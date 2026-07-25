@@ -55,6 +55,14 @@ const memory = createHindsightMemoryStore({
 });
 ```
 
+`HINDSIGHT_URL` is the base URL of a reachable
+[Hindsight](https://hindsight.vectorize.io) deployment: `http://127.0.0.1:8888`
+for the default self-hosted Docker image, or a Hindsight Cloud workspace URL.
+Obtaining one (cloud signup or self-host deploy) is a human step, covered in
+the Product API at
+[Set Up Semantic Memory](/guide/setup/semantic-memory); `HINDSIGHT_API_KEY` is
+the bearer token for endpoints that require one.
+
 The contract store stays authoritative for atomic exact records and global
 message/note ids; Hindsight projection is best-effort, logging and queueing a
 remote failure for in-process retry (not durable across restarts) without

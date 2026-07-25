@@ -80,7 +80,7 @@ The minimal manifests in `deploy/reference/k8s/` create:
 - a token `Secret`
 - a `Service` and `Ingress`
 
-The reference directory doesn't deploy Hindsight, so `HINDSIGHT_URL` is empty and the Gateway keeps the local SQLite fallback; set it only after deploying a reachable Hindsight service backed by Postgres and pgvector.
+The reference directory doesn't deploy Hindsight, so `HINDSIGHT_URL` is empty and the Gateway keeps the local SQLite fallback; set it only after deploying a reachable Hindsight service backed by Postgres and pgvector (cloud signup or self-host steps: [Set Up Semantic Memory](/guide/setup/semantic-memory)).
 
 Edit `deploy/reference/k8s/secret.example.yaml` to set the bearer token and update the host in `deploy/reference/k8s/ingress.yaml` before applying:
 

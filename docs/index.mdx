@@ -31,7 +31,7 @@ mode: "custom"
 
       <div className="flex flex-wrap gap-3 mt-9">
         <a href="/guide/get-started" className="landing-btn">Read the docs</a>
-        <a href="/introduction" className="landing-btn-ghost">Docs for agents →</a>
+        <a href="/introduction" className="landing-btn-ghost">Technical API (for agents) →</a>
         <a href="https://ui-preview.smithers.sh" target="_blank" rel="noopener noreferrer" className="landing-btn-preview">
           <span>Sign up for UI preview <span className="landing-brass">→</span></span>
         </a>
@@ -361,9 +361,12 @@ mode: "custom"
     </div>
   </div>
 
-  <p className="text-center mt-8">
+  <p className="text-center mt-8 flex flex-wrap justify-center gap-x-6 gap-y-2">
     <a href="/guide/what-you-can-do" className="landing-brass" style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}>
       See what you can do →
+    </a>
+    <a href="/guide/capabilities" className="landing-brass" style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}>
+      Every platform capability, and how to ask for it →
     </a>
   </p>
 </section>
@@ -375,20 +378,22 @@ mode: "custom"
   </div>
   <div className="grid md:grid-cols-2 gap-5">
     <a href="/guide/get-started" className="landing-card p-7 block" style={{ transition: "border-color 0.15s" }}>
-      <div className="landing-eyebrow" style={{ marginBottom: "0.75rem" }}>For humans</div>
+      <div className="landing-eyebrow" style={{ marginBottom: "0.75rem" }}>Product API · for humans</div>
       <strong className="landing-display" style={{ fontSize: "1.5rem", display: "block", marginBottom: "0.6rem" }}>Get started</strong>
       <p style={{ marginBottom: "1rem" }}>
         Run one command and ask the agent you already use for an outcome. Learn
-        what Smithers is, then drive it without writing a workflow by hand.
+        what Smithers is, see <a href="/guide/capabilities">every capability you
+        can ask for</a>, then drive it without writing a workflow by hand.
       </p>
       <span className="landing-brass" style={{ fontWeight: 600 }}>Read the guide →</span>
     </a>
     <a href="/introduction" className="landing-card p-7 block" style={{ transition: "border-color 0.15s" }}>
-      <div className="landing-eyebrow" style={{ marginBottom: "0.75rem" }}>For agents</div>
+      <div className="landing-eyebrow" style={{ marginBottom: "0.75rem" }}>Technical API · for agents</div>
       <strong className="landing-display" style={{ fontSize: "1.5rem", display: "block", marginBottom: "0.6rem" }}>Docs for agents</strong>
       <p style={{ marginBottom: "1rem" }}>
         The full API, components, and patterns, written for the coding agent that
-        authors and runs your workflows. Or feed it <code>/llms-full.txt</code> directly.
+        authors and runs your workflows, not for reading by hand. Feed it
+        <code>/llms-full.txt</code> directly.
       </p>
       <span className="landing-brass" style={{ fontWeight: 600 }}>Read the agent docs →</span>
     </a>

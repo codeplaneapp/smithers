@@ -30,6 +30,10 @@ step is a database row, so live watching, rewind, and replay are built in.*
   replay any run from any point.
 - 🛡️ **Durable runs that survive crashes**: every completed step is persisted the moment it
   finishes, so a run resumes from where it stopped instead of starting over.
+- 🧠 **Memory across runs**: wrap tasks in `<Memory>` and agents recall what earlier runs
+  learned, pick up `remember`/`recall` tools mid-task, and retain a digest afterward.
+  Works locally out of the box; connect [Hindsight](https://smithers.sh/guide/setup/semantic-memory)
+  for semantic recall by meaning.
 - 🔌 **Any agent, any model**: Claude Code, Codex, Pi, Antigravity, and more, plus any model
   through the AI SDK. Swap the harness without rewriting the workflow.
 - 🛠️ **Higher-quality output**: review loops, human approvals, and evals give agents the
@@ -279,6 +283,8 @@ the runtime:
   one-command local Grafana stack (`bunx smithers-orchestrator observability`).
 - **Evals and prompt optimization**: repeatable regression suites, and GEPA-style tuning
   that rewrites prompts only when the score improves.
+- **Cross-run memory**: durable facts, threads, and notes with keyword recall in local
+  SQLite, upgradeable to semantic recall and mental-model primers via Hindsight.
 - **Hot reload**: edit prompts, config, or JSX mid-run; newly scheduled tasks pick up the
   changes.
 
