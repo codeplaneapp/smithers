@@ -52,6 +52,7 @@ const workflowOwners = {
   "./tests/shared-ui-library.test.tsx": ["shared-ui-library.tsx"],
   "./tests/xstate-release-train.test.tsx": ["xstate-release-train.tsx"],
   "./tests/memory-recall-demo.test.tsx": ["memory-recall-demo.tsx"],
+  "./tests/vibe-audit.test.tsx": ["vibe-audit.tsx"],
 } as const;
 
 const componentOwners = {
