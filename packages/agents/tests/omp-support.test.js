@@ -93,6 +93,15 @@ describe("OmpAgent", () => {
     expect(events.at(-1)).toMatchObject({ ok: true, answer: "OK", resume: "s1" });
   });
 
+  test("preserves tool call args on start and update like the pi interpreter", () => {
+    const interpreter = new OmpAgent({ mode: "json" }).createOutputInterpreter();
+    const args = { op: "init", list: [{ phase: "Investigate", items: ["Map files"] }] };
+    const actionsFor = (payload) => interpreter.onStdoutLine(JSON.stringify(payload)).filter((event) => event.type === "action");
+    expect(actionsFor({ type: "tool_execution_start", toolName: "todo", toolCallId: "t1", args }).at(-1)?.action).toEqual({ id: "t1", kind: "todo_list", title: "todo", detail: { args } });
+    expect(actionsFor({ type: "tool_execution_update", toolName: "todo", toolCallId: "t1", args: { op: "start", task: "Map files" } }).at(-1)?.action.detail).toEqual({ args: { op: "start", task: "Map files" } });
+    expect(actionsFor({ type: "tool_execution_end", toolName: "todo", toolCallId: "t1", result: "ok" }).at(-1)?.action.detail).toBeUndefined();
+  });
+
   test("uses a terminal-only assistant message as the authoritative JSON answer once", () => {
     const interpreter = new OmpAgent({ mode: "json" }).createOutputInterpreter();
     const terminal = JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: "terminal answer", stopReason: "stop" }] });
