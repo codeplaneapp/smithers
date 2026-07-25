@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/react */
 import { afterEach, it, expect } from "bun:test";
-import { act } from "react";
+import { act, useState } from "react";
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -67,6 +67,36 @@ describeHeadlessRender("HijackMode phase components", () => {
     await flush();
     expect(cancelled).toBe(1);
     renderer.destroy();
+  });
+
+  it("Selecting hands off to the highlighted node even when a candidate drops out mid-selection", async () => {
+    const running = (id: string): GatewayRunNode => ({ id, name: id, kind: "agent", status: "running" });
+    const [alpha, beta, gamma] = [running("alpha"), running("beta"), running("gamma")];
+    const picked: string[] = [];
+    let setNodes: (nodes: GatewayRunNode[]) => void = () => {};
+    function Harness() {
+      const [nodes, setter] = useState<GatewayRunNode[]>([alpha, beta, gamma]);
+      setNodes = setter;
+      return <Selecting nodes={nodes} onSelect={(n) => picked.push(n.id)} onCancel={() => {}} />;
+    }
+
+    const r = await renderForTest(<Harness />, { width: 120, height: 20 });
+    await r.waitForVisualIdle();
+    // Operator arrows down onto "beta" and pauses before confirming.
+    act(() => { r.mockInput.pressArrow("down"); });
+    await r.flush();
+    // Meanwhile "alpha" completes and leaves hijackCandidates — the picker must
+    // NOT slide the rows up under the highlight.
+    await act(async () => { setNodes([beta, gamma]); });
+    await r.flush();
+    await r.waitForVisualIdle();
+
+    act(() => { r.mockInput.pressEnter(); });
+    await r.flush();
+    expect(picked).toEqual(["beta"]);
+    // The finished node stays visible as a pinned row, marked as no longer live.
+    expect(r.captureCharFrame()).toContain("status: ended");
+    r.renderer.destroy();
   });
 
   it("HandingOff suspends, spawns the real child, and reports its exit code", async () => {
@@ -200,15 +230,21 @@ describeHeadlessRender("HijackMode – full state machine over a live gateway", 
       expect(frame).toContain("select a running node");
 
       // Confirm the highlighted candidate → handing-off spawns the real stub.
+      // The picker pins rows in the order it first saw them, so which live node
+      // (the root or the agent task) sits at row 0 depends on whether the tree or
+      // the event stream landed first — read the highlight (▶) off the frame
+      // rather than assuming, and assert the hand-off targets exactly that node.
+      const highlighted = frame.match(/▶ (\S+)/)?.[1];
+      expect(highlighted).toBeTruthy();
       act(() => { r.mockInput.pressEnter(); });
       await r.flush();
       // Wait for the child to exit → phase "returned".
       for (let i = 0; i < 100; i++) {
         await r.waitForVisualIdle();
         await act(async () => { await new Promise((res) => setTimeout(res, 20)); });
-        if (r.captureCharFrame().includes("from hijack: fetch-data")) break;
+        if (r.captureCharFrame().includes(`from hijack: ${highlighted}`)) break;
       }
-      expect(r.captureCharFrame()).toContain("from hijack: fetch-data");
+      expect(r.captureCharFrame()).toContain(`from hijack: ${highlighted}`);
 
       // [d] dismisses back to the selecting phase.
       act(() => { r.mockInput.pressKey("d"); });
