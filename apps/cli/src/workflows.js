@@ -655,6 +655,31 @@ export function discoverWorkflows(from = process.cwd(), env = process.env) {
     return discovered.sort((a, b) => a.id.localeCompare(b.id));
 }
 /**
+ * How many workflows a gateway boot in `from` would discover, counted from the
+ * directory listing alone — no metadata parse, no module load. Autostart
+ * waiters size their wait budget with this (#1362), so it must stay cheap.
+ *
+ * @param {string} [from] Directory to search from (default: cwd).
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {number}
+ */
+export function countDiscoverableWorkflows(from = process.cwd(), env = process.env) {
+    const seen = new Set();
+    for (const { dir } of resolveWorkflowDirs(from, env)) {
+        try {
+            if (!existsSync(dir) || !statSync(dir).isDirectory())
+                continue;
+            for (const { id } of enumerateWorkflowEntries(dir)) {
+                seen.add(id);
+            }
+        }
+        catch {
+            // A budget estimate must never be the thing that fails a command.
+        }
+    }
+    return seen.size;
+}
+/**
  * @param {string} name
  */
 export function validateWorkflowName(name) {

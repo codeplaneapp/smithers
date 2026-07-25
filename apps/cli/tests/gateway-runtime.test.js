@@ -8,11 +8,14 @@ import {
     claimGatewayAutostartLock,
     claimGatewayDaemonStartLock,
     clearGatewayRuntimeState,
+    describeGatewayStartInProgress,
     discoverWorkspaceGateway,
+    gatewayAutostartWaitMs,
     gatewayRuntimePaths,
     mintGatewayToken,
     probeGatewayHealthIdentity,
     readGatewayRuntimeState,
+    readGatewayStartProgress,
     resolveGatewayBearer,
     verifyGatewayHealthIdentity,
     writeGatewayRuntimeState,
@@ -459,5 +462,96 @@ describe("claimGatewayAutostartLock", () => {
         expect(daemon).not.toBeNull();
         daemon?.release();
         autostart?.release();
+    });
+
+    test("a big pack's wait window keeps the lock unstealable for that long", () => {
+        const env = makeEnv();
+        const workspace = makeWorkspace();
+        const { dir, lockFile } = gatewayRuntimePaths(workspace, env);
+        mkdirSync(dir, { recursive: true });
+        // Held for 7 minutes: past the flat 5-minute staleness cutoff, but a
+        // pack this size is still inside its wait window, so stealing it here
+        // would spawn a SECOND daemon over a booting one.
+        writeFileSync(lockFile, JSON.stringify({ pid: process.pid, atMs: Date.now() - 7 * 60_000 }));
+        expect(claimGatewayAutostartLock(workspace, env, { workflowCount: 400 })).toBeNull();
+        const stealable = claimGatewayAutostartLock(workspace, env, { workflowCount: 0 });
+        expect(stealable).not.toBeNull();
+        stealable?.release();
+    });
+});
+
+describe("gatewayAutostartWaitMs", () => {
+    test("scales the wait budget with the discovered-workflow count", () => {
+        // A ~130-workflow pack timed out on the flat budget (#1362).
+        const empty = gatewayAutostartWaitMs(0);
+        const big = gatewayAutostartWaitMs(130);
+        expect(empty).toBe(120_000);
+        expect(big).toBeGreaterThan(empty);
+        expect(gatewayAutostartWaitMs(10)).toBeGreaterThan(empty);
+        expect(big).toBeGreaterThan(gatewayAutostartWaitMs(10));
+    });
+
+    test("caps the budget so a wedged boot still fails in bounded time", () => {
+        expect(gatewayAutostartWaitMs(100_000)).toBe(600_000);
+        expect(gatewayAutostartWaitMs(100_000)).toBe(gatewayAutostartWaitMs(1_000_000));
+    });
+
+    test("treats a missing or nonsense count as no workflows", () => {
+        expect(gatewayAutostartWaitMs()).toBe(120_000);
+        expect(gatewayAutostartWaitMs(Number.NaN)).toBe(120_000);
+        expect(gatewayAutostartWaitMs(-5)).toBe(120_000);
+    });
+});
+
+describe("describeGatewayStartInProgress", () => {
+    test("reports the in-flight boot's age, bind, and load progress", () => {
+        const env = makeEnv();
+        const workspace = makeWorkspace();
+        const { dir, daemonStartLockFile, logFile } = gatewayRuntimePaths(workspace, env);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(daemonStartLockFile, JSON.stringify({ pid: process.pid, atMs: Date.now() - 90_000 }), { mode: 0o600 });
+        writeFileSync(logFile, [
+            "[smithers] Gateway listening on http://127.0.0.1:7331",
+            "[smithers] Workflow loading: 37/130",
+            "",
+        ].join("\n"), { mode: 0o600 });
+
+        const progress = readGatewayStartProgress(workspace, env);
+        expect(progress.pid).toBe(process.pid);
+        expect(progress.bootAgeMs).toBeGreaterThanOrEqual(90_000);
+        expect(progress.url).toBe("http://127.0.0.1:7331");
+        expect(progress).toMatchObject({ workflowsLoaded: 37, workflowsTotal: 130 });
+
+        const { message, details } = describeGatewayStartInProgress(workspace, { waitedMs: 315_000, env });
+        // The old message claimed nothing became discoverable; the boot is
+        // alive and mid-load, so say that instead (#1362).
+        expect(message).not.toContain("no healthy gateway became discoverable");
+        expect(message).toContain("still in progress");
+        expect(message).toContain(`pid ${process.pid}`);
+        expect(message).toContain("booting for 1m 30s");
+        expect(message).toContain("37/130 workflows");
+        expect(message).toContain("http://127.0.0.1:7331");
+        expect(message).toContain("5m 15s");
+        expect(message).toContain("--gateway <url>");
+        expect(message).toContain(logFile);
+        expect(details).toMatchObject({
+            workspace,
+            startPid: process.pid,
+            workflowsLoaded: 37,
+            workflowsTotal: 130,
+            waitedMs: 315_000,
+        });
+    });
+
+    test("degrades to a usable message when nothing is knowable", () => {
+        const env = makeEnv();
+        const workspace = makeWorkspace();
+        const { message, details } = describeGatewayStartInProgress(workspace, { env });
+        expect(message).toContain("still in progress");
+        expect(message).toContain(workspace);
+        expect(message).toContain("--gateway <url>");
+        expect(message).not.toContain("undefined");
+        expect(message).not.toContain("NaN");
+        expect(details).toMatchObject({ workspace, startPid: null, workflowsTotal: null });
     });
 });

@@ -3,6 +3,7 @@ import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, r
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+    countDiscoverableWorkflows,
     createWorkflowFile,
     discoverWorkflows,
     renderWorkflowSkill,
@@ -156,6 +157,54 @@ describe("discoverWorkflows", () => {
         const result = discoverWorkflows(root);
         expect(result).toHaveLength(1);
         expect(result[0].id).toBe("real");
+    });
+});
+
+describe("countDiscoverableWorkflows", () => {
+    const dirs = [];
+    afterEach(() => {
+        for (const d of dirs) {
+            try {
+                rmSync(d, { recursive: true, force: true });
+            }
+            catch { }
+        }
+        dirs.length = 0;
+    });
+
+    function isolatedEnv() {
+        const home = makeTempDir();
+        dirs.push(home);
+        return { ...process.env, SMITHERS_HOME: home, SMITHERS_WORKFLOW_PATHS: "" };
+    }
+
+    test("counts what a gateway boot would load, without parsing metadata", () => {
+        const root = makeTempDir();
+        dirs.push(root);
+        const env = isolatedEnv();
+        expect(countDiscoverableWorkflows(root, env)).toBe(0);
+        const wfDir = join(root, ".smithers", "workflows");
+        mkdirSync(wfDir, { recursive: true });
+        for (let index = 0; index < 130; index += 1) {
+            writeFileSync(join(wfDir, `wf-${index}.tsx`), "export default {};");
+        }
+        // Directory-form workflows count once; a bare directory does not.
+        mkdirSync(join(wfDir, "bundled"), { recursive: true });
+        writeFileSync(join(wfDir, "bundled", "workflow.tsx"), "export default {};");
+        mkdirSync(join(wfDir, "not-a-workflow"), { recursive: true });
+        expect(countDiscoverableWorkflows(root, env)).toBe(131);
+    });
+
+    test("counts a file discoverWorkflows would reject, so the budget never under-counts a slow boot", () => {
+        const root = makeTempDir();
+        dirs.push(root);
+        const env = isolatedEnv();
+        const wfDir = join(root, ".smithers", "workflows");
+        mkdirSync(wfDir, { recursive: true });
+        writeFileSync(join(wfDir, "ok.tsx"), "export default {};");
+        writeFileSync(join(wfDir, "future.tsx"), "// smithers-metadata-version: 99\nexport default {};");
+        expect(discoverWorkflows(root, env).map((workflow) => workflow.id)).toEqual(["ok"]);
+        expect(countDiscoverableWorkflows(root, env)).toBe(2);
     });
 });
 

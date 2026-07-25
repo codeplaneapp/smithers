@@ -42,7 +42,7 @@ import { findAndOpenDb, findSmithersDb } from "./find-db.js";
 import { cliWorkspace } from "./cliWorkspace.js";
 import { cascadeCancelRun, finalizeCancelledOwnedRun, isCancellableRunStatus, listCascadeLineage } from "./cancel-cascade.js";
 import { isDaemonDisabled } from "./isDaemonDisabled.js";
-import { assertGatewayRuntimeStateFileTrusted, canonicalWorkspacePath, claimGatewayAutostartLock, claimGatewayDaemonStartLock, clearGatewayRuntimeState, discoverWorkspaceGateway, gatewayRuntimePaths, isGatewayPidAlive, mintGatewayToken, probeGatewayHealthIdentity, readGatewayRuntimeState, resolveGatewayBearer, verifyGatewayHealthIdentity, waitForWorkspaceGateway, writeGatewayRuntimeState } from "./gateway-runtime.js";
+import { assertGatewayRuntimeStateFileTrusted, canonicalWorkspacePath, claimGatewayAutostartLock, claimGatewayDaemonStartLock, clearGatewayRuntimeState, describeGatewayStartInProgress, discoverWorkspaceGateway, gatewayAutostartWaitMs, gatewayRuntimePaths, isGatewayPidAlive, mintGatewayToken, probeGatewayHealthIdentity, readGatewayRuntimeState, resolveGatewayBearer, verifyGatewayHealthIdentity, waitForWorkspaceGateway, writeGatewayRuntimeState } from "./gateway-runtime.js";
 import { buildAskKindFields, buildAskPromptText, buildAskUniqueToken, formatAskHumanResolveHelp, parseChoices, resolveAskHumanContext, } from "./ask-human.js";
 import { chatAttemptKey, formatChatAttemptHeader, formatChatBlock, parseAgentEvent, parseChatAttemptMeta, parseNodeOutputEvent, selectChatAttempts, } from "./chat.js";
 import { buildHijackLaunchSpec, isNativeHijackCandidate, launchHijackSession, resolveHijackCandidate, waitForHijackCandidate, } from "./hijack.js";
@@ -76,7 +76,7 @@ import { whatHappened } from "./what-happened.js";
 import { openInBrowser } from "./openInBrowser.js";
 import { parseCliErrorFromStderr } from "./util/errorMessage.js";
 import { runBugCommand } from "./runBugCommand.js";
-import { discoverWorkflows, resolveWorkflow, createWorkflowFile, renderWorkflowSkill, writeWorkflowSkillFiles, resolvePackDirs, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
+import { countDiscoverableWorkflows, discoverWorkflows, resolveWorkflow, createWorkflowFile, renderWorkflowSkill, writeWorkflowSkillFiles, resolvePackDirs, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
 import { addPack, removePack, listPacks, listLockedPacks, updatePack, ejectPack } from "./packs.js";
 import { sharePack } from "./share.js";
 import { createEvalsExtension } from "./evals-extension.js";
@@ -3035,9 +3035,13 @@ async function ensureWorkspaceGateway(workspace, preferredPort) {
     if (discovered) {
         return { base: discovered.state.url, token: discovered.state.token, started: false };
     }
-    const lock = claimGatewayAutostartLock(workspace);
+    // Size the wait to the boot it is waiting on: a ~130-workflow pack keeps a
+    // core busy well past listen(), and a flat budget timed out on it (#1362).
+    // The count is a directory listing, so it costs nothing to read up front.
+    const workflowCount = countDiscoverableWorkflows(workspace);
+    const lock = claimGatewayAutostartLock(workspace, process.env, { workflowCount });
     if (!lock) {
-        const awaited = await waitForWorkspaceGateway(workspace);
+        const awaited = await waitForWorkspaceGateway(workspace, { workflowCount });
         return awaited ? { base: awaited.state.url, token: awaited.state.token, started: false } : null;
     }
     let child;
@@ -3075,14 +3079,15 @@ async function ensureWorkspaceGateway(workspace, preferredPort) {
         catch { }
     }
     try {
-        // Gateway boot loads + compiles every workspace workflow before it
-        // listens, so allow generous time for the state file to appear.
+        // Gateway boot binds before it loads workflows, but a large pack keeps
+        // transpiling afterwards, so the state file can lag the spawn on a busy
+        // machine. The budget scales with the pack (see gatewayAutostartWaitMs).
         const childFailure = new Promise((resolvePromise) => {
             child.once("error", (error) => resolvePromise({ kind: "error", error }));
             child.once("exit", (code, signal) => resolvePromise({ kind: "exit", code, signal }));
         });
         const result = await Promise.race([
-            waitForWorkspaceGateway(workspace).then((awaited) => ({ kind: "ready", awaited })),
+            waitForWorkspaceGateway(workspace, { workflowCount }).then((awaited) => ({ kind: "ready", awaited })),
             childFailure.then((failure) => ({ kind: "failed", failure })),
         ]);
         if (result.kind === "failed") {
@@ -3527,11 +3532,16 @@ async function runGatewayCommand(options) {
     const workspace = localWorkspace ?? dirname(dbPath);
     const startLock = claimGatewayDaemonStartLock(workspace);
     if (!startLock) {
-        const winner = await waitForWorkspaceGateway(workspace);
+        const workflowCount = countDiscoverableWorkflows(workspace);
+        const waitedMs = gatewayAutostartWaitMs(workflowCount);
+        const winner = await waitForWorkspaceGateway(workspace, { workflowCount });
         if (winner) {
             throw gatewayAlreadyRunningError(workspace, winner.state);
         }
-        throw new SmithersError("GATEWAY_START_IN_PROGRESS", `Another gateway start is already in progress for ${workspace}, but no healthy gateway became discoverable before the wait timed out.`, { workspace });
+        // The other boot is still running — say so, with its age and progress,
+        // instead of implying no gateway will ever appear (#1362).
+        const inProgress = describeGatewayStartInProgress(workspace, { waitedMs });
+        throw new SmithersError("GATEWAY_START_IN_PROGRESS", inProgress.message, inProgress.details);
     }
     let startLockReleased = false;
     const releaseStartLock = () => {

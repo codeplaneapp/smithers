@@ -38,7 +38,15 @@ import { join, resolve } from "node:path";
 
 const GATEWAY_RUNTIME_DIR_NAME = "smithers-gateway";
 const AUTOSTART_LOCK_STALE_MS = 5 * 60_000;
-const AUTOSTART_WAIT_TIMEOUT_MS = 2 * 60_000;
+// Autostart wait budget (#1362). Boot binds the port and writes the state file
+// before workflow modules load, but a big pack still pins a core transpiling
+// afterwards, which slows everything the waiter needs (discovery, /health) —
+// so the budget grows with the discovered-workflow count instead of timing out
+// at a flat two minutes on a ~130-workflow pack. Capped so a wedged boot still
+// fails in bounded time.
+const AUTOSTART_WAIT_BASE_MS = 2 * 60_000;
+const AUTOSTART_WAIT_PER_WORKFLOW_MS = 1_500;
+const AUTOSTART_WAIT_MAX_MS = 10 * 60_000;
 const DAEMON_START_LOCK_STALE_MS = 10 * 60_000;
 const HEALTH_TIMEOUT_MS = 1_500;
 // A transient /health failure must not be lethal: the daemon writes its state
@@ -582,12 +590,16 @@ function claimGatewayRuntimeLock(workspace, env, lockFile, staleMs, opts = {}) {
  *
  * @param {string} workspace
  * @param {NodeJS.ProcessEnv} [env]
- * @param {{ beforeStaleRename?: () => void }} [opts]
+ * @param {{ beforeStaleRename?: () => void; workflowCount?: number }} [opts]
  * @returns {GatewayRuntimeLock | null}
  */
 export function claimGatewayAutostartLock(workspace, env = process.env, opts = {}) {
     const { lockFile } = gatewayRuntimePaths(workspace, env);
-    return claimGatewayRuntimeLock(workspace, env, lockFile, AUTOSTART_LOCK_STALE_MS, opts);
+    // The steal window must never be shorter than the wait window, or a second
+    // client would steal the lock and spawn a SECOND daemon while the first is
+    // still booting a large pack.
+    const staleMs = Math.max(AUTOSTART_LOCK_STALE_MS, gatewayAutostartWaitMs(opts.workflowCount));
+    return claimGatewayRuntimeLock(workspace, env, lockFile, staleMs, opts);
 }
 
 /**
@@ -623,13 +635,147 @@ export function resolveGatewayBearer(workspace, url, env = process.env) {
 }
 
 /**
- * Poll until the workspace gateway is discoverable, for autostart waiters.
+ * How long a client waits for a booting gateway to become discoverable: a flat
+ * base plus a small per-workflow increment, capped. `smithers ui`/`monitor`
+ * (and a `smithers gateway` that lost the start lock) pass the cheaply-globbed
+ * discovered-workflow count so a large pack gets a budget that matches its
+ * boot cost (#1362).
+ *
+ * @param {number} [workflowCount]
+ * @returns {number}
+ */
+export function gatewayAutostartWaitMs(workflowCount = 0) {
+    const count = Number.isFinite(workflowCount) ? Math.max(0, Math.floor(Number(workflowCount))) : 0;
+    return Math.min(AUTOSTART_WAIT_MAX_MS, AUTOSTART_WAIT_BASE_MS + count * AUTOSTART_WAIT_PER_WORKFLOW_MS);
+}
+
+/**
+ * Best-effort facts about a gateway boot that is still in flight: who holds the
+ * daemon start lock, how long it has been booting, whether it is already
+ * listening, and how far its workflow load has got. Nothing here is load
+ * bearing — every source is optional and any read failure just narrows the
+ * report.
  *
  * @param {string} workspace
- * @param {{ timeoutMs?: number; intervalMs?: number; env?: NodeJS.ProcessEnv }} [opts]
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {{ pid: number | null; bootAgeMs: number | null; url: string | null; workflowsLoaded: number | null; workflowsTotal: number | null; logFile: string }}
+ */
+export function readGatewayStartProgress(workspace, env = process.env) {
+    const { daemonStartLockFile, logFile } = gatewayRuntimePaths(workspace, env);
+    /** @type {number | null} */
+    let pid = null;
+    /** @type {number | null} */
+    let startedAtMs = null;
+    try {
+        const holder = readGatewayLockRecord(daemonStartLockFile)?.claim;
+        if (holder) {
+            pid = Number.isInteger(holder.pid) ? Number(holder.pid) : null;
+            startedAtMs = Number.isFinite(holder.atMs) ? Number(holder.atMs) : null;
+        }
+    }
+    catch {
+        // An unreadable or untrusted lock still leaves the log to report from.
+    }
+    /** @type {string | null} */
+    let url = null;
+    try {
+        // A state file that exists but did not verify still tells us where the
+        // boot bound — much more useful than "nothing became discoverable".
+        const state = readGatewayRuntimeState(workspace, env);
+        if (state) {
+            url = state.url;
+            pid ??= state.pid;
+            startedAtMs ??= Number.isFinite(state.startedAtMs) ? state.startedAtMs : null;
+        }
+    }
+    catch {
+        // Same: a missing/untrusted state file is not fatal to a diagnostic.
+    }
+    /** @type {number | null} */
+    let workflowsLoaded = null;
+    /** @type {number | null} */
+    let workflowsTotal = null;
+    try {
+        const log = readFileSync(logFile, "utf8");
+        const listening = [...log.matchAll(/Gateway listening on (\S+)/g)].pop();
+        if (!url && listening)
+            url = listening[1];
+        const loading = [...log.matchAll(/Workflow loading: (\d+)\/(\d+)/g)].pop();
+        if (loading) {
+            workflowsLoaded = Number(loading[1]);
+            workflowsTotal = Number(loading[2]);
+        }
+    }
+    catch {
+        // The autostart log only exists for autostarted daemons.
+    }
+    return {
+        pid,
+        bootAgeMs: startedAtMs === null ? null : Math.max(0, Date.now() - startedAtMs),
+        url,
+        workflowsLoaded,
+        workflowsTotal,
+        logFile,
+    };
+}
+
+/**
+ * @param {number} ms
+ */
+function formatGatewayDuration(ms) {
+    const seconds = Math.max(0, Math.round(ms / 1000));
+    if (seconds < 60)
+        return `${seconds}s`;
+    return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+/**
+ * Explain a losing `smithers gateway` start honestly: another boot for this
+ * workspace holds the start lock and is still working, so report its age and
+ * (when knowable) its workflow-load progress instead of claiming no gateway
+ * became discoverable (#1362).
+ *
+ * @param {string} workspace
+ * @param {{ waitedMs?: number; env?: NodeJS.ProcessEnv }} [opts]
+ * @returns {{ message: string; details: Record<string, unknown> }}
+ */
+export function describeGatewayStartInProgress(workspace, opts = {}) {
+    const progress = readGatewayStartProgress(workspace, opts.env);
+    const holder = [
+        progress.pid ? `pid ${progress.pid}` : null,
+        progress.bootAgeMs === null ? null : `booting for ${formatGatewayDuration(progress.bootAgeMs)}`,
+    ].filter(Boolean).join(", ");
+    const loadProgress = progress.workflowsTotal !== null
+        ? ` It has loaded ${progress.workflowsLoaded}/${progress.workflowsTotal} workflows so far.`
+        : "";
+    const bound = progress.url ? ` It is already listening on ${progress.url}, but /health has not verified it yet.` : "";
+    const waited = opts.waitedMs === undefined ? "" : ` This command watched for ${formatGatewayDuration(opts.waitedMs)} and gave the boot precedence.`;
+    return {
+        message: `Another gateway start for ${workspace} is still in progress${holder ? ` (${holder})` : ""}.${bound}`
+            + ` A gateway binds its port and writes its runtime state file before workflow modules finish loading, so a large pack keeps booting after that point.${loadProgress}${waited}`
+            + ` Wait for it to finish (\`smithers gateway status\` reports it once /health verifies, and its log is ${progress.logFile}), or point client commands at it with \`--gateway <url>\` instead of starting a second one.`,
+        details: {
+            workspace,
+            startPid: progress.pid,
+            bootAgeMs: progress.bootAgeMs,
+            url: progress.url,
+            workflowsLoaded: progress.workflowsLoaded,
+            workflowsTotal: progress.workflowsTotal,
+            logFile: progress.logFile,
+            ...(opts.waitedMs === undefined ? {} : { waitedMs: opts.waitedMs }),
+        },
+    };
+}
+
+/**
+ * Poll until the workspace gateway is discoverable, for autostart waiters.
+ * The default budget scales with `workflowCount` (see gatewayAutostartWaitMs).
+ *
+ * @param {string} workspace
+ * @param {{ timeoutMs?: number; intervalMs?: number; workflowCount?: number; env?: NodeJS.ProcessEnv }} [opts]
  */
 export async function waitForWorkspaceGateway(workspace, opts = {}) {
-    const timeoutMs = opts.timeoutMs ?? AUTOSTART_WAIT_TIMEOUT_MS;
+    const timeoutMs = opts.timeoutMs ?? gatewayAutostartWaitMs(opts.workflowCount);
     const intervalMs = opts.intervalMs ?? 500;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {

@@ -2731,6 +2731,35 @@ export class Gateway {
         return mounts.sort((left, right) => right.config.path.length - left.config.path.length);
     }
     /**
+   * Where to send a request for the conventional `/workflows/<key>` route when
+   * the workflow mounts its UI somewhere else (a `<UI path="…">` declaration).
+   * The conventional route is the only one clients can construct without
+   * loading the module, so it is also the route that triggers a lazy
+   * registration — a workflow whose module loads AFTER listen() would
+   * otherwise register, mount its UI at the declared path, and still 404 the
+   * request that loaded it (#1362).
+   *
+   * @param {string} workflowKey
+   * @param {URL} url
+   * @returns {string | null}
+   */
+    workflowUiMountRedirect(workflowKey, url) {
+        const conventionalPath = `/workflows/${encodeURIComponent(workflowKey)}`;
+        // Only the mount root redirects: asset paths belong to the real mount.
+        if (url.pathname !== conventionalPath && url.pathname !== `${conventionalPath}/`) {
+            return null;
+        }
+        const entry = this.workflows.get(workflowKey);
+        if (!entry) {
+            return null;
+        }
+        const ui = this.resolvedUiFor(workflowKey, entry);
+        if (!ui || ui.path === url.pathname) {
+            return null;
+        }
+        return `${ui.path}${url.search}`;
+    }
+    /**
    * @param {string} pathname
    * @returns {GatewayUiMount | null}
    */
@@ -2864,6 +2893,13 @@ export class Gateway {
         }
         const uiMatch = this.resolveUiMatch(url.pathname);
         if (!uiMatch) {
+            const declaredMount = requestedWorkflowKey
+                ? this.workflowUiMountRedirect(requestedWorkflowKey, url)
+                : null;
+            if (declaredMount) {
+                sendRedirect(res, declaredMount);
+                return true;
+            }
             return false;
         }
         const uiAuthFailure = await authorizeGatewayUiRequest({
