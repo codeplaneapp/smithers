@@ -31,17 +31,16 @@ function uncommented(source) {
 const CODEX_DEFAULT_TIERS = {
     cheapFast: "Luna",
     research: "Luna",
-    implement: "Terra",
     midTier: "Terra",
     smartTool: "Terra",
     validate: "Terra",
-    smart: "Sol",
     review: "Sol",
 };
 
-// Orchestration/gating and planning are Claude-led; Codex Sol appears in these
-// chains only as an availability fallback.
-const CLAUDE_LED_TIERS = ["planning", "orchestrator"];
+// Building (implement/smart) plus orchestration/gating and planning are
+// Claude-led as of registry v7 (Claude Opus 5 is the default implementer);
+// Codex appears in these chains only as an availability fallback.
+const CLAUDE_LED_TIERS = ["planning", "orchestrator", "implement", "smart"];
 const ALL_TIERS = [...Object.keys(CODEX_DEFAULT_TIERS), ...CLAUDE_LED_TIERS];
 
 function activePoolProviders(source, pool) {
@@ -84,7 +83,11 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(generated).toContain('codexWorkTerra: new SmithersCodexAgent({ model: "gpt-5.6-terra"');
         expect(generated).toContain('codexWorkLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna"');
         expectCodexFirstDefaultTiers(generated, "codexWork");
-        expect(activePoolProviders(generated, "implement").slice(1)).toContain("claudeWork");
+        // Claude accounts lead implementation (registry v7); the Codex Terra
+        // sibling follows as the checking / second-build lane.
+        const implementPool = activePoolProviders(generated, "implement");
+        expect(implementPool[0]).toBe("claudeWork");
+        expect(implementPool).toContain("codexWorkTerra");
         // Claude accounts lead the orchestrator/planning seats; Codex Sol is
         // only the availability fallback behind them.
         expect(activePoolProviders(generated, "orchestrator").slice(0, 3)).toEqual([
@@ -100,7 +103,7 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(uncommented(generated)).not.toContain("cwd: process.cwd()");
     });
 
-    test("keeps every registered Codex account ahead of non-Codex fallbacks", () => {
+    test("keeps every registered Codex account together behind the Claude implement lead", () => {
         const env = newSmithersHome();
         for (const label of ["codex-a", "codex-b", "codex-c", "codex-d"]) {
             addAccount(
@@ -114,13 +117,13 @@ describe("generateAgentsTs (account-driven)", () => {
         );
 
         const providers = activePoolProviders(generateAgentsTs(env), "implement");
-        expect(providers.slice(0, 4)).toEqual([
+        expect(providers[0]).toBe("claudeBackup");
+        expect(providers.slice(1, 5)).toEqual([
             "codexATerra",
             "codexBTerra",
             "codexCTerra",
             "codexDTerra",
         ]);
-        expect(providers.indexOf("claudeBackup")).toBeGreaterThan(3);
     });
 
     test("path.join(homedir(), ...) is used for paths under $HOME", () => {
@@ -160,6 +163,12 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(generated).toContain('openaiProdLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna"');
         expectCodexFirstDefaultTiers(generated, "openaiProd");
         expect(activePoolProviders(generated, "review")).toContain("anthropicProd");
+        // The Claude account leads implementation; the Codex Terra sibling
+        // follows as the checking / second-build lane.
+        expect(activePoolProviders(generated, "implement").slice(0, 2)).toEqual([
+            "anthropicProd",
+            "openaiProdTerra",
+        ]);
         // The Claude account leads orchestration; the Codex Sol sibling stays
         // behind it as the availability fallback.
         expect(activePoolProviders(generated, "orchestrator").slice(0, 2)).toEqual([
@@ -204,10 +213,12 @@ describe("generateAgentsTs (account-driven)", () => {
         expect(generated).toContain('codexTerra: new SmithersCodexAgent({ model: "gpt-5.6-terra"');
         expect(generated).toContain('codexLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna"');
         expectCodexFirstDefaultTiers(generated, "codex");
-        expect(activePoolProviders(generated, "implement").slice(1)).toEqual([
+        // claudeOpus (the Opus 5 variant) leads implementation; Codex Terra is
+        // spliced in right behind it.
+        expect(activePoolProviders(generated, "implement").slice(0, 3)).toEqual([
+            "claudeOpus",
+            "codexTerra",
             "claudeSonnet",
-            "claude",
-            "opencode",
         ]);
         expect(activePoolProviders(generated, "review").slice(1)).toEqual([
             "claude",
@@ -266,11 +277,11 @@ describe("generateAgentsTs (account-driven)", () => {
             "antigravity",
             "opencode",
         ]);
-        expect(activePoolProviders(generated, "implement")).toEqual([
+        expect(activePoolProviders(generated, "implement").slice(0, 4)).toEqual([
+            "claudeOpus",
             "codexTerra",
             "claudeSonnet",
             "kimiBackup",
-            "antigravity",
         ]);
     });
 

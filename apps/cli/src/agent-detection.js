@@ -356,26 +356,27 @@ const LOCAL_SCAFFOLDED_PROVIDERS = {
 const LOCAL_SCAFFOLDED_PROVIDER_FILES = {
     ...SCAFFOLDED_PROVIDER_FILES,
 };
-// Role routing. Codex leads the building tiers: Terra for substantial
-// implementation, validation, and tool-heavy work, Sol for the hardest
-// reasoning and review, and Luna (the base `codex` provider) only for
-// trivial, minimal-risk cheap/research work. Orchestration, gating, and
-// planning are Claude-led: Opus for orchestrator decisions (scope, direction,
-// progress, done-or-not), Fable (the base `claude` provider) for planning;
-// GPT-5.6 Sol/Terra are strong reviewers but poor gatekeepers, so they appear
-// in those chains only as availability fallbacks. Each chain's `order` is the
-// chain order; the Codex block (detected variant + every registered Codex
-// account) is inserted at the codexVariant's position in `order`. Later
-// entries are dormant runtime fallbacks; a healthy earlier attempt completes
-// the task before any fallback is invoked.
+// Role routing. Claude Opus 5 leads the building and gating tiers: it is the
+// default implementer (it beats GPT-5.6 Sol on agentic coding — Frontier-Bench
+// 43.3% vs 34.4% — at lower output cost) and holds smart plus orchestrator
+// decisions (scope, direction, progress, done-or-not); Fable (the base
+// `claude` provider) plans. Codex keeps the checking tiers: Sol for review,
+// Terra for validation and tool-heavy structured checking, and Luna (the base
+// `codex` provider) only for trivial, minimal-risk cheap/research work.
+// GPT-5.6 Sol/Terra are strong reviewers but poor gatekeepers, so in the
+// Claude-led chains they appear only as availability fallbacks. Each chain's
+// `order` is the chain order; the Codex block (detected variant + every
+// registered Codex account) is inserted at the codexVariant's position in
+// `order`. Later entries are dormant runtime fallbacks; a healthy earlier
+// attempt completes the task before any fallback is invoked.
 const TIER_PREFERENCES = {
     cheapFast: { codexVariant: "codexLuna", order: ["codexLuna", "claudeSonnet", "kimi", "vibe", "antigravity", "openclaw", "pi"], maxSize: 3 },
     research: { codexVariant: "codexLuna", order: ["codexLuna", "kimi", "antigravity", "opencode", "claudeSonnet", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
-    implement: { codexVariant: "codexTerra", order: ["codexTerra", "claudeSonnet", "kimi", "antigravity", "claude", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
+    implement: { codexVariant: "codexTerra", order: ["claudeOpus", "codexTerra", "claudeSonnet", "kimi", "antigravity", "claude", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
     midTier: { codexVariant: "codexTerra", order: ["codexTerra", "claudeSonnet", "kimi", "antigravity", "opencode", "claude", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
     smartTool: { codexVariant: "codexTerra", order: ["codexTerra", "claudeSonnet", "kimi", "antigravity", "opencode", "claude", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
     validate: { codexVariant: "codexTerra", order: ["codexTerra", "claudeSonnet", "kimi", "antigravity", "opencode", "claude", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
-    smart: { codexVariant: "codexSol", order: ["codexSol", "claude", "claudeOpus", "opencode", "openclaw", DEFAULT_PROVIDER_ID, "antigravity", "amp", "kimi"], maxSize: 3 },
+    smart: { codexVariant: "codexSol", order: ["claudeOpus", "claude", "codexSol", "opencode", "openclaw", DEFAULT_PROVIDER_ID, "antigravity", "amp", "kimi"], maxSize: 3 },
     review: { codexVariant: "codexSol", order: ["codexSol", "claude", "claudeOpus", "claudeSonnet", "kimi", "amp", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
     planning: { codexVariant: "codexSol", order: ["claude", "claudeOpus", "codexSol", "claudeSonnet", "kimi", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
     orchestrator: { codexVariant: "codexSol", order: ["claudeOpus", "claude", "kimi", "codexSol", "opencode", "openclaw", DEFAULT_PROVIDER_ID], maxSize: 3 },
