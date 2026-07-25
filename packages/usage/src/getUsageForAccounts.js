@@ -32,6 +32,20 @@ function hardFloorMs(provider) {
 }
 
 /**
+ * The floor exists to space out *successful* probes of the rate-limited endpoint.
+ * A cached failure carries no numbers, so pinning it under the floor only blinds
+ * the view for 3 minutes — a refreshed token or a recovered endpoint could not be
+ * re-probed at all. Failures stay cacheable (the soft interval still shields the
+ * endpoint on normal runs) but `--fresh` may clear them.
+ *
+ * @param {{ report?: UsageReport } | undefined} entry
+ * @returns {boolean}
+ */
+function entryFailed(entry) {
+    return entry?.report?.source === "none";
+}
+
+/**
  * Builds a credential-safe identity for a cached report. The API key digest
  * distinguishes replacements without persisting the key itself.
  *
@@ -78,7 +92,7 @@ export async function getUsageForAccounts(accounts, options = {}) {
         const fetchedAt = entry?.report?.fetchedAt;
         const ageMs = typeof fetchedAt === "string" ? nowMs - Date.parse(fetchedAt) : Number.NaN;
         const useCache = entryMatchesAccount(entry, identity) && Number.isFinite(ageMs) && (
-            ageMs < hardFloorMs(account.provider) ||
+            (!entryFailed(entry) && ageMs < hardFloorMs(account.provider)) ||
             (!fresh && ageMs < refreshIntervalMs(account.provider))
         );
         return { account, entry, identity, useCache };
