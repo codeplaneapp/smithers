@@ -54,26 +54,78 @@ function outputRow(nodeId, iteration, payload) {
 }
 
 describe("Panel duplicate panelist identities", () => {
-    test("two panelists resolving to the same task id fail loudly instead of silently collapsing", async () => {
-        // Both panelists derive their task id from role "security", so the
-        // needs/deps maps would silently collapse to one entry. The renderer
-        // must reject the duplicate node id rather than drop a panelist.
-        await expect(
-            render(
-                <Panel
-                    id="p"
-                    panelists={[
-                        { agent, role: "security" },
-                        { agent: otherAgent, role: "security" },
-                    ]}
-                    moderator={agent}
-                    panelistOutput="panel_out"
-                    moderatorOutput="moderator_out"
-                >
-                    review this
-                </Panel>,
-            ),
-        ).rejects.toThrow(/Duplicate Task id.*p-security/);
+    test("two panelists sharing a role each keep their own task, suffixed on collision", async () => {
+        // Both panelists derive their task id from role "security". Without a
+        // uniqueness guard the graph carries two `p-security` Task nodes, which
+        // extraction rejects with DUPLICATE_ID (and the needs/deps maps collapse
+        // to one entry), so neither panelist ever runs.
+        const { graph } = await render(
+            <Panel
+                id="p"
+                panelists={[
+                    { agent, role: "security" },
+                    { agent: otherAgent, role: "security" },
+                ]}
+                moderator={agent}
+                panelistOutput="panel_out"
+                moderatorOutput="moderator_out"
+            >
+                review this
+            </Panel>,
+        );
+        const first = graph.tasks.find((t) => t.nodeId === "p-security");
+        const second = graph.tasks.find((t) => t.nodeId === "p-security-1");
+        expect(first.agent).toBe(agent);
+        expect(second.agent).toBe(otherAgent);
+        // Both panelists still gate the moderator, and both feed its prompt.
+        const moderator = graph.tasks.find((t) => t.nodeId === "p-moderator");
+        expect(new Set(moderator.dependsOn)).toEqual(
+            new Set(["p-security", "p-security-1"]),
+        );
+        expect(moderator.prompt).toContain("### p-security\n");
+        expect(moderator.prompt).toContain("### p-security-1\n");
+    });
+
+    test("a collision-suffixed id that is itself taken keeps searching for a free one", async () => {
+        const { graph } = await render(
+            <Panel
+                id="p"
+                panelists={[
+                    { agent, label: "sec" },
+                    { agent, label: "sec" },
+                    { agent: otherAgent, label: "sec-1" },
+                ]}
+                moderator={agent}
+                panelistOutput="panel_out"
+                moderatorOutput="moderator_out"
+            >
+                review this
+            </Panel>,
+        );
+        const ids = graph.tasks.map((t) => t.nodeId);
+        expect(ids).toEqual([
+            "p-sec",
+            "p-sec-1",
+            "p-sec-1-2",
+            "p-moderator",
+        ]);
+    });
+
+    test("a panelist labeled moderator does not collide with the moderator task", async () => {
+        const { graph } = await render(
+            <Panel
+                id="p"
+                panelists={[{ agent, label: "moderator" }]}
+                moderator={otherAgent}
+                panelistOutput="panel_out"
+                moderatorOutput="moderator_out"
+            >
+                review this
+            </Panel>,
+        );
+        const moderator = graph.tasks.find((t) => t.nodeId === "p-moderator");
+        expect(moderator.agent).toBe(otherAgent);
+        expect(moderator.dependsOn).toEqual(["p-moderator-0"]);
     });
 });
 

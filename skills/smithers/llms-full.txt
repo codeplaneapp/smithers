@@ -6873,6 +6873,7 @@ type PanelProps = {
 ## Notes
 
 - Panelist task ids: `{prefix}-{label|role|panelist-N}`; moderator is `{prefix}-moderator`.
+- Panelists may share a `label`/`role` (two `security` reviewers): colliding ids get an index suffix (`{prefix}-security-1`), so every panelist keeps its own task.
 - `strategy` and `minAgree` are passed as prompt context to the moderator, which interprets them.
 - All panelists write to the same `panelistOutput` schema, differentiated by task id.
 
