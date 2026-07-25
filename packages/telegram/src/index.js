@@ -275,6 +275,38 @@ export function escapeTelegramMarkdownV2(text) {
   return String(text).replace(MARKDOWN_V2_SPECIAL, "\\$1");
 }
 
+// Back a cut index off any boundary that would corrupt the chunk it ends:
+// a bisected surrogate pair (lone surrogates render as replacement chars) or an
+// odd trailing run of backslashes (a MarkdownV2 escape whose escaped character
+// would land in the next chunk, making both chunks unparseable).
+function safeCutIndex(text, end) {
+  let cut = end;
+  if (cut > 0 && cut < text.length) {
+    const high = text.charCodeAt(cut - 1);
+    const low = text.charCodeAt(cut);
+    if (high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff) cut -= 1;
+  }
+  const codePointSafe = cut > 0 ? cut : end;
+  cut = codePointSafe;
+  // Trailing whitespace is dropped by trimEnd/trimStart either way, so look past it —
+  // otherwise a backslash it hides only surfaces after the trim. Backing off one
+  // backslash can expose another the same way, so re-check until the cut is stable.
+  while (cut > 0) {
+    let scan = cut;
+    while (scan > 0 && /\s/.test(text[scan - 1])) scan -= 1;
+    let backslashes = 0;
+    while (scan - backslashes > 0 && text.charCodeAt(scan - backslashes - 1) === 0x5c) backslashes += 1;
+    if (backslashes % 2 === 0) {
+      cut = scan;
+      break;
+    }
+    cut = scan - 1;
+  }
+  // Never stall the split loop: a zero-width cut would repeat forever. When no
+  // escape-safe cut fits the window, keep at least the code-point-safe one.
+  return cut > 0 ? cut : codePointSafe;
+}
+
 export function splitTelegramText(text, options = {}) {
   const maxLength = Math.min(
     TELEGRAM_MAX_MESSAGE_LENGTH,
@@ -288,7 +320,7 @@ export function splitTelegramText(text, options = {}) {
     const softCut = Math.max(newlineCut, spaceCut);
     // Prefer the last newline/space cut, but only if it lands past the midpoint —
     // otherwise hard-cut at maxLength rather than emit tiny fragment chunks.
-    const end = softCut > Math.floor(maxLength / 2) ? softCut : maxLength;
+    const end = safeCutIndex(remaining, softCut > Math.floor(maxLength / 2) ? softCut : maxLength);
     chunks.push(remaining.slice(0, end).trimEnd());
     remaining = remaining.slice(end).trimStart();
   }

@@ -73,6 +73,25 @@ describe("@smithers-orchestrator/telegram", () => {
     expect(chunks.join("").replace(/\s/g, "")).toContain("bbbbbbbbbbbbbbbbbbbb");
   });
 
+  test("hard-cuts chunks without breaking MarkdownV2 escapes or surrogate pairs", () => {
+    const escaped = escapeTelegramMarkdownV2(`x${".".repeat(50)}`);
+    const escapedChunks = splitTelegramText(escaped, { maxLength: 10 });
+    expect(escapedChunks.every((chunk) => chunk.length <= 10)).toBe(true);
+    expect(escapedChunks.join("")).toBe(escaped);
+    for (const chunk of escapedChunks) {
+      // an escape opener must never be the last character of a chunk
+      expect(/(?:^|[^\\])(?:\\\\)*\\$/.test(chunk)).toBe(false);
+    }
+
+    const emoji = "😀".repeat(20);
+    const emojiChunks = splitTelegramText(emoji, { maxLength: 5 });
+    expect(emojiChunks.every((chunk) => chunk.length <= 5)).toBe(true);
+    expect(emojiChunks.join("")).toBe(emoji);
+    for (const chunk of emojiChunks) {
+      expect(Array.from(chunk).every((codePoint) => codePoint === "😀")).toBe(true);
+    }
+  });
+
   test("calls Telegram Bot API with typed helpers", async () => {
     const requests = [];
     const client = createTelegramClient({
