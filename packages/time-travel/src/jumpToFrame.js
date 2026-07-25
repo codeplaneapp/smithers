@@ -654,7 +654,7 @@ export async function jumpToFrame(input) {
   let runIdForAudit = typeof input.runId === "string" ? input.runId : "invalid-run-id";
   let fromFrameNoForAudit = -1;
   let toFrameNoForAudit = Number.isInteger(input.frameNo) ? Number(input.frameNo) : -1;
-  /** @type {"success" | "failed" | "partial"} */
+  /** @type {"success" | "failed" | "partial" | "rejected"} */
   let auditResult = "failed";
 
   /** @type {JumpResult | null} */
@@ -1371,6 +1371,15 @@ export async function jumpToFrame(input) {
     }
   } finally {
     const durationMs = Math.max(0, nowMs() - startedAtMs);
+
+    // A rewind refused before the in_progress write (Busy, RateLimited) never
+    // mutated anything, so it is recorded as `rejected` rather than `failed`.
+    // `countRecentRewindAuditRows` ignores `rejected`, otherwise every retry of
+    // a rate-limited caller would insert a fresh row inside the trailing window
+    // and the quota could never drain.
+    if (auditRowId === null && (finalError?.code === "Busy" || finalError?.code === "RateLimited")) {
+      auditResult = "rejected";
+    }
 
     // Persist the terminal audit state BEFORE releasing the lock so a second
     // caller cannot beat us to the rate-limit count.

@@ -519,7 +519,74 @@ describe("jumpToFrame", () => {
 
       const audits = await listRewindAuditRows(adapter, { runId: "run-rate" });
       expect(audits).toHaveLength(11);
-      expect(audits[10]?.result).toBe("failed");
+      expect(audits[10]?.result).toBe("rejected");
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("rate limit: rejected retries do not extend the lockout past the window", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      await seedRun(adapter, "run-rate-retry");
+      const client = (adapter as any).db.session.client;
+      const t0 = 10_000_000;
+      const rateLimit = { maxPerWindow: 2, windowMs: 60_000 };
+      for (let index = 0; index < 2; index += 1) {
+        client
+          .query(
+            `INSERT INTO _smithers_time_travel_audit (
+               run_id,
+               from_frame_no,
+               to_frame_no,
+               caller,
+               timestamp_ms,
+               result,
+               duration_ms
+             ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run("run-rate-retry", 2, 1, "user:owner", t0, "success", 10);
+      }
+
+      // Two rejected retries inside the window; each writes an audit row.
+      for (const offsetMs of [1_000, 59_000]) {
+        await expect(
+          jumpToFrame({
+            adapter,
+            runId: "run-rate-retry",
+            frameNo: 1,
+            confirm: true,
+            caller: "user:owner",
+            rateLimit,
+            nowMs: () => t0 + offsetMs,
+            ...makeNoVcsHooks(),
+          }),
+        ).rejects.toMatchObject({ code: "RateLimited" });
+      }
+
+      // Once the two real rewinds age out, the quota must drain even though the
+      // rejection rows are still inside the trailing window.
+      await expect(
+        jumpToFrame({
+          adapter,
+          runId: "run-rate-retry",
+          frameNo: 1,
+          confirm: true,
+          caller: "user:owner",
+          rateLimit,
+          nowMs: () => t0 + 61_000,
+          ...makeNoVcsHooks(),
+        }),
+      ).resolves.toMatchObject({ ok: true });
+
+      const audits = await listRewindAuditRows(adapter, { runId: "run-rate-retry" });
+      expect(audits.map((row) => row.result)).toEqual([
+        "success",
+        "success",
+        "rejected",
+        "rejected",
+        "success",
+      ]);
     } finally {
       sqlite.close();
     }

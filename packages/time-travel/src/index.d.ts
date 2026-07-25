@@ -91,7 +91,9 @@ type RevertOptions$2 = {
     };
 };
 
-type RewindAuditResult$4 = "success" | "failed" | "partial" | "in_progress";
+type RewindAuditResult$4 = "success" | "failed" | "partial" | "in_progress"
+/** Refused before any mutation (Busy/RateLimited); never counts against the quota. */
+ | "rejected";
 
 type RewindLockHandle$2 = {
     runId: string;
@@ -1299,7 +1301,9 @@ type RewindAuditResult$2 = RewindAuditResult$4;
 /**
  * Count audit rows for one caller and run in a time window.
  * Only counts terminal (non-in_progress) rows so that a live attempt
- * does not itself blow the rate-limit quota.
+ * does not itself blow the rate-limit quota, and skips `rejected` rows so
+ * that retries of a refused rewind cannot keep refreshing the window and
+ * lock the caller out indefinitely.
  *
  * @param {SmithersDb} adapter
  * @param {{ runId: string; caller: string; sinceMs: number; }} input
