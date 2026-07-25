@@ -152,6 +152,32 @@ for await (const frame of client.streamRunEvents(
   or raw event frames.
 </ResponseField>
 
+### Disposal
+
+<ResponseField name="close()" type="void">
+  Releases everything the client owns: aborts its in-flight RPCs and streams,
+  closes the WebSockets `connect()` opened, and marks the client closed so a
+  later call throws instead of opening a new socket. Idempotent, and it never
+  aborts a caller's own `AbortSignal`.
+</ResponseField>
+<ResponseField name="closed" type="boolean">
+  Whether `close()` has run.
+</ResponseField>
+
+Only the owner closes. `SmithersGatewayProvider` closes the client it built from
+`options` when the options rotate one in and on unmount, and never closes a
+client you passed as the `client` prop, so a client shared across trees stays
+yours to dispose.
+
+```ts
+const client = new SmithersGatewayClient({ baseUrl: "/" });
+try {
+  await client.listWorkflows();
+} finally {
+  client.close();
+}
+```
+
 ### SmithersGatewayConnection
 
 A single open WebSocket: RPC via `request` / `requestRaw`, plus a single

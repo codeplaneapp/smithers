@@ -83,9 +83,14 @@ type GatewayAsyncState<T> = {
 ### SmithersGatewayProvider
 
 Holds one `SmithersGatewayClient` in context for every hook below. Pass a ready
-`client`, or `options` to construct one. The client is memoized on
-`baseUrl`/`token`, so an inline `options` literal won't trigger a reconnect
-storm.
+`client`, or `options` to construct one. The client is memoized on the *content*
+of `options`, so an inline literal won't trigger a reconnect storm while a
+rotated credential or transport still rebuilds the client.
+
+Clients the provider builds are the provider's to dispose: it closes the
+previous one when `options` rotate it in, and closes both the client and the
+collection data client on unmount, so no abandoned socket or reconnect timer
+survives the tree. A client passed as the `client` prop is never closed.
 
 ```tsx
 function SmithersGatewayProvider(props: {

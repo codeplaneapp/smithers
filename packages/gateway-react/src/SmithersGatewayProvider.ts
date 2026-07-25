@@ -1,4 +1,4 @@
-import { createElement, useMemo, type ReactNode } from "react";
+import { createElement, useEffect, useMemo, useRef, type ReactNode } from "react";
 import {
   SmithersGatewayClient,
   createSmithersDataClient,
@@ -23,6 +23,44 @@ function headersIdentity(headers: HeadersInit | undefined) {
   return entries.map(([name, value]) => `${name.toLowerCase()}:${value}`).sort().join("\n");
 }
 
+/**
+ * Closes a client the provider built once the provider stops using it — on
+ * recreation and on unmount — and never touches one the caller passed in.
+ *
+ * The close is deferred by a microtask because React runs a cleanup and the
+ * following setup in the same commit when it re-mounts a tree in place (what
+ * StrictMode's double-invoke does): closing synchronously in the cleanup would
+ * destroy the very client the next setup keeps using. Re-registering the same
+ * instance cancels the pending close; a real drop has nothing to re-register,
+ * so the close lands on the next microtask.
+ */
+function useOwnedClient(client: { close: () => void }, owned: boolean) {
+  const pending = useRef<{ client: unknown; cancelled: boolean } | null>(null);
+  useEffect(() => {
+    if (!owned) {
+      return;
+    }
+    if (pending.current?.client === client) {
+      pending.current.cancelled = true;
+      pending.current = null;
+    }
+    return () => {
+      // Captured per registration, so the close can only ever hit the exact
+      // instance this effect ran for — never a successor.
+      const ticket = { client, cancelled: false };
+      pending.current = ticket;
+      queueMicrotask(() => {
+        if (pending.current === ticket) {
+          pending.current = null;
+        }
+        if (!ticket.cancelled) {
+          client.close();
+        }
+      });
+    };
+  }, [client, owned]);
+}
+
 export function SmithersGatewayProvider(props: {
   client?: SmithersGatewayClient;
   options?: SmithersGatewayClientOptions;
@@ -32,8 +70,12 @@ export function SmithersGatewayProvider(props: {
   const provided = props.client;
   const options = props.options;
   const headerIdentity = headersIdentity(options?.headers);
-  const client = useMemo(
-    () => provided ?? new SmithersGatewayClient(options),
+  // Ownership rides with the instance: a client the provider constructed is
+  // the provider's to close, a caller-supplied one never is.
+  const rpc = useMemo(
+    () => provided
+      ? { client: provided, owned: false }
+      : { client: new SmithersGatewayClient(options), owned: true },
     // Memoize on option *content* so an inline `options` object literal does
     // not re-create the client (and trigger a reconnect storm) every render —
     // while every behavior-affecting option still rotates it, so a new key,
@@ -51,6 +93,8 @@ export function SmithersGatewayProvider(props: {
       options?.client?.platform,
     ],
   );
+  const client = rpc.client;
+  useOwnedClient(client, rpc.owned);
   const clientConfig = client as SmithersGatewayClient & { baseUrl?: string; token?: string };
   const apiBaseUrl = clientConfig.baseUrl ?? options?.baseUrl ?? "http://127.0.0.1:7331";
   const mode = props.mode ?? { kind: "local" as const, apiBaseUrl, ...(clientConfig.token ? { token: clientConfig.token } : {}) };
@@ -62,6 +106,10 @@ export function SmithersGatewayProvider(props: {
     () => createSmithersDataClient({ mode, fetch: client.fetchImpl, ...(customHeaders ? { headers: customHeaders } : {}) }),
     [client, mode.kind, mode.apiBaseUrl, "electricBaseUrl" in mode ? mode.electricBaseUrl : undefined, "workspaceId" in mode ? mode.workspaceId : undefined, mode.token],
   );
+  // There is no `dataClient` prop, so this one is always provider-owned — and
+  // because it is passed down, `SmithersCollectionsProvider`'s own guard treats
+  // it as caller-supplied and leaves it alone. Only here can it be closed.
+  useOwnedClient(dataClient, true);
   return createElement(
     SmithersGatewayContext.Provider,
     { value: client },

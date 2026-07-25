@@ -67,6 +67,14 @@ const DEFAULT_CLIENT_VERSION = "0.30.0";
 // method's doc comment.
 const DEFAULT_HEALTHY_AFTER_MS = 1_000;
 
+const CLOSED_MESSAGE = "Gateway client is closed.";
+
+// Captured while this module initializes. DOM test environments replace the
+// global AbortController later, and handing one of those cross-realm signals to
+// the native fetch fails the request before it reaches the gateway (the same
+// trap createSmithersDataClient documents for the SSE stream).
+const RuntimeAbortController = globalThis.AbortController;
+
 function defaultBaseUrl() {
   if (typeof globalThis.location !== "undefined") {
     return globalThis.location.origin;
@@ -214,6 +222,11 @@ export class SmithersGatewayClient {
   readonly headers: HeadersInit | undefined;
   readonly client: Required<NonNullable<SmithersGatewayClientOptions["client"]>>;
   readonly boot: GatewayUiBootConfig | undefined;
+  private isClosed = false;
+  /** One controller per in-flight request or stream, aborted by `close()`. */
+  private readonly links = new Set<AbortController>();
+  /** Sockets opened by `connect()` that have not reported a close yet. */
+  private readonly openConnections = new Set<SmithersGatewayConnection>();
 
   constructor(options: SmithersGatewayClientOptions = {}) {
     this.boot = globalThis.__SMITHERS_GATEWAY_UI__;
@@ -233,6 +246,65 @@ export class SmithersGatewayClient {
     };
   }
 
+  /** True once `close()` has run. A closed client starts no new work. */
+  get closed() {
+    return this.isClosed;
+  }
+
+  /**
+   * Releases everything this client owns: aborts its in-flight RPCs and
+   * streams, closes the WebSockets `connect()` opened, and marks the client
+   * closed so a later call fails fast instead of re-opening a socket.
+   * Idempotent.
+   *
+   * Ownership does not transfer: a component tree handed a client (rather than
+   * given options to build one) must leave closing to whoever constructed it.
+   */
+  close() {
+    if (this.isClosed) {
+      return;
+    }
+    this.isClosed = true;
+    for (const link of this.links) {
+      link.abort();
+    }
+    this.links.clear();
+    for (const connection of this.openConnections) {
+      connection.close();
+    }
+    this.openConnections.clear();
+  }
+
+  /**
+   * A signal that aborts when either the caller aborts or this client closes,
+   * so `close()` reaches work the caller has not abandoned — without taking
+   * over (or aborting) the caller's own signal. `release()` unregisters it once
+   * the work settles, so a long-lived client does not accumulate one per call.
+   */
+  private link(signal: AbortSignal | undefined) {
+    const controller = new RuntimeAbortController();
+    const forward = () => { controller.abort(); };
+    this.links.add(controller);
+    if (this.isClosed || signal?.aborted) {
+      controller.abort();
+    } else {
+      signal?.addEventListener("abort", forward, { once: true });
+    }
+    return {
+      signal: controller.signal,
+      release: () => {
+        this.links.delete(controller);
+        signal?.removeEventListener("abort", forward);
+      },
+    };
+  }
+
+  private assertOpen() {
+    if (this.closed) {
+      throw new Error(CLOSED_MESSAGE);
+    }
+  }
+
   rpc<Method extends GatewayRpcMethod>(
     method: Method,
     params: GatewayRpcParams<Method>,
@@ -242,83 +314,107 @@ export class SmithersGatewayClient {
   }
 
   async rpcRaw(method: string, params?: unknown, options: { signal?: AbortSignal } = {}) {
-    const response = await this.fetchImpl(`${this.baseUrl}/v1/rpc/${method}`, {
-      method: "POST",
-      headers: headersFromOptions(this),
-      body: JSON.stringify(params ?? {}),
-      signal: options.signal,
-    });
-    let frame: unknown;
+    this.assertOpen();
+    const link = this.link(options.signal);
     try {
-      frame = await response.json();
-    } catch {
-      if (response.ok) {
-        throw invalidGatewayResponse(method, response.status);
-      }
-      throw gatewayHttpError(method, response.status);
-    }
-    if (!isGatewayResponseFrame(frame)) {
-      if (!response.ok) {
+      const response = await this.fetchImpl(`${this.baseUrl}/v1/rpc/${method}`, {
+        method: "POST",
+        headers: headersFromOptions(this),
+        body: JSON.stringify(params ?? {}),
+        signal: link.signal,
+      });
+      let frame: unknown;
+      try {
+        frame = await response.json();
+      } catch {
+        if (response.ok) {
+          throw invalidGatewayResponse(method, response.status);
+        }
         throw gatewayHttpError(method, response.status);
       }
-      throw invalidGatewayResponse(method, response.status, frame);
+      if (!isGatewayResponseFrame(frame)) {
+        if (!response.ok) {
+          throw gatewayHttpError(method, response.status);
+        }
+        throw invalidGatewayResponse(method, response.status, frame);
+      }
+      if (!frame.ok) {
+        throw rpcError(frame, method, response.status);
+      }
+      return frame.payload;
+    } finally {
+      link.release();
     }
-    if (!frame.ok) {
-      throw rpcError(frame, method, response.status);
-    }
-    return frame.payload;
   }
 
   async connect(options: { subscribe?: string[]; signal?: AbortSignal } = {}) {
+    this.assertOpen();
     if (!this.WebSocketImpl) {
       throw new Error("WebSocket is not available in this environment.");
     }
-    if (options.signal?.aborted) {
-      throw new Error("Gateway WebSocket open aborted.");
-    }
-    const ws = new this.WebSocketImpl(toWebSocketUrl(this.baseUrl, this.boot?.wsPath));
-    await new Promise<void>((resolve, reject) => {
-      const onOpen = () => {
-        cleanup();
-        resolve();
-      };
-      const onError = () => {
-        cleanup();
-        ws.close();
-        reject(new Error("Gateway WebSocket failed to open."));
-      };
-      const onAbort = () => {
-        cleanup();
-        ws.close();
-        reject(new Error("Gateway WebSocket open aborted."));
-      };
-      const cleanup = () => {
-        ws.removeEventListener("open", onOpen);
-        ws.removeEventListener("error", onError);
-        options.signal?.removeEventListener("abort", onAbort);
-      };
-      ws.addEventListener("open", onOpen);
-      ws.addEventListener("error", onError);
-      options.signal?.addEventListener("abort", onAbort, { once: true });
-    });
-    const connection = new SmithersGatewayConnection(ws);
+    // The handshake rides a link so `close()` interrupts it; once the socket is
+    // live the connection itself is what `close()` hangs up, so the link is
+    // released rather than held for the socket's lifetime.
+    const link = this.link(options.signal);
+    const signal = link.signal;
     try {
-      await raceSignal(
-        connection.requestRaw("connect", {
-          minProtocol: 1,
-          maxProtocol: 1,
-          client: this.client,
-          ...(this.token ? { auth: { token: this.token } } : {}),
-          ...(options.subscribe ? { subscribe: options.subscribe } : {}),
-        }),
-        options.signal,
-        "Gateway WebSocket open aborted.",
-      );
-    } catch (error) {
-      connection.close();
-      throw error;
+      if (signal.aborted) {
+        throw new Error("Gateway WebSocket open aborted.");
+      }
+      const ws = new this.WebSocketImpl(toWebSocketUrl(this.baseUrl, this.boot?.wsPath));
+      await new Promise<void>((resolve, reject) => {
+        const onOpen = () => {
+          cleanup();
+          resolve();
+        };
+        const onError = () => {
+          cleanup();
+          ws.close();
+          reject(new Error("Gateway WebSocket failed to open."));
+        };
+        const onAbort = () => {
+          cleanup();
+          ws.close();
+          reject(new Error("Gateway WebSocket open aborted."));
+        };
+        const cleanup = () => {
+          ws.removeEventListener("open", onOpen);
+          ws.removeEventListener("error", onError);
+          signal.removeEventListener("abort", onAbort);
+        };
+        ws.addEventListener("open", onOpen);
+        ws.addEventListener("error", onError);
+        signal.addEventListener("abort", onAbort, { once: true });
+      });
+      const connection = new SmithersGatewayConnection(ws);
+      // Tracked so `close()` can hang up sockets whose iterator is still
+      // running. The socket's own close event deregisters it, so a long-lived
+      // client does not accumulate dead connections.
+      this.openConnections.add(connection);
+      ws.addEventListener("close", () => {
+        this.openConnections.delete(connection);
+      });
+      try {
+        await raceSignal(
+          connection.requestRaw("connect", {
+            minProtocol: 1,
+            maxProtocol: 1,
+            client: this.client,
+            ...(this.token ? { auth: { token: this.token } } : {}),
+            ...(options.subscribe ? { subscribe: options.subscribe } : {}),
+          }),
+          signal,
+          "Gateway WebSocket open aborted.",
+        );
+      } catch (error) {
+        connection.close();
+        this.openConnections.delete(connection);
+        throw error;
+      }
+      return connection;
+    } finally {
+      link.release();
     }
-    return connection;
   }
 
   /**
@@ -336,16 +432,22 @@ export class SmithersGatewayClient {
     options: { signal?: AbortSignal },
   ): AsyncGenerator<GatewayEventFrame> {
     const connection = await this.connect({ subscribe: [params.runId], signal: options.signal });
+    // Held for the whole subscription so `close()` ends the iterator instead of
+    // leaving it parked on a socket that will never speak again. Taken after
+    // the connect (which links its own handshake) so a failed connect cannot
+    // strand it.
+    const link = this.link(options.signal);
+    const signal = link.signal;
     try {
       const subscribed = await raceSignal(
         connection.request(method, params),
-        options.signal,
+        signal,
         "Gateway stream subscribe aborted.",
       );
       if (!isObject(subscribed) || typeof subscribed.streamId !== "string") {
         throw invalidGatewayResponse(method, undefined, subscribed);
       }
-      for await (const frame of connection.events(options.signal)) {
+      for await (const frame of connection.events(signal)) {
         if (
           eventNames.includes(frame.event) &&
           typeof frame.payload === "object" &&
@@ -357,6 +459,7 @@ export class SmithersGatewayClient {
         }
       }
     } finally {
+      link.release();
       connection.close();
     }
   }
@@ -414,71 +517,78 @@ export class SmithersGatewayClient {
     params: GatewayRpcParams<"streamRunEvents">,
     options: StreamRunEventsResilientOptions = {},
   ): AsyncGenerator<GatewayEventFrame<StreamRunEventPayload>> {
-    const signal = options.signal;
+    // Linked to the client lifetime: `close()` must stop the reconnect loop,
+    // not just the socket it happens to be holding.
+    const link = this.link(options.signal);
+    const signal = link.signal;
     const healthyAfterMs = options.healthyAfterMs ?? DEFAULT_HEALTHY_AFTER_MS;
     let lastSeq = typeof params.afterSeq === "number" ? params.afterSeq : undefined;
     let attempt = 0;
-    while (!signal?.aborted) {
-      let reachedTerminal = false;
-      let reconnectReason: GatewayStreamReconnectEvent["reason"] = "stream_closed";
-      let reconnectError: unknown;
-      // Mark when this connection's inner stream began so we only zero the
-      // backoff counter once the connection proves sustained liveness.
-      const connectionStart = Date.now();
-      let resetBackoff = false;
-      try {
-        for await (const frame of this.streamRunEvents(
-          { runId: params.runId, ...(typeof lastSeq === "number" ? { afterSeq: lastSeq } : {}) },
-          { signal },
-        )) {
-          const isReplay = frame.event === "run.gap_resync";
-          // Reset backoff only after the connection is demonstrably healthy: a
-          // live (non-replay) frame, or any frame past the healthy threshold.
-          // A bare replay frame at connection start is NOT proof of liveness.
-          if (!resetBackoff && (!isReplay || Date.now() - connectionStart >= healthyAfterMs)) {
-            attempt = 0;
-            resetBackoff = true;
+    try {
+      while (!signal?.aborted) {
+        let reachedTerminal = false;
+        let reconnectReason: GatewayStreamReconnectEvent["reason"] = "stream_closed";
+        let reconnectError: unknown;
+        // Mark when this connection's inner stream began so we only zero the
+        // backoff counter once the connection proves sustained liveness.
+        const connectionStart = Date.now();
+        let resetBackoff = false;
+        try {
+          for await (const frame of this.streamRunEvents(
+            { runId: params.runId, ...(typeof lastSeq === "number" ? { afterSeq: lastSeq } : {}) },
+            { signal },
+          )) {
+            const isReplay = frame.event === "run.gap_resync";
+            // Reset backoff only after the connection is demonstrably healthy: a
+            // live (non-replay) frame, or any frame past the healthy threshold.
+            // A bare replay frame at connection start is NOT proof of liveness.
+            if (!resetBackoff && (!isReplay || Date.now() - connectionStart >= healthyAfterMs)) {
+              attempt = 0;
+              resetBackoff = true;
+            }
+            const seq = isObject(frame.payload) && typeof frame.payload.seq === "number"
+              ? frame.payload.seq
+              : undefined;
+            if (typeof seq === "number") {
+              lastSeq = typeof lastSeq === "number" ? Math.max(lastSeq, seq) : seq;
+            }
+            if (isObject(frame.payload) && frame.payload.event === "run.completed") {
+              reachedTerminal = true;
+            }
+            yield frame;
           }
-          const seq = isObject(frame.payload) && typeof frame.payload.seq === "number"
-            ? frame.payload.seq
-            : undefined;
-          if (typeof seq === "number") {
-            lastSeq = typeof lastSeq === "number" ? Math.max(lastSeq, seq) : seq;
+          // The inner stream ended without throwing. A graceful end is only a clean
+          // stop when the run actually completed or the caller aborted; otherwise it
+          // is a silent socket drop (close code 1006) and we reconnect + resume.
+          if (reachedTerminal) {
+            return;
           }
-          if (isObject(frame.payload) && frame.payload.event === "run.completed") {
-            reachedTerminal = true;
-          }
-          yield frame;
+        } catch (error) {
+          // A thrown drop (error frame, invalid frame, connect failure). Fall
+          // through to the shared backoff + reconnect below unless aborted.
+          reconnectReason = "transport_error";
+          reconnectError = error;
         }
-        // The inner stream ended without throwing. A graceful end is only a clean
-        // stop when the run actually completed or the caller aborted; otherwise it
-        // is a silent socket drop (close code 1006) and we reconnect + resume.
-        if (reachedTerminal) {
+        // Either the stream threw or ended silently with the run still live. Stop
+        // if the caller aborted; otherwise back off and reconnect (resuming from
+        // the last observed seq).
+        if (signal?.aborted) {
           return;
         }
-      } catch (error) {
-        // A thrown drop (error frame, invalid frame, connect failure). Fall
-        // through to the shared backoff + reconnect below unless aborted.
-        reconnectReason = "transport_error";
-        reconnectError = error;
+        const backoffMs = gatewayBackoffDelay(attempt, options.backoff);
+        options.onReconnect?.({
+          runId: params.runId,
+          ...(typeof lastSeq === "number" ? { afterSeq: lastSeq } : {}),
+          attempt,
+          backoffMs,
+          reason: reconnectReason,
+          ...(reconnectError === undefined ? {} : { error: reconnectError }),
+        });
+        await sleepWithSignal(backoffMs, signal);
+        attempt += 1;
       }
-      // Either the stream threw or ended silently with the run still live. Stop
-      // if the caller aborted; otherwise back off and reconnect (resuming from
-      // the last observed seq).
-      if (signal?.aborted) {
-        return;
-      }
-      const backoffMs = gatewayBackoffDelay(attempt, options.backoff);
-      options.onReconnect?.({
-        runId: params.runId,
-        ...(typeof lastSeq === "number" ? { afterSeq: lastSeq } : {}),
-        attempt,
-        backoffMs,
-        reason: reconnectReason,
-        ...(reconnectError === undefined ? {} : { error: reconnectError }),
-      });
-      await sleepWithSignal(backoffMs, signal);
-      attempt += 1;
+    } finally {
+      link.release();
     }
   }
 
@@ -628,11 +738,13 @@ export class SmithersGatewayClient {
     options: { signal?: AbortSignal } = {},
   ): AsyncGenerator<T, void, void> {
     const connection = await this.connect({ signal: options.signal });
+    const link = this.link(options.signal);
+    const signal = link.signal;
     const method = extensionStreamMethodName(namespace, key);
     try {
       const response = (await raceSignal(
         connection.requestRaw(method, params),
-        options.signal,
+        signal,
         "Gateway stream subscribe aborted.",
       )) as GatewayExtensionSubscribeResponse<T> | undefined;
       if (!isObject(response) || typeof response.streamId !== "string") {
@@ -641,7 +753,7 @@ export class SmithersGatewayClient {
       if (response.initial !== undefined) {
         yield response.initial as T;
       }
-      for await (const frame of connection.events(options.signal)) {
+      for await (const frame of connection.events(signal)) {
         if (frame.event === GATEWAY_EXTENSION_STREAM_EVENT) {
           const payload = frame.payload as GatewayExtensionStreamFrame<T> | undefined;
           if (payload?.streamId === response.streamId) {
@@ -661,6 +773,7 @@ export class SmithersGatewayClient {
         }
       }
     } finally {
+      link.release();
       connection.close();
     }
   }
