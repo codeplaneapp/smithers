@@ -12,7 +12,7 @@ export const CLI_ERROR_MESSAGES = Object.freeze({
     // Input validation
     InvalidRunId: {
         message: "The run id is not in the expected shape.",
-        hint: "Run ids must match /^[a-z0-9_-]{1,64}$/. Check for typos or pick a run from `smithers ps`.",
+        hint: "Run ids must match /^[a-z0-9_-][a-z0-9_.-]{0,63}$/. Check for typos or pick a run from `smithers ps`.",
         exitCode: EXIT_USER_ERROR,
     },
     InvalidNodeId: {

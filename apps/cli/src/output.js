@@ -5,11 +5,11 @@
 
 import { getNodeOutputRoute } from "@smithers-orchestrator/server/gatewayRoutes/getNodeOutput";
 import { NodeOutputRouteError } from "@smithers-orchestrator/server/gatewayRoutes/NodeOutputRouteError";
+import { RUN_ID_PATTERN } from "@smithers-orchestrator/server/gatewayRoutes/RUN_ID_PATTERN";
 import { camelToSnake } from "@smithers-orchestrator/db/utils/camelToSnake";
 import { EXIT_OK } from "./util/exitCodes.js";
 import { formatCliErrorForStderr, getCliErrorMapping } from "./util/errorMessage.js";
 
-const RUN_ID_PATTERN = /^[a-z0-9_-]{1,64}$/;
 const NODE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,128}$/;
 
 /**
@@ -97,7 +97,7 @@ function stripOutputKeyColumns(row) {
  */
 async function runRawJsonOutput(input, iteration) {
     if (!RUN_ID_PATTERN.test(input.runId)) {
-        throw new NodeOutputRouteError("InvalidRunId", "runId must match /^[a-z0-9_-]{1,64}$/.");
+        throw new NodeOutputRouteError("InvalidRunId", "runId must match /^[a-z0-9_-][a-z0-9_.-]{0,63}$/.");
     }
     if (!NODE_ID_PATTERN.test(input.nodeId)) {
         throw new NodeOutputRouteError("InvalidNodeId", "nodeId must match /^[a-zA-Z0-9:_-]{1,128}$/.");

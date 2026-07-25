@@ -327,7 +327,9 @@ describe("rewind validation and rate-limit boundaries", () => {
     test("validateJumpRunId enforces slug length and lowercase shape", () => {
         expect(validateJumpRunId("a")).toBe("a");
         expect(validateJumpRunId("a".repeat(64))).toBe("a".repeat(64));
-        for (const invalid of ["", "a".repeat(65), "RunUpper", "run.with.dot"]) {
+        // `up --run-id` creates dotted ids, so rewinding one must work too.
+        expect(validateJumpRunId("run.with.dot")).toBe("run.with.dot");
+        for (const invalid of ["", "a".repeat(65), "RunUpper", ".leading.dot", ".."]) {
             let caught;
             try {
                 validateJumpRunId(invalid);

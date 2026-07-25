@@ -5,7 +5,8 @@
 // Terminal targets are cached per state fingerprint so repeated clicks in the
 // monitor UI do not re-pay the narrator.
 
-const RUN_ID_PATTERN = /^[a-z0-9_-]{1,64}$/;
+import { RUN_ID_PATTERN } from "./RUN_ID_PATTERN.js";
+
 const NODE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,128}$/;
 const INT32_MAX = 2_147_483_647;
 const CACHE_MAX_ENTRIES = 200;
@@ -131,7 +132,7 @@ export async function whatHappenedRoute(params) {
     const now = params.now ?? Date.now;
     const runId = asString(params.runId);
     if (!runId || !RUN_ID_PATTERN.test(runId)) {
-        throw new WhatHappenedRouteError("InvalidRunId", "runId must match /^[a-z0-9_-]{1,64}$/.");
+        throw new WhatHappenedRouteError("InvalidRunId", "runId must match /^[a-z0-9_-][a-z0-9_.-]{0,63}$/.");
     }
     const nodeId = params.nodeId === undefined || params.nodeId === null ? null : asString(params.nodeId) ?? "";
     if (nodeId !== null && !NODE_ID_PATTERN.test(nodeId)) {

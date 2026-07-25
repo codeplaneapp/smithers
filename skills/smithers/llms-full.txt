@@ -16403,7 +16403,7 @@ Request:
 
 ```ts
 type RewindRunRequest = {
-  runId: string;     // /^[a-z0-9_-]{1,64}$/
+  runId: string;     // /^[a-z0-9_-][a-z0-9_.-]{0,63}$/
   frameNo: number;   // 0 <= frameNo <= latestFrameNo
   confirm: true;     // must be literal true
 };
@@ -16436,7 +16436,7 @@ Failure modes and HTTP status:
 
 | Code                   | Meaning                                                                   | HTTP  |
 | ---------------------- | ------------------------------------------------------------------------- | ----- |
-| `InvalidRunId`         | `runId` fails `/^[a-z0-9_-]{1,64}$/`.                                     | `400` |
+| `InvalidRunId`         | `runId` fails `/^[a-z0-9_-][a-z0-9_.-]{0,63}$/`.                          | `400` |
 | `InvalidFrameNo`       | `frameNo` is not a non-negative i32 integer.                              | `400` |
 | `ConfirmationRequired` | Caller omitted `confirm: true`.                                           | `400` |
 | `FrameOutOfRange`      | `frameNo` > latest frame, or run has no frames.                           | `400` |

@@ -296,6 +296,25 @@ describe("getNodeOutputRoute input boundaries", () => {
     });
   });
 
+  // `smithers up --run-id` constrains nothing, so a dotted id like
+  // `orchb-r1-panel-review-vbt-1.2.0-roadmap` is creatable — and used to be
+  // unreadable through this route while inspect/status/events all worked.
+  test("dotted runId the create path allows is accepted", async () => {
+    const response = await invokeRoute({
+      runId: "orchb-r1-panel-review-vbt-1.2.0-roadmap",
+      selectOutputRowImpl: async () => ({ value: "done" }),
+    });
+    expect(response.status).toBe("produced");
+  });
+
+  test("runId that could escape a path join still yields InvalidRunId", async () => {
+    for (const runId of ["..", ".hidden", "../etc/passwd", "a".repeat(65)]) {
+      await expect(invokeRoute({ runId })).rejects.toMatchObject({
+        code: "InvalidRunId",
+      });
+    }
+  });
+
   test("invalid nodeId yields InvalidNodeId", async () => {
     await expect(invokeRoute({ nodeId: "bad$node" })).rejects.toMatchObject({
       code: "InvalidNodeId",
