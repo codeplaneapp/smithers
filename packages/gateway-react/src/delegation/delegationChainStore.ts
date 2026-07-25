@@ -18,8 +18,12 @@
  *   `listRunEvents` backfill plus live-frame accumulation), so loop
  *   iterations the tree already replaced survive reloads and late joins.
  * - `getNodeOutput` fetches each (nodeId, iteration) exactly once; a missing
- *   or errored output is re-fetched only when a finish event for that node
- *   arrives (event-driven invalidation), never on every frame.
+ *   output is re-fetched only when a finish event for that node arrives
+ *   (event-driven invalidation), never on every frame. An UNEXPECTED
+ *   transport/RPC failure is instead retried on later reconciles with
+ *   exponential backoff, bounded by `MAX_OUTPUT_FETCH_ATTEMPTS`, because the
+ *   node may already have finished — waiting for another finish event would
+ *   strand the row forever.
  * - The pure `foldDelegation` reducer turns the assembled records into the
  *   graph; malformed/unknown rows surface as errors instead of throwing.
  */
@@ -49,6 +53,19 @@ const EXPECTED_OUTPUT_ERRORS = new Set(["NodeHasNoOutput", "NodeNotFound", "Iter
 
 /** Page size for the one-shot run-event history backfill. */
 export const EVENT_HISTORY_PAGE_SIZE = 500;
+
+/**
+ * Total `getNodeOutput` attempts per target while it keeps failing
+ * UNEXPECTEDLY (dropped socket, 5xx, an RPC code outside
+ * `EXPECTED_OUTPUT_ERRORS`): the first attempt plus bounded backoff retries.
+ * Such a failure says nothing about the durable row, so it must not be gated
+ * behind the next finish event — the node may already be done. A new finish
+ * tick refreshes the budget.
+ */
+export const MAX_OUTPUT_FETCH_ATTEMPTS = 3;
+
+/** First retry delay; doubles per prior failed attempt (150ms, then 300ms). */
+export const OUTPUT_FETCH_RETRY_BASE_MS = 150;
 
 /**
  * The two gateway RPCs the pipeline needs, stated structurally so the real
@@ -97,7 +114,20 @@ export type DelegationChainStore = {
 type OutputCacheEntry =
   | { state: "produced"; record: DelegationOutputRecord }
   | { state: "missing"; finishCount: number }
-  | { state: "error"; finishCount: number; error: Error };
+  /** `attempts` counts consecutive unexpected failures (retry budget spent). */
+  | { state: "error"; finishCount: number; attempts: number; error: Error };
+
+/** A (nodeId, iteration) pair scheduled for a `getNodeOutput` call. */
+type DueFetch = DelegationFetchTarget & {
+  key: string;
+  /** Unexpected failures already suffered for this key; 0 for a fresh fetch. */
+  attempts: number;
+};
+
+/** Backoff before a retry attempt; 0 for the first (non-retry) attempt. */
+function retryDelayMs(attempts: number): number {
+  return attempts === 0 ? 0 : OUTPUT_FETCH_RETRY_BASE_MS * 2 ** (attempts - 1);
+}
 
 type StoreMessage = Data.TaggedEnum<{
   /** React pushed a new input batch. */
@@ -254,20 +284,19 @@ export function createDelegationChainStore(options: {
         });
 
       /** One parallel `getNodeOutput` batch; settles back through the queue. */
-      const fetchOutputs = (
-        due: ReadonlyArray<{ key: string } & DelegationFetchTarget>,
-        finishCounts: ReadonlyMap<string, number>,
-      ) =>
+      const fetchOutputs = (due: ReadonlyArray<DueFetch>, finishCounts: ReadonlyMap<string, number>) =>
         Effect.gen(function* () {
           if (runId === undefined) return;
           const results = yield* Effect.forEach(
             due,
-            ({ key, nodeId, iteration }) => {
+            ({ key, nodeId, iteration, attempts }) => {
               const finishCount = finishCounts.get(nodeId) ?? 0;
-              return Effect.tryPromise({
+              const delay = retryDelayMs(attempts);
+              const request = Effect.tryPromise({
                 try: () => api.getNodeOutput({ runId, nodeId, iteration }),
                 catch: (cause) => cause,
-              }).pipe(
+              });
+              return (delay > 0 ? request.pipe(Effect.delay(delay)) : request).pipe(
                 Effect.map((response): OutputCacheEntry => {
                   const row = isRecord(response) && isRecord(response.row) ? response.row : undefined;
                   const produced = isRecord(response) && response.status === "produced" && row !== undefined;
@@ -284,7 +313,7 @@ export function createDelegationChainStore(options: {
                     return Effect.succeed({ state: "missing", finishCount });
                   }
                   const error = cause instanceof Error ? cause : new Error(String(cause));
-                  return Effect.succeed({ state: "error", finishCount, error });
+                  return Effect.succeed({ state: "error", finishCount, attempts: attempts + 1, error });
                 }),
                 Effect.map((entry) => ({ key, entry })),
               );
@@ -318,15 +347,23 @@ export function createDelegationChainStore(options: {
           const finishCounts = countFinishes(inputsNow.events);
           const cacheNow = yield* Ref.get(cache);
           const inFlightNow = yield* Ref.get(inFlight);
-          const due: Array<{ key: string } & DelegationFetchTarget> = [];
+          const due: DueFetch[] = [];
           for (const [key, target] of targets) {
             const entry = cacheNow.get(key);
             if (entry?.state === "produced") continue;
             const finishCount = finishCounts.get(target.nodeId) ?? 0;
-            if (entry && entry.finishCount >= finishCount && entry.state !== "error") continue;
-            if (entry?.state === "error" && entry.finishCount >= finishCount) continue;
+            // A new finish tick invalidates the entry and resets its retry
+            // budget. Without one, only an errored entry is still due: an
+            // unexpected failure is finish-independent (the node may already be
+            // done), so it is retried with backoff until the budget runs out.
+            // A `missing` entry stays purely event-driven.
+            let attempts = 0;
+            if (entry !== undefined && entry.finishCount >= finishCount) {
+              if (entry.state !== "error" || entry.attempts >= MAX_OUTPUT_FETCH_ATTEMPTS) continue;
+              attempts = entry.attempts;
+            }
             if (inFlightNow.has(key)) continue;
-            due.push({ key, ...target });
+            due.push({ key, ...target, attempts });
           }
           if (due.length > 0) {
             yield* Ref.update(inFlight, (previous) => {
