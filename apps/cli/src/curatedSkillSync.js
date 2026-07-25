@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +10,11 @@ import {
   resolveSkillSource,
   skillTargets,
 } from "./installCuratedSkill.js";
-import { ensureCuratedSkillsFresh, isRetiredCuratedSkill } from "./refreshCuratedSkills.js";
+import {
+  ensureCuratedSkillsFresh,
+  hashCuratedSkillFiles,
+  isRetiredCuratedSkill,
+} from "./refreshCuratedSkills.js";
 
 /**
  * `skills add` owns EVERY Smithers-managed skill.
@@ -28,11 +31,6 @@ import { ensureCuratedSkillsFresh, isRetiredCuratedSkill } from "./refreshCurate
  * `update` use. It has no TTY gate: non-interactive sessions get identical
  * behavior.
  */
-
-/** @param {string} file */
-function sha256File(file) {
-  return createHash("sha256").update(readFileSync(file)).digest("hex");
-}
 
 /**
  * @typedef {{
@@ -92,7 +90,7 @@ export function curatedSkillStatus(opts = {}) {
   };
   if (!source) return status;
 
-  const sourceHash = sha256File(source.skillMd);
+  const sourceHash = hashCuratedSkillFiles(source);
   const marker = readMarker(join(homeDir, ".smithers", "skill-refresh.json"));
   const markerVersion = typeof marker.appliedVersion === "string" ? marker.appliedVersion : null;
   const detections = opts.detections ?? detectAvailableAgents(env);
@@ -116,7 +114,10 @@ export function curatedSkillStatus(opts = {}) {
     let retired = false;
     try {
       retired = isRetiredCuratedSkill(readFileSync(skillMd, "utf8"));
-      installedHash = sha256File(skillMd);
+      installedHash = hashCuratedSkillFiles({
+        skillMd,
+        llmsFull: join(dest, "llms-full.txt"),
+      });
     } catch {
       /* unreadable copy counts as stale below */
     }
@@ -127,7 +128,7 @@ export function curatedSkillStatus(opts = {}) {
       agent: target.displayName,
       path: dest,
       state,
-      // A byte-identical copy IS the bundled release; otherwise only the
+      // A byte-identical pair IS the bundled release; otherwise only the
       // refresh marker can name the release that wrote it.
       version: fresh ? version : installedHash && installedHash === marker.appliedHash ? markerVersion : null,
     });

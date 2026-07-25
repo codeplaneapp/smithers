@@ -94,6 +94,18 @@ test("curatedSkillStatus flags a stale copy against the installed package", () =
   expect(status.stale).toBe(true);
 });
 
+test("curatedSkillStatus flags a stale llms-full bundle when SKILL.md is current", () => {
+  const f = fixture();
+  mkdirSync(f.claudeSkill, { recursive: true });
+  writeFileSync(join(f.claudeSkill, "SKILL.md"), CURRENT_SKILL);
+  writeFileSync(join(f.claudeSkill, "llms-full.txt"), "old bundle\n");
+
+  const status = curatedSkillStatus(f.opts);
+
+  expect(status.installs.find((i) => i.id === "claude")?.state).toBe("stale");
+  expect(status.stale).toBe(true);
+});
+
 test("curatedSkillStatus reports a detected agent that has no curated skill yet", () => {
   const f = fixture();
   const status = curatedSkillStatus(f.opts);
