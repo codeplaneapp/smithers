@@ -13,6 +13,7 @@ import { SPEC_SOURCE_URL } from "../specSourceUrl.js";
 /** @typedef {import("../OpenApiTool.ts").OpenApiTool} OpenApiTool */
 /** @typedef {import("../OpenApiToolsOptions.ts").OpenApiToolsOptions} OpenApiToolsOptions */
 /** @typedef {import("../ParsedOperation.ts").ParsedOperation} ParsedOperation */
+/** @typedef {NonNullable<OpenApiSpec["servers"]>[number]} ServerObject */
 
 // Last-resort base URL, used only when the spec declares no servers[] and the
 // caller passed no `baseUrl` option — requests then fail loudly against
@@ -680,16 +681,40 @@ function isAbsoluteUrl(url) {
     }
 }
 /**
- * Resolve a spec `servers[].url` to an absolute URL. Absolute URLs pass through
- * unchanged. A relative URL (e.g. the Swagger Petstore's "/api/v3") is resolved
- * against the URL the spec was loaded from; if that base is unknown, throw a
- * clear error naming the relative URL so the caller can pass `baseUrl`.
+ * Substitute OpenAPI server variables ("https://{region}.api.example.com") with
+ * the defaults declared in `servers[].variables`. A `{name}` with no declared
+ * default is left in place for `resolveServerUrl` to reject — a templated host
+ * would otherwise be used verbatim and fail with an opaque DNS error per call.
  *
- * @param {string} serverUrl
+ * @param {ServerObject} server
+ * @returns {string}
+ */
+function substituteServerVariables(server) {
+    const variables = server.variables;
+    if (!variables)
+        return server.url;
+    return server.url.replace(/\{([^{}]*)\}/g, (placeholder, name) => {
+        const value = variables[name]?.default;
+        return typeof value === "string" ? value : placeholder;
+    });
+}
+/**
+ * Resolve a spec `servers[]` entry to an absolute URL. Server variables are
+ * substituted with their declared defaults first. Absolute URLs then pass
+ * through unchanged. A relative URL (e.g. the Swagger Petstore's "/api/v3") is
+ * resolved against the URL the spec was loaded from; if that base is unknown,
+ * throw a clear error naming the relative URL so the caller can pass `baseUrl`.
+ *
+ * @param {ServerObject} server
  * @param {OpenApiSpec} spec
  * @returns {string}
  */
-function resolveServerUrl(serverUrl, spec) {
+function resolveServerUrl(server, spec) {
+    const serverUrl = substituteServerVariables(server);
+    const unresolved = serverUrl.match(/\{[^{}]*\}/);
+    if (unresolved)
+        throw new Error(`OpenAPI spec server URL "${server.url}" leaves variable "${unresolved[0]}" unresolved because it declares no default under \`servers[].variables\`. `
+            + `Pass an absolute base URL via the \`baseUrl\` option (e.g. { baseUrl: "https://us.api.example.com" }).`);
     if (isAbsoluteUrl(serverUrl))
         return serverUrl;
     const sourceUrl = /** @type {Record<PropertyKey, unknown>} */ (spec)[SPEC_SOURCE_URL];
@@ -708,7 +733,7 @@ export function resolveBaseUrl(spec, options) {
     if (options.baseUrl)
         return options.baseUrl;
     if (spec.servers && spec.servers.length > 0)
-        return resolveServerUrl(spec.servers[0].url, spec);
+        return resolveServerUrl(spec.servers[0], spec);
     return FALLBACK_BASE_URL;
 }
 /**
