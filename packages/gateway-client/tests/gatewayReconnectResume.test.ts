@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ServerWebSocket } from "bun";
-import { GatewayRpcError, SmithersGatewayClient } from "../src/index.ts";
+import { GatewayRpcError, SmithersGatewayClient, type GatewayStreamReconnectEvent } from "../src/index.ts";
 
 /**
  * Real in-process gateway WebSocket server. It speaks the genuine Smithers
@@ -116,6 +116,27 @@ function sendGapResync(ws: ServerWebSocket<unknown>, streamId: string, seq: numb
     seq,
     stateVersion: seq,
     payload: { streamId, runId: "run-1", seq },
+  }));
+}
+
+/**
+ * The frame the real gateway sends from `disconnectRunEventStreamForBackpressure`
+ * (and from a failed replay): the subscription is torn down server-side while
+ * the socket is deliberately left OPEN, so nothing else ever arrives on it.
+ */
+function sendRunError(
+  ws: ServerWebSocket<unknown>,
+  streamId: string,
+  seq: number,
+  code: string,
+  message: string,
+) {
+  ws.send(JSON.stringify({
+    type: "event",
+    event: "run.error",
+    seq,
+    stateVersion: seq,
+    payload: { streamId, runId: "run-1", error: { version: 1, code, message } },
   }));
 }
 
@@ -241,6 +262,76 @@ describe("streamRunEventsResilient reconnect-resume (real WS server)", () => {
         reason: "stream_closed",
       },
     ]);
+  });
+
+  test("reconnects and resumes after a server BackpressureDisconnect run.error frame", async () => {
+    // The gateway disconnects a slow consumer by sending ONE
+    // `run.error{code:"BackpressureDisconnect"}`, unregistering the subscriber,
+    // and deliberately leaving the socket OPEN so its other streams survive.
+    // Nothing further ever arrives on this subscription and the socket never
+    // closes, so a client that yields that frame as ordinary data then awaits
+    // the next one blocks forever on a leaked socket (regression guard: the
+    // watchdog abort below is the only thing that would end that hang, leaving
+    // `seen` short and `connectionCount` at 1). The fix surfaces the frame as a
+    // throw, so the resilient loop reconnects with afterSeq=2 and resumes.
+    running = startRealGatewayServer({
+      onSubscribed: (ws, { afterSeq, connectionIndex }) => {
+        const streamId = `stream-${connectionIndex}`;
+        if (connectionIndex === 0) {
+          sendRunEvent(ws, streamId, 1, "task.started");
+          sendRunEvent(ws, streamId, 2, "task.progress");
+          setTimeout(() => {
+            sendRunError(
+              ws,
+              streamId,
+              3,
+              "BackpressureDisconnect",
+              "Run event stream outbound queue exceeded 512 frames; disconnecting slow consumer.",
+            );
+          }, 5);
+        } else {
+          expect(afterSeq).toBe(2);
+          sendRunEvent(ws, streamId, 3, "task.progress");
+          sendRunEvent(ws, streamId, 4, "task.completed");
+        }
+      },
+    });
+
+    const client = new SmithersGatewayClient({ baseUrl: running.baseUrl });
+    const controller = new AbortController();
+    const seen: number[] = [];
+    const reconnects: GatewayStreamReconnectEvent[] = [];
+    // Bound the test: a hung generator is woken by the abort and fails on the
+    // assertions below rather than stalling until the suite timeout.
+    const watchdog = setTimeout(() => controller.abort(), 3_000);
+
+    await (async () => {
+      for await (const frame of client.streamRunEventsResilient(
+        { runId: "run-1" },
+        {
+          signal: controller.signal,
+          backoff: { baseMs: 1, maxMs: 5, random: () => 0.5 },
+          onReconnect: (event) => reconnects.push(event),
+        },
+      )) {
+        seen.push((frame.payload as { seq: number }).seq);
+        if ((frame.payload as { seq: number }).seq === 4) {
+          controller.abort();
+        }
+      }
+    })();
+    clearTimeout(watchdog);
+
+    expect(seen).toEqual([1, 2, 3, 4]);
+    expect(running.connectionCount).toBe(2);
+    expect(running.afterSeqLog).toEqual([-1, 2]);
+    expect(reconnects).toHaveLength(1);
+    expect(reconnects[0]).toMatchObject({ runId: "run-1", afterSeq: 2, reason: "transport_error" });
+    // The reconnect carries the server's own error code, so callers can tell a
+    // backpressure eviction apart from a corrupt-frame drop.
+    const reconnectError = reconnects[0]?.error;
+    expect(reconnectError).toBeInstanceOf(GatewayRpcError);
+    expect((reconnectError as GatewayRpcError).code).toBe("BackpressureDisconnect");
   });
 
   test("stops cleanly when the run reaches a terminal run.completed frame (no reconnect)", async () => {
@@ -479,6 +570,43 @@ describe("streamRunEvents subscribe-streamId validation (real WS server)", () =>
     const error = await iterator.next().catch((e) => e);
     expect(error).toBeInstanceOf(GatewayRpcError);
     expect(error.code).toBe("INVALID_GATEWAY_RESPONSE");
+  });
+});
+
+describe("streamRunEvents run.error frames (real WS server)", () => {
+  test("throws the gateway's stream error instead of yielding it as data", async () => {
+    running = startRealGatewayServer({
+      onSubscribed: (ws, { connectionIndex }) => {
+        sendRunError(ws, `stream-${connectionIndex}`, 1, "BackpressureDisconnect", "slow consumer");
+      },
+    });
+
+    const client = new SmithersGatewayClient({ baseUrl: running.baseUrl });
+    const iterator = client.streamRunEvents({ runId: "run-1" });
+
+    const error = await iterator.next().catch((e) => e);
+    expect(error).toBeInstanceOf(GatewayRpcError);
+    expect(error.code).toBe("BackpressureDisconnect");
+    expect(error.message).toBe("slow consumer");
+    // Iteration ended, so the socket the gateway deliberately left open is closed.
+    expect(await iterator.next()).toEqual({ done: true, value: undefined });
+  });
+
+  test("ignores a run.error frame addressed to another stream on the same socket", async () => {
+    running = startRealGatewayServer({
+      onSubscribed: (ws, { connectionIndex }) => {
+        const streamId = `stream-${connectionIndex}`;
+        sendRunError(ws, "stream-other", 1, "BackpressureDisconnect", "not ours");
+        sendRunEvent(ws, streamId, 2, "task.completed");
+      },
+    });
+
+    const client = new SmithersGatewayClient({ baseUrl: running.baseUrl });
+    const iterator = client.streamRunEvents({ runId: "run-1" });
+
+    const first = await iterator.next();
+    expect((first.value as { payload: { seq: number } }).payload.seq).toBe(2);
+    await iterator.return(undefined);
   });
 });
 

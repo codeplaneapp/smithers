@@ -132,8 +132,10 @@ for await (const frame of client.streamRunEvents(
 
 <ResponseField name="streamRunEvents(params, { signal? })" type="AsyncGenerator<GatewayEventFrame>">
   Subscribes to one run and yields its `run.*` frames (`run.event`,
-  `run.gap_resync`, `run.heartbeat`, `run.error`). Pass `afterSeq` to resume.
-  Closes the socket when iteration ends.
+  `run.gap_resync`, `run.heartbeat`). Pass `afterSeq` to resume. A `run.error`
+  frame (the gateway dropping the subscription, e.g. a backpressure disconnect)
+  throws a `GatewayRpcError` carrying the gateway's code. Closes the socket when
+  iteration ends.
 </ResponseField>
 <ResponseField name="streamRunEventsResilient(params, options?)" type="AsyncGenerator<GatewayEventFrame>">
   Same frames, but reconnects with backoff + jitter on a silent drop and resumes

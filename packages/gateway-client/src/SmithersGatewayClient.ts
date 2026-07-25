@@ -129,6 +129,23 @@ function invalidGatewayResponse(method: string, status: number | undefined, deta
   });
 }
 
+/**
+ * A `run.error` frame means the gateway unregistered this subscription
+ * (backpressure disconnect of a slow consumer, replay failure) while
+ * deliberately leaving the socket open, so no further frame will ever arrive.
+ * It is a stream fault, not stream data — surfaced as a throw.
+ */
+function runEventStreamError(payload: unknown) {
+  const error = isObject(payload) && isObject(payload.error) ? payload.error : undefined;
+  return new GatewayRpcError({
+    method: "streamRunEvents",
+    code: typeof error?.code === "string" ? error.code : "RUN_EVENT_STREAM_ERROR",
+    message: typeof error?.message === "string"
+      ? error.message
+      : "Gateway ended the run event stream.",
+  });
+}
+
 function sleepWithSignal(ms: number, signal: AbortSignal | undefined): Promise<void> {
   return new Promise<void>((resolve) => {
     if (signal?.aborted) {
@@ -344,6 +361,15 @@ export class SmithersGatewayClient {
     }
   }
 
+  /**
+   * Subscribes to one run over a dedicated socket and yields its `run.*`
+   * frames. A `run.error` frame throws instead of yielding (mirroring
+   * `streamExtension`): the gateway drops the subscription on that frame but
+   * keeps the socket open, so yielding it would leave the caller awaiting a
+   * next frame that never comes on a socket that never closes. Throwing ends
+   * the iterator, closes the dead socket, and lets
+   * `streamRunEventsResilient` reconnect + resume.
+   */
   async *streamRunEvents(
     params: GatewayRpcParams<"streamRunEvents">,
     options: { signal?: AbortSignal } = {},
@@ -354,6 +380,9 @@ export class SmithersGatewayClient {
       ["run.event", "run.gap_resync", "run.heartbeat", "run.error"],
       options,
     )) {
+      if (frame.event === "run.error") {
+        throw runEventStreamError(frame.payload);
+      }
       yield frame as GatewayEventFrame<StreamRunEventPayload>;
     }
   }
