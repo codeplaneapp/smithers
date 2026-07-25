@@ -268,6 +268,12 @@ type SmithersDevToolsOptions$2 = {
      * eviction.
      */
     maxTasksPerRun?: number;
+    /**
+     * Max tool calls retained per task before FIFO-evicting the oldest. Status
+     * updates still land on any retained call. Default 1000. Pass Infinity to
+     * disable eviction.
+     */
+    maxToolCallsPerTask?: number;
 };
 
 /** Execution state for a run, aggregated from SmithersEvent stream */
@@ -285,7 +291,7 @@ type RunExecutionState$3 = {
     finishedAt?: number;
 };
 
-type DevToolsRunStoreOptions$2 = Pick<SmithersDevToolsOptions$2, "onEngineEvent" | "verbose" | "maxRunsRetained" | "maxEventsPerRun" | "maxTasksPerRun">;
+type DevToolsRunStoreOptions$2 = Pick<SmithersDevToolsOptions$2, "onEngineEvent" | "verbose" | "maxRunsRetained" | "maxEventsPerRun" | "maxTasksPerRun" | "maxToolCallsPerTask">;
 
 type DevToolsEventBus$3 = {
     on: (event: "event", handler: (e: DevToolsEngineEvent$2) => void) => void;

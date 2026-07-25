@@ -13,6 +13,8 @@ const DEFAULT_MAX_RUNS_RETAINED = 500;
 const DEFAULT_MAX_EVENTS_PER_RUN = 10000;
 /** Default cap on retained task states per run before the oldest are FIFO-evicted. */
 const DEFAULT_MAX_TASKS_PER_RUN = 5000;
+/** Default cap on retained tool calls per task before the oldest are FIFO-evicted. */
+const DEFAULT_MAX_TOOL_CALLS_PER_TASK = 1000;
 
 /**
  * Normalize a retention cap. A finite value >= 1 is used as-is; Infinity
@@ -90,6 +92,8 @@ export class DevToolsRunStore {
     _maxEventsPerRun;
     /** @type {number} */
     _maxTasksPerRun;
+    /** @type {number} */
+    _maxToolCallsPerTask;
     /**
      * @param {DevToolsRunStoreOptions} [options]
      */
@@ -98,6 +102,7 @@ export class DevToolsRunStore {
         this._maxRunsRetained = resolveCap(options.maxRunsRetained, DEFAULT_MAX_RUNS_RETAINED);
         this._maxEventsPerRun = resolveCap(options.maxEventsPerRun, DEFAULT_MAX_EVENTS_PER_RUN);
         this._maxTasksPerRun = resolveCap(options.maxTasksPerRun, DEFAULT_MAX_TASKS_PER_RUN);
+        this._maxToolCallsPerTask = resolveCap(options.maxToolCallsPerTask, DEFAULT_MAX_TOOL_CALLS_PER_TASK);
     }
     /**
      * Attach to a Smithers EventBus-like source.
@@ -310,6 +315,12 @@ export class DevToolsRunStore {
                 const existing = task.toolCalls.find((t) => t.name === event.toolName && t.seq === event.seq);
                 if (!existing) {
                     task.toolCalls.push({ name: event.toolName, seq: event.seq });
+                    // FIFO-evict the oldest tool calls so a long-lived agent task
+                    // emitting thousands of calls can't grow the store forever the
+                    // way the capped runs/events/tasks already can't.
+                    if (task.toolCalls.length > this._maxToolCallsPerTask) {
+                        task.toolCalls.splice(0, task.toolCalls.length - this._maxToolCallsPerTask);
+                    }
                 }
                 break;
             }

@@ -744,6 +744,90 @@ describe("DevToolsRunStore retention/eviction", () => {
     expect(defaulted.getRun("r1")?.tasks.size).toBe(60);
   });
 
+  test("caps tool calls per task with FIFO eviction, keeping the newest calls", () => {
+    const store = new DevToolsRunStore({ maxToolCallsPerTask: 3 });
+    const base = { runId: "r1", nodeId: "n1", iteration: 0 };
+    for (let seq = 0; seq < 10; seq++) {
+      store.processEngineEvent({
+        ...base,
+        type: "ToolCallStarted",
+        timestampMs: seq,
+        toolName: "search",
+        seq,
+      });
+    }
+    const toolCalls = store.getTaskState("r1", "n1")?.toolCalls ?? [];
+    expect(toolCalls).toHaveLength(3);
+    expect(toolCalls.map((t) => t.seq)).toEqual([7, 8, 9]);
+  });
+
+  test("status updates still land on retained calls after tool-call eviction", () => {
+    const store = new DevToolsRunStore({ maxToolCallsPerTask: 2 });
+    const base = { runId: "r1", nodeId: "n1", iteration: 0 };
+    for (let seq = 0; seq < 4; seq++) {
+      store.processEngineEvent({
+        ...base,
+        type: "ToolCallStarted",
+        timestampMs: seq,
+        toolName: "search",
+        seq,
+      });
+    }
+    // A Finished for an evicted call is a no-op; a retained one still records.
+    store.processEngineEvent({
+      ...base,
+      type: "ToolCallFinished",
+      timestampMs: 5,
+      toolName: "search",
+      seq: 0,
+      status: "success",
+    });
+    store.processEngineEvent({
+      ...base,
+      type: "ToolCallFinished",
+      timestampMs: 6,
+      toolName: "search",
+      seq: 3,
+      status: "error",
+    });
+    const toolCalls = store.getTaskState("r1", "n1")?.toolCalls ?? [];
+    expect(toolCalls.map((t) => t.seq)).toEqual([2, 3]);
+    expect(toolCalls[1]?.status).toBe("error");
+    // The dedup upsert must not resurrect an evicted call's slot ordering.
+    store.processEngineEvent({
+      ...base,
+      type: "ToolCallStarted",
+      timestampMs: 7,
+      toolName: "search",
+      seq: 3,
+    });
+    expect(store.getTaskState("r1", "n1")?.toolCalls).toHaveLength(2);
+    expect(store.getTaskState("r1", "n1")?.toolCalls[1]?.status).toBe("error");
+  });
+
+  test("Infinity disables tool-call eviction; invalid tool-call cap falls back to the default", () => {
+    const unbounded = new DevToolsRunStore({
+      maxToolCallsPerTask: Number.POSITIVE_INFINITY,
+    });
+    const defaulted = new DevToolsRunStore({ maxToolCallsPerTask: 0 });
+    for (const store of [unbounded, defaulted]) {
+      for (let seq = 0; seq < 60; seq++) {
+        store.processEngineEvent({
+          runId: "r1",
+          nodeId: "n1",
+          iteration: 0,
+          type: "ToolCallStarted",
+          timestampMs: seq,
+          toolName: "search",
+          seq,
+        });
+      }
+    }
+    expect(unbounded.getTaskState("r1", "n1")?.toolCalls).toHaveLength(60);
+    // A non-positive cap is nonsensical, so it falls back to the default (1000).
+    expect(defaulted.getTaskState("r1", "n1")?.toolCalls).toHaveLength(60);
+  });
+
   test("Infinity disables eviction; invalid cap falls back to the default", () => {
     const unbounded = new DevToolsRunStore({
       maxEventsPerRun: Number.POSITIVE_INFINITY,

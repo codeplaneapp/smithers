@@ -25,4 +25,10 @@ export type SmithersDevToolsOptions = {
    * eviction.
    */
   maxTasksPerRun?: number;
+  /**
+   * Max tool calls retained per task before FIFO-evicting the oldest. Status
+   * updates still land on any retained call. Default 1000. Pass Infinity to
+   * disable eviction.
+   */
+  maxToolCallsPerTask?: number;
 };

@@ -7,4 +7,5 @@ export type DevToolsRunStoreOptions = Pick<
   | "maxRunsRetained"
   | "maxEventsPerRun"
   | "maxTasksPerRun"
+  | "maxToolCallsPerTask"
 >;
