@@ -274,8 +274,13 @@ export class SmithersDevTools {
              * @returns {void}
              */
             onCommitFiberUnmount(_rendererID, fiber) {
+                // The global hook is shared with every other renderer on the page,
+                // so this fires for composite fibers, plain host fibers (`div`),
+                // and fibers we don't own. Only Smithers host fibers are ours.
                 const nodeType = resolveNodeType(fiber);
-                if (nodeType && verbose) {
+                if (!nodeType)
+                    return;
+                if (verbose) {
                     const name = getDisplayName(fiber) ?? fiber.type;
                     console.log(`🗑️  [smithers-devtools] Unmounted: ${nodeType} (${name})`);
                 }
