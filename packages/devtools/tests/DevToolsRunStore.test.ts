@@ -681,6 +681,69 @@ describe("DevToolsRunStore retention/eviction", () => {
     expect(store.getRun("r2")).toBeUndefined();
   });
 
+  test("task states grow one per (nodeId, iteration) under the default cap", () => {
+    const store = new DevToolsRunStore();
+    for (let iteration = 0; iteration < 40; iteration++) {
+      store.processEngineEvent({
+        type: "NodeStarted",
+        runId: "r1",
+        nodeId: "loop-body",
+        iteration,
+        attempt: 1,
+        timestampMs: iteration,
+      });
+    }
+    // One entry per iteration of the same node — the growth vector a looping
+    // run exercises.
+    expect(store.getRun("r1")?.tasks.size).toBe(40);
+  });
+
+  test("caps task states per run with FIFO eviction, keeping the newest iterations", () => {
+    const store = new DevToolsRunStore({ maxTasksPerRun: 3 });
+    for (let iteration = 0; iteration < 10; iteration++) {
+      store.processEngineEvent({
+        type: "NodeStarted",
+        runId: "r1",
+        nodeId: "loop-body",
+        iteration,
+        attempt: 1,
+        timestampMs: iteration,
+      });
+    }
+    const tasks = store.getRun("r1")?.tasks;
+    expect(tasks?.size).toBe(3);
+    expect([...(tasks?.keys() ?? [])]).toEqual([
+      "loop-body::7",
+      "loop-body::8",
+      "loop-body::9",
+    ]);
+    // The surviving newest iteration keeps its state; the evicted ones are gone.
+    expect(store.getTaskState("r1", "loop-body", 9)?.status).toBe("started");
+    expect(store.getTaskState("r1", "loop-body", 0)).toBeUndefined();
+  });
+
+  test("Infinity disables task eviction; invalid task cap falls back to the default", () => {
+    const unbounded = new DevToolsRunStore({
+      maxTasksPerRun: Number.POSITIVE_INFINITY,
+    });
+    const defaulted = new DevToolsRunStore({ maxTasksPerRun: -1 });
+    for (const store of [unbounded, defaulted]) {
+      for (let iteration = 0; iteration < 60; iteration++) {
+        store.processEngineEvent({
+          type: "NodeStarted",
+          runId: "r1",
+          nodeId: "loop-body",
+          iteration,
+          attempt: 1,
+          timestampMs: iteration,
+        });
+      }
+    }
+    expect(unbounded.getRun("r1")?.tasks.size).toBe(60);
+    // A negative cap is nonsensical, so it falls back to the default (5000).
+    expect(defaulted.getRun("r1")?.tasks.size).toBe(60);
+  });
+
   test("Infinity disables eviction; invalid cap falls back to the default", () => {
     const unbounded = new DevToolsRunStore({
       maxEventsPerRun: Number.POSITIVE_INFINITY,

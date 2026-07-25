@@ -7,7 +7,7 @@ Dependency-free inspection utilities for Smithers runs, in three clusters:
    by the `SmithersDevToolsCore` facade.
 2. **Engine-event reduction** — `DevToolsRunStore` folds `DevToolsEngineEvent`
    streams into `RunExecutionState` / `TaskExecutionState`, with FIFO retention
-   caps for runs and per-run events.
+   caps for runs, per-run events, and per-run task states.
 3. **Snapshot wire format** — `snapshotSerialize` produces JSON-safe props;
    `diffSnapshots` / `applyDelta` / `InvalidDeltaError` operate on the seq'd
    `DevToolsSnapshotV1`.

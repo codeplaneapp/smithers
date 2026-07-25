@@ -11,6 +11,8 @@ const TERMINAL_TASK_STATUSES = new Set(["finished", "failed", "cancelled", "skip
 const DEFAULT_MAX_RUNS_RETAINED = 500;
 /** Default cap on retained events per run before the oldest are FIFO-evicted. */
 const DEFAULT_MAX_EVENTS_PER_RUN = 10000;
+/** Default cap on retained task states per run before the oldest are FIFO-evicted. */
+const DEFAULT_MAX_TASKS_PER_RUN = 5000;
 
 /**
  * Normalize a retention cap. A finite value >= 1 is used as-is; Infinity
@@ -86,6 +88,8 @@ export class DevToolsRunStore {
     _maxRunsRetained;
     /** @type {number} */
     _maxEventsPerRun;
+    /** @type {number} */
+    _maxTasksPerRun;
     /**
      * @param {DevToolsRunStoreOptions} [options]
      */
@@ -93,6 +97,7 @@ export class DevToolsRunStore {
         this.options = options;
         this._maxRunsRetained = resolveCap(options.maxRunsRetained, DEFAULT_MAX_RUNS_RETAINED);
         this._maxEventsPerRun = resolveCap(options.maxEventsPerRun, DEFAULT_MAX_EVENTS_PER_RUN);
+        this._maxTasksPerRun = resolveCap(options.maxTasksPerRun, DEFAULT_MAX_TASKS_PER_RUN);
     }
     /**
      * Attach to a Smithers EventBus-like source.
@@ -362,6 +367,15 @@ export class DevToolsRunStore {
                 toolCalls: [],
             };
             run.tasks.set(key, task);
+            // FIFO-evict oldest task states (Map preserves insertion order) so a
+            // looping run — one entry per (nodeId, iteration) — can't grow the
+            // store forever the way the capped runs/events already can't.
+            while (run.tasks.size > this._maxTasksPerRun) {
+                const oldest = run.tasks.keys().next().value;
+                if (oldest === undefined)
+                    break;
+                run.tasks.delete(oldest);
+            }
         }
         return task;
     }
