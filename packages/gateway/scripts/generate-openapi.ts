@@ -501,11 +501,23 @@ function buildOpenApiDocument(): OpenApiDocument {
   };
 }
 
+// Plain scalars a YAML 1.1/1.2 resolver would load as something other than a string.
+// Emitting a string that matches one of these bare makes the document contradict its own `type: string`
+// (e.g. `0016` loads as the integer 14, a 64-zero content hash loads as 0), so such strings must be quoted.
+const YAML_BOOLEAN_LIKE = /^(?:y|Y|yes|Yes|YES|n|N|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF)$/;
+const YAML_NULL_LIKE = /^(?:~|null|Null|NULL)$/;
+const YAML_NUMBER_LIKE =
+  /^[-+]?(?:[0-9][0-9_]*(?::[0-5]?[0-9])+(?:\.[0-9_]*)?|0b[01_]+|0o?[0-7_]+|0x[0-9a-fA-F_]+|[0-9][0-9_]*(?:\.[0-9_]*)?(?:[eE][-+]?[0-9]+)?|\.[0-9_]+(?:[eE][-+]?[0-9]+)?|\.(?:inf|Inf|INF|nan|NaN|NAN))$/;
+
+function isYamlPlainString(value: string): boolean {
+  return !YAML_BOOLEAN_LIKE.test(value) && !YAML_NULL_LIKE.test(value) && !YAML_NUMBER_LIKE.test(value);
+}
+
 function scalarToYaml(value: unknown): string {
   if (value === null) return "null";
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   if (typeof value === "string") {
-    if (/^[A-Za-z0-9_./:-]+$/.test(value) && value !== "true" && value !== "false" && value !== "null") {
+    if (/^[A-Za-z0-9_./:-]+$/.test(value) && isYamlPlainString(value)) {
       return value;
     }
     return JSON.stringify(value);

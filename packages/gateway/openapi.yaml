@@ -5337,7 +5337,7 @@ paths:
                 ok: true
                 apiVersion: v1
                 payload:
-                  schemaVersion: 0016
+                  schemaVersion: "0016"
                   signature: sha256
         400:
           description: "The request shape is invalid."
@@ -14694,7 +14694,7 @@ paths:
                     path: feat-issues-card
                     kind: ticket
                     content: "# Issues card"
-                    contentHash: 0000000000000000000000000000000000000000000000000000000000000000
+                    contentHash: "0000000000000000000000000000000000000000000000000000000000000000"
                     status: in-progress
                     updatedAtMs: 1710000000000
         400:
@@ -15076,7 +15076,7 @@ paths:
                   path: feat-issues-card
                   kind: ticket
                   content: "# Issues card"
-                  contentHash: 0000000000000000000000000000000000000000000000000000000000000000
+                  contentHash: "0000000000000000000000000000000000000000000000000000000000000000"
                   status: todo
                   updatedAtMs: 1710000000000
         400:
@@ -15447,7 +15447,7 @@ paths:
                   path: feat-issues-card
                   kind: ticket
                   content: "# Issues card"
-                  contentHash: 0000000000000000000000000000000000000000000000000000000000000000
+                  contentHash: "0000000000000000000000000000000000000000000000000000000000000000"
                   status: in-progress
                   updatedAtMs: 1710000000000
         400:
@@ -16965,7 +16965,7 @@ paths:
                                       type: number
                                   required:
                                     - x
-                                    - y
+                                    - "y"
                                   additionalProperties: false
                                 button:
                                   type: string
@@ -17886,7 +17886,7 @@ paths:
                                   type: number
                               required:
                                 - x
-                                - y
+                                - "y"
                                 - width
                                 - height
                               additionalProperties: false
@@ -18377,7 +18377,7 @@ paths:
                           type: number
                       required:
                         - x
-                        - y
+                        - "y"
                       additionalProperties: false
                   required:
                     - sessionId
@@ -18455,7 +18455,7 @@ paths:
                             type: number
                         required:
                           - x
-                          - y
+                          - "y"
                           - width
                           - height
                         additionalProperties: false

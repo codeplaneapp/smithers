@@ -230,6 +230,36 @@ describe("scalarToYaml", () => {
     expect(scalarToYaml("hello world")).toBe('"hello world"');
     expect(scalarToYaml("line1\nline2")).toBe('"line1\\nline2"');
   });
+
+  test("strings that would re-parse as YAML numbers are quoted", () => {
+    expect(scalarToYaml("0016")).toBe('"0016"');
+    expect(scalarToYaml("0".repeat(64))).toBe(`"${"0".repeat(64)}"`);
+    expect(scalarToYaml("42")).toBe('"42"');
+    expect(scalarToYaml("-7")).toBe('"-7"');
+    expect(scalarToYaml("3.14")).toBe('"3.14"');
+    expect(scalarToYaml("1e10")).toBe('"1e10"');
+    expect(scalarToYaml("0x1f")).toBe('"0x1f"');
+    expect(scalarToYaml("1_000")).toBe('"1_000"');
+    expect(scalarToYaml("1:30")).toBe('"1:30"');
+    expect(scalarToYaml(".inf")).toBe('".inf"');
+  });
+
+  test("strings that would re-parse as YAML booleans or null are quoted", () => {
+    expect(scalarToYaml("yes")).toBe('"yes"');
+    expect(scalarToYaml("no")).toBe('"no"');
+    expect(scalarToYaml("on")).toBe('"on"');
+    expect(scalarToYaml("off")).toBe('"off"');
+    expect(scalarToYaml("Y")).toBe('"Y"');
+    expect(scalarToYaml("TRUE")).toBe('"TRUE"');
+    expect(scalarToYaml("Null")).toBe('"Null"');
+  });
+
+  test("strings that merely contain digits stay unquoted", () => {
+    expect(scalarToYaml("v1")).toBe("v1");
+    expect(scalarToYaml("1.2.3")).toBe("1.2.3");
+    expect(scalarToYaml("run_01")).toBe("run_01");
+    expect(scalarToYaml("0016-alpha")).toBe("0016-alpha");
+  });
 });
 
 describe("toYaml", () => {
