@@ -8,17 +8,23 @@ import { SmithersGatewayClient } from "../src/index.ts";
 
 class FakeWebSocket extends EventTarget {
   static instances: FakeWebSocket[] = [];
+  static afterOpen: (() => void) | undefined;
+  static onSend: (() => void) | undefined;
   closeCount = 0;
+  sendCount = 0;
 
   constructor(_url: string | URL) {
     super();
     FakeWebSocket.instances.push(this);
     queueMicrotask(() => {
       this.dispatchEvent(new Event("open"));
+      FakeWebSocket.afterOpen?.();
     });
   }
 
   send(raw: string) {
+    this.sendCount += 1;
+    FakeWebSocket.onSend?.();
     const frame = JSON.parse(raw) as { id: string; method: string };
     // The handshake wants a protocol; a stream subscribe wants a streamId, or
     // the generator rejects the response and ends before close() can matter.
@@ -84,6 +90,8 @@ describe("SmithersGatewayClient.close", () => {
 
   test("hangs up sockets it opened and refuses to open more", async () => {
     FakeWebSocket.instances = [];
+    FakeWebSocket.afterOpen = undefined;
+    FakeWebSocket.onSend = undefined;
     const client = new SmithersGatewayClient({
       baseUrl: "http://gateway.test",
       WebSocket: FakeWebSocket as unknown as typeof WebSocket,
@@ -102,6 +110,8 @@ describe("SmithersGatewayClient.close", () => {
 
   test("stops tracking a socket the caller closed itself", async () => {
     FakeWebSocket.instances = [];
+    FakeWebSocket.afterOpen = undefined;
+    FakeWebSocket.onSend = undefined;
     const client = new SmithersGatewayClient({
       baseUrl: "http://gateway.test",
       WebSocket: FakeWebSocket as unknown as typeof WebSocket,
@@ -117,6 +127,8 @@ describe("SmithersGatewayClient.close", () => {
 
   test("ends a live run-event stream", async () => {
     FakeWebSocket.instances = [];
+    FakeWebSocket.afterOpen = undefined;
+    FakeWebSocket.onSend = undefined;
     const client = new SmithersGatewayClient({
       baseUrl: "http://gateway.test",
       WebSocket: FakeWebSocket as unknown as typeof WebSocket,
@@ -143,6 +155,37 @@ describe("SmithersGatewayClient.close", () => {
     expect(ended).toBe(true);
   });
 
+  test("does not send a handshake when close races the socket open event", async () => {
+    FakeWebSocket.instances = [];
+    let client!: SmithersGatewayClient;
+    FakeWebSocket.afterOpen = () => { client.close(); };
+    client = new SmithersGatewayClient({
+      baseUrl: "http://gateway.test",
+      WebSocket: FakeWebSocket as unknown as typeof WebSocket,
+    });
+
+    await expect(client.connect()).rejects.toThrow("Gateway WebSocket open aborted.");
+    expect(FakeWebSocket.instances[0]!.sendCount).toBe(0);
+    expect(FakeWebSocket.instances[0]!.closeCount).toBe(1);
+    FakeWebSocket.afterOpen = undefined;
+  });
+
+  test("observes a handshake rejection when close re-enters from send", async () => {
+    FakeWebSocket.instances = [];
+    FakeWebSocket.afterOpen = undefined;
+    let client!: SmithersGatewayClient;
+    FakeWebSocket.onSend = () => { client.close(); };
+    client = new SmithersGatewayClient({
+      baseUrl: "http://gateway.test",
+      WebSocket: FakeWebSocket as unknown as typeof WebSocket,
+    });
+
+    await expect(client.connect()).rejects.toThrow("Gateway WebSocket open aborted.");
+    expect(FakeWebSocket.instances[0]!.sendCount).toBe(1);
+    await Promise.resolve();
+    FakeWebSocket.onSend = undefined;
+  });
+
   test("reports closed, rejects new RPCs, and is idempotent", async () => {
     const client = new SmithersGatewayClient({ baseUrl: "http://gateway.test", fetch: okFetch() });
     expect(client.closed).toBe(false);
@@ -153,6 +196,14 @@ describe("SmithersGatewayClient.close", () => {
 
     expect(client.closed).toBe(true);
     await expect(client.rpcRaw("listRuns", {})).rejects.toThrow("Gateway client is closed.");
+  });
+
+  test("rejects a new resilient stream instead of silently ending it", async () => {
+    const client = new SmithersGatewayClient({ baseUrl: "http://gateway.test" });
+    client.close();
+
+    const next = client.streamRunEventsResilient({ runId: "run-1" }).next();
+    await expect(next).rejects.toThrow("Gateway client is closed.");
   });
 
   test("closing one client leaves an independently built one alone", async () => {

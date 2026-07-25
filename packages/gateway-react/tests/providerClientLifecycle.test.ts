@@ -137,27 +137,55 @@ describe("SmithersGatewayProvider client lifecycle", () => {
     expect(streamUrls).toHaveLength(openedBeforeUnmount);
   });
 
-  test("never closes a caller-supplied client, while still closing the owned data client", async () => {
+  test("never closes caller-supplied clients on rotation or unmount, while closing owned data clients", async () => {
     const streamUrls: string[] = [];
-    const caller = new SmithersGatewayClient({ baseUrl: "http://gateway.test", fetch: streamFailingFetch(streamUrls) });
+    const firstCaller = new SmithersGatewayClient({
+      baseUrl: "http://gateway.test",
+      fetch: streamFailingFetch(streamUrls),
+    });
+    const secondCaller = new SmithersGatewayClient({
+      baseUrl: "http://gateway.test",
+      fetch: streamFailingFetch(streamUrls),
+    });
     const harness = await mountHarness();
 
-    const first = await harness.renderClient(caller);
-    expect(first.rpc).toBe(caller);
+    const first = await harness.renderClient(firstCaller);
+    expect(first.rpc).toBe(firstCaller);
+    const firstDataClosed = waiterOutcome(first.data);
 
-    // A re-render with the same caller client keeps everything in place.
-    const second = await harness.renderClient(caller);
-    expect(second.rpc).toBe(caller);
-    expect(caller.closed).toBe(false);
+    const second = await harness.renderClient(secondCaller);
+    expect(second.rpc).toBe(secondCaller);
+    expect(firstCaller.closed).toBe(false);
+    await expect(firstCaller.rpcRaw("listRuns", {})).resolves.toBeDefined();
+    expect(await firstDataClosed).toBe("closed");
 
     const dataClosed = waiterOutcome(second.data);
     await harness.unmount();
 
-    expect(caller.closed).toBe(false);
-    await expect(caller.rpcRaw("listRuns", {})).resolves.toBeDefined();
+    expect(firstCaller.closed).toBe(false);
+    expect(secondCaller.closed).toBe(false);
+    await expect(secondCaller.rpcRaw("listRuns", {})).resolves.toBeDefined();
     expect(await dataClosed).toBe("closed");
 
-    caller.close();
+    firstCaller.close();
+    secondCaller.close();
+  });
+
+  test("does not close an owned client transferred into the client prop", async () => {
+    const harness = await mountHarness();
+    const gateway = await harness.renderOptions({
+      baseUrl: "http://gateway.test",
+      fetch: streamFailingFetch([]),
+    });
+
+    const transferred = await harness.renderClient(gateway.rpc);
+    expect(transferred.rpc).toBe(gateway.rpc);
+    expect(gateway.rpc.closed).toBe(false);
+    await expect(gateway.rpc.rpcRaw("listRuns", {})).resolves.toBeDefined();
+
+    await harness.unmount();
+    expect(gateway.rpc.closed).toBe(false);
+    gateway.rpc.close();
   });
 
   test("survives StrictMode's effect double-invoke", async () => {

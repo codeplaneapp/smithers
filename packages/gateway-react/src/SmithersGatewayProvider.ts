@@ -37,12 +37,12 @@ function headersIdentity(headers: HeadersInit | undefined) {
 function useOwnedClient(client: { close: () => void }, owned: boolean) {
   const pending = useRef<{ client: unknown; cancelled: boolean } | null>(null);
   useEffect(() => {
-    if (!owned) {
-      return;
-    }
     if (pending.current?.client === client) {
       pending.current.cancelled = true;
       pending.current = null;
+    }
+    if (!owned) {
+      return;
     }
     return () => {
       // Captured per registration, so the close can only ever hit the exact

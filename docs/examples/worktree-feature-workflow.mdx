@@ -101,7 +101,7 @@ const claudeCli = new ClaudeCodeAgent({
 const claudeFallback = USE_CLI ? claudeCli : claudeApi;
 
 // This example deliberately runs its build lane on Codex Terra (the default
-// implementer is Claude Opus 5 — see /reference/sota-models); Luna is
+// implementer is Claude Opus 5; see /reference/sota-models); Luna is
 // reserved for trivial, minimal-risk edits. Sol, below, takes review.
 const codexTerra = new CodexAgent({
   model: "gpt-5.6-terra",

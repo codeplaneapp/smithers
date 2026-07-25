@@ -178,6 +178,11 @@ function raceSignal<T>(promise: Promise<T>, signal: AbortSignal | undefined, mes
     return promise;
   }
   if (signal.aborted) {
+    // The caller has already created the promise before passing it here. It
+    // may reject as a consequence of the same abort (for example when a
+    // WebSocket send synchronously closes the client), so observe that
+    // secondary rejection while reporting the stable abort error below.
+    void promise.catch(() => undefined);
     return Promise.reject(new Error(message));
   }
   return new Promise<T>((resolve, reject) => {
@@ -386,6 +391,14 @@ export class SmithersGatewayClient {
         ws.addEventListener("error", onError);
         signal.addEventListener("abort", onAbort, { once: true });
       });
+      // The open event resolves the promise and removes its abort listener
+      // before this continuation runs. A custom WebSocket can synchronously
+      // close the client during that dispatch, so re-check before tracking the
+      // socket or sending the handshake request.
+      if (signal.aborted) {
+        ws.close();
+        throw new Error("Gateway WebSocket open aborted.");
+      }
       const connection = new SmithersGatewayConnection(ws);
       // Tracked so `close()` can hang up sockets whose iterator is still
       // running. The socket's own close event deregisters it, so a long-lived
@@ -394,6 +407,14 @@ export class SmithersGatewayClient {
       ws.addEventListener("close", () => {
         this.openConnections.delete(connection);
       });
+      // Custom transports can re-enter client code from listener registration,
+      // after the raw-socket check above. Once tracked, close through the
+      // connection so pending requests and event consumers settle too.
+      if (signal.aborted) {
+        connection.close();
+        this.openConnections.delete(connection);
+        throw new Error("Gateway WebSocket open aborted.");
+      }
       try {
         await raceSignal(
           connection.requestRaw("connect", {
@@ -517,6 +538,7 @@ export class SmithersGatewayClient {
     params: GatewayRpcParams<"streamRunEvents">,
     options: StreamRunEventsResilientOptions = {},
   ): AsyncGenerator<GatewayEventFrame<StreamRunEventPayload>> {
+    this.assertOpen();
     // Linked to the client lifetime: `close()` must stop the reconnect loop,
     // not just the socket it happens to be holding.
     const link = this.link(options.signal);

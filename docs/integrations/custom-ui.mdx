@@ -217,7 +217,7 @@ Ownership is per instance: whoever constructed the client closes it. `SmithersGa
 
 ## The React hooks
 
-Wrap the tree once in a provider, then read with hooks. The provider memoizes the client on the *content* of `options` — `baseUrl`, `token`, `headers`, `fetch`, `WebSocket`, and the `client` metadata — so an inline options literal does not trigger a reconnect storm on every render, while rotating any of them does rebuild the client so the new credentials and transports reach the wire. (`fetch` and `WebSocket` are compared by reference: hoist them out of render or memoize them.)
+Wrap the tree once in a provider, then read with hooks. The provider memoizes the client on the *content* of `options` (`baseUrl`, `token`, `headers`, `fetch`, `WebSocket`, and the `client` metadata), so an inline options literal does not trigger a reconnect storm on every render, while rotating any of them does rebuild the client so the new credentials and transports reach the wire. (`fetch` and `WebSocket` are compared by reference: hoist them out of render or memoize them.)
 
 ```tsx
 import { SmithersGatewayProvider } from "smithers-orchestrator/gateway-react";
