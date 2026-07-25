@@ -84,7 +84,8 @@ export type DelegationChainApi = {
 export type DelegationChainInputs = {
   treeNodes: ReadonlyArray<{ id: string; iteration?: number | undefined }>;
   treeLoading: boolean;
-  events: ReadonlyArray<{ event: string; payload?: unknown }>;
+  /** Live event frames; `seq` is the durable run-event sequence when known. */
+  events: ReadonlyArray<{ event: string; payload?: unknown; seq?: number | undefined }>;
   approvals: ReadonlyArray<{ runId: string; nodeId: string; iteration: number }>;
 };
 
@@ -122,6 +123,8 @@ type DueFetch = DelegationFetchTarget & {
   key: string;
   /** Unexpected failures already suffered for this key; 0 for a fresh fetch. */
   attempts: number;
+  /** Accumulated finish tick this fetch answers; recorded on the settled entry. */
+  finishCount: number;
 };
 
 /** Backoff before a retry attempt; 0 for the first (non-retry) attempt. */
@@ -169,24 +172,53 @@ function mergeTargets(
 }
 
 /**
- * Completion ticks per node id, so missing outputs are only refetched when
- * something actually finished (not on every event frame). Durable history
- * rows carry the persisted engine type (`NodeFinished`); live wire frames
- * use `node.finished` — accept both spellings.
+ * Completion tick for one node id. `count` is the marker compared against the
+ * cache entry; `lastSeq` is the highest durable run-event seq already folded
+ * into it, so the same frame is never counted twice as the window slides.
  */
-function countFinishes(events: ReadonlyArray<{ event: string; payload?: unknown }>): Map<string, number> {
-  const counts = new Map<string, number>();
+type FinishMark = { readonly count: number; readonly lastSeq: number };
+
+/** Durable history rows persist `NodeFinished`; live wire frames use `node.finished`. */
+const FINISH_EVENTS = new Set(["node.finished", "NodeFinished", "node.failed", "NodeFailed"]);
+
+/**
+ * Accumulate completion ticks per node id, so missing outputs are only
+ * refetched when something actually finished (not on every event frame).
+ *
+ * Ticks MUST accumulate rather than be counted off the current window: the
+ * live event buffer is a bounded ring, so once it evicts an old finish frame a
+ * windowed count DROPS BACK, and the next finish for that node recomputes to
+ * the same number the cache entry already recorded — the refetch never fires
+ * and the newly produced output is never displayed. Frames carrying a durable
+ * `seq` are therefore folded in exactly once (per-node cursor); frames without
+ * one can only be counted per batch, so their count is merged as a maximum.
+ * Either way the marker never decreases.
+ */
+function accumulateFinishes(
+  previous: ReadonlyMap<string, FinishMark>,
+  events: DelegationChainInputs["events"],
+): ReadonlyMap<string, FinishMark> {
+  let next: Map<string, FinishMark> | null = null;
+  const seqless = new Map<string, number>();
   for (const frame of events) {
-    if (
-      frame.event !== "node.finished" && frame.event !== "NodeFinished" &&
-      frame.event !== "node.failed" && frame.event !== "NodeFailed"
-    ) continue;
+    if (!FINISH_EVENTS.has(frame.event)) continue;
     const payload = isRecord(frame.payload) ? frame.payload : {};
     const nodeId = typeof payload.nodeId === "string" ? payload.nodeId : undefined;
     if (!nodeId) continue;
-    counts.set(nodeId, (counts.get(nodeId) ?? 0) + 1);
+    if (typeof frame.seq !== "number") {
+      seqless.set(nodeId, (seqless.get(nodeId) ?? 0) + 1);
+      continue;
+    }
+    const mark = (next ?? previous).get(nodeId);
+    if (mark !== undefined && frame.seq <= mark.lastSeq) continue;
+    (next ??= new Map(previous)).set(nodeId, { count: (mark?.count ?? 0) + 1, lastSeq: frame.seq });
   }
-  return counts;
+  for (const [nodeId, count] of seqless) {
+    const mark = (next ?? previous).get(nodeId);
+    if (mark !== undefined && count <= mark.count) continue;
+    (next ??= new Map(previous)).set(nodeId, { count, lastSeq: mark?.lastSeq ?? 0 });
+  }
+  return next ?? previous;
 }
 
 type FoldMemo = {
@@ -208,6 +240,7 @@ export function createDelegationChainStore(options: {
       const inputs = yield* Ref.make<DelegationChainInputs>(INITIAL_INPUTS);
       const eventTargets = yield* Ref.make<ReadonlyMap<string, DelegationFetchTarget>>(new Map());
       const cache = yield* Ref.make<ReadonlyMap<string, OutputCacheEntry>>(new Map());
+      const finishMarks = yield* Ref.make<ReadonlyMap<string, FinishMark>>(new Map());
       const inFlight = yield* Ref.make<ReadonlySet<string>>(new Set());
       const hydrated = yield* Ref.make(false);
       const historyError = yield* Ref.make<Error | undefined>(undefined);
@@ -284,13 +317,12 @@ export function createDelegationChainStore(options: {
         });
 
       /** One parallel `getNodeOutput` batch; settles back through the queue. */
-      const fetchOutputs = (due: ReadonlyArray<DueFetch>, finishCounts: ReadonlyMap<string, number>) =>
+      const fetchOutputs = (due: ReadonlyArray<DueFetch>) =>
         Effect.gen(function* () {
           if (runId === undefined) return;
           const results = yield* Effect.forEach(
             due,
-            ({ key, nodeId, iteration, attempts }) => {
-              const finishCount = finishCounts.get(nodeId) ?? 0;
+            ({ key, nodeId, iteration, attempts, finishCount }) => {
               const delay = retryDelayMs(attempts);
               const request = Effect.tryPromise({
                 try: () => api.getNodeOutput({ runId, nodeId, iteration }),
@@ -344,14 +376,14 @@ export function createDelegationChainStore(options: {
         }
 
         if (runId !== undefined) {
-          const finishCounts = countFinishes(inputsNow.events);
+          const finishMarksNow = yield* Ref.get(finishMarks);
           const cacheNow = yield* Ref.get(cache);
           const inFlightNow = yield* Ref.get(inFlight);
           const due: DueFetch[] = [];
           for (const [key, target] of targets) {
             const entry = cacheNow.get(key);
             if (entry?.state === "produced") continue;
-            const finishCount = finishCounts.get(target.nodeId) ?? 0;
+            const finishCount = finishMarksNow.get(target.nodeId)?.count ?? 0;
             // A new finish tick invalidates the entry and resets its retry
             // budget. Without one, only an errored entry is still due: an
             // unexpected failure is finish-independent (the node may already be
@@ -363,7 +395,7 @@ export function createDelegationChainStore(options: {
               attempts = entry.attempts;
             }
             if (inFlightNow.has(key)) continue;
-            due.push({ key, ...target, attempts });
+            due.push({ key, ...target, attempts, finishCount });
           }
           if (due.length > 0) {
             yield* Ref.update(inFlight, (previous) => {
@@ -371,7 +403,7 @@ export function createDelegationChainStore(options: {
               for (const item of due) next.add(item.key);
               return next;
             });
-            yield* Effect.forkIn(fetchOutputs(due, finishCounts), scope);
+            yield* Effect.forkIn(fetchOutputs(due), scope);
           } else if (inFlightNow.size === 0 && !(yield* Ref.get(hydrated)) && !inputsNow.treeLoading) {
             // Only hydrate when nothing is outstanding: in-flight keys are
             // excluded from `due`, so an empty `due` with a forked fetch still
@@ -392,6 +424,9 @@ export function createDelegationChainStore(options: {
               // listener deliveries) add their (nodeId, iteration) pairs.
               const found = delegationTargetsFromEvents(next.events);
               if (found.size > 0) yield* Ref.update(eventTargets, (previous) => mergeTargets(previous, found));
+              // Finish ticks accumulate across batches: the window is a ring,
+              // so counting off it alone loses ticks once frames are evicted.
+              yield* Ref.update(finishMarks, (previous) => accumulateFinishes(previous, next.events));
               yield* reconcile;
             }),
           HistoryLoaded: ({ targets: found, error }) =>
