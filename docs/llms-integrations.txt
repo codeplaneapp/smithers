@@ -1403,16 +1403,18 @@ Returns combined stdout and stderr; working directory defaults to `rootDir`. Tim
 
 Controlled by `allowNetwork` in `RunOptions`, `--allow-network` on CLI, or server config. Default: blocked.
 
-When blocked, Smithers tokenizes `cmd` plus `args`. Executable basenames are
-matched for known network tools, URL tokens are blocked by prefix, and `git`
-plus a remote-operation token is blocked.
+When blocked, Smithers matches the invoked executable, arguments that are
+themselves URLs, and git's resolved subcommand. Argument *text* is never
+scanned, so local commands that merely mention a network tool or a URL still
+run: `git commit -m "fetch upstream"`, `echo "run npm install"`.
 
 | Category | Match |
 |---|---|
 | HTTP clients | executable basename `curl` or `wget` |
-| URL tokens | any token starting with `http://` or `https://` |
+| URL arguments | an argument that *is* a `http://` or `https://` URL (the whole argument, or the value in `--flag=<url>`) |
 | Package managers | executable basename `npm`, `bun`, or `pip` |
-| Git remote ops | `git` plus a `push`, `pull`, `fetch`, `clone`, or `remote` token |
+| Git remote ops | `git` whose subcommand is `push`, `pull`, `fetch`, `clone`, or `remote` |
+| Shell payloads | a command position inside `sh -c` / `bash -lc "..."` matching any row above |
 
 Local git commands (`git status`, `git diff`, `git log`) are allowed.
 
@@ -1422,9 +1424,9 @@ Local git commands (`git status`, `git diff`, `git log`) are allowed.
 network-deny profile (when available). On Linux and every other platform,
 including Smithers' CI, cloud, and production environments, `allowNetwork:false`
 cannot enforce a kernel sandbox and falls back to the
-token/basename denylist above: best-effort defense-in-depth, not a security
-boundary, trivially bypassed by a shell, an interpreter (`python -c` assembling a URL from parts,
-bash `/dev/tcp`), or a renamed binary. Unenforced isolation logs a
+executable/URL denylist above: best-effort defense-in-depth, not a security
+boundary, trivially bypassed by an interpreter (`python -c` assembling a URL from parts,
+bash `/dev/tcp`), a nested shell, or a renamed binary. Unenforced isolation logs a
 `TOOL_NETWORK_ISOLATION_UNENFORCED` observability warning. **Do not rely on
 `allowNetwork:false` to sandbox untrusted code**: run it under a real
 [`<Sandbox>`](/components/sandbox) provider with egress controls instead.

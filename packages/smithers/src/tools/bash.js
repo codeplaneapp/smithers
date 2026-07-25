@@ -136,41 +136,128 @@ function validateBashInvocation(cmd, args, opts, ctx) {
   }
 }
 
+const NETWORK_EXECUTABLES = new Set(["curl", "wget", "npm", "bun", "pip"]);
+const GIT_REMOTE_OPS = new Set(["push", "pull", "fetch", "clone", "remote"]);
+const URL_SCHEMES = ["http://", "https://"];
+// git's global options come before the subcommand, and these consume the next
+// argument, so `git -C /repo fetch` still resolves to the `fetch` subcommand.
+const GIT_VALUE_FLAGS = new Set([
+  "-C",
+  "-c",
+  "--exec-path",
+  "--git-dir",
+  "--namespace",
+  "--work-tree",
+]);
+// A shell runs its `-c` payload as a script, so the payload's command positions
+// are executables that actually run and are checked too.
+const INTERPRETER_EXECUTABLES = new Set(["sh", "bash", "zsh", "dash", "ash", "ksh"]);
+const SHELL_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
 function tokenExecutableName(token) {
   const stripped = token.split(/[/\\]/).pop() ?? token;
   return stripped;
+}
+
+// `cmd` is spawned directly and never shell-parsed, but callers occasionally
+// pass a whole command line, so resolve the executable from the trimmed string
+// and from its leading token: `bashTool("curl https://x")` is still caught here
+// instead of failing later at spawn.
+function commandExecutables(cmd) {
+  const trimmed = String(cmd).trim();
+  const [leading = trimmed] = trimmed.split(/\s+/);
+  return [...new Set([trimmed, leading].map(tokenExecutableName))];
+}
+
+// A genuine URL argument is one whose value *is* a URL: the whole argument, or
+// the value half of `--flag=<url>`. Prose that merely mentions a URL (a commit
+// message, an echoed doc line) performs no network I/O.
+function isUrlArgument(arg) {
+  const equals = arg.indexOf("=");
+  const values =
+    arg.startsWith("-") && equals > 0 ? [arg, arg.slice(equals + 1)] : [arg];
+  return values.some((value) =>
+    URL_SCHEMES.some((scheme) => value.startsWith(scheme)),
+  );
+}
+
+function gitSubcommand(args) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (GIT_VALUE_FLAGS.has(arg)) {
+      index += 1;
+      continue;
+    }
+    if (!arg.startsWith("-")) {
+      return arg;
+    }
+  }
+  return null;
+}
+
+// Command positions inside a shell `-c` payload: the start of the script and
+// whatever follows `;`, a newline, a pipe, `&&`, or a subshell. Matching only
+// those keeps `sh -c "curl https://x"` blocked while leaving quoted prose such
+// as `sh -c 'git commit -m "fetch upstream"'` alone.
+function interpreterCommands(executables, argv) {
+  if (!executables.some((name) => INTERPRETER_EXECUTABLES.has(name))) {
+    return [];
+  }
+  const commands = [];
+  for (const [index, arg] of argv.entries()) {
+    if (index === 0 || !/^-[a-z]*c$/.test(argv[index - 1])) {
+      continue;
+    }
+    for (const segment of arg.split(/[\n;&|`()]+/)) {
+      const tokens = segment.trim().split(/\s+/).filter(Boolean);
+      while (tokens.length > 0 && SHELL_ASSIGNMENT.test(tokens[0])) {
+        tokens.shift();
+      }
+      if (tokens.length > 0) {
+        commands.push(tokens);
+      }
+    }
+  }
+  return commands;
+}
+
+function assertLocalExecutable(executable, argv) {
+  if (NETWORK_EXECUTABLES.has(executable)) {
+    throw new SmithersError(
+      "TOOL_NETWORK_DISABLED",
+      "Network access is disabled for bash tool",
+    );
+  }
+  if (executable === "git" && GIT_REMOTE_OPS.has(gitSubcommand(argv))) {
+    throw new SmithersError(
+      "TOOL_GIT_REMOTE_DISABLED",
+      "Git remote operations are disabled for bash tool",
+    );
+  }
 }
 
 function assertNetworkAllowed(cmd, args, allowNetwork) {
   if (allowNetwork) {
     return;
   }
-  const tokens = [cmd, ...(args ?? [])].flatMap((part) =>
-    String(part).split(/\s+/).filter(Boolean),
-  );
-  const executables = new Set(tokens.map(tokenExecutableName));
-  const networkExecutables = ["curl", "wget", "npm", "bun", "pip"];
-  const hasNetworkExecutable = networkExecutables.some((name) =>
-    executables.has(name),
-  );
-  const urlSchemes = ["http://", "https://"];
-  const hasUrlToken = tokens.some((token) =>
-    urlSchemes.some((scheme) => token.startsWith(scheme)),
-  );
-  if (hasNetworkExecutable || hasUrlToken) {
+  // Match the executables that actually run, never argument *text*: a commit
+  // message, an echoed doc line, or a grep pattern mentioning `npm`, `fetch`,
+  // or a URL opens no socket. This denylist is bypassable defense-in-depth
+  // (see resolveNetworkIsolatedCommand), so scanning every whitespace-delimited
+  // token bought no isolation and only rejected benign local commands.
+  const executables = commandExecutables(cmd);
+  const argv = (args ?? []).map((arg) => String(arg));
+  if (argv.some(isUrlArgument)) {
     throw new SmithersError(
       "TOOL_NETWORK_DISABLED",
       "Network access is disabled for bash tool",
     );
   }
-  if (executables.has("git")) {
-    const gitRemoteOps = new Set(["push", "pull", "fetch", "clone", "remote"]);
-    if (tokens.some((token) => gitRemoteOps.has(token))) {
-      throw new SmithersError(
-        "TOOL_GIT_REMOTE_DISABLED",
-        "Git remote operations are disabled for bash tool",
-      );
-    }
+  for (const executable of executables) {
+    assertLocalExecutable(executable, argv);
+  }
+  for (const tokens of interpreterCommands(executables, argv)) {
+    assertLocalExecutable(tokenExecutableName(tokens[0]), tokens.slice(1));
   }
 }
 
