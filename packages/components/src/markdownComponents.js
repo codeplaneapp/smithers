@@ -17,8 +17,18 @@ export const markdownComponents = {
     blockquote: ({ children }) => fragment("> ", children, "\n"),
     hr: () => fragment("---\n\n"),
     ul: ({ children }) => fragment(children, "\n"),
-    ol: ({ children }) => fragment(children, "\n"),
-    li: ({ children }) => fragment("- ", children, "\n"),
+    ol: ({ children, start }) => {
+        // Number the items so ordered lists keep their `1.`/`2.` labels: each
+        // direct child element gets the ordinal it renders with, counting from
+        // the HTML `start` attribute when the source list did not begin at 1.
+        const first = Number(start);
+        let ordinal = Number.isFinite(first) ? first : 1;
+        const items = React.Children.map(children, (child) => React.isValidElement(child)
+            ? React.cloneElement(child, { ordinal: ordinal++ })
+            : child);
+        return fragment(items, "\n");
+    },
+    li: ({ children, ordinal }) => fragment(typeof ordinal === "number" ? `${ordinal}. ` : "- ", children, "\n"),
     code: ({ children, className }) => {
         if (className) {
             const lang = className.replace("language-", "");
