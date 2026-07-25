@@ -296,7 +296,16 @@ export class DevToolsRunStore {
             }
             case "ToolCallStarted": {
                 const task = this.ensureTask(run, event.nodeId, event.iteration);
-                task.toolCalls.push({ name: event.toolName, seq: event.seq });
+                // Upsert by (name, seq): a reconnect-after-seq replay re-feeds the
+                // whole log, so a blind push would duplicate every tool call and
+                // strand the copies without a status (ToolCallFinished below only
+                // matches the first). Deliberately no isTerminalTask guard — the
+                // dedup already makes replay converge, and a late tool call on a
+                // finished task is still real data worth keeping.
+                const existing = task.toolCalls.find((t) => t.name === event.toolName && t.seq === event.seq);
+                if (!existing) {
+                    task.toolCalls.push({ name: event.toolName, seq: event.seq });
+                }
                 break;
             }
             case "ToolCallFinished": {

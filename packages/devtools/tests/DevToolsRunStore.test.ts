@@ -264,6 +264,50 @@ describe("DevToolsRunStore event processing", () => {
     expect(task?.toolCalls[0]?.status).toBe("success");
   });
 
+  test("replayed ToolCallStarted upserts by (name, seq) instead of duplicating", () => {
+    const store = new DevToolsRunStore();
+    const base = { runId: "r1", nodeId: "n1", iteration: 0 };
+    const started = { ...base, type: "ToolCallStarted", timestampMs: 1, toolName: "search", seq: 1 };
+    const finished = {
+      ...base,
+      type: "ToolCallFinished",
+      timestampMs: 2,
+      toolName: "search",
+      seq: 1,
+      status: "success",
+    };
+    store.processEngineEvent(started);
+    store.processEngineEvent(finished);
+    // A reconnect replays the log from the start.
+    store.processEngineEvent(started);
+    store.processEngineEvent(finished);
+
+    const task = store.getTaskState("r1", "n1");
+    expect(task?.toolCalls).toHaveLength(1);
+    expect(task?.toolCalls[0]?.status).toBe("success");
+
+    // Same tool at a different seq is a distinct call, not a duplicate.
+    store.processEngineEvent({ ...started, timestampMs: 3, seq: 2 });
+    expect(store.getTaskState("r1", "n1")?.toolCalls).toHaveLength(2);
+  });
+
+  test("a replayed ToolCallStarted does not wipe the status already recorded for that call", () => {
+    const store = new DevToolsRunStore();
+    const base = { runId: "r1", nodeId: "n1", iteration: 0 };
+    store.processEngineEvent({ ...base, type: "ToolCallStarted", timestampMs: 1, toolName: "search", seq: 1 });
+    store.processEngineEvent({
+      ...base,
+      type: "ToolCallFinished",
+      timestampMs: 2,
+      toolName: "search",
+      seq: 1,
+      status: "error",
+    });
+    // Duplicate Started with no trailing Finished: the recorded status must survive.
+    store.processEngineEvent({ ...base, type: "ToolCallStarted", timestampMs: 3, toolName: "search", seq: 1 });
+    expect(store.getTaskState("r1", "n1")?.toolCalls[0]?.status).toBe("error");
+  });
+
   test("getTaskState with iteration returns exact iteration", () => {
     const store = new DevToolsRunStore();
     store.processEngineEvent({
@@ -479,6 +523,9 @@ describe("DevToolsRunStore event processing", () => {
     const events = [
       { type: "RunStarted", runId: "r1", timestampMs: 1 },
       { type: "NodeStarted", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 2, attempt: 1 },
+      { type: "ToolCallStarted", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 2, toolName: "search", seq: 1 },
+      { type: "ToolCallFinished", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 3, toolName: "search", seq: 1, status: "success" },
+      { type: "ToolCallStarted", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 3, toolName: "search", seq: 2 },
       { type: "NodeWaitingApproval", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 3 },
       { type: "NodeFinished", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 4, attempt: 1 },
       { type: "NodeStarted", runId: "r1", nodeId: "n2", iteration: 0, timestampMs: 5, attempt: 1 },
@@ -505,6 +552,13 @@ describe("DevToolsRunStore event processing", () => {
     expect(doublePass.getTaskState("r1", "n1")?.finishedAt).toBe(4);
     expect(doublePass.getTaskState("r1", "n2")?.status).toBe("finished");
     expect(doublePass.getTaskState("r1", "n2")?.finishedAt).toBe(6);
+    // Tool calls converge to the single-pass list, statuses intact.
+    expect(doublePass.getTaskState("r1", "n1")?.toolCalls).toEqual(
+      singlePass.getTaskState("r1", "n1")?.toolCalls ?? [],
+    );
+    expect(doublePass.getTaskState("r1", "n1")?.toolCalls).toHaveLength(2);
+    expect(doublePass.getTaskState("r1", "n1")?.toolCalls[0]?.status).toBe("success");
+    expect(doublePass.getTaskState("r1", "n1")?.toolCalls[1]?.status).toBeUndefined();
     // The replay appended its events; the read-model state is still correct.
     expect(b?.events).toHaveLength(events.length * 2);
   });
