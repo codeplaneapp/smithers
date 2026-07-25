@@ -76,8 +76,11 @@ function normalizeBaseUrl(baseUrl: string) {
   return baseUrl.replace(/\/+$/, "");
 }
 
-function headers(token: string | undefined, json = false) {
-  const next = new Headers();
+// Custom headers come first so the gateway's own content type and bearer
+// authorization always win — the same precedence SmithersGatewayClient applies
+// to RPC requests.
+function headers(custom: HeadersInit | undefined, token: string | undefined, json = false) {
+  const next = new Headers(custom);
   if (json) next.set("content-type", "application/json");
   if (token) next.set("authorization", `Bearer ${token}`);
   return next;
@@ -195,7 +198,7 @@ function eventFromMessage(type: "change" | "reset" | "heartbeat", raw: string): 
 
 function fetchEventSource(
   url: string,
-  init: { fetchImpl: typeof fetch; token?: string; onError?: (cause: unknown) => void },
+  init: { fetchImpl: typeof fetch; headers?: HeadersInit; onError?: (cause: unknown) => void },
 ): EventSourceLike {
   const listeners = new Map<string, Set<(event: MessageEvent) => void>>();
   const abort = new RuntimeAbortController();
@@ -223,7 +226,7 @@ function fetchEventSource(
   void (async () => {
     try {
       const response = await init.fetchImpl(url, {
-        headers: headers(init.token),
+        headers: init.headers,
         signal: abort.signal,
       });
       if (!response.ok || !response.body) {
@@ -287,6 +290,10 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
   const mode = options.mode;
   const apiBaseUrl = normalizeBaseUrl(mode.apiBaseUrl);
   const fetchImpl = options.fetch ?? (typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : unavailableFetch);
+  // Every `/v1/api/*` request and the change stream carry the caller's custom
+  // headers alongside the workspace token, so an API-key/proxy header applied to
+  // RPC authorizes the collection API and SSE identically.
+  const requestHeaders = (json = false) => headers(options.headers, mode.token, json);
   let closed = false;
   let source: EventSourceLike | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -345,8 +352,8 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
     // carry a cause instead of a bare Event.
     let streamCause: unknown;
     source = EventSourceImpl
-      ? new EventSourceImpl(url.toString(), { withCredentials: true, headers: Object.fromEntries(headers(mode.token)) } as EventSourceInit) as EventSourceLike
-      : fetchEventSource(url.toString(), { fetchImpl, token: mode.token, onError: (cause) => { streamCause = cause; } });
+      ? new EventSourceImpl(url.toString(), { withCredentials: true, headers: Object.fromEntries(requestHeaders()) } as EventSourceInit) as EventSourceLike
+      : fetchEventSource(url.toString(), { fetchImpl, headers: requestHeaders(), onError: (cause) => { streamCause = cause; } });
     const wasReconnect = reconnectAttempt > 0;
     source.onopen = () => {
       setStatus({ status: "online" });
@@ -457,7 +464,7 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
   async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const response = await fetchGateway(path, {
       method,
-      headers: headers(mode.token, body !== undefined),
+      headers: requestHeaders(body !== undefined),
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const json = await readEnvelope<T>(path, response);
@@ -467,7 +474,7 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
   async function mutate<T>(method: string, path: string, body?: unknown) {
     const response = await fetchGateway(path, {
       method,
-      headers: headers(mode.token, true),
+      headers: requestHeaders(true),
       body: JSON.stringify(body ?? {}),
     });
     const json = await readEnvelope<T>(path, response);

@@ -348,6 +348,13 @@ const ack = await dataClient.api.cancelRun({ runId: runs[0]?.runId ?? "" });
   SSE implementation override. When omitted, the client falls back to streaming
   `fetch`.
 </ParamField>
+<ParamField path="options.headers" type="HeadersInit">
+  Extra headers merged into every `/v1/api/*` request and the change stream, so
+  an API-key or proxy header authorizes the collection API and SSE exactly as it
+  does RPC. The content type and `authorization: Bearer <mode.token>` win over
+  conflicting entries. `SmithersGatewayProvider` forwards the gateway client's
+  `headers` here automatically.
+</ParamField>
 
 <ResponseField name="SmithersDataClient" type="object">
   `{ mode, api, stream, close }`. The `api` object covers run lifecycle,
