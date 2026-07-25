@@ -2883,15 +2883,16 @@ commands[102]:
     purpose: Query run event history with filters, grouping, and NDJSON output
     args[1]{name,type,required,desc}:
       runId,string,true,Run ID
-    flags[8]{name,short,type,default,desc}:
+    flags[9]{name,short,type,default,desc}:
       node,n,string,,Filter by node ID
       type,t,string,,"Category: agent|approval|frame|memory|node|openapi|output|revert|run|sandbox|scorer|snapshot|supervisor|timer|token|tool-call|workflow"
       since,s,string,,Recent duration window such as 5m or 2h
       limit,l,number,1000,Max events; capped at 100000
       json,j,boolean,false,Emit NDJSON
       group-by,,string,,"node | attempt"
-      watch,w,boolean,false,Append new events as they arrive
+      watch,w,boolean,false,Append new events as they arrive from the live cursor
       interval,i,number,2,Watch poll seconds
+      history,,boolean,false,Replay existing history before tailing in watch mode
   - name: chat
     purpose: Show agent chat output for the latest run or a specific run
     args[1]{name,type,required,desc}:
@@ -3510,7 +3511,7 @@ commands[102]:
 
 - **Detached mode** (`up --detach`): preflight-renders the workflow graph before spawning anything (a parse, import, or graph error prints `file:line:col` on stderr and exits non-zero with no run created), then redirects stdout/stderr to a log file, waits up to 10s for proof the run was admitted, prints `runId`/`pid`/`logFile`, and exits. A child that dies before admission prints its log tail and exits non-zero instead of a success run ID. The same preflight and admission gate covers `workflow run --detach` and detached `--resume`.
 - **Serve mode** (`up --serve`): starts the HTTP app and keeps the process alive until interrupted. Add `--supervise` to run stale-run recovery in the same process.
-- **Watch mode**: `ps`, `events`, `inspect`, `node`, and `tree` have watch-style behavior. They stop cleanly on SIGINT and most stop when the run becomes terminal.
+- **Watch mode**: `ps`, `events`, `inspect`, `node`, and `tree` have watch-style behavior. They stop cleanly on SIGINT and most stop when the run becomes terminal. `events --watch` on a live run starts at the current event cursor and only prints events appended after startup; pass `--history` (or a `--since` window) to replay matching history first.
 - **DevTools commands**: `tree`, `diff`, `output`, and `rewind` intentionally use command-scoped `--json`/`-j` and return exit code `1` for parser/user errors.
 - **Account commands**: `agents add|list|remove|test` manage `~/.smithers/accounts.json`; subscription providers use CLI config directories, API providers use API keys. Legacy entries with an unknown provider are preserved across `add`/`remove`; `agents remove <label>` deletes one.
 - **Output format**: all commands honour `--format toon|json|yaml|md|jsonl`; `--filter-output <key.path>` extracts a nested field from JSON output.

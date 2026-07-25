@@ -1838,6 +1838,7 @@ const eventsOptions = z.object({
     groupBy: z.string().optional().describe("Group output by \"node\" or \"attempt\""),
     watch: z.boolean().default(false).describe("Watch mode: append new events as they arrive"),
     interval: z.number().positive().default(2).describe("Watch poll interval in seconds"),
+    history: z.boolean().default(false).describe("Replay existing history before tailing in watch mode (watch starts at the live cursor by default)"),
     raw: z.boolean().default(false).describe("Include raw agent chunk/tool history instead of the default lifecycle-only view"),
 });
 const chatArgs = z.object({
@@ -6416,6 +6417,13 @@ const cli = Cli.create({
             if (c.options.watch) {
                 watchIntervalMs = resolveWatchIntervalMsOrFail("events", c.options.interval, fail);
             }
+            // Tailing a live run starts at the CURRENT cursor: replaying the whole
+            // event log before the first new event buries what `--watch` is for.
+            // `--history` (or an explicit `--since` window) opts back into the
+            // replay, and a terminal run still prints history because there is
+            // nothing left to tail. (#1355)
+            const willTail = c.options.watch && !isRunStatusTerminal(run.status);
+            const replayHistory = !willTail || c.options.history || query.sinceTimestampMs !== undefined;
             const filters = {
                 nodeId: query.nodeId,
                 type: query.typeName,
@@ -6424,11 +6432,12 @@ const cli = Cli.create({
                 json: query.json,
                 groupBy,
                 watch: c.options.watch,
+                history: replayHistory,
             };
             const baseMs = run.startedAtMs ??
                 run.createdAtMs ??
                 Date.now();
-            const totalCount = query.defaultLimitUsed && !query.json
+            const totalCount = replayHistory && query.defaultLimitUsed && !query.json
                 ? await countEventHistory(adapter, c.args.runId, {
                     nodeId: query.nodeId,
                     eventTypes: query.eventTypes,
@@ -6437,8 +6446,8 @@ const cli = Cli.create({
                 : undefined;
             const groupedEvents = [];
             let emitted = 0;
-            let lastSeq = -1;
-            while (emitted < query.limit) {
+            let lastSeq = replayHistory ? -1 : ((await adapter.getLastEventSeq(c.args.runId)) ?? -1);
+            while (replayHistory && emitted < query.limit) {
                 const pageLimit = Math.min(EVENTS_PAGE_SIZE, query.limit - emitted);
                 const page = await queryEventHistoryPage(adapter, c.args.runId, {
                     afterSeq: lastSeq,
@@ -6481,7 +6490,7 @@ const cli = Cli.create({
                 totalCount > query.limit) {
                 yield `showing first ${query.limit} of ${totalCount} events, use --limit to see more`;
             }
-            if (c.options.watch && !isRunStatusTerminal(run.status)) {
+            if (willTail) {
                 /**
        * @param {EventHistoryRow[]} events
        */
