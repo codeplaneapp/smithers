@@ -712,4 +712,19 @@ describe("pure helper branches", () => {
         expect(out).toContain("boom happened");
         expect(out).toContain("not supported");
     });
+
+    test("formatUsageReports surfaces the error even when the report also has windows", () => {
+        const out = formatUsageReports([
+            {
+                accountLabel: "throttled", provider: "anthropic-api", authMode: "api-key",
+                source: "headers", stale: false, estimate: false,
+                fetchedAt: "2026-06-03T00:00:00.000Z",
+                windows: [{ id: "requests-per-min", label: "requests/min", unit: "count", used: 100, remaining: 0, limit: 100 }],
+                error: "Rate limited (429) — retry after 12s",
+            },
+        ], Date.parse("2026-06-03T00:00:00.000Z"));
+
+        expect(out).toContain("0/100 left");
+        expect(out).toContain("Rate limited (429) — retry after 12s");
+    });
 });
