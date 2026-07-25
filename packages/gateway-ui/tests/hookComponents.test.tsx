@@ -1063,6 +1063,44 @@ describe("SimpleWorkflowDashboard", () => {
     }
   });
 
+  test("keeps the just-launched run selected while the runs collection catches up", async () => {
+    // The run list only refreshes on the gateway's async re-pull, so a run
+    // launched here is selected while still absent from `runs` — the window in
+    // which the auto-select reconcile used to snap back to the previous run.
+    const gw = boot({
+      runsDelayMs: 250,
+      runs: [{ runId: "run-old00001", workflowKey: "implement", status: "running", createdAtMs: Date.now() }],
+    });
+    const harness = await mount(
+      gw,
+      createElement(SimpleWorkflowDashboard, { workflow: "implement", testId: "dash" }),
+    );
+    const rowFor = (runId: string) =>
+      [...harness.container.querySelectorAll("button.workflow-run-row")].find((row) =>
+        row.textContent?.includes(runId.slice(0, 8)),
+      );
+    await waitFor(
+      harness,
+      () => rowFor("run-old00001")?.getAttribute("aria-pressed") === "true",
+      "existing run auto-selected",
+    );
+
+    click([...harness.container.querySelectorAll("button")].find((b) => b.textContent?.includes("Start"))!);
+    // Commit the launch's selection while the run list is still stale...
+    await harness.flush(40);
+    const launchedRunId = gw.state.runs[0]!.runId as string;
+    expect(launchedRunId).not.toBe("run-old00001");
+    expect(rowFor(launchedRunId)).toBeUndefined();
+    expect(harness.container.querySelector('[aria-label="Run detail"] .mono')?.textContent).toBe(
+      launchedRunId.slice(0, 8),
+    );
+
+    // ...then let the re-pull land it. The launched run stays selected.
+    await waitFor(harness, () => rowFor(launchedRunId) !== undefined, "launched run row");
+    expect(rowFor(launchedRunId)?.getAttribute("aria-pressed")).toBe("true");
+    expect(rowFor("run-old00001")?.getAttribute("aria-pressed")).toBe("false");
+  });
+
   test("renders the empty state and reports a launch error", async () => {
     const gw = boot({ runs: [], failPaths: new Set(["/v1/api/runs"]) });
     const harness = await mount(

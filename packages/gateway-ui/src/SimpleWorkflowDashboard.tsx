@@ -52,6 +52,7 @@ export function SimpleWorkflowDashboard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>();
+  const [pendingRunId, setPendingRunId] = useState<string | undefined>();
   const [selectedNodeId, setSelectedNodeId] = useState<string | undefined>();
   const runsRaw = useGatewayRuns({ filter: { workflow, limit: runLimit } });
   const actions = useGatewayActions();
@@ -60,11 +61,16 @@ export function SimpleWorkflowDashboard({
     [runsRaw.data, workflow],
   );
   const selectedRunPresent = selectedRunId ? runs.some((run) => run.runId === selectedRunId) : false;
-  const activeRunId = selectedRunPresent ? selectedRunId : runs[0]?.runId;
+  // A run launched from here is selected before the runs collection has synced
+  // it in. Until it lands its absence must not read as a stale selection, or
+  // the reconcile effect below would snap straight back to the previous top run.
+  const awaitingLaunch = pendingRunId !== undefined && pendingRunId === selectedRunId && !selectedRunPresent;
+  const activeRunId = selectedRunPresent || awaitingLaunch ? selectedRunId : runs[0]?.runId;
 
   useEffect(() => {
-    if (runs.length > 0 && !selectedRunPresent) setSelectedRunId(runs[0]!.runId);
-  }, [runs, selectedRunPresent]);
+    if (pendingRunId !== undefined && runs.some((run) => run.runId === pendingRunId)) setPendingRunId(undefined);
+    else if (runs.length > 0 && !selectedRunPresent && !awaitingLaunch) setSelectedRunId(runs[0]!.runId);
+  }, [runs, selectedRunPresent, awaitingLaunch, pendingRunId]);
 
   // Reset the selected node when switching runs — a nodeId is only meaningful
   // within its own run.
@@ -78,7 +84,10 @@ export function SimpleWorkflowDashboard({
     try {
       const result = await actions.launchRun({ workflow, input: inputFromPrompt(prompt) });
       const runId = (result as { runId?: string } | undefined)?.runId;
-      if (runId) setSelectedRunId(runId);
+      if (runId) {
+        setSelectedRunId(runId);
+        setPendingRunId(runId);
+      }
       setPrompt("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

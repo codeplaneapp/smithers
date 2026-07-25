@@ -21,6 +21,12 @@ export type SeedState = {
   outputs?: Record<string, unknown>;
   /** Optional response delay by `runId:nodeId`, used to exercise loading transitions. */
   outputDelayMs?: Record<string, number>;
+  /**
+   * Optional delay on `GET /v1/api/runs`. A real gateway answers the run-list
+   * refetch well after the launch POST resolves, so this models the window in
+   * which a just-launched run is not yet in the runs collection.
+   */
+  runsDelayMs?: number;
   /** Endpoints (by pathname) that should answer with an HTTP error envelope. */
   failPaths?: Set<string>;
   /** When set, the SSE stream endpoint answers with this HTTP status. */
@@ -67,6 +73,7 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
     trees: seed.trees ?? {},
     outputs: seed.outputs ?? {},
     outputDelayMs: seed.outputDelayMs ?? {},
+    runsDelayMs: seed.runsDelayMs ?? 0,
     failPaths: seed.failPaths ?? new Set<string>(),
     streamStatus: seed.streamStatus ?? 200,
     failApprovalSubmit: seed.failApprovalSubmit ?? false,
@@ -134,6 +141,7 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
 
       // GET /v1/api/runs
       if (path === "/v1/api/runs" && request.method === "GET") {
+        if (state.runsDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, state.runsDelayMs));
         return ok(state.runs);
       }
       // GET /v1/api/runs/:id (getRun)
