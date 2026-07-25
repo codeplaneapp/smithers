@@ -306,6 +306,20 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
     state = next;
     for (const listener of statusListeners) listener();
   };
+  // Tear the stream down once nothing consumes it. A stream opened purely to
+  // satisfy a waitForSeq waiter (a mutation-only client that never subscribes)
+  // has no consumer left once the waiter settles, so it must be closed here or
+  // it stays connected until close() — burning a gateway connection slot and a
+  // reader loop for nobody.
+  const closeStreamIfUnused = () => {
+    if (streamListeners.size > 0 || waiters.size > 0) return;
+    source?.close();
+    source = null;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    reconnectAttempt = 0;
+    setStatus({ status: "idle" });
+  };
   const resolveWaiters = () => {
     for (const waiter of [...waiters]) {
       if (lastSeq >= waiter.seq) {
@@ -314,6 +328,7 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
         waiter.resolve();
       }
     }
+    closeStreamIfUnused();
   };
   const emit = (event: SmithersStreamEvent) => {
     lastSeq = Math.max(lastSeq, event.seq);
@@ -537,14 +552,7 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
         openStream();
         return () => {
           streamListeners.delete(handler);
-          if (streamListeners.size === 0 && waiters.size === 0) {
-            source?.close();
-            source = null;
-            if (reconnectTimer) clearTimeout(reconnectTimer);
-            reconnectTimer = null;
-            reconnectAttempt = 0;
-            setStatus({ status: "idle" });
-          }
+          closeStreamIfUnused();
         };
       },
       subscribeStatus(handler) {
@@ -563,6 +571,7 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
             },
             timer: setTimeout(() => {
               waiters.delete(waiter);
+              closeStreamIfUnused();
               reject(new Error(`Timed out waiting for Smithers stream seq ${seq}.`));
             }, WAIT_FOR_SEQ_TIMEOUT_MS),
           };
