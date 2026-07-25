@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/react */
 import { it, expect } from "bun:test";
 import { describeHeadlessRender, renderForTest } from "./renderHelpers.tsx";
-import { act } from "react";
+import { act, useState } from "react";
 import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
 import { TimelineView } from "../src/modes/TimelineMode.tsx";
 
@@ -315,6 +315,87 @@ describeHeadlessRender("TimelineMode – terminal rendering (CI-safe, no gateway
     expect(f).toContain("seq:7");
     expect(f).toContain("node.start");
     expect(f).not.toContain("run.event");
+    renderer.destroy();
+  });
+
+  it("keeps the pinned frame anchored on its seq as the event ring evicts", async () => {
+    // `events` is a bounded ring: new frames push the oldest out, so every
+    // surviving row shifts DOWN one index while `events.length` stays at the
+    // cap. An index-anchored scrub therefore slides silently forward onto a
+    // LATER frame — the operator inspects a run state they never selected.
+    const RING = 8;
+    const all = Array.from({ length: 12 }, (_, i) =>
+      frame(i + 1, "node.start", {
+        nodeId: `n-${i + 1}`,
+        name: `task-${String(i + 1).padStart(2, "0")}`,
+        status: "running",
+      }),
+    );
+    let stream!: () => void;
+    function Harness() {
+      const [count, setCount] = useState(RING);
+      stream = () => { setCount((prev) => prev + 1); };
+      return <TimelineView events={all.slice(Math.max(0, count - RING), count)} />;
+    }
+
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
+      await renderForTest(<Harness />, { width: 120, height: 30 });
+    await waitForVisualIdle();
+
+    // Scrub back two frames from live: ring holds seq 1..8, so we pin seq 6.
+    act(() => { mockInput.pressKey("k"); });
+    act(() => { mockInput.pressKey("k"); });
+    await flush();
+    await waitForVisualIdle();
+    expect(captureCharFrame()).toContain("seq:6");
+
+    // Three more frames stream in; the ring now holds seq 4..11 and the pinned
+    // frame has moved from index 5 to index 2.
+    act(() => { stream(); stream(); stream(); });
+    await flush();
+    await waitForVisualIdle();
+
+    const f = captureCharFrame();
+    expect(f).toContain("seq:6");
+    expect(f).toContain("[f3]");
+    // The snapshot panel must still reconstruct state as of the pinned frame.
+    expect(f).toContain("task-06");
+    expect(f).not.toContain("task-07");
+
+    renderer.destroy();
+  });
+
+  it("keeps k responsive when the event list shrinks under the selection", async () => {
+    // Reconnect/rewind can shrink the list below the pinned index. A stale raw
+    // index made `k` appear dead until pressed (selectedIdx − length) times.
+    let shrink!: () => void;
+    function Harness() {
+      const [full, setFull] = useState(true);
+      shrink = () => { setFull(false); };
+      return <TimelineView events={full ? CANNED_EVENTS : CANNED_EVENTS.slice(0, 3)} />;
+    }
+
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
+      await renderForTest(<Harness />, { width: 120, height: 30 });
+    await waitForVisualIdle();
+
+    // Pin frame 7 (index 6) out of 8, then drop to a 3-event list.
+    act(() => { mockInput.pressKey("k"); });
+    await flush();
+    await waitForVisualIdle();
+    expect(captureCharFrame()).toContain("[f7]");
+
+    act(() => { shrink(); });
+    await flush();
+    await waitForVisualIdle();
+    expect(captureCharFrame()).toContain("[f3]");
+
+    // A single k must move back one frame, not be swallowed.
+    act(() => { mockInput.pressKey("k"); });
+    await flush();
+    await waitForVisualIdle();
+    expect(captureCharFrame()).toContain("[f2]");
+
     renderer.destroy();
   });
 

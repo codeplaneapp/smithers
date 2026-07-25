@@ -7,6 +7,7 @@ import {
   extractNodeSnapshots,
   nodeStatusGlyph,
   nodeStatusColor,
+  resolveFrameIdx,
   snapshotKey,
 } from "../src/modes/timelineUtils.ts";
 
@@ -84,6 +85,41 @@ describe("frameTickColor", () => {
 
   it("returns dim for unselected normal", () => {
     expect(frameTickColor("normal", false)).toBe("#333333");
+  });
+});
+
+// ─── resolveFrameIdx ──────────────────────────────────────────────────────────
+
+describe("resolveFrameIdx", () => {
+  const ring = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => frame(from + i, "run.event"));
+
+  it("follows the newest frame when the anchor is null (live)", () => {
+    expect(resolveFrameIdx(ring(1, 8), null)).toBe(7);
+    expect(resolveFrameIdx([], null)).toBe(0);
+  });
+
+  it("resolves the anchored seq to its current index", () => {
+    expect(resolveFrameIdx(ring(1, 8), 6)).toBe(5);
+  });
+
+  it("keeps the pinned frame as the ring evicts older rows", () => {
+    // Same pinned seq, ring slid forward by 3: index must follow the frame, not
+    // stay put (which would silently show a later run state).
+    expect(resolveFrameIdx(ring(4, 11), 6)).toBe(2);
+    expect(resolveFrameIdx(ring(6, 13), 6)).toBe(0);
+  });
+
+  it("falls back to the nearest retained frame once the anchor is evicted", () => {
+    // seq 6 has fallen out of the ring: land on the oldest RETAINED frame, never
+    // slide forward to a later one.
+    expect(resolveFrameIdx(ring(9, 16), 6)).toBe(0);
+  });
+
+  it("clamps to the last frame when the list shrinks under the anchor", () => {
+    // Reconnect/rewind truncation: stay in range so j/k respond immediately.
+    expect(resolveFrameIdx(ring(1, 3), 7)).toBe(2);
+    expect(resolveFrameIdx([], 7)).toBe(0);
   });
 });
 

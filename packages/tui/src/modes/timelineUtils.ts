@@ -59,6 +59,28 @@ export function frameTickColor(marker: FrameMarker, isSelected: boolean): string
   return "#333333";
 }
 
+/**
+ * Derive the scrubbed frame index from a selection ANCHORED BY `seq`. The event
+ * list is a bounded ring (TUI_EVENT_CAP) that keeps the most recent rows and
+ * evicts from the front while a run streams, so a bare index drifts: eviction
+ * holds `events.length` at the cap while every row shifts down, silently sliding
+ * the pinned frame forward onto a LATER run state the operator never selected —
+ * and a shrink (reconnect/rewind) strands the index past the end, making `k`
+ * appear dead. Anchoring on `seq` keeps the same frame pinned across live
+ * mutations; `null` means "live" (newest frame). Events are seq-sorted, so once
+ * the anchored frame is evicted we fall back to the nearest retained frame
+ * at-or-after it — never forward past the ring, never behind the pin.
+ */
+export function resolveFrameIdx(
+  events: ReadonlyArray<GatewayEventFrame>,
+  anchorSeq: number | null,
+): number {
+  if (events.length === 0) return 0;
+  if (anchorSeq === null) return events.length - 1;
+  const idx = events.findIndex((ev) => ev.seq >= anchorSeq);
+  return idx >= 0 ? idx : events.length - 1;
+}
+
 /** Reconstruct node statuses from events up to and including upToSeq. */
 export function extractNodeSnapshots(
   events: GatewayEventFrame[],
