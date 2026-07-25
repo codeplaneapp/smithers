@@ -1,5 +1,5 @@
 import { describe, expect, test, afterEach } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -290,6 +290,37 @@ describe("discoverWorkflows — skill-parity spec", () => {
         const wf = discoverWorkflows(root)[0];
         expect(wf.eligible).toBe(false);
         expect(wf.ineligibleReasons.join(" ")).toContain("definitely-not-a-real-binary-xyz");
+    });
+
+    test.skipIf(process.platform === "win32")("required-bins: a non-executable file on PATH is not a binary", () => {
+        const { root } = seed({
+            "needs-bin.tsx": [
+                "/* smithers",
+                "required-bins: [smithers-test-fake-bin]",
+                "*/",
+                "export default {};",
+            ].join("\n"),
+        });
+        const binDir = join(root, "fake-bin");
+        mkdirSync(binDir, { recursive: true });
+        const bin = join(binDir, "smithers-test-fake-bin");
+        // A regular file that exists but cannot be executed: launching the
+        // workflow would fail with EACCES, so the gate must reject it.
+        writeFileSync(bin, "#!/bin/sh\nexit 0\n", { mode: 0o644 });
+        const env = { ...process.env, PATH: binDir };
+        expect(discoverWorkflows(root, env)[0].eligible).toBe(false);
+        chmodSync(bin, 0o755);
+        expect(discoverWorkflows(root, env)[0].eligible).toBe(true);
+    });
+
+    test.skipIf(process.platform === "win32")("required-bins: a non-executable path entry is not a binary", () => {
+        const { root, wfDir } = seed({});
+        const bin = join(root, "tool.sh");
+        writeFileSync(bin, "#!/bin/sh\nexit 0\n", { mode: 0o644 });
+        writeFileSync(join(wfDir, "needs-bin.tsx"), ["/* smithers", `required-bins: [${bin}]`, "*/", "export default {};"].join("\n"));
+        expect(discoverWorkflows(root)[0].eligible).toBe(false);
+        chmodSync(bin, 0o755);
+        expect(discoverWorkflows(root)[0].eligible).toBe(true);
     });
 
     test("disable-model-invocation and user-invocable flags parse", () => {
