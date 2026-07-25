@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 import { setJsonMode } from "./util/logger.ts";
 import { ensureCuratedSkillsFresh, formatRefreshNotice } from "./refreshCuratedSkills.js";
+import { curatedSkillStatus, formatCuratedSkillList, formatSkillsAddSummary, syncCuratedSkill } from "./curatedSkillSync.js";
+import { syncSkillsAfterUpgrade } from "./syncSkillsAfterUpgrade.js";
 import { extractBackendFlag, findFirstPositionalIndex, rewriteBareResumeFlagArgv } from "./argv-utils.js";
 import { CHAT_CREATE_PROMPT, INLINE_CHAT_ENGINES, buildInlineChatWorkflow } from "./buildInlineChatWorkflow.js";
 import { readBackendMarkerForCwd } from "./readBackendMarkerForCwd.js";
@@ -47,7 +49,7 @@ import { buildAskKindFields, buildAskPromptText, buildAskUniqueToken, formatAskH
 import { chatAttemptKey, formatChatAttemptHeader, formatChatBlock, parseAgentEvent, parseChatAttemptMeta, parseNodeOutputEvent, selectChatAttempts, } from "./chat.js";
 import { buildHijackLaunchSpec, isNativeHijackCandidate, launchHijackSession, resolveHijackCandidate, waitForHijackCandidate, } from "./hijack.js";
 import { mcpAddFallbackMessage } from "./agent-wiring/mcpAddFallbackMessage.js";
-import { parseAgentWiringArgv } from "./agent-wiring/parseAgentWiringArgv.js";
+import { parseAgentWiringArgv, parseSkillsSubcommandArgv } from "./agent-wiring/parseAgentWiringArgv.js";
 import { EXTRA_MCP_AGENTS, EXTRA_SKILL_AGENTS, wireExtraAgents } from "./agent-wiring/wireExtraAgents.js";
 import { launchConversationHijackSession, persistConversationHijackHandoff, } from "./hijack-session.js";
 import { colorizeEventText, formatAge, formatElapsedCompact, formatEventLine, formatRelativeOffset, } from "./format.js";
@@ -9254,10 +9256,22 @@ const cli = Cli.create({
             return c.error({ message: `Upgrade command exited with code ${result.exitCode}.`, code: "UPDATE_FAILED" });
         }
         process.stderr.write(`✓ Upgraded to ${latest}.\n`);
+        // An upgrade must leave every Smithers-owned skill current — the
+        // generated command skills AND the curated `smithers` skill — or the
+        // agent keeps reading the previous release's SKILL.md/llms-full.txt
+        // with no warning (#1377). No TTY gate: agent/CI upgrades sync too.
+        const skillSync = await syncSkillsAfterUpgrade({
+            commandSkillsInstalled: hasInstalledCommandSkills(),
+            version: latest,
+        });
+        if (skillSync.notice) process.stderr.write(`${skillSync.notice}\n`);
+        if (skillSync.error) {
+            process.stderr.write(`⚠ Post-upgrade skill sync: ${skillSync.error}. Run \`smithers skills add\` to finish it.\n`);
+        }
         if (sotaBehind) {
             process.stderr.write("New SOTA models are in. Run `smithers init` to refresh installed workflows to the latest agents.\n");
         }
-        return c.ok({ current, latest, updateAvailable: true, action: "upgraded", command: plan.command, sotaVersion: SOTA_REGISTRY_VERSION, sotaLatest: remoteSota });
+        return c.ok({ current, latest, updateAvailable: true, action: "upgraded", command: plan.command, sotaVersion: SOTA_REGISTRY_VERSION, sotaLatest: remoteSota, skillSync: { via: skillSync.via, ok: skillSync.ok } });
     },
 })
     .command("usage", {
@@ -9295,6 +9309,38 @@ if (!(cliCommands instanceof Map)) {
     throw new Error("Could not resolve Smithers CLI commands for input bounds.");
 }
 wrapCliCommandHandlersWithInputBounds(cliCommands);
+/**
+ * How many generated command skills the framework manages, so a successful
+ * `skills add` can state both halves of what it synced (command skills + the
+ * curated skill). Returns null when the count is unavailable rather than
+ * guessing. (#1377)
+ *
+ * @returns {Promise<number | null>}
+ */
+/**
+ * Whether a previous `skills add` installed the generated command skills. Gates
+ * the post-upgrade re-sync so `update` never installs command skills for a user
+ * who never opted in (same guard the init-time re-sync uses).
+ *
+ * @returns {boolean}
+ */
+function hasInstalledCommandSkills() {
+    try {
+        return Boolean(SyncSkills.readHash("smithers") && SyncSkills.hasInstalledSkills("smithers", {}));
+    }
+    catch {
+        return false;
+    }
+}
+async function countCommandSkills() {
+    try {
+        const skills = await SyncSkills.list("smithers", cliCommands, { description: CLI_DESCRIPTION });
+        return Array.isArray(skills) ? skills.length : null;
+    }
+    catch {
+        return null;
+    }
+}
 /**
  * Resolve a leaf command entry (with its args/options zod schemas) from a
  * resolved command path such as "inspect" or "workflow run".
@@ -9962,7 +10008,7 @@ async function main() {
         !argv.includes("--version") &&
         !argv.includes("--help") &&
         !argv.includes("-h")) {
-        const refreshNotice = formatRefreshNotice(ensureCuratedSkillsFresh());
+        const refreshNotice = formatRefreshNotice(ensureCuratedSkillsFresh({ version: readPackageVersion() }));
         if (refreshNotice) console.error(refreshNotice);
     }
     // A successful `smithers init` installs/refreshes skills, so it must not end
@@ -10068,6 +10114,31 @@ async function main() {
         }
         catch (err) {
             console.error(`⚠ Smithers agent wiring skipped: ${err?.message ?? String(err)}`);
+        }
+    }
+    // Smithers owns two skill sets: the generated command skills the framework
+    // just synced, and the curated `smithers` skill (SKILL.md + llms-full.txt).
+    // `skills add` syncs BOTH and `skills list` reports both — deliberately with
+    // no `process.stderr.isTTY` gate, so an agent/CI session upgrading the
+    // package gets exactly what a human at a terminal gets (#1377).
+    const skillsSubcommand = parseSkillsSubcommandArgv(argv);
+    if (skillsSubcommand === "add" && serveSucceeded) {
+        try {
+            const version = readPackageVersion();
+            const { status, optedOut } = syncCuratedSkill({ version });
+            console.error(formatSkillsAddSummary({ status, commandSkillCount: await countCommandSkills(), optedOut }));
+        }
+        catch (err) {
+            console.error(`⚠ Curated \`smithers\` skill sync skipped: ${err?.message ?? String(err)}`);
+        }
+    }
+    else if (skillsSubcommand === "list" && serveSucceeded) {
+        try {
+            console.error("");
+            console.error(formatCuratedSkillList(curatedSkillStatus({ version: readPackageVersion() })));
+        }
+        catch (err) {
+            console.error(`⚠ Curated \`smithers\` skill status unavailable: ${err?.message ?? String(err)}`);
         }
     }
     // `mcp add` failed inside the registration helper and we did not recover it

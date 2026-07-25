@@ -262,7 +262,7 @@ function readMarker(markerPath) {
  * (a CLI upgrade carrying a new skill), OR more than a day has elapsed (to catch
  * externally-introduced stale/plugin copies). `force` bypasses the throttle.
  *
- * @param {{ homeDir?: string; env?: NodeJS.ProcessEnv; sourceDir?: string; now?: number; force?: boolean }} [opts]
+ * @param {{ homeDir?: string; env?: NodeJS.ProcessEnv; sourceDir?: string; now?: number; force?: boolean; version?: string | null; detections?: import("./AgentAvailability.ts").AgentAvailability[] }} [opts]
  * @returns {RefreshResult | null}
  */
 export function ensureCuratedSkillsFresh(opts = {}) {
@@ -282,13 +282,16 @@ export function ensureCuratedSkillsFresh(opts = {}) {
     const needScan = opts.force || needContentUpdate || nowMs - lastScanMs > DAY_MS;
     if (!needScan) return null;
 
-    const result = refreshCuratedSkills({ homeDir, env, sourceDir: opts.sourceDir });
+    const result = refreshCuratedSkills({ homeDir, env, sourceDir: opts.sourceDir, detections: opts.detections });
     try {
       mkdirSync(dirname(markerPath), { recursive: true });
-      writeFileSync(
-        markerPath,
-        `${JSON.stringify({ appliedHash: sourceHash, lastScanMs: nowMs }, null, 2)}\n`,
-      );
+      // `appliedVersion` lets `skills list` name the release that wrote an
+      // installed copy; the hash is what actually decides staleness.
+      const applied = { appliedHash: sourceHash, lastScanMs: nowMs };
+      const carried = marker.appliedHash === sourceHash && typeof marker.appliedVersion === "string" ? marker.appliedVersion : null;
+      const version = opts.version ?? carried;
+      if (version) applied.appliedVersion = version;
+      writeFileSync(markerPath, `${JSON.stringify(applied, null, 2)}\n`);
     } catch {
       /* a missing marker just means we re-scan next time — harmless */
     }

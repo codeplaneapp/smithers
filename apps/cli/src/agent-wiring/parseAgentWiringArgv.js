@@ -1,4 +1,31 @@
 /**
+ * Which `skills` subcommand an argv invokes (`"add"` / `"list"`), or null when
+ * it is not a `skills` command or asks for help. Smithers owns the curated
+ * `smithers` skill on top of the framework's generated command skills, so both
+ * subcommands need a post-serve hook (#1377).
+ *
+ * @param {string[]} argv
+ * @returns {"add" | "list" | null}
+ */
+export function parseSkillsSubcommandArgv(argv) {
+  const positionals = [];
+  for (let i = 0; i < argv.length; i++) {
+    const tok = argv[i];
+    if (tok === "--help" || tok === "-h") return null;
+    // Skip the values of flags that take one, so `--format json` does not leave
+    // `json` looking like the command positional.
+    if (["--agent", "-a", "--command", "-c", "--depth", "--format"].includes(tok)) {
+      i++;
+    } else if (!tok.startsWith("-")) {
+      positionals.push(tok);
+    }
+  }
+  const [cmd, sub] = positionals;
+  if (cmd !== "skills") return null;
+  return sub === "add" || sub === "list" ? sub : null;
+}
+
+/**
  * Parses a `mcp add` / `skills add` argv into supplementary-wiring options, or
  * returns `null` when argv is not one of those commands.
  *

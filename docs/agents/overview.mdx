@@ -77,12 +77,37 @@ mode, the `.smithers/` layout, which component to reach for) and ships the full
 docs bundle next to it so the agent can read the exact API on demand.
 
 `init` installs the curated onboarding skill automatically for detected agents
-whose skill directory Smithers can write directly today: Claude Code and Pi. To
-sync the generated Smithers CLI skill set at any time:
+whose skill directory Smithers can write directly today: Claude Code and Pi.
+
+`skills add` is the one command that makes **every** Smithers-owned skill
+current: it syncs the generated CLI command skills *and* the curated `smithers`
+skill (`SKILL.md` plus the `llms-full.txt` bundle) from the installed package.
 
 ```bash
 bunx smithers-orchestrator skills add
 ```
+
+It behaves identically in an agent, a CI job, and an interactive terminal, so a
+non-interactive session is never left on the previous release's curated skill.
+Its success output names both halves of what it synced. `skills list` reports
+the curated skill's status and version next to the command skills, and flags a
+stale copy:
+
+```bash
+bunx smithers-orchestrator skills list
+```
+
+```text
+Curated skill (smithers, bundled v0.30.0):
+  ✓ Claude Code  current (v0.30.0)  /Users/you/.claude/skills/smithers
+  ✗ Pi           stale              /Users/you/.pi/agent/skills/smithers
+
+Run `smithers skills add` to bring the curated skill up to date.
+```
+
+`bunx smithers-orchestrator update` runs the same sync once the package upgrade
+finishes, so an upgrade leaves every Smithers-owned skill current on its own.
+Opt out of the curated-skill half with `SMITHERS_NO_SKILL_REFRESH=1`.
 
 `skills add` supports `--no-global` for project-scoped installs; unlike
 `mcp add`, it has no supported `--agent` target filter. See each agent's page for

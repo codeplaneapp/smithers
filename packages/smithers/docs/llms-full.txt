@@ -147,6 +147,14 @@ smithers update --check    # just report current vs latest, never change anythin
 smithers update --dry-run  # print the upgrade command without running it
 ```
 
+Once the upgrade finishes, the update re-syncs every Smithers-owned skill (the
+generated CLI command skills and the curated `smithers` skill) so an upgrade
+never leaves an agent reading the previous release's `SKILL.md` and
+`llms-full.txt`. This runs in agent and CI sessions too, not just interactive
+terminals. Opt out with `SMITHERS_NO_SKILL_REFRESH=1`, and run
+`bunx smithers-orchestrator skills add` yourself if the sync is skipped or
+fails.
+
 Verify the installed version:
 
 ```bash
