@@ -1106,6 +1106,23 @@ export class SqlMessageStorage {
         return this.execute(statement, params);
     }
     /**
+   * Like {@link insertIgnore} but reports whether *this* call is the one that
+   * inserted the row. The verdict comes from the insert's own `RETURNING`
+   * rows, never from a preceding `SELECT`: PostgreSQL runs Smithers'
+   * transactions at READ COMMITTED, so two concurrent claimants can both read
+   * no row, and `ON CONFLICT DO NOTHING` then silently no-ops for the loser
+   * instead of raising. Only the winner gets a row back.
+   * @param {string} table
+   * @param {Record<string, unknown>} row
+   * @returns {Promise<boolean>}
+   */
+    async insertIgnoreReturningInserted(table, row) {
+        const filteredRow = this.filterKnownColumns(table, row);
+        const { statement, params } = buildInsertSql(table, filteredRow, { orIgnore: true }, this.dialect);
+        const rows = await this.queryAllRaw(`${statement} RETURNING 1`, params);
+        return rows.length > 0;
+    }
+    /**
    * @param {string} table
    * @param {Record<string, unknown>} row
    * @param {readonly string[]} conflictColumns

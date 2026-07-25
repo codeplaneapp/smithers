@@ -441,6 +441,18 @@ declare class SqlMessageStorage {
    */
     insertIgnore(table: string, row: Record<string, unknown>): Promise<void>;
     /**
+   * Like {@link insertIgnore} but reports whether *this* call is the one that
+   * inserted the row. The verdict comes from the insert's own `RETURNING`
+   * rows, never from a preceding `SELECT`: PostgreSQL runs Smithers'
+   * transactions at READ COMMITTED, so two concurrent claimants can both read
+   * no row, and `ON CONFLICT DO NOTHING` then silently no-ops for the loser
+   * instead of raising. Only the winner gets a row back.
+   * @param {string} table
+   * @param {Record<string, unknown>} row
+   * @returns {Promise<boolean>}
+   */
+    insertIgnoreReturningInserted(table: string, row: Record<string, unknown>): Promise<boolean>;
+    /**
    * @param {string} table
    * @param {Record<string, unknown>} row
    * @param {readonly string[]} conflictColumns

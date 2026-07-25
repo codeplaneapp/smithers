@@ -3551,28 +3551,24 @@ export class SmithersDb {
     /**
    * Insert an integration-delivery dedupe row if `(sourceId, dedupeKey)` was
    * never recorded. Returns `true` when the row was inserted (first delivery)
-   * and `false` when it already existed (a redelivery to drop). The
-   * check-then-insert runs inside a single adapter transaction so two
-   * concurrent redeliveries cannot both claim "first".
+   * and `false` when it already existed (a redelivery to drop). The insert
+   * itself is the verdict — a preceding `SELECT` cannot decide this on
+   * PostgreSQL, where Smithers' transactions run at READ COMMITTED and two
+   * concurrent redeliveries both read no row before either commits. Only the
+   * `ON CONFLICT DO NOTHING` winner gets a `RETURNING` row, so two concurrent
+   * redeliveries cannot both claim "first".
    * @param {{ sourceId: string; dedupeKey: string; eventName: string; receivedAtMs: number }} row
    * @returns {RunnableEffect<boolean, SmithersError>}
    */
     insertIntegrationDeliveryIfNew(row) {
         const self = this;
         return runnableEffect(this.withTransactionEffect(`insert integration delivery ${row.sourceId}`, Effect.gen(function* () {
-            const existing = yield* self.read(`get integration delivery ${row.sourceId}`, () => self.internalStorage.queryOne(`SELECT source_id
-             FROM _smithers_integration_deliveries
-             WHERE source_id = ? AND dedupe_key = ?`, [row.sourceId, row.dedupeKey]));
-            if (existing) {
-                return false;
-            }
-            yield* self.write(`insert integration delivery ${row.sourceId}`, () => self.internalStorage.insertIgnore("_smithers_integration_deliveries", {
+            return yield* self.write(`insert integration delivery ${row.sourceId}`, () => self.internalStorage.insertIgnoreReturningInserted("_smithers_integration_deliveries", {
                 sourceId: row.sourceId,
                 dedupeKey: row.dedupeKey,
                 eventName: row.eventName,
                 receivedAtMs: row.receivedAtMs,
             }));
-            return true;
         })).pipe(Effect.annotateLogs({
             sourceId: row.sourceId,
             eventName: row.eventName,
