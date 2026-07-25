@@ -287,6 +287,53 @@ describe("spawnCaptureEffect — timeouts and cancellation", () => {
   });
 });
 
+describe("spawnCaptureEffect — abort after a successful close (issue #683)", () => {
+  test("a late abort on a detached child does not kill the (possibly reused) process group", async () => {
+    const ac = new AbortController();
+    /** @type {(number | string)[]} */
+    const killedPids = [];
+    const originalKill = process.kill;
+    process.kill = ((pid, signal) => {
+      killedPids.push(pid);
+      return originalKill(pid, signal);
+    });
+    try {
+      const result = await run("node", ["-e", "process.stdout.write('ok')"], {
+        detached: true,
+        signal: ac.signal,
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe("ok");
+
+      // Run shutdown aborts the same controller long after the child closed.
+      ac.abort();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(killedPids).toEqual([]);
+    } finally {
+      process.kill = originalKill;
+    }
+  });
+
+  test("finalize unregisters the abort listener", async () => {
+    const ac = new AbortController();
+    const removed = [];
+    const originalRemove = ac.signal.removeEventListener.bind(ac.signal);
+    ac.signal.removeEventListener = (type, listener, options) => {
+      removed.push(type);
+      return originalRemove(type, listener, options);
+    };
+    try {
+      const result = await run("node", ["-e", "process.stdout.write('done')"], {
+        signal: ac.signal,
+      });
+      expect(result.stdout).toBe("done");
+      expect(removed).toContain("abort");
+    } finally {
+      ac.signal.removeEventListener = originalRemove;
+    }
+  });
+});
+
 describe("spawnCaptureEffect — external kill / spawn errors", () => {
   test("process killed externally exits with null code, no throw", async () => {
     // Self-kill via SIGKILL — we treat this like an external kill since the

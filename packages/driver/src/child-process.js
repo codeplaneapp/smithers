@@ -176,16 +176,24 @@ export function spawnCaptureEffect(command, args, options) {
             stdio: ["pipe", "pipe", "pipe"],
         });
         onProcess?.({ phase: "started", pid: child.pid });
+        /** @type {(() => void) | undefined} Detaches the abort listener once the effect has settled. */
+        let detachAbort;
         /**
      * @param {string} reason
      * @param {"PROCESS_ABORTED" | "PROCESS_TIMEOUT" | "PROCESS_IDLE_TIMEOUT"} code
      */
         const kill = (reason, code) => {
+            // A late abort (or a timer that outlived the close) must not touch the
+            // process: for detached children the pid group may already be reused.
+            if (settled)
+                return;
             logWarning("child process interrupted", {
                 ...logAnnotations,
                 reason,
                 errorCode: code,
             }, span);
+            settled = true;
+            detachAbort?.();
             try {
                 killChildTree(child, detached);
             }
@@ -197,11 +205,8 @@ export function spawnCaptureEffect(command, args, options) {
                     // ignore
                 }
             }
-            if (!settled) {
-                settled = true;
-                onProcess?.({ phase: "exited", pid: child.pid });
-                resume(Effect.fail(new SmithersError(code, reason, errorDetails)));
-            }
+            onProcess?.({ phase: "exited", pid: child.pid });
+            resume(Effect.fail(new SmithersError(code, reason, errorDetails)));
         };
         let totalTimer;
         let idleTimer;
@@ -236,6 +241,7 @@ export function spawnCaptureEffect(command, args, options) {
             if (settled)
                 return;
             settled = true;
+            detachAbort?.();
             onProcess?.({ phase: "exited", pid: child.pid });
             if (totalTimer)
                 clearTimeout(totalTimer);
@@ -259,9 +265,9 @@ export function spawnCaptureEffect(command, args, options) {
                 kill("CLI aborted", "PROCESS_ABORTED");
             }
             else {
-                signal.addEventListener("abort", () => kill("CLI aborted", "PROCESS_ABORTED"), {
-                    once: true,
-                });
+                const onAbort = () => kill("CLI aborted", "PROCESS_ABORTED");
+                signal.addEventListener("abort", onAbort, { once: true });
+                detachAbort = () => signal.removeEventListener("abort", onAbort);
             }
         }
         child.stdout?.on("data", (chunk) => {
@@ -301,6 +307,7 @@ export function spawnCaptureEffect(command, args, options) {
                 clearTimeout(idleTimer);
             if (!settled) {
                 settled = true;
+                detachAbort?.();
                 const smithersError = toSmithersError(sanitizeSpawnCause(error), `spawn ${command}`, {
                     code: "PROCESS_SPAWN_FAILED",
                     details: errorDetails,
