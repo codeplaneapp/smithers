@@ -19,6 +19,22 @@ function createTestDb() {
 const now = 1_700_000_000_000;
 const runRow = (runId, status, extra = {}) => ({ runId, workflowName: "wf", status, createdAtMs: now, ...extra });
 
+/** Mirrors the engine's `buildWaitForEventAttemptMeta` output. */
+const waitForEventMetaJson = ({ signalName, correlationId = null }) => JSON.stringify({
+    kind: "wait-for-event",
+    waitForEvent: {
+        signalName,
+        correlationId,
+        onTimeout: "fail",
+        timeoutMs: undefined,
+        waitAsync: false,
+        startedAtMs: now,
+        resolvedSignalSeq: null,
+        receivedAtMs: null,
+        timedOutAtMs: null,
+    },
+});
+
 describe("parseTimerMeta", () => {
     test("parses a finite firesAtMs", () => {
         expect(parseTimerMeta(JSON.stringify({ timer: { firesAtMs: 1234.9 } }))).toEqual({ firesAtMs: 1234 });
@@ -33,13 +49,19 @@ describe("parseTimerMeta", () => {
 });
 
 describe("parseEventMeta", () => {
-    test("prefers event.correlationKey, then correlationKey, then event.eventName", () => {
-        expect(parseEventMeta(JSON.stringify({ event: { correlationKey: "ck" } }))).toEqual({ correlationKey: "ck" });
-        expect(parseEventMeta(JSON.stringify({ correlationKey: "top" }))).toEqual({ correlationKey: "top" });
-        expect(parseEventMeta(JSON.stringify({ event: { eventName: "en" } }))).toEqual({ correlationKey: "en" });
+    test("reads the engine's wait-for-event shape, preferring correlationId", () => {
+        expect(parseEventMeta(waitForEventMetaJson({ signalName: "issue-42", correlationId: "order:42" })))
+            .toEqual({ correlationKey: "order:42" });
     });
-    test("returns null for non-string key / malformed / absent", () => {
-        expect(parseEventMeta(JSON.stringify({ event: { correlationKey: 5 } }))).toBeNull();
+    test("falls back to signalName when the wait declares no correlationId", () => {
+        expect(parseEventMeta(waitForEventMetaJson({ signalName: "issue-42", correlationId: null })))
+            .toEqual({ correlationKey: "issue-42" });
+        expect(parseEventMeta(waitForEventMetaJson({ signalName: "issue-42", correlationId: "  " })))
+            .toEqual({ correlationKey: "issue-42" });
+    });
+    test("returns null for a missing signalName / malformed / absent", () => {
+        expect(parseEventMeta(JSON.stringify({ kind: "wait-for-event", waitForEvent: { correlationId: "ck" } }))).toBeNull();
+        expect(parseEventMeta(JSON.stringify({ event: { correlationKey: "legacy" } }))).toBeNull();
         expect(parseEventMeta("{bad")).toBeNull();
         expect(parseEventMeta(null)).toBeNull();
     });
@@ -179,7 +201,7 @@ describe("computeRunState / computeRunStateFromRow against a real adapter", () =
         const { adapter } = createTestDb();
         await adapter.insertRun(runRow("r3", "waiting-event"));
         await adapter.insertNode({ runId: "r3", nodeId: "evt", iteration: 0, state: "waiting-event", updatedAtMs: now, outputTable: "out", label: null });
-        await adapter.insertAttempt({ runId: "r3", nodeId: "evt", iteration: 0, attempt: 1, state: "waiting-event", startedAtMs: now, metaJson: JSON.stringify({ event: { correlationKey: "ck-3" } }) });
+        await adapter.insertAttempt({ runId: "r3", nodeId: "evt", iteration: 0, attempt: 1, state: "waiting-event", startedAtMs: now, metaJson: waitForEventMetaJson({ signalName: "sig-3", correlationId: "ck-3" }) });
         const view = await computeRunState(adapter, "r3");
         expect(view.blocked).toEqual({ kind: "event", nodeId: "evt", correlationKey: "ck-3" });
     });
