@@ -95,6 +95,8 @@ declare function useGatewayActions(): {
         runId: string;
         frameNo: number;
         confirm: true;
+        force?: boolean;
+        noRevert?: boolean;
     }) => Promise<Record<string, unknown> & {
         seq?: number;
         txid?: string;

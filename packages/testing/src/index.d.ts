@@ -684,17 +684,26 @@ declare const shrink: (ast: ScenarioAst, controls: readonly ControlMessage[], fa
 
 type PlainDbMethod = (...args: readonly never[]) => unknown | PromiseLike<unknown>;
 type DbMethod<Args extends readonly unknown[]> = (...args: Args) => unknown | PromiseLike<unknown>;
-type AttemptCompletionArgs = [runId: string, nodeId: string, iteration: number, attempt: number, runtimeOwnerId: string | null, finishedAtMs: number];
-type ResumeArgs = [params: {
-    runId: string;
-    expectedStatus?: string;
-    expectedRuntimeOwnerId: string | null;
-    expectedHeartbeatAtMs: number | null;
-    staleBeforeMs: number;
-    claimOwnerId: string;
-    claimHeartbeatAtMs: number;
-    requireStale?: boolean;
-}];
+type AttemptCompletionArgs = [
+    runId: string,
+    nodeId: string,
+    iteration: number,
+    attempt: number,
+    runtimeOwnerId: string | null,
+    finishedAtMs: number
+];
+type ResumeArgs = [
+    params: {
+        runId: string;
+        expectedStatus?: string;
+        expectedRuntimeOwnerId: string | null;
+        expectedHeartbeatAtMs: number | null;
+        staleBeforeMs: number;
+        claimOwnerId: string;
+        claimHeartbeatAtMs: number;
+        requireStale?: boolean;
+    }
+];
 type RealDbResource = Readonly<{
     readonly db: unknown;
     readonly path?: string;

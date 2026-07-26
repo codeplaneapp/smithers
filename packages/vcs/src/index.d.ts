@@ -190,7 +190,7 @@ declare function resolveGitBinary(): ResolvedBinary;
  * @param {{ platform?: NodeJS.Platform, accessFile?: typeof accessSync }} [options]
  * @returns {boolean}
  */
-declare function isJjExecutable(binaryPath: string, { platform, accessFile, }?: {
+declare function isJjExecutable(binaryPath: string, { platform, accessFile }?: {
     platform?: NodeJS.Platform;
     accessFile?: typeof accessSync;
 }): boolean;

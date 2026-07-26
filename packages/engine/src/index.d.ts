@@ -92,9 +92,9 @@ type AlertRuntimeServices$1 = {
 /** @typedef {import("@smithers-orchestrator/scheduler/SmithersWorkflowOptions").SmithersAlertPolicy} SmithersAlertPolicy */
 declare class AlertRuntime {
     /**
-   * @param {SmithersAlertPolicy} policy
-   * @param {AlertRuntimeServices} services
-   */
+     * @param {SmithersAlertPolicy} policy
+     * @param {AlertRuntimeServices} services
+     */
     constructor(policy: SmithersAlertPolicy, services: AlertRuntimeServices);
     /** @type {SmithersAlertPolicy} */
     policy: SmithersAlertPolicy;
@@ -391,8 +391,8 @@ declare function waitForChildRunToSettle(adapter: SmithersDb$1, childRunId: stri
  */
 declare class EventBus$1 extends EventEmitter<any> {
     /**
-   * @param {{ db?: BunSQLiteDatabase; logDir?: string; startSeq?: number }} opts
-   */
+     * @param {{ db?: BunSQLiteDatabase; logDir?: string; startSeq?: number }} opts
+     */
     constructor(opts: {
         db?: BunSQLiteDatabase;
         logDir?: string;
@@ -404,64 +404,64 @@ declare class EventBus$1 extends EventEmitter<any> {
     persistTail: Promise<void>;
     persistError: null;
     /**
-   * @param {SmithersEvent} event
-   * @returns {Effect.Effect<void, unknown>}
-   */
+     * @param {SmithersEvent} event
+     * @returns {Effect.Effect<void, unknown>}
+     */
     emitEvent(event: SmithersEvent): Effect.Effect<void, unknown>;
     /**
-   * @param {SmithersEvent} event
-   * @returns {Effect.Effect<void, unknown>}
-   */
+     * @param {SmithersEvent} event
+     * @returns {Effect.Effect<void, unknown>}
+     */
     emitEventWithPersist(event: SmithersEvent): Effect.Effect<void, unknown>;
     /**
-   * @param {SmithersEvent} event
-   * @returns {Promise<void>}
-   */
+     * @param {SmithersEvent} event
+     * @returns {Promise<void>}
+     */
     emitEventQueued(event: SmithersEvent): Promise<void>;
     /**
-   * @returns {Effect.Effect<void, unknown>}
-   */
+     * @returns {Effect.Effect<void, unknown>}
+     */
     flush(): Effect.Effect<void, unknown>;
     /**
-   * @param {CorrelatedSmithersEvent} event
-   * @returns {Effect.Effect<void, unknown>}
-   */
+     * @param {CorrelatedSmithersEvent} event
+     * @returns {Effect.Effect<void, unknown>}
+     */
     persist(event: CorrelatedSmithersEvent): Effect.Effect<void, unknown>;
     /**
-   * @param {CorrelatedSmithersEvent} event
-   * @returns {Effect.Effect<void, unknown>}
-   */
+     * @param {CorrelatedSmithersEvent} event
+     * @returns {Effect.Effect<void, unknown>}
+     */
     emitAndTrack(event: CorrelatedSmithersEvent): Effect.Effect<void, unknown>;
     /**
-   * @param {CorrelatedSmithersEvent} event
-   * @returns {Effect.Effect<void, unknown>}
-   */
+     * @param {CorrelatedSmithersEvent} event
+     * @returns {Effect.Effect<void, unknown>}
+     */
     enqueuePersist(event: CorrelatedSmithersEvent): Effect.Effect<void, unknown>;
     /**
-   * @param {CorrelatedSmithersEvent} event
-   * @returns {Effect.Effect<void, unknown>}
-   */
+     * @param {CorrelatedSmithersEvent} event
+     * @returns {Effect.Effect<void, unknown>}
+     */
     persistDb(event: CorrelatedSmithersEvent): Effect.Effect<void, unknown>;
     /**
-   * @param {string} label
-   * @param {(row: any) => unknown} method
-   * @param {any} row
-   * @returns {Effect.Effect<void, unknown>}
-   */
+     * @param {string} label
+     * @param {(row: any) => unknown} method
+     * @param {any} row
+     * @returns {Effect.Effect<void, unknown>}
+     */
     callDbPersistence(label: string, method: (row: any) => unknown, row: any): Effect.Effect<void, unknown>;
     /**
-   * @param {CorrelatedSmithersEvent} event
-   * @returns {Effect.Effect<void, unknown>}
-   */
+     * @param {CorrelatedSmithersEvent} event
+     * @returns {Effect.Effect<void, unknown>}
+     */
     persistLog(event: CorrelatedSmithersEvent): Effect.Effect<void, unknown>;
     /**
-   * @param {SmithersEvent} event
-   * @returns {CorrelatedSmithersEvent}
-   */
+     * @param {SmithersEvent} event
+     * @returns {CorrelatedSmithersEvent}
+     */
     attachCorrelation(event: SmithersEvent): CorrelatedSmithersEvent;
     /**
-   * @param {CorrelatedSmithersEvent} event
-   */
+     * @param {CorrelatedSmithersEvent} event
+     */
     eventLogAnnotations(event: CorrelatedSmithersEvent): {
         runId: string;
         eventType: "SupervisorStarted" | "SupervisorPollCompleted" | "RunAutoResumed" | "RunAutoResumeSkipped" | "RunStarted" | "RunStatusChanged" | "RunStateChanged" | "RunFinished" | "RunFailed" | "RunCancelled" | "RunContinuedAsNew" | "RunHijackRequested" | "RunHijacked" | "SandboxCreated" | "SandboxShipped" | "SandboxHeartbeat" | "SandboxBundleReceived" | "SandboxCompleted" | "SandboxFailed" | "SandboxDiffReviewRequested" | "SandboxDiffAccepted" | "SandboxDiffRejected" | "FrameCommitted" | "NodePending" | "NodeStarted" | "TaskHeartbeat" | "TaskHeartbeatTimeout" | "NodeFinished" | "NodeFailed" | "NodeCancelled" | "NodeSkipped" | "NodeRetrying" | "NodeWaitingApproval" | "NodeWaitingTimer" | "ApprovalRequested" | "ApprovalGranted" | "ApprovalAutoApproved" | "ApprovalDenied" | "ToolCallStarted" | "ToolCallFinished" | "NodeOutput" | "AgentEvent" | "RetryTaskStarted" | "RetryTaskFinished" | "RevertStarted" | "RevertFinished" | "TimeTravelStarted" | "TimeTravelFinished" | "TimeTravelJumped" | "EffectRevertStarted" | "EffectRevertFinished" | "EffectRevertFailed" | "SideEffectBoundaryCrossed" | "WorkflowReloadDetected" | "WorkflowReloaded" | "WorkflowReloadFailed" | "WorkflowReloadUnsafe" | "ScorerStarted" | "ScorerFinished" | "ScorerFailed" | "TokenUsageReported" | "SnapshotCaptured" | "RunForked" | "ReplayStarted" | "MemoryFactSet" | "MemoryRecalled" | "MemoryMessageSaved" | "OpenApiToolCalled" | "TimerCreated" | "TimerFired" | "TimerCancelled" | "AgentTraceEvent" | "AgentTraceSummary" | "AgentSessionEvent";
@@ -939,9 +939,9 @@ type HotReloadEvent$2 = {
 
 declare class WatchTree {
     /**
-   * @param {string} rootDir
-   * @param {WatchTreeOptions} [opts]
-   */
+     * @param {string} rootDir
+     * @param {WatchTreeOptions} [opts]
+     */
     constructor(rootDir: string, opts?: WatchTreeOptions$1);
     watchers: any[];
     rootDir: string;
@@ -969,9 +969,9 @@ declare class WatchTree {
     startEffect(): Effect.Effect<void, _smithers_orchestrator_errors_toSmithersError.SmithersError, never>;
     waitEffect(): Effect.Effect<any, never, never>;
     /**
-   * @param {string} name
-   * @returns {boolean}
-   */
+     * @param {string} name
+     * @returns {boolean}
+     */
     shouldIgnore(name: string): boolean;
     pollIntervalMs(): number;
     resetPollBackoff(): void;
@@ -980,28 +980,28 @@ declare class WatchTree {
     startPolling(): void;
     pollOnce(): Promise<boolean>;
     /**
-   * @param {string} dir
-   * @returns {Promise<Map<string, string>>}
-   */
+     * @param {string} dir
+     * @returns {Promise<Map<string, string>>}
+     */
     scanFileSignatures(dir: string): Promise<Map<string, string>>;
     /**
-   * @param {string} dir
-   * @param {Map<string, string>} files
-   * @returns {Promise<void>}
-   */
+     * @param {string} dir
+     * @param {Map<string, string>} files
+     * @returns {Promise<void>}
+     */
     scanDir(dir: string, files: Map<string, string>): Promise<void>;
     /**
-   * @param {Map<string, string>} next
-   */
+     * @param {Map<string, string>} next
+     */
     recordScanChanges(next: Map<string, string>): boolean;
     /**
-   * @param {string} dir
-   * @returns {Promise<void>}
-   */
+     * @param {string} dir
+     * @returns {Promise<void>}
+     */
     watchDir(dir: string): Promise<void>;
     /**
-   * @param {string} filePath
-   */
+     * @param {string} filePath
+     */
     onFileChange(filePath: string): void;
     flush(): void;
 }
@@ -1009,9 +1009,9 @@ type WatchTreeOptions$1 = WatchTreeOptions$2;
 
 declare class HotWorkflowController {
     /**
-   * @param {string} entryPath
-   * @param {HotReloadOptions} [opts]
-   */
+     * @param {string} entryPath
+     * @param {HotReloadOptions} [opts]
+     */
     constructor(entryPath: string, opts?: HotReloadOptions);
     entryPath: string;
     hotRoot: string;
@@ -1046,8 +1046,8 @@ declare class HotWorkflowController {
     initEffect(): Effect.Effect<void, SmithersError, never>;
     waitEffect(): Effect.Effect<any, never, never>;
     /**
-   * @param {string[]} changedFiles
-   */
+     * @param {string[]} changedFiles
+     */
     reloadEffect(changedFiles: string[]): Effect.Effect<HotReloadEvent$2 | {
         type: string;
         generation: number;
@@ -1641,9 +1641,9 @@ declare const COMPLETED_ACTIVITY_RESULTS_MAX: number;
 declare function completedActivityResultsSize(): number;
 declare class RetriableTaskFailure extends Error {
     /**
-   * @param {string} nodeId
-   * @param {number} attempt
-   */
+     * @param {string} nodeId
+     * @param {number} attempt
+     */
     constructor(nodeId: string, attempt: number);
     nodeId: string;
     attempt: number;

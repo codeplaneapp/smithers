@@ -17,8 +17,8 @@ type HostContainer$1 = {
 
 declare class SmithersRenderer {
     /**
-   * @param {SmithersRendererOptions} [options]
-   */
+     * @param {SmithersRendererOptions} [options]
+     */
     constructor(options?: SmithersRendererOptions);
     /** @type {HostContainer} */
     container: HostContainer;
@@ -27,14 +27,14 @@ declare class SmithersRenderer {
     /** @type {ExtractGraph | undefined} */
     extractGraph: ExtractGraph | undefined;
     /**
-   * @param {React.ReactElement} element
-   * @param {ExtractOptions} [opts]
-   * @returns {Promise<WorkflowGraph>}
-   */
+     * @param {React.ReactElement} element
+     * @param {ExtractOptions} [opts]
+     * @returns {Promise<WorkflowGraph>}
+     */
     render(element: React.ReactElement, opts?: ExtractOptions): Promise<WorkflowGraph>;
     /**
-   * @returns {HostNode | null}
-   */
+     * @returns {HostNode | null}
+     */
     getRoot(): HostNode | null;
     #private;
 }

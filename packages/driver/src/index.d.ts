@@ -941,86 +941,86 @@ declare class WorkflowDriver<Schema extends unknown = unknown> {
      */
     persistTaskOutput(task: TaskDescriptor, output: unknown): Promise<void>;
     /**
-   * @param {RunOptions} options
-   * @returns {Promise<RunResult>}
-   */
+     * @param {RunOptions} options
+     * @returns {Promise<RunResult>}
+     */
     run(options: RunOptions$1): Promise<RunResult$1>;
     /**
-   * The body of `run()` up to (but not including) durable run-state
-   * persistence — split out so every exit path (including the early
-   * signal-abort return) is persisted uniformly by `run()`.
-   * @param {string} runId
-   * @param {RunOptions} options
-   * @returns {Promise<RunResult>}
-   */
+     * The body of `run()` up to (but not including) durable run-state
+     * persistence — split out so every exit path (including the early
+     * signal-abort return) is persisted uniformly by `run()`.
+     * @param {string} runId
+     * @param {RunOptions} options
+     * @returns {Promise<RunResult>}
+     */
     runUntilTerminal(runId: string, options: RunOptions$1): Promise<RunResult$1>;
     /**
-   * @param {string} runId
-   * @param {RunOptions} options
-   * @returns {Promise<WorkflowSession>}
-   */
+     * @param {string} runId
+     * @param {RunOptions} options
+     * @returns {Promise<WorkflowSession>}
+     */
     initializeSession(runId: string, options: RunOptions$1): Promise<WorkflowSession$1>;
     /**
-   * @param {RenderContext} context
-   * @returns {Promise<EngineDecision>}
-   */
+     * @param {RenderContext} context
+     * @returns {Promise<EngineDecision>}
+     */
     renderAndSubmit(context: RenderContext): Promise<EngineDecision>;
     /**
-   * @param {readonly TaskDescriptor[]} tasks
-   * @returns {Promise<EngineDecision | RunResult>}
-   */
+     * @param {readonly TaskDescriptor[]} tasks
+     * @returns {Promise<EngineDecision | RunResult>}
+     */
     executeTasks(tasks: readonly TaskDescriptor[]): Promise<EngineDecision | RunResult$1>;
     /**
-   * Start a task without blocking the driver loop on its completion. Settled
-   * tasks queue in `settledTasks` and are reported to the session one at a
-   * time from `nextCompletionDecision`, so each decision is computed against
-   * fresh session state and a slow task never blocks scheduling work that
-   * became ready elsewhere in the graph (#267).
-   * @param {TaskDescriptor} task
-   * @param {{ runId: string; options: RunOptions; signal?: AbortSignal }} context
-   */
+     * Start a task without blocking the driver loop on its completion. Settled
+     * tasks queue in `settledTasks` and are reported to the session one at a
+     * time from `nextCompletionDecision`, so each decision is computed against
+     * fresh session state and a slow task never blocks scheduling work that
+     * became ready elsewhere in the graph (#267).
+     * @param {TaskDescriptor} task
+     * @param {{ runId: string; options: RunOptions; signal?: AbortSignal }} context
+     */
     startInflightTask(task: TaskDescriptor, context: {
         runId: string;
         options: RunOptions$1;
         signal?: AbortSignal;
     }): void;
     /**
-   * Wait for the next settled task (or an optional deadline) and report it to
-   * the session for a fresh decision. Completions that landed while a previous
-   * one was being processed drain from `settledTasks` first.
-   * @param {number | null} [deadlineMs]
-   * @returns {Promise<EngineDecision | RunResult>}
-   */
+     * Wait for the next settled task (or an optional deadline) and report it to
+     * the session for a fresh decision. Completions that landed while a previous
+     * one was being processed drain from `settledTasks` first.
+     * @param {number | null} [deadlineMs]
+     * @returns {Promise<EngineDecision | RunResult>}
+     */
     nextCompletionDecision(deadlineMs?: number | null): Promise<EngineDecision | RunResult$1>;
     /**
-   * Await every in-flight task without reporting further decisions. Used
-   * before run-level exits (failure, continue-as-new) so task executors are
-   * not abandoned mid-write. This matches the pre-#267 barrier semantics:
-   * failure reporting waits for in-flight siblings (bounded by their
-   * timeouts), trading latency for the invariant that no executor writes
-   * after the run is terminal. Fail-fast would need a per-run abort threaded
-   * through executors.
-   */
+     * Await every in-flight task without reporting further decisions. Used
+     * before run-level exits (failure, continue-as-new) so task executors are
+     * not abandoned mid-write. This matches the pre-#267 barrier semantics:
+     * failure reporting waits for in-flight siblings (bounded by their
+     * timeouts), trading latency for the invariant that no executor writes
+     * after the run is terminal. Fail-fast would need a per-run abort threaded
+     * through executors.
+     */
     drainInflight(): Promise<void>;
     /**
-   * @param {WaitReason} reason
-   * @returns {Promise<EngineDecision | RunResult>}
-   */
+     * @param {WaitReason} reason
+     * @returns {Promise<EngineDecision | RunResult>}
+     */
     handleWait(reason: WaitReason): Promise<EngineDecision | RunResult$1>;
     /**
-   * @param {unknown} transition
-   * @returns {Promise<RunResult>}
-   */
+     * @param {unknown} transition
+     * @returns {Promise<RunResult>}
+     */
     continueAsNew(transition: unknown): Promise<RunResult$1>;
     /**
-   * @returns {Promise<RunResult>}
-   */
+     * @returns {Promise<RunResult>}
+     */
     cancelRun(): Promise<RunResult$1>;
     /**
-   * @template A
-   * @param {unknown} effect
-   * @returns {Promise<A>}
-   */
+     * @template A
+     * @param {unknown} effect
+     * @returns {Promise<A>}
+     */
     runEffect<A>(effect: unknown): Promise<A>;
 }
 type CreateWorkflowSession = CreateWorkflowSession$1;

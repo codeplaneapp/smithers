@@ -773,8 +773,8 @@ declare class Gateway {
         updatedAtMs: any;
     };
     /**
-   * @param {GatewayOptions} [options]
-   */
+     * @param {GatewayOptions} [options]
+     */
     constructor(options?: GatewayOptions);
     protocol: number;
     features: string[];
@@ -1021,10 +1021,10 @@ declare class Gateway {
         version?: string;
     } | null;
     /**
-   * Identity block advertised on `GET /health`, the `health` RPC, and the WS
-   * hello. Lets a client verify it reached the gateway for the workspace it
-   * resolved locally instead of trusting whichever process owns the port.
-   */
+     * Identity block advertised on `GET /health`, the `health` RPC, and the WS
+     * hello. Lets a client verify it reached the gateway for the workspace it
+     * resolved locally instead of trusting whichever process owns the port.
+     */
     buildIdentity(): {
         workspaceRoot: string | null;
         backend: string | null;
@@ -1047,44 +1047,44 @@ declare class Gateway {
      */
     refreshWorkflowRegistryOnMiss(workflowKey: string): Promise<boolean>;
     /**
-   * A workflow's UI: the one it declared, or — by convention — a sibling
-   * `ui/<key>.tsx` next to its entry file's `workflows/` directory. The
-   * convention is resolved on every call (a cheap existsSync) so a UI file
-   * created while the gateway is running becomes servable immediately, with
-   * no workflow edit (which would break parked runs' resume hashes) and no
-   * gateway restart.
-   *
-   * @param {string} key
-   * @param {RegisteredWorkflow} entry
-   * @returns {GatewayUiConfig | null}
-   */
+     * A workflow's UI: the one it declared, or — by convention — a sibling
+     * `ui/<key>.tsx` next to its entry file's `workflows/` directory. The
+     * convention is resolved on every call (a cheap existsSync) so a UI file
+     * created while the gateway is running becomes servable immediately, with
+     * no workflow edit (which would break parked runs' resume hashes) and no
+     * gateway restart.
+     *
+     * @param {string} key
+     * @param {RegisteredWorkflow} entry
+     * @returns {GatewayUiConfig | null}
+     */
     resolvedUiFor(key: string, entry: RegisteredWorkflow): GatewayUiConfig | null;
     /**
-   * @returns {GatewayUiMount[]}
-   */
+     * @returns {GatewayUiMount[]}
+     */
     getUiMounts(): GatewayUiMount[];
     /**
-   * Where to send a request for the conventional `/workflows/<key>` route when
-   * the workflow mounts its UI somewhere else (a `<UI path="…">` declaration).
-   * The conventional route is the only one clients can construct without
-   * loading the module, so it is also the route that triggers a lazy
-   * registration — a workflow whose module loads AFTER listen() would
-   * otherwise register, mount its UI at the declared path, and still 404 the
-   * request that loaded it (#1362).
-   *
-   * @param {string} workflowKey
-   * @param {URL} url
-   * @returns {string | null}
-   */
+     * Where to send a request for the conventional `/workflows/<key>` route when
+     * the workflow mounts its UI somewhere else (a `<UI path="…">` declaration).
+     * The conventional route is the only one clients can construct without
+     * loading the module, so it is also the route that triggers a lazy
+     * registration — a workflow whose module loads AFTER listen() would
+     * otherwise register, mount its UI at the declared path, and still 404 the
+     * request that loaded it (#1362).
+     *
+     * @param {string} workflowKey
+     * @param {URL} url
+     * @returns {string | null}
+     */
     workflowUiMountRedirect(workflowKey: string, url: URL): string | null;
     /**
-   * @param {string} pathname
-   * @returns {GatewayUiMount | null}
-   */
+     * @param {string} pathname
+     * @returns {GatewayUiMount | null}
+     */
     findUiMount(pathname: string): GatewayUiMount | null;
     /**
-   * @param {string} pathname
-   */
+     * @param {string} pathname
+     */
     resolveUiMatch(pathname: string): {
         pathname: string;
         mountPath: string;
@@ -1092,8 +1092,8 @@ declare class Gateway {
         config: GatewayUiMount;
     } | null;
     /**
-   * @param {GatewayUiMount} mount
-   */
+     * @param {GatewayUiMount} mount
+     */
     uiBootConfig(mount: GatewayUiMount): {
         apiVersion: "v1";
         kind: "workflow" | "gateway" | "operator";
@@ -1105,14 +1105,14 @@ declare class Gateway {
         props: Record<string, unknown>;
     };
     /**
-   * @param {{ config: GatewayUiMount }} match
-   */
+     * @param {{ config: GatewayUiMount }} match
+     */
     renderUiIndex(match: {
         config: GatewayUiMount;
     }): string;
     /**
-   * @param {{ config: GatewayUiMount; assetPath: string | null }} match
-   */
+     * @param {{ config: GatewayUiMount; assetPath: string | null }} match
+     */
     renderUiAsset(match: {
         config: GatewayUiMount;
         assetPath: string | null;
@@ -1121,19 +1121,19 @@ declare class Gateway {
         contentType: string;
     } | null>;
     /**
-   * @param {IncomingMessage} req
-   * @param {ServerResponse} res
-   */
+     * @param {IncomingMessage} req
+     * @param {ServerResponse} res
+     */
     handleUiHttp(req: IncomingMessage, res: ServerResponse$1): Promise<boolean>;
     /**
-   * @param {IncomingMessage} req
-   * @param {ServerResponse} res
-   */
+     * @param {IncomingMessage} req
+     * @param {ServerResponse} res
+     */
     handleRootRequest(req: IncomingMessage, res: ServerResponse$1): void;
     /**
-   * @param {string} key
-   * @param {RegisteredWorkflow} entry
-   */
+     * @param {string} key
+     * @param {RegisteredWorkflow} entry
+     */
     workflowSummary(key: string, entry: RegisteredWorkflow): {
         hasUi: boolean;
         uiPath: any;
@@ -1143,9 +1143,9 @@ declare class Gateway {
         key: string;
     };
     /**
-   * @param {boolean | undefined} hasUi
-   * @param {boolean | undefined} [includeSystem] System (internal plumbing) workflows are hidden unless true.
-   */
+     * @param {boolean | undefined} hasUi
+     * @param {boolean | undefined} [includeSystem] System (internal plumbing) workflows are hidden unless true.
+     */
     listWorkflowSummaries(hasUi: boolean | undefined, includeSystem?: boolean | undefined): {
         hasUi: boolean;
         uiPath: any;
@@ -1156,185 +1156,185 @@ declare class Gateway {
     }[];
     authModeLabel(): string;
     /**
-   * @param {string} [runId]
-   * @returns {number}
-   */
+     * @param {string} [runId]
+     * @returns {number}
+     */
     getDevToolsSubscriberCount(runId?: string): number;
     /**
-   * Record a single subscribe attempt outcome. Centralised so that invalid
-   * runId, missing run, SeqOutOfRange, etc. still update
-   * `smithers_devtools_subscribe_total{result="error"}`.
-   *
-   * @param {"ok" | "error"} result
-   */
+     * Record a single subscribe attempt outcome. Centralised so that invalid
+     * runId, missing run, SeqOutOfRange, etc. still update
+     * `smithers_devtools_subscribe_total{result="error"}`.
+     *
+     * @param {"ok" | "error"} result
+     */
     recordDevToolsSubscribeAttempt(result: "ok" | "error"): void;
     /**
-   * Push the absolute active-subscriber count to the Prometheus gauge. The
-   * `runId` is hashed for bounded cardinality.
-   *
-   * @param {string} runId
-   */
+     * Push the absolute active-subscriber count to the Prometheus gauge. The
+     * `runId` is hashed for bounded cardinality.
+     *
+     * @param {string} runId
+     */
     publishDevToolsActiveSubscribersGauge(runId: string): void;
     /**
-   * @param {ConnectionState} connection
-   * @param {string} streamId
-   * @param {string} runId
-   * @returns {AbortController}
-   */
+     * @param {ConnectionState} connection
+     * @param {string} streamId
+     * @param {string} runId
+     * @returns {AbortController}
+     */
     registerDevToolsSubscriber(connection: ConnectionState, streamId: string, runId: string): AbortController;
     /**
-   * @param {ConnectionState} connection
-   * @param {string} streamId
-   * @param {Record<string, unknown>} [details]
-   */
+     * @param {ConnectionState} connection
+     * @param {string} streamId
+     * @param {Record<string, unknown>} [details]
+     */
     unregisterDevToolsSubscriber(connection: ConnectionState, streamId: string, details?: Record<string, unknown>): void;
     /**
-   * Flag every active subscriber for `runId` to rebaseline on its next emit.
-   * Called when the gateway observes `TimeTravelJumped` for that run.
-   *
-   * @param {string} runId
-   */
+     * Flag every active subscriber for `runId` to rebaseline on its next emit.
+     * Called when the gateway observes `TimeTravelJumped` for that run.
+     *
+     * @param {string} runId
+     */
     invalidateDevToolsSubscribersForRun(runId: string): void;
     /**
-   * Authorize a devtools request against the connection's `subscribe` set.
-   *
-   * If the client provided a `subscribe` filter at `connect` time, the run
-   * must be in that set before any DB lookup happens.
-   *
-   * @param {ConnectionState | null | undefined} connection
-   * @param {string} runId
-   * @returns {boolean}
-   */
+     * Authorize a devtools request against the connection's `subscribe` set.
+     *
+     * If the client provided a `subscribe` filter at `connect` time, the run
+     * must be in that set before any DB lookup happens.
+     *
+     * @param {ConnectionState | null | undefined} connection
+     * @param {string} runId
+     * @returns {boolean}
+     */
     isDevToolsRunAuthorized(connection: ConnectionState | null | undefined, runId: string): boolean;
     /**
-   * @param {ConnectionState} connection
-   */
+     * @param {ConnectionState} connection
+     */
     cleanupDevToolsSubscribers(connection: ConnectionState): void;
     /**
-   * @param {string} runId
-   * @returns {number}
-   */
+     * @param {string} runId
+     * @returns {number}
+     */
     getRunEventSubscriberCount(runId: string): number;
     /**
-   * @param {string} runId
-   */
+     * @param {string} runId
+     */
     deleteRunEventWindow(runId: string): void;
     /**
-   * @param {string} runId
-   */
+     * @param {string} runId
+     */
     clearTerminalRunEventWindowTimer(runId: string): void;
     /**
-   * @param {string} runId
-   */
+     * @param {string} runId
+     */
     scheduleTerminalRunEventWindowRelease(runId: string): void;
     /**
-   * @param {string} runId
-   * @returns {boolean}
-   */
+     * @param {string} runId
+     * @returns {boolean}
+     */
     releaseTerminalRunEventWindow(runId: string): boolean;
     /**
-   * @param {string} runId
-   */
+     * @param {string} runId
+     */
     markRunEventWindowTerminal(runId: string): void;
     enforceRunEventWindowLimit(): void;
     /**
-   * @param {string} runId
-   * @returns {{ nextSeq: number; window: Array<Record<string, unknown>> }}
-   */
+     * @param {string} runId
+     * @returns {{ nextSeq: number; window: Array<Record<string, unknown>> }}
+     */
     getRunEventWindow(runId: string): {
         nextSeq: number;
         window: Array<Record<string, unknown>>;
     };
     /**
-   * @param {string} event
-   * @param {unknown} payload
-   * @param {number} stateVersion
-   * @returns {Record<string, unknown> | null}
-   */
+     * @param {string} event
+     * @param {unknown} payload
+     * @param {number} stateVersion
+     * @returns {Record<string, unknown> | null}
+     */
     appendRunEventWindow(event: string, payload: unknown, stateVersion: number): Record<string, unknown> | null;
     /**
-   * @param {string} runId
-   * @returns {number}
-   */
+     * @param {string} runId
+     * @returns {number}
+     */
     getRunEventCurrentSeq(runId: string): number;
     /**
-   * First cap a run-event subscription would violate, or null when it fits.
-   * The caller checks this immediately before registration, with no await in
-   * between, so rejection happens before a stream map, heartbeat, or counter
-   * is allocated.
-   * @param {ConnectionState} connection
-   * @param {string} runId
-   * @returns {{ scope: "global" | "user" | "connection" | "run"; limit: number } | null}
-   */
+     * First cap a run-event subscription would violate, or null when it fits.
+     * The caller checks this immediately before registration, with no await in
+     * between, so rejection happens before a stream map, heartbeat, or counter
+     * is allocated.
+     * @param {ConnectionState} connection
+     * @param {string} runId
+     * @returns {{ scope: "global" | "user" | "connection" | "run"; limit: number } | null}
+     */
     runEventStreamCapViolation(connection: ConnectionState, runId: string): {
         scope: "global" | "user" | "connection" | "run";
         limit: number;
     } | null;
     /**
-   * @param {ConnectionState} connection
-   * @param {string} streamId
-   * @param {string} runId
-   * @param {boolean} [replayPending]
-   * @returns {() => void}
-   */
+     * @param {ConnectionState} connection
+     * @param {string} streamId
+     * @param {string} runId
+     * @param {boolean} [replayPending]
+     * @returns {() => void}
+     */
     registerRunEventSubscriber(connection: ConnectionState, streamId: string, runId: string, replayPending?: boolean): () => void;
     /**
-   * Start the connection's shared run-event heartbeat timer. Each WebSocket
-   * connection owns at most ONE heartbeat interval no matter how many run
-   * event streams it registers; every tick emits one `run.heartbeat` frame
-   * per active stream. No-op while the timer is already running; the timer
-   * stops when the last stream unregisters (or the connection tears down).
-   * @param {ConnectionState} connection
-   */
+     * Start the connection's shared run-event heartbeat timer. Each WebSocket
+     * connection owns at most ONE heartbeat interval no matter how many run
+     * event streams it registers; every tick emits one `run.heartbeat` frame
+     * per active stream. No-op while the timer is already running; the timer
+     * stops when the last stream unregisters (or the connection tears down).
+     * @param {ConnectionState} connection
+     */
     startRunEventHeartbeat(connection: ConnectionState): void;
     /**
-   * @param {ConnectionState} connection
-   */
+     * @param {ConnectionState} connection
+     */
     stopRunEventHeartbeat(connection: ConnectionState): void;
     /**
-   * @param {ConnectionState} connection
-   * @param {string} streamId
-   */
+     * @param {ConnectionState} connection
+     * @param {string} streamId
+     */
     unregisterRunEventSubscriber(connection: ConnectionState, streamId: string): void;
     /**
-   * @param {ConnectionState} connection
-   */
+     * @param {ConnectionState} connection
+     */
     cleanupRunEventSubscribers(connection: ConnectionState): void;
     /**
-   * @param {ConnectionState} connection
-   * @param {string} streamId
-   * @param {Record<string, unknown>} frame
-   * @param {boolean} [replay]
-   */
+     * @param {ConnectionState} connection
+     * @param {string} streamId
+     * @param {Record<string, unknown>} frame
+     * @param {boolean} [replay]
+     */
     sendRunEventStreamFrame(connection: ConnectionState, streamId: string, frame: Record<string, unknown>, replay?: boolean): void;
     /**
-   * Drain a run event stream's outbound queue against the socket's buffered
-   * bytes. If the socket is congested past the high-water mark we re-arm a
-   * short retry instead of dropping frames; the queue cap (enforced at enqueue
-   * time) is what bounds memory and trips the slow-consumer disconnect.
-   * @param {ConnectionState} connection
-   * @param {RunEventStreamState} stream
-   */
+     * Drain a run event stream's outbound queue against the socket's buffered
+     * bytes. If the socket is congested past the high-water mark we re-arm a
+     * short retry instead of dropping frames; the queue cap (enforced at enqueue
+     * time) is what bounds memory and trips the slow-consumer disconnect.
+     * @param {ConnectionState} connection
+     * @param {RunEventStreamState} stream
+     */
     drainRunEventStream(connection: ConnectionState, stream: RunEventStreamState): void;
     /**
-   * Tear down a single slow run event subscriber whose outbound queue overflowed.
-   * The WS connection itself stays open so other streams keep receiving events.
-   * @param {ConnectionState} connection
-   * @param {RunEventStreamState} stream
-   */
+     * Tear down a single slow run event subscriber whose outbound queue overflowed.
+     * The WS connection itself stays open so other streams keep receiving events.
+     * @param {ConnectionState} connection
+     * @param {RunEventStreamState} stream
+     */
     disconnectRunEventStreamForBackpressure(connection: ConnectionState, stream: RunEventStreamState): void;
     /**
-   * @param {ConnectionState} connection
-   * @param {string} streamId
-   * @param {string} runId
-   * @param {number} fromSeq
-   * @param {number} toSeq
-   * @param {unknown} snapshot
-   */
+     * @param {ConnectionState} connection
+     * @param {string} streamId
+     * @param {string} runId
+     * @param {number} fromSeq
+     * @param {number} toSeq
+     * @param {unknown} snapshot
+     */
     sendRunGapResync(connection: ConnectionState, streamId: string, runId: string, fromSeq: number, toSeq: number, snapshot: unknown): void;
     /**
-   * @param {string} runId
-   */
+     * @param {string} runId
+     */
     buildRunSnapshot(runId: string): Promise<{
         runState?: _smithers_orchestrator_db_runState.RunStateView | undefined;
         workflowKey: string;
@@ -1361,44 +1361,44 @@ declare class Gateway {
         configJson: string | null;
     } | null>;
     /**
-   * @param {GatewayTransport} transport
-   * @param {string} frameType
-   * @param {GatewayMetricLabels} [labels]
-   */
+     * @param {GatewayTransport} transport
+     * @param {string} frameType
+     * @param {GatewayMetricLabels} [labels]
+     */
     recordMessageReceived(transport: GatewayTransport, frameType: string, labels?: GatewayMetricLabels): void;
     /**
-   * @param {GatewayTransport} transport
-   * @param {string} frameType
-   * @param {GatewayMetricLabels} [labels]
-   */
+     * @param {GatewayTransport} transport
+     * @param {string} frameType
+     * @param {GatewayMetricLabels} [labels]
+     */
     recordMessageSent(transport: GatewayTransport, frameType: string, labels?: GatewayMetricLabels): void;
     /**
-   * @param {GatewayTransport} transport
-   * @param {"success" | "failure"} outcome
-   * @param {GatewayRequestContext} context
-   * @param {Record<string, unknown>} [details]
-   * @param {"debug" | "info" | "warning"} [level]
-   */
+     * @param {GatewayTransport} transport
+     * @param {"success" | "failure"} outcome
+     * @param {GatewayRequestContext} context
+     * @param {Record<string, unknown>} [details]
+     * @param {"debug" | "info" | "warning"} [level]
+     */
     recordAuthEvent(transport: GatewayTransport, outcome: "success" | "failure", context: GatewayRequestContext, details?: Record<string, unknown>, level?: "debug" | "info" | "warning"): void;
     /**
-   * @param {GatewayRequestContext} context
-   * @param {RequestFrame} frame
-   * @param {() => Promise<ResponseFrame>} handler
-   * @returns {Promise<ResponseFrame>}
-   */
+     * @param {GatewayRequestContext} context
+     * @param {RequestFrame} frame
+     * @param {() => Promise<ResponseFrame>} handler
+     * @returns {Promise<ResponseFrame>}
+     */
     executeRpc(context: GatewayRequestContext, frame: RequestFrame, handler: () => Promise<ResponseFrame>): Promise<ResponseFrame>;
     /**
-   * @param {GatewayRequestContext} context
-   * @param {RequestFrame} frame
-   * @param {ResponseFrame} response
-   * @returns {Effect.Effect<void>}
-   */
+     * @param {GatewayRequestContext} context
+     * @param {RequestFrame} frame
+     * @param {ResponseFrame} response
+     * @returns {Effect.Effect<void>}
+     */
     rpcSuccessEffect(context: GatewayRequestContext, frame: RequestFrame, response: ResponseFrame): Effect.Effect<void>;
     /**
-   * @param {ServerResponse} res
-   * @param {number} status
-   * @param {ResponseFrame} response
-   */
+     * @param {ServerResponse} res
+     * @param {number} status
+     * @param {ResponseFrame} response
+     */
     sendHttpRpcResponse(res: ServerResponse$1, status: number, response: ResponseFrame): void;
     /**
      * @param {Record<string, unknown>} frame
@@ -1473,24 +1473,24 @@ declare class Gateway {
      */
     handleHttpApi(req: IncomingMessage, res: ServerResponse$1): Promise<void>;
     /**
-   * @param {SmithersDb} adapter
-   * @param {string} runId
-   * @param {string} signalName
-   * @param {string | null} correlationId
-   */
+     * @param {SmithersDb} adapter
+     * @param {string} runId
+     * @param {string} signalName
+     * @param {string | null} correlationId
+     */
     runWaitsForSignal(adapter: SmithersDb$4, runId: string, signalName: string, correlationId: string | null): Promise<boolean>;
     /**
-   * @param {RegisteredWorkflow} entry
-   * @param {string} signalName
-   * @param {string | null} correlationId
-   * @param {string} [explicitRunId]
-   */
+     * @param {RegisteredWorkflow} entry
+     * @param {string} signalName
+     * @param {string | null} correlationId
+     * @param {string} [explicitRunId]
+     */
     findMatchingWebhookRuns(entry: RegisteredWorkflow, signalName: string, correlationId: string | null, explicitRunId?: string): Promise<any[]>;
     /**
-   * @param {IncomingMessage} req
-   * @param {ServerResponse} res
-   * @param {string} workflowKey
-   */
+     * @param {IncomingMessage} req
+     * @param {ServerResponse} res
+     * @param {string} workflowKey
+     */
     handleWebhook(req: IncomingMessage, res: ServerResponse$1, workflowKey: string): Promise<void>;
     /**
      * Register a typed extension namespace exposing declarative resources,
@@ -1519,30 +1519,30 @@ declare class Gateway {
      */
     register(key: string, workflow: SmithersWorkflow, options?: GatewayRegisterOptions): this;
     /**
-   * Gate a `/v1/pty/hijack` websocket upgrade: authenticate the request (same
-   * token/Host/Origin semantics as the HTTP API, token also accepted as a
-   * `?token=` query param since browsers cannot set websocket headers), check
-   * the hijack scope, validate the target run, then hand the socket to
-   * `startPtyHijackSession`. The Origin/Host allow-list already ran in the
-   * shared `upgrade` handler before this method is reached.
-   *
-   * @param {IncomingMessage} req
-   * @param {import("node:stream").Duplex} socket
-   * @param {Buffer} head
-   * @param {WebSocketServer} wsServer
-   * @param {URL} url
-   */
+     * Gate a `/v1/pty/hijack` websocket upgrade: authenticate the request (same
+     * token/Host/Origin semantics as the HTTP API, token also accepted as a
+     * `?token=` query param since browsers cannot set websocket headers), check
+     * the hijack scope, validate the target run, then hand the socket to
+     * `startPtyHijackSession`. The Origin/Host allow-list already ran in the
+     * shared `upgrade` handler before this method is reached.
+     *
+     * @param {IncomingMessage} req
+     * @param {import("node:stream").Duplex} socket
+     * @param {Buffer} head
+     * @param {WebSocketServer} wsServer
+     * @param {URL} url
+     */
     handlePtyHijackUpgrade(req: IncomingMessage, socket: node_stream.Duplex, head: Buffer, wsServer: WebSocketServer, url: URL): Promise<void>;
     /**
-   * Run the host-provided hijack command inside a real PTY and pipe it over an
-   * accepted websocket. Mirrors the terminal transport smithers cloud UIs use:
-   * binary frames are raw PTY bytes in both directions; text frames are JSON
-   * control messages (client sends `{"type":"resize","cols","rows"}`, the
-   * server sends `{"type":"exit","code"}` before a clean close).
-   *
-   * @param {import("ws").WebSocket} ws
-   * @param {{ runId: string; nodeId?: string; cols: number; rows: number }} params
-   */
+     * Run the host-provided hijack command inside a real PTY and pipe it over an
+     * accepted websocket. Mirrors the terminal transport smithers cloud UIs use:
+     * binary frames are raw PTY bytes in both directions; text frames are JSON
+     * control messages (client sends `{"type":"resize","cols","rows"}`, the
+     * server sends `{"type":"exit","code"}` before a clean close).
+     *
+     * @param {import("ws").WebSocket} ws
+     * @param {{ runId: string; nodeId?: string; cols: number; rows: number }} params
+     */
     startPtyHijackSession(ws: ws.WebSocket, params: {
         runId: string;
         nodeId?: string;
@@ -1550,8 +1550,8 @@ declare class Gateway {
         rows: number;
     }): void;
     /**
-   * @param {{ port?: number; host?: string; path?: string }} [options]
-   */
+     * @param {{ port?: number; host?: string; path?: string }} [options]
+     */
     listen(options?: {
         port?: number;
         host?: string;
@@ -1561,18 +1561,18 @@ declare class Gateway {
     ticketWatchers: Map<any, any> | null | undefined;
     startScheduler(): void;
     /**
-   * Record client activity for idle spin-down (spec decision 14). Called on
-   * every RPC (HTTP + WS) and on each new WS connection. If the daemon had
-   * already fired onIdle but a client came back, re-arm the monitor.
-   */
+     * Record client activity for idle spin-down (spec decision 14). Called on
+     * every RPC (HTTP + WS) and on each new WS connection. If the daemon had
+     * already fired onIdle but a client came back, re-arm the monitor.
+     */
     markActivity(): void;
     /**
-   * Whether the daemon has nothing to do: no attached WS clients, no in-flight
-   * runs, and no registered crons or pending durable timers. Schedules count as
-   * "busy" so an autostarted daemon that owns a schedule does not idle-exit and
-   * silently stop firing it.
-   * @returns {boolean}
-   */
+     * Whether the daemon has nothing to do: no attached WS clients, no in-flight
+     * runs, and no registered crons or pending durable timers. Schedules count as
+     * "busy" so an autostarted daemon that owns a schedule does not idle-exit and
+     * silently stop firing it.
+     * @returns {boolean}
+     */
     isIdle(): boolean;
     startIdleMonitor(): void;
     stopIdleMonitor(): void;
@@ -1584,31 +1584,31 @@ declare class Gateway {
     syncRegisteredSchedules(): Promise<void>;
     processDueCrons(): Promise<void>;
     /**
-   * Earliest fire time across a run's still-pending timer nodes, or null when the
-   * run has no timer waiting to fire. Lets the scheduler tick decide when a
-   * torn-down `waiting-timer` run is due to resume without re-driving it blindly.
-   * @param {SmithersDb} adapter
-   * @param {string} runId
-   * @returns {Promise<number | null>}
-   */
+     * Earliest fire time across a run's still-pending timer nodes, or null when the
+     * run has no timer waiting to fire. Lets the scheduler tick decide when a
+     * torn-down `waiting-timer` run is due to resume without re-driving it blindly.
+     * @param {SmithersDb} adapter
+     * @param {string} runId
+     * @returns {Promise<number | null>}
+     */
     runTimerDueAtMs(adapter: SmithersDb$4, runId: string): Promise<number | null>;
     /**
-   * Wake suspended timer runs whose fire time has passed. The engine releases the
-   * worker when a `<Timer>` starts waiting, persisting only the fire time, so this
-   * sweep is what resumes the run on its own without a live process holding CPU.
-   * Mirrors `processDueCrons`: one pass per shared DB, attribute each run to its
-   * true workflow key, and let `resumeRunIfNeeded` re-acquire the durable lease.
-   * @returns {Promise<void>}
-   */
+     * Wake suspended timer runs whose fire time has passed. The engine releases the
+     * worker when a `<Timer>` starts waiting, persisting only the fire time, so this
+     * sweep is what resumes the run on its own without a live process holding CPU.
+     * Mirrors `processDueCrons`: one pass per shared DB, attribute each run to its
+     * true workflow key, and let `resumeRunIfNeeded` re-acquire the durable lease.
+     * @returns {Promise<void>}
+     */
     processDueTimers(): Promise<void>;
     timerSweepInFlight: boolean | undefined;
     /**
-   * @param {string} workflowKey
-   * @param {Record<string, unknown>} input
-   * @param {RunStartAuthContext} auth
-   * @param {string} [runId]
-   * @param {{ resume?: boolean; maxConcurrency?: number; allowNetwork?: boolean; maxOutputBytes?: number; toolTimeoutMs?: number; startedBy?: import("@smithers-orchestrator/driver/RunStartedBy").RunStartedBy }} [options]
-   */
+     * @param {string} workflowKey
+     * @param {Record<string, unknown>} input
+     * @param {RunStartAuthContext} auth
+     * @param {string} [runId]
+     * @param {{ resume?: boolean; maxConcurrency?: number; allowNetwork?: boolean; maxOutputBytes?: number; toolTimeoutMs?: number; startedBy?: import("@smithers-orchestrator/driver/RunStartedBy").RunStartedBy }} [options]
+     */
     startRun(workflowKey: string, input: Record<string, unknown>, auth: RunStartAuthContext, runId?: string, options?: {
         resume?: boolean;
         maxConcurrency?: number;
@@ -1621,49 +1621,49 @@ declare class Gateway {
         workflow: string;
     }>;
     /**
-   * @param {string} runId
-   * @param {string} workflowKey
-   * @param {SmithersDb} adapter
-   * @param {RunStartAuthContext} auth
-   */
+     * @param {string} runId
+     * @param {string} workflowKey
+     * @param {SmithersDb} adapter
+     * @param {RunStartAuthContext} auth
+     */
     resumeRunIfNeeded(runId: string, workflowKey: string, adapter: SmithersDb$4, auth: RunStartAuthContext): Promise<void>;
     /**
-   * @param {string} runId
-   * @param {string} workflowKey
-   * @param {SmithersDb} adapter
-   * @param {RunStartAuthContext} auth
-   */
+     * @param {string} runId
+     * @param {string} workflowKey
+     * @param {SmithersDb} adapter
+     * @param {RunStartAuthContext} auth
+     */
     resumeRunInBackground(runId: string, workflowKey: string, adapter: SmithersDb$4, auth: RunStartAuthContext): void;
     /**
-   * Authenticated WS connection count. `connections` holds every open RPC
-   * websocket while `preAuthConnections` tracks the subset still awaiting a
-   * successful `connect`, so the difference is the authenticated pool that
-   * `maxConnections` bounds (#1008).
-   * @returns {number}
-   */
+     * Authenticated WS connection count. `connections` holds every open RPC
+     * websocket while `preAuthConnections` tracks the subset still awaiting a
+     * successful `connect`, so the difference is the authenticated pool that
+     * `maxConnections` bounds (#1008).
+     * @returns {number}
+     */
     authenticatedConnectionCount(): number;
     /**
-   * @param {WebSocket} ws
-   * @param {IncomingMessage} req
-   */
+     * @param {WebSocket} ws
+     * @param {IncomingMessage} req
+     */
     handleSocket(ws: WebSocket, req: IncomingMessage): void;
     /**
-   * @param {ConnectionState} connection
-   */
+     * @param {ConnectionState} connection
+     */
     startHeartbeat(connection: ConnectionState): void;
     /**
-   * @param {ConnectionState} connection
-   * @param {IncomingMessage} req
-   * @param {string} id
-   * @param {unknown} params
-   * @returns {Promise<ResponseFrame>}
-   */
+     * @param {ConnectionState} connection
+     * @param {IncomingMessage} req
+     * @param {string} id
+     * @param {unknown} params
+     * @returns {Promise<ResponseFrame>}
+     */
     handleConnect(connection: ConnectionState, req: IncomingMessage, id: string, params: unknown): Promise<ResponseFrame>;
     /**
-   * @param {IncomingMessage} req
-   * @param {ConnectRequest} request
-   * @returns {Promise< | { ok: true; role: string; scopes: string[]; userId?: string } | { ok: false; code: string; message: string } >}
-   */
+     * @param {IncomingMessage} req
+     * @param {ConnectRequest} request
+     * @returns {Promise< | { ok: true; role: string; scopes: string[]; userId?: string } | { ok: false; code: string; message: string } >}
+     */
     authenticate(req: IncomingMessage, request: ConnectRequest): Promise<{
         ok: true;
         role: string;
@@ -1675,50 +1675,50 @@ declare class Gateway {
         message: string;
     }>;
     /**
-   * Whether `req`'s browser `Origin` is permitted by the configured auth-mode
-   * Origin allow-list. No auth, an empty/unset `allowedOrigins`, or a missing
-   * `Origin` header (server-to-server / CLI) are always allowed; a present
-   * `Origin` must be on the list. Enforced for both the HTTP RPC path (via
-   * `authenticateRequest`) and the WS `upgrade` handler (#446).
-   * @param {IncomingMessage} req
-   * @returns {boolean}
-   */
+     * Whether `req`'s browser `Origin` is permitted by the configured auth-mode
+     * Origin allow-list. No auth, an empty/unset `allowedOrigins`, or a missing
+     * `Origin` header (server-to-server / CLI) are always allowed; a present
+     * `Origin` must be on the list. Enforced for both the HTTP RPC path (via
+     * `authenticateRequest`) and the WS `upgrade` handler (#446).
+     * @param {IncomingMessage} req
+     * @returns {boolean}
+     */
     isOriginAllowed(req: IncomingMessage): boolean;
     /**
-   * Origin gate that adapts to auth mode.
-   *
-   * With auth configured the token is the gate, so an empty allow-list is
-   * permissive (delegates to `isOriginAllowed`). With NO auth every request is
-   * an implicit operator, so a cross-origin browser page must be rejected even
-   * though `Host` is loopback: the page points a `fetch`/`WebSocket` straight at
-   * `http://127.0.0.1:<port>` — no DNS rebinding, so the Host gate can't see it —
-   * and would otherwise drive `launchRun` (real compute/shell) as operator. Only
-   * an absent, `"null"`, or loopback Origin may drive an unauthenticated daemon.
-   * `--insecure` / `SMITHERS_GATEWAY_TRUST_ANY_HOST` opts out, mirroring the Host
-   * gate for an explicit remote bind. (#446)
-   * @param {IncomingMessage} req
-   * @returns {boolean}
-   */
+     * Origin gate that adapts to auth mode.
+     *
+     * With auth configured the token is the gate, so an empty allow-list is
+     * permissive (delegates to `isOriginAllowed`). With NO auth every request is
+     * an implicit operator, so a cross-origin browser page must be rejected even
+     * though `Host` is loopback: the page points a `fetch`/`WebSocket` straight at
+     * `http://127.0.0.1:<port>` — no DNS rebinding, so the Host gate can't see it —
+     * and would otherwise drive `launchRun` (real compute/shell) as operator. Only
+     * an absent, `"null"`, or loopback Origin may drive an unauthenticated daemon.
+     * `--insecure` / `SMITHERS_GATEWAY_TRUST_ANY_HOST` opts out, mirroring the Host
+     * gate for an explicit remote bind. (#446)
+     * @param {IncomingMessage} req
+     * @returns {boolean}
+     */
     isRequestOriginAllowed(req: IncomingMessage): boolean;
     /**
-   * DNS-rebinding defense (spec decision 16a). An unauthenticated daemon grants
-   * operator scope to every request, so a browser page at a name rebound to
-   * 127.0.0.1 could drive `launchRun` (real compute/shell). Browsers send the
-   * rebound name in `Host`, so requiring a loopback `Host` closes the hole even
-   * when the Origin allow-list is empty (permissive). Only the unauthenticated
-   * path is gated: with auth configured the token is the gate and a remote
-   * client legitimately sends a non-loopback Host. `SMITHERS_GATEWAY_TRUST_ANY_HOST=1`
-   * opts out for an explicit `--insecure` remote bind. A missing/empty Host
-   * (non-browser CLI, HTTP/1.0) is not a rebinding vector and is allowed.
-   * @param {IncomingMessage} req
-   * @returns {boolean}
-   */
+     * DNS-rebinding defense (spec decision 16a). An unauthenticated daemon grants
+     * operator scope to every request, so a browser page at a name rebound to
+     * 127.0.0.1 could drive `launchRun` (real compute/shell). Browsers send the
+     * rebound name in `Host`, so requiring a loopback `Host` closes the hole even
+     * when the Origin allow-list is empty (permissive). Only the unauthenticated
+     * path is gated: with auth configured the token is the gate and a remote
+     * client legitimately sends a non-loopback Host. `SMITHERS_GATEWAY_TRUST_ANY_HOST=1`
+     * opts out for an explicit `--insecure` remote bind. A missing/empty Host
+     * (non-browser CLI, HTTP/1.0) is not a rebinding vector and is allowed.
+     * @param {IncomingMessage} req
+     * @returns {boolean}
+     */
     isHostAllowed(req: IncomingMessage): boolean;
     /**
-   * @param {IncomingMessage} req
-   * @param {string | null} token
-   * @returns {Promise< | { ok: true; role: string; scopes: string[]; userId?: string } | { ok: false; code: string; message: string } >}
-   */
+     * @param {IncomingMessage} req
+     * @param {string | null} token
+     * @returns {Promise< | { ok: true; role: string; scopes: string[]; userId?: string } | { ok: false; code: string; message: string } >}
+     */
     authenticateRequest(req: IncomingMessage, token: string | null): Promise<{
         ok: true;
         role: string;
@@ -1730,76 +1730,76 @@ declare class Gateway {
         message: string;
     }>;
     /**
-   * @param {IncomingMessage} req
-   * @param {ServerResponse} res
-   */
+     * @param {IncomingMessage} req
+     * @param {ServerResponse} res
+     */
     handleElectricWrite(req: IncomingMessage, res: ServerResponse$1): Promise<void>;
     /**
-   * @param {IncomingMessage} req
-   * @param {ServerResponse} res
-   * @param {string} [forcedMethod]
-   */
+     * @param {IncomingMessage} req
+     * @param {ServerResponse} res
+     * @param {string} [forcedMethod]
+     */
     handleHttpRpc(req: IncomingMessage, res: ServerResponse$1, forcedMethod?: string): Promise<void>;
     /**
-   * @param {ConnectionState} connection
-   * @param {ResponseFrame} frame
-   */
+     * @param {ConnectionState} connection
+     * @param {ResponseFrame} frame
+     */
     sendResponse(connection: ConnectionState, frame: ResponseFrame): void;
     /**
-   * @param {ConnectionState} connection
-   * @param {string} event
-   * @param {unknown} [payload]
-   */
+     * @param {ConnectionState} connection
+     * @param {string} event
+     * @param {unknown} [payload]
+     */
     sendEvent(connection: ConnectionState, event: string, payload?: unknown, stateVersion?: number): void;
     /**
-   * @param {ConnectionState} connection
-   * @returns {ConnectionEventWriterState}
-   */
+     * @param {ConnectionState} connection
+     * @returns {ConnectionEventWriterState}
+     */
     getConnectionEventWriter(connection: ConnectionState): ConnectionEventWriterState;
     /**
-   * Observable buffered event bytes for a connection: what the socket itself
-   * reports (bufferedAmount) plus what the bounded writer is still holding.
-   * @param {ConnectionState} connection
-   * @returns {number}
-   */
+     * Observable buffered event bytes for a connection: what the socket itself
+     * reports (bufferedAmount) plus what the bounded writer is still holding.
+     * @param {ConnectionState} connection
+     * @returns {number}
+     */
     getConnectionBufferedEventBytes(connection: ConnectionState): number;
     /**
-   * The single byte-bounded writer every event frame for a connection goes
-   * through — the generic broadcast copy AND the dedicated run-event stream
-   * frames (whose per-stream queues drain into sendEvent) both land here, so
-   * neither can bypass backpressure. On a healthy socket frames are written
-   * straight through; once the socket's observable bufferedAmount crosses the
-   * high-water mark frames queue here — bounded by bytes — and drain when the
-   * socket recovers. Overflow disconnects the connection.
-   * @param {ConnectionState} connection
-   * @param {ConnectionEventWriterState} writer
-   * @param {string} data
-   * @param {string} event
-   */
+     * The single byte-bounded writer every event frame for a connection goes
+     * through — the generic broadcast copy AND the dedicated run-event stream
+     * frames (whose per-stream queues drain into sendEvent) both land here, so
+     * neither can bypass backpressure. On a healthy socket frames are written
+     * straight through; once the socket's observable bufferedAmount crosses the
+     * high-water mark frames queue here — bounded by bytes — and drain when the
+     * socket recovers. Overflow disconnects the connection.
+     * @param {ConnectionState} connection
+     * @param {ConnectionEventWriterState} writer
+     * @param {string} data
+     * @param {string} event
+     */
     writeConnectionEventFrame(connection: ConnectionState, writer: ConnectionEventWriterState, data: string, event: string): void;
     /**
-   * Drain the connection writer's queue against the socket's buffered bytes.
-   * Mirrors drainRunEventStream: a congested socket re-arms a short retry
-   * instead of dropping frames; the byte cap (enforced at enqueue time) is
-   * what bounds memory and trips the per-connection disconnect.
-   * @param {ConnectionState} connection
-   * @param {ConnectionEventWriterState} writer
-   */
+     * Drain the connection writer's queue against the socket's buffered bytes.
+     * Mirrors drainRunEventStream: a congested socket re-arms a short retry
+     * instead of dropping frames; the byte cap (enforced at enqueue time) is
+     * what bounds memory and trips the per-connection disconnect.
+     * @param {ConnectionState} connection
+     * @param {ConnectionEventWriterState} writer
+     */
     drainConnectionEventWriter(connection: ConnectionState, writer: ConnectionEventWriterState): void;
     /**
-   * Per-connection overflow behavior: a consumer that stays congested past the
-   * socket high-water mark AND fills the byte-bounded queue is disconnected
-   * outright (close 1013 Try Again Later) — the socket's close handler tears
-   * down every stream on the connection, and nothing further buffers for it.
-   * @param {ConnectionState} connection
-   * @param {ConnectionEventWriterState} writer
-   * @param {string} event
-   */
+     * Per-connection overflow behavior: a consumer that stays congested past the
+     * socket high-water mark AND fills the byte-bounded queue is disconnected
+     * outright (close 1013 Try Again Later) — the socket's close handler tears
+     * down every stream on the connection, and nothing further buffers for it.
+     * @param {ConnectionState} connection
+     * @param {ConnectionEventWriterState} writer
+     * @param {string} event
+     */
     disconnectConnectionForEventBackpressure(connection: ConnectionState, writer: ConnectionEventWriterState, event: string): void;
     /**
-   * @param {string} event
-   * @param {unknown} [payload]
-   */
+     * @param {string} event
+     * @param {unknown} [payload]
+     */
     browserSubscriberCount(sessionId: any): number;
     broadcastEvent(event: any, payload: any): void;
     buildSnapshot(): Promise<{
@@ -1825,71 +1825,71 @@ declare class Gateway {
         stateVersion: number;
     }>;
     /**
-   * @param {SmithersWorkflow} workflow
-   * @returns {SmithersDb}
-   */
+     * @param {SmithersWorkflow} workflow
+     * @returns {SmithersDb}
+     */
     adapterForWorkflow(workflow: SmithersWorkflow): SmithersDb$4;
     adapterCache: Map<any, any> | undefined;
     adapterByStore: Map<any, any> | undefined;
     /**
-   * Resolve the true gateway workflow key for a stored run row. A run started
-   * THROUGH the gateway records its key in config; a run started elsewhere (e.g.
-   * the CLI) does not, so we fall back to the row's own `workflowName` when that
-   * matches a registered key, then to the run's entry-file basename (the
-   * discovered-workflow id — this catches runs whose workflow crashed before it
-   * ever announced a name), then to an unregistered stored name. Only a row with
-   * no workflow identity falls back to the adapter's first owner. This keeps
-   * runs correctly attributed when many workflows share one DB — the adapter
-   * that finds a row is no longer assumed to own it.
-   * @param {{ configJson?: string; workflowName?: string; workflowPath?: string }} row
-   * @param {Set<string>} registeredKeys
-   * @param {string} fallbackKey
-   * @returns {string}
-   */
+     * Resolve the true gateway workflow key for a stored run row. A run started
+     * THROUGH the gateway records its key in config; a run started elsewhere (e.g.
+     * the CLI) does not, so we fall back to the row's own `workflowName` when that
+     * matches a registered key, then to the run's entry-file basename (the
+     * discovered-workflow id — this catches runs whose workflow crashed before it
+     * ever announced a name), then to an unregistered stored name. Only a row with
+     * no workflow identity falls back to the adapter's first owner. This keeps
+     * runs correctly attributed when many workflows share one DB — the adapter
+     * that finds a row is no longer assumed to own it.
+     * @param {{ configJson?: string; workflowName?: string; workflowPath?: string }} row
+     * @param {Set<string>} registeredKeys
+     * @param {string} fallbackKey
+     * @returns {string}
+     */
     resolveRunWorkflowKey(row: {
         configJson?: string;
         workflowName?: string;
         workflowPath?: string;
     }, registeredKeys: Set<string>, fallbackKey: string): string;
     /**
-   * @param {string} [status]
-   * @param {string} [workflow]
-   * @param {number} [offset] Rows to skip after the newest-first sort (server-side pagination).
-   */
+     * @param {string} [status]
+     * @param {string} [workflow]
+     * @param {number} [offset] Rows to skip after the newest-first sort (server-side pagination).
+     */
     listRunsAcrossWorkflows(limit?: number, status?: string, workflow?: string, offset?: number): Promise<any[]>;
     /**
-   * Cross-run memory facts for the `listMemoryFacts` RPC. Memory is global (keyed
-   * by namespace+key, not per-run), so iterate each DISTINCT workflow DB exactly
-   * once — shared-DB workflows share an adapter — and union the rows, deduping on
-   * `${namespace}\u0000${key}` so a fact stored in a shared DB is returned once.
-   * Mirrors the `listRunsAcrossWorkflows` shape.
-   * @param {string | null} [namespace]
-   */
+     * Cross-run memory facts for the `listMemoryFacts` RPC. Memory is global (keyed
+     * by namespace+key, not per-run), so iterate each DISTINCT workflow DB exactly
+     * once — shared-DB workflows share an adapter — and union the rows, deduping on
+     * `${namespace}\u0000${key}` so a fact stored in a shared DB is returned once.
+     * Mirrors the `listRunsAcrossWorkflows` shape.
+     * @param {string | null} [namespace]
+     */
     listMemoryFactsAcrossWorkflows(namespace?: string | null): Promise<any[]>;
     /**
-   * Registered agent accounts for the `listAccounts` RPC. Accounts are the rows
-   * in the USER-level `~/.smithers/accounts.json` registry that the
-   * `smithers agents` CLI manages (resolved via `accountsRoot(process.env)`,
-   * honoring `SMITHERS_HOME`/`HOME`) — NOT a per-workspace DB table. So, like
-   * `listPromptsFromDisk` but at the user root, this reads the file directly
-   * through the `@smithers-orchestrator/accounts` package's `listAccounts()` and
-   * maps each entry onto the wire `GatewayAccount` shape.
-   *
-   * SECRET REDACTION: an account may carry a raw `apiKey` (a plaintext
-   * credential stored mode-600 on disk). The key is NEVER returned — instead
-   * `hasApiKey` reports whether a non-empty key is set and `hasConfigDir`
-   * reports whether a subscription account has a config dir, so the client can
-   * render the auth posture without ever receiving the secret. A malformed
-   * registry surfaces as a thrown `SmithersError` (→ the dispatcher's error
-   * envelope); a missing file is a clean empty list (the package's own default).
-   * @returns {Array<Record<string, unknown>>}
-   */
+     * Registered agent accounts for the `listAccounts` RPC. Accounts are the rows
+     * in the USER-level `~/.smithers/accounts.json` registry that the
+     * `smithers agents` CLI manages (resolved via `accountsRoot(process.env)`,
+     * honoring `SMITHERS_HOME`/`HOME`) — NOT a per-workspace DB table. So, like
+     * `listPromptsFromDisk` but at the user root, this reads the file directly
+     * through the `@smithers-orchestrator/accounts` package's `listAccounts()` and
+     * maps each entry onto the wire `GatewayAccount` shape.
+     *
+     * SECRET REDACTION: an account may carry a raw `apiKey` (a plaintext
+     * credential stored mode-600 on disk). The key is NEVER returned — instead
+     * `hasApiKey` reports whether a non-empty key is set and `hasConfigDir`
+     * reports whether a subscription account has a config dir, so the client can
+     * render the auth posture without ever receiving the secret. A malformed
+     * registry surfaces as a thrown `SmithersError` (→ the dispatcher's error
+     * envelope); a missing file is a clean empty list (the package's own default).
+     * @returns {Array<Record<string, unknown>>}
+     */
     listAccountsFromRegistry(): Array<Record<string, unknown>>;
     /**
-   * Raw registered accounts for host-side provider probes. This method must
-   * never be returned directly over the wire because API-key accounts include
-   * their credential.
-   */
+     * Raw registered accounts for host-side provider probes. This method must
+     * never be returned directly over the wire because API-key accounts include
+     * their credential.
+     */
     registeredAccountsFromRegistry(): {
         label: string;
         provider: "claude-code" | "antigravity" | "codex" | "kimi" | "anthropic-api" | "openai-api" | "gemini-api";
@@ -1899,85 +1899,85 @@ declare class Gateway {
         addedAt?: string;
     }[];
     /**
-   * Injection seam for tests; production delegates to the usage package.
-   * @param {ReturnType<Gateway["registeredAccountsFromRegistry"]>} accounts
-   * @param {{ fresh?: boolean }} options
-   * @returns {Promise<UsageReport[]>}
-   */
+     * Injection seam for tests; production delegates to the usage package.
+     * @param {ReturnType<Gateway["registeredAccountsFromRegistry"]>} accounts
+     * @param {{ fresh?: boolean }} options
+     * @returns {Promise<UsageReport[]>}
+     */
     fetchUsageReports(accounts: ReturnType<Gateway["registeredAccountsFromRegistry"]>, options: {
         fresh?: boolean;
     }): Promise<UsageReport[]>;
     /**
-   * Provider rate-limit and subscription-usage reports. Normal polling shares
-   * one in-flight request and reuses its result for 60 seconds; `fresh` skips
-   * the Gateway cache while still honoring provider safety in the usage package.
-   * @param {{ fresh?: boolean }} [options]
-   * @returns {Promise<UsageReport[]>}
-   */
+     * Provider rate-limit and subscription-usage reports. Normal polling shares
+     * one in-flight request and reuses its result for 60 seconds; `fresh` skips
+     * the Gateway cache while still honoring provider safety in the usage package.
+     * @param {{ fresh?: boolean }} [options]
+     * @returns {Promise<UsageReport[]>}
+     */
     listUsageReports(options?: {
         fresh?: boolean;
     }): Promise<UsageReport[]>;
     /**
-   * Every persisted TokenUsageReported attempt event for a run. Unlike the
-   * live event collections this reads the complete durable history and is not
-   * bounded by a client replay/ring window.
-   * @param {string} runId
-   * @returns {Promise<{ runId: string; events: Array<Record<string, string | number>> } | null>}
-   */
+     * Every persisted TokenUsageReported attempt event for a run. Unlike the
+     * live event collections this reads the complete durable history and is not
+     * bounded by a client replay/ring window.
+     * @param {string} runId
+     * @returns {Promise<{ runId: string; events: Array<Record<string, string | number>> } | null>}
+     */
     listRunTokenUsage(runId: string): Promise<{
         runId: string;
         events: Array<Record<string, string | number>>;
     } | null>;
     /**
-   * Registered prompts for the `listPrompts` RPC. A prompt is a `.md`/`.mdx`
-   * file under the workspace's `.smithers/prompts/` directory — the SAME real
-   * source smithers-studio walks. Unlike memory/scores/tickets (DB-table backed),
-   * prompts live on disk, so this enumerates the filesystem under the registered
-   * WORKSPACE ROOT (`this.workspaceRoot`, set from `options.workspaceRoot`). That
-   * root — not `process.cwd()` — is authoritative because some launch modes keep
-   * cwd elsewhere than the workspace (e.g. an app that binds the gateway to an
-   * ABSOLUTE workspace DB path without `chdir`-ing, like the studio server, which
-   * passes `SMITHERS_STUDIO_WORKSPACE`); resolving from cwd there returns the
-   * wrong app's prompts or `[]`. When no workspace root was configured we fall
-   * back to `process.cwd()`, which is correct for the common case where the
-   * gateway boots from the workspace root. Each file maps to
-   * `{ id, entryFile, source, createdAtMs, updatedAtMs }` where `id` is the
-   * extensionless relative path (POSIX-separated so ids are stable across OSes).
-   * Returns `[]` when no `.smithers/prompts/` directory exists (a clean empty
-   * state, not an error).
-   * @returns {Array<Record<string, unknown>>}
-   */
+     * Registered prompts for the `listPrompts` RPC. A prompt is a `.md`/`.mdx`
+     * file under the workspace's `.smithers/prompts/` directory — the SAME real
+     * source smithers-studio walks. Unlike memory/scores/tickets (DB-table backed),
+     * prompts live on disk, so this enumerates the filesystem under the registered
+     * WORKSPACE ROOT (`this.workspaceRoot`, set from `options.workspaceRoot`). That
+     * root — not `process.cwd()` — is authoritative because some launch modes keep
+     * cwd elsewhere than the workspace (e.g. an app that binds the gateway to an
+     * ABSOLUTE workspace DB path without `chdir`-ing, like the studio server, which
+     * passes `SMITHERS_STUDIO_WORKSPACE`); resolving from cwd there returns the
+     * wrong app's prompts or `[]`. When no workspace root was configured we fall
+     * back to `process.cwd()`, which is correct for the common case where the
+     * gateway boots from the workspace root. Each file maps to
+     * `{ id, entryFile, source, createdAtMs, updatedAtMs }` where `id` is the
+     * extensionless relative path (POSIX-separated so ids are stable across OSes).
+     * Returns `[]` when no `.smithers/prompts/` directory exists (a clean empty
+     * state, not an error).
+     * @returns {Array<Record<string, unknown>>}
+     */
     listPromptsFromDisk(): Array<Record<string, unknown>>;
     /**
-   * Scorer/eval results for one run for the `listScores` RPC. Scores are
-   * per-run (keyed by runId), so resolve the run's owning adapter exactly like
-   * `getRun` and read the `_smithers_scorers` table via `listScorerResults`
-   * (rows already snake→camel cased). Maps each row to the wire `GatewayScoreRow`
-   * shape — only the fields the surface needs (no meta/input/output JSON blobs).
-   * Returns `null` when the run is unknown so the dispatcher can answer NOT_FOUND.
-   * @param {string} runId
-   * @param {string | null} [nodeId]
-   * @returns {Promise<Array<Record<string, unknown>> | null>}
-   */
+     * Scorer/eval results for one run for the `listScores` RPC. Scores are
+     * per-run (keyed by runId), so resolve the run's owning adapter exactly like
+     * `getRun` and read the `_smithers_scorers` table via `listScorerResults`
+     * (rows already snake→camel cased). Maps each row to the wire `GatewayScoreRow`
+     * shape — only the fields the surface needs (no meta/input/output JSON blobs).
+     * Returns `null` when the run is unknown so the dispatcher can answer NOT_FOUND.
+     * @param {string} runId
+     * @param {string | null} [nodeId]
+     * @returns {Promise<Array<Record<string, unknown>> | null>}
+     */
     listScoresForRun(runId: string, nodeId?: string | null): Promise<Array<Record<string, unknown>> | null>;
     /**
-   * Query persisted scorer rows across runs that may live in distinct stores.
-   * All run ownership is resolved before the first score-table query so an
-   * unknown id fails atomically. Each store contributes its filtered count and
-   * its first `offset + limit` candidates; pagination happens after the global
-   * deterministic merge.
-   * @param {{
-   *   runIds: string[];
-   *   nodeId?: string;
-   *   scorerId?: string;
-   *   scorerName?: string;
-   *   source?: string;
-   *   order: "scoredAtAsc" | "scoredAtDesc";
-   *   offset: number;
-   *   limit: number;
-   * }} query
-   * @returns {Promise<{ missingRunId: string } | { rows: Array<Record<string, unknown>>, total: number }>}
-   */
+     * Query persisted scorer rows across runs that may live in distinct stores.
+     * All run ownership is resolved before the first score-table query so an
+     * unknown id fails atomically. Each store contributes its filtered count and
+     * its first `offset + limit` candidates; pagination happens after the global
+     * deterministic merge.
+     * @param {{
+     *   runIds: string[];
+     *   nodeId?: string;
+     *   scorerId?: string;
+     *   scorerName?: string;
+     *   source?: string;
+     *   order: "scoredAtAsc" | "scoredAtDesc";
+     *   offset: number;
+     *   limit: number;
+     * }} query
+     * @returns {Promise<{ missingRunId: string } | { rows: Array<Record<string, unknown>>, total: number }>}
+     */
     listScoresForRunsAcrossStores(query: {
         runIds: string[];
         nodeId?: string;
@@ -1994,48 +1994,48 @@ declare class Gateway {
         total: number;
     }>;
     /**
-   * Read and decode one exact persisted score row. Missing runs and missing
-   * score ids remain distinct so the typed RPC errors stay precise; malformed
-   * JSON throws `Internal`.
-   * @param {string} runId
-   * @param {string} scoreId
-   * @returns {Promise<{ missing: "run" | "score" } | { detail: Record<string, unknown> }>}
-   */
+     * Read and decode one exact persisted score row. Missing runs and missing
+     * score ids remain distinct so the typed RPC errors stay precise; malformed
+     * JSON throws `Internal`.
+     * @param {string} runId
+     * @param {string} scoreId
+     * @returns {Promise<{ missing: "run" | "score" } | { detail: Record<string, unknown> }>}
+     */
     getScoreDetailForRun(runId: string, scoreId: string): Promise<{
         missing: "run" | "score";
     } | {
         detail: Record<string, unknown>;
     }>;
     /**
-   * The ONE adapter that backs the ticket WRITE RPCs (create/update/delete) and
-   * the file-watcher. `_smithers_docs` is a SINGLE global table (not per-run,
-   * not per-workflow), so writes must land in one deterministic DB — the first
-   * registered workflow's adapter. `listTickets` still reads across every
-   * distinct adapter (so a doc in any shared DB surfaces), but a write has to
-   * pick one; picking the first registered keeps create→list→update→delete
-   * consistent. Returns `null` only when no workflow is registered yet.
-   * @returns {import("@smithers-orchestrator/db/adapter").SmithersDb | null}
-   */
+     * The ONE adapter that backs the ticket WRITE RPCs (create/update/delete) and
+     * the file-watcher. `_smithers_docs` is a SINGLE global table (not per-run,
+     * not per-workflow), so writes must land in one deterministic DB — the first
+     * registered workflow's adapter. `listTickets` still reads across every
+     * distinct adapter (so a doc in any shared DB surfaces), but a write has to
+     * pick one; picking the first registered keeps create→list→update→delete
+     * consistent. Returns `null` only when no workflow is registered yet.
+     * @returns {import("@smithers-orchestrator/db/adapter").SmithersDb | null}
+     */
     primaryDocsAdapter(): _smithers_orchestrator_db_adapter.SmithersDb | null;
     /**
-   * Live work docs for the `listTickets` RPC. `_smithers_docs` is global, so
-   * read across every DISTINCT adapter (mirrors `listMemoryFactsAcrossWorkflows`)
-   * and dedupe by `path`; `listDocs` already filters tombstones server-side, so
-   * a soft-deleted doc never surfaces. Newest-updated first.
-   * @param {string | null} [kind]
-   * @returns {Promise<Array<Record<string, unknown>>>}
-   */
+     * Live work docs for the `listTickets` RPC. `_smithers_docs` is global, so
+     * read across every DISTINCT adapter (mirrors `listMemoryFactsAcrossWorkflows`)
+     * and dedupe by `path`; `listDocs` already filters tombstones server-side, so
+     * a soft-deleted doc never surfaces. Newest-updated first.
+     * @param {string | null} [kind]
+     * @returns {Promise<Array<Record<string, unknown>>>}
+     */
     listTicketsAcrossWorkflows(kind?: string | null): Promise<Array<Record<string, unknown>>>;
     /**
-   * Create-or-replace a work doc for `createTicket`. The handler hashes content
-   * + stamps `updated_at_ms` through the SAME `sha256Hex`/clock the file-watcher
-   * uses, so an RPC-written `content_hash` and a file-derived one are comparable
-   * (last-write-wins). Writing `deleted_at_ms: null` REVIVES a soft-deleted path
-   * (a deliberate re-create). Returns the persisted row, or `null` when no
-   * workflow is registered.
-   * @param {{ path: string, content: string, kind?: string, status?: string }} input
-   * @returns {Promise<Record<string, unknown> | null>}
-   */
+     * Create-or-replace a work doc for `createTicket`. The handler hashes content
+     * + stamps `updated_at_ms` through the SAME `sha256Hex`/clock the file-watcher
+     * uses, so an RPC-written `content_hash` and a file-derived one are comparable
+     * (last-write-wins). Writing `deleted_at_ms: null` REVIVES a soft-deleted path
+     * (a deliberate re-create). Returns the persisted row, or `null` when no
+     * workflow is registered.
+     * @param {{ path: string, content: string, kind?: string, status?: string }} input
+     * @returns {Promise<Record<string, unknown> | null>}
+     */
     createTicketDoc(input: {
         path: string;
         content: string;
@@ -2043,37 +2043,37 @@ declare class Gateway {
         status?: string;
     }): Promise<Record<string, unknown> | null>;
     /**
-   * Patch a LIVE work doc's content and/or status for `updateTicket`. Re-hashes
-   * + re-stamps when content changes (a status-only patch keeps the existing
-   * hash/content). Returns `null` for an unknown or already-soft-deleted path so
-   * the dispatcher can answer TicketNotFound; `false` when no workflow exists.
-   * @param {{ path: string, content?: string, status?: string }} input
-   * @returns {Promise<Record<string, unknown> | null | false>}
-   */
+     * Patch a LIVE work doc's content and/or status for `updateTicket`. Re-hashes
+     * + re-stamps when content changes (a status-only patch keeps the existing
+     * hash/content). Returns `null` for an unknown or already-soft-deleted path so
+     * the dispatcher can answer TicketNotFound; `false` when no workflow exists.
+     * @param {{ path: string, content?: string, status?: string }} input
+     * @returns {Promise<Record<string, unknown> | null | false>}
+     */
     updateTicketDoc(input: {
         path: string;
         content?: string;
         status?: string;
     }): Promise<Record<string, unknown> | null | false>;
     /**
-   * Soft-delete (tombstone) a work doc for `deleteTicket`. Returns `null` for an
-   * unknown/already-deleted path (→ TicketNotFound), `false` when no workflow is
-   * registered. The row survives so `listTickets` hides it without losing
-   * history; the watcher never materializes a tombstone back to disk.
-   * @param {string} path
-   * @returns {Promise<boolean | null | false>}
-   */
+     * Soft-delete (tombstone) a work doc for `deleteTicket`. Returns `null` for an
+     * unknown/already-deleted path (→ TicketNotFound), `false` when no workflow is
+     * registered. The row survives so `listTickets` hides it without losing
+     * history; the watcher never materializes a tombstone back to disk.
+     * @param {string} path
+     * @returns {Promise<boolean | null | false>}
+     */
     deleteTicketDoc(path: string): Promise<boolean | null | false>;
     /**
-   * Wire the `_smithers_docs` file-watcher durability seam against the primary
-   * docs adapter: watch a directory of `*.md` work docs and upsert each into
-   * `_smithers_docs` (file → DB, last-write-wins on hash mismatch). Idempotent —
-   * a second call for the same dir is a no-op. Returns the watcher handle (or
-   * `null` when there is no adapter / no dir). The gateway reads
-   * `SMITHERS_TICKETS_DIR` at `listen()` to start this automatically.
-   * @param {string} dir
-   * @returns {{ close: () => void } | null}
-   */
+     * Wire the `_smithers_docs` file-watcher durability seam against the primary
+     * docs adapter: watch a directory of `*.md` work docs and upsert each into
+     * `_smithers_docs` (file → DB, last-write-wins on hash mismatch). Idempotent —
+     * a second call for the same dir is a no-op. Returns the watcher handle (or
+     * `null` when there is no adapter / no dir). The gateway reads
+     * `SMITHERS_TICKETS_DIR` at `listen()` to start this automatically.
+     * @param {string} dir
+     * @returns {{ close: () => void } | null}
+     */
     watchTicketsDirectory(dir: string): {
         close: () => void;
     } | null;
@@ -2096,8 +2096,8 @@ declare class Gateway {
         autoApprove: Record<string, unknown> | null;
     }[]>;
     /**
-   * @param {{ kind?: string; includeDeleted?: boolean; updatedAfterMs?: number; limit?: number }} [options]
-   */
+     * @param {{ kind?: string; includeDeleted?: boolean; updatedAfterMs?: number; limit?: number }} [options]
+     */
     listDocsAcrossWorkflows(options?: {
         kind?: string;
         includeDeleted?: boolean;
@@ -2108,40 +2108,40 @@ declare class Gateway {
         workflow: any;
     }[]>;
     /**
-   * @param {string} cronId
-   */
+     * @param {string} cronId
+     */
     findCron(cronId: string): Promise<{
         cron: Record<string, unknown>;
         workflowKey: any;
         adapter: SmithersDb$4;
     } | null>;
     /**
-   * @param {string} runId
-   * @returns {Promise<ResolvedRun | null>}
-   */
+     * @param {string} runId
+     * @returns {Promise<ResolvedRun | null>}
+     */
     resolveRun(runId: string): Promise<ResolvedRun | null>;
     /**
-   * @param {SmithersEvent} event
-   * @returns {string | null}
-   */
+     * @param {SmithersEvent} event
+     * @returns {string | null}
+     */
     terminalRunIdFromSmithersEvent(event: SmithersEvent$1): string | null;
     /**
-   * @param {SmithersEvent} event
-   */
+     * @param {SmithersEvent} event
+     */
     handleSmithersEvent(event: SmithersEvent$1): void;
     /**
-   * @param {SmithersEvent} event
-   * @returns {{ event: string; payload: unknown } | null}
-   */
+     * @param {SmithersEvent} event
+     * @returns {{ event: string; payload: unknown } | null}
+     */
     mapEvent(event: SmithersEvent$1): {
         event: string;
         payload: unknown;
     } | null;
     /**
-   * @param {GatewayRequestContext} connection
-   * @param {RequestFrame} frame
-   * @returns {Promise<ResponseFrame>}
-   */
+     * @param {GatewayRequestContext} connection
+     * @param {RequestFrame} frame
+     * @returns {Promise<ResponseFrame>}
+     */
     routeRequest(connection: GatewayRequestContext, frame: RequestFrame): Promise<ResponseFrame>;
     browserCall(frame: any, operation: any): Promise<ResponseFrame$1>;
     /**
@@ -2525,10 +2525,10 @@ declare const DEVTOOLS_MAX_FRAME_NO: 2147483647;
 declare const DEVTOOLS_TREE_MAX_DEPTH: 256;
 declare class DevToolsRouteError extends Error {
     /**
-   * @param {string} code
-   * @param {string} message
-   * @param {string} [hint]
-   */
+     * @param {string} code
+     * @param {string} message
+     * @param {string} [hint]
+     */
     constructor(code: string, message: string, hint?: string);
     code: string;
     hint: string | undefined;
