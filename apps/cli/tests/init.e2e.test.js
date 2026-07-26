@@ -64,6 +64,7 @@ function writeWorkflowPackTypecheckHarness(repo) {
       "  export const Gateway: any;",
       "  export const ClaudeCodeAgent: any;",
       "  export class CodexAgent { constructor(options?: any); generate(...args: any[]): any; }",
+      "  export class CursorAgent { constructor(options?: any); generate(...args: any[]): any; }",
       "  export const OpenCodeAgent: any;",
       "  export const AntigravityAgent: any;",
       "  export const GeminiAgent: any;",

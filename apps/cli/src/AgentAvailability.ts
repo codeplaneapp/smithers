@@ -4,7 +4,9 @@ export type AgentAvailability = {
   id:
     | "claude"
     | "codex"
-    | "openrouter" | "cursor" | "antigravity"
+    | "openrouter"
+    | "cursor"
+    | "antigravity"
     | "pi"
     | "omp"
     | "opencode"

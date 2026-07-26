@@ -32,11 +32,11 @@ const CLI_AGENT_CAPABILITY_ADAPTERS = [
     binary: "codex",
     buildRegistry: () => createCodexCapabilityRegistry(),
   },
-    {
-        id: "cursor",
-        binary: "cursor-agent",
-        buildRegistry: () => createCursorCapabilityRegistry(),
-    },
+  {
+    id: "cursor",
+    binary: "cursor-agent",
+    buildRegistry: () => createCursorCapabilityRegistry(),
+  },
   {
     id: "antigravity",
     binary: "agy",

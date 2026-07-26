@@ -41,7 +41,7 @@ Kimi/OpenCode callers should pass their known session explicitly.
 This is the thing to internalize: **you, the AI agent, operate Smithers.** The
 human asks for an outcome ("implement rate limiting and don't stop until the
 tests pass"); you reach for Smithers, run the workflow, watch it, and report
-back. Smithers spawns *other* agents (Claude Code, Codex, Cursor, etc.) as the workers
+back. Smithers spawns *other* agents (Claude Code, Codex, etc.) as the workers
 inside a workflow. You are the operator standing at the control panel, not a
 person clicking buttons in a UI.
 

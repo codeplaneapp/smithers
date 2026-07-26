@@ -283,6 +283,7 @@ describe("smithers agents capabilities", () => {
       "amp",
       "claude",
       "codex",
+      "cursor",
       "antigravity",
       "forge",
       "hermes",

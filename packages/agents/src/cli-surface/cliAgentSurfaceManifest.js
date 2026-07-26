@@ -228,7 +228,8 @@ export const CLI_AGENT_SURFACE_MANIFEST = [
     unsupportedFlags: [
       {
         flag: "--output-schema",
-        reason: "Cursor CLI does not expose schema-constrained output; Smithers uses prompt-injection plus output validation.",
+        reason:
+          "Cursor CLI does not expose schema-constrained output; Smithers uses prompt-injection plus output validation.",
       },
     ],
     optionMappings: [
