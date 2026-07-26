@@ -608,8 +608,8 @@ type SignalProps$2<Schema extends z.ZodObject<z.ZodRawShape> = z.ZodObject<z.Zod
 
 type SidecarProps$2 = {
     id?: string;
-    agent: AgentLike$2;
-    sidecar: AgentLike$2;
+    agent: AgentLike$2 | AgentLike$2[];
+    sidecar: AgentLike$2 | AgentLike$2[];
     output: OutputTarget$1;
     sidecarOutput?: OutputTarget$1;
     scorers?: ScorersMap$1;

@@ -81,7 +81,7 @@ export default smithers((ctx) => {
             sidecarOutput={outputs.frcSidecarShadow}
             scorers={{
               schema: { scorer: schemaAdherenceScorer() },
-              latency: { scorer: latencyScorer({ targetMs: 1_800_000 }) },
+              latency: { scorer: latencyScorer({ targetMs: 1_800_000, maxMs: 3_600_000 }) },
             }}
           >
             <M1FlagCodegenPrompt repo={c.repo} reactRepo={c.reactRepo} />

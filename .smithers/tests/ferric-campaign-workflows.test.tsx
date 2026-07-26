@@ -37,3 +37,44 @@ describe("react-rust-port workflow", () => {
     expect(frame.tasks.length).toBeGreaterThan(0);
   });
 });
+
+describe("ferric and accounts campaign components", () => {
+  const componentFiles = [
+    "accounts/accountAgents.ts",
+    "accounts/accountPool.ts",
+    "accounts/RefreshAccountUsage.tsx",
+    "ferric/BenchTask.tsx",
+    "ferric/CampaignGate.tsx",
+    "ferric/Closeout.tsx",
+    "ferric/ferricAgents.ts",
+    "ferric/ferricConfig.ts",
+    "ferric/ferricGates.ts",
+    "ferric/ferricLedger.ts",
+    "ferric/ferricSchemas.ts",
+    "ferric/ferricShell.ts",
+    "ferric/ferricSmithers.ts",
+    "ferric/FoundationAndBudget.tsx",
+    "ferric/FuzzTask.tsx",
+    "ferric/PhaseGA.tsx",
+    "ferric/PhaseM0.tsx",
+    "ferric/PhaseM25.tsx",
+    "ferric/PhaseM3.tsx",
+    "ferric/PhaseM4.tsx",
+    "ferric/PhaseM5M6.tsx",
+    "ferric/PhaseM7.tsx",
+    "ferric/PhaseM8.tsx",
+    "ferric/PhaseM9.tsx",
+    "ferric/PortCampaign.tsx",
+    "ferric/PublishPipeline.tsx",
+    "ferric/QueueParse.tsx",
+    "ferric/Slice.tsx",
+    "ferric/SuiteTask.tsx",
+    "ferric/TrialPhase.tsx",
+  ];
+  test("every campaign component module loads and exports something", async () => {
+    for (const file of componentFiles) {
+      const mod = await import(join(import.meta.dir, "..", "components", file));
+      expect(Object.keys(mod).length, `${file} has no exports`).toBeGreaterThan(0);
+    }
+  });
+});

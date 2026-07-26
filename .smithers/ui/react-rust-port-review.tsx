@@ -150,7 +150,7 @@ function App() {
         />
         <div style={{ display: "grid", gap: 14, alignContent: "start" }}>
           {/* The human gates this reviewer can clear, right where the evidence is. */}
-          <GatewayApprovalList filter={{ workflow: WORKFLOW }} note="resolved from the slice-review surface" />
+          <GatewayApprovalList filter={{ workflow: WORKFLOW }} note />
           {sliceId ? (
             <SliceReview runId={runId} sliceId={sliceId} />
           ) : (

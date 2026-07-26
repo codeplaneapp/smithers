@@ -23,7 +23,7 @@ const CODEX_LENS =
  * That predicate also gates land admission, which is what makes the verifier's
  * veto structural: no reviewer and no human approval can route around it.
  */
-export function Slice(props: { ctx: any; c: FerricConfig; slice: SliceDef }) {
+export function Slice(props: { key?: string; ctx: any; c: FerricConfig; slice: SliceDef }) {
   const { ctx, c, slice } = props;
   const sid = slice.id;
   const ledger = readLedger(c.repo);

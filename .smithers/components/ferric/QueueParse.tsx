@@ -167,7 +167,7 @@ export function QueueParse({ c }: { c: FerricConfig }) {
         const sccSet = new Set(sccRows.map((r) => r.module));
         const byName = new Map(sccRows.map((r) => [r.module, r]));
 
-        const fail = (why: string): never => {
+        const fail: (why: string) => never = (why) => {
           throw new Error(
             `D5_QUEUE_CONTRACT: ${why}. Regenerate MODULE_QUEUE.tsv (report-fable §4.4) or amend the COHORTS table in QueueParse.tsx.`,
           );

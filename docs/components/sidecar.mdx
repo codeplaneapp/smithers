@@ -196,8 +196,8 @@ import type { OutputTarget } from "./OutputTarget.ts";
 
 export type SidecarProps = {
   id?: string;
-  agent: AgentLike;
-  sidecar: AgentLike;
+  agent: AgentLike | AgentLike[];
+  sidecar: AgentLike | AgentLike[];
   output: OutputTarget;
   sidecarOutput?: OutputTarget;
   scorers?: ScorersMap;

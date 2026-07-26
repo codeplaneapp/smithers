@@ -32,7 +32,7 @@ function initialRunId(): string | undefined {
 /** Which campaign milestone this run executes (input override or the
  *  ContinueAsNew continuation payload), plus live run status. */
 function MilestoneRail({ runId }: { runId?: string }) {
-  const run = useGatewayRun(runId ? { runId } : {});
+  const run = useGatewayRun(runId);
   const input = (run.data as any)?.input ?? {};
   const current: string = input.milestone ?? input.__smithersContinuation?.payload?.milestone ?? "M0";
   const status = String((run.data as any)?.status ?? "unknown");
@@ -49,7 +49,7 @@ function MilestoneRail({ runId }: { runId?: string }) {
 }
 
 function CampaignKpis({ runId }: { runId?: string }) {
-  const run = useGatewayRun(runId ? { runId } : {});
+  const run = useGatewayRun(runId);
   const input = (run.data as any)?.input ?? {};
   const cont = input.__smithersContinuation?.payload ?? {};
   const lineage: string[] = cont.lineage ?? [];
