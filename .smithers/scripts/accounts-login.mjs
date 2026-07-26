@@ -8,10 +8,17 @@
  * subscriptions coexist on one machine; this script drives it in bulk and
  * registers the result in `~/.smithers/accounts.json`.
  *
- * Login is the vendor's own browser OAuth flow, which needs a human. So this is
- * interactive by design: for each account still missing credentials it launches
- * that CLI with an isolated config dir, you complete sign-in in the browser,
- * and it moves on. Accounts that already have credentials are skipped, so
+ * Verified on macOS with Claude Code 2.1.220: setting CLAUDE_CONFIG_DIR at all
+ * switches Claude to a config-dir-scoped credential store, separate from the
+ * default `Claude Code-credentials` Keychain item. Pointing CLAUDE_CONFIG_DIR at
+ * `~/.claude` — the very directory the ambient login uses — still reports
+ * `loggedIn: false`, which is how we know the scoping is by the setting rather
+ * than by path. Two consequences: every seat needs its own OAuth (the ambient
+ * login cannot be adopted as one of them), and the fleet cannot clobber the
+ * user's existing login.
+ *
+ * Login is the vendor's own browser OAuth flow, which needs a human, so this is
+ * interactive by design. Accounts that are already signed in are skipped, so
  * re-running is cheap and safe.
  *
  *   node .smithers/scripts/accounts-login.mjs            # provision + log in
@@ -19,7 +26,7 @@
  *   node .smithers/scripts/accounts-login.mjs --claude 8 --codex 2
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -34,31 +41,62 @@ const STATUS_ONLY = args.includes("--status");
 
 const ACCOUNTS_ROOT = join(homedir(), ".smithers", "accounts");
 
+/**
+ * ANTHROPIC_API_KEY takes precedence over the subscription OAuth this fleet is
+ * built on. Left set, `auth status` reports the API key's identity instead of
+ * the account's and `auth login` signs into the wrong thing, so every vendor
+ * call below blanks it.
+ */
+const noApiKey = { ANTHROPIC_API_KEY: "" };
+
+const run = (cmd, cmdArgs, env) =>
+  spawnSync(cmd, cmdArgs, { encoding: "utf8", env: { ...process.env, ...env } });
+
 const PROVIDERS = {
   "claude-code": {
     labels: Array.from({ length: CLAUDE_N }, (_, i) => `claude-${i + 1}`),
-    // Credentials may live in the config dir OR the macOS Keychain, so a
-    // populated directory is the signal that a login happened here.
-    hasCreds: (dir) =>
-      existsSync(join(dir, ".credentials.json")) ||
-      (existsSync(dir) && readdirSync(dir).length > 0),
-    env: (dir) => ({ CLAUDE_CONFIG_DIR: dir }),
-    // `claude` with no args opens the interactive UI, which runs OAuth in the
-    // browser when the config dir has no credentials.
-    loginCmd: "claude",
-    loginArgs: [],
+    env: (dir) => ({ CLAUDE_CONFIG_DIR: dir, ...noApiKey }),
+    envName: "CLAUDE_CONFIG_DIR",
+    /**
+     * `claude auth status --json` is the authoritative check: it costs no
+     * tokens and reports the identity behind this config dir. Sniffing the
+     * directory for files does NOT work — merely running claude once populates
+     * `.claude.json`, `projects/`, and friends without any login happening.
+     */
+    status(dir) {
+      const r = run("claude", ["auth", "status", "--json"], this.env(dir));
+      try {
+        const j = JSON.parse(r.stdout);
+        return {
+          loggedIn: Boolean(j.loggedIn),
+          identity: j.email ?? null,
+          detail: j.subscriptionType ? `${j.subscriptionType}` : (j.authMethod ?? null),
+        };
+      } catch {
+        return { loggedIn: false, identity: null, detail: null };
+      }
+    },
+    // --claudeai signs into the Claude subscription (not Console API billing),
+    // which is the whole point of running a fleet of them.
+    login: ["claude", ["auth", "login", "--claudeai"]],
   },
   codex: {
     labels: Array.from({ length: CODEX_N }, (_, i) => `codex-acct-${i + 1}`),
-    hasCreds: (dir) => existsSync(join(dir, "auth.json")),
     env: (dir) => ({ CODEX_HOME: dir }),
-    loginCmd: "codex",
-    loginArgs: ["login"],
+    envName: "CODEX_HOME",
+    status(dir) {
+      const r = run("codex", ["login", "status"], this.env(dir));
+      const out = `${r.stdout}${r.stderr}`;
+      const loggedIn = /logged in/i.test(out) && !/not logged in/i.test(out);
+      const identity = out.match(/logged in using ([^\n]+)/i)?.[1]?.trim() ?? null;
+      return { loggedIn, identity, detail: null };
+    },
+    login: ["codex", ["login"]],
   },
 };
 
 const registered = (() => {
-  const r = spawnSync("smithers", ["agents", "list", "--format", "json"], { encoding: "utf8" });
+  const r = run("smithers", ["agents", "list", "--format", "json"], {});
   try {
     const parsed = JSON.parse(r.stdout);
     const rows = parsed?.data?.accounts ?? parsed?.accounts ?? parsed?.data ?? [];
@@ -72,80 +110,93 @@ const plan = [];
 for (const [provider, spec] of Object.entries(PROVIDERS)) {
   for (const label of spec.labels) {
     const dir = join(ACCOUNTS_ROOT, label);
-    plan.push({
-      provider,
-      label,
-      dir,
-      spec,
-      loggedIn: spec.hasCreds(dir),
-      registered: registered.has(label),
-    });
+    mkdirSync(dir, { recursive: true });
+    plan.push({ provider, label, dir, spec, ...spec.status(dir), registered: registered.has(label) });
   }
 }
 
 const mark = (b) => (b ? "✓" : "·");
-console.log(`\nAccount fleet — ${CLAUDE_N} claude + ${CODEX_N} codex\n`);
-for (const p of plan) {
-  console.log(
-    `  ${mark(p.loggedIn)} login  ${mark(p.registered)} registered  ${p.label.padEnd(16)} ${p.dir}`,
-  );
-}
-const missing = plan.filter((p) => !p.loggedIn);
-console.log(
-  `\n${plan.length - missing.length}/${plan.length} logged in, ` +
-    `${plan.filter((p) => p.registered).length}/${plan.length} registered.\n`,
-);
 
+function report() {
+  console.log(`\nAccount fleet — ${CLAUDE_N} claude + ${CODEX_N} codex\n`);
+  for (const p of plan) {
+    const who = p.identity ? `${p.identity}${p.detail ? ` (${p.detail})` : ""}` : "—";
+    console.log(
+      `  ${mark(p.loggedIn)} login  ${mark(p.registered)} registered  ${p.label.padEnd(14)} ${who}`,
+    );
+  }
+  const inCount = plan.filter((p) => p.loggedIn).length;
+  console.log(
+    `\n${inCount}/${plan.length} logged in, ` +
+      `${plan.filter((p) => p.registered).length}/${plan.length} registered.`,
+  );
+
+  // A fleet of eight seats all pointing at one subscription has one quota and
+  // buys nothing, so surface it loudly rather than letting it look healthy.
+  const seen = new Map();
+  for (const p of plan) {
+    if (!p.loggedIn || !p.identity) continue;
+    const key = `${p.provider}:${p.identity}`;
+    seen.set(key, [...(seen.get(key) ?? []), p.label]);
+  }
+  const dupes = [...seen.entries()].filter(([, labels]) => labels.length > 1);
+  if (dupes.length > 0) {
+    console.log(`\n  ⚠ SHARED SUBSCRIPTIONS — these seats draw from one quota:`);
+    for (const [key, labels] of dupes) {
+      console.log(`      ${key.split(":").slice(1).join(":")} → ${labels.join(", ")}`);
+    }
+    console.log(`    Log those labels out and back in with different accounts.`);
+  }
+  console.log("");
+}
+
+report();
 if (STATUS_ONLY) process.exit(0);
 
+const missing = plan.filter((p) => !p.loggedIn);
 if (missing.length > 0) {
   console.log(
-    `${missing.length} account(s) need a browser sign-in. Each launches its CLI with an\n` +
-      `isolated config dir; complete the OAuth flow in the browser, then quit the CLI\n` +
-      `(Ctrl-D or /exit) to continue to the next.\n\n` +
+    `${missing.length} account(s) need a browser sign-in. Each opens your browser with an\n` +
+      `isolated config dir; complete the OAuth flow and it moves on to the next.\n\n` +
       `Sign in with a DIFFERENT subscription for each label — otherwise they all share\n` +
-      `one quota and the entire point of the fleet is lost.\n`,
+      `one quota and the fleet buys nothing.\n`,
   );
 }
 
 for (const p of missing) {
-  mkdirSync(p.dir, { recursive: true });
-  const envName = Object.keys(p.spec.env(p.dir))[0];
+  const [cmd, cmdArgs] = p.spec.login;
   console.log(`\n── ${p.label} ─────────────────────────────────────────────`);
-  console.log(`   ${p.spec.loginCmd} ${p.spec.loginArgs.join(" ")}   (${envName}=${p.dir})`);
-  const r = spawnSync(p.spec.loginCmd, p.spec.loginArgs, {
+  console.log(`   ${cmd} ${cmdArgs.join(" ")}   (${p.spec.envName}=${p.dir})`);
+  const r = spawnSync(cmd, cmdArgs, {
     stdio: "inherit",
-    // Blank the API key: it would override the subscription OAuth we are here
-    // to establish, and the whole fleet exists to use subscriptions.
-    env: { ...process.env, ...p.spec.env(p.dir), ANTHROPIC_API_KEY: "" },
+    env: { ...process.env, ...p.spec.env(p.dir) },
   });
   if (r.error) {
-    console.log(`   ! could not launch ${p.spec.loginCmd}: ${r.error.message}`);
+    console.log(`   ! could not launch ${cmd}: ${r.error.message}`);
     continue;
   }
-  p.loggedIn = p.spec.hasCreds(p.dir);
-  console.log(p.loggedIn ? "   ✓ credentials present" : "   · still no credentials — skipped");
+  const after = p.spec.status(p.dir);
+  Object.assign(p, after);
+  console.log(
+    p.loggedIn ? `   ✓ signed in as ${p.identity ?? "(unknown)"}` : "   · still not signed in",
+  );
 }
 
 for (const p of plan) {
-  if (!p.spec.hasCreds(p.dir) || p.registered) continue;
-  const r = spawnSync(
+  if (!p.loggedIn || p.registered) continue;
+  const r = run(
     "smithers",
-    [
-      "agents", "add",
-      "--provider", p.provider,
-      "--label", p.label,
-      "--config-dir", p.dir,
-      "--replace",
-    ],
-    { encoding: "utf8" },
+    ["agents", "add", "--provider", p.provider, "--label", p.label, "--config-dir", p.dir, "--replace"],
+    {},
   );
-  console.log(
-    r.status === 0
-      ? `  ✓ registered ${p.label}`
-      : `  ! register ${p.label} failed: ${(r.stderr || r.stdout || "").trim().split("\n")[0]}`,
-  );
+  if (r.status === 0) {
+    p.registered = true;
+    console.log(`  ✓ registered ${p.label}`);
+  } else {
+    console.log(`  ! register ${p.label} failed: ${(r.stderr || r.stdout || "").trim().split("\n")[0]}`);
+  }
 }
 
-console.log(`\nNext: \`smithers usage\` shows per-account headroom; the campaign's`);
+report();
+console.log(`Next: \`smithers usage\` shows per-account headroom; the campaign's`);
 console.log(`accounts:refresh task snapshots it for load-balanced seat selection.\n`);
