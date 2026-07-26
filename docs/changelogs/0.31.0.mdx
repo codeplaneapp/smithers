@@ -144,6 +144,42 @@ bunx smithers-orchestrator packs update
 bunx smithers-orchestrator up opus5-bug-sweep
 ```
 
+## Reliability and security
+
+A security pin and a broad sweep of bug fixes landed alongside the features:
+
+- **CVE-2026-59892 is closed.** The vulnerable `@opentelemetry/propagator-jaeger`
+  2.7.1 arrived transitively through `@effect/opentelemetry`; the workspace now
+  forces 2.9.0 through its dependency overrides in both lockfiles.
+- **Custom run UIs stop going silently stale.** Provider-owned gateway clients
+  are disposed when replaced or unmounted, so a React StrictMode replay or
+  Activity hide/show can no longer leave a UI reading from a closed client
+  (#906), and provider recreation now accounts for every behavior-affecting
+  option (#904).
+- **`bunx smithers-orchestrator ui` and gateway autostart got honest.** Autostart waits scale
+  instead of racing, `START_IN_PROGRESS` reports what is actually happening,
+  and workflow UIs mount lazily (#1362).
+- **`bunx smithers-orchestrator events --watch` tails instead of replaying.** It no longer
+  dumps the run's full history before following new events (#1355).
+- **The bash tool stops over-blocking.** With network access off, the denylist
+  scanned every argument token and rejected benign local commands; it now
+  matches actual network use (#691).
+- **Webhook deliveries no longer double-fire on Postgres.** The dedupe contract
+  held on SQLite but the Postgres `ON CONFLICT` loser still reported success
+  (#682).
+- **`bunx smithers-orchestrator skills add`/`list`/`update` work headless.** The commands own
+  the curated skill and no longer gate on a TTY (#1377).
+- **`bunx smithers-orchestrator worktree prune` reclaims landed lanes.** Fully-landed jj lane
+  workspaces were misread as unsaved work due to colocated git HEAD skew and
+  held forever (#1379).
+- **Retried agent attempts survive a busy runner.** The engine clears a busy
+  SingleRunner close before retrying instead of failing the attempt.
+- **Shared agent pools close cleanly.** Lifecycle races when several tasks
+  share one pool are fixed, and OMP agents gained RPC fallback parity.
+- **Long runs stay bounded in the Monitor.** DevTools retains a bounded number
+  of tool calls per task (#869) and finish invalidation stays correct when the
+  event ring evicts (#864).
+
 ## Docs for humans, docs for agents
 
 The docs site now separates its two audiences. The Product API tab is for
