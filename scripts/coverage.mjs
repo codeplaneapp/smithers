@@ -264,7 +264,10 @@ for (const relDir of selected) {
     console.log(`\n[coverage] ${relDir} (${segment.phase}): bun ${args.join(" ")}`);
     const run = spawnSync("bun", args, {
       cwd: join(repoRoot, relDir),
-      env: process.env,
+      // SMITHERS_COVERAGE lets individual tests opt out of the instrumented
+      // lane when bun's coverage runtime itself breaks them (spawn EBADF,
+      // gesture timing); those tests still run in the plain test jobs.
+      env: { ...process.env, SMITHERS_COVERAGE: "1" },
       stdio: "inherit",
     });
     if (run.status !== 0) {

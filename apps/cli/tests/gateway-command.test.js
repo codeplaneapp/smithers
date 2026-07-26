@@ -224,7 +224,9 @@ test("gateway help distinguishes the multi-run Gateway from up --serve", () => {
   expect(result.stdout).toContain("unlike up --serve");
 });
 
-test("gateway starts for an initialized workspace with no existing DB and listRuns is empty", async () => {
+// Under bun's coverage instrumentation this spawn intermittently fails with
+// EBADF before the gateway boots; the plain test jobs cover the real boot.
+test.skipIf(process.env.SMITHERS_COVERAGE === "1")("gateway starts for an initialized workspace with no existing DB and listRuns is empty", async () => {
   const repo = createTempRepo();
   writeTestWorkflow(repo, ".smithers/workflows/basic.tsx");
   const dbPath = repo.path("smithers.db");
