@@ -5,7 +5,11 @@
  * apps/cli/tests/monitor-ui-model.test.ts. The React entry stays thin: it
  * renders what these functions derive.
  */
-import { normalizeStatus, statusClass, type StatusClass } from "smithers-orchestrator/ui";
+// The status vocabulary comes from the React-free `/ui/status` subpath, never
+// the `smithers-orchestrator/ui` barrel: the barrel eagerly evaluates the whole
+// radix component tree, which would drag React into every CLI test process that
+// imports this model (issue #1381). Pinned by tests/monitor-model-no-react.test.ts.
+import { normalizeStatus, statusClass, type StatusClass } from "smithers-orchestrator/ui/status";
 import { formatTokenRange, formatTokens, type NodeTiming, type RunUsagePrediction } from "./usagePrediction.ts";
 
 export { normalizeStatus };

@@ -79,6 +79,9 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "./scorers",
       "./gateway-ui",
       "./ui",
+      // The React-free status vocabulary: importing it must never evaluate the
+      // component barrel (issue #1381).
+      "./ui/status",
       "./ui/adapters/markdown-editor",
       "./sandbox",
       "./telegram",

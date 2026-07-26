@@ -29,6 +29,11 @@
       "types": "./src/adapters/terminal.tsx",
       "import": "./src/adapters/terminal.tsx",
       "default": "./src/adapters/terminal.tsx"
+    },
+    "./status": {
+      "types": "./src/status.ts",
+      "import": "./src/status.ts",
+      "default": "./src/status.ts"
     }
   },
   "files": [

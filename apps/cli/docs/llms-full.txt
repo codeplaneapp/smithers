@@ -10645,6 +10645,7 @@ Use the subpath form to import only the surface you need. Entry files in this ta
 | `smithers-orchestrator/gateway-react` | `./src/gateway-react.js` | React hooks and providers for gateway-backed UIs |
 | `smithers-orchestrator/gateway-ui` | `./src/gateway-ui.js` | Prebuilt React components for gateway-backed UIs (`RunList`, `RunTree`, `ApprovalPanel`, and more) |
 | `smithers-orchestrator/ui` | `./src/ui.js` | Shared shadcn-anatomy component library (`Button`, `Card`, `Dialog`, `Tabs`, `StatusPill`, and more) styled through the ui-styleguide theme tokens |
+| `smithers-orchestrator/ui/status` | `./src/ui/status.js` | The React-free status vocabulary (`normalizeStatus`, `statusClass`, `statusColor`, `statusColors`, `formatStatus`, `isTerminalRunStatus`) for CLI models, servers, and other non-React consumers that must not evaluate the component barrel |
 | `smithers-orchestrator/ui/adapters/markdown-editor` | `./src/ui/adapters/markdown-editor.js` | The shared `MarkdownEditor` WYSIWYG Milkdown Crepe editor, shipped behind an explicit heavy-dependency adapter subpath |
 | `smithers-orchestrator/ui/adapters/pierre-diff-view` | `./src/ui-adapters-pierre-diff-view.js` | Syntax-highlighted `PierreDiffView` diff surface (split/inline) over `@pierre/diffs`; opt-in adapter kept out of the base `ui` barrel so the heavy widget dependency is never pulled in transitively |
 | `smithers-orchestrator/ui/adapters/terminal` | `./src/ui/adapters/terminal.js` | The shared xterm.js-backed `Terminal` adapter, kept behind an explicit heavy-dependency subpath |
