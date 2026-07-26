@@ -41,12 +41,18 @@ describe("detectAvailableAgents", () => {
     const CODEX_DEFAULT_TIERS = {
         cheapFast: "codexLuna",
         research: "codexLuna",
-        implement: "codexTerra",
         midTier: "codexTerra",
         smartTool: "codexTerra",
         validate: "codexTerra",
-        smart: "codexSol",
         review: "codexSol",
+    };
+
+    // Registry v7: Claude Opus leads the build lanes whenever a Claude
+    // provider is usable; the Codex Terra/Sol variants stay spliced in
+    // behind as checking lanes.
+    const OPUS_LED_TIERS = {
+        implement: "codexTerra",
+        smart: "codexSol",
     };
 
     // Orchestration/gating and planning lead with Claude when it is available;
@@ -233,6 +239,10 @@ describe("detectAvailableAgents", () => {
         for (const [tier, provider] of Object.entries(CLAUDE_LED_TIERS)) {
             expect(activePoolProviders(source, tier)[0], `${tier} must start with Claude`).toBe(provider);
             expect(activePoolProviders(source, tier), `${tier} keeps Codex Sol as a fallback`).toContain("codexSol");
+        }
+        for (const [tier, codexLane] of Object.entries(OPUS_LED_TIERS)) {
+            expect(activePoolProviders(source, tier)[0], `${tier} leads with Claude Opus`).toBe("claudeOpus");
+            expect(activePoolProviders(source, tier), `${tier} keeps ${codexLane} as its checking lane`).toContain(codexLane);
         }
         expect(activePoolProviders(source, "implement").slice(1)).toContain("claudeSonnet");
         expect(activePoolProviders(source, "review").slice(1)).toContain("claude");

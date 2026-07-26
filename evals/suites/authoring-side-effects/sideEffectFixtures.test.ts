@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { gradeSideEffectCompliance } from "../../../packages/scorers/src/gradeSideEffectCompliance.js";
 import { fixtureVerdicts } from "./fixtureVerdicts.js";
 
@@ -9,7 +9,7 @@ const fixturesRoot = join(import.meta.dir, "fixtures");
 function sourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
-    return entry.isDirectory() ? sourceFiles(path) : [relative(fixturesRoot, path)];
+    return entry.isDirectory() ? sourceFiles(path) : [relative(fixturesRoot, path).split(sep).join("/")];
   });
 }
 
