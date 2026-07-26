@@ -183,11 +183,12 @@ export function closeSingleRunnerRuntime() {
         // Clear only this failed attempt so a later close can retry. The no-op
         // catch keeps a caller that ignores the promise from crashing the
         // process on an unhandled rejection.
-        attempt.catch(() => { }).then(() => {
+        queueMicrotask(() => {
             if (singleRunnerClosePromise === attempt) {
                 singleRunnerClosePromise = undefined;
             }
         });
+        attempt.catch(() => { });
         return attempt;
     }
     // Fence synchronously, before any await.

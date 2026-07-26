@@ -149,6 +149,19 @@ describe("single runner lifecycle", () => {
         expect(disposals.length).toBe(1);
     });
 
+    test("a busy close can be retried immediately after its rejection is observed", async () => {
+        const { runtime, disposals } = makeFakeRuntime();
+        I.setSingleRunnerRuntimePromiseForTest(Promise.resolve(runtime));
+        const releaseRunLease = acquireSingleRunnerRunLease("settling-run");
+        const busyClose = closeSingleRunnerRuntime();
+        await expect(busyClose).rejects.toMatchObject({ code: "SINGLE_RUNNER_BUSY" });
+        releaseRunLease();
+        const retryClose = closeSingleRunnerRuntime();
+        expect(retryClose).not.toBe(busyClose);
+        await retryClose;
+        expect(disposals.length).toBe(1);
+    });
+
     test("dispatch and run admission are fenced while a close is in flight", async () => {
         let finishDispose = () => { };
         const disposeGate = new Promise((resolve) => {
