@@ -142,6 +142,9 @@ const CORE_PAGES = [
   // fragment because the SmithersEvent union is too detailed for everyday
   // schema noise for everyday use.
   "runtime/run-workflow.mdx",
+  // How a finite embedding program ends: closeSingleRunnerRuntime() and the
+  // shutdown ordering. Without this, agents reach for process.exit().
+  "runtime/shutdown.mdx",
   "runtime/browser.mdx",
   "runtime/render-frame.mdx",
   "runtime/revert.mdx",

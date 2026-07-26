@@ -216,6 +216,8 @@ connection setup problems aren't hidden behind unrelated source-store errors.
 | `PROCESS_IDLE_TIMEOUT` | A spawned child process stops producing output longer than its idle timeout. | `{ command, args, cwd, idleTimeoutMs }` |
 | `PROCESS_SPAWN_FAILED` | The runtime cannot spawn the requested child process. | `{ command, args, cwd }` |
 | `TASK_RUNTIME_UNAVAILABLE` | Builder task runtime APIs are accessed outside an executing step. | -- |
+| `SINGLE_RUNNER_BUSY` | `closeSingleRunnerRuntime()` was called while a run or a task dispatch still holds the process-local SingleRunner runtime. The runtime is left open and usable; await the outstanding runs and close again. | `{ state, runIds, executionIds }` |
+| `SINGLE_RUNNER_CLOSED` | A run or task dispatch tried to start after `closeSingleRunnerRuntime()` began. Call `reopenSingleRunnerRuntime()` to allow the runtime to be rebuilt lazily. | `{ state, operation }` |
 
 ## Hot Reload
 

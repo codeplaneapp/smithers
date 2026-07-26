@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { runWorkflow } from "smithers-orchestrator";
+import { closeSingleRunnerRuntime, runWorkflow } from "smithers-orchestrator";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import {
   buildKillResumeWorkflow,
@@ -26,12 +26,13 @@ import {
  * It prints a single machine-readable line to stdout when the run resolves:
  *   RESULT_STATUS=<status>
  *
- * It then calls process.exit() explicitly. The engine leaves a run supervisor /
- * db handle alive that keeps the event loop running after runWorkflow resolves,
- * so without an explicit exit the child would never terminate on its own — the
- * test would hang waiting for the resume child to exit. Exiting here is safe:
- * runWorkflow only resolves after the run reaches a terminal/durable state and
- * all output rows are committed to the on-disk db.
+ * It then closes the process-local SingleRunner runtime and returns, setting
+ * process.exitCode rather than forcing an exit. The engine used to leave that
+ * cluster runtime's daemon fibers alive after runWorkflow resolved, which kept
+ * the event loop running and forced a process.exit() here (#1378); the public
+ * closeSingleRunnerRuntime() is now the teardown boundary. Closing here is
+ * safe: runWorkflow only resolves after the run reaches a terminal/durable
+ * state and all output rows are committed to the on-disk db.
  *
  * On the "initial" run this process is expected to be SIGKILLed by the parent
  * before it ever reaches the exit line — that is the whole point.
@@ -90,9 +91,10 @@ async function main(): Promise<void> {
 
   const result = await Effect.runPromise(runWorkflow(workflow, opts));
   process.stdout.write(`RESULT_STATUS=${result.status}\n`);
-  // See header comment: explicit exit is required because the engine keeps the
-  // event loop alive after the run resolves.
-  process.exit(result.status === "finished" ? 0 : 1);
+  // See header comment: the run has settled, so closing the process-local
+  // SingleRunner runtime lets this child exit on its own (#1378).
+  await closeSingleRunnerRuntime();
+  process.exitCode = result.status === "finished" ? 0 : 1;
 }
 
 main().catch((error) => {

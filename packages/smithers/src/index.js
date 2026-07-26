@@ -229,11 +229,17 @@ export { resolveSmithersBackendChoice } from "./resolveSmithersBackendChoice.js"
 export { migrateSmithersStore } from "./migrateSmithersStore.js";
 export {
   approveNode,
+  // Process-local SingleRunner lifecycle. Nothing calls these by default; a
+  // finite program awaits its runs, then closes so the cluster daemon fibers
+  // stop pinning the event loop and the process can exit without
+  // process.exit(). See https://smithers.sh/runtime/shutdown (#1378).
+  closeSingleRunnerRuntime,
   denyNode,
   fragment,
   getRun,
   listRuns,
   renderFrame,
+  reopenSingleRunnerRuntime,
   runWorkflow,
   Smithers,
   workflow,

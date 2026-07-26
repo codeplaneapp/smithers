@@ -873,6 +873,22 @@ declare namespace smithersErrorDefinitions {
         let details_101: string;
         export { details_101 as details };
     }
+    namespace SINGLE_RUNNER_BUSY {
+        let category_102: string;
+        export { category_102 as category };
+        let when_102: string;
+        export { when_102 as when };
+        let details_102: string;
+        export { details_102 as details };
+    }
+    namespace SINGLE_RUNNER_CLOSED {
+        let category_103: string;
+        export { category_103 as category };
+        let when_103: string;
+        export { when_103 as when };
+        let details_103: string;
+        export { details_103 as details };
+    }
 }
 
 type KnownSmithersErrorCode$3 = keyof typeof smithersErrorDefinitions;

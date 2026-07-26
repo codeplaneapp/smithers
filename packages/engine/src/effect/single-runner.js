@@ -5,8 +5,9 @@ import * as RunnerStorage from "@effect/cluster/RunnerStorage";
 import * as Sharding from "@effect/cluster/Sharding";
 import * as ShardingConfig from "@effect/cluster/ShardingConfig";
 import * as SingleRunner from "@effect/cluster/SingleRunner";
-import { Effect, Layer, Scope } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { fromTaggedErrorPayload } from "@smithers-orchestrator/errors/fromTaggedErrorPayload";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { toTaggedErrorPayload } from "@smithers-orchestrator/errors/toTaggedErrorPayload";
 import { isUnknownWorkerError, isTaskResultFailure, TaskWorkerEntity, } from "./entity-worker.js";
 /**
@@ -14,6 +15,12 @@ import { isUnknownWorkerError, isTaskResultFailure, TaskWorkerEntity, } from "./
  */
 /**
  * @typedef {{ terminal: boolean; }} WorkerExecutionResult
+ */
+/**
+ * @typedef {{ client: any; context: any; dispose?: () => Promise<void>; }} SingleRunnerRuntime
+ */
+/**
+ * @typedef {"idle" | "opening" | "open" | "closing" | "closed"} SingleRunnerState
  */
 /** @typedef {import("./WorkerTask.ts").WorkerTask} WorkerTask */
 /** @typedef {import("./TaskResult.ts").TaskResult} TaskResult */
@@ -34,6 +41,196 @@ const workerExecutions = new Map();
 const workerErrors = new Map();
 const dispatchSubscribers = new Set();
 let singleRunnerRuntimePromise;
+/**
+ * Lifecycle of the process-local SingleRunner runtime:
+ *
+ *   idle -> opening -> open -> closing -> closed -> (reopen) -> idle
+ *
+ * Every transition out of a usable state is made SYNCHRONOUSLY, before any
+ * await, so a close can never interleave with a dispatch or a run that has
+ * already passed the fence.
+ * @type {SingleRunnerState}
+ */
+let singleRunnerState = "idle";
+/**
+ * The one close promise shared by every concurrent caller. Retained after a
+ * successful or failed close so repeat calls settle identically; cleared by a
+ * busy rejection (so a later close can retry) and by an explicit reopen.
+ * @type {Promise<void> | undefined}
+ */
+let singleRunnerClosePromise;
+/**
+ * Live `runWorkflow` calls. A run lease spans validation, every task attempt,
+ * driver retry backoff between attempts, and cleanup. `workerExecutions` is
+ * empty during backoff, so this is the only thing that stops a close from
+ * tearing the runtime out from under a mid-flight run.
+ * @type {Map<string, string>}
+ */
+const activeRunLeases = new Map();
+/**
+ * Live `dispatchWorkerTask` calls, acquired before the first await so a close
+ * cannot observe an empty lease set while a dispatch is still on its way to
+ * the runtime.
+ * @type {Map<string, string>}
+ */
+const activeDispatchLeases = new Map();
+let singleRunnerLeaseCounter = 0;
+const SHUTDOWN_DOC_URL = "https://smithers.sh/runtime/shutdown";
+/**
+ * @returns {{ state: SingleRunnerState; runIds: string[]; executionIds: string[]; } | undefined}
+ */
+function describeActiveLeases() {
+    if (activeRunLeases.size === 0 && activeDispatchLeases.size === 0) {
+        return undefined;
+    }
+    return {
+        state: singleRunnerState,
+        runIds: [...new Set(activeRunLeases.values())],
+        executionIds: [...new Set(activeDispatchLeases.values())],
+    };
+}
+/**
+ * Fence new work once a close has been committed to. Throws synchronously so
+ * callers never queue behind a teardown and the runtime is never implicitly
+ * rebuilt underneath one.
+ * @param {string} what
+ * @returns {void}
+ */
+function assertSingleRunnerAcceptsWork(what) {
+    if (singleRunnerState !== "closing" && singleRunnerState !== "closed") {
+        return;
+    }
+    throw new SmithersError("SINGLE_RUNNER_CLOSED", `The process-local SingleRunner runtime is ${singleRunnerState}, so ${what} cannot start. Call reopenSingleRunnerRuntime() to allow the runtime to be rebuilt lazily, or start this work before closing it. Shutdown ordering: ${SHUTDOWN_DOC_URL}`, { state: singleRunnerState, operation: what });
+}
+/**
+ * @param {Map<string, string>} leases
+ * @param {string} kind
+ * @param {string} id
+ * @returns {() => void}
+ */
+function acquireSingleRunnerLease(leases, kind, id) {
+    const leaseId = `${kind}:${++singleRunnerLeaseCounter}`;
+    leases.set(leaseId, id);
+    let released = false;
+    return () => {
+        if (released) {
+            return;
+        }
+        released = true;
+        leases.delete(leaseId);
+    };
+}
+/**
+ * Hold the process-local SingleRunner runtime open for the entire lifetime of
+ * one `runWorkflow` call. The engine acquires this next to the wake lock and
+ * releases it in the same `finally`, so `closeSingleRunnerRuntime()` reports
+ * the run as busy even while the driver is sleeping between retry attempts.
+ * @param {string} runId
+ * @returns {() => void} release
+ */
+export function acquireSingleRunnerRunLease(runId) {
+    assertSingleRunnerAcceptsWork(`run ${runId}`);
+    return acquireSingleRunnerLease(activeRunLeases, "run", runId);
+}
+/**
+ * @param {string} executionId
+ * @returns {() => void} release
+ */
+function acquireSingleRunnerDispatchLease(executionId) {
+    assertSingleRunnerAcceptsWork(`task dispatch ${executionId}`);
+    return acquireSingleRunnerLease(activeDispatchLeases, "dispatch", executionId);
+}
+/**
+ * Tear down the process-local SingleRunner runtime so a finite program can
+ * exit without `process.exit()`. The Effect Cluster stack behind task dispatch
+ * forks repeating daemon fibers (shard lock refresh, shard assignment, message
+ * polling, runner health) whose timers pin the event loop forever, so awaiting
+ * `runWorkflow` is not by itself a lifecycle boundary.
+ *
+ * This is a non-async function on purpose: every concurrent caller receives the
+ * identical promise object.
+ *
+ * - Never opened, or already closed: resolves without doing resource work, and
+ *   still transitions to `closed` so a shutting-down process cannot be
+ *   restarted by a stray dispatch.
+ * - Open in progress: awaits the build's settlement first, so a just-built
+ *   scope is never leaked.
+ * - Any run or dispatch lease held: REJECTS with `SINGLE_RUNNER_BUSY` and
+ *   leaves the runtime fully usable. The failed attempt is cleared, so a close
+ *   issued after the work settles succeeds.
+ * - Terminal by default: `closed` persists until `reopenSingleRunnerRuntime()`.
+ * - If disposal itself fails the shared promise rejects for every waiter and
+ *   the state stays `closed`; a partially finalized runtime is not safe to
+ *   reuse, but an explicit reopen is still available.
+ *
+ * Smithers installs no process signal handlers. The owner pattern is: stop
+ * admission, abort in-flight runs via `RunOptions.signal`, await run
+ * settlement, call this, then clean up your own database/backends. See
+ * https://smithers.sh/runtime/shutdown.
+ * @returns {Promise<void>}
+ */
+export function closeSingleRunnerRuntime() {
+    if (singleRunnerClosePromise) {
+        return singleRunnerClosePromise;
+    }
+    const busy = describeActiveLeases();
+    if (busy) {
+        // Never force a close: the entity handler wraps task work in an
+        // uninterruptible Effect.promise, so tearing the scope down here would
+        // abandon live work and stall in Sharding's entityTerminationTimeout.
+        const attempt = Promise.reject(new SmithersError("SINGLE_RUNNER_BUSY", `The process-local SingleRunner runtime is still in use by ${busy.runIds.length} run(s) and ${busy.executionIds.length} task dispatch(es), so it was left open. Await your runWorkflow promises (or abort them via RunOptions.signal) before closing. Shutdown ordering: ${SHUTDOWN_DOC_URL}`, busy));
+        singleRunnerClosePromise = attempt;
+        // Clear only this failed attempt so a later close can retry. The no-op
+        // catch keeps a caller that ignores the promise from crashing the
+        // process on an unhandled rejection.
+        attempt.catch(() => { }).then(() => {
+            if (singleRunnerClosePromise === attempt) {
+                singleRunnerClosePromise = undefined;
+            }
+        });
+        return attempt;
+    }
+    // Fence synchronously, before any await.
+    singleRunnerState = "closing";
+    const pendingRuntime = singleRunnerRuntimePromise;
+    const closing = (async () => {
+        try {
+            const runtime = pendingRuntime
+                ? await pendingRuntime.catch(() => undefined)
+                : undefined;
+            await runtime?.dispose?.();
+        }
+        finally {
+            singleRunnerRuntimePromise = undefined;
+            singleRunnerState = "closed";
+        }
+    })();
+    closing.catch(() => { });
+    singleRunnerClosePromise = closing;
+    return closing;
+}
+/**
+ * Allow the lazy open path again after a completed close, for a long-lived host
+ * recovering from a component-level shutdown. Nothing in Smithers calls this by
+ * default; the next task dispatch rebuilds the runtime through the existing
+ * lazy memo.
+ *
+ * No-op while the runtime is still usable (`idle`/`opening`/`open`). Throws
+ * while a close is in flight: await `closeSingleRunnerRuntime()` first, then
+ * reopen.
+ * @returns {void}
+ */
+export function reopenSingleRunnerRuntime() {
+    if (singleRunnerState === "closing") {
+        throw new SmithersError("SINGLE_RUNNER_CLOSED", `The process-local SingleRunner runtime is still closing. Await closeSingleRunnerRuntime() before reopening it. Shutdown ordering: ${SHUTDOWN_DOC_URL}`, { state: singleRunnerState, operation: "reopen" });
+    }
+    if (singleRunnerState !== "closed") {
+        return;
+    }
+    singleRunnerState = "idle";
+    singleRunnerClosePromise = undefined;
+    singleRunnerRuntimePromise = undefined;
+}
 /**
  * @param {WorkerTask} task
  */
@@ -164,12 +361,16 @@ async function buildSingleRunnerRuntime() {
     const layer = TaskWorkerEntity.toLayer(TaskWorkerEntity.of({
         execute: (request) => Effect.promise(() => runRegisteredExecution(request.payload)),
     }), { concurrency: "unbounded" }).pipe(Layer.provideMerge(runnerLayer));
-    const scope = await Effect.runPromise(Scope.make());
-    const context = await Effect.runPromise(Layer.buildWithScope(layer, scope));
-    const client = await Effect.runPromise(TaskWorkerEntity.client.pipe(Effect.provide(context)));
+    // ManagedRuntime owns the layer's scope, so `dispose()` is the teardown
+    // handle this function used to build and then drop on the floor (#1378).
+    // Precedent: packages/integrations/src/core/IntegrationRuntime.js.
+    const managed = ManagedRuntime.make(layer);
+    const context = (await managed.runtime()).context;
+    const client = await managed.runPromise(TaskWorkerEntity.client);
     return {
         client: client,
         context,
+        dispose: () => managed.dispose(),
     };
 }
 /**
@@ -183,9 +384,23 @@ async function getSingleRunnerRuntime() {
  * @returns {Promise<SingleRunnerRuntime>}
  */
 async function getSingleRunnerRuntimeFromBuilder(buildRuntime) {
+    assertSingleRunnerAcceptsWork("opening the SingleRunner runtime");
     if (!singleRunnerRuntimePromise) {
-        singleRunnerRuntimePromise = buildRuntime().catch((error) => {
+        singleRunnerState = "opening";
+        singleRunnerRuntimePromise = buildRuntime().then((runtime) => {
+            // A close that raced this build already owns the state machine; do
+            // not resurrect it here.
+            if (singleRunnerState === "opening") {
+                singleRunnerState = "open";
+            }
+            return runtime;
+        }, (error) => {
+            // Construction failure stays retryable, exactly as before: drop the
+            // memo so the next dispatch rebuilds.
             singleRunnerRuntimePromise = undefined;
+            if (singleRunnerState === "opening") {
+                singleRunnerState = "idle";
+            }
             throw error;
         });
     }
@@ -197,25 +412,33 @@ async function getSingleRunnerRuntimeFromBuilder(buildRuntime) {
  * @returns {Promise<WorkerExecutionResult>}
  */
 export async function dispatchWorkerTask(task, execute) {
-    const runtime = await getSingleRunnerRuntime();
-    const registered = {
-        task,
-        execute,
-    };
-    workerExecutions.set(task.executionId, registered);
+    // Acquired before the first await (and before the runtime is built) so a
+    // concurrent close can never see an empty lease set for this dispatch.
+    const releaseDispatchLease = acquireSingleRunnerDispatchLease(task.executionId);
     try {
-        const result = await Effect.runPromise(runtime.client(task.bridgeKey).execute(task).pipe(Effect.provide(runtime.context)));
-        if (isTaskResultFailure(result)) {
-            throw consumeWorkerError(result);
-        }
-        return {
-            terminal: result.terminal,
+        const runtime = await getSingleRunnerRuntime();
+        const registered = {
+            task,
+            execute,
         };
+        workerExecutions.set(task.executionId, registered);
+        try {
+            const result = await Effect.runPromise(runtime.client(task.bridgeKey).execute(task).pipe(Effect.provide(runtime.context)));
+            if (isTaskResultFailure(result)) {
+                throw consumeWorkerError(result);
+            }
+            return {
+                terminal: result.terminal,
+            };
+        }
+        finally {
+            if (workerExecutions.get(task.executionId) === registered) {
+                workerExecutions.delete(task.executionId);
+            }
+        }
     }
     finally {
-        if (workerExecutions.get(task.executionId) === registered) {
-            workerExecutions.delete(task.executionId);
-        }
+        releaseDispatchLease();
     }
 }
 /**
@@ -230,14 +453,28 @@ export function subscribeTaskWorkerDispatches(subscriber) {
 }
 
 export const __singleRunnerInternals = {
+    acquireSingleRunnerDispatchLease,
+    activeDispatchLeases,
+    activeRunLeases,
     buildMissingExecutionResult,
     buildSingleRunnerRuntime,
     consumeWorkerError,
     dispatchSubscribers,
     getSingleRunnerRuntimeFromBuilder,
     getSingleRunnerRuntime,
+    getSingleRunnerStateForTest: () => singleRunnerState,
+    getSingleRunnerClosePromiseForTest: () => singleRunnerClosePromise,
+    getSingleRunnerRuntimePromiseForTest: () => singleRunnerRuntimePromise,
+    resetSingleRunnerLifecycleForTest: () => {
+        singleRunnerState = "idle";
+        singleRunnerClosePromise = undefined;
+        singleRunnerRuntimePromise = undefined;
+        activeRunLeases.clear();
+        activeDispatchLeases.clear();
+    },
     setSingleRunnerRuntimePromiseForTest: (promise) => {
         singleRunnerRuntimePromise = promise;
+        singleRunnerState = promise ? "open" : "idle";
     },
     notifyDispatchSubscribers,
     runRegisteredExecution,

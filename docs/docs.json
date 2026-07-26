@@ -463,6 +463,7 @@
             "pages": [
               "runtime/browser",
               "runtime/run-workflow",
+              "runtime/shutdown",
               "runtime/render-frame",
               "runtime/run-state",
               "runtime/revert",

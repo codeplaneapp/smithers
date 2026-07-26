@@ -67,7 +67,7 @@ export { aggregateScores, createScorer, estimateCostUsd, faithfulnessScorer, lat
 import * as _smithers_orchestrator_agents_capability_registry from '@smithers-orchestrator/agents/capability-registry';
 export { hashCapabilityRegistry } from '@smithers-orchestrator/agents/capability-registry';
 export { ERROR_REFERENCE_URL } from '@smithers-orchestrator/errors/ERROR_REFERENCE_URL';
-export { Smithers, approveNode, denyNode, fragment, getRun, listRuns, renderFrame, runWorkflow, workflow } from '@smithers-orchestrator/engine';
+export { Smithers, approveNode, closeSingleRunnerRuntime, denyNode, fragment, getRun, listRuns, renderFrame, reopenSingleRunnerRuntime, runWorkflow, workflow } from '@smithers-orchestrator/engine';
 export { SmithersDb, loadOutputs, loadOutputsEffect } from '@smithers-orchestrator/db';
 import { SmithersDb } from '@smithers-orchestrator/db/adapter';
 export { camelToSnake } from '@smithers-orchestrator/db/utils/camelToSnake';

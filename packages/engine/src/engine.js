@@ -61,6 +61,7 @@ import { annotateSmithersTrace, smithersSpanNames, withSmithersSpan, } from "@sm
 import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
 import { hashCapabilityRegistry } from "@smithers-orchestrator/agents/capability-registry";
 import { bridgeApprovalResolve, bridgeWaitForEventResolve, cancelPendingTimersBridge, executeTaskBridgeEffect, isBridgeManagedTimerTask as isTimerTask, resolveDeferredTaskStateBridge, } from "./effect/workflow-bridge.js";
+import { acquireSingleRunnerRunLease } from "./effect/single-runner.js";
 import { parseWaitForEventAttemptSnapshot } from "@smithers-orchestrator/db/waitForEventAttempt";
 import { AlertRuntime } from "./alert-runtime.js";
 import { attachSandboxComputeFns, attachSubflowComputeFns } from "./task-compute-fns.js";
@@ -6637,18 +6638,31 @@ async function activateRunForResume(adapter, existingRun, opts, runtimeOwnerId, 
  * @returns {Promise<RunResult>}
  */
 async function runWorkflowAsync(workflow, opts) {
-    validateRunOptions(opts);
-    const runId = opts.runId ?? crypto.randomUUID();
-    const platformLayer = resolveRunPlatformLayer(opts);
-    const run = () => runWithCorrelationContext({
-        runId,
-        parentRunId: opts.parentRunId ?? undefined,
-        workflowName: "workflow",
-    }, () => runWorkflowWithMakeBridge(workflow, {
-        ...opts,
-        runId,
-    }, runWorkflowBodyDriver));
-    return platformLayer ? withPlatformLayer(platformLayer, run) : run();
+    // The run lease spans this whole call -- validation, every attempt, the
+    // driver's retry backoff between attempts, and cleanup -- so
+    // closeSingleRunnerRuntime() reports SINGLE_RUNNER_BUSY instead of
+    // disposing the cluster runtime under a live run. `workerExecutions` alone
+    // is empty during backoff and cannot see this (#1378). `return await` is
+    // load bearing: a bare `return` would release the lease before the run
+    // settles.
+    const releaseRunLease = acquireSingleRunnerRunLease(opts.runId ?? "pending");
+    try {
+        validateRunOptions(opts);
+        const runId = opts.runId ?? crypto.randomUUID();
+        const platformLayer = resolveRunPlatformLayer(opts);
+        const run = () => runWithCorrelationContext({
+            runId,
+            parentRunId: opts.parentRunId ?? undefined,
+            workflowName: "workflow",
+        }, () => runWorkflowWithMakeBridge(workflow, {
+            ...opts,
+            runId,
+        }, runWorkflowBodyDriver));
+        return await (platformLayer ? withPlatformLayer(platformLayer, run) : run());
+    }
+    finally {
+        releaseRunLease();
+    }
 }
 /**
  * @param {ReadonlyMap<string, number> | Record<string, number> | null} [iterations]

@@ -478,4 +478,14 @@ export const smithersErrorDefinitions = {
         category: "integrations",
         when: "An OpenAPI tool call fails during HTTP execution.",
     },
+    SINGLE_RUNNER_BUSY: {
+        category: "effect",
+        when: "closeSingleRunnerRuntime() was called while a run or a task dispatch still holds the process-local SingleRunner runtime. The runtime is left open and usable; await the outstanding runs and close again.",
+        details: "{ state, runIds, executionIds }",
+    },
+    SINGLE_RUNNER_CLOSED: {
+        category: "effect",
+        when: "A run or task dispatch tried to start after closeSingleRunnerRuntime() began. Call reopenSingleRunnerRuntime() to allow the runtime to be rebuilt lazily.",
+        details: "{ state, operation }",
+    },
 };

@@ -33,7 +33,7 @@ export { SandboxEntity, SandboxEntityExecutor, makeSandboxEntityId, makeSandboxT
 export { CodeplaneSandboxExecutorLive, DockerSandboxExecutorLive, SandboxHttpRunner, } from "./http-runner.js";
 export { BubblewrapSandboxExecutorLive, SandboxSocketRunner, } from "@smithers-orchestrator/sandbox/effect/socket-runner";
 export { isTaskResultFailure, makeWorkerTask, TaskResult, WorkerDispatchKind, WorkerTask, WorkerTaskKind, TaskWorkerEntity, } from "./entity-worker.js";
-export { dispatchWorkerTask, subscribeTaskWorkerDispatches, } from "./single-runner.js";
+export { closeSingleRunnerRuntime, dispatchWorkerTask, reopenSingleRunnerRuntime, subscribeTaskWorkerDispatches, } from "./single-runner.js";
 // Dedupe caches keyed by bridgeKey. Completed executions are kept only until the
 // end of the current macrotask (see the setTimeout(..., 0) eviction in
 // `executeTaskBridge`): duplicate dispatches of the same bridgeKey issued in the

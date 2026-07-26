@@ -1,0 +1,119 @@
+---
+title: Shutdown
+description: Close the process-local SingleRunner runtime so a finite program exits without process.exit().
+---
+
+Awaiting `runWorkflow` is not a process lifecycle boundary. The first task
+dispatch lazily boots a process-local Effect Cluster "SingleRunner": an
+in-process task routing stack that forks repeating daemon fibers (shard lock
+refresh, shard assignment refresh, message polling, runner health). Their timers
+keep the event loop alive, so a finite Bun or Node program can finish every run
+and still hang.
+
+`closeSingleRunnerRuntime()` is the teardown boundary. Calling `process.exit()`
+instead is unsafe: a hard exit skips your own database flushes and cleanup.
+
+```ts
+import { closeSingleRunnerRuntime, runWorkflow } from "smithers-orchestrator";
+import { Effect } from "effect";
+
+const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+await closeSingleRunnerRuntime();
+process.exitCode = result.status === "finished" ? 0 : 1;
+// main() returns, the event loop drains, the process exits on its own.
+```
+
+Signatures:
+
+```ts
+function closeSingleRunnerRuntime(): Promise<void>;
+function reopenSingleRunnerRuntime(): void;
+```
+
+Nothing in Smithers calls either function for you. Gateway, `up --serve`, and
+the HTTP server deliberately keep the runtime open across many runs, so
+`Gateway.close()` does not close it.
+
+## Semantics
+
+| Situation | Behavior |
+|---|---|
+| Never opened, or already closed | Resolves immediately. A close before the first dispatch still moves the runtime to `closed`, so a stray dispatch in a shutting-down process cannot restart it. |
+| Concurrent callers | Every caller gets the identical promise object. `closeSingleRunnerRuntime()` is not an `async` function for exactly this reason. |
+| Open still in progress | The close awaits the build's settlement first, so a just-built runtime is never leaked. |
+| A run or dispatch is still active | Rejects with `SINGLE_RUNNER_BUSY` and leaves the runtime fully usable. The failed attempt is discarded, so a close issued after the work settles succeeds. |
+| Dispatch or run starts while closing or closed | Rejects with `SINGLE_RUNNER_CLOSED`. Work never queues behind a teardown, and the runtime is never implicitly rebuilt. |
+| After a completed close | Terminal by default. `reopenSingleRunnerRuntime()` returns the runtime to `idle`, and the next dispatch rebuilds it lazily. |
+| Teardown itself fails | The shared promise rejects for every waiter and the state stays `closed`. A partially finalized runtime is not safe to reuse, but an explicit reopen is still available. |
+
+Construction failures are unaffected: a build that throws while the runtime is
+open stays retryable and the next dispatch rebuilds, exactly as before.
+
+## Busy is a lease, not a guess
+
+Two levels of lease keep a close from landing in the middle of live work:
+
+- A **run lease** spans the entirety of one `runWorkflow` call: validation,
+  every task attempt, the driver's retry backoff *between* attempts, and
+  cleanup.
+- A **dispatch lease** is taken at the top of every task dispatch, before the
+  runtime is even built.
+
+The run lease is the important one. Between two attempts of a retrying task
+there is no in-flight dispatch at all, so an "are any tasks running" check would
+report the runtime as idle and tear it down under a live run.
+
+## Ordering for a process owner
+
+Only the component that owns the process should close the runtime, and only
+after it has stopped admitting work:
+
+1. Stop accepting new runs.
+2. Abort in-flight runs through `RunOptions.signal`.
+3. Await settlement of every `runWorkflow` promise you started.
+4. `await closeSingleRunnerRuntime()`.
+5. Clean up your own resources: database handles, servers, backends.
+
+```ts
+const controller = new AbortController();
+process.on("SIGINT", () => controller.abort());
+
+try {
+  await Effect.runPromise(runWorkflow(workflow, { input: {}, signal: controller.signal }));
+} finally {
+  try {
+    await closeSingleRunnerRuntime();
+  } catch (error) {
+    // SINGLE_RUNNER_BUSY means work is still live: report it instead of
+    // forcing the process down and losing that work.
+    console.error("smithers cleanup failed", error);
+    process.exitCode = 1;
+  }
+}
+```
+
+Smithers installs no `SIGINT` or `SIGTERM` handlers of its own, so this ordering
+is entirely yours to choose.
+
+## Reopening
+
+`reopenSingleRunnerRuntime()` exists for long-lived hosts that embed a component
+which closes the runtime at its own shutdown. It returns a `closed` runtime to
+`idle` so the next dispatch rebuilds it. It is a no-op when the runtime is still
+usable, and it throws while a close is in flight: await
+`closeSingleRunnerRuntime()` first.
+
+```ts
+await closeSingleRunnerRuntime();
+reopenSingleRunnerRuntime();
+// The next runWorkflow builds a fresh SingleRunner runtime.
+```
+
+Do not use it to paper over a misplaced close during shutdown. Rebuilding the
+runtime restarts every daemon fiber, and the process stops being able to exit
+again.
+
+## Related
+
+- [runWorkflow](/runtime/run-workflow)
+- [Errors](/reference/errors)
