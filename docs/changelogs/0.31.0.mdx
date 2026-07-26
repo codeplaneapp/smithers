@@ -202,6 +202,12 @@ repo's own issue tracker. The most noticeable, with a security pin first:
   their step numbers (#700), duplicate `Panel` panelist labels no longer
   collide into a `DUPLICATE_ID` crash (#694), and Telegram message splitting
   stops breaking MarkdownV2 escapes and surrogate pairs (#739).
+- **Account logins are detected authoritatively.** Registration asks the
+  provider instead of sniffing the config directory, so stale directories no
+  longer read as logged-in seats.
+- **jj workspaces survive symlinked paths.** The engine resolves symlinks when
+  verifying workspace roots, fixing worktree verification on macOS /tmp-style
+  paths.
 - **Sandboxes respect their limits.** A GCP Cloud Run abort during setup
   cancels the run (#724) and Vercel `extendTimeout` treats the plan cap as
   absolute (#741).
@@ -218,6 +224,13 @@ reference, and its entry pages now say so.
 
 ## Other improvements
 
+- **Agent seats load-balance across an account fleet.** Register several
+  Claude or Codex accounts and Smithers picks the seat per attempt from
+  usage-probe headroom instead of pinning one subscription, so big campaigns
+  stop parking on a single exhausted window.
+- **System runs stay out of your way.** Internal runs (autopsies, mirrors)
+  carry a fail-closed visibility stamp and are excluded from run listings
+  unless a caller opts in with `includeSystem`.
 - **Cursor joins the agent adapters.** `CursorAgent` drives Cursor's headless
   CLI inside workflow tasks, parsing tool calls from its real stream shape,
   and the agent docs scaffold it alongside Codex. Contributed by Ralf
@@ -256,6 +269,10 @@ Running into something? `bunx smithers-orchestrator bug` files a report
 straight from your terminal.
 
 ## Upgrade notes
+
+- **Run listings no longer include system runs** (post-failure autopsies and
+  other internal workflows). Pass `includeSystem` to `listRuns` or the CLI
+  debug surfaces if you relied on seeing them.
 
 - **DB migrations 0031 (the side-effect journal) and 0032 (tool-call
   tokens) run automatically** through the existing schema-migrations
