@@ -75,7 +75,13 @@ export class OmpAgent extends BaseCliAgent {
     else if (this.opts.autoApprove || this.opts.yolo) args.push("--auto-approve");
     if (this.extraArgs?.length) args.push(...this.extraArgs);
     if (mode === "rpc" && options?.files?.length) throw new Error("OMP RPC mode does not support file arguments");
-    if (mode !== "rpc" && prompt) args.push(prompt);
+    if (mode !== "rpc") {
+      for (const value of options?.files ?? []) {
+        if (typeof value !== "string" || !value) throw new Error("OMP file arguments must be non-empty strings");
+        args.push(`@${value}`);
+      }
+      if (prompt) args.push(prompt);
+    }
     return args;
   }
   createOutputInterpreter() {
@@ -122,7 +128,7 @@ export class OmpAgent extends BaseCliAgent {
    * @param {{ taskContext?: unknown } | undefined} options @returns {Record<string, string>}
    */
   resolveRpcEnv(options) {
-    return { ...(this.inheritEnv ? process.env : {}), ...this.env, ...taskContextEnv(options?.taskContext), ...this.resolveCredentialEnv() };
+    return { ...(this.inheritEnv ? process.env : {}), ...this.env, ...this.resolveCredentialEnv(), ...taskContextEnv(options?.taskContext) };
   }
   async generate(options = {}) {
     if (this.resolveMode(options) !== "rpc") return super.generate(options);

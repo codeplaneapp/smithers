@@ -22,6 +22,7 @@ const usageFieldAliases = {
     ],
     cacheReadTokens: [
         ["cacheReadTokens"],
+        ["cacheRead"],
         ["cache_read_input_tokens"],
         ["cached_input_tokens"],
         ["cache_read_tokens"],
@@ -29,6 +30,7 @@ const usageFieldAliases = {
     ],
     cacheWriteTokens: [
         ["cacheWriteTokens"],
+        ["cacheWrite"],
         ["cache_write_input_tokens"],
         ["cache_creation_input_tokens"],
         ["cache_write_tokens"],

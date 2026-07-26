@@ -240,6 +240,7 @@ describe("OmpAgent", () => {
     const spec = await new OmpAgent({ model: "m" }).buildCommand({ prompt: "hi", cwd: "/repo", options: { onEvent() {}, files: ["/repo/a.txt"] } });
     expect(spec.outputFormat).toBe("json");
     expect(spec.args).toContain("--print");
+    expect(spec.args.slice(-2)).toEqual(["@/repo/a.txt", "hi"]);
   });
 
   test("honors an explicit mode:json opt-out for cheap single-shot work", async () => {
@@ -256,6 +257,15 @@ describe("OmpAgent", () => {
     const inherited = new OmpAgent({ model: "m" }).resolveRpcEnv({ taskContext });
     expect(inherited.PATH).toBe(process.env.PATH);
     expect(inherited.SMITHERS_RUN_ID).toBe("run-1");
+    const credentialed = new OmpAgent({
+      provider: "openai",
+      apiKey: "explicit",
+      inheritEnv: false,
+      env: { SMITHERS_RUN_ID: "stale-run", SMITHERS_NODE_ID: "stale-node" },
+    }).resolveRpcEnv({ taskContext });
+    expect(credentialed.OPENAI_API_KEY).toBe("explicit");
+    expect(credentialed.SMITHERS_RUN_ID).toBe("run-1");
+    expect(credentialed.SMITHERS_NODE_ID).toBe("node-1");
   });
 
   test("keeps RPC tool events, usage, and structured output at JSON-mode parity", async () => {
@@ -272,7 +282,7 @@ rl.on("line", (line) => {
   }
   if (command.type === "prompt") {
     process.stdout.write(JSON.stringify({ type: "tool_execution_start", toolName: "read", toolCallId: "tool-1", args: { path: "README.md" } }) + "\\n");
-    process.stdout.write(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: "{\\"value\\":42}", stopReason: "stop", usage: { input_tokens: 11, output_tokens: 4, total_tokens: 15 } }] }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: "{\\"value\\":42}", stopReason: "stop", usage: { input: 11, output: 4, cacheRead: 3, cacheWrite: 2, totalTokens: 20 } }] }) + "\\n");
   }
 });
 `, "utf8");
@@ -289,7 +299,12 @@ rl.on("line", (line) => {
         .find((event) => event.type === "action");
       expect(rpcAction).toEqual(jsonAction);
       expect(result.output).toEqual({ value: 42 });
-      expect(result.usage).toMatchObject({ inputTokens: 11, outputTokens: 4, totalTokens: 15 });
+      expect(result.usage).toMatchObject({
+        inputTokens: 11,
+        inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 2 },
+        outputTokens: 4,
+        totalTokens: 20,
+      });
     }
     finally {
       await rm(dir, { recursive: true, force: true });
