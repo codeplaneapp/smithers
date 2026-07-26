@@ -439,7 +439,9 @@ test("error reference docs cover current Smithers error registry", () => {
   const errorSource = readRepoFile("packages/errors/src/smithersErrorDefinitions.js");
   const errorDoc = readRepoFile("docs/reference/errors.mdx");
   const documentedErrorSection = errorDoc.slice(errorDoc.indexOf("## Engine"), errorDoc.indexOf("## HTTP API Errors"));
-  const sourceCodes = new Set([...errorSource.matchAll(/^\s{4}([A-Z0-9_]+): \{/gm)].map((match) => match[1]));
+  // Any leading indent: only the top-level codes are UPPER_SNAKE keys opening
+  // a block, so this survives a reindent of the definitions file.
+  const sourceCodes = new Set([...errorSource.matchAll(/^\s+([A-Z0-9_]+):\s*\{/gm)].map((match) => match[1]));
   const documentedCodes = new Set(
     [...documentedErrorSection.matchAll(/^\| `([A-Z0-9_]+)` \|/gm)].map((match) => match[1]),
   );
@@ -459,7 +461,7 @@ test("event reference docs and categories cover current Smithers events", () => 
   const sourceEvents = new Set([...eventUnionSource.matchAll(/type: "([^"]+)";/g)].map((match) => match[1]));
   const documentedEvents = new Set([...eventDoc.matchAll(/^\| `([A-Za-z0-9]+)` \|/gm)].map((match) => match[1]));
   const categorizedEvents = new Set(
-    [...eventCategoryMapSource.matchAll(/^\s{4}([A-Za-z0-9]+): /gm)].map((match) => match[1]),
+    [...eventCategoryMapSource.matchAll(/^\s+([A-Za-z0-9]+): /gm)].map((match) => match[1]),
   );
 
   expect([...documentedEvents].sort()).toEqual([...sourceEvents].sort());
