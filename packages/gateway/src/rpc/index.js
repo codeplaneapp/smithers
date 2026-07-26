@@ -6,6 +6,7 @@
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayRpcErrorDefinition} GatewayRpcErrorDefinition */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayRpcDefinition} GatewayRpcDefinition */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayRpcMethod} GatewayRpcMethod */
+/** @typedef {import("./gatewayRpcTypes.ts").GatewayResponseFrame} GatewayResponseFrame */
 /** @typedef {import("./gatewayRpcTypes.ts").LaunchRunRequest} LaunchRunRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").LaunchRunResponse} LaunchRunResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").ResumeRunRequest} ResumeRunRequest */
