@@ -3,12 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import {
-  Reasoning,
-  ReasoningContent,
-  ReasoningSummary,
-  ReasoningTrigger,
-} from "../src/agentic/Reasoning";
+import { Reasoning, ReasoningContent, ReasoningSummary, ReasoningTrigger } from "../src/agentic/Reasoning";
 import { SMITHERS_UI_STYLE_ATTR } from "../src/index";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -121,9 +116,7 @@ describe("ReasoningSummary", () => {
   });
 
   test("supports a custom label and shimmer while streaming", () => {
-    const html = renderToStaticMarkup(
-      <ReasoningSummary text="Working through it" streaming label="Reasoning" />,
-    );
+    const html = renderToStaticMarkup(<ReasoningSummary text="Working through it" streaming label="Reasoning" />);
     expect(html).toContain("Reasoning");
     expect(html).toContain('data-streaming="true"');
   });

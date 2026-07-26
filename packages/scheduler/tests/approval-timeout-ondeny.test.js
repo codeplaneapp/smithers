@@ -22,7 +22,11 @@ function descriptor(nodeId, overrides = {}) {
 
 function graph(tasks) {
   return {
-    xml: el("smithers:workflow", {}, tasks.map((task) => el("smithers:task", { id: task.nodeId }))),
+    xml: el(
+      "smithers:workflow",
+      {},
+      tasks.map((task) => el("smithers:task", { id: task.nodeId })),
+    ),
     tasks,
     mountedTaskIds: new Set(tasks.map((task) => `${task.nodeId}::${task.iteration}`)),
   };

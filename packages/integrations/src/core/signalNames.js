@@ -12,14 +12,16 @@ export const INTEGRATION_SIGNAL_PREFIX = "integration:";
  * @returns {string}
  */
 function requireSegment(value, label) {
-    const normalized = typeof value === "string" ? value.trim() : "";
-    if (!normalized) {
-        throw new SmithersError("INVALID_INPUT", `Integration signal ${label} must be a non-empty string.`, { [label]: value });
-    }
-    if (normalized.includes(":")) {
-        throw new SmithersError("INVALID_INPUT", `Integration signal ${label} must not contain ":".`, { [label]: value });
-    }
-    return normalized;
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized) {
+    throw new SmithersError("INVALID_INPUT", `Integration signal ${label} must be a non-empty string.`, {
+      [label]: value,
+    });
+  }
+  if (normalized.includes(":")) {
+    throw new SmithersError("INVALID_INPUT", `Integration signal ${label} must not contain ":".`, { [label]: value });
+  }
+  return normalized;
 }
 
 /**
@@ -32,9 +34,9 @@ function requireSegment(value, label) {
  * @returns {string}
  */
 export function integrationEventName(service, event) {
-    const normalizedService = requireSegment(service, "service");
-    const normalizedEvent = requireSegment(event, "event");
-    return `${INTEGRATION_SIGNAL_PREFIX}${normalizedService}:${normalizedEvent}`;
+  const normalizedService = requireSegment(service, "service");
+  const normalizedEvent = requireSegment(event, "event");
+  return `${INTEGRATION_SIGNAL_PREFIX}${normalizedService}:${normalizedEvent}`;
 }
 
 /**
@@ -43,8 +45,7 @@ export function integrationEventName(service, event) {
  * @returns {boolean}
  */
 export function isIntegrationSignalName(signalName) {
-    return typeof signalName === "string" &&
-        signalName.startsWith(INTEGRATION_SIGNAL_PREFIX);
+  return typeof signalName === "string" && signalName.startsWith(INTEGRATION_SIGNAL_PREFIX);
 }
 
 /**
@@ -54,18 +55,18 @@ export function isIntegrationSignalName(signalName) {
  * @returns {{ service: string; event: string } | null}
  */
 export function parseIntegrationEventName(signalName) {
-    if (!isIntegrationSignalName(signalName)) {
-        return null;
-    }
-    const rest = signalName.slice(INTEGRATION_SIGNAL_PREFIX.length);
-    const separator = rest.indexOf(":");
-    if (separator <= 0 || separator === rest.length - 1) {
-        return null;
-    }
-    return {
-        service: rest.slice(0, separator),
-        event: rest.slice(separator + 1),
-    };
+  if (!isIntegrationSignalName(signalName)) {
+    return null;
+  }
+  const rest = signalName.slice(INTEGRATION_SIGNAL_PREFIX.length);
+  const separator = rest.indexOf(":");
+  if (separator <= 0 || separator === rest.length - 1) {
+    return null;
+  }
+  return {
+    service: rest.slice(0, separator),
+    event: rest.slice(separator + 1),
+  };
 }
 
 /**
@@ -75,5 +76,5 @@ export function parseIntegrationEventName(signalName) {
  * @returns {string}
  */
 export function integrationReceivedBy(service) {
-    return `${INTEGRATION_SIGNAL_PREFIX}${requireSegment(service, "service")}`;
+  return `${INTEGRATION_SIGNAL_PREFIX}${requireSegment(service, "service")}`;
 }

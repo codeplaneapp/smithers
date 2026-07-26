@@ -31,7 +31,8 @@ const require = createRequire(import.meta.url);
 // Superset worker response: satisfies the work schema with recognizable tokens.
 const FAKE_RESPONSE = JSON.stringify({
   summary: "added a dark-mode toggle to the settings page",
-  artifact: "# Settings Page — Living Spec\n\n## Sections\n- Account\n- Appearance: dark-mode toggle\n\n## Open\n- persistence strategy\n",
+  artifact:
+    "# Settings Page — Living Spec\n\n## Sections\n- Account\n- Appearance: dark-mode toggle\n\n## Open\n- persistence strategy\n",
   questions: ["Tabs or a sidebar for the settings sections?", "Persist preference per-user or per-device?"],
 });
 
@@ -127,59 +128,69 @@ beforeAll(async () => {
 
 afterAll(() => {
   if (!CHROMIUM) return;
-  try { proc?.kill("SIGTERM"); } catch {}
-  try { rmSync(tempRepo, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
-  try { rmSync(binDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
+  try {
+    proc?.kill("SIGTERM");
+  } catch {}
+  try {
+    rmSync(tempRepo, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch {}
+  try {
+    rmSync(binDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch {}
 });
 
-browserTest("a real UltraGrill session: say something → worker works → spec + questions → end", async () => {
-  const browser = await CHROMIUM!.launch({ headless: true });
-  try {
-    const page = await browser.newPage();
-    const errors: string[] = [];
-    page.on("pageerror", (e: Error) => errors.push(e.message));
+browserTest(
+  "a real UltraGrill session: say something → worker works → spec + questions → end",
+  async () => {
+    const browser = await CHROMIUM!.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (e: Error) => errors.push(e.message));
 
-    await page.goto(`${base}/workflows/ultragrill?runId=${RUN_ID}`, { waitUntil: "domcontentloaded" });
-    await page.waitForSelector('[data-testid="ultragrill-ui"]', { timeout: 20_000 });
+      await page.goto(`${base}/workflows/ultragrill?runId=${RUN_ID}`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector('[data-testid="ultragrill-ui"]', { timeout: 20_000 });
 
-    // Say something: type a directive and Send → posts a real `utterance` signal.
-    await page.fill('[data-testid="ug-composer"]', "Add an Appearance section with a dark mode toggle");
-    await page.click('[data-testid="ug-send"]');
+      // Say something: type a directive and Send → posts a real `utterance` signal.
+      await page.fill('[data-testid="ug-composer"]', "Add an Appearance section with a dark mode toggle");
+      await page.click('[data-testid="ug-send"]');
 
-    // The user message shows in the feed immediately (optimistic).
-    await page.waitForSelector('[data-testid="ug-feed-me"]', { timeout: 20_000 });
+      // The user message shows in the feed immediately (optimistic).
+      await page.waitForSelector('[data-testid="ug-feed-me"]', { timeout: 20_000 });
 
-    // The worker really dispatched and finished — its activity appears, and the
-    // living spec + question pool render THIS run's real worker output.
-    await page.waitForSelector('[data-testid="ug-feed-worker"]', { timeout: 30_000 });
-    await page.waitForFunction(
-      () => {
-        const text = document.body.textContent ?? "";
-        return text.includes("Settings Page — Living Spec") && text.includes("dark-mode toggle");
-      },
-      undefined,
-      { timeout: 30_000 },
-    );
-    await page.waitForSelector('[data-testid="ug-question"]', { timeout: 20_000 });
-    const questionText = await page.evaluate(
-      () => document.querySelector('[data-testid="ug-questions"]')?.textContent ?? "",
-    );
-    expect(questionText).toContain("Tabs or a sidebar");
+      // The worker really dispatched and finished — its activity appears, and the
+      // living spec + question pool render THIS run's real worker output.
+      await page.waitForSelector('[data-testid="ug-feed-worker"]', { timeout: 30_000 });
+      await page.waitForFunction(
+        () => {
+          const text = document.body.textContent ?? "";
+          return text.includes("Settings Page — Living Spec") && text.includes("dark-mode toggle");
+        },
+        undefined,
+        { timeout: 30_000 },
+      );
+      await page.waitForSelector('[data-testid="ug-question"]', { timeout: 20_000 });
+      const questionText = await page.evaluate(
+        () => document.querySelector('[data-testid="ug-questions"]')?.textContent ?? "",
+      );
+      expect(questionText).toContain("Tabs or a sidebar");
 
-    // End the session → posts the `end` signal; the run leaves the running state.
-    await page.waitForSelector('[data-testid="ug-end"]', { timeout: 20_000 });
-    await page.click('[data-testid="ug-end"]');
-    await page.waitForFunction(
-      () => {
-        const s = document.querySelector('[data-testid="ug-status"]')?.textContent ?? "";
-        return s === "finished" || s === "continued";
-      },
-      undefined,
-      { timeout: 30_000 },
-    );
+      // End the session → posts the `end` signal; the run leaves the running state.
+      await page.waitForSelector('[data-testid="ug-end"]', { timeout: 20_000 });
+      await page.click('[data-testid="ug-end"]');
+      await page.waitForFunction(
+        () => {
+          const s = document.querySelector('[data-testid="ug-status"]')?.textContent ?? "";
+          return s === "finished" || s === "continued";
+        },
+        undefined,
+        { timeout: 30_000 },
+      );
 
-    expect(errors).toEqual([]);
-  } finally {
-    await browser.close();
-  }
-}, 120_000);
+      expect(errors).toEqual([]);
+    } finally {
+      await browser.close();
+    }
+  },
+  120_000,
+);

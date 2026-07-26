@@ -25,7 +25,7 @@ export function renderEffectBoundaryReport(report) {
     const name = kind === "task" ? effect?.nodeId : effect?.toolName;
     lines.push(
       `  ${kind} ${name ?? "unknown"} node=${effect?.nodeId ?? "unknown"} ` +
-      `status=${effect?.effectStatus ?? "unknown"} disposition=${disposition}`,
+        `status=${effect?.effectStatus ?? "unknown"} disposition=${disposition}`,
     );
   }
   return `${lines.join("\n")}\n`;

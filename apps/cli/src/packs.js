@@ -1,6 +1,21 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { constants as fsConstants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, cpSync, mkdtempSync, writeFileSync, statSync, lstatSync, realpathSync, renameSync } from "node:fs";
+import {
+  constants as fsConstants,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  cpSync,
+  mkdtempSync,
+  writeFileSync,
+  statSync,
+  lstatSync,
+  realpathSync,
+  renameSync,
+} from "node:fs";
 import { accountsRoot } from "@smithers-orchestrator/accounts";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { decode, encode } from "@toon-format/toon";
@@ -15,20 +30,42 @@ export function parsePackSpec(spec) {
   if (raw.startsWith("github:")) {
     const match = raw.slice(7).match(/^([^/]+)\/([^/#]+)(?:\/([^#]+))?(?:#(.+))?$/);
     if (!match) throw new Error(`Invalid GitHub pack spec: ${raw}`);
-    return { kind: "github", owner: match[1], repo: match[2], subdir: match[3] ?? "", ref: match[4] ?? "HEAD", name: `${match[1]}-${match[2]}` };
+    return {
+      kind: "github",
+      owner: match[1],
+      repo: match[2],
+      subdir: match[3] ?? "",
+      ref: match[4] ?? "HEAD",
+      name: `${match[1]}-${match[2]}`,
+    };
   }
   {
     // Bare GitHub shorthand, npm-style: user/repo with an optional #ref.
     const bare = raw.match(/^([^/@#]+)\/([^/#]+?)(?:#(.+))?$/);
     if (bare) {
-      return { kind: "github", owner: bare[1], repo: bare[2], subdir: "", ref: bare[3] ?? "HEAD", name: `${bare[1]}-${bare[2]}` };
+      return {
+        kind: "github",
+        owner: bare[1],
+        repo: bare[2],
+        subdir: "",
+        ref: bare[3] ?? "HEAD",
+        name: `${bare[1]}-${bare[2]}`,
+      };
     }
   }
   const npm = raw.startsWith("npm:") ? raw.slice(4) : raw;
-  if (!raw.startsWith("file:") && (raw.startsWith("npm:") || /^[^/@][^/]*(?:@[^/]+)?$/.test(npm) || /^@[^/]+\/[^@]+(?:@[^/]+)?$/.test(npm))) {
+  if (
+    !raw.startsWith("file:") &&
+    (raw.startsWith("npm:") || /^[^/@][^/]*(?:@[^/]+)?$/.test(npm) || /^@[^/]+\/[^@]+(?:@[^/]+)?$/.test(npm))
+  ) {
     const at = npm.lastIndexOf("@");
     const name = at > 0 ? npm.slice(0, at) : npm;
-    return { kind: "npm", package: name, version: at > 0 ? npm.slice(at + 1) : "latest", name: name.replace(/^@/, "").replaceAll("/", "-") };
+    return {
+      kind: "npm",
+      package: name,
+      version: at > 0 ? npm.slice(at + 1) : "latest",
+      name: name.replace(/^@/, "").replaceAll("/", "-"),
+    };
   }
   if (raw.startsWith("file:")) return { kind: "file", path: resolve(raw.slice(5)), name: basename(raw.slice(5)) };
   throw new Error(`Unsupported pack spec: ${raw}`);
@@ -46,10 +83,14 @@ function packRoot(from, global, env = process.env) {
   }
 }
 
-export function packDirs(from = process.cwd(), global = false, env = process.env) { return packRoot(from, global, env); }
+export function packDirs(from = process.cwd(), global = false, env = process.env) {
+  return packRoot(from, global, env);
+}
 // The lock lives BESIDE the packs dir (.smithers/packs.lock.toon), not inside
 // it — the packs dir holds only installed pack contents.
-export function lockPath(root) { return join(dirname(root), "packs.lock.toon"); }
+export function lockPath(root) {
+  return join(dirname(root), "packs.lock.toon");
+}
 function readLock(root) {
   // Legacy location (inside the packs dir) is read as a fallback so packs
   // installed before the move keep updating; the next write lands beside.
@@ -58,11 +99,19 @@ function readLock(root) {
   const value = decode(readFileSync(path, "utf8"));
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
-function writeLock(root, value) { mkdirSync(dirname(lockPath(root)), { recursive: true }); rmSync(join(root, "packs.lock.toon"), { force: true }); writeFileSync(lockPath(root), `${encode(value)}\n`); }
+function writeLock(root, value) {
+  mkdirSync(dirname(lockPath(root)), { recursive: true });
+  rmSync(join(root, "packs.lock.toon"), { force: true });
+  writeFileSync(lockPath(root), `${encode(value)}\n`);
+}
 
 function assertNoInstalledSymlinks(root) {
-  try { if (lstatSync(root).isSymbolicLink()) throw new Error(`Installed pack contains an unsupported symlink: ${root}`); }
-  catch (error) { if (error?.code !== "ENOENT") throw error; return; }
+  try {
+    if (lstatSync(root).isSymbolicLink()) throw new Error(`Installed pack contains an unsupported symlink: ${root}`);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    return;
+  }
   const visit = (current) => {
     const info = lstatSync(current);
     if (info.isSymbolicLink()) throw new Error(`Installed pack contains an unsupported symlink: ${current}`);
@@ -87,7 +136,14 @@ function overlayTree(source, target) {
   }
 }
 
-function lstatSyncSafe(path) { try { lstatSync(path); return true; } catch { return false; } }
+function lstatSyncSafe(path) {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Lock entries for both scopes, for `packs update` (the lock — not the set of
  * currently-intact pack dirs — is the source of truth for what to update). */
@@ -101,11 +157,14 @@ export function listLockedPacks(from = process.cwd()) {
 function importAllowed(name) {
   // smithers-orchestrator subpaths matter: every canonical pack UI imports
   // "smithers-orchestrator/gateway-react" (and JSX emits ".../jsx-runtime").
-  return name.startsWith(".") || ALLOWED.has(name)
-    || name.startsWith("smithers-orchestrator/")
-    || name.startsWith("@smithers-orchestrator/")
-    || name.startsWith("react/")
-    || name.startsWith("zod/");
+  return (
+    name.startsWith(".") ||
+    ALLOWED.has(name) ||
+    name.startsWith("smithers-orchestrator/") ||
+    name.startsWith("@smithers-orchestrator/") ||
+    name.startsWith("react/") ||
+    name.startsWith("zod/")
+  );
 }
 
 /** Lex one module's import specifiers. Prefers Bun's transpiler (a real lexer:
@@ -114,7 +173,9 @@ function importAllowed(name) {
  * comment-stripped regex scan when Bun is unavailable. */
 function moduleImports(file, source) {
   if (/\.(?:md|mdx)$/.test(file)) {
-    return [...source.matchAll(/^\s*(?:import|export)\s+(?:[^"'\n]+?\s+from\s+)?["']([^"']+)["']/gm)].map((match) => match[1]);
+    return [...source.matchAll(/^\s*(?:import|export)\s+(?:[^"'\n]+?\s+from\s+)?["']([^"']+)["']/gm)].map(
+      (match) => match[1],
+    );
   }
   if (/\.(?:css|scss|sass|less)$/.test(file)) {
     return [
@@ -131,7 +192,9 @@ function moduleImports(file, source) {
   }
   const stripped = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
   const names = [];
-  for (const match of stripped.matchAll(/\b(?:import|export)\s+(?:[^"'`;]+?\s+from\s+)?["']([^"']+)["']|\b(?:import|require)\s*\(\s*["']([^"']+)["']\s*\)|\bimport\s+\w+\s*=\s*require\s*\(\s*["']([^"']+)["']\s*\)/g)) {
+  for (const match of stripped.matchAll(
+    /\b(?:import|export)\s+(?:[^"'`;]+?\s+from\s+)?["']([^"']+)["']|\b(?:import|require)\s*\(\s*["']([^"']+)["']\s*\)|\bimport\s+\w+\s*=\s*require\s*\(\s*["']([^"']+)["']\s*\)/g,
+  )) {
     names.push(match[1] ?? match[2] ?? match[3]);
   }
   return names;
@@ -186,7 +249,10 @@ function validateArchiveManifest(archive, fallbackName, subdir = "") {
 }
 
 function copyOrExtract(source, target, fallbackName, subdir = "") {
-  if (existsSync(join(source, "smithers.toon"))) { cpSync(source, target, { recursive: true }); return; }
+  if (existsSync(join(source, "smithers.toon"))) {
+    cpSync(source, target, { recursive: true });
+    return;
+  }
   validateArchiveManifest(source, fallbackName, subdir);
   mkdirSync(target, { recursive: true });
   execFileSync("tar", ["-xzf", source, "-C", target]);
@@ -195,10 +261,17 @@ function copyOrExtract(source, target, fallbackName, subdir = "") {
   // (`<root>/smithers.toon`) or under the requested subdir
   // (`<root>/<subdir>/smithers.toon`) — so callers can address `<target>/<subdir>`.
   const child = readdirSync(target, { withFileTypes: true }).find((entry) => entry.isDirectory());
-  const manifestUnderChild = child && (existsSync(join(target, child.name, "smithers.toon"))
-    || (subdir && existsSync(join(target, child.name, subdir, "smithers.toon"))));
+  const manifestUnderChild =
+    child &&
+    (existsSync(join(target, child.name, "smithers.toon")) ||
+      (subdir && existsSync(join(target, child.name, subdir, "smithers.toon"))));
   if (manifestUnderChild && !existsSync(join(target, "smithers.toon"))) {
-    const staging = `${target}.flat`; rmSync(staging, { recursive: true, force: true }); cpSync(join(target, child.name), staging, { recursive: true }); rmSync(target, { recursive: true, force: true }); cpSync(staging, target, { recursive: true }); rmSync(staging, { recursive: true, force: true });
+    const staging = `${target}.flat`;
+    rmSync(staging, { recursive: true, force: true });
+    cpSync(join(target, child.name), staging, { recursive: true });
+    rmSync(target, { recursive: true, force: true });
+    cpSync(staging, target, { recursive: true });
+    rmSync(staging, { recursive: true, force: true });
   }
 }
 
@@ -213,16 +286,26 @@ async function resolveGithubSha(owner, repo, ref) {
     if (!response.ok) return ref;
     const sha = (await response.text()).trim();
     return /^[0-9a-f]{40}$/.test(sha) ? sha : ref;
-  } catch { return ref; }
+  } catch {
+    return ref;
+  }
 }
 
 async function fetchPack(parsed, staging) {
-  if (parsed.kind === "file") { copyOrExtract(parsed.path, staging, parsed.name, parsed.subdir); return { resolved: parsed.path, integrity: "file" }; }
-  let url = parsed.kind === "github"
-    ? `https://codeload.github.com/${parsed.owner}/${parsed.repo}/tar.gz/${encodeURIComponent(parsed.ref)}`
-    : `https://registry.npmjs.org/${encodeURIComponent(parsed.package).replace("%2F", "/")}`;
+  if (parsed.kind === "file") {
+    copyOrExtract(parsed.path, staging, parsed.name, parsed.subdir);
+    return { resolved: parsed.path, integrity: "file" };
+  }
+  let url =
+    parsed.kind === "github"
+      ? `https://codeload.github.com/${parsed.owner}/${parsed.repo}/tar.gz/${encodeURIComponent(parsed.ref)}`
+      : `https://registry.npmjs.org/${encodeURIComponent(parsed.package).replace("%2F", "/")}`;
   let response;
-  try { response = await fetch(url); } catch (error) { throw new Error(`Unable to fetch ${parsed.kind} pack while offline: ${error.message}`); }
+  try {
+    response = await fetch(url);
+  } catch (error) {
+    throw new Error(`Unable to fetch ${parsed.kind} pack while offline: ${error.message}`);
+  }
   if (!response.ok) throw new Error(`Unable to fetch pack ${parsed.kind} (${response.status}): ${url}`);
   let bytes;
   if (parsed.kind === "npm") {
@@ -233,39 +316,51 @@ async function fetchPack(parsed, staging) {
     const tarball = metadata.versions?.[version]?.dist?.tarball;
     if (!tarball) throw new Error(`npm pack version not found: ${parsed.package}@${parsed.version}`);
     parsed.version = version;
-    try { response = await fetch(tarball); } catch (error) { throw new Error(`Unable to fetch npm pack while offline: ${error.message}`); }
+    try {
+      response = await fetch(tarball);
+    } catch (error) {
+      throw new Error(`Unable to fetch npm pack while offline: ${error.message}`);
+    }
     if (!response.ok) throw new Error(`Unable to fetch npm pack tarball (${response.status}): ${tarball}`);
     bytes = Buffer.from(await response.arrayBuffer());
   } else bytes = Buffer.from(await response.arrayBuffer());
-  const archive = `${staging}.tgz`; writeFileSync(archive, bytes);
+  const archive = `${staging}.tgz`;
+  writeFileSync(archive, bytes);
   validateArchiveManifest(archive, parsed.name, parsed.subdir);
-  copyOrExtract(archive, staging, parsed.name, parsed.subdir); rmSync(archive, { force: true });
-  const resolved = parsed.kind === "github"
-    ? await resolveGithubSha(parsed.owner, parsed.repo, parsed.ref)
-    : parsed.version;
+  copyOrExtract(archive, staging, parsed.name, parsed.subdir);
+  rmSync(archive, { force: true });
+  const resolved =
+    parsed.kind === "github" ? await resolveGithubSha(parsed.owner, parsed.repo, parsed.ref) : parsed.version;
   return { resolved, integrity: `sha256-${createHash("sha256").update(bytes).digest("hex")}` };
 }
 
 export async function addPack(spec, { from = process.cwd(), global = false, yes = false, subdir = "" } = {}) {
   const parsed = parsePackSpec(spec);
   if (parsed.kind === "file") {
-    try { if (lstatSync(parsed.path).isSymbolicLink()) throw new Error(`Pack contains an unsupported symlink: ${parsed.path}`); }
-    catch (error) { if (error?.code !== "ENOENT") throw error; }
+    try {
+      if (lstatSync(parsed.path).isSymbolicLink())
+        throw new Error(`Pack contains an unsupported symlink: ${parsed.path}`);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
   }
   // file: archives have no spec-embedded subdir; allow callers to name one.
   if (subdir && !parsed.subdir) parsed.subdir = subdir;
-  const temp = mkdtempSync(join(resolve(from), ".smithers-pack-")); const staging = join(temp, "pack");
+  const temp = mkdtempSync(join(resolve(from), ".smithers-pack-"));
+  const staging = join(temp, "pack");
   try {
     const fetched = await fetchPack(parsed, staging);
     const sourceRoot = parsed.subdir ? join(staging, parsed.subdir) : staging;
     let manifest;
-    try { manifest = loadManifest(join(sourceRoot, "smithers.toon")); }
-    catch (error) {
+    try {
+      manifest = loadManifest(join(sourceRoot, "smithers.toon"));
+    } catch (error) {
       if (!String(error?.message ?? error).includes("missing required name")) throw error;
       const source = readFileSync(join(sourceRoot, "smithers.toon"), "utf8");
       manifest = parseManifest(`name: ${parsed.name}\n${source}`);
     }
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(manifest.name)) throw new Error(`Invalid smithers pack name: ${manifest.name}`);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(manifest.name))
+      throw new Error(`Invalid smithers pack name: ${manifest.name}`);
     assertNoSymlinks(sourceRoot);
     scanPackImports(sourceRoot);
     const workflowTrust = [];
@@ -281,18 +376,29 @@ export async function addPack(spec, { from = process.cwd(), global = false, yes 
             const parseList = (key) => {
               const value = frontmatter[key] ?? source.match(new RegExp(`^//\\s*smithers-${key}:\\s*(.+)$`, "m"))?.[1];
               if (Array.isArray(value)) return value;
-              return typeof value === "string" ? value.replace(/^\[(.*)\]$/, "$1").split(",").map((item) => item.trim()).filter(Boolean) : [];
+              return typeof value === "string"
+                ? value
+                    .replace(/^\[(.*)\]$/, "$1")
+                    .split(",")
+                    .map((item) => item.trim())
+                    .filter(Boolean)
+                : [];
             };
             const requiredOs = parseList("required-os");
             const requiredBins = parseList("required-bins");
             const requiredEnv = parseList("required-env");
-            const eligibility = evaluateEligibility({
-              requiredOs,
-              requiredBins,
-              requiredEnv,
-            }, process.env);
+            const eligibility = evaluateEligibility(
+              {
+                requiredOs,
+                requiredBins,
+                requiredEnv,
+              },
+              process.env,
+            );
             if (requiredOs.length || requiredBins.length || requiredEnv.length) {
-              workflowTrust.push(`${entry.name}: ${eligibility.eligible ? "eligible" : eligibility.ineligibleReasons.join("; ")}`);
+              workflowTrust.push(
+                `${entry.name}: ${eligibility.eligible ? "eligible" : eligibility.ineligibleReasons.join("; ")}`,
+              );
             }
           }
         }
@@ -300,7 +406,8 @@ export async function addPack(spec, { from = process.cwd(), global = false, yes 
       walk(workflowDir);
     }
     const report = `Pack ${manifest.name} (${manifest.version})\nCapabilities: bins=${manifest.capabilities.bins.join(",") || "none"}, env=${manifest.capabilities.env.join(",") || "none"}, writes=${manifest.capabilities.writes}${workflowTrust.length ? `\nWorkflows: ${workflowTrust.join("; ")}` : ""}`;
-    if (!yes && !(process.stdin.isTTY && process.stdout.isTTY)) throw new Error(`${report}\nConfirmation required; pass --yes in non-interactive mode`);
+    if (!yes && !(process.stdin.isTTY && process.stdout.isTTY))
+      throw new Error(`${report}\nConfirmation required; pass --yes in non-interactive mode`);
     if (!yes) {
       process.stderr.write(`${report}\n`);
       // One line from the terminal — readFileSync(0) would block until EOF,
@@ -311,43 +418,77 @@ export async function addPack(spec, { from = process.cwd(), global = false, yes 
       rl.close();
       if (answer !== "y" && answer !== "yes") throw new Error("Pack installation cancelled");
     }
-    const root = packRoot(from, global); const target = join(root, manifest.name);
+    const root = packRoot(from, global);
+    const target = join(root, manifest.name);
     assertNoInstalledSymlinks(target);
     mkdirSync(root, { recursive: true });
     const merged = join(root, `.${manifest.name}.staging-${process.pid}-${Date.now()}`);
     const backup = join(root, `.${manifest.name}.backup-${process.pid}-${Date.now()}`);
-    rmSync(merged, { recursive: true, force: true }); rmSync(backup, { recursive: true, force: true });
+    rmSync(merged, { recursive: true, force: true });
+    rmSync(backup, { recursive: true, force: true });
     try {
-      if (existsSync(target)) cpSync(target, merged, { recursive: true }); else mkdirSync(merged, { recursive: true });
+      if (existsSync(target)) cpSync(target, merged, { recursive: true });
+      else mkdirSync(merged, { recursive: true });
       overlayTree(sourceRoot, merged);
       if (existsSync(target)) {
         rmSync(backup, { recursive: true, force: true });
         // The backup and replacement are siblings, so the swap is same-filesystem.
         renameSync(target, backup);
       }
-      try { renameSync(merged, target); }
-      catch (error) {
+      try {
+        renameSync(merged, target);
+      } catch (error) {
         if (existsSync(backup)) renameSync(backup, target);
         throw error;
       }
-      const lock = readLock(root); lock[manifest.name] = { spec, ...(parsed.subdir ? { subdir: parsed.subdir } : {}), resolved: fetched.resolved, version: manifest.version, integrity: fetched.integrity }; writeLock(root, lock);
+      const lock = readLock(root);
+      lock[manifest.name] = {
+        spec,
+        ...(parsed.subdir ? { subdir: parsed.subdir } : {}),
+        resolved: fetched.resolved,
+        version: manifest.version,
+        integrity: fetched.integrity,
+      };
+      writeLock(root, lock);
       rmSync(backup, { recursive: true, force: true });
     } catch (error) {
       if (lstatSyncSafe(target)) rmSync(target, { recursive: true, force: true });
       if (existsSync(backup)) renameSync(backup, target);
       throw error;
-    } finally { rmSync(merged, { recursive: true, force: true }); rmSync(backup, { recursive: true, force: true }); }
+    } finally {
+      rmSync(merged, { recursive: true, force: true });
+      rmSync(backup, { recursive: true, force: true });
+    }
     return { name: manifest.name, manifest, report, scope: global ? "global" : "local", path: target };
-  } finally { rmSync(temp, { recursive: true, force: true }); }
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
 }
 
 export function removePack(name, { from = process.cwd(), global = false } = {}) {
-  const root = packRoot(from, global); const target = join(root, name); if (!existsSync(target)) throw new Error(`Pack not found: ${name}`);
-  rmSync(target, { recursive: true, force: true }); const lock = readLock(root); delete lock[name]; writeLock(root, lock); return { name, removed: true, scope: global ? "global" : "local" };
+  const root = packRoot(from, global);
+  const target = join(root, name);
+  if (!existsSync(target)) throw new Error(`Pack not found: ${name}`);
+  rmSync(target, { recursive: true, force: true });
+  const lock = readLock(root);
+  delete lock[name];
+  writeLock(root, lock);
+  return { name, removed: true, scope: global ? "global" : "local" };
 }
 
 export function listPacks(from = process.cwd()) {
-  return [false, true].flatMap((global) => { const root = packRoot(from, global); if (!existsSync(root)) return []; return readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory() && existsSync(join(root, e.name, "smithers.toon"))).map((e) => ({ name: e.name, scope: global ? "global" : "local", path: join(root, e.name), manifest: loadManifest(join(root, e.name, "smithers.toon")) })); });
+  return [false, true].flatMap((global) => {
+    const root = packRoot(from, global);
+    if (!existsSync(root)) return [];
+    return readdirSync(root, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && existsSync(join(root, e.name, "smithers.toon")))
+      .map((e) => ({
+        name: e.name,
+        scope: global ? "global" : "local",
+        path: join(root, e.name),
+        manifest: loadManifest(join(root, e.name, "smithers.toon")),
+      }));
+  });
 }
 
 function isWithin(root, path) {
@@ -358,9 +499,26 @@ function isWithin(root, path) {
 function resolveModuleFile(file) {
   const candidates = [
     file,
-    `${file}.ts`, `${file}.tsx`, `${file}.js`, `${file}.jsx`, `${file}.json`, `${file}.md`, `${file}.mdx`,
-    `${file}.css`, `${file}.scss`, `${file}.sass`, `${file}.less`, `${file}.svg`, `${file}.png`, `${file}.jpg`, `${file}.jpeg`, `${file}.gif`,
-    join(file, "index.ts"), join(file, "index.tsx"), join(file, "index.js"), join(file, "index.jsx"),
+    `${file}.ts`,
+    `${file}.tsx`,
+    `${file}.js`,
+    `${file}.jsx`,
+    `${file}.json`,
+    `${file}.md`,
+    `${file}.mdx`,
+    `${file}.css`,
+    `${file}.scss`,
+    `${file}.sass`,
+    `${file}.less`,
+    `${file}.svg`,
+    `${file}.png`,
+    `${file}.jpg`,
+    `${file}.jpeg`,
+    `${file}.gif`,
+    join(file, "index.ts"),
+    join(file, "index.tsx"),
+    join(file, "index.js"),
+    join(file, "index.jsx"),
   ];
   return candidates.find((candidate) => existsSync(candidate) && lstatSync(candidate).isFile()) ?? null;
 }
@@ -385,7 +543,8 @@ function workflowEntries(root) {
     if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "curated") continue;
     const file = join(workflows, entry.name);
     if (entry.isFile() && entry.name.endsWith(".tsx")) entries.push({ id: entry.name.slice(0, -4), file });
-    else if (entry.isDirectory() && existsSync(join(file, "workflow.tsx"))) entries.push({ id: entry.name, file: join(file, "workflow.tsx") });
+    else if (entry.isDirectory() && existsSync(join(file, "workflow.tsx")))
+      entries.push({ id: entry.name, file: join(file, "workflow.tsx") });
   }
   return entries;
 }
@@ -398,33 +557,61 @@ function uiEntries(source) {
       if (parts[0] === "UI") uiTags.add(parts[1] ?? "UI");
     }
   }
-  const bindings = new Map([...source.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(["'])([^"']+)\2/g)].map((match) => [match[1], match[3]]));
+  const bindings = new Map(
+    [...source.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(["'])([^"']+)\2/g)].map((match) => [
+      match[1],
+      match[3],
+    ]),
+  );
   const entries = [];
   let index = 0;
   while (index < source.length) {
     const character = source[index];
-    if (character === "/" && source[index + 1] === "/") { index = source.indexOf("\n", index + 2); if (index < 0) break; continue; }
-    if (character === "/" && source[index + 1] === "*") { const end = source.indexOf("*/", index + 2); index = end < 0 ? source.length : end + 2; continue; }
-    if (character === "\"" || character === "'" || character === "`") {
-      const quote = character; index++;
-      while (index < source.length) { if (source[index] === "\\") index += 2; else if (source[index++] === quote) break; }
+    if (character === "/" && source[index + 1] === "/") {
+      index = source.indexOf("\n", index + 2);
+      if (index < 0) break;
+      continue;
+    }
+    if (character === "/" && source[index + 1] === "*") {
+      const end = source.indexOf("*/", index + 2);
+      index = end < 0 ? source.length : end + 2;
+      continue;
+    }
+    if (character === '"' || character === "'" || character === "`") {
+      const quote = character;
+      index++;
+      while (index < source.length) {
+        if (source[index] === "\\") index += 2;
+        else if (source[index++] === quote) break;
+      }
       continue;
     }
     if (character === "<" && /[A-Za-z_$]/.test(source[index + 1] ?? "")) {
       const tag = source.slice(index + 1).match(/^([A-Za-z_$][\w$]*)/);
       if (tag && uiTags.has(tag[1])) {
         const start = index + 1 + tag[0].length;
-        let cursor = start, braces = 0, quote = null;
+        let cursor = start,
+          braces = 0,
+          quote = null;
         for (; cursor < source.length; cursor++) {
           const current = source[cursor];
-          if (quote) { if (current === "\\") cursor++; else if (current === quote) quote = null; continue; }
-          if (current === "\"" || current === "'") { quote = current; continue; }
+          if (quote) {
+            if (current === "\\") cursor++;
+            else if (current === quote) quote = null;
+            continue;
+          }
+          if (current === '"' || current === "'") {
+            quote = current;
+            continue;
+          }
           if (current === "{") braces++;
           else if (current === "}") braces--;
           else if (current === ">" && braces === 0) break;
         }
         const attributes = source.slice(start, cursor);
-        const entry = attributes.match(/\bentry\s*=\s*(?:(["'])([^"']+)\1|\{\s*(?:(["'])([^"']+)\3|([A-Za-z_$][\w$]*))\s*\})/s);
+        const entry = attributes.match(
+          /\bentry\s*=\s*(?:(["'])([^"']+)\1|\{\s*(?:(["'])([^"']+)\3|([A-Za-z_$][\w$]*))\s*\})/s,
+        );
         if (entry) entries.push(entry[2] ?? entry[4] ?? bindings.get(entry[5]));
         index = cursor + 1;
         continue;
@@ -454,10 +641,14 @@ function cssReferences(source) {
 }
 
 function fileReferences(file, source) {
-  if (LEXABLE_MODULE.test(file)) return [...moduleImports(file, source).filter((name) => name.startsWith(".")), ...uiEntries(source)];
+  if (LEXABLE_MODULE.test(file))
+    return [...moduleImports(file, source).filter((name) => name.startsWith(".")), ...uiEntries(source)];
   if (MARKDOWN_MODULE.test(file)) {
-    try { return moduleImports(file, source).filter((name) => name.startsWith(".")); }
-    catch { return []; }
+    try {
+      return moduleImports(file, source).filter((name) => name.startsWith("."));
+    } catch {
+      return [];
+    }
   }
   if (CSS_MODULE.test(file)) {
     // In stylesheets, url("logo.png") and @use "util" are relative to the
@@ -498,7 +689,8 @@ function referencedFiles(packDir, workflowFile) {
 
 /** Copy a pack workflow and its relative UI/prompt/lib closure into the local pack. */
 export function ejectPack(spec, { from = process.cwd() } = {}) {
-  if (typeof spec !== "string" || !spec.trim()) throw new Error("Pack workflow is required (expected <pack>:<workflow>)");
+  if (typeof spec !== "string" || !spec.trim())
+    throw new Error("Pack workflow is required (expected <pack>:<workflow>)");
   const match = spec.trim().match(/^([^:]+):(.+)$/);
   if (!match) throw new Error(`Invalid pack workflow: ${spec}. Expected <pack>:<workflow>`);
   const [, packName, workflowId] = match;
@@ -512,23 +704,28 @@ export function ejectPack(spec, { from = process.cwd() } = {}) {
   // in (or worse, made a spurious collision).
   const isFlatForm = workflow.file === join(packDir, "workflows", `${workflowId}.tsx`);
   const conventionUi = join(packDir, "ui", `${workflowId}.tsx`);
-  if (isFlatForm
-    && uiEntries(readFileSync(workflow.file, "utf8")).length === 0
-    && existsSync(conventionUi)
-    && !files.has(conventionUi)) {
+  if (
+    isFlatForm &&
+    uiEntries(readFileSync(workflow.file, "utf8")).length === 0 &&
+    existsSync(conventionUi) &&
+    !files.has(conventionUi)
+  ) {
     for (const file of referencedFiles(packDir, conventionUi)) files.add(file);
   }
   const targetRoot = localPackDir(from);
   const copies = [...files].map((source) => ({ source, target: join(targetRoot, relative(packDir, source)) }));
   const collision = copies.find(({ target }) => existsSync(target));
-  if (collision) throw new Error(`Cannot eject ${spec}: local target already exists: ${relative(targetRoot, collision.target)}`);
+  if (collision)
+    throw new Error(`Cannot eject ${spec}: local target already exists: ${relative(targetRoot, collision.target)}`);
   // Both on-disk workflow forms define the same id — refuse when the OTHER
   // form already exists locally, or discovery becomes ambiguous.
   const flatForm = join(targetRoot, "workflows", `${workflowId}.tsx`);
   const dirForm = join(targetRoot, "workflows", workflowId, "workflow.tsx");
   for (const alternate of [flatForm, dirForm]) {
     if (existsSync(alternate)) {
-      throw new Error(`Cannot eject ${spec}: a local workflow with id '${workflowId}' already exists at ${relative(targetRoot, alternate)}`);
+      throw new Error(
+        `Cannot eject ${spec}: a local workflow with id '${workflowId}' already exists at ${relative(targetRoot, alternate)}`,
+      );
     }
   }
   // A parent that exists as a FILE (e.g. a stray .smithers/ui file) would fail
@@ -555,11 +752,18 @@ export function ejectPack(spec, { from = process.cwd() } = {}) {
     for (const target of written.reverse()) rmSync(target, { force: true });
     throw new Error(`Cannot eject ${spec}: ${error?.message ?? error} (rolled back ${written.length} copied file(s))`);
   }
-  return { pack: packName, workflow: workflowId, files: copies.map(({ target }) => target), path: join(targetRoot, relative(packDir, workflow.file)) };
+  return {
+    pack: packName,
+    workflow: workflowId,
+    files: copies.map(({ target }) => target),
+    path: join(targetRoot, relative(packDir, workflow.file)),
+  };
 }
 
 export async function updatePack(name, { from = process.cwd(), global = false } = {}) {
-  const root = packRoot(from, global); const lock = readLock(root); const entry = lock[name];
+  const root = packRoot(from, global);
+  const lock = readLock(root);
+  const entry = lock[name];
   if (!entry?.spec) throw new Error(`No lock entry for pack: ${name}`);
   return addPack(entry.spec, { from, global, yes: true, subdir: typeof entry.subdir === "string" ? entry.subdir : "" });
 }

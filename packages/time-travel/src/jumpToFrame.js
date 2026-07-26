@@ -236,11 +236,10 @@ async function countFramesAfter(adapter, runId, targetFrameNo) {
  * @param {number} cutoffMs
  */
 async function deleteAttemptsStartedAfter(adapter, runId, cutoffMs) {
-  await resolveStorage(adapter).deleteWhere(
-    "_smithers_attempts",
-    "run_id = ? AND started_at_ms > ?",
-    [runId, cutoffMs],
-  );
+  await resolveStorage(adapter).deleteWhere("_smithers_attempts", "run_id = ? AND started_at_ms > ?", [
+    runId,
+    cutoffMs,
+  ]);
 }
 
 /**
@@ -336,11 +335,19 @@ async function deleteOutputTargets(adapter, targets, runId) {
 /** @param {SmithersDb} adapter @param {string} runId @param {Record<string, Array<Record<string, unknown>>>} snapshotOutputs */
 async function restoreOutputSet(adapter, runId, snapshotOutputs) {
   const storage = resolveStorage(adapter);
-  const physicalTableRows = adapter.internalStorage?.dialect === "postgres"
-    ? await storage.queryAll("SELECT table_name AS name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name NOT LIKE '_smithers_%' ORDER BY table_name")
-    : await storage.queryAll("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '_smithers_%' ORDER BY name");
+  const physicalTableRows =
+    adapter.internalStorage?.dialect === "postgres"
+      ? await storage.queryAll(
+          "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name NOT LIKE '_smithers_%' ORDER BY table_name",
+        )
+      : await storage.queryAll(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '_smithers_%' ORDER BY name",
+        );
   const physicalTables = new Set(physicalTableRows.map((row) => asString(row.name)).filter(Boolean));
-  const resolveTable = (name) => physicalTables.has(name) ? name : [...physicalTables].find((candidate) => candidate === name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`));
+  const resolveTable = (name) =>
+    physicalTables.has(name)
+      ? name
+      : [...physicalTables].find((candidate) => candidate === name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`));
   const rowsByPhysical = new Map();
   for (const [name, rows] of Object.entries(snapshotOutputs)) {
     if (!Array.isArray(rows)) continue;
@@ -348,10 +355,14 @@ async function restoreOutputSet(adapter, runId, snapshotOutputs) {
     if (physical) rowsByPhysical.set(physical, [...(rowsByPhysical.get(physical) ?? []), ...rows]);
   }
   const tables = await storage.queryAll(`SELECT DISTINCT output_table FROM _smithers_nodes WHERE run_id = ?`, [runId]);
-  const tableNames = new Set(tables.map((entry) => {
-    const name = asString(entry.outputTable ?? entry.output_table);
-    return name ? (resolveTable(name) ?? name) : undefined;
-  }).filter((name) => name && OUTPUT_TABLE_PATTERN.test(name)));
+  const tableNames = new Set(
+    tables
+      .map((entry) => {
+        const name = asString(entry.outputTable ?? entry.output_table);
+        return name ? (resolveTable(name) ?? name) : undefined;
+      })
+      .filter((name) => name && OUTPUT_TABLE_PATTERN.test(name)),
+  );
   for (const name of rowsByPhysical.keys()) if (OUTPUT_TABLE_PATTERN.test(name)) tableNames.add(name);
   let deleted = 0;
   for (const tableName of tableNames) {
@@ -360,16 +371,23 @@ async function restoreOutputSet(adapter, runId, snapshotOutputs) {
     const keep = new Set(snapshotRows.map((row) => `${row.nodeId ?? row.node_id}::${Number(row.iteration ?? 0)}`));
     let rows;
     try {
-      rows = await storage.queryAll(`SELECT node_id, iteration FROM ${quoteIdentifier(tableName)} WHERE run_id = ?`, [runId]);
+      rows = await storage.queryAll(`SELECT node_id, iteration FROM ${quoteIdentifier(tableName)} WHERE run_id = ?`, [
+        runId,
+      ]);
     } catch (error) {
       if (/no such table|does not exist/i.test(formatError(error))) continue;
       throw error;
     }
-    const desired = new Map(snapshotRows.map((row) => [`${row.nodeId ?? row.node_id}::${Number(row.iteration ?? 0)}`, row]));
+    const desired = new Map(
+      snapshotRows.map((row) => [`${row.nodeId ?? row.node_id}::${Number(row.iteration ?? 0)}`, row]),
+    );
     for (const row of rows) {
       const key = `${row.nodeId ?? row.node_id}::${Number(row.iteration ?? 0)}`;
       if (!desired.has(key)) {
-        await storage.execute(`DELETE FROM ${quoteIdentifier(tableName)} WHERE run_id = ? AND node_id = ? AND iteration = ?`, [runId, row.nodeId ?? row.node_id, Number(row.iteration ?? 0)]);
+        await storage.execute(
+          `DELETE FROM ${quoteIdentifier(tableName)} WHERE run_id = ? AND node_id = ? AND iteration = ?`,
+          [runId, row.nodeId ?? row.node_id, Number(row.iteration ?? 0)],
+        );
         deleted += 1;
       }
     }
@@ -382,13 +400,17 @@ async function restoreOutputSet(adapter, runId, snapshotOutputs) {
       try {
         await storage.upsert(tableName, values, ["runId", "nodeId", "iteration"]);
         if (Number.isFinite(Number(provenanceSeq))) {
-          await storage.upsert("_smithers_output_provenance", {
-            runId,
-            outputTable: tableName,
-            nodeId,
-            iteration: Number(iterationText),
-            seq: Number(provenanceSeq),
-          }, ["runId", "outputTable", "nodeId", "iteration"]);
+          await storage.upsert(
+            "_smithers_output_provenance",
+            {
+              runId,
+              outputTable: tableName,
+              nodeId,
+              iteration: Number(iterationText),
+              seq: Number(provenanceSeq),
+            },
+            ["runId", "outputTable", "nodeId", "iteration"],
+          );
         }
       } catch (error) {
         if (/no such table|does not exist/i.test(formatError(error))) continue;
@@ -398,11 +420,16 @@ async function restoreOutputSet(adapter, runId, snapshotOutputs) {
   }
   const predicates = [];
   const params = [];
-  for (const tableName of tableNames) for (const row of (rowsByPhysical.get(tableName) ?? [])) {
-    predicates.push("(output_table = ? AND node_id = ? AND iteration = ?)");
-    params.push(tableName, row.nodeId ?? row.node_id, Number(row.iteration ?? 0));
-  }
-  if (predicates.length) await storage.execute(`DELETE FROM _smithers_output_provenance WHERE run_id = ? AND NOT (${predicates.join(" OR ")})`, [runId, ...params]);
+  for (const tableName of tableNames)
+    for (const row of rowsByPhysical.get(tableName) ?? []) {
+      predicates.push("(output_table = ? AND node_id = ? AND iteration = ?)");
+      params.push(tableName, row.nodeId ?? row.node_id, Number(row.iteration ?? 0));
+    }
+  if (predicates.length)
+    await storage.execute(
+      `DELETE FROM _smithers_output_provenance WHERE run_id = ? AND NOT (${predicates.join(" OR ")})`,
+      [runId, ...params],
+    );
   else await storage.execute(`DELETE FROM _smithers_output_provenance WHERE run_id = ?`, [runId]);
   // Signals use the same run-local provenance clock. Snapshot output rows
   // carry the clock value through JSON, so the durable signal inbox is
@@ -418,28 +445,52 @@ async function restoreOutputSet(adapter, runId, snapshotOutputs) {
 /** Restore the exact node set represented by the target snapshot. */
 async function restoreNodeSet(adapter, runId, snapshotNodes) {
   const storage = resolveStorage(adapter);
-  const desired = new Map(snapshotNodes.map((node) => [`${node.nodeId ?? node.node_id}::${Number(node.iteration ?? 0)}`, node]));
+  const desired = new Map(
+    snapshotNodes.map((node) => [`${node.nodeId ?? node.node_id}::${Number(node.iteration ?? 0)}`, node]),
+  );
   const current = await storage.queryAll(`SELECT node_id, iteration FROM _smithers_nodes WHERE run_id = ?`, [runId]);
   for (const node of current) {
     const key = `${node.nodeId ?? node.node_id}::${Number(node.iteration ?? 0)}`;
-    if (!desired.has(key)) await storage.execute(`DELETE FROM _smithers_nodes WHERE run_id = ? AND node_id = ? AND iteration = ?`, [runId, node.nodeId ?? node.node_id, Number(node.iteration ?? 0)]);
+    if (!desired.has(key))
+      await storage.execute(`DELETE FROM _smithers_nodes WHERE run_id = ? AND node_id = ? AND iteration = ?`, [
+        runId,
+        node.nodeId ?? node.node_id,
+        Number(node.iteration ?? 0),
+      ]);
   }
-  for (const node of desired.values()) await storage.upsert("_smithers_nodes", {
-    ...node,
-    runId,
-    updatedAtMs: Number(node.updatedAtMs ?? node.updated_at_ms ?? Date.now()),
-  }, ["runId", "nodeId", "iteration"]);
+  for (const node of desired.values())
+    await storage.upsert(
+      "_smithers_nodes",
+      {
+        ...node,
+        runId,
+        updatedAtMs: Number(node.updatedAtMs ?? node.updated_at_ms ?? Date.now()),
+      },
+      ["runId", "nodeId", "iteration"],
+    );
 }
 
 /** Attempts are not part of the public snapshot; trim them to each target node's lastAttempt. */
 async function restoreAttemptsToNodeSnapshot(adapter, runId, snapshotNodes) {
   const storage = resolveStorage(adapter);
-  const limits = new Map(snapshotNodes.map((node) => [`${node.nodeId ?? node.node_id}::${Number(node.iteration ?? 0)}`, node.lastAttempt ?? node.last_attempt]));
-  const attempts = await storage.queryAll(`SELECT node_id, iteration, attempt FROM _smithers_attempts WHERE run_id = ?`, [runId]);
+  const limits = new Map(
+    snapshotNodes.map((node) => [
+      `${node.nodeId ?? node.node_id}::${Number(node.iteration ?? 0)}`,
+      node.lastAttempt ?? node.last_attempt,
+    ]),
+  );
+  const attempts = await storage.queryAll(
+    `SELECT node_id, iteration, attempt FROM _smithers_attempts WHERE run_id = ?`,
+    [runId],
+  );
   for (const attempt of attempts) {
     const key = `${attempt.nodeId ?? attempt.node_id}::${Number(attempt.iteration ?? 0)}`;
     const limit = limits.get(key);
-    if (limit == null || Number(attempt.attempt) > Number(limit)) await storage.execute(`DELETE FROM _smithers_attempts WHERE run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?`, [runId, attempt.nodeId ?? attempt.node_id, Number(attempt.iteration ?? 0), Number(attempt.attempt)]);
+    if (limit == null || Number(attempt.attempt) > Number(limit))
+      await storage.execute(
+        `DELETE FROM _smithers_attempts WHERE run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?`,
+        [runId, attempt.nodeId ?? attempt.node_id, Number(attempt.iteration ?? 0), Number(attempt.attempt)],
+      );
   }
 }
 
@@ -482,18 +533,14 @@ async function markRunNeedsAttention(adapter, runId, nowMs, reason) {
  * @param {string | undefined} cwd
  */
 async function defaultRevertToPointer(pointer, cwd) {
-  return await Effect.runPromise(
-    revertToJjPointer(pointer, cwd).pipe(Effect.provide(BunContext.layer)),
-  );
+  return await Effect.runPromise(revertToJjPointer(pointer, cwd).pipe(Effect.provide(BunContext.layer)));
 }
 
 /**
  * @param {string | undefined} cwd
  */
 async function defaultGetCurrentPointer(cwd) {
-  return await Effect.runPromise(
-    getJjPointer(cwd).pipe(Effect.provide(BunContext.layer)),
-  );
+  return await Effect.runPromise(getJjPointer(cwd).pipe(Effect.provide(BunContext.layer)));
 }
 
 /**
@@ -582,12 +629,7 @@ async function rollbackSandboxPointers(revertedSandboxes, revertToPointerImpl, c
  * @param {(cwd?: string) => Promise<string | null>} getCurrentPointerImpl
  * @returns {Promise<Array<{ cwd: string; targetPointer: string; previousPointer: string | null }>>}
  */
-async function planSandboxReverts(
-  attemptsForRun,
-  attemptsToDelete,
-  cutoffMs,
-  getCurrentPointerImpl,
-) {
+async function planSandboxReverts(attemptsForRun, attemptsToDelete, cutoffMs, getCurrentPointerImpl) {
   /** @type {Map<string, { cwd: string; targetPointer: string; previousPointer: string | null }>} */
   const byCwd = new Map();
   const affectedCwds = new Set(
@@ -616,18 +658,12 @@ async function planSandboxReverts(
       // to snapshot the cwd at some point (just not before the target frame),
       // since that case really can't be resolved to a safe revert target.
       const everSnapshotted = attemptsForRun.some(
-        (attempt) =>
-          attempt?.jjCwd === cwd &&
-          typeof attempt?.jjPointer === "string" &&
-          attempt.jjPointer.length > 0,
+        (attempt) => attempt?.jjCwd === cwd && typeof attempt?.jjPointer === "string" && attempt.jjPointer.length > 0,
       );
       if (!everSnapshotted) {
         continue;
       }
-      throw new JumpToFrameError(
-        "UnsupportedSandbox",
-        `Could not resolve a rewind pointer for sandbox cwd ${cwd}.`,
-      );
+      throw new JumpToFrameError("UnsupportedSandbox", `Could not resolve a rewind pointer for sandbox cwd ${cwd}.`);
     }
     const previousPointer = await getCurrentPointerImpl(cwd);
     byCwd.set(cwd, {
@@ -689,20 +725,13 @@ export async function jumpToFrame(input) {
           );
         }
 
-        lock = await withSpan(
-          "timetravel.lock.acquire",
-          { runId },
-          async () => {
-            const handle = await acquireRewindLock(input.adapter, runId);
-            if (!handle) {
-              throw new JumpToFrameError(
-                "Busy",
-                `Another jumpToFrame is already running for ${runId}.`,
-              );
-            }
-            return handle;
-          },
-        );
+        lock = await withSpan("timetravel.lock.acquire", { runId }, async () => {
+          const handle = await acquireRewindLock(input.adapter, runId);
+          if (!handle) {
+            throw new JumpToFrameError("Busy", `Another jumpToFrame is already running for ${runId}.`);
+          }
+          return handle;
+        });
 
         // The durable lease is held before any rewind state is loaded, so a
         // contender cannot plan mutations from a snapshot being invalidated.
@@ -710,11 +739,7 @@ export async function jumpToFrame(input) {
         if (!run) {
           throw new JumpToFrameError("RunNotFound", `Run not found: ${runId}`);
         }
-        if (
-          input.force !== true &&
-          run.status === "running" &&
-          isRunLikelyLive(run, nowMs())
-        ) {
+        if (input.force !== true && run.status === "running" && isRunLikelyLive(run, nowMs())) {
           throw new JumpToFrameError(
             "RunOwnerAlive",
             `Run ${runId} is still running (live owner or fresh heartbeat). Stop it before rewinding, or pass force: true.`,
@@ -740,9 +765,7 @@ export async function jumpToFrame(input) {
         if (rateLimit.limited) {
           throw new JumpToFrameError(
             "RateLimited",
-            `Rewind quota exceeded for ${runId}; max ${rateLimit.max} per ${Math.floor(
-              rateLimit.windowMs / 60_000,
-            )}m.`,
+            `Rewind quota exceeded for ${runId}; max ${rateLimit.max} per ${Math.floor(rateLimit.windowMs / 60_000)}m.`,
           );
         }
 
@@ -770,18 +793,12 @@ export async function jumpToFrame(input) {
         fromFrameNoForAudit = latestFrame.frameNo;
 
         if (targetFrameNo > latestFrame.frameNo) {
-          throw new JumpToFrameError(
-            "FrameOutOfRange",
-            `frameNo must be between 0 and ${latestFrame.frameNo}.`,
-          );
+          throw new JumpToFrameError("FrameOutOfRange", `frameNo must be between 0 and ${latestFrame.frameNo}.`);
         }
 
         const targetFrame = await readFrameByNo(input.adapter, runId, targetFrameNo);
         if (!targetFrame) {
-          throw new JumpToFrameError(
-            "FrameOutOfRange",
-            `Frame ${targetFrameNo} does not exist for run ${runId}.`,
-          );
+          throw new JumpToFrameError("FrameOutOfRange", `Frame ${targetFrameNo} does not exist for run ${runId}.`);
         }
 
         await emitLog(input.onLog, "info", "jumpToFrame started", {
@@ -824,8 +841,7 @@ export async function jumpToFrame(input) {
         const reconcilerSnapshot = await withSpan(
           "timetravel.snapshot.preJump",
           { runId, sandboxes: sandboxPlan.length },
-          async () =>
-            input.captureReconcilerState ? await input.captureReconcilerState() : null,
+          async () => (input.captureReconcilerState ? await input.captureReconcilerState() : null),
         );
         await runStepHook(input.hooks, "after", "snapshot-pre-jump");
 
@@ -849,10 +865,7 @@ export async function jumpToFrame(input) {
 
           await runStepHook(input.hooks, "before", "revert-effects");
           if (!(await lock.renew())) {
-            throw new JumpToFrameError(
-              "Busy",
-              `Rewind lease ownership was lost for ${runId} before compensation.`,
-            );
+            throw new JumpToFrameError("Busy", `Rewind lease ownership was lost for ${runId} before compensation.`);
           }
           boundary = await guardEffectBoundary(input.adapter, {
             runId,
@@ -883,16 +896,12 @@ export async function jumpToFrame(input) {
               async () => revertToPointerImpl(sandbox.targetPointer, sandbox.cwd),
             );
             if (!reverted.success) {
-              throw new JumpToFrameError(
-                "VcsError",
-                reverted.error ?? `Failed to revert sandbox cwd ${sandbox.cwd}.`,
-                {
-                  details: {
-                    cwd: sandbox.cwd,
-                    pointer: sandbox.targetPointer,
-                  },
+              throw new JumpToFrameError("VcsError", reverted.error ?? `Failed to revert sandbox cwd ${sandbox.cwd}.`, {
+                details: {
+                  cwd: sandbox.cwd,
+                  pointer: sandbox.targetPointer,
                 },
-              );
+              });
             }
             revertedSandboxes.push(sandbox);
           }
@@ -936,163 +945,140 @@ export async function jumpToFrame(input) {
             );
           }
           const dbStats = await input.adapter.withTransaction(
-                `jump to frame ${runId}:${targetFrameNo}`,
-                Effect.gen(function* () {
-                  // Fence the DB mutation with the lease row in this same
-                  // transaction. PostgreSQL holds the updated row lock until
-                  // commit, so an expiry-based takeover cannot begin while the
-                  // destructive transaction is still running.
-                  yield* Effect.promise(async () => {
-                    if (!(await lock.checkStillHeld())) {
-                      throw new JumpToFrameError(
-                        "Busy",
-                        `Rewind lease ownership was lost for ${runId} during database mutation.`,
-                      );
-                    }
-                  });
+            `jump to frame ${runId}:${targetFrameNo}`,
+            Effect.gen(function* () {
+              // Fence the DB mutation with the lease row in this same
+              // transaction. PostgreSQL holds the updated row lock until
+              // commit, so an expiry-based takeover cannot begin while the
+              // destructive transaction is still running.
+              yield* Effect.promise(async () => {
+                if (!(await lock.checkStillHeld())) {
+                  throw new JumpToFrameError(
+                    "Busy",
+                    `Rewind lease ownership was lost for ${runId} during database mutation.`,
+                  );
+                }
+              });
 
-                  // Invalidate node-diff cache BEFORE we truncate frames /
-                  // attempts: the adapter hook computes which diffs are beyond
-                  // the target by looking at the frame/attempt join, and that
-                  // only works while frames/attempts are still intact.
-                  yield* Effect.promise(() =>
-                    runStepHook(input.hooks, "before", "invalidate-diffs"),
-                  );
-                  const invalidatedDiffs = yield* input.adapter
-                    .invalidateNodeDiffsAfterFrame(runId, targetFrameNo);
-                  yield* Effect.promise(() =>
-                    runStepHook(input.hooks, "after", "invalidate-diffs"),
-                  );
+              // Invalidate node-diff cache BEFORE we truncate frames /
+              // attempts: the adapter hook computes which diffs are beyond
+              // the target by looking at the frame/attempt join, and that
+              // only works while frames/attempts are still intact.
+              yield* Effect.promise(() => runStepHook(input.hooks, "before", "invalidate-diffs"));
+              const invalidatedDiffs = yield* input.adapter.invalidateNodeDiffsAfterFrame(runId, targetFrameNo);
+              yield* Effect.promise(() => runStepHook(input.hooks, "after", "invalidate-diffs"));
 
-                  yield* Effect.promise(() =>
-                    runStepHook(input.hooks, "before", "truncate-frames"),
-                  );
-                  yield* input.adapter.deleteFramesAfter(runId, targetFrameNo);
-                  // Snapshots and vcs-tags are keyed (run_id, frame_no) and are
-                  // the fork/hydration source; truncate them atomically with the
-                  // frames or fork/replay/timeline can read discarded state.
-                  yield* input.adapter.deleteSnapshotsAfter(runId, targetFrameNo);
-                  yield* input.adapter.deleteVcsTagsAfter(runId, targetFrameNo);
-                  yield* Effect.promise(() =>
-                    runStepHook(input.hooks, "after", "truncate-frames"),
-                  );
+              yield* Effect.promise(() => runStepHook(input.hooks, "before", "truncate-frames"));
+              yield* input.adapter.deleteFramesAfter(runId, targetFrameNo);
+              // Snapshots and vcs-tags are keyed (run_id, frame_no) and are
+              // the fork/hydration source; truncate them atomically with the
+              // frames or fork/replay/timeline can read discarded state.
+              yield* input.adapter.deleteSnapshotsAfter(runId, targetFrameNo);
+              yield* input.adapter.deleteVcsTagsAfter(runId, targetFrameNo);
+              yield* Effect.promise(() => runStepHook(input.hooks, "after", "truncate-frames"));
 
-                  yield* Effect.promise(() =>
-                    runStepHook(input.hooks, "before", "truncate-attempts"),
-                  );
-                  yield* Effect.promise(() =>
-                    archiveDiscardedEffects(input.adapter, {
-                      runId,
-                      opId: boundary.opId,
-                      archivedAtMs: nowMs(),
-                      archiveReason: `rewind to frame ${targetFrameNo}`,
-                      attempts: attemptsToDelete.map((attempt) => ({
-                        nodeId: String(attempt.nodeId),
-                        iteration: Number(attempt.iteration ?? 0),
-                        attempt: Number(attempt.attempt),
-                      })),
-                    }),
-                  );
-                  yield* Effect.promise(() =>
-                    deleteAttemptsStartedAfter(
-                      input.adapter,
-                      runId,
-                      targetFrame.createdAtMs,
-                    ),
-                  );
-                  yield* Effect.promise(() =>
-                    runStepHook(input.hooks, "after", "truncate-attempts"),
-                  );
+              yield* Effect.promise(() => runStepHook(input.hooks, "before", "truncate-attempts"));
+              yield* Effect.promise(() =>
+                archiveDiscardedEffects(input.adapter, {
+                  runId,
+                  opId: boundary.opId,
+                  archivedAtMs: nowMs(),
+                  archiveReason: `rewind to frame ${targetFrameNo}`,
+                  attempts: attemptsToDelete.map((attempt) => ({
+                    nodeId: String(attempt.nodeId),
+                    iteration: Number(attempt.iteration ?? 0),
+                    attempt: Number(attempt.attempt),
+                  })),
+                }),
+              );
+              yield* Effect.promise(() => deleteAttemptsStartedAfter(input.adapter, runId, targetFrame.createdAtMs));
+              yield* Effect.promise(() => runStepHook(input.hooks, "after", "truncate-attempts"));
 
-                  yield* Effect.promise(() =>
-                    runStepHook(input.hooks, "before", "truncate-outputs"),
-                  );
-                  if (!targetSnapshotSets.found) {
-                    yield* Effect.logWarning("rewind using legacy heuristic because the target has no exact snapshot").pipe(Effect.annotateLogs({ runId, targetFrameNo }));
-                  }
-                  const deletedOutputs = yield* Effect.promise(() =>
-                    targetSnapshotSets.found
-                      ? restoreOutputSet(input.adapter, runId, targetSnapshotSets.outputs)
-                      : deleteOutputTargets(input.adapter, [...outputTargetsMap.values()], runId),
-                  );
-                  if (targetSnapshotSets.found) {
-                    yield* Effect.promise(() => restoreNodeSet(input.adapter, runId, targetSnapshotSets.nodes));
-                    yield* Effect.promise(() => restoreAttemptsToNodeSnapshot(input.adapter, runId, targetSnapshotSets.nodes));
-                  }
-                  yield* Effect.promise(() =>
-                    runStepHook(input.hooks, "after", "truncate-outputs"),
-                  );
+              yield* Effect.promise(() => runStepHook(input.hooks, "before", "truncate-outputs"));
+              if (!targetSnapshotSets.found) {
+                yield* Effect.logWarning("rewind using legacy heuristic because the target has no exact snapshot").pipe(
+                  Effect.annotateLogs({ runId, targetFrameNo }),
+                );
+              }
+              const deletedOutputs = yield* Effect.promise(() =>
+                targetSnapshotSets.found
+                  ? restoreOutputSet(input.adapter, runId, targetSnapshotSets.outputs)
+                  : deleteOutputTargets(input.adapter, [...outputTargetsMap.values()], runId),
+              );
+              if (targetSnapshotSets.found) {
+                yield* Effect.promise(() => restoreNodeSet(input.adapter, runId, targetSnapshotSets.nodes));
+                yield* Effect.promise(() =>
+                  restoreAttemptsToNodeSnapshot(input.adapter, runId, targetSnapshotSets.nodes),
+                );
+              }
+              yield* Effect.promise(() => runStepHook(input.hooks, "after", "truncate-outputs"));
 
-                  yield* Effect.promise(() =>
-                    runStepHook(input.hooks, "before", "rebuild-reconciler"),
-                  );
-                  if (input.rebuildReconcilerState) {
-                    yield* Effect.promise(() =>
-                      input.rebuildReconcilerState?.(targetFrame.xmlJson),
-                    );
-                  }
-                  yield* Effect.promise(() =>
-                    runStepHook(input.hooks, "after", "rebuild-reconciler"),
-                  );
+              yield* Effect.promise(() => runStepHook(input.hooks, "before", "rebuild-reconciler"));
+              if (input.rebuildReconcilerState) {
+                yield* Effect.promise(() => input.rebuildReconcilerState?.(targetFrame.xmlJson));
+              }
+              yield* Effect.promise(() => runStepHook(input.hooks, "after", "rebuild-reconciler"));
 
-                  if (!targetSnapshotSets.found) {
-                    yield* Effect.promise(() => resetNodesToPending(input.adapter, runId, [...nodeResetMap.values()], nowMs()));
-                  }
+              if (!targetSnapshotSets.found) {
+                yield* Effect.promise(() =>
+                  resetNodesToPending(input.adapter, runId, [...nodeResetMap.values()], nowMs()),
+                );
+              }
 
-                  yield* input.adapter.updateRun(runId, {
-                    status: "running",
-                    finishedAtMs: null,
-                    heartbeatAtMs: null,
-                    runtimeOwnerId: null,
-                    cancelRequestedAtMs: null,
-                    hijackRequestedAtMs: null,
-                    hijackTarget: null,
-                    errorJson: null,
-                  });
+              yield* input.adapter.updateRun(runId, {
+                status: "running",
+                finishedAtMs: null,
+                heartbeatAtMs: null,
+                runtimeOwnerId: null,
+                cancelRequestedAtMs: null,
+                hijackRequestedAtMs: null,
+                hijackTarget: null,
+                errorJson: null,
+              });
 
-                  // Persist the TimeTravelJumped event inside the same
-                  // transaction so frames/attempts truncation and audit/event
-                  // rows commit atomically — there is no partial durable state.
-                  const event = {
-                    type: "TimeTravelJumped",
-                    runId,
-                    fromFrameNo: latestFrame.frameNo,
-                    toFrameNo: targetFrameNo,
-                    timestampMs: nowMs(),
-                    caller,
-                  };
-                  // Insert the event row via raw SQL inside the enclosing
-                  // transaction. We deliberately avoid `insertEventWithNextSeq`
-                  // here because it opens its own transaction and would error
-                  // out nested. internalStorage runs on the same connection as
-                  // the open transaction, so this participates in the commit.
-                  yield* Effect.promise(async () => {
-                    const storage = resolveStorage(input.adapter);
-                    const seqRow = /** @type {Record<string, unknown> | undefined} */ (
-                      await storage.queryOne(
-                        `SELECT COALESCE(MAX(seq), -1) + 1 AS seq
+              // Persist the TimeTravelJumped event inside the same
+              // transaction so frames/attempts truncation and audit/event
+              // rows commit atomically — there is no partial durable state.
+              const event = {
+                type: "TimeTravelJumped",
+                runId,
+                fromFrameNo: latestFrame.frameNo,
+                toFrameNo: targetFrameNo,
+                timestampMs: nowMs(),
+                caller,
+              };
+              // Insert the event row via raw SQL inside the enclosing
+              // transaction. We deliberately avoid `insertEventWithNextSeq`
+              // here because it opens its own transaction and would error
+              // out nested. internalStorage runs on the same connection as
+              // the open transaction, so this participates in the commit.
+              yield* Effect.promise(async () => {
+                const storage = resolveStorage(input.adapter);
+                const seqRow = /** @type {Record<string, unknown> | undefined} */ (
+                  await storage.queryOne(
+                    `SELECT COALESCE(MAX(seq), -1) + 1 AS seq
                            FROM _smithers_events
                           WHERE run_id = ?`,
-                        [runId],
-                      )
-                    );
-                    const seq = Number(seqRow?.seq ?? 0);
-                    await storage.execute(
-                      `INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
+                    [runId],
+                  )
+                );
+                const seq = Number(seqRow?.seq ?? 0);
+                await storage.execute(
+                  `INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
                        VALUES (?, ?, ?, ?, ?)`,
-                      [runId, seq, event.timestampMs, event.type, JSON.stringify(event)],
-                    );
-                    return seq;
-                  });
+                  [runId, seq, event.timestampMs, event.type, JSON.stringify(event)],
+                );
+                return seq;
+              });
 
-                  return {
-                    deletedFrames,
-                    deletedAttempts,
-                    deletedOutputs,
-                    invalidatedDiffs,
-                    event,
-                  };
-                }),
+              return {
+                deletedFrames,
+                deletedAttempts,
+                deletedOutputs,
+                invalidatedDiffs,
+                event,
+              };
+            }),
           );
 
           // The durable jump is committed. Mark success and build the result up
@@ -1114,11 +1100,8 @@ export async function jumpToFrame(input) {
           // committed, so subscribers can reconcile from seq on reconnect.
           if (input.emitEvent) {
             try {
-              await withSpan(
-                "timetravel.eventbus.emit",
-                { runId, type: "TimeTravelJumped" },
-                async () =>
-                  input.emitEvent?.(/** @type {SmithersEvent} */ (dbStats.event)),
+              await withSpan("timetravel.eventbus.emit", { runId, type: "TimeTravelJumped" }, async () =>
+                input.emitEvent?.(/** @type {SmithersEvent} */ (dbStats.event)),
               );
             } catch (emitError) {
               await emitLog(input.onLog, "warn", "jumpToFrame emit broadcast failed", {
@@ -1194,7 +1177,9 @@ export async function jumpToFrame(input) {
               reconcilerSkipped ? "Reconciler-state restore was skipped." : null,
               leaseError ? `Lease check failed: ${leaseError}` : null,
               `Original failure: ${formatError(error)}`,
-            ].filter(Boolean).join(" ");
+            ]
+              .filter(Boolean)
+              .join(" ");
             const auditEvent = {
               type: "TimeTravelFinished",
               runId,
@@ -1294,9 +1279,9 @@ export async function jumpToFrame(input) {
               throw finalError;
             }
             try {
-                await input.restoreReconcilerState(reconcilerSnapshot);
+              await input.restoreReconcilerState(reconcilerSnapshot);
             } catch (restoreError) {
-                rollbackReconcilerError = formatError(restoreError);
+              rollbackReconcilerError = formatError(restoreError);
             }
           }
 
@@ -1320,12 +1305,7 @@ export async function jumpToFrame(input) {
             ]
               .filter(Boolean)
               .join("; ");
-            await markRunNeedsAttention(
-              input.adapter,
-              runId,
-              now,
-              reason || "Rewind rollback was partial.",
-            );
+            await markRunNeedsAttention(input.adapter, runId, now, reason || "Rewind rollback was partial.");
             finalError = new JumpToFrameError(
               "RewindFailed",
               "Rewind failed and rollback was only partial; run needs attention.",
@@ -1423,10 +1403,7 @@ export async function jumpToFrame(input) {
         error: formatError(auditError),
       });
       if (!finalError) {
-        finalError = new JumpToFrameError(
-          "RewindFailed",
-          "Failed to persist rewind audit row.",
-        );
+        finalError = new JumpToFrameError("RewindFailed", "Failed to persist rewind audit row.");
       }
     }
 
@@ -1478,9 +1455,7 @@ export async function jumpToFrame(input) {
     // and audit-write logs emitted above).
     if (
       finalError &&
-      (finalError.code === "VcsError" ||
-        finalError.code === "RewindFailed" ||
-        finalError.code === "UnsupportedSandbox")
+      (finalError.code === "VcsError" || finalError.code === "RewindFailed" || finalError.code === "UnsupportedSandbox")
     ) {
       await emitLog(input.onLog, "error", "jumpToFrame failed", {
         runId: runIdForAudit,

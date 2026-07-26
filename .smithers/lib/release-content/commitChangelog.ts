@@ -35,11 +35,54 @@ function repoUrl(): string {
 const escapeMd = (s: string) => s.replace(/</g, "\\<").replace(/>/g, "\\>");
 
 const TOKEN_STOPWORDS = new Set([
-  "the", "a", "an", "and", "or", "of", "in", "on", "for", "to", "with", "from",
-  "into", "its", "their", "when", "after", "before", "are", "is", "be", "now",
-  "not", "no", "that", "this", "via", "by", "as", "at", "it", "up", "out",
-  "only", "also", "add", "adds", "added", "fix", "fixes", "fixed", "make",
-  "makes", "keep", "keeps", "use", "uses", "support",
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "of",
+  "in",
+  "on",
+  "for",
+  "to",
+  "with",
+  "from",
+  "into",
+  "its",
+  "their",
+  "when",
+  "after",
+  "before",
+  "are",
+  "is",
+  "be",
+  "now",
+  "not",
+  "no",
+  "that",
+  "this",
+  "via",
+  "by",
+  "as",
+  "at",
+  "it",
+  "up",
+  "out",
+  "only",
+  "also",
+  "add",
+  "adds",
+  "added",
+  "fix",
+  "fixes",
+  "fixed",
+  "make",
+  "makes",
+  "keep",
+  "keeps",
+  "use",
+  "uses",
+  "support",
 ]);
 
 type CommitEntry = { sha: string; subject: string; scope: string; tokens: Set<string> };
@@ -74,8 +117,7 @@ function clusterCommits(commits: CommitEntry[]): CommitEntry[][] {
   const clusters: CommitEntry[][] = [];
   for (const entry of commits) {
     const home = clusters.find(
-      (cluster) =>
-        cluster[0].scope === entry.scope && jaccard(cluster[0].tokens, entry.tokens) >= 0.65,
+      (cluster) => cluster[0].scope === entry.scope && jaccard(cluster[0].tokens, entry.tokens) >= 0.65,
     );
     if (home) home.push(entry);
     else clusters.push([entry]);
@@ -93,7 +135,10 @@ function renderCluster(cluster: CommitEntry[], repo: string): string {
   return `- ${escapeMd(subject)} (${links})`;
 }
 
-export function renderCommitChangelogSection(probe: Probe, context: CollectedContext): {
+export function renderCommitChangelogSection(
+  probe: Probe,
+  context: CollectedContext,
+): {
   section: string;
   totalCommits: number;
   categoryCounts: Record<string, number>;
@@ -116,7 +161,10 @@ export function renderCommitChangelogSection(probe: Probe, context: CollectedCon
   }
   const renderedBuckets = new Map<string, string[]>();
   for (const [title, commits] of buckets) {
-    renderedBuckets.set(title, clusterCommits(commits).map((cluster) => renderCluster(cluster, repo)));
+    renderedBuckets.set(
+      title,
+      clusterCommits(commits).map((cluster) => renderCluster(cluster, repo)),
+    );
   }
   const other = clusterCommits(otherCommits).map((cluster) => renderCluster(cluster, repo));
 
@@ -131,21 +179,21 @@ export function renderCommitChangelogSection(probe: Probe, context: CollectedCon
   for (const c of CATEGORIES) {
     const items = renderedBuckets.get(c.title) ?? [];
     const commitCount = buckets.get(c.title)?.length ?? 0;
-    const label = commitCount === items.length
-      ? `${items.length}`
-      : `${items.length} changes, ${commitCount} commits`;
+    const label = commitCount === items.length ? `${items.length}` : `${items.length} changes, ${commitCount} commits`;
     if (items.length) sections.push(`### ${c.title} (${label})\n\n${items.join("\n")}`);
   }
   if (other.length) {
-    const label = otherCommits.length === other.length
-      ? `${other.length}`
-      : `${other.length} changes, ${otherCommits.length} commits`;
+    const label =
+      otherCommits.length === other.length
+        ? `${other.length}`
+        : `${other.length} changes, ${otherCommits.length} commits`;
     sections.push(`### Chores and maintenance (${label})\n\n${other.join("\n")}`);
   }
 
-  const categoryCounts = Object.fromEntries(
-    [...CATEGORIES.map((c) => [c.title, buckets.get(c.title)?.length ?? 0] as const), ["Other", otherCommits.length] as const],
-  );
+  const categoryCounts = Object.fromEntries([
+    ...CATEGORIES.map((c) => [c.title, buckets.get(c.title)?.length ?? 0] as const),
+    ["Other", otherCommits.length] as const,
+  ]);
 
   const section = [
     `## ${probe.version} (${probe.releaseDate})`,

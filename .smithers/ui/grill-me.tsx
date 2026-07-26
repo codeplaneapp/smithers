@@ -137,10 +137,7 @@ function App() {
   const actions = useGatewayActions();
 
   const grillRuns = useMemo(
-    () =>
-      ((runsQuery.data ?? []) as RunSummary[]).filter(
-        (r) => !r.workflowKey || r.workflowKey === WORKFLOW_KEY,
-      ),
+    () => ((runsQuery.data ?? []) as RunSummary[]).filter((r) => !r.workflowKey || r.workflowKey === WORKFLOW_KEY),
     [runsQuery.data],
   );
 
@@ -180,18 +177,13 @@ function App() {
     return null;
   }, [rows]);
 
-  const runStatus =
-    (isRecord(runDetail.data) ? asString(runDetail.data.status) : undefined) ?? activeRun?.status;
+  const runStatus = (isRecord(runDetail.data) ? asString(runDetail.data.status) : undefined) ?? activeRun?.status;
   const eventCount = (stream.events ?? []).length;
   const isRunning = statusClass(runStatus) === "running";
   const isPaused = statusClass(runStatus) === "paused";
 
   async function refresh() {
-    await Promise.all([
-      runsQuery.refetch(),
-      runDetail.refetch(),
-      ...iterQueries.map((q) => q.refetch()),
-    ]);
+    await Promise.all([runsQuery.refetch(), runDetail.refetch(), ...iterQueries.map((q) => q.refetch())]);
   }
   async function launch() {
     setBusy(true);
@@ -265,7 +257,12 @@ function App() {
           <button className="button" data-testid="grill-me-refresh" onClick={() => void refresh()} disabled={busy}>
             Refresh
           </button>
-          <button className="button primary" data-testid="grill-me-launch" onClick={() => void launch()} disabled={busy}>
+          <button
+            className="button primary"
+            data-testid="grill-me-launch"
+            onClick={() => void launch()}
+            disabled={busy}
+          >
             Start Grilling
           </button>
         </div>
@@ -303,7 +300,12 @@ function App() {
             <div className="empty" data-testid="grill-me-empty">
               <div>No active run.</div>
               <div>Launch a grill-me workflow from the Smithers CLI or dashboard.</div>
-              <button className="button primary" data-testid="grill-me-launch-empty" onClick={() => void launch()} disabled={busy}>
+              <button
+                className="button primary"
+                data-testid="grill-me-launch-empty"
+                onClick={() => void launch()}
+                disabled={busy}
+              >
                 Start Grilling
               </button>
             </div>

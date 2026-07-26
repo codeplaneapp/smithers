@@ -6,7 +6,11 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 // Other test files in this package also call register(); the second call
 // throws "already registered". Idempotent guard keeps test order independent.
-try { GlobalRegistrator.register(); } catch { /* already registered */ }
+try {
+  GlobalRegistrator.register();
+} catch {
+  /* already registered */
+}
 
 import { describe, expect, test } from "bun:test";
 import { act, createElement, useEffect, useState, type ReactElement } from "react";
@@ -106,19 +110,11 @@ describe("SmithersGatewayProvider", () => {
 
     const harness = await mountHarness();
     await harness.render(
-      createElement(
-        SmithersGatewayProvider,
-        { options: { baseUrl: "http://a.test" } },
-        createElement(Capture),
-      ),
+      createElement(SmithersGatewayProvider, { options: { baseUrl: "http://a.test" } }, createElement(Capture)),
     );
     const firstClient = observed[observed.length - 1];
     await harness.render(
-      createElement(
-        SmithersGatewayProvider,
-        { options: { baseUrl: "http://b.test" } },
-        createElement(Capture),
-      ),
+      createElement(SmithersGatewayProvider, { options: { baseUrl: "http://b.test" } }, createElement(Capture)),
     );
     const secondClient = observed[observed.length - 1];
 
@@ -160,11 +156,7 @@ describe("useGatewayRpc", () => {
     function Wrapper() {
       const [, setTick] = useState(0);
       const onMount = () => setTick((n) => n + 1);
-      return createElement(
-        SmithersGatewayProvider,
-        { client },
-        createElement(Probe, { onMount }),
-      );
+      return createElement(SmithersGatewayProvider, { client }, createElement(Probe, { onMount }));
     }
 
     const harness = await mountHarness();
@@ -198,9 +190,7 @@ describe("useGatewayRpc", () => {
     }
 
     const harness = await mountHarness();
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe, { enabled: true })),
-    );
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe, { enabled: true })));
     // Resolve the first request so the hook holds real data.
     await act(async () => {
       resolveRpc?.({ run: { id: "run-1" } });
@@ -209,9 +199,7 @@ describe("useGatewayRpc", () => {
     expect(snapshot?.loading).toBe(false);
 
     // Disable the query: data and error must clear and loading must be false.
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe, { enabled: false })),
-    );
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe, { enabled: false })));
     expect(snapshot?.data).toBeUndefined();
     expect(snapshot?.error).toBeUndefined();
     expect(snapshot?.loading).toBe(false);
@@ -237,9 +225,7 @@ describe("useGatewayRpc", () => {
     }
 
     const harness = await mountHarness();
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe, { runId: "run-1" })),
-    );
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe, { runId: "run-1" })));
     await act(async () => {
       resolvers.get("run-1")?.({ run: { id: "run-1" } });
     });
@@ -247,9 +233,7 @@ describe("useGatewayRpc", () => {
 
     // Switch the key: the prior payload must be dropped immediately and the hook
     // re-enters loading until the new request resolves.
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe, { runId: "run-2" })),
-    );
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe, { runId: "run-2" })));
     expect(snapshot?.data).toBeUndefined();
     expect(snapshot?.loading).toBe(true);
 
@@ -284,16 +268,12 @@ describe("useGatewayRpc", () => {
 
     const harness = await mountHarness();
     // Mount with run-1; do NOT resolve its request — it stays in flight.
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe, { runId: "run-1" })),
-    );
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe, { runId: "run-1" })));
     expect(snapshot?.loading).toBe(true);
 
     // Switch to run-2 BEFORE run-1 resolves. The hook must clear data and
     // remain in loading; the run-1 promise is now "stale".
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe, { runId: "run-2" })),
-    );
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe, { runId: "run-2" })));
     expect(snapshot?.data).toBeUndefined();
     expect(snapshot?.loading).toBe(true);
 
@@ -330,19 +310,13 @@ describe("useGatewayRpc", () => {
     }
 
     const harness = await mountHarness();
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe, { limit: 5 })),
-    );
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe, { limit: 5 })));
     // Re-render with identical params: no new call.
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe, { limit: 5 })),
-    );
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe, { limit: 5 })));
     expect(calls.length).toBe(1);
 
     // Re-render with changed params: exactly one new call.
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe, { limit: 9 })),
-    );
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe, { limit: 9 })));
     expect(calls).toEqual([
       { method: "listRuns", params: { limit: 5 } },
       { method: "listRuns", params: { limit: 9 } },

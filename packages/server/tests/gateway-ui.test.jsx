@@ -17,13 +17,12 @@ function getPort(server) {
 }
 
 function createValueWorkflow(dbPath) {
-  const { smithers, Workflow, Task, outputs } = createSmithers(
-    { result: z.object({ ok: z.boolean() }) },
-    { dbPath },
-  );
+  const { smithers, Workflow, Task, outputs } = createSmithers({ result: z.object({ ok: z.boolean() }) }, { dbPath });
   return smithers(() => (
     <Workflow name="gateway-ui-test">
-      <Task id="task1" output={outputs.result}>{{ ok: true }}</Task>
+      <Task id="task1" output={outputs.result}>
+        {{ ok: true }}
+      </Task>
     </Workflow>
   ));
 }
@@ -46,7 +45,9 @@ function createWorkflowOwnedLiteralUi(dbPath) {
           <text>Terminal workflow UI</text>
         </box>
       </TUI>
-      <Task id="task1" output={outputs.result}>{{ ok: true }}</Task>
+      <Task id="task1" output={outputs.result}>
+        {{ ok: true }}
+      </Task>
     </Workflow>
   ));
 }
@@ -59,7 +60,9 @@ function createWorkflowOwnedEntryUi(dbPath, entry) {
   return smithers(() => (
     <Workflow name="workflow-owned-entry-ui">
       <UI entry={entry} title="Entry Workflow UI" props={{ source: "entry-declaration" }} />
-      <Task id="task1" output={outputs.result}>{{ ok: true }}</Task>
+      <Task id="task1" output={outputs.result}>
+        {{ ok: true }}
+      </Task>
     </Workflow>
   ));
 }
@@ -72,7 +75,9 @@ function createWorkflowOwnedSourceUi(dbPath, source) {
   return smithers(() => (
     <Workflow name="workflow-owned-source-ui">
       <UI source={source} title="Source Workflow UI" props={{ label: "Source Workflow UI" }} />
-      <Task id="task1" output={outputs.result}>{{ ok: true }}</Task>
+      <Task id="task1" output={outputs.result}>
+        {{ ok: true }}
+      </Task>
     </Workflow>
   ));
 }
@@ -158,7 +163,7 @@ describe("Gateway UI", () => {
     expect(html).toContain('"kind":"gateway"');
     expect(html).toContain('"mountPath":"/console"');
     expect(html).toContain('"section":"ops"');
-    expect(html).toContain('/console/__smithers_ui/client.js');
+    expect(html).toContain("/console/__smithers_ui/client.js");
 
     const assetResponse = await fetch(`http://127.0.0.1:${port}/console/__smithers_ui/client.js`);
     expect(assetResponse.status).toBe(200);
@@ -177,7 +182,7 @@ describe("Gateway UI", () => {
     expect(html).toContain("<title>Smithers Operator Console</title>");
     expect(html).toContain('"kind":"operator"');
     expect(html).toContain('"mountPath":"/console"');
-    expect(html).toContain('/console/__smithers_ui/client.js');
+    expect(html).toContain("/console/__smithers_ui/client.js");
 
     const assetResponse = await fetch(`http://127.0.0.1:${port}/console/__smithers_ui/client.js`);
     expect(assetResponse.status).toBe(200);
@@ -210,7 +215,7 @@ describe("Gateway UI", () => {
     expect(html).toContain("<title>Smithers Operator Console</title>");
     expect(html).toContain('"kind":"operator"');
     expect(html).toContain('"mountPath":"/console"');
-    expect(html).toContain('/console/__smithers_ui/client.js');
+    expect(html).toContain("/console/__smithers_ui/client.js");
 
     const assetResponse = await fetch(`http://127.0.0.1:${port}/console/__smithers_ui/client.js`);
     expect(assetResponse.status).toBe(200);
@@ -302,13 +307,12 @@ describe("Gateway UI", () => {
   test("built-in operator console loads and launches a real run in the browser", async () => {
     tempDir = mkdtempSync(join(process.cwd(), ".smithers-op-console-behavioral-"));
     const dbPath = join(tempDir, "op.db");
-    const { smithers, Workflow, Task, outputs } = createSmithers(
-      { result: z.object({ ok: z.boolean() }) },
-      { dbPath },
-    );
+    const { smithers, Workflow, Task, outputs } = createSmithers({ result: z.object({ ok: z.boolean() }) }, { dbPath });
     const workflow = smithers(() => (
       <Workflow name="op-console-workflow">
-        <Task id="step1" output={outputs.result}>{{ ok: true }}</Task>
+        <Task id="step1" output={outputs.result}>
+          {{ ok: true }}
+        </Task>
       </Workflow>
     ));
 
@@ -409,10 +413,12 @@ describe("Gateway UI", () => {
       expect(document.body.textContent).toContain("No runs found.");
     });
 
-    document.querySelector("#launch").dispatchEvent(new Event("submit", {
-      bubbles: true,
-      cancelable: true,
-    }));
+    document.querySelector("#launch").dispatchEvent(
+      new Event("submit", {
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
 
     const runId = await waitFor(async () => {
       const listRunsResponse = await postRpc(port, "listRuns");

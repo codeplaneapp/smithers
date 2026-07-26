@@ -32,7 +32,8 @@ export class FrameScrubber {
     const barWidth = Math.max(10, W - 24);
     const position = latest <= 0 ? 0 : Math.round((current / latest) * (barWidth - 1));
     const chars = Array.from({ length: barWidth }, (_, index) => (index === position ? "|" : "-"));
-    const mode = this.store.mode.kind === "historical" ? paint(theme, "warning", "historical") : paint(theme, "success", "live");
+    const mode =
+      this.store.mode.kind === "historical" ? paint(theme, "warning", "historical") : paint(theme, "success", "live");
     const lines = [
       truncateToWidth(
         ` frame ${String(current).padStart(3)} / ${String(latest).padEnd(3)} ${paint(theme, "border", chars.join(""))} ${mode}`,
@@ -40,15 +41,9 @@ export class FrameScrubber {
       ),
     ];
     if (this.store.mode.kind === "historical") {
-      const running =
-        this.store.runningNodeCount > 0
-          ? ` ${this.store.runningNodeCount} running at this frame.`
-          : "";
+      const running = this.store.runningNodeCount > 0 ? ` ${this.store.runningNodeCount} running at this frame.` : "";
       lines.push(
-        truncateToWidth(
-          paint(theme, "warning", ` viewing stale frame ${current}; live has ${latest}.${running}`),
-          W,
-        ),
+        truncateToWidth(paint(theme, "warning", ` viewing stale frame ${current}; live has ${latest}.${running}`), W),
       );
     }
     if (this.store.scrubError || this.store.rewindError) {

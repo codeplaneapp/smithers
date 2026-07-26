@@ -6,5 +6,4 @@ const WorkflowSessionBase =
     /** @type {unknown} */ (Context.Tag("WorkflowSession")())
   );
 
-export class WorkflowSession extends WorkflowSessionBase {
-}
+export class WorkflowSession extends WorkflowSessionBase {}

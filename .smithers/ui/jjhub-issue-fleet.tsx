@@ -32,12 +32,11 @@ import {
   normalizeStatus,
   statusClass,
 } from "smithers-orchestrator/ui";
-import {
-  buildIssueBlitzNodeState,
-  type IssueBlitzNodeStatus as NodeStatus,
-} from "../lib/buildIssueBlitzNodeState";
+import { buildIssueBlitzNodeState, type IssueBlitzNodeStatus as NodeStatus } from "../lib/buildIssueBlitzNodeState";
 
-function asString(value: unknown): string | undefined { return typeof value === "string" ? value : undefined; }
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
 function runIdFromUrl(): string | undefined {
   if (typeof location === "undefined") return undefined;
   return new URLSearchParams(location.search).get("runId") ?? undefined;
@@ -102,17 +101,22 @@ export function JjhubIssueFleetApp() {
       actions={
         <>
           <StatusPill data-testid="fleet-run-status" status={runStatus} />
-          <Button variant="destructive" onClick={() => runId && cancelRun({ runId })}>Cancel run</Button>
+          <Button variant="destructive" onClick={() => runId && cancelRun({ runId })}>
+            Cancel run
+          </Button>
         </>
       }
       testId="jjhub-issue-fleet-ui"
     >
       <SmithersUiStyles />
       <Card>
-        <CardHeader><CardTitle>Fleet</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>Fleet</CardTitle>
+        </CardHeader>
         <CardContent>
           <CardDescription>
-            One jjhub sandbox per open smithersai/plue issue · codex gpt-5.6-sol implements in-VM · bookmark push → GitHub PR + jjhub landing request
+            One jjhub sandbox per open smithersai/plue issue · codex gpt-5.6-sol implements in-VM · bookmark push →
+            GitHub PR + jjhub landing request
           </CardDescription>
           <StatusPill status={st("discover")} label="discover" />
           <Badge variant="default">{`lanes ${issueNumbers.length}`}</Badge>
@@ -125,7 +129,10 @@ export function JjhubIssueFleetApp() {
 
       <SectionHeader title="Issue lanes" />
       {issueNumbers.length === 0 ? (
-        <EmptyState title="Waiting for discovery" description="Lanes appear once the open-issue list and jjhub base are resolved." />
+        <EmptyState
+          title="Waiting for discovery"
+          description="Lanes appear once the open-issue list and jjhub base are resolved."
+        />
       ) : (
         <Table>
           <TableHeader>
@@ -141,13 +148,27 @@ export function JjhubIssueFleetApp() {
               const lane = lanes.get(issue);
               return (
                 <TableRow key={issue}>
-                  <TableCell><strong>{`#${issue}`}</strong><br />{lane?.title ?? ""}</TableCell>
-                  <TableCell><StatusPill status={st(`i${issue}:lane`)} label="vm+sol" /></TableCell>
-                  <TableCell><StatusPill status={st(`i${issue}:pr`)} label="pr" /></TableCell>
                   <TableCell>
-                    {lane?.prUrl ? <a href={lane.prUrl} target="_blank" rel="noreferrer">{lane.prUrl.split("/").slice(-2).join("/")}</a>
-                      : lane?.error ? <Badge variant="destructive">{lane.error.slice(0, 80)}</Badge>
-                        : <Badge variant="default">in flight</Badge>}
+                    <strong>{`#${issue}`}</strong>
+                    <br />
+                    {lane?.title ?? ""}
+                  </TableCell>
+                  <TableCell>
+                    <StatusPill status={st(`i${issue}:lane`)} label="vm+sol" />
+                  </TableCell>
+                  <TableCell>
+                    <StatusPill status={st(`i${issue}:pr`)} label="pr" />
+                  </TableCell>
+                  <TableCell>
+                    {lane?.prUrl ? (
+                      <a href={lane.prUrl} target="_blank" rel="noreferrer">
+                        {lane.prUrl.split("/").slice(-2).join("/")}
+                      </a>
+                    ) : lane?.error ? (
+                      <Badge variant="destructive">{lane.error.slice(0, 80)}</Badge>
+                    ) : (
+                      <Badge variant="default">in flight</Badge>
+                    )}
                   </TableCell>
                 </TableRow>
               );
@@ -159,11 +180,17 @@ export function JjhubIssueFleetApp() {
       <Tabs defaultValue="tree">
         <TabsList>
           <TabsTrigger value="tree">Run tree</TabsTrigger>
-          <TabsTrigger value="events" count={(events ?? []).length}>Events</TabsTrigger>
+          <TabsTrigger value="events" count={(events ?? []).length}>
+            Events
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="tree">
           <RunTree runId={runId} activeNodeId={selectedNodeId} onSelectNode={(node) => setSelectedNodeId(node.id)} />
-          <NodeOutputView runId={runId} nodeId={selectedNodeId} iteration={selectedNodeId ? iteration.get(selectedNodeId) : undefined} />
+          <NodeOutputView
+            runId={runId}
+            nodeId={selectedNodeId}
+            iteration={selectedNodeId ? iteration.get(selectedNodeId) : undefined}
+          />
         </TabsContent>
         <TabsContent value="events">
           {runId ? <RunEventLog runId={runId} /> : <EmptyState title="Select a run." />}

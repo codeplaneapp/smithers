@@ -57,10 +57,7 @@ describe("vcs domain parsers", () => {
       { status: "Modified", category: "modified", path: "apps/smithers/src/app/router.ts" },
       { status: "Deleted", category: "deleted", path: "old file.ts" },
     ]);
-    expect(parseJjBookmarks("main: abcdef01 message\nfeature/vcs*: 12345678 work\n")).toEqual([
-      "feature/vcs",
-      "main",
-    ]);
+    expect(parseJjBookmarks("main: abcdef01 message\nfeature/vcs*: 12345678 work\n")).toEqual(["feature/vcs", "main"]);
   });
 
   test("parses compact jj status output from real local workspaces", () => {

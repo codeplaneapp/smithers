@@ -27,14 +27,7 @@ function descriptorMap(...descs) {
 
 describe("scheduleTasks input shapes", () => {
   test("empty plan: returns no runnables, no flags", () => {
-    const result = scheduleTasks(
-      null,
-      new Map(),
-      new Map(),
-      new Map(),
-      new Map(),
-      0,
-    );
+    const result = scheduleTasks(null, new Map(), new Map(), new Map(), new Map(), 0);
     expect(result.runnable).toEqual([]);
     expect(result.pendingExists).toBe(false);
     expect(result.waitingApprovalExists).toBe(false);
@@ -49,14 +42,7 @@ describe("scheduleTasks input shapes", () => {
   test("single task plan: returns the single task as runnable", () => {
     const plan = { kind: "task", nodeId: "only" };
     const descs = descriptorMap(makeDescriptor("only"));
-    const result = scheduleTasks(
-      plan,
-      new Map(),
-      descs,
-      new Map(),
-      new Map(),
-      0,
-    );
+    const result = scheduleTasks(plan, new Map(), descs, new Map(), new Map(), 0);
     expect(result.runnable.map((r) => r.nodeId)).toEqual(["only"]);
     expect(result.pendingExists).toBe(true);
   });
@@ -68,14 +54,7 @@ describe("scheduleTasks input shapes", () => {
       children: ids.map((id) => ({ kind: "task", nodeId: id })),
     };
     const descs = descriptorMap(...ids.map((id) => makeDescriptor(id)));
-    const result = scheduleTasks(
-      plan,
-      new Map(),
-      descs,
-      new Map(),
-      new Map(),
-      0,
-    );
+    const result = scheduleTasks(plan, new Map(), descs, new Map(), new Map(), 0);
     expect(result.runnable.length).toBe(100);
     expect(new Set(result.runnable.map((r) => r.nodeId)).size).toBe(100);
   });
@@ -90,18 +69,8 @@ describe("scheduleTasks queue / FIFO ordering", () => {
         { kind: "task", nodeId: "second" },
       ],
     };
-    const descs = descriptorMap(
-      makeDescriptor("first"),
-      makeDescriptor("second"),
-    );
-    const result = scheduleTasks(
-      plan,
-      new Map(),
-      descs,
-      new Map(),
-      new Map(),
-      0,
-    );
+    const descs = descriptorMap(makeDescriptor("first"), makeDescriptor("second"));
+    const result = scheduleTasks(plan, new Map(), descs, new Map(), new Map(), 0);
     // sequence runs first task only
     expect(result.runnable.map((r) => r.nodeId)).toEqual(["first"]);
   });
@@ -115,19 +84,8 @@ describe("scheduleTasks queue / FIFO ordering", () => {
         { kind: "task", nodeId: "c" },
       ],
     };
-    const descs = descriptorMap(
-      makeDescriptor("a"),
-      makeDescriptor("b"),
-      makeDescriptor("c"),
-    );
-    const result = scheduleTasks(
-      plan,
-      new Map(),
-      descs,
-      new Map(),
-      new Map(),
-      0,
-    );
+    const descs = descriptorMap(makeDescriptor("a"), makeDescriptor("b"), makeDescriptor("c"));
+    const result = scheduleTasks(plan, new Map(), descs, new Map(), new Map(), 0);
     expect(result.runnable.map((r) => r.nodeId)).toEqual(["a", "b", "c"]);
   });
 });
@@ -147,14 +105,7 @@ describe("scheduleTasks concurrency cap", () => {
       makeDescriptor("b", { parallelGroupId: "g", parallelMaxConcurrency: 1 }),
       makeDescriptor("c", { parallelGroupId: "g", parallelMaxConcurrency: 1 }),
     );
-    const result = scheduleTasks(
-      plan,
-      new Map(),
-      descs,
-      new Map(),
-      new Map(),
-      0,
-    );
+    const result = scheduleTasks(plan, new Map(), descs, new Map(), new Map(), 0);
     expect(result.runnable.length).toBe(1);
     expect(result.pendingExists).toBe(true);
   });
@@ -176,14 +127,7 @@ describe("scheduleTasks concurrency cap", () => {
         }),
       ),
     );
-    const result = scheduleTasks(
-      plan,
-      new Map(),
-      descs,
-      new Map(),
-      new Map(),
-      0,
-    );
+    const result = scheduleTasks(plan, new Map(), descs, new Map(), new Map(), 0);
     expect(result.runnable.length).toBe(2);
   });
 
@@ -217,14 +161,7 @@ describe("scheduleTasks concurrency cap", () => {
       makeDescriptor("a", { parallelGroupId: "g" }),
       makeDescriptor("b", { parallelGroupId: "g" }),
     );
-    const result = scheduleTasks(
-      plan,
-      new Map(),
-      descs,
-      new Map(),
-      new Map(),
-      0,
-    );
+    const result = scheduleTasks(plan, new Map(), descs, new Map(), new Map(), 0);
     expect(result.runnable.map((r) => r.nodeId)).toEqual(["a", "b"]);
   });
 
@@ -240,14 +177,7 @@ describe("scheduleTasks concurrency cap", () => {
       makeDescriptor("a", { parallelGroupId: "g1", parallelMaxConcurrency: 1 }),
       makeDescriptor("b", { parallelGroupId: "g2", parallelMaxConcurrency: 1 }),
     );
-    const result = scheduleTasks(
-      plan,
-      new Map(),
-      descs,
-      new Map(),
-      new Map(),
-      0,
-    );
+    const result = scheduleTasks(plan, new Map(), descs, new Map(), new Map(), 0);
     expect(result.runnable.length).toBe(2);
   });
 });
@@ -320,14 +250,7 @@ describe("scheduleTasks rescheduling after failure (retry wait)", () => {
       [buildStateKey("a", 0), 9_000],
       [buildStateKey("b", 0), 4_000],
     ]);
-    const result = scheduleTasks(
-      plan,
-      new Map(),
-      descs,
-      new Map(),
-      retryWait,
-      1_000,
-    );
+    const result = scheduleTasks(plan, new Map(), descs, new Map(), retryWait, 1_000);
     expect(result.nextRetryAtMs).toBe(4_000);
   });
 
@@ -340,10 +263,7 @@ describe("scheduleTasks rescheduling after failure (retry wait)", () => {
       ],
     };
     const states = new Map([[buildStateKey("a", 0), "failed"]]);
-    const descs = descriptorMap(
-      makeDescriptor("a", { continueOnFail: true }),
-      makeDescriptor("b"),
-    );
+    const descs = descriptorMap(makeDescriptor("a", { continueOnFail: true }), makeDescriptor("b"));
     const result = scheduleTasks(plan, states, descs, new Map(), new Map(), 0);
     expect(result.runnable.map((r) => r.nodeId)).toEqual(["b"]);
   });

@@ -76,13 +76,18 @@ function MergeRow({ runId, slug, nodes }: { runId: string; slug: string; nodes: 
   const label = slug.replace(/^run-\d+-\d+-/, "");
   return (
     <div style={{ ...panelStyle, padding: 8 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }} onClick={() => setOpen((v) => !v)}>
-        <StatusPill status={row !== undefined ? (merged ? "finished" : "failed") : node.status ?? "pending"} />
+      <div
+        style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <StatusPill status={row !== undefined ? (merged ? "finished" : "failed") : (node.status ?? "pending")} />
         <strong>{label}</strong>
         {row !== undefined ? <span style={{ opacity: 0.7 }}>{merged ? "landed" : "not landed"}</span> : null}
       </div>
       {open && row !== undefined ? (
-        <pre style={{ marginTop: 8, fontSize: 11, whiteSpace: "pre-wrap", opacity: 0.85 }}>{JSON.stringify(row, null, 2)}</pre>
+        <pre style={{ marginTop: 8, fontSize: 11, whiteSpace: "pre-wrap", opacity: 0.85 }}>
+          {JSON.stringify(row, null, 2)}
+        </pre>
       ) : null}
     </div>
   );
@@ -96,7 +101,9 @@ function ReportPanel({ runId, nodes }: { runId: string; nodes: TreeNode[] }) {
   return (
     <div style={{ ...panelStyle, marginBottom: 12 }}>
       <strong style={{ fontSize: 13 }}>Landing report</strong>
-      <pre style={{ marginTop: 8, fontSize: 11, whiteSpace: "pre-wrap", opacity: 0.85 }}>{JSON.stringify(row, null, 2)}</pre>
+      <pre style={{ marginTop: 8, fontSize: 11, whiteSpace: "pre-wrap", opacity: 0.85 }}>
+        {JSON.stringify(row, null, 2)}
+      </pre>
     </div>
   );
 }
@@ -124,14 +131,30 @@ function App() {
   return (
     <WorkflowUiShell title="Land Shared UI Worktrees" meta={`${runId.slice(0, 8)} · ${formatStatus(status)}`}>
       <div style={{ ...panelStyle, display: "flex", gap: 16, alignItems: "center", marginBottom: 12, fontSize: 12 }}>
-        <span>CI gate: <StatusPill status={ci.status ?? "pending"} /></span>
-        {fix.status ? <span>fix round: <StatusPill status={fix.status} /></span> : null}
+        <span>
+          CI gate: <StatusPill status={ci.status ?? "pending"} />
+        </span>
+        {fix.status ? (
+          <span>
+            fix round: <StatusPill status={fix.status} />
+          </span>
+        ) : null}
       </div>
       <ReportPanel runId={runId} nodes={nodes} />
       {slugs.length === 0 ? (
-        <EmptyState title="No merge lanes yet" description="Lanes appear as the merge queue schedules worktree landings." />
+        <EmptyState
+          title="No merge lanes yet"
+          description="Lanes appear as the merge queue schedules worktree landings."
+        />
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 8, marginBottom: 12 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+            gap: 8,
+            marginBottom: 12,
+          }}
+        >
           {slugs.map((slug) => (
             <MergeRow key={slug} runId={runId} slug={slug} nodes={nodes} />
           ))}

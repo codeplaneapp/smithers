@@ -189,18 +189,30 @@ export function specIsStub(specFeatures: ReadonlyArray<{ id: string }>): boolean
 }
 
 /** Same-origin href to a sibling workflow's run UI (served by the same gateway). */
-export function workflowUiHref(workflowKey: string, runId: string, pathname: string = window.location.pathname): string {
+export function workflowUiHref(
+  workflowKey: string,
+  runId: string,
+  pathname: string = window.location.pathname,
+): string {
   const base = pathname.replace(/\/workflows\/[^/]*$/, "");
   return `${base}/workflows/${encodeURIComponent(workflowKey)}?runId=${encodeURIComponent(runId)}`;
 }
 
-export function workflowKeyFromPathname(pathname: string = typeof window === "undefined" ? "" : window.location.pathname): string {
+export function workflowKeyFromPathname(
+  pathname: string = typeof window === "undefined" ? "" : window.location.pathname,
+): string {
   const match = pathname.match(/\/workflows\/([^/?#]+)/);
   return match ? decodeURIComponent(match[1]!) : "";
 }
 
 function slugForWorkflowName(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "workflow";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "workflow"
+  );
 }
 
 export function builderWorkflowName(description: string): string {
@@ -239,7 +251,9 @@ export function App({
   if (initialDraftsRef.current === null) initialDraftsRef.current = loadSpecDrafts(specDocs);
   const [drafts, setDrafts] = useState<Record<string, string>>(() => initialDraftsRef.current ?? {});
   const [editorResetVersions, setEditorResetVersions] = useState<Record<string, number>>({});
-  const [recoveredDraftPaths, setRecoveredDraftPaths] = useState<string[]>(() => Object.keys(initialDraftsRef.current ?? {}));
+  const [recoveredDraftPaths, setRecoveredDraftPaths] = useState<string[]>(() =>
+    Object.keys(initialDraftsRef.current ?? {}),
+  );
   const [launchedRunId, setLaunchedRunId] = useState<string | null>(null);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [launchPending, setLaunchPending] = useState(false);
@@ -278,7 +292,11 @@ export function App({
   const auditOut = useGatewayNodeOutput({ runId: liveRunId, nodeId: "audit", iteration: 0 });
   const specOut = useGatewayNodeOutput({ runId: liveRunId, nodeId: "spec-update", iteration: 0 });
   const triageOut = useGatewayNodeOutput({ runId: liveRunId, nodeId: "triage", iteration: 0 });
-  const materializedTicketsOut = useGatewayNodeOutput({ runId: liveRunId, nodeId: "materialize-tickets", iteration: 0 });
+  const materializedTicketsOut = useGatewayNodeOutput({
+    runId: liveRunId,
+    nodeId: "materialize-tickets",
+    iteration: 0,
+  });
   const roundSummaryOut = useGatewayNodeOutput({ runId: liveRunId, nodeId: "round-summary", iteration: 0 });
   const runsState = useGatewayRuns({ filter: { limit: 100 } });
   const runDetail = useGatewayRun(liveRunId);
@@ -343,8 +361,7 @@ export function App({
       : listedRuns;
   const selectedRun = runs.find((run) => run.runId === liveRunId);
   const selectedWorkflowKey =
-    asString(selectedRun?.workflowKey ?? selectedRun?.workflowName ?? selectedRun?.workflow) ||
-    activeRunWorkflowKey;
+    asString(selectedRun?.workflowKey ?? selectedRun?.workflowName ?? selectedRun?.workflow) || activeRunWorkflowKey;
   const expectsDddNodeOutputs = selectedWorkflowKey === "docs-driven-development";
   const runStatus = asString(runDetailRow?.status) || asString(selectedRun?.status) || undefined;
   const refetchDddNodeOutputs = useCallback(() => {
@@ -449,12 +466,8 @@ export function App({
   const dispatchedDraftFiles = changedFilesFromMetaTicket(metaTicket);
   const specUpdatedPaths = updatedDocPathsFromSpec(spec);
   const dispatchedDddRun =
-    !!launchedRunId &&
-    liveRunId === launchedRunId &&
-    selectedWorkflowKey === "docs-driven-development";
-  const canReconcileDispatchedDraftRun =
-    dispatchedDddRun &&
-    (Boolean(spec) || isTerminalRunStatus(runStatus));
+    !!launchedRunId && liveRunId === launchedRunId && selectedWorkflowKey === "docs-driven-development";
+  const canReconcileDispatchedDraftRun = dispatchedDddRun && (Boolean(spec) || isTerminalRunStatus(runStatus));
   const draftReconciliationSignature = [
     launchedRunId,
     runStatus,
@@ -575,7 +588,13 @@ export function App({
     void actions
       .launchRun({
         workflow: "docs-driven-development",
-        input: { maxAgents: 1, maxRounds: 1, runImplementation: false, implementationApproved: false, metaTicket: payload },
+        input: {
+          maxAgents: 1,
+          maxRounds: 1,
+          runImplementation: false,
+          implementationApproved: false,
+          metaTicket: payload,
+        },
       })
       .then((result: unknown) => {
         const nextRunId = launchResultRunId(result);
@@ -614,7 +633,11 @@ export function App({
         setCreateRun(
           nextRunId
             ? { runId: nextRunId, error: null, pending: false }
-            : { runId: null, error: "The gateway accepted the request but did not return a run id. Try again.", pending: false },
+            : {
+                runId: null,
+                error: "The gateway accepted the request but did not return a run id. Try again.",
+                pending: false,
+              },
         );
       })
       .catch((error: unknown) => {
@@ -634,13 +657,20 @@ export function App({
     generateLaunchInFlight.current = true;
     setGenerateRun({ runId: null, error: null, pending: true });
     void actions
-      .launchRun({ workflow: "docs-driven-development", input: { maxAgents: 1, maxRounds: 1, runImplementation: false } })
+      .launchRun({
+        workflow: "docs-driven-development",
+        input: { maxAgents: 1, maxRounds: 1, runImplementation: false },
+      })
       .then((result: unknown) => {
         const nextRunId = launchResultRunId(result);
         setGenerateRun(
           nextRunId
             ? { runId: nextRunId, error: null, pending: false }
-            : { runId: null, error: "The gateway accepted the request but did not return a run id. Try again.", pending: false },
+            : {
+                runId: null,
+                error: "The gateway accepted the request but did not return a run id. Try again.",
+                pending: false,
+              },
         );
         if (nextRunId) setPickedRunId(nextRunId);
       })
@@ -657,10 +687,13 @@ export function App({
     if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(key)) return;
     event.preventDefault();
     const nextIndex =
-      key === "Home" ? 0 :
-      key === "End" ? TABS.length - 1 :
-      key === "ArrowRight" ? (index + 1) % TABS.length :
-      (index - 1 + TABS.length) % TABS.length;
+      key === "Home"
+        ? 0
+        : key === "End"
+          ? TABS.length - 1
+          : key === "ArrowRight"
+            ? (index + 1) % TABS.length
+            : (index - 1 + TABS.length) % TABS.length;
     const next = TABS[nextIndex]!;
     setActiveTab(next.key);
     window.requestAnimationFrame(() => {
@@ -694,16 +727,22 @@ export function App({
               <span className={`badge ${statusClass(runStatus)}`} data-testid="ddd-run-status">
                 {formatStatus(runStatus) || "Run"}
               </span>
-              <span className="pill" data-testid="ddd-run-id" title={liveRunId}>{shortRunId(liveRunId)}</span>
+              <span className="pill" data-testid="ddd-run-id" title={liveRunId}>
+                {shortRunId(liveRunId)}
+              </span>
             </>
           ) : (
-            <span className="pill muted" data-testid="ddd-run-id">No run</span>
+            <span className="pill muted" data-testid="ddd-run-id">
+              No run
+            </span>
           )}
         </div>
         <div className="actions">
           {/* v1 ships no asset server; the Assets link only appears with ?assetBaseUrl. */}
           {assetBase ? (
-            <a className="button" href={assetBase} target="_blank" rel="noreferrer">Assets</a>
+            <a className="button" href={assetBase} target="_blank" rel="noreferrer">
+              Assets
+            </a>
           ) : null}
           {stub ? (
             <button type="button" className="button" data-testid="ddd-open-start" onClick={() => setShowStart(true)}>
@@ -737,13 +776,21 @@ export function App({
         <nav className="tabbar" role="tablist" aria-label="Docs-driven development sections" data-testid="ddd-tabbar">
           {TABS.map((tab) => {
             const count =
-              tab.key === "specs" ? changedPaths.length :
-              tab.key === "live" ? runs.length :
-              tab.key === "tickets" ? tickets.length : 0;
+              tab.key === "specs"
+                ? changedPaths.length
+                : tab.key === "live"
+                  ? runs.length
+                  : tab.key === "tickets"
+                    ? tickets.length
+                    : 0;
             const countTitle =
-              tab.key === "specs" ? `${count} unsaved doc${count === 1 ? "" : "s"}` :
-              tab.key === "live" ? `${count} run${count === 1 ? "" : "s"}` :
-              tab.key === "tickets" ? `${count} ticket${count === 1 ? "" : "s"}` : "";
+              tab.key === "specs"
+                ? `${count} unsaved doc${count === 1 ? "" : "s"}`
+                : tab.key === "live"
+                  ? `${count} run${count === 1 ? "" : "s"}`
+                  : tab.key === "tickets"
+                    ? `${count} ticket${count === 1 ? "" : "s"}`
+                    : "";
             return (
               <button
                 key={tab.key}
@@ -756,10 +803,19 @@ export function App({
                 className={activeTab === tab.key ? "tab is-active" : "tab"}
                 data-testid={`ddd-tab-${tab.key}`}
                 onClick={() => setActiveTab(tab.key)}
-                onKeyDown={(event) => onTabKeyDown(event, TABS.findIndex((item) => item.key === tab.key))}
+                onKeyDown={(event) =>
+                  onTabKeyDown(
+                    event,
+                    TABS.findIndex((item) => item.key === tab.key),
+                  )
+                }
               >
                 {tab.label}
-                {count ? <span className="count" title={countTitle} aria-label={countTitle}>{count}</span> : null}
+                {count ? (
+                  <span className="count" title={countTitle} aria-label={countTitle}>
+                    {count}
+                  </span>
+                ) : null}
               </button>
             );
           })}
@@ -784,12 +840,7 @@ export function App({
       <div className="content">
         <ErrorBanner
           title="Gateway data issue"
-          errors={[
-            runsState.error,
-            runDetail.error,
-            runTree.error,
-            ticketsState.error,
-          ]}
+          errors={[runsState.error, runDetail.error, runTree.error, ticketsState.error]}
         />
 
         {showStart ? (
@@ -826,24 +877,24 @@ export function App({
           hidden={showStart || activeTab !== "specs"}
         >
           {!showStart && activeTab === "specs" ? (
-          <SpecsTab
-            docs={specDocs}
-            drafts={drafts}
-            selectedPath={selectedPath}
-            assetBase={assetBase}
-            changedPaths={changedPaths}
-            launchPending={launchPending}
-            launchedRunId={launchedRunId}
-            launchError={launchError}
-            recoveredPaths={recoveredDraftPaths.filter((path) => changedPaths.includes(path))}
-            editorResetKey={editorResetVersions[selectedPath] ?? 0}
-            draftRunNotice={draftRunNotice}
-            onSelectPath={setSelectedPath}
-            onDraftChange={updateDraft}
-            onDiscardDrafts={discardDrafts}
-            onDispatch={dispatchAgents}
-            onReload={reloadDocsUi}
-          />
+            <SpecsTab
+              docs={specDocs}
+              drafts={drafts}
+              selectedPath={selectedPath}
+              assetBase={assetBase}
+              changedPaths={changedPaths}
+              launchPending={launchPending}
+              launchedRunId={launchedRunId}
+              launchError={launchError}
+              recoveredPaths={recoveredDraftPaths.filter((path) => changedPaths.includes(path))}
+              editorResetKey={editorResetVersions[selectedPath] ?? 0}
+              draftRunNotice={draftRunNotice}
+              onSelectPath={setSelectedPath}
+              onDraftChange={updateDraft}
+              onDiscardDrafts={discardDrafts}
+              onDispatch={dispatchAgents}
+              onReload={reloadDocsUi}
+            />
           ) : null}
         </div>
 

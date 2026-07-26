@@ -19,11 +19,7 @@ export type AgentCaptureMode =
   | "cli-text"
   | "artifact-import";
 
-export type TraceCompleteness =
-  | "full-observed"
-  | "partial-observed"
-  | "final-only"
-  | "capture-failed";
+export type TraceCompleteness = "full-observed" | "partial-observed" | "final-only" | "capture-failed";
 
 export type CanonicalAgentTraceEventKind =
   | "session.start"
@@ -51,14 +47,7 @@ export type CanonicalAgentTraceEventKind =
   | "capture.error"
   | "artifact.created";
 
-export type CanonicalAgentTraceEventPhase =
-  | "agent"
-  | "turn"
-  | "message"
-  | "tool"
-  | "session"
-  | "capture"
-  | "artifact";
+export type CanonicalAgentTraceEventPhase = "agent" | "turn" | "message" | "tool" | "session" | "capture" | "artifact";
 
 export type CanonicalAgentTraceEvent = {
   traceVersion: "1";

@@ -90,10 +90,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   postCard: (card, text = "") => {
     set((state) => ({
-      messages: [
-        ...state.messages,
-        { id: nextId(), role: "assistant", text, card },
-      ],
+      messages: [...state.messages, { id: nextId(), role: "assistant", text, card }],
     }));
     scrollToBottom(false);
   },
@@ -150,10 +147,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           started = true;
           set((state) => ({
             pending: false,
-            messages: [
-              ...state.messages,
-              { id: assistantId, role: "assistant", text: acc },
-            ],
+            messages: [...state.messages, { id: assistantId, role: "assistant", text: acc }],
           }));
         } else {
           set((state) => ({
@@ -166,10 +160,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       if (!started) {
         set((state) => ({
-          messages: [
-            ...state.messages,
-            { id: assistantId, role: "assistant", text: "(no response)" },
-          ],
+          messages: [...state.messages, { id: assistantId, role: "assistant", text: "(no response)" }],
         }));
       }
     } catch (error) {
@@ -177,9 +168,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (error instanceof DOMException && error.name === "AbortError") {
         return;
       }
-      const offline =
-        (typeof navigator !== "undefined" && navigator.onLine === false) ||
-        error instanceof TypeError;
+      const offline = (typeof navigator !== "undefined" && navigator.onLine === false) || error instanceof TypeError;
       const message = offline
         ? "You appear to be offline, chat needs a connection."
         : error instanceof Error
@@ -188,14 +177,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((state) => ({
         messages: started
           ? state.messages.map((entry) =>
-              entry.id === assistantId
-                ? { ...entry, text: `${acc}\n\n⚠️ ${message}` }
-                : entry,
+              entry.id === assistantId ? { ...entry, text: `${acc}\n\n⚠️ ${message}` } : entry,
             )
-          : [
-              ...state.messages,
-              { id: assistantId, role: "assistant", text: `⚠️ ${message}` },
-            ],
+          : [...state.messages, { id: assistantId, role: "assistant", text: `⚠️ ${message}` }],
       }));
     } finally {
       // Only the active stream clears the flags; a newer send owns them now.

@@ -2,15 +2,7 @@ import dagre from "dagre";
 import type { Edge, Node } from "@xyflow/react";
 
 /** The Smithers node kinds — each maps to a colored accent in the graph. */
-export type WorkflowKind =
-  | "agent"
-  | "compute"
-  | "approval"
-  | "merge"
-  | "loop"
-  | "branch"
-  | "signal"
-  | "human";
+export type WorkflowKind = "agent" | "compute" | "approval" | "merge" | "loop" | "branch" | "signal" | "human";
 
 export type WorkflowNodeSpec = {
   id: string;

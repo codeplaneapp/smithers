@@ -8,7 +8,10 @@ import type {
   RankedStory,
 } from "./schemas";
 
-export function mergeAssessments(batches: EditorialAssessment[][], srcIdMap: Record<string, string>): MergeAssessmentsOutput {
+export function mergeAssessments(
+  batches: EditorialAssessment[][],
+  srcIdMap: Record<string, string>,
+): MergeAssessmentsOutput {
   const validIds = new Set(Object.keys(srcIdMap));
   const flat = batches.flat();
   const assessments: EditorialAssessment[] = [];
@@ -42,13 +45,22 @@ function scoreOf(assessment: EditorialAssessment, weights: RunConfig["weights"])
 
 const INFORMAL_KINDS = new Set(["reddit", "bluesky", "hn"]);
 
-export function rankAndSelect(clusters: Cluster[], assessments: EditorialAssessment[], config: RunConfig): RankAndSelectOutput {
+export function rankAndSelect(
+  clusters: Cluster[],
+  assessments: EditorialAssessment[],
+  config: RunConfig,
+): RankAndSelectOutput {
   const clusterById = new Map(clusters.map((cluster) => [cluster.srcId, cluster]));
   const ranked: RankedStory[] = assessments
     .map((assessment) => {
       const cluster = clusterById.get(assessment.srcId);
       if (!cluster) return null;
-      return { ...assessment, title: cluster.title, excerpt: cluster.excerpt, score: scoreOf(assessment, config.weights) };
+      return {
+        ...assessment,
+        title: cluster.title,
+        excerpt: cluster.excerpt,
+        score: scoreOf(assessment, config.weights),
+      };
     })
     .filter((row): row is RankedStory => row !== null)
     .sort((a, b) => b.score - a.score);

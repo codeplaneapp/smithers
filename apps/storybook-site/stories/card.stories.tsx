@@ -27,8 +27,7 @@ export const Anatomy: Story = {
         <CardDescription>v0.30.0 publish pipeline</CardDescription>
       </CardHeader>
       <CardContent>
-        Fourteen of sixteen nodes complete. The publish gate is waiting on a
-        green faults suite.
+        Fourteen of sixteen nodes complete. The publish gate is waiting on a green faults suite.
       </CardContent>
       <CardFooter>
         <Button size="sm">Open run</Button>
@@ -53,7 +52,11 @@ export const SectionHeaders: Story = {
       <SectionHeader
         eyebrow="Workspace"
         title="Active runs"
-        actions={<Button size="sm" variant="outline">Refresh</Button>}
+        actions={
+          <Button size="sm" variant="outline">
+            Refresh
+          </Button>
+        }
       />
       <SectionHeader title="Recent approvals" />
     </div>

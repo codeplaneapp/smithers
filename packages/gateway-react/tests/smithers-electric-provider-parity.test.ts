@@ -125,17 +125,20 @@ async function bootRealElectricGateway(fixture: ElectricFixture) {
       },
     },
   });
-  gateway.register("value", api.smithers((ctx: any) =>
-    React.createElement(
-      api.Workflow,
-      { name: "collections-value" },
+  gateway.register(
+    "value",
+    api.smithers((ctx: any) =>
       React.createElement(
-        api.Task,
-        { id: "task1", output: api.outputs.result },
-        { value: Number(ctx.input.value ?? 1) },
+        api.Workflow,
+        { name: "collections-value" },
+        React.createElement(
+          api.Task,
+          { id: "task1", output: api.outputs.result },
+          { value: Number(ctx.input.value ?? 1) },
+        ),
       ),
     ),
-  ));
+  );
   gateway.register("approval", createApprovalWorkflow(api));
   const gatewayServer = await gateway.listen({ port: 0, host: "127.0.0.1" });
   cleanups.push(() => gateway.close());
@@ -162,97 +165,112 @@ async function bootRealElectricGateway(fixture: ElectricFixture) {
   };
 }
 
-test.skipIf(!runElectricSuite)("Smithers Electric provider parity skipped because SMITHERS_TEST_ELECTRIC is not set", () => {
-  expect(runElectricSuite).toBe(true);
-});
+test.skipIf(!runElectricSuite)(
+  "Smithers Electric provider parity skipped because SMITHERS_TEST_ELECTRIC is not set",
+  () => {
+    expect(runElectricSuite).toBe(true);
+  },
+);
 
-test.skipIf(!runElectricSuite || !dockerAvailable)("Smithers Electric provider parity skipped because Docker Electric fixture is unavailable", () => {
-  expect(dockerAvailable).toBe(true);
-});
+test.skipIf(!runElectricSuite || !dockerAvailable)(
+  "Smithers Electric provider parity skipped because Docker Electric fixture is unavailable",
+  () => {
+    expect(dockerAvailable).toBe(true);
+  },
+);
 
-describe.skipIf(!runElectricSuite || !dockerAvailable)("Smithers Electric provider parity over real Postgres + Electric + proxy", () => {
-  test("shared provider parity passes over Electric", async () => {
-    const fixture = await startElectricFixture();
-    cleanups.push(() => fixture.teardown());
-    const { apiBaseUrl, electricBaseUrl } = await bootRealElectricGateway(fixture);
-    await runProviderParitySuite({
-      kind: "multiplayer",
-      apiBaseUrl,
-      electricBaseUrl,
-      workspaceId: "workspace-electric-provider-parity-shared",
-      token: "operator-token",
-    });
-  }, 240_000);
-
-  test("M2 provider parity passes over Electric and txid matching drops optimism without flicker", async () => {
-    const fixture = await startElectricFixture();
-    cleanups.push(() => fixture.teardown());
-    const { apiBaseUrl, electricBaseUrl } = await bootRealElectricGateway(fixture);
-
-    const queryClient = new QueryClient();
-    const client = createSmithersDataClient({
-      mode: {
+describe.skipIf(!runElectricSuite || !dockerAvailable)(
+  "Smithers Electric provider parity over real Postgres + Electric + proxy",
+  () => {
+    test("shared provider parity passes over Electric", async () => {
+      const fixture = await startElectricFixture();
+      cleanups.push(() => fixture.teardown());
+      const { apiBaseUrl, electricBaseUrl } = await bootRealElectricGateway(fixture);
+      await runProviderParitySuite({
         kind: "multiplayer",
         apiBaseUrl,
         electricBaseUrl,
-        workspaceId: "workspace-electric-provider-parity",
+        workspaceId: "workspace-electric-provider-parity-shared",
         token: "operator-token",
-      },
-    });
-    const collections = await createSmithersCollections(client, queryClient);
-    cleanups.push(() => {
-      collections.close();
-      client.close();
-      queryClient.clear();
-    });
-
-    const crons = collections.crons();
-    await crons.preload();
-
-    const snapshots: Array<{ exists: boolean; synced?: boolean; pattern?: string }> = [];
-    const record = () => {
-      const row = crons.get("cron-electric-provider-parity") as
-        | (GatewayCronRow & { $synced?: boolean })
-        | undefined;
-      snapshots.push({ exists: Boolean(row), synced: row?.$synced, pattern: row?.pattern });
-    };
-    const timer = setInterval(record, 25);
-    try {
-      const insert = crons.insert(cronRow());
-      record();
-      expect(crons.get("cron-electric-provider-parity")?.pattern).toBe("* * * * *");
-      expect((crons.get("cron-electric-provider-parity") as GatewayCronRow & { $synced?: boolean }).$synced).toBe(false);
-      await insert.isPersisted.promise;
-      await waitFor(() =>
-        (crons.get("cron-electric-provider-parity") as GatewayCronRow & { $synced?: boolean } | undefined)?.$synced === true,
-      );
-      record();
-
-      const update = crons.update("cron-electric-provider-parity", (draft) => {
-        draft.pattern = "*/5 * * * *";
-        draft.enabled = false;
       });
-      expect((crons.get("cron-electric-provider-parity") as GatewayCronRow & { $synced?: boolean }).$synced).toBe(false);
-      await update.isPersisted.promise;
-      await waitFor(() => {
-        const row = crons.get("cron-electric-provider-parity") as GatewayCronRow & { $synced?: boolean } | undefined;
-        return row?.pattern === "*/5 * * * *" && row.enabled === false && row.$synced === true;
+    }, 240_000);
+
+    test("M2 provider parity passes over Electric and txid matching drops optimism without flicker", async () => {
+      const fixture = await startElectricFixture();
+      cleanups.push(() => fixture.teardown());
+      const { apiBaseUrl, electricBaseUrl } = await bootRealElectricGateway(fixture);
+
+      const queryClient = new QueryClient();
+      const client = createSmithersDataClient({
+        mode: {
+          kind: "multiplayer",
+          apiBaseUrl,
+          electricBaseUrl,
+          workspaceId: "workspace-electric-provider-parity",
+          token: "operator-token",
+        },
       });
-      record();
+      const collections = await createSmithersCollections(client, queryClient);
+      cleanups.push(() => {
+        collections.close();
+        client.close();
+        queryClient.clear();
+      });
 
-      const remove = crons.delete("cron-electric-provider-parity");
-      await remove.isPersisted.promise;
-      await waitFor(() => crons.has("cron-electric-provider-parity") === false);
-    } finally {
-      clearInterval(timer);
-    }
+      const crons = collections.crons();
+      await crons.preload();
 
-    const firstSynced = snapshots.findIndex((snapshot) => snapshot.exists && snapshot.synced === true);
-    const flickerAfterSynced = snapshots.slice(Math.max(0, firstSynced)).some((snapshot) =>
-      snapshot.exists && snapshot.pattern !== "* * * * *" && snapshot.pattern !== "*/5 * * * *",
-    );
-    expect(snapshots.some((snapshot) => snapshot.exists && snapshot.synced === false)).toBe(true);
-    expect(firstSynced).toBeGreaterThanOrEqual(0);
-    expect(flickerAfterSynced).toBe(false);
-  }, 240_000);
-});
+      const snapshots: Array<{ exists: boolean; synced?: boolean; pattern?: string }> = [];
+      const record = () => {
+        const row = crons.get("cron-electric-provider-parity") as (GatewayCronRow & { $synced?: boolean }) | undefined;
+        snapshots.push({ exists: Boolean(row), synced: row?.$synced, pattern: row?.pattern });
+      };
+      const timer = setInterval(record, 25);
+      try {
+        const insert = crons.insert(cronRow());
+        record();
+        expect(crons.get("cron-electric-provider-parity")?.pattern).toBe("* * * * *");
+        expect((crons.get("cron-electric-provider-parity") as GatewayCronRow & { $synced?: boolean }).$synced).toBe(
+          false,
+        );
+        await insert.isPersisted.promise;
+        await waitFor(
+          () =>
+            (crons.get("cron-electric-provider-parity") as (GatewayCronRow & { $synced?: boolean }) | undefined)
+              ?.$synced === true,
+        );
+        record();
+
+        const update = crons.update("cron-electric-provider-parity", (draft) => {
+          draft.pattern = "*/5 * * * *";
+          draft.enabled = false;
+        });
+        expect((crons.get("cron-electric-provider-parity") as GatewayCronRow & { $synced?: boolean }).$synced).toBe(
+          false,
+        );
+        await update.isPersisted.promise;
+        await waitFor(() => {
+          const row = crons.get("cron-electric-provider-parity") as
+            | (GatewayCronRow & { $synced?: boolean })
+            | undefined;
+          return row?.pattern === "*/5 * * * *" && row.enabled === false && row.$synced === true;
+        });
+        record();
+
+        const remove = crons.delete("cron-electric-provider-parity");
+        await remove.isPersisted.promise;
+        await waitFor(() => crons.has("cron-electric-provider-parity") === false);
+      } finally {
+        clearInterval(timer);
+      }
+
+      const firstSynced = snapshots.findIndex((snapshot) => snapshot.exists && snapshot.synced === true);
+      const flickerAfterSynced = snapshots
+        .slice(Math.max(0, firstSynced))
+        .some((snapshot) => snapshot.exists && snapshot.pattern !== "* * * * *" && snapshot.pattern !== "*/5 * * * *");
+      expect(snapshots.some((snapshot) => snapshot.exists && snapshot.synced === false)).toBe(true);
+      expect(firstSynced).toBeGreaterThanOrEqual(0);
+      expect(flickerAfterSynced).toBe(false);
+    }, 240_000);
+  },
+);

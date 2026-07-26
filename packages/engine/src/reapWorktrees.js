@@ -24,16 +24,16 @@ export const TERMINAL_RUN_STATUSES = new Set(["finished", "failed", "cancelled",
  * @returns {Promise<number>}
  */
 function directorySizeBytes(path) {
-    return new Promise((res) => {
-        const child = spawn("du", ["-sk", path], { stdio: ["ignore", "pipe", "ignore"] });
-        let stdout = "";
-        child.stdout?.on("data", (chunk) => (stdout += chunk.toString()));
-        child.on("error", () => res(0));
-        child.on("close", () => {
-            const kb = Number.parseInt(stdout.trim().split(/\s+/)[0] ?? "", 10);
-            res(Number.isFinite(kb) ? kb * 1024 : 0);
-        });
+  return new Promise((res) => {
+    const child = spawn("du", ["-sk", path], { stdio: ["ignore", "pipe", "ignore"] });
+    let stdout = "";
+    child.stdout?.on("data", (chunk) => (stdout += chunk.toString()));
+    child.on("error", () => res(0));
+    child.on("close", () => {
+      const kb = Number.parseInt(stdout.trim().split(/\s+/)[0] ?? "", 10);
+      res(Number.isFinite(kb) ? kb * 1024 : 0);
     });
+  });
 }
 
 /**
@@ -42,8 +42,8 @@ function directorySizeBytes(path) {
  * @returns {Promise<{ code: number; stdout: string }>}
  */
 async function jj(args, cwd) {
-    const res = await Effect.runPromise(runJj([...args], { cwd }).pipe(Effect.provide(getPlatformLayer())));
-    return { code: res.code, stdout: res.stdout };
+  const res = await Effect.runPromise(runJj([...args], { cwd }).pipe(Effect.provide(getPlatformLayer())));
+  return { code: res.code, stdout: res.stdout };
 }
 
 /**
@@ -60,22 +60,20 @@ async function jj(args, cwd) {
  * @returns {Promise<boolean>}
  */
 async function patchesAreUpstream(gitDir, upstreamRefs, commits) {
-    for (const commit of commits) {
-        let landed = false;
-        for (const ref of upstreamRefs) {
-            const res = await runGit(gitDir, ["cherry", ref, commit]);
-            if (res.code !== 0)
-                continue;
-            const line = res.stdout.split("\n").find((entry) => entry.trim().endsWith(commit));
-            if (line?.trimStart().startsWith("-")) {
-                landed = true;
-                break;
-            }
-        }
-        if (!landed)
-            return false;
+  for (const commit of commits) {
+    let landed = false;
+    for (const ref of upstreamRefs) {
+      const res = await runGit(gitDir, ["cherry", ref, commit]);
+      if (res.code !== 0) continue;
+      const line = res.stdout.split("\n").find((entry) => entry.trim().endsWith(commit));
+      if (line?.trimStart().startsWith("-")) {
+        landed = true;
+        break;
+      }
     }
-    return true;
+    if (!landed) return false;
+  }
+  return true;
 }
 
 /**
@@ -94,22 +92,23 @@ async function patchesAreUpstream(gitDir, upstreamRefs, commits) {
  * @returns {Promise<boolean>}
  */
 async function jjWorkspaceHasUnsavedWork(worktreePath, baseBranch, rootDir) {
-    const base = baseBranch ?? "main";
-    const revsets = [
-        `::@ & ~::(${base} | ${base}@origin) & ~empty()`,
-        `::@ & ~::${base} & ~empty()`,
-        "::@ & ~::trunk() & ~empty()",
-    ];
-    for (const revset of revsets) {
-        const res = await jj(["log", "--no-graph", "-r", revset, "-T", 'commit_id ++ "\\n"'], worktreePath);
-        if (res.code !== 0)
-            continue;
-        const commits = res.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
-        if (commits.length === 0)
-            return false;
-        return !(await patchesAreUpstream(rootDir, [`origin/${base}`, base], commits));
-    }
-    return true;
+  const base = baseBranch ?? "main";
+  const revsets = [
+    `::@ & ~::(${base} | ${base}@origin) & ~empty()`,
+    `::@ & ~::${base} & ~empty()`,
+    "::@ & ~::trunk() & ~empty()",
+  ];
+  for (const revset of revsets) {
+    const res = await jj(["log", "--no-graph", "-r", revset, "-T", 'commit_id ++ "\\n"'], worktreePath);
+    if (res.code !== 0) continue;
+    const commits = res.stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (commits.length === 0) return false;
+    return !(await patchesAreUpstream(rootDir, [`origin/${base}`, base], commits));
+  }
+  return true;
 }
 
 /**
@@ -122,23 +121,18 @@ async function jjWorkspaceHasUnsavedWork(worktreePath, baseBranch, rootDir) {
  * @returns {Promise<boolean>}
  */
 async function gitWorktreeHasUnsavedWork(worktreePath, rootDir) {
-    const status = await runGit(worktreePath, ["status", "--porcelain"]);
-    if (status.code !== 0)
-        return true;
-    if (status.stdout.trim() !== "")
-        return true;
-    const head = await runGit(worktreePath, ["rev-parse", "HEAD"]);
-    if (head.code !== 0)
-        return true;
-    const commit = head.stdout.trim();
-    const onRemote = await runGit(worktreePath, ["branch", "-r", "--contains", commit]);
-    if (onRemote.code === 0 && onRemote.stdout.trim() !== "")
-        return false;
-    const rootHead = await runGit(rootDir, ["rev-parse", "HEAD"]);
-    if (rootHead.code !== 0)
-        return true;
-    const merged = await runGit(rootDir, ["merge-base", "--is-ancestor", commit, rootHead.stdout.trim()]);
-    return merged.code !== 0;
+  const status = await runGit(worktreePath, ["status", "--porcelain"]);
+  if (status.code !== 0) return true;
+  if (status.stdout.trim() !== "") return true;
+  const head = await runGit(worktreePath, ["rev-parse", "HEAD"]);
+  if (head.code !== 0) return true;
+  const commit = head.stdout.trim();
+  const onRemote = await runGit(worktreePath, ["branch", "-r", "--contains", commit]);
+  if (onRemote.code === 0 && onRemote.stdout.trim() !== "") return false;
+  const rootHead = await runGit(rootDir, ["rev-parse", "HEAD"]);
+  if (rootHead.code !== 0) return true;
+  const merged = await runGit(rootDir, ["merge-base", "--is-ancestor", commit, rootHead.stdout.trim()]);
+  return merged.code !== 0;
 }
 
 /**
@@ -147,9 +141,9 @@ async function gitWorktreeHasUnsavedWork(worktreePath, rootDir) {
  * @returns {Promise<boolean>}
  */
 function hasUnsavedWork(worktree, rootDir) {
-    return worktree.owner.vcsType === "jj"
-        ? jjWorkspaceHasUnsavedWork(worktree.path, worktree.owner.baseBranch, rootDir)
-        : gitWorktreeHasUnsavedWork(worktree.path, rootDir);
+  return worktree.owner.vcsType === "jj"
+    ? jjWorkspaceHasUnsavedWork(worktree.path, worktree.owner.baseBranch, rootDir)
+    : gitWorktreeHasUnsavedWork(worktree.path, rootDir);
 }
 
 /**
@@ -158,10 +152,10 @@ function hasUnsavedWork(worktree, rootDir) {
  * @returns {Promise<void>}
  */
 async function removeWorktree(worktree, rootDir) {
-    if (worktree.owner.vcsType === "jj") {
-        await jj(["workspace", "forget", worktree.owner.workspaceName ?? basename(worktree.path)], rootDir);
-    }
-    rmSync(worktree.path, { recursive: true, force: true });
+  if (worktree.owner.vcsType === "jj") {
+    await jj(["workspace", "forget", worktree.owner.workspaceName ?? basename(worktree.path)], rootDir);
+  }
+  rmSync(worktree.path, { recursive: true, force: true });
 }
 
 /**
@@ -187,60 +181,59 @@ async function removeWorktree(worktree, rootDir) {
  * @returns {Promise<ReapWorktreesResult>}
  */
 export async function reapWorktrees(options) {
-    const { rootDir, getRunStatus, runId, force = false, dryRun = false, olderThanMs, nowMs = Date.now() } = options;
-    const root = resolve(rootDir);
-    const worktrees = await listSmithersWorktrees(root);
-    /** @type {ReapedWorktree[]} */
-    const removed = [];
-    /** @type {SkippedWorktree[]} */
-    const skipped = [];
-    /** @type {Map<string, string | null>} */
-    const statuses = new Map();
-    let bytesFreed = 0;
+  const { rootDir, getRunStatus, runId, force = false, dryRun = false, olderThanMs, nowMs = Date.now() } = options;
+  const root = resolve(rootDir);
+  const worktrees = await listSmithersWorktrees(root);
+  /** @type {ReapedWorktree[]} */
+  const removed = [];
+  /** @type {SkippedWorktree[]} */
+  const skipped = [];
+  /** @type {Map<string, string | null>} */
+  const statuses = new Map();
+  let bytesFreed = 0;
 
-    for (const worktree of worktrees) {
-        const owner = worktree.owner;
-        if (runId && owner.runId !== runId)
-            continue;
-        const entry = { path: worktree.path, runId: owner.runId };
-        if (worktree.path === root || root.startsWith(`${worktree.path}${sep}`)) {
-            skipped.push({ ...entry, reason: "is-root" });
-            continue;
-        }
-        if (worktree.locked) {
-            skipped.push({ ...entry, reason: "locked" });
-            continue;
-        }
-        if (!statuses.has(owner.runId)) {
-            statuses.set(owner.runId, (await getRunStatus(owner.runId)) ?? null);
-        }
-        const status = statuses.get(owner.runId);
-        if (!status) {
-            skipped.push({ ...entry, reason: "unknown-run" });
-            continue;
-        }
-        if (!TERMINAL_RUN_STATUSES.has(status)) {
-            skipped.push({ ...entry, reason: `run-${status}` });
-            continue;
-        }
-        if (olderThanMs !== undefined && nowMs - owner.updatedAtMs < olderThanMs) {
-            skipped.push({ ...entry, reason: "too-recent" });
-            continue;
-        }
-        if (worktree.exists && !force && (await hasUnsavedWork(worktree, root))) {
-            skipped.push({ ...entry, reason: "unsaved-work" });
-            continue;
-        }
-        const bytes = worktree.exists ? await directorySizeBytes(worktree.path) : 0;
-        if (!dryRun && worktree.exists) {
-            await removeWorktree(worktree, root);
-        }
-        bytesFreed += bytes;
-        removed.push({ ...entry, bytes });
+  for (const worktree of worktrees) {
+    const owner = worktree.owner;
+    if (runId && owner.runId !== runId) continue;
+    const entry = { path: worktree.path, runId: owner.runId };
+    if (worktree.path === root || root.startsWith(`${worktree.path}${sep}`)) {
+      skipped.push({ ...entry, reason: "is-root" });
+      continue;
     }
+    if (worktree.locked) {
+      skipped.push({ ...entry, reason: "locked" });
+      continue;
+    }
+    if (!statuses.has(owner.runId)) {
+      statuses.set(owner.runId, (await getRunStatus(owner.runId)) ?? null);
+    }
+    const status = statuses.get(owner.runId);
+    if (!status) {
+      skipped.push({ ...entry, reason: "unknown-run" });
+      continue;
+    }
+    if (!TERMINAL_RUN_STATUSES.has(status)) {
+      skipped.push({ ...entry, reason: `run-${status}` });
+      continue;
+    }
+    if (olderThanMs !== undefined && nowMs - owner.updatedAtMs < olderThanMs) {
+      skipped.push({ ...entry, reason: "too-recent" });
+      continue;
+    }
+    if (worktree.exists && !force && (await hasUnsavedWork(worktree, root))) {
+      skipped.push({ ...entry, reason: "unsaved-work" });
+      continue;
+    }
+    const bytes = worktree.exists ? await directorySizeBytes(worktree.path) : 0;
+    if (!dryRun && worktree.exists) {
+      await removeWorktree(worktree, root);
+    }
+    bytesFreed += bytes;
+    removed.push({ ...entry, bytes });
+  }
 
-    if (!dryRun && removed.length > 0) {
-        await runGit(root, ["worktree", "prune"]);
-    }
-    return { removed, skipped, bytesFreed, dryRun };
+  if (!dryRun && removed.length > 0) {
+    await runGit(root, ["worktree", "prune"]);
+  }
+  return { removed, skipped, bytesFreed, dryRun };
 }

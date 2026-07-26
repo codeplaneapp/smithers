@@ -36,11 +36,7 @@ const PAD_X = 96;
 const CONTENT_W = W - PAD_X * 2;
 
 function esc(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function stripDecoration(text: string): string {
@@ -163,9 +159,7 @@ function textBlock(params: {
   ]
     .filter(Boolean)
     .join(" ");
-  const tspans = lines
-    .map((line, i) => `<tspan x="${x}" y="${y + i * lineHeight}">${esc(line)}</tspan>`)
-    .join("");
+  const tspans = lines.map((line, i) => `<tspan x="${x}" y="${y + i * lineHeight}">${esc(line)}</tspan>`).join("");
   return `<text ${attrs}>${tspans}</text>`;
 }
 
@@ -596,9 +590,7 @@ export function renderMediaAssets(params: {
   files.push(rasterizerPath);
 
   const captureNote =
-    captures.length > 0
-      ? ` ${captures.length} tweet(s) want a real terminal capture (see media-manifest.json).`
-      : "";
+    captures.length > 0 ? ` ${captures.length} tweet(s) want a real terminal capture (see media-manifest.json).` : "";
 
   return {
     generated: true,

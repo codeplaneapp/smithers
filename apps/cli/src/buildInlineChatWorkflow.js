@@ -13,9 +13,9 @@ export const INLINE_CHAT_ENGINES = /** @type {const} */ (["claude-code", "codex"
 
 /** Default bootstrap prompt for `smithers chat create` sessions. */
 export const CHAT_CREATE_PROMPT = [
-    "Start an interactive chat session with the user and help them directly.",
-    "Stay in this conversation until the user is done.",
-    'When you are completely finished and want to hand control back to Smithers, return ONLY this raw JSON object with no prose, markdown, or code fence: {}.',
+  "Start an interactive chat session with the user and help them directly.",
+  "Stay in this conversation until the user is done.",
+  "When you are completely finished and want to hand control back to Smithers, return ONLY this raw JSON object with no prose, markdown, or code fence: {}.",
 ].join("\n\n");
 
 /**
@@ -23,48 +23,48 @@ export const CHAT_CREATE_PROMPT = [
  * @param {string} cwd
  */
 async function createChatAgent(engine, cwd) {
-    switch (engine) {
-        case "claude-code": {
-            const { ClaudeCodeAgent } = await import("@smithers-orchestrator/agents/ClaudeCodeAgent");
-            return new ClaudeCodeAgent({
-                cwd,
-                model: "claude-fable-5",
-            });
-        }
-        case "codex": {
-            const { CodexAgent } = await import("@smithers-orchestrator/agents/CodexAgent");
-            return new CodexAgent({
-                cwd,
-                model: "gpt-5.6-luna",
-                config: { model_reasoning_effort: "medium" },
-                skipGitRepoCheck: true,
-            });
-        }
-        case "antigravity": {
-            const { AntigravityAgent } = await import("@smithers-orchestrator/agents/AntigravityAgent");
-            return new AntigravityAgent({
-                cwd,
-            });
-        }
-        case "pi": {
-            const { PiAgent } = await import("@smithers-orchestrator/agents/PiAgent");
-            return new PiAgent({
-                cwd,
-            });
-        }
-        case "kimi": {
-            const { KimiAgent } = await import("@smithers-orchestrator/agents/KimiAgent");
-            return new KimiAgent({
-                cwd,
-            });
-        }
-        case "amp": {
-            const { AmpAgent } = await import("@smithers-orchestrator/agents/AmpAgent");
-            return new AmpAgent({
-                cwd,
-            });
-        }
+  switch (engine) {
+    case "claude-code": {
+      const { ClaudeCodeAgent } = await import("@smithers-orchestrator/agents/ClaudeCodeAgent");
+      return new ClaudeCodeAgent({
+        cwd,
+        model: "claude-fable-5",
+      });
     }
+    case "codex": {
+      const { CodexAgent } = await import("@smithers-orchestrator/agents/CodexAgent");
+      return new CodexAgent({
+        cwd,
+        model: "gpt-5.6-luna",
+        config: { model_reasoning_effort: "medium" },
+        skipGitRepoCheck: true,
+      });
+    }
+    case "antigravity": {
+      const { AntigravityAgent } = await import("@smithers-orchestrator/agents/AntigravityAgent");
+      return new AntigravityAgent({
+        cwd,
+      });
+    }
+    case "pi": {
+      const { PiAgent } = await import("@smithers-orchestrator/agents/PiAgent");
+      return new PiAgent({
+        cwd,
+      });
+    }
+    case "kimi": {
+      const { KimiAgent } = await import("@smithers-orchestrator/agents/KimiAgent");
+      return new KimiAgent({
+        cwd,
+      });
+    }
+    case "amp": {
+      const { AmpAgent } = await import("@smithers-orchestrator/agents/AmpAgent");
+      return new AmpAgent({
+        cwd,
+      });
+    }
+  }
 }
 
 /**
@@ -80,20 +80,30 @@ async function createChatAgent(engine, cwd) {
  * @returns {Promise<import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>>}
  */
 export async function buildInlineChatWorkflow({ engine, cwd, prompt, name = "chat" }) {
-    const [{ Workflow, Task }, { z: zod }] = await Promise.all([
-        import("@smithers-orchestrator/components"), import("zod"),
-    ]);
-    const agent = await createChatAgent(engine, cwd);
-    const chatSchema = zod.object({});
-    const store = await openInlineWorkflowStore(cwd, { [name]: chatSchema });
-    return {
-        ...store,
-        build: () => React.createElement(Workflow, { name }, React.createElement(Task, {
+  const [{ Workflow, Task }, { z: zod }] = await Promise.all([
+    import("@smithers-orchestrator/components"),
+    import("zod"),
+  ]);
+  const agent = await createChatAgent(engine, cwd);
+  const chatSchema = zod.object({});
+  const store = await openInlineWorkflowStore(cwd, { [name]: chatSchema });
+  return {
+    ...store,
+    build: () =>
+      React.createElement(
+        Workflow,
+        { name },
+        React.createElement(
+          Task,
+          {
             id: name,
             output: chatSchema,
             agent,
             hijack: true,
-        }, prompt)),
-        opts: {},
-    };
+          },
+          prompt,
+        ),
+      ),
+    opts: {},
+  };
 }

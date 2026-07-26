@@ -58,11 +58,7 @@ async function mount(gw: InMemoryGateway, element: ReactElement): Promise<Harnes
     root = createRoot(container);
   });
   const wrapped = () =>
-    createElement(
-      SmithersCollectionsProvider,
-      { mode: { kind: "local" as const, apiBaseUrl: gw.baseUrl } },
-      element,
-    );
+    createElement(SmithersCollectionsProvider, { mode: { kind: "local" as const, apiBaseUrl: gw.baseUrl } }, element);
   const harness: Harness = {
     container,
     render: async (next) => {
@@ -95,12 +91,7 @@ async function mount(gw: InMemoryGateway, element: ReactElement): Promise<Harnes
   return harness;
 }
 
-async function waitFor(
-  harness: Harness,
-  assertion: () => boolean,
-  label: string,
-  timeoutMs = 10_000,
-) {
+async function waitFor(harness: Harness, assertion: () => boolean, label: string, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (assertion()) return;
@@ -122,10 +113,7 @@ function click(el: Element | null) {
 // which makes React re-check and fire onChange.
 function setInputValue(el: HTMLInputElement, value: string) {
   el.dispatchEvent(new Event("focusin", { bubbles: true }));
-  const nativeSetter = Object.getOwnPropertyDescriptor(
-    Object.getPrototypeOf(el) as object,
-    "value",
-  )?.set;
+  const nativeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el) as object, "value")?.set;
   nativeSetter?.call(el, value);
   el.dispatchEvent(new Event("keyup", { bubbles: true }));
 }
@@ -352,10 +340,7 @@ describe("RunTree", () => {
 describe("NodeOutputView", () => {
   async function renderOutput(seedOutput: unknown, nodeId = "n1") {
     const gw = boot({ outputs: { [`run-a:${nodeId}`]: seedOutput } });
-    const harness = await mount(
-      gw,
-      createElement(NodeOutputView, { runId: "run-a", nodeId, iteration: 0 }),
-    );
+    const harness = await mount(gw, createElement(NodeOutputView, { runId: "run-a", nodeId, iteration: 0 }));
     await harness.flush(50);
     return harness;
   }
@@ -417,9 +402,7 @@ describe("NodeOutputView", () => {
     const output = harness.container.querySelector('[data-slot="agent-output"]');
     expect(output?.getAttribute("data-streaming")).toBe("true");
     expect(output?.querySelector('[data-slot="reasoning"]')).not.toBeNull();
-    expect(output?.querySelector('[data-slot="tool-call"]')?.getAttribute("data-state")).toBe(
-      "closed",
-    );
+    expect(output?.querySelector('[data-slot="tool-call"]')?.getAttribute("data-state")).toBe("closed");
     expect(output?.querySelector('[data-slot="message-response"]')).not.toBeNull();
   });
 
@@ -431,19 +414,14 @@ describe("NodeOutputView", () => {
       },
       outputDelayMs: { "run-a:n2": 150 },
     });
-    const harness = await mount(
-      gw,
-      createElement(NodeOutputView, { runId: "run-a", nodeId: "n1", iteration: 0 }),
-    );
+    const harness = await mount(gw, createElement(NodeOutputView, { runId: "run-a", nodeId: "n1", iteration: 0 }));
     await waitFor(
       harness,
       () => harness.container.textContent?.includes("first node answer") ?? false,
       "first node output to load",
     );
 
-    await harness.render(
-      createElement(NodeOutputView, { runId: "run-a", nodeId: "n2", iteration: 0 }),
-    );
+    await harness.render(createElement(NodeOutputView, { runId: "run-a", nodeId: "n2", iteration: 0 }));
     expect(harness.container.textContent).toContain("Loading…");
     expect(harness.container.textContent).not.toContain("first node answer");
     expect(harness.container.querySelector('[data-slot="agent-output"]')).toBeNull();
@@ -494,10 +472,7 @@ describe("NodeOutputView", () => {
 
   test("error state when the output endpoint fails", async () => {
     const gw = boot({ failPaths: new Set(["/v1/api/nodes/run-a/nboom/output"]) });
-    const harness = await mount(
-      gw,
-      createElement(NodeOutputView, { runId: "run-a", nodeId: "nboom" }),
-    );
+    const harness = await mount(gw, createElement(NodeOutputView, { runId: "run-a", nodeId: "nboom" }));
     await harness.flush(60);
     // GatewayRpcError surfaces the gateway's own error message.
     expect(harness.container.textContent).toContain("Forced failure");
@@ -614,10 +589,7 @@ describe("NodeOutputCard", () => {
 
   test("reads live output through the real gateway hook", async () => {
     const gw = boot({ outputs: { "run-a:n1": { status: "produced", row: { output: "live-value" } } } });
-    const harness = await mount(
-      gw,
-      createElement(NodeOutputCard, { runId: "run-a", nodeId: "n1", iteration: 0 }),
-    );
+    const harness = await mount(gw, createElement(NodeOutputCard, { runId: "run-a", nodeId: "n1", iteration: 0 }));
     await waitFor(
       harness,
       () => harness.container.textContent?.includes("live-value") ?? false,
@@ -634,19 +606,14 @@ describe("NodeOutputCard", () => {
       },
       outputDelayMs: { "run-a:n2": 150 },
     });
-    const harness = await mount(
-      gw,
-      createElement(NodeOutputCard, { runId: "run-a", nodeId: "n1", iteration: 0 }),
-    );
+    const harness = await mount(gw, createElement(NodeOutputCard, { runId: "run-a", nodeId: "n1", iteration: 0 }));
     await waitFor(
       harness,
       () => harness.container.textContent?.includes("first card answer") ?? false,
       "first card output to load",
     );
 
-    await harness.render(
-      createElement(NodeOutputCard, { runId: "run-a", nodeId: "n2", iteration: 0 }),
-    );
+    await harness.render(createElement(NodeOutputCard, { runId: "run-a", nodeId: "n2", iteration: 0 }));
     expect(harness.container.querySelector('[data-status="pending"]')).not.toBeNull();
     expect(harness.container.textContent).toContain("Loading…");
     expect(harness.container.textContent).not.toContain("first card answer");
@@ -688,11 +655,7 @@ describe("LaunchButton", () => {
     const errors: Error[] = [];
     const harness = await mount(
       gw,
-      createElement(
-        LaunchButton,
-        { workflow: "broken", onError: (e: Error) => errors.push(e) },
-        "Go Now",
-      ),
+      createElement(LaunchButton, { workflow: "broken", onError: (e: Error) => errors.push(e) }, "Go Now"),
     );
     await harness.flush(20);
     const button = harness.container.querySelector("button")!;
@@ -706,10 +669,7 @@ describe("LaunchButton", () => {
 describe("WorkflowPicker", () => {
   test("lists workflows and reports selection", async () => {
     const gw = boot({
-      workflows: [
-        { key: "implement", readableName: "Implement" },
-        { key: "review" },
-      ],
+      workflows: [{ key: "implement", readableName: "Implement" }, { key: "review" }],
     });
     const chosen: string[] = [];
     const harness = await mount(
@@ -754,9 +714,7 @@ describe("ApprovalPanel", () => {
     expect(harness.container.textContent).toContain("Ship it?");
     // Second approval has no title/summary -> default title path.
     expect(harness.container.textContent).toContain("Approval: gate2");
-    const approveButtons = [...harness.container.querySelectorAll("button")].filter(
-      (b) => b.textContent === "Approve",
-    );
+    const approveButtons = [...harness.container.querySelectorAll("button")].filter((b) => b.textContent === "Approve");
     expect(approveButtons[0]?.className).toContain("gw-approval-button-success");
     click(approveButtons[0]);
     await harness.flush(60);
@@ -772,7 +730,9 @@ describe("ApprovalPanel", () => {
     const denyButtons = [...harness.container.querySelectorAll("button")].filter((b) => b.textContent === "Deny");
     click(denyButtons[0]);
     await harness.flush(60);
-    expect(gw.approvalsSubmitted.some((row) => (row.decision as { approved?: boolean })?.approved === false)).toBe(true);
+    expect(gw.approvalsSubmitted.some((row) => (row.decision as { approved?: boolean })?.approved === false)).toBe(
+      true,
+    );
   });
 
   test("shows the empty state", async () => {
@@ -789,15 +749,11 @@ describe("ApprovalPanel", () => {
     });
     const harness = await mount(gw, createElement(ApprovalPanel, { pollMs: 0 }));
     await harness.flush(50);
-    const approveButtons = [...harness.container.querySelectorAll("button")].filter(
-      (b) => b.textContent === "Approve",
-    );
+    const approveButtons = [...harness.container.querySelectorAll("button")].filter((b) => b.textContent === "Approve");
     click(approveButtons[0]);
     await harness.flush(60);
     expect(harness.container.textContent).toMatch(/Forced failure|failed|error/i);
-    const stillApprove = [...harness.container.querySelectorAll("button")].filter(
-      (b) => b.textContent === "Approve",
-    );
+    const stillApprove = [...harness.container.querySelectorAll("button")].filter((b) => b.textContent === "Approve");
     expect((stillApprove[0] as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -807,14 +763,9 @@ describe("ApprovalPanel", () => {
       failApprovalSubmit: true,
     });
     const errors: Error[] = [];
-    const harness = await mount(
-      gw,
-      createElement(ApprovalPanel, { pollMs: 0, onError: (e: Error) => errors.push(e) }),
-    );
+    const harness = await mount(gw, createElement(ApprovalPanel, { pollMs: 0, onError: (e: Error) => errors.push(e) }));
     await harness.flush(50);
-    const approveButtons = [...harness.container.querySelectorAll("button")].filter(
-      (b) => b.textContent === "Approve",
-    );
+    const approveButtons = [...harness.container.querySelectorAll("button")].filter((b) => b.textContent === "Approve");
     click(approveButtons[0]);
     await harness.flush(60);
     expect(errors.length).toBe(1);
@@ -835,10 +786,7 @@ describe("RunEventLog", () => {
         ],
       },
     });
-    const harness = await mount(
-      gw,
-      createElement(RunEventLog, { runId: "run-a", maxEvents: 100, follow: true }),
-    );
+    const harness = await mount(gw, createElement(RunEventLog, { runId: "run-a", maxEvents: 100, follow: true }));
     await harness.flush(60);
     // Structured rows (a kind badge + zero-padded seq), not raw JSON lines. The
     // RunEventLog opts into heartbeat delivery, so all 5 frames remain.
@@ -850,9 +798,7 @@ describe("RunEventLog", () => {
     const toggle = rows[0]!.querySelector(".gw-event-row-toggle") as HTMLButtonElement;
     click(toggle);
     await harness.flush();
-    expect(rows[0]!.querySelector('[data-slot="event-json"]')?.textContent).toContain(
-      "a string payload",
-    );
+    expect(rows[0]!.querySelector('[data-slot="event-json"]')?.textContent).toContain("a string payload");
   });
 
   test("renders the select-a-run prompt with no runId", async () => {
@@ -894,9 +840,7 @@ describe("RunEventLog", () => {
     rows = harness.container.querySelectorAll('[data-slot="event-row"]');
     expect(rows.length).toBe(5);
     expect(
-      [...harness.container.querySelectorAll("button")].some((b) =>
-        b.textContent?.includes("Coalesce heartbeats"),
-      ),
+      [...harness.container.querySelectorAll("button")].some((b) => b.textContent?.includes("Coalesce heartbeats")),
     ).toBe(true);
   });
 
@@ -924,9 +868,7 @@ describe("RunEventLog", () => {
   test("selects a node when a node-bearing row is clicked and highlights the active node", async () => {
     const gw = boot({
       events: {
-        "run-a": [
-          { runId: "run-a", seq: 1, event: "NodeStarted", payload: { type: "NodeStarted", nodeId: "plan" } },
-        ],
+        "run-a": [{ runId: "run-a", seq: 1, event: "NodeStarted", payload: { type: "NodeStarted", nodeId: "plan" } }],
       },
     });
     const selected: string[] = [];
@@ -990,10 +932,7 @@ describe("RunEventLog", () => {
     const gw = boot({ events: { "run-a": seed } });
     const scrollSpy = spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
     try {
-      const harness = await mount(
-        gw,
-        createElement(RunEventLog, { runId: "run-a", maxEvents: 5, follow: true }),
-      );
+      const harness = await mount(gw, createElement(RunEventLog, { runId: "run-a", maxEvents: 5, follow: true }));
       await harness.flush(60);
       const callsBeforePush = scrollSpy.mock.calls.length;
       expect(callsBeforePush).toBeGreaterThan(0);
@@ -1054,9 +993,7 @@ describe("SimpleWorkflowDashboard", () => {
     expect((launch?.input as { prompt?: string })?.prompt).toBe("do the thing");
 
     // Select the second run row.
-    const runRow = [...harness.container.querySelectorAll("button")].find((b) =>
-      b.textContent?.includes("run-bbbb"),
-    );
+    const runRow = [...harness.container.querySelectorAll("button")].find((b) => b.textContent?.includes("run-bbbb"));
     if (runRow) {
       click(runRow);
       await harness.flush(40);
@@ -1071,10 +1008,7 @@ describe("SimpleWorkflowDashboard", () => {
       runsDelayMs: 250,
       runs: [{ runId: "run-old00001", workflowKey: "implement", status: "running", createdAtMs: Date.now() }],
     });
-    const harness = await mount(
-      gw,
-      createElement(SimpleWorkflowDashboard, { workflow: "implement", testId: "dash" }),
-    );
+    const harness = await mount(gw, createElement(SimpleWorkflowDashboard, { workflow: "implement", testId: "dash" }));
     const rowFor = (runId: string) =>
       [...harness.container.querySelectorAll("button.workflow-run-row")].find((row) =>
         row.textContent?.includes(runId.slice(0, 8)),

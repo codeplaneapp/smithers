@@ -12,25 +12,39 @@ export const ticketSchema = z.object({
   spec: z.string(),
   e2eVerification: z.string(),
   acceptanceCriteria: z.array(z.string()).default([]),
-  dependsOn: z.array(z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "dependsOn must contain kebab-case slugs")).default([]),
+  dependsOn: z
+    .array(z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "dependsOn must contain kebab-case slugs"))
+    .default([]),
 });
 
-export const goalsSchema = z.looseObject({
-  summary: z.string(),
-  tickets: z.array(ticketSchema).default([]),
-}).superRefine((goals, issue) => {
-  const slugs = new Set<string>();
-  for (const ticket of goals.tickets) {
-    if (slugs.has(ticket.slug)) issue.addIssue({ code: "custom", path: ["tickets"], message: `duplicate ticket slug: ${ticket.slug}` });
-    slugs.add(ticket.slug);
-    for (const dependency of ticket.dependsOn) {
-      if (!slugs.has(dependency)) issue.addIssue({ code: "custom", path: ["tickets"], message: `dependsOn must reference an earlier ticket: ${dependency}` });
+export const goalsSchema = z
+  .looseObject({
+    summary: z.string(),
+    tickets: z.array(ticketSchema).default([]),
+  })
+  .superRefine((goals, issue) => {
+    const slugs = new Set<string>();
+    for (const ticket of goals.tickets) {
+      if (slugs.has(ticket.slug))
+        issue.addIssue({ code: "custom", path: ["tickets"], message: `duplicate ticket slug: ${ticket.slug}` });
+      slugs.add(ticket.slug);
+      for (const dependency of ticket.dependsOn) {
+        if (!slugs.has(dependency))
+          issue.addIssue({
+            code: "custom",
+            path: ["tickets"],
+            message: `dependsOn must reference an earlier ticket: ${dependency}`,
+          });
+      }
+      if (new Set(ticket.dependsOn).size !== ticket.dependsOn.length) {
+        issue.addIssue({
+          code: "custom",
+          path: ["tickets"],
+          message: `dependsOn entries must be unique: ${ticket.slug}`,
+        });
+      }
     }
-    if (new Set(ticket.dependsOn).size !== ticket.dependsOn.length) {
-      issue.addIssue({ code: "custom", path: ["tickets"], message: `dependsOn entries must be unique: ${ticket.slug}` });
-    }
-  }
-});
+  });
 
 export const writtenSchema = z.object({
   dir: z.string(),

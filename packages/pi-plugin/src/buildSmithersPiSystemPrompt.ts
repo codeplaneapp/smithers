@@ -25,9 +25,7 @@ function buildTypicalWorkflowGuidance(contract: SmithersAgentContract) {
   const listArtifacts = toolRef(contract, "list_artifacts");
   const getTranscript = toolRef(contract, "get_chat_transcript");
   const revertAttempt = toolRef(contract, "revert_attempt");
-  const steps = [
-    "**Write a workflow** -> Use your Smithers knowledge to help the user write workflow files.",
-  ];
+  const steps = ["**Write a workflow** -> Use your Smithers knowledge to help the user write workflow files."];
 
   if (discover && run) {
     steps.push(`**Run it** -> Use ${discover} to find workflow IDs, then ${run} to launch the workflow.`);
@@ -53,9 +51,7 @@ function buildTypicalWorkflowGuidance(contract: SmithersAgentContract) {
   }
 
   if (revertAttempt) {
-    steps.push(
-      `**Revert** -> Use ${revertAttempt} only when the user explicitly asks to roll back or time travel.`,
-    );
+    steps.push(`**Revert** -> Use ${revertAttempt} only when the user explicitly asks to roll back or time travel.`);
   }
 
   return steps.map((step, index) => `${index + 1}. ${step}`);

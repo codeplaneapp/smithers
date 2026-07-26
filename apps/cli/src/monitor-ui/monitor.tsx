@@ -37,14 +37,7 @@ import {
   TableHeader,
   TableRow,
 } from "smithers-orchestrator/ui";
-import {
-  Chip,
-  MonitorToolbar,
-  RunLifecycleControls,
-  RunRailRow,
-  RunsPagination,
-  ToneDot,
-} from "./monitorShell.tsx";
+import { Chip, MonitorToolbar, RunLifecycleControls, RunRailRow, RunsPagination, ToneDot } from "./monitorShell.tsx";
 import { processPatch, type CodeViewItem } from "@pierre/diffs";
 import { CodeView } from "@pierre/diffs/react";
 import type { Terminal as XTerminal, IDisposable } from "@xterm/xterm";
@@ -196,7 +189,11 @@ function subscribeClock(callback: () => void): () => void {
 }
 
 function useNowMs(): number {
-  return useSyncExternalStore(subscribeClock, () => clockNowMs, () => clockNowMs);
+  return useSyncExternalStore(
+    subscribeClock,
+    () => clockNowMs,
+    () => clockNowMs,
+  );
 }
 
 function LiveElapsed({ startMs }: { startMs: number | undefined }) {
@@ -220,7 +217,11 @@ function Countdown({ untilMs }: { untilMs: number }) {
   if (remaining === 0) return <>due now</>;
   const mins = Math.floor(remaining / 60_000);
   const secs = Math.floor((remaining % 60_000) / 1_000);
-  return <>in {mins}m {String(secs).padStart(2, "0")}s</>;
+  return (
+    <>
+      in {mins}m {String(secs).padStart(2, "0")}s
+    </>
+  );
 }
 
 function ApprovalWait({ requestedAtMs }: { requestedAtMs: number | undefined }) {
@@ -313,9 +314,12 @@ function ConnectionBadge() {
 function CopyableRunId({ runId }: { runId: string }) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
   return (
     <button
       type="button"
@@ -366,7 +370,12 @@ export function createMonitorKeydownHandler(
     if (document.querySelector(".mon-modal-backdrop")) return;
     const state = keyState.current;
     const target = event.target instanceof HTMLElement ? event.target : null;
-    const typing = target !== null && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable);
+    const typing =
+      target !== null &&
+      (target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" ||
+        target.isContentEditable);
     if (event.key === "Escape") {
       if (typing) {
         target?.blur();
@@ -393,7 +402,8 @@ export function createMonitorKeydownHandler(
       const list = state.sortedTableRuns;
       if (list.length === 0) return;
       const index = list.findIndex((run) => run.runId === state.cursorRunId);
-      const nextIndex = index < 0 ? (delta > 0 ? 0 : list.length - 1) : Math.min(list.length - 1, Math.max(0, index + delta));
+      const nextIndex =
+        index < 0 ? (delta > 0 ? 0 : list.length - 1) : Math.min(list.length - 1, Math.max(0, index + delta));
       setCursorRunId(list[nextIndex]!.runId);
       setRunsPage(Math.floor(nextIndex / RUNS_PAGE_SIZE) + 1);
       return;
@@ -476,7 +486,9 @@ function ApprovalActions({
         variant={denyArmed ? "destructive" : "outline"}
         data-testid="monitor-approval-deny"
         disabled={busy}
-        title={denyArmed ? "Click again to deny — this fails the waiting gate" : "Deny this request (fails the waiting gate)"}
+        title={
+          denyArmed ? "Click again to deny — this fails the waiting gate" : "Deny this request (fails the waiting gate)"
+        }
         onClick={() => {
           if (arm.armOrConfirm(approvalKey(approval))) void decide(approval, false);
         }}
@@ -506,7 +518,12 @@ function ApprovalCard({
   const [expanded, setExpanded] = useState(false);
   return (
     <div className="mon-approval">
-      <button type="button" className="mon-approval-main" onClick={() => onSelectRun(approval.runId)} title={`Open run ${shortRunId(approval.runId)}`}>
+      <button
+        type="button"
+        className="mon-approval-main"
+        onClick={() => onSelectRun(approval.runId)}
+        title={`Open run ${shortRunId(approval.runId)}`}
+      >
         <div className="mon-approval-title">{approval.requestTitle ?? approval.nodeId}</div>
         <div className="mon-approval-meta">
           <span className="mon-mono">{approval.workflowKey ?? "workflow"}</span>
@@ -561,21 +578,15 @@ function ApprovalsInbox({
 // Runs rail.
 // ---------------------------------------------------------------------------
 
-function RunListRow({
-  run,
-  active,
-  onSelect,
-}: {
-  run: RunRow;
-  active: boolean;
-  onSelect: (runId: string) => void;
-}) {
+function RunListRow({ run, active, onSelect }: { run: RunRow; active: boolean; onSelect: (runId: string) => void }) {
   const tone = toneForStatus(run.status);
   const live = tone === "running" || tone === "waiting";
   const startedBy = startedByOf(run);
   const startedLabel = startedBy?.harness
     ? ` · ${startedBy.harness}${startedBy.sessionId ? ` · ${startedBy.sessionId}` : ""}`
-    : startedBy?.sessionId ? ` · ${startedBy.sessionId}` : "";
+    : startedBy?.sessionId
+      ? ` · ${startedBy.sessionId}`
+      : "";
   return (
     <RunRailRow
       runId={run.runId}
@@ -686,7 +697,11 @@ function useJsonApi(url: string | null, refreshMs: number | null): { body: unkno
 
 const METRICS_REFRESH_MS = 10_000;
 
-function useMetricsScrape(enabled: boolean): { scrape: PromScrape | null; failed: boolean; scrapedAtMs: number | null } {
+function useMetricsScrape(enabled: boolean): {
+  scrape: PromScrape | null;
+  failed: boolean;
+  scrapedAtMs: number | null;
+} {
   const [state, setState] = useState<{ scrape: PromScrape | null; failed: boolean; scrapedAtMs: number | null }>({
     scrape: null,
     failed: false,
@@ -736,9 +751,17 @@ export function StatCard({
 }) {
   return (
     <div className={`mon-stat${tone ? ` tone-${tone}` : ""}`} data-testid={testId ?? "monitor-stat"}>
-      <div className="mon-stat-value" title={value}>{value}</div>
-      <div className="mon-stat-label" title={label}>{label}</div>
-      {sub ? <div className="mon-stat-sub mon-dim" title={sub}>{sub}</div> : null}
+      <div className="mon-stat-value" title={value}>
+        {value}
+      </div>
+      <div className="mon-stat-label" title={label}>
+        {label}
+      </div>
+      {sub ? (
+        <div className="mon-stat-sub mon-dim" title={sub}>
+          {sub}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -755,7 +778,11 @@ function NeedsYouRunRow({ run, onSelectRun }: { run: RunRow; onSelectRun: (runId
       <span className="mon-needs-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
       <span className="mon-mono mon-dim">{shortRunId(run.runId)}</span>
       <span className="mon-dim mon-needs-when">
-        {groupForStatus(run.status) === "failed" ? <Ago ms={run.finishedAtMs ?? run.createdAtMs} /> : <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} />}
+        {groupForStatus(run.status) === "failed" ? (
+          <Ago ms={run.finishedAtMs ?? run.createdAtMs} />
+        ) : (
+          <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} />
+        )}
       </span>
     </button>
   );
@@ -835,7 +862,9 @@ function NeedsYouBand({
         <NeedsYouRunRow key={run.runId} run={run} onSelectRun={onSelectRun} />
       ))}
       {parked.length > NEEDS_YOU_ROW_CAP ? (
-        <div className="mon-dim mon-needs-more">+{parked.length - NEEDS_YOU_ROW_CAP} more waiting — see the table below</div>
+        <div className="mon-dim mon-needs-more">
+          +{parked.length - NEEDS_YOU_ROW_CAP} more waiting — see the table below
+        </div>
       ) : null}
       {recentFailures.slice(0, NEEDS_YOU_ROW_CAP).map((run) => (
         <NeedsYouRunRow key={run.runId} run={run} onSelectRun={onSelectRun} />
@@ -851,10 +880,7 @@ function NeedsYouBand({
 
 /** One rich row per live run: pulse, name, progress, elapsed — click opens it. */
 function ActiveNowBand({ runs, onSelectRun }: { runs: RunRow[]; onSelectRun: (runId: string) => void }) {
-  const active = useMemo(
-    () => groupRuns(runs).find((group) => group.group === "active")?.runs ?? [],
-    [runs],
-  );
+  const active = useMemo(() => groupRuns(runs).find((group) => group.group === "active")?.runs ?? [], [runs]);
   if (active.length === 0) return null;
   return (
     <section className="mon-panel mon-active-band" data-testid="monitor-active-now">
@@ -885,13 +911,7 @@ function ActiveNowBand({ runs, onSelectRun }: { runs: RunRow[]; onSelectRun: (ru
  * line: still one glance away, no longer competing with the triage band.
  * Latency percentiles live in the Metrics view they came from.
  */
-function OpsFooter({
-  runs,
-  onShowMetrics,
-}: {
-  runs: RunRow[];
-  onShowMetrics: () => void;
-}) {
+function OpsFooter({ runs, onShowMetrics }: { runs: RunRow[]; onShowMetrics: () => void }) {
   const now = useNowMs();
   const cronsApi = useJsonApi("/v1/api/crons", 30_000);
   const accountsApi = useJsonApi("/v1/api/accounts", 60_000);
@@ -1163,8 +1183,7 @@ function MetricsPanel() {
       </section>
     );
   }
-  const num = (value: number | undefined): string =>
-    value === undefined ? "—" : String(Math.round(value));
+  const num = (value: number | undefined): string => (value === undefined ? "—" : String(Math.round(value)));
   const uptime = metricValue(scrape, "smithers_process_uptime_seconds");
   return (
     <section className="mon-panel mon-metrics-panel" data-testid="monitor-metrics">
@@ -1182,8 +1201,8 @@ function MetricsPanel() {
           <h3 className="mon-kicker">Agent latency (this gateway process)</h3>
           {agentLatency.length === 0 ? (
             <div className="mon-empty mon-dim">
-              No agent invocations recorded by this gateway process yet — engines attached elsewhere (e.g. `smithers
-              up` in a terminal) report to their own process.
+              No agent invocations recorded by this gateway process yet — engines attached elsewhere (e.g. `smithers up`
+              in a terminal) report to their own process.
             </div>
           ) : (
             <div className="mon-metrics-table">
@@ -1205,10 +1224,22 @@ function MetricsPanel() {
         <div className="mon-metrics-section" data-testid="monitor-metrics-runs">
           <h3 className="mon-kicker">Runs & connections</h3>
           <div className="mon-metrics-table">
-            <MetricRow label="runs started (this process)" value={num(metricValue(scrape, "smithers_gateway_runs_started_total"))} />
-            <MetricRow label="runs completed" value={num(metricValue(scrape, "smithers_gateway_runs_completed_total"))} />
-            <MetricRow label="connections active" value={num(metricValue(scrape, "smithers_gateway_connections_active"))} />
-            <MetricRow label="connections opened" value={num(metricValue(scrape, "smithers_gateway_connections_total"))} />
+            <MetricRow
+              label="runs started (this process)"
+              value={num(metricValue(scrape, "smithers_gateway_runs_started_total"))}
+            />
+            <MetricRow
+              label="runs completed"
+              value={num(metricValue(scrape, "smithers_gateway_runs_completed_total"))}
+            />
+            <MetricRow
+              label="connections active"
+              value={num(metricValue(scrape, "smithers_gateway_connections_active"))}
+            />
+            <MetricRow
+              label="connections opened"
+              value={num(metricValue(scrape, "smithers_gateway_connections_total"))}
+            />
             <MetricRow label="pending approvals" value={num(metricValue(scrape, "smithers_approval_pending"))} />
           </div>
         </div>
@@ -1256,7 +1287,13 @@ function MetricsPanel() {
                 <div
                   className="mon-metric-row"
                   key={`${sample.name}:${index}`}
-                  title={`${sample.name}${Object.keys(sample.labels).length ? `{${Object.entries(sample.labels).map(([k, v]) => `${k}=${v}`).join(",")}}` : ""}`}
+                  title={`${sample.name}${
+                    Object.keys(sample.labels).length
+                      ? `{${Object.entries(sample.labels)
+                          .map(([k, v]) => `${k}=${v}`)
+                          .join(",")}}`
+                      : ""
+                  }`}
                 >
                   <span className="mon-metric-label">{describeErrorCounter(sample.name, sample.labels)}</span>
                   <span className="mon-mono mon-metric-value">{String(sample.value)}</span>
@@ -1332,7 +1369,8 @@ export function RunsTable({
             "Live status, execution tree, node outputs, events, and approvals — for every run this gateway owns."
           ) : (
             <>
-              Launch one with <code>smithers up &lt;workflow&gt;</code> or <code>smithers workflow run &lt;id&gt;</code>.
+              Launch one with <code>smithers up &lt;workflow&gt;</code> or <code>smithers workflow run &lt;id&gt;</code>
+              .
             </>
           )}
         </div>
@@ -1357,7 +1395,10 @@ export function RunsTable({
               <TableHead scope="col">Status</TableHead>
               <TableHead scope="col">Workflow</TableHead>
               <TableHead scope="col">Progress</TableHead>
-              <TableHead scope="col" aria-sort={sort === "default" ? undefined : sort === "newest" ? "descending" : "ascending"}>
+              <TableHead
+                scope="col"
+                aria-sort={sort === "default" ? undefined : sort === "newest" ? "descending" : "ascending"}
+              >
                 <button
                   type="button"
                   className="mon-th-sort"
@@ -1365,7 +1406,13 @@ export function RunsTable({
                   title="Sort by start time"
                   onClick={() => setSort(sort === "default" ? "newest" : sort === "newest" ? "oldest" : "default")}
                 >
-                  Started{startedIndicator ? <span className="mon-sort-arrow" aria-hidden> {startedIndicator}</span> : null}
+                  Started
+                  {startedIndicator ? (
+                    <span className="mon-sort-arrow" aria-hidden>
+                      {" "}
+                      {startedIndicator}
+                    </span>
+                  ) : null}
                 </button>
               </TableHead>
               <TableHead scope="col">Duration</TableHead>
@@ -1379,7 +1426,11 @@ export function RunsTable({
                 data-run-id={run.runId}
                 role="button"
                 tabIndex={0}
-                ref={run.runId === cursorRunId ? (el: HTMLTableRowElement | null) => el?.scrollIntoView({ block: "nearest" }) : undefined}
+                ref={
+                  run.runId === cursorRunId
+                    ? (el: HTMLTableRowElement | null) => el?.scrollIntoView({ block: "nearest" })
+                    : undefined
+                }
                 onClick={() => onSelect(run.runId)}
                 onKeyDown={(event) => {
                   if (event.key !== "Enter" && event.key !== " ") return;
@@ -1679,7 +1730,9 @@ function TreeRow({
                   : `${formatTokens(tokens.spent)} tokens${isContainer ? " (subtree)" : ""}`
               }
             >
-              {tokens.inFlight !== undefined ? `~${formatTokens(tokens.spent + tokens.inFlight)}…` : formatTokens(tokens.spent)}
+              {tokens.inFlight !== undefined
+                ? `~${formatTokens(tokens.spent + tokens.inFlight)}…`
+                : formatTokens(tokens.spent)}
             </span>
           ) : null}
           {showPill ? <StatusTag status={node.status} /> : null}
@@ -1918,13 +1971,22 @@ function TimelinePanel({
       (candidate) => candidate.id === entry.nodeId && (candidate.iteration ?? 0) === entry.iteration,
     );
     onSelectNode(
-      match ?? ({ id: entry.nodeId, iteration: entry.iteration, status: entry.state, kind: "task", name: entry.label ?? entry.nodeId } as TreeNode),
+      match ??
+        ({
+          id: entry.nodeId,
+          iteration: entry.iteration,
+          status: entry.state,
+          kind: "task",
+          name: entry.label ?? entry.nodeId,
+        } as TreeNode),
     );
   };
   if (rows === null) {
     return (
       <div className="mon-empty">
-        {failed ? "Could not load the timeline — the gateway did not answer the node-states request." : "Loading timeline…"}
+        {failed
+          ? "Could not load the timeline — the gateway did not answer the node-states request."
+          : "Loading timeline…"}
       </div>
     );
   }
@@ -2066,8 +2128,7 @@ function ExecutionPanel({
     if (frameQuery.data === undefined) return;
     setScrubTree(snapshotToGatewayRunNode(frameQuery.data as DevToolsSnapshot) as TreeNode | null);
   }, [frameEnabled, frameQuery.data]);
-  const scrubLoading =
-    scrubbing && (latestQuery.loading || frameQuery.loading || debouncedFrame !== shownFrame);
+  const scrubLoading = scrubbing && (latestQuery.loading || frameQuery.loading || debouncedFrame !== shownFrame);
   const scrubError = scrubbing ? (latestQuery.error ?? frameQuery.error) : undefined;
   const goLive = () => {
     setScrubbing(false);
@@ -2117,9 +2178,7 @@ function ExecutionPanel({
     <section className="mon-panel mon-tree-panel">
       <header className="mon-panel-head">
         <h2 className="mon-kicker">Execution</h2>
-        {selectedNode && !scrubbing ? (
-          <Chip onClick={() => onSelectNode(undefined)}>Clear selection</Chip>
-        ) : null}
+        {selectedNode && !scrubbing ? <Chip onClick={() => onSelectNode(undefined)}>Clear selection</Chip> : null}
         <Chip
           on={showTimeline}
           data-testid="monitor-timeline-chip"
@@ -2317,7 +2376,9 @@ function BurnSparkline({ buckets }: { buckets: readonly TokenBurnBucket[] }) {
       </svg>
       <div className="mon-dim mon-spark-legend">
         <span>{formatTokens(latest)} tok/min</span>
-        <span>peak {formatTokens(max)} tok/min · {buckets.length}m</span>
+        <span>
+          peak {formatTokens(max)} tok/min · {buckets.length}m
+        </span>
       </div>
     </div>
   );
@@ -2329,9 +2390,14 @@ function UsageShareBars({ rows }: { rows: readonly UsageShareRow[] }) {
     <div className="mon-usage-shares">
       {rows.map((row) => (
         <div className="mon-usage-row" key={row.key}>
-          <span className="mon-usage-label" title={row.key}>{row.key}</span>
+          <span className="mon-usage-label" title={row.key}>
+            {row.key}
+          </span>
           <span className="mon-usage-bar" aria-hidden>
-            <span className="mon-usage-bar-fill mon-usage-share-fill" style={{ width: `${Math.round(row.fraction * 100)}%` }} />
+            <span
+              className="mon-usage-bar-fill mon-usage-share-fill"
+              style={{ width: `${Math.round(row.fraction * 100)}%` }}
+            />
           </span>
           <span className="mon-mono mon-dim mon-usage-text">{formatTokens(row.tokens)}</span>
         </div>
@@ -2373,11 +2439,15 @@ function UsagePanel({
           windowRows.map((row) =>
             row.unavailable ? (
               <div className="mon-usage-row" key={row.key}>
-                <span className="mon-dim">{row.label}: {row.text}</span>
+                <span className="mon-dim">
+                  {row.label}: {row.text}
+                </span>
               </div>
             ) : (
               <div className="mon-usage-row" key={row.key}>
-                <span className="mon-usage-label" title={row.label}>{row.label}</span>
+                <span className="mon-usage-label" title={row.label}>
+                  {row.label}
+                </span>
                 <UsageWindowBar row={row} />
                 <span className={`mon-mono mon-usage-text${row.estimate ? " mon-usage-est" : ""}`}>
                   {row.estimate ? `~${row.text} est` : row.text}
@@ -2446,7 +2516,15 @@ function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEvent
     const { heartbeats, rest } = splitHeartbeatEvents(allEvents);
     if (view === "all") {
       return heartbeats.length > 0
-        ? [...rest, { event: "__heartbeats__", seq: heartbeats[heartbeats.length - 1]!.seq ?? 0, payload: { count: heartbeats.length }, timestampMs: heartbeats[heartbeats.length - 1]!.timestampMs }]
+        ? [
+            ...rest,
+            {
+              event: "__heartbeats__",
+              seq: heartbeats[heartbeats.length - 1]!.seq ?? 0,
+              payload: { count: heartbeats.length },
+              timestampMs: heartbeats[heartbeats.length - 1]!.timestampMs,
+            },
+          ]
         : rest;
     }
     return rest.filter((frame) => {
@@ -2475,11 +2553,16 @@ function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEvent
     <section className="mon-panel mon-events-panel">
       <header className="mon-panel-head">
         <h2 className="mon-kicker">
-          Events <span className="mon-count">{events.length}{view === "all" ? "" : `/${allEvents.length}`}</span>
+          Events{" "}
+          <span className="mon-count">
+            {events.length}
+            {view === "all" ? "" : `/${allEvents.length}`}
+          </span>
         </h2>
         {lastHeartbeat?.timestampMs ? (
           <span className="mon-dim mon-liveness" title="Latest task heartbeat — the engine is alive">
-            <span className="mon-dot tone-ok mon-dot-pulse" aria-hidden /> heartbeat <Ago ms={lastHeartbeat.timestampMs} />
+            <span className="mon-dot tone-ok mon-dot-pulse" aria-hidden /> heartbeat{" "}
+            <Ago ms={lastHeartbeat.timestampMs} />
           </span>
         ) : null}
         <Chip
@@ -2519,12 +2602,18 @@ function EventLog({ runId, eventsState }: { runId: string; eventsState: RunEvent
       <div className="mon-events" ref={containerRef} onScroll={onScroll} data-testid="monitor-events">
         {events.length === 0 ? (
           <div className="mon-empty">
-            {loading ? "Loading events…" : allEvents.length === 0 ? "No events yet." : view === "notable" ? "No notable events yet." : "No activity yet."}
+            {loading
+              ? "Loading events…"
+              : allEvents.length === 0
+                ? "No events yet."
+                : view === "notable"
+                  ? "No notable events yet."
+                  : "No activity yet."}
           </div>
         ) : null}
         {events.map((frame) => {
           if (frame.event === "__heartbeats__") {
-            const count = isRecord(frame.payload) ? asNumber(frame.payload.count) ?? 0 : 0;
+            const count = isRecord(frame.payload) ? (asNumber(frame.payload.count) ?? 0) : 0;
             return (
               <div className="mon-event mon-event-heartbeats" key={`${runId}:heartbeats`}>
                 <span className="mon-mono mon-dim">#{frame.seq}</span>
@@ -2619,11 +2708,12 @@ function HealthStrip({
   const sampleError = nodeErrorOf(sampleQuery.data);
   // A run that failed before its first task has no node error — fall back to
   // the run-level error so the red strip shows the actual cause.
-  const failureSample = failedNodeId && sampleError
-    ? { nodeId: failedNodeId, message: sampleError.message }
-    : runError
-      ? { nodeId: "run", message: runError }
-      : null;
+  const failureSample =
+    failedNodeId && sampleError
+      ? { nodeId: failedNodeId, message: sampleError.message }
+      : runError
+        ? { nodeId: "run", message: runError }
+        : null;
   // First paint: the tree collection is still pulling — a verdict computed on
   // an empty tree ("no tasks yet") is wrong, not neutral. Say loading.
   if (tree.isLoading && treeNodes.length === 0) {
@@ -2731,9 +2821,7 @@ function formatLiveTranscriptLine(
  * and drop protocol noise. Without these the live panel sat on "No output"
  * for minutes while the agent was visibly working.
  */
-function formatSessionTranscriptLine(
-  payload: unknown,
-): { text: string; kind: "cmd" | "text" | "meta" } | null {
+function formatSessionTranscriptLine(payload: unknown): { text: string; kind: "cmd" | "text" | "meta" } | null {
   if (!isRecord(payload)) return null;
   const transcript = isRecord(payload.transcript) ? payload.transcript : undefined;
   const raw = transcript && isRecord(transcript.raw) ? transcript.raw : undefined;
@@ -2830,7 +2918,12 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
             if (formatted) fresh.push({ seq, ...formatted });
             continue;
           }
-          if (!/AgentEvent|AgentTraceEvent|NodeOutput|ToolCall|task\.output|agent\.|NodeStarted|NodeFinished|NodeFailed|NodeRetrying/i.test(name)) continue;
+          if (
+            !/AgentEvent|AgentTraceEvent|NodeOutput|ToolCall|task\.output|agent\.|NodeStarted|NodeFinished|NodeFailed|NodeRetrying/i.test(
+              name,
+            )
+          )
+            continue;
           const line = formatEventLine({ event: name, seq, payload: raw.payload });
           const text = line.detail.startsWith(`${nodeId} · `) ? line.detail.slice(nodeId.length + 3) : line.detail;
           const formatted = formatLiveTranscriptLine(name, text || name);
@@ -2871,11 +2964,15 @@ function NodeLiveOutput({ runId, nodeId, live }: { runId: string; nodeId: string
   if (lines.length === 0) {
     return (
       <div className="mon-empty mon-dim">
-        {failed
-          ? "Could not load this node's events."
-          : !loadedOnce
-            ? <span className="mon-live-pending"><span className="mon-dot mon-dot-pulse" aria-hidden /> loading transcript…</span>
-            : "No output from this node yet — its events land here as they arrive."}
+        {failed ? (
+          "Could not load this node's events."
+        ) : !loadedOnce ? (
+          <span className="mon-live-pending">
+            <span className="mon-dot mon-dot-pulse" aria-hidden /> loading transcript…
+          </span>
+        ) : (
+          "No output from this node yet — its events land here as they arrive."
+        )}
       </div>
     );
   }
@@ -3151,7 +3248,17 @@ function InspectorSection({
  * back to a deterministic fact summary, so this renders something for every
  * settled node; errors just hide the panel.
  */
-function NodeWhatHappened({ runId, nodeId, iteration, status }: { runId: string; nodeId: string; iteration: number; status?: string }) {
+function NodeWhatHappened({
+  runId,
+  nodeId,
+  iteration,
+  status,
+}: {
+  runId: string;
+  nodeId: string;
+  iteration: number;
+  status?: string;
+}) {
   const enabled = nodeSummaryEligible(status);
   const summary = useGatewayRpc("whatHappened", { runId, nodeId, iteration }, { enabled });
   if (!enabled || summary.error) return null;
@@ -3247,10 +3354,7 @@ function HijackTerminal({
 
     async function connect() {
       onStatus("connecting");
-      const [{ Terminal }, { FitAddon }] = await Promise.all([
-        import("@xterm/xterm"),
-        import("@xterm/addon-fit"),
-      ]);
+      const [{ Terminal }, { FitAddon }] = await Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]);
       if (ac.signal.aborted || !host) return;
       // The mount div persists across effect re-runs — never stack a second
       // terminal into it.
@@ -3275,7 +3379,9 @@ function HijackTerminal({
       stopObservingMotion = observeReducedMotion((reduced) => {
         boundTerm.options.cursorBlink = !reduced;
       });
-      const socket = new WebSocket(ptyHijackUrl(location.origin, runId, nodeId, { cols: boundTerm.cols, rows: boundTerm.rows }));
+      const socket = new WebSocket(
+        ptyHijackUrl(location.origin, runId, nodeId, { cols: boundTerm.cols, rows: boundTerm.rows }),
+      );
       ws = socket;
       socket.binaryType = "arraybuffer";
       const sendResize = () => {
@@ -3293,7 +3399,9 @@ function HijackTerminal({
             const message = JSON.parse(event.data) as { type?: unknown; code?: unknown; message?: unknown };
             if (message.type === "exit") {
               onStatus("exited");
-              boundTerm.writeln(`\r\n\x1b[2m[session ended${typeof message.code === "number" ? ` · exit ${message.code}` : ""}]\x1b[0m`);
+              boundTerm.writeln(
+                `\r\n\x1b[2m[session ended${typeof message.code === "number" ? ` · exit ${message.code}` : ""}]\x1b[0m`,
+              );
             } else if (message.type === "error") {
               onStatus("error");
               boundTerm.writeln(`\r\n\x1b[1;31m${String(message.message ?? "PTY error")}\x1b[0m`);
@@ -3345,9 +3453,7 @@ function HijackTerminal({
       term?.dispose();
     };
   }, [runId, nodeId, dark]);
-  return (
-    <div className="mon-hijack-terminal" ref={mountRef} data-testid="monitor-hijack-terminal" />
-  );
+  return <div className="mon-hijack-terminal" ref={mountRef} data-testid="monitor-hijack-terminal" />;
 }
 
 const HIJACK_STATUS_TONES: Record<HijackStatus, Tone> = {
@@ -3564,7 +3670,12 @@ function NodeInspector({
           </Button>
         ) : null}
         <StatusTag status={node.status} />
-        <Chip onClick={onClose} aria-label="Close inspector" title="Close inspector (Esc)" data-testid="monitor-inspector-close">
+        <Chip
+          onClick={onClose}
+          aria-label="Close inspector"
+          title="Close inspector (Esc)"
+          data-testid="monitor-inspector-close"
+        >
           ✕
         </Chip>
       </header>
@@ -3635,7 +3746,9 @@ function NodeInspector({
           {nodeUsage ? (
             <>
               <dt>tokens</dt>
-              <dd className="mon-mono" data-testid="monitor-node-tokens">{formatTokens(nodeUsage.total)}</dd>
+              <dd className="mon-mono" data-testid="monitor-node-tokens">
+                {formatTokens(nodeUsage.total)}
+              </dd>
               <dt>input</dt>
               <dd className="mon-mono">{formatTokens(nodeUsage.input)}</dd>
               <dt>output</dt>
@@ -3752,7 +3865,9 @@ function NodeInspector({
               <OutputFields row={row} />
             ) : output.loading ? (
               <div className="mon-empty mon-dim">
-                <span className="mon-live-pending"><span className="mon-dot mon-dot-pulse" aria-hidden /> loading output…</span>
+                <span className="mon-live-pending">
+                  <span className="mon-dot mon-dot-pulse" aria-hidden /> loading output…
+                </span>
               </div>
             ) : output.error ? (
               <div className="mon-empty mon-dim" data-testid="monitor-output-error">
@@ -3760,11 +3875,16 @@ function NodeInspector({
               </div>
             ) : (
               <div className="mon-empty mon-dim">
-                {failure
-                  ? "The node failed before producing output."
-                  : isLive
-                    ? <span className="mon-live-pending"><span className="mon-dot mon-dot-pulse" aria-hidden /> running — structured output lands here when the node finishes</span>
-                    : "No output recorded for this node."}
+                {failure ? (
+                  "The node failed before producing output."
+                ) : isLive ? (
+                  <span className="mon-live-pending">
+                    <span className="mon-dot mon-dot-pulse" aria-hidden /> running — structured output lands here when
+                    the node finishes
+                  </span>
+                ) : (
+                  "No output recorded for this node."
+                )}
               </div>
             )}
           </InspectorSection>
@@ -3891,7 +4011,8 @@ function RunDetail({
 
   const status = asString(run.status);
   const workflowKey = asString(run.workflowKey) ?? "unknown";
-  const startedAtMs = asNumber(pick(run, "startedAtMs", "started_at_ms")) ?? asNumber(pick(run, "createdAtMs", "created_at_ms"));
+  const startedAtMs =
+    asNumber(pick(run, "startedAtMs", "started_at_ms")) ?? asNumber(pick(run, "createdAtMs", "created_at_ms"));
   const finishedAtMs = asNumber(pick(run, "finishedAtMs", "finished_at_ms"));
   const runState = isRecord(run.runState) ? run.runState : null;
   const healthState = runState ? asString(runState.state) : undefined;
@@ -3934,7 +4055,10 @@ function RunDetail({
           const error = isRecord(envelope.error) ? asString(envelope.error.message) : undefined;
           throw new Error(error ?? `pause failed (${response.status})`);
         }
-        onResult("ok", `Pause requested for ${shortRunId(runId)} — in-flight tasks drain, then the run parks resumably.`);
+        onResult(
+          "ok",
+          `Pause requested for ${shortRunId(runId)} — in-flight tasks drain, then the run parks resumably.`,
+        );
       } else {
         await actions.resumeRun({ runId });
         onResult("ok", `Resume requested for ${shortRunId(runId)}.`);
@@ -3969,7 +4093,10 @@ function RunDetail({
         </div>
         <CopyableRunId runId={runId} />
         {progress ? (
-          <div className="mon-progress" title={`${progress.done} done · ${progress.failed} failed · ${progress.total} tasks`}>
+          <div
+            className="mon-progress"
+            title={`${progress.done} done · ${progress.failed} failed · ${progress.total} tasks`}
+          >
             <div className="mon-progress-track">
               <div className="mon-progress-fill" style={{ width: `${Math.round(progress.fraction * 100)}%` }} />
             </div>
@@ -4012,11 +4139,17 @@ function RunDetail({
                     input: { targetWorkflow: workflowKey, gatewayUrl: location.origin, exampleRunId: runId },
                   })
                   .then(() => {
-                    onResult("ok", `Creating a UI for ${workflowKey} — the Open UI button appears here when it's ready (a few minutes).`);
+                    onResult(
+                      "ok",
+                      `Creating a UI for ${workflowKey} — the Open UI button appears here when it's ready (a few minutes).`,
+                    );
                   })
                   .catch((error) => {
                     setCreatingUi(false);
-                    onResult("err", `Create UI failed to launch: ${error instanceof Error ? error.message : String(error)}`);
+                    onResult(
+                      "err",
+                      `Create UI failed to launch: ${error instanceof Error ? error.message : String(error)}`,
+                    );
                   });
               }}
             >
@@ -4034,7 +4167,14 @@ function RunDetail({
         </div>
       </header>
 
-      <HealthStrip runId={runId} status={status} healthState={healthState} quota={quota} runError={runError} onResult={onResult} />
+      <HealthStrip
+        runId={runId}
+        status={status}
+        healthState={healthState}
+        quota={quota}
+        runError={runError}
+        onResult={onResult}
+      />
 
       <ScoresPanel scores={scores} />
 
@@ -4220,7 +4360,15 @@ function App() {
     selectNode,
     selectRun,
   });
-  keyState.current = { selectedRunId, selectedNodeKey, sortedTableRuns, railOrderRuns, cursorRunId, selectNode, selectRun };
+  keyState.current = {
+    selectedRunId,
+    selectedNodeKey,
+    sortedTableRuns,
+    railOrderRuns,
+    cursorRunId,
+    selectNode,
+    selectRun,
+  };
   useEffect(() => {
     if (monitorMode.embed) return;
     const onKeyDown = createMonitorKeydownHandler(keyState, setCursorRunId, setRunsPage);
@@ -4233,28 +4381,30 @@ function App() {
     <main className={`mon-shell${monitorMode.embed ? " mon-embed" : ""}`} data-testid="monitor-root">
       <WorkflowUiStyles mode="theme" />
       <SmithersUiStyles extra={`${monitorCss}\n${xtermCss}`} />
-      {!monitorMode.embed ? <header className="mon-topbar">
-        <div className="mon-brand">
-          <span className="mon-brand-mark" aria-hidden />
-          <h1>Smithers Monitor</h1>
-          <ConnectionBadge />
-        </div>
-        <MonitorToolbar
-          filterText={filterText}
-          onFilterText={setFilterText}
-          statusFilter={statusFilter}
-          onStatusFilter={setStatusFilter}
-          statuses={statuses}
-          workflowFilter={workflowFilter}
-          onWorkflowFilter={setWorkflowFilter}
-          workflows={workflows}
-          visibleCount={visibleRuns.length}
-          totalCount={allRuns.length}
-          showMetrics={showMetrics}
-          onToggleMetrics={() => setShowMetrics((value) => !value)}
-          onRefresh={() => void runsQuery.refetch()}
-        />
-      </header> : null}
+      {!monitorMode.embed ? (
+        <header className="mon-topbar">
+          <div className="mon-brand">
+            <span className="mon-brand-mark" aria-hidden />
+            <h1>Smithers Monitor</h1>
+            <ConnectionBadge />
+          </div>
+          <MonitorToolbar
+            filterText={filterText}
+            onFilterText={setFilterText}
+            statusFilter={statusFilter}
+            onStatusFilter={setStatusFilter}
+            statuses={statuses}
+            workflowFilter={workflowFilter}
+            onWorkflowFilter={setWorkflowFilter}
+            workflows={workflows}
+            visibleCount={visibleRuns.length}
+            totalCount={allRuns.length}
+            showMetrics={showMetrics}
+            onToggleMetrics={() => setShowMetrics((value) => !value)}
+            onRefresh={() => void runsQuery.refetch()}
+          />
+        </header>
+      ) : null}
 
       {banner ? (
         <div className={`mon-banner mon-banner-app tone-${banner.kind === "ok" ? "ok" : "failed"}`} role="status">
@@ -4264,16 +4414,18 @@ function App() {
       ) : null}
 
       <div className={`mon-body${inspectorOpen ? "" : " mon-body-no-inspector"}${railOpen ? "" : " mon-body-no-rail"}`}>
-        {railOpen ? <div className="mon-rail">
-          <ApprovalsInbox onSelectRun={selectRun} onResult={showResult} />
-          <RunsRail
-            runs={visibleRuns}
-            loading={runsQuery.loading ?? false}
-            connStatus={connStatus}
-            selectedRunId={selectedRunId}
-            onSelect={selectRun}
-          />
-        </div> : null}
+        {railOpen ? (
+          <div className="mon-rail">
+            <ApprovalsInbox onSelectRun={selectRun} onResult={showResult} />
+            <RunsRail
+              runs={visibleRuns}
+              loading={runsQuery.loading ?? false}
+              connStatus={connStatus}
+              selectedRunId={selectedRunId}
+              onSelect={selectRun}
+            />
+          </div>
+        ) : null}
 
         <div className="mon-main">
           {showMetrics ? (

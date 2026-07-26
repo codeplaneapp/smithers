@@ -98,9 +98,7 @@ describe("createTranscriptionTool", () => {
       },
     });
 
-    await expect(transcription.execute({ audioUrl: "file:///etc/passwd" }, callOptions)).rejects.toThrow(
-      /http\(s\)/i,
-    );
+    await expect(transcription.execute({ audioUrl: "file:///etc/passwd" }, callOptions)).rejects.toThrow(/http\(s\)/i);
     expect(called).toBe(0);
   });
 
@@ -327,10 +325,9 @@ describe("createTranscriptionTool", () => {
       maxResponseBytes: 4,
       audioUrlResolver: async () => [{ address: "8.8.8.8", family: 4 }],
       audioUrlTransport: async () =>
-        new Response(
-          new ReadableStream({ cancel: () => void (cancelled = true) }),
-          { headers: { "content-length": "5" } },
-        ),
+        new Response(new ReadableStream({ cancel: () => void (cancelled = true) }), {
+          headers: { "content-length": "5" },
+        }),
       fetch: async () => {
         providerCalled = true;
         return Response.json({ text: "unexpected" });

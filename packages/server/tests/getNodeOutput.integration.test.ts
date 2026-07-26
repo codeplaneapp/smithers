@@ -10,10 +10,7 @@ import { Gateway } from "../src/gateway.js";
 import { sleep } from "../../smithers/tests/helpers.js";
 
 function makeDbPath(name: string) {
-  return join(
-    tmpdir(),
-    `smithers-get-node-output-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
-  );
+  return join(tmpdir(), `smithers-get-node-output-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
 function createConnectionContext() {
@@ -119,7 +116,7 @@ describe("getNodeOutput integration", () => {
       { dbPath },
     );
 
-    const workflow = api.smithers((ctx) => (
+    const workflow = api.smithers((ctx) =>
       React.createElement(
         api.Workflow,
         { name: "get-node-output-finished" },
@@ -128,8 +125,8 @@ describe("getNodeOutput integration", () => {
           { id: "task:finished:0", output: api.outputs.result },
           { value: Number(ctx.input.value ?? 1), note: "done" },
         ),
-      )
-    ));
+      ),
+    );
 
     gateway = new Gateway();
     gateway.register("finished", workflow);
@@ -174,20 +171,16 @@ describe("getNodeOutput integration", () => {
       { dbPath },
     );
 
-    const workflow = api.smithers((ctx) => (
+    const workflow = api.smithers((ctx) =>
       React.createElement(
         api.Workflow,
         { name: "get-node-output-pending" },
-        React.createElement(
-          api.Task,
-          { id: "task:pending:0", output: api.outputs.result },
-          async () => {
-            await sleep(400);
-            return { value: Number(ctx.input.value ?? 1) };
-          },
-        ),
-      )
-    ));
+        React.createElement(api.Task, { id: "task:pending:0", output: api.outputs.result }, async () => {
+          await sleep(400);
+          return { value: Number(ctx.input.value ?? 1) };
+        }),
+      ),
+    );
 
     gateway = new Gateway();
     gateway.register("pending", workflow);
@@ -201,13 +194,7 @@ describe("getNodeOutput integration", () => {
     expect(created.ok).toBe(true);
     const runId = String(created.payload.runId);
 
-    const pendingOutput = await waitForNodeOutputStatus(
-      gateway,
-      connection,
-      runId,
-      "task:pending:0",
-      ["pending"],
-    );
+    const pendingOutput = await waitForNodeOutputStatus(gateway, connection, runId, "task:pending:0", ["pending"]);
 
     expect(pendingOutput.status).toBe("pending");
     await waitForRunStatus(gateway, connection, runId, ["finished"]);
@@ -224,21 +211,17 @@ describe("getNodeOutput integration", () => {
       { dbPath },
     );
 
-    const workflow = api.smithers(() => (
+    const workflow = api.smithers(() =>
       React.createElement(
         api.Workflow,
         { name: "get-node-output-failed" },
-        React.createElement(
-          api.Task,
-          { id: "task:failed:0", output: api.outputs.result, retries: 0 },
-          () => {
-            const runtime = requireTaskRuntime();
-            runtime.heartbeat({ progress: 50, partial: "halfway" });
-            throw new Error("boom");
-          },
-        ),
-      )
-    ));
+        React.createElement(api.Task, { id: "task:failed:0", output: api.outputs.result, retries: 0 }, () => {
+          const runtime = requireTaskRuntime();
+          runtime.heartbeat({ progress: 50, partial: "halfway" });
+          throw new Error("boom");
+        }),
+      ),
+    );
 
     gateway = new Gateway();
     gateway.register("failed", workflow);

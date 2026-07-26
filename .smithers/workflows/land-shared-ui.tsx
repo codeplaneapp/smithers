@@ -33,9 +33,11 @@ export const landReportSchema = z.object({
 });
 
 export const inputSchema = z.object({
-  worktreesRoot: z.string().trim().min(1).default(
-    "/Users/williamcory/smithers/.smithers/workflows/.worktrees/shared-ui/run-1784418919774/batch-0",
-  ),
+  worktreesRoot: z
+    .string()
+    .trim()
+    .min(1)
+    .default("/Users/williamcory/smithers/.smithers/workflows/.worktrees/shared-ui/run-1784418919774/batch-0"),
   worktrees: z.array(z.string()).default([]),
   baseBranch: z.string().trim().min(1).default("main"),
   maxCiRounds: z.number().int().min(1).max(6).default(4),
@@ -54,7 +56,13 @@ type RawRow = Record<string, unknown>;
 const opus = [providers.claudeOpus, providers.claudeSonnet];
 
 function slug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "item";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 64) || "item"
+  );
 }
 
 function rawRows(ctx: any, channel: string): RawRow[] {
@@ -121,7 +129,9 @@ export default smithers((ctx) => {
   const mergedSlugs = new Set(mergeRows.filter((row) => row.merged === true).map((row) => String(row.worktree)));
   const settledSlugs = new Set(mergeRows.map((row) => String(row.worktree)));
   const allSettled = worktrees.every((path) => settledSlugs.has(slug(path.split("/").at(-1) ?? path)));
-  const latestCi = rawRows(ctx, "ci").filter((row) => String(row.nodeId ?? "").startsWith("land-ci")).at(-1);
+  const latestCi = rawRows(ctx, "ci")
+    .filter((row) => String(row.nodeId ?? "").startsWith("land-ci"))
+    .at(-1);
   const ciCurrent = latestCi !== undefined && Number(latestCi.iteration ?? 0) === ctx.iteration;
   const done = allSettled && latestCi?.allPassed === true;
 
@@ -135,7 +145,15 @@ export default smithers((ctx) => {
               const worktreeSlug = slug(worktreePath.split("/").at(-1) ?? worktreePath);
               if (settledSlugs.has(worktreeSlug)) return null;
               return (
-                <Task key={worktreeSlug} id={`merge-${worktreeSlug}`} output={outputs.merge} agent={opus} retries={2} timeoutMs={50 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                <Task
+                  key={worktreeSlug}
+                  id={`merge-${worktreeSlug}`}
+                  output={outputs.merge}
+                  agent={opus}
+                  retries={2}
+                  timeoutMs={50 * 60_000}
+                  heartbeatTimeoutMs={10 * 60_000}
+                >
                   {mergePrompt(worktreePath, worktreeSlug, input.baseBranch, repoRoot)}
                 </Task>
               );
@@ -149,7 +167,14 @@ export default smithers((ctx) => {
           ) : null}
 
           {ciCurrent && latestCi?.allPassed === false ? (
-            <Task id="land-fix" output={outputs.fix} agent={opus} retries={2} timeoutMs={60 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+            <Task
+              id="land-fix"
+              output={outputs.fix}
+              agent={opus}
+              retries={2}
+              timeoutMs={60 * 60_000}
+              heartbeatTimeoutMs={10 * 60_000}
+            >
               {fixPrompt(latestCi, repoRoot)}
             </Task>
           ) : null}
@@ -157,7 +182,14 @@ export default smithers((ctx) => {
       </Loop>
 
       {done ? (
-        <Task id="land-report" output={outputs.report} agent={opus} retries={2} timeoutMs={30 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+        <Task
+          id="land-report"
+          output={outputs.report}
+          agent={opus}
+          retries={2}
+          timeoutMs={30 * 60_000}
+          heartbeatTimeoutMs={10 * 60_000}
+        >
           {reportPrompt(mergeRows, repoRoot)}
         </Task>
       ) : null}

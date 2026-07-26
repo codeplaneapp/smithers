@@ -9,5 +9,5 @@ import { listAccounts } from "./listAccounts.js";
  * @returns {import("./Account.ts").Account | undefined}
  */
 export function getAccount(label, env = process.env) {
-    return listAccounts(env).find((account) => account.label === label);
+  return listAccounts(env).find((account) => account.label === label);
 }

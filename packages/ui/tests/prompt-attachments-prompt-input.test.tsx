@@ -40,9 +40,7 @@ afterEach(async () => {
   document.documentElement.removeAttribute("data-theme");
   removeDarkThemeStyles();
   document.querySelectorAll(`style[${SMITHERS_UI_STYLE_ATTR}]`).forEach((element) => element.remove());
-  document
-    .querySelectorAll('style[data-smithers-ui-lane="prompt-attachments"]')
-    .forEach((element) => element.remove());
+  document.querySelectorAll('style[data-smithers-ui-lane="prompt-attachments"]').forEach((element) => element.remove());
 });
 
 async function render(element: ReactElement): Promise<void> {
@@ -57,10 +55,7 @@ function pressEnter(target: HTMLElement, init: KeyboardEventInit = {}) {
   target.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true, ...init }));
 }
 
-const textareaValueSetter = Object.getOwnPropertyDescriptor(
-  window.HTMLTextAreaElement.prototype,
-  "value",
-)!.set!;
+const textareaValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")!.set!;
 
 function typeText(textarea: HTMLTextAreaElement, text: string) {
   textareaValueSetter.call(textarea, text);
@@ -168,9 +163,7 @@ describe("PromptInput", () => {
     expect(chip.getAttribute("role")).toBe("listitem");
     expect(container!.querySelector('[data-slot="attachment-name"]')!.textContent).toBe("report.pdf");
     expect(container!.querySelector('[data-slot="prompt-input-attachments"]')!.getAttribute("role")).toBe("list");
-    await act(async () =>
-      container!.querySelector<HTMLButtonElement>('[data-slot="attachment-remove"]')!.click(),
-    );
+    await act(async () => container!.querySelector<HTMLButtonElement>('[data-slot="attachment-remove"]')!.click());
     expect(hook.attachments).toHaveLength(0);
     expect(container!.querySelector('[aria-live="polite"]')!.textContent).toBe("report.pdf removed");
   });
@@ -401,9 +394,9 @@ describe("PromptInput", () => {
     await act(async () => stop.click());
     expect(stops).toBe(1);
     await act(async () => {
-      container!.querySelector<HTMLTextAreaElement>("textarea")!.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
-      );
+      container!
+        .querySelector<HTMLTextAreaElement>("textarea")!
+        .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     });
     expect(stops).toBe(2);
   });
@@ -422,9 +415,7 @@ describe("PromptInput", () => {
         </PromptInputActionMenu>
       </PromptInput>,
     );
-    const trigger = container!.querySelector<HTMLButtonElement>(
-      '[data-slot="prompt-input-action-menu-trigger"]',
-    )!;
+    const trigger = container!.querySelector<HTMLButtonElement>('[data-slot="prompt-input-action-menu-trigger"]')!;
     expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(container!.querySelector('[role="menu"]')).toBeNull();
@@ -572,8 +563,6 @@ describe("PromptInput", () => {
     expect(form.className).toContain("sui-prompt");
     expect(container!.querySelector('[data-slot="prompt-input-header"]')!.textContent).toBe("queued");
     expect(getComputedStyle(form).backgroundColor).toBe("#141417");
-    expect(
-      document.querySelector('style[data-smithers-ui-lane="prompt-attachments"]'),
-    ).not.toBeNull();
+    expect(document.querySelector('style[data-smithers-ui-lane="prompt-attachments"]')).not.toBeNull();
   });
 });

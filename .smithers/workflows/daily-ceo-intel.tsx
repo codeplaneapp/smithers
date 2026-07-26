@@ -17,12 +17,7 @@ import { fetchBluesky } from "../lib/daily-ceo-intel/sources/bluesky";
 import { canonicalizeAndDedupe } from "../lib/daily-ceo-intel/dedupe";
 import { clusterEvents } from "../lib/daily-ceo-intel/cluster";
 import { commitSeenState } from "../lib/daily-ceo-intel/commit";
-import {
-  loadConfigAndState,
-  loadRunConfig,
-  loadSources,
-  resolveCloudflareCreds,
-} from "../lib/daily-ceo-intel/config";
+import { loadConfigAndState, loadRunConfig, loadSources, resolveCloudflareCreds } from "../lib/daily-ceo-intel/config";
 import { openDb } from "../lib/daily-ceo-intel/db";
 import { filterToWindow } from "../lib/daily-ceo-intel/filterWindow";
 import { fetchGithubReleases } from "../lib/daily-ceo-intel/sources/githubReleases";
@@ -66,13 +61,23 @@ import {
 const DEFAULT_CONFIG_PATH = "config/ceo-intel.json";
 
 const inputSchema = z.object({
-  windowEnd: z.string().nullable().default(null).describe("ISO-8601 UTC override for the window end. Null means run start."),
+  windowEnd: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe("ISO-8601 UTC override for the window end. Null means run start."),
   publishMode: z
     .enum(["auto", "archive-only", "publish"])
     .nullable()
     .default(null)
-    .describe("auto publishes to CF KV/R2 when creds are present, else archives locally; archive-only always forces the local path."),
-  configPath: z.string().nullable().default(null).describe(`Path to the versioned run config. Defaults to ${DEFAULT_CONFIG_PATH}.`),
+    .describe(
+      "auto publishes to CF KV/R2 when creds are present, else archives locally; archive-only always forces the local path.",
+    ),
+  configPath: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe(`Path to the versioned run config. Defaults to ${DEFAULT_CONFIG_PATH}.`),
 });
 
 type NormalizedInput = {
@@ -137,7 +142,11 @@ export default smithers((ctx) => {
   const configOut = ctx.outputMaybe(outputs.ceoIntelConfig, { nodeId: "load-config-and-state" });
   const providerSelectionOut = ctx.outputMaybe(outputs.ceoIntelProviderSelection, { nodeId: "select-model-provider" });
   const agentPools = providerSelectionOut
-    ? buildAgentPoolsForSelection(providerSelectionOut, { cheap: agents.ceoIntelCheap, strong: agents.ceoIntelStrong }, process.env)
+    ? buildAgentPoolsForSelection(
+        providerSelectionOut,
+        { cheap: agents.ceoIntelCheap, strong: agents.ceoIntelStrong },
+        process.env,
+      )
     : null;
 
   const fetchRssOut = ctx.outputMaybe(outputs.ceoIntelFetchRss, { nodeId: "fetch-rss" });
@@ -146,7 +155,9 @@ export default smithers((ctx) => {
   const fetchLobstersOut = ctx.outputMaybe(outputs.ceoIntelFetchLobsters, { nodeId: "fetch-lobsters" });
   const fetchRedditOut = ctx.outputMaybe(outputs.ceoIntelFetchReddit, { nodeId: "fetch-reddit" });
   const fetchBlueskyOut = ctx.outputMaybe(outputs.ceoIntelFetchBluesky, { nodeId: "fetch-bluesky" });
-  const allFetchesReady = Boolean(fetchRssOut && fetchGithubOut && fetchHnOut && fetchLobstersOut && fetchRedditOut && fetchBlueskyOut);
+  const allFetchesReady = Boolean(
+    fetchRssOut && fetchGithubOut && fetchHnOut && fetchLobstersOut && fetchRedditOut && fetchBlueskyOut,
+  );
 
   const normalizeOut = ctx.outputMaybe(outputs.ceoIntelNormalize, { nodeId: "normalize" });
   const windowFilterOut = ctx.outputMaybe(outputs.ceoIntelWindowFilter, { nodeId: "strict-24h-filter" });
@@ -155,7 +166,9 @@ export default smithers((ctx) => {
   const clustersOut = ctx.outputMaybe(outputs.ceoIntelClusters, { nodeId: "cluster-events" });
 
   const batches = clustersOut ? chunk(clustersOut.clusters, loadRunConfig(input.configPath).assessBatchSize) : [];
-  const assessBatchOutputs = batches.map((_, index) => ctx.outputMaybe(outputs.ceoIntelAssessBatch, { nodeId: `assess-relevance-b${index}` }));
+  const assessBatchOutputs = batches.map((_, index) =>
+    ctx.outputMaybe(outputs.ceoIntelAssessBatch, { nodeId: `assess-relevance-b${index}` }),
+  );
   const allBatchesReady = assessBatchOutputs.every((row) => row !== undefined);
 
   const mergedOut = ctx.outputMaybe(outputs.ceoIntelMergedAssessments, { nodeId: "merge-assessments" });
@@ -175,7 +188,12 @@ export default smithers((ctx) => {
 
   const lighterSideItems = (lighterSideOut?.picks ?? []).map((pick) => {
     const candidate = selectionOut?.lighterSideCandidates.find((entry) => entry.srcId === pick.srcId);
-    return { srcId: pick.srcId, title: candidate?.title ?? "", excerpt: candidate?.excerpt ?? "", whyFunny: pick.whyFunny };
+    return {
+      srcId: pick.srcId,
+      title: candidate?.title ?? "",
+      excerpt: candidate?.excerpt ?? "",
+      whyFunny: pick.whyFunny,
+    };
   });
 
   return (
@@ -247,7 +265,9 @@ export default smithers((ctx) => {
             <Task id="fetch-hn" output={outputs.ceoIntelFetchHn}>
               {async () => {
                 const sources = loadSources(input.configPath).hn;
-                const since = ctx.outputMaybe(outputs.ceoIntelWindow, { nodeId: "compute-window" })?.windowStart ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+                const since =
+                  ctx.outputMaybe(outputs.ceoIntelWindow, { nodeId: "compute-window" })?.windowStart ??
+                  new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
                 const rows = await fetchHn(sources, since);
                 return {
                   kind: "hn" as const,
@@ -356,7 +376,12 @@ export default smithers((ctx) => {
               >
                 <AssessPrompt
                   batchIndex={index}
-                  clusters={batch.map((c) => ({ srcId: c.srcId, title: c.title, excerpt: c.excerpt, categoryHints: c.categoryHints }))}
+                  clusters={batch.map((c) => ({
+                    srcId: c.srcId,
+                    title: c.title,
+                    excerpt: c.excerpt,
+                    categoryHints: c.categoryHints,
+                  }))}
                 />
               </Task>
             ))}
@@ -365,7 +390,12 @@ export default smithers((ctx) => {
 
         {clustersOut && allBatchesReady ? (
           <Task id="merge-assessments" output={outputs.ceoIntelMergedAssessments}>
-            {() => mergeAssessments(assessBatchOutputs.map((row) => row!.assessments), clustersOut.srcIdMap)}
+            {() =>
+              mergeAssessments(
+                assessBatchOutputs.map((row) => row!.assessments),
+                clustersOut.srcIdMap,
+              )
+            }
           </Task>
         ) : null}
 
@@ -376,15 +406,30 @@ export default smithers((ctx) => {
         ) : null}
 
         {selectionOut && agentPools ? (
-          <Task id="curate-lighter-side" output={outputs.ceoIntelLighterSide} agent={agentPools.cheap} heartbeatTimeoutMs={180_000}>
+          <Task
+            id="curate-lighter-side"
+            output={outputs.ceoIntelLighterSide}
+            agent={agentPools.cheap}
+            heartbeatTimeoutMs={180_000}
+          >
             <LighterSidePrompt candidates={selectionOut.lighterSideCandidates} />
           </Task>
         ) : null}
 
         {selectionOut && lighterSideOut && clustersOut && windowOut && agentPools ? (
-          <Loop id="editorial-repair" maxIterations={2} until={latestVerify?.passed === true} onMaxReached="return-last">
+          <Loop
+            id="editorial-repair"
+            maxIterations={2}
+            until={latestVerify?.passed === true}
+            onMaxReached="return-last"
+          >
             <Sequence>
-              <Task id="compose-editorial" output={outputs.ceoIntelIssue} agent={agentPools.strong} heartbeatTimeoutMs={600_000}>
+              <Task
+                id="compose-editorial"
+                output={outputs.ceoIntelIssue}
+                agent={agentPools.strong}
+                heartbeatTimeoutMs={600_000}
+              >
                 <ComposePrompt
                   issueDateEt={windowOut.issueDateEt}
                   topStories={selectionOut.topStories}
@@ -420,7 +465,15 @@ export default smithers((ctx) => {
           </Loop>
         ) : null}
 
-        {latestIssue && clustersOut && normalizeOut && windowOut && windowFilterOut && dedupeOut && mergedOut && selectionOut && providerSelectionOut ? (
+        {latestIssue &&
+        clustersOut &&
+        normalizeOut &&
+        windowOut &&
+        windowFilterOut &&
+        dedupeOut &&
+        mergedOut &&
+        selectionOut &&
+        providerSelectionOut ? (
           <Task id="render" output={outputs.ceoIntelRender}>
             {() =>
               renderIssue(
@@ -464,7 +517,15 @@ export default smithers((ctx) => {
               const runConfig = loadRunConfig(input.configPath);
               const creds = configOut.cfCredsPresent ? resolveCloudflareCreds(runConfig) : null;
               const { db } = openDb(runConfig.dbPath);
-              return archiveIssue(renderOut, windowOut.issueDateEt, configOut.effectiveMode, configOut.cfCredsPresent, creds, runConfig.reportsDir, db);
+              return archiveIssue(
+                renderOut,
+                windowOut.issueDateEt,
+                configOut.effectiveMode,
+                configOut.cfCredsPresent,
+                creds,
+                runConfig.reportsDir,
+                db,
+              );
             }}
           </Task>
         ) : null}
@@ -494,19 +555,35 @@ export default smithers((ctx) => {
             {() => {
               const runConfig = loadRunConfig(input.configPath);
               const { db } = openDb(runConfig.dbPath);
-              const publishOk = publishOut.published || publishOut.idempotentSkip || configOut.effectiveMode === "archive-only";
+              const publishOk =
+                publishOut.published || publishOut.idempotentSkip || configOut.effectiveMode === "archive-only";
               const shouldCommit = latestVerify.passed && publishOk;
               const reason = !latestVerify.passed
                 ? "The composed issue failed verification."
                 : !publishOk
                   ? (publishOut.skippedReason ?? "Publish did not succeed.")
                   : null;
-              return commitSeenState(clustersOut.clusters, db, runConfig.fingerprintRetentionDays, new Date().toISOString(), shouldCommit, reason);
+              return commitSeenState(
+                clustersOut.clusters,
+                db,
+                runConfig.fingerprintRetentionDays,
+                new Date().toISOString(),
+                shouldCommit,
+                reason,
+              );
             }}
           </Task>
         ) : null}
 
-        {commitOut && renderOut && archiveOut && publishOut && latestVerify && windowOut && normalizeOut && latestIssue && mergedOut ? (
+        {commitOut &&
+        renderOut &&
+        archiveOut &&
+        publishOut &&
+        latestVerify &&
+        windowOut &&
+        normalizeOut &&
+        latestIssue &&
+        mergedOut ? (
           <Task id="finalize" output={outputs.ceoIntelFinalize}>
             {() =>
               finalizeRun({

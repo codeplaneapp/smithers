@@ -30,7 +30,11 @@ export function TooltipTrigger(props: ComponentProps<typeof TooltipPrimitive.Tri
   return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
 }
 
-export function TooltipContent({ className, sideOffset = 6, ...props }: ComponentProps<typeof TooltipPrimitive.Content>) {
+export function TooltipContent({
+  className,
+  sideOffset = 6,
+  ...props
+}: ComponentProps<typeof TooltipPrimitive.Content>) {
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content

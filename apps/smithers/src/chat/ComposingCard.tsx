@@ -6,17 +6,11 @@ export function ComposingCard() {
   if (!card) return null;
 
   return (
-    <article
-      aria-live="polite"
-      className={`composing-card composing-card-${card.status}`}
-      ref={registerCard}
-    >
+    <article aria-live="polite" className={`composing-card composing-card-${card.status}`} ref={registerCard}>
       <div className="composing-card-head">
         <span className="composing-card-dot" aria-hidden="true" />
         <span className="composing-card-title">{card.title}</span>
-        <span className="composing-card-status">
-          {card.status === "streaming" ? "Composing" : "Submitting"}
-        </span>
+        <span className="composing-card-status">{card.status === "streaming" ? "Composing" : "Submitting"}</span>
       </div>
       <pre className="composing-card-text">
         {card.visibleText}

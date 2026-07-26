@@ -32,10 +32,7 @@ type RailState = {
   onResizeEnd: (event: PointerEvent<HTMLElement>) => void;
 };
 
-function resizePatch(width: number): Pick<
-  RailState,
-  "width" | "lastOpenWidth" | "collapsed"
-> {
+function resizePatch(width: number): Pick<RailState, "width" | "lastOpenWidth" | "collapsed"> {
   const clamped = Math.min(RAIL_MAX, Math.max(RAIL_MIN, width));
   return { width: clamped, lastOpenWidth: clamped, collapsed: false };
 }
@@ -63,8 +60,7 @@ export const useRailStore = create<RailState>()(
           const next = state.width + delta;
           return next < COLLAPSE_AT ? { collapsed: true } : resizePatch(next);
         }),
-      resizeTo: (width) =>
-        set(width < COLLAPSE_AT ? { collapsed: true } : resizePatch(width)),
+      resizeTo: (width) => set(width < COLLAPSE_AT ? { collapsed: true } : resizePatch(width)),
       onResizeKeyDown: (event) => {
         let handled = true;
         const state = useRailStore.getState();

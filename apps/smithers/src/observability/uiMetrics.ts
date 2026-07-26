@@ -17,13 +17,7 @@
  * labels multiplies cardinality without adding information).
  */
 
-import {
-  DEFAULT_BYTE_BUCKETS,
-  DEFAULT_MS_BUCKETS,
-  browserRegistry,
-  workerRegistry,
-  type LabelSet,
-} from "./metrics";
+import { DEFAULT_BYTE_BUCKETS, DEFAULT_MS_BUCKETS, browserRegistry, workerRegistry, type LabelSet } from "./metrics";
 
 export type ProxyRouteKind =
   | "auth"
@@ -54,11 +48,7 @@ export type ProxyOutcome =
   | "rate_limited"
   | "upstream_unreachable";
 
-export type GatewayProxyFailureReason =
-  | "missing_gateway_base"
-  | "auth_failure"
-  | "upstream_rpc_failure"
-  | "route_miss";
+export type GatewayProxyFailureReason = "missing_gateway_base" | "auth_failure" | "upstream_rpc_failure" | "route_miss";
 
 /* ───────────────────────── proxy (worker) metrics ─────────────────────── */
 
@@ -90,15 +80,13 @@ export const proxyAuthFailuresTotal = workerRegistry.counter({
 
 export const workerGatewayProxyFailuresTotal = workerRegistry.counter({
   name: "smithers_ui_worker_gateway_proxy_failures_total",
-  help:
-    "Gateway Worker proxy failures split by root cause. Distinguishes missing config, auth, upstream failure, and route misses.",
+  help: "Gateway Worker proxy failures split by root cause. Distinguishes missing config, auth, upstream failure, and route misses.",
   allowedLabels: ["route_kind", "reason"],
 });
 
 export const workerGatewayBridgeFailuresTotal = workerRegistry.counter({
   name: "smithers_ui_worker_gateway_bridge_failures_total",
-  help:
-    "Gateway UI bridge RPC failures mirrored from browser beacons, split by bridge, RPC method, error code, and whether a runId was present.",
+  help: "Gateway UI bridge RPC failures mirrored from browser beacons, split by bridge, RPC method, error code, and whether a runId was present.",
   allowedLabels: ["bridge", "method", "code", "run_bound"],
 });
 
@@ -137,8 +125,7 @@ export const gatewayStreamReconnectsTotal = browserRegistry.counter({
 
 export const gatewayStreamReconnectStormsTotal = browserRegistry.counter({
   name: "smithers_ui_gateway_stream_reconnect_storms_total",
-  help:
-    "Reconnect storms detected (≥ N reconnects within the storm window). Browser-local; use as a flapping-stream signal.",
+  help: "Reconnect storms detected (≥ N reconnects within the storm window). Browser-local; use as a flapping-stream signal.",
   allowedLabels: ["stream"],
 });
 
@@ -151,22 +138,19 @@ export const gatewayStreamBackoffMs = browserRegistry.histogram({
 
 export const gatewayStreamStaleUpdatesTotal = browserRegistry.counter({
   name: "smithers_ui_gateway_stream_stale_updates_total",
-  help:
-    "Updates received for a stream whose subscription has been closed or replaced (browser-local).",
+  help: "Updates received for a stream whose subscription has been closed or replaced (browser-local).",
   allowedLabels: ["stream", "reason"],
 });
 
 export const gatewayConnectionState = browserRegistry.gauge({
   name: "smithers_ui_gateway_connection_state",
-  help:
-    "Current Smithers Gateway connection state. 0=offline, 1=connecting, 2=online, 3=unauthorized (browser-local).",
+  help: "Current Smithers Gateway connection state. 0=offline, 1=connecting, 2=online, 3=unauthorized (browser-local).",
   allowedLabels: [],
 });
 
 export const gatewayBridgeFailuresTotal = browserRegistry.counter({
   name: "smithers_ui_gateway_bridge_failures_total",
-  help:
-    "Gateway UI bridge RPC failures split by bridge, RPC method, error code, and whether a runId was present (browser-local).",
+  help: "Gateway UI bridge RPC failures split by bridge, RPC method, error code, and whether a runId was present (browser-local).",
   allowedLabels: ["bridge", "method", "code", "run_bound"],
 });
 
@@ -315,17 +299,11 @@ function sendUiMetricEvent(event: UiMetricEvent): void {
     return;
   }
   if (typeof navigator === "undefined" || typeof navigator.sendBeacon !== "function") return;
-  if (
-    typeof location === "undefined" ||
-    (location.protocol !== "http:" && location.protocol !== "https:")
-  ) {
+  if (typeof location === "undefined" || (location.protocol !== "http:" && location.protocol !== "https:")) {
     return;
   }
   try {
-    navigator.sendBeacon(
-      "/api/ui-metrics",
-      new Blob([JSON.stringify(event)], { type: "application/json" }),
-    );
+    navigator.sendBeacon("/api/ui-metrics", new Blob([JSON.stringify(event)], { type: "application/json" }));
   } catch {
     // Metrics beacons must never affect product flow.
   }
@@ -360,10 +338,7 @@ export function recordMirrorPollAttempts(value: number): void {
   sendUiMetricEvent({ name: "mirror_poll_attempts", value });
 }
 
-export function recordGatewayProxyFailure(
-  routeKind: ProxyRouteKind,
-  reason: GatewayProxyFailureReason,
-): void {
+export function recordGatewayProxyFailure(routeKind: ProxyRouteKind, reason: GatewayProxyFailureReason): void {
   workerGatewayProxyFailuresTotal.inc({ route_kind: routeKind, reason });
 }
 
@@ -443,7 +418,10 @@ export function recordUiMetricBeacon(event: unknown): boolean {
   switch (candidate.name) {
     case "mirror_flow_total":
       if (!isMirrorPhase(candidate.phase) || !isMirrorOutcome(candidate.outcome)) return false;
-      workerMirrorFlowTotal.inc({ phase: candidate.phase, outcome: candidate.outcome }, finitePositive(candidate.value, 1));
+      workerMirrorFlowTotal.inc(
+        { phase: candidate.phase, outcome: candidate.outcome },
+        finitePositive(candidate.value, 1),
+      );
       return true;
     case "mirror_flow_duration_ms":
       if (!isMirrorPhaseOrEnd(candidate.phase) || !isFiniteNonNegative(candidate.value)) return false;
@@ -495,8 +473,15 @@ export function recordUiMetricBeacon(event: unknown): boolean {
 }
 
 function isMirrorPhase(value: unknown): value is MirrorPhase {
-  return value === "pick" || value === "mirror" || value === "poll" || value === "branch" ||
-    value === "sandbox" || value === "land" || value === "ready";
+  return (
+    value === "pick" ||
+    value === "mirror" ||
+    value === "poll" ||
+    value === "branch" ||
+    value === "sandbox" ||
+    value === "land" ||
+    value === "ready"
+  );
 }
 
 function isMirrorPhaseOrEnd(value: unknown): value is MirrorPhase | "end_to_end" {
@@ -504,12 +489,14 @@ function isMirrorPhaseOrEnd(value: unknown): value is MirrorPhase | "end_to_end"
 }
 
 function isMirrorOutcome(value: unknown): value is MirrorOutcome {
-  return value === "ok" || value === "client_error" || value === "server_error" ||
-    value === "timeout" || value === "aborted";
+  return (
+    value === "ok" || value === "client_error" || value === "server_error" || value === "timeout" || value === "aborted"
+  );
 }
 
 function isGatewayBridgeName(value: unknown): value is GatewayBridgeName {
-  return value === "runs" ||
+  return (
+    value === "runs" ||
     value === "approvals" ||
     value === "prompts" ||
     value === "tickets" ||
@@ -519,11 +506,13 @@ function isGatewayBridgeName(value: unknown): value is GatewayBridgeName {
     value === "workflows" ||
     value === "run" ||
     value === "extension" ||
-    value === "unknown";
+    value === "unknown"
+  );
 }
 
 function isGatewayBridgeMethod(value: unknown): value is GatewayBridgeMethod {
-  return value === "listRuns" ||
+  return (
+    value === "listRuns" ||
     value === "listApprovals" ||
     value === "listPrompts" ||
     value === "listTickets" ||
@@ -533,7 +522,8 @@ function isGatewayBridgeMethod(value: unknown): value is GatewayBridgeMethod {
     value === "listWorkflows" ||
     value === "getRun" ||
     value === "extension" ||
-    value === "unknown";
+    value === "unknown"
+  );
 }
 
 function isFiniteNonNegative(value: unknown): value is number {
@@ -737,9 +727,7 @@ export function resetReconnectHistory(): void {
   reconnectHistory.clear();
 }
 
-export function connectionStateValue(
-  status: "idle" | "connecting" | "online" | "offline" | "unauthorized",
-): number {
+export function connectionStateValue(status: "idle" | "connecting" | "online" | "offline" | "unauthorized"): number {
   switch (status) {
     case "offline":
       return 0;
@@ -755,9 +743,8 @@ export function connectionStateValue(
 }
 
 function extractErrorCode(err: unknown): string {
-  const objectCode = typeof err === "object" && err !== null && "code" in err
-    ? String((err as { code?: unknown }).code ?? "")
-    : "";
+  const objectCode =
+    typeof err === "object" && err !== null && "code" in err ? String((err as { code?: unknown }).code ?? "") : "";
   const normalizedObjectCode = normalizeRpcErrorCode(objectCode);
   if (normalizedObjectCode) return normalizedObjectCode;
 

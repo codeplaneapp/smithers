@@ -10,21 +10,24 @@ const storage = new AsyncLocalStorage();
  * @returns {T}
  */
 export function withTaskRuntime(runtime, execute) {
-    return storage.run(runtime, execute);
+  return storage.run(runtime, execute);
 }
 /**
  * @returns {SmithersTaskRuntime | undefined}
  */
 export function getTaskRuntime() {
-    return storage.getStore();
+  return storage.getStore();
 }
 /**
  * @returns {SmithersTaskRuntime}
  */
 export function requireTaskRuntime() {
-    const runtime = storage.getStore();
-    if (!runtime) {
-        throw new SmithersError("TASK_RUNTIME_UNAVAILABLE", "Smithers task runtime is only available while a builder step is executing.");
-    }
-    return runtime;
+  const runtime = storage.getStore();
+  if (!runtime) {
+    throw new SmithersError(
+      "TASK_RUNTIME_UNAVAILABLE",
+      "Smithers task runtime is only available while a builder step is executing.",
+    );
+  }
+  return runtime;
 }

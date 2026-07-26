@@ -53,20 +53,16 @@ describe("buildPlanTree __tcfCatchErrors host-prop fallback", () => {
 
   test("an explicit catchErrors prop wins over the dunder fallback", () => {
     const { plan } = buildPlanTree(
-      el(
-        "smithers:try-catch-finally",
-        { id: "tcf", catchErrors: ["EXPLICIT"], __tcfCatchErrors: "DUNDER" },
-        [el("smithers:task", { id: "t" })],
-      ),
+      el("smithers:try-catch-finally", { id: "tcf", catchErrors: ["EXPLICIT"], __tcfCatchErrors: "DUNDER" }, [
+        el("smithers:task", { id: "t" }),
+      ]),
     );
     expect(plan.catchErrors).toEqual(["EXPLICIT"]);
   });
 
   test("a whitespace-only filter string collapses to no filter", () => {
     const { plan } = buildPlanTree(
-      el("smithers:try-catch-finally", { id: "tcf", __tcfCatchErrors: " , , " }, [
-        el("smithers:task", { id: "t" }),
-      ]),
+      el("smithers:try-catch-finally", { id: "tcf", __tcfCatchErrors: " , , " }, [el("smithers:task", { id: "t" })]),
     );
     expect("catchErrors" in plan).toBe(false);
   });

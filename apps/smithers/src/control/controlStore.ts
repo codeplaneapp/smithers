@@ -85,9 +85,7 @@ export const useControlStore = create<ControlState>((set, get) => ({
     // User still in control: queue the remaining UI actions behind the gate.
     const actions = directives.filter(
       (directive) =>
-        !isWorkflowLaunch(directive.tool) &&
-        directive.tool !== "requestControl" &&
-        directive.tool !== "releaseControl",
+        !isWorkflowLaunch(directive.tool) && directive.tool !== "requestControl" && directive.tool !== "releaseControl",
     );
     if (actions.length === 0) {
       return;

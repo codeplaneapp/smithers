@@ -17,51 +17,51 @@ import { PiAgent } from "@smithers-orchestrator/agents/PiAgent";
  * @returns {AgentLike}
  */
 export function applyCliToolAllowlist(agent, allowTools) {
-    if (!allowTools) {
-        return agent;
-    }
-    if (agent instanceof ClaudeCodeAgent) {
-        const opts = { ...agent.opts };
-        if (allowTools.length === 0) {
-            return new ClaudeCodeAgent({
-                ...opts,
-                allowedTools: [],
-                tools: "",
-            });
-        }
-        return new ClaudeCodeAgent({
-            ...opts,
-            allowedTools: [...allowTools],
-        });
-    }
-    if (agent instanceof PiAgent) {
-        const opts = { ...agent.opts };
-        if (allowTools.length === 0) {
-            return new PiAgent({
-                ...opts,
-                tools: [],
-                noTools: true,
-            });
-        }
-        return new PiAgent({
-            ...opts,
-            tools: [...allowTools],
-            noTools: false,
-        });
-    }
-    if (agent instanceof GeminiAgent) {
-        const opts = { ...agent.opts };
-        return new GeminiAgent({
-            ...opts,
-            allowedTools: [...allowTools],
-        });
-    }
-    if (agent instanceof AntigravityAgent) {
-        const opts = { ...agent.opts };
-        return new AntigravityAgent({
-            ...opts,
-            allowedTools: [...allowTools],
-        });
-    }
+  if (!allowTools) {
     return agent;
+  }
+  if (agent instanceof ClaudeCodeAgent) {
+    const opts = { ...agent.opts };
+    if (allowTools.length === 0) {
+      return new ClaudeCodeAgent({
+        ...opts,
+        allowedTools: [],
+        tools: "",
+      });
+    }
+    return new ClaudeCodeAgent({
+      ...opts,
+      allowedTools: [...allowTools],
+    });
+  }
+  if (agent instanceof PiAgent) {
+    const opts = { ...agent.opts };
+    if (allowTools.length === 0) {
+      return new PiAgent({
+        ...opts,
+        tools: [],
+        noTools: true,
+      });
+    }
+    return new PiAgent({
+      ...opts,
+      tools: [...allowTools],
+      noTools: false,
+    });
+  }
+  if (agent instanceof GeminiAgent) {
+    const opts = { ...agent.opts };
+    return new GeminiAgent({
+      ...opts,
+      allowedTools: [...allowTools],
+    });
+  }
+  if (agent instanceof AntigravityAgent) {
+    const opts = { ...agent.opts };
+    return new AntigravityAgent({
+      ...opts,
+      allowedTools: [...allowTools],
+    });
+  }
+  return agent;
 }

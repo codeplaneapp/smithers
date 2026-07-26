@@ -135,8 +135,7 @@ function PendingDetail({ gate }: { gate: ApprovalGate }) {
 
       {gate.source === "synthetic" ? (
         <p className="appr-synthetic-note">
-          This approval was derived from run inspection because no native approval transport was
-          available.
+          This approval was derived from run inspection because no native approval transport was available.
         </p>
       ) : null}
 
@@ -161,8 +160,7 @@ function PendingDetail({ gate }: { gate: ApprovalGate }) {
       {confirming ? (
         <div className="appr-confirm" data-testid="approvals-deny-confirm">
           <div className="appr-confirm-msg">
-            Deny approval for <b>{label}</b> on run <b>{shortRunId(gate.runId)}</b>? This will fail
-            the waiting gate.
+            Deny approval for <b>{label}</b> on run <b>{shortRunId(gate.runId)}</b>? This will fail the waiting gate.
           </div>
           <div className="appr-actions">
             <button
@@ -224,10 +222,7 @@ function HistoryDetail({ decision }: { decision: ApprovalDecision }) {
       <div className="appr-meta">
         <MetaRow label="Run ID" value={decision.runId} />
         <MetaRow label="Node ID" value={decision.nodeId} />
-        <MetaRow
-          label="Iteration"
-          value={decision.iteration !== undefined ? String(decision.iteration) : undefined}
-        />
+        <MetaRow label="Iteration" value={decision.iteration !== undefined ? String(decision.iteration) : undefined} />
         <MetaRow label="Workflow" value={decision.workflowPath} />
         <MetaRow label="Requested" value={formatTimestamp(decision.requestedAtMs)} />
         <MetaRow label="Status" value={decision.action.toUpperCase()} />
@@ -241,8 +236,7 @@ function HistoryDetail({ decision }: { decision: ApprovalDecision }) {
 
       {decision.source === "synthetic" ? (
         <p className="appr-synthetic-note">
-          This approval was derived from run inspection because no native approval transport was
-          available.
+          This approval was derived from run inspection because no native approval transport was available.
         </p>
       ) : null}
 
@@ -269,9 +263,8 @@ export function ApprovalsCanvas() {
   const pending = filterPending(gates);
   const history = orderHistory(decisions);
 
-  const selectedGate = tab === "pending" ? pending.find((gate) => gate.id === selectedId) ?? null : null;
-  const selectedDecision =
-    tab === "history" ? history.find((decision) => decision.id === selectedId) ?? null : null;
+  const selectedGate = tab === "pending" ? (pending.find((gate) => gate.id === selectedId) ?? null) : null;
+  const selectedDecision = tab === "history" ? (history.find((decision) => decision.id === selectedId) ?? null) : null;
   const listEmpty = tab === "pending" ? pending.length === 0 : history.length === 0;
 
   return (

@@ -9,5 +9,5 @@ import { createDaytonaSandboxProvider } from "./createDaytonaSandboxProvider.js"
  * @returns {() => void}
  */
 export function registerDaytonaSandboxProvider(options = {}) {
-	return registerSandboxProvider(createDaytonaSandboxProvider(options));
+  return registerSandboxProvider(createDaytonaSandboxProvider(options));
 }

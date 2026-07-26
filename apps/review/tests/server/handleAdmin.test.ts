@@ -54,7 +54,13 @@ describe("admin endpoints", () => {
       new Request("https://review.test/api/admin/repos", {
         method: "POST",
         headers: { authorization: "Bearer test-admin", "content-type": "application/json" },
-        body: JSON.stringify({ repo: "octo/widgets", mode: "auto", quiz: "sometimes", prsPerMonth: 10, spendCapUsd: 25 }),
+        body: JSON.stringify({
+          repo: "octo/widgets",
+          mode: "auto",
+          quiz: "sometimes",
+          prsPerMonth: 10,
+          spendCapUsd: 25,
+        }),
       }),
       env,
     );

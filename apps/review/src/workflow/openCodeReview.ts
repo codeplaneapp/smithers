@@ -378,8 +378,8 @@ export async function resolveReviewTarget(input: OpenCodeReviewInput): Promise<R
     mode === "commit"
       ? input.commit.trim()
       : mode === "range"
-      ? `${input.from.trim()}..${input.to.trim()}`
-      : "workspace";
+        ? `${input.from.trim()}..${input.to.trim()}`
+        : "workspace";
   return { repoDir, mode, ref };
 }
 
@@ -402,7 +402,7 @@ function escapeRegex(value: string) {
 
 function globToRegExp(pattern: string) {
   let out = "^";
-  for (let i = 0; i < pattern.length; ) {
+  for (let i = 0; i < pattern.length;) {
     if (pattern.slice(i, i + 3) === "**/") {
       out += "(?:.*/)?";
       i += 3;
@@ -551,7 +551,10 @@ async function workspaceDiffText(repoDir: string) {
 
   const untracked = await git(repoDir, ["ls-files", "--others", "--exclude-standard"]);
   const pieces = [tracked];
-  for (const relPath of untracked.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)) {
+  for (const relPath of untracked
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)) {
     const fullPath = join(repoDir, relPath);
     if (!existsSync(fullPath)) continue;
     const stat = statSync(fullPath);
@@ -579,9 +582,23 @@ export async function loadDiffs(repoDir: string, input: OpenCodeReviewInput) {
   if (mode === "range") {
     const base = (await git(repoDir, ["merge-base", "--end-of-options", input.from.trim(), input.to.trim()])).trim();
     if (!base) throw new Error(`Cannot find merge-base between ${input.from} and ${input.to}.`);
-    diffText = await git(repoDir, ["diff", "--no-color", `-U${DIFF_CONTEXT_LINES}`, "--end-of-options", base, input.to.trim(), "--"]);
+    diffText = await git(repoDir, [
+      "diff",
+      "--no-color",
+      `-U${DIFF_CONTEXT_LINES}`,
+      "--end-of-options",
+      base,
+      input.to.trim(),
+      "--",
+    ]);
   } else if (mode === "commit") {
-    diffText = await git(repoDir, ["show", "--no-color", `-U${DIFF_CONTEXT_LINES}`, "--end-of-options", input.commit.trim()]);
+    diffText = await git(repoDir, [
+      "show",
+      "--no-color",
+      `-U${DIFF_CONTEXT_LINES}`,
+      "--end-of-options",
+      input.commit.trim(),
+    ]);
   } else {
     diffText = await workspaceDiffText(repoDir);
   }
@@ -607,7 +624,9 @@ function buildFileFilter(repoDir: string, customRulePath: string): FileFilter | 
     readProjectRule(join(repoDir, ".opencodereview", "rule.json")),
     readProjectRule(join(homedir(), ".opencodereview", "rule.json")),
   ];
-  const picked = candidates.find((rule) => rule && ((rule.include?.length ?? 0) > 0 || (rule.exclude?.length ?? 0) > 0));
+  const picked = candidates.find(
+    (rule) => rule && ((rule.include?.length ?? 0) > 0 || (rule.exclude?.length ?? 0) > 0),
+  );
   if (!picked) return null;
   return {
     include: (picked.include ?? []).map((pattern) => pattern.toLowerCase()),
@@ -728,14 +747,13 @@ export function reviewFileTaskId(path: string, index: number) {
 }
 
 function changedFileLine(diff: DiffRecord) {
-  const status =
-    diff.isNew
-      ? "ADDED"
-      : diff.isDeleted
-        ? "DELETED"
-        : diff.oldPath !== diff.newPath
-          ? "RENAMED"
-          : "MODIFIED";
+  const status = diff.isNew
+    ? "ADDED"
+    : diff.isDeleted
+      ? "DELETED"
+      : diff.oldPath !== diff.newPath
+        ? "RENAMED"
+        : "MODIFIED";
   return `${status}   ${effectivePath(diff)}`;
 }
 
@@ -747,7 +765,12 @@ function otherChangedFiles(diffs: DiffRecord[], currentPath: string) {
   return lines.length > 0 ? lines.join("\n") : "none";
 }
 
-function renderFileReviewPrompt(target: ReviewTarget, input: OpenCodeReviewInput, diff: DiffRecord, allDiffs: DiffRecord[]) {
+function renderFileReviewPrompt(
+  target: ReviewTarget,
+  input: OpenCodeReviewInput,
+  diff: DiffRecord,
+  allDiffs: DiffRecord[],
+) {
   const path = effectivePath(diff);
   const changeLines = diff.insertions + diff.deletions;
   const planGuidance =
@@ -786,7 +809,7 @@ function renderFileReviewPrompt(target: ReviewTarget, input: OpenCodeReviewInput
     "- major: a real bug users will hit.",
     "- minor: a correctness risk, an edge case, or misleading behavior.",
     "- info: style or docs, and only with concrete impact.",
-    "- confidence \"confirmed\" means you traced a concrete failure path; \"plausible\" means reasoned but not traced.",
+    '- confidence "confirmed" means you traced a concrete failure path; "plausible" means reasoned but not traced.',
     "- Omit any finding you cannot honestly call at least plausible.",
     "",
     "Untrusted content:",
@@ -798,7 +821,7 @@ function renderFileReviewPrompt(target: ReviewTarget, input: OpenCodeReviewInput
     "- Include existingCode for the smallest contiguous snippet related to the issue.",
     "- Include suggestionCode when a concrete replacement is useful.",
     "- startLine/endLine must point at lines present in the new side of this diff; when unsure, leave them 0 and provide exact existingCode for deterministic matching.",
-    "- If there are no findings, return status \"success\", message \"No comments generated. Looks good to me.\", and an empty comments array.",
+    '- If there are no findings, return status "success", message "No comments generated. Looks good to me.", and an empty comments array.',
     "",
     `Repository: ${target.repoDir}`,
     `Review mode: ${target.mode}`,
@@ -824,7 +847,10 @@ function renderFileReviewPrompt(target: ReviewTarget, input: OpenCodeReviewInput
   ].join("\n");
 }
 
-export async function buildNativeReviewPrompt(input: OpenCodeReviewInput, preview: PreviewOutput): Promise<NativeReviewPrompt> {
+export async function buildNativeReviewPrompt(
+  input: OpenCodeReviewInput,
+  preview: PreviewOutput,
+): Promise<NativeReviewPrompt> {
   input = normalizeOpenCodeReviewInput(input);
   const target = await resolveReviewTarget(input);
   if (!input.runReview) {
@@ -933,10 +959,7 @@ function normalizeCodeLine(value: string) {
 }
 
 function splitAndNormalizeCode(value: string) {
-  return value
-    .split("\n")
-    .map(normalizeCodeLine)
-    .filter(Boolean);
+  return value.split("\n").map(normalizeCodeLine).filter(Boolean);
 }
 
 function extractSideLines(hunk: Hunk, newSide: boolean): IndexedLine[] {
@@ -945,7 +968,11 @@ function extractSideLines(hunk: Hunk, newSide: boolean): IndexedLine[] {
   let newLine = hunk.newStart;
   for (const line of hunk.lines) {
     if (line.type === "context") {
-      result.push({ lineNum: newSide ? newLine : oldLine, anchorLine: newLine, content: normalizeCodeLine(line.content) });
+      result.push({
+        lineNum: newSide ? newLine : oldLine,
+        anchorLine: newLine,
+        content: normalizeCodeLine(line.content),
+      });
       oldLine += 1;
       newLine += 1;
     } else if (line.type === "added") {
@@ -1056,21 +1083,14 @@ function nearIdenticalContent(a: string, b: string) {
     for (let bIndex = 1; bIndex <= keyB.length; bIndex += 1) {
       const above = previous[bIndex];
       const substitutionCost = keyA[aIndex - 1] === keyB[bIndex - 1] ? 0 : 1;
-      previous[bIndex] = Math.min(
-        previous[bIndex] + 1,
-        previous[bIndex - 1] + 1,
-        diagonal + substitutionCost,
-      );
+      previous[bIndex] = Math.min(previous[bIndex] + 1, previous[bIndex - 1] + 1, diagonal + substitutionCost);
       diagonal = above;
     }
   }
   return 1 - previous[keyB.length] / longer >= 0.9;
 }
 
-function commentLinesOverlap(
-  a: { startLine: number; endLine: number },
-  b: { startLine: number; endLine: number },
-) {
+function commentLinesOverlap(a: { startLine: number; endLine: number }, b: { startLine: number; endLine: number }) {
   return a.startLine <= b.endLine && b.startLine <= a.endLine;
 }
 
@@ -1130,19 +1150,20 @@ export function finalizeNativeReview(
   prepared = nativeReviewPromptSchema.parse(prepared);
   if (!prepared.shouldReview || !input.runReview) return skippedReviewOutput(prepared);
 
-  const results: NativeReviewFileResult[] =
-    Array.isArray(fileResults)
-      ? fileResults.map((entry, index) => {
+  const results: NativeReviewFileResult[] = Array.isArray(fileResults)
+    ? fileResults
+        .map((entry, index) => {
           if (isPlainRecord(entry) && "file" in entry) return entry as NativeReviewFileResult;
           return { file: prepared.files[index], output: entry as NativeReviewAgentOutput };
-        }).filter((entry) => entry.file)
-      : fileResults && isPlainRecord(fileResults) && "file" in fileResults
-        ? [fileResults as NativeReviewFileResult]
-        : fileResults
-          ? prepared.files.length === 1
-            ? [{ file: prepared.files[0], output: fileResults as NativeReviewAgentOutput }]
-            : []
-          : [];
+        })
+        .filter((entry) => entry.file)
+    : fileResults && isPlainRecord(fileResults) && "file" in fileResults
+      ? [fileResults as NativeReviewFileResult]
+      : fileResults
+        ? prepared.files.length === 1
+          ? [{ file: prepared.files[0], output: fileResults as NativeReviewAgentOutput }]
+          : []
+        : [];
 
   const byFileId = new Map(results.map((result) => [result.file.id, result]));
   const orderedResults = prepared.files.map((file) => byFileId.get(file.id) ?? { file, output: null });
@@ -1212,7 +1233,7 @@ export function finalizeNativeReview(
     elapsed: "",
   });
   const status =
-    failedFiles >= prepared.files.length || explicitFailure && prepared.files.length === 1
+    failedFiles >= prepared.files.length || (explicitFailure && prepared.files.length === 1)
       ? "failed"
       : warnings.length > 0
         ? "completed_with_warnings"
@@ -1222,11 +1243,12 @@ export function finalizeNativeReview(
     status,
     ok: status !== "failed",
     reviewer: "smithers-native",
-    message: status === "failed"
-      ? `All ${prepared.files.length} file review(s) failed.`
-      : finalComments.length > 0
-        ? `Reviewed ${prepared.reviewableFiles} file(s) and produced ${finalComments.length} comment(s).`
-        : "No comments generated. Looks good to me.",
+    message:
+      status === "failed"
+        ? `All ${prepared.files.length} file review(s) failed.`
+        : finalComments.length > 0
+          ? `Reviewed ${prepared.reviewableFiles} file(s) and produced ${finalComments.length} comment(s).`
+          : "No comments generated. Looks good to me.",
     summary,
     comments: finalComments,
     warnings,

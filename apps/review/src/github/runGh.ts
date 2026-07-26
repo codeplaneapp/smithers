@@ -21,8 +21,7 @@ export async function runGh(repoDir: string, args: string[], stdin?: string): Pr
   const stderr = result.stderr ?? "";
   if (result.status !== 0) {
     const detail =
-      stderr.trim() ||
-      `exited with code ${result.status}${result.signal ? `, signal ${result.signal}` : ""}`;
+      stderr.trim() || `exited with code ${result.status}${result.signal ? `, signal ${result.signal}` : ""}`;
     throw new Error(`gh ${args.slice(0, 2).join(" ")} failed: ${detail}`);
   }
   return result.stdout ?? "";
@@ -37,11 +36,7 @@ export async function runGh(repoDir: string, args: string[], stdin?: string): Pr
  * across jq builds, so string results are unwrapped once; blank and
  * unparseable lines are skipped.
  */
-export async function runGhJsonLines(
-  repoDir: string,
-  args: string[],
-  gh: typeof runGh = runGh,
-): Promise<object[]> {
+export async function runGhJsonLines(repoDir: string, args: string[], gh: typeof runGh = runGh): Promise<object[]> {
   const raw = await gh(repoDir, args);
   const records: object[] = [];
   for (const line of raw.split("\n")) {

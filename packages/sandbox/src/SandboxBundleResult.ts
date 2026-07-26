@@ -1,3 +1,3 @@
 export type SandboxBundleResult = {
-    bundlePath: string;
+  bundlePath: string;
 };

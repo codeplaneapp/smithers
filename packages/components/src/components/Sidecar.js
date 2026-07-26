@@ -15,54 +15,54 @@ import { Task } from "./Task.js";
  * @param {SidecarProps} props
  */
 export function Sidecar(props) {
-	if (props.skipIf) return null;
-	const {
-		id = "sidecar",
-		agent,
-		sidecar,
-		output,
-		sidecarOutput,
-		scorers,
-		prompt,
-		input,
-		maxConcurrency,
-		groundTruth,
-		context,
-		primaryLabel,
-		sidecarLabel,
-		children,
-	} = props;
-	const promptNode = prompt ?? input ?? children;
-	const shadowId = `${id}-sidecar`;
-	return React.createElement(
-		Parallel,
-		{ id: `${id}-parallel`, maxConcurrency },
-		React.createElement(
-			Task,
-			{
-				id,
-				output,
-				agent,
-				scorers,
-				groundTruth,
-				context,
-				label: primaryLabel,
-			},
-			promptNode,
-		),
-		React.createElement(
-			Task,
-			{
-				id: shadowId,
-				output: sidecarOutput ?? output,
-				agent: sidecar,
-				continueOnFail: true,
-				scorers,
-				groundTruth,
-				context,
-				label: sidecarLabel,
-			},
-			promptNode,
-		),
-	);
+  if (props.skipIf) return null;
+  const {
+    id = "sidecar",
+    agent,
+    sidecar,
+    output,
+    sidecarOutput,
+    scorers,
+    prompt,
+    input,
+    maxConcurrency,
+    groundTruth,
+    context,
+    primaryLabel,
+    sidecarLabel,
+    children,
+  } = props;
+  const promptNode = prompt ?? input ?? children;
+  const shadowId = `${id}-sidecar`;
+  return React.createElement(
+    Parallel,
+    { id: `${id}-parallel`, maxConcurrency },
+    React.createElement(
+      Task,
+      {
+        id,
+        output,
+        agent,
+        scorers,
+        groundTruth,
+        context,
+        label: primaryLabel,
+      },
+      promptNode,
+    ),
+    React.createElement(
+      Task,
+      {
+        id: shadowId,
+        output: sidecarOutput ?? output,
+        agent: sidecar,
+        continueOnFail: true,
+        scorers,
+        groundTruth,
+        context,
+        label: sidecarLabel,
+      },
+      promptNode,
+    ),
+  );
 }

@@ -1,10 +1,4 @@
-import type {
-  DeterministicCheck,
-  EditedContent,
-  ReleaseAnalysis,
-  ReleaseContentInput,
-  ScoreReport,
-} from "./schemas";
+import type { DeterministicCheck, EditedContent, ReleaseAnalysis, ReleaseContentInput, ScoreReport } from "./schemas";
 
 type Issue = DeterministicCheck["issues"][number];
 
@@ -144,23 +138,11 @@ export function runDeterministicChecks(params: {
   }
 
   if (input.channels.changelog && !input.skip.changelog && content.changelog) {
-    validateClaimIds(
-      issues,
-      "changelog",
-      content.changelog.claimIds,
-      analysis,
-      input.quality.requireClaimLedger,
-    );
+    validateClaimIds(issues, "changelog", content.changelog.claimIds, analysis, input.quality.requireClaimLedger);
   }
 
   if (input.channels.blogPost && !input.skip.blogPost && content.blogPost) {
-    validateClaimIds(
-      issues,
-      "blogPost",
-      content.blogPost.claimIds,
-      analysis,
-      input.quality.requireClaimLedger,
-    );
+    validateClaimIds(issues, "blogPost", content.blogPost.claimIds, analysis, input.quality.requireClaimLedger);
     if (content.blogPost.wordCount < Math.floor(input.blogPost.targetWords * 0.45)) {
       addIssue(issues, {
         severity: "minor",

@@ -5,24 +5,23 @@
  * set. This is intentionally conservative — it re-runs more rather than less.
  */
 export function expandResetSet(nodes, resetNodeIds) {
-    if (resetNodeIds.length === 0)
-        return [];
-    const resetSet = new Set(resetNodeIds);
-    const result = new Set();
-    // Collect all unique base nodeIds from the snapshot keyed as "nodeId::iteration"
-    for (const key of Object.keys(nodes)) {
-        const baseId = key.split("::")[0];
-        if (resetSet.has(baseId)) {
-            result.add(key);
-        }
+  if (resetNodeIds.length === 0) return [];
+  const resetSet = new Set(resetNodeIds);
+  const result = new Set();
+  // Collect all unique base nodeIds from the snapshot keyed as "nodeId::iteration"
+  for (const key of Object.keys(nodes)) {
+    const baseId = key.split("::")[0];
+    if (resetSet.has(baseId)) {
+      result.add(key);
     }
-    // If we found nothing via base nodeId, try exact key match
-    if (result.size === 0) {
-        for (const id of resetNodeIds) {
-            if (nodes[id]) {
-                result.add(id);
-            }
-        }
+  }
+  // If we found nothing via base nodeId, try exact key match
+  if (result.size === 0) {
+    for (const id of resetNodeIds) {
+      if (nodes[id]) {
+        result.add(id);
+      }
     }
-    return [...result];
+  }
+  return [...result];
 }

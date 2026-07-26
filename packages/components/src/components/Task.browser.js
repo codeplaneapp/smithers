@@ -13,7 +13,7 @@ export { renderPromptToText } from "./taskCore.js";
  * @returns {import("@smithers-orchestrator/agents/AgentLike").AgentLike}
  */
 function passthroughCliToolAllowlist(agent) {
-    return agent;
+  return agent;
 }
 
 export const Task = createTaskComponent({ applyCliToolAllowlist: passthroughCliToolAllowlist });

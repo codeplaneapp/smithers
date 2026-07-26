@@ -262,9 +262,16 @@ function runProcess(command: string, args: string[], cwd: string, timeoutMs: num
       clearTimeout(timer);
       resolve({ exitCode, stdout, stderr });
     };
-    child.stdout.on("data", (chunk) => { stdout += String(chunk); });
-    child.stderr.on("data", (chunk) => { stderr += String(chunk); });
-    child.on("error", (error) => { stderr += String(error); finish(1); });
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", (error) => {
+      stderr += String(error);
+      finish(1);
+    });
     child.on("close", (code) => finish(code ?? 1));
     const timer = setTimeout(() => {
       stderr += "\nTimed out after " + timeoutMs + "ms";
@@ -278,14 +285,24 @@ function runProcess(command: string, args: string[], cwd: string, timeoutMs: num
 
 type GateDef = { gateKey: string; cwd: string; command: string; timeoutMinutes: number };
 function parseGates(raw: unknown): GateDef[] {
-  const parsed = typeof raw === "string"
-    ? (() => { try { return JSON.parse(raw); } catch { return []; } })()
-    : raw;
+  const parsed =
+    typeof raw === "string"
+      ? (() => {
+          try {
+            return JSON.parse(raw);
+          } catch {
+            return [];
+          }
+        })()
+      : raw;
   if (!Array.isArray(parsed)) return [];
   return parsed
     .map((entry): GateDef | null => {
       if (!isRecord(entry)) return null;
-      const gateKey = String(entry.gateKey ?? "").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+      const gateKey = String(entry.gateKey ?? "")
+        .replace(/[^a-zA-Z0-9_-]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 40);
       const cwd = String(entry.cwd ?? "").trim();
       const command = String(entry.command ?? "").trim();
       if (!gateKey || !cwd || !command) return null;
@@ -317,7 +334,10 @@ function checkDocs(input: Input, docs: Docs | undefined): DocsCheck {
   }
   if (workplan && workplan.length < 800) problems.push("WORKPLAN.md is too thin (" + workplan.length + " bytes)");
   const gates = parseGates(docs?.gatesJson);
-  if (gates.length < 3) problems.push("gatesJson has " + gates.length + " valid gate(s); need at least 3 (plue, multi, smithers suites at minimum)");
+  if (gates.length < 3)
+    problems.push(
+      "gatesJson has " + gates.length + " valid gate(s); need at least 3 (plue, multi, smithers suites at minimum)",
+    );
   for (const gate of gates) {
     if (!existsSync(gate.cwd)) problems.push("gate " + gate.gateKey + " cwd missing: " + gate.cwd);
   }
@@ -328,11 +348,17 @@ function checkDocs(input: Input, docs: Docs | undefined): DocsCheck {
       continue;
     }
     const hits = (readFileSync(path, "utf8").match(new RegExp(RETIRED_PROVIDER_NAME, "gi")) ?? []).length;
-    if (hits > 0) problems.push(rel + " still mentions the retired provider " + hits + " time(s); the single-provider spec must have zero");
+    if (hits > 0)
+      problems.push(
+        rel + " still mentions the retired provider " + hits + " time(s); the single-provider spec must have zero",
+      );
   }
   return problems.length
     ? { passed: false, detail: problems.join("; ").slice(0, 4_000) }
-    : { passed: true, detail: "Workplan written, " + gates.length + " gates frozen, specs contain no retired-provider vocabulary." };
+    : {
+        passed: true,
+        detail: "Workplan written, " + gates.length + " gates frozen, specs contain no retired-provider vocabulary.",
+      };
 }
 
 async function runGate(gate: GateDef): Promise<Gate> {
@@ -351,9 +377,7 @@ async function runGate(gate: GateDef): Promise<Gate> {
   // direct argv instead: it enters each draft before applying its globs and
   // distinguishes rg's clean no-match exit from an execution error.
   const usesVocabularyScanner = gate.gateKey === "single-provider-vocabulary";
-  const executedCommand = usesVocabularyScanner
-    ? "/bin/bash " + PROVIDER_VOCABULARY_SCANNER
-    : gate.command;
+  const executedCommand = usesVocabularyScanner ? "/bin/bash " + PROVIDER_VOCABULARY_SCANNER : gate.command;
   const result = usesVocabularyScanner
     ? await runProcess("/bin/bash", [PROVIDER_VOCABULARY_SCANNER], gate.cwd, timeoutMs)
     : await runProcess("/bin/bash", ["-lc", gate.command], gate.cwd, timeoutMs);
@@ -363,7 +387,16 @@ async function runGate(gate: GateDef): Promise<Gate> {
     passed: result.exitCode === 0,
     exitCode: result.exitCode,
     logTail,
-    summary: "Gate " + gate.gateKey + " exited " + result.exitCode + " (`" + executedCommand.slice(0, 120) + "` in " + gate.cwd + ").",
+    summary:
+      "Gate " +
+      gate.gateKey +
+      " exited " +
+      result.exitCode +
+      " (`" +
+      executedCommand.slice(0, 120) +
+      "` in " +
+      gate.cwd +
+      ").",
   };
 }
 
@@ -373,67 +406,86 @@ const PHASES: PhaseDef[] = [
   {
     key: "provider-purge",
     title: "Remove every retired-provider remnant",
-    mission: (input) => [
-      "Remove every retired-provider remnant from the isolated drafts, per the locked single-provider decision:",
-      "- Retired-provider fallback routing in the Plue provider code.",
-      "- Retired-provider configuration, secret plumbing, and Helm values.",
-      "- Retired-provider dashboards and monitoring references.",
-      "- Migration-oriented retired-provider documentation and the rejected vendor-backed compose setting.",
-      "Search exhaustively for " + RETIRED_PROVIDER_NAME + " across " + input.plueDir + ", " + input.multiDir + ", " + input.smithersDir + ".",
-      "Historical changelog entries may keep the word; runtime code, config, infra, and active docs may not.",
-      "Update any tests that referenced the removed paths; do not weaken unrelated assertions.",
-    ].join("\n"),
+    mission: (input) =>
+      [
+        "Remove every retired-provider remnant from the isolated drafts, per the locked single-provider decision:",
+        "- Retired-provider fallback routing in the Plue provider code.",
+        "- Retired-provider configuration, secret plumbing, and Helm values.",
+        "- Retired-provider dashboards and monitoring references.",
+        "- Migration-oriented retired-provider documentation and the rejected vendor-backed compose setting.",
+        "Search exhaustively for " +
+          RETIRED_PROVIDER_NAME +
+          " across " +
+          input.plueDir +
+          ", " +
+          input.multiDir +
+          ", " +
+          input.smithersDir +
+          ".",
+        "Historical changelog entries may keep the word; runtime code, config, infra, and active docs may not.",
+        "Update any tests that referenced the removed paths; do not weaken unrelated assertions.",
+      ].join("\n"),
   },
   {
     key: "local-harness",
     title: "Real local harness (no fakes)",
-    mission: (input) => [
-      "Replace the rejected fake compose path with a real local harness in " + input.plueDir + ":",
-      "- Docker Compose for Postgres/GCS-emulation/repository dependencies (Docker is OrbStack on this host; `open -a OrbStack` if the daemon is down).",
-      "- A REAL Microsandbox runtime on the macOS host using the Apple Silicon HVF runtime (this M3 Max is confirmed capable). Install/launch it from the harness scripts.",
-      "- The Plue controller and API connected to that real runtime, so the API no longer exits from a missing controller.",
-      "Deliver one documented entrypoint (script or make/zig target) that brings the whole harness up and health-checks it, and a teardown path.",
-      "Prove it: run the entrypoint, show the controller registering the runtime and the API serving. Paste the evidence.",
-    ].join("\n"),
+    mission: (input) =>
+      [
+        "Replace the rejected fake compose path with a real local harness in " + input.plueDir + ":",
+        "- Docker Compose for Postgres/GCS-emulation/repository dependencies (Docker is OrbStack on this host; `open -a OrbStack` if the daemon is down).",
+        "- A REAL Microsandbox runtime on the macOS host using the Apple Silicon HVF runtime (this M3 Max is confirmed capable). Install/launch it from the harness scripts.",
+        "- The Plue controller and API connected to that real runtime, so the API no longer exits from a missing controller.",
+        "Deliver one documented entrypoint (script or make/zig target) that brings the whole harness up and health-checks it, and a teardown path.",
+        "Prove it: run the entrypoint, show the controller registering the runtime and the API serving. Paste the evidence.",
+      ].join("\n"),
   },
   {
     key: "conformance-local",
     title: "Provider conformance green locally",
-    mission: (input) => [
-      "Make the full provider-conformance lifecycle pass locally against the real harness in " + input.plueDir + ":",
-      "create, exec, file transfer, SSH, preview HTTP and WebSocket, stop/start, snapshot/restore/fork, secrets, drain/recovery/delete.",
-      "Then fix the local E2E cascade for real: the prior run was 69 passed / 223 failed, almost all cascading from the API exiting without a real controller.",
-      "Run the actual suites and iterate until green. Never mock, never skip a failing test to get green; fix root causes.",
-      "Paste the final suite tallies and the commands that produced them.",
-    ].join("\n"),
+    mission: (input) =>
+      [
+        "Make the full provider-conformance lifecycle pass locally against the real harness in " + input.plueDir + ":",
+        "create, exec, file transfer, SSH, preview HTTP and WebSocket, stop/start, snapshot/restore/fork, secrets, drain/recovery/delete.",
+        "Then fix the local E2E cascade for real: the prior run was 69 passed / 223 failed, almost all cascading from the API exiting without a real controller.",
+        "Run the actual suites and iterate until green. Never mock, never skip a failing test to get green; fix root causes.",
+        "Paste the final suite tallies and the commands that produced them.",
+      ].join("\n"),
   },
   {
     key: "ci-canary",
     title: "Linux KVM CI gate + prod canary wiring",
-    mission: (input) => [
-      "In " + input.plueDir + ": add a CI gate that runs the Microsandbox provider-conformance suite on a Linux KVM-capable runner, and wire a production canary (config + jobs) that will exercise the sandbox lifecycle continuously once deployed.",
-      "The CI gate must be a real pipeline definition consistent with the repo's existing CI layout; the canary must be deployable via the existing Helm/infra structure.",
-      "Validate what is validatable locally: pipeline config lint/dry-run, helm template/lint, terraform validate. Paste the evidence.",
-    ].join("\n"),
+    mission: (input) =>
+      [
+        "In " +
+          input.plueDir +
+          ": add a CI gate that runs the Microsandbox provider-conformance suite on a Linux KVM-capable runner, and wire a production canary (config + jobs) that will exercise the sandbox lifecycle continuously once deployed.",
+        "The CI gate must be a real pipeline definition consistent with the repo's existing CI layout; the canary must be deployable via the existing Helm/infra structure.",
+        "Validate what is validatable locally: pipeline config lint/dry-run, helm template/lint, terraform validate. Paste the evidence.",
+      ].join("\n"),
   },
   {
     key: "suite-green",
     title: "Every affected suite green",
-    mission: (input) => [
-      "Rerun and green every suite the drafts affect:",
-      "- Plue (" + input.plueDir + "): `zig build ci-local` plus the E2E suites.",
-      "- Multi (" + input.multiDir + "): the full test suite (was 5,989 passed / 0 failed; keep it there).",
-      "- Smithers (" + input.smithersDir + "): the suites covering the changed workflows/docs/pack files; regenerate docs bundles with `pnpm docs:llms` if docs changed and run the docs checks.",
-      "Fix any failure at its root cause. Distinguish pre-existing/machine-state failures (verify against the workspace's base revision before blaming the drafts) and document them instead of papering over.",
-      "Paste per-repo tallies with the exact commands.",
-    ].join("\n"),
+    mission: (input) =>
+      [
+        "Rerun and green every suite the drafts affect:",
+        "- Plue (" + input.plueDir + "): `zig build ci-local` plus the E2E suites.",
+        "- Multi (" + input.multiDir + "): the full test suite (was 5,989 passed / 0 failed; keep it there).",
+        "- Smithers (" +
+          input.smithersDir +
+          "): the suites covering the changed workflows/docs/pack files; regenerate docs bundles with `pnpm docs:llms` if docs changed and run the docs checks.",
+        "Fix any failure at its root cause. Distinguish pre-existing/machine-state failures (verify against the workspace's base revision before blaming the drafts) and document them instead of papering over.",
+        "Paste per-repo tallies with the exact commands.",
+      ].join("\n"),
   },
 ];
 
 // ── Prompts ──────────────────────────────────────────────────────────────────
 function preamble(input: Input): string {
   return [
-    "First, read " + input.briefPath + " COMPLETELY. It is the source of truth for goals, locked decisions, workspace paths, and house rules; everything below assumes it.",
+    "First, read " +
+      input.briefPath +
+      " COMPLETELY. It is the source of truth for goals, locked decisions, workspace paths, and house rules; everything below assumes it.",
     "Isolated drafts: plue=" + input.plueDir + " multi=" + input.multiDir + " smithers=" + input.smithersDir + ".",
     "NEVER touch the original repos (~/plue, ~/multi, ~/smithers) unless your prompt explicitly says integration is your job.",
     "NEVER push, deploy, or file issues unless your prompt explicitly says that is your job.",
@@ -447,11 +499,15 @@ function docsPrompt(input: Input, feedback: string): string {
     "You are Claude Fable, the docs architect and lead reviewer for this effort. This phase is docs-first: the docs you produce define the contract every later phase implements against.",
     "",
     "Do all of the following:",
-    "1. REVIEW the docs architecture and the implementation so far. Read the Plue spec (docs/specs/microsandbox-sandbox-provider.md) and runbook (docs/runbooks/microsandbox.md) in " + input.plueDir + ", the spec/docs changes in the Multi and Smithers drafts (use `jj diff` / `git diff` there to see what changed), and the in-flight packages/microsandbox package in /Users/williamcory/smithers5. Check the docs against the actual code: find drift, gaps, contradictions, and structural problems.",
+    "1. REVIEW the docs architecture and the implementation so far. Read the Plue spec (docs/specs/microsandbox-sandbox-provider.md) and runbook (docs/runbooks/microsandbox.md) in " +
+      input.plueDir +
+      ", the spec/docs changes in the Multi and Smithers drafts (use `jj diff` / `git diff` there to see what changed), and the in-flight packages/microsandbox package in /Users/williamcory/smithers5. Check the docs against the actual code: find drift, gaps, contradictions, and structural problems.",
     "2. REVISE the Plue spec and runbook to the locked single-provider decision: Microsandbox only. Zero case-insensitive mentions of the retired provider may remain in those two files (a deterministic check enforces this). Fold in the operational reality: Autopilot control plane stays, isolated regional Standard GKE cluster with nested virtualization for sandboxes, out-of-state PKI/secret bootstrap, migration 000102, and the real local harness (Docker Compose deps + real HVF Microsandbox on macOS).",
     "3. IMPROVE the docs you touch: correct structure, tighten prose per the house style in the brief, fix stale statements. Docs only in this phase; do not change product code (record code problems in the work plan instead).",
-    "4. WRITE the work plan to " + WORKPLAN_PATH + " with one section per phase: provider-purge, local-harness, conformance-local, ci-canary, suite-green. For each: concrete files/dirs to touch, exact commands, acceptance criteria, and known landmines from the brief and your review. Make it specific enough that a Codex implementer can execute without guessing.",
-    "5. FREEZE the deterministic verification gates and return them in the gatesJson output field: a JSON array of {\"gateKey\", \"cwd\", \"command\", \"timeoutMinutes\"} objects (3 to 10 gates). Each command is non-interactive bash where exit 0 means pass, run from cwd. Include at minimum: the Plue CI/E2E suite gate(s), the Multi full-suite gate, a Smithers checks gate, and a grep gate that fails if the retired provider name survives anywhere it must not (make the grep precise about allowed historical locations). Choose realistic timeoutMinutes; suites here run 30 to 120 minutes.",
+    "4. WRITE the work plan to " +
+      WORKPLAN_PATH +
+      " with one section per phase: provider-purge, local-harness, conformance-local, ci-canary, suite-green. For each: concrete files/dirs to touch, exact commands, acceptance criteria, and known landmines from the brief and your review. Make it specific enough that a Codex implementer can execute without guessing.",
+    '5. FREEZE the deterministic verification gates and return them in the gatesJson output field: a JSON array of {"gateKey", "cwd", "command", "timeoutMinutes"} objects (3 to 10 gates). Each command is non-interactive bash where exit 0 means pass, run from cwd. Include at minimum: the Plue CI/E2E suite gate(s), the Multi full-suite gate, a Smithers checks gate, and a grep gate that fails if the retired provider name survives anywhere it must not (make the grep precise about allowed historical locations). Choose realistic timeoutMinutes; suites here run 30 to 120 minutes.',
     feedback ? "\nThe previous attempt failed the deterministic docs check. Fix exactly this:\n" + feedback : "",
     "",
     "Output fields: summary (what you found and changed), workPlanWritten (true only after the file is on disk), gatesJson (the frozen gates), filesChanged (repo-relative paths per workspace, prefixed like plue:docs/specs/...).",
@@ -462,8 +518,14 @@ function implPrompt(phase: PhaseDef, input: Input, feedback: string): string {
   return [
     preamble(input),
     "",
-    "You are Codex Sol, the implementer for phase \"" + phase.key + "\" (" + phase.title + ") of the microsandbox-finish run.",
-    "Read your phase's section of the work plan at " + WORKPLAN_PATH + " before starting; it carries the acceptance criteria a separate reviewer will enforce.",
+    'You are Codex Sol, the implementer for phase "' +
+      phase.key +
+      '" (' +
+      phase.title +
+      ") of the microsandbox-finish run.",
+    "Read your phase's section of the work plan at " +
+      WORKPLAN_PATH +
+      " before starting; it carries the acceptance criteria a separate reviewer will enforce.",
     "",
     phase.mission(input),
     "",
@@ -478,8 +540,20 @@ function selfReviewPrompt(phase: PhaseDef, input: Input, impl: Impl | undefined)
   return [
     preamble(input),
     "",
-    "You are Codex Sol reviewing your own team's work for phase \"" + phase.key + "\" (" + phase.title + "). Review it as a hostile outsider: assume the implementation report overstates what happened.",
-    impl ? "Implementer self-report:\n" + JSON.stringify({ status: impl.status, summary: impl.summary, evidence: impl.evidence.slice(0, 3_000), filesChanged: impl.filesChanged }) : "No implementer self-report; inspect the workspaces directly.",
+    "You are Codex Sol reviewing your own team's work for phase \"" +
+      phase.key +
+      '" (' +
+      phase.title +
+      "). Review it as a hostile outsider: assume the implementation report overstates what happened.",
+    impl
+      ? "Implementer self-report:\n" +
+        JSON.stringify({
+          status: impl.status,
+          summary: impl.summary,
+          evidence: impl.evidence.slice(0, 3_000),
+          filesChanged: impl.filesChanged,
+        })
+      : "No implementer self-report; inspect the workspaces directly.",
     "",
     "Verify against the acceptance criteria in " + WORKPLAN_PATH + " for this phase:",
     "- Inspect the actual diffs in the draft workspaces (`jj diff`/`git diff`).",
@@ -493,14 +567,24 @@ function gateFixPrompt(gate: GateDef, row: Gate | undefined, input: Input): stri
   return [
     preamble(input),
     "",
-    "You are Codex Sol. The deterministic gate \"" + gate.gateKey + "\" failed (exit " + (row?.exitCode ?? "?") + "). The harness runs it mechanically as: `" + gate.command + "` in " + gate.cwd + ".",
+    'You are Codex Sol. The deterministic gate "' +
+      gate.gateKey +
+      '" failed (exit ' +
+      (row?.exitCode ?? "?") +
+      "). The harness runs it mechanically as: `" +
+      gate.command +
+      "` in " +
+      gate.cwd +
+      ".",
     "Gate log tail:",
     "---",
     row?.logTail || "(no log captured)",
     "---",
     "Diagnose and fix the ROOT CAUSE in the draft workspaces, then re-run the exact gate command yourself to confirm it exits 0 before you finish.",
     "Never weaken the gate, delete/skip tests, or mock a backend to get green. If you believe the gate command itself is wrong, say so explicitly in your summary and fix the code anyway where possible; a human reads exhausted gates.",
-    "Output fields: fixKey=" + JSON.stringify(gate.gateKey) + ", summary (root cause + fix + your confirming run), filesChanged.",
+    "Output fields: fixKey=" +
+      JSON.stringify(gate.gateKey) +
+      ", summary (root cause + fix + your confirming run), filesChanged.",
   ].join("\n");
 }
 
@@ -531,7 +615,7 @@ function lgtmFixPrompt(input: Input, review: FableReview | undefined): string {
     "---",
     review?.findings || "(missing findings; inspect the latest fable-review output row)",
     "---",
-    "Output fields: fixKey=\"lgtm\", summary (finding-by-finding disposition with evidence), filesChanged.",
+    'Output fields: fixKey="lgtm", summary (finding-by-finding disposition with evidence), filesChanged.',
   ].join("\n");
 }
 
@@ -557,12 +641,20 @@ function integrateReviewPrompt(input: Input, row: Integrate | undefined): string
     preamble(input),
     "",
     "You are Codex Sol, verifying the integration of the drafts into the original repos (/Users/williamcory/plue, /Users/williamcory/multi, /Users/williamcory/smithers).",
-    row ? "Integrator self-report:\n" + JSON.stringify({ status: row.status, summary: row.summary, evidence: row.evidence.slice(0, 3_000), reposTouched: row.reposTouched }) : "No integrator self-report; verify directly.",
+    row
+      ? "Integrator self-report:\n" +
+        JSON.stringify({
+          status: row.status,
+          summary: row.summary,
+          evidence: row.evidence.slice(0, 3_000),
+          reposTouched: row.reposTouched,
+        })
+      : "No integrator self-report; verify directly.",
     "Check, per repo, with your own commands:",
     "- Every microsandbox-effort file in the draft is content-identical (or correctly three-way merged) in the original.",
     "- The integration commits are pathspec-scoped: `git show --stat`/`jj log` show only effort files; no foreign WIP was swept in and no unrelated file was reverted.",
     "- Nothing was pushed to any remote.",
-    "approved=true only if all three repos check out. findings must be precise (repo, file, what diverged). Set phaseKey=\"integrate\".",
+    'approved=true only if all three repos check out. findings must be precise (repo, file, what diverged). Set phaseKey="integrate".',
   ].join("\n");
 }
 
@@ -583,7 +675,9 @@ function prodProofPrompt(input: Input, deployRow: Deploy | undefined): string {
     preamble(input),
     "",
     "You are Claude Fable, proving the deployed Microsandbox stack in PRODUCTION.",
-    deployRow ? "Deploy self-report:\n" + JSON.stringify({ status: deployRow.status, summary: deployRow.summary }) : "No deploy report; inspect the cluster state first.",
+    deployRow
+      ? "Deploy self-report:\n" + JSON.stringify({ status: deployRow.status, summary: deployRow.summary })
+      : "No deploy report; inspect the cluster state first.",
     "Run the complete provider-conformance lifecycle against production: create, exec, file transfer, SSH, preview HTTP and WebSocket, stop/start, snapshot/restore/fork, secrets, drain/recovery/delete. Also run the GKE-side conformance suite the CI gate uses, pointed at prod, and confirm the canary is live and reporting.",
     "Clean up every artifact the proof creates. passed=true only when every lifecycle step verifiably succeeded; evidence carries the command-by-command proof.",
   ].join("\n");
@@ -593,8 +687,12 @@ function issueDraftPrompt(input: Input): string {
   return [
     preamble(input),
     "",
-    "You are Codex Sol. Draft the upstream issue for the Iron/Microsandbox gap this effort uncovered (the Iron proxy gap investigated during the spike; re-derive the specifics from the spec/runbook and the provider code in " + input.plueDir + " rather than from memory).",
-    "Write the draft to " + ISSUE_DRAFT_PATH + " with: a one-line title; 'Target repo: <owner/name>' on its own line (the correct upstream repository); environment; a minimal reproduction; expected vs actual; impact on downstream users; and a concrete proposed fix or API change. Follow the brief's prose style.",
+    "You are Codex Sol. Draft the upstream issue for the Iron/Microsandbox gap this effort uncovered (the Iron proxy gap investigated during the spike; re-derive the specifics from the spec/runbook and the provider code in " +
+      input.plueDir +
+      " rather than from memory).",
+    "Write the draft to " +
+      ISSUE_DRAFT_PATH +
+      " with: a one-line title; 'Target repo: <owner/name>' on its own line (the correct upstream repository); environment; a minimal reproduction; expected vs actual; impact on downstream users; and a concrete proposed fix or API change. Follow the brief's prose style.",
     "Do NOT file anything. The human reviews this draft before it goes anywhere.",
     "Output: draftPath, targetRepo (owner/name), synopsis (3-6 sentences).",
   ].join("\n");
@@ -602,7 +700,11 @@ function issueDraftPrompt(input: Input): string {
 
 function issueFilePrompt(draft: IssueDraft | undefined): string {
   return [
-    "You are Codex Luna. The human approved filing the upstream issue drafted at " + (draft?.draftPath ?? ISSUE_DRAFT_PATH) + " against " + (draft?.targetRepo ?? "(read 'Target repo:' from the draft)") + ".",
+    "You are Codex Luna. The human approved filing the upstream issue drafted at " +
+      (draft?.draftPath ?? ISSUE_DRAFT_PATH) +
+      " against " +
+      (draft?.targetRepo ?? "(read 'Target repo:' from the draft)") +
+      ".",
     "Read the draft file, then file it verbatim with `gh issue create --repo <target> --title <first line> --body-file <a body file you prepare from the draft minus the title/target lines>`.",
     "Verify with `gh issue view <url>` and return the URL. Touch nothing else.",
   ].join("\n");
@@ -623,7 +725,8 @@ export default smithers((ctx) => {
   const gateRowFor = (key: string) => latest<Gate>(ctx, outputs.msbGate, "gate-" + key);
 
   const fableReview = latest<FableReview>(ctx, outputs.msbFableReview, "fable-review");
-  const integrationApproved = ctx.outputMaybe(outputs.msbApproval, { nodeId: "approve-integration" })?.approved === true;
+  const integrationApproved =
+    ctx.outputMaybe(outputs.msbApproval, { nodeId: "approve-integration" })?.approved === true;
   const integrate = latest<Integrate>(ctx, outputs.msbIntegrate, "integrate");
   const integrateReview = latest<SelfReview>(ctx, outputs.msbSelfReview, "integrate-review");
   const integrated = integrateReview?.approved === true;
@@ -636,17 +739,29 @@ export default smithers((ctx) => {
   const gateResultsText = gates
     .map((gate) => {
       const row = gateRowFor(gate.gateKey);
-      return "- " + gate.gateKey + ": " + (row ? (row.passed ? "PASSED" : "FAILED (exit " + row.exitCode + ")") : "not run") + " — `" + gate.command.slice(0, 100) + "`";
+      return (
+        "- " +
+        gate.gateKey +
+        ": " +
+        (row ? (row.passed ? "PASSED" : "FAILED (exit " + row.exitCode + ")") : "not run") +
+        " — `" +
+        gate.command.slice(0, 100) +
+        "`"
+      );
     })
     .join("\n");
 
-  const phaseStatusText = PHASES
-    .map((phase) => {
-      const impl = implFor(phase.key);
-      const review = reviewFor(phase.key);
-      return phase.key + "=" + (impl?.status ?? "pending") + "/" + (review ? (review.approved ? "approved" : "rejected") : "unreviewed");
-    })
-    .join(", ");
+  const phaseStatusText = PHASES.map((phase) => {
+    const impl = implFor(phase.key);
+    const review = reviewFor(phase.key);
+    return (
+      phase.key +
+      "=" +
+      (impl?.status ?? "pending") +
+      "/" +
+      (review ? (review.approved ? "approved" : "rejected") : "unreviewed")
+    );
+  }).join(", ");
 
   const integrationSummary = [
     "LGTM: " + (fableReview ? (fableReview.lgtm ? "yes" : "NO") : "no review yet") + ".",
@@ -654,15 +769,27 @@ export default smithers((ctx) => {
     "Phases: " + phaseStatusText + ".",
     "Gates:\n" + (gateResultsText || "(none)"),
     "Approving integrates the isolated drafts into the dirty original repos (~/plue, ~/multi, ~/smithers) with pathspec-scoped commits (no pushes).",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const deploySummary = [
-    "Integration: " + (integrate ? integrate.status + " — " + integrate.summary.slice(0, 300) : "missing") + " (verifier: " + (integrateReview ? (integrateReview.approved ? "approved" : "rejected") : "pending") + ").",
+    "Integration: " +
+      (integrate ? integrate.status + " — " + integrate.summary.slice(0, 300) : "missing") +
+      " (verifier: " +
+      (integrateReview ? (integrateReview.approved ? "approved" : "rejected") : "pending") +
+      ").",
     "Approving creates the prod GKE sandbox cluster, bootstraps secrets, deploys Microsandbox via the sanctioned runbook procedure, runs migration 000102, and then proves the full lifecycle in production.",
   ].join("\n");
 
   const fileSummary = issueDraft
-    ? "Draft at " + issueDraft.draftPath + " targeting " + issueDraft.targetRepo + ".\n" + issueDraft.synopsis.slice(0, 600) + "\nApproving files it via gh."
+    ? "Draft at " +
+      issueDraft.draftPath +
+      " targeting " +
+      issueDraft.targetRepo +
+      ".\n" +
+      issueDraft.synopsis.slice(0, 600) +
+      "\nApproving files it via gh."
     : "Upstream issue draft pending.";
 
   return (
@@ -713,10 +840,14 @@ export default smithers((ctx) => {
                     heartbeatTimeoutMs={HEARTBEAT_MS}
                     continueOnFail
                   >
-                    {implPrompt(phase, input, (() => {
-                      const review = reviewFor(phase.key);
-                      return review && !review.approved ? review.findings : "";
-                    })())}
+                    {implPrompt(
+                      phase,
+                      input,
+                      (() => {
+                        const review = reviewFor(phase.key);
+                        return review && !review.approved ? review.findings : "";
+                      })(),
+                    )}
                   </Task>
                   <Task
                     id={"phase-" + phase.key + "-review"}
@@ -772,7 +903,12 @@ export default smithers((ctx) => {
         })}
 
         {docsPassed ? (
-          <Loop id="lgtm-loop" until={fableReview?.lgtm === true} maxIterations={input.lgtmIterations} onMaxReached="return-last">
+          <Loop
+            id="lgtm-loop"
+            until={fableReview?.lgtm === true}
+            maxIterations={input.lgtmIterations}
+            onMaxReached="return-last"
+          >
             <Sequence>
               {fableReview && !fableReview.lgtm ? (
                 <Task
@@ -807,12 +943,20 @@ export default smithers((ctx) => {
             id="approve-integration"
             output={outputs.msbApproval}
             onDeny="skip"
-            request={{ title: "Integrate the Microsandbox drafts into the original repos?", summary: integrationSummary }}
+            request={{
+              title: "Integrate the Microsandbox drafts into the original repos?",
+              summary: integrationSummary,
+            }}
           />
         ) : null}
 
         {integrationApproved ? (
-          <Loop id="integrate-loop" until={integrated} maxIterations={input.integrateIterations} onMaxReached="return-last">
+          <Loop
+            id="integrate-loop"
+            until={integrated}
+            maxIterations={input.integrateIterations}
+            onMaxReached="return-last"
+          >
             <Sequence>
               <Task
                 id="integrate"
@@ -850,7 +994,12 @@ export default smithers((ctx) => {
         ) : null}
 
         {deployApproved ? (
-          <Loop id="deploy-loop" until={prodProof?.passed === true} maxIterations={input.deployIterations} onMaxReached="return-last">
+          <Loop
+            id="deploy-loop"
+            until={prodProof?.passed === true}
+            maxIterations={input.deployIterations}
+            onMaxReached="return-last"
+          >
             <Sequence>
               <Task
                 id="deploy"
@@ -924,7 +1073,8 @@ export default smithers((ctx) => {
             const phaseLines = PHASES.map((phase) => ({
               phaseKey: phase.key,
               status: latest<Impl>(ctx, outputs.msbImpl, "phase-" + phase.key)?.status ?? "not-run",
-              approved: latest<SelfReview>(ctx, outputs.msbSelfReview, "phase-" + phase.key + "-review")?.approved === true,
+              approved:
+                latest<SelfReview>(ctx, outputs.msbSelfReview, "phase-" + phase.key + "-review")?.approved === true,
             }));
             const review = latest<FableReview>(ctx, outputs.msbFableReview, "fable-review");
             const integrateRow = latest<Integrate>(ctx, outputs.msbIntegrate, "integrate");
@@ -939,12 +1089,29 @@ export default smithers((ctx) => {
                   review?.lgtm ? "Fable LGTM" : "no LGTM",
                   integrateRow ? "integration " + integrateRow.status : "integration skipped",
                   proofRow?.passed ? "prod lifecycle PROVEN" : "prod proof " + (proofRow ? "FAILED" : "skipped"),
-                  filedRow?.filed ? "upstream issue filed" : draftRow ? "upstream issue drafted (not filed)" : "no upstream draft",
+                  filedRow?.filed
+                    ? "upstream issue filed"
+                    : draftRow
+                      ? "upstream issue drafted (not filed)"
+                      : "no upstream draft",
                 ].join("; ");
             return {
               headline,
-              detailsJson: JSON.stringify({ phases: phaseLines, gates: gateLines, lgtm: review?.lgtm === true, prodProven: proofRow?.passed === true, issueUrl: filedRow?.issueUrl ?? "" }),
-              summary: "Microsandbox finish run: " + headline + " Draft workspaces: " + [input.plueDir, input.multiDir, input.smithersDir].join(", ") + ". Work plan: " + WORKPLAN_PATH + ".",
+              detailsJson: JSON.stringify({
+                phases: phaseLines,
+                gates: gateLines,
+                lgtm: review?.lgtm === true,
+                prodProven: proofRow?.passed === true,
+                issueUrl: filedRow?.issueUrl ?? "",
+              }),
+              summary:
+                "Microsandbox finish run: " +
+                headline +
+                " Draft workspaces: " +
+                [input.plueDir, input.multiDir, input.smithersDir].join(", ") +
+                ". Work plan: " +
+                WORKPLAN_PATH +
+                ".",
             };
           }}
         </Task>

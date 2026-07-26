@@ -106,7 +106,21 @@ export function quotaBeat(status: string, rateLimited: boolean): "none" | "parke
 
 /** One audit strategy card: status, agent, finding count, and the parked-on-quota
  *  -> fallback-agent story when the node's first attempt rate-limits. */
-export function StrategyCard({ runId, nodeId, label, node, sig, rateLimited }: { runId: string; nodeId: string; label: string; node: NodeLite | undefined; sig: string; rateLimited: boolean }) {
+export function StrategyCard({
+  runId,
+  nodeId,
+  label,
+  node,
+  sig,
+  rateLimited,
+}: {
+  runId: string;
+  nodeId: string;
+  label: string;
+  node: NodeLite | undefined;
+  sig: string;
+  rateLimited: boolean;
+}) {
   const output = useGatewayNodeOutput({ runId, nodeId });
   useEffect(() => {
     void output.refetch?.();
@@ -118,7 +132,10 @@ export function StrategyCard({ runId, nodeId, label, node, sig, rateLimited }: {
   const parked = beat === "parked";
 
   return (
-    <div className={`va-card ${parked ? "parked" : status === "running" ? "running" : ""}`} data-testid={`va-strategy-${nodeId}`}>
+    <div
+      className={`va-card ${parked ? "parked" : status === "running" ? "running" : ""}`}
+      data-testid={`va-strategy-${nodeId}`}
+    >
       <div className="va-card-head">
         <span className="va-card-title">{label}</span>
         <StatusPill status={parked ? "waiting" : status} />
@@ -131,7 +148,15 @@ export function StrategyCard({ runId, nodeId, label, node, sig, rateLimited }: {
       ) : null}
       {beat === "recovered" ? <Badge text="recovered on fallback agent" tone="success" /> : null}
       <div className="va-card-meta">
-        <span>{row?.agentUsed ? `agent: ${row.agentUsed}` : status === "running" ? "scanning…" : parked ? "waiting for retry" : "queued"}</span>
+        <span>
+          {row?.agentUsed
+            ? `agent: ${row.agentUsed}`
+            : status === "running"
+              ? "scanning…"
+              : parked
+                ? "waiting for retry"
+                : "queued"}
+        </span>
         {typeof row?.findingCount === "number" ? (
           <span className="va-card-count">{row.findingCount} findings</span>
         ) : null}
@@ -140,13 +165,34 @@ export function StrategyCard({ runId, nodeId, label, node, sig, rateLimited }: {
   );
 }
 
-function PipelineCard({ runId, nodeId, label, node, sig }: { runId: string; nodeId: string; label: string; node: NodeLite | undefined; sig: string }) {
+function PipelineCard({
+  runId,
+  nodeId,
+  label,
+  node,
+  sig,
+}: {
+  runId: string;
+  nodeId: string;
+  label: string;
+  node: NodeLite | undefined;
+  sig: string;
+}) {
   const output = useGatewayNodeOutput({ runId, nodeId });
   useEffect(() => {
     void output.refetch?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig]);
-  const row = rowOf(output) as { uniqueCount?: number; duplicateCount?: number; highCount?: number; mediumCount?: number; lowCount?: number; totalFindings?: number } | undefined;
+  const row = rowOf(output) as
+    | {
+        uniqueCount?: number;
+        duplicateCount?: number;
+        highCount?: number;
+        mediumCount?: number;
+        lowCount?: number;
+        totalFindings?: number;
+      }
+    | undefined;
   const status = node?.status ?? "queued";
   const detail =
     nodeId === "dedupe" && row
@@ -202,7 +248,8 @@ function FindingsTable({ runId, sig, done }: { runId: string; sig: string; done:
 export function VibeAuditApp() {
   const runsRaw = useGatewayRuns({ filter: { workflow: WORKFLOW, limit: 10 } });
   const runs = (runsRaw.data ?? []) as Array<{ runId: string; status?: string }>;
-  const urlRunId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("runId") ?? undefined : undefined;
+  const urlRunId =
+    typeof window !== "undefined" ? (new URLSearchParams(window.location.search).get("runId") ?? undefined) : undefined;
   const runId = urlRunId ?? runs[0]?.runId;
 
   const { nodes, status } = useGatewayRunTree(runId);
@@ -255,12 +302,27 @@ export function VibeAuditApp() {
           <section className="va-main">
             <div className="va-strategies">
               {STRATEGIES.map((s) => (
-                <StrategyCard key={s.nodeId} runId={runId} nodeId={s.nodeId} label={s.label} node={nodeStatus(nodesLite, s.nodeId)} sig={sig} rateLimited={rateLimitedNodes.has(s.nodeId)} />
+                <StrategyCard
+                  key={s.nodeId}
+                  runId={runId}
+                  nodeId={s.nodeId}
+                  label={s.label}
+                  node={nodeStatus(nodesLite, s.nodeId)}
+                  sig={sig}
+                  rateLimited={rateLimitedNodes.has(s.nodeId)}
+                />
               ))}
             </div>
             <div className="va-pipeline">
               {PIPELINE.map((p) => (
-                <PipelineCard key={p.nodeId} runId={runId} nodeId={p.nodeId} label={p.label} node={nodeStatus(nodesLite, p.nodeId)} sig={sig} />
+                <PipelineCard
+                  key={p.nodeId}
+                  runId={runId}
+                  nodeId={p.nodeId}
+                  label={p.label}
+                  node={nodeStatus(nodesLite, p.nodeId)}
+                  sig={sig}
+                />
               ))}
             </div>
             <div className="va-panel">

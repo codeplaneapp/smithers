@@ -1,11 +1,5 @@
 #!/usr/bin/env node
-import {
-  existsSync,
-  lstatSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-} from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, extname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -14,14 +8,9 @@ const workspaceRoots = ["packages", "apps"];
 const sourceExtensions = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]);
 const ignoredDirs = new Set(["dist", "node_modules"]);
 const testDirs = new Set(["test", "tests", "__tests__"]);
-const sanctionedSourceRoots = new Set([
-  "packages/db/src",
-  "packages/gateway/src",
-  "packages/server/src",
-]);
+const sanctionedSourceRoots = new Set(["packages/db/src", "packages/gateway/src", "packages/server/src"]);
 
-const directDbPattern =
-  /new Database\(|new pg\.Client\(|new pg\.Pool\(|PGlite\.create\(/g;
+const directDbPattern = /new Database\(|new pg\.Client\(|new pg\.Pool\(|PGlite\.create\(/g;
 
 const allowedDirectDbAccess = new Map([
   ["packages/engine/src/effect/builder.js", 3],
@@ -51,11 +40,7 @@ function toRelativePath(path) {
 function isTestFile(file) {
   const base = basename(file);
   const parts = toRelativePath(file).split("/");
-  return (
-    parts.some((part) => testDirs.has(part)) ||
-    base.includes(".test.") ||
-    base.includes(".spec.")
-  );
+  return parts.some((part) => testDirs.has(part)) || base.includes(".test.") || base.includes(".spec.");
 }
 
 /** @param {string} rootDir */
@@ -149,9 +134,7 @@ function auditDirectDbAccess(observed) {
 
   if (!failed) {
     const total = [...observed.values()].reduce((sum, count) => sum + count, 0);
-    console.log(
-      `[db-access-audit] ${total} tracked direct DB constructor call(s); no untracked direct DB access`,
-    );
+    console.log(`[db-access-audit] ${total} tracked direct DB constructor call(s); no untracked direct DB access`);
   }
 
   return !failed;

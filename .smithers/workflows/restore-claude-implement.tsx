@@ -24,7 +24,8 @@ export default smithers(() => (
         return {
           filePath: workflowPath,
           restored: false,
-          message: "No change needed: the implementation workflow is Codex-first and already retains Claude/Gemini as automatic fallback providers.",
+          message:
+            "No change needed: the implementation workflow is Codex-first and already retains Claude/Gemini as automatic fallback providers.",
         };
       }}
     </Task>

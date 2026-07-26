@@ -31,11 +31,11 @@ export function gatewayCollectionAsyncState<T>(options: {
   refetch: () => Promise<void>;
 }): GatewayAsyncState<T> {
   const sourceError = normalizeError(options.collection.utils?.lastError);
-  const error = sourceError ?? (
-    options.live.isError
+  const error =
+    sourceError ??
+    (options.live.isError
       ? new Error(`Gateway live query failed${options.collection.id ? ` for ${options.collection.id}` : ""}.`)
-      : undefined
-  );
+      : undefined);
 
   return {
     data: options.data,

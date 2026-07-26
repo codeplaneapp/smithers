@@ -28,19 +28,14 @@ const inputSchema = z.object({
     .nullable()
     .default(null)
     .describe("Desired kebab-case skill id. Null lets the clarify/design steps choose one."),
-  review: z
-    .boolean()
-    .default(true)
-    .describe("Pause for human approval of the design before any files are written."),
+  review: z.boolean().default(true).describe("Pause for human approval of the design before any files are written."),
 });
 
 // 1. The freeform ask, turned into a structured skill spec.
 const skillSpecSchema = z.looseObject({
   name: z.string().describe("Proposed kebab-case skill id."),
   purpose: z.string().describe("One sentence: what the skill equips an agent to do."),
-  whenToUse: z
-    .string()
-    .describe("Trigger phrasing — when an agent should reach for this skill."),
+  whenToUse: z.string().describe("Trigger phrasing — when an agent should reach for this skill."),
   capabilities: z
     .array(z.string())
     .default([])
@@ -49,10 +44,7 @@ const skillSpecSchema = z.looseObject({
     .array(z.object({ name: z.string(), type: z.string(), purpose: z.string() }))
     .default([])
     .describe("Parameters / context the skill expects when invoked."),
-  openQuestions: z
-    .array(z.string())
-    .default([])
-    .describe("Anything ambiguous the author should resolve."),
+  openQuestions: z.array(z.string()).default([]).describe("Anything ambiguous the author should resolve."),
 });
 
 // 2. The concrete design the scaffolder turns into a real SKILL.md.
@@ -61,9 +53,7 @@ const designSchema = z.looseObject({
   frontmatter: z
     .object({
       name: z.string(),
-      description: z
-        .string()
-        .describe("One line: what it does and when to use it — goes in YAML frontmatter."),
+      description: z.string().describe("One line: what it does and when to use it — goes in YAML frontmatter."),
     })
     .describe("YAML frontmatter for the SKILL.md file."),
   sections: z
@@ -142,8 +132,7 @@ export default smithers((ctx) => {
   const proceed = designed && approved;
 
   // The name we scaffold against, resolved as soon as it is known.
-  const skillName =
-    scaffold?.skillName ?? design?.skillName ?? clarify?.name ?? ctx.input.name ?? "new-skill";
+  const skillName = scaffold?.skillName ?? design?.skillName ?? clarify?.name ?? ctx.input.name ?? "new-skill";
 
   return (
     <Workflow name="create-skill">
@@ -173,9 +162,7 @@ export default smithers((ctx) => {
               output={outputs.approval}
               request={{
                 title: `Approve design for skill "${skillName}"`,
-                summary:
-                  design?.frontmatter?.description ??
-                  "Review the proposed skill design before scaffolding.",
+                summary: design?.frontmatter?.description ?? "Review the proposed skill design before scaffolding.",
               }}
             />
           }
@@ -184,12 +171,7 @@ export default smithers((ctx) => {
 
         {/* 4 — Scaffold the real SKILL.md (and any supporting files). */}
         {proceed ? (
-          <Task
-            id="scaffold"
-            output={outputs.scaffold}
-            agent={agents.implement}
-            heartbeatTimeoutMs={900_000}
-          >
+          <Task id="scaffold" output={outputs.scaffold} agent={agents.implement} heartbeatTimeoutMs={900_000}>
             <ScaffoldPrompt design={design} skillsDir={SKILLS_DIR} />
           </Task>
         ) : null}

@@ -1,20 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
-import {
-  createSmithersElectricProxy,
-  type SmithersElectricAuthContext,
-} from "@smithers-orchestrator/electric-proxy";
+import { createSmithersElectricProxy, type SmithersElectricAuthContext } from "@smithers-orchestrator/electric-proxy";
 import { serializeCronRow, serializeScoreRow } from "@smithers-orchestrator/gateway/api";
 import { QueryClient } from "@tanstack/react-query";
 import { createSmithersPostgres } from "smithers-orchestrator";
 
 import type { SmithersCollections } from "../../src/data/SmithersCollections.ts";
 import type { SmithersDataClient } from "../../src/data/SmithersDataClient.ts";
-import {
-  createSmithersCollections,
-  cronsWhere,
-  scoresWhere,
-} from "../../src/data/createSmithersCollections.ts";
+import { createSmithersCollections, cronsWhere, scoresWhere } from "../../src/data/createSmithersCollections.ts";
 import { createSmithersDataClient } from "../../src/data/createSmithersDataClient.ts";
 import { mapSmithersElectricRow } from "../../src/data/mapSmithersElectricRow.ts";
 import { smithersElectricCollectionOptions } from "../../src/data/smithersElectricCollectionOptions.ts";
@@ -53,9 +46,7 @@ const multiplayerMode = {
 describe("scoresWhere / cronsWhere compilation", () => {
   test("scores compile runId and the optional nodeId into one predicate", () => {
     expect(scoresWhere({ runId: "run-1" })).toBe("run_id = 'run-1'");
-    expect(scoresWhere({ runId: "run-1", nodeId: "task-a" })).toBe(
-      "run_id = 'run-1' AND node_id = 'task-a'",
-    );
+    expect(scoresWhere({ runId: "run-1", nodeId: "task-a" })).toBe("run_id = 'run-1' AND node_id = 'task-a'");
     // No runId means no filter (matches the pre-existing shape behavior).
     expect(scoresWhere({ runId: "" })).toBeUndefined();
     // Empty nodeId is "no node filter", mirroring the server's truthy check.
@@ -65,14 +56,10 @@ describe("scoresWhere / cronsWhere compilation", () => {
   test("crons compile the workflow filter against both workflow_path storages", () => {
     expect(cronsWhere({})).toBeUndefined();
     expect(cronsWhere({ filter: {} })).toBeUndefined();
-    expect(cronsWhere({ filter: { workflow: "value" } })).toBe(
-      "workflow_path IN ('gateway:value', 'value')",
-    );
+    expect(cronsWhere({ filter: { workflow: "value" } })).toBe("workflow_path IN ('gateway:value', 'value')");
     // A filter that itself starts with gateway: only matches the prefixed
     // storage — the bare path would serialize with its prefix stripped.
-    expect(cronsWhere({ filter: { workflow: "gateway:value" } })).toBe(
-      "workflow_path = 'gateway:gateway:value'",
-    );
+    expect(cronsWhere({ filter: { workflow: "gateway:value" } })).toBe("workflow_path = 'gateway:gateway:value'");
   });
 
   test("values the proxy grammar cannot express request the RPC fallback", () => {
@@ -170,9 +157,11 @@ describe("compiled predicates pass the real Electric proxy where validation", ()
     });
     const where = scoresWhere({ runId: "run-1", nodeId: "task-a" });
     expect(typeof where).toBe("string");
-    const response = await proxy.fetch(new Request(
-      `http://proxy.local/v1/shape?table=_smithers_scorers&shape=scores&where=${encodeURIComponent(String(where))}`,
-    ));
+    const response = await proxy.fetch(
+      new Request(
+        `http://proxy.local/v1/shape?table=_smithers_scorers&shape=scores&where=${encodeURIComponent(String(where))}`,
+      ),
+    );
     expect(response.status).toBe(200);
     expect(forwarded).toEqual(["run_id = 'run-1' AND node_id = 'task-a'"]);
   });
@@ -186,9 +175,11 @@ describe("compiled predicates pass the real Electric proxy where validation", ()
     });
     const where = cronsWhere({ filter: { workflow: "value" } });
     expect(typeof where).toBe("string");
-    const response = await proxy.fetch(new Request(
-      `http://proxy.local/v1/shape?table=_smithers_cron&shape=crons&where=${encodeURIComponent(String(where))}`,
-    ));
+    const response = await proxy.fetch(
+      new Request(
+        `http://proxy.local/v1/shape?table=_smithers_cron&shape=crons&where=${encodeURIComponent(String(where))}`,
+      ),
+    );
     expect(response.status).toBe(200);
     expect(forwarded).toEqual(["workflow_path IN ('gateway:value', 'value')"]);
   });
@@ -199,9 +190,13 @@ describe("local and multiplayer results match on a seeded multi-row dataset", ()
     const api = await createSmithersPostgres({}, { provider: "pglite" });
     cleanups.push(() => api.close());
     const adapter = new SmithersDb(api.db);
-    const connection = (api.db as unknown as {
-      connection: { query: (query: { text: string; values?: unknown[] }) => Promise<{ rows: Record<string, unknown>[] }> };
-    }).connection;
+    const connection = (
+      api.db as unknown as {
+        connection: {
+          query: (query: { text: string; values?: unknown[] }) => Promise<{ rows: Record<string, unknown>[] }>;
+        };
+      }
+    ).connection;
     const now = 1_718_000_000_000;
 
     const insertScore = (id: string, runId: string, nodeId: string, atMs: number) =>
@@ -236,41 +231,48 @@ describe("local and multiplayer results match on a seeded multi-row dataset", ()
       });
       return result.rows;
     };
-    const sortByKey = <T,>(rows: T[], key: (row: T) => string) =>
+    const sortByKey = <T>(rows: T[], key: (row: T) => string) =>
       [...rows].sort((left, right) => key(left).localeCompare(key(right)));
     const scoreKey = (row: Record<string, unknown>) => `${row.runId}:${row.nodeId}:${row.scorerId}`;
 
     // Scores filtered by runId + nodeId: only run-a/task-1 comes back.
-    const filteredLocal = (await adapter.listScorerResults("run-a", "task-1"))
-      .map((row) => serializeScoreRow(row as Record<string, unknown>));
-    const filteredElectric = (await electricRows("_smithers_scorers", scoresWhere({ runId: "run-a", nodeId: "task-1" }) ?? undefined))
-      .map((row) => mapSmithersElectricRow("scores", row) as unknown as Record<string, unknown>);
+    const filteredLocal = (await adapter.listScorerResults("run-a", "task-1")).map((row) =>
+      serializeScoreRow(row as Record<string, unknown>),
+    );
+    const filteredElectric = (
+      await electricRows("_smithers_scorers", scoresWhere({ runId: "run-a", nodeId: "task-1" }) ?? undefined)
+    ).map((row) => mapSmithersElectricRow("scores", row) as unknown as Record<string, unknown>);
     expect(filteredElectric).toHaveLength(1);
     expect(sortByKey(filteredElectric, scoreKey)).toEqual(sortByKey(filteredLocal, scoreKey));
 
     // Scores filtered by runId only: both run-a rows, never run-b's.
-    const runLocal = (await adapter.listScorerResults("run-a"))
-      .map((row) => serializeScoreRow(row as Record<string, unknown>));
-    const runElectric = (await electricRows("_smithers_scorers", scoresWhere({ runId: "run-a" }) ?? undefined))
-      .map((row) => mapSmithersElectricRow("scores", row) as unknown as Record<string, unknown>);
+    const runLocal = (await adapter.listScorerResults("run-a")).map((row) =>
+      serializeScoreRow(row as Record<string, unknown>),
+    );
+    const runElectric = (await electricRows("_smithers_scorers", scoresWhere({ runId: "run-a" }) ?? undefined)).map(
+      (row) => mapSmithersElectricRow("scores", row) as unknown as Record<string, unknown>,
+    );
     expect(runElectric).toHaveLength(2);
     expect(sortByKey(runElectric, scoreKey)).toEqual(sortByKey(runLocal, scoreKey));
 
     // Crons: local semantics are cron.list's post-serialization workflow match.
-    const allLocalCrons = (await adapter.listCrons(false))
-      .map((row) => serializeCronRow(row as Record<string, unknown>));
+    const allLocalCrons = (await adapter.listCrons(false)).map((row) =>
+      serializeCronRow(row as Record<string, unknown>),
+    );
     const cronKey = (row: Record<string, unknown>) => String(row.cronId);
     for (const workflow of ["value", "plain-path"]) {
       const local = allLocalCrons.filter((row) => row.workflow === workflow);
-      const electric = (await electricRows("_smithers_cron", cronsWhere({ filter: { workflow } }) ?? undefined))
-        .map((row) => mapSmithersElectricRow("crons", row) as unknown as Record<string, unknown>);
+      const electric = (await electricRows("_smithers_cron", cronsWhere({ filter: { workflow } }) ?? undefined)).map(
+        (row) => mapSmithersElectricRow("crons", row) as unknown as Record<string, unknown>,
+      );
       expect(electric).toHaveLength(1);
       expect(sortByKey(electric, cronKey)).toEqual(sortByKey(local, cronKey));
     }
 
     // Unfiltered crons: both surfaces return every row.
-    const unfilteredElectric = (await electricRows("_smithers_cron", cronsWhere({}) ?? undefined))
-      .map((row) => mapSmithersElectricRow("crons", row) as unknown as Record<string, unknown>);
+    const unfilteredElectric = (await electricRows("_smithers_cron", cronsWhere({}) ?? undefined)).map(
+      (row) => mapSmithersElectricRow("crons", row) as unknown as Record<string, unknown>,
+    );
     expect(sortByKey(unfilteredElectric, cronKey)).toEqual(sortByKey(allLocalCrons, cronKey));
   }, 120_000);
 });

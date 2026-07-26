@@ -37,10 +37,7 @@ describe("local WorkspaceMode import boundary", () => {
   });
 
   test("local provider entrypoint has no static Electric package import", () => {
-    const source = readFileSync(
-      join(import.meta.dir, "../../src/data/createSmithersCollections.ts"),
-      "utf8",
-    );
+    const source = readFileSync(join(import.meta.dir, "../../src/data/createSmithersCollections.ts"), "utf8");
     for (const pkg of forbiddenPackages) expect(source).not.toContain(pkg);
   });
 

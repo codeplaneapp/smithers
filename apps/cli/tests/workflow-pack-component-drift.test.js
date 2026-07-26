@@ -14,12 +14,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..", "..", "..");
 const PACK_DRIFT_TIMEOUT_MS = 30_000;
 
-const EMBEDDED_AGENT_SCAFFOLDS = [
-  "claude-code.ts",
-  "codex.ts",
-  "opencode.ts",
-  "antigravity.ts",
-];
+const EMBEDDED_AGENT_SCAFFOLDS = ["claude-code.ts", "codex.ts", "opencode.ts", "antigravity.ts"];
 
 function seededAgentEnv() {
   const binDir = createExecutableDir();
@@ -34,52 +29,60 @@ function seededAgentEnv() {
   };
 }
 
-test("embedded agent scaffolds match their canonical .smithers sources", () => {
-  const tmpDir = mkdtempSync(join(tmpdir(), "smithers-comp-drift-"));
-  onTestFinished(() => rmSync(tmpDir, { recursive: true, force: true }));
-  initWorkflowPack({ rootDir: tmpDir, installSkill: false, skipInstall: true, env: seededAgentEnv() });
+test(
+  "embedded agent scaffolds match their canonical .smithers sources",
+  () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "smithers-comp-drift-"));
+    onTestFinished(() => rmSync(tmpDir, { recursive: true, force: true }));
+    initWorkflowPack({ rootDir: tmpDir, installSkill: false, skipInstall: true, env: seededAgentEnv() });
 
-  expect(existsSync(join(tmpDir, ".smithers", "components"))).toBe(false);
+    expect(existsSync(join(tmpDir, ".smithers", "components"))).toBe(false);
 
-  for (const name of EMBEDDED_AGENT_SCAFFOLDS) {
-    const installed = readFileSync(join(tmpDir, ".smithers", "agents", name), "utf8");
-    const canonical = readFileSync(join(REPO_ROOT, ".smithers", "agents", name), "utf8");
-    expect(installed, `${name} embed drifted from .smithers/agents/${name}`).toBe(canonical);
-    expect(installed, `${name} pins the launch cwd and overrides <Worktree>`).not.toContain("cwd: process.cwd()");
-  }
-}, PACK_DRIFT_TIMEOUT_MS);
+    for (const name of EMBEDDED_AGENT_SCAFFOLDS) {
+      const installed = readFileSync(join(tmpDir, ".smithers", "agents", name), "utf8");
+      const canonical = readFileSync(join(REPO_ROOT, ".smithers", "agents", name), "utf8");
+      expect(installed, `${name} embed drifted from .smithers/agents/${name}`).toBe(canonical);
+      expect(installed, `${name} pins the launch cwd and overrides <Worktree>`).not.toContain("cwd: process.cwd()");
+    }
+  },
+  PACK_DRIFT_TIMEOUT_MS,
+);
 
 // Guards the class of bug where a seeded workflow imports a local module that
 // init never installs. Every supported relative import of every installed
 // seeded workflow must resolve to a file that init actually wrote.
-test("seeded workflows' local imports all resolve to installed files", () => {
-  const tmpDir = mkdtempSync(join(tmpdir(), "smithers-seeded-imports-"));
-  onTestFinished(() => rmSync(tmpDir, { recursive: true, force: true }));
-  initWorkflowPack({ rootDir: tmpDir, installSkill: false, skipInstall: true, env: seededAgentEnv() });
+test(
+  "seeded workflows' local imports all resolve to installed files",
+  () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "smithers-seeded-imports-"));
+    onTestFinished(() => rmSync(tmpDir, { recursive: true, force: true }));
+    initWorkflowPack({ rootDir: tmpDir, installSkill: false, skipInstall: true, env: seededAgentEnv() });
 
-  const workflowsDir = join(tmpDir, ".smithers", "workflows");
-  const seededWorkflows = readdirSync(workflowsDir)
-    .filter((f) => f.endsWith(".tsx"))
-    .filter((f) => readFileSync(join(workflowsDir, f), "utf8").includes("// smithers-source: seeded"));
+    const workflowsDir = join(tmpDir, ".smithers", "workflows");
+    const seededWorkflows = readdirSync(workflowsDir)
+      .filter((f) => f.endsWith(".tsx"))
+      .filter((f) => readFileSync(join(workflowsDir, f), "utf8").includes("// smithers-source: seeded"));
 
-  expect(seededWorkflows.length, "expected seeded workflows to be installed").toBeGreaterThan(0);
+    expect(seededWorkflows.length, "expected seeded workflows to be installed").toBeGreaterThan(0);
 
-  const resolvesTo = (fromFile, spec) => {
-    const base = resolve(dirname(fromFile), spec);
-    return [base, `${base}.ts`, `${base}.tsx`, `${base}.mdx`, `${base}/index.ts`, `${base}/index.tsx`].some(
-      existsSync,
-    );
-  };
-
-  const importRe = /\bfrom\s+["'](\.{1,2}\/[^"']+)["']/g;
-  for (const wf of seededWorkflows) {
-    const abs = join(workflowsDir, wf);
-    const source = readFileSync(abs, "utf8");
-    let m;
-    while ((m = importRe.exec(source)) !== null) {
-      expect(resolvesTo(abs, m[1]), `seeded workflow ${wf} imports ${m[1]} but init installed no such file`).toBe(
-        true,
+    const resolvesTo = (fromFile, spec) => {
+      const base = resolve(dirname(fromFile), spec);
+      return [base, `${base}.ts`, `${base}.tsx`, `${base}.mdx`, `${base}/index.ts`, `${base}/index.tsx`].some(
+        existsSync,
       );
+    };
+
+    const importRe = /\bfrom\s+["'](\.{1,2}\/[^"']+)["']/g;
+    for (const wf of seededWorkflows) {
+      const abs = join(workflowsDir, wf);
+      const source = readFileSync(abs, "utf8");
+      let m;
+      while ((m = importRe.exec(source)) !== null) {
+        expect(resolvesTo(abs, m[1]), `seeded workflow ${wf} imports ${m[1]} but init installed no such file`).toBe(
+          true,
+        );
+      }
     }
-  }
-}, PACK_DRIFT_TIMEOUT_MS);
+  },
+  PACK_DRIFT_TIMEOUT_MS,
+);

@@ -237,7 +237,13 @@ export function discoverImports(source: string): Import[] {
     const names = clause
       .replace(/[{}]/g, " ")
       .split(",")
-      .map((part) => part.trim().split(/\s+as\s+/).pop()!.trim())
+      .map((part) =>
+        part
+          .trim()
+          .split(/\s+as\s+/)
+          .pop()!
+          .trim(),
+      )
       .filter((part) => part.length > 0);
     for (const name of names) {
       if (seen.has(name)) continue;
@@ -289,10 +295,7 @@ export function defaultValues(inputs: Input[]): Record<string, string> {
  * typed value is present and differs from its default. Ported from
  * `hasInputValueChanges`.
  */
-export function hasInputValueChanges(
-  values: Record<string, string>,
-  inputs: Input[],
-): boolean {
+export function hasInputValueChanges(values: Record<string, string>, inputs: Input[]): boolean {
   return inputs.some((input) => {
     const typed = values[input.name];
     return typed != null && typed !== input.default;

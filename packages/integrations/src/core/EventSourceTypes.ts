@@ -46,9 +46,7 @@ export type MakeWebhookSourceOptions = {
 export type WebhookSource = {
   source: EventSource;
   /** Verify + decode + enqueue a webhook request; resolves with the accepted count. */
-  offer: (
-    request: WebhookRequest,
-  ) => import("effect").Effect.Effect<{ accepted: number }, SmithersError>;
+  offer: (request: WebhookRequest) => import("effect").Effect.Effect<{ accepted: number }, SmithersError>;
   /**
    * Atomically reject new offers and append EOS after accepted events.
    * Idempotent; the event stream drains in FIFO order before completing.
@@ -65,9 +63,7 @@ export type PollResult = {
 export type MakePollingSourceOptions = {
   id: string;
   /** One poll turn: given the current cursor, fetch new events + next cursor. */
-  poll: (
-    cursor: string | null,
-  ) => import("effect").Effect.Effect<PollResult, SmithersError>;
+  poll: (cursor: string | null) => import("effect").Effect.Effect<PollResult, SmithersError>;
   /** Poll cadence. @default Schedule.spaced("5 seconds") */
   schedule?: import("effect").Schedule.Schedule<unknown>;
   /** Durable cursor persistence (e.g. `makeDbCursorStore(adapter)`). */

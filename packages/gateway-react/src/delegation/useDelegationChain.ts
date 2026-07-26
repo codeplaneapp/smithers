@@ -58,10 +58,7 @@ export function useDelegationChain(params: { runId: string | undefined }): UseDe
   // dispose the store in the effect cleanup; the epoch bump recreates it when
   // the effect re-runs against an already-disposed store.
   const [storeEpoch, bumpStoreEpoch] = useReducer((epoch: number) => epoch + 1, 0);
-  const store = useMemo(
-    () => createDelegationChainStore({ runId, api: client.api }),
-    [runId, client, storeEpoch],
-  );
+  const store = useMemo(() => createDelegationChainStore({ runId, api: client.api }), [runId, client, storeEpoch]);
   useEffect(() => {
     if (store.disposed) {
       bumpStoreEpoch();

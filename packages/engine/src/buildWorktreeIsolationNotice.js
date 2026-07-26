@@ -25,13 +25,13 @@ export const WORKTREE_ISOLATION_NOTICE_MARKER = "[smithers worktree isolation]";
  * @returns {string | null}
  */
 export function buildWorktreeIsolationNotice(worktreePath, rootDir) {
-    if (!worktreePath || !rootDir || resolve(worktreePath) === resolve(rootDir)) {
-        return null;
-    }
-    return [
-        `${WORKTREE_ISOLATION_NOTICE_MARKER} Your working directory is an isolated git worktree of the parent checkout at ${rootDir}.`,
-        "- Do all reads, writes, installs, builds, and tests inside this worktree.",
-        "- Dependencies (node_modules) may be absent here. Install them fresh inside the worktree (e.g. `pnpm install` at the worktree root); the package manager's shared store makes this cheap.",
-        `- NEVER symlink node_modules (top-level or per-package) from ${rootDir} into this worktree, and NEVER create, modify, or delete anything under ${rootDir} itself. Shared node_modules links make installs write through into the parent checkout and leave it broken once this worktree is removed.`,
-    ].join("\n");
+  if (!worktreePath || !rootDir || resolve(worktreePath) === resolve(rootDir)) {
+    return null;
+  }
+  return [
+    `${WORKTREE_ISOLATION_NOTICE_MARKER} Your working directory is an isolated git worktree of the parent checkout at ${rootDir}.`,
+    "- Do all reads, writes, installs, builds, and tests inside this worktree.",
+    "- Dependencies (node_modules) may be absent here. Install them fresh inside the worktree (e.g. `pnpm install` at the worktree root); the package manager's shared store makes this cheap.",
+    `- NEVER symlink node_modules (top-level or per-package) from ${rootDir} into this worktree, and NEVER create, modify, or delete anything under ${rootDir} itself. Shared node_modules links make installs write through into the parent checkout and leave it broken once this worktree is removed.`,
+  ].join("\n");
 }

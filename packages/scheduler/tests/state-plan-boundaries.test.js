@@ -79,14 +79,7 @@ describe("isTerminalState", () => {
   });
 
   test("active and waiting states are not terminal", () => {
-    for (const state of [
-      "pending",
-      "in-progress",
-      "waiting-approval",
-      "waiting-event",
-      "waiting-timer",
-      "cancelled",
-    ]) {
+    for (const state of ["pending", "in-progress", "waiting-approval", "waiting-event", "waiting-timer", "cancelled"]) {
       expect(isTerminalState(state)).toBe(false);
     }
   });
@@ -102,12 +95,7 @@ describe("buildPlanTree", () => {
   });
 
   test("workflow becomes sequence and ignores text children", () => {
-    const { plan } = buildPlanTree(
-      el("smithers:workflow", {}, [
-        text("ignore"),
-        el("smithers:task", { id: "a" }),
-      ]),
-    );
+    const { plan } = buildPlanTree(el("smithers:workflow", {}, [text("ignore"), el("smithers:task", { id: "a" })]));
     expect(plan).toEqual({
       kind: "sequence",
       children: [{ kind: "task", nodeId: "a" }],
@@ -134,9 +122,7 @@ describe("buildPlanTree", () => {
 
   test("inline subflow expands children instead of a task node", () => {
     const { plan } = buildPlanTree(
-      el("smithers:subflow", { id: "sf", mode: "inline" }, [
-        el("smithers:task", { id: "child" }),
-      ]),
+      el("smithers:subflow", { id: "sf", mode: "inline" }, [el("smithers:task", { id: "child" })]),
     );
     expect(plan).toEqual({
       kind: "sequence",
@@ -145,16 +131,11 @@ describe("buildPlanTree", () => {
   });
 
   test("child-run subflow becomes a task node", () => {
-    expect(buildPlanTree(el("smithers:subflow", { id: "sf" })).plan)
-      .toEqual({ kind: "task", nodeId: "sf" });
+    expect(buildPlanTree(el("smithers:subflow", { id: "sf" })).plan).toEqual({ kind: "task", nodeId: "sf" });
   });
 
   test("sandbox wait-for-event and timer become task nodes", () => {
-    for (const tag of [
-      "smithers:sandbox",
-      "smithers:wait-for-event",
-      "smithers:timer",
-    ]) {
+    for (const tag of ["smithers:sandbox", "smithers:wait-for-event", "smithers:timer"]) {
       expect(buildPlanTree(el(tag, { id: tag })).plan).toEqual({
         kind: "task",
         nodeId: tag,
@@ -163,8 +144,10 @@ describe("buildPlanTree", () => {
   });
 
   test("continue-as-new preserves state JSON", () => {
-    expect(buildPlanTree(el("smithers:continue-as-new", { stateJson: '{"a":1}' })).plan)
-      .toEqual({ kind: "continue-as-new", stateJson: '{"a":1}' });
+    expect(buildPlanTree(el("smithers:continue-as-new", { stateJson: '{"a":1}' })).plan).toEqual({
+      kind: "continue-as-new",
+      stateJson: '{"a":1}',
+    });
   });
 
   test("ralph parses defaults and emits metadata", () => {
@@ -210,22 +193,15 @@ describe("buildPlanTree", () => {
   test("duplicate ralph ids throw", () => {
     expect(() =>
       buildPlanTree(
-        el("smithers:workflow", {}, [
-          el("smithers:ralph", { id: "dup" }),
-          el("smithers:ralph", { id: "dup" }),
-        ]),
+        el("smithers:workflow", {}, [el("smithers:ralph", { id: "dup" }), el("smithers:ralph", { id: "dup" })]),
       ),
     ).toThrow(/Duplicate Ralph id/);
   });
 
   test("direct nested ralph throws", () => {
-    expect(() =>
-      buildPlanTree(
-        el("smithers:ralph", { id: "outer" }, [
-          el("smithers:ralph", { id: "inner" }),
-        ]),
-      ),
-    ).toThrow(/Nested <Loop>\/<Ralph>/);
+    expect(() => buildPlanTree(el("smithers:ralph", { id: "outer" }, [el("smithers:ralph", { id: "inner" })]))).toThrow(
+      /Nested <Loop>\/<Ralph>/,
+    );
   });
 
   test("nested ralph reached through a non-loop wrapper (e.g. Sequence) does not throw", () => {
@@ -235,11 +211,7 @@ describe("buildPlanTree", () => {
     // executable.
     expect(() =>
       buildPlanTree(
-        el("smithers:ralph", { id: "outer" }, [
-          el("smithers:sequence", {}, [
-            el("smithers:ralph", { id: "inner" }),
-          ]),
-        ]),
+        el("smithers:ralph", { id: "outer" }, [el("smithers:sequence", {}, [el("smithers:ralph", { id: "inner" })])]),
       ),
     ).not.toThrow();
   });
@@ -248,9 +220,7 @@ describe("buildPlanTree", () => {
     const { plan } = buildPlanTree(
       el("smithers:saga", { id: "s1", onFailure: "compensate-and-fail" }, [
         el("smithers:saga-actions", {}, [el("smithers:task", { id: "a" })]),
-        el("smithers:saga-compensations", {}, [
-          el("smithers:task", { id: "undo-a" }),
-        ]),
+        el("smithers:saga-compensations", {}, [el("smithers:task", { id: "undo-a" })]),
       ]),
     );
     expect(plan).toEqual({
@@ -282,14 +252,7 @@ describe("buildPlanTree", () => {
 
 describe("scheduleTasks boundaries", () => {
   test("missing descriptor is treated as terminal", () => {
-    const result = scheduleTasks(
-      { kind: "task", nodeId: "missing" },
-      new Map(),
-      new Map(),
-      new Map(),
-      new Map(),
-      0,
-    );
+    const result = scheduleTasks({ kind: "task", nodeId: "missing" }, new Map(), new Map(), new Map(), new Map(), 0);
     expect(result.runnable).toEqual([]);
     expect(result.pendingExists).toBe(false);
   });
@@ -297,14 +260,7 @@ describe("scheduleTasks boundaries", () => {
   test("dependencies must exist and be terminal", () => {
     const plan = { kind: "task", nodeId: "child" };
     const child = makeDescriptor("child", { dependsOn: ["parent"] });
-    const result = scheduleTasks(
-      plan,
-      new Map(),
-      descriptorMap(child),
-      new Map(),
-      new Map(),
-      0,
-    );
+    const result = scheduleTasks(plan, new Map(), descriptorMap(child), new Map(), new Map(), 0);
     expect(result.runnable).toEqual([]);
     expect(result.pendingExists).toBe(true);
   });
@@ -366,11 +322,7 @@ describe("scheduleTasks boundaries", () => {
   });
 
   test("waiting flags are surfaced", () => {
-    const descriptors = descriptorMap(
-      makeDescriptor("approval"),
-      makeDescriptor("event"),
-      makeDescriptor("timer"),
-    );
+    const descriptors = descriptorMap(makeDescriptor("approval"), makeDescriptor("event"), makeDescriptor("timer"));
     const states = new Map([
       [buildStateKey("approval", 0), "waiting-approval"],
       [buildStateKey("event", 0), "waiting-event"],
@@ -493,12 +445,7 @@ describe("scheduleTasks boundaries", () => {
         [buildStateKey("a", 0), "finished"],
         [buildStateKey("b", 0), "failed"],
       ]),
-      descriptorMap(
-        makeDescriptor("a"),
-        makeDescriptor("b"),
-        makeDescriptor("undo-a"),
-        makeDescriptor("undo-b"),
-      ),
+      descriptorMap(makeDescriptor("a"), makeDescriptor("b"), makeDescriptor("undo-a"), makeDescriptor("undo-b")),
       new Map(),
       new Map(),
       0,
@@ -516,11 +463,7 @@ describe("scheduleTasks boundaries", () => {
         finallyChildren: [{ kind: "task", nodeId: "finally" }],
       },
       new Map([[buildStateKey("try", 0), "failed"]]),
-      descriptorMap(
-        makeDescriptor("try"),
-        makeDescriptor("catch"),
-        makeDescriptor("finally"),
-      ),
+      descriptorMap(makeDescriptor("try"), makeDescriptor("catch"), makeDescriptor("finally")),
       new Map(),
       new Map(),
       0,
@@ -579,11 +522,7 @@ describe("scheduleTasks boundaries", () => {
         [buildStateKey("try", 0), "failed"],
         [buildStateKey("catch", 0), "failed"],
       ]),
-      descriptorMap(
-        makeDescriptor("try"),
-        makeDescriptor("catch"),
-        makeDescriptor("finally"),
-      ),
+      descriptorMap(makeDescriptor("try"), makeDescriptor("catch"), makeDescriptor("finally")),
       new Map(),
       new Map(),
       0,
@@ -607,11 +546,7 @@ describe("scheduleTasks boundaries", () => {
         [buildStateKey("catch", 0), "failed"],
         [buildStateKey("finally", 0), "finished"],
       ]),
-      descriptorMap(
-        makeDescriptor("try"),
-        makeDescriptor("catch"),
-        makeDescriptor("finally"),
-      ),
+      descriptorMap(makeDescriptor("try"), makeDescriptor("catch"), makeDescriptor("finally")),
       new Map(),
       new Map(),
       0,
@@ -642,11 +577,7 @@ describe("scheduleTasks boundaries", () => {
         [buildStateKey("inner-try", 0), "failed"],
         [buildStateKey("inner-catch", 0), "finished"],
       ]),
-      descriptorMap(
-        makeDescriptor("inner-try"),
-        makeDescriptor("inner-catch"),
-        makeDescriptor("outer-catch"),
-      ),
+      descriptorMap(makeDescriptor("inner-try"), makeDescriptor("inner-catch"), makeDescriptor("outer-catch")),
       new Map(),
       new Map(),
       0,

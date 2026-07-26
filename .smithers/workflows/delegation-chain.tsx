@@ -19,11 +19,17 @@ import { agents } from "../agents";
 // What you pass in. Only `prompt` is required — everything else defaults to
 // fully-automatic operation (no approval gates, previews on, poll at the end).
 const inputSchema = z.object({
-  prompt: z.string().describe("The (possibly ambiguous) goal. Goal refinement will ask only genuine user-preference questions, each with a prefilled recommended answer."),
+  prompt: z
+    .string()
+    .describe(
+      "The (possibly ambiguous) goal. Goal refinement will ask only genuine user-preference questions, each with a prefilled recommended answer.",
+    ),
   approvalPolicy: z
     .string()
     .optional()
-    .describe("When set, delegating agents may add approval gates where this policy applies (and pass a clarified policy down). Absent = no approval gates anywhere."),
+    .describe(
+      "When set, delegating agents may add approval gates where this policy applies (and pass a clarified policy down). Absent = no approval gates anywhere.",
+    ),
   maxDepth: z.number().int().min(1).max(5).default(3).describe("Max decomposition depth."),
   maxConcurrency: z.number().int().min(1).max(8).default(4).describe("Max parallel tasks per fan-out phase."),
   maxDeriskRounds: z.number().int().min(1).max(6).default(3).describe("Max research/POC replan rounds per node."),

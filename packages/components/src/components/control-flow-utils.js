@@ -4,17 +4,17 @@ import React from "react";
  * @returns {unknown}
  */
 function mapChildren(node) {
-    if (Array.isArray(node)) {
-        const mapped = [];
-        for (const child of node) {
-            mapped.push(forceContinueOnFail(child));
-        }
-        return mapped;
+  if (Array.isArray(node)) {
+    const mapped = [];
+    for (const child of node) {
+      mapped.push(forceContinueOnFail(child));
     }
-    if (React.isValidElement(node)) {
-        return forceContinueOnFail(node);
-    }
-    return node;
+    return mapped;
+  }
+  if (React.isValidElement(node)) {
+    return forceContinueOnFail(node);
+  }
+  return node;
 }
 /**
  * Failure-boundary components need inner tasks to fail "softly" so the
@@ -23,22 +23,22 @@ function mapChildren(node) {
  * @returns {React.ReactNode}
  */
 export function forceContinueOnFail(node) {
-    if (Array.isArray(node)) {
-        return mapChildren(node);
-    }
-    if (!React.isValidElement(node)) {
-        return node;
-    }
-    const props = (node.props ?? {});
-    const nextProps = {};
-    if ("output" in props) {
-        nextProps.continueOnFail = true;
-    }
-    if ("children" in props) {
-        nextProps.children = mapChildren(props.children);
-    }
-    if (Object.keys(nextProps).length === 0) {
-        return node;
-    }
-    return React.cloneElement(node, nextProps);
+  if (Array.isArray(node)) {
+    return mapChildren(node);
+  }
+  if (!React.isValidElement(node)) {
+    return node;
+  }
+  const props = node.props ?? {};
+  const nextProps = {};
+  if ("output" in props) {
+    nextProps.continueOnFail = true;
+  }
+  if ("children" in props) {
+    nextProps.children = mapChildren(props.children);
+  }
+  if (Object.keys(nextProps).length === 0) {
+    return node;
+  }
+  return React.cloneElement(node, nextProps);
 }

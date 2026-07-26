@@ -3,7 +3,7 @@ export function formatJsonSafe(value: unknown): string {
   try {
     const formatted = JSON.stringify(
       value,
-      (_key, current) => typeof current === "bigint" ? `${current}n` : current,
+      (_key, current) => (typeof current === "bigint" ? `${current}n` : current),
       2,
     );
     return formatted === undefined ? String(value) : formatted;

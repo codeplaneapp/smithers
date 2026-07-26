@@ -6,8 +6,6 @@ import { correlationStorage } from "./_correlationStorage.js";
  * @param {Effect.Effect<A, E, R>} effect
  */
 export function withCurrentCorrelationContext(effect) {
-    const current = correlationStorage.getStore();
-    return current
-        ? effect.pipe(Effect.locally(correlationContextFiberRef, current))
-        : effect;
+  const current = correlationStorage.getStore();
+  return current ? effect.pipe(Effect.locally(correlationContextFiberRef, current)) : effect;
 }

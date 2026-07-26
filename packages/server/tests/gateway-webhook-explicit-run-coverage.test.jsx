@@ -51,7 +51,9 @@ afterEach(async () => {
   gateway = undefined;
   for (const dbPath of dbPaths.splice(0)) {
     for (const suffix of ["", "-shm", "-wal"]) {
-      try { rmSync(`${dbPath}${suffix}`, { force: true }); } catch {}
+      try {
+        rmSync(`${dbPath}${suffix}`, { force: true });
+      } catch {}
     }
   }
 });
@@ -107,19 +109,39 @@ describe("Gateway webhook explicit-run signal targeting", () => {
     let attemptSeq = 1;
     async function seedNode(nodeId, state, metaJson) {
       await adapter.insertNode({
-        runId, nodeId, iteration: 0, state, lastAttempt: 1, updatedAtMs: Date.now(),
-        outputTable, label: nodeId,
+        runId,
+        nodeId,
+        iteration: 0,
+        state,
+        lastAttempt: 1,
+        updatedAtMs: Date.now(),
+        outputTable,
+        label: nodeId,
       });
       await adapter.insertAttempt({
-        runId, nodeId, iteration: 0, attempt: 1, state,
-        startedAtMs: Date.now(), finishedAtMs: null, errorJson: null,
-        metaJson, responseText: null, cached: false, jjPointer: null, jjCwd: null,
+        runId,
+        nodeId,
+        iteration: 0,
+        attempt: 1,
+        state,
+        startedAtMs: Date.now(),
+        finishedAtMs: null,
+        errorJson: null,
+        metaJson,
+        responseText: null,
+        cached: false,
+        jjPointer: null,
+        jjCwd: null,
       });
       attemptSeq += 1;
     }
 
     // 1. non-waiting node -> skipped by the state guard.
-    await seedNode("done-node", "finished", JSON.stringify({ waitForEvent: { signalName: "github.comment.created", correlationId: "42" } }));
+    await seedNode(
+      "done-node",
+      "finished",
+      JSON.stringify({ waitForEvent: { signalName: "github.comment.created", correlationId: "42" } }),
+    );
     // 2. waiting node with NO meta -> parseWebhookWaitForEventSnapshot returns null (!metaJson).
     await seedNode("no-meta", "waiting-event", null);
     // 3. waiting node whose waitForEvent has no signalName -> snapshot null (!signalName).
@@ -127,17 +149,34 @@ describe("Gateway webhook explicit-run signal targeting", () => {
     // 4. waiting node with invalid JSON meta -> snapshot null (JSON.parse throws / caught).
     await seedNode("bad-json", "waiting-event", "{not valid json");
     // 5. waiting node whose signal name differs -> signalName mismatch continue.
-    await seedNode("wrong-signal", "waiting-event", JSON.stringify({ waitForEvent: { signalName: "other.event", correlationId: "42" } }));
+    await seedNode(
+      "wrong-signal",
+      "waiting-event",
+      JSON.stringify({ waitForEvent: { signalName: "other.event", correlationId: "42" } }),
+    );
     // 6. waiting node whose correlation differs -> correlationId mismatch continue.
-    await seedNode("wrong-corr", "waiting-event", JSON.stringify({ waitForEvent: { signalName: "github.comment.created", correlationId: "999" } }));
+    await seedNode(
+      "wrong-corr",
+      "waiting-event",
+      JSON.stringify({ waitForEvent: { signalName: "github.comment.created", correlationId: "999" } }),
+    );
     // 7. matching node (LAST) -> returns true.
-    await seedNode("wait", "waiting-event", JSON.stringify({ waitForEvent: { signalName: "github.comment.created", correlationId: "42", waitAsync: false } }));
+    await seedNode(
+      "wait",
+      "waiting-event",
+      JSON.stringify({ waitForEvent: { signalName: "github.comment.created", correlationId: "42", waitAsync: false } }),
+    );
 
-    const response = await postWebhook(port, "github", {
-      target: { runId },
-      issue: { id: 42 },
-      comment: { body: "ship it" },
-    }, "explicit-secret");
+    const response = await postWebhook(
+      port,
+      "github",
+      {
+        target: { runId },
+        issue: { id: 42 },
+        comment: { body: "ship it" },
+      },
+      "explicit-secret",
+    );
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.ok).toBe(true);
@@ -158,7 +197,12 @@ describe("Gateway webhook explicit-run signal targeting", () => {
     gateway.register("github", workflow, {
       webhook: {
         secret: "explicit-secret",
-        signal: { name: "github.comment.created", runIdPath: "target.runId", correlationIdPath: "issue.id", payloadPath: "comment" },
+        signal: {
+          name: "github.comment.created",
+          runIdPath: "target.runId",
+          correlationIdPath: "issue.id",
+          payloadPath: "comment",
+        },
         run: { enabled: false },
       },
     });
@@ -166,13 +210,24 @@ describe("Gateway webhook explicit-run signal targeting", () => {
     const port = getPort(server);
     const adapter = new SmithersDb(api.db);
     // A finished run: the status guard rejects it before runWaitsForSignal.
-    await adapter.insertRun({ runId: "finished-run", workflowName: "explicit-wait", workflowHash: "h", status: "finished", createdAtMs: Date.now() });
+    await adapter.insertRun({
+      runId: "finished-run",
+      workflowName: "explicit-wait",
+      workflowHash: "h",
+      status: "finished",
+      createdAtMs: Date.now(),
+    });
 
-    const response = await postWebhook(port, "github", {
-      target: { runId: "finished-run" },
-      issue: { id: 42 },
-      comment: { body: "late" },
-    }, "explicit-secret");
+    const response = await postWebhook(
+      port,
+      "github",
+      {
+        target: { runId: "finished-run" },
+        issue: { id: 42 },
+        comment: { body: "late" },
+      },
+      "explicit-secret",
+    );
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.matchedRunIds).toEqual([]);

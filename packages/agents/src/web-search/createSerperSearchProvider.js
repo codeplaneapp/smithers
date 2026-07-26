@@ -32,12 +32,14 @@ export function createSerperSearchProvider(options) {
       );
       const body = await readJson(response, "Serper");
       const results = Array.isArray(body.organic) ? body.organic : [];
-      return results.map((result) => ({
-        title: String(result.title ?? result.link ?? "Untitled"),
-        url: String(result.link ?? ""),
-        snippet: result.snippet,
-        publishedDate: result.date,
-      })).filter((result) => result.url);
+      return results
+        .map((result) => ({
+          title: String(result.title ?? result.link ?? "Untitled"),
+          url: String(result.link ?? ""),
+          snippet: result.snippet,
+          publishedDate: result.date,
+        }))
+        .filter((result) => result.url);
     },
   };
 }
@@ -81,9 +83,14 @@ async function fetchWithSameOriginRedirects(fetchImpl, url, init, provider) {
     if (!location) return response;
     const nextUrl = new URL(location, currentUrl);
     if (nextUrl.origin !== origin) {
-      throw new Error(`${provider} search rejected a cross-origin redirect to ${nextUrl.origin}: credentials are only sent to ${origin}`);
+      throw new Error(
+        `${provider} search rejected a cross-origin redirect to ${nextUrl.origin}: credentials are only sent to ${origin}`,
+      );
     }
-    if (response.status === 303 || ((response.status === 301 || response.status === 302) && currentInit.method === "POST")) {
+    if (
+      response.status === 303 ||
+      ((response.status === 301 || response.status === 302) && currentInit.method === "POST")
+    ) {
       currentInit = { ...currentInit, method: "GET", body: undefined };
     }
     currentUrl = nextUrl.href;

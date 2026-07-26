@@ -3,7 +3,7 @@ import { buildTimeline as buildTimelineEffect } from "./buildTimelineEffect.js";
 import { buildTimelineTree as buildTimelineTreeEffect } from "./buildTimelineTreeEffect.js";
 export { formatTimelineForTui } from "./formatTimelineForTui.js";
 export { formatTimelineAsJson } from "./formatTimelineAsJson.js";
-export { buildTimelineEffect, buildTimelineTreeEffect, };
+export { buildTimelineEffect, buildTimelineTreeEffect };
 
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("../RunTimeline.ts").RunTimeline} RunTimeline */
@@ -17,7 +17,7 @@ export { buildTimelineEffect, buildTimelineTreeEffect, };
  * @returns {Promise<RunTimeline>}
  */
 export function buildTimeline(adapter, runId) {
-    return Effect.runPromise(buildTimelineEffect(adapter, runId));
+  return Effect.runPromise(buildTimelineEffect(adapter, runId));
 }
 /**
  * Build the recursive timeline tree (run + all descendants) for a run.
@@ -27,5 +27,5 @@ export function buildTimeline(adapter, runId) {
  * @returns {Promise<TimelineTree>}
  */
 export function buildTimelineTree(adapter, runId) {
-    return Effect.runPromise(buildTimelineTreeEffect(adapter, runId));
+  return Effect.runPromise(buildTimelineTreeEffect(adapter, runId));
 }

@@ -256,15 +256,7 @@ export type DelegationEdge = {
   kind: "child" | "dep" | "gate" | "probe";
 };
 
-export type DelegationPhase =
-  | "goal"
-  | "planning"
-  | "preview"
-  | "gates"
-  | "derisk"
-  | "execution"
-  | "scoring"
-  | "done";
+export type DelegationPhase = "goal" | "planning" | "preview" | "gates" | "derisk" | "execution" | "scoring" | "done";
 
 export type DelegationGraph = {
   nodes: Record<string, DelegationNodeState>;
@@ -304,9 +296,12 @@ export function isTier(value: unknown): value is Tier {
 export function isEstimate(value: unknown): value is Estimate {
   return (
     isRecord(value) &&
-    typeof value.tokens === "number" && Number.isFinite(value.tokens) &&
-    typeof value.costUsd === "number" && Number.isFinite(value.costUsd) &&
-    typeof value.minutes === "number" && Number.isFinite(value.minutes)
+    typeof value.tokens === "number" &&
+    Number.isFinite(value.tokens) &&
+    typeof value.costUsd === "number" &&
+    Number.isFinite(value.costUsd) &&
+    typeof value.minutes === "number" &&
+    Number.isFinite(value.minutes)
   );
 }
 
@@ -366,7 +361,8 @@ export function isDcPlanRow(value: unknown): value is DcPlanRow {
     isTier(value.tier) &&
     typeof value.title === "string" &&
     typeof value.brief === "string" &&
-    Array.isArray(value.children) && value.children.every(isDcPlanChild) &&
+    Array.isArray(value.children) &&
+    value.children.every(isDcPlanChild) &&
     isEstimate(value.subtreeEstimate) &&
     Array.isArray(value.risks) &&
     value.risks.every(
@@ -388,7 +384,8 @@ export function isDcGatesRow(value: unknown): value is DcGatesRow {
   return (
     isRecord(value) &&
     typeof value.logicalId === "string" &&
-    Array.isArray(value.gates) && value.gates.every(isGate) &&
+    Array.isArray(value.gates) &&
+    value.gates.every(isGate) &&
     isStringArray(value.depsLogical)
   );
 }
@@ -462,7 +459,12 @@ export function isDcReviewRow(value: unknown): value is DcReviewRow {
 }
 
 export function isDcEditRow(value: unknown): value is DcEditRow {
-  return isRecord(value) && typeof value.editId === "string" && typeof value.logicalId === "string" && "editedOutput" in value;
+  return (
+    isRecord(value) &&
+    typeof value.editId === "string" &&
+    typeof value.logicalId === "string" &&
+    "editedOutput" in value
+  );
 }
 
 export function isDcSkipRow(value: unknown): value is DcSkipRow {
@@ -477,7 +479,9 @@ export function isDcPollRow(value: unknown): value is DcPollRow {
       (answer) =>
         isRecord(answer) &&
         typeof answer.question === "string" &&
-        typeof answer.rating === "number" && answer.rating >= 1 && answer.rating <= 5,
+        typeof answer.rating === "number" &&
+        answer.rating >= 1 &&
+        answer.rating <= 5,
     )
   );
 }

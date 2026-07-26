@@ -154,9 +154,7 @@ export function matchesAge(run: RunSummary, filter: AgeFilter): boolean {
 export function matchesSearch(run: RunSummary, search: string): boolean {
   const q = search.trim().toLowerCase();
   if (q === "") return true;
-  return (
-    run.workflowName.toLowerCase().includes(q) || run.runId.toLowerCase().includes(q)
-  );
+  return run.workflowName.toLowerCase().includes(q) || run.runId.toLowerCase().includes(q);
 }
 
 /** The four header filters, as one bag so the canvas passes a single value. */
@@ -177,10 +175,7 @@ export const DEFAULT_FILTERS: RunFilters = {
 /** Whether any filter is off its default — drives the Clear link's visibility. */
 export function hasActiveFilters(filters: RunFilters): boolean {
   return (
-    filters.status !== "all" ||
-    filters.workflow !== "all" ||
-    filters.age !== "all" ||
-    filters.search.trim() !== ""
+    filters.status !== "all" || filters.workflow !== "all" || filters.age !== "all" || filters.search.trim() !== ""
   );
 }
 

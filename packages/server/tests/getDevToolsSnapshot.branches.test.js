@@ -49,9 +49,7 @@ describe("getDevToolsSnapshot transform branches", () => {
     // Matches the numeric regex but Number(...) is not finite, so the
     // isFinite guard falls through and the value stays a plain string.
     const huge = "9".repeat(400);
-    const root = parseXmlToDevToolsRoot(
-      element("smithers:task", { id: "p2", pHuge: huge }),
-    );
+    const root = parseXmlToDevToolsRoot(element("smithers:task", { id: "p2", pHuge: huge }));
     expect(Number(huge)).toBe(Infinity);
     expect(root.props.pHuge).toBe(huge);
   });
@@ -188,9 +186,7 @@ describe("getDevToolsSnapshot transform branches", () => {
           startedAtMs: 1,
           heartbeatAtMs: 1,
         }),
-        listPendingApprovals: async () => [
-          { nodeId: "gate", requestedAtMs: 5 },
-        ],
+        listPendingApprovals: async () => [{ nodeId: "gate", requestedAtMs: 5 }],
         getLastFrame: async () => null,
       };
       const snap = await getDevToolsSnapshotRoute({ adapter, runId: "wa2", frameNo: 0 });

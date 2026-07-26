@@ -1,13 +1,7 @@
 import { create } from "zustand";
 import { useChatStore } from "../chat/chatStore";
 import { useNotificationsStore } from "../notifications/notificationsStore";
-import {
-  createCron,
-  deleteCron,
-  toggleCron,
-  validateCreate,
-  type Cron,
-} from "./crons";
+import { createCron, deleteCron, toggleCron, validateCreate, type Cron } from "./crons";
 
 /**
  * The triggers store: the LIVE cron list (pushed in by `CronsBridge` from the

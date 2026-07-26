@@ -27,11 +27,16 @@ function ModeBody({
   onBack: () => void;
 }) {
   switch (mode) {
-    case 1: return <TreeMode runId={runId} initialSelectedNodeKey={treeSelectedNodeKey} />;
-    case 2: return <GraphMode runId={runId} onSelectNodeKey={onSelectNodeKey} />;
-    case 3: return <LogMode runId={runId} />;
-    case 4: return <TimelineMode runId={runId} />;
-    case 5: return <HijackMode runId={runId} onBack={onBack} />;
+    case 1:
+      return <TreeMode runId={runId} initialSelectedNodeKey={treeSelectedNodeKey} />;
+    case 2:
+      return <GraphMode runId={runId} onSelectNodeKey={onSelectNodeKey} />;
+    case 3:
+      return <LogMode runId={runId} />;
+    case 4:
+      return <TimelineMode runId={runId} />;
+    case 5:
+      return <HijackMode runId={runId} onBack={onBack} />;
   }
 }
 
@@ -94,18 +99,18 @@ function HelpOverlay({ mode }: { mode: Mode }) {
         paddingLeft={2}
         paddingRight={2}
       >
-        <text fg="#00d7ff">  Keybindings</text>
+        <text fg="#00d7ff"> Keybindings</text>
         <text> </text>
         {entries.map((e) => (
           <text key={e.key} fg="#cccccc">{`  ${e.key.padEnd(3)} ${e.description}`}</text>
         ))}
         <text> </text>
         {mode === 1 ? (
-          <text fg="#888888">  1-4 select an inspector tab in Tree</text>
+          <text fg="#888888"> 1-4 select an inspector tab in Tree</text>
         ) : (
-          <text fg="#888888">  g/l/t/h  switch mode from Tree</text>
+          <text fg="#888888"> g/l/t/h switch mode from Tree</text>
         )}
-        <text fg="#555555">  ? or Esc to close</text>
+        <text fg="#555555"> ? or Esc to close</text>
       </box>
     </box>
   );

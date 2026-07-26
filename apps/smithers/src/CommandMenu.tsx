@@ -1,8 +1,4 @@
-import {
-  useRef,
-  type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from "react";
+import { useRef, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { goToView, openSurface } from "./app/navigation";
 import { useRouteStore } from "./app/routeStore";
 import { useUiStore } from "./app/uiStore";
@@ -12,25 +8,13 @@ import { MenuBackdrop } from "./components/MenuBackdrop";
 
 const ChevronDown = () => (
   <svg aria-hidden="true" className="chevron" fill="none" viewBox="0 0 24 24">
-    <path
-      d="m6 9 6 6 6-6"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="2"
-    />
+    <path d="m6 9 6 6 6-6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
   </svg>
 );
 
 const ChevronRight = () => (
   <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
-    <path
-      d="m9 6 6 6-6 6"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="2"
-    />
+    <path d="m9 6 6 6-6 6" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
   </svg>
 );
 
@@ -43,13 +27,7 @@ const Magnifier = () => (
 
 const Check = () => (
   <svg aria-hidden="true" className="check" fill="none" viewBox="0 0 24 24">
-    <path
-      d="m5 13 4 4L19 7"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="2"
-    />
+    <path d="m5 13 4 4L19 7" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
   </svg>
 );
 
@@ -58,9 +36,7 @@ function focusChecked(menu: HTMLDivElement | null): void {
   if (!menu) {
     return;
   }
-  const items = Array.from(
-    menu.querySelectorAll<HTMLElement>('[role^="menuitem"]'),
-  );
+  const items = Array.from(menu.querySelectorAll<HTMLElement>('[role^="menuitem"]'));
   const checked = items.find((item) => item.getAttribute("aria-checked") === "true");
   (checked ?? items[0])?.focus();
 }
@@ -91,9 +67,7 @@ export function CommandMenu() {
       close();
       return;
     }
-    const items = Array.from(
-      event.currentTarget.querySelectorAll<HTMLElement>('[role^="menuitem"]'),
-    );
+    const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role^="menuitem"]'));
     if (items.length === 0) {
       return;
     }
@@ -138,12 +112,7 @@ export function CommandMenu() {
       {open ? (
         <>
           <MenuBackdrop />
-          <div
-            className="command-list"
-            ref={focusChecked}
-            role="menu"
-            onKeyDown={onMenuKeyDown}
-          >
+          <div className="command-list" ref={focusChecked} role="menu" onKeyDown={onMenuKeyDown}>
             <div className="command-group" role="group" aria-label="Mode">
               <div className="command-section" aria-hidden="true">
                 Mode

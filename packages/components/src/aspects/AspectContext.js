@@ -20,9 +20,9 @@ AspectContext.displayName = "AspectContext";
  * @returns {AspectAccumulator}
  */
 export function createAccumulator() {
-    return {
-        totalTokens: 0,
-        totalLatencyMs: 0,
-        taskCount: 0,
-    };
+  return {
+    totalTokens: 0,
+    totalLatencyMs: 0,
+    taskCount: 0,
+  };
 }

@@ -81,9 +81,7 @@ describe("SmithersPiHttpClient.json", () => {
       text: async () => "teapot",
     })) as typeof fetch;
 
-    await expect(
-      new SmithersPiHttpClient({ baseUrl: "http://pi.local" }).json("/bad"),
-    ).rejects.toMatchObject({
+    await expect(new SmithersPiHttpClient({ baseUrl: "http://pi.local" }).json("/bad")).rejects.toMatchObject({
       name: "SmithersError",
       code: "PI_HTTP_ERROR",
       summary: "Smithers HTTP 418: teapot",
@@ -123,9 +121,7 @@ describe("pi-plugin api wrappers", () => {
       note: "ship it",
     });
 
-    expect(calls[0].url).toBe(
-      "http://pi.local/v1/runs/run-1/nodes/node-a/approve",
-    );
+    expect(calls[0].url).toBe("http://pi.local/v1/runs/run-1/nodes/node-a/approve");
     expect(calls[0].init?.method).toBe("POST");
     expect(calls[0].init?.headers).toEqual({
       "Content-Type": "application/json",

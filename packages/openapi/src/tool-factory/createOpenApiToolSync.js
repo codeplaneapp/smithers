@@ -17,6 +17,6 @@ import { createOpenApiToolFromSpec } from "./_helpers.js";
  * @returns {OpenApiTool}
  */
 export function createOpenApiToolSync(input, operationId, options = {}) {
-    const spec = loadSpecSync(input);
-    return createOpenApiToolFromSpec(spec, operationId, options);
+  const spec = loadSpecSync(input);
+  return createOpenApiToolFromSpec(spec, operationId, options);
 }

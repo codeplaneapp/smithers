@@ -7,7 +7,8 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const fixturesDir = join(import.meta.dir, "..", "evals", "fixtures");
-const loadFixture = async (name: string) => (await import(`${pathToFileURL(join(fixturesDir, name)).href}?test=${Date.now()}-${Math.random()}`)).default;
+const loadFixture = async (name: string) =>
+  (await import(`${pathToFileURL(join(fixturesDir, name)).href}?test=${Date.now()}-${Math.random()}`)).default;
 
 type Frame = RenderedWorkflow;
 function task(frame: Frame, id: string): TaskDescriptor {

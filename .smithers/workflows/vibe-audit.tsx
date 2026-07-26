@@ -28,9 +28,22 @@ const strategySchema = z.object({
   findingCount: z.number().int(),
 });
 
-const dedupeSchema = z.object({ mergedJson: z.string(), uniqueCount: z.number().int(), duplicateCount: z.number().int() });
-const triageSchema = z.object({ triagedJson: z.string(), highCount: z.number().int(), mediumCount: z.number().int(), lowCount: z.number().int() });
-const reportSchema = z.object({ reportMarkdown: z.string(), totalFindings: z.number().int(), strategiesRun: z.number().int() });
+const dedupeSchema = z.object({
+  mergedJson: z.string(),
+  uniqueCount: z.number().int(),
+  duplicateCount: z.number().int(),
+});
+const triageSchema = z.object({
+  triagedJson: z.string(),
+  highCount: z.number().int(),
+  mediumCount: z.number().int(),
+  lowCount: z.number().int(),
+});
+const reportSchema = z.object({
+  reportMarkdown: z.string(),
+  totalFindings: z.number().int(),
+  strategiesRun: z.number().int(),
+});
 
 const inputSchema = z.object({
   repo: z.string().default("acme/payments-api"),
@@ -51,19 +64,54 @@ type Finding = z.infer<typeof findingSchema>;
 
 const STRATEGY_FINDINGS: Record<string, Finding[]> = {
   "injection-scan": [
-    { findingKey: "sqli-orders", title: "String-built SQL in orders search", file: "src/orders/search.ts:88", severity: "high" },
-    { findingKey: "xss-receipt", title: "Unescaped HTML in receipt renderer", file: "src/receipts/render.ts:41", severity: "medium" },
+    {
+      findingKey: "sqli-orders",
+      title: "String-built SQL in orders search",
+      file: "src/orders/search.ts:88",
+      severity: "high",
+    },
+    {
+      findingKey: "xss-receipt",
+      title: "Unescaped HTML in receipt renderer",
+      file: "src/receipts/render.ts:41",
+      severity: "medium",
+    },
   ],
   "auth-review": [
-    { findingKey: "admin-noauth", title: "Admin refund route missing auth check", file: "src/admin/refunds.ts:23", severity: "high" },
-    { findingKey: "sqli-orders", title: "Search endpoint interpolates user input into SQL", file: "src/orders/search.ts:88", severity: "high" },
+    {
+      findingKey: "admin-noauth",
+      title: "Admin refund route missing auth check",
+      file: "src/admin/refunds.ts:23",
+      severity: "high",
+    },
+    {
+      findingKey: "sqli-orders",
+      title: "Search endpoint interpolates user input into SQL",
+      file: "src/orders/search.ts:88",
+      severity: "high",
+    },
   ],
   "secrets-scan": [
-    { findingKey: "aws-key", title: "Hardcoded AWS key in deploy script", file: "scripts/deploy.sh:12", severity: "high" },
-    { findingKey: "stripe-test", title: "Stripe test secret committed in fixtures", file: "tests/fixtures/billing.json:3", severity: "low" },
+    {
+      findingKey: "aws-key",
+      title: "Hardcoded AWS key in deploy script",
+      file: "scripts/deploy.sh:12",
+      severity: "high",
+    },
+    {
+      findingKey: "stripe-test",
+      title: "Stripe test secret committed in fixtures",
+      file: "tests/fixtures/billing.json:3",
+      severity: "low",
+    },
   ],
   "deps-audit": [
-    { findingKey: "lodash-cve", title: "lodash 4.17.15 — prototype pollution CVE", file: "package.json", severity: "medium" },
+    {
+      findingKey: "lodash-cve",
+      title: "lodash 4.17.15 — prototype pollution CVE",
+      file: "package.json",
+      severity: "medium",
+    },
     { findingKey: "jwt-none", title: "jsonwebtoken allows alg:none downgrade", file: "package.json", severity: "high" },
   ],
 };

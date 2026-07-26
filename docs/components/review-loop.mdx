@@ -79,36 +79,57 @@ import { useOptionalSmithersContext } from "./useOptionalSmithersContext.js";
  * @param {ReviewLoopProps} props
  */
 export function ReviewLoop(props) {
-    if (props.skipIf)
-        return null;
-    const { id, producer, reviewer, produceOutput, reviewOutput, maxIterations = 5, onMaxReached = "return-last", children, } = props;
-    const prefix = id ?? "review-loop";
-    const produceId = `${prefix}-produce`;
-    const reviewId = `${prefix}-review`;
-    const ctx = useOptionalSmithersContext();
-    const latestReview = ctx?.latest?.(reviewOutput, reviewId);
-    const approved = latestReview?.approved === true;
-    const reviewerAgents = Array.isArray(reviewer) ? reviewer : [reviewer];
-    if (reviewerAgents.length === 0) {
-        throw new Error("ReviewLoop reviewer must include at least one reviewer.");
-    }
-    // On iterations after the first, fold the previous (not-yet-approved) review
-    // feedback into the producer's prompt so it revises rather than restarts.
-    const priorReview = latestReview && latestReview.approved !== true ? latestReview : undefined;
-    const produceChildren = priorReview
-        ? React.createElement(React.Fragment, null, children, "\n\nRevise your previous work using the reviewer's feedback:\n", JSON.stringify(priorReview))
-        : children;
-    return React.createElement(Loop, {
-        id: prefix,
-        until: approved,
-        maxIterations,
-        onMaxReached,
-    }, React.createElement(Sequence, null, React.createElement(Task, {
+  if (props.skipIf) return null;
+  const {
+    id,
+    producer,
+    reviewer,
+    produceOutput,
+    reviewOutput,
+    maxIterations = 5,
+    onMaxReached = "return-last",
+    children,
+  } = props;
+  const prefix = id ?? "review-loop";
+  const produceId = `${prefix}-produce`;
+  const reviewId = `${prefix}-review`;
+  const ctx = useOptionalSmithersContext();
+  const latestReview = ctx?.latest?.(reviewOutput, reviewId);
+  const approved = latestReview?.approved === true;
+  const reviewerAgents = Array.isArray(reviewer) ? reviewer : [reviewer];
+  if (reviewerAgents.length === 0) {
+    throw new Error("ReviewLoop reviewer must include at least one reviewer.");
+  }
+  // On iterations after the first, fold the previous (not-yet-approved) review
+  // feedback into the producer's prompt so it revises rather than restarts.
+  const priorReview = latestReview && latestReview.approved !== true ? latestReview : undefined;
+  const produceChildren = priorReview
+    ? React.createElement(
+        React.Fragment,
+        null,
+        children,
+        "\n\nRevise your previous work using the reviewer's feedback:\n",
+        JSON.stringify(priorReview),
+      )
+    : children;
+  return React.createElement(
+    Loop,
+    {
+      id: prefix,
+      until: approved,
+      maxIterations,
+      onMaxReached,
+    },
+    React.createElement(
+      Sequence,
+      null,
+      React.createElement(Task, {
         id: produceId,
         output: produceOutput,
         agent: producer,
         children: produceChildren,
-    }), React.createElement(Task, {
+      }),
+      React.createElement(Task, {
         id: reviewId,
         output: reviewOutput,
         agent: reviewerAgents.length === 1 ? reviewerAgents[0] : reviewerAgents,
@@ -117,8 +138,11 @@ export function ReviewLoop(props) {
         // is cache-context only and injects nothing).
         needs: { produced: produceId },
         deps: { produced: produceOutput },
-        children: (d) => `Review the produced work and decide whether to approve.\n\nProduced work:\n${JSON.stringify(d.produced ?? "(no output)")}`,
-    })));
+        children: (d) =>
+          `Review the produced work and decide whether to approve.\n\nProduced work:\n${JSON.stringify(d.produced ?? "(no output)")}`,
+      }),
+    ),
+  );
 }
 ```
 
@@ -134,18 +158,17 @@ import React from "react";
  * @param {LoopProps} props
  */
 export function Loop(props) {
-    if (props.skipIf)
-        return null;
-    // Sanitize to the loop's host props (align with other structural components);
-    // key/skipIf are React/control props and children are passed separately.
-    const next = {
-        id: props.id,
-        until: props.until,
-        maxIterations: props.maxIterations,
-        onMaxReached: props.onMaxReached,
-        continueAsNewEvery: props.continueAsNewEvery,
-    };
-    return React.createElement("smithers:ralph", next, props.children);
+  if (props.skipIf) return null;
+  // Sanitize to the loop's host props (align with other structural components);
+  // key/skipIf are React/control props and children are passed separately.
+  const next = {
+    id: props.id,
+    until: props.until,
+    maxIterations: props.maxIterations,
+    onMaxReached: props.onMaxReached,
+    continueAsNewEvery: props.continueAsNewEvery,
+  };
+  return React.createElement("smithers:ralph", next, props.children);
 }
 /** @deprecated Use `Loop` instead. */
 export const Ralph = Loop;
@@ -159,17 +182,16 @@ import React from "react";
  * @param {SequenceProps} props
  */
 export function Sequence(props) {
-    if (props.skipIf)
-        return null;
-    // Sequence carries only a display label; pass a sanitized bag (align with
-    // the sanitizing structural components) so control props don't leak through.
-    // `label` names the phase group in run views (graph, the Claude /workflows
-    // mirror) and is preserved in the persisted frame XML.
-    const next = {
-        ...(props.label === undefined ? {} : { label: props.label }),
-        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
-    };
-    return React.createElement("smithers:sequence", next, props.children);
+  if (props.skipIf) return null;
+  // Sequence carries only a display label; pass a sanitized bag (align with
+  // the sanitizing structural components) so control props don't leak through.
+  // `label` names the phase group in run views (graph, the Claude /workflows
+  // mirror) and is preserved in the persisted frame XML.
+  const next = {
+    ...(props.label === undefined ? {} : { label: props.label }),
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+  };
+  return React.createElement("smithers:sequence", next, props.children);
 }
 ```
 
@@ -211,16 +233,15 @@ import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context
  * error; treating it as "no context yet" preserves the static element shape.
  */
 export function useOptionalSmithersContext() {
-    try {
-        return React.useContext(SmithersContext);
+  try {
+    return React.useContext(SmithersContext);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/Invalid hook call|dispatcher\.useContext|useContext/i.test(message)) {
+      return null;
     }
-    catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (/Invalid hook call|dispatcher\.useContext|useContext/i.test(message)) {
-            return null;
-        }
-        throw error;
-    }
+    throw error;
+  }
 }
 ```
 
@@ -230,23 +251,23 @@ import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type ReviewLoopProps = {
-	id?: string;
-	/** Agent that produces or fixes the work each iteration. */
-	producer: AgentLike;
-	/** Agent (or agents) that reviews the produced work. */
-	reviewer: AgentLike | AgentLike[];
-	/** Output schema for the produced work. */
-	produceOutput: OutputTarget;
-	/** Output schema for the review result. Must include an `approved: boolean` field. */
-	reviewOutput: OutputTarget;
-	/** Maximum number of review cycles before stopping. @default 5 */
-	maxIterations?: number;
-	/** Behavior when maxIterations is reached. @default "return-last" */
-	onMaxReached?: "return-last" | "fail";
-	/** Skip the entire review loop. */
-	skipIf?: boolean;
-	/** Initial prompt for the producer (string or ReactNode). */
-	children: string | React.ReactNode;
+  id?: string;
+  /** Agent that produces or fixes the work each iteration. */
+  producer: AgentLike;
+  /** Agent (or agents) that reviews the produced work. */
+  reviewer: AgentLike | AgentLike[];
+  /** Output schema for the produced work. */
+  produceOutput: OutputTarget;
+  /** Output schema for the review result. Must include an `approved: boolean` field. */
+  reviewOutput: OutputTarget;
+  /** Maximum number of review cycles before stopping. @default 5 */
+  maxIterations?: number;
+  /** Behavior when maxIterations is reached. @default "return-last" */
+  onMaxReached?: "return-last" | "fail";
+  /** Skip the entire review loop. */
+  skipIf?: boolean;
+  /** Initial prompt for the producer (string or ReactNode). */
+  children: string | React.ReactNode;
 };
 ```
 </CodeGroup>

@@ -13,10 +13,7 @@ import HelloPrompt from "../prompts/hello.mdx";
 // What you pass in. `name` defaults to "world" so `workflow run hello` works
 // with no arguments at all.
 const inputSchema = z.object({
-  name: z
-    .string()
-    .default("world")
-    .describe("Who to greet. Set it via the --input JSON; defaults to world."),
+  name: z.string().default("world").describe("Who to greet. Set it via the --input JSON; defaults to world."),
 });
 
 // What the agent must return: a single structured field, validated for you.

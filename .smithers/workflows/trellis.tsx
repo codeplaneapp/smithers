@@ -7,31 +7,31 @@ import { fableAuthor, implementer, synthesizer, validator } from "../components/
 const inputSchema = z.strictObject({
   prompt: z.string().trim().min(1).max(12_000).default("Build the requested result and prove it works."),
   role: z.enum(["sol", "fable"]).default("sol"),
-  work: z.enum([
-    "refine_goal",
-    "plan",
-    "research",
-    "poc",
-    "execute",
-    "review",
-    "preview",
-    "synthesize",
-  ]).default("synthesize"),
+  work: z
+    .enum(["refine_goal", "plan", "research", "poc", "execute", "review", "preview", "synthesize"])
+    .default("synthesize"),
   maxConcurrency: z.number().int().min(1).max(16).default(4),
   maxAuthorGenerations: z.number().int().min(1).max(12).default(4),
   maxAuthorDepth: z.number().int().min(1).max(8).default(4),
   maxTotalAuthorTurns: z.number().int().min(1).max(256).default(32),
-  criticalExecutionPolicy: z.strictObject({
-    allowedCategories: z.array(z.enum([
-      "security_boundary",
-      "data_integrity",
-      "concurrency_invariant",
-      "protocol_core",
-      "irreversible_migration",
-    ])).min(1).max(5),
-    allowedPathPrefixes: z.array(z.string().trim().min(1).max(512)).min(1).max(32),
-    maxChangedLines: z.number().int().min(1).max(500),
-  }).optional(),
+  criticalExecutionPolicy: z
+    .strictObject({
+      allowedCategories: z
+        .array(
+          z.enum([
+            "security_boundary",
+            "data_integrity",
+            "concurrency_invariant",
+            "protocol_core",
+            "irreversible_migration",
+          ]),
+        )
+        .min(1)
+        .max(5),
+      allowedPathPrefixes: z.array(z.string().trim().min(1).max(512)).min(1).max(32),
+      maxChangedLines: z.number().int().min(1).max(500),
+    })
+    .optional(),
 });
 
 const { Workflow, smithers, outputs } = createSmithers({

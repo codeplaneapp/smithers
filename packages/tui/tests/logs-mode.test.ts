@@ -10,11 +10,7 @@ import {
   splitAttemptKey,
 } from "../src/modes/logUtils.ts";
 
-function frame(
-  seq: number,
-  event: string,
-  payload?: unknown,
-): GatewayEventFrame {
+function frame(seq: number, event: string, payload?: unknown): GatewayEventFrame {
   return { type: "event", seq, event, payload, stateVersion: seq };
 }
 
@@ -177,11 +173,7 @@ describe("filterEventsByAttempt", () => {
       frame(2, "run.event", { nodeId: "mode:tree", iteration: 1 }),
       frame(3, "run.event", { nodeId: "mode:graph", iteration: 0 }),
     ];
-    expect(extractAttemptKeys(colonEvents)).toEqual([
-      "mode:tree:0",
-      "mode:tree:1",
-      "mode:graph:0",
-    ]);
+    expect(extractAttemptKeys(colonEvents)).toEqual(["mode:tree:0", "mode:tree:1", "mode:graph:0"]);
     expect(splitAttemptKey("mode:tree:1")).toEqual({ nodeId: "mode:tree", iteration: 1 });
     expect(filterEventsByAttempt(colonEvents, "mode:tree:1").map((e) => e.seq)).toEqual([2]);
     expect(filterEventsByAttempt(colonEvents, "mode:tree:0").map((e) => e.seq)).toEqual([1]);

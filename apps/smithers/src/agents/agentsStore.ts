@@ -145,9 +145,7 @@ export function mergeAccounts(
   const removed = new Set(removedLabels);
   const liveLabels = new Set(gatewayRows.map((row) => row.label));
   // Gateway rows are the truth for what it knows, minus locally-removed labels.
-  const liveAccounts = gatewayRows
-    .filter((row) => !removed.has(row.label))
-    .map(accountFromGateway);
+  const liveAccounts = gatewayRows.filter((row) => !removed.has(row.label)).map(accountFromGateway);
   // Keep only local echoes the gateway has not yet confirmed (and that have not
   // since been removed locally). A confirmed one is pruned — the live row wins.
   const remainingLocal = localAccounts.filter(
@@ -205,8 +203,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
   toggleDraftForce: () => set((state) => ({ draftForce: !state.draftForce })),
 
   submitRegister: () => {
-    const { accounts, draftProviderId, draftLabel, draftConfigDir, draftApiKey, draftModel, draftForce } =
-      get();
+    const { accounts, draftProviderId, draftLabel, draftConfigDir, draftApiKey, draftModel, draftForce } = get();
     const draft: AccountDraft = {
       providerId: draftProviderId,
       label: draftLabel,
@@ -268,9 +265,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
     const target = accounts.find((account) => account.label === label);
     if (!target) return;
     // Deterministic acknowledgement — no real spawn (mirrors `agents test`).
-    useChatStore
-      .getState()
-      .say(`Spawned \`${target.command} --version\` for **${label}** — reachable.`);
+    useChatStore.getState().say(`Spawned \`${target.command} --version\` for **${label}** — reachable.`);
   },
 
   hydrate: (rows) => {
@@ -311,9 +306,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
         const available = accounts.filter((account) => account.usable).length;
         useChatStore
           .getState()
-          .say(
-            `Re-ran agent detection — ${available} available, ${accounts.length - available} not detected.`,
-          );
+          .say(`Re-ran agent detection — ${available} available, ${accounts.length - available} not detected.`);
       })
       .catch(() => {
         useChatStore.getState().say("Agent detection failed — gateway unreachable.");

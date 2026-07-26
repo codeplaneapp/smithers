@@ -46,8 +46,26 @@ describe("buildGatewayRunTree", () => {
     // separate children even though they share `id`.
     const rows: GatewayRunNode[] = [
       { key: "loop", id: "loop", name: "Loop", kind: "loop", status: "running", childIds: ["plan#0", "plan#1"] },
-      { key: "plan#0", id: "plan", iteration: 0, name: "Plan", kind: "agent", status: "ok", parentId: "loop", childIds: [] },
-      { key: "plan#1", id: "plan", iteration: 1, name: "Plan", kind: "agent", status: "running", parentId: "loop", childIds: [] },
+      {
+        key: "plan#0",
+        id: "plan",
+        iteration: 0,
+        name: "Plan",
+        kind: "agent",
+        status: "ok",
+        parentId: "loop",
+        childIds: [],
+      },
+      {
+        key: "plan#1",
+        id: "plan",
+        iteration: 1,
+        name: "Plan",
+        kind: "agent",
+        status: "running",
+        parentId: "loop",
+        childIds: [],
+      },
     ];
 
     const children = buildGatewayRunTree(rows)?.children ?? [];

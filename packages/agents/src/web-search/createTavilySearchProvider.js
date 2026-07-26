@@ -25,13 +25,15 @@ export function createTavilySearchProvider(options) {
       });
       const body = await readJson(response, "Tavily");
       const results = Array.isArray(body.results) ? body.results : [];
-      return results.map((result) => ({
-        title: String(result.title ?? result.url ?? "Untitled"),
-        url: String(result.url ?? ""),
-        snippet: result.content,
-        publishedDate: result.published_date,
-        score: typeof result.score === "number" ? result.score : undefined,
-      })).filter((result) => result.url);
+      return results
+        .map((result) => ({
+          title: String(result.title ?? result.url ?? "Untitled"),
+          url: String(result.url ?? ""),
+          snippet: result.content,
+          publishedDate: result.published_date,
+          score: typeof result.score === "number" ? result.score : undefined,
+        }))
+        .filter((result) => result.url);
     },
   };
 }

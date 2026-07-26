@@ -1,10 +1,6 @@
 /** @jsxImportSource react */
 import { useMemo } from "react";
-import {
-  createGatewayReactRoot,
-  useGatewayNodeOutput,
-  useGatewayRun,
-} from "smithers-orchestrator/gateway-react";
+import { createGatewayReactRoot, useGatewayNodeOutput, useGatewayRun } from "smithers-orchestrator/gateway-react";
 import { RunEventLog, RunTree, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
 import { Card, EmptyState, StatusPill, Tabs, TabsContent, TabsList, TabsTrigger } from "smithers-orchestrator/ui";
 
@@ -77,7 +73,15 @@ function LaneCard({ runId, finding, index }: { runId?: string; finding: Finding;
   const merge = isRecord(mergeOut.data) ? mergeOut.data : undefined;
 
   const landed = merge ? asString(merge.status) === "merged" && asBool(merge.verified) : false;
-  const stage = merge ? asString(merge.status) : review ? (asBool(review.approved) ? "approved" : "changes requested") : impl ? asString(impl.status) : "pending";
+  const stage = merge
+    ? asString(merge.status)
+    : review
+      ? asBool(review.approved)
+        ? "approved"
+        : "changes requested"
+      : impl
+        ? asString(impl.status)
+        : "pending";
 
   return (
     <Card>
@@ -86,7 +90,10 @@ function LaneCard({ runId, finding, index }: { runId?: string; finding: Finding;
         <strong>
           #{finding.priority} {finding.title}
         </strong>
-        <StatusPill status={severityTone(finding.severity) === "danger" ? "failed" : "pending"} label={finding.severity} />
+        <StatusPill
+          status={severityTone(finding.severity) === "danger" ? "failed" : "pending"}
+          label={finding.severity}
+        />
       </div>
       <div style={{ opacity: 0.75, fontSize: 13, marginTop: 4 }}>
         {finding.group} · {finding.dimension} · stage: {stage}
@@ -96,7 +103,7 @@ function LaneCard({ runId, finding, index }: { runId?: string; finding: Finding;
           <div>{asString(impl.summary)}</div>
           <div style={{ opacity: 0.7, marginTop: 4 }}>
             test: {asString(impl.testAdded) || "(none reported)"} · files:{" "}
-            {(Array.isArray(impl.filesChanged) ? impl.filesChanged.length : 0)}
+            {Array.isArray(impl.filesChanged) ? impl.filesChanged.length : 0}
           </div>
         </div>
       ) : null}

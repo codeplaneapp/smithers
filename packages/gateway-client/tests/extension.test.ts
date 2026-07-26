@@ -37,11 +37,7 @@ describe("SmithersGatewayClient.extensionRpc", () => {
         );
       },
     });
-    const out = await client.extensionRpc<{ id: string; status: string }>(
-      "github",
-      "issue",
-      { id: "42" },
-    );
+    const out = await client.extensionRpc<{ id: string; status: string }>("github", "issue", { id: "42" });
     expect(out).toEqual({ id: "42", status: "open" });
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe("http://gateway.test/v1/rpc/ext.github.issue");

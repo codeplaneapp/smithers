@@ -112,10 +112,7 @@ describe("Markdown (link activation)", () => {
   test("onLinkClick fires with the href and default navigation is prevented", async () => {
     const seen: string[] = [];
     await render(
-      <Markdown
-        content="Read the [docs](https://smithers.sh/docs) now."
-        onLinkClick={(href) => seen.push(href)}
-      />,
+      <Markdown content="Read the [docs](https://smithers.sh/docs) now." onLinkClick={(href) => seen.push(href)} />,
     );
     const anchor = container!.querySelector("a.sui-md-link") as HTMLAnchorElement;
     expect(anchor).toBeTruthy();
@@ -129,12 +126,7 @@ describe("Markdown (link activation)", () => {
 
   test("rejects unsafe links without invoking onLinkClick", async () => {
     const seen: string[] = [];
-    await render(
-      <Markdown
-        content="Click [this](javascript:alert)"
-        onLinkClick={(href) => seen.push(href)}
-      />,
-    );
+    await render(<Markdown content="Click [this](javascript:alert)" onLinkClick={(href) => seen.push(href)} />);
     const anchor = container!.querySelector("a.sui-md-link") as HTMLAnchorElement;
     expect(anchor).toBeTruthy();
     expect(anchor.hasAttribute("href")).toBe(false);

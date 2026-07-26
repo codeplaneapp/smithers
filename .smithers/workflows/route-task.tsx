@@ -79,9 +79,7 @@ const executeSchema = z.looseObject({
 
 // 2b. Durable path: a pointer at the right seeded workflow to run instead.
 const recommendSchema = z.looseObject({
-  recommendedWorkflow: z
-    .enum(SEEDED_WORKFLOWS)
-    .describe("The single best-fit seeded workflow id to run."),
+  recommendedWorkflow: z.enum(SEEDED_WORKFLOWS).describe("The single best-fit seeded workflow id to run."),
   why: z.string().describe("Why this workflow fits the task — what durable behaviour it provides."),
   alternativeWorkflows: z
     .array(z.enum(SEEDED_WORKFLOWS))
@@ -152,11 +150,7 @@ export default smithers((ctx) => {
             if={durable}
             then={
               <Task id="recommend" output={outputs.recommend} agent={agents.planning}>
-                <RecommendPrompt
-                  prompt={prompt}
-                  classification={classify}
-                  workflows={SEEDED_WORKFLOWS}
-                />
+                <RecommendPrompt prompt={prompt} classification={classify} workflows={SEEDED_WORKFLOWS} />
               </Task>
             }
             else={
@@ -177,8 +171,7 @@ export default smithers((ctx) => {
               outcome: durable ? ("recommended" as const) : ("executed" as const),
               summary: execute?.summary ?? null,
               done: execute?.done ?? null,
-              recommendedWorkflow:
-                recommend?.recommendedWorkflow ?? classify?.recommendedWorkflow ?? null,
+              recommendedWorkflow: recommend?.recommendedWorkflow ?? classify?.recommendedWorkflow ?? null,
               why: recommend?.why ?? null,
               alternativeWorkflows: recommend?.alternativeWorkflows ?? [],
             })}

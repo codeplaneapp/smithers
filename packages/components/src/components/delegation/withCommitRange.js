@@ -10,21 +10,20 @@ const VCS_PROBE_TIMEOUT_MS = 5_000;
  * @returns {Promise<string | null>}
  */
 function run(command, args, cwd) {
-    return new Promise((resolve) => {
-        try {
-            execFile(command, args, { cwd, timeout: VCS_PROBE_TIMEOUT_MS }, (error, stdout) => {
-                if (error) {
-                    resolve(null);
-                    return;
-                }
-                const out = String(stdout ?? "").trim();
-                resolve(out.length > 0 ? out : null);
-            });
+  return new Promise((resolve) => {
+    try {
+      execFile(command, args, { cwd, timeout: VCS_PROBE_TIMEOUT_MS }, (error, stdout) => {
+        if (error) {
+          resolve(null);
+          return;
         }
-        catch {
-            resolve(null);
-        }
-    });
+        const out = String(stdout ?? "").trim();
+        resolve(out.length > 0 ? out : null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
 }
 
 /**
@@ -37,13 +36,11 @@ function run(command, args, cwd) {
  * @returns {Promise<{ commit: string; vcs: "jj" | "git" } | null>}
  */
 export async function captureWorkingCopyCommit(cwd) {
-    const jj = await run("jj", ["log", "-r", "@", "--no-graph", "-T", "commit_id"], cwd);
-    if (jj)
-        return { commit: jj, vcs: "jj" };
-    const git = await run("git", ["rev-parse", "HEAD"], cwd);
-    if (git)
-        return { commit: git, vcs: "git" };
-    return null;
+  const jj = await run("jj", ["log", "-r", "@", "--no-graph", "-T", "commit_id"], cwd);
+  if (jj) return { commit: jj, vcs: "jj" };
+  const git = await run("git", ["rev-parse", "HEAD"], cwd);
+  if (git) return { commit: git, vcs: "git" };
+  return null;
 }
 
 /**
@@ -67,44 +64,37 @@ export async function captureWorkingCopyCommit(cwd) {
  * @returns {AgentLike | AgentLike[]}
  */
 export function withCommitRange(agent, probe = captureWorkingCopyCommit) {
-    if (Array.isArray(agent)) {
-        return agent.map((entry) => /** @type {AgentLike} */ (withCommitRange(entry, probe)));
-    }
-    if (!agent || typeof agent.generate !== "function") {
-        return agent;
-    }
-    return new Proxy(agent, {
-        get(target, prop, receiver) {
-            if (prop !== "generate") {
-                return Reflect.get(target, prop, receiver);
-            }
-            /** @param {import("@smithers-orchestrator/agents/BaseCliAgent/AgentGenerateOptions").AgentGenerateOptions} [args] */
-            return async function generate(args) {
-                const cwd = typeof args?.rootDir === "string" && args.rootDir.length > 0
-                    ? args.rootDir
-                    : process.cwd();
-                const before = await probe(cwd).catch(() => null);
-                const result = await target.generate.call(target, args);
-                if (!before)
-                    return result;
-                const after = await probe(cwd).catch(() => null);
-                if (!after || after.vcs !== before.vcs)
-                    return result;
-                if (after.commit === before.commit)
-                    return result;
-                if (result === null || typeof result !== "object" || Array.isArray(result))
-                    return result;
-                const output = /** @type {Record<string, unknown>} */ (result).output;
-                if (output === null || typeof output !== "object" || Array.isArray(output))
-                    return result;
-                return {
-                    .../** @type {Record<string, unknown>} */ (result),
-                    output: {
-                        .../** @type {Record<string, unknown>} */ (output),
-                        commitRange: { from: before.commit, to: after.commit, vcs: before.vcs },
-                    },
-                };
-            };
-        },
-    });
+  if (Array.isArray(agent)) {
+    return agent.map((entry) => /** @type {AgentLike} */ (withCommitRange(entry, probe)));
+  }
+  if (!agent || typeof agent.generate !== "function") {
+    return agent;
+  }
+  return new Proxy(agent, {
+    get(target, prop, receiver) {
+      if (prop !== "generate") {
+        return Reflect.get(target, prop, receiver);
+      }
+      /** @param {import("@smithers-orchestrator/agents/BaseCliAgent/AgentGenerateOptions").AgentGenerateOptions} [args] */
+      return async function generate(args) {
+        const cwd = typeof args?.rootDir === "string" && args.rootDir.length > 0 ? args.rootDir : process.cwd();
+        const before = await probe(cwd).catch(() => null);
+        const result = await target.generate.call(target, args);
+        if (!before) return result;
+        const after = await probe(cwd).catch(() => null);
+        if (!after || after.vcs !== before.vcs) return result;
+        if (after.commit === before.commit) return result;
+        if (result === null || typeof result !== "object" || Array.isArray(result)) return result;
+        const output = /** @type {Record<string, unknown>} */ (result).output;
+        if (output === null || typeof output !== "object" || Array.isArray(output)) return result;
+        return {
+          .../** @type {Record<string, unknown>} */ (result),
+          output: {
+            .../** @type {Record<string, unknown>} */ (output),
+            commitRange: { from: before.commit, to: after.commit, vcs: before.vcs },
+          },
+        };
+      };
+    },
+  });
 }

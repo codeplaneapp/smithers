@@ -1,13 +1,7 @@
 import { expect, test } from "@playwright/test";
-import {
-  expectNoPageErrors,
-  openRenderedSurface,
-  trackPageErrors,
-} from "./surfaceTestUtils";
+import { expectNoPageErrors, openRenderedSurface, trackPageErrors } from "./surfaceTestUtils";
 
-async function ticketRows(
-  page: import("@playwright/test").Page,
-): Promise<Array<{ path: string; content: string }>> {
+async function ticketRows(page: import("@playwright/test").Page): Promise<Array<{ path: string; content: string }>> {
   const response = await page.request.post("/v1/rpc/listTickets", { data: {} });
   const frame = (await response.json()) as {
     payload?: Array<{ path: string; content: string }>;
@@ -54,15 +48,11 @@ test("searches, edits, creates, cancels, submits, and deletes real tickets", asy
   const created = page.getByTestId("tickets-row").filter({ hasText: "e2e-created-ticket" });
   await expect(created).toBeVisible();
   await expect(page.locator(".rev-detail-title")).toHaveText("e2e-created-ticket");
-  await expect
-    .poll(async () => (await ticketRows(page)).some((row) => row.path === "e2e-created-ticket"))
-    .toBe(true);
+  await expect.poll(async () => (await ticketRows(page)).some((row) => row.path === "e2e-created-ticket")).toBe(true);
   await page.locator(".rev-detail").getByRole("button", { name: "Delete" }).click();
   await expect(created).toHaveCount(0);
   await expect(page.locator(".rev-detail-title")).not.toHaveText("e2e-created-ticket");
-  await expect
-    .poll(async () => (await ticketRows(page)).some((row) => row.path === "e2e-created-ticket"))
-    .toBe(false);
+  await expect.poll(async () => (await ticketRows(page)).some((row) => row.path === "e2e-created-ticket")).toBe(false);
   expectNoPageErrors(pageErrors);
 });
 

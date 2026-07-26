@@ -14,9 +14,9 @@ import * as path from "node:path";
  * @returns {string}
  */
 export function defaultGapSpoolPath(runId) {
-    // No '.' in the safe set, so a runId like "../x" can't become a "../" segment.
-    const safe = String(runId).replace(/[^a-zA-Z0-9_-]/g, "_") || "run";
-    return path.join(os.tmpdir(), "smithers-durability", `${safe}.gaps.ndjson`);
+  // No '.' in the safe set, so a runId like "../x" can't become a "../" segment.
+  const safe = String(runId).replace(/[^a-zA-Z0-9_-]/g, "_") || "run";
+  return path.join(os.tmpdir(), "smithers-durability", `${safe}.gaps.ndjson`);
 }
 
 /**
@@ -27,11 +27,12 @@ export function defaultGapSpoolPath(runId) {
  * @returns {void}
  */
 export function appendGap(spoolPath, record) {
-    try {
-        fs.mkdirSync(path.dirname(spoolPath), { recursive: true });
-        fs.appendFileSync(spoolPath, `${JSON.stringify(record)}\n`);
-    }
-    catch { /* best-effort: a gap log must not throw */ }
+  try {
+    fs.mkdirSync(path.dirname(spoolPath), { recursive: true });
+    fs.appendFileSync(spoolPath, `${JSON.stringify(record)}\n`);
+  } catch {
+    /* best-effort: a gap log must not throw */
+  }
 }
 
 /**
@@ -40,18 +41,27 @@ export function appendGap(spoolPath, record) {
  * @returns {Array<Record<string, unknown>>}
  */
 export function drainGaps(spoolPath) {
-    let content;
-    try { content = fs.readFileSync(spoolPath, "utf8"); }
-    catch { return []; }
-    /** @type {Array<Record<string, unknown>>} */
-    const gaps = [];
-    for (const line of content.split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try { gaps.push(JSON.parse(trimmed)); }
-        catch { /* torn line from an interleaved append; skip it */ }
+  let content;
+  try {
+    content = fs.readFileSync(spoolPath, "utf8");
+  } catch {
+    return [];
+  }
+  /** @type {Array<Record<string, unknown>>} */
+  const gaps = [];
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      gaps.push(JSON.parse(trimmed));
+    } catch {
+      /* torn line from an interleaved append; skip it */
     }
-    try { fs.rmSync(spoolPath, { force: true }); }
-    catch { /* best-effort */ }
-    return gaps;
+  }
+  try {
+    fs.rmSync(spoolPath, { force: true });
+  } catch {
+    /* best-effort */
+  }
+  return gaps;
 }

@@ -112,7 +112,9 @@ export function buildFeedback(
       parts.push(`REVIEWER REJECTED:\n${review.feedback}`);
       if (review.issues?.length) {
         for (const issue of review.issues) {
-          parts.push(`  [${issue.severity}] ${issue.title}: ${issue.description}${issue.file ? ` (${issue.file})` : ""}`);
+          parts.push(
+            `  [${issue.severity}] ${issue.title}: ${issue.description}${issue.file ? ` (${issue.file})` : ""}`,
+          );
         }
       }
     }
@@ -158,17 +160,12 @@ export default smithers((ctx) => {
                     done={done}
                     maxIterations={3}
                   />
-                  <Task
-                    id={`result-${ticket.slug}`}
-                    output={outputs.ticketResult}
-                    continueOnFail
-                  >
+                  <Task id={`result-${ticket.slug}`} output={outputs.ticketResult} continueOnFail>
                     {async () => {
                       const { spawnSync } = await import("node:child_process");
                       const branch = `ticket/${ticket.slug}`;
                       const wt = resolve(process.cwd(), ".worktrees", ticket.slug);
-                      const git = (args: string[], cwd = wt) =>
-                        spawnSync("git", args, { cwd, encoding: "utf8" });
+                      const git = (args: string[], cwd = wt) => spawnSync("git", args, { cwd, encoding: "utf8" });
                       // Safety net: the implement agent is asked to commit, but if it
                       // left converged work uncommitted, capture it here so the merge
                       // step doesn't silently drop it. Only commit once the loop
@@ -182,7 +179,9 @@ export default smithers((ctx) => {
                           committed = true;
                         }
                       }
-                      const ahead = ((git(["rev-list", "--count", `main..${branch}`], process.cwd()).stdout) ?? "0").trim();
+                      const ahead = (
+                        git(["rev-list", "--count", `main..${branch}`], process.cwd()).stdout ?? "0"
+                      ).trim();
                       const hasWork = ahead !== "" && ahead !== "0";
                       return {
                         ticketId: ticket.id,
@@ -204,9 +203,11 @@ export default smithers((ctx) => {
 
         {/* Agent merges completed branches back into main */}
         <Task id="merge" output={outputs.merge} agent={agents.implement}>
-          <MergeTicketsPrompt ticketSummary={ticketResults
-            .map((r) => `- ${r.ticketId}: branch "${r.branch}" — ${r.status} (${r.summary})`)
-            .join("\n")} />
+          <MergeTicketsPrompt
+            ticketSummary={ticketResults
+              .map((r) => `- ${r.ticketId}: branch "${r.branch}" — ${r.status} (${r.summary})`)
+              .join("\n")}
+          />
         </Task>
       </Sequence>
     </Workflow>

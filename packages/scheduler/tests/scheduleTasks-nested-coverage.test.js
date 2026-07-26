@@ -63,11 +63,7 @@ describe("scheduleTasks inspect() saga arm", () => {
       actionChildren: [task("sa")],
       compensationChildren: [],
     };
-    const result = sched(
-      tcfWrappingSaga(saga),
-      { sa: "failed" },
-      descriptorMap(makeDescriptor("sa")),
-    );
+    const result = sched(tcfWrappingSaga(saga), { sa: "failed" }, descriptorMap(makeDescriptor("sa")));
     expect(result.fatalError).toBe("TryCatchFinally tcf failed");
   });
 
@@ -105,12 +101,7 @@ describe("scheduleTasks inspect() saga arm", () => {
     const result = sched(
       tcfWrappingSaga(saga, { catchChildren: [task("c")] }),
       { sa: "finished", sb: "failed", ca: "failed", c: "pending" },
-      descriptorMap(
-        makeDescriptor("sa"),
-        makeDescriptor("sb"),
-        makeDescriptor("ca"),
-        makeDescriptor("c"),
-      ),
+      descriptorMap(makeDescriptor("sa"), makeDescriptor("sb"), makeDescriptor("ca"), makeDescriptor("c")),
     );
     // Saga inspects failed → try failed → catch runs.
     expect(result.runnable.map((t) => t.nodeId)).toEqual(["c"]);
@@ -124,11 +115,7 @@ describe("scheduleTasks inspect() saga arm", () => {
       actionChildren: [task("sa")],
       compensationChildren: [],
     };
-    const result = sched(
-      tcfWrappingSaga(saga),
-      { sa: "pending" },
-      descriptorMap(makeDescriptor("sa")),
-    );
+    const result = sched(tcfWrappingSaga(saga), { sa: "pending" }, descriptorMap(makeDescriptor("sa")));
     // Non-terminal saga → try region falls back to walking the saga → action runs.
     expect(result.runnable.map((t) => t.nodeId)).toEqual(["sa"]);
   });
@@ -144,12 +131,7 @@ describe("scheduleTasks inspect() saga arm", () => {
     const result = sched(
       tcfWrappingSaga(saga, { catchChildren: [task("c")] }),
       { sa: "finished", sb: "failed", ca: "pending" },
-      descriptorMap(
-        makeDescriptor("sa"),
-        makeDescriptor("sb"),
-        makeDescriptor("ca"),
-        makeDescriptor("c"),
-      ),
+      descriptorMap(makeDescriptor("sa"), makeDescriptor("sb"), makeDescriptor("ca"), makeDescriptor("c")),
     );
     // Compensation still pending → saga non-terminal → walked → compensation runs.
     expect(result.runnable.map((t) => t.nodeId)).toEqual(["ca"]);
@@ -212,11 +194,7 @@ describe("scheduleTasks inspect() ralph and continue-as-new arms", () => {
       onMaxReached: "return-last",
       children: [task("rc")],
     };
-    const result = sched(
-      tcfWrappingSaga(ralph),
-      { rc: "pending" },
-      descriptorMap(makeDescriptor("rc")),
-    );
+    const result = sched(tcfWrappingSaga(ralph), { rc: "pending" }, descriptorMap(makeDescriptor("rc")));
     expect(result.runnable.map((t) => t.nodeId)).toEqual(["rc"]);
   });
 
@@ -263,11 +241,7 @@ describe("scheduleTasks inspect() ralph and continue-as-new arms", () => {
       onMaxReached: "return-last",
       children: [task("rc")],
     };
-    const result = sched(
-      tcfWrappingSaga(ralph),
-      { rc: "in-progress" },
-      descriptorMap(makeDescriptor("rc")),
-    );
+    const result = sched(tcfWrappingSaga(ralph), { rc: "in-progress" }, descriptorMap(makeDescriptor("rc")));
     // ralph inspected non-terminal → walked → child in-progress, nothing runnable.
     expect(result.runnable).toEqual([]);
   });
@@ -290,7 +264,13 @@ describe("scheduleTasks collectFailureKeys arms", () => {
         { kind: "group", children: [task("gp")] },
         { kind: "saga", id: "s", onFailure: "compensate", actionChildren: [task("sa")], compensationChildren: [] },
         { kind: "ralph", id: "r", until: false, maxIterations: 5, onMaxReached: "return-last", children: [task("rc")] },
-        { kind: "try-catch-finally", id: "inner", tryChildren: [task("it")], catchChildren: [task("icx")], finallyChildren: [task("ifx")] },
+        {
+          kind: "try-catch-finally",
+          id: "inner",
+          tryChildren: [task("it")],
+          catchChildren: [task("icx")],
+          finallyChildren: [task("ifx")],
+        },
       ],
       catchChildren: [task("c")],
       finallyChildren: [],
@@ -356,12 +336,7 @@ describe("scheduleTasks saga walk failure arms", () => {
     const result = sched(
       plan,
       { sa: "finished", sb: "failed", ca: "failed" },
-      descriptorMap(
-        makeDescriptor("sa"),
-        makeDescriptor("sb"),
-        makeDescriptor("ca"),
-        makeDescriptor("cb"),
-      ),
+      descriptorMap(makeDescriptor("sa"), makeDescriptor("sb"), makeDescriptor("ca"), makeDescriptor("cb")),
     );
     // Compensation for the completed action failed → saga cannot settle yet.
     expect(result.runnable).toEqual([]);
@@ -379,12 +354,7 @@ describe("scheduleTasks saga walk failure arms", () => {
     const result = sched(
       plan,
       { sa: "finished", sb: "failed", ca: "finished" },
-      descriptorMap(
-        makeDescriptor("sa"),
-        makeDescriptor("sb"),
-        makeDescriptor("ca"),
-        makeDescriptor("cb"),
-      ),
+      descriptorMap(makeDescriptor("sa"), makeDescriptor("sb"), makeDescriptor("ca"), makeDescriptor("cb")),
     );
     expect(result.fatalError).toBe("Saga s failed");
     expect(result.failureRecoveryActive).toBe(true);
@@ -418,11 +388,7 @@ describe("scheduleTasks try-catch-finally walk finally-failure arms", () => {
       catchChildren: [],
       finallyChildren: [task("f")],
     };
-    const result = sched(
-      plan,
-      { t: "failed", f: "failed" },
-      descriptorMap(makeDescriptor("t"), makeDescriptor("f")),
-    );
+    const result = sched(plan, { t: "failed", f: "failed" }, descriptorMap(makeDescriptor("t"), makeDescriptor("f")));
     expect(result.runnable).toEqual([]);
     expect(result.failureRecoveryActive).toBe(false);
     expect(result.failureRecoveryKeys).toContain(buildStateKey("t", 0));

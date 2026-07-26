@@ -38,16 +38,12 @@ export function RunTree({ runId, onSelectNode, activeNodeId, className, style }:
         ...style,
       }}
     >
-      {!runId ? (
-        <div style={{ color: theme.textDim, fontSize: 13, padding: 10 }}>Select a run.</div>
-      ) : null}
+      {!runId ? <div style={{ color: theme.textDim, fontSize: 13, padding: 10 }}>Select a run.</div> : null}
       {error ? <div style={{ color: theme.danger, fontSize: 13, padding: 10 }}>{error.message}</div> : null}
       {runId && isLoading && !root ? (
         <div style={{ color: theme.textDim, fontSize: 13, padding: 10 }}>Loading…</div>
       ) : null}
-      {root ? (
-        <NodeRow node={root} depth={0} activeNodeId={activeNodeId} onSelectNode={onSelectNode} />
-      ) : null}
+      {root ? <NodeRow node={root} depth={0} activeNodeId={activeNodeId} onSelectNode={onSelectNode} /> : null}
     </div>
   );
 }

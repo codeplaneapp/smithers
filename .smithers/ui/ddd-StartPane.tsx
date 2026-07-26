@@ -42,7 +42,17 @@ function launchIsActive(state: LaunchState): boolean {
   return !isTerminalRunStatus(state.status);
 }
 
-function LaunchStatus({ state, label, href, testId = "ddd-start-launched" }: { state: LaunchState; label: string; href?: string; testId?: string }) {
+function LaunchStatus({
+  state,
+  label,
+  href,
+  testId = "ddd-start-launched",
+}: {
+  state: LaunchState;
+  label: string;
+  href?: string;
+  testId?: string;
+}) {
   if (state.pending) {
     return (
       <p className="start-status" data-testid={`${testId}-launching`}>
@@ -62,7 +72,8 @@ function LaunchStatus({ state, label, href, testId = "ddd-start-launched" }: { s
   const terminal = isTerminalRunStatus(status);
   return (
     <p className="start-status" data-testid={testId}>
-      <span className={`badge ${statusClass(status)}`}>{state.statusLoading ? "Checking" : formatStatus(status)}</span> {label}{" "}
+      <span className={`badge ${statusClass(status)}`}>{state.statusLoading ? "Checking" : formatStatus(status)}</span>{" "}
+      {label}{" "}
       {href ? (
         <a className="doc-link" href={href} target="_blank" rel="noreferrer">
           open run UI ↗
@@ -71,7 +82,11 @@ function LaunchStatus({ state, label, href, testId = "ddd-start-launched" }: { s
         <span className="pill">{state.runId}</span>
       )}
       {terminal ? <span className="pill muted">Ready for another launch</span> : null}
-      {state.statusError ? <span className="badge bad" data-testid={`${testId}-status-error`} title={state.statusError}>Status unavailable</span> : null}
+      {state.statusError ? (
+        <span className="badge bad" data-testid={`${testId}-status-error`} title={state.statusError}>
+          Status unavailable
+        </span>
+      ) : null}
     </p>
   );
 }
@@ -120,7 +135,12 @@ export function NewEntryMenu(props: NewEntryMenuProps) {
         <section className="new-menu" role="dialog" aria-label="Start new DDD work" data-testid="ddd-new-menu">
           <div className="new-menu-head">
             <h2>Start new work</h2>
-            <button type="button" className="icon-button" aria-label="Close new menu" onClick={() => props.onOpenChange(false)}>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Close new menu"
+              onClick={() => props.onOpenChange(false)}
+            >
               x
             </button>
           </div>
@@ -148,7 +168,9 @@ export function NewEntryMenu(props: NewEntryMenuProps) {
           <LaunchStatus
             state={props.createState}
             label="create-workflow is designing your workflow."
-            href={props.createState.runId ? props.workflowUiHref("create-workflow", props.createState.runId) : undefined}
+            href={
+              props.createState.runId ? props.workflowUiHref("create-workflow", props.createState.runId) : undefined
+            }
             testId="ddd-new-create-run"
           />
           <div className="new-menu-divider" />
@@ -209,8 +231,8 @@ export function StartPane(props: StartPaneProps) {
           ) : null}
         </div>
         <p>
-          Docs-driven development keeps a living spec of your product and puts agents to work closing the gaps
-          in it. Start from a brand-new workflow idea, or point it at the code you already have.
+          Docs-driven development keeps a living spec of your product and puts agents to work closing the gaps in it.
+          Start from a brand-new workflow idea, or point it at the code you already have.
         </p>
       </section>
 
@@ -219,8 +241,8 @@ export function StartPane(props: StartPaneProps) {
           <span className="eyebrow">New workflow</span>
           <h2>Create a new workflow</h2>
           <p>
-            Describe the durable process you want. The authoring workflow clarifies it, designs the graph, scaffolds
-            its files, verifies the graph and UI, and writes its companion skill.
+            Describe the durable process you want. The authoring workflow clarifies it, designs the graph, scaffolds its
+            files, verifies the graph and UI, and writes its companion skill.
           </p>
           <textarea
             className="search-input start-textarea"
@@ -239,13 +261,19 @@ export function StartPane(props: StartPaneProps) {
               disabled={createDisabled}
               onClick={() => props.onCreateWorkflow(description.trim())}
             >
-              {props.createState.pending ? "Launching authoring..." : createAgain ? "Create another workflow" : "Create workflow"}
+              {props.createState.pending
+                ? "Launching authoring..."
+                : createAgain
+                  ? "Create another workflow"
+                  : "Create workflow"}
             </button>
           </div>
           <LaunchStatus
             state={props.createState}
             label="create-workflow is designing your workflow."
-            href={props.createState.runId ? props.workflowUiHref("create-workflow", props.createState.runId) : undefined}
+            href={
+              props.createState.runId ? props.workflowUiHref("create-workflow", props.createState.runId) : undefined
+            }
           />
         </section>
 
@@ -264,7 +292,11 @@ export function StartPane(props: StartPaneProps) {
               disabled={generateDisabled}
               onClick={props.onGenerateDocs}
             >
-              {props.generateState.pending ? "Launching docs..." : generateAgain ? "Generate docs again" : "Generate docs"}
+              {props.generateState.pending
+                ? "Launching docs..."
+                : generateAgain
+                  ? "Generate docs again"
+                  : "Generate docs"}
             </button>
           </div>
           <LaunchStatus
@@ -277,13 +309,19 @@ export function StartPane(props: StartPaneProps) {
             isTerminalRunStatus(props.generateState.status) ? (
               <div className="start-reload" data-testid="ddd-start-reload-path">
                 <p>The generate-docs run finished. Reload this UI to load the generated spec modules.</p>
-                <button type="button" className="button primary" data-testid="ddd-start-reload" onClick={reloadGeneratedDocs}>
+                <button
+                  type="button"
+                  className="button primary"
+                  data-testid="ddd-start-reload"
+                  onClick={reloadGeneratedDocs}
+                >
                   Reload docs
                 </button>
               </div>
             ) : (
               <p className="start-status" data-testid="ddd-start-reload-pending">
-                <span className="badge warn">Working</span> Reload will be available once the generate-docs run finishes.
+                <span className="badge warn">Working</span> Reload will be available once the generate-docs run
+                finishes.
               </p>
             )
           ) : null}

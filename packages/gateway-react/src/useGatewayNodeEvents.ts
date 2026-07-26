@@ -59,9 +59,7 @@ export function useGatewayNodeEvents(
               stateVersion: 0,
             });
           }
-          const events = [...bySeq.values()]
-            .sort((left, right) => left.seq - right.seq)
-            .slice(-Math.max(1, maxEvents));
+          const events = [...bySeq.values()].sort((left, right) => left.seq - right.seq).slice(-Math.max(1, maxEvents));
           return { events, error: undefined, loading: false };
         });
       } catch (error) {

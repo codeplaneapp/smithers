@@ -85,56 +85,56 @@ import { Task } from "./Task.js";
  * @param {SidecarProps} props
  */
 export function Sidecar(props) {
-	if (props.skipIf) return null;
-	const {
-		id = "sidecar",
-		agent,
-		sidecar,
-		output,
-		sidecarOutput,
-		scorers,
-		prompt,
-		input,
-		maxConcurrency,
-		groundTruth,
-		context,
-		primaryLabel,
-		sidecarLabel,
-		children,
-	} = props;
-	const promptNode = prompt ?? input ?? children;
-	const shadowId = `${id}-sidecar`;
-	return React.createElement(
-		Parallel,
-		{ id: `${id}-parallel`, maxConcurrency },
-		React.createElement(
-			Task,
-			{
-				id,
-				output,
-				agent,
-				scorers,
-				groundTruth,
-				context,
-				label: primaryLabel,
-			},
-			promptNode,
-		),
-		React.createElement(
-			Task,
-			{
-				id: shadowId,
-				output: sidecarOutput ?? output,
-				agent: sidecar,
-				continueOnFail: true,
-				scorers,
-				groundTruth,
-				context,
-				label: sidecarLabel,
-			},
-			promptNode,
-		),
-	);
+  if (props.skipIf) return null;
+  const {
+    id = "sidecar",
+    agent,
+    sidecar,
+    output,
+    sidecarOutput,
+    scorers,
+    prompt,
+    input,
+    maxConcurrency,
+    groundTruth,
+    context,
+    primaryLabel,
+    sidecarLabel,
+    children,
+  } = props;
+  const promptNode = prompt ?? input ?? children;
+  const shadowId = `${id}-sidecar`;
+  return React.createElement(
+    Parallel,
+    { id: `${id}-parallel`, maxConcurrency },
+    React.createElement(
+      Task,
+      {
+        id,
+        output,
+        agent,
+        scorers,
+        groundTruth,
+        context,
+        label: primaryLabel,
+      },
+      promptNode,
+    ),
+    React.createElement(
+      Task,
+      {
+        id: shadowId,
+        output: sidecarOutput ?? output,
+        agent: sidecar,
+        continueOnFail: true,
+        scorers,
+        groundTruth,
+        context,
+        label: sidecarLabel,
+      },
+      promptNode,
+    ),
+  );
 }
 ```
 
@@ -146,19 +146,18 @@ import React from "react";
  * @param {ParallelProps} props
  */
 export function Parallel(props) {
-    if (props.skipIf)
-        return null;
-    // Align prop sanitization with other structural components. `label` names
-    // the phase group in run views (graph, the Claude /workflows mirror).
-    const next = {
-        maxConcurrency: props.maxConcurrency,
-        subtreeConcurrency: props.subtreeConcurrency,
-        id: props.id,
-        ...(props.label === undefined ? {} : { label: props.label }),
-        ...(props.priority === undefined ? {} : { priority: props.priority }),
-        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
-    };
-    return React.createElement("smithers:parallel", next, props.children);
+  if (props.skipIf) return null;
+  // Align prop sanitization with other structural components. `label` names
+  // the phase group in run views (graph, the Claude /workflows mirror).
+  const next = {
+    maxConcurrency: props.maxConcurrency,
+    subtreeConcurrency: props.subtreeConcurrency,
+    id: props.id,
+    ...(props.label === undefined ? {} : { label: props.label }),
+    ...(props.priority === undefined ? {} : { priority: props.priority }),
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+  };
+  return React.createElement("smithers:parallel", next, props.children);
 }
 ```
 
@@ -196,21 +195,21 @@ import type { ScorersMap } from "@smithers-orchestrator/graph/types";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type SidecarProps = {
-	id?: string;
-	agent: AgentLike;
-	sidecar: AgentLike;
-	output: OutputTarget;
-	sidecarOutput?: OutputTarget;
-	scorers?: ScorersMap;
-	prompt?: string | React.ReactNode;
-	input?: string | React.ReactNode;
-	maxConcurrency?: number;
-	groundTruth?: unknown;
-	context?: unknown;
-	primaryLabel?: string;
-	sidecarLabel?: string;
-	skipIf?: boolean;
-	children?: string | React.ReactNode;
+  id?: string;
+  agent: AgentLike;
+  sidecar: AgentLike;
+  output: OutputTarget;
+  sidecarOutput?: OutputTarget;
+  scorers?: ScorersMap;
+  prompt?: string | React.ReactNode;
+  input?: string | React.ReactNode;
+  maxConcurrency?: number;
+  groundTruth?: unknown;
+  context?: unknown;
+  primaryLabel?: string;
+  sidecarLabel?: string;
+  skipIf?: boolean;
+  children?: string | React.ReactNode;
 };
 ```
 </CodeGroup>

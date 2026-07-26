@@ -41,7 +41,10 @@ export function AuditTab(props: AuditTabProps) {
   const { audit, triage } = props;
   const findings = findingsOf(audit);
   const findingKindCounts = findings.reduce<Record<AuditFinding["kind"], number>>(
-    (acc, finding) => { acc[finding.kind] = (acc[finding.kind] ?? 0) + 1; return acc; },
+    (acc, finding) => {
+      acc[finding.kind] = (acc[finding.kind] ?? 0) + 1;
+      return acc;
+    },
     { broken: 0, partial: 0, missingE2E: 0, missingDocs: 0 },
   );
   const notes = strings(audit?.notes);
@@ -71,9 +74,13 @@ export function AuditTab(props: AuditTabProps) {
         </div>
         {findings.length ? (
           <div className="status-counts">
-            {(Object.keys(findingKindCounts) as AuditFinding["kind"][]).filter((kind) => findingKindCounts[kind] > 0).map((kind) => (
-              <span key={kind} className={`badge ${statusClass(kind === "broken" ? "broken" : "partial")}`}>{findingKindCounts[kind]} {findingLabels[kind]}</span>
-            ))}
+            {(Object.keys(findingKindCounts) as AuditFinding["kind"][])
+              .filter((kind) => findingKindCounts[kind] > 0)
+              .map((kind) => (
+                <span key={kind} className={`badge ${statusClass(kind === "broken" ? "broken" : "partial")}`}>
+                  {findingKindCounts[kind]} {findingLabels[kind]}
+                </span>
+              ))}
           </div>
         ) : null}
         {findings.length ? (
@@ -94,8 +101,15 @@ export function AuditTab(props: AuditTabProps) {
                     </span>
                   </div>
                   <p>Audit returned an unknown feature id.</p>
-                  {note ? <p><strong>Note:</strong> {note}</p> : null}
-                  <p><strong>Next step:</strong> Add this feature to features.json or update the audit result to reference an existing feature.</p>
+                  {note ? (
+                    <p>
+                      <strong>Note:</strong> {note}
+                    </p>
+                  ) : null}
+                  <p>
+                    <strong>Next step:</strong> Add this feature to features.json or update the audit result to
+                    reference an existing feature.
+                  </p>
                 </article>
               );
             }
@@ -135,7 +149,9 @@ export function AuditTab(props: AuditTabProps) {
           triage.map((item) => (
             <article className="slot" key={item.slot}>
               <div className="slot-title">
-                <strong>{item.slot}. {item.title}</strong>
+                <strong>
+                  {item.slot}. {item.title}
+                </strong>
                 <span className="pill">{item.agent}</span>
               </div>
               <p>{item.reason}</p>
@@ -153,19 +169,27 @@ export function AuditTab(props: AuditTabProps) {
           <span className="pill">{features.length}</span>
         </div>
         <div className="status-counts">
-          {(Object.keys(counts) as FeatureStatus[]).filter((status) => counts[status] > 0).map((status) => (
-            <span key={status} className={`badge ${statusClass(status)}`}>{counts[status]} {statusLabels[status]}</span>
-          ))}
+          {(Object.keys(counts) as FeatureStatus[])
+            .filter((status) => counts[status] > 0)
+            .map((status) => (
+              <span key={status} className={`badge ${statusClass(status)}`}>
+                {counts[status]} {statusLabels[status]}
+              </span>
+            ))}
         </div>
         <div className="feature-grid">
           {features.map((feature) => (
             <article className="feature-card" key={feature.id}>
               <div className="feature-card-head">
                 <strong>{feature.title}</strong>
-                <span className={`badge ${statusClass(feature.status)}`}>{statusLabels[feature.status] ?? feature.status}</span>
+                <span className={`badge ${statusClass(feature.status)}`}>
+                  {statusLabels[feature.status] ?? feature.status}
+                </span>
               </div>
               <p className="feature-card-summary">{feature.summary}</p>
-              <button className="button" type="button" onClick={() => props.onOpenFeature(feature)}>Details</button>
+              <button className="button" type="button" onClick={() => props.onOpenFeature(feature)}>
+                Details
+              </button>
             </article>
           ))}
         </div>

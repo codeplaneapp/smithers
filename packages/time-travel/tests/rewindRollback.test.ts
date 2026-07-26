@@ -7,11 +7,7 @@ import { jumpToFrame } from "../src/jumpToFrame.js";
 import { listRewindAuditRows } from "../src/rewindAudit.js";
 import { resetRewindLocksForTests } from "../src/resetRewindLocksForTests.js";
 
-type JumpStep = Parameters<
-  NonNullable<
-    NonNullable<Parameters<typeof jumpToFrame>[0]["hooks"]>["beforeStep"]
-  >
->[0];
+type JumpStep = Parameters<NonNullable<NonNullable<Parameters<typeof jumpToFrame>[0]["hooks"]>["beforeStep"]>>[0];
 
 function setupDb() {
   const sqlite = new Database(":memory:");
@@ -103,75 +99,70 @@ describe("jumpToFrame rollback behavior", () => {
   ];
 
   for (const stepName of failureSteps) {
-    test(
-      `failure injected at step "${stepName}" rolls back DB and restores reconciler snapshot`,
-      async () => {
-        resetRewindLocksForTests();
-        const { adapter, sqlite } = setupDb();
-        try {
-          const runId = `run-rollback-${stepName}`;
-          await seedRollbackRun(adapter, runId);
+    test(`failure injected at step "${stepName}" rolls back DB and restores reconciler snapshot`, async () => {
+      resetRewindLocksForTests();
+      const { adapter, sqlite } = setupDb();
+      try {
+        const runId = `run-rollback-${stepName}`;
+        await seedRollbackRun(adapter, runId);
 
-          const framesBefore = await adapter.listFrames(runId, 20);
-          const attemptsBefore = await adapter.listAttemptsForRun(runId);
+        const framesBefore = await adapter.listFrames(runId, 20);
+        const attemptsBefore = await adapter.listAttemptsForRun(runId);
 
-          let restoreCalledWith: unknown = null;
-          let rebuildCalled = false;
+        let restoreCalledWith: unknown = null;
+        let rebuildCalled = false;
 
-          await expect(
-            jumpToFrame({
-              adapter,
-              runId,
-              frameNo: 0,
-              confirm: true,
-              caller: "user:owner",
-              captureReconcilerState: async () => ({ snapshot: "pre-jump" }),
-              restoreReconcilerState: async (snapshot) => {
-                restoreCalledWith = snapshot;
+        await expect(
+          jumpToFrame({
+            adapter,
+            runId,
+            frameNo: 0,
+            confirm: true,
+            caller: "user:owner",
+            captureReconcilerState: async () => ({ snapshot: "pre-jump" }),
+            restoreReconcilerState: async (snapshot) => {
+              restoreCalledWith = snapshot;
+            },
+            rebuildReconcilerState: async () => {
+              rebuildCalled = true;
+            },
+            getCurrentPointerImpl: async () => "pre-pointer",
+            revertToPointerImpl: async () => ({ success: true }),
+            hooks: {
+              beforeStep: async (step) => {
+                if (step === stepName) {
+                  throw new Error(`inject failure at ${step}`);
+                }
               },
-              rebuildReconcilerState: async () => {
-                rebuildCalled = true;
-              },
-              getCurrentPointerImpl: async () => "pre-pointer",
-              revertToPointerImpl: async () => ({ success: true }),
-              hooks: {
-                beforeStep: async (step) => {
-                  if (step === stepName) {
-                    throw new Error(`inject failure at ${step}`);
-                  }
-                },
-              },
-            }),
-          ).rejects.toMatchObject({ code: expect.any(String) });
+            },
+          }),
+        ).rejects.toMatchObject({ code: expect.any(String) });
 
-          const framesAfter = await adapter.listFrames(runId, 20);
-          const attemptsAfter = await adapter.listAttemptsForRun(runId);
-          expect(framesAfter.map((frame) => frame.frameNo)).toEqual(
-            framesBefore.map((frame) => frame.frameNo),
-          );
-          expect(attemptsAfter).toHaveLength(attemptsBefore.length);
+        const framesAfter = await adapter.listFrames(runId, 20);
+        const attemptsAfter = await adapter.listAttemptsForRun(runId);
+        expect(framesAfter.map((frame) => frame.frameNo)).toEqual(framesBefore.map((frame) => frame.frameNo));
+        expect(attemptsAfter).toHaveLength(attemptsBefore.length);
 
-          // Restore hook fires only if the snapshot was captured before the
-          // injected failure. A failure at "snapshot-pre-jump" itself aborts
-          // before we capture, so `restoreCalledWith` stays null in that case.
-          if (stepName === "snapshot-pre-jump") {
-            expect(restoreCalledWith).toBeNull();
-          } else {
-            expect(restoreCalledWith).toEqual({ snapshot: "pre-jump" });
-          }
-          // rebuild may or may not run depending on step order; assert shape.
-          expect(typeof rebuildCalled).toBe("boolean");
-
-          const audits = await listRewindAuditRows(adapter, { runId });
-          expect(audits).toHaveLength(1);
-          expect(["failed", "partial"]).toContain(audits[0]?.result);
-          // in_progress must never linger after a rollback completes.
-          expect(audits[0]?.result).not.toBe("in_progress");
-        } finally {
-          sqlite.close();
+        // Restore hook fires only if the snapshot was captured before the
+        // injected failure. A failure at "snapshot-pre-jump" itself aborts
+        // before we capture, so `restoreCalledWith` stays null in that case.
+        if (stepName === "snapshot-pre-jump") {
+          expect(restoreCalledWith).toBeNull();
+        } else {
+          expect(restoreCalledWith).toEqual({ snapshot: "pre-jump" });
         }
-      },
-    );
+        // rebuild may or may not run depending on step order; assert shape.
+        expect(typeof rebuildCalled).toBe("boolean");
+
+        const audits = await listRewindAuditRows(adapter, { runId });
+        expect(audits).toHaveLength(1);
+        expect(["failed", "partial"]).toContain(audits[0]?.result);
+        // in_progress must never linger after a rollback completes.
+        expect(audits[0]?.result).not.toBe("in_progress");
+      } finally {
+        sqlite.close();
+      }
+    });
   }
 
   test("sandbox revert failure on one-of-three rolls back other reverts and marks partial", async () => {

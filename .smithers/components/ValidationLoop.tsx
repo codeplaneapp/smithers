@@ -70,7 +70,10 @@ export type ValidationLoopState = {
   exhausted: boolean;
 };
 
-function rawRows(ctx: { outputs?: Record<string, unknown[]> | ((channel: string) => unknown[]) }, channel: string): RawOutputRow[] {
+function rawRows(
+  ctx: { outputs?: Record<string, unknown[]> | ((channel: string) => unknown[]) },
+  channel: string,
+): RawOutputRow[] {
   const value = typeof ctx.outputs === "function" ? ctx.outputs(channel) : ctx.outputs?.[channel];
   return Array.isArray(value)
     ? value.filter((row): row is RawOutputRow => typeof row === "object" && row !== null)
@@ -79,21 +82,19 @@ function rawRows(ctx: { outputs?: Record<string, unknown[]> | ((channel: string)
 
 function rowVersion(row: RawOutputRow): [number, number] {
   const iteration = Number.isFinite(Number(row.iteration)) ? Number(row.iteration) : 0;
-  const iterationCount = Number.isFinite(Number(row.iterationCount))
-    ? Number(row.iterationCount)
-    : iteration;
+  const iterationCount = Number.isFinite(Number(row.iterationCount)) ? Number(row.iterationCount) : iteration;
   return [iterationCount, iteration];
 }
 
 function latestRaw(rows: RawOutputRow[], nodeId: string): RawOutputRow | undefined {
-  return rows.filter((row) => row.nodeId === nodeId).reduce<RawOutputRow | undefined>((best, row) => {
-    if (!best) return row;
-    const current = rowVersion(row);
-    const previous = rowVersion(best);
-    return current[0] > previous[0] || (current[0] === previous[0] && current[1] >= previous[1])
-      ? row
-      : best;
-  }, undefined);
+  return rows
+    .filter((row) => row.nodeId === nodeId)
+    .reduce<RawOutputRow | undefined>((best, row) => {
+      if (!best) return row;
+      const current = rowVersion(row);
+      const previous = rowVersion(best);
+      return current[0] > previous[0] || (current[0] === previous[0] && current[1] >= previous[1]) ? row : best;
+    }, undefined);
 }
 
 /** Fail-closed validation/review state, paired to the same loop iteration. */
@@ -109,7 +110,9 @@ export function validationLoopState(
 ): ValidationLoopState {
   const validate = latestRaw(rawRows(ctx, "validate"), validateNodeId);
   const review = latestRaw(rawRows(ctx, reviewChannel), reviewNodeId);
-  const paired = validate !== undefined && review !== undefined &&
+  const paired =
+    validate !== undefined &&
+    review !== undefined &&
     rowVersion(validate)[0] === rowVersion(review)[0] &&
     rowVersion(validate)[1] === rowVersion(review)[1];
   const validationPassed = validate?.allPassed === true;
@@ -120,15 +123,16 @@ export function validationLoopState(
   const latestImplement = latestRaw(implementRows, `${prefix}:implement`);
   const validateVersion = validate ? rowVersion(validate) : null;
   const implementVersion = latestImplement ? rowVersion(latestImplement) : null;
-  const hasCurrentValidation = validateVersion !== null && implementVersion !== null &&
+  const hasCurrentValidation =
+    validateVersion !== null &&
+    implementVersion !== null &&
     (validateVersion[0] > implementVersion[0] ||
       (validateVersion[0] === implementVersion[0] && validateVersion[1] >= implementVersion[1]));
   // Do not declare exhaustion in the middle of the last attempt: implement
   // output lands before validation, and a green validation lands before its
   // same-iteration review. The explicit failure node may mount only after the
   // final attempt has a terminal red validation or a paired review verdict.
-  const finalAttemptComplete = hasCurrentValidation &&
-    (validate?.allPassed === false || paired);
+  const finalAttemptComplete = hasCurrentValidation && (validate?.allPassed === false || paired);
 
   const feedback: string[] = [];
   if (validate?.allPassed === false) {
@@ -143,7 +147,9 @@ export function validationLoopState(
       for (const rawIssue of review.issues) {
         if (typeof rawIssue !== "object" || rawIssue === null) continue;
         const issue = rawIssue as Record<string, unknown>;
-        feedback.push(`  [${String(issue.severity ?? "issue")}] ${String(issue.title ?? "Untitled")}: ${String(issue.description ?? "")}${issue.file ? ` (${String(issue.file)})` : ""}`);
+        feedback.push(
+          `  [${String(issue.severity ?? "issue")}] ${String(issue.title ?? "Untitled")}: ${String(issue.description ?? "")}${issue.file ? ` (${String(issue.file)})` : ""}`,
+        );
       }
     }
   }
@@ -176,21 +182,40 @@ export function ValidationLoop({
   return (
     <Loop id={`${idPrefix}:loop`} until={done} maxIterations={maxIterations} onMaxReached="return-last">
       <Sequence>
-        <Task id={`${idPrefix}:implement`} output={implementOutputSchema} agent={implementAgents} dependsOn={startAfter} timeoutMs={1_800_000} heartbeatTimeoutMs={600_000}>
-          <ImplementPrompt prompt={feedback
-            ? `${promptText}\n\n---\nPREVIOUS ATTEMPT FEEDBACK (fix these issues):\n${feedback}`
-            : promptText} />
+        <Task
+          id={`${idPrefix}:implement`}
+          output={implementOutputSchema}
+          agent={implementAgents}
+          dependsOn={startAfter}
+          timeoutMs={1_800_000}
+          heartbeatTimeoutMs={600_000}
+        >
+          <ImplementPrompt
+            prompt={
+              feedback ? `${promptText}\n\n---\nPREVIOUS ATTEMPT FEEDBACK (fix these issues):\n${feedback}` : promptText
+            }
+          />
         </Task>
-        <Task id={`${idPrefix}:validate`} output={validateOutputSchema} dependsOn={[`${idPrefix}:implement`]} agent={validateAgents && validateAgents.length > 0
-          ? validateAgents
-          : implementAgents} timeoutMs={1_800_000} heartbeatTimeoutMs={600_000}>
+        <Task
+          id={`${idPrefix}:validate`}
+          output={validateOutputSchema}
+          dependsOn={[`${idPrefix}:implement`]}
+          agent={validateAgents && validateAgents.length > 0 ? validateAgents : implementAgents}
+          timeoutMs={1_800_000}
+          heartbeatTimeoutMs={600_000}
+        >
           <ValidatePrompt prompt={promptText} />
         </Task>
-        {!reviewWhen
-          ? null
-          : synthesizeReview
-            ? <ReviewPanel idPrefix={`${idPrefix}:review`} prompt={promptText} agents={reviewAgents} moderator={reviewModerator} />
-            : <Review idPrefix={`${idPrefix}:review`} prompt={promptText} agents={reviewAgents} />}
+        {!reviewWhen ? null : synthesizeReview ? (
+          <ReviewPanel
+            idPrefix={`${idPrefix}:review`}
+            prompt={promptText}
+            agents={reviewAgents}
+            moderator={reviewModerator}
+          />
+        ) : (
+          <Review idPrefix={`${idPrefix}:review`} prompt={promptText} agents={reviewAgents} />
+        )}
       </Sequence>
     </Loop>
   );

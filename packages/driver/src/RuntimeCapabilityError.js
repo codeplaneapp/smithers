@@ -24,25 +24,30 @@ export const RUNTIME_CAPABILITY_UNAVAILABLE = "RUNTIME_CAPABILITY_UNAVAILABLE";
  * reaching for a Node/Bun global that does not exist there.
  */
 export class RuntimeCapabilityError extends SmithersError {
-    /** @type {string} */
-    runtime;
-    /** @type {string} */
-    capability;
-    /** @type {string} */
-    operation;
-    /**
-     * @param {string} runtime Name of the active runtime (e.g. "browser", "node").
-     * @param {string} capability Capability namespace (e.g. "filesystem", "subprocess", "worktree", "sandbox").
-     * @param {string} operation Method name that was called (e.g. "readFile", "spawn", "resolve", "run").
-     * @param {{ cause?: unknown }} [opts]
-     */
-    constructor(runtime, capability, operation, opts) {
-        super(RUNTIME_CAPABILITY_UNAVAILABLE, `The "${runtime}" runtime does not support ${capability}.${operation}(). ` +
-            `This capability is not available in this environment; configure a ` +
-            `RuntimeAdapter that implements it, or avoid calling it here.`, { runtime, capability, operation }, opts?.cause !== undefined ? { cause: opts.cause } : undefined);
-        this.name = "RuntimeCapabilityError";
-        this.runtime = runtime;
-        this.capability = capability;
-        this.operation = operation;
-    }
+  /** @type {string} */
+  runtime;
+  /** @type {string} */
+  capability;
+  /** @type {string} */
+  operation;
+  /**
+   * @param {string} runtime Name of the active runtime (e.g. "browser", "node").
+   * @param {string} capability Capability namespace (e.g. "filesystem", "subprocess", "worktree", "sandbox").
+   * @param {string} operation Method name that was called (e.g. "readFile", "spawn", "resolve", "run").
+   * @param {{ cause?: unknown }} [opts]
+   */
+  constructor(runtime, capability, operation, opts) {
+    super(
+      RUNTIME_CAPABILITY_UNAVAILABLE,
+      `The "${runtime}" runtime does not support ${capability}.${operation}(). ` +
+        `This capability is not available in this environment; configure a ` +
+        `RuntimeAdapter that implements it, or avoid calling it here.`,
+      { runtime, capability, operation },
+      opts?.cause !== undefined ? { cause: opts.cause } : undefined,
+    );
+    this.name = "RuntimeCapabilityError";
+    this.runtime = runtime;
+    this.capability = capability;
+    this.operation = operation;
+  }
 }

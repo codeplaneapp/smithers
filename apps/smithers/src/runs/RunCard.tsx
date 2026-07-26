@@ -9,12 +9,7 @@ import { statusTone } from "./statusMeta";
 function BoltIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
+      <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -63,10 +58,7 @@ export function RunCard({ runId }: { runId: string }) {
       <div className="card-body">
         <ul className="step-list">
           {runSteps(run).map((step) => (
-            <li
-              className={step.status === "queued" ? "step is-dim" : "step"}
-              key={step.id}
-            >
+            <li className={step.status === "queued" ? "step is-dim" : "step"} key={step.id}>
               <StepDot tone={statusTone(step.status)} />
               <span className="step-label">{step.cardLabel ?? step.name}</span>
               <span className="step-meta">{step.meta}</span>
@@ -76,26 +68,14 @@ export function RunCard({ runId }: { runId: string }) {
       </div>
 
       <footer className="card-foot">
-        <button
-          className="btn btn-brand"
-          type="button"
-          onClick={() => openSurface({ kind: "inspector", runId })}
-        >
+        <button className="btn btn-brand" type="button" onClick={() => openSurface({ kind: "inspector", runId })}>
           Open
         </button>
-        <button
-          className="btn"
-          type="button"
-          onClick={() => openSurface({ kind: "logs", runId })}
-        >
+        <button className="btn" type="button" onClick={() => openSurface({ kind: "logs", runId })}>
           Logs
         </button>
         {running ? (
-          <button
-            className="btn"
-            type="button"
-            onClick={() => cancel(runId)}
-          >
+          <button className="btn" type="button" onClick={() => cancel(runId)}>
             Cancel
           </button>
         ) : null}

@@ -2,11 +2,29 @@
 /** @typedef {import("./EffectBoundaryAttempt.ts").EffectBoundaryAttempt} EffectBoundaryAttempt */
 
 const JOURNAL_COLUMNS = [
-  "run_id", "node_id", "iteration", "attempt", "seq", "call_token", "tool_name",
-  "input_json", "output_json", "started_at_ms", "finished_at_ms", "status",
-  "error_json", "kind", "side_effect", "idempotent",
-  "accepts_idempotency_key", "has_revert", "idempotency_key",
-  "revert_status", "reverted_at_ms", "revert_error_json", "forced_past_json",
+  "run_id",
+  "node_id",
+  "iteration",
+  "attempt",
+  "seq",
+  "call_token",
+  "tool_name",
+  "input_json",
+  "output_json",
+  "started_at_ms",
+  "finished_at_ms",
+  "status",
+  "error_json",
+  "kind",
+  "side_effect",
+  "idempotent",
+  "accepts_idempotency_key",
+  "has_revert",
+  "idempotency_key",
+  "revert_status",
+  "reverted_at_ms",
+  "revert_error_json",
+  "forced_past_json",
 ].join(", ");
 
 /**
@@ -52,9 +70,6 @@ export async function archiveDiscardedEffects(db, params) {
       WHERE run_id = ? AND (${predicate})`,
     [params.opId, params.archivedAtMs, params.archiveReason, ...values],
   );
-  await db.internalStorage.execute(
-    `DELETE FROM _smithers_tool_calls WHERE run_id = ? AND (${predicate})`,
-    values,
-  );
+  await db.internalStorage.execute(`DELETE FROM _smithers_tool_calls WHERE run_id = ? AND (${predicate})`, values);
   return rows.length;
 }

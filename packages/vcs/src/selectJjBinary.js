@@ -9,12 +9,8 @@ import { existsSync } from "node:fs";
  * @param {{ override?: string, bundled?: string | null, overrideExists?: typeof existsSync }} candidates
  * @returns {import("./ResolvedBinary.js").ResolvedBinary}
  */
-export function selectJjBinary({
-	override,
-	bundled,
-	overrideExists = existsSync,
-}) {
-	if (override && overrideExists(override)) return { path: override, source: "env" };
-	if (bundled) return { path: bundled, source: "bundled" };
-	return { path: "jj", source: "path" };
+export function selectJjBinary({ override, bundled, overrideExists = existsSync }) {
+  if (override && overrideExists(override)) return { path: override, source: "env" };
+  if (bundled) return { path: bundled, source: "bundled" };
+  return { path: "jj", source: "path" };
 }

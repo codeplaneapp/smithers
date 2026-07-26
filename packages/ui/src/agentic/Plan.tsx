@@ -1,12 +1,5 @@
 /** @jsxImportSource react */
-import {
-  createContext,
-  useContext,
-  useId,
-  useState,
-  type ComponentProps,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useId, useState, type ComponentProps, type ReactNode } from "react";
 import { cn } from "../cn";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { formatStatus, statusClass } from "../status";
@@ -123,7 +116,9 @@ export function PlanTrigger({ className, children, onClick, ...props }: Componen
       }}
       {...props}
     >
-      <span className="sui-plan-chevron" aria-hidden="true">›</span>
+      <span className="sui-plan-chevron" aria-hidden="true">
+        ›
+      </span>
       {children}
     </button>
   );
@@ -223,12 +218,7 @@ export function PlanStep({
 export function PlanAction({ className, type, ...props }: ComponentProps<"button">) {
   usePlanCss();
   return (
-    <button
-      type={type ?? "button"}
-      data-slot="plan-action"
-      className={cn("sui-plan-action", className)}
-      {...props}
-    />
+    <button type={type ?? "button"} data-slot="plan-action" className={cn("sui-plan-action", className)} {...props} />
   );
 }
 
@@ -341,7 +331,9 @@ function LegacyPlan({
           aria-controls={bodyId}
           onClick={togglePlan}
         >
-          <span className="sui-plan-chevron" aria-hidden="true">›</span>
+          <span className="sui-plan-chevron" aria-hidden="true">
+            ›
+          </span>
           <span className="sui-plan-title" data-shimmer={streaming ? "true" : "false"}>
             {title}
           </span>

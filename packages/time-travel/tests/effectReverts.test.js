@@ -17,9 +17,7 @@ import { timeTravel } from "../src/timetravel.js";
 import { recordForcedEffectBoundary } from "../src/recordForcedEffectBoundary.js";
 
 function entryHash(workflowPath) {
-  return workflowPath
-    ? createHash("sha256").update(readFileSync(workflowPath, "utf8")).digest("hex")
-    : null;
+  return workflowPath ? createHash("sha256").update(readFileSync(workflowPath, "utf8")).digest("hex") : null;
 }
 
 async function setup(runId, workflowPath) {
@@ -39,30 +37,32 @@ async function setup(runId, workflowPath) {
 }
 
 async function insert(adapter, row) {
-  await Effect.runPromise(adapter.insertToolCall({
-    runId: row.runId,
-    nodeId: row.nodeId,
-    iteration: 0,
-    attempt: row.attempt ?? 1,
-    seq: row.seq,
-    toolName: row.toolName,
-    inputJson: JSON.stringify({ value: row.seq }),
-    outputJson: JSON.stringify({ result: row.seq }),
-    startedAtMs: row.startedAtMs,
-    finishedAtMs: row.startedAtMs + 1,
-    status: "succeeded",
-    errorJson: null,
-    kind: row.kind ?? "tool",
-    sideEffect: true,
-    idempotent: false,
-    acceptsIdempotencyKey: false,
-    hasRevert: true,
-    idempotencyKey: `key-${row.seq}`,
-    revertStatus: null,
-    revertedAtMs: null,
-    revertErrorJson: null,
-    forcedPastJson: null,
-  }));
+  await Effect.runPromise(
+    adapter.insertToolCall({
+      runId: row.runId,
+      nodeId: row.nodeId,
+      iteration: 0,
+      attempt: row.attempt ?? 1,
+      seq: row.seq,
+      toolName: row.toolName,
+      inputJson: JSON.stringify({ value: row.seq }),
+      outputJson: JSON.stringify({ result: row.seq }),
+      startedAtMs: row.startedAtMs,
+      finishedAtMs: row.startedAtMs + 1,
+      status: "succeeded",
+      errorJson: null,
+      kind: row.kind ?? "tool",
+      sideEffect: true,
+      idempotent: false,
+      acceptsIdempotencyKey: false,
+      hasRevert: true,
+      idempotencyKey: `key-${row.seq}`,
+      revertStatus: null,
+      revertedAtMs: null,
+      revertErrorJson: null,
+      forcedPastJson: null,
+    }),
+  );
 }
 
 describe("effect revert execution", () => {
@@ -70,12 +70,19 @@ describe("effect revert execution", () => {
     const workflowPath = fileURLToPath(new URL("./fixtures/effect-boundary-workflow.jsx", import.meta.url));
     const { sqlite, adapter } = await setup("loaded-handlers", workflowPath);
     await insert(adapter, {
-      runId: "loaded-handlers", nodeId: "tool-node", seq: 1,
-      toolName: "undoable-tool", startedAtMs: 100,
+      runId: "loaded-handlers",
+      nodeId: "tool-node",
+      seq: 1,
+      toolName: "undoable-tool",
+      startedAtMs: 100,
     });
     await insert(adapter, {
-      runId: "loaded-handlers", nodeId: "task-node", seq: 0,
-      toolName: "task-node", startedAtMs: 200, kind: "task",
+      runId: "loaded-handlers",
+      nodeId: "task-node",
+      seq: 0,
+      toolName: "task-node",
+      startedAtMs: 200,
+      kind: "task",
     });
     globalThis.__smithersEffectBoundaryReverts = [];
 
@@ -86,14 +93,12 @@ describe("effect revert execution", () => {
       runsReverts: true,
     });
 
-    expect(globalThis.__smithersEffectBoundaryReverts.map((entry) => entry.kind))
-      .toEqual(["task", "tool"]);
+    expect(globalThis.__smithersEffectBoundaryReverts.map((entry) => entry.kind)).toEqual(["task", "tool"]);
     expect(globalThis.__smithersEffectBoundaryReverts[1]).toMatchObject({
       input: { value: 1 },
       context: { output: { result: 1 }, effectStatus: "succeeded" },
     });
-    expect(boundary.report.revertible.every((effect) => effect.reason === "Reverted successfully."))
-      .toBe(true);
+    expect(boundary.report.revertible.every((effect) => effect.reason === "Reverted successfully.")).toBe(true);
     delete globalThis.__smithersEffectBoundaryReverts;
     sqlite.close();
   });
@@ -143,23 +148,30 @@ describe("effect revert execution", () => {
     const { sqlite, adapter } = await setup("changed-workflow", workflowPath);
     await adapter.updateRun("changed-workflow", { workflowHash: "recorded-before-edit" });
     await insert(adapter, {
-      runId: "changed-workflow", nodeId: "tool-node", seq: 1,
-      toolName: "undoable-tool", startedAtMs: 100,
+      runId: "changed-workflow",
+      nodeId: "tool-node",
+      seq: 1,
+      toolName: "undoable-tool",
+      startedAtMs: 100,
     });
     globalThis.__smithersEffectBoundaryReverts = [];
 
-    await expect(guardEffectBoundary(adapter, {
-      runId: "changed-workflow",
-      cutoffMs: 0,
-      operation: "revert",
-      runsReverts: true,
-    })).rejects.toMatchObject({
+    await expect(
+      guardEffectBoundary(adapter, {
+        runId: "changed-workflow",
+        cutoffMs: 0,
+        operation: "revert",
+        runsReverts: true,
+      }),
+    ).rejects.toMatchObject({
       code: "TIME_TRAVEL_SIDE_EFFECT_BLOCKED",
       details: {
         report: {
-          blocking: [{
-            reason: "workflow changed since the effect was recorded",
-          }],
+          blocking: [
+            {
+              reason: "workflow changed since the effect was recorded",
+            },
+          ],
         },
       },
     });
@@ -183,17 +195,22 @@ describe("effect revert execution", () => {
       const runId = `semantics-${testCase.operation}`;
       const { sqlite, adapter } = await setup(runId, workflowPath);
       await insert(adapter, {
-        runId, nodeId: "tool-node", seq: 1,
-        toolName: "undoable-tool", startedAtMs: 100,
+        runId,
+        nodeId: "tool-node",
+        seq: 1,
+        toolName: "undoable-tool",
+        startedAtMs: 100,
       });
       globalThis.__smithersEffectBoundaryReverts = [];
       if (testCase.expected === "blocked") {
-        await expect(guardEffectBoundary(adapter, {
-          runId,
-          cutoffMs: 0,
-          operation: testCase.operation,
-          runsReverts: testCase.runsReverts,
-        })).rejects.toMatchObject({ code: "TIME_TRAVEL_SIDE_EFFECT_BLOCKED" });
+        await expect(
+          guardEffectBoundary(adapter, {
+            runId,
+            cutoffMs: 0,
+            operation: testCase.operation,
+            runsReverts: testCase.runsReverts,
+          }),
+        ).rejects.toMatchObject({ code: "TIME_TRAVEL_SIDE_EFFECT_BLOCKED" });
         expect(globalThis.__smithersEffectBoundaryReverts).toEqual([]);
       } else {
         const boundary = await guardEffectBoundary(adapter, {
@@ -215,27 +232,38 @@ describe("effect revert execution", () => {
     const workflowPath = fileURLToPath(new URL("./fixtures/effect-boundary-workflow.jsx", import.meta.url));
     const { sqlite, adapter } = await setup("unresolved", workflowPath);
     await insert(adapter, {
-      runId: "unresolved", nodeId: "tool-node", seq: 1,
-      toolName: "undoable-tool", startedAtMs: 100,
+      runId: "unresolved",
+      nodeId: "tool-node",
+      seq: 1,
+      toolName: "undoable-tool",
+      startedAtMs: 100,
     });
     await insert(adapter, {
-      runId: "unresolved", nodeId: "missing-node", seq: 2,
-      toolName: "missing-tool", startedAtMs: 200,
+      runId: "unresolved",
+      nodeId: "missing-node",
+      seq: 2,
+      toolName: "missing-tool",
+      startedAtMs: 200,
     });
     globalThis.__smithersEffectBoundaryReverts = [];
 
-    await expect(guardEffectBoundary(adapter, {
-      runId: "unresolved",
-      cutoffMs: 0,
-      operation: "revert",
-      runsReverts: true,
-    })).rejects.toMatchObject({
+    await expect(
+      guardEffectBoundary(adapter, {
+        runId: "unresolved",
+        cutoffMs: 0,
+        operation: "revert",
+        runsReverts: true,
+      }),
+    ).rejects.toMatchObject({
       code: "TIME_TRAVEL_SIDE_EFFECT_BLOCKED",
       details: {
         report: {
-          blocking: [{
-            reason: "The journal records hasRevert=true for tool missing-tool, but no matching defineTool instance was enumerable from task agents or exported workflow tool registries. Closed-over compute-task tools must be exported in a tool registry.",
-          }],
+          blocking: [
+            {
+              reason:
+                "The journal records hasRevert=true for tool missing-tool, but no matching defineTool instance was enumerable from task agents or exported workflow tool registries. Closed-over compute-task tools must be exported in a tool registry.",
+            },
+          ],
         },
       },
     });
@@ -251,15 +279,20 @@ describe("effect revert execution", () => {
     expect(globalThis.__smithersEffectBoundaryReverts.map((entry) => entry.kind)).toEqual(["tool"]);
     expect(forced.report.blocking).toHaveLength(1);
     expect(forced.forced).toBe(true);
-    const forcedRows = sqlite.query(
-      `SELECT tool_name, forced_past_json FROM _smithers_tool_calls
+    const forcedRows = sqlite
+      .query(
+        `SELECT tool_name, forced_past_json FROM _smithers_tool_calls
         WHERE run_id = ? ORDER BY tool_name`,
-    ).all("unresolved");
+      )
+      .all("unresolved");
     expect(forcedRows).toHaveLength(2);
     expect(forcedRows.every((row) => JSON.parse(row.forced_past_json).length === 1)).toBe(true);
-    expect(sqlite.query(
-      `SELECT type FROM _smithers_events WHERE run_id = ? ORDER BY seq`,
-    ).all("unresolved").map((row) => row.type)).toContain("SideEffectBoundaryCrossed");
+    expect(
+      sqlite
+        .query(`SELECT type FROM _smithers_events WHERE run_id = ? ORDER BY seq`)
+        .all("unresolved")
+        .map((row) => row.type),
+    ).toContain("SideEffectBoundaryCrossed");
     const run = await adapter.getRun("unresolved");
     expect(run?.status).toBe("finished");
     expect(run?.finishedAtMs).toBeNull();
@@ -273,8 +306,11 @@ describe("effect revert execution", () => {
   test("concurrent forced crossings atomically preserve every row stamp", async () => {
     const { sqlite, adapter } = await setup("concurrent-forced");
     await insert(adapter, {
-      runId: "concurrent-forced", nodeId: "tool-node", seq: 1,
-      toolName: "undoable-tool", startedAtMs: 100,
+      runId: "concurrent-forced",
+      nodeId: "tool-node",
+      seq: 1,
+      toolName: "undoable-tool",
+      startedAtMs: 100,
     });
     const report = await assessEffectBoundary(adapter, {
       runId: "concurrent-forced",
@@ -296,11 +332,14 @@ describe("effect revert execution", () => {
       }),
     ]);
 
-    const row = sqlite.query(
-      `SELECT forced_past_json FROM _smithers_tool_calls WHERE run_id = ?`,
-    ).get("concurrent-forced");
-    expect(JSON.parse(row.forced_past_json).map((entry) => entry.opId).sort())
-      .toEqual(["forced-a", "forced-b"]);
+    const row = sqlite
+      .query(`SELECT forced_past_json FROM _smithers_tool_calls WHERE run_id = ?`)
+      .get("concurrent-forced");
+    expect(
+      JSON.parse(row.forced_past_json)
+        .map((entry) => entry.opId)
+        .sort(),
+    ).toEqual(["forced-a", "forced-b"]);
     sqlite.close();
   });
 
@@ -327,12 +366,13 @@ describe("effect revert execution", () => {
       jjPointer: null,
     });
     await insert(adapter, {
-      runId: "forced-timetravel", nodeId: "target", seq: 1,
-      toolName: "unrevertible", startedAtMs: 100,
+      runId: "forced-timetravel",
+      nodeId: "target",
+      seq: 1,
+      toolName: "unrevertible",
+      startedAtMs: 100,
     });
-    await Effect.runPromise(adapter.updateToolCall(
-      "forced-timetravel", "target", 0, 1, 1, { hasRevert: false },
-    ));
+    await Effect.runPromise(adapter.updateToolCall("forced-timetravel", "target", 0, 1, 1, { hasRevert: false }));
 
     const result = await timeTravel(adapter, {
       runId: "forced-timetravel",
@@ -362,7 +402,10 @@ describe("effect revert execution", () => {
     const order = [];
     const events = [];
     const handler = {
-      name: "undo", sideEffect: true, idempotent: false, hasRevert: true,
+      name: "undo",
+      sideEffect: true,
+      idempotent: false,
+      hasRevert: true,
       revert: async (input, context) => order.push([input.value, context.output.result, context.idempotencyKey]),
     };
     const result = await executeEffectReverts(adapter, {
@@ -376,15 +419,22 @@ describe("effect revert execution", () => {
       },
       onProgress: (event) => events.push(event.type),
     });
-    expect(order).toEqual([[2, 2, "key-2"], [1, 1, "key-1"]]);
+    expect(order).toEqual([
+      [2, 2, "key-2"],
+      [1, 1, "key-1"],
+    ]);
     expect(events).toEqual([
-      "EffectRevertStarted", "EffectRevertFinished",
-      "EffectRevertStarted", "EffectRevertFinished",
+      "EffectRevertStarted",
+      "EffectRevertFinished",
+      "EffectRevertStarted",
+      "EffectRevertFinished",
     ]);
     expect(result.revertible.every((effect) => effect.reason === "Reverted successfully.")).toBe(true);
-    expect(sqlite.query(
-      `SELECT revert_status FROM _smithers_tool_calls WHERE run_id = ? ORDER BY started_at_ms`,
-    ).all("reverse")).toEqual([{ revert_status: "reverted" }, { revert_status: "reverted" }]);
+    expect(
+      sqlite
+        .query(`SELECT revert_status FROM _smithers_tool_calls WHERE run_id = ? ORDER BY started_at_ms`)
+        .all("reverse"),
+    ).toEqual([{ revert_status: "reverted" }, { revert_status: "reverted" }]);
     sqlite.close();
   });
 
@@ -407,43 +457,44 @@ describe("effect revert execution", () => {
       idempotent: false,
       hasRevert: true,
       revert: async () => {
-        await Effect.runPromise(adapter.updateToolCall(
-          "stale-during-revert",
-          "effect",
-          0,
-          1,
-          1,
-          {
+        await Effect.runPromise(
+          adapter.updateToolCall("stale-during-revert", "effect", 0, 1, 1, {
             status: "succeeded",
             revertStatus: "revert-stale",
-          },
-        ));
+          }),
+        );
       },
     };
 
-    await expect(executeEffectReverts(adapter, {
-      runId: "stale-during-revert",
-      operation: "rewind",
-      report,
-      registry: {
-        toolMetadata: new Map([["undo", handler]]),
-        tools: new Map([["undo", handler]]),
-        tasks: new Map(),
-      },
-    })).rejects.toMatchObject({
+    await expect(
+      executeEffectReverts(adapter, {
+        runId: "stale-during-revert",
+        operation: "rewind",
+        report,
+        registry: {
+          toolMetadata: new Map([["undo", handler]]),
+          tools: new Map([["undo", handler]]),
+          tasks: new Map(),
+        },
+      }),
+    ).rejects.toMatchObject({
       code: "TIME_TRAVEL_SIDE_EFFECT_BLOCKED",
       details: {
         report: {
-          blocking: [{
-            reason: expect.stringContaining("revert is stale"),
-          }],
+          blocking: [
+            {
+              reason: expect.stringContaining("revert is stale"),
+            },
+          ],
           revertible: [],
         },
       },
     });
-    expect(sqlite.query(
-      `SELECT status, revert_status FROM _smithers_tool_calls WHERE run_id = ?`,
-    ).get("stale-during-revert")).toEqual({
+    expect(
+      sqlite
+        .query(`SELECT status, revert_status FROM _smithers_tool_calls WHERE run_id = ?`)
+        .get("stale-during-revert"),
+    ).toEqual({
       status: "succeeded",
       revert_status: "revert-stale",
     });
@@ -458,27 +509,34 @@ describe("effect revert execution", () => {
     const report = await assessEffectBoundary(adapter, { runId: "failure", cutoffMs: 0 });
     const calls = [];
     const failing = {
-      name: "undo", sideEffect: true, idempotent: false, hasRevert: true,
+      name: "undo",
+      sideEffect: true,
+      idempotent: false,
+      hasRevert: true,
       revert: async (input) => {
         calls.push(input.value);
         if (input.value === 1) throw new Error("cannot undo old");
       },
     };
-    await expect(executeEffectReverts(adapter, {
-      runId: "failure",
-      operation: "timetravel",
-      report,
-      registry: {
-        toolMetadata: new Map([["undo", failing]]),
-        tools: new Map([["undo", failing]]),
-        tasks: new Map(),
-      },
-    })).rejects.toMatchObject({ code: "TIME_TRAVEL_SIDE_EFFECT_BLOCKED" });
+    await expect(
+      executeEffectReverts(adapter, {
+        runId: "failure",
+        operation: "timetravel",
+        report,
+        registry: {
+          toolMetadata: new Map([["undo", failing]]),
+          tools: new Map([["undo", failing]]),
+          tasks: new Map(),
+        },
+      }),
+    ).rejects.toMatchObject({ code: "TIME_TRAVEL_SIDE_EFFECT_BLOCKED" });
     expect(calls).toEqual([2, 1]);
     expect(sqlite.query(`SELECT value FROM sentinel`).all()).toEqual([{ value: "untouched" }]);
-    expect(sqlite.query(
-      `SELECT node_id, revert_status FROM _smithers_tool_calls WHERE run_id = ? ORDER BY started_at_ms`,
-    ).all("failure")).toEqual([
+    expect(
+      sqlite
+        .query(`SELECT node_id, revert_status FROM _smithers_tool_calls WHERE run_id = ? ORDER BY started_at_ms`)
+        .all("failure"),
+    ).toEqual([
       { node_id: "old", revert_status: "revert-failed" },
       { node_id: "new", revert_status: "reverted" },
     ]);
@@ -503,22 +561,30 @@ describe("effect revert execution", () => {
   test("archive move is atomic with discard and prevents attempt-1 journal collisions", async () => {
     const { sqlite, adapter } = await setup("archive");
     await insert(adapter, { runId: "archive", nodeId: "task", attempt: 1, seq: 1, toolName: "undo", startedAtMs: 100 });
-    await adapter.withTransaction("archive discard", Effect.gen(function* () {
-      yield* Effect.promise(() => archiveDiscardedEffects(adapter, {
-        runId: "archive",
-        opId: "op-1",
-        archivedAtMs: 200,
-        archiveReason: "test discard",
-        attempts: [{ nodeId: "task", iteration: 0, attempt: 1 }],
-      }));
-    }));
+    await adapter.withTransaction(
+      "archive discard",
+      Effect.gen(function* () {
+        yield* Effect.promise(() =>
+          archiveDiscardedEffects(adapter, {
+            runId: "archive",
+            opId: "op-1",
+            archivedAtMs: 200,
+            archiveReason: "test discard",
+            attempts: [{ nodeId: "task", iteration: 0, attempt: 1 }],
+          }),
+        );
+      }),
+    );
     expect(sqlite.query(`SELECT * FROM _smithers_tool_calls WHERE run_id = ?`).all("archive")).toEqual([]);
-    expect(sqlite.query(
-      `SELECT archived_by_op, archive_reason FROM _smithers_tool_call_archive WHERE run_id = ?`,
-    ).all("archive")).toEqual([{ archived_by_op: "op-1", archive_reason: "test discard" }]);
+    expect(
+      sqlite
+        .query(`SELECT archived_by_op, archive_reason FROM _smithers_tool_call_archive WHERE run_id = ?`)
+        .all("archive"),
+    ).toEqual([{ archived_by_op: "op-1", archive_reason: "test discard" }]);
     await insert(adapter, { runId: "archive", nodeId: "task", attempt: 1, seq: 1, toolName: "undo", startedAtMs: 300 });
-    expect(sqlite.query(`SELECT started_at_ms FROM _smithers_tool_calls WHERE run_id = ?`).all("archive"))
-      .toEqual([{ started_at_ms: 300 }]);
+    expect(sqlite.query(`SELECT started_at_ms FROM _smithers_tool_calls WHERE run_id = ?`).all("archive")).toEqual([
+      { started_at_ms: 300 },
+    ]);
     const report = await assessEffectBoundary(adapter, { runId: "archive", cutoffMs: 0 });
     expect(report.revertible).toHaveLength(1);
     expect(report.warnings).toHaveLength(1);
@@ -571,9 +637,9 @@ describe("effect revert execution", () => {
         success: false,
         error: "Another time-travel operation is already running for lease-reuse.",
       });
-      expect(sqlite.query(
-        `SELECT run_id FROM _smithers_rewind_leases WHERE run_id = ?`,
-      ).all("lease-reuse")).toEqual([{ run_id: "lease-reuse" }]);
+      expect(sqlite.query(`SELECT run_id FROM _smithers_rewind_leases WHERE run_id = ?`).all("lease-reuse")).toEqual([
+        { run_id: "lease-reuse" },
+      ]);
     } finally {
       await lease?.release();
       sqlite.close();
@@ -603,7 +669,10 @@ describe("effect revert execution", () => {
       finishedAtMs: 110,
       jjPointer: null,
     });
-    for (const [frameNo, createdAtMs] of [[0, 50], [1, 150]]) {
+    for (const [frameNo, createdAtMs] of [
+      [0, 50],
+      [1, 150],
+    ]) {
       await adapter.insertFrame({
         runId: "lease-steal-after-compensation",
         frameNo,
@@ -637,23 +706,26 @@ describe("effect revert execution", () => {
       return await originalWithTransaction(label, effect);
     };
 
-    await expect(timeTravel(adapter, {
-      runId: "lease-steal-after-compensation",
-      nodeId: "target",
-      iteration: 0,
-      attempt: 1,
-      restoreVcs: false,
-    })).rejects.toThrow("lease ownership was lost");
+    await expect(
+      timeTravel(adapter, {
+        runId: "lease-steal-after-compensation",
+        nodeId: "target",
+        iteration: 0,
+        attempt: 1,
+        restoreVcs: false,
+      }),
+    ).rejects.toThrow("lease ownership was lost");
 
-    expect(globalThis.__smithersEffectBoundaryReverts.map((entry) => entry.kind))
-      .toEqual(["tool"]);
-    expect((await adapter.listFrames("lease-steal-after-compensation", 10)).map((frame) => frame.frameNo))
-      .toEqual([1, 0]);
-    expect(await adapter.getNode("lease-steal-after-compensation", "target", 0))
-      .toMatchObject({ state: "finished" });
-    expect(sqlite.query(
-      `SELECT revert_status FROM _smithers_tool_calls WHERE run_id = ?`,
-    ).all("lease-steal-after-compensation")).toEqual([{ revert_status: "reverted" }]);
+    expect(globalThis.__smithersEffectBoundaryReverts.map((entry) => entry.kind)).toEqual(["tool"]);
+    expect((await adapter.listFrames("lease-steal-after-compensation", 10)).map((frame) => frame.frameNo)).toEqual([
+      1, 0,
+    ]);
+    expect(await adapter.getNode("lease-steal-after-compensation", "target", 0)).toMatchObject({ state: "finished" });
+    expect(
+      sqlite
+        .query(`SELECT revert_status FROM _smithers_tool_calls WHERE run_id = ?`)
+        .all("lease-steal-after-compensation"),
+    ).toEqual([{ revert_status: "reverted" }]);
 
     delete globalThis.__smithersEffectBoundaryReverts;
     sqlite.close();

@@ -2,9 +2,12 @@
 import { createSmithers, defineTool } from "smithers-orchestrator";
 import { z } from "zod";
 
-const { smithers, Workflow, Task, outputs } = createSmithers({
-  result: z.object({ value: z.number() }),
-}, { dbPath: ":memory:" });
+const { smithers, Workflow, Task, outputs } = createSmithers(
+  {
+    result: z.object({ value: z.number() }),
+  },
+  { dbPath: ":memory:" },
+);
 
 const undoableTool = defineTool({
   name: "undoable-tool",

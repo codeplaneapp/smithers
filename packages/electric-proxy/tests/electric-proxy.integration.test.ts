@@ -8,11 +8,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createSmithersElectricProxy } from "../src/index.js";
-import {
-  isDockerFixtureAvailable,
-  startElectricFixture,
-  type ElectricFixture,
-} from "./fixtures/electricFixture.ts";
+import { isDockerFixtureAvailable, startElectricFixture, type ElectricFixture } from "./fixtures/electricFixture.ts";
 
 const dockerAvailable = process.platform !== "win32" && isDockerFixtureAvailable();
 

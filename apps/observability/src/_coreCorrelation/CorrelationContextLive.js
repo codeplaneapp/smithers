@@ -5,7 +5,7 @@ import { getCurrentCorrelationContextEffect } from "./getCurrentCorrelationConte
 import { withCorrelationContext } from "./withCorrelationContext.js";
 /** @type {Layer.Layer<CorrelationContextService, never, never>} */
 export const CorrelationContextLive = Layer.succeed(CorrelationContextService, {
-    current: () => getCurrentCorrelationContextEffect(),
-    withCorrelation: (patch, effect) => withCorrelationContext(effect, patch),
-    toLogAnnotations: correlationContextToLogAnnotations,
+  current: () => getCurrentCorrelationContextEffect(),
+  withCorrelation: (patch, effect) => withCorrelationContext(effect, patch),
+  toLogAnnotations: correlationContextToLogAnnotations,
 });

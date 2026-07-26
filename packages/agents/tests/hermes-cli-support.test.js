@@ -130,9 +130,7 @@ describe("Hermes CLI agent", () => {
     try {
       process.env.PATH = prependPath(fake.dir, originalPath);
       const agent = new HermesCliAgent({ env: { PATH: process.env.PATH } });
-      await expect(
-        agent.generate({ messages: [{ role: "user", content: "fail" }] }),
-      ).rejects.toThrow(/hermes blew up/);
+      await expect(agent.generate({ messages: [{ role: "user", content: "fail" }] })).rejects.toThrow(/hermes blew up/);
     } finally {
       await rm(fake.dir, { recursive: true, force: true });
     }

@@ -3,11 +3,7 @@
 import { createSmithers, Sequence } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
-import {
-  ForEachFeature,
-  forEachFeatureMergeSchema,
-  forEachFeatureResultSchema,
-} from "../components/ForEachFeature";
+import { ForEachFeature, forEachFeatureMergeSchema, forEachFeatureResultSchema } from "../components/ForEachFeature";
 import SweepDocumentation from "../prompts/sweep-documentation.mdx";
 import SweepE2ETesting from "../prompts/sweep-e2e-testing.mdx";
 import SweepUnitTests from "../prompts/sweep-unit-tests.mdx";
@@ -15,14 +11,7 @@ import SweepObservability from "../prompts/sweep-observability.mdx";
 import SweepImplementation from "../prompts/sweep-implementation.mdx";
 import SweepCli from "../prompts/sweep-cli.mdx";
 
-const TOPIC_KEYS = [
-  "DOCUMENTATION",
-  "E2E_TESTING",
-  "UNIT_TESTS",
-  "OBSERVABILITY",
-  "IMPLEMENTATION",
-  "CLI",
-] as const;
+const TOPIC_KEYS = ["DOCUMENTATION", "E2E_TESTING", "UNIT_TESTS", "OBSERVABILITY", "IMPLEMENTATION", "CLI"] as const;
 
 type TopicKey = (typeof TOPIC_KEYS)[number];
 
@@ -70,7 +59,10 @@ const sweepSummarySchema = z.looseObject({
 const agentTierSchema = z.enum(["cheap", "smart", "smartTool"]).default("cheap");
 type AgentTier = z.infer<typeof agentTierSchema>;
 
-const AGENT_TIERS: Record<AgentTier, { work: (typeof agents)[keyof typeof agents]; merge: (typeof agents)[keyof typeof agents] }> = {
+const AGENT_TIERS: Record<
+  AgentTier,
+  { work: (typeof agents)[keyof typeof agents]; merge: (typeof agents)[keyof typeof agents] }
+> = {
   // Every topic prompt edits or fixes files, so the work seat is always Luna.
   // The legacy model selector now controls only the report/synthesis seat.
   cheap: { work: agents.implement, merge: agents.cheapFast },
@@ -127,9 +119,7 @@ export default smithers((ctx) => {
           const featuresPath = path.resolve(cwd, ".smithers/specs/features.ts");
 
           if (!fs.existsSync(featuresPath)) {
-            throw new Error(
-              "Missing .smithers/specs/features.ts — run the sync-features workflow first.",
-            );
+            throw new Error("Missing .smithers/specs/features.ts — run the sync-features workflow first.");
           }
 
           const content = fs.readFileSync(featuresPath, "utf-8");
@@ -139,19 +129,14 @@ export default smithers((ctx) => {
           while ((match = groupRegex.exec(content)) !== null) {
             const groupName = match[1];
             const featuresStr = match[2];
-            const featureList = [...featuresStr.matchAll(/"([^"]+)"/g)].map(
-              (m) => m[1],
-            );
+            const featureList = [...featuresStr.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
             if (featureList.length > 0) {
               features[groupName] = featureList;
             }
           }
 
           const totalGroups = Object.keys(features).length;
-          const totalFeatures = Object.values(features).reduce(
-            (sum, group) => sum + group.length,
-            0,
-          );
+          const totalFeatures = Object.values(features).reduce((sum, group) => sum + group.length, 0);
 
           return { features, totalGroups, totalFeatures };
         }}

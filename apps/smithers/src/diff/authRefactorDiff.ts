@@ -99,7 +99,7 @@ export const AUTH_REFACTOR_DIFF: Diff = {
       modeChanges: ["old mode 100644", "new mode 100755"],
       lines: [
         { kind: "context", text: "@@ -1,4 +1,5 @@" },
-        { kind: "context", lnOld: 1, ln: 1, text: "import { verify } from \"./token\"" },
+        { kind: "context", lnOld: 1, ln: 1, text: 'import { verify } from "./token"' },
         { kind: "del", lnOld: 2, text: "export function authMw(req, res, next) {" },
         { kind: "add", ln: 2, text: "export function authMiddleware(req: Req, res: Res, next: Next) {" },
         { kind: "add", ln: 3, text: "  const ok = verify(req.headers.authorization)" },
@@ -115,7 +115,12 @@ export const AUTH_REFACTOR_DIFF: Diff = {
       add: 0,
       del: 0,
       sizeBytes: 18_944,
-      lines: [{ kind: "context", text: "Binary files a/auth/assets/avatar-default.png and b/auth/assets/avatar-default.png differ" }],
+      lines: [
+        {
+          kind: "context",
+          text: "Binary files a/auth/assets/avatar-default.png and b/auth/assets/avatar-default.png differ",
+        },
+      ],
     },
   ],
 };

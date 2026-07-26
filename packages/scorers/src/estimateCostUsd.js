@@ -50,14 +50,9 @@ function requestMultipliers(model, inputTokens) {
  */
 export function estimateCostUsd(usage) {
   const price = modelTokenPrices(usage.model);
-  const perMillion = (count, rate) =>
-    (tokenCount(count) / 1_000_000) * rate;
+  const perMillion = (count, rate) => (tokenCount(count) / 1_000_000) * rate;
 
-  if (
-    usage.inputTokens === undefined &&
-    usage.outputTokens === undefined &&
-    typeof usage.tokens === "number"
-  ) {
+  if (usage.inputTokens === undefined && usage.outputTokens === undefined && typeof usage.tokens === "number") {
     const inputTokens = tokenCount(usage.tokens) / 2;
     const outputTokens = inputTokens;
     const multiplier = requestMultipliers(usage.model, inputTokens);
@@ -70,10 +65,7 @@ export function estimateCostUsd(usage) {
   const inputTokens = tokenCount(usage.inputTokens);
   const cacheReadTokens = tokenCount(usage.cacheReadTokens);
   const cacheWriteTokens = tokenCount(usage.cacheWriteTokens);
-  const multiplier = requestMultipliers(
-    usage.model,
-    inputTokens + cacheReadTokens + cacheWriteTokens,
-  );
+  const multiplier = requestMultipliers(usage.model, inputTokens + cacheReadTokens + cacheWriteTokens);
 
   return (
     perMillion(inputTokens, price.input * multiplier.input) +

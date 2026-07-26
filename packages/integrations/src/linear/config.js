@@ -19,9 +19,9 @@ let registeredConfig = {};
  * @returns {LinearConfig} the previously registered config
  */
 export function configureLinear(config = {}) {
-    const previous = registeredConfig;
-    registeredConfig = { ...config };
-    return previous;
+  const previous = registeredConfig;
+  registeredConfig = { ...config };
+  return previous;
 }
 
 /**
@@ -33,19 +33,12 @@ export function configureLinear(config = {}) {
  * @returns {ResolvedLinearConfig}
  */
 export function resolveLinearConfig(explicit = {}) {
-    const env = typeof process !== "undefined" ? process.env : {};
-    return {
-        apiKey: explicit.apiKey ??
-            registeredConfig.apiKey ??
-            env["SMITHERS_LINEAR_API_KEY"] ??
-            undefined,
-        webhookSecret: explicit.webhookSecret ??
-            registeredConfig.webhookSecret ??
-            env["SMITHERS_LINEAR_WEBHOOK_SECRET"] ??
-            undefined,
-        apiBaseUrl: explicit.apiBaseUrl ??
-            registeredConfig.apiBaseUrl ??
-            env["SMITHERS_LINEAR_API_BASE_URL"] ??
-            LINEAR_API_BASE_URL,
-    };
+  const env = typeof process !== "undefined" ? process.env : {};
+  return {
+    apiKey: explicit.apiKey ?? registeredConfig.apiKey ?? env["SMITHERS_LINEAR_API_KEY"] ?? undefined,
+    webhookSecret:
+      explicit.webhookSecret ?? registeredConfig.webhookSecret ?? env["SMITHERS_LINEAR_WEBHOOK_SECRET"] ?? undefined,
+    apiBaseUrl:
+      explicit.apiBaseUrl ?? registeredConfig.apiBaseUrl ?? env["SMITHERS_LINEAR_API_BASE_URL"] ?? LINEAR_API_BASE_URL,
+  };
 }

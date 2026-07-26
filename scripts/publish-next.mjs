@@ -91,12 +91,11 @@ export function workspacePackages(rootDir) {
   const packages = [];
   for (const entry of ["packages", "apps", "e2e", ".smithers"]) {
     const entryPath = join(rootDir, entry);
-    const dirs =
-      existsSync(join(entryPath, "package.json"))
-        ? [entryPath]
-        : existsSync(entryPath)
-          ? readdirSync(entryPath).map((name) => join(entryPath, name))
-          : [];
+    const dirs = existsSync(join(entryPath, "package.json"))
+      ? [entryPath]
+      : existsSync(entryPath)
+        ? readdirSync(entryPath).map((name) => join(entryPath, name))
+        : [];
     for (const dir of dirs) {
       const packagePath = join(dir, "package.json");
       if (!existsSync(packagePath)) continue;
@@ -118,7 +117,10 @@ export function workspacePackages(rootDir) {
  */
 export function propagateVersion(rootDir, version) {
   const changed = [];
-  const targets = [join(rootDir, "package.json"), ...workspacePackages(rootDir).map((pkg) => join(pkg.dir, "package.json"))];
+  const targets = [
+    join(rootDir, "package.json"),
+    ...workspacePackages(rootDir).map((pkg) => join(pkg.dir, "package.json")),
+  ];
   for (const path of targets) {
     const pkg = JSON.parse(readFileSync(path, "utf8"));
     if (pkg.version === version) continue;
@@ -214,7 +216,10 @@ function main() {
   const currentNext = npmNextDistTag("smithers-orchestrator");
   const advanceNext = shouldAdvanceNext(currentNext, commitEpoch);
   if (!advanceNext) {
-    log("dist-tag", `registry next (${currentNext}) is a newer commit's snapshot — publishing without advancing the next pointers`);
+    log(
+      "dist-tag",
+      `registry next (${currentNext}) is a newer commit's snapshot — publishing without advancing the next pointers`,
+    );
   }
 
   log("publish", "checking npm registry for already-published package versions");

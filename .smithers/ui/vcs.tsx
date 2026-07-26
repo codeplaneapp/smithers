@@ -58,17 +58,27 @@ function statusClass(status: string | undefined) {
   return "";
 }
 
-type StatusView = { tool: string; repo: boolean; branch: string; head: string; clean: boolean; summary: string; changes: Change[] };
+type StatusView = {
+  tool: string;
+  repo: boolean;
+  branch: string;
+  head: string;
+  clean: boolean;
+  summary: string;
+  changes: Change[];
+};
 function extractStatus(value: unknown): StatusView | null {
   const row = rowOf(value);
   if (!row) return null;
   const summary = asString(row.summary);
   if (summary === undefined) return null;
-  const changes: Change[] = asArray(row.changes).filter(isRecord).map((c) => ({
-    path: asString(c.path) ?? "",
-    code: asString(c.code) ?? "?",
-    staged: asBool(c.staged),
-  }));
+  const changes: Change[] = asArray(row.changes)
+    .filter(isRecord)
+    .map((c) => ({
+      path: asString(c.path) ?? "",
+      code: asString(c.code) ?? "?",
+      staged: asBool(c.staged),
+    }));
   return {
     tool: asString(row.tool) ?? "git",
     repo: asBool(row.isRepo ?? row.is_repo),
@@ -85,10 +95,12 @@ function extractCommits(value: unknown): { summary: string; commits: Commit[] } 
   if (!row) return null;
   const summary = asString(row.summary);
   if (summary === undefined) return null;
-  const commits: Commit[] = asArray(row.commits).filter(isRecord).map((c) => ({
-    id: asString(c.id) ?? "",
-    subject: asString(c.subject) ?? "",
-  }));
+  const commits: Commit[] = asArray(row.commits)
+    .filter(isRecord)
+    .map((c) => ({
+      id: asString(c.id) ?? "",
+      subject: asString(c.subject) ?? "",
+    }));
   return { summary, commits };
 }
 
@@ -105,7 +117,9 @@ function extractRebasePlan(value: unknown): { summary: string; steps: string[] }
   if (!row) return null;
   const summary = asString(row.summary);
   if (summary === undefined) return null;
-  const steps = asArray(row.steps).map((s) => asString(s) ?? "").filter((s) => s.length > 0);
+  const steps = asArray(row.steps)
+    .map((s) => asString(s) ?? "")
+    .filter((s) => s.length > 0);
   return { summary, steps };
 }
 
@@ -189,7 +203,7 @@ function App() {
   const message = extractMessage(messageOut.data);
   const rebase = extractRebasePlan(rebaseOut.data);
   const diffRow = rowOf(diffOut.data);
-  const patch = diffRow ? asString(diffRow.patch) ?? "" : "";
+  const patch = diffRow ? (asString(diffRow.patch) ?? "") : "";
 
   const hasAny = status || log || message || rebase || patch.length > 0;
 
@@ -221,23 +235,43 @@ function App() {
       <header className="topbar">
         <div className="title-group">
           <h1>VCS</h1>
-          <span className="pill" data-testid="vcs-runid">{activeRunId ? shortRunId(activeRunId) : "No run"}</span>
+          <span className="pill" data-testid="vcs-runid">
+            {activeRunId ? shortRunId(activeRunId) : "No run"}
+          </span>
           {activeRun ? (
-            <span className={"badge " + statusClass(activeRun.status)} data-testid="vcs-status-badge">{activeRun.status ?? "idle"}</span>
+            <span className={"badge " + statusClass(activeRun.status)} data-testid="vcs-status-badge">
+              {activeRun.status ?? "idle"}
+            </span>
           ) : null}
         </div>
         <div className="toolbar">
-          <select className="select" data-testid="vcs-vcs" value={vcs} onChange={(e) => setVcs(e.currentTarget.value as "git" | "jj")}>
+          <select
+            className="select"
+            data-testid="vcs-vcs"
+            value={vcs}
+            onChange={(e) => setVcs(e.currentTarget.value as "git" | "jj")}
+          >
             <option value="git">git</option>
             <option value="jj">jj</option>
           </select>
-          <select className="select" data-testid="vcs-action" value={action} onChange={(e) => setAction(e.currentTarget.value as Action)}>
+          <select
+            className="select"
+            data-testid="vcs-action"
+            value={action}
+            onChange={(e) => setAction(e.currentTarget.value as Action)}
+          >
             {ACTIONS.map((a) => (
-              <option key={a} value={a}>{a}</option>
+              <option key={a} value={a}>
+                {a}
+              </option>
             ))}
           </select>
-          <button className="button" data-testid="vcs-refresh" onClick={() => void refresh()} disabled={busy}>Refresh</button>
-          <button className="button primary" data-testid="vcs-launch" onClick={() => void launch()} disabled={busy}>Run {action}</button>
+          <button className="button" data-testid="vcs-refresh" onClick={() => void refresh()} disabled={busy}>
+            Refresh
+          </button>
+          <button className="button primary" data-testid="vcs-launch" onClick={() => void launch()} disabled={busy}>
+            Run {action}
+          </button>
         </div>
       </header>
 
@@ -246,9 +280,14 @@ function App() {
           {status ? (
             <section className="panel" data-testid="vcs-status">
               <h2>Working tree</h2>
-              <div className="summary" data-testid="vcs-status-summary">{status.summary}</div>
+              <div className="summary" data-testid="vcs-status-summary">
+                {status.summary}
+              </div>
               {status.repo ? (
-                <div className="meta">{status.branch}{status.head ? " @ " + status.head : ""}</div>
+                <div className="meta">
+                  {status.branch}
+                  {status.head ? " @ " + status.head : ""}
+                </div>
               ) : null}
               {status.changes.map((c) => (
                 <div className="change" key={c.path} data-testid="vcs-change">
@@ -277,7 +316,11 @@ function App() {
             <section className="panel" data-testid="vcs-message">
               <h2>Commit message (drafted by agent)</h2>
               <div className="code">{message.message}</div>
-              {message.command ? <div className="meta" style={{ marginTop: 8 }}>{message.command}</div> : null}
+              {message.command ? (
+                <div className="meta" style={{ marginTop: 8 }}>
+                  {message.command}
+                </div>
+              ) : null}
             </section>
           ) : null}
 
@@ -311,7 +354,9 @@ function App() {
             </div>
           ) : null}
 
-          <div className="meta" style={{ marginTop: 4 }}>{eventCount} events</div>
+          <div className="meta" style={{ marginTop: 4 }}>
+            {eventCount} events
+          </div>
         </div>
 
         <aside className="sidebar">

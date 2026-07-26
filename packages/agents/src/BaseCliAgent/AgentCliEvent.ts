@@ -38,7 +38,4 @@ export type AgentCliCompletedEvent = {
   usage?: Record<string, unknown>;
 };
 
-export type AgentCliEvent =
-  | AgentCliStartedEvent
-  | AgentCliActionEvent
-  | AgentCliCompletedEvent;
+export type AgentCliEvent = AgentCliStartedEvent | AgentCliActionEvent | AgentCliCompletedEvent;

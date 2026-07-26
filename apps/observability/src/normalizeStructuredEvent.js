@@ -11,5 +11,5 @@ import { normalizeStructuredEventForFamily } from "./_traceEventNormalizers.js";
  * @returns {NormalizedTraceBatch}
  */
 export function normalizeStructuredEvent(agentFamily, parsed, rawType) {
-    return normalizeStructuredEventForFamily(agentFamily, parsed, rawType);
+  return normalizeStructuredEventForFamily(agentFamily, parsed, rawType);
 }

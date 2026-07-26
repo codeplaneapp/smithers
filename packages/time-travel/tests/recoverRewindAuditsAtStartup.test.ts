@@ -59,7 +59,11 @@ describe("recoverRewindAuditsAtStartup", () => {
     const { adapter, sqlite } = setupDb();
     try {
       let called = false;
-      await recoverRewindAuditsAtStartup(adapter, { onRecovered: () => { called = true; } });
+      await recoverRewindAuditsAtStartup(adapter, {
+        onRecovered: () => {
+          called = true;
+        },
+      });
       expect(called).toBe(false);
     } finally {
       sqlite.close();

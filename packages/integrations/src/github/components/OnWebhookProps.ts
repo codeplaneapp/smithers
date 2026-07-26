@@ -7,9 +7,7 @@ import type { z } from "zod";
  * `integration:github:<event>[.<action>]`, correlationId
  * `<repo>#<number>` | `<repo>` | none.
  */
-export type OnWebhookProps<
-  Schema extends z.ZodObject<z.ZodRawShape> = z.ZodObject<z.ZodRawShape>,
-> = {
+export type OnWebhookProps<Schema extends z.ZodObject<z.ZodRawShape> = z.ZodObject<z.ZodRawShape>> = {
   id: string;
   /** GitHub webhook event name, e.g. `pull_request`, `issues`, `push`. */
   event: string;
@@ -36,6 +34,7 @@ export type OnWebhookProps<
 };
 
 /** Sugar-listener props: everything generic except `event`/`action`/`schema`. */
-export type GitHubSugarListenerProps<
-  Schema extends z.ZodObject<z.ZodRawShape> = z.ZodObject<z.ZodRawShape>,
-> = Omit<OnWebhookProps<Schema>, "event">;
+export type GitHubSugarListenerProps<Schema extends z.ZodObject<z.ZodRawShape> = z.ZodObject<z.ZodRawShape>> = Omit<
+  OnWebhookProps<Schema>,
+  "event"
+>;

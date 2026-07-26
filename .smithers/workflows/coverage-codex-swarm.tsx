@@ -9,7 +9,7 @@ import { z } from "zod/v4";
 import { agents } from "../agents";
 
 const packageStats = [
-  { path: "packages/db", lines: 83.57, functions: 81.10 },
+  { path: "packages/db", lines: 83.57, functions: 81.1 },
   { path: "packages/server", lines: 56.79, functions: 72.06 },
   { path: "packages/gateway-react", lines: 91.67, functions: 87.75 },
   { path: "packages/time-travel", lines: 90.93, functions: 87.56 },
@@ -20,20 +20,22 @@ const packageStats = [
   { path: "packages/usage", lines: 87.43, functions: 94.23 },
 ] as const;
 
-const inputSchema = z.object({
-  coverageThreshold: z.number().min(0).max(100).optional(),
-  n: z.number().min(0).max(100).optional(),
-  maxConcurrency: z.number().int().min(1).max(8).default(4),
-  packages: z.array(z.string()).optional(),
-  packageInstructions: z.record(z.string(), z.string()).optional(),
-  includeAlreadyCovered: z.boolean().default(false),
-}).superRefine((input, ctx) => {
-  for (const requested of input.packages ?? []) {
-    if (!packageStats.some((item) => item.path === requested)) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["packages"], message: `Unknown package: ${requested}` });
+const inputSchema = z
+  .object({
+    coverageThreshold: z.number().min(0).max(100).optional(),
+    n: z.number().min(0).max(100).optional(),
+    maxConcurrency: z.number().int().min(1).max(8).default(4),
+    packages: z.array(z.string()).optional(),
+    packageInstructions: z.record(z.string(), z.string()).optional(),
+    includeAlreadyCovered: z.boolean().default(false),
+  })
+  .superRefine((input, ctx) => {
+    for (const requested of input.packages ?? []) {
+      if (!packageStats.some((item) => item.path === requested)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["packages"], message: `Unknown package: ${requested}` });
+      }
     }
-  }
-});
+  });
 
 const coverageResultSchema = z.object({
   package: z.string(),
@@ -60,7 +62,11 @@ function slugify(value: string) {
     .slice(0, 60);
 }
 
-function promptForCoverageTarget(item: (typeof packageStats)[number], targetPercent: number, extraInstructions?: string) {
+function promptForCoverageTarget(
+  item: (typeof packageStats)[number],
+  targetPercent: number,
+  extraInstructions?: string,
+) {
   return `/goal Raise test coverage for ${item.path} to at least ${targetPercent}% lines and ${targetPercent}% functions.
 
 Context:

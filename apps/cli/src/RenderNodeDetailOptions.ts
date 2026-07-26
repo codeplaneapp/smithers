@@ -1,4 +1,4 @@
 export type RenderNodeDetailOptions = {
-    expandAttempts: boolean;
-    expandTools: boolean;
+  expandAttempts: boolean;
+  expandTools: boolean;
 };

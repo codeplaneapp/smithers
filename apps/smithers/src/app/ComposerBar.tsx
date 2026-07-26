@@ -43,9 +43,7 @@ export function ComposerBar() {
     const layoutSlash = raw.match(/^\/(sidebar|rail|dock|full|normal)$/i);
     if (layoutSlash) {
       const keyword = layoutSlash[1].toLowerCase();
-      usePreferencesStore
-        .getState()
-        .setLayout(keyword === "sidebar" || keyword === "rail" ? "sidebar" : "normal");
+      usePreferencesStore.getState().setLayout(keyword === "sidebar" || keyword === "rail" ? "sidebar" : "normal");
       chat.setQuery("");
       return;
     }

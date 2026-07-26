@@ -69,9 +69,7 @@ export class HermesCliAgent extends BaseCliAgent {
         return [{ type: "started", engine: this.cliEngine, title: "Hermes" }];
       },
       onExit: (result) => {
-        const started = !emittedStarted
-          ? [{ type: "started", engine: this.cliEngine, title: "Hermes" }]
-          : [];
+        const started = !emittedStarted ? [{ type: "started", engine: this.cliEngine, title: "Hermes" }] : [];
         return [
           ...started,
           {
@@ -102,8 +100,7 @@ export class HermesCliAgent extends BaseCliAgent {
     // Resume: a per-call resumeSession wins over the configured continueSession.
     // `-r <session>` resumes a specific session id; `-c [name]` continues the
     // most recent (or a named) session.
-    const resumeSession =
-      typeof params.options?.resumeSession === "string" ? params.options.resumeSession : undefined;
+    const resumeSession = typeof params.options?.resumeSession === "string" ? params.options.resumeSession : undefined;
     if (resumeSession) {
       pushFlag(args, "-r", resumeSession);
     } else if (typeof this.opts.continueSession === "string") {

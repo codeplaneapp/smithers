@@ -37,8 +37,9 @@ describe("Pi SDK package scope", () => {
     const combinedSource = sources.join("\n");
 
     expect(combinedSource).not.toContain("@mariozechner/");
-    expect(readFileSync(join(packageRoot, "src/extension.ts"), "utf8"))
-      .toContain('from "@earendil-works/pi-coding-agent"');
+    expect(readFileSync(join(packageRoot, "src/extension.ts"), "utf8")).toContain(
+      'from "@earendil-works/pi-coding-agent"',
+    );
     for (const path of [
       "src/extension.ts",
       "src/views/FrameScrubber.ts",
@@ -47,16 +48,17 @@ describe("Pi SDK package scope", () => {
       "src/views/RunInspector.ts",
       "src/views/RunTree.ts",
     ]) {
-      expect(readFileSync(join(packageRoot, path), "utf8"))
-        .toContain('from "@earendil-works/pi-tui"');
+      expect(readFileSync(join(packageRoot, path), "utf8")).toContain('from "@earendil-works/pi-tui"');
     }
   });
 
   test("uses the SDK exports directly instead of local compatibility shims", () => {
-    expect(sourceFiles(join(packageRoot, "src")).map((path) => path.replace(`${packageRoot}/`, "")))
-      .not.toContain("src/piSdk.d.ts");
-    expect(sourceFiles(join(packageRoot, "src")).map((path) => path.replace(`${packageRoot}/`, "")))
-      .not.toContain("src/piTui.ts");
+    expect(sourceFiles(join(packageRoot, "src")).map((path) => path.replace(`${packageRoot}/`, ""))).not.toContain(
+      "src/piSdk.d.ts",
+    );
+    expect(sourceFiles(join(packageRoot, "src")).map((path) => path.replace(`${packageRoot}/`, ""))).not.toContain(
+      "src/piTui.ts",
+    );
 
     const extension = readFileSync(join(packageRoot, "src/extension.ts"), "utf8");
     expect(extension).toContain('import { Text } from "@earendil-works/pi-tui"');

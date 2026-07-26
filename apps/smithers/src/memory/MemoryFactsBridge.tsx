@@ -80,9 +80,8 @@ export function MemoryFactsBridge() {
       // surface's own pure validators): a namespace/fact that vanished from the
       // live store can never strand the UI on an empty view.
       const namespaceFilter = validatedFilter(state.namespaceFilter, facts);
-      const selectedFactId = state.selectedFactId && facts.some((fact) => fact.id === state.selectedFactId)
-        ? state.selectedFactId
-        : null;
+      const selectedFactId =
+        state.selectedFactId && facts.some((fact) => fact.id === state.selectedFactId) ? state.selectedFactId : null;
       return { facts, namespaceFilter, selectedFactId };
     });
   }, [data]);

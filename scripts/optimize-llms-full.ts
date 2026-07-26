@@ -28,9 +28,7 @@ import { dirname, resolve } from "node:path";
 import { createVersionedArtifactGuard } from "./llms-version-guard.ts";
 
 const TARGET = resolve(import.meta.dir, "../docs/llms-full.txt");
-const PACKAGE_VERSION = JSON.parse(
-  readFileSync(resolve(import.meta.dir, "../package.json"), "utf8"),
-).version;
+const PACKAGE_VERSION = JSON.parse(readFileSync(resolve(import.meta.dir, "../package.json"), "utf8")).version;
 const VERSIONED_MIRROR = resolve(import.meta.dir, `../docs/llms-full-v${PACKAGE_VERSION}.txt`);
 const MIRRORS = [
   resolve(import.meta.dir, "../skills/smithers/llms-full.txt"),
@@ -51,20 +49,10 @@ let text = before;
 // "## Related", "## See Also". These run until the next "## " heading,
 // the next "---" page separator, or end-of-file.
 {
-  const NAV_HEADINGS = [
-    "Next Steps",
-    "Next steps",
-    "Read Next",
-    "Related",
-    "See Also",
-    "See also",
-  ];
+  const NAV_HEADINGS = ["Next Steps", "Next steps", "Read Next", "Related", "See Also", "See also"];
   const headingAlt = NAV_HEADINGS.map((h) => h.replace(/ /g, "\\s+")).join("|");
   // Match: heading line + everything until the next ## heading or --- separator.
-  const re = new RegExp(
-    String.raw`(^|\n)##\s+(?:${headingAlt})\s*\n[\s\S]*?(?=\n##\s|\n---\s*\n|$)`,
-    "g",
-  );
+  const re = new RegExp(String.raw`(^|\n)##\s+(?:${headingAlt})\s*\n[\s\S]*?(?=\n##\s|\n---\s*\n|$)`, "g");
   text = text.replace(re, (_m, lead) => lead);
 }
 
@@ -139,53 +127,50 @@ text = text.replace(/\n{4,}/g, "\n\n\n");
 //
 // Keep the first (canonical) line and at most one combined-flag variant
 // (the one with the most flags). Drop the rest.
-text = text.replace(
-  /```bash\n([\s\S]*?)\n```/g,
-  (full, body: string) => {
-    const lines = body.split("\n").filter((l) => l.trim().length > 0);
-    if (lines.length < 4) return full;
-    // Group consecutive lines that share the same first 3 tokens (e.g.
-    // "bunx smithers-orchestrator ps").
-    const groups: string[][] = [];
-    let cur: string[] = [];
-    let curKey = "";
-    for (const line of lines) {
-      const key = line.trim().split(/\s+/).slice(0, 3).join(" ");
-      if (key === curKey) {
-        cur.push(line);
-      } else {
-        if (cur.length) groups.push(cur);
-        cur = [line];
-        curKey = key;
-      }
+text = text.replace(/```bash\n([\s\S]*?)\n```/g, (full, body: string) => {
+  const lines = body.split("\n").filter((l) => l.trim().length > 0);
+  if (lines.length < 4) return full;
+  // Group consecutive lines that share the same first 3 tokens (e.g.
+  // "bunx smithers-orchestrator ps").
+  const groups: string[][] = [];
+  let cur: string[] = [];
+  let curKey = "";
+  for (const line of lines) {
+    const key = line.trim().split(/\s+/).slice(0, 3).join(" ");
+    if (key === curKey) {
+      cur.push(line);
+    } else {
+      if (cur.length) groups.push(cur);
+      cur = [line];
+      curKey = key;
     }
-    if (cur.length) groups.push(cur);
+  }
+  if (cur.length) groups.push(cur);
 
-    const kept: string[] = [];
-    let collapsed = false;
-    for (const g of groups) {
-      if (g.length <= 2) {
-        kept.push(...g);
-      } else {
-        // Keep first (canonical) and the line with the most --flags.
-        const first = g[0];
-        let best = g[1];
-        let bestFlags = (best.match(/--/g) ?? []).length;
-        for (let i = 2; i < g.length; i++) {
-          const f = (g[i].match(/--/g) ?? []).length;
-          if (f > bestFlags) {
-            best = g[i];
-            bestFlags = f;
-          }
+  const kept: string[] = [];
+  let collapsed = false;
+  for (const g of groups) {
+    if (g.length <= 2) {
+      kept.push(...g);
+    } else {
+      // Keep first (canonical) and the line with the most --flags.
+      const first = g[0];
+      let best = g[1];
+      let bestFlags = (best.match(/--/g) ?? []).length;
+      for (let i = 2; i < g.length; i++) {
+        const f = (g[i].match(/--/g) ?? []).length;
+        if (f > bestFlags) {
+          best = g[i];
+          bestFlags = f;
         }
-        kept.push(first, best);
-        collapsed = true;
       }
+      kept.push(first, best);
+      collapsed = true;
     }
-    if (!collapsed) return full;
-    return "```bash\n" + kept.join("\n") + "\n```";
-  },
-);
+  }
+  if (!collapsed) return full;
+  return "```bash\n" + kept.join("\n") + "\n```";
+});
 
 // --- 6. Strip repeated JSX pragma comments after first occurrence -----------
 {
@@ -241,9 +226,7 @@ text = text.replace(
     }
     const followingHeader = k < lines.length ? lines[k] : "";
     const followingDivider = k + 1 < lines.length ? lines[k + 1] : "";
-    const isTableHeader =
-      /^\|.*\|\s*$/.test(followingHeader) &&
-      /^\|[-:|\s]+\|\s*$/.test(followingDivider);
+    const isTableHeader = /^\|.*\|\s*$/.test(followingHeader) && /^\|[-:|\s]+\|\s*$/.test(followingDivider);
     // Decide whether to drop the ts block.
     let drop = false;
     if (isTableHeader) {
@@ -255,16 +238,9 @@ text = text.replace(
         .map((c) => c.trim())
         .filter(Boolean);
       const firstCell = headerCells[0]?.toLowerCase() ?? "";
-      const isFieldTable = [
-        "field",
-        "prop",
-        "field / method",
-        "value",
-        "event",
-        "code",
-        "key",
-        "option",
-      ].some((k) => firstCell.startsWith(k));
+      const isFieldTable = ["field", "prop", "field / method", "value", "event", "code", "key", "option"].some((k) =>
+        firstCell.startsWith(k),
+      );
       // Skip dedupe for literal-string union types when the table is a 2-col
       // value/description table — the union form is denser.
       const body = bodyLines.join("\n");
@@ -333,9 +309,7 @@ text = text.replace(
           out.push(
             "Verbatim source files for seeded workflows, plugin manifests, and CI configuration are not duplicated here.",
           );
-          out.push(
-            "After `bunx smithers-orchestrator init`, browse `.smithers/` for live copies.",
-          );
+          out.push("After `bunx smithers-orchestrator init`, browse `.smithers/` for live copies.");
           out.push(
             "For repo-level files (`AGENTS.md`, `.github/workflows/ci.yml`, `~/.claude/plugins/smithers-orchestrator/`, etc.) see the source repository at github.com/smithersai/smithers.",
           );
@@ -379,15 +353,12 @@ text = text.replace(
 // link text.
 {
   const seen = new Set<string>();
-  text = text.replace(
-    /\[([^\]\n]+?)\]\((https?:\/\/[^)\n\s]+)\)/g,
-    (full, label: string, url: string) => {
-      const key = url;
-      if (seen.has(key)) return label;
-      seen.add(key);
-      return full;
-    },
-  );
+  text = text.replace(/\[([^\]\n]+?)\]\((https?:\/\/[^)\n\s]+)\)/g, (full, label: string, url: string) => {
+    const key = url;
+    if (seen.has(key)) return label;
+    seen.add(key);
+    return full;
+  });
 }
 
 // Final tidy: re-collapse adjacent --- separators (Ghost replacement may have
@@ -427,8 +398,12 @@ const beforeTokens = Math.round(beforeBytes / 4);
 const afterTokens = Math.round(afterBytes / 4);
 const pct = (((beforeBytes - afterBytes) / beforeBytes) * 100).toFixed(1);
 console.log(`docs/llms-full.txt`);
-console.log(`  bytes:  ${beforeBytes.toLocaleString()} -> ${afterBytes.toLocaleString()}  (-${(beforeBytes - afterBytes).toLocaleString()}, -${pct}%)`);
-console.log(`  ~tokens: ${beforeTokens.toLocaleString()} -> ${afterTokens.toLocaleString()}  (-${(beforeTokens - afterTokens).toLocaleString()})`);
+console.log(
+  `  bytes:  ${beforeBytes.toLocaleString()} -> ${afterBytes.toLocaleString()}  (-${(beforeBytes - afterBytes).toLocaleString()}, -${pct}%)`,
+);
+console.log(
+  `  ~tokens: ${beforeTokens.toLocaleString()} -> ${afterTokens.toLocaleString()}  (-${(beforeTokens - afterTokens).toLocaleString()})`,
+);
 for (const mirror of MIRRORS) {
   console.log(`  mirrored: ${mirror.replace(resolve(import.meta.dir, "..") + "/", "")}`);
 }

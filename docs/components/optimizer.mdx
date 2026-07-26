@@ -81,36 +81,60 @@ import { useOptionalSmithersContext } from "./useOptionalSmithersContext.js";
  * @param {OptimizerProps} props
  */
 export function Optimizer(props) {
-    if (props.skipIf)
-        return null;
-    const { id, generator, evaluator, generateOutput, evaluateOutput, targetScore, maxIterations = 10, onMaxReached = "return-last", children, } = props;
-    const prefix = id ?? "optimizer";
-    const generateId = `${prefix}-generate`;
-    const evaluateId = `${prefix}-evaluate`;
-    const ctx = useOptionalSmithersContext();
-    // Read the most recent evaluation for both the convergence check and to feed
-    // the previous score/feedback back into the next generation prompt.
-    const latestEvaluation = ctx?.latest?.(evaluateOutput, evaluateId);
-    const score = typeof latestEvaluation?.score === "number" ? latestEvaluation.score : undefined;
-    const converged = targetScore != null && score != null && score >= targetScore;
-    const isAgentEvaluator = typeof evaluator !== "function";
-    // On iterations after the first, fold the prior score and feedback into the
-    // generator's prompt so it improves rather than regenerates from scratch.
-    const priorEval = score != null ? latestEvaluation : undefined;
-    const generateChildren = priorEval
-        ? React.createElement(React.Fragment, null, children, "\n\nPrevious attempt score: ", String(score), ". Improve on it using this feedback:\n", JSON.stringify(priorEval))
-        : children;
-    return React.createElement(Loop, {
-        id: prefix,
-        until: converged,
-        maxIterations,
-        onMaxReached,
-    }, React.createElement(Sequence, null, React.createElement(Task, {
+  if (props.skipIf) return null;
+  const {
+    id,
+    generator,
+    evaluator,
+    generateOutput,
+    evaluateOutput,
+    targetScore,
+    maxIterations = 10,
+    onMaxReached = "return-last",
+    children,
+  } = props;
+  const prefix = id ?? "optimizer";
+  const generateId = `${prefix}-generate`;
+  const evaluateId = `${prefix}-evaluate`;
+  const ctx = useOptionalSmithersContext();
+  // Read the most recent evaluation for both the convergence check and to feed
+  // the previous score/feedback back into the next generation prompt.
+  const latestEvaluation = ctx?.latest?.(evaluateOutput, evaluateId);
+  const score = typeof latestEvaluation?.score === "number" ? latestEvaluation.score : undefined;
+  const converged = targetScore != null && score != null && score >= targetScore;
+  const isAgentEvaluator = typeof evaluator !== "function";
+  // On iterations after the first, fold the prior score and feedback into the
+  // generator's prompt so it improves rather than regenerates from scratch.
+  const priorEval = score != null ? latestEvaluation : undefined;
+  const generateChildren = priorEval
+    ? React.createElement(
+        React.Fragment,
+        null,
+        children,
+        "\n\nPrevious attempt score: ",
+        String(score),
+        ". Improve on it using this feedback:\n",
+        JSON.stringify(priorEval),
+      )
+    : children;
+  return React.createElement(
+    Loop,
+    {
+      id: prefix,
+      until: converged,
+      maxIterations,
+      onMaxReached,
+    },
+    React.createElement(
+      Sequence,
+      null,
+      React.createElement(Task, {
         id: generateId,
         output: generateOutput,
         agent: generator,
         children: generateChildren,
-    }), isAgentEvaluator
+      }),
+      isAgentEvaluator
         ? React.createElement(Task, {
             id: evaluateId,
             output: evaluateOutput,
@@ -119,14 +143,17 @@ export function Optimizer(props) {
             // resolves the candidate into its prompt (needs alone injects nothing).
             needs: { candidate: generateId },
             deps: { candidate: generateOutput },
-            children: (d) => `Evaluate the generated candidate and provide a score.\n\nCandidate:\n${JSON.stringify(d.candidate ?? "(no candidate)")}`,
-        })
+            children: (d) =>
+              `Evaluate the generated candidate and provide a score.\n\nCandidate:\n${JSON.stringify(d.candidate ?? "(no candidate)")}`,
+          })
         : React.createElement(Task, {
             id: evaluateId,
             output: evaluateOutput,
             needs: { candidate: generateId },
             children: evaluator,
-        })));
+          }),
+    ),
+  );
 }
 ```
 
@@ -142,18 +169,17 @@ import React from "react";
  * @param {LoopProps} props
  */
 export function Loop(props) {
-    if (props.skipIf)
-        return null;
-    // Sanitize to the loop's host props (align with other structural components);
-    // key/skipIf are React/control props and children are passed separately.
-    const next = {
-        id: props.id,
-        until: props.until,
-        maxIterations: props.maxIterations,
-        onMaxReached: props.onMaxReached,
-        continueAsNewEvery: props.continueAsNewEvery,
-    };
-    return React.createElement("smithers:ralph", next, props.children);
+  if (props.skipIf) return null;
+  // Sanitize to the loop's host props (align with other structural components);
+  // key/skipIf are React/control props and children are passed separately.
+  const next = {
+    id: props.id,
+    until: props.until,
+    maxIterations: props.maxIterations,
+    onMaxReached: props.onMaxReached,
+    continueAsNewEvery: props.continueAsNewEvery,
+  };
+  return React.createElement("smithers:ralph", next, props.children);
 }
 /** @deprecated Use `Loop` instead. */
 export const Ralph = Loop;
@@ -167,17 +193,16 @@ import React from "react";
  * @param {SequenceProps} props
  */
 export function Sequence(props) {
-    if (props.skipIf)
-        return null;
-    // Sequence carries only a display label; pass a sanitized bag (align with
-    // the sanitizing structural components) so control props don't leak through.
-    // `label` names the phase group in run views (graph, the Claude /workflows
-    // mirror) and is preserved in the persisted frame XML.
-    const next = {
-        ...(props.label === undefined ? {} : { label: props.label }),
-        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
-    };
-    return React.createElement("smithers:sequence", next, props.children);
+  if (props.skipIf) return null;
+  // Sequence carries only a display label; pass a sanitized bag (align with
+  // the sanitizing structural components) so control props don't leak through.
+  // `label` names the phase group in run views (graph, the Claude /workflows
+  // mirror) and is preserved in the persisted frame XML.
+  const next = {
+    ...(props.label === undefined ? {} : { label: props.label }),
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+  };
+  return React.createElement("smithers:sequence", next, props.children);
 }
 ```
 
@@ -219,16 +244,15 @@ import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context
  * error; treating it as "no context yet" preserves the static element shape.
  */
 export function useOptionalSmithersContext() {
-    try {
-        return React.useContext(SmithersContext);
+  try {
+    return React.useContext(SmithersContext);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/Invalid hook call|dispatcher\.useContext|useContext/i.test(message)) {
+      return null;
     }
-    catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (/Invalid hook call|dispatcher\.useContext|useContext/i.test(message)) {
-            return null;
-        }
-        throw error;
-    }
+    throw error;
+  }
 }
 ```
 
@@ -238,25 +262,25 @@ import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type OptimizerProps = {
-	id?: string;
-	/** Agent that generates or improves candidates each iteration. */
-	generator: AgentLike;
-	/** Agent (or compute function) that scores candidates. */
-	evaluator: AgentLike | ((candidate: unknown) => unknown | Promise<unknown>);
-	/** Output schema for generated candidates. */
-	generateOutput: OutputTarget;
-	/** Output schema for evaluation results. Must include a `score: number` field. */
-	evaluateOutput: OutputTarget;
-	/** Score threshold to stop early. When omitted, runs all iterations. */
-	targetScore?: number;
-	/** Maximum optimization rounds. @default 10 */
-	maxIterations?: number;
-	/** Behavior when maxIterations is reached. @default "return-last" */
-	onMaxReached?: "return-last" | "fail";
-	/** Skip the entire optimization loop. */
-	skipIf?: boolean;
-	/** Initial generation prompt (string or ReactNode). */
-	children: string | React.ReactNode;
+  id?: string;
+  /** Agent that generates or improves candidates each iteration. */
+  generator: AgentLike;
+  /** Agent (or compute function) that scores candidates. */
+  evaluator: AgentLike | ((candidate: unknown) => unknown | Promise<unknown>);
+  /** Output schema for generated candidates. */
+  generateOutput: OutputTarget;
+  /** Output schema for evaluation results. Must include a `score: number` field. */
+  evaluateOutput: OutputTarget;
+  /** Score threshold to stop early. When omitted, runs all iterations. */
+  targetScore?: number;
+  /** Maximum optimization rounds. @default 10 */
+  maxIterations?: number;
+  /** Behavior when maxIterations is reached. @default "return-last" */
+  onMaxReached?: "return-last" | "fail";
+  /** Skip the entire optimization loop. */
+  skipIf?: boolean;
+  /** Initial generation prompt (string or ReactNode). */
+  children: string | React.ReactNode;
 };
 ```
 </CodeGroup>

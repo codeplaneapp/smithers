@@ -13,8 +13,8 @@
  * @returns {Promise<UsageProbe>}
  */
 export async function googleUsage(account) {
-    return {
-        source: "none",
-        error: "Google exposes no live usage endpoint; local estimate not yet wired",
-    };
+  return {
+    source: "none",
+    error: "Google exposes no live usage endpoint; local estimate not yet wired",
+  };
 }

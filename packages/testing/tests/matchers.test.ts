@@ -4,12 +4,7 @@ import React from "react";
 import { z } from "zod";
 import { createSmithers } from "smithers-orchestrator";
 import { fakeAgent, simulate } from "../src/index.ts";
-import {
-  simMatchers,
-  toHaveExecuted,
-  toHaveExecutedInOrder,
-  toHaveFinished,
-} from "../src/matchers.ts";
+import { simMatchers, toHaveExecuted, toHaveExecutedInOrder, toHaveFinished } from "../src/matchers.ts";
 
 const schemas = {
   input: z.object({
@@ -38,11 +33,9 @@ function buildWorkflow() {
         { id: "greet", output: outputs.greeting, agent: realAgent, noRetry: true },
         `Greet ${ctx.input.name}`,
       ),
-      React.createElement(
-        Task,
-        { id: "reply", output: outputs.reply, dependsOn: ["greet"] },
-        () => ({ text: `done ${ctx.input.name}` }),
-      ),
+      React.createElement(Task, { id: "reply", output: outputs.reply, dependsOn: ["greet"] }, () => ({
+        text: `done ${ctx.input.name}`,
+      })),
     ),
   );
 }

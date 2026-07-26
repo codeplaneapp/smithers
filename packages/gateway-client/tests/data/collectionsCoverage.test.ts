@@ -28,9 +28,8 @@ const multiplayerMode = {
 // tests already ran a successful load() on the shared instance.
 describe("smithersElectricCollectionOptions preload guard", () => {
   test("building an Electric collection before preload throws", async () => {
-    const fresh = (await import(
-      "../../src/data/smithersElectricCollectionOptions.ts?preload-guard"
-    )) as typeof import("../../src/data/smithersElectricCollectionOptions.ts");
+    const fresh =
+      (await import("../../src/data/smithersElectricCollectionOptions.ts?preload-guard")) as typeof import("../../src/data/smithersElectricCollectionOptions.ts");
     expect(() =>
       fresh.smithersElectricCollectionOptions<{ cronId: string }>({
         id: "before-preload",
@@ -166,9 +165,9 @@ describe("smithersElectricCollectionOptions builder", () => {
 
 describe("smithersElectricCollectionOptions dependency guard", () => {
   test("load() throws when the dependency does not export electricCollectionOptions", async () => {
-    await expect(
-      smithersElectricCollectionOptions.load(async () => ({}) as unknown),
-    ).rejects.toThrow(/did not export electricCollectionOptions/);
+    await expect(smithersElectricCollectionOptions.load(async () => ({}) as unknown)).rejects.toThrow(
+      /did not export electricCollectionOptions/,
+    );
   });
 
   test("load() with an injected importer resolves the exported loader without touching the cache", async () => {
@@ -206,15 +205,13 @@ describe("createSmithersCollections multiplayer shape mapping", () => {
       { load: async () => {} },
     ) as unknown as Awaited<ReturnType<typeof smithersElectricCollectionOptions.load>> & { load: () => Promise<void> };
 
-    const collections = await (createSmithersCollections as unknown as (
-      mode: typeof multiplayerMode,
-      qc: QueryClient,
-      load: () => Promise<typeof fakeElectric>,
-    ) => Promise<ReturnType<typeof createSmithersCollections> extends Promise<infer R> ? R : never>)(
-      multiplayerMode,
-      queryClient,
-      async () => fakeElectric,
-    );
+    const collections = await (
+      createSmithersCollections as unknown as (
+        mode: typeof multiplayerMode,
+        qc: QueryClient,
+        load: () => Promise<typeof fakeElectric>,
+      ) => Promise<ReturnType<typeof createSmithersCollections> extends Promise<infer R> ? R : never>
+    )(multiplayerMode, queryClient, async () => fakeElectric);
 
     collections.runs();
     collections.run("run-1");
@@ -244,11 +241,13 @@ describe("createSmithersCollections multiplayer load failure", () => {
     // Passing a mode makes the collections own the client; the rejecting loader
     // drives the catch that closes that client before rethrowing.
     await expect(
-      (createSmithersCollections as unknown as (
-        mode: typeof multiplayerMode,
-        qc: QueryClient,
-        load: () => Promise<never>,
-      ) => Promise<unknown>)(multiplayerMode, queryClient, failingLoader),
+      (
+        createSmithersCollections as unknown as (
+          mode: typeof multiplayerMode,
+          qc: QueryClient,
+          load: () => Promise<never>,
+        ) => Promise<unknown>
+      )(multiplayerMode, queryClient, failingLoader),
     ).rejects.toThrow(/electric load boom/);
     queryClient.clear();
   });

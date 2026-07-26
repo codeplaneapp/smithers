@@ -87,9 +87,7 @@ function expandWorkspacePattern(pattern) {
 }
 
 function readWorkspaceTestPackages() {
-  const rootPackage = JSON.parse(
-    readFileSync(path.join(root, "package.json"), "utf8"),
-  );
+  const rootPackage = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
   const workspacePatterns = rootPackage.workspaces ?? [];
   const packageDirectories = workspacePatterns.flatMap(expandWorkspacePattern);
 
@@ -140,22 +138,16 @@ function shardPackages(packages, totalShards) {
   }));
 
   for (const pkg of [...packages].sort((left, right) => {
-    const weightDelta =
-      (packageWeights.get(right.directory) ?? 1) -
-      (packageWeights.get(left.directory) ?? 1);
+    const weightDelta = (packageWeights.get(right.directory) ?? 1) - (packageWeights.get(left.directory) ?? 1);
     return weightDelta || left.directory.localeCompare(right.directory);
   })) {
-    const target = shards.reduce((best, candidate) =>
-      candidate.weight < best.weight ? candidate : best,
-    );
+    const target = shards.reduce((best, candidate) => (candidate.weight < best.weight ? candidate : best));
     target.packages.push(pkg);
     target.weight += packageWeights.get(pkg.directory) ?? 1;
   }
 
   for (const shard of shards) {
-    shard.packages.sort((left, right) =>
-      left.directory.localeCompare(right.directory),
-    );
+    shard.packages.sort((left, right) => left.directory.localeCompare(right.directory));
   }
 
   return shards;
@@ -197,9 +189,7 @@ function runPackageTest(pkg, timeoutMinutes) {
         stdio: "inherit",
       });
     } catch (error) {
-      console.error(
-        `::error title=Package test failed::${pkg.directory} could not start: ${error.message}`,
-      );
+      console.error(`::error title=Package test failed::${pkg.directory} could not start: ${error.message}`);
       resolve({ pkg, status: "failed to start", elapsedSeconds: "0.0" });
       return;
     }
@@ -217,9 +207,7 @@ function runPackageTest(pkg, timeoutMinutes) {
         return;
       }
       timedOut = true;
-      console.error(
-        `::error title=Package test timed out::${pkg.directory} exceeded ${timeoutMinutes} minutes`,
-      );
+      console.error(`::error title=Package test timed out::${pkg.directory} exceeded ${timeoutMinutes} minutes`);
       killProcessTree(child, "SIGTERM");
 
       if (process.platform !== "win32") {
@@ -242,9 +230,7 @@ function runPackageTest(pkg, timeoutMinutes) {
       settled = true;
       clearTimers();
       const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
-      console.error(
-        `::error title=Package test failed::${pkg.directory} could not start: ${error.message}`,
-      );
+      console.error(`::error title=Package test failed::${pkg.directory} could not start: ${error.message}`);
       resolve({ pkg, status: "failed to start", elapsedSeconds });
     });
 
@@ -261,9 +247,7 @@ function runPackageTest(pkg, timeoutMinutes) {
         console.log(`=== ${pkg.directory} passed in ${elapsedSeconds}s ===`);
         resolve({ pkg, status: "passed", elapsedSeconds });
       } else {
-        console.error(
-          `::error title=Package test failed::${pkg.directory} exited with ${signal ?? code}`,
-        );
+        console.error(`::error title=Package test failed::${pkg.directory} exited with ${signal ?? code}`);
         resolve({ pkg, status: `failed (${signal ?? code})`, elapsedSeconds });
       }
     });
@@ -271,9 +255,7 @@ function runPackageTest(pkg, timeoutMinutes) {
 }
 
 const options = parseArgs(process.argv.slice(2));
-const packages = readWorkspaceTestPackages().filter(
-  (pkg) => !options.exclude.has(pkg.directory),
-);
+const packages = readWorkspaceTestPackages().filter((pkg) => !options.exclude.has(pkg.directory));
 const shards = shardPackages(packages, options.totalShards);
 const selectedPackages = shards[options.shard - 1].packages;
 
@@ -281,11 +263,7 @@ console.log(
   `Running workspace test shard ${options.shard}/${options.totalShards} with ${selectedPackages.length}/${packages.length} packages`,
 );
 for (const [index, shard] of shards.entries()) {
-  console.log(
-    `Shard ${index + 1}: ${shard.packages
-      .map((pkg) => pkg.directory)
-      .join(", ")}`,
-  );
+  console.log(`Shard ${index + 1}: ${shard.packages.map((pkg) => pkg.directory).join(", ")}`);
 }
 
 if (options.listOnly) {
@@ -300,9 +278,7 @@ for (const pkg of selectedPackages) {
 const failures = results.filter((result) => result.status !== "passed");
 console.log("\nWorkspace test shard summary:");
 for (const result of results) {
-  console.log(
-    `${result.status.padEnd(12)} ${result.elapsedSeconds.padStart(6)}s ${result.pkg.directory}`,
-  );
+  console.log(`${result.status.padEnd(12)} ${result.elapsedSeconds.padStart(6)}s ${result.pkg.directory}`);
 }
 
 if (failures.length > 0) {

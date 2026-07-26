@@ -32,9 +32,7 @@ function positiveInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
 }
 
-type PullRequestResolution =
-  | { ok: true; pr: number }
-  | { ok: false; message: string };
+type PullRequestResolution = { ok: true; pr: number } | { ok: false; message: string };
 
 function resolveOidcPullRequestNumber(
   claims: { ref?: string; event_name?: string; pull_request?: { number?: number } },

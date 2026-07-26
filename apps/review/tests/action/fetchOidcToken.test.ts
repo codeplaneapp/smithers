@@ -18,9 +18,9 @@ describe("fetchOidcToken", () => {
   });
 
   test("throws when only REQUEST_URL is set", async () => {
-    await expect(
-      fetchOidcToken({ env: { ACTIONS_ID_TOKEN_REQUEST_URL: "http://example.invalid" } }),
-    ).rejects.toThrow("ACTIONS_ID_TOKEN_REQUEST_TOKEN");
+    await expect(fetchOidcToken({ env: { ACTIONS_ID_TOKEN_REQUEST_URL: "http://example.invalid" } })).rejects.toThrow(
+      "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    );
   });
 
   test("makes a real HTTP request and returns the token value", async () => {

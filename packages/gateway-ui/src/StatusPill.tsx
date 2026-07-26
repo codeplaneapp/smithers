@@ -28,10 +28,7 @@ export function StatusPill({ status, label, className, style }: StatusPillProps)
         ...style,
       }}
     >
-      <span
-        aria-hidden
-        className="gw-status-pill-dot"
-      />
+      <span aria-hidden className="gw-status-pill-dot" />
       {text}
     </span>
   );

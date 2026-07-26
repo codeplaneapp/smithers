@@ -4,7 +4,10 @@
 // etc.) that would defeat the point of a bundle importable by a browser
 // fixture. This module only ever imports `@smithers-orchestrator/driver`
 // subpaths, which are themselves runtime-portable.
-import { RuntimeCapabilityError, RUNTIME_CAPABILITY_UNAVAILABLE } from "@smithers-orchestrator/driver/RuntimeCapabilityError";
+import {
+  RuntimeCapabilityError,
+  RUNTIME_CAPABILITY_UNAVAILABLE,
+} from "@smithers-orchestrator/driver/RuntimeCapabilityError";
 
 export type BrowserConformanceSmithers = {
   run(options?: { runId?: string; input?: unknown; signal?: AbortSignal }): Promise<{
@@ -78,7 +81,11 @@ export async function assertAsyncCapabilityError(
 export async function runConformanceWorkflow(
   smithers: BrowserConformanceSmithers,
   runOptions: { runId?: string; input?: unknown; signal?: AbortSignal } = {},
-): Promise<{ result: Awaited<ReturnType<BrowserConformanceSmithers["run"]>>; stored: unknown; outputs: Record<string, unknown[]> | undefined }> {
+): Promise<{
+  result: Awaited<ReturnType<BrowserConformanceSmithers["run"]>>;
+  stored: unknown;
+  outputs: Record<string, unknown[]> | undefined;
+}> {
   const result = await smithers.run(runOptions);
   if (result.status !== "finished") {
     throw new Error(`Expected a finished run, got status "${result.status}": ${JSON.stringify(result.error ?? null)}`);

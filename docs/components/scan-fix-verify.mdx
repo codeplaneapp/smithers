@@ -82,96 +82,104 @@ import { Loop } from "./Ralph.js";
  * @param {ScanFixVerifyProps} props
  */
 export function ScanFixVerify(props) {
-    if (props.skipIf)
-        return null;
-    const prefix = props.id ?? "sfv";
-    const maxRetries = props.maxRetries ?? 3;
-    const ctx = React.useContext(SmithersContext);
-    const loopId = `${prefix}-loop`;
-    const iteration = ctx?.iterations?.[loopId] ?? ctx?.iteration ?? 0;
-    const scanRow = ctx?.outputMaybe(props.scanOutput, {
-        nodeId: `${prefix}-scan`,
-        iteration,
-    });
-    const scanComplete = scanRow !== undefined;
-    const issues = Array.isArray(scanRow?.issues) ? scanRow.issues : [];
-    // Exit the loop once verification reports the issues resolved, instead of
-    // always running every retry. Read the verify row for this iteration like
-    // Poller reads its check output.
-    const verifyRow = ctx?.outputMaybe(props.verifyOutput, {
-        nodeId: `${prefix}-verify`,
-        iteration,
-    });
-    const resolved = verifyRow?.resolved === true;
-    if (Array.isArray(props.fixer) && props.fixer.length === 0) {
-        throw new TypeError("ScanFixVerify fixer array must contain at least one agent.");
+  if (props.skipIf) return null;
+  const prefix = props.id ?? "sfv";
+  const maxRetries = props.maxRetries ?? 3;
+  const ctx = React.useContext(SmithersContext);
+  const loopId = `${prefix}-loop`;
+  const iteration = ctx?.iterations?.[loopId] ?? ctx?.iteration ?? 0;
+  const scanRow = ctx?.outputMaybe(props.scanOutput, {
+    nodeId: `${prefix}-scan`,
+    iteration,
+  });
+  const scanComplete = scanRow !== undefined;
+  const issues = Array.isArray(scanRow?.issues) ? scanRow.issues : [];
+  // Exit the loop once verification reports the issues resolved, instead of
+  // always running every retry. Read the verify row for this iteration like
+  // Poller reads its check output.
+  const verifyRow = ctx?.outputMaybe(props.verifyOutput, {
+    nodeId: `${prefix}-verify`,
+    iteration,
+  });
+  const resolved = verifyRow?.resolved === true;
+  if (Array.isArray(props.fixer) && props.fixer.length === 0) {
+    throw new TypeError("ScanFixVerify fixer array must contain at least one agent.");
+  }
+  const fixerForIssue = (index) => {
+    if (!Array.isArray(props.fixer)) {
+      return props.fixer;
     }
-    const fixerForIssue = (index) => {
-        if (!Array.isArray(props.fixer)) {
-            return props.fixer;
-        }
-        if (props.fixer.length === 1) {
-            return props.fixer[0];
-        }
-        const start = index % props.fixer.length;
-        return [...props.fixer.slice(start), ...props.fixer.slice(0, start)];
-    };
-    // The scan task finds problems
-    const scanTask = React.createElement(Task, {
-        id: `${prefix}-scan`,
-        output: props.scanOutput,
-        agent: props.scanner,
-        children: props.children ?? "Scan for problems and return an issues array.",
-    });
-    // The first render keeps the historical placeholder. Once the scan row
-    // exists, the reactive re-render replaces it with one fix task per issue.
-    const fixTaskIds = scanComplete
-        ? issues.map((_, index) => `${prefix}-fix-${index}`)
-        : [`${prefix}-fix`];
-    const fixTasks = scanComplete
-        ? issues.map((issue, index) => React.createElement(Task, {
-            key: `${prefix}-fix-${index}`,
-            id: `${prefix}-fix-${index}`,
-            output: props.fixOutput,
-            agent: fixerForIssue(index),
-            dependsOn: [`${prefix}-scan`],
-            children: `Fix scan issue ${index + 1} of ${issues.length}: ${typeof issue === "string" ? issue : JSON.stringify(issue)}`,
-        }))
-        : [
-            React.createElement(Task, {
-                id: `${prefix}-fix`,
-                output: props.fixOutput,
-                agent: props.fixer,
-                dependsOn: [`${prefix}-scan`],
-                children: "Fix all issues identified by the scan. Address each problem found.",
-            }),
-        ];
-    const fixParallel = React.createElement(Parallel, { id: `${prefix}-fixes`, maxConcurrency: props.maxConcurrency }, ...fixTasks);
-    // Verify that all fixes were applied correctly
-    const verifyTask = React.createElement(Task, {
-        id: `${prefix}-verify`,
-        output: props.verifyOutput,
-        agent: props.verifier,
-        dependsOn: scanComplete && fixTaskIds.length === 0 ? [`${prefix}-scan`] : fixTaskIds,
-        children: "Verify that all fixes were applied correctly. Return whether all issues are resolved.",
-    });
-    // The inner loop: scan → fix → verify, repeating until verification passes
-    const innerSequence = React.createElement(Sequence, null, scanTask, fixParallel, verifyTask);
-    const loop = React.createElement(Loop, {
-        id: loopId,
-        until: resolved,
-        maxIterations: maxRetries,
-        onMaxReached: "return-last",
-    }, innerSequence);
-    // Final report task after the loop completes
-    const reportTask = React.createElement(Task, {
-        id: `${prefix}-report`,
-        output: props.reportOutput,
-        agent: props.verifier,
-        dependsOn: [`${prefix}-verify`],
-        children: "Produce a final summary report of all scan-fix-verify cycles, including what was found, what was fixed, and the final verification status.",
-    });
-    return React.createElement(Sequence, null, loop, reportTask);
+    if (props.fixer.length === 1) {
+      return props.fixer[0];
+    }
+    const start = index % props.fixer.length;
+    return [...props.fixer.slice(start), ...props.fixer.slice(0, start)];
+  };
+  // The scan task finds problems
+  const scanTask = React.createElement(Task, {
+    id: `${prefix}-scan`,
+    output: props.scanOutput,
+    agent: props.scanner,
+    children: props.children ?? "Scan for problems and return an issues array.",
+  });
+  // The first render keeps the historical placeholder. Once the scan row
+  // exists, the reactive re-render replaces it with one fix task per issue.
+  const fixTaskIds = scanComplete ? issues.map((_, index) => `${prefix}-fix-${index}`) : [`${prefix}-fix`];
+  const fixTasks = scanComplete
+    ? issues.map((issue, index) =>
+        React.createElement(Task, {
+          key: `${prefix}-fix-${index}`,
+          id: `${prefix}-fix-${index}`,
+          output: props.fixOutput,
+          agent: fixerForIssue(index),
+          dependsOn: [`${prefix}-scan`],
+          children: `Fix scan issue ${index + 1} of ${issues.length}: ${typeof issue === "string" ? issue : JSON.stringify(issue)}`,
+        }),
+      )
+    : [
+        React.createElement(Task, {
+          id: `${prefix}-fix`,
+          output: props.fixOutput,
+          agent: props.fixer,
+          dependsOn: [`${prefix}-scan`],
+          children: "Fix all issues identified by the scan. Address each problem found.",
+        }),
+      ];
+  const fixParallel = React.createElement(
+    Parallel,
+    { id: `${prefix}-fixes`, maxConcurrency: props.maxConcurrency },
+    ...fixTasks,
+  );
+  // Verify that all fixes were applied correctly
+  const verifyTask = React.createElement(Task, {
+    id: `${prefix}-verify`,
+    output: props.verifyOutput,
+    agent: props.verifier,
+    dependsOn: scanComplete && fixTaskIds.length === 0 ? [`${prefix}-scan`] : fixTaskIds,
+    children: "Verify that all fixes were applied correctly. Return whether all issues are resolved.",
+  });
+  // The inner loop: scan → fix → verify, repeating until verification passes
+  const innerSequence = React.createElement(Sequence, null, scanTask, fixParallel, verifyTask);
+  const loop = React.createElement(
+    Loop,
+    {
+      id: loopId,
+      until: resolved,
+      maxIterations: maxRetries,
+      onMaxReached: "return-last",
+    },
+    innerSequence,
+  );
+  // Final report task after the loop completes
+  const reportTask = React.createElement(Task, {
+    id: `${prefix}-report`,
+    output: props.reportOutput,
+    agent: props.verifier,
+    dependsOn: [`${prefix}-verify`],
+    children:
+      "Produce a final summary report of all scan-fix-verify cycles, including what was found, what was fixed, and the final verification status.",
+  });
+  return React.createElement(Sequence, null, loop, reportTask);
 }
 ```
 
@@ -193,20 +201,23 @@ SmithersContext.displayName = "SmithersContext";
  * @returns {{ SmithersContext: React.Context<SmithersCtx<Schema> | null>, useCtx: () => SmithersCtx<Schema> }}
  */
 export function createSmithersContext() {
-    /** @type {React.Context<SmithersCtx<Schema> | null>} */
-    const Context = React.createContext(null);
-    Context.displayName = "SmithersContext";
-    /**
+  /** @type {React.Context<SmithersCtx<Schema> | null>} */
+  const Context = React.createContext(null);
+  Context.displayName = "SmithersContext";
+  /**
    * @returns {SmithersCtx<Schema>}
    */
-    function useCtx() {
-        const ctx = React.useContext(Context);
-        if (!ctx) {
-            throw new SmithersError("CONTEXT_OUTSIDE_WORKFLOW", "useCtx() must be called inside a <Workflow> created by createSmithers()");
-        }
-        return ctx;
+  function useCtx() {
+    const ctx = React.useContext(Context);
+    if (!ctx) {
+      throw new SmithersError(
+        "CONTEXT_OUTSIDE_WORKFLOW",
+        "useCtx() must be called inside a <Workflow> created by createSmithers()",
+      );
     }
-    return { SmithersContext: Context, useCtx };
+    return ctx;
+  }
+  return { SmithersContext: Context, useCtx };
 }
 ```
 
@@ -245,17 +256,16 @@ import React from "react";
  * @param {SequenceProps} props
  */
 export function Sequence(props) {
-    if (props.skipIf)
-        return null;
-    // Sequence carries only a display label; pass a sanitized bag (align with
-    // the sanitizing structural components) so control props don't leak through.
-    // `label` names the phase group in run views (graph, the Claude /workflows
-    // mirror) and is preserved in the persisted frame XML.
-    const next = {
-        ...(props.label === undefined ? {} : { label: props.label }),
-        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
-    };
-    return React.createElement("smithers:sequence", next, props.children);
+  if (props.skipIf) return null;
+  // Sequence carries only a display label; pass a sanitized bag (align with
+  // the sanitizing structural components) so control props don't leak through.
+  // `label` names the phase group in run views (graph, the Claude /workflows
+  // mirror) and is preserved in the persisted frame XML.
+  const next = {
+    ...(props.label === undefined ? {} : { label: props.label }),
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+  };
+  return React.createElement("smithers:sequence", next, props.children);
 }
 ```
 
@@ -267,19 +277,18 @@ import React from "react";
  * @param {ParallelProps} props
  */
 export function Parallel(props) {
-    if (props.skipIf)
-        return null;
-    // Align prop sanitization with other structural components. `label` names
-    // the phase group in run views (graph, the Claude /workflows mirror).
-    const next = {
-        maxConcurrency: props.maxConcurrency,
-        subtreeConcurrency: props.subtreeConcurrency,
-        id: props.id,
-        ...(props.label === undefined ? {} : { label: props.label }),
-        ...(props.priority === undefined ? {} : { priority: props.priority }),
-        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
-    };
-    return React.createElement("smithers:parallel", next, props.children);
+  if (props.skipIf) return null;
+  // Align prop sanitization with other structural components. `label` names
+  // the phase group in run views (graph, the Claude /workflows mirror).
+  const next = {
+    maxConcurrency: props.maxConcurrency,
+    subtreeConcurrency: props.subtreeConcurrency,
+    id: props.id,
+    ...(props.label === undefined ? {} : { label: props.label }),
+    ...(props.priority === undefined ? {} : { priority: props.priority }),
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+  };
+  return React.createElement("smithers:parallel", next, props.children);
 }
 ```
 
@@ -295,18 +304,17 @@ import React from "react";
  * @param {LoopProps} props
  */
 export function Loop(props) {
-    if (props.skipIf)
-        return null;
-    // Sanitize to the loop's host props (align with other structural components);
-    // key/skipIf are React/control props and children are passed separately.
-    const next = {
-        id: props.id,
-        until: props.until,
-        maxIterations: props.maxIterations,
-        onMaxReached: props.onMaxReached,
-        continueAsNewEvery: props.continueAsNewEvery,
-    };
-    return React.createElement("smithers:ralph", next, props.children);
+  if (props.skipIf) return null;
+  // Sanitize to the loop's host props (align with other structural components);
+  // key/skipIf are React/control props and children are passed separately.
+  const next = {
+    id: props.id,
+    until: props.until,
+    maxIterations: props.maxIterations,
+    onMaxReached: props.onMaxReached,
+    continueAsNewEvery: props.continueAsNewEvery,
+  };
+  return React.createElement("smithers:ralph", next, props.children);
 }
 /** @deprecated Use `Loop` instead. */
 export const Ralph = Loop;
@@ -318,30 +326,30 @@ import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type ScanFixVerifyProps = {
-	/** ID prefix for generated task/component ids. */
-	id?: string;
-	/** Agent that scans for problems. */
-	scanner: AgentLike;
-	/** Agent (or agents) that fixes problems. When an array is provided, agents are cycled across issues. */
-	fixer: AgentLike | AgentLike[];
-	/** Agent that verifies the fixes were applied correctly. */
-	verifier: AgentLike;
-	/** Output schema for scan results. Should include `issues: Array`. */
-	scanOutput: OutputTarget;
-	/** Output schema for each individual fix. */
-	fixOutput: OutputTarget;
-	/** Output schema for verification results. */
-	verifyOutput: OutputTarget;
-	/** Output schema for the final summary report. */
-	reportOutput: OutputTarget;
-	/** Maximum number of parallel fix tasks. */
-	maxConcurrency?: number;
-	/** Maximum scan-fix-verify cycles before stopping. Default 3. */
-	maxRetries?: number;
-	/** Skip the entire component. */
-	skipIf?: boolean;
-	/** Prompt/context describing what to scan for. */
-	children?: React.ReactNode;
+  /** ID prefix for generated task/component ids. */
+  id?: string;
+  /** Agent that scans for problems. */
+  scanner: AgentLike;
+  /** Agent (or agents) that fixes problems. When an array is provided, agents are cycled across issues. */
+  fixer: AgentLike | AgentLike[];
+  /** Agent that verifies the fixes were applied correctly. */
+  verifier: AgentLike;
+  /** Output schema for scan results. Should include `issues: Array`. */
+  scanOutput: OutputTarget;
+  /** Output schema for each individual fix. */
+  fixOutput: OutputTarget;
+  /** Output schema for verification results. */
+  verifyOutput: OutputTarget;
+  /** Output schema for the final summary report. */
+  reportOutput: OutputTarget;
+  /** Maximum number of parallel fix tasks. */
+  maxConcurrency?: number;
+  /** Maximum scan-fix-verify cycles before stopping. Default 3. */
+  maxRetries?: number;
+  /** Skip the entire component. */
+  skipIf?: boolean;
+  /** Prompt/context describing what to scan for. */
+  children?: React.ReactNode;
 };
 ```
 </CodeGroup>

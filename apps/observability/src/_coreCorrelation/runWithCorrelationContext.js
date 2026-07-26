@@ -9,6 +9,6 @@ import { mergeCorrelationContext } from "./mergeCorrelationContext.js";
  * @returns {T}
  */
 export function runWithCorrelationContext(patch, fn) {
-    const next = mergeCorrelationContext(correlationStorage.getStore(), patch);
-    return next ? correlationStorage.run(next, fn) : fn();
+  const next = mergeCorrelationContext(correlationStorage.getStore(), patch);
+  return next ? correlationStorage.run(next, fn) : fn();
 }

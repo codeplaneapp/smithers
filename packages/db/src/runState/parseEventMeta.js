@@ -17,7 +17,7 @@ import { parseWaitForEventAttemptSnapshot } from "../waitForEventAttempt.js";
  * @returns {{ correlationKey: string } | null}
  */
 export function parseEventMeta(metaJson) {
-    const snapshot = parseWaitForEventAttemptSnapshot(metaJson ?? null);
-    if (snapshot == null) return null;
-    return { correlationKey: snapshot.correlationId ?? snapshot.signalName };
+  const snapshot = parseWaitForEventAttemptSnapshot(metaJson ?? null);
+  if (snapshot == null) return null;
+  return { correlationKey: snapshot.correlationId ?? snapshot.signalName };
 }

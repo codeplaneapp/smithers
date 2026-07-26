@@ -87,38 +87,31 @@ const DEFAULT_TASKS: z.input<typeof taskSchema>[] = [
   {
     id: "1b-platform-layer",
     title: "♻️ refactor(engine): swap Bun globals + make platform layer injectable",
-    goal:
-      "Unblock the FULL engine on Node-based serverless (Vercel-Node/AWS/GCP/k8s). Replace Bun-only globals on the run loop with runtime-agnostic equivalents and make the @effect/platform layer swappable (Bun today, Node/Worker injectable) so the engine no longer hard-binds BunContext.",
+    goal: "Unblock the FULL engine on Node-based serverless (Vercel-Node/AWS/GCP/k8s). Replace Bun-only globals on the run loop with runtime-agnostic equivalents and make the @effect/platform layer swappable (Bun today, Node/Worker injectable) so the engine no longer hard-binds BunContext.",
     files:
       "packages/engine/src/engine.js (Bun.sleep at ~:2001,:2744,:5001,:5224; @effect/platform-bun BunContext at ~:32 provided at :730,:731,:767,:775,:1730,:2905,:4269; Bun.which guards ~:80-81), packages/engine/src/effect/compute-task-bridge.js (Bun.sleep ~:345, BunContext ~:14 provided :539), packages/engine/src/workflow-hash.js (Bun.Transpiler, already guarded). ALSO the other BunContext importers so the injectable layer is real: packages/engine/src/effect/static-task-bridge.js:10 (provided :159), packages/engine/src/startDurability.js:10 (:33), packages/engine/src/restoreWorkspace.js:10 (:18).",
-    done:
-      "Bun.sleep → Effect.sleep/setTimeout; Bun.which guarded/replaced; BunContext no longer hard-imported anywhere on the run path — a single injectable platform layer (default Bun preserved; a Node layer selectable). `pnpm typecheck` green; `pnpm -C packages/engine test` green; no behavior change on Bun.",
+    done: "Bun.sleep → Effect.sleep/setTimeout; Bun.which guarded/replaced; BunContext no longer hard-imported anywhere on the run path — a single injectable platform layer (default Bun preserved; a Node layer selectable). `pnpm typecheck` green; `pnpm -C packages/engine test` green; no behavior change on Bun.",
   },
   {
     id: "1b2-node-runtime-smoke",
     title: "✅ test(engine): prove the engine drives a run under plain node (no Bun)",
-    goal:
-      "Bank the fast serverless win from 1b: prove the FULL engine runs a workflow under plain `node` (not Bun) with a Node platform layer, since Node hosts (Vercel-Node/AWS/GCP/k8s) have fs+child_process. This is the cheap, high-value validation of 1b's real goal.",
+    goal: "Bank the fast serverless win from 1b: prove the FULL engine runs a workflow under plain `node` (not Bun) with a Node platform layer, since Node hosts (Vercel-Node/AWS/GCP/k8s) have fs+child_process. This is the cheap, high-value validation of 1b's real goal.",
     files:
       "New CI-runnable test. Provide the engine with @effect/platform-node NodeContext instead of BunContext; storage on PGlite or Postgres (packages/db is already portable). Seed a fake agent (CI has no agent CLIs).",
-    done:
-      "A workflow with an in-process/SDK (or fake) agent runs to completion under `node` on Postgres/PGlite; added as a CI test. `pnpm typecheck` green.",
+    done: "A workflow with an in-process/SDK (or fake) agent runs to completion under `node` on Postgres/PGlite; added as a CI test. `pnpm typecheck` green.",
   },
   {
     id: "1c-command-seam",
     title: "♻️ refactor(engine,driver): route subprocess spawning through @effect/platform Command",
-    goal:
-      "Move node:child_process spawning behind @effect/platform CommandExecutor so it can be provided per runtime (absent on isolates → dispatch to a remote SandboxProvider). Copy the existing precedent.",
+    goal: "Move node:child_process spawning behind @effect/platform CommandExecutor so it can be provided per runtime (absent on isolates → dispatch to a remote SandboxProvider). Copy the existing precedent.",
     files:
       "precedent: packages/vcs/src/jj.js:16 (@effect/platform Command + CommandExecutor). Migrate: packages/engine/src/engine.js runGitCommand(:584)+caffeinate(:959), packages/engine/src/effect/diff-bundle.js:2 (node:child_process; called by getNodeDiff), packages/driver/src/child-process.js:1 (spawnCaptureEffect), packages/server/src/gatewayRoutes/getNodeDiff.js:1, packages/agents/src/BaseCliAgent/runRpcCommandEffect.js:1.",
-    done:
-      "Engine hot path no longer statically imports node:child_process (goes through CommandExecutor). `pnpm typecheck` + `pnpm -C packages/engine test` + `pnpm -C packages/driver test` green. No behavior change on Bun/Node.",
+    done: "Engine hot path no longer statically imports node:child_process (goes through CommandExecutor). `pnpm typecheck` + `pnpm -C packages/engine test` + `pnpm -C packages/driver test` green. No behavior change on Bun/Node.",
   },
   {
     id: "1d-i-engine-fs",
     title: "♻️ refactor(engine): route engine-core node:fs through @effect/platform FileSystem",
-    goal:
-      "First slice of the FileSystem seam (split from an XL task). Extract engine-core node:fs behind @effect/platform FileSystem so the engine core loads on an isolate.",
+    goal: "First slice of the FileSystem seam (split from an XL task). Extract engine-core node:fs behind @effect/platform FileSystem so the engine core loads on an isolate.",
     files:
       "packages/engine/src/engine.js:39 (node:fs) + worktree writes (~:642-714, ensureWorktree :724), packages/engine/src/effect/diff-bundle.js:3 (node:fs/promises).",
     done: "engine core imports without a top-level node:fs value import. `pnpm typecheck` + `pnpm -C packages/engine test` green; worktree behavior unchanged on Bun/Node.",
@@ -142,59 +135,48 @@ const DEFAULT_TASKS: z.input<typeof taskSchema>[] = [
   {
     id: "1e-gateway-fetch-adapter",
     title: "✨ feat(server): fetch-handler adapter for the gateway (Workers/Edge)",
-    goal:
-      "Add a Web `fetch(request)`-handler adapter over the gateway RPC/WS surface so it can serve on Cloudflare Workers / Vercel Edge, keeping the existing node:http createServer path for Node hosts.",
+    goal: "Add a Web `fetch(request)`-handler adapter over the gateway RPC/WS surface so it can serve on Cloudflare Workers / Vercel Edge, keeping the existing node:http createServer path for Node hosts.",
     files:
       "packages/server/src/gateway.js:10 (node:http; createServer at ~:3836), packages/server/src/light-gateway.js (node:http createServer :108), packages/server/src/index.js. Reuse the existing route/registry logic; wrap it in a fetch handler. Depends on 1d-iii.",
-    done:
-      "A `fetch`-handler entry serves the same gateway RPC methods as the node:http server (proven by a request-level test). `pnpm typecheck` + `pnpm -C packages/server test` green.",
+    done: "A `fetch`-handler entry serves the same gateway RPC methods as the node:http server (proven by a request-level test). `pnpm typecheck` + `pnpm -C packages/server test` green.",
   },
   {
     id: "2a-cf-worker-driver",
     title: "✨ feat(cloudflare): Worker entry + Durable Object class + alarm-driven run driver",
-    goal:
-      "Ship the missing pieces so a run can be DRIVEN on Cloudflare Workers: a reference Worker entry, a Durable Object class backing createSmithersCloudflare over DO-SQLite, and an alarm-driven driver that advances the run without a long-lived host.",
+    goal: "Ship the missing pieces so a run can be DRIVEN on Cloudflare Workers: a reference Worker entry, a Durable Object class backing createSmithersCloudflare over DO-SQLite, and an alarm-driven driver that advances the run without a long-lived host.",
     files:
       "packages/cloudflare/src/index.js (createSmithersCloudflare, createCloudflareDurableObjectSqliteDescriptor). Depends on 1b-1e (engine must load on a Worker) and on 2c's capability-degrade for worktree/fs features.",
-    done:
-      "A Durable Object advances a small SDK-agent workflow (touching NO worktree/durability-snapshot features — those degrade in 2c) to completion on DO-SQLite under Miniflare (@cloudflare/vitest-pool-workers), no mocks. `pnpm typecheck` + `pnpm -C packages/cloudflare test` green.",
+    done: "A Durable Object advances a small SDK-agent workflow (touching NO worktree/durability-snapshot features — those degrade in 2c) to completion on DO-SQLite under Miniflare (@cloudflare/vitest-pool-workers), no mocks. `pnpm typecheck` + `pnpm -C packages/cloudflare test` green.",
   },
   {
     id: "2b-cf-sandbox-provider-harness",
     title: "✨ feat(cloudflare): ship the in-container harness + keepAlive lifecycle",
-    goal:
-      "Finish createCloudflareSandboxProvider. ALREADY LANDED (commit 32fc7400b): execution:'process' now waits (proc.waitForExit) and reconciles the result bundle, and sleepAfter is threaded. REMAINING: (a) ship the reference in-container harness — the default command `node /workspace/run-smithers-sandbox.js` still ships nowhere, so the container cannot run a real child workflow out of the box; (b) exercise keepAlive/setKeepAlive so a warm container can be reused/stopped across boundaries. Independent of 1b-1e (container-side) — safe as an early parallel lane.",
+    goal: "Finish createCloudflareSandboxProvider. ALREADY LANDED (commit 32fc7400b): execution:'process' now waits (proc.waitForExit) and reconciles the result bundle, and sleepAfter is threaded. REMAINING: (a) ship the reference in-container harness — the default command `node /workspace/run-smithers-sandbox.js` still ships nowhere, so the container cannot run a real child workflow out of the box; (b) exercise keepAlive/setKeepAlive so a warm container can be reused/stopped across boundaries. Independent of 1b-1e (container-side) — safe as an early parallel lane.",
     files:
       "packages/cloudflare/src/index.js (createCloudflareSandboxProvider; process branch ~:265-286, cleanup ~:302-311, sleepAfter ~:203), packages/sandbox/src/SandboxProvider.ts. Bundle the harness into the image/setupFiles and reconstruct the workflow from input/config.",
-    done:
-      "a shipped harness reconstructs+runs a child workflow from input/config to a result bundle; keepAlive reuse/stop is exercised. No mocks: unit tests may use the local @cloudflare/sandbox dev container/workerd; add ONE integration lane against a real container (no fabricated responses). `pnpm typecheck` + tests green.",
+    done: "a shipped harness reconstructs+runs a child workflow from input/config to a result bundle; keepAlive reuse/stop is exercised. No mocks: unit tests may use the local @cloudflare/sandbox dev container/workerd; add ONE integration lane against a real container (no fabricated responses). `pnpm typecheck` + tests green.",
   },
   {
     id: "2c-graceful-degrade",
     title: "✨ feat(engine): capability flags so non-serverless features degrade on isolates",
-    goal:
-      "Where worktrees / Tier-1 fs durability snapshots are impossible (isolates), surface them as DISABLED capabilities rather than crashing, and route worktree-backed execution to a remote SandboxProvider. Document which harnesses can and cannot run on Workers.",
+    goal: "Where worktrees / Tier-1 fs durability snapshots are impossible (isolates), surface them as DISABLED capabilities rather than crashing, and route worktree-backed execution to a remote SandboxProvider. Document which harnesses can and cannot run on Workers.",
     files:
       "packages/engine/src/engine.js (ensureWorktree :724), packages/engine/src/snapshotServer.js:9 (node:net), packages/sandbox/src/execute.js:34 (provider registry), docs/concepts/execution-model.mdx, docs/integrations/cloudflare.mdx.",
-    done:
-      "Isolate runtime reports worktree/fs-snapshot as unavailable capabilities (no import-time crash); docs state the per-harness serverless limits. `pnpm typecheck` + `pnpm test` gate green (check-docs/check-llms).",
+    done: "Isolate runtime reports worktree/fs-snapshot as unavailable capabilities (no import-time crash); docs state the per-harness serverless limits. `pnpm typecheck` + `pnpm test` gate green (check-docs/check-llms).",
   },
   {
     id: "3a-vercel-example-rebuild",
     title: "✨ feat(vercel-example): rebuild into a real multi-agent serverless showcase",
-    goal:
-      "CROSS-REPO at /Users/williamcory/vercel-example. Today it is a Telegram-summary ECHO app (only summarizer is FixtureSummarizerPort — no agent ever runs in a function) and it is deploy-broken (pins smithers-orchestrator ^0.26.1 but imports smithers-orchestrator/telegram, added in 0.27 — clean npm install breaks next build; only works via a node_modules symlink). Make it the real showcase.",
+    goal: "CROSS-REPO at /Users/williamcory/vercel-example. Today it is a Telegram-summary ECHO app (only summarizer is FixtureSummarizerPort — no agent ever runs in a function) and it is deploy-broken (pins smithers-orchestrator ^0.26.1 but imports smithers-orchestrator/telegram, added in 0.27 — clean npm install breaks next build; only works via a node_modules symlink). Make it the real showcase.",
     files:
       "/Users/williamcory/vercel-example: package.json (bump smithers-orchestrator ^0.26.1 → current, add engines node>=22), src/summary.ts + src/container.ts + src/pipeline.ts (replace FixtureSummarizerPort with real agent dispatch across a pool), src/db/pool.ts (Neon serverless/pooled driver), add a Vercel Sandbox offload for >20min agent work, vercel.json (maxDuration).",
-    done:
-      "clean `npm install && next build` green from the registry (no workspace symlink); a deployed function drives a REAL agent run across ≥2 agents; tests exercise the agents. Commit directly in that repo.",
+    done: "clean `npm install && next build` green from the registry (no workspace symlink); a deployed function drives a REAL agent run across ≥2 agents; tests exercise the agents. Commit directly in that repo.",
     isolate: false,
   },
   {
     id: "3b-node-host-examples-docs",
     title: "📝 docs+examples(providers): AWS/GCP/Kubernetes Node-host guides + cost model",
-    goal:
-      "Add first-class runtime-host guides + minimal examples for the Node-based clouds (which run the full engine after 1b): AWS (ECS/App Runner/Lambda), GCP (Cloud Run), Kubernetes — each pairing a Postgres descriptor (RDS/Cloud SQL/Neon) with a Docker container SandboxProvider. Gives 4b docs to one-shot from.",
+    goal: "Add first-class runtime-host guides + minimal examples for the Node-based clouds (which run the full engine after 1b): AWS (ECS/App Runner/Lambda), GCP (Cloud Run), Kubernetes — each pairing a Postgres descriptor (RDS/Cloud SQL/Neon) with a Docker container SandboxProvider. Gives 4b docs to one-shot from.",
     files:
       "docs/integrations/{vercel,aws,gcp,kubernetes}.mdx (today docs/integrations has only *-sandbox-provider.mdx, no runtime-host guide), docs/docs.json nav, each with a cost model. Optional minimal example dirs under examples/.",
     done: "the four host guides land with cost models; `pnpm docs:llms` regenerated; check-docs/check-llms green. `pnpm typecheck` green.",
@@ -202,22 +184,18 @@ const DEFAULT_TASKS: z.input<typeof taskSchema>[] = [
   {
     id: "4a-dual-surface-e2e",
     title: "✅ test(cloudflare): dual-surface e2e — Workers isolate AND sandbox container",
-    goal:
-      "Prove BOTH Cloudflare surfaces independently (a setup can pass in one and fail in the other): (1) Workers ISOLATE — importing `smithers-orchestrator` itself + createSmithersCloudflare + a workflow on DO-SQLite under Miniflare, asserting no bun:sqlite/node:fs/child_process leaks into the isolate; (2) sandbox CONTAINER — createCloudflareSandboxProvider running a real harness to a diff bundle. No mocks.",
+    goal: "Prove BOTH Cloudflare surfaces independently (a setup can pass in one and fail in the other): (1) Workers ISOLATE — importing `smithers-orchestrator` itself + createSmithersCloudflare + a workflow on DO-SQLite under Miniflare, asserting no bun:sqlite/node:fs/child_process leaks into the isolate; (2) sandbox CONTAINER — createCloudflareSandboxProvider running a real harness to a diff bundle. No mocks.",
     files:
       "packages/cloudflare/tests/, e2e/. Use @cloudflare/vitest-pool-workers / Miniflare for the isolate lane. Same isolate-vs-Node split noted for Vercel (Edge vs Node fn).",
-    done:
-      "CI runs both lanes green on a clean box (seed a fake agent; skip browser-only). `pnpm -C packages/cloudflare test` + the new e2e lane pass.",
+    done: "CI runs both lanes green on a clean box (seed a fake agent; skip browser-only). `pnpm -C packages/cloudflare test` + the new e2e lane pass.",
   },
   {
     id: "4b-fluency-evals",
     title: "✅ eval(providers): Haiku one-shot deploy-setup fluency evals + harness matrix",
-    goal:
-      "Extend the agent-fluency harness so a WEAK model (Haiku) can one-shot each provider's deploy setup from the docs (3b), and publish a per-harness serverless compatibility matrix (ideally capability flags on agents: inProcess / requiresOs / sessionState). Independent of Phase 1/2 code — safe early parallel lane.",
+    goal: "Extend the agent-fluency harness so a WEAK model (Haiku) can one-shot each provider's deploy setup from the docs (3b), and publish a per-harness serverless compatibility matrix (ideally capability flags on agents: inProcess / requiresOs / sessionState). Independent of Phase 1/2 code — safe early parallel lane.",
     files:
       "evals/ (haiku is wired 'weak' in evals/agents.ts; per-feature one-shot scorecard), packages/agents/src (capability flags), docs/agents/overview.mdx or a new docs/agents/serverless.mdx. Depends on 3b's docs existing.",
-    done:
-      "A per-provider fluency eval case runs and writes a linked report artifact with a one-shot rate (no pass threshold required); the harness matrix doc lands and passes check-docs/check-llms. `pnpm typecheck` green.",
+    done: "A per-provider fluency eval case runs and writes a linked report artifact with a one-shot rate (no pass threshold required); the harness matrix doc lands and passes check-docs/check-llms. `pnpm typecheck` green.",
   },
 ];
 
@@ -255,7 +233,13 @@ function repoRootDir(): string {
 const repoRoot = repoRootDir();
 
 function slugify(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50) || "task";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 50) || "task"
+  );
 }
 
 /** Merge validation failures + synthesized-review rejection into one feedback block. */
@@ -285,13 +269,18 @@ Area / file hints: ${t.files || "(discover)"}
 Done criteria: ${t.done || "typecheck + touched-package tests green"}`;
 }
 
-function buildImplementPrompt(t: WorkTask, plan: z.infer<typeof planSynthesisSchema> | undefined, branch: string): string {
+function buildImplementPrompt(
+  t: WorkTask,
+  plan: z.infer<typeof planSynthesisSchema> | undefined,
+  branch: string,
+): string {
   const planText = plan
     ? `Synthesized Codex Sol plan:\n${plan.summary}\n${(plan.steps ?? []).map((s, i) => `  ${i + 1}. ${s}`).join("\n")}`
     : "Plan: (pending — follow the goal + done criteria below.)";
-  const location = t.isolate === false
-    ? `This task runs in the launch checkout (NOT a smithers worktree). If the goal targets another repository, \`cd\` there first (the goal names the path). Commit your work with explicit pathspecs in that repository. Do NOT open a PR here.`
-    : `Implement this task inside the isolated git worktree on branch ${branch}. Commit your work on THIS branch as you go. Do NOT open a PR (a later step does that).`;
+  const location =
+    t.isolate === false
+      ? `This task runs in the launch checkout (NOT a smithers worktree). If the goal targets another repository, \`cd\` there first (the goal names the path). Commit your work with explicit pathspecs in that repository. Do NOT open a PR here.`
+      : `Implement this task inside the isolated git worktree on branch ${branch}. Commit your work on THIS branch as you go. Do NOT open a PR (a later step does that).`;
   return `${location}
 
 ${taskCard(t)}
@@ -322,7 +311,13 @@ Report branch, created, prNumber, prUrl, and a one-line summary.`;
 // Per-task pipeline: worktree → dual-plan(+Opus synth) → implement/validate/
 // dual-review(+Opus synth) loop → PR
 // ----------------------------------------------------------------------------
-function renderTask(opts: { ctx: any; task: WorkTask; baseBranch: string; maxReviewIterations: number; dryRun: boolean }) {
+function renderTask(opts: {
+  ctx: any;
+  task: WorkTask;
+  baseBranch: string;
+  maxReviewIterations: number;
+  dryRun: boolean;
+}) {
   const { ctx, task, baseBranch, maxReviewIterations, dryRun } = opts;
   // Key by slug (stable across `only`/reordering), not index.
   const key = `t-${slugify(task.id)}`;
@@ -364,7 +359,14 @@ function renderTask(opts: { ctx: any; task: WorkTask; baseBranch: string; maxRev
         />
       )}
       {dryRun || !done || !isolated ? null : (
-        <Task id={`${key}:pr`} output={prSchema} agent={prChain} timeoutMs={1_200_000} heartbeatTimeoutMs={600_000} continueOnFail>
+        <Task
+          id={`${key}:pr`}
+          output={prSchema}
+          agent={prChain}
+          timeoutMs={1_200_000}
+          heartbeatTimeoutMs={600_000}
+          continueOnFail
+        >
           {buildPrPrompt(task, branch, baseBranch)}
         </Task>
       )}

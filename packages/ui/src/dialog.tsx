@@ -44,7 +44,9 @@ export function DialogClose(props: ComponentProps<typeof DialogPrimitive.Close>)
 }
 
 export function DialogOverlay({ className, ...props }: ComponentProps<typeof DialogPrimitive.Overlay>) {
-  return <DialogPrimitive.Overlay data-slot="dialog-overlay" className={cn("sui-dialog-overlay", className)} {...props} />;
+  return (
+    <DialogPrimitive.Overlay data-slot="dialog-overlay" className={cn("sui-dialog-overlay", className)} {...props} />
+  );
 }
 
 export type DialogContentProps = ComponentProps<typeof DialogPrimitive.Content> & {
@@ -60,7 +62,16 @@ export function DialogContent({ className, children, showCloseButton = true, ...
         {children}
         {showCloseButton ? (
           <DialogPrimitive.Close className="sui-dialog-close" aria-label="Close">
-            <svg aria-hidden width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <svg
+              aria-hidden
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            >
               <path d="M2 2l8 8M10 2l-8 8" />
             </svg>
           </DialogPrimitive.Close>
@@ -83,5 +94,11 @@ export function DialogTitle({ className, ...props }: ComponentProps<typeof Dialo
 }
 
 export function DialogDescription({ className, ...props }: ComponentProps<typeof DialogPrimitive.Description>) {
-  return <DialogPrimitive.Description data-slot="dialog-description" className={cn("sui-dialog-description", className)} {...props} />;
+  return (
+    <DialogPrimitive.Description
+      data-slot="dialog-description"
+      className={cn("sui-dialog-description", className)}
+      {...props}
+    />
+  );
 }

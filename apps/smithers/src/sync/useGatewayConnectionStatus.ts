@@ -1,9 +1,6 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { useSmithersCollections } from "@smithers-orchestrator/gateway-react";
-import {
-  connectionStateValue,
-  gatewayConnectionState,
-} from "../observability/uiMetrics";
+import { connectionStateValue, gatewayConnectionState } from "../observability/uiMetrics";
 import type { GatewayStatus } from "../gateway/gatewayTypes";
 
 type GatewayConnectionStatus = {
@@ -18,11 +15,7 @@ type GatewayConnectionStatus = {
  */
 export function useGatewayConnectionStatus(): GatewayConnectionStatus {
   const { client } = useSmithersCollections();
-  const state = useSyncExternalStore(
-    client.stream.subscribeStatus,
-    client.stream.status,
-    client.stream.status,
-  );
+  const state = useSyncExternalStore(client.stream.subscribeStatus, client.stream.status, client.stream.status);
 
   useEffect(() => {
     return client.stream.subscribe(() => {});
@@ -38,9 +31,7 @@ export function useGatewayConnectionStatus(): GatewayConnectionStatus {
     () => ({
       status,
       isOnline: status === "online",
-      ...(state.reconnectingSince === undefined
-        ? {}
-        : { reconnectingSince: state.reconnectingSince }),
+      ...(state.reconnectingSince === undefined ? {} : { reconnectingSince: state.reconnectingSince }),
     }),
     [status, state.reconnectingSince],
   );

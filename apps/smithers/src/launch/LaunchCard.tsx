@@ -51,9 +51,7 @@ export function LaunchCard({ workflowId }: { workflowId: string }) {
                 ))}
               </div>
             ) : (
-              <div className={field.type === "area" ? "field-input is-area" : "field-input"}>
-                {field.placeholder}
-              </div>
+              <div className={field.type === "area" ? "field-input is-area" : "field-input"}>{field.placeholder}</div>
             )}
           </div>
         ))}

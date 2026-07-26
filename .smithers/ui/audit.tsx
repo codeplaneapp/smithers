@@ -212,9 +212,10 @@ function App() {
   const merge = useMemo(() => extractMerge(mergeOutput.data), [mergeOutput.data]);
   const events = stream.events ?? [];
   const eventCount = events.length;
-  const mergeStarted = events.some(
-    (e) => isRecord(e.payload) && typeof e.payload.event === "string" && /merge/.test(JSON.stringify(e.payload)),
-  ) || merge !== null;
+  const mergeStarted =
+    events.some(
+      (e) => isRecord(e.payload) && typeof e.payload.event === "string" && /merge/.test(JSON.stringify(e.payload)),
+    ) || merge !== null;
 
   const activeGroupId = selectedGroupIdx !== undefined ? selectedGroupIdx : groups[0]?.index;
   const activeGroup = groups.find((g) => g.index === activeGroupId);
@@ -273,11 +274,21 @@ function App() {
       <header className="topbar">
         <div className="title-group">
           <h1>Audit</h1>
-          <span className="pill" data-testid="audit-runid">{activeRunId ? shortRunId(activeRunId) : "No run"}</span>
-          {focus ? <span className="pill focus" data-testid="audit-focus">focus: {focus}</span> : null}
-          <span className="pill" data-testid="audit-groupcount">{groupCount} groups</span>
+          <span className="pill" data-testid="audit-runid">
+            {activeRunId ? shortRunId(activeRunId) : "No run"}
+          </span>
+          {focus ? (
+            <span className="pill focus" data-testid="audit-focus">
+              focus: {focus}
+            </span>
+          ) : null}
+          <span className="pill" data-testid="audit-groupcount">
+            {groupCount} groups
+          </span>
           {activeRun ? (
-            <span className={"badge " + statusClass(activeRun.status)} data-testid="audit-status">{activeRun.status ?? "idle"}</span>
+            <span className={"badge " + statusClass(activeRun.status)} data-testid="audit-status">
+              {activeRun.status ?? "idle"}
+            </span>
           ) : null}
         </div>
         <div className="toolbar">
@@ -288,11 +299,17 @@ function App() {
             onChange={(e) => setPrompt(e.currentTarget.value)}
             placeholder="Audit focus (e.g. code review)"
           />
-          <button className="button" data-testid="audit-refresh" onClick={() => void refresh()} disabled={busy}>Refresh</button>
+          <button className="button" data-testid="audit-refresh" onClick={() => void refresh()} disabled={busy}>
+            Refresh
+          </button>
           {activeRun && statusClass(activeRun.status) === "running" ? (
-            <button className="button danger" data-testid="audit-cancel" onClick={() => void cancel()} disabled={busy}>Cancel</button>
+            <button className="button danger" data-testid="audit-cancel" onClick={() => void cancel()} disabled={busy}>
+              Cancel
+            </button>
           ) : null}
-          <button className="button primary" data-testid="audit-launch" onClick={() => void launch()} disabled={busy}>Start Audit</button>
+          <button className="button primary" data-testid="audit-launch" onClick={() => void launch()} disabled={busy}>
+            Start Audit
+          </button>
         </div>
       </header>
 
@@ -301,9 +318,15 @@ function App() {
           <span className="dot" />
           <span>Parallel audit ({groupCount} groups)</span>
         </div>
-        <div className="progress"><span style={{ width: parallelDone ? "100%" : parallelActive ? "55%" : "0%" }} /></div>
+        <div className="progress">
+          <span style={{ width: parallelDone ? "100%" : parallelActive ? "55%" : "0%" }} />
+        </div>
         <div className="phase-sep" />
-        <div className={"phase " + (parallelDone ? (statusClass(activeRun?.status) === "finished" ? "done" : "active") : "")}>
+        <div
+          className={
+            "phase " + (parallelDone ? (statusClass(activeRun?.status) === "finished" ? "done" : "active") : "")
+          }
+        >
           <span className="dot" />
           <span>Merge &amp; synthesize</span>
         </div>
@@ -315,7 +338,10 @@ function App() {
 
       <div className="main">
         <aside className="sidebar">
-          <div className="side-head"><span>Feature groups</span><span>{groupCount}</span></div>
+          <div className="side-head">
+            <span>Feature groups</span>
+            <span>{groupCount}</span>
+          </div>
           {groups.map((g) => (
             <GroupRow
               key={g.nodeId}
@@ -328,15 +354,27 @@ function App() {
               }}
             />
           ))}
-          {groupCount === 0 ? <div className="empty" style={{ padding: "28px 16px" }}>No feature groups yet.</div> : null}
+          {groupCount === 0 ? (
+            <div className="empty" style={{ padding: "28px 16px" }}>
+              No feature groups yet.
+            </div>
+          ) : null}
         </aside>
 
         <div className="content">
           <div className="tabs">
-            <button className={"tab" + (tab === "group" ? " active" : "")} data-testid="audit-tab-group" onClick={() => setTab("group")}>
+            <button
+              className={"tab" + (tab === "group" ? " active" : "")}
+              data-testid="audit-tab-group"
+              onClick={() => setTab("group")}
+            >
               Group findings
             </button>
-            <button className={"tab" + (tab === "report" ? " active" : "")} data-testid="audit-tab-report" onClick={() => setTab("report")}>
+            <button
+              className={"tab" + (tab === "report" ? " active" : "")}
+              data-testid="audit-tab-report"
+              onClick={() => setTab("report")}
+            >
               Consolidated report
             </button>
           </div>
@@ -349,7 +387,9 @@ function App() {
                 <div className="empty" data-testid="audit-group-empty">
                   <div>{activeRunId ? "No feature groups in this run." : "No audit run selected."}</div>
                   {!activeRunId ? (
-                    <button className="button primary" onClick={() => void launch()} disabled={busy}>Start Audit</button>
+                    <button className="button primary" onClick={() => void launch()} disabled={busy}>
+                      Start Audit
+                    </button>
                   ) : null}
                 </div>
               )}
@@ -372,12 +412,18 @@ function App() {
                   </div>
                   <div className="card">
                     <h2>Report body</h2>
-                    <pre className="report-body" data-testid="audit-report-body">{merge.markdownBody ?? merge.mergedResult ?? ""}</pre>
+                    <pre className="report-body" data-testid="audit-report-body">
+                      {merge.markdownBody ?? merge.mergedResult ?? ""}
+                    </pre>
                   </div>
                 </>
               ) : (
                 <div className="empty" data-testid="audit-report-empty">
-                  <div>{mergeStarted ? "Synthesizing consolidated report…" : "The consolidated report appears once all groups are audited and merged."}</div>
+                  <div>
+                    {mergeStarted
+                      ? "Synthesizing consolidated report…"
+                      : "The consolidated report appears once all groups are audited and merged."}
+                  </div>
                 </div>
               )}
             </section>
@@ -388,12 +434,7 @@ function App() {
   );
 }
 
-function GroupRow(props: {
-  group: FeatureGroup;
-  runId: string | undefined;
-  active: boolean;
-  onSelect: () => void;
-}) {
+function GroupRow(props: { group: FeatureGroup; runId: string | undefined; active: boolean; onSelect: () => void }) {
   const out = useGatewayNodeOutput({ runId: props.runId, nodeId: props.group.nodeId, iteration: 0 });
   const result = extractGroupResult(out.data);
   const done = result !== null;
@@ -408,7 +449,7 @@ function GroupRow(props: {
         {props.group.groupName}
       </span>
       <span className="meta">
-        <span>{(result?.featuresCovered.length ?? props.group.features.length)} features</span>
+        <span>{result?.featuresCovered.length ?? props.group.features.length} features</span>
         {result?.score !== undefined ? (
           <span className={"score " + scoreClass(result.score)}>{result.score}</span>
         ) : (
@@ -428,20 +469,32 @@ function GroupDetail(props: { group: FeatureGroup; runId: string | undefined }) 
       <div className="detail-head">
         <h2 data-testid="audit-group-name">{result?.groupName ?? props.group.groupName}</h2>
         {result?.score !== undefined ? (
-          <span className={"score " + scoreClass(result.score)} style={{ fontSize: 18 }} data-testid="audit-group-score">{result.score}</span>
+          <span
+            className={"score " + scoreClass(result.score)}
+            style={{ fontSize: 18 }}
+            data-testid="audit-group-score"
+          >
+            {result.score}
+          </span>
         ) : (
           <span className="badge">{result ? "done" : "pending"}</span>
         )}
       </div>
       <div className="chips" data-testid="audit-group-features">
         {features.length > 0 ? (
-          features.map((f, i) => <span className="chip" key={i}>{f}</span>)
+          features.map((f, i) => (
+            <span className="chip" key={i}>
+              {f}
+            </span>
+          ))
         ) : (
           <span className="chip">no features listed</span>
         )}
       </div>
       {result?.result ? (
-        <pre className="findings" style={{ marginTop: 14 }} data-testid="audit-group-findings">{result.result}</pre>
+        <pre className="findings" style={{ marginTop: 14 }} data-testid="audit-group-findings">
+          {result.result}
+        </pre>
       ) : (
         <div className="empty" style={{ padding: "32px 8px" }}>
           {props.runId ? "Waiting for this group's audit findings…" : "No run selected."}

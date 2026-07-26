@@ -22,91 +22,102 @@ const SECRET_KEY_RE = /token|secret|key|password|credential|authorization|passwd
  * @returns {import("../SandboxProvider.ts").SandboxProvider}
  */
 export function createCommandSandboxProvider(options) {
-	const id = typeof options?.id === "string" ? options.id.trim() : "";
-	if (!id) {
-		throw new SmithersError("INVALID_INPUT", "Command sandbox provider requires a non-empty id.");
-	}
-	if (typeof options.createSession !== "function") {
-		throw new SmithersError("INVALID_INPUT", "Command sandbox provider requires a createSession function.", { provider: id });
-	}
-	const command = (options.command ?? DEFAULT_COMMAND).trim();
-	if (!command) {
-		throw new SmithersError("INVALID_INPUT", "Command sandbox provider command must not be empty.", { provider: id });
-	}
-	const cleanupMode = options.cleanup ?? "destroy";
-	if (cleanupMode !== "destroy" && cleanupMode !== "keep") {
-		throw new SmithersError("INVALID_INPUT", "Command sandbox provider cleanup must be \"destroy\" or \"keep\".", { provider: id, cleanup: cleanupMode });
-	}
-	const workdir = options.workdir ?? DEFAULT_WORKDIR;
-	const requestFile = options.requestFile ?? DEFAULT_REQUEST_FILE;
-	const resultFile = options.resultFile ?? DEFAULT_RESULT_FILE;
-	/** @type {Map<string, import("./SandboxSession.ts").SandboxSession>} */
-	const active = new Map();
+  const id = typeof options?.id === "string" ? options.id.trim() : "";
+  if (!id) {
+    throw new SmithersError("INVALID_INPUT", "Command sandbox provider requires a non-empty id.");
+  }
+  if (typeof options.createSession !== "function") {
+    throw new SmithersError("INVALID_INPUT", "Command sandbox provider requires a createSession function.", {
+      provider: id,
+    });
+  }
+  const command = (options.command ?? DEFAULT_COMMAND).trim();
+  if (!command) {
+    throw new SmithersError("INVALID_INPUT", "Command sandbox provider command must not be empty.", { provider: id });
+  }
+  const cleanupMode = options.cleanup ?? "destroy";
+  if (cleanupMode !== "destroy" && cleanupMode !== "keep") {
+    throw new SmithersError("INVALID_INPUT", 'Command sandbox provider cleanup must be "destroy" or "keep".', {
+      provider: id,
+      cleanup: cleanupMode,
+    });
+  }
+  const workdir = options.workdir ?? DEFAULT_WORKDIR;
+  const requestFile = options.requestFile ?? DEFAULT_REQUEST_FILE;
+  const resultFile = options.resultFile ?? DEFAULT_RESULT_FILE;
+  /** @type {Map<string, import("./SandboxSession.ts").SandboxSession>} */
+  const active = new Map();
 
-	return {
-		id,
-		async run(request) {
-			const egressEnv = sandboxEgressEnv(request.egress);
-			const secrets = collectSecretValues(options.env, request.egress, egressEnv);
-			const session = await options.createSession(request);
-			const key = `${request.runId}:${request.sandboxId}`;
-			active.set(key, session);
-			request.heartbeat({ sandboxId: request.sandboxId, stage: `${id}-session-created`, remoteId: session.remoteId });
+  return {
+    id,
+    async run(request) {
+      const egressEnv = sandboxEgressEnv(request.egress);
+      const secrets = collectSecretValues(options.env, request.egress, egressEnv);
+      const session = await options.createSession(request);
+      const key = `${request.runId}:${request.sandboxId}`;
+      active.set(key, session);
+      request.heartbeat({ sandboxId: request.sandboxId, stage: `${id}-session-created`, remoteId: session.remoteId });
 
-			const requestPath = absolutePath(workdir, requestFile);
-			const resultPath = absolutePath(workdir, resultFile);
-			await writeSandboxProviderRequestFile(session, requestPath, request);
-			await uploadEgressCaToSession(session, request.egress, workdir);
-			request.heartbeat({ sandboxId: request.sandboxId, stage: `${id}-request-shipped`, remoteId: session.remoteId });
+      const requestPath = absolutePath(workdir, requestFile);
+      const resultPath = absolutePath(workdir, resultFile);
+      await writeSandboxProviderRequestFile(session, requestPath, request);
+      await uploadEgressCaToSession(session, request.egress, workdir);
+      request.heartbeat({ sandboxId: request.sandboxId, stage: `${id}-request-shipped`, remoteId: session.remoteId });
 
-			const env = {
-				...(options.env ?? {}),
-				...egressEnv,
-				[SANDBOX_PROVIDER_REQUEST_ENV]: requestPath,
-				[SANDBOX_PROVIDER_RESULT_ENV]: resultPath,
-			};
+      const env = {
+        ...(options.env ?? {}),
+        ...egressEnv,
+        [SANDBOX_PROVIDER_REQUEST_ENV]: requestPath,
+        [SANDBOX_PROVIDER_RESULT_ENV]: resultPath,
+      };
 
-			let res;
-			try {
-				res = await session.exec(command, {
-					cwd: workdir,
-					env,
-					timeoutMs: request.toolTimeoutMs,
-					signal: request.signal,
-				});
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				throw new SmithersError("SANDBOX_EXECUTION_FAILED", scrubSecrets(message, secrets), { provider: id, remoteId: session.remoteId });
-			}
+      let res;
+      try {
+        res = await session.exec(command, {
+          cwd: workdir,
+          env,
+          timeoutMs: request.toolTimeoutMs,
+          signal: request.signal,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new SmithersError("SANDBOX_EXECUTION_FAILED", scrubSecrets(message, secrets), {
+          provider: id,
+          remoteId: session.remoteId,
+        });
+      }
 
-			const stdout = String(res?.stdout ?? "").trim();
-			const exitCode = Number(res?.exitCode ?? 0);
-			const stdoutIsJson = stdout.startsWith("{");
-			if (exitCode !== 0 && !stdoutIsJson) {
-				const detail = scrubSecrets(truncateOutput(String(res?.stderr ?? "") || stdout, request.maxOutputBytes), secrets);
-				throw new SmithersError(
-					"SANDBOX_EXECUTION_FAILED",
-					`Sandbox command "${command}" exited with code ${exitCode}: ${detail}`,
-					{ provider: id, remoteId: session.remoteId, exitCode },
-				);
-			}
+      const stdout = String(res?.stdout ?? "").trim();
+      const exitCode = Number(res?.exitCode ?? 0);
+      const stdoutIsJson = stdout.startsWith("{");
+      if (exitCode !== 0 && !stdoutIsJson) {
+        const detail = scrubSecrets(
+          truncateOutput(String(res?.stderr ?? "") || stdout, request.maxOutputBytes),
+          secrets,
+        );
+        throw new SmithersError(
+          "SANDBOX_EXECUTION_FAILED",
+          `Sandbox command "${command}" exited with code ${exitCode}: ${detail}`,
+          { provider: id, remoteId: session.remoteId, exitCode },
+        );
+      }
 
-			const raw = stdoutIsJson ? stdout : await session.readFile(resultPath);
-			request.heartbeat({ sandboxId: request.sandboxId, stage: `${id}-result-read`, remoteId: session.remoteId });
-			return parseSandboxProviderResult(raw, session.remoteId, { provider: id, resultPath, secrets });
-		},
-		async cleanup(request) {
-			const key = `${request.runId}:${request.sandboxId}`;
-			const session = active.get(key);
-			active.delete(key);
-			if (!session || cleanupMode !== "destroy") {
-				return;
-			}
-			if (typeof session.destroy === "function") {
-				await session.destroy();
-			}
-		},
-	};
+      const raw = stdoutIsJson ? stdout : await session.readFile(resultPath);
+      request.heartbeat({ sandboxId: request.sandboxId, stage: `${id}-result-read`, remoteId: session.remoteId });
+      return parseSandboxProviderResult(raw, session.remoteId, { provider: id, resultPath, secrets });
+    },
+    async cleanup(request) {
+      const key = `${request.runId}:${request.sandboxId}`;
+      const session = active.get(key);
+      active.delete(key);
+      if (!session || cleanupMode !== "destroy") {
+        return;
+      }
+      if (typeof session.destroy === "function") {
+        await session.destroy();
+      }
+    },
+  };
 }
 
 /**
@@ -115,7 +126,7 @@ export function createCommandSandboxProvider(options) {
  * @returns {string}
  */
 function absolutePath(workdir, path) {
-	return path.startsWith("/") ? path : `${workdir.replace(/\/+$/g, "")}/${path.replace(/^\/+/g, "")}`;
+  return path.startsWith("/") ? path : `${workdir.replace(/\/+$/g, "")}/${path.replace(/^\/+/g, "")}`;
 }
 
 /**
@@ -124,11 +135,11 @@ function absolutePath(workdir, path) {
  * @returns {string}
  */
 function truncateOutput(text, maxBytes) {
-	if (!Number.isFinite(maxBytes) || maxBytes <= 0 || text.length <= maxBytes) {
-		return text;
-	}
-	const kept = text.slice(0, maxBytes);
-	return `${kept}… [truncated ${text.length - maxBytes} chars]`;
+  if (!Number.isFinite(maxBytes) || maxBytes <= 0 || text.length <= maxBytes) {
+    return text;
+  }
+  const kept = text.slice(0, maxBytes);
+  return `${kept}… [truncated ${text.length - maxBytes} chars]`;
 }
 
 /**
@@ -142,20 +153,20 @@ function truncateOutput(text, maxBytes) {
  * @returns {string[]}
  */
 function collectSecretValues(optionsEnv, egress, egressEnv) {
-	const out = secretValuesFrom(optionsEnv);
-	const normalized = normalizeSandboxEgressConfig(egress);
-	for (const value of Object.values(normalized?.env ?? {})) {
-		if (typeof value === "string" && value.length > 0) {
-			out.push(value);
-		}
-	}
-	for (const key of ["HTTP_PROXY", "HTTPS_PROXY"]) {
-		const value = egressEnv[key];
-		if (typeof value === "string" && value.length > 0) {
-			out.push(value);
-		}
-	}
-	return out;
+  const out = secretValuesFrom(optionsEnv);
+  const normalized = normalizeSandboxEgressConfig(egress);
+  for (const value of Object.values(normalized?.env ?? {})) {
+    if (typeof value === "string" && value.length > 0) {
+      out.push(value);
+    }
+  }
+  for (const key of ["HTTP_PROXY", "HTTPS_PROXY"]) {
+    const value = egressEnv[key];
+    if (typeof value === "string" && value.length > 0) {
+      out.push(value);
+    }
+  }
+  return out;
 }
 
 /**
@@ -163,16 +174,16 @@ function collectSecretValues(optionsEnv, egress, egressEnv) {
  * @returns {string[]}
  */
 function secretValuesFrom(env) {
-	if (!env) {
-		return [];
-	}
-	const out = [];
-	for (const [key, value] of Object.entries(env)) {
-		if (SECRET_KEY_RE.test(key) && typeof value === "string" && value.length > 0) {
-			out.push(value);
-		}
-	}
-	return out;
+  if (!env) {
+    return [];
+  }
+  const out = [];
+  for (const [key, value] of Object.entries(env)) {
+    if (SECRET_KEY_RE.test(key) && typeof value === "string" && value.length > 0) {
+      out.push(value);
+    }
+  }
+  return out;
 }
 
 /**
@@ -181,9 +192,9 @@ function secretValuesFrom(env) {
  * @returns {string}
  */
 function scrubSecrets(text, secrets) {
-	let out = text;
-	for (const secret of secrets) {
-		out = out.split(secret).join("[redacted]");
-	}
-	return out;
+  let out = text;
+  for (const secret of secrets) {
+    out = out.split(secret).join("[redacted]");
+  }
+  return out;
 }

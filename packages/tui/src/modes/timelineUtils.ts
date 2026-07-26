@@ -71,10 +71,7 @@ export function frameTickColor(marker: FrameMarker, isSelected: boolean): string
  * the anchored frame is evicted we fall back to the nearest retained frame
  * at-or-after it — never forward past the ring, never behind the pin.
  */
-export function resolveFrameIdx(
-  events: ReadonlyArray<GatewayEventFrame>,
-  anchorSeq: number | null,
-): number {
+export function resolveFrameIdx(events: ReadonlyArray<GatewayEventFrame>, anchorSeq: number | null): number {
   if (events.length === 0) return 0;
   if (anchorSeq === null) return events.length - 1;
   const idx = events.findIndex((ev) => ev.seq >= anchorSeq);
@@ -82,10 +79,7 @@ export function resolveFrameIdx(
 }
 
 /** Reconstruct node statuses from events up to and including upToSeq. */
-export function extractNodeSnapshots(
-  events: GatewayEventFrame[],
-  upToSeq: number,
-): NodeSnapshot[] {
+export function extractNodeSnapshots(events: GatewayEventFrame[], upToSeq: number): NodeSnapshot[] {
   const nodeMap = new Map<string, NodeSnapshot>();
 
   for (const ev of events) {

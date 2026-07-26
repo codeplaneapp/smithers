@@ -5,12 +5,12 @@
  * @returns {number | null}
  */
 export function coerceFiniteNumber(value) {
-    if (typeof value === "number") {
-        return Number.isFinite(value) ? value : null;
-    }
-    if (typeof value !== "string" || value.trim().length === 0) {
-        return null;
-    }
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }

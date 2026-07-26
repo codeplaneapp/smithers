@@ -41,15 +41,11 @@ export class SmithersPiHttpClient {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new SmithersError(
-        "PI_HTTP_ERROR",
-        `Smithers HTTP ${res.status}${text ? `: ${text}` : ""}`,
-        {
-          baseUrl: this.baseUrl,
-          path,
-          status: res.status,
-        },
-      );
+      throw new SmithersError("PI_HTTP_ERROR", `Smithers HTTP ${res.status}${text ? `: ${text}` : ""}`, {
+        baseUrl: this.baseUrl,
+        path,
+        status: res.status,
+      });
     }
     return res.json();
   }
@@ -60,15 +56,11 @@ export class SmithersPiHttpClient {
     });
     if (!res.ok || !res.body) {
       const text = await res.text().catch(() => "");
-      throw new SmithersError(
-        "PI_HTTP_ERROR",
-        `Smithers HTTP ${res.status}${text ? `: ${text}` : ""}`,
-        {
-          baseUrl: this.baseUrl,
-          path,
-          status: res.status,
-        },
-      );
+      throw new SmithersError("PI_HTTP_ERROR", `Smithers HTTP ${res.status}${text ? `: ${text}` : ""}`, {
+        baseUrl: this.baseUrl,
+        path,
+        status: res.status,
+      });
     }
 
     const reader = res.body.getReader();
@@ -87,9 +79,7 @@ export class SmithersPiHttpClient {
         buffer = parts.pop() ?? "";
 
         for (const part of parts) {
-          const line = part
-            .split("\n")
-            .find((item) => item.startsWith("data: "));
+          const line = part.split("\n").find((item) => item.startsWith("data: "));
           if (line) {
             const payload = line.slice(6);
             try {

@@ -1,8 +1,1 @@
-export type SmithersMetricUnit =
-  | "count"
-  | "milliseconds"
-  | "seconds"
-  | "bytes"
-  | "tokens"
-  | "ratio"
-  | "depth";
+export type SmithersMetricUnit = "count" | "milliseconds" | "seconds" | "bytes" | "tokens" | "ratio" | "depth";

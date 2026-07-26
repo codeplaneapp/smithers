@@ -162,11 +162,7 @@ export const useRunsStore = create<RunsState>((set, get) => {
         // approval, past the gate it continues. A flat "none" would strand a
         // fork taken at or past the gate frame.
         const forkGate: RunGate =
-          source.frame < GATE_FRAME
-            ? "none"
-            : source.frame > GATE_FRAME
-              ? "approved"
-              : "pending";
+          source.frame < GATE_FRAME ? "none" : source.frame > GATE_FRAME ? "approved" : "pending";
         return {
           runs: [
             ...state.runs,

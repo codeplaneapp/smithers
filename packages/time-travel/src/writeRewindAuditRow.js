@@ -34,15 +34,7 @@ export async function writeRewindAuditRow(adapter, row) {
          duration_ms
        ) VALUES (?, ?, ?, ?, ?, ?, ?)
        RETURNING id`,
-      [
-        row.runId,
-        row.fromFrameNo,
-        row.toFrameNo,
-        row.caller,
-        row.timestampMs,
-        row.result,
-        row.durationMs ?? null,
-      ],
+      [row.runId, row.fromFrameNo, row.toFrameNo, row.caller, row.timestampMs, row.result, row.durationMs ?? null],
     )
   );
   const id = Number(inserted?.id);

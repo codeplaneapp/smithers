@@ -41,13 +41,13 @@ const EVAL_JUDGE_KEYS = new Set(["instructions", "threshold"]);
  *  underlying engine/CLI job-state vocabulary (NOT the simplified
  *  `EvalCaseResult.status` the `evals` extension persists). */
 export const EVAL_CASE_STATUSES = [
-    "finished",
-    "continued",
-    "failed",
-    "cancelled",
-    "waiting-approval",
-    "waiting-event",
-    "waiting-timer",
+  "finished",
+  "continued",
+  "failed",
+  "cancelled",
+  "waiting-approval",
+  "waiting-event",
+  "waiting-timer",
 ];
 
 /** The score `scorerVerdict.score` (and `evalAssertionScorer`'s own score)
@@ -62,24 +62,24 @@ export const EVAL_PASS_THRESHOLD = 0.8;
  * @returns {{ instructions: string; threshold: number } | undefined}
  */
 export function normalizeEvalJudge(value, label = "judge") {
-    if (value === undefined) {
-        return undefined;
-    }
-    if (!isPlainObject(value)) {
-        throw new Error(`${label} must be a JSON object.`);
-    }
-    const unknownKeys = Object.keys(value).filter((key) => !EVAL_JUDGE_KEYS.has(key));
-    if (unknownKeys.length > 0) {
-        throw new Error(`${label} contains unsupported assertion keys: ${unknownKeys.join(", ")}.`);
-    }
-    if (typeof value.instructions !== "string" || value.instructions.trim() === "") {
-        throw new Error(`${label}.instructions must be a non-empty string.`);
-    }
-    const threshold = value.threshold === undefined ? EVAL_PASS_THRESHOLD : value.threshold;
-    if (typeof threshold !== "number" || !Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
-        throw new Error(`${label}.threshold must be a number between 0 and 1.`);
-    }
-    return { instructions: value.instructions.trim(), threshold };
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isPlainObject(value)) {
+    throw new Error(`${label} must be a JSON object.`);
+  }
+  const unknownKeys = Object.keys(value).filter((key) => !EVAL_JUDGE_KEYS.has(key));
+  if (unknownKeys.length > 0) {
+    throw new Error(`${label} contains unsupported assertion keys: ${unknownKeys.join(", ")}.`);
+  }
+  if (typeof value.instructions !== "string" || value.instructions.trim() === "") {
+    throw new Error(`${label}.instructions must be a non-empty string.`);
+  }
+  const threshold = value.threshold === undefined ? EVAL_PASS_THRESHOLD : value.threshold;
+  if (typeof threshold !== "number" || !Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+    throw new Error(`${label}.threshold must be a number between 0 and 1.`);
+  }
+  return { instructions: value.instructions.trim(), threshold };
 }
 
 /**
@@ -87,7 +87,7 @@ export function normalizeEvalJudge(value, label = "judge") {
  * @returns {value is Record<string, unknown>}
  */
 export function isPlainObject(value) {
-    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 /**
@@ -95,7 +95,7 @@ export function isPlainObject(value) {
  * @returns {string}
  */
 function stableHash(value) {
-    return crypto.createHash("sha1").update(value).digest("hex").slice(0, 8);
+  return crypto.createHash("sha1").update(value).digest("hex").slice(0, 8);
 }
 
 /**
@@ -108,17 +108,17 @@ function stableHash(value) {
  * @returns {string}
  */
 export function slugifyEvalToken(value, fallback = "case", maxLength = 32) {
-    const slug = value
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9_-]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .replace(/-{2,}/g, "-");
-    const normalized = slug || fallback;
-    if (normalized.length <= maxLength) {
-        return normalized;
-    }
-    return `${normalized.slice(0, Math.max(1, maxLength - 9)).replace(/-+$/g, "")}-${stableHash(normalized)}`;
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+  const normalized = slug || fallback;
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(1, maxLength - 9)).replace(/-+$/g, "")}-${stableHash(normalized)}`;
 }
 
 /**
@@ -126,13 +126,16 @@ export function slugifyEvalToken(value, fallback = "case", maxLength = 32) {
  * @returns {string}
  */
 function stableJson(value) {
-    if (Array.isArray(value)) {
-        return `[${value.map(stableJson).join(",")}]`;
-    }
-    if (isPlainObject(value)) {
-        return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
-    }
-    return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJson).join(",")}]`;
+  }
+  if (isPlainObject(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 /**
@@ -142,7 +145,7 @@ function stableJson(value) {
  * @returns {boolean}
  */
 export function jsonEquals(actual, expected) {
-    return stableJson(actual) === stableJson(expected);
+  return stableJson(actual) === stableJson(expected);
 }
 
 /**
@@ -154,32 +157,34 @@ export function jsonEquals(actual, expected) {
  * @returns {boolean}
  */
 export function jsonContains(actual, expected) {
-    if (isPlainObject(expected)) {
-        if (!isPlainObject(actual)) {
-            return false;
-        }
-        for (const [key, value] of Object.entries(expected)) {
-            if (!jsonContains(actual[key], value)) {
-                return false;
-            }
-        }
-        return true;
+  if (isPlainObject(expected)) {
+    if (!isPlainObject(actual)) {
+      return false;
     }
-    if (Array.isArray(expected)) {
-        if (!Array.isArray(actual) || actual.length < expected.length) {
-            return false;
-        }
-        const matchedActualIndexes = new Set();
-        return expected.every((entry) => {
-            const matchIndex = actual.findIndex((actualEntry, index) => !matchedActualIndexes.has(index) && jsonContains(actualEntry, entry));
-            if (matchIndex < 0) {
-                return false;
-            }
-            matchedActualIndexes.add(matchIndex);
-            return true;
-        });
+    for (const [key, value] of Object.entries(expected)) {
+      if (!jsonContains(actual[key], value)) {
+        return false;
+      }
     }
-    return jsonEquals(actual, expected);
+    return true;
+  }
+  if (Array.isArray(expected)) {
+    if (!Array.isArray(actual) || actual.length < expected.length) {
+      return false;
+    }
+    const matchedActualIndexes = new Set();
+    return expected.every((entry) => {
+      const matchIndex = actual.findIndex(
+        (actualEntry, index) => !matchedActualIndexes.has(index) && jsonContains(actualEntry, entry),
+      );
+      if (matchIndex < 0) {
+        return false;
+      }
+      matchedActualIndexes.add(matchIndex);
+      return true;
+    });
+  }
+  return jsonEquals(actual, expected);
 }
 
 /**
@@ -187,19 +192,19 @@ export function jsonContains(actual, expected) {
  * @returns {string}
  */
 export function formatEvalError(error) {
-    if (error === undefined || error === null) {
-        return "";
+  if (error === undefined || error === null) {
+    return "";
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (isPlainObject(error)) {
+    if (typeof error.message === "string") {
+      return error.message;
     }
-    if (error instanceof Error) {
-        return error.message;
-    }
-    if (isPlainObject(error)) {
-        if (typeof error.message === "string") {
-            return error.message;
-        }
-        return stableJson(error);
-    }
-    return String(error);
+    return stableJson(error);
+  }
+  return String(error);
 }
 
 /**
@@ -211,21 +216,21 @@ export function formatEvalError(error) {
  * @returns {{ status: string; [key: string]: unknown }}
  */
 export function normalizeExpected(value, label = "expected") {
-    if (value === undefined || value === null) {
-        return { status: "finished" };
-    }
-    if (!isPlainObject(value)) {
-        throw new Error(`${label} must be a JSON object.`);
-    }
-    const unknownKeys = Object.keys(value).filter((key) => !EVAL_EXPECTED_KEYS.has(key));
-    if (unknownKeys.length > 0) {
-        throw new Error(`${label} contains unsupported assertion keys: ${unknownKeys.join(", ")}.`);
-    }
-    const status = value.status ?? "finished";
-    if (typeof status !== "string" || !EVAL_CASE_STATUSES.includes(status)) {
-        throw new Error(`${label}.status must be one of ${EVAL_CASE_STATUSES.join(", ")}.`);
-    }
-    return { ...value, status };
+  if (value === undefined || value === null) {
+    return { status: "finished" };
+  }
+  if (!isPlainObject(value)) {
+    throw new Error(`${label} must be a JSON object.`);
+  }
+  const unknownKeys = Object.keys(value).filter((key) => !EVAL_EXPECTED_KEYS.has(key));
+  if (unknownKeys.length > 0) {
+    throw new Error(`${label} contains unsupported assertion keys: ${unknownKeys.join(", ")}.`);
+  }
+  const status = value.status ?? "finished";
+  if (typeof status !== "string" || !EVAL_CASE_STATUSES.includes(status)) {
+    throw new Error(`${label}.status must be one of ${EVAL_CASE_STATUSES.join(", ")}.`);
+  }
+  return { ...value, status };
 }
 
 // ---------------------------------------------------------------------------
@@ -238,28 +243,28 @@ export function normalizeExpected(value, label = "expected") {
  * @returns {EvalCaseInput}
  */
 function caseFromRow(row, index) {
-    const explicitId = typeof row.id === "string" && row.id.trim() !== "" ? row.id.trim() : undefined;
-    const explicitName = typeof row.name === "string" && row.name.trim() !== "" ? row.name.trim() : undefined;
-    const id = explicitId ?? explicitName ?? `case-${index + 1}`;
-    const hasExpected = "expected" in row;
-    const judge = normalizeEvalJudge(row.judge, `Dataset row ${index + 1} judge`);
-    if ("input" in row) {
-        return {
-            id,
-            name: explicitName,
-            input: row.input,
-            ...(hasExpected ? { expected: row.expected } : {}),
-            ...(judge ? { judge } : {}),
-        };
-    }
-    const { id: _id, name: _name, expected: _expected, judge: _judge, ...rest } = row;
+  const explicitId = typeof row.id === "string" && row.id.trim() !== "" ? row.id.trim() : undefined;
+  const explicitName = typeof row.name === "string" && row.name.trim() !== "" ? row.name.trim() : undefined;
+  const id = explicitId ?? explicitName ?? `case-${index + 1}`;
+  const hasExpected = "expected" in row;
+  const judge = normalizeEvalJudge(row.judge, `Dataset row ${index + 1} judge`);
+  if ("input" in row) {
     return {
-        id,
-        name: explicitName,
-        input: rest,
-        ...(hasExpected ? { expected: row.expected } : {}),
-        ...(judge ? { judge } : {}),
+      id,
+      name: explicitName,
+      input: row.input,
+      ...(hasExpected ? { expected: row.expected } : {}),
+      ...(judge ? { judge } : {}),
     };
+  }
+  const { id: _id, name: _name, expected: _expected, judge: _judge, ...rest } = row;
+  return {
+    id,
+    name: explicitName,
+    input: rest,
+    ...(hasExpected ? { expected: row.expected } : {}),
+    ...(judge ? { judge } : {}),
+  };
 }
 
 /**
@@ -270,23 +275,20 @@ function caseFromRow(row, index) {
  * @returns {Record<string, unknown>[] | undefined}
  */
 function tryParseJsonl(text) {
-    /** @type {Record<string, unknown>[]} */
-    const rows = [];
-    for (const rawLine of text.split("\n")) {
-        const line = rawLine.trim();
-        if (line === "" || line.startsWith("#"))
-            continue;
-        try {
-            const parsed = JSON.parse(line);
-            if (!isPlainObject(parsed))
-                return undefined;
-            rows.push(parsed);
-        }
-        catch {
-            return undefined;
-        }
+  /** @type {Record<string, unknown>[]} */
+  const rows = [];
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (!isPlainObject(parsed)) return undefined;
+      rows.push(parsed);
+    } catch {
+      return undefined;
     }
-    return rows;
+  }
+  return rows;
 }
 
 /**
@@ -301,56 +303,52 @@ function tryParseJsonl(text) {
  * @returns {EvalDatasetParseResult}
  */
 export function parseEvalDataset(text) {
-    const trimmed = text.trim();
-    if (trimmed === "")
-        return { ok: false, error: "Dataset is empty." };
-    /** @type {Record<string, unknown>[] | undefined} */
-    let rows;
+  const trimmed = text.trim();
+  if (trimmed === "") return { ok: false, error: "Dataset is empty." };
+  /** @type {Record<string, unknown>[] | undefined} */
+  let rows;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      if (!parsed.every(isPlainObject)) {
+        return { ok: false, error: "Every dataset row must be a JSON object." };
+      }
+      rows = /** @type {Record<string, unknown>[]} */ (parsed);
+    } else if (isPlainObject(parsed)) {
+      return {
+        ok: false,
+        error: "Dataset must be a JSON array of case objects (a single object is not a list).",
+      };
+    }
+  } catch {
+    // Not whole-document JSON — fall through to JSONL below.
+  }
+  if (rows === undefined) {
+    rows = tryParseJsonl(trimmed);
+  }
+  if (rows === undefined) {
+    return { ok: false, error: "Could not parse the dataset as a JSON array or JSONL (one JSON object per line)." };
+  }
+  if (rows.length === 0) {
+    return { ok: false, error: "Dataset has no cases." };
+  }
+  /** @type {EvalCaseInput[]} */
+  const cases = [];
+  const seen = new Set();
+  for (const [index, row] of rows.entries()) {
+    let parsedCase;
     try {
-        const parsed = JSON.parse(trimmed);
-        if (Array.isArray(parsed)) {
-            if (!parsed.every(isPlainObject)) {
-                return { ok: false, error: "Every dataset row must be a JSON object." };
-            }
-            rows = /** @type {Record<string, unknown>[]} */ (parsed);
-        }
-        else if (isPlainObject(parsed)) {
-            return {
-                ok: false,
-                error: "Dataset must be a JSON array of case objects (a single object is not a list).",
-            };
-        }
+      parsedCase = caseFromRow(row, index);
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
-    catch {
-        // Not whole-document JSON — fall through to JSONL below.
+    if (seen.has(parsedCase.id)) {
+      return { ok: false, error: `Duplicate case id "${parsedCase.id}" (row ${index + 1}).` };
     }
-    if (rows === undefined) {
-        rows = tryParseJsonl(trimmed);
-    }
-    if (rows === undefined) {
-        return { ok: false, error: "Could not parse the dataset as a JSON array or JSONL (one JSON object per line)." };
-    }
-    if (rows.length === 0) {
-        return { ok: false, error: "Dataset has no cases." };
-    }
-    /** @type {EvalCaseInput[]} */
-    const cases = [];
-    const seen = new Set();
-    for (const [index, row] of rows.entries()) {
-        let parsedCase;
-        try {
-            parsedCase = caseFromRow(row, index);
-        }
-        catch (error) {
-            return { ok: false, error: error instanceof Error ? error.message : String(error) };
-        }
-        if (seen.has(parsedCase.id)) {
-            return { ok: false, error: `Duplicate case id "${parsedCase.id}" (row ${index + 1}).` };
-        }
-        seen.add(parsedCase.id);
-        cases.push(parsedCase);
-    }
-    return { ok: true, cases };
+    seen.add(parsedCase.id);
+    cases.push(parsedCase);
+  }
+  return { ok: true, cases };
 }
 
 // ---------------------------------------------------------------------------
@@ -375,62 +373,61 @@ export function parseEvalDataset(text) {
  * @returns {{ assertions: EvalAssertion[]; passed: boolean }}
  */
 export function evaluateEvalCase({ expected, status, output, error }) {
-    const actualStatus = status ?? "error";
-    const isAssertionSpec = expected === undefined ||
-        expected === null ||
-        (isPlainObject(expected) && Object.keys(expected).every((key) => EVAL_EXPECTED_KEYS.has(key)));
-    /** @type {EvalAssertion[]} */
-    const assertions = [];
-    if (isAssertionSpec) {
-        let normalized;
-        try {
-            normalized = normalizeExpected(expected);
-        }
-        catch (err) {
-            return {
-                assertions: [{ description: err instanceof Error ? err.message : String(err), passed: false }],
-                passed: false,
-            };
-        }
-        assertions.push({
-            description: `case run status is "${normalized.status}"`,
-            passed: actualStatus === normalized.status,
-        });
-        if (Object.prototype.hasOwnProperty.call(normalized, "output")) {
-            assertions.push({
-                description: "output equals expected.output",
-                passed: jsonEquals(output, normalized.output),
-            });
-        }
-        if (Object.prototype.hasOwnProperty.call(normalized, "outputContains")) {
-            assertions.push({
-                description: "output contains expected.outputContains",
-                passed: jsonContains(output, normalized.outputContains),
-            });
-        }
-        if (Object.prototype.hasOwnProperty.call(normalized, "errorContains")) {
-            const actualError = formatEvalError(error);
-            assertions.push({
-                description: `error contains "${String(normalized.errorContains)}"`,
-                passed: actualError.includes(String(normalized.errorContains)),
-            });
-        }
+  const actualStatus = status ?? "error";
+  const isAssertionSpec =
+    expected === undefined ||
+    expected === null ||
+    (isPlainObject(expected) && Object.keys(expected).every((key) => EVAL_EXPECTED_KEYS.has(key)));
+  /** @type {EvalAssertion[]} */
+  const assertions = [];
+  if (isAssertionSpec) {
+    let normalized;
+    try {
+      normalized = normalizeExpected(expected);
+    } catch (err) {
+      return {
+        assertions: [{ description: err instanceof Error ? err.message : String(err), passed: false }],
+        passed: false,
+      };
     }
-    else {
-        assertions.push({
-            description: "case run finished",
-            passed: actualStatus === "finished",
-        });
-        const isSubsetMatch = isPlainObject(expected) || Array.isArray(expected);
-        assertions.push({
-            description: isSubsetMatch ? "output matches expected (subset)" : "output equals expected",
-            passed: isSubsetMatch ? jsonContains(output, expected) : jsonEquals(output, expected),
-        });
+    assertions.push({
+      description: `case run status is "${normalized.status}"`,
+      passed: actualStatus === normalized.status,
+    });
+    if (Object.prototype.hasOwnProperty.call(normalized, "output")) {
+      assertions.push({
+        description: "output equals expected.output",
+        passed: jsonEquals(output, normalized.output),
+      });
     }
-    return {
-        assertions,
-        passed: assertions.every((assertion) => assertion.passed),
-    };
+    if (Object.prototype.hasOwnProperty.call(normalized, "outputContains")) {
+      assertions.push({
+        description: "output contains expected.outputContains",
+        passed: jsonContains(output, normalized.outputContains),
+      });
+    }
+    if (Object.prototype.hasOwnProperty.call(normalized, "errorContains")) {
+      const actualError = formatEvalError(error);
+      assertions.push({
+        description: `error contains "${String(normalized.errorContains)}"`,
+        passed: actualError.includes(String(normalized.errorContains)),
+      });
+    }
+  } else {
+    assertions.push({
+      description: "case run finished",
+      passed: actualStatus === "finished",
+    });
+    const isSubsetMatch = isPlainObject(expected) || Array.isArray(expected);
+    assertions.push({
+      description: isSubsetMatch ? "output matches expected (subset)" : "output equals expected",
+      passed: isSubsetMatch ? jsonContains(output, expected) : jsonEquals(output, expected),
+    });
+  }
+  return {
+    assertions,
+    passed: assertions.every((assertion) => assertion.passed),
+  };
 }
 
 /**
@@ -445,71 +442,70 @@ export function evaluateEvalCase({ expected, status, output, error }) {
  * @returns {Promise<{ assertions: EvalAssertion[]; passed: boolean }>}
  */
 export async function evaluateEvalCaseAsync({ expected, judge, input, status, output, error }, runJudge) {
-    const deterministic = evaluateEvalCase({ expected, status, output, error });
-    if (judge === undefined) {
-        return deterministic;
-    }
-    /** @type {{ instructions: string; threshold: number } | undefined} */
-    let normalizedJudge;
+  const deterministic = evaluateEvalCase({ expected, status, output, error });
+  if (judge === undefined) {
+    return deterministic;
+  }
+  /** @type {{ instructions: string; threshold: number } | undefined} */
+  let normalizedJudge;
+  try {
+    normalizedJudge = normalizeEvalJudge(judge);
+  } catch (err) {
+    const assertion = {
+      description: err instanceof Error ? err.message : String(err),
+      passed: false,
+      score: 0,
+      reason: "Invalid judge assertion.",
+    };
+    return { assertions: [...deterministic.assertions, assertion], passed: false };
+  }
+  if (!normalizedJudge) {
+    return deterministic;
+  }
+  const description = `LLM judge score >= ${normalizedJudge.threshold}: ${normalizedJudge.instructions}`;
+  /** @type {EvalAssertion} */
+  let assertion;
+  if (!runJudge) {
+    assertion = {
+      description,
+      passed: false,
+      score: 0,
+      reason: "No LLM judge runner was provided.",
+    };
+  } else {
     try {
-        normalizedJudge = normalizeEvalJudge(judge);
+      const verdict = await runJudge({
+        judge: normalizedJudge,
+        input,
+        expected,
+        status,
+        output,
+        error,
+      });
+      const score =
+        typeof verdict?.score === "number" && Number.isFinite(verdict.score)
+          ? Math.max(0, Math.min(1, verdict.score))
+          : 0;
+      assertion = {
+        description,
+        passed: score >= normalizedJudge.threshold,
+        score,
+        reason:
+          typeof verdict?.reason === "string" && verdict.reason.trim() !== ""
+            ? verdict.reason
+            : "Judge returned no reason.",
+      };
+    } catch (err) {
+      assertion = {
+        description,
+        passed: false,
+        score: 0,
+        reason: `LLM judge failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
     }
-    catch (err) {
-        const assertion = {
-            description: err instanceof Error ? err.message : String(err),
-            passed: false,
-            score: 0,
-            reason: "Invalid judge assertion.",
-        };
-        return { assertions: [...deterministic.assertions, assertion], passed: false };
-    }
-    if (!normalizedJudge) {
-        return deterministic;
-    }
-    const description = `LLM judge score >= ${normalizedJudge.threshold}: ${normalizedJudge.instructions}`;
-    /** @type {EvalAssertion} */
-    let assertion;
-    if (!runJudge) {
-        assertion = {
-            description,
-            passed: false,
-            score: 0,
-            reason: "No LLM judge runner was provided.",
-        };
-    }
-    else {
-        try {
-            const verdict = await runJudge({
-                judge: normalizedJudge,
-                input,
-                expected,
-                status,
-                output,
-                error,
-            });
-            const score = typeof verdict?.score === "number" && Number.isFinite(verdict.score)
-                ? Math.max(0, Math.min(1, verdict.score))
-                : 0;
-            assertion = {
-                description,
-                passed: score >= normalizedJudge.threshold,
-                score,
-                reason: typeof verdict?.reason === "string" && verdict.reason.trim() !== ""
-                    ? verdict.reason
-                    : "Judge returned no reason.",
-            };
-        }
-        catch (err) {
-            assertion = {
-                description,
-                passed: false,
-                score: 0,
-                reason: `LLM judge failed: ${err instanceof Error ? err.message : String(err)}`,
-            };
-        }
-    }
-    const assertions = [...deterministic.assertions, assertion];
-    return { assertions, passed: assertions.every((entry) => entry.passed) };
+  }
+  const assertions = [...deterministic.assertions, assertion];
+  return { assertions, passed: assertions.every((entry) => entry.passed) };
 }
 
 /**
@@ -522,14 +518,14 @@ export async function evaluateEvalCaseAsync({ expected, judge, input, status, ou
  * @returns {string}
  */
 export function evalCaseRunId(suiteId, caseId, evalRunId) {
-    const suite = slugifyEvalToken(suiteId, "suite", 16);
-    const testCase = slugifyEvalToken(caseId, "case", 16);
-    const run = slugifyEvalToken(evalRunId, "run", 16);
-    const base = `evalcase-${run}-${suite}-${testCase}`;
-    if (base.length <= RUN_ID_MAX_LENGTH) {
-        return base;
-    }
-    return `${base.slice(0, RUN_ID_MAX_LENGTH - 9).replace(/-+$/g, "")}-${stableHash(base)}`;
+  const suite = slugifyEvalToken(suiteId, "suite", 16);
+  const testCase = slugifyEvalToken(caseId, "case", 16);
+  const run = slugifyEvalToken(evalRunId, "run", 16);
+  const base = `evalcase-${run}-${suite}-${testCase}`;
+  if (base.length <= RUN_ID_MAX_LENGTH) {
+    return base;
+  }
+  return `${base.slice(0, RUN_ID_MAX_LENGTH - 9).replace(/-+$/g, "")}-${stableHash(base)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -547,25 +543,26 @@ export function evalCaseRunId(suiteId, caseId, evalRunId) {
  * @returns {Scorer}
  */
 export function evalAssertionScorer() {
-    return createScorer({
-        id: "eval-assertions",
-        name: "Eval Assertions",
-        description: "Scores 1 when every assertion recorded on the case's own output row passed, else 0.",
-        score: async ({ output }) => {
-            const assertions = isPlainObject(output) && Array.isArray(/** @type {any} */ (output).assertions)
-                ? /** @type {EvalAssertion[]} */ (/** @type {any} */ (output).assertions)
-                : [];
-            if (assertions.length === 0) {
-                return { score: 1, reason: "No assertions recorded; case passes on completion alone." };
-            }
-            const failed = assertions.filter((assertion) => !assertion.passed);
-            if (failed.length === 0) {
-                return { score: 1, reason: `All ${assertions.length} assertion(s) passed.` };
-            }
-            return {
-                score: 0,
-                reason: `${failed.length}/${assertions.length} assertion(s) failed: ${failed.map((assertion) => assertion.description).join("; ")}`,
-            };
-        },
-    });
+  return createScorer({
+    id: "eval-assertions",
+    name: "Eval Assertions",
+    description: "Scores 1 when every assertion recorded on the case's own output row passed, else 0.",
+    score: async ({ output }) => {
+      const assertions =
+        isPlainObject(output) && Array.isArray(/** @type {any} */ (output).assertions)
+          ? /** @type {EvalAssertion[]} */ (/** @type {any} */ (output).assertions)
+          : [];
+      if (assertions.length === 0) {
+        return { score: 1, reason: "No assertions recorded; case passes on completion alone." };
+      }
+      const failed = assertions.filter((assertion) => !assertion.passed);
+      if (failed.length === 0) {
+        return { score: 1, reason: `All ${assertions.length} assertion(s) passed.` };
+      }
+      return {
+        score: 0,
+        reason: `${failed.length}/${assertions.length} assertion(s) failed: ${failed.map((assertion) => assertion.description).join("; ")}`,
+      };
+    },
+  });
 }

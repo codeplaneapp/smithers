@@ -88,7 +88,8 @@ function box(title: string, lines: string[], color = C.cyan, width = 76) {
 }
 
 function printCode(code: string, indent = "  ") {
-  const KW = /\b(import|from|export|default|const|let|return|function|async|await|if|else|for|of|new|class|interface|type)\b/g;
+  const KW =
+    /\b(import|from|export|default|const|let|return|function|async|await|if|else|for|of|new|class|interface|type)\b/g;
   for (const rawLine of code.split("\n")) {
     const line = rawLine
       .replace(/(\/\/[^\n]*)/g, `${C.grey}$1${C.reset}`)
@@ -113,7 +114,13 @@ async function speakStart(text: string, ctx: Ctx) {
   const p = spawn("say", ["-v", ctx.voice, "-r", String(ctx.rate), text], {
     stdio: "ignore",
   });
-  activeSay = { kill: () => { try { p.kill("SIGTERM"); } catch {} } };
+  activeSay = {
+    kill: () => {
+      try {
+        p.kill("SIGTERM");
+      } catch {}
+    },
+  };
   p.on("close", () => {
     if (activeSay && p.killed === false) activeSay = null;
   });
@@ -133,7 +140,9 @@ const W = 78;
 function header(title: string, subtitle: string, n: number, total: number) {
   clearScreen();
   hideCursor();
-  write(`${C.dim}smithers · slideshow${C.reset}${" ".repeat(W - "smithers · slideshow".length - `${n}/${total}`.length)}${C.dim}${n}/${total}${C.reset}\n`);
+  write(
+    `${C.dim}smithers · slideshow${C.reset}${" ".repeat(W - "smithers · slideshow".length - `${n}/${total}`.length)}${C.dim}${n}/${total}${C.reset}\n`,
+  );
   hr();
   write(`\n  ${C.bold}${C.yellow}${title}${C.reset}\n`);
   if (subtitle) write(`  ${C.dim}${subtitle}${C.reset}\n`);
@@ -160,7 +169,16 @@ function startKeyboard(onKey: (k: Key) => void): () => void {
 
   const handler = (chunk: string) => {
     // Arrow keys arrive as escape sequences
-    if (chunk === "\x1b[C" || chunk === "\x1b[B" || chunk === " " || chunk === "\r" || chunk === "\n" || chunk === "j" || chunk === "l") onKey("next");
+    if (
+      chunk === "\x1b[C" ||
+      chunk === "\x1b[B" ||
+      chunk === " " ||
+      chunk === "\r" ||
+      chunk === "\n" ||
+      chunk === "j" ||
+      chunk === "l"
+    )
+      onKey("next");
     else if (chunk === "\x1b[D" || chunk === "\x1b[A" || chunk === "h" || chunk === "k") onKey("prev");
     else if (chunk === "r") onKey("replay");
     else if (chunk === "m") onKey("mute");
@@ -171,7 +189,9 @@ function startKeyboard(onKey: (k: Key) => void): () => void {
 
   return () => {
     stdin.off("data", handler);
-    try { stdin.setRawMode?.(false); } catch {}
+    try {
+      stdin.setRawMode?.(false);
+    } catch {}
     stdin.pause();
   };
 }
@@ -216,7 +236,9 @@ async function wipeStageDb() {
   const fs = await import("node:fs");
   const path = await import("node:path");
   for (const f of ["smithers.db", "smithers.db-shm", "smithers.db-wal"]) {
-    try { fs.unlinkSync(path.join(STAGE_DIR, f)); } catch {}
+    try {
+      fs.unlinkSync(path.join(STAGE_DIR, f));
+    } catch {}
   }
 }
 
@@ -611,7 +633,7 @@ const SLIDES: Slide[] = [
     render: () => {
       write("\n");
       printCode(
-`<Workflow name="review">
+        `<Workflow name="review">
   <Sequence>
     <Task id="analyze" output={outputs.analysis} agent={analyst} retries={3}>
       Analyze {ctx.input.repo}@{ctx.input.sha}
@@ -704,7 +726,7 @@ const SLIDES: Slide[] = [
       "Both ship in the box. Both are forty lines of source you can read and copy.",
     render: () => {
       printCode(
-`<ReviewLoop
+        `<ReviewLoop
   producer={coder}
   reviewer={[primaryReviewer, secondaryReviewer]}     // array = consensus
   produceOutput={outputs.code}
@@ -740,7 +762,7 @@ const SLIDES: Slide[] = [
     render: () => {
       write("\n");
       printCode(
-`// packages/components/src/ReviewLoop.tsx
+        `// packages/components/src/ReviewLoop.tsx
 export function ReviewLoop({
   id = "review-loop", producer, reviewer,
   produceOutput, reviewOutput,
@@ -804,7 +826,7 @@ export function Optimizer({
       "Panel: N specialist reviewers in parallel, a moderator synthesises by vote, consensus, or merge.",
     render: () => {
       printCode(
-`<ScanFixVerify
+        `<ScanFixVerify
   scanner={lintAgent}
   fixer={[fixerA, fixerB, fixerC]}                    // array cycles across issues
   verifier={verifyAgent}
@@ -876,7 +898,7 @@ export function Optimizer({
       "Super-smithers spawns a whole nested workflow with its own database scope.",
     render: () => {
       printCode(
-`const remoteVmProvider = {
+        `const remoteVmProvider = {
   id: "remote-vm",
   async run(request) {
     return runRemoteVm(request);
@@ -916,7 +938,7 @@ export function Optimizer({
       "Nested Aspects inherit. Inner fields override per-config.",
     render: () => {
       printCode(
-`<Workflow name="budgeted">
+        `<Workflow name="budgeted">
   <Aspects
     tokenBudget={{ max: 100_000, perTask: 25_000, onExceeded: "warn" }}
     latencySlo ={{ maxMs: 30_000,                onExceeded: "fail" }}
@@ -953,7 +975,7 @@ export function Optimizer({
       "Scores aggregate. They emit to Prometheus. They show up in the dashboard, and you can query them from the C L I with smithers scores.",
     render: () => {
       printCode(
-`import { llmJudge, faithfulness, relevancy, schemaAdherence } from
+        `import { llmJudge, faithfulness, relevancy, schemaAdherence } from
   "smithers-orchestrator/scorers";
 
 <Task
@@ -986,7 +1008,7 @@ export function Optimizer({
       "On any task you can set memory dot recall to auto-inject the top K most relevant past facts into the prompt.",
     render: () => {
       printCode(
-`import { createMemoryStore } from "smithers-orchestrator/memory";
+        `import { createMemoryStore } from "smithers-orchestrator/memory";
 const ns = { kind: "workflow", id: "code-review" };
 
 <Task
@@ -1173,7 +1195,7 @@ store.setFact(ns, "code-style", { tabs: 2, semi: true }, 30 * 24 * 3600_000);`,
     render: async () => {
       write("\n");
       printCode(
-`<Workflow name="ship-it">
+        `<Workflow name="ship-it">
   <Sequence>
     <Task id="research"  output={outputs.research}>  {/* fast */}
       {async () => { await wait(1.2); return { message: "scanned repo" }; }}
@@ -1206,7 +1228,9 @@ store.setFact(ns, "code-style", { tabs: 2, semi: true }, 30 * 24 * 3600_000);`,
       await runReal(["cancel", subRunId], { allowFailure: true });
       await sleep(200);
 
-      write(`\n${C.grey}$${C.reset} ${C.bold}smithers up sample.tsx --run-id ${subRunId} --resume true --force${C.reset}\n\n`);
+      write(
+        `\n${C.grey}$${C.reset} ${C.bold}smithers up sample.tsx --run-id ${subRunId} --resume true --force${C.reset}\n\n`,
+      );
       await runReal(["up", "sample.tsx", "--run-id", subRunId, "--resume", "true", "--force"]);
       await sleep(400);
 
@@ -1295,7 +1319,7 @@ store.setFact(ns, "code-style", { tabs: 2, semi: true }, 30 * 24 * 3600_000);`,
       "and Smithers hands it to any client that asks. Workflows as full apps, not just task graphs.",
     render: () => {
       printCode(
-`// .smithers/workflows/kanban.tsx
+        `// .smithers/workflows/kanban.tsx
 // .smithers/workflows/kanban.frontend/
 //   index.html · assets/ · manifest.json   ← React app, served by smithers
 
@@ -1323,7 +1347,7 @@ GET  /metrics                       # Prometheus`,
       "Same substrate. Different authoring surface. You can mix both in one workflow.",
     render: () => {
       printCode(
-`import { Smithers } from "smithers-orchestrator";
+        `import { Smithers } from "smithers-orchestrator";
 import { Effect, Schema } from "effect";
 
 const G = Smithers.workflow({
@@ -1342,7 +1366,9 @@ const analyze = G.step("analyze", {
     }),
 });`,
       );
-      write(`\n  ${C.dim}A retry policy is a Schedule. A dependency is a Layer. A timeout is Effect.timeout.${C.reset}\n`);
+      write(
+        `\n  ${C.dim}A retry policy is a Schedule. A dependency is a Layer. A timeout is Effect.timeout.${C.reset}\n`,
+      );
     },
   },
 
@@ -1393,7 +1419,7 @@ const analyze = G.step("analyze", {
     render: () => {
       write("\n");
       printCode(
-`export default smithers((ctx) => (
+        `export default smithers((ctx) => (
   <Workflow name="demo">
     <Task id="slideshow" output={outputs.slideshow}>
       {async () => {
@@ -1446,8 +1472,7 @@ const analyze = G.step("analyze", {
   {
     title: "READY TO TRY?",
     subtitle: "",
-    narration:
-      "Try it. B U N X smithers-orchestrator init. Thanks for watching.",
+    narration: "Try it. B U N X smithers-orchestrator init. Thanks for watching.",
     render: () => {
       write("\n\n\n");
       write(`        ${C.bold}${C.green}bunx smithers-orchestrator init${C.reset}\n`);
@@ -1483,12 +1508,33 @@ async function runSlideshow(ctx: Ctx, startAt: number) {
   const auto = ctx.auto || !isTTY;
 
   const stopKeyboard = startKeyboard((key) => {
-    if (key === "quit") { quit = true; speakStop(); return; }
+    if (key === "quit") {
+      quit = true;
+      speakStop();
+      return;
+    }
     if (demoInFlight) return; // ignore nav while a demo is running
-    if (key === "mute") { ctx.muted = !ctx.muted; speakStop(); pendingNav = "replay"; return; }
-    if (key === "replay") { pendingNav = "replay"; speakStop(); return; }
-    if (key === "next" || key === "skip") { pendingNav = "next"; speakStop(); return; }
-    if (key === "prev") { pendingNav = "prev"; speakStop(); return; }
+    if (key === "mute") {
+      ctx.muted = !ctx.muted;
+      speakStop();
+      pendingNav = "replay";
+      return;
+    }
+    if (key === "replay") {
+      pendingNav = "replay";
+      speakStop();
+      return;
+    }
+    if (key === "next" || key === "skip") {
+      pendingNav = "next";
+      speakStop();
+      return;
+    }
+    if (key === "prev") {
+      pendingNav = "prev";
+      speakStop();
+      return;
+    }
   });
 
   try {
@@ -1501,17 +1547,26 @@ async function runSlideshow(ctx: Ctx, startAt: number) {
         dirty = false;
         if (auto) {
           // Schedule auto-advance — keyboard nav still wins if user hits a key
-          setTimeout(() => { if (!pendingNav) pendingNav = "next"; }, ctx.autoMs);
+          setTimeout(() => {
+            if (!pendingNav) pendingNav = "next";
+          }, ctx.autoMs);
         }
       }
       while (!pendingNav && !quit) await sleep(50);
       if (quit) break;
       const nav = pendingNav;
       pendingNav = null;
-      if (nav === "next" && idx < SLIDES.length - 1) { idx++; dirty = true; }
-      else if (nav === "next" && idx === SLIDES.length - 1) { quit = true; }
-      else if (nav === "prev" && idx > 0) { idx--; dirty = true; }
-      else if (nav === "replay") { dirty = true; }
+      if (nav === "next" && idx < SLIDES.length - 1) {
+        idx++;
+        dirty = true;
+      } else if (nav === "next" && idx === SLIDES.length - 1) {
+        quit = true;
+      } else if (nav === "prev" && idx > 0) {
+        idx--;
+        dirty = true;
+      } else if (nav === "replay") {
+        dirty = true;
+      }
     }
   } finally {
     speakStop();

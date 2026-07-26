@@ -58,10 +58,7 @@ function wordCount(line: string): number {
 }
 
 function lineHash(line: string): string {
-  return createHash("sha256")
-    .update(`${MODEL}|${VOICE}|${INSTRUCTIONS}|${line}`)
-    .digest("hex")
-    .slice(0, 16);
+  return createHash("sha256").update(`${MODEL}|${VOICE}|${INSTRUCTIONS}|${line}`).digest("hex").slice(0, 16);
 }
 
 async function synth(line: string, outMp3: string, apiKey: string): Promise<void> {
@@ -87,8 +84,13 @@ async function synth(line: string, outMp3: string, apiKey: string): Promise<void
 
 async function probeDurationMs(file: string): Promise<number> {
   const probe = await exec("ffprobe", [
-    "-v", "error", "-show_entries", "format=duration",
-    "-of", "default=noprint_wrappers=1:nokey=1", file,
+    "-v",
+    "error",
+    "-show_entries",
+    "format=duration",
+    "-of",
+    "default=noprint_wrappers=1:nokey=1",
+    file,
   ]);
   const secs = Number.parseFloat(probe.stdout.trim());
   if (Number.isFinite(secs) && secs > 0) return Math.round(secs * 1000);
@@ -120,11 +122,7 @@ async function main(): Promise<void> {
     const outFile = join(OUT_DIR, name);
     const hash = lineHash(s.line);
     const prev = previous.get(name);
-    const cached =
-      !force &&
-      prev?.hash === hash &&
-      existsSync(outFile) &&
-      statSync(outFile).size > 0;
+    const cached = !force && prev?.hash === hash && existsSync(outFile) && statSync(outFile).size > 0;
     if (cached) {
       console.log(`[${name}] cached`);
     } else {
@@ -151,10 +149,20 @@ async function main(): Promise<void> {
   let running = 0;
   for (const r of steps) {
     running += r.durationMs;
-    console.log(`${r.i + 1}  ${r.id}${r.id === "live" ? `·${r.beat + 1}` : ""}`.padEnd(24) + String(r.words).padStart(6) + fmt(r.durationMs).padStart(8) + fmt(running).padStart(8));
+    console.log(
+      `${r.i + 1}  ${r.id}${r.id === "live" ? `·${r.beat + 1}` : ""}`.padEnd(24) +
+        String(r.words).padStart(6) +
+        fmt(r.durationMs).padStart(8) +
+        fmt(running).padStart(8),
+    );
   }
   console.log("-".repeat(46));
-  console.log("TOTAL".padEnd(24) + String(steps.reduce((sum, r) => sum + r.words, 0)).padStart(6) + fmt(totalMs).padStart(8) + fmt(totalMs).padStart(8));
+  console.log(
+    "TOTAL".padEnd(24) +
+      String(steps.reduce((sum, r) => sum + r.words, 0)).padStart(6) +
+      fmt(totalMs).padStart(8) +
+      fmt(totalMs).padStart(8),
+  );
 }
 
 main().catch((err) => {

@@ -11,9 +11,7 @@ export interface RepoRecord {
 
 export async function lookupRepo(db: D1Database, repo: string): Promise<RepoRecord | null> {
   const row = await db
-    .prepare(
-      "SELECT repo, mode, quiz, prs_per_month, spend_cap_usd, created_at FROM repos WHERE repo = ?",
-    )
+    .prepare("SELECT repo, mode, quiz, prs_per_month, spend_cap_usd, created_at FROM repos WHERE repo = ?")
     .bind(repo)
     .first<RepoRecord>();
   return row ?? null;

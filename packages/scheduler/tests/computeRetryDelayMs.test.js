@@ -24,12 +24,8 @@ describe("computeRetryDelayMs", () => {
   test("fixed backoff is the default backoff", () => {
     const explicit = { backoff: "fixed", initialDelayMs: 100 };
     const implicit = { initialDelayMs: 100 };
-    expect(computeRetryDelayMs(implicit, 1)).toBe(
-      computeRetryDelayMs(explicit, 1),
-    );
-    expect(computeRetryDelayMs(implicit, 5)).toBe(
-      computeRetryDelayMs(explicit, 5),
-    );
+    expect(computeRetryDelayMs(implicit, 1)).toBe(computeRetryDelayMs(explicit, 1));
+    expect(computeRetryDelayMs(implicit, 5)).toBe(computeRetryDelayMs(explicit, 5));
   });
 
   test("linear backoff is monotonically non-decreasing", () => {
@@ -78,19 +74,13 @@ describe("computeRetryDelayMs", () => {
 
   test("attempt below 1 is treated as attempt=1", () => {
     const policy = { backoff: "fixed", initialDelayMs: 200 };
-    expect(computeRetryDelayMs(policy, 0)).toBe(
-      computeRetryDelayMs(policy, 1),
-    );
-    expect(computeRetryDelayMs(policy, -5)).toBe(
-      computeRetryDelayMs(policy, 1),
-    );
+    expect(computeRetryDelayMs(policy, 0)).toBe(computeRetryDelayMs(policy, 1));
+    expect(computeRetryDelayMs(policy, -5)).toBe(computeRetryDelayMs(policy, 1));
   });
 
   test("non-integer attempts are floored", () => {
     const policy = { backoff: "linear", initialDelayMs: 100 };
-    expect(computeRetryDelayMs(policy, 2.9)).toBe(
-      computeRetryDelayMs(policy, 2),
-    );
+    expect(computeRetryDelayMs(policy, 2.9)).toBe(computeRetryDelayMs(policy, 2));
   });
 
   test("fractional initialDelayMs is floored", () => {

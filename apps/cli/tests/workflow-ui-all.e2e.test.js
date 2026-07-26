@@ -38,8 +38,9 @@ import {
  * If the binary is not installed (e.g. CI), the test is skipped.
  */
 
-const DESCRIPTORS = JSON.parse(readFileSync(resolve(import.meta.dir, "workflow-ui-descriptors.json"), "utf8"))
-  .filter((descriptor) => ["create-workflow", "create-skill", "docs-driven-development"].includes(descriptor.key));
+const DESCRIPTORS = JSON.parse(readFileSync(resolve(import.meta.dir, "workflow-ui-descriptors.json"), "utf8")).filter(
+  (descriptor) => ["create-workflow", "create-skill", "docs-driven-development"].includes(descriptor.key),
+);
 const require = createRequire(import.meta.url);
 
 function resolveChromium() {
@@ -135,88 +136,92 @@ async function checkUi(page, base, descriptor, runId) {
   return missing.length ? `rendered output missing: ${missing.join(" | ")}` : null;
 }
 
-workflowUiTest("every init-pack workflow UI builds + boots; the output-verified set renders real runs", async () => {
-  const binDir = createExecutableDir();
-  writeFakeClaudeBinary(binDir);
-  writeFakeCodexBinary(binDir);
-  writeFakeAntigravityBinary(binDir);
-  const repo = createTempRepo();
-  const env = {
-    HOME: repo.dir,
-    PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
-    ANTHROPIC_API_KEY: "",
-    OPENAI_API_KEY: "sk-test-openai-key",
-    GEMINI_API_KEY: "",
-    GOOGLE_API_KEY: "",
-  };
-  repo.write(".claude/.credentials.json", "{}\n");
-  repo.write(".codex/auth.json", "{}\n");
-  repo.write(".gemini/antigravity-cli/settings.json", "{}\n");
+workflowUiTest(
+  "every init-pack workflow UI builds + boots; the output-verified set renders real runs",
+  async () => {
+    const binDir = createExecutableDir();
+    writeFakeClaudeBinary(binDir);
+    writeFakeCodexBinary(binDir);
+    writeFakeAntigravityBinary(binDir);
+    const repo = createTempRepo();
+    const env = {
+      HOME: repo.dir,
+      PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
+      ANTHROPIC_API_KEY: "",
+      OPENAI_API_KEY: "sk-test-openai-key",
+      GEMINI_API_KEY: "",
+      GOOGLE_API_KEY: "",
+    };
+    repo.write(".claude/.credentials.json", "{}\n");
+    repo.write(".codex/auth.json", "{}\n");
+    repo.write(".gemini/antigravity-cli/settings.json", "{}\n");
 
-  expect(runSmithers(["init"], { cwd: repo.dir, format: "json", env }).exitCode).toBe(0);
-  expect(repo.read(".smithers/gateway.ts")).not.toContain("ui: { entry:");
-  for (const descriptor of DESCRIPTORS) {
-    expect(repo.read(`.smithers/workflows/${descriptor.key}.tsx`)).toContain(
-      `<UI entry="../ui/${descriptor.key}.tsx"`,
-    );
-  }
-
-  // Execute the output-verified workflows for real and capture their run ids.
-  const runIdByKey = {};
-  const runFailures = [];
-  for (const d of DESCRIPTORS.filter((x) => x.verifyOutput)) {
-    const r = runSmithers(["workflow", ...d.launchArgs], { cwd: repo.dir, format: "json", env, timeoutMs: 180_000 });
-    if (r.exitCode === 0 && typeof r.json?.runId === "string") {
-      runIdByKey[d.key] = r.json.runId;
-    } else {
-      const detail = `${r.stdout}\n${r.stderr}`
-        .split("\n")
-        .slice(-20)
-        .join(" ")
-        .slice(0, 1600);
-      runFailures.push(`${d.key}: run exit=${r.exitCode}, status=${String(r.json?.status)}: ${detail}`);
-    }
-  }
-
-  const port = await findOpenPort();
-  const base = `http://127.0.0.1:${port}`;
-  const gatewayProc = spawn(process.execPath, ["run", ".smithers/gateway.ts"], {
-    cwd: repo.dir,
-    env: { ...process.env, ...env, PORT: String(port), HOST: "127.0.0.1" },
-    stdio: "ignore",
-  });
-  let browser;
-  const uiFailures = [];
-  try {
-    expect(await waitForHealth(base)).toBe(true);
-    const workflowsWithUi = await listWorkflowUis(base);
+    expect(runSmithers(["init"], { cwd: repo.dir, format: "json", env }).exitCode).toBe(0);
+    expect(repo.read(".smithers/gateway.ts")).not.toContain("ui: { entry:");
     for (const descriptor of DESCRIPTORS) {
-      expect(workflowsWithUi).toContainEqual(
-        expect.objectContaining({
-          key: descriptor.key,
-          hasUi: true,
-          uiPath: `/workflows/${descriptor.key}`,
-        }),
+      expect(repo.read(`.smithers/workflows/${descriptor.key}.tsx`)).toContain(
+        `<UI entry="../ui/${descriptor.key}.tsx"`,
       );
     }
-    browser = await (await loadChromium()).launch({ headless: true });
-    const page = await browser.newPage();
-    for (const d of DESCRIPTORS) {
-      const tag = d.verifyOutput ? "output" : "boot  ";
-      try {
-        const problem = await checkUi(page, base, d, runIdByKey[d.key]);
-        console.log(`  ${problem ? "FAIL" : "ok  "} [${tag}] ${d.key}${problem ? " — " + problem : ""}`);
-        if (problem) uiFailures.push(`${d.key}: ${problem}`);
-      } catch (err) {
-        console.log(`  FAIL [${tag}] ${d.key} — ${err.message.split("\n")[0]}`);
-        uiFailures.push(`${d.key}: ${err.message.split("\n")[0]}`);
+
+    // Execute the output-verified workflows for real and capture their run ids.
+    const runIdByKey = {};
+    const runFailures = [];
+    for (const d of DESCRIPTORS.filter((x) => x.verifyOutput)) {
+      const r = runSmithers(["workflow", ...d.launchArgs], { cwd: repo.dir, format: "json", env, timeoutMs: 180_000 });
+      if (r.exitCode === 0 && typeof r.json?.runId === "string") {
+        runIdByKey[d.key] = r.json.runId;
+      } else {
+        const detail = `${r.stdout}\n${r.stderr}`.split("\n").slice(-20).join(" ").slice(0, 1600);
+        runFailures.push(`${d.key}: run exit=${r.exitCode}, status=${String(r.json?.status)}: ${detail}`);
       }
     }
-  } finally {
-    try { await browser?.close(); } catch {}
-    try { gatewayProc.kill("SIGTERM"); } catch {}
-  }
 
-  expect(runFailures).toEqual([]);
-  expect(uiFailures).toEqual([]);
-}, 600_000);
+    const port = await findOpenPort();
+    const base = `http://127.0.0.1:${port}`;
+    const gatewayProc = spawn(process.execPath, ["run", ".smithers/gateway.ts"], {
+      cwd: repo.dir,
+      env: { ...process.env, ...env, PORT: String(port), HOST: "127.0.0.1" },
+      stdio: "ignore",
+    });
+    let browser;
+    const uiFailures = [];
+    try {
+      expect(await waitForHealth(base)).toBe(true);
+      const workflowsWithUi = await listWorkflowUis(base);
+      for (const descriptor of DESCRIPTORS) {
+        expect(workflowsWithUi).toContainEqual(
+          expect.objectContaining({
+            key: descriptor.key,
+            hasUi: true,
+            uiPath: `/workflows/${descriptor.key}`,
+          }),
+        );
+      }
+      browser = await (await loadChromium()).launch({ headless: true });
+      const page = await browser.newPage();
+      for (const d of DESCRIPTORS) {
+        const tag = d.verifyOutput ? "output" : "boot  ";
+        try {
+          const problem = await checkUi(page, base, d, runIdByKey[d.key]);
+          console.log(`  ${problem ? "FAIL" : "ok  "} [${tag}] ${d.key}${problem ? " — " + problem : ""}`);
+          if (problem) uiFailures.push(`${d.key}: ${problem}`);
+        } catch (err) {
+          console.log(`  FAIL [${tag}] ${d.key} — ${err.message.split("\n")[0]}`);
+          uiFailures.push(`${d.key}: ${err.message.split("\n")[0]}`);
+        }
+      }
+    } finally {
+      try {
+        await browser?.close();
+      } catch {}
+      try {
+        gatewayProc.kill("SIGTERM");
+      } catch {}
+    }
+
+    expect(runFailures).toEqual([]);
+    expect(uiFailures).toEqual([]);
+  },
+  600_000,
+);

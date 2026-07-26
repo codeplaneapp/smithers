@@ -6,13 +6,29 @@ import { renderPrompt, renderWorkflow } from "smithers-orchestrator/testing";
 
 setDefaultTimeout(45_000);
 
-type Descriptor = { nodeId: string; prompt?: unknown; staticPayload?: unknown; worktreeBaseBranch?: string; [key: string]: unknown };
+type Descriptor = {
+  nodeId: string;
+  prompt?: unknown;
+  staticPayload?: unknown;
+  worktreeBaseBranch?: string;
+  [key: string]: unknown;
+};
 type Frame = { tasks: readonly Descriptor[]; toXml(): string };
 
 const workflows = join(import.meta.dir, "..", "workflows");
 const pathFor = (name: string) => join(workflows, name);
-const render = async (name: string, input: unknown = {}, outputs: Record<string, unknown[]> = {}, extra: Record<string, unknown> = {}) =>
-  await renderWorkflow((await import(pathFor(name))).default, { input, outputs, workflowPath: pathFor(name), ...extra }) as unknown as Frame;
+const render = async (
+  name: string,
+  input: unknown = {},
+  outputs: Record<string, unknown[]> = {},
+  extra: Record<string, unknown> = {},
+) =>
+  (await renderWorkflow((await import(pathFor(name))).default, {
+    input,
+    outputs,
+    workflowPath: pathFor(name),
+    ...extra,
+  })) as unknown as Frame;
 const baseId = (id: string) => id.split("@@", 1)[0] ?? id;
 const optional = (frame: Frame, id: string) => frame.tasks.find((candidate) => baseId(candidate.nodeId) === id);
 const task = (frame: Frame, id: string) => {
@@ -21,7 +37,12 @@ const task = (frame: Frame, id: string) => {
   return found!;
 };
 const prompt = (frame: Frame, id: string) => renderPrompt(task(frame, id).prompt);
-const row = (nodeId: string, iteration: number, value: Record<string, unknown>) => ({ nodeId, iteration, iterationCount: iteration, ...value });
+const row = (nodeId: string, iteration: number, value: Record<string, unknown>) => ({
+  nodeId,
+  iteration,
+  iterationCount: iteration,
+  ...value,
+});
 
 const WORKFLOW = "converge-agentic-ui-library.tsx";
 const LANE_IDS = ["workflow-canvas"];
@@ -40,26 +61,57 @@ describe("converge-agentic-ui-library workflow", () => {
   });
 
   test("review prompt locks scope; closure and cross-seat gate on merges", async () => {
-    const laneRows = LANE_IDS.map((laneId) => row(`conv-${laneId}-result`, 0, {
-      laneId, branch: `agui-conv/conv-run/${laneId}`, worktreePath: `/tmp/conv/${laneId}`,
-      lgtm: true, exhausted: false, attempts: 1, summary: `Lane ${laneId} LGTM.`, seatVerdicts: [],
-    }));
+    const laneRows = LANE_IDS.map((laneId) =>
+      row(`conv-${laneId}-result`, 0, {
+        laneId,
+        branch: `agui-conv/conv-run/${laneId}`,
+        worktreePath: `/tmp/conv/${laneId}`,
+        lgtm: true,
+        exhausted: false,
+        attempts: 1,
+        summary: `Lane ${laneId} LGTM.`,
+        seatVerdicts: [],
+      }),
+    );
     const withLanes = await render(WORKFLOW, {}, { aguiConvLane: laneRows }, { runId: "Conv Run" });
     expect(prompt(withLanes, "merge-workflow-canvas")).toContain("update-ref refs/heads/");
     expect(optional(withLanes, "closure-implement")).toBeUndefined();
 
-    const merges = LANE_IDS.map((laneId) => row(`merge-${laneId}`, 0, { laneId, mergedToMain: true, summary: `landed ${laneId}`, commandsRun: [] }));
-    const withMerges = await render(WORKFLOW, {}, { aguiConvLane: laneRows, aguiConvMerge: merges }, { runId: "Conv Run" });
+    const merges = LANE_IDS.map((laneId) =>
+      row(`merge-${laneId}`, 0, { laneId, mergedToMain: true, summary: `landed ${laneId}`, commandsRun: [] }),
+    );
+    const withMerges = await render(
+      WORKFLOW,
+      {},
+      { aguiConvLane: laneRows, aguiConvMerge: merges },
+      { runId: "Conv Run" },
+    );
     const closure = prompt(withMerges, "closure-implement");
     expect(closure).toContain("MonitorButton");
     expect(closure).toContain("hookComponents.test.tsx");
     expect(optional(withMerges, "cross-adopt-gateway-fable")).toBeUndefined();
 
     const closureGreen = {
-      aguiImpl: [row("closure-implement@@closure-loop=0", 0, { laneId: "closure", status: "implemented", summary: "closure complete and gates pass", filesChanged: ["packages/gateway-ui/src/MonitorButton.tsx"], componentsImplemented: [], componentsDeferred: [] })],
-      aguiCi: [row("closure-ci@@closure-loop=0", 0, { scope: "smithers", allPassed: true, summary: "green", commands: [] })],
+      aguiImpl: [
+        row("closure-implement@@closure-loop=0", 0, {
+          laneId: "closure",
+          status: "implemented",
+          summary: "closure complete and gates pass",
+          filesChanged: ["packages/gateway-ui/src/MonitorButton.tsx"],
+          componentsImplemented: [],
+          componentsDeferred: [],
+        }),
+      ],
+      aguiCi: [
+        row("closure-ci@@closure-loop=0", 0, { scope: "smithers", allPassed: true, summary: "green", commands: [] }),
+      ],
     };
-    const withClosure = await render(WORKFLOW, {}, { aguiConvLane: laneRows, aguiConvMerge: merges, ...closureGreen }, { runId: "Conv Run" });
+    const withClosure = await render(
+      WORKFLOW,
+      {},
+      { aguiConvLane: laneRows, aguiConvMerge: merges, ...closureGreen },
+      { runId: "Conv Run" },
+    );
     const cross = prompt(withClosure, "cross-adopt-gateway-fable");
     expect(cross).toContain("ALREADY-LANDED");
     expect(cross).toContain("/Users/williamcory/multi");

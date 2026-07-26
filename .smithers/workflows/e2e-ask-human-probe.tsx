@@ -32,10 +32,7 @@ export default smithers((ctx) => {
         output={outputs.ask}
         outputSchema={askSchema}
         maxAttempts={10}
-        prompt={
-          "Answer the E2E ask probe. Reply with JSON: " +
-          '{"answer":"<any non-empty string>"}.'
-        }
+        prompt={"Answer the E2E ask probe. Reply with JSON: " + '{"answer":"<any non-empty string>"}.'}
       />
 
       {ask ? (

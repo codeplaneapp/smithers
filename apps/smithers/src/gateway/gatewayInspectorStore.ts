@@ -20,8 +20,7 @@ type GatewayInspectorState = {
 export const useGatewayInspectorStore = create<GatewayInspectorState>((set) => ({
   viewByRun: {},
   selectedNodeByRun: {},
-  setView: (runId, view) =>
-    set((state) => ({ viewByRun: { ...state.viewByRun, [runId]: view } })),
+  setView: (runId, view) => set((state) => ({ viewByRun: { ...state.viewByRun, [runId]: view } })),
   selectNode: (runId, nodeId) =>
     set((state) => ({
       selectedNodeByRun: { ...state.selectedNodeByRun, [runId]: nodeId },

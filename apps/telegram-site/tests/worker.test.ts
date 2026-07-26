@@ -68,19 +68,28 @@ describe("telegram site worker", () => {
   });
 
   test("falls back to the home page for marketing paths", async () => {
-    const response = await createTelegramSiteWorker().fetch(new Request("https://telegram.smithers.sh/learn"), makeEnv());
+    const response = await createTelegramSiteWorker().fetch(
+      new Request("https://telegram.smithers.sh/learn"),
+      makeEnv(),
+    );
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("Smithers");
   });
 
   test("redirects /join to the community invite the bare domain used to serve", async () => {
-    const response = await createTelegramSiteWorker().fetch(new Request("https://telegram.smithers.sh/join"), makeEnv());
+    const response = await createTelegramSiteWorker().fetch(
+      new Request("https://telegram.smithers.sh/join"),
+      makeEnv(),
+    );
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe("https://t.me/+ANThR9bHDLAwMjUx");
   });
 
   test("reports health without touching static assets", async () => {
-    const response = await createTelegramSiteWorker().fetch(new Request("https://telegram.smithers.sh/healthz"), makeEnv());
+    const response = await createTelegramSiteWorker().fetch(
+      new Request("https://telegram.smithers.sh/healthz"),
+      makeEnv(),
+    );
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, service: "telegram-site" });
   });
@@ -91,7 +100,10 @@ describe("reference Mini App /approve endpoint", () => {
 
   test("accepts a validly signed approval and echoes the decision", async () => {
     const initData = signInitData(initDataFields(), BOT_TOKEN);
-    const response = await worker.fetch(approveRequest(initData, { requestId: "r-1", decision: "approve" }), makeEnv({ TELEGRAM_BOT_TOKEN: BOT_TOKEN }));
+    const response = await worker.fetch(
+      approveRequest(initData, { requestId: "r-1", decision: "approve" }),
+      makeEnv({ TELEGRAM_BOT_TOKEN: BOT_TOKEN }),
+    );
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       ok: true,
@@ -104,7 +116,10 @@ describe("reference Mini App /approve endpoint", () => {
   test("rejects a tampered initData with 401 and never leaks the token", async () => {
     const initData = signInitData(initDataFields(), BOT_TOKEN);
     const tampered = initData.replace("query_id=AAApprove", "query_id=forged");
-    const response = await worker.fetch(approveRequest(tampered, { requestId: "r-1", decision: "approve" }), makeEnv({ TELEGRAM_BOT_TOKEN: BOT_TOKEN }));
+    const response = await worker.fetch(
+      approveRequest(tampered, { requestId: "r-1", decision: "approve" }),
+      makeEnv({ TELEGRAM_BOT_TOKEN: BOT_TOKEN }),
+    );
     expect(response.status).toBe(401);
     const text = await response.text();
     expect(text).toContain("bad_signature");
@@ -112,13 +127,19 @@ describe("reference Mini App /approve endpoint", () => {
   });
 
   test("rejects a missing Authorization header with 401", async () => {
-    const response = await worker.fetch(approveRequest(null, { decision: "approve" }), makeEnv({ TELEGRAM_BOT_TOKEN: BOT_TOKEN }));
+    const response = await worker.fetch(
+      approveRequest(null, { decision: "approve" }),
+      makeEnv({ TELEGRAM_BOT_TOKEN: BOT_TOKEN }),
+    );
     expect(response.status).toBe(401);
   });
 
   test("rejects an unknown decision with 400", async () => {
     const initData = signInitData(initDataFields(), BOT_TOKEN);
-    const response = await worker.fetch(approveRequest(initData, { decision: "maybe" }), makeEnv({ TELEGRAM_BOT_TOKEN: BOT_TOKEN }));
+    const response = await worker.fetch(
+      approveRequest(initData, { decision: "maybe" }),
+      makeEnv({ TELEGRAM_BOT_TOKEN: BOT_TOKEN }),
+    );
     expect(response.status).toBe(400);
   });
 
@@ -135,7 +156,10 @@ describe("reference Mini App /approve endpoint", () => {
   });
 
   test("serves the Mini App page on GET /approve", async () => {
-    const response = await worker.fetch(new Request("https://telegram.smithers.sh/approve"), makeEnv({ TELEGRAM_BOT_TOKEN: BOT_TOKEN }));
+    const response = await worker.fetch(
+      new Request("https://telegram.smithers.sh/approve"),
+      makeEnv({ TELEGRAM_BOT_TOKEN: BOT_TOKEN }),
+    );
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("Approve");
   });
@@ -177,10 +201,7 @@ describe("reference Mini App /approve endpoint", () => {
   test("a valid signature with a non-JSON user field yields a null approver", async () => {
     // The `user` field survives HMAC verification but is not valid JSON, so
     // parseJson swallows the error and returns null.
-    const initData = signInitData(
-      { auth_date: String(Math.floor(Date.now() / 1000)), user: "not-json" },
-      BOT_TOKEN,
-    );
+    const initData = signInitData({ auth_date: String(Math.floor(Date.now() / 1000)), user: "not-json" }, BOT_TOKEN);
     const response = await worker.fetch(
       approveRequest(initData, { decision: "reject", requestId: "r-2" }),
       makeEnv({ TELEGRAM_BOT_TOKEN: BOT_TOKEN }),

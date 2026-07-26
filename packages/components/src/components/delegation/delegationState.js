@@ -24,16 +24,14 @@ import { DEFAULT_TIER_ORDER } from "./delegationSchemasRuntime.js";
  * @returns {Record<string, any>[]}
  */
 export function readRows(ctx, target) {
-    if (!ctx || target == null)
-        return [];
-    try {
-        const name = ctx.resolveTableName(target);
-        const rows = ctx.outputs(name);
-        return Array.isArray(rows) ? rows : [];
-    }
-    catch {
-        return [];
-    }
+  if (!ctx || target == null) return [];
+  try {
+    const name = ctx.resolveTableName(target);
+    const rows = ctx.outputs(name);
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -48,7 +46,7 @@ export function readRows(ctx, target) {
  * @returns {string}
  */
 export function physicalId(idPrefix, logicalId, phase) {
-    return `${idPrefix}:${logicalId.replaceAll("/", ":")}:${phase}`;
+  return `${idPrefix}:${logicalId.replaceAll("/", ":")}:${phase}`;
 }
 
 /**
@@ -58,11 +56,11 @@ export function physicalId(idPrefix, logicalId, phase) {
  * @returns {Record<string, any>[]}
  */
 export function rowsForNode(rows, nodeId) {
-    return rows.filter((row) => {
-        const id = typeof row.nodeId === "string" ? row.nodeId : "";
-        const at = id.indexOf("@@");
-        return (at === -1 ? id : id.slice(0, at)) === nodeId;
-    });
+  return rows.filter((row) => {
+    const id = typeof row.nodeId === "string" ? row.nodeId : "";
+    const at = id.indexOf("@@");
+    return (at === -1 ? id : id.slice(0, at)) === nodeId;
+  });
 }
 
 /**
@@ -71,16 +69,16 @@ export function rowsForNode(rows, nodeId) {
  * @returns {Record<string, any> | undefined}
  */
 export function latestRow(rows) {
-    let best;
-    let bestIteration = -Infinity;
-    for (const row of rows) {
-        const iter = Number.isFinite(Number(row.iteration)) ? Number(row.iteration) : 0;
-        if (!best || iter >= bestIteration) {
-            best = row;
-            bestIteration = iter;
-        }
+  let best;
+  let bestIteration = -Infinity;
+  for (const row of rows) {
+    const iter = Number.isFinite(Number(row.iteration)) ? Number(row.iteration) : 0;
+    if (!best || iter >= bestIteration) {
+      best = row;
+      bestIteration = iter;
     }
-    return best;
+  }
+  return best;
 }
 
 /**
@@ -90,18 +88,17 @@ export function latestRow(rows) {
  * @returns {Map<string, { plan: DcPlanRow; versions: number }>}
  */
 export function foldPlans(planRows) {
-    /** @type {Map<string, { plan: DcPlanRow; versions: number }>} */
-    const plans = new Map();
-    for (const row of planRows) {
-        if (typeof row.logicalId !== "string")
-            continue;
-        const prev = plans.get(row.logicalId);
-        plans.set(row.logicalId, {
-            plan: /** @type {DcPlanRow} */ (/** @type {unknown} */ (row)),
-            versions: (prev?.versions ?? 0) + 1,
-        });
-    }
-    return plans;
+  /** @type {Map<string, { plan: DcPlanRow; versions: number }>} */
+  const plans = new Map();
+  for (const row of planRows) {
+    if (typeof row.logicalId !== "string") continue;
+    const prev = plans.get(row.logicalId);
+    plans.set(row.logicalId, {
+      plan: /** @type {DcPlanRow} */ (/** @type {unknown} */ (row)),
+      versions: (prev?.versions ?? 0) + 1,
+    });
+  }
+  return plans;
 }
 
 /**
@@ -123,34 +120,34 @@ export function foldPlans(planRows) {
  * @returns {Map<string, DelegationNodeInfo>}
  */
 export function nodeIndex(plans) {
-    /** @type {Map<string, DelegationNodeInfo>} */
-    const nodes = new Map();
-    for (const [logicalId, { plan }] of plans) {
-        for (const child of plan.children ?? []) {
-            nodes.set(child.logicalId, {
-                logicalId: child.logicalId,
-                parentId: logicalId,
-                tier: child.tier,
-                kind: child.kind,
-                title: child.title,
-                brief: child.brief,
-                estimate: child.estimate,
-            });
-        }
+  /** @type {Map<string, DelegationNodeInfo>} */
+  const nodes = new Map();
+  for (const [logicalId, { plan }] of plans) {
+    for (const child of plan.children ?? []) {
+      nodes.set(child.logicalId, {
+        logicalId: child.logicalId,
+        parentId: logicalId,
+        tier: child.tier,
+        kind: child.kind,
+        title: child.title,
+        brief: child.brief,
+        estimate: child.estimate,
+      });
     }
-    for (const [logicalId, { plan }] of plans) {
-        const declared = nodes.get(logicalId);
-        nodes.set(logicalId, {
-            logicalId,
-            parentId: declared?.parentId ?? null,
-            tier: plan.tier,
-            kind: "chunk",
-            title: plan.title,
-            brief: plan.brief,
-            estimate: plan.subtreeEstimate ?? declared?.estimate,
-        });
-    }
-    return nodes;
+  }
+  for (const [logicalId, { plan }] of plans) {
+    const declared = nodes.get(logicalId);
+    nodes.set(logicalId, {
+      logicalId,
+      parentId: declared?.parentId ?? null,
+      tier: plan.tier,
+      kind: "chunk",
+      title: plan.title,
+      brief: plan.brief,
+      estimate: plan.subtreeEstimate ?? declared?.estimate,
+    });
+  }
+  return nodes;
 }
 
 /**
@@ -160,15 +157,15 @@ export function nodeIndex(plans) {
  * @returns {DelegationNodeInfo[]}
  */
 export function unplannedChunks(plans) {
-    const nodes = nodeIndex(plans);
-    /** @type {DelegationNodeInfo[]} */
-    const result = [];
-    for (const node of nodes.values()) {
-        if (node.kind === "chunk" && !plans.has(node.logicalId)) {
-            result.push(node);
-        }
+  const nodes = nodeIndex(plans);
+  /** @type {DelegationNodeInfo[]} */
+  const result = [];
+  for (const node of nodes.values()) {
+    if (node.kind === "chunk" && !plans.has(node.logicalId)) {
+      result.push(node);
     }
-    return result;
+  }
+  return result;
 }
 
 /**
@@ -178,15 +175,15 @@ export function unplannedChunks(plans) {
  * @returns {DelegationNodeInfo[]}
  */
 export function frontierLeaves(plans) {
-    const nodes = nodeIndex(plans);
-    /** @type {DelegationNodeInfo[]} */
-    const result = [];
-    for (const node of nodes.values()) {
-        if (node.kind === "leaf" && !plans.has(node.logicalId)) {
-            result.push(node);
-        }
+  const nodes = nodeIndex(plans);
+  /** @type {DelegationNodeInfo[]} */
+  const result = [];
+  for (const node of nodes.values()) {
+    if (node.kind === "leaf" && !plans.has(node.logicalId)) {
+      result.push(node);
     }
-    return result;
+  }
+  return result;
 }
 
 /**
@@ -196,7 +193,7 @@ export function frontierLeaves(plans) {
  * @returns {boolean}
  */
 export function planningComplete(plans) {
-    return plans.size > 0 && unplannedChunks(plans).length === 0;
+  return plans.size > 0 && unplannedChunks(plans).length === 0;
 }
 
 /**
@@ -205,14 +202,14 @@ export function planningComplete(plans) {
  * @returns {Map<string, DcGatesRow>}
  */
 export function foldGates(gatesRows) {
-    /** @type {Map<string, DcGatesRow>} */
-    const map = new Map();
-    for (const row of gatesRows) {
-        if (typeof row.logicalId === "string") {
-            map.set(row.logicalId, /** @type {DcGatesRow} */ (/** @type {unknown} */ (row)));
-        }
+  /** @type {Map<string, DcGatesRow>} */
+  const map = new Map();
+  for (const row of gatesRows) {
+    if (typeof row.logicalId === "string") {
+      map.set(row.logicalId, /** @type {DcGatesRow} */ (/** @type {unknown} */ (row)));
     }
-    return map;
+  }
+  return map;
 }
 
 /**
@@ -225,36 +222,36 @@ export function foldGates(gatesRows) {
  * @returns {string[]}
  */
 export function dependentsOf(logicalId, plans, gates) {
-    const nodes = nodeIndex(plans);
-    /** @type {Map<string, string[]>} */
-    const forward = new Map();
-    for (const node of nodes.values()) {
-        if (node.parentId) {
-            const list = forward.get(node.parentId) ?? [];
-            list.push(node.logicalId);
-            forward.set(node.parentId, list);
-        }
+  const nodes = nodeIndex(plans);
+  /** @type {Map<string, string[]>} */
+  const forward = new Map();
+  for (const node of nodes.values()) {
+    if (node.parentId) {
+      const list = forward.get(node.parentId) ?? [];
+      list.push(node.logicalId);
+      forward.set(node.parentId, list);
     }
-    for (const [id, row] of gates) {
-        for (const dep of row.depsLogical ?? []) {
-            const list = forward.get(dep) ?? [];
-            list.push(id);
-            forward.set(dep, list);
-        }
+  }
+  for (const [id, row] of gates) {
+    for (const dep of row.depsLogical ?? []) {
+      const list = forward.get(dep) ?? [];
+      list.push(id);
+      forward.set(dep, list);
     }
-    /** @type {Set<string>} */
-    const seen = new Set();
-    const queue = [logicalId];
-    while (queue.length > 0) {
-        const current = /** @type {string} */ (queue.shift());
-        for (const next of forward.get(current) ?? []) {
-            if (!seen.has(next) && next !== logicalId) {
-                seen.add(next);
-                queue.push(next);
-            }
-        }
+  }
+  /** @type {Set<string>} */
+  const seen = new Set();
+  const queue = [logicalId];
+  while (queue.length > 0) {
+    const current = /** @type {string} */ (queue.shift());
+    for (const next of forward.get(current) ?? []) {
+      if (!seen.has(next) && next !== logicalId) {
+        seen.add(next);
+        queue.push(next);
+      }
     }
-    return [...seen];
+  }
+  return [...seen];
 }
 
 /**
@@ -265,15 +262,14 @@ export function dependentsOf(logicalId, plans, gates) {
  * @returns {string | null}
  */
 export function planOwnerOf(logicalId, plans) {
-    const nodes = nodeIndex(plans);
-    /** @type {string | null} */
-    let current = logicalId;
-    while (current) {
-        if (plans.has(current))
-            return current;
-        current = nodes.get(current)?.parentId ?? null;
-    }
-    return null;
+  const nodes = nodeIndex(plans);
+  /** @type {string | null} */
+  let current = logicalId;
+  while (current) {
+    if (plans.has(current)) return current;
+    current = nodes.get(current)?.parentId ?? null;
+  }
+  return null;
 }
 
 /**
@@ -284,8 +280,9 @@ export function planOwnerOf(logicalId, plans) {
  * @returns {DelegationNodeInfo[]}
  */
 export function leavesUnder(logicalId, plans) {
-    return frontierLeaves(plans).filter((leaf) => leaf.logicalId === logicalId ||
-        leaf.logicalId.startsWith(`${logicalId}/`));
+  return frontierLeaves(plans).filter(
+    (leaf) => leaf.logicalId === logicalId || leaf.logicalId.startsWith(`${logicalId}/`),
+  );
 }
 
 /**
@@ -295,7 +292,7 @@ export function leavesUnder(logicalId, plans) {
  * @returns {string}
  */
 export function probeIdFor(parentLogicalId, riskId) {
-    return `${parentLogicalId}#${riskId}`;
+  return `${parentLogicalId}#${riskId}`;
 }
 
 /**
@@ -304,21 +301,21 @@ export function probeIdFor(parentLogicalId, riskId) {
  * @returns {Array<{ parentLogicalId: string; probeId: string; kind: "poc" | "research"; risk: DcPlanRow["risks"][number] }>}
  */
 export function probesRequested(plans) {
-    /** @type {Array<{ parentLogicalId: string; probeId: string; kind: "poc" | "research"; risk: DcPlanRow["risks"][number] }>} */
-    const result = [];
-    for (const [logicalId, { plan }] of plans) {
-        for (const risk of plan.risks ?? []) {
-            if (risk.probe === "poc" || risk.probe === "research") {
-                result.push({
-                    parentLogicalId: logicalId,
-                    probeId: probeIdFor(logicalId, risk.id),
-                    kind: risk.probe,
-                    risk,
-                });
-            }
-        }
+  /** @type {Array<{ parentLogicalId: string; probeId: string; kind: "poc" | "research"; risk: DcPlanRow["risks"][number] }>} */
+  const result = [];
+  for (const [logicalId, { plan }] of plans) {
+    for (const risk of plan.risks ?? []) {
+      if (risk.probe === "poc" || risk.probe === "research") {
+        result.push({
+          parentLogicalId: logicalId,
+          probeId: probeIdFor(logicalId, risk.id),
+          kind: risk.probe,
+          risk,
+        });
+      }
     }
-    return result;
+  }
+  return result;
 }
 
 /**
@@ -336,42 +333,40 @@ export function probesRequested(plans) {
  * @returns {DeriskTrigger[]}
  */
 export function pendingTriggers(probeRows, editRows, replanRows, chunkFailures = []) {
-    const addressed = new Set(replanRows
-        .map((row) => row?.trigger?.ref)
-        .filter((ref) => typeof ref === "string"));
-    /** @type {DeriskTrigger[]} */
-    const triggers = [];
-    for (const row of probeRows) {
-        if (row.planImpact === "changes" && !addressed.has(row.probeId)) {
-            triggers.push({
-                type: "probe",
-                ref: String(row.probeId),
-                flagged: String(row.parentLogicalId),
-                detail: row,
-            });
-        }
+  const addressed = new Set(replanRows.map((row) => row?.trigger?.ref).filter((ref) => typeof ref === "string"));
+  /** @type {DeriskTrigger[]} */
+  const triggers = [];
+  for (const row of probeRows) {
+    if (row.planImpact === "changes" && !addressed.has(row.probeId)) {
+      triggers.push({
+        type: "probe",
+        ref: String(row.probeId),
+        flagged: String(row.parentLogicalId),
+        detail: row,
+      });
     }
-    for (const row of editRows) {
-        if (typeof row.editId === "string" && !addressed.has(row.editId)) {
-            triggers.push({
-                type: "user-edit",
-                ref: row.editId,
-                flagged: String(row.logicalId),
-                detail: row,
-            });
-        }
+  }
+  for (const row of editRows) {
+    if (typeof row.editId === "string" && !addressed.has(row.editId)) {
+      triggers.push({
+        type: "user-edit",
+        ref: row.editId,
+        flagged: String(row.logicalId),
+        detail: row,
+      });
     }
-    for (const failure of chunkFailures) {
-        if (!addressed.has(failure.ref)) {
-            triggers.push({
-                type: "review-fail",
-                ref: failure.ref,
-                flagged: failure.logicalId,
-                detail: failure,
-            });
-        }
+  }
+  for (const failure of chunkFailures) {
+    if (!addressed.has(failure.ref)) {
+      triggers.push({
+        type: "review-fail",
+        ref: failure.ref,
+        flagged: failure.logicalId,
+        detail: failure,
+      });
     }
-    return triggers;
+  }
+  return triggers;
 }
 
 /**
@@ -387,11 +382,10 @@ export function pendingTriggers(probeRows, editRows, replanRows, chunkFailures =
  * @returns {string}
  */
 export function triggerTargetOf(flagged, plans) {
-    const hash = flagged.indexOf("#");
-    const base = hash === -1 ? flagged : flagged.slice(0, hash);
-    if (base === "goal" && !plans.has("goal"))
-        return "root";
-    return base;
+  const hash = flagged.indexOf("#");
+  const base = hash === -1 ? flagged : flagged.slice(0, hash);
+  if (base === "goal" && !plans.has("goal")) return "root";
+  return base;
 }
 
 /**
@@ -401,7 +395,7 @@ export function triggerTargetOf(flagged, plans) {
  * @returns {number}
  */
 export function replanCountFor(replanRows, logicalId) {
-    return replanRows.filter((row) => row.logicalId === logicalId).length;
+  return replanRows.filter((row) => row.logicalId === logicalId).length;
 }
 
 /**
@@ -410,19 +404,16 @@ export function replanCountFor(replanRows, logicalId) {
  * @returns {{ tokens: number; costUsd: number; minutes: number }}
  */
 export function actualTotals(execRows) {
-    const totals = { tokens: 0, costUsd: 0, minutes: 0 };
-    for (const row of execRows) {
-        const actual = row?.actual;
-        if (actual && typeof actual === "object") {
-            if (typeof actual.tokens === "number")
-                totals.tokens += actual.tokens;
-            if (typeof actual.costUsd === "number")
-                totals.costUsd += actual.costUsd;
-            if (typeof actual.minutes === "number")
-                totals.minutes += actual.minutes;
-        }
+  const totals = { tokens: 0, costUsd: 0, minutes: 0 };
+  for (const row of execRows) {
+    const actual = row?.actual;
+    if (actual && typeof actual === "object") {
+      if (typeof actual.tokens === "number") totals.tokens += actual.tokens;
+      if (typeof actual.costUsd === "number") totals.costUsd += actual.costUsd;
+      if (typeof actual.minutes === "number") totals.minutes += actual.minutes;
     }
-    return totals;
+  }
+  return totals;
 }
 
 /**
@@ -433,25 +424,21 @@ export function actualTotals(execRows) {
  * @param {string | undefined} approvalPolicy
  */
 export function splitGates(gatesRow, approvalPolicy) {
-    /** @type {Extract<import("./delegationSchemas.ts").Gate, { method: "review" }>[]} */
-    const reviews = [];
-    /** @type {Extract<import("./delegationSchemas.ts").Gate, { method: "check" }>[]} */
-    const checks = [];
-    /** @type {Extract<import("./delegationSchemas.ts").Gate, { method: "approval" }>[]} */
-    const approvals = [];
-    /** @type {Extract<import("./delegationSchemas.ts").Gate, { method: "preview" }>[]} */
-    const previews = [];
-    for (const gate of gatesRow?.gates ?? []) {
-        if (gate.method === "review")
-            reviews.push(gate);
-        else if (gate.method === "check")
-            checks.push(gate);
-        else if (gate.method === "approval" && approvalPolicy)
-            approvals.push(gate);
-        else if (gate.method === "preview")
-            previews.push(gate);
-    }
-    return { reviews, checks, approvals, previews };
+  /** @type {Extract<import("./delegationSchemas.ts").Gate, { method: "review" }>[]} */
+  const reviews = [];
+  /** @type {Extract<import("./delegationSchemas.ts").Gate, { method: "check" }>[]} */
+  const checks = [];
+  /** @type {Extract<import("./delegationSchemas.ts").Gate, { method: "approval" }>[]} */
+  const approvals = [];
+  /** @type {Extract<import("./delegationSchemas.ts").Gate, { method: "preview" }>[]} */
+  const previews = [];
+  for (const gate of gatesRow?.gates ?? []) {
+    if (gate.method === "review") reviews.push(gate);
+    else if (gate.method === "check") checks.push(gate);
+    else if (gate.method === "approval" && approvalPolicy) approvals.push(gate);
+    else if (gate.method === "preview") previews.push(gate);
+  }
+  return { reviews, checks, approvals, previews };
 }
 
 /**
@@ -463,7 +450,7 @@ export function splitGates(gatesRow, approvalPolicy) {
  * @returns {string}
  */
 export function devPreviewNodeId(idPrefix, logicalId, index) {
-    return physicalId(idPrefix, logicalId, index === 0 ? "dev-preview" : `dev-preview-${index + 1}`);
+  return physicalId(idPrefix, logicalId, index === 0 ? "dev-preview" : `dev-preview-${index + 1}`);
 }
 
 /**
@@ -482,35 +469,39 @@ export function devPreviewNodeId(idPrefix, logicalId, index) {
  * }} opts
  */
 export function leafAttemptState(opts) {
-    const ownExec = rowsForNode(opts.execRows, opts.execId);
-    const latestIteration = ownExec.reduce((max, row) => Math.max(max, Number(row.iteration) || 0), -1);
-    const attempts = ownExec.length;
-    /** @type {string[]} */
-    const failedFeedback = [];
-    let allPass = attempts > 0;
-    for (const gateNodeId of opts.gateNodeIds) {
-        const rows = rowsForNode(opts.reviewRows, gateNodeId).filter((row) => (Number(row.iteration) || 0) === latestIteration);
-        const latest = rows[rows.length - 1];
-        if (!latest || latest.verdict !== "pass") {
-            allPass = false;
-        }
-        if (latest && latest.verdict === "fail") {
-            failedFeedback.push(String(latest.feedback ?? ""));
-        }
+  const ownExec = rowsForNode(opts.execRows, opts.execId);
+  const latestIteration = ownExec.reduce((max, row) => Math.max(max, Number(row.iteration) || 0), -1);
+  const attempts = ownExec.length;
+  /** @type {string[]} */
+  const failedFeedback = [];
+  let allPass = attempts > 0;
+  for (const gateNodeId of opts.gateNodeIds) {
+    const rows = rowsForNode(opts.reviewRows, gateNodeId).filter(
+      (row) => (Number(row.iteration) || 0) === latestIteration,
+    );
+    const latest = rows[rows.length - 1];
+    if (!latest || latest.verdict !== "pass") {
+      allPass = false;
     }
-    // Developer-preview gates: the built artifact (builtOk) is REQUIRED for
-    // the node to pass; a failed build fails the attempt like a failed review.
-    for (const previewNodeId of opts.previewNodeIds ?? []) {
-        const rows = rowsForNode(opts.devPreviewRows ?? [], previewNodeId).filter((row) => (Number(row.iteration) || 0) === latestIteration);
-        const latest = rows[rows.length - 1];
-        if (!latest || latest.builtOk !== true) {
-            allPass = false;
-        }
-        if (latest && latest.builtOk !== true) {
-            failedFeedback.push(`Developer preview failed to build: ${String(latest.summary ?? "")}`);
-        }
+    if (latest && latest.verdict === "fail") {
+      failedFeedback.push(String(latest.feedback ?? ""));
     }
-    return { attempts, latestIteration, allPass, failedFeedback };
+  }
+  // Developer-preview gates: the built artifact (builtOk) is REQUIRED for
+  // the node to pass; a failed build fails the attempt like a failed review.
+  for (const previewNodeId of opts.previewNodeIds ?? []) {
+    const rows = rowsForNode(opts.devPreviewRows ?? [], previewNodeId).filter(
+      (row) => (Number(row.iteration) || 0) === latestIteration,
+    );
+    const latest = rows[rows.length - 1];
+    if (!latest || latest.builtOk !== true) {
+      allPass = false;
+    }
+    if (latest && latest.builtOk !== true) {
+      failedFeedback.push(`Developer preview failed to build: ${String(latest.summary ?? "")}`);
+    }
+  }
+  return { attempts, latestIteration, allPass, failedFeedback };
 }
 
 /**
@@ -530,23 +521,24 @@ export function leafAttemptState(opts) {
  * @returns {boolean}
  */
 export function leafComplete(opts) {
-    const gatesRow = opts.gates.get(opts.leaf.logicalId);
-    const { reviews, checks, approvals, previews } = splitGates(gatesRow, opts.approvalPolicy);
-    const gateNodeIds = [...reviews, ...checks].map((_, i) => physicalId(opts.idPrefix, opts.leaf.logicalId, `review-${i + 1}`));
-    const state = leafAttemptState({
-        execRows: opts.execRows,
-        reviewRows: opts.reviewRows,
-        execId: physicalId(opts.idPrefix, opts.leaf.logicalId, "exec"),
-        gateNodeIds,
-        devPreviewRows: opts.devPreviewRows ?? [],
-        previewNodeIds: previews.map((_, i) => devPreviewNodeId(opts.idPrefix, opts.leaf.logicalId, i)),
-    });
-    if (!state.allPass)
-        return false;
-    return approvals.every((_, i) => {
-        const rows = rowsForNode(opts.approvalRows, physicalId(opts.idPrefix, opts.leaf.logicalId, `approval-${i + 1}`));
-        return rows.some((row) => row.approved === true);
-    });
+  const gatesRow = opts.gates.get(opts.leaf.logicalId);
+  const { reviews, checks, approvals, previews } = splitGates(gatesRow, opts.approvalPolicy);
+  const gateNodeIds = [...reviews, ...checks].map((_, i) =>
+    physicalId(opts.idPrefix, opts.leaf.logicalId, `review-${i + 1}`),
+  );
+  const state = leafAttemptState({
+    execRows: opts.execRows,
+    reviewRows: opts.reviewRows,
+    execId: physicalId(opts.idPrefix, opts.leaf.logicalId, "exec"),
+    gateNodeIds,
+    devPreviewRows: opts.devPreviewRows ?? [],
+    previewNodeIds: previews.map((_, i) => devPreviewNodeId(opts.idPrefix, opts.leaf.logicalId, i)),
+  });
+  if (!state.allPass) return false;
+  return approvals.every((_, i) => {
+    const rows = rowsForNode(opts.approvalRows, physicalId(opts.idPrefix, opts.leaf.logicalId, `approval-${i + 1}`));
+    return rows.some((row) => row.approved === true);
+  });
 }
 
 /**
@@ -572,27 +564,26 @@ export function leafComplete(opts) {
  * @returns {ChunkGateFailure[]}
  */
 export function chunkGateFailures(opts) {
-    /** @type {ChunkGateFailure[]} */
-    const failures = [];
-    for (const node of nodeIndex(opts.plans).values()) {
-        if (node.kind === "leaf")
-            continue;
-        const { reviews } = splitGates(opts.gates.get(node.logicalId), opts.approvalPolicy);
-        for (let i = 0; i < reviews.length; i++) {
-            const gateNodeId = physicalId(opts.idPrefix, node.logicalId, `review-${i + 1}`);
-            const rows = rowsForNode(opts.reviewRows, gateNodeId);
-            const latest = rows[rows.length - 1];
-            if (latest && latest.verdict === "fail") {
-                failures.push({
-                    logicalId: node.logicalId,
-                    gateNodeId,
-                    ref: `${gateNodeId}#fail-${rows.length}`,
-                    feedback: String(latest.feedback ?? ""),
-                });
-            }
-        }
+  /** @type {ChunkGateFailure[]} */
+  const failures = [];
+  for (const node of nodeIndex(opts.plans).values()) {
+    if (node.kind === "leaf") continue;
+    const { reviews } = splitGates(opts.gates.get(node.logicalId), opts.approvalPolicy);
+    for (let i = 0; i < reviews.length; i++) {
+      const gateNodeId = physicalId(opts.idPrefix, node.logicalId, `review-${i + 1}`);
+      const rows = rowsForNode(opts.reviewRows, gateNodeId);
+      const latest = rows[rows.length - 1];
+      if (latest && latest.verdict === "fail") {
+        failures.push({
+          logicalId: node.logicalId,
+          gateNodeId,
+          ref: `${gateNodeId}#fail-${rows.length}`,
+          feedback: String(latest.feedback ?? ""),
+        });
+      }
     }
-    return failures;
+  }
+  return failures;
 }
 
 /**
@@ -615,24 +606,19 @@ export function chunkGateFailures(opts) {
  * @returns {boolean}
  */
 export function executionComplete(opts) {
-    if (!planningComplete(opts.plans))
-        return false;
-    const leaves = frontierLeaves(opts.plans);
-    if (leaves.length === 0 || !leaves.every((leaf) => leafComplete({ ...opts, leaf })))
-        return false;
-    const failures = chunkGateFailures(opts);
-    if (failures.length === 0)
-        return true;
-    const maxRounds = opts.maxDeriskRounds ?? 3;
-    const rr = opts.replanRows ?? [];
-    const addressed = new Set(rr
-        .map((row) => row?.trigger?.ref)
-        .filter((ref) => typeof ref === "string"));
-    // A chunk failure is terminal once addressed by a replan (matched on
-    // trigger.ref) OR once its owning node has exhausted its per-node derisk
-    // budget — otherwise an exhausted owner + a pinned latest-fail chunk review
-    // would wedge the run forever (executionComplete never turning true).
-    return failures.every((failure) => addressed.has(failure.ref) || replanCountFor(rr, failure.logicalId) >= maxRounds);
+  if (!planningComplete(opts.plans)) return false;
+  const leaves = frontierLeaves(opts.plans);
+  if (leaves.length === 0 || !leaves.every((leaf) => leafComplete({ ...opts, leaf }))) return false;
+  const failures = chunkGateFailures(opts);
+  if (failures.length === 0) return true;
+  const maxRounds = opts.maxDeriskRounds ?? 3;
+  const rr = opts.replanRows ?? [];
+  const addressed = new Set(rr.map((row) => row?.trigger?.ref).filter((ref) => typeof ref === "string"));
+  // A chunk failure is terminal once addressed by a replan (matched on
+  // trigger.ref) OR once its owning node has exhausted its per-node derisk
+  // budget — otherwise an exhausted owner + a pinned latest-fail chunk review
+  // would wedge the run forever (executionComplete never turning true).
+  return failures.every((failure) => addressed.has(failure.ref) || replanCountFor(rr, failure.logicalId) >= maxRounds);
 }
 
 /**
@@ -644,20 +630,17 @@ export function executionComplete(opts) {
  * @returns {AgentLike | AgentLike[] | undefined}
  */
 export function agentForTier(agents, tier, tierOrder = DEFAULT_TIER_ORDER) {
-    if (agents[tier])
-        return agents[tier];
-    const start = tierOrder.indexOf(tier);
-    for (let i = start + 1; i < tierOrder.length; i++) {
-        const candidate = agents[tierOrder[i]];
-        if (candidate)
-            return candidate;
-    }
-    for (let i = start - 1; i >= 0; i--) {
-        const candidate = agents[tierOrder[i]];
-        if (candidate)
-            return candidate;
-    }
-    return undefined;
+  if (agents[tier]) return agents[tier];
+  const start = tierOrder.indexOf(tier);
+  for (let i = start + 1; i < tierOrder.length; i++) {
+    const candidate = agents[tierOrder[i]];
+    if (candidate) return candidate;
+  }
+  for (let i = start - 1; i >= 0; i--) {
+    const candidate = agents[tierOrder[i]];
+    if (candidate) return candidate;
+  }
+  return undefined;
 }
 
 /**
@@ -693,79 +676,75 @@ export function agentForTier(agents, tier, tierOrder = DEFAULT_TIER_ORDER) {
  * @returns {Record<string, any>[]}
  */
 export function synthesizeDelegationEvents(opts) {
-    /** @type {Record<string, any>[]} */
-    const events = [];
-    // 1. Planning: every declared risk is a flag by its owner; probed risks
-    //    spawn probe nodes (`probe` carries the probe id so the scorers can
-    //    exclude probes from the planning-node set).
-    for (const row of opts.planRows) {
-        if (typeof row.logicalId !== "string")
-            continue;
-        for (const risk of row.risks ?? []) {
-            events.push({ t: "RISK_FLAGGED", node: row.logicalId, risk: String(risk?.id ?? "") });
-            if (risk?.probe === "poc" || risk?.probe === "research") {
-                events.push({
-                    t: "PROBE_SPAWNED",
-                    parent: row.logicalId,
-                    probe: probeIdFor(row.logicalId, String(risk.id)),
-                    kind: risk.probe,
-                });
-            }
-        }
-    }
-    // 2. Probe findings report to the nearest parent only.
-    for (const row of opts.probeRows) {
+  /** @type {Record<string, any>[]} */
+  const events = [];
+  // 1. Planning: every declared risk is a flag by its owner; probed risks
+  //    spawn probe nodes (`probe` carries the probe id so the scorers can
+  //    exclude probes from the planning-node set).
+  for (const row of opts.planRows) {
+    if (typeof row.logicalId !== "string") continue;
+    for (const risk of row.risks ?? []) {
+      events.push({ t: "RISK_FLAGGED", node: row.logicalId, risk: String(risk?.id ?? "") });
+      if (risk?.probe === "poc" || risk?.probe === "research") {
         events.push({
-            t: "FINDING_REPORTED",
-            probe: String(row.probeId ?? ""),
-            toParent: String(row.parentLogicalId ?? ""),
-            planImpact: row.planImpact,
+          t: "PROBE_SPAWNED",
+          parent: row.logicalId,
+          probe: probeIdFor(row.logicalId, String(risk.id)),
+          kind: risk.probe,
         });
+      }
     }
-    /** @param {Record<string, any>} row */
-    const pushReplan = (row) => {
-        const node = String(row.logicalId ?? "");
-        events.push({ t: "REPLAN_REQUESTED", from: node, reason: String(row.reason ?? ""), trigger: row.trigger });
-        events.push({ t: row.decision === "invalidated" ? "NODE_INVALIDATED" : "NODE_REAFFIRMED", node });
-    };
-    // 3. Plan-phase replan decisions (probe findings + live user edits).
-    for (const row of opts.replanRows) {
-        if (row?.trigger?.type !== "review-fail")
-            pushReplan(row);
+  }
+  // 2. Probe findings report to the nearest parent only.
+  for (const row of opts.probeRows) {
+    events.push({
+      t: "FINDING_REPORTED",
+      probe: String(row.probeId ?? ""),
+      toParent: String(row.parentLogicalId ?? ""),
+      planImpact: row.planImpact,
+    });
+  }
+  /** @param {Record<string, any>} row */
+  const pushReplan = (row) => {
+    const node = String(row.logicalId ?? "");
+    events.push({ t: "REPLAN_REQUESTED", from: node, reason: String(row.reason ?? ""), trigger: row.trigger });
+    events.push({ t: row.decision === "invalidated" ? "NODE_INVALIDATED" : "NODE_REAFFIRMED", node });
+  };
+  // 3. Plan-phase replan decisions (probe findings + live user edits).
+  for (const row of opts.replanRows) {
+    if (row?.trigger?.type !== "review-fail") pushReplan(row);
+  }
+  // 4. Execution: the first attempt per node starts it; retries redelegate.
+  /** @type {Set<string>} */
+  const executed = new Set();
+  for (const row of opts.execRows) {
+    const node = String(row.logicalId ?? "");
+    if (executed.has(node)) {
+      events.push({ t: "REDELEGATED", node });
+    } else {
+      executed.add(node);
+      events.push({ t: "EXEC_STARTED", node });
     }
-    // 4. Execution: the first attempt per node starts it; retries redelegate.
-    /** @type {Set<string>} */
-    const executed = new Set();
-    for (const row of opts.execRows) {
-        const node = String(row.logicalId ?? "");
-        if (executed.has(node)) {
-            events.push({ t: "REDELEGATED", node });
-        }
-        else {
-            executed.add(node);
-            events.push({ t: "EXEC_STARTED", node });
-        }
+  }
+  // 5. Gate verdicts (reviews/checks write dcReview; a dev preview that
+  //    failed to build fails its gate like a failed review).
+  for (const row of opts.reviewRows) {
+    events.push({ t: row.verdict === "fail" ? "GATE_FAILED" : "GATE_PASSED", node: String(row.logicalId ?? "") });
+  }
+  for (const row of opts.devPreviewRows ?? []) {
+    if (row.builtOk !== true) {
+      events.push({ t: "GATE_FAILED", node: String(row.logicalId ?? ""), gate: "preview" });
     }
-    // 5. Gate verdicts (reviews/checks write dcReview; a dev preview that
-    //    failed to build fails its gate like a failed review).
-    for (const row of opts.reviewRows) {
-        events.push({ t: row.verdict === "fail" ? "GATE_FAILED" : "GATE_PASSED", node: String(row.logicalId ?? "") });
-    }
-    for (const row of opts.devPreviewRows ?? []) {
-        if (row.builtOk !== true) {
-            events.push({ t: "GATE_FAILED", node: String(row.logicalId ?? ""), gate: "preview" });
-        }
-    }
-    // 6. Post-exec replans (chunk review failures — see chunkGateFailures).
-    for (const row of opts.replanRows) {
-        if (row?.trigger?.type === "review-fail")
-            pushReplan(row);
-    }
-    // 7. Completion per executed node.
-    for (const node of executed) {
-        events.push({ t: "NODE_DONE", node });
-    }
-    return events;
+  }
+  // 6. Post-exec replans (chunk review failures — see chunkGateFailures).
+  for (const row of opts.replanRows) {
+    if (row?.trigger?.type === "review-fail") pushReplan(row);
+  }
+  // 7. Completion per executed node.
+  for (const node of executed) {
+    events.push({ t: "NODE_DONE", node });
+  }
+  return events;
 }
 
 /**
@@ -777,10 +756,8 @@ export function synthesizeDelegationEvents(opts) {
  * @returns {Tier}
  */
 export function delegatingTierFor(node, nodes, tierOrder = DEFAULT_TIER_ORDER) {
-    if (!node)
-        return /** @type {Tier} */ (tierOrder[0]);
-    if (node.kind !== "leaf")
-        return node.tier;
-    const parent = node.parentId ? nodes.get(node.parentId) : undefined;
-    return parent?.tier ?? /** @type {Tier} */ (tierOrder[0]);
+  if (!node) return /** @type {Tier} */ (tierOrder[0]);
+  if (node.kind !== "leaf") return node.tier;
+  const parent = node.parentId ? nodes.get(node.parentId) : undefined;
+  return parent?.tier ?? /** @type {Tier} */ (tierOrder[0]);
 }

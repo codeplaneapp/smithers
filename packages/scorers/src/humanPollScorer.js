@@ -6,14 +6,12 @@ import { createScorer } from "./createScorer.js";
  * @returns {{ question?: unknown; answer?: unknown }[] | null}
  */
 function extractPoll(candidate) {
-    if (Array.isArray(candidate))
-        return candidate.length > 0 ? candidate : null;
-    if (typeof candidate === "object" && candidate !== null) {
-        const poll = /** @type {{ poll?: unknown }} */ (candidate).poll;
-        if (Array.isArray(poll))
-            return poll.length > 0 ? poll : null;
-    }
-    return null;
+  if (Array.isArray(candidate)) return candidate.length > 0 ? candidate : null;
+  if (typeof candidate === "object" && candidate !== null) {
+    const poll = /** @type {{ poll?: unknown }} */ (candidate).poll;
+    if (Array.isArray(poll)) return poll.length > 0 ? poll : null;
+  }
+  return null;
 }
 
 /**
@@ -25,17 +23,16 @@ function extractPoll(candidate) {
  * @returns {number | null}
  */
 function normalizeAnswer(answer) {
-    if (typeof answer === "boolean")
-        return answer ? 1 : 0;
-    const rating = typeof answer === "number"
-        ? answer
-        : typeof answer === "string" && answer.trim() !== ""
-            ? Number(answer)
-            : Number.NaN;
-    if (!Number.isFinite(rating))
-        return null;
-    const clamped = Math.max(1, Math.min(5, rating));
-    return (clamped - 1) / 4;
+  if (typeof answer === "boolean") return answer ? 1 : 0;
+  const rating =
+    typeof answer === "number"
+      ? answer
+      : typeof answer === "string" && answer.trim() !== ""
+        ? Number(answer)
+        : Number.NaN;
+  if (!Number.isFinite(rating)) return null;
+  const clamped = Math.max(1, Math.min(5, rating));
+  return (clamped - 1) / 4;
 }
 
 /**
@@ -51,48 +48,45 @@ function normalizeAnswer(answer) {
  * @returns {Scorer}
  */
 export function humanPollScorer() {
-    return createScorer({
-        id: "human-poll",
-        name: "Human Poll",
-        description: "Normalizes a submitted end-of-run user poll (1-5 ratings and booleans) to a 0-1 score",
-        score: async ({ output, context }) => {
-            const poll = extractPoll(output) ?? extractPoll(context);
-            if (!poll || poll.length === 0) {
-                return {
-                    score: 1,
-                    reason: "No poll submitted; skipping",
-                    meta: { skipped: true },
-                };
-            }
-            /** @type {{ question: string; answer: unknown; normalized: number }[]} */
-            const answers = [];
-            /** @type {{ question: string; answer: unknown }[]} */
-            const ignored = [];
-            for (const entry of poll) {
-                const question = typeof entry?.question === "string"
-                    ? entry.question
-                    : String(entry?.question ?? "");
-                const normalized = normalizeAnswer(entry?.answer);
-                if (normalized === null) {
-                    ignored.push({ question, answer: entry?.answer });
-                    continue;
-                }
-                answers.push({ question, answer: entry?.answer, normalized });
-            }
-            if (answers.length === 0) {
-                return {
-                    score: 1,
-                    reason: "Poll contained no recognizable answers; skipping",
-                    meta: { skipped: true, ignored },
-                };
-            }
-            const score = answers.reduce((sum, a) => sum + a.normalized, 0) /
-                answers.length;
-            return {
-                score: Math.max(0, Math.min(1, score)),
-                reason: `${answers.length} poll answer(s), mean ${score.toFixed(2)}${ignored.length > 0 ? `; ${ignored.length} unrecognized answer(s) ignored` : ""}`,
-                meta: { answers, ignored },
-            };
-        },
-    });
+  return createScorer({
+    id: "human-poll",
+    name: "Human Poll",
+    description: "Normalizes a submitted end-of-run user poll (1-5 ratings and booleans) to a 0-1 score",
+    score: async ({ output, context }) => {
+      const poll = extractPoll(output) ?? extractPoll(context);
+      if (!poll || poll.length === 0) {
+        return {
+          score: 1,
+          reason: "No poll submitted; skipping",
+          meta: { skipped: true },
+        };
+      }
+      /** @type {{ question: string; answer: unknown; normalized: number }[]} */
+      const answers = [];
+      /** @type {{ question: string; answer: unknown }[]} */
+      const ignored = [];
+      for (const entry of poll) {
+        const question = typeof entry?.question === "string" ? entry.question : String(entry?.question ?? "");
+        const normalized = normalizeAnswer(entry?.answer);
+        if (normalized === null) {
+          ignored.push({ question, answer: entry?.answer });
+          continue;
+        }
+        answers.push({ question, answer: entry?.answer, normalized });
+      }
+      if (answers.length === 0) {
+        return {
+          score: 1,
+          reason: "Poll contained no recognizable answers; skipping",
+          meta: { skipped: true, ignored },
+        };
+      }
+      const score = answers.reduce((sum, a) => sum + a.normalized, 0) / answers.length;
+      return {
+        score: Math.max(0, Math.min(1, score)),
+        reason: `${answers.length} poll answer(s), mean ${score.toFixed(2)}${ignored.length > 0 ? `; ${ignored.length} unrecognized answer(s) ignored` : ""}`,
+        meta: { answers, ignored },
+      };
+    },
+  });
 }

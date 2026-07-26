@@ -23,7 +23,13 @@ function descriptor(nodeId, overrides = {}) {
 
 function graph(tasks, xml) {
   return {
-    xml: xml ?? el("smithers:workflow", {}, tasks.map((task) => el("smithers:task", { id: task.nodeId }))),
+    xml:
+      xml ??
+      el(
+        "smithers:workflow",
+        {},
+        tasks.map((task) => el("smithers:task", { id: task.nodeId })),
+      ),
     tasks,
     mountedTaskIds: new Set(tasks.map((task) => `${task.nodeId}::${task.iteration}`)),
   };
@@ -48,9 +54,7 @@ describe("makeWorkflowSession unknown-node error paths", () => {
 
   test("submitGraph reports a Failed decision when the plan build throws", () => {
     const nested = el("smithers:workflow", {}, [
-      el("smithers:ralph", { id: "outer" }, [
-        el("smithers:ralph", { id: "inner" }, []),
-      ]),
+      el("smithers:ralph", { id: "outer" }, [el("smithers:ralph", { id: "inner" }, [])]),
     ]);
     const session = makeWorkflowSession();
     const decision = run(session.submitGraph({ xml: nested, tasks: [], mountedTaskIds: new Set() }));
@@ -60,9 +64,7 @@ describe("makeWorkflowSession unknown-node error paths", () => {
 
   test("hotReloaded reports a Failed decision when the plan build throws", () => {
     const nested = el("smithers:workflow", {}, [
-      el("smithers:ralph", { id: "outer" }, [
-        el("smithers:ralph", { id: "inner" }, []),
-      ]),
+      el("smithers:ralph", { id: "outer" }, [el("smithers:ralph", { id: "inner" }, [])]),
     ]);
     const session = makeWorkflowSession();
     run(session.submitGraph(graph([descriptor("a")])));
@@ -182,9 +184,7 @@ describe("makeWorkflowSession requireStableFinish success path", () => {
 describe("makeWorkflowSession waiting reason accumulation", () => {
   test("an async approval falls through to the findWaitingReason approval branch", () => {
     const session = makeWorkflowSession();
-    const decision = run(
-      session.submitGraph(graph([descriptor("appr", { needsApproval: true, waitAsync: true })])),
-    );
+    const decision = run(session.submitGraph(graph([descriptor("appr", { needsApproval: true, waitAsync: true })])));
     expect(decision._tag).toBe("Wait");
     expect(decision.reason).toEqual({ _tag: "Approval", nodeId: "appr" });
   });
@@ -214,9 +214,7 @@ describe("makeWorkflowSession ralph loop advancement", () => {
 
   test("an until=true ralph is marked done at submission", () => {
     const session = makeWorkflowSession();
-    const decision = run(
-      session.submitGraph(graph([descriptor("body")], ralphXml({ until: "true" }))),
-    );
+    const decision = run(session.submitGraph(graph([descriptor("body")], ralphXml({ until: "true" }))));
     expect(decision._tag).toBe("Finished");
   });
 });
@@ -230,9 +228,7 @@ describe("makeWorkflowSession saga fatal error surfacing", () => {
     ]);
     const session = makeWorkflowSession();
     run(session.submitGraph(graph([descriptor("act")], xml)));
-    const decision = run(
-      session.taskFailed({ nodeId: "act", iteration: 0, error: new SmithersError("BOOM", "boom") }),
-    );
+    const decision = run(session.taskFailed({ nodeId: "act", iteration: 0, error: new SmithersError("BOOM", "boom") }));
     expect(decision._tag).toBe("Failed");
     expect(decision.error.code).toBe("SCHEDULER_ERROR");
   });
@@ -251,16 +247,11 @@ describe("makeWorkflowSession timer parse failure", () => {
 describe("makeWorkflowSession pending-with-inflight and stable deadlock", () => {
   test("pending work alongside an in-flight task waits on an external trigger", () => {
     const xml = el("smithers:workflow", {}, [
-      el("smithers:parallel", {}, [
-        el("smithers:task", { id: "inflight" }),
-        el("smithers:task", { id: "blocked" }),
-      ]),
+      el("smithers:parallel", {}, [el("smithers:task", { id: "inflight" }), el("smithers:task", { id: "blocked" })]),
     ]);
     const session = makeWorkflowSession();
     const first = run(
-      session.submitGraph(
-        graph([descriptor("inflight"), descriptor("blocked", { dependsOn: ["ghost"] })], xml),
-      ),
+      session.submitGraph(graph([descriptor("inflight"), descriptor("blocked", { dependsOn: ["ghost"] })], xml)),
     );
     expect(first._tag).toBe("Execute");
     const decision = run(session.eventReceived("x", 1));

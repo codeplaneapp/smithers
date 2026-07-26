@@ -79,16 +79,12 @@ let failed = false;
 for (const packageDir of workspacePackageDirs()) {
   const manifestPath = join(packageDir, "package.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  const hasTests = [
-    join(packageDir, "tests"),
-    join(packageDir, "src"),
-    join(packageDir, "server"),
-  ].some(containsRuntimeTestFile);
+  const hasTests = [join(packageDir, "tests"), join(packageDir, "src"), join(packageDir, "server")].some(
+    containsRuntimeTestFile,
+  );
 
   if (hasTests && typeof manifest.scripts?.test !== "string") {
-    console.error(
-      `${relative(root, manifestPath)} has runtime tests but no scripts.test for pnpm -r test`,
-    );
+    console.error(`${relative(root, manifestPath)} has runtime tests but no scripts.test for pnpm -r test`);
     failed = true;
     continue;
   }

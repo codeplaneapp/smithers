@@ -35,7 +35,11 @@ function compileFixture(sourcePath: string, outputPath: string): void {
     stderr: "pipe",
   });
   if (result.exitCode !== 0) {
-    throw new Error(new TextDecoder().decode(result.stderr) || new TextDecoder().decode(result.stdout) || "Fixture compilation failed.");
+    throw new Error(
+      new TextDecoder().decode(result.stderr) ||
+        new TextDecoder().decode(result.stdout) ||
+        "Fixture compilation failed.",
+    );
   }
 }
 
@@ -68,12 +72,7 @@ async function runWatchdogProcess(
     for (let index = 0; index < ticks; index += 1) {
       const stdoutPath = join(root, `watchdog-${index}.stdout`);
       const stderrPath = join(root, `watchdog-${index}.stderr`);
-      const child = Bun.spawn([process.execPath,
-        runner,
-        "--run-id", runId,
-        "--root", root,
-        "--state-dir", stateDir,
-      ], {
+      const child = Bun.spawn([process.execPath, runner, "--run-id", runId, "--root", root, "--state-dir", stateDir], {
         env: {
           ...process.env,
           PATH: process.env.PATH ?? "",
@@ -89,15 +88,17 @@ async function runWatchdogProcess(
       const stderr = existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : "";
       result = { status, stdout, stderr };
       if (!stdout.trim()) {
-        throw new Error(
-          `Watchdog fixture tick ${index + 1} emitted no JSON (status=${status}, stderr=${stderr})`,
-        );
+        throw new Error(`Watchdog fixture tick ${index + 1} emitted no JSON (status=${status}, stderr=${stderr})`);
       }
     }
     if (!result) throw new Error("At least one watchdog fixture tick is required.");
     return result;
   } finally {
-    try { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
+    try {
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch {
+      /* best-effort temp cleanup */
+    }
   }
 }
 
@@ -118,7 +119,7 @@ describe("codex issue merge watchdog", () => {
     const source = readFileSync(watchdogScript, "utf8");
     expect(source).toContain("subscriptionCodexFirst({");
     expect(source).toContain("buildPublicIssueAgentPolicy(");
-    expect(source).not.toContain("smithersRuntimeAccess: \"write\"");
+    expect(source).not.toContain('smithersRuntimeAccess: "write"');
     expect(source).not.toContain("claudeBashAllowRules");
     expect(source).toContain("executeRepairProposal(activeRunId, repair, options.rootDir)");
     expect(source).toContain('model: "claude-fable-5"');
@@ -132,10 +133,14 @@ describe("codex issue merge watchdog", () => {
   test("supports a foreground interval and explicit cooldown", () => {
     const root = join(tmpdir(), "repo");
     const options = parseWatchdogArgs([
-      "--run-id", "run-456",
-      "--interval-seconds", "60",
-      "--cooldown-minutes", "45",
-      "--root", root,
+      "--run-id",
+      "run-456",
+      "--interval-seconds",
+      "60",
+      "--cooldown-minutes",
+      "45",
+      "--root",
+      root,
     ]);
     expect(options.once).toBe(false);
     expect(options.intervalSeconds).toBe(60);
@@ -144,22 +149,36 @@ describe("codex issue merge watchdog", () => {
   });
 
   test("recognizes durable waits, terminal success, failures, and intentional cancellation", () => {
-    expect(knownStateDecision({ runState: { state: "waiting-approval" } })).toMatchObject({ healthy: true, repairRequired: false });
-    expect(knownStateDecision({ runState: { state: "waiting-event" } })).toMatchObject({ healthy: true, repairRequired: false });
-    expect(knownStateDecision(
-      { ok: true, data: { runState: { state: "succeeded" } } },
-      Date.now(),
-      { successful: true, blocked: 0 },
-    )).toMatchObject({ healthy: true, repairRequired: false });
+    expect(knownStateDecision({ runState: { state: "waiting-approval" } })).toMatchObject({
+      healthy: true,
+      repairRequired: false,
+    });
+    expect(knownStateDecision({ runState: { state: "waiting-event" } })).toMatchObject({
+      healthy: true,
+      repairRequired: false,
+    });
+    expect(
+      knownStateDecision({ ok: true, data: { runState: { state: "succeeded" } } }, Date.now(), {
+        successful: true,
+        blocked: 0,
+      }),
+    ).toMatchObject({ healthy: true, repairRequired: false });
     expect(knownStateDecision({ ok: true, data: { runState: { state: "succeeded" } } })).toBeNull();
-    expect(knownStateDecision(
-      { ok: true, data: { runState: { state: "succeeded" } } },
-      Date.now(),
-      { successful: false, blocked: 2 },
-    )).toMatchObject({ healthy: false, repairRequired: true });
+    expect(
+      knownStateDecision({ ok: true, data: { runState: { state: "succeeded" } } }, Date.now(), {
+        successful: false,
+        blocked: 2,
+      }),
+    ).toMatchObject({ healthy: false, repairRequired: true });
     expect(knownStateDecision({ ok: true, data: { runState: { state: "succeeded" }, failedChildren: 2 } })).toBeNull();
-    expect(knownStateDecision({ runState: { state: "stale" } })).toMatchObject({ healthy: false, repairRequired: true });
-    expect(knownStateDecision({ runState: { state: "cancelled" } })).toMatchObject({ healthy: false, repairRequired: false });
+    expect(knownStateDecision({ runState: { state: "stale" } })).toMatchObject({
+      healthy: false,
+      repairRequired: true,
+    });
+    expect(knownStateDecision({ runState: { state: "cancelled" } })).toMatchObject({
+      healthy: false,
+      repairRequired: false,
+    });
     expect(knownStateDecision({ runState: { state: "running" } })).toBeNull();
   });
 
@@ -187,7 +206,8 @@ describe("codex issue merge watchdog", () => {
   });
 
   test("parses exact Terra JSON and rejects wrapped or contradictory output", () => {
-    const raw = '{"healthy":false,"repairRequired":true,"state":"stalled","reason":"no progress","recommendedAction":"retry task"}';
+    const raw =
+      '{"healthy":false,"repairRequired":true,"state":"stalled","reason":"no progress","recommendedAction":"retry task"}';
     expect(parseHealthDecision(raw)).toEqual({
       healthy: false,
       repairRequired: true,
@@ -219,10 +239,18 @@ describe("codex issue merge watchdog", () => {
         steps: [{ id: "i1:research", state: "in-progress", attempt: 1 }],
       },
     };
-    const firstEvents = parseEventEvidence([
-      JSON.stringify({ runId: "run-progress", seq: 0, timestampMs: 10, type: "RunStarted", payload: {} }),
-      JSON.stringify({ runId: "run-progress", seq: 1, timestampMs: 20, type: "NodeStarted", payload: { nodeId: "i1:research" } }),
-    ].join("\n"));
+    const firstEvents = parseEventEvidence(
+      [
+        JSON.stringify({ runId: "run-progress", seq: 0, timestampMs: 10, type: "RunStarted", payload: {} }),
+        JSON.stringify({
+          runId: "run-progress",
+          seq: 1,
+          timestampMs: 20,
+          type: "NodeStarted",
+          payload: { nodeId: "i1:research" },
+        }),
+      ].join("\n"),
+    );
     expect(firstEvents).not.toBeNull();
     const firstSnapshot = progressSnapshot("run-progress", inspect, firstEvents!);
     expect(firstSnapshot).not.toBeNull();
@@ -235,13 +263,15 @@ describe("codex issue merge watchdog", () => {
     expect(unchanged.current.changedAt).toBe(100);
     expect(unchanged.current.unchangedTicks).toBe(1);
 
-    const laterEvents = parseEventEvidence(`${firstEvents!.map((event) => JSON.stringify(event)).join("\n")}\n${JSON.stringify({
-      runId: "run-progress",
-      seq: 2,
-      timestampMs: 30,
-      type: "TaskHeartbeat",
-      payload: { nodeId: "i1:research" },
-    })}`);
+    const laterEvents = parseEventEvidence(
+      `${firstEvents!.map((event) => JSON.stringify(event)).join("\n")}\n${JSON.stringify({
+        runId: "run-progress",
+        seq: 2,
+        timestampMs: 30,
+        type: "TaskHeartbeat",
+        payload: { nodeId: "i1:research" },
+      })}`,
+    );
     const laterSnapshot = progressSnapshot("run-progress", inspect, laterEvents!);
     const advanced = compareProgress(unchanged.current, laterSnapshot!, 300);
     expect(advanced.changedSinceLastTick).toBe(true);
@@ -270,10 +300,24 @@ describe("codex issue merge watchdog", () => {
         ],
       },
     };
-    const events = parseEventEvidence([
-      JSON.stringify({ runId: "run-side-effects", seq: 1, timestampMs: 10, type: "NodeFailed", payload: { nodeId: "i1:sync-pr" } }),
-      JSON.stringify({ runId: "run-side-effects", seq: 2, timestampMs: 20, type: "NodeStarted", payload: { nodeId: "i4:land-local-main" } }),
-    ].join("\n"));
+    const events = parseEventEvidence(
+      [
+        JSON.stringify({
+          runId: "run-side-effects",
+          seq: 1,
+          timestampMs: 10,
+          type: "NodeFailed",
+          payload: { nodeId: "i1:sync-pr" },
+        }),
+        JSON.stringify({
+          runId: "run-side-effects",
+          seq: 2,
+          timestampMs: 20,
+          type: "NodeStarted",
+          payload: { nodeId: "i4:land-local-main" },
+        }),
+      ].join("\n"),
+    );
     expect(ambiguousSideEffectNodes(inspect, events!)).toEqual([
       "i1:sync-pr",
       "i2:queue-publish",
@@ -297,9 +341,28 @@ describe("codex issue merge watchdog", () => {
       summary: "retry the failed read-only reviewer",
     });
     expect(parseSolRepairResult(`report:\n${raw}`, "run-current")).toBeNull();
-    expect(parseSolRepairResult(JSON.stringify({ outcome: "repair-requested", action: { kind: "retry-task", nodeId: "i7:sync-pr", iteration: 0 }, summary: "unsafe" }), "run-current")).toBeNull();
-    expect(parseSolRepairResult(JSON.stringify({ outcome: "repair-requested", action: { kind: "none" }, summary: "contradictory" }), "run-current")).toBeNull();
-    expect(parseSolRepairResult(JSON.stringify({ outcome: "no-change", action: { kind: "none" }, summary: "healthy" }), "run-current")).toEqual({
+    expect(
+      parseSolRepairResult(
+        JSON.stringify({
+          outcome: "repair-requested",
+          action: { kind: "retry-task", nodeId: "i7:sync-pr", iteration: 0 },
+          summary: "unsafe",
+        }),
+        "run-current",
+      ),
+    ).toBeNull();
+    expect(
+      parseSolRepairResult(
+        JSON.stringify({ outcome: "repair-requested", action: { kind: "none" }, summary: "contradictory" }),
+        "run-current",
+      ),
+    ).toBeNull();
+    expect(
+      parseSolRepairResult(
+        JSON.stringify({ outcome: "no-change", action: { kind: "none" }, summary: "healthy" }),
+        "run-current",
+      ),
+    ).toEqual({
       outcome: "no-change",
       action: { kind: "none" },
       summary: "healthy",
@@ -308,44 +371,92 @@ describe("codex issue merge watchdog", () => {
 
   test("brokers only an exact failed non-side-effect node without resetting dependents", () => {
     const action = { kind: "retry-task" as const, nodeId: "i7:review-panel-sol", iteration: 2 };
-    const inspect = { data: { run: { id: "run-current" }, steps: [
-      { id: action.nodeId, iteration: 2, state: "failed" },
-      { id: "i7:sync-pr", iteration: 0, state: "finished" },
-    ] } };
+    const inspect = {
+      data: {
+        run: { id: "run-current" },
+        steps: [
+          { id: action.nodeId, iteration: 2, state: "failed" },
+          { id: "i7:sync-pr", iteration: 0, state: "finished" },
+        ],
+      },
+    };
     expect(validateRetryTaskProposal(inspect, "run-current", action)).toEqual({ ok: true });
     expect(validateRetryTaskProposal(inspect, "run-other", action)).toMatchObject({ ok: false });
     expect(validateRetryTaskProposal(inspect, "run-current", { ...action, iteration: 1 })).toMatchObject({ ok: false });
-    expect(validateRetryTaskProposal(inspect, "run-current", { ...action, nodeId: "i7:sync-pr" })).toMatchObject({ ok: false });
+    expect(validateRetryTaskProposal(inspect, "run-current", { ...action, nodeId: "i7:sync-pr" })).toMatchObject({
+      ok: false,
+    });
     const args = retryTaskBrokerArgs("run-current", action);
     expect(args).toEqual([
-      "retry-task", "codex-issue-merge-queue",
-      "--run-id", "run-current",
-      "--node-id", action.nodeId,
-      "--iteration", "2",
+      "retry-task",
+      "codex-issue-merge-queue",
+      "--run-id",
+      "run-current",
+      "--node-id",
+      action.nodeId,
+      "--iteration",
+      "2",
       "--no-deps",
-      "--format", "json",
+      "--format",
+      "json",
     ]);
     expect(args).not.toContain("--force");
   });
 
   test("verifies replacement lineage for externally supervised handoffs", () => {
-
-    const current = { data: { run: { id: "run-current", workflow: "Codex Issue Merge Queue", started: "2026-07-09T10:00:00.000Z" }, runState: { state: "failed" }, steps: [] } };
-    const linked = { data: { run: { id: "run-replacement", workflow: "Codex Issue Merge Queue", parentRunId: "run-current", started: "2026-07-09T10:01:00.000Z" }, runState: { state: "running" }, steps: [] } };
+    const current = {
+      data: {
+        run: { id: "run-current", workflow: "Codex Issue Merge Queue", started: "2026-07-09T10:00:00.000Z" },
+        runState: { state: "failed" },
+        steps: [],
+      },
+    };
+    const linked = {
+      data: {
+        run: {
+          id: "run-replacement",
+          workflow: "Codex Issue Merge Queue",
+          parentRunId: "run-current",
+          started: "2026-07-09T10:01:00.000Z",
+        },
+        runState: { state: "running" },
+        steps: [],
+      },
+    };
     expect(validateReplacementRun(current, linked, "run-current", "run-replacement")).toEqual({ ok: true });
-    const unlinked = { data: { run: { id: "run-replacement", workflow: "Codex Issue Merge Queue", started: "2026-07-09T10:01:00.000Z" }, runState: { state: "running" }, steps: [] } };
+    const unlinked = {
+      data: {
+        run: { id: "run-replacement", workflow: "Codex Issue Merge Queue", started: "2026-07-09T10:01:00.000Z" },
+        runState: { state: "running" },
+        steps: [],
+      },
+    };
     expect(validateReplacementRun(current, unlinked, "run-current", "run-replacement")).toMatchObject({ ok: false });
-    const unrelated = { data: { run: { id: "run-replacement", workflow: "Other Workflow", started: "2026-07-09T10:01:00.000Z" }, runState: { state: "running" }, steps: [] } };
+    const unrelated = {
+      data: {
+        run: { id: "run-replacement", workflow: "Other Workflow", started: "2026-07-09T10:01:00.000Z" },
+        runState: { state: "running" },
+        steps: [],
+      },
+    };
     expect(validateReplacementRun(current, unrelated, "run-current", "run-replacement")).toMatchObject({ ok: false });
   });
 
   test("turns a Sol human-required outcome into an explicit manual non-repair state", () => {
-    const unhealthy = { healthy: false, repairRequired: true, state: "failed", reason: "failed", recommendedAction: "repair" };
-    expect(decisionAfterSolRepair(unhealthy, {
-      outcome: "human-required",
-      action: { kind: "none" },
-      summary: "reconcile the PR branch",
-    })).toMatchObject({
+    const unhealthy = {
+      healthy: false,
+      repairRequired: true,
+      state: "failed",
+      reason: "failed",
+      recommendedAction: "repair",
+    };
+    expect(
+      decisionAfterSolRepair(unhealthy, {
+        outcome: "human-required",
+        action: { kind: "none" },
+        summary: "reconcile the PR branch",
+      }),
+    ).toMatchObject({
       manualInterventionRequired: true,
       decision: {
         healthy: false,
@@ -354,11 +465,13 @@ describe("codex issue merge watchdog", () => {
         reason: "reconcile the PR branch",
       },
     });
-    expect(decisionAfterSolRepair(unhealthy, {
-      outcome: "repair-requested",
-      action: { kind: "retry-task", nodeId: "i1:research", iteration: 0 },
-      summary: "retry requested",
-    })).toEqual({ decision: unhealthy, manualInterventionRequired: false });
+    expect(
+      decisionAfterSolRepair(unhealthy, {
+        outcome: "repair-requested",
+        action: { kind: "retry-task", nodeId: "i1:research", iteration: 0 },
+        summary: "retry requested",
+      }),
+    ).toEqual({ decision: unhealthy, manualInterventionRequired: false });
   });
 
   test("falls through an ordered agent array on preflight or unusable output", async () => {
@@ -386,11 +499,13 @@ describe("codex issue merge watchdog", () => {
       },
     };
 
-    expect(await generateWithAgentFallback(
-      [preflightFailure, malformed, fallback],
-      { prompt: "health check" },
-      (text) => text === '{"ok":true}',
-    )).toBe('{"ok":true}');
+    expect(
+      await generateWithAgentFallback(
+        [preflightFailure, malformed, fallback],
+        { prompt: "health check" },
+        (text) => text === '{"ok":true}',
+      ),
+    ).toBe('{"ok":true}');
     expect(calls).toEqual(["first:preflight", "second:generate", "third:generate"]);
     await expect(generateWithAgentFallback([], { prompt: "x" })).rejects.toThrow("must not be empty");
   });
@@ -434,7 +549,11 @@ describe("codex issue merge watchdog", () => {
       releaseLeaseLock(first!);
       expect(existsSync(lockPath)).toBe(false);
     } finally {
-      try { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
+      try {
+        rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      } catch {
+        /* best-effort temp cleanup */
+      }
     }
   });
 
@@ -450,7 +569,11 @@ describe("codex issue merge watchdog", () => {
       expect(existsSync(lockPath)).toBe(true);
       releaseLeaseLock(replacement!);
     } finally {
-      try { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
+      try {
+        rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      } catch {
+        /* best-effort temp cleanup */
+      }
     }
   });
 
@@ -464,7 +587,11 @@ describe("codex issue merge watchdog", () => {
       expect(replacement).not.toBeNull();
       releaseLeaseLock(replacement!);
     } finally {
-      try { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
+      try {
+        rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      } catch {
+        /* best-effort temp cleanup */
+      }
     }
   });
 
@@ -473,24 +600,33 @@ describe("codex issue merge watchdog", () => {
     const inspect = {
       ok: true,
       data: {
-        run: { id: runId, workflow: "Codex Issue Merge Queue", status: "waiting-event", started: "2026-07-09T10:00:00.000Z" },
+        run: {
+          id: runId,
+          workflow: "Codex Issue Merge Queue",
+          status: "waiting-event",
+          started: "2026-07-09T10:00:00.000Z",
+        },
         runState: { state: "waiting-event", blocked: { kind: "event", nodeId: "signal", correlationKey: "ready" } },
         steps: [{ id: "signal", state: "waiting-event", attempt: 1 }],
       },
     };
-    const result = await runWatchdogProcess(runId, {
-      inspect: { output: JSON.stringify(inspect) },
-      why: { output: JSON.stringify({ ok: true, data: { blocker: "event" } }) },
-      events: {
-        output: `${JSON.stringify({
-          runId,
-          seq: 8,
-          timestampMs: Date.now() - 1_000,
-          type: "NodeWaitingEvent",
-          payload: { nodeId: "signal" },
-        })}\n`,
+    const result = await runWatchdogProcess(
+      runId,
+      {
+        inspect: { output: JSON.stringify(inspect) },
+        why: { output: JSON.stringify({ ok: true, data: { blocker: "event" } }) },
+        events: {
+          output: `${JSON.stringify({
+            runId,
+            seq: 8,
+            timestampMs: Date.now() - 1_000,
+            type: "NodeWaitingEvent",
+            payload: { nodeId: "signal" },
+          })}\n`,
+        },
       },
-    }, 2);
+      2,
+    );
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
     expect(JSON.parse(result.stdout)).toMatchObject({
@@ -563,27 +699,35 @@ describe("codex issue merge watchdog", () => {
 
   // bun spawnSync `timeout` enforcement is unreliable on Windows (observed
   // ~14s past a 50ms deadline); the watchdog runs on POSIX infra only.
-  test.skipIf(process.platform === "win32")("terminates a stuck Smithers command at its deadline", () => {
-    const root = mkdtempSync(join(tmpdir(), "smithers-watchdog-command-"));
-    const source = join(root, "stuck-smithers.ts");
-    const binary = join(root, process.platform === "win32" ? "stuck-smithers.exe" : "stuck-smithers");
-    try {
-      if (process.platform === "win32") {
-        writeFileSync(source, "while (true) await Bun.sleep(1_000);\n");
-        compileFixture(source, binary);
-      } else {
-        // A compiled Bun binary can spend the whole deadline paging in at
-        // startup on a loaded machine; the deadline behavior under test only
-        // needs a process that hangs and dies to SIGTERM.
-        writeFileSync(binary, "#!/bin/sh\nexec sleep 1000\n", { mode: 0o755 });
+  test.skipIf(process.platform === "win32")(
+    "terminates a stuck Smithers command at its deadline",
+    () => {
+      const root = mkdtempSync(join(tmpdir(), "smithers-watchdog-command-"));
+      const source = join(root, "stuck-smithers.ts");
+      const binary = join(root, process.platform === "win32" ? "stuck-smithers.exe" : "stuck-smithers");
+      try {
+        if (process.platform === "win32") {
+          writeFileSync(source, "while (true) await Bun.sleep(1_000);\n");
+          compileFixture(source, binary);
+        } else {
+          // A compiled Bun binary can spend the whole deadline paging in at
+          // startup on a loaded machine; the deadline behavior under test only
+          // needs a process that hangs and dies to SIGTERM.
+          writeFileSync(binary, "#!/bin/sh\nexec sleep 1000\n", { mode: 0o755 });
+        }
+        const startedAt = Date.now();
+        const result = runSmithersJson("inspect", "run-stuck", root, { binary, timeoutMs: 50 });
+        expect(result.ok).toBe(false);
+        expect(Date.now() - startedAt).toBeLessThan(2_000);
+        expect(result.output).toContain("ETIMEDOUT");
+      } finally {
+        try {
+          rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+        } catch {
+          /* best-effort temp cleanup */
+        }
       }
-      const startedAt = Date.now();
-      const result = runSmithersJson("inspect", "run-stuck", root, { binary, timeoutMs: 50 });
-      expect(result.ok).toBe(false);
-      expect(Date.now() - startedAt).toBeLessThan(2_000);
-      expect(result.output).toContain("ETIMEDOUT");
-    } finally {
-      try { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
-    }
-  }, 15_000);
+    },
+    15_000,
+  );
 });

@@ -1,6 +1,13 @@
 // smithers-display-name: Bulletproof UI Design Pass
 /** @jsxImportSource smithers-orchestrator */
-import { OpenCodeAgent as SmithersOpenCodeAgent, Parallel, Sequence, Task, UI, createSmithers } from "smithers-orchestrator";
+import {
+  OpenCodeAgent as SmithersOpenCodeAgent,
+  Parallel,
+  Sequence,
+  Task,
+  UI,
+  createSmithers,
+} from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { providers } from "../agents";
 
@@ -30,12 +37,16 @@ const findingsSchema = z.object({
   surfaceId: surfaceIdSchema,
   score: z.number().int().min(1).max(10),
   summary: z.string().min(40),
-  findings: z.array(z.object({
-    severity: z.enum(["blocker", "major", "minor", "polish"]),
-    title: z.string().min(3),
-    description: z.string().min(10),
-    files: z.array(z.string()).default([]),
-  })).default([]),
+  findings: z
+    .array(
+      z.object({
+        severity: z.enum(["blocker", "major", "minor", "polish"]),
+        title: z.string().min(3),
+        description: z.string().min(10),
+        files: z.array(z.string()).default([]),
+      }),
+    )
+    .default([]),
   consistencyNotes: z.array(z.string()).default([]),
   praise: z.array(z.string()).default([]),
 });
@@ -63,47 +74,56 @@ const SURFACES: Surface[] = [
   {
     id: "ui-core",
     title: "packages/ui base components",
-    scope: "packages/ui/src/*.tsx (button, card, dialog, select, tabs, table, tooltip, badge, alert, input, progress, skeleton, spinner, separator) and the house compositions (status-pill, empty-state, section-header, kpi-stat, file-tree, stage-strip, collapsible-panel, row-button), plus their CSS blocks in uiCss.ts.",
+    scope:
+      "packages/ui/src/*.tsx (button, card, dialog, select, tabs, table, tooltip, badge, alert, input, progress, skeleton, spinner, separator) and the house compositions (status-pill, empty-state, section-header, kpi-stat, file-tree, stage-strip, collapsible-panel, row-button), plus their CSS blocks in uiCss.ts.",
   },
   {
     id: "ui-chat",
     title: "packages/ui chat surface",
-    scope: "packages/ui/src/chat/ — ChatTranscript, ChatMessage, ChatComposer plus the newly landed MessageScroller, Bubble, Attachment, Marker, shimmer, scroll-fade.",
+    scope:
+      "packages/ui/src/chat/ — ChatTranscript, ChatMessage, ChatComposer plus the newly landed MessageScroller, Bubble, Attachment, Marker, shimmer, scroll-fade.",
   },
   {
     id: "ui-agentic",
     title: "packages/ui agentic components",
-    scope: "packages/ui/src/agentic/ — Reasoning, ChainOfThought, ToolCall, Response, CodeBlock, Plan, TaskItem, Sources, InlineCitation (the components this campaign added).",
+    scope:
+      "packages/ui/src/agentic/ — Reasoning, ChainOfThought, ToolCall, Response, CodeBlock, Plan, TaskItem, Sources, InlineCitation (the components this campaign added).",
   },
   {
     id: "ui-tokens",
     title: "theme tokens and standalone bundle",
-    scope: "packages/ui-styleguide/src/ — the light/dark token ramps, semantic colors, elevation shadows, and the standaloneThemeCss() bundle. Judge contrast (WCAG AA for text on bg/surface/muted), ramp coherence, and dark/light parity.",
+    scope:
+      "packages/ui-styleguide/src/ — the light/dark token ramps, semantic colors, elevation shadows, and the standaloneThemeCss() bundle. Judge contrast (WCAG AA for text on bg/surface/muted), ramp coherence, and dark/light parity.",
   },
   {
     id: "ui-adapters",
     title: "heavy-widget adapters + markdown primitive",
-    scope: "packages/ui/src/adapters/ (markdown-editor, pierre-diff-view, terminal) and packages/ui/src/primitives/markdown.tsx — do the third-party surfaces visually cohere with the house components (spacing, borders, typography, both themes)?",
+    scope:
+      "packages/ui/src/adapters/ (markdown-editor, pierre-diff-view, terminal) and packages/ui/src/primitives/markdown.tsx — do the third-party surfaces visually cohere with the house components (spacing, borders, typography, both themes)?",
   },
   {
     id: "gateway-ui",
     title: "gateway-ui run surfaces",
-    scope: "packages/gateway-ui/src/ — NodeOutputView, NodeOutputCard, RunEventLog, RunTree, ApprovalPanel, SimpleWorkflowDashboard, WorkflowGraph. Special attention to the new agent-output rendering (Reasoning/ToolCall/Response integration).",
+    scope:
+      "packages/gateway-ui/src/ — NodeOutputView, NodeOutputCard, RunEventLog, RunTree, ApprovalPanel, SimpleWorkflowDashboard, WorkflowGraph. Special attention to the new agent-output rendering (Reasoning/ToolCall/Response integration).",
   },
   {
     id: "monitor-ui",
     title: "monitor web UI",
-    scope: "apps/cli/src/monitor-ui/ (monitor.tsx, monitorShell.tsx) — the reference composed surface. Information hierarchy, density, scanability of run lists and event streams.",
+    scope:
+      "apps/cli/src/monitor-ui/ (monitor.tsx, monitorShell.tsx) — the reference composed surface. Information hierarchy, density, scanability of run lists and event streams.",
   },
   {
     id: "pack-uis",
     title: "workflow pack UIs",
-    scope: ".smithers/ui/review.tsx and .smithers/ui/issue-blitz.tsx (freshly rewritten to compose the libraries) plus 3-4 of the thin SimpleWorkflowDashboard stubs — is the composed result coherent, and do the rewritten UIs keep useful information hierarchy?",
+    scope:
+      ".smithers/ui/review.tsx and .smithers/ui/issue-blitz.tsx (freshly rewritten to compose the libraries) plus 3-4 of the thin SimpleWorkflowDashboard stubs — is the composed result coherent, and do the rewritten UIs keep useful information hierarchy?",
   },
   {
     id: "generated-html",
     title: "generated/served HTML contract",
-    scope: "The report-slideshow prompt (.smithers/prompts/report-slideshow-render.mdx), apps/review/src/walkthrough/ (walkthroughCss.ts + renderWalkthroughHtml.ts), and the standaloneThemeCss() integration — will agent-generated pages actually look on-brand in both themes?",
+    scope:
+      "The report-slideshow prompt (.smithers/prompts/report-slideshow-render.mdx), apps/review/src/walkthrough/ (walkthroughCss.ts + renderWalkthroughHtml.ts), and the standaloneThemeCss() integration — will agent-generated pages actually look on-brand in both themes?",
   },
 ];
 
@@ -144,12 +164,27 @@ export default smithers((ctx) => {
       <Sequence>
         <Parallel maxConcurrency={input.maxConcurrency}>
           {SURFACES.map((surface) => (
-            <Task key={surface.id} id={`design-${surface.id}`} output={outputs.bpuiDpFindings} agent={kimiDesigner} retries={2} timeoutMs={40 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+            <Task
+              key={surface.id}
+              id={`design-${surface.id}`}
+              output={outputs.bpuiDpFindings}
+              agent={kimiDesigner}
+              retries={2}
+              timeoutMs={40 * 60_000}
+              heartbeatTimeoutMs={10 * 60_000}
+            >
               {reviewPrompt(surface)}
             </Task>
           ))}
         </Parallel>
-        <Task id="design-synthesis" output={outputs.bpuiDpReport} agent={synthesisAgents} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+        <Task
+          id="design-synthesis"
+          output={outputs.bpuiDpReport}
+          agent={synthesisAgents}
+          retries={2}
+          timeoutMs={45 * 60_000}
+          heartbeatTimeoutMs={10 * 60_000}
+        >
           {synthesisPrompt(ctx)}
         </Task>
       </Sequence>

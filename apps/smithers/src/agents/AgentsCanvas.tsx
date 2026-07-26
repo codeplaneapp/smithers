@@ -42,15 +42,11 @@ function AccountRow({
   return (
     <button
       type="button"
-      className={
-        (selected ? "rev-row is-on" : "rev-row") + (account.usable ? "" : " is-off")
-      }
+      className={(selected ? "rev-row is-on" : "rev-row") + (account.usable ? "" : " is-off")}
       onClick={() => onSelect(account.label)}
       data-testid="agents-row"
     >
-      <span className={`agent-status-glyph ${STATUS_GLYPH_CLASS[status]}`}>
-        {STATUS_GLYPH[status]}
-      </span>
+      <span className={`agent-status-glyph ${STATUS_GLYPH_CLASS[status]}`}>{STATUS_GLYPH[status]}</span>
       <div className="rev-row-main">
         <div className="rev-row-title">{account.label}</div>
         <div className="rev-row-meta">
@@ -373,11 +369,7 @@ export function AgentsCanvas() {
         </div>
 
         <div className="rev-detail">
-          {selected ? (
-            <AccountDetail account={selected} />
-          ) : (
-            <div className="rev-detail-empty">Select an agent.</div>
-          )}
+          {selected ? <AccountDetail account={selected} /> : <div className="rev-detail-empty">Select an agent.</div>}
         </div>
       </div>
     </section>

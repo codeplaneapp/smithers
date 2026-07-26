@@ -6,7 +6,5 @@ import { isSmithersTaggedErrorTag } from "./isSmithersTaggedErrorTag.js";
  * @returns {value is SmithersTaggedError}
  */
 export function isSmithersTaggedError(value) {
-    return Boolean(value &&
-        typeof value === "object" &&
-        isSmithersTaggedErrorTag(value._tag));
+  return Boolean(value && typeof value === "object" && isSmithersTaggedErrorTag(value._tag));
 }

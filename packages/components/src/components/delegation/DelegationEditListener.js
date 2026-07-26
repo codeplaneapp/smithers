@@ -22,43 +22,45 @@ import { executionComplete, foldGates, foldPlans, readRows } from "./delegationS
  * @param {DelegationEditListenerProps} props
  */
 export function DelegationEditListener(props) {
-    const ctx = React.useContext(SmithersContext);
-    if (props.skipIf)
-        return null;
-    const p = props.idPrefix ?? "dc";
-    const o = props.outputs;
-    const maxEdits = props.maxEdits ?? 25;
-    let done = props.until;
-    if (done === undefined) {
-        if (readRows(ctx, o.dcPoll).length > 0) {
-            done = true;
-        }
-        else {
-            const plans = foldPlans(readRows(ctx, o.dcPlan));
-            done = (props.poll ?? true) === false &&
-                executionComplete({
-                    idPrefix: p,
-                    plans,
-                    gates: foldGates(readRows(ctx, o.dcGates)),
-                    approvalPolicy: props.approvalPolicy,
-                    execRows: readRows(ctx, o.dcExec),
-                    reviewRows: readRows(ctx, o.dcReview),
-                    approvalRows: readRows(ctx, o.dcApproval ?? "dcApproval"),
-                    devPreviewRows: readRows(ctx, o.dcDevPreview ?? "dcDevPreview"),
-                    replanRows: readRows(ctx, o.dcReplan),
-                });
-        }
+  const ctx = React.useContext(SmithersContext);
+  if (props.skipIf) return null;
+  const p = props.idPrefix ?? "dc";
+  const o = props.outputs;
+  const maxEdits = props.maxEdits ?? 25;
+  let done = props.until;
+  if (done === undefined) {
+    if (readRows(ctx, o.dcPoll).length > 0) {
+      done = true;
+    } else {
+      const plans = foldPlans(readRows(ctx, o.dcPlan));
+      done =
+        (props.poll ?? true) === false &&
+        executionComplete({
+          idPrefix: p,
+          plans,
+          gates: foldGates(readRows(ctx, o.dcGates)),
+          approvalPolicy: props.approvalPolicy,
+          execRows: readRows(ctx, o.dcExec),
+          reviewRows: readRows(ctx, o.dcReview),
+          approvalRows: readRows(ctx, o.dcApproval ?? "dcApproval"),
+          devPreviewRows: readRows(ctx, o.dcDevPreview ?? "dcDevPreview"),
+          replanRows: readRows(ctx, o.dcReplan),
+        });
     }
-    if (done)
-        return null;
-    return React.createElement(Loop, {
-        id: `${p}:edit-loop`,
-        until: false,
-        maxIterations: maxEdits,
-        onMaxReached: "return-last",
-    }, React.createElement(Signal, {
-        id: DC_EDIT_SIGNAL,
-        schema: /** @type {any} */ (o.dcEdit),
-        label: "delegation: live edit",
-    }));
+  }
+  if (done) return null;
+  return React.createElement(
+    Loop,
+    {
+      id: `${p}:edit-loop`,
+      until: false,
+      maxIterations: maxEdits,
+      onMaxReached: "return-last",
+    },
+    React.createElement(Signal, {
+      id: DC_EDIT_SIGNAL,
+      schema: /** @type {any} */ (o.dcEdit),
+      label: "delegation: live edit",
+    }),
+  );
 }

@@ -16,8 +16,8 @@ import * as fs from "node:fs";
  * @param {readonly string[]} ignoreDirs
  */
 function isIgnored(relPath, ignoreDirs) {
-    if (!relPath) return false;
-    return relPath.split(/[\\/]/).some((segment) => ignoreDirs.includes(segment));
+  if (!relPath) return false;
+  return relPath.split(/[\\/]/).some((segment) => ignoreDirs.includes(segment));
 }
 
 /**
@@ -29,21 +29,23 @@ function isIgnored(relPath, ignoreDirs) {
  * @returns {{ close: () => void } | null}
  */
 function defaultWatch(cwd, onChange) {
-    try {
-        const watcher = fs.watch(cwd, { recursive: true }, (_event, filename) => {
-            if (filename != null) onChange(typeof filename === "string" ? filename : String(filename));
-        });
-        watcher.on("error", () => {});
-        return {
-            close() {
-                try { watcher.close(); }
-                catch { /* already closed */ }
-            },
-        };
-    }
-    catch {
-        return null;
-    }
+  try {
+    const watcher = fs.watch(cwd, { recursive: true }, (_event, filename) => {
+      if (filename != null) onChange(typeof filename === "string" ? filename : String(filename));
+    });
+    watcher.on("error", () => {});
+    return {
+      close() {
+        try {
+          watcher.close();
+        } catch {
+          /* already closed */
+        }
+      },
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -62,40 +64,40 @@ function defaultWatch(cwd, onChange) {
  * @returns {{ close: () => void, watching: boolean }}
  */
 export function createWorkspaceWatcher(deps) {
-    const {
-        cwd,
-        onSettle,
-        debounceMs = 150,
-        ignoreDirs = [".jj", ".git"],
-        watch = defaultWatch,
-        setTimeoutFn = setTimeout,
-        clearTimeoutFn = clearTimeout,
-    } = deps;
+  const {
+    cwd,
+    onSettle,
+    debounceMs = 150,
+    ignoreDirs = [".jj", ".git"],
+    watch = defaultWatch,
+    setTimeoutFn = setTimeout,
+    clearTimeoutFn = clearTimeout,
+  } = deps;
 
-    let timer = null;
-    let closed = false;
+  let timer = null;
+  let closed = false;
 
-    const arm = () => {
-        if (closed) return;
-        if (timer != null) clearTimeoutFn(timer);
-        timer = setTimeoutFn(() => {
-            timer = null;
-            if (!closed) onSettle();
-        }, debounceMs);
-    };
+  const arm = () => {
+    if (closed) return;
+    if (timer != null) clearTimeoutFn(timer);
+    timer = setTimeoutFn(() => {
+      timer = null;
+      if (!closed) onSettle();
+    }, debounceMs);
+  };
 
-    const handle = watch(cwd, (relPath) => {
-        if (closed) return;
-        if (isIgnored(relPath, ignoreDirs)) return;
-        arm();
-    });
+  const handle = watch(cwd, (relPath) => {
+    if (closed) return;
+    if (isIgnored(relPath, ignoreDirs)) return;
+    arm();
+  });
 
-    return {
-        watching: handle != null,
-        close() {
-            closed = true;
-            if (timer != null) clearTimeoutFn(timer);
-            handle?.close?.();
-        },
-    };
+  return {
+    watching: handle != null,
+    close() {
+      closed = true;
+      if (timer != null) clearTimeoutFn(timer);
+      handle?.close?.();
+    },
+  };
 }

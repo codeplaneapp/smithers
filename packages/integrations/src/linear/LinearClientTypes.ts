@@ -2,14 +2,7 @@ import type { Effect } from "effect";
 import type { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 
 /** A Linear priority: 0 none, 1 urgent, 2 high, 3 normal, 4 low — or a name. */
-export type LinearPriority =
-  | number
-  | "none"
-  | "urgent"
-  | "high"
-  | "normal"
-  | "medium"
-  | "low";
+export type LinearPriority = number | "none" | "urgent" | "high" | "normal" | "medium" | "low";
 
 export type LinearTeamRef = { id: string; key?: string; name?: string };
 
@@ -71,38 +64,16 @@ export type UpdateIssueFields = {
  */
 export type LinearClientService = {
   /** Raw GraphQL request; resolves with the `data` payload. */
-  query: (
-    gql: string,
-    variables?: Record<string, unknown>,
-  ) => Effect.Effect<any, SmithersError>;
+  query: (gql: string, variables?: Record<string, unknown>) => Effect.Effect<any, SmithersError>;
   /** Resolve a team by key (`ENG`) or pass through an explicit id. Cached. */
-  resolveTeam: (ref: {
-    teamId?: string;
-    teamKey?: string;
-  }) => Effect.Effect<LinearTeamRef, SmithersError>;
+  resolveTeam: (ref: { teamId?: string; teamKey?: string }) => Effect.Effect<LinearTeamRef, SmithersError>;
   /** Resolve a workflow-state name to its id for a team. Cached per team. */
-  resolveStateId: (
-    teamId: string,
-    stateName: string,
-  ) => Effect.Effect<string, SmithersError>;
+  resolveStateId: (teamId: string, stateName: string) => Effect.Effect<string, SmithersError>;
   /** Resolve label names to ids for a team. Cached per team. */
-  resolveLabelIds: (
-    teamId: string,
-    names: string[],
-  ) => Effect.Effect<string[], SmithersError>;
+  resolveLabelIds: (teamId: string, names: string[]) => Effect.Effect<string[], SmithersError>;
   /** Fetch an issue by UUID or identifier like `ENG-123`. */
-  getIssue: (
-    idOrIdentifier: string,
-  ) => Effect.Effect<LinearIssueResult, SmithersError>;
-  createIssue: (
-    input: CreateIssueInput,
-  ) => Effect.Effect<LinearIssueResult, SmithersError>;
-  updateIssue: (
-    idOrIdentifier: string,
-    fields: UpdateIssueFields,
-  ) => Effect.Effect<LinearIssueResult, SmithersError>;
-  commentOnIssue: (
-    idOrIdentifier: string,
-    body: string,
-  ) => Effect.Effect<LinearCommentResult, SmithersError>;
+  getIssue: (idOrIdentifier: string) => Effect.Effect<LinearIssueResult, SmithersError>;
+  createIssue: (input: CreateIssueInput) => Effect.Effect<LinearIssueResult, SmithersError>;
+  updateIssue: (idOrIdentifier: string, fields: UpdateIssueFields) => Effect.Effect<LinearIssueResult, SmithersError>;
+  commentOnIssue: (idOrIdentifier: string, body: string) => Effect.Effect<LinearCommentResult, SmithersError>;
 };

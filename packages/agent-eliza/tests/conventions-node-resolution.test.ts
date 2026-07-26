@@ -41,20 +41,16 @@ describe("conventions subpath export — plain node resolution", () => {
       // Run from the package root so Node picks up the package exports map.
       // Use `node` from PATH, not `process.execPath` (which is Bun when run under bun test).
       const nodeBin = process.env["NODE"] ?? "node";
-      stdout = execFileSync(
-        nodeBin,
-        ["--input-type=module"],
-        {
-          input: script,
-          cwd: packageRoot,
-          encoding: "utf8",
-          timeout: 15_000,
-        }
-      );
+      stdout = execFileSync(nodeBin, ["--input-type=module"], {
+        input: script,
+        cwd: packageRoot,
+        encoding: "utf8",
+        timeout: 15_000,
+      });
     } catch (err: unknown) {
       const e = err as { stdout?: string; stderr?: string; message?: string };
       throw new Error(
-        `node resolution failed:\nstdout: ${e.stdout ?? ""}\nstderr: ${e.stderr ?? ""}\n${e.message ?? ""}`
+        `node resolution failed:\nstdout: ${e.stdout ?? ""}\nstderr: ${e.stderr ?? ""}\n${e.message ?? ""}`,
       );
     }
     expect(stdout.trim()).toBe("ok");
@@ -82,7 +78,7 @@ tags:
 --- */
 export default { workflow: { build: () => null, opts: {} } };
 `,
-      "utf8"
+      "utf8",
     );
 
     const result = await loadWorkflowsFromDir({ dir, source: "test" });
@@ -112,7 +108,7 @@ tags:
 --- */
 export default { workflow: { build: () => null, opts: {} }, name: "my-workflow", description: "A workflow with block-comment frontmatter" };
 `,
-      "utf8"
+      "utf8",
     );
 
     const result = await loadWorkflowsFromDir({ dir, source: "test" });
@@ -139,7 +135,7 @@ tags:
 --- */
 export default { workflow: {}, name: "tagged", description: "Tagged workflow" };
 `,
-      "utf8"
+      "utf8",
     );
 
     const result = await loadWorkflowsFromDir({ dir, source: "test" });
@@ -152,7 +148,7 @@ export default { workflow: {}, name: "tagged", description: "Tagged workflow" };
     writeFileSync(
       join(dir, "simple.js"),
       `export default { workflow: {}, name: "simple", description: "No frontmatter" };`,
-      "utf8"
+      "utf8",
     );
 
     const result = await loadWorkflowsFromDir({ dir, source: "test" });

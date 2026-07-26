@@ -70,14 +70,12 @@ function extractReview(value: unknown): ReviewOutput | null {
   const reviewer = asString(row.reviewer);
   if (reviewer === undefined) return null;
   const issues = Array.isArray(row.issues)
-    ? row.issues
-        .filter(isRecord)
-        .map((i) => ({
-          severity: asString(i.severity) ?? "nit",
-          title: asString(i.title) ?? "",
-          file: asString(i.file) ?? null,
-          description: asString(i.description) ?? "",
-        }))
+    ? row.issues.filter(isRecord).map((i) => ({
+        severity: asString(i.severity) ?? "nit",
+        title: asString(i.title) ?? "",
+        file: asString(i.file) ?? null,
+        description: asString(i.description) ?? "",
+      }))
     : [];
   return {
     reviewer,
@@ -195,7 +193,9 @@ function IterationPanels(props: { runId: string; iteration: number }) {
           </div>
           {implement ? (
             <>
-              <div className="panel-summary" data-testid="debug-implement-summary">{implement.summary}</div>
+              <div className="panel-summary" data-testid="debug-implement-summary">
+                {implement.summary}
+              </div>
               {implement.filesChanged.length > 0 ? (
                 <ul className="files" data-testid="debug-implement-files">
                   {implement.filesChanged.map((f, i) => (
@@ -203,7 +203,9 @@ function IterationPanels(props: { runId: string; iteration: number }) {
                   ))}
                 </ul>
               ) : (
-                <div className="sub-empty" data-testid="debug-implement-files-empty">No files changed in this attempt.</div>
+                <div className="sub-empty" data-testid="debug-implement-files-empty">
+                  No files changed in this attempt.
+                </div>
               )}
             </>
           ) : (
@@ -222,9 +224,13 @@ function IterationPanels(props: { runId: string; iteration: number }) {
           </div>
           {validate ? (
             <>
-              <div className="panel-summary" data-testid="debug-validate-summary">{validate.summary}</div>
+              <div className="panel-summary" data-testid="debug-validate-summary">
+                {validate.summary}
+              </div>
               {validate.failingSummary ? (
-                <div className="fail-box" data-testid="debug-validate-failing">{validate.failingSummary}</div>
+                <div className="fail-box" data-testid="debug-validate-failing">
+                  {validate.failingSummary}
+                </div>
               ) : (
                 <div className="sub-empty">No failing tests reported.</div>
               )}
@@ -238,17 +244,23 @@ function IterationPanels(props: { runId: string; iteration: number }) {
       <div className="panel" data-testid="debug-review-panel">
         <div className="panel-head">
           <h3>Reviewers · attempt {iteration + 1}</h3>
-          <span className="pill">{reviews.length} reviewer{reviews.length === 1 ? "" : "s"}</span>
+          <span className="pill">
+            {reviews.length} reviewer{reviews.length === 1 ? "" : "s"}
+          </span>
         </div>
         {reviews.length > 0 ? (
           <div className="reviewers">
             {reviews.map((r, i) => (
               <div className="reviewer-card" key={i} data-testid="debug-reviewer-card">
                 <div className="reviewer-head">
-                  <span className="reviewer-name" data-testid="debug-reviewer-name">{r.reviewer}</span>
+                  <span className="reviewer-name" data-testid="debug-reviewer-name">
+                    {r.reviewer}
+                  </span>
                   <span className={"badge " + (r.approved ? "ok" : "err")}>{r.approved ? "approved" : "rejected"}</span>
                 </div>
-                <div className="reviewer-feedback" data-testid="debug-reviewer-feedback">{r.feedback}</div>
+                <div className="reviewer-feedback" data-testid="debug-reviewer-feedback">
+                  {r.feedback}
+                </div>
                 {r.issues.length > 0 ? (
                   <ul className="issues" data-testid="debug-reviewer-issues">
                     {r.issues.map((issue, j) => (
@@ -260,13 +272,17 @@ function IterationPanels(props: { runId: string; iteration: number }) {
                     ))}
                   </ul>
                 ) : (
-                  <div className="sub-empty" data-testid="debug-reviewer-issues-empty">No issues raised.</div>
+                  <div className="sub-empty" data-testid="debug-reviewer-issues-empty">
+                    No issues raised.
+                  </div>
                 )}
               </div>
             ))}
           </div>
         ) : (
-          <div className="sub-empty" data-testid="debug-review-empty">Waiting for reviewers on this attempt…</div>
+          <div className="sub-empty" data-testid="debug-review-empty">
+            Waiting for reviewers on this attempt…
+          </div>
         )}
       </div>
     </>
@@ -322,9 +338,13 @@ function App() {
       <header className="topbar">
         <div className="title-group">
           <h1>Debug</h1>
-          <span className="pill" data-testid="debug-runid">{activeRunId ? shortRunId(activeRunId) : "No run"}</span>
+          <span className="pill" data-testid="debug-runid">
+            {activeRunId ? shortRunId(activeRunId) : "No run"}
+          </span>
           {activeRun ? (
-            <span className={"badge " + statusClass(activeRun.status)} data-testid="debug-status">{activeRun.status ?? "idle"}</span>
+            <span className={"badge " + statusClass(activeRun.status)} data-testid="debug-status">
+              {activeRun.status ?? "idle"}
+            </span>
           ) : null}
         </div>
         <div className="toolbar">
@@ -335,11 +355,17 @@ function App() {
             onChange={(e) => setPrompt(e.currentTarget.value)}
             placeholder="Describe the bug to reproduce and fix…"
           />
-          <button className="button" data-testid="debug-refresh" onClick={() => void refresh()} disabled={busy}>Refresh</button>
+          <button className="button" data-testid="debug-refresh" onClick={() => void refresh()} disabled={busy}>
+            Refresh
+          </button>
           {activeRun && statusClass(activeRun.status) === "running" ? (
-            <button className="button danger" data-testid="debug-cancel" onClick={() => void cancel()} disabled={busy}>Cancel</button>
+            <button className="button danger" data-testid="debug-cancel" onClick={() => void cancel()} disabled={busy}>
+              Cancel
+            </button>
           ) : null}
-          <button className="button primary" data-testid="debug-launch" onClick={() => void launch()} disabled={busy}>Start Debug</button>
+          <button className="button primary" data-testid="debug-launch" onClick={() => void launch()} disabled={busy}>
+            Start Debug
+          </button>
         </div>
       </header>
 
@@ -380,7 +406,12 @@ function App() {
           ) : (
             <div className="empty" data-testid="debug-empty">
               <div>No debug run yet. Describe the bug above and start a run.</div>
-              <button className="button primary" data-testid="debug-launch-empty" onClick={() => void launch()} disabled={busy}>
+              <button
+                className="button primary"
+                data-testid="debug-launch-empty"
+                onClick={() => void launch()}
+                disabled={busy}
+              >
                 Start Debug
               </button>
             </div>

@@ -84,18 +84,13 @@ export function trellisMetaOf(node: TrellisRunNode): TrellisMeta | undefined {
   if (!node.meta) return undefined;
   try {
     const parsed = JSON.parse(node.meta);
-    return isRecord(parsed) && isRecord(parsed.trellis)
-      ? parsed.trellis as TrellisMeta
-      : undefined;
+    return isRecord(parsed) && isRecord(parsed.trellis) ? (parsed.trellis as TrellisMeta) : undefined;
   } catch {
     return undefined;
   }
 }
 
-export function findTrellisNodeByPhase<T extends TrellisRunNode>(
-  nodes: readonly T[],
-  phase: string,
-): T | undefined {
+export function findTrellisNodeByPhase<T extends TrellisRunNode>(nodes: readonly T[], phase: string): T | undefined {
   return nodes.find((node) => trellisMetaOf(node)?.phase === phase);
 }
 
@@ -115,9 +110,10 @@ function nonNegativeInteger(value: unknown): number | undefined {
 export function trellisRunTruthOf(nodes: readonly TrellisRunNode[]): TrellisRunTruth | undefined {
   const metas = nodes.map(trellisMetaOf).filter((meta): meta is TrellisMeta => meta !== undefined);
   const rootMetas = metas.filter((meta) => meta.logicalId === "root");
-  const settings = rootMetas.find((meta) => meta.phase === "final")
-    ?? rootMetas.find((meta) => meta.phase === "initial")
-    ?? rootMetas[0];
+  const settings =
+    rootMetas.find((meta) => meta.phase === "final") ??
+    rootMetas.find((meta) => meta.phase === "initial") ??
+    rootMetas[0];
   const rootMaxConcurrency = positiveInteger(settings?.rootMaxConcurrency);
   const rootAuthorTurnsTotal = positiveInteger(settings?.rootAuthorTurnsTotal);
   if (rootMaxConcurrency === undefined || rootAuthorTurnsTotal === undefined) return undefined;

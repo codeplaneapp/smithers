@@ -15,12 +15,8 @@ describe("monitorHref", () => {
   });
 
   test("resolves against an explicit gateway origin and encodes the runId", () => {
-    expect(monitorHref("run-xyz", { baseUrl: "https://gw.example" })).toBe(
-      "https://gw.example/monitor?runId=run-xyz",
-    );
-    expect(monitorHref("a b/c", { baseUrl: "https://gw.example" })).toBe(
-      "https://gw.example/monitor?runId=a%20b%2Fc",
-    );
+    expect(monitorHref("run-xyz", { baseUrl: "https://gw.example" })).toBe("https://gw.example/monitor?runId=run-xyz");
+    expect(monitorHref("a b/c", { baseUrl: "https://gw.example" })).toBe("https://gw.example/monitor?runId=a%20b%2Fc");
   });
 
   test("honors a custom monitor mount path", () => {

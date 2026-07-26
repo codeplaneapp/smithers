@@ -19,7 +19,10 @@ type ServerBehavior = {
   /** Override the streamRunEvents subscribe reply (e.g. to omit streamId). */
   subscribeReply?: (params: SubscribeFrame["params"], streamId: string) => unknown;
   /** Called after each socket's subscribe so the test can drive events/drops. */
-  onSubscribed?: (ws: ServerWebSocket<unknown>, ctx: { streamId: string; afterSeq?: number; connectionIndex: number }) => void;
+  onSubscribed?: (
+    ws: ServerWebSocket<unknown>,
+    ctx: { streamId: string; afterSeq?: number; connectionIndex: number },
+  ) => void;
   /** Complete the connect handshake but never reply to streamRunEvents — a gateway that stalls after handshake. */
   stallSubscribe?: boolean;
 };
@@ -84,12 +87,14 @@ function startRealGatewayServer(behavior: ServerBehavior = {}): RealGatewayServe
           return;
         }
         // Unknown method: surface a real gateway error frame.
-        ws.send(JSON.stringify({
-          type: "res",
-          id: frame.id,
-          ok: false,
-          error: { code: "UnknownMethod", message: `No such method: ${frame.method}` },
-        }));
+        ws.send(
+          JSON.stringify({
+            type: "res",
+            id: frame.id,
+            ok: false,
+            error: { code: "UnknownMethod", message: `No such method: ${frame.method}` },
+          }),
+        );
       },
     },
   });
@@ -100,23 +105,27 @@ function startRealGatewayServer(behavior: ServerBehavior = {}): RealGatewayServe
 }
 
 function sendRunEvent(ws: ServerWebSocket<unknown>, streamId: string, seq: number, event: string) {
-  ws.send(JSON.stringify({
-    type: "event",
-    event: "run.event",
-    seq,
-    stateVersion: seq,
-    payload: { streamId, runId: "run-1", seq, event },
-  }));
+  ws.send(
+    JSON.stringify({
+      type: "event",
+      event: "run.event",
+      seq,
+      stateVersion: seq,
+      payload: { streamId, runId: "run-1", seq, event },
+    }),
+  );
 }
 
 function sendGapResync(ws: ServerWebSocket<unknown>, streamId: string, seq: number) {
-  ws.send(JSON.stringify({
-    type: "event",
-    event: "run.gap_resync",
-    seq,
-    stateVersion: seq,
-    payload: { streamId, runId: "run-1", seq },
-  }));
+  ws.send(
+    JSON.stringify({
+      type: "event",
+      event: "run.gap_resync",
+      seq,
+      stateVersion: seq,
+      payload: { streamId, runId: "run-1", seq },
+    }),
+  );
 }
 
 /**
@@ -124,20 +133,16 @@ function sendGapResync(ws: ServerWebSocket<unknown>, streamId: string, seq: numb
  * (and from a failed replay): the subscription is torn down server-side while
  * the socket is deliberately left OPEN, so nothing else ever arrives on it.
  */
-function sendRunError(
-  ws: ServerWebSocket<unknown>,
-  streamId: string,
-  seq: number,
-  code: string,
-  message: string,
-) {
-  ws.send(JSON.stringify({
-    type: "event",
-    event: "run.error",
-    seq,
-    stateVersion: seq,
-    payload: { streamId, runId: "run-1", error: { version: 1, code, message } },
-  }));
+function sendRunError(ws: ServerWebSocket<unknown>, streamId: string, seq: number, code: string, message: string) {
+  ws.send(
+    JSON.stringify({
+      type: "event",
+      event: "run.error",
+      seq,
+      stateVersion: seq,
+      payload: { streamId, runId: "run-1", error: { version: 1, code, message } },
+    }),
+  );
 }
 
 let running: RealGatewayServer | undefined;

@@ -35,7 +35,13 @@ export function registerOpenClawPlugin({ homeDir = homedir() } = {}) {
 
   const enabled = enablePluginInConfig(configPath);
   if (!enabled) {
-    return { agent: "OpenClaw", installedPlugin: false, path: pluginDest, reason: "unparseable-config", enabled: false };
+    return {
+      agent: "OpenClaw",
+      installedPlugin: false,
+      path: pluginDest,
+      reason: "unparseable-config",
+      enabled: false,
+    };
   }
 
   mkdirSync(dirname(pluginDest), { recursive: true });
@@ -61,15 +67,14 @@ function enablePluginInConfig(configPath) {
     if (typeof config !== "object" || Array.isArray(config)) return false;
   }
 
-  const plugins = config.plugins && typeof config.plugins === "object" && !Array.isArray(config.plugins)
-    ? config.plugins
-    : {};
-  const entries = plugins.entries && typeof plugins.entries === "object" && !Array.isArray(plugins.entries)
-    ? plugins.entries
-    : {};
-  const smithers = entries.smithers && typeof entries.smithers === "object" && !Array.isArray(entries.smithers)
-    ? entries.smithers
-    : {};
+  const plugins =
+    config.plugins && typeof config.plugins === "object" && !Array.isArray(config.plugins) ? config.plugins : {};
+  const entries =
+    plugins.entries && typeof plugins.entries === "object" && !Array.isArray(plugins.entries) ? plugins.entries : {};
+  const smithers =
+    entries.smithers && typeof entries.smithers === "object" && !Array.isArray(entries.smithers)
+      ? entries.smithers
+      : {};
   smithers.enabled = true;
   entries.smithers = smithers;
   plugins.entries = entries;

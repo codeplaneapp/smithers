@@ -29,56 +29,47 @@ const TERMINAL_CHILD_RUN_STATUSES = new Set(["finished", "failed", "cancelled"])
  * @returns {value is import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>}
  */
 function isWorkflowLike(value) {
-    return Boolean(value &&
-        typeof value === "object" &&
-        "build" in value &&
-        typeof value.build === "function");
+  return Boolean(value && typeof value === "object" && "build" in value && typeof value.build === "function");
 }
 /**
  * @param {unknown} input
  * @returns {Record<string, unknown>}
  */
 function normalizeChildInput(input) {
-    if (!input)
-        return {};
-    if (typeof input === "object" && !Array.isArray(input)) {
-        return input;
-    }
-    return { value: input };
+  if (!input) return {};
+  if (typeof input === "object" && !Array.isArray(input)) {
+    return input;
+  }
+  return { value: input };
 }
 /**
  * @param {unknown} value
  * @returns {unknown}
  */
 function stripSystemColumns(value) {
-    if (!value || typeof value !== "object")
-        return value;
-    if (Array.isArray(value)) {
-        return value.map(stripSystemColumns);
-    }
-    const obj = value;
-    const out = {};
-    for (const [key, val] of Object.entries(obj)) {
-        if (key === "runId" || key === "nodeId" || key === "iteration")
-            continue;
-        out[key] = val;
-    }
-    return out;
+  if (!value || typeof value !== "object") return value;
+  if (Array.isArray(value)) {
+    return value.map(stripSystemColumns);
+  }
+  const obj = value;
+  const out = {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (key === "runId" || key === "nodeId" || key === "iteration") continue;
+    out[key] = val;
+  }
+  return out;
 }
 /**
  * @param {RunResult} runResult
  * @returns {unknown}
  */
 function normalizeChildOutput(runResult) {
-    const output = runResult.output;
-    if (!Array.isArray(output))
-        return stripSystemColumns(output);
-    const rows = output.map((row) => stripSystemColumns(row));
-    if (rows.length === 0)
-        return null;
-    if (rows.length === 1)
-        return rows[0];
-    return rows;
+  const output = runResult.output;
+  if (!Array.isArray(output)) return stripSystemColumns(output);
+  const rows = output.map((row) => stripSystemColumns(row));
+  if (rows.length === 0) return null;
+  if (rows.length === 1) return rows[0];
+  return rows;
 }
 /**
  * @param {string} parentRunId
@@ -87,12 +78,7 @@ function normalizeChildOutput(runResult) {
  * @returns {string}
  */
 function buildChildWorkflowRunId(parentRunId, stepId, iteration) {
-    return [
-        parentRunId,
-        "child",
-        stepId,
-        String(iteration),
-    ].join(":");
+  return [parentRunId, "child", stepId, String(iteration)].join(":");
 }
 /**
  * A child run is "live elsewhere" when another engine process is actively
@@ -105,14 +91,12 @@ function buildChildWorkflowRunId(parentRunId, stepId, iteration) {
  * @returns {boolean}
  */
 function isChildRunLiveElsewhere(run, now = Date.now()) {
-    if (!run || run.status !== "running")
-        return false;
-    if (typeof run.heartbeatAtMs === "number" &&
-        now - run.heartbeatAtMs <= CHILD_RUN_HEARTBEAT_STALE_MS) {
-        return true;
-    }
-    const ownerPid = parseRuntimeOwnerPid(run.runtimeOwnerId);
-    return ownerPid !== null && isPidAlive(ownerPid);
+  if (!run || run.status !== "running") return false;
+  if (typeof run.heartbeatAtMs === "number" && now - run.heartbeatAtMs <= CHILD_RUN_HEARTBEAT_STALE_MS) {
+    return true;
+  }
+  const ownerPid = parseRuntimeOwnerPid(run.runtimeOwnerId);
+  return ownerPid !== null && isPidAlive(ownerPid);
 }
 /**
  * @param {number} ms
@@ -120,21 +104,21 @@ function isChildRunLiveElsewhere(run, now = Date.now()) {
  * @returns {Promise<void>}
  */
 function sleepUnlessAborted(ms, signal) {
-    return new Promise((resolve, reject) => {
-        if (signal?.aborted) {
-            reject(signal.reason ?? makeAbortError("Child workflow attach aborted"));
-            return;
-        }
-        const onAbort = () => {
-            clearTimeout(timer);
-            reject(signal?.reason ?? makeAbortError("Child workflow attach aborted"));
-        };
-        const timer = setTimeout(() => {
-            signal?.removeEventListener("abort", onAbort);
-            resolve();
-        }, ms);
-        signal?.addEventListener("abort", onAbort, { once: true });
-    });
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? makeAbortError("Child workflow attach aborted"));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? makeAbortError("Child workflow attach aborted"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 /**
  * Attach to a child run another process is executing: poll its row until the
@@ -148,12 +132,12 @@ function sleepUnlessAborted(ms, signal) {
  * @returns {Promise<RunRow | undefined>}
  */
 async function waitForChildRunToSettle(adapter, childRunId, signal, pollIntervalMs = CHILD_RUN_ATTACH_POLL_MS) {
-    let run = await adapter.getRun(childRunId);
-    while (isChildRunLiveElsewhere(run)) {
-        await sleepUnlessAborted(pollIntervalMs, signal);
-        run = await adapter.getRun(childRunId);
-    }
-    return run;
+  let run = await adapter.getRun(childRunId);
+  while (isChildRunLiveElsewhere(run)) {
+    await sleepUnlessAborted(pollIntervalMs, signal);
+    run = await adapter.getRun(childRunId);
+  }
+  return run;
 }
 /**
  * Load the preserved result of a child run that already reached a terminal
@@ -166,20 +150,22 @@ async function waitForChildRunToSettle(adapter, childRunId, signal, pollInterval
  * @returns {Promise<{ runId: string; status: RunResult["status"]; output: unknown; }>}
  */
 async function loadPreservedChildResult(childWorkflow, childRunId, status) {
-    let output;
-    if (status === "finished") {
-        const { resolveSchema, __engineInternals } = await import("./engine.js");
-        const schema = resolveSchema(childWorkflow.db);
-        const outputTable = __engineInternals.resolveWorkflowOutputTable(childWorkflow, schema);
-        if (outputTable) {
-            output = await Effect.runPromise(loadRunOutputRowsEffect(childWorkflow.db, /** @type {any} */ (outputTable), childRunId));
-        }
+  let output;
+  if (status === "finished") {
+    const { resolveSchema, __engineInternals } = await import("./engine.js");
+    const schema = resolveSchema(childWorkflow.db);
+    const outputTable = __engineInternals.resolveWorkflowOutputTable(childWorkflow, schema);
+    if (outputTable) {
+      output = await Effect.runPromise(
+        loadRunOutputRowsEffect(childWorkflow.db, /** @type {any} */ (outputTable), childRunId),
+      );
     }
-    return {
-        runId: childRunId,
-        status,
-        output: normalizeChildOutput({ runId: childRunId, status, output }),
-    };
+  }
+  return {
+    runId: childRunId,
+    status,
+    output: normalizeChildOutput({ runId: childRunId, status, output }),
+  };
 }
 /**
  * @param {ChildWorkflowDefinition} definition
@@ -187,32 +173,32 @@ async function loadPreservedChildResult(childWorkflow, childRunId, status) {
  * @returns {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>}
  */
 function resolveChildWorkflow(definition, parentWorkflow) {
-    const resolved = typeof definition === "function" ? definition() : definition;
-    if (isWorkflowLike(resolved)) {
-        return {
-            db: resolved.db ?? parentWorkflow?.db,
-            build: resolved.build,
-            opts: resolved.opts ?? {},
-            schemaRegistry: resolved.schemaRegistry ?? parentWorkflow?.schemaRegistry,
-            zodToKeyName: resolved.zodToKeyName ?? parentWorkflow?.zodToKeyName,
-            ambiguousZodSchemas: resolved.ambiguousZodSchemas ?? parentWorkflow?.ambiguousZodSchemas,
-        };
+  const resolved = typeof definition === "function" ? definition() : definition;
+  if (isWorkflowLike(resolved)) {
+    return {
+      db: resolved.db ?? parentWorkflow?.db,
+      build: resolved.build,
+      opts: resolved.opts ?? {},
+      schemaRegistry: resolved.schemaRegistry ?? parentWorkflow?.schemaRegistry,
+      zodToKeyName: resolved.zodToKeyName ?? parentWorkflow?.zodToKeyName,
+      ambiguousZodSchemas: resolved.ambiguousZodSchemas ?? parentWorkflow?.ambiguousZodSchemas,
+    };
+  }
+  if (typeof resolved === "function") {
+    if (!parentWorkflow) {
+      throw new SmithersError("INVALID_INPUT", "Child workflow function requires a parent workflow context.");
     }
-    if (typeof resolved === "function") {
-        if (!parentWorkflow) {
-            throw new SmithersError("INVALID_INPUT", "Child workflow function requires a parent workflow context.");
-        }
-        const render = resolved;
-        return {
-            db: parentWorkflow.db,
-            build: (ctx) => render(ctx),
-            opts: {},
-            schemaRegistry: parentWorkflow.schemaRegistry,
-            zodToKeyName: parentWorkflow.zodToKeyName,
-            ambiguousZodSchemas: parentWorkflow.ambiguousZodSchemas,
-        };
-    }
-    throw new SmithersError("INVALID_INPUT", "Child workflow must be a Smithers workflow object or function.");
+    const render = resolved;
+    return {
+      db: parentWorkflow.db,
+      build: (ctx) => render(ctx),
+      opts: {},
+      schemaRegistry: parentWorkflow.schemaRegistry,
+      zodToKeyName: parentWorkflow.zodToKeyName,
+      ambiguousZodSchemas: parentWorkflow.ambiguousZodSchemas,
+    };
+  }
+  throw new SmithersError("INVALID_INPUT", "Child workflow must be a Smithers workflow object or function.");
 }
 /**
  * Execute a child workflow with prefer-resume fan-out semantics.
@@ -229,97 +215,98 @@ function resolveChildWorkflow(definition, parentWorkflow) {
  * @returns {Promise<{ runId: string; status: RunResult["status"]; output: unknown; }>}
  */
 export async function executeChildWorkflow(parentWorkflow, options) {
-    const runtime = requireTaskRuntime();
-    let definition = options.workflow;
-    let workflowPath = options.workflowPath;
-    if (isWorkflowFileRef(definition)) {
-        // A runtime-generated workflow file: load it from the approved root
-        // (defaulting to the parent run's rootDir) so a path authored mid-run
-        // cannot escape the parent's workspace. The loaded module becomes the
-        // child run's own workflowPath so resume re-loads the same file.
-        const loaded = await loadWorkflowFileRef(definition, {
-            approvedRoot: options.rootDir,
-        });
-        definition = loaded.workflow;
-        workflowPath = workflowPath ?? loaded.path;
+  const runtime = requireTaskRuntime();
+  let definition = options.workflow;
+  let workflowPath = options.workflowPath;
+  if (isWorkflowFileRef(definition)) {
+    // A runtime-generated workflow file: load it from the approved root
+    // (defaulting to the parent run's rootDir) so a path authored mid-run
+    // cannot escape the parent's workspace. The loaded module becomes the
+    // child run's own workflowPath so resume re-loads the same file.
+    const loaded = await loadWorkflowFileRef(definition, {
+      approvedRoot: options.rootDir,
+    });
+    definition = loaded.workflow;
+    workflowPath = workflowPath ?? loaded.path;
+  }
+  const childWorkflow = resolveChildWorkflow(definition, parentWorkflow);
+  const input = normalizeChildInput(options.input);
+  const childRunId =
+    options.runId ?? buildChildWorkflowRunId(options.parentRunId ?? runtime.runId, runtime.stepId, runtime.iteration);
+  // The child may bring its own db (e.g. a runtime-generated workflow with
+  // its own dbPath) that has never seen a run: create the system tables
+  // before probing for an existing child run. No-op when the parent already
+  // initialized the shared db, and for Postgres (ensured by its entry point).
+  ensureSmithersTables(/** @type {any} */ (childWorkflow.db));
+  const adapter = new SmithersDb(childWorkflow.db);
+  const signal = options.signal ?? runtime.signal;
+  const existingChildRun = await adapter.getRun(childRunId);
+  if (existingChildRun?.status === "finished") {
+    // The child already completed (e.g. the parent crashed after the child
+    // finished): preserve its recorded output instead of re-executing it.
+    return loadPreservedChildResult(childWorkflow, childRunId, "finished");
+  }
+  if (isChildRunLiveElsewhere(existingChildRun)) {
+    // Another process (a detached owner, a concurrent parent resume) is
+    // still executing this child. Launching a second engine would duplicate
+    // the fan-out, so attach: wait for the in-flight child to settle and
+    // preserve whatever terminal state it reaches.
+    const settled = await waitForChildRunToSettle(adapter, childRunId, signal);
+    if (settled && TERMINAL_CHILD_RUN_STATUSES.has(settled.status)) {
+      return loadPreservedChildResult(childWorkflow, childRunId, /** @type {RunResult["status"]} */ (settled.status));
     }
-    const childWorkflow = resolveChildWorkflow(definition, parentWorkflow);
-    const input = normalizeChildInput(options.input);
-    const childRunId = options.runId ??
-        buildChildWorkflowRunId(options.parentRunId ?? runtime.runId, runtime.stepId, runtime.iteration);
-    // The child may bring its own db (e.g. a runtime-generated workflow with
-    // its own dbPath) that has never seen a run: create the system tables
-    // before probing for an existing child run. No-op when the parent already
-    // initialized the shared db, and for Postgres (ensured by its entry point).
-    ensureSmithersTables(/** @type {any} */ (childWorkflow.db));
-    const adapter = new SmithersDb(childWorkflow.db);
-    const signal = options.signal ?? runtime.signal;
-    const existingChildRun = await adapter.getRun(childRunId);
-    if (existingChildRun?.status === "finished") {
-        // The child already completed (e.g. the parent crashed after the child
-        // finished): preserve its recorded output instead of re-executing it.
-        return loadPreservedChildResult(childWorkflow, childRunId, "finished");
-    }
-    if (isChildRunLiveElsewhere(existingChildRun)) {
-        // Another process (a detached owner, a concurrent parent resume) is
-        // still executing this child. Launching a second engine would duplicate
-        // the fan-out, so attach: wait for the in-flight child to settle and
-        // preserve whatever terminal state it reaches.
-        const settled = await waitForChildRunToSettle(adapter, childRunId, signal);
-        if (settled && TERMINAL_CHILD_RUN_STATUSES.has(settled.status)) {
-            return loadPreservedChildResult(childWorkflow, childRunId,
-            /** @type {RunResult["status"]} */ (settled.status));
-        }
-        // The other owner abandoned the run mid-flight (stale heartbeat, dead
-        // pid) or parked it — fall through to a durable resume of the same id.
-    }
-    const resume = Boolean(existingChildRun);
-    const bridgeRuntime = getWorkflowMakeBridgeRuntime();
-    if (bridgeRuntime) {
-        const result = await bridgeRuntime.executeChildWorkflow(childWorkflow, {
-            input,
-            runId: childRunId,
-            resume,
-            parentRunId: options.parentRunId ?? runtime.runId,
-            rootDir: options.rootDir,
-            workflowPath,
-            allowNetwork: options.allowNetwork,
-            maxOutputBytes: options.maxOutputBytes,
-            toolTimeoutMs: options.toolTimeoutMs,
-            signal,
-        });
-        return {
-            runId: result.runId,
-            status: result.status,
-            output: normalizeChildOutput(result),
-        };
-    }
-    const { runWorkflow } = await import("./engine.js");
-    const result = await Effect.runPromise(runWorkflow(childWorkflow, {
-        input,
-        runId: childRunId,
-        resume,
-        parentRunId: options.parentRunId ?? runtime.runId,
-        rootDir: options.rootDir,
-        workflowPath,
-        allowNetwork: options.allowNetwork,
-        maxOutputBytes: options.maxOutputBytes,
-        toolTimeoutMs: options.toolTimeoutMs,
-        signal,
-    }));
+    // The other owner abandoned the run mid-flight (stale heartbeat, dead
+    // pid) or parked it — fall through to a durable resume of the same id.
+  }
+  const resume = Boolean(existingChildRun);
+  const bridgeRuntime = getWorkflowMakeBridgeRuntime();
+  if (bridgeRuntime) {
+    const result = await bridgeRuntime.executeChildWorkflow(childWorkflow, {
+      input,
+      runId: childRunId,
+      resume,
+      parentRunId: options.parentRunId ?? runtime.runId,
+      rootDir: options.rootDir,
+      workflowPath,
+      allowNetwork: options.allowNetwork,
+      maxOutputBytes: options.maxOutputBytes,
+      toolTimeoutMs: options.toolTimeoutMs,
+      signal,
+    });
     return {
-        runId: result.runId,
-        status: result.status,
-        output: normalizeChildOutput(result),
+      runId: result.runId,
+      status: result.status,
+      output: normalizeChildOutput(result),
     };
+  }
+  const { runWorkflow } = await import("./engine.js");
+  const result = await Effect.runPromise(
+    runWorkflow(childWorkflow, {
+      input,
+      runId: childRunId,
+      resume,
+      parentRunId: options.parentRunId ?? runtime.runId,
+      rootDir: options.rootDir,
+      workflowPath,
+      allowNetwork: options.allowNetwork,
+      maxOutputBytes: options.maxOutputBytes,
+      toolTimeoutMs: options.toolTimeoutMs,
+      signal,
+    }),
+  );
+  return {
+    runId: result.runId,
+    status: result.status,
+    output: normalizeChildOutput(result),
+  };
 }
 export const __childWorkflowInternals = {
-    buildChildWorkflowRunId,
-    isChildRunLiveElsewhere,
-    loadPreservedChildResult,
-    normalizeChildInput,
-    normalizeChildOutput,
-    resolveChildWorkflow,
-    stripSystemColumns,
-    waitForChildRunToSettle,
+  buildChildWorkflowRunId,
+  isChildRunLiveElsewhere,
+  loadPreservedChildResult,
+  normalizeChildInput,
+  normalizeChildOutput,
+  resolveChildWorkflow,
+  stripSystemColumns,
+  waitForChildRunToSettle,
 };

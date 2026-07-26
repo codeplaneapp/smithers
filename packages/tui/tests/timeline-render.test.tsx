@@ -95,25 +95,29 @@ describeHeadlessRender("TimelineMode – terminal rendering (CI-safe, no gateway
   });
 
   it("shows (no events yet) when event list is empty", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
-      <TimelineView events={[]} />,
-      { width: 120, height: 20 },
-    );
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(<TimelineView events={[]} />, {
+      width: 120,
+      height: 20,
+    });
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("(no events yet)");
     renderer.destroy();
   });
 
   it("navigates frames backward with k key", async () => {
-    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await renderForTest(<TimelineView events={CANNED_EVENTS} />, { width: 120, height: 30 });
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } = await renderForTest(
+      <TimelineView events={CANNED_EVENTS} />,
+      { width: 120, height: 30 },
+    );
     await waitForVisualIdle();
 
     // Initially in live mode (last frame = 8)
     expect(captureCharFrame()).toContain("[live]");
 
     // Press k to go backward
-    act(() => { mockInput.pressKey("k"); });
+    act(() => {
+      mockInput.pressKey("k");
+    });
     await flush();
     await waitForVisualIdle();
     const after = captureCharFrame();
@@ -126,21 +130,27 @@ describeHeadlessRender("TimelineMode – terminal rendering (CI-safe, no gateway
 
   it("frame indicator changes when navigating, live mode is default", async () => {
     // Verifies: starts live, navigates to a numbered frame, can navigate back to last frame
-    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await renderForTest(<TimelineView events={CANNED_EVENTS} />, { width: 120, height: 30 });
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } = await renderForTest(
+      <TimelineView events={CANNED_EVENTS} />,
+      { width: 120, height: 30 },
+    );
     await waitForVisualIdle();
 
     // Initial state is live
     expect(captureCharFrame()).toContain("[live]");
 
     // Navigate backward (leaves live)
-    act(() => { mockInput.pressKey("k"); });
+    act(() => {
+      mockInput.pressKey("k");
+    });
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).not.toContain("[live]");
 
     // Navigate forward back to last frame (j key)
-    act(() => { mockInput.pressKey("j"); });
+    act(() => {
+      mockInput.pressKey("j");
+    });
     await flush();
     await waitForVisualIdle();
     // Should be at frame 8 (the last one) but NOT live (selectedIdx > 0)
@@ -150,18 +160,24 @@ describeHeadlessRender("TimelineMode – terminal rendering (CI-safe, no gateway
   });
 
   it("navigates forward with j key", async () => {
-    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await renderForTest(<TimelineView events={CANNED_EVENTS} />, { width: 120, height: 30 });
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } = await renderForTest(
+      <TimelineView events={CANNED_EVENTS} />,
+      { width: 120, height: 30 },
+    );
     await waitForVisualIdle();
 
     // Go back 1 frame from live (last=8 → becomes frame 7 = index 6 → [f7])
-    act(() => { mockInput.pressKey("k"); });
+    act(() => {
+      mockInput.pressKey("k");
+    });
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("[f7]");
 
     // Press j to advance to frame 8
-    act(() => { mockInput.pressKey("j"); });
+    act(() => {
+      mockInput.pressKey("j");
+    });
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("[f8]");
@@ -190,10 +206,10 @@ describeHeadlessRender("TimelineMode – terminal rendering (CI-safe, no gateway
       frame(1, "node.start", { nodeId: "n-1", name: "task", status: "running" }),
       frame(2, "node.end", { nodeId: "n-1", name: "task", status: "done" }),
     ];
-    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
-      <TimelineView events={events} />,
-      { width: 120, height: 20 },
-    );
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(<TimelineView events={events} />, {
+      width: 120,
+      height: 20,
+    });
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("✓");
     renderer.destroy();
@@ -204,10 +220,10 @@ describeHeadlessRender("TimelineMode – terminal rendering (CI-safe, no gateway
       frame(1, "node.start", { nodeId: "n-1", name: "task", status: "running" }),
       frame(2, "node.fail", { nodeId: "n-1", name: "task", status: "failed" }),
     ];
-    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
-      <TimelineView events={events} />,
-      { width: 120, height: 20 },
-    );
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(<TimelineView events={events} />, {
+      width: 120,
+      height: 20,
+    });
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("✗");
     renderer.destroy();
@@ -236,16 +252,22 @@ describeHeadlessRender("TimelineMode – terminal rendering (CI-safe, no gateway
     // Raw uppercase "L" goes through the REAL parser as { name: "l", shift: true }
     // (parseKeypress lowercases shifted letters), so a literal `name === "L"`
     // comparison is dead code. This locks the working binding.
-    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await renderForTest(<TimelineView events={CANNED_EVENTS} />, { width: 120, height: 30 });
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } = await renderForTest(
+      <TimelineView events={CANNED_EVENTS} />,
+      { width: 120, height: 30 },
+    );
     await waitForVisualIdle();
 
-    act(() => { mockInput.pressKey("k"); });
+    act(() => {
+      mockInput.pressKey("k");
+    });
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).not.toContain("[live]");
 
-    act(() => { mockInput.pressKey("L"); });
+    act(() => {
+      mockInput.pressKey("L");
+    });
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("[live]");
@@ -256,18 +278,26 @@ describeHeadlessRender("TimelineMode – terminal rendering (CI-safe, no gateway
   it("Shift+L works even after scrubbing forward to the last frame", async () => {
     // j to the last frame pins a NUMERIC index (not -1): before the fix there
     // was no in-mode way back to [live] at all.
-    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await renderForTest(<TimelineView events={CANNED_EVENTS} />, { width: 120, height: 30 });
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } = await renderForTest(
+      <TimelineView events={CANNED_EVENTS} />,
+      { width: 120, height: 30 },
+    );
     await waitForVisualIdle();
 
-    act(() => { mockInput.pressKey("k"); });
-    act(() => { mockInput.pressKey("j"); });
+    act(() => {
+      mockInput.pressKey("k");
+    });
+    act(() => {
+      mockInput.pressKey("j");
+    });
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("[f8]");
     expect(captureCharFrame()).not.toContain("[live]");
 
-    act(() => { mockInput.pressKey("L"); });
+    act(() => {
+      mockInput.pressKey("L");
+    });
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("[live]");
@@ -276,13 +306,17 @@ describeHeadlessRender("TimelineMode – terminal rendering (CI-safe, no gateway
   });
 
   it("ignores ctrl-modified chords (Ctrl-K must not scrub)", async () => {
-    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await renderForTest(<TimelineView events={CANNED_EVENTS} />, { width: 120, height: 30 });
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } = await renderForTest(
+      <TimelineView events={CANNED_EVENTS} />,
+      { width: 120, height: 30 },
+    );
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("[live]");
 
     // Emits the raw control byte 0x0b, parsed as { name: "k", ctrl: true }.
-    act(() => { mockInput.pressKey("k", { ctrl: true }); });
+    act(() => {
+      mockInput.pressKey("k", { ctrl: true });
+    });
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("[live]");
@@ -306,10 +340,10 @@ describeHeadlessRender("TimelineMode – terminal rendering (CI-safe, no gateway
       },
       stateVersion: 7,
     };
-    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
-      <TimelineView events={[wrapped]} />,
-      { width: 120, height: 30 },
-    );
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(<TimelineView events={[wrapped]} />, {
+      width: 120,
+      height: 30,
+    });
     await waitForVisualIdle();
     const f = captureCharFrame();
     expect(f).toContain("seq:7");
@@ -334,24 +368,36 @@ describeHeadlessRender("TimelineMode – terminal rendering (CI-safe, no gateway
     let stream!: () => void;
     function Harness() {
       const [count, setCount] = useState(RING);
-      stream = () => { setCount((prev) => prev + 1); };
+      stream = () => {
+        setCount((prev) => prev + 1);
+      };
       return <TimelineView events={all.slice(Math.max(0, count - RING), count)} />;
     }
 
-    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await renderForTest(<Harness />, { width: 120, height: 30 });
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } = await renderForTest(<Harness />, {
+      width: 120,
+      height: 30,
+    });
     await waitForVisualIdle();
 
     // Scrub back two frames from live: ring holds seq 1..8, so we pin seq 6.
-    act(() => { mockInput.pressKey("k"); });
-    act(() => { mockInput.pressKey("k"); });
+    act(() => {
+      mockInput.pressKey("k");
+    });
+    act(() => {
+      mockInput.pressKey("k");
+    });
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("seq:6");
 
     // Three more frames stream in; the ring now holds seq 4..11 and the pinned
     // frame has moved from index 5 to index 2.
-    act(() => { stream(); stream(); stream(); });
+    act(() => {
+      stream();
+      stream();
+      stream();
+    });
     await flush();
     await waitForVisualIdle();
 
@@ -371,27 +417,37 @@ describeHeadlessRender("TimelineMode – terminal rendering (CI-safe, no gateway
     let shrink!: () => void;
     function Harness() {
       const [full, setFull] = useState(true);
-      shrink = () => { setFull(false); };
+      shrink = () => {
+        setFull(false);
+      };
       return <TimelineView events={full ? CANNED_EVENTS : CANNED_EVENTS.slice(0, 3)} />;
     }
 
-    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await renderForTest(<Harness />, { width: 120, height: 30 });
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } = await renderForTest(<Harness />, {
+      width: 120,
+      height: 30,
+    });
     await waitForVisualIdle();
 
     // Pin frame 7 (index 6) out of 8, then drop to a 3-event list.
-    act(() => { mockInput.pressKey("k"); });
+    act(() => {
+      mockInput.pressKey("k");
+    });
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("[f7]");
 
-    act(() => { shrink(); });
+    act(() => {
+      shrink();
+    });
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("[f3]");
 
     // A single k must move back one frame, not be swallowed.
-    act(() => { mockInput.pressKey("k"); });
+    act(() => {
+      mockInput.pressKey("k");
+    });
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("[f2]");
@@ -405,8 +461,10 @@ describeHeadlessRender("TimelineMode – terminal rendering (CI-safe, no gateway
       frame(1, "node.start", { nodeId: "n-alpha", name: "fetch-data", status: "running" }),
       frame(2, "node.start", { nodeId: "n-beta", name: "process", status: "running" }),
     ];
-    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await renderForTest(<TimelineView events={twoNodeEvents} />, { width: 120, height: 30 });
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } = await renderForTest(
+      <TimelineView events={twoNodeEvents} />,
+      { width: 120, height: 30 },
+    );
     await waitForVisualIdle();
 
     // Live mode shows last frame (seq 2) — both nodes visible
@@ -414,7 +472,9 @@ describeHeadlessRender("TimelineMode – terminal rendering (CI-safe, no gateway
     expect(captureCharFrame()).toContain("process");
 
     // Navigate back one frame (seq 1) — only n-alpha present
-    act(() => { mockInput.pressKey("k"); });
+    act(() => {
+      mockInput.pressKey("k");
+    });
     await flush();
     await waitForVisualIdle();
 

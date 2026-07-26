@@ -240,7 +240,12 @@ function BranchDemo() {
 function ComposerDemo({ onSubmit }: { onSubmit: (message: PromptInputMessage) => void }) {
   const [status, setStatus] = useState<"ready" | "submitted" | "streaming" | "error">("ready");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
   return (
     <PromptInput
       data-testid="prompt-input"
@@ -268,7 +273,11 @@ function ComposerDemo({ onSubmit }: { onSubmit: (message: PromptInputMessage) =>
             </PromptInputActionMenuContent>
           </PromptInputActionMenu>
         </PromptInputTools>
-        {status === "streaming" ? <PromptInputStop aria-label="Stop generating" /> : <PromptInputSubmit aria-label="Send message" />}
+        {status === "streaming" ? (
+          <PromptInputStop aria-label="Stop generating" />
+        ) : (
+          <PromptInputSubmit aria-label="Send message" />
+        )}
       </PromptInputFooter>
     </PromptInput>
   );
@@ -288,7 +297,10 @@ function AttachmentsDemo() {
             <AttachmentTitle>{item.name}</AttachmentTitle>
             <AttachmentDescription>{item.state}</AttachmentDescription>
           </AttachmentContent>
-          <AttachmentRemove aria-label={`Remove ${item.name}`} onClick={() => setItems((all) => all.filter((x) => x.id !== item.id))} />
+          <AttachmentRemove
+            aria-label={`Remove ${item.name}`}
+            onClick={() => setItems((all) => all.filter((x) => x.id !== item.id))}
+          />
         </Attachment>
       ))}
     </AttachmentGroup>
@@ -342,14 +354,13 @@ function CheckpointDemo() {
         <CheckpointIcon />
         <CheckpointMetadata />
         <CheckpointTrigger />
-        <CheckpointActions
-          actions={["fork", "replay", "rewind"]}
-          onAction={(kind) => setPending(kind)}
-        />
+        <CheckpointActions actions={["fork", "replay", "rewind"]} onAction={(kind) => setPending(kind)} />
       </Checkpoint>
       {pending ? (
         <div role="alertdialog" aria-label={`Confirm ${pending}`} data-testid="checkpoint-confirm">
-          <p>{pending === "rewind" ? "Rewind deletes later frames. Continue?" : `Run ${pending} from checkpoint cp-12?`}</p>
+          <p>
+            {pending === "rewind" ? "Rewind deletes later frames. Continue?" : `Run ${pending} from checkpoint cp-12?`}
+          </p>
           <button
             type="button"
             data-testid="checkpoint-confirm-yes"
@@ -421,7 +432,9 @@ function CodeBlockTabsDemo() {
     { id: "b", label: "b.ts", code: "export const b = 2;", language: "typescript" },
   ];
   const [activeId, setActiveId] = useState("a");
-  return <CodeBlockGroup data-testid="code-block-group" items={items} activeId={activeId} onActiveIdChange={setActiveId} />;
+  return (
+    <CodeBlockGroup data-testid="code-block-group" items={items} activeId={activeId} onActiveIdChange={setActiveId} />
+  );
 }
 
 export function GalleryCanvas() {
@@ -444,7 +457,10 @@ export function GalleryCanvas() {
   }, [theme]);
 
   return (
-    <div data-testid="ui-gallery" style={{ padding: 24, maxWidth: 860, margin: "0 auto", fontFamily: "system-ui, sans-serif" }}>
+    <div
+      data-testid="ui-gallery"
+      style={{ padding: 24, maxWidth: 860, margin: "0 auto", fontFamily: "system-ui, sans-serif" }}
+    >
       <SmithersUiStyles />
       <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <h1 style={{ margin: 0, fontSize: 22 }}>Agentic UI gallery</h1>
@@ -618,8 +634,7 @@ export function GalleryCanvas() {
         </Sources>
         <p>
           As recorded in the contract
-          <InlineCitation href="https://example.com/contract" index={1} label="Integration contract" />
-          .
+          <InlineCitation href="https://example.com/contract" index={1} label="Integration contract" />.
         </p>
         <CitationCarousel sources={[CITATION_SOURCE]} />
         <CitationCard source={CITATION_SOURCE} />

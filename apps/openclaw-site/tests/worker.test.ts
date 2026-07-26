@@ -54,7 +54,10 @@ describe("OpenClaw site worker", () => {
   });
 
   test("reports health without touching static assets", async () => {
-    const response = await createOpenClawSiteWorker().fetch(new Request("https://openclaw.smithers.sh/healthz"), makeEnv());
+    const response = await createOpenClawSiteWorker().fetch(
+      new Request("https://openclaw.smithers.sh/healthz"),
+      makeEnv(),
+    );
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, service: "openclaw-site" });

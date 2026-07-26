@@ -65,7 +65,10 @@ const packageThresholdOverrides = new Map([
 ]);
 
 const coverageUnsupported = new Map([
-  ["apps/smithers", "The local Smithers UI (served by `smithers ui --app`); covered by normal test/typecheck/e2e jobs, not coverage thresholds."],
+  [
+    "apps/smithers",
+    "The local Smithers UI (served by `smithers ui --app`); covered by normal test/typecheck/e2e jobs, not coverage thresholds.",
+  ],
   ["e2e", "Bun coverage can fail while instrumenting the full fault matrix; run e2e through normal test/fault jobs."],
 ]);
 
@@ -151,11 +154,15 @@ function workspacePackageDirs() {
 function selectedPackageDirs() {
   const fromEnv = process.env.SMITHERS_COVERAGE_PACKAGES;
   const fromArgs = process.argv.slice(2);
-  const selected = fromArgs.length > 0
-    ? fromArgs
-    : fromEnv
-      ? fromEnv.split(",").map((part) => part.trim()).filter(Boolean)
-      : workspacePackageDirs();
+  const selected =
+    fromArgs.length > 0
+      ? fromArgs
+      : fromEnv
+        ? fromEnv
+            .split(",")
+            .map((part) => part.trim())
+            .filter(Boolean)
+        : workspacePackageDirs();
   return selected.map((dir) => relative(repoRoot, resolve(repoRoot, dir)));
 }
 
@@ -201,7 +208,7 @@ function bunTestSegments(pkg, relDir) {
   // safe `bun test ... && bun test ...` boundaries explicitly. Each segment
   // gets its own process and LCOV report; mergeLcovReports unions counters.
   const script = pkg.scripts?.test;
-  return typeof script === "string" ? directBunTestSegments(script) ?? [] : [];
+  return typeof script === "string" ? (directBunTestSegments(script) ?? []) : [];
 }
 
 function thresholdFor(relDir) {
@@ -240,9 +247,7 @@ for (const relDir of selected) {
   const lcovPaths = [];
   let segmentFailure = null;
   for (const [index, segment] of testSegments.entries()) {
-    const segmentOutDir = testSegments.length === 1
-      ? outDir
-      : join(outDir, `${index + 1}-${segment.phase}`);
+    const segmentOutDir = testSegments.length === 1 ? outDir : join(outDir, `${index + 1}-${segment.phase}`);
     mkdirSync(segmentOutDir, { recursive: true });
     const args = [
       "test",
@@ -295,9 +300,10 @@ for (const relDir of selected) {
   const threshold = thresholdFor(relDir);
   const linePass = summary.lines.pct >= threshold.lines;
   const fnPass = summary.functions.pct >= threshold.functions;
-  const branchNote = summary.branches.found === 0
-    ? "branch coverage unavailable in this lcov"
-    : `${summary.branches.pct.toFixed(2)}% branches`;
+  const branchNote =
+    summary.branches.found === 0
+      ? "branch coverage unavailable in this lcov"
+      : `${summary.branches.pct.toFixed(2)}% branches`;
 
   if (!linePass || !fnPass) failed = true;
   results.push({

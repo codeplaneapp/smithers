@@ -95,7 +95,11 @@ const SKILL_SOURCES = [
 ];
 
 function slugify(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 50);
 }
 
 function wordCount(text: string) {
@@ -144,7 +148,12 @@ export function buildBatches(batchWords: number, batchFiles: number) {
     let curWords = 0;
     const flush = () => {
       if (cur.length === 0) return;
-      let batchId = slugify(`${group}-${cur[0].split("/").pop()!.replace(/\.(mdx|md)$/, "")}`);
+      let batchId = slugify(
+        `${group}-${cur[0]
+          .split("/")
+          .pop()!
+          .replace(/\.(mdx|md)$/, "")}`,
+      );
       while (seen.has(batchId)) batchId = `${batchId}-x`;
       seen.add(batchId);
       batches.push({ batchId, group, files: cur, words: curWords });
@@ -184,7 +193,9 @@ function extractFrontmatter(text: string): string {
 }
 
 function extractHeadings(text: string): string[] {
-  return stripFences(text).split("\n").filter((l) => /^#{1,6}\s/.test(l));
+  return stripFences(text)
+    .split("\n")
+    .filter((l) => /^#{1,6}\s/.test(l));
 }
 
 function countEmDash(text: string) {
@@ -214,22 +225,34 @@ function mechCheck(batch: { batchId: string; files: string[] }) {
     wordsBefore += wb;
     wordsAfter += wa;
     if (wa > wb) violations.push(`${rel}: grew from ${wb} to ${wa} words; must not grow`);
-    if (wa < Math.floor(wb * 0.4) && wb > 120) violations.push(`${rel}: over-compressed (${wb} -> ${wa} words); verify no ideas were lost, restore any that were`);
-    if (extractFrontmatter(after) !== extractFrontmatter(before)) violations.push(`${rel}: frontmatter changed; restore it exactly from HEAD`);
+    if (wa < Math.floor(wb * 0.4) && wb > 120)
+      violations.push(
+        `${rel}: over-compressed (${wb} -> ${wa} words); verify no ideas were lost, restore any that were`,
+      );
+    if (extractFrontmatter(after) !== extractFrontmatter(before))
+      violations.push(`${rel}: frontmatter changed; restore it exactly from HEAD`);
     const fb = extractFences(before);
     const fa = extractFences(after);
-    if (fb.length !== fa.length || fb.some((f, i) => f !== fa[i])) violations.push(`${rel}: fenced code blocks changed; restore them exactly from HEAD`);
+    if (fb.length !== fa.length || fb.some((f, i) => f !== fa[i]))
+      violations.push(`${rel}: fenced code blocks changed; restore them exactly from HEAD`);
     const hb = extractHeadings(before);
     const ha = extractHeadings(after);
-    if (hb.length !== ha.length || hb.some((h, i) => h !== ha[i])) violations.push(`${rel}: headings changed (anchors/links break); restore them exactly from HEAD`);
-    if (countEmDash(after) > countEmDash(before)) violations.push(`${rel}: em-dash added; docs forbid em-dashes (check:docs gates on it)`);
+    if (hb.length !== ha.length || hb.some((h, i) => h !== ha[i]))
+      violations.push(`${rel}: headings changed (anchors/links break); restore them exactly from HEAD`);
+    if (countEmDash(after) > countEmDash(before))
+      violations.push(`${rel}: em-dash added; docs forbid em-dashes (check:docs gates on it)`);
   }
   return { batchId: batch.batchId, ok: violations.length === 0, violations, wordsBefore, wordsAfter };
 }
 
 function runScript(cmd: string, args: string[]): { ok: boolean; out: string } {
   try {
-    const out = execFileSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 10 * 60_000 });
+    const out = execFileSync(cmd, args, {
+      cwd: ROOT,
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: 10 * 60_000,
+    });
     return { ok: true, out: out.slice(-4000) };
   } catch (err) {
     const e = err as { stdout?: string; stderr?: string; message?: string };
@@ -310,15 +333,18 @@ When done, fill the structured output: batchId is
 lists files you changed, filesUnchanged the ones you deliberately left.`;
 }
 
-function auditPrompt(
-  batch: { batchId: string; files: string[] },
-  mech: { violations?: unknown } | undefined,
-) {
+function auditPrompt(batch: { batchId: string; files: string[] }, mech: { violations?: unknown } | undefined) {
   const rawViolations = mech?.violations;
   const violations: string[] = Array.isArray(rawViolations)
     ? rawViolations.map(String)
     : typeof rawViolations === "string"
-      ? (() => { try { return JSON.parse(rawViolations as string) as string[]; } catch { return [rawViolations as string]; } })()
+      ? (() => {
+          try {
+            return JSON.parse(rawViolations as string) as string[];
+          } catch {
+            return [rawViolations as string];
+          }
+        })()
       : [];
   return `You are the idea-preservation auditor for a concision pass over the Smithers docs
 (repo cwd: ${ROOT}). A previous editor rewrote these files to be more concise. Your job:
@@ -377,23 +403,27 @@ export default smithers((ctx) => {
   const batchFiles = ctx.input.batchFiles ?? 8;
   const onlyGroup = ctx.input.onlyGroup ?? null;
 
-  const inv = ctx.outputMaybe("dcInventory", { nodeId: "inventory" }) as
-    | { batches?: unknown }
-    | undefined;
+  const inv = ctx.outputMaybe("dcInventory", { nodeId: "inventory" }) as { batches?: unknown } | undefined;
   const rawBatches = inv?.batches;
-  const parsedBatches: { batchId: string; group: string; files: string[]; words: number }[] =
-    Array.isArray(rawBatches)
-      ? (rawBatches as { batchId: string; group: string; files: string[]; words: number }[])
-      : typeof rawBatches === "string"
-        ? JSON.parse(rawBatches)
-        : [];
+  const parsedBatches: { batchId: string; group: string; files: string[]; words: number }[] = Array.isArray(rawBatches)
+    ? (rawBatches as { batchId: string; group: string; files: string[]; words: number }[])
+    : typeof rawBatches === "string"
+      ? JSON.parse(rawBatches)
+      : [];
   // Array inputs hydrate as JSON strings; parse defensively.
   const skipRaw = ctx.input.skipBatchIds as unknown;
   const skipSet = new Set<string>(
-    Array.isArray(skipRaw) ? (skipRaw as string[]) : typeof skipRaw === "string" ? (JSON.parse(skipRaw) as string[]) : [],
+    Array.isArray(skipRaw)
+      ? (skipRaw as string[])
+      : typeof skipRaw === "string"
+        ? (JSON.parse(skipRaw) as string[])
+        : [],
   );
   const batches = parsedBatches
-    .map((b) => ({ ...b, files: typeof b.files === "string" ? (JSON.parse(b.files as unknown as string) as string[]) : b.files }))
+    .map((b) => ({
+      ...b,
+      files: typeof b.files === "string" ? (JSON.parse(b.files as unknown as string) as string[]) : b.files,
+    }))
     .filter((b) => (onlyGroup ? b.group === onlyGroup : true))
     .filter((b) => !skipSet.has(b.batchId));
 
@@ -422,9 +452,7 @@ export default smithers((ctx) => {
       filesProcessed += b.files.length;
       if (!(re.ok === true || re.ok === 1)) withViolations.push(b.batchId);
     }
-    const audit = ctx.outputMaybe("dcAudit", { nodeId: `audit-${b.batchId}` }) as
-      | { verdict?: string }
-      | undefined;
+    const audit = ctx.outputMaybe("dcAudit", { nodeId: `audit-${b.batchId}` }) as { verdict?: string } | undefined;
     if (audit?.verdict === "escalate") escalated.push(b.batchId);
   }
   const gatesPassed = gate1Failed ? gate2?.ok === true || gate2?.ok === 1 : gate1 != null;
@@ -471,7 +499,13 @@ export default smithers((ctx) => {
                         try {
                           return mechCheck(b);
                         } catch (err) {
-                          return { batchId: b.batchId, ok: false, violations: [`mech check crashed: ${err instanceof Error ? err.message : String(err)}`], wordsBefore: 0, wordsAfter: 0 };
+                          return {
+                            batchId: b.batchId,
+                            ok: false,
+                            violations: [`mech check crashed: ${err instanceof Error ? err.message : String(err)}`],
+                            wordsBefore: 0,
+                            wordsAfter: 0,
+                          };
                         }
                       }}
                     </Task>
@@ -495,7 +529,13 @@ export default smithers((ctx) => {
                         try {
                           return mechCheck(b);
                         } catch (err) {
-                          return { batchId: b.batchId, ok: false, violations: [`recheck crashed: ${err instanceof Error ? err.message : String(err)}`], wordsBefore: 0, wordsAfter: 0 };
+                          return {
+                            batchId: b.batchId,
+                            ok: false,
+                            violations: [`recheck crashed: ${err instanceof Error ? err.message : String(err)}`],
+                            wordsBefore: 0,
+                            wordsAfter: 0,
+                          };
                         }
                       }}
                     </Task>

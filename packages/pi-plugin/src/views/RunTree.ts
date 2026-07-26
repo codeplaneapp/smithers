@@ -153,14 +153,11 @@ function collectPathIds(root: DevToolsNode, target: (node: DevToolsNode) => bool
 }
 
 function searchText(node: DevToolsNode) {
-  return [
-    node.name,
-    node.type,
-    node.task?.nodeId,
-    node.task?.label,
-    node.task?.agent,
-    propsSummary(node, 200),
-  ].filter(Boolean).join(" ").toLowerCase().normalize("NFC");
+  return [node.name, node.type, node.task?.nodeId, node.task?.label, node.task?.agent, propsSummary(node, 200)]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .normalize("NFC");
 }
 
 export class RunTree {

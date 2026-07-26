@@ -14,15 +14,14 @@ const require = createRequire(import.meta.url);
  * @returns {string | undefined}
  */
 function resolveEngineModule(specifier, optional = false) {
-    try {
-        return require.resolve(specifier);
+  try {
+    return require.resolve(specifier);
+  } catch (error) {
+    if (optional && /** @type {{ code?: unknown }} */ (error).code === "MODULE_NOT_FOUND") {
+      return undefined;
     }
-    catch (error) {
-        if (optional && /** @type {{ code?: unknown }} */ (error).code === "MODULE_NOT_FOUND") {
-            return undefined;
-        }
-        throw error;
-    }
+    throw error;
+  }
 }
 
 /**
@@ -31,68 +30,72 @@ function resolveEngineModule(specifier, optional = false) {
  * of bare package specifiers do not run onResolve hooks.
  */
 export function installWorkflowModuleResolution() {
-    const bun = typeof Bun === "undefined" ? undefined : Bun;
-    if (!bun?.plugin) {
-        return;
-    }
+  const bun = typeof Bun === "undefined" ? undefined : Bun;
+  if (!bun?.plugin) {
+    return;
+  }
 
-    const globals = /** @type {Record<symbol, unknown>} */ (globalThis);
-    if (globals[WORKFLOW_MODULE_RESOLUTION]) {
-        return;
-    }
+  const globals = /** @type {Record<symbol, unknown>} */ (globalThis);
+  if (globals[WORKFLOW_MODULE_RESOLUTION]) {
+    return;
+  }
 
-    /** @type {Map<string, string>} */
-    const aliases = new Map([
-        ["react", resolveEngineModule("react")],
-        ["react/jsx-runtime", resolveEngineModule("react/jsx-runtime")],
-        ["react/jsx-dev-runtime", resolveEngineModule("react/jsx-dev-runtime")],
-        ["@smithers-orchestrator/components", resolveEngineModule("@smithers-orchestrator/components")],
-    ]);
-    for (const specifier of ["smithers-orchestrator", "smithers-orchestrator/jsx-runtime", "smithers-orchestrator/jsx-dev-runtime"]) {
-        const resolved = resolveEngineModule(specifier, true);
-        if (resolved) {
-            aliases.set(specifier, resolved);
-        }
+  /** @type {Map<string, string>} */
+  const aliases = new Map([
+    ["react", resolveEngineModule("react")],
+    ["react/jsx-runtime", resolveEngineModule("react/jsx-runtime")],
+    ["react/jsx-dev-runtime", resolveEngineModule("react/jsx-dev-runtime")],
+    ["@smithers-orchestrator/components", resolveEngineModule("@smithers-orchestrator/components")],
+  ]);
+  for (const specifier of [
+    "smithers-orchestrator",
+    "smithers-orchestrator/jsx-runtime",
+    "smithers-orchestrator/jsx-dev-runtime",
+  ]) {
+    const resolved = resolveEngineModule(specifier, true);
+    if (resolved) {
+      aliases.set(specifier, resolved);
     }
+  }
 
-    // Keep the first engine installation in charge for the lifetime of the
-    // process. A later workflow-pack copy must not replace these identities.
-    globals[WORKFLOW_MODULE_RESOLUTION] = true;
-    // Load the react modules once, eagerly, while module evaluation is still
-    // serial. Requiring them lazily inside a build.module callback races the
-    // loader's own in-flight fetch of the same file (surfaces as "Requested
-    // module is already fetched" under coverage instrumentation).
-    const eagerExports = new Map();
-    for (const [specifier, resolved] of aliases) {
-        if (specifier === "react" || specifier.startsWith("react/")) {
-            const module = require(resolved);
-            eagerExports.set(specifier, { ...module, default: module.default ?? module });
-        }
+  // Keep the first engine installation in charge for the lifetime of the
+  // process. A later workflow-pack copy must not replace these identities.
+  globals[WORKFLOW_MODULE_RESOLUTION] = true;
+  // Load the react modules once, eagerly, while module evaluation is still
+  // serial. Requiring them lazily inside a build.module callback races the
+  // loader's own in-flight fetch of the same file (surfaces as "Requested
+  // module is already fetched" under coverage instrumentation).
+  const eagerExports = new Map();
+  for (const [specifier, resolved] of aliases) {
+    if (specifier === "react" || specifier.startsWith("react/")) {
+      const module = require(resolved);
+      eagerExports.set(specifier, { ...module, default: module.default ?? module });
     }
-    bun.plugin({
-        name: "smithers-workflow-module-resolution",
-        setup(build) {
-            for (const [specifier, resolved] of aliases) {
-                build.module(specifier, () => {
-                    // React is required by CommonJS react-dom internals. Bun
-                    // cannot require an async virtual module, so these three
-                    // canonical modules must stay synchronous.
-                    const eager = eagerExports.get(specifier);
-                    if (eager) {
-                        return { exports: eager, loader: "object" };
-                    }
-                    return {
-                        // A source-level re-export retains the complete
-                        // static export list, including `export *` chains in
-                        // smithers-orchestrator, while its absolute target
-                        // keeps resolution in the engine installation.
-                        contents: `export * from ${JSON.stringify(pathToFileURL(resolved).href)};`,
-                        loader: "js",
-                    };
-                });
-            }
-        },
-    });
+  }
+  bun.plugin({
+    name: "smithers-workflow-module-resolution",
+    setup(build) {
+      for (const [specifier, resolved] of aliases) {
+        build.module(specifier, () => {
+          // React is required by CommonJS react-dom internals. Bun
+          // cannot require an async virtual module, so these three
+          // canonical modules must stay synchronous.
+          const eager = eagerExports.get(specifier);
+          if (eager) {
+            return { exports: eager, loader: "object" };
+          }
+          return {
+            // A source-level re-export retains the complete
+            // static export list, including `export *` chains in
+            // smithers-orchestrator, while its absolute target
+            // keeps resolution in the engine installation.
+            contents: `export * from ${JSON.stringify(pathToFileURL(resolved).href)};`,
+            loader: "js",
+          };
+        });
+      }
+    },
+  });
 }
 
 installWorkflowModuleResolution();

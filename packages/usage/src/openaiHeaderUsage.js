@@ -21,42 +21,42 @@ const PROBE_TIMEOUT_MS = 6_000;
  * @returns {Promise<UsageProbe>}
  */
 export async function openaiHeaderUsage(account) {
-    const apiKey = account.apiKey;
-    if (!apiKey) {
-        return { source: "none", error: "Account has no API key set" };
+  const apiKey = account.apiKey;
+  if (!apiKey) {
+    return { source: "none", error: "Account has no API key set" };
+  }
+  try {
+    const res = await fetch(CHAT_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: PROBE_MODEL,
+        max_tokens: 1,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    if (res.status === 401) {
+      return { source: "none", error: "OPENAI_API_KEY rejected (401)" };
     }
-    try {
-        const res = await fetch(CHAT_URL, {
-            method: "POST",
-            headers: {
-                Authorization: `Bearer ${apiKey}`,
-                "content-type": "application/json",
-            },
-            body: JSON.stringify({
-                model: PROBE_MODEL,
-                max_tokens: 1,
-                messages: [{ role: "user", content: "hi" }],
-            }),
-            signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-        });
-        if (res.status === 401) {
-            return { source: "none", error: "OPENAI_API_KEY rejected (401)" };
-        }
-        const get = (name) => res.headers.get(name);
-        const windows = parseOpenAiRateLimitHeaders(get);
-        if (res.status === 429) {
-            const retryAfter = res.headers.get("retry-after");
-            return {
-                source: "headers",
-                windows,
-                error: `Rate limited (429)${retryAfter ? ` — retry after ${retryAfter}s` : ""}`,
-            };
-        }
-        if (!res.ok && windows.length === 0) {
-            return { source: "none", error: `OpenAI returned ${res.status} with no rate-limit headers` };
-        }
-        return { source: "headers", windows };
-    } catch (err) {
-        return { source: "none", error: `OpenAI header probe failed: ${err instanceof Error ? err.message : String(err)}` };
+    const get = (name) => res.headers.get(name);
+    const windows = parseOpenAiRateLimitHeaders(get);
+    if (res.status === 429) {
+      const retryAfter = res.headers.get("retry-after");
+      return {
+        source: "headers",
+        windows,
+        error: `Rate limited (429)${retryAfter ? ` — retry after ${retryAfter}s` : ""}`,
+      };
     }
+    if (!res.ok && windows.length === 0) {
+      return { source: "none", error: `OpenAI returned ${res.status} with no rate-limit headers` };
+    }
+    return { source: "headers", windows };
+  } catch (err) {
+    return { source: "none", error: `OpenAI header probe failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }

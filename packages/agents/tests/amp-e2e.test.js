@@ -25,17 +25,13 @@ try {
     stdio: "pipe",
     encoding: "utf8",
   });
-  supportsAmpE2EFlags =
-    helpText.includes("--execute") &&
-    helpText.includes("--dangerously-allow-all");
+  supportsAmpE2EFlags = helpText.includes("--execute") && helpText.includes("--dangerously-allow-all");
 } catch {
   isAmpInstalled = false;
   supportsAmpE2EFlags = false;
 }
 
-describe.skipIf(!runRealAgentE2E || !isAmpInstalled || !supportsAmpE2EFlags)(
-  "AmpAgent E2E (real CLI)",
-  () => {
+describe.skipIf(!runRealAgentE2E || !isAmpInstalled || !supportsAmpE2EFlags)("AmpAgent E2E (real CLI)", () => {
   /** @type {string} */
   let tmpDir;
 
@@ -88,5 +84,4 @@ describe.skipIf(!runRealAgentE2E || !isAmpInstalled || !supportsAmpE2EFlags)(
     expect(completed.engine).toBe("amp");
     expect(completed.ok).toBe(true);
   }, 120_000);
-  }
-);
+});

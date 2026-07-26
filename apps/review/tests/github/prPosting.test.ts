@@ -158,7 +158,9 @@ describe("GitHub PR posting helpers", () => {
       body: "Review body",
       comments: [{ path: "src/index.ts", line: 7, side: "RIGHT", body: "Check this." }],
     };
-    ghResponses.push(JSON.stringify({ html_url: "https://github.com/smithersai/smithers/pull/306#pullrequestreview-1" }));
+    ghResponses.push(
+      JSON.stringify({ html_url: "https://github.com/smithersai/smithers/pull/306#pullrequestreview-1" }),
+    );
 
     await expect(postPullRequestReview("/repo", pr, payload, runGhMock)).resolves.toEqual({
       url: "https://github.com/smithersai/smithers/pull/306#pullrequestreview-1",

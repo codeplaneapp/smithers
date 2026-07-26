@@ -9,18 +9,16 @@ import { resolve, dirname, parse } from "node:path";
  * @returns {{ type: "jj"; root: string } | { type: "git"; root: string } | null}
  */
 export function findVcsRoot(startDir) {
-    let dir = resolve(startDir);
-    const { root: fsRoot } = parse(dir);
-    // Single loop covers every ancestor INCLUDING the filesystem root; the loop
-    // stops at the filesystem root and the terminal `return null` reports "no VCS".
-    while (true) {
-        if (existsSync(resolve(dir, ".jj")))
-            return /** @type {{ type: "jj"; root: string }} */ ({ type: "jj", root: dir });
-        if (existsSync(resolve(dir, ".git")))
-            return /** @type {{ type: "git"; root: string }} */ ({ type: "git", root: dir });
-        if (dir === fsRoot)
-            break;
-        dir = dirname(dir);
-    }
-    return null;
+  let dir = resolve(startDir);
+  const { root: fsRoot } = parse(dir);
+  // Single loop covers every ancestor INCLUDING the filesystem root; the loop
+  // stops at the filesystem root and the terminal `return null` reports "no VCS".
+  while (true) {
+    if (existsSync(resolve(dir, ".jj"))) return /** @type {{ type: "jj"; root: string }} */ ({ type: "jj", root: dir });
+    if (existsSync(resolve(dir, ".git")))
+      return /** @type {{ type: "git"; root: string }} */ ({ type: "git", root: dir });
+    if (dir === fsRoot) break;
+    dir = dirname(dir);
+  }
+  return null;
 }

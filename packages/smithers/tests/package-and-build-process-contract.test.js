@@ -1,13 +1,6 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -58,17 +51,11 @@ function run(command, args, options) {
 }
 
 function expectSuccess(result) {
-  expect(
-    result.status,
-    `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
-  ).toBe(0);
+  expect(result.status, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`).toBe(0);
 }
 
 function expectFailure(result) {
-  expect(
-    result.status,
-    `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
-  ).not.toBe(0);
+  expect(result.status, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`).not.toBe(0);
 }
 
 async function importDependencyBoundaryModule(cwd) {
@@ -211,12 +198,12 @@ describe("PACKAGE_AND_BUILD process contracts", () => {
       join(dir, "packages/consumer/package.json"),
       JSON.stringify({ name: "@fixture/consumer", type: "module", dependencies: {} }),
     );
-    write(
-      join(dir, "packages/provider/package.json"),
-      JSON.stringify({ name: "@fixture/provider", type: "module" }),
-    );
+    write(join(dir, "packages/provider/package.json"), JSON.stringify({ name: "@fixture/provider", type: "module" }));
     write(join(dir, "packages/provider/src/index.js"), "export const value = 1;\n");
-    write(join(dir, "packages/consumer/src/index.js"), 'import { value } from "@fixture/provider";\nexport { value };\n');
+    write(
+      join(dir, "packages/consumer/src/index.js"),
+      'import { value } from "@fixture/provider";\nexport { value };\n',
+    );
 
     const result = run(process.execPath, [resolve(root, "scripts/check-dependency-boundaries.mjs")], {
       cwd: dir,
@@ -230,10 +217,7 @@ describe("PACKAGE_AND_BUILD process contracts", () => {
   test("dependency-boundary gate accepts direct workspaces, dev-only imports, and dangling local artifacts", () => {
     const dir = tempRoot("smithers-dep-boundary-pass-");
     write(join(dir, "package.json"), JSON.stringify({ name: "fixture-root", type: "module" }));
-    write(
-      join(dir, "packages/provider/package.json"),
-      JSON.stringify({ name: "@fixture/provider", type: "module" }),
-    );
+    write(join(dir, "packages/provider/package.json"), JSON.stringify({ name: "@fixture/provider", type: "module" }));
     write(join(dir, "packages/provider/src/index.js"), "export const value = 1;\n");
     write(
       join(dir, "packages/consumer/package.json"),
@@ -258,9 +242,16 @@ describe("PACKAGE_AND_BUILD process contracts", () => {
     write(join(dir, "e2e/runtime.test.ts"), 'import { value } from "@fixture/provider";\nexport { value };\n');
     write(
       join(dir, ".smithers/package.json"),
-      JSON.stringify({ name: "fixture-workflows", type: "module", dependencies: { "@fixture/provider": "workspace:*" } }),
+      JSON.stringify({
+        name: "fixture-workflows",
+        type: "module",
+        dependencies: { "@fixture/provider": "workspace:*" },
+      }),
     );
-    write(join(dir, ".smithers/workflows/direct-workspace.tsx"), 'import { value } from "@fixture/provider";\nexport default value;\n');
+    write(
+      join(dir, ".smithers/workflows/direct-workspace.tsx"),
+      'import { value } from "@fixture/provider";\nexport default value;\n',
+    );
     linkDir(join(dir, "missing-worktree-target"), join(dir, "packages/consumer/src/dangling-artifact"));
 
     const result = run(process.execPath, [resolve(root, "scripts/check-dependency-boundaries.mjs")], {
@@ -274,10 +265,7 @@ describe("PACKAGE_AND_BUILD process contracts", () => {
     const dir = repoTempRoot("smithers-dep-boundary-symlink-");
     const srcDir = join(relative(root, dir), "packages", "consumer", "src");
     write(join(dir, "package.json"), JSON.stringify({ name: "fixture-root", type: "module" }));
-    write(
-      join(dir, "packages/consumer/package.json"),
-      JSON.stringify({ name: "@fixture/consumer", type: "module" }),
-    );
+    write(join(dir, "packages/consumer/package.json"), JSON.stringify({ name: "@fixture/consumer", type: "module" }));
     write(join(dir, "packages/consumer/src/index.ts"), "export const value = 1;\n");
     linkDir(join(dir, "packages/consumer/src"), join(dir, "packages/consumer/src/cycle"));
 
@@ -293,10 +281,7 @@ describe("PACKAGE_AND_BUILD process contracts", () => {
     const dir = repoTempRoot("smithers-dep-boundary-nested-package-");
     const srcDir = join(relative(root, dir), "packages", "consumer", "src");
     write(join(dir, "package.json"), JSON.stringify({ name: "fixture-root", type: "module" }));
-    write(
-      join(dir, "packages/consumer/package.json"),
-      JSON.stringify({ name: "@fixture/consumer", type: "module" }),
-    );
+    write(join(dir, "packages/consumer/package.json"), JSON.stringify({ name: "@fixture/consumer", type: "module" }));
     write(join(dir, "packages/consumer/src/index.ts"), "export const parent = 1;\n");
     write(
       join(dir, "packages/consumer/src/plugin/package.json"),

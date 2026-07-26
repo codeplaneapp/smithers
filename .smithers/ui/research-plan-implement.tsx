@@ -87,14 +87,12 @@ function extractReview(value: unknown): ReviewOutput | null {
   const approved = asBool(row.approved);
   if (reviewer === undefined && approved === undefined) return null;
   const rawIssues = Array.isArray(row.issues) ? row.issues : [];
-  const issues: ReviewIssue[] = rawIssues
-    .filter(isRecord)
-    .map((i) => ({
-      severity: asString(i.severity) ?? "nit",
-      title: asString(i.title) ?? "Issue",
-      file: asString(i.file) ?? null,
-      description: asString(i.description) ?? "",
-    }));
+  const issues: ReviewIssue[] = rawIssues.filter(isRecord).map((i) => ({
+    severity: asString(i.severity) ?? "nit",
+    title: asString(i.title) ?? "Issue",
+    file: asString(i.file) ?? null,
+    description: asString(i.description) ?? "",
+  }));
   return {
     reviewer: reviewer ?? "reviewer",
     approved: approved ?? false,
@@ -311,7 +309,9 @@ function App() {
           <span className="pill" data-testid="research-plan-implement-runid">
             {activeRunId ? shortRunId(activeRunId) : "No run"}
           </span>
-          {activeRun ? <span className={"badge " + statusClass(activeRun.status)}>{activeRun.status ?? "idle"}</span> : null}
+          {activeRun ? (
+            <span className={"badge " + statusClass(activeRun.status)}>{activeRun.status ?? "idle"}</span>
+          ) : null}
           {tdd ? <span className="badge tdd">TDD</span> : null}
         </div>
         <div className="toolbar">
@@ -325,20 +325,40 @@ function App() {
           <label className="check">
             <input type="checkbox" checked={tdd} onChange={(e) => setTdd(e.currentTarget.checked)} /> TDD
           </label>
-          <button className="button" data-testid="research-plan-implement-refresh" onClick={() => void refresh()} disabled={busy}>
+          <button
+            className="button"
+            data-testid="research-plan-implement-refresh"
+            onClick={() => void refresh()}
+            disabled={busy}
+          >
             Refresh
           </button>
           {running ? (
-            <button className="button danger" data-testid="research-plan-implement-cancel" onClick={() => void cancel()} disabled={busy}>
+            <button
+              className="button danger"
+              data-testid="research-plan-implement-cancel"
+              onClick={() => void cancel()}
+              disabled={busy}
+            >
               Cancel
             </button>
           ) : null}
           {activeRunId && !running ? (
-            <button className="button" data-testid="research-plan-implement-rewind" onClick={() => void rewind()} disabled={busy}>
+            <button
+              className="button"
+              data-testid="research-plan-implement-rewind"
+              onClick={() => void rewind()}
+              disabled={busy}
+            >
               Rewind
             </button>
           ) : null}
-          <button className="button primary" data-testid="research-plan-implement-launch" onClick={() => void launch()} disabled={busy}>
+          <button
+            className="button primary"
+            data-testid="research-plan-implement-launch"
+            onClick={() => void launch()}
+            disabled={busy}
+          >
             Launch
           </button>
         </div>
@@ -349,7 +369,10 @@ function App() {
           {!activeRunId ? (
             <div className="launch-form" data-testid="research-plan-implement-empty">
               <h2>Launch a workflow</h2>
-              <p>Describe the change. Research informs the plan, then an implement → validate → review loop runs until the synthesized review verdict approves.</p>
+              <p>
+                Describe the change. Research informs the plan, then an implement → validate → review loop runs until
+                the synthesized review verdict approves.
+              </p>
               <input
                 className="prompt"
                 value={prompt}
@@ -358,9 +381,15 @@ function App() {
               />
               <div className="row">
                 <label className="check">
-                  <input type="checkbox" checked={tdd} onChange={(e) => setTdd(e.currentTarget.checked)} /> Test-driven (write tests first)
+                  <input type="checkbox" checked={tdd} onChange={(e) => setTdd(e.currentTarget.checked)} /> Test-driven
+                  (write tests first)
                 </label>
-                <button className="button primary" data-testid="research-plan-implement-launch-empty" onClick={() => void launch()} disabled={busy}>
+                <button
+                  className="button primary"
+                  data-testid="research-plan-implement-launch-empty"
+                  onClick={() => void launch()}
+                  disabled={busy}
+                >
                   Launch Workflow
                 </button>
               </div>
@@ -553,7 +582,9 @@ function App() {
                       </span>
                     </>
                   )}
-                  <span className="muted" style={{ marginLeft: "auto" }}>{eventCount} events</span>
+                  <span className="muted" style={{ marginLeft: "auto" }}>
+                    {eventCount} events
+                  </span>
                 </div>
               </div>
             </>

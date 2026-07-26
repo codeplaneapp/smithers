@@ -41,7 +41,9 @@ function newer(a: StatusRow, b: StatusRow): boolean {
   const attemptA = a.attempt ?? 0;
   const attemptB = b.attempt ?? 0;
   if (attemptA !== attemptB) return attemptA > attemptB;
-  return rank(typeof a.status === "string" ? a.status : "queued") >= rank(typeof b.status === "string" ? b.status : "queued");
+  return (
+    rank(typeof a.status === "string" ? a.status : "queued") >= rank(typeof b.status === "string" ? b.status : "queued")
+  );
 }
 
 /**

@@ -10,8 +10,12 @@ type ElectricCollectionOptionsLoader = <TRow extends Record<string, unknown>>(
 ) => CollectionConfig<TRow, string | number>;
 
 type ElectricMutationHandlers<TRow extends object, TKey extends string | number> = {
-  onInsert?: (params: { transaction: { mutations: Array<{ key: TKey; modified: TRow; original?: TRow }> } }) => Promise<unknown>;
-  onUpdate?: (params: { transaction: { mutations: Array<{ key: TKey; modified: TRow; original: TRow; changes?: Partial<TRow> }> } }) => Promise<unknown>;
+  onInsert?: (params: {
+    transaction: { mutations: Array<{ key: TKey; modified: TRow; original?: TRow }> };
+  }) => Promise<unknown>;
+  onUpdate?: (params: {
+    transaction: { mutations: Array<{ key: TKey; modified: TRow; original: TRow; changes?: Partial<TRow> }> };
+  }) => Promise<unknown>;
   onDelete?: (params: { transaction: { mutations: Array<{ key: TKey; original: TRow }> } }) => Promise<unknown>;
 };
 
@@ -48,7 +52,9 @@ async function loadElectricCollectionOptions(
 
 function loadedElectricCollectionOptions(): ElectricCollectionOptionsLoader {
   if (!cachedElectricCollectionOptions) {
-    throw new Error("Smithers multiplayer collections must preload @tanstack/electric-db-collection before creating collections.");
+    throw new Error(
+      "Smithers multiplayer collections must preload @tanstack/electric-db-collection before creating collections.",
+    );
   }
   return cachedElectricCollectionOptions;
 }
@@ -103,7 +109,6 @@ function createSmithersElectricCollectionOptions<
   } as Record<string, unknown>) as unknown as CollectionConfig<TRow, TKey>;
 }
 
-export const smithersElectricCollectionOptions = Object.assign(
-  createSmithersElectricCollectionOptions,
-  { load: loadElectricCollectionOptions },
-);
+export const smithersElectricCollectionOptions = Object.assign(createSmithersElectricCollectionOptions, {
+  load: loadElectricCollectionOptions,
+});

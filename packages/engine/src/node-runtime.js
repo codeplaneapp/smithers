@@ -23,21 +23,21 @@ const SIGNAL_LOAD_LIMIT = 1_000_000;
  * @returns {import("@smithers-orchestrator/driver/RuntimeAdapter").RuntimeSignals}
  */
 function createAdapterSignals(adapter) {
-    return {
-        async load(runId) {
-            const rows = await Effect.runPromise(
-                /** @type {any} */ (adapter.listSignals(runId, { limit: SIGNAL_LOAD_LIMIT })),
-            );
-            return rows.map((row) => ({
-                seq: Number(row.seq),
-                signalName: row.signalName,
-                correlationId: row.correlationId ?? null,
-                payloadJson: row.payloadJson,
-                receivedAtMs: Number(row.receivedAtMs),
-                receivedBy: row.receivedBy ?? null,
-            }));
-        },
-    };
+  return {
+    async load(runId) {
+      const rows = await Effect.runPromise(
+        /** @type {any} */ (adapter.listSignals(runId, { limit: SIGNAL_LOAD_LIMIT })),
+      );
+      return rows.map((row) => ({
+        seq: Number(row.seq),
+        signalName: row.signalName,
+        correlationId: row.correlationId ?? null,
+        payloadJson: row.payloadJson,
+        receivedAtMs: Number(row.receivedAtMs),
+        receivedBy: row.receivedBy ?? null,
+      }));
+    },
+  };
 }
 
 /**
@@ -52,16 +52,16 @@ function createAdapterSignals(adapter) {
  * @returns {import("@smithers-orchestrator/driver/RuntimeAdapter").RuntimeStorage}
  */
 function createNoopStorage() {
-    return {
-        async loadRun() {
-            return undefined;
-        },
-        async saveRun() {},
-        async loadOutputs() {
-            return undefined;
-        },
-        async saveOutputs() {},
-    };
+  return {
+    async loadRun() {
+      return undefined;
+    },
+    async saveRun() {},
+    async loadOutputs() {
+      return undefined;
+    },
+    async saveOutputs() {},
+  };
 }
 
 /**
@@ -71,24 +71,24 @@ function createNoopStorage() {
  * @returns {Promise<import("@smithers-orchestrator/driver/RuntimeAdapter").RuntimeSubprocessResult>}
  */
 function runSubprocess(command, args = [], opts) {
-    return new Promise((resolvePromise, rejectPromise) => {
-        const child = spawn(command, [...args], {
-            cwd: opts?.cwd,
-            env: opts?.env ? { ...process.env, ...opts.env } : process.env,
-        });
-        let stdout = "";
-        let stderr = "";
-        child.stdout?.on("data", (chunk) => {
-            stdout += chunk.toString();
-        });
-        child.stderr?.on("data", (chunk) => {
-            stderr += chunk.toString();
-        });
-        child.once("error", rejectPromise);
-        child.once("close", (exitCode) => {
-            resolvePromise({ stdout, stderr, exitCode: exitCode ?? 0 });
-        });
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn(command, [...args], {
+      cwd: opts?.cwd,
+      env: opts?.env ? { ...process.env, ...opts.env } : process.env,
     });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.once("error", rejectPromise);
+    child.once("close", (exitCode) => {
+      resolvePromise({ stdout, stderr, exitCode: exitCode ?? 0 });
+    });
+  });
 }
 
 /**
@@ -110,53 +110,54 @@ function runSubprocess(command, args = [], opts) {
  * @returns {RuntimeAdapter}
  */
 export function createNodeRuntime(opts = {}) {
-    const runtimeName = "node";
-    return {
-        name: runtimeName,
-        clock: {
-            now: () => Date.now(),
-            monotonicNow: () => performance.now(),
-            sleep(ms, signal) {
-                if (signal?.aborted) {
-                    const error = new Error("Task aborted");
-                    error.name = "AbortError";
-                    return Promise.reject(error);
-                }
-                if (ms <= 0)
-                    return Promise.resolve();
-                return new Promise((resolvePromise, rejectPromise) => {
-                    const timer = setTimeout(() => {
-                        signal?.removeEventListener("abort", onAbort);
-                        resolvePromise();
-                    }, ms);
-                    function onAbort() {
-                        clearTimeout(timer);
-                        const error = new Error("Task aborted");
-                        error.name = "AbortError";
-                        rejectPromise(error);
-                    }
-                    signal?.addEventListener("abort", onAbort, { once: true });
-                });
-            },
-        },
-        storage: createNoopStorage(),
-        uuid: () => randomUUID(),
-        executeTask: defaultTaskExecutor,
-        filesystem: {
-            readFile: (path) => readFile(path, "utf8"),
-            writeFile: (path, contents) => writeFile(path, contents, "utf8"),
-            async exists(path) {
-                return existsSync(path);
-            },
-            mkdir: (path, opts) => mkdir(path, { recursive: opts?.recursive ?? false }).then(() => undefined),
-        },
-        subprocess: {
-            spawn: (command, args, opts) => runSubprocess(command, args, opts),
-        },
-        worktree: {
-            resolve: (path, opts) => resolveWorktreePath(path, opts),
-        },
-        sandbox: /** @type {import("@smithers-orchestrator/driver/RuntimeAdapter").RuntimeSandbox} */ (createUnsupportedCapability(runtimeName, "sandbox", ["run"], "async")),
-        ...(opts.adapter ? { signals: createAdapterSignals(opts.adapter) } : {}),
-    };
+  const runtimeName = "node";
+  return {
+    name: runtimeName,
+    clock: {
+      now: () => Date.now(),
+      monotonicNow: () => performance.now(),
+      sleep(ms, signal) {
+        if (signal?.aborted) {
+          const error = new Error("Task aborted");
+          error.name = "AbortError";
+          return Promise.reject(error);
+        }
+        if (ms <= 0) return Promise.resolve();
+        return new Promise((resolvePromise, rejectPromise) => {
+          const timer = setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolvePromise();
+          }, ms);
+          function onAbort() {
+            clearTimeout(timer);
+            const error = new Error("Task aborted");
+            error.name = "AbortError";
+            rejectPromise(error);
+          }
+          signal?.addEventListener("abort", onAbort, { once: true });
+        });
+      },
+    },
+    storage: createNoopStorage(),
+    uuid: () => randomUUID(),
+    executeTask: defaultTaskExecutor,
+    filesystem: {
+      readFile: (path) => readFile(path, "utf8"),
+      writeFile: (path, contents) => writeFile(path, contents, "utf8"),
+      async exists(path) {
+        return existsSync(path);
+      },
+      mkdir: (path, opts) => mkdir(path, { recursive: opts?.recursive ?? false }).then(() => undefined),
+    },
+    subprocess: {
+      spawn: (command, args, opts) => runSubprocess(command, args, opts),
+    },
+    worktree: {
+      resolve: (path, opts) => resolveWorktreePath(path, opts),
+    },
+    sandbox: /** @type {import("@smithers-orchestrator/driver/RuntimeAdapter").RuntimeSandbox} */ (
+      createUnsupportedCapability(runtimeName, "sandbox", ["run"], "async")
+    ),
+    ...(opts.adapter ? { signals: createAdapterSignals(opts.adapter) } : {}),
+  };
 }

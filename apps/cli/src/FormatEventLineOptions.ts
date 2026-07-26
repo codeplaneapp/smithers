@@ -1,4 +1,4 @@
 export type FormatEventLineOptions = {
-    includeTimestamp?: boolean;
-    truncatePayloadAt?: number;
+  includeTimestamp?: boolean;
+  truncatePayloadAt?: number;
 };

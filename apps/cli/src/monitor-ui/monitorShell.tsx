@@ -300,7 +300,12 @@ export function RunLifecycleActions({
             >
               Confirm cancel?
             </Button>
-            <Button variant="ghost" data-testid="monitor-keep-cancel-run" disabled={busyAction !== null} onClick={onCancelKeep}>
+            <Button
+              variant="ghost"
+              data-testid="monitor-keep-cancel-run"
+              disabled={busyAction !== null}
+              onClick={onCancelKeep}
+            >
               Keep
             </Button>
           </>
@@ -365,9 +370,7 @@ export function RunLifecycleControls({
       onAction("cancel");
       return;
     }
-    setCancelArm(
-      transition.state.armedAtMs === null ? null : { runId, armedAtMs: transition.state.armedAtMs },
-    );
+    setCancelArm(transition.state.armedAtMs === null ? null : { runId, armedAtMs: transition.state.armedAtMs });
   };
 
   return (

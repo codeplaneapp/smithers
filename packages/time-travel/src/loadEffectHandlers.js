@@ -101,7 +101,7 @@ export async function loadEffectHandlers(db, runId) {
   if (typeof run.workflowPath !== "string" || run.workflowPath.length === 0) {
     throw new Error(`Run ${runId} has no recorded workflow entry file.`);
   }
-  if (!await validateWorkflowIdentity(run)) {
+  if (!(await validateWorkflowIdentity(run))) {
     throw new Error("workflow changed since the effect was recorded");
   }
   const module = await import(pathToFileURL(run.workflowPath).href);
@@ -143,8 +143,7 @@ export async function loadEffectHandlers(db, runId) {
   const toolMetadata = new Map();
   const tools = new Map();
   const tasks = new Map();
-  const register = (registeredName, tool) =>
-    registerDefinedTool(toolMetadata, tools, registeredName, tool);
+  const register = (registeredName, tool) => registerDefinedTool(toolMetadata, tools, registeredName, tool);
   const seenExports = new Set();
   for (const [exportName, exported] of Object.entries(module)) {
     if (exportName === "default") continue;
@@ -159,17 +158,16 @@ export async function loadEffectHandlers(db, runId) {
         ...(typeof task.sideEffect.revert === "function" ? { revert: task.sideEffect.revert } : {}),
       });
     }
-    const taskTools = task.tools && typeof task.tools === "object"
-      ? Object.entries(task.tools)
-      : [];
+    const taskTools = task.tools && typeof task.tools === "object" ? Object.entries(task.tools) : [];
     for (const [registeredName, tool] of taskTools) {
       register(registeredName, tool);
     }
     const agents = Array.isArray(task.agent) ? task.agent : task.agent ? [task.agent] : [];
     for (const agent of agents) {
-      const entries = agent && typeof agent === "object" && agent.tools && typeof agent.tools === "object"
-        ? Object.entries(agent.tools)
-        : [];
+      const entries =
+        agent && typeof agent === "object" && agent.tools && typeof agent.tools === "object"
+          ? Object.entries(agent.tools)
+          : [];
       for (const [registeredName, tool] of entries) {
         register(registeredName, tool);
       }

@@ -186,7 +186,9 @@ export async function runReviewCli(
   let pr: PullRequestTarget | null = null;
   if (args.pr) {
     if (!Bun.which(process.env.SMITHERS_GH_BIN || "gh")) {
-      console.error("smithers-review: --pr needs the `gh` CLI — install https://cli.github.com and run `gh auth login`");
+      console.error(
+        "smithers-review: --pr needs the `gh` CLI — install https://cli.github.com and run `gh auth login`",
+      );
       process.exit(1);
       return;
     }
@@ -225,7 +227,9 @@ export async function runReviewCli(
       // and would drag unrelated commits into the review diff.
       args.from = refExists(repoDir, `origin/${pr.baseRefName}`) ? `origin/${pr.baseRefName}` : pr.baseRefName;
       args.to = pr.headSha;
-      console.error(`[smithers-review] PR #${pr.number} (${pr.baseRefName}…${pr.headRefName}) → ${args.from}..${args.to}`);
+      console.error(
+        `[smithers-review] PR #${pr.number} (${pr.baseRefName}…${pr.headRefName}) → ${args.from}..${args.to}`,
+      );
     }
     if (!args.background.trim()) {
       // The PR's own intent is the requirement background the agents need;
@@ -278,10 +282,7 @@ export async function runReviewCli(
   )) as { status: string };
   await reporter.flush();
 
-  const rows = (await loadOutputs(db as never, tables as never, runId)) as Record<
-    string,
-    Record<string, unknown>[]
-  >;
+  const rows = (await loadOutputs(db as never, tables as never, runId)) as Record<string, Record<string, unknown>[]>;
   const walkthrough = rows.walkthrough?.at(-1);
   // Prefer the verified review (the `final` table) when the verify pass ran.
   const review = rows.final?.at(-1) ?? rows.review?.at(-1);
@@ -346,7 +347,9 @@ export async function runReviewCli(
       });
       const superseded = await supersedePriorReviews(repoDir, pr);
       if (superseded > 0) {
-        console.error(`[smithers-review] marked ${superseded} earlier smithers review${superseded === 1 ? "" : "s"} superseded`);
+        console.error(
+          `[smithers-review] marked ${superseded} earlier smithers review${superseded === 1 ? "" : "s"} superseded`,
+        );
       }
       const posted = await postPullRequestReview(repoDir, pr, payload);
       inlinePosted = posted.inline;

@@ -1,27 +1,29 @@
-import { blob, foreignKey, integer, sqliteTable, text, primaryKey, uniqueIndex, } from "drizzle-orm/sqlite-core";
+import { blob, foreignKey, integer, sqliteTable, text, primaryKey, uniqueIndex } from "drizzle-orm/sqlite-core";
 export const smithersRuns = sqliteTable("_smithers_runs", {
-    runId: text("run_id").primaryKey(),
-    parentRunId: text("parent_run_id"),
-    workflowName: text("workflow_name").notNull(),
-    workflowPath: text("workflow_path"),
-    workflowHash: text("workflow_hash"),
-    status: text("status").notNull(),
-    createdAtMs: integer("created_at_ms").notNull(),
-    startedAtMs: integer("started_at_ms"),
-    finishedAtMs: integer("finished_at_ms"),
-    heartbeatAtMs: integer("heartbeat_at_ms"),
-    runtimeOwnerId: text("runtime_owner_id"),
-    cancelRequestedAtMs: integer("cancel_requested_at_ms"),
-    pauseRequestedAtMs: integer("pause_requested_at_ms"),
-    hijackRequestedAtMs: integer("hijack_requested_at_ms"),
-    hijackTarget: text("hijack_target"),
-    vcsType: text("vcs_type"),
-    vcsRoot: text("vcs_root"),
-    vcsRevision: text("vcs_revision"),
-    errorJson: text("error_json"),
-    configJson: text("config_json"),
+  runId: text("run_id").primaryKey(),
+  parentRunId: text("parent_run_id"),
+  workflowName: text("workflow_name").notNull(),
+  workflowPath: text("workflow_path"),
+  workflowHash: text("workflow_hash"),
+  status: text("status").notNull(),
+  createdAtMs: integer("created_at_ms").notNull(),
+  startedAtMs: integer("started_at_ms"),
+  finishedAtMs: integer("finished_at_ms"),
+  heartbeatAtMs: integer("heartbeat_at_ms"),
+  runtimeOwnerId: text("runtime_owner_id"),
+  cancelRequestedAtMs: integer("cancel_requested_at_ms"),
+  pauseRequestedAtMs: integer("pause_requested_at_ms"),
+  hijackRequestedAtMs: integer("hijack_requested_at_ms"),
+  hijackTarget: text("hijack_target"),
+  vcsType: text("vcs_type"),
+  vcsRoot: text("vcs_root"),
+  vcsRevision: text("vcs_revision"),
+  errorJson: text("error_json"),
+  configJson: text("config_json"),
 });
-export const smithersNodes = sqliteTable("_smithers_nodes", {
+export const smithersNodes = sqliteTable(
+  "_smithers_nodes",
+  {
     runId: text("run_id").notNull(),
     nodeId: text("node_id").notNull(),
     iteration: integer("iteration").notNull().default(0),
@@ -30,10 +32,14 @@ export const smithersNodes = sqliteTable("_smithers_nodes", {
     updatedAtMs: integer("updated_at_ms").notNull(),
     outputTable: text("output_table").notNull(),
     label: text("label"),
-}, (t) => ({
+  },
+  (t) => ({
     pk: primaryKey({ columns: [t.runId, t.nodeId, t.iteration] }),
-}));
-export const smithersAttempts = sqliteTable("_smithers_attempts", {
+  }),
+);
+export const smithersAttempts = sqliteTable(
+  "_smithers_attempts",
+  {
     runId: text("run_id").notNull(),
     nodeId: text("node_id").notNull(),
     iteration: integer("iteration").notNull().default(0),
@@ -49,10 +55,14 @@ export const smithersAttempts = sqliteTable("_smithers_attempts", {
     metaJson: text("meta_json"),
     responseText: text("response_text"),
     jjCwd: text("jj_cwd"),
-}, (t) => ({
+  },
+  (t) => ({
     pk: primaryKey({ columns: [t.runId, t.nodeId, t.iteration, t.attempt] }),
-}));
-export const smithersFrames = sqliteTable("_smithers_frames", {
+  }),
+);
+export const smithersFrames = sqliteTable(
+  "_smithers_frames",
+  {
     runId: text("run_id").notNull(),
     frameNo: integer("frame_no").notNull(),
     createdAtMs: integer("created_at_ms").notNull(),
@@ -62,14 +72,18 @@ export const smithersFrames = sqliteTable("_smithers_frames", {
     mountedTaskIdsJson: text("mounted_task_ids_json"),
     taskIndexJson: text("task_index_json"),
     note: text("note"),
-}, (t) => ({
+  },
+  (t) => ({
     pk: primaryKey({ columns: [t.runId, t.frameNo] }),
     runFk: foreignKey({
-        columns: [t.runId],
-        foreignColumns: [smithersRuns.runId],
+      columns: [t.runId],
+      foreignColumns: [smithersRuns.runId],
     }).onDelete("cascade"),
-}));
-export const smithersApprovals = sqliteTable("_smithers_approvals", {
+  }),
+);
+export const smithersApprovals = sqliteTable(
+  "_smithers_approvals",
+  {
     runId: text("run_id").notNull(),
     nodeId: text("node_id").notNull(),
     iteration: integer("iteration").notNull().default(0),
@@ -80,55 +94,57 @@ export const smithersApprovals = sqliteTable("_smithers_approvals", {
     decidedBy: text("decided_by"),
     requestJson: text("request_json"),
     decisionJson: text("decision_json"),
-    autoApproved: integer("auto_approved", { mode: "boolean" })
-        .notNull()
-        .default(false),
-}, (t) => ({
+    autoApproved: integer("auto_approved", { mode: "boolean" }).notNull().default(false),
+  },
+  (t) => ({
     pk: primaryKey({ columns: [t.runId, t.nodeId, t.iteration] }),
-}));
+  }),
+);
 export const smithersHumanRequests = sqliteTable("_smithers_human_requests", {
-    requestId: text("request_id").primaryKey(),
-    runId: text("run_id").notNull(),
-    nodeId: text("node_id").notNull(),
-    iteration: integer("iteration").notNull().default(0),
-    kind: text("kind").notNull(),
-    status: text("status").notNull(),
-    prompt: text("prompt").notNull(),
-    schemaJson: text("schema_json"),
-    optionsJson: text("options_json"),
-    responseJson: text("response_json"),
-    requestedAtMs: integer("requested_at_ms").notNull(),
-    answeredAtMs: integer("answered_at_ms"),
-    answeredBy: text("answered_by"),
-    timeoutAtMs: integer("timeout_at_ms"),
+  requestId: text("request_id").primaryKey(),
+  runId: text("run_id").notNull(),
+  nodeId: text("node_id").notNull(),
+  iteration: integer("iteration").notNull().default(0),
+  kind: text("kind").notNull(),
+  status: text("status").notNull(),
+  prompt: text("prompt").notNull(),
+  schemaJson: text("schema_json"),
+  optionsJson: text("options_json"),
+  responseJson: text("response_json"),
+  requestedAtMs: integer("requested_at_ms").notNull(),
+  answeredAtMs: integer("answered_at_ms"),
+  answeredBy: text("answered_by"),
+  timeoutAtMs: integer("timeout_at_ms"),
 });
 export const smithersAlerts = sqliteTable("_smithers_alerts", {
-    alertId: text("alert_id").primaryKey(),
-    runId: text("run_id"),
-    policyName: text("policy_name").notNull(),
-    severity: text("severity").notNull(),
-    status: text("status").notNull(),
-    firedAtMs: integer("fired_at_ms").notNull(),
-    resolvedAtMs: integer("resolved_at_ms"),
-    acknowledgedAtMs: integer("acknowledged_at_ms"),
-    message: text("message").notNull(),
-    detailsJson: text("details_json"),
-    fingerprint: text("fingerprint"),
-    nodeId: text("node_id"),
-    iteration: integer("iteration"),
-    owner: text("owner"),
-    runbook: text("runbook"),
-    labelsJson: text("labels_json"),
-    reactionJson: text("reaction_json"),
-    sourceEventType: text("source_event_type"),
-    firstFiredAtMs: integer("first_fired_at_ms"),
-    lastFiredAtMs: integer("last_fired_at_ms"),
-    occurrenceCount: integer("occurrence_count").default(1),
-    silencedUntilMs: integer("silenced_until_ms"),
-    acknowledgedBy: text("acknowledged_by"),
-    resolvedBy: text("resolved_by"),
+  alertId: text("alert_id").primaryKey(),
+  runId: text("run_id"),
+  policyName: text("policy_name").notNull(),
+  severity: text("severity").notNull(),
+  status: text("status").notNull(),
+  firedAtMs: integer("fired_at_ms").notNull(),
+  resolvedAtMs: integer("resolved_at_ms"),
+  acknowledgedAtMs: integer("acknowledged_at_ms"),
+  message: text("message").notNull(),
+  detailsJson: text("details_json"),
+  fingerprint: text("fingerprint"),
+  nodeId: text("node_id"),
+  iteration: integer("iteration"),
+  owner: text("owner"),
+  runbook: text("runbook"),
+  labelsJson: text("labels_json"),
+  reactionJson: text("reaction_json"),
+  sourceEventType: text("source_event_type"),
+  firstFiredAtMs: integer("first_fired_at_ms"),
+  lastFiredAtMs: integer("last_fired_at_ms"),
+  occurrenceCount: integer("occurrence_count").default(1),
+  silencedUntilMs: integer("silenced_until_ms"),
+  acknowledgedBy: text("acknowledged_by"),
+  resolvedBy: text("resolved_by"),
 });
-export const smithersSignals = sqliteTable("_smithers_signals", {
+export const smithersSignals = sqliteTable(
+  "_smithers_signals",
+  {
     runId: text("run_id").notNull(),
     seq: integer("seq").notNull(),
     signalName: text("signal_name").notNull(),
@@ -136,22 +152,26 @@ export const smithersSignals = sqliteTable("_smithers_signals", {
     payloadJson: text("payload_json").notNull(),
     receivedAtMs: integer("received_at_ms").notNull(),
     receivedBy: text("received_by"),
-}, (t) => ({
+  },
+  (t) => ({
     pk: primaryKey({ columns: [t.runId, t.seq] }),
-}));
+  }),
+);
 export const smithersCache = sqliteTable("_smithers_cache", {
-    cacheKey: text("cache_key").primaryKey(),
-    createdAtMs: integer("created_at_ms").notNull(),
-    workflowName: text("workflow_name").notNull(),
-    nodeId: text("node_id").notNull(),
-    outputTable: text("output_table").notNull(),
-    schemaSig: text("schema_sig").notNull(),
-    agentSig: text("agent_sig"),
-    toolsSig: text("tools_sig"),
-    jjPointer: text("jj_pointer"),
-    payloadJson: text("payload_json").notNull(),
+  cacheKey: text("cache_key").primaryKey(),
+  createdAtMs: integer("created_at_ms").notNull(),
+  workflowName: text("workflow_name").notNull(),
+  nodeId: text("node_id").notNull(),
+  outputTable: text("output_table").notNull(),
+  schemaSig: text("schema_sig").notNull(),
+  agentSig: text("agent_sig"),
+  toolsSig: text("tools_sig"),
+  jjPointer: text("jj_pointer"),
+  payloadJson: text("payload_json").notNull(),
 });
-export const smithersNodeDiffs = sqliteTable("_smithers_node_diffs", {
+export const smithersNodeDiffs = sqliteTable(
+  "_smithers_node_diffs",
+  {
     runId: text("run_id").notNull(),
     nodeId: text("node_id").notNull(),
     iteration: integer("iteration").notNull(),
@@ -159,16 +179,20 @@ export const smithersNodeDiffs = sqliteTable("_smithers_node_diffs", {
     diffJson: text("diff_json").notNull(),
     computedAtMs: integer("computed_at_ms").notNull(),
     sizeBytes: integer("size_bytes").notNull(),
-}, (t) => ({
+  },
+  (t) => ({
     pk: primaryKey({
-        columns: [t.runId, t.nodeId, t.iteration, t.baseRef],
+      columns: [t.runId, t.nodeId, t.iteration, t.baseRef],
     }),
     runFk: foreignKey({
-        columns: [t.runId],
-        foreignColumns: [smithersRuns.runId],
+      columns: [t.runId],
+      foreignColumns: [smithersRuns.runId],
     }).onDelete("cascade"),
-}));
-export const smithersTimeTravelAudit = sqliteTable("_smithers_time_travel_audit", {
+  }),
+);
+export const smithersTimeTravelAudit = sqliteTable(
+  "_smithers_time_travel_audit",
+  {
     id: integer("id").primaryKey({ autoIncrement: true }),
     runId: text("run_id").notNull(),
     fromFrameNo: integer("from_frame_no").notNull(),
@@ -177,13 +201,17 @@ export const smithersTimeTravelAudit = sqliteTable("_smithers_time_travel_audit"
     timestampMs: integer("timestamp_ms").notNull(),
     result: text("result").notNull(),
     durationMs: integer("duration_ms"),
-}, (t) => ({
+  },
+  (t) => ({
     runFk: foreignKey({
-        columns: [t.runId],
-        foreignColumns: [smithersRuns.runId],
+      columns: [t.runId],
+      foreignColumns: [smithersRuns.runId],
     }).onDelete("cascade"),
-}));
-export const smithersSandboxes = sqliteTable("_smithers_sandboxes", {
+  }),
+);
+export const smithersSandboxes = sqliteTable(
+  "_smithers_sandboxes",
+  {
     runId: text("run_id").notNull(),
     sandboxId: text("sandbox_id").notNull(),
     runtime: text("runtime").notNull().default("bubblewrap"),
@@ -196,10 +224,14 @@ export const smithersSandboxes = sqliteTable("_smithers_sandboxes", {
     shippedAtMs: integer("shipped_at_ms"),
     completedAtMs: integer("completed_at_ms"),
     bundlePath: text("bundle_path"),
-}, (t) => ({
+  },
+  (t) => ({
     pk: primaryKey({ columns: [t.runId, t.sandboxId] }),
-}));
-export const smithersToolCalls = sqliteTable("_smithers_tool_calls", {
+  }),
+);
+export const smithersToolCalls = sqliteTable(
+  "_smithers_tool_calls",
+  {
     runId: text("run_id").notNull(),
     nodeId: text("node_id").notNull(),
     iteration: integer("iteration").notNull().default(0),
@@ -220,37 +252,47 @@ export const smithersToolCalls = sqliteTable("_smithers_tool_calls", {
     hasRevert: integer("has_revert", { mode: "boolean" }),
     idempotencyKey: text("idempotency_key"),
     revertStatus: text("revert_status", {
-        enum: ["reverting", "reverted", "revert-failed", "revert-stale"],
+      enum: ["reverting", "reverted", "revert-failed", "revert-stale"],
     }),
     revertedAtMs: integer("reverted_at_ms"),
     revertErrorJson: text("revert_error_json"),
     forcedPastJson: text("forced_past_json"),
-}, (t) => ({
+  },
+  (t) => ({
     pk: primaryKey({
-        columns: [t.runId, t.nodeId, t.iteration, t.attempt, t.seq],
+      columns: [t.runId, t.nodeId, t.iteration, t.attempt, t.seq],
     }),
     callTokenUnique: uniqueIndex("_smithers_tool_calls_call_token_uidx").on(t.callToken),
-}));
+  }),
+);
 export { smithersToolCallArchive } from "./internal-schema/smithersToolCallArchive.js";
-export const smithersEvents = sqliteTable("_smithers_events", {
+export const smithersEvents = sqliteTable(
+  "_smithers_events",
+  {
     runId: text("run_id").notNull(),
     seq: integer("seq").notNull(),
     timestampMs: integer("timestamp_ms").notNull(),
     type: text("type").notNull(),
     payloadJson: text("payload_json").notNull(),
-}, (t) => ({
+  },
+  (t) => ({
     pk: primaryKey({ columns: [t.runId, t.seq] }),
-}));
+  }),
+);
 export { smithersOutputProvenance } from "./internal-schema/smithersOutputProvenance.js";
-export const smithersRalph = sqliteTable("_smithers_ralph", {
+export const smithersRalph = sqliteTable(
+  "_smithers_ralph",
+  {
     runId: text("run_id").notNull(),
     ralphId: text("ralph_id").notNull(),
     iteration: integer("iteration").notNull().default(0),
     done: integer("done", { mode: "boolean" }).notNull().default(false),
     updatedAtMs: integer("updated_at_ms").notNull(),
-}, (t) => ({
+  },
+  (t) => ({
     pk: primaryKey({ columns: [t.runId, t.ralphId] }),
-}));
+  }),
+);
 export { smithersScorers } from "./internal-schema/smithersScorers.js";
 export { smithersMemoryFacts } from "./internal-schema/smithersMemoryFacts.js";
 export { smithersMemoryThreads } from "./internal-schema/smithersMemoryThreads.js";
@@ -258,35 +300,33 @@ export { smithersMemoryMessages } from "./internal-schema/smithersMemoryMessages
 export { smithersMemoryNotes } from "./internal-schema/smithersMemoryNotes.js";
 export { smithersMemoryNoteSupersessions } from "./internal-schema/smithersMemoryNoteSupersessions.js";
 export const smithersVectors = sqliteTable("_smithers_vectors", {
-    id: text("id").primaryKey(),
-    namespace: text("namespace").notNull(),
-    content: text("content").notNull(),
-    embedding: blob("embedding").notNull(),
-    dimensions: integer("dimensions").notNull(),
-    metadataJson: text("metadata_json"),
-    documentId: text("document_id"),
-    chunkIndex: integer("chunk_index"),
-    createdAtMs: integer("created_at_ms").notNull(),
+  id: text("id").primaryKey(),
+  namespace: text("namespace").notNull(),
+  content: text("content").notNull(),
+  embedding: blob("embedding").notNull(),
+  dimensions: integer("dimensions").notNull(),
+  metadataJson: text("metadata_json"),
+  documentId: text("document_id"),
+  chunkIndex: integer("chunk_index"),
+  createdAtMs: integer("created_at_ms").notNull(),
 });
 export const smithersCron = sqliteTable("_smithers_cron", {
-    cronId: text("cron_id").primaryKey(),
-    pattern: text("pattern").notNull(),
-    workflowPath: text("workflow_path").notNull(),
-    enabled: integer("enabled", { mode: "boolean" }).default(true),
-    createdAtMs: integer("created_at_ms").notNull(),
-    lastRunAtMs: integer("last_run_at_ms"),
-    nextRunAtMs: integer("next_run_at_ms"),
-    errorJson: text("error_json"),
+  cronId: text("cron_id").primaryKey(),
+  pattern: text("pattern").notNull(),
+  workflowPath: text("workflow_path").notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).default(true),
+  createdAtMs: integer("created_at_ms").notNull(),
+  lastRunAtMs: integer("last_run_at_ms"),
+  nextRunAtMs: integer("next_run_at_ms"),
+  errorJson: text("error_json"),
 });
 export const smithersSchemaMigrations = sqliteTable("_smithers_schema_migrations", {
-    id: text("id").primaryKey(),
-    name: text("name").notNull(),
-    appliedAtMs: integer("applied_at_ms").notNull(),
-    checksum: text("checksum"),
-    destructive: integer("destructive", { mode: "boolean" })
-        .notNull()
-        .default(false),
-    detailsJson: text("details_json"),
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  appliedAtMs: integer("applied_at_ms").notNull(),
+  checksum: text("checksum"),
+  destructive: integer("destructive", { mode: "boolean" }).notNull().default(false),
+  detailsJson: text("details_json"),
 });
 export { smithersWorkspaceStates } from "./internal-schema/smithersWorkspaceStates.js";
 export { smithersWorkspaceCheckpoints } from "./internal-schema/smithersWorkspaceCheckpoints.js";

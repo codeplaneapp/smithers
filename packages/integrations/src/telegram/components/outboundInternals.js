@@ -27,17 +27,17 @@ import { resolveTelegramClient } from "../config.js";
  * @returns {string[]}
  */
 export function depNodeIds(deps, needs) {
-    if (!deps) {
-        return [];
+  if (!deps) {
+    return [];
+  }
+  const ids = new Set();
+  for (const key of Object.keys(deps)) {
+    const nodeId = needs?.[key] ?? key;
+    if (nodeId) {
+      ids.add(nodeId);
     }
-    const ids = new Set();
-    for (const key of Object.keys(deps)) {
-        const nodeId = needs?.[key] ?? key;
-        if (nodeId) {
-            ids.add(nodeId);
-        }
-    }
-    return [...ids];
+  }
+  return [...ids];
 }
 
 /**
@@ -49,19 +49,19 @@ export function depNodeIds(deps, needs) {
  * @returns {Record<string, unknown> | null}
  */
 export function resolveOutboundDeps(ctx, deps, needs) {
-    if (!deps) {
-        return Object.create(null);
+  if (!deps) {
+    return Object.create(null);
+  }
+  const resolved = Object.create(null);
+  for (const key of Object.keys(deps)) {
+    const nodeId = needs?.[key] ?? key;
+    const value = ctx.outputMaybe(deps[key], { nodeId });
+    if (value === undefined) {
+      return null;
     }
-    const resolved = Object.create(null);
-    for (const key of Object.keys(deps)) {
-        const nodeId = needs?.[key] ?? key;
-        const value = ctx.outputMaybe(deps[key], { nodeId });
-        if (value === undefined) {
-            return null;
-        }
-        resolved[key] = value;
-    }
-    return resolved;
+    resolved[key] = value;
+  }
+  return resolved;
 }
 
 /**
@@ -72,43 +72,46 @@ export function resolveOutboundDeps(ctx, deps, needs) {
  * @returns {React.ReactElement | null}
  */
 export function renderOutboundTask(props, componentName, run) {
-    if (props.skipIf) {
-        return null;
-    }
-    const smithersContext = /** @type {any} */ (props.smithersContext) ?? SmithersContext;
-    const ctx = React.useContext(smithersContext);
-    if (props.deps && !ctx) {
-        throw new SmithersError("CONTEXT_OUTSIDE_WORKFLOW", `Telegram.${componentName} deps require a workflow context. Build the workflow with createSmithers().`);
-    }
-    const resolved = props.deps
-        ? resolveOutboundDeps(ctx, props.deps, props.needs)
-        : Object.create(null);
-    const gateIds = depNodeIds(props.deps, props.needs);
-    if (props.deps && resolved == null) {
-        // Deps not ready — defer exactly like Task does so the engine can
-        // distinguish transient waits from unsatisfiable ones.
-        ctx?.recordDeferredDep?.(props.id, gateIds);
-        return null;
-    }
-    const dependsOn = [...new Set([...(props.dependsOn ?? []), ...gateIds])];
-    const config = props.config;
-    // Function child WITHOUT a deps prop → __smithersKind: "compute".
-    const computeFn = () => {
-        const client = resolveTelegramClient(config);
-        return Effect.runPromise(
-        /** @type {Effect.Effect<any, any>} */ (run(client, resolved ?? Object.create(null))));
-    };
-    return React.createElement(Task, /** @type {any} */ ({
-        id: props.id,
-        key: props.key,
-        output: props.output,
-        outputSchema: props.outputSchema,
-        retryPolicy: props.retryPolicy,
-        timeoutMs: props.timeoutMs,
-        dependsOn: dependsOn.length > 0 ? dependsOn : undefined,
-        async: props.async,
-        label: props.label ?? `telegram:${componentName}`,
-        smithersContext: props.smithersContext,
-        children: computeFn,
-    }));
+  if (props.skipIf) {
+    return null;
+  }
+  const smithersContext = /** @type {any} */ (props.smithersContext) ?? SmithersContext;
+  const ctx = React.useContext(smithersContext);
+  if (props.deps && !ctx) {
+    throw new SmithersError(
+      "CONTEXT_OUTSIDE_WORKFLOW",
+      `Telegram.${componentName} deps require a workflow context. Build the workflow with createSmithers().`,
+    );
+  }
+  const resolved = props.deps ? resolveOutboundDeps(ctx, props.deps, props.needs) : Object.create(null);
+  const gateIds = depNodeIds(props.deps, props.needs);
+  if (props.deps && resolved == null) {
+    // Deps not ready — defer exactly like Task does so the engine can
+    // distinguish transient waits from unsatisfiable ones.
+    ctx?.recordDeferredDep?.(props.id, gateIds);
+    return null;
+  }
+  const dependsOn = [...new Set([...(props.dependsOn ?? []), ...gateIds])];
+  const config = props.config;
+  // Function child WITHOUT a deps prop → __smithersKind: "compute".
+  const computeFn = () => {
+    const client = resolveTelegramClient(config);
+    return Effect.runPromise(/** @type {Effect.Effect<any, any>} */ (run(client, resolved ?? Object.create(null))));
+  };
+  return React.createElement(
+    Task,
+    /** @type {any} */ ({
+      id: props.id,
+      key: props.key,
+      output: props.output,
+      outputSchema: props.outputSchema,
+      retryPolicy: props.retryPolicy,
+      timeoutMs: props.timeoutMs,
+      dependsOn: dependsOn.length > 0 ? dependsOn : undefined,
+      async: props.async,
+      label: props.label ?? `telegram:${componentName}`,
+      smithersContext: props.smithersContext,
+      children: computeFn,
+    }),
+  );
 }

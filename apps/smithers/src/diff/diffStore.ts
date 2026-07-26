@@ -31,23 +31,18 @@ export const useDiffStore = create<DiffState>((set) => ({
   expandedByDiff: {},
   revealedByDiff: {},
 
-  selectFile: (diffId, index) =>
-    set((state) => ({ activeByDiff: { ...state.activeByDiff, [diffId]: index } })),
+  selectFile: (diffId, index) => set((state) => ({ activeByDiff: { ...state.activeByDiff, [diffId]: index } })),
 
   toggleExpanded: (diffId, path) =>
     set((state) => {
       const current = state.expandedByDiff[diffId] ?? [];
-      const next = current.includes(path)
-        ? current.filter((p) => p !== path)
-        : [...current, path];
+      const next = current.includes(path) ? current.filter((p) => p !== path) : [...current, path];
       return { expandedByDiff: { ...state.expandedByDiff, [diffId]: next } };
     }),
 
-  expandAll: (diffId, paths) =>
-    set((state) => ({ expandedByDiff: { ...state.expandedByDiff, [diffId]: [...paths] } })),
+  expandAll: (diffId, paths) => set((state) => ({ expandedByDiff: { ...state.expandedByDiff, [diffId]: [...paths] } })),
 
-  collapseAll: (diffId) =>
-    set((state) => ({ expandedByDiff: { ...state.expandedByDiff, [diffId]: [] } })),
+  collapseAll: (diffId) => set((state) => ({ expandedByDiff: { ...state.expandedByDiff, [diffId]: [] } })),
 
   revealRemaining: (diffId, path) =>
     set((state) => {

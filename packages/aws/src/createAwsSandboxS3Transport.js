@@ -14,12 +14,12 @@ import { scrubAwsSandboxSecrets } from "./scrubAwsSandboxSecrets.js";
  * @returns {string}
  */
 function workdirRelative(path, workdir) {
-	const p = String(path);
-	const wd = String(workdir).replace(/\/+$/g, "");
-	if (wd && (p === wd || p.startsWith(`${wd}/`))) {
-		return p.slice(wd.length).replace(/^\/+/g, "");
-	}
-	return p.replace(/^\/+/g, "");
+  const p = String(path);
+  const wd = String(workdir).replace(/\/+$/g, "");
+  if (wd && (p === wd || p.startsWith(`${wd}/`))) {
+    return p.slice(wd.length).replace(/^\/+/g, "");
+  }
+  return p.replace(/^\/+/g, "");
 }
 
 /**
@@ -30,12 +30,12 @@ function workdirRelative(path, workdir) {
  * @returns {Promise<string>}
  */
 async function readBody(body) {
-	if (body === undefined || body === null) return "";
-	if (typeof body === "string") return body;
-	if (body instanceof Uint8Array) return new TextDecoder().decode(body);
-	const maybe = /** @type {{ transformToString?: () => Promise<string> }} */ (body);
-	if (typeof maybe.transformToString === "function") return await maybe.transformToString();
-	return String(body);
+  if (body === undefined || body === null) return "";
+  if (typeof body === "string") return body;
+  if (body instanceof Uint8Array) return new TextDecoder().decode(body);
+  const maybe = /** @type {{ transformToString?: () => Promise<string> }} */ (body);
+  if (typeof maybe.transformToString === "function") return await maybe.transformToString();
+  return String(body);
 }
 
 /**
@@ -59,105 +59,107 @@ async function readBody(body) {
  * }} config
  */
 export function createAwsSandboxS3Transport(config) {
-	const { s3, bucket, prefix } = config;
-	const workdir = config.workdir ?? "/workspace";
-	const secrets = config.secrets ?? [];
-	/** @type {Set<string>} */
-	const writtenKeys = new Set();
-	// Every key this session touches — written (request/CA) AND read (result) —
-	// so `cleanup: "destroy"` removes the container-authored result object too, not
-	// just the keys we uploaded. The result JSON is fetched via `readFile` and is
-	// never registered in `writtenKeys`, so it would otherwise leak past destroy.
-	/** @type {Set<string>} */
-	const touchedKeys = new Set();
+  const { s3, bucket, prefix } = config;
+  const workdir = config.workdir ?? "/workspace";
+  const secrets = config.secrets ?? [];
+  /** @type {Set<string>} */
+  const writtenKeys = new Set();
+  // Every key this session touches — written (request/CA) AND read (result) —
+  // so `cleanup: "destroy"` removes the container-authored result object too, not
+  // just the keys we uploaded. The result JSON is fetched via `readFile` and is
+  // never registered in `writtenKeys`, so it would otherwise leak past destroy.
+  /** @type {Set<string>} */
+  const touchedKeys = new Set();
 
-	/**
-	 * Map a workdir path to its collision-free S3 object key.
-	 * @param {string} path
-	 * @returns {string}
-	 */
-	function keyForPath(path) {
-		return `${prefix}/${encodeURIComponent(workdirRelative(path, workdir))}`;
-	}
+  /**
+   * Map a workdir path to its collision-free S3 object key.
+   * @param {string} path
+   * @returns {string}
+   */
+  function keyForPath(path) {
+    return `${prefix}/${encodeURIComponent(workdirRelative(path, workdir))}`;
+  }
 
-	/**
-	 * @param {string} operation
-	 * @param {string} key
-	 * @param {unknown} error
-	 * @returns {never}
-	 */
-	function fail(operation, key, error) {
-		const detail = scrubAwsSandboxSecrets(error instanceof Error ? error.message : String(error), secrets);
-		throw new SmithersError(
-			"SANDBOX_EXECUTION_FAILED",
-			`AWS sandbox S3 ${operation} failed for s3://${bucket}/${key}: ${detail}`,
-			{ provider: AWS_SANDBOX_PROVIDER_ID, bucket, key, operation },
-		);
-	}
+  /**
+   * @param {string} operation
+   * @param {string} key
+   * @param {unknown} error
+   * @returns {never}
+   */
+  function fail(operation, key, error) {
+    const detail = scrubAwsSandboxSecrets(error instanceof Error ? error.message : String(error), secrets);
+    throw new SmithersError(
+      "SANDBOX_EXECUTION_FAILED",
+      `AWS sandbox S3 ${operation} failed for s3://${bucket}/${key}: ${detail}`,
+      { provider: AWS_SANDBOX_PROVIDER_ID, bucket, key, operation },
+    );
+  }
 
-	return {
-		bucket,
-		prefix,
-		keyForPath,
-		/** @returns {string[]} */
-		writtenKeys() {
-			return [...writtenKeys];
-		},
-		/**
-		 * @param {string} path
-		 * @param {string} content
-		 * @returns {Promise<void>}
-		 */
-		async writeFile(path, content) {
-			const key = keyForPath(path);
-			try {
-				await s3.putObject({ Bucket: bucket, Key: key, Body: content });
-			} catch (error) {
-				fail("upload", key, error);
-			}
-			writtenKeys.add(key);
-			touchedKeys.add(key);
-		},
-		/**
-		 * @param {string} path
-		 * @returns {Promise<string>}
-		 */
-		async readFile(path) {
-			const key = keyForPath(path);
-			// Register the key we read so cleanup removes the result object (written by
-			// the container, fetched here) even though we never uploaded it ourselves.
-			touchedKeys.add(key);
-			try {
-				const res = await s3.getObject({ Bucket: bucket, Key: key });
-				return await readBody(/** @type {{ Body?: unknown }} */ (res)?.Body);
-			} catch (error) {
-				return fail("download", key, error);
-			}
-		},
-		/**
-		 * Delete every transient object this session touched (request/result/CA).
-		 * @returns {Promise<void>}
-		 */
-		async deleteAll() {
-			if (touchedKeys.size === 0) return;
-			const keys = [...touchedKeys];
-			try {
-				const result = await s3.deleteObjects({ Bucket: bucket, Delete: { Objects: keys.map((Key) => ({ Key })) } });
-				const errors = Array.isArray(result?.Errors) ? result.Errors : [];
-				const failedKeys = new Set(errors.map((error) => error?.Key).filter((key) => typeof key === "string"));
-				for (const key of keys) {
-					if (failedKeys.has(key)) continue;
-					writtenKeys.delete(key);
-					touchedKeys.delete(key);
-				}
-				if (failedKeys.size > 0) {
-					console.warn(`[smithers/aws] S3 cleanup left ${failedKeys.size} object(s) in s3://${bucket}/${prefix}; retry deleteAll()`);
-				}
-			} catch (error) {
-				// Best-effort cleanup: a leftover object must never fail the run.
-				const detail = scrubAwsSandboxSecrets(error instanceof Error ? error.message : String(error), secrets);
-				console.warn(`[smithers/aws] S3 cleanup failed for s3://${bucket}/${prefix}; retry deleteAll(): ${detail}`);
-			}
-		},
-	};
+  return {
+    bucket,
+    prefix,
+    keyForPath,
+    /** @returns {string[]} */
+    writtenKeys() {
+      return [...writtenKeys];
+    },
+    /**
+     * @param {string} path
+     * @param {string} content
+     * @returns {Promise<void>}
+     */
+    async writeFile(path, content) {
+      const key = keyForPath(path);
+      try {
+        await s3.putObject({ Bucket: bucket, Key: key, Body: content });
+      } catch (error) {
+        fail("upload", key, error);
+      }
+      writtenKeys.add(key);
+      touchedKeys.add(key);
+    },
+    /**
+     * @param {string} path
+     * @returns {Promise<string>}
+     */
+    async readFile(path) {
+      const key = keyForPath(path);
+      // Register the key we read so cleanup removes the result object (written by
+      // the container, fetched here) even though we never uploaded it ourselves.
+      touchedKeys.add(key);
+      try {
+        const res = await s3.getObject({ Bucket: bucket, Key: key });
+        return await readBody(/** @type {{ Body?: unknown }} */ (res)?.Body);
+      } catch (error) {
+        return fail("download", key, error);
+      }
+    },
+    /**
+     * Delete every transient object this session touched (request/result/CA).
+     * @returns {Promise<void>}
+     */
+    async deleteAll() {
+      if (touchedKeys.size === 0) return;
+      const keys = [...touchedKeys];
+      try {
+        const result = await s3.deleteObjects({ Bucket: bucket, Delete: { Objects: keys.map((Key) => ({ Key })) } });
+        const errors = Array.isArray(result?.Errors) ? result.Errors : [];
+        const failedKeys = new Set(errors.map((error) => error?.Key).filter((key) => typeof key === "string"));
+        for (const key of keys) {
+          if (failedKeys.has(key)) continue;
+          writtenKeys.delete(key);
+          touchedKeys.delete(key);
+        }
+        if (failedKeys.size > 0) {
+          console.warn(
+            `[smithers/aws] S3 cleanup left ${failedKeys.size} object(s) in s3://${bucket}/${prefix}; retry deleteAll()`,
+          );
+        }
+      } catch (error) {
+        // Best-effort cleanup: a leftover object must never fail the run.
+        const detail = scrubAwsSandboxSecrets(error instanceof Error ? error.message : String(error), secrets);
+        console.warn(`[smithers/aws] S3 cleanup failed for s3://${bucket}/${prefix}; retry deleteAll(): ${detail}`);
+      }
+    },
+  };
 }

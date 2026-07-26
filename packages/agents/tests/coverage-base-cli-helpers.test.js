@@ -65,9 +65,13 @@ describe("normalizeCodexConfig", () => {
     expect(normalizeCodexConfig(["a=1", 2])).toEqual(["a=1", "2"]);
   });
   test("object entries render each value type", () => {
-    expect(
-      normalizeCodexConfig({ a: null, b: "s", c: 3, d: true, e: { nested: 1 } }),
-    ).toEqual(["a=null", "b=s", "c=3", "d=true", 'e={"nested":1}']);
+    expect(normalizeCodexConfig({ a: null, b: "s", c: 3, d: true, e: { nested: 1 } })).toEqual([
+      "a=null",
+      "b=s",
+      "c=3",
+      "d=true",
+      'e={"nested":1}',
+    ]);
   });
 });
 
@@ -215,11 +219,26 @@ describe("createAgentStdoutTextEmitter", () => {
       JSON.stringify({ type: "MESSAGE", role: "assistant", delta: true, content: "delta-up" }),
       JSON.stringify({ type: "MESSAGE", role: "assistant", content: "final-2" }),
       JSON.stringify({ role: "assistant", content: "bare-assistant" }),
-      JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "wrapped" }] } }),
+      JSON.stringify({
+        type: "assistant",
+        message: { role: "assistant", content: [{ type: "text", text: "wrapped" }] },
+      }),
       JSON.stringify({ type: "result", result: "result-answer" }),
-      JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "turn-answer" }] } }),
-      JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "end-answer" }] } }),
-      JSON.stringify({ type: "agent_end", messages: [{ role: "user", content: "q" }, { role: "assistant", content: "agent-answer" }] }),
+      JSON.stringify({
+        type: "turn_end",
+        message: { role: "assistant", content: [{ type: "text", text: "turn-answer" }] },
+      }),
+      JSON.stringify({
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: "end-answer" }] },
+      }),
+      JSON.stringify({
+        type: "agent_end",
+        messages: [
+          { role: "user", content: "q" },
+          { role: "assistant", content: "agent-answer" },
+        ],
+      }),
     ];
     emitter.push(lines.join("\n") + "\n");
     // A representative set of the emitted answers proves the branches ran.

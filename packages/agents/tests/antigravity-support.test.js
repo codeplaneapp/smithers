@@ -25,14 +25,16 @@ async function buildAntigravityCommand(agent, options = {}) {
 
 describe("AntigravityAgent command surface", () => {
   test("uses current agy non-interactive flags and never emits removed flags", async () => {
-    const spec = await buildAntigravityCommand(new AntigravityAgent({
-      model: "gemini-3.1-pro",
-      includeDirectories: ["/tmp/project", "/tmp/shared"],
-      conversation: "conv-123",
-      continue: true,
-      configDir: "/tmp/agy-config",
-      apiKey: "google-key",
-    }));
+    const spec = await buildAntigravityCommand(
+      new AntigravityAgent({
+        model: "gemini-3.1-pro",
+        includeDirectories: ["/tmp/project", "/tmp/shared"],
+        conversation: "conv-123",
+        continue: true,
+        configDir: "/tmp/agy-config",
+        apiKey: "google-key",
+      }),
+    );
 
     expect(spec.command).toBe("agy");
     expect(spec.outputFormat).toBe("text");
@@ -55,11 +57,14 @@ describe("AntigravityAgent command surface", () => {
   });
 
   test("maps per-call resumeSession to --conversation", async () => {
-    const spec = await buildAntigravityCommand(new AntigravityAgent({
-      resume: "constructor-conversation",
-    }), {
-      resumeSession: "call-conversation",
-    });
+    const spec = await buildAntigravityCommand(
+      new AntigravityAgent({
+        resume: "constructor-conversation",
+      }),
+      {
+        resumeSession: "call-conversation",
+      },
+    );
 
     const index = spec.args.indexOf("--conversation");
     expect(index).toBeGreaterThanOrEqual(0);
@@ -112,7 +117,9 @@ describe("AntigravityAgent command surface", () => {
     ]);
     // Assistant messages accumulate (no event), then RESULT flushes the answer.
     expect(i.onStdoutLine(JSON.stringify({ type: "MESSAGE", role: "assistant", content: "Hello " }))).toEqual([]);
-    expect(i.onStdoutLine(JSON.stringify({ type: "MESSAGE", role: "assistant", content: "world", delta: true }))).toEqual([]);
+    expect(
+      i.onStdoutLine(JSON.stringify({ type: "MESSAGE", role: "assistant", content: "world", delta: true })),
+    ).toEqual([]);
     const done = i.onStdoutLine(JSON.stringify({ type: "RESULT", status: "ok" }));
     expect(done).toEqual([
       { type: "completed", engine: "antigravity", ok: true, answer: "Hello world", resume: "sess-1", usage: undefined },
@@ -125,7 +132,9 @@ describe("AntigravityAgent command surface", () => {
     const i = new AntigravityAgent().createOutputInterpreter();
     const use = i.onStdoutLine(JSON.stringify({ type: "TOOL_USE", tool_name: "bash", tool_id: "t1" }));
     expect(use[0]).toMatchObject({ type: "action", phase: "started", action: { id: "t1", title: "bash" } });
-    const result = i.onStdoutLine(JSON.stringify({ type: "TOOL_RESULT", tool_id: "t1", status: "error", error: { message: "boom" } }));
+    const result = i.onStdoutLine(
+      JSON.stringify({ type: "TOOL_RESULT", tool_id: "t1", status: "error", error: { message: "boom" } }),
+    );
     expect(result[0]).toMatchObject({ type: "action", phase: "completed", ok: false, level: "warning" });
     const err = i.onStdoutLine(JSON.stringify({ type: "ERROR", severity: "error", message: "fatal" }));
     expect(err[0]).toMatchObject({ type: "action", ok: false, level: "error", message: "fatal" });

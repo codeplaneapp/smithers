@@ -103,7 +103,7 @@ export function buildRunHeaderData(
   nowMs: number,
   loading: boolean,
 ): RunHeaderData {
-  const status = loading ? "connecting" : asString(run?.["status"]) ?? "unknown";
+  const status = loading ? "connecting" : (asString(run?.["status"]) ?? "unknown");
   const startedAt = asNumber(run?.["startedAtMs"]) ?? asNumber(run?.["createdAtMs"]);
   const finishedAt = asNumber(run?.["finishedAtMs"]);
   const end = finishedAt !== undefined ? finishedAt : nowMs;

@@ -158,8 +158,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>((set, get) => 
     const { selectedId, workflows, sourceDraft, importDrafts } = get();
     if (id === selectedId) return;
     const doc = findWorkflowDoc(workflows, selectedId);
-    const dirty =
-      doc !== null && changedFileCount(doc, sourceDraft, importDrafts) > 0;
+    const dirty = doc !== null && changedFileCount(doc, sourceDraft, importDrafts) > 0;
     if (dirty) {
       set({ pendingSelectId: id });
       return;
@@ -188,8 +187,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>((set, get) => 
 
   selectImport: (path) => set({ selectedImportPath: path }),
 
-  setImportDraft: (path, value) =>
-    set((state) => ({ importDrafts: { ...state.importDrafts, [path]: value } })),
+  setImportDraft: (path, value) => set((state) => ({ importDrafts: { ...state.importDrafts, [path]: value } })),
 
   saveAll: () => {
     const { workflows, selectedId, sourceDraft, importDrafts, saving } = get();
@@ -204,18 +202,14 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>((set, get) => 
       source: sourceDraft,
       originalSource: sourceDraft,
       imports: doc.imports.map((file) =>
-        importDrafts[file.path] !== undefined
-          ? { ...file, source: importDrafts[file.path] }
-          : file,
+        importDrafts[file.path] !== undefined ? { ...file, source: importDrafts[file.path] } : file,
       ),
     };
     set((state) => ({
       workflows: state.workflows.map((w) => (w.id === saved.id ? saved : w)),
       saving: false,
     }));
-    useChatStore.getState().say(
-      `Saved ${changed} file${changed === 1 ? "" : "s"} in \`${saved.filePath}\`.`,
-    );
+    useChatStore.getState().say(`Saved ${changed} file${changed === 1 ? "" : "s"} in \`${saved.filePath}\`.`);
     useNotificationsStore.getState().notify({
       title: "Workflow saved",
       detail: `${saved.name} · ${changed} file${changed === 1 ? "" : "s"}`,
@@ -250,16 +244,16 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>((set, get) => 
     const issues = runDoctor(doc);
     const summary = summarizeDoctor(issues);
     set((state) => ({
-      workflows: state.workflows.map((w) =>
-        w.id === doc.id ? { ...w, doctorIssues: issues } : w,
-      ),
+      workflows: state.workflows.map((w) => (w.id === doc.id ? { ...w, doctorIssues: issues } : w)),
       doctorRun: true,
     }));
-    useChatStore.getState().say(
-      `Workflow doctor for \`${doc.name}\`: ` +
-        `${summary.ok} ok · ${summary.warning} warning${summary.warning === 1 ? "" : "s"} · ` +
-        `${summary.error} error${summary.error === 1 ? "" : "s"}.`,
-    );
+    useChatStore
+      .getState()
+      .say(
+        `Workflow doctor for \`${doc.name}\`: ` +
+          `${summary.ok} ok · ${summary.warning} warning${summary.warning === 1 ? "" : "s"} · ` +
+          `${summary.error} error${summary.error === 1 ? "" : "s"}.`,
+      );
     useNotificationsStore.getState().notify({
       title: "Doctor finished",
       detail:

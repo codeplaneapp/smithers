@@ -20,13 +20,7 @@ type WorkflowRow = { key: string; readableName?: string };
  * A `<select>` of the workflows registered on the gateway. Reads
  * {@link useGatewayWorkflows}. Pair with {@link LaunchButton} to build a launcher.
  */
-export function WorkflowPicker({
-  value,
-  onChange,
-  hasUiOnly = false,
-  className,
-  style,
-}: WorkflowPickerProps) {
+export function WorkflowPicker({ value, onChange, hasUiOnly = false, className, style }: WorkflowPickerProps) {
   const { data } = useGatewayWorkflows(hasUiOnly ? { filter: { hasUi: true } } : undefined);
   const workflows = (data ?? []) as WorkflowRow[];
 

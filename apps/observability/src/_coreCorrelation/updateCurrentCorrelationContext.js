@@ -10,10 +10,10 @@ import { mergeCorrelationContext } from "./mergeCorrelationContext.js";
  * @returns {Effect.Effect<CorrelationContext | undefined>}
  */
 export function updateCurrentCorrelationContext(patch) {
-    return Effect.gen(function* () {
-        const current = yield* getCurrentCorrelationContextEffect();
-        const next = mergeCorrelationContext(current, patch);
-        yield* FiberRef.set(correlationContextFiberRef, next);
-        return next;
-    });
+  return Effect.gen(function* () {
+    const current = yield* getCurrentCorrelationContextEffect();
+    const next = mergeCorrelationContext(current, patch);
+    yield* FiberRef.set(correlationContextFiberRef, next);
+    return next;
+  });
 }

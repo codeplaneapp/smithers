@@ -56,9 +56,9 @@ describe("bundleGatewayUiEntry failure paths", () => {
   test("falls back to a generic message when a failed build reports no logs", async () => {
     originalBuild = Bun.build;
     Bun.build = async () => ({ success: false, logs: [] });
-    await expect(
-      bundleGatewayUiEntry({ entry: "/some/entry.tsx" }, new Map()),
-    ).rejects.toThrow("Failed to build Gateway UI entry /some/entry.tsx");
+    await expect(bundleGatewayUiEntry({ entry: "/some/entry.tsx" }, new Map())).rejects.toThrow(
+      "Failed to build Gateway UI entry /some/entry.tsx",
+    );
   });
 
   test("restores a working Bun.build after the stubs", () => {

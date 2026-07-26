@@ -50,7 +50,11 @@ async function mount(gw: InMemoryGateway, element: ReactElement): Promise<Harnes
     rerender: async (element: ReactElement) => {
       await act(async () => {
         root.render(
-          createElement(SmithersCollectionsProvider, { mode: { kind: "local" as const, apiBaseUrl: gw.baseUrl } }, element),
+          createElement(
+            SmithersCollectionsProvider,
+            { mode: { kind: "local" as const, apiBaseUrl: gw.baseUrl } },
+            element,
+          ),
         );
       });
     },
@@ -178,7 +182,9 @@ describe("GatewayApprovalList", () => {
     await act(async () => click(harness.container.querySelector("[data-decision='approve']")));
     await waitFor(
       harness,
-      () => harness.container.querySelector("[data-slot='confirmation']")?.getAttribute("data-state") === "failed-submission",
+      () =>
+        harness.container.querySelector("[data-slot='confirmation']")?.getAttribute("data-state") ===
+        "failed-submission",
       "failed-submission state",
     );
     const button = harness.container.querySelector<HTMLButtonElement>("[data-decision='approve']")!;

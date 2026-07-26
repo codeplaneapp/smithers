@@ -1,9 +1,5 @@
 /** @jsxImportSource react */
-import {
-  createGatewayReactRoot,
-  useGatewayNodeOutput,
-  useGatewayRunEvents,
-} from "smithers-orchestrator/gateway-react";
+import { createGatewayReactRoot, useGatewayNodeOutput, useGatewayRunEvents } from "smithers-orchestrator/gateway-react";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
 
 const GATED_NODE_ID = "gated-task";
@@ -61,7 +57,9 @@ function App() {
       <WorkflowUiStyles mode="theme" />
       <div className="head">
         <h1>E2E Approval Probe</h1>
-        <span className="pill" data-testid="approval-probe-run-id">{runId ?? ""}</span>
+        <span className="pill" data-testid="approval-probe-run-id">
+          {runId ?? ""}
+        </span>
       </div>
       <section className="panel">
         <span className="label">Status</span>

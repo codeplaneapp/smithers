@@ -32,7 +32,10 @@ function runSearchBlob(run: RunSummaryRow): string {
     run.status,
     fmtTime(run.createdAtMs),
     run.createdAtMs ? new Date(run.createdAtMs).toISOString() : "",
-  ].filter(Boolean).join(" ").toLowerCase();
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
 }
 
 function shortRunId(runId: string): string {
@@ -40,8 +43,9 @@ function shortRunId(runId: string): string {
 }
 
 function uniqueRunStatuses(runs: RunSummaryRow[]): string[] {
-  return [...new Set(runs.map((run) => asString(run.status).trim()).filter(Boolean))]
-    .sort((left, right) => formatStatus(left).localeCompare(formatStatus(right)));
+  return [...new Set(runs.map((run) => asString(run.status).trim()).filter(Boolean))].sort((left, right) =>
+    formatStatus(left).localeCompare(formatStatus(right)),
+  );
 }
 
 /** `smithers up --interactive` style streaming feed: every run event as a log line, auto-scrolled. */
@@ -123,9 +127,10 @@ function usePersistedRunEvents(assetBase: string | undefined, runId: string | un
       .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`run events ${response.status}`))))
       .then((json: unknown) => {
         if (!alive) return;
-        const rows = json && typeof json === "object" && Array.isArray((json as { events?: unknown }).events)
-          ? ((json as { events: EventFrame[] }).events)
-          : [];
+        const rows =
+          json && typeof json === "object" && Array.isArray((json as { events?: unknown }).events)
+            ? (json as { events: EventFrame[] }).events
+            : [];
         setEvents(rows);
       })
       .catch(() => {
@@ -164,7 +169,7 @@ function Node({ node, onSelect }: { node: RunNode; onSelect: (node: RunNode) => 
   const children = asArray(node.children) as RunNode[];
   const label = nodeLabel(node);
   const agent = asString(node.agent);
-  const hasDetail = Boolean(asString(node.output) || (asArray(node.toolCalls).length > 0) || asString(node.meta));
+  const hasDetail = Boolean(asString(node.output) || asArray(node.toolCalls).length > 0 || asString(node.meta));
   return (
     <li>
       <button
@@ -179,9 +184,17 @@ function Node({ node, onSelect }: { node: RunNode; onSelect: (node: RunNode) => 
         </span>
         <span className="node-name">{label}</span>
         {agent ? <span className="pill">{agent}</span> : null}
-        <span className="node-drill" aria-hidden="true">›</span>
+        <span className="node-drill" aria-hidden="true">
+          ›
+        </span>
       </button>
-      {children.length ? <ul>{children.map((child, index) => <Node key={asString(child.key ?? child.id) || `node:${index}`} node={child} onSelect={onSelect} />)}</ul> : null}
+      {children.length ? (
+        <ul>
+          {children.map((child, index) => (
+            <Node key={asString(child.key ?? child.id) || `node:${index}`} node={child} onSelect={onSelect} />
+          ))}
+        </ul>
+      ) : null}
     </li>
   );
 }
@@ -196,7 +209,9 @@ function NodeDetail({ node, onClose }: { node: RunNode; onClose: () => void }) {
   const iteration = Number(node.iteration ?? 0);
   const output = asString(node.output);
   const meta = asString(node.meta);
-  const toolCalls = asArray(node.toolCalls).filter((call): call is Record<string, unknown> => !!call && typeof call === "object");
+  const toolCalls = asArray(node.toolCalls).filter(
+    (call): call is Record<string, unknown> => !!call && typeof call === "object",
+  );
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <section
@@ -211,22 +226,31 @@ function NodeDetail({ node, onClose }: { node: RunNode; onClose: () => void }) {
       >
         <div className="modal-head">
           <div>
-            <span className="eyebrow">{kind || "node"}{iteration > 0 ? ` · attempt ${iteration + 1}` : ""}</span>
+            <span className="eyebrow">
+              {kind || "node"}
+              {iteration > 0 ? ` · attempt ${iteration + 1}` : ""}
+            </span>
             <h2 id="ddd-node-detail-title">{nodeLabel(node)}</h2>
           </div>
-          <button ref={closeRef} className="icon-button" type="button" onClick={onClose} aria-label="Close">x</button>
+          <button ref={closeRef} className="icon-button" type="button" onClick={onClose} aria-label="Close">
+            x
+          </button>
         </div>
         <div className="meta-row">
           {status ? <span className={`badge ${statusClass(status)}`}>{formatStatus(status)}</span> : null}
           {agent ? <span className="pill">{agent}</span> : null}
-          <span className="pill muted" title={asString(node.id)}>{asString(node.id)}</span>
+          <span className="pill muted" title={asString(node.id)}>
+            {asString(node.id)}
+          </span>
         </div>
         {toolCalls.length ? (
           <div className="list-block">
             <strong>Tool calls</strong>
             <div className="meta-row">
               {toolCalls.map((call, index) => (
-                <span className="pill" key={`tool:${index}`}>{asString(call.name ?? call.tool ?? call.kind) || "tool"}</span>
+                <span className="pill" key={`tool:${index}`}>
+                  {asString(call.name ?? call.tool ?? call.kind) || "tool"}
+                </span>
               ))}
             </div>
           </div>
@@ -276,7 +300,10 @@ export function LiveTab(props: LiveTabProps) {
   return (
     <div className="live pane" data-testid="ddd-live-tab">
       <div className="runlist" data-testid="ddd-run-list">
-        <div className="card-head"><h2>Docs runs</h2><span className="pill">{countLabel}</span></div>
+        <div className="card-head">
+          <h2>Docs runs</h2>
+          <span className="pill">{countLabel}</span>
+        </div>
         <div className="run-filters" role="search" aria-label="Run filters">
           <label className="filter-field">
             <span>Search</span>
@@ -292,13 +319,29 @@ export function LiveTab(props: LiveTabProps) {
           </label>
           <label className="filter-field">
             <span>Status</span>
-            <select className="select" value={statusFilter} data-testid="ddd-run-status-filter" onChange={(event) => setStatusFilter(event.currentTarget.value)}>
+            <select
+              className="select"
+              value={statusFilter}
+              data-testid="ddd-run-status-filter"
+              onChange={(event) => setStatusFilter(event.currentTarget.value)}
+            >
               <option value="all">All statuses</option>
-              {statuses.map((status) => <option key={status} value={status}>{formatStatus(status)}</option>)}
+              {statuses.map((status) => (
+                <option key={status} value={status}>
+                  {formatStatus(status)}
+                </option>
+              ))}
             </select>
           </label>
           {filtersActive ? (
-            <button className="button" type="button" onClick={() => { setQuery(""); setStatusFilter("all"); }}>
+            <button
+              className="button"
+              type="button"
+              onClick={() => {
+                setQuery("");
+                setStatusFilter("all");
+              }}
+            >
               Clear
             </button>
           ) : null}
@@ -311,7 +354,9 @@ export function LiveTab(props: LiveTabProps) {
               className={run.runId === selectedRunId ? "run-row is-active" : "run-row"}
               onClick={() => props.onSelectRun(run.runId)}
             >
-              <span className="rid" title={run.runId}>{shortRunId(run.runId)}</span>
+              <span className="rid" title={run.runId}>
+                {shortRunId(run.runId)}
+              </span>
               <div className="meta-row">
                 <span className={`badge ${statusClass(run.status)}`}>{formatStatus(run.status) || "-"}</span>
                 <span className="pill">{runWorkflow(run)}</span>
@@ -320,24 +365,31 @@ export function LiveTab(props: LiveTabProps) {
             </button>
           ))
         ) : (
-          <p>{runsLoading ? "Loading runs..." : filtersActive ? "No runs match the current filters." : "No docs-driven-development runs yet. Dispatch agents from the Docs tab."}</p>
+          <p>
+            {runsLoading
+              ? "Loading runs..."
+              : filtersActive
+                ? "No runs match the current filters."
+                : "No docs-driven-development runs yet. Dispatch agents from the Docs tab."}
+          </p>
         )}
       </div>
 
       <div className="scroll">
         {!selectedRunId ? (
-          <section className="card"><p>Select a run to see its chat log, the smithers script, and the live node tree.</p></section>
+          <section className="card">
+            <p>Select a run to see its chat log, the smithers script, and the live node tree.</p>
+          </section>
         ) : (
           <>
-            <ErrorBanner
-              title="Live data issue"
-              errors={[props.eventsError, runTree.error, persistedEvents.error]}
-            />
+            <ErrorBanner title="Live data issue" errors={[props.eventsError, runTree.error, persistedEvents.error]} />
 
             <section className="card" data-testid="ddd-run-tree">
               <div className="card-head">
                 <h2>Run node tree</h2>
-                <span className={`badge ${statusClass(props.runStatus ?? runTree.status)}`}>{formatStatus(props.runStatus ?? runTree.status) || "-"}</span>
+                <span className={`badge ${statusClass(props.runStatus ?? runTree.status)}`}>
+                  {formatStatus(props.runStatus ?? runTree.status) || "-"}
+                </span>
               </div>
               {nodeTally.total > 0 ? (
                 <div className="tree-tally" data-testid="ddd-tree-tally">
@@ -348,7 +400,13 @@ export function LiveTab(props: LiveTabProps) {
                 </div>
               ) : null}
               <div className="nodetree">
-                {runTree.root ? <ul><Node node={runTree.root as unknown as RunNode} onSelect={setSelectedNode} /></ul> : <p className="empty">{runTree.isLoading ? "Loading tree..." : "No node tree for this run yet."}</p>}
+                {runTree.root ? (
+                  <ul>
+                    <Node node={runTree.root as unknown as RunNode} onSelect={setSelectedNode} />
+                  </ul>
+                ) : (
+                  <p className="empty">{runTree.isLoading ? "Loading tree..." : "No node tree for this run yet."}</p>
+                )}
               </div>
             </section>
 
@@ -365,11 +423,7 @@ export function LiveTab(props: LiveTabProps) {
                       key={`${line.kind}:${line.who}:${index}`}
                     >
                       <span className="who">{line.who}</span>
-                      {line.kind === "message" ? (
-                        <MarkdownPreview markdown={line.text} />
-                      ) : (
-                        <pre>{line.text}</pre>
-                      )}
+                      {line.kind === "message" ? <MarkdownPreview markdown={line.text} /> : <pre>{line.text}</pre>}
                     </div>
                   ))}
                 </div>

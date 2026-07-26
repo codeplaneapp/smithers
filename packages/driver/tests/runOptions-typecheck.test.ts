@@ -77,9 +77,7 @@ describe("RunOptions public type", () => {
           module: "ESNext",
           moduleResolution: "bundler",
           paths: {
-            "@smithers-orchestrator/driver": [
-              resolve(REPO_ROOT, "packages/driver/src/index.d.ts"),
-            ],
+            "@smithers-orchestrator/driver": [resolve(REPO_ROOT, "packages/driver/src/index.d.ts")],
           },
           allowImportingTsExtensions: true,
           skipLibCheck: true,

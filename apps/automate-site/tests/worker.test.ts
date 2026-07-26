@@ -27,13 +27,19 @@ describe("automate site worker", () => {
   });
 
   test("falls back to the home page for marketing paths", async () => {
-    const response = await createAutomateSiteWorker().fetch(new Request("https://automate.smithers.sh/learn"), makeEnv());
+    const response = await createAutomateSiteWorker().fetch(
+      new Request("https://automate.smithers.sh/learn"),
+      makeEnv(),
+    );
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("Smithers");
   });
 
   test("reports health without touching static assets", async () => {
-    const response = await createAutomateSiteWorker().fetch(new Request("https://automate.smithers.sh/healthz"), makeEnv());
+    const response = await createAutomateSiteWorker().fetch(
+      new Request("https://automate.smithers.sh/healthz"),
+      makeEnv(),
+    );
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, service: "automate-site" });
   });

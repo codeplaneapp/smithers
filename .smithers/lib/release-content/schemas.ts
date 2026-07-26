@@ -117,17 +117,9 @@ export const releaseContentInputSchema = z.object({
       allowedTemplateIds: z.array(templateIdSchema).default([]),
       blockedTemplateIds: z.array(templateIdSchema).default([]),
       audience: z
-        .enum([
-          "agent-builders",
-          "platform-engineers",
-          "maintainers",
-          "founders",
-          "general-developers",
-        ])
+        .enum(["agent-builders", "platform-engineers", "maintainers", "founders", "general-developers"])
         .default("agent-builders"),
-      tone: z
-        .enum(["systems", "founder-led", "launch-week", "technical-deep-dive", "minimal"])
-        .default("systems"),
+      tone: z.enum(["systems", "founder-led", "launch-week", "technical-deep-dive", "minimal"]).default("systems"),
     })
     .default({
       allowedTemplateIds: [],
@@ -365,13 +357,7 @@ export const threadDraftSchema = z.object({
   notes: z.string().default(""),
 });
 
-export const mediaAssetKindSchema = z.enum([
-  "hero",
-  "capability",
-  "diagram",
-  "changelog",
-  "terminal",
-]);
+export const mediaAssetKindSchema = z.enum(["hero", "capability", "diagram", "changelog", "terminal"]);
 
 export const mediaAssetSchema = z.object({
   tweetIndex: z.number(),

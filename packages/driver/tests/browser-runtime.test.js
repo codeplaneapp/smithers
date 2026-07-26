@@ -74,10 +74,7 @@ describe("createBrowserRuntime", () => {
     const agent = {
       generate: async ({ prompt }) => ({ summary: `handled:${prompt}` }),
     };
-    const out = await runtime.executeTask(
-      { agent, prompt: "hello", outputSchema: schema },
-      {},
-    );
+    const out = await runtime.executeTask({ agent, prompt: "hello", outputSchema: schema }, {});
     expect(out).toEqual({ summary: "handled:hello" });
   });
 
@@ -85,9 +82,7 @@ describe("createBrowserRuntime", () => {
     const runtime = createBrowserRuntime();
     const schema = z.object({ summary: z.string() });
     const agent = { generate: async () => ({ wrong: true }) };
-    await expect(
-      runtime.executeTask({ agent, prompt: "hello", outputSchema: schema }, {}),
-    ).rejects.toThrow();
+    await expect(runtime.executeTask({ agent, prompt: "hello", outputSchema: schema }, {})).rejects.toThrow();
   });
 
   test("filesystem/subprocess/sandbox/worktree fail closed with typed RuntimeCapabilityError", async () => {

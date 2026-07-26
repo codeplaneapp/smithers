@@ -276,7 +276,16 @@ type Input = z.infer<typeof inputSchema>;
 function parseInput(raw: unknown): Input {
   const record = (raw ?? {}) as Record<string, unknown>;
   const asIntArray = (value: unknown): number[] => {
-    const parsed = typeof value === "string" ? (() => { try { return JSON.parse(value); } catch { return []; } })() : value;
+    const parsed =
+      typeof value === "string"
+        ? (() => {
+            try {
+              return JSON.parse(value);
+            } catch {
+              return [];
+            }
+          })()
+        : value;
     return Array.isArray(parsed) ? parsed.map((entry) => Number(entry)).filter((entry) => Number.isInteger(entry)) : [];
   };
   const asInt = (value: unknown, fallback: number): number => {
@@ -316,10 +325,16 @@ function trainBranchFor(key: string): string {
   return "smithers/issue-train-" + key;
 }
 function splitZero(value: string): string[] {
-  return value.split("\0").map((part) => part.trim()).filter(Boolean);
+  return value
+    .split("\0")
+    .map((part) => part.trim())
+    .filter(Boolean);
 }
 function splitLines(value: string): string[] {
-  return value.split("\n").map((part) => part.trim()).filter(Boolean);
+  return value
+    .split("\n")
+    .map((part) => part.trim())
+    .filter(Boolean);
 }
 function normalizePath(path: string): string {
   return path.replace(/^\.\//, "").replace(/\/+$/, "").trim();
@@ -361,9 +376,16 @@ function runProcess(command: string, args: string[], cwd: string, timeoutMs: num
       clearTimeout(timer);
       resolve({ exitCode, stdout, stderr, durationMs: Date.now() - started });
     };
-    child.stdout.on("data", (chunk) => { stdout += String(chunk); });
-    child.stderr.on("data", (chunk) => { stderr += String(chunk); });
-    child.on("error", (error) => { stderr += String(error); finish(1); });
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", (error) => {
+      stderr += String(error);
+      finish(1);
+    });
     child.on("close", (code) => finish(code ?? 1));
     const timer = setTimeout(() => {
       stderr += "\nTimed out after " + timeoutMs + "ms";
@@ -378,7 +400,9 @@ function runProcess(command: string, args: string[], cwd: string, timeoutMs: num
 async function setupTrain(key: string, baseRef: string): Promise<Setup> {
   const path = trainPathFor(key);
   const branch = trainBranchFor(key);
-  try { git(["fetch", "origin", "main"], repoRoot); } catch {}
+  try {
+    git(["fetch", "origin", "main"], repoRoot);
+  } catch {}
   let baseSha = "";
   try {
     baseSha = git(["rev-parse", baseRef || "origin/main"], repoRoot);
@@ -393,26 +417,59 @@ async function setupTrain(key: string, baseRef: string): Promise<Setup> {
       try {
         git(["worktree", "add", path, branch], repoRoot);
       } catch (inner) {
-        return { ready: false, trainPath: path, branch, baseSha, summary: "worktree add failed: " + String(inner).slice(0, 2_000) };
+        return {
+          ready: false,
+          trainPath: path,
+          branch,
+          baseSha,
+          summary: "worktree add failed: " + String(inner).slice(0, 2_000),
+        };
       }
     }
   }
   const install = await runProcess("pnpm", ["install", "--frozen-lockfile"], path, 45 * 60_000);
   if (install.exitCode !== 0) {
-    return { ready: false, trainPath: path, branch, baseSha, summary: "pnpm install failed: " + (install.stderr || install.stdout).slice(-4_000) };
+    return {
+      ready: false,
+      trainPath: path,
+      branch,
+      baseSha,
+      summary: "pnpm install failed: " + (install.stderr || install.stdout).slice(-4_000),
+    };
   }
-  return { ready: true, trainPath: path, branch, baseSha, summary: "Train worktree ready at " + path + " (base " + baseSha.slice(0, 12) + ")." };
+  return {
+    ready: true,
+    trainPath: path,
+    branch,
+    baseSha,
+    summary: "Train worktree ready at " + path + " (base " + baseSha.slice(0, 12) + ").",
+  };
 }
 
 function discoverIssues(input: Input): z.infer<typeof discoverySchema> {
-  const raw = gh([
-    "issue", "list", "--repo", REPO, "--state", "open",
-    "--limit", String(Math.max(input.maxIssues, input.issueNumbers.length, 500)),
-    "--json", "number,title,body,author",
-  ], repoRoot);
+  const raw = gh(
+    [
+      "issue",
+      "list",
+      "--repo",
+      REPO,
+      "--state",
+      "open",
+      "--limit",
+      String(Math.max(input.maxIssues, input.issueNumbers.length, 500)),
+      "--json",
+      "number,title,body,author",
+    ],
+    repoRoot,
+  );
   const requested = new Set(input.issueNumbers);
   const excluded = new Set(input.excludeNumbers);
-  const rows = JSON.parse(raw) as Array<{ number: number; title: string; body: string | null; author: { login?: string } | null }>;
+  const rows = JSON.parse(raw) as Array<{
+    number: number;
+    title: string;
+    body: string | null;
+    author: { login?: string } | null;
+  }>;
   const issues: Issue[] = rows
     .map((row) => ({
       number: Number(row.number),
@@ -465,8 +522,15 @@ function buildPlan(ctx: any, issues: Issue[], input: Input): Plan {
     needsHumanCount: needsHuman.length,
     skipCount: skipped.length,
     wavesJson: JSON.stringify(waves),
-    summary: fixable.length + " fixable issue(s) in " + waves.length + " wave(s); "
-      + needsHuman.length + " need human input; " + skipped.length + " to close as skip/obsolete.",
+    summary:
+      fixable.length +
+      " fixable issue(s) in " +
+      waves.length +
+      " wave(s); " +
+      needsHuman.length +
+      " need human input; " +
+      skipped.length +
+      " to close as skip/obsolete.",
   };
 }
 
@@ -479,22 +543,39 @@ function verifyCommit(cwd: string, issueNumber: number, expected: string[]): Com
     const headSha = git(["rev-parse", "HEAD"], cwd);
     const message = git(["log", "-1", "--format=%B"], cwd);
     if (!issueRefPattern(issueNumber).test(message)) {
-      return { issueNumber, verified: false, commitSha: "", summary: "HEAD does not reference #" + issueNumber + "; commit missing." };
+      return {
+        issueNumber,
+        verified: false,
+        commitSha: "",
+        summary: "HEAD does not reference #" + issueNumber + "; commit missing.",
+      };
     }
     const touched = uniquePaths(splitLines(git(["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"], cwd)));
     if (!touched.length) {
       return { issueNumber, verified: false, commitSha: headSha, summary: "Commit is empty." };
     }
-    const strays = touched.filter((path) => !expected.some((allowed) => path === allowed || path.startsWith(allowed + "/")));
+    const strays = touched.filter(
+      (path) => !expected.some((allowed) => path === allowed || path.startsWith(allowed + "/")),
+    );
     if (strays.length) {
       git(["reset", "--mixed", "HEAD~1"], cwd);
-      return { issueNumber, verified: false, commitSha: "", summary: "Commit touched unexpected paths (" + strays.slice(0, 10).join(", ") + "); reset." };
+      return {
+        issueNumber,
+        verified: false,
+        commitSha: "",
+        summary: "Commit touched unexpected paths (" + strays.slice(0, 10).join(", ") + "); reset.",
+      };
     }
     const staged = git(["diff", "--cached", "--name-only"], cwd);
     if (staged) {
       git(["reset", "HEAD", "--", "."], cwd);
     }
-    return { issueNumber, verified: true, commitSha: headSha, summary: "Commit " + headSha.slice(0, 12) + " verified (" + touched.length + " path(s))." };
+    return {
+      issueNumber,
+      verified: true,
+      commitSha: headSha,
+      summary: "Commit " + headSha.slice(0, 12) + " verified (" + touched.length + " path(s)).",
+    };
   } catch (error) {
     return { issueNumber, verified: false, commitSha: "", summary: String(error).slice(0, 2_000) };
   }
@@ -512,7 +593,11 @@ function wipeStrays(cwd: string, waveIndex: number): z.infer<typeof wipeSchema> 
       git(["checkout", "--", "."], cwd);
       git(["clean", "-fd"], cwd);
     }
-    return { waveIndex, wipedPaths: dirty.slice(0, 100), summary: dirty.length ? "Wiped " + dirty.length + " uncommitted stray path(s)." : "Worktree clean." };
+    return {
+      waveIndex,
+      wipedPaths: dirty.slice(0, 100),
+      summary: dirty.length ? "Wiped " + dirty.length + " uncommitted stray path(s)." : "Worktree clean.",
+    };
   } catch (error) {
     return { waveIndex, wipedPaths: [], summary: "Wipe failed: " + String(error).slice(0, 2_000) };
   }
@@ -526,22 +611,50 @@ function conflictedPaths(cwd: string): string[] {
  *  continues it. Any other failure aborts cleanly. */
 function syncTrain(cwd: string, waveIndex: number): Sync {
   try {
-    try { git(["fetch", "origin", "main"], cwd); } catch {}
+    try {
+      git(["fetch", "origin", "main"], cwd);
+    } catch {}
     const remoteSha = git(["rev-parse", "origin/main"], cwd);
     const headSha = git(["rev-parse", "HEAD"], cwd);
     if (git(["merge-base", remoteSha, headSha], cwd) === remoteSha) {
-      return { waveIndex, status: "current", conflictPaths: [], headSha, summary: "Train already contains origin/main." };
+      return {
+        waveIndex,
+        status: "current",
+        conflictPaths: [],
+        headSha,
+        summary: "Train already contains origin/main.",
+      };
     }
     try {
       git(["rebase", remoteSha], cwd);
-      return { waveIndex, status: "rebased", conflictPaths: [], headSha: git(["rev-parse", "HEAD"], cwd), summary: "Rebased train onto origin/main " + remoteSha.slice(0, 12) + "." };
+      return {
+        waveIndex,
+        status: "rebased",
+        conflictPaths: [],
+        headSha: git(["rev-parse", "HEAD"], cwd),
+        summary: "Rebased train onto origin/main " + remoteSha.slice(0, 12) + ".",
+      };
     } catch (error) {
       const conflicts = conflictedPaths(cwd);
       if (conflicts.length) {
-        return { waveIndex, status: "conflict", conflictPaths: conflicts.slice(0, 100), headSha: "", summary: "Rebase conflict in " + conflicts.length + " file(s); resolution agent takes over." };
+        return {
+          waveIndex,
+          status: "conflict",
+          conflictPaths: conflicts.slice(0, 100),
+          headSha: "",
+          summary: "Rebase conflict in " + conflicts.length + " file(s); resolution agent takes over.",
+        };
       }
-      try { git(["rebase", "--abort"], cwd); } catch {}
-      return { waveIndex, status: "blocked", conflictPaths: [], headSha: "", summary: "Rebase failed: " + String(error).slice(0, 4_000) };
+      try {
+        git(["rebase", "--abort"], cwd);
+      } catch {}
+      return {
+        waveIndex,
+        status: "blocked",
+        conflictPaths: [],
+        headSha: "",
+        summary: "Rebase failed: " + String(error).slice(0, 4_000),
+      };
     }
   } catch (error) {
     return { waveIndex, status: "blocked", conflictPaths: [], headSha: "", summary: String(error).slice(0, 4_000) };
@@ -553,8 +666,16 @@ function finishSync(cwd: string, waveIndex: number): Sync {
     for (const path of unresolved) {
       const content = readFileSync(join(cwd, path), "utf8");
       if (/^(<{7,}|={7,}|>{7,}|\|{7,})/m.test(content)) {
-        try { git(["rebase", "--abort"], cwd); } catch {}
-        return { waveIndex, status: "blocked", conflictPaths: unresolved, headSha: "", summary: "Conflict markers remain in " + path + "; rebase aborted." };
+        try {
+          git(["rebase", "--abort"], cwd);
+        } catch {}
+        return {
+          waveIndex,
+          status: "blocked",
+          conflictPaths: unresolved,
+          headSha: "",
+          summary: "Conflict markers remain in " + path + "; rebase aborted.",
+        };
       }
     }
     if (unresolved.length) git(["add", "--", ...unresolved], cwd);
@@ -563,10 +684,24 @@ function finishSync(cwd: string, waveIndex: number): Sync {
       encoding: "utf8",
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_EDITOR: "true", EDITOR: "true" },
     });
-    return { waveIndex, status: "finished", conflictPaths: [], headSha: git(["rev-parse", "HEAD"], cwd), summary: "Conflicts resolved; rebase continued." };
+    return {
+      waveIndex,
+      status: "finished",
+      conflictPaths: [],
+      headSha: git(["rev-parse", "HEAD"], cwd),
+      summary: "Conflicts resolved; rebase continued.",
+    };
   } catch (error) {
-    try { git(["rebase", "--abort"], cwd); } catch {}
-    return { waveIndex, status: "blocked", conflictPaths: [], headSha: "", summary: "Rebase continuation failed and was aborted: " + String(error).slice(0, 4_000) };
+    try {
+      git(["rebase", "--abort"], cwd);
+    } catch {}
+    return {
+      waveIndex,
+      status: "blocked",
+      conflictPaths: [],
+      headSha: "",
+      summary: "Rebase continuation failed and was aborted: " + String(error).slice(0, 4_000),
+    };
   }
 }
 
@@ -587,20 +722,40 @@ async function runGate(cwd: string, waveIndex: number): Promise<Gate> {
 async function pushTrain(cwd: string, waveIndex: number, dryRun: boolean): Promise<Push> {
   const headSha = git(["rev-parse", "HEAD"], cwd);
   if (dryRun) {
-    return { waveIndex, pushed: false, headSha, remoteSha: "", summary: "Dry run: skipping push of " + headSha.slice(0, 12) + "." };
+    return {
+      waveIndex,
+      pushed: false,
+      headSha,
+      remoteSha: "",
+      summary: "Dry run: skipping push of " + headSha.slice(0, 12) + ".",
+    };
   }
-  try { git(["fetch", "origin", "main"], cwd); } catch {}
+  try {
+    git(["fetch", "origin", "main"], cwd);
+  } catch {}
   const remoteSha = git(["rev-parse", "origin/main"], cwd);
   if (remoteSha === headSha) {
     return { waveIndex, pushed: true, headSha, remoteSha, summary: "origin/main already at train head." };
   }
   const mergeBase = git(["merge-base", remoteSha, headSha], cwd);
   if (mergeBase !== remoteSha) {
-    return { waveIndex, pushed: false, headSha, remoteSha, summary: "origin/main diverged from the train; manual reconciliation needed." };
+    return {
+      waveIndex,
+      pushed: false,
+      headSha,
+      remoteSha,
+      summary: "origin/main diverged from the train; manual reconciliation needed.",
+    };
   }
   const result = await runProcess("git", ["push", "origin", "HEAD:refs/heads/main"], cwd, 15 * 60_000);
   if (result.exitCode !== 0) {
-    return { waveIndex, pushed: false, headSha, remoteSha, summary: "Push failed: " + (result.stderr || result.stdout).slice(-4_000) };
+    return {
+      waveIndex,
+      pushed: false,
+      headSha,
+      remoteSha,
+      summary: "Push failed: " + (result.stderr || result.stdout).slice(-4_000),
+    };
   }
   git(["fetch", "origin", "main"], cwd);
   const after = git(["rev-parse", "origin/main"], cwd);
@@ -617,7 +772,11 @@ function verifyClose(issueNumber: number): CloseCheck {
   try {
     const raw = gh(["issue", "view", String(issueNumber), "--repo", REPO, "--json", "state"], repoRoot);
     const state = String((JSON.parse(raw) as { state?: string }).state ?? "");
-    return { issueNumber, confirmedClosed: state === "CLOSED", summary: "Issue #" + issueNumber + " state: " + state + "." };
+    return {
+      issueNumber,
+      confirmedClosed: state === "CLOSED",
+      summary: "Issue #" + issueNumber + " state: " + state + ".",
+    };
   } catch (error) {
     return { issueNumber, confirmedClosed: false, summary: String(error).slice(0, 2_000) };
   }
@@ -636,63 +795,87 @@ function issueText(issue: Issue): string {
   ].join("\n");
 }
 function triagePrompt(issue: Issue): string {
-  return issueText(issue) + [
-    "",
-    "",
-    "You are triaging this issue for an automated fix train running in this repository checkout.",
-    "Read the relevant code (ripgrep first; paths in the issue may have drifted). Decide:",
-    "- action=fix: an agent can produce a correct, reviewable code/docs fix without human decisions.",
-    "- action=needs_human: the issue requires a product/design decision, is an epic needing decomposition, or is too risky to automate.",
-    "- action=skip: verifiably already fixed on main, obsolete, or not actionable in this repository (skip issues get CLOSED with your reason as the comment, so only skip when confident).",
-    "For action=fix also list 1-5 `areas`: repo-relative directory or file paths a fix will touch (e.g. packages/gateway/src, apps/cli/src/commands). Be accurate; areas schedule non-conflicting parallel work.",
-    "Do not edit any files. reason must explain the decision concretely.",
-  ].join("\n");
+  return (
+    issueText(issue) +
+    [
+      "",
+      "",
+      "You are triaging this issue for an automated fix train running in this repository checkout.",
+      "Read the relevant code (ripgrep first; paths in the issue may have drifted). Decide:",
+      "- action=fix: an agent can produce a correct, reviewable code/docs fix without human decisions.",
+      "- action=needs_human: the issue requires a product/design decision, is an epic needing decomposition, or is too risky to automate.",
+      "- action=skip: verifiably already fixed on main, obsolete, or not actionable in this repository (skip issues get CLOSED with your reason as the comment, so only skip when confident).",
+      "For action=fix also list 1-5 `areas`: repo-relative directory or file paths a fix will touch (e.g. packages/gateway/src, apps/cli/src/commands). Be accurate; areas schedule non-conflicting parallel work.",
+      "Do not edit any files. reason must explain the decision concretely.",
+    ].join("\n")
+  );
 }
 function fixPrompt(issue: Issue, areas: string[], feedback: string): string {
-  return issueText(issue) + [
-    "",
-    "",
-    "You are one of several Codex fixers working CONCURRENTLY in this shared worktree (a train branch off main).",
-    "Your assigned areas: " + JSON.stringify(areas) + ". Keep ALL edits inside those areas (tests for your fix may live in the owning package's test directory). Never touch files outside them; another agent owns those.",
-    "Investigate the real root cause, then implement a correct, minimal, production-quality fix.",
-    "Rules:",
-    "- Verify cited paths with ripgrep first; the issue may be stale. If the issue is already fixed on this branch, return status=obsolete with proof.",
-    "- Match surrounding code style. No unrelated refactors. No new dependencies.",
-    "- Add or update a focused test proving the fix when practical. Run only cheap, focused package tests (e.g. `pnpm -C packages/<pkg> test` for the touched package); never the full suite and never a full install.",
-    "- Do NOT run any git/jj/gh write commands (no add/commit/push/describe). Just edit files; commit happens later.",
-    "- If you cannot fix it without a human decision, return status=blocked with the precise blocker.",
-    "filesChanged must list every repo-relative path you touched.",
-    feedback ? "\nPrevious review feedback you MUST address:\n" + feedback : "",
-  ].join("\n");
+  return (
+    issueText(issue) +
+    [
+      "",
+      "",
+      "You are one of several Codex fixers working CONCURRENTLY in this shared worktree (a train branch off main).",
+      "Your assigned areas: " +
+        JSON.stringify(areas) +
+        ". Keep ALL edits inside those areas (tests for your fix may live in the owning package's test directory). Never touch files outside them; another agent owns those.",
+      "Investigate the real root cause, then implement a correct, minimal, production-quality fix.",
+      "Rules:",
+      "- Verify cited paths with ripgrep first; the issue may be stale. If the issue is already fixed on this branch, return status=obsolete with proof.",
+      "- Match surrounding code style. No unrelated refactors. No new dependencies.",
+      "- Add or update a focused test proving the fix when practical. Run only cheap, focused package tests (e.g. `pnpm -C packages/<pkg> test` for the touched package); never the full suite and never a full install.",
+      "- Do NOT run any git/jj/gh write commands (no add/commit/push/describe). Just edit files; commit happens later.",
+      "- If you cannot fix it without a human decision, return status=blocked with the precise blocker.",
+      "filesChanged must list every repo-relative path you touched.",
+      feedback ? "\nPrevious review feedback you MUST address:\n" + feedback : "",
+    ].join("\n")
+  );
 }
 function reviewPrompt(issue: Issue, areas: string[], fix: Fix | undefined): string {
-  return issueText(issue) + [
-    "",
-    "",
-    "You are Claude Fable, the mandatory reviewer and polisher for this fix.",
-    "The fixer worked only in areas " + JSON.stringify(areas) + ". Inspect its actual uncommitted diff: `git status --porcelain -- <area>` and `git diff -- <area>` for each area (other agents' concurrent edits elsewhere in the worktree are NOT yours to judge).",
-    fix ? "Fixer self-report:\n" + JSON.stringify({ status: fix.status, summary: fix.summary, filesChanged: fix.filesChanged }) : "No fixer self-report; inspect the diff directly.",
-    "",
-    "Judge strictly: does the change correctly and completely resolve the issue? Minimal, idiomatic, regression-free?",
-    "You SHOULD do final polish yourself: fix small defects, tighten style, improve the test - edit files directly within the same areas. List every file you touch in filesChanged.",
-    "Verdicts:",
-    "- approve: fix is complete and safe to land (after your polish).",
-    "- reject: fundamentally wrong or incomplete; give precise, actionable feedback for the next fixer iteration.",
-    "- obsolete: the issue is already resolved on this branch/main; no change needed (explain the evidence). If the fixer made unnecessary edits, revert them with `git checkout -- <path>`.",
-    "- needs_human: resolving requires a product/design decision; say exactly what to ask.",
-    "Do NOT run any git/jj/gh write commands other than `git checkout -- <path>` to revert files inside your areas. Never commit.",
-  ].join("\n");
+  return (
+    issueText(issue) +
+    [
+      "",
+      "",
+      "You are Claude Fable, the mandatory reviewer and polisher for this fix.",
+      "The fixer worked only in areas " +
+        JSON.stringify(areas) +
+        ". Inspect its actual uncommitted diff: `git status --porcelain -- <area>` and `git diff -- <area>` for each area (other agents' concurrent edits elsewhere in the worktree are NOT yours to judge).",
+      fix
+        ? "Fixer self-report:\n" +
+          JSON.stringify({ status: fix.status, summary: fix.summary, filesChanged: fix.filesChanged })
+        : "No fixer self-report; inspect the diff directly.",
+      "",
+      "Judge strictly: does the change correctly and completely resolve the issue? Minimal, idiomatic, regression-free?",
+      "You SHOULD do final polish yourself: fix small defects, tighten style, improve the test - edit files directly within the same areas. List every file you touch in filesChanged.",
+      "Verdicts:",
+      "- approve: fix is complete and safe to land (after your polish).",
+      "- reject: fundamentally wrong or incomplete; give precise, actionable feedback for the next fixer iteration.",
+      "- obsolete: the issue is already resolved on this branch/main; no change needed (explain the evidence). If the fixer made unnecessary edits, revert them with `git checkout -- <path>`.",
+      "- needs_human: resolving requires a product/design decision; say exactly what to ask.",
+      "Do NOT run any git/jj/gh write commands other than `git checkout -- <path>` to revert files inside your areas. Never commit.",
+    ].join("\n")
+  );
 }
 function commitPrompt(issue: Issue, paths: string[]): string {
   const title = ("🐛 fix: " + issue.title).slice(0, 100);
   return [
-    "You are Codex Luna, the committer. A reviewed fix for issue #" + issue.number + " (" + JSON.stringify(issue.title) + ") sits uncommitted in this worktree.",
+    "You are Codex Luna, the committer. A reviewed fix for issue #" +
+      issue.number +
+      " (" +
+      JSON.stringify(issue.title) +
+      ") sits uncommitted in this worktree.",
     "Commit EXACTLY these paths and nothing else:",
     JSON.stringify(paths),
     "Steps:",
     "1. `git status --porcelain -- <each path>` to confirm changes exist. Paths with no changes are fine to skip in the add.",
     "2. `git add -- <the paths>` (only these paths; never `git add -A` or `.`).",
-    "3. Commit with a heredoc message, first line like `" + title + "`, body containing `Refs #" + issue.number + "` and `Co-Authored-By: Codex <noreply@openai.com>`. Adjust the gitmoji/type prefix (🐛 fix / ✨ feat / 📝 docs / ♻️ refactor) to match the actual change.",
+    "3. Commit with a heredoc message, first line like `" +
+      title +
+      "`, body containing `Refs #" +
+      issue.number +
+      "` and `Co-Authored-By: Codex <noreply@openai.com>`. Adjust the gitmoji/type prefix (🐛 fix / ✨ feat / 📝 docs / ♻️ refactor) to match the actual change.",
     "4. `git rev-parse HEAD` and report it as commitSha.",
     "If there are no changes at all in those paths, do not create an empty commit; report committed=false.",
     "Never push. Never touch other paths. Never amend or rebase.",
@@ -700,7 +883,11 @@ function commitPrompt(issue: Issue, paths: string[]): string {
 }
 function waveFixPrompt(waveIndex: number, gate: Gate, committedPaths: string[]): string {
   return [
-    "You are Claude Fable. Wave " + waveIndex + " of the issue train just failed the local gate (`" + GATE_COMMAND + "`).",
+    "You are Claude Fable. Wave " +
+      waveIndex +
+      " of the issue train just failed the local gate (`" +
+      GATE_COMMAND +
+      "`).",
     "Gate log tail:",
     "---",
     gate.logTail || "(no log captured)",
@@ -714,7 +901,9 @@ function waveFixPrompt(waveIndex: number, gate: Gate, committedPaths: string[]):
 }
 function syncResolvePrompt(waveIndex: number, sync: Sync): string {
   return [
-    "You are resolving a git rebase conflict for wave " + waveIndex + " of the issue train. The rebase of the train branch onto origin/main is IN PROGRESS in this worktree.",
+    "You are resolving a git rebase conflict for wave " +
+      waveIndex +
+      " of the issue train. The rebase of the train branch onto origin/main is IN PROGRESS in this worktree.",
     "Conflicted files:",
     JSON.stringify(sync.conflictPaths),
     "Resolve ONLY those files: preserve BOTH the train's issue fixes and the changes from origin/main. Remove every conflict marker of any length, including diff3 base sections (<<<<<<<, =======, >>>>>>>, |||||||, 7+ characters).",
@@ -727,7 +916,11 @@ function waveFixCommitPrompt(waveIndex: number, paths: string[]): string {
     "You are Codex Luna. Commit the gate-fixup for wave " + waveIndex + " of the issue train.",
     "Commit EXACTLY these paths and nothing else:",
     JSON.stringify(paths),
-    "Use `git add -- <paths>` then commit with first line `🚨 fix: repair wave " + waveIndex + " gate failures`, body containing `Wave-Fixup: " + waveIndex + "` and `Co-Authored-By: Codex <noreply@openai.com>`.",
+    "Use `git add -- <paths>` then commit with first line `🚨 fix: repair wave " +
+      waveIndex +
+      " gate failures`, body containing `Wave-Fixup: " +
+      waveIndex +
+      "` and `Co-Authored-By: Codex <noreply@openai.com>`.",
     "Report the new HEAD sha as commitSha. Never push, never amend, never touch other paths.",
   ].join("\n");
 }
@@ -735,10 +928,19 @@ function closePrompt(issue: Issue, sha: string, reasonText: string): string {
   return [
     "You are Codex Luna. Close GitHub issue #" + issue.number + " in " + REPO + ".",
     reasonText,
-    "Run: `gh issue close " + issue.number + " --repo " + REPO + " --reason completed --comment <msg>` (use --reason \"not planned\" only when the issue is being declined rather than resolved).",
-    "The comment must briefly say what was done" + (sha
-      ? ". The train commit was " + sha + " but it may have been rebased before landing; find the landed sha with `git log origin/main --format='%H %s' --grep 'Refs #" + issue.number + "'` (run `git fetch origin main` first) and reference THAT sha, falling back to describing the fix if the grep finds nothing."
-      : "."),
+    "Run: `gh issue close " +
+      issue.number +
+      " --repo " +
+      REPO +
+      ' --reason completed --comment <msg>` (use --reason "not planned" only when the issue is being declined rather than resolved).',
+    "The comment must briefly say what was done" +
+      (sha
+        ? ". The train commit was " +
+          sha +
+          " but it may have been rebased before landing; find the landed sha with `git log origin/main --format='%H %s' --grep 'Refs #" +
+          issue.number +
+          "'` (run `git fetch origin main` first) and reference THAT sha, falling back to describing the fix if the grep finds nothing."
+        : "."),
     "Then verify with `gh issue view " + issue.number + " --repo " + REPO + " --json state`.",
     "Do not touch any other issue. Do not edit files.",
   ].join("\n");
@@ -755,15 +957,25 @@ export default smithers((ctx) => {
   const issues = (discovery?.issues ?? []) as Issue[];
   const issueByNumber = new Map(issues.map((issue) => [issue.number, issue]));
   const plan = latest<Plan>(ctx, outputs.itrainPlan, "plan");
-  const waves: number[][] = plan ? (() => { try { return JSON.parse(plan.wavesJson) as number[][]; } catch { return []; } })() : [];
+  const waves: number[][] = plan
+    ? (() => {
+        try {
+          return JSON.parse(plan.wavesJson) as number[][];
+        } catch {
+          return [];
+        }
+      })()
+    : [];
   const waveOf = new Map<number, number>();
   waves.forEach((numbers, w) => numbers.forEach((n) => waveOf.set(n, w)));
 
   const triageFor = (n: number) => latest<Triage>(ctx, outputs.itrainTriage, "triage-" + n);
-  const laneReview = (w: number, n: number) => latest<Review>(ctx, outputs.itrainReview, "w" + w + ":i" + n + ":review");
+  const laneReview = (w: number, n: number) =>
+    latest<Review>(ctx, outputs.itrainReview, "w" + w + ":i" + n + ":review");
   const laneFix = (w: number, n: number) => latest<Fix>(ctx, outputs.itrainFix, "w" + w + ":i" + n + ":fix");
   const laneRow = (w: number, n: number) => latest<Lane>(ctx, outputs.itrainLane, "w" + w + ":i" + n + ":ready");
-  const laneCommitCheck = (w: number, n: number) => latest<CommitCheck>(ctx, outputs.itrainCommitCheck, "w" + w + ":i" + n + ":verify-commit");
+  const laneCommitCheck = (w: number, n: number) =>
+    latest<CommitCheck>(ctx, outputs.itrainCommitCheck, "w" + w + ":i" + n + ":verify-commit");
   const laneDone = (w: number, n: number) => {
     const review = laneReview(w, n);
     return review !== undefined && review.verdict !== "reject";
@@ -787,10 +999,14 @@ export default smithers((ctx) => {
       if (check?.verified && check.commitSha) verifiedCommits.set(n, check.commitSha);
     }
   }
-  const pushRows: Array<Push | undefined> = waves.map((_, w) => latest<Push>(ctx, outputs.itrainPush, "w" + w + ":push"));
+  const pushRows: Array<Push | undefined> = waves.map((_, w) =>
+    latest<Push>(ctx, outputs.itrainPush, "w" + w + ":push"),
+  );
   const finalPush = latest<Push>(ctx, outputs.itrainPush, "final-push");
   let maxPushedWave = -1;
-  pushRows.forEach((row, w) => { if (row?.pushed) maxPushedWave = Math.max(maxPushedWave, w); });
+  pushRows.forEach((row, w) => {
+    if (row?.pushed) maxPushedWave = Math.max(maxPushedWave, w);
+  });
   if (finalPush?.pushed) maxPushedWave = waves.length;
   const landed = (n: number) => {
     const w = waveOf.get(n);
@@ -798,9 +1014,15 @@ export default smithers((ctx) => {
   };
   const closeConfirmed = (n: number) => {
     const w = waveOf.get(n);
-    if (w !== undefined && latest<CloseCheck>(ctx, outputs.itrainCloseCheck, "w" + w + ":close-check-" + n)?.confirmedClosed === true) return true;
-    if (latest<CloseCheck>(ctx, outputs.itrainCloseCheck, "final-close-check-" + n)?.confirmedClosed === true) return true;
-    if (latest<CloseCheck>(ctx, outputs.itrainCloseCheck, "skip-close-check-" + n)?.confirmedClosed === true) return true;
+    if (
+      w !== undefined &&
+      latest<CloseCheck>(ctx, outputs.itrainCloseCheck, "w" + w + ":close-check-" + n)?.confirmedClosed === true
+    )
+      return true;
+    if (latest<CloseCheck>(ctx, outputs.itrainCloseCheck, "final-close-check-" + n)?.confirmedClosed === true)
+      return true;
+    if (latest<CloseCheck>(ctx, outputs.itrainCloseCheck, "skip-close-check-" + n)?.confirmedClosed === true)
+      return true;
     return false;
   };
   const laneObsolete = (n: number) => {
@@ -866,7 +1088,12 @@ export default smithers((ctx) => {
                     heartbeatTimeoutMs={HEARTBEAT_MS}
                     continueOnFail
                   >
-                    {closePrompt(issue, "", "Triage found it should be closed without a code change: " + (triage?.reason ?? "already resolved or not actionable."))}
+                    {closePrompt(
+                      issue,
+                      "",
+                      "Triage found it should be closed without a code change: " +
+                        (triage?.reason ?? "already resolved or not actionable."),
+                    )}
                   </Task>
                   <Task id={"skip-close-check-" + n} output={outputs.itrainCloseCheck} continueOnFail>
                     {() => verifyClose(n)}
@@ -892,10 +1119,14 @@ export default smithers((ctx) => {
           const syncBase = latest<Sync>(ctx, outputs.itrainSync, "w" + w + ":sync");
           const syncFinish = latest<Sync>(ctx, outputs.itrainSync, "w" + w + ":sync-finish");
           const syncResolve = latest<WaveFix>(ctx, outputs.itrainWaveFix, "w" + w + ":sync-resolve");
-          const syncEffective = syncBase?.status === "conflict"
-            ? (syncFinish && iterationOf(syncFinish) >= iterationOf(syncBase) ? syncFinish : syncBase)
-            : syncBase;
-          const syncOk = syncEffective !== undefined && ["current", "rebased", "finished"].includes(syncEffective.status);
+          const syncEffective =
+            syncBase?.status === "conflict"
+              ? syncFinish && iterationOf(syncFinish) >= iterationOf(syncBase)
+                ? syncFinish
+                : syncBase
+              : syncBase;
+          const syncOk =
+            syncEffective !== undefined && ["current", "rebased", "finished"].includes(syncEffective.status);
           const push = pushRows[w];
           const committedPaths = committedIssues.flatMap((issue) => expectedPathsFor(w, issue.number));
           const closeEligible = waveIssues.filter((issue) => {
@@ -953,7 +1184,10 @@ export default smithers((ctx) => {
                             issueNumber: n,
                             waveIndex: w,
                             verdict,
-                            summary: review?.feedback?.slice(0, 400) ?? fix?.summary?.slice(0, 400) ?? "Lane produced no agent output.",
+                            summary:
+                              review?.feedback?.slice(0, 400) ??
+                              fix?.summary?.slice(0, 400) ??
+                              "Lane produced no agent output.",
                           };
                         }}
                       </Task>
@@ -979,7 +1213,11 @@ export default smithers((ctx) => {
                         >
                           {commitPrompt(issue, expectedPathsFor(w, n))}
                         </Task>
-                        <Task id={"w" + w + ":i" + n + ":verify-commit"} output={outputs.itrainCommitCheck} continueOnFail>
+                        <Task
+                          id={"w" + w + ":i" + n + ":verify-commit"}
+                          output={outputs.itrainCommitCheck}
+                          continueOnFail
+                        >
                           {() => verifyCommit(trainPath, n, expectedPathsFor(w, n))}
                         </Task>
                       </Sequence>
@@ -1018,13 +1256,25 @@ export default smithers((ctx) => {
                         {syncResolvePrompt(w, syncBase)}
                       </Task>
                     ) : null}
-                    {syncBase?.status === "conflict" && syncResolve && iterationOf(syncResolve) >= iterationOf(syncBase) ? (
-                      <Task id={"w" + w + ":sync-finish"} output={outputs.itrainSync} timeoutMs={15 * 60_000} continueOnFail>
+                    {syncBase?.status === "conflict" &&
+                    syncResolve &&
+                    iterationOf(syncResolve) >= iterationOf(syncBase) ? (
+                      <Task
+                        id={"w" + w + ":sync-finish"}
+                        output={outputs.itrainSync}
+                        timeoutMs={15 * 60_000}
+                        continueOnFail
+                      >
                         {() => finishSync(trainPath, w)}
                       </Task>
                     ) : null}
                     {syncOk ? (
-                      <Task id={"w" + w + ":gate"} output={outputs.itrainGate} timeoutMs={GATE_TIMEOUT_MS + 5 * 60_000} continueOnFail>
+                      <Task
+                        id={"w" + w + ":gate"}
+                        output={outputs.itrainGate}
+                        timeoutMs={GATE_TIMEOUT_MS + 5 * 60_000}
+                        continueOnFail
+                      >
                         {() => runGate(trainPath, w)}
                       </Task>
                     ) : null}
@@ -1060,15 +1310,19 @@ export default smithers((ctx) => {
 
               {lanesSettled && (commitsSettled || !approvedIssues.length) ? (
                 <Task id={"w" + w + ":push"} output={outputs.itrainPush} timeoutMs={20 * 60_000} continueOnFail>
-                  {() => (committedIssues.length && latest<Gate>(ctx, outputs.itrainGate, "w" + w + ":gate")?.passed === true
-                    ? pushTrain(trainPath, w, input.dryRun)
-                    : Promise.resolve({
-                        waveIndex: w,
-                        pushed: false,
-                        headSha: "",
-                        remoteSha: "",
-                        summary: committedIssues.length ? "Gate never went green; wave not pushed." : "No verified commits in this wave; nothing to push.",
-                      }))}
+                  {() =>
+                    committedIssues.length && latest<Gate>(ctx, outputs.itrainGate, "w" + w + ":gate")?.passed === true
+                      ? pushTrain(trainPath, w, input.dryRun)
+                      : Promise.resolve({
+                          waveIndex: w,
+                          pushed: false,
+                          headSha: "",
+                          remoteSha: "",
+                          summary: committedIssues.length
+                            ? "Gate never went green; wave not pushed."
+                            : "No verified commits in this wave; nothing to push.",
+                        })
+                  }
                 </Task>
               ) : null}
 
@@ -1088,9 +1342,16 @@ export default smithers((ctx) => {
                           heartbeatTimeoutMs={HEARTBEAT_MS}
                           continueOnFail
                         >
-                          {closePrompt(issue, sha, sha
-                            ? "Its fix landed on main in commit " + sha + " (verified ancestor of origin/main). Close with --reason completed."
-                            : "Review verified the issue is already resolved / obsolete: " + (laneReview(w, n)?.feedback ?? "").slice(0, 400))}
+                          {closePrompt(
+                            issue,
+                            sha,
+                            sha
+                              ? "Its fix landed on main in commit " +
+                                  sha +
+                                  " (verified ancestor of origin/main). Close with --reason completed."
+                              : "Review verified the issue is already resolved / obsolete: " +
+                                  (laneReview(w, n)?.feedback ?? "").slice(0, 400),
+                          )}
                         </Task>
                         <Task id={"w" + w + ":close-check-" + n} output={outputs.itrainCloseCheck} continueOnFail>
                           {() => verifyClose(n)}
@@ -1128,9 +1389,15 @@ export default smithers((ctx) => {
                       heartbeatTimeoutMs={HEARTBEAT_MS}
                       continueOnFail
                     >
-                      {closePrompt(issue, sha, sha
-                        ? "Its fix landed on main in commit " + sha + " (verified ancestor of origin/main). Close with --reason completed."
-                        : "Review verified the issue is already resolved / obsolete.")}
+                      {closePrompt(
+                        issue,
+                        sha,
+                        sha
+                          ? "Its fix landed on main in commit " +
+                              sha +
+                              " (verified ancestor of origin/main). Close with --reason completed."
+                          : "Review verified the issue is already resolved / obsolete.",
+                      )}
                     </Task>
                     <Task id={"final-close-check-" + n} output={outputs.itrainCloseCheck} continueOnFail>
                       {() => verifyClose(n)}
@@ -1153,15 +1420,27 @@ export default smithers((ctx) => {
                 if (w !== undefined) {
                   const review = laneReview(w, n);
                   const check = laneCommitCheck(w, n);
-                  if (review) { disposition = review.verdict; note = review.feedback; }
-                  if (check?.verified) { disposition = "committed"; note = check.commitSha; }
-                  if (landed(n)) { disposition = "landed"; }
+                  if (review) {
+                    disposition = review.verdict;
+                    note = review.feedback;
+                  }
+                  if (check?.verified) {
+                    disposition = "committed";
+                    note = check.commitSha;
+                  }
+                  if (landed(n)) {
+                    disposition = "landed";
+                  }
                 }
-                if (closeConfirmed(n)) { disposition = "closed"; }
+                if (closeConfirmed(n)) {
+                  disposition = "closed";
+                }
                 return { issueNumber: n, title: issue.title, disposition, note: String(note).slice(0, 400) };
               });
               const closed = details.filter((entry) => entry.disposition === "closed").length;
-              const landedCount = details.filter((entry) => entry.disposition === "closed" || entry.disposition === "landed").length;
+              const landedCount = details.filter(
+                (entry) => entry.disposition === "closed" || entry.disposition === "landed",
+              ).length;
               const needsHuman = details.filter((entry) => !["closed", "landed"].includes(entry.disposition)).length;
               return {
                 totalIssues: issues.length,
@@ -1169,8 +1448,16 @@ export default smithers((ctx) => {
                 landedCount,
                 needsHumanCount: needsHuman,
                 detailsJson: JSON.stringify(details),
-                summary: closed + "/" + issues.length + " issue(s) closed; " + landedCount + " landed on main; "
-                  + needsHuman + " still need attention. " + (finalPush?.summary ?? ""),
+                summary:
+                  closed +
+                  "/" +
+                  issues.length +
+                  " issue(s) closed; " +
+                  landedCount +
+                  " landed on main; " +
+                  needsHuman +
+                  " still need attention. " +
+                  (finalPush?.summary ?? ""),
               };
             }}
           </Task>

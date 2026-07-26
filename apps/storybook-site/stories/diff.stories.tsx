@@ -37,13 +37,7 @@ export const Tree: Story = {
   render: () => (
     <div style={{ maxWidth: 360 }}>
       <FileTree
-        nodes={[
-          "src/app/main.ts",
-          "src/app/util/helpers.ts",
-          "src/index.ts",
-          "tests/main.test.ts",
-          "README.md",
-        ]}
+        nodes={["src/app/main.ts", "src/app/util/helpers.ts", "src/index.ts", "tests/main.test.ts", "README.md"]}
       />
     </div>
   ),

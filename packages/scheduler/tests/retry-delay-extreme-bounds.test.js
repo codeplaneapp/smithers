@@ -13,21 +13,12 @@ describe("retry delay cap vs oversized initial delays", () => {
   );
 
   test("an Infinity initialDelayMs still resolves to the finite cap", () => {
-    expect(
-      computeRetryDelayMs(
-        { backoff: "fixed", initialDelayMs: Number.POSITIVE_INFINITY },
-        1,
-      ),
-    ).toBe(CAP_MS);
+    expect(computeRetryDelayMs({ backoff: "fixed", initialDelayMs: Number.POSITIVE_INFINITY }, 1)).toBe(CAP_MS);
   });
 
   test("initialDelayMs exactly at the cap passes through uncapped", () => {
-    expect(
-      computeRetryDelayMs({ backoff: "fixed", initialDelayMs: CAP_MS }, 1),
-    ).toBe(CAP_MS);
-    expect(
-      computeRetryDelayMs({ backoff: "fixed", initialDelayMs: CAP_MS - 1 }, 3),
-    ).toBe(CAP_MS - 1);
+    expect(computeRetryDelayMs({ backoff: "fixed", initialDelayMs: CAP_MS }, 1)).toBe(CAP_MS);
+    expect(computeRetryDelayMs({ backoff: "fixed", initialDelayMs: CAP_MS - 1 }, 3)).toBe(CAP_MS - 1);
   });
 });
 
@@ -55,17 +46,9 @@ describe("retry delay at pathological attempt counts", () => {
   test("Infinity attempt terminates at the bounded schedule walk", () => {
     // Regression: before the MAX_SCHEDULE_STEPS clamp in
     // retryScheduleDelayMs, an Infinity attempt looped forever.
-    expect(
-      computeRetryDelayMs(
-        { backoff: "fixed", initialDelayMs: 50 },
-        Number.POSITIVE_INFINITY,
-      ),
-    ).toBe(50);
-    expect(
-      computeRetryDelayMs(
-        { backoff: "exponential", initialDelayMs: 1000 },
-        Number.POSITIVE_INFINITY,
-      ),
-    ).toBe(CAP_MS);
+    expect(computeRetryDelayMs({ backoff: "fixed", initialDelayMs: 50 }, Number.POSITIVE_INFINITY)).toBe(50);
+    expect(computeRetryDelayMs({ backoff: "exponential", initialDelayMs: 1000 }, Number.POSITIVE_INFINITY)).toBe(
+      CAP_MS,
+    );
   });
 });

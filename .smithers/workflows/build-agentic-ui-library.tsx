@@ -1,6 +1,16 @@
 // smithers-display-name: Agentic UI Library Program
 /** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, MergeQueue, OpenCodeAgent, Parallel, Sequence, Task, UI, Worktree, createSmithers } from "smithers-orchestrator";
+import {
+  ClaudeCodeAgent,
+  MergeQueue,
+  OpenCodeAgent,
+  Parallel,
+  Sequence,
+  Task,
+  UI,
+  Worktree,
+  createSmithers,
+} from "smithers-orchestrator";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
@@ -20,10 +30,7 @@ export const MULTI_ROOT = "/Users/williamcory/multi";
 // User directive: OpenCode with Kimi 3 implements; Fable and Sol review.
 // Fallbacks exist only for provider failure (preflight/mid-attempt), so a dead
 // CLI never burns the lane's attempt budget.
-const kimiImplement = [
-  new OpenCodeAgent({ model: "kimi-for-coding/k3" }),
-  providers.claudeSonnet,
-];
+const kimiImplement = [new OpenCodeAgent({ model: "kimi-for-coding/k3" }), providers.claudeSonnet];
 const kimiImplementMulti = [
   new OpenCodeAgent({ model: "kimi-for-coding/k3", cwd: MULTI_ROOT }),
   new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd: MULTI_ROOT }),
@@ -90,7 +97,30 @@ export const LANES: Lane[] = [
     id: "conversation-foundation",
     title: "Conversation foundation: Message/Bubble/Branch/Transcript + MessageScroller upgrade",
     seats: ["fable", "sol"],
-    components: ["Message", "MessageAvatar", "MessageHeader", "MessageContent", "MessageFooter", "MessageActions", "MessageGroup", "MessageBranch", "MessageBranchSelector", "MessageBranchPrevious", "MessageBranchNext", "MessageBranchPage", "Bubble", "BubbleContent", "BubbleActions", "BubbleReactions", "ChatTranscript", "CompactGroup", "ConversationCheckpoint", "Marker", "Shimmer", "MessageScroller"],
+    components: [
+      "Message",
+      "MessageAvatar",
+      "MessageHeader",
+      "MessageContent",
+      "MessageFooter",
+      "MessageActions",
+      "MessageGroup",
+      "MessageBranch",
+      "MessageBranchSelector",
+      "MessageBranchPrevious",
+      "MessageBranchNext",
+      "MessageBranchPage",
+      "Bubble",
+      "BubbleContent",
+      "BubbleActions",
+      "BubbleReactions",
+      "ChatTranscript",
+      "CompactGroup",
+      "ConversationCheckpoint",
+      "Marker",
+      "Shimmer",
+      "MessageScroller",
+    ],
     spec: [
       "Complete or add in packages/ui/src/chat/: the Message compound family (Message, MessageAvatar, MessageHeader, MessageContent, MessageFooter, MessageActions, MessageGroup), the MessageBranch family (MessageBranch, MessageBranchSelector, MessageBranchPrevious, MessageBranchNext, MessageBranchPage) for alternate-response navigation, Bubble compound anatomy (BubbleContent, BubbleActions, BubbleReactions on the existing Bubble), CompactGroup (collapsed runs of compacted turns), ConversationCheckpoint (a labeled durable-checkpoint row), and keep/extend Marker, Shimmer, and the scroll-fade behavior.",
       "Upgrade MessageScroller to a Provider/Scroller/Viewport/Content/Item/Button compound anatomy with: stable message IDs, turn anchoring, previous-item peek, streaming follow behavior, saved-transcript restoration, prepend-history position preservation, jump-to-message, jump-to-latest, visibility tracking, pay-for-use scroll subscriptions, keyboard-accessible region + live-log semantics, and content-visibility optimization for long transcripts. The existing MessageScroller/ChatTranscript props and streaming defaults MUST keep working unchanged (compat surface stays green in the existing tests).",
@@ -101,7 +131,30 @@ export const LANES: Lane[] = [
     id: "prompt-attachments",
     title: "Prompt input and attachment system",
     seats: ["fable"],
-    components: ["PromptInput", "PromptInputHeader", "PromptInputBody", "PromptInputTextarea", "PromptInputFooter", "PromptInputTools", "PromptInputButton", "PromptInputSubmit", "PromptInputStop", "PromptInputActionMenu", "PromptInputActionAddAttachments", "Attachment", "AttachmentMedia", "AttachmentContent", "AttachmentTitle", "AttachmentDescription", "AttachmentActions", "AttachmentAction", "AttachmentTrigger", "AttachmentGroup", "AttachmentPreview", "AttachmentRemove"],
+    components: [
+      "PromptInput",
+      "PromptInputHeader",
+      "PromptInputBody",
+      "PromptInputTextarea",
+      "PromptInputFooter",
+      "PromptInputTools",
+      "PromptInputButton",
+      "PromptInputSubmit",
+      "PromptInputStop",
+      "PromptInputActionMenu",
+      "PromptInputActionAddAttachments",
+      "Attachment",
+      "AttachmentMedia",
+      "AttachmentContent",
+      "AttachmentTitle",
+      "AttachmentDescription",
+      "AttachmentActions",
+      "AttachmentAction",
+      "AttachmentTrigger",
+      "AttachmentGroup",
+      "AttachmentPreview",
+      "AttachmentRemove",
+    ],
     spec: [
       "Add in packages/ui/src/chat/ (or a prompt/ sibling per the frozen spec): the PromptInput compound family (PromptInput, PromptInputHeader, PromptInputBody, PromptInputTextarea, PromptInputFooter, PromptInputTools, PromptInputButton, PromptInputSubmit, PromptInputStop, PromptInputActionMenu, PromptInputActionAddAttachments) and the Attachment compound family (extend the existing Attachment with AttachmentMedia, AttachmentContent, AttachmentTitle, AttachmentDescription, AttachmentActions, AttachmentAction, AttachmentTrigger, AttachmentGroup, AttachmentPreview, AttachmentRemove).",
       "Support: controlled and uncontrolled input, submit and stop states, keyboard submission (Enter/mod+Enter), multiline input, uploading/processing/error/completed attachment states, numeric and indeterminate progress, images/files/screenshots, model/agent selector slots, queued prompts, and mobile + keyboard accessibility.",
@@ -112,7 +165,27 @@ export const LANES: Lane[] = [
     id: "reasoning-tools",
     title: "Agent reasoning and tool activity",
     seats: ["sol"],
-    components: ["Reasoning", "ReasoningTrigger", "ReasoningContent", "ReasoningSummary", "ChainOfThought", "ChainOfThoughtStep", "ToolCall", "ToolCallHeader", "ToolCallInput", "ToolCallOutput", "ToolCallError", "ToolCallApproval", "AgentOutput", "MessageResponse", "CodeBlock", "CodeBlockHeader", "CodeBlockFilename", "CodeBlockGroup", "CodeBlockTabs"],
+    components: [
+      "Reasoning",
+      "ReasoningTrigger",
+      "ReasoningContent",
+      "ReasoningSummary",
+      "ChainOfThought",
+      "ChainOfThoughtStep",
+      "ToolCall",
+      "ToolCallHeader",
+      "ToolCallInput",
+      "ToolCallOutput",
+      "ToolCallError",
+      "ToolCallApproval",
+      "AgentOutput",
+      "MessageResponse",
+      "CodeBlock",
+      "CodeBlockHeader",
+      "CodeBlockFilename",
+      "CodeBlockGroup",
+      "CodeBlockTabs",
+    ],
     spec: [
       "Complete in packages/ui/src/agentic/: give the existing Reasoning a Trigger/Content compound anatomy plus a ReasoningSummary presentation ('Thinking' is presentation text over provider-safe reasoning summaries; the API must NOT assume raw private chain-of-thought is available and must not encourage disclosing it). Extend ChainOfThought with an explicit ChainOfThoughtStep. Extend ToolCall with ToolCallHeader, ToolCallInput, ToolCallOutput, ToolCallError, ToolCallApproval compound parts. Extend AgentOutput and MessageResponse as needed. Add CodeBlock compound additions: CodeBlockHeader, CodeBlockFilename, CodeBlockGroup, CodeBlockTabs.",
       "Support: streaming, partial JSON tool input, image results, code results, errors, duration display, disclosure state, and approval-request presentation.",
@@ -122,7 +195,35 @@ export const LANES: Lane[] = [
     id: "plans-tasks-queues",
     title: "Plans, tasks, queues and activity timeline",
     seats: ["fable"],
-    components: ["Plan", "PlanHeader", "PlanTitle", "PlanDescription", "PlanContent", "PlanStep", "PlanAction", "PlanFooter", "AgentTask", "TaskTrigger", "TaskContent", "TaskItem", "TaskItemFile", "TaskGroup", "Queue", "QueueSection", "QueueSectionTrigger", "QueueSectionLabel", "QueueSectionContent", "QueueList", "QueueItem", "QueueItemIndicator", "QueueItemContent", "QueueItemDescription", "ActivityTimeline", "ActivityItem", "ActivityGroup"],
+    components: [
+      "Plan",
+      "PlanHeader",
+      "PlanTitle",
+      "PlanDescription",
+      "PlanContent",
+      "PlanStep",
+      "PlanAction",
+      "PlanFooter",
+      "AgentTask",
+      "TaskTrigger",
+      "TaskContent",
+      "TaskItem",
+      "TaskItemFile",
+      "TaskGroup",
+      "Queue",
+      "QueueSection",
+      "QueueSectionTrigger",
+      "QueueSectionLabel",
+      "QueueSectionContent",
+      "QueueList",
+      "QueueItem",
+      "QueueItemIndicator",
+      "QueueItemContent",
+      "QueueItemDescription",
+      "ActivityTimeline",
+      "ActivityItem",
+      "ActivityGroup",
+    ],
     spec: [
       "Complete in packages/ui/src/agentic/: Plan compound anatomy (PlanHeader, PlanTitle, PlanDescription, PlanContent, PlanStep, PlanAction, PlanFooter on the existing Plan), a collapsible Task unit (exported name resolves the collision with any existing export — the program calls it Task; AgentTask is an acceptable exported name if Task collides, the design freeze decides) with TaskTrigger, TaskContent, TaskItem (extend existing), TaskItemFile, TaskGroup. Add the Queue family (Queue, QueueSection, QueueSectionTrigger, QueueSectionLabel, QueueSectionContent, QueueList, QueueItem, QueueItemIndicator, QueueItemContent, QueueItemDescription). Add ActivityTimeline with ActivityItem and ActivityGroup.",
       "Model states: pending, running, completed, failed, skipped, blocked, approval-waiting, retrying, cancelled — mapped through the shared status vocabulary in src/status.ts (extend it rather than inventing a parallel one).",
@@ -133,7 +234,24 @@ export const LANES: Lane[] = [
     id: "approvals-checkpoints",
     title: "Approvals and durable checkpoints (+ gateway-ui bindings)",
     seats: ["sol"],
-    components: ["Confirmation", "ConfirmationTitle", "ConfirmationRequest", "ConfirmationAccepted", "ConfirmationRejected", "ConfirmationActions", "ConfirmationAction", "ApprovalCard", "ApprovalRisk", "ApprovalResources", "ApprovalNote", "Checkpoint", "CheckpointIcon", "CheckpointMetadata", "CheckpointTrigger", "CheckpointActions"],
+    components: [
+      "Confirmation",
+      "ConfirmationTitle",
+      "ConfirmationRequest",
+      "ConfirmationAccepted",
+      "ConfirmationRejected",
+      "ConfirmationActions",
+      "ConfirmationAction",
+      "ApprovalCard",
+      "ApprovalRisk",
+      "ApprovalResources",
+      "ApprovalNote",
+      "Checkpoint",
+      "CheckpointIcon",
+      "CheckpointMetadata",
+      "CheckpointTrigger",
+      "CheckpointActions",
+    ],
     spec: [
       "Add in packages/ui/src/agentic/ (or approvals/ per the frozen spec): the Confirmation family (Confirmation, ConfirmationTitle, ConfirmationRequest, ConfirmationAccepted, ConfirmationRejected, ConfirmationActions, ConfirmationAction), ApprovalCard with ApprovalRisk, ApprovalResources, ApprovalNote (note/editor slots, risk levels, proposed actions, affected resources), and the Checkpoint family (Checkpoint, CheckpointIcon, CheckpointMetadata, CheckpointTrigger, CheckpointActions).",
       "Approval states must cover: synchronizing, requested, approving, denying, approved, denied, expired, unavailable, failed-submission.",
@@ -145,7 +263,19 @@ export const LANES: Lane[] = [
     id: "sources-citations",
     title: "Sources, citations and contextual actions",
     seats: ["fable"],
-    components: ["Sources", "SourcesTrigger", "SourcesContent", "Source", "InlineCitation", "CitationCard", "CitationCarousel", "CitationQuote", "Suggestion", "SuggestionGroup", "OpenInChat"],
+    components: [
+      "Sources",
+      "SourcesTrigger",
+      "SourcesContent",
+      "Source",
+      "InlineCitation",
+      "CitationCard",
+      "CitationCarousel",
+      "CitationQuote",
+      "Suggestion",
+      "SuggestionGroup",
+      "OpenInChat",
+    ],
     spec: [
       "Complete in packages/ui/src/agentic/: give the existing Sources a Trigger/Content/Source compound anatomy. Extend InlineCitation with CitationCard, CitationCarousel (keyboard-accessible multi-source preview per claim), and CitationQuote. Add Suggestion and SuggestionGroup (prompt suggestion chips). Add OpenInChat: an 'Ask Smithers about this' action affordance for files, diffs, issues, tests, runs, logs, errors and artifacts (props-driven: subject descriptor in, onOpen callback out; no routing/transport in the base package).",
       "Support: safe URLs only (reuse safeMarkdownHref), favicons where available with text fallback, source title/domain/excerpt, keyboard-accessible citation previews, multiple sources per claim.",
@@ -155,7 +285,33 @@ export const LANES: Lane[] = [
     id: "agent-identity-context",
     title: "Agent identity, models and context usage",
     seats: ["sol"],
-    components: ["AgentDefinition", "AgentHeader", "AgentContent", "AgentInstructions", "AgentTools", "AgentTool", "AgentOutputSchema", "AgentCard", "ModelSelector", "ModelSelectorTrigger", "ModelSelectorContent", "ModelSelectorGroup", "ModelSelectorItem", "ModelBadge", "ProviderBadge", "ContextUsage", "ContextTrigger", "ContextContent", "ContextContentHeader", "ContextContentBody", "ContextContentFooter", "ContextInputUsage", "ContextOutputUsage", "ContextReasoningUsage", "ContextCacheUsage"],
+    components: [
+      "AgentDefinition",
+      "AgentHeader",
+      "AgentContent",
+      "AgentInstructions",
+      "AgentTools",
+      "AgentTool",
+      "AgentOutputSchema",
+      "AgentCard",
+      "ModelSelector",
+      "ModelSelectorTrigger",
+      "ModelSelectorContent",
+      "ModelSelectorGroup",
+      "ModelSelectorItem",
+      "ModelBadge",
+      "ProviderBadge",
+      "ContextUsage",
+      "ContextTrigger",
+      "ContextContent",
+      "ContextContentHeader",
+      "ContextContentBody",
+      "ContextContentFooter",
+      "ContextInputUsage",
+      "ContextOutputUsage",
+      "ContextReasoningUsage",
+      "ContextCacheUsage",
+    ],
     spec: [
       "Add in packages/ui/src/agentic/ (or agents/ per the frozen spec): an Agent presentation family (the program calls the root Agent; AgentDefinition is an acceptable exported name if Agent is too collision-prone, the design freeze decides) with AgentHeader, AgentContent, AgentInstructions, AgentTools, AgentTool, AgentOutputSchema, plus AgentCard. Add ModelSelector compound anatomy (ModelSelector, ModelSelectorTrigger, ModelSelectorContent, ModelSelectorGroup, ModelSelectorItem — compose the existing Select primitives), ModelBadge and ProviderBadge. Add the ContextUsage family (ContextUsage, ContextTrigger, ContextContent, ContextContentHeader, ContextContentBody, ContextContentFooter, ContextInputUsage, ContextOutputUsage, ContextReasoningUsage, ContextCacheUsage).",
       "Support: provider and model identity, availability and authentication posture, instructions, tool descriptions and input schemas, permissions, output schema, context-window percentage, input/output/reasoning/cache token counts, token limits, optional cost values, and honest unavailable/unknown states.",
@@ -166,7 +322,51 @@ export const LANES: Lane[] = [
     id: "coding-artifacts",
     title: "Coding artifacts and diagnostics",
     seats: ["fable"],
-    components: ["Artifact", "ArtifactHeader", "ArtifactTitle", "ArtifactDescription", "ArtifactActions", "ArtifactAction", "ArtifactContent", "ArtifactClose", "Snippet", "PackageInfo", "SchemaDisplay", "StackTrace", "StackFrame", "TestResults", "TestResultsHeader", "TestResultsSummary", "TestResultsDuration", "TestResultsProgress", "TestResultsContent", "TestSuite", "TestSuiteName", "TestSuiteStats", "TestSuiteContent", "TestRow", "TestStatus", "TestName", "Commit", "CommitHeader", "CommitAuthor", "CommitInfo", "CommitMessage", "CommitMetadata", "CommitHash", "CommitTimestamp", "CommitActions", "CommitFiles", "CommitFile", "CommitFileStatus", "CommitFilePath", "ChangeSummary", "EnvironmentVariables", "EnvironmentVariable", "SecretField"],
+    components: [
+      "Artifact",
+      "ArtifactHeader",
+      "ArtifactTitle",
+      "ArtifactDescription",
+      "ArtifactActions",
+      "ArtifactAction",
+      "ArtifactContent",
+      "ArtifactClose",
+      "Snippet",
+      "PackageInfo",
+      "SchemaDisplay",
+      "StackTrace",
+      "StackFrame",
+      "TestResults",
+      "TestResultsHeader",
+      "TestResultsSummary",
+      "TestResultsDuration",
+      "TestResultsProgress",
+      "TestResultsContent",
+      "TestSuite",
+      "TestSuiteName",
+      "TestSuiteStats",
+      "TestSuiteContent",
+      "TestRow",
+      "TestStatus",
+      "TestName",
+      "Commit",
+      "CommitHeader",
+      "CommitAuthor",
+      "CommitInfo",
+      "CommitMessage",
+      "CommitMetadata",
+      "CommitHash",
+      "CommitTimestamp",
+      "CommitActions",
+      "CommitFiles",
+      "CommitFile",
+      "CommitFileStatus",
+      "CommitFilePath",
+      "ChangeSummary",
+      "EnvironmentVariables",
+      "EnvironmentVariable",
+      "SecretField",
+    ],
     spec: [
       "Add in packages/ui/src/agentic/ (or artifacts/ per the frozen spec): the Artifact family (Artifact, ArtifactHeader, ArtifactTitle, ArtifactDescription, ArtifactActions, ArtifactAction, ArtifactContent, ArtifactClose), Snippet, PackageInfo, SchemaDisplay (JSON-schema rendering), StackTrace + StackFrame, the TestResults family (TestResults, TestResultsHeader, TestResultsSummary, TestResultsDuration, TestResultsProgress, TestResultsContent, TestSuite, TestSuiteName, TestSuiteStats, TestSuiteContent, a per-test row — the program calls it Test; TestRow is an acceptable exported name if Test collides, the design freeze decides — with TestStatus and TestName), the Commit family (Commit, CommitHeader, CommitAuthor, CommitInfo, CommitMessage, CommitMetadata, CommitHash, CommitTimestamp, CommitActions, CommitFiles, CommitFile, CommitFileStatus, CommitFilePath), ChangeSummary (additions/deletions/changed-file rollup, git AND jj terminology), EnvironmentVariables + EnvironmentVariable, and SecretField (redacted display with reveal affordance; never renders the secret into the DOM while masked).",
       "COMPOSE the existing Smithers components rather than rebuilding: CodeBlock, Markdown, FileTree, DiffHunks, the PierreDiffView adapter, and the Terminal adapter.",
@@ -177,7 +377,18 @@ export const LANES: Lane[] = [
     id: "sandbox-previews",
     title: "Sandbox, web previews and generated UI",
     seats: ["sol"],
-    components: ["Sandbox", "SandboxHeader", "SandboxStatus", "SandboxActions", "SandboxContent", "WebPreview", "WebPreviewToolbar", "WebPreviewAddress", "WebPreviewContent", "JSXPreview"],
+    components: [
+      "Sandbox",
+      "SandboxHeader",
+      "SandboxStatus",
+      "SandboxActions",
+      "SandboxContent",
+      "WebPreview",
+      "WebPreviewToolbar",
+      "WebPreviewAddress",
+      "WebPreviewContent",
+      "JSXPreview",
+    ],
     spec: [
       "Add in packages/ui/src/agentic/ (or sandbox/ per the frozen spec): the Sandbox family (Sandbox, SandboxHeader, SandboxStatus, SandboxActions, SandboxContent) modeling provisioning/ready/disconnected/suspended/failed/destroyed states with retry/reconnect actions and workspace/repository identity. Add WebPreview (WebPreview, WebPreviewToolbar, WebPreviewAddress, WebPreviewContent) with preview URLs, sandboxed iframe boundaries (sandbox attribute locked down, no allow-same-origin+allow-scripts combination), loading and navigation states. Add JSXPreview (render a provided React node inside an inert preview frame with an honest unavailable state). Reuse attachment/tool-output image + media preview primitives where the frozen spec requires them.",
       "Honest unavailable states everywhere; NO fake execution and NO fake preview results.",
@@ -187,7 +398,19 @@ export const LANES: Lane[] = [
     id: "workflow-canvas",
     title: "Workflow canvas anatomy (renderer-neutral)",
     seats: ["fable", "sol"],
-    components: ["WorkflowCanvas", "WorkflowNode", "WorkflowNodeHeader", "WorkflowNodeContent", "WorkflowNodeStatus", "WorkflowEdge", "WorkflowConnection", "WorkflowControls", "WorkflowPanel", "WorkflowToolbar", "WorkflowMinimap"],
+    components: [
+      "WorkflowCanvas",
+      "WorkflowNode",
+      "WorkflowNodeHeader",
+      "WorkflowNodeContent",
+      "WorkflowNodeStatus",
+      "WorkflowEdge",
+      "WorkflowConnection",
+      "WorkflowControls",
+      "WorkflowPanel",
+      "WorkflowToolbar",
+      "WorkflowMinimap",
+    ],
     spec: [
       "Add lightweight, props-driven canvas anatomy in packages/ui/src/agentic/ (or canvas/ per the frozen spec): WorkflowCanvas, WorkflowNode, WorkflowNodeHeader, WorkflowNodeContent, WorkflowNodeStatus, WorkflowEdge, WorkflowConnection, WorkflowControls, WorkflowPanel, WorkflowToolbar, and a WorkflowMinimap seam.",
       "The base anatomy is renderer-neutral: @xyflow/react must NOT enter the packages/ui base barrel or dependencies. The actual ReactFlow renderer stays behind an adapter or in packages/gateway-ui. INTEGRATE with the existing gateway-ui WorkflowGraph (SmithersTaskNode, workflowToFlow, workflowGraphCss) rather than creating a competing graph model: the anatomy components become the visual language WorkflowGraph's node/edge renderers compose (change gateway-ui only in NEW files or minimal, behavior-preserving edits; the integration lane wires barrels).",
@@ -200,7 +423,21 @@ export const ADOPTION_LANES: Lane[] = [
     id: "adopt-chat",
     title: "Multi chat adoption: transcript + composer on shared components",
     seats: ["fable", "sol"],
-    components: ["Message", "MessageScroller", "Bubble", "MessageBranch", "PromptInput", "AttachmentGroup", "Marker", "Shimmer", "SuggestionGroup", "Reasoning", "ToolCall", "Sources", "CompactGroup"],
+    components: [
+      "Message",
+      "MessageScroller",
+      "Bubble",
+      "MessageBranch",
+      "PromptInput",
+      "AttachmentGroup",
+      "Marker",
+      "Shimmer",
+      "SuggestionGroup",
+      "Reasoning",
+      "ToolCall",
+      "Sources",
+      "CompactGroup",
+    ],
     spec: [
       `Refactor Multi's transcript and composer (${MULTI_ROOT}/src/chat/ChatTranscript.tsx, ComposingCard.tsx and their collaborators) to consume the shared components from @smithers-orchestrator/ui: Message family, MessageScroller, Bubble, MessageBranch, PromptInput, AttachmentGroup, Marker, Shimmer, SuggestionGroup, Reasoning, ToolCall, Sources, CompactGroup.`,
       "PRESERVE, verified by the existing tests: Zustand store ownership (zero new useState/useEffect in product code), ref-registered imperative handles, transcript persistence, scope compaction, inline live cards, pair co-composition, slash commands, dictation, streaming behavior, and honest pending/error states.",
@@ -210,7 +447,21 @@ export const ADOPTION_LANES: Lane[] = [
     id: "adopt-gateway",
     title: "Multi gateway/run adoption: structured node output rendering",
     seats: ["sol"],
-    components: ["AgentOutput", "ActivityTimeline", "Plan", "TaskContent", "Queue", "Artifact", "TestResults", "StackTrace", "CodeBlock", "SchemaDisplay", "Confirmation", "Checkpoint", "ContextUsage"],
+    components: [
+      "AgentOutput",
+      "ActivityTimeline",
+      "Plan",
+      "TaskContent",
+      "Queue",
+      "Artifact",
+      "TestResults",
+      "StackTrace",
+      "CodeBlock",
+      "SchemaDisplay",
+      "Confirmation",
+      "Checkpoint",
+      "ContextUsage",
+    ],
     spec: [
       `Refactor Multi's gateway node detail and run inspection (${MULTI_ROOT}/src/gateway/GatewayNodeDetail.tsx, GatewayRunInspector.tsx, ${MULTI_ROOT}/src/runs/NodeInspector.tsx, RunInspector.tsx and collaborators) to render structured output through the shared components: AgentOutput, ActivityTimeline, Plan/Task/Queue, Artifact, TestResults, StackTrace, CodeBlock, SchemaDisplay, Confirmation, Checkpoint, ContextUsage.`,
       "Replace raw JSON output whenever a recognized structured renderer exists; ALWAYS retain a raw/source fallback view.",
@@ -220,7 +471,23 @@ export const ADOPTION_LANES: Lane[] = [
     id: "adopt-product",
     title: "Multi product-surface adoption (selective)",
     seats: ["fable"],
-    components: ["AgentCard", "ModelSelector", "ProviderBadge", "Confirmation", "ApprovalCard", "CheckpointActions", "Commit", "ChangeSummary", "Artifact", "OpenInChat", "TestResults", "EnvironmentVariables", "SecretField", "Sandbox", "WorkflowCanvas"],
+    components: [
+      "AgentCard",
+      "ModelSelector",
+      "ProviderBadge",
+      "Confirmation",
+      "ApprovalCard",
+      "CheckpointActions",
+      "Commit",
+      "ChangeSummary",
+      "Artifact",
+      "OpenInChat",
+      "TestResults",
+      "EnvironmentVariables",
+      "SecretField",
+      "Sandbox",
+      "WorkflowCanvas",
+    ],
     spec: [
       "Adopt shared components in Multi's product surfaces WHERE shared behavior and accessibility remove duplicated product code (do NOT migrate every screen mechanically): agent registry (AgentCard, ModelSelector, ProviderBadge), approvals (Confirmation, ApprovalCard), timeline (Checkpoint actions), VCS/files (Commit, ChangeSummary, Artifact, OpenInChat), evals (TestResults), BYOK/environment (EnvironmentVariables, SecretField), sandbox/terminal (Sandbox + status anatomy), flow editor/diagram (workflow canvas anatomy), inline concierge cards (shared Card/Artifact primitives).",
       "Prioritize by duplication removed; record what you deliberately skipped and why in the summary.",
@@ -275,11 +542,15 @@ export const reviewSchema = z.object({
   approved: z.boolean(),
   feedback: z.string().min(10),
   deferralsEndorsed: z.boolean().default(false),
-  issues: z.array(z.object({
-    severity: z.enum(["critical", "major", "minor", "nit"]),
-    title: z.string(),
-    description: z.string(),
-  })).default([]),
+  issues: z
+    .array(
+      z.object({
+        severity: z.enum(["critical", "major", "minor", "nit"]),
+        title: z.string(),
+        description: z.string(),
+      }),
+    )
+    .default([]),
 });
 export const laneResultSchema = z.object({
   laneId: laneIdSchema,
@@ -304,12 +575,16 @@ export const ciSchema = z.object({
   scope: z.enum(["smithers", "multi"]),
   allPassed: z.boolean(),
   summary: z.string().min(5),
-  commands: z.array(z.object({
-    command: z.string(),
-    exitCode: z.number().nullable(),
-    stdout: z.string(),
-    stderr: z.string(),
-  })).default([]),
+  commands: z
+    .array(
+      z.object({
+        command: z.string(),
+        exitCode: z.number().nullable(),
+        stdout: z.string(),
+        stderr: z.string(),
+      }),
+    )
+    .default([]),
 });
 export const ciFixSchema = z.object({
   scope: z.enum(["smithers", "multi"]),
@@ -321,25 +596,33 @@ export const auditSchema = z.object({
   complete: z.boolean(),
   deferralsEndorsed: z.boolean(),
   summary: z.string().min(100),
-  coverageMatrix: z.array(z.object({
-    component: z.string(),
-    lane: z.string(),
-    state: z.enum(["planned", "implemented", "reviewed", "integrated", "adopted", "deferred"]),
-    note: z.string().nullable().default(null),
-  })).default([]),
+  coverageMatrix: z
+    .array(
+      z.object({
+        component: z.string(),
+        lane: z.string(),
+        state: z.enum(["planned", "implemented", "reviewed", "integrated", "adopted", "deferred"]),
+        note: z.string().nullable().default(null),
+      }),
+    )
+    .default([]),
   followUps: z.array(z.string()).default([]),
 });
 export const manifestSchema = z.object({
   programTitle: z.string().min(5),
   plannedComponents: z.number().int().min(1),
-  lanes: z.array(z.object({
-    laneId: laneIdSchema,
-    title: z.string(),
-    kind: z.enum(["component", "integration", "adoption"]),
-    implementModel: z.string(),
-    reviewSeats: z.array(z.string()),
-    components: z.array(z.string()),
-  })).min(1),
+  lanes: z
+    .array(
+      z.object({
+        laneId: laneIdSchema,
+        title: z.string(),
+        kind: z.enum(["component", "integration", "adoption"]),
+        implementModel: z.string(),
+        reviewSeats: z.array(z.string()),
+        components: z.array(z.string()),
+      }),
+    )
+    .min(1),
 });
 export const finalReportSchema = z.object({
   success: z.boolean(),
@@ -380,7 +663,13 @@ type RawRow = Record<string, unknown>;
 
 // ── Row helpers (proven shapes from bulletproof-ui / studio-parity-swarm) ───
 function slug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "item";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 64) || "item"
+  );
 }
 
 export function resolveRepoRoot(): string {
@@ -417,12 +706,14 @@ function baseNodeId(row: RawRow): string {
 }
 
 function latestRaw(rows: RawRow[], nodeId: string): RawRow | undefined {
-  return rows.filter((row) => baseNodeId(row) === nodeId).reduce<RawRow | undefined>((best, row) => {
-    if (!best) return row;
-    const current = rowVersion(row);
-    const previous = rowVersion(best);
-    return current[0] > previous[0] || (current[0] === previous[0] && current[1] >= previous[1]) ? row : best;
-  }, undefined);
+  return rows
+    .filter((row) => baseNodeId(row) === nodeId)
+    .reduce<RawRow | undefined>((best, row) => {
+      if (!best) return row;
+      const current = rowVersion(row);
+      const previous = rowVersion(best);
+      return current[0] > previous[0] || (current[0] === previous[0] && current[1] >= previous[1]) ? row : best;
+    }, undefined);
 }
 
 function sameVersion(left: RawRow | undefined, right: RawRow | undefined): boolean {
@@ -434,9 +725,14 @@ function sameVersion(left: RawRow | undefined, right: RawRow | undefined): boole
 
 // ── Lane state ──────────────────────────────────────────────────────────────
 export function laneState(ctx: any, lane: Lane, maxIterations: number, nodePrefix = `lane-${lane.id}`) {
-  const implRows = rawRows(ctx, "aguiImpl").filter((row) => baseNodeId(row) === `${nodePrefix}-implement` && row.laneId === lane.id);
+  const implRows = rawRows(ctx, "aguiImpl").filter(
+    (row) => baseNodeId(row) === `${nodePrefix}-implement` && row.laneId === lane.id,
+  );
   const implementation = latestRaw(implRows, `${nodePrefix}-implement`);
-  const validation = latestRaw(rawRows(ctx, "aguiValidation").filter((row) => row.laneId === lane.id), `${nodePrefix}-validate`);
+  const validation = latestRaw(
+    rawRows(ctx, "aguiValidation").filter((row) => row.laneId === lane.id),
+    `${nodePrefix}-validate`,
+  );
   const validationCurrent = sameVersion(implementation, validation);
   const reviews = lane.seats.map((seat) => {
     const review = latestRaw(
@@ -447,10 +743,14 @@ export function laneState(ctx: any, lane: Lane, maxIterations: number, nodePrefi
   });
   const reviewsCurrent = reviews.every((entry) => entry.current);
   const reviewsApproved = reviewsCurrent && reviews.every((entry) => entry.review?.approved === true);
-  const done = implementation?.status === "implemented"
-    && validationCurrent && validation?.allPassed === true && validation?.diffNonEmpty === true
-    && reviewsApproved;
-  const finalAttemptComplete = validationCurrent && (validation?.allPassed === false || validation?.diffNonEmpty === false || reviewsCurrent);
+  const done =
+    implementation?.status === "implemented" &&
+    validationCurrent &&
+    validation?.allPassed === true &&
+    validation?.diffNonEmpty === true &&
+    reviewsApproved;
+  const finalAttemptComplete =
+    validationCurrent && (validation?.allPassed === false || validation?.diffNonEmpty === false || reviewsCurrent);
   return {
     implementation,
     validation,
@@ -465,11 +765,19 @@ export function laneState(ctx: any, lane: Lane, maxIterations: number, nodePrefi
 
 function laneFeedback(state: ReturnType<typeof laneState>): string {
   const parts: string[] = [];
-  if (state.implementation && state.implementation.status !== "implemented") parts.push(`IMPLEMENTATION ${String(state.implementation.status).toUpperCase()}:\n${String(state.implementation.summary ?? "")}`);
-  if (state.validationCurrent && state.validation?.allPassed === false) parts.push(`VALIDATION FAILED:\n${String(state.validation.failingSummary ?? state.validation.summary ?? "")}`);
-  if (state.validationCurrent && state.validation?.diffNonEmpty === false) parts.push("VALIDATION FAILED: the lane BRANCH carries no changes (jj diff --from \"fork_point(main | <branch>)\" --to <branch> is empty). Your work did not land on this lane's branch; re-apply it here (commit with jj, explicit pathspecs).");
+  if (state.implementation && state.implementation.status !== "implemented")
+    parts.push(
+      `IMPLEMENTATION ${String(state.implementation.status).toUpperCase()}:\n${String(state.implementation.summary ?? "")}`,
+    );
+  if (state.validationCurrent && state.validation?.allPassed === false)
+    parts.push(`VALIDATION FAILED:\n${String(state.validation.failingSummary ?? state.validation.summary ?? "")}`);
+  if (state.validationCurrent && state.validation?.diffNonEmpty === false)
+    parts.push(
+      'VALIDATION FAILED: the lane BRANCH carries no changes (jj diff --from "fork_point(main | <branch>)" --to <branch> is empty). Your work did not land on this lane\'s branch; re-apply it here (commit with jj, explicit pathspecs).',
+    );
   for (const entry of state.reviews) {
-    if (entry.current && entry.review?.approved === false) parts.push(`REVIEW (${entry.seat} seat) NOT LGTM:\n${String(entry.review.feedback ?? "")}`);
+    if (entry.current && entry.review?.approved === false)
+      parts.push(`REVIEW (${entry.seat} seat) NOT LGTM:\n${String(entry.review.feedback ?? "")}`);
   }
   return parts.join("\n\n");
 }
@@ -500,7 +808,10 @@ export function runSmithersCi(cwd: string) {
   return {
     scope: "smithers" as const,
     allPassed: failed.length === 0,
-    summary: failed.length === 0 ? "Smithers gates green." : `${failed.length} smithers gate(s) failed: ${failed.map((f) => f.command).join("; ")}`,
+    summary:
+      failed.length === 0
+        ? "Smithers gates green."
+        : `${failed.length} smithers gate(s) failed: ${failed.map((f) => f.command).join("; ")}`,
     commands: results,
   };
 }
@@ -518,7 +829,10 @@ export function runMultiCi(cwd: string) {
   return {
     scope: "multi" as const,
     allPassed: failed.length === 0,
-    summary: failed.length === 0 ? "Multi gates green." : `${failed.length} multi gate(s) failed: ${failed.map((f) => f.command).join("; ")}`,
+    summary:
+      failed.length === 0
+        ? "Multi gates green."
+        : `${failed.length} multi gate(s) failed: ${failed.map((f) => f.command).join("; ")}`,
     commands: results,
   };
 }
@@ -574,8 +888,12 @@ function designPrompt(research: RawRow | undefined, specReview: RawRow | undefin
     "Return componentApis: a compact TypeScript declaration block (exported types/signatures only) lanes can paste against.",
     "Return integrationContract: the EXACT conventions that make the integration lane's job mechanical — per-lane source directory, CSS fragment naming + how each component self-injects the deduplicated stylesheet, provenance fragment file per lane (packages/ui/provenance/<laneId>.json), the append points the integration lane will use for packages/ui/src/index.ts + uiCss.ts + shadcn-provenance.json + gateway-ui barrels, and which components the multi adoption lanes consume.",
     "Design constraint reminders: MessageScroller/ChatTranscript/ChatComposer/Attachment/Reasoning/ChainOfThought/ToolCall/Plan/TaskItem/Sources/InlineCitation/CodeBlock/MessageResponse/AgentOutput ALREADY EXIST — design compound extensions over them, not replacements. No pricing DB in base. Canvas anatomy renderer-neutral (no @xyflow/react in base). Voice surfaces stay deferred.",
-    specReview && specReview.approved === false ? `Previous spec review feedback (address ALL of it):\n${String(specReview.feedback ?? "")}` : "",
-  ].filter(Boolean).join("\n\n");
+    specReview && specReview.approved === false
+      ? `Previous spec review feedback (address ALL of it):\n${String(specReview.feedback ?? "")}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function specReviewPrompt(spec: RawRow | undefined): string {
@@ -600,7 +918,9 @@ function implementPrompt(lane: Lane, spec: RawRow | undefined, feedback: string)
     "Definition of done: every planned component implemented (or honestly listed in componentsDeferred with a reason a reviewer can endorse), new behavior covered by tests that went red before your change and green after, `pnpm -C packages/ui test` green in THIS worktree (plus `pnpm -C packages/gateway-ui test` if your lane touched it), and your lane BRANCH carrying the work (commit with jj, explicit pathspecs).",
     feedback ? `Feedback on your previous attempt (fix ALL of it):\n${feedback}` : "",
     "Return componentsImplemented with the EXACT exported names you completed. Return implemented only when focused checks pass here; otherwise return partial or blocked truthfully with the failing output in summary.",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function validatePrompt(lane: Lane, branch: string, implementation: RawRow | undefined): string {
@@ -617,7 +937,13 @@ function validatePrompt(lane: Lane, branch: string, implementation: RawRow | und
   ].join("\n");
 }
 
-function reviewPrompt(lane: Lane, seat: Seat, spec: RawRow | undefined, implementation: RawRow | undefined, validation: RawRow | undefined): string {
+function reviewPrompt(
+  lane: Lane,
+  seat: Seat,
+  spec: RawRow | undefined,
+  implementation: RawRow | undefined,
+  validation: RawRow | undefined,
+): string {
   return [
     `Independent ${seat}-seat review of the green candidate for lane ${lane.id}. Do NOT edit files. Return laneId=${lane.id}, seat=${seat}, and reviewer=<the model identity you actually are> exactly.`,
     `The frozen API surface it must match:\n${String(spec?.componentApis ?? "")}`,
@@ -645,7 +971,12 @@ function mergePrompt(result: RawRow, baseBranch: string, repoRoot: string): stri
   ].join("\n");
 }
 
-function integrationPrompt(spec: RawRow | undefined, merges: RawRow[], laneResults: RawRow[], feedback: string): string {
+function integrationPrompt(
+  spec: RawRow | undefined,
+  merges: RawRow[],
+  laneResults: RawRow[],
+  feedback: string,
+): string {
   return [
     "Integration lane: you own every shared surface the component lanes were forbidden to touch. Work in the PRIMARY checkout (jj-colocated, shared, with unrelated uncommitted work to preserve — jj st / jj diff are truth; commit ONLY your files with explicit pathspecs; never blanket-stage/stash/rebase/amend).",
     "Return laneId=integration exactly.",
@@ -667,7 +998,9 @@ function integrationPrompt(spec: RawRow | undefined, merges: RawRow[], laneResul
     ].join("\n"),
     feedback ? `Feedback on your previous attempt (fix ALL of it):\n${feedback}` : "",
     "Return implemented only when the checks you ran are green; otherwise partial/blocked truthfully with failing output in summary.",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function integrationReviewPrompt(seat: Seat, implementation: RawRow | undefined, ci: RawRow | undefined): string {
@@ -690,7 +1023,9 @@ function adoptionImplementPrompt(lane: Lane, spec: RawRow | undefined, feedback:
     "Definition of done: the refactored surfaces render through the shared components with behavior preserved (existing tests stay green; add focused tests for the new rendering paths), pnpm check:ui-architecture and pnpm typecheck green, your work committed via jj with explicit pathspecs, unrelated working-copy changes untouched.",
     feedback ? `Feedback on your previous attempt (fix ALL of it):\n${feedback}` : "",
     "Return componentsImplemented with the shared components actually adopted. Return implemented only when the focused checks pass; otherwise partial/blocked truthfully.",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function adoptionValidatePrompt(lane: Lane, implementation: RawRow | undefined): string {
@@ -722,7 +1057,11 @@ function auditPrompt(seat: Seat, ctx: any): string {
     "In followUps name any deferred adoption work SEPARATELY from component completion.",
     `Lane results:\n${JSON.stringify(laneResults, null, 2)}`,
     `Merges:\n${JSON.stringify(merges, null, 2)}`,
-    `CI rows:\n${JSON.stringify(ciRows.map((row) => ({ nodeId: row.nodeId, scope: row.scope, allPassed: row.allPassed, summary: row.summary })), null, 2)}`,
+    `CI rows:\n${JSON.stringify(
+      ciRows.map((row) => ({ nodeId: row.nodeId, scope: row.scope, allPassed: row.allPassed, summary: row.summary })),
+      null,
+      2,
+    )}`,
   ].join("\n\n");
 }
 
@@ -732,9 +1071,13 @@ function ciFixPrompt(scope: "smithers" | "multi", ci: RawRow | undefined): strin
     `The ${scope} CI gate is red in ${where}. Fix it minimally so all gates pass. Return scope=${scope} exactly.`,
     `Gate output:\n${JSON.stringify(ci ?? null, null, 2)}`,
     "You are in a SHARED checkout with unrelated uncommitted work. Touch only files implicated by the failures; commit with explicit pathspecs via jj; NEVER blanket-stage/stash/amend/rebase. If a failure is INHERITED (reproduces on files entirely outside this program's changes), say so in summary and leave it alone rather than chasing foreign breakage.",
-    scope === "smithers" ? "check-llms failures mean regenerating bundles: run `pnpm docs:llms` ONLY if `jj st` shows no foreign uncommitted docs changes; otherwise report the conflict." : "",
+    scope === "smithers"
+      ? "check-llms failures mean regenerating bundles: run `pnpm docs:llms` ONLY if `jj st` shows no foreign uncommitted docs changes; otherwise report the conflict."
+      : "",
     "Re-run the exact failed commands until green.",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 // ── Workflow ────────────────────────────────────────────────────────────────
@@ -766,9 +1109,14 @@ export default smithers((ctx) => {
     components: [],
     spec: "",
   };
-  const integrationImplRows = rawRows(ctx, "aguiImpl").filter((row) => baseNodeId(row) === "integration-implement" && row.laneId === "integration");
+  const integrationImplRows = rawRows(ctx, "aguiImpl").filter(
+    (row) => baseNodeId(row) === "integration-implement" && row.laneId === "integration",
+  );
   const integrationImpl = latestRaw(integrationImplRows, "integration-implement");
-  const smithersCi = latestRaw(rawRows(ctx, "aguiCi").filter((row) => row.scope === "smithers"), "integration-ci");
+  const smithersCi = latestRaw(
+    rawRows(ctx, "aguiCi").filter((row) => row.scope === "smithers"),
+    "integration-ci",
+  );
   const smithersCiCurrent = sameVersion(integrationImpl, smithersCi);
   const integrationReviews = (["fable", "sol"] as Seat[]).map((seat) => {
     const review = latestRaw(
@@ -778,30 +1126,63 @@ export default smithers((ctx) => {
     return { seat, review, current: smithersCiCurrent && sameVersion(smithersCi, review) };
   });
   const integrationReviewsCurrent = integrationReviews.every((entry) => entry.current);
-  const integrationDone = integrationImpl?.status === "implemented"
-    && smithersCiCurrent && smithersCi?.allPassed === true
-    && integrationReviewsCurrent && integrationReviews.every((entry) => entry.review?.approved === true);
-  const integrationSettled = integrationDone
-    || (integrationImplRows.length >= 3 && smithersCiCurrent && (smithersCi?.allPassed === false || integrationReviewsCurrent));
+  const integrationDone =
+    integrationImpl?.status === "implemented" &&
+    smithersCiCurrent &&
+    smithersCi?.allPassed === true &&
+    integrationReviewsCurrent &&
+    integrationReviews.every((entry) => entry.review?.approved === true);
+  const integrationSettled =
+    integrationDone ||
+    (integrationImplRows.length >= 3 &&
+      smithersCiCurrent &&
+      (smithersCi?.allPassed === false || integrationReviewsCurrent));
   const integrationFeedback = [
-    smithersCiCurrent && smithersCi?.allPassed === false ? `SMITHERS CI GATE FAILED:\n${String(smithersCi.summary ?? "")}` : "",
-    ...integrationReviews.map((entry) => entry.current && entry.review?.approved === false ? `REVIEW (${entry.seat} seat) NOT LGTM:\n${String(entry.review.feedback ?? "")}` : ""),
-  ].filter(Boolean).join("\n\n");
+    smithersCiCurrent && smithersCi?.allPassed === false
+      ? `SMITHERS CI GATE FAILED:\n${String(smithersCi.summary ?? "")}`
+      : "",
+    ...integrationReviews.map((entry) =>
+      entry.current && entry.review?.approved === false
+        ? `REVIEW (${entry.seat} seat) NOT LGTM:\n${String(entry.review.feedback ?? "")}`
+        : "",
+    ),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
-  const adoptionStates = ADOPTION_LANES.map((lane) => ({ lane, state: laneState(ctx, lane, input.perLaneIterations, `adopt-${lane.id.replace(/^adopt-/, "")}`) }));
+  const adoptionStates = ADOPTION_LANES.map((lane) => ({
+    lane,
+    state: laneState(ctx, lane, input.perLaneIterations, `adopt-${lane.id.replace(/^adopt-/, "")}`),
+  }));
   const adoptionSettled = ADOPTION_LANES.every((lane) => laneResults.some((row) => row.laneId === lane.id));
-  const multiCi = latestRaw(rawRows(ctx, "aguiCi").filter((row) => row.scope === "multi"), "multi-ci");
+  const multiCi = latestRaw(
+    rawRows(ctx, "aguiCi").filter((row) => row.scope === "multi"),
+    "multi-ci",
+  );
   const multiCiGreen = multiCi?.allPassed === true;
   const multiCiSettled = multiCiGreen || rawRows(ctx, "aguiCi").filter((row) => row.scope === "multi").length >= 3;
 
   const audits = rawRows(ctx, "aguiAudit");
-  const auditFable = latestRaw(audits.filter((row) => row.seat === "fable"), "final-audit-fable");
-  const auditSol = latestRaw(audits.filter((row) => row.seat === "sol"), "final-audit-sol");
-  const auditsComplete = auditFable?.complete === true && auditSol?.complete === true
-    && auditFable?.deferralsEndorsed === true && auditSol?.deferralsEndorsed === true;
+  const auditFable = latestRaw(
+    audits.filter((row) => row.seat === "fable"),
+    "final-audit-fable",
+  );
+  const auditSol = latestRaw(
+    audits.filter((row) => row.seat === "sol"),
+    "final-audit-sol",
+  );
+  const auditsComplete =
+    auditFable?.complete === true &&
+    auditSol?.complete === true &&
+    auditFable?.deferralsEndorsed === true &&
+    auditSol?.deferralsEndorsed === true;
 
-  const readyForAudit = specSettled && lanesSettled && mergesSettled && integrationSettled
-    && (integrationDone ? adoptionSettled && multiCiSettled : true);
+  const readyForAudit =
+    specSettled &&
+    lanesSettled &&
+    mergesSettled &&
+    integrationSettled &&
+    (integrationDone ? adoptionSettled && multiCiSettled : true);
 
   const manifestLanes: z.infer<typeof manifestSchema>["lanes"] = [
     ...ALL_LANES.map((lane) => ({
@@ -834,16 +1215,37 @@ export default smithers((ctx) => {
           }}
         </Task>
 
-        <Task id="agui-research" output={outputs.aguiResearch} agent={fableChain} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+        <Task
+          id="agui-research"
+          output={outputs.aguiResearch}
+          agent={fableChain}
+          retries={2}
+          timeoutMs={45 * 60_000}
+          heartbeatTimeoutMs={10 * 60_000}
+        >
           {researchPrompt()}
         </Task>
 
         <Loop id="agui-design-loop" until={specApproved} maxIterations={2} onMaxReached="return-last">
           <Sequence>
-            <Task id="design-freeze" output={outputs.aguiSpec} agent={fableChain} retries={2} timeoutMs={90 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+            <Task
+              id="design-freeze"
+              output={outputs.aguiSpec}
+              agent={fableChain}
+              retries={2}
+              timeoutMs={90 * 60_000}
+              heartbeatTimeoutMs={10 * 60_000}
+            >
               {designPrompt(research, specReview)}
             </Task>
-            <Task id="design-review" output={outputs.aguiSpecReview} agent={solChain} retries={2} timeoutMs={40 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+            <Task
+              id="design-review"
+              output={outputs.aguiSpecReview}
+              agent={solChain}
+              retries={2}
+              timeoutMs={40 * 60_000}
+              heartbeatTimeoutMs={10 * 60_000}
+            >
               {specReviewPrompt(spec)}
             </Task>
           </Sequence>
@@ -858,18 +1260,47 @@ export default smithers((ctx) => {
               return (
                 <Worktree key={lane.id} path={worktreePath} branch={branch} baseBranch={input.baseBranch}>
                   <Sequence>
-                    <Loop id={`lane-${lane.id}-loop`} until={state.done} maxIterations={input.perLaneIterations} onMaxReached="return-last">
+                    <Loop
+                      id={`lane-${lane.id}-loop`}
+                      until={state.done}
+                      maxIterations={input.perLaneIterations}
+                      onMaxReached="return-last"
+                    >
                       <Sequence>
-                        <Task id={`lane-${lane.id}-implement`} output={outputs.aguiImpl} agent={kimiImplement} retries={2} timeoutMs={100 * 60_000} heartbeatTimeoutMs={15 * 60_000}>
+                        <Task
+                          id={`lane-${lane.id}-implement`}
+                          output={outputs.aguiImpl}
+                          agent={kimiImplement}
+                          retries={2}
+                          timeoutMs={100 * 60_000}
+                          heartbeatTimeoutMs={15 * 60_000}
+                        >
                           {implementPrompt(lane, spec, laneFeedback(state))}
                         </Task>
-                        <Task id={`lane-${lane.id}-validate`} output={outputs.aguiValidation} agent={validateChain} retries={2} timeoutMs={40 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                        <Task
+                          id={`lane-${lane.id}-validate`}
+                          output={outputs.aguiValidation}
+                          agent={validateChain}
+                          retries={2}
+                          timeoutMs={40 * 60_000}
+                          heartbeatTimeoutMs={10 * 60_000}
+                        >
                           {validatePrompt(lane, branch, state.implementation)}
                         </Task>
-                        {state.validationCurrent && state.validation?.allPassed === true && state.validation?.diffNonEmpty === true ? (
+                        {state.validationCurrent &&
+                        state.validation?.allPassed === true &&
+                        state.validation?.diffNonEmpty === true ? (
                           <Parallel>
                             {lane.seats.map((seat) => (
-                              <Task key={seat} id={`lane-${lane.id}-review-${seat}`} output={outputs.aguiReview} agent={seat === "fable" ? fableChain : solChain} retries={2} timeoutMs={40 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                              <Task
+                                key={seat}
+                                id={`lane-${lane.id}-review-${seat}`}
+                                output={outputs.aguiReview}
+                                agent={seat === "fable" ? fableChain : solChain}
+                                retries={2}
+                                timeoutMs={40 * 60_000}
+                                heartbeatTimeoutMs={10 * 60_000}
+                              >
                                 {reviewPrompt(lane, seat, spec, state.implementation, state.validation)}
                               </Task>
                             ))}
@@ -885,10 +1316,15 @@ export default smithers((ctx) => {
                         lgtm: state.done,
                         exhausted: state.exhausted,
                         attempts: state.attempts,
-                        summary: state.done ? `Lane ${lane.id} LGTM after ${state.attempts} attempt(s).` : `Lane ${lane.id} settled without LGTM after ${state.attempts} attempt(s).`,
+                        summary: state.done
+                          ? `Lane ${lane.id} LGTM after ${state.attempts} attempt(s).`
+                          : `Lane ${lane.id} settled without LGTM after ${state.attempts} attempt(s).`,
                         filesChanged: asArray(state.implementation?.filesChanged) as string[],
                         componentsImplemented: asArray(state.implementation?.componentsImplemented) as string[],
-                        componentsDeferred: asArray(state.implementation?.componentsDeferred) as { name: string; reason: string }[],
+                        componentsDeferred: asArray(state.implementation?.componentsDeferred) as {
+                          name: string;
+                          reason: string;
+                        }[],
                         seatVerdicts: state.reviews.map((entry) => ({
                           seat: entry.seat,
                           approved: entry.current && entry.review?.approved === true,
@@ -904,8 +1340,21 @@ export default smithers((ctx) => {
         ) : null}
 
         <MergeQueue id="agui-merge-queue" maxConcurrency={1}>
-          {(lanesSettled ? lgtmResults.filter((row) => !merges.some((merge) => merge.laneId === row.laneId && merge.mergedToMain === true)) : []).map((row) => (
-            <Task key={String(row.laneId)} id={`merge-${slug(String(row.laneId))}`} output={outputs.aguiMerge} agent={mergeChain} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+          {(lanesSettled
+            ? lgtmResults.filter(
+                (row) => !merges.some((merge) => merge.laneId === row.laneId && merge.mergedToMain === true),
+              )
+            : []
+          ).map((row) => (
+            <Task
+              key={String(row.laneId)}
+              id={`merge-${slug(String(row.laneId))}`}
+              output={outputs.aguiMerge}
+              agent={mergeChain}
+              retries={2}
+              timeoutMs={45 * 60_000}
+              heartbeatTimeoutMs={10 * 60_000}
+            >
               {mergePrompt(row, input.baseBranch, repoRoot)}
             </Task>
           ))}
@@ -914,7 +1363,14 @@ export default smithers((ctx) => {
         {lanesSettled && mergesSettled ? (
           <Loop id="integration-loop" until={integrationDone} maxIterations={3} onMaxReached="return-last">
             <Sequence>
-              <Task id="integration-implement" output={outputs.aguiImpl} agent={kimiImplement} retries={2} timeoutMs={120 * 60_000} heartbeatTimeoutMs={15 * 60_000}>
+              <Task
+                id="integration-implement"
+                output={outputs.aguiImpl}
+                agent={kimiImplement}
+                retries={2}
+                timeoutMs={120 * 60_000}
+                heartbeatTimeoutMs={15 * 60_000}
+              >
                 {integrationPrompt(spec, merges, laneResults, integrationFeedback)}
               </Task>
               <Task id="integration-ci" output={outputs.aguiCi} timeoutMs={150 * 60_000}>
@@ -923,7 +1379,15 @@ export default smithers((ctx) => {
               {smithersCiCurrent && smithersCi?.allPassed === true ? (
                 <Parallel>
                   {(["fable", "sol"] as Seat[]).map((seat) => (
-                    <Task key={seat} id={`integration-review-${seat}`} output={outputs.aguiReview} agent={seat === "fable" ? fableChain : solChain} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                    <Task
+                      key={seat}
+                      id={`integration-review-${seat}`}
+                      output={outputs.aguiReview}
+                      agent={seat === "fable" ? fableChain : solChain}
+                      retries={2}
+                      timeoutMs={45 * 60_000}
+                      heartbeatTimeoutMs={10 * 60_000}
+                    >
                       {integrationReviewPrompt(seat, integrationImpl, smithersCi)}
                     </Task>
                   ))}
@@ -940,18 +1404,47 @@ export default smithers((ctx) => {
               const state = adoptionStates.find((entry) => entry.lane.id === lane.id)!.state;
               return (
                 <Sequence key={lane.id}>
-                  <Loop id={`${prefix}-loop`} until={state.done} maxIterations={input.perLaneIterations} onMaxReached="return-last">
+                  <Loop
+                    id={`${prefix}-loop`}
+                    until={state.done}
+                    maxIterations={input.perLaneIterations}
+                    onMaxReached="return-last"
+                  >
                     <Sequence>
-                      <Task id={`${prefix}-implement`} output={outputs.aguiImpl} agent={kimiImplementMulti} retries={2} timeoutMs={100 * 60_000} heartbeatTimeoutMs={15 * 60_000}>
+                      <Task
+                        id={`${prefix}-implement`}
+                        output={outputs.aguiImpl}
+                        agent={kimiImplementMulti}
+                        retries={2}
+                        timeoutMs={100 * 60_000}
+                        heartbeatTimeoutMs={15 * 60_000}
+                      >
                         {adoptionImplementPrompt(lane, spec, laneFeedback(state))}
                       </Task>
-                      <Task id={`${prefix}-validate`} output={outputs.aguiValidation} agent={validateChainMulti} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                      <Task
+                        id={`${prefix}-validate`}
+                        output={outputs.aguiValidation}
+                        agent={validateChainMulti}
+                        retries={2}
+                        timeoutMs={45 * 60_000}
+                        heartbeatTimeoutMs={10 * 60_000}
+                      >
                         {adoptionValidatePrompt(lane, state.implementation)}
                       </Task>
-                      {state.validationCurrent && state.validation?.allPassed === true && state.validation?.diffNonEmpty === true ? (
+                      {state.validationCurrent &&
+                      state.validation?.allPassed === true &&
+                      state.validation?.diffNonEmpty === true ? (
                         <Parallel>
                           {lane.seats.map((seat) => (
-                            <Task key={seat} id={`${prefix}-review-${seat}`} output={outputs.aguiReview} agent={seat === "fable" ? fableChainMulti : solChainMulti} retries={2} timeoutMs={40 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                            <Task
+                              key={seat}
+                              id={`${prefix}-review-${seat}`}
+                              output={outputs.aguiReview}
+                              agent={seat === "fable" ? fableChainMulti : solChainMulti}
+                              retries={2}
+                              timeoutMs={40 * 60_000}
+                              heartbeatTimeoutMs={10 * 60_000}
+                            >
                               {reviewPrompt(lane, seat, spec, state.implementation, state.validation)}
                             </Task>
                           ))}
@@ -967,10 +1460,15 @@ export default smithers((ctx) => {
                       lgtm: state.done,
                       exhausted: state.exhausted,
                       attempts: state.attempts,
-                      summary: state.done ? `Adoption lane ${lane.id} LGTM after ${state.attempts} attempt(s).` : `Adoption lane ${lane.id} settled without LGTM after ${state.attempts} attempt(s).`,
+                      summary: state.done
+                        ? `Adoption lane ${lane.id} LGTM after ${state.attempts} attempt(s).`
+                        : `Adoption lane ${lane.id} settled without LGTM after ${state.attempts} attempt(s).`,
                       filesChanged: asArray(state.implementation?.filesChanged) as string[],
                       componentsImplemented: asArray(state.implementation?.componentsImplemented) as string[],
-                      componentsDeferred: asArray(state.implementation?.componentsDeferred) as { name: string; reason: string }[],
+                      componentsDeferred: asArray(state.implementation?.componentsDeferred) as {
+                        name: string;
+                        reason: string;
+                      }[],
                       seatVerdicts: state.reviews.map((entry) => ({
                         seat: entry.seat,
                         approved: entry.current && entry.review?.approved === true,
@@ -989,7 +1487,14 @@ export default smithers((ctx) => {
                     {() => runMultiCi(MULTI_ROOT)}
                   </Task>
                   {multiCi && multiCi.allPassed === false ? (
-                    <Task id="multi-ci-fix" output={outputs.aguiCiFix} agent={kimiImplementMulti} retries={2} timeoutMs={60 * 60_000} heartbeatTimeoutMs={15 * 60_000}>
+                    <Task
+                      id="multi-ci-fix"
+                      output={outputs.aguiCiFix}
+                      agent={kimiImplementMulti}
+                      retries={2}
+                      timeoutMs={60 * 60_000}
+                      heartbeatTimeoutMs={15 * 60_000}
+                    >
                       {ciFixPrompt("multi", multiCi)}
                     </Task>
                   ) : null}
@@ -1001,10 +1506,24 @@ export default smithers((ctx) => {
 
         {readyForAudit ? (
           <Parallel>
-            <Task id="final-audit-fable" output={outputs.aguiAudit} agent={fableChain} retries={2} timeoutMs={60 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+            <Task
+              id="final-audit-fable"
+              output={outputs.aguiAudit}
+              agent={fableChain}
+              retries={2}
+              timeoutMs={60 * 60_000}
+              heartbeatTimeoutMs={10 * 60_000}
+            >
               {auditPrompt("fable", ctx)}
             </Task>
-            <Task id="final-audit-sol" output={outputs.aguiAudit} agent={solChain} retries={2} timeoutMs={60 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+            <Task
+              id="final-audit-sol"
+              output={outputs.aguiAudit}
+              agent={solChain}
+              retries={2}
+              timeoutMs={60 * 60_000}
+              heartbeatTimeoutMs={10 * 60_000}
+            >
               {auditPrompt("sol", ctx)}
             </Task>
           </Parallel>
@@ -1017,13 +1536,16 @@ export default smithers((ctx) => {
               lanesLgtm: lgtmResults.length,
               lanesTotal: LANES.length,
               integrationDone,
-              adoptionDone: adoptionSettled && ADOPTION_LANES.every((lane) => laneResults.some((row) => row.laneId === lane.id && row.lgtm === true)),
+              adoptionDone:
+                adoptionSettled &&
+                ADOPTION_LANES.every((lane) => laneResults.some((row) => row.laneId === lane.id && row.lgtm === true)),
               smithersCiGreen: smithersCi?.allPassed === true,
               multiCiGreen,
               auditsComplete,
-              summary: auditsComplete && integrationDone && multiCiGreen
-                ? `Program complete: ${lgtmResults.length}/${LANES.length} component lanes LGTM, integration + adoption landed, both audits complete.`
-                : `Program settled incomplete: ${lgtmResults.length}/${LANES.length} lanes LGTM; integrationDone=${integrationDone}; multiCiGreen=${multiCiGreen}; audits fable=${auditFable?.complete === true} sol=${auditSol?.complete === true}. See audit followUps.`,
+              summary:
+                auditsComplete && integrationDone && multiCiGreen
+                  ? `Program complete: ${lgtmResults.length}/${LANES.length} component lanes LGTM, integration + adoption landed, both audits complete.`
+                  : `Program settled incomplete: ${lgtmResults.length}/${LANES.length} lanes LGTM; integrationDone=${integrationDone}; multiCiGreen=${multiCiGreen}; audits fable=${auditFable?.complete === true} sol=${auditSol?.complete === true}. See audit followUps.`,
             }}
           </Task>
         ) : null}

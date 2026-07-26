@@ -12,9 +12,8 @@ test("first leg instruments the first durable source version", async () => {
   expect(first.first()).toBe("first");
   // The next isolated Bun leg observes a different function inventory at the
   // same SF path. Its aggregate-only LCOV must make the merge fail closed.
-  writeFileSync(source, [
-    "export function first() { return 'first'; }",
-    "export function second() { return 'second'; }",
-    "",
-  ].join("\n"));
+  writeFileSync(
+    source,
+    ["export function first() { return 'first'; }", "export function second() { return 'second'; }", ""].join("\n"),
+  );
 });

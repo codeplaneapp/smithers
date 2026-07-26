@@ -26,11 +26,7 @@ export function ConversationCheckpoint({
   useInjectLaneCss(CONVERSATION_FOUNDATION_CSS_ID, conversationFoundationCss);
   const date = timestampMs !== undefined ? new Date(timestampMs) : undefined;
   return (
-    <div
-      data-slot="conversation-checkpoint"
-      className={cn("sui-convo-checkpoint", className)}
-      {...props}
-    >
+    <div data-slot="conversation-checkpoint" className={cn("sui-convo-checkpoint", className)} {...props}>
       <span className="sui-convo-checkpoint-body">
         <span data-slot="conversation-checkpoint-label" className="sui-convo-checkpoint-label">
           {label}

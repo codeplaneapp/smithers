@@ -1,4 +1,4 @@
-import { TracingService, withSmithersSpan as withCoreSmithersSpan, } from "./_coreTracing.js";
+import { TracingService, withSmithersSpan as withCoreSmithersSpan } from "./_coreTracing.js";
 import { Effect } from "effect";
 /**
  * @template A, E, R
@@ -9,7 +9,9 @@ import { Effect } from "effect";
  * @returns {Effect.Effect<A, E, Exclude<R, import("effect/Tracer").ParentSpan>>}
  */
 export function withSmithersSpan(name, effect, attributes, _options) {
-    return Effect.flatMap(Effect.serviceOption(TracingService), (service) => service._tag === "Some"
-        ? service.value.withSpan(name, effect, attributes ? { ...attributes } : undefined)
-        : withCoreSmithersSpan(name, effect, attributes));
+  return Effect.flatMap(Effect.serviceOption(TracingService), (service) =>
+    service._tag === "Some"
+      ? service.value.withSpan(name, effect, attributes ? { ...attributes } : undefined)
+      : withCoreSmithersSpan(name, effect, attributes),
+  );
 }

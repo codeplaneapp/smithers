@@ -12,16 +12,15 @@ import { smithersBranches } from "../schema.js";
  * @returns {Effect.Effect<BranchInfo[], SmithersError>}
  */
 export function listBranches(adapter, parentRunId) {
-    return Effect.tryPromise({
-        try: () => adapter.internalStorage?.dialect === "postgres"
-            ? adapter.internalStorage.queryAll(`SELECT * FROM _smithers_branches WHERE parent_run_id = ?`, [parentRunId])
-            : adapter.db
-                .select()
-                .from(smithersBranches)
-                .where(eq(smithersBranches.parentRunId, parentRunId)),
-        catch: (cause) => toSmithersError(cause, "list branches", {
-            code: "DB_QUERY_FAILED",
-            details: { parentRunId },
-        }),
-    }).pipe(Effect.annotateLogs({ parentRunId }), Effect.withLogSpan("time-travel:list-branches"));
+  return Effect.tryPromise({
+    try: () =>
+      adapter.internalStorage?.dialect === "postgres"
+        ? adapter.internalStorage.queryAll(`SELECT * FROM _smithers_branches WHERE parent_run_id = ?`, [parentRunId])
+        : adapter.db.select().from(smithersBranches).where(eq(smithersBranches.parentRunId, parentRunId)),
+    catch: (cause) =>
+      toSmithersError(cause, "list branches", {
+        code: "DB_QUERY_FAILED",
+        details: { parentRunId },
+      }),
+  }).pipe(Effect.annotateLogs({ parentRunId }), Effect.withLogSpan("time-travel:list-branches"));
 }

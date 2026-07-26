@@ -109,11 +109,7 @@ function NodeOutputCardInner({
   const { status: envelopeStatus, row } = unwrapNodeOutput(data);
   // Before the first envelope lands (or on error) show pending/failed chrome
   // rather than the "produced" default unwrapNodeOutput gives an empty payload.
-  const status: NodeOutputStatus = error
-    ? "failed"
-    : !nodeId || (loading && data == null)
-      ? "pending"
-      : envelopeStatus;
+  const status: NodeOutputStatus = error ? "failed" : !nodeId || (loading && data == null) ? "pending" : envelopeStatus;
   const { glyph, label } = STATUS_GLYPH[status];
   const render = typeof children === "function" ? children : body;
 
@@ -165,11 +161,7 @@ function NodeOutputCardInner({
       }}
     >
       <header style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-        <span
-          aria-label={label}
-          title={label}
-          className="gw-node-output-glyph"
-        >
+        <span aria-label={label} title={label} className="gw-node-output-glyph">
           {glyph}
         </span>
         <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>

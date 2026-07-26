@@ -8,11 +8,5 @@ import { useUiStore } from "../app/uiStore";
  */
 export function MenuBackdrop() {
   const setOpenMenu = useUiStore((state) => state.setOpenMenu);
-  return (
-    <div
-      aria-hidden="true"
-      className="menu-backdrop"
-      onPointerDown={() => setOpenMenu(null)}
-    />
-  );
+  return <div aria-hidden="true" className="menu-backdrop" onPointerDown={() => setOpenMenu(null)} />;
 }

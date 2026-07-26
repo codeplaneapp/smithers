@@ -42,12 +42,7 @@ const SourcesContext = createContext<SourcesContextValue | null>(null);
 export function Sources(props: SourcesProps) {
   useInjectUiCss();
   useInjectLaneCss(SOURCES_CITATIONS_CSS_ID, sourcesCitationsCss);
-  const {
-    open: controlledOpen,
-    defaultOpen = false,
-    onOpenChange,
-    className,
-  } = props;
+  const { open: controlledOpen, defaultOpen = false, onOpenChange, className } = props;
   const triggerId = useId();
   const contentId = useId();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
@@ -74,12 +69,7 @@ export function Sources(props: SourcesProps) {
     const countLabel = `Used ${sources.length} ${sources.length === 1 ? "source" : "sources"}`;
 
     return (
-      <div
-        data-slot="sources"
-        data-state={open ? "open" : "closed"}
-        className={cn("sui-sources", className)}
-        {...rest}
-      >
+      <div data-slot="sources" data-state={open ? "open" : "closed"} className={cn("sui-sources", className)} {...rest}>
         <button
           type="button"
           data-slot="sources-trigger"
@@ -134,12 +124,7 @@ export function Sources(props: SourcesProps) {
 
   return (
     <SourcesContext.Provider value={{ open, toggle, triggerId, contentId }}>
-      <div
-        data-slot="sources"
-        data-state={open ? "open" : "closed"}
-        className={cn("sui-sources", className)}
-        {...rest}
-      >
+      <div data-slot="sources" data-state={open ? "open" : "closed"} className={cn("sui-sources", className)} {...rest}>
         {children}
       </div>
     </SourcesContext.Provider>
@@ -152,22 +137,11 @@ export type SourcesTriggerProps = Omit<ComponentProps<"button">, "children"> & {
 };
 
 /** Disclosure trigger for a compound Sources; defaults to a 'Used N sources' label. */
-export function SourcesTrigger({
-  count,
-  children,
-  className,
-  onClick,
-  type,
-  ...props
-}: SourcesTriggerProps) {
+export function SourcesTrigger({ count, children, className, onClick, type, ...props }: SourcesTriggerProps) {
   useInjectUiCss();
   useInjectLaneCss(SOURCES_CITATIONS_CSS_ID, sourcesCitationsCss);
   const context = useContext(SourcesContext);
-  const label =
-    children ??
-    (count === undefined
-      ? "Sources"
-      : `Used ${count} ${count === 1 ? "source" : "sources"}`);
+  const label = children ?? (count === undefined ? "Sources" : `Used ${count} ${count === 1 ? "source" : "sources"}`);
 
   return (
     <button
@@ -191,12 +165,7 @@ export function SourcesTrigger({
 export type SourcesContentProps = ComponentProps<"div">;
 
 /** Collapsible source list region for a compound Sources; renders a <ul>. */
-export function SourcesContent({
-  className,
-  children,
-  role,
-  ...props
-}: SourcesContentProps) {
+export function SourcesContent({ className, children, role, ...props }: SourcesContentProps) {
   useInjectUiCss();
   useInjectLaneCss(SOURCES_CITATIONS_CSS_ID, sourcesCitationsCss);
   const context = useContext(SourcesContext);
@@ -216,10 +185,7 @@ export function SourcesContent({
   );
 }
 
-export type SourceProps = Omit<
-  ComponentProps<"a">,
-  "title" | "href" | "children" | "onClick"
-> & {
+export type SourceProps = Omit<ComponentProps<"a">, "title" | "href" | "children" | "onClick"> & {
   href?: string;
   title: ReactNode;
   domain?: string;
@@ -289,10 +255,7 @@ export function Source({
           {body}
         </a>
       ) : (
-        <span
-          {...(props as ComponentProps<"span">)}
-          className={cn("sui-sources-label", "sui-sources-rich", className)}
-        >
+        <span {...(props as ComponentProps<"span">)} className={cn("sui-sources-label", "sui-sources-rich", className)}>
           {body}
         </span>
       )}

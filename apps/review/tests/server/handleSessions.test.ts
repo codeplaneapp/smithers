@@ -40,10 +40,9 @@ beforeEach(() => {
 });
 
 async function registerRepo(env: ReviewWorkerEnv, repo: string, prsPerMonth = 3) {
-  await env.DB
-    .prepare(
-      "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
-    )
+  await env.DB.prepare(
+    "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
+  )
     .bind(repo, "auto", prsPerMonth, 10, Date.now())
     .run();
 }
@@ -62,10 +61,9 @@ describe("POST /api/sessions (OIDC)", () => {
   test("verifies a valid token and mints a session", async () => {
     const env = await buildTestEnv();
     const worker = makeWorker(jwks.url);
-    await env.DB
-      .prepare(
-        "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
-      )
+    await env.DB.prepare(
+      "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
       .bind(REPO, "comment", 5, 25, Date.now())
       .run();
     const token = await signTestJwt(keypair, baseClaims(REPO, 42, Math.floor(Date.now() / 1000) + 600));
@@ -138,10 +136,9 @@ describe("POST /api/sessions (OIDC)", () => {
   test("returns the repo's registered quiz mode", async () => {
     const env = await buildTestEnv();
     const worker = makeWorker(jwks.url);
-    await env.DB
-      .prepare(
-        "INSERT INTO repos (repo, mode, quiz, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-      )
+    await env.DB.prepare(
+      "INSERT INTO repos (repo, mode, quiz, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
       .bind(REPO, "auto", "on", 5, 25, Date.now())
       .run();
     const token = await signTestJwt(keypair, baseClaims(REPO, 42, Math.floor(Date.now() / 1000) + 600));
@@ -177,8 +174,7 @@ describe("POST /api/sessions (OIDC)", () => {
       env,
     );
     expect(res.status).toBe(200);
-    const reviewed = await env.DB
-      .prepare("SELECT pr FROM reviewed_prs WHERE repo = ?")
+    const reviewed = await env.DB.prepare("SELECT pr FROM reviewed_prs WHERE repo = ?")
       .bind(REPO)
       .first<{ pr: number }>();
     expect(reviewed?.pr).toBe(77);
@@ -339,8 +335,7 @@ describe("POST /api/sessions (OIDC)", () => {
     const env = await buildTestEnv();
     const worker = makeWorker(jwks.url);
     await registerRepo(env, REPO, 2);
-    const sign = async (pr: number) =>
-      signTestJwt(keypair, baseClaims(REPO, pr, Math.floor(Date.now() / 1000) + 600));
+    const sign = async (pr: number) => signTestJwt(keypair, baseClaims(REPO, pr, Math.floor(Date.now() / 1000) + 600));
     expect(
       (
         await worker.fetch(
@@ -469,9 +464,7 @@ describe("POST /api/sessions (OIDC)", () => {
     const exp = Math.floor(Date.now() / 1000) + 600;
     // Six distinct new PRs racing at once against a 3-PR plan. A check-then-insert
     // split lets more than three pass the read; the atomic claim must grant three.
-    const tokens = await Promise.all(
-      [1, 2, 3, 4, 5, 6].map((pr) => signTestJwt(keypair, baseClaims(REPO, pr, exp))),
-    );
+    const tokens = await Promise.all([1, 2, 3, 4, 5, 6].map((pr) => signTestJwt(keypair, baseClaims(REPO, pr, exp))));
     const responses = await Promise.all(
       tokens.map((token) =>
         worker.fetch(
@@ -486,8 +479,7 @@ describe("POST /api/sessions (OIDC)", () => {
     const statuses = responses.map((r) => r.status);
     expect(statuses.filter((s) => s === 200).length).toBe(3);
     expect(statuses.filter((s) => s === 402).length).toBe(3);
-    const reviewed = await env.DB
-      .prepare("SELECT COUNT(*) AS c FROM reviewed_prs WHERE repo = ?")
+    const reviewed = await env.DB.prepare("SELECT COUNT(*) AS c FROM reviewed_prs WHERE repo = ?")
       .bind(REPO)
       .first<{ c: number }>();
     expect(reviewed?.c).toBe(3);
@@ -499,17 +491,15 @@ describe("POST /api/sessions (OIDC)", () => {
     const env = await buildTestEnv();
     const worker = makeWorker(jwks.url);
     // Ceiling = prs_per_month * spend_cap_usd = 1 * 0.01 = 0.01.
-    await env.DB
-      .prepare(
-        "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
-      )
+    await env.DB.prepare(
+      "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
       .bind(REPO, "auto", 1, 0.01, Date.now())
       .run();
     // Prior sessions this month already spent past the ceiling.
-    await env.DB
-      .prepare(
-        "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      )
+    await env.DB.prepare(
+      "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
       .bind("u1", REPO, 1, "claude-sonnet-4-6", 0, 0, 0.05, "messages", Date.now())
       .run();
     // A fresh mint for a brand-new PR — the re-mint that would otherwise reset
@@ -525,8 +515,7 @@ describe("POST /api/sessions (OIDC)", () => {
     expect(res.status).toBe(402);
     expect(((await res.json()) as { error: string }).error).toContain("monthly spend cap");
     // Rejected before claiming a quota slot or minting a session.
-    const reviewed = await env.DB
-      .prepare("SELECT COUNT(*) AS c FROM reviewed_prs WHERE repo = ?")
+    const reviewed = await env.DB.prepare("SELECT COUNT(*) AS c FROM reviewed_prs WHERE repo = ?")
       .bind(REPO)
       .first<{ c: number }>();
     expect(reviewed?.c).toBe(0);

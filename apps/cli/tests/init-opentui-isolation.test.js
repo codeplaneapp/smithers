@@ -12,19 +12,19 @@ const SRC = resolve(fileURLToPath(import.meta.url), "../../src");
 // now (the OpenTUI multiselect wizard was removed when init became a single
 // agent question), so nothing on this chain may import @opentui at all.
 const STARTUP_MODULES = [
-    "init/interactiveInit.tsx",
-    "init/selectPreferredAgent.js",
-    "init/installAgentIntegration.js",
-    "initCeremony.js",
-    "init-command.js",
+  "init/interactiveInit.tsx",
+  "init/selectPreferredAgent.js",
+  "init/installAgentIntegration.js",
+  "initCeremony.js",
+  "init-command.js",
 ];
 
 test("no static @opentui import on the eager CLI startup path", () => {
-    for (const rel of STARTUP_MODULES) {
-        const src = readFileSync(resolve(SRC, rel), "utf8");
-        // Matches `from "@opentui...` / `from '@opentui...`, which excludes
-        // type-position `typeof import("...")` annotations (erased at compile
-        // time) — those are harmless.
-        expect(src).not.toMatch(/from\s+["']@opentui/);
-    }
+  for (const rel of STARTUP_MODULES) {
+    const src = readFileSync(resolve(SRC, rel), "utf8");
+    // Matches `from "@opentui...` / `from '@opentui...`, which excludes
+    // type-position `typeof import("...")` annotations (erased at compile
+    // time) — those are harmless.
+    expect(src).not.toMatch(/from\s+["']@opentui/);
+  }
 });

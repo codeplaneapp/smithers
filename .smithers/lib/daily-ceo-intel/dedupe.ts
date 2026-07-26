@@ -34,15 +34,75 @@ export function contentHashKey(body: string): string {
 }
 
 const STOPWORDS = new Set([
-  "the", "a", "an", "and", "or", "of", "to", "for", "in", "on", "with", "is", "are", "was", "were",
-  "how", "what", "why", "new", "now", "your", "you", "we", "our", "it", "its", "at", "by", "from",
-  "vs", "v", "into", "about", "release", "releases", "announcing", "announces", "launch", "launches",
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "of",
+  "to",
+  "for",
+  "in",
+  "on",
+  "with",
+  "is",
+  "are",
+  "was",
+  "were",
+  "how",
+  "what",
+  "why",
+  "new",
+  "now",
+  "your",
+  "you",
+  "we",
+  "our",
+  "it",
+  "its",
+  "at",
+  "by",
+  "from",
+  "vs",
+  "v",
+  "into",
+  "about",
+  "release",
+  "releases",
+  "announcing",
+  "announces",
+  "launch",
+  "launches",
 ]);
 
 const KNOWN_BRANDS = [
-  "claude", "anthropic", "openai", "gpt", "codex", "gemini", "google", "cloudflare", "vercel",
-  "github", "cursor", "mcp", "langchain", "crewai", "autogen", "huggingface", "smithers",
-  "copilot", "bedrock", "aws", "azure", "microsoft", "llama", "meta", "grok", "xai", "mistral",
+  "claude",
+  "anthropic",
+  "openai",
+  "gpt",
+  "codex",
+  "gemini",
+  "google",
+  "cloudflare",
+  "vercel",
+  "github",
+  "cursor",
+  "mcp",
+  "langchain",
+  "crewai",
+  "autogen",
+  "huggingface",
+  "smithers",
+  "copilot",
+  "bedrock",
+  "aws",
+  "azure",
+  "microsoft",
+  "llama",
+  "meta",
+  "grok",
+  "xai",
+  "mistral",
 ];
 
 function tokenize(title: string): Set<string> {
@@ -92,7 +152,9 @@ function bestRepresentative(items: Item[]): Item {
 
 function mergeGroup(items: Item[]): Item {
   const representative = bestRepresentative(items);
-  const corroboratingSourceIds = [...new Set(items.map((item) => item.sourceId).filter((id) => id !== representative.sourceId))];
+  const corroboratingSourceIds = [
+    ...new Set(items.map((item) => item.sourceId).filter((id) => id !== representative.sourceId)),
+  ];
   return { ...representative, corroboratingSourceIds };
 }
 
@@ -136,7 +198,11 @@ export function canonicalizeAndDedupe(items: Item[]): DedupeOutput {
   const deduped = finalGroups.map((group) => {
     const merged = mergeGroup(group);
     const corroboratingSourceIds = [
-      ...new Set(group.flatMap((entry) => [entry.sourceId, ...entry.corroboratingSourceIds]).filter((id) => id !== merged.sourceId)),
+      ...new Set(
+        group
+          .flatMap((entry) => [entry.sourceId, ...entry.corroboratingSourceIds])
+          .filter((id) => id !== merged.sourceId),
+      ),
     ];
     return { ...merged, corroboratingSourceIds };
   });

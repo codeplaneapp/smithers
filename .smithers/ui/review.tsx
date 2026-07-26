@@ -135,15 +135,7 @@ function extractSynthesis(value: unknown): Synthesis | null {
   return { approved: row.approved === true, feedback: asString(row.feedback) ?? "", issues };
 }
 
-export function ReviewerLane({
-  review,
-  open,
-  onToggle,
-}: {
-  review: ReviewRow;
-  open: boolean;
-  onToggle: () => void;
-}) {
+export function ReviewerLane({ review, open, onToggle }: { review: ReviewRow; open: boolean; onToggle: () => void }) {
   const feedbackId = `review-reviewer-feedback-${review.index}`;
   return (
     <Card
@@ -162,10 +154,7 @@ export function ReviewerLane({
     >
       <CardHeader>
         <CardTitle>{review.reviewer}</CardTitle>
-        <StatusPill
-          status={review.approved ? "finished" : "failed"}
-          label={review.approved ? "approved" : "denied"}
-        />
+        <StatusPill status={review.approved ? "finished" : "failed"} label={review.approved ? "approved" : "denied"} />
       </CardHeader>
       <CardContent id={feedbackId}>
         {open ? review.feedback || "No feedback provided." : review.feedback.slice(0, 180) || "No feedback provided."}
@@ -181,7 +170,6 @@ export function ReviewerLane({
     </Card>
   );
 }
-
 
 export function ReviewApp() {
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>(runIdFromUrl());
@@ -202,8 +190,7 @@ export function ReviewApp() {
   // Authoritative run record fetched by id (not limited to the recent-runs list),
   // so a deep ?runId= link or an older run still resolves its real status.
   const activeRunDetail = useGatewayRun(activeRunId);
-  const activeRun =
-    (activeRunDetail.data as RunSummary | undefined) ?? reviewRuns.find((r) => r.runId === activeRunId);
+  const activeRun = (activeRunDetail.data as RunSummary | undefined) ?? reviewRuns.find((r) => r.runId === activeRunId);
   const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
   const eventCount = (stream.events ?? []).length;
 
@@ -242,10 +229,13 @@ export function ReviewApp() {
   const allIssues = synthesis
     ? synthesis.issues.map((it) => ({ ...it, reviewer: "synthesized" }))
     : reviews.flatMap((r) => r.issues.map((it) => ({ ...it, reviewer: r.reviewer })));
-  const sevCounts = SEVERITIES.reduce((acc, s) => {
-    acc[s] = allIssues.filter((it) => it.severity === s).length;
-    return acc;
-  }, {} as Record<Severity, number>);
+  const sevCounts = SEVERITIES.reduce(
+    (acc, s) => {
+      acc[s] = allIssues.filter((it) => it.severity === s).length;
+      return acc;
+    },
+    {} as Record<Severity, number>,
+  );
   const visibleIssues = sevFilter === "all" ? allIssues : allIssues.filter((it) => it.severity === sevFilter);
   const issuesEmptyMessage = issuesEmptyMessageFor({
     verdictState,
@@ -255,7 +245,12 @@ export function ReviewApp() {
   });
 
   async function refresh() {
-    await Promise.all([runsQuery.refetch(), activeRunDetail.refetch(), moderator.refetch(), ...nodeQueries.map((q) => q.refetch())]);
+    await Promise.all([
+      runsQuery.refetch(),
+      activeRunDetail.refetch(),
+      moderator.refetch(),
+      ...nodeQueries.map((q) => q.refetch()),
+    ]);
   }
   async function launch() {
     setBusy(true);
@@ -278,29 +273,184 @@ export function ReviewApp() {
     }
   }
 
-  return <WorkflowUiShell
-    title="Review"
-    meta={activeRunId ? shortRunId(activeRunId) : "No run"}
-    actions={<>
-      {activeRun ? <StatusPill data-testid="review-status" status={activeRun.status ?? "idle"} /> : null}
-      <Input data-testid="review-prompt" value={prompt} onChange={(e) => setPrompt(e.currentTarget.value)} placeholder="What should be reviewed?" />
-      <Button variant="outline" data-testid="review-refresh" onClick={() => void refresh()} disabled={busy}>Refresh</Button>
-      {activeRun && !runTerminal ? <Button variant="destructive" data-testid="review-cancel" onClick={() => void cancel()} disabled={busy}>Cancel</Button> : null}
-      <Button data-testid="review-launch" onClick={() => void launch()} disabled={busy}>Launch Review</Button>
-    </>}
-    testId="review-ui"
-  >
-    <SmithersUiStyles />
-    {hasContent ? <>
-      <Card data-testid="review-verdict"><CardHeader><CardTitle>{verdictState === "pending" ? "Awaiting synthesized verdict" : verdictState === "missing" ? "No synthesized verdict — the moderator produced none" : verdictApproved ? "Approved — synthesized verdict" : "Blocked — synthesized verdict"}</CardTitle><StatusPill status={verdictState === "approved" ? "finished" : verdictState === "blocked" || verdictState === "missing" ? "failed" : "waiting"} /></CardHeader><CardContent><CardDescription>{approvedCount} of {reviews.length} panelists approved{verdictState === "pending" ? " · awaiting moderator synthesis" : verdictState === "missing" ? " · moderator produced no verdict" : " · moderator synthesized"}</CardDescription>{synthesis?.feedback ? <p data-testid="review-synthesis-feedback">{synthesis.feedback}</p> : null}{SEVERITIES.map((s) => <Badge key={s} variant={s === "critical" ? "destructive" : s === "major" || s === "minor" ? "warning" : "muted"}>{s} {sevCounts[s]}</Badge>)}</CardContent></Card>
-      <SectionHeader title={`Panelists (${reviews.length})`} />
-      <div data-testid="review-reviewers">{reviews.map((review) => <ReviewerLane key={review.index} review={review} open={openLanes[review.index] ?? false} onToggle={() => setOpenLanes((prev) => ({ ...prev, [review.index]: !prev[review.index] }))} />)}</div>
-      <SectionHeader title="Issues" actions={<Tabs value={sevFilter} onValueChange={(value) => setSevFilter(value as Severity | "all")}><TabsList><TabsTrigger value="all" data-testid="review-filter-all" count={allIssues.length}>All</TabsTrigger>{SEVERITIES.map((s) => <TabsTrigger key={s} value={s} data-testid={`review-filter-${s}`} count={sevCounts[s]}>{s}</TabsTrigger>)}</TabsList></Tabs>} />
-      <div data-testid="review-issues">{visibleIssues.map((it, i) => <Card key={i} data-testid="review-issue"><CardHeader><CardTitle>{it.title}</CardTitle><Badge variant={it.severity === "critical" ? "destructive" : it.severity === "nit" ? "muted" : "warning"}>{it.severity}</Badge></CardHeader><CardContent><CardDescription>{it.file ? `${it.file} · ` : ""}flagged by {it.reviewer}</CardDescription>{it.description}</CardContent></Card>)}{visibleIssues.length === 0 ? <EmptyState data-testid="review-issues-empty" title={issuesEmptyMessage} /> : null}</div>
-    </> : <EmptyState data-testid="review-empty" title={activeRunId ? "Waiting for the review panel…" : "No review runs yet."} description="Launch a review to have code changes examined by panelists and synthesized by a moderator." action={<Button data-testid="review-launch-empty" onClick={() => void launch()} disabled={busy}>Launch Review</Button>} />}
-    <SectionHeader title="Run activity" eyebrow={`${eventCount} events${nodeQueries.some((q) => q.loading) || moderator.loading ? " · refreshing…" : ""}`} />
-    <Tabs defaultValue="runs"><TabsList><TabsTrigger value="runs" count={reviewRuns.length}>Recent reviews</TabsTrigger><TabsTrigger value="tree">Run tree</TabsTrigger><TabsTrigger value="events" count={eventCount}>Events</TabsTrigger></TabsList><TabsContent value="runs">{reviewRuns.map((r) => <Button key={r.runId} variant={r.runId === activeRunId ? "default" : "ghost"} data-testid={`review-run-${r.runId}`} onClick={() => setSelectedRunId(r.runId)}>{shortRunId(r.runId)} <StatusPill status={r.status} />{r.runId === activeRunId && reviews.length > 0 ? `${approvedCount}/${reviews.length} approved` : ""}</Button>)}{reviewRuns.length === 0 ? <EmptyState title="No runs yet." /> : null}</TabsContent><TabsContent value="tree"><RunTree runId={activeRunId} activeNodeId={selectedNodeId} onSelectNode={(node) => setSelectedNodeId(node.id)} /><NodeOutputView runId={activeRunId} nodeId={selectedNodeId} /></TabsContent><TabsContent value="events"><RunEventLog runId={activeRunId} /></TabsContent></Tabs>
-  </WorkflowUiShell>;
+  return (
+    <WorkflowUiShell
+      title="Review"
+      meta={activeRunId ? shortRunId(activeRunId) : "No run"}
+      actions={
+        <>
+          {activeRun ? <StatusPill data-testid="review-status" status={activeRun.status ?? "idle"} /> : null}
+          <Input
+            data-testid="review-prompt"
+            value={prompt}
+            onChange={(e) => setPrompt(e.currentTarget.value)}
+            placeholder="What should be reviewed?"
+          />
+          <Button variant="outline" data-testid="review-refresh" onClick={() => void refresh()} disabled={busy}>
+            Refresh
+          </Button>
+          {activeRun && !runTerminal ? (
+            <Button variant="destructive" data-testid="review-cancel" onClick={() => void cancel()} disabled={busy}>
+              Cancel
+            </Button>
+          ) : null}
+          <Button data-testid="review-launch" onClick={() => void launch()} disabled={busy}>
+            Launch Review
+          </Button>
+        </>
+      }
+      testId="review-ui"
+    >
+      <SmithersUiStyles />
+      {hasContent ? (
+        <>
+          <Card data-testid="review-verdict">
+            <CardHeader>
+              <CardTitle>
+                {verdictState === "pending"
+                  ? "Awaiting synthesized verdict"
+                  : verdictState === "missing"
+                    ? "No synthesized verdict — the moderator produced none"
+                    : verdictApproved
+                      ? "Approved — synthesized verdict"
+                      : "Blocked — synthesized verdict"}
+              </CardTitle>
+              <StatusPill
+                status={
+                  verdictState === "approved"
+                    ? "finished"
+                    : verdictState === "blocked" || verdictState === "missing"
+                      ? "failed"
+                      : "waiting"
+                }
+              />
+            </CardHeader>
+            <CardContent>
+              <CardDescription>
+                {approvedCount} of {reviews.length} panelists approved
+                {verdictState === "pending"
+                  ? " · awaiting moderator synthesis"
+                  : verdictState === "missing"
+                    ? " · moderator produced no verdict"
+                    : " · moderator synthesized"}
+              </CardDescription>
+              {synthesis?.feedback ? <p data-testid="review-synthesis-feedback">{synthesis.feedback}</p> : null}
+              {SEVERITIES.map((s) => (
+                <Badge
+                  key={s}
+                  variant={s === "critical" ? "destructive" : s === "major" || s === "minor" ? "warning" : "muted"}
+                >
+                  {s} {sevCounts[s]}
+                </Badge>
+              ))}
+            </CardContent>
+          </Card>
+          <SectionHeader title={`Panelists (${reviews.length})`} />
+          <div data-testid="review-reviewers">
+            {reviews.map((review) => (
+              <ReviewerLane
+                key={review.index}
+                review={review}
+                open={openLanes[review.index] ?? false}
+                onToggle={() => setOpenLanes((prev) => ({ ...prev, [review.index]: !prev[review.index] }))}
+              />
+            ))}
+          </div>
+          <SectionHeader
+            title="Issues"
+            actions={
+              <Tabs value={sevFilter} onValueChange={(value) => setSevFilter(value as Severity | "all")}>
+                <TabsList>
+                  <TabsTrigger value="all" data-testid="review-filter-all" count={allIssues.length}>
+                    All
+                  </TabsTrigger>
+                  {SEVERITIES.map((s) => (
+                    <TabsTrigger key={s} value={s} data-testid={`review-filter-${s}`} count={sevCounts[s]}>
+                      {s}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
+            }
+          />
+          <div data-testid="review-issues">
+            {visibleIssues.map((it, i) => (
+              <Card key={i} data-testid="review-issue">
+                <CardHeader>
+                  <CardTitle>{it.title}</CardTitle>
+                  <Badge
+                    variant={it.severity === "critical" ? "destructive" : it.severity === "nit" ? "muted" : "warning"}
+                  >
+                    {it.severity}
+                  </Badge>
+                </CardHeader>
+                <CardContent>
+                  <CardDescription>
+                    {it.file ? `${it.file} · ` : ""}flagged by {it.reviewer}
+                  </CardDescription>
+                  {it.description}
+                </CardContent>
+              </Card>
+            ))}
+            {visibleIssues.length === 0 ? (
+              <EmptyState data-testid="review-issues-empty" title={issuesEmptyMessage} />
+            ) : null}
+          </div>
+        </>
+      ) : (
+        <EmptyState
+          data-testid="review-empty"
+          title={activeRunId ? "Waiting for the review panel…" : "No review runs yet."}
+          description="Launch a review to have code changes examined by panelists and synthesized by a moderator."
+          action={
+            <Button data-testid="review-launch-empty" onClick={() => void launch()} disabled={busy}>
+              Launch Review
+            </Button>
+          }
+        />
+      )}
+      <SectionHeader
+        title="Run activity"
+        eyebrow={`${eventCount} events${nodeQueries.some((q) => q.loading) || moderator.loading ? " · refreshing…" : ""}`}
+      />
+      <Tabs defaultValue="runs">
+        <TabsList>
+          <TabsTrigger value="runs" count={reviewRuns.length}>
+            Recent reviews
+          </TabsTrigger>
+          <TabsTrigger value="tree">Run tree</TabsTrigger>
+          <TabsTrigger value="events" count={eventCount}>
+            Events
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="runs">
+          {reviewRuns.map((r) => (
+            <Button
+              key={r.runId}
+              variant={r.runId === activeRunId ? "default" : "ghost"}
+              data-testid={`review-run-${r.runId}`}
+              onClick={() => setSelectedRunId(r.runId)}
+            >
+              {shortRunId(r.runId)} <StatusPill status={r.status} />
+              {r.runId === activeRunId && reviews.length > 0 ? `${approvedCount}/${reviews.length} approved` : ""}
+            </Button>
+          ))}
+          {reviewRuns.length === 0 ? <EmptyState title="No runs yet." /> : null}
+        </TabsContent>
+        <TabsContent value="tree">
+          <RunTree
+            runId={activeRunId}
+            activeNodeId={selectedNodeId}
+            onSelectNode={(node) => setSelectedNodeId(node.id)}
+          />
+          <NodeOutputView runId={activeRunId} nodeId={selectedNodeId} />
+        </TabsContent>
+        <TabsContent value="events">
+          <RunEventLog runId={activeRunId} />
+        </TabsContent>
+      </Tabs>
+    </WorkflowUiShell>
+  );
 }
 
 // Guard the mount so this module can be imported by unit tests (which exercise

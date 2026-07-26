@@ -63,15 +63,9 @@ function FileBody({ diffId, file }: { diffId: string; file: DiffFile }) {
     <>
       {status === "deleted" ? <div className="diff-notice is-deleted">File deleted</div> : null}
       {status === "added" ? <div className="diff-notice is-added">New file</div> : null}
-      {file.partial ? (
-        <div className="diff-partial-warn">Partial parse: some hunks could not be rendered.</div>
-      ) : null}
+      {file.partial ? <div className="diff-partial-warn">Partial parse: some hunks could not be rendered.</div> : null}
       {file.lines.length > 0 ? (
-        <DiffHunks
-          file={file}
-          revealed={revealed}
-          onReveal={() => revealRemaining(diffId, file.path)}
-        />
+        <DiffHunks file={file} revealed={revealed} onReveal={() => revealRemaining(diffId, file.path)} />
       ) : null}
     </>
   );
@@ -139,8 +133,7 @@ export function DiffCanvas() {
       <header className="surface-head">
         <span className="surface-title">{diff.title}</span>
         <span className="surface-sub">
-          {totals.files} file{totals.files === 1 ? "" : "s"} ·{" "}
-          <span className="delta-add">+{totals.add}</span>{" "}
+          {totals.files} file{totals.files === 1 ? "" : "s"} · <span className="delta-add">+{totals.add}</span>{" "}
           <span className="delta-del">−{totals.del}</span>
         </span>
         <div className="seg" data-testid="diff-expand-controls">
@@ -178,9 +171,7 @@ export function DiffCanvas() {
         </div>
 
         <div className="diff-view">
-          {large ? (
-            <div className="diff-large-warn">Large diff — expand files individually.</div>
-          ) : null}
+          {large ? <div className="diff-large-warn">Large diff — expand files individually.</div> : null}
           {diff.files.map((file, index) => {
             const open = expanded.includes(file.path);
             const binary = detectBinary(file);

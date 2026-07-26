@@ -5,9 +5,7 @@ interface JwksCacheEntry {
   keys?: JsonWebKey[];
   inFlight?: Promise<JsonWebKey[]>;
   lastMissRefreshAt?: number;
-  lastRefreshFailure?:
-    | { at: number; kind: "inadmissible" }
-    | { at: number; kind: "error"; error: unknown };
+  lastRefreshFailure?: { at: number; kind: "inadmissible" } | { at: number; kind: "error"; error: unknown };
 }
 
 /**

@@ -15,12 +15,7 @@ export type TicketFleetLaneFacts = {
   evictionCount: number;
 };
 
-export type TicketFleetDispositionKind =
-  | "landed"
-  | "parked"
-  | "failed-readiness"
-  | "unlanded"
-  | "pending";
+export type TicketFleetDispositionKind = "landed" | "parked" | "failed-readiness" | "unlanded" | "pending";
 
 export type TicketFleetDispositionRow = {
   issueNumber: number;
@@ -142,9 +137,10 @@ function classifyLane(
 
   let pendingReason = "Readiness has not completed.";
   if (lane.readiness?.ready === true) {
-    pendingReason = lane.needsApproval && !lane.approval
-      ? "Merge approval is pending."
-      : "Ready candidate is awaiting merge-train landing.";
+    pendingReason =
+      lane.needsApproval && !lane.approval
+        ? "Merge approval is pending."
+        : "Ready candidate is awaiting merge-train landing.";
   }
 
   return {

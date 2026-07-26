@@ -49,9 +49,7 @@ export function CronsCard() {
             </div>
           </div>
         ))}
-        {summary.total > shown.length ? (
-          <div className="rev-more">+{summary.total - shown.length} more</div>
-        ) : null}
+        {summary.total > shown.length ? <div className="rev-more">+{summary.total - shown.length} more</div> : null}
       </div>
 
       <footer className="card-foot">

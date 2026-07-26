@@ -119,9 +119,7 @@ test("separates cleanly from content that does not end in a newline", () => {
 
   noteWorkflowPreferenceInAgentDocs({ projectRoot: root });
 
-  expect(readFileSync(path, "utf8")).toContain(
-    "no trailing newline\n\n<!-- smithers:prefer-workflows START -->",
-  );
+  expect(readFileSync(path, "utf8")).toContain("no trailing newline\n\n<!-- smithers:prefer-workflows START -->");
 });
 
 test("honors a custom fileNames list", () => {

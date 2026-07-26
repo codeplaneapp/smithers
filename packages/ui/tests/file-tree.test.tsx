@@ -37,12 +37,7 @@ async function click(el: Element): Promise<void> {
   });
 }
 
-const PATHS = [
-  "src/app/main.ts",
-  "src/app/util/helpers.ts",
-  "src/index.ts",
-  "README.md",
-];
+const PATHS = ["src/app/main.ts", "src/app/util/helpers.ts", "src/index.ts", "README.md"];
 
 function files(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>('[data-slot="file-tree-file"]'));
@@ -59,9 +54,7 @@ describe("FileTree", () => {
     expect(container!.querySelector('[role="treeitem"]')).toBeNull();
 
     // Directories: src, src/app, src/app/util (README.md is a root leaf).
-    const dirNames = dirToggles().map((toggle) =>
-      toggle.querySelector(".sui-file-tree-dir-name")?.textContent,
-    );
+    const dirNames = dirToggles().map((toggle) => toggle.querySelector(".sui-file-tree-dir-name")?.textContent);
     expect(dirNames).toEqual(["src", "app", "util"]);
 
     // All four leaves render, labelled by their last path segment.
@@ -85,13 +78,7 @@ describe("FileTree", () => {
   test("fires onSelect with the node path and applies the active highlight", async () => {
     const selected: string[] = [];
     function Harness() {
-      return (
-        <FileTree
-          nodes={PATHS}
-          selected="src/index.ts"
-          onSelect={(path) => selected.push(path)}
-        />
-      );
+      return <FileTree nodes={PATHS} selected="src/index.ts" onSelect={(path) => selected.push(path)} />;
     }
     await render(<Harness />);
 
@@ -110,9 +97,7 @@ describe("FileTree", () => {
     await render(
       <FileTree
         nodes={PATHS}
-        renderAffordance={(node) =>
-          node.path === "README.md" ? <span data-testid="dirty" /> : null
-        }
+        renderAffordance={(node) => (node.path === "README.md" ? <span data-testid="dirty" /> : null)}
       />,
     );
 
@@ -124,19 +109,13 @@ describe("FileTree", () => {
 
   test("accepts full nodes with custom labels and honors defaultCollapsed", async () => {
     await render(
-      <FileTree
-        nodes={[{ path: "src/app/main.ts", label: "Entry point" }, "docs/guide.md"]}
-        defaultCollapsed
-      />,
+      <FileTree nodes={[{ path: "src/app/main.ts", label: "Entry point" }, "docs/guide.md"]} defaultCollapsed />,
     );
 
     // Every directory starts collapsed: only the two top-level dirs are visible,
     // and no leaf shows yet.
     expect(files().length).toBe(0);
-    expect(dirToggles().map((toggle) => toggle.getAttribute("aria-expanded"))).toEqual([
-      "false",
-      "false",
-    ]);
+    expect(dirToggles().map((toggle) => toggle.getAttribute("aria-expanded"))).toEqual(["false", "false"]);
 
     // Drill into src -> app -> the custom-labelled leaf.
     await click(dirToggles()[0]!);

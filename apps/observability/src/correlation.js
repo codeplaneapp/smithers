@@ -1,9 +1,23 @@
-import { getCurrentCorrelationContext as getCoreCurrentCorrelationContext, mergeCorrelationContext as mergeCoreCorrelationContext, } from "./_coreCorrelation/index.js";
+import {
+  getCurrentCorrelationContext as getCoreCurrentCorrelationContext,
+  mergeCorrelationContext as mergeCoreCorrelationContext,
+} from "./_coreCorrelation/index.js";
 /** @typedef {import("./_coreCorrelation/CorrelationContext.ts").CorrelationContext} CorrelationContext */
 /** @typedef {import("./_coreCorrelation/CorrelationPatch.ts").CorrelationPatch} CorrelationPatch */
 /** @typedef {CorrelationPatch} CorrelationContextPatch */
 
-export { correlationContextFiberRef, correlationContextToLogAnnotations, CorrelationContextLive, CorrelationContextService, getCurrentCorrelationContext, getCurrentCorrelationContextEffect, mergeCorrelationContext, runWithCorrelationContext, withCorrelationContext, withCurrentCorrelationContext, } from "./_coreCorrelation/index.js";
+export {
+  correlationContextFiberRef,
+  correlationContextToLogAnnotations,
+  CorrelationContextLive,
+  CorrelationContextService,
+  getCurrentCorrelationContext,
+  getCurrentCorrelationContextEffect,
+  mergeCorrelationContext,
+  runWithCorrelationContext,
+  withCorrelationContext,
+  withCurrentCorrelationContext,
+} from "./_coreCorrelation/index.js";
 /**
  * Temporary compatibility shim for legacy, non-Effect callers.
  *
@@ -29,16 +43,14 @@ export { correlationContextFiberRef, correlationContextToLogAnnotations, Correla
  * @returns {void}
  */
 export function updateCurrentCorrelationContext(patch) {
-    const current = getCoreCurrentCorrelationContext();
-    if (!current)
-        return;
-    // Compatibility shim: mutate the current context in place rather than
-    // setting a new FiberRef value. See the JSDoc above — this preserves
-    // behavior for legacy callers and is intentional, not a bug. Remove once
-    // those callers adopt the Effect-returning core
-    // updateCurrentCorrelationContext.
-    const next = mergeCoreCorrelationContext(current, patch);
-    if (!next)
-        return;
-    Object.assign(current, next);
+  const current = getCoreCurrentCorrelationContext();
+  if (!current) return;
+  // Compatibility shim: mutate the current context in place rather than
+  // setting a new FiberRef value. See the JSDoc above — this preserves
+  // behavior for legacy callers and is intentional, not a bug. Remove once
+  // those callers adopt the Effect-returning core
+  // updateCurrentCorrelationContext.
+  const next = mergeCoreCorrelationContext(current, patch);
+  if (!next) return;
+  Object.assign(current, next);
 }

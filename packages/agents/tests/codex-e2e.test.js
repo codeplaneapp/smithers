@@ -34,9 +34,7 @@ try {
   supportsCodexE2EFlags = false;
 }
 
-describe.skipIf(!runRealAgentE2E || !isCodexInstalled || !supportsCodexE2EFlags)(
-  "CodexAgent E2E (real CLI)",
-  () => {
+describe.skipIf(!runRealAgentE2E || !isCodexInstalled || !supportsCodexE2EFlags)("CodexAgent E2E (real CLI)", () => {
   /** @type {string} */
   let tmpDir;
 
@@ -97,5 +95,4 @@ describe.skipIf(!runRealAgentE2E || !isCodexInstalled || !supportsCodexE2EFlags)
     expect(completed.engine).toBe("codex");
     expect(completed.ok).toBe(true);
   }, 120_000);
-  }
-);
+});

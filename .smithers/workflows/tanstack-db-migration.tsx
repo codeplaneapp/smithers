@@ -131,9 +131,34 @@ const { Workflow, Task, Sequence, Parallel, Approval, Worktree, smithers, output
 // Codex 5.6 role split. Opus/Sonnet remain fallback-only.
 const opusFallback = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
 const sonnetFallback = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
-const solAgent = codexFirst({ model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [opusFallback]);
-const lunaAgent = codexFirst({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [sonnetFallback]);
-const terraAgent = codexFirst({ model: "gpt-5.6-terra", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [sonnetFallback]);
+const solAgent = codexFirst(
+  {
+    model: "gpt-5.6-sol",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
+  [opusFallback],
+);
+const lunaAgent = codexFirst(
+  {
+    model: "gpt-5.6-luna",
+    config: { model_reasoning_effort: "medium" },
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
+  [sonnetFallback],
+);
+const terraAgent = codexFirst(
+  {
+    model: "gpt-5.6-terra",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
+  [sonnetFallback],
+);
 
 const RETRIES = 2;
 const DESIGN_TIMEOUT_MS = 30 * 60_000;
@@ -164,13 +189,17 @@ function commitWorktree(path: string, branch: string, subject: string) {
     const sha = git(["rev-parse", "HEAD"]).trim();
     return { ...base, committed: true, sha, summary: `Committed ${branch} @ ${sha.slice(0, 10)}.` };
   } catch (err) {
-    return { ...base, summary: `Commit failed on ${branch}: ${String(err instanceof Error ? err.message : err).slice(0, 600)}` };
+    return {
+      ...base,
+      summary: `Commit failed on ${branch}: ${String(err instanceof Error ? err.message : err).slice(0, 600)}`,
+    };
   }
 }
 
 /** After approval: push the integrate branch and open a DRAFT PR (never auto-merges main). */
 function openLandingPr(path: string, branch: string) {
-  const git = (args: string[]) => execFileSync("git", args, { cwd: path, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const git = (args: string[]) =>
+    execFileSync("git", args, { cwd: path, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   const gh = (args: string[]) => execFileSync("gh", args, { cwd: path, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   const base = { pushed: false, prNumber: null as number | null, prUrl: null as string | null, summary: "" };
   try {
@@ -190,7 +219,19 @@ function openLandingPr(path: string, branch: string) {
     let prUrl: string;
     let prNumber: number;
     try {
-      prUrl = gh(["pr", "create", "--draft", "--head", branch, "--base", "main", "--title", title, "--body", body]).trim();
+      prUrl = gh([
+        "pr",
+        "create",
+        "--draft",
+        "--head",
+        branch,
+        "--base",
+        "main",
+        "--title",
+        title,
+        "--body",
+        body,
+      ]).trim();
       prNumber = Number(prUrl.split("/").pop());
     } catch {
       const view = gh(["pr", "view", branch, "--json", "number,url"]);
@@ -281,7 +322,10 @@ function designBlock(design: Design | undefined): string {
 
 function reviewFeedbackBlock(opus?: Review, codex?: Review): string {
   const parts: string[] = [];
-  for (const [who, r] of [["OPUS", opus], ["CODEX", codex]] as const) {
+  for (const [who, r] of [
+    ["OPUS", opus],
+    ["CODEX", codex],
+  ] as const) {
     if (r && !r.approved) {
       parts.push(`${who} REVIEW — CHANGES REQUIRED:\n${r.feedback}`);
       for (const i of r.issues ?? []) {
@@ -371,7 +415,9 @@ function clientVerifyPrompt(feedback: string): string {
     "",
     ARCH,
     "",
-    feedback ? `Apply ALL of this review feedback, then verify:\n${feedback}\n` : "No blocking review feedback; verify and harden.",
+    feedback
+      ? `Apply ALL of this review feedback, then verify:\n${feedback}\n`
+      : "No blocking review feedback; verify and harden.",
     "",
     "Then ensure green: run `pnpm install` (if node_modules absent), `pnpm --filter @smithers-orchestrator/gateway-client typecheck`,",
     "and `pnpm --filter @smithers-orchestrator/gateway-client test`. Fix every type error and test failure until both pass.",
@@ -509,29 +555,70 @@ export default smithers((ctx) => {
     <Workflow name="tanstack-db-migration">
       <Sequence>
         {/* Phase 0 — design + freeze the public hook contract (read-only, repo root). */}
-        <Task id="design" output={outputs.design} agent={solAgent} retries={RETRIES} timeoutMs={DESIGN_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+        <Task
+          id="design"
+          output={outputs.design}
+          agent={solAgent}
+          retries={RETRIES}
+          timeoutMs={DESIGN_TIMEOUT_MS}
+          heartbeatTimeoutMs={HEARTBEAT_MS}
+        >
           {designPrompt()}
         </Task>
 
         {/* Phase 1 — gateway-client foundation, committed to CLIENT_BRANCH. */}
         <Worktree path={wt("tanstack-db-client")} branch={CLIENT_BRANCH} baseBranch="main">
           <Sequence>
-            <Task id="client-impl" output={outputs.clientImpl} agent={lunaAgent} retries={RETRIES} timeoutMs={IMPL_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+            <Task
+              id="client-impl"
+              output={outputs.clientImpl}
+              agent={lunaAgent}
+              retries={RETRIES}
+              timeoutMs={IMPL_TIMEOUT_MS}
+              heartbeatTimeoutMs={HEARTBEAT_MS}
+            >
               {clientImplPrompt(design, clientFeedback)}
             </Task>
             <Parallel maxConcurrency={2}>
-              <Task id="client-review-opus" output={outputs.clientReviewOpus} agent={solAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task
+                id="client-review-opus"
+                output={outputs.clientReviewOpus}
+                agent={solAgent}
+                retries={RETRIES}
+                timeoutMs={REVIEW_TIMEOUT_MS}
+                heartbeatTimeoutMs={HEARTBEAT_MS}
+              >
                 {clientReviewPrompt("opus")}
               </Task>
-              <Task id="client-review-codex" output={outputs.clientReviewCodex} agent={solAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task
+                id="client-review-codex"
+                output={outputs.clientReviewCodex}
+                agent={solAgent}
+                retries={RETRIES}
+                timeoutMs={REVIEW_TIMEOUT_MS}
+                heartbeatTimeoutMs={HEARTBEAT_MS}
+              >
                 {clientReviewPrompt("codex")}
               </Task>
             </Parallel>
-            <Task id="client-fix-verify" output={outputs.clientVerify} agent={lunaAgent} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+            <Task
+              id="client-fix-verify"
+              output={outputs.clientVerify}
+              agent={lunaAgent}
+              retries={RETRIES}
+              timeoutMs={VERIFY_TIMEOUT_MS}
+              heartbeatTimeoutMs={HEARTBEAT_MS}
+            >
               {clientVerifyPrompt(clientFeedback)}
             </Task>
             <Task id="client-commit" output={outputs.clientCommit} timeoutMs={5 * 60_000}>
-              {() => commitWorktree(wt("tanstack-db-client"), CLIENT_BRANCH, "✨ feat(gateway-client): TanStack DB collections + collection-options-creator over the gateway transport")}
+              {() =>
+                commitWorktree(
+                  wt("tanstack-db-client"),
+                  CLIENT_BRANCH,
+                  "✨ feat(gateway-client): TanStack DB collections + collection-options-creator over the gateway transport",
+                )
+              }
             </Task>
           </Sequence>
         </Worktree>
@@ -540,27 +627,67 @@ export default smithers((ctx) => {
         <Parallel maxConcurrency={2}>
           <Worktree path={wt("tanstack-db-react")} branch={REACT_BRANCH} baseBranch={CLIENT_BRANCH}>
             <Sequence>
-              <Task id="react-impl" output={outputs.reactImpl} agent={lunaAgent} retries={RETRIES} timeoutMs={IMPL_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task
+                id="react-impl"
+                output={outputs.reactImpl}
+                agent={lunaAgent}
+                retries={RETRIES}
+                timeoutMs={IMPL_TIMEOUT_MS}
+                heartbeatTimeoutMs={HEARTBEAT_MS}
+              >
                 {reactImplPrompt(design)}
               </Task>
-              <Task id="react-verify" output={outputs.reactVerify} agent={terraAgent} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task
+                id="react-verify"
+                output={outputs.reactVerify}
+                agent={terraAgent}
+                retries={RETRIES}
+                timeoutMs={VERIFY_TIMEOUT_MS}
+                heartbeatTimeoutMs={HEARTBEAT_MS}
+              >
                 {reactVerifyPrompt()}
               </Task>
               <Task id="react-commit" output={outputs.reactCommit} timeoutMs={5 * 60_000}>
-                {() => commitWorktree(wt("tanstack-db-react"), REACT_BRANCH, "✨ feat(gateway-react): reimplement sync hooks on @tanstack/react-db + devtools/status hooks")}
+                {() =>
+                  commitWorktree(
+                    wt("tanstack-db-react"),
+                    REACT_BRANCH,
+                    "✨ feat(gateway-react): reimplement sync hooks on @tanstack/react-db + devtools/status hooks",
+                  )
+                }
               </Task>
             </Sequence>
           </Worktree>
           <Worktree path={wt("tanstack-db-app")} branch={APP_BRANCH} baseBranch={CLIENT_BRANCH}>
             <Sequence>
-              <Task id="app-impl" output={outputs.appImpl} agent={lunaAgent} retries={RETRIES} timeoutMs={IMPL_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task
+                id="app-impl"
+                output={outputs.appImpl}
+                agent={lunaAgent}
+                retries={RETRIES}
+                timeoutMs={IMPL_TIMEOUT_MS}
+                heartbeatTimeoutMs={HEARTBEAT_MS}
+              >
                 {appImplPrompt(design)}
               </Task>
-              <Task id="app-verify" output={outputs.appVerify} agent={terraAgent} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task
+                id="app-verify"
+                output={outputs.appVerify}
+                agent={terraAgent}
+                retries={RETRIES}
+                timeoutMs={VERIFY_TIMEOUT_MS}
+                heartbeatTimeoutMs={HEARTBEAT_MS}
+              >
                 {appVerifyPrompt()}
               </Task>
               <Task id="app-commit" output={outputs.appCommit} timeoutMs={5 * 60_000}>
-                {() => commitWorktree(wt("tanstack-db-app"), APP_BRANCH, "✨ feat(apps/smithers): rewire gateway UI onto gateway-react TanStack DB hooks")}
+                {() =>
+                  commitWorktree(
+                    wt("tanstack-db-app"),
+                    APP_BRANCH,
+                    "✨ feat(apps/smithers): rewire gateway UI onto gateway-react TanStack DB hooks",
+                  )
+                }
               </Task>
             </Sequence>
           </Worktree>
@@ -569,11 +696,24 @@ export default smithers((ctx) => {
         {/* Phase 3 — integrate: merge the two branches, green-build everything. */}
         <Worktree path={wt("tanstack-db-integrate")} branch={INTEGRATE_BRANCH} baseBranch={CLIENT_BRANCH}>
           <Sequence>
-            <Task id="integrate" output={outputs.integrate} agent={lunaAgent} retries={RETRIES} timeoutMs={INTEGRATE_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+            <Task
+              id="integrate"
+              output={outputs.integrate}
+              agent={lunaAgent}
+              retries={RETRIES}
+              timeoutMs={INTEGRATE_TIMEOUT_MS}
+              heartbeatTimeoutMs={HEARTBEAT_MS}
+            >
               {integratePrompt()}
             </Task>
             <Task id="integrate-commit" output={outputs.integrateCommit} timeoutMs={5 * 60_000}>
-              {() => commitWorktree(wt("tanstack-db-integrate"), INTEGRATE_BRANCH, "✨ feat(gateway): integrate TanStack DB migration across client + react + app")}
+              {() =>
+                commitWorktree(
+                  wt("tanstack-db-integrate"),
+                  INTEGRATE_BRANCH,
+                  "✨ feat(gateway): integrate TanStack DB migration across client + react + app",
+                )
+              }
             </Task>
           </Sequence>
         </Worktree>

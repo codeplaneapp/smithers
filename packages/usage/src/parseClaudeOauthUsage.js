@@ -10,17 +10,17 @@
  * @returns {UsageWindow | undefined}
  */
 function windowFrom(block, id, label) {
-    if (!block || typeof block !== "object") return undefined;
-    const util = /** @type {{ utilization?: unknown }} */ (block).utilization;
-    if (typeof util !== "number") return undefined;
-    const resetsAt = /** @type {{ resets_at?: unknown }} */ (block).resets_at;
-    return {
-        id,
-        label,
-        unit: "percent",
-        usedPercent: util,
-        resetsAt: typeof resetsAt === "string" ? resetsAt : undefined,
-    };
+  if (!block || typeof block !== "object") return undefined;
+  const util = /** @type {{ utilization?: unknown }} */ (block).utilization;
+  if (typeof util !== "number") return undefined;
+  const resetsAt = /** @type {{ resets_at?: unknown }} */ (block).resets_at;
+  return {
+    id,
+    label,
+    unit: "percent",
+    usedPercent: util,
+    resetsAt: typeof resetsAt === "string" ? resetsAt : undefined,
+  };
 }
 
 /**
@@ -32,16 +32,16 @@ function windowFrom(block, id, label) {
  * @returns {UsageWindow[]}
  */
 export function parseClaudeOauthUsage(payload) {
-    if (!payload || typeof payload !== "object") return [];
-    const p = /** @type {Record<string, unknown>} */ (payload);
-    const windows = [];
-    const fiveHour = windowFrom(p.five_hour, "5h", "5-hour session");
-    if (fiveHour) windows.push(fiveHour);
-    const weekly = windowFrom(p.seven_day, "weekly", "weekly");
-    if (weekly) windows.push(weekly);
-    const opus = windowFrom(p.seven_day_opus, "weekly-opus", "weekly (Opus)");
-    if (opus) windows.push(opus);
-    const sonnet = windowFrom(p.seven_day_sonnet, "weekly-sonnet", "weekly (Sonnet)");
-    if (sonnet) windows.push(sonnet);
-    return windows;
+  if (!payload || typeof payload !== "object") return [];
+  const p = /** @type {Record<string, unknown>} */ (payload);
+  const windows = [];
+  const fiveHour = windowFrom(p.five_hour, "5h", "5-hour session");
+  if (fiveHour) windows.push(fiveHour);
+  const weekly = windowFrom(p.seven_day, "weekly", "weekly");
+  if (weekly) windows.push(weekly);
+  const opus = windowFrom(p.seven_day_opus, "weekly-opus", "weekly (Opus)");
+  if (opus) windows.push(opus);
+  const sonnet = windowFrom(p.seven_day_sonnet, "weekly-sonnet", "weekly (Sonnet)");
+  if (sonnet) windows.push(sonnet);
+  return windows;
 }

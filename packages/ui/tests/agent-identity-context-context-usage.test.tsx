@@ -92,7 +92,14 @@ describe("ContextUsage", () => {
     const html = renderToStaticMarkup(
       <ContextUsage
         defaultOpen
-        usage={{ modelId: "claude-opus-4", usedTokens: 8000, maxTokens: 32000, inputTokens: 5000, outputTokens: 3000, costUsd: 0.42 }}
+        usage={{
+          modelId: "claude-opus-4",
+          usedTokens: 8000,
+          maxTokens: 32000,
+          inputTokens: 5000,
+          outputTokens: 3000,
+          costUsd: 0.42,
+        }}
       />,
     );
     expect(html).toContain('data-slot="context-content"');
@@ -181,9 +188,9 @@ describe("ContextUsage", () => {
     await act(async () => trigger.click());
     expect(container!.querySelector('[data-slot="context-content"]')).not.toBeNull();
     await act(async () => {
-      container!.querySelector('[data-slot="context-usage"]')!.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-      );
+      container!
+        .querySelector('[data-slot="context-usage"]')!
+        .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
     expect(container!.querySelector('[data-slot="context-content"]')).toBeNull();
     expect(document.activeElement).toBe(trigger);

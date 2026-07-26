@@ -315,7 +315,9 @@ describe("createDelegationChainStore — record assembly", () => {
     try {
       // A single batch, pushed once: no further input and no second finish.
       store.push(
-        inputs({ events: [{ event: "node.finished", payload: { runId: RUN_ID, nodeId: "dc:root:plan", iteration: 0 } }] }),
+        inputs({
+          events: [{ event: "node.finished", payload: { runId: RUN_ID, nodeId: "dc:root:plan", iteration: 0 } }],
+        }),
       );
       await waitFor(() => store.getSnapshot().hydrated);
       await settle(updates);
@@ -341,7 +343,9 @@ describe("createDelegationChainStore — record assembly", () => {
     const { store, updates, unsubscribe } = trackedStore(brokenApi);
     try {
       store.push(
-        inputs({ events: [{ event: "node.finished", payload: { runId: RUN_ID, nodeId: "dc:root:plan", iteration: 0 } }] }),
+        inputs({
+          events: [{ event: "node.finished", payload: { runId: RUN_ID, nodeId: "dc:root:plan", iteration: 0 } }],
+        }),
       );
       await waitFor(() => store.getSnapshot().hydrated);
       await settle(updates);

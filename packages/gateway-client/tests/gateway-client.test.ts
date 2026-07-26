@@ -248,13 +248,17 @@ describe("SmithersGatewayClient HTTP RPC", () => {
 
   test("preserves gateway error details on failed RPC frames", async () => {
     const client = new SmithersGatewayClient({
-      fetch: async () => errorResponse({
-        code: "Forbidden",
-        message: "Missing scope.",
-        requiredScope: "run:write",
-        refresh: "reauth",
-        details: { scope: "run:write" },
-      }, 403),
+      fetch: async () =>
+        errorResponse(
+          {
+            code: "Forbidden",
+            message: "Missing scope.",
+            requiredScope: "run:write",
+            refresh: "reauth",
+            details: { scope: "run:write" },
+          },
+          403,
+        ),
     });
 
     const failure = client.resumeRun({ runId: "run-1" }).catch((error) => error);
@@ -416,18 +420,20 @@ describe("SmithersGatewayConnection WebSocket RPC", () => {
         message: "blocked",
         details: {
           report: {
-            blocking: [{
-              kind: "tool",
-              toolName: "publish",
-              nodeId: "task",
-              iteration: 0,
-              attempt: 1,
-              seq: 1,
-              effectStatus: "succeeded",
-              idempotent: false,
-              hasRevert: false,
-              startedAtMs: 1,
-            }],
+            blocking: [
+              {
+                kind: "tool",
+                toolName: "publish",
+                nodeId: "task",
+                iteration: 0,
+                attempt: 1,
+                seq: 1,
+                effectStatus: "succeeded",
+                idempotent: false,
+                hasRevert: false,
+                startedAtMs: 1,
+              },
+            ],
             revertible: [],
             warnings: [],
           },

@@ -1,12 +1,6 @@
 import { useEffect } from "react";
-import {
-  useGatewayApprovals,
-  useGatewayMutation,
-} from "@smithers-orchestrator/gateway-react";
-import {
-  gatewayKeys,
-  type GatewayApprovalRow,
-} from "@smithers-orchestrator/gateway-client";
+import { useGatewayApprovals, useGatewayMutation } from "@smithers-orchestrator/gateway-react";
+import { gatewayKeys, type GatewayApprovalRow } from "@smithers-orchestrator/gateway-client";
 import { useLocalModeRefetch } from "../sync/useLocalModeRefetch";
 import type { ApprovalGate } from "./approvals";
 import { bindApprovalActions, syncSelection, useApprovalsStore } from "./approvalsStore";
@@ -86,18 +80,11 @@ export function toApprovalGate(row: GatewayApprovalRow, nowMs: number): Approval
       requestedAtMs = existing;
     }
   }
-  const gate =
-    typeof row.requestTitle === "string" && row.requestTitle.trim() !== ""
-      ? row.requestTitle
-      : row.nodeId;
+  const gate = typeof row.requestTitle === "string" && row.requestTitle.trim() !== "" ? row.requestTitle : row.nodeId;
   const workflowPath =
-    typeof row.workflowKey === "string" && row.workflowKey.trim() !== ""
-      ? row.workflowKey
-      : undefined;
+    typeof row.workflowKey === "string" && row.workflowKey.trim() !== "" ? row.workflowKey : undefined;
   const summary =
-    typeof row.requestSummary === "string" && row.requestSummary.trim() !== ""
-      ? row.requestSummary
-      : undefined;
+    typeof row.requestSummary === "string" && row.requestSummary.trim() !== "" ? row.requestSummary : undefined;
   return {
     id: `${row.runId}:${row.nodeId}:${iteration}`,
     runId: row.runId,
@@ -114,15 +101,9 @@ export function toApprovalGate(row: GatewayApprovalRow, nowMs: number): Approval
 
 export function ApprovalsBridge() {
   const { data, refetch } = useGatewayApprovals(APPROVALS_PARAMS);
-  const submitApproval = useGatewayMutation<SubmitApprovalVars, unknown>(
-    "submitApproval",
-    {
-      invalidate: [
-        gatewayKeys.approvals(APPROVALS_PARAMS),
-        gatewayKeys.runs({}),
-      ],
-    },
-  );
+  const submitApproval = useGatewayMutation<SubmitApprovalVars, unknown>("submitApproval", {
+    invalidate: [gatewayKeys.approvals(APPROVALS_PARAMS), gatewayKeys.runs({})],
+  });
 
   // Install the real RPC seam so the store's approve/confirmDeny submit live.
   useEffect(() => {

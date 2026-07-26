@@ -95,8 +95,7 @@ const taggedCases = [
   {
     tag: "InvalidInput",
     code: "INVALID_INPUT",
-    instance: () =>
-      new InvalidInput({ message: "bad input", details: { field: "name" } }),
+    instance: () => new InvalidInput({ message: "bad input", details: { field: "name" } }),
     payload: {
       _tag: "InvalidInput",
       message: "bad input",
@@ -106,8 +105,7 @@ const taggedCases = [
   {
     tag: "DbWriteFailed",
     code: "DB_WRITE_FAILED",
-    instance: () =>
-      new DbWriteFailed({ message: "write failed", details: { table: "runs" } }),
+    instance: () => new DbWriteFailed({ message: "write failed", details: { table: "runs" } }),
     payload: {
       _tag: "DbWriteFailed",
       message: "write failed",
@@ -117,8 +115,7 @@ const taggedCases = [
   {
     tag: "AgentCliError",
     code: "AGENT_CLI_ERROR",
-    instance: () =>
-      new AgentCliError({ message: "cli failed", details: { exitCode: 127 } }),
+    instance: () => new AgentCliError({ message: "cli failed", details: { exitCode: 127 } }),
     payload: {
       _tag: "AgentCliError",
       message: "cli failed",
@@ -160,12 +157,8 @@ describe("SmithersError", () => {
   });
 
   test("does not duplicate docs URL if summary already contains it", () => {
-    const error = new SmithersError(
-      "INVALID_INPUT",
-      `Bad input See ${ERROR_REFERENCE_URL}`,
-    );
-    expect(error.message.match(/https:\/\/smithers\.sh\/reference\/errors/g))
-      .toHaveLength(1);
+    const error = new SmithersError("INVALID_INPUT", `Bad input See ${ERROR_REFERENCE_URL}`);
+    expect(error.message.match(/https:\/\/smithers\.sh\/reference\/errors/g)).toHaveLength(1);
   });
 
   test("supports legacy cause argument", () => {
@@ -244,9 +237,7 @@ describe("SmithersError", () => {
 
 describe("error code catalog", () => {
   test("knownSmithersErrorCodes matches smithersErrorDefinitions keys", () => {
-    expect([...knownSmithersErrorCodes].sort()).toEqual(
-      Object.keys(smithersErrorDefinitions).sort(),
-    );
+    expect([...knownSmithersErrorCodes].sort()).toEqual(Object.keys(smithersErrorDefinitions).sort());
   });
 
   test("knownSmithersErrorCodes has no duplicates", () => {

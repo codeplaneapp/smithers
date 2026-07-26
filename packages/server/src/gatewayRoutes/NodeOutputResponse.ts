@@ -4,14 +4,7 @@ export type NodeOutputResponse = {
   schema: {
     fields: Array<{
       name: string;
-      type:
-        | "string"
-        | "number"
-        | "boolean"
-        | "object"
-        | "array"
-        | "null"
-        | "unknown";
+      type: "string" | "number" | "boolean" | "object" | "array" | "null" | "unknown";
       optional: boolean;
       nullable: boolean;
       description?: string;

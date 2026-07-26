@@ -1,3 +1,3 @@
 export type ContinuationRequest = {
-	stateJson?: string;
+  stateJson?: string;
 };

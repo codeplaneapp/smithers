@@ -19,12 +19,8 @@ describe("parseAgentOutput", () => {
     const model = parseAgentOutput({
       text: "Found **two** matches.",
       reasoningSummary: "I should search first.",
-      toolCalls: [
-        { toolCallId: "call-1", toolName: "search", input: { query: "smithers" } },
-      ],
-      toolResults: [
-        { toolCallId: "call-1", output: { hits: 2 }, status: "completed" },
-      ],
+      toolCalls: [{ toolCallId: "call-1", toolName: "search", input: { query: "smithers" } }],
+      toolResults: [{ toolCallId: "call-1", output: { hits: 2 }, status: "completed" }],
     });
 
     expect(model).toEqual({
@@ -49,9 +45,7 @@ describe("parseAgentOutput", () => {
       output: "Working",
       thinking: "Check the files",
       is_streaming: true,
-      tool_calls: JSON.stringify([
-        { tool_name: "read", arguments: '{"path":"README.md"}', status: "running" },
-      ]),
+      tool_calls: JSON.stringify([{ tool_name: "read", arguments: '{"path":"README.md"}', status: "running" }]),
     });
 
     expect(model?.streaming).toBe(true);
@@ -65,32 +59,36 @@ describe("parseAgentOutput", () => {
     });
 
     // Summary-typed parts are provider-disclosed summaries and ARE surfaced.
-    expect(parseAgentOutput({
-      reasoning_summary: "Inspect the result",
-    })?.reasoningSummary).toBe("Inspect the result");
+    expect(
+      parseAgentOutput({
+        reasoning_summary: "Inspect the result",
+      })?.reasoningSummary,
+    ).toBe("Inspect the result");
   });
 
   test("unwraps nested agent results and reads message content parts", () => {
-    expect(parseAgentOutput({
-      status: "running",
-      output: {
-        message: {
-          content: [
-            {
-              type: "reasoning",
-              summary: [{ type: "summary_text", text: "Inspect the nested result" }],
-            },
-            {
-              type: "tool-call",
-              toolCallId: "call-nested",
-              toolName: "read_file",
-              input: { path: "README.md" },
-            },
-            { type: "text", text: "Found **the answer**." },
-          ],
+    expect(
+      parseAgentOutput({
+        status: "running",
+        output: {
+          message: {
+            content: [
+              {
+                type: "reasoning",
+                summary: [{ type: "summary_text", text: "Inspect the nested result" }],
+              },
+              {
+                type: "tool-call",
+                toolCallId: "call-nested",
+                toolName: "read_file",
+                input: { path: "README.md" },
+              },
+              { type: "text", text: "Found **the answer**." },
+            ],
+          },
         },
-      },
-    })).toEqual({
+      }),
+    ).toEqual({
       response: "Found **the answer**.",
       reasoning: "Inspect the nested result",
       reasoningSummary: "Inspect the nested result",
@@ -105,10 +103,12 @@ describe("parseAgentOutput", () => {
       ],
     });
 
-    expect(parseAgentOutput({
-      reasoningSummary: "Outer reasoning",
-      output: { text: "Nested response" },
-    })).toMatchObject({
+    expect(
+      parseAgentOutput({
+        reasoningSummary: "Outer reasoning",
+        output: { text: "Nested response" },
+      }),
+    ).toMatchObject({
       response: "Nested response",
       reasoningSummary: "Outer reasoning",
     });
@@ -134,8 +134,6 @@ describe("AgentOutput", () => {
   test("renders under the dark theme", () => {
     document.documentElement.dataset.theme = "dark";
     const model = parseAgentOutput({ text: "Dark response", streaming: true });
-    expect(renderToStaticMarkup(<AgentOutput model={model!} />)).toContain(
-      'data-streaming="true"',
-    );
+    expect(renderToStaticMarkup(<AgentOutput model={model!} />)).toContain('data-streaming="true"');
   });
 });

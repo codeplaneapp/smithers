@@ -125,19 +125,31 @@ type ManifestLane = {
 };
 export function parseManifest(value: unknown): { plannedComponents: number; lanes: ManifestLane[] } {
   const row = unwrapRow(value);
-  const lanes = asArray(row.lanes).filter(isRecord).map((lane) => ({
-    laneId: asString(lane.laneId) ?? "",
-    title: asString(lane.title) ?? "",
-    kind: asString(lane.kind) ?? "component",
-    implementModel: asString(lane.implementModel) ?? "",
-    reviewSeats: asArray(lane.reviewSeats).map((seat) => String(seat)),
-    components: asArray(lane.components).map((name) => String(name)),
-  })).filter((lane) => lane.laneId.length > 0);
+  const lanes = asArray(row.lanes)
+    .filter(isRecord)
+    .map((lane) => ({
+      laneId: asString(lane.laneId) ?? "",
+      title: asString(lane.title) ?? "",
+      kind: asString(lane.kind) ?? "component",
+      implementModel: asString(lane.implementModel) ?? "",
+      reviewSeats: asArray(lane.reviewSeats).map((seat) => String(seat)),
+      components: asArray(lane.components).map((name) => String(name)),
+    }))
+    .filter((lane) => lane.laneId.length > 0);
   const planned = Number(row.plannedComponents);
-  return { plannedComponents: Number.isFinite(planned) ? planned : lanes.reduce((sum, lane) => sum + lane.components.length, 0), lanes };
+  return {
+    plannedComponents: Number.isFinite(planned)
+      ? planned
+      : lanes.reduce((sum, lane) => sum + lane.components.length, 0),
+    lanes,
+  };
 }
 
-export function laneLiveStatus(ledger: Ledger, prefix: string, resultRow: Record<string, unknown> | undefined): { status: string; label: string } {
+export function laneLiveStatus(
+  ledger: Ledger,
+  prefix: string,
+  resultRow: Record<string, unknown> | undefined,
+): { status: string; label: string } {
   if (resultRow && typeof resultRow.lgtm === "boolean") {
     if (resultRow.lgtm === true) return { status: "finished", label: "lgtm" };
     return { status: "failed", label: resultRow.exhausted === true ? "exhausted" : "not lgtm" };
@@ -156,8 +168,23 @@ export function laneLiveStatus(ledger: Ledger, prefix: string, resultRow: Record
   return { status: "running", label: "iterating" };
 }
 
-function LaneCard({ runId, lane, ledger, refreshKey }: { runId: string | undefined; lane: ManifestLane; ledger: Ledger; refreshKey: number }) {
-  const prefix = lane.kind === "adoption" ? lane.laneId.replace(/^adopt-/, "adopt-") : lane.kind === "integration" ? "integration" : `lane-${lane.laneId}`;
+function LaneCard({
+  runId,
+  lane,
+  ledger,
+  refreshKey,
+}: {
+  runId: string | undefined;
+  lane: ManifestLane;
+  ledger: Ledger;
+  refreshKey: number;
+}) {
+  const prefix =
+    lane.kind === "adoption"
+      ? lane.laneId.replace(/^adopt-/, "adopt-")
+      : lane.kind === "integration"
+        ? "integration"
+        : `lane-${lane.laneId}`;
   const resultNode = lane.kind === "integration" ? "integration-implement" : `${prefix}-result`;
   const result = useGatewayNodeOutput({ runId, nodeId: resultNode, iteration: 0 });
   const row = unwrapRow(result.data);
@@ -187,10 +214,18 @@ function LaneCard({ runId, lane, ledger, refreshKey }: { runId: string | undefin
           );
         })}
         <Badge variant="muted">attempts {attempts}</Badge>
-        {lane.components.length > 0 ? <Badge variant="muted">{implemented.length}/{lane.components.length} components</Badge> : null}
+        {lane.components.length > 0 ? (
+          <Badge variant="muted">
+            {implemented.length}/{lane.components.length} components
+          </Badge>
+        ) : null}
         {filesChanged.length > 0 ? <Badge variant="muted">{filesChanged.length} files</Badge> : null}
         {deferred.length > 0 ? <Badge variant="warning">{deferred.length} deferred</Badge> : null}
-        {asString(row.branch) ? <CardDescription>branch {asString(row.branch)} · {asString(row.worktreePath) ?? ""}</CardDescription> : null}
+        {asString(row.branch) ? (
+          <CardDescription>
+            branch {asString(row.branch)} · {asString(row.worktreePath) ?? ""}
+          </CardDescription>
+        ) : null}
         {asString(row.summary) ? <CardDescription>{asString(row.summary)}</CardDescription> : null}
       </CardContent>
     </Card>
@@ -198,22 +233,39 @@ function LaneCard({ runId, lane, ledger, refreshKey }: { runId: string | undefin
 }
 
 type MatrixRow = { component: string; lane: string; state: string; note: string | null };
-export function coverageRows(auditValue: unknown, lanes: ManifestLane[], resultRows: Map<string, Record<string, unknown>>): MatrixRow[] {
+export function coverageRows(
+  auditValue: unknown,
+  lanes: ManifestLane[],
+  resultRows: Map<string, Record<string, unknown>>,
+): MatrixRow[] {
   const audit = unwrapRow(auditValue);
-  const fromAudit = asArray(audit.coverageMatrix).filter(isRecord).map((entry) => ({
-    component: asString(entry.component) ?? "",
-    lane: asString(entry.lane) ?? "",
-    state: asString(entry.state) ?? "planned",
-    note: asString(entry.note) ?? null,
-  })).filter((entry) => entry.component.length > 0);
+  const fromAudit = asArray(audit.coverageMatrix)
+    .filter(isRecord)
+    .map((entry) => ({
+      component: asString(entry.component) ?? "",
+      lane: asString(entry.lane) ?? "",
+      state: asString(entry.state) ?? "planned",
+      note: asString(entry.note) ?? null,
+    }))
+    .filter((entry) => entry.component.length > 0);
   if (fromAudit.length > 0) return fromAudit;
   const rows: MatrixRow[] = [];
   for (const lane of lanes) {
     const result = resultRows.get(lane.laneId);
     const implemented = new Set(asArray(result?.componentsImplemented).map((name) => String(name)));
-    const deferred = new Set(asArray(result?.componentsDeferred).filter(isRecord).map((entry) => String(entry.name ?? "")));
+    const deferred = new Set(
+      asArray(result?.componentsDeferred)
+        .filter(isRecord)
+        .map((entry) => String(entry.name ?? "")),
+    );
     for (const component of lane.components) {
-      const state = deferred.has(component) ? "deferred" : implemented.has(component) ? (result?.lgtm === true ? "reviewed" : "implemented") : "planned";
+      const state = deferred.has(component)
+        ? "deferred"
+        : implemented.has(component)
+          ? result?.lgtm === true
+            ? "reviewed"
+            : "implemented"
+          : "planned";
       rows.push({ component, lane: lane.laneId, state, note: null });
     }
   }
@@ -227,7 +279,17 @@ function matrixPillStatus(state: string): string {
   return "waiting";
 }
 
-function CoverageMatrix({ runId, lanes, resultRows, refreshKey }: { runId: string | undefined; lanes: ManifestLane[]; resultRows: Map<string, Record<string, unknown>>; refreshKey: number }) {
+function CoverageMatrix({
+  runId,
+  lanes,
+  resultRows,
+  refreshKey,
+}: {
+  runId: string | undefined;
+  lanes: ManifestLane[];
+  resultRows: Map<string, Record<string, unknown>>;
+  refreshKey: number;
+}) {
   const auditFable = useGatewayNodeOutput({ runId, nodeId: "final-audit-fable", iteration: 0 });
   const [filter, setFilter] = useState<string>("all");
   const rows = useMemo(() => coverageRows(auditFable.data, lanes, resultRows), [auditFable.data, lanes, resultRows]);
@@ -243,13 +305,17 @@ function CoverageMatrix({ runId, lanes, resultRows, refreshKey }: { runId: strin
           <Tabs value={filter} onValueChange={setFilter}>
             <TabsList>
               {states.map((state) => (
-                <TabsTrigger key={state} value={state} count={state === "all" ? rows.length : counts.get(state) ?? 0}>{state}</TabsTrigger>
+                <TabsTrigger key={state} value={state} count={state === "all" ? rows.length : (counts.get(state) ?? 0)}>
+                  {state}
+                </TabsTrigger>
               ))}
             </TabsList>
           </Tabs>
         }
       />
-      {visible.length === 0 ? <EmptyState title="No components in this state." /> : (
+      {visible.length === 0 ? (
+        <EmptyState title="No components in this state." />
+      ) : (
         <Table>
           <TableHeader>
             <TableRow>
@@ -264,7 +330,9 @@ function CoverageMatrix({ runId, lanes, resultRows, refreshKey }: { runId: strin
               <TableRow key={`${row.lane}:${row.component}`}>
                 <TableCell>{row.component}</TableCell>
                 <TableCell>{row.lane}</TableCell>
-                <TableCell><StatusPill status={matrixPillStatus(row.state)} label={row.state} /></TableCell>
+                <TableCell>
+                  <StatusPill status={matrixPillStatus(row.state)} label={row.state} />
+                </TableCell>
                 <TableCell>{row.note ?? ""}</TableCell>
               </TableRow>
             ))}
@@ -275,23 +343,45 @@ function CoverageMatrix({ runId, lanes, resultRows, refreshKey }: { runId: strin
   );
 }
 
-function AuditCard({ runId, seat, refreshKey }: { runId: string | undefined; seat: "fable" | "sol"; refreshKey: number }) {
+function AuditCard({
+  runId,
+  seat,
+  refreshKey,
+}: {
+  runId: string | undefined;
+  seat: "fable" | "sol";
+  refreshKey: number;
+}) {
   const audit = useGatewayNodeOutput({ runId, nodeId: `final-audit-${seat}`, iteration: 0 });
   const row = unwrapRow(audit.data);
   if (Object.keys(row).length === 0) {
-    return <Card key={refreshKey}><CardHeader><CardTitle>{seat} audit</CardTitle><StatusPill status="waiting" label="pending" /></CardHeader></Card>;
+    return (
+      <Card key={refreshKey}>
+        <CardHeader>
+          <CardTitle>{seat} audit</CardTitle>
+          <StatusPill status="waiting" label="pending" />
+        </CardHeader>
+      </Card>
+    );
   }
   const followUps = asArray(row.followUps).map((item) => String(item));
   return (
     <Card key={refreshKey} data-testid={`agui-audit-${seat}`}>
       <CardHeader>
         <CardTitle>{seat} audit</CardTitle>
-        <StatusPill status={row.complete === true ? "finished" : "failed"} label={row.complete === true ? "complete" : "incomplete"} />
+        <StatusPill
+          status={row.complete === true ? "finished" : "failed"}
+          label={row.complete === true ? "complete" : "incomplete"}
+        />
       </CardHeader>
       <CardContent>
-        <Badge variant={row.deferralsEndorsed === true ? "default" : "destructive"}>deferrals {row.deferralsEndorsed === true ? "endorsed" : "not endorsed"}</Badge>
+        <Badge variant={row.deferralsEndorsed === true ? "default" : "destructive"}>
+          deferrals {row.deferralsEndorsed === true ? "endorsed" : "not endorsed"}
+        </Badge>
         <CardDescription>{asString(row.summary) ?? ""}</CardDescription>
-        {followUps.map((item, index) => <CardDescription key={index}>follow-up: {item}</CardDescription>)}
+        {followUps.map((item, index) => (
+          <CardDescription key={index}>follow-up: {item}</CardDescription>
+        ))}
       </CardContent>
     </Card>
   );
@@ -301,13 +391,16 @@ function MergePanel({ ledger }: { ledger: Ledger }) {
   const mergeNodes = [...ledger.order.entries()]
     .filter(([node]) => node.startsWith("merge-"))
     .sort((a, b) => a[1] - b[1]);
-  if (mergeNodes.length === 0) return <EmptyState title="No merges yet." description="Merges start after every component lane settles." />;
+  if (mergeNodes.length === 0)
+    return <EmptyState title="No merges yet." description="Merges start after every component lane settles." />;
   return (
     <div data-testid="agui-merges">
       {mergeNodes.map(([node], index) => (
         <Card key={node}>
           <CardHeader>
-            <CardTitle>{index + 1}. {node.replace(/^merge-/, "")}</CardTitle>
+            <CardTitle>
+              {index + 1}. {node.replace(/^merge-/, "")}
+            </CardTitle>
             <StatusPill status={ledger.states.get(node) ?? "waiting"} />
           </CardHeader>
         </Card>
@@ -322,7 +415,8 @@ export function AgenticUiProgramApp() {
 
   const runsQuery = useGatewayRuns({ filter: { limit: 20 } });
   const programRuns = useMemo(
-    () => ((runsQuery.data ?? []) as RunSummary[]).filter((run) => !run.workflowKey || run.workflowKey === WORKFLOW_KEY),
+    () =>
+      ((runsQuery.data ?? []) as RunSummary[]).filter((run) => !run.workflowKey || run.workflowKey === WORKFLOW_KEY),
     [runsQuery.data],
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? programRuns[0]?.runId;
@@ -332,7 +426,10 @@ export function AgenticUiProgramApp() {
   const events = stream.events;
   const eventCount = events?.length ?? 0;
   const ledger = useMemo(() => buildLedger(events ?? []), [events]);
-  const finishedCount = useMemo(() => [...ledger.states.values()].filter((state) => state !== "running").length, [ledger]);
+  const finishedCount = useMemo(
+    () => [...ledger.states.values()].filter((state) => state !== "running").length,
+    [ledger],
+  );
 
   const manifestQuery = useGatewayNodeOutput({ runId: activeRunId, nodeId: "agui-manifest", iteration: 0 });
   const manifest = useMemo(() => parseManifest(manifestQuery.data), [manifestQuery.data]);
@@ -364,17 +461,38 @@ export function AgenticUiProgramApp() {
     });
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [r0.data, r1.data, r2.data, r3.data, r4.data, r5.data, r6.data, r7.data, r8.data, r9.data, r10.data, r11.data, r12.data]);
+  }, [
+    r0.data,
+    r1.data,
+    r2.data,
+    r3.data,
+    r4.data,
+    r5.data,
+    r6.data,
+    r7.data,
+    r8.data,
+    r9.data,
+    r10.data,
+    r11.data,
+    r12.data,
+  ]);
 
   const componentLanes = manifest.lanes.filter((lane) => lane.kind === "component");
   const adoptionLanes = manifest.lanes.filter((lane) => lane.kind === "adoption");
   const integrationLane = manifest.lanes.find((lane) => lane.kind === "integration");
-  const knownLaneIds = manifest.lanes.length > 0 ? manifest.lanes.map((lane) => lane.laneId) : [...COMPONENT_LANE_IDS, ...ADOPTION_LANE_IDS];
+  const knownLaneIds =
+    manifest.lanes.length > 0
+      ? manifest.lanes.map((lane) => lane.laneId)
+      : [...COMPONENT_LANE_IDS, ...ADOPTION_LANE_IDS];
 
   const lanesLgtm = Number(reportRow.lanesLgtm);
-  const overall = typeof reportRow.success === "boolean"
-    ? { status: reportRow.success ? "finished" : "failed", label: reportRow.success ? "program complete" : "settled incomplete" }
-    : { status: String(activeRun?.status ?? "waiting"), label: String(activeRun?.status ?? "no run") };
+  const overall =
+    typeof reportRow.success === "boolean"
+      ? {
+          status: reportRow.success ? "finished" : "failed",
+          label: reportRow.success ? "program complete" : "settled incomplete",
+        }
+      : { status: String(activeRun?.status ?? "waiting"), label: String(activeRun?.status ?? "no run") };
 
   return (
     <WorkflowUiShell
@@ -383,30 +501,56 @@ export function AgenticUiProgramApp() {
       actions={
         <>
           <StatusPill data-testid="agui-overall" status={overall.status} label={overall.label} />
-          <Button variant="outline" data-testid="agui-refresh" onClick={() => { void runsQuery.refetch(); void runDetail.refetch(); void manifestQuery.refetch(); void finalReport.refetch(); for (const query of resultQueries) void query.refetch(); }}>Refresh</Button>
+          <Button
+            variant="outline"
+            data-testid="agui-refresh"
+            onClick={() => {
+              void runsQuery.refetch();
+              void runDetail.refetch();
+              void manifestQuery.refetch();
+              void finalReport.refetch();
+              for (const query of resultQueries) void query.refetch();
+            }}
+          >
+            Refresh
+          </Button>
         </>
       }
       testId="agui-ui"
     >
       <SmithersUiStyles />
       {activeRunId === undefined ? (
-        <EmptyState title="No program runs yet." description="Start the build-agentic-ui-library workflow to see lanes, reviews, merges and the coverage matrix here." />
+        <EmptyState
+          title="No program runs yet."
+          description="Start the build-agentic-ui-library workflow to see lanes, reviews, merges and the coverage matrix here."
+        />
       ) : (
         <>
           <div data-testid="agui-kpis">
             <KpiStat label="Planned components" value={String(manifest.plannedComponents || "—")} />
-            <KpiStat label="Component lanes" value={`${Number.isFinite(lanesLgtm) ? lanesLgtm : "—"}/${componentLanes.length || 10} lgtm`} />
+            <KpiStat
+              label="Component lanes"
+              value={`${Number.isFinite(lanesLgtm) ? lanesLgtm : "—"}/${componentLanes.length || 10} lgtm`}
+            />
             <KpiStat label="Nodes settled" value={String(finishedCount)} />
             <KpiStat label="Events" value={String(eventCount)} />
           </div>
           <Tabs defaultValue="lanes">
             <TabsList>
-              <TabsTrigger value="lanes" count={componentLanes.length || 10}>Lanes</TabsTrigger>
+              <TabsTrigger value="lanes" count={componentLanes.length || 10}>
+                Lanes
+              </TabsTrigger>
               <TabsTrigger value="integration">Integration</TabsTrigger>
-              <TabsTrigger value="adoption" count={adoptionLanes.length || 3}>Multi adoption</TabsTrigger>
+              <TabsTrigger value="adoption" count={adoptionLanes.length || 3}>
+                Multi adoption
+              </TabsTrigger>
               <TabsTrigger value="matrix">Coverage matrix</TabsTrigger>
-              <TabsTrigger value="activity" count={eventCount}>Activity</TabsTrigger>
-              <TabsTrigger value="runs" count={programRuns.length}>Runs</TabsTrigger>
+              <TabsTrigger value="activity" count={eventCount}>
+                Activity
+              </TabsTrigger>
+              <TabsTrigger value="runs" count={programRuns.length}>
+                Runs
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="lanes">
@@ -420,8 +564,24 @@ export function AgenticUiProgramApp() {
                 </Card>
               ))}
               <SectionHeader title="Component lanes (OpenCode Kimi 3 implements; Fable/Sol review)" />
-              {(componentLanes.length > 0 ? componentLanes : COMPONENT_LANE_IDS.map((laneId) => ({ laneId, title: laneId, kind: "component", implementModel: "opencode/kimi-for-coding-k3", reviewSeats: [], components: [] }))).map((lane) => (
-                <LaneCard key={lane.laneId} runId={activeRunId} lane={lane} ledger={ledger} refreshKey={finishedCount} />
+              {(componentLanes.length > 0
+                ? componentLanes
+                : COMPONENT_LANE_IDS.map((laneId) => ({
+                    laneId,
+                    title: laneId,
+                    kind: "component",
+                    implementModel: "opencode/kimi-for-coding-k3",
+                    reviewSeats: [],
+                    components: [],
+                  }))
+              ).map((lane) => (
+                <LaneCard
+                  key={lane.laneId}
+                  runId={activeRunId}
+                  lane={lane}
+                  ledger={ledger}
+                  refreshKey={finishedCount}
+                />
               ))}
             </TabsContent>
 
@@ -429,7 +589,14 @@ export function AgenticUiProgramApp() {
               <SectionHeader title="Serialized merge queue" />
               <MergePanel ledger={ledger} />
               <SectionHeader title="Integration lane (dual review: Fable + Sol)" />
-              {(["integration-implement", "integration-ci", "integration-review-fable", "integration-review-sol"] as const).map((node) => (
+              {(
+                [
+                  "integration-implement",
+                  "integration-ci",
+                  "integration-review-fable",
+                  "integration-review-sol",
+                ] as const
+              ).map((node) => (
                 <Card key={node}>
                   <CardHeader>
                     <CardTitle>{node}</CardTitle>
@@ -437,14 +604,32 @@ export function AgenticUiProgramApp() {
                   </CardHeader>
                 </Card>
               ))}
-              {integrationLane ? <LaneCard runId={activeRunId} lane={integrationLane} ledger={ledger} refreshKey={finishedCount} /> : null}
+              {integrationLane ? (
+                <LaneCard runId={activeRunId} lane={integrationLane} ledger={ledger} refreshKey={finishedCount} />
+              ) : null}
               <SectionHeader title="Smithers CI gate output" />
               <NodeOutputView runId={activeRunId} nodeId="integration-ci" />
             </TabsContent>
 
             <TabsContent value="adoption">
-              {(adoptionLanes.length > 0 ? adoptionLanes : ADOPTION_LANE_IDS.map((laneId) => ({ laneId, title: laneId, kind: "adoption", implementModel: "opencode/kimi-for-coding-k3", reviewSeats: [], components: [] }))).map((lane) => (
-                <LaneCard key={lane.laneId} runId={activeRunId} lane={lane} ledger={ledger} refreshKey={finishedCount} />
+              {(adoptionLanes.length > 0
+                ? adoptionLanes
+                : ADOPTION_LANE_IDS.map((laneId) => ({
+                    laneId,
+                    title: laneId,
+                    kind: "adoption",
+                    implementModel: "opencode/kimi-for-coding-k3",
+                    reviewSeats: [],
+                    components: [],
+                  }))
+              ).map((lane) => (
+                <LaneCard
+                  key={lane.laneId}
+                  runId={activeRunId}
+                  lane={lane}
+                  ledger={ledger}
+                  refreshKey={finishedCount}
+                />
               ))}
               <SectionHeader title="Multi CI gate" />
               {(["multi-ci", "multi-ci-fix"] as const).map((node) => (
@@ -472,29 +657,47 @@ export function AgenticUiProgramApp() {
                 <Card data-testid="agui-final-report">
                   <CardHeader>
                     <CardTitle>Final report</CardTitle>
-                    <StatusPill status={reportRow.success === true ? "finished" : "failed"} label={reportRow.success === true ? "success" : "incomplete"} />
+                    <StatusPill
+                      status={reportRow.success === true ? "finished" : "failed"}
+                      label={reportRow.success === true ? "success" : "incomplete"}
+                    />
                   </CardHeader>
-                  <CardContent><CardDescription>{asString(reportRow.summary)}</CardDescription></CardContent>
+                  <CardContent>
+                    <CardDescription>{asString(reportRow.summary)}</CardDescription>
+                  </CardContent>
                 </Card>
               ) : null}
             </TabsContent>
 
             <TabsContent value="activity">
               <ApprovalPanel filter={{ runId: activeRunId }} />
-              <RunTree runId={activeRunId} activeNodeId={selectedNodeId} onSelectNode={(node) => setSelectedNodeId(node.id)} />
+              <RunTree
+                runId={activeRunId}
+                activeNodeId={selectedNodeId}
+                onSelectNode={(node) => setSelectedNodeId(node.id)}
+              />
               {selectedNodeId ? <NodeOutputView runId={activeRunId} nodeId={selectedNodeId} /> : null}
               <RunEventLog runId={activeRunId} />
             </TabsContent>
 
             <TabsContent value="runs">
               {programRuns.map((run) => (
-                <Button key={run.runId} variant={run.runId === activeRunId ? "default" : "ghost"} data-testid={`agui-run-${run.runId}`} onClick={() => setSelectedRunId(run.runId)}>
+                <Button
+                  key={run.runId}
+                  variant={run.runId === activeRunId ? "default" : "ghost"}
+                  data-testid={`agui-run-${run.runId}`}
+                  onClick={() => setSelectedRunId(run.runId)}
+                >
                   {shortRunId(run.runId)} <StatusPill status={run.status} />
                 </Button>
               ))}
               {programRuns.length === 0 ? <EmptyState title="No runs yet." /> : null}
               <SectionHeader title={`Known lanes (${knownLaneIds.length})`} />
-              {knownLaneIds.map((laneId) => <Badge key={laneId} variant="muted">{laneId}</Badge>)}
+              {knownLaneIds.map((laneId) => (
+                <Badge key={laneId} variant="muted">
+                  {laneId}
+                </Badge>
+              ))}
             </TabsContent>
           </Tabs>
         </>

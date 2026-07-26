@@ -36,16 +36,18 @@ const inputSchema = z.object({
   implementationApproved: z.preprocess((value) => value ?? undefined, z.boolean().default(true)),
   requireImplementationApproval: z.preprocess((value) => value ?? undefined, z.boolean().default(false)),
   runImplementation: z.preprocess((value) => value ?? undefined, z.boolean().default(true)),
-  metaTicket: z.object({
-    title: z.string().default("Docs change triage"),
-    source: z.string().default("manual"),
-    docPath: z.string().default(".smithers/spec"),
-    featureIds: z.array(z.string()).default([]),
-    changedFiles: z.array(changedFileSchema).default([]),
-    beforeMarkdown: z.string().default(""),
-    afterMarkdown: z.string().default(""),
-    changedAtIso: z.string().default(""),
-  }).optional(),
+  metaTicket: z
+    .object({
+      title: z.string().default("Docs change triage"),
+      source: z.string().default("manual"),
+      docPath: z.string().default(".smithers/spec"),
+      featureIds: z.array(z.string()).default([]),
+      changedFiles: z.array(changedFileSchema).default([]),
+      beforeMarkdown: z.string().default(""),
+      afterMarkdown: z.string().default(""),
+      changedAtIso: z.string().default(""),
+    })
+    .optional(),
 });
 
 const bootstrapSchema = z.object({
@@ -99,32 +101,40 @@ const metaTicketSchema = z.object({
 });
 
 const triageSchema = z.object({
-  selected: z.array(z.object({
-    slot: z.number().int().min(1).max(1),
-    featureId: z.string(),
-    title: z.string(),
-    agent: z.enum(["implementation", "review"]),
-    taskType: z.enum(["fix", "feature", "e2e", "review", "issue"]),
-    reason: z.string(),
-    files: z.array(z.string()).default([]),
-    tests: z.array(z.string()).default([]),
-    acceptance: z.array(z.string()).default([]),
-  })).default([]),
+  selected: z
+    .array(
+      z.object({
+        slot: z.number().int().min(1).max(1),
+        featureId: z.string(),
+        title: z.string(),
+        agent: z.enum(["implementation", "review"]),
+        taskType: z.enum(["fix", "feature", "e2e", "review", "issue"]),
+        reason: z.string(),
+        files: z.array(z.string()).default([]),
+        tests: z.array(z.string()).default([]),
+        acceptance: z.array(z.string()).default([]),
+      }),
+    )
+    .default([]),
   summary: z.string().default(""),
 });
 
 const materializedTicketsSchema = z.object({
   created: z.number().int().min(0).default(0),
   directory: z.string().default(""),
-  tickets: z.array(z.object({
-    path: z.string(),
-    kind: z.string().default("ticket"),
-    featureId: z.string().default(""),
-    featureTitle: z.string().default(""),
-    content: z.string(),
-    status: z.string().default("todo"),
-    updatedAtMs: z.number().default(0),
-  })).default([]),
+  tickets: z
+    .array(
+      z.object({
+        path: z.string(),
+        kind: z.string().default("ticket"),
+        featureId: z.string().default(""),
+        featureTitle: z.string().default(""),
+        content: z.string(),
+        status: z.string().default("todo"),
+        updatedAtMs: z.number().default(0),
+      }),
+    )
+    .default([]),
   summary: z.string().default(""),
 });
 
@@ -267,11 +277,13 @@ export function runCommandResult(command: string, args: string[], fieldName: str
 }
 
 export function ticketSlug(value: unknown): string {
-  return String(value ?? "")
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80) || "ticket";
+  return (
+    String(value ?? "")
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "ticket"
+  );
 }
 
 function shortTicketHash(value: string): string {
@@ -299,24 +311,30 @@ export function ticketMarkdownFor(runId: string, item: any): string {
     return items.length ? `\n## ${title}\n\n${items.map((value) => `- ${value}`).join("\n")}\n` : "";
   };
 
-  return [
-    `# ${item.title || item.featureId || `Triage slot ${item.slot}`}`,
-    "",
-    `Status: todo`,
-    `Run: ${runId}`,
-    `Slot: ${item.slot ?? ""}`,
-    `Feature: ${item.featureId ?? ""}`,
-    item.featureTitle ? `Feature title: ${item.featureTitle}` : "",
-    `Agent: ${item.agent ?? ""}`,
-    `Task type: ${item.taskType ?? item.task_type ?? ""}`,
-    "",
-    "## Reason",
-    "",
-    String(item.reason ?? "No reason recorded."),
-    list("Files", item.files),
-    list("Tests", item.tests),
-    list("Acceptance", item.acceptance),
-  ].filter((line) => line !== "").join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+  return (
+    [
+      `# ${item.title || item.featureId || `Triage slot ${item.slot}`}`,
+      "",
+      `Status: todo`,
+      `Run: ${runId}`,
+      `Slot: ${item.slot ?? ""}`,
+      `Feature: ${item.featureId ?? ""}`,
+      item.featureTitle ? `Feature title: ${item.featureTitle}` : "",
+      `Agent: ${item.agent ?? ""}`,
+      `Task type: ${item.taskType ?? item.task_type ?? ""}`,
+      "",
+      "## Reason",
+      "",
+      String(item.reason ?? "No reason recorded."),
+      list("Files", item.files),
+      list("Tests", item.tests),
+      list("Acceptance", item.acceptance),
+    ]
+      .filter((line) => line !== "")
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trimEnd() + "\n"
+  );
 }
 
 function writeTriageTicketFile(directory: string, path: string, content: string): { path: string; created: boolean } {
@@ -326,7 +344,10 @@ function writeTriageTicketFile(directory: string, path: string, content: string)
       writeFileSync(full, content, { flag: "wx" });
       return { path: candidate, created: true };
     } catch (error) {
-      const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
+      const code =
+        typeof error === "object" && error !== null && "code" in error
+          ? String((error as { code?: unknown }).code)
+          : "";
       if (code !== "EEXIST") throw error;
       try {
         if (readFileSync(full, "utf8") === content) return { path: candidate, created: false };
@@ -375,8 +396,13 @@ export function materializeTriageTickets(runId: string, triage: any) {
 
 function featureTitleById(): Map<string, string> {
   try {
-    const rows = JSON.parse(readFileSync(`${ROOT}/.smithers/spec/features.json`, "utf8")) as Array<{ id?: string; title?: string }>;
-    return new Map(rows.map((row): [string, string] => [String(row.id ?? ""), String(row.title ?? "")]).filter(([id]) => id));
+    const rows = JSON.parse(readFileSync(`${ROOT}/.smithers/spec/features.json`, "utf8")) as Array<{
+      id?: string;
+      title?: string;
+    }>;
+    return new Map(
+      rows.map((row): [string, string] => [String(row.id ?? ""), String(row.title ?? "")]).filter(([id]) => id),
+    );
   } catch {
     return new Map();
   }
@@ -423,7 +449,9 @@ export function auditAgent(_ctx: any) {
 export function featuresStillIncomplete(): number {
   try {
     const features = validateFeatures(ROOT);
-    return features.filter((feature) => feature.status !== "fixed" || (feature.missing ?? []).filter(Boolean).length > 0).length;
+    return features.filter(
+      (feature) => feature.status !== "fixed" || (feature.missing ?? []).filter(Boolean).length > 0,
+    ).length;
   } catch {
     return -1; // unreadable → don't claim completion on a read error
   }
@@ -474,7 +502,9 @@ export function roundSummaryFromDeps(deps: any) {
     ...workItems
       .filter((item: any) => item?.status && item.status !== "done" && item.status !== "skipped")
       .map((item: any) => `${item.status}: ${item.featureId || "unknown"} - ${item.summary || "not complete"}`),
-    ...(deps.review?.blockingFindings ?? deps.review?.blocking_findings ?? []).map((finding: string) => `review blocker: ${finding}`),
+    ...(deps.review?.blockingFindings ?? deps.review?.blocking_findings ?? []).map(
+      (finding: string) => `review blocker: ${finding}`,
+    ),
   ];
   const blocked = (deps.review?.blockingFindings ?? deps.review?.blocking_findings ?? []).length > 0;
   const done =
@@ -507,8 +537,7 @@ export default smithers((ctx) => {
   const implementationApproved = ctx.input.implementationApproved !== false;
   const approvalRequired = runImplementation && requireImplementationApproval && !implementationApproved;
   const workApproved =
-    runImplementation &&
-    (implementationApproved || !requireImplementationApproval || approvalRequired);
+    runImplementation && (implementationApproved || !requireImplementationApproval || approvalRequired);
 
   return (
     <Workflow name="docs-driven-development">
@@ -525,7 +554,8 @@ export default smithers((ctx) => {
                   scaffolded: true,
                   docsBuildPassed: true,
                   commandsRun,
-                  summary: "features.json validated, derived feature docs regenerated, and UI content modules rebuilt reproducibly.",
+                  summary:
+                    "features.json validated, derived feature docs regenerated, and UI content modules rebuilt reproducibly.",
                 };
                 writeJsonArtifact(BOOTSTRAP_ARTIFACT, output);
                 return output;
@@ -547,28 +577,21 @@ export default smithers((ctx) => {
           <Task id="metaTicket" output={outputs.metaTicket} dependsOn={["bootstrap"]}>
             {async () => {
               const ticket = ctx.input.metaTicket;
-              const gitStatusResult = runCommandResult(
-                "git",
-                ["status", "--short"],
-                "git-status",
-              );
-              const fullDocsDiffResult = runCommandResult(
-                "git",
-                ["diff", "--", ".smithers/spec"],
-                "docs-diff",
-              );
+              const gitStatusResult = runCommandResult("git", ["status", "--short"], "git-status");
+              const fullDocsDiffResult = runCommandResult("git", ["diff", "--", ".smithers/spec"], "docs-diff");
               const codeDiffResult = runCommandResult(
                 "git",
                 ["diff", "--name-only", "--", ".", ":(exclude).smithers/spec"],
                 "code-diff",
               );
               const gitStatus = gitStatusResult.ok ? gitStatusResult.output : "";
-              const fullDocsDiff = cleanDiffForMetaTicket(
-                fullDocsDiffResult.ok ? fullDocsDiffResult.output : "",
-              );
+              const fullDocsDiff = cleanDiffForMetaTicket(fullDocsDiffResult.ok ? fullDocsDiffResult.output : "");
               const docsDiff = boundedField(fullDocsDiff, "meta-ticket-docs-diff");
               const codeDiffFiles = codeDiffResult.ok
-                ? codeDiffResult.output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+                ? codeDiffResult.output
+                    .split(/\r?\n/)
+                    .map((line) => line.trim())
+                    .filter(Boolean)
                 : [];
 
               if (!ticket) {
@@ -582,7 +605,8 @@ export default smithers((ctx) => {
                   docsDiffError: fullDocsDiffResult.error,
                   codeDiffFiles,
                   codeDiffError: codeDiffResult.error,
-                  summary: "No editor-created docs change was submitted. Triage should use the current spec and codebase state.",
+                  summary:
+                    "No editor-created docs change was submitted. Triage should use the current spec and codebase state.",
                 };
               }
 
@@ -608,12 +632,29 @@ export default smithers((ctx) => {
             }}
           </Task>
 
-          <Task id="audit" output={outputs.audit} agent={auditAgent(ctx)} retries={1} timeoutMs={20 * 60 * 1000} dependsOn={["metaTicket"]}>
+          <Task
+            id="audit"
+            output={outputs.audit}
+            agent={auditAgent(ctx)}
+            retries={1}
+            timeoutMs={20 * 60 * 1000}
+            dependsOn={["metaTicket"]}
+          >
             {`Audit the current docs-driven-development spec state. Start with "bun .smithers/lib/ddd/auditInputs.ts" and read only the listed bounded inputs unless a specific gap requires one more file. Read .smithers/spec/features.json and the derived content. Inspect the meta-ticket output first; if it was created from the docs editor, include that requested docs delta in your audit. The workflow already ran "bun .smithers/lib/ddd/build.ts"; check the bootstrap node output (or .smithers/docs-driven-development/bootstrap-latest.json) before deciding generatedSiteBuilds, which means "the ddd build gate passed". Return only JSON matching the audit schema. ${CONTEXT}`}
           </Task>
 
-          <Task id="spec-update" output={outputs.spec} agent={implementationAgents} retries={1} timeoutMs={40 * 60 * 1000} dependsOn={["audit", "metaTicket"]} deps={{ audit: outputs.audit, metaTicket: outputs.metaTicket }}>
-            {(deps: any) => `Update this repository's product spec so it reflects the audit honestly. The source of truth is .smithers/spec/features.json — edit it (feature status, summary, tests, observability, debug, architecture, changes/diffHints, missing) for the real product features. Preserve tier, group, userValue, capabilities, endpoints, and links on every record. tier is "feature" (end-user-facing), "platform" (infrastructure that gates production confidence), or "reference" (shared documentation surfaced as a record). group is an end-user journey discovered from this product (for example "Discover", "Create", "Manage", "Measure", or "Operate"), not an owner/team name and not a Smithers-specific catalog. Every link href must resolve to an existing content file (reference/<doc>.md#anchor or features/<id>.md) or a full URL. .smithers/spec/content/features/<id>.md are derived from features.json (regenerated by bun .smithers/lib/ddd/build.ts — never hand-edit them); .smithers/spec/content/overview.md is the editable product overview. If the meta-ticket was created by the docs editor, apply that intent only where it is supported by the current codebase/diffs; otherwise record it as a missing or broken gap. Keep the spec about this repository's product. After editing, run bun .smithers/lib/ddd/build.ts and keep features.json valid. Return only JSON matching the spec schema.
+          <Task
+            id="spec-update"
+            output={outputs.spec}
+            agent={implementationAgents}
+            retries={1}
+            timeoutMs={40 * 60 * 1000}
+            dependsOn={["audit", "metaTicket"]}
+            deps={{ audit: outputs.audit, metaTicket: outputs.metaTicket }}
+          >
+            {(
+              deps: any,
+            ) => `Update this repository's product spec so it reflects the audit honestly. The source of truth is .smithers/spec/features.json — edit it (feature status, summary, tests, observability, debug, architecture, changes/diffHints, missing) for the real product features. Preserve tier, group, userValue, capabilities, endpoints, and links on every record. tier is "feature" (end-user-facing), "platform" (infrastructure that gates production confidence), or "reference" (shared documentation surfaced as a record). group is an end-user journey discovered from this product (for example "Discover", "Create", "Manage", "Measure", or "Operate"), not an owner/team name and not a Smithers-specific catalog. Every link href must resolve to an existing content file (reference/<doc>.md#anchor or features/<id>.md) or a full URL. .smithers/spec/content/features/<id>.md are derived from features.json (regenerated by bun .smithers/lib/ddd/build.ts — never hand-edit them); .smithers/spec/content/overview.md is the editable product overview. If the meta-ticket was created by the docs editor, apply that intent only where it is supported by the current codebase/diffs; otherwise record it as a missing or broken gap. Keep the spec about this repository's product. After editing, run bun .smithers/lib/ddd/build.ts and keep features.json valid. Return only JSON matching the spec schema.
 
 Audit:
 ${JSON.stringify(deps.audit, null, 2)}
@@ -624,7 +665,14 @@ ${JSON.stringify(deps.metaTicket, null, 2)}
 ${CONTEXT}`}
           </Task>
 
-          <Task id="triage" output={outputs.triage} agent={planningAgent(ctx)} retries={1} timeoutMs={30 * 60 * 1000} dependsOn={["spec-update"]}>
+          <Task
+            id="triage"
+            output={outputs.triage}
+            agent={planningAgent(ctx)}
+            retries={1}
+            timeoutMs={30 * 60 * 1000}
+            dependsOn={["spec-update"]}
+          >
             {`Plan the next docs-driven-development round. First run "bun .smithers/lib/ddd/triageCandidates.ts --max ${Math.max(maxAgents * 4, 4)}" and use that bounded ranked list instead of re-auditing the entire repo. Read the meta-ticket output before selecting slots. If it contains a docs-editor change, triage tickets based on that latest docs delta, the recorded docs diff, and the current codebase state. Pick at most ${maxAgents} work items. Slots must be numbered 1..${maxAgents}. Prefer broken P0 fixes, then partial P0 proof gaps, then missing e2e tests, then high-impact reviews/issues, then new features. Set agent to "implementation" for code/docs/test changes and "review" only when independent review judgment is the work item. Never select pointless issues unless the product is otherwise fully built, tested, documented, and reviewed. Return only JSON matching the triage schema. ${CONTEXT}`}
           </Task>
 
@@ -634,7 +682,12 @@ ${CONTEXT}`}
             dependsOn={["triage"]}
             deps={{ triage: outputs.triage }}
           >
-            {(deps: any) => materializeTriageTickets(String((ctx as any).runId ?? (ctx.input as any).runId ?? "unknown-run"), deps.triage)}
+            {(deps: any) =>
+              materializeTriageTickets(
+                String((ctx as any).runId ?? (ctx.input as any).runId ?? "unknown-run"),
+                deps.triage,
+              )
+            }
           </Task>
 
           {triageReady(ctx) && approvalRequired ? (
@@ -669,7 +722,14 @@ ${CONTEXT}`}
             </Task>
           ) : null}
 
-          <Task id="cycle-review" output={outputs.review} agent={planningAgent(ctx)} retries={1} timeoutMs={20 * 60 * 1000} dependsOn={workApproved ? ["work:1"] : ["triage"]}>
+          <Task
+            id="cycle-review"
+            output={outputs.review}
+            agent={planningAgent(ctx)}
+            retries={1}
+            timeoutMs={20 * 60 * 1000}
+            dependsOn={workApproved ? ["work:1"] : ["triage"]}
+          >
             {`Review this entire docs-driven-development cycle. Start with "bun .smithers/lib/ddd/auditInputs.ts" for bounded inputs and read this run's node outputs (smithers output <runId> <nodeId>) before reading raw traces. Check whether the workflow itself wasted work, stopped too early, selected the wrong agents, failed to test, or failed to update the spec honestly. Set approved=true only if the cycle made genuine forward progress or accurately identified the next blocker. List inefficiencies with concrete script fixes. Return only JSON matching the review schema. ${CONTEXT}`}
           </Task>
 

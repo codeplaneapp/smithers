@@ -7,13 +7,15 @@ import { normalizeApiRow } from "./normalizeApiRow.js";
  */
 export function serializeMemoryFactRow(row) {
   const normalized = normalizeApiRow(row);
-  return /** @type {Row} */ (/** @type {unknown} */ ({
-    namespace: normalized.namespace,
-    key: normalized.key,
-    valueJson: normalized.valueJson,
-    schemaSig: normalized.schemaSig ?? null,
-    createdAtMs: normalized.createdAtMs,
-    updatedAtMs: normalized.updatedAtMs,
-    ttlMs: normalized.ttlMs ?? null,
-  }));
+  return /** @type {Row} */ (
+    /** @type {unknown} */ ({
+      namespace: normalized.namespace,
+      key: normalized.key,
+      valueJson: normalized.valueJson,
+      schemaSig: normalized.schemaSig ?? null,
+      createdAtMs: normalized.createdAtMs,
+      updatedAtMs: normalized.updatedAtMs,
+      ttlMs: normalized.ttlMs ?? null,
+    })
+  );
 }

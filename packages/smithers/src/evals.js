@@ -23,18 +23,18 @@ const MAX_FIELD_JSON_BYTES = 256 * 1024;
  * @returns {string | null}
  */
 function encodeBoundedJsonField(value) {
-    if (value === undefined) {
-        return null;
-    }
-    const encoded = JSON.stringify(value);
-    if (encoded.length <= MAX_FIELD_JSON_BYTES) {
-        return encoded;
-    }
-    return JSON.stringify({
-        truncated: true,
-        originalBytes: encoded.length,
-        preview: encoded.slice(0, 2048),
-    });
+  if (value === undefined) {
+    return null;
+  }
+  const encoded = JSON.stringify(value);
+  if (encoded.length <= MAX_FIELD_JSON_BYTES) {
+    return encoded;
+  }
+  return JSON.stringify({
+    truncated: true,
+    originalBytes: encoded.length,
+    preview: encoded.slice(0, 2048),
+  });
 }
 
 /**
@@ -53,19 +53,19 @@ function encodeBoundedJsonField(value) {
  * } | undefined>}
  */
 export async function readEvalSuite(db, suiteId) {
-    const adapter = new SmithersDb(/** @type {any} */ (db));
-    const row = await adapter.getEvalSuite(suiteId);
-    if (!row) {
-        return undefined;
-    }
-    return {
-        suiteId: row.suiteId,
-        name: row.name,
-        workflowKey: row.workflowKey,
-        workflowPath: row.workflowPath,
-        workflowRoot: row.workflowRoot,
-        cases: JSON.parse(row.datasetJson),
-    };
+  const adapter = new SmithersDb(/** @type {any} */ (db));
+  const row = await adapter.getEvalSuite(suiteId);
+  if (!row) {
+    return undefined;
+  }
+  return {
+    suiteId: row.suiteId,
+    name: row.name,
+    workflowKey: row.workflowKey,
+    workflowPath: row.workflowPath,
+    workflowRoot: row.workflowRoot,
+    cases: JSON.parse(row.datasetJson),
+  };
 }
 
 /**
@@ -95,23 +95,23 @@ export async function readEvalSuite(db, suiteId) {
  * @returns {Promise<void>}
  */
 export async function writeEvalCaseRow(db, row) {
-    const adapter = new SmithersDb(/** @type {any} */ (db));
-    await adapter.upsertEvalCaseResult({
-        id: row.id,
-        evalRunId: row.evalRunId,
-        suiteId: row.suiteId,
-        caseId: row.caseId,
-        caseIndex: row.caseIndex,
-        name: row.name ?? null,
-        status: row.status,
-        caseRunId: row.caseRunId ?? null,
-        inputJson: encodeBoundedJsonField(row.input),
-        expectedJson: encodeBoundedJsonField(row.expected),
-        actualJson: encodeBoundedJsonField(row.actual),
-        assertionsJson: encodeBoundedJsonField(row.assertions),
-        error: row.error ?? null,
-        startedAtMs: row.startedAtMs ?? null,
-        finishedAtMs: row.finishedAtMs ?? null,
-        durationMs: row.durationMs ?? null,
-    });
+  const adapter = new SmithersDb(/** @type {any} */ (db));
+  await adapter.upsertEvalCaseResult({
+    id: row.id,
+    evalRunId: row.evalRunId,
+    suiteId: row.suiteId,
+    caseId: row.caseId,
+    caseIndex: row.caseIndex,
+    name: row.name ?? null,
+    status: row.status,
+    caseRunId: row.caseRunId ?? null,
+    inputJson: encodeBoundedJsonField(row.input),
+    expectedJson: encodeBoundedJsonField(row.expected),
+    actualJson: encodeBoundedJsonField(row.actual),
+    assertionsJson: encodeBoundedJsonField(row.assertions),
+    error: row.error ?? null,
+    startedAtMs: row.startedAtMs ?? null,
+    finishedAtMs: row.finishedAtMs ?? null,
+    durationMs: row.durationMs ?? null,
+  });
 }

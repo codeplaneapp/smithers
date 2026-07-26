@@ -74,7 +74,8 @@ export function ApprovalCard({
     onNoteChange?.(next);
   }
 
-  const showNote = noteEditor !== undefined || onNoteChange !== undefined || defaultNote !== undefined || controlledNote !== undefined;
+  const showNote =
+    noteEditor !== undefined || onNoteChange !== undefined || defaultNote !== undefined || controlledNote !== undefined;
 
   return (
     <div data-slot="approval-card" data-state={state} className={cn("sui-approval-card", className)} {...props}>
@@ -146,11 +147,7 @@ export function ApprovalResources({ resources, className, ...props }: ApprovalRe
         return (
           <div key={resource.id} data-slot="approval-resource" className="sui-approval-resource">
             {resource.kind !== undefined ? <span className="sui-approval-resource-kind">{resource.kind}</span> : null}
-            {href !== undefined ? (
-              <a href={href}>{resource.label}</a>
-            ) : (
-              <span>{resource.label}</span>
-            )}
+            {href !== undefined ? <a href={href}>{resource.label}</a> : <span>{resource.label}</span>}
           </div>
         );
       })}

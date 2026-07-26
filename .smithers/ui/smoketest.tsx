@@ -72,7 +72,13 @@ function VerdictBadge({ passed }: { passed: boolean | undefined }) {
   return <span className={`pill ${passed ? "pill-done" : "pill-failed"}`}>{passed ? "PASS" : "FAIL"}</span>;
 }
 
-function AreaCard({ runId, nodeId, title, state, refreshKey }: {
+function AreaCard({
+  runId,
+  nodeId,
+  title,
+  state,
+  refreshKey,
+}: {
   runId: string;
   nodeId: string;
   title: string;
@@ -198,7 +204,13 @@ function App() {
         .finding-fail .finding-status { color: #dc2626; font-weight: 600; }
         .finding-pass .finding-status { color: #16a34a; }
       `}</style>
-      {runId ? <RunView runId={runId} /> : <main className="wrap"><p>No smoketest run yet.</p></main>}
+      {runId ? (
+        <RunView runId={runId} />
+      ) : (
+        <main className="wrap">
+          <p>No smoketest run yet.</p>
+        </main>
+      )}
     </>
   );
 }

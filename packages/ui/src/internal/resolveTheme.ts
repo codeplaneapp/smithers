@@ -34,8 +34,7 @@ export function subscribeTheme(onChange: () => void): () => void {
   if (typeof window === "undefined" || typeof document === "undefined") return () => {};
 
   const root = document.documentElement;
-  const observer =
-    typeof MutationObserver === "undefined" ? null : new MutationObserver(onChange);
+  const observer = typeof MutationObserver === "undefined" ? null : new MutationObserver(onChange);
   observer?.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
 
   const media = typeof window.matchMedia === "function" ? window.matchMedia(DARK_QUERY) : null;

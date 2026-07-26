@@ -116,9 +116,7 @@ async function connectGateway(port: number, token: string, subscribe?: string[])
         ws.once("error", reject);
       });
       const client = new GatewayClient(ws);
-      await client.waitFor(
-        (message) => message.type === "event" && message.event === "connect.challenge",
-      );
+      await client.waitFor((message) => message.type === "event" && message.event === "connect.challenge");
       const hello = await client.request("connect", {
         minProtocol: 1,
         maxProtocol: 1,
@@ -575,10 +573,7 @@ describe("getDevToolsSnapshotRoute", () => {
     const dir = mkdtempSync(join(tmpdir(), "smithers-devtools-agent-"));
     const dbPath = join(dir, "smithers.db");
     try {
-      const { smithers, Workflow, Task } = createSmithers(
-        { out: z.object({ value: z.number() }) },
-        { dbPath },
-      );
+      const { smithers, Workflow, Task } = createSmithers({ out: z.object({ value: z.number() }) }, { dbPath });
       const fakeAgent = {
         id: "fake-reviewer",
         label: "Reviewer",
@@ -807,15 +802,15 @@ describe("getDevToolsSnapshotRoute", () => {
       taskIndexJson: "[]",
       note: "frame-0",
     });
-    await expect(
-      getDevToolsSnapshotRoute({ adapter, runId, frameNo: -1 as any }),
-    ).rejects.toMatchObject({ code: "FrameOutOfRange" });
-    await expect(
-      getDevToolsSnapshotRoute({ adapter, runId, frameNo: Number.MAX_SAFE_INTEGER }),
-    ).rejects.toMatchObject({ code: "FrameOutOfRange" });
-    await expect(
-      getDevToolsSnapshotRoute({ adapter, runId, frameNo: 1 }),
-    ).rejects.toMatchObject({ code: "FrameOutOfRange" });
+    await expect(getDevToolsSnapshotRoute({ adapter, runId, frameNo: -1 as any })).rejects.toMatchObject({
+      code: "FrameOutOfRange",
+    });
+    await expect(getDevToolsSnapshotRoute({ adapter, runId, frameNo: Number.MAX_SAFE_INTEGER })).rejects.toMatchObject({
+      code: "FrameOutOfRange",
+    });
+    await expect(getDevToolsSnapshotRoute({ adapter, runId, frameNo: 1 })).rejects.toMatchObject({
+      code: "FrameOutOfRange",
+    });
     const first = await getDevToolsSnapshotRoute({ adapter, runId, frameNo: 0 });
     expect(first.frameNo).toBe(0);
     sqlite.close();
@@ -884,9 +879,7 @@ describe("getDevToolsSnapshotRoute", () => {
     const firstSnapshot = await getDevToolsSnapshotRoute({ adapter, runId, frameNo: 0 });
     const secondSnapshot = await getDevToolsSnapshotRoute({ adapter, runId, frameNo: 1 });
     const idOf = (snap: any, taskId: string) =>
-      (snap.root.children as any[]).find(
-        (child) => (child.task?.nodeId ?? "") === taskId,
-      )?.id;
+      (snap.root.children as any[]).find((child) => (child.task?.nodeId ?? "") === taskId)?.id;
     const aFirst = idOf(firstSnapshot, "a");
     const bFirst = idOf(firstSnapshot, "b");
     const aSecond = idOf(secondSnapshot, "a");
@@ -970,10 +963,7 @@ describe("Gateway getDevToolsSnapshot RPC", () => {
   let dbPath = "";
 
   beforeEach(() => {
-    dbPath = join(
-      tmpdir(),
-      `smithers-get-devtools-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
-    );
+    dbPath = join(tmpdir(), `smithers-get-devtools-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
   });
 
   afterEach(async () => {
@@ -988,10 +978,7 @@ describe("Gateway getDevToolsSnapshot RPC", () => {
   });
 
   test("returns snapshots over websocket RPC", async () => {
-    const { smithers, Workflow, Task } = createSmithers(
-      { out: z.object({ value: z.number() }) },
-      { dbPath },
-    );
+    const { smithers, Workflow, Task } = createSmithers({ out: z.object({ value: z.number() }) }, { dbPath });
     const workflow = smithers(() => (
       <Workflow name="gateway-devtools">
         <Task id="task-a">{{ value: 1 }}</Task>
@@ -1044,10 +1031,7 @@ describe("Gateway getDevToolsSnapshot RPC", () => {
   });
 
   async function startAuthGateway() {
-    const { smithers, Workflow, Task } = createSmithers(
-      { out: z.object({ value: z.number() }) },
-      { dbPath },
-    );
+    const { smithers, Workflow, Task } = createSmithers({ out: z.object({ value: z.number() }) }, { dbPath });
     const workflow = smithers(() => (
       <Workflow name="gateway-devtools-auth">
         <Task id="task-a">{{ value: 1 }}</Task>

@@ -6,15 +6,19 @@ import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 
 const inputSchema = z.object({
-  items: z.array(z.object({
-    id: z.string(),
-    title: z.string(),
-    needsFix: z.boolean().default(true),
-  })).default([
-    { id: "item-1", title: "Auth flow", needsFix: true },
-    { id: "item-2", title: "Rate limit", needsFix: false },
-    { id: "item-3", title: "Error handler", needsFix: true },
-  ]),
+  items: z
+    .array(
+      z.object({
+        id: z.string(),
+        title: z.string(),
+        needsFix: z.boolean().default(true),
+      }),
+    )
+    .default([
+      { id: "item-1", title: "Auth flow", needsFix: true },
+      { id: "item-2", title: "Rate limit", needsFix: false },
+      { id: "item-3", title: "Error handler", needsFix: true },
+    ]),
   maxCorrections: z.number().int().min(1).max(10).default(3),
 });
 
@@ -59,10 +63,12 @@ function needsCorrection(ctx: any, itemId: string): boolean {
 }
 
 export default smithers((ctx) => {
-  const items = (ctx.input?.items ?? [
-    { id: "item-1", title: "Auth flow", needsFix: true },
-    { id: "item-2", title: "Rate limit", needsFix: false },
-  ]).filter((item) => item.needsFix);
+  const items = (
+    ctx.input?.items ?? [
+      { id: "item-1", title: "Auth flow", needsFix: true },
+      { id: "item-2", title: "Rate limit", needsFix: false },
+    ]
+  ).filter((item) => item.needsFix);
   const maxCorrections = ctx.input?.maxCorrections ?? 3;
 
   return (
@@ -84,7 +90,9 @@ export default smithers((ctx) => {
 
           <Parallel id="parallel-correction-loops" maxConcurrency={3}>
             {items.map((item) => {
-              const latest = ctx.latest(outputs.correct, `${item.id}:correct`) as z.infer<typeof correctSchema> | undefined;
+              const latest = ctx.latest(outputs.correct, `${item.id}:correct`) as
+                | z.infer<typeof correctSchema>
+                | undefined;
               const isFixed = latest?.fixed ?? false;
 
               return (
@@ -96,11 +104,7 @@ export default smithers((ctx) => {
                   onMaxReached="return-last"
                 >
                   <Sequence>
-                    <Task
-                      id={`${item.id}:correct`}
-                      output={outputs.correct}
-                      continueOnFail
-                    >
+                    <Task id={`${item.id}:correct`} output={outputs.correct} continueOnFail>
                       {() => {
                         const iterationCount = ctx.iteration;
                         return {
@@ -112,20 +116,22 @@ export default smithers((ctx) => {
                       }}
                     </Task>
 
-                    <Task
-                      id={`${item.id}:verify`}
-                      output={outputs.verify}
-                      continueOnFail
-                    >
+                    <Task id={`${item.id}:verify`} output={outputs.verify} continueOnFail>
                       {() => {
                         const iterationCount = ctx.iteration;
                         const previousIteration = Math.max(0, iterationCount - 1);
-                        const previous = ctx.outputMaybe(outputs.verify, { nodeId: `${item.id}:verify`, iteration: previousIteration });
+                        const previous = ctx.outputMaybe(outputs.verify, {
+                          nodeId: `${item.id}:verify`,
+                          iteration: previousIteration,
+                        });
                         return {
                           itemId: item.id,
                           headSha: `sha-${item.id}-${iterationCount}`,
                           approved: iterationCount > 0,
-                          feedback: previous && !previous.approved ? "Reviewer rejected: " + previous.feedback : "Verification passed",
+                          feedback:
+                            previous && !previous.approved
+                              ? "Reviewer rejected: " + previous.feedback
+                              : "Verification passed",
                         };
                       }}
                     </Task>

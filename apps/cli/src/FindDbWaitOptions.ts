@@ -1,4 +1,4 @@
 export type FindDbWaitOptions = {
-    timeoutMs?: number;
-    intervalMs?: number;
+  timeoutMs?: number;
+  intervalMs?: number;
 };

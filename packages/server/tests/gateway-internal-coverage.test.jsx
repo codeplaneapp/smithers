@@ -28,7 +28,9 @@ function getPort(server) {
 const cleanups = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) {
-    try { await cleanup(); } catch {}
+    try {
+      await cleanup();
+    } catch {}
   }
 });
 
@@ -36,7 +38,9 @@ function makeDbPath(name) {
   const dbPath = join(tmpdir(), `smithers-internal-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
   cleanups.push(() => {
     for (const suffix of ["", "-shm", "-wal"]) {
-      try { rmSync(`${dbPath}${suffix}`, { force: true }); } catch {}
+      try {
+        rmSync(`${dbPath}${suffix}`, { force: true });
+      } catch {}
     }
   });
   return dbPath;
@@ -55,7 +59,9 @@ describe("gateway internal coverage", () => {
       queueBytes: 0,
       res: {
         write: () => false, // signal backpressure so the drain path is taken
-        once: (event, cb) => { if (event === "drain") drainHandlers.push(cb); },
+        once: (event, cb) => {
+          if (event === "drain") drainHandlers.push(cb);
+        },
       },
     };
     gateway.drainApiStreamSubscriber(subscriber);
@@ -79,7 +85,9 @@ describe("gateway internal coverage", () => {
       queueBytes: 10,
       res: {
         write: () => false,
-        once: (event, cb) => { if (event === "drain") drainHandlers.push(cb); },
+        once: (event, cb) => {
+          if (event === "drain") drainHandlers.push(cb);
+        },
       },
     };
     gateway.drainApiStreamSubscriber(subscriber);
@@ -96,7 +104,9 @@ describe("gateway internal coverage", () => {
     cleanups.push(() => gateway.close());
     const warnings = [];
     const originalWarn = console.warn;
-    console.warn = (...args) => { warnings.push(args.join(" ")); };
+    console.warn = (...args) => {
+      warnings.push(args.join(" "));
+    };
     try {
       gateway.server.emit("error", new Error("post-listen boom"));
     } finally {
@@ -115,7 +125,11 @@ describe("gateway internal coverage", () => {
       ws.once("open", resolve);
       ws.once("error", reject);
     });
-    cleanups.push(() => { try { ws.close(); } catch {} });
+    cleanups.push(() => {
+      try {
+        ws.close();
+      } catch {}
+    });
     // Wait for the server side to register the connection.
     for (let i = 0; i < 100 && gateway.connections.size === 0; i += 1) await sleep(10);
     expect(gateway.connections.size).toBeGreaterThan(0);
@@ -131,7 +145,12 @@ describe("gateway internal coverage", () => {
     let idleFired = 0;
     // A short idle window: checkMs clamps to 1000ms, so the interval callback
     // (checkIdle) runs within ~1s and, finding the daemon idle, invokes onIdle.
-    const gateway = new Gateway({ idleTimeoutMs: 1000, onIdle: () => { idleFired += 1; } });
+    const gateway = new Gateway({
+      idleTimeoutMs: 1000,
+      onIdle: () => {
+        idleFired += 1;
+      },
+    });
     const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
     cleanups.push(() => gateway.close());
     getPort(server);
@@ -149,7 +168,9 @@ describe("gateway internal coverage", () => {
     const workflow = smithers(() => (
       <Workflow name="rel-source">
         <UI source="./relative-ui.jsx" title="Relative UI" props={{ label: "Relative" }} />
-        <Task id="task1" output={outputs.result}>{{ value: 1 }}</Task>
+        <Task id="task1" output={outputs.result}>
+          {{ value: 1 }}
+        </Task>
       </Workflow>
     ));
     const gateway = new Gateway({});

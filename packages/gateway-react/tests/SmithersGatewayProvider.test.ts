@@ -5,16 +5,17 @@
 // original client, so the new credentials/transports never reached the wire.
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-try { GlobalRegistrator.register(); } catch { /* already registered */ }
+try {
+  GlobalRegistrator.register();
+} catch {
+  /* already registered */
+}
 
 import { describe, expect, test } from "bun:test";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
-import {
-  SmithersGatewayClient,
-  type SmithersGatewayClientOptions,
-} from "@smithers-orchestrator/gateway-client";
+import { SmithersGatewayClient, type SmithersGatewayClientOptions } from "@smithers-orchestrator/gateway-client";
 import { SmithersGatewayProvider, useSmithersGateway } from "../src/index.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -45,7 +46,9 @@ function fakeWebSocket(log: SocketLog): typeof WebSocket {
     private readonly listeners = new Map<string, Set<(event: unknown) => void>>();
     constructor(url: string) {
       log.urls.push(url);
-      queueMicrotask(() => { this.dispatch("open", { type: "open" }); });
+      queueMicrotask(() => {
+        this.dispatch("open", { type: "open" });
+      });
     }
     addEventListener(type: string, listener: (event: unknown) => void) {
       const bucket = this.listeners.get(type) ?? new Set();
@@ -104,9 +107,7 @@ async function optionsHarness() {
   }
   return {
     render: async (options: SmithersGatewayClientOptions) => {
-      await harness.render(
-        createElement(SmithersGatewayProvider, { options }, createElement(Capture)),
-      );
+      await harness.render(createElement(SmithersGatewayProvider, { options }, createElement(Capture)));
       return client;
     },
     unmount: harness.unmount,
@@ -116,9 +117,7 @@ async function optionsHarness() {
 describe("SmithersGatewayProvider", () => {
   test("provides the configured Gateway client", () => {
     const client = new SmithersGatewayClient({ baseUrl: "http://gateway.test" });
-    const html = renderToString(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe)),
-    );
+    const html = renderToString(createElement(SmithersGatewayProvider, { client }, createElement(Probe)));
     expect(html).toContain("http://gateway.test");
   });
 
@@ -127,11 +126,19 @@ describe("SmithersGatewayProvider", () => {
     const fetchImpl = capturingFetch(calls);
     const harness = await optionsHarness();
 
-    const first = await harness.render({ baseUrl: "http://gateway.test", headers: { "x-api-key": "key-1" }, fetch: fetchImpl });
+    const first = await harness.render({
+      baseUrl: "http://gateway.test",
+      headers: { "x-api-key": "key-1" },
+      fetch: fetchImpl,
+    });
     await first.rpcRaw("listRuns", {});
     expect(calls.at(-1)!.headers.get("x-api-key")).toBe("key-1");
 
-    const second = await harness.render({ baseUrl: "http://gateway.test", headers: { "x-api-key": "key-2" }, fetch: fetchImpl });
+    const second = await harness.render({
+      baseUrl: "http://gateway.test",
+      headers: { "x-api-key": "key-2" },
+      fetch: fetchImpl,
+    });
     expect(second).not.toBe(first);
     await second.rpcRaw("listRuns", {});
     expect(calls.at(-1)!.headers.get("x-api-key")).toBe("key-2");

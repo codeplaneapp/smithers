@@ -115,13 +115,7 @@ describe("ToolCall", () => {
     expect(formatJsonSafe(cyclic)).toStartWith("[unserializable: ");
 
     const html = renderToStaticMarkup(
-      <ToolCall
-        name="inspect"
-        state="running"
-        layout="expanded"
-        args={{ count: 4n }}
-        result={cyclic}
-      />,
+      <ToolCall name="inspect" state="running" layout="expanded" args={{ count: 4n }} result={cyclic} />,
     );
     expect(html).toContain("4n");
     expect(html).toContain("unserializable");
@@ -143,11 +137,7 @@ describe("ToolCall", () => {
 
   test("renders the approval seam only while approval is requested", () => {
     const requested = renderToStaticMarkup(
-      <ToolCall
-        name="deploy"
-        state="approval-requested"
-        approvalSlot={<button>Approve</button>}
-      />,
+      <ToolCall name="deploy" state="approval-requested" approvalSlot={<button>Approve</button>} />,
     );
     expect(requested).toContain('data-slot="tool-call-approval"');
     expect(requested).toContain("Approve");
@@ -162,12 +152,7 @@ describe("ToolCall", () => {
   test("compact disclosure toggles and controlled state round-trips", async () => {
     const changes: boolean[] = [];
     await render(
-      <ToolCall
-        name="search"
-        state="running"
-        args={{ query: "status" }}
-        onOpenChange={(open) => changes.push(open)}
-      />,
+      <ToolCall name="search" state="running" args={{ query: "status" }} onOpenChange={(open) => changes.push(open)} />,
     );
     const trigger = container!.querySelector<HTMLButtonElement>('[data-slot="tool-call-trigger"]')!;
     expect(trigger.tagName).toBe("BUTTON");

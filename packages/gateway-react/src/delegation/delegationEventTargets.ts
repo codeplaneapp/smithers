@@ -27,16 +27,26 @@ export function delegationTargetKey(nodeId: string, iteration: number): string {
  * frames use dotted names (`node.finished`).
  */
 const NODE_LIFECYCLE_EVENTS = new Set([
-  "NodePending", "node.pending",
-  "NodeStarted", "node.started",
-  "NodeFinished", "node.finished",
-  "NodeFailed", "node.failed",
-  "NodeRetrying", "node.retrying",
-  "NodeSkipped", "node.skipped",
-  "NodeCancelled", "node.cancelled",
-  "NodeWaitingApproval", "node.waiting_approval",
-  "NodeWaitingEvent", "node.waiting_event",
-  "NodeWaitingTimer", "node.waiting_timer",
+  "NodePending",
+  "node.pending",
+  "NodeStarted",
+  "node.started",
+  "NodeFinished",
+  "node.finished",
+  "NodeFailed",
+  "node.failed",
+  "NodeRetrying",
+  "node.retrying",
+  "NodeSkipped",
+  "node.skipped",
+  "NodeCancelled",
+  "node.cancelled",
+  "NodeWaitingApproval",
+  "node.waiting_approval",
+  "NodeWaitingEvent",
+  "node.waiting_event",
+  "NodeWaitingTimer",
+  "node.waiting_timer",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {

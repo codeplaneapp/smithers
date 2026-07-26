@@ -1,6 +1,8 @@
 import { integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
-export const smithersToolCallArchive = sqliteTable("_smithers_tool_call_archive", {
+export const smithersToolCallArchive = sqliteTable(
+  "_smithers_tool_call_archive",
+  {
     runId: text("run_id").notNull(),
     nodeId: text("node_id").notNull(),
     iteration: integer("iteration").notNull().default(0),
@@ -21,7 +23,7 @@ export const smithersToolCallArchive = sqliteTable("_smithers_tool_call_archive"
     hasRevert: integer("has_revert", { mode: "boolean" }),
     idempotencyKey: text("idempotency_key"),
     revertStatus: text("revert_status", {
-        enum: ["reverting", "reverted", "revert-failed", "revert-stale"],
+      enum: ["reverting", "reverted", "revert-failed", "revert-stale"],
     }),
     revertedAtMs: integer("reverted_at_ms"),
     revertErrorJson: text("revert_error_json"),
@@ -29,9 +31,11 @@ export const smithersToolCallArchive = sqliteTable("_smithers_tool_call_archive"
     archivedByOp: text("archived_by_op").notNull(),
     archivedAtMs: integer("archived_at_ms").notNull(),
     archiveReason: text("archive_reason").notNull(),
-}, (t) => ({
+  },
+  (t) => ({
     pk: primaryKey({
-        columns: [t.runId, t.nodeId, t.iteration, t.attempt, t.seq, t.archivedByOp],
+      columns: [t.runId, t.nodeId, t.iteration, t.attempt, t.seq, t.archivedByOp],
     }),
     callTokenUnique: uniqueIndex("_smithers_tool_call_archive_call_token_uidx").on(t.callToken),
-}));
+  }),
+);

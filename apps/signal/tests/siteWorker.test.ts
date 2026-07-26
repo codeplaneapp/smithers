@@ -6,7 +6,11 @@ function mockEnv(kv: Record<string, string>) {
     ASSETS: {
       async fetch(request: Request) {
         const url = new URL(request.url);
-        if (url.pathname === "/index.html") return new Response("<html><body>spa shell</body></html>", { status: 200, headers: { "content-type": "text/html" } });
+        if (url.pathname === "/index.html")
+          return new Response("<html><body>spa shell</body></html>", {
+            status: 200,
+            headers: { "content-type": "text/html" },
+          });
         return new Response("not found", { status: 404 });
       },
     },

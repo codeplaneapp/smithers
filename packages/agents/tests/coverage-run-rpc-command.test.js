@@ -32,10 +32,12 @@ describe("runRpcCommandEffect branches", () => {
     // Never let a fake pid signal a real process group.
     realKill = process.kill;
     killCalls = [];
-    process.kill = /** @type {any} */ ((pid, signal) => {
-      killCalls.push([pid, signal]);
-      return true;
-    });
+    process.kill = /** @type {any} */ (
+      (pid, signal) => {
+        killCalls.push([pid, signal]);
+        return true;
+      }
+    );
   });
   afterEach(() => {
     process.kill = realKill;
@@ -59,7 +61,10 @@ describe("runRpcCommandEffect branches", () => {
   test("finalizes a successful turn, tracking usage and terminating the group", async () => {
     const child = makeFakeChild({ pid: 4242 });
     const childKillSignals = [];
-    child.kill = (signal) => { childKillSignals.push(signal); return true; };
+    child.kill = (signal) => {
+      childKillSignals.push(signal);
+      return true;
+    };
     const controller = new AbortController();
     /** @type {string[]} */
     const streamed = [];
@@ -75,9 +80,7 @@ describe("runRpcCommandEffect branches", () => {
     await tick();
     // top-level usage event (extractedUsage assignment)
     child.stdout.write(JSON.stringify({ type: "note", usage: { input_tokens: 3 } }) + "\n");
-    child.stdout.write(
-      JSON.stringify({ type: "message_end", message: { role: "assistant" } }) + "\n",
-    );
+    child.stdout.write(JSON.stringify({ type: "message_end", message: { role: "assistant" } }) + "\n");
     child.stdout.write(
       JSON.stringify({
         type: "turn_end",
@@ -138,8 +141,7 @@ describe("runRpcCommandEffect branches", () => {
     await tick();
     child.stdout.write("not-json{\n");
     child.stdout.write(
-      JSON.stringify({ type: "response", command: "prompt", success: false, error: "prompt rejected" }) +
-        "\n",
+      JSON.stringify({ type: "response", command: "prompt", success: false, error: "prompt rejected" }) + "\n",
     );
     await expect(promise).rejects.toThrow(/prompt rejected/);
   });
@@ -147,7 +149,10 @@ describe("runRpcCommandEffect branches", () => {
   test("surfaces an assistant error stop reason from turn_end", async () => {
     const child = makeFakeChild({ pid: 4343 });
     const childKillSignals = [];
-    child.kill = (signal) => { childKillSignals.push(signal); return true; };
+    child.kill = (signal) => {
+      childKillSignals.push(signal);
+      return true;
+    };
     const promise = start(child);
     await tick();
     child.stdout.write(
@@ -179,8 +184,10 @@ describe("runRpcCommandEffect branches", () => {
     child.stderr.write("this is a very long stderr line well past the cap\n");
     await tick();
     child.stdout.write(
-      JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "closed answer" }] } }) +
-        "\n",
+      JSON.stringify({
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: "closed answer" }] },
+      }) + "\n",
     );
     await tick();
     child.emit("close", 0);
@@ -216,8 +223,10 @@ describe("runRpcCommandEffect branches", () => {
     child.stdout.write(JSON.stringify({ type: "extension_ui_request", method: "select", id: "s1" }) + "\n");
     await tick();
     child.stdout.write(
-      JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "ext done" }] } }) +
-        "\n",
+      JSON.stringify({
+        type: "turn_end",
+        message: { role: "assistant", content: [{ type: "text", text: "ext done" }] },
+      }) + "\n",
     );
     const result = await promise;
     expect(result.text).toBe("ext done");
@@ -252,9 +261,7 @@ describe("runRpcCommandEffect branches", () => {
     });
     // The child never closes, so the total timeout interrupts the fiber and
     // runs the acquireRelease finalizer (rl.close + removeEventListener + kill).
-    await expect(
-      Effect.runPromise(Effect.timeout(effect, "80 millis")),
-    ).rejects.toThrow();
+    await expect(Effect.runPromise(Effect.timeout(effect, "80 millis"))).rejects.toThrow();
   });
 
   test("kills the child when the idle timer fires", async () => {
@@ -271,12 +278,10 @@ describe("runRpcCommandEffect branches", () => {
     const promise = start(child, { onStdout: (t) => streamed.push(t) });
     await tick();
     child.stdout.write(
-      JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "hel" } }) +
-        "\n",
+      JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "hel" } }) + "\n",
     );
     child.stdout.write(
-      JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "lo" } }) +
-        "\n",
+      JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "lo" } }) + "\n",
     );
     await tick();
     child.emit("close", 0);
@@ -330,7 +335,10 @@ describe("runRpcCommandEffect branches", () => {
   test("fires the delayed SIGKILL when no close clears the terminate timer", async () => {
     const child = makeFakeChild({ pid: 7777 });
     const childKillSignals = [];
-    child.kill = (signal) => { childKillSignals.push(signal); return true; };
+    child.kill = (signal) => {
+      childKillSignals.push(signal);
+      return true;
+    };
     const promise = start(child, { idleTimeoutMs: 30 });
     await expect(promise).rejects.toThrow(/idle timed out/);
     if (process.platform === "win32") expect(childKillSignals).toContain("SIGTERM");

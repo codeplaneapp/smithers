@@ -14,7 +14,11 @@ const AGENT_AUDIT_TIMEOUT_MS = 2 * 60_000;
 const inputSchema = z.object({
   mode: z.enum(["verify", "implement"]).default("verify"),
   allowEdits: z.boolean().default(false),
-  focus: z.string().default("OpenClaw plugin, OpenClaw workflow agent adapter, Claude/Codex/Hermes/OpenClaw integration tests, and the OpenClaw marketing site."),
+  focus: z
+    .string()
+    .default(
+      "OpenClaw plugin, OpenClaw workflow agent adapter, Claude/Codex/Hermes/OpenClaw integration tests, and the OpenClaw marketing site.",
+    ),
 });
 
 const auditSchema = z.object({
@@ -28,11 +32,13 @@ const auditSchema = z.object({
 
 const commandCheckSchema = z.object({
   status: z.enum(["pass", "fail"]),
-  commands: z.array(z.object({
-    command: z.string(),
-    exitCode: z.number(),
-    tail: z.string(),
-  })),
+  commands: z.array(
+    z.object({
+      command: z.string(),
+      exitCode: z.number(),
+      tail: z.string(),
+    }),
+  ),
 });
 
 const summarySchema = z.object({
@@ -85,10 +91,7 @@ async function runCommand(command: string) {
     stdout: "pipe",
     stderr: "pipe",
   });
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
+  const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
   const exitCode = await proc.exited;
   const combined = `${stdout}${stderr ? `\n[stderr]\n${stderr}` : ""}`;
   return {
@@ -110,20 +113,58 @@ export default smithers((ctx) => {
     <Workflow name="openclaw-integration-hardening">
       <Sequence>
         <Parallel maxConcurrency={5}>
-          <Task id="fable-integration-audit" output={outputs.audit} agent={fable} timeoutMs={AGENT_AUDIT_TIMEOUT_MS} continueOnFail noRetry>
+          <Task
+            id="fable-integration-audit"
+            output={outputs.audit}
+            agent={fable}
+            timeoutMs={AGENT_AUDIT_TIMEOUT_MS}
+            continueOnFail
+            noRetry
+          >
             {auditPrompt("Claude Fable integration reviewer", ctx.input.focus, ctx.input.mode, ctx.input.allowEdits)}
           </Task>
 
-          <Task id="codex-test-hardening-audit" output={outputs.audit} agent={codex} timeoutMs={AGENT_AUDIT_TIMEOUT_MS} continueOnFail noRetry>
+          <Task
+            id="codex-test-hardening-audit"
+            output={outputs.audit}
+            agent={codex}
+            timeoutMs={AGENT_AUDIT_TIMEOUT_MS}
+            continueOnFail
+            noRetry
+          >
             {auditPrompt("Codex unit and e2e coverage reviewer", ctx.input.focus, ctx.input.mode, ctx.input.allowEdits)}
           </Task>
 
-          <Task id="codex-openclaw-worker-audit" output={outputs.audit} agent={codex} timeoutMs={AGENT_AUDIT_TIMEOUT_MS} continueOnFail noRetry>
-            {auditPrompt("Codex OpenClaw workflow-agent reviewer", ctx.input.focus, ctx.input.mode, ctx.input.allowEdits)}
+          <Task
+            id="codex-openclaw-worker-audit"
+            output={outputs.audit}
+            agent={codex}
+            timeoutMs={AGENT_AUDIT_TIMEOUT_MS}
+            continueOnFail
+            noRetry
+          >
+            {auditPrompt(
+              "Codex OpenClaw workflow-agent reviewer",
+              ctx.input.focus,
+              ctx.input.mode,
+              ctx.input.allowEdits,
+            )}
           </Task>
 
-          <Task id="fable-marketing-audit" output={outputs.audit} agent={fable} timeoutMs={AGENT_AUDIT_TIMEOUT_MS} continueOnFail noRetry>
-            {auditPrompt("Claude Fable non-technical marketing-site reviewer", ctx.input.focus, ctx.input.mode, ctx.input.allowEdits)}
+          <Task
+            id="fable-marketing-audit"
+            output={outputs.audit}
+            agent={fable}
+            timeoutMs={AGENT_AUDIT_TIMEOUT_MS}
+            continueOnFail
+            noRetry
+          >
+            {auditPrompt(
+              "Claude Fable non-technical marketing-site reviewer",
+              ctx.input.focus,
+              ctx.input.mode,
+              ctx.input.allowEdits,
+            )}
           </Task>
 
           <Task id="targeted-tests" output={outputs.commandCheck} timeoutMs={10 * 60_000} noRetry>
@@ -155,22 +196,23 @@ export default smithers((ctx) => {
               .filter((audit): audit is NonNullable<typeof audit> => Boolean(audit));
             const checks = ctx.outputMaybe(outputs.commandCheck, { nodeId: "targeted-tests" });
             const failingAreas = [
-              ...auditResults.flatMap((result) => result.output ? [] : [`${result.id} did not produce audit output.`]),
-              ...audits.flatMap((audit) => audit.status === "pass" ? [] : audit.findings),
+              ...auditResults.flatMap((result) =>
+                result.output ? [] : [`${result.id} did not produce audit output.`],
+              ),
+              ...audits.flatMap((audit) => (audit.status === "pass" ? [] : audit.findings)),
               ...(!checks ? ["targeted-tests did not produce command output."] : []),
-              ...(checks?.status === "pass" ? [] : checks?.commands.filter((cmd) => cmd.exitCode !== 0).map((cmd) => cmd.command) ?? []),
+              ...(checks?.status === "pass"
+                ? []
+                : (checks?.commands.filter((cmd) => cmd.exitCode !== 0).map((cmd) => cmd.command) ?? [])),
             ];
             return {
               status: failingAreas.length === 0 ? "pass" : "needs-work",
-              summary: failingAreas.length === 0
-                ? "OpenClaw integration hardening checks passed."
-                : "OpenClaw integration hardening found issues that need follow-up.",
+              summary:
+                failingAreas.length === 0
+                  ? "OpenClaw integration hardening checks passed."
+                  : "OpenClaw integration hardening found issues that need follow-up.",
               failingAreas,
-              nextCommands: [
-                "pnpm typecheck",
-                "pnpm test",
-                "pnpm -C e2e test",
-              ],
+              nextCommands: ["pnpm typecheck", "pnpm test", "pnpm -C e2e test"],
             };
           }}
         </Task>

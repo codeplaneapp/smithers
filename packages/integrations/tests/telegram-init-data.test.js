@@ -67,7 +67,9 @@ describe("verifyTelegramWebAppInitData (HMAC)", () => {
     // Swap the user id after signing → data-check-string changes, hash stale.
     const tampered = initData.replace("%22id%22%3A7", "%22id%22%3A9");
     expect(tampered).not.toBe(initData);
-    await expect(verifyTelegramWebAppInitData(tampered, BOT_TOKEN, { nowMs })).rejects.toThrow(/signature does not match/);
+    await expect(verifyTelegramWebAppInitData(tampered, BOT_TOKEN, { nowMs })).rejects.toThrow(
+      /signature does not match/,
+    );
   });
 
   test("rejects when signed with a different bot token", async () => {
@@ -78,7 +80,9 @@ describe("verifyTelegramWebAppInitData (HMAC)", () => {
   test("rejects expired initData and never leaks the token", async () => {
     const stale = { ...baseFields(), auth_date: String(nowSeconds - 7200) };
     const initData = signHmacInitData(stale, BOT_TOKEN);
-    const error = await verifyTelegramWebAppInitData(initData, BOT_TOKEN, { maxAgeSeconds: 3600, nowMs }).catch((e) => e);
+    const error = await verifyTelegramWebAppInitData(initData, BOT_TOKEN, { maxAgeSeconds: 3600, nowMs }).catch(
+      (e) => e,
+    );
     expect(String(error?.message)).toMatch(/expired/);
     expect(JSON.stringify({ m: error?.message, d: error?.details })).not.toContain(BOT_TOKEN);
   });
@@ -91,7 +95,9 @@ describe("verifyTelegramWebAppInitData (HMAC)", () => {
   });
 
   test("rejects initData with no hash field", async () => {
-    await expect(verifyTelegramWebAppInitData("user=%7B%7D&auth_date=1", BOT_TOKEN, { nowMs })).rejects.toThrow(/missing the hash/);
+    await expect(verifyTelegramWebAppInitData("user=%7B%7D&auth_date=1", BOT_TOKEN, { nowMs })).rejects.toThrow(
+      /missing the hash/,
+    );
   });
 
   test("keeps values containing encoded delimiters intact (URLSearchParams parse)", async () => {
@@ -122,11 +128,15 @@ describe("verifyTelegramWebAppInitDataSignature (Ed25519 third-party)", () => {
     expect(parsed.user?.id).toBe(7);
 
     const tampered = initData.replace("query_id=AAExampleQueryId", "query_id=forged");
-    await expect(verifyTelegramWebAppInitDataSignature(tampered, botId, { publicKeyHex, nowMs })).rejects.toThrow(/does not match/);
+    await expect(verifyTelegramWebAppInitDataSignature(tampered, botId, { publicKeyHex, nowMs })).rejects.toThrow(
+      /does not match/,
+    );
   });
 
   test("rejects initData with no signature field", async () => {
-    await expect(verifyTelegramWebAppInitDataSignature("auth_date=1&user=%7B%7D", 1, { nowMs })).rejects.toThrow(/missing the signature/);
+    await expect(verifyTelegramWebAppInitDataSignature("auth_date=1&user=%7B%7D", 1, { nowMs })).rejects.toThrow(
+      /missing the signature/,
+    );
   });
 
   test("a malformed base64url signature rejects cleanly (not a raw DOMException)", async () => {

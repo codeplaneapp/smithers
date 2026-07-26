@@ -1,13 +1,7 @@
 import { create } from "zustand";
 import { useChatStore } from "../chat/chatStore";
 import { useNotificationsStore } from "../notifications/notificationsStore";
-import {
-  DEFAULT_FILTERS,
-  shortRunId,
-  type AgeFilter,
-  type RunStatusFilter,
-  type RunSummary,
-} from "./runsList";
+import { DEFAULT_FILTERS, shortRunId, type AgeFilter, type RunStatusFilter, type RunSummary } from "./runsList";
 
 /**
  * The runs-list store: the live run roster (pushed in by `RunsListBridge` from
@@ -94,20 +88,14 @@ export const useRunsListStore = create<RunsListState>((set, get) => ({
     if (!run) return;
     const id = shortRunId(run.runId);
     // RunInspectView.startRerun: a demo acknowledgement, not a fabricated run.
-    echo(
-      `Triggering rerun of ${run.workflowName} (${id})…`,
-      "Run rerun",
-      id,
-    );
+    echo(`Triggering rerun of ${run.workflowName} (${id})…`, "Run rerun", id);
   },
 
   approve: (runId) => {
     const run = get().runs.find((r) => r.runId === runId);
     if (!run || run.status !== "waiting") return;
     set((state) => ({
-      runs: state.runs.map((r) =>
-        r.runId === runId ? { ...r, status: "running", blockedNodeLabel: undefined } : r,
-      ),
+      runs: state.runs.map((r) => (r.runId === runId ? { ...r, status: "running", blockedNodeLabel: undefined } : r)),
     }));
     const id = shortRunId(run.runId);
     echo(
@@ -144,9 +132,7 @@ export const useRunsListStore = create<RunsListState>((set, get) => ({
     const run = get().runs.find((r) => r.runId === runId);
     if (!run || (run.status !== "failed" && run.status !== "cancelled")) return;
     set((state) => ({
-      runs: state.runs.map((r) =>
-        r.runId === runId ? { ...r, status: "running", errorText: undefined } : r,
-      ),
+      runs: state.runs.map((r) => (r.runId === runId ? { ...r, status: "running", errorText: undefined } : r)),
     }));
     const id = shortRunId(run.runId);
     echo(`Resumed ${run.workflowName} (${id}).`, "Run resumed", id);

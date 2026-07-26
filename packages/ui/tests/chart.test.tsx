@@ -52,7 +52,10 @@ describe("<ChartContainer>", () => {
 });
 
 describe("<ChartTooltipContent>", () => {
-  const config = chartConfig([{ key: "landed", label: "Landed" }, { key: "inflight", label: "In flight" }]);
+  const config = chartConfig([
+    { key: "landed", label: "Landed" },
+    { key: "inflight", label: "In flight" },
+  ]);
 
   test("renders config labels, indicator swatches, and formatted values", () => {
     const html = renderToStaticMarkup(
@@ -98,7 +101,10 @@ describe("<ChartTooltipContent>", () => {
 
 describe("<ChartLegendContent>", () => {
   test("renders one swatch + label per series from the config", () => {
-    const config = chartConfig([{ key: "landed", label: "Landed" }, { key: "inflight", label: "In flight" }]);
+    const config = chartConfig([
+      { key: "landed", label: "Landed" },
+      { key: "inflight", label: "In flight" },
+    ]);
     const html = renderToStaticMarkup(
       <ChartProvider config={config}>
         <ChartLegendContent

@@ -39,11 +39,11 @@ const hasCompletedActivityResult = (key) => completedActivityResults.has(key);
  * @returns {unknown}
  */
 const getCompletedActivityResult = (key) => {
-    const value = completedActivityResults.get(key);
-    if (completedActivityResults.delete(key)) {
-        completedActivityResults.set(key, value);
-    }
-    return value;
+  const value = completedActivityResults.get(key);
+  if (completedActivityResults.delete(key)) {
+    completedActivityResults.set(key, value);
+  }
+  return value;
 };
 /**
  * Stores a result, evicting least-recently-used entries beyond the cap.
@@ -52,15 +52,15 @@ const getCompletedActivityResult = (key) => {
  * @returns {void}
  */
 const setCompletedActivityResult = (key, value) => {
-    completedActivityResults.delete(key);
-    completedActivityResults.set(key, value);
-    while (completedActivityResults.size > COMPLETED_ACTIVITY_RESULTS_MAX) {
-        const oldest = completedActivityResults.keys().next().value;
-        if (oldest === undefined) {
-            break;
-        }
-        completedActivityResults.delete(oldest);
+  completedActivityResults.delete(key);
+  completedActivityResults.set(key, value);
+  while (completedActivityResults.size > COMPLETED_ACTIVITY_RESULTS_MAX) {
+    const oldest = completedActivityResults.keys().next().value;
+    if (oldest === undefined) {
+      break;
     }
+    completedActivityResults.delete(oldest);
+  }
 };
 /**
  * Current number of cached completed-activity results. Exported for tests.
@@ -72,27 +72,27 @@ export const completedActivityResultsSize = () => completedActivityResults.size;
  * @returns {string}
  */
 const getAdapterNamespace = (adapter) => {
-    const existing = adapterNamespaces.get(adapter);
-    if (existing) {
-        return existing;
-    }
-    const created = `adapter-${++nextAdapterNamespace}`;
-    adapterNamespaces.set(adapter, created);
-    return created;
+  const existing = adapterNamespaces.get(adapter);
+  if (existing) {
+    return existing;
+  }
+  const created = `adapter-${++nextAdapterNamespace}`;
+  adapterNamespaces.set(adapter, created);
+  return created;
 };
 export class RetriableTaskFailure extends Error {
-    nodeId;
-    attempt;
-    /**
+  nodeId;
+  attempt;
+  /**
    * @param {string} nodeId
    * @param {number} attempt
    */
-    constructor(nodeId, attempt) {
-        super(`Task ${nodeId} failed on attempt ${attempt} and should be retried`);
-        this.name = "RetriableTaskFailure";
-        this.nodeId = nodeId;
-        this.attempt = attempt;
-    }
+  constructor(nodeId, attempt) {
+    super(`Task ${nodeId} failed on attempt ${attempt} and should be retried`);
+    this.name = "RetriableTaskFailure";
+    this.nodeId = nodeId;
+    this.attempt = attempt;
+  }
 }
 /**
  * @param {unknown} error
@@ -106,14 +106,10 @@ const isRetriableTaskFailure = (error) => error instanceof RetriableTaskFailure;
  * @param {_TaskDescriptor} desc
  * @returns {string}
  */
-export const makeTaskBridgeKey = (adapter, workflowName, runId, desc) => [
-    "smithers-task-bridge",
-    getAdapterNamespace(adapter),
-    workflowName,
-    runId,
-    desc.nodeId,
-    String(desc.iteration),
-].join(":");
+export const makeTaskBridgeKey = (adapter, workflowName, runId, desc) =>
+  ["smithers-task-bridge", getAdapterNamespace(adapter), workflowName, runId, desc.nodeId, String(desc.iteration)].join(
+    ":",
+  );
 /**
  * @param {_SmithersDb} adapter
  * @param {string} workflowName
@@ -124,8 +120,8 @@ export const makeTaskBridgeKey = (adapter, workflowName, runId, desc) => [
  * @returns {string}
  */
 const makeActivityIdempotencyKey = (adapter, workflowName, runId, desc, attempt, includeAttempt) => {
-    const base = makeTaskBridgeKey(adapter, workflowName, runId, desc);
-    return includeAttempt ? `${base}:attempt:${attempt}` : base;
+  const base = makeTaskBridgeKey(adapter, workflowName, runId, desc);
+  return includeAttempt ? `${base}:attempt:${attempt}` : base;
 };
 /**
  * @template A
@@ -133,21 +129,22 @@ const makeActivityIdempotencyKey = (adapter, workflowName, runId, desc, attempt,
  * @param {(context: TaskActivityContext) => Promise<A> | A} executeFn
  * @param {Pick<ExecuteTaskActivityOptions, "includeAttemptInIdempotencyKey">} [options]
  */
-export const makeTaskActivity = (desc, executeFn, options) => Activity.make({
+export const makeTaskActivity = (desc, executeFn, options) =>
+  Activity.make({
     name: desc.nodeId,
     success: Schema.Unknown,
     error: Schema.Unknown,
     execute: Effect.gen(function* () {
-        const attempt = yield* Activity.CurrentAttempt;
-        const idempotencyKey = yield* Activity.idempotencyKey(desc.nodeId, {
-            includeAttempt: options?.includeAttemptInIdempotencyKey,
-        });
-        return yield* Effect.tryPromise({
-            try: () => Promise.resolve(executeFn({ attempt, idempotencyKey })),
-            catch: (error) => error,
-        });
+      const attempt = yield* Activity.CurrentAttempt;
+      const idempotencyKey = yield* Activity.idempotencyKey(desc.nodeId, {
+        includeAttempt: options?.includeAttemptInIdempotencyKey,
+      });
+      return yield* Effect.tryPromise({
+        try: () => Promise.resolve(executeFn({ attempt, idempotencyKey })),
+        catch: (error) => error,
+      });
     }),
-});
+  });
 /**
  * @template A
  * @param {_SmithersDb} adapter
@@ -159,28 +156,34 @@ export const makeTaskActivity = (desc, executeFn, options) => Activity.make({
  * @returns {Promise<A>}
  */
 export const executeTaskActivity = async (adapter, workflowName, runId, desc, executeFn, options) => {
-    const initialAttempt = Math.max(1, options?.initialAttempt ?? 1);
-    const retry = options?.retry === undefined
-        ? { times: desc.retries, while: isRetriableTaskFailure }
-        : options.retry;
-    let attempt = initialAttempt;
-    while (true) {
-        const idempotencyKey = makeActivityIdempotencyKey(adapter, workflowName, runId, desc, attempt, options?.includeAttemptInIdempotencyKey);
-        if (hasCompletedActivityResult(idempotencyKey)) {
-            return getCompletedActivityResult(idempotencyKey);
-        }
-        try {
-            const result = await Promise.resolve(executeFn({ attempt, idempotencyKey }));
-            setCompletedActivityResult(idempotencyKey, result);
-            return result;
-        }
-        catch (error) {
-            if (retry === false ||
-                attempt - initialAttempt >= retry.times ||
-                !(retry.while ?? isRetriableTaskFailure)(error)) {
-                throw error;
-            }
-            attempt += 1;
-        }
+  const initialAttempt = Math.max(1, options?.initialAttempt ?? 1);
+  const retry = options?.retry === undefined ? { times: desc.retries, while: isRetriableTaskFailure } : options.retry;
+  let attempt = initialAttempt;
+  while (true) {
+    const idempotencyKey = makeActivityIdempotencyKey(
+      adapter,
+      workflowName,
+      runId,
+      desc,
+      attempt,
+      options?.includeAttemptInIdempotencyKey,
+    );
+    if (hasCompletedActivityResult(idempotencyKey)) {
+      return getCompletedActivityResult(idempotencyKey);
     }
+    try {
+      const result = await Promise.resolve(executeFn({ attempt, idempotencyKey }));
+      setCompletedActivityResult(idempotencyKey, result);
+      return result;
+    } catch (error) {
+      if (
+        retry === false ||
+        attempt - initialAttempt >= retry.times ||
+        !(retry.while ?? isRetriableTaskFailure)(error)
+      ) {
+        throw error;
+      }
+      attempt += 1;
+    }
+  }
 };

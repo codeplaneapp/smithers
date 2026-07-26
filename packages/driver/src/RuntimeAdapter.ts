@@ -56,19 +56,12 @@ export type RuntimeSubprocessResult = {
 
 /** Subprocess capability namespace. Unsupported in any environment without real process spawning (e.g. a browser). */
 export type RuntimeSubprocess = {
-  spawn(
-    command: string,
-    args?: readonly string[],
-    opts?: Record<string, unknown>,
-  ): Promise<RuntimeSubprocessResult>;
+  spawn(command: string, args?: readonly string[], opts?: Record<string, unknown>): Promise<RuntimeSubprocessResult>;
 };
 
 /** Worktree path-resolution capability, mirroring `@smithers-orchestrator/graph`'s `resolveWorktreePath` contract. */
 export type RuntimeWorktree = {
-  resolve(
-    path: string,
-    opts?: { baseRootDir?: string; workflowPath?: string | null },
-  ): string;
+  resolve(path: string, opts?: { baseRootDir?: string; workflowPath?: string | null }): string;
 };
 
 export type RuntimeSandboxResult = {

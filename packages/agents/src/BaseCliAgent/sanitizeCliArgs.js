@@ -9,7 +9,10 @@ export function sanitizeCliArgs(args) {
     const flag = equals >= 0 ? arg.slice(0, equals) : arg;
     if (SENSITIVE_FLAG.test(flag)) {
       sanitized.push(equals >= 0 ? `${flag}=[REDACTED]` : arg);
-      if (equals < 0 && index + 1 < args.length) { sanitized.push("[REDACTED]"); index += 1; }
+      if (equals < 0 && index + 1 < args.length) {
+        sanitized.push("[REDACTED]");
+        index += 1;
+      }
     } else sanitized.push(arg);
   }
   return sanitized;

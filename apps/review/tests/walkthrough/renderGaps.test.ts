@@ -63,9 +63,21 @@ describe("renderWalkthroughHtml edge branches", () => {
     const files: ChangedFile[] = [
       file({ path: "src/new.ts", status: "renamed", insertions: 0, deletions: 0, diff: renamedDiff }),
       // A renamed file whose diff lacks explicit rename lines → renamePaths returns null.
-      file({ path: "src/moved.ts", status: "renamed", insertions: 1, deletions: 1, diff: "diff --git a/src/moved.ts b/src/moved.ts\n+x\n-y" }),
+      file({
+        path: "src/moved.ts",
+        status: "renamed",
+        insertions: 1,
+        deletions: 1,
+        diff: "diff --git a/src/moved.ts b/src/moved.ts\n+x\n-y",
+      }),
       // Oversize churn → the highlighted renderer is skipped for the plain fallback.
-      file({ path: "src/huge.ts", status: "modified", insertions: 6000, deletions: 0, diff: "diff --git a/src/huge.ts b/src/huge.ts\n+big" }),
+      file({
+        path: "src/huge.ts",
+        status: "modified",
+        insertions: 6000,
+        deletions: 0,
+        diff: "diff --git a/src/huge.ts b/src/huge.ts\n+big",
+      }),
       // A non-patch diff makes the Pierre renderer throw → plain fallback + logged.
       file({ path: "src/garbage.ts", status: "modified", insertions: 1, deletions: 0, diff: "garbage not a diff" }),
     ];
@@ -153,7 +165,10 @@ describe("renderWalkthroughHtml edge branches", () => {
       synopsis: "An impactful change.",
       chapters: [{ title: "c", blocks: [block({ kind: "diff", path: "src/auth.ts", intro: "" })] }],
     };
-    const impact = { level: "high" as const, reasons: [{ signal: "security-sensitive path (auth)", path: "src/auth.ts" }] };
+    const impact = {
+      level: "high" as const,
+      reasons: [{ signal: "security-sensitive path (auth)", path: "src/auth.ts" }],
+    };
     const quiz = {
       impact,
       questions: [

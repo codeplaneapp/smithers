@@ -33,7 +33,7 @@ function DEFAULT_PROMPT(): string {
     "",
     "The test must:",
     "1. Use `createSmithers({ input, decision, deploy }, { dbPath })` with a temp dbPath under tmpdir(),",
-    "   build a workflow `<Approval id=\"approve-deploy\"> then <Task id=\"deploy\">{ value }` via",
+    '   build a workflow `<Approval id="approve-deploy"> then <Task id="deploy">{ value }` via',
     "   React.createElement, `ensureSmithersTables(db)`, and `const adapter = new SmithersDb(db)`.",
     "2. `await Effect.runPromise(runWorkflow(workflow, { runId, input: { value: 7 } }))` and assert the",
     "   result status is 'waiting-approval'.",
@@ -43,7 +43,7 @@ function DEFAULT_PROMPT(): string {
     "   partially matches `{ kind: 'approval', nodeId: 'approve-deploy' }` via expect(...).toMatchObject(...)",
     "   (the real ReasonBlocked also carries a `requestedAt` string) — this proves the pending approval was",
     "   read back out of the REAL DB, not fabricated.",
-    "4. A second test: a workflow with a single literal `<Task id=\"deploy\">{ value }` runs to completion",
+    '4. A second test: a workflow with a single literal `<Task id="deploy">{ value }` runs to completion',
     "   (status 'finished'); assert `computeRunStateFromRow` returns state 'succeeded' and never idle.",
     "5. Give each async test a 30_000 ms timeout and clean up temp db files in afterEach.",
     "",
@@ -61,9 +61,7 @@ const { Workflow, smithers, outputs } = createSmithers({
 export default smithers((ctx) => {
   const validate = ctx.latest(outputs.validate, "issue-306-cov:validate");
   const done = validate?.allPassed === true;
-  const feedback = validate && !done
-    ? `VALIDATION FAILED:\n${validate.failingSummary ?? validate.summary}`
-    : null;
+  const feedback = validate && !done ? `VALIDATION FAILED:\n${validate.failingSummary ?? validate.summary}` : null;
   return (
     <Workflow name="issue-306-audit-test-coverage-gaps-apps-gateway-ui">
       <ValidationLoop

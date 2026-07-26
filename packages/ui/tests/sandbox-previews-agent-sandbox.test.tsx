@@ -47,7 +47,14 @@ async function render(element: ReactElement): Promise<void> {
 
 describe("sandboxStateToStatus", () => {
   test("maps every sandbox state into the shared vocabulary", () => {
-    const states: readonly SandboxState[] = ["provisioning", "ready", "disconnected", "suspended", "failed", "destroyed"];
+    const states: readonly SandboxState[] = [
+      "provisioning",
+      "ready",
+      "disconnected",
+      "suspended",
+      "failed",
+      "destroyed",
+    ];
     expect(states.map(sandboxStateToStatus)).toEqual(["pending", "ready", "waiting", "paused", "failed", "cancelled"]);
   });
 });
@@ -143,9 +150,11 @@ describe("AgentSandbox", () => {
     let retries = 0;
     await render(
       <AgentSandbox state="failed">
-        <AgentSandboxActions onRetry={() => {
-          retries += 1;
-        }} />
+        <AgentSandboxActions
+          onRetry={() => {
+            retries += 1;
+          }}
+        />
       </AgentSandbox>,
     );
     const retry = container!.querySelector('[data-slot="agent-sandbox-retry"]') as HTMLButtonElement;

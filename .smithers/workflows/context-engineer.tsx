@@ -113,16 +113,7 @@ const backpressureSchema = z.looseObject({
       z.looseObject({
         criterion: z.string().describe("The success criterion this gate enforces."),
         verificationMethod: z
-          .enum([
-            "schema",
-            "unit_test",
-            "integration_test",
-            "eval",
-            "review",
-            "approval",
-            "trace",
-            "manual_check",
-          ])
+          .enum(["schema", "unit_test", "integration_test", "eval", "review", "approval", "trace", "manual_check"])
           .describe("How the criterion is checked."),
         gateType: z
           .enum(["blocking", "warning", "informational"])
@@ -212,7 +203,7 @@ export default smithers((ctx) => {
 
   // The contract is "designed" once it has been drafted and grilling has settled.
   const designed = contract !== undefined && grillResolved && route !== undefined && backpressure !== undefined;
-  const approved = !review && !grillExhausted || approval?.approved === true;
+  const approved = (!review && !grillExhausted) || approval?.approved === true;
   const proceed = designed && approved;
 
   // Execute-loop bookkeeping: re-render the `until` against the latest execute output.
@@ -234,12 +225,7 @@ export default smithers((ctx) => {
 
         {/* 2 — Inventory the repo/tools/skills into a context contract draft. */}
         {classify ? (
-          <Task
-            id="inventory-context"
-            output={outputs.inventory}
-            agent={agents.research}
-            heartbeatTimeoutMs={600_000}
-          >
+          <Task id="inventory-context" output={outputs.inventory} agent={agents.research} heartbeatTimeoutMs={600_000}>
             <InventoryPrompt
               prompt={prompt}
               classification={classify}
@@ -304,12 +290,7 @@ export default smithers((ctx) => {
         {/* 7 — Execute (or dispatch) the contracted work, looping until done. */}
         {proceed ? (
           <Ralph id="execute:loop" until={executed} maxIterations={3} onMaxReached="return-last">
-            <Task
-              id="execute"
-              output={outputs.execute}
-              agent={agents.implement}
-              heartbeatTimeoutMs={900_000}
-            >
+            <Task id="execute" output={outputs.execute} agent={agents.implement} heartbeatTimeoutMs={900_000}>
               <ExecutePrompt
                 prompt={prompt}
                 contract={contract}

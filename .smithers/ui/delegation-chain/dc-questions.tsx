@@ -49,8 +49,7 @@ export function QuestionForm({
   const [confirmed, setConfirmed] = useState<boolean>(recommendedBoolean(question.recommended));
   const [text, setText] = useState<string>(question.kind === "text" ? question.recommended : "");
 
-  const value: unknown =
-    question.kind === "select" ? selected : question.kind === "confirm" ? confirmed : text;
+  const value: unknown = question.kind === "select" ? selected : question.kind === "confirm" ? confirmed : text;
 
   return (
     <div className="dc-section" data-testid={`dc-question-${question.seq}`}>
@@ -203,7 +202,11 @@ export function QuestionsPanel({
           waiting for question {waitingForSeq}…
         </span>
       ) : null}
-      {error ? <span className="badge bad" data-testid="dc-questions-error">{error}</span> : null}
+      {error ? (
+        <span className="badge bad" data-testid="dc-questions-error">
+          {error}
+        </span>
+      ) : null}
       {prepared.length > 0 ? (
         <div className="dc-question-queue">
           {prepared.map((question) => (
@@ -267,7 +270,11 @@ export function RefinedPromptApproval({
           className={"badge " + (submitted === "approved" ? "ok" : submitted === "rejected" ? "bad" : "warn")}
           data-testid="dc-refined-status"
         >
-          {submitted === "approved" ? "approved" : submitted === "rejected" ? "rejected — run ends" : "awaiting approval"}
+          {submitted === "approved"
+            ? "approved"
+            : submitted === "rejected"
+              ? "rejected — run ends"
+              : "awaiting approval"}
         </span>
       </div>
       {initial === "" && submitted === null ? (
@@ -302,7 +309,11 @@ export function RefinedPromptApproval({
             Rejected — the run ends here
           </span>
         ) : null}
-        {error ? <span className="badge bad" data-testid="dc-refined-error">{error}</span> : null}
+        {error ? (
+          <span className="badge bad" data-testid="dc-refined-error">
+            {error}
+          </span>
+        ) : null}
       </div>
       {rejecting && submitted === null ? (
         <div className="dc-section" data-testid="dc-refined-reject">
@@ -321,7 +332,12 @@ export function RefinedPromptApproval({
               className="button danger"
               data-testid="dc-refined-reject-confirm"
               disabled={busy}
-              onClick={() => void submit({ approved: false, refinedPrompt: draft, reason: reason.trim() || "rejected by human" }, "rejected")}
+              onClick={() =>
+                void submit(
+                  { approved: false, refinedPrompt: draft, reason: reason.trim() || "rejected by human" },
+                  "rejected",
+                )
+              }
             >
               {busy ? "Submitting..." : "Reject & end run"}
             </button>

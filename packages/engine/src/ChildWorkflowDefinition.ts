@@ -2,6 +2,6 @@ import type { SmithersWorkflow } from "@smithers-orchestrator/components/Smither
 import type { ChildWorkflowFileRef } from "./ChildWorkflowFileRef.ts";
 
 export type ChildWorkflowDefinition =
-	| SmithersWorkflow<unknown>
-	| (() => SmithersWorkflow<unknown> | unknown)
-	| ChildWorkflowFileRef;
+  | SmithersWorkflow<unknown>
+  | (() => SmithersWorkflow<unknown> | unknown)
+  | ChildWorkflowFileRef;

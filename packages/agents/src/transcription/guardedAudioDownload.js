@@ -395,8 +395,8 @@ function assertTransportResponse(response) {
   if (
     !response ||
     typeof response !== "object" ||
-    typeof /** @type {{ status?: unknown }} */ (response).status !== "number" ||
-    typeof /** @type {{ headers?: { get?: unknown } }} */ (response).headers?.get !== "function"
+    typeof (/** @type {{ status?: unknown }} */ (response).status) !== "number" ||
+    typeof (/** @type {{ headers?: { get?: unknown } }} */ (response).headers?.get) !== "function"
   ) {
     throw new TypeError("Pinned audio transport returned an invalid response");
   }

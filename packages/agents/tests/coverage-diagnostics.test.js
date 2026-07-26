@@ -2,10 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  getDiagnosticStrategy,
-  diagnosticApiKeyEnv,
-} from "../src/diagnostics/getDiagnosticStrategy.js";
+import { getDiagnosticStrategy, diagnosticApiKeyEnv } from "../src/diagnostics/getDiagnosticStrategy.js";
 import { launchDiagnostics } from "../src/diagnostics/launchDiagnostics.js";
 import { runDiagnostics } from "../src/diagnostics/runDiagnostics.js";
 import { makeFakeNodeCliSync } from "./fake-cli.js";
@@ -79,9 +76,11 @@ describe("claude rate_limit_status probe", () => {
     expect((await rl().run(ctx)).status).toBe("pass");
   });
   test("errors when the probe throws", async () => {
-    globalThis.fetch = /** @type {any} */ (async () => {
-      throw new Error("network down");
-    });
+    globalThis.fetch = /** @type {any} */ (
+      async () => {
+        throw new Error("network down");
+      }
+    );
     const r = await rl().run(ctx);
     expect(r.status).toBe("error");
     expect(r.message).toContain("network down");
@@ -146,9 +145,11 @@ describe("codex openai checks", () => {
     expect((await apiKey().run({ env: { OPENAI_API_KEY: "sk-x" }, cwd: "/tmp" })).status).toBe("pass");
   });
   test("errors when the api-key probe throws", async () => {
-    globalThis.fetch = /** @type {any} */ (async () => {
-      throw new Error("openai unreachable");
-    });
+    globalThis.fetch = /** @type {any} */ (
+      async () => {
+        throw new Error("openai unreachable");
+      }
+    );
     expect((await apiKey().run({ env: { OPENAI_API_KEY: "sk-x" }, cwd: "/tmp" })).status).toBe("error");
   });
   test("passes via CODEX_HOME subscription tokens with no env key", async () => {
@@ -168,18 +169,28 @@ describe("codex openai checks", () => {
     stubFetch(new Response("", { status: 429, headers: { "retry-after": "12" } }));
     expect((await rl().run({ env: { OPENAI_API_KEY: "sk-x" }, cwd: "/tmp" })).message).toContain("retry after 12");
     stubFetch(
-      new Response("{}", { status: 200, headers: { "x-ratelimit-remaining-requests": "0", "x-ratelimit-remaining-tokens": "100" } }),
+      new Response("{}", {
+        status: 200,
+        headers: { "x-ratelimit-remaining-requests": "0", "x-ratelimit-remaining-tokens": "100" },
+      }),
     );
-    expect((await rl().run({ env: { OPENAI_API_KEY: "sk-x" }, cwd: "/tmp" })).message).toBe("Rate limit quota exhausted");
+    expect((await rl().run({ env: { OPENAI_API_KEY: "sk-x" }, cwd: "/tmp" })).message).toBe(
+      "Rate limit quota exhausted",
+    );
     stubFetch(
-      new Response("{}", { status: 200, headers: { "x-ratelimit-remaining-requests": "10", "x-ratelimit-remaining-tokens": "100" } }),
+      new Response("{}", {
+        status: 200,
+        headers: { "x-ratelimit-remaining-requests": "10", "x-ratelimit-remaining-tokens": "100" },
+      }),
     );
     expect((await rl().run({ env: { OPENAI_API_KEY: "sk-x" }, cwd: "/tmp" })).status).toBe("pass");
     stubFetch(new Response("{}", { status: 200 }));
     expect((await rl().run({ env: { OPENAI_API_KEY: "sk-x" }, cwd: "/tmp" })).message).toContain("no headers");
-    globalThis.fetch = /** @type {any} */ (async () => {
-      throw new Error("rl down");
-    });
+    globalThis.fetch = /** @type {any} */ (
+      async () => {
+        throw new Error("rl down");
+      }
+    );
     expect((await rl().run({ env: { OPENAI_API_KEY: "sk-x" }, cwd: "/tmp" })).status).toBe("error");
   });
 });
@@ -194,9 +205,11 @@ describe("pi google checks", () => {
     expect((await auth().run(ctx)).status).toBe("fail");
     stubFetch(new Response("{}", { status: 200 }));
     expect((await auth().run(ctx)).status).toBe("pass");
-    globalThis.fetch = /** @type {any} */ (async () => {
-      throw new Error("google down");
-    });
+    globalThis.fetch = /** @type {any} */ (
+      async () => {
+        throw new Error("google down");
+      }
+    );
     expect((await auth().run(ctx)).status).toBe("error");
   });
 
@@ -232,9 +245,11 @@ describe("pi google checks", () => {
     expect((await rl().run({ env: { GEMINI_API_KEY: "g" }, cwd: "/tmp" })).message).toContain("retry after 5");
     stubFetch(new Response("{}", { status: 200 }));
     expect((await rl().run({ env: { GEMINI_API_KEY: "g" }, cwd: "/tmp" })).status).toBe("pass");
-    globalThis.fetch = /** @type {any} */ (async () => {
-      throw new Error("g rl down");
-    });
+    globalThis.fetch = /** @type {any} */ (
+      async () => {
+        throw new Error("g rl down");
+      }
+    );
     expect((await rl().run({ env: { GEMINI_API_KEY: "g" }, cwd: "/tmp" })).status).toBe("error");
   });
 });

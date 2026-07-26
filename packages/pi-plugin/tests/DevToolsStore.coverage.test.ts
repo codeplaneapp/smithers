@@ -184,7 +184,11 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2_000) {
 describe("DevToolsStore standalone lifecycle coverage", () => {
   test("selection follows a live node, becomes a ghost, and clears", () => {
     const store = new DevToolsStore({ ghostNodeCap: 8 });
-    store.applyEvent({ version: 1, kind: "snapshot", snapshot: snapshot(0, [task(2, "task:x", "running", { output: "v" })]) });
+    store.applyEvent({
+      version: 1,
+      kind: "snapshot",
+      snapshot: snapshot(0, [task(2, "task:x", "running", { output: "v" })]),
+    });
 
     store.selectNode(2);
     expect(store.selectedNode?.task?.nodeId).toBe("task:x");
@@ -311,9 +315,7 @@ describe("DevToolsStore standalone lifecycle coverage", () => {
       client: fakeClient({
         rewind: async () => ({ auditRowId: "audit-1" }),
         getDevToolsSnapshot: async (_runId, frameNo) =>
-          typeof frameNo === "number"
-            ? snapshot(2, [task(2, "task:anchor", "running")])
-            : afterRewind,
+          typeof frameNo === "number" ? snapshot(2, [task(2, "task:anchor", "running")]) : afterRewind,
         streamDevTools: async function* () {},
       }),
     });

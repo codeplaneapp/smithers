@@ -8,7 +8,5 @@ type GetFramesArgs = {
 };
 
 export async function getFrames(args: GetFramesArgs) {
-  return new SmithersPiHttpClient(args).json(
-    `/v1/runs/${args.runId}/frames?limit=${args.tail ?? 20}`,
-  );
+  return new SmithersPiHttpClient(args).json(`/v1/runs/${args.runId}/frames?limit=${args.tail ?? 20}`);
 }

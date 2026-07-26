@@ -118,7 +118,9 @@ describe("TestResults (model mode)", () => {
           <TestResultsProgress />
         </TestResultsHeader>
         <TestResultsContent>
-          {suites.map((suite) => <TestSuite key={suite.id} suite={suite} />)}
+          {suites.map((suite) => (
+            <TestSuite key={suite.id} suite={suite} />
+          ))}
         </TestResultsContent>
       </TestResults>,
     );

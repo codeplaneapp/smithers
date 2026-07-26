@@ -11,10 +11,12 @@ type MatcherResult = {
   message: () => string;
 };
 
-type SimLike = Sim | {
-  executed?: readonly string[];
-  status?: string;
-};
+type SimLike =
+  | Sim
+  | {
+      executed?: readonly string[];
+      status?: string;
+    };
 
 function executedOf(received: SimLike): readonly string[] {
   return Array.isArray(received.executed) ? received.executed : [];
@@ -40,50 +42,42 @@ function hasSubsequence(actual: readonly string[], expected: readonly string[]):
   return expectedIndex === expected.length;
 }
 
-export function toHaveExecuted(
-  this: MatcherContext | void,
-  received: SimLike,
-  ids: string[],
-): MatcherResult {
+export function toHaveExecuted(this: MatcherContext | void, received: SimLike, ids: string[]): MatcherResult {
   const executed = executedOf(received);
   const missing = ids.filter((id) => !executed.includes(id));
   const pass = missing.length === 0;
 
   return {
     pass,
-    message: (): string => pass
-      ? `Expected simulation not to have executed ${formatValue(ids)}, but actual executed nodes were ${formatValue(executed)}.`
-      : `Expected simulation to have executed ${formatValue(ids)}, but missing ids were ${formatValue(missing)}. Actual executed nodes were ${formatValue(executed)}.`,
+    message: (): string =>
+      pass
+        ? `Expected simulation not to have executed ${formatValue(ids)}, but actual executed nodes were ${formatValue(executed)}.`
+        : `Expected simulation to have executed ${formatValue(ids)}, but missing ids were ${formatValue(missing)}. Actual executed nodes were ${formatValue(executed)}.`,
   };
 }
 
-export function toHaveExecutedInOrder(
-  this: MatcherContext | void,
-  received: SimLike,
-  ids: string[],
-): MatcherResult {
+export function toHaveExecutedInOrder(this: MatcherContext | void, received: SimLike, ids: string[]): MatcherResult {
   const executed = executedOf(received);
   const pass = hasSubsequence(executed, ids);
 
   return {
     pass,
-    message: (): string => pass
-      ? `Expected simulation not to have executed in order ${formatValue(ids)}, but actual executed order was ${formatValue(executed)}.`
-      : `Expected simulation to have executed in order ${formatValue(ids)}, but actual executed order was ${formatValue(executed)}.`,
+    message: (): string =>
+      pass
+        ? `Expected simulation not to have executed in order ${formatValue(ids)}, but actual executed order was ${formatValue(executed)}.`
+        : `Expected simulation to have executed in order ${formatValue(ids)}, but actual executed order was ${formatValue(executed)}.`,
   };
 }
 
-export function toHaveFinished(
-  this: MatcherContext | void,
-  received: SimLike,
-): MatcherResult {
+export function toHaveFinished(this: MatcherContext | void, received: SimLike): MatcherResult {
   const pass = received.status === "finished";
 
   return {
     pass,
-    message: (): string => pass
-      ? 'Expected simulation not to have finished, but status was "finished".'
-      : `Expected simulation to have finished, but status was ${formatValue(received.status)}.`,
+    message: (): string =>
+      pass
+        ? 'Expected simulation not to have finished, but status was "finished".'
+        : `Expected simulation to have finished, but status was ${formatValue(received.status)}.`,
   };
 }
 

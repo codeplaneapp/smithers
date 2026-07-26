@@ -19,8 +19,7 @@ const DEFAULT_DOMAIN = "kimibenchmarks.smithers.sh";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const siteDir = join(here, "site");
-const domain =
-  process.env.KIMI_BENCHMARKS_SITE_DOMAIN?.trim() || DEFAULT_DOMAIN;
+const domain = process.env.KIMI_BENCHMARKS_SITE_DOMAIN?.trim() || DEFAULT_DOMAIN;
 const zoneId = process.env.CLOUDFLARE_SMITHERS_ZONE_ID?.trim() || undefined;
 
 const app = await alchemy("kimi-benchmarks-site");
@@ -41,8 +40,6 @@ export const worker = await Worker("kimi-benchmarks-site", {
   domains: [{ domainName: domain, ...(zoneId ? { zoneId } : {}), adopt: true }],
 });
 
-console.log(
-  `Kimi benchmarks site deployed -> https://${domain} (${worker.url ?? "no workers.dev url"})`,
-);
+console.log(`Kimi benchmarks site deployed -> https://${domain} (${worker.url ?? "no workers.dev url"})`);
 
 await app.finalize();

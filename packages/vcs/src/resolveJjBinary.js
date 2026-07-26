@@ -18,11 +18,11 @@ const require = createRequire(import.meta.url);
  * @type {Record<string, string>}
  */
 const BUNDLED_PACKAGES = {
-	"darwin-arm64": "@smithers-orchestrator/jj-darwin-arm64",
-	"darwin-x64": "@smithers-orchestrator/jj-darwin-x64",
-	"linux-arm64": "@smithers-orchestrator/jj-linux-arm64",
-	"linux-x64": "@smithers-orchestrator/jj-linux-x64",
-	"win32-x64": "@smithers-orchestrator/jj-win32-x64",
+  "darwin-arm64": "@smithers-orchestrator/jj-darwin-arm64",
+  "darwin-x64": "@smithers-orchestrator/jj-darwin-x64",
+  "linux-arm64": "@smithers-orchestrator/jj-linux-arm64",
+  "linux-x64": "@smithers-orchestrator/jj-linux-x64",
+  "win32-x64": "@smithers-orchestrator/jj-win32-x64",
 };
 
 /**
@@ -35,24 +35,22 @@ const BUNDLED_PACKAGES = {
  * @returns {string | null}
  */
 export function resolveBundledJjPath({
-	platform = process.platform,
-	arch = process.arch,
-	resolvePackage = require.resolve,
-	fileExists = existsSync,
-	fileExecutable = isJjExecutable,
+  platform = process.platform,
+  arch = process.arch,
+  resolvePackage = require.resolve,
+  fileExists = existsSync,
+  fileExecutable = isJjExecutable,
 } = {}) {
-	const pkg = BUNDLED_PACKAGES[`${platform}-${arch}`];
-	if (!pkg) return null;
-	const binary = platform === "win32" ? "jj.exe" : "jj";
-	try {
-		const manifest = resolvePackage(`${pkg}/package.json`);
-		const candidate = join(manifest, "..", "bin", binary);
-		return fileExists(candidate) && fileExecutable(candidate, { platform })
-			? candidate
-			: null;
-	} catch {
-		return null;
-	}
+  const pkg = BUNDLED_PACKAGES[`${platform}-${arch}`];
+  if (!pkg) return null;
+  const binary = platform === "win32" ? "jj.exe" : "jj";
+  try {
+    const manifest = resolvePackage(`${pkg}/package.json`);
+    const candidate = join(manifest, "..", "bin", binary);
+    return fileExists(candidate) && fileExecutable(candidate, { platform }) ? candidate : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -73,8 +71,8 @@ export function resolveBundledJjPath({
  * @returns {import("./ResolvedBinary.js").ResolvedBinary}
  */
 export function resolveJjBinary() {
-	return selectJjBinary({
-		override: process.env.SMITHERS_JJ_PATH,
-		bundled: resolveBundledJjPath(),
-	});
+  return selectJjBinary({
+    override: process.env.SMITHERS_JJ_PATH,
+    bundled: resolveBundledJjPath(),
+  });
 }

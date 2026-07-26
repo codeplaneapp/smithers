@@ -42,10 +42,10 @@ const CANNED_EVENTS: GatewayEventFrame[] = [
 
 describeHeadlessRender("LogMode – terminal rendering (CI-safe, no gateway)", () => {
   it("renders event seq numbers and node IDs", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
-      <LogView events={CANNED_EVENTS} />,
-      { width: 120, height: 30 },
-    );
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(<LogView events={CANNED_EVENTS} />, {
+      width: 120,
+      height: 30,
+    });
     await waitForVisualIdle();
     const frame = captureCharFrame();
 
@@ -61,10 +61,10 @@ describeHeadlessRender("LogMode – terminal rendering (CI-safe, no gateway)", (
   });
 
   it("shows event text content", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
-      <LogView events={CANNED_EVENTS} />,
-      { width: 120, height: 30 },
-    );
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(<LogView events={CANNED_EVENTS} />, {
+      width: 120,
+      height: 30,
+    });
     await waitForVisualIdle();
     const frame = captureCharFrame();
 
@@ -75,10 +75,10 @@ describeHeadlessRender("LogMode – terminal rendering (CI-safe, no gateway)", (
   });
 
   it("shows (no events) when event list is empty", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
-      <LogView events={[]} />,
-      { width: 120, height: 20 },
-    );
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(<LogView events={[]} />, {
+      width: 120,
+      height: 20,
+    });
     await waitForVisualIdle();
     const frame = captureCharFrame();
     expect(frame).toContain("(no events)");
@@ -86,10 +86,10 @@ describeHeadlessRender("LogMode – terminal rendering (CI-safe, no gateway)", (
   });
 
   it("starts in live (follow) mode", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
-      <LogView events={CANNED_EVENTS} />,
-      { width: 120, height: 20 },
-    );
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(<LogView events={CANNED_EVENTS} />, {
+      width: 120,
+      height: 20,
+    });
     await waitForVisualIdle();
     const frame = captureCharFrame();
     expect(frame).toContain("[live]");
@@ -97,18 +97,24 @@ describeHeadlessRender("LogMode – terminal rendering (CI-safe, no gateway)", (
   });
 
   it("toggles follow mode with f key", async () => {
-    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await renderForTest(<LogView events={CANNED_EVENTS} />, { width: 120, height: 20 });
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } = await renderForTest(
+      <LogView events={CANNED_EVENTS} />,
+      { width: 120, height: 20 },
+    );
     await waitForVisualIdle();
 
     expect(captureCharFrame()).toContain("[live]");
 
-    act(() => { mockInput.pressKey("f"); });
+    act(() => {
+      mockInput.pressKey("f");
+    });
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("[paused]");
 
-    act(() => { mockInput.pressKey("f"); });
+    act(() => {
+      mockInput.pressKey("f");
+    });
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("[live]");
@@ -117,10 +123,10 @@ describeHeadlessRender("LogMode – terminal rendering (CI-safe, no gateway)", (
   });
 
   it("shows event count in header", async () => {
-    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
-      <LogView events={CANNED_EVENTS} />,
-      { width: 120, height: 20 },
-    );
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(<LogView events={CANNED_EVENTS} />, {
+      width: 120,
+      height: 20,
+    });
     await waitForVisualIdle();
     const frame = captureCharFrame();
     // "5/5 events"
@@ -134,15 +140,19 @@ describeHeadlessRender("LogMode – terminal rendering (CI-safe, no gateway)", (
       frame(2, "run.event", { nodeId: "n-1", text: "attempt 1", iteration: 1 }),
     ];
 
-    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await renderForTest(<LogView events={eventsWithAttempts} />, { width: 120, height: 20 });
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } = await renderForTest(
+      <LogView events={eventsWithAttempts} />,
+      { width: 120, height: 20 },
+    );
     await waitForVisualIdle();
 
     // Initial: all events shown
     expect(captureCharFrame()).toContain("2/2 events");
 
     // Press ] to go to first attempt (n-1:0)
-    act(() => { mockInput.pressKey("]"); });
+    act(() => {
+      mockInput.pressKey("]");
+    });
     await flush();
     await waitForVisualIdle();
     const afterNext = captureCharFrame();
@@ -151,7 +161,9 @@ describeHeadlessRender("LogMode – terminal rendering (CI-safe, no gateway)", (
     expect(afterNext).toContain("attempt:n-1:0");
 
     // Press [ to go back to all
-    act(() => { mockInput.pressKey("["); });
+    act(() => {
+      mockInput.pressKey("[");
+    });
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("2/2 events");
@@ -180,21 +192,29 @@ describeHeadlessRender("LogMode – terminal rendering (CI-safe, no gateway)", (
       return <LogView events={events} />;
     }
 
-    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await renderForTest(<EvictionHarness />, { width: 120, height: 20 });
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } = await renderForTest(
+      <EvictionHarness />,
+      { width: 120, height: 20 },
+    );
     await waitForVisualIdle();
 
     // Select the SECOND attempt (n-2:0). Its index (1) is not at the tail, so
     // a positional-index bug and a key-anchored fix diverge once the window
     // shifts left.
-    act(() => { mockInput.pressKey("]"); }); // -> n-1:0
-    act(() => { mockInput.pressKey("]"); }); // -> n-2:0
+    act(() => {
+      mockInput.pressKey("]");
+    }); // -> n-1:0
+    act(() => {
+      mockInput.pressKey("]");
+    }); // -> n-2:0
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("attempt:n-2:0");
 
     // Evict n-1's frames from the window; n-2/n-3 both shift left by one index.
-    act(() => { mockInput.pressKey("e"); });
+    act(() => {
+      mockInput.pressKey("e");
+    });
     await flush();
     await waitForVisualIdle();
 
@@ -224,10 +244,10 @@ describeHeadlessRender("LogMode – terminal rendering (CI-safe, no gateway)", (
       wrapped(1, "run.event", { nodeId: "node-wrapped", text: "Wrapped start" }),
       wrapped(2, "agent.message", { nodeId: "node-wrapped", text: "second line" }),
     ];
-    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(
-      <LogView events={wrappedEvents} />,
-      { width: 120, height: 30 },
-    );
+    const { waitForVisualIdle, captureCharFrame, renderer } = await renderForTest(<LogView events={wrappedEvents} />, {
+      width: 120,
+      height: 30,
+    });
     await waitForVisualIdle();
     const f = captureCharFrame();
     // node tag (unwrapped from the envelope) and text survive the unwrap

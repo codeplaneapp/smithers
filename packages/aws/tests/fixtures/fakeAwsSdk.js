@@ -4,31 +4,31 @@
 // the SDK convention (`<Method>Command`).
 
 export class Client {
-	/** @param {Record<string, unknown>} [options] */
-	constructor(options) {
-		this.options = options;
-		/** @type {unknown[]} */
-		this.sent = [];
-	}
-	/** @param {{ name?: string; input?: unknown }} command */
-	async send(command) {
-		this.sent.push(command);
-		return { echoed: command.input, commandName: command.name, viaClient: true };
-	}
+  /** @param {Record<string, unknown>} [options] */
+  constructor(options) {
+    this.options = options;
+    /** @type {unknown[]} */
+    this.sent = [];
+  }
+  /** @param {{ name?: string; input?: unknown }} command */
+  async send(command) {
+    this.sent.push(command);
+    return { echoed: command.input, commandName: command.name, viaClient: true };
+  }
 }
 
 export class PutObjectCommand {
-	/** @param {unknown} input */
-	constructor(input) {
-		this.input = input;
-		this.name = "PutObjectCommand";
-	}
+  /** @param {unknown} input */
+  constructor(input) {
+    this.input = input;
+    this.name = "PutObjectCommand";
+  }
 }
 
 export class GetObjectCommand {
-	/** @param {unknown} input */
-	constructor(input) {
-		this.input = input;
-		this.name = "GetObjectCommand";
-	}
+  /** @param {unknown} input */
+  constructor(input) {
+    this.input = input;
+    this.name = "GetObjectCommand";
+  }
 }

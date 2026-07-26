@@ -12,11 +12,11 @@ import { computeRunStateFromRow } from "./computeRunStateFromRow.js";
  * @returns {Promise<RunStateView>}
  */
 export async function computeRunState(adapter, runId, options = {}) {
-    const run = await adapter.getRun(runId);
-    if (!run) {
-        throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`, {
-            runId,
-        });
-    }
-    return computeRunStateFromRow(adapter, run, options);
+  const run = await adapter.getRun(runId);
+  if (!run) {
+    throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`, {
+      runId,
+    });
+  }
+  return computeRunStateFromRow(adapter, run, options);
 }

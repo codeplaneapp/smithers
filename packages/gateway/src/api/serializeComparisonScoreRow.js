@@ -9,8 +9,10 @@ import { serializeScoreRow } from "./serializeScoreRow.js";
  */
 export function serializeComparisonScoreRow(row) {
   const normalized = normalizeApiRow(row);
-  return /** @type {GatewayComparisonScoreRow} */ (/** @type {unknown} */ ({
-    scoreId: normalized.scoreId ?? normalized.id,
-    ...serializeScoreRow(row),
-  }));
+  return /** @type {GatewayComparisonScoreRow} */ (
+    /** @type {unknown} */ ({
+      scoreId: normalized.scoreId ?? normalized.id,
+      ...serializeScoreRow(row),
+    })
+  );
 }

@@ -14,22 +14,37 @@ import { sanitizeCliArgs } from "./sanitizeCliArgs.js";
  * @returns {Effect.Effect<RunCommandResult, SmithersError>}
  */
 export function runCommandEffect(command, args, options) {
-    const { cwd, env, input, timeoutMs, idleTimeoutMs, signal, maxOutputBytes, truncateKeep, onStdout, onStderr, onProcess, } = options;
-    return spawnCaptureEffect(command, args, {
-        cwd,
-        env,
-        input,
-        signal,
-        timeoutMs,
-        idleTimeoutMs,
-        maxOutputBytes,
-        truncateKeep,
-        onStdout,
-        onStderr,
-        onProcess,
-    }).pipe(Effect.annotateLogs({
-        agentCommand: command,
-        agentArgs: sanitizeCliArgs(args).join(" "),
-        cwd,
-    }), Effect.withLogSpan(`agent:${command}`));
+  const {
+    cwd,
+    env,
+    input,
+    timeoutMs,
+    idleTimeoutMs,
+    signal,
+    maxOutputBytes,
+    truncateKeep,
+    onStdout,
+    onStderr,
+    onProcess,
+  } = options;
+  return spawnCaptureEffect(command, args, {
+    cwd,
+    env,
+    input,
+    signal,
+    timeoutMs,
+    idleTimeoutMs,
+    maxOutputBytes,
+    truncateKeep,
+    onStdout,
+    onStderr,
+    onProcess,
+  }).pipe(
+    Effect.annotateLogs({
+      agentCommand: command,
+      agentArgs: sanitizeCliArgs(args).join(" "),
+      cwd,
+    }),
+    Effect.withLogSpan(`agent:${command}`),
+  );
 }

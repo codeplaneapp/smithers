@@ -59,9 +59,7 @@ function App() {
   const runsQuery = useGatewayRuns({ filter: { limit: 30 } });
   const runs = useMemo(
     () =>
-      ((runsQuery.data ?? []) as RunSummary[]).filter(
-        (run) => !run.workflowKey || run.workflowKey === WORKFLOW_KEY,
-      ),
+      ((runsQuery.data ?? []) as RunSummary[]).filter((run) => !run.workflowKey || run.workflowKey === WORKFLOW_KEY),
     [runsQuery.data],
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? runs[0]?.runId;
@@ -134,7 +132,9 @@ function App() {
       <header className="top">
         <div className="title">
           <h1>Delegation Chain</h1>
-          <span className="pill mono" data-testid="dc-runid">{shortRunId(activeRunId)}</span>
+          <span className="pill mono" data-testid="dc-runid">
+            {shortRunId(activeRunId)}
+          </span>
           {activeRun?.status ? (
             <span className={"badge " + statusClass(activeRun.status)} data-testid="dc-run-status">
               {activeRun.status}
@@ -192,9 +192,9 @@ function App() {
                 <span className="eyebrow">New delegation</span>
                 <h2>Hand an ambiguous ask to a tiered delegation tree</h2>
                 <p>
-                  Fable refines the goal with a few questions, decomposes into opus chunks and
-                  sonnet leaves, previews expected outputs, hunts risk with probes, then executes
-                  behind gates. Every output stays editable while it runs.
+                  Fable refines the goal with a few questions, decomposes into opus chunks and sonnet leaves, previews
+                  expected outputs, hunts risk with probes, then executes behind gates. Every output stays editable
+                  while it runs.
                 </p>
               </div>
               <textarea
@@ -243,12 +243,14 @@ function App() {
               <NodeInspector node={selectedNode} actions={actions} onClose={() => setSelectedNodeId(null)} />
             ) : null}
             <ScoresPanel scores={graph.scores} />
-            {showPoll ? <PollForm busy={pollBusy} onSubmit={(answers, comment) => void submitPoll(answers, comment)} /> : null}
+            {showPoll ? (
+              <PollForm busy={pollBusy} onSubmit={(answers, comment) => void submitPoll(answers, comment)} />
+            ) : null}
             {pollError ? <div className="error-strip">{pollError}</div> : null}
             {!selectedNode && unresolvedQuestions.length === 0 && !showRefinedPrompt && !showPoll && !graph.scores ? (
               <p className="muted" data-testid="dc-rail-empty">
-                Click a node to inspect its brief, output (editable), gates, and version history.
-                Pulsing ⚠ badges jump to whatever needs you.
+                Click a node to inspect its brief, output (editable), gates, and version history. Pulsing ⚠ badges jump
+                to whatever needs you.
               </p>
             ) : null}
           </aside>

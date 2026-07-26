@@ -10,22 +10,22 @@ import { createMachine, initialTransition, transition } from "xstate";
  * and early instead of a confusing downstream TypeError inside the fold.
  */
 describe("xstate API presence (peer range ^5.19.0)", () => {
-    test("initialTransition and transition exist and are functions", () => {
-        expect(typeof initialTransition).toBe("function");
-        expect(typeof transition).toBe("function");
-    });
+  test("initialTransition and transition exist and are functions", () => {
+    expect(typeof initialTransition).toBe("function");
+    expect(typeof transition).toBe("function");
+  });
 
-    test("initialTransition and transition both return a [snapshot, actions] tuple", () => {
-        // A minimal live check, not just a typeof probe: pins the actual
-        // calling contract foldMachine.js relies on.
-        const machine = createMachine({ initial: "a", states: { a: { on: { GO: "b" } }, b: {} } });
-        const initial = initialTransition(machine, undefined);
-        expect(Array.isArray(initial)).toBe(true);
-        expect(initial).toHaveLength(2);
-        const [snapshot] = initial;
-        const next = transition(machine, snapshot, { type: "GO" });
-        expect(Array.isArray(next)).toBe(true);
-        expect(next).toHaveLength(2);
-        expect(next[0].matches("b")).toBe(true);
-    });
+  test("initialTransition and transition both return a [snapshot, actions] tuple", () => {
+    // A minimal live check, not just a typeof probe: pins the actual
+    // calling contract foldMachine.js relies on.
+    const machine = createMachine({ initial: "a", states: { a: { on: { GO: "b" } }, b: {} } });
+    const initial = initialTransition(machine, undefined);
+    expect(Array.isArray(initial)).toBe(true);
+    expect(initial).toHaveLength(2);
+    const [snapshot] = initial;
+    const next = transition(machine, snapshot, { type: "GO" });
+    expect(Array.isArray(next)).toBe(true);
+    expect(next).toHaveLength(2);
+    expect(next[0].matches("b")).toBe(true);
+  });
 });

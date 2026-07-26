@@ -166,7 +166,11 @@ describe("docs-driven-development real workflow run", () => {
     expect(work.payload.status).toBe("pending");
     expect(work.payload.row).toBeNull();
 
-    const summary = await gatewayRequest(gateway, connection, "getNodeOutput", { runId, nodeId: "round-summary", iteration: 0 });
+    const summary = await gatewayRequest(gateway, connection, "getNodeOutput", {
+      runId,
+      nodeId: "round-summary",
+      iteration: 0,
+    });
     expect(summary.ok).toBe(false);
     expect(summary.error?.code).toBe("NodeNotFound");
 
@@ -198,7 +202,11 @@ describe("docs-driven-development real workflow run", () => {
       iteration: 0,
     });
 
-    const beforeWork = await gatewayRequest(gateway, connection, "getNodeOutput", { runId, nodeId: "work:1", iteration: 0 });
+    const beforeWork = await gatewayRequest(gateway, connection, "getNodeOutput", {
+      runId,
+      nodeId: "work:1",
+      iteration: 0,
+    });
     expect(beforeWork.ok).toBe(true);
     expect(beforeWork.payload.status).toBe("pending");
     expect(beforeWork.payload.row).toBeNull();
@@ -305,11 +313,13 @@ describe("docs-driven-development real workflow run", () => {
         agentResponsesByNode: {
           "spec-update": JSON.parse(fakeAgentResponse("spec fake output", { status: "ready" })),
           "work:1": JSON.parse(fakeAgentResponse("work fake output", { status: "done" })),
-          "cycle-review": JSON.parse(fakeAgentResponse("review fake output", {
-            approved: true,
-            blockingFindings: [],
-            inefficiencies: [],
-          })),
+          "cycle-review": JSON.parse(
+            fakeAgentResponse("review fake output", {
+              approved: true,
+              blockingFindings: [],
+              inefficiencies: [],
+            }),
+          ),
         },
       },
     );
@@ -327,7 +337,9 @@ describe("docs-driven-development real workflow run", () => {
     const summary1 = await nodeOutput(gateway, connection, runId, "round-summary", 1);
     expect(summary1.row.status).toBe("done");
 
-    const featureRows = JSON.parse(readFileSync(join(repo.root, ".smithers/spec/features.json"), "utf8")) as Array<{ status?: string }>;
+    const featureRows = JSON.parse(readFileSync(join(repo.root, ".smithers/spec/features.json"), "utf8")) as Array<{
+      status?: string;
+    }>;
     expect(featureRows[0]?.status).toBe("partial");
   }, 120_000);
 
@@ -355,24 +367,30 @@ describe("docs-driven-development real workflow run", () => {
       },
       {
         agentResponsesByNode: {
-          audit: JSON.parse(fakeAgentResponse("clean audit", {
-            broken: [],
-            partial: [],
-            missingE2E: [],
-            missingDocs: [],
-            notes: [],
-          })),
+          audit: JSON.parse(
+            fakeAgentResponse("clean audit", {
+              broken: [],
+              partial: [],
+              missingE2E: [],
+              missingDocs: [],
+              notes: [],
+            }),
+          ),
           "spec-update": JSON.parse(fakeAgentResponse("clean spec", { status: "ready" })),
           triage: JSON.parse(fakeAgentResponse("clean triage")),
-          "work:1": JSON.parse(fakeAgentResponse("clean work", {
-            status: "done",
-            summary: "completed the final DDD proof",
-          })),
-          "cycle-review": JSON.parse(fakeAgentResponse("clean review", {
-            approved: true,
-            blockingFindings: [],
-            inefficiencies: [],
-          })),
+          "work:1": JSON.parse(
+            fakeAgentResponse("clean work", {
+              status: "done",
+              summary: "completed the final DDD proof",
+            }),
+          ),
+          "cycle-review": JSON.parse(
+            fakeAgentResponse("clean review", {
+              approved: true,
+              blockingFindings: [],
+              inefficiencies: [],
+            }),
+          ),
         },
       },
     );
@@ -383,7 +401,11 @@ describe("docs-driven-development real workflow run", () => {
     expect(summary.row.status).toBe("done");
     expect(summary.row.summary).toContain("All tracked P0/P1 features are complete");
 
-    const secondBootstrap = await gatewayRequest(gateway, connection, "getNodeOutput", { runId, nodeId: "bootstrap", iteration: 1 });
+    const secondBootstrap = await gatewayRequest(gateway, connection, "getNodeOutput", {
+      runId,
+      nodeId: "bootstrap",
+      iteration: 1,
+    });
     expect(secondBootstrap.ok).toBe(false);
     expect(secondBootstrap.error?.code).toBe("IterationNotFound");
 
@@ -408,10 +430,12 @@ describe("docs-driven-development real workflow run", () => {
       },
       {
         agentResponsesByNode: {
-          triage: JSON.parse(fakeAgentResponse("empty triage", {
-            selected: [],
-            summary: "no worthwhile DDD work selected",
-          })),
+          triage: JSON.parse(
+            fakeAgentResponse("empty triage", {
+              selected: [],
+              summary: "no worthwhile DDD work selected",
+            }),
+          ),
           "work:1": {
             slot: 1,
             featureId: "",
@@ -421,11 +445,13 @@ describe("docs-driven-development real workflow run", () => {
             issuesCreated: [],
             summary: "No triage item selected for slot 1.",
           },
-          "cycle-review": JSON.parse(fakeAgentResponse("empty triage review", {
-            approved: true,
-            blockingFindings: [],
-            inefficiencies: [],
-          })),
+          "cycle-review": JSON.parse(
+            fakeAgentResponse("empty triage review", {
+              approved: true,
+              blockingFindings: [],
+              inefficiencies: [],
+            }),
+          ),
         },
       },
     );
@@ -523,12 +549,16 @@ describe("docs-driven-development real workflow run", () => {
     const truncationMarker = "TRUNCATION_MARKER_END";
     writeFileSync(
       join(repo.root, ".smithers/spec/features.json"),
-      `${JSON.stringify([
-        dddFixtureFeature({
-          status: "not-real",
-          summary: `${"large docs diff ".repeat(1_200)}${truncationMarker}`,
-        }),
-      ], null, 2)}\n`,
+      `${JSON.stringify(
+        [
+          dddFixtureFeature({
+            status: "not-real",
+            summary: `${"large docs diff ".repeat(1_200)}${truncationMarker}`,
+          }),
+        ],
+        null,
+        2,
+      )}\n`,
     );
 
     const runId = "ddd-run-build-failure-truncated";

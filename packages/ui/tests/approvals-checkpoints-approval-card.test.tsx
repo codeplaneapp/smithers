@@ -2,12 +2,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import {
-  ApprovalCard,
-  ApprovalNote,
-  ApprovalResources,
-  ApprovalRisk,
-} from "../src/approvals/ApprovalCard";
+import { ApprovalCard, ApprovalNote, ApprovalResources, ApprovalRisk } from "../src/approvals/ApprovalCard";
 import { SMITHERS_UI_STYLE_ATTR } from "../src/styles";
 import { safeHref } from "../src/agentic/safeHref";
 
@@ -96,9 +91,7 @@ describe("ApprovalCard", () => {
 
   test("controlled note threads through onNoteChange", async () => {
     const notes: string[] = [];
-    await render(
-      <ApprovalCard title="t" state="requested" note="fixed" onNoteChange={(n) => notes.push(n)} />,
-    );
+    await render(<ApprovalCard title="t" state="requested" note="fixed" onNoteChange={(n) => notes.push(n)} />);
     const textarea = container!.querySelector<HTMLTextAreaElement>(".sui-approval-note-input")!;
     expect(textarea.value).toBe("fixed");
     await act(async () => setTextareaValue(textarea, "fixed!"));

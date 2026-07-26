@@ -19,14 +19,16 @@ import {
 
 describe("token usage folding", () => {
   test("sums every reported counter and treats missing fields as zero", () => {
-    expect(totalTokensOf({
-      nodeId: "build",
-      inputTokens: 10,
-      outputTokens: 5,
-      cacheReadTokens: 7,
-      cacheWriteTokens: 3,
-      reasoningTokens: 2,
-    })).toBe(27);
+    expect(
+      totalTokensOf({
+        nodeId: "build",
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 7,
+        cacheWriteTokens: 3,
+        reasoningTokens: 2,
+      }),
+    ).toBe(27);
 
     const fold = foldTokenUsage([
       { nodeId: "build", inputTokens: 10, outputTokens: 5 },
@@ -46,10 +48,16 @@ describe("token usage folding", () => {
 
     expect(fold.grandTotal).toBe(30);
     expect(fold.eventCount).toBe(3);
-    expect([...fold.perNode]).toEqual([["build", 30], ["test", 0]]);
+    expect([...fold.perNode]).toEqual([
+      ["build", 30],
+      ["test", 0],
+    ]);
     expect([...fold.perAgent]).toEqual([["codex", 15]]);
     expect([...fold.perModel]).toEqual([["model-a", 15]]);
-    expect([...fold.perNodeAttempts.get("build")!]).toEqual([["0:0", 15], ["1:2", 15]]);
+    expect([...fold.perNodeAttempts.get("build")!]).toEqual([
+      ["0:0", 15],
+      ["1:2", 15],
+    ]);
   });
 });
 
@@ -109,10 +117,12 @@ describe("throughput rates", () => {
 
 describe("duration prediction", () => {
   test("requires at least two completed samples", () => {
-    expect(predictNodeDurationMs("build", [
-      { nodeId: "build", startedAtMs: 0, finishedAtMs: 1_000 },
-      { nodeId: "build", startedAtMs: 2_000 },
-    ])).toBeUndefined();
+    expect(
+      predictNodeDurationMs("build", [
+        { nodeId: "build", startedAtMs: 0, finishedAtMs: 1_000 },
+        { nodeId: "build", startedAtMs: 2_000 },
+      ]),
+    ).toBeUndefined();
   });
 
   test("uses loop iterations as independent duration samples", () => {
@@ -313,7 +323,14 @@ describe("subtree token rollup", () => {
         { id: "leaf-c", kind: "task" },
       ],
     };
-    const totals = subtreeTokenTotals(tree, new Map([["leaf-a", 10], ["leaf-b-key", 5], ["leaf-c", 3]]));
+    const totals = subtreeTokenTotals(
+      tree,
+      new Map([
+        ["leaf-a", 10],
+        ["leaf-b-key", 5],
+        ["leaf-c", 3],
+      ]),
+    );
     expect(totals.get("leaf-a")).toBe(10);
     expect(totals.get("leaf-b-key")).toBe(5);
     expect(totals.get("branch")).toBe(15);
@@ -330,7 +347,15 @@ describe("subtree token rollup", () => {
 describe("node usage breakdown", () => {
   test("sums counters and groups per attempt with the observed model", () => {
     const events: TokenUsageEvent[] = [
-      { nodeId: "build", iteration: 0, attempt: 1, model: "model-a", inputTokens: 10, outputTokens: 5, cacheReadTokens: 2 },
+      {
+        nodeId: "build",
+        iteration: 0,
+        attempt: 1,
+        model: "model-a",
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 2,
+      },
       { nodeId: "build", iteration: 0, attempt: 1, model: "model-a", outputTokens: 3, reasoningTokens: 1 },
       { nodeId: "build", iteration: 0, attempt: 2, model: "model-b", outputTokens: 8, cacheWriteTokens: 4 },
       { nodeId: "other", outputTokens: 100 },
@@ -355,7 +380,11 @@ describe("node usage breakdown", () => {
       { nodeId: "loop", iteration: 0, attempt: 1, outputTokens: 1 },
     ];
     const breakdown = nodeUsageBreakdown(events, "loop")!;
-    expect(breakdown.attempts.map((attempt) => `${attempt.iteration}:${attempt.attempt}`)).toEqual(["0:1", "0:2", "1:1"]);
+    expect(breakdown.attempts.map((attempt) => `${attempt.iteration}:${attempt.attempt}`)).toEqual([
+      "0:1",
+      "0:2",
+      "1:1",
+    ]);
     expect(nodeUsageBreakdown(events, "missing")).toBeUndefined();
     expect(nodeUsageBreakdown([], "loop")).toBeUndefined();
   });

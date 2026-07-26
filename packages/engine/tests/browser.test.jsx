@@ -1,12 +1,6 @@
 import React from "react";
 import { describe, expect, test } from "bun:test";
-import {
-  createBrowserRuntime,
-  createBrowserSmithers,
-  defineBrowserWorkflow,
-  Task,
-  Workflow,
-} from "../src/browser.js";
+import { createBrowserRuntime, createBrowserSmithers, defineBrowserWorkflow, Task, Workflow } from "../src/browser.js";
 
 describe("createBrowserSmithers", () => {
   test("uses a fresh driver and session for sequential runs", async () => {
@@ -14,11 +8,13 @@ describe("createBrowserSmithers", () => {
     const runtime = createBrowserRuntime({
       executeTask: async () => ({ execution: ++executions }),
     });
-    const workflow = defineBrowserWorkflow(() => React.createElement(
-      Workflow,
-      { name: "sequential-browser-runs" },
-      React.createElement(Task, { id: "task", output: "browser_outputs" }, { value: "run" }),
-    ));
+    const workflow = defineBrowserWorkflow(() =>
+      React.createElement(
+        Workflow,
+        { name: "sequential-browser-runs" },
+        React.createElement(Task, { id: "task", output: "browser_outputs" }, { value: "run" }),
+      ),
+    );
     const smithers = createBrowserSmithers({ workflow, runtime });
 
     const first = await smithers.run({ runId: "browser-run-one" });

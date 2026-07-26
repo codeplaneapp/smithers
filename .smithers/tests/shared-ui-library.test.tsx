@@ -24,7 +24,12 @@ const workflows = join(import.meta.dir, "..", "workflows");
 const pathFor = (name: string) => join(workflows, name);
 const load = async (name: string) => (await import(pathFor(name))).default;
 const render = async (name: string, input: unknown = {}, outputs: Outputs = {}, extra: Record<string, unknown> = {}) =>
-  await renderWorkflow(await load(name), { input, outputs, workflowPath: pathFor(name), ...extra }) as unknown as Frame;
+  (await renderWorkflow(await load(name), {
+    input,
+    outputs,
+    workflowPath: pathFor(name),
+    ...extra,
+  })) as unknown as Frame;
 const baseId = (id: string) => id.split("@@", 1)[0] ?? id;
 const optional = (frame: Frame, id: string) => frame.tasks.find((candidate) => baseId(candidate.nodeId) === id);
 const task = (frame: Frame, id: string) => {
@@ -34,7 +39,12 @@ const task = (frame: Frame, id: string) => {
 };
 const prompt = (frame: Frame, id: string) => renderPrompt(task(frame, id).prompt);
 const normalizedPath = (value: string | undefined) => (value ?? "").replaceAll("\\", "/");
-const row = (nodeId: string, iteration: number, value: Record<string, unknown>) => ({ nodeId, iteration, iterationCount: iteration, ...value });
+const row = (nodeId: string, iteration: number, value: Record<string, unknown>) => ({
+  nodeId,
+  iteration,
+  iterationCount: iteration,
+  ...value,
+});
 
 const WORKFLOW = "shared-ui-library.tsx";
 const LOOP_SUFFIX = "@@shared-ui-batches=0";
@@ -66,14 +76,20 @@ describe("shared-ui-library workflow", () => {
     expect(defaults.baseBranch).toBe("main");
     expect(defaults.multiRoot).toBe("/Users/williamcory/multi");
     expect(mod.inputSchema.safeParse({ maxBatches: 0 }).success).toBe(false);
-    const duplicate = { batchKey: "case-run:0", complete: false, rationale: "dup", tickets: [ticketValue, ticketValue] };
+    const duplicate = {
+      batchKey: "case-run:0",
+      complete: false,
+      rationale: "dup",
+      tickets: [ticketValue, ticketValue],
+    };
     expect(mod.discoverySchema.safeParse(duplicate).success).toBe(false);
     expect(mod.discoverySchema.safeParse({ ...duplicate, tickets: [ticketValue] }).success).toBe(true);
   });
 
   test("inventories run once, discovery targets both repos, and lanes scope worktrees", async () => {
     const initial = await render(WORKFLOW, { baseBranch: "release/ui" }, {}, { runId: "Case Run" });
-    for (const area of ["shared-packages", "smithers-surfaces", "multi-app"]) expect(optional(initial, `inventory-${area}`)).toBeDefined();
+    for (const area of ["shared-packages", "smithers-surfaces", "multi-app"])
+      expect(optional(initial, `inventory-${area}`)).toBeDefined();
     const discovery = prompt(initial, "discover-batch");
     expect(discovery).toContain("/Users/williamcory/multi");
     expect(discovery).toContain("packages/ui");
@@ -85,8 +101,20 @@ describe("shared-ui-library workflow", () => {
     expect(optional(initial, "ci-gate")).toBeUndefined();
     expect(optional(initial, "final-audit")).toBeUndefined();
 
-    const seeded = { inventory: inventoryRows, discovery: [row("discover-batch", 0, { batchKey: "case-run:0", complete: false, rationale: "gaps", tickets: [ticketValue] })] };
-    const laneFrame = await render(WORKFLOW, { baseBranch: "release/ui", perTicketIterations: 1 }, seeded, { runId: "Case Run" });
+    const seeded = {
+      inventory: inventoryRows,
+      discovery: [
+        row("discover-batch", 0, {
+          batchKey: "case-run:0",
+          complete: false,
+          rationale: "gaps",
+          tickets: [ticketValue],
+        }),
+      ],
+    };
+    const laneFrame = await render(WORKFLOW, { baseBranch: "release/ui", perTicketIterations: 1 }, seeded, {
+      runId: "Case Run",
+    });
     expect(optional(laneFrame, "inventory-shared-packages")).toBeUndefined();
     const implement = task(laneFrame, "ticket-terminal-implement");
     expect(implement.worktreeBaseBranch).toBe("release/ui");
@@ -100,17 +128,41 @@ describe("shared-ui-library workflow", () => {
 
   test("results gate merges on a current LGTM candidate", async () => {
     const correlatedRow = { ticketId: "terminal", batchKey: "case-run:0", candidateId: "case-run:0:terminal" };
-    const implementation = { ...correlatedRow, status: "implemented", summary: "done", planSummary: "plan", filesChanged: ["packages/ui/src/terminal.tsx"], testsAddedOrUpdated: ["packages/ui/tests/terminal.test.tsx"], commandsRun: ["pnpm -C packages/ui test"] };
-    const validation = { ...correlatedRow, allPassed: true, summary: "green", commandsRun: ["pnpm -C packages/ui test"], failingSummary: null };
+    const implementation = {
+      ...correlatedRow,
+      status: "implemented",
+      summary: "done",
+      planSummary: "plan",
+      filesChanged: ["packages/ui/src/terminal.tsx"],
+      testsAddedOrUpdated: ["packages/ui/tests/terminal.test.tsx"],
+      commandsRun: ["pnpm -C packages/ui test"],
+    };
+    const validation = {
+      ...correlatedRow,
+      allPassed: true,
+      summary: "green",
+      commandsRun: ["pnpm -C packages/ui test"],
+      failingSummary: null,
+    };
     const review = { ...correlatedRow, approved: true, reviewer: "opus", feedback: "LGTM", issues: [] };
-    const seeded = { inventory: inventoryRows, discovery: [row("discover-batch", 0, { batchKey: "case-run:0", complete: true, rationale: "one", tickets: [ticketValue] })] };
+    const seeded = {
+      inventory: inventoryRows,
+      discovery: [
+        row("discover-batch", 0, { batchKey: "case-run:0", complete: true, rationale: "one", tickets: [ticketValue] }),
+      ],
+    };
 
-    const stale = await render(WORKFLOW, { perTicketIterations: 1 }, {
-      ...seeded,
-      implementation: [row(`ticket-terminal-implement${LOOP_SUFFIX}`, 1, implementation)],
-      validation: [row(`ticket-terminal-validate${LOOP_SUFFIX}`, 1, validation)],
-      review: [row(`ticket-terminal-review${LOOP_SUFFIX}`, 0, review)],
-    }, { runId: "Case Run" });
+    const stale = await render(
+      WORKFLOW,
+      { perTicketIterations: 1 },
+      {
+        ...seeded,
+        implementation: [row(`ticket-terminal-implement${LOOP_SUFFIX}`, 1, implementation)],
+        validation: [row(`ticket-terminal-validate${LOOP_SUFFIX}`, 1, validation)],
+        review: [row(`ticket-terminal-review${LOOP_SUFFIX}`, 0, review)],
+      },
+      { runId: "Case Run" },
+    );
     expect(task(stale, "ticket-terminal-result").staticPayload).toMatchObject({ lgtm: false });
 
     const currentRows = {
@@ -123,8 +175,20 @@ describe("shared-ui-library workflow", () => {
     expect(task(current, "ticket-terminal-result").staticPayload).toMatchObject({ lgtm: true, exhausted: false });
     expect(optional(current, "merge-terminal")).toBeUndefined();
 
-    const result = { ...correlatedRow, branch: "shared-ui/case-run/0/terminal", worktreePath: "/tmp/terminal", lgtm: true, exhausted: false, summary: "done" };
-    const withResult = await render(WORKFLOW, {}, { ...currentRows, ticketResult: [row("ticket-terminal-result", 0, result)] }, { runId: "Case Run" });
+    const result = {
+      ...correlatedRow,
+      branch: "shared-ui/case-run/0/terminal",
+      worktreePath: "/tmp/terminal",
+      lgtm: true,
+      exhausted: false,
+      summary: "done",
+    };
+    const withResult = await render(
+      WORKFLOW,
+      {},
+      { ...currentRows, ticketResult: [row("ticket-terminal-result", 0, result)] },
+      { runId: "Case Run" },
+    );
     const merge = task(withResult, "merge-terminal");
     const mergePromptText = renderPrompt(merge.prompt);
     expect(mergePromptText).toContain("git show --name-only");
@@ -133,7 +197,25 @@ describe("shared-ui-library workflow", () => {
     expect(optional(withResult, "ci-gate")).toBeUndefined();
     expect(optional(withResult, "final-audit")).toBeUndefined();
 
-    const withMerge = await render(WORKFLOW, {}, { ...currentRows, ticketResult: [row("ticket-terminal-result", 0, result)], merge: [row("merge-terminal", 0, { ...correlatedRow, mergedToMain: true, branch: result.branch, summary: "landed", conflicts: [], commandsRun: [] })] }, { runId: "Case Run" });
+    const withMerge = await render(
+      WORKFLOW,
+      {},
+      {
+        ...currentRows,
+        ticketResult: [row("ticket-terminal-result", 0, result)],
+        merge: [
+          row("merge-terminal", 0, {
+            ...correlatedRow,
+            mergedToMain: true,
+            branch: result.branch,
+            summary: "landed",
+            conflicts: [],
+            commandsRun: [],
+          }),
+        ],
+      },
+      { runId: "Case Run" },
+    );
     expect(optional(withMerge, "merge-terminal")).toBeUndefined();
     expect(optional(withMerge, "ci-gate")).toBeDefined();
     expect(optional(withMerge, "final-audit")).toBeUndefined();

@@ -91,7 +91,9 @@ describe("OpenClaw CLI agent", () => {
   });
 
   test("OpenClawAgent returns JSON reply text", async () => {
-    const fake = await makeFakeOpenClaw(`process.stdout.write(JSON.stringify({ result: { message: "openclaw finished" } }) + "\\n");`);
+    const fake = await makeFakeOpenClaw(
+      `process.stdout.write(JSON.stringify({ result: { message: "openclaw finished" } }) + "\\n");`,
+    );
     try {
       process.env.PATH = prependPath(fake.dir, originalPath);
       const agent = new OpenClawAgent({ env: { PATH: process.env.PATH } });
@@ -149,9 +151,9 @@ describe("OpenClaw CLI agent", () => {
     try {
       process.env.PATH = prependPath(fake.dir, originalPath);
       const agent = new OpenClawAgent({ env: { PATH: process.env.PATH } });
-      await expect(
-        agent.generate({ messages: [{ role: "user", content: "fail" }] }),
-      ).rejects.toThrow(/openclaw failed/);
+      await expect(agent.generate({ messages: [{ role: "user", content: "fail" }] })).rejects.toThrow(
+        /openclaw failed/,
+      );
     } finally {
       await rm(fake.dir, { recursive: true, force: true });
     }

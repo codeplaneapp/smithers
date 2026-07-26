@@ -1,9 +1,5 @@
 import { expect, test } from "@playwright/test";
-import {
-  expectNoPageErrors,
-  openRenderedSurface,
-  trackPageErrors,
-} from "./surfaceTestUtils";
+import { expectNoPageErrors, openRenderedSurface, trackPageErrors } from "./surfaceTestUtils";
 
 test("resolves the real workspace repository, metadata, changes, and refresh", async ({ page }) => {
   const pageErrors = trackPageErrors(page);

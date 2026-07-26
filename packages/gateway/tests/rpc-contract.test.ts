@@ -120,7 +120,9 @@ function validateAgainstSchema(value: unknown, schema: JsonSchema, path = "$"): 
   const types = schema.type === undefined ? [] : Array.isArray(schema.type) ? schema.type : [schema.type];
   if (types.length > 0) {
     const actual = jsonType(value);
-    const ok = types.some((t) => (t === "integer" ? actual === "integer" : actual === t || (t === "number" && actual === "integer")));
+    const ok = types.some((t) =>
+      t === "integer" ? actual === "integer" : actual === t || (t === "number" && actual === "integer"),
+    );
     if (!ok) {
       errors.push(`${path}: expected type ${types.join("|")}, got ${actual}`);
       return errors;
@@ -218,21 +220,29 @@ describe("Gateway RPC contract", () => {
     expect(startedBy?.properties?.harness).toMatchObject({ type: "string", maxLength: 64 });
     expect(startedBy?.properties?.sessionId).toMatchObject({ type: "string", maxLength: 256 });
     expect(startedBy?.properties?.detected).toMatchObject({ const: true });
-    expect(validateAgainstSchema({ workflow: "deploy", options: { startedBy: { harness: "codex", unknown: true } } }, launch!.requestSchema)).not.toEqual([]);
+    expect(
+      validateAgainstSchema(
+        { workflow: "deploy", options: { startedBy: { harness: "codex", unknown: true } } },
+        launch!.requestSchema,
+      ),
+    ).not.toEqual([]);
   });
 
   test("getRun accepts null timestamps before a run starts or finishes", () => {
     const getRun = getGatewayRpcDefinition("getRun");
     if (!getRun) throw new Error("getRun RPC definition is missing");
-    const errors = validateAgainstSchema({
-      runId: "run_01",
-      workflowKey: "deploy",
-      status: "pending",
-      createdAtMs: 1710000000000,
-      startedAtMs: null,
-      finishedAtMs: null,
-      summary: {},
-    }, getRun.responseSchema);
+    const errors = validateAgainstSchema(
+      {
+        runId: "run_01",
+        workflowKey: "deploy",
+        status: "pending",
+        createdAtMs: 1710000000000,
+        startedAtMs: null,
+        finishedAtMs: null,
+        summary: {},
+      },
+      getRun.responseSchema,
+    );
 
     expect(errors).toEqual([]);
   });
@@ -464,13 +474,42 @@ describe("Gateway RPC contract", () => {
     expect(act.requestSchema.properties?.actionId?.minLength).toBe(1);
     expect(pick.requestSchema.properties?.sessionId?.minLength).toBe(1);
     expect(close.requestSchema.properties?.sessionId?.minLength).toBe(1);
-    expect(validateAgainstSchema({ sessionId: "", actionId: "a", action: { kind: "reload" } }, act.requestSchema).length).toBeGreaterThan(0);
-    expect(validateAgainstSchema({ sessionId: "s", actionId: "a", action: { kind: "click", locator: { css: "button" }, point: { x: 1, y: 2 } } }, act.requestSchema).length).toBeGreaterThan(0);
-    expect(validateAgainstSchema({ sessionId: "s", actionId: "a", action: { kind: "click" } }, act.requestSchema).length).toBeGreaterThan(0);
-    expect(validateAgainstSchema({ sessionId: "s", actionId: "a", action: { kind: "type", locator: { role: "textbox" }, text: "" } }, act.requestSchema).length).toBeGreaterThan(0);
-    expect(validateAgainstSchema({ sessionId: "s", actionId: "a", action: { kind: "dialog", decision: "accept", promptText: "" } }, act.requestSchema).length).toBeGreaterThan(0);
-    expect(validateAgainstSchema({ revision: 1, page: null, outcome: { ok: false, code: "ACTION_FAILED", message: "No element" } }, act.responseSchema).length).toBe(0);
-    expect(validateAgainstSchema({ revision: 1, page: null, outcome: { ok: false, code: "ACTION_FAILED" } }, act.responseSchema).length).toBeGreaterThan(0);
+    expect(
+      validateAgainstSchema({ sessionId: "", actionId: "a", action: { kind: "reload" } }, act.requestSchema).length,
+    ).toBeGreaterThan(0);
+    expect(
+      validateAgainstSchema(
+        { sessionId: "s", actionId: "a", action: { kind: "click", locator: { css: "button" }, point: { x: 1, y: 2 } } },
+        act.requestSchema,
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(
+      validateAgainstSchema({ sessionId: "s", actionId: "a", action: { kind: "click" } }, act.requestSchema).length,
+    ).toBeGreaterThan(0);
+    expect(
+      validateAgainstSchema(
+        { sessionId: "s", actionId: "a", action: { kind: "type", locator: { role: "textbox" }, text: "" } },
+        act.requestSchema,
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(
+      validateAgainstSchema(
+        { sessionId: "s", actionId: "a", action: { kind: "dialog", decision: "accept", promptText: "" } },
+        act.requestSchema,
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(
+      validateAgainstSchema(
+        { revision: 1, page: null, outcome: { ok: false, code: "ACTION_FAILED", message: "No element" } },
+        act.responseSchema,
+      ).length,
+    ).toBe(0);
+    expect(
+      validateAgainstSchema(
+        { revision: 1, page: null, outcome: { ok: false, code: "ACTION_FAILED" } },
+        act.responseSchema,
+      ).length,
+    ).toBeGreaterThan(0);
   });
 
   test("exampleRequest/exampleResponse survive a JSON serialize→deserialize round-trip without data loss", () => {
@@ -481,12 +520,16 @@ describe("Gateway RPC contract", () => {
       const reqRoundTripped = JSON.parse(JSON.stringify(definition.exampleRequest));
       expect(reqRoundTripped, `${definition.method} exampleRequest round-trip`).toEqual(definition.exampleRequest);
       const reqRTErrors = validateAgainstSchema(reqRoundTripped, definition.requestSchema);
-      expect(reqRTErrors, `${definition.method} exampleRequest round-trip schema: ${reqRTErrors.join("; ")}`).toEqual([]);
+      expect(reqRTErrors, `${definition.method} exampleRequest round-trip schema: ${reqRTErrors.join("; ")}`).toEqual(
+        [],
+      );
 
       const resRoundTripped = JSON.parse(JSON.stringify(definition.exampleResponse));
       expect(resRoundTripped, `${definition.method} exampleResponse round-trip`).toEqual(definition.exampleResponse);
       const resRTErrors = validateAgainstSchema(resRoundTripped, definition.responseSchema);
-      expect(resRTErrors, `${definition.method} exampleResponse round-trip schema: ${resRTErrors.join("; ")}`).toEqual([]);
+      expect(resRTErrors, `${definition.method} exampleResponse round-trip schema: ${resRTErrors.join("; ")}`).toEqual(
+        [],
+      );
     }
   });
 
@@ -584,9 +627,7 @@ describe("Gateway RPC contract", () => {
     const branches = anyJsonSchema.oneOf!;
     const samples: unknown[] = [{ a: 1 }, [1, null, "x"], "hello", 1.5, 42, true, null];
     for (const sample of samples) {
-      const matchCount = branches.filter(
-        (branch) => validateAgainstSchema(sample, branch).length === 0,
-      ).length;
+      const matchCount = branches.filter((branch) => validateAgainstSchema(sample, branch).length === 0).length;
       expect(matchCount, `value ${JSON.stringify(sample)} should match exactly one oneOf branch`).toBe(1);
     }
     // Specifically: there is no standalone "integer" branch shadowing "number".
@@ -689,7 +730,11 @@ describe("Gateway RPC contract", () => {
     const cases: TypedCase[] = [
       {
         method: "launchRun",
-        request: { workflow: "deploy", input: { sha: "abc" }, options: { runId: "r1", idempotencyKey: "k1" } } satisfies LaunchRunRequest,
+        request: {
+          workflow: "deploy",
+          input: { sha: "abc" },
+          options: { runId: "r1", idempotencyKey: "k1" },
+        } satisfies LaunchRunRequest,
         response: { runId: "r1", workflow: "deploy" } satisfies LaunchRunResponse,
       },
       {
@@ -728,7 +773,12 @@ describe("Gateway RPC contract", () => {
       },
       {
         method: "submitApproval",
-        request: { runId: "r1", nodeId: "n1", note: "ok", decision: { approved: true } } satisfies SubmitApprovalRequest,
+        request: {
+          runId: "r1",
+          nodeId: "n1",
+          note: "ok",
+          decision: { approved: true },
+        } satisfies SubmitApprovalRequest,
         response: { runId: "r1", nodeId: "n1", iteration: 0, approved: true } satisfies SubmitApprovalResponse,
       },
       {
@@ -746,19 +796,21 @@ describe("Gateway RPC contract", () => {
         request: { runId: "r1" } satisfies ListRunTokenUsageRequest,
         response: {
           runId: "r1",
-          events: [{
-            nodeId: "task",
-            iteration: 0,
-            attempt: 1,
-            model: "gpt-test",
-            agent: "agent-test",
-            inputTokens: 10,
-            outputTokens: 5,
-            cacheReadTokens: 2,
-            cacheWriteTokens: 1,
-            reasoningTokens: 3,
-            timestampMs: 1_710_000_000_000,
-          }],
+          events: [
+            {
+              nodeId: "task",
+              iteration: 0,
+              attempt: 1,
+              model: "gpt-test",
+              agent: "agent-test",
+              inputTokens: 10,
+              outputTokens: 5,
+              cacheReadTokens: 2,
+              cacheWriteTokens: 1,
+              reasoningTokens: 3,
+              timestampMs: 1_710_000_000_000,
+            },
+          ],
         } satisfies ListRunTokenUsageResponse,
       },
       {
@@ -804,7 +856,13 @@ describe("Gateway RPC contract", () => {
       {
         method: "getDevToolsSnapshot",
         request: { runId: "r1", frameNo: 4 } satisfies GetDevToolsSnapshotRequest,
-        response: { version: 1, runId: "r1", frameNo: 4, seq: 9, root: { id: 0 } } satisfies GetDevToolsSnapshotResponse,
+        response: {
+          version: 1,
+          runId: "r1",
+          frameNo: 4,
+          seq: 9,
+          root: { id: 0 },
+        } satisfies GetDevToolsSnapshotResponse,
       },
       {
         method: "getNodeOutput",
@@ -878,9 +936,29 @@ describe("Gateway RPC contract", () => {
       },
       {
         method: "listScoresForRuns",
-        request: { runIds: ["r1", "r2"], scorerName: "quality", source: "batch", order: "scoredAtDesc", offset: 2, limit: 50 } satisfies ListScoresForRunsRequest,
+        request: {
+          runIds: ["r1", "r2"],
+          scorerName: "quality",
+          source: "batch",
+          order: "scoredAtDesc",
+          offset: 2,
+          limit: 50,
+        } satisfies ListScoresForRunsRequest,
         response: {
-          rows: [{ scoreId: "score-1", runId: "r1", nodeId: "n1", iteration: 0, attempt: 1, scorerId: "quality", scorerName: "quality", source: "batch", score: 0.9, scoredAtMs: 1 }],
+          rows: [
+            {
+              scoreId: "score-1",
+              runId: "r1",
+              nodeId: "n1",
+              iteration: 0,
+              attempt: 1,
+              scorerId: "quality",
+              scorerName: "quality",
+              source: "batch",
+              score: 0.9,
+              scoredAtMs: 1,
+            },
+          ],
           total: 1,
         } satisfies ListScoresForRunsResponse,
       },
@@ -913,22 +991,82 @@ describe("Gateway RPC contract", () => {
       {
         method: "createTicket",
         request: { path: "feat-1", content: "# title", kind: "ticket", status: "open" } satisfies CreateTicketRequest,
-        response: { path: "feat-1", kind: "ticket", content: "# title", contentHash: "abc123", status: "open", updatedAtMs: 1710000000000 },
+        response: {
+          path: "feat-1",
+          kind: "ticket",
+          content: "# title",
+          contentHash: "abc123",
+          status: "open",
+          updatedAtMs: 1710000000000,
+        },
       },
       {
         method: "updateTicket",
         request: { path: "feat-1", content: "# updated", status: "done" } satisfies UpdateTicketRequest,
-        response: { path: "feat-1", kind: "ticket", content: "# updated", contentHash: "abc123", status: "done", updatedAtMs: 1710000000000 },
+        response: {
+          path: "feat-1",
+          kind: "ticket",
+          content: "# updated",
+          contentHash: "abc123",
+          status: "done",
+          updatedAtMs: 1710000000000,
+        },
       },
       {
         method: "deleteTicket",
         request: { path: "feat-1" } satisfies DeleteTicketRequest,
         response: { path: "feat-1", deleted: true },
       },
-      { method: "createBrowserSession", request: { source: { kind: "url", url: "https://example.com" } }, response: { sessionId: "s1", source: { kind: "url", url: "https://example.com" }, status: "ready", revision: 0, page: null, viewport: { width: 1280, height: 720 }, control: { owner: null } } },
-      { method: "browserAct", request: { sessionId: "s1", actionId: "a1", action: { kind: "reload" } }, response: { revision: 1, page: null, outcome: { ok: true } } },
-      { method: "browserContext", request: { sessionId: "s1" }, response: { fresh: true, snapshot: { sessionId: "s1", source: { kind: "url", url: "https://example.com" }, status: "ready", revision: 0, page: null, viewport: { width: 1280, height: 720 }, control: { owner: null } }, revision: 0, include: ["visible-text"] } },
-      { method: "browserPick", request: { sessionId: "s1", point: { x: 1, y: 1 } }, response: { locator: { role: "button", name: "Continue" }, role: "button", name: "Continue", text: "Continue", fingerprint: "button:Continue:0:0", rect: { x: 0, y: 0, width: 80, height: 30 }, viewport: { width: 1280, height: 720 }, screenshot: { data: "/9j/4AAQ", mediaType: "image/jpeg" } } },
+      {
+        method: "createBrowserSession",
+        request: { source: { kind: "url", url: "https://example.com" } },
+        response: {
+          sessionId: "s1",
+          source: { kind: "url", url: "https://example.com" },
+          status: "ready",
+          revision: 0,
+          page: null,
+          viewport: { width: 1280, height: 720 },
+          control: { owner: null },
+        },
+      },
+      {
+        method: "browserAct",
+        request: { sessionId: "s1", actionId: "a1", action: { kind: "reload" } },
+        response: { revision: 1, page: null, outcome: { ok: true } },
+      },
+      {
+        method: "browserContext",
+        request: { sessionId: "s1" },
+        response: {
+          fresh: true,
+          snapshot: {
+            sessionId: "s1",
+            source: { kind: "url", url: "https://example.com" },
+            status: "ready",
+            revision: 0,
+            page: null,
+            viewport: { width: 1280, height: 720 },
+            control: { owner: null },
+          },
+          revision: 0,
+          include: ["visible-text"],
+        },
+      },
+      {
+        method: "browserPick",
+        request: { sessionId: "s1", point: { x: 1, y: 1 } },
+        response: {
+          locator: { role: "button", name: "Continue" },
+          role: "button",
+          name: "Continue",
+          text: "Continue",
+          fingerprint: "button:Continue:0:0",
+          rect: { x: 0, y: 0, width: 80, height: 30 },
+          viewport: { width: 1280, height: 720 },
+          screenshot: { data: "/9j/4AAQ", mediaType: "image/jpeg" },
+        },
+      },
       { method: "closeBrowserSession", request: { sessionId: "s1" }, response: { closed: true, sessionId: "s1" } },
       { method: "listBrowserSessions", request: {}, response: [] },
     ];
@@ -967,18 +1105,20 @@ describe("Gateway RPC contract", () => {
           runId: "r1",
           operation: "rewind",
           report: {
-            blocking: [{
-              kind: "tool",
-              toolName: "publish",
-              nodeId: "task",
-              iteration: 0,
-              attempt: 1,
-              seq: 1,
-              effectStatus: "unknown",
-              idempotent: false,
-              hasRevert: false,
-              startedAtMs: 1,
-            }],
+            blocking: [
+              {
+                kind: "tool",
+                toolName: "publish",
+                nodeId: "task",
+                iteration: 0,
+                attempt: 1,
+                seq: 1,
+                effectStatus: "unknown",
+                idempotent: false,
+                hasRevert: false,
+                startedAtMs: 1,
+              },
+            ],
             revertible: [],
             warnings: [],
           },

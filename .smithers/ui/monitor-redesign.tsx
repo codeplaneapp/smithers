@@ -81,21 +81,44 @@ function StageDot({ status, label }: { status: string | undefined; label: string
   );
 }
 
-function LaneCard({ runId, laneId, title, nodes }: { runId: string; laneId: string; title: string; nodes: Array<Record<string, unknown>> }) {
+function LaneCard({
+  runId,
+  laneId,
+  title,
+  nodes,
+}: {
+  runId: string;
+  laneId: string;
+  title: string;
+  nodes: Array<Record<string, unknown>>;
+}) {
   const [open, setOpen] = useState(false);
   const resultQuery = useGatewayNodeOutput({ runId, nodeId: `${laneId}-result`, iteration: 0 });
   const row = isRecord(resultQuery.data) && isRecord(resultQuery.data.row) ? resultQuery.data.row : undefined;
   const stages = STAGES.map((stage) => ({ ...stage, status: laneStageStatus(nodes, laneId, stage.suffix) }));
   const active = stages.filter((stage) => stage.status !== undefined);
   const laneVerdict =
-    row !== undefined ? (row.ready === true || row.ready === 1 ? "ready" : "rejected") : active.length === 0 ? "queued" : undefined;
+    row !== undefined
+      ? row.ready === true || row.ready === 1
+        ? "ready"
+        : "rejected"
+      : active.length === 0
+        ? "queued"
+        : undefined;
   return (
     <div style={panelStyle}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, cursor: "pointer" }} onClick={() => setOpen((v) => !v)}>
+      <div
+        style={{ display: "flex", alignItems: "baseline", gap: 8, cursor: "pointer" }}
+        onClick={() => setOpen((v) => !v)}
+      >
         <strong style={{ fontSize: 13 }}>{title}</strong>
         <code style={{ fontSize: 11, opacity: 0.6 }}>{laneId}</code>
         <span style={{ marginLeft: "auto" }}>
-          {laneVerdict ? <StatusPill status={laneVerdict === "ready" ? "finished" : laneVerdict === "rejected" ? "failed" : "pending"} /> : null}
+          {laneVerdict ? (
+            <StatusPill
+              status={laneVerdict === "ready" ? "finished" : laneVerdict === "rejected" ? "failed" : "pending"}
+            />
+          ) : null}
         </span>
       </div>
       <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap" }}>
@@ -104,7 +127,9 @@ function LaneCard({ runId, laneId, title, nodes }: { runId: string; laneId: stri
         ))}
       </div>
       {open && row !== undefined ? (
-        <pre style={{ marginTop: 8, fontSize: 11, whiteSpace: "pre-wrap", opacity: 0.85 }}>{JSON.stringify(row, null, 2)}</pre>
+        <pre style={{ marginTop: 8, fontSize: 11, whiteSpace: "pre-wrap", opacity: 0.85 }}>
+          {JSON.stringify(row, null, 2)}
+        </pre>
       ) : null}
     </div>
   );
@@ -120,14 +145,26 @@ function GateRow({ runId }: { runId: string }) {
       <span style={{ fontSize: 12 }}>
         Verify gate:{" "}
         <StatusPill
-          status={verifyRow === undefined ? "pending" : verifyRow.allPassed === true || verifyRow.allPassed === 1 ? "finished" : "failed"}
+          status={
+            verifyRow === undefined
+              ? "pending"
+              : verifyRow.allPassed === true || verifyRow.allPassed === 1
+                ? "finished"
+                : "failed"
+          }
         />
       </span>
       <span style={{ fontSize: 12 }}>
         Ship:{" "}
-        <StatusPill status={shipRow === undefined ? "pending" : shipRow.ready === true || shipRow.ready === 1 ? "finished" : "failed"} />
+        <StatusPill
+          status={
+            shipRow === undefined ? "pending" : shipRow.ready === true || shipRow.ready === 1 ? "finished" : "failed"
+          }
+        />
       </span>
-      {verifyRow !== undefined ? <span style={{ fontSize: 11, opacity: 0.7 }}>{String(verifyRow.summary ?? "")}</span> : null}
+      {verifyRow !== undefined ? (
+        <span style={{ fontSize: 11, opacity: 0.7 }}>{String(verifyRow.summary ?? "")}</span>
+      ) : null}
     </div>
   );
 }
@@ -161,7 +198,14 @@ function App() {
       title="Monitor Redesign Swarm"
       meta={`${runId.slice(0, 8)} · ${formatStatus(status)}${pendingApprovals ? ` · ${pendingApprovals} approval(s) waiting` : ""}`}
     >
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 10, marginBottom: 12 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
+          gap: 10,
+          marginBottom: 12,
+        }}
+      >
         {LANES.map((lane) => (
           <LaneCard key={lane.id} runId={runId} laneId={lane.id} title={lane.title} nodes={nodes} />
         ))}

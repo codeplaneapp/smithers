@@ -29,8 +29,7 @@ export function materializeInferenceCredentials(input: {
   const { env } = input;
   delete env.CODEX_AUTH_JSON;
   if (input.mode !== "codex-subscription") return null;
-  const codexHome =
-    env.CODEX_HOME?.trim() || join(env.RUNNER_TEMP?.trim() || tmpdir(), ".smithers-codex-home");
+  const codexHome = env.CODEX_HOME?.trim() || join(env.RUNNER_TEMP?.trim() || tmpdir(), ".smithers-codex-home");
   mkdirSync(codexHome, { recursive: true });
   writeFileSync(join(codexHome, "auth.json"), input.codexAuthJson ?? "", { mode: 0o600 });
   env.CODEX_HOME = codexHome;

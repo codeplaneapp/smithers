@@ -38,7 +38,10 @@ describe("Plugins site worker", () => {
   });
 
   test("reports health without touching static assets", async () => {
-    const response = await createPluginsSiteWorker().fetch(new Request("https://plugins.smithers.sh/healthz"), makeEnv());
+    const response = await createPluginsSiteWorker().fetch(
+      new Request("https://plugins.smithers.sh/healthz"),
+      makeEnv(),
+    );
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, service: "plugins-site" });

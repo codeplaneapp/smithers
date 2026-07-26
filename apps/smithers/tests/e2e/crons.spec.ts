@@ -13,15 +13,11 @@ test("creates, validates, toggles, and deletes a real cron trigger", async ({ pa
   await expect(page.getByTestId("crons-empty")).toBeVisible();
 
   await page.getByTestId("crons-new-toggle").click();
-  await expect(page.getByTestId("crons-validation")).toContainText(
-    "Cron pattern and workflow key are required.",
-  );
+  await expect(page.getByTestId("crons-validation")).toContainText("Cron pattern and workflow key are required.");
   await expect(page.getByTestId("crons-create-submit")).toBeDisabled();
   await page.getByTestId("crons-create-pattern").fill("99 * * * *");
   await page.getByTestId("crons-create-path").fill("e2e-task");
-  await expect(page.getByTestId("crons-validation")).toContainText(
-    "Not a valid 5-field cron pattern.",
-  );
+  await expect(page.getByTestId("crons-validation")).toContainText("Not a valid 5-field cron pattern.");
 
   await page.getByTestId("crons-create-pattern").fill("*/15 * * * *");
   await expect(page.getByTestId("crons-create-submit")).toBeEnabled();

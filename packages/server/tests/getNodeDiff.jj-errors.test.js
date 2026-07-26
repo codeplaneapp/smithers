@@ -30,14 +30,31 @@ async function seed(adapter, runId, nodeId, jjPointer, jjCwd) {
     vcsRevision: jjPointer,
   });
   await adapter.insertNode({
-    runId, nodeId, iteration: 0, state: "finished", lastAttempt: 1,
-    updatedAtMs: Date.now(), outputTable: "out", label: null,
+    runId,
+    nodeId,
+    iteration: 0,
+    state: "finished",
+    lastAttempt: 1,
+    updatedAtMs: Date.now(),
+    outputTable: "out",
+    label: null,
   });
   await adapter.insertAttempt({
-    runId, nodeId, iteration: 0, attempt: 1, state: "finished",
-    startedAtMs: Date.now() - 1000, finishedAtMs: Date.now() - 500,
-    heartbeatAtMs: null, heartbeatDataJson: null, errorJson: null,
-    jjPointer, responseText: null, jjCwd, cached: false, metaJson: null,
+    runId,
+    nodeId,
+    iteration: 0,
+    attempt: 1,
+    state: "finished",
+    startedAtMs: Date.now() - 1000,
+    finishedAtMs: Date.now() - 500,
+    heartbeatAtMs: null,
+    heartbeatDataJson: null,
+    errorJson: null,
+    jjPointer,
+    responseText: null,
+    jjCwd,
+    cached: false,
+    metaJson: null,
   });
 }
 

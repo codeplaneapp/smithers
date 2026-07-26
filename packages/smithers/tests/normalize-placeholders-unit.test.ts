@@ -20,12 +20,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 describe("normalize-placeholders units", () => {
   test("hyphenated tokens are replaced in any command context", () => {
-    expect(normalizeCommand("smithers logs <run-id> --node <node-id>")).toBe(
-      "smithers logs RUN_ID --node NODE_ID",
-    );
-    expect(normalizeCommand("smithers workflow run <workflow-id>")).toBe(
-      "smithers workflow run WORKFLOW_ID",
-    );
+    expect(normalizeCommand("smithers logs <run-id> --node <node-id>")).toBe("smithers logs RUN_ID --node NODE_ID");
+    expect(normalizeCommand("smithers workflow run <workflow-id>")).toBe("smithers workflow run WORKFLOW_ID");
   });
 
   test("camelCase and snake_case id tokens map to their uppercase forms", () => {
@@ -42,16 +38,12 @@ describe("normalize-placeholders units", () => {
     const url = "curl 'http://localhost:3000/api?runId=<id>'";
     expect(normalizeCommand(url)).toBe(url);
     // The hyphenated wrap-bug tokens are still fixed even in path context.
-    expect(normalizeCommand("cat executions/<runId>/x <run-id>")).toBe(
-      "cat executions/<runId>/x RUN_ID",
-    );
+    expect(normalizeCommand("cat executions/<runId>/x <run-id>")).toBe("cat executions/<runId>/x RUN_ID");
   });
 
   test("<node> is replaced only as the argument of --node / --node-id", () => {
     expect(normalizeCommand("smithers node --node <node>")).toBe("smithers node --node NODE_ID");
-    expect(normalizeCommand("smithers retry --node-id <node>")).toBe(
-      "smithers retry --node-id NODE_ID",
-    );
+    expect(normalizeCommand("smithers retry --node-id <node>")).toBe("smithers retry --node-id NODE_ID");
     expect(normalizeCommand("echo <node>")).toBe("echo <node>");
   });
 
@@ -66,23 +58,17 @@ describe("normalize-placeholders units", () => {
   });
 
   test("prose normalizes hyphenated tokens everywhere but command tokens only in smithers-orchestrator spans", () => {
-    expect(normalizeProseLine("Pass the <run-id> to the command.")).toBe(
-      "Pass the RUN_ID to the command.",
-    );
+    expect(normalizeProseLine("Pass the <run-id> to the command.")).toBe("Pass the RUN_ID to the command.");
     expect(normalizeProseLine("Run `bunx smithers-orchestrator inspect <runId>` to check.")).toBe(
       "Run `bunx smithers-orchestrator inspect RUN_ID` to check.",
     );
     // Non-smithers spans and prose mentions of <runId> stay untouched.
-    expect(normalizeProseLine("Use `other-tool <runId>` instead.")).toBe(
-      "Use `other-tool <runId>` instead.",
-    );
-    expect(normalizeProseLine("The <runId> appears in prose.")).toBe(
-      "The <runId> appears in prose.",
-    );
+    expect(normalizeProseLine("Use `other-tool <runId>` instead.")).toBe("Use `other-tool <runId>` instead.");
+    expect(normalizeProseLine("The <runId> appears in prose.")).toBe("The <runId> appears in prose.");
     // Path/URL template spans keep their placeholders even for smithers commands.
-    expect(
-      normalizeProseLine("See `bunx smithers-orchestrator logs .smithers/executions/<runId>/`."),
-    ).toBe("See `bunx smithers-orchestrator logs .smithers/executions/<runId>/`.");
+    expect(normalizeProseLine("See `bunx smithers-orchestrator logs .smithers/executions/<runId>/`.")).toBe(
+      "See `bunx smithers-orchestrator logs .smithers/executions/<runId>/`.",
+    );
   });
 
   test("rewrite scopes command normalization to shell fences and restores prose rules after the fence", () => {

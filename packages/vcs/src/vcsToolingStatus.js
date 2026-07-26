@@ -24,15 +24,15 @@ const VERSION_PROBE_TIMEOUT_MS = 2_000;
  * @returns {boolean}
  */
 export function runsVersion(bin) {
-	try {
-		const res = spawnSync(bin.path, ["--version"], {
-			stdio: "ignore",
-			timeout: VERSION_PROBE_TIMEOUT_MS,
-		});
-		return res.status === 0;
-	} catch {
-		return false;
-	}
+  try {
+    const res = spawnSync(bin.path, ["--version"], {
+      stdio: "ignore",
+      timeout: VERSION_PROBE_TIMEOUT_MS,
+    });
+    return res.status === 0;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -47,9 +47,9 @@ export function runsVersion(bin) {
  * @returns {VcsToolingStatus}
  */
 export function vcsToolingStatus() {
-	const jjBin = resolveJjBinary();
-	const gitBin = resolveGitBinary();
-	const jj = runsVersion(jjBin) ? jjBin : null;
-	const git = runsVersion(gitBin) ? gitBin : null;
-	return { jj, git, ok: Boolean(jj || git) };
+  const jjBin = resolveJjBinary();
+  const gitBin = resolveGitBinary();
+  const jj = runsVersion(jjBin) ? jjBin : null;
+  const git = runsVersion(gitBin) ? gitBin : null;
+  return { jj, git, ok: Boolean(jj || git) };
 }

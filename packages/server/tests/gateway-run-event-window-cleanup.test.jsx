@@ -17,10 +17,7 @@ function sleep(ms) {
 }
 
 function makeDbPath(name) {
-  return join(
-    tmpdir(),
-    `smithers-run-event-window-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
-  );
+  return join(tmpdir(), `smithers-run-event-window-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
 function getPort(server) {
@@ -45,10 +42,7 @@ async function waitUntil(predicate, label, timeoutMs = 10_000) {
 }
 
 function createCleanupWorkflow(dbPath) {
-  const { smithers, Workflow, Task, outputs } = createSmithers(
-    { out: z.object({ value: z.number() }) },
-    { dbPath },
-  );
+  const { smithers, Workflow, Task, outputs } = createSmithers({ out: z.object({ value: z.number() }) }, { dbPath });
   return smithers(() => (
     <Workflow name="cleanup">
       <Task id="a" output={outputs.out}>
@@ -145,15 +139,17 @@ describe("gateway run event window cleanup", () => {
     gateway.register("cleanup", workflow);
 
     const runIds = Array.from({ length: RUN_COUNT }, (_, index) => `cleanup-${index.toString().padStart(2, "0")}`);
-    await Promise.all(
-      runIds.map((runId) => gateway.startRun("cleanup", {}, AUTH, runId, { resume: false })),
-    );
+    await Promise.all(runIds.map((runId) => gateway.startRun("cleanup", {}, AUTH, runId, { resume: false })));
 
-    await waitUntil(async () => {
-      const listed = await gateway.listRunsAcrossWorkflows(RUN_COUNT * 2);
-      const byRun = new Map(listed.map((run) => [run.runId, run.status]));
-      return runIds.every((runId) => byRun.get(runId) === "finished") && gateway.inflightRuns.size === 0;
-    }, "all runs to finish", 45_000);
+    await waitUntil(
+      async () => {
+        const listed = await gateway.listRunsAcrossWorkflows(RUN_COUNT * 2);
+        const byRun = new Map(listed.map((run) => [run.runId, run.status]));
+        return runIds.every((runId) => byRun.get(runId) === "finished") && gateway.inflightRuns.size === 0;
+      },
+      "all runs to finish",
+      45_000,
+    );
 
     await waitUntil(
       () => gateway.runEventWindows.size === 0 && gateway.outOfProcessEventBridgeLastFedSeq.size === 0,

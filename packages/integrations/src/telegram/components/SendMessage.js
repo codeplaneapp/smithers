@@ -11,10 +11,10 @@ import { renderOutboundTask } from "./outboundInternals.js";
 
 /** Output shape produced by `<SendMessage>` (sendMessageSmart's result). */
 export const TelegramSendResultSchema = z.object({
-    chatId: z.string(),
-    messageIds: z.array(z.number()),
-    chunkCount: z.number(),
-    usedPlainTextFallback: z.boolean(),
+  chatId: z.string(),
+  messageIds: z.array(z.number()),
+  chunkCount: z.number(),
+  usedPlainTextFallback: z.boolean(),
 });
 
 /**
@@ -24,13 +24,17 @@ export const TelegramSendResultSchema = z.object({
  * @returns {Record<string, any>}
  */
 function normalizeBuilt(value, componentName) {
-    if (typeof value === "string") {
-        return { text: value };
-    }
-    if (value && typeof value === "object") {
-        return /** @type {Record<string, any>} */ (value);
-    }
-    throw new SmithersError("INVALID_INPUT", `Telegram.${componentName} children must return a string or an options object.`, { received: typeof value });
+  if (typeof value === "string") {
+    return { text: value };
+  }
+  if (value && typeof value === "object") {
+    return /** @type {Record<string, any>} */ (value);
+  }
+  throw new SmithersError(
+    "INVALID_INPUT",
+    `Telegram.${componentName} children must return a string or an options object.`,
+    { received: typeof value },
+  );
 }
 
 /**
@@ -44,24 +48,35 @@ function normalizeBuilt(value, componentName) {
  * @param {SendMessageProps} props
  */
 export function SendMessage(props) {
-    const { chatId, text, children, parseMode, replyToMessageId, messageThreadId, inlineKeyboard, typing, disableNotification } = props;
-    return renderOutboundTask(props, "SendMessage", (client, deps) => {
-        const built = children
-            ? normalizeBuilt(children(deps), "SendMessage")
-            : { text };
-        const finalText = built.text ?? text;
-        if (typeof finalText !== "string" || finalText.length === 0) {
-            throw new SmithersError("INVALID_INPUT", "Telegram.SendMessage requires message text (text prop or children returning it).");
-        }
-        return client.sendMessageSmart(chatId, finalText, {
-            parseMode: built.parseMode ?? parseMode,
-            replyToMessageId: built.replyToMessageId ?? replyToMessageId,
-            messageThreadId: built.messageThreadId ?? messageThreadId,
-            inlineKeyboard: built.inlineKeyboard ?? inlineKeyboard,
-            typing: built.typing ?? typing,
-            disableNotification: built.disableNotification ?? disableNotification,
-        });
+  const {
+    chatId,
+    text,
+    children,
+    parseMode,
+    replyToMessageId,
+    messageThreadId,
+    inlineKeyboard,
+    typing,
+    disableNotification,
+  } = props;
+  return renderOutboundTask(props, "SendMessage", (client, deps) => {
+    const built = children ? normalizeBuilt(children(deps), "SendMessage") : { text };
+    const finalText = built.text ?? text;
+    if (typeof finalText !== "string" || finalText.length === 0) {
+      throw new SmithersError(
+        "INVALID_INPUT",
+        "Telegram.SendMessage requires message text (text prop or children returning it).",
+      );
+    }
+    return client.sendMessageSmart(chatId, finalText, {
+      parseMode: built.parseMode ?? parseMode,
+      replyToMessageId: built.replyToMessageId ?? replyToMessageId,
+      messageThreadId: built.messageThreadId ?? messageThreadId,
+      inlineKeyboard: built.inlineKeyboard ?? inlineKeyboard,
+      typing: built.typing ?? typing,
+      disableNotification: built.disableNotification ?? disableNotification,
     });
+  });
 }
 
 /**
@@ -70,21 +85,22 @@ export function SendMessage(props) {
  * @param {EditMessageProps} props
  */
 export function EditMessage(props) {
-    const { chatId, messageId, text, children, parseMode, inlineKeyboard } = props;
-    return renderOutboundTask(props, "EditMessage", (client, deps) => {
-        const built = children
-            ? normalizeBuilt(children(deps), "EditMessage")
-            : { text, messageId };
-        const finalText = built.text ?? text;
-        const finalMessageId = built.messageId ?? messageId;
-        if (typeof finalText !== "string" || finalText.length === 0 || typeof finalMessageId !== "number") {
-            throw new SmithersError("INVALID_INPUT", "Telegram.EditMessage requires text and messageId (props or children returning them).");
-        }
-        return client.editMessageSmart(chatId, finalMessageId, finalText, {
-            parseMode: built.parseMode ?? parseMode,
-            inlineKeyboard: built.inlineKeyboard ?? inlineKeyboard,
-        });
+  const { chatId, messageId, text, children, parseMode, inlineKeyboard } = props;
+  return renderOutboundTask(props, "EditMessage", (client, deps) => {
+    const built = children ? normalizeBuilt(children(deps), "EditMessage") : { text, messageId };
+    const finalText = built.text ?? text;
+    const finalMessageId = built.messageId ?? messageId;
+    if (typeof finalText !== "string" || finalText.length === 0 || typeof finalMessageId !== "number") {
+      throw new SmithersError(
+        "INVALID_INPUT",
+        "Telegram.EditMessage requires text and messageId (props or children returning them).",
+      );
+    }
+    return client.editMessageSmart(chatId, finalMessageId, finalText, {
+      parseMode: built.parseMode ?? parseMode,
+      inlineKeyboard: built.inlineKeyboard ?? inlineKeyboard,
     });
+  });
 }
 
 /**
@@ -93,21 +109,22 @@ export function EditMessage(props) {
  * @param {SendDocumentProps} props
  */
 export function SendDocument(props) {
-    const { chatId, document, caption, replyToMessageId, messageThreadId, children } = props;
-    return renderOutboundTask(props, "SendDocument", (client, deps) => {
-        const built = children
-            ? normalizeBuilt(children(deps), "SendDocument")
-            : { document, caption };
-        const finalDocument = built.document ?? document;
-        if (!finalDocument) {
-            throw new SmithersError("INVALID_INPUT", "Telegram.SendDocument requires a document (prop or children returning one).");
-        }
-        return client.sendDocument(chatId, finalDocument, {
-            caption: built.caption ?? caption,
-            replyToMessageId: built.replyToMessageId ?? replyToMessageId,
-            messageThreadId: built.messageThreadId ?? messageThreadId,
-        });
+  const { chatId, document, caption, replyToMessageId, messageThreadId, children } = props;
+  return renderOutboundTask(props, "SendDocument", (client, deps) => {
+    const built = children ? normalizeBuilt(children(deps), "SendDocument") : { document, caption };
+    const finalDocument = built.document ?? document;
+    if (!finalDocument) {
+      throw new SmithersError(
+        "INVALID_INPUT",
+        "Telegram.SendDocument requires a document (prop or children returning one).",
+      );
+    }
+    return client.sendDocument(chatId, finalDocument, {
+      caption: built.caption ?? caption,
+      replyToMessageId: built.replyToMessageId ?? replyToMessageId,
+      messageThreadId: built.messageThreadId ?? messageThreadId,
     });
+  });
 }
 
 /**
@@ -117,18 +134,21 @@ export function SendDocument(props) {
  * @param {AnswerCallbackQueryProps} props
  */
 export function AnswerCallbackQuery(props) {
-    const { callbackQueryId, text, showAlert, children } = props;
-    return renderOutboundTask(props, "AnswerCallbackQuery", (client, deps) => {
-        const built = children
-            ? normalizeBuilt(children(deps), "AnswerCallbackQuery")
-            : { callbackQueryId, text, showAlert };
-        const finalId = built.callbackQueryId ?? callbackQueryId;
-        if (typeof finalId !== "string" || finalId.length === 0) {
-            throw new SmithersError("INVALID_INPUT", "Telegram.AnswerCallbackQuery requires callbackQueryId (prop or children returning it).");
-        }
-        return client.answerCallbackQuery(finalId, {
-            text: built.text ?? text,
-            showAlert: built.showAlert ?? showAlert,
-        });
+  const { callbackQueryId, text, showAlert, children } = props;
+  return renderOutboundTask(props, "AnswerCallbackQuery", (client, deps) => {
+    const built = children
+      ? normalizeBuilt(children(deps), "AnswerCallbackQuery")
+      : { callbackQueryId, text, showAlert };
+    const finalId = built.callbackQueryId ?? callbackQueryId;
+    if (typeof finalId !== "string" || finalId.length === 0) {
+      throw new SmithersError(
+        "INVALID_INPUT",
+        "Telegram.AnswerCallbackQuery requires callbackQueryId (prop or children returning it).",
+      );
+    }
+    return client.answerCallbackQuery(finalId, {
+      text: built.text ?? text,
+      showAlert: built.showAlert ?? showAlert,
     });
+  });
 }

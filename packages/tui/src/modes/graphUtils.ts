@@ -50,9 +50,7 @@ export function computeColumnDepths(
     bfsFrom(runNodeKey(root), 0);
   } else {
     // Start BFS from every parentless node
-    const rootNodes = nodes.filter(
-      (n) => !n.parentId || !nodeMap.has(n.parentId),
-    );
+    const rootNodes = nodes.filter((n) => !n.parentId || !nodeMap.has(n.parentId));
     for (const n of rootNodes) bfsFrom(runNodeKey(n), 0);
   }
 
@@ -64,10 +62,7 @@ export function computeColumnDepths(
   return depths;
 }
 
-export function computeGraphLayout(
-  nodes: ReadonlyArray<GatewayRunNode>,
-  root: GatewayRunNode | null,
-): GraphLayout {
+export function computeGraphLayout(nodes: ReadonlyArray<GatewayRunNode>, root: GatewayRunNode | null): GraphLayout {
   if (nodes.length === 0) {
     return { positions: new Map(), colGroups: [], edges: [], numCols: 0, maxRows: 0 };
   }
@@ -145,9 +140,6 @@ export function connectorArrow(compact: boolean): string {
  * For a given connector slot (= row in the right column),
  * does any edge arrive at this slot from the left column?
  */
-export function hasIncomingEdge(
-  connectorEdges: Array<{ fromRow: number; toRow: number }>,
-  toRow: number,
-): boolean {
+export function hasIncomingEdge(connectorEdges: Array<{ fromRow: number; toRow: number }>, toRow: number): boolean {
   return connectorEdges.some((e) => e.toRow === toRow);
 }

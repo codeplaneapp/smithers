@@ -134,22 +134,28 @@ const dimensionResultSchema = z.object({
   evidence: z.array(z.string()).default([]),
 });
 
-const groupAuditSchema = z.looseObject({
-  groupName: z.string(),
-  /** Holistic, weighted judgment for the group (not a naive dimension average). */
-  overallScore: z.number().min(0).max(100),
-  /** The features in the group the auditor actually inspected. */
-  featuresAudited: z.array(z.string()).default([]),
-  dimensions: z.array(dimensionResultSchema).default([]),
-  /** The 3–5 highest-leverage fixes for this group across all dimensions. */
-  topGaps: z.array(z.string()).default([]),
-  summary: z.string(),
-}).superRefine((value, ctx) => {
-  const keys = value.dimensions.map((d) => d.key);
-  if (new Set(keys).size !== DIMENSION_KEYS.length || DIMENSION_KEYS.some((key) => !keys.includes(key))) {
-    ctx.addIssue({ code: "custom", path: ["dimensions"], message: "exactly one result is required for each audit dimension" });
-  }
-});
+const groupAuditSchema = z
+  .looseObject({
+    groupName: z.string(),
+    /** Holistic, weighted judgment for the group (not a naive dimension average). */
+    overallScore: z.number().min(0).max(100),
+    /** The features in the group the auditor actually inspected. */
+    featuresAudited: z.array(z.string()).default([]),
+    dimensions: z.array(dimensionResultSchema).default([]),
+    /** The 3–5 highest-leverage fixes for this group across all dimensions. */
+    topGaps: z.array(z.string()).default([]),
+    summary: z.string(),
+  })
+  .superRefine((value, ctx) => {
+    const keys = value.dimensions.map((d) => d.key);
+    if (new Set(keys).size !== DIMENSION_KEYS.length || DIMENSION_KEYS.some((key) => !keys.includes(key))) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["dimensions"],
+        message: "exactly one result is required for each audit dimension",
+      });
+    }
+  });
 
 const backlogItemSchema = z.object({
   title: z.string(),
@@ -209,7 +215,12 @@ type WorkItem = { groupName: string; features: string[]; sources: string };
 
 /** kebab-case a group name into a stable node-id fragment. */
 function slug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "group";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "group"
+  );
 }
 
 /**
@@ -303,10 +314,7 @@ function buildScorecardTable(results: Array<z.infer<typeof groupAuditSchema>>): 
 }
 
 /** Build the final report/synthesis prompt from the per-group scorecards. */
-function reportPrompt(
-  results: Array<z.infer<typeof groupAuditSchema>>,
-  opts: { minScoreToFlag: number },
-): string {
+function reportPrompt(results: Array<z.infer<typeof groupAuditSchema>>, opts: { minScoreToFlag: number }): string {
   const table = buildScorecardTable(results);
   const detail = results
     .map((r) =>
@@ -373,9 +381,10 @@ export default smithers((ctx) => {
   const reportNeeds: Record<string, string> = Object.fromEntries(
     workItems.map((item, i) => [`g${i}`, `audit:${slug(item.groupName)}`]),
   );
-  const reportDeps = Object.fromEntries(
-    workItems.map((_, i) => [`g${i}`, groupAuditSchema]),
-  ) as Record<string, typeof groupAuditSchema>;
+  const reportDeps = Object.fromEntries(workItems.map((_, i) => [`g${i}`, groupAuditSchema])) as Record<
+    string,
+    typeof groupAuditSchema
+  >;
 
   // Sol owns the audit and report synthesis. The generated role pool is
   // Codex-only when available and exposes legacy providers only as fallback.
@@ -401,13 +410,7 @@ export default smithers((ctx) => {
         </Parallel>
 
         {/* 2. REPORT — synthesize the per-group scorecards into one ranked report + backlog. */}
-        <Task
-          id="report"
-          output={outputs.report}
-          agent={reportAgent}
-          needs={reportNeeds}
-          deps={reportDeps}
-        >
+        <Task id="report" output={outputs.report} agent={reportAgent} needs={reportNeeds} deps={reportDeps}>
           {(deps) => {
             const results = workItems
               .map((_, i) => deps[`g${i}`])

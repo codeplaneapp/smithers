@@ -57,24 +57,24 @@ export default smithers((ctx) => {
  * sandbox).
  */
 function loadScriptBody() {
-    const source = readFileSync(SCRIPT_PATH, "utf8");
-    expect(source.startsWith("export const meta = {")).toBe(true);
-    return source.replace(/^export const meta = /m, "const meta = ");
+  const source = readFileSync(SCRIPT_PATH, "utf8");
+  expect(source.startsWith("export const meta = {")).toBe(true);
+  return source.replace(/^export const meta = /m, "const meta = ");
 }
 
 /** @param {string} command @param {string} cwd */
 function execMirrorCommand(command, cwd) {
-    // The script targets `bunx smithers-orchestrator`; tests run the same CLI
-    // from the workspace so they exercise the code under review, not npm.
-    const localized = command.replaceAll("bunx smithers-orchestrator", `bun ${CLI_ENTRY}`);
-    const result = spawnSync("bash", ["-c", localized], {
-        cwd,
-        encoding: "utf8",
-        maxBuffer: 16 * 1024 * 1024,
-        timeout: 120_000,
-        env: { ...process.env, SMITHERS_BACKEND: "sqlite" },
-    });
-    return { stdout: result.stdout ?? "", status: result.status ?? 1 };
+  // The script targets `bunx smithers-orchestrator`; tests run the same CLI
+  // from the workspace so they exercise the code under review, not npm.
+  const localized = command.replaceAll("bunx smithers-orchestrator", `bun ${CLI_ENTRY}`);
+  const result = spawnSync("bash", ["-c", localized], {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: 120_000,
+    env: { ...process.env, SMITHERS_BACKEND: "sqlite" },
+  });
+  return { stdout: result.stdout ?? "", status: result.status ?? 1 };
 }
 
 /**
@@ -83,146 +83,168 @@ function execMirrorCommand(command, cwd) {
  * @param {{ cwd: string; calls: any[] }} state
  */
 function harnessAgent(state) {
-    return async (prompt, opts = {}) => {
-        state.calls.push({ label: opts.label, phase: opts.phase, schema: Boolean(opts.schema) });
-        const echo = prompt.match(/RETURN-EXACTLY-BEGIN\n([\s\S]*?)\nRETURN-EXACTLY-END/);
-        if (echo) {
-            return echo[1];
+  return async (prompt, opts = {}) => {
+    state.calls.push({ label: opts.label, phase: opts.phase, schema: Boolean(opts.schema) });
+    const echo = prompt.match(/RETURN-EXACTLY-BEGIN\n([\s\S]*?)\nRETURN-EXACTLY-END/);
+    if (echo) {
+      return echo[1];
+    }
+    const run = prompt.match(/^RUN-EXACTLY: (.+)$/m);
+    expect(run, `agent prompt without RUN-EXACTLY/RETURN-EXACTLY:\n${prompt}`).toBeTruthy();
+    // node-wait watchers are told to re-run while timedOut is true.
+    const isNodeWait = run[1].includes("claude node-wait");
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const { stdout, status } = execMirrorCommand(run[1], state.cwd);
+      let parsed;
+      try {
+        parsed = JSON.parse(stdout.trim());
+      } catch {
+        parsed = undefined;
+      }
+      if (opts.schema) {
+        if (!parsed || status !== 0) {
+          // The tick prompt's declared failure shape.
+          return {
+            contract: -1,
+            runId: "",
+            status: "error",
+            seq: 0,
+            phases: [],
+            nodes: [],
+            error: stdout.slice(0, 200),
+          };
         }
-        const run = prompt.match(/^RUN-EXACTLY: (.+)$/m);
-        expect(run, `agent prompt without RUN-EXACTLY/RETURN-EXACTLY:\n${prompt}`).toBeTruthy();
-        // node-wait watchers are told to re-run while timedOut is true.
-        const isNodeWait = run[1].includes("claude node-wait");
-        for (let attempt = 0; attempt < 40; attempt += 1) {
-            const { stdout, status } = execMirrorCommand(run[1], state.cwd);
-            let parsed;
-            try {
-                parsed = JSON.parse(stdout.trim());
-            }
-            catch {
-                parsed = undefined;
-            }
-            if (opts.schema) {
-                if (!parsed || status !== 0) {
-                    // The tick prompt's declared failure shape.
-                    return { contract: -1, runId: "", status: "error", seq: 0, phases: [], nodes: [], error: stdout.slice(0, 200) };
-                }
-                return parsed;
-            }
-            if (isNodeWait && parsed) {
-                if (parsed.timedOut === true) {
-                    continue;
-                }
-                if (parsed.vanished === true) {
-                    return "[skipped]";
-                }
-                if (parsed.state === "failed") {
-                    return `[failed] ${parsed.output ?? ""}`;
-                }
-                if (parsed.state === "cancelled") {
-                    return "[cancelled]";
-                }
-                return parsed.output && parsed.output.length > 0 ? parsed.output : "[no output]";
-            }
-            return stdout;
+        return parsed;
+      }
+      if (isNodeWait && parsed) {
+        if (parsed.timedOut === true) {
+          continue;
         }
-        return "[no output]";
-    };
+        if (parsed.vanished === true) {
+          return "[skipped]";
+        }
+        if (parsed.state === "failed") {
+          return `[failed] ${parsed.output ?? ""}`;
+        }
+        if (parsed.state === "cancelled") {
+          return "[cancelled]";
+        }
+        return parsed.output && parsed.output.length > 0 ? parsed.output : "[no output]";
+      }
+      return stdout;
+    }
+    return "[no output]";
+  };
 }
 
 /** @param {{ dir: string }} repo @param {any} args */
 async function runMirrorScript(repo, args) {
-    const state = { cwd: repo.dir, calls: [], phases: [], logs: [] };
-    const AsyncFunction = (async () => {}).constructor;
-    const body = new AsyncFunction("agent", "parallel", "pipeline", "phase", "log", "args", "budget", "workflow", loadScriptBody());
-    const parallel = (thunks) => Promise.all(thunks.map((thunk) => thunk().catch(() => null)));
-    const pipeline = async (items, ...stages) => {
-        const results = [];
-        for (const item of items) {
-            let value = item;
-            for (const stage of stages) {
-                value = await stage(value, item, results.length);
-            }
-            results.push(value);
-        }
-        return results;
-    };
-    const result = await body(
-        harnessAgent(state),
-        parallel,
-        pipeline,
-        (title) => state.phases.push(title),
-        (message) => state.logs.push(message),
-        args,
-        { total: null, spent: () => 0, remaining: () => Infinity },
-        () => { throw new Error("workflow() is not available to the mirror"); },
-    );
-    return { result, state };
+  const state = { cwd: repo.dir, calls: [], phases: [], logs: [] };
+  const AsyncFunction = (async () => {}).constructor;
+  const body = new AsyncFunction(
+    "agent",
+    "parallel",
+    "pipeline",
+    "phase",
+    "log",
+    "args",
+    "budget",
+    "workflow",
+    loadScriptBody(),
+  );
+  const parallel = (thunks) => Promise.all(thunks.map((thunk) => thunk().catch(() => null)));
+  const pipeline = async (items, ...stages) => {
+    const results = [];
+    for (const item of items) {
+      let value = item;
+      for (const stage of stages) {
+        value = await stage(value, item, results.length);
+      }
+      results.push(value);
+    }
+    return results;
+  };
+  const result = await body(
+    harnessAgent(state),
+    parallel,
+    pipeline,
+    (title) => state.phases.push(title),
+    (message) => state.logs.push(message),
+    args,
+    { total: null, spent: () => 0, remaining: () => Infinity },
+    () => {
+      throw new Error("workflow() is not available to the mirror");
+    },
+  );
+  return { result, state };
 }
 
 const TERMINAL = new Set(["finished", "failed", "cancelled", "continued"]);
 
 describe("smithers-run.mjs mirror script (harness, real run)", () => {
-    test("attach mode mirrors a finished fan-out run: phases, rows, outputs, summary", async () => {
-        const repo = createTempRepo();
-        pinSqliteBackend(repo.dir);
-        repo.write("workflow.tsx", FANOUT_WORKFLOW);
+  test("attach mode mirrors a finished fan-out run: phases, rows, outputs, summary", async () => {
+    const repo = createTempRepo();
+    pinSqliteBackend(repo.dir);
+    repo.write("workflow.tsx", FANOUT_WORKFLOW);
 
-        const runId = "mirror-harness-attach";
-        const up = runSmithers(["up", "workflow.tsx", "--detach", "--run-id", runId], {
-            cwd: repo.dir,
-            format: "json",
-            timeoutMs: 120_000,
-        });
-        expect(up.exitCode, `${up.stdout}\n${up.stderr}`).toBe(0);
-        for (let index = 0; index < 100; index += 1) {
-            const probe = runSmithers(["claude", "tick", runId], { cwd: repo.dir, format: "json" });
-            if (probe.exitCode === 0 && probe.json && TERMINAL.has(probe.json.status)) {
-                break;
-            }
-            Bun.sleepSync(150);
-        }
+    const runId = "mirror-harness-attach";
+    const up = runSmithers(["up", "workflow.tsx", "--detach", "--run-id", runId], {
+      cwd: repo.dir,
+      format: "json",
+      timeoutMs: 120_000,
+    });
+    expect(up.exitCode, `${up.stdout}\n${up.stderr}`).toBe(0);
+    for (let index = 0; index < 100; index += 1) {
+      const probe = runSmithers(["claude", "tick", runId], { cwd: repo.dir, format: "json" });
+      if (probe.exitCode === 0 && probe.json && TERMINAL.has(probe.json.status)) {
+        break;
+      }
+      Bun.sleepSync(150);
+    }
 
-        // args arrive as a JSON string sometimes; the script must normalize.
-        const { result, state } = await runMirrorScript(repo, JSON.stringify({
-            runId,
-            cwd: repo.dir,
-            mirrorAllNodes: true,
-        }));
+    // args arrive as a JSON string sometimes; the script must normalize.
+    const { result, state } = await runMirrorScript(
+      repo,
+      JSON.stringify({
+        runId,
+        cwd: repo.dir,
+        mirrorAllNodes: true,
+      }),
+    );
 
-        expect(result.runId).toBe(runId);
-        expect(result.status).toBe("finished");
-        expect(result.mirrored).toBeGreaterThanOrEqual(3);
-        expect(state.phases).toContain("Plan");
-        expect(state.phases).toContain("Audit");
-        const labels = state.calls.map((call) => call.label);
-        // The run-level tick row (labeled `sync` before mirror 0.2.2, now
-        // `tick #N · <status>`) plus one mirrored row per workflow node.
-        expect(labels.some((label) => /^tick #\d+ · /.test(String(label)))).toBe(true);
-        expect(labels).toContain("seed");
-        expect(labels).toContain("audit-alpha");
-        expect(labels).toContain("audit-beta");
-        const auditCall = state.calls.find((call) => call.label === "audit-alpha");
-        expect(auditCall.phase).toBe("Audit");
-        expect(state.logs.some((line) => line.includes("Mirror complete"))).toBe(true);
-    }, 90_000);
+    expect(result.runId).toBe(runId);
+    expect(result.status).toBe("finished");
+    expect(result.mirrored).toBeGreaterThanOrEqual(3);
+    expect(state.phases).toContain("Plan");
+    expect(state.phases).toContain("Audit");
+    const labels = state.calls.map((call) => call.label);
+    // The run-level tick row (labeled `sync` before mirror 0.2.2, now
+    // `tick #N · <status>`) plus one mirrored row per workflow node.
+    expect(labels.some((label) => /^tick #\d+ · /.test(String(label)))).toBe(true);
+    expect(labels).toContain("seed");
+    expect(labels).toContain("audit-alpha");
+    expect(labels).toContain("audit-beta");
+    const auditCall = state.calls.find((call) => call.label === "audit-alpha");
+    expect(auditCall.phase).toBe("Audit");
+    expect(state.logs.some((line) => line.includes("Mirror complete"))).toBe(true);
+  }, 90_000);
 
-    test("launch mode starts the detached run itself and follows it to terminal", async () => {
-        const repo = createTempRepo();
-        pinSqliteBackend(repo.dir);
-        repo.write(".smithers/workflows/mirror-harness-launch.tsx", FANOUT_WORKFLOW);
+  test("launch mode starts the detached run itself and follows it to terminal", async () => {
+    const repo = createTempRepo();
+    pinSqliteBackend(repo.dir);
+    repo.write(".smithers/workflows/mirror-harness-launch.tsx", FANOUT_WORKFLOW);
 
-        const { result, state } = await runMirrorScript(repo, {
-            workflow: "mirror-harness-launch",
-            cwd: repo.dir,
-            mirrorAllNodes: true,
-        });
+    const { result, state } = await runMirrorScript(repo, {
+      workflow: "mirror-harness-launch",
+      cwd: repo.dir,
+      mirrorAllNodes: true,
+    });
 
-        expect(typeof result.runId).toBe("string");
-        expect(result.runId.length).toBeGreaterThan(0);
-        expect(result.status).toBe("finished");
-        expect(state.logs.some((line) => line.includes(`Detached Smithers run ${result.runId} started`))).toBe(true);
-        expect(state.phases).toContain("Audit");
-        expect(result.mirrored).toBeGreaterThanOrEqual(3);
-    }, 120_000);
+    expect(typeof result.runId).toBe("string");
+    expect(result.runId.length).toBeGreaterThan(0);
+    expect(result.status).toBe("finished");
+    expect(state.logs.some((line) => line.includes(`Detached Smithers run ${result.runId} started`))).toBe(true);
+    expect(state.phases).toContain("Audit");
+    expect(result.mirrored).toBeGreaterThanOrEqual(3);
+  }, 120_000);
 });

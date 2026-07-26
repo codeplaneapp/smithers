@@ -207,11 +207,13 @@ function PhaseCard(props: PhaseCardProps) {
         <span className="phase-meta">{props.meta}</span>
         <span className="phase-meta">{open ? "collapse" : "expand"}</span>
       </div>
-      {open
-        ? props.hasContent
-          ? <div className="phase-body">{props.children}</div>
-          : <div className="phase-empty">{props.emptyText}</div>
-        : null}
+      {open ? (
+        props.hasContent ? (
+          <div className="phase-body">{props.children}</div>
+        ) : (
+          <div className="phase-empty">{props.emptyText}</div>
+        )
+      ) : null}
     </section>
   );
 }
@@ -241,10 +243,7 @@ function App() {
   const validate = useMemo(() => extractValidate(validateOut.data), [validateOut.data]);
   const review0 = useMemo(() => extractReview(review0Out.data), [review0Out.data]);
   const review1 = useMemo(() => extractReview(review1Out.data), [review1Out.data]);
-  const reviews = useMemo(
-    () => [review0, review1].filter((r): r is ReviewOutput => r !== null),
-    [review0, review1],
-  );
+  const reviews = useMemo(() => [review0, review1].filter((r): r is ReviewOutput => r !== null), [review0, review1]);
   // The synthesized verdict from the review panel's moderator (usually Codex).
   const verdict = useMemo(() => extractReview(moderatorOut.data), [moderatorOut.data]);
 
@@ -273,7 +272,13 @@ function App() {
       feedbackParts.push("REVIEWER REJECTED (" + review.reviewer + "):\n" + review.feedback);
       for (const issue of review.issues) {
         feedbackParts.push(
-          "  [" + issue.severity + "] " + issue.title + ": " + issue.description + (issue.file ? " (" + issue.file + ")" : ""),
+          "  [" +
+            issue.severity +
+            "] " +
+            issue.title +
+            ": " +
+            issue.description +
+            (issue.file ? " (" + issue.file + ")" : ""),
         );
       }
     }
@@ -333,11 +338,17 @@ function App() {
       <header className="topbar">
         <div className="title-group">
           <h1>Implement</h1>
-          <span className="pill" data-testid="implement-runid">{activeRunId ? shortRunId(activeRunId) : "No run"}</span>
+          <span className="pill" data-testid="implement-runid">
+            {activeRunId ? shortRunId(activeRunId) : "No run"}
+          </span>
           {activeRun ? (
-            <span className={"badge " + statusClass(activeRun.status)} data-testid="implement-status">{activeRun.status ?? "idle"}</span>
+            <span className={"badge " + statusClass(activeRun.status)} data-testid="implement-status">
+              {activeRun.status ?? "idle"}
+            </span>
           ) : null}
-          <span className="iteration" data-testid="implement-iteration">Loop · up to 3 iterations</span>
+          <span className="iteration" data-testid="implement-iteration">
+            Loop · up to 3 iterations
+          </span>
         </div>
         <div className="toolbar">
           <input
@@ -347,11 +358,27 @@ function App() {
             onChange={(e) => setPrompt(e.currentTarget.value)}
             placeholder="What should we implement?"
           />
-          <button className="button" data-testid="implement-refresh" onClick={() => void refresh()} disabled={busy}>Refresh</button>
+          <button className="button" data-testid="implement-refresh" onClick={() => void refresh()} disabled={busy}>
+            Refresh
+          </button>
           {activeRun && statusClass(activeRun.status) === "running" ? (
-            <button className="button danger" data-testid="implement-cancel" onClick={() => void cancel()} disabled={busy}>Cancel</button>
+            <button
+              className="button danger"
+              data-testid="implement-cancel"
+              onClick={() => void cancel()}
+              disabled={busy}
+            >
+              Cancel
+            </button>
           ) : null}
-          <button className="button primary" data-testid="implement-launch" onClick={() => void launch()} disabled={busy}>Implement</button>
+          <button
+            className="button primary"
+            data-testid="implement-launch"
+            onClick={() => void launch()}
+            disabled={busy}
+          >
+            Implement
+          </button>
         </div>
       </header>
 
@@ -383,11 +410,15 @@ function App() {
                     {implement.filesChanged.length > 0 ? (
                       <div className="chips">
                         {implement.filesChanged.map((f, i) => (
-                          <span className="chip" key={i}>{f}</span>
+                          <span className="chip" key={i}>
+                            {f}
+                          </span>
                         ))}
                       </div>
                     ) : (
-                      <div className="phase-empty" style={{ padding: 0 }}>No files reported as changed.</div>
+                      <div className="phase-empty" style={{ padding: 0 }}>
+                        No files reported as changed.
+                      </div>
                     )}
                   </>
                 ) : null}
@@ -419,9 +450,15 @@ function App() {
                 testId="implement-phase-review"
                 title="Review"
                 dot={revDot}
-                meta={verdict
-                  ? (verdict.approved ? "synthesized: approved" : "synthesized: rejected")
-                  : reviews.length > 0 ? reviews.length + " panelist(s)" : "pending"}
+                meta={
+                  verdict
+                    ? verdict.approved
+                      ? "synthesized: approved"
+                      : "synthesized: rejected"
+                    : reviews.length > 0
+                      ? reviews.length + " panelist(s)"
+                      : "pending"
+                }
                 emptyText="Waiting for the review panel to produce verdicts."
                 hasContent={reviews.length > 0 || verdict !== null}
               >
@@ -460,7 +497,9 @@ function App() {
                           ))}
                         </ul>
                       ) : (
-                        <div className="phase-empty" style={{ padding: "8px 0 0" }}>No issues raised.</div>
+                        <div className="phase-empty" style={{ padding: "8px 0 0" }}>
+                          No issues raised.
+                        </div>
                       )}
                     </div>
                   ))}
@@ -482,11 +521,16 @@ function App() {
           ) : (
             <div className="empty" data-testid="implement-empty">
               <div className="empty-lead">
-                Implement a code change with automated validation and code review. The workflow will iterate up to 3 times
-                if validation or reviews fail, incorporating feedback each round.
+                Implement a code change with automated validation and code review. The workflow will iterate up to 3
+                times if validation or reviews fail, incorporating feedback each round.
               </div>
               <div>{activeRunId ? "Waiting for the first task to run…" : "No run yet."}</div>
-              <button className="button primary" data-testid="implement-launch-empty" onClick={() => void launch()} disabled={busy}>
+              <button
+                className="button primary"
+                data-testid="implement-launch-empty"
+                onClick={() => void launch()}
+                disabled={busy}
+              >
                 Implement
               </button>
             </div>

@@ -113,8 +113,9 @@ describe("migrateSmithersStore — postgres target/source over a real wire", () 
       await target.close();
     }
 
-    await expect(migrateSmithersStore({ cwd, from: "sqlite", to: "postgres", url: connectionString, env: {} }))
-      .rejects.toThrow("reject_migration_node");
+    await expect(
+      migrateSmithersStore({ cwd, from: "sqlite", to: "postgres", url: connectionString, env: {} }),
+    ).rejects.toThrow("reject_migration_node");
 
     const rolledBack = await createSmithersPostgres({}, { provider: "postgres", connectionString });
     try {

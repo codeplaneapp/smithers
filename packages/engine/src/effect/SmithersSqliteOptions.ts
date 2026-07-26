@@ -1,3 +1,3 @@
 export type SmithersSqliteOptions = {
-	filename: string;
+  filename: string;
 };

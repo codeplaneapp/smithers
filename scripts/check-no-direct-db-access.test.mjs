@@ -47,9 +47,7 @@ describe("scanDirectDbAccess", () => {
         'import { Database } from "bun:sqlite";\nconst sqlite = new Database(":memory:");\n',
       );
 
-      expect(sortedEntries(scanDirectDbAccess(root))).toEqual([
-        ["packages/fixture-pkg/src/index.js", 1],
-      ]);
+      expect(sortedEntries(scanDirectDbAccess(root))).toEqual([["packages/fixture-pkg/src/index.js", 1]]);
     });
   });
 

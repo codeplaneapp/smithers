@@ -50,9 +50,7 @@ function setupMemoryDb() {
 }
 
 function migrationRows(sqlite) {
-  return sqlite
-    .query('SELECT id, destructive, details_json FROM _smithers_schema_migrations ORDER BY id')
-    .all();
+  return sqlite.query("SELECT id, destructive, details_json FROM _smithers_schema_migrations ORDER BY id").all();
 }
 
 function createV019RunOwnedSchema(sqlite) {
@@ -145,7 +143,13 @@ describe("DB migration edges", () => {
       expect(afterTables).toContain("_smithers_schema_migrations");
       sqlite.run("DROP TRIGGER _smithers_snapshot_payload_refs_insert");
       ensureSmithersTables(db);
-      expect(sqlite.query("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = '_smithers_snapshot_payload_refs_insert'").get()).toBeDefined();
+      expect(
+        sqlite
+          .query(
+            "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = '_smithers_snapshot_payload_refs_insert'",
+          )
+          .get(),
+      ).toBeDefined();
       expect(migrationRows(sqlite).map((row) => row.id)).toEqual(
         expect.arrayContaining([
           "0001_current_tables",
@@ -187,15 +191,16 @@ describe("DB migration edges", () => {
         .query('PRAGMA table_info("_smithers_integration_deliveries")')
         .all()
         .map((column) => column.name);
-      expect(columns).toEqual(expect.arrayContaining([
-        "status",
-        "claim_token",
-        "claim_expires_at_ms",
-        "completed_at_ms",
-      ]));
-      expect(reopened.query(`SELECT status, claim_token, claim_expires_at_ms
+      expect(columns).toEqual(
+        expect.arrayContaining(["status", "claim_token", "claim_expires_at_ms", "completed_at_ms"]),
+      );
+      expect(
+        reopened
+          .query(`SELECT status, claim_token, claim_expires_at_ms
         FROM _smithers_integration_deliveries
-        WHERE source_id = 'github' AND dedupe_key = 'legacy-guid'`).get()).toEqual({
+        WHERE source_id = 'github' AND dedupe_key = 'legacy-guid'`)
+          .get(),
+      ).toEqual({
         status: "completed",
         claim_token: null,
         claim_expires_at_ms: null,
@@ -203,12 +208,17 @@ describe("DB migration edges", () => {
       expect(migrationRows(reopened).map((row) => row.id)).toContain("0029_integration_delivery_claims");
 
       const adapter = new SmithersDb(db);
-      expect(await adapter.claimIntegrationDelivery({
-        sourceId: "github",
-        dedupeKey: "legacy-guid",
-        eventName: "integration:github:push",
-        receivedAtMs: 9999,
-      }, { ownerToken: "new-worker", nowMs: 10_000 })).toMatchObject({
+      expect(
+        await adapter.claimIntegrationDelivery(
+          {
+            sourceId: "github",
+            dedupeKey: "legacy-guid",
+            eventName: "integration:github:push",
+            receivedAtMs: 9999,
+          },
+          { ownerToken: "new-worker", nowMs: 10_000 },
+        ),
+      ).toMatchObject({
         status: "completed",
         receivedAtMs: 1234,
       });
@@ -246,15 +256,31 @@ describe("DB migration edges", () => {
         (run_id, frame_no, nodes_json, outputs_json, ralph_json, input_json, content_hash, payload_hash, created_at_ms)
         VALUES ('prototype-run', 0, '', '', '', '', 'prototype-hash', 'prototype-hash', 1);
     `);
-    const before = sqlite.query("SELECT rootpage, sql FROM sqlite_master WHERE type = 'table' AND name = '_smithers_snapshots'").get();
+    const before = sqlite
+      .query("SELECT rootpage, sql FROM sqlite_master WHERE type = 'table' AND name = '_smithers_snapshots'")
+      .get();
     ensureSmithersTables(drizzle(sqlite));
-    const after = sqlite.query("SELECT rootpage, sql FROM sqlite_master WHERE type = 'table' AND name = '_smithers_snapshots'").get();
+    const after = sqlite
+      .query("SELECT rootpage, sql FROM sqlite_master WHERE type = 'table' AND name = '_smithers_snapshots'")
+      .get();
     expect(after).toEqual(before);
     expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshots").get().count).toBe(1);
     expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_payloads").get().count).toBe(1);
-    expect(sqlite.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_snapshot_contents'").get()).toBeDefined();
-    expect(sqlite.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_snapshot_payload_refs'").get()).toBeDefined();
-    expect(sqlite.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_snapshots_0024_legacy'").get()).toBeNull();
+    expect(
+      sqlite
+        .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_snapshot_contents'")
+        .get(),
+    ).toBeDefined();
+    expect(
+      sqlite
+        .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_snapshot_payload_refs'")
+        .get(),
+    ).toBeDefined();
+    expect(
+      sqlite
+        .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_snapshots_0024_legacy'")
+        .get(),
+    ).toBeNull();
     expect(migrationRows(sqlite).map((row) => row.id)).toContain("0025_snapshot_contents");
     sqlite.close();
   });
@@ -371,7 +397,10 @@ describe("DB migration edges", () => {
     const db = drizzle(sqlite);
     ensureSmithersTables(db);
 
-    const cols = sqlite.query('PRAGMA table_info("_smithers_frames")').all().map((c) => c.name);
+    const cols = sqlite
+      .query('PRAGMA table_info("_smithers_frames")')
+      .all()
+      .map((c) => c.name);
     expect(cols).toContain("encoding");
 
     const row = sqlite.query("SELECT run_id, encoding FROM _smithers_frames").get();
@@ -409,18 +438,18 @@ describe("DB migration edges", () => {
     const db = drizzle(sqlite);
     ensureSmithersTables(db);
 
-    const cols = sqlite.query('PRAGMA table_info("_smithers_scorers")').all().map((c) => c.name);
+    const cols = sqlite
+      .query('PRAGMA table_info("_smithers_scorers")')
+      .all()
+      .map((c) => c.name);
     expect(cols).toContain("ground_truth_json");
     expect(cols).toContain("context_json");
 
-    sqlite.run(
-      `UPDATE _smithers_scorers SET ground_truth_json = ?, context_json = ? WHERE id = ?`,
-      [
-        JSON.stringify({ expected: "answer" }),
-        JSON.stringify({ docs: ["source"] }),
-        "score-legacy",
-      ],
-    );
+    sqlite.run(`UPDATE _smithers_scorers SET ground_truth_json = ?, context_json = ? WHERE id = ?`, [
+      JSON.stringify({ expected: "answer" }),
+      JSON.stringify({ docs: ["source"] }),
+      "score-legacy",
+    ]);
     const row = sqlite
       .query("SELECT ground_truth_json, context_json FROM _smithers_scorers WHERE id = ?")
       .get("score-legacy");
@@ -517,9 +546,7 @@ describe("DB migration edges", () => {
          VALUES (?, ?, ?, ?, ?)`,
         ["bad-cfg-run", "wf", "running", 1, "{not-valid-json"],
       );
-      const cfg = sqlite
-        .query("SELECT config_json FROM _smithers_runs WHERE run_id = ?")
-        .get("bad-cfg-run");
+      const cfg = sqlite.query("SELECT config_json FROM _smithers_runs WHERE run_id = ?").get("bad-cfg-run");
       // Round-trip preserves the bytes — corruption is not caught at write.
       expect(cfg.config_json).toBe("{not-valid-json");
       // Deserialize must throw a SyntaxError which the caller can wrap.
@@ -535,9 +562,7 @@ describe("DB migration edges", () => {
          VALUES (?, ?, ?, ?, ?)`,
         ["bad-xml-run", 0, 1, "{garbage", "h"],
       );
-      const frame = sqlite
-        .query("SELECT xml_json FROM _smithers_frames WHERE run_id = ?")
-        .get("bad-xml-run");
+      const frame = sqlite.query("SELECT xml_json FROM _smithers_frames WHERE run_id = ?").get("bad-xml-run");
       let parsed;
       let parseErr;
       try {
@@ -598,9 +623,7 @@ describe("DB migration edges", () => {
       // intact across a checkpoint.)
       ctx.sqlite.exec("PRAGMA wal_checkpoint(FULL)");
 
-      const back = ctx.sqlite
-        .query("SELECT xml_json FROM _smithers_frames WHERE run_id = ?")
-        .get("big-run");
+      const back = ctx.sqlite.query("SELECT xml_json FROM _smithers_frames WHERE run_id = ?").get("big-run");
       expect(back.xml_json.length).toBe(giant.length);
       expect(JSON.parse(back.xml_json).blob.length).toBe(blobChars);
     } finally {
@@ -663,11 +686,7 @@ describe("DB migration edges", () => {
 
       sqlite.run(`DELETE FROM _smithers_runs WHERE run_id = ?`, ["cascade-run"]);
 
-      for (const table of [
-        "_smithers_frames",
-        "_smithers_node_diffs",
-        "_smithers_time_travel_audit",
-      ]) {
+      for (const table of ["_smithers_frames", "_smithers_node_diffs", "_smithers_time_travel_audit"]) {
         const row = sqlite.query(`SELECT COUNT(*) AS count FROM ${table}`).get();
         expect(row.count).toBe(0);
       }
@@ -713,9 +732,15 @@ describe("DB migration edges", () => {
       const db = drizzle(sqlite);
       expect(() => ensureSmithersTables(db)).not.toThrow();
 
-      const cols = sqlite.query('PRAGMA table_info("_smithers_runs")').all().map((c) => c.name);
+      const cols = sqlite
+        .query('PRAGMA table_info("_smithers_runs")')
+        .all()
+        .map((c) => c.name);
       expect(cols).toContain("heartbeat_at_ms");
-      const indexes = sqlite.query('PRAGMA index_list("_smithers_runs")').all().map((i) => i.name);
+      const indexes = sqlite
+        .query('PRAGMA index_list("_smithers_runs")')
+        .all()
+        .map((i) => i.name);
       expect(indexes).toContain("_smithers_runs_status_heartbeat_idx");
     } finally {
       sqlite.close();
@@ -735,7 +760,10 @@ describe("DB migration edges", () => {
       const db = drizzle(sqlite);
       expect(() => ensureSmithersTables(db)).not.toThrow();
 
-      const cols = sqlite.query('PRAGMA table_info("_smithers_runs")').all().map((c) => c.name);
+      const cols = sqlite
+        .query('PRAGMA table_info("_smithers_runs")')
+        .all()
+        .map((c) => c.name);
       expect(cols).toContain("pause_requested_at_ms");
     } finally {
       sqlite.close();
@@ -758,18 +786,12 @@ describe("DB migration edges", () => {
       structuredLogs.push(args.map(String).join(" "));
     };
     const destructiveNotices = () =>
-      structuredLogs.filter(
-        (line) => line.includes("dropped") && line.includes("orphan run-owned rows"),
-      );
+      structuredLogs.filter((line) => line.includes("dropped") && line.includes("orphan run-owned rows"));
     try {
       createV019RunOwnedSchema(sqlite);
       ensureSmithersTables(db);
 
-      for (const table of [
-        "_smithers_frames",
-        "_smithers_node_diffs",
-        "_smithers_time_travel_audit",
-      ]) {
+      for (const table of ["_smithers_frames", "_smithers_node_diffs", "_smithers_time_travel_audit"]) {
         const fks = sqlite.query(`PRAGMA foreign_key_list("${table}")`).all();
         expect(fks).toContainEqual(
           expect.objectContaining({
@@ -814,7 +836,10 @@ describe("DB migration edges", () => {
   test("migrations 0011 and 0012 produce the expected node_diffs + audit tables", () => {
     const { sqlite } = setupMemoryDb();
     try {
-      const diffCols = sqlite.query('PRAGMA table_info("_smithers_node_diffs")').all().map((c) => c.name);
+      const diffCols = sqlite
+        .query('PRAGMA table_info("_smithers_node_diffs")')
+        .all()
+        .map((c) => c.name);
       expect(diffCols.sort()).toEqual([
         "base_ref",
         "computed_at_ms",

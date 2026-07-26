@@ -1,6 +1,10 @@
 import { createElement, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
-import { SmithersGatewayClient, type SmithersGatewayClientOptions, type WorkspaceMode } from "@smithers-orchestrator/gateway-client";
+import {
+  SmithersGatewayClient,
+  type SmithersGatewayClientOptions,
+  type WorkspaceMode,
+} from "@smithers-orchestrator/gateway-client";
 import { SmithersGatewayProvider } from "./SmithersGatewayProvider.ts";
 
 export function createGatewayReactRoot(
@@ -12,12 +16,6 @@ export function createGatewayReactRoot(
     throw new Error(`Gateway React root element not found: ${options.rootId ?? "root"}`);
   }
   const client = new SmithersGatewayClient(options);
-  createRoot(root).render(
-    createElement(
-      SmithersGatewayProvider,
-      { client, mode: options.mode },
-      element,
-    ),
-  );
+  createRoot(root).render(createElement(SmithersGatewayProvider, { client, mode: options.mode }, element));
   return client;
 }

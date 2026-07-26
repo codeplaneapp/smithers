@@ -19,17 +19,17 @@ export const RESET_CANCELLED_META_KEY = "resetCancelled";
  * @returns {string}
  */
 export function markResetCancelledMeta(metaJson) {
-    let meta = {};
-    if (metaJson) {
-        try {
-            const parsed = JSON.parse(metaJson);
-            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-                meta = parsed;
-            }
-        } catch {
-            meta = {};
-        }
+  let meta = {};
+  if (metaJson) {
+    try {
+      const parsed = JSON.parse(metaJson);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        meta = parsed;
+      }
+    } catch {
+      meta = {};
     }
-    meta[RESET_CANCELLED_META_KEY] = true;
-    return JSON.stringify(meta);
+  }
+  meta[RESET_CANCELLED_META_KEY] = true;
+  return JSON.stringify(meta);
 }

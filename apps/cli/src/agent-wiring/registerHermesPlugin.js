@@ -82,9 +82,8 @@ function enablePluginInConfig(configPath) {
     if (typeof config !== "object" || Array.isArray(config)) return false;
   }
 
-  const plugins = config.plugins && typeof config.plugins === "object" && !Array.isArray(config.plugins)
-    ? config.plugins
-    : {};
+  const plugins =
+    config.plugins && typeof config.plugins === "object" && !Array.isArray(config.plugins) ? config.plugins : {};
   const enabledList = Array.isArray(plugins.enabled) ? plugins.enabled : [];
   if (!enabledList.includes("smithers")) enabledList.push("smithers");
   plugins.enabled = enabledList;

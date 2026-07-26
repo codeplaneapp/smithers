@@ -110,9 +110,7 @@ describe("shape lookup by explicit shape name", () => {
         return new Response("[]");
       },
     });
-    const response = await proxy.fetch(
-      new Request("http://proxy.local/v1/shape?table=_smithers_runs&shape=runs"),
-    );
+    const response = await proxy.fetch(new Request("http://proxy.local/v1/shape?table=_smithers_runs&shape=runs"));
     expect(response.status).toBe(200);
     expect(forwardedWhere).toBe("run_id IN ('run-1')");
   });
@@ -164,7 +162,9 @@ describe("workspace-scoped shapes fill and enforce workspace grants", () => {
       fetchClient: async () => new Response("[]"),
     });
     const response = await proxy.fetch(
-      new Request("http://proxy.local/v1/shape?table=_smithers_ws&where=" + encodeURIComponent("workspace_id = 'ws-9'")),
+      new Request(
+        "http://proxy.local/v1/shape?table=_smithers_ws&where=" + encodeURIComponent("workspace_id = 'ws-9'"),
+      ),
     );
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("unauthorized value");
@@ -205,7 +205,9 @@ describe("user-private shapes bind to the authenticated user", () => {
       fetchClient: async () => new Response("[]"),
     });
     const response = await proxy.fetch(
-      new Request("http://proxy.local/v1/shape?table=_smithers_me&where=" + encodeURIComponent("user_id = 'someone-else'")),
+      new Request(
+        "http://proxy.local/v1/shape?table=_smithers_me&where=" + encodeURIComponent("user_id = 'someone-else'"),
+      ),
     );
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("must match the authenticated user");

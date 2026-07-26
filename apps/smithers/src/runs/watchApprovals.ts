@@ -27,10 +27,7 @@ export function startApprovalWatcher(): void {
           command: "chat",
         });
         pendingToast.set(run.id, toastId);
-      } else if (
-        (run.gate === "approved" || run.gate === "denied" || run.canceled) &&
-        pendingToast.has(run.id)
-      ) {
+      } else if ((run.gate === "approved" || run.gate === "denied" || run.canceled) && pendingToast.has(run.id)) {
         const toastId = pendingToast.get(run.id);
         pendingToast.delete(run.id);
         if (toastId) {

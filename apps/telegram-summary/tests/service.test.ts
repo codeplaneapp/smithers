@@ -37,7 +37,9 @@ type FetchLike = typeof globalThis.fetch;
 
 // A router that returns a stubbed object whose .json() resolves to `body`.
 // This mirrors the pattern the existing worker.test.ts already uses.
-function routeFetch(route: (url: string, init?: RequestInit) => { ok?: boolean; status?: number; body: unknown }): FetchLike {
+function routeFetch(
+  route: (url: string, init?: RequestInit) => { ok?: boolean; status?: number; body: unknown },
+): FetchLike {
   return (async (input: Request | string | URL, init?: RequestInit) => {
     const url = String(input);
     const { ok = true, status = 200, body } = route(url, init);
@@ -126,7 +128,10 @@ describe("service ingest", () => {
         // empty text after trimming -> filtered out (returns null)
         { update_id: 105, message: { message_id: 6, chat: { id: 9 }, from: { first_name: "" }, text: "   " } },
         // chat record without id or username -> chatId null
-        { update_id: 107, message: { message_id: 7, chat: { title: "NoIdChat" }, from: { first_name: "Z" }, text: "no chat id" } },
+        {
+          update_id: 107,
+          message: { message_id: 7, chat: { title: "NoIdChat" }, from: { first_name: "Z" }, text: "no chat id" },
+        },
         // non-number update_id -> null
         { update_id: "nope", message: { chat: { id: 9 }, text: "x" } },
         // no message container -> null
@@ -253,20 +258,18 @@ const richContent = JSON.stringify({
   ],
   actionItems: ["do the thing", 5],
   openQuestions: ["what next?"],
-  notableLinks: [
-    "skip-string",
-    { label: "Docs", url: "https://example.com", context: "why" },
-    { label: "NoUrl" },
-  ],
+  notableLinks: ["skip-string", { label: "Docs", url: "https://example.com", context: "why" }, { label: "NoUrl" }],
   caveats: ["low confidence"],
 });
 
-function modelAndTelegramFetch(options: {
-  openai?: { ok?: boolean; status?: number; body?: unknown };
-  kimi?: { ok?: boolean; status?: number; body?: unknown };
-  send?: { ok?: boolean; status?: number; body?: unknown };
-  requests?: Array<{ url: string; init?: RequestInit }>;
-} = {}): FetchLike {
+function modelAndTelegramFetch(
+  options: {
+    openai?: { ok?: boolean; status?: number; body?: unknown };
+    kimi?: { ok?: boolean; status?: number; body?: unknown };
+    send?: { ok?: boolean; status?: number; body?: unknown };
+    requests?: Array<{ url: string; init?: RequestInit }>;
+  } = {},
+): FetchLike {
   const openai = options.openai ?? {
     ok: true,
     status: 200,
@@ -280,7 +283,8 @@ function modelAndTelegramFetch(options: {
   const send = options.send ?? { ok: true, status: 200, body: { ok: true, result: {} } };
   return routeFetch((url, init) => {
     options.requests?.push({ url, init });
-    if (url.includes("api.openai.com")) return { ok: openai.ok ?? true, status: openai.status ?? 200, body: openai.body };
+    if (url.includes("api.openai.com"))
+      return { ok: openai.ok ?? true, status: openai.status ?? 200, body: openai.body };
     if (url.includes("moonshot")) return { ok: kimi.ok ?? true, status: kimi.status ?? 200, body: kimi.body };
     return { ok: send.ok ?? true, status: send.status ?? 200, body: send.body };
   });

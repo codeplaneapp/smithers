@@ -2,12 +2,7 @@ import type { Effect } from "effect";
 import type { Schema } from "effect";
 import type { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 
-export type GitHubRequestMethod =
-  | "GET"
-  | "POST"
-  | "PATCH"
-  | "PUT"
-  | "DELETE";
+export type GitHubRequestMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 export type GitHubRequestOptions<A = unknown> = {
   /** Effect Schema to validate/decode the response body with. */

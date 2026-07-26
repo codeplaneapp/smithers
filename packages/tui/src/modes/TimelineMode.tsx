@@ -46,9 +46,7 @@ function TickStrip({
   const visible = events.slice(start, end);
   const selEvent = events[selectedIdx];
 
-  const controls = compact
-    ? "[j/k]scrub [L]live"
-    : "[j/k] scrub events  [L] back to live";
+  const controls = compact ? "[j/k]scrub [L]live" : "[j/k] scrub events  [L] back to live";
 
   return (
     <box width="100%" height={3} flexDirection="column">
@@ -57,9 +55,7 @@ function TickStrip({
           literal string "run.event"; the engine event name lives inside. */}
       <box width="100%" height={1} flexDirection="row">
         <text fg="#444444">{`  frame ${selectedIdx + 1}/${events.length}`}</text>
-        {selEvent ? (
-          <text fg="#555555">{`  seq:${selEvent.seq}  ${unwrapEvent(selEvent).name}`}</text>
-        ) : null}
+        {selEvent ? <text fg="#555555">{`  seq:${selEvent.seq}  ${unwrapEvent(selEvent).name}`}</text> : null}
       </box>
 
       {/* Tick marks row */}
@@ -87,17 +83,8 @@ function TickStrip({
 
 // ─── Node Snapshot Panel ─────────────────────────────────────────────────────
 
-function SnapshotPanel({
-  events,
-  upToSeq,
-}: {
-  events: GatewayEventFrame[];
-  upToSeq: number;
-}) {
-  const snapshots = useMemo(
-    () => extractNodeSnapshots(events, upToSeq),
-    [events, upToSeq],
-  );
+function SnapshotPanel({ events, upToSeq }: { events: GatewayEventFrame[]; upToSeq: number }) {
+  const snapshots = useMemo(() => extractNodeSnapshots(events, upToSeq), [events, upToSeq]);
 
   return (
     <scrollbox width="100%" height="100%" scrollY>
@@ -144,13 +131,7 @@ export function TimelineMode({ runId }: { runId: string }) {
  * surface the honest inspect-only affordance and point at the `smithers rewind`
  * CLI for the destructive frame operation instead.
  */
-export function TimelineView({
-  events,
-  streaming = false,
-}: {
-  events: GatewayEventFrame[];
-  streaming?: boolean;
-}) {
+export function TimelineView({ events, streaming = false }: { events: GatewayEventFrame[]; streaming?: boolean }) {
   const { width } = useTerminalDimensions();
   const compact = width < COMPACT_WIDTH;
   const overlayOpen = useOverlayOpen();
@@ -206,12 +187,7 @@ export function TimelineView({
       </box>
 
       {/* Tick strip */}
-      <TickStrip
-        events={events}
-        selectedIdx={safeIdx}
-        totalWidth={width}
-        compact={compact}
-      />
+      <TickStrip events={events} selectedIdx={safeIdx} totalWidth={width} compact={compact} />
 
       {/* Divider */}
       <box width="100%" height={1}>

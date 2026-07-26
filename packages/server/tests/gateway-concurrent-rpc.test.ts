@@ -14,10 +14,7 @@ import { Gateway } from "../src/gateway.js";
 import { sleep } from "../../smithers/tests/helpers.js";
 
 function makeDbPath(name: string) {
-  return join(
-    tmpdir(),
-    `smithers-concurrent-rpc-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
-  );
+  return join(tmpdir(), `smithers-concurrent-rpc-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
 function createConnectionContext() {
@@ -87,10 +84,7 @@ describe("concurrent gateway RPC on the same resource", () => {
     const dbPath = makeDbPath("parallel-getNodeOutput");
     dbPaths.push(dbPath);
 
-    const api = createSmithers(
-      { result: z.object({ value: z.number() }) },
-      { dbPath },
-    );
+    const api = createSmithers({ result: z.object({ value: z.number() }) }, { dbPath });
     const workflow = api.smithers((ctx) =>
       React.createElement(
         api.Workflow,
@@ -140,10 +134,7 @@ describe("concurrent gateway RPC on the same resource", () => {
     const dbPath = makeDbPath("interleaved-jump");
     dbPaths.push(dbPath);
 
-    const api = createSmithers(
-      { result: z.object({ value: z.number() }) },
-      { dbPath },
-    );
+    const api = createSmithers({ result: z.object({ value: z.number() }) }, { dbPath });
     const workflow = api.smithers((ctx) =>
       React.createElement(
         api.Workflow,

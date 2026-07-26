@@ -4,13 +4,13 @@ import { createDaytonaSandboxProvider } from "../src/createDaytonaSandboxProvide
 import { createMockDaytonaSandboxEnvironment } from "../src/createMockDaytonaSandboxEnvironment.js";
 
 createSandboxProviderContractSuite({
-	name: "daytona sandbox provider",
-	expectedProviderId: DAYTONA_SANDBOX_PROVIDER_ID,
-	createProvider: (handler, providerOptions = {}) => {
-		const { onDestroy, ...rest } = providerOptions;
-		return createDaytonaSandboxProvider({
-			client: createMockDaytonaSandboxEnvironment(handler, { onDestroy }),
-			...rest,
-		});
-	},
+  name: "daytona sandbox provider",
+  expectedProviderId: DAYTONA_SANDBOX_PROVIDER_ID,
+  createProvider: (handler, providerOptions = {}) => {
+    const { onDestroy, ...rest } = providerOptions;
+    return createDaytonaSandboxProvider({
+      client: createMockDaytonaSandboxEnvironment(handler, { onDestroy }),
+      ...rest,
+    });
+  },
 });

@@ -23,9 +23,7 @@ function makeAgentDescriptor(overrides = {}) {
 
 function makeGraph(descriptor) {
   return {
-    xml: el("smithers:workflow", {}, [
-      el("smithers:task", { id: descriptor.nodeId }),
-    ]),
+    xml: el("smithers:workflow", {}, [el("smithers:task", { id: descriptor.nodeId })]),
     tasks: [descriptor],
     mountedTaskIds: new Set([`${descriptor.nodeId}::${descriptor.iteration}`]),
   };
@@ -34,13 +32,9 @@ function makeGraph(descriptor) {
 // Graph that mounts a different task so the original is unmounted (pruned on hot reload).
 function makeOtherGraph(otherDescriptor) {
   return {
-    xml: el("smithers:workflow", {}, [
-      el("smithers:task", { id: otherDescriptor.nodeId }),
-    ]),
+    xml: el("smithers:workflow", {}, [el("smithers:task", { id: otherDescriptor.nodeId })]),
     tasks: [otherDescriptor],
-    mountedTaskIds: new Set([
-      `${otherDescriptor.nodeId}::${otherDescriptor.iteration}`,
-    ]),
+    mountedTaskIds: new Set([`${otherDescriptor.nodeId}::${otherDescriptor.iteration}`]),
   };
 }
 
@@ -60,9 +54,7 @@ describe("makeWorkflowSession prune clears approvals/retryCounts on unmount", ()
     expect(initial.reason).toEqual({ _tag: "Approval", nodeId: "approve-me" });
 
     // Operator approves -> approvals set now contains the key.
-    Effect.runSync(
-      session.approvalResolved("approve-me", { approved: true }),
-    );
+    Effect.runSync(session.approvalResolved("approve-me", { approved: true }));
 
     // Hot reload to a graph where "approve-me" is unmounted -> it gets pruned.
     const other = makeAgentDescriptor({
@@ -73,9 +65,7 @@ describe("makeWorkflowSession prune clears approvals/retryCounts on unmount", ()
     Effect.runSync(session.hotReloaded(makeOtherGraph(other)));
 
     // Finish the unrelated task so the next reload settles cleanly.
-    Effect.runSync(
-      session.taskCompleted({ nodeId: "other", iteration: 0, output: {} }),
-    );
+    Effect.runSync(session.taskCompleted({ nodeId: "other", iteration: 0, output: {} }));
 
     // Re-mount "approve-me" at the same stateKey. Because the prior approval
     // was pruned, the HITL gate MUST fire again instead of auto-running.
@@ -114,9 +104,7 @@ describe("makeWorkflowSession prune clears approvals/retryCounts on unmount", ()
       retryPolicy: undefined,
     });
     Effect.runSync(session.hotReloaded(makeOtherGraph(other)));
-    Effect.runSync(
-      session.taskCompleted({ nodeId: "other", iteration: 0, output: {} }),
-    );
+    Effect.runSync(session.taskCompleted({ nodeId: "other", iteration: 0, output: {} }));
 
     // Re-mount "flaky" at the same stateKey. With retryCounts pruned, it must
     // get its full budget again: the FIRST failure should retry, not fail.

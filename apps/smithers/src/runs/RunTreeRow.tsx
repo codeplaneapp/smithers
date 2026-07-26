@@ -39,9 +39,7 @@ export function RunTreeRow({
       </span>
       <span className="tree-name">{node.name}</span>
       <span className={`tree-tag tone-${statusTone(node.status)}`}>
-        {node.meta && node.meta !== statusLabel(node.status)
-          ? node.meta
-          : statusLabel(node.status)}
+        {node.meta && node.meta !== statusLabel(node.status) ? node.meta : statusLabel(node.status)}
       </span>
     </button>
   );

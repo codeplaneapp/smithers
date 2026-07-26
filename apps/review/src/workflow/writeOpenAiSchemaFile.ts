@@ -8,7 +8,16 @@ import { z } from "zod/v4";
 // toJSONSchema emits these for `.default()`, integer bounds, and the meta
 // header; leaving them in makes codex discard the schema and fall back to a
 // free-form (prose) final message.
-const STRIP_KEYS = ["default", "$schema", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "format"];
+const STRIP_KEYS = [
+  "default",
+  "$schema",
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "multipleOf",
+  "format",
+];
 
 /**
  * Make every object node strict the way OpenAI / Codex structured output

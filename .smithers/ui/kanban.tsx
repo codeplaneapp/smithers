@@ -49,7 +49,7 @@ const laneLabels: Record<BoardLane, string> = {
 const laneOrder: BoardLane[] = ["pending", "in-progress", "completed"];
 
 const styles = [
-  ":root { --bg: #0c0c0e; --panel: #151518; --card: #1c1c1f; --text: #eeeeee; --muted: #8a8a8e; --border: #262629; --primary: #5e6ad2; --success: #4ade80; --error: #f87171; --warning: #fbbf24; color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif; }",
+  ':root { --bg: #0c0c0e; --panel: #151518; --card: #1c1c1f; --text: #eeeeee; --muted: #8a8a8e; --border: #262629; --primary: #5e6ad2; --success: #4ade80; --error: #f87171; --warning: #fbbf24; color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }',
   "* { box-sizing: border-box; -webkit-font-smoothing: antialiased; }",
   "body { margin: 0; background: var(--bg); color: var(--text); font-size: 13px; line-height: 1.4; }",
   "button, input { font: inherit; transition: all 0.1s ease; }",
@@ -130,7 +130,11 @@ function shortRunId(runId: string | undefined) {
 function formatTime(ms: number | undefined) {
   if (!ms) return "--";
   const d = new Date(ms);
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + " " + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return (
+    d.toLocaleDateString([], { month: "short", day: "numeric" }) +
+    " " +
+    d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  );
 }
 
 function titleFromSlug(slug: string) {
@@ -242,8 +246,9 @@ function App() {
   const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
   const ticketsOutput = useGatewayNodeOutput({ runId: activeRunId, nodeId: "tickets", iteration: 0 });
   const streamEvents = useMemo(() => {
-    return collectStreamEvents(stream.events as Array<Record<string, unknown>>)
-      .filter((frame) => !activeRunId || asString((isRecord(frame.payload) ? frame.payload : {}).runId) === activeRunId);
+    return collectStreamEvents(stream.events as Array<Record<string, unknown>>).filter(
+      (frame) => !activeRunId || asString((isRecord(frame.payload) ? frame.payload : {}).runId) === activeRunId,
+    );
   }, [activeRunId, stream.events]);
   const discoveredTickets = useMemo(() => extractDiscoveredTickets(ticketsOutput.data), [ticketsOutput.data]);
   const tickets = useMemo(() => deriveTickets(discoveredTickets, streamEvents), [discoveredTickets, streamEvents]);
@@ -271,7 +276,11 @@ function App() {
       setSelectedRunId(run.runId);
       notify("Launched " + shortRunId(run.runId));
       await refresh();
-    } catch (e) { notify(String(e)); } finally { setBusy(false); }
+    } catch (e) {
+      notify(String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function cancelRun() {
@@ -281,19 +290,29 @@ function App() {
       await actions.cancelRun({ runId: activeRunId });
       notify("Cancelled run");
       await refresh();
-    } catch (e) { notify(String(e)); } finally { setBusy(false); }
+    } catch (e) {
+      notify(String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function decide(approval: (typeof pendingApprovals)[number], ok: boolean) {
     setBusy(true);
     try {
       await actions.submitApproval({
-        runId: approval.runId, nodeId: approval.nodeId, iteration: approval.iteration,
-        decision: { approved: ok, note: (ok ? 'Approved' : 'Denied') + ' via UI' }
+        runId: approval.runId,
+        nodeId: approval.nodeId,
+        iteration: approval.iteration,
+        decision: { approved: ok, note: (ok ? "Approved" : "Denied") + " via UI" },
       });
-      notify(ok ? 'Approved' : 'Denied');
+      notify(ok ? "Approved" : "Denied");
       await refresh();
-    } catch (e) { notify(String(e)); } finally { setBusy(false); }
+    } catch (e) {
+      notify(String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   const hasError = !!(stream.error || ticketsOutput.error);
@@ -306,10 +325,18 @@ function App() {
         <div className="title-group">
           <h1>Kanban</h1>
           <div className="run-indicator">
-            <div className="status-circle" style={{ border: '1.5px solid var(--primary)', background: activeRun?.status === 'running' ? 'var(--primary)' : 'transparent' }}></div>
-            <span>{activeRunId ? shortRunId(activeRunId) : 'No Run'}</span>
-            <span style={{ color: activeRun?.status === 'running' ? 'var(--warning)' : 'var(--muted)', fontWeight: 600 }}>
-              {activeRun?.status ?? 'Idle'}
+            <div
+              className="status-circle"
+              style={{
+                border: "1.5px solid var(--primary)",
+                background: activeRun?.status === "running" ? "var(--primary)" : "transparent",
+              }}
+            ></div>
+            <span>{activeRunId ? shortRunId(activeRunId) : "No Run"}</span>
+            <span
+              style={{ color: activeRun?.status === "running" ? "var(--warning)" : "var(--muted)", fontWeight: 600 }}
+            >
+              {activeRun?.status ?? "Idle"}
             </span>
           </div>
         </div>
@@ -317,15 +344,24 @@ function App() {
           <div className="field">
             <label>Limit</label>
             <input
-              type="number" min={1} max={10} value={maxConcurrency}
+              type="number"
+              min={1}
+              max={10}
+              value={maxConcurrency}
               onChange={(e) => setMaxConcurrency(Math.max(1, Number(e.currentTarget.value) || 1))}
             />
           </div>
-          <button className="button" onClick={() => void refresh()} disabled={busy}>Refresh</button>
+          <button className="button" onClick={() => void refresh()} disabled={busy}>
+            Refresh
+          </button>
           {activeRun?.status === "running" && (
-            <button className="button danger" onClick={() => void cancelRun()} disabled={busy}>Cancel</button>
+            <button className="button danger" onClick={() => void cancelRun()} disabled={busy}>
+              Cancel
+            </button>
           )}
-          <button className="button primary" onClick={() => void launch()} disabled={busy}>Launch Run</button>
+          <button className="button primary" onClick={() => void launch()} disabled={busy}>
+            Launch Run
+          </button>
         </div>
       </header>
 
@@ -350,7 +386,7 @@ function App() {
                         <div className="dot"></div>
                         <span>{t.currentStep ?? t.state}</span>
                       </div>
-                      <div className={"pill " + (t.state === 'in-progress' ? 'active' : '')}>{t.events} Events</div>
+                      <div className={"pill " + (t.state === "in-progress" ? "active" : "")}>{t.events} Events</div>
                     </div>
                   </article>
                 ))}
@@ -362,11 +398,14 @@ function App() {
 
         <aside className="sidebar">
           <section className="side-block">
-            <div className="side-head"><h2>Recent Runs</h2></div>
+            <div className="side-head">
+              <h2>Recent Runs</h2>
+            </div>
             <div className="side-list">
               {kanbanRuns.map((r) => (
                 <button
-                  key={r.runId} className={"run-btn " + (r.runId === activeRunId ? 'selected' : '')}
+                  key={r.runId}
+                  className={"run-btn " + (r.runId === activeRunId ? "selected" : "")}
                   onClick={() => setSelectedRunId(r.runId)}
                 >
                   <div className="run-info">
@@ -379,14 +418,20 @@ function App() {
             </div>
           </section>
           <section className="side-block" style={{ flex: 1.5 }}>
-            <div className="side-head"><h2>Approvals</h2></div>
+            <div className="side-head">
+              <h2>Approvals</h2>
+            </div>
             <div className="side-list">
               {pendingApprovals.map((a) => (
                 <div className="approval-box" key={a.runId + a.nodeId + a.iteration}>
                   <div className="approval-txt">{a.requestTitle ?? a.nodeId}</div>
                   <div className="approval-grid">
-                    <button className="button" onClick={() => void decide(a, false)} disabled={busy}>Deny</button>
-                    <button className="button primary" onClick={() => void decide(a, true)} disabled={busy}>Approve</button>
+                    <button className="button" onClick={() => void decide(a, false)} disabled={busy}>
+                      Deny
+                    </button>
+                    <button className="button primary" onClick={() => void decide(a, true)} disabled={busy}>
+                      Approve
+                    </button>
                   </div>
                 </div>
               ))}
@@ -398,7 +443,9 @@ function App() {
 
       {showMsg && (
         <div className="toast">
-          <div className={hasError ? "error-msg" : ""}>{stream.error?.message ?? ticketsOutput.error?.message ?? message}</div>
+          <div className={hasError ? "error-msg" : ""}>
+            {stream.error?.message ?? ticketsOutput.error?.message ?? message}
+          </div>
         </div>
       )}
     </main>

@@ -16,16 +16,13 @@ export const WORKTREE_OWNER_FILE = "smithers-owner.json";
  * @returns {Promise<string | null>}
  */
 async function resolveLinkedWorktreeAdminDir(worktreePath) {
-    const res = await runGit(worktreePath, ["rev-parse", "--absolute-git-dir"]);
-    if (res.code !== 0)
-        return null;
-    const adminDir = res.stdout.trim();
-    if (!adminDir)
-        return null;
-    const resolved = resolve(adminDir);
-    if (basename(dirname(resolved)) !== "worktrees")
-        return null;
-    return resolved;
+  const res = await runGit(worktreePath, ["rev-parse", "--absolute-git-dir"]);
+  if (res.code !== 0) return null;
+  const adminDir = res.stdout.trim();
+  if (!adminDir) return null;
+  const resolved = resolve(adminDir);
+  if (basename(dirname(resolved)) !== "worktrees") return null;
+  return resolved;
 }
 
 /**
@@ -38,24 +35,22 @@ async function resolveLinkedWorktreeAdminDir(worktreePath) {
  * @returns {Promise<boolean>}
  */
 export async function writeWorktreeOwner(worktreePath, owner, nowMs = Date.now()) {
-    try {
-        const adminDir = await resolveLinkedWorktreeAdminDir(worktreePath);
-        if (!adminDir)
-            return false;
-        const ownerPath = join(adminDir, WORKTREE_OWNER_FILE);
-        const previous = readWorktreeOwnerFile(ownerPath);
-        /** @type {WorktreeOwner} */
-        const next = {
-            ...owner,
-            createdAtMs: previous?.createdAtMs ?? nowMs,
-            updatedAtMs: nowMs,
-        };
-        writeFileSync(ownerPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
-        return true;
-    }
-    catch {
-        return false;
-    }
+  try {
+    const adminDir = await resolveLinkedWorktreeAdminDir(worktreePath);
+    if (!adminDir) return false;
+    const ownerPath = join(adminDir, WORKTREE_OWNER_FILE);
+    const previous = readWorktreeOwnerFile(ownerPath);
+    /** @type {WorktreeOwner} */
+    const next = {
+      ...owner,
+      createdAtMs: previous?.createdAtMs ?? nowMs,
+      updatedAtMs: nowMs,
+    };
+    writeFileSync(ownerPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -63,15 +58,12 @@ export async function writeWorktreeOwner(worktreePath, owner, nowMs = Date.now()
  * @returns {WorktreeOwner | null}
  */
 export function readWorktreeOwnerFile(ownerPath) {
-    if (!existsSync(ownerPath))
-        return null;
-    try {
-        const parsed = JSON.parse(readFileSync(ownerPath, "utf8"));
-        if (!parsed || typeof parsed.runId !== "string" || !parsed.runId)
-            return null;
-        return /** @type {WorktreeOwner} */ (parsed);
-    }
-    catch {
-        return null;
-    }
+  if (!existsSync(ownerPath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(ownerPath, "utf8"));
+    if (!parsed || typeof parsed.runId !== "string" || !parsed.runId) return null;
+    return /** @type {WorktreeOwner} */ (parsed);
+  } catch {
+    return null;
+  }
 }

@@ -98,7 +98,9 @@ function normalizeSandboxTokens(tokens: readonly string[]): WebPreviewSandboxTok
     const candidate = raw.trim().toLowerCase();
     if (!KNOWN_SANDBOX_TOKENS.has(candidate as WebPreviewSandboxToken)) {
       if (candidate !== "") {
-        console.warn(`WebPreviewContent: rejecting malformed sandbox token entry ${JSON.stringify(raw)}; only exact known tokens are granted.`);
+        console.warn(
+          `WebPreviewContent: rejecting malformed sandbox token entry ${JSON.stringify(raw)}; only exact known tokens are granted.`,
+        );
       }
       continue;
     }
@@ -149,7 +151,10 @@ function useRovingTabIndex(ref: RefObject<HTMLElement | null>) {
 
   function onKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    if (event.target instanceof Element && event.target.closest('input, textarea, [contenteditable]:not([contenteditable="false"])')) {
+    if (
+      event.target instanceof Element &&
+      event.target.closest('input, textarea, [contenteditable]:not([contenteditable="false"])')
+    ) {
       return;
     }
     const root = ref.current;
@@ -159,7 +164,8 @@ function useRovingTabIndex(ref: RefObject<HTMLElement | null>) {
     const current = items.indexOf(document.activeElement as HTMLElement);
     if (current === -1) return;
     event.preventDefault();
-    const next = event.key === "ArrowRight" ? (current + 1) % items.length : (current - 1 + items.length) % items.length;
+    const next =
+      event.key === "ArrowRight" ? (current + 1) % items.length : (current - 1 + items.length) % items.length;
     items.forEach((el, index) => {
       el.tabIndex = index === next ? 0 : -1;
     });

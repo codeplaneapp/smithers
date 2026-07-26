@@ -33,40 +33,56 @@ import { evaluateAspectBudget } from "./evaluateAspectBudget.js";
  * @returns {Promise<"run" | "skip">}
  */
 export async function enforceDispatchBudget(args) {
-    const { desc, snapshot, adapter, runId, eventBus, budgetSkippedKeys, stateKey, nowMs, logWarning, } = args;
-    if (budgetSkippedKeys.has(stateKey)) {
-        return "skip";
-    }
-    const breach = evaluateAspectBudget(desc.aspects, snapshot);
-    if (!breach) {
-        return "run";
-    }
-    const detail = { kind: breach.kind, limit: breach.limit, current: breach.current };
-    if (breach.onExceeded === "warn") {
-        logWarning?.("aspect budget exceeded; continuing (onExceeded: warn)", { runId, nodeId: desc.nodeId, iteration: desc.iteration, ...detail }, "engine:aspects");
-        return "run";
-    }
-    if (breach.onExceeded === "skip-remaining") {
-        budgetSkippedKeys.add(stateKey);
-        await Effect.runPromise(adapter.insertNode({
-            runId,
-            nodeId: desc.nodeId,
-            iteration: desc.iteration,
-            state: "skipped",
-            lastAttempt: null,
-            updatedAtMs: nowMs(),
-            outputTable: desc.outputTableName,
-            label: desc.label ?? null,
-        }));
-        await Effect.runPromise(eventBus.emitEventWithPersist({
-            type: "NodeSkipped",
-            runId,
-            nodeId: desc.nodeId,
-            iteration: desc.iteration,
-            timestampMs: nowMs(),
-        }));
-        logWarning?.("aspect budget exceeded; skipping task (onExceeded: skip-remaining)", { runId, nodeId: desc.nodeId, iteration: desc.iteration, ...detail }, "engine:aspects");
-        return "skip";
-    }
-    throw new SmithersError("ASPECT_BUDGET_EXCEEDED", `Aspects ${breach.kind} budget exceeded for task "${desc.nodeId}": ${breach.current} >= ${breach.limit}`, detail);
+  const { desc, snapshot, adapter, runId, eventBus, budgetSkippedKeys, stateKey, nowMs, logWarning } = args;
+  if (budgetSkippedKeys.has(stateKey)) {
+    return "skip";
+  }
+  const breach = evaluateAspectBudget(desc.aspects, snapshot);
+  if (!breach) {
+    return "run";
+  }
+  const detail = { kind: breach.kind, limit: breach.limit, current: breach.current };
+  if (breach.onExceeded === "warn") {
+    logWarning?.(
+      "aspect budget exceeded; continuing (onExceeded: warn)",
+      { runId, nodeId: desc.nodeId, iteration: desc.iteration, ...detail },
+      "engine:aspects",
+    );
+    return "run";
+  }
+  if (breach.onExceeded === "skip-remaining") {
+    budgetSkippedKeys.add(stateKey);
+    await Effect.runPromise(
+      adapter.insertNode({
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        state: "skipped",
+        lastAttempt: null,
+        updatedAtMs: nowMs(),
+        outputTable: desc.outputTableName,
+        label: desc.label ?? null,
+      }),
+    );
+    await Effect.runPromise(
+      eventBus.emitEventWithPersist({
+        type: "NodeSkipped",
+        runId,
+        nodeId: desc.nodeId,
+        iteration: desc.iteration,
+        timestampMs: nowMs(),
+      }),
+    );
+    logWarning?.(
+      "aspect budget exceeded; skipping task (onExceeded: skip-remaining)",
+      { runId, nodeId: desc.nodeId, iteration: desc.iteration, ...detail },
+      "engine:aspects",
+    );
+    return "skip";
+  }
+  throw new SmithersError(
+    "ASPECT_BUDGET_EXCEEDED",
+    `Aspects ${breach.kind} budget exceeded for task "${desc.nodeId}": ${breach.current} >= ${breach.limit}`,
+    detail,
+  );
 }

@@ -22,28 +22,27 @@ import { createBudgetTracker } from "./createBudgetTracker.js";
  * @returns {Promise<BudgetTracker>}
  */
 export async function setupBudgetTracker(opts) {
-    const { adapter, runId, eventBus, runStartMs } = opts;
-    const tracker = createBudgetTracker({ runStartMs });
-    // Seed from persisted usage so resumed runs keep their accumulated spend.
-    try {
-        const rows = await adapter.listEventsByType(runId, "TokenUsageReported");
-        for (const row of rows ?? []) {
-            const payload = parseUsageRow(row);
-            if (payload) {
-                tracker.recordUsage(payload);
-            }
-        }
+  const { adapter, runId, eventBus, runStartMs } = opts;
+  const tracker = createBudgetTracker({ runStartMs });
+  // Seed from persisted usage so resumed runs keep their accumulated spend.
+  try {
+    const rows = await adapter.listEventsByType(runId, "TokenUsageReported");
+    for (const row of rows ?? []) {
+      const payload = parseUsageRow(row);
+      if (payload) {
+        tracker.recordUsage(payload);
+      }
     }
-    catch {
-        // Best-effort seeding: a missing/garbled history must not block the run.
-        // Budgets simply start from the live usage in that case.
+  } catch {
+    // Best-effort seeding: a missing/garbled history must not block the run.
+    // Budgets simply start from the live usage in that case.
+  }
+  eventBus.on("event", (event) => {
+    if (event && event.type === "TokenUsageReported") {
+      tracker.recordUsage(event);
     }
-    eventBus.on("event", (event) => {
-        if (event && event.type === "TokenUsageReported") {
-            tracker.recordUsage(event);
-        }
-    });
-    return tracker;
+  });
+  return tracker;
 }
 
 /**
@@ -51,18 +50,17 @@ export async function setupBudgetTracker(opts) {
  * @returns {import("./createBudgetTracker.js").UsageLike | null}
  */
 function parseUsageRow(row) {
-    const json = row?.payloadJson;
-    if (typeof json !== "string") {
-        return null;
+  const json = row?.payloadJson;
+  if (typeof json !== "string") {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(json);
+    if (!parsed || typeof parsed !== "object") {
+      return null;
     }
-    try {
-        const parsed = JSON.parse(json);
-        if (!parsed || typeof parsed !== "object") {
-            return null;
-        }
-        return parsed;
-    }
-    catch {
-        return null;
-    }
+    return parsed;
+  } catch {
+    return null;
+  }
 }

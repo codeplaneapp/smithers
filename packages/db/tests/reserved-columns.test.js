@@ -13,10 +13,14 @@ describe("assertNoReservedColumns", () => {
   });
 
   test("input schema rejects only runId, not nodeId/iteration", () => {
-    expect(() => assertNoReservedColumns(z.object({ runId: z.string() }), "input", { isInput: true })).toThrow(/reserved field name/);
+    expect(() => assertNoReservedColumns(z.object({ runId: z.string() }), "input", { isInput: true })).toThrow(
+      /reserved field name/,
+    );
     // nodeId / iteration are NOT reserved on input tables (only run_id is the PK).
     expect(() => assertNoReservedColumns(z.object({ nodeId: z.string() }), "input", { isInput: true })).not.toThrow();
-    expect(() => assertNoReservedColumns(z.object({ iteration: z.number() }), "input", { isInput: true })).not.toThrow();
+    expect(() =>
+      assertNoReservedColumns(z.object({ iteration: z.number() }), "input", { isInput: true }),
+    ).not.toThrow();
   });
 
   test("non-reserved fields are allowed", () => {

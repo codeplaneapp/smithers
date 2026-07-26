@@ -50,7 +50,8 @@ function resolveQuizMode(input: string | undefined, sessionQuiz: unknown): "off"
 /** Reviewer-quiz status line, e.g. " — 🧠 reviewer quiz: 4 questions (high impact)". */
 function quizNote(summary: ReviewSummary | null): string {
   if (typeof summary?.questions !== "number" || summary.questions <= 0) return "";
-  const impact = typeof summary.impact === "string" && summary.impact.trim() ? ` (${summary.impact.trim()} impact)` : "";
+  const impact =
+    typeof summary.impact === "string" && summary.impact.trim() ? ` (${summary.impact.trim()} impact)` : "";
   return ` — 🧠 reviewer quiz: ${summary.questions} question${summary.questions === 1 ? "" : "s"}${impact}`;
 }
 
@@ -124,19 +125,11 @@ async function main(): Promise<void> {
     // the environment. Fail closed — if gh cannot tell us, do not review.
     let isCrossRepository: boolean;
     try {
-      const raw = await runGh(workspace, [
-        "pr",
-        "view",
-        String(decision.prNumber),
-        "--json",
-        "isCrossRepository",
-      ]);
+      const raw = await runGh(workspace, ["pr", "view", String(decision.prNumber), "--json", "isCrossRepository"]);
       isCrossRepository = (JSON.parse(raw) as { isCrossRepository?: boolean }).isCrossRepository === true;
     } catch (error) {
       await setStatus(`❌ smithers review failed: could not resolve the PR's head repository${runLink}`);
-      throw new Error(
-        `could not determine whether PR #${decision.prNumber} is a fork PR: ${(error as Error).message}`,
-      );
+      throw new Error(`could not determine whether PR #${decision.prNumber} is a fork PR: ${(error as Error).message}`);
     }
     if (isCrossRepository) {
       console.log("::notice::smithers review skipped: fork pull requests are not reviewed");
@@ -153,14 +146,14 @@ async function main(): Promise<void> {
     oidcToken = await fetchOidcToken();
     session = await createSession({ serviceUrl, oidcToken, pr: decision.prNumber });
   } catch (error) {
-    await setStatus(`❌ smithers review failed before it could start: ${(error as Error).message.slice(0, 200)}${runLink}`);
+    await setStatus(
+      `❌ smithers review failed before it could start: ${(error as Error).message.slice(0, 200)}${runLink}`,
+    );
     throw error;
   }
 
   if (session.status === "quota-exhausted") {
-    console.log(
-      `::notice::smithers review skipped: this repo's monthly PR quota is spent (${session.message})`,
-    );
+    console.log(`::notice::smithers review skipped: this repo's monthly PR quota is spent (${session.message})`);
     await setStatus(`⏭️ smithers review skipped: this repo's monthly PR quota is spent${runLink}`);
     return;
   }
@@ -182,7 +175,9 @@ async function main(): Promise<void> {
     console.log(
       `::notice::smithers review skipped: this repo is in comment mode — comment "@smithers review" on the PR to trigger a review.`,
     );
-    await setStatus('⏭️ smithers review skipped: this repo is in comment mode — comment "@smithers review" to trigger a review');
+    await setStatus(
+      '⏭️ smithers review skipped: this repo is in comment mode — comment "@smithers review" to trigger a review',
+    );
     return;
   }
 
@@ -207,13 +202,12 @@ async function main(): Promise<void> {
   if (inference.mode === "codex-subscription") {
     console.log("::notice::smithers review: inference runs on this repo's own ChatGPT (Codex) subscription.");
   } else if (inference.mode === "claude-subscription") {
-    console.log("::notice::smithers review: inference runs on this repo's own Claude subscription (CLAUDE_CODE_OAUTH_TOKEN is set).");
+    console.log(
+      "::notice::smithers review: inference runs on this repo's own Claude subscription (CLAUDE_CODE_OAUTH_TOKEN is set).",
+    );
   }
 
-  const summaryPath = join(
-    process.env.RUNNER_TEMP?.trim() || tmpdir(),
-    `smithers-review-summary-${process.pid}.json`,
-  );
+  const summaryPath = join(process.env.RUNNER_TEMP?.trim() || tmpdir(), `smithers-review-summary-${process.pid}.json`);
   const exitCode = await runReview({
     smithersRoot,
     workspace,

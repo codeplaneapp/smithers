@@ -4,13 +4,13 @@ import { createMicrosandboxSandboxProvider } from "../src/createMicrosandboxSand
 import { createMockMicrosandboxEnvironment } from "./fixtures/createMockMicrosandboxEnvironment.js";
 
 createSandboxProviderContractSuite({
-	name: "Microsandbox SandboxProvider contract",
-	expectedProviderId: MICROSANDBOX_PROVIDER_ID,
-	createProvider(handler, providerOptions = {}) {
-		const { onDestroy, ...rest } = providerOptions;
-		return createMicrosandboxSandboxProvider({
-			sdk: createMockMicrosandboxEnvironment(handler, { onStop: onDestroy }),
-			...rest,
-		});
-	},
+  name: "Microsandbox SandboxProvider contract",
+  expectedProviderId: MICROSANDBOX_PROVIDER_ID,
+  createProvider(handler, providerOptions = {}) {
+    const { onDestroy, ...rest } = providerOptions;
+    return createMicrosandboxSandboxProvider({
+      sdk: createMockMicrosandboxEnvironment(handler, { onStop: onDestroy }),
+      ...rest,
+    });
+  },
 });

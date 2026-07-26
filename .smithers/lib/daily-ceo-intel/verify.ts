@@ -70,21 +70,29 @@ export function verifyIssue(
   const topStoryIds = issue.topStories.map((story) => story.srcId);
   if (new Set(topStoryIds).size !== topStoryIds.length) errors.push("Top stories contain duplicate SRC ids.");
   const briefIds = new Set(issue.briefs.map((brief) => brief.srcId));
-  for (const id of topStoryIds) if (briefIds.has(id)) errors.push(`SRC id ${id} appears in both top stories and briefs.`);
+  for (const id of topStoryIds)
+    if (briefIds.has(id)) errors.push(`SRC id ${id} appears in both top stories and briefs.`);
 
   if (!issue.headline.trim()) errors.push("Missing headline.");
   if (!issue.intro.trim()) errors.push("Missing intro.");
   if (!issue.coverageStatement.trim()) errors.push("Missing coverage statement.");
   if (!issue.quietDay && issue.topStories.length === 0) errors.push("No top stories on a non-quiet day.");
 
-  if (issue.topStories.length > config.maxTopStories) errors.push(`Too many top stories: ${issue.topStories.length} > ${config.maxTopStories}.`);
-  if (issue.recommendedActions.length > config.maxActions) errors.push(`Too many recommended actions: ${issue.recommendedActions.length} > ${config.maxActions}.`);
-  if (issue.lighterSide.length > config.lighterSideMax) errors.push(`Too many Lighter Side items: ${issue.lighterSide.length} > ${config.lighterSideMax}.`);
-  if (!issue.quietDay && issue.lighterSide.length < config.lighterSideMin) errors.push(`Too few Lighter Side items: ${issue.lighterSide.length} < ${config.lighterSideMin}.`);
+  if (issue.topStories.length > config.maxTopStories)
+    errors.push(`Too many top stories: ${issue.topStories.length} > ${config.maxTopStories}.`);
+  if (issue.recommendedActions.length > config.maxActions)
+    errors.push(`Too many recommended actions: ${issue.recommendedActions.length} > ${config.maxActions}.`);
+  if (issue.lighterSide.length > config.lighterSideMax)
+    errors.push(`Too many Lighter Side items: ${issue.lighterSide.length} > ${config.lighterSideMax}.`);
+  if (!issue.quietDay && issue.lighterSide.length < config.lighterSideMin)
+    errors.push(`Too few Lighter Side items: ${issue.lighterSide.length} < ${config.lighterSideMin}.`);
 
   const requiredSections = ["topStories", "recommendedActions", "briefs", "lighterSide"] as const;
   const orderedSet = new Set<string>(issue.sectionOrder);
-  if (issue.sectionOrder.length !== requiredSections.length || requiredSections.some((section) => !orderedSet.has(section))) {
+  if (
+    issue.sectionOrder.length !== requiredSections.length ||
+    requiredSections.some((section) => !orderedSet.has(section))
+  ) {
     errors.push("sectionOrder must list each of topStories, recommendedActions, briefs, lighterSide exactly once.");
   } else if (issue.sectionOrder[issue.sectionOrder.length - 1] !== "lighterSide") {
     errors.push("The Lighter Side section must always be last.");
@@ -105,6 +113,8 @@ export function verifyIssue(
     passed,
     errors,
     attempt,
-    summary: passed ? `Issue verified clean on attempt ${attempt}.` : `Issue failed verification on attempt ${attempt}: ${errors.length} error(s).`,
+    summary: passed
+      ? `Issue verified clean on attempt ${attempt}.`
+      : `Issue failed verification on attempt ${attempt}: ${errors.length} error(s).`,
   };
 }

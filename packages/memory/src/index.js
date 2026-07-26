@@ -28,7 +28,13 @@ export { parseNamespace } from "./parseNamespace.js";
 export { HindsightMemoryStore, createHindsightMemoryStore } from "./HindsightMemoryStore.js";
 export { LocalMemoryRuntime, createLocalMemoryRuntime } from "./LocalMemoryRuntime.js";
 // Schema (Drizzle tables)
-export { smithersMemoryFacts, smithersMemoryThreads, smithersMemoryMessages, smithersMemoryNotes, smithersMemoryNoteSupersessions, } from "./schema.js";
+export {
+  smithersMemoryFacts,
+  smithersMemoryThreads,
+  smithersMemoryMessages,
+  smithersMemoryNotes,
+  smithersMemoryNoteSupersessions,
+} from "./schema.js";
 // Store
 export { createMemoryStore } from "./store/createMemoryStore.js";
 // Processors

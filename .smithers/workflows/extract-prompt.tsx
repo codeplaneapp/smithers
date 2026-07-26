@@ -4,12 +4,7 @@
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../agents";
-import {
-  ExtractPrompt,
-  MarkdownPromptCache,
-  rctfPromptSchema,
-  stakesToThreshold,
-} from "../components/extract-prompt";
+import { ExtractPrompt, MarkdownPromptCache, rctfPromptSchema, stakesToThreshold } from "../components/extract-prompt";
 import type { RctfPromptOutput } from "../components/extract-prompt";
 
 const WORKFLOW_ID = "extract-prompt";

@@ -11,7 +11,12 @@ function joinErrors(errors: CloudflareApiResponse["errors"]): string {
   return (errors ?? []).map((error) => `${error.code}: ${error.message}`).join("; ") || "unknown error";
 }
 
-export async function putR2Object(creds: CloudflareCreds, key: string, body: string | Uint8Array<ArrayBuffer>, contentType: string): Promise<void> {
+export async function putR2Object(
+  creds: CloudflareCreds,
+  key: string,
+  body: string | Uint8Array<ArrayBuffer>,
+  contentType: string,
+): Promise<void> {
   const url = `https://api.cloudflare.com/client/v4/accounts/${creds.accountId}/r2/buckets/${creds.r2Bucket}/objects/${key}`;
   const response = await fetch(url, {
     method: "PUT",

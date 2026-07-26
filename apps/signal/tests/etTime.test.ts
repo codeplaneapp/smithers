@@ -44,8 +44,14 @@ describe("scheduler cron guards", () => {
   });
 
   test("one of the two daily primary-cron UTC firings is always 7am ET, year-round", () => {
-    const winterHours = [etClock(new Date("2026-01-01T11:00:00.000Z")).hour, etClock(new Date("2026-01-01T12:00:00.000Z")).hour];
-    const summerHours = [etClock(new Date("2026-07-01T11:00:00.000Z")).hour, etClock(new Date("2026-07-01T12:00:00.000Z")).hour];
+    const winterHours = [
+      etClock(new Date("2026-01-01T11:00:00.000Z")).hour,
+      etClock(new Date("2026-01-01T12:00:00.000Z")).hour,
+    ];
+    const summerHours = [
+      etClock(new Date("2026-07-01T11:00:00.000Z")).hour,
+      etClock(new Date("2026-07-01T12:00:00.000Z")).hour,
+    ];
     expect(winterHours.filter((h) => h === 7)).toHaveLength(1);
     expect(summerHours.filter((h) => h === 7)).toHaveLength(1);
   });

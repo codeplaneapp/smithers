@@ -10,11 +10,7 @@ import {
   resolveSkillSource,
   skillTargets,
 } from "./installCuratedSkill.js";
-import {
-  ensureCuratedSkillsFresh,
-  hashCuratedSkillFiles,
-  isRetiredCuratedSkill,
-} from "./refreshCuratedSkills.js";
+import { ensureCuratedSkillsFresh, hashCuratedSkillFiles, isRetiredCuratedSkill } from "./refreshCuratedSkills.js";
 
 /**
  * `skills add` owns EVERY Smithers-managed skill.
@@ -169,7 +165,9 @@ export function formatSkillsAddSummary({ status, commandSkillCount = null, opted
     return `✓ Synced ${commandPart}. Curated \`${status.skill}\` skill skipped (SMITHERS_NO_SKILL_REFRESH=1).`;
   }
   if (!status.source) {
-    lines.push(`⚠ Synced ${commandPart}. The curated \`${status.skill}\` skill could not be synced: bundled source not found (reinstall smithers-orchestrator).`);
+    lines.push(
+      `⚠ Synced ${commandPart}. The curated \`${status.skill}\` skill could not be synced: bundled source not found (reinstall smithers-orchestrator).`,
+    );
     return lines.join("\n");
   }
   const label = status.version ? `\`${status.skill}\` skill v${status.version}` : `\`${status.skill}\` skill`;
@@ -185,7 +183,9 @@ export function formatSkillsAddSummary({ status, commandSkillCount = null, opted
   );
   const unresolved = status.installs.filter((i) => i.state !== "current");
   if (unresolved.length > 0) {
-    lines.push(`⚠ Curated ${label} still not current for: ${unresolved.map((i) => `${i.agent} (${i.state})`).join(", ")}`);
+    lines.push(
+      `⚠ Curated ${label} still not current for: ${unresolved.map((i) => `${i.agent} (${i.state})`).join(", ")}`,
+    );
   }
   return lines.join("\n");
 }

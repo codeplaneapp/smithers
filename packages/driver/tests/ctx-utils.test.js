@@ -10,11 +10,7 @@ import { normalizeInputRow } from "../src/normalizeInputRow.js";
 import { SmithersCtx } from "../src/SmithersCtx.js";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { WorkflowDriver } from "../src/WorkflowDriver.js";
-import {
-  getTaskRuntime,
-  requireTaskRuntime,
-  withTaskRuntime,
-} from "../src/task-runtime.js";
+import { getTaskRuntime, requireTaskRuntime, withTaskRuntime } from "../src/task-runtime.js";
 import { withAbort } from "../src/withAbort.js";
 import { withLogicalIterationShortcuts } from "../src/withLogicalIterationShortcuts.js";
 
@@ -38,9 +34,7 @@ const numberSchema = {
 
 const runtime = {
   runPromise(value) {
-    return value && typeof value.pipe === "function"
-      ? Effect.runPromise(value)
-      : Promise.resolve(value);
+    return value && typeof value.pipe === "function" ? Effect.runPromise(value) : Promise.resolve(value);
   },
 };
 
@@ -81,8 +75,7 @@ function deferred() {
 
 async function waitFor(condition) {
   for (let i = 0; i < 20; i += 1) {
-    if (condition())
-      return;
+    if (condition()) return;
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 }
@@ -230,7 +223,10 @@ describe("normalizeInputRow", () => {
   });
 
   test("renderAndSubmit passes an already-typed SmithersError through unchanged", async () => {
-    const typed = new SmithersError("CONTEXT_OUTSIDE_WORKFLOW", "useCtx() must be called inside a <Workflow> created by createSmithers()");
+    const typed = new SmithersError(
+      "CONTEXT_OUTSIDE_WORKFLOW",
+      "useCtx() must be called inside a <Workflow> created by createSmithers()",
+    );
     const driver = makeDriver({
       renderer: {
         render: async () => {
@@ -259,40 +255,30 @@ describe("filterRowsByNodeId", () => {
   ];
 
   test("returns exact rows first", () => {
-    expect(filterRowsByNodeId(rows, "task", new Set()).map((r) => r.value))
-      .toEqual(["exact-0", "exact-1"]);
+    expect(filterRowsByNodeId(rows, "task", new Set()).map((r) => r.value)).toEqual(["exact-0", "exact-1"]);
   });
 
   test("exact rows win over scoped fallback", () => {
-    expect(
-      filterRowsByNodeId(rows, "task", new Set(["@@outer=1"])).map((r) => r.value),
-    ).toEqual(["exact-0", "exact-1"]);
+    expect(filterRowsByNodeId(rows, "task", new Set(["@@outer=1"])).map((r) => r.value)).toEqual([
+      "exact-0",
+      "exact-1",
+    ]);
   });
 
   test("falls back to scoped rows when exact rows are absent", () => {
     const scopedOnly = rows.filter((row) => row.nodeId !== "task");
-    expect(
-      filterRowsByNodeId(scopedOnly, "task", new Set(["@@outer=1"])).map(
-        (r) => r.value,
-      ),
-    ).toEqual(["scoped-1"]);
+    expect(filterRowsByNodeId(scopedOnly, "task", new Set(["@@outer=1"])).map((r) => r.value)).toEqual(["scoped-1"]);
   });
 
   test("uses the longest matching current scope first", () => {
     const scopedOnly = rows.filter((row) => row.nodeId !== "task");
     expect(
-      filterRowsByNodeId(
-        scopedOnly,
-        "task",
-        new Set(["@@outer=1", "@@outer=1,inner=2"]),
-      ).map((r) => r.value),
+      filterRowsByNodeId(scopedOnly, "task", new Set(["@@outer=1", "@@outer=1,inner=2"])).map((r) => r.value),
     ).toEqual(["scoped-deep"]);
   });
 
   test("scoped lookup id does not fallback to other scopes", () => {
-    expect(
-      filterRowsByNodeId(rows, "task@@outer=2", new Set(["@@outer=1"])),
-    ).toEqual([]);
+    expect(filterRowsByNodeId(rows, "task@@outer=2", new Set(["@@outer=1"]))).toEqual([]);
   });
 
   test("returns empty array for missing node id", () => {
@@ -310,13 +296,11 @@ describe("iteration scope helpers", () => {
   });
 
   test("buildCurrentScopes rewrites ancestor iterations to current values", () => {
-    expect(buildCurrentScopes({ outer: 3, "inner@@outer=1": 4 }))
-      .toEqual(new Set(["@@outer=3"]));
+    expect(buildCurrentScopes({ outer: 3, "inner@@outer=1": 4 })).toEqual(new Set(["@@outer=3"]));
   });
 
   test("buildCurrentScopes preserves unknown ancestor scope parts", () => {
-    expect(buildCurrentScopes({ "inner@@outer=1": 4 }))
-      .toEqual(new Set(["@@outer=1"]));
+    expect(buildCurrentScopes({ "inner@@outer=1": 4 })).toEqual(new Set(["@@outer=1"]));
   });
 
   test("buildCurrentScopes skips malformed scope parts", () => {
@@ -343,18 +327,23 @@ describe("iteration scope helpers", () => {
   });
 
   test("withLogicalIterationShortcuts maps current scoped id to logical id", () => {
-    expect(withLogicalIterationShortcuts({ outer: 2, "inner@@outer=2": 7 }))
-      .toEqual({ outer: 2, "inner@@outer=2": 7, inner: 7 });
+    expect(withLogicalIterationShortcuts({ outer: 2, "inner@@outer=2": 7 })).toEqual({
+      outer: 2,
+      "inner@@outer=2": 7,
+      inner: 7,
+    });
   });
 
   test("withLogicalIterationShortcuts leaves stale scoped id at logical zero", () => {
-    expect(withLogicalIterationShortcuts({ outer: 3, "inner@@outer=2": 7 }))
-      .toEqual({ outer: 3, "inner@@outer=2": 7, inner: 0 });
+    expect(withLogicalIterationShortcuts({ outer: 3, "inner@@outer=2": 7 })).toEqual({
+      outer: 3,
+      "inner@@outer=2": 7,
+      inner: 0,
+    });
   });
 
   test("withLogicalIterationShortcuts handles malformed scope as non-current", () => {
-    expect(withLogicalIterationShortcuts({ "inner@@outer": 7 }))
-      .toEqual({ "inner@@outer": 7, inner: 0 });
+    expect(withLogicalIterationShortcuts({ "inner@@outer": 7 })).toEqual({ "inner@@outer": 7, inner: 0 });
   });
 });
 
@@ -433,14 +422,12 @@ describe("SmithersCtx output access", () => {
 
   test("output throws clear SmithersError when row is missing", () => {
     const ctx = makeCtx({ outputs: { rows: [] } });
-    expect(() => ctx.output("rows", { nodeId: "missing", iteration: 0 }))
-      .toThrow(/Missing output/);
+    expect(() => ctx.output("rows", { nodeId: "missing", iteration: 0 })).toThrow(/Missing output/);
   });
 
   test("outputMaybe returns undefined when row is missing", () => {
     const ctx = makeCtx({ outputs: { rows: [] } });
-    expect(ctx.outputMaybe("rows", { nodeId: "missing", iteration: 0 }))
-      .toBeUndefined();
+    expect(ctx.outputMaybe("rows", { nodeId: "missing", iteration: 0 })).toBeUndefined();
   });
 
   test("resolveRow defaults missing key iteration to current iteration", () => {
@@ -508,16 +495,14 @@ describe("SmithersCtx output access", () => {
     const ctx = makeCtx({
       outputs: { rows: [{ nodeId: "a", iteration: 0, value: 1 }] },
     });
-    expect(ctx.output({ _: { name: "rows" } }, { nodeId: "a", iteration: 0 }).value)
-      .toBe(1);
+    expect(ctx.output({ _: { name: "rows" } }, { nodeId: "a", iteration: 0 }).value).toBe(1);
   });
 
   test("direct table name property resolves table name", () => {
     const ctx = makeCtx({
       outputs: { rows: [{ nodeId: "a", iteration: 0, value: 1 }] },
     });
-    expect(ctx.output({ name: "rows" }, { nodeId: "a", iteration: 0 }).value)
-      .toBe(1);
+    expect(ctx.output({ name: "rows" }, { nodeId: "a", iteration: 0 }).value).toBe(1);
   });
 
   test("scoped output fallback uses current loop scope", () => {
@@ -556,8 +541,7 @@ describe("SmithersCtx output access", () => {
     });
 
     expect(ctx.output("rows", { nodeId: "upstream" }).value).toBe("outside-loop");
-    expect(ctx.outputMaybe("rows", { nodeId: "upstream", iteration: 3 }))
-      .toBeUndefined();
+    expect(ctx.outputMaybe("rows", { nodeId: "upstream", iteration: 3 })).toBeUndefined();
   });
 
   test("recordDeferredDep stores valid deferred deps and ignores empty node ids", () => {
@@ -583,7 +567,7 @@ describe("SmithersCtx latestArray", () => {
 
   test("parses JSON arrays and filters invalid entries", () => {
     const ctx = makeCtx();
-    expect(ctx.latestArray("[1,\"x\",2]", numberSchema)).toEqual([1, 2]);
+    expect(ctx.latestArray('[1,"x",2]', numberSchema)).toEqual([1, 2]);
   });
 
   test("wraps JSON objects as a single candidate", () => {
@@ -625,8 +609,7 @@ describe("task runtime and async helpers", () => {
   test("withAbort rejects when signal is already aborted", async () => {
     const controller = new AbortController();
     controller.abort();
-    await expect(withAbort(new Promise(() => {}), controller.signal))
-      .rejects.toMatchObject({ name: "AbortError" });
+    await expect(withAbort(new Promise(() => {}), controller.signal)).rejects.toMatchObject({ name: "AbortError" });
   });
 
   test("withAbort rejects pending work on later abort", async () => {
@@ -650,18 +633,16 @@ describe("task runtime and async helpers", () => {
 describe("defaultTaskExecutor", () => {
   test("executes compute functions, static payloads, agents, and prompt fallback", async () => {
     const context = { signal: undefined };
-    await expect(defaultTaskExecutor({ computeFn: () => "computed" }, context))
-      .resolves.toBe("computed");
-    await expect(defaultTaskExecutor({ staticPayload: { ok: true } }, context))
-      .resolves.toEqual({ ok: true });
-    await expect(defaultTaskExecutor({ agent: [{ execute: () => "agent-execute" }] }, context))
-      .resolves.toBe("agent-execute");
-    await expect(defaultTaskExecutor({ agent: { run: () => "agent-run" } }, context))
-      .resolves.toBe("agent-run");
-    await expect(defaultTaskExecutor({ agent: { call: () => "agent-call" } }, context))
-      .resolves.toBe("agent-call");
-    await expect(defaultTaskExecutor({ agent: {}, prompt: "agentless prompt" }, context))
-      .resolves.toBe("agentless prompt");
+    await expect(defaultTaskExecutor({ computeFn: () => "computed" }, context)).resolves.toBe("computed");
+    await expect(defaultTaskExecutor({ staticPayload: { ok: true } }, context)).resolves.toEqual({ ok: true });
+    await expect(defaultTaskExecutor({ agent: [{ execute: () => "agent-execute" }] }, context)).resolves.toBe(
+      "agent-execute",
+    );
+    await expect(defaultTaskExecutor({ agent: { run: () => "agent-run" } }, context)).resolves.toBe("agent-run");
+    await expect(defaultTaskExecutor({ agent: { call: () => "agent-call" } }, context)).resolves.toBe("agent-call");
+    await expect(defaultTaskExecutor({ agent: {}, prompt: "agentless prompt" }, context)).resolves.toBe(
+      "agentless prompt",
+    );
     await expect(defaultTaskExecutor({ prompt: "hello" }, context)).resolves.toBe("hello");
     await expect(defaultTaskExecutor({}, context)).resolves.toBeNull();
   });
@@ -751,7 +732,7 @@ describe("WorkflowDriver", () => {
     const fast = deferred();
     const completed = [];
     const driver = makeDriver({
-      executeTask: (task) => task.nodeId === "slow" ? slow.promise : fast.promise,
+      executeTask: (task) => (task.nodeId === "slow" ? slow.promise : fast.promise),
       session: makeSession({
         taskCompleted: ({ nodeId, output }) => {
           completed.push({ nodeId, output });
@@ -820,9 +801,7 @@ describe("WorkflowDriver", () => {
   });
 
   test("reports ordinary failures containing abort through taskFailed", async () => {
-    const messageFailure = new Error(
-      "database transaction aborted due to serialization conflict",
-    );
+    const messageFailure = new Error("database transaction aborted due to serialization conflict");
     const namedFailure = new Error("provider request failed");
     namedFailure.name = "ProviderAbortFailure";
 
@@ -866,8 +845,10 @@ describe("WorkflowDriver", () => {
     abortErrorDriver.activeRunId = "run-abort-error";
     abortErrorDriver.activeOptions = { input: {} };
 
-    await expect(abortErrorDriver.executeTasks([{ nodeId: "abort", iteration: 0 }]))
-      .resolves.toEqual({ runId: "run-abort-error", status: "cancelled" });
+    await expect(abortErrorDriver.executeTasks([{ nodeId: "abort", iteration: 0 }])).resolves.toEqual({
+      runId: "run-abort-error",
+      status: "cancelled",
+    });
 
     const controller = new AbortController();
     const signalDriver = makeDriver({ executeTask: () => new Promise(() => {}) });
@@ -940,12 +921,18 @@ describe("WorkflowDriver", () => {
   test("handles wait statuses, custom wait handlers, retry decisions, and timer fallback", async () => {
     const approvalDriver = makeDriver();
     approvalDriver.activeRunId = "run-wait";
-    await expect(approvalDriver.handleWait({ _tag: "Approval" }))
-      .resolves.toEqual({ runId: "run-wait", status: "waiting-approval" });
-    await expect(approvalDriver.handleWait({ _tag: "Event" }))
-      .resolves.toEqual({ runId: "run-wait", status: "waiting-event" });
-    await expect(approvalDriver.handleWait({ _tag: "Timer", resumeAtMs: Date.now() }))
-      .resolves.toEqual({ runId: "run-wait", status: "waiting-timer" });
+    await expect(approvalDriver.handleWait({ _tag: "Approval" })).resolves.toEqual({
+      runId: "run-wait",
+      status: "waiting-approval",
+    });
+    await expect(approvalDriver.handleWait({ _tag: "Event" })).resolves.toEqual({
+      runId: "run-wait",
+      status: "waiting-event",
+    });
+    await expect(approvalDriver.handleWait({ _tag: "Timer", resumeAtMs: Date.now() })).resolves.toEqual({
+      runId: "run-wait",
+      status: "waiting-timer",
+    });
 
     const customDriver = makeDriver({
       onWait: (reason, context) => ({
@@ -955,8 +942,11 @@ describe("WorkflowDriver", () => {
       }),
     });
     customDriver.activeRunId = "run-custom-wait";
-    await expect(customDriver.handleWait({ _tag: "HotReload" }))
-      .resolves.toEqual({ runId: "run-custom-wait", status: "custom", output: "HotReload" });
+    await expect(customDriver.handleWait({ _tag: "HotReload" })).resolves.toEqual({
+      runId: "run-custom-wait",
+      status: "custom",
+      output: "HotReload",
+    });
 
     const retryDriver = makeDriver({
       session: makeSession({
@@ -968,11 +958,10 @@ describe("WorkflowDriver", () => {
     });
     retryDriver.activeRunId = "run-retry";
     retryDriver.activeOptions = { input: {} };
-    await expect(retryDriver.handleWait({ _tag: "RetryBackoff", waitMs: 0 }))
-      .resolves.toEqual({
-        _tag: "Finished",
-        result: { runId: "run-retry", status: "finished" },
-      });
+    await expect(retryDriver.handleWait({ _tag: "RetryBackoff", waitMs: 0 })).resolves.toEqual({
+      _tag: "Finished",
+      result: { runId: "run-retry", status: "finished" },
+    });
   });
 
   test("cancels through session decisions and aborted execution", async () => {
@@ -1009,8 +998,10 @@ describe("WorkflowDriver", () => {
     const abortedDriver = makeDriver();
     abortedDriver.activeRunId = "run-aborted";
     abortedDriver.activeOptions = { input: {}, signal: controller.signal };
-    await expect(abortedDriver.executeTasks([{ nodeId: "never", iteration: 0 }]))
-      .resolves.toEqual({ runId: "run-aborted", status: "cancelled" });
+    await expect(abortedDriver.executeTasks([{ nodeId: "never", iteration: 0 }])).resolves.toEqual({
+      runId: "run-aborted",
+      status: "cancelled",
+    });
   });
 
   test("reports scheduler wait only when waiting on pending tasks", async () => {
@@ -1037,9 +1028,10 @@ describe("WorkflowDriver", () => {
 
     let finishTask;
     const pendingTask = { nodeId: "task-2", iteration: 0 };
-    driver.executeTask = () => new Promise((resolve) => {
-      finishTask = resolve;
-    });
+    driver.executeTask = () =>
+      new Promise((resolve) => {
+        finishTask = resolve;
+      });
     driver.startInflightTask(pendingTask, {
       runId: "run-1",
       options: { input: {} },

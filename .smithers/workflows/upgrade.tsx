@@ -119,9 +119,7 @@ export default smithers((ctx) => {
             const install = detectInstallMethod();
             const plan = buildUpdatePlan(install, SMITHERS_PACKAGE);
             const updateAvailable =
-              typeof latest === "string" && latest.length > 0
-                ? isUpdateAvailable(latest, current)
-                : false;
+              typeof latest === "string" && latest.length > 0 ? isUpdateAvailable(latest, current) : false;
             const changelogs = await fetchChangelogsSince({
               currentVersion: current,
               latestVersion: latest,

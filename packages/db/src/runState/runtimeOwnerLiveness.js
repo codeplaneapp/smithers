@@ -12,31 +12,26 @@
  * @returns {number | null}
  */
 export function parseRuntimeOwnerPid(runtimeOwnerId) {
-    if (!runtimeOwnerId)
-        return null;
-    const trimmed = runtimeOwnerId.trim();
-    if (trimmed.length === 0)
-        return null;
-    const exact = trimmed.match(/^pid:(\d+)(?::.*)?$/i);
-    const raw = exact ? exact[1] : /^\d+$/.test(trimmed) ? trimmed : null;
-    if (raw === null)
-        return null;
-    const pid = Number(raw);
-    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  if (!runtimeOwnerId) return null;
+  const trimmed = runtimeOwnerId.trim();
+  if (trimmed.length === 0) return null;
+  const exact = trimmed.match(/^pid:(\d+)(?::.*)?$/i);
+  const raw = exact ? exact[1] : /^\d+$/.test(trimmed) ? trimmed : null;
+  if (raw === null) return null;
+  const pid = Number(raw);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
 }
 /**
  * @param {number} pid
  * @returns {boolean}
  */
 export function isPidAlive(pid) {
-    if (!Number.isInteger(pid) || pid <= 0)
-        return false;
-    try {
-        process.kill(pid, 0);
-        return true;
-    }
-    catch (error) {
-        // EPERM means the process exists but we may not signal it — still alive.
-        return /** @type {{ code?: string }} */ (error)?.code === "EPERM";
-    }
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means the process exists but we may not signal it — still alive.
+    return /** @type {{ code?: string }} */ (error)?.code === "EPERM";
+  }
 }

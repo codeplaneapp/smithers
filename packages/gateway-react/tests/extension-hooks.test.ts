@@ -5,7 +5,11 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 // Other tests in this package also register happy-dom into the same bun
 // process. The second register() throws — guard so test order doesn't matter.
-try { GlobalRegistrator.register(); } catch { /* already registered */ }
+try {
+  GlobalRegistrator.register();
+} catch {
+  /* already registered */
+}
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Server } from "node:http";
@@ -100,11 +104,11 @@ describe("useGatewayExtensionResource", () => {
     }
 
     const harness = await mountHarness();
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe)),
-    );
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe)));
     // useEffect flushes within act; wait a microtask for the rpc promise to land.
-    await act(async () => { await Promise.resolve(); });
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     expect(calls).toEqual([{ namespace: "github", key: "issue", params: { id: "42" } }]);
     expect(snapshot?.data).toEqual({ id: "42", status: "open" });
@@ -117,7 +121,9 @@ describe("useGatewayExtensionResource", () => {
     // The first call resolves SLOWLY; the second call resolves quickly. The hook
     // must only render the latest result, not the slow earlier one.
     let resolveFirst: ((value: unknown) => void) | undefined;
-    const firstPromise = new Promise<unknown>((resolve) => { resolveFirst = resolve; });
+    const firstPromise = new Promise<unknown>((resolve) => {
+      resolveFirst = resolve;
+    });
     let callCount = 0;
     const client = {
       extensionRpc: async (_namespace: string, _key: string, params: unknown) => {
@@ -140,14 +146,15 @@ describe("useGatewayExtensionResource", () => {
     }
 
     const harness = await mountHarness();
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe)),
-    );
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe)));
     await act(async () => {
       setParams?.({ tag: "second" });
     });
     // Let the SECOND rpc resolve (it's already resolved by virtue of being synchronous).
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
     expect(snapshot?.data).toEqual({ tag: "second" });
 
     // Now resolve the FIRST (stale) call. It must not overwrite the fresh data.
@@ -178,9 +185,7 @@ describe("useGatewayExtensionAction", () => {
     }
 
     const harness = await mountHarness();
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe)),
-    );
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe)));
     await act(async () => {
       await hook?.call({ service: "api" });
     });
@@ -211,9 +216,7 @@ describe("useGatewayExtensionAction", () => {
     }
 
     const harness = await mountHarness();
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe)),
-    );
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe)));
 
     let thrown: unknown;
     await act(async () => {
@@ -234,7 +237,9 @@ describe("useGatewayExtensionAction", () => {
 
   test("stale double-call completion does not overwrite fresh data", async () => {
     let resolveFirst: ((value: unknown) => void) | undefined;
-    const firstResponse = new Promise<unknown>((resolve) => { resolveFirst = resolve; });
+    const firstResponse = new Promise<unknown>((resolve) => {
+      resolveFirst = resolve;
+    });
     const calls: Array<{ namespace: string; key: string; params: Record<string, unknown> }> = [];
     const client = await startGatewayClient(
       new Gateway().extend("ops", {
@@ -257,9 +262,7 @@ describe("useGatewayExtensionAction", () => {
     }
 
     const harness = await mountHarness();
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe)),
-    );
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe)));
 
     let firstCall: Promise<unknown> | undefined;
     await act(async () => {
@@ -305,9 +308,7 @@ describe("useGatewayExtensionStream", () => {
     }
 
     const harness = await mountHarness();
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe)),
-    );
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe)));
 
     expect(streamingSnapshots[0]).toBe(false);
     await harness.unmount();
@@ -339,15 +340,23 @@ describe("useGatewayExtensionStream", () => {
     }
 
     const harness = await mountHarness();
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe)),
-    );
-    await act(async () => { await Promise.resolve(); });
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe)));
+    await act(async () => {
+      await Promise.resolve();
+    });
     const subscribesBeforeRerender = subscribeCount;
-    await act(async () => { setReRenderToken?.(1); });
-    await act(async () => { await Promise.resolve(); });
-    await act(async () => { setReRenderToken?.(2); });
-    await act(async () => { await Promise.resolve(); });
+    await act(async () => {
+      setReRenderToken?.(1);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      setReRenderToken?.(2);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(subscribeCount).toBe(subscribesBeforeRerender);
     await harness.unmount();
   });
@@ -369,10 +378,10 @@ describe("useGatewayExtensionStream", () => {
     }
 
     const harness = await mountHarness();
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe)),
-    );
-    await act(async () => { await Promise.resolve(); });
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe)));
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     expect(snapshot?.frames.length).toBe(maxFrames);
     expect(snapshot?.frames.map((f) => f.line)).toEqual([51, 52, 53, 54, 55, 56, 57, 58, 59, 60]);
@@ -408,9 +417,7 @@ describe("useGatewayExtensionStream", () => {
     }
 
     const harness = await mountHarness();
-    await harness.render(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe)),
-    );
+    await harness.render(createElement(SmithersGatewayProvider, { client }, createElement(Probe)));
 
     for (let i = 0; i < 10 && calls.length < 2; i += 1) {
       await act(async () => {

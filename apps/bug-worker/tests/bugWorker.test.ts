@@ -81,10 +81,7 @@ describe("bug worker", () => {
 
   test("oversized payload rejected 413", async () => {
     const worker = createBugWorker();
-    const res = await worker.fetch(
-      postBug({ title: "big", body: "x".repeat(256 * 1024 + 1) }),
-      makeEnv(),
-    );
+    const res = await worker.fetch(postBug({ title: "big", body: "x".repeat(256 * 1024 + 1) }), makeEnv());
     expect(res.status).toBe(413);
   });
 
@@ -129,7 +126,7 @@ describe("bug worker", () => {
     expect(res.status).toBe(413);
   });
 
-  test("post with an empty (null) body reads as \"\" and is rejected 400 as non-JSON", async () => {
+  test('post with an empty (null) body reads as "" and is rejected 400 as non-JSON', async () => {
     const worker = createBugWorker();
     const request = new Request("https://bug.smithers.sh/api/bugs", {
       method: "POST",
@@ -198,20 +195,14 @@ describe("bug worker", () => {
 
   test("unmatched route falls through to 404", async () => {
     const worker = createBugWorker();
-    const res = await worker.fetch(
-      new Request("https://bug.smithers.sh/nope", { method: "DELETE" }),
-      makeEnv(),
-    );
+    const res = await worker.fetch(new Request("https://bug.smithers.sh/nope", { method: "DELETE" }), makeEnv());
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "not found" });
   });
 
   test("OPTIONS preflight allows POST from anywhere", async () => {
     const worker = createBugWorker();
-    const res = await worker.fetch(
-      new Request("https://bug.smithers.sh/api/bugs", { method: "OPTIONS" }),
-      makeEnv(),
-    );
+    const res = await worker.fetch(new Request("https://bug.smithers.sh/api/bugs", { method: "OPTIONS" }), makeEnv());
     expect(res.status).toBe(204);
     expect(res.headers.get("access-control-allow-origin")).toBe("*");
     expect(res.headers.get("access-control-allow-methods")).toContain("POST");

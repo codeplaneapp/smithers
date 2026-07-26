@@ -125,11 +125,7 @@ describe("findNodeById", () => {
 describe("collectTasks", () => {
   test("returns all tasks in tree order", () => {
     const tasks = collectTasks(tree());
-    expect(tasks.map((t) => t.task?.nodeId)).toEqual([
-      "task-a",
-      "task-b",
-      "task-c",
-    ]);
+    expect(tasks.map((t) => t.task?.nodeId)).toEqual(["task-a", "task-b", "task-c"]);
   });
 
   test("returns empty list when no tasks", () => {
@@ -228,13 +224,7 @@ describe("collectTasks", () => {
     };
 
     const tasks = collectTasks(root);
-    expect(tasks.map((t) => t.task?.nodeId)).toEqual([
-      "task-a",
-      "task-b",
-      "task-c",
-      "task-d",
-      "task-e",
-    ]);
+    expect(tasks.map((t) => t.task?.nodeId)).toEqual(["task-a", "task-b", "task-c", "task-d", "task-e"]);
   });
 });
 

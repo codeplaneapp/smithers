@@ -159,10 +159,16 @@ function assertExtensionIdentifier(value, field) {
     throw new SmithersError("INVALID_INPUT", `Gateway extension ${field} is required.`);
   }
   if (value.length > EXTENSION_IDENTIFIER_MAX_LENGTH) {
-    throw new SmithersError("INVALID_INPUT", `Gateway extension ${field} exceeds ${EXTENSION_IDENTIFIER_MAX_LENGTH} chars.`, { [field]: value });
+    throw new SmithersError(
+      "INVALID_INPUT",
+      `Gateway extension ${field} exceeds ${EXTENSION_IDENTIFIER_MAX_LENGTH} chars.`,
+      { [field]: value },
+    );
   }
   if (!EXTENSION_IDENTIFIER_PATTERN.test(value)) {
-    throw new SmithersError("INVALID_INPUT", `Gateway extension ${field} must match /^[a-z][a-zA-Z0-9_-]*$/.`, { [field]: value });
+    throw new SmithersError("INVALID_INPUT", `Gateway extension ${field} must match /^[a-z][a-zA-Z0-9_-]*$/.`, {
+      [field]: value,
+    });
   }
 }
 
@@ -176,7 +182,10 @@ function assertHandlersCallable(namespace, kindLabel, entries) {
     assertExtensionIdentifier(key, `${kindLabel} key`);
     const callable = kindLabel === "stream" ? entry.subscribe : entry.handler;
     if (typeof callable !== "function") {
-      throw new SmithersError("INVALID_INPUT", `Gateway extension ${namespace}.${kindLabel}.${key} must define a ${kindLabel === "stream" ? "subscribe" : "handler"} function.`);
+      throw new SmithersError(
+        "INVALID_INPUT",
+        `Gateway extension ${namespace}.${kindLabel}.${key} must define a ${kindLabel === "stream" ? "subscribe" : "handler"} function.`,
+      );
     }
   }
 }
@@ -201,7 +210,9 @@ export class GatewayExtensions {
   register(namespace, definition) {
     assertExtensionIdentifier(namespace, "namespace");
     if (this.namespaces.has(namespace)) {
-      throw new SmithersError("INVALID_INPUT", `Gateway extension namespace already registered: ${namespace}`, { namespace });
+      throw new SmithersError("INVALID_INPUT", `Gateway extension namespace already registered: ${namespace}`, {
+        namespace,
+      });
     }
     if (!definition || typeof definition !== "object") {
       throw new SmithersError("INVALID_INPUT", `Gateway extension definition is required: ${namespace}`);
@@ -222,7 +233,11 @@ export class GatewayExtensions {
     assertHandlersCallable(namespace, "action", definition.actions ?? {});
     for (const [key, entry] of Object.entries(definition.actions ?? {})) {
       if (invocable.has(key)) {
-        throw new SmithersError("INVALID_INPUT", `Gateway extension ${namespace}.${key} is declared as both a resource and an action.`, { namespace, key });
+        throw new SmithersError(
+          "INVALID_INPUT",
+          `Gateway extension ${namespace}.${key} is declared as both a resource and an action.`,
+          { namespace, key },
+        );
       }
       if (entry.scope !== undefined) {
         assertScope(entry.scope, `${namespace}.actions.${key}.scope`);
@@ -352,7 +367,10 @@ export class GatewayExtensions {
  */
 function assertScope(scope, field) {
   if (typeof scope !== "string" || !KNOWN_GATEWAY_SCOPES.includes(scope)) {
-    throw new SmithersError("INVALID_INPUT", `Gateway extension ${field} must be a known GatewayScope.`, { field, scope });
+    throw new SmithersError("INVALID_INPUT", `Gateway extension ${field} must be a known GatewayScope.`, {
+      field,
+      scope,
+    });
   }
 }
 

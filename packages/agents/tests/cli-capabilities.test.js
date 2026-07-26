@@ -347,9 +347,7 @@ describe("getCliAgentCapabilityReport", () => {
     );
     const union = source.match(/engine:\s*([^;]+);/);
     expect(union).toBeTruthy();
-    const declared = new Set(
-      [...union[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]),
-    );
+    const declared = new Set([...union[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]));
     const missing = getCliAgentCapabilityReport()
       .map((entry) => entry.capabilities.engine)
       .filter((engine) => !declared.has(engine));
@@ -358,9 +356,7 @@ describe("getCliAgentCapabilityReport", () => {
 
   test("covers every CLI surface manifest entry", () => {
     const report = getCliAgentCapabilityReport();
-    expect(report.map((entry) => entry.id).sort()).toEqual(
-      CLI_AGENT_SURFACE_MANIFEST.map((entry) => entry.id).sort(),
-    );
+    expect(report.map((entry) => entry.id).sort()).toEqual(CLI_AGENT_SURFACE_MANIFEST.map((entry) => entry.id).sort());
     for (const entry of report) {
       expect(entry.surface.binary).toBe(entry.binary);
       expect(entry.surface.packageExport).toBeTruthy();

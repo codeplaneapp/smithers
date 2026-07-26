@@ -1,30 +1,12 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import {
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import {
-  getToolContext,
-  getToolIdempotencyKey,
-  nextToolSeq,
-  runWithToolContext,
-} from "../src/tools/context.js";
-import {
-  defineTool,
-  getDefinedToolMetadata,
-} from "../src/tools/defineTool.js";
-import {
-  bashTool,
-  resolveNetworkIsolatedCommand,
-  warnNetworkIsolationUnenforced,
-} from "../src/tools/bash.js";
+import { getToolContext, getToolIdempotencyKey, nextToolSeq, runWithToolContext } from "../src/tools/context.js";
+import { defineTool, getDefinedToolMetadata } from "../src/tools/defineTool.js";
+import { bashTool, resolveNetworkIsolatedCommand, warnNetworkIsolationUnenforced } from "../src/tools/bash.js";
 import { editFileTool } from "../src/tools/edit.js";
 import { grepTool } from "../src/tools/grep.js";
 import { readFileTool } from "../src/tools/read.js";
@@ -115,9 +97,7 @@ describe("tool context and definition helpers", () => {
     expect(getToolContext()).toBeUndefined();
     expect(getToolRuntimeOptions().allowNetwork).toBe(false);
     expect(getToolIdempotencyKey()).toBeNull();
-    expect(getToolIdempotencyKey({ runId: "r", nodeId: "n", iteration: 3 })).toBe(
-      "smithers:r:n:3",
-    );
+    expect(getToolIdempotencyKey({ runId: "r", nodeId: "n", iteration: 3 })).toBe("smithers:r:n:3");
     expect(getToolIdempotencyKey({ idempotencyKey: "custom" })).toBe("custom");
     expect(getToolIdempotencyKey({ runId: "r" })).toBeNull();
 
@@ -171,9 +151,7 @@ describe("tool context and definition helpers", () => {
       },
     });
 
-    const output = await withToolCtx(root, {}, () =>
-      tool.execute({ value: "hello" }),
-    );
+    const output = await withToolCtx(root, {}, () => tool.execute({ value: "hello" }));
 
     expect(output).toBe("hello:smithers:run-1:node-1:2:echo-context");
     expect(seen[0]).toMatchObject({
@@ -206,9 +184,7 @@ describe("file tools", () => {
 
     await withToolCtx(root, {}, async () => {
       expect(await writeFileTool("nested/file.txt", "alpha\nbeta\n")).toBe("ok");
-      expect(readFileSync(join(root, "nested/file.txt"), "utf8")).toBe(
-        "alpha\nbeta\n",
-      );
+      expect(readFileSync(join(root, "nested/file.txt"), "utf8")).toBe("alpha\nbeta\n");
       expect(await readFileTool("nested/file.txt")).toBe("alpha\nbeta\n");
 
       const patch = [
@@ -221,9 +197,7 @@ describe("file tools", () => {
         "",
       ].join("\n");
       expect(await editFileTool("nested/file.txt", patch)).toBe("ok");
-      expect(readFileSync(join(root, "nested/file.txt"), "utf8")).toContain(
-        "needle",
-      );
+      expect(readFileSync(join(root, "nested/file.txt"), "utf8")).toContain("needle");
       expect(await grepTool("needle", "nested")).toContain("file.txt");
       expect(await grepTool("not-present", "nested")).toBe("");
     });
@@ -244,26 +218,14 @@ describe("file tools", () => {
     writeFileSync(join(root, "target.txt"), "one\ntwo\n", "utf8");
 
     await withToolCtx(root, { maxOutputBytes: 4 }, async () => {
-      await expectSmithersCode(
-        writeFileTool("too-large.txt", "abcde"),
-        "TOOL_CONTENT_TOO_LARGE",
-      );
-      await expectSmithersCode(
-        readFileTool("large.txt"),
-        "TOOL_FILE_TOO_LARGE",
-      );
-      await expectSmithersCode(
-        editFileTool("target.txt", "abcdef"),
-        "TOOL_PATCH_TOO_LARGE",
-      );
+      await expectSmithersCode(writeFileTool("too-large.txt", "abcde"), "TOOL_CONTENT_TOO_LARGE");
+      await expectSmithersCode(readFileTool("large.txt"), "TOOL_FILE_TOO_LARGE");
+      await expectSmithersCode(editFileTool("target.txt", "abcdef"), "TOOL_PATCH_TOO_LARGE");
     });
 
     await withToolCtx(root, { maxOutputBytes: 1000 }, async () => {
       await expectSmithersCode(
-        editFileTool(
-          "target.txt",
-          "--- a/target.txt\n+++ b/target.txt\n@@ -10,1 +10,1 @@\n-missing\n+nope\n",
-        ),
+        editFileTool("target.txt", "--- a/target.txt\n+++ b/target.txt\n@@ -10,1 +10,1 @@\n-missing\n+nope\n"),
         "TOOL_PATCH_FAILED",
       );
       await expectSmithersCode(grepTool("[", "."), "TOOL_GREP_FAILED");
@@ -279,11 +241,11 @@ describe("process helpers and bash tool", () => {
     expect(truncateToBytes("abcdef", 3)).toBe("abc");
     expect(truncateToBytes("abc", 3)).toBe("abc");
 
-    const result = await captureProcess(
-      process.execPath,
-      ["-e", "process.stdout.write('abcdef')"],
-      { cwd: root, maxOutputBytes: 3, timeoutMs: 1000 },
-    );
+    const result = await captureProcess(process.execPath, ["-e", "process.stdout.write('abcdef')"], {
+      cwd: root,
+      maxOutputBytes: 3,
+      timeoutMs: 1000,
+    });
     expect(result).toMatchObject({
       exitCode: 0,
       stdout: "abc",
@@ -312,19 +274,15 @@ describe("process helpers and bash tool", () => {
       "PROCESS_FAILED",
     );
     await expectSmithersCode(
-      captureProcess(
-        process.execPath,
-        ["-e", "setTimeout(() => {}, 10_000)"],
-        { cwd: root, timeoutMs: 20 },
-      ),
+      captureProcess(process.execPath, ["-e", "setTimeout(() => {}, 10_000)"], { cwd: root, timeoutMs: 20 }),
       "PROCESS_TIMEOUT",
     );
     await expectSmithersCode(
-      captureProcess(
-        process.execPath,
-        ["-e", "setTimeout(() => {}, 10_000)"],
-        { cwd: root, detached: true, timeoutMs: 20 },
-      ),
+      captureProcess(process.execPath, ["-e", "setTimeout(() => {}, 10_000)"], {
+        cwd: root,
+        detached: true,
+        timeoutMs: 20,
+      }),
       "PROCESS_TIMEOUT",
     );
 
@@ -334,11 +292,11 @@ describe("process helpers and bash tool", () => {
     };
     try {
       await expectSmithersCode(
-        captureProcess(
-          process.execPath,
-          ["-e", "setTimeout(() => {}, 10_000)"],
-          { cwd: root, detached: true, timeoutMs: 20 },
-        ),
+        captureProcess(process.execPath, ["-e", "setTimeout(() => {}, 10_000)"], {
+          cwd: root,
+          detached: true,
+          timeoutMs: 20,
+        }),
         "PROCESS_TIMEOUT",
       );
     } finally {
@@ -354,10 +312,7 @@ describe("process helpers and bash tool", () => {
     // budget, the stderr flood would truncate or drop the stdout output.
     const result = await captureProcess(
       process.execPath,
-      [
-        "-e",
-        "process.stderr.write('e'.repeat(50)); process.stdout.write('keep-me')",
-      ],
+      ["-e", "process.stderr.write('e'.repeat(50)); process.stdout.write('keep-me')"],
       { cwd: root, maxOutputBytes: 10, timeoutMs: 1000 },
     );
 
@@ -421,10 +376,7 @@ describe("process helpers and bash tool", () => {
       expect(output).toBe("cwd-ok");
 
       const error = await expectSmithersCode(
-        bashTool(process.execPath, [
-          "-e",
-          "process.stdout.write('before-fail'); process.exit(7)",
-        ]),
+        bashTool(process.execPath, ["-e", "process.stdout.write('before-fail'); process.exit(7)"]),
         "TOOL_COMMAND_FAILED",
       );
       expect(error.details.output).toContain("before-fail");
@@ -439,18 +391,15 @@ describe("process helpers and bash tool", () => {
       await expectSmithersCode(bashTool(1, []), "INVALID_INPUT");
       await expectSmithersCode(bashTool("echo", "nope"), "INVALID_INPUT");
       await expectSmithersCode(
-        bashTool("echo", Array.from({ length: 129 }, () => "x")),
+        bashTool(
+          "echo",
+          Array.from({ length: 129 }, () => "x"),
+        ),
         "INVALID_INPUT",
       );
       await expectSmithersCode(bashTool("echo", [1]), "INVALID_INPUT");
-      await expectSmithersCode(
-        bashTool("echo", [String(1).repeat(8193)]),
-        "INVALID_INPUT",
-      );
-      await expectSmithersCode(
-        bashTool("echo", [], { cwd: "x".repeat(1025) }),
-        "INVALID_INPUT",
-      );
+      await expectSmithersCode(bashTool("echo", [String(1).repeat(8193)]), "INVALID_INPUT");
+      await expectSmithersCode(bashTool("echo", [], { cwd: "x".repeat(1025) }), "INVALID_INPUT");
     });
 
     await withToolCtx(root, { maxOutputBytes: 0 }, async () => {
@@ -469,18 +418,16 @@ describe("process helpers and bash tool", () => {
       await expectSmithersCode(bashTool("curl", ["https://example.com"]), "TOOL_NETWORK_DISABLED");
       await expectSmithersCode(bashTool("git", ["fetch"]), "TOOL_GIT_REMOTE_DISABLED");
       expect((await bashTool("/bin/echo", ["safe"])).trim()).toBe("safe");
-      expect((await bashTool("/bin/echo", ["git", "status"])).trim()).toBe(
-        "git status",
-      );
+      expect((await bashTool("/bin/echo", ["git", "status"])).trim()).toBe("git status");
     });
 
     await withPlatform("darwin", () =>
-      withBunWhich(() => null, () =>
-        withToolCtx(root, { allowNetwork: false }, async () => {
-          expect((await bashTool("/bin/echo", ["darwin-fallback"])).trim()).toBe(
-            "darwin-fallback",
-          );
-        }),
+      withBunWhich(
+        () => null,
+        () =>
+          withToolCtx(root, { allowNetwork: false }, async () => {
+            expect((await bashTool("/bin/echo", ["darwin-fallback"])).trim()).toBe("darwin-fallback");
+          }),
       ),
     );
   });
@@ -491,34 +438,15 @@ describe("process helpers and bash tool", () => {
     await withToolCtx(root, { allowNetwork: false }, async () => {
       // Benign commands whose args merely contain a blocked substring
       // ("bundle" contains "bun", "pipeline" contains "pip") must run.
-      expect((await bashTool("/bin/echo", ["bundle.js"])).trim()).toBe(
-        "bundle.js",
-      );
-      expect((await bashTool("/bin/echo", ["pipeline.txt"])).trim()).toBe(
-        "pipeline.txt",
-      );
+      expect((await bashTool("/bin/echo", ["bundle.js"])).trim()).toBe("bundle.js");
+      expect((await bashTool("/bin/echo", ["pipeline.txt"])).trim()).toBe("pipeline.txt");
 
       // Real network commands must still be blocked.
-      await expectSmithersCode(
-        bashTool("curl", ["http://x"]),
-        "TOOL_NETWORK_DISABLED",
-      );
-      await expectSmithersCode(
-        bashTool("wget", ["http://x"]),
-        "TOOL_NETWORK_DISABLED",
-      );
-      await expectSmithersCode(
-        bashTool("npm", ["install"]),
-        "TOOL_NETWORK_DISABLED",
-      );
-      await expectSmithersCode(
-        bashTool("bun", ["add", "left-pad"]),
-        "TOOL_NETWORK_DISABLED",
-      );
-      await expectSmithersCode(
-        bashTool("pip", ["install", "requests"]),
-        "TOOL_NETWORK_DISABLED",
-      );
+      await expectSmithersCode(bashTool("curl", ["http://x"]), "TOOL_NETWORK_DISABLED");
+      await expectSmithersCode(bashTool("wget", ["http://x"]), "TOOL_NETWORK_DISABLED");
+      await expectSmithersCode(bashTool("npm", ["install"]), "TOOL_NETWORK_DISABLED");
+      await expectSmithersCode(bashTool("bun", ["add", "left-pad"]), "TOOL_NETWORK_DISABLED");
+      await expectSmithersCode(bashTool("pip", ["install", "requests"]), "TOOL_NETWORK_DISABLED");
     });
   });
 
@@ -532,43 +460,22 @@ describe("process helpers and bash tool", () => {
     await withToolCtx(root, { allowNetwork: false }, async () => {
       // Local commands whose arguments merely mention a network tool, a remote
       // git verb, or a URL run no network I/O and must not be rejected.
-      expect(
-        (await bashTool("/bin/echo", ["please run npm install"])).trim(),
-      ).toBe("please run npm install");
-      expect(
-        (
-          await bashTool(gitStub, ["commit", "-m", "fetch upstream changes"])
-        ).trim(),
-      ).toBe("commit -m fetch upstream changes");
-      expect(
-        (await bashTool(gitStub, ["commit", "-m", "see https://x"])).trim(),
-      ).toBe("commit -m see https://x");
+      expect((await bashTool("/bin/echo", ["please run npm install"])).trim()).toBe("please run npm install");
+      expect((await bashTool(gitStub, ["commit", "-m", "fetch upstream changes"])).trim()).toBe(
+        "commit -m fetch upstream changes",
+      );
+      expect((await bashTool(gitStub, ["commit", "-m", "see https://x"])).trim()).toBe("commit -m see https://x");
 
       // Real remote operations are still blocked, including behind git's
       // value-taking global flags.
-      await expectSmithersCode(
-        bashTool(gitStub, ["fetch"]),
-        "TOOL_GIT_REMOTE_DISABLED",
-      );
-      await expectSmithersCode(
-        bashTool(gitStub, ["-C", root, "--no-pager", "push"]),
-        "TOOL_GIT_REMOTE_DISABLED",
-      );
+      await expectSmithersCode(bashTool(gitStub, ["fetch"]), "TOOL_GIT_REMOTE_DISABLED");
+      await expectSmithersCode(bashTool(gitStub, ["-C", root, "--no-pager", "push"]), "TOOL_GIT_REMOTE_DISABLED");
       // Arguments that are themselves URLs still count as network use.
-      await expectSmithersCode(
-        bashTool(gitStub, ["clone", "https://example.com/x"]),
-        "TOOL_NETWORK_DISABLED",
-      );
-      await expectSmithersCode(
-        bashTool("/bin/echo", ["--url=https://example.com"]),
-        "TOOL_NETWORK_DISABLED",
-      );
+      await expectSmithersCode(bashTool(gitStub, ["clone", "https://example.com/x"]), "TOOL_NETWORK_DISABLED");
+      await expectSmithersCode(bashTool("/bin/echo", ["--url=https://example.com"]), "TOOL_NETWORK_DISABLED");
       // A whole command line passed as `cmd` is still resolved to its leading
       // executable rather than falling through to a spawn failure.
-      await expectSmithersCode(
-        bashTool("curl https://example.com"),
-        "TOOL_NETWORK_DISABLED",
-      );
+      await expectSmithersCode(bashTool("curl https://example.com"), "TOOL_NETWORK_DISABLED");
     });
   });
 
@@ -576,37 +483,21 @@ describe("process helpers and bash tool", () => {
     const root = await makeRoot();
     await withToolCtx(root, { allowNetwork: false }, async () => {
       // Interpreters run their payload, so its command positions are blocked.
-      await expectSmithersCode(
-        bashTool("/bin/sh", ["-c", "curl https://example.com"]),
-        "TOOL_NETWORK_DISABLED",
-      );
-      await expectSmithersCode(
-        bashTool("/bin/bash", ["-lc", "cd /tmp && npm install"]),
-        "TOOL_NETWORK_DISABLED",
-      );
+      await expectSmithersCode(bashTool("/bin/sh", ["-c", "curl https://example.com"]), "TOOL_NETWORK_DISABLED");
+      await expectSmithersCode(bashTool("/bin/bash", ["-lc", "cd /tmp && npm install"]), "TOOL_NETWORK_DISABLED");
       await expectSmithersCode(
         bashTool("/bin/sh", ["-c", "echo $(wget -qO- https://example.com)"]),
         "TOOL_NETWORK_DISABLED",
       );
-      await expectSmithersCode(
-        bashTool("/bin/sh", ["-c", "git -C /repo push"]),
-        "TOOL_GIT_REMOTE_DISABLED",
-      );
+      await expectSmithersCode(bashTool("/bin/sh", ["-c", "git -C /repo push"]), "TOOL_GIT_REMOTE_DISABLED");
 
       // Prose inside the payload is not a command position.
-      expect(
-        (
-          await bashTool("/bin/sh", ["-c", "echo 'please run npm install'"])
-        ).trim(),
-      ).toBe("please run npm install");
-      expect(
-        (
-          await bashTool("/bin/sh", [
-            "-c",
-            "echo 'git commit -m \"fetch upstream\"'",
-          ])
-        ).trim(),
-      ).toBe('git commit -m "fetch upstream"');
+      expect((await bashTool("/bin/sh", ["-c", "echo 'please run npm install'"])).trim()).toBe(
+        "please run npm install",
+      );
+      expect((await bashTool("/bin/sh", ["-c", "echo 'git commit -m \"fetch upstream\"'"])).trim()).toBe(
+        'git commit -m "fetch upstream"',
+      );
     });
   });
 
@@ -629,20 +520,26 @@ describe("process helpers and bash tool", () => {
 
     // darwin without sandbox-exec: no mechanism, so NOT enforced.
     await withPlatform("darwin", () =>
-      withBunWhich(() => null, () => {
-        const isolation = resolveNetworkIsolatedCommand("/bin/echo", ["hi"]);
-        expect(isolation).toEqual({ command: "/bin/echo", args: ["hi"], enforced: false });
-      }),
+      withBunWhich(
+        () => null,
+        () => {
+          const isolation = resolveNetworkIsolatedCommand("/bin/echo", ["hi"]);
+          expect(isolation).toEqual({ command: "/bin/echo", args: ["hi"], enforced: false });
+        },
+      ),
     );
 
     // Linux (and any non-darwin platform) has no enforced sandbox here: the
     // resolver must not claim isolation it cannot deliver.
     for (const platform of ["linux", "freebsd", "win32"]) {
       await withPlatform(platform, () =>
-        withBunWhich(() => "/usr/bin/unshare", () => {
-          const isolation = resolveNetworkIsolatedCommand("/bin/echo", ["hi"]);
-          expect(isolation).toEqual({ command: "/bin/echo", args: ["hi"], enforced: false });
-        }),
+        withBunWhich(
+          () => "/usr/bin/unshare",
+          () => {
+            const isolation = resolveNetworkIsolatedCommand("/bin/echo", ["hi"]);
+            expect(isolation).toEqual({ command: "/bin/echo", args: ["hi"], enforced: false });
+          },
+        ),
       );
     }
   });
@@ -669,12 +566,12 @@ describe("process helpers and bash tool", () => {
     // under the bypassable denylist rather than being refused, so existing
     // workflows keep working while the warning surfaces the gap.
     await withPlatform("linux", () =>
-      withBunWhich(() => null, () =>
-        withToolCtx(root, { allowNetwork: false }, async () => {
-          expect((await bashTool("/bin/echo", ["net-degraded"])).trim()).toBe(
-            "net-degraded",
-          );
-        }),
+      withBunWhich(
+        () => null,
+        () =>
+          withToolCtx(root, { allowNetwork: false }, async () => {
+            expect((await bashTool("/bin/echo", ["net-degraded"])).trim()).toBe("net-degraded");
+          }),
       ),
     );
   });

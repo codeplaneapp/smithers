@@ -57,10 +57,7 @@ describe("ddd site worker", () => {
         },
       },
     };
-    const response = await createDddSiteWorker().fetch(
-      new Request("https://ddd.smithers.sh/assets/app.css"),
-      env,
-    );
+    const response = await createDddSiteWorker().fetch(new Request("https://ddd.smithers.sh/assets/app.css"), env);
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
@@ -75,10 +72,7 @@ describe("ddd site worker", () => {
         },
       },
     };
-    const response = await createDddSiteWorker().fetch(
-      new Request("https://ddd.smithers.sh/missing"),
-      env,
-    );
+    const response = await createDddSiteWorker().fetch(new Request("https://ddd.smithers.sh/missing"), env);
     expect(response.status).toBe(404);
   });
 

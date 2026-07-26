@@ -20,7 +20,8 @@ export function createGroundedWebSearchToolset(options) {
   return {
     tools: {
       grounded_web_search: dynamicTool({
-        description: "Search the web with both Exa semantic retrieval and a fresh/SERP provider, returning grounded citations.",
+        description:
+          "Search the web with both Exa semantic retrieval and a fresh/SERP provider, returning grounded citations.",
         inputSchema: jsonSchema({
           type: "object",
           additionalProperties: false,
@@ -46,10 +47,12 @@ export function createGroundedWebSearchToolset(options) {
  */
 async function searchAll(providers, input, maxResultsPerProvider) {
   const args = normalizeInput(input, maxResultsPerProvider);
-  const settled = await Promise.allSettled(providers.map(async (provider) => ({
-    provider,
-    results: await provider.search(args),
-  })));
+  const settled = await Promise.allSettled(
+    providers.map(async (provider) => ({
+      provider,
+      results: await provider.search(args),
+    })),
+  );
   const deduped = new Map();
   const succeededProviders = [];
   for (const outcome of settled) {

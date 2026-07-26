@@ -36,7 +36,18 @@ export function SelectTrigger({ className, children, ...props }: ComponentProps<
     <SelectPrimitive.Trigger data-slot="select-trigger" className={cn("sui-select-trigger", className)} {...props}>
       {children}
       <SelectPrimitive.Icon asChild>
-        <svg className="sui-select-icon" aria-hidden width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          className="sui-select-icon"
+          aria-hidden
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <path d="M2 3.75L5 6.75l3-3" />
         </svg>
       </SelectPrimitive.Icon>
@@ -44,7 +55,13 @@ export function SelectTrigger({ className, children, ...props }: ComponentProps<
   );
 }
 
-export function SelectContent({ className, children, position = "popper", sideOffset = 4, ...props }: ComponentProps<typeof SelectPrimitive.Content>) {
+export function SelectContent({
+  className,
+  children,
+  position = "popper",
+  sideOffset = 4,
+  ...props
+}: ComponentProps<typeof SelectPrimitive.Content>) {
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
@@ -55,13 +72,33 @@ export function SelectContent({ className, children, position = "popper", sideOf
         {...props}
       >
         <SelectPrimitive.ScrollUpButton className="sui-select-scroll-button">
-          <svg aria-hidden width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            aria-hidden
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <path d="M2 6.25l3-3 3 3" />
           </svg>
         </SelectPrimitive.ScrollUpButton>
         <SelectPrimitive.Viewport className="sui-select-viewport">{children}</SelectPrimitive.Viewport>
         <SelectPrimitive.ScrollDownButton className="sui-select-scroll-button">
-          <svg aria-hidden width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            aria-hidden
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <path d="M2 3.75L5 6.75l3-3" />
           </svg>
         </SelectPrimitive.ScrollDownButton>
@@ -79,7 +116,17 @@ export function SelectItem({ className, children, ...props }: ComponentProps<typ
     <SelectPrimitive.Item data-slot="select-item" className={cn("sui-select-item", className)} {...props}>
       <span className="sui-select-item-indicator">
         <SelectPrimitive.ItemIndicator>
-          <svg aria-hidden width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            aria-hidden
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <path d="M1.5 5.5l2.5 2.5 4.5-5" />
           </svg>
         </SelectPrimitive.ItemIndicator>
@@ -90,5 +137,11 @@ export function SelectItem({ className, children, ...props }: ComponentProps<typ
 }
 
 export function SelectSeparator({ className, ...props }: ComponentProps<typeof SelectPrimitive.Separator>) {
-  return <SelectPrimitive.Separator data-slot="select-separator" className={cn("sui-select-separator", className)} {...props} />;
+  return (
+    <SelectPrimitive.Separator
+      data-slot="select-separator"
+      className={cn("sui-select-separator", className)}
+      {...props}
+    />
+  );
 }

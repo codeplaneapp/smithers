@@ -31,20 +31,14 @@ export function defineWorkflow(definition) {
     throw new TypeError("defineWorkflow: name is required");
   }
   if (!definition.description) {
-    throw new TypeError(
-      `defineWorkflow: description is required (in "${definition.name}")`
-    );
+    throw new TypeError(`defineWorkflow: description is required (in "${definition.name}")`);
   }
   if (!definition.workflow) {
-    throw new TypeError(
-      `defineWorkflow: \`workflow\` is required (in "${definition.name}")`
-    );
+    throw new TypeError(`defineWorkflow: \`workflow\` is required (in "${definition.name}")`);
   }
 
   // Normalize kebab-case to camelCase.
-  const disableModelInvocation =
-    definition.disableModelInvocation ??
-    definition["disable-model-invocation"];
+  const disableModelInvocation = definition.disableModelInvocation ?? definition["disable-model-invocation"];
 
   const { "disable-model-invocation": _dropped, ...rest } = definition;
 
@@ -68,9 +62,7 @@ export function defineWorkflowPlugin(plugin) {
     throw new TypeError("defineWorkflowPlugin: name is required");
   }
   if (!Array.isArray(plugin.workflows)) {
-    throw new TypeError(
-      `defineWorkflowPlugin: \`workflows\` must be an array (in "${plugin.name}")`
-    );
+    throw new TypeError(`defineWorkflowPlugin: \`workflows\` must be an array (in "${plugin.name}")`);
   }
   return { ...plugin };
 }

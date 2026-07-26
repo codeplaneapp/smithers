@@ -223,12 +223,16 @@ const reviewSchema = z.object({
   headSha: z.string(),
   approved: z.boolean().default(false),
   feedback: z.string().default(""),
-  issues: z.array(z.object({
-    severity: z.enum(["critical", "major", "minor", "nit"]).default("nit"),
-    title: z.string().default(""),
-    file: z.string().nullable().default(null),
-    description: z.string().default(""),
-  })).default([]),
+  issues: z
+    .array(
+      z.object({
+        severity: z.enum(["critical", "major", "minor", "nit"]).default("nit"),
+        title: z.string().default(""),
+        file: z.string().nullable().default(null),
+        description: z.string().default(""),
+      }),
+    )
+    .default([]),
 });
 type Review = z.infer<typeof reviewSchema>;
 const readinessSchema = z.object({
@@ -245,11 +249,15 @@ const commitsSchema = z.object({
   headSha: z.string().default(""),
   changedPaths: z.array(z.string()).default([]),
   reviewDiff: z.string().default(""),
-  commits: z.array(z.object({
-    itemKey: z.string().default(""),
-    subject: z.string().default(""),
-    sha: z.string().default(""),
-  })).default([]),
+  commits: z
+    .array(
+      z.object({
+        itemKey: z.string().default(""),
+        subject: z.string().default(""),
+        sha: z.string().default(""),
+      }),
+    )
+    .default([]),
   skipped: z.array(z.object({ itemKey: z.string().default(""), reason: z.string().default("") })).default([]),
   summary: z.string().default(""),
 });
@@ -268,11 +276,15 @@ const finalReviewSchema = z.object({
   headSha: z.string(),
   approved: z.boolean().default(false),
   verdict: z.string().default(""),
-  blockers: z.array(z.object({
-    title: z.string().default(""),
-    file: z.string().nullable().default(null),
-    description: z.string().default(""),
-  })).default([]),
+  blockers: z
+    .array(
+      z.object({
+        title: z.string().default(""),
+        file: z.string().nullable().default(null),
+        description: z.string().default(""),
+      }),
+    )
+    .default([]),
   summary: z.string().default(""),
 });
 type FinalReview = z.infer<typeof finalReviewSchema>;
@@ -297,9 +309,7 @@ const inputSchema = z.object({
   implementConcurrency: z.number().int().min(1).max(8).default(4),
 });
 
-const {
-  Workflow, Task, Sequence, Parallel, Loop, Worktree, Approval, smithers, outputs,
-} = createSmithers({
+const { Workflow, Task, Sequence, Parallel, Loop, Worktree, Approval, smithers, outputs } = createSmithers({
   input: inputSchema,
   discovery: discoverySchema,
   setup: setupSchema,
@@ -362,13 +372,19 @@ function latestForItem<T extends { itemKey: string }>(rows: T[] | undefined, key
   return latest((rows ?? []).filter((row) => row.itemKey === key));
 }
 function issuesForItem(all: Issue[], item: WorkItem): Issue[] {
-  return item.issues.map((number) => all.find((issue) => issue.number === number)).filter((issue): issue is Issue => !!issue);
+  return item.issues
+    .map((number) => all.find((issue) => issue.number === number))
+    .filter((issue): issue is Issue => !!issue);
 }
 function itemReady(ctx: any, key: string): boolean {
   const candidate = latestForItem<Candidate>(ctx.outputs.candidate, key);
   const review = latestForItem<Review>(ctx.outputs.review, key);
-  return candidate?.ready === true && !!candidate.headSha
-    && review?.approved === true && review.headSha === candidate.headSha;
+  return (
+    candidate?.ready === true &&
+    !!candidate.headSha &&
+    review?.approved === true &&
+    review.headSha === candidate.headSha
+  );
 }
 function itemFeedback(ctx: any, key: string): string {
   const implementation = latestForItem<Implementation>(ctx.outputs.implementation, key);
@@ -417,11 +433,13 @@ function splitZero(value: string): string[] {
   return value.split("\0").filter(Boolean);
 }
 function changedWorkingPaths(cwd: string): string[] {
-  return [...new Set([
-    ...splitZero(gitRaw(["diff", "--name-only", "-z"], cwd)),
-    ...splitZero(gitRaw(["diff", "--cached", "--name-only", "-z"], cwd)),
-    ...splitZero(gitRaw(["ls-files", "--others", "--exclude-standard", "-z"], cwd)),
-  ])].sort();
+  return [
+    ...new Set([
+      ...splitZero(gitRaw(["diff", "--name-only", "-z"], cwd)),
+      ...splitZero(gitRaw(["diff", "--cached", "--name-only", "-z"], cwd)),
+      ...splitZero(gitRaw(["ls-files", "--others", "--exclude-standard", "-z"], cwd)),
+    ]),
+  ].sort();
 }
 function completeDiff(baseSha: string, headSha: string, cwd: string): string {
   const diff = gitRaw(["diff", "--no-ext-diff", "--binary", "--full-index", `${baseSha}..${headSha}`], cwd);
@@ -467,12 +485,21 @@ function runProcess(
       try {
         process.kill(-child.pid, signal);
       } catch {
-        try { child.kill(signal); } catch {}
+        try {
+          child.kill(signal);
+        } catch {}
       }
     };
-    child.stdout.on("data", (chunk) => { stdout += String(chunk); });
-    child.stderr.on("data", (chunk) => { stderr += String(chunk); });
-    child.on("error", (error) => { stderr += String(error); finish(1); });
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", (error) => {
+      stderr += String(error);
+      finish(1);
+    });
     child.on("close", (code) => finish(timedOut ? 124 : (code ?? 1)));
     timer = setTimeout(() => {
       timedOut = true;
@@ -481,7 +508,9 @@ function runProcess(
         try {
           execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", timeout: 5_000 });
         } catch {
-          try { child.kill("SIGKILL"); } catch {}
+          try {
+            child.kill("SIGKILL");
+          } catch {}
         }
       } else {
         signalTree("SIGTERM");
@@ -495,21 +524,25 @@ function runProcess(
   });
 }
 function safeInstall(cwd: string): Promise<ProcessResult> {
-  return runProcess(
-    "pnpm",
-    ["install", "--frozen-lockfile", "--ignore-scripts"],
-    cwd,
-    30 * 60_000,
-    { ...readPolicy.codex.env, CI: "1" },
-  );
+  return runProcess("pnpm", ["install", "--frozen-lockfile", "--ignore-scripts"], cwd, 30 * 60_000, {
+    ...readPolicy.codex.env,
+    CI: "1",
+  });
 }
 function runSandboxedGate(cwd: string): Promise<ProcessResult> {
   return runProcess(
     "codex",
     [
-      "sandbox", "-P", "local-issue-gate", "-C", cwd,
+      "sandbox",
+      "-P",
+      "local-issue-gate",
+      "-C",
+      cwd,
       ...localGatePolicy.config.flatMap((entry) => ["-c", entry]),
-      "--", "bash", "-c", LOCAL_GATE_COMMAND,
+      "--",
+      "bash",
+      "-c",
+      LOCAL_GATE_COMMAND,
     ],
     cwd,
     90 * 60_000,
@@ -544,7 +577,13 @@ function discover() {
 async function bootstrapWorktree(itemKey: string, cwd: string, expectedBase: string): Promise<Setup> {
   const actualBase = currentHead(cwd);
   if (actualBase !== expectedBase) {
-    return { itemKey, cwd, baseSha: actualBase, ready: false, summary: "Worktree did not start at the captured remote-main SHA." };
+    return {
+      itemKey,
+      cwd,
+      baseSha: actualBase,
+      ready: false,
+      summary: "Worktree did not start at the captured remote-main SHA.",
+    };
   }
   const install = await safeInstall(cwd);
   const clean = !git(["status", "--porcelain"], cwd);
@@ -554,17 +593,17 @@ async function bootstrapWorktree(itemKey: string, cwd: string, expectedBase: str
     cwd,
     baseSha: expectedBase,
     ready,
-    summary: ready ? "Dependencies ready in the isolated worktree." : (install.stderr || install.stdout || "Bootstrap mutated the worktree.").slice(-8_000),
+    summary: ready
+      ? "Dependencies ready in the isolated worktree."
+      : (install.stderr || install.stdout || "Bootstrap mutated the worktree.").slice(-8_000),
   };
 }
 function deterministicCommitMessage(item: WorkItem): { subject: string; body: string } {
   return {
     subject: `🐛 fix(issue-blitz): resolve ${item.key}`,
-    body: [
-      ...item.issues.map((number) => `Refs #${number}`),
-      "",
-      "Co-Authored-By: Codex <noreply@openai.com>",
-    ].join("\n"),
+    body: [...item.issues.map((number) => `Refs #${number}`), "", "Co-Authored-By: Codex <noreply@openai.com>"].join(
+      "\n",
+    ),
   };
 }
 function captureCandidate(item: WorkItem, setup: Setup): Candidate {
@@ -582,7 +621,8 @@ function captureCandidate(item: WorkItem, setup: Setup): Candidate {
     const paths = changedWorkingPaths(setup.cwd);
     if (paths.length) git(["add", "--", ...paths], setup.cwd);
     const count = Number(git(["rev-list", "--count", `${setup.baseSha}..HEAD`], setup.cwd));
-    if (!Number.isInteger(count) || count > 1) return rejected("Candidate branch contains unexpected commits; refusing to snapshot it.");
+    if (!Number.isInteger(count) || count > 1)
+      return rejected("Candidate branch contains unexpected commits; refusing to snapshot it.");
     const staged = !gitSucceeds(["diff", "--cached", "--quiet"], setup.cwd);
     const message = deterministicCommitMessage(item);
     if (staged) {
@@ -597,9 +637,15 @@ function captureCandidate(item: WorkItem, setup: Setup): Candidate {
     }
     const changedPaths = splitZero(gitRaw(["diff", "--name-only", "-z", `${setup.baseSha}..${headSha}`], setup.cwd));
     const protectedPaths = changedPaths.filter((path) => PROTECTED_WORKFLOW_PATHS.has(path));
-    if (protectedPaths.length) return rejected(`Candidate changed protected workflow policy: ${protectedPaths.join(", ")}`, headSha, changedPaths);
+    if (protectedPaths.length)
+      return rejected(
+        `Candidate changed protected workflow policy: ${protectedPaths.join(", ")}`,
+        headSha,
+        changedPaths,
+      );
     const dirty = git(["status", "--porcelain"], setup.cwd);
-    if (dirty) return rejected(`Candidate worktree is dirty after snapshot: ${dirty.slice(0, 2_000)}`, headSha, changedPaths);
+    if (dirty)
+      return rejected(`Candidate worktree is dirty after snapshot: ${dirty.slice(0, 2_000)}`, headSha, changedPaths);
     const reviewDiff = completeDiff(setup.baseSha, headSha, setup.cwd);
     return {
       itemKey: item.key,
@@ -608,7 +654,10 @@ function captureCandidate(item: WorkItem, setup: Setup): Candidate {
       changedPaths,
       reviewDiff,
       ready: changedPaths.length > 0,
-      summary: changedPaths.length > 0 ? "Single-commit candidate snapshot ready for exact-head review." : "Candidate commit has no changes.",
+      summary:
+        changedPaths.length > 0
+          ? "Single-commit candidate snapshot ready for exact-head review."
+          : "Candidate commit has no changes.",
     };
   } catch (error) {
     return rejected(`Candidate snapshot failed: ${String(error).slice(0, 8_000)}`);
@@ -621,7 +670,9 @@ function finalizeReadiness(ctx: any, item: WorkItem): Readiness {
     itemKey: item.key,
     ready,
     headSha: candidate?.headSha ?? "",
-    summary: ready ? "Candidate is queued for serialized integration." : "Candidate did not reach an exact-head approval.",
+    summary: ready
+      ? "Candidate is queued for serialized integration."
+      : "Candidate did not reach an exact-head approval.",
   };
 }
 function integrateCandidates(cwd: string, setup: Setup, ctx: any): Commits {
@@ -650,7 +701,10 @@ function integrateCandidates(cwd: string, setup: Setup, ctx: any): Commits {
         skipped.push({ itemKey: item.key, reason: readiness?.summary ?? "Candidate was not approved." });
         continue;
       }
-      if (candidate.baseSha !== setup.baseSha || !gitSucceeds(["cat-file", "-e", `${candidate.headSha}^{commit}`], cwd)) {
+      if (
+        candidate.baseSha !== setup.baseSha ||
+        !gitSucceeds(["cat-file", "-e", `${candidate.headSha}^{commit}`], cwd)
+      ) {
         skipped.push({ itemKey: item.key, reason: "Candidate does not descend from the captured integration base." });
         continue;
       }
@@ -700,13 +754,24 @@ function integrateCandidates(cwd: string, setup: Setup, ctx: any): Commits {
 async function verifyIntegration(cwd: string, integration: Commits): Promise<Gate> {
   const started = Date.now();
   if (!integration.ready || currentHead(cwd) !== integration.headSha || git(["status", "--porcelain"], cwd)) {
-    return { headSha: currentHead(cwd), passed: false, exitCode: 1, durationMs: 0, command: LOCAL_GATE_COMMAND, log: "", summary: "Integration head changed or worktree was dirty before verification." };
+    return {
+      headSha: currentHead(cwd),
+      passed: false,
+      exitCode: 1,
+      durationMs: 0,
+      command: LOCAL_GATE_COMMAND,
+      log: "",
+      summary: "Integration head changed or worktree was dirty before verification.",
+    };
   }
   const install = await safeInstall(cwd);
   if (install.exitCode !== 0) {
     return {
-      headSha: currentHead(cwd), passed: false, exitCode: install.exitCode,
-      durationMs: Date.now() - started, command: LOCAL_GATE_COMMAND,
+      headSha: currentHead(cwd),
+      passed: false,
+      exitCode: install.exitCode,
+      durationMs: Date.now() - started,
+      command: LOCAL_GATE_COMMAND,
       log: `${install.stdout}\n${install.stderr}`.slice(-30_000),
       summary: "Safe dependency bootstrap failed before the integration gate.",
     };
@@ -722,7 +787,9 @@ async function verifyIntegration(cwd: string, integration: Commits): Promise<Gat
     durationMs: Date.now() - started,
     command: LOCAL_GATE_COMMAND,
     log: `${result.stdout}\n${result.stderr}`.slice(-30_000),
-    summary: passed ? "Typecheck and tests passed in the no-network sandbox on the exact integration head." : "Verification failed or mutated the exact integration worktree.",
+    summary: passed
+      ? "Typecheck and tests passed in the no-network sandbox on the exact integration head."
+      : "Verification failed or mutated the exact integration worktree.",
   };
 }
 function publishExactHead(
@@ -741,8 +808,10 @@ function publishExactHead(
     summary,
   });
   if (!integration?.ready) return blocked(integration?.summary ?? "No integration result exists.");
-  if (gate?.passed !== true || gate.headSha !== integration.headSha) return blocked("The fixed local gate did not pass on this exact head.");
-  if (review?.approved !== true || review.headSha !== integration.headSha) return blocked("Fable did not approve this exact head.");
+  if (gate?.passed !== true || gate.headSha !== integration.headSha)
+    return blocked("The fixed local gate did not pass on this exact head.");
+  if (review?.approved !== true || review.headSha !== integration.headSha)
+    return blocked("Fable did not approve this exact head.");
   if (approval?.approved !== true) return blocked("A human denied or did not grant publication approval.");
   try {
     if (currentHead(cwd) !== integration.headSha || git(["status", "--porcelain"], cwd)) {
@@ -754,20 +823,24 @@ function publishExactHead(
     git(["fetch", "origin", "main"]);
     const remoteBefore = git(["rev-parse", "refs/remotes/origin/main"]);
     if (remoteBefore !== integration.baseSha) {
-      return blocked("origin/main moved after the batch was created; rebuild and re-review instead of rebasing after approval.", remoteBefore);
+      return blocked(
+        "origin/main moved after the batch was created; rebuild and re-review instead of rebasing after approval.",
+        remoteBefore,
+      );
     }
     git(["push", "origin", `${integration.headSha}:refs/heads/main`]);
     git(["fetch", "origin", "main"]);
     const remoteMainSha = git(["rev-parse", "refs/remotes/origin/main"]);
     return {
       pushed: remoteMainSha === integration.headSha,
-      status: remoteMainSha === integration.headSha ? "published" as const : "blocked" as const,
+      status: remoteMainSha === integration.headSha ? ("published" as const) : ("blocked" as const),
       baseSha: integration.baseSha,
       headSha: integration.headSha,
       remoteMainSha,
-      summary: remoteMainSha === integration.headSha
-        ? `Published and verified exact head ${integration.headSha.slice(0, 12)}. Local main was never mutated.`
-        : "Remote verification did not match the reviewed integration head.",
+      summary:
+        remoteMainSha === integration.headSha
+          ? `Published and verified exact head ${integration.headSha.slice(0, 12)}. Local main was never mutated.`
+          : "Remote verification did not match the reviewed integration head.",
     };
   } catch (error) {
     return blocked(`Exact non-force publication failed: ${String(error).slice(0, 8_000)}`);
@@ -783,14 +856,16 @@ const UNTRUSTED_ISSUE_NOTICE = [
 function issueHeader(issues: Issue[]): string {
   return [
     UNTRUSTED_ISSUE_NOTICE,
-    ...issues.map((issue) => [
-      `<public-issue number="${issue.number}">`,
-      `title=${JSON.stringify(issue.title)}`,
-      `url=${JSON.stringify(issue.url)}`,
-      "body:",
-      issue.body || "(no body)",
-      "</public-issue>",
-    ].join("\n")),
+    ...issues.map((issue) =>
+      [
+        `<public-issue number="${issue.number}">`,
+        `title=${JSON.stringify(issue.title)}`,
+        `url=${JSON.stringify(issue.url)}`,
+        "body:",
+        issue.body || "(no body)",
+        "</public-issue>",
+      ].join("\n"),
+    ),
   ].join("\n\n");
 }
 function planPrompt(item: WorkItem, issues: Issue[]): string {
@@ -828,7 +903,12 @@ function implementPrompt(ctx: any, item: WorkItem, issues: Issue[]): string {
     feedback ? `\nADVISORY PRIOR FEEDBACK DATA TO ADDRESS:\n${feedback}` : "",
   ].join("\n");
 }
-function reviewPrompt(item: WorkItem, issues: Issue[], candidate: Candidate, implementation: Implementation | undefined): string {
+function reviewPrompt(
+  item: WorkItem,
+  issues: Issue[],
+  candidate: Candidate,
+  implementation: Implementation | undefined,
+): string {
   return [
     `You are the strict read-only reviewer for work item ${JSON.stringify(item.key)}. Review only the exact candidate head below; do not edit files or use VCS/network commands.`,
     UNTRUSTED_ISSUE_NOTICE,
@@ -878,26 +958,24 @@ export default smithers((ctx) => {
   const baseCommit = discovery?.baseCommit ?? "";
   const iterations = input.perItemIterations;
   const laneConcurrency = Math.min(input.planConcurrency, input.implementConcurrency);
-  const allSettled = !!baseCommit && WORK_ITEMS.every((item) => latestForItem<Readiness>(ctx.outputs.readiness, item.key));
+  const allSettled =
+    !!baseCommit && WORK_ITEMS.every((item) => latestForItem<Readiness>(ctx.outputs.readiness, item.key));
   const integrationPath = worktreePath("integration", run);
   const integrationSetup = latestForItem<Setup>(ctx.outputs.setup, "__integration");
   const commits = latest(ctx.outputs.commits);
   const gate = latest(ctx.outputs.gate);
   const finalReview = latest(ctx.outputs.finalReview);
   const approval = latest(ctx.outputs.approval);
-  const exactReviewPassed = commits?.ready === true
-    && gate?.passed === true && gate.headSha === commits.headSha
-    && finalReview?.approved === true && finalReview.headSha === commits.headSha;
-  const gateRejected = !!commits && gate !== undefined
-    && (!gate.passed || gate.headSha !== commits.headSha);
-  const reviewRejected = !!commits && finalReview !== undefined
-    && (!finalReview.approved || finalReview.headSha !== commits.headSha);
-  const publishReady = !!commits && (
-    !commits.ready
-    || gateRejected
-    || reviewRejected
-    || approval !== undefined
-  );
+  const exactReviewPassed =
+    commits?.ready === true &&
+    gate?.passed === true &&
+    gate.headSha === commits.headSha &&
+    finalReview?.approved === true &&
+    finalReview.headSha === commits.headSha;
+  const gateRejected = !!commits && gate !== undefined && (!gate.passed || gate.headSha !== commits.headSha);
+  const reviewRejected =
+    !!commits && finalReview !== undefined && (!finalReview.approved || finalReview.headSha !== commits.headSha);
+  const publishReady = !!commits && (!commits.ready || gateRejected || reviewRejected || approval !== undefined);
 
   return (
     <Workflow name="issue-blitz">
@@ -917,31 +995,59 @@ export default smithers((ctx) => {
               const candidate = latestForItem<Candidate>(ctx.outputs.candidate, item.key);
               const issues = issuesForItem(allIssues, item);
               return (
-                <Worktree key={item.key} id={`${item.key}:worktree`} path={cwd} branch={branchName(item.key, run)} baseBranch={baseCommit}>
+                <Worktree
+                  key={item.key}
+                  id={`${item.key}:worktree`}
+                  path={cwd}
+                  branch={branchName(item.key, run)}
+                  baseBranch={baseCommit}
+                >
                   <Sequence>
                     <Task id={`${item.key}:bootstrap`} output={outputs.setup} timeoutMs={35 * 60_000}>
                       {() => bootstrapWorktree(item.key, cwd, baseCommit)}
                     </Task>
                     {setup?.ready ? (
-                      <Task id={`${item.key}:plan`} output={outputs.plan} agent={sol} retries={AGENT_RETRIES}
-                        timeoutMs={PLAN_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+                      <Task
+                        id={`${item.key}:plan`}
+                        output={outputs.plan}
+                        agent={sol}
+                        retries={AGENT_RETRIES}
+                        timeoutMs={PLAN_TIMEOUT_MS}
+                        heartbeatTimeoutMs={HEARTBEAT_MS}
+                      >
                         {planPrompt(item, issues)}
                       </Task>
                     ) : null}
                     {setup?.ready && plan ? (
-                      <Loop id={`${item.key}:loop`} until={itemReady(ctx, item.key)} maxIterations={iterations} onMaxReached="return-last">
+                      <Loop
+                        id={`${item.key}:loop`}
+                        until={itemReady(ctx, item.key)}
+                        maxIterations={iterations}
+                        onMaxReached="return-last"
+                      >
                         <Sequence>
-                          <Task id={`${item.key}:implement`} output={outputs.implementation}
-                            agent={item.kind === "hard" ? terra : lunaImplement} retries={AGENT_RETRIES}
-                            timeoutMs={IMPLEMENT_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+                          <Task
+                            id={`${item.key}:implement`}
+                            output={outputs.implementation}
+                            agent={item.kind === "hard" ? terra : lunaImplement}
+                            retries={AGENT_RETRIES}
+                            timeoutMs={IMPLEMENT_TIMEOUT_MS}
+                            heartbeatTimeoutMs={HEARTBEAT_MS}
+                          >
                             {implementPrompt(ctx, item, issues)}
                           </Task>
                           <Task id={`${item.key}:candidate`} output={outputs.candidate}>
                             {() => captureCandidate(item, setup)}
                           </Task>
                           {implementation && candidate?.ready ? (
-                            <Task id={`${item.key}:review`} output={outputs.review} agent={lunaReview}
-                              retries={AGENT_RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+                            <Task
+                              id={`${item.key}:review`}
+                              output={outputs.review}
+                              agent={lunaReview}
+                              retries={AGENT_RETRIES}
+                              timeoutMs={REVIEW_TIMEOUT_MS}
+                              heartbeatTimeoutMs={HEARTBEAT_MS}
+                            >
                               {reviewPrompt(item, issues, candidate, implementation)}
                             </Task>
                           ) : null}
@@ -959,7 +1065,12 @@ export default smithers((ctx) => {
         ) : null}
 
         {allSettled ? (
-          <Worktree id="integration-worktree" path={integrationPath} branch={branchName("integration", run)} baseBranch={baseCommit}>
+          <Worktree
+            id="integration-worktree"
+            path={integrationPath}
+            branch={branchName("integration", run)}
+            baseBranch={baseCommit}
+          >
             <Sequence>
               <Task id="integration-bootstrap" output={outputs.setup} timeoutMs={35 * 60_000}>
                 {() => bootstrapWorktree("__integration", integrationPath, baseCommit)}
@@ -975,8 +1086,14 @@ export default smithers((ctx) => {
                 </Task>
               ) : null}
               {commits?.ready && gate?.passed && gate.headSha === commits.headSha ? (
-                <Task id="fable-review" output={outputs.finalReview} agent={fable} retries={1}
-                  timeoutMs={FINAL_REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+                <Task
+                  id="fable-review"
+                  output={outputs.finalReview}
+                  agent={fable}
+                  retries={1}
+                  timeoutMs={FINAL_REVIEW_TIMEOUT_MS}
+                  heartbeatTimeoutMs={HEARTBEAT_MS}
+                >
                   {finalReviewPrompt(allIssues, commits)}
                 </Task>
               ) : null}
@@ -993,7 +1110,11 @@ export default smithers((ctx) => {
                       `Skipped: ${commits.skipped.map((item) => `${item.itemKey}: ${item.reason}`).join("; ") || "(none)"}`,
                       "The fixed no-network gate passed and Fable approved this exact SHA. Approve to perform one non-force exact-SHA push; deny to leave main untouched.",
                     ].join("\n"),
-                    metadata: { baseSha: commits.baseSha, headSha: commits.headSha, changedPaths: commits.changedPaths },
+                    metadata: {
+                      baseSha: commits.baseSha,
+                      headSha: commits.headSha,
+                      changedPaths: commits.changedPaths,
+                    },
                   }}
                   onDeny="continue"
                 />

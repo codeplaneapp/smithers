@@ -62,14 +62,23 @@ type RunResult = {
 
 function redactSecrets(value: string): string {
   let result = value;
-  for (const key of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "CLOUDFLARE_API_TOKEN", "SIGNAL_MANUAL_TRIGGER_SECRET"]) {
+  for (const key of [
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "CLOUDFLARE_API_TOKEN",
+    "SIGNAL_MANUAL_TRIGGER_SECRET",
+  ]) {
     const secret = process.env[key]?.trim();
     if (secret) result = result.split(secret).join("[REDACTED]");
   }
   return result;
 }
 
-async function runSmithersCli(runId: string, input: Record<string, unknown>): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+async function runSmithersCli(
+  runId: string,
+  input: Record<string, unknown>,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const proc = Bun.spawn(
     [
       join(REPO_ROOT, "node_modules", ".bin", "smithers"),
@@ -86,16 +95,23 @@ async function runSmithersCli(runId: string, input: Record<string, unknown>): Pr
     ],
     { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe", env: process.env },
   );
-  const [stdout, stderr, exitCode] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
   return { exitCode, stdout, stderr };
 }
 
 async function readNodeOutput(runId: string, nodeId: string): Promise<Record<string, unknown> | null> {
-  const proc = Bun.spawn([join(REPO_ROOT, "node_modules", ".bin", "smithers"), "output", runId, nodeId, "--format", "json"], {
-    cwd: REPO_ROOT,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  const proc = Bun.spawn(
+    [join(REPO_ROOT, "node_modules", ".bin", "smithers"), "output", runId, nodeId, "--format", "json"],
+    {
+      cwd: REPO_ROOT,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
   const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
   try {
     return JSON.parse(stdout) as Record<string, unknown>;
@@ -136,7 +152,8 @@ export async function runOnce(options: { dbPath?: string } = {}): Promise<RunRes
       .filter((line) => /SIGTERM|SIGINT|cancel|hijack|force-exit|out of memory|OOM/i.test(line))
       .slice(0, 20);
     const tail = redactSecrets(stderr.slice(-4000));
-    const signals = signalLines.length > 0 ? `\n--- cancellation/signal lines ---\n${redactSecrets(signalLines.join("\n"))}` : "";
+    const signals =
+      signalLines.length > 0 ? `\n--- cancellation/signal lines ---\n${redactSecrets(signalLines.join("\n"))}` : "";
     errors.push(`smithers up exited ${exitCode}: ${tail}${signals}`);
   }
 
@@ -160,7 +177,17 @@ export async function runOnce(options: { dbPath?: string } = {}): Promise<RunRes
   }
 
   const ok = exitCode === 0 && (creds === null || published);
-  return { ok, runId, cliExitCode: exitCode, published, publishSkippedReason, finalizeStatus, errors, stateSyncedDown, stateSyncedUp };
+  return {
+    ok,
+    runId,
+    cliExitCode: exitCode,
+    published,
+    publishSkippedReason,
+    finalizeStatus,
+    errors,
+    stateSyncedDown,
+    stateSyncedUp,
+  };
 }
 
 function serve(): void {
@@ -177,7 +204,10 @@ function serve(): void {
           const result = await runOnce();
           return Response.json(result, { status: result.ok ? 200 : 500 });
         } catch (error) {
-          return Response.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+          return Response.json(
+            { ok: false, error: error instanceof Error ? error.message : String(error) },
+            { status: 500 },
+          );
         }
       }
       return new Response("not found", { status: 404 });

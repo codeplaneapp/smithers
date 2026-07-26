@@ -29,11 +29,7 @@ type FakeAgentScriptFn<T> = (
   args: Record<string, unknown>,
 ) => FakeAgentResult<T> | T | AutoMock | Promise<FakeAgentResult<T> | T | AutoMock>;
 
-export type FakeAgentScript<T> =
-  | AutoMock
-  | FakeAgentResult<T>
-  | T
-  | FakeAgentScriptFn<T>;
+export type FakeAgentScript<T> = AutoMock | FakeAgentResult<T> | T | FakeAgentScriptFn<T>;
 
 export type FakeAgentOptions = {
   id?: string;
@@ -63,7 +59,9 @@ export const auto: AutoMock = Object.freeze({
 });
 
 export function isAuto(value: unknown): value is AutoMock {
-  return Boolean(value && typeof value === "object" && (value as Record<typeof autoMarker, unknown>)[autoMarker] === true);
+  return Boolean(
+    value && typeof value === "object" && (value as Record<typeof autoMarker, unknown>)[autoMarker] === true,
+  );
 }
 
 function schemaExample<T>(schema: SafeSchema<T>): T {
@@ -188,7 +186,12 @@ async function ensureSafeParentDirectories(root: string, target: string, name: s
   }
 }
 
-async function writeFileWithoutFollowingSymlinks(root: string, target: string, name: string, contents: string | Uint8Array) {
+async function writeFileWithoutFollowingSymlinks(
+  root: string,
+  target: string,
+  name: string,
+  contents: string | Uint8Array,
+) {
   await ensureSafeParentDirectories(root, target, name);
   // Recheck every ancestor after directory creation to catch components that
   // were replaced while the parent directories were being prepared.
@@ -251,18 +254,14 @@ function isUnsafePosixError(posix: PosixFs, errno: number): boolean {
 }
 
 function openAt(posix: PosixFs, directory: number, path: string, flags: number, mode?: number): number {
-  const fd = mode === undefined
-    ? posix.openat(directory, path, flags)
-    : posix.openat(directory, path, flags, "int", mode);
+  const fd =
+    mode === undefined ? posix.openat(directory, path, flags) : posix.openat(directory, path, flags, "int", mode);
   if (fd >= 0) return fd;
   throw posixError("openat", path, posix.errno());
 }
 
 function directoryOpenFlags(): number {
-  return fsConstants.O_RDONLY
-    | fsConstants.O_DIRECTORY
-    | fsConstants.O_NOFOLLOW
-    | closeOnExecFlag();
+  return fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW | closeOnExecFlag();
 }
 
 function closeOnExecFlag(): number {
@@ -360,11 +359,8 @@ function writeFileAt(posix: PosixFs, root: number, path: string, name: string, c
       ownsCurrent = true;
     }
 
-    const flags = fsConstants.O_WRONLY
-      | fsConstants.O_CREAT
-      | fsConstants.O_TRUNC
-      | fsConstants.O_NOFOLLOW
-      | closeOnExecFlag();
+    const flags =
+      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW | closeOnExecFlag();
     let file: number;
     try {
       file = openAt(posix, current, filename, flags, 0o666);
@@ -422,7 +418,11 @@ async function writeFiles(rootDir: string | undefined, files: FakeAgentFiles | u
   }
 }
 
-function buildFakeAgent<T>(schema: SafeSchema<T>, script: FakeAgentScript<T>, options: FakeAgentOptions = {}): FakeAgent<T> {
+function buildFakeAgent<T>(
+  schema: SafeSchema<T>,
+  script: FakeAgentScript<T>,
+  options: FakeAgentOptions = {},
+): FakeAgent<T> {
   const calls: FakeAgentCall[] = [];
   const agent: FakeAgent<T> = {
     id: options.id ?? "fake-agent",

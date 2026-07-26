@@ -15,62 +15,59 @@
  * @returns {Record<string, unknown> | unknown[] | number | undefined}
  */
 function parseJudgeJson(text) {
-    const trimmed = text.trim();
-    try {
-        const parsed = JSON.parse(trimmed);
-        if (typeof parsed === "number") {
-            return parsed;
-        }
-        if (parsed && typeof parsed === "object") {
-            return parsed;
-        }
-        return undefined;
+  const trimmed = text.trim();
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed === "number") {
+      return parsed;
     }
-    catch {
-        // fall through to balanced-brace extraction
-    }
-    const start = trimmed.indexOf("{");
-    if (start === -1) {
-        return undefined;
-    }
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    for (let i = start; i < trimmed.length; i++) {
-        const char = trimmed[i];
-        if (escaped) {
-            escaped = false;
-            continue;
-        }
-        if (char === "\\") {
-            if (inString) {
-                escaped = true;
-            }
-            continue;
-        }
-        if (char === '"') {
-            inString = !inString;
-            continue;
-        }
-        if (inString) {
-            continue;
-        }
-        if (char === "{") {
-            depth++;
-        }
-        else if (char === "}") {
-            depth--;
-            if (depth === 0) {
-                try {
-                    return JSON.parse(trimmed.slice(start, i + 1));
-                }
-                catch {
-                    return undefined;
-                }
-            }
-        }
+    if (parsed && typeof parsed === "object") {
+      return parsed;
     }
     return undefined;
+  } catch {
+    // fall through to balanced-brace extraction
+  }
+  const start = trimmed.indexOf("{");
+  if (start === -1) {
+    return undefined;
+  }
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < trimmed.length; i++) {
+    const char = trimmed[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      if (inString) {
+        escaped = true;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) {
+      continue;
+    }
+    if (char === "{") {
+      depth++;
+    } else if (char === "}") {
+      depth--;
+      if (depth === 0) {
+        try {
+          return JSON.parse(trimmed.slice(start, i + 1));
+        } catch {
+          return undefined;
+        }
+      }
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -95,51 +92,48 @@ function parseJudgeJson(text) {
  * @returns {Scorer}
  */
 export function llmJudge(config) {
-    const { id, name, description, judge, instructions, promptTemplate } = config;
-    /**
+  const { id, name, description, judge, instructions, promptTemplate } = config;
+  /**
    * @param {ScorerInput} input
    * @returns {Promise<ScoreResult>}
    */
-    const score = async (input) => {
-        const prompt = promptTemplate(input);
-        const response = await judge.generate({
-            prompt: `${instructions}\n\n${prompt}`,
-        });
-        // The response can be a string, or an object with a text field
-        const text = typeof response === "string"
-            ? response
-            : typeof response?.text === "string"
-                ? response.text
-                : JSON.stringify(response);
-        // Try to parse JSON from the response. First attempt the whole trimmed
-        // text, then fall back to the outermost balanced-brace object so that a
-        // brace inside the judge's `reason` string does not truncate the match.
-        const parsed = parseJudgeJson(text);
-        if (typeof parsed === "number") {
-            return {
-                score: Number.isFinite(parsed)
-                    ? Math.max(0, Math.min(1, parsed))
-                    : 0,
-                reason: undefined,
-                meta: { raw: text },
-            };
-        }
-        if (parsed) {
-            const rawScore = Number(parsed.score);
-            return {
-                score: Number.isFinite(rawScore)
-                    ? Math.max(0, Math.min(1, rawScore))
-                    : 0,
-                reason: typeof parsed.reason === "string" ? parsed.reason : undefined,
-                meta: { raw: text },
-            };
-        }
-        // If we can't parse JSON, return a low-confidence score
-        return {
-            score: 0,
-            reason: "Failed to parse judge response as JSON",
-            meta: { raw: text },
-        };
+  const score = async (input) => {
+    const prompt = promptTemplate(input);
+    const response = await judge.generate({
+      prompt: `${instructions}\n\n${prompt}`,
+    });
+    // The response can be a string, or an object with a text field
+    const text =
+      typeof response === "string"
+        ? response
+        : typeof response?.text === "string"
+          ? response.text
+          : JSON.stringify(response);
+    // Try to parse JSON from the response. First attempt the whole trimmed
+    // text, then fall back to the outermost balanced-brace object so that a
+    // brace inside the judge's `reason` string does not truncate the match.
+    const parsed = parseJudgeJson(text);
+    if (typeof parsed === "number") {
+      return {
+        score: Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : 0,
+        reason: undefined,
+        meta: { raw: text },
+      };
+    }
+    if (parsed) {
+      const rawScore = Number(parsed.score);
+      return {
+        score: Number.isFinite(rawScore) ? Math.max(0, Math.min(1, rawScore)) : 0,
+        reason: typeof parsed.reason === "string" ? parsed.reason : undefined,
+        meta: { raw: text },
+      };
+    }
+    // If we can't parse JSON, return a low-confidence score
+    return {
+      score: 0,
+      reason: "Failed to parse judge response as JSON",
+      meta: { raw: text },
     };
-    return { id, name, description, score };
+  };
+  return { id, name, description, score };
 }

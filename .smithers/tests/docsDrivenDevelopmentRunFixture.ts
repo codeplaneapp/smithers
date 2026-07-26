@@ -87,7 +87,10 @@ export function createDddFixtureRepo(options: DddFixtureRepoOptions = {}): DddFi
   mkdirSync(join(root, ".smithers/workflows"), { recursive: true });
   cpSync(agentsDir, join(root, ".smithers/agents"), { recursive: true });
   writeFixtureAgents(root);
-  writeFileSync(join(root, ".smithers/spec/features.json"), `${JSON.stringify(options.features ?? [dddFixtureFeature()], null, 2)}\n`);
+  writeFileSync(
+    join(root, ".smithers/spec/features.json"),
+    `${JSON.stringify(options.features ?? [dddFixtureFeature()], null, 2)}\n`,
+  );
   writeFileSync(join(root, ".smithers/spec/content/overview.md"), "# Overview\n\nInitial DDD overview.\n");
   writeFileSync(join(root, ".smithers/specs/docs-driven-development.md"), "# Docs Driven Development\n");
   const providersImport = `import { agents } from "../agents";`;
@@ -110,7 +113,10 @@ export function createDddFixtureRepo(options: DddFixtureRepoOptions = {}): DddFi
   execFileSync("git", ["config", "user.name", "DDD Test"], { cwd: root, stdio: "pipe" });
   execFileSync("git", ["add", "."], { cwd: root, stdio: "pipe" });
   execFileSync("git", ["commit", "-m", "seed ddd fixture"], { cwd: root, stdio: "pipe" });
-  writeFileSync(join(root, ".smithers/spec/content/overview.md"), "# Overview\n\nInitial DDD overview.\n\nUncommitted docs edit.\n");
+  writeFileSync(
+    join(root, ".smithers/spec/content/overview.md"),
+    "# Overview\n\nInitial DDD overview.\n\nUncommitted docs edit.\n",
+  );
 
   writeFakeAgents(binDir);
 
@@ -304,9 +310,11 @@ export function fakeAgentResponse(summary: string, overrides: Record<string, unk
 
 function serializeFakeResponsesByNode(responses: DddFakeAgentResponses | undefined): string | undefined {
   if (!responses) return undefined;
-  return JSON.stringify(Object.fromEntries(
-    Object.entries(responses).map(([key, value]) => [key, typeof value === "string" ? value : JSON.stringify(value)]),
-  ));
+  return JSON.stringify(
+    Object.fromEntries(
+      Object.entries(responses).map(([key, value]) => [key, typeof value === "string" ? value : JSON.stringify(value)]),
+    ),
+  );
 }
 
 export async function withDddFixtureExecutionEnv<T>(
@@ -352,15 +360,23 @@ export async function runDddWorkflow(
   input: Record<string, unknown>,
   options: { agentResponsesByNode?: DddFakeAgentResponses } = {},
 ) {
-  return withDddFixtureExecutionEnv(repo, async () => {
+  return withDddFixtureExecutionEnv(
+    repo,
+    async () => {
       const tempWorkflowPath = join(repo.root, ".smithers/workflows/docs-driven-development.tsx");
       const mod = await import(`${tempWorkflowPath}?run=${encodeURIComponent(runId)}-${Date.now()}-${Math.random()}`);
       const gateway = new Gateway({ heartbeatMs: 50 });
-      gateway.register("docs-driven-development", (mod as { default: Parameters<typeof gateway.register>[1] }).default, {
-        ui: { entry: uiEntry, title: "Docs Driven Development" },
-      });
+      gateway.register(
+        "docs-driven-development",
+        (mod as { default: Parameters<typeof gateway.register>[1] }).default,
+        {
+          ui: { entry: uiEntry, title: "Docs Driven Development" },
+        },
+      );
       const auth = { triggeredBy: "e2e", scopes: ["*"], role: "operator", tokenId: null };
-      await gateway.startRun("docs-driven-development", input, auth as Parameters<typeof gateway.startRun>[2], runId, { resume: false });
+      await gateway.startRun("docs-driven-development", input, auth as Parameters<typeof gateway.startRun>[2], runId, {
+        resume: false,
+      });
       let inflight = gateway.inflightRuns.get(runId);
       for (let attempt = 0; !inflight && attempt < 50; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 20));
@@ -371,7 +387,9 @@ export async function runDddWorkflow(
       } else {
         for (let attempt = 0; attempt < 2400; attempt += 1) {
           const response = await gatewayRequest(gateway, createConnectionContext(), "runs.list", { limit: 100 });
-          const rows = (response.ok && Array.isArray(response.payload) ? response.payload : []) as Array<Record<string, unknown>>;
+          const rows = (response.ok && Array.isArray(response.payload) ? response.payload : []) as Array<
+            Record<string, unknown>
+          >;
           const status = rows.find((row) => row.runId === runId)?.status;
           if (status === "finished" || status === "failed" || status === "canceled") break;
           await new Promise((resolve) => setTimeout(resolve, 50));
@@ -397,7 +415,12 @@ export function createConnectionContext() {
   };
 }
 
-export async function gatewayRequest(gateway: Gateway, connection: ReturnType<typeof createConnectionContext>, method: string, params?: Record<string, unknown>) {
+export async function gatewayRequest(
+  gateway: Gateway,
+  connection: ReturnType<typeof createConnectionContext>,
+  method: string,
+  params?: Record<string, unknown>,
+) {
   return (gateway as any).routeRequest(connection, {
     type: "req",
     id: `${method}-${Math.random().toString(36).slice(2)}`,
@@ -406,7 +429,13 @@ export async function gatewayRequest(gateway: Gateway, connection: ReturnType<ty
   });
 }
 
-export async function nodeOutput(gateway: Gateway, connection: ReturnType<typeof createConnectionContext>, runId: string, nodeId: string, iteration = 0) {
+export async function nodeOutput(
+  gateway: Gateway,
+  connection: ReturnType<typeof createConnectionContext>,
+  runId: string,
+  nodeId: string,
+  iteration = 0,
+) {
   const response = await gatewayRequest(gateway, connection, "getNodeOutput", { runId, nodeId, iteration });
   if (!response.ok) throw new Error(`getNodeOutput ${nodeId} failed: ${response.error?.code ?? "unknown"}`);
   return response.payload;

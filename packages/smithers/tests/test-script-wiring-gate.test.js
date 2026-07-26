@@ -99,7 +99,9 @@ describe("check-smithers-test-script gate", () => {
     write(dir, ".smithers/ui/other/orphan.test.tsx", "");
     const result = runGate(dir);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('.smithers/ui/other/orphan.test.tsx is a runtime test file but no "bun test" script runs it');
+    expect(result.stderr).toContain(
+      '.smithers/ui/other/orphan.test.tsx is a runtime test file but no "bun test" script runs it',
+    );
     expect(result.stderr).toContain("add it to one of: test, test:ddd.");
     expect(result.stderr).not.toContain("lint");
   });

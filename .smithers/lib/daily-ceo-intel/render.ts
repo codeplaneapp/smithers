@@ -25,7 +25,14 @@ export type PublicIssue = {
     sourcesChecked: Array<{ id: string; name: string; ok: boolean; error?: string; itemCount: number }>;
     dateUncertain: Array<{ title: string; url: string; sourceName: string }>;
     lateDiscovered: Array<{ title: string; url: string; publishedAt: string }>;
-    totals: { fetched: number; inWindow: number; afterDedupe: number; clusters: number; assessed: number; selected: number };
+    totals: {
+      fetched: number;
+      inWindow: number;
+      afterDedupe: number;
+      clusters: number;
+      assessed: number;
+      selected: number;
+    };
   };
   /** Additive (phase 2 round 3+); absent on issues rendered before the provider fallback landed. */
   provenance?: IssueProvenance;
@@ -70,10 +77,12 @@ function dekFrom(text: string): string {
 }
 
 function sourcesForCluster(cluster: Cluster | undefined, canonicalUrl: string): PublicStory["sources"] {
-  if (!cluster || cluster.sourceIds.length === 0) return [{ id: "unknown", name: "unknown", url: canonicalUrl, type: "community", primary: true }];
+  if (!cluster || cluster.sourceIds.length === 0)
+    return [{ id: "unknown", name: "unknown", url: canonicalUrl, type: "community", primary: true }];
   return cluster.sourceIds.map((sourceId, index) => {
     const kind = cluster.sourceKinds[index] ?? cluster.sourceKinds[0];
-    const type: PublicStory["sources"][number]["type"] = index === 0 ? "primary" : kind && COMMUNITY_SOURCE_KINDS.has(kind) ? "community" : "press";
+    const type: PublicStory["sources"][number]["type"] =
+      index === 0 ? "primary" : kind && COMMUNITY_SOURCE_KINDS.has(kind) ? "community" : "press";
     return { id: sourceId, name: sourceId, url: canonicalUrl, type, primary: index === 0 };
   });
 }
@@ -89,7 +98,14 @@ export function buildPublicIssue(
   windowStart: string,
   windowEnd: string,
   generatedAt: string,
-  totals: { fetched: number; inWindow: number; afterDedupe: number; clusters: number; assessed: number; selected: number },
+  totals: {
+    fetched: number;
+    inWindow: number;
+    afterDedupe: number;
+    clusters: number;
+    assessed: number;
+    selected: number;
+  },
   provenance?: IssueProvenance,
 ): PublicIssue {
   const clusterById = new Map(clusters.map((cluster) => [cluster.srcId, cluster]));
@@ -150,8 +166,18 @@ export function buildPublicIssue(
     ourMove,
     lighterSide,
     coverage: {
-      sourcesChecked: coverage.map((row) => ({ id: row.sourceId, name: row.sourceId, ok: row.ok, error: row.error ?? undefined, itemCount: row.itemCount })),
-      dateUncertain: dateUncertainSample.map((item) => ({ title: item.title, url: item.url, sourceName: item.sourceId })),
+      sourcesChecked: coverage.map((row) => ({
+        id: row.sourceId,
+        name: row.sourceId,
+        ok: row.ok,
+        error: row.error ?? undefined,
+        itemCount: row.itemCount,
+      })),
+      dateUncertain: dateUncertainSample.map((item) => ({
+        title: item.title,
+        url: item.url,
+        sourceName: item.sourceId,
+      })),
       lateDiscovered: [],
       totals,
     },
@@ -175,7 +201,11 @@ const SECTION_TITLES: Record<Issue["sectionOrder"][number], string> = {
   lighterSide: "The Lighter Side",
 };
 
-function renderMarkdownSection(kind: Issue["sectionOrder"][number], issue: Issue, srcIdMap: Record<string, string>): string {
+function renderMarkdownSection(
+  kind: Issue["sectionOrder"][number],
+  issue: Issue,
+  srcIdMap: Record<string, string>,
+): string {
   const title = `## ${SECTION_TITLES[kind]}`;
   if (kind === "topStories") {
     if (issue.topStories.length === 0) return `${title}\n\nNo qualifying stories today.`;
@@ -210,7 +240,11 @@ function renderMarkdownSection(kind: Issue["sectionOrder"][number], issue: Issue
   return `${title}\n\n${body}`;
 }
 
-function renderHtmlSection(kind: Issue["sectionOrder"][number], issue: Issue, srcIdMap: Record<string, string>): string {
+function renderHtmlSection(
+  kind: Issue["sectionOrder"][number],
+  issue: Issue,
+  srcIdMap: Record<string, string>,
+): string {
   const title = `<h2>${escapeHtml(SECTION_TITLES[kind])}</h2>`;
   if (kind === "topStories") {
     if (issue.topStories.length === 0) return `${title}<p>No qualifying stories today.</p>`;
@@ -224,22 +258,31 @@ function renderHtmlSection(kind: Issue["sectionOrder"][number], issue: Issue, sr
   }
   if (kind === "recommendedActions") {
     if (issue.recommendedActions.length === 0) return `${title}<p>None today.</p>`;
-    const items = issue.recommendedActions.map((action) => `<li>${escapeHtml(action.action)} (${escapeHtml(action.srcId)})</li>`).join("");
+    const items = issue.recommendedActions
+      .map((action) => `<li>${escapeHtml(action.action)} (${escapeHtml(action.srcId)})</li>`)
+      .join("");
     return `${title}<ol>${items}</ol>`;
   }
   if (kind === "briefs") {
     if (issue.briefs.length === 0) return `${title}<p>None today.</p>`;
-    const items = issue.briefs.map((brief) => `<li>${escapeHtml(brief.text)} (${escapeHtml(brief.srcId)})</li>`).join("");
+    const items = issue.briefs
+      .map((brief) => `<li>${escapeHtml(brief.text)} (${escapeHtml(brief.srcId)})</li>`)
+      .join("");
     return `${title}<ul>${items}</ul>`;
   }
   if (issue.lighterSide.length === 0) return `${title}<p>Quiet day for memes.</p>`;
-  const items = issue.lighterSide.map((item) => `<li>${escapeHtml(item.text)} (${escapeHtml(item.srcId)})</li>`).join("");
+  const items = issue.lighterSide
+    .map((item) => `<li>${escapeHtml(item.text)} (${escapeHtml(item.srcId)})</li>`)
+    .join("");
   return `${title}<ul>${items}</ul>`;
 }
 
 function renderCoverageMarkdown(coverage: CoverageRow[]): string {
   const rows = coverage
-    .map((row) => `| ${row.sourceId} | ${row.kind} | ${row.ok ? "ok" : "failed"} | ${row.itemCount} | ${row.retried ? "yes" : "no"} | ${row.error ?? ""} |`)
+    .map(
+      (row) =>
+        `| ${row.sourceId} | ${row.kind} | ${row.ok ? "ok" : "failed"} | ${row.itemCount} | ${row.retried ? "yes" : "no"} | ${row.error ?? ""} |`,
+    )
     .join("\n");
   return `## Source Coverage\n\n| Source | Kind | Status | Items | Retried | Error |\n| --- | --- | --- | --- | --- | --- |\n${rows}`;
 }
@@ -267,7 +310,14 @@ export function renderIssue(
     windowStart: string;
     windowEnd: string;
     generatedAt: string;
-    totals: { fetched: number; inWindow: number; afterDedupe: number; clusters: number; assessed: number; selected: number };
+    totals: {
+      fetched: number;
+      inWindow: number;
+      afterDedupe: number;
+      clusters: number;
+      assessed: number;
+      selected: number;
+    };
   },
   provenance?: IssueProvenance,
 ): RenderOutput {

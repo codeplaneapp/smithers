@@ -82,14 +82,20 @@ export function telegramApprovalCallbackData(choice, token) {
     data = `${CALLBACK_PREFIX}:${tok}:d`;
   } else if (choice.kind === "select") {
     if (!choice.key || choice.key.includes(":")) {
-      throw new SmithersError("INVALID_INPUT", `Approval option key must be non-empty and contain no ":": ${JSON.stringify(choice.key)}`);
+      throw new SmithersError(
+        "INVALID_INPUT",
+        `Approval option key must be non-empty and contain no ":": ${JSON.stringify(choice.key)}`,
+      );
     }
     data = `${CALLBACK_PREFIX}:${tok}:s:${choice.key}`;
   } else {
     throw new SmithersError("INVALID_INPUT", "Unknown approval choice.");
   }
   if (byteLength(data) > CALLBACK_DATA_MAX_BYTES) {
-    throw new SmithersError("INVALID_INPUT", `Approval callback_data exceeds Telegram's ${CALLBACK_DATA_MAX_BYTES}-byte limit (option key too long): ${data}`);
+    throw new SmithersError(
+      "INVALID_INPUT",
+      `Approval callback_data exceeds Telegram's ${CALLBACK_DATA_MAX_BYTES}-byte limit (option key too long): ${data}`,
+    );
   }
   return data;
 }
@@ -163,11 +169,16 @@ export function approvalInlineKeyboard(spec) {
       throw new SmithersError("INVALID_INPUT", 'TelegramApproval mode "select" requires at least one option.');
     }
     for (const option of options) {
-      rows.push([{ text: option.label, callback_data: telegramApprovalCallbackData({ kind: "select", key: option.key }, token) }]);
+      rows.push([
+        { text: option.label, callback_data: telegramApprovalCallbackData({ kind: "select", key: option.key }, token) },
+      ]);
     }
   } else {
     rows.push([
-      { text: spec.approveText ?? "✅ Approve", callback_data: telegramApprovalCallbackData({ kind: "approve" }, token) },
+      {
+        text: spec.approveText ?? "✅ Approve",
+        callback_data: telegramApprovalCallbackData({ kind: "approve" }, token),
+      },
       { text: spec.rejectText ?? "🚫 Reject", callback_data: telegramApprovalCallbackData({ kind: "reject" }, token) },
     ]);
   }

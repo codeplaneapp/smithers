@@ -185,8 +185,8 @@
 // @smithers-type-exports-end
 
 export { hashCapabilityRegistry } from "@smithers-orchestrator/agents/capability-registry";
-export { ERROR_REFERENCE_URL, } from "@smithers-orchestrator/errors/ERROR_REFERENCE_URL";
-export { SmithersError as SmithersErrorInstance, } from "@smithers-orchestrator/errors/SmithersError";
+export { ERROR_REFERENCE_URL } from "@smithers-orchestrator/errors/ERROR_REFERENCE_URL";
+export { SmithersError as SmithersErrorInstance } from "@smithers-orchestrator/errors/SmithersError";
 export { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
 export { getSmithersErrorDefinition } from "@smithers-orchestrator/errors/getSmithersErrorDefinition";
 export { getSmithersErrorDocsUrl } from "@smithers-orchestrator/errors/getSmithersErrorDocsUrl";
@@ -194,9 +194,97 @@ export { isKnownSmithersErrorCode } from "@smithers-orchestrator/errors/isKnownS
 export { isSmithersError } from "@smithers-orchestrator/errors/isSmithersError";
 export { knownSmithersErrorCodes } from "@smithers-orchestrator/errors/knownSmithersErrorCodes";
 // Components
-export { Approval, ApprovalGate, Aspects, Branch, CheckSuite, ClassifyAndRoute, ContentPipeline, ContinueAsNew, Debate, DecisionTable, DriftDetector, EscalationChain, GatherAndSynthesize, HumanTask, Kanban, Loop, Memory, MergeQueue, Optimizer, Panel, Parallel, Poller, Ralph, ReviewLoop, Runbook, Saga, SagaStep, Sandbox, ScanFixVerify, Sequence, Sidecar, Signal, Subflow, SuperSmithers, Supervisor, TUI, Task, Timer, TryCatchFinally, UI, WaitForEvent, Workflow, Worktree, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema, computeSidecarDelta, continueAsNew, } from "@smithers-orchestrator/components";
+export {
+  Approval,
+  ApprovalGate,
+  Aspects,
+  Branch,
+  CheckSuite,
+  ClassifyAndRoute,
+  ContentPipeline,
+  ContinueAsNew,
+  Debate,
+  DecisionTable,
+  DriftDetector,
+  EscalationChain,
+  GatherAndSynthesize,
+  HumanTask,
+  Kanban,
+  Loop,
+  Memory,
+  MergeQueue,
+  Optimizer,
+  Panel,
+  Parallel,
+  Poller,
+  Ralph,
+  ReviewLoop,
+  Runbook,
+  Saga,
+  SagaStep,
+  Sandbox,
+  ScanFixVerify,
+  Sequence,
+  Sidecar,
+  Signal,
+  Subflow,
+  SuperSmithers,
+  Supervisor,
+  TUI,
+  Task,
+  Timer,
+  TryCatchFinally,
+  UI,
+  WaitForEvent,
+  Workflow,
+  Worktree,
+  approvalDecisionSchema,
+  approvalRankingSchema,
+  approvalSelectionSchema,
+  computeSidecarDelta,
+  continueAsNew,
+} from "@smithers-orchestrator/components";
 // Delegation chain
-export { BackpressurePlanning, DelegationChain, DelegationEditListener, DelegationExecution, DelegationPlanning, DelegationPreview, DelegationScoring, DeriskLoop, GoalRefinement, DC_EDIT_SIGNAL, DC_SKIP_PREVIEW_SIGNAL, DEFAULT_TIER_ORDER, captureWorkingCopyCommit, dcApprovalSchema, dcBudgetSchema, dcDevPreviewSchema, dcEditSchema, dcExecSchema, dcForecastSchema, dcGatesSchema, dcGoalApprovalSchema, dcGoalSchema, dcPlanSchema, dcPollSchema, dcPreviewSchema, dcProbeSchema, dcQuestionSchema, dcReplanSchema, dcReviewSchema, dcScoreSchema, dcSkipSchema, delegationPrompts, delegationSchemas, devPreviewKindSchema, estimateSchema, gateSchema, tierSchema, withCommitRange, } from "@smithers-orchestrator/components";
+export {
+  BackpressurePlanning,
+  DelegationChain,
+  DelegationEditListener,
+  DelegationExecution,
+  DelegationPlanning,
+  DelegationPreview,
+  DelegationScoring,
+  DeriskLoop,
+  GoalRefinement,
+  DC_EDIT_SIGNAL,
+  DC_SKIP_PREVIEW_SIGNAL,
+  DEFAULT_TIER_ORDER,
+  captureWorkingCopyCommit,
+  dcApprovalSchema,
+  dcBudgetSchema,
+  dcDevPreviewSchema,
+  dcEditSchema,
+  dcExecSchema,
+  dcForecastSchema,
+  dcGatesSchema,
+  dcGoalApprovalSchema,
+  dcGoalSchema,
+  dcPlanSchema,
+  dcPollSchema,
+  dcPreviewSchema,
+  dcProbeSchema,
+  dcQuestionSchema,
+  dcReplanSchema,
+  dcReviewSchema,
+  dcScoreSchema,
+  dcSkipSchema,
+  delegationPrompts,
+  delegationSchemas,
+  devPreviewKindSchema,
+  estimateSchema,
+  gateSchema,
+  tierSchema,
+  withCommitRange,
+} from "@smithers-orchestrator/components";
 // Trellis dynamic delegation
 export {
   Trellis,
@@ -218,9 +306,37 @@ export {
   trellisPrompts,
 } from "@smithers-orchestrator/components";
 // Agents
-export { AnthropicAgent, OpenAIAgent, HermesAgent, HermesCliAgent, OpenClawAgent, AmpAgent, AntigravityAgent, ClaudeCodeAgent, CodexAgent, GeminiAgent, PiAgent, OmpAgent, createOmpCapabilityRegistry, KimiAgent, ForgeAgent, VibeAgent, OpenCodeAgent, PoolAgent, createHttpTool, } from "@smithers-orchestrator/agents";
+export {
+  AnthropicAgent,
+  OpenAIAgent,
+  HermesAgent,
+  HermesCliAgent,
+  OpenClawAgent,
+  AmpAgent,
+  AntigravityAgent,
+  ClaudeCodeAgent,
+  CodexAgent,
+  GeminiAgent,
+  PiAgent,
+  OmpAgent,
+  createOmpCapabilityRegistry,
+  KimiAgent,
+  ForgeAgent,
+  VibeAgent,
+  OpenCodeAgent,
+  PoolAgent,
+  createHttpTool,
+} from "@smithers-orchestrator/agents";
 // VCS
-export { runJj, getJjPointer, revertToJjPointer, isJjRepo, workspaceAdd, workspaceList, workspaceClose, } from "@smithers-orchestrator/vcs/jj";
+export {
+  runJj,
+  getJjPointer,
+  revertToJjPointer,
+  isJjRepo,
+  workspaceAdd,
+  workspaceList,
+  workspaceClose,
+} from "@smithers-orchestrator/vcs/jj";
 // Core API
 export { createSmithers, createSmithersCloudflare, createSmithersPostgres } from "./create.js";
 export { openSmithersBackend } from "./openSmithersBackend.js";
@@ -255,23 +371,64 @@ export { signalRun } from "@smithers-orchestrator/engine/signals";
 export { executeChildWorkflow } from "@smithers-orchestrator/engine/child-workflow";
 export { usePatched } from "@smithers-orchestrator/engine/effect/versioning";
 // Tools
-export {
-  bash,
-  defineTool,
-  edit,
-  getDefinedToolMetadata,
-  grep,
-  read,
-  tools,
-  write,
-} from "./tools.js";
+export { bash, defineTool, edit, getDefinedToolMetadata, grep, read, tools, write } from "./tools.js";
 // Server
 export { startServer } from "@smithers-orchestrator/server";
 export { Gateway } from "@smithers-orchestrator/server/gateway";
 // Serve (Hono-based single-workflow HTTP server)
 export { createServeApp } from "@smithers-orchestrator/server/serve";
 // Observability
-export { SmithersObservability, createSmithersObservabilityLayer, createSmithersOtelLayer, createSmithersRuntimeLayer, smithersMetrics, trackSmithersEvent, activeNodes, activeRuns, externalWaitAsyncPending, approvalsDenied, approvalsGranted, approvalsRequested, timerDelayDuration, timersCancelled, timersCreated, timersFired, timersPending, attemptDuration, cacheHits, cacheMisses, dbQueryDuration, dbRetries, dbTransactionDuration, dbTransactionRetries, dbTransactionRollbacks, hotReloadDuration, hotReloadFailures, hotReloads, httpRequestDuration, httpRequests, nodeDuration, nodesFailed, nodesFinished, nodesStarted, prometheusContentType, renderPrometheusMetrics, resolveSmithersObservabilityOptions, runsTotal, sandboxActive, sandboxBundleSizeBytes, sandboxCompletedTotal, sandboxCreatedTotal, sandboxDurationMs, sandboxPatchCount, sandboxTransportDurationMs, schedulerQueueDepth, toolCallsTotal, toolDuration, vcsDuration, } from "@smithers-orchestrator/observability";
+export {
+  SmithersObservability,
+  createSmithersObservabilityLayer,
+  createSmithersOtelLayer,
+  createSmithersRuntimeLayer,
+  smithersMetrics,
+  trackSmithersEvent,
+  activeNodes,
+  activeRuns,
+  externalWaitAsyncPending,
+  approvalsDenied,
+  approvalsGranted,
+  approvalsRequested,
+  timerDelayDuration,
+  timersCancelled,
+  timersCreated,
+  timersFired,
+  timersPending,
+  attemptDuration,
+  cacheHits,
+  cacheMisses,
+  dbQueryDuration,
+  dbRetries,
+  dbTransactionDuration,
+  dbTransactionRetries,
+  dbTransactionRollbacks,
+  hotReloadDuration,
+  hotReloadFailures,
+  hotReloads,
+  httpRequestDuration,
+  httpRequests,
+  nodeDuration,
+  nodesFailed,
+  nodesFinished,
+  nodesStarted,
+  prometheusContentType,
+  renderPrometheusMetrics,
+  resolveSmithersObservabilityOptions,
+  runsTotal,
+  sandboxActive,
+  sandboxBundleSizeBytes,
+  sandboxCompletedTotal,
+  sandboxCreatedTotal,
+  sandboxDurationMs,
+  sandboxPatchCount,
+  sandboxTransportDurationMs,
+  schedulerQueueDepth,
+  toolCallsTotal,
+  toolDuration,
+  vcsDuration,
+} from "@smithers-orchestrator/observability";
 // DB
 export { SmithersDb } from "@smithers-orchestrator/db";
 export { loadOutputs, loadOutputsEffect } from "@smithers-orchestrator/db";
@@ -284,17 +441,62 @@ export { createExternalSmithers } from "./external/index.js";
 export { revertToAttempt } from "@smithers-orchestrator/time-travel/revert";
 export { timeTravel } from "@smithers-orchestrator/time-travel/timetravel";
 // Scorers
-export { createScorer, llmJudge, relevancyScorer, toxicityScorer, faithfulnessScorer, schemaAdherenceScorer, latencyScorer, runScorersAsync, runScorersBatch, aggregateScores, smithersScorers, modelTokenPrices, estimateCostUsd, } from "@smithers-orchestrator/scorers";
+export {
+  createScorer,
+  llmJudge,
+  relevancyScorer,
+  toxicityScorer,
+  faithfulnessScorer,
+  schemaAdherenceScorer,
+  latencyScorer,
+  runScorersAsync,
+  runScorersBatch,
+  aggregateScores,
+  smithersScorers,
+  modelTokenPrices,
+  estimateCostUsd,
+} from "@smithers-orchestrator/scorers";
 // Memory
-export { createMemoryStore, createHindsightMemoryStore, HindsightMemoryStore, createLocalMemoryRuntime, LocalMemoryRuntime, createMemoryLayer, MemoryService, TtlGarbageCollector, TokenLimiter, Summarizer, namespaceToString, parseNamespace, memoryFactReads, memoryFactWrites, memoryRecallQueries, memoryMessageSaves, memoryRecallDuration, } from "@smithers-orchestrator/memory";
+export {
+  createMemoryStore,
+  createHindsightMemoryStore,
+  HindsightMemoryStore,
+  createLocalMemoryRuntime,
+  LocalMemoryRuntime,
+  createMemoryLayer,
+  MemoryService,
+  TtlGarbageCollector,
+  TokenLimiter,
+  Summarizer,
+  namespaceToString,
+  parseNamespace,
+  memoryFactReads,
+  memoryFactWrites,
+  memoryRecallQueries,
+  memoryMessageSaves,
+  memoryRecallDuration,
+} from "@smithers-orchestrator/memory";
 // OpenAPI Tools
-export { createOpenApiTools, createOpenApiToolsSync, createOpenApiTool, createOpenApiToolSync, listOperations, openApiToolCallsTotal, openApiToolCallErrorsTotal, openApiToolDuration, } from "@smithers-orchestrator/openapi";
+export {
+  createOpenApiTools,
+  createOpenApiToolsSync,
+  createOpenApiTool,
+  createOpenApiToolSync,
+  listOperations,
+  openApiToolCallsTotal,
+  openApiToolCallErrorsTotal,
+  openApiToolDuration,
+} from "@smithers-orchestrator/openapi";
 // Utilities
 export { mdxPlugin } from "./mdx-plugin.js";
 export { markdownComponents } from "@smithers-orchestrator/components/markdownComponents";
 export { renderMdx } from "@smithers-orchestrator/components/renderMdx";
 export { zodToTable } from "@smithers-orchestrator/db/zodToTable";
-export { syncZodTableSchema, zodSchemaColumns, zodToCreateTableSQL } from "@smithers-orchestrator/db/zodToCreateTableSQL";
+export {
+  syncZodTableSchema,
+  zodSchemaColumns,
+  zodToCreateTableSQL,
+} from "@smithers-orchestrator/db/zodToCreateTableSQL";
 export { camelToSnake } from "@smithers-orchestrator/db/utils/camelToSnake";
 export { unwrapZodType } from "@smithers-orchestrator/db/unwrapZodType";
 export { zodSchemaToJsonExample } from "@smithers-orchestrator/components/zod-to-example";

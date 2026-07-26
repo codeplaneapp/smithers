@@ -9,14 +9,12 @@ export function reconcileSnapshotNodes(
   // Identity is the unique row `key` (not the logical `id`), matching the
   // collection's `getKey`, so loop/retry attempts sharing an `id` reconcile as
   // distinct rows instead of clobbering each other.
-  const previousRows = "get" in previous && "has" in previous
-    ? previous
-    : new Map(Array.from(previous, (row) => [runNodeKey(row), row] as const));
+  const previousRows =
+    "get" in previous && "has" in previous
+      ? previous
+      : new Map(Array.from(previous, (row) => [runNodeKey(row), row] as const));
   const nextRows = new Map(next.map((row) => [runNodeKey(row), row]));
-  const writes: Array<
-    | { type: "insert" | "update"; value: GatewayRunNode }
-    | { type: "delete"; key: string }
-  > = [];
+  const writes: Array<{ type: "insert" | "update"; value: GatewayRunNode } | { type: "delete"; key: string }> = [];
 
   for (const row of next) {
     const current = previousRows.get(runNodeKey(row));

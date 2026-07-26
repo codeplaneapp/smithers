@@ -1,3 +1,3 @@
 export type RefObject = {
-	$ref: string;
+  $ref: string;
 };

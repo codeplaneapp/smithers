@@ -29,16 +29,7 @@ export type DcActions = {
   submitPoll: (answers: DcPollAnswer[], comment?: string) => Promise<void>;
 };
 
-export const DC_PHASES: DcPhase[] = [
-  "goal",
-  "planning",
-  "preview",
-  "gates",
-  "derisk",
-  "execution",
-  "scoring",
-  "done",
-];
+export const DC_PHASES: DcPhase[] = ["goal", "planning", "preview", "gates", "derisk", "execution", "scoring", "done"];
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -213,7 +204,14 @@ function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
     while (index < lines.length) {
       const next = lines[index] ?? "";
       if (!next.trim()) break;
-      if (/^```/.test(next) || /^#{1,6}\s+/.test(next) || /^>\s?/.test(next) || /^\s*[-*]\s+/.test(next) || /^\s*\d+\.\s+/.test(next)) break;
+      if (
+        /^```/.test(next) ||
+        /^#{1,6}\s+/.test(next) ||
+        /^>\s?/.test(next) ||
+        /^\s*[-*]\s+/.test(next) ||
+        /^\s*\d+\.\s+/.test(next)
+      )
+        break;
       paragraph.push(next.trim());
       index += 1;
     }
@@ -253,7 +251,9 @@ function renderInlineMarkdown(value: string, keyPrefix: string): ReactNode[] {
       const end = findUnescaped(value, "`", cursor + 1);
       if (end > cursor) {
         flushText(cursor);
-        nodes.push(<code key={`${keyPrefix}:code:${cursor}`}>{value.slice(cursor + 1, end).replace(/\\`/g, "`")}</code>);
+        nodes.push(
+          <code key={`${keyPrefix}:code:${cursor}`}>{value.slice(cursor + 1, end).replace(/\\`/g, "`")}</code>,
+        );
         cursor = end + 1;
         textStart = cursor;
         continue;
@@ -364,9 +364,7 @@ export function MarkdownPreview({ markdown }: { markdown: string }) {
 // Lazy so @milkdown/crepe is only imported in a real browser.
 // ---------------------------------------------------------------------------
 
-const CrepeMarkdownEditor = lazy(() =>
-  import("./cw-editor").then((module) => ({ default: module.MarkdownEditor })),
-);
+const CrepeMarkdownEditor = lazy(() => import("./cw-editor").then((module) => ({ default: module.MarkdownEditor })));
 
 export function DcMarkdownEditor({
   value,
@@ -429,9 +427,7 @@ export function budgetBarModel(budget: DcBudget | undefined): BudgetBarModel {
   const fraction = hasPrediction ? Math.min(actualUsd / (predictedUsd as number), 1) : 0;
   const predictedMinutes = budget?.predicted?.minutes ?? null;
   const minutesLeft =
-    predictedMinutes === null
-      ? null
-      : Math.max(0, Math.round(predictedMinutes - (budget?.actual?.minutes ?? 0)));
+    predictedMinutes === null ? null : Math.max(0, Math.round(predictedMinutes - (budget?.actual?.minutes ?? 0)));
   const minutesLabel = minutesLeft === null || over ? null : `~${minutesLeft} min left`;
   const label = hasPrediction
     ? `${formatUsd(actualUsd)} of ~${formatUsd(predictedUsd as number)}`
@@ -474,9 +470,7 @@ export function BudgetBar({ budget }: { budget: DcBudget | undefined }) {
 
 export type EstimateChipModel = { text: string; over: boolean };
 
-export function estimateChipModel(
-  node: Pick<DelegationNode, "estimate" | "actual">,
-): EstimateChipModel | null {
+export function estimateChipModel(node: Pick<DelegationNode, "estimate" | "actual">): EstimateChipModel | null {
   const predicted = node.estimate?.costUsd;
   const actual = node.actual?.costUsd;
   if (predicted === undefined && actual === undefined) return null;
@@ -595,11 +589,7 @@ export function PhaseStrip({ phase }: { phase: DcPhase }) {
       {DC_PHASES.map((entry, index) => (
         <span
           key={entry}
-          className={
-            "dc-phase" +
-            (entry === phase ? " is-active" : "") +
-            (index < activeIndex ? " is-done" : "")
-          }
+          className={"dc-phase" + (entry === phase ? " is-active" : "") + (index < activeIndex ? " is-done" : "")}
           data-testid={`dc-phase-${entry}`}
         >
           {entry}
@@ -609,13 +599,7 @@ export function PhaseStrip({ phase }: { phase: DcPhase }) {
   );
 }
 
-export function SkipPreviewsButton({
-  phase,
-  actions,
-}: {
-  phase: DcPhase;
-  actions: Pick<DcActions, "skipPreviews">;
-}) {
+export function SkipPreviewsButton({ phase, actions }: { phase: DcPhase; actions: Pick<DcActions, "skipPreviews"> }) {
   const [busy, setBusy] = useState(false);
   if (phase !== "preview") return null;
   return (

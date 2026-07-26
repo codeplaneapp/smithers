@@ -12,10 +12,7 @@ export function launchRun(prompt?: string): Promise<string | undefined> {
 }
 
 /** Launch a named workflow with a prompt. */
-export function composeThenLaunchRun(
-  workflowKey: string,
-  prompt: string,
-): Promise<string | undefined> {
+export function composeThenLaunchRun(workflowKey: string, prompt: string): Promise<string | undefined> {
   return startWorkflowRun({ workflowKey, inputs: { prompt } });
 }
 

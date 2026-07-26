@@ -7,7 +7,11 @@
 // caller-supplied client is never touched.
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-try { GlobalRegistrator.register(); } catch { /* already registered */ }
+try {
+  GlobalRegistrator.register();
+} catch {
+  /* already registered */
+}
 
 import { describe, expect, test } from "bun:test";
 import { act, createElement, StrictMode, type ReactElement } from "react";
@@ -82,16 +86,25 @@ async function mountHarness() {
  * until its own 5s timeout, so the race reports "open" long before that.
  */
 async function waiterOutcome(client: SmithersDataClient) {
-  const waited = client.stream.waitForSeq(9_999).then(() => "closed" as const, () => "timeout" as const);
+  const waited = client.stream.waitForSeq(9_999).then(
+    () => "closed" as const,
+    () => "timeout" as const,
+  );
   const raced = await Promise.race([
     waited,
-    new Promise<"open">((resolve) => { setTimeout(() => { resolve("open"); }, 250); }),
+    new Promise<"open">((resolve) => {
+      setTimeout(() => {
+        resolve("open");
+      }, 250);
+    }),
   ]);
   return raced;
 }
 
 function sleep(ms: number) {
-  return new Promise((resolve) => { setTimeout(resolve, ms); });
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 describe("SmithersGatewayProvider client lifecycle", () => {
@@ -119,12 +132,18 @@ describe("SmithersGatewayProvider client lifecycle", () => {
   test("closes both owned clients on unmount and leaves no reconnect timer", async () => {
     const streamUrls: string[] = [];
     const harness = await mountHarness();
-    const gateway = await harness.renderOptions({ baseUrl: "http://gateway.test", fetch: streamFailingFetch(streamUrls) });
+    const gateway = await harness.renderOptions({
+      baseUrl: "http://gateway.test",
+      fetch: streamFailingFetch(streamUrls),
+    });
 
     // A mutation awaiting its own change is the documented leak: the waiter
     // keeps the stream open, so the failing stream schedules a reconnect that
     // nothing but the data client's own close() can cancel.
-    const pending = gateway.data.stream.waitForSeq(9_999).then(() => "closed" as const, () => "timeout" as const);
+    const pending = gateway.data.stream.waitForSeq(9_999).then(
+      () => "closed" as const,
+      () => "timeout" as const,
+    );
     await sleep(50);
     expect(streamUrls.length).toBeGreaterThan(0);
     const openedBeforeUnmount = streamUrls.length;

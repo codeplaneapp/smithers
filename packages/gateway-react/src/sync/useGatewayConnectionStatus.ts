@@ -17,11 +17,7 @@ export type UseGatewayConnectionStatusResult = {
  */
 export function useGatewayConnectionStatus(): UseGatewayConnectionStatusResult {
   const { client } = useSmithersCollections();
-  const state = useSyncExternalStore(
-    client.stream.subscribeStatus,
-    client.stream.status,
-    client.stream.status,
-  );
+  const state = useSyncExternalStore(client.stream.subscribeStatus, client.stream.status, client.stream.status);
   return {
     status: state.status,
     isOnline: state.status === "online",

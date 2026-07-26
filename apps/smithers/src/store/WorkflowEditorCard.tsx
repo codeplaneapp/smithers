@@ -1,10 +1,5 @@
 import { openSurface } from "../app/navigation";
-import {
-  changedFileCount,
-  toneForWorkflowStatus,
-  WORKFLOW_STATUS_LABEL,
-  type WorkflowDoc,
-} from "./workflowDocs";
+import { changedFileCount, toneForWorkflowStatus, WORKFLOW_STATUS_LABEL, type WorkflowDoc } from "./workflowDocs";
 import { useWorkflowEditorStore } from "./workflowEditorStore";
 
 function BranchIcon() {
@@ -59,11 +54,7 @@ export function WorkflowEditorCard() {
             <code className="cron-pattern">{doc.filePath}</code>
           </div>
         </div>
-        <button
-          className="card-link"
-          type="button"
-          onClick={() => openSurface({ kind: "workflowEditor", id: doc.id })}
-        >
+        <button className="card-link" type="button" onClick={() => openSurface({ kind: "workflowEditor", id: doc.id })}>
           Open editor ›
         </button>
       </header>
@@ -73,9 +64,7 @@ export function WorkflowEditorCard() {
           <span className={`state-badge ${toneForWorkflowStatus(doc.status)}`}>
             {WORKFLOW_STATUS_LABEL[doc.status]}
           </span>
-          {changed > 0 ? (
-            <span className="mini-tag tone-waiting">{changed} unsaved</span>
-          ) : null}
+          {changed > 0 ? <span className="mini-tag tone-waiting">{changed} unsaved</span> : null}
         </div>
         {shownImports.map((file) => (
           <div className="list-row" key={file.path}>

@@ -31,11 +31,7 @@ export function LogsCard({ runId }: { runId: string }) {
             {AUTH_REFACTOR_LOG.length} lines · run {runId.replace(/^run-/, "")}
           </div>
         </div>
-        <button
-          className="card-link"
-          type="button"
-          onClick={() => openSurface({ kind: "logs", runId })}
-        >
+        <button className="card-link" type="button" onClick={() => openSurface({ kind: "logs", runId })}>
           Open logs ›
         </button>
       </header>

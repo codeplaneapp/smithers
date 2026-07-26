@@ -12,12 +12,14 @@ import { serializeComparisonScoreRow } from "./serializeComparisonScoreRow.js";
  */
 export function serializeScoreDetailRow(row) {
   const normalized = normalizeApiRow(row);
-  return /** @type {GatewayScoreDetail} */ (/** @type {unknown} */ ({
-    ...serializeComparisonScoreRow(row),
-    meta: normalized.meta ?? null,
-    input: normalized.input ?? null,
-    output: normalized.output ?? null,
-    groundTruth: normalized.groundTruth ?? null,
-    context: normalized.context ?? null,
-  }));
+  return /** @type {GatewayScoreDetail} */ (
+    /** @type {unknown} */ ({
+      ...serializeComparisonScoreRow(row),
+      meta: normalized.meta ?? null,
+      input: normalized.input ?? null,
+      output: normalized.output ?? null,
+      groundTruth: normalized.groundTruth ?? null,
+      context: normalized.context ?? null,
+    })
+  );
 }

@@ -76,7 +76,13 @@ export function fallbackStory(files: ChangedFile[]): Story {
   }
 
   if (config.length > 0) {
-    chapters.push(chapter("Wiring and configuration", "Build, dependency, and configuration changes that support the work above.", config));
+    chapters.push(
+      chapter(
+        "Wiring and configuration",
+        "Build, dependency, and configuration changes that support the work above.",
+        config,
+      ),
+    );
   }
   if (tests.length > 0) {
     chapters.push(chapter("The proof: tests", "Tests added or updated for this change.", tests));

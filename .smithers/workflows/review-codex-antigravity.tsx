@@ -18,11 +18,6 @@ const { Workflow, smithers } = createSmithers({
 
 export default smithers((ctx) => (
   <Workflow name="review-codex-antigravity">
-    <ReviewPanel
-      idPrefix="review"
-      prompt={ctx.input.prompt}
-      agents={panelists}
-      moderator={synthesizer}
-    />
+    <ReviewPanel idPrefix="review" prompt={ctx.input.prompt} agents={panelists} moderator={synthesizer} />
   </Workflow>
 ));

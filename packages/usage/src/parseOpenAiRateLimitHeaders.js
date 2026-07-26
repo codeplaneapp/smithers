@@ -7,9 +7,9 @@ import { parseDurationSeconds } from "./parseDurationSeconds.js";
  * @returns {number | undefined}
  */
 function int(value) {
-    if (value == null) return undefined;
-    const n = parseInt(value, 10);
-    return Number.isNaN(n) ? undefined : n;
+  if (value == null) return undefined;
+  const n = parseInt(value, 10);
+  return Number.isNaN(n) ? undefined : n;
 }
 
 /**
@@ -21,22 +21,20 @@ function int(value) {
  * @returns {UsageWindow | undefined}
  */
 function countWindow(get, suffix, id, label, nowMs) {
-    const limit = int(get(`x-ratelimit-limit-${suffix}`));
-    const remaining = int(get(`x-ratelimit-remaining-${suffix}`));
-    if (limit === undefined && remaining === undefined) return undefined;
-    const resetSeconds = parseDurationSeconds(get(`x-ratelimit-reset-${suffix}`));
-    const used = limit !== undefined && remaining !== undefined ? Math.max(0, limit - remaining) : undefined;
-    return {
-        id,
-        label,
-        unit: "count",
-        limit,
-        remaining,
-        used,
-        resetsAt: resetSeconds !== undefined
-            ? new Date(nowMs + resetSeconds * 1000).toISOString()
-            : undefined,
-    };
+  const limit = int(get(`x-ratelimit-limit-${suffix}`));
+  const remaining = int(get(`x-ratelimit-remaining-${suffix}`));
+  if (limit === undefined && remaining === undefined) return undefined;
+  const resetSeconds = parseDurationSeconds(get(`x-ratelimit-reset-${suffix}`));
+  const used = limit !== undefined && remaining !== undefined ? Math.max(0, limit - remaining) : undefined;
+  return {
+    id,
+    label,
+    unit: "count",
+    limit,
+    remaining,
+    used,
+    resetsAt: resetSeconds !== undefined ? new Date(nowMs + resetSeconds * 1000).toISOString() : undefined,
+  };
 }
 
 /**
@@ -51,10 +49,10 @@ function countWindow(get, suffix, id, label, nowMs) {
  * @returns {UsageWindow[]}
  */
 export function parseOpenAiRateLimitHeaders(get, nowMs = Date.now()) {
-    const windows = [];
-    const requests = countWindow(get, "requests", "requests-per-min", "requests/min", nowMs);
-    if (requests) windows.push(requests);
-    const tokens = countWindow(get, "tokens", "tokens-per-min", "tokens/min", nowMs);
-    if (tokens) windows.push(tokens);
-    return windows;
+  const windows = [];
+  const requests = countWindow(get, "requests", "requests-per-min", "requests/min", nowMs);
+  if (requests) windows.push(requests);
+  const tokens = countWindow(get, "tokens", "tokens-per-min", "tokens/min", nowMs);
+  if (tokens) windows.push(tokens);
+  return windows;
 }

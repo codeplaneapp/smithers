@@ -19,8 +19,8 @@ export const DEFAULT_LINEAR_TIMESTAMP_SKEW_MS = 60_000;
  * @returns {string | undefined}
  */
 function headerValue(headers, name) {
-    const value = headers[name] ?? headers[name.toLowerCase()];
-    return Array.isArray(value) ? value[0] : value;
+  const value = headers[name] ?? headers[name.toLowerCase()];
+  return Array.isArray(value) ? value[0] : value;
 }
 
 /**
@@ -30,10 +30,10 @@ function headerValue(headers, name) {
  * @returns {number | null}
  */
 function normalizeWebhookTimestampMs(value) {
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-        return null;
-    }
-    return value < 1e12 ? value * 1000 : value;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return value < 1e12 ? value * 1000 : value;
 }
 
 /**
@@ -47,24 +47,28 @@ function normalizeWebhookTimestampMs(value) {
  * @param {() => number} [now]
  * @returns {boolean}
  */
-export function verifyLinearWebhook(request, secret, maxTimestampSkewMs = DEFAULT_LINEAR_TIMESTAMP_SKEW_MS, now = Date.now) {
-    const signature = headerValue(request.headers, "linear-signature");
-    if (!verifySignature({ payload: request.rawBody, secret, signature })) {
-        return false;
-    }
-    /** @type {any} */
-    let payload;
-    try {
-        payload = JSON.parse(request.rawBody);
-    }
-    catch {
-        return false;
-    }
-    const timestampMs = normalizeWebhookTimestampMs(payload?.webhookTimestamp);
-    if (timestampMs === null) {
-        return false;
-    }
-    return Math.abs(now() - timestampMs) <= maxTimestampSkewMs;
+export function verifyLinearWebhook(
+  request,
+  secret,
+  maxTimestampSkewMs = DEFAULT_LINEAR_TIMESTAMP_SKEW_MS,
+  now = Date.now,
+) {
+  const signature = headerValue(request.headers, "linear-signature");
+  if (!verifySignature({ payload: request.rawBody, secret, signature })) {
+    return false;
+  }
+  /** @type {any} */
+  let payload;
+  try {
+    payload = JSON.parse(request.rawBody);
+  } catch {
+    return false;
+  }
+  const timestampMs = normalizeWebhookTimestampMs(payload?.webhookTimestamp);
+  if (timestampMs === null) {
+    return false;
+  }
+  return Math.abs(now() - timestampMs) <= maxTimestampSkewMs;
 }
 
 /**
@@ -88,48 +92,51 @@ export function verifyLinearWebhook(request, secret, maxTimestampSkewMs = DEFAUL
  * @returns {import("../core/ExternalEventTypes.ts").ExternalEvent[]}
  */
 export function decodeLinearWebhook(request, sourceId = LINEAR_SOURCE_ID) {
-    /** @type {any} */
-    const payload = JSON.parse(request.rawBody);
-    const type = typeof payload?.type === "string" ? payload.type : "unknown";
-    const action = typeof payload?.action === "string" ? payload.action : "unknown";
-    const data = payload?.data ?? {};
-    const typeSegment = type.toLowerCase();
-    const receivedAtMs = Date.now();
-    // Delivery identity: prefer the Linear-Delivery header (unique per
-    // delivery); fall back to webhookId + entity id + action + timestamp.
-    const deliveryId = headerValue(request.headers, "linear-delivery") ??
-        [payload?.webhookId ?? "-", typeSegment, action, data?.id ?? "-", payload?.webhookTimestamp ?? "-"].join(":");
-    const identifier = typeof data?.identifier === "string" && data.identifier
-        ? data.identifier
-        : typeof data?.issue?.identifier === "string" && data.issue.identifier
-            ? data.issue.identifier
-            : null;
-    const teamKey = typeof data?.team?.key === "string" && data.team.key
-        ? data.team.key
-        : typeof data?.issue?.team?.key === "string" && data.issue.team.key
-            ? data.issue.team.key
-            : null;
-    const eventNames = [
-        integrationEventName(LINEAR_SOURCE_ID, `${typeSegment}.${action.toLowerCase()}`),
-        integrationEventName(LINEAR_SOURCE_ID, typeSegment),
-    ];
-    /** @type {(string | null)[]} */
-    const correlations = [...new Set([identifier, teamKey].filter((value) => value !== null)), null];
-    /** @type {import("../core/ExternalEventTypes.ts").ExternalEvent[]} */
-    const events = [];
-    for (const eventName of eventNames) {
-        for (const correlationId of correlations) {
-            events.push({
-                source: sourceId,
-                eventName,
-                correlationId,
-                payload,
-                dedupeKey: `${deliveryId}#${eventName}#${correlationId ?? ""}`,
-                receivedAtMs,
-            });
-        }
+  /** @type {any} */
+  const payload = JSON.parse(request.rawBody);
+  const type = typeof payload?.type === "string" ? payload.type : "unknown";
+  const action = typeof payload?.action === "string" ? payload.action : "unknown";
+  const data = payload?.data ?? {};
+  const typeSegment = type.toLowerCase();
+  const receivedAtMs = Date.now();
+  // Delivery identity: prefer the Linear-Delivery header (unique per
+  // delivery); fall back to webhookId + entity id + action + timestamp.
+  const deliveryId =
+    headerValue(request.headers, "linear-delivery") ??
+    [payload?.webhookId ?? "-", typeSegment, action, data?.id ?? "-", payload?.webhookTimestamp ?? "-"].join(":");
+  const identifier =
+    typeof data?.identifier === "string" && data.identifier
+      ? data.identifier
+      : typeof data?.issue?.identifier === "string" && data.issue.identifier
+        ? data.issue.identifier
+        : null;
+  const teamKey =
+    typeof data?.team?.key === "string" && data.team.key
+      ? data.team.key
+      : typeof data?.issue?.team?.key === "string" && data.issue.team.key
+        ? data.issue.team.key
+        : null;
+  const eventNames = [
+    integrationEventName(LINEAR_SOURCE_ID, `${typeSegment}.${action.toLowerCase()}`),
+    integrationEventName(LINEAR_SOURCE_ID, typeSegment),
+  ];
+  /** @type {(string | null)[]} */
+  const correlations = [...new Set([identifier, teamKey].filter((value) => value !== null)), null];
+  /** @type {import("../core/ExternalEventTypes.ts").ExternalEvent[]} */
+  const events = [];
+  for (const eventName of eventNames) {
+    for (const correlationId of correlations) {
+      events.push({
+        source: sourceId,
+        eventName,
+        correlationId,
+        payload,
+        dedupeKey: `${deliveryId}#${eventName}#${correlationId ?? ""}`,
+        receivedAtMs,
+      });
     }
-    return events;
+  }
+  return events;
 }
 
 /**
@@ -144,17 +151,17 @@ export function decodeLinearWebhook(request, sourceId = LINEAR_SOURCE_ID) {
  * @returns {LinearWebhookSourceConfig}
  */
 export function makeLinearWebhookSource(options = {}) {
-    const { id = LINEAR_SOURCE_ID, capacity, maxTimestampSkewMs = DEFAULT_LINEAR_TIMESTAMP_SKEW_MS, ...config } = options;
-    const secret = resolveLinearConfig(config).webhookSecret;
-    return {
-        id,
-        ...(capacity !== undefined ? { capacity } : {}),
-        verify: (request) => {
-            if (!secret) {
-                return false;
-            }
-            return verifyLinearWebhook(request, secret, maxTimestampSkewMs);
-        },
-        decode: (request) => decodeLinearWebhook(request, id),
-    };
+  const { id = LINEAR_SOURCE_ID, capacity, maxTimestampSkewMs = DEFAULT_LINEAR_TIMESTAMP_SKEW_MS, ...config } = options;
+  const secret = resolveLinearConfig(config).webhookSecret;
+  return {
+    id,
+    ...(capacity !== undefined ? { capacity } : {}),
+    verify: (request) => {
+      if (!secret) {
+        return false;
+      }
+      return verifyLinearWebhook(request, secret, maxTimestampSkewMs);
+    },
+    decode: (request) => decodeLinearWebhook(request, id),
+  };
 }

@@ -9,10 +9,7 @@
  * @returns {obj is RefObject}
  */
 export function isRef(obj) {
-    return (typeof obj === "object" &&
-        obj !== null &&
-        "$ref" in obj &&
-        typeof obj.$ref === "string");
+  return typeof obj === "object" && obj !== null && "$ref" in obj && typeof obj.$ref === "string";
 }
 /**
  * Resolve a local JSON pointer ($ref) anywhere within the OpenAPI spec.
@@ -23,23 +20,23 @@ export function isRef(obj) {
  * @returns {T}
  */
 export function resolveRef(spec, ref) {
-    if (!ref.startsWith("#/")) {
-        throw new Error(`Unsupported $ref format: ${ref}`);
+  if (!ref.startsWith("#/")) {
+    throw new Error(`Unsupported $ref format: ${ref}`);
+  }
+  const parts = ref.slice(2).split("/");
+  /** @type {unknown} */
+  let current = spec;
+  for (const part of parts) {
+    const decoded = part.replace(/~1/g, "/").replace(/~0/g, "~");
+    if (current === null || typeof current !== "object") {
+      throw new Error(`Could not resolve $ref: ${ref}`);
     }
-    const parts = ref.slice(2).split("/");
-    /** @type {unknown} */
-    let current = spec;
-    for (const part of parts) {
-        const decoded = part.replace(/~1/g, "/").replace(/~0/g, "~");
-        if (current === null || typeof current !== "object") {
-            throw new Error(`Could not resolve $ref: ${ref}`);
-        }
-        current = /** @type {Record<string, unknown>} */ (current)[decoded];
-        if (current === undefined) {
-            throw new Error(`Could not resolve $ref: ${ref}`);
-        }
+    current = /** @type {Record<string, unknown>} */ (current)[decoded];
+    if (current === undefined) {
+      throw new Error(`Could not resolve $ref: ${ref}`);
     }
-    return /** @type {T} */ (current);
+  }
+  return /** @type {T} */ (current);
 }
 /**
  * If the value is a $ref, resolve it. Otherwise return as-is.
@@ -51,8 +48,8 @@ export function resolveRef(spec, ref) {
  * @returns {T}
  */
 export function deref(spec, value) {
-    if (isRef(value)) {
-        return resolveRef(spec, value.$ref);
-    }
-    return value;
+  if (isRef(value)) {
+    return resolveRef(spec, value.$ref);
+  }
+  return value;
 }

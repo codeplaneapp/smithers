@@ -17,18 +17,13 @@ function makeWorker() {
 
 async function seedSession(
   env: ReviewWorkerEnv,
-  {
-    token = "srs_testtoken",
-    repo = "octo/widgets",
-    pr = 7,
-  }: { token?: string; repo?: string; pr?: number } = {},
+  { token = "srs_testtoken", repo = "octo/widgets", pr = 7 }: { token?: string; repo?: string; pr?: number } = {},
 ) {
   const hash = await sha256Hex(token);
   const createdAt = Date.now();
-  await env.DB
-    .prepare(
-      "INSERT INTO sessions (hash, repo, pr, expires_at, spend_cap_usd, spent_usd, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    )
+  await env.DB.prepare(
+    "INSERT INTO sessions (hash, repo, pr, expires_at, spend_cap_usd, spent_usd, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
     .bind(hash, repo, pr, createdAt + 3_600_000, 25, 0, createdAt)
     .run();
   return { token, hash, repo, pr };
@@ -110,8 +105,7 @@ describe("walkthrough publish and serve", () => {
     expect(publish.status).toBe(201);
     const published = (await publish.json()) as { id: string; url: string };
 
-    const row = await env.DB
-      .prepare("SELECT id, repo, pr, bytes, session_hash FROM walkthroughs WHERE id = ?")
+    const row = await env.DB.prepare("SELECT id, repo, pr, bytes, session_hash FROM walkthroughs WHERE id = ?")
       .bind(published.id)
       .first<{ id: string; repo: string; pr: number; bytes: number; session_hash: string | null }>();
     expect(row).toEqual({
@@ -181,8 +175,7 @@ describe("walkthrough publish and serve", () => {
     expect(notFound).toContain("Walkthrough not found");
     expect(notFound).toContain("smithers review");
 
-    const row = await env.DB
-      .prepare("SELECT id FROM walkthroughs WHERE id = ?")
+    const row = await env.DB.prepare("SELECT id FROM walkthroughs WHERE id = ?")
       .bind(published.id)
       .first<{ id: string }>();
     expect(row).toBeNull();

@@ -90,8 +90,14 @@ export function resolveSkillSource(override) {
         // Packaged CLI copy (apps/cli/docs, shipped in the npm tarball).
         { skillMd: resolve(cliRoot, "../docs/SKILL.md"), llmsFull: resolve(cliRoot, "../docs/llms-full.txt") },
         // Monorepo canonical sources.
-        { skillMd: resolve(cliRoot, "../../../skills/smithers/SKILL.md"), llmsFull: resolve(cliRoot, "../../../docs/llms-full.txt") },
-        { skillMd: resolve(cliRoot, "../../../skills/smithers/SKILL.md"), llmsFull: resolve(cliRoot, "../../../skills/smithers/llms-full.txt") },
+        {
+          skillMd: resolve(cliRoot, "../../../skills/smithers/SKILL.md"),
+          llmsFull: resolve(cliRoot, "../../../docs/llms-full.txt"),
+        },
+        {
+          skillMd: resolve(cliRoot, "../../../skills/smithers/SKILL.md"),
+          llmsFull: resolve(cliRoot, "../../../skills/smithers/llms-full.txt"),
+        },
       ];
   for (const candidate of candidates) {
     if (existsSync(candidate.skillMd) && existsSync(candidate.llmsFull)) return candidate;

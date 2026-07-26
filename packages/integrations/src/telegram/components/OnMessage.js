@@ -10,7 +10,12 @@
 // @smithers-type-exports-end
 
 import { TelegramCallbackQuerySchema, TelegramMessageSchema, TelegramWebAppDataMessageSchema } from "../schemas.js";
-import { TELEGRAM_CALLBACK_QUERY_EVENT, TELEGRAM_EDITED_MESSAGE_EVENT, TELEGRAM_MESSAGE_EVENT, TELEGRAM_WEB_APP_DATA_EVENT } from "../TelegramSource.js";
+import {
+  TELEGRAM_CALLBACK_QUERY_EVENT,
+  TELEGRAM_EDITED_MESSAGE_EVENT,
+  TELEGRAM_MESSAGE_EVENT,
+  TELEGRAM_WEB_APP_DATA_EVENT,
+} from "../TelegramSource.js";
 import { renderTelegramListener } from "./listenerInternals.js";
 
 /**
@@ -24,8 +29,8 @@ import { renderTelegramListener } from "./listenerInternals.js";
  * @param {OnMessageProps<Schema>} props
  */
 export function OnMessage(props) {
-    const eventName = props.edited ? TELEGRAM_EDITED_MESSAGE_EVENT : TELEGRAM_MESSAGE_EVENT;
-    return renderTelegramListener(eventName, props, props.schema ?? TelegramMessageSchema);
+  const eventName = props.edited ? TELEGRAM_EDITED_MESSAGE_EVENT : TELEGRAM_MESSAGE_EVENT;
+  return renderTelegramListener(eventName, props, props.schema ?? TelegramMessageSchema);
 }
 
 /**
@@ -36,7 +41,7 @@ export function OnMessage(props) {
  * @param {OnCallbackQueryProps<Schema>} props
  */
 export function OnCallbackQuery(props) {
-    return renderTelegramListener(TELEGRAM_CALLBACK_QUERY_EVENT, props, props.schema ?? TelegramCallbackQuerySchema);
+  return renderTelegramListener(TELEGRAM_CALLBACK_QUERY_EVENT, props, props.schema ?? TelegramCallbackQuerySchema);
 }
 
 /**
@@ -50,5 +55,5 @@ export function OnCallbackQuery(props) {
  * @param {OnMessageProps<Schema>} props
  */
 export function OnWebAppData(props) {
-    return renderTelegramListener(TELEGRAM_WEB_APP_DATA_EVENT, props, props.schema ?? TelegramWebAppDataMessageSchema);
+  return renderTelegramListener(TELEGRAM_WEB_APP_DATA_EVENT, props, props.schema ?? TelegramWebAppDataMessageSchema);
 }

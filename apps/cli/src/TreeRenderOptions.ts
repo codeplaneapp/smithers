@@ -1,5 +1,5 @@
 export type TreeRenderOptions = {
-    depth?: number;
-    nodeId?: string;
-    color?: boolean;
+  depth?: number;
+  nodeId?: string;
+  color?: boolean;
 };

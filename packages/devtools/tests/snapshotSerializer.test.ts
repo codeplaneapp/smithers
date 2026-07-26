@@ -98,12 +98,15 @@ describe("snapshotSerialize", () => {
 
   test("emits a warning when maxDepth is exceeded", () => {
     const warnings: unknown[] = [];
-    const serialized = snapshotSerialize({ nested: { child: { value: 1 } } }, {
-      maxDepth: 1,
-      onWarning(warning) {
-        warnings.push(warning);
+    const serialized = snapshotSerialize(
+      { nested: { child: { value: 1 } } },
+      {
+        maxDepth: 1,
+        onWarning(warning) {
+          warnings.push(warning);
+        },
       },
-    });
+    );
     expect(serialized).toEqual({ nested: { child: "[MaxDepth]" } });
     expect(warnings).toContainEqual({ code: "MaxDepthExceeded", path: "$.nested.child" });
   });

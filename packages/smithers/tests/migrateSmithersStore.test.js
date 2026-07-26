@@ -17,7 +17,28 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
-import { chunkedTest, assertRowForRowEquality, canonicalRows, listSourceTables, normalizeCell, sourceColumns, assertSqlitePrimaryKeyAndDuplicateRejection, closeApi, makeWorkspace, PG_URL, pgUrlForDatabase, quoteId, seedOlderSqliteStore, seedPgliteStore, seedPgliteStoreWithReceipt, seedSqliteStore, sqliteRunIds, tableCount, tempPgDatabaseName, withTempPostgresDatabase } from "./migrateStoreKit.js";
+import {
+  chunkedTest,
+  assertRowForRowEquality,
+  canonicalRows,
+  listSourceTables,
+  normalizeCell,
+  sourceColumns,
+  assertSqlitePrimaryKeyAndDuplicateRejection,
+  closeApi,
+  makeWorkspace,
+  PG_URL,
+  pgUrlForDatabase,
+  quoteId,
+  seedOlderSqliteStore,
+  seedPgliteStore,
+  seedPgliteStoreWithReceipt,
+  seedSqliteStore,
+  sqliteRunIds,
+  tableCount,
+  tempPgDatabaseName,
+  withTempPostgresDatabase,
+} from "./migrateStoreKit.js";
 
 setDefaultTimeout(120_000);
 
@@ -109,146 +130,160 @@ describe("migrateSmithersStore", () => {
     }
   });
 
-  chunkedTest("migrates every row of every table row-for-row and yields a replayable (fork/time-travel) run on the target", async () => {
-    const cwd = makeWorkspace("smithers-migrate-roundtrip");
-    const dbPath = seedSqliteStore(cwd);
+  chunkedTest(
+    "migrates every row of every table row-for-row and yields a replayable (fork/time-travel) run on the target",
+    async () => {
+      const cwd = makeWorkspace("smithers-migrate-roundtrip");
+      const dbPath = seedSqliteStore(cwd);
 
-    const result = await migrateSmithersStore({ cwd, to: "pglite" });
-    // Copy-only by default: the source store is left intact for rollback.
-    expect(result.sqliteRemoved).toBe(false);
-    expect(existsSync(dbPath)).toBe(true);
+      const result = await migrateSmithersStore({ cwd, to: "pglite" });
+      // Copy-only by default: the source store is left intact for rollback.
+      expect(result.sqliteRemoved).toBe(false);
+      expect(existsSync(dbPath)).toBe(true);
 
-    const api = await openSmithersBackend({}, { cwd, backend: "pglite", env: {} });
-    try {
-      const pgConn = api.db.connection;
+      const api = await openSmithersBackend({}, { cwd, backend: "pglite", env: {} });
+      try {
+        const pgConn = api.db.connection;
 
-      // 1. Row-for-row equality across every migrated table.
-      await assertRowForRowEquality(dbPath, pgConn);
+        // 1. Row-for-row equality across every migrated table.
+        await assertRowForRowEquality(dbPath, pgConn);
 
-      // 2. The migrated snapshot is replayable: fork the run from its frame on
-      //    the PGlite target and confirm the branched run + lineage persisted.
-      const adapter = new SmithersDb(api.db);
-      const fork = await forkRun(adapter, {
-        parentRunId: "run-migrate-1",
-        frameNo: 1,
-        branchLabel: "replay-after-migrate",
-      });
-      expect(fork.runId).toBeTruthy();
-      expect(fork.runId).not.toBe("run-migrate-1");
+        // 2. The migrated snapshot is replayable: fork the run from its frame on
+        //    the PGlite target and confirm the branched run + lineage persisted.
+        const adapter = new SmithersDb(api.db);
+        const fork = await forkRun(adapter, {
+          parentRunId: "run-migrate-1",
+          frameNo: 1,
+          branchLabel: "replay-after-migrate",
+        });
+        expect(fork.runId).toBeTruthy();
+        expect(fork.runId).not.toBe("run-migrate-1");
 
-      const childRun = await adapter.getRun(fork.runId);
-      expect(childRun?.parentRunId).toBe("run-migrate-1");
+        const childRun = await adapter.getRun(fork.runId);
+        expect(childRun?.parentRunId).toBe("run-migrate-1");
 
-      const branches = await listBranches(adapter, "run-migrate-1");
-      expect(branches.map((branch) => branch.runId)).toContain(fork.runId);
+        const branches = await listBranches(adapter, "run-migrate-1");
+        expect(branches.map((branch) => branch.runId)).toContain(fork.runId);
 
-      const branchInfo = await getBranchInfo(adapter, fork.runId);
-      expect(branchInfo?.parentRunId).toBe("run-migrate-1");
-      expect(branchInfo?.parentFrameNo).toBe(1);
+        const branchInfo = await getBranchInfo(adapter, fork.runId);
+        expect(branchInfo?.parentRunId).toBe("run-migrate-1");
+        expect(branchInfo?.parentFrameNo).toBe(1);
 
-      // The forked snapshot carries the migrated input forward (frame 0 of the
-      // child), proving the time-travel checkpoint survived the migration.
-      const childSnapshot = await loadSnapshot(adapter, fork.runId, 0);
-      expect(JSON.parse(childSnapshot.inputJson)).toEqual({ prompt: "hello" });
-    } finally {
-      await closeApi(api);
-    }
-  });
+        // The forked snapshot carries the migrated input forward (frame 0 of the
+        // child), proving the time-travel checkpoint survived the migration.
+        const childSnapshot = await loadSnapshot(adapter, fork.runId, 0);
+        expect(JSON.parse(childSnapshot.inputJson)).toEqual({ prompt: "hello" });
+      } finally {
+        await closeApi(api);
+      }
+    },
+  );
 
-  chunkedTest("rejects with an actionable SmithersError when the source store is corrupt, leaving no partial output", async () => {
-    const cwd = makeWorkspace("smithers-migrate-corrupt");
-    const dbPath = join(cwd, "smithers.db");
-    // A file that is not a valid SQLite store: bun:sqlite fails to read it with
-    // a "not a database" / "malformed" style error when migrate opens it.
-    writeFileSync(dbPath, "this is not a sqlite database at all", "utf8");
+  chunkedTest(
+    "rejects with an actionable SmithersError when the source store is corrupt, leaving no partial output",
+    async () => {
+      const cwd = makeWorkspace("smithers-migrate-corrupt");
+      const dbPath = join(cwd, "smithers.db");
+      // A file that is not a valid SQLite store: bun:sqlite fails to read it with
+      // a "not a database" / "malformed" style error when migrate opens it.
+      writeFileSync(dbPath, "this is not a sqlite database at all", "utf8");
 
-    let caught;
-    try {
-      await migrateSmithersStore({ cwd, to: "pglite" });
-    } catch (error) {
-      caught = error;
-    }
+      let caught;
+      try {
+        await migrateSmithersStore({ cwd, to: "pglite" });
+      } catch (error) {
+        caught = error;
+      }
 
-    expect(caught).toBeInstanceOf(SmithersError);
-    expect(caught.code).toBe("DB_QUERY_FAILED");
-    expect(caught.message).toContain(dbPath);
-    expect(caught.message).toContain("corrupt");
-    expect(caught.message).toContain("PRAGMA integrity_check");
-    expect(caught.message).toContain("left untouched");
-    expect(caught.message).toContain("smithers migrate --from sqlite --to pglite");
-    expect(caught.message).not.toContain("is not defined");
-    // The original bun:sqlite error is preserved as the cause/details.
-    expect(caught.details).toEqual({ dbPath });
-    expect(caught.cause).toBeDefined();
+      expect(caught).toBeInstanceOf(SmithersError);
+      expect(caught.code).toBe("DB_QUERY_FAILED");
+      expect(caught.message).toContain(dbPath);
+      expect(caught.message).toContain("corrupt");
+      expect(caught.message).toContain("PRAGMA integrity_check");
+      expect(caught.message).toContain("left untouched");
+      expect(caught.message).toContain("smithers migrate --from sqlite --to pglite");
+      expect(caught.message).not.toContain("is not defined");
+      // The original bun:sqlite error is preserved as the cause/details.
+      expect(caught.details).toEqual({ dbPath });
+      expect(caught.cause).toBeDefined();
 
-    // No partial write: neither the PGlite store nor the migrated.json marker
-    // should exist, and the corrupt source file is left untouched.
-    expect(existsSync(join(cwd, ".smithers", "pg"))).toBe(false);
-    expect(existsSync(join(cwd, ".smithers", "migrated.json"))).toBe(false);
-    expect(existsSync(dbPath)).toBe(true);
-  });
+      // No partial write: neither the PGlite store nor the migrated.json marker
+      // should exist, and the corrupt source file is left untouched.
+      expect(existsSync(join(cwd, ".smithers", "pg"))).toBe(false);
+      expect(existsSync(join(cwd, ".smithers", "migrated.json"))).toBe(false);
+      expect(existsSync(dbPath)).toBe(true);
+    },
+  );
 
-  chunkedTest("rejects with an actionable SmithersError when the source store cannot be opened, leaving no partial output", async () => {
-    const cwd = makeWorkspace("smithers-migrate-unopenable");
-    const dbPath = join(cwd, "smithers.db");
-    // A file that exists but cannot be opened (no read permission) makes
-    // bun:sqlite fail with "unable to open database file" — distinct from a
-    // corrupt store. This also covers the missing -wal/-shm sidecar case.
-    writeFileSync(dbPath, "placeholder", "utf8");
-    chmodSync(dbPath, 0o000);
+  chunkedTest(
+    "rejects with an actionable SmithersError when the source store cannot be opened, leaving no partial output",
+    async () => {
+      const cwd = makeWorkspace("smithers-migrate-unopenable");
+      const dbPath = join(cwd, "smithers.db");
+      // A file that exists but cannot be opened (no read permission) makes
+      // bun:sqlite fail with "unable to open database file" — distinct from a
+      // corrupt store. This also covers the missing -wal/-shm sidecar case.
+      writeFileSync(dbPath, "placeholder", "utf8");
+      chmodSync(dbPath, 0o000);
 
-    let caught;
-    try {
-      await migrateSmithersStore({ cwd, to: "pglite" });
-    } catch (error) {
-      caught = error;
-    } finally {
-      chmodSync(dbPath, 0o600); // restore so afterEach can clean up
-    }
+      let caught;
+      try {
+        await migrateSmithersStore({ cwd, to: "pglite" });
+      } catch (error) {
+        caught = error;
+      } finally {
+        chmodSync(dbPath, 0o600); // restore so afterEach can clean up
+      }
 
-    expect(caught).toBeInstanceOf(SmithersError);
-    expect(caught.code).toBe("DB_QUERY_FAILED");
-    expect(caught.message).toContain(dbPath);
-    expect(caught.message.toLowerCase()).toContain("could not open");
-    expect(caught.message).toContain("-wal");
-    expect(caught.message).toContain("left untouched");
-    expect(caught.message).toContain("smithers migrate --from sqlite --to pglite");
-    expect(caught.message).not.toContain("is not defined");
-    expect(caught.details).toEqual({ dbPath });
-    expect(caught.cause).toBeDefined();
-    expect(existsSync(join(cwd, ".smithers", "pg"))).toBe(false);
-    expect(existsSync(join(cwd, ".smithers", "migrated.json"))).toBe(false);
-  });
+      expect(caught).toBeInstanceOf(SmithersError);
+      expect(caught.code).toBe("DB_QUERY_FAILED");
+      expect(caught.message).toContain(dbPath);
+      expect(caught.message.toLowerCase()).toContain("could not open");
+      expect(caught.message).toContain("-wal");
+      expect(caught.message).toContain("left untouched");
+      expect(caught.message).toContain("smithers migrate --from sqlite --to pglite");
+      expect(caught.message).not.toContain("is not defined");
+      expect(caught.details).toEqual({ dbPath });
+      expect(caught.cause).toBeDefined();
+      expect(existsSync(join(cwd, ".smithers", "pg"))).toBe(false);
+      expect(existsSync(join(cwd, ".smithers", "migrated.json"))).toBe(false);
+    },
+  );
 
-  chunkedTest("migrate --to postgres with no url fails with INVALID_INPUT before opening the source (not masked)", async () => {
-    const cwd = makeWorkspace("smithers-migrate-pg-nourl");
-    const dbPath = join(cwd, "smithers.db");
-    // Even with an UNOPENABLE source, the missing-url validation must win, so
-    // the user sees the actionable url guidance rather than a source-open error.
-    writeFileSync(dbPath, "placeholder", "utf8");
-    chmodSync(dbPath, 0o000);
+  chunkedTest(
+    "migrate --to postgres with no url fails with INVALID_INPUT before opening the source (not masked)",
+    async () => {
+      const cwd = makeWorkspace("smithers-migrate-pg-nourl");
+      const dbPath = join(cwd, "smithers.db");
+      // Even with an UNOPENABLE source, the missing-url validation must win, so
+      // the user sees the actionable url guidance rather than a source-open error.
+      writeFileSync(dbPath, "placeholder", "utf8");
+      chmodSync(dbPath, 0o000);
 
-    let caught;
-    try {
-      await migrateSmithersStore({ cwd, to: "postgres", env: {} });
-    } catch (error) {
-      caught = error;
-    } finally {
-      chmodSync(dbPath, 0o600);
-    }
+      let caught;
+      try {
+        await migrateSmithersStore({ cwd, to: "postgres", env: {} });
+      } catch (error) {
+        caught = error;
+      } finally {
+        chmodSync(dbPath, 0o600);
+      }
 
-    expect(caught).toBeInstanceOf(SmithersError);
-    expect(caught.code).toBe("INVALID_INPUT");
-    expect(caught.message).toContain("SMITHERS_POSTGRES_URL");
-    expect(existsSync(join(cwd, ".smithers", "pg"))).toBe(false);
-    expect(existsSync(join(cwd, ".smithers", "migrated.json"))).toBe(false);
-  });
+      expect(caught).toBeInstanceOf(SmithersError);
+      expect(caught.code).toBe("INVALID_INPUT");
+      expect(caught.message).toContain("SMITHERS_POSTGRES_URL");
+      expect(existsSync(join(cwd, ".smithers", "pg"))).toBe(false);
+      expect(existsSync(join(cwd, ".smithers", "migrated.json"))).toBe(false);
+    },
+  );
 
   chunkedTest("can remove sqlite files only after a successful copy", async () => {
     const cwd = makeWorkspace("smithers-migrate-remove-sqlite");
     const dbPath = seedSqliteStore(cwd);
     const sqlite = new Database(dbPath);
-    sqlite.exec("PRAGMA journal_mode = WAL; INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json) VALUES ('run-migrate-1', 2, 23, 'SidecarSeed', '{}');");
+    sqlite.exec(
+      "PRAGMA journal_mode = WAL; INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json) VALUES ('run-migrate-1', 2, 23, 'SidecarSeed', '{}');",
+    );
     sqlite.close();
     // Some SQLite builds checkpoint and remove WAL/SHM sidecars when the last
     // connection closes. The migration cleanup promise is filesystem-level:

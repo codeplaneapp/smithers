@@ -1,6 +1,1 @@
-export type SmithersAgentToolCategory =
-  | "runs"
-  | "approvals"
-  | "workflows"
-  | "debug"
-  | "admin";
+export type SmithersAgentToolCategory = "runs" | "approvals" | "workflows" | "debug" | "admin";

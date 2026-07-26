@@ -34,9 +34,9 @@ declare const DEFAULT_TELEGRAM_API_BASE_URL: "https://api.telegram.org";
  */
 declare class TelegramApiError extends SmithersError {
     /**
-   * @param {string} message
-   * @param {{ method: string; errorCode?: number | null; description?: string | null; retryAfterSeconds?: number | null; cause?: unknown }} options
-   */
+     * @param {string} message
+     * @param {{ method: string; errorCode?: number | null; description?: string | null; retryAfterSeconds?: number | null; cause?: unknown }} options
+     */
     constructor(message: string, options: {
         method: string;
         errorCode?: number | null;

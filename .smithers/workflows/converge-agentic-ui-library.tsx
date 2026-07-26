@@ -1,6 +1,16 @@
 // smithers-display-name: Converge Agentic UI Library
 /** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, MergeQueue, OpenCodeAgent, Parallel, Sequence, Task, UI, Worktree, createSmithers } from "smithers-orchestrator";
+import {
+  ClaudeCodeAgent,
+  MergeQueue,
+  OpenCodeAgent,
+  Parallel,
+  Sequence,
+  Task,
+  UI,
+  Worktree,
+  createSmithers,
+} from "smithers-orchestrator";
 import { join } from "node:path";
 import { z } from "zod/v4";
 import { providers } from "../agents";
@@ -47,7 +57,7 @@ export const CONVERGE_LANES: ConvergeLane[] = [
     priorBranch: "agui-conv/run-1784718901085/workflow-canvas",
     closedFindings: [
       "Wire mounted selection and editable mutations for real: in the DEFAULT mounted WorkflowGraph, node selection updates selection state truthfully and editable mutations (connect/drag) actually operate when editable; readOnly still disables them. Add a mounted (not SSR/source-string) test proving both paths.",
-      "Fix the invalid ARIA role: WorkflowNode currently renders role=\"option\" outside any listbox context. Use a valid rendered-context role structure (e.g. listbox on the container with option children, or button/group roles) and assert the accessible tree in a mounted test.",
+      'Fix the invalid ARIA role: WorkflowNode currently renders role="option" outside any listbox context. Use a valid rendered-context role structure (e.g. listbox on the container with option children, or button/group roles) and assert the accessible tree in a mounted test.',
     ],
   },
 ];
@@ -101,10 +111,7 @@ const { Workflow, Loop, smithers, outputs } = createSmithers({
   aguiConvReport: reportSchema,
 });
 
-const kimiImplement = [
-  new OpenCodeAgent({ model: "kimi-for-coding/k3" }),
-  providers.claudeSonnet,
-];
+const kimiImplement = [new OpenCodeAgent({ model: "kimi-for-coding/k3" }), providers.claudeSonnet];
 const fableChain = [providers.claude, providers.claudeOpus];
 const solChain = codexFirst(
   { model: "gpt-5.6-sol", config: { model_reasoning_effort: "xhigh" }, skipGitRepoCheck: true },
@@ -120,7 +127,13 @@ const mergeChain = [providers.claudeSonnet, providers.claude];
 
 type RawRow = Record<string, unknown>;
 function slug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "item";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 64) || "item"
+  );
 }
 function rawRows(ctx: any, channel: string): RawRow[] {
   const rows = typeof ctx.outputs === "function" ? ctx.outputs(channel) : ctx.outputs?.[channel];
@@ -135,12 +148,14 @@ function rowVersion(row: RawRow): [number, number] {
   return [iterationCount, iteration];
 }
 function latestRaw(rows: RawRow[], nodeId: string): RawRow | undefined {
-  return rows.filter((row) => baseNodeId(row) === nodeId).reduce<RawRow | undefined>((best, row) => {
-    if (!best) return row;
-    const current = rowVersion(row);
-    const previous = rowVersion(best);
-    return current[0] > previous[0] || (current[0] === previous[0] && current[1] >= previous[1]) ? row : best;
-  }, undefined);
+  return rows
+    .filter((row) => baseNodeId(row) === nodeId)
+    .reduce<RawRow | undefined>((best, row) => {
+      if (!best) return row;
+      const current = rowVersion(row);
+      const previous = rowVersion(best);
+      return current[0] > previous[0] || (current[0] === previous[0] && current[1] >= previous[1]) ? row : best;
+    }, undefined);
 }
 function sameVersion(left: RawRow | undefined, right: RawRow | undefined): boolean {
   if (!left || !right) return false;
@@ -149,7 +164,8 @@ function sameVersion(left: RawRow | undefined, right: RawRow | undefined): boole
   return a[0] === b[0] && a[1] === b[1];
 }
 
-const SHARED_TREE_RULES = "Shared-tree rules: jj-colocated checkout shared with concurrent agents carrying unrelated uncommitted work. jj st / jj diff are truth; commit ONLY your own files with explicit pathspecs (`jj commit <paths> -m ...`); NEVER git add -A / commit -a / stash / rebase / --amend; never blanket-stage. NEVER edit .smithers/agents.ts, .smithers/lib/**, or .smithers/workflows/*agentic-ui-library*.tsx.";
+const SHARED_TREE_RULES =
+  "Shared-tree rules: jj-colocated checkout shared with concurrent agents carrying unrelated uncommitted work. jj st / jj diff are truth; commit ONLY your own files with explicit pathspecs (`jj commit <paths> -m ...`); NEVER git add -A / commit -a / stash / rebase / --amend; never blanket-stage. NEVER edit .smithers/agents.ts, .smithers/lib/**, or .smithers/workflows/*agentic-ui-library*.tsx.";
 
 function findingsBlock(lane: ConvergeLane): string {
   return lane.closedFindings.map((finding, index) => `${index + 1}. ${finding}`).join("\n");
@@ -164,7 +180,9 @@ function implementPrompt(lane: ConvergeLane, branch: string, feedback: string): 
     "Work in this isolated jj worktree; commit only your files with explicit pathspecs.",
     feedback ? `Previous-attempt feedback (close ALL of it):\n${feedback}` : "",
     "Return status=implemented only when every listed finding is closed and focused checks pass here.",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function validatePrompt(lane: ConvergeLane, branch: string, implementation: RawRow | undefined): string {
@@ -177,7 +195,12 @@ function validatePrompt(lane: ConvergeLane, branch: string, implementation: RawR
   ].join("\n");
 }
 
-function reviewPrompt(lane: ConvergeLane, seat: Seat, implementation: RawRow | undefined, validation: RawRow | undefined): string {
+function reviewPrompt(
+  lane: ConvergeLane,
+  seat: Seat,
+  implementation: RawRow | undefined,
+  validation: RawRow | undefined,
+): string {
   return [
     `SCOPE-LOCKED ${seat}-seat convergence review of lane ${lane.id}. Do NOT edit files. Return laneId=${lane.id}, seat=${seat}, reviewer=<your model identity>.`,
     `THE CLOSED FINDINGS LIST:\n${findingsBlock(lane)}`,
@@ -204,13 +227,16 @@ function closurePrompt(feedback: string): string {
     CLOSURE_ITEMS,
     feedback ? `Previous-attempt feedback:\n${feedback}` : "",
     "Commit your files with explicit pathspecs. Return status=implemented only when check-ui-architecture and check-docs pass locally.",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function crossSeatPrompt(target: "adopt-gateway" | "adopt-product", seat: Seat): string {
-  const scope = target === "adopt-gateway"
-    ? "Multi's gateway/run structured-output adoption (GatewayNodeDetail/GatewayRunInspector/NodeInspector/RunInspector rendering through shared AgentOutput/ActivityTimeline/Plan/Queue/Artifact/TestResults/StackTrace/CodeBlock/SchemaDisplay/Confirmation/Checkpoint/ContextUsage, raw fallbacks retained)"
-    : "Multi's product-surface adoption (AgentCard/ModelSelector/ProviderBadge in the agent registry, Confirmation/ApprovalCard in approvals, Checkpoint actions in timeline, Commit/ChangeSummary/Artifact/OpenInChat in VCS/files, TestResults in evals, EnvironmentVariables/SecretField in BYOK, Sandbox anatomy, canvas anatomy in the flow editor)";
+  const scope =
+    target === "adopt-gateway"
+      ? "Multi's gateway/run structured-output adoption (GatewayNodeDetail/GatewayRunInspector/NodeInspector/RunInspector rendering through shared AgentOutput/ActivityTimeline/Plan/Queue/Artifact/TestResults/StackTrace/CodeBlock/SchemaDisplay/Confirmation/Checkpoint/ContextUsage, raw fallbacks retained)"
+      : "Multi's product-surface adoption (AgentCard/ModelSelector/ProviderBadge in the agent registry, Confirmation/ApprovalCard in approvals, Checkpoint actions in timeline, Commit/ChangeSummary/Artifact/OpenInChat in VCS/files, TestResults in evals, EnvironmentVariables/SecretField in BYOK, Sandbox anatomy, canvas anatomy in the flow editor)";
   return [
     `Missing cross-seat verdict: independent ${seat}-seat review of the ALREADY-LANDED ${target} lane in ${MULTI_ROOT}. Do NOT edit files. Return laneId=${target}, seat=${seat}, reviewer=<your model identity>.`,
     `Scope reviewed: ${scope}. The lane was implemented and approved by the other seat in run ${PRIOR_RUN}; find its commits via \`jj log\` in the Multi repo.`,
@@ -233,9 +259,14 @@ export default smithers((ctx) => {
   const lgtm = laneRows.filter((row) => CONVERGE_LANES.some((lane) => lane.id === row.laneId) && row.lgtm === true);
   const mergesSettled = lanesSettled && lgtm.every((row) => merges.some((merge) => merge.laneId === row.laneId));
 
-  const closureRows = rawRows(ctx, "aguiImpl").filter((row) => baseNodeId(row) === "closure-implement" && row.laneId === "closure");
+  const closureRows = rawRows(ctx, "aguiImpl").filter(
+    (row) => baseNodeId(row) === "closure-implement" && row.laneId === "closure",
+  );
   const closureImpl = latestRaw(closureRows, "closure-implement");
-  const ci = latestRaw(rawRows(ctx, "aguiCi").filter((row) => row.scope === "smithers"), "closure-ci");
+  const ci = latestRaw(
+    rawRows(ctx, "aguiCi").filter((row) => row.scope === "smithers"),
+    "closure-ci",
+  );
   const ciCurrent = sameVersion(closureImpl, ci);
   const closureDone = closureImpl?.status === "implemented" && ciCurrent && ci?.allPassed === true;
   const closureSettled = closureDone || (closureRows.length >= 3 && ciCurrent);
@@ -244,10 +275,12 @@ export default smithers((ctx) => {
     { target: "adopt-gateway", seat: "fable" },
     { target: "adopt-product", seat: "sol" },
   ];
-  const crossRows = crossSeats.map(({ target, seat }) => latestRaw(
-    rawRows(ctx, "aguiReview").filter((row) => row.laneId === target && row.seat === seat),
-    `cross-${target}-${seat}`,
-  ));
+  const crossRows = crossSeats.map(({ target, seat }) =>
+    latestRaw(
+      rawRows(ctx, "aguiReview").filter((row) => row.laneId === target && row.seat === seat),
+      `cross-${target}-${seat}`,
+    ),
+  );
   const crossSettled = crossRows.every((row) => row !== undefined);
   const crossApproved = crossSettled && crossRows.every((row) => row?.approved === true);
 
@@ -261,25 +294,64 @@ export default smithers((ctx) => {
             const worktreePath = join(repoRoot, ".smithers", "workflows", ".worktrees", "agui-conv", runSlug, lane.id);
             const state = laneState(ctx, lane as any, input.perLaneIterations, `conv-${lane.id}`);
             const feedback = [
-              state.implementation && state.implementation.status !== "implemented" ? `IMPLEMENTATION ${String(state.implementation.status).toUpperCase()}:\n${String(state.implementation.summary ?? "")}` : "",
-              state.validationCurrent && state.validation?.allPassed === false ? `VALIDATION FAILED:\n${String(state.validation.failingSummary ?? state.validation.summary ?? "")}` : "",
-              ...state.reviews.map((entry) => entry.current && entry.review?.approved === false ? `REVIEW (${entry.seat}) NOT LGTM:\n${String(entry.review.feedback ?? "")}` : ""),
-            ].filter(Boolean).join("\n\n");
+              state.implementation && state.implementation.status !== "implemented"
+                ? `IMPLEMENTATION ${String(state.implementation.status).toUpperCase()}:\n${String(state.implementation.summary ?? "")}`
+                : "",
+              state.validationCurrent && state.validation?.allPassed === false
+                ? `VALIDATION FAILED:\n${String(state.validation.failingSummary ?? state.validation.summary ?? "")}`
+                : "",
+              ...state.reviews.map((entry) =>
+                entry.current && entry.review?.approved === false
+                  ? `REVIEW (${entry.seat}) NOT LGTM:\n${String(entry.review.feedback ?? "")}`
+                  : "",
+              ),
+            ]
+              .filter(Boolean)
+              .join("\n\n");
             return (
               <Worktree key={lane.id} path={worktreePath} branch={branch} baseBranch={input.baseBranch}>
                 <Sequence>
-                  <Loop id={`conv-${lane.id}-loop`} until={state.done} maxIterations={input.perLaneIterations} onMaxReached="return-last">
+                  <Loop
+                    id={`conv-${lane.id}-loop`}
+                    until={state.done}
+                    maxIterations={input.perLaneIterations}
+                    onMaxReached="return-last"
+                  >
                     <Sequence>
-                      <Task id={`conv-${lane.id}-implement`} output={outputs.aguiImpl} agent={kimiImplement} retries={2} timeoutMs={90 * 60_000} heartbeatTimeoutMs={15 * 60_000}>
+                      <Task
+                        id={`conv-${lane.id}-implement`}
+                        output={outputs.aguiImpl}
+                        agent={kimiImplement}
+                        retries={2}
+                        timeoutMs={90 * 60_000}
+                        heartbeatTimeoutMs={15 * 60_000}
+                      >
                         {implementPrompt(lane, branch, feedback)}
                       </Task>
-                      <Task id={`conv-${lane.id}-validate`} output={outputs.aguiValidation} agent={validateChain} retries={2} timeoutMs={40 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                      <Task
+                        id={`conv-${lane.id}-validate`}
+                        output={outputs.aguiValidation}
+                        agent={validateChain}
+                        retries={2}
+                        timeoutMs={40 * 60_000}
+                        heartbeatTimeoutMs={10 * 60_000}
+                      >
                         {validatePrompt(lane, branch, state.implementation)}
                       </Task>
-                      {state.validationCurrent && state.validation?.allPassed === true && state.validation?.diffNonEmpty === true ? (
+                      {state.validationCurrent &&
+                      state.validation?.allPassed === true &&
+                      state.validation?.diffNonEmpty === true ? (
                         <Parallel>
                           {lane.seats.map((seat) => (
-                            <Task key={seat} id={`conv-${lane.id}-review-${seat}`} output={outputs.aguiReview} agent={seat === "fable" ? fableChain : solChain} retries={2} timeoutMs={40 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                            <Task
+                              key={seat}
+                              id={`conv-${lane.id}-review-${seat}`}
+                              output={outputs.aguiReview}
+                              agent={seat === "fable" ? fableChain : solChain}
+                              retries={2}
+                              timeoutMs={40 * 60_000}
+                              heartbeatTimeoutMs={10 * 60_000}
+                            >
                               {reviewPrompt(lane, seat, state.implementation, state.validation)}
                             </Task>
                           ))}
@@ -295,7 +367,9 @@ export default smithers((ctx) => {
                       lgtm: state.done,
                       exhausted: state.exhausted,
                       attempts: state.attempts,
-                      summary: state.done ? `Convergence lane ${lane.id} LGTM after ${state.attempts} attempt(s).` : `Convergence lane ${lane.id} settled without LGTM after ${state.attempts} attempt(s).`,
+                      summary: state.done
+                        ? `Convergence lane ${lane.id} LGTM after ${state.attempts} attempt(s).`
+                        : `Convergence lane ${lane.id} settled without LGTM after ${state.attempts} attempt(s).`,
                       seatVerdicts: state.reviews.map((entry) => ({
                         seat: entry.seat,
                         approved: entry.current && entry.review?.approved === true,
@@ -310,8 +384,19 @@ export default smithers((ctx) => {
         </Parallel>
 
         <MergeQueue id="agui-conv-merge-queue" maxConcurrency={1}>
-          {(lanesSettled ? lgtm.filter((row) => !merges.some((merge) => merge.laneId === row.laneId && merge.mergedToMain === true)) : []).map((row) => (
-            <Task key={String(row.laneId)} id={`merge-${slug(String(row.laneId))}`} output={outputs.aguiConvMerge} agent={mergeChain} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+          {(lanesSettled
+            ? lgtm.filter((row) => !merges.some((merge) => merge.laneId === row.laneId && merge.mergedToMain === true))
+            : []
+          ).map((row) => (
+            <Task
+              key={String(row.laneId)}
+              id={`merge-${slug(String(row.laneId))}`}
+              output={outputs.aguiConvMerge}
+              agent={mergeChain}
+              retries={2}
+              timeoutMs={45 * 60_000}
+              heartbeatTimeoutMs={10 * 60_000}
+            >
               {mergePrompt(row, input.baseBranch, repoRoot)}
             </Task>
           ))}
@@ -320,8 +405,17 @@ export default smithers((ctx) => {
         {lanesSettled && mergesSettled ? (
           <Loop id="closure-loop" until={closureDone} maxIterations={3} onMaxReached="return-last">
             <Sequence>
-              <Task id="closure-implement" output={outputs.aguiImpl} agent={kimiImplement} retries={2} timeoutMs={60 * 60_000} heartbeatTimeoutMs={15 * 60_000}>
-                {closurePrompt(ciCurrent && ci?.allPassed === false ? `CI GATE FAILED:\n${String(ci?.summary ?? "")}` : "")}
+              <Task
+                id="closure-implement"
+                output={outputs.aguiImpl}
+                agent={kimiImplement}
+                retries={2}
+                timeoutMs={60 * 60_000}
+                heartbeatTimeoutMs={15 * 60_000}
+              >
+                {closurePrompt(
+                  ciCurrent && ci?.allPassed === false ? `CI GATE FAILED:\n${String(ci?.summary ?? "")}` : "",
+                )}
               </Task>
               <Task id="closure-ci" output={outputs.aguiCi} timeoutMs={150 * 60_000}>
                 {() => runSmithersCi(repoRoot)}
@@ -333,7 +427,15 @@ export default smithers((ctx) => {
         {lanesSettled && mergesSettled && closureSettled ? (
           <Parallel>
             {crossSeats.map(({ target, seat }) => (
-              <Task key={`${target}-${seat}`} id={`cross-${target}-${seat}`} output={outputs.aguiReview} agent={seat === "fable" ? fableChainMulti : solChainMulti} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+              <Task
+                key={`${target}-${seat}`}
+                id={`cross-${target}-${seat}`}
+                output={outputs.aguiReview}
+                agent={seat === "fable" ? fableChainMulti : solChainMulti}
+                retries={2}
+                timeoutMs={45 * 60_000}
+                heartbeatTimeoutMs={10 * 60_000}
+              >
                 {crossSeatPrompt(target, seat)}
               </Task>
             ))}
@@ -349,9 +451,10 @@ export default smithers((ctx) => {
               closureDone,
               smithersCiGreen: ci?.allPassed === true,
               crossSeatApproved: crossApproved,
-              summary: lgtm.length === CONVERGE_LANES.length && closureDone && crossApproved
-                ? `Convergence complete: ${lgtm.length}/${CONVERGE_LANES.length} lanes LGTM and merged, closure items done, CI green, cross-seat verdicts approved.`
-                : `Convergence settled: ${lgtm.length}/${CONVERGE_LANES.length} lanes LGTM; closureDone=${closureDone}; crossSeatApproved=${crossApproved}.`,
+              summary:
+                lgtm.length === CONVERGE_LANES.length && closureDone && crossApproved
+                  ? `Convergence complete: ${lgtm.length}/${CONVERGE_LANES.length} lanes LGTM and merged, closure items done, CI green, cross-seat verdicts approved.`
+                  : `Convergence settled: ${lgtm.length}/${CONVERGE_LANES.length} lanes LGTM; closureDone=${closureDone}; crossSeatApproved=${crossApproved}.`,
             }}
           </Task>
         ) : null}

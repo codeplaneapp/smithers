@@ -9,8 +9,8 @@ import { join } from "node:path";
  * @returns {string}
  */
 export function accountsRoot(env = process.env) {
-    if (env.SMITHERS_HOME) {
-        return env.SMITHERS_HOME;
-    }
-    return join(env.HOME ?? homedir(), ".smithers");
+  if (env.SMITHERS_HOME) {
+    return env.SMITHERS_HOME;
+  }
+  return join(env.HOME ?? homedir(), ".smithers");
 }

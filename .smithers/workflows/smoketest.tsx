@@ -25,9 +25,7 @@ import WorkflowUiPrompt from "../prompts/smoketest-ui.mdx";
  */
 const workflowDir = fileURLToPath(new URL(".", import.meta.url).href);
 const monorepoRoot = resolve(workflowDir, "../..");
-const rootPkg = JSON.parse(
-  readFileSync(resolve(monorepoRoot, "package.json"), "utf8"),
-) as { version: string };
+const rootPkg = JSON.parse(readFileSync(resolve(monorepoRoot, "package.json"), "utf8")) as { version: string };
 const CURRENT_VERSION = String(rootPkg.version);
 
 // How many releases back to smoke-test. The user-facing surface changes across
@@ -54,8 +52,7 @@ const CHANGELOGS = VERSIONS.map(
 // The human getting-started track and the agent skill, embedded so each
 // onboarding agent walks the EXACT documented steps without needing repo access
 // from its throwaway temp dir.
-const readDoc = (rel: string): string =>
-  `=== ${rel} ===\n\n${readFileSync(resolve(monorepoRoot, rel), "utf8")}`;
+const readDoc = (rel: string): string => `=== ${rel} ===\n\n${readFileSync(resolve(monorepoRoot, rel), "utf8")}`;
 const HUMAN_GUIDE = ["docs/guide/get-started.mdx", "docs/quickstart.mdx", "docs/cli/quickstart.mdx"]
   .map(readDoc)
   .join("\n\n");
@@ -127,12 +124,7 @@ export default smithers((ctx) => {
 
           {/* 3 — Every user-facing change across the last RELEASE_COUNT releases. */}
           <Task id="features" output={outputs.area} agent={agents.midTier} continueOnFail>
-            <FeaturesPrompt
-              prompt={prompt}
-              version={CURRENT_VERSION}
-              versions={versions}
-              changelogs={changelogs}
-            />
+            <FeaturesPrompt prompt={prompt} version={CURRENT_VERSION} versions={versions} changelogs={changelogs} />
           </Task>
 
           {/* 4 — A real workflow UI + gateway root routing, served over HTTP. */}
@@ -156,7 +148,12 @@ export default smithers((ctx) => {
               (passed
                 ? "All baseline, onboarding, feature, and UI checks passed."
                 : `${failed.length} failing check(s)${rows.length < 4 ? `; only ${rows.length}/4 areas reported` : ""}.`) +
-              (rows.length ? ` ${rows.map((r) => r.summary).filter(Boolean).join(" ")}` : "");
+              (rows.length
+                ? ` ${rows
+                    .map((r) => r.summary)
+                    .filter(Boolean)
+                    .join(" ")}`
+                : "");
             return { passed, summary, findings, reproSteps };
           }}
         </Task>

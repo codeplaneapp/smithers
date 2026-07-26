@@ -33,10 +33,15 @@ afterEach(async () => {
 async function removeTempDir(dir: string) {
   for (let attempt = 0; ; attempt += 1) {
     try {
-      try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      } catch {
+        /* best-effort temp cleanup */
+      }
       return;
     } catch (error) {
-      const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code: unknown }).code) : "";
+      const code =
+        typeof error === "object" && error !== null && "code" in error ? String((error as { code: unknown }).code) : "";
       if (!["EBUSY", "ENOTEMPTY", "EPERM"].includes(code) || attempt >= 5) throw error;
       await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
     }
@@ -95,7 +100,9 @@ describe("OpenCodeReview compatibility helpers", () => {
 
   test("review mode validation rejects ambiguous refs", () => {
     expect(() => validateReviewInput(input(".", { from: "main" }))).toThrow("--to is required");
-    expect(() => validateReviewInput(input(".", { from: "main", to: "feature", commit: "abc" }))).toThrow("Only one review mode");
+    expect(() => validateReviewInput(input(".", { from: "main", to: "feature", commit: "abc" }))).toThrow(
+      "Only one review mode",
+    );
   });
 
   test("native review prompt includes reviewable diffs and excludes default filtered diffs", async () => {
@@ -148,7 +155,14 @@ describe("OpenCodeReview compatibility helpers", () => {
         output: {
           status: "success",
           message: "",
-          summary: { filesReviewed: 1, comments: 2, totalTokens: 123, inputTokens: 100, outputTokens: 23, elapsed: "1s" },
+          summary: {
+            filesReviewed: 1,
+            comments: 2,
+            totalTokens: 123,
+            inputTokens: 100,
+            outputTokens: 23,
+            elapsed: "1s",
+          },
           comments: [
             {
               path: "",
@@ -226,14 +240,22 @@ describe("OpenCodeReview compatibility helpers", () => {
     const prepared = await buildNativeReviewPrompt(reviewInput, preview);
     const prompt = prepared.files[0].prompt;
 
-    expect(prompt).toContain("critical: the merge must stop; data loss, a security hole, or a guaranteed crash on a main path.");
+    expect(prompt).toContain(
+      "critical: the merge must stop; data loss, a security hole, or a guaranteed crash on a main path.",
+    );
     expect(prompt).toContain("major: a real bug users will hit.");
     expect(prompt).toContain("minor: a correctness risk, an edge case, or misleading behavior.");
     expect(prompt).toContain("info: style or docs, and only with concrete impact.");
-    expect(prompt).toContain('confidence "confirmed" means you traced a concrete failure path; "plausible" means reasoned but not traced.');
+    expect(prompt).toContain(
+      'confidence "confirmed" means you traced a concrete failure path; "plausible" means reasoned but not traced.',
+    );
     expect(prompt).toContain("Omit any finding you cannot honestly call at least plausible.");
-    expect(prompt).toContain("Your working directory is the repository; read the full current file before commenting on any part of it.");
-    expect(prompt).toContain("When a finding depends on callers or callees, grep the repository for them and confirm the failure path actually exists.");
+    expect(prompt).toContain(
+      "Your working directory is the repository; read the full current file before commenting on any part of it.",
+    );
+    expect(prompt).toContain(
+      "When a finding depends on callers or callees, grep the repository for them and confirm the failure path actually exists.",
+    );
     expect(prompt).toContain("Drop any finding that the surrounding code contradicts.");
     expect(prompt).toContain(
       "startLine/endLine must point at lines present in the new side of this diff; when unsure, leave them 0 and provide exact existingCode for deterministic matching.",
@@ -271,7 +293,14 @@ describe("OpenCodeReview compatibility helpers", () => {
         file: prepared.files[0],
         output: agentOutput({
           status: "success",
-          summary: { filesReviewed: 1, comments: 0, totalTokens: 999_999, inputTokens: 500_000, outputTokens: 499_999, elapsed: "1s" },
+          summary: {
+            filesReviewed: 1,
+            comments: 0,
+            totalTokens: 999_999,
+            inputTokens: 500_000,
+            outputTokens: 499_999,
+            elapsed: "1s",
+          },
           comments: [],
           warnings: [],
         }),
@@ -392,9 +421,7 @@ describe("OpenCodeReview compatibility helpers", () => {
       },
     ]);
 
-    expect(
-      finalized.comments.map((comment) => [comment.severity, comment.path, comment.startLine]),
-    ).toEqual([
+    expect(finalized.comments.map((comment) => [comment.severity, comment.path, comment.startLine])).toEqual([
       ["critical", "src/app.ts", 2],
       ["critical", "src/other.ts", 1],
       ["minor", "src/app.ts", 1],

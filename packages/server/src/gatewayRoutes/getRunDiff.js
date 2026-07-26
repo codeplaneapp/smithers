@@ -1,4 +1,8 @@
-import { applyDiffBundle, computeDiffBundle, computeDiffBundleBetweenRefs } from "@smithers-orchestrator/engine/effect/diff-bundle";
+import {
+  applyDiffBundle,
+  computeDiffBundle,
+  computeDiffBundleBetweenRefs,
+} from "@smithers-orchestrator/engine/effect/diff-bundle";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,13 +11,7 @@ import { resolveCommitPointer } from "./getNodeDiff.js";
 
 const RUN_ID_MAX_LENGTH = 256;
 export const RUN_DIFF_MAX_BYTES = 50 * 1024 * 1024;
-const TERMINAL_RUN_STATUSES = new Set([
-  "finished",
-  "failed",
-  "cancelled",
-  "canceled",
-  "continued",
-]);
+const TERMINAL_RUN_STATUSES = new Set(["finished", "failed", "cancelled", "canceled", "continued"]);
 
 class GetRunDiffError extends Error {
   constructor(code, message) {
@@ -24,11 +22,7 @@ class GetRunDiffError extends Error {
 }
 
 function validateRunId(value) {
-  if (
-    typeof value !== "string" ||
-    value.length === 0 ||
-    value.length > RUN_ID_MAX_LENGTH
-  ) {
+  if (typeof value !== "string" || value.length === 0 || value.length > RUN_ID_MAX_LENGTH) {
     throw new GetRunDiffError(
       "InvalidRequest",
       `runId must be a non-empty string of at most ${RUN_ID_MAX_LENGTH} characters.`,
@@ -40,12 +34,7 @@ function validateRunId(value) {
 function terminalAttemptsByCwd(attempts) {
   const latest = new Map();
   for (const row of attempts) {
-    if (
-      !TERMINAL_RUN_STATUSES.has(row?.state) ||
-      typeof row.jjPointer !== "string" ||
-      !row.jjPointer
-    )
-      continue;
+    if (!TERMINAL_RUN_STATUSES.has(row?.state) || typeof row.jjPointer !== "string" || !row.jjPointer) continue;
     const cwd = typeof row.jjCwd === "string" && row.jjCwd ? row.jjCwd : "";
     const previous = latest.get(cwd);
     const finished = Number(row.finishedAtMs ?? -1);
@@ -55,8 +44,7 @@ function terminalAttemptsByCwd(attempts) {
     if (
       !previous ||
       finished > previousFinished ||
-      (finished === previousFinished &&
-        Number(row.attempt ?? 0) > Number(previous.attempt ?? 0))
+      (finished === previousFinished && Number(row.attempt ?? 0) > Number(previous.attempt ?? 0))
     )
       latest.set(cwd, row);
   }
@@ -86,9 +74,7 @@ async function readCachedRunBundles(adapter, runId, baseRef) {
   if (typeof adapter.listNodeDiffCache !== "function") return null;
   const rows = await adapter.listNodeDiffCache(runId);
   const bundles = [];
-  for (const row of [...(rows ?? [])].sort(
-    (a, b) => Number(a?.computedAtMs ?? 0) - Number(b?.computedAtMs ?? 0),
-  )) {
+  for (const row of [...(rows ?? [])].sort((a, b) => Number(a?.computedAtMs ?? 0) - Number(b?.computedAtMs ?? 0))) {
     if (typeof row?.diffJson !== "string") continue;
     try {
       const parsed = JSON.parse(row.diffJson);
@@ -105,7 +91,9 @@ function runGit(cwd, args) {
     const child = spawn("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
     let stderr = "";
     child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
     child.once("error", reject);
     child.once("close", (code) => resolve({ code: code ?? 1, stderr }));
   });
@@ -123,7 +111,11 @@ async function cachedRunBundle(adapter, runId, baseRef, vcsRoot) {
     const checkedOut = await runGit(checkout, ["checkout", "--detach", baseRef]);
     if (checkedOut.code !== 0) return null;
     for (const bundle of bundles) await applyDiffBundle(bundle, checkout);
-    return await computeDiffBundle(baseRef, checkout, Math.max(0, ...bundles.map((bundle) => Number(bundle?.seq ?? 0))));
+    return await computeDiffBundle(
+      baseRef,
+      checkout,
+      Math.max(0, ...bundles.map((bundle) => Number(bundle?.seq ?? 0))),
+    );
   } finally {
     await rm(checkout, { recursive: true, force: true });
   }
@@ -183,21 +175,17 @@ export async function getRunDiffRoute({
         ok: false,
         error: {
           code: "VcsError",
-          message:
-            "Run diff is unavailable until the run reaches a terminal state.",
+          message: "Run diff is unavailable until the run reaches a terminal state.",
         },
       };
     }
     const attempts = await resolved.adapter.listAttemptsForRun(runId);
     const terminalAttempts = terminalAttemptsByCwd(attempts);
     if (terminalAttempts.length === 0) {
-      if (attempts.length === 0)
-        return { ok: true, payload: { seq: 0, baseRef, patches: [] } };
+      if (attempts.length === 0) return { ok: true, payload: { seq: 0, baseRef, patches: [] } };
       const cached = await cachedRunBundle(resolved.adapter, runId, baseRef, run.vcsRoot);
       if (cached) return finalizeRunBundle(cached, baseRef, "multiple");
-      const hasEvidence = attempts.some((row) =>
-        TERMINAL_RUN_STATUSES.has(row?.state),
-      );
+      const hasEvidence = attempts.some((row) => TERMINAL_RUN_STATUSES.has(row?.state));
       if (hasEvidence)
         return {
           ok: false,
@@ -218,21 +206,16 @@ export async function getRunDiffRoute({
     for (const attempt of terminalAttempts) {
       // Reaped task worktrees are not durable. The run root is the surviving
       // VCS repository and is also sufficient for resolving immutable refs.
-      const cwd =
-        (typeof attempt.jjCwd === "string" && attempt.jjCwd) || run.vcsRoot;
+      const cwd = (typeof attempt.jjCwd === "string" && attempt.jjCwd) || run.vcsRoot;
       if (!cwd)
         return {
           ok: false,
           error: {
             code: "VcsError",
-            message:
-              "Run has no surviving VCS root for terminal diff resolution.",
+            message: "Run has no surviving VCS root for terminal diff resolution.",
           },
         };
-      const resolveRef =
-        run.vcsType === "jj" || !run.vcsType
-          ? resolveCommitPointerImpl
-          : async (ref) => ref;
+      const resolveRef = run.vcsType === "jj" || !run.vcsType ? resolveCommitPointerImpl : async (ref) => ref;
       const terminalRef = await resolveRef(attempt.jjPointer, cwd);
       if (!terminalRef)
         return {
@@ -253,12 +236,7 @@ export async function getRunDiffRoute({
         };
       try {
         bundles.push(
-          await computeDiffBundleBetweenRefsImpl(
-            resolvedBaseRef,
-            terminalRef,
-            cwd,
-            Number(attempt.attempt ?? 0),
-          ),
+          await computeDiffBundleBetweenRefsImpl(resolvedBaseRef, terminalRef, cwd, Number(attempt.attempt ?? 0)),
         );
       } catch (error) {
         const cached = await cachedRunBundle(resolved.adapter, runId, baseRef, run.vcsRoot);
@@ -266,20 +244,14 @@ export async function getRunDiffRoute({
         throw error;
       }
     }
-    const bundle =
-      bundles.length === 1
-        ? { ...bundles[0], baseRef }
-        : mergeBundles(bundles, baseRef);
+    const bundle = bundles.length === 1 ? { ...bundles[0], baseRef } : mergeBundles(bundles, baseRef);
     return finalizeRunBundle(
       bundle,
       baseRef,
-      terminalAttempts.length === 1
-        ? terminalAttempts[0].jjPointer
-        : "multiple",
+      terminalAttempts.length === 1 ? terminalAttempts[0].jjPointer : "multiple",
     );
   } catch (error) {
-    if (error instanceof GetRunDiffError)
-      return { ok: false, error: { code: error.code, message: error.message } };
+    if (error instanceof GetRunDiffError) return { ok: false, error: { code: error.code, message: error.message } };
     return {
       ok: false,
       error: {

@@ -80,7 +80,9 @@ describe("createSerperSearchProvider", () => {
         apiKey: "k",
         baseUrl: "https://serper.test/search",
         fetch: async () =>
-          Response.json({ organic: [{ title: "S", link: "https://s.example", snippet: "snip", date: "2026" }, { snippet: "no-link" }] }),
+          Response.json({
+            organic: [{ title: "S", link: "https://s.example", snippet: "snip", date: "2026" }, { snippet: "no-link" }],
+          }),
       });
       const results = await provider.search({ query: "q", maxResults: 4, freshness });
       expect(results).toEqual([{ title: "S", url: "https://s.example", snippet: "snip", publishedDate: "2026" }]);
@@ -136,7 +138,10 @@ describe("createGroundedWebSearchToolset", () => {
   test("merges + dedupes citations and skips a failing provider", async () => {
     const toolset = createGroundedWebSearchToolset({
       providers: [
-        exa([{ title: "A", url: "https://a.example/x#frag" }, { title: "bad", url: "" }]),
+        exa([
+          { title: "A", url: "https://a.example/x#frag" },
+          { title: "bad", url: "" },
+        ]),
         fresh("brave", [
           { title: "A-dup", url: "https://a.example/x" },
           { title: "B", url: "https://b.example" },
@@ -161,8 +166,8 @@ describe("createGroundedWebSearchToolset", () => {
     });
     const result = await toolset.tools.grounded_web_search.execute({ query: "q", freshness: "bogus" }, callOptions);
     expect(result.results[0].url).toBe("not a url");
-    await expect(
-      toolset.tools.grounded_web_search.execute({ query: "   " }, callOptions),
-    ).rejects.toThrow(/non-empty query/);
+    await expect(toolset.tools.grounded_web_search.execute({ query: "   " }, callOptions)).rejects.toThrow(
+      /non-empty query/,
+    );
   });
 });

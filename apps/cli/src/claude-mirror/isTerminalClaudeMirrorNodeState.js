@@ -5,5 +5,5 @@ const TERMINAL_NODE_STATES = new Set(["finished", "failed", "skipped", "cancelle
  * @returns {boolean}
  */
 export function isTerminalClaudeMirrorNodeState(state) {
-    return TERMINAL_NODE_STATES.has(String(state ?? ""));
+  return TERMINAL_NODE_STATES.has(String(state ?? ""));
 }

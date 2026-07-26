@@ -83,9 +83,7 @@ export function Reasoning({
   const bodyId = `${baseId}-reasoning-body`;
   const triggerId = `${baseId}-reasoning-trigger`;
   const isControlled = controlledOpen !== undefined;
-  const [uncontrolledOpen, setUncontrolledOpen] = useState(
-    () => defaultOpen ?? streaming,
-  );
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(() => defaultOpen ?? streaming);
   const previousStreaming = useRef(streaming);
   const userToggled = useRef(false);
   const isOpen = isControlled ? controlledOpen : uncontrolledOpen;
@@ -119,7 +117,9 @@ export function Reasoning({
         {...props}
       >
         <ReasoningLiveRegion title={title} announcement={announcement} />
-        {composed ? children : (
+        {composed ? (
+          children
+        ) : (
           <>
             <button
               type="button"
@@ -132,10 +132,7 @@ export function Reasoning({
               <span className="sui-reasoning-chevron" aria-hidden="true">
                 ›
               </span>
-              <span
-                className="sui-reasoning-title"
-                data-shimmer={streaming ? "true" : "false"}
-              >
+              <span className="sui-reasoning-title" data-shimmer={streaming ? "true" : "false"}>
                 {title}
               </span>
               {!streaming && duration != null ? (
@@ -159,12 +156,7 @@ export function Reasoning({
 export type ReasoningTriggerProps = ComponentProps<"button">;
 
 /** Disclosure trigger for a composed Reasoning. */
-export function ReasoningTrigger({
-  className,
-  children,
-  onClick,
-  ...props
-}: ReasoningTriggerProps) {
+export function ReasoningTrigger({ className, children, onClick, ...props }: ReasoningTriggerProps) {
   useInjectUiCss();
   useInjectLaneCss(REASONING_TOOLS_CSS_ID, reasoningToolsCss);
   const context = useReasoningContext("ReasoningTrigger");
@@ -244,10 +236,7 @@ export function ReasoningSummary({
       className={cn("sui-reasoning-summary", className)}
       {...props}
     >
-      <span
-        className="sui-reasoning-summary-label"
-        data-streaming={streaming ? "true" : "false"}
-      >
+      <span className="sui-reasoning-summary-label" data-streaming={streaming ? "true" : "false"}>
         {label}
       </span>
       <div className="sui-reasoning-summary-text">{text}</div>

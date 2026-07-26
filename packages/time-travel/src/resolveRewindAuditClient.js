@@ -15,9 +15,7 @@
 export function resolveRewindAuditClient(adapter) {
   const storage = adapter?.internalStorage;
   if (!storage || typeof storage.execute !== "function") {
-    throw new TypeError(
-      "Could not resolve storage for rewind audit writes; adapter has no internalStorage.",
-    );
+    throw new TypeError("Could not resolve storage for rewind audit writes; adapter has no internalStorage.");
   }
   return storage;
 }

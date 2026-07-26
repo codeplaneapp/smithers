@@ -32,20 +32,13 @@ test("the gateway-ui workflow UI renders live data", async ({ page }) => {
   // its data-status attribute exposes the live transport state. It is the
   // root's only direct-child span (RunList StatusPills carry run statuses).
   await expect(page.getByText("Connected")).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId("e2e-task-ui").locator("> span[data-status]")).toHaveAttribute(
-    "data-status",
-    "online",
-  );
+  await expect(page.getByTestId("e2e-task-ui").locator("> span[data-status]")).toHaveAttribute("data-status", "online");
   // RunList (gateway-ui) renders the seeded runs by workflow key — the
   // populated state: at least one selectable run row with a StatusPill (the
   // seeded e2e-approval runs are deterministically waiting on their gate).
   await expect(page.getByText(/e2e-task|e2e-approval/).first()).toBeVisible({ timeout: 15_000 });
-  expect(
-    await page.getByRole("button").filter({ hasText: /e2e-/ }).count(),
-  ).toBeGreaterThan(0);
-  await expect(
-    page.locator('[data-status="waiting-approval"], [data-status="finished"]').first(),
-  ).toBeVisible();
+  expect(await page.getByRole("button").filter({ hasText: /e2e-/ }).count()).toBeGreaterThan(0);
+  await expect(page.locator('[data-status="waiting-approval"], [data-status="finished"]').first()).toBeVisible();
   // RunEventLog renders its no-selection empty state until a run is picked.
   await expect(page.getByText("Select a run to stream its events.")).toBeVisible();
 });
@@ -64,16 +57,11 @@ test("selecting a run in the gateway-ui RunList streams its events", async ({ pa
   // …and real frames render: the seeded runs executed, so the log shows
   // seq-prefixed engine event lines (every run commits at least frame 1 and a
   // status change), not just a waiting placeholder.
-  await expect(page.getByTestId("e2e-task-ui")).toContainText(
-    /FrameCommitted|RunStatusChanged/,
-    { timeout: 15_000 },
-  );
+  await expect(page.getByTestId("e2e-task-ui")).toContainText(/FrameCommitted|RunStatusChanged/, { timeout: 15_000 });
   await expect(page.getByTestId("e2e-task-ui")).toContainText("0001");
 });
 
-test("a workflow UI with zero runs renders its empty state with idle launch controls", async ({
-  page,
-}) => {
+test("a workflow UI with zero runs renders its empty state with idle launch controls", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => pageErrors.push(String(err)));
 

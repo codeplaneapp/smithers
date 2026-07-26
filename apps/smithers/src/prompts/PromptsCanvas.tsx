@@ -177,11 +177,7 @@ function InputsTab() {
           {inputs.map((input) => (
             <InputRow key={input.name} input={input} value={values[input.name] ?? ""} />
           ))}
-          <button
-            className="btn btn-brand"
-            type="button"
-            onClick={() => renderNow(selectedId)}
-          >
+          <button className="btn btn-brand" type="button" onClick={() => renderNow(selectedId)}>
             Preview with values
           </button>
         </>
@@ -245,9 +241,7 @@ function PromptDetail() {
             data-testid={`prompts-tab-${entry.id}`}
           >
             {entry.label}
-            {entry.id === "inputs" && inputsDirty ? (
-              <span className="prompts-tab-dot" />
-            ) : null}
+            {entry.id === "inputs" && inputsDirty ? <span className="prompts-tab-dot" /> : null}
           </button>
         ))}
         {sourceDirty ? (
@@ -277,9 +271,7 @@ function PromptDetail() {
 /** The full prompts EDITOR surface: a prompt list rail and a tabbed detail pane. */
 export function PromptsCanvas() {
   const prompts = usePromptsStore((state) => state.prompts);
-  const selected = usePromptsStore(
-    (state) => state.prompts.find((prompt) => prompt.id === state.selectedId) ?? null,
-  );
+  const selected = usePromptsStore((state) => state.prompts.find((prompt) => prompt.id === state.selectedId) ?? null);
   const draft = usePromptsStore(selectDraft);
 
   // The header sub echoes the selected entryFile + discovered-input count, the

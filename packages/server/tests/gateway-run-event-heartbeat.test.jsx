@@ -54,9 +54,7 @@ function makeFakeConnection({ bufferedAmount = 0 } = {}) {
 
 function heartbeats(connection, streamId) {
   return connection.sent.filter(
-    (frame) =>
-      frame.event === "run.heartbeat" &&
-      (streamId === undefined || frame.payload.streamId === streamId),
+    (frame) => frame.event === "run.heartbeat" && (streamId === undefined || frame.payload.streamId === streamId),
   );
 }
 
@@ -122,9 +120,7 @@ describe("run event stream shared heartbeat", () => {
 
     // One shared timer: every tick fans out exactly one heartbeat per stream,
     // so all streams see the same number of heartbeats.
-    const counts = ["stream-a", "stream-b", "stream-c"].map(
-      (streamId) => heartbeats(connection, streamId).length,
-    );
+    const counts = ["stream-a", "stream-b", "stream-c"].map((streamId) => heartbeats(connection, streamId).length);
     expect(new Set(counts).size).toBe(1);
   });
 
@@ -133,11 +129,7 @@ describe("run event stream shared heartbeat", () => {
     connection = makeFakeConnection();
 
     gateway.registerRunEventSubscriber(connection, "stream-first", "run-first");
-    const unsubscribeSecond = gateway.registerRunEventSubscriber(
-      connection,
-      "stream-second",
-      "run-second",
-    );
+    const unsubscribeSecond = gateway.registerRunEventSubscriber(connection, "stream-second", "run-second");
     const timer = connection.runEventHeartbeatTimer;
     expect(timer).toBeTruthy();
 
@@ -228,10 +220,7 @@ const AUTH_TOKENS = {
 };
 
 function makeDbPath(name) {
-  return join(
-    tmpdir(),
-    `smithers-run-event-heartbeat-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
-  );
+  return join(tmpdir(), `smithers-run-event-heartbeat-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
 function getPort(server) {
@@ -256,10 +245,7 @@ async function waitUntil(predicate, label, timeoutMs = 10_000) {
 }
 
 function createHeartbeatWorkflow(dbPath) {
-  const { smithers, Workflow, Task, outputs } = createSmithers(
-    { out: z.object({ value: z.number() }) },
-    { dbPath },
-  );
+  const { smithers, Workflow, Task, outputs } = createSmithers({ out: z.object({ value: z.number() }) }, { dbPath });
   return smithers(() => (
     <Workflow name="heartbeat">
       <Task id="a" output={outputs.out}>
@@ -387,9 +373,7 @@ describe("run event stream shared heartbeat over a real socket", () => {
     for (const streamId of streamIds) {
       const frame = await client.waitFor(
         (message) =>
-          message.type === "event" &&
-          message.event === "run.heartbeat" &&
-          message.payload.streamId === streamId,
+          message.type === "event" && message.event === "run.heartbeat" && message.payload.streamId === streamId,
       );
       expect(frame.payload.type).toBe("Heartbeat");
       expect(frame.payload.runId).toBe(runId);

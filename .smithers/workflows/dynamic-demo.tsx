@@ -43,7 +43,11 @@ const stages: Stage[] = [
     title: "Intake",
     steps: [
       { id: "read-context", title: "Read Context", summary: "Review the demo brief and current run state." },
-      { id: "inventory-files", title: "Inventory Files", summary: "List the docs and tickets that would be inspected." },
+      {
+        id: "inventory-files",
+        title: "Inventory Files",
+        summary: "List the docs and tickets that would be inspected.",
+      },
     ],
   },
   {
@@ -83,7 +87,9 @@ export default smithers((ctx) => {
   const iteration = ctx.iteration;
   const stage = stages[iteration % stages.length];
   const previousStage = iteration === 0 ? null : stages[(iteration - 1) % stages.length];
-  const added = previousStage ? stepNames(stage).filter((name) => !stepNames(previousStage).includes(name)) : stepNames(stage);
+  const added = previousStage
+    ? stepNames(stage).filter((name) => !stepNames(previousStage).includes(name))
+    : stepNames(stage);
   const removed = previousStage ? stepNames(previousStage).filter((name) => !stepNames(stage).includes(name)) : [];
 
   return (

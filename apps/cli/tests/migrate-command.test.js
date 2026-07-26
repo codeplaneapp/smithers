@@ -28,9 +28,7 @@ function seedLegacyStore(repo) {
     INSERT INTO result (run_id, node_id, iteration, summary)
       VALUES ('cli-migrate-run', 'write-result', 0, 'fixture workflow ran');
   `);
-  const row = api.db.$client
-    .query("SELECT id FROM _smithers_schema_migrations ORDER BY id DESC LIMIT 1")
-    .get();
+  const row = api.db.$client.query("SELECT id FROM _smithers_schema_migrations ORDER BY id DESC LIMIT 1").get();
   const schemaVersion = String(row?.id ?? "0000").match(/^\d+/)?.[0] ?? "0000";
   api.db.$client.close();
   return { dbPath, schemaVersion };
@@ -87,7 +85,11 @@ test("post-migration CLI reads use backend.json and see the migrated PGlite run"
   expect(inspect.exitCode).toBe(0);
   expect(inspect.json.run.id).toBe("cli-migrate-run");
 
-  const output = runSmithers(["output", "cli-migrate-run", "write-result"], { cwd: repo.dir, format: "json", timeoutMs: 120_000 });
+  const output = runSmithers(["output", "cli-migrate-run", "write-result"], {
+    cwd: repo.dir,
+    format: "json",
+    timeoutMs: 120_000,
+  });
   expect(output.exitCode).toBe(0);
   expect(output.stdout).toContain("fixture workflow ran");
 });
@@ -132,18 +134,14 @@ test("smithers migrate redacts passwords from url guidance", () => {
   const repo = createTempRepo();
   seedLegacyStore(repo);
 
-  const result = runSmithers([
-    "migrate",
-    "--to",
-    "postgres",
-    "--url",
-    "postgres://user:super-secret-pw@127.0.0.1:5432/smithers",
-    "--agent",
-  ], {
-    cwd: repo.dir,
-    format: "json",
-    timeoutMs: 30_000,
-  });
+  const result = runSmithers(
+    ["migrate", "--to", "postgres", "--url", "postgres://user:super-secret-pw@127.0.0.1:5432/smithers", "--agent"],
+    {
+      cwd: repo.dir,
+      format: "json",
+      timeoutMs: 30_000,
+    },
+  );
 
   expect(result.exitCode).toBe(4);
   const combined = `${result.stdout}\n${result.stderr}`;
@@ -252,24 +250,27 @@ test("post-migration smithers workflow run fails loud for a sync createSmithers 
 
   // Write a compute-only workflow that uses createSmithers() (the default db path).
   // No AI agents — pure synchronous output so the test is deterministic and fast.
-  repo.write(".smithers/workflows/up-backend-test.tsx", [
-    "/** @jsxImportSource smithers-orchestrator */",
-    'import { createSmithers } from "smithers-orchestrator";',
-    'import { z } from "zod";',
-    "",
-    "const { Workflow, Task, smithers, outputs } = createSmithers({",
-    "  output: z.object({ result: z.string() }),",
-    "});",
-    "",
-    "export default smithers(() => (",
-    '  <Workflow name="up-backend-test">',
-    '    <Task id="result" output={outputs.output}>',
-    "      {() => ({ result: \"backend-write-path-ok\" })}",
-    "    </Task>",
-    "  </Workflow>",
-    "));",
-    "",
-  ].join("\n"));
+  repo.write(
+    ".smithers/workflows/up-backend-test.tsx",
+    [
+      "/** @jsxImportSource smithers-orchestrator */",
+      'import { createSmithers } from "smithers-orchestrator";',
+      'import { z } from "zod";',
+      "",
+      "const { Workflow, Task, smithers, outputs } = createSmithers({",
+      "  output: z.object({ result: z.string() }),",
+      "});",
+      "",
+      "export default smithers(() => (",
+      '  <Workflow name="up-backend-test">',
+      '    <Task id="result" output={outputs.output}>',
+      '      {() => ({ result: "backend-write-path-ok" })}',
+      "    </Task>",
+      "  </Workflow>",
+      "));",
+      "",
+    ].join("\n"),
+  );
 
   // Migrate sqlite → pglite. This writes backend.json (authoritative = pglite)
   // and keeps the source smithers.db on disk (keepSqlite default = true).
@@ -329,24 +330,27 @@ test("post-migration smithers up honors SMITHERS_BACKEND=sqlite instead of marke
   const env = { HOME: repo.dir };
   seedLegacyStore(repo);
 
-  repo.write(".smithers/workflows/up-env-sqlite.tsx", [
-    "/** @jsxImportSource smithers-orchestrator */",
-    'import { createSmithers } from "smithers-orchestrator";',
-    'import { z } from "zod";',
-    "",
-    "const { Workflow, Task, smithers, outputs } = createSmithers({",
-    "  output: z.object({ result: z.string() }),",
-    "});",
-    "",
-    "export default smithers(() => (",
-    '  <Workflow name="up-env-sqlite">',
-    '    <Task id="result" output={outputs.output}>',
-    "      {() => ({ result: \"env-sqlite-write-path-ok\" })}",
-    "    </Task>",
-    "  </Workflow>",
-    "));",
-    "",
-  ].join("\n"));
+  repo.write(
+    ".smithers/workflows/up-env-sqlite.tsx",
+    [
+      "/** @jsxImportSource smithers-orchestrator */",
+      'import { createSmithers } from "smithers-orchestrator";',
+      'import { z } from "zod";',
+      "",
+      "const { Workflow, Task, smithers, outputs } = createSmithers({",
+      "  output: z.object({ result: z.string() }),",
+      "});",
+      "",
+      "export default smithers(() => (",
+      '  <Workflow name="up-env-sqlite">',
+      '    <Task id="result" output={outputs.output}>',
+      '      {() => ({ result: "env-sqlite-write-path-ok" })}',
+      "    </Task>",
+      "  </Workflow>",
+      "));",
+      "",
+    ].join("\n"),
+  );
 
   const migrate = runSmithers(["migrate", "--to", "pglite"], {
     cwd: repo.dir,
@@ -357,15 +361,12 @@ test("post-migration smithers up honors SMITHERS_BACKEND=sqlite instead of marke
   expect(migrate.exitCode).toBe(0);
   expect(repo.exists(".smithers/backend.json")).toBe(true);
 
-  const run = runSmithers(
-    ["up", ".smithers/workflows/up-env-sqlite.tsx", "--run-id", "env-sqlite-up-run"],
-    {
-      cwd: repo.dir,
-      env: { ...env, SMITHERS_BACKEND: "sqlite" },
-      format: "json",
-      timeoutMs: 120_000,
-    },
-  );
+  const run = runSmithers(["up", ".smithers/workflows/up-env-sqlite.tsx", "--run-id", "env-sqlite-up-run"], {
+    cwd: repo.dir,
+    env: { ...env, SMITHERS_BACKEND: "sqlite" },
+    format: "json",
+    timeoutMs: 120_000,
+  });
   expect(run.exitCode).toBe(0);
   expect(`${run.stdout}\n${run.stderr}`).not.toContain("BACKEND_OPEN_FAILED");
 
@@ -385,24 +386,27 @@ test("authoritative pglite open failure stops workflow run instead of writing st
 
   repo.write(".smithers/backend.json", JSON.stringify({ backend: "pglite" }, null, 2) + "\n");
   repo.write(".smithers/pg", "not a directory\n");
-  repo.write(".smithers/workflows/up-backend-fail.tsx", [
-    "/** @jsxImportSource smithers-orchestrator */",
-    'import { createSmithers } from "smithers-orchestrator";',
-    'import { z } from "zod";',
-    "",
-    "const { Workflow, Task, smithers, outputs } = createSmithers({",
-    "  output: z.object({ result: z.string() }),",
-    "});",
-    "",
-    "export default smithers(() => (",
-    '  <Workflow name="up-backend-fail">',
-    '    <Task id="result" output={outputs.output}>',
-    "      {() => ({ result: \"should-not-run\" })}",
-    "    </Task>",
-    "  </Workflow>",
-    "));",
-    "",
-  ].join("\n"));
+  repo.write(
+    ".smithers/workflows/up-backend-fail.tsx",
+    [
+      "/** @jsxImportSource smithers-orchestrator */",
+      'import { createSmithers } from "smithers-orchestrator";',
+      'import { z } from "zod";',
+      "",
+      "const { Workflow, Task, smithers, outputs } = createSmithers({",
+      "  output: z.object({ result: z.string() }),",
+      "});",
+      "",
+      "export default smithers(() => (",
+      '  <Workflow name="up-backend-fail">',
+      '    <Task id="result" output={outputs.output}>',
+      '      {() => ({ result: "should-not-run" })}',
+      "    </Task>",
+      "  </Workflow>",
+      "));",
+      "",
+    ].join("\n"),
+  );
 
   const run = runSmithers(["workflow", "run", "up-backend-fail", "--run-id", "must-not-hit-sqlite"], {
     cwd: repo.dir,

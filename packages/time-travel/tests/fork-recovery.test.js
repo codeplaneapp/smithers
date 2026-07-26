@@ -74,16 +74,14 @@ describe("fork recovery: partially-deleted parent", () => {
     const sqlClient = adapter.db.session?.client ?? adapter.db.$client;
     sqlClient.run(`DELETE FROM _smithers_snapshots WHERE run_id = 'parent-run'`);
 
-    await expect(
-      forkRun(adapter, { parentRunId: "parent-run", frameNo: 1 }),
-    ).rejects.toThrow(/No snapshot found|SNAPSHOT_NOT_FOUND/);
+    await expect(forkRun(adapter, { parentRunId: "parent-run", frameNo: 1 })).rejects.toThrow(
+      /No snapshot found|SNAPSHOT_NOT_FOUND/,
+    );
   });
 
   test("forking a non-existent run fails with a useful error", async () => {
     const { adapter } = createTestDb();
-    await expect(
-      forkRun(adapter, { parentRunId: "nonexistent", frameNo: 0 }),
-    ).rejects.toThrow(/No snapshot found/);
+    await expect(forkRun(adapter, { parentRunId: "nonexistent", frameNo: 0 })).rejects.toThrow(/No snapshot found/);
   });
 
   test("forking a parent at a frame whose snapshot was selectively pruned fails for that frame only", async () => {
@@ -92,18 +90,14 @@ describe("fork recovery: partially-deleted parent", () => {
     await captureSnapshot(adapter, "parent-run", 1, sampleData());
     await captureSnapshot(adapter, "parent-run", 2, sampleData());
     const sqlClient = adapter.db.session?.client ?? adapter.db.$client;
-    sqlClient.run(
-      `DELETE FROM _smithers_snapshots WHERE run_id = 'parent-run' AND frame_no = 1`,
-    );
+    sqlClient.run(`DELETE FROM _smithers_snapshots WHERE run_id = 'parent-run' AND frame_no = 1`);
 
     // Frame 0 still works.
     const ok = await forkRun(adapter, { parentRunId: "parent-run", frameNo: 0 });
     expect(ok.runId).toBeTruthy();
 
     // Frame 1 is gone — fork should fail.
-    await expect(
-      forkRun(adapter, { parentRunId: "parent-run", frameNo: 1 }),
-    ).rejects.toThrow(/No snapshot found/);
+    await expect(forkRun(adapter, { parentRunId: "parent-run", frameNo: 1 })).rejects.toThrow(/No snapshot found/);
 
     // Frame 2 still works.
     const ok2 = await forkRun(adapter, { parentRunId: "parent-run", frameNo: 2 });
@@ -135,12 +129,8 @@ describe("fork recovery: mid-creation failure", () => {
     }
     expect(caught).toBeDefined();
 
-    const runCount = sqlite
-      .query(`SELECT COUNT(*) AS count FROM _smithers_runs`)
-      .get().count;
-    const snapshotCount = sqlite
-      .query(`SELECT COUNT(*) AS count FROM _smithers_snapshots`)
-      .get().count;
+    const runCount = sqlite.query(`SELECT COUNT(*) AS count FROM _smithers_runs`).get().count;
+    const snapshotCount = sqlite.query(`SELECT COUNT(*) AS count FROM _smithers_snapshots`).get().count;
     expect(runCount).toBe(1);
     expect(snapshotCount).toBe(1);
 

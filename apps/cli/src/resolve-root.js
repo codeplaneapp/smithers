@@ -29,11 +29,11 @@ import { findSmithersAnchorDir } from "smithers-orchestrator/findSmithersAnchorD
  * @returns {string} absolute root directory
  */
 export function resolveLaunchRootDir(rootOption, cwd = process.cwd()) {
-    if (rootOption) {
-        return resolve(cwd, rootOption);
-    }
-    const anchorDir = findSmithersAnchorDir(cwd);
-    return anchorDir ?? resolve(cwd);
+  if (rootOption) {
+    return resolve(cwd, rootOption);
+  }
+  const anchorDir = findSmithersAnchorDir(cwd);
+  return anchorDir ?? resolve(cwd);
 }
 
 /**
@@ -50,17 +50,14 @@ export function resolveLaunchRootDir(rootOption, cwd = process.cwd()) {
  * @returns {string | undefined}
  */
 export function parsePersistedRootDir(configJson) {
-    if (!configJson) {
-        return undefined;
-    }
-    try {
-        const parsed = JSON.parse(configJson);
-        const rootDir = parsed?.rootDir;
-        return typeof rootDir === "string" && rootDir.length > 0
-            ? rootDir
-            : undefined;
-    }
-    catch {
-        return undefined;
-    }
+  if (!configJson) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(configJson);
+    const rootDir = parsed?.rootDir;
+    return typeof rootDir === "string" && rootDir.length > 0 ? rootDir : undefined;
+  } catch {
+    return undefined;
+  }
 }

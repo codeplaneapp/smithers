@@ -77,81 +77,90 @@ import { Timer } from "./Timer.js";
  * @returns {number}
  */
 function computeDelayMs(gap, baseMs, strategy) {
-    let raw;
-    switch (strategy) {
-        case "linear":
-            raw = baseMs * (gap + 1);
-            break;
-        case "exponential":
-            raw = baseMs * Math.pow(2, gap);
-            break;
-        case "fixed":
-        default:
-            raw = baseMs;
-            break;
-    }
-    // A non-finite delay would be formatted as "Infinity ms"/"NaNms" (and any
-    // value >= 1e21 as "1e+21ms"), none of which the engine's duration parser
-    // accepts. Fail here, where the offending prop is still in scope.
-    if (!Number.isFinite(raw)) {
-        throw new SmithersError("INVALID_INPUT", `<Poller> computed a non-finite poll delay from intervalMs=${baseMs}, backoff="${strategy}".`);
-    }
-    return Math.max(0, Math.round(raw));
+  let raw;
+  switch (strategy) {
+    case "linear":
+      raw = baseMs * (gap + 1);
+      break;
+    case "exponential":
+      raw = baseMs * Math.pow(2, gap);
+      break;
+    case "fixed":
+    default:
+      raw = baseMs;
+      break;
+  }
+  // A non-finite delay would be formatted as "Infinity ms"/"NaNms" (and any
+  // value >= 1e21 as "1e+21ms"), none of which the engine's duration parser
+  // accepts. Fail here, where the offending prop is still in scope.
+  if (!Number.isFinite(raw)) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      `<Poller> computed a non-finite poll delay from intervalMs=${baseMs}, backoff="${strategy}".`,
+    );
+  }
+  return Math.max(0, Math.round(raw));
 }
 /**
  * @param {PollerProps} props
  */
 export function Poller(props) {
-    if (props.skipIf)
-        return null;
-    const ctx = React.useContext(SmithersContext);
-    const prefix = props.id ?? "poll";
-    const maxAttempts = props.maxAttempts ?? 30;
-    const backoff = props.backoff ?? "fixed";
-    const baseInterval = props.intervalMs ?? 5000;
-    const onTimeout = props.onTimeout ?? "fail";
-    const iteration = ctx?.iterations?.[`${prefix}-loop`] ?? ctx?.iteration ?? 0;
-    const checkRow = ctx?.outputMaybe(props.checkOutput, {
-        nodeId: `${prefix}-check`,
-        iteration,
-    });
-    const until = checkRow?.satisfied === true;
-    // Determine if check is an agent or a compute function
-    const isAgent = typeof props.check === "object" &&
-        props.check !== null &&
-        "generate" in props.check;
-    // Build the check task
-    const prompt = props.children ??
-        "Check whether the condition is satisfied. Return an object with a satisfied boolean.";
-    const checkTask = isAgent
-        ? React.createElement(Task, {
-            id: `${prefix}-check`,
-            output: props.checkOutput,
-            timeoutMs: props.checkTimeoutMs,
-            agent: props.check,
-            children: prompt,
-        })
-        : React.createElement(Task, {
-            id: `${prefix}-check`,
-            output: props.checkOutput,
-            timeoutMs: props.checkTimeoutMs,
-            children: props.check,
-        });
-    // Pace the loop with a durable <Timer> ahead of the check, inside a
-    // <Sequence> so the scheduler holds the check back until the timer fires.
-    // The timer is skipped on the first iteration (poll immediately), so the
-    // delay before attempt N is the (N-1)th gap.
-    const delayMs = iteration === 0 ? 0 : computeDelayMs(iteration - 1, baseInterval, backoff);
-    return React.createElement(Loop, {
-        id: `${prefix}-loop`,
-        until,
-        maxIterations: maxAttempts,
-        onMaxReached: onTimeout === "fail" ? "fail" : "return-last",
-    }, React.createElement(Sequence, null, React.createElement(Timer, {
+  if (props.skipIf) return null;
+  const ctx = React.useContext(SmithersContext);
+  const prefix = props.id ?? "poll";
+  const maxAttempts = props.maxAttempts ?? 30;
+  const backoff = props.backoff ?? "fixed";
+  const baseInterval = props.intervalMs ?? 5000;
+  const onTimeout = props.onTimeout ?? "fail";
+  const iteration = ctx?.iterations?.[`${prefix}-loop`] ?? ctx?.iteration ?? 0;
+  const checkRow = ctx?.outputMaybe(props.checkOutput, {
+    nodeId: `${prefix}-check`,
+    iteration,
+  });
+  const until = checkRow?.satisfied === true;
+  // Determine if check is an agent or a compute function
+  const isAgent = typeof props.check === "object" && props.check !== null && "generate" in props.check;
+  // Build the check task
+  const prompt =
+    props.children ?? "Check whether the condition is satisfied. Return an object with a satisfied boolean.";
+  const checkTask = isAgent
+    ? React.createElement(Task, {
+        id: `${prefix}-check`,
+        output: props.checkOutput,
+        timeoutMs: props.checkTimeoutMs,
+        agent: props.check,
+        children: prompt,
+      })
+    : React.createElement(Task, {
+        id: `${prefix}-check`,
+        output: props.checkOutput,
+        timeoutMs: props.checkTimeoutMs,
+        children: props.check,
+      });
+  // Pace the loop with a durable <Timer> ahead of the check, inside a
+  // <Sequence> so the scheduler holds the check back until the timer fires.
+  // The timer is skipped on the first iteration (poll immediately), so the
+  // delay before attempt N is the (N-1)th gap.
+  const delayMs = iteration === 0 ? 0 : computeDelayMs(iteration - 1, baseInterval, backoff);
+  return React.createElement(
+    Loop,
+    {
+      id: `${prefix}-loop`,
+      until,
+      maxIterations: maxAttempts,
+      onMaxReached: onTimeout === "fail" ? "fail" : "return-last",
+    },
+    React.createElement(
+      Sequence,
+      null,
+      React.createElement(Timer, {
         id: `${prefix}-delay`,
         duration: `${delayMs}ms`,
         skipIf: iteration === 0,
-    }), checkTask));
+      }),
+      checkTask,
+    ),
+  );
 }
 ```
 
@@ -161,51 +170,47 @@ import { getSmithersErrorDocsUrl } from "./getSmithersErrorDocsUrl.js";
 /** @typedef {import("./SmithersErrorOptions.ts").SmithersErrorOptions} SmithersErrorOptions */
 
 export class SmithersError extends Error {
-    /** @type {SmithersErrorCode} */
-    code;
-    /** @type {string} */
-    summary;
-    /** @type {string} */
-    docsUrl;
-    /** @type {Record<string, unknown> | undefined} */
-    details;
-    /** @type {unknown} */
-    cause;
-    /** @type {string} */
-    name;
-    /**
+  /** @type {SmithersErrorCode} */
+  code;
+  /** @type {string} */
+  summary;
+  /** @type {string} */
+  docsUrl;
+  /** @type {Record<string, unknown> | undefined} */
+  details;
+  /** @type {unknown} */
+  cause;
+  /** @type {string} */
+  name;
+  /**
    * @param {SmithersErrorCode} code
    * @param {string} summary
    * @param {Record<string, unknown>} [details]
    * @param {unknown | SmithersErrorOptions} [causeOrOptions]
    */
-    constructor(code, summary, details, causeOrOptions) {
-        const docsUrl = getSmithersErrorDocsUrl(code);
-        // The 4th arg historically took a bare `cause`. An object counts as an
-        // options bag only when all of its own keys are known options. Any extra
-        // data means the whole object is a legacy cause and must round-trip.
-        const ownKeys = causeOrOptions && typeof causeOrOptions === "object"
-            ? Reflect.ownKeys(causeOrOptions)
-            : [];
-        const isOptionsObject = ownKeys.length > 0 &&
-            !(causeOrOptions instanceof Error) &&
-            ownKeys.every((key) => key === "cause" || key === "includeDocsUrl" || key === "name");
-        const options = /** @type {SmithersErrorOptions} */ (isOptionsObject
-            ? causeOrOptions
-            : { cause: causeOrOptions });
-        // Append the docs pointer unless suppressed or the summary already contains it.
-        const message = options.includeDocsUrl === false || summary.includes(docsUrl)
-            ? summary
-            : `${summary} See ${docsUrl}`;
-        super(message, { cause: options.cause });
-        Object.setPrototypeOf(this, new.target.prototype);
-        this.name = options.name ?? "SmithersError";
-        this.code = code;
-        this.summary = summary;
-        this.docsUrl = docsUrl;
-        this.details = details;
-        this.cause = options.cause;
-    }
+  constructor(code, summary, details, causeOrOptions) {
+    const docsUrl = getSmithersErrorDocsUrl(code);
+    // The 4th arg historically took a bare `cause`. An object counts as an
+    // options bag only when all of its own keys are known options. Any extra
+    // data means the whole object is a legacy cause and must round-trip.
+    const ownKeys = causeOrOptions && typeof causeOrOptions === "object" ? Reflect.ownKeys(causeOrOptions) : [];
+    const isOptionsObject =
+      ownKeys.length > 0 &&
+      !(causeOrOptions instanceof Error) &&
+      ownKeys.every((key) => key === "cause" || key === "includeDocsUrl" || key === "name");
+    const options = /** @type {SmithersErrorOptions} */ (isOptionsObject ? causeOrOptions : { cause: causeOrOptions });
+    // Append the docs pointer unless suppressed or the summary already contains it.
+    const message =
+      options.includeDocsUrl === false || summary.includes(docsUrl) ? summary : `${summary} See ${docsUrl}`;
+    super(message, { cause: options.cause });
+    Object.setPrototypeOf(this, new.target.prototype);
+    this.name = options.name ?? "SmithersError";
+    this.code = code;
+    this.summary = summary;
+    this.docsUrl = docsUrl;
+    this.details = details;
+    this.cause = options.cause;
+  }
 }
 ```
 
@@ -227,20 +232,23 @@ SmithersContext.displayName = "SmithersContext";
  * @returns {{ SmithersContext: React.Context<SmithersCtx<Schema> | null>, useCtx: () => SmithersCtx<Schema> }}
  */
 export function createSmithersContext() {
-    /** @type {React.Context<SmithersCtx<Schema> | null>} */
-    const Context = React.createContext(null);
-    Context.displayName = "SmithersContext";
-    /**
+  /** @type {React.Context<SmithersCtx<Schema> | null>} */
+  const Context = React.createContext(null);
+  Context.displayName = "SmithersContext";
+  /**
    * @returns {SmithersCtx<Schema>}
    */
-    function useCtx() {
-        const ctx = React.useContext(Context);
-        if (!ctx) {
-            throw new SmithersError("CONTEXT_OUTSIDE_WORKFLOW", "useCtx() must be called inside a <Workflow> created by createSmithers()");
-        }
-        return ctx;
+  function useCtx() {
+    const ctx = React.useContext(Context);
+    if (!ctx) {
+      throw new SmithersError(
+        "CONTEXT_OUTSIDE_WORKFLOW",
+        "useCtx() must be called inside a <Workflow> created by createSmithers()",
+      );
     }
-    return { SmithersContext: Context, useCtx };
+    return ctx;
+  }
+  return { SmithersContext: Context, useCtx };
 }
 ```
 
@@ -283,18 +291,17 @@ import React from "react";
  * @param {LoopProps} props
  */
 export function Loop(props) {
-    if (props.skipIf)
-        return null;
-    // Sanitize to the loop's host props (align with other structural components);
-    // key/skipIf are React/control props and children are passed separately.
-    const next = {
-        id: props.id,
-        until: props.until,
-        maxIterations: props.maxIterations,
-        onMaxReached: props.onMaxReached,
-        continueAsNewEvery: props.continueAsNewEvery,
-    };
-    return React.createElement("smithers:ralph", next, props.children);
+  if (props.skipIf) return null;
+  // Sanitize to the loop's host props (align with other structural components);
+  // key/skipIf are React/control props and children are passed separately.
+  const next = {
+    id: props.id,
+    until: props.until,
+    maxIterations: props.maxIterations,
+    onMaxReached: props.onMaxReached,
+    continueAsNewEvery: props.continueAsNewEvery,
+  };
+  return React.createElement("smithers:ralph", next, props.children);
 }
 /** @deprecated Use `Loop` instead. */
 export const Ralph = Loop;
@@ -308,17 +315,16 @@ import React from "react";
  * @param {SequenceProps} props
  */
 export function Sequence(props) {
-    if (props.skipIf)
-        return null;
-    // Sequence carries only a display label; pass a sanitized bag (align with
-    // the sanitizing structural components) so control props don't leak through.
-    // `label` names the phase group in run views (graph, the Claude /workflows
-    // mirror) and is preserved in the persisted frame XML.
-    const next = {
-        ...(props.label === undefined ? {} : { label: props.label }),
-        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
-    };
-    return React.createElement("smithers:sequence", next, props.children);
+  if (props.skipIf) return null;
+  // Sequence carries only a display label; pass a sanitized bag (align with
+  // the sanitizing structural components) so control props don't leak through.
+  // `label` names the phase group in run views (graph, the Claude /workflows
+  // mirror) and is preserved in the persisted frame XML.
+  const next = {
+    ...(props.label === undefined ? {} : { label: props.label }),
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+  };
+  return React.createElement("smithers:sequence", next, props.children);
 }
 ```
 
@@ -331,39 +337,38 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
  * @param {TimerProps} props
  */
 export function Timer(props) {
-    if (props.skipIf)
-        return null;
-    const hasDuration = typeof props.duration === "string" && props.duration.trim().length > 0;
-    const hasUntil = props.until !== undefined && props.until !== null && String(props.until).trim().length > 0;
-    if ((hasDuration ? 1 : 0) + (hasUntil ? 1 : 0) !== 1) {
-        throw new SmithersError("INVALID_INPUT", `<Timer id="${props.id}"> requires exactly one of "duration" or "until".`);
-    }
-    if (props.every !== undefined) {
-        throw new SmithersError("INVALID_INPUT", `<Timer id="${props.id}"> does not support "every" yet. Recurring timers ship in phase 2.`);
-    }
-    const untilIso = props.until instanceof Date
-        ? props.until.toISOString()
-        : typeof props.until === "string"
-            ? props.until
-            : undefined;
-    const timerMeta = {
-        timer: true,
-        ...(hasDuration ? { duration: props.duration } : {}),
-        ...(hasUntil ? { until: untilIso } : {}),
-        ...props.meta,
-    };
-    return React.createElement("smithers:timer", {
-        id: props.id,
-        key: props.key,
-        duration: props.duration,
-        until: untilIso,
-        dependsOn: props.dependsOn,
-        needs: props.needs,
-        label: props.label ?? `timer:${props.id}`,
-        meta: Object.keys(timerMeta).length > 0 ? timerMeta : undefined,
-        __smithersTimerDuration: props.duration,
-        __smithersTimerUntil: untilIso,
-    });
+  if (props.skipIf) return null;
+  const hasDuration = typeof props.duration === "string" && props.duration.trim().length > 0;
+  const hasUntil = props.until !== undefined && props.until !== null && String(props.until).trim().length > 0;
+  if ((hasDuration ? 1 : 0) + (hasUntil ? 1 : 0) !== 1) {
+    throw new SmithersError("INVALID_INPUT", `<Timer id="${props.id}"> requires exactly one of "duration" or "until".`);
+  }
+  if (props.every !== undefined) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      `<Timer id="${props.id}"> does not support "every" yet. Recurring timers ship in phase 2.`,
+    );
+  }
+  const untilIso =
+    props.until instanceof Date ? props.until.toISOString() : typeof props.until === "string" ? props.until : undefined;
+  const timerMeta = {
+    timer: true,
+    ...(hasDuration ? { duration: props.duration } : {}),
+    ...(hasUntil ? { until: untilIso } : {}),
+    ...props.meta,
+  };
+  return React.createElement("smithers:timer", {
+    id: props.id,
+    key: props.key,
+    duration: props.duration,
+    until: untilIso,
+    dependsOn: props.dependsOn,
+    needs: props.needs,
+    label: props.label ?? `timer:${props.id}`,
+    meta: Object.keys(timerMeta).length > 0 ? timerMeta : undefined,
+    __smithersTimerDuration: props.duration,
+    __smithersTimerUntil: untilIso,
+  });
 }
 ```
 
@@ -373,29 +378,29 @@ import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type PollerProps = {
-	/** ID prefix for generated task/component ids. */
-	id?: string;
-	/** Agent or compute function that checks the condition. */
-	check: AgentLike | (() => unknown | Promise<unknown>);
-	/** Output schema for the check result. Must include `satisfied: boolean`. */
-	checkOutput: OutputTarget;
-	/** Maximum poll attempts. Default 30. */
-	maxAttempts?: number;
-	/** Strategy used to scale the inter-attempt delay. Default "fixed". */
-	backoff?: "fixed" | "linear" | "exponential";
-	/**
-	 * Base delay in milliseconds BETWEEN poll attempts; the first attempt runs
-	 * immediately. Enforced by a durable `<Timer>`. Default 5000.
-	 */
-	intervalMs?: number;
-	/** Timeout in ms for a single check attempt. Unbounded when unset. */
-	checkTimeoutMs?: number;
-	/** Behavior when maxAttempts is reached. Default "fail". */
-	onTimeout?: "fail" | "return-last";
-	/** Skip the entire component. */
-	skipIf?: boolean;
-	/** Prompt/condition description for the check agent. */
-	children?: React.ReactNode;
+  /** ID prefix for generated task/component ids. */
+  id?: string;
+  /** Agent or compute function that checks the condition. */
+  check: AgentLike | (() => unknown | Promise<unknown>);
+  /** Output schema for the check result. Must include `satisfied: boolean`. */
+  checkOutput: OutputTarget;
+  /** Maximum poll attempts. Default 30. */
+  maxAttempts?: number;
+  /** Strategy used to scale the inter-attempt delay. Default "fixed". */
+  backoff?: "fixed" | "linear" | "exponential";
+  /**
+   * Base delay in milliseconds BETWEEN poll attempts; the first attempt runs
+   * immediately. Enforced by a durable `<Timer>`. Default 5000.
+   */
+  intervalMs?: number;
+  /** Timeout in ms for a single check attempt. Unbounded when unset. */
+  checkTimeoutMs?: number;
+  /** Behavior when maxAttempts is reached. Default "fail". */
+  onTimeout?: "fail" | "return-last";
+  /** Skip the entire component. */
+  skipIf?: boolean;
+  /** Prompt/condition description for the check agent. */
+  children?: React.ReactNode;
 };
 ```
 </CodeGroup>

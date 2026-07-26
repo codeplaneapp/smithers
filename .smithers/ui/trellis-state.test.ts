@@ -1,10 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  findTrellisNodeByPhase,
-  trellisMetaOf,
-  trellisNodeOutputRevision,
-  trellisRunTruthOf,
-} from "./trellis-state";
+import { findTrellisNodeByPhase, trellisMetaOf, trellisNodeOutputRevision, trellisRunTruthOf } from "./trellis-state";
 
 describe("Trellis UI metadata", () => {
   test("finds semantic final nodes without parsing their physical id", () => {
@@ -33,26 +28,61 @@ describe("Trellis UI metadata", () => {
 
   test("reads selected-run concurrency and fuel from persisted root metadata", () => {
     const nodes = [
-      { id: "root-author-0", meta: JSON.stringify({ trellis: {
-        phase: "initial", logicalId: "root", rootMaxConcurrency: 3,
-        rootAuthorTurnsTotal: 17, rootMaxAuthorGenerations: 5, rootMaxAuthorDepth: 4,
-        invocationAuthorTurnsAllocated: 17, invocationAuthorTurnsRemaining: 16,
-      } }) },
-      { id: "child-author", meta: JSON.stringify({ trellis: {
-        phase: "initial", logicalId: "child", rootMaxConcurrency: 3,
-        rootAuthorTurnsTotal: 17, invocationAuthorTurnsAllocated: 4,
-        invocationAuthorTurnsRemaining: 1,
-      } }) },
-      { id: "root-author-1", meta: JSON.stringify({ trellis: {
-        phase: "continuation", logicalId: "root", rootMaxConcurrency: 3,
-        rootAuthorTurnsTotal: 17, invocationAuthorTurnsAllocated: 17,
-        invocationAuthorTurnsRemaining: 7,
-      } }) },
-      { id: "root-final", meta: JSON.stringify({ trellis: {
-        phase: "final", logicalId: "root", rootMaxConcurrency: 3,
-        rootAuthorTurnsTotal: 17, rootMaxAuthorGenerations: 5, rootMaxAuthorDepth: 4,
-        invocationAuthorTurnsAllocated: 17,
-      } }) },
+      {
+        id: "root-author-0",
+        meta: JSON.stringify({
+          trellis: {
+            phase: "initial",
+            logicalId: "root",
+            rootMaxConcurrency: 3,
+            rootAuthorTurnsTotal: 17,
+            rootMaxAuthorGenerations: 5,
+            rootMaxAuthorDepth: 4,
+            invocationAuthorTurnsAllocated: 17,
+            invocationAuthorTurnsRemaining: 16,
+          },
+        }),
+      },
+      {
+        id: "child-author",
+        meta: JSON.stringify({
+          trellis: {
+            phase: "initial",
+            logicalId: "child",
+            rootMaxConcurrency: 3,
+            rootAuthorTurnsTotal: 17,
+            invocationAuthorTurnsAllocated: 4,
+            invocationAuthorTurnsRemaining: 1,
+          },
+        }),
+      },
+      {
+        id: "root-author-1",
+        meta: JSON.stringify({
+          trellis: {
+            phase: "continuation",
+            logicalId: "root",
+            rootMaxConcurrency: 3,
+            rootAuthorTurnsTotal: 17,
+            invocationAuthorTurnsAllocated: 17,
+            invocationAuthorTurnsRemaining: 7,
+          },
+        }),
+      },
+      {
+        id: "root-final",
+        meta: JSON.stringify({
+          trellis: {
+            phase: "final",
+            logicalId: "root",
+            rootMaxConcurrency: 3,
+            rootAuthorTurnsTotal: 17,
+            rootMaxAuthorGenerations: 5,
+            rootMaxAuthorDepth: 4,
+            invocationAuthorTurnsAllocated: 17,
+          },
+        }),
+      },
     ];
     expect(trellisRunTruthOf(nodes)).toEqual({
       rootMaxConcurrency: 3,
@@ -65,11 +95,21 @@ describe("Trellis UI metadata", () => {
   });
 
   test("does not invent run truth when persisted fields are absent or invalid", () => {
-    expect(trellisRunTruthOf([
-      { id: "legacy", meta: JSON.stringify({ trellis: { phase: "initial", logicalId: "root" } }) },
-      { id: "malformed", meta: JSON.stringify({ trellis: {
-        phase: "final", logicalId: "root", rootMaxConcurrency: 0, rootAuthorTurnsTotal: "32",
-      } }) },
-    ])).toBeUndefined();
+    expect(
+      trellisRunTruthOf([
+        { id: "legacy", meta: JSON.stringify({ trellis: { phase: "initial", logicalId: "root" } }) },
+        {
+          id: "malformed",
+          meta: JSON.stringify({
+            trellis: {
+              phase: "final",
+              logicalId: "root",
+              rootMaxConcurrency: 0,
+              rootAuthorTurnsTotal: "32",
+            },
+          }),
+        },
+      ]),
+    ).toBeUndefined();
   });
 });

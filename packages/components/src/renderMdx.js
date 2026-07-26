@@ -14,14 +14,14 @@ import { markdownComponents } from "./markdownComponents.js";
  * @returns {string}
  */
 export function renderMdx(Component, props = {}) {
-    const element = React.createElement(Component, {
-        ...props,
-        components: {
-            ...markdownComponents,
-            ...props.components,
-        },
-    });
-    return decodeHtmlEntities(renderToStaticMarkup(element))
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
+  const element = React.createElement(Component, {
+    ...props,
+    components: {
+      ...markdownComponents,
+      ...props.components,
+    },
+  });
+  return decodeHtmlEntities(renderToStaticMarkup(element))
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }

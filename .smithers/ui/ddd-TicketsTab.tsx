@@ -39,26 +39,44 @@ function ticketSearchBlob(ticket: TicketRow): string {
     asString(ticket.priority),
     asString(ticket.severity),
     asString(ticket.content),
-  ].filter(Boolean).join(" ").toLowerCase();
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
 }
 
 function uniqueTicketValues(tickets: TicketRow[], field: "kind" | "status"): string[] {
-  return [...new Set(tickets.map((ticket) => asString(ticket[field]).trim()).filter(Boolean))]
-    .sort((left, right) => left.localeCompare(right));
+  return [...new Set(tickets.map((ticket) => asString(ticket[field]).trim()).filter(Boolean))].sort((left, right) =>
+    left.localeCompare(right),
+  );
 }
 
 function uniqueTicketMetadataValues(tickets: TicketRow[], key: "Priority" | "Severity"): string[] {
-  return [...new Set(tickets.map((ticket) => metadataForTicket(ticket)[key]?.trim()).filter(Boolean))]
-    .sort((left, right) => {
+  return [...new Set(tickets.map((ticket) => metadataForTicket(ticket)[key]?.trim()).filter(Boolean))].sort(
+    (left, right) => {
       if (key === "Priority") return priorityRank(left) - priorityRank(right) || left.localeCompare(right);
       return severityRank(left) - severityRank(right) || left.localeCompare(right);
-    });
+    },
+  );
 }
 
 type TicketSection = { title: string; body: string[]; items: string[] };
 type TicketDetail = { metadata: Record<string, string>; plainBody: string[]; sections: TicketSection[] };
 
-const METADATA_ORDER = ["Status", "Kind", "Priority", "Severity", "Run", "Slot", "Agent", "Task type", "Feature", "Feature title", "Feature status", "File"];
+const METADATA_ORDER = [
+  "Status",
+  "Kind",
+  "Priority",
+  "Severity",
+  "Run",
+  "Slot",
+  "Agent",
+  "Task type",
+  "Feature",
+  "Feature title",
+  "Feature status",
+  "File",
+];
 
 function parseMetadataLine(line: string): Array<[string, string]> {
   const entries: Array<[string, string]> = [];
@@ -126,7 +144,12 @@ function metadataForTicket(ticket: TicketRow): Record<string, string> {
 }
 
 function ticketFeatureLabel(ticket: TicketRow, metadata: Record<string, string> = metadataForTicket(ticket)): string {
-  return asString(ticket.featureTitle ?? ticket.feature_title) || metadata["Feature title"] || metadata.Feature || asString(ticket.featureId ?? ticket.feature_id);
+  return (
+    asString(ticket.featureTitle ?? ticket.feature_title) ||
+    metadata["Feature title"] ||
+    metadata.Feature ||
+    asString(ticket.featureId ?? ticket.feature_id)
+  );
 }
 
 function ticketFileLabel(metadata: Record<string, string>): string {
@@ -147,10 +170,22 @@ function ticketBodyMarkdown(content: string): string {
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!sawHeading) {
-      if (!droppedTitle && line.startsWith("# ")) { droppedTitle = true; continue; }
-      if (line.startsWith("## ")) { sawHeading = true; kept.push(rawLine); continue; }
+      if (!droppedTitle && line.startsWith("# ")) {
+        droppedTitle = true;
+        continue;
+      }
+      if (line.startsWith("## ")) {
+        sawHeading = true;
+        kept.push(rawLine);
+        continue;
+      }
       // A pure metadata line (every `·`-separated part is a single `Key: value`).
-      if (line && parseMetadataLine(line).length > 0 && line.split(/\s+·\s+/).every((part) => parseMetadataLine(part).length === 1)) continue;
+      if (
+        line &&
+        parseMetadataLine(line).length > 0 &&
+        line.split(/\s+·\s+/).every((part) => parseMetadataLine(part).length === 1)
+      )
+        continue;
       if (line || kept.length) kept.push(rawLine);
     } else {
       kept.push(rawLine);
@@ -224,15 +259,29 @@ function TicketModal({ ticket, onClose }: { ticket: TicketRow; onClose: () => vo
             <span className="eyebrow">{formatTicketKind(asString(ticket.kind) || "ticket")}</span>
             <h2 id="ddd-ticket-detail-title">{ticketTitle(ticket)}</h2>
           </div>
-          <button ref={closeRef} className="icon-button" type="button" onClick={onClose} aria-label="Close">x</button>
+          <button ref={closeRef} className="icon-button" type="button" onClick={onClose} aria-label="Close">
+            x
+          </button>
         </div>
         <div className="meta-row">
-          {ticket.status ? <span className={`badge ${statusClass(asString(ticket.status))}`}>{formatStatus(asString(ticket.status))}</span> : null}
-          {priority ? <span className={`badge ${ticketRiskClass(priority, severity)}`}>{formatPriority(priority)}</span> : null}
+          {ticket.status ? (
+            <span className={`badge ${statusClass(asString(ticket.status))}`}>
+              {formatStatus(asString(ticket.status))}
+            </span>
+          ) : null}
+          {priority ? (
+            <span className={`badge ${ticketRiskClass(priority, severity)}`}>{formatPriority(priority)}</span>
+          ) : null}
           {severity ? <span className={`badge ${severityClass(severity)}`}>{formatSeverity(severity)}</span> : null}
           {featureTitle ? <span className="pill">{featureTitle}</span> : null}
-          {file ? <span className="pill ticket-path" title={file}>{file}</span> : null}
-          <span className="pill ticket-path" title={ticket.path}>{ticket.path}</span>
+          {file ? (
+            <span className="pill ticket-path" title={file}>
+              {file}
+            </span>
+          ) : null}
+          <span className="pill ticket-path" title={ticket.path}>
+            {ticket.path}
+          </span>
           {ticket.updatedAtMs ? <span className="pill">{fmtTime(ticket.updatedAtMs)}</span> : null}
         </div>
         <TicketDetailBody ticket={ticket} />
@@ -254,29 +303,38 @@ export function TicketsTab(props: TicketsTabProps) {
   const severities = useMemo(() => uniqueTicketMetadataValues(tickets, "Severity"), [tickets]);
   const filteredTickets = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    const filtered = tickets.map((ticket, index) => ({ ticket, index })).filter(({ ticket }) => {
-      const metadata = metadataForTicket(ticket);
-      if (statusFilter !== "all" && asString(ticket.status) !== statusFilter) return false;
-      if (kindFilter !== "all" && asString(ticket.kind) !== kindFilter) return false;
-      if (severityFilter !== "all" && metadata.Severity !== severityFilter) return false;
-      return !needle || ticketSearchBlob(ticket).includes(needle);
-    });
-    return [...filtered].sort((left, right) => {
-      if (sortMode === "updated") return Number(right.ticket.updatedAtMs ?? 0) - Number(left.ticket.updatedAtMs ?? 0) || left.index - right.index;
-      if (sortMode === "title") return ticketTitle(left.ticket).localeCompare(ticketTitle(right.ticket)) || left.index - right.index;
-      const leftMeta = metadataForTicket(left.ticket);
-      const rightMeta = metadataForTicket(right.ticket);
-      return (
-        Math.min(priorityRank(leftMeta.Priority), severityRank(leftMeta.Severity)) -
-          Math.min(priorityRank(rightMeta.Priority), severityRank(rightMeta.Severity)) ||
-        severityRank(leftMeta.Severity) - severityRank(rightMeta.Severity) ||
-        priorityRank(leftMeta.Priority) - priorityRank(rightMeta.Priority) ||
-        Number(right.ticket.updatedAtMs ?? 0) - Number(left.ticket.updatedAtMs ?? 0) ||
-        left.index - right.index
-      );
-    }).map(({ ticket }) => ticket);
+    const filtered = tickets
+      .map((ticket, index) => ({ ticket, index }))
+      .filter(({ ticket }) => {
+        const metadata = metadataForTicket(ticket);
+        if (statusFilter !== "all" && asString(ticket.status) !== statusFilter) return false;
+        if (kindFilter !== "all" && asString(ticket.kind) !== kindFilter) return false;
+        if (severityFilter !== "all" && metadata.Severity !== severityFilter) return false;
+        return !needle || ticketSearchBlob(ticket).includes(needle);
+      });
+    return [...filtered]
+      .sort((left, right) => {
+        if (sortMode === "updated")
+          return (
+            Number(right.ticket.updatedAtMs ?? 0) - Number(left.ticket.updatedAtMs ?? 0) || left.index - right.index
+          );
+        if (sortMode === "title")
+          return ticketTitle(left.ticket).localeCompare(ticketTitle(right.ticket)) || left.index - right.index;
+        const leftMeta = metadataForTicket(left.ticket);
+        const rightMeta = metadataForTicket(right.ticket);
+        return (
+          Math.min(priorityRank(leftMeta.Priority), severityRank(leftMeta.Severity)) -
+            Math.min(priorityRank(rightMeta.Priority), severityRank(rightMeta.Severity)) ||
+          severityRank(leftMeta.Severity) - severityRank(rightMeta.Severity) ||
+          priorityRank(leftMeta.Priority) - priorityRank(rightMeta.Priority) ||
+          Number(right.ticket.updatedAtMs ?? 0) - Number(left.ticket.updatedAtMs ?? 0) ||
+          left.index - right.index
+        );
+      })
+      .map(({ ticket }) => ticket);
   }, [tickets, query, statusFilter, kindFilter, severityFilter, sortMode]);
-  const filtersActive = query.trim().length > 0 || statusFilter !== "all" || kindFilter !== "all" || severityFilter !== "all";
+  const filtersActive =
+    query.trim().length > 0 || statusFilter !== "all" || kindFilter !== "all" || severityFilter !== "all";
   // At-a-glance backlog health: count tickets by severity (highest-risk first),
   // each chip a one-click facet toggle for that severity.
   const severityCounts = useMemo(() => {
@@ -286,7 +344,9 @@ export function TicketsTab(props: TicketsTabProps) {
       if (!severity) continue;
       counts.set(severity, (counts.get(severity) ?? 0) + 1);
     }
-    return [...counts.entries()].sort(([left], [right]) => severityRank(left) - severityRank(right) || left.localeCompare(right));
+    return [...counts.entries()].sort(
+      ([left], [right]) => severityRank(left) - severityRank(right) || left.localeCompare(right),
+    );
   }, [tickets]);
 
   return (
@@ -294,7 +354,13 @@ export function TicketsTab(props: TicketsTabProps) {
       <section className="card">
         <div className="card-head">
           <h2>Tickets</h2>
-          <span className={`badge ${filteredTickets.length ? "ok" : "muted"}`}>{loading ? "Loading" : filteredTickets.length === tickets.length ? formatCount(tickets.length, "ticket") : `${formatCount(filteredTickets.length, "ticket")} of ${formatCount(tickets.length, "ticket")}`}</span>
+          <span className={`badge ${filteredTickets.length ? "ok" : "muted"}`}>
+            {loading
+              ? "Loading"
+              : filteredTickets.length === tickets.length
+                ? formatCount(tickets.length, "ticket")
+                : `${formatCount(filteredTickets.length, "ticket")} of ${formatCount(tickets.length, "ticket")}`}
+          </span>
         </div>
         <div className="filters ticket-filters" role="search" aria-label="Ticket filters">
           <label className="filter-field">
@@ -310,41 +376,83 @@ export function TicketsTab(props: TicketsTabProps) {
           </label>
           <label className="filter-field">
             <span>Status</span>
-            <select className="select" value={statusFilter} onChange={(event) => setStatusFilter(event.currentTarget.value)}>
+            <select
+              className="select"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.currentTarget.value)}
+            >
               <option value="all">All statuses</option>
-              {statuses.map((status) => <option key={status} value={status}>{formatStatus(status)}</option>)}
+              {statuses.map((status) => (
+                <option key={status} value={status}>
+                  {formatStatus(status)}
+                </option>
+              ))}
             </select>
           </label>
           <label className="filter-field">
             <span>Kind</span>
-            <select className="select" value={kindFilter} onChange={(event) => setKindFilter(event.currentTarget.value)}>
+            <select
+              className="select"
+              value={kindFilter}
+              onChange={(event) => setKindFilter(event.currentTarget.value)}
+            >
               <option value="all">All kinds</option>
-              {kinds.map((kind) => <option key={kind} value={kind}>{formatTicketKind(kind)}</option>)}
+              {kinds.map((kind) => (
+                <option key={kind} value={kind}>
+                  {formatTicketKind(kind)}
+                </option>
+              ))}
             </select>
           </label>
           <label className="filter-field">
             <span>Severity</span>
-            <select className="select" value={severityFilter} onChange={(event) => setSeverityFilter(event.currentTarget.value)}>
+            <select
+              className="select"
+              value={severityFilter}
+              onChange={(event) => setSeverityFilter(event.currentTarget.value)}
+            >
               <option value="all">All severities</option>
-              {severities.map((severity) => <option key={severity} value={severity}>{formatSeverity(severity)}</option>)}
+              {severities.map((severity) => (
+                <option key={severity} value={severity}>
+                  {formatSeverity(severity)}
+                </option>
+              ))}
             </select>
           </label>
           <label className="filter-field">
             <span>Sort</span>
-            <select className="select" value={sortMode} onChange={(event) => setSortMode(event.currentTarget.value as "risk" | "updated" | "title")}>
+            <select
+              className="select"
+              value={sortMode}
+              onChange={(event) => setSortMode(event.currentTarget.value as "risk" | "updated" | "title")}
+            >
               <option value="risk">Highest risk</option>
               <option value="updated">Recently updated</option>
               <option value="title">Title</option>
             </select>
           </label>
           {filtersActive ? (
-            <button className="button" type="button" onClick={() => { setQuery(""); setStatusFilter("all"); setKindFilter("all"); setSeverityFilter("all"); }}>
+            <button
+              className="button"
+              type="button"
+              onClick={() => {
+                setQuery("");
+                setStatusFilter("all");
+                setKindFilter("all");
+                setSeverityFilter("all");
+              }}
+            >
               Clear
             </button>
           ) : null}
         </div>
         {severityCounts.length ? (
-          <div className="status-counts ticket-tally" data-testid="ddd-ticket-tally" role="group" aria-label="Filter by severity">
+          <div
+            className="status-counts ticket-tally"
+            data-testid="ddd-ticket-tally"
+            role="group"
+            aria-label="Filter by severity"
+          >
             {severityCounts.map(([severity, count]) => (
               <button
                 key={severity}
@@ -359,7 +467,7 @@ export function TicketsTab(props: TicketsTabProps) {
           </div>
         ) : null}
         {filteredTickets.length ? (
-          filteredTickets.map((ticket, index) => (
+          filteredTickets.map((ticket, index) =>
             (() => {
               const metadata = metadataForTicket(ticket);
               const feature = ticketFeatureLabel(ticket, metadata);
@@ -367,32 +475,52 @@ export function TicketsTab(props: TicketsTabProps) {
               const priority = metadata.Priority;
               const severity = metadata.Severity;
               return (
-            <button
-              type="button"
-              className={`slot ticket-row risk-${ticketRiskClass(priority, severity)}`}
-              key={`${ticket.path}:${index}`}
-              data-testid="ddd-ticket"
-              onClick={() => setSelected(ticket)}
-            >
-              <div className="slot-title">
-                <strong>{ticketTitle(ticket)}</strong>
-                {ticket.status ? <span className={`badge ${statusClass(asString(ticket.status))}`}>{formatStatus(asString(ticket.status))}</span> : null}
-              </div>
-              <div className="meta-row">
-                <span className="pill">{formatTicketKind(asString(ticket.kind) || "ticket")}</span>
-                {priority ? <span className={`badge ${ticketRiskClass(priority, severity)}`}>{formatPriority(priority)}</span> : null}
-                {severity ? <span className={`badge ${severityClass(severity)}`}>{formatSeverity(severity)}</span> : null}
-                {feature ? <span className="pill">{feature}</span> : null}
-                {file ? <span className="pill ticket-path" title={file}>{file}</span> : null}
-                <span className="pill ticket-path" title={ticket.path}>{ticket.path}</span>
-                {ticket.updatedAtMs ? <span className="pill">{fmtTime(ticket.updatedAtMs)}</span> : null}
-              </div>
-            </button>
+                <button
+                  type="button"
+                  className={`slot ticket-row risk-${ticketRiskClass(priority, severity)}`}
+                  key={`${ticket.path}:${index}`}
+                  data-testid="ddd-ticket"
+                  onClick={() => setSelected(ticket)}
+                >
+                  <div className="slot-title">
+                    <strong>{ticketTitle(ticket)}</strong>
+                    {ticket.status ? (
+                      <span className={`badge ${statusClass(asString(ticket.status))}`}>
+                        {formatStatus(asString(ticket.status))}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="meta-row">
+                    <span className="pill">{formatTicketKind(asString(ticket.kind) || "ticket")}</span>
+                    {priority ? (
+                      <span className={`badge ${ticketRiskClass(priority, severity)}`}>{formatPriority(priority)}</span>
+                    ) : null}
+                    {severity ? (
+                      <span className={`badge ${severityClass(severity)}`}>{formatSeverity(severity)}</span>
+                    ) : null}
+                    {feature ? <span className="pill">{feature}</span> : null}
+                    {file ? (
+                      <span className="pill ticket-path" title={file}>
+                        {file}
+                      </span>
+                    ) : null}
+                    <span className="pill ticket-path" title={ticket.path}>
+                      {ticket.path}
+                    </span>
+                    {ticket.updatedAtMs ? <span className="pill">{fmtTime(ticket.updatedAtMs)}</span> : null}
+                  </div>
+                </button>
               );
-            })()
-          ))
+            })(),
+          )
         ) : (
-          <p>{loading ? "Loading tickets..." : filtersActive ? "No tickets match the current filters." : "No tickets yet. Triage should materialize selected work into tickets before agents run."}</p>
+          <p>
+            {loading
+              ? "Loading tickets..."
+              : filtersActive
+                ? "No tickets match the current filters."
+                : "No tickets yet. Triage should materialize selected work into tickets before agents run."}
+          </p>
         )}
       </section>
       {selected ? <TicketModal ticket={selected} onClose={() => setSelected(null)} /> : null}

@@ -76,14 +76,7 @@ type PendingRequest = {
 
 // Default local gateway address; matches the smithers gateway default port and the --smithers-url flag default.
 const DEFAULT_BASE = "http://127.0.0.1:7331";
-const AUDIT_ROW_ID_KEYS = new Set([
-  "auditRowId",
-  "audit_row_id",
-  "auditId",
-  "audit_id",
-  "auditLogId",
-  "audit_log_id",
-]);
+const AUDIT_ROW_ID_KEYS = new Set(["auditRowId", "audit_row_id", "auditId", "audit_id", "auditLogId", "audit_log_id"]);
 const NESTED_AUDIT_CONTAINERS = ["result", "data", "mutation", "ack", "payload", "meta"];
 
 function toWsUrl(baseUrl: string) {
@@ -191,7 +184,11 @@ class GatewayWsConnection {
     // "error". Reject in-flight request() promises here too — draining only
     // event waiters would leave the initial connect/streamDevTools await parked
     // forever, so the consuming generator never reaches its reconnect path.
-    ws.on("close", () => this.rejectAll(new SmithersError("PI_GATEWAY_CLOSED", "Gateway connection closed before the in-flight request completed.")));
+    ws.on("close", () =>
+      this.rejectAll(
+        new SmithersError("PI_GATEWAY_CLOSED", "Gateway connection closed before the in-flight request completed."),
+      ),
+    );
     ws.on("error", (error) => this.rejectAll(error instanceof Error ? error : new Error(String(error))));
   }
 
@@ -341,11 +338,7 @@ export class DevToolsClient {
     return this.lastSeqSeenByRunId.get(runId);
   }
 
-  async *streamDevTools(
-    runId: string,
-    afterSeq?: number,
-    signal?: AbortSignal,
-  ): AsyncGenerator<DevToolsRuntimeEvent> {
+  async *streamDevTools(runId: string, afterSeq?: number, signal?: AbortSignal): AsyncGenerator<DevToolsRuntimeEvent> {
     // afterSeq is the caller's explicit resume cursor. An omitted/undefined
     // value means "start with a fresh full-snapshot subscribe" (e.g. a
     // decode-error recovery) — it must not be silently backfilled from this
@@ -412,10 +405,7 @@ export class DevToolsClient {
             continue;
           }
           const event = normalizeEvent(message.payload.event);
-          this.lastSeqSeenByRunId.set(
-            runId,
-            Math.max(this.lastSeqSeenByRunId.get(runId) ?? 0, eventSeq(event)),
-          );
+          this.lastSeqSeenByRunId.set(runId, Math.max(this.lastSeqSeenByRunId.get(runId) ?? 0, eventSeq(event)));
           yield event;
         }
       } finally {

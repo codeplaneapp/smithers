@@ -7,13 +7,7 @@ import { z } from "zod/v4";
  * gate (`bun .smithers/lib/ddd/build.ts`) validates it. Keep this schema and
  * the `Feature` type rendered by the workflow UI in sync.
  */
-export const featureStatusSchema = z.enum([
-  "fixed",
-  "partial",
-  "broken",
-  "missing-tests",
-  "missing",
-]);
+export const featureStatusSchema = z.enum(["fixed", "partial", "broken", "missing-tests", "missing"]);
 
 export const featurePrioritySchema = z.enum(["p0", "p1", "p2"]);
 

@@ -1,9 +1,5 @@
 import { expect, test } from "@playwright/test";
-import {
-  expectNoPageErrors,
-  openRenderedSurface,
-  trackPageErrors,
-} from "./surfaceTestUtils";
+import { expectNoPageErrors, openRenderedSurface, trackPageErrors } from "./surfaceTestUtils";
 
 test("renders the honest not-wired state for a real gateway run", async ({ page }) => {
   const pageErrors = trackPageErrors(page);
@@ -12,9 +8,7 @@ test("renders the honest not-wired state for a real gateway run", async ({ page 
   const run = frame.payload?.[0];
   expect(run?.runId).toBeTruthy();
   await page.goto(`/gw/${run?.workflowKey ?? "run"}/${run!.runId}/timeline`);
-  await expect(page.getByTestId("timeline-not-wired")).toContainText(
-    "Time travel isn't wired to the gateway yet.",
-  );
+  await expect(page.getByTestId("timeline-not-wired")).toContainText("Time travel isn't wired to the gateway yet.");
   expectNoPageErrors(pageErrors);
 });
 

@@ -26,10 +26,7 @@ const inputSchema = z.object({
     .boolean()
     .default(true)
     .describe("Also refresh the curated `smithers` skill for every detected agent."),
-  skipInstall: z
-    .boolean()
-    .default(false)
-    .describe("Skip `bun install` inside .smithers/ after scaffolding."),
+  skipInstall: z.boolean().default(false).describe("Skip `bun install` inside .smithers/ after scaffolding."),
 });
 
 const packSchema = z.object({
@@ -111,9 +108,7 @@ export default smithers((ctx) => {
               if (process.env.SMITHERS_NO_SKILL_REFRESH === "1") {
                 return { refreshed: false, detail: "skipped (SMITHERS_NO_SKILL_REFRESH=1)" };
               }
-              const { refreshCuratedSkills, formatRefreshNotice } = await import(
-                cliModule("refreshCuratedSkills")
-              );
+              const { refreshCuratedSkills, formatRefreshNotice } = await import(cliModule("refreshCuratedSkills"));
               const result = refreshCuratedSkills({});
               return { refreshed: true, detail: formatRefreshNotice(result) || "up to date" };
             }}
@@ -129,11 +124,10 @@ export default smithers((ctx) => {
               if (!refreshSkills) {
                 return { noted: false, detail: "skipped (refreshSkills=false)" };
               }
-              const [{ noteWorkflowPreferenceInAgentDocs }, { resolveEffectiveAgentDocs }] =
-                await Promise.all([
-                  import(cliModule("noteWorkflowPreferenceInAgentDocs")),
-                  import(cliModule("workflow-pack")),
-                ]);
+              const [{ noteWorkflowPreferenceInAgentDocs }, { resolveEffectiveAgentDocs }] = await Promise.all([
+                import(cliModule("noteWorkflowPreferenceInAgentDocs")),
+                import(cliModule("workflow-pack")),
+              ]);
               // Honor a persisted à-la-carte deselection (pack-selections.json):
               // an interactive init that unchecked CLAUDE.md/AGENTS.md must not be
               // re-added by this non-interactive durable re-init. undefined =

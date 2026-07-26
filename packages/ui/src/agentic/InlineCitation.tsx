@@ -30,10 +30,7 @@ export type InlineCitationProps = Omit<ComponentProps<"a">, "href" | "children" 
   index: number;
   label: string;
   href?: string;
-  onNavigate?: (
-    href: string,
-    event: MouseEvent<HTMLAnchorElement | HTMLButtonElement>,
-  ) => void;
+  onNavigate?: (href: string, event: MouseEvent<HTMLAnchorElement | HTMLButtonElement>) => void;
   sources?: readonly CitationSource[];
   open?: boolean;
   defaultOpen?: boolean;
@@ -125,11 +122,7 @@ export function InlineCitation({
             className="sui-citation-content"
             onKeyDown={handleEscape}
           >
-            {sources.length === 1 ? (
-              <CitationCard source={sources[0]!} />
-            ) : (
-              <CitationCarousel sources={sources} />
-            )}
+            {sources.length === 1 ? <CitationCard source={sources[0]!} /> : <CitationCarousel sources={sources} />}
           </span>
         ) : null}
       </sup>
@@ -158,11 +151,7 @@ export function InlineCitation({
                 [{index}]
               </a>
             ) : (
-              <button
-                {...(props as ComponentProps<"button">)}
-                type="button"
-                aria-label={accessibleName}
-              >
+              <button {...(props as ComponentProps<"button">)} type="button" aria-label={accessibleName}>
                 [{index}]
               </button>
             )}
@@ -176,14 +165,10 @@ export function InlineCitation({
 
 function CitationFavicon({ source }: { source: CitationSource }) {
   if (source.faviconUrl !== undefined) {
-    return (
-      <img className="sui-citation-favicon" src={source.faviconUrl} alt="" width={16} height={16} />
-    );
+    return <img className="sui-citation-favicon" src={source.faviconUrl} alt="" width={16} height={16} />;
   }
   const initial =
-    (source.domain ?? "").trim().charAt(0).toUpperCase() ||
-    source.title.trim().charAt(0).toUpperCase() ||
-    "?";
+    (source.domain ?? "").trim().charAt(0).toUpperCase() || source.title.trim().charAt(0).toUpperCase() || "?";
   return (
     <span className="sui-citation-favicon-fallback" aria-hidden="true">
       {initial}
@@ -215,13 +200,9 @@ export function CitationCard({ source, children, className, ...props }: Citation
             source.title
           )}
         </span>
-        {source.domain !== undefined ? (
-          <span className="sui-citation-card-domain">{source.domain}</span>
-        ) : null}
+        {source.domain !== undefined ? <span className="sui-citation-card-domain">{source.domain}</span> : null}
       </div>
-      {source.excerpt !== undefined ? (
-        <div className="sui-citation-card-excerpt">{source.excerpt}</div>
-      ) : null}
+      {source.excerpt !== undefined ? <div className="sui-citation-card-excerpt">{source.excerpt}</div> : null}
       {source.quote !== undefined ? <CitationQuote quote={source.quote} /> : null}
       {children}
     </div>
@@ -316,11 +297,7 @@ export function CitationQuote({ quote, children, className, ...props }: Citation
   useInjectUiCss();
   useInjectLaneCss(SOURCES_CITATIONS_CSS_ID, sourcesCitationsCss);
   return (
-    <blockquote
-      data-slot="citation-quote"
-      className={cn("sui-citation-quote", className)}
-      {...props}
-    >
+    <blockquote data-slot="citation-quote" className={cn("sui-citation-quote", className)} {...props}>
       <p>{quote}</p>
       {children}
     </blockquote>

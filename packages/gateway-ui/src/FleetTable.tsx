@@ -1,15 +1,7 @@
 /** @jsxImportSource react */
 import type { CSSProperties, ReactNode } from "react";
 import { useGatewayRunTree } from "@smithers-orchestrator/gateway-react";
-import {
-  StatusPill,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@smithers-orchestrator/ui";
+import { StatusPill, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@smithers-orchestrator/ui";
 import { nodeStatusIndex, rollupNodeStatus } from "./runNodeStatus";
 import { theme } from "./theme";
 
@@ -103,8 +95,7 @@ export function FleetTable({
       </TableHeader>
       <TableBody>
         {items.map((item) => {
-          const status =
-            item.status ?? (item.nodeIds ? rollupNodeStatus(statuses, item.nodeIds) : "pending");
+          const status = item.status ?? (item.nodeIds ? rollupNodeStatus(statuses, item.nodeIds) : "pending");
           const selected = selectedKey === item.key;
           return (
             <TableRow

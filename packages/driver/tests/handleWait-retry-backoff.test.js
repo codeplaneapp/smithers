@@ -109,9 +109,7 @@ describe("WorkflowDriver.nextCompletionDecision — deadline racer", () => {
     // One in-flight task that never settles, so the deadline sleep wins the
     // race and its `.then(() => null)` continuation fires.
     driver.inflightTasks = new Map([["k", new Promise(() => {})]]);
-    driver.inflightTaskDescriptors = new Map([
-      ["k", { nodeId: "a", iteration: 0 }],
-    ]);
+    driver.inflightTaskDescriptors = new Map([["k", { nodeId: "a", iteration: 0 }]]);
 
     const result = await driver.nextCompletionDecision(15);
 
@@ -129,9 +127,7 @@ describe("WorkflowDriver.nextCompletionDecision — deadline racer", () => {
     driver.activeRunId = "r1";
     driver.activeOptions = { input: {} };
     driver.inflightTasks = new Map([["k", new Promise(() => {})]]);
-    driver.inflightTaskDescriptors = new Map([
-      ["k", { nodeId: "a", iteration: 0 }],
-    ]);
+    driver.inflightTaskDescriptors = new Map([["k", { nodeId: "a", iteration: 0 }]]);
 
     const result = await driver.nextCompletionDecision(15);
     expect(result).toEqual({ runId: "r1", status: "waiting-event" });
@@ -184,18 +180,14 @@ describe("WorkflowDriver.nextCompletionDecision — deadline racer", () => {
         workflow: { db: {} },
         db: {},
         runtime: { runPromise: async (value) => value },
-        executeTask: () =>
-          new Promise((resolve) => realSetTimeout(() => resolve({ ok: true }), 5)),
+        executeTask: () => new Promise((resolve) => realSetTimeout(() => resolve({ ok: true }), 5)),
         session: {
           taskCompleted: () => ({ _tag: "Execute", tasks: [] }),
         },
       });
       driver.activeRunId = "r1";
       driver.activeOptions = { input: {}, signal };
-      driver.startInflightTask(
-        { nodeId: "a", iteration: 0 },
-        { runId: "r1", options: driver.activeOptions, signal },
-      );
+      driver.startInflightTask({ nodeId: "a", iteration: 0 }, { runId: "r1", options: driver.activeOptions, signal });
 
       const result = await driver.nextCompletionDecision(300_000);
 
@@ -227,9 +219,7 @@ describe("WorkflowDriver.nextCompletionDecision — deadline racer", () => {
     driver.activeRunId = "r1";
     driver.activeOptions = { input: {}, signal: controller.signal };
     driver.inflightTasks = new Map([["k", new Promise(() => {})]]);
-    driver.inflightTaskDescriptors = new Map([
-      ["k", { nodeId: "a", iteration: 0 }],
-    ]);
+    driver.inflightTaskDescriptors = new Map([["k", { nodeId: "a", iteration: 0 }]]);
 
     const resultPromise = driver.nextCompletionDecision(60_000);
     controller.abort();

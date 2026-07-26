@@ -157,11 +157,7 @@ function stepFinish({
 }
 
 /** error event */
-function errorEvent({
-  name = "UnknownError",
-  message = "Something went wrong",
-  sessionID = "sess-1",
-} = {}) {
+function errorEvent({ name = "UnknownError", message = "Something went wrong", sessionID = "sess-1" } = {}) {
   return j({
     type: "error",
     timestamp: Date.now(),
@@ -196,9 +192,7 @@ describe("OpenCode CLI agent", () => {
   // -----------------------------------------------------------------------
 
   test("builds correct args for basic prompt with model", async () => {
-    const argsFileDir = await mkdtemp(
-      join(tmpdir(), "smithers-opencode-args-")
-    );
+    const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-opencode-args-"));
     const argsFile = join(argsFileDir, "args.json");
 
     const fake = await makeFakeOpenCode(`
@@ -245,9 +239,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
   });
 
   test("includes --agent flag when agentName is specified", async () => {
-    const argsFileDir = await mkdtemp(
-      join(tmpdir(), "smithers-opencode-args-")
-    );
+    const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-opencode-args-"));
     const argsFile = join(argsFileDir, "args.json");
 
     const fake = await makeFakeOpenCode(`
@@ -285,9 +277,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
   });
 
   test("includes -f flags for attached files (repeated flag)", async () => {
-    const argsFileDir = await mkdtemp(
-      join(tmpdir(), "smithers-opencode-args-")
-    );
+    const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-opencode-args-"));
     const argsFile = join(argsFileDir, "args.json");
 
     const fake = await makeFakeOpenCode(`
@@ -332,9 +322,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
   });
 
   test("places '--' separator before prompt when -f is used (prevents yargs array consumption)", async () => {
-    const argsFileDir = await mkdtemp(
-      join(tmpdir(), "smithers-opencode-args-")
-    );
+    const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-opencode-args-"));
     const argsFile = join(argsFileDir, "args.json");
 
     const fake = await makeFakeOpenCode(`
@@ -380,9 +368,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
   });
 
   test("sets OPENCODE_PERMISSION env var as JSON when yolo is true", async () => {
-    const argsFileDir = await mkdtemp(
-      join(tmpdir(), "smithers-opencode-args-")
-    );
+    const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-opencode-args-"));
     const argsFile = join(argsFileDir, "args.json");
 
     const fake = await makeFakeOpenCode(`
@@ -423,9 +409,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
   });
 
   test("does NOT set OPENCODE_PERMISSION when yolo is false", async () => {
-    const argsFileDir = await mkdtemp(
-      join(tmpdir(), "smithers-opencode-args-")
-    );
+    const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-opencode-args-"));
     const argsFile = join(argsFileDir, "args.json");
 
     const fake = await makeFakeOpenCode(`
@@ -465,9 +449,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
   });
 
   test("includes --variant flag when variant is specified", async () => {
-    const argsFileDir = await mkdtemp(
-      join(tmpdir(), "smithers-opencode-args-")
-    );
+    const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-opencode-args-"));
     const argsFile = join(argsFileDir, "args.json");
 
     const fake = await makeFakeOpenCode(`
@@ -505,9 +487,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
   });
 
   test("includes --continue flag when continueSession is true", async () => {
-    const argsFileDir = await mkdtemp(
-      join(tmpdir(), "smithers-opencode-args-")
-    );
+    const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-opencode-args-"));
     const argsFile = join(argsFileDir, "args.json");
 
     const fake = await makeFakeOpenCode(`
@@ -544,9 +524,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
   });
 
   test("includes --session flag with session ID", async () => {
-    const argsFileDir = await mkdtemp(
-      join(tmpdir(), "smithers-opencode-args-")
-    );
+    const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-opencode-args-"));
     const argsFile = join(argsFileDir, "args.json");
 
     const fake = await makeFakeOpenCode(`
@@ -584,9 +562,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
   });
 
   test("prepends Smithers systemPrompt to the positional prompt", async () => {
-    const argsFileDir = await mkdtemp(
-      join(tmpdir(), "smithers-opencode-args-")
-    );
+    const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-opencode-args-"));
     const argsFile = join(argsFileDir, "args.json");
 
     const fake = await makeFakeOpenCode(`
@@ -619,9 +595,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
 
       expect(prompt).toContain("You are a careful reviewer.");
       expect(prompt).toContain("USER: Analyze this diff");
-      expect(prompt.indexOf("You are a careful reviewer.")).toBeLessThan(
-        prompt.indexOf("USER: Analyze this diff")
-      );
+      expect(prompt.indexOf("You are a careful reviewer.")).toBeLessThan(prompt.indexOf("USER: Analyze this diff"));
     } finally {
       await rm(fake.dir, { recursive: true, force: true });
       await rm(argsFileDir, { recursive: true, force: true });
@@ -629,9 +603,7 @@ process.stdout.write('${stepFinish()}' + "\\n");
   });
 
   test("uses per-call resumeSession as --session", async () => {
-    const argsFileDir = await mkdtemp(
-      join(tmpdir(), "smithers-opencode-args-")
-    );
+    const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-opencode-args-"));
     const argsFile = join(argsFileDir, "args.json");
 
     const fake = await makeFakeOpenCode(`
@@ -674,10 +646,10 @@ process.stdout.write('${stepFinish()}' + "\\n");
     const fake = await makeFakeOpenCode(`
 process.stdout.write('${stepStart("s-1")}' + "\\n");
 process.stdout.write('${errorEvent({
-  sessionID: "s-1",
-  name: "ProviderAuthError",
-  message: "Invalid API key",
-})}' + "\\n");
+      sessionID: "s-1",
+      name: "ProviderAuthError",
+      message: "Invalid API key",
+    })}' + "\\n");
 process.exit(0);
 `);
 
@@ -692,7 +664,7 @@ process.exit(0);
       await expect(
         agent.generate({
           messages: [{ role: "user", content: "test" }],
-        })
+        }),
       ).rejects.toThrow("Invalid API key");
     } finally {
       await rm(fake.dir, { recursive: true, force: true });
@@ -773,13 +745,13 @@ process.stdout.write('${stepFinish({ sessionID: "s-1", reason: "stop" })}' + "\\
     const fake = await makeFakeOpenCode(`
 process.stdout.write('${stepStart("s-1")}' + "\\n");
 process.stdout.write('${toolUseEvent({
-  tool: "bash",
-  callID: "call-1",
-  status: "completed",
-  input: { command: "ls -la", description: "List files" },
-  output: "total 8\\nfile1.txt\\nfile2.txt",
-  sessionID: "s-1",
-})}' + "\\n");
+      tool: "bash",
+      callID: "call-1",
+      status: "completed",
+      input: { command: "ls -la", description: "List files" },
+      output: "total 8\\nfile1.txt\\nfile2.txt",
+      sessionID: "s-1",
+    })}' + "\\n");
 process.stdout.write('${stepFinish({ sessionID: "s-1", reason: "tool-calls" })}' + "\\n");
 process.stdout.write('${stepStart("s-1", "m-2")}' + "\\n");
 process.stdout.write('${textEvent("I found 2 files.", "s-1", "m-2")}' + "\\n");
@@ -802,9 +774,7 @@ process.stdout.write('${stepFinish({ sessionID: "s-1", messageID: "m-2", reason:
       expect(result.text).toBe("I found 2 files.");
 
       // Should have tool action events
-      const toolEvents = events.filter(
-        (e) => e.type === "action" && e.action?.kind === "command"
-      );
+      const toolEvents = events.filter((e) => e.type === "action" && e.action?.kind === "command");
       expect(toolEvents.length).toBeGreaterThanOrEqual(1);
 
       // Tool event should have the call ID
@@ -829,13 +799,13 @@ process.stdout.write('${stepFinish({ sessionID: "s-1", messageID: "m-2", reason:
     const fake = await makeFakeOpenCode(`
 process.stdout.write('${stepStart("s-1", "m-1")}' + "\\n");
 process.stdout.write('${toolUseEvent({
-  tool: "read",
-  callID: "call-read-1",
-  input: { filePath: "/tmp/test.txt" },
-  output: "file contents here",
-  sessionID: "s-1",
-  messageID: "m-1",
-})}' + "\\n");
+      tool: "read",
+      callID: "call-read-1",
+      input: { filePath: "/tmp/test.txt" },
+      output: "file contents here",
+      sessionID: "s-1",
+      messageID: "m-1",
+    })}' + "\\n");
 process.stdout.write('${stepFinish({ sessionID: "s-1", messageID: "m-1", reason: "tool-calls" })}' + "\\n");
 process.stdout.write('${stepStart("s-1", "m-2")}' + "\\n");
 process.stdout.write('${textEvent("The file contains: file contents here", "s-1", "m-2")}' + "\\n");
@@ -862,15 +832,11 @@ process.stdout.write('${stepFinish({ sessionID: "s-1", messageID: "m-2", reason:
       expect(startedEvents.length).toBe(1);
 
       // Should have tool action event for read
-      const toolEvents = events.filter(
-        (e) => e.type === "action" && e.action?.title === "read"
-      );
+      const toolEvents = events.filter((e) => e.type === "action" && e.action?.title === "read");
       expect(toolEvents.length).toBeGreaterThanOrEqual(1);
 
       // Should have text action event
-      const textEvents = events.filter(
-        (e) => e.type === "action" && e.entryType === "message"
-      );
+      const textEvents = events.filter((e) => e.type === "action" && e.entryType === "message");
       expect(textEvents.length).toBeGreaterThanOrEqual(1);
     } finally {
       await rm(fake.dir, { recursive: true, force: true });
@@ -885,17 +851,17 @@ process.stdout.write('${stepFinish({ sessionID: "s-1", messageID: "m-2", reason:
 process.stdout.write('${stepStart("s-1")}' + "\\n");
 process.stdout.write('${textEvent("Hello", "s-1")}' + "\\n");
 process.stdout.write('${stepFinish({
-  sessionID: "s-1",
-  reason: "stop",
-  tokens: {
-    total: 1500,
-    input: 1000,
-    output: 500,
-    reasoning: 50,
-    cache: { write: 10, read: 200 },
-  },
-  cost: 0.01,
-})}' + "\\n");
+      sessionID: "s-1",
+      reason: "stop",
+      tokens: {
+        total: 1500,
+        input: 1000,
+        output: 500,
+        reasoning: 50,
+        cache: { write: 10, read: 200 },
+      },
+      cost: 0.01,
+    })}' + "\\n");
 `);
 
     try {
@@ -929,17 +895,17 @@ process.stdout.write('${stepFinish({
 process.stdout.write('${stepStart("s-1")}' + "\\n");
 process.stdout.write('${textEvent("Hello", "s-1")}' + "\\n");
 process.stdout.write('${stepFinish({
-  sessionID: "s-1",
-  reason: "stop",
-  tokens: {
-    total: 1500,
-    input: 1000,
-    output: 500,
-    reasoning: 50,
-    cache: { write: 10, read: 200 },
-  },
-  cost: 0.01,
-})}' + "\\n");
+      sessionID: "s-1",
+      reason: "stop",
+      tokens: {
+        total: 1500,
+        input: 1000,
+        output: 500,
+        reasoning: 50,
+        cache: { write: 10, read: 200 },
+      },
+      cost: 0.01,
+    })}' + "\\n");
 `);
 
     try {
@@ -992,18 +958,14 @@ process.stdout.write('${stepFinish({
         "websearch",
         "question",
         "apply_patch",
-      ])
+      ]),
     );
   });
 
   test("passes --dir from cwd constructor option", async () => {
-    const argsFileDir = await mkdtemp(
-      join(tmpdir(), "smithers-opencode-args-")
-    );
+    const argsFileDir = await mkdtemp(join(tmpdir(), "smithers-opencode-args-"));
     const argsFile = join(argsFileDir, "args.json");
-    const projectDir = await mkdtemp(
-      join(tmpdir(), "smithers-opencode-project-")
-    );
+    const projectDir = await mkdtemp(join(tmpdir(), "smithers-opencode-project-"));
 
     const fake = await makeFakeOpenCode(`
 const fs = require("node:fs");
@@ -1086,10 +1048,10 @@ process.exit(1);
     const fake = await makeFakeOpenCode(`
 process.stdout.write('${stepStart("s-1")}' + "\\n");
 process.stdout.write('${errorEvent({
-  sessionID: "s-1",
-  name: "ProviderAuthError",
-  message: "Invalid API key",
-})}' + "\\n");
+      sessionID: "s-1",
+      name: "ProviderAuthError",
+      message: "Invalid API key",
+    })}' + "\\n");
 process.exit(1);
 `);
 
@@ -1127,10 +1089,10 @@ process.exit(1);
     const fake = await makeFakeOpenCode(`
 process.stdout.write('${stepStart("s-1")}' + "\\n");
 process.stdout.write('${errorEvent({
-  sessionID: "s-1",
-  name: "ProviderAuthError",
-  message: "Invalid API key",
-})}' + "\\n");
+      sessionID: "s-1",
+      name: "ProviderAuthError",
+      message: "Invalid API key",
+    })}' + "\\n");
 process.exit(1);
 `);
 
@@ -1145,7 +1107,7 @@ process.exit(1);
       await expect(
         agent.generate({
           messages: [{ role: "user", content: "test" }],
-        })
+        }),
       ).rejects.toThrow("Invalid API key");
     } finally {
       await rm(fake.dir, { recursive: true, force: true });
@@ -1159,13 +1121,13 @@ process.exit(1);
     const fake = await makeFakeOpenCode(`
 process.stdout.write('${stepStart("s-1")}' + "\\n");
 process.stdout.write('${toolUseEvent({
-  tool: "bash",
-  callID: "call-err-1",
-  status: "error",
-  input: { command: "rm -rf /", description: "Delete everything" },
-  error: "Permission denied",
-  sessionID: "s-1",
-})}' + "\\n");
+      tool: "bash",
+      callID: "call-err-1",
+      status: "error",
+      input: { command: "rm -rf /", description: "Delete everything" },
+      error: "Permission denied",
+      sessionID: "s-1",
+    })}' + "\\n");
 process.stdout.write('${stepFinish({ sessionID: "s-1", reason: "tool-calls" })}' + "\\n");
 process.stdout.write('${stepStart("s-1", "m-2")}' + "\\n");
 process.stdout.write('${textEvent("The command failed.", "s-1", "m-2")}' + "\\n");
@@ -1188,9 +1150,7 @@ process.stdout.write('${stepFinish({ sessionID: "s-1", messageID: "m-2", reason:
       expect(result.text).toBe("The command failed.");
 
       // Tool event should have ok: false for error status
-      const toolEvents = events.filter(
-        (e) => e.type === "action" && e.action?.id === "call-err-1"
-      );
+      const toolEvents = events.filter((e) => e.type === "action" && e.action?.id === "call-err-1");
       expect(toolEvents.length).toBeGreaterThanOrEqual(1);
       const completedTool = toolEvents.find((e) => e.phase === "completed");
       expect(completedTool).toBeDefined();
@@ -1209,21 +1169,21 @@ process.stdout.write('${stepFinish({ sessionID: "s-1", messageID: "m-2", reason:
 process.stdout.write('${stepStart("s-1", "m-1")}' + "\\n");
 process.stdout.write('${toolUseEvent({ tool: "bash", callID: "c1", sessionID: "s-1", messageID: "m-1" })}' + "\\n");
 process.stdout.write('${stepFinish({
-  sessionID: "s-1",
-  messageID: "m-1",
-  reason: "tool-calls",
-  tokens: { total: 500, input: 400, output: 100, reasoning: 0, cache: { write: 0, read: 50 } },
-  cost: 0.002,
-})}' + "\\n");
+      sessionID: "s-1",
+      messageID: "m-1",
+      reason: "tool-calls",
+      tokens: { total: 500, input: 400, output: 100, reasoning: 0, cache: { write: 0, read: 50 } },
+      cost: 0.002,
+    })}' + "\\n");
 process.stdout.write('${stepStart("s-1", "m-2")}' + "\\n");
 process.stdout.write('${textEvent("Result.", "s-1", "m-2")}' + "\\n");
 process.stdout.write('${stepFinish({
-  sessionID: "s-1",
-  messageID: "m-2",
-  reason: "stop",
-  tokens: { total: 700, input: 500, output: 200, reasoning: 10, cache: { write: 5, read: 80 } },
-  cost: 0.003,
-})}' + "\\n");
+      sessionID: "s-1",
+      messageID: "m-2",
+      reason: "stop",
+      tokens: { total: 700, input: 500, output: 200, reasoning: 10, cache: { write: 5, read: 80 } },
+      cost: 0.003,
+    })}' + "\\n");
 `);
 
     try {
@@ -1277,9 +1237,7 @@ process.stdout.write('${stepFinish({ sessionID: "s-1", messageID: "m-1" })}' + "
       });
 
       // Should emit a thought action for the reasoning event
-      const thoughtActions = events.filter(
-        (e) => e.type === "action" && e.entryType === "thought"
-      );
+      const thoughtActions = events.filter((e) => e.type === "action" && e.entryType === "thought");
       expect(thoughtActions.length).toBe(1);
       expect(thoughtActions[0].action.title).toBe("reasoning");
       expect(thoughtActions[0].message).toContain("Let me think about this");

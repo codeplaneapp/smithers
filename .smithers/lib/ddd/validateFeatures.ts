@@ -21,11 +21,10 @@ export function validateFeatures(root: string = dddRoot(), options: ValidateFeat
   try {
     raw = JSON.parse(readFileSync(featuresPath, "utf8"));
   } catch (error) {
-    const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
+    const code =
+      typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
     if (options.allowMissing && code === "ENOENT") return [];
-    throw new Error(
-      `could not read/parse ${featuresPath}: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    throw new Error(`could not read/parse ${featuresPath}: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const parsed = featuresSchema.safeParse(raw);

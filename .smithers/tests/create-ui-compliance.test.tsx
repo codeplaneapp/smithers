@@ -83,9 +83,12 @@ describe("create-ui compliance hard gate", () => {
     expect(sim.status).toBe("failed");
     expect(sim.task("author-and-verify").outputs).toHaveLength(3);
     expect(sim.executed).toEqual([
-      "author-and-verify", "ui-compliance",
-      "author-and-verify", "ui-compliance",
-      "author-and-verify", "ui-compliance",
+      "author-and-verify",
+      "ui-compliance",
+      "author-and-verify",
+      "ui-compliance",
+      "author-and-verify",
+      "ui-compliance",
     ]);
   });
 });

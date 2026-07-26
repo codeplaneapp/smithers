@@ -1,4 +1,4 @@
 export type WorkflowPatchDecisionRecord = {
-	patchId: string;
-	decision: boolean;
+  patchId: string;
+  decision: boolean;
 };

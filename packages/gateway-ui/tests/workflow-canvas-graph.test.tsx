@@ -60,7 +60,7 @@ describe("SmithersNodeHandles", () => {
     expect(handles).toEqual(["react-flow__handle-left", "react-flow__handle-right"]);
     expect(html).toContain('data-handlepos="left"');
     expect(html).toContain('data-handlepos="right"');
-    expect(html).not.toContain('data-handleid=');
+    expect(html).not.toContain("data-handleid=");
   });
 });
 
@@ -148,9 +148,7 @@ describe("WorkflowGraph nodeTypes seam", () => {
 
   test("unrelated nodeTypes entries merge over the default without replacing it", () => {
     const Other = memo(() => createElement("div", { "data-slot": "other-node" }));
-    const html = renderToStaticMarkup(
-      createElement(WorkflowGraph, { spec: SPEC, nodeTypes: { other: Other } }),
-    );
+    const html = renderToStaticMarkup(createElement(WorkflowGraph, { spec: SPEC, nodeTypes: { other: Other } }));
     // No spec node emits type "other", so the default canvas-anatomy card stays.
     expect(html).toContain('data-slot="workflow-node"');
     expect(html).not.toContain('data-slot="other-node"');
@@ -168,10 +166,7 @@ describe("WorkflowGraph nodeTypes seam", () => {
 describe("WorkflowGraph keyboard focus contract", () => {
   test("gives every laid-out node an accessible aria-label", () => {
     const { nodes } = workflowToFlow(SPEC);
-    expect(nodes.map((node) => node.ariaLabel)).toEqual([
-      "Plan the work (agent node)",
-      "Build it (compute node)",
-    ]);
+    expect(nodes.map((node) => node.ariaLabel)).toEqual(["Plan the work (agent node)", "Build it (compute node)"]);
   });
 
   test("node wrappers are tab-focusable and carry their accessible names", () => {
@@ -248,8 +243,7 @@ describe("WorkflowGraph mounted accessible tree", () => {
     const { container, unmount } = await mount({ spec: SPEC });
     const wrapperA = container.querySelector("[data-id='plan']") as HTMLElement;
     const wrapperB = container.querySelector("[data-id='build']") as HTMLElement;
-    const cardOf = (wrapper: HTMLElement) =>
-      wrapper.querySelector("[data-slot='workflow-node']")!;
+    const cardOf = (wrapper: HTMLElement) => wrapper.querySelector("[data-slot='workflow-node']")!;
     await act(async () => {
       wrapperA.click();
     });
@@ -274,24 +268,52 @@ describe("WorkflowGraph mounted accessible tree", () => {
     const nodeA = editable.container.querySelector("[data-id='plan']") as HTMLElement;
     const before = nodeA.style.transform;
     await act(async () => {
-      nodeA.dispatchEvent(new MouseEvent("mousedown", {
-        bubbles: true, cancelable: true, view: window, clientX: 100, clientY: 100, button: 0,
-      }));
+      nodeA.dispatchEvent(
+        new MouseEvent("mousedown", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: 100,
+          clientY: 100,
+          button: 0,
+        }),
+      );
     });
     await act(async () => {
       // Two moves: the first crosses d3-drag's click-distance threshold and
       // starts the gesture; the second produces the actual delta.
-      window.dispatchEvent(new MouseEvent("mousemove", {
-        bubbles: true, cancelable: true, view: window, clientX: 180, clientY: 180, buttons: 1,
-      }));
-      window.dispatchEvent(new MouseEvent("mousemove", {
-        bubbles: true, cancelable: true, view: window, clientX: 200, clientY: 200, buttons: 1,
-      }));
+      window.dispatchEvent(
+        new MouseEvent("mousemove", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: 180,
+          clientY: 180,
+          buttons: 1,
+        }),
+      );
+      window.dispatchEvent(
+        new MouseEvent("mousemove", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: 200,
+          clientY: 200,
+          buttons: 1,
+        }),
+      );
     });
     await act(async () => {
-      window.dispatchEvent(new MouseEvent("mouseup", {
-        bubbles: true, cancelable: true, view: window, clientX: 200, clientY: 200, button: 0,
-      }));
+      window.dispatchEvent(
+        new MouseEvent("mouseup", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: 200,
+          clientY: 200,
+          button: 0,
+        }),
+      );
     });
     expect(nodeA.style.transform).not.toBe(before);
     await editable.unmount();
@@ -301,18 +323,46 @@ describe("WorkflowGraph mounted accessible tree", () => {
     const pinned = readOnly.container.querySelector("[data-id='plan']") as HTMLElement;
     const pinnedBefore = pinned.style.transform;
     await act(async () => {
-      pinned.dispatchEvent(new MouseEvent("mousedown", {
-        bubbles: true, cancelable: true, view: window, clientX: 100, clientY: 100, button: 0,
-      }));
-      window.dispatchEvent(new MouseEvent("mousemove", {
-        bubbles: true, cancelable: true, view: window, clientX: 180, clientY: 180, buttons: 1,
-      }));
-      window.dispatchEvent(new MouseEvent("mousemove", {
-        bubbles: true, cancelable: true, view: window, clientX: 200, clientY: 200, buttons: 1,
-      }));
-      window.dispatchEvent(new MouseEvent("mouseup", {
-        bubbles: true, cancelable: true, view: window, clientX: 200, clientY: 200, button: 0,
-      }));
+      pinned.dispatchEvent(
+        new MouseEvent("mousedown", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: 100,
+          clientY: 100,
+          button: 0,
+        }),
+      );
+      window.dispatchEvent(
+        new MouseEvent("mousemove", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: 180,
+          clientY: 180,
+          buttons: 1,
+        }),
+      );
+      window.dispatchEvent(
+        new MouseEvent("mousemove", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: 200,
+          clientY: 200,
+          buttons: 1,
+        }),
+      );
+      window.dispatchEvent(
+        new MouseEvent("mouseup", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: 200,
+          clientY: 200,
+          button: 0,
+        }),
+      );
     });
     expect(pinned.style.transform).toBe(pinnedBefore);
     await readOnly.unmount();
@@ -321,95 +371,91 @@ describe("WorkflowGraph mounted accessible tree", () => {
   // win32: the simulated d3-drag mousedown/mousemove sequence through
   // happy-dom does not produce the connect gesture on Windows runners; the
   // editable/read-only contract stays covered by the Linux suite and coverage.
-  test.skipIf(process.platform === "win32")("click-to-connect adds a real edge when editable and is inert when read-only", async () => {
-    // A third unconnected node: ReactFlow's addEdge dedupes connections that
-    // already exist, so wiring plan->build (already an edge in SPEC) could
-    // never prove a mutation. plan->ship is a genuinely new edge.
-    const CONNECT_SPEC: WorkflowSpecNode[] = [
-      ...SPEC,
-      { id: "ship", label: "Ship it", kind: "agent" },
-    ];
-    // happy-dom never measures handle bounds, so EdgeWrapper returns null and
-    // no .react-flow__edge element reaches the DOM. The truthful surface for
-    // the edge mutation is the controlled edges state; this probe renderer
-    // (dropped in through the supported nodeTypes override, still painting
-    // the real SmithersCanvasNode + handles) mirrors it out of the store.
-    const observed: { edges: { id: string; source: string; target: string }[] } = { edges: [] };
-    function ProbeNode(props: NodeProps) {
-      const edges = useStore((state) => state.edges);
-      observed.edges = edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target }));
-      return createElement(SmithersCanvasNode, props);
-    }
-    const connections: { source: string; target: string }[] = [];
-    const editable = await mount({
-      spec: CONNECT_SPEC,
-      readOnly: false,
-      onConnect: (connection) => connections.push({ source: connection.source, target: connection.target }),
-      nodeTypes: { smithersTask: ProbeNode },
-    });
-    expect(observed.edges).toEqual([{ id: "plan->build", source: "plan", target: "build" }]);
-    const sourceHandle = editable.container.querySelector(
-      "[data-id='plan'] .react-flow__handle.source",
-    ) as HTMLElement;
-    const targetHandle = editable.container.querySelector(
-      "[data-id='ship'] .react-flow__handle.target",
-    ) as HTMLElement;
-    // xyflow applies the gesture state through its own store subscription,
-    // which can land a commit after act() returns on a loaded runner — poll
-    // for each gesture's observable result instead of asserting immediately.
-    const flushUntil = async (condition: () => boolean) => {
-      // 20s, not 5s: instrumented coverage runs are slow enough that the
-      // first gesture commit can take longer than 5s on CI runners.
-      const deadline = Date.now() + 20_000;
-      while (!condition() && Date.now() < deadline) {
-        await act(async () => {
-          await new Promise((resolve) => setTimeout(resolve, 10));
-        });
+  test.skipIf(process.platform === "win32")(
+    "click-to-connect adds a real edge when editable and is inert when read-only",
+    async () => {
+      // A third unconnected node: ReactFlow's addEdge dedupes connections that
+      // already exist, so wiring plan->build (already an edge in SPEC) could
+      // never prove a mutation. plan->ship is a genuinely new edge.
+      const CONNECT_SPEC: WorkflowSpecNode[] = [...SPEC, { id: "ship", label: "Ship it", kind: "agent" }];
+      // happy-dom never measures handle bounds, so EdgeWrapper returns null and
+      // no .react-flow__edge element reaches the DOM. The truthful surface for
+      // the edge mutation is the controlled edges state; this probe renderer
+      // (dropped in through the supported nodeTypes override, still painting
+      // the real SmithersCanvasNode + handles) mirrors it out of the store.
+      const observed: { edges: { id: string; source: string; target: string }[] } = { edges: [] };
+      function ProbeNode(props: NodeProps) {
+        const edges = useStore((state) => state.edges);
+        observed.edges = edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target }));
+        return createElement(SmithersCanvasNode, props);
       }
-    };
-    await act(async () => {
-      sourceHandle.click();
-    });
-    await flushUntil(() => sourceHandle.classList.contains("clickconnecting"));
-    expect(sourceHandle.classList.contains("clickconnecting")).toBe(true);
-    await act(async () => {
-      targetHandle.click();
-    });
-    await flushUntil(() => connections.length > 0);
-    expect(connections).toEqual([{ source: "plan", target: "ship" }]);
-    // The edge mutation, not just the callback: the new edge round-tripped
-    // through addEdge into the controlled state (ReactFlow's generated
-    // connection id proves it came from the gesture, not the spec).
-    expect(observed.edges).toEqual([
-      { id: "plan->build", source: "plan", target: "build" },
-      { id: "xy-edge__plan-ship", source: "plan", target: "ship" },
-    ]);
-    await editable.unmount();
+      const connections: { source: string; target: string }[] = [];
+      const editable = await mount({
+        spec: CONNECT_SPEC,
+        readOnly: false,
+        onConnect: (connection) => connections.push({ source: connection.source, target: connection.target }),
+        nodeTypes: { smithersTask: ProbeNode },
+      });
+      expect(observed.edges).toEqual([{ id: "plan->build", source: "plan", target: "build" }]);
+      const sourceHandle = editable.container.querySelector(
+        "[data-id='plan'] .react-flow__handle.source",
+      ) as HTMLElement;
+      const targetHandle = editable.container.querySelector(
+        "[data-id='ship'] .react-flow__handle.target",
+      ) as HTMLElement;
+      // xyflow applies the gesture state through its own store subscription,
+      // which can land a commit after act() returns on a loaded runner — poll
+      // for each gesture's observable result instead of asserting immediately.
+      const flushUntil = async (condition: () => boolean) => {
+        // 20s, not 5s: instrumented coverage runs are slow enough that the
+        // first gesture commit can take longer than 5s on CI runners.
+        const deadline = Date.now() + 20_000;
+        while (!condition() && Date.now() < deadline) {
+          await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          });
+        }
+      };
+      await act(async () => {
+        sourceHandle.click();
+      });
+      await flushUntil(() => sourceHandle.classList.contains("clickconnecting"));
+      expect(sourceHandle.classList.contains("clickconnecting")).toBe(true);
+      await act(async () => {
+        targetHandle.click();
+      });
+      await flushUntil(() => connections.length > 0);
+      expect(connections).toEqual([{ source: "plan", target: "ship" }]);
+      // The edge mutation, not just the callback: the new edge round-tripped
+      // through addEdge into the controlled state (ReactFlow's generated
+      // connection id proves it came from the gesture, not the spec).
+      expect(observed.edges).toEqual([
+        { id: "plan->build", source: "plan", target: "build" },
+        { id: "xy-edge__plan-ship", source: "plan", target: "ship" },
+      ]);
+      await editable.unmount();
 
-    // Read-only (the default): handles are not connectable, so the same
-    // clicks never even start a connection gesture — no callback, no edge.
-    const readOnlyConnections: unknown[] = [];
-    const readOnly = await mount({
-      spec: CONNECT_SPEC,
-      onConnect: (connection) => readOnlyConnections.push(connection),
-      nodeTypes: { smithersTask: ProbeNode },
-    });
-    expect(observed.edges.length).toBe(1);
-    const roSource = readOnly.container.querySelector(
-      "[data-id='plan'] .react-flow__handle.source",
-    ) as HTMLElement;
-    const roTarget = readOnly.container.querySelector(
-      "[data-id='ship'] .react-flow__handle.target",
-    ) as HTMLElement;
-    await act(async () => {
-      roSource.click();
-      roTarget.click();
-    });
-    expect(roSource.classList.contains("clickconnecting")).toBe(false);
-    expect(readOnlyConnections).toEqual([]);
-    expect(observed.edges).toEqual([{ id: "plan->build", source: "plan", target: "build" }]);
-    await readOnly.unmount();
-  });
+      // Read-only (the default): handles are not connectable, so the same
+      // clicks never even start a connection gesture — no callback, no edge.
+      const readOnlyConnections: unknown[] = [];
+      const readOnly = await mount({
+        spec: CONNECT_SPEC,
+        onConnect: (connection) => readOnlyConnections.push(connection),
+        nodeTypes: { smithersTask: ProbeNode },
+      });
+      expect(observed.edges.length).toBe(1);
+      const roSource = readOnly.container.querySelector("[data-id='plan'] .react-flow__handle.source") as HTMLElement;
+      const roTarget = readOnly.container.querySelector("[data-id='ship'] .react-flow__handle.target") as HTMLElement;
+      await act(async () => {
+        roSource.click();
+        roTarget.click();
+      });
+      expect(roSource.classList.contains("clickconnecting")).toBe(false);
+      expect(readOnlyConnections).toEqual([]);
+      expect(observed.edges).toEqual([{ id: "plan->build", source: "plan", target: "build" }]);
+      await readOnly.unmount();
+    },
+  );
 });
 
 describe("WorkflowGraph read-only contract", () => {
@@ -443,9 +489,7 @@ describe("WorkflowGraph read-only contract", () => {
   });
 
   test("readOnly={false} opts into real drag and connect mutations at first paint", () => {
-    const html = markupOnly(renderToStaticMarkup(
-      createElement(WorkflowGraph, { spec: SPEC, readOnly: false }),
-    ));
+    const html = markupOnly(renderToStaticMarkup(createElement(WorkflowGraph, { spec: SPEC, readOnly: false })));
     const wrappers = html.match(/<div class="react-flow__node [^"]*"[^>]*>/g) ?? [];
     expect(wrappers.length).toBe(2);
     for (const wrapper of wrappers) {

@@ -5,10 +5,13 @@
 
 import { Effect } from "effect";
 import { captureSnapshot as captureSnapshotEffect } from "./captureSnapshotEffect.js";
-import { loadLatestSnapshot as loadLatestSnapshotEffect, loadSnapshot as loadSnapshotEffect, } from "./loadSnapshotEffect.js";
+import {
+  loadLatestSnapshot as loadLatestSnapshotEffect,
+  loadSnapshot as loadSnapshotEffect,
+} from "./loadSnapshotEffect.js";
 import { listSnapshots as listSnapshotsEffect } from "./listSnapshotsEffect.js";
 export { parseSnapshot } from "./parseSnapshot.js";
-export { captureSnapshotEffect, listSnapshotsEffect, loadLatestSnapshotEffect, loadSnapshotEffect, };
+export { captureSnapshotEffect, listSnapshotsEffect, loadLatestSnapshotEffect, loadSnapshotEffect };
 
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 
@@ -22,7 +25,7 @@ export { captureSnapshotEffect, listSnapshotsEffect, loadLatestSnapshotEffect, l
  * @returns {Promise<Snapshot>}
  */
 export function captureSnapshot(adapter, runId, frameNo, data) {
-    return Effect.runPromise(captureSnapshotEffect(adapter, runId, frameNo, data));
+  return Effect.runPromise(captureSnapshotEffect(adapter, runId, frameNo, data));
 }
 /**
  * Load a specific snapshot row for a run/frame.
@@ -33,7 +36,7 @@ export function captureSnapshot(adapter, runId, frameNo, data) {
  * @returns {Promise<Snapshot | undefined>}
  */
 export function loadSnapshot(adapter, runId, frameNo) {
-    return Effect.runPromise(loadSnapshotEffect(adapter, runId, frameNo));
+  return Effect.runPromise(loadSnapshotEffect(adapter, runId, frameNo));
 }
 /**
  * Load the most recent snapshot row for a run.
@@ -43,7 +46,7 @@ export function loadSnapshot(adapter, runId, frameNo) {
  * @returns {Promise<Snapshot | undefined>}
  */
 export function loadLatestSnapshot(adapter, runId) {
-    return Effect.runPromise(loadLatestSnapshotEffect(adapter, runId));
+  return Effect.runPromise(loadLatestSnapshotEffect(adapter, runId));
 }
 /**
  * List lightweight snapshot index rows for a run.
@@ -53,5 +56,5 @@ export function loadLatestSnapshot(adapter, runId) {
  * @returns {Promise<Array<Pick<Snapshot, "runId" | "frameNo" | "contentHash" | "createdAtMs" | "vcsPointer">>>}
  */
 export function listSnapshots(adapter, runId) {
-    return Effect.runPromise(listSnapshotsEffect(adapter, runId));
+  return Effect.runPromise(listSnapshotsEffect(adapter, runId));
 }

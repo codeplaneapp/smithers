@@ -20,7 +20,11 @@ export function EmptyState({ icon, title, description, action, className, childr
   useInjectUiCss();
   return (
     <div data-slot="empty-state" className={cn("sui-empty", className)} {...props}>
-      {icon ? <div className="sui-empty-icon" aria-hidden>{icon}</div> : null}
+      {icon ? (
+        <div className="sui-empty-icon" aria-hidden>
+          {icon}
+        </div>
+      ) : null}
       {title ? <div className="sui-empty-title">{title}</div> : null}
       {description ? <div className="sui-empty-description">{description}</div> : null}
       {children}

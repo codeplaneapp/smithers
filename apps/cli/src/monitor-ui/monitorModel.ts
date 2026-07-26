@@ -5,17 +5,8 @@
  * apps/cli/tests/monitor-ui-model.test.ts. The React entry stays thin: it
  * renders what these functions derive.
  */
-import {
-  normalizeStatus,
-  statusClass,
-  type StatusClass,
-} from "smithers-orchestrator/ui";
-import {
-  formatTokenRange,
-  formatTokens,
-  type NodeTiming,
-  type RunUsagePrediction,
-} from "./usagePrediction.ts";
+import { normalizeStatus, statusClass, type StatusClass } from "smithers-orchestrator/ui";
+import { formatTokenRange, formatTokens, type NodeTiming, type RunUsagePrediction } from "./usagePrediction.ts";
 
 export { normalizeStatus };
 
@@ -102,7 +93,11 @@ export function embedModeFromSearch(search: string): MonitorEmbedMode {
 }
 
 export type SelectionSinkDecision =
-  | { kind: "postMessage"; targetOrigin: string; message: { type: "smithers-monitor:selection"; runId?: string; nodeId?: string } }
+  | {
+      kind: "postMessage";
+      targetOrigin: string;
+      message: { type: "smithers-monitor:selection"; runId?: string; nodeId?: string };
+    }
   | { kind: "url"; runId?: string; nodeId?: string }
   | { kind: "none" };
 
@@ -234,9 +229,7 @@ export type RunDiagnosis = {
 };
 
 /** Logical task rows only — structural containers carry numeric snapshot keys. */
-function taskRows(
-  treeNodes: ReadonlyArray<{ id?: unknown; status?: unknown }>,
-): Array<{ id: string; status: string }> {
+function taskRows(treeNodes: ReadonlyArray<{ id?: unknown; status?: unknown }>): Array<{ id: string; status: string }> {
   const seen = new Map<string, string>();
   for (const node of treeNodes) {
     const id = asString(node.id);
@@ -256,9 +249,7 @@ function taskRows(
  * number humans read; node-state summaries count structural rows too and must
  * never be shown side by side with it.
  */
-export function taskProgressOf(
-  treeNodes: ReadonlyArray<{ id?: unknown; status?: unknown }>,
-): RunProgress | null {
+export function taskProgressOf(treeNodes: ReadonlyArray<{ id?: unknown; status?: unknown }>): RunProgress | null {
   const tasks = taskRows(treeNodes);
   if (tasks.length === 0) return null;
   const done = tasks.filter((task) => task.status === "ok").length;
@@ -341,7 +332,10 @@ export function diagnoseRun(input: {
   if (status === "waiting-quota") {
     const blocked = input.quota?.blocked ?? [];
     const who = blocked.length
-      ? ` Blocked: ${blocked.slice(0, 3).map((entry) => entry.nodeId).join(", ")}${blocked.length > 3 ? "…" : ""}.`
+      ? ` Blocked: ${blocked
+          .slice(0, 3)
+          .map((entry) => entry.nodeId)
+          .join(", ")}${blocked.length > 3 ? "…" : ""}.`
       : "";
     const why = blocked[0]?.message ? ` ${blocked[0].message.slice(0, 220)}` : sample;
     return {
@@ -373,12 +367,18 @@ export function diagnoseRun(input: {
     return {
       tone: "warn",
       headline: `Running with ${failed.length} failed task(s)`,
-      detail: `${progress}; ${running.length} running. Failed: ${failed.slice(0, 4).map((task) => task.id).join(", ")}${failed.length > 4 ? "…" : ""}.${sample}`,
+      detail: `${progress}; ${running.length} running. Failed: ${failed
+        .slice(0, 4)
+        .map((task) => task.id)
+        .join(", ")}${failed.length > 4 ? "…" : ""}.${sample}`,
       fix: `Failed tasks were continue-on-fail or await retry. \`smithers retry-task\` recovers one; the run keeps going meanwhile.`,
     };
   }
   if (status === "running") {
-    const active = running.slice(0, 3).map((task) => task.id).join(", ");
+    const active = running
+      .slice(0, 3)
+      .map((task) => task.id)
+      .join(", ");
     return {
       tone: "ok",
       headline: "Healthy — running",
@@ -391,7 +391,10 @@ export function diagnoseRun(input: {
       ? {
           tone: "warn",
           headline: "Finished with failures",
-          detail: `${progress}; ${failed.length} task(s) failed: ${failed.slice(0, 4).map((task) => task.id).join(", ")}.${sample}`,
+          detail: `${progress}; ${failed.length} task(s) failed: ${failed
+            .slice(0, 4)
+            .map((task) => task.id)
+            .join(", ")}.${sample}`,
           fix: `Review the failed nodes; \`smithers retry-task\` + resume if they should complete.`,
         }
       : {
@@ -561,7 +564,11 @@ export type RunRow = {
 };
 
 /** Read the Gateway projection first, then tolerate older rows carrying only configJson. */
-export function startedByOf(row: { startedBy?: unknown; configJson?: unknown; config_json?: unknown }): { harness?: string; sessionId?: string; detected?: true } | undefined {
+export function startedByOf(row: {
+  startedBy?: unknown;
+  configJson?: unknown;
+  config_json?: unknown;
+}): { harness?: string; sessionId?: string; detected?: true } | undefined {
   const source = row as Record<string, unknown>;
   let value = source.startedBy;
   if (!isRecord(value)) {
@@ -964,7 +971,9 @@ export function isHeartbeatEvent(name: string): boolean {
  * events view can collapse pulse traffic into a single liveness row instead
  * of wallpapering the log (and aging real events out of the ring).
  */
-export function splitHeartbeatEvents<T extends { event?: string }>(events: readonly T[]): {
+export function splitHeartbeatEvents<T extends { event?: string }>(
+  events: readonly T[],
+): {
   heartbeats: T[];
   rest: T[];
 } {
@@ -1177,7 +1186,11 @@ export function diffSummaryOf(patch: string): DiffSummary {
 /** Merge per-file summaries (one getNodeDiff patch each) into one rollup. */
 export function sumDiffSummaries(summaries: readonly DiffSummary[]): DiffSummary {
   return summaries.reduce(
-    (acc, entry) => ({ files: acc.files + entry.files, added: acc.added + entry.added, removed: acc.removed + entry.removed }),
+    (acc, entry) => ({
+      files: acc.files + entry.files,
+      added: acc.added + entry.added,
+      removed: acc.removed + entry.removed,
+    }),
     { files: 0, added: 0, removed: 0 },
   );
 }
@@ -1300,10 +1313,7 @@ export function buildTimeline(rows: readonly NodeStateRow[], nowMs: number): Tim
     const neverRan = NEVER_RAN_STATES.has(normalizeStatus(row.state)) && row.startedAtMs === undefined;
     const settled = !neverRan && (tone === "ok" || tone === "failed" || tone === "idle");
     const endMs = row.finishedAtMs ?? (settled ? row.updatedAtMs : undefined);
-    const durationMs =
-      row.startedAtMs !== undefined
-        ? Math.max(0, (endMs ?? nowMs) - row.startedAtMs)
-        : undefined;
+    const durationMs = row.startedAtMs !== undefined ? Math.max(0, (endMs ?? nowMs) - row.startedAtMs) : undefined;
     const key = `${row.nodeId}#${row.iteration}`;
     sortKeys.set(key, row.startedAtMs ?? (neverRan ? undefined : row.updatedAtMs));
     return {
@@ -1399,10 +1409,7 @@ export type RunUsageChipView = {
  * settled run renders exactly its measured total even if the prediction
  * still carries stale estimate fields.
  */
-export function runUsageChipOf(
-  prediction: RunUsagePrediction,
-  options: { live: boolean },
-): RunUsageChipView {
+export function runUsageChipOf(prediction: RunUsagePrediction, options: { live: boolean }): RunUsageChipView {
   const spent = `${formatTokens(prediction.spentTokens)} tok`;
   const inFlight =
     options.live && prediction.inFlightTokens !== undefined && prediction.inFlightTokens >= 1
@@ -1864,11 +1871,7 @@ export function histogramStats(
 }
 
 /** Sum every sample of a counter/gauge that matches the given labels (subset match). */
-export function metricValue(
-  scrape: PromScrape,
-  name: string,
-  labels?: Record<string, string>,
-): number | undefined {
+export function metricValue(scrape: PromScrape, name: string, labels?: Record<string, string>): number | undefined {
   let sum = 0;
   let found = false;
   for (const sample of scrape.samples) {
@@ -1911,7 +1914,11 @@ const ERROR_COUNTER_LABELS: Record<string, string> = {
  */
 export function describeErrorCounter(name: string, labels: Record<string, string>): string {
   const base =
-    ERROR_COUNTER_LABELS[name] ?? name.replace(/^smithers_/, "").replace(/_total$/, "").replace(/_/g, " ");
+    ERROR_COUNTER_LABELS[name] ??
+    name
+      .replace(/^smithers_/, "")
+      .replace(/_total$/, "")
+      .replace(/_/g, " ");
   const detail = Object.entries(labels)
     .map(([key, value]) => `${key} ${value}`)
     .join(" · ");
@@ -2020,9 +2027,7 @@ export function cronRowsOf(body: unknown): CronRow[] {
     if (!cronId || !pattern || seen.has(cronId)) continue;
     seen.add(cronId);
     const workflowPath = asString(pick(raw, "workflowPath", "workflow_path"));
-    const stem = workflowPath
-      ? (workflowPath.split("/").pop() ?? workflowPath).replace(/\.[jt]sx?$/, "")
-      : undefined;
+    const stem = workflowPath ? (workflowPath.split("/").pop() ?? workflowPath).replace(/\.[jt]sx?$/, "") : undefined;
     const lastRunAtMs = asNumber(pick(raw, "lastRunAtMs", "last_run_at_ms"));
     const nextRunAtMs = asNumber(pick(raw, "nextRunAtMs", "next_run_at_ms"));
     const error = cronErrorMessage(pick(raw, "errorJson", "error_json"));

@@ -60,7 +60,10 @@ export function resolveCliLogLevel(value: string | undefined = process.env.SMITH
   }
 }
 
-export function shouldEmitLogLevel(logLevel: LogLevel.LogLevel, minimum: LogLevel.LogLevel = resolveCliLogLevel()): boolean {
+export function shouldEmitLogLevel(
+  logLevel: LogLevel.LogLevel,
+  minimum: LogLevel.LogLevel = resolveCliLogLevel(),
+): boolean {
   return logLevel.ordinal >= minimum.ordinal;
 }
 
@@ -70,7 +73,10 @@ function visibleLength(value: string): number {
 
 function wrapLine(text: string, width: number): string[] {
   const max = Math.max(20, width);
-  const words = String(text).replace(/[\r\n]+/g, " ").split(/ +/).filter(Boolean);
+  const words = String(text)
+    .replace(/[\r\n]+/g, " ")
+    .split(/ +/)
+    .filter(Boolean);
   const lines: string[] = [];
   let line = "";
   for (const word of words) {

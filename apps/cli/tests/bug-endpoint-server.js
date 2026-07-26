@@ -12,24 +12,24 @@ import { appendFileSync } from "node:fs";
 
 const payloadLogFile = process.argv[2];
 if (!payloadLogFile) {
-    console.error("usage: bun bug-endpoint-server.js <payload-log-file>");
-    process.exit(2);
+  console.error("usage: bun bug-endpoint-server.js <payload-log-file>");
+  process.exit(2);
 }
 
 let received = 0;
 const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    async fetch(request) {
-        const url = new URL(request.url);
-        if (request.method === "POST" && url.pathname === "/api/bugs") {
-            const payload = await request.json();
-            appendFileSync(payloadLogFile, `${JSON.stringify(payload)}\n`, "utf8");
-            received += 1;
-            const id = `bug-${received}`;
-            return Response.json({ id, url: `https://bug.smithers.sh/api/bugs/${id}` });
-        }
-        return new Response("not found", { status: 404 });
-    },
+  port: 0,
+  hostname: "127.0.0.1",
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (request.method === "POST" && url.pathname === "/api/bugs") {
+      const payload = await request.json();
+      appendFileSync(payloadLogFile, `${JSON.stringify(payload)}\n`, "utf8");
+      received += 1;
+      const id = `bug-${received}`;
+      return Response.json({ id, url: `https://bug.smithers.sh/api/bugs/${id}` });
+    }
+    return new Response("not found", { status: 404 });
+  },
 });
 console.log(JSON.stringify({ port: server.port }));

@@ -121,9 +121,9 @@ process.stdout.write(JSON.stringify({ args: { success: true }, name: "exit", typ
 
       expect(result.text).toBe("Done!");
       // Verify we got started, some actions, and completed
-      expect(events.some(e => e.type === "started")).toBe(true);
-      expect(events.some(e => e.type === "completed")).toBe(true);
-      const completed = events.find(e => e.type === "completed");
+      expect(events.some((e) => e.type === "started")).toBe(true);
+      expect(events.some((e) => e.type === "completed")).toBe(true);
+      const completed = events.find((e) => e.type === "completed");
       expect(completed).toMatchObject({
         engine: "pool",
         ok: true,
@@ -161,14 +161,16 @@ process.stdout.write(JSON.stringify({ args: { success: true }, name: "exit", typ
         entryType: "message",
         message: "First record answer",
       });
-      expect(events).toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          type: "completed",
-          engine: "pool",
-          ok: true,
-          answer: "First record answer",
-        }),
-      ]));
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "completed",
+            engine: "pool",
+            ok: true,
+            answer: "First record answer",
+          }),
+        ]),
+      );
     } finally {
       await rm(fake.dir, { recursive: true, force: true });
     }
@@ -185,11 +187,13 @@ process.stdout.write(JSON.stringify({ args: { success: false }, name: "exit", ty
       const events = [];
       const agent = new PoolAgent({ env: { PATH: process.env.PATH } });
 
-      await expect(agent.generate({
-        prompt: "Fail immediately",
-        rootDir: fake.dir,
-        onEvent: (event) => events.push(event),
-      })).rejects.toMatchObject({ code: "AGENT_CLI_ERROR" });
+      await expect(
+        agent.generate({
+          prompt: "Fail immediately",
+          rootDir: fake.dir,
+          onEvent: (event) => events.push(event),
+        }),
+      ).rejects.toMatchObject({ code: "AGENT_CLI_ERROR" });
 
       expect(events[0]).toMatchObject({ type: "started", engine: "pool" });
       expect(events[1]).toMatchObject({ type: "completed", engine: "pool", ok: false });
@@ -206,7 +210,7 @@ process.stdout.write(JSON.stringify({ args: { success: false }, name: "exit", ty
     expect(interpreter.onStdoutLine?.("not json")).toEqual([]);
 
     const exitEvents = interpreter.onExit?.({ exitCode: 7, stderr: "bad credentials\n" }) ?? [];
-    
+
     // Should have both started and completed events
     expect(exitEvents.length).toBe(2);
     expect(exitEvents[0]).toMatchObject({

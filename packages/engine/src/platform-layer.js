@@ -22,7 +22,7 @@ let overrideLayer;
  * @returns {PlatformLayer}
  */
 export function getDefaultPlatformLayer() {
-    return defaultPlatformLayer;
+  return defaultPlatformLayer;
 }
 
 /**
@@ -31,7 +31,7 @@ export function getDefaultPlatformLayer() {
  * @returns {PlatformLayer}
  */
 export function getPlatformLayer() {
-    return storage.getStore() ?? overrideLayer ?? defaultPlatformLayer;
+  return storage.getStore() ?? overrideLayer ?? defaultPlatformLayer;
 }
 
 /**
@@ -41,11 +41,11 @@ export function getPlatformLayer() {
  * @param {PlatformLayer} layer
  */
 export function setPlatformLayer(layer) {
-    overrideLayer = layer;
+  overrideLayer = layer;
 }
 
 export function resetPlatformLayer() {
-    overrideLayer = undefined;
+  overrideLayer = undefined;
 }
 
 /**
@@ -59,5 +59,5 @@ export function resetPlatformLayer() {
  * @returns {T | Promise<T>}
  */
 export function withPlatformLayer(layer, execute) {
-    return storage.run(layer, execute);
+  return storage.run(layer, execute);
 }

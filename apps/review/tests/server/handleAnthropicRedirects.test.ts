@@ -15,13 +15,13 @@ import { serveFixtureAnthropic } from "./helpers/serveFixtureAnthropic.ts";
 const REPO = "octo/widgets";
 
 const SSE_USAGE = [
-  'event: message_start',
+  "event: message_start",
   'data: {"type":"message_start","message":{"id":"m1","model":"claude-sonnet-4-6","usage":{"input_tokens":300,"output_tokens":1}}}',
   "",
-  'event: message_delta',
+  "event: message_delta",
   'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":300,"output_tokens":42}}',
   "",
-  'event: message_stop',
+  "event: message_stop",
   'data: {"type":"message_stop"}',
   "",
 ].join("\n");
@@ -29,10 +29,9 @@ const SSE_USAGE = [
 async function seedSession(env: ReviewWorkerEnv, repo: string, spendCapUsd = 1) {
   const token = "srs_testsessiontoken";
   const hash = await sha256Hex(token);
-  await env.DB
-    .prepare(
-      "INSERT INTO sessions (hash, repo, pr, expires_at, spend_cap_usd, spent_usd, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    )
+  await env.DB.prepare(
+    "INSERT INTO sessions (hash, repo, pr, expires_at, spend_cap_usd, spent_usd, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
     .bind(hash, repo, 99, Date.now() + 60_000, spendCapUsd, 0, Date.now())
     .run();
   return token;

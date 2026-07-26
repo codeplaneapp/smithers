@@ -46,9 +46,7 @@ function localVcsMiddleware() {
     } catch (error) {
       res.statusCode = 500;
       res.setHeader("content-type", "application/json; charset=utf-8");
-      res.end(
-        JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
-      );
+      res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
     }
   };
 }

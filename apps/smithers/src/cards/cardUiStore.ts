@@ -75,12 +75,10 @@ export const useCardUiStore = create<CardUiState>((set) => ({
     })),
 
   noteByRun: {},
-  setNote: (runId, note) =>
-    set((state) => ({ noteByRun: { ...state.noteByRun, [runId]: note } })),
+  setNote: (runId, note) => set((state) => ({ noteByRun: { ...state.noteByRun, [runId]: note } })),
 
   diffActiveByKey: {},
-  setDiffActive: (key, index) =>
-    set((state) => ({ diffActiveByKey: { ...state.diffActiveByKey, [key]: index } })),
+  setDiffActive: (key, index) => set((state) => ({ diffActiveByKey: { ...state.diffActiveByKey, [key]: index } })),
 
   cronsAdding: false,
   setCronsAdding: (cronsAdding) => set({ cronsAdding }),
@@ -88,8 +86,7 @@ export const useCardUiStore = create<CardUiState>((set) => ({
   humanPicked: null,
   pickHuman: (humanPicked) => set({ humanPicked }),
   deliveredByEvent: {},
-  deliverSignal: (event) =>
-    set((state) => ({ deliveredByEvent: { ...state.deliveredByEvent, [event]: true } })),
+  deliverSignal: (event) => set((state) => ({ deliveredByEvent: { ...state.deliveredByEvent, [event]: true } })),
 
   depthByWorkflow: {},
   setDepth: (workflowId, depth) =>

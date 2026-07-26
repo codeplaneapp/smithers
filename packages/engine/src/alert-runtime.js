@@ -5,18 +5,18 @@
 
 /** @typedef {import("@smithers-orchestrator/scheduler/SmithersWorkflowOptions").SmithersAlertPolicy} SmithersAlertPolicy */
 export class AlertRuntime {
-    /** @type {SmithersAlertPolicy} */
-    policy;
-    /** @type {AlertRuntimeServices} */
-    services;
-    /**
+  /** @type {SmithersAlertPolicy} */
+  policy;
+  /** @type {AlertRuntimeServices} */
+  services;
+  /**
    * @param {SmithersAlertPolicy} policy
    * @param {AlertRuntimeServices} services
    */
-    constructor(policy, services) {
-        this.policy = policy;
-        this.services = services;
-    }
-    start() { }
-    stop() { }
+  constructor(policy, services) {
+    this.policy = policy;
+    this.services = services;
+  }
+  start() {}
+  stop() {}
 }

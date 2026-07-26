@@ -17,48 +17,48 @@ import { z } from "zod/v4";
  */
 
 const luna = [
-	new CodexAgent({
-		model: "gpt-5.6-luna",
-		config: { model_reasoning_effort: "medium" },
-		skipGitRepoCheck: true,
-	}),
-	new ClaudeCodeAgent({ model: "claude-sonnet-5" }),
+  new CodexAgent({
+    model: "gpt-5.6-luna",
+    config: { model_reasoning_effort: "medium" },
+    skipGitRepoCheck: true,
+  }),
+  new ClaudeCodeAgent({ model: "claude-sonnet-5" }),
 ];
 
 const answerSchema = z.object({
-	answer: z.string().describe("A short, direct answer."),
+  answer: z.string().describe("A short, direct answer."),
 });
 
 const outputSchema = z.object({
-	firstAnswer: z.string(),
-	secondAnswer: z.string(),
+  firstAnswer: z.string(),
+  secondAnswer: z.string(),
 });
 
 const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({
-	firstStep: answerSchema,
-	secondStep: answerSchema,
-	output: outputSchema,
+  firstStep: answerSchema,
+  secondStep: answerSchema,
+  output: outputSchema,
 });
 
 export default smithers((ctx) => {
-	const firstStep = ctx.outputMaybe("firstStep", { nodeId: "ask-first" });
-	const secondStep = ctx.outputMaybe("secondStep", { nodeId: "ask-second" });
+  const firstStep = ctx.outputMaybe("firstStep", { nodeId: "ask-first" });
+  const secondStep = ctx.outputMaybe("secondStep", { nodeId: "ask-second" });
 
-	return (
-		<Workflow name="plue-demo-child">
-			<Sequence>
-				<Task id="ask-first" output={outputs.firstStep} agent={luna}>
-					What is 2 + 2? Answer with just the number.
-				</Task>
-				<Task id="ask-second" output={outputs.secondStep} agent={luna}>
-					What is the capital of France? Answer with just the city name.
-				</Task>
-				{firstStep && secondStep ? (
-					<Task id="output" output={outputs.output}>
-						{() => ({ firstAnswer: firstStep.answer, secondAnswer: secondStep.answer })}
-					</Task>
-				) : null}
-			</Sequence>
-		</Workflow>
-	);
+  return (
+    <Workflow name="plue-demo-child">
+      <Sequence>
+        <Task id="ask-first" output={outputs.firstStep} agent={luna}>
+          What is 2 + 2? Answer with just the number.
+        </Task>
+        <Task id="ask-second" output={outputs.secondStep} agent={luna}>
+          What is the capital of France? Answer with just the city name.
+        </Task>
+        {firstStep && secondStep ? (
+          <Task id="output" output={outputs.output}>
+            {() => ({ firstAnswer: firstStep.answer, secondAnswer: secondStep.answer })}
+          </Task>
+        ) : null}
+      </Sequence>
+    </Workflow>
+  );
 });

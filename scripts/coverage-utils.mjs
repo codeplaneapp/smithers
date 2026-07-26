@@ -22,12 +22,12 @@ export function directBunTestSegments(input) {
     const ch = input[index];
     if (ch === "\n" || ch === "\r") return null;
 
-    if (quote === "\"") {
-      if (ch === "\"") {
+    if (quote === '"') {
+      if (ch === '"') {
         quote = null;
       } else if ("$`%^!".includes(ch)) {
         return null;
-      } else if (ch === "\\" && (input[index + 1] === "\"" || input[index + 1] === "\\")) {
+      } else if (ch === "\\" && (input[index + 1] === '"' || input[index + 1] === "\\")) {
         current += input[index + 1];
         index += 1;
       } else {
@@ -40,7 +40,7 @@ export function directBunTestSegments(input) {
     if (ch === "\\") {
       return null;
     }
-    if (ch === "\"") {
+    if (ch === '"') {
       quote = ch;
       started = true;
       continue;
@@ -140,7 +140,7 @@ export function mergeLcovReports(lcovPaths, outputPath) {
   };
   const addBranchHits = (map, identity, hits) => {
     const previous = map.get(identity);
-    map.set(identity, hits === null ? previous ?? null : (previous ?? 0) + hits);
+    map.set(identity, hits === null ? (previous ?? null) : (previous ?? 0) + hits);
   };
   const setAggregate = (metric, field, value, source, legIndex, metricName) => {
     if (!Number.isSafeInteger(value) || value < 0) {
@@ -219,12 +219,7 @@ export function mergeLcovReports(lcovPaths, outputPath) {
       const metric = leg[metricName];
       let { found, hit } = metric;
       // Bun omits BRF/BRH entirely when a source has no branches.
-      if (
-        metricName === "branches" &&
-        found === undefined &&
-        hit === undefined &&
-        metric.identities.size === 0
-      ) {
+      if (metricName === "branches" && found === undefined && hit === undefined && metric.identities.size === 0) {
         found = 0;
         hit = 0;
       }

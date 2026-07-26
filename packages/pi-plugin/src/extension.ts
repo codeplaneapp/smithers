@@ -7,10 +7,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import type { ExtensionAPI as PiExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type, type TSchema } from "@sinclair/typebox";
-import {
-  createSmithersAgentContract,
-  type SmithersAgentContract,
-} from "@smithers-orchestrator/agents/agent-contract";
+import { createSmithersAgentContract, type SmithersAgentContract } from "@smithers-orchestrator/agents/agent-contract";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { buildSmithersPiSystemPrompt } from "./buildSmithersPiSystemPrompt.js";
 import { DevToolsClient } from "./runtime/DevToolsClient.js";
@@ -425,13 +422,14 @@ async function openInspector(ctx: ExtensionContext, run: TrackedRun) {
   if (run.store.runId === undefined || run.store.connectionState.kind === "disconnected") {
     run.store.connect(run.runId);
   }
-  await ctx.ui.custom((_tui: unknown, theme: any, _kb: unknown, done: () => void) =>
-    new RunInspector(run.store, run.client, {
-      workflowName: run.workflowName,
-      theme,
-      onClose: done,
-      onNotify: (message, level) => ctx.ui.notify(message, level),
-    }),
+  await ctx.ui.custom(
+    (_tui: unknown, theme: any, _kb: unknown, done: () => void) =>
+      new RunInspector(run.store, run.client, {
+        workflowName: run.workflowName,
+        theme,
+        onClose: done,
+        onNotify: (message, level) => ctx.ui.notify(message, level),
+      }),
   );
 }
 
@@ -481,8 +479,7 @@ async function registerMcpToolsInner(pi: ExtensionAPI, ctx: ExtensionContext) {
             .map(([key, value]) => `${key}=${value}`)
             .join(" ");
           return new Text(
-            theme.fg("toolTitle", theme.bold(`smithers ${tool.name.replace(/_/g, " ")} `)) +
-              theme.fg("muted", argStr),
+            theme.fg("toolTitle", theme.bold(`smithers ${tool.name.replace(/_/g, " ")} `)) + theme.fg("muted", argStr),
             0,
             0,
           );
@@ -645,7 +642,8 @@ export function extension(pi: ExtensionAPI) {
       }
       const runList = [...runs.values()];
       const options = runList.map(
-        (run) => `${statusIcon(run.store.runStatus)} ${run.workflowName} (${run.runId.slice(0, 8)}) - ${run.store.runStatus}`,
+        (run) =>
+          `${statusIcon(run.store.runStatus)} ${run.workflowName} (${run.runId.slice(0, 8)}) - ${run.store.runStatus}`,
       );
       const selected = await ctx.ui.select("Smithers Runs", options);
       if (!selected) {

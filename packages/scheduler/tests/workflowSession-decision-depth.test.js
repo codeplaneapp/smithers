@@ -29,21 +29,15 @@ describe("makeWorkflowSession decision depth guard", () => {
     // scales with the task count, so the run skips them all and finishes. 25
     // tasks proves the bound is task-proportional, not a bumped constant.
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
-    const descriptors = Array.from({ length: 25 }, (_, index) =>
-      makeDescriptor(`skip-${index}`, index),
-    );
+    const descriptors = Array.from({ length: 25 }, (_, index) => makeDescriptor(`skip-${index}`, index));
     const graph = {
       xml: el(
         "smithers:workflow",
         {},
-        descriptors.map((descriptor) =>
-          el("smithers:task", { id: descriptor.nodeId }),
-        ),
+        descriptors.map((descriptor) => el("smithers:task", { id: descriptor.nodeId })),
       ),
       tasks: descriptors,
-      mountedTaskIds: new Set(
-        descriptors.map((descriptor) => `${descriptor.nodeId}::0`),
-      ),
+      mountedTaskIds: new Set(descriptors.map((descriptor) => `${descriptor.nodeId}::0`)),
     };
 
     const decision = Effect.runSync(session.submitGraph(graph));

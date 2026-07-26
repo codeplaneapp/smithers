@@ -16,13 +16,13 @@ import { telegramChatCorrelationId, telegramThreadCorrelationId } from "../Teleg
  * @returns {string | undefined}
  */
 export function listenerCorrelationId(props) {
-    if (props.threadId != null) {
-        if (props.chatId == null) {
-            throw new SmithersError("INVALID_INPUT", "Telegram listener threadId requires chatId.");
-        }
-        return telegramThreadCorrelationId(props.chatId, props.threadId);
+  if (props.threadId != null) {
+    if (props.chatId == null) {
+      throw new SmithersError("INVALID_INPUT", "Telegram listener threadId requires chatId.");
     }
-    return props.chatId != null ? telegramChatCorrelationId(props.chatId) : undefined;
+    return telegramThreadCorrelationId(props.chatId, props.threadId);
+  }
+  return props.chatId != null ? telegramChatCorrelationId(props.chatId) : undefined;
 }
 
 /**
@@ -32,36 +32,39 @@ export function listenerCorrelationId(props) {
  * @returns {React.ReactElement | null}
  */
 export function renderTelegramListener(eventName, props, schema) {
-    if (props.skipIf) {
-        return null;
-    }
-    const smithersContext = /** @type {any} */ (props.smithersContext) ?? SmithersContext;
-    const ctx = React.useContext(smithersContext);
-    const correlationId = listenerCorrelationId(props);
-    const waitNode = React.createElement(WaitForEvent, {
-        id: props.id,
-        key: props.key,
-        event: eventName,
-        correlationId,
-        output: /** @type {any} */ (schema),
-        outputSchema: /** @type {any} */ (schema),
-        timeoutMs: props.timeoutMs,
-        onTimeout: props.onTimeout,
-        async: props.async,
-        dependsOn: props.dependsOn,
-        label: props.label ?? `telegram:${eventName}`,
-        meta: props.meta,
-    });
-    if (!props.children) {
-        return waitNode;
-    }
-    if (!ctx) {
-        throw new SmithersError("CONTEXT_OUTSIDE_WORKFLOW", "Telegram listener children require a workflow context. Build the workflow with createSmithers().");
-    }
-    const row = ctx.outputMaybe(schema, { nodeId: props.id });
-    if (row === undefined) {
-        return waitNode;
-    }
-    const data = schema.parse(stripAutoColumns(row));
-    return React.createElement(React.Fragment, null, waitNode, props.children(data));
+  if (props.skipIf) {
+    return null;
+  }
+  const smithersContext = /** @type {any} */ (props.smithersContext) ?? SmithersContext;
+  const ctx = React.useContext(smithersContext);
+  const correlationId = listenerCorrelationId(props);
+  const waitNode = React.createElement(WaitForEvent, {
+    id: props.id,
+    key: props.key,
+    event: eventName,
+    correlationId,
+    output: /** @type {any} */ (schema),
+    outputSchema: /** @type {any} */ (schema),
+    timeoutMs: props.timeoutMs,
+    onTimeout: props.onTimeout,
+    async: props.async,
+    dependsOn: props.dependsOn,
+    label: props.label ?? `telegram:${eventName}`,
+    meta: props.meta,
+  });
+  if (!props.children) {
+    return waitNode;
+  }
+  if (!ctx) {
+    throw new SmithersError(
+      "CONTEXT_OUTSIDE_WORKFLOW",
+      "Telegram listener children require a workflow context. Build the workflow with createSmithers().",
+    );
+  }
+  const row = ctx.outputMaybe(schema, { nodeId: props.id });
+  if (row === undefined) {
+    return waitNode;
+  }
+  const data = schema.parse(stripAutoColumns(row));
+  return React.createElement(React.Fragment, null, waitNode, props.children(data));
 }

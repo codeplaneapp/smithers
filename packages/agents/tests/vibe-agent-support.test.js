@@ -132,12 +132,7 @@ process.stdout.write(JSON.stringify({ role: "assistant", content: "world" }) + "
       });
 
       expect(result.text).toBe("Hello world");
-      expect(events.map((event) => event.type)).toEqual([
-        "started",
-        "action",
-        "action",
-        "completed",
-      ]);
+      expect(events.map((event) => event.type)).toEqual(["started", "action", "action", "completed"]);
       expect(events[0]).toMatchObject({
         type: "started",
         engine: "vibe",

@@ -77,12 +77,20 @@ describeHeadlessRender("GraphView – terminal rendering (CI-safe, no gateway)",
   it("Enter fires onSelectNodeKey with the focused node's key (root, column-major first)", async () => {
     const selected: string[] = [];
     const { waitForVisualIdle, mockInput, flush, renderer } = await renderForTest(
-      <GraphView nodes={NODES} root={ROOT} isLoading={false} error={undefined} onSelectNodeKey={(k) => selected.push(k)} />,
+      <GraphView
+        nodes={NODES}
+        root={ROOT}
+        isLoading={false}
+        error={undefined}
+        onSelectNodeKey={(k) => selected.push(k)}
+      />,
       { width: 120, height: 30 },
     );
     await waitForVisualIdle();
 
-    act(() => { mockInput.pressEnter(); });
+    act(() => {
+      mockInput.pressEnter();
+    });
     await flush();
     await waitForVisualIdle();
     expect(selected).toEqual(["root"]);
@@ -93,15 +101,25 @@ describeHeadlessRender("GraphView – terminal rendering (CI-safe, no gateway)",
   it("j moves selection to the next node, then Enter fires it", async () => {
     const selected: string[] = [];
     const { waitForVisualIdle, mockInput, flush, renderer } = await renderForTest(
-      <GraphView nodes={NODES} root={ROOT} isLoading={false} error={undefined} onSelectNodeKey={(k) => selected.push(k)} />,
+      <GraphView
+        nodes={NODES}
+        root={ROOT}
+        isLoading={false}
+        error={undefined}
+        onSelectNodeKey={(k) => selected.push(k)}
+      />,
       { width: 120, height: 30 },
     );
     await waitForVisualIdle();
 
-    act(() => { mockInput.pressKey("j"); });
+    act(() => {
+      mockInput.pressKey("j");
+    });
     await flush();
     await waitForVisualIdle();
-    act(() => { mockInput.pressEnter(); });
+    act(() => {
+      mockInput.pressEnter();
+    });
     await flush();
     await waitForVisualIdle();
     expect(selected).toEqual(["alpha"]);

@@ -25,10 +25,7 @@ export type IntegrationRuntime = {
    * whose `reason` is `unknown-source` (404), `invalid-signature` (401), or
    * `decode-failed` (400).
    */
-  handleWebhook: (
-    sourceId: string,
-    request: WebhookRequest,
-  ) => Promise<{ accepted: number }>;
+  handleWebhook: (sourceId: string, request: WebhookRequest) => Promise<{ accepted: number }>;
   /**
    * Reject new ingress, drain accepted webhooks, stop other source fibers,
    * and dispose the runtime. Concurrent calls share one promise.

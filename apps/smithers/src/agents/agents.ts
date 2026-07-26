@@ -24,11 +24,7 @@ export type Agent = {
 };
 
 /** Codex 5.6 models in Smithers' default routing order. */
-export const CODEX_5_6_MODELS = [
-  "gpt-5.6-luna",
-  "gpt-5.6-terra",
-  "gpt-5.6-sol",
-] as const;
+export const CODEX_5_6_MODELS = ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"] as const;
 
 /** Luna is the default account model; workflows promote to Terra or Sol by role. */
 export const DEFAULT_CODEX_MODEL = CODEX_5_6_MODELS[0];
@@ -275,11 +271,7 @@ export function accountFromGateway(row: GatewayAccountRow): Account {
  * backend: unusable wins (→ unavailable); otherwise a logged-in CLI is a likely
  * subscription, then a raw key is api-key, then a bare binary is binary-only.
  */
-export function deriveStatus(account: {
-  usable: boolean;
-  hasAuth: boolean;
-  hasAPIKey: boolean;
-}): AgentStatus {
+export function deriveStatus(account: { usable: boolean; hasAuth: boolean; hasAPIKey: boolean }): AgentStatus {
   if (!account.usable) return "unavailable";
   if (account.hasAuth) return "likely-subscription";
   if (account.hasAPIKey) return "api-key";
@@ -466,7 +458,5 @@ export function addAccount(accounts: Account[], account: Account): Account[] {
  * are guarded — discovering a provider does not make it removable.
  */
 export function removeAccount(accounts: Account[], label: string): Account[] {
-  return accounts.filter(
-    (account) => !(account.label === label && account.registered),
-  );
+  return accounts.filter((account) => !(account.label === label && account.registered));
 }

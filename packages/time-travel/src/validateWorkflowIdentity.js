@@ -62,7 +62,7 @@ async function collectGraphEntries(workflowPath, visited = new Set()) {
   for (const specifier of importSpecifiers(source, resolvedPath)) {
     const importedPath = resolveImport(resolvedPath, specifier);
     if (!importedPath) throw new Error(`Unable to resolve ${specifier} from ${resolvedPath}.`);
-    entries.push(...await collectGraphEntries(importedPath, visited));
+    entries.push(...(await collectGraphEntries(importedPath, visited)));
   }
   return entries;
 }
@@ -75,9 +75,7 @@ function durabilityMetadata(configJson) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     return {
       version: typeof value.version === "number" ? value.version : 0,
-      entryWorkflowHash: typeof value.entryWorkflowHash === "string"
-        ? value.entryWorkflowHash
-        : null,
+      entryWorkflowHash: typeof value.entryWorkflowHash === "string" ? value.entryWorkflowHash : null,
     };
   } catch {
     return null;
@@ -103,8 +101,7 @@ export async function validateWorkflowIdentity(run) {
       if (!durability?.entryWorkflowHash) return false;
       const graphEntries = await collectGraphEntries(resolvedPath);
       const workflowHash = sha256(graphEntries.sort().join("|"));
-      return run.workflowHash === workflowHash
-        && durability.entryWorkflowHash === entryWorkflowHash;
+      return run.workflowHash === workflowHash && durability.entryWorkflowHash === entryWorkflowHash;
     }
     return run.workflowHash === entryWorkflowHash;
   } catch {

@@ -14,14 +14,11 @@ import { accessSync, constants as fsConstants } from "node:fs";
  * @param {{ platform?: NodeJS.Platform, accessFile?: typeof accessSync }} [options]
  * @returns {boolean}
  */
-export function isJjExecutable(binaryPath, {
-	platform = process.platform,
-	accessFile = accessSync,
-} = {}) {
-	try {
-		accessFile(binaryPath, platform === "win32" ? fsConstants.F_OK : fsConstants.X_OK);
-		return true;
-	} catch {
-		return false;
-	}
+export function isJjExecutable(binaryPath, { platform = process.platform, accessFile = accessSync } = {}) {
+  try {
+    accessFile(binaryPath, platform === "win32" ? fsConstants.F_OK : fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }

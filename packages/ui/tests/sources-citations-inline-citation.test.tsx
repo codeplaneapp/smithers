@@ -82,9 +82,7 @@ describe("InlineCitation with sources", () => {
   });
 
   test("multiple sources render a keyboard-accessible carousel", async () => {
-    await render(
-      <InlineCitation index={1} label="Two sources" sources={[alpha, beta]} defaultOpen />,
-    );
+    await render(<InlineCitation index={1} label="Two sources" sources={[alpha, beta]} defaultOpen />);
     const carousel = container!.querySelector('[data-slot="citation-carousel"]') as HTMLElement;
     expect(carousel).not.toBeNull();
     expect(carousel.querySelector(".sui-citation-card-title")?.textContent).toContain("Alpha report");
@@ -136,7 +134,13 @@ describe("InlineCitation with sources", () => {
   test("honors controlled open and still calls onOpenChange on toggle", async () => {
     const changes: boolean[] = [];
     await render(
-      <InlineCitation index={1} label="Alpha" sources={[alpha]} open={false} onOpenChange={(open) => changes.push(open)} />,
+      <InlineCitation
+        index={1}
+        label="Alpha"
+        sources={[alpha]}
+        open={false}
+        onOpenChange={(open) => changes.push(open)}
+      />,
     );
     const button = trigger();
     await act(async () => button.click());
@@ -190,7 +194,7 @@ describe("CitationCarousel", () => {
 describe("CitationQuote", () => {
   test("renders the quote with an optional cite slot", async () => {
     await render(
-      <CitationQuote quote="Exact words" >
+      <CitationQuote quote="Exact words">
         <cite>alpha.example</cite>
       </CitationQuote>,
     );

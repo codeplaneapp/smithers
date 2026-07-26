@@ -26,13 +26,15 @@ const MAX_PRIMITIVE_PREVIEW_CHARS = 80;
  * @returns {ZodIssueLike[]}
  */
 function extractIssues(error) {
-    if (error &&
-        typeof error === "object" &&
-        "issues" in error &&
-        Array.isArray(/** @type {{ issues?: unknown }} */ (error).issues)) {
-        return /** @type {ZodIssueLike[]} */ (/** @type {{ issues: unknown[] }} */ (error).issues);
-    }
-    return [];
+  if (
+    error &&
+    typeof error === "object" &&
+    "issues" in error &&
+    Array.isArray(/** @type {{ issues?: unknown }} */ (error).issues)
+  ) {
+    return /** @type {ZodIssueLike[]} */ (/** @type {{ issues: unknown[] }} */ (error).issues);
+  }
+  return [];
 }
 
 /**
@@ -44,27 +46,23 @@ function extractIssues(error) {
  * @returns {string}
  */
 function formatIssue(issue) {
-    const path = Array.isArray(issue.path) && issue.path.length > 0
-        ? issue.path.map(String).join(".")
-        : "(root)";
-    let detail = typeof issue.message === "string" && issue.message.length > 0
-        ? issue.message
-        : "";
-    const structuredParts = [];
-    if (issue.expected !== undefined && !detail.includes("expected")) {
-        structuredParts.push(`expected ${String(issue.expected)}`);
-    }
-    if (issue.received !== undefined && !detail.includes("received")) {
-        structuredParts.push(`received ${String(issue.received)}`);
-    }
-    if (structuredParts.length > 0) {
-        const structured = structuredParts.join(", ");
-        detail = detail ? `${detail} (${structured})` : structured;
-    }
-    if (!detail) {
-        detail = typeof issue.code === "string" ? issue.code : "invalid";
-    }
-    return `${path}: ${detail}`;
+  const path = Array.isArray(issue.path) && issue.path.length > 0 ? issue.path.map(String).join(".") : "(root)";
+  let detail = typeof issue.message === "string" && issue.message.length > 0 ? issue.message : "";
+  const structuredParts = [];
+  if (issue.expected !== undefined && !detail.includes("expected")) {
+    structuredParts.push(`expected ${String(issue.expected)}`);
+  }
+  if (issue.received !== undefined && !detail.includes("received")) {
+    structuredParts.push(`received ${String(issue.received)}`);
+  }
+  if (structuredParts.length > 0) {
+    const structured = structuredParts.join(", ");
+    detail = detail ? `${detail} (${structured})` : structured;
+  }
+  if (!detail) {
+    detail = typeof issue.code === "string" ? issue.code : "invalid";
+  }
+  return `${path}: ${detail}`;
 }
 
 /**
@@ -75,45 +73,44 @@ function formatIssue(issue) {
  * @returns {{ receivedKeys: string[] | null; receivedDescription: string }}
  */
 export function describeReceivedOutput(received) {
-    if (received === null) {
-        return { receivedKeys: null, receivedDescription: "received value is null" };
-    }
-    if (received === undefined) {
-        return { receivedKeys: null, receivedDescription: "received value is undefined" };
-    }
-    if (Array.isArray(received)) {
-        return {
-            receivedKeys: null,
-            receivedDescription: `received value is an array of ${received.length} element(s), not an object`,
-        };
-    }
-    if (typeof received === "object") {
-        const keys = Object.keys(received);
-        if (keys.length === 0) {
-            return { receivedKeys: keys, receivedDescription: "received value is an object with no top-level keys" };
-        }
-        const shown = keys.slice(0, MAX_SUMMARY_KEYS).join(", ");
-        const overflow = keys.length > MAX_SUMMARY_KEYS ? `, +${keys.length - MAX_SUMMARY_KEYS} more` : "";
-        return {
-            receivedKeys: keys,
-            receivedDescription: `received value top-level keys: [${shown}${overflow}]`,
-        };
-    }
-    /** @type {string | undefined} */
-    let preview;
-    try {
-        preview = JSON.stringify(received);
-    }
-    catch {
-        preview = undefined;
-    }
-    if (typeof preview === "string" && preview.length > MAX_PRIMITIVE_PREVIEW_CHARS) {
-        preview = `${preview.slice(0, MAX_PRIMITIVE_PREVIEW_CHARS)}…`;
-    }
+  if (received === null) {
+    return { receivedKeys: null, receivedDescription: "received value is null" };
+  }
+  if (received === undefined) {
+    return { receivedKeys: null, receivedDescription: "received value is undefined" };
+  }
+  if (Array.isArray(received)) {
     return {
-        receivedKeys: null,
-        receivedDescription: `received value is a ${typeof received}${preview !== undefined ? ` (${preview})` : ""}, not an object`,
+      receivedKeys: null,
+      receivedDescription: `received value is an array of ${received.length} element(s), not an object`,
     };
+  }
+  if (typeof received === "object") {
+    const keys = Object.keys(received);
+    if (keys.length === 0) {
+      return { receivedKeys: keys, receivedDescription: "received value is an object with no top-level keys" };
+    }
+    const shown = keys.slice(0, MAX_SUMMARY_KEYS).join(", ");
+    const overflow = keys.length > MAX_SUMMARY_KEYS ? `, +${keys.length - MAX_SUMMARY_KEYS} more` : "";
+    return {
+      receivedKeys: keys,
+      receivedDescription: `received value top-level keys: [${shown}${overflow}]`,
+    };
+  }
+  /** @type {string | undefined} */
+  let preview;
+  try {
+    preview = JSON.stringify(received);
+  } catch {
+    preview = undefined;
+  }
+  if (typeof preview === "string" && preview.length > MAX_PRIMITIVE_PREVIEW_CHARS) {
+    preview = `${preview.slice(0, MAX_PRIMITIVE_PREVIEW_CHARS)}…`;
+  }
+  return {
+    receivedKeys: null,
+    receivedDescription: `received value is a ${typeof received}${preview !== undefined ? ` (${preview})` : ""}, not an object`,
+  };
 }
 
 /**
@@ -126,24 +123,19 @@ export function describeReceivedOutput(received) {
  * @returns {{ summary: string; receivedKeys: string[] | null; receivedDescription: string }}
  */
 export function buildOutputValidationDiagnostics(error, received) {
-    const { receivedKeys, receivedDescription } = describeReceivedOutput(received);
-    const issues = extractIssues(error);
-    let issuesPart;
-    if (issues.length > 0) {
-        const lines = issues.slice(0, MAX_SUMMARY_ISSUES).map(formatIssue);
-        const overflow = issues.length > MAX_SUMMARY_ISSUES
-            ? `; +${issues.length - MAX_SUMMARY_ISSUES} more issue(s)`
-            : "";
-        issuesPart = `${lines.join("; ")}${overflow}`;
-    }
-    else {
-        issuesPart = error instanceof Error && error.message
-            ? error.message.slice(0, 200)
-            : "schema validation failed";
-    }
-    return {
-        summary: `${issuesPart}; ${receivedDescription}`,
-        receivedKeys,
-        receivedDescription,
-    };
+  const { receivedKeys, receivedDescription } = describeReceivedOutput(received);
+  const issues = extractIssues(error);
+  let issuesPart;
+  if (issues.length > 0) {
+    const lines = issues.slice(0, MAX_SUMMARY_ISSUES).map(formatIssue);
+    const overflow = issues.length > MAX_SUMMARY_ISSUES ? `; +${issues.length - MAX_SUMMARY_ISSUES} more issue(s)` : "";
+    issuesPart = `${lines.join("; ")}${overflow}`;
+  } else {
+    issuesPart = error instanceof Error && error.message ? error.message.slice(0, 200) : "schema validation failed";
+  }
+  return {
+    summary: `${issuesPart}; ${receivedDescription}`,
+    receivedKeys,
+    receivedDescription,
+  };
 }

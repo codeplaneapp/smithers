@@ -37,46 +37,16 @@ function stringAt(row: Record<string, unknown>, camel: string, snake: string): s
   return typeof value === "string" ? value : undefined;
 }
 
-export function mapSmithersElectricRow(
-  collection: "runs",
-  row: Record<string, unknown>,
-): GatewayRunSummaryRow;
-export function mapSmithersElectricRow(
-  collection: "run",
-  row: Record<string, unknown>,
-): GatewayRunRow;
-export function mapSmithersElectricRow(
-  collection: "events",
-  row: Record<string, unknown>,
-): GatewayRunEventRow;
-export function mapSmithersElectricRow(
-  collection: "approvals",
-  row: Record<string, unknown>,
-): GatewayApprovalRow;
-export function mapSmithersElectricRow(
-  collection: "docs",
-  row: Record<string, unknown>,
-): GatewayDocRow;
-export function mapSmithersElectricRow(
-  collection: "scores",
-  row: Record<string, unknown>,
-): GatewayScoreRow;
-export function mapSmithersElectricRow(
-  collection: "tickets",
-  row: Record<string, unknown>,
-): GatewayTicketRow;
-export function mapSmithersElectricRow(
-  collection: "memoryFacts",
-  row: Record<string, unknown>,
-): GatewayMemoryFactRow;
-export function mapSmithersElectricRow(
-  collection: "crons",
-  row: Record<string, unknown>,
-): GatewayCronRow;
-export function mapSmithersElectricRow(
-  collection: "nodes",
-  row: Record<string, unknown>,
-): GatewayRunNode;
+export function mapSmithersElectricRow(collection: "runs", row: Record<string, unknown>): GatewayRunSummaryRow;
+export function mapSmithersElectricRow(collection: "run", row: Record<string, unknown>): GatewayRunRow;
+export function mapSmithersElectricRow(collection: "events", row: Record<string, unknown>): GatewayRunEventRow;
+export function mapSmithersElectricRow(collection: "approvals", row: Record<string, unknown>): GatewayApprovalRow;
+export function mapSmithersElectricRow(collection: "docs", row: Record<string, unknown>): GatewayDocRow;
+export function mapSmithersElectricRow(collection: "scores", row: Record<string, unknown>): GatewayScoreRow;
+export function mapSmithersElectricRow(collection: "tickets", row: Record<string, unknown>): GatewayTicketRow;
+export function mapSmithersElectricRow(collection: "memoryFacts", row: Record<string, unknown>): GatewayMemoryFactRow;
+export function mapSmithersElectricRow(collection: "crons", row: Record<string, unknown>): GatewayCronRow;
+export function mapSmithersElectricRow(collection: "nodes", row: Record<string, unknown>): GatewayRunNode;
 export function mapSmithersElectricRow(collection: string, row: Record<string, unknown>) {
   switch (collection) {
     case "runs":

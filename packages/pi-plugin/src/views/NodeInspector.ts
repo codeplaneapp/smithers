@@ -57,8 +57,7 @@ function toolCalls(node: DevToolsNode) {
         return undefined;
       }
       const record = item as Record<string, unknown>;
-      const name =
-        record.name ?? record.tool ?? record.toolName ?? record.function ?? `tool-call-${index + 1}`;
+      const name = record.name ?? record.tool ?? record.toolName ?? record.function ?? `tool-call-${index + 1}`;
       const status = record.status ?? record.state;
       const effect = record.sideEffect ?? record.side_effect ?? record.effect;
       return [name, status, effect].filter((part) => typeof part === "string" && part.length > 0).join(" ");

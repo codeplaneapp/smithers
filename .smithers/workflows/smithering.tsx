@@ -91,13 +91,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { UI } from "smithers-orchestrator";
 import { $ } from "bun";
-import {
-  ClaudeCodeAgent,
-  HumanTask,
-  ScanFixVerify,
-  createSmithers,
-  type AgentLike,
-} from "smithers-orchestrator";
+import { ClaudeCodeAgent, HumanTask, ScanFixVerify, createSmithers, type AgentLike } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { codexFirst } from "../lib/codexAccounts";
 
@@ -166,66 +160,84 @@ const claudeImplementationFallback = new ClaudeCodeAgent({
 });
 
 // Sol owns orchestration-grade judgment and all review work.
-const sol = codexFirst({
-  model: SOL_MODEL,
-  config: { model_reasoning_effort: "xhigh" },
-  sandbox: "workspace-write",
-  yolo: false,
-  skipGitRepoCheck: true,
-  cwd: process.cwd(),
-  timeoutMs: 30 * 60_000,
-}, [claudeSmartFallback]);
-const solReviewer = codexFirst({
-  model: SOL_MODEL,
-  config: { model_reasoning_effort: "xhigh" },
-  sandbox: "read-only",
-  yolo: false,
-  skipGitRepoCheck: true,
-  cwd: process.cwd(),
-  timeoutMs: 30 * 60_000,
-}, [claudeSmartFallback]);
+const sol = codexFirst(
+  {
+    model: SOL_MODEL,
+    config: { model_reasoning_effort: "xhigh" },
+    sandbox: "workspace-write",
+    yolo: false,
+    skipGitRepoCheck: true,
+    cwd: process.cwd(),
+    timeoutMs: 30 * 60_000,
+  },
+  [claudeSmartFallback],
+);
+const solReviewer = codexFirst(
+  {
+    model: SOL_MODEL,
+    config: { model_reasoning_effort: "xhigh" },
+    sandbox: "read-only",
+    yolo: false,
+    skipGitRepoCheck: true,
+    cwd: process.cwd(),
+    timeoutMs: 30 * 60_000,
+  },
+  [claudeSmartFallback],
+);
 
 // Luna owns every implementation path, including the complex direct tier.
-const lunaComplex = codexFirst({
-  model: LUNA_MODEL,
-  config: { model_reasoning_effort: "xhigh" },
-  sandbox: "workspace-write",
-  yolo: false,
-  skipGitRepoCheck: true,
-  cwd: process.cwd(),
-  timeoutMs: 90 * 60_000,
-}, [claudeImplementationFallback]);
-const lunaBuilder = codexFirst({
-  model: LUNA_MODEL,
-  config: { model_reasoning_effort: "high" },
-  sandbox: "workspace-write",
-  yolo: false,
-  skipGitRepoCheck: true,
-  cwd: process.cwd(),
-  timeoutMs: 60 * 60_000,
-}, [claudeImplementationFallback]);
+const lunaComplex = codexFirst(
+  {
+    model: LUNA_MODEL,
+    config: { model_reasoning_effort: "xhigh" },
+    sandbox: "workspace-write",
+    yolo: false,
+    skipGitRepoCheck: true,
+    cwd: process.cwd(),
+    timeoutMs: 90 * 60_000,
+  },
+  [claudeImplementationFallback],
+);
+const lunaBuilder = codexFirst(
+  {
+    model: LUNA_MODEL,
+    config: { model_reasoning_effort: "high" },
+    sandbox: "workspace-write",
+    yolo: false,
+    skipGitRepoCheck: true,
+    cwd: process.cwd(),
+    timeoutMs: 60 * 60_000,
+  },
+  [claudeImplementationFallback],
+);
 
 // Terra runs routine verification and may execute tests during polish.
-const terraVerifier = codexFirst({
-  model: TERRA_MODEL,
-  config: { model_reasoning_effort: "high" },
-  sandbox: "workspace-write",
-  yolo: false,
-  skipGitRepoCheck: true,
-  cwd: process.cwd(),
-  timeoutMs: 30 * 60_000,
-}, [claudeImplementationFallback]);
+const terraVerifier = codexFirst(
+  {
+    model: TERRA_MODEL,
+    config: { model_reasoning_effort: "high" },
+    sandbox: "workspace-write",
+    yolo: false,
+    skipGitRepoCheck: true,
+    cwd: process.cwd(),
+    timeoutMs: 30 * 60_000,
+  },
+  [claudeImplementationFallback],
+);
 
 // Luna also owns the cheap/research tier.
-const luna = codexFirst({
-  model: LUNA_MODEL,
-  config: { model_reasoning_effort: "medium" },
-  sandbox: "workspace-write",
-  yolo: false,
-  skipGitRepoCheck: true,
-  cwd: process.cwd(),
-  timeoutMs: 20 * 60_000,
-}, [claudeImplementationFallback]);
+const luna = codexFirst(
+  {
+    model: LUNA_MODEL,
+    config: { model_reasoning_effort: "medium" },
+    sandbox: "workspace-write",
+    yolo: false,
+    skipGitRepoCheck: true,
+    cwd: process.cwd(),
+    timeoutMs: 20 * 60_000,
+  },
+  [claudeImplementationFallback],
+);
 
 // ScanFixVerify's published prop type still names a single AgentLike for its
 // scan/verify seats, though it forwards these values directly to Task (which
@@ -240,13 +252,9 @@ async function runPreflight() {
   const jj = await $`jj --version`.nothrow().quiet();
   const git = await $`git --version`.nothrow().quiet();
   const vcs = jj.exitCode === 0 ? "jj" : git.exitCode === 0 ? "git" : "none";
-  if (vcs === "git")
-    notes.push(
-      "jj not found: attempt-level revert/time-travel will be unavailable (git-only mode).",
-    );
+  if (vcs === "git") notes.push("jj not found: attempt-level revert/time-travel will be unavailable (git-only mode).");
   const doctor = await $`bunx smithers-orchestrator workflow doctor`.nothrow().quiet();
-  if (doctor.exitCode !== 0)
-    notes.push(`workflow doctor failed: ${(doctor.stderr?.toString() ?? "").slice(0, 1500)}`);
+  if (doctor.exitCode !== 0) notes.push(`workflow doctor failed: ${(doctor.stderr?.toString() ?? "").slice(0, 1500)}`);
   await $`mkdir -p ${ART}/research ${ART}/mockups ${ART}/probes ${ART}/reports ${ART}/decisions ${PLANNING}`
     .nothrow()
     .quiet();
@@ -269,9 +277,10 @@ async function checkImplGraph(passNote: string, failNote: string) {
 // A crash-retry of the same attempt can hit RUN_ALREADY_EXISTS for a child it already
 // created; falling back to resume --force picks that child back up instead of dead-ending.
 async function runSmokeAttempt(smokeRunId: string) {
-  let res = await $`bunx smithers-orchestrator up ${IMPL_WORKFLOW} --run-id ${smokeRunId} --input ${JSON.stringify({ smoke: true })}`
-    .nothrow()
-    .quiet();
+  let res =
+    await $`bunx smithers-orchestrator up ${IMPL_WORKFLOW} --run-id ${smokeRunId} --input ${JSON.stringify({ smoke: true })}`
+      .nothrow()
+      .quiet();
   let tail = `${res.stderr?.toString() ?? ""}\n${res.stdout?.toString() ?? ""}`.trim();
   if (res.exitCode !== 0 && /ALREADY[_ ]?EXISTS/i.test(tail)) {
     res = await $`bunx smithers-orchestrator up ${IMPL_WORKFLOW} --run-id ${smokeRunId} --resume true --force`
@@ -291,9 +300,10 @@ async function runSmokeAttempt(smokeRunId: string) {
 }
 
 async function launchImplementationRun(implRunId: string) {
-  let res = await $`bunx smithers-orchestrator up ${IMPL_WORKFLOW} --run-id ${implRunId} --input ${JSON.stringify({ smoke: false })} --detach`
-    .nothrow()
-    .quiet();
+  let res =
+    await $`bunx smithers-orchestrator up ${IMPL_WORKFLOW} --run-id ${implRunId} --input ${JSON.stringify({ smoke: false })} --detach`
+      .nothrow()
+      .quiet();
   let tail = `${res.stdout?.toString() ?? ""}\n${res.stderr?.toString() ?? ""}`.trim();
   if (res.exitCode !== 0 && /ALREADY[_ ]?EXISTS/i.test(tail)) {
     res = await $`bunx smithers-orchestrator up ${IMPL_WORKFLOW} --run-id ${implRunId} --resume true --force --detach`
@@ -309,9 +319,7 @@ async function launchImplementationRun(implRunId: string) {
 }
 
 async function pollImplementationRun(implRunId: string) {
-  const res = await $`bunx smithers-orchestrator inspect ${implRunId} --format json --full-output`
-    .nothrow()
-    .quiet();
+  const res = await $`bunx smithers-orchestrator inspect ${implRunId} --format json --full-output`.nothrow().quiet();
   const raw = res.stdout?.toString() ?? "";
   let status = "unknown";
   let runState = "unknown";
@@ -321,19 +329,21 @@ async function pollImplementationRun(implRunId: string) {
     // runState is the derived liveness view ("stale"/"orphaned" when the owner's
     // heartbeat expired) — inspect emits NO raw heartbeat field.
     runState = j?.runState?.state ?? status;
-  } catch { /* malformed inspect output remains unknown */ }
+  } catch {
+    /* malformed inspect output remains unknown */
+  }
   const terminal = ["finished", "failed", "cancelled", "continued"].includes(status);
   const stale = runState === "stale" || runState === "orphaned";
   let resumed = false;
   if (stale) {
     // supervise-in-miniature: the owner process died; pick the run back up.
-    const r = await $`bunx smithers-orchestrator up ${IMPL_WORKFLOW} --run-id ${implRunId} --resume true --force --detach`
-      .nothrow()
-      .quiet();
+    const r =
+      await $`bunx smithers-orchestrator up ${IMPL_WORKFLOW} --run-id ${implRunId} --resume true --force --detach`
+        .nothrow()
+        .quiet();
     resumed = r.exitCode === 0;
   }
-  const needsAttention =
-    (stale && !resumed) || status === "waiting-approval" || status === "failed";
+  const needsAttention = (stale && !resumed) || status === "waiting-approval" || status === "failed";
   return { status, terminal, needsAttention, resumed, detail: raw.slice(0, 4000) };
 }
 
@@ -359,9 +369,7 @@ function parseFirstJsonObject(raw: string): Record<string, any> {
 }
 
 async function gatherReportInputs(implRunId: string) {
-  const run = await $`bunx smithers-orchestrator inspect ${implRunId} --format json`
-    .nothrow()
-    .quiet();
+  const run = await $`bunx smithers-orchestrator inspect ${implRunId} --format json`.nothrow().quiet();
   const files = await $`find ${ART} ${PLANNING} -type f | sort`.nothrow().quiet();
   const fileList = (files.stdout?.toString() ?? "").split("\n").filter(Boolean);
   return {
@@ -422,9 +430,7 @@ const preflightSchema = z.looseObject({
 const intakeSchema = z.looseObject({
   summary: z.string().default(""),
   classification: z.enum(["greenfield", "existing-codebase"]).default("greenfield"),
-  productType: z
-    .enum(["webapp", "mobile-app", "library", "api", "cli", "service", "other"])
-    .default("other"),
+  productType: z.enum(["webapp", "mobile-app", "library", "api", "cli", "service", "other"]).default("other"),
   targetRepo: z.string().default("."),
   constraints: z.array(z.string()).default([]),
   unknowns: z.array(z.string()).default([]),
@@ -471,9 +477,7 @@ const questionsSchema = z.looseObject({
 });
 
 const humanAnswersSchema = z.looseObject({
-  answers: z
-    .array(z.looseObject({ id: z.string().default("q"), answer: z.string().default("") }))
-    .default([]),
+  answers: z.array(z.looseObject({ id: z.string().default("q"), answer: z.string().default("") })).default([]),
   additionalContext: z.string().nullable().default(null),
   autoAnswered: z.boolean().default(false),
 });
@@ -573,7 +577,16 @@ const backpressureSchema = z.looseObject({
         criterionId: z.string().default(""),
         criterion: z.string().default(""),
         verificationMethod: z
-          .enum(["schema", "unit_test", "integration_test", "e2e_test", "eval", "agent_review", "approval", "manual_check"])
+          .enum([
+            "schema",
+            "unit_test",
+            "integration_test",
+            "e2e_test",
+            "eval",
+            "agent_review",
+            "approval",
+            "manual_check",
+          ])
           .default("unit_test"),
         gateType: z.enum(["blocking", "warning", "informational"]).default("blocking"),
         checkedBy: z.string().default(""),
@@ -660,9 +673,7 @@ const verifySchema = z.looseObject({
 
 const wfReviewSchema = z.looseObject({
   approved: z.boolean().default(false),
-  blockingIssues: z
-    .array(z.looseObject({ title: z.string().default(""), detail: z.string().default("") }))
-    .default([]),
+  blockingIssues: z.array(z.looseObject({ title: z.string().default(""), detail: z.string().default("") })).default([]),
   advisories: z.array(z.string()).default([]),
 });
 
@@ -794,48 +805,47 @@ const outputSchema = z.looseObject({
   implRunId: z.string().nullable().default(null), // child build run to inspect
 });
 
-const { Workflow, Task, Sequence, Parallel, Branch, Loop, Approval, Timer, smithers, outputs } =
-  createSmithers({
-    input: inputSchema,
-    setup: setupSchema,
-    route: routeSchema,
-    directResult: directResultSchema,
-    preflight: preflightSchema,
-    intake: intakeSchema,
-    brainstorm: brainstormSchema,
-    research: researchSchema,
-    questions: questionsSchema,
-    humanAnswers: humanAnswersSchema,
-    prd: prdSchema,
-    gate: gateSchema,
-    docReview: docReviewSchema,
-    designDoc: designDocSchema,
-    engDoc: engDocSchema,
-    backpressure: backpressureSchema,
-    probe: probeSchema,
-    probeSynthesis: probeSynthesisSchema,
-    tickets: ticketsSchema,
-    poc: pocSchema,
-    orchDesign: orchDesignSchema,
-    scaffold: scaffoldSchema,
-    verify: verifySchema,
-    wfReview: wfReviewSchema,
-    smoke: smokeSchema,
-    launch: launchSchema,
-    monitorPoll: monitorPollSchema,
-    monitorReport: monitorReportSchema,
-    monitorTriage: monitorTriageSchema,
-    reviewFinding: reviewFindingSchema,
-    reviewSynthesis: reviewSynthesisSchema,
-    polishScan: polishScanSchema,
-    polishFix: polishFixSchema,
-    polishVerify: polishVerifySchema,
-    polishReport: polishReportSchema,
-    reportGather: reportGatherSchema,
-    finalReport: finalReportSchema,
-    delivery: deliverySchema,
-    output: outputSchema,
-  });
+const { Workflow, Task, Sequence, Parallel, Branch, Loop, Approval, Timer, smithers, outputs } = createSmithers({
+  input: inputSchema,
+  setup: setupSchema,
+  route: routeSchema,
+  directResult: directResultSchema,
+  preflight: preflightSchema,
+  intake: intakeSchema,
+  brainstorm: brainstormSchema,
+  research: researchSchema,
+  questions: questionsSchema,
+  humanAnswers: humanAnswersSchema,
+  prd: prdSchema,
+  gate: gateSchema,
+  docReview: docReviewSchema,
+  designDoc: designDocSchema,
+  engDoc: engDocSchema,
+  backpressure: backpressureSchema,
+  probe: probeSchema,
+  probeSynthesis: probeSynthesisSchema,
+  tickets: ticketsSchema,
+  poc: pocSchema,
+  orchDesign: orchDesignSchema,
+  scaffold: scaffoldSchema,
+  verify: verifySchema,
+  wfReview: wfReviewSchema,
+  smoke: smokeSchema,
+  launch: launchSchema,
+  monitorPoll: monitorPollSchema,
+  monitorReport: monitorReportSchema,
+  monitorTriage: monitorTriageSchema,
+  reviewFinding: reviewFindingSchema,
+  reviewSynthesis: reviewSynthesisSchema,
+  polishScan: polishScanSchema,
+  polishFix: polishFixSchema,
+  polishVerify: polishVerifySchema,
+  polishReport: polishReportSchema,
+  reportGather: reportGatherSchema,
+  finalReport: finalReportSchema,
+  delivery: deliverySchema,
+  output: outputSchema,
+});
 
 // ─── Workflow ────────────────────────────────────────────────────────────────
 export default smithers((ctx) => {
@@ -845,8 +855,7 @@ export default smithers((ctx) => {
   const implRunId = `impl-${ctx.runId}`;
 
   // ── Resolved configuration (the setup step is the single source of truth) ──
-  const hasProvidedPrompt =
-    typeof input.prompt === "string" && input.prompt.trim().length > 0;
+  const hasProvidedPrompt = typeof input.prompt === "string" && input.prompt.trim().length > 0;
   const cfg = (ctx as any).outputMaybe("setup", { nodeId: "setup", iteration: 0 });
   const review = cfg?.review ?? true;
   const wantPoc = cfg?.poc ?? false;
@@ -858,8 +867,7 @@ export default smithers((ctx) => {
   // ── Routing: forced via setup.route, otherwise classified by Sol ──
   const routeOut = (ctx as any).outputMaybe("route", { nodeId: "route", iteration: 0 });
   const forcedRoute = cfg?.route && cfg.route !== "auto" ? cfg.route : null;
-  const routeTier: "trivial" | "complex" | "full-build" | null =
-    forcedRoute ?? routeOut?.tier ?? null;
+  const routeTier: "trivial" | "complex" | "full-build" | null = forcedRoute ?? routeOut?.tier ?? null;
   const directTrivial = (ctx as any).outputMaybe("directResult", { nodeId: "direct:trivial", iteration: 0 });
   const directComplex = (ctx as any).outputMaybe("directResult", { nodeId: "direct:complex", iteration: 0 });
   const directResult = directTrivial ?? directComplex;
@@ -872,8 +880,7 @@ export default smithers((ctx) => {
   const questions = (ctx as any).outputMaybe("questions", { nodeId: "questions", iteration: 0 });
   const prd = (ctx as any).outputMaybe("prd", { nodeId: "prd", iteration: 0 });
 
-  const gateRow = (nodeId: string) =>
-    (ctx as any).outputMaybe("gate", { nodeId, iteration: 0 });
+  const gateRow = (nodeId: string) => (ctx as any).outputMaybe("gate", { nodeId, iteration: 0 });
   const gatePassed = (nodeId: string) => !review || gateRow(nodeId)?.approved === true;
   const gateDenied = (nodeId: string) => review && gateRow(nodeId)?.approved === false;
 
@@ -882,8 +889,7 @@ export default smithers((ctx) => {
   const designArt = (ctx as any).outputMaybe("research", { nodeId: "research:design-art", iteration: 0 });
   const designReviewLatest = (ctx as any).latest("docReview", "design:review");
   const designLoopDone =
-    designReviewLatest?.approved === true ||
-    (ctx as any).iterationCount("docReview", "design:review") >= 3;
+    designReviewLatest?.approved === true || (ctx as any).iterationCount("docReview", "design:review") >= 3;
   const designFinal = (ctx as any).outputMaybe("designDoc", { nodeId: "design:final", iteration: 0 });
 
   const engDepsResearch = (ctx as any).outputMaybe("research", { nodeId: "research:eng-deps", iteration: 0 });
@@ -896,15 +902,12 @@ export default smithers((ctx) => {
 
   const backpressure = (ctx as any).outputMaybe("backpressure", { nodeId: "backpressure", iteration: 0 });
   const probesNeeded: any[] = engDoc?.assumptionsToProbe ?? [];
-  const probeRow = (id: string) =>
-    (ctx as any).outputMaybe("probe", { nodeId: `probe:${id}`, iteration: 0 });
+  const probeRow = (id: string) => (ctx as any).outputMaybe("probe", { nodeId: `probe:${id}`, iteration: 0 });
   const allProbesDone = !!backpressure && probesNeeded.every((a: any) => probeRow(a.id));
   const probeSynth = (ctx as any).outputMaybe("probeSynthesis", { nodeId: "probe:synthesis", iteration: 0 });
   const probeBlocked = probeSynth?.blockingFailure === true;
   const probesCleared =
-    !!backpressure &&
-    (probesNeeded.length === 0 ||
-      (!!probeSynth && (!probeBlocked || gatePassed("gate:probes"))));
+    !!backpressure && (probesNeeded.length === 0 || (!!probeSynth && (!probeBlocked || gatePassed("gate:probes"))));
 
   const tickets = (ctx as any).outputMaybe("tickets", { nodeId: "tickets", iteration: 0 });
   const poc = (ctx as any).outputMaybe("poc", { nodeId: "poc", iteration: 0 });
@@ -921,8 +924,7 @@ export default smithers((ctx) => {
   const reverify = (ctx as any).outputMaybe("verify", { nodeId: "wf:reverify", iteration: 0 });
   const wfReady =
     verifyPassed &&
-    (wfReview?.approved === true ||
-      (wfReview?.approved === false && !!wfFix && reverify?.passed === true));
+    (wfReview?.approved === true || (wfReview?.approved === false && !!wfFix && reverify?.passed === true));
   const wfDeadEnd =
     (!!scaffold && !verifyPassed && verifyAttempts >= 3) ||
     (wfReview?.approved === false && !!wfFix && reverify?.passed === false);
@@ -934,9 +936,7 @@ export default smithers((ctx) => {
 
   const launchApproved = wfReady && smokeCleared && gatePassed("gate:launch");
   const launch = (ctx as any).outputMaybe("launch", { nodeId: "launch", iteration: 0 });
-  const implChildRunId = typeof launch?.childRunId === "string" && launch.childRunId.trim()
-    ? launch.childRunId
-    : null;
+  const implChildRunId = typeof launch?.childRunId === "string" && launch.childRunId.trim() ? launch.childRunId : null;
   const launched = launch?.launched === true && implChildRunId !== null;
   const launchFailed = Boolean(launch) && !launched;
 
@@ -948,8 +948,7 @@ export default smithers((ctx) => {
   const monitorExhausted = launched && !buildEnded && monitorPolls >= monitorMaxIterations;
   const monitorStopped = buildEnded || lastTriage?.escalate === true || monitorExhausted;
 
-  const reviewReady =
-    launched && monitorStopped && (buildFinished || gatePassed("gate:incomplete"));
+  const reviewReady = launched && monitorStopped && (buildFinished || gatePassed("gate:incomplete"));
   const panelFindings = [
     (ctx as any).outputMaybe("reviewFinding", { nodeId: "review:fable", iteration: 0 }),
     (ctx as any).outputMaybe("reviewFinding", { nodeId: "review:codex", iteration: 0 }),
@@ -957,9 +956,7 @@ export default smithers((ctx) => {
   ].filter(Boolean);
   const reviewSynth = (ctx as any).outputMaybe("reviewSynthesis", { nodeId: "review:synthesis", iteration: 0 });
   const mustFix: any[] = reviewSynth?.mustFix ?? [];
-  const polishDone =
-    !!reviewSynth &&
-    (mustFix.length === 0 || ((ctx as any).outputs("polishReport") ?? []).length > 0);
+  const polishDone = !!reviewSynth && (mustFix.length === 0 || ((ctx as any).outputs("polishReport") ?? []).length > 0);
 
   const finalReport = (ctx as any).outputMaybe("finalReport", { nodeId: "report:final", iteration: 0 });
   const deliveryApproved = !!finalReport && gatePassed("gate:delivery");
@@ -1088,9 +1085,7 @@ export default smithers((ctx) => {
             <Task id="research:domain" output={outputs.research} agent={luna} retries={2}>
               <ResearchDomainPrompt
                 problemStatement={brainstorm.problemStatement}
-                openQuestions={JSON.stringify(
-                  (brainstorm.openQuestions ?? []).map((q: any) => q.question),
-                )}
+                openQuestions={JSON.stringify((brainstorm.openQuestions ?? []).map((q: any) => q.question))}
               />
               <Rules />
             </Task>
@@ -1190,7 +1185,12 @@ export default smithers((ctx) => {
         ) : null}
 
         {prdApproved && designArt ? (
-          <Loop id="design:loop" until={designReviewLatest?.approved === true} maxIterations={3} onMaxReached="return-last">
+          <Loop
+            id="design:loop"
+            until={designReviewLatest?.approved === true}
+            maxIterations={3}
+            onMaxReached="return-last"
+          >
             <Sequence>
               <Task id="design:draft" output={outputs.designDoc} agent={sol} heartbeatTimeoutMs={900_000}>
                 <DesignDraftPrompt
@@ -1362,11 +1362,7 @@ export default smithers((ctx) => {
         {/* ── 9. Orchestration design: decisions recorded, then the workflow authored ── */}
         {tickets && pocDone ? (
           <Task id="orch:design" output={outputs.orchDesign} agent={sol}>
-            <OrchDesignPrompt
-              targetRepo={targetRepo}
-              baseBranch={baseBranch}
-              pocSummary={poc?.summary ?? null}
-            />
+            <OrchDesignPrompt targetRepo={targetRepo} baseBranch={baseBranch} pocSummary={poc?.summary ?? null} />
             <DecisionDocs />
             <Rules />
           </Task>
@@ -1573,7 +1569,14 @@ export default smithers((ctx) => {
         {/* ── 11. Review panel: three lenses, cross-model, then orchestrator synthesis ── */}
         {reviewReady ? (
           <Parallel maxConcurrency={3}>
-            <Task id="review:fable" output={outputs.reviewFinding} agent={solReviewer} continueOnFail retries={1} heartbeatTimeoutMs={900_000}>
+            <Task
+              id="review:fable"
+              output={outputs.reviewFinding}
+              agent={solReviewer}
+              continueOnFail
+              retries={1}
+              heartbeatTimeoutMs={900_000}
+            >
               <ReviewFablePrompt targetRepo={targetRepo} />
               <Rules />
             </Task>

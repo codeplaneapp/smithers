@@ -35,9 +35,7 @@ describe("resolveForkSessionMessages", () => {
       { role: "user", content: "hi" },
       { role: "assistant", content: "ANSWER:a" },
     ];
-    const attempts = [
-      attempt({ nodeId: "a", finishedAtMs: 100, metaJson: metaWithConversation(messages) }),
-    ];
+    const attempts = [attempt({ nodeId: "a", finishedAtMs: 100, metaJson: metaWithConversation(messages) })];
     const result = resolveForkSessionMessages(attempts, "a", "b");
     expect(result).toEqual(messages);
     // Mutating the result must not affect the source array.
@@ -77,9 +75,7 @@ describe("resolveForkSessionMessages", () => {
   });
 
   test("throws TASK_FORK_SOURCE_NOT_COMPLETE when no finished attempt exists", () => {
-    const attempts = [
-      attempt({ nodeId: "a", state: "in-progress", metaJson: null }),
-    ];
+    const attempts = [attempt({ nodeId: "a", state: "in-progress", metaJson: null })];
     let error;
     try {
       resolveForkSessionMessages(attempts, "a", "b");

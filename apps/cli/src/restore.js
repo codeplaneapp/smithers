@@ -19,7 +19,7 @@ const KILL_GRACE_MS = 5_000;
 
 /** @param {unknown} id */
 function short(id) {
-    return id ? String(id).slice(0, 12) : "";
+  return id ? String(id).slice(0, 12) : "";
 }
 
 /**
@@ -38,63 +38,80 @@ function short(id) {
  * @returns {Promise<{ success: boolean, error?: string }>}
  */
 export function defaultRevert(commitId, cwd, options = {}) {
-    let bin = "jj";
-    try { bin = resolveJjBinary().path || "jj"; }
-    catch { bin = "jj"; }
-    const timeoutMs = Math.max(1, options.timeoutMs ?? RESTORE_TIMEOUT_MS);
-    const signal = options.signal;
-    // Never start a destructive restore that is already cancelled.
-    if (signal?.aborted) return Promise.resolve({ success: false, error: "jj restore aborted" });
-    return new Promise((resolve) => {
-        let child;
-        try {
-            // stdin/stdout ignored: nothing reads them, and an inherited stdin
-            // would let a prompting jj wait on a tty forever.
-            child = spawn(bin, ["restore", "--from", commitId], { cwd, stdio: ["ignore", "ignore", "pipe"] });
-        }
-        catch (error) {
-            resolve({ success: false, error: `failed to spawn ${bin}: ${error instanceof Error ? error.message : String(error)}` });
-            return;
-        }
+  let bin = "jj";
+  try {
+    bin = resolveJjBinary().path || "jj";
+  } catch {
+    bin = "jj";
+  }
+  const timeoutMs = Math.max(1, options.timeoutMs ?? RESTORE_TIMEOUT_MS);
+  const signal = options.signal;
+  // Never start a destructive restore that is already cancelled.
+  if (signal?.aborted) return Promise.resolve({ success: false, error: "jj restore aborted" });
+  return new Promise((resolve) => {
+    let child;
+    try {
+      // stdin/stdout ignored: nothing reads them, and an inherited stdin
+      // would let a prompting jj wait on a tty forever.
+      child = spawn(bin, ["restore", "--from", commitId], { cwd, stdio: ["ignore", "ignore", "pipe"] });
+    } catch (error) {
+      resolve({
+        success: false,
+        error: `failed to spawn ${bin}: ${error instanceof Error ? error.message : String(error)}`,
+      });
+      return;
+    }
 
-        let stderr = "";
-        let settled = false;
-        child.stderr?.setEncoding("utf8");
-        child.stderr?.on("data", (chunk) => { stderr += chunk; });
-
-        /** @param {{ success: boolean, error?: string }} result */
-        const settle = (result) => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timer);
-            signal?.removeEventListener("abort", onAbort);
-            resolve(result);
-        };
-        // Terminate a jj that stopped responding, escalating so a process that
-        // ignores SIGTERM still cannot keep the CLI alive.
-        const stop = () => {
-            child.kill("SIGTERM");
-            const escalation = setTimeout(() => { child.kill("SIGKILL"); }, KILL_GRACE_MS);
-            escalation.unref?.();
-            child.once("close", () => { clearTimeout(escalation); });
-        };
-        const onAbort = () => {
-            stop();
-            settle({ success: false, error: "jj restore aborted" });
-        };
-        const timer = setTimeout(() => {
-            stop();
-            settle({ success: false, error: `jj restore timed out after ${timeoutMs}ms` });
-        }, timeoutMs);
-
-        child.on("error", (error) => settle({ success: false, error: `failed to spawn ${bin}: ${error.message}` }));
-        child.on("close", (code, closeSignal) => {
-            if (code === 0) settle({ success: true });
-            else settle({ success: false, error: (stderr || (code === null ? `jj terminated with ${closeSignal}` : `jj exited with code ${code}`)).trim() });
-        });
-
-        signal?.addEventListener("abort", onAbort, { once: true });
+    let stderr = "";
+    let settled = false;
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk;
     });
+
+    /** @param {{ success: boolean, error?: string }} result */
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(result);
+    };
+    // Terminate a jj that stopped responding, escalating so a process that
+    // ignores SIGTERM still cannot keep the CLI alive.
+    const stop = () => {
+      child.kill("SIGTERM");
+      const escalation = setTimeout(() => {
+        child.kill("SIGKILL");
+      }, KILL_GRACE_MS);
+      escalation.unref?.();
+      child.once("close", () => {
+        clearTimeout(escalation);
+      });
+    };
+    const onAbort = () => {
+      stop();
+      settle({ success: false, error: "jj restore aborted" });
+    };
+    const timer = setTimeout(() => {
+      stop();
+      settle({ success: false, error: `jj restore timed out after ${timeoutMs}ms` });
+    }, timeoutMs);
+
+    child.on("error", (error) => settle({ success: false, error: `failed to spawn ${bin}: ${error.message}` }));
+    child.on("close", (code, closeSignal) => {
+      if (code === 0) settle({ success: true });
+      else
+        settle({
+          success: false,
+          error: (
+            stderr || (code === null ? `jj terminated with ${closeSignal}` : `jj exited with code ${code}`)
+          ).trim(),
+        });
+    });
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /**
@@ -119,15 +136,17 @@ export function defaultRevert(commitId, cwd, options = {}) {
  * @returns {Checkpoint | null}
  */
 export function pickTargetCheckpoint(checkpoints, sel) {
-    let cands = checkpoints.filter((c) => c.nodeId === sel.nodeId);
-    if (sel.iteration !== undefined) cands = cands.filter((c) => Number(c.iteration) === Number(sel.iteration));
-    if (sel.seq !== undefined) cands = cands.filter((c) => Number(c.seq) === Number(sel.seq));
-    if (cands.length === 0) return null;
-    cands.sort((a, b) =>
-        Number(a.createdAtMs) - Number(b.createdAtMs)
-        || Number(a.attempt) - Number(b.attempt)
-        || Number(a.seq) - Number(b.seq));
-    return cands[cands.length - 1];
+  let cands = checkpoints.filter((c) => c.nodeId === sel.nodeId);
+  if (sel.iteration !== undefined) cands = cands.filter((c) => Number(c.iteration) === Number(sel.iteration));
+  if (sel.seq !== undefined) cands = cands.filter((c) => Number(c.seq) === Number(sel.seq));
+  if (cands.length === 0) return null;
+  cands.sort(
+    (a, b) =>
+      Number(a.createdAtMs) - Number(b.createdAtMs) ||
+      Number(a.attempt) - Number(b.attempt) ||
+      Number(a.seq) - Number(b.seq),
+  );
+  return cands[cands.length - 1];
 }
 
 /**
@@ -147,41 +166,44 @@ export function pickTargetCheckpoint(checkpoints, sel) {
  * @returns {Promise<{ exitCode: number }>}
  */
 export async function runRestoreOnce(opts) {
-    const { adapter, runId, nodeId, iteration, seq, stdout, stderr } = opts;
-    const revert = opts.revert ?? defaultRevert;
+  const { adapter, runId, nodeId, iteration, seq, stdout, stderr } = opts;
+  const revert = opts.revert ?? defaultRevert;
 
-    // Reuse a preselected target when the caller already picked one (the
-    // semantic tool reports it), so we never re-list and risk selecting a
-    // different checkpoint than the one reported. But still validate it against
-    // the requested node/iteration/seq — a stale or mis-reported target must be
-    // rejected rather than silently reverting the wrong checkpoint. Validation
-    // runs the preselected row through the same predicate as the listing path
-    // (`pickTargetCheckpoint`) so the two can never diverge.
-    const selection = { nodeId, iteration, seq };
-    let target = null;
-    if (opts.target) {
-        target = pickTargetCheckpoint([opts.target], selection);
-        if (!target) {
-            // Include the target's own iteration/seq so an iteration-only
-            // mismatch is legible. Checkpoint rows carry no runId, so the
-            // predicate matches on node/iteration/seq only — `run ${runId}` is
-            // context, not something validated here.
-            stderr.write(`Preselected checkpoint (node ${opts.target.nodeId} iteration ${opts.target.iteration ?? 0} seq ${opts.target.seq}) does not match requested node ${nodeId}${iteration !== undefined ? ` iteration ${iteration}` : ""}${seq !== undefined ? ` seq ${seq}` : ""} for run ${runId}\n`);
-            return { exitCode: 1 };
-        }
-    }
-    else if (adapter) {
-        target = pickTargetCheckpoint(await adapter.listWorkspaceCheckpoints(runId), selection);
-    }
+  // Reuse a preselected target when the caller already picked one (the
+  // semantic tool reports it), so we never re-list and risk selecting a
+  // different checkpoint than the one reported. But still validate it against
+  // the requested node/iteration/seq — a stale or mis-reported target must be
+  // rejected rather than silently reverting the wrong checkpoint. Validation
+  // runs the preselected row through the same predicate as the listing path
+  // (`pickTargetCheckpoint`) so the two can never diverge.
+  const selection = { nodeId, iteration, seq };
+  let target = null;
+  if (opts.target) {
+    target = pickTargetCheckpoint([opts.target], selection);
     if (!target) {
-        stderr.write(`No matching durability checkpoint for run ${runId} node ${nodeId}${seq !== undefined ? ` seq ${seq}` : ""}\n`);
-        return { exitCode: 1 };
+      // Include the target's own iteration/seq so an iteration-only
+      // mismatch is legible. Checkpoint rows carry no runId, so the
+      // predicate matches on node/iteration/seq only — `run ${runId}` is
+      // context, not something validated here.
+      stderr.write(
+        `Preselected checkpoint (node ${opts.target.nodeId} iteration ${opts.target.iteration ?? 0} seq ${opts.target.seq}) does not match requested node ${nodeId}${iteration !== undefined ? ` iteration ${iteration}` : ""}${seq !== undefined ? ` seq ${seq}` : ""} for run ${runId}\n`,
+      );
+      return { exitCode: 1 };
     }
-    const result = await revert(target.jjCommitId, target.jjCwd, { timeoutMs: opts.timeoutMs, signal: opts.signal });
-    if (result?.success) {
-        stdout.write(`Restored ${target.jjCwd} to checkpoint #${target.seq} (${short(target.jjCommitId)})\n`);
-        return { exitCode: 0 };
-    }
-    stderr.write(`Restore failed: ${result?.error ?? "unknown error"}\n`);
+  } else if (adapter) {
+    target = pickTargetCheckpoint(await adapter.listWorkspaceCheckpoints(runId), selection);
+  }
+  if (!target) {
+    stderr.write(
+      `No matching durability checkpoint for run ${runId} node ${nodeId}${seq !== undefined ? ` seq ${seq}` : ""}\n`,
+    );
     return { exitCode: 1 };
+  }
+  const result = await revert(target.jjCommitId, target.jjCwd, { timeoutMs: opts.timeoutMs, signal: opts.signal });
+  if (result?.success) {
+    stdout.write(`Restored ${target.jjCwd} to checkpoint #${target.seq} (${short(target.jjCommitId)})\n`);
+    return { exitCode: 0 };
+  }
+  stderr.write(`Restore failed: ${result?.error ?? "unknown error"}\n`);
+  return { exitCode: 1 };
 }

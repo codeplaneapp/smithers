@@ -4,12 +4,7 @@ import { useChatStore } from "../chat/chatStore";
 import { GATE_FRAME } from "../runs/authRefactorFrames";
 import { useRunsStore } from "../runs/runsStore";
 import { selectRun } from "../runs/selectRun";
-import {
-  frameLabel,
-  frameMarkers,
-  framePct,
-  runningAtFrame,
-} from "./timeline";
+import { frameLabel, frameMarkers, framePct, runningAtFrame } from "./timeline";
 import { useTimelineStore } from "./timelineStore";
 
 function PlayIcon() {
@@ -180,10 +175,7 @@ export function TimelineCanvas({ runId }: { runId: string }) {
         ) : (
           <>
             <div className="tl-track">
-              <span
-                className={`tl-fill${isFailed ? " is-failed" : ""}`}
-                style={{ width: `${headPct}%` }}
-              />
+              <span className={`tl-fill${isFailed ? " is-failed" : ""}`} style={{ width: `${headPct}%` }} />
               {frames.map((index) => {
                 const pct = framePct(index, latest);
                 const done = isComplete || index < head;
@@ -240,21 +232,11 @@ export function TimelineCanvas({ runId }: { runId: string }) {
                 </div>
                 <div className="tl-error-actions">
                   {error.retriable ? (
-                    <button
-                      className="btn"
-                      type="button"
-                      data-testid="tl-error-retry"
-                      onClick={() => retry(runId)}
-                    >
+                    <button className="btn" type="button" data-testid="tl-error-retry" onClick={() => retry(runId)}>
                       Retry
                     </button>
                   ) : null}
-                  <button
-                    className="btn"
-                    type="button"
-                    data-testid="tl-error-dismiss"
-                    onClick={clearError}
-                  >
+                  <button className="btn" type="button" data-testid="tl-error-dismiss" onClick={clearError}>
                     Dismiss
                   </button>
                 </div>
@@ -338,20 +320,10 @@ export function TimelineCanvas({ runId }: { runId: string }) {
             </div>
 
             <div className="tl-actions" data-testid="tl-actions">
-              <button
-                className="btn btn-brand"
-                type="button"
-                data-testid="tl-fork"
-                onClick={() => fork(runId)}
-              >
+              <button className="btn btn-brand" type="button" data-testid="tl-fork" onClick={() => fork(runId)}>
                 Fork from here
               </button>
-              <button
-                className="btn"
-                type="button"
-                data-testid="tl-replay"
-                onClick={() => replay(runId)}
-              >
+              <button className="btn" type="button" data-testid="tl-replay" onClick={() => replay(runId)}>
                 Replay
               </button>
               {rewindEligible ? (
@@ -370,8 +342,7 @@ export function TimelineCanvas({ runId }: { runId: string }) {
               <div className="tl-rewind-confirm" data-testid="tl-rewind-confirm">
                 <WarnIcon />
                 <span>
-                  Rewind to frame {head} ({frameLabel(head)})? This drops every later frame and
-                  resumes from here.
+                  Rewind to frame {head} ({frameLabel(head)})? This drops every later frame and resumes from here.
                 </span>
                 <div className="tl-rewind-confirm-actions">
                   <button
@@ -382,12 +353,7 @@ export function TimelineCanvas({ runId }: { runId: string }) {
                   >
                     Rewind
                   </button>
-                  <button
-                    className="btn"
-                    type="button"
-                    data-testid="tl-rewind-cancel"
-                    onClick={cancelRewind}
-                  >
+                  <button className="btn" type="button" data-testid="tl-rewind-cancel" onClick={cancelRewind}>
                     Cancel
                   </button>
                 </div>

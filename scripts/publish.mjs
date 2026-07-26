@@ -60,12 +60,11 @@ function workspacePackages() {
   const packages = [];
   for (const entry of ["packages", "apps", "e2e", ".smithers"]) {
     const entryPath = join(root, entry);
-    const dirs =
-      existsSync(join(entryPath, "package.json"))
-        ? [entryPath]
-        : existsSync(entryPath)
-          ? readdirSync(entryPath).map((name) => join(entryPath, name))
-          : [];
+    const dirs = existsSync(join(entryPath, "package.json"))
+      ? [entryPath]
+      : existsSync(entryPath)
+        ? readdirSync(entryPath).map((name) => join(entryPath, name))
+        : [];
     for (const dir of dirs) {
       const packagePath = join(dir, "package.json");
       if (!existsSync(packagePath)) continue;
@@ -125,14 +124,18 @@ for (const docsArtifact of [`llms-v${version}.txt`, `llms-full-v${version}.txt`]
   try {
     readFileSync(join(root, "docs", docsArtifact));
   } catch {
-    throw new Error(`docs/${docsArtifact} missing — run bun scripts/generate-llms.ts and commit the versioned docs artifacts before releasing`);
+    throw new Error(
+      `docs/${docsArtifact} missing — run bun scripts/generate-llms.ts and commit the versioned docs artifacts before releasing`,
+    );
   }
 }
 for (const packageArtifact of ["llms.txt", "llms-full.txt"]) {
   try {
     readFileSync(join(root, "packages", "smithers", "docs", packageArtifact));
   } catch {
-    throw new Error(`packages/smithers/docs/${packageArtifact} missing — run bun scripts/generate-llms.ts and commit the npm-bundled docs artifacts before releasing`);
+    throw new Error(
+      `packages/smithers/docs/${packageArtifact} missing — run bun scripts/generate-llms.ts and commit the npm-bundled docs artifacts before releasing`,
+    );
   }
 }
 
@@ -264,19 +267,14 @@ if (SKIP_GH_RELEASE) {
     );
   } else {
     log("gh-release", `creating GitHub release ${tag}`);
-    const exists = spawnSync(
-      "gh",
-      ["release", "view", tag, "--repo", GH_REPO],
-      { cwd: root, encoding: "utf8" },
-    );
+    const exists = spawnSync("gh", ["release", "view", tag, "--repo", GH_REPO], { cwd: root, encoding: "utf8" });
     if (exists.status === 0) {
       console.log(`  release ${tag} already exists — skipping`);
     } else {
-      const tagOnRemote = spawnSync(
-        "git",
-        ["ls-remote", "--exit-code", "--tags", "origin", tag],
-        { cwd: root, encoding: "utf8" },
-      );
+      const tagOnRemote = spawnSync("git", ["ls-remote", "--exit-code", "--tags", "origin", tag], {
+        cwd: root,
+        encoding: "utf8",
+      });
       if (tagOnRemote.status !== 0) {
         console.log(`  tag ${tag} not on origin — pushing`);
         run(`git push origin ${tag}`);

@@ -129,35 +129,46 @@ const sonnetFallback = new ClaudeCodeAgent({
   permissionMode: "bypassPermissions",
   dangerouslySkipPermissions: true,
 });
-const solPrimary = codexFirst({
-  model: "gpt-5.6-sol",
-  sandbox: "danger-full-access",
-  dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true,
-}, [opusFallback]);
+const solPrimary = codexFirst(
+  {
+    model: "gpt-5.6-sol",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
+  [opusFallback],
+);
 // Steered moderator: the bare-opus moderator once discarded the panelists'
 // grounded findings (the #271 discovery) and synthesized a generic plan. This
 // systemPrompt forces it to preserve concrete findings.
-const solSecondary = codexFirst({
-  model: "gpt-5.6-sol",
-  sandbox: "danger-full-access",
-  dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true,
-}, [opusFallback]);
+const solSecondary = codexFirst(
+  {
+    model: "gpt-5.6-sol",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
+  [opusFallback],
+);
 const speedSystemPrompt =
   "You merge implementation plans into ONE strongest consolidated plan. PRESERVE the panelists' concrete grounded findings verbatim: exact file paths, line numbers, prior-PR references (e.g. #271), and what ALREADY exists in the code. Do NOT generalize, re-scope, or drift to a different layer than the panelists analyzed. Keep the best concrete steps, reconcile disagreements with code evidence. Output the consolidated plan + ordered steps.";
-const speedModerator: AgentLike[] = codexFirst({
-  model: "gpt-5.6-sol",
-  sandbox: "danger-full-access",
-  dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true,
-  systemPrompt: speedSystemPrompt,
-}, [new ClaudeCodeAgent({
-  model: "claude-opus-4-8",
-  permissionMode: "bypassPermissions",
-  dangerouslySkipPermissions: true,
-  systemPrompt: speedSystemPrompt,
-})]);
+const speedModerator: AgentLike[] = codexFirst(
+  {
+    model: "gpt-5.6-sol",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+    systemPrompt: speedSystemPrompt,
+  },
+  [
+    new ClaudeCodeAgent({
+      model: "claude-opus-4-8",
+      permissionMode: "bypassPermissions",
+      dangerouslySkipPermissions: true,
+      systemPrompt: speedSystemPrompt,
+    }),
+  ],
+);
 
 // Codex role split; Claude remains fallback-only.
 const planners: { agent: AgentLike | AgentLike[]; role: string }[] = [
@@ -166,7 +177,13 @@ const planners: { agent: AgentLike | AgentLike[]; role: string }[] = [
 ];
 const planningAgent: AgentLike[] = solPrimary;
 const docsAgent: AgentLike[] = codexFirst(
-  { model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-luna",
+    config: { model_reasoning_effort: "medium" },
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [sonnetFallback],
 );
 const codeAgent = docsAgent;
@@ -190,7 +207,12 @@ const SPEED_WORKTREE = `${repoRoot()}/.smithers/workflows/.worktrees/rerender-tr
 // ---- deterministic gate runner ----
 function runGate(cwd: string, cmds: string[][], timeoutMs = 30 * 60_000) {
   const results = cmds.map((parts) => {
-    const r = spawnSync(parts[0], parts.slice(1), { cwd, encoding: "utf8", env: { ...process.env }, timeout: timeoutMs });
+    const r = spawnSync(parts[0], parts.slice(1), {
+      cwd,
+      encoding: "utf8",
+      env: { ...process.env },
+      timeout: timeoutMs,
+    });
     return {
       command: parts.join(" "),
       exitCode: r.status,
@@ -200,8 +222,14 @@ function runGate(cwd: string, cmds: string[][], timeoutMs = 30 * 60_000) {
   const failed = results.filter((r) => r.exitCode !== 0);
   return {
     allPassed: failed.length === 0,
-    summary: failed.length === 0 ? `All ${results.length} gate command(s) passed.` : `${failed.length}/${results.length} gate command(s) failed.`,
-    failing: failed.map((r) => `$ ${r.command}\n${r.tail}`).join("\n\n---\n").slice(0, 12_000),
+    summary:
+      failed.length === 0
+        ? `All ${results.length} gate command(s) passed.`
+        : `${failed.length}/${results.length} gate command(s) failed.`,
+    failing: failed
+      .map((r) => `$ ${r.command}\n${r.tail}`)
+      .join("\n\n---\n")
+      .slice(0, 12_000),
   };
 }
 
@@ -216,13 +244,19 @@ function planPrompt(deliverable: "docs" | "sidecar" | "speed", specPath: string)
   ].join("\n\n");
 }
 
-function buildPrompt(deliverable: "docs" | "sidecar" | "speed", specPath: string, plan: string, feedback: string, inWorktree: boolean): string {
+function buildPrompt(
+  deliverable: "docs" | "sidecar" | "speed",
+  specPath: string,
+  plan: string,
+  feedback: string,
+  inWorktree: boolean,
+): string {
   const base = [
     `Read the spec: ${specPath}. Implement the "${deliverable}" deliverable to its acceptance criteria.`,
     plan ? `Approved plan to follow:\n${plan}` : "",
     inWorktree ? "You are in an isolated worktree. Make ALL edits here; do not touch the main checkout." : "",
     deliverable === "docs"
-      ? "Write the docs (Opus). House style: no em-dashes, no \"not X but Y\", no padding triads, no hedging. Fold the triad + smart zone + the full context-engineering doctrine into the SINGLE docs/guides/context-engineering.mdx. Add the runnable <Aspects>+<TryCatchFinally catchErrors={[\"ASPECT_BUDGET_EXCEEDED\"]}>+<ContinueAsNew> handoff example (a real file that `smithers graph` renders) and embed it. Add small user docs and a concise skills/smithers/SKILL.md section. FIX the stale '<Aspects> ... not implemented yet' line. Run `pnpm docs:llms` and commit the bundles."
+      ? 'Write the docs (Opus). House style: no em-dashes, no "not X but Y", no padding triads, no hedging. Fold the triad + smart zone + the full context-engineering doctrine into the SINGLE docs/guides/context-engineering.mdx. Add the runnable <Aspects>+<TryCatchFinally catchErrors={["ASPECT_BUDGET_EXCEEDED"]}>+<ContinueAsNew> handoff example (a real file that `smithers graph` renders) and embed it. Add small user docs and a concise skills/smithers/SKILL.md section. FIX the stale \'<Aspects> ... not implemented yet\' line. Run `pnpm docs:llms` and commit the bundles.'
       : deliverable === "sidecar"
         ? "Implement the <Sidecar> composite (Codex): packages/components/src/components/Sidecar.js + SidecarProps.ts, exported like the other composites, one export per file, colocated props, composing existing primitives + scorers. The sidecar (cheap model) runs continueOnFail and never affects the primary result; record the primary-vs-sidecar score delta. Add docs/components/sidecar.mdx + catalog entry. Run `pnpm docs:llms`."
         : "Per-completion re-render ALREADY ships (#271): the engine re-renders on every task completion and dispatches ready work without waiting for the slowest sibling. Do NOT re-implement dispatch. Make it an EXPLICIT, OBSERVABLE contract per the corrected Deliverable 3: (1) add a `trigger: { reason: 'task-finished' | ... }` to the scheduler render context and thread it makeWorkflowSession -> WorkflowDriver.renderAndSubmit -> engine.js driverRenderer.render -> persistDriverFrame; (2) record trigger.reason in the existing frame/commit event payload so a future agent can see WHY a frame rendered (do not add a breaking new event); (3) make engine.js requireRerenderOnOutputChange an opts-driven value defaulting true; (4) regenerate packages/components/src/index.d.ts so the stale 'Aspects enforcement not implemented' claim is gone. Default behavior stays identical.",
@@ -281,7 +315,9 @@ function planText(ctx: any, d: Del): string {
     if (s) return `${s.plan}\n\nSteps:\n${(s.steps ?? []).map((x: string, i: number) => `${i + 1}. ${x}`).join("\n")}`;
   }
   const p = lastFor(ctx.outputs.plan, d);
-  return p ? `${p.approach}\n\nSteps:\n${(p.steps ?? []).map((x: string, i: number) => `${i + 1}. ${x}`).join("\n")}\n\nTests:\n${(p.tests ?? []).join("\n")}` : "";
+  return p
+    ? `${p.approach}\n\nSteps:\n${(p.steps ?? []).map((x: string, i: number) => `${i + 1}. ${x}`).join("\n")}\n\nTests:\n${(p.tests ?? []).join("\n")}`
+    : "";
 }
 function planSummary(ctx: any, d: Del): string {
   const t = planText(ctx, d);
@@ -289,19 +325,54 @@ function planSummary(ctx: any, d: Del): string {
 }
 
 // A build/validate/review loop for one deliverable. cwd is "main" or the worktree.
-function BuildLoop({ ctx, d, cwd, inWorktree, gateCmds, specPath }: { ctx: any; d: Del; cwd: string; inWorktree: boolean; gateCmds: string[][]; specPath: string }) {
+function BuildLoop({
+  ctx,
+  d,
+  cwd,
+  inWorktree,
+  gateCmds,
+  specPath,
+}: {
+  ctx: any;
+  d: Del;
+  cwd: string;
+  inWorktree: boolean;
+  gateCmds: string[][];
+  specPath: string;
+}) {
   return (
-    <Loop id={`${d}-loop`} until={buildDone(ctx, d)} maxIterations={ctx.input?.maxBuildIterations ?? 3} onMaxReached="return-last">
+    <Loop
+      id={`${d}-loop`}
+      until={buildDone(ctx, d)}
+      maxIterations={ctx.input?.maxBuildIterations ?? 3}
+      onMaxReached="return-last"
+    >
       <Sequence>
-        <Task id={`${d}-build`} output={outputs.build} agent={d === "docs" ? docsAgent : codeAgent} retries={RETRIES} timeoutMs={AGENT_TIMEOUT} heartbeatTimeoutMs={HEARTBEAT}>
+        <Task
+          id={`${d}-build`}
+          output={outputs.build}
+          agent={d === "docs" ? docsAgent : codeAgent}
+          retries={RETRIES}
+          timeoutMs={AGENT_TIMEOUT}
+          heartbeatTimeoutMs={HEARTBEAT}
+        >
           {buildPrompt(d, specPath, planText(ctx, d), buildFeedback(ctx, d), inWorktree)}
         </Task>
         <Task id={`${d}-validate`} output={outputs.validation}>
           {() => ({ deliverable: d, ...runGate(cwd, gateCmds) })}
         </Task>
-        {lastFor(ctx.outputs.validation, d)?.allPassed === true ? <Task id={`${d}-review`} output={outputs.review} agent={reviewAgent} retries={RETRIES} timeoutMs={AGENT_TIMEOUT} heartbeatTimeoutMs={HEARTBEAT}>
-          {reviewPrompt(d, specPath, JSON.stringify(lastFor(ctx.outputs.validation, d) ?? {}, null, 2))}
-        </Task> : null}
+        {lastFor(ctx.outputs.validation, d)?.allPassed === true ? (
+          <Task
+            id={`${d}-review`}
+            output={outputs.review}
+            agent={reviewAgent}
+            retries={RETRIES}
+            timeoutMs={AGENT_TIMEOUT}
+            heartbeatTimeoutMs={HEARTBEAT}
+          >
+            {reviewPrompt(d, specPath, JSON.stringify(lastFor(ctx.outputs.validation, d) ?? {}, null, 2))}
+          </Task>
+        ) : null}
       </Sequence>
     </Loop>
   );
@@ -328,12 +399,34 @@ export default smithers((ctx: any) => {
         {/* ============ DELIVERABLE 1: DOCS ============ */}
         {includeDocs && specReady ? (
           <Sequence>
-            <Task id="plan-docs" output={outputs.plan} agent={planningAgent} retries={RETRIES} timeoutMs={AGENT_TIMEOUT} heartbeatTimeoutMs={HEARTBEAT}>
-            {planPrompt("docs", specPath)}
+            <Task
+              id="plan-docs"
+              output={outputs.plan}
+              agent={planningAgent}
+              retries={RETRIES}
+              timeoutMs={AGENT_TIMEOUT}
+              heartbeatTimeoutMs={HEARTBEAT}
+            >
+              {planPrompt("docs", specPath)}
             </Task>
-            <Approval id="approve-docs" output={outputs.approval} onDeny="skip" request={{ title: "Approve the DOCS plan?", summary: planSummary(ctx, "docs") }} />
+            <Approval
+              id="approve-docs"
+              output={outputs.approval}
+              onDeny="skip"
+              request={{ title: "Approve the DOCS plan?", summary: planSummary(ctx, "docs") }}
+            />
             {specReady && approvedGate(ctx, "approve-docs") ? (
-              <BuildLoop ctx={ctx} d="docs" cwd={docsCwd} inWorktree={false} gateCmds={[["pnpm", "typecheck"], ["pnpm", "docs:llms"]]} specPath={specPath} />
+              <BuildLoop
+                ctx={ctx}
+                d="docs"
+                cwd={docsCwd}
+                inWorktree={false}
+                gateCmds={[
+                  ["pnpm", "typecheck"],
+                  ["pnpm", "docs:llms"],
+                ]}
+                specPath={specPath}
+              />
             ) : null}
           </Sequence>
         ) : null}
@@ -341,12 +434,34 @@ export default smithers((ctx: any) => {
         {/* ============ DELIVERABLE 2: SIDECAR ============ */}
         {includeSidecar && specReady ? (
           <Sequence>
-            <Task id="plan-sidecar" output={outputs.plan} agent={planningAgent} retries={RETRIES} timeoutMs={AGENT_TIMEOUT} heartbeatTimeoutMs={HEARTBEAT}>
-            {planPrompt("sidecar", specPath)}
+            <Task
+              id="plan-sidecar"
+              output={outputs.plan}
+              agent={planningAgent}
+              retries={RETRIES}
+              timeoutMs={AGENT_TIMEOUT}
+              heartbeatTimeoutMs={HEARTBEAT}
+            >
+              {planPrompt("sidecar", specPath)}
             </Task>
-            <Approval id="approve-sidecar" output={outputs.approval} onDeny="skip" request={{ title: "Approve the <Sidecar> plan?", summary: planSummary(ctx, "sidecar") }} />
+            <Approval
+              id="approve-sidecar"
+              output={outputs.approval}
+              onDeny="skip"
+              request={{ title: "Approve the <Sidecar> plan?", summary: planSummary(ctx, "sidecar") }}
+            />
             {specReady && approvedGate(ctx, "approve-sidecar") ? (
-              <BuildLoop ctx={ctx} d="sidecar" cwd={docsCwd} inWorktree={false} gateCmds={[["pnpm", "typecheck"], ["pnpm", "-C", "packages/components", "test"]]} specPath={specPath} />
+              <BuildLoop
+                ctx={ctx}
+                d="sidecar"
+                cwd={docsCwd}
+                inWorktree={false}
+                gateCmds={[
+                  ["pnpm", "typecheck"],
+                  ["pnpm", "-C", "packages/components", "test"],
+                ]}
+                specPath={specPath}
+              />
             ) : null}
           </Sequence>
         ) : null}
@@ -365,24 +480,73 @@ export default smithers((ctx: any) => {
             >
               {planPrompt("speed", specPath)}
             </Panel>
-            <Approval id="approve-speed-obs" output={outputs.approval} onDeny="skip" request={{ title: "Approve the RE-RENDER OBSERVABILITY plan? (opens a PR)", summary: planSummary(ctx, "speed") }} />
+            <Approval
+              id="approve-speed-obs"
+              output={outputs.approval}
+              onDeny="skip"
+              request={{
+                title: "Approve the RE-RENDER OBSERVABILITY plan? (opens a PR)",
+                summary: planSummary(ctx, "speed"),
+              }}
+            />
             {specReady && approvedGate(ctx, "approve-speed-obs") ? (
               <Worktree path={SPEED_WORKTREE} branch={SPEED_BRANCH} baseBranch={jjCommit()}>
                 <Sequence>
-                  <BuildLoop ctx={ctx} d="speed" cwd={SPEED_WORKTREE} inWorktree={true} gateCmds={[["pnpm", "typecheck"], ["pnpm", "-C", "packages/scheduler", "test"], ["pnpm", "-C", "packages/engine", "test"]]} specPath={specPath} />
+                  <BuildLoop
+                    ctx={ctx}
+                    d="speed"
+                    cwd={SPEED_WORKTREE}
+                    inWorktree={true}
+                    gateCmds={[
+                      ["pnpm", "typecheck"],
+                      ["pnpm", "-C", "packages/scheduler", "test"],
+                      ["pnpm", "-C", "packages/engine", "test"],
+                    ]}
+                    specPath={specPath}
+                  />
                   {buildDone(ctx, "speed") ? (
                     <Task id="speed-pr" output={outputs.pr} timeoutMs={10 * 60_000}>
                       {() => {
                         const opts = { cwd: SPEED_WORKTREE, encoding: "utf8" as const, env: { ...process.env } };
-                        spawnSync("jj", ["describe", "-m", "feat(engine): make per-completion re-render an explicit, observable contract"], opts);
+                        spawnSync(
+                          "jj",
+                          [
+                            "describe",
+                            "-m",
+                            "feat(engine): make per-completion re-render an explicit, observable contract",
+                          ],
+                          opts,
+                        );
                         spawnSync("jj", ["bookmark", "set", SPEED_BRANCH, "-r", "@"], opts);
-                        const push = spawnSync("jj", ["git", "push", "--bookmark", SPEED_BRANCH, "--allow-new", "--remote", "origin"], opts);
-                        const pr = spawnSync("gh", ["pr", "create", "--head", SPEED_BRANCH, "--base", "main", "--title", "feat(engine): re-render trigger reason + observability", "--body", "Per-completion re-render already ships (#271). This makes it an explicit, observable contract: a trigger reason threaded through the render context, recorded in the frame event so a future agent can see why a frame rendered, and requireRerenderOnOutputChange as a reversible option. Also regenerates the stale Aspects .d.ts. See .smithers/specs/context-engineering-and-execution-levers.md (Deliverable 3). Authored by a Smithers run.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"], opts);
+                        const push = spawnSync(
+                          "jj",
+                          ["git", "push", "--bookmark", SPEED_BRANCH, "--allow-new", "--remote", "origin"],
+                          opts,
+                        );
+                        const pr = spawnSync(
+                          "gh",
+                          [
+                            "pr",
+                            "create",
+                            "--head",
+                            SPEED_BRANCH,
+                            "--base",
+                            "main",
+                            "--title",
+                            "feat(engine): re-render trigger reason + observability",
+                            "--body",
+                            "Per-completion re-render already ships (#271). This makes it an explicit, observable contract: a trigger reason threaded through the render context, recorded in the frame event so a future agent can see why a frame rendered, and requireRerenderOnOutputChange as a reversible option. Also regenerates the stale Aspects .d.ts. See .smithers/specs/context-engineering-and-execution-levers.md (Deliverable 3). Authored by a Smithers run.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+                          ],
+                          opts,
+                        );
                         const url = (pr.stdout || "").trim();
                         return {
                           opened: pr.status === 0,
                           url,
-                          summary: pr.status === 0 ? `PR opened: ${url}` : `PR not opened. push=${push.status} pr=${pr.status}: ${(pr.stderr || "").slice(-1500)}`,
+                          summary:
+                            pr.status === 0
+                              ? `PR opened: ${url}`
+                              : `PR not opened. push=${push.status} pr=${pr.status}: ${(pr.stderr || "").slice(-1500)}`,
                         };
                       }}
                     </Task>

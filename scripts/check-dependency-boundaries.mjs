@@ -1,12 +1,6 @@
 #!/usr/bin/env node
 import { builtinModules } from "node:module";
-import {
-  existsSync,
-  lstatSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-} from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, extname, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
@@ -29,11 +23,7 @@ const ignoredDirs = new Set([
   "node_modules",
   "tmp",
 ]);
-const builtinPackages = new Set([
-  "bun",
-  ...builtinModules,
-  ...builtinModules.map((mod) => `node:${mod}`),
-]);
+const builtinPackages = new Set(["bun", ...builtinModules, ...builtinModules.map((mod) => `node:${mod}`)]);
 
 /** @typedef {{ dir: string; name: string; manifestPath: string; manifest: Record<string, unknown> }} WorkspacePackage */
 
@@ -167,13 +157,7 @@ function scriptKindForPath(path) {
 function importSpecifiersForFile(file) {
   const absFile = join(repoRoot, file);
   const text = readFileSync(absFile, "utf8");
-  const sourceFile = ts.createSourceFile(
-    file,
-    text,
-    ts.ScriptTarget.Latest,
-    true,
-    scriptKindForPath(file),
-  );
+  const sourceFile = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKindForPath(file));
   /** @type {Set<string>} */
   const specifiers = new Set();
   /** Character ranges of string/template literals, so the regex sweep below skips their contents. @type {[number, number][]} */
@@ -240,9 +224,7 @@ function importSpecifiersForFile(file) {
 /** @param {Record<string, unknown>} manifest @param {string} section */
 function dependencyNames(manifest, section) {
   const deps = manifest[section];
-  return deps && typeof deps === "object" && !Array.isArray(deps)
-    ? new Set(Object.keys(deps))
-    : new Set();
+  return deps && typeof deps === "object" && !Array.isArray(deps) ? new Set(Object.keys(deps)) : new Set();
 }
 
 /** @param {string} file */
@@ -269,10 +251,7 @@ function dependencySets(pkg) {
     ...dependencyNames(pkg.manifest, "peerDependencies"),
     ...dependencyNames(pkg.manifest, "optionalDependencies"),
   ]);
-  const dev = new Set([
-    ...runtime,
-    ...dependencyNames(pkg.manifest, "devDependencies"),
-  ]);
+  const dev = new Set([...runtime, ...dependencyNames(pkg.manifest, "devDependencies")]);
   return { runtime, dev };
 }
 

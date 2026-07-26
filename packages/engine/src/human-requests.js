@@ -11,12 +11,7 @@ import { jsonSchemaToZodType } from "./external/json-schema-to-zod.js";
 /** @type {readonly ["ask", "confirm", "select", "json"]} */
 export const HUMAN_REQUEST_KINDS = ["ask", "confirm", "select", "json"];
 /** @type {readonly ["pending", "answered", "cancelled", "expired"]} */
-export const HUMAN_REQUEST_STATUSES = [
-    "pending",
-    "answered",
-    "cancelled",
-    "expired",
-];
+export const HUMAN_REQUEST_STATUSES = ["pending", "answered", "cancelled", "expired"];
 /**
  * @param {string} runId
  * @param {string} nodeId
@@ -24,14 +19,14 @@ export const HUMAN_REQUEST_STATUSES = [
  * @returns {string}
  */
 export function buildHumanRequestId(runId, nodeId, iteration) {
-    return `human:${runId}:${nodeId}:${iteration}`;
+  return `human:${runId}:${nodeId}:${iteration}`;
 }
 /**
  * @param {Record<string, unknown> | null | undefined} meta
  * @returns {boolean}
  */
 export function isHumanTaskMeta(meta) {
-    return Boolean(meta?.humanTask);
+  return Boolean(meta?.humanTask);
 }
 /**
  * @param {Record<string, unknown> | null | undefined} meta
@@ -39,36 +34,32 @@ export function isHumanTaskMeta(meta) {
  * @returns {string}
  */
 export function getHumanTaskPrompt(meta, fallback) {
-    const prompt = meta?.prompt;
-    return typeof prompt === "string" && prompt.trim().length > 0
-        ? prompt
-        : fallback;
+  const prompt = meta?.prompt;
+  return typeof prompt === "string" && prompt.trim().length > 0 ? prompt : fallback;
 }
 /**
  * @param {{ timeoutAtMs?: number | null } | null | undefined} request
  * @returns {boolean}
  */
 export function isHumanRequestPastTimeout(request, nowMs = Date.now()) {
-    return (typeof request?.timeoutAtMs === "number" &&
-        Number.isFinite(request.timeoutAtMs) &&
-        request.timeoutAtMs <= nowMs);
+  return (
+    typeof request?.timeoutAtMs === "number" && Number.isFinite(request.timeoutAtMs) && request.timeoutAtMs <= nowMs
+  );
 }
 /**
  * @param {{ issues?: Array<{ path?: PropertyKey[]; message?: string }> }} error
  */
 function formatValidationIssues(error) {
-    const issues = error.issues ?? [];
-    if (issues.length === 0) {
-        return "unknown validation error";
-    }
-    return issues
-        .map((issue) => {
-        const path = Array.isArray(issue.path) && issue.path.length > 0
-            ? issue.path.join(".")
-            : "(root)";
-        return `${path}: ${issue.message ?? "invalid value"}`;
+  const issues = error.issues ?? [];
+  if (issues.length === 0) {
+    return "unknown validation error";
+  }
+  return issues
+    .map((issue) => {
+      const path = Array.isArray(issue.path) && issue.path.length > 0 ? issue.path.join(".") : "(root)";
+      return `${path}: ${issue.message ?? "invalid value"}`;
     })
-        .join("; ");
+    .join("; ");
 }
 /**
  * @param {{ requestId: string; schemaJson: string | null }} request
@@ -76,47 +67,45 @@ function formatValidationIssues(error) {
  * @returns {HumanRequestSchemaValidation}
  */
 export function validateHumanRequestValue(request, value) {
-    if (!request.schemaJson) {
-        return { ok: true };
-    }
-    let schema;
-    try {
-        schema = JSON.parse(request.schemaJson);
-    }
-    catch (err) {
-        return {
-            ok: false,
-            code: "HUMAN_REQUEST_SCHEMA_INVALID",
-            message: `Stored schema for ${request.requestId} is not valid JSON: ${err?.message ?? String(err)}`,
-        };
-    }
-    if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
-        return {
-            ok: false,
-            code: "HUMAN_REQUEST_SCHEMA_INVALID",
-            message: `Stored schema for ${request.requestId} is not a JSON object.`,
-        };
-    }
-    let validator;
-    try {
-        validator = jsonSchemaToZodType(schema);
-    }
-    catch (err) {
-        return {
-            ok: false,
-            code: "HUMAN_REQUEST_SCHEMA_INVALID",
-            message: `Stored schema for ${request.requestId} could not be loaded for validation: ${err?.message ?? String(err)}`,
-        };
-    }
-    const result = validator.safeParse(value);
-    if (!result.success) {
-        return {
-            ok: false,
-            code: "HUMAN_REQUEST_VALIDATION_FAILED",
-            message: `Human request ${request.requestId} does not match the stored schema: ${formatValidationIssues(result.error)}`,
-        };
-    }
+  if (!request.schemaJson) {
     return { ok: true };
+  }
+  let schema;
+  try {
+    schema = JSON.parse(request.schemaJson);
+  } catch (err) {
+    return {
+      ok: false,
+      code: "HUMAN_REQUEST_SCHEMA_INVALID",
+      message: `Stored schema for ${request.requestId} is not valid JSON: ${err?.message ?? String(err)}`,
+    };
+  }
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return {
+      ok: false,
+      code: "HUMAN_REQUEST_SCHEMA_INVALID",
+      message: `Stored schema for ${request.requestId} is not a JSON object.`,
+    };
+  }
+  let validator;
+  try {
+    validator = jsonSchemaToZodType(schema);
+  } catch (err) {
+    return {
+      ok: false,
+      code: "HUMAN_REQUEST_SCHEMA_INVALID",
+      message: `Stored schema for ${request.requestId} could not be loaded for validation: ${err?.message ?? String(err)}`,
+    };
+  }
+  const result = validator.safeParse(value);
+  if (!result.success) {
+    return {
+      ok: false,
+      code: "HUMAN_REQUEST_VALIDATION_FAILED",
+      message: `Human request ${request.requestId} does not match the stored schema: ${formatValidationIssues(result.error)}`,
+    };
+  }
+  return { ok: true };
 }
 /**
  * Default node id used when an agent raises an ad-hoc human request mid-task and
@@ -141,7 +130,7 @@ export const DEFAULT_AGENT_ASK_NODE_ID = "agent-ask";
  * @returns {string}
  */
 export function buildAgentAskRequestId(runId, nodeId, iteration, unique) {
-    return `human:${runId}:${nodeId}:${iteration}:${unique}`;
+  return `human:${runId}:${nodeId}:${iteration}:${unique}`;
 }
 /**
  * @typedef {object} BuildAgentAskRequestInput
@@ -165,31 +154,29 @@ export function buildAgentAskRequestId(runId, nodeId, iteration, unique) {
  * @returns {Record<string, unknown>}
  */
 export function buildAgentAskRequestRow(input) {
-    return {
-        requestId: buildAgentAskRequestId(input.runId, input.nodeId, input.iteration, input.unique),
-        runId: input.runId,
-        nodeId: input.nodeId,
-        iteration: input.iteration,
-        kind: input.kind ?? "ask",
-        status: "pending",
-        prompt: input.prompt,
-        schemaJson: input.schemaJson ?? null,
-        optionsJson: input.optionsJson ?? null,
-        responseJson: null,
-        requestedAtMs: input.requestedAtMs,
-        answeredAtMs: null,
-        answeredBy: null,
-        timeoutAtMs: input.timeoutAtMs ?? null,
-    };
+  return {
+    requestId: buildAgentAskRequestId(input.runId, input.nodeId, input.iteration, input.unique),
+    runId: input.runId,
+    nodeId: input.nodeId,
+    iteration: input.iteration,
+    kind: input.kind ?? "ask",
+    status: "pending",
+    prompt: input.prompt,
+    schemaJson: input.schemaJson ?? null,
+    optionsJson: input.optionsJson ?? null,
+    responseJson: null,
+    requestedAtMs: input.requestedAtMs,
+    answeredAtMs: null,
+    answeredBy: null,
+    timeoutAtMs: input.timeoutAtMs ?? null,
+  };
 }
 /**
  * @param {string} status
  * @returns {boolean}
  */
 export function isResolvedHumanRequestStatus(status) {
-    return (status === "answered" ||
-        status === "cancelled" ||
-        status === "expired");
+  return status === "answered" || status === "cancelled" || status === "expired";
 }
 /**
  * @param {number} ms
@@ -197,24 +184,23 @@ export function isResolvedHumanRequestStatus(status) {
  * @returns {Promise<void>}
  */
 function defaultPollSleep(ms, signal) {
-    return new Promise((resolve) => {
-        if (signal?.aborted) {
-            resolve();
-            return;
-        }
-        /** @type {(() => void) | undefined} */
-        let onAbort;
-        const timer = setTimeout(() => {
-            if (onAbort)
-                signal?.removeEventListener?.("abort", onAbort);
-            resolve();
-        }, ms);
-        onAbort = () => {
-            clearTimeout(timer);
-            resolve();
-        };
-        signal?.addEventListener?.("abort", onAbort, { once: true });
-    });
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    /** @type {(() => void) | undefined} */
+    let onAbort;
+    const timer = setTimeout(() => {
+      if (onAbort) signal?.removeEventListener?.("abort", onAbort);
+      resolve();
+    }, ms);
+    onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    signal?.addEventListener?.("abort", onAbort, { once: true });
+  });
 }
 /**
  * @typedef {object} HumanAnswerOutcome
@@ -238,29 +224,29 @@ function defaultPollSleep(ms, signal) {
  * @returns {Promise<HumanAnswerOutcome>}
  */
 export async function waitForHumanAnswer(adapter, requestId, options = {}) {
-    const pollIntervalMs = Math.max(250, options.pollIntervalMs ?? 3_000);
-    const now = options.now ?? Date.now;
-    const sleep = options.sleep ?? defaultPollSleep;
-    for (;;) {
-        if (options.signal?.aborted) {
-            return { status: "aborted" };
-        }
-        await adapter.expireStaleHumanRequests(now());
-        const request = await adapter.getHumanRequest(requestId);
-        if (!request) {
-            return { status: "missing" };
-        }
-        if (request.status !== "pending") {
-            return {
-                status: request.status,
-                responseJson: request.responseJson ?? null,
-                answeredBy: request.answeredBy ?? null,
-            };
-        }
-        await sleep(pollIntervalMs, options.signal);
+  const pollIntervalMs = Math.max(250, options.pollIntervalMs ?? 3_000);
+  const now = options.now ?? Date.now;
+  const sleep = options.sleep ?? defaultPollSleep;
+  for (;;) {
+    if (options.signal?.aborted) {
+      return { status: "aborted" };
     }
+    await adapter.expireStaleHumanRequests(now());
+    const request = await adapter.getHumanRequest(requestId);
+    if (!request) {
+      return { status: "missing" };
+    }
+    if (request.status !== "pending") {
+      return {
+        status: request.status,
+        responseJson: request.responseJson ?? null,
+        answeredBy: request.answeredBy ?? null,
+      };
+    }
+    await sleep(pollIntervalMs, options.signal);
+  }
 }
 export const __humanRequestInternals = {
-    formatValidationIssues,
-    defaultPollSleep,
+  formatValidationIssues,
+  defaultPollSleep,
 };

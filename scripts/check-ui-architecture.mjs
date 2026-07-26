@@ -34,9 +34,7 @@ const UI_PACKAGES = new Set([
 // Workflow-render hooks execute inside the reconciler and are not gateway/UI
 // data hooks. Keep this exception explicit so new public React hook packages
 // still fail the single-hook-package policy by default.
-const WORKFLOW_RENDER_HOOK_PACKAGES = new Set([
-  "@smithers-orchestrator/xstate",
-]);
+const WORKFLOW_RENDER_HOOK_PACKAGES = new Set(["@smithers-orchestrator/xstate"]);
 const LEGACY_UI_PACKAGES = new Set([
   "@smithers-orchestrator/gateway-ui",
   "@smithers-orchestrator/ui-styleguide",
@@ -103,12 +101,7 @@ const DUPLICATE_WRAPPER_NAMES = new Set([
   "textarea",
   "tooltip",
 ]);
-const DEPENDENCY_SECTIONS = [
-  "dependencies",
-  "devDependencies",
-  "optionalDependencies",
-  "peerDependencies",
-];
+const DEPENDENCY_SECTIONS = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"];
 const INVENTORY_KEYS = [
   "heavyWidgetDependencies",
   "legacyPackageUsage",
@@ -117,10 +110,7 @@ const INVENTORY_KEYS = [
   "styleEntryPoints",
   "uiImports",
 ];
-const SHADCN_DIRECTORIES = [
-  "packages/ui/src/chat/shadcn",
-  "packages/ui/src/primitives/shadcn",
-];
+const SHADCN_DIRECTORIES = ["packages/ui/src/chat/shadcn", "packages/ui/src/primitives/shadcn"];
 // The frozen agentic-ui program (freeze v2, integrationContract E) sanctions
 // exactly one new gateway-ui file per gateway lane; each lane adds ONLY its own
 // file to this set in its own branch, and the blanket legacy-facade rule below
@@ -193,81 +183,89 @@ const SHADCN_PROVENANCE_TRIGGERS = new Map([
   ["provenance/workflow-canvas.json", "packages/ui/src/canvas/WorkflowCanvas.tsx"],
 ]);
 const SHADCN_PROVENANCE_REQUIRED_FILES = new Map([
-  ["provenance/chat-foundation.json", [
-    "src/uiCss.ts",
-  ]],
+  ["provenance/chat-foundation.json", ["src/uiCss.ts"]],
   ["provenance/agentic-reasoning-tool.json", []],
   ["provenance/agentic-response-code.json", []],
   ["provenance/agentic-plan-sources.json", []],
   ["provenance/node-output-agentic.json", []],
-  ["provenance/conversation-foundation.json", [
-    "src/chat/MessageScroller.tsx",
-    "src/chat/Message.tsx",
-    "src/chat/MessageBranch.tsx",
-    "src/chat/Bubble.tsx",
-    "src/chat/CompactGroup.tsx",
-    "src/chat/ConversationCheckpoint.tsx",
-    "src/chat/Marker.tsx",
-    "src/chat/Shimmer.tsx",
-  ]],
-  ["provenance/prompt-attachments.json", [
-    "src/prompt/PromptInput.tsx",
-    "src/chat/Attachment.tsx",
-  ]],
-  ["provenance/reasoning-tools.json", [
-    "src/agentic/Reasoning.tsx",
-    "src/agentic/ChainOfThought.tsx",
-    "src/agentic/ToolCall.tsx",
-    "src/agentic/MessageResponse.tsx",
-    "src/agentic/AgentOutput.tsx",
-    "src/agentic/CodeBlock.tsx",
-  ]],
-  ["provenance/plans-tasks-queues.json", [
-    "src/agentic/Plan.tsx",
-    "src/agentic/TaskItem.tsx",
-    "src/agentic/AgentTask.tsx",
-    "src/agentic/Queue.tsx",
-    "src/agentic/ActivityTimeline.tsx",
-  ]],
-  ["provenance/approvals-checkpoints.json", [
-    "src/approvals/Confirmation.tsx",
-    "src/approvals/ApprovalCard.tsx",
-    "src/approvals/Checkpoint.tsx",
-  ]],
-  ["provenance/sources-citations.json", [
-    "src/agentic/Sources.tsx",
-    "src/agentic/InlineCitation.tsx",
-    "src/agentic/Suggestion.tsx",
-    "src/agentic/OpenInChat.tsx",
-  ]],
-  ["provenance/agent-identity-context.json", [
-    "src/agents/AgentDefinition.tsx",
-    "src/agents/AgentCard.tsx",
-    "src/agents/ModelSelector.tsx",
-    "src/agents/badges.tsx",
-    "src/agents/ContextUsage.tsx",
-  ]],
-  ["provenance/coding-artifacts.json", [
-    "src/artifacts/Artifact.tsx",
-    "src/artifacts/Snippet.tsx",
-    "src/artifacts/PackageInfo.tsx",
-    "src/artifacts/SchemaDisplay.tsx",
-    "src/artifacts/StackTrace.tsx",
-    "src/artifacts/TestResults.tsx",
-    "src/artifacts/Commit.tsx",
-    "src/artifacts/ChangeSummary.tsx",
-    "src/artifacts/EnvironmentVariables.tsx",
-    "src/artifacts/SecretField.tsx",
-  ]],
-  ["provenance/sandbox-previews.json", [
-    "src/sandbox/AgentSandbox.tsx",
-    "src/sandbox/WebPreview.tsx",
-    "src/sandbox/JSXPreview.tsx",
-  ]],
-  ["provenance/workflow-canvas.json", [
-    "src/canvas/WorkflowCanvas.tsx",
-    "src/canvas/canvasCss.ts",
-  ]],
+  [
+    "provenance/conversation-foundation.json",
+    [
+      "src/chat/MessageScroller.tsx",
+      "src/chat/Message.tsx",
+      "src/chat/MessageBranch.tsx",
+      "src/chat/Bubble.tsx",
+      "src/chat/CompactGroup.tsx",
+      "src/chat/ConversationCheckpoint.tsx",
+      "src/chat/Marker.tsx",
+      "src/chat/Shimmer.tsx",
+    ],
+  ],
+  ["provenance/prompt-attachments.json", ["src/prompt/PromptInput.tsx", "src/chat/Attachment.tsx"]],
+  [
+    "provenance/reasoning-tools.json",
+    [
+      "src/agentic/Reasoning.tsx",
+      "src/agentic/ChainOfThought.tsx",
+      "src/agentic/ToolCall.tsx",
+      "src/agentic/MessageResponse.tsx",
+      "src/agentic/AgentOutput.tsx",
+      "src/agentic/CodeBlock.tsx",
+    ],
+  ],
+  [
+    "provenance/plans-tasks-queues.json",
+    [
+      "src/agentic/Plan.tsx",
+      "src/agentic/TaskItem.tsx",
+      "src/agentic/AgentTask.tsx",
+      "src/agentic/Queue.tsx",
+      "src/agentic/ActivityTimeline.tsx",
+    ],
+  ],
+  [
+    "provenance/approvals-checkpoints.json",
+    ["src/approvals/Confirmation.tsx", "src/approvals/ApprovalCard.tsx", "src/approvals/Checkpoint.tsx"],
+  ],
+  [
+    "provenance/sources-citations.json",
+    [
+      "src/agentic/Sources.tsx",
+      "src/agentic/InlineCitation.tsx",
+      "src/agentic/Suggestion.tsx",
+      "src/agentic/OpenInChat.tsx",
+    ],
+  ],
+  [
+    "provenance/agent-identity-context.json",
+    [
+      "src/agents/AgentDefinition.tsx",
+      "src/agents/AgentCard.tsx",
+      "src/agents/ModelSelector.tsx",
+      "src/agents/badges.tsx",
+      "src/agents/ContextUsage.tsx",
+    ],
+  ],
+  [
+    "provenance/coding-artifacts.json",
+    [
+      "src/artifacts/Artifact.tsx",
+      "src/artifacts/Snippet.tsx",
+      "src/artifacts/PackageInfo.tsx",
+      "src/artifacts/SchemaDisplay.tsx",
+      "src/artifacts/StackTrace.tsx",
+      "src/artifacts/TestResults.tsx",
+      "src/artifacts/Commit.tsx",
+      "src/artifacts/ChangeSummary.tsx",
+      "src/artifacts/EnvironmentVariables.tsx",
+      "src/artifacts/SecretField.tsx",
+    ],
+  ],
+  [
+    "provenance/sandbox-previews.json",
+    ["src/sandbox/AgentSandbox.tsx", "src/sandbox/WebPreview.tsx", "src/sandbox/JSXPreview.tsx"],
+  ],
+  ["provenance/workflow-canvas.json", ["src/canvas/WorkflowCanvas.tsx", "src/canvas/canvasCss.ts"]],
 ]);
 const SHADCN_PROVENANCE_COMPONENTS = new Map([
   ["src/chat/MessageScroller.tsx", "provenance/conversation-foundation.json"],
@@ -327,7 +325,8 @@ const SHADCN_PROVENANCE_ENTRY_KEYS = [
   "ported",
   "registryItem",
 ];
-const SHADCN_PROVENANCE_VERIFICATION = "Each source file in an approved collection must name its upstream registry item URL in a lane manifest under provenance/. Entries record ported anatomy plus explicit omissions and divergences; this is provenance, not cryptographic verification.";
+const SHADCN_PROVENANCE_VERIFICATION =
+  "Each source file in an approved collection must name its upstream registry item URL in a lane manifest under provenance/. Entries record ported anatomy plus explicit omissions and divergences; this is provenance, not cryptographic verification.";
 const PACK_UI_DIRECTORIES = [".smithers/ui", "examples/ui"];
 const PACK_UI_IMPORTS = new Set([
   "react",
@@ -336,10 +335,43 @@ const PACK_UI_IMPORTS = new Set([
   "smithers-orchestrator/ui",
 ]);
 const INTRINSIC_VISUAL_TAGS = new Set([
-  "a", "article", "aside", "button", "canvas", "code", "div", "footer", "form",
-  "h1", "h2", "h3", "header", "iframe", "img", "input", "label", "li", "main",
-  "nav", "ol", "option", "p", "pre", "section", "select", "span", "strong", "svg",
-  "table", "tbody", "td", "textarea", "th", "thead", "tr", "ul",
+  "a",
+  "article",
+  "aside",
+  "button",
+  "canvas",
+  "code",
+  "div",
+  "footer",
+  "form",
+  "h1",
+  "h2",
+  "h3",
+  "header",
+  "iframe",
+  "img",
+  "input",
+  "label",
+  "li",
+  "main",
+  "nav",
+  "ol",
+  "option",
+  "p",
+  "pre",
+  "section",
+  "select",
+  "span",
+  "strong",
+  "svg",
+  "table",
+  "tbody",
+  "td",
+  "textarea",
+  "th",
+  "thead",
+  "tr",
+  "ul",
 ]);
 function toPosix(value) {
   return value.split("\\").join("/");
@@ -422,9 +454,7 @@ function directWorkspaceDirectories(root, parent) {
 
 function isSourcePath(path) {
   return (
-    SOURCE_EXTENSIONS.has(extname(path)) &&
-    !path.endsWith(".d.ts") &&
-    !/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path)
+    SOURCE_EXTENSIONS.has(extname(path)) && !path.endsWith(".d.ts") && !/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path)
   );
 }
 
@@ -440,20 +470,18 @@ function sourceFiles(root, kind) {
   const packUiFiles = PACK_UI_DIRECTORIES.flatMap((directory) => walk(root, directory, isSourcePath));
   const ignoredPackUiFiles = gitIgnoredSet(root, packUiFiles);
   return sorted(
-    ["packages", "apps"].flatMap((parent) =>
-      directWorkspaceDirectories(root, parent).flatMap((directory) =>
-        walk(root, directory, isSourcePath),
-      ),
-    ).concat(packUiFiles.filter((path) => !ignoredPackUiFiles.has(path))),
+    ["packages", "apps"]
+      .flatMap((parent) =>
+        directWorkspaceDirectories(root, parent).flatMap((directory) => walk(root, directory, isSourcePath)),
+      )
+      .concat(packUiFiles.filter((path) => !ignoredPackUiFiles.has(path))),
   );
 }
 
 function styleFiles(root, kind) {
   const roots = kind === "multi" ? ["src", "packages"] : ["packages", "apps", ...PACK_UI_DIRECTORIES];
   const files = sorted(
-    roots.flatMap((directory) =>
-      walk(root, directory, (path) => STYLE_EXTENSIONS.has(extname(path))),
-    ),
+    roots.flatMap((directory) => walk(root, directory, (path) => STYLE_EXTENSIONS.has(extname(path)))),
   );
   const ignoredPackUiFiles = gitIgnoredSet(root, files.filter(isPackUiPath));
   return files.filter((path) => !ignoredPackUiFiles.has(path));
@@ -467,18 +495,12 @@ function isPackLocalImport(path, specifier) {
   if (!specifier.startsWith(".")) return false;
   const root = PACK_UI_DIRECTORIES.find((directory) => path.startsWith(`${directory}/`));
   const target = posix.normalize(posix.join(posix.dirname(path), specifier));
-  const helperRoot = root === ".smithers/ui"
-    ? ".smithers/lib"
-    : root === "examples/ui"
-      ? "examples/lib"
-      : undefined;
+  const helperRoot = root === ".smithers/ui" ? ".smithers/lib" : root === "examples/ui" ? "examples/lib" : undefined;
   return Boolean(
-    root
-    && (
-      target === root
-      || target.startsWith(`${root}/`)
-      || (helperRoot && (target === helperRoot || target.startsWith(`${helperRoot}/`)))
-    )
+    root &&
+    (target === root ||
+      target.startsWith(`${root}/`) ||
+      (helperRoot && (target === helperRoot || target.startsWith(`${helperRoot}/`)))),
   );
 }
 
@@ -504,7 +526,9 @@ function packUiViolations(path, source) {
   function visit(node) {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       if (node.tagName.getText(sourceFile).toLowerCase() === "style") hasStyleTag = true;
-      if (node.attributes.properties.some((attribute) => ts.isJsxAttribute(attribute) && attribute.name.text === "style")) {
+      if (
+        node.attributes.properties.some((attribute) => ts.isJsxAttribute(attribute) && attribute.name.text === "style")
+      ) {
         hasStyleProp = true;
       }
     }
@@ -553,7 +577,7 @@ function lexModules(source) {
       index += 2;
       continue;
     }
-    if (character === "\"" || character === "'") {
+    if (character === '"' || character === "'") {
       const quote = character;
       let value = "";
       index += 1;
@@ -605,7 +629,8 @@ function parseModuleReferences(source) {
     const token = tokens[index];
     if (token.kind !== "identifier") continue;
     if ((token.value === "import" || token.value === "require") && tokens[index + 1]?.value === "(") {
-      if (tokens[index + 2]?.kind === "string") references.push({ specifier: tokens[index + 2].value, typeOnly: false });
+      if (tokens[index + 2]?.kind === "string")
+        references.push({ specifier: tokens[index + 2].value, typeOnly: false });
       continue;
     }
     if (token.value === "import" && tokens[index + 1]?.kind === "string") {
@@ -653,9 +678,11 @@ function isGatewayReact(specifier) {
 }
 
 function isSmithersPackage(specifier) {
-  return specifier === "smithers-orchestrator" ||
+  return (
+    specifier === "smithers-orchestrator" ||
     specifier.startsWith("smithers-orchestrator/") ||
-    specifier.startsWith("@smithers-orchestrator/");
+    specifier.startsWith("@smithers-orchestrator/")
+  );
 }
 
 function isLegacyUiPackage(specifier) {
@@ -669,18 +696,15 @@ function isHeavyDependency(specifier) {
 function isDuplicateWrapperOrIcon(path) {
   const withoutExtension = posix.basename(path, extname(path)).toLowerCase();
   const looksVisual =
-    path.endsWith(".jsx") ||
-    path.endsWith(".tsx") ||
-    /\/(cards?|components?|icons?|ui|views?)\//i.test(path);
+    path.endsWith(".jsx") || path.endsWith(".tsx") || /\/(cards?|components?|icons?|ui|views?)\//i.test(path);
   return (
-    looksVisual && (
-      DUPLICATE_WRAPPER_NAMES.has(withoutExtension) ||
+    looksVisual &&
+    (DUPLICATE_WRAPPER_NAMES.has(withoutExtension) ||
       withoutExtension === "icon" ||
       withoutExtension === "icons" ||
       withoutExtension.endsWith("-icon") ||
       withoutExtension.endsWith("icon") ||
-      path.toLowerCase().includes("/icons/")
-    )
+      path.toLowerCase().includes("/icons/"))
   );
 }
 
@@ -698,7 +722,11 @@ function intrinsicVisualTags(source, path) {
   const tags = [];
   if (path.endsWith(".jsx") || path.endsWith(".tsx")) {
     for (let index = 0; index < tokens.length - 1; index += 1) {
-      if (tokens[index].value === "<" && tokens[index + 1].kind === "identifier" && INTRINSIC_VISUAL_TAGS.has(tokens[index + 1].value)) {
+      if (
+        tokens[index].value === "<" &&
+        tokens[index + 1].kind === "identifier" &&
+        INTRINSIC_VISUAL_TAGS.has(tokens[index + 1].value)
+      ) {
         tags.push(tokens[index + 1].value);
       }
     }
@@ -747,11 +775,13 @@ function formatViolation(rule, detail) {
 
 function exportEntries(path, manifest) {
   const entries = typeof manifest.name === "string" ? [`${path}#name=${JSON.stringify(manifest.name)}`] : [];
-  entries.push(...(manifest.exports && typeof manifest.exports === "object"
-    ? Object.entries(manifest.exports)
-    .sort(([left], [right]) => compareText(left, right))
-    .map(([key, value]) => `${path}#${key}=${JSON.stringify(stableValue(value))}`)
-    : []));
+  entries.push(
+    ...(manifest.exports && typeof manifest.exports === "object"
+      ? Object.entries(manifest.exports)
+          .sort(([left], [right]) => compareText(left, right))
+          .map(([key, value]) => `${path}#${key}=${JSON.stringify(stableValue(value))}`)
+      : []),
+  );
   for (const key of ["browser", "main", "module"]) {
     if (typeof manifest[key] === "string") entries.push(`${path}#${key}=${JSON.stringify(manifest[key])}`);
   }
@@ -786,7 +816,7 @@ function publicEntryPaths(root, manifestPath, manifest, files) {
         const pattern = new RegExp(`^${normalized.split("*").map(escapeRegExp).join(".*")}$`);
         return files.filter((path) => pattern.test(path));
       })
-      .filter((target) => !target.endsWith(".d.ts"))
+      .filter((target) => !target.endsWith(".d.ts")),
   );
 }
 
@@ -794,7 +824,11 @@ function jsxComponentSpecifiers(source) {
   const tokens = lexModules(source);
   const jsxRoots = new Set();
   for (let index = 0; index < tokens.length - 1; index += 1) {
-    if (tokens[index].value === "<" && tokens[index + 1].kind === "identifier" && /^[A-Z]/.test(tokens[index + 1].value)) {
+    if (
+      tokens[index].value === "<" &&
+      tokens[index + 1].kind === "identifier" &&
+      /^[A-Z]/.test(tokens[index + 1].value)
+    ) {
       jsxRoots.add(tokens[index + 1].value);
     }
   }
@@ -809,7 +843,8 @@ function jsxComponentSpecifiers(source) {
         specifier = tokens[cursor + 1].value;
         break;
       }
-      if (tokens[cursor].kind === "identifier" && /^[A-Z]/.test(tokens[cursor].value)) bindings.add(tokens[cursor].value);
+      if (tokens[cursor].kind === "identifier" && /^[A-Z]/.test(tokens[cursor].value))
+        bindings.add(tokens[cursor].value);
     }
     if (specifier && [...bindings].some((binding) => jsxRoots.has(binding))) specifiers.push(specifier);
   }
@@ -846,13 +881,14 @@ function commonJsExportName(node) {
 
 function sourceFile(source, path) {
   const extension = extname(path);
-  const scriptKind = extension === ".tsx"
-    ? ts.ScriptKind.TSX
-    : extension === ".jsx"
-      ? ts.ScriptKind.JSX
-      : [".js", ".mjs", ".cjs"].includes(extension)
-        ? ts.ScriptKind.JS
-        : ts.ScriptKind.TS;
+  const scriptKind =
+    extension === ".tsx"
+      ? ts.ScriptKind.TSX
+      : extension === ".jsx"
+        ? ts.ScriptKind.JSX
+        : [".js", ".mjs", ".cjs"].includes(extension)
+          ? ts.ScriptKind.JS
+          : ts.ScriptKind.TS;
   return ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, scriptKind);
 }
 
@@ -902,8 +938,7 @@ function hasPublicHookExport(source, path, exportMode = "all") {
     }
     if (hasExportModifier(statement)) {
       const isDefaultExport = hasDefaultModifier(statement);
-      const isTypeOnlyDeclaration =
-        ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement);
+      const isTypeOnlyDeclaration = ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement);
       if (isDefaultExport && includesDefaultExport && !isTypeOnlyDeclaration) {
         hasRuntimeDefaultExport = true;
       }
@@ -922,10 +957,7 @@ function hasPublicHookExport(source, path, exportMode = "all") {
         return true;
       }
     }
-    if (
-      ts.isExportAssignment(statement) &&
-      includesDefaultExport
-    ) {
+    if (ts.isExportAssignment(statement) && includesDefaultExport) {
       hasRuntimeDefaultExport = true;
       if (ts.isIdentifier(statement.expression) && isHookName(statement.expression.text)) return true;
     }
@@ -1001,10 +1033,11 @@ function relativeHookReexports(source, path) {
       continue;
     }
     if (
-      statement.exportClause.elements.some((element) =>
-        !element.isTypeOnly &&
-        element.name.text === "default" &&
-        (element.propertyName ?? element.name).text === "default",
+      statement.exportClause.elements.some(
+        (element) =>
+          !element.isTypeOnly &&
+          element.name.text === "default" &&
+          (element.propertyName ?? element.name).text === "default",
       )
     ) {
       reexports.push({ exportedMode: "default", targetMode: "default", specifier: statement.moduleSpecifier.text });
@@ -1041,7 +1074,22 @@ function uiLayer(path) {
   const relativePath = path.slice(prefix.length);
   if (relativePath.startsWith("smithers/connected/")) return "connected";
   const layer = relativePath.split("/")[0];
-  return ["adapters", "agentic", "agents", "ai", "approvals", "artifacts", "canvas", "chat", "internal", "primitives", "prompt", "sandbox", "smithers", "styles"].includes(layer)
+  return [
+    "adapters",
+    "agentic",
+    "agents",
+    "ai",
+    "approvals",
+    "artifacts",
+    "canvas",
+    "chat",
+    "internal",
+    "primitives",
+    "prompt",
+    "sandbox",
+    "smithers",
+    "styles",
+  ].includes(layer)
     ? layer
     : null;
 }
@@ -1064,11 +1112,13 @@ function resolveRelativeSource(file, specifier, files) {
   const base = posix.normalize(posix.join(posix.dirname(file), specifier));
   const extension = extname(base);
   const stem = extension ? base.slice(0, -extension.length) : base;
-  const candidates = [...new Set([
-    base,
-    ...[".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"].map((candidateExtension) => `${stem}${candidateExtension}`),
-    ...[".ts", ".tsx", ".js", ".jsx"].map((extension) => `${base}/index${extension}`),
-  ])];
+  const candidates = [
+    ...new Set([
+      base,
+      ...[".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"].map((candidateExtension) => `${stem}${candidateExtension}`),
+      ...[".ts", ".tsx", ".js", ".jsx"].map((extension) => `${base}/index${extension}`),
+    ]),
+  ];
   return candidates.find((candidate) => files.includes(candidate)) ?? null;
 }
 
@@ -1094,7 +1144,11 @@ function disconnectedPropViolations(path, source) {
   const componentFunction = (expression) => {
     if (!expression) return null;
     if (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression)) return expression;
-    if (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) || ts.isSatisfiesExpression(expression)) {
+    if (
+      ts.isParenthesizedExpression(expression) ||
+      ts.isAsExpression(expression) ||
+      ts.isSatisfiesExpression(expression)
+    ) {
       return componentFunction(expression.expression);
     }
     if (ts.isCallExpression(expression)) {
@@ -1104,15 +1158,21 @@ function disconnectedPropViolations(path, source) {
   };
   const exported = new Set();
   for (const statement of file.statements) {
-    if (ts.isExportDeclaration(statement) && statement.exportClause && ts.isNamedExports(statement.exportClause) && !statement.moduleSpecifier) {
+    if (
+      ts.isExportDeclaration(statement) &&
+      statement.exportClause &&
+      ts.isNamedExports(statement.exportClause) &&
+      !statement.moduleSpecifier
+    ) {
       for (const element of statement.exportClause.elements) exported.add((element.propertyName ?? element.name).text);
     }
-    if (ts.isExportAssignment(statement) && ts.isIdentifier(statement.expression)) exported.add(statement.expression.text);
+    if (ts.isExportAssignment(statement) && ts.isIdentifier(statement.expression))
+      exported.add(statement.expression.text);
   }
   const violations = [];
   const inspectFunction = (name, fn, contextualType = null, wrapper = null) => {
     if (!fn || !containsJsx(fn) || fn.parameters.length === 0) return;
-    const wrapperTypes = wrapper && ts.isCallExpression(wrapper) ? wrapper.typeArguments?.length ?? 0 : 0;
+    const wrapperTypes = wrapper && ts.isCallExpression(wrapper) ? (wrapper.typeArguments?.length ?? 0) : 0;
     if (!fn.parameters[0].type && !contextualType && wrapperTypes === 0) violations.push(name);
   };
   for (const statement of file.statements) {
@@ -1162,19 +1222,38 @@ function shadcnViolations(root, files) {
     violations.push(formatViolation("shadcn-provenance", "version must be 2"));
   }
   if (JSON.stringify(manifest.policy?.registries) !== JSON.stringify(SHADCN_PROVENANCE_REGISTRIES)) {
-    violations.push(formatViolation("shadcn-provenance", `policy.registries must equal ${JSON.stringify(SHADCN_PROVENANCE_REGISTRIES)}`));
+    violations.push(
+      formatViolation(
+        "shadcn-provenance",
+        `policy.registries must equal ${JSON.stringify(SHADCN_PROVENANCE_REGISTRIES)}`,
+      ),
+    );
   }
   if (JSON.stringify(manifest.policy?.collections) !== JSON.stringify(SHADCN_PROVENANCE_COLLECTIONS)) {
-    violations.push(formatViolation("shadcn-provenance", `policy.collections must equal ${JSON.stringify(SHADCN_PROVENANCE_COLLECTIONS)}`));
+    violations.push(
+      formatViolation(
+        "shadcn-provenance",
+        `policy.collections must equal ${JSON.stringify(SHADCN_PROVENANCE_COLLECTIONS)}`,
+      ),
+    );
   }
   if (manifest.policy?.verification !== SHADCN_PROVENANCE_VERIFICATION) {
-    violations.push(formatViolation("shadcn-provenance", "policy.verification does not match the frozen provenance policy"));
+    violations.push(
+      formatViolation("shadcn-provenance", "policy.verification does not match the frozen provenance policy"),
+    );
   }
   if (JSON.stringify(manifest.policy?.entryFiles) !== JSON.stringify(SHADCN_PROVENANCE_ENTRY_FILES)) {
-    violations.push(formatViolation("shadcn-provenance", `policy.entryFiles must equal ${JSON.stringify(SHADCN_PROVENANCE_ENTRY_FILES)}`));
+    violations.push(
+      formatViolation(
+        "shadcn-provenance",
+        `policy.entryFiles must equal ${JSON.stringify(SHADCN_PROVENANCE_ENTRY_FILES)}`,
+      ),
+    );
   }
   if (!Array.isArray(manifest.entries)) {
-    violations.push(formatViolation("shadcn-provenance", "entries must be an array aggregating the provenance/ fragments"));
+    violations.push(
+      formatViolation("shadcn-provenance", "entries must be an array aggregating the provenance/ fragments"),
+    );
   }
 
   const recordedPaths = new Set();
@@ -1210,7 +1289,9 @@ function shadcnViolations(root, files) {
       const entryPath = typeof entry?.file === "string" ? toPosix(entry.file) : "";
       const fullPath = entryPath ? `packages/ui/${entryPath}` : "";
       if (JSON.stringify(Object.keys(entry ?? {}).sort()) !== JSON.stringify(SHADCN_PROVENANCE_ENTRY_KEYS)) {
-        violations.push(formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} does not use the frozen entry shape`));
+        violations.push(
+          formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} does not use the frozen entry shape`),
+        );
       }
       if (!entryPath || entryPath.startsWith("/") || entryPath.split("/").includes("..")) {
         violations.push(formatViolation("shadcn-provenance", `${laneManifestPath} has an invalid or missing file`));
@@ -1226,18 +1307,36 @@ function shadcnViolations(root, files) {
         }
       }
 
-      if (!Array.isArray(entry?.exports) || entry.exports.length === 0 || entry.exports.some((value) => typeof value !== "string" || !value)) {
-        violations.push(formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} exports must be a non-empty string array`));
+      if (
+        !Array.isArray(entry?.exports) ||
+        entry.exports.length === 0 ||
+        entry.exports.some((value) => typeof value !== "string" || !value)
+      ) {
+        violations.push(
+          formatViolation(
+            "shadcn-provenance",
+            `${entryPath || laneManifestPath} exports must be a non-empty string array`,
+          ),
+        );
       }
       if (!SHADCN_PROVENANCE_COLLECTIONS.includes(entry?.collection)) {
-        violations.push(formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} has an unapproved collection`));
+        violations.push(
+          formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} has an unapproved collection`),
+        );
       }
       if (entry?.ported !== "partial-anatomy" && entry?.ported !== "full-anatomy") {
-        violations.push(formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} ported must be partial-anatomy or full-anatomy`));
+        violations.push(
+          formatViolation(
+            "shadcn-provenance",
+            `${entryPath || laneManifestPath} ported must be partial-anatomy or full-anatomy`,
+          ),
+        );
       }
       for (const field of ["omissions", "divergences"]) {
         if (!Array.isArray(entry?.[field]) || entry[field].some((value) => typeof value !== "string")) {
-          violations.push(formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} ${field} must be a string array`));
+          violations.push(
+            formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} ${field} must be a string array`),
+          );
         }
       }
 
@@ -1245,28 +1344,33 @@ function shadcnViolations(root, files) {
         if (entry?.registryItem === null) {
           // Smithers-native component with no upstream registry item.
         } else {
-        const registryItem = new URL(entry?.registryItem);
-        const expectedOrigin = entry?.collection === "agentic/ai-elements"
-          ? "https://elements.ai-sdk.dev"
-          : "https://ui.shadcn.com";
-        const approvedPath = expectedOrigin === "https://elements.ai-sdk.dev"
-          ? registryItem.pathname.startsWith("/components/")
-          : registryItem.pathname.startsWith("/docs/components/base/") ||
-            registryItem.pathname.startsWith("/docs/utils/") ||
-            registryItem.pathname.startsWith("/r/");
-        if (
-          registryItem.origin !== expectedOrigin ||
-          registryItem.username ||
-          registryItem.password ||
-          !approvedPath ||
-          registryItem.search ||
-          registryItem.hash
-        ) {
-          throw new Error("not an approved registry item URL");
-        }
+          const registryItem = new URL(entry?.registryItem);
+          const expectedOrigin =
+            entry?.collection === "agentic/ai-elements" ? "https://elements.ai-sdk.dev" : "https://ui.shadcn.com";
+          const approvedPath =
+            expectedOrigin === "https://elements.ai-sdk.dev"
+              ? registryItem.pathname.startsWith("/components/")
+              : registryItem.pathname.startsWith("/docs/components/base/") ||
+                registryItem.pathname.startsWith("/docs/utils/") ||
+                registryItem.pathname.startsWith("/r/");
+          if (
+            registryItem.origin !== expectedOrigin ||
+            registryItem.username ||
+            registryItem.password ||
+            !approvedPath ||
+            registryItem.search ||
+            registryItem.hash
+          ) {
+            throw new Error("not an approved registry item URL");
+          }
         }
       } catch {
-        violations.push(formatViolation("shadcn-provenance", `${entryPath || laneManifestPath} registryItem must be an exact approved registry URL`));
+        violations.push(
+          formatViolation(
+            "shadcn-provenance",
+            `${entryPath || laneManifestPath} registryItem must be an exact approved registry URL`,
+          ),
+        );
       }
     }
 
@@ -1281,22 +1385,27 @@ function shadcnViolations(root, files) {
 
   for (const entry of aggregatedByFile.values()) aggregatedEntries.push(entry);
   if (Array.isArray(manifest.entries) && JSON.stringify(manifest.entries) !== JSON.stringify(aggregatedEntries)) {
-    violations.push(formatViolation("shadcn-provenance", "entries must equal the aggregation of the provenance/ fragments (superseded entries removed)"));
+    violations.push(
+      formatViolation(
+        "shadcn-provenance",
+        "entries must equal the aggregation of the provenance/ fragments (superseded entries removed)",
+      ),
+    );
   }
 
   const shadcnFiles = files.filter((path) => SHADCN_DIRECTORIES.some((directory) => path.startsWith(`${directory}/`)));
   for (const path of shadcnFiles) {
-    if (!recordedPaths.has(path)) violations.push(formatViolation("shadcn-provenance", `${path} has no provenance entry`));
+    if (!recordedPaths.has(path))
+      violations.push(formatViolation("shadcn-provenance", `${path} has no provenance entry`));
   }
   for (const [entryPath, expectedManifest] of SHADCN_PROVENANCE_COMPONENTS) {
-    if (
-      fileSet.has(`packages/ui/${entryPath}`) &&
-      recordedManifests.get(entryPath) !== expectedManifest
-    ) {
-      violations.push(formatViolation(
-        "shadcn-provenance",
-        `packages/ui/${entryPath} has no entry in packages/ui/${expectedManifest}`,
-      ));
+    if (fileSet.has(`packages/ui/${entryPath}`) && recordedManifests.get(entryPath) !== expectedManifest) {
+      violations.push(
+        formatViolation(
+          "shadcn-provenance",
+          `packages/ui/${entryPath} has no entry in packages/ui/${expectedManifest}`,
+        ),
+      );
     }
   }
   return violations;
@@ -1338,7 +1447,11 @@ export function collectUiArchitectureState(root, kind = "smithers") {
         violations.push(formatViolation("official-shadcn-only", `${path} imports ${specifier}`));
       }
       if (kind === "smithers" && path.startsWith("packages/components/src/")) {
-        if (isUiSpecifier(specifier) || matchesPrefix(specifier, VISUAL_DEPENDENCY_PREFIXES) || STYLE_EXTENSIONS.has(extname(specifier))) {
+        if (
+          isUiSpecifier(specifier) ||
+          matchesPrefix(specifier, VISUAL_DEPENDENCY_PREFIXES) ||
+          STYLE_EXTENSIONS.has(extname(specifier))
+        ) {
           violations.push(formatViolation("components-non-visual", `${path} imports ${specifier}`));
         }
       }
@@ -1360,7 +1473,11 @@ export function collectUiArchitectureState(root, kind = "smithers") {
         violations.push(formatViolation("gateway-react-location", `${path} imports ${specifier}`));
       }
       if (kind === "smithers" && path.startsWith("packages/gateway-react/src/")) {
-        if (isSmithersPackage(specifier) && basePackage(specifier) !== "@smithers-orchestrator/gateway-client" && basePackage(specifier) !== "smithers-orchestrator/gateway-client") {
+        if (
+          isSmithersPackage(specifier) &&
+          basePackage(specifier) !== "@smithers-orchestrator/gateway-client" &&
+          basePackage(specifier) !== "smithers-orchestrator/gateway-client"
+        ) {
           violations.push(formatViolation("gateway-react-direction", `${path} imports ${specifier}`));
         }
       }
@@ -1388,14 +1505,22 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       if (layer) {
         for (const specifier of specifiers) {
           const target = importedUiLayer(path, specifier);
-          if (target && !allowedLayers[layer].has(target) && !SANCTIONED_UI_LAYER_EDGES.has(`${path} -> ${specifier}`)) {
-            violations.push(formatViolation("ui-layer-direction", `${path} (${layer}) imports ${specifier} (${target})`));
+          if (
+            target &&
+            !allowedLayers[layer].has(target) &&
+            !SANCTIONED_UI_LAYER_EDGES.has(`${path} -> ${specifier}`)
+          ) {
+            violations.push(
+              formatViolation("ui-layer-direction", `${path} (${layer}) imports ${specifier} (${target})`),
+            );
           }
         }
         if (layer === "smithers") {
           for (const reference of references.get(path)) {
             if (importedUiLayer(path, reference.specifier) === "adapters" && !reference.typeOnly) {
-              violations.push(formatViolation("adapter-types-only", `${path} imports ${reference.specifier} at runtime`));
+              violations.push(
+                formatViolation("adapter-types-only", `${path} imports ${reference.specifier} at runtime`),
+              );
             }
           }
         }
@@ -1405,7 +1530,11 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       }
       if (path === "packages/ui/src/index.ts" || path === "packages/ui/src/index.tsx") {
         for (const specifier of specifiers) {
-          if (specifier.includes("/adapters") || specifier.includes("smithers/connected") || isHeavyDependency(specifier)) {
+          if (
+            specifier.includes("/adapters") ||
+            specifier.includes("smithers/connected") ||
+            isHeavyDependency(specifier)
+          ) {
             violations.push(formatViolation("base-ui-export", `${path} exposes ${specifier}`));
           }
           const target = resolveRelativeSource(path, specifier, files);
@@ -1437,7 +1566,8 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       }
       if (
         (path.startsWith("packages/gateway-ui/src/") ||
-        (path.startsWith("packages/ui-styleguide/src/") && path !== "packages/ui-styleguide/src/standaloneThemeCss.ts")) &&
+          (path.startsWith("packages/ui-styleguide/src/") &&
+            path !== "packages/ui-styleguide/src/standaloneThemeCss.ts")) &&
         !SANCTIONED_GATEWAY_UI_PROGRAM_FILES.has(path)
       ) {
         violations.push(formatViolation("compatibility-facade-file", `${path} is legacy facade implementation`));
@@ -1446,7 +1576,9 @@ export function collectUiArchitectureState(root, kind = "smithers") {
   }
 
   if (kind === "smithers") {
-    for (const entry of ["packages/ui/src/index.ts", "packages/ui/src/index.tsx"].filter((path) => files.includes(path))) {
+    for (const entry of ["packages/ui/src/index.ts", "packages/ui/src/index.tsx"].filter((path) =>
+      files.includes(path),
+    )) {
       const pending = [entry];
       const visited = new Set();
       while (pending.length) {
@@ -1455,12 +1587,19 @@ export function collectUiArchitectureState(root, kind = "smithers") {
         visited.add(current);
         for (const specifier of imports.get(current) ?? []) {
           if (isHeavyDependency(specifier)) {
-            violations.push(formatViolation("base-ui-export", `${entry} transitively exposes heavy dependency ${specifier} via ${current}`));
+            violations.push(
+              formatViolation(
+                "base-ui-export",
+                `${entry} transitively exposes heavy dependency ${specifier} via ${current}`,
+              ),
+            );
           }
           const target = resolveRelativeSource(current, specifier, files);
           if (!target) continue;
           if (target.startsWith("packages/ui/src/adapters/")) {
-            violations.push(formatViolation("base-ui-export", `${entry} transitively exposes adapter module ${target}`));
+            violations.push(
+              formatViolation("base-ui-export", `${entry} transitively exposes adapter module ${target}`),
+            );
           }
           pending.push(target);
         }
@@ -1471,7 +1610,8 @@ export function collectUiArchitectureState(root, kind = "smithers") {
   for (const path of files) {
     if (!isPackUiPath(path) && isStyleModule(path)) inventories.styleEntryPoints.push(path);
     const canonicalUi = kind === "smithers" && path.startsWith("packages/ui/src/");
-    if (!isPackUiPath(path) && !canonicalUi && isDuplicateWrapperOrIcon(path)) inventories.localDuplicateWrappersAndIcons.push(path);
+    if (!isPackUiPath(path) && !canonicalUi && isDuplicateWrapperOrIcon(path))
+      inventories.localDuplicateWrappersAndIcons.push(path);
   }
   inventories.styleEntryPoints.push(...styles);
 
@@ -1493,7 +1633,9 @@ export function collectUiArchitectureState(root, kind = "smithers") {
     if (includeExports) inventories.packageExportSurfaces.push(...exportEntries(path, manifest));
     for (const section of DEPENDENCY_SECTIONS) {
       const dependencies = manifest[section] ?? {};
-      for (const [dependency, version] of Object.entries(dependencies).sort(([left], [right]) => compareText(left, right))) {
+      for (const [dependency, version] of Object.entries(dependencies).sort(([left], [right]) =>
+        compareText(left, right),
+      )) {
         if (isHeavyDependency(dependency)) {
           inventories.heavyWidgetDependencies.push(`${path}#${section}:${dependency}@${version}`);
         }
@@ -1539,7 +1681,8 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       kind === "smithers" &&
       manifest.name !== "@smithers-orchestrator/gateway-react" &&
       !permitsWorkflowRenderHooks &&
-      (/(^|[-/])hooks?$/.test(manifest.name ?? "") || exportKeys.some((key) => /(^|\/)(?:hooks?|use(?:[-_A-Z]|$))/.test(key)))
+      (/(^|[-/])hooks?$/.test(manifest.name ?? "") ||
+        exportKeys.some((key) => /(^|\/)(?:hooks?|use(?:[-_A-Z]|$))/.test(key)))
     ) {
       violations.push(formatViolation("single-public-hook-package", `${path} publishes a hook package or hook export`));
     }
@@ -1552,7 +1695,9 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       for (const entryPath of publicEntryPaths(absoluteRoot, path, manifest, files)) {
         const entrySource = readFileSync(join(absoluteRoot, entryPath), "utf8");
         if (publicEntryExportsHook(entryPath, files, sources)) {
-          violations.push(formatViolation("single-public-hook-package", `${path} root entry ${entryPath} exports a React-style hook`));
+          violations.push(
+            formatViolation("single-public-hook-package", `${path} root entry ${entryPath} exports a React-style hook`),
+          );
         }
         for (const specifier of parseModuleSpecifiers(entrySource)) {
           if (isGatewayReact(specifier) && !entryPath.startsWith("packages/ui/src/smithers/connected/")) {
@@ -1568,7 +1713,8 @@ export function collectUiArchitectureState(root, kind = "smithers") {
       }
       for (const [key, value] of Object.entries(manifest.exports ?? {})) {
         const target = JSON.stringify(value);
-        if (key === "./*") violations.push(formatViolation("explicit-ui-subpaths", `${path} exposes a wildcard subpath`));
+        if (key === "./*")
+          violations.push(formatViolation("explicit-ui-subpaths", `${path} exposes a wildcard subpath`));
         if (target.includes("adapters") && !key.startsWith("./adapters/")) {
           violations.push(formatViolation("explicit-ui-subpaths", `${path} exposes adapters through ${key}`));
         }
@@ -1599,7 +1745,12 @@ export function collectUiArchitectureState(root, kind = "smithers") {
         if ([".jsx", ".tsx"].includes(extname(sourcePath))) {
           for (const specifier of jsxComponentSpecifiers(source)) {
             if (!specifier.startsWith(".") && !isSmithersPackage(specifier) && basePackage(specifier) !== "react") {
-              violations.push(formatViolation("single-visual-package", `${sourcePath} renders a component imported from ${specifier}`));
+              violations.push(
+                formatViolation(
+                  "single-visual-package",
+                  `${sourcePath} renders a component imported from ${specifier}`,
+                ),
+              );
             }
           }
         }
@@ -1647,7 +1798,10 @@ export function checkUiArchitecture({ root, baselinePath, kind = "smithers" }) {
   try {
     baseline = readJson(absoluteBaseline);
   } catch (error) {
-    return { ok: false, errors: [`Cannot read ${toPosix(relative(absoluteRoot, absoluteBaseline))}: ${error.message}`] };
+    return {
+      ok: false,
+      errors: [`Cannot read ${toPosix(relative(absoluteRoot, absoluteBaseline))}: ${error.message}`],
+    };
   }
   const state = collectUiArchitectureState(absoluteRoot, kind);
   if (baseline.version !== state.version || baseline.repo !== kind) {
@@ -1665,7 +1819,8 @@ export function checkUiArchitecture({ root, baselinePath, kind = "smithers" }) {
     const expected = Array.isArray(baseline.inventories?.[key]) ? baseline.inventories[key] : [];
     const actual = state.inventories[key];
     for (const entry of arrayDifference(actual, expected)) errors.push(`Inventory ${key} gained: ${entry}`);
-    for (const entry of arrayDifference(expected, actual)) errors.push(`Inventory ${key} removed (ratchet the baseline): ${entry}`);
+    for (const entry of arrayDifference(expected, actual))
+      errors.push(`Inventory ${key} removed (ratchet the baseline): ${entry}`);
     if (JSON.stringify(expected) !== JSON.stringify(sorted(expected))) {
       errors.push(`Inventory ${key} must be sorted and unique`);
     }
@@ -1690,7 +1845,9 @@ function runCli() {
     process.exitCode = 1;
     return;
   }
-  process.stdout.write(`UI architecture guard passed (${kind}; ${state.violations.length} allowlisted legacy violations).\n`);
+  process.stdout.write(
+    `UI architecture guard passed (${kind}; ${state.violations.length} allowlisted legacy violations).\n`,
+  );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) runCli();

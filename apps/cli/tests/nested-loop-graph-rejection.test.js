@@ -46,21 +46,25 @@ export default smithers((ctx) => {
 `;
 
 test("smithers graph fails fast (statically) on a literal immediate nested <Loop>", () => {
-    writeFileSync(FIXTURE_PATH, NESTED_LOOP_FIXTURE, "utf8");
-    try {
-        const result = spawnSync(process.execPath, ["run", CLI_ENTRY, "graph", "examples/_nested-loop-rejection-fixture.jsx"], {
-            cwd: REPO_ROOT,
-            encoding: "utf8",
-            maxBuffer: 10 * 1024 * 1024,
-        });
-        expect(result.status).not.toBe(0);
-        const combined = `${result.stdout}\n${result.stderr}`;
-        expect(combined).toContain("Nested <Loop>/<Ralph>");
-        // The error must name both loop ids and suggest the queue-based fix.
-        expect(combined).toContain("outer");
-        expect(combined).toContain("inner");
-        expect(combined).toContain("MergeQueue");
-    } finally {
-        rmSync(FIXTURE_PATH, { force: true });
-    }
+  writeFileSync(FIXTURE_PATH, NESTED_LOOP_FIXTURE, "utf8");
+  try {
+    const result = spawnSync(
+      process.execPath,
+      ["run", CLI_ENTRY, "graph", "examples/_nested-loop-rejection-fixture.jsx"],
+      {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        maxBuffer: 10 * 1024 * 1024,
+      },
+    );
+    expect(result.status).not.toBe(0);
+    const combined = `${result.stdout}\n${result.stderr}`;
+    expect(combined).toContain("Nested <Loop>/<Ralph>");
+    // The error must name both loop ids and suggest the queue-based fix.
+    expect(combined).toContain("outer");
+    expect(combined).toContain("inner");
+    expect(combined).toContain("MergeQueue");
+  } finally {
+    rmSync(FIXTURE_PATH, { force: true });
+  }
 }, 60_000);

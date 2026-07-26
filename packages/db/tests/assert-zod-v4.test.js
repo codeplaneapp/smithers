@@ -16,9 +16,7 @@ describe("assertZodV4 with real zod", () => {
   });
 
   test("zodToTable still builds a table from a real v4 schema", () => {
-    expect(() =>
-      zodToTable("ok_table", z.object({ name: z.string(), score: z.number() })),
-    ).not.toThrow();
+    expect(() => zodToTable("ok_table", z.object({ name: z.string(), score: z.number() }))).not.toThrow();
   });
 
   test("zodToTable rejects a Zod v3-shaped schema with an actionable error", () => {

@@ -121,8 +121,7 @@ function FilterMenu<T extends string>({
  * real run rather than the dead local route.
  */
 function openRunInspector(run: RunSummary): void {
-  const workflowKey =
-    run.workflowKey && run.workflowKey.trim() !== "" ? run.workflowKey : run.runId;
+  const workflowKey = run.workflowKey && run.workflowKey.trim() !== "" ? run.workflowKey : run.runId;
   openSurface({ kind: "gatewayRun", workflowKey, runId: run.runId });
 }
 
@@ -169,26 +168,15 @@ function RunRow({ run }: { run: RunSummary }) {
         </div>
       ) : null}
 
-      {run.status === "failed" && run.errorText ? (
-        <div className="runs-error">{run.errorText}</div>
-      ) : null}
+      {run.status === "failed" && run.errorText ? <div className="runs-error">{run.errorText}</div> : null}
 
       {run.status === "waiting" && run.blockedNodeLabel ? (
-        <div
-          className="runs-approval"
-          data-testid="runs-approval"
-          onClick={(event) => event.stopPropagation()}
-        >
+        <div className="runs-approval" data-testid="runs-approval" onClick={(event) => event.stopPropagation()}>
           <span>
-            Waiting for approval:{" "}
-            <span className="runs-approval-node">{run.blockedNodeLabel}</span>
+            Waiting for approval: <span className="runs-approval-node">{run.blockedNodeLabel}</span>
           </span>
           <div className="runs-approval-actions">
-            <button
-              className="btn btn-brand tone-ok"
-              type="button"
-              onClick={() => approve(run.runId)}
-            >
+            <button className="btn btn-brand tone-ok" type="button" onClick={() => approve(run.runId)}>
               Approve
             </button>
             <button className="btn btn-deny" type="button" onClick={() => deny(run.runId)}>
@@ -199,19 +187,14 @@ function RunRow({ run }: { run: RunSummary }) {
       ) : null}
 
       <div className="runs-row-actions" onClick={(event) => event.stopPropagation()}>
-        <button
-          className="btn"
-          type="button"
-          onClick={() => openRunInspector(run)}
-        >
+        <button className="btn" type="button" onClick={() => openRunInspector(run)}>
           Inspect
         </button>
         <button
           className="btn"
           type="button"
           onClick={() => {
-            const workflowKey =
-              run.workflowKey && run.workflowKey.trim() !== "" ? run.workflowKey : run.runId;
+            const workflowKey = run.workflowKey && run.workflowKey.trim() !== "" ? run.workflowKey : run.runId;
             openSurface({ kind: "gatewayRun", workflowKey, runId: run.runId, view: "logs" });
           }}
         >
@@ -221,8 +204,7 @@ function RunRow({ run }: { run: RunSummary }) {
           className="btn"
           type="button"
           onClick={() => {
-            const workflowKey =
-              run.workflowKey && run.workflowKey.trim() !== "" ? run.workflowKey : run.runId;
+            const workflowKey = run.workflowKey && run.workflowKey.trim() !== "" ? run.workflowKey : run.runId;
             openSurface({ kind: "gatewayRun", workflowKey, runId: run.runId, view: "timeline" });
           }}
         >
@@ -311,13 +293,7 @@ export function RunsCanvas() {
             options={workflowOptions}
             onSelect={setWorkflowFilter}
           />
-          <FilterMenu
-            menuId="runs-age"
-            label="Time"
-            value={ageFilter}
-            options={AGE_OPTIONS}
-            onSelect={setAgeFilter}
-          />
+          <FilterMenu menuId="runs-age" label="Time" value={ageFilter} options={AGE_OPTIONS} onSelect={setAgeFilter} />
 
           {showClear ? (
             <button className="runs-clear" type="button" onClick={clearFilters} data-testid="runs-clear">

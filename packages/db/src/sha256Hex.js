@@ -10,5 +10,5 @@ import { createHash } from "node:crypto";
  * @returns {string}
  */
 export function sha256Hex(content) {
-    return createHash("sha256").update(content, "utf8").digest("hex");
+  return createHash("sha256").update(content, "utf8").digest("hex");
 }

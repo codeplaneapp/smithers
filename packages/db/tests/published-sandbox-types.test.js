@@ -8,24 +8,19 @@ const declarationPath = fileURLToPath(new URL("../src/index.d.ts", import.meta.u
 // Keep this list deliberately small and focused on the published sandbox
 // heartbeat surface. Any new method added here must also be added to the
 // committed declaration before it can ship.
-const PINNED_SANDBOX_METHODS = [
-    "upsertSandbox",
-    "heartbeatSandbox",
-    "getSandbox",
-    "listSandboxes",
-];
+const PINNED_SANDBOX_METHODS = ["upsertSandbox", "heartbeatSandbox", "getSandbox", "listSandboxes"];
 
 describe("published SmithersDb sandbox declarations", () => {
-    test("publish every pinned sandbox adapter method", () => {
-        const adapterSource = readFileSync(adapterSourcePath, "utf8");
-        const declarations = readFileSync(declarationPath, "utf8");
-        const runtimeMethods = PINNED_SANDBOX_METHODS.filter((method) =>
-            new RegExp(`^    ${method}\\(`, "m").test(adapterSource));
+  test("publish every pinned sandbox adapter method", () => {
+    const adapterSource = readFileSync(adapterSourcePath, "utf8");
+    const declarations = readFileSync(declarationPath, "utf8");
+    const runtimeMethods = PINNED_SANDBOX_METHODS.filter((method) =>
+      new RegExp(`^    ${method}\\(`, "m").test(adapterSource),
+    );
 
-        expect(runtimeMethods).toEqual(PINNED_SANDBOX_METHODS);
+    expect(runtimeMethods).toEqual(PINNED_SANDBOX_METHODS);
 
-        const missingMethods = runtimeMethods.filter((method) =>
-            !new RegExp(`^    ${method}\\(`, "m").test(declarations));
-        expect(missingMethods).toEqual([]);
-    });
+    const missingMethods = runtimeMethods.filter((method) => !new RegExp(`^    ${method}\\(`, "m").test(declarations));
+    expect(missingMethods).toEqual([]);
+  });
 });

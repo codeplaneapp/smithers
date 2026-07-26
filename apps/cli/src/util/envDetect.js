@@ -21,24 +21,24 @@
  * @param {NodeJS.ProcessEnv} [env]
  */
 export function isCI(env = process.env) {
-    const ci = env.CI && env.CI.toLowerCase() !== "false" ? env.CI : undefined;
-    return Boolean(
-        ci ||
-        env.GITHUB_ACTIONS ||
-        env.GITLAB_CI ||
-        env.BUILDKITE ||
-        env.CIRCLECI ||
-        env.TF_BUILD ||
-        env.JENKINS_URL ||
-        env.DRONE ||
-        env.BITBUCKET_BUILD_NUMBER ||
-        env.TEAMCITY_VERSION ||
-        env.SEMAPHORE ||
-        env.APPVEYOR ||
-        env.CODESHIP ||
-        env.HEROKU_TEST_RUN_ID ||
-        env.WERCKER
-    );
+  const ci = env.CI && env.CI.toLowerCase() !== "false" ? env.CI : undefined;
+  return Boolean(
+    ci ||
+    env.GITHUB_ACTIONS ||
+    env.GITLAB_CI ||
+    env.BUILDKITE ||
+    env.CIRCLECI ||
+    env.TF_BUILD ||
+    env.JENKINS_URL ||
+    env.DRONE ||
+    env.BITBUCKET_BUILD_NUMBER ||
+    env.TEAMCITY_VERSION ||
+    env.SEMAPHORE ||
+    env.APPVEYOR ||
+    env.CODESHIP ||
+    env.HEROKU_TEST_RUN_ID ||
+    env.WERCKER,
+  );
 }
 
 /**
@@ -48,8 +48,5 @@ export function isCI(env = process.env) {
  * @param {NodeJS.ProcessEnv} [env]
  */
 export function isAgentHarness(env = process.env) {
-    return Boolean(
-        env.CLAUDECODE ||
-        env.CLAUDE_CODE_ENTRYPOINT
-    );
+  return Boolean(env.CLAUDECODE || env.CLAUDE_CODE_ENTRYPOINT);
 }

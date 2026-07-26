@@ -15,16 +15,7 @@ import { expect, test } from "@playwright/test";
  * they hold on a clean CI box (empty state) and locally (existing runs) alike.
  */
 
-const STEP_TABS = [
-  "clarify",
-  "provision",
-  "design",
-  "approve",
-  "scaffold",
-  "verify",
-  "document",
-  "result",
-] as const;
+const STEP_TABS = ["clarify", "provision", "design", "approve", "scaffold", "verify", "document", "result"] as const;
 
 test("create-workflow custom UI mounts and renders the tabbed shell", async ({ page }) => {
   const pageErrors: string[] = [];
@@ -57,16 +48,10 @@ test("create-workflow tabs switch selected state across the whole tab bar", asyn
   // state moves with it (aria-selected drives the is-active styling).
   for (const id of STEP_TABS) {
     await page.getByTestId(`create-workflow-tab-${id}`).click();
-    await expect(page.getByTestId(`create-workflow-tab-${id}`)).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    await expect(page.getByTestId(`create-workflow-tab-${id}`)).toHaveAttribute("aria-selected", "true");
     for (const other of STEP_TABS) {
       if (other === id) continue;
-      await expect(page.getByTestId(`create-workflow-tab-${other}`)).toHaveAttribute(
-        "aria-selected",
-        "false",
-      );
+      await expect(page.getByTestId(`create-workflow-tab-${other}`)).toHaveAttribute("aria-selected", "false");
     }
   }
 });

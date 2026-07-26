@@ -13,12 +13,11 @@ import { runDiagnostics } from "./runDiagnostics.js";
  * @returns {Promise<DiagnosticReport | null> | null}
  */
 export function launchDiagnostics(command, env, cwd, hints, run = runDiagnostics) {
-    const strategy = getDiagnosticStrategy(command, hints);
-    if (!strategy)
-        return null;
-    const apiKeyEnv = diagnosticApiKeyEnv(command, hints);
-    const effectiveEnv = apiKeyEnv ? { ...env, ...apiKeyEnv } : env;
-    return Promise.resolve()
-        .then(() => run(strategy, { env: effectiveEnv, cwd }))
-        .catch(() => null);
+  const strategy = getDiagnosticStrategy(command, hints);
+  if (!strategy) return null;
+  const apiKeyEnv = diagnosticApiKeyEnv(command, hints);
+  const effectiveEnv = apiKeyEnv ? { ...env, ...apiKeyEnv } : env;
+  return Promise.resolve()
+    .then(() => run(strategy, { env: effectiveEnv, cwd }))
+    .catch(() => null);
 }

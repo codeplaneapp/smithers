@@ -52,18 +52,17 @@ try {
   // Verify the port is free first so a conflict fails before we launch the run.
   await assertPortFree(host, port);
   await gateway.listen({ port, host });
-  await gateway.startRun(
-    "ultragrill",
-    { goal, artifactPath },
-    auth as Parameters<typeof gateway.startRun>[2],
-    runId,
-    { resume: false },
-  );
+  await gateway.startRun("ultragrill", { goal, artifactPath }, auth as Parameters<typeof gateway.startRun>[2], runId, {
+    resume: false,
+  });
 } catch (error) {
   await gateway.close().catch(() => {});
-  const reason = (error as { code?: string })?.code === "EADDRINUSE"
-    ? `port ${port} is already in use (set PORT=… to pick another)`
-    : error instanceof Error ? error.message : String(error);
+  const reason =
+    (error as { code?: string })?.code === "EADDRINUSE"
+      ? `port ${port} is already in use (set PORT=… to pick another)`
+      : error instanceof Error
+        ? error.message
+        : String(error);
   console.error(`\n  ✖ UltraGrill failed to start: ${reason}\n`);
   process.exit(1);
 }

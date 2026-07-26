@@ -46,9 +46,7 @@ export type SendMessageProps = TelegramOutboundBaseProps & {
    * Build the message from resolved deps: return the text, or an object of
    * `{ text, ...SendMessageSmartOptions }` overrides.
    */
-  children?: (
-    deps: ResolvedDeps,
-  ) => string | ({ text: string } & SendMessageSmartOptions);
+  children?: (deps: ResolvedDeps) => string | ({ text: string } & SendMessageSmartOptions);
   parseMode?: SendMessageSmartOptions["parseMode"];
   replyToMessageId?: number;
   messageThreadId?: number;
@@ -75,16 +73,12 @@ export type SendDocumentProps = TelegramOutboundBaseProps & {
   caption?: string;
   replyToMessageId?: number;
   messageThreadId?: number;
-  children?: (
-    deps: ResolvedDeps,
-  ) => { document: TelegramDocumentInput; caption?: string };
+  children?: (deps: ResolvedDeps) => { document: TelegramDocumentInput; caption?: string };
 };
 
 export type AnswerCallbackQueryProps = TelegramOutboundBaseProps & {
   callbackQueryId?: string;
   text?: string;
   showAlert?: boolean;
-  children?: (
-    deps: ResolvedDeps,
-  ) => { callbackQueryId: string; text?: string; showAlert?: boolean };
+  children?: (deps: ResolvedDeps) => { callbackQueryId: string; text?: string; showAlert?: boolean };
 };

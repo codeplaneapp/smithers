@@ -3,17 +3,17 @@ import type { SandboxPortMapping, SandboxVolumeMount, SandboxWorkspaceSpec } fro
 import type { SandboxEgressConfig } from "./SandboxEgressConfig.ts";
 
 export type SandboxTransportConfig = {
-    runId: string;
-    sandboxId: string;
-    runtime: SandboxRuntime;
-    rootDir: string;
-    image?: string;
-    allowNetwork?: boolean;
-    env?: Record<string, string>;
-    egress?: SandboxEgressConfig;
-    ports?: SandboxPortMapping[];
-    volumes?: SandboxVolumeMount[];
-    memoryLimit?: string;
-    cpuLimit?: string;
-    workspace?: SandboxWorkspaceSpec;
+  runId: string;
+  sandboxId: string;
+  runtime: SandboxRuntime;
+  rootDir: string;
+  image?: string;
+  allowNetwork?: boolean;
+  env?: Record<string, string>;
+  egress?: SandboxEgressConfig;
+  ports?: SandboxPortMapping[];
+  volumes?: SandboxVolumeMount[];
+  memoryLimit?: string;
+  cpuLimit?: string;
+  workspace?: SandboxWorkspaceSpec;
 };

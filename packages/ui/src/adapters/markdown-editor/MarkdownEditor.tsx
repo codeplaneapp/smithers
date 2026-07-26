@@ -1,12 +1,5 @@
 /** @jsxImportSource react */
-import {
-  forwardRef,
-  useEffect,
-  useImperativeHandle,
-  useInsertionEffect,
-  useRef,
-  useState,
-} from "react";
+import { forwardRef, useEffect, useImperativeHandle, useInsertionEffect, useRef, useState } from "react";
 import type { Crepe } from "@milkdown/crepe";
 import { crepeThemeCss } from "./crepeTheme.generated";
 
@@ -123,145 +116,143 @@ function prefersTextareaFallback(): boolean {
 
 type CrepeListener = Parameters<Parameters<Crepe["on"]>[0]>[0];
 
-export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
-  function MarkdownEditor(
-    { value, onChange, readOnly = false, resetKey, className, "aria-label": ariaLabel },
+export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
+  { value, onChange, readOnly = false, resetKey, className, "aria-label": ariaLabel },
+  ref,
+) {
+  useInjectMarkdownEditorCss();
+
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const crepeRef = useRef<Crepe | null>(null);
+  const readyRef = useRef(false);
+  const replaceAllRef = useRef<typeof import("@milkdown/kit/utils").replaceAll | null>(null);
+  const suppressEchoRef = useRef(0);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  // The single source of truth for `getMarkdown`; seeded from `value` and
+  // updated by every local edit, external `setMarkdown`, and reseed.
+  const lastMarkdownRef = useRef(value);
+
+  const useFallback = prefersTextareaFallback();
+  const [fallbackValue, setFallbackValue] = useState(value);
+
+  useImperativeHandle(
     ref,
-  ) {
-    useInjectMarkdownEditorCss();
-
-    const hostRef = useRef<HTMLDivElement | null>(null);
-    const crepeRef = useRef<Crepe | null>(null);
-    const readyRef = useRef(false);
-    const replaceAllRef = useRef<typeof import("@milkdown/kit/utils").replaceAll | null>(null);
-    const suppressEchoRef = useRef(0);
-    const onChangeRef = useRef(onChange);
-    onChangeRef.current = onChange;
-    // The single source of truth for `getMarkdown`; seeded from `value` and
-    // updated by every local edit, external `setMarkdown`, and reseed.
-    const lastMarkdownRef = useRef(value);
-
-    const useFallback = prefersTextareaFallback();
-    const [fallbackValue, setFallbackValue] = useState(value);
-
-    useImperativeHandle(
-      ref,
-      () => ({
-        getMarkdown: () => lastMarkdownRef.current,
-        setMarkdown: (markdown: string) => {
-          if (markdown === lastMarkdownRef.current) return;
-          lastMarkdownRef.current = markdown;
-          setFallbackValue(markdown);
-          const crepe = crepeRef.current;
-          const replaceAll = replaceAllRef.current;
-          if (!crepe || !readyRef.current || !replaceAll) return;
-          suppressEchoRef.current += 1;
-          try {
-            crepe.editor.action(replaceAll(markdown, true));
-          } finally {
-            // Release on the next tick — replaceAll's markdownUpdated fires
-            // synchronously within the action, but be tolerant of async flushes.
-            setTimeout(() => {
-              suppressEchoRef.current = Math.max(0, suppressEchoRef.current - 1);
-            }, 0);
-          }
-        },
-      }),
-      [],
-    );
-
-    // Reseed the document whenever `resetKey` changes (declared BEFORE the
-    // editor effect so the fresh markdown is visible when Crepe re-initializes).
-    useEffect(() => {
-      lastMarkdownRef.current = value;
-      setFallbackValue(value);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [resetKey]);
-
-    useEffect(() => {
-      if (useFallback) return;
-      const host = hostRef.current;
-      if (!host) return;
-      readyRef.current = false;
-      const seed = lastMarkdownRef.current;
-      let cancelled = false;
-      let crepe: Crepe | null = null;
-      host.innerHTML = "";
-
-      void Promise.all([import("@milkdown/crepe"), import("@milkdown/kit/utils")])
-        .then(async ([{ Crepe }, { replaceAll }]) => {
-          if (cancelled) return;
-          replaceAllRef.current = replaceAll;
-          const editor = new Crepe({ root: host, defaultValue: seed });
-          crepe = editor;
-          crepeRef.current = editor;
-          editor.on((listener: CrepeListener) => {
-            listener.markdownUpdated((_ctx, markdown) => {
-              lastMarkdownRef.current = markdown;
-              if (suppressEchoRef.current > 0) return; // programmatic replaceAll echo
-              onChangeRef.current?.(markdown);
-            });
-          });
-          await editor.create();
-          if (cancelled) {
-            void editor.destroy();
-            return;
-          }
-          editor.setReadonly(readOnly);
-          readyRef.current = true;
-        })
-        .catch(() => {
-          // WYSIWYG could not initialize; getMarkdown still returns the seed and
-          // callers can fall back to their own controls.
-        });
-
-      return () => {
-        cancelled = true;
-        readyRef.current = false;
-        crepeRef.current = null;
-        replaceAllRef.current = null;
+    () => ({
+      getMarkdown: () => lastMarkdownRef.current,
+      setMarkdown: (markdown: string) => {
+        if (markdown === lastMarkdownRef.current) return;
+        lastMarkdownRef.current = markdown;
+        setFallbackValue(markdown);
+        const crepe = crepeRef.current;
+        const replaceAll = replaceAllRef.current;
+        if (!crepe || !readyRef.current || !replaceAll) return;
+        suppressEchoRef.current += 1;
         try {
-          void crepe?.destroy();
-        } catch {
-          // A failed teardown must not crash the unmount.
+          crepe.editor.action(replaceAll(markdown, true));
+        } finally {
+          // Release on the next tick — replaceAll's markdownUpdated fires
+          // synchronously within the action, but be tolerant of async flushes.
+          setTimeout(() => {
+            suppressEchoRef.current = Math.max(0, suppressEchoRef.current - 1);
+          }, 0);
         }
-      };
-      // Re-init only when the doc reseeds or editability changes; content
-      // updates flow through the listener + setMarkdown, never by recreating.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [resetKey, readOnly, useFallback]);
+      },
+    }),
+    [],
+  );
 
-    const onFallbackInput = (next: string) => {
-      if (next === lastMarkdownRef.current) return;
-      lastMarkdownRef.current = next;
-      setFallbackValue(next);
-      onChangeRef.current?.(next);
+  // Reseed the document whenever `resetKey` changes (declared BEFORE the
+  // editor effect so the fresh markdown is visible when Crepe re-initializes).
+  useEffect(() => {
+    lastMarkdownRef.current = value;
+    setFallbackValue(value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetKey]);
+
+  useEffect(() => {
+    if (useFallback) return;
+    const host = hostRef.current;
+    if (!host) return;
+    readyRef.current = false;
+    const seed = lastMarkdownRef.current;
+    let cancelled = false;
+    let crepe: Crepe | null = null;
+    host.innerHTML = "";
+
+    void Promise.all([import("@milkdown/crepe"), import("@milkdown/kit/utils")])
+      .then(async ([{ Crepe }, { replaceAll }]) => {
+        if (cancelled) return;
+        replaceAllRef.current = replaceAll;
+        const editor = new Crepe({ root: host, defaultValue: seed });
+        crepe = editor;
+        crepeRef.current = editor;
+        editor.on((listener: CrepeListener) => {
+          listener.markdownUpdated((_ctx, markdown) => {
+            lastMarkdownRef.current = markdown;
+            if (suppressEchoRef.current > 0) return; // programmatic replaceAll echo
+            onChangeRef.current?.(markdown);
+          });
+        });
+        await editor.create();
+        if (cancelled) {
+          void editor.destroy();
+          return;
+        }
+        editor.setReadonly(readOnly);
+        readyRef.current = true;
+      })
+      .catch(() => {
+        // WYSIWYG could not initialize; getMarkdown still returns the seed and
+        // callers can fall back to their own controls.
+      });
+
+    return () => {
+      cancelled = true;
+      readyRef.current = false;
+      crepeRef.current = null;
+      replaceAllRef.current = null;
+      try {
+        void crepe?.destroy();
+      } catch {
+        // A failed teardown must not crash the unmount.
+      }
     };
+    // Re-init only when the doc reseeds or editability changes; content
+    // updates flow through the listener + setMarkdown, never by recreating.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetKey, readOnly, useFallback]);
 
-    if (useFallback) {
-      return (
-        <textarea
-          className={className ? `sui-markdown-editor-fallback ${className}` : "sui-markdown-editor-fallback"}
-          data-slot="markdown-editor"
-          data-testid="markdown-editor"
-          data-mode="fallback"
-          aria-label={ariaLabel}
-          readOnly={readOnly}
-          value={fallbackValue}
-          onChange={(event) => onFallbackInput(event.currentTarget.value)}
-        />
-      );
-    }
+  const onFallbackInput = (next: string) => {
+    if (next === lastMarkdownRef.current) return;
+    lastMarkdownRef.current = next;
+    setFallbackValue(next);
+    onChangeRef.current?.(next);
+  };
 
+  if (useFallback) {
     return (
-      <div
-        className={className ? `sui-markdown-editor ${className}` : "sui-markdown-editor"}
+      <textarea
+        className={className ? `sui-markdown-editor-fallback ${className}` : "sui-markdown-editor-fallback"}
         data-slot="markdown-editor"
         data-testid="markdown-editor"
-        data-mode="wysiwyg"
+        data-mode="fallback"
         aria-label={ariaLabel}
-        ref={hostRef}
+        readOnly={readOnly}
+        value={fallbackValue}
+        onChange={(event) => onFallbackInput(event.currentTarget.value)}
       />
     );
-  },
-);
+  }
+
+  return (
+    <div
+      className={className ? `sui-markdown-editor ${className}` : "sui-markdown-editor"}
+      data-slot="markdown-editor"
+      data-testid="markdown-editor"
+      data-mode="wysiwyg"
+      aria-label={ariaLabel}
+      ref={hostRef}
+    />
+  );
+});

@@ -13,18 +13,18 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
  * reach ingress.
  */
 export class IntegrationError extends SmithersError {
-    /** @type {IntegrationErrorReason} */
-    reason;
-    /**
+  /** @type {IntegrationErrorReason} */
+  reason;
+  /**
    * @param {IntegrationErrorReason} reason
    * @param {string} message
    * @param {Record<string, unknown>} [details]
    * @param {{ cause?: unknown }} [options]
    */
-    constructor(reason, message, details, options) {
-        super("INTEGRATION_ERROR", message, { reason, ...details }, { cause: options?.cause, name: "IntegrationError" });
-        this.reason = reason;
-    }
+  constructor(reason, message, details, options) {
+    super("INTEGRATION_ERROR", message, { reason, ...details }, { cause: options?.cause, name: "IntegrationError" });
+    this.reason = reason;
+  }
 }
 
 /**
@@ -32,6 +32,5 @@ export class IntegrationError extends SmithersError {
  * @returns {error is IntegrationError}
  */
 export function isIntegrationError(error) {
-    return error instanceof IntegrationError ||
-        (error instanceof Error && error.name === "IntegrationError");
+  return error instanceof IntegrationError || (error instanceof Error && error.name === "IntegrationError");
 }

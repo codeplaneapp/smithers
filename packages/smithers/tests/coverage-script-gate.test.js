@@ -65,10 +65,12 @@ function lcovCounter(record, name) {
 
 describe("coverage script gate", () => {
   test("parses every direct &&-joined Bun test leg and strips nested coverage flags", () => {
-    expect(directBunTestSegments(
-      "bun test --coverage --coverage-dir old first.test.js && " +
-      "bun test --coverage-reporter=lcov --path-ignore-patterns=\"**/dom/**\" tests",
-    )).toEqual([
+    expect(
+      directBunTestSegments(
+        "bun test --coverage --coverage-dir old first.test.js && " +
+          'bun test --coverage-reporter=lcov --path-ignore-patterns="**/dom/**" tests',
+      ),
+    ).toEqual([
       { phase: "test-1", args: ["first.test.js"] },
       { phase: "test-2", args: ["--path-ignore-patterns=**/dom/**", "tests"] },
     ]);
@@ -91,13 +93,13 @@ describe("coverage script gate", () => {
       "bun test tests\\one.test.js",
       "bun test %TEST_FILE%",
       "bun test ^tests/one.test.js",
-      "bun test \"%TEST_FILE%\"",
+      'bun test "%TEST_FILE%"',
       "bun test first.test.js\nbun test second.test.js",
       "bun test first.test.js &&",
       "&& bun test first.test.js",
       "bun test first.test.js && echo skipped",
       "NODE_ENV=test bun test first.test.js",
-      "bun test \"unterminated",
+      'bun test "unterminated',
       "bun test --coverage-dir",
     ];
     for (const scriptText of rejected) {
@@ -110,7 +112,9 @@ describe("coverage script gate", () => {
     const first = join(dir, "first.info");
     const second = join(dir, "second.info");
     const mergedPath = join(dir, "merged.info");
-    writeFileSync(first, `TN:first
+    writeFileSync(
+      first,
+      `TN:first
 SF:src/common.js
 FN:1,shared
 FNDA:1,shared
@@ -156,8 +160,11 @@ BRDA:1,0,0,1
 BRF:2
 BRH:1
 end_of_record
-`);
-    writeFileSync(second, `TN:second
+`,
+    );
+    writeFileSync(
+      second,
+      `TN:second
 SF:src/common.js
 FN:1,shared
 FN:3,second
@@ -202,7 +209,8 @@ LH:3
 BRF:2
 BRH:1
 end_of_record
-`);
+`,
+    );
 
     mergeLcovReports([first, second], mergedPath);
     const merged = readFileSync(mergedPath, "utf8");
@@ -243,7 +251,12 @@ end_of_record
     const cases = [
       { metric: "lines", tag: "LF", first: "FNF:0\nFNH:0\nLF:1\nLH:0", second: "FNF:0\nFNH:0\nLF:2\nLH:0" },
       { metric: "functions", tag: "FNF", first: "FNF:1\nFNH:0\nLF:0\nLH:0", second: "FNF:2\nFNH:0\nLF:0\nLH:0" },
-      { metric: "branches", tag: "BRF", first: "FNF:0\nFNH:0\nLF:0\nLH:0\nBRF:1\nBRH:0", second: "FNF:0\nFNH:0\nLF:0\nLH:0\nBRF:2\nBRH:0" },
+      {
+        metric: "branches",
+        tag: "BRF",
+        first: "FNF:0\nFNH:0\nLF:0\nLH:0\nBRF:1\nBRH:0",
+        second: "FNF:0\nFNH:0\nLF:0\nLH:0\nBRF:2\nBRH:0",
+      },
     ];
     for (const { metric, tag, first: firstCounters, second: secondCounters } of cases) {
       const dir = tempDir();
@@ -272,10 +285,9 @@ end_of_record
       const dir = tempDir();
       const input = join(dir, `${metric}-missing.info`);
       writeFileSync(input, `SF:src/missing.js\n${counters}\nend_of_record\n`);
-      expect(
-        () => mergeLcovReports([input], join(dir, `${metric}-merged.info`)),
-        metric,
-      ).toThrow(`Incomplete LCOV ${metric} aggregates`);
+      expect(() => mergeLcovReports([input], join(dir, `${metric}-merged.info`)), metric).toThrow(
+        `Incomplete LCOV ${metric} aggregates`,
+      );
     }
   });
 
@@ -284,7 +296,9 @@ end_of_record
     const first = join(dir, "identity-first.info");
     const second = join(dir, "identity-second.info");
     const aggregateOnly = join(dir, "identity-aggregate.info");
-    writeFileSync(first, `SF:src/identity.js
+    writeFileSync(
+      first,
+      `SF:src/identity.js
 FN:1,first
 FNDA:1,first
 FNF:1
@@ -292,8 +306,11 @@ FNH:1
 LF:0
 LH:0
 end_of_record
-`);
-    writeFileSync(second, `SF:src/identity.js
+`,
+    );
+    writeFileSync(
+      second,
+      `SF:src/identity.js
 FN:2,second
 FNDA:0,second
 FNF:1
@@ -301,14 +318,18 @@ FNH:0
 LF:0
 LH:0
 end_of_record
-`);
-    writeFileSync(aggregateOnly, `SF:src/identity.js
+`,
+    );
+    writeFileSync(
+      aggregateOnly,
+      `SF:src/identity.js
 FNF:1
 FNH:0
 LF:0
 LH:0
 end_of_record
-`);
+`,
+    );
     const merged = join(dir, "identity-merged.info");
     mergeLcovReports([first, second, aggregateOnly], merged);
     // Two identified functions exceed the stable aggregate's 1 found: bun's
@@ -330,20 +351,14 @@ end_of_record
     const lcov = readFileSync(join(coverageDir, fixture, "lcov.info"), "utf8");
     expect(lcov).toContain("SF:src/first.js");
     expect(lcov).toContain("SF:src/second.js");
-    const firstLegLcov = readFileSync(
-      join(coverageDir, fixture, "1-test-1", "lcov.info"),
-      "utf8",
-    );
+    const firstLegLcov = readFileSync(join(coverageDir, fixture, "1-test-1", "lcov.info"), "utf8");
     const rawFirst = lcovRecord(firstLegLcov, "src/first.js");
     const mergedFirst = lcovRecord(lcov, "src/first.js");
     expect(lcovCounter(rawFirst, "FNF")).toBeGreaterThan(0);
     for (const counter of ["LF", "LH", "FNF", "FNH", "BRF", "BRH"]) {
       expect(lcovCounter(mergedFirst, counter), counter).toBe(lcovCounter(rawFirst, counter) ?? 0);
     }
-    const secondLegLcov = readFileSync(
-      join(coverageDir, fixture, "2-test-2", "lcov.info"),
-      "utf8",
-    );
+    const secondLegLcov = readFileSync(join(coverageDir, fixture, "2-test-2", "lcov.info"), "utf8");
     const firstShared = lcovRecord(firstLegLcov, "src/shared.js");
     const secondShared = lcovRecord(secondLegLcov, "src/shared.js");
     const mergedShared = lcovRecord(lcov, "src/shared.js");
@@ -353,10 +368,9 @@ end_of_record
     expect(lcovCounter(mergedShared, "FNF")).toBe(sharedFound);
     // Function identities are absent in Bun 1.3 LCOV, so complementary calls
     // cannot be proven disjoint. Preserve max(FNH) as a conservative union.
-    expect(lcovCounter(mergedShared, "FNH")).toBe(Math.max(
-      lcovCounter(firstShared, "FNH"),
-      lcovCounter(secondShared, "FNH"),
-    ));
+    expect(lcovCounter(mergedShared, "FNH")).toBe(
+      Math.max(lcovCounter(firstShared, "FNH"), lcovCounter(secondShared, "FNH")),
+    );
     const summary = readSummary(coverageDir);
     expect(summary.map((entry) => entry.package)).toEqual([fixture]);
     // Bun 1.3 emits aggregate FNF/FNH without FN/FNDA for these real source
@@ -376,9 +390,7 @@ end_of_record
     expect(result.status, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`).toBe(1);
     expect(result.stdout).toContain("COVERAGE_FIXTURE_SEGMENT_ONE");
     expect(result.stdout).toContain(`[coverage] ${fixture} (test-2):`);
-    expect(readSummary(coverageDir)).toEqual([
-      { package: fixture, error: "test-2 bun test exited 1" },
-    ]);
+    expect(readSummary(coverageDir)).toEqual([{ package: fixture, error: "test-2 bun test exited 1" }]);
   });
 
   test("an ambiguous out-of-package LCOV source resolves conservatively instead of failing the package", () => {
@@ -451,9 +463,7 @@ end_of_record
     const coverageDir = tempCoverageDir();
     const result = runCoverage(["packages/jj-darwin-arm64"], { coverageDir });
     expect(result.status, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`).toBe(0);
-    expect(result.stdout).toContain(
-      "[coverage] skip packages/jj-darwin-arm64: test script is not a direct bun test",
-    );
+    expect(result.stdout).toContain("[coverage] skip packages/jj-darwin-arm64: test script is not a direct bun test");
     expect(readSummary(coverageDir)).toEqual([]);
   });
 

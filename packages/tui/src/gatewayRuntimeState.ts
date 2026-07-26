@@ -106,14 +106,14 @@ export function resolveMonitorWorkspaceRoot(
   const start = resolve(cwd);
   // Pass 1: nearest ancestor with a `.smithers/` pack — its directory is the
   // workspace root (the CLI keys off `dirname(localPackDir)`).
-  for (let dir = start; ; ) {
+  for (let dir = start; ;) {
     if (isDirectory(join(dir, ".smithers"))) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
   // Pass 2: nearest ancestor holding a `smithers.db` (projects with no pack).
-  for (let dir = start; ; ) {
+  for (let dir = start; ;) {
     if (isRegularFile(join(dir, "smithers.db"))) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;

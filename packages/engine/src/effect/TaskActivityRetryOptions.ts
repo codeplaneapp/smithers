@@ -1,4 +1,4 @@
 export type TaskActivityRetryOptions = {
-	times: number;
-	while?: (error: unknown) => boolean;
+  times: number;
+  while?: (error: unknown) => boolean;
 };

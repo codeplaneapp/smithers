@@ -36,7 +36,8 @@ describe("extractDiffAssets", () => {
   });
 
   test("keeps the sprite when the body references it", () => {
-    const input = '<svg id="sprite"><symbol id="icon"/></svg><style>:host { color: red }</style><div><use href="#icon"></use></div>';
+    const input =
+      '<svg id="sprite"><symbol id="icon"/></svg><style>:host { color: red }</style><div><use href="#icon"></use></div>';
     const assets = extractDiffAssets(input);
     expect(assets.sprite).toBe('<svg id="sprite"><symbol id="icon"/></svg>');
     expect(assets.styles).toEqual(["<style>.pierre-diff { color: red }</style>"]);
@@ -44,7 +45,9 @@ describe("extractDiffAssets", () => {
   });
 
   test("style assets are byte-identical across diffs so pages can dedupe", async () => {
-    const a = extractDiffAssets(await renderPierreFileDiff({ diff: makePatch("a.ts", "const a = 1;", "const a = 2;") }));
+    const a = extractDiffAssets(
+      await renderPierreFileDiff({ diff: makePatch("a.ts", "const a = 1;", "const a = 2;") }),
+    );
     const b = extractDiffAssets(await renderPierreFileDiff({ diff: makePatch("b.py", "x = 1", "x = 2") }));
     expect(a.styles).toEqual(b.styles);
   });
@@ -61,7 +64,7 @@ describe("extractDiffAssets", () => {
   });
 
   test("literal :host text in the body is not touched", () => {
-    const input = '<style>:host { color: red }</style><div><code>:host { display: none }</code></div>';
+    const input = "<style>:host { color: red }</style><div><code>:host { display: none }</code></div>";
     const assets = extractDiffAssets(input);
     expect(assets.styles).toEqual(["<style>.pierre-diff { color: red }</style>"]);
     expect(assets.body).toBe("<div><code>:host { display: none }</code></div>");

@@ -28,7 +28,7 @@ describe("init site worker", () => {
     expect(homeHtml).toContain(codexRow);
     expect(homeHtml).toContain(claudeRow);
     expect(homeHtml).toContain("5.6 Sol · Terra · Luna · default");
-    expect(homeHtml).toContain("claude<span class=\"desc\">fallback only");
+    expect(homeHtml).toContain('claude<span class="desc">fallback only');
     expect(homeHtml.indexOf(codexRow)).toBeLessThan(homeHtml.indexOf(claudeRow));
   });
 
@@ -77,10 +77,7 @@ describe("init site worker", () => {
         },
       },
     };
-    const response = await createInitSiteWorker().fetch(
-      new Request("https://init.smithers.sh/assets/app.js"),
-      env,
-    );
+    const response = await createInitSiteWorker().fetch(new Request("https://init.smithers.sh/assets/app.js"), env);
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
@@ -94,10 +91,7 @@ describe("init site worker", () => {
         },
       },
     };
-    const response = await createInitSiteWorker().fetch(
-      new Request("https://init.smithers.sh/missing.html"),
-      env,
-    );
+    const response = await createInitSiteWorker().fetch(new Request("https://init.smithers.sh/missing.html"), env);
     expect(response.status).toBe(404);
   });
 });

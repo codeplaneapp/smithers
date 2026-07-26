@@ -53,8 +53,32 @@ export const evalSuite = {
 } as const;
 
 export const caseRows = {
-  pass: { caseId: "pass", status: "ok", assertions: [{ description: "output", passed: true }], passed: true, error: null },
-  fail: { caseId: "fail", status: "failed", assertions: [{ description: "output", passed: false }], passed: false, error: "mismatch" },
-  passedFail: { caseId: "fail", status: "ok", assertions: [{ description: "output", passed: true }], passed: true, error: null },
-  failedPass: { caseId: "pass", status: "failed", assertions: [{ description: "output", passed: false }], passed: false, error: "mismatch" },
+  pass: {
+    caseId: "pass",
+    status: "ok",
+    assertions: [{ description: "output", passed: true }],
+    passed: true,
+    error: null,
+  },
+  fail: {
+    caseId: "fail",
+    status: "failed",
+    assertions: [{ description: "output", passed: false }],
+    passed: false,
+    error: "mismatch",
+  },
+  passedFail: {
+    caseId: "fail",
+    status: "ok",
+    assertions: [{ description: "output", passed: true }],
+    passed: true,
+    error: null,
+  },
+  failedPass: {
+    caseId: "pass",
+    status: "failed",
+    assertions: [{ description: "output", passed: false }],
+    passed: false,
+    error: "mismatch",
+  },
 } as const;

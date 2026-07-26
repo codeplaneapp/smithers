@@ -36,13 +36,7 @@ function formatEventPayload(value: unknown): string {
   }
 }
 
-function GatewayRunLogsCanvas({
-  workflowKey,
-  runId,
-}: {
-  workflowKey: string;
-  runId: string;
-}) {
+function GatewayRunLogsCanvas({ workflowKey, runId }: { workflowKey: string; runId: string }) {
   const run = useGatewayRun(runId);
   const stream = useGatewayRunEvents(runId, { maxEvents: 200 });
   const status = typeof run.data?.status === "string" ? run.data.status : "unknown";
@@ -68,7 +62,9 @@ function GatewayRunLogsCanvas({
         <div className="logs-stream">
           {stream.events.map((event) => (
             <div className="log-line role-agent" key={`${event.seq}-${event.event}`}>
-              <span className="log-role">#{event.seq} {event.event} ›</span>{" "}
+              <span className="log-role">
+                #{event.seq} {event.event} ›
+              </span>{" "}
               {formatEventPayload(event.payload)}
             </div>
           ))}
@@ -95,11 +91,7 @@ function parseDiffId(diffId: string): { nodeId: string; iteration: number } {
 function GatewayRunDiffPage() {
   const { workflowKey, runId, diffId } = gatewayRunDiffRoute.useParams();
   const { nodeId, iteration } = parseDiffId(diffId);
-  const diff = useGatewayRpc(
-    "getNodeDiff",
-    { runId, nodeId, iteration },
-    { deps: [runId, nodeId, iteration] },
-  );
+  const diff = useGatewayRpc("getNodeDiff", { runId, nodeId, iteration }, { deps: [runId, nodeId, iteration] });
 
   return (
     <section className="surface" data-testid="diff-canvas">

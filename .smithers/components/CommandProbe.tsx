@@ -13,9 +13,10 @@ export const commandProbeOutputSchema = z.looseObject({
 function executableAvailable(command: string): boolean {
   const executable = command.trim().split(/\s+/, 1)[0];
   if (!executable) return false;
-  const lookup = process.platform === "win32"
-    ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "where.exe")
-    : "/usr/bin/which";
+  const lookup =
+    process.platform === "win32"
+      ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "where.exe")
+      : "/usr/bin/which";
   return spawnSync(lookup, [executable], { stdio: "ignore", shell: false }).status === 0;
 }
 

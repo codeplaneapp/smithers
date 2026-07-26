@@ -1,10 +1,7 @@
 import type { ReviewWorkerEnv } from "../env.ts";
 import { jsonError } from "../jsonError.ts";
 import { monthKey } from "../monthKey.ts";
-import {
-  authenticateProxyRequest,
-  type ProxyAuth,
-} from "../proxy/authenticateProxyRequest.ts";
+import { authenticateProxyRequest, type ProxyAuth } from "../proxy/authenticateProxyRequest.ts";
 import { repoMonthlyCapUsd } from "../repoMonthlyCapUsd.ts";
 import { repoMonthlySpendUsd } from "../repoMonthlySpendUsd.ts";
 import { lookupRepo } from "../sessions/lookupRepo.ts";
@@ -13,12 +10,7 @@ interface CountRow {
   count: number;
 }
 
-export async function handlePlan(
-  request: Request,
-  env: ReviewWorkerEnv,
-  url: URL,
-  now: number,
-): Promise<Response> {
+export async function handlePlan(request: Request, env: ReviewWorkerEnv, url: URL, now: number): Promise<Response> {
   const credential = await authenticateProxyRequest(request, env, now);
   if (!credential) return jsonError(401, "unauthorized");
 
@@ -30,8 +22,7 @@ export async function handlePlan(
   if (!registration) return jsonError(404, "repo not registered");
 
   const month = monthKey(now);
-  const countRow = await env.DB
-    .prepare("SELECT COUNT(*) AS count FROM reviewed_prs WHERE repo = ? AND month = ?")
+  const countRow = await env.DB.prepare("SELECT COUNT(*) AS count FROM reviewed_prs WHERE repo = ? AND month = ?")
     .bind(repo, month)
     .first<CountRow>();
   const prsUsed = Number(countRow?.count ?? 0);

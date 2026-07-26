@@ -83,8 +83,7 @@ export class Header {
     const runId = this.store.runId ?? "no-run";
     const state = this.store.runStatus;
     const runState = this.store.runStateView;
-    const engineHeartbeatMs =
-      numberField(runState, ["engineHeartbeatMs", "engine_heartbeat_ms"]) ?? 1_000;
+    const engineHeartbeatMs = numberField(runState, ["engineHeartbeatMs", "engine_heartbeat_ms"]) ?? 1_000;
     const engineLastMs =
       dateMs(
         runState,
@@ -92,12 +91,8 @@ export class Header {
         ["engineHeartbeatAt", "engine_heartbeat_at"],
       ) ?? this.store.lastEventAt?.getTime();
     const sandboxHeartbeatMs =
-      numberField(runState, [
-        "viewersHeartbeatMs",
-        "viewers_heartbeat_ms",
-        "uiHeartbeatMs",
-        "ui_heartbeat_ms",
-      ]) ?? engineHeartbeatMs;
+      numberField(runState, ["viewersHeartbeatMs", "viewers_heartbeat_ms", "uiHeartbeatMs", "ui_heartbeat_ms"]) ??
+      engineHeartbeatMs;
     const sandboxLastMs = dateMs(
       runState,
       ["viewersHeartbeatAtMs", "viewers_heartbeat_at_ms", "uiHeartbeatAtMs", "ui_heartbeat_at_ms"],
@@ -116,13 +111,17 @@ export class Header {
       paint(theme, "muted", this.workflowName),
       paint(theme, "dim", runId.slice(0, 12)),
       runStateLabel ? paint(theme, "muted", runStateLabel) : "",
-    ].filter(Boolean).join("  ");
+    ]
+      .filter(Boolean)
+      .join("  ");
     const right = [
       `${paint(theme, heartbeatColor(engineAge, engineHeartbeatMs), "eng")}:${Math.max(0, Math.floor(engineAge / 1_000))}s`,
       `${paint(theme, heartbeatColor(sandboxAge, sandboxHeartbeatMs), "box")}:${Number.isFinite(sandboxAge) ? Math.max(0, Math.floor(sandboxAge / 1_000)) : "--"}s`,
       paint(theme, "dim", `seq ${this.store.seq}`),
       connection,
-    ].filter(Boolean).join("  ");
+    ]
+      .filter(Boolean)
+      .join("  ");
     const plainLeft = stripAnsi(left);
     const plainRight = stripAnsi(right);
     const gap = Math.max(1, W - plainLeft.length - plainRight.length - 2);

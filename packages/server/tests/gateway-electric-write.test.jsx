@@ -99,7 +99,10 @@ describe("Gateway Electric write endpoint", () => {
     server = await gateway.listen({ port: 0, host: "127.0.0.1" });
     const port = getPort(server);
 
-    const response = await electricWrite(port, "writer-token", { method: "launchRun", params: { workflow: "basic", input: { value: 9 } } });
+    const response = await electricWrite(port, "writer-token", {
+      method: "launchRun",
+      params: { workflow: "basic", input: { value: 9 } },
+    });
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.ok).toBe(true);
@@ -128,7 +131,10 @@ describe("Gateway Electric write endpoint", () => {
     server = await gateway.listen({ port: 0, host: "127.0.0.1" });
     const port = getPort(server);
 
-    const response = await electricWrite(port, "reader-token", { method: "launchRun", params: { workflow: "basic", input: {} } });
+    const response = await electricWrite(port, "reader-token", {
+      method: "launchRun",
+      params: { workflow: "basic", input: {} },
+    });
     expect(response.status).toBe(403);
     const body = await response.json();
     expect(body.ok).toBe(false);

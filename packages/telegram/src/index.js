@@ -144,13 +144,8 @@ function sanitizeTelegramNetworkCause(cause, botToken, requestUrl) {
       .join("<redacted>")
       .replace(/\/bot\d+:[A-Za-z0-9_-]+/g, "/bot<redacted>");
   const message =
-    cause instanceof Error || (isRecord(cause) && typeof cause.message === "string")
-      ? cause.message
-      : cause;
-  const name =
-    cause instanceof Error || (isRecord(cause) && typeof cause.name === "string")
-      ? cause.name
-      : "Error";
+    cause instanceof Error || (isRecord(cause) && typeof cause.message === "string") ? cause.message : cause;
+  const name = cause instanceof Error || (isRecord(cause) && typeof cause.name === "string") ? cause.name : "Error";
   const sanitized = new Error(redact(message));
   sanitized.name = redact(name);
   if (isRecord(cause) && (typeof cause.code === "string" || typeof cause.code === "number")) {
@@ -412,11 +407,7 @@ export function createTelegramClient(options) {
       } catch (error) {
         lastError = error;
         if (attempt >= maxRetries || !isRetryableTelegramError(error)) throw error;
-        await sleepWithSignal(
-          sleep,
-          telegramDelayMs(error, attempt, retryBaseMs, maxRetryAfterSeconds),
-          init.signal,
-        );
+        await sleepWithSignal(sleep, telegramDelayMs(error, attempt, retryBaseMs, maxRetryAfterSeconds), init.signal);
       }
     }
     throw lastError ?? new Error(`Telegram ${method} failed`);

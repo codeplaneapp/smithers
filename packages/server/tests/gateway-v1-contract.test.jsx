@@ -20,10 +20,7 @@ function getPort(server) {
 }
 
 function makeDbPath(name) {
-  return join(
-    tmpdir(),
-    `smithers-gateway-v1-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
-  );
+  return join(tmpdir(), `smithers-gateway-v1-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
 function createValueWorkflow(dbPath) {
@@ -286,9 +283,7 @@ describe("Gateway v1 contract", () => {
     });
     expect(subscribed.ok).toBe(true);
     expect(subscribed.payload.currentSeq).toBe(3);
-    const gap = await client.waitFor(
-      (message) => message.type === "event" && message.event === "run.gap_resync",
-    );
+    const gap = await client.waitFor((message) => message.type === "event" && message.event === "run.gap_resync");
     expect(gap.payload).toEqual(
       expect.objectContaining({
         type: "GapResync",

@@ -14,49 +14,46 @@ import { parseTimerMeta } from "./parseTimerMeta.js";
  * @returns {Promise<RunStateView>}
  */
 export async function computeRunStateFromRow(adapter, run, options = {}) {
-    let pendingApproval = null;
-    let pendingTimer = null;
-    let pendingEvent = null;
-    let parkedEventBlock = null;
-    let sandboxHeartbeats = [];
+  let pendingApproval = null;
+  let pendingTimer = null;
+  let pendingEvent = null;
+  let parkedEventBlock = null;
+  let sandboxHeartbeats = [];
 
-    if (run.status === "waiting-approval") {
-        pendingApproval = await loadPendingApproval(adapter, run.runId);
-    } else if (run.status === "waiting-timer") {
-        pendingTimer = await loadPendingTimer(adapter, run.runId);
-    } else if (run.status === "waiting-event") {
-        pendingEvent = await loadPendingEvent(adapter, run.runId);
-        if (pendingEvent == null) {
-            parkedEventBlock = await loadParkedEventBlock(adapter, run.runId);
-        }
-    } else if (run.status === "running" && typeof adapter.listSandboxes === "function") {
-        const sandboxes = await adapter.listSandboxes(run.runId);
-        sandboxHeartbeats = sandboxes
-            .filter((sandbox) => isActiveSandbox(sandbox?.status))
-            .map((sandbox) => sandbox?.heartbeatAtMs)
-            .filter((heartbeatAtMs) => typeof heartbeatAtMs === "number");
+  if (run.status === "waiting-approval") {
+    pendingApproval = await loadPendingApproval(adapter, run.runId);
+  } else if (run.status === "waiting-timer") {
+    pendingTimer = await loadPendingTimer(adapter, run.runId);
+  } else if (run.status === "waiting-event") {
+    pendingEvent = await loadPendingEvent(adapter, run.runId);
+    if (pendingEvent == null) {
+      parkedEventBlock = await loadParkedEventBlock(adapter, run.runId);
     }
+  } else if (run.status === "running" && typeof adapter.listSandboxes === "function") {
+    const sandboxes = await adapter.listSandboxes(run.runId);
+    sandboxHeartbeats = sandboxes
+      .filter((sandbox) => isActiveSandbox(sandbox?.status))
+      .map((sandbox) => sandbox?.heartbeatAtMs)
+      .filter((heartbeatAtMs) => typeof heartbeatAtMs === "number");
+  }
 
-    return deriveRunState({
-        run,
-        pendingApproval,
-        pendingTimer,
-        pendingEvent,
-        parkedEventBlock,
-        sandboxHeartbeats,
-        now: options.now,
-        staleThresholdMs: options.staleThresholdMs,
-    });
+  return deriveRunState({
+    run,
+    pendingApproval,
+    pendingTimer,
+    pendingEvent,
+    parkedEventBlock,
+    sandboxHeartbeats,
+    now: options.now,
+    staleThresholdMs: options.staleThresholdMs,
+  });
 }
 
 /**
  * @param {unknown} status
  */
 function isActiveSandbox(status) {
-    return typeof status === "string" &&
-        status !== "finished" &&
-        status !== "failed" &&
-        status !== "cancelled";
+  return typeof status === "string" && status !== "finished" && status !== "failed" && status !== "cancelled";
 }
 
 /**
@@ -64,15 +61,15 @@ function isActiveSandbox(status) {
  * @param {string} runId
  */
 async function loadPendingApproval(adapter, runId) {
-    const approvals = await adapter.listPendingApprovals(runId);
-    let earliest = null;
-    for (const a of approvals) {
-        if (typeof a.requestedAtMs !== "number") continue;
-        if (earliest == null || a.requestedAtMs < earliest.requestedAtMs) {
-            earliest = { nodeId: a.nodeId, requestedAtMs: a.requestedAtMs };
-        }
+  const approvals = await adapter.listPendingApprovals(runId);
+  let earliest = null;
+  for (const a of approvals) {
+    if (typeof a.requestedAtMs !== "number") continue;
+    if (earliest == null || a.requestedAtMs < earliest.requestedAtMs) {
+      earliest = { nodeId: a.nodeId, requestedAtMs: a.requestedAtMs };
     }
-    return earliest;
+  }
+  return earliest;
 }
 
 /**
@@ -80,24 +77,19 @@ async function loadPendingApproval(adapter, runId) {
  * @param {string} runId
  */
 async function loadPendingTimer(adapter, runId) {
-    const nodes = await adapter.listNodes(runId);
-    let earliest = null;
-    for (const node of nodes) {
-        if (node.state !== "waiting-timer") continue;
-        const attempts = await adapter.listAttempts(
-            runId,
-            node.nodeId,
-            node.iteration ?? 0,
-        );
-        const waiting =
-            attempts.find((a) => a.state === "waiting-timer") ?? attempts[0];
-        const parsed = parseTimerMeta(waiting?.metaJson);
-        if (parsed == null) continue;
-        if (earliest == null || parsed.firesAtMs < earliest.firesAtMs) {
-            earliest = { nodeId: node.nodeId, firesAtMs: parsed.firesAtMs };
-        }
+  const nodes = await adapter.listNodes(runId);
+  let earliest = null;
+  for (const node of nodes) {
+    if (node.state !== "waiting-timer") continue;
+    const attempts = await adapter.listAttempts(runId, node.nodeId, node.iteration ?? 0);
+    const waiting = attempts.find((a) => a.state === "waiting-timer") ?? attempts[0];
+    const parsed = parseTimerMeta(waiting?.metaJson);
+    if (parsed == null) continue;
+    if (earliest == null || parsed.firesAtMs < earliest.firesAtMs) {
+      earliest = { nodeId: node.nodeId, firesAtMs: parsed.firesAtMs };
     }
-    return earliest;
+  }
+  return earliest;
 }
 
 /**
@@ -105,23 +97,18 @@ async function loadPendingTimer(adapter, runId) {
  * @param {string} runId
  */
 async function loadPendingEvent(adapter, runId) {
-    const nodes = await adapter.listNodes(runId);
-    for (const node of nodes) {
-        if (node.state !== "waiting-event") continue;
-        const attempts = await adapter.listAttempts(
-            runId,
-            node.nodeId,
-            node.iteration ?? 0,
-        );
-        const waiting =
-            attempts.find((a) => a.state === "waiting-event") ?? attempts[0];
-        const parsed = parseEventMeta(waiting?.metaJson);
-        return {
-            nodeId: node.nodeId,
-            correlationKey: parsed?.correlationKey ?? "",
-        };
-    }
-    return null;
+  const nodes = await adapter.listNodes(runId);
+  for (const node of nodes) {
+    if (node.state !== "waiting-event") continue;
+    const attempts = await adapter.listAttempts(runId, node.nodeId, node.iteration ?? 0);
+    const waiting = attempts.find((a) => a.state === "waiting-event") ?? attempts[0];
+    const parsed = parseEventMeta(waiting?.metaJson);
+    return {
+      nodeId: node.nodeId,
+      correlationKey: parsed?.correlationKey ?? "",
+    };
+  }
+  return null;
 }
 
 /**
@@ -129,13 +116,13 @@ async function loadPendingEvent(adapter, runId) {
  * @param {string} runId
  */
 async function loadParkedEventBlock(adapter, runId) {
-    const nodes = await adapter.listNodes(runId);
-    const pending = nodes.find((node) => node.state === "pending");
-    if (pending) {
-        return {
-            kind: "approval-decided-resume-required",
-            nodeId: pending.nodeId,
-        };
-    }
-    return { kind: "external-trigger" };
+  const nodes = await adapter.listNodes(runId);
+  const pending = nodes.find((node) => node.state === "pending");
+  if (pending) {
+    return {
+      kind: "approval-decided-resume-required",
+      nodeId: pending.nodeId,
+    };
+  }
+  return { kind: "external-trigger" };
 }

@@ -67,10 +67,9 @@ describe("AmpAgent", () => {
       "--mcp-config",
       "mcp.json",
     ]);
-    expect(command.args.slice(command.args.indexOf("--settings-file"), command.args.indexOf("--settings-file") + 2)).toEqual([
-      "--settings-file",
-      "settings.json",
-    ]);
+    expect(
+      command.args.slice(command.args.indexOf("--settings-file"), command.args.indexOf("--settings-file") + 2),
+    ).toEqual(["--settings-file", "settings.json"]);
     expect(command.args.slice(command.args.indexOf("--log-level"), command.args.indexOf("--log-level") + 2)).toEqual([
       "--log-level",
       "debug",
@@ -81,9 +80,7 @@ describe("AmpAgent", () => {
     ]);
 
     const executeIndex = command.args.indexOf("--execute");
-    expect(command.args[executeIndex + 1]).toBe(
-      "System instructions\n\nImplement the change",
-    );
+    expect(command.args[executeIndex + 1]).toBe("System instructions\n\nImplement the change");
   });
 
   test("builds text command arguments with inherited yolo and model options", async () => {
@@ -278,10 +275,14 @@ describe("AmpAgent", () => {
 
     const exited = new AmpAgent().createOutputInterpreter();
     expect(exited.onExit({ exitCode: 0, stderr: "" })).toEqual([]);
-    expect(exited.onStdoutLine(JSON.stringify({
-      type: "assistant",
-      message: { content: [{ type: "text", text: "draft" }] },
-    }))).toEqual([]);
+    expect(
+      exited.onStdoutLine(
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "draft" }] },
+        }),
+      ),
+    ).toEqual([]);
     expect(exited.onExit({ exitCode: 9, stderr: "boom\n" })).toEqual([
       {
         type: "completed",
@@ -294,9 +295,7 @@ describe("AmpAgent", () => {
     ]);
 
     const fallbackExit = new AmpAgent().createOutputInterpreter();
-    expect(fallbackExit.onExit({ exitCode: 3, stderr: "" })[0].error).toBe(
-      "Amp exited with code 3",
-    );
+    expect(fallbackExit.onExit({ exitCode: 3, stderr: "" })[0].error).toBe("Amp exited with code 3");
   });
 
   test("continues an existing thread when a session id is provided", async () => {

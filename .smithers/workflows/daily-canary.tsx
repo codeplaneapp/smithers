@@ -101,14 +101,17 @@ const MEMORY_NAMESPACE = "workflow:daily-canary";
 const MEMORY_KEY = "test-lru";
 const OWNERSHIP_MARKER = ".smithers-canary-owned";
 
-const smartBugHunter = codexFirst({
-  model: "gpt-5.6-sol",
-  cwd: ROOT,
-  sandbox: "read-only",
-  skipGitRepoCheck: true,
-  extraArgs: ["-c", "tools.web_search=true"],
-  timeoutMs: 35 * 60_000,
-}, [new ClaudeCodeAgent({ model: "claude-fable-5", cwd: ROOT })]);
+const smartBugHunter = codexFirst(
+  {
+    model: "gpt-5.6-sol",
+    cwd: ROOT,
+    sandbox: "read-only",
+    skipGitRepoCheck: true,
+    extraArgs: ["-c", "tools.web_search=true"],
+    timeoutMs: 35 * 60_000,
+  },
+  [new ClaudeCodeAgent({ model: "claude-fable-5", cwd: ROOT })],
+);
 
 function truncate(text: string, max = MAX_OUTPUT): string {
   return text.length > max ? `${text.slice(0, max)}\n...[truncated ${text.length - max} chars]` : text;
@@ -122,7 +125,7 @@ function run(
   timeoutMs = 12 * 60_000,
 ): z.infer<typeof commandSchema> {
   const started = Date.now();
-  const executable = command === "bun" ? (process.env.SMITHERS_CANARY_BUN || command) : command;
+  const executable = command === "bun" ? process.env.SMITHERS_CANARY_BUN || command : command;
   const res = spawnSync(executable, args, {
     cwd,
     encoding: "utf8",
@@ -143,7 +146,7 @@ function run(
     status: res.status ?? null,
     durationMs: Date.now() - started,
     stdout: truncate(res.stdout ?? ""),
-    stderr: truncate(res.error ? res.error.message : res.stderr ?? ""),
+    stderr: truncate(res.error ? res.error.message : (res.stderr ?? "")),
   };
 }
 
@@ -253,12 +256,26 @@ export default smithers((ctx) => {
             {() => {
               const commands: z.infer<typeof commandSchema>[] = [];
               commands.push(
-                run("bun", [prepare.cliPath, "init", "--yes", "--no-skill", "--format", "json"], prepare.workspaceDir, {}, 20 * 60_000),
+                run(
+                  "bun",
+                  [prepare.cliPath, "init", "--yes", "--no-skill", "--format", "json"],
+                  prepare.workspaceDir,
+                  {},
+                  20 * 60_000,
+                ),
               );
               const initOk = commands[commands.length - 1]?.ok === true;
               if (initOk) {
-                commands.push(run("bun", [prepare.cliPath, "workflow", "list", "--system", "--format", "json"], prepare.workspaceDir));
-                commands.push(run("bun", [prepare.cliPath, "graph", ".smithers/workflows/hello.tsx"], prepare.workspaceDir));
+                commands.push(
+                  run(
+                    "bun",
+                    [prepare.cliPath, "workflow", "list", "--system", "--format", "json"],
+                    prepare.workspaceDir,
+                  ),
+                );
+                commands.push(
+                  run("bun", [prepare.cliPath, "graph", ".smithers/workflows/hello.tsx"], prepare.workspaceDir),
+                );
                 commands.push(
                   run(
                     "bun",
@@ -276,7 +293,11 @@ export default smithers((ctx) => {
                   ),
                 );
                 commands.push(
-                  run("bun", [prepare.cliPath, "memory", "get", MEMORY_NAMESPACE, "canary-probe", "--format", "json"], prepare.workspaceDir),
+                  run(
+                    "bun",
+                    [prepare.cliPath, "memory", "get", MEMORY_NAMESPACE, "canary-probe", "--format", "json"],
+                    prepare.workspaceDir,
+                  ),
                 );
                 if (ctx.input.runHello ?? true) {
                   commands.push(
@@ -319,7 +340,11 @@ export default smithers((ctx) => {
         {prepare && canary ? (
           <Task id="read-test-memory" output={outputs.memory} retries={0}>
             {() => {
-              const cmd = run("bun", [prepare.cliPath, "memory", "get", MEMORY_NAMESPACE, MEMORY_KEY, "--format", "json"], prepare.workspaceDir);
+              const cmd = run(
+                "bun",
+                [prepare.cliPath, "memory", "get", MEMORY_NAMESPACE, MEMORY_KEY, "--format", "json"],
+                prepare.workspaceDir,
+              );
               const parsed = factEntriesFromMemoryCommand(cmd);
               return {
                 namespace: MEMORY_NAMESPACE,
@@ -335,7 +360,11 @@ export default smithers((ctx) => {
         <Task id="git-history" output={outputs.gitHistory} retries={0}>
           {() => {
             const since = "7 days ago";
-            const log = run("git", ["log", "--since", since, "--stat", "--oneline", "--decorate", "--max-count", "80"], ROOT);
+            const log = run(
+              "git",
+              ["log", "--since", since, "--stat", "--oneline", "--decorate", "--max-count", "80"],
+              ROOT,
+            );
             const diffStat = run("git", ["diff", "--stat", "HEAD~50..HEAD"], ROOT);
             return {
               since,
@@ -349,7 +378,12 @@ export default smithers((ctx) => {
           id="smart-bug-hunt"
           output={outputs.bugHunt}
           agent={smartBugHunter}
-          deps={{ prepare: outputs.prepare, canary: outputs.canary, memory: outputs.memory, history: outputs.gitHistory }}
+          deps={{
+            prepare: outputs.prepare,
+            canary: outputs.canary,
+            memory: outputs.memory,
+            history: outputs.gitHistory,
+          }}
           needs={{ canary: "run-canary", memory: "read-test-memory", history: "git-history" }}
         >
           {(deps) => `You are the smart daily Smithers canary reviewer.
@@ -418,10 +452,19 @@ Return JSON:
                   const row = item as { runLabel?: unknown; mode?: unknown };
                   return row.runLabel !== entry.runLabel || row.mode !== entry.mode;
                 }),
-              ].slice(0, (ctx.input.lruLimit ?? 30));
+              ].slice(0, ctx.input.lruLimit ?? 30);
               const cmd = run(
                 "bun",
-                [prepare.cliPath, "memory", "set", MEMORY_NAMESPACE, MEMORY_KEY, JSON.stringify(entries), "--format", "json"],
+                [
+                  prepare.cliPath,
+                  "memory",
+                  "set",
+                  MEMORY_NAMESPACE,
+                  MEMORY_KEY,
+                  JSON.stringify(entries),
+                  "--format",
+                  "json",
+                ],
                 prepare.workspaceDir,
               );
               return { ok: cmd.ok, command: cmd, entries };
@@ -447,7 +490,9 @@ Return JSON:
                 bugHunt.summary || "(no summary)",
                 "",
                 "## Commands",
-                ...canary.commands.map((cmd) => `- ${cmd.ok ? "PASS" : "FAIL"} \`${cmd.command}\` (${cmd.durationMs}ms)`),
+                ...canary.commands.map(
+                  (cmd) => `- ${cmd.ok ? "PASS" : "FAIL"} \`${cmd.command}\` (${cmd.durationMs}ms)`,
+                ),
                 "",
                 "## Bugs",
                 JSON.stringify(bugHunt.bugs ?? [], null, 2),

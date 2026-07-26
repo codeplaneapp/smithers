@@ -110,8 +110,7 @@ export type TerminalProps = Omit<ComponentProps<"div">, "onResize"> & {
   scrollback?: number;
 };
 
-const DEFAULT_FONT_FAMILY =
-  "'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+const DEFAULT_FONT_FAMILY = "'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 
 /** Inject the xterm base sheet + surface chrome once per document (browser only). */
 function injectTerminalStyles(): void {

@@ -38,10 +38,7 @@ function transportFor(respond) {
  */
 function rfc6052Address(prefixLength, ipv4, suffix = []) {
   const bytes = new Uint8Array(16);
-  const prefix = Uint8Array.from([
-    0x26, 0x06, 0x47, 0x00, 0x12, 0x34, 0x56, 0x78,
-    0x00, 0xbc, 0xde, 0xf0,
-  ]);
+  const prefix = Uint8Array.from([0x26, 0x06, 0x47, 0x00, 0x12, 0x34, 0x56, 0x78, 0x00, 0xbc, 0xde, 0xf0]);
   bytes.set(prefix.slice(0, prefixLength / 8));
   const v4 = ipv4.split(".").map(Number);
 
@@ -380,11 +377,7 @@ describe("guardedAudioDownload", () => {
     });
 
     expect(await response.text()).toBe("final audio");
-    expect(dns.calls.map((call) => call.hostname)).toEqual([
-      "one.example.com",
-      "one.example.com",
-      "two.example.com",
-    ]);
+    expect(dns.calls.map((call) => call.hostname)).toEqual(["one.example.com", "one.example.com", "two.example.com"]);
     expect(network.calls.map((call) => [call.url.href, call.address])).toEqual([
       ["https://one.example.com/start", "93.184.216.1"],
       ["https://one.example.com/middle", "93.184.216.1"],
@@ -396,11 +389,12 @@ describe("guardedAudioDownload", () => {
     const dns = resolverFor({
       "public.example.com": [{ address: "93.184.216.34", family: 4 }],
     });
-    const network = transportFor(() =>
-      new Response(null, {
-        status: 302,
-        headers: { location: "http://169.254.169.254/latest/meta-data/" },
-      }),
+    const network = transportFor(
+      () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: "http://169.254.169.254/latest/meta-data/" },
+        }),
     );
 
     await expect(
@@ -418,8 +412,8 @@ describe("guardedAudioDownload", () => {
       "public.example.com": [{ address: "93.184.216.34", family: 4 }],
       "internal.example.com": [{ address: "192.168.1.10", family: 4 }],
     });
-    const network = transportFor(() =>
-      new Response(null, { status: 301, headers: { location: "https://internal.example.com/secret" } }),
+    const network = transportFor(
+      () => new Response(null, { status: 301, headers: { location: "https://internal.example.com/secret" } }),
     );
 
     await expect(
@@ -442,9 +436,7 @@ describe("guardedAudioDownload", () => {
         resolver: async (hostname, options) => {
           resolverCalls.push({ hostname, signal: options.signal });
           resolution += 1;
-          return resolution === 1
-            ? [{ address: "93.184.216.34", family: 4 }]
-            : [{ address: "10.0.0.9", family: 4 }];
+          return resolution === 1 ? [{ address: "93.184.216.34", family: 4 }] : [{ address: "10.0.0.9", family: 4 }];
         },
         transport: network.transport,
       }),
@@ -549,11 +541,12 @@ describe("guardedAudioDownload", () => {
     const dns = resolverFor({
       "audio.example.com": [{ address: "93.184.216.34", family: 4 }],
     });
-    const network = transportFor(({ url }) =>
-      new Response(null, {
-        status: 302,
-        headers: { location: `/hop-${Number(url.pathname.split("-").at(-1) || 0) + 1}` },
-      }),
+    const network = transportFor(
+      ({ url }) =>
+        new Response(null, {
+          status: 302,
+          headers: { location: `/hop-${Number(url.pathname.split("-").at(-1) || 0) + 1}` },
+        }),
     );
 
     await expect(
@@ -586,8 +579,8 @@ describe("guardedAudioDownload", () => {
     const dns = resolverFor({
       "one.example.com": [{ address: "10.0.0.5", family: 4 }],
     });
-    const network = transportFor(() =>
-      new Response(null, { status: 302, headers: { location: "https://two.example.com/audio" } }),
+    const network = transportFor(
+      () => new Response(null, { status: 302, headers: { location: "https://two.example.com/audio" } }),
     );
 
     await expect(

@@ -105,18 +105,12 @@ export async function fetchJwks(
   const cached = existing ?? {};
   if (!existing) jwksCache.set(url, cached);
 
-  const fresh =
-    cached.keys !== undefined &&
-    cached.fetchedAt !== undefined &&
-    now - cached.fetchedAt < CACHE_TTL_MS;
+  const fresh = cached.keys !== undefined && cached.fetchedAt !== undefined && now - cached.fetchedAt < CACHE_TTL_MS;
   if (!options.bypassCacheOnKidMiss && fresh) return cached.keys ?? [];
   if (cached.inFlight) return cached.inFlight;
 
   const recentFailure = cached.lastRefreshFailure;
-  if (
-    recentFailure !== undefined &&
-    now - recentFailure.at < JWKS_REFRESH_COOLDOWN_MS
-  ) {
+  if (recentFailure !== undefined && now - recentFailure.at < JWKS_REFRESH_COOLDOWN_MS) {
     if (recentFailure.kind === "error") throw recentFailure.error;
     return cached.keys ?? [];
   }

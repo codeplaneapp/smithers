@@ -1,11 +1,6 @@
 /** @jsxImportSource react */
 import { useMemo, type ReactNode } from "react";
-import {
-  processPatch,
-  type CodeViewItem,
-  type DiffsThemeNames,
-  type FileDiffMetadata,
-} from "@pierre/diffs";
+import { processPatch, type CodeViewItem, type DiffsThemeNames, type FileDiffMetadata } from "@pierre/diffs";
 import { CodeView } from "@pierre/diffs/react";
 import { cn } from "../cn";
 import { useInjectUiCss } from "../styles";
@@ -122,7 +117,11 @@ export function PierreDiffView({
 
   if (items.length === 0) {
     return (
-      <div className={cn("sui-pierre-diff-empty", className)} data-slot="pierre-diff-view" data-theme-mode={resolvedMode}>
+      <div
+        className={cn("sui-pierre-diff-empty", className)}
+        data-slot="pierre-diff-view"
+        data-theme-mode={resolvedMode}
+      >
         {emptyLabel ?? "No diff is available for this change."}
       </div>
     );
@@ -154,9 +153,7 @@ export function PierreDiffView({
           theme: diffsThemeForMode(resolvedMode),
           themeType: resolvedMode,
         }}
-        renderHeaderMetadata={(item) =>
-          item.type === "diff" ? renderStats(item.fileDiff) : null
-        }
+        renderHeaderMetadata={(item) => (item.type === "diff" ? renderStats(item.fileDiff) : null)}
       />
     </div>
   );

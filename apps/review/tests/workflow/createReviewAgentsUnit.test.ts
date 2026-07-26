@@ -2,7 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createReviewAgents, registeredReviewCodexCredentials, resolveReviewEngine } from "../../src/workflow/createReviewAgents";
+import {
+  createReviewAgents,
+  registeredReviewCodexCredentials,
+  resolveReviewEngine,
+} from "../../src/workflow/createReviewAgents";
 
 const ENV_KEYS = [
   "SMITHERS_REVIEW_ENGINE",
@@ -116,13 +120,16 @@ describe("createReviewAgents", () => {
     const root = mkdtempSync(join(tmpdir(), "smithers-review-accounts-"));
     tempDirs.push(root);
     mkdirSync(root, { recursive: true });
-    writeFileSync(join(root, "accounts.json"), JSON.stringify({
-      version: 1,
-      accounts: [
-        { label: "codex-work", provider: "codex", configDir: "/accounts/codex-work" },
-        { label: "openai-paid", provider: "openai-api", apiKey: "sk-openai-paid" },
-      ],
-    }));
+    writeFileSync(
+      join(root, "accounts.json"),
+      JSON.stringify({
+        version: 1,
+        accounts: [
+          { label: "codex-work", provider: "codex", configDir: "/accounts/codex-work" },
+          { label: "openai-paid", provider: "openai-api", apiKey: "sk-openai-paid" },
+        ],
+      }),
+    );
     process.env.SMITHERS_HOME = root;
 
     expect(registeredReviewCodexCredentials()).toHaveLength(2);

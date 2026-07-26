@@ -5,5 +5,5 @@ import { correlationStorage } from "./_correlationStorage.js";
  * @returns {CorrelationContext | undefined}
  */
 export function getCurrentCorrelationContext() {
-    return correlationStorage.getStore();
+  return correlationStorage.getStore();
 }

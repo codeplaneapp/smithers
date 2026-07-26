@@ -1,21 +1,12 @@
 import { openSurface } from "../app/navigation";
 import { StatusPill } from "../cards/StatusPill";
-import {
-  runDisplayName,
-  runStatusToNode,
-  summarizeRuns,
-} from "./runsList";
+import { runDisplayName, runStatusToNode, summarizeRuns } from "./runsList";
 import { useRunsListStore } from "./runsListStore";
 
 function BoltIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
+      <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
     </svg>
   );
 }

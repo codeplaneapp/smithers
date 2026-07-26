@@ -220,7 +220,11 @@ export function buildNodeChatTranscript(
       items.push({ kind: "note", key: `note:${frame.seq}`, label: describeFileChange(detail, title) });
       sawContent = true;
     } else if (kind === "web_search") {
-      items.push({ kind: "note", key: `note:${frame.seq}`, label: `Searched: ${title !== "web_search" ? title : message || "the web"}` });
+      items.push({
+        kind: "note",
+        key: `note:${frame.seq}`,
+        label: `Searched: ${title !== "web_search" ? title : message || "the web"}`,
+      });
       sawContent = true;
     }
     // Other kinds (turn, todo_list, generic notes) stay off the transcript.

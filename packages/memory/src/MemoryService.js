@@ -1,1 +1,4 @@
-import { Context } from "effect"; export class MemoryService extends /** @type {Context.TagClass<MemoryService, "MemoryService", import("./MemoryServiceApi.ts").MemoryServiceApi>} */ (/** @type {unknown} */ (Context.Tag("MemoryService")())) {}
+import { Context } from "effect";
+export class MemoryService /** @type {Context.TagClass<MemoryService, "MemoryService", import("./MemoryServiceApi.ts").MemoryServiceApi>} */
+  /** @type {unknown} */
+  extends Context.Tag("MemoryService")() {}

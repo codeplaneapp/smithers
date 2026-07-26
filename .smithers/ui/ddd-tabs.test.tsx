@@ -22,7 +22,23 @@ import type { Feature, TicketRow } from "./ddd-shared";
 
 const { docsContent } = await import("./ddd-docsContent.generated");
 const { ticketsBacklog } = await import("./ddd-ticketsBacklog.generated");
-const { FeatureDetail, MarkdownEditor, MarkdownPreview, SpecFileTree, buildChatLines, changedFilesFromMetaTicket, features, formatCount, formatTicketKind, loadSpecDrafts, reconcileDraftsAfterRun, saveSpecDrafts, updatedDocPathsFromSpec, uploadAsset, useDialogFocusTrap } = await import("./ddd-shared");
+const {
+  FeatureDetail,
+  MarkdownEditor,
+  MarkdownPreview,
+  SpecFileTree,
+  buildChatLines,
+  changedFilesFromMetaTicket,
+  features,
+  formatCount,
+  formatTicketKind,
+  loadSpecDrafts,
+  reconcileDraftsAfterRun,
+  saveSpecDrafts,
+  updatedDocPathsFromSpec,
+  uploadAsset,
+  useDialogFocusTrap,
+} = await import("./ddd-shared");
 const { FeaturesTab } = await import("./ddd-FeaturesTab");
 const { SpecsTab } = await import("./ddd-SpecsTab");
 const { AuditTab } = await import("./ddd-AuditTab");
@@ -145,7 +161,9 @@ function setInputValue(input: HTMLTextAreaElement | HTMLInputElement, value: str
   const prototype = input.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
   setter?.call(input, value);
-  (input as HTMLTextAreaElement & { _valueTracker?: { setValue: (value: string) => void } })._valueTracker?.setValue(previous);
+  (input as HTMLTextAreaElement & { _valueTracker?: { setValue: (value: string) => void } })._valueTracker?.setValue(
+    previous,
+  );
   input.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: value, inputType: "insertText" }));
   input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
 }
@@ -154,7 +172,9 @@ function setSelectValue(select: HTMLSelectElement, value: string) {
   const previous = select.value;
   const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
   setter?.call(select, value);
-  (select as HTMLSelectElement & { _valueTracker?: { setValue: (value: string) => void } })._valueTracker?.setValue(previous);
+  (select as HTMLSelectElement & { _valueTracker?: { setValue: (value: string) => void } })._valueTracker?.setValue(
+    previous,
+  );
   select.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
   select.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
 }
@@ -206,34 +226,44 @@ async function localJsonServer(
 }
 
 function makeStaticWorkflow(name: string, dbPath: string, delayMs = 0) {
-  const row = z.object({
-    summary: z.string().default(""),
-    status: z.string().default("partial"),
-    source: z.string().default(""),
-    docPath: z.string().default(""),
-    changedFiles: z.array(z.any()).default([]),
-    beforeMarkdown: z.string().default(""),
-    afterMarkdown: z.string().default(""),
-    updatedFiles: z.array(z.string()).default([]),
-    featureIds: z.array(z.string()).default([]),
-    broken: z.array(z.string()).default([]),
-    partial: z.array(z.string()).default([]),
-    missingE2E: z.array(z.string()).default([]),
-    missingDocs: z.array(z.string()).default([]),
-    selected: z.array(z.any()).default([]),
-    tickets: z.array(z.any()).default([]),
-    approved: z.boolean().default(true),
-  }).passthrough();
-  const { smithers, Workflow: W, Task: T, outputs } = createSmithers({
-    bootstrap: row,
-    metaTicket: row,
-    audit: row,
-    spec: row,
-    triage: row,
-    materializedTickets: row,
-    summary: row,
-    done: row,
-  }, { dbPath });
+  const row = z
+    .object({
+      summary: z.string().default(""),
+      status: z.string().default("partial"),
+      source: z.string().default(""),
+      docPath: z.string().default(""),
+      changedFiles: z.array(z.any()).default([]),
+      beforeMarkdown: z.string().default(""),
+      afterMarkdown: z.string().default(""),
+      updatedFiles: z.array(z.string()).default([]),
+      featureIds: z.array(z.string()).default([]),
+      broken: z.array(z.string()).default([]),
+      partial: z.array(z.string()).default([]),
+      missingE2E: z.array(z.string()).default([]),
+      missingDocs: z.array(z.string()).default([]),
+      selected: z.array(z.any()).default([]),
+      tickets: z.array(z.any()).default([]),
+      approved: z.boolean().default(true),
+    })
+    .passthrough();
+  const {
+    smithers,
+    Workflow: W,
+    Task: T,
+    outputs,
+  } = createSmithers(
+    {
+      bootstrap: row,
+      metaTicket: row,
+      audit: row,
+      spec: row,
+      triage: row,
+      materializedTickets: row,
+      summary: row,
+      done: row,
+    },
+    { dbPath },
+  );
 
   if (name !== "docs-driven-development") {
     return smithers(() => (
@@ -271,33 +301,45 @@ function makeStaticWorkflow(name: string, dbPath: string, delayMs = 0) {
         {{ summary: "spec ok", status: "ready", updatedFiles: ["overview.md"] }}
       </T>
       <T id="audit" output={outputs.audit} dependsOn={["metaTicket"]}>
-        {{ summary: "audit ok", status: "done", featureIds: ["docs-driven-development"], broken: [], partial: [], missingE2E: [], missingDocs: [] }}
+        {{
+          summary: "audit ok",
+          status: "done",
+          featureIds: ["docs-driven-development"],
+          broken: [],
+          partial: [],
+          missingE2E: [],
+          missingDocs: [],
+        }}
       </T>
       <T id="triage" output={outputs.triage} dependsOn={["spec-update"]}>
         {{
           summary: "triage ok",
-          selected: [{
-            slot: 1,
-            featureId: "docs-driven-development",
-            title: "Top-level App test",
-            agent: "implementation",
-            taskType: "e2e",
-            reason: "Exercise App launch state.",
-          }],
+          selected: [
+            {
+              slot: 1,
+              featureId: "docs-driven-development",
+              title: "Top-level App test",
+              agent: "implementation",
+              taskType: "e2e",
+              reason: "Exercise App launch state.",
+            },
+          ],
         }}
       </T>
       <T id="materialize-tickets" output={outputs.materializedTickets} dependsOn={["triage"]}>
         {{
           summary: "materialized",
-          tickets: [{
-            path: "docs-driven-development--app-run--01-docs-driven-development",
-            kind: "ticket",
-            status: "todo",
-            content: "# App materialized ticket",
-            featureId: "docs-driven-development",
-            featureTitle: "Docs driven development",
-            updatedAtMs: 1,
-          }],
+          tickets: [
+            {
+              path: "docs-driven-development--app-run--01-docs-driven-development",
+              kind: "ticket",
+              status: "todo",
+              content: "# App materialized ticket",
+              featureId: "docs-driven-development",
+              featureTitle: "Docs driven development",
+              updatedAtMs: 1,
+            },
+          ],
         }}
       </T>
       <T id="round-summary" output={outputs.summary} dependsOn={["materialize-tickets"]}>
@@ -318,17 +360,39 @@ async function mountAppWithGateway(
   tempDirs.push(root);
   const gateway = new Gateway({ heartbeatMs: 50 });
   gateways.push(gateway);
-  gateway.register("docs-driven-development", makeStaticWorkflow("docs-driven-development", join(root, "ddd.db"), 50) as Parameters<typeof gateway.register>[1], {
-    ui: { entry: "docs-driven-development.tsx", title: "Docs Driven Development" },
-  });
-  gateway.register("create-workflow", makeStaticWorkflow("create-workflow", join(root, "create.db")) as Parameters<typeof gateway.register>[1]);
-  gateway.register("other-workflow", makeStaticWorkflow("other-workflow", join(root, "other.db")) as Parameters<typeof gateway.register>[1]);
+  gateway.register(
+    "docs-driven-development",
+    makeStaticWorkflow("docs-driven-development", join(root, "ddd.db"), 50) as Parameters<typeof gateway.register>[1],
+    {
+      ui: { entry: "docs-driven-development.tsx", title: "Docs Driven Development" },
+    },
+  );
+  gateway.register(
+    "create-workflow",
+    makeStaticWorkflow("create-workflow", join(root, "create.db")) as Parameters<typeof gateway.register>[1],
+  );
+  gateway.register(
+    "other-workflow",
+    makeStaticWorkflow("other-workflow", join(root, "other.db")) as Parameters<typeof gateway.register>[1],
+  );
   if (pathname.includes("url-run")) {
-    await gateway.startRun("docs-driven-development", {}, { triggeredBy: "unit", scopes: ["*"], role: "operator", tokenId: null } as any, "url-run", { resume: false });
+    await gateway.startRun(
+      "docs-driven-development",
+      {},
+      { triggeredBy: "unit", scopes: ["*"], role: "operator", tokenId: null } as any,
+      "url-run",
+      { resume: false },
+    );
     await gateway.inflightRuns.get("url-run");
   }
   if (pathname.includes("other-run")) {
-    await gateway.startRun("other-workflow", {}, { triggeredBy: "unit", scopes: ["*"], role: "operator", tokenId: null } as any, "other-run", { resume: false });
+    await gateway.startRun(
+      "other-workflow",
+      {},
+      { triggeredBy: "unit", scopes: ["*"], role: "operator", tokenId: null } as any,
+      "other-run",
+      { resume: false },
+    );
     await gateway.inflightRuns.get("other-run");
   }
   await gateway.listen({ port: 0, host: "127.0.0.1" });
@@ -365,16 +429,19 @@ describe("DDD tabs and components", () => {
   }, 60_000);
 
   test("App mounted with stub generated spec starts in the non-dismissible Start pane and keeps launch wiring", async () => {
-    const stubDocs = [{
-      path: "overview.md",
-      title: "Overview",
-      level: "product" as const,
-      content: "# Overview\n\nSeeded starter doc.\n",
-    }];
-    const app = await mountAppWithGateway(
-      "/workflows/docs-driven-development?tutorial=off",
-      { specFeatures: [], specDocs: stubDocs, ticketsBacklogData: [] },
-    );
+    const stubDocs = [
+      {
+        path: "overview.md",
+        title: "Overview",
+        level: "product" as const,
+        content: "# Overview\n\nSeeded starter doc.\n",
+      },
+    ];
+    const app = await mountAppWithGateway("/workflows/docs-driven-development?tutorial=off", {
+      specFeatures: [],
+      specDocs: stubDocs,
+      ticketsBacklogData: [],
+    });
 
     await waitFor(() => expect(app.container.querySelector('[data-testid="docs-driven-development-ui"]')).toBeTruthy());
     expect(app.container.querySelector('[data-testid="ddd-start-pane"]')).toBeTruthy();
@@ -384,13 +451,32 @@ describe("DDD tabs and components", () => {
 
     const createButton = app.container.querySelector('[data-testid="ddd-start-create-launch"]') as HTMLButtonElement;
     expect(createButton.disabled).toBe(true);
-    await act(async () => setInputValue(app.container.querySelector('[data-testid="ddd-start-description"]') as HTMLTextAreaElement, "Build a stub-mode workflow"));
+    await act(async () =>
+      setInputValue(
+        app.container.querySelector('[data-testid="ddd-start-description"]') as HTMLTextAreaElement,
+        "Build a stub-mode workflow",
+      ),
+    );
     expect(createButton.disabled).toBe(false);
     await act(async () => createButton.click());
-    await waitFor(() => expect(text(app.container.querySelector('[data-testid="ddd-start-launched"]') as HTMLElement)).toContain("create-workflow"), 10_000);
+    await waitFor(
+      () =>
+        expect(text(app.container.querySelector('[data-testid="ddd-start-launched"]') as HTMLElement)).toContain(
+          "create-workflow",
+        ),
+      10_000,
+    );
 
-    await act(async () => (app.container.querySelector('[data-testid="ddd-start-generate-launch"]') as HTMLButtonElement).click());
-    await waitFor(() => expect(text(app.container.querySelector('[data-testid="ddd-start-generate-run"]') as HTMLElement)).toContain("docs audit"), 10_000);
+    await act(async () =>
+      (app.container.querySelector('[data-testid="ddd-start-generate-launch"]') as HTMLButtonElement).click(),
+    );
+    await waitFor(
+      () =>
+        expect(text(app.container.querySelector('[data-testid="ddd-start-generate-run"]') as HTMLElement)).toContain(
+          "docs audit",
+        ),
+      10_000,
+    );
     expect(app.container.querySelector('[data-testid="ddd-start-pane"]')).toBeTruthy();
     expect(app.container.querySelector('[data-testid="ddd-subhead"]')?.hasAttribute("hidden")).toBe(true);
   }, 60_000);
@@ -406,24 +492,48 @@ describe("DDD tabs and components", () => {
 
     const featuresTab = app.container.querySelector('[data-testid="ddd-tab-features"]') as HTMLButtonElement;
     await act(async () => featuresTab.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true })));
-    await waitFor(() => expect(app.container.querySelector('[data-testid="ddd-tab-tickets"]')?.getAttribute("aria-selected")).toBe("true"));
-    await act(async () => (app.container.querySelector('[data-testid="ddd-tab-tickets"]') as HTMLButtonElement)
-      .dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })));
-    await waitFor(() => expect(app.container.querySelector('[data-testid="ddd-tab-features"]')?.getAttribute("aria-selected")).toBe("true"));
-    await act(async () => (app.container.querySelector('[data-testid="ddd-tab-features"]') as HTMLButtonElement)
-      .dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
-    await waitFor(() => expect(app.container.querySelector('[data-testid="ddd-tab-specs"]')?.getAttribute("aria-selected")).toBe("true"));
+    await waitFor(() =>
+      expect(app.container.querySelector('[data-testid="ddd-tab-tickets"]')?.getAttribute("aria-selected")).toBe(
+        "true",
+      ),
+    );
+    await act(async () =>
+      (app.container.querySelector('[data-testid="ddd-tab-tickets"]') as HTMLButtonElement).dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Home", bubbles: true }),
+      ),
+    );
+    await waitFor(() =>
+      expect(app.container.querySelector('[data-testid="ddd-tab-features"]')?.getAttribute("aria-selected")).toBe(
+        "true",
+      ),
+    );
+    await act(async () =>
+      (app.container.querySelector('[data-testid="ddd-tab-features"]') as HTMLButtonElement).dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+      ),
+    );
+    await waitFor(() =>
+      expect(app.container.querySelector('[data-testid="ddd-tab-specs"]')?.getAttribute("aria-selected")).toBe("true"),
+    );
 
     await waitFor(() => expect(app.container.querySelector('[data-testid="ddd-editor"]')).toBeTruthy());
     const beforeUnloadAdds: string[] = [];
     const beforeUnloadRemoves: string[] = [];
     const originalAdd = window.addEventListener.bind(window);
     const originalRemove = window.removeEventListener.bind(window);
-    window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+    window.addEventListener = ((
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: boolean | AddEventListenerOptions,
+    ) => {
       if (type === "beforeunload") beforeUnloadAdds.push(type);
       return originalAdd(type, listener, options);
     }) as typeof window.addEventListener;
-    window.removeEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions) => {
+    window.removeEventListener = ((
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: boolean | EventListenerOptions,
+    ) => {
       if (type === "beforeunload") beforeUnloadRemoves.push(type);
       return originalRemove(type, listener, options);
     }) as typeof window.removeEventListener;
@@ -431,37 +541,27 @@ describe("DDD tabs and components", () => {
     try {
       const editor = app.container.querySelector('[data-testid="ddd-editor"]') as HTMLTextAreaElement;
       await act(async () => setInputValue(editor, `${productDoc.content}\nApp draft line\n`));
-      await waitFor(() => expect((app.container.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement).disabled).toBe(false));
+      await waitFor(() =>
+        expect((app.container.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement).disabled).toBe(
+          false,
+        ),
+      );
       expect(beforeUnloadAdds).toEqual(["beforeunload"]);
       expect(loadSpecDrafts(docsContent)[productDoc.path]).toContain("App draft line");
 
       await act(async () => setInputValue(editor, productDoc.content));
-      await waitFor(() => expect((app.container.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement).disabled).toBe(true));
+      await waitFor(() =>
+        expect((app.container.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement).disabled).toBe(
+          true,
+        ),
+      );
       expect(loadSpecDrafts(docsContent)[productDoc.path]).toBeUndefined();
       expect(beforeUnloadRemoves).toEqual(["beforeunload"]);
 
       await act(async () => setInputValue(editor, `${productDoc.content}\nDispatch once\n`));
-      const beforeRuns = await (app.gateway as any).routeRequest({
-        connectionId: "app-unit-before",
-        transport: "test",
-        authenticated: true,
-        role: "operator",
-        scopes: ["*"],
-        userId: "app-unit",
-        tokenId: null,
-        subscribedRuns: new Set<string>(),
-      }, { type: "req", id: "before", method: "runs.list", params: { limit: 100 } });
-      const beforeCount = (beforeRuns.payload as Array<Record<string, unknown>>).filter((run) => run.workflowKey === "docs-driven-development").length;
-      const dispatch = app.container.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement;
-      await act(async () => {
-        dispatch.click();
-        dispatch.click();
-      });
-      await waitFor(() => expect(app.container.querySelector('[data-testid="ddd-tab-live"]')?.getAttribute("aria-selected")).toBe("true"), 10_000);
-      let docsRuns: Array<Record<string, unknown>> = [];
-      await waitFor(async () => {
-        const afterRuns = await (app.gateway as any).routeRequest({
-          connectionId: "app-unit-after",
+      const beforeRuns = await (app.gateway as any).routeRequest(
+        {
+          connectionId: "app-unit-before",
           transport: "test",
           authenticated: true,
           role: "operator",
@@ -469,21 +569,62 @@ describe("DDD tabs and components", () => {
           userId: "app-unit",
           tokenId: null,
           subscribedRuns: new Set<string>(),
-        }, { type: "req", id: "after", method: "runs.list", params: { limit: 100 } });
-        docsRuns = (afterRuns.payload as Array<Record<string, unknown>>).filter((run) => run.workflowKey === "docs-driven-development");
+        },
+        { type: "req", id: "before", method: "runs.list", params: { limit: 100 } },
+      );
+      const beforeCount = (beforeRuns.payload as Array<Record<string, unknown>>).filter(
+        (run) => run.workflowKey === "docs-driven-development",
+      ).length;
+      const dispatch = app.container.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement;
+      await act(async () => {
+        dispatch.click();
+        dispatch.click();
+      });
+      await waitFor(
+        () =>
+          expect(app.container.querySelector('[data-testid="ddd-tab-live"]')?.getAttribute("aria-selected")).toBe(
+            "true",
+          ),
+        10_000,
+      );
+      let docsRuns: Array<Record<string, unknown>> = [];
+      await waitFor(async () => {
+        const afterRuns = await (app.gateway as any).routeRequest(
+          {
+            connectionId: "app-unit-after",
+            transport: "test",
+            authenticated: true,
+            role: "operator",
+            scopes: ["*"],
+            userId: "app-unit",
+            tokenId: null,
+            subscribedRuns: new Set<string>(),
+          },
+          { type: "req", id: "after", method: "runs.list", params: { limit: 100 } },
+        );
+        docsRuns = (afterRuns.payload as Array<Record<string, unknown>>).filter(
+          (run) => run.workflowKey === "docs-driven-development",
+        );
         expect(docsRuns.length).toBe(beforeCount + 1);
       }, 10_000);
       const launchedRunId = String(docsRuns.find((run) => run.runId !== "url-run")?.runId ?? "");
       await waitFor(() => {
-        const runTitles = [...app.container.querySelectorAll('[data-testid="ddd-live-tab"] .rid')]
-          .map((node) => node.getAttribute("title"));
+        const runTitles = [...app.container.querySelectorAll('[data-testid="ddd-live-tab"] .rid')].map((node) =>
+          node.getAttribute("title"),
+        );
         expect(runTitles).toContain(launchedRunId);
       }, 10_000);
       await waitFor(() => expect(loadSpecDrafts(docsContent)[productDoc.path]).toBeUndefined(), 30_000);
-      await act(async () => (app.container.querySelector('[data-testid="ddd-tab-specs"]') as HTMLButtonElement).click());
+      await act(async () =>
+        (app.container.querySelector('[data-testid="ddd-tab-specs"]') as HTMLButtonElement).click(),
+      );
       await waitFor(() => {
-        expect(text(app.container.querySelector('[data-testid="ddd-draft-run-state"]') as HTMLElement)).toContain("Applied");
-        expect((app.container.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement).disabled).toBe(true);
+        expect(text(app.container.querySelector('[data-testid="ddd-draft-run-state"]') as HTMLElement)).toContain(
+          "Applied",
+        );
+        expect((app.container.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement).disabled).toBe(
+          true,
+        );
       });
       expect(beforeUnloadRemoves.length).toBeGreaterThanOrEqual(2);
     } finally {
@@ -495,12 +636,18 @@ describe("DDD tabs and components", () => {
   test("App includes the active non-DDD URL run and shows the installed DDD workflow source", async () => {
     const other = await mountAppWithGateway("/workflows/other-workflow?runId=other-run&tutorial=off");
     await act(async () => (other.container.querySelector('[data-testid="ddd-tab-live"]') as HTMLButtonElement).click());
-    await waitFor(() => expect(text(other.container.querySelector('[data-testid="ddd-live-tab"]') as HTMLElement)).toContain("other-run"));
+    await waitFor(() =>
+      expect(text(other.container.querySelector('[data-testid="ddd-live-tab"]') as HTMLElement)).toContain("other-run"),
+    );
 
     await other.unmount();
     const ddd = await mountAppWithGateway("/workflows/docs-driven-development?runId=url-run&tutorial=off");
     await act(async () => (ddd.container.querySelector('[data-testid="ddd-tab-live"]') as HTMLButtonElement).click());
-    await waitFor(() => expect(text(ddd.container.querySelector('[data-testid="ddd-workflow-source"]') as HTMLElement)).toContain("docs-driven-development"));
+    await waitFor(() =>
+      expect(text(ddd.container.querySelector('[data-testid="ddd-workflow-source"]') as HTMLElement)).toContain(
+        "docs-driven-development",
+      ),
+    );
   }, 60_000);
 
   test("FeaturesTab renders real feature tiers, counts, and opens a feature", async () => {
@@ -525,10 +672,11 @@ describe("DDD tabs and components", () => {
   });
 
   test("FeaturesTab filters by search, status, tier, clears filters, reports no matches, and preserves group order", async () => {
-    const target = features.find((feature) => {
-      const token = feature.title;
-      return features.filter((item) => JSON.stringify(item).toLowerCase().includes(token.toLowerCase())).length === 1;
-    }) ?? features[0]!;
+    const target =
+      features.find((feature) => {
+        const token = feature.title;
+        return features.filter((item) => JSON.stringify(item).toLowerCase().includes(token.toLowerCase())).length === 1;
+      }) ?? features[0]!;
     const harness = await mount(<FeaturesTab onOpenFeature={() => undefined} />);
     const search = harness.container.querySelector('input[type="search"]') as HTMLInputElement;
     const [statusSelect, tierSelect] = [...harness.container.querySelectorAll("select")] as HTMLSelectElement[];
@@ -549,8 +697,11 @@ describe("DDD tabs and components", () => {
     expect(text(harness.container)).toContain(target.title);
 
     await act(async () => setSelectValue(statusSelect!, target.status));
-    expect([...harness.container.querySelectorAll('[data-testid="ddd-feature-card"]')]
-      .every((card) => text(card).includes(target.title))).toBe(true);
+    expect(
+      [...harness.container.querySelectorAll('[data-testid="ddd-feature-card"]')].every((card) =>
+        text(card).includes(target.title),
+      ),
+    ).toBe(true);
 
     await act(async () => setSelectValue(tierSelect!, target.tier ?? "feature"));
     expect(text(harness.container)).toContain(target.title);
@@ -597,7 +748,9 @@ describe("DDD tabs and components", () => {
         feature={feature}
         note="Audit note for ddd-test-feature"
         assetUrl={(path?: string) => path}
-        onClose={() => { closed += 1; }}
+        onClose={() => {
+          closed += 1;
+        }}
         onOpenDoc={(href) => openedDocs.push(href)}
       />,
     );
@@ -612,19 +765,28 @@ describe("DDD tabs and components", () => {
     expect(text(harness.container)).toContain("Capabilities");
 
     // Docs & API panel holds endpoints + related-doc links.
-    await act(async () => (harness.container.querySelector('[data-testid="ddd-feature-section-docs-api"]') as HTMLButtonElement).click());
+    await act(async () =>
+      (harness.container.querySelector('[data-testid="ddd-feature-section-docs-api"]') as HTMLButtonElement).click(),
+    );
     const docsPanel = text(harness.container);
     expect(docsPanel).toContain("POST /runs");
     expect(docsPanel).toContain("Related docs");
-    const docButton = [...harness.container.querySelectorAll("button.doc-link")]
-      .find((button) => text(button).includes("docs")) as HTMLButtonElement;
+    const docButton = [...harness.container.querySelectorAll("button.doc-link")].find((button) =>
+      text(button).includes("docs"),
+    ) as HTMLButtonElement;
     await act(async () => docButton.click());
     expect(openedDocs).toContain("reference/api.md#runs");
 
     // Verification panel holds evidence/tests; Gaps & Fixes holds open gaps.
-    await act(async () => (harness.container.querySelector('[data-testid="ddd-feature-section-verification"]') as HTMLButtonElement).click());
+    await act(async () =>
+      (
+        harness.container.querySelector('[data-testid="ddd-feature-section-verification"]') as HTMLButtonElement
+      ).click(),
+    );
     expect(text(harness.container)).toContain("Evidence");
-    await act(async () => (harness.container.querySelector('[data-testid="ddd-feature-section-gaps"]') as HTMLButtonElement).click());
+    await act(async () =>
+      (harness.container.querySelector('[data-testid="ddd-feature-section-gaps"]') as HTMLButtonElement).click(),
+    );
     expect(text(harness.container)).toContain("Open Gaps");
 
     const close = harness.container.querySelector('button[aria-label="Close"]') as HTMLButtonElement;
@@ -635,7 +797,9 @@ describe("DDD tabs and components", () => {
       <FeatureDetail
         feature={feature}
         assetUrl={(path?: string) => path}
-        onClose={() => { closed += 1; }}
+        onClose={() => {
+          closed += 1;
+        }}
       />,
     );
     await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
@@ -663,11 +827,7 @@ describe("DDD tabs and components", () => {
             Background action
           </button>
           {open ? (
-            <FeatureDetail
-              feature={feature}
-              assetUrl={(path?: string) => path}
-              onClose={() => setOpen(false)}
-            />
+            <FeatureDetail feature={feature} assetUrl={(path?: string) => path} onClose={() => setOpen(false)} />
           ) : null}
         </>
       );
@@ -705,11 +865,19 @@ describe("DDD tabs and components", () => {
     const listenerRemoves: string[] = [];
     const originalAdd = document.addEventListener.bind(document);
     const originalRemove = document.removeEventListener.bind(document);
-    document.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+    document.addEventListener = ((
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: boolean | AddEventListenerOptions,
+    ) => {
       if (type === "keydown" || type === "focusin") listenerAdds.push(type);
       return originalAdd(type, listener, options);
     }) as typeof document.addEventListener;
-    document.removeEventListener = ((type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions) => {
+    document.removeEventListener = ((
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: boolean | EventListenerOptions,
+    ) => {
       if (type === "keydown" || type === "focusin") listenerRemoves.push(type);
       return originalRemove(type, listener, options);
     }) as typeof document.removeEventListener;
@@ -717,11 +885,37 @@ describe("DDD tabs and components", () => {
     function Dialog(props: { id: string; onClose: () => void; noFocusable?: boolean; children?: ReactElement }) {
       const modalRef = useState(() => ({ current: null as HTMLElement | null }))[0];
       const firstRef = useState(() => ({ current: null as HTMLButtonElement | null }))[0];
-      useDialogFocusTrap({ containerRef: modalRef, initialFocusRef: props.noFocusable ? undefined : firstRef, onClose: props.onClose });
+      useDialogFocusTrap({
+        containerRef: modalRef,
+        initialFocusRef: props.noFocusable ? undefined : firstRef,
+        onClose: props.onClose,
+      });
       return (
-        <section ref={(node) => { modalRef.current = node; }} data-testid={props.id} role="dialog" tabIndex={-1}>
-          {props.noFocusable ? null : <button ref={(node) => { firstRef.current = node; }} type="button" data-testid={`${props.id}-close`} onClick={props.onClose}>Close {props.id}</button>}
-          {props.noFocusable ? null : <button type="button" data-testid={`${props.id}-last`}>Last {props.id}</button>}
+        <section
+          ref={(node) => {
+            modalRef.current = node;
+          }}
+          data-testid={props.id}
+          role="dialog"
+          tabIndex={-1}
+        >
+          {props.noFocusable ? null : (
+            <button
+              ref={(node) => {
+                firstRef.current = node;
+              }}
+              type="button"
+              data-testid={`${props.id}-close`}
+              onClick={props.onClose}
+            >
+              Close {props.id}
+            </button>
+          )}
+          {props.noFocusable ? null : (
+            <button type="button" data-testid={`${props.id}-last`}>
+              Last {props.id}
+            </button>
+          )}
           {props.children}
         </section>
       );
@@ -733,16 +927,24 @@ describe("DDD tabs and components", () => {
       const [empty, setEmpty] = useState(false);
       return (
         <>
-          <button type="button" data-testid="stack-opener" onClick={() => setLower(true)}>Open lower</button>
-          <button type="button" data-testid="stack-background">Background</button>
+          <button type="button" data-testid="stack-opener" onClick={() => setLower(true)}>
+            Open lower
+          </button>
+          <button type="button" data-testid="stack-background">
+            Background
+          </button>
           {lower ? (
             <Dialog id="lower-dialog" onClose={() => setLower(false)}>
-              <button type="button" data-testid="open-top" onClick={() => setTop(true)}>Open top</button>
+              <button type="button" data-testid="open-top" onClick={() => setTop(true)}>
+                Open top
+              </button>
             </Dialog>
           ) : null}
           {top ? (
             <Dialog id="top-dialog" onClose={() => setTop(false)}>
-              <button type="button" data-testid="open-empty" onClick={() => setEmpty(true)}>Open empty</button>
+              <button type="button" data-testid="open-empty" onClick={() => setEmpty(true)}>
+                Open empty
+              </button>
             </Dialog>
           ) : null}
           {empty ? <Dialog id="empty-dialog" noFocusable onClose={() => setEmpty(false)} /> : null}
@@ -755,7 +957,9 @@ describe("DDD tabs and components", () => {
       const opener = harness.container.querySelector('[data-testid="stack-opener"]') as HTMLButtonElement;
       opener.focus();
       await act(async () => opener.click());
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
       const lowerClose = harness.container.querySelector('[data-testid="lower-dialog-close"]') as HTMLButtonElement;
       const lowerLast = harness.container.querySelector('[data-testid="lower-dialog-last"]') as HTMLButtonElement;
       expect(document.activeElement).toBe(lowerClose);
@@ -763,14 +967,18 @@ describe("DDD tabs and components", () => {
       const openTop = harness.container.querySelector('[data-testid="open-top"]') as HTMLButtonElement;
       openTop.focus();
       await act(async () => openTop.click());
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
       const topClose = harness.container.querySelector('[data-testid="top-dialog-close"]') as HTMLButtonElement;
       const topLast = harness.container.querySelector('[data-testid="top-dialog-last"]') as HTMLButtonElement;
       expect(document.activeElement).toBe(topClose);
 
       await act(async () => topLast.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true })));
       expect(document.activeElement).toBe(topClose);
-      await act(async () => topClose.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true })));
+      await act(async () =>
+        topClose.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true })),
+      );
       expect(document.activeElement).toBe(harness.container.querySelector('[data-testid="open-empty"]'));
 
       const background = harness.container.querySelector('[data-testid="stack-background"]') as HTMLButtonElement;
@@ -782,17 +990,23 @@ describe("DDD tabs and components", () => {
       const openEmpty = harness.container.querySelector('[data-testid="open-empty"]') as HTMLButtonElement;
       openEmpty.focus();
       await act(async () => openEmpty.click());
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
       const emptyDialog = harness.container.querySelector('[data-testid="empty-dialog"]') as HTMLElement;
       expect(document.activeElement).toBe(emptyDialog);
       await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
       expect(harness.container.querySelector('[data-testid="empty-dialog"]')).toBeFalsy();
-      expect(harness.container.querySelector('[data-testid="top-dialog"]')?.contains(document.activeElement)).toBe(true);
+      expect(harness.container.querySelector('[data-testid="top-dialog"]')?.contains(document.activeElement)).toBe(
+        true,
+      );
 
       await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
       expect(harness.container.querySelector('[data-testid="top-dialog"]')).toBeFalsy();
       expect(harness.container.querySelector('[data-testid="lower-dialog"]')).toBeTruthy();
-      expect(harness.container.querySelector('[data-testid="lower-dialog"]')?.contains(document.activeElement)).toBe(true);
+      expect(harness.container.querySelector('[data-testid="lower-dialog"]')?.contains(document.activeElement)).toBe(
+        true,
+      );
 
       await act(async () => lowerLast.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true })));
       expect(document.activeElement).toBe(lowerClose);
@@ -801,8 +1015,12 @@ describe("DDD tabs and components", () => {
       expect(document.activeElement).toBe(opener);
 
       await harness.unmount();
-      expect(listenerRemoves.filter((type) => type === "keydown").length).toBe(listenerAdds.filter((type) => type === "keydown").length);
-      expect(listenerRemoves.filter((type) => type === "focusin").length).toBe(listenerAdds.filter((type) => type === "focusin").length);
+      expect(listenerRemoves.filter((type) => type === "keydown").length).toBe(
+        listenerAdds.filter((type) => type === "keydown").length,
+      );
+      expect(listenerRemoves.filter((type) => type === "focusin").length).toBe(
+        listenerAdds.filter((type) => type === "focusin").length,
+      );
     } finally {
       document.addEventListener = originalAdd;
       document.removeEventListener = originalRemove;
@@ -822,12 +1040,14 @@ describe("DDD tabs and components", () => {
 
     expect(text(harness.container)).toContain("features");
     expect(text(harness.container)).toContain("reference");
-    const active = [...harness.container.querySelectorAll('[data-testid="ddd-tree-file"]')]
-      .find((button) => text(button).includes("cli.md")) as HTMLButtonElement;
+    const active = [...harness.container.querySelectorAll('[data-testid="ddd-tree-file"]')].find((button) =>
+      text(button).includes("cli.md"),
+    ) as HTMLButtonElement;
     expect(active.className).toContain("is-active");
 
-    const overview = [...harness.container.querySelectorAll('[data-testid="ddd-tree-file"]')]
-      .find((button) => text(button).includes("overview.md")) as HTMLButtonElement;
+    const overview = [...harness.container.querySelectorAll('[data-testid="ddd-tree-file"]')].find((button) =>
+      text(button).includes("overview.md"),
+    ) as HTMLButtonElement;
     expect(overview.className).toContain("is-dirty");
     expect(overview.querySelector(".tree-dirty")).toBeTruthy();
     await act(async () => overview.click());
@@ -852,8 +1072,12 @@ describe("DDD tabs and components", () => {
     );
 
     expect(text(empty.container)).toContain("No narrative docs found");
-    expect((empty.container.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement).disabled).toBe(true);
-    expect((empty.container.querySelector('[data-testid="ddd-create-meta-ticket"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((empty.container.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(
+      (empty.container.querySelector('[data-testid="ddd-create-meta-ticket"]') as HTMLButtonElement).disabled,
+    ).toBe(true);
 
     // Dispatch is a PRODUCT-doc affordance: technical docs are derived and
     // read-only, so the dirty/dispatch cycle is exercised on a product doc.
@@ -902,21 +1126,35 @@ describe("DDD tabs and components", () => {
         onSelectPath={() => undefined}
         onDraftChange={() => undefined}
         onDiscardDrafts={(paths) => discarded.push(paths)}
-        onDispatch={() => { throw new Error("dispatch should be disabled while launching"); }}
+        onDispatch={() => {
+          throw new Error("dispatch should be disabled while launching");
+        }}
       />,
     );
 
-    expect((harness.container.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement).disabled).toBe(true);
-    expect((harness.container.querySelector('[data-testid="ddd-create-meta-ticket"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((harness.container.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(
+      (harness.container.querySelector('[data-testid="ddd-create-meta-ticket"]') as HTMLButtonElement).disabled,
+    ).toBe(true);
     expect(text(harness.container)).toContain("Dispatching");
     expect(text(harness.container)).toContain("Recovered");
     expect(text(harness.container)).toContain("restored from this browser");
 
-    await act(async () => (harness.container.querySelector('[data-testid="ddd-discard-file"]') as HTMLButtonElement).click());
+    await act(async () =>
+      (harness.container.querySelector('[data-testid="ddd-discard-file"]') as HTMLButtonElement).click(),
+    );
     // "Discard all" is destructive: first click only arms it, second confirms.
-    await act(async () => (harness.container.querySelector('[data-testid="ddd-discard-all"]') as HTMLButtonElement).click());
-    expect(text(harness.container.querySelector('[data-testid="ddd-discard-all"]') as HTMLElement)).toContain("Confirm discard");
-    await act(async () => (harness.container.querySelector('[data-testid="ddd-discard-all"]') as HTMLButtonElement).click());
+    await act(async () =>
+      (harness.container.querySelector('[data-testid="ddd-discard-all"]') as HTMLButtonElement).click(),
+    );
+    expect(text(harness.container.querySelector('[data-testid="ddd-discard-all"]') as HTMLElement)).toContain(
+      "Confirm discard",
+    );
+    await act(async () =>
+      (harness.container.querySelector('[data-testid="ddd-discard-all"]') as HTMLButtonElement).click(),
+    );
     await act(async () => buttonByText(harness.container, "Discard recovered").click());
     expect(discarded).toEqual([[productDoc.path], [productDoc.path], [productDoc.path]]);
 
@@ -959,11 +1197,17 @@ describe("DDD tabs and components", () => {
         onDraftChange={() => undefined}
         onDiscardDrafts={(paths) => discarded.push(paths)}
         onDispatch={() => undefined}
-        onReload={() => { reloads += 1; }}
+        onReload={() => {
+          reloads += 1;
+        }}
       />,
     );
-    expect(text(harness.container.querySelector('[data-testid="ddd-draft-run-state"]') as HTMLElement)).toContain("Applied");
-    await act(async () => (harness.container.querySelector('[data-testid="ddd-draft-run-reload"]') as HTMLButtonElement).click());
+    expect(text(harness.container.querySelector('[data-testid="ddd-draft-run-state"]') as HTMLElement)).toContain(
+      "Applied",
+    );
+    await act(async () =>
+      (harness.container.querySelector('[data-testid="ddd-draft-run-reload"]') as HTMLButtonElement).click(),
+    );
     expect(reloads).toBe(1);
   });
 
@@ -1015,7 +1259,9 @@ describe("DDD tabs and components", () => {
       expect(editor.value).toContain("Stale recovered draft");
       expect(text(harness.container)).toContain("Unsaved");
 
-      await act(async () => (harness.container.querySelector('[data-testid="ddd-discard-file"]') as HTMLButtonElement).click());
+      await act(async () =>
+        (harness.container.querySelector('[data-testid="ddd-discard-file"]') as HTMLButtonElement).click(),
+      );
       await waitFor(() => {
         const resetEditor = harness.container.querySelector('[data-testid="ddd-editor"]') as HTMLTextAreaElement;
         expect(resetEditor.value).toBe(productDoc.content);
@@ -1059,7 +1305,9 @@ describe("DDD tabs and components", () => {
         { path: "product/not-updated.md", beforeMarkdown: "# Old\n", afterMarkdown: "# New\n" },
       ],
     });
-    const updatedPaths = updatedDocPathsFromSpec({ updated_files: [".smithers/spec/content/overview.md", "product/guide.md"] });
+    const updatedPaths = updatedDocPathsFromSpec({
+      updated_files: [".smithers/spec/content/overview.md", "product/guide.md"],
+    });
     const result = reconcileDraftsAfterRun(
       {
         "overview.md": "# Applied\n",
@@ -1098,8 +1346,12 @@ describe("DDD tabs and components", () => {
     expect(text(callout as HTMLElement)).toContain("asking your agent to read these");
     expect(harness.container.querySelector('[data-testid="ddd-technical-docs"]')).not.toBeNull();
     expect(harness.container.querySelector('[data-testid="ddd-technical-doc-view"]')).not.toBeNull();
-    expect(text(harness.container.querySelector('[data-testid="ddd-doc-generated-badge"]') as HTMLElement)).toContain("read-only");
-    expect((harness.container.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(text(harness.container.querySelector('[data-testid="ddd-doc-generated-badge"]') as HTMLElement)).toContain(
+      "read-only",
+    );
+    expect((harness.container.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement).disabled).toBe(
+      true,
+    );
     // Product docs render as a first-class tree section.
     expect(text(harness.container)).toContain("Product docs");
   });
@@ -1121,7 +1373,7 @@ describe("DDD tabs and components", () => {
         "```",
         "",
         "```ts",
-        "const status = \"ready\";",
+        'const status = "ready";',
         "```",
       ].join("\n"),
     };
@@ -1149,7 +1401,9 @@ describe("DDD tabs and components", () => {
     await act(async () => (harness.container.querySelector("button.doc-link") as HTMLButtonElement).click());
     expect(selected).toEqual([productDoc.path]);
 
-    await act(async () => (harness.container.querySelector('[data-testid="ddd-technical-source-toggle"]') as HTMLButtonElement).click());
+    await act(async () =>
+      (harness.container.querySelector('[data-testid="ddd-technical-source-toggle"]') as HTMLButtonElement).click(),
+    );
     expect(harness.container.querySelector('[data-testid="ddd-technical-doc-source"]')).toBeTruthy();
     expect(text(harness.container)).toContain("```mermaid");
   });
@@ -1172,7 +1426,9 @@ describe("DDD tabs and components", () => {
     expect(body).toContain("<Task>");
     expect(body).not.toContain("**Status:**");
     expect(body).not.toContain("docs\\_owner");
-    expect([...harness.container.querySelectorAll("code")].map((node) => text(node))).toContain(".smithers/tests/open-code-review.test.ts");
+    expect([...harness.container.querySelectorAll("code")].map((node) => text(node))).toContain(
+      ".smithers/tests/open-code-review.test.ts",
+    );
 
     const docsLink = harness.container.querySelector("button.doc-link") as HTMLButtonElement | null;
     if (docsLink) {
@@ -1215,7 +1471,9 @@ describe("DDD tabs and components", () => {
     expect([...harness.container.querySelectorAll("code")].map((node) => text(node))).toEqual(
       expect.arrayContaining(["code", "inline", "const unclosed = true;"]),
     );
-    expect((harness.container.querySelector('a[href="https://example.com/docs"]') as HTMLAnchorElement).target).toBe("_blank");
+    expect((harness.container.querySelector('a[href="https://example.com/docs"]') as HTMLAnchorElement).target).toBe(
+      "_blank",
+    );
     expect(harness.container.querySelector('a[href="mailto:support@example.com"]')).toBeTruthy();
 
     const internalLinks = [...harness.container.querySelectorAll("button.doc-link")] as HTMLButtonElement[];
@@ -1259,7 +1517,9 @@ describe("DDD tabs and components", () => {
       />,
     );
 
-    const previewLinks = [...harness.container.querySelectorAll(".markdown-preview button.doc-link")] as HTMLButtonElement[];
+    const previewLinks = [
+      ...harness.container.querySelectorAll(".markdown-preview button.doc-link"),
+    ] as HTMLButtonElement[];
     expect(previewLinks.map((button) => text(button))).toEqual(["dead", "same", "overview"]);
     for (const button of previewLinks) await act(async () => button.click());
     expect(selected).toEqual(["overview.md"]);
@@ -1291,8 +1551,9 @@ describe("DDD tabs and components", () => {
     await waitFor(() => expect(selected).toEqual([technicalDoc.path]));
     expect(harness.container.querySelector('[data-testid="ddd-technical-doc-view"]')).toBeTruthy();
     expect(text(harness.container.querySelector(".editor-title") as HTMLElement)).toContain(technicalDoc.path);
-    const techButton = [...harness.container.querySelectorAll('[data-testid="ddd-tree-file"]')]
-      .find((button) => text(button).includes(technicalDoc.path.split("/").at(-1) ?? technicalDoc.path)) as HTMLButtonElement;
+    const techButton = [...harness.container.querySelectorAll('[data-testid="ddd-tree-file"]')].find((button) =>
+      text(button).includes(technicalDoc.path.split("/").at(-1) ?? technicalDoc.path),
+    ) as HTMLButtonElement;
     expect(techButton).toBeTruthy();
     await act(async () => techButton.click());
     expect(selected).toEqual([technicalDoc.path, technicalDoc.path]);
@@ -1317,8 +1578,12 @@ describe("DDD tabs and components", () => {
     );
 
     expect(harness.container.querySelector('[data-testid="ddd-technical-doc-view"]')).toBeTruthy();
-    expect((harness.container.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement).disabled).toBe(true);
-    expect((harness.container.querySelector('[data-testid="ddd-create-meta-ticket"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((harness.container.querySelector('[data-testid="ddd-dispatch-file"]') as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(
+      (harness.container.querySelector('[data-testid="ddd-create-meta-ticket"]') as HTMLButtonElement).disabled,
+    ).toBe(true);
     expect(text(harness.container)).toContain("Dispatch all changes");
     expect(text(harness.container)).not.toContain("Dispatch all changes (1)");
     expect(dispatched).toEqual([]);
@@ -1445,7 +1710,10 @@ describe("DDD tabs and components", () => {
       await act(async () => setInputValue(fallback, "# Edited\n"));
       expect(edits.at(-1)).toBe("# Edited\n");
     } finally {
-      Object.defineProperty(globalThis, "MutationObserver", { configurable: true, value: originalGlobalMutationObserver });
+      Object.defineProperty(globalThis, "MutationObserver", {
+        configurable: true,
+        value: originalGlobalMutationObserver,
+      });
       Object.defineProperty(window, "MutationObserver", { configurable: true, value: originalMutationObserver });
       Object.defineProperty(window, "navigator", { configurable: true, value: originalWindowNavigator });
       Object.defineProperty(globalThis, "navigator", { configurable: true, value: originalNavigator });
@@ -1520,17 +1788,19 @@ describe("DDD tabs and components", () => {
     const feature = features[0]!;
     const harness = await mount(
       <AuditTab
-        audit={{
-          generatedSiteBuilds: true,
-          featureIds: [feature.id],
-          broken: [],
-          partial: [],
-          missingE2E: [],
-          missingDocs: [],
-          notes: [],
-          missing_e2e: [feature.id],
-          missing_docs: [feature.id],
-        } as any}
+        audit={
+          {
+            generatedSiteBuilds: true,
+            featureIds: [feature.id],
+            broken: [],
+            partial: [],
+            missingE2E: [],
+            missingDocs: [],
+            notes: [],
+            missing_e2e: [feature.id],
+            missing_docs: [feature.id],
+          } as any
+        }
         bootstrap={{ summary: "bootstrap passed" }}
         spec={{ status: "ready", summary: "spec updated" }}
         metaTicket={{ summary: "meta ticket" }}
@@ -1544,7 +1814,9 @@ describe("DDD tabs and components", () => {
     expect(text(harness.container)).toContain("bootstrap passed");
     expect(text(harness.container)).toContain("Triage docs");
 
-    await act(async () => (harness.container.querySelector('[data-testid="ddd-finding"]') as HTMLButtonElement).click());
+    await act(async () =>
+      (harness.container.querySelector('[data-testid="ddd-finding"]') as HTMLButtonElement).click(),
+    );
     expect(opened[0]?.feature.id).toBe(feature.id);
 
     await harness.render(
@@ -1588,7 +1860,9 @@ describe("DDD tabs and components", () => {
     expect(text(harness.container)).toContain("Audit returned an unknown feature id");
     expect(text(harness.container)).toContain("Add this feature to features.json");
     expect(text(harness.container)).toContain("missing-feature could not be matched");
-    expect(text(harness.container.querySelector('[data-testid="ddd-output-bootstrap"]') as HTMLElement)).toContain("Failed");
+    expect(text(harness.container.querySelector('[data-testid="ddd-output-bootstrap"]') as HTMLElement)).toContain(
+      "Failed",
+    );
     expect(harness.container.querySelector('[data-testid="ddd-finding"]')).toBeFalsy();
     expect(harness.container.querySelector('[data-testid="ddd-unresolved-finding"]')).toBeTruthy();
     expect(opened).toEqual([]);
@@ -1603,10 +1877,18 @@ describe("DDD tabs and components", () => {
         updatedAtMs: 1,
         featureId: "feature-one",
         featureTitle: "Feature One",
-        content: "# First ticket\n\nRun: run-1\nSlot: 1\nAgent: implementation\nTask type: e2e\nSeverity: major\nFile: src/core/index.ts\n\n## Gap\n\nBody",
+        content:
+          "# First ticket\n\nRun: run-1\nSlot: 1\nAgent: implementation\nTask type: e2e\nSeverity: major\nFile: src/core/index.ts\n\n## Gap\n\nBody",
       },
       { path: "tickets/two.md", kind: "issue", status: null, updatedAtMs: 0, content: "No heading" },
-      { path: "tickets/snake.md", kind: "ticket", status: "todo", feature_id: "snake-feature", feature_title: "Snake Feature", content: "# Snake ticket" },
+      {
+        path: "tickets/snake.md",
+        kind: "ticket",
+        status: "todo",
+        feature_id: "snake-feature",
+        feature_title: "Snake Feature",
+        content: "# Snake ticket",
+      },
     ];
     const harness = await mount(<TicketsTab tickets={tickets} loading={false} />);
 
@@ -1634,7 +1916,9 @@ describe("DDD tabs and components", () => {
     await act(async () => ticketClose.click());
     expect(harness.container.querySelector('[data-testid="ddd-ticket-detail"]')).toBeFalsy();
 
-    await act(async () => (harness.container.querySelectorAll('[data-testid="ddd-ticket"]')[1] as HTMLButtonElement).click());
+    await act(async () =>
+      (harness.container.querySelectorAll('[data-testid="ddd-ticket"]')[1] as HTMLButtonElement).click(),
+    );
     // The ticket body renders as markdown directly (no synthesized "Description"
     // heading); plain-text bodies still show, and it is not the empty state.
     expect(text(harness.container)).toContain("No heading");
@@ -1708,7 +1992,19 @@ describe("DDD tabs and components", () => {
     });
     expect(harness.container.querySelector('[data-testid="ddd-ticket-detail"]')).toBeTruthy();
     const labels = [...harness.container.querySelectorAll(".ticket-meta span")].map((node) => text(node));
-    expect(labels.slice(0, 11)).toEqual(["Status", "Kind", "Priority", "Severity", "Run", "Slot", "Agent", "Task type", "Feature", "Feature status", "File"]);
+    expect(labels.slice(0, 11)).toEqual([
+      "Status",
+      "Kind",
+      "Priority",
+      "Severity",
+      "Run",
+      "Slot",
+      "Agent",
+      "Task type",
+      "Feature",
+      "Feature status",
+      "File",
+    ]);
     expect(text(harness.container)).toContain("Todo");
     expect(text(harness.container)).toContain("P0");
     expect(text(harness.container)).toContain("Major");
@@ -1728,9 +2024,18 @@ describe("DDD tabs and components", () => {
     await act(async () => buttonByText(harness.container, "Clear").click());
     expect(harness.container.querySelectorAll('[data-testid="ddd-ticket"]').length).toBe(2);
 
-    const [statusSelect, kindSelect, severitySelect, sortSelect] = [...harness.container.querySelectorAll("select")] as HTMLSelectElement[];
-    expect([...kindSelect!.querySelectorAll("option")].map((option) => option.textContent)).toEqual(["All kinds", "E2E", "Fix"]);
-    expect([...severitySelect!.querySelectorAll("option")].map((option) => option.textContent)).toEqual(["All severities", "Major"]);
+    const [statusSelect, kindSelect, severitySelect, sortSelect] = [
+      ...harness.container.querySelectorAll("select"),
+    ] as HTMLSelectElement[];
+    expect([...kindSelect!.querySelectorAll("option")].map((option) => option.textContent)).toEqual([
+      "All kinds",
+      "E2E",
+      "Fix",
+    ]);
+    expect([...severitySelect!.querySelectorAll("option")].map((option) => option.textContent)).toEqual([
+      "All severities",
+      "Major",
+    ]);
     await act(async () => setSelectValue(statusSelect!, "todo"));
     expect(harness.container.querySelectorAll('[data-testid="ddd-ticket"]').length).toBe(1);
     expect(text(harness.container)).toContain("Add no-work dispatch coverage");
@@ -1786,7 +2091,10 @@ describe("DDD tabs and components", () => {
     const [statusSelect, kindSelect] = [...harness.container.querySelectorAll("select")] as HTMLSelectElement[];
     expect([...statusSelect!.querySelectorAll("option")].map((option) => option.value)).toEqual(["all", "todo"]);
     expect([...kindSelect!.querySelectorAll("option")].map((option) => option.value)).toEqual(["all", "issue"]);
-    expect([...kindSelect!.querySelectorAll("option")].map((option) => option.textContent)).toEqual(["All kinds", "Issue"]);
+    expect([...kindSelect!.querySelectorAll("option")].map((option) => option.textContent)).toEqual([
+      "All kinds",
+      "Issue",
+    ]);
 
     await act(async () => (harness.container.querySelector('[data-testid="ddd-ticket"]') as HTMLButtonElement).click());
     await act(async () => {
@@ -1795,8 +2103,9 @@ describe("DDD tabs and components", () => {
     expect(text(harness.container)).toContain("No detail recorded for this ticket.");
     await act(async () => (harness.container.querySelector('button[aria-label="Close"]') as HTMLButtonElement).click());
 
-    const metadataButton = [...harness.container.querySelectorAll('[data-testid="ddd-ticket"]')]
-      .find((button) => text(button).includes("Metadata detail")) as HTMLButtonElement;
+    const metadataButton = [...harness.container.querySelectorAll('[data-testid="ddd-ticket"]')].find((button) =>
+      text(button).includes("Metadata detail"),
+    ) as HTMLButtonElement;
     await act(async () => metadataButton.click());
     const labels = [...harness.container.querySelectorAll(".ticket-meta span")].map((node) => text(node));
     expect(labels).toEqual(["Status", "Kind", "Alpha", "Zoo"]);
@@ -1809,9 +2118,13 @@ describe("DDD tabs and components", () => {
     const harness = await mount(
       <NewEntryMenu
         open={open}
-        onOpenChange={(next) => { open = next; }}
+        onOpenChange={(next) => {
+          open = next;
+        }}
         onCreateWorkflow={(description) => created.push(description)}
-        onGenerateDocs={() => { generateCount += 1; }}
+        onGenerateDocs={() => {
+          generateCount += 1;
+        }}
         createState={{ runId: null, error: null }}
         generateState={{ runId: null, error: null }}
         workflowUiHref={(workflow, runId) => `/workflows/${workflow}?runId=${runId}`}
@@ -1819,14 +2132,27 @@ describe("DDD tabs and components", () => {
     );
 
     expect(harness.container.querySelector('[data-testid="ddd-new-menu"]')).toBeTruthy();
-    expect((harness.container.querySelector('[data-testid="ddd-new-create-launch"]') as HTMLButtonElement).disabled).toBe(true);
-    await act(async () => setInputValue(harness.container.querySelector('[data-testid="ddd-new-description"]') as HTMLTextAreaElement, "  Build a compact workflow  "));
-    await act(async () => (harness.container.querySelector('[data-testid="ddd-new-create-launch"]') as HTMLButtonElement).click());
-    await act(async () => (harness.container.querySelector('[data-testid="ddd-new-generate-launch"]') as HTMLButtonElement).click());
+    expect(
+      (harness.container.querySelector('[data-testid="ddd-new-create-launch"]') as HTMLButtonElement).disabled,
+    ).toBe(true);
+    await act(async () =>
+      setInputValue(
+        harness.container.querySelector('[data-testid="ddd-new-description"]') as HTMLTextAreaElement,
+        "  Build a compact workflow  ",
+      ),
+    );
+    await act(async () =>
+      (harness.container.querySelector('[data-testid="ddd-new-create-launch"]') as HTMLButtonElement).click(),
+    );
+    await act(async () =>
+      (harness.container.querySelector('[data-testid="ddd-new-generate-launch"]') as HTMLButtonElement).click(),
+    );
     expect(created).toEqual(["Build a compact workflow"]);
     expect(generateCount).toBe(1);
 
-    await act(async () => (harness.container.querySelector('button[aria-label="Close new menu"]') as HTMLButtonElement).click());
+    await act(async () =>
+      (harness.container.querySelector('button[aria-label="Close new menu"]') as HTMLButtonElement).click(),
+    );
     expect(open).toBe(false);
   });
 
@@ -1834,8 +2160,12 @@ describe("DDD tabs and components", () => {
     expect(builderWorkflowName("A markdown search workflow")).toBe("build-a-markdown-search-workflow");
     expect(builderWorkflowName("!!!")).toBe("build-workflow");
     expect(builderWorkflowName("x".repeat(80))).toBe(`build-${"x".repeat(48)}`);
-    expect(createWorkflowPrompt("A markdown search workflow")).toContain("workflow named build-a-markdown-search-workflow");
-    expect(createWorkflowPrompt("A markdown search workflow")).toContain("file slug must be exactly build-a-markdown-search-workflow");
+    expect(createWorkflowPrompt("A markdown search workflow")).toContain(
+      "workflow named build-a-markdown-search-workflow",
+    );
+    expect(createWorkflowPrompt("A markdown search workflow")).toContain(
+      "file slug must be exactly build-a-markdown-search-workflow",
+    );
   });
 
   test("StartPane validates trimmed descriptions, hides close in stub mode, and launches with trimmed text", async () => {
@@ -1847,7 +2177,9 @@ describe("DDD tabs and components", () => {
         stub
         onClose={null}
         onCreateWorkflow={(description) => created.push(description)}
-        onGenerateDocs={() => { generateCount += 1; }}
+        onGenerateDocs={() => {
+          generateCount += 1;
+        }}
         createState={{ runId: null, error: null }}
         generateState={{ runId: null, error: null }}
         workflowUiHref={(workflow, runId) => `/workflows/${workflow}?runId=${runId}`}
@@ -1867,15 +2199,21 @@ describe("DDD tabs and components", () => {
     await act(async () => launch.click());
     expect(created).toEqual(["Build a docs-first workflow"]);
 
-    await act(async () => (harness.container.querySelector('[data-testid="ddd-start-generate-launch"]') as HTMLButtonElement).click());
+    await act(async () =>
+      (harness.container.querySelector('[data-testid="ddd-start-generate-launch"]') as HTMLButtonElement).click(),
+    );
     expect(generateCount).toBe(1);
 
     await harness.render(
       <StartPane
         stub={false}
-        onClose={() => { closed += 1; }}
+        onClose={() => {
+          closed += 1;
+        }}
         onCreateWorkflow={(description) => created.push(description)}
-        onGenerateDocs={() => { generateCount += 1; }}
+        onGenerateDocs={() => {
+          generateCount += 1;
+        }}
         createState={{ runId: null, error: null }}
         generateState={{ runId: null, error: null }}
         workflowUiHref={(workflow, runId) => `/workflows/${workflow}?runId=${runId}`}
@@ -1897,23 +2235,35 @@ describe("DDD tabs and components", () => {
         onGenerateDocs={() => undefined}
         createState={{ runId: "create-run-1", error: null }}
         generateState={{ runId: "generate-run-1", error: null }}
-        workflowUiHref={(workflow, runId) => `/workflows/${encodeURIComponent(workflow)}?runId=${encodeURIComponent(runId)}`}
-        onReload={() => { reloads += 1; }}
+        workflowUiHref={(workflow, runId) =>
+          `/workflows/${encodeURIComponent(workflow)}?runId=${encodeURIComponent(runId)}`
+        }
+        onReload={() => {
+          reloads += 1;
+        }}
       />,
     );
 
-    expect((harness.container.querySelector('[data-testid="ddd-start-create-launch"]') as HTMLButtonElement).disabled).toBe(true);
-    expect((harness.container.querySelector('[data-testid="ddd-start-generate-launch"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (harness.container.querySelector('[data-testid="ddd-start-create-launch"]') as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (harness.container.querySelector('[data-testid="ddd-start-generate-launch"]') as HTMLButtonElement).disabled,
+    ).toBe(true);
     expect(text(harness.container)).toContain("create-workflow is designing your workflow.");
     expect(text(harness.container)).toContain("The docs audit is reading your repository.");
     const link = harness.container.querySelector('[data-testid="ddd-start-launched"] a') as HTMLAnchorElement;
     expect(link.getAttribute("href")).toBe("/workflows/create-workflow?runId=create-run-1");
-    const generateLink = harness.container.querySelector('[data-testid="ddd-start-generate-run"] a') as HTMLAnchorElement;
+    const generateLink = harness.container.querySelector(
+      '[data-testid="ddd-start-generate-run"] a',
+    ) as HTMLAnchorElement;
     expect(generateLink.getAttribute("href")).toBe("/workflows/docs-driven-development?runId=generate-run-1");
     // The generate run has no terminal status yet: reload is gated behind a
     // "working" note rather than offered prematurely.
     expect(harness.container.querySelector('[data-testid="ddd-start-reload-path"]')).toBeFalsy();
-    expect(text(harness.container.querySelector('[data-testid="ddd-start-reload-pending"]') as HTMLElement)).toContain("Reload will be available");
+    expect(text(harness.container.querySelector('[data-testid="ddd-start-reload-pending"]') as HTMLElement)).toContain(
+      "Reload will be available",
+    );
 
     await harness.render(
       <StartPane
@@ -1924,20 +2274,35 @@ describe("DDD tabs and components", () => {
         createState={{ runId: "create-run-1", error: null, status: "finished" }}
         generateState={{ runId: "generate-run-1", error: null, status: "failed" }}
         workflowUiHref={(workflow, runId) => `/workflows/${workflow}?runId=${runId}`}
-        onReload={() => { reloads += 1; }}
+        onReload={() => {
+          reloads += 1;
+        }}
       />,
     );
-    await act(async () => setInputValue(harness.container.querySelector('[data-testid="ddd-start-description"]') as HTMLTextAreaElement, "Build another workflow"));
-    expect((harness.container.querySelector('[data-testid="ddd-start-create-launch"]') as HTMLButtonElement).disabled).toBe(false);
-    expect((harness.container.querySelector('[data-testid="ddd-start-generate-launch"]') as HTMLButtonElement).disabled).toBe(false);
+    await act(async () =>
+      setInputValue(
+        harness.container.querySelector('[data-testid="ddd-start-description"]') as HTMLTextAreaElement,
+        "Build another workflow",
+      ),
+    );
+    expect(
+      (harness.container.querySelector('[data-testid="ddd-start-create-launch"]') as HTMLButtonElement).disabled,
+    ).toBe(false);
+    expect(
+      (harness.container.querySelector('[data-testid="ddd-start-generate-launch"]') as HTMLButtonElement).disabled,
+    ).toBe(false);
     expect(text(harness.container)).toContain("Finished");
     expect(text(harness.container)).toContain("Failed");
     expect(text(harness.container)).toContain("Ready for another launch");
     expect(text(harness.container)).toContain("Create another workflow");
     expect(text(harness.container)).toContain("Generate docs again");
     // The generate run is now terminal ("failed"), so reload is offered and works.
-    expect(text(harness.container.querySelector('[data-testid="ddd-start-reload-path"]') as HTMLElement)).toContain("Reload this UI");
-    await act(async () => (harness.container.querySelector('[data-testid="ddd-start-reload"]') as HTMLButtonElement).click());
+    expect(text(harness.container.querySelector('[data-testid="ddd-start-reload-path"]') as HTMLElement)).toContain(
+      "Reload this UI",
+    );
+    await act(async () =>
+      (harness.container.querySelector('[data-testid="ddd-start-reload"]') as HTMLButtonElement).click(),
+    );
     expect(reloads).toBe(1);
 
     await harness.render(
@@ -1949,11 +2314,17 @@ describe("DDD tabs and components", () => {
         createState={{ runId: null, error: null, pending: true }}
         generateState={{ runId: null, error: null, pending: true }}
         workflowUiHref={(workflow, runId) => `/workflows/${workflow}?runId=${runId}`}
-        onReload={() => { reloads += 1; }}
+        onReload={() => {
+          reloads += 1;
+        }}
       />,
     );
-    expect((harness.container.querySelector('[data-testid="ddd-start-create-launch"]') as HTMLButtonElement).disabled).toBe(true);
-    expect((harness.container.querySelector('[data-testid="ddd-start-generate-launch"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (harness.container.querySelector('[data-testid="ddd-start-create-launch"]') as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (harness.container.querySelector('[data-testid="ddd-start-generate-launch"]') as HTMLButtonElement).disabled,
+    ).toBe(true);
     expect(text(harness.container)).toContain("Launching authoring");
     expect(text(harness.container)).toContain("Launching docs");
     expect(harness.container.querySelector('[data-testid="ddd-start-launched-launching"]')).toBeTruthy();
@@ -1968,7 +2339,9 @@ describe("DDD tabs and components", () => {
         createState={{ runId: null, error: "create failed" }}
         generateState={{ runId: null, error: "generate failed" }}
         workflowUiHref={(workflow, runId) => `/workflows/${workflow}?runId=${runId}`}
-        onReload={() => { reloads += 1; }}
+        onReload={() => {
+          reloads += 1;
+        }}
       />,
     );
     expect(harness.container.querySelectorAll('[data-testid="ddd-start-error"]').length).toBe(2);
@@ -2004,9 +2377,15 @@ describe("DDD tabs and components", () => {
     Object.defineProperty(window, "localStorage", {
       configurable: true,
       value: {
-        getItem: () => { throw new Error("blocked"); },
-        setItem: () => { throw new Error("blocked"); },
-        removeItem: () => { throw new Error("blocked"); },
+        getItem: () => {
+          throw new Error("blocked");
+        },
+        setItem: () => {
+          throw new Error("blocked");
+        },
+        removeItem: () => {
+          throw new Error("blocked");
+        },
       },
     });
     try {
@@ -2023,9 +2402,18 @@ describe("DDD tabs and components", () => {
   test("Tutorial navigates within bounds, skip and finish mark done, reset to first step, and call onClose", async () => {
     window.localStorage.clear();
     let closes = 0;
-    const harness = await mount(<Tutorial open onClose={() => { closes += 1; }} />);
+    const harness = await mount(
+      <Tutorial
+        open
+        onClose={() => {
+          closes += 1;
+        }}
+      />,
+    );
 
-    expect((harness.container.querySelector('[role="dialog"]') as HTMLElement).getAttribute("aria-labelledby")).toBe("ddd-tutorial-title");
+    expect((harness.container.querySelector('[role="dialog"]') as HTMLElement).getAttribute("aria-labelledby")).toBe(
+      "ddd-tutorial-title",
+    );
     expect(text(harness.container)).toContain("1 / 5");
     const back = buttonByText(harness.container, "Back");
     expect(back.disabled).toBe(true);
@@ -2038,13 +2426,29 @@ describe("DDD tabs and components", () => {
     await act(async () => back.click());
     expect(text(harness.container)).toContain("1 / 5");
 
-    await act(async () => (harness.container.querySelector('[data-testid="ddd-tutorial-skip"]') as HTMLButtonElement).click());
+    await act(async () =>
+      (harness.container.querySelector('[data-testid="ddd-tutorial-skip"]') as HTMLButtonElement).click(),
+    );
     expect(closes).toBe(1);
     expect(tutorialDone()).toBe(true);
 
     window.localStorage.clear();
-    await harness.render(<Tutorial open={false} onClose={() => { closes += 1; }} />);
-    await harness.render(<Tutorial open onClose={() => { closes += 1; }} />);
+    await harness.render(
+      <Tutorial
+        open={false}
+        onClose={() => {
+          closes += 1;
+        }}
+      />,
+    );
+    await harness.render(
+      <Tutorial
+        open
+        onClose={() => {
+          closes += 1;
+        }}
+      />,
+    );
     expect(text(harness.container)).toContain("1 / 5");
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -2052,25 +2456,59 @@ describe("DDD tabs and components", () => {
     expect(document.activeElement).toBe(harness.container.querySelector('[data-testid="ddd-tutorial-next"]'));
 
     for (let i = 0; i < 4; i += 1) {
-      await act(async () => (harness.container.querySelector('[data-testid="ddd-tutorial-next"]') as HTMLButtonElement).click());
+      await act(async () =>
+        (harness.container.querySelector('[data-testid="ddd-tutorial-next"]') as HTMLButtonElement).click(),
+      );
     }
     expect(text(harness.container)).toContain("5 / 5");
     expect(text(harness.container)).toContain("Start building");
-    await act(async () => (harness.container.querySelector('[data-testid="ddd-tutorial-next"]') as HTMLButtonElement).click());
+    await act(async () =>
+      (harness.container.querySelector('[data-testid="ddd-tutorial-next"]') as HTMLButtonElement).click(),
+    );
     expect(closes).toBe(2);
     expect(tutorialDone()).toBe(true);
 
-    await harness.render(<Tutorial open={false} onClose={() => { closes += 1; }} />);
-    await harness.render(<Tutorial open onClose={() => { closes += 1; }} />);
+    await harness.render(
+      <Tutorial
+        open={false}
+        onClose={() => {
+          closes += 1;
+        }}
+      />,
+    );
+    await harness.render(
+      <Tutorial
+        open
+        onClose={() => {
+          closes += 1;
+        }}
+      />,
+    );
     expect(text(harness.container)).toContain("1 / 5");
     await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
     expect(closes).toBe(3);
     expect(tutorialDone()).toBe(true);
 
     window.localStorage.clear();
-    await harness.render(<Tutorial open={false} onClose={() => { closes += 1; }} />);
-    await harness.render(<Tutorial open onClose={() => { closes += 1; }} />);
-    await act(async () => (harness.container.querySelector('button[aria-label="Close tutorial"]') as HTMLButtonElement).click());
+    await harness.render(
+      <Tutorial
+        open={false}
+        onClose={() => {
+          closes += 1;
+        }}
+      />,
+    );
+    await harness.render(
+      <Tutorial
+        open
+        onClose={() => {
+          closes += 1;
+        }}
+      />,
+    );
+    await act(async () =>
+      (harness.container.querySelector('button[aria-label="Close tutorial"]') as HTMLButtonElement).click(),
+    );
     expect(closes).toBe(4);
     expect(tutorialDone()).toBe(true);
   });
@@ -2100,9 +2538,24 @@ describe("DDD tabs and components", () => {
     const harness = await mount(
       <LiveTab
         runs={[
-          { runId: "docs-run-alpha-1234567890", workflowKey: "docs-driven-development", status: "finished", createdAtMs: Date.UTC(2026, 0, 2, 3, 4) },
-          { runId: "docs-run-beta-1234567890", workflowKey: "docs-driven-development", status: "running", createdAtMs: Date.UTC(2026, 0, 3, 3, 4) },
-          { runId: "docs-run-gamma-1234567890", workflowKey: "docs-driven-development", status: "failed", createdAtMs: Date.UTC(2026, 0, 4, 3, 4) },
+          {
+            runId: "docs-run-alpha-1234567890",
+            workflowKey: "docs-driven-development",
+            status: "finished",
+            createdAtMs: Date.UTC(2026, 0, 2, 3, 4),
+          },
+          {
+            runId: "docs-run-beta-1234567890",
+            workflowKey: "docs-driven-development",
+            status: "running",
+            createdAtMs: Date.UTC(2026, 0, 3, 3, 4),
+          },
+          {
+            runId: "docs-run-gamma-1234567890",
+            workflowKey: "docs-driven-development",
+            status: "failed",
+            createdAtMs: Date.UTC(2026, 0, 4, 3, 4),
+          },
         ]}
         runsLoading={false}
         selectedRunId={undefined}
@@ -2213,13 +2666,18 @@ describe("DDD tabs and components", () => {
     const persistedEvents = [
       {
         seq: 2,
-        payload: { event: "task.output", payload: { nodeId: "work:1", output: "persisted duplicate should be replaced" } },
+        payload: {
+          event: "task.output",
+          payload: { nodeId: "work:1", output: "persisted duplicate should be replaced" },
+        },
       },
       {
         seq: 1,
         payload: {
           event: "agent.session",
-          payload: { transcript: [{ role: "assistant", content: [{ type: "text", text: "persisted assistant line" }] }] },
+          payload: {
+            transcript: [{ role: "assistant", content: [{ type: "text", text: "persisted assistant line" }] }],
+          },
         },
       },
       {
@@ -2271,7 +2729,14 @@ describe("DDD tabs and components", () => {
           },
           {
             seq: 3,
-            payload: { event: "agent.event", payload: { nodeId: "work:1", engine: "codex", event: { type: "completed", answer: "live assistant line" } } },
+            payload: {
+              event: "agent.event",
+              payload: {
+                nodeId: "work:1",
+                engine: "codex",
+                event: { type: "completed", answer: "live assistant line" },
+              },
+            },
           },
         ]}
         eventsError={undefined}
@@ -2290,10 +2755,17 @@ describe("DDD tabs and components", () => {
     expect(text(harness.container)).toContain("live assistant line");
     expect(text(harness.container)).not.toContain("persisted duplicate should be replaced");
     expect(harness.container.querySelector(".livelog-debug")).toBeFalsy();
-    expect(text(harness.container.querySelector('[data-testid="ddd-live-log"]') as HTMLElement)).not.toContain('"nodeId"');
+    expect(text(harness.container.querySelector('[data-testid="ddd-live-log"]') as HTMLElement)).not.toContain(
+      '"nodeId"',
+    );
 
-    await act(async () => ([...harness.container.querySelectorAll(".run-row")]
-      .find((row) => text(row).includes("run-2")) as HTMLButtonElement).click());
+    await act(async () =>
+      (
+        [...harness.container.querySelectorAll(".run-row")].find((row) =>
+          text(row).includes("run-2"),
+        ) as HTMLButtonElement
+      ).click(),
+    );
     expect(selected).toEqual(["run-2"]);
   });
 

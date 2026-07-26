@@ -14,21 +14,20 @@ import { upsertClaudeMirrorSubscription } from "./upsertClaudeMirrorSubscription
  * @returns {boolean} whether a subscription was recorded
  */
 export function subscribeClaudeSessionRun(runId, options = {}) {
-    const env = options.env ?? process.env;
-    const sessionId = env.CLAUDE_CODE_SESSION_ID;
-    if (!sessionId) {
-        return false;
-    }
-    try {
-        const cwd = options.cwd ?? process.cwd();
-        const workspaceRoot = findSmithersAnchorDir(cwd) ?? cwd;
-        return upsertClaudeMirrorSubscription(resolveClaudeMirrorSubscriptionsPath(workspaceRoot), {
-            runId,
-            sessionId,
-            nowMs: options.nowMs ?? Date.now(),
-        });
-    }
-    catch {
-        return false;
-    }
+  const env = options.env ?? process.env;
+  const sessionId = env.CLAUDE_CODE_SESSION_ID;
+  if (!sessionId) {
+    return false;
+  }
+  try {
+    const cwd = options.cwd ?? process.cwd();
+    const workspaceRoot = findSmithersAnchorDir(cwd) ?? cwd;
+    return upsertClaudeMirrorSubscription(resolveClaudeMirrorSubscriptionsPath(workspaceRoot), {
+      runId,
+      sessionId,
+      nowMs: options.nowMs ?? Date.now(),
+    });
+  } catch {
+    return false;
+  }
 }

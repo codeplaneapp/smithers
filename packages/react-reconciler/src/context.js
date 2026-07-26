@@ -15,18 +15,21 @@ SmithersContext.displayName = "SmithersContext";
  * @returns {{ SmithersContext: React.Context<SmithersCtx<Schema> | null>, useCtx: () => SmithersCtx<Schema> }}
  */
 export function createSmithersContext() {
-    /** @type {React.Context<SmithersCtx<Schema> | null>} */
-    const Context = React.createContext(null);
-    Context.displayName = "SmithersContext";
-    /**
+  /** @type {React.Context<SmithersCtx<Schema> | null>} */
+  const Context = React.createContext(null);
+  Context.displayName = "SmithersContext";
+  /**
    * @returns {SmithersCtx<Schema>}
    */
-    function useCtx() {
-        const ctx = React.useContext(Context);
-        if (!ctx) {
-            throw new SmithersError("CONTEXT_OUTSIDE_WORKFLOW", "useCtx() must be called inside a <Workflow> created by createSmithers()");
-        }
-        return ctx;
+  function useCtx() {
+    const ctx = React.useContext(Context);
+    if (!ctx) {
+      throw new SmithersError(
+        "CONTEXT_OUTSIDE_WORKFLOW",
+        "useCtx() must be called inside a <Workflow> created by createSmithers()",
+      );
     }
-    return { SmithersContext: Context, useCtx };
+    return ctx;
+  }
+  return { SmithersContext: Context, useCtx };
 }

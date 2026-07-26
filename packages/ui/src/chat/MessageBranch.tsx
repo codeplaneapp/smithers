@@ -60,8 +60,7 @@ export function MessageBranch({
   const maxIndex = safeCount - 1;
   // Zero branches means there is no active branch: index -1 renders "0 of 0"
   // and hides every panel instead of pointing at a nonexistent first branch.
-  const current =
-    safeCount === 0 ? -1 : Math.min(Math.max(index ?? internalIndex, 0), maxIndex);
+  const current = safeCount === 0 ? -1 : Math.min(Math.max(index ?? internalIndex, 0), maxIndex);
   // Reconcile the uncontrolled state itself, silently: a count-driven clamp is
   // not a user navigation, and a later count increase keeps the clamped spot.
   // A transient empty state is exempt so the user's branch survives it.

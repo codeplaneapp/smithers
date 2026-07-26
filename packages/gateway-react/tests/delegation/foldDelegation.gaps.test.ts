@@ -58,12 +58,28 @@ describe("foldDelegation — cascade reaffirm by a replanned parent", () => {
     const records: DelegationRecord[] = [
       rec("dcGoal", "dc:goal:goal", 0, { logicalId: "goal", refinedPrompt: "x", assumptions: [], questionsAsked: 0 }),
       rec("dcPlan", "dc:root:plan", 0, plan("root", "fable", [child("root/a", "opus", est(10, 1, 5))], est(20, 2, 10))),
-      rec("dcPlan", "dc:root/a:plan", 0, plan("root/a", "opus", [child("root/a/x", "sonnet", est(5, 1, 2))], est(10, 1, 5))),
+      rec(
+        "dcPlan",
+        "dc:root/a:plan",
+        0,
+        plan("root/a", "opus", [child("root/a/x", "sonnet", est(5, 1, 2))], est(10, 1, 5)),
+      ),
       // x deps on a (creates the dep edge the cascade follows).
       rec("dcGates", "dc:root/a/x:gates", 0, { logicalId: "root/a/x", gates: [], depsLogical: ["root/a"] }),
       // a is invalidated in round 1, then replanned (v2) still declaring x.
-      rec("dcReplan", "dc:root/a:replan-1", 0, { round: 1, logicalId: "root/a", decision: "invalidated", reason: "probe changed it", trigger: { type: "probe", ref: "h1" } }),
-      rec("dcPlan", "dc:root/a:plan", 1, plan("root/a", "opus", [child("root/a/x", "sonnet", est(5, 1, 2))], est(12, 1, 6))),
+      rec("dcReplan", "dc:root/a:replan-1", 0, {
+        round: 1,
+        logicalId: "root/a",
+        decision: "invalidated",
+        reason: "probe changed it",
+        trigger: { type: "probe", ref: "h1" },
+      }),
+      rec(
+        "dcPlan",
+        "dc:root/a:plan",
+        1,
+        plan("root/a", "opus", [child("root/a/x", "sonnet", est(5, 1, 2))], est(12, 1, 6)),
+      ),
     ];
     const graph = foldDelegation(records);
     // x was re-declared by the replanned parent → not left derisking.
@@ -92,7 +108,12 @@ describe("foldDelegation — cascade reaffirm by a replanned parent", () => {
           est(30, 3, 15),
         ),
       ),
-      rec("dcPlan", "dc:root:z:plan", 0, plan("root/z", "opus", [child("root/z/x", "sonnet", est(5, 1, 2))], est(10, 1, 5))),
+      rec(
+        "dcPlan",
+        "dc:root:z:plan",
+        0,
+        plan("root/z", "opus", [child("root/z/x", "sonnet", est(5, 1, 2))], est(10, 1, 5)),
+      ),
       rec("dcGates", "dc:root:z:gates", 0, { logicalId: "root/z", gates: [], depsLogical: ["root/source"] }),
       rec("dcGates", "dc:root/b:gates", 0, { logicalId: "root/b", gates: [], depsLogical: ["root/source"] }),
       rec("dcGates", "dc:root:z:x:gates", 0, { logicalId: "root/z/x", gates: [], depsLogical: ["root/b"] }),
@@ -110,7 +131,12 @@ describe("foldDelegation — cascade reaffirm by a replanned parent", () => {
         reason: "dependent plan changed",
         trigger: { type: "probe", ref: "h1" },
       }),
-      rec("dcPlan", "dc:root:z:plan", 1, plan("root/z", "opus", [child("root/z/x", "sonnet", est(5, 1, 2))], est(12, 1, 6))),
+      rec(
+        "dcPlan",
+        "dc:root:z:plan",
+        1,
+        plan("root/z", "opus", [child("root/z/x", "sonnet", est(5, 1, 2))], est(12, 1, 6)),
+      ),
     ];
 
     const graph = foldDelegation(records);
@@ -128,9 +154,21 @@ describe("foldDelegation — a node invalidated across two rounds", () => {
       rec("dcPlan", "dc:root/a:plan", 0, plan("root/a", "opus", [], est(10, 1, 5))),
       // Round 2 arrives BEFORE round 1 in the record stream so the per-node
       // invalidations array is genuinely out of order until `.sort` runs.
-      rec("dcReplan", "dc:root/a:replan-2", 0, { round: 2, logicalId: "root/a", decision: "invalidated", reason: "r2", trigger: { type: "user-edit", ref: "e1" } }),
+      rec("dcReplan", "dc:root/a:replan-2", 0, {
+        round: 2,
+        logicalId: "root/a",
+        decision: "invalidated",
+        reason: "r2",
+        trigger: { type: "user-edit", ref: "e1" },
+      }),
       rec("dcPlan", "dc:root/a:plan", 2, plan("root/a", "opus", [], est(14, 1, 7))),
-      rec("dcReplan", "dc:root/a:replan-1", 0, { round: 1, logicalId: "root/a", decision: "invalidated", reason: "r1", trigger: { type: "probe", ref: "h1" } }),
+      rec("dcReplan", "dc:root/a:replan-1", 0, {
+        round: 1,
+        logicalId: "root/a",
+        decision: "invalidated",
+        reason: "r1",
+        trigger: { type: "probe", ref: "h1" },
+      }),
       rec("dcPlan", "dc:root/a:plan", 1, plan("root/a", "opus", [], est(12, 1, 6))),
     ];
     const graph = foldDelegation(records);
@@ -142,8 +180,15 @@ describe("foldDelegation — a node invalidated across two rounds", () => {
 describe("foldDelegation — pending questions ordered by (seq, logicalId)", () => {
   test("two unresolved questions with the SAME seq fall back to the logicalId tiebreak", () => {
     const q = (logicalId: string, seq: number) => ({
-      logicalId, seq, question: `Q${seq}?`, header: `Q${seq}`, kind: "select" as const,
-      options: [{ label: "yes", description: "do it" }], recommended: "yes", reason: "default", resolved: false,
+      logicalId,
+      seq,
+      question: `Q${seq}?`,
+      header: `Q${seq}`,
+      kind: "select" as const,
+      options: [{ label: "yes", description: "do it" }],
+      recommended: "yes",
+      reason: "default",
+      resolved: false,
     });
     const graph = foldDelegation([
       rec("dcGoal", "dc:goal:goal", 0, { logicalId: "goal", refinedPrompt: "x", assumptions: [], questionsAsked: 2 }),

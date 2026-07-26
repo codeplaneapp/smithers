@@ -3,13 +3,7 @@ import { StatusPill } from "../cards/StatusPill";
 import { RunTree } from "../runs/RunTree";
 import { useGatewayRunTree } from "../sync/useGatewayRunTree";
 
-export function GatewayRunCard({
-  workflowKey,
-  runId,
-}: {
-  workflowKey: string;
-  runId: string;
-}) {
+export function GatewayRunCard({ workflowKey, runId }: { workflowKey: string; runId: string }) {
   const runTree = useGatewayRunTree(runId);
   const steps = runTree.root?.children ?? [];
 
@@ -35,10 +29,7 @@ export function GatewayRunCard({
           steps.length > 0 ? (
             <ul className="step-list">
               {steps.slice(0, 6).map((step) => (
-                <li
-                  className={step.status === "queued" ? "step is-dim" : "step"}
-                  key={step.id}
-                >
+                <li className={step.status === "queued" ? "step is-dim" : "step"} key={step.id}>
                   <span className="step-dot" />
                   <span className="step-label">{step.cardLabel ?? step.name}</span>
                   <span className="step-meta">{step.meta}</span>
@@ -49,9 +40,7 @@ export function GatewayRunCard({
             <RunTree root={runTree.root} selectedId={runTree.root.id} onSelect={() => {}} />
           )
         ) : (
-          <div className="surface-empty">
-            {runTree.error ? runTree.error.message : "No execution tree yet."}
-          </div>
+          <div className="surface-empty">{runTree.error ? runTree.error.message : "No execution tree yet."}</div>
         )}
       </div>
 

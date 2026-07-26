@@ -16,11 +16,8 @@ function isDesktopWebview(): boolean {
   if (typeof window === "undefined") {
     return false;
   }
-  const httpScheme =
-    window.location.protocol === "http:" ||
-    window.location.protocol === "https:";
-  const electrobunUa =
-    typeof navigator !== "undefined" && /electrobun/i.test(navigator.userAgent);
+  const httpScheme = window.location.protocol === "http:" || window.location.protocol === "https:";
+  const electrobunUa = typeof navigator !== "undefined" && /electrobun/i.test(navigator.userAgent);
   return electrobunUa || !httpScheme;
 }
 

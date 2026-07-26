@@ -8,12 +8,12 @@
  * @type {Record<string, { label: string; requestsPerDay: number; rpm?: number }>}
  */
 export const PUBLISHED_CAPS = {
-    "code-assist-free": { label: "Code Assist (free)", requestsPerDay: 1000, rpm: 60 },
-    "ai-pro": { label: "Google AI Pro", requestsPerDay: 1500 },
-    "ai-ultra": { label: "Google AI Ultra", requestsPerDay: 2000 },
-    "gemini-api-free": { label: "Gemini API (free tier)", requestsPerDay: 250 },
-    "code-assist-standard": { label: "Code Assist Standard", requestsPerDay: 1500 },
-    "code-assist-enterprise": { label: "Code Assist Enterprise", requestsPerDay: 2000 },
+  "code-assist-free": { label: "Code Assist (free)", requestsPerDay: 1000, rpm: 60 },
+  "ai-pro": { label: "Google AI Pro", requestsPerDay: 1500 },
+  "ai-ultra": { label: "Google AI Ultra", requestsPerDay: 2000 },
+  "gemini-api-free": { label: "Gemini API (free tier)", requestsPerDay: 250 },
+  "code-assist-standard": { label: "Code Assist Standard", requestsPerDay: 1500 },
+  "code-assist-enterprise": { label: "Code Assist Enterprise", requestsPerDay: 2000 },
 };
 
 /**
@@ -24,6 +24,6 @@ export const PUBLISHED_CAPS = {
  * @returns {{ label: string; requestsPerDay: number; rpm?: number } | undefined}
  */
 export function publishedCapForTier(tier) {
-    if (!tier) return undefined;
-    return PUBLISHED_CAPS[tier];
+  if (!tier) return undefined;
+  return PUBLISHED_CAPS[tier];
 }

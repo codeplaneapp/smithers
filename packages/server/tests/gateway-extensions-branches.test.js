@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  GatewayExtensions,
-  extensionMethodName,
-  isExtensionMethod,
-} from "../src/GatewayExtensions.js";
+import { GatewayExtensions, extensionMethodName, isExtensionMethod } from "../src/GatewayExtensions.js";
 
 describe("GatewayExtensions branch coverage", () => {
   test("resolve exercises every kind and fallback + miss branch", () => {
@@ -62,15 +58,13 @@ describe("GatewayExtensions branch coverage", () => {
   test("register enforces scope + identifier validation branches", () => {
     const registry = new GatewayExtensions();
     expect(() => registry.register("bad", { defaultScope: "moon:read" })).toThrow(/GatewayScope/);
-    expect(() =>
-      registry.register("s2", { streams: { t: { scope: "moon:read", subscribe: () => {} } } }),
-    ).toThrow(/GatewayScope/);
-    expect(() =>
-      registry.register("s3", { actions: { a: { scope: "moon:read", handler: () => 1 } } }),
-    ).toThrow(/GatewayScope/);
-    expect(() =>
-      registry.register("s4", { streams: { t: { subscribe: "no" } } }),
-    ).toThrow(/subscribe function/);
+    expect(() => registry.register("s2", { streams: { t: { scope: "moon:read", subscribe: () => {} } } })).toThrow(
+      /GatewayScope/,
+    );
+    expect(() => registry.register("s3", { actions: { a: { scope: "moon:read", handler: () => 1 } } })).toThrow(
+      /GatewayScope/,
+    );
+    expect(() => registry.register("s4", { streams: { t: { subscribe: "no" } } })).toThrow(/subscribe function/);
     expect(() => registry.register("s5", null)).toThrow(/definition is required/);
     expect(() => registry.register("s6", 5)).toThrow(/definition is required/);
   });

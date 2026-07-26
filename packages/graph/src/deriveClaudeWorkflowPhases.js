@@ -15,11 +15,11 @@ import { classifyClaudeWorkflowNodeKind } from "./classifyClaudeWorkflowNodeKind
  * @returns {ClaudeWorkflowPhasePlan}
  */
 export function deriveClaudeWorkflowPhases(snapshot, options = {}) {
-    const tasks = (snapshot.tasks ?? []).map((task) => ({
-        nodeId: task.nodeId,
-        label: task.label || task.nodeId,
-        ordinal: task.ordinal ?? 0,
-        kind: classifyClaudeWorkflowNodeKind(task),
-    }));
-    return buildClaudeWorkflowPhasePlan(snapshot.xml ?? null, tasks, options);
+  const tasks = (snapshot.tasks ?? []).map((task) => ({
+    nodeId: task.nodeId,
+    label: task.label || task.nodeId,
+    ordinal: task.ordinal ?? 0,
+    kind: classifyClaudeWorkflowNodeKind(task),
+  }));
+  return buildClaudeWorkflowPhasePlan(snapshot.xml ?? null, tasks, options);
 }

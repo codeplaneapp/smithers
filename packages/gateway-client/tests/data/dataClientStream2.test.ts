@@ -20,7 +20,10 @@ async function waitFor(predicate: () => boolean, timeoutMs = 3_000) {
 }
 
 /** A fetch returning a real event-stream Response; `emit` receives the controller. */
-function streamingFetch(emit: (controller: ReadableStreamDefaultController<Uint8Array>) => void, status = 200): typeof fetch {
+function streamingFetch(
+  emit: (controller: ReadableStreamDefaultController<Uint8Array>) => void,
+  status = 200,
+): typeof fetch {
   return (async (_url: string | URL | Request, init?: RequestInit) => {
     let ctrl: ReadableStreamDefaultController<Uint8Array>;
     const body = new ReadableStream<Uint8Array>({
@@ -30,7 +33,11 @@ function streamingFetch(emit: (controller: ReadableStreamDefaultController<Uint8
       },
     });
     init?.signal?.addEventListener("abort", () => {
-      try { ctrl.close(); } catch { /* already closed */ }
+      try {
+        ctrl.close();
+      } catch {
+        /* already closed */
+      }
     });
     return new Response(status === 200 ? body : null, {
       status,
@@ -67,10 +74,16 @@ describe("createSmithersDataClient change stream", () => {
         fetch: (async (_url: string | URL | Request, init?: RequestInit) => {
           receivedSignal = init?.signal;
           const body = new ReadableStream<Uint8Array>({
-            start(next) { controller = next; },
+            start(next) {
+              controller = next;
+            },
           });
           init?.signal?.addEventListener("abort", () => {
-            try { controller.close(); } catch { /* already closed */ }
+            try {
+              controller.close();
+            } catch {
+              /* already closed */
+            }
           });
           return new Response(body, {
             status: 200,
@@ -97,7 +110,9 @@ describe("createSmithersDataClient change stream", () => {
     const events: SmithersStreamEvent[] = [];
     const client = createSmithersDataClient({
       mode: { kind: "local", apiBaseUrl: "http://gateway.test/" },
-      fetch: streamingFetch((c) => { controller = c; }),
+      fetch: streamingFetch((c) => {
+        controller = c;
+      }),
     });
 
     const statuses: string[] = [];
@@ -106,8 +121,8 @@ describe("createSmithersDataClient change stream", () => {
 
     // Once the stream is online, push a heartbeat, then a change with collections.
     await waitFor(() => client.stream.status().status === "online");
-    controller.enqueue(encoder.encode("event: heartbeat\ndata: {\"seq\":3}\n\n"));
-    controller.enqueue(encoder.encode("event: change\ndata: {\"seq\":7,\"collections\":[\"runs\",42,\"crons\"]}\n\n"));
+    controller.enqueue(encoder.encode('event: heartbeat\ndata: {"seq":3}\n\n'));
+    controller.enqueue(encoder.encode('event: change\ndata: {"seq":7,"collections":["runs",42,"crons"]}\n\n'));
 
     await waitFor(() => events.some((event) => event.type === "change"));
     const change = events.find((event) => event.type === "change") as Extract<SmithersStreamEvent, { type: "change" }>;
@@ -119,7 +134,7 @@ describe("createSmithersDataClient change stream", () => {
     // resolves for a future seq delivered by a later frame.
     await client.stream.waitForSeq(7);
     const pending = client.stream.waitForSeq(9);
-    controller.enqueue(encoder.encode("event: change\ndata: {\"seq\":9,\"collections\":[]}\n\n"));
+    controller.enqueue(encoder.encode('event: change\ndata: {"seq":9,"collections":[]}\n\n'));
     await pending;
 
     expect(statuses).toContain("connecting");
@@ -134,7 +149,9 @@ describe("createSmithersDataClient change stream", () => {
     const events: SmithersStreamEvent[] = [];
     const client = createSmithersDataClient({
       mode: { kind: "local", apiBaseUrl: "http://gateway.test/" },
-      fetch: streamingFetch((c) => { controller = c; }),
+      fetch: streamingFetch((c) => {
+        controller = c;
+      }),
     });
     const unsubscribe = client.stream.subscribe((event) => events.push(event));
     await waitFor(() => client.stream.status().status === "online");
@@ -171,7 +188,9 @@ describe("createSmithersDataClient change stream", () => {
     });
     // The waiter opens the stream and pends; close() resolves outstanding waiters.
     let settled = false;
-    const pending = client.stream.waitForSeq(999).then(() => { settled = true; });
+    const pending = client.stream.waitForSeq(999).then(() => {
+      settled = true;
+    });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(settled).toBe(false);
     client.close();
@@ -189,10 +208,12 @@ describe("createSmithersDataClient change stream", () => {
           streamOpens += 1;
           const body = new ReadableStream<Uint8Array>({
             start(controller) {
-              controller.enqueue(encoder.encode("event: change\ndata: {\"seq\":5,\"collections\":[\"runs\"]}\n\n"));
+              controller.enqueue(encoder.encode('event: change\ndata: {"seq":5,"collections":["runs"]}\n\n'));
             },
           });
-          init?.signal?.addEventListener("abort", () => { streamAborted = true; });
+          init?.signal?.addEventListener("abort", () => {
+            streamAborted = true;
+          });
           return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
         }
         return new Response(JSON.stringify({ ok: true, data: { runId: "r1" }, seq: 5 }), {
@@ -219,8 +240,14 @@ describe("createSmithersDataClient change stream", () => {
     const client = createSmithersDataClient({
       mode: { kind: "local", apiBaseUrl: "http://gateway.test/" },
       fetch: (async (_url: string | URL | Request, init?: RequestInit) => {
-        const body = new ReadableStream<Uint8Array>({ start(next) { controller = next; } });
-        init?.signal?.addEventListener("abort", () => { streamAborted = true; });
+        const body = new ReadableStream<Uint8Array>({
+          start(next) {
+            controller = next;
+          },
+        });
+        init?.signal?.addEventListener("abort", () => {
+          streamAborted = true;
+        });
         return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
       }) as unknown as typeof fetch,
     });
@@ -228,13 +255,13 @@ describe("createSmithersDataClient change stream", () => {
     const unsubscribe = client.stream.subscribe((event) => events.push(event));
     await waitFor(() => client.stream.status().status === "online");
     const pending = client.stream.waitForSeq(4);
-    controller.enqueue(encoder.encode("event: change\ndata: {\"seq\":4,\"collections\":[\"runs\"]}\n\n"));
+    controller.enqueue(encoder.encode('event: change\ndata: {"seq":4,"collections":["runs"]}\n\n'));
     await pending;
 
     expect(streamAborted).toBe(false);
     expect(client.stream.status().status).toBe("online");
     // Still live: a later frame reaches the subscriber.
-    controller.enqueue(encoder.encode("event: change\ndata: {\"seq\":6,\"collections\":[]}\n\n"));
+    controller.enqueue(encoder.encode('event: change\ndata: {"seq":6,"collections":[]}\n\n'));
     await waitFor(() => events.some((event) => event.seq === 6));
 
     unsubscribe();
@@ -268,10 +295,13 @@ describe("createSmithersDataClient change stream", () => {
           return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
         }
         if (!tokenValid) {
-          return new Response(JSON.stringify({ ok: false, error: { code: "UNAUTHORIZED", message: "Invalid token" } }), {
-            status: 401,
-            headers: { "content-type": "application/json" },
-          });
+          return new Response(
+            JSON.stringify({ ok: false, error: { code: "UNAUTHORIZED", message: "Invalid token" } }),
+            {
+              status: 401,
+              headers: { "content-type": "application/json" },
+            },
+          );
         }
         return new Response(JSON.stringify({ ok: true, data: [] }), {
           status: 200,
@@ -310,8 +340,18 @@ describe("createSmithersDataClient change stream", () => {
       fetch: (async (url: string | URL | Request, init?: RequestInit) => {
         const href = String(url);
         if (href.includes("/v1/api/stream")) {
-          const body = new ReadableStream<Uint8Array>({ start(c) { controller = c; } });
-          init?.signal?.addEventListener("abort", () => { try { controller.close(); } catch { /* closed */ } });
+          const body = new ReadableStream<Uint8Array>({
+            start(c) {
+              controller = c;
+            },
+          });
+          init?.signal?.addEventListener("abort", () => {
+            try {
+              controller.close();
+            } catch {
+              /* closed */
+            }
+          });
           return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
         }
         return new Response(JSON.stringify({ ok: true, data: { runId: "r1" }, seq: 4 }), {
@@ -333,7 +373,7 @@ describe("createSmithersDataClient change stream", () => {
     // The mutation is parked on waitForSeq(4) until the stream advances lastSeq.
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(resolved).toBe(false);
-    controller.enqueue(encoder.encode("event: change\ndata: {\"seq\":4,\"collections\":[\"runs\"]}\n\n"));
+    controller.enqueue(encoder.encode('event: change\ndata: {"seq":4,"collections":["runs"]}\n\n'));
     const result = await mutation;
     expect(result).toMatchObject({ data: { runId: "r1" }, seq: 4 });
 
@@ -347,7 +387,9 @@ describe("createSmithersDataClient change stream", () => {
       mode: { kind: "local", apiBaseUrl: "http://gateway.test/" },
       onError: (error) => errors.push(error as { reason: string }),
       // The fetch itself rejects — the async transport body hits its catch.
-      fetch: (async () => { throw new Error("connect refused"); }) as unknown as typeof fetch,
+      fetch: (async () => {
+        throw new Error("connect refused");
+      }) as unknown as typeof fetch,
     });
     const unsubscribe = client.stream.subscribe(() => {});
     await waitFor(() => errors.some((error) => error.reason === "disconnected"));
@@ -391,7 +433,9 @@ describe("createSmithersDataClient change stream", () => {
       emit(type: string, data: string) {
         this.listeners.get(type)?.(new MessageEvent(type, { data }));
       }
-      close() { this.closed = true; }
+      close() {
+        this.closed = true;
+      }
     }
 
     const client = createSmithersDataClient({
@@ -414,6 +458,4 @@ describe("createSmithersDataClient change stream", () => {
 });
 
 // Local alias so the FakeEventSource cast reads clearly.
-type CreateSmithersDataClientEventSource = NonNullable<
-  Parameters<typeof createSmithersDataClient>[0]["EventSource"]
->;
+type CreateSmithersDataClientEventSource = NonNullable<Parameters<typeof createSmithersDataClient>[0]["EventSource"]>;

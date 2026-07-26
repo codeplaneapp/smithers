@@ -73,13 +73,7 @@ export function toScoresRun(row: Record<string, unknown>): ScoresRun {
  * `key={runId}`) ONLY when a run is resolved, so `useGatewayScores` always gets a
  * real `runId` and a run switch re-subscribes cleanly.
  */
-function ActiveRunScores({
-  runId,
-  refetchRuns,
-}: {
-  runId: string;
-  refetchRuns: () => Promise<void> | void;
-}) {
+function ActiveRunScores({ runId, refetchRuns }: { runId: string; refetchRuns: () => Promise<void> | void }) {
   const { data: scoreRows, refetch: refetchScores } = useGatewayScores(runId);
 
   // The Refresh button re-pulls both the roster and this run's scores.
@@ -110,9 +104,7 @@ export function ScoresBridge() {
   const refetchRuns = runsState.refetch;
 
   useEffect(() => {
-    const runs = (runRows ?? [])
-      .map(toScoresRun)
-      .filter((run) => run.runId.trim() !== "");
+    const runs = (runRows ?? []).map(toScoresRun).filter((run) => run.runId.trim() !== "");
     useScoresStore.setState({ runs });
   }, [runRows]);
 

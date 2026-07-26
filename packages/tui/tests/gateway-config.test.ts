@@ -39,9 +39,7 @@ describe("resolveGatewayConfig", () => {
     // 70000 is out of the 1..65535 TCP range; without validation this built an
     // unreachable http://127.0.0.1:70000. It must fail loudly instead.
     for (const bad of ["70000", "0", "-1", "8.5", "abc"]) {
-      expect(() => resolveGatewayConfig({ env: { SMITHERS_GATEWAY_PORT: bad } })).toThrow(
-        GatewayConfigError,
-      );
+      expect(() => resolveGatewayConfig({ env: { SMITHERS_GATEWAY_PORT: bad } })).toThrow(GatewayConfigError);
     }
   });
 
@@ -78,9 +76,7 @@ describe("resolveGatewayConfig", () => {
   });
 
   test("--port preserves the pinned URL's path while overriding the port", () => {
-    expect(
-      resolveGatewayConfig({ gatewayUrlArg: "http://gw.internal/base", portArg: 8080, env: {} }),
-    ).toEqual({
+    expect(resolveGatewayConfig({ gatewayUrlArg: "http://gw.internal/base", portArg: 8080, env: {} })).toEqual({
       base: "http://gw.internal:8080/base",
       port: 8080,
       autoStartAllowed: false,
@@ -89,9 +85,7 @@ describe("resolveGatewayConfig", () => {
   });
 
   test("SMITHERS_GATEWAY_URL is pinned (no autostart) when no --gateway arg", () => {
-    expect(
-      resolveGatewayConfig({ env: { SMITHERS_GATEWAY_URL: "http://host:5555" } }),
-    ).toEqual({
+    expect(resolveGatewayConfig({ env: { SMITHERS_GATEWAY_URL: "http://host:5555" } })).toEqual({
       base: "http://host:5555",
       port: 5555,
       autoStartAllowed: false,
@@ -123,9 +117,7 @@ describe("resolveGatewayConfig", () => {
   });
 
   test("SMITHERS_TOKEN overrides SMITHERS_API_KEY", () => {
-    expect(
-      resolveGatewayConfig({ env: { SMITHERS_TOKEN: "tok", SMITHERS_API_KEY: "key" } }).token,
-    ).toBe("tok");
+    expect(resolveGatewayConfig({ env: { SMITHERS_TOKEN: "tok", SMITHERS_API_KEY: "key" } }).token).toBe("tok");
   });
 
   test("--token arg wins over both env tokens", () => {
@@ -138,9 +130,7 @@ describe("resolveGatewayConfig", () => {
   });
 
   test("carries the token onto a pinned gateway too", () => {
-    expect(
-      resolveGatewayConfig({ gatewayUrlArg: "http://host:5555", env: { SMITHERS_API_KEY: "key" } }),
-    ).toEqual({
+    expect(resolveGatewayConfig({ gatewayUrlArg: "http://host:5555", env: { SMITHERS_API_KEY: "key" } })).toEqual({
       base: "http://host:5555",
       port: 5555,
       autoStartAllowed: false,

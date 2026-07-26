@@ -1,10 +1,4 @@
-import {
-  BaseCliAgent,
-  pushFlag,
-  isRecord,
-  asString,
-  createSyntheticIdGenerator,
-} from "./BaseCliAgent/index.js";
+import { BaseCliAgent, pushFlag, isRecord, asString, createSyntheticIdGenerator } from "./BaseCliAgent/index.js";
 
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
@@ -138,10 +132,7 @@ export class VibeAgent extends BaseCliAgent {
           engine: this.cliEngine,
           ok,
           answer: ok ? finalAnswer || undefined : undefined,
-          error: ok
-            ? undefined
-            : result.stderr?.trim() ||
-              `vibe exited with code ${result.exitCode ?? -1}`,
+          error: ok ? undefined : result.stderr?.trim() || `vibe exited with code ${result.exitCode ?? -1}`,
           resume: this.issuedSessionId,
         });
 
@@ -156,9 +147,7 @@ export class VibeAgent extends BaseCliAgent {
   async buildCommand(params) {
     const args = [];
 
-    const resumeSession = typeof params.options?.resumeSession === "string"
-      ? params.options.resumeSession
-      : undefined;
+    const resumeSession = typeof params.options?.resumeSession === "string" ? params.options.resumeSession : undefined;
     const effectiveSession = resumeSession ?? this.opts.sessionId;
     this.issuedSessionId = effectiveSession;
     if (this.opts.continueSession && !effectiveSession) {
@@ -188,9 +177,7 @@ export class VibeAgent extends BaseCliAgent {
 
     if (this.extraArgs?.length) args.push(...this.extraArgs);
 
-    const systemPrefix = params.systemPrompt
-      ? `${params.systemPrompt}\n\n`
-      : "";
+    const systemPrefix = params.systemPrompt ? `${params.systemPrompt}\n\n` : "";
     const fullPrompt = `${systemPrefix}${params.prompt ?? ""}`;
     pushFlag(args, "--prompt", fullPrompt);
 

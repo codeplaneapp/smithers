@@ -4,7 +4,22 @@ import { extractUsageFromOutput } from "@smithers-orchestrator/agents/BaseCliAge
 describe("extractUsageFromOutput", () => {
   test("extracts tokens from Claude Code stream-json NDJSON", () => {
     const lines = [
-      JSON.stringify({ type: "message_start", message: { id: "msg_01", type: "message", role: "assistant", content: [], model: "claude-sonnet-5", usage: { input_tokens: 1523, cache_creation_input_tokens: 200, cache_read_input_tokens: 50, output_tokens: 1 } } }),
+      JSON.stringify({
+        type: "message_start",
+        message: {
+          id: "msg_01",
+          type: "message",
+          role: "assistant",
+          content: [],
+          model: "claude-sonnet-5",
+          usage: {
+            input_tokens: 1523,
+            cache_creation_input_tokens: 200,
+            cache_read_input_tokens: 50,
+            output_tokens: 1,
+          },
+        },
+      }),
       JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
       JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello" } }),
       JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: " world" } }),
@@ -23,11 +38,25 @@ describe("extractUsageFromOutput", () => {
 
   test("does not double-count Claude stream-json terminal result event", () => {
     const lines = [
-      JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 1523, cache_creation_input_tokens: 200, cache_read_input_tokens: 50, output_tokens: 1 } } }),
+      JSON.stringify({
+        type: "message_start",
+        message: {
+          usage: {
+            input_tokens: 1523,
+            cache_creation_input_tokens: 200,
+            cache_read_input_tokens: 50,
+            output_tokens: 1,
+          },
+        },
+      }),
       JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello" } }),
       JSON.stringify({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 42 } }),
       JSON.stringify({ type: "message_stop" }),
-      JSON.stringify({ type: "result", subtype: "success", usage: { input_tokens: 1523, output_tokens: 42, cache_creation_input_tokens: 200, cache_read_input_tokens: 50 } }),
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        usage: { input_tokens: 1523, output_tokens: 42, cache_creation_input_tokens: 200, cache_read_input_tokens: 50 },
+      }),
     ];
     const raw = lines.join("\n");
     const usage = extractUsageFromOutput(raw);
@@ -39,7 +68,11 @@ describe("extractUsageFromOutput", () => {
   });
 
   test("falls back to result usage when no incremental events were seen", () => {
-    const raw = JSON.stringify({ type: "result", subtype: "success", usage: { input_tokens: 800, output_tokens: 90, cache_read_input_tokens: 30 } });
+    const raw = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      usage: { input_tokens: 800, output_tokens: 90, cache_read_input_tokens: 30 },
+    });
     const usage = extractUsageFromOutput(raw);
     expect(usage).toBeDefined();
     expect(usage.inputTokens).toBe(800);
@@ -51,7 +84,10 @@ describe("extractUsageFromOutput", () => {
     const lines = [
       JSON.stringify({ type: "turn.started", session_id: "sess-1" }),
       JSON.stringify({ type: "message", role: "assistant", content: "Hello world" }),
-      JSON.stringify({ type: "turn.completed", usage: { input_tokens: 500, output_tokens: 120, cached_input_tokens: 80 } }),
+      JSON.stringify({
+        type: "turn.completed",
+        usage: { input_tokens: 500, output_tokens: 120, cached_input_tokens: 80 },
+      }),
     ];
     const raw = lines.join("\n");
     const usage = extractUsageFromOutput(raw);
@@ -84,7 +120,10 @@ describe("extractUsageFromOutput", () => {
   });
 
   test("extracts tokens from generic usage object", () => {
-    const raw = JSON.stringify({ type: "complete", usage: { input_tokens: 250, output_tokens: 60, reasoning_tokens: 15 } });
+    const raw = JSON.stringify({
+      type: "complete",
+      usage: { input_tokens: 250, output_tokens: 60, reasoning_tokens: 15 },
+    });
     const usage = extractUsageFromOutput(raw);
     expect(usage).toBeDefined();
     expect(usage.inputTokens).toBe(250);

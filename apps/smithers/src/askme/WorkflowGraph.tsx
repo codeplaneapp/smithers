@@ -1,14 +1,6 @@
 import "@xyflow/react/dist/style.css";
 import { memo } from "react";
-import {
-  Background,
-  Controls,
-  Handle,
-  Position,
-  ReactFlow,
-  type Edge,
-  type NodeProps,
-} from "@xyflow/react";
+import { Background, Controls, Handle, Position, ReactFlow, type Edge, type NodeProps } from "@xyflow/react";
 import type { SmithersFlowNode } from "./workflowFlow";
 
 function SmithersTaskNode({ data }: NodeProps<SmithersFlowNode>) {

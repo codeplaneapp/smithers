@@ -1,6 +1,6 @@
 export type DiffBundleLike = {
-    patches: Array<{
-        path?: string;
-        diff?: string;
-    }>;
+  patches: Array<{
+    path?: string;
+    diff?: string;
+  }>;
 };

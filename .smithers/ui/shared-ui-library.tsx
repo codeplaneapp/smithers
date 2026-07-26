@@ -107,23 +107,30 @@ function TicketCard({ runId, slug, nodes }: { runId: string; slug: string; nodes
   const verdict = merge.status === "finished" ? "merged" : settled ? (lgtm ? "lgtm" : "not lgtm") : undefined;
   return (
     <div style={panelStyle}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, cursor: "pointer" }} onClick={() => setOpen((v) => !v)}>
+      <div
+        style={{ display: "flex", alignItems: "baseline", gap: 8, cursor: "pointer" }}
+        onClick={() => setOpen((v) => !v)}
+      >
         <strong style={{ fontSize: 13 }}>{slug}</strong>
         <span style={{ marginLeft: "auto", fontSize: 12 }}>
-          {verdict ? (
-            <StatusPill status={verdict === "merged" || verdict === "lgtm" ? "finished" : "failed"} />
-          ) : null}
+          {verdict ? <StatusPill status={verdict === "merged" || verdict === "lgtm" ? "finished" : "failed"} /> : null}
           {verdict ? <span style={{ marginLeft: 6, opacity: 0.75 }}>{verdict}</span> : null}
         </span>
       </div>
       <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap" }}>
         {STAGES.map((stage) => (
-          <StageDot key={stage.suffix} status={latestStatus(nodes, `ticket-${slug}-${stage.suffix}`).status} label={stage.label} />
+          <StageDot
+            key={stage.suffix}
+            status={latestStatus(nodes, `ticket-${slug}-${stage.suffix}`).status}
+            label={stage.label}
+          />
         ))}
         <StageDot status={merge.status} label="merge" />
       </div>
       {open && row !== undefined ? (
-        <pre style={{ marginTop: 8, fontSize: 11, whiteSpace: "pre-wrap", opacity: 0.85 }}>{JSON.stringify(row, null, 2)}</pre>
+        <pre style={{ marginTop: 8, fontSize: 11, whiteSpace: "pre-wrap", opacity: 0.85 }}>
+          {JSON.stringify(row, null, 2)}
+        </pre>
       ) : null}
     </div>
   );
@@ -179,10 +186,20 @@ function App() {
       </div>
       {slugs.length === 0 ? (
         <div style={{ marginBottom: 12 }}>
-          <EmptyState title="No extraction lanes yet" description="Lanes appear once discovery returns the batch tickets." />
+          <EmptyState
+            title="No extraction lanes yet"
+            description="Lanes appear once discovery returns the batch tickets."
+          />
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 10, marginBottom: 12 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+            gap: 10,
+            marginBottom: 12,
+          }}
+        >
           {slugs.map((slug) => (
             <TicketCard key={slug} runId={runId} slug={slug} nodes={nodes} />
           ))}

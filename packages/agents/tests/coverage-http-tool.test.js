@@ -11,10 +11,12 @@ afterEach(() => {
 function stub(handler) {
   /** @type {{ url: string; init: any }[]} */
   const calls = [];
-  globalThis.fetch = /** @type {any} */ (async (url, init) => {
-    calls.push({ url: String(url), init });
-    return handler(url, init);
-  });
+  globalThis.fetch = /** @type {any} */ (
+    async (url, init) => {
+      calls.push({ url: String(url), init });
+      return handler(url, init);
+    }
+  );
   return calls;
 }
 
@@ -52,7 +54,12 @@ describe("createHttpTool", () => {
     const calls = stub(() => Response.json({ echoed: true }));
     const tool = createHttpTool();
     await tool.execute(
-      { url: "https://api.example.com/x", method: "POST", body: { hello: "world" }, auth: { type: "bearer", token: "tok" } },
+      {
+        url: "https://api.example.com/x",
+        method: "POST",
+        body: { hello: "world" },
+        auth: { type: "bearer", token: "tok" },
+      },
       callOptions,
     );
     expect(calls[0].init.headers.get("authorization")).toBe("Bearer tok");
@@ -64,7 +71,12 @@ describe("createHttpTool", () => {
     const calls = stub(() => new Response("plain", { status: 200, headers: { "content-type": "text/plain" } }));
     const tool = createHttpTool();
     const result = await tool.execute(
-      { url: "https://api.example.com/x", method: "PUT", body: "raw-string", auth: { type: "basic", username: "u", password: "p" } },
+      {
+        url: "https://api.example.com/x",
+        method: "PUT",
+        body: "raw-string",
+        auth: { type: "basic", username: "u", password: "p" },
+      },
       callOptions,
     );
     expect(calls[0].init.body).toBe("raw-string");
@@ -76,7 +88,11 @@ describe("createHttpTool", () => {
     const calls = stub(() => new Response("", { status: 200 }));
     const tool = createHttpTool({ allowedHosts: ["api.example.com:8443"] });
     const result = await tool.execute(
-      { url: "https://api.example.com/x", headers: { "x-req": "1" }, auth: { type: "header", name: "x-key", value: "kv" } },
+      {
+        url: "https://api.example.com/x",
+        headers: { "x-req": "1" },
+        auth: { type: "header", name: "x-key", value: "kv" },
+      },
       callOptions,
     );
     expect(calls[0].init.headers.get("x-key")).toBe("kv");
@@ -114,10 +130,7 @@ describe("createHttpTool", () => {
       return Response.json({ late: true });
     });
     const tool = createHttpTool();
-    const error = await tool.execute(
-      { url: "https://api.example.com/slow", timeoutMs: 1 },
-      callOptions,
-    ).then(
+    const error = await tool.execute({ url: "https://api.example.com/slow", timeoutMs: 1 }, callOptions).then(
       () => null,
       (cause) => cause,
     );
@@ -137,9 +150,9 @@ describe("createHttpTool", () => {
 
   test("rejects an invalid baseUrl before it can disable the default-header allowlist", () => {
     const calls = stub(() => Response.json({ receivedSecret: true }));
-    expect(() =>
-      createHttpTool({ baseUrl: "::::not a url", defaultHeaders: { "x-secret": "s" } }),
-    ).toThrow("createHttpTool baseUrl must be a valid absolute HTTP(S) URL");
+    expect(() => createHttpTool({ baseUrl: "::::not a url", defaultHeaders: { "x-secret": "s" } })).toThrow(
+      "createHttpTool baseUrl must be a valid absolute HTTP(S) URL",
+    );
     expect(calls).toHaveLength(0);
   });
 

@@ -28,7 +28,12 @@ function envelope(data: unknown, extra: Record<string, unknown> = {}) {
 
 const treeSnapshot = {
   runId: "run-1",
-  root: { id: "root", name: "root", status: "running", children: [{ id: "task-a", name: "Task A", status: "completed", children: [] }] },
+  root: {
+    id: "root",
+    name: "root",
+    status: "running",
+    children: [{ id: "task-a", name: "Task A", status: "completed", children: [] }],
+  },
 };
 
 function routingFetch(overrides: Record<string, Handler> = {}) {
@@ -72,7 +77,10 @@ function routingFetch(overrides: Record<string, Handler> = {}) {
 function makeCollections(overrides?: Record<string, Handler>) {
   const { fetchImpl, calls } = routingFetch(overrides);
   const queryClient = new QueryClient();
-  const client = createSmithersDataClient({ mode: { kind: "local", apiBaseUrl: "http://gateway.test/" }, fetch: fetchImpl });
+  const client = createSmithersDataClient({
+    mode: { kind: "local", apiBaseUrl: "http://gateway.test/" },
+    fetch: fetchImpl,
+  });
   const collections = createSmithersCollections(client, queryClient);
   cleanups.push(() => {
     collections.close();
@@ -214,12 +222,16 @@ describe("createSmithersCollections local mutations", () => {
     await insert.isPersisted.promise;
     expect(calls.some((call) => call.method === "POST" && call.path === "/v1/api/runs")).toBe(true);
 
-    const cancel = runs.update("run-1", (draft: Record<string, unknown>) => { draft.status = "cancelled"; });
+    const cancel = runs.update("run-1", (draft: Record<string, unknown>) => {
+      draft.status = "cancelled";
+    });
     await cancel.isPersisted.promise;
     expect(calls.some((call) => call.path === "/v1/api/runs/run-1/cancel")).toBe(true);
 
     // Re-seed run-1 status so the resume branch has a row to update.
-    const resume = runs.update("run-1", (draft: Record<string, unknown>) => { draft.status = "running"; });
+    const resume = runs.update("run-1", (draft: Record<string, unknown>) => {
+      draft.status = "running";
+    });
     await resume.isPersisted.promise;
     expect(calls.some((call) => call.path === "/v1/api/runs/run-1/resume")).toBe(true);
 
@@ -237,7 +249,9 @@ describe("createSmithersCollections local mutations", () => {
     await expect(bad.isPersisted.promise).rejects.toThrow(/workflow/i);
 
     // finished -> paused is a real change the mutation cannot persist.
-    const badStatus = runs.update("run-1", (draft: Record<string, unknown>) => { draft.status = "paused"; });
+    const badStatus = runs.update("run-1", (draft: Record<string, unknown>) => {
+      draft.status = "paused";
+    });
     await expect(badStatus.isPersisted.promise).rejects.toThrow(/cannot persist status/i);
   });
 
@@ -247,7 +261,9 @@ describe("createSmithersCollections local mutations", () => {
     await approvals.preload();
     const key = "run-1:gate:0";
 
-    const approve = approvals.update(key, (draft: Record<string, unknown>) => { draft.status = "approved"; });
+    const approve = approvals.update(key, (draft: Record<string, unknown>) => {
+      draft.status = "approved";
+    });
     await approve.isPersisted.promise;
     const denyByUpdate = approvals.update(key, (draft: Record<string, unknown>) => {
       draft.decision = { approved: false };
@@ -270,12 +286,16 @@ describe("createSmithersCollections local mutations", () => {
     // cron-1 (still in the collection) to cover onUpdate/onDelete.
     const insert = crons.insert({ cronId: "cron-2", workflow: "value", pattern: "* * * * *", enabled: true } as never);
     await insert.isPersisted.promise;
-    const update = crons.update("cron-1", (draft: Record<string, unknown>) => { draft.pattern = "*/5 * * * *"; });
+    const update = crons.update("cron-1", (draft: Record<string, unknown>) => {
+      draft.pattern = "*/5 * * * *";
+    });
     await update.isPersisted.promise;
     const remove = crons.delete("cron-1");
     await remove.isPersisted.promise;
 
-    expect(calls.filter((call) => call.method === "POST" && call.path === "/v1/api/crons").length).toBeGreaterThanOrEqual(2);
+    expect(
+      calls.filter((call) => call.method === "POST" && call.path === "/v1/api/crons").length,
+    ).toBeGreaterThanOrEqual(2);
     expect(calls.some((call) => call.method === "DELETE" && call.path === "/v1/api/crons/cron-1")).toBe(true);
   });
 });
@@ -301,9 +321,17 @@ describe("createSmithersCollections invalidation and lifecycle", () => {
     const encoder = new TextEncoder();
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     const streamHandler: Handler = (init) => {
-      const body = new ReadableStream<Uint8Array>({ start(c) { controller = c; } });
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c;
+        },
+      });
       (init?.signal as AbortSignal | undefined)?.addEventListener("abort", () => {
-        try { controller.close(); } catch { /* closed */ }
+        try {
+          controller.close();
+        } catch {
+          /* closed */
+        }
       });
       return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
     };
@@ -326,8 +354,8 @@ describe("createSmithersCollections invalidation and lifecycle", () => {
     await online();
     // Let the transport reach onopen before pushing frames.
     await new Promise((r) => setTimeout(r, 30));
-    controller.enqueue(encoder.encode("event: change\ndata: {\"seq\":1,\"collections\":[\"runs\"]}\n\n"));
-    controller.enqueue(encoder.encode("event: reset\ndata: {\"seq\":2}\n\n"));
+    controller.enqueue(encoder.encode('event: change\ndata: {"seq":1,"collections":["runs"]}\n\n'));
+    controller.enqueue(encoder.encode('event: reset\ndata: {"seq":2}\n\n'));
     await new Promise((r) => setTimeout(r, 60));
     expect(invalidations.length).toBeGreaterThan(0);
   });
@@ -335,10 +363,7 @@ describe("createSmithersCollections invalidation and lifecycle", () => {
   test("close() tears down a client the collections own", () => {
     const queryClient = new QueryClient();
     // Passing a mode (not a client) makes the collections OWN the client.
-    const collections = createSmithersCollections(
-      { kind: "local", apiBaseUrl: "http://gateway.test/" },
-      queryClient,
-    );
+    const collections = createSmithersCollections({ kind: "local", apiBaseUrl: "http://gateway.test/" }, queryClient);
     expect(collections.client.mode.kind).toBe("local");
     // Build one collection so close() clears a non-empty registry.
     collections.runs();

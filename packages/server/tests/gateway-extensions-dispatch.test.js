@@ -17,7 +17,9 @@ function fakeConnection({ scopes = ["*"], transport = "ws" } = {}) {
   const ws = {
     OPEN: 1,
     readyState: 1,
-    send(data) { sent.push(JSON.parse(data)); },
+    send(data) {
+      sent.push(JSON.parse(data));
+    },
   };
   return {
     connection: {
@@ -102,7 +104,11 @@ describe("Gateway.extend + routeExtensionRequest", () => {
     const gateway = new Gateway();
     gateway.extend("plain", {
       resources: {
-        boom: { handler: () => { throw new Error("boom from handler"); } },
+        boom: {
+          handler: () => {
+            throw new Error("boom from handler");
+          },
+        },
       },
     });
     const { connection } = fakeConnection();
@@ -138,7 +144,9 @@ describe("Gateway.extend + routeExtensionRequest", () => {
             queueMicrotask(() => ctx.send({ line: "live-1" }));
             return {
               initial: { resumeAtSeq: params.resumeAtSeq ?? 0, snapshot: ["a", "b"] },
-              cleanup: () => { cleanedUp = true; },
+              cleanup: () => {
+                cleanedUp = true;
+              },
             };
           },
         },
@@ -175,9 +183,7 @@ describe("Gateway.extend + routeExtensionRequest", () => {
       streams: {
         whale: {
           subscribe: (_params, ctx) => {
-            queueMicrotask(() =>
-              ctx.send({ blob: "x".repeat(EXTENSION_PAYLOAD_MAX_BYTES + 1) }),
-            );
+            queueMicrotask(() => ctx.send({ blob: "x".repeat(EXTENSION_PAYLOAD_MAX_BYTES + 1) }));
             return () => {};
           },
         },
@@ -195,9 +201,7 @@ describe("Gateway.extend + routeExtensionRequest", () => {
   test("namespace collision throws at registration time", () => {
     const gateway = new Gateway();
     gateway.extend("dup", { resources: { a: { handler: () => 1 } } });
-    expect(() =>
-      gateway.extend("dup", { resources: { b: { handler: () => 2 } } }),
-    ).toThrow(/already registered/i);
+    expect(() => gateway.extend("dup", { resources: { b: { handler: () => 2 } } })).toThrow(/already registered/i);
   });
 
   test("subscribeExtensionStream rejects an oversize initial snapshot", async () => {
@@ -208,7 +212,9 @@ describe("Gateway.extend + routeExtensionRequest", () => {
         big: {
           subscribe: () => ({
             initial: { blob: "x".repeat(EXTENSION_PAYLOAD_MAX_BYTES + 1) },
-            cleanup: () => { cleanedUp = true; },
+            cleanup: () => {
+              cleanedUp = true;
+            },
           }),
         },
       },
@@ -240,7 +246,9 @@ describe("Gateway.extend + routeExtensionRequest", () => {
             setTimeout(() => {
               for (let i = 0; i < 1_500; i += 1) ctx.send({ i });
             }, 0);
-            return () => { cleanedUp = true; };
+            return () => {
+              cleanedUp = true;
+            };
           },
         },
       },
@@ -301,11 +309,17 @@ describe("Gateway.extend + routeExtensionRequest", () => {
     const gateway = new Gateway();
     let fastCleanedAtMs = 0;
     let hangResolver;
-    const hangPromise = new Promise((resolve) => { hangResolver = resolve; });
+    const hangPromise = new Promise((resolve) => {
+      hangResolver = resolve;
+    });
     gateway.extend("multi", {
       streams: {
         fast: {
-          subscribe: () => ({ cleanup: () => { fastCleanedAtMs = Date.now(); } }),
+          subscribe: () => ({
+            cleanup: () => {
+              fastCleanedAtMs = Date.now();
+            },
+          }),
         },
         slow: {
           subscribe: () => ({ cleanup: () => hangPromise }),

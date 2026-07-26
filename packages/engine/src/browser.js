@@ -12,7 +12,10 @@ import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
 import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context";
 import { extractGraph } from "@smithers-orchestrator/graph/extract";
 
-export { RuntimeCapabilityError, RUNTIME_CAPABILITY_UNAVAILABLE } from "@smithers-orchestrator/driver/RuntimeCapabilityError";
+export {
+  RuntimeCapabilityError,
+  RUNTIME_CAPABILITY_UNAVAILABLE,
+} from "@smithers-orchestrator/driver/RuntimeCapabilityError";
 export { Task } from "@smithers-orchestrator/components/components/Task.browser";
 export { Workflow } from "@smithers-orchestrator/components/components/Workflow";
 export { Sequence } from "@smithers-orchestrator/components/components/Sequence";
@@ -29,7 +32,7 @@ export { Worktree } from "@smithers-orchestrator/components/components/Worktree"
  * @returns {{ build: (ctx: unknown) => React.ReactNode; zodToKeyName?: Map<unknown, string> }}
  */
 export function defineBrowserWorkflow(build, opts = {}) {
-    return { build, zodToKeyName: opts.zodToKeyName };
+  return { build, zodToKeyName: opts.zodToKeyName };
 }
 
 /**
@@ -39,7 +42,7 @@ export function defineBrowserWorkflow(build, opts = {}) {
  * @returns {RuntimeAdapter}
  */
 export function createBrowserRuntime(options) {
-    return createBrowserRuntimeImpl(options);
+  return createBrowserRuntimeImpl(options);
 }
 
 /**
@@ -62,38 +65,40 @@ export function createBrowserRuntime(options) {
  * }}
  */
 export function createBrowserSmithers(options) {
-    const runtime = options?.runtime ?? createBrowserRuntimeImpl(options?.runtimeOptions);
-    const workflow = options?.workflow;
-    if (!workflow || typeof workflow.build !== "function") {
-        throw new TypeError("createBrowserSmithers requires a browser workflow definition — see defineBrowserWorkflow().");
-    }
-    const definition = {
-        zodToKeyName: workflow.zodToKeyName,
-        build: (ctx) => React.createElement(SmithersContext.Provider, { value: ctx }, workflow.build(ctx)),
-    };
-    const createDriver = () => new WorkflowDriver({
-        workflow: definition,
-        runtime: { runPromise: (effect) => Effect.runPromise(effect) },
-        renderer: new SmithersRenderer({ extractGraph }),
-        runtimeAdapter: runtime,
-        createSession: (sessionOptions) => makeWorkflowSession({
-            ...sessionOptions,
-            nowMs: runtime.clock.now,
-            // A task with `deps` that aren't ready yet renders null and defers
-            // (see taskCore.js); it only appears in the graph on a LATER
-            // render. Without this, the scheduler can decide "Finished" right
-            // after the last known task completes, never re-rendering to pick
-            // up a still-deferred dependent task. Matches the Node engine
-            // (packages/engine/src/engine.js), which always sets this too.
-            requireRerenderOnOutputChange: true,
+  const runtime = options?.runtime ?? createBrowserRuntimeImpl(options?.runtimeOptions);
+  const workflow = options?.workflow;
+  if (!workflow || typeof workflow.build !== "function") {
+    throw new TypeError("createBrowserSmithers requires a browser workflow definition — see defineBrowserWorkflow().");
+  }
+  const definition = {
+    zodToKeyName: workflow.zodToKeyName,
+    build: (ctx) => React.createElement(SmithersContext.Provider, { value: ctx }, workflow.build(ctx)),
+  };
+  const createDriver = () =>
+    new WorkflowDriver({
+      workflow: definition,
+      runtime: { runPromise: (effect) => Effect.runPromise(effect) },
+      renderer: new SmithersRenderer({ extractGraph }),
+      runtimeAdapter: runtime,
+      createSession: (sessionOptions) =>
+        makeWorkflowSession({
+          ...sessionOptions,
+          nowMs: runtime.clock.now,
+          // A task with `deps` that aren't ready yet renders null and defers
+          // (see taskCore.js); it only appears in the graph on a LATER
+          // render. Without this, the scheduler can decide "Finished" right
+          // after the last known task completes, never re-rendering to pick
+          // up a still-deferred dependent task. Matches the Node engine
+          // (packages/engine/src/engine.js), which always sets this too.
+          requireRerenderOnOutputChange: true,
         }),
     });
-    return {
-        runtime,
-        run: (runOptions = {}) => createDriver().run(runOptions),
-        getRun: (runId) => runtime.storage.loadRun(runId),
-        getOutputs: (runId) => runtime.storage.loadOutputs(runId),
-    };
+  return {
+    runtime,
+    run: (runOptions = {}) => createDriver().run(runOptions),
+    getRun: (runId) => runtime.storage.loadRun(runId),
+    getOutputs: (runId) => runtime.storage.loadOutputs(runId),
+  };
 }
 
 /**
@@ -104,6 +109,6 @@ export function createBrowserSmithers(options) {
  * @returns {Promise<import("@smithers-orchestrator/driver/RunResult").RunResult>}
  */
 export async function runBrowserWorkflow(workflow, options = {}) {
-    const { runtime, ...runOptions } = options;
-    return createBrowserSmithers({ workflow, runtime }).run(runOptions);
+  const { runtime, ...runOptions } = options;
+  return createBrowserSmithers({ workflow, runtime }).run(runOptions);
 }

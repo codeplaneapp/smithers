@@ -2,10 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  extractWorkflowImportSpecifiers,
-  readWorkflowGraphHash,
-} from "../src/workflow-hash.js";
+import { extractWorkflowImportSpecifiers, readWorkflowGraphHash } from "../src/workflow-hash.js";
 
 const originalTranspiler = Bun.Transpiler;
 
@@ -23,11 +20,7 @@ describe("extractWorkflowImportSpecifiers fallback scanning", () => {
       'const c = import("./c");',
       'import "./a";',
     ].join("\n");
-    expect(extractWorkflowImportSpecifiers(source, "file.ts").sort()).toEqual([
-      "./a",
-      "./b",
-      "./c",
-    ]);
+    expect(extractWorkflowImportSpecifiers(source, "file.ts").sort()).toEqual(["./a", "./b", "./c"]);
   });
 
   test("falls back to regex scanning when the transpiler rejects the source", () => {

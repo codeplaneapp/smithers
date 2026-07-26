@@ -3,13 +3,7 @@
 // smithers-description: Runs ONE RoadmapBench task under ONE orchestration pattern (solo-sol, solo-luna, plan-impl-review, research-first, panel-review) with single-model agents and the official hidden-test scorer, so patterns can be compared on quality/speed/cost. See benchmarks/orchbench/DESIGN.md.
 /** @jsxImportSource smithers-orchestrator */
 import { readFileSync } from "node:fs";
-import {
-  ClaudeCodeAgent,
-  CodexAgent,
-  KimiAgent,
-  UI,
-  createSmithers,
-} from "smithers-orchestrator";
+import { ClaudeCodeAgent, CodexAgent, KimiAgent, UI, createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { roadmapScorer } from "../lib/roadmapScorer";
 
@@ -23,9 +17,7 @@ const inputSchema = z.object({
   instructionPath: z.string(),
   testsDir: z.string(),
   workDir: z.string(),
-  pattern: z
-    .enum(["solo-sol", "solo-luna", "plan-impl-review", "research-first", "panel-review"])
-    .default("solo-sol"),
+  pattern: z.enum(["solo-sol", "solo-luna", "plan-impl-review", "research-first", "panel-review"]).default("solo-sol"),
   panelThird: z.enum(["opus", "kimi"]).default("opus"),
   smoke: z.boolean().default(false),
 });
@@ -230,7 +222,9 @@ exact build and test commands that work via docker exec, and the main risks or
 tricky interactions an implementer should know about. Do NOT write or modify
 any files.`;
 
-  const planPrompt = (deps?: { research?: z.infer<typeof researchSchema> }) => `You are the lead engineer for a long-horizon version-upgrade task: "${input.taskId}".
+  const planPrompt = (deps?: {
+    research?: z.infer<typeof researchSchema>;
+  }) => `You are the lead engineer for a long-horizon version-upgrade task: "${input.taskId}".
 
 ${ENV}
 
@@ -251,7 +245,9 @@ target list the files you'll touch and the precise approach. Identify the build/
 test command for sanity-checking. Note interdependencies (some targets build on
 others) and ordering. Be specific and technical.`;
 
-  const implementPrompt = (deps: { plan?: z.infer<typeof planSchema> }) => `Continue task "${input.taskId}". Now IMPLEMENT the full roadmap.
+  const implementPrompt = (deps: {
+    plan?: z.infer<typeof planSchema>;
+  }) => `Continue task "${input.taskId}". Now IMPLEMENT the full roadmap.
 
 ${ENV}
 
@@ -269,7 +265,9 @@ documented signatures, defaults, and error/warning behavior. Maintain backward
 compatibility. Do not stop until all targets are implemented and your own
 sanity checks pass. Report exactly what you changed.`;
 
-  const reviewFixPrompt = (deps: { implement?: z.infer<typeof implementSchema> }) => `You are an independent senior reviewer (a DIFFERENT engineer and model)
+  const reviewFixPrompt = (deps: {
+    implement?: z.infer<typeof implementSchema>;
+  }) => `You are an independent senior reviewer (a DIFFERENT engineer and model)
 auditing the implementation for task "${input.taskId}". Be adversarial and precise.
 
 ${ENV}
@@ -289,7 +287,9 @@ defect, FIX IT directly in the code. Re-verify after fixing. Do a final
 completeness pass over every target before you finish. Report the issues you
 found and the fixes you applied.`;
 
-  const panelPrompt = (deps: { implement?: z.infer<typeof implementSchema> }) => `You are one member of an independent review panel (each member is a
+  const panelPrompt = (deps: {
+    implement?: z.infer<typeof implementSchema>;
+  }) => `You are one member of an independent review panel (each member is a
 DIFFERENT frontier model) auditing the implementation for task "${input.taskId}".
 Be adversarial and precise.
 
@@ -341,26 +341,61 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
     <Workflow name="orchbench">
       <UI entry="../ui/orchbench.tsx" title={"OrchBench"} />
       {pattern === "solo-sol" ? (
-        <Task id="solo" output={outputs.solo} agent={sol(150 * MIN)} timeoutMs={155 * MIN} heartbeatTimeoutMs={15 * MIN} scorers={reward}>
+        <Task
+          id="solo"
+          output={outputs.solo}
+          agent={sol(150 * MIN)}
+          timeoutMs={155 * MIN}
+          heartbeatTimeoutMs={15 * MIN}
+          scorers={reward}
+        >
           {soloPrompt}
         </Task>
       ) : null}
 
       {pattern === "solo-luna" ? (
-        <Task id="solo" output={outputs.solo} agent={luna(150 * MIN)} timeoutMs={155 * MIN} heartbeatTimeoutMs={15 * MIN} scorers={reward}>
+        <Task
+          id="solo"
+          output={outputs.solo}
+          agent={luna(150 * MIN)}
+          timeoutMs={155 * MIN}
+          heartbeatTimeoutMs={15 * MIN}
+          scorers={reward}
+        >
           {soloPrompt}
         </Task>
       ) : null}
 
       {pattern === "plan-impl-review" ? (
         <Sequence>
-          <Task id="plan" output={outputs.plan} agent={sol(75 * MIN)} timeoutMs={80 * MIN} heartbeatTimeoutMs={15 * MIN}>
+          <Task
+            id="plan"
+            output={outputs.plan}
+            agent={sol(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+          >
             {planPrompt()}
           </Task>
-          <Task id="implement" output={outputs.implement} agent={luna(75 * MIN)} timeoutMs={80 * MIN} heartbeatTimeoutMs={15 * MIN} deps={{ plan: outputs.plan }}>
+          <Task
+            id="implement"
+            output={outputs.implement}
+            agent={luna(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ plan: outputs.plan }}
+          >
             {implementPrompt}
           </Task>
-          <Task id="review" output={outputs.reviewFix} agent={sol(75 * MIN)} timeoutMs={80 * MIN} heartbeatTimeoutMs={15 * MIN} deps={{ implement: outputs.implement }} scorers={reward}>
+          <Task
+            id="review"
+            output={outputs.reviewFix}
+            agent={sol(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ implement: outputs.implement }}
+            scorers={reward}
+          >
             {reviewFixPrompt}
           </Task>
         </Sequence>
@@ -368,16 +403,44 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
 
       {pattern === "research-first" ? (
         <Sequence>
-          <Task id="research" output={outputs.research} agent={luna(30 * MIN)} timeoutMs={35 * MIN} heartbeatTimeoutMs={15 * MIN}>
+          <Task
+            id="research"
+            output={outputs.research}
+            agent={luna(30 * MIN)}
+            timeoutMs={35 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+          >
             {researchPrompt}
           </Task>
-          <Task id="plan" output={outputs.plan} agent={sol(60 * MIN)} timeoutMs={65 * MIN} heartbeatTimeoutMs={15 * MIN} deps={{ research: outputs.research }}>
+          <Task
+            id="plan"
+            output={outputs.plan}
+            agent={sol(60 * MIN)}
+            timeoutMs={65 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ research: outputs.research }}
+          >
             {planPrompt}
           </Task>
-          <Task id="implement" output={outputs.implement} agent={luna(75 * MIN)} timeoutMs={80 * MIN} heartbeatTimeoutMs={15 * MIN} deps={{ plan: outputs.plan }}>
+          <Task
+            id="implement"
+            output={outputs.implement}
+            agent={luna(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ plan: outputs.plan }}
+          >
             {implementPrompt}
           </Task>
-          <Task id="review" output={outputs.reviewFix} agent={sol(75 * MIN)} timeoutMs={80 * MIN} heartbeatTimeoutMs={15 * MIN} deps={{ implement: outputs.implement }} scorers={reward}>
+          <Task
+            id="review"
+            output={outputs.reviewFix}
+            agent={sol(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ implement: outputs.implement }}
+            scorers={reward}
+          >
             {reviewFixPrompt}
           </Task>
         </Sequence>
@@ -385,20 +448,54 @@ compatibility. Report what you addressed, what you rejected, and files changed.`
 
       {pattern === "panel-review" ? (
         <Sequence>
-          <Task id="plan" output={outputs.plan} agent={sol(75 * MIN)} timeoutMs={80 * MIN} heartbeatTimeoutMs={15 * MIN}>
+          <Task
+            id="plan"
+            output={outputs.plan}
+            agent={sol(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+          >
             {planPrompt()}
           </Task>
-          <Task id="implement" output={outputs.implement} agent={luna(75 * MIN)} timeoutMs={80 * MIN} heartbeatTimeoutMs={15 * MIN} deps={{ plan: outputs.plan }}>
+          <Task
+            id="implement"
+            output={outputs.implement}
+            agent={luna(75 * MIN)}
+            timeoutMs={80 * MIN}
+            heartbeatTimeoutMs={15 * MIN}
+            deps={{ plan: outputs.plan }}
+          >
             {implementPrompt}
           </Task>
           <Parallel maxConcurrency={3}>
-            <Task id="panel-sol" output={outputs.panelSol} agent={sol(45 * MIN)} timeoutMs={50 * MIN} heartbeatTimeoutMs={15 * MIN} deps={{ implement: outputs.implement }}>
+            <Task
+              id="panel-sol"
+              output={outputs.panelSol}
+              agent={sol(45 * MIN)}
+              timeoutMs={50 * MIN}
+              heartbeatTimeoutMs={15 * MIN}
+              deps={{ implement: outputs.implement }}
+            >
               {panelPrompt}
             </Task>
-            <Task id="panel-fable" output={outputs.panelFable} agent={fable(45 * MIN)} timeoutMs={50 * MIN} heartbeatTimeoutMs={15 * MIN} deps={{ implement: outputs.implement }}>
+            <Task
+              id="panel-fable"
+              output={outputs.panelFable}
+              agent={fable(45 * MIN)}
+              timeoutMs={50 * MIN}
+              heartbeatTimeoutMs={15 * MIN}
+              deps={{ implement: outputs.implement }}
+            >
               {panelPrompt}
             </Task>
-            <Task id="panel-third" output={outputs.panelThird} agent={third(45 * MIN)} timeoutMs={50 * MIN} heartbeatTimeoutMs={15 * MIN} deps={{ implement: outputs.implement }}>
+            <Task
+              id="panel-third"
+              output={outputs.panelThird}
+              agent={third(45 * MIN)}
+              timeoutMs={50 * MIN}
+              heartbeatTimeoutMs={15 * MIN}
+              deps={{ implement: outputs.implement }}
+            >
               {panelPrompt}
             </Task>
           </Parallel>

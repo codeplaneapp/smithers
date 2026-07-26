@@ -9,30 +9,41 @@ const callOptions = { toolCallId: "test-call", messages: [] };
 
 describe("createGroundedWebSearchToolset", () => {
   test("rejects a single semantic provider", () => {
-    expect(() => createGroundedWebSearchToolset({
-      providers: [provider("exa", "semantic", [])],
-    })).toThrow("fresh/SERP provider");
+    expect(() =>
+      createGroundedWebSearchToolset({
+        providers: [provider("exa", "semantic", [])],
+      }),
+    ).toThrow("fresh/SERP provider");
   });
 
   test("fans out to Exa plus a fresh provider and returns grounded citations", async () => {
     const calls = [];
     const toolset = createGroundedWebSearchToolset({
       providers: [
-        provider("exa", "semantic", [
-          { title: "Semantic result", url: "https://example.com/semantic", snippet: "context" },
-        ], calls),
-        provider("tavily", "fresh", [
-          { title: "Fresh result", url: "https://example.com/fresh", snippet: "news" },
-        ], calls),
+        provider(
+          "exa",
+          "semantic",
+          [{ title: "Semantic result", url: "https://example.com/semantic", snippet: "context" }],
+          calls,
+        ),
+        provider(
+          "tavily",
+          "fresh",
+          [{ title: "Fresh result", url: "https://example.com/fresh", snippet: "news" }],
+          calls,
+        ),
       ],
     });
 
     expect(toolset.toolNames).toEqual(["grounded_web_search"]);
-    const result = await toolset.tools.grounded_web_search.execute({
-      query: "latest smithers integrations",
-      maxResults: 3,
-      freshness: "week",
-    }, callOptions);
+    const result = await toolset.tools.grounded_web_search.execute(
+      {
+        query: "latest smithers integrations",
+        maxResults: 3,
+        freshness: "week",
+      },
+      callOptions,
+    );
 
     expect(calls).toEqual([
       { name: "exa", query: "latest smithers integrations", maxResults: 3, freshness: "week" },
@@ -40,7 +51,13 @@ describe("createGroundedWebSearchToolset", () => {
     ]);
     expect(result.providers).toEqual(["exa", "tavily"]);
     expect(result.results).toEqual([
-      { title: "Semantic result", url: "https://example.com/semantic", snippet: "context", provider: "exa", citation: 1 },
+      {
+        title: "Semantic result",
+        url: "https://example.com/semantic",
+        snippet: "context",
+        provider: "exa",
+        citation: 1,
+      },
       { title: "Fresh result", url: "https://example.com/fresh", snippet: "news", provider: "tavily", citation: 2 },
     ]);
   });
@@ -61,13 +78,22 @@ describe("createGroundedWebSearchToolset", () => {
       ],
     });
 
-    const result = await toolset.tools.grounded_web_search.execute({
-      query: "latest smithers integrations",
-    }, callOptions);
+    const result = await toolset.tools.grounded_web_search.execute(
+      {
+        query: "latest smithers integrations",
+      },
+      callOptions,
+    );
 
     expect(result.providers).toEqual(["exa"]);
     expect(result.results).toEqual([
-      { title: "Semantic result", url: "https://example.com/semantic", snippet: "context", provider: "exa", citation: 1 },
+      {
+        title: "Semantic result",
+        url: "https://example.com/semantic",
+        snippet: "context",
+        provider: "exa",
+        citation: 1,
+      },
     ]);
   });
 
@@ -75,16 +101,16 @@ describe("createGroundedWebSearchToolset", () => {
     const calls = [];
     const toolset = createGroundedWebSearchToolset({
       maxResultsPerProvider: 4,
-      providers: [
-        provider("exa", "semantic", [], calls),
-        provider("brave", "fresh", [], calls),
-      ],
+      providers: [provider("exa", "semantic", [], calls), provider("brave", "fresh", [], calls)],
     });
 
-    await toolset.tools.grounded_web_search.execute({
-      query: "latest smithers integrations",
-      maxResults: 12,
-    }, callOptions);
+    await toolset.tools.grounded_web_search.execute(
+      {
+        query: "latest smithers integrations",
+        maxResults: 12,
+      },
+      callOptions,
+    );
 
     expect(calls).toEqual([
       { name: "exa", query: "latest smithers integrations", maxResults: 4, freshness: undefined },
@@ -134,7 +160,9 @@ describe("grounded web search HTTP providers", () => {
       apiKey: "brave-key",
       baseUrl: "https://brave.test/search",
       fetch: okJsonFetch(requests, {
-        web: { results: [{ title: "Brave result", url: "https://example.com", description: "Snippet", age: "2 days ago" }] },
+        web: {
+          results: [{ title: "Brave result", url: "https://example.com", description: "Snippet", age: "2 days ago" }],
+        },
       }),
     });
 
@@ -157,7 +185,9 @@ describe("grounded web search HTTP providers", () => {
     const results = await provider.search({ query: "smithers", maxResults: 2, freshness: "year" });
 
     expect(JSON.parse(requests[0].init.body)).toEqual({ q: "smithers", num: 2, tbs: "qdr:y" });
-    expect(results).toEqual([{ title: "Serper result", url: "https://example.com", snippet: "Snippet", publishedDate: "Jun 1, 2026" }]);
+    expect(results).toEqual([
+      { title: "Serper result", url: "https://example.com", snippet: "Snippet", publishedDate: "Jun 1, 2026" },
+    ]);
   });
 });
 

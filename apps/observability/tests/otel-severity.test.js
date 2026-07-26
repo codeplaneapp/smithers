@@ -3,7 +3,9 @@ import { inferCanonicalSeverity, inferSessionSeverity } from "../src/_otelLogBui
 
 describe("inferCanonicalSeverity", () => {
   test("treats truncated-json-stream capture.error as WARN, other capture.error as ERROR", () => {
-    expect(inferCanonicalSeverity({ event: { kind: "capture.error" }, payload: { reason: "truncated-json-stream" } })).toBe("WARN");
+    expect(
+      inferCanonicalSeverity({ event: { kind: "capture.error" }, payload: { reason: "truncated-json-stream" } }),
+    ).toBe("WARN");
     expect(inferCanonicalSeverity({ event: { kind: "capture.error" }, payload: { reason: "boom" } })).toBe("ERROR");
     expect(inferCanonicalSeverity({ event: { kind: "capture.error" } })).toBe("ERROR");
   });

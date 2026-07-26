@@ -8,9 +8,7 @@ export type InferOutputEntry<T> = T extends z.ZodTypeAny
     ? InferRow<T>
     : never;
 
-type FallbackTableName<Schema> = [keyof Schema & string] extends [never]
-  ? string
-  : never;
+type FallbackTableName<Schema> = [keyof Schema & string] extends [never] ? string : never;
 
 export type OutputAccessor<Schema, TRow = unknown> = {
   (table: FallbackTableName<Schema>): Array<TRow>;

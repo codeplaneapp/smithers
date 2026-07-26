@@ -41,14 +41,7 @@ describe("scheduleTasks priority ordering", () => {
       makeDescriptor("c", { priority: 1 }),
       makeDescriptor("d", { priority: -2 }),
     );
-    const result = scheduleTasks(
-      parallelPlan("a", "b", "c", "d"),
-      new Map(),
-      descriptors,
-      new Map(),
-      new Map(),
-      0,
-    );
+    const result = scheduleTasks(parallelPlan("a", "b", "c", "d"), new Map(), descriptors, new Map(), new Map(), 0);
     expect(result.runnable.map((t) => t.nodeId)).toEqual(["b", "c", "a", "d"]);
   });
 
@@ -59,31 +52,13 @@ describe("scheduleTasks priority ordering", () => {
       makeDescriptor("c", { priority: 1 }),
       makeDescriptor("d", { priority: 1 }),
     );
-    const result = scheduleTasks(
-      parallelPlan("a", "b", "c", "d"),
-      new Map(),
-      descriptors,
-      new Map(),
-      new Map(),
-      0,
-    );
+    const result = scheduleTasks(parallelPlan("a", "b", "c", "d"), new Map(), descriptors, new Map(), new Map(), 0);
     expect(result.runnable.map((t) => t.nodeId)).toEqual(["b", "a", "c", "d"]);
   });
 
   test("all-default priorities preserve plan-walk order exactly", () => {
-    const descriptors = descriptorMap(
-      makeDescriptor("a"),
-      makeDescriptor("b"),
-      makeDescriptor("c"),
-    );
-    const result = scheduleTasks(
-      parallelPlan("a", "b", "c"),
-      new Map(),
-      descriptors,
-      new Map(),
-      new Map(),
-      0,
-    );
+    const descriptors = descriptorMap(makeDescriptor("a"), makeDescriptor("b"), makeDescriptor("c"));
+    const result = scheduleTasks(parallelPlan("a", "b", "c"), new Map(), descriptors, new Map(), new Map(), 0);
     expect(result.runnable.map((t) => t.nodeId)).toEqual(["a", "b", "c"]);
   });
 

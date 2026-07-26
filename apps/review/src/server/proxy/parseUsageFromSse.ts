@@ -29,10 +29,8 @@ export function parseUsageFromSse(stream: string): UsageSummary | null {
   const takeUsage = (usage: SseUsage) => {
     if (typeof usage.input_tokens === "number") inputTokens = usage.input_tokens;
     if (typeof usage.output_tokens === "number") outputTokens = usage.output_tokens;
-    if (typeof usage.cache_creation_input_tokens === "number")
-      cacheCreationTokens = usage.cache_creation_input_tokens;
-    if (typeof usage.cache_read_input_tokens === "number")
-      cacheReadTokens = usage.cache_read_input_tokens;
+    if (typeof usage.cache_creation_input_tokens === "number") cacheCreationTokens = usage.cache_creation_input_tokens;
+    if (typeof usage.cache_read_input_tokens === "number") cacheReadTokens = usage.cache_read_input_tokens;
   };
   // Split on a blank line between frames. The SSE spec allows CRLF endings, so
   // match one-or-more `\r?\n` pairs — an LF-only split silently turns a CRLF

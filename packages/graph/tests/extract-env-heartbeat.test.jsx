@@ -8,18 +8,18 @@ const moduleUrl = new URL("../src/extract.js", import.meta.url).href;
  * @returns {number}
  */
 function heartbeatFromFreshProcess(envValue, body) {
-    const proc = Bun.spawnSync({
-        cmd: [process.execPath, "--eval", body],
-        env: {
-            ...process.env,
-            ...(envValue === undefined ? {} : { SMITHERS_TASK_HEARTBEAT_MS: envValue }),
-            GRAPH_EXTRACT_MODULE_URL: moduleUrl,
-        },
-        stdout: "pipe",
-        stderr: "pipe",
-    });
-    expect(proc.exitCode).toBe(0);
-    return Number(new TextDecoder().decode(proc.stdout).trim());
+  const proc = Bun.spawnSync({
+    cmd: [process.execPath, "--eval", body],
+    env: {
+      ...process.env,
+      ...(envValue === undefined ? {} : { SMITHERS_TASK_HEARTBEAT_MS: envValue }),
+      GRAPH_EXTRACT_MODULE_URL: moduleUrl,
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(proc.exitCode).toBe(0);
+  return Number(new TextDecoder().decode(proc.stdout).trim());
 }
 
 const agentHeartbeatScript = `
@@ -70,17 +70,17 @@ console.log(task.heartbeatTimeoutMs);
 `;
 
 describe("extractGraph heartbeat env defaults", () => {
-    test("uses a positive integer SMITHERS_TASK_HEARTBEAT_MS for agent task defaults", async () => {
-        expect(heartbeatFromFreshProcess("1234.9", agentHeartbeatScript)).toBe(1234);
-    });
+  test("uses a positive integer SMITHERS_TASK_HEARTBEAT_MS for agent task defaults", async () => {
+    expect(heartbeatFromFreshProcess("1234.9", agentHeartbeatScript)).toBe(1234);
+  });
 
-    test("falls back to the default heartbeat for empty, non-finite, and non-positive env values", async () => {
-        for (const raw of ["", "not-a-number", "Infinity", "0", "-1"]) {
-            expect(heartbeatFromFreshProcess(raw, sandboxHeartbeatScript)).toBe(600_000);
-        }
-    });
+  test("falls back to the default heartbeat for empty, non-finite, and non-positive env values", async () => {
+    for (const raw of ["", "not-a-number", "Infinity", "0", "-1"]) {
+      expect(heartbeatFromFreshProcess(raw, sandboxHeartbeatScript)).toBe(600_000);
+    }
+  });
 
-    test("explicit heartbeatTimeoutMs overrides the environment default", async () => {
-        expect(heartbeatFromFreshProcess("9999", explicitHeartbeatScript)).toBe(42);
-    });
+  test("explicit heartbeatTimeoutMs overrides the environment default", async () => {
+    expect(heartbeatFromFreshProcess("9999", explicitHeartbeatScript)).toBe(42);
+  });
 });

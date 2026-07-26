@@ -1,12 +1,6 @@
 import { useGatewayWorkflows } from "@smithers-orchestrator/gateway-react";
 import "./crons.css";
-import {
-  describeCron,
-  sortCrons,
-  summarizeCrons,
-  toneForCronEnabled,
-  validateCreate,
-} from "./crons";
+import { describeCron, sortCrons, summarizeCrons, toneForCronEnabled, validateCreate } from "./crons";
 import { useCronsStore } from "./cronsStore";
 
 /**
@@ -69,10 +63,7 @@ function CreateForm() {
         ))}
       </datalist>
       {message ? (
-        <div
-          className={`crons-validation ${isRequired ? "is-warn" : "is-error"}`}
-          data-testid="crons-validation"
-        >
+        <div className={`crons-validation ${isRequired ? "is-warn" : "is-error"}`} data-testid="crons-validation">
           {message}
         </div>
       ) : null}
@@ -108,15 +99,8 @@ function DetailActions({ id }: { id: string }) {
   if (pendingDeleteId === id) {
     return (
       <div className="crons-confirm" data-testid="crons-confirm">
-        <span className="crons-confirm-text">
-          Delete {cron.name}? This cannot be undone.
-        </span>
-        <button
-          className="btn btn-deny"
-          type="button"
-          onClick={confirmDelete}
-          data-testid="crons-confirm-delete"
-        >
+        <span className="crons-confirm-text">Delete {cron.name}? This cannot be undone.</span>
+        <button className="btn btn-deny" type="button" onClick={confirmDelete} data-testid="crons-confirm-delete">
           Delete
         </button>
         <button className="btn" type="button" onClick={cancelDelete}>
@@ -131,12 +115,7 @@ function DetailActions({ id }: { id: string }) {
       <button className="btn" type="button" onClick={() => toggle(id)} data-testid="crons-toggle">
         {cron.enabled ? "Disable" : "Enable"}
       </button>
-      <button
-        className="btn btn-deny"
-        type="button"
-        onClick={() => requestDelete(id)}
-        data-testid="crons-delete"
-      >
+      <button className="btn btn-deny" type="button" onClick={() => requestDelete(id)} data-testid="crons-delete">
         Delete
       </button>
     </div>

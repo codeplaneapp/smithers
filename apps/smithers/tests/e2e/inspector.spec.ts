@@ -17,11 +17,7 @@ function trackPageErrors(page: Page): string[] {
 type RpcFrame<T> = { ok?: boolean; payload?: T; error?: { message?: string } };
 
 /** Call a real gateway RPC through the app origin (the vite proxy). */
-async function rpc<T>(
-  page: Page,
-  method: string,
-  data: Record<string, unknown> = {},
-): Promise<T> {
+async function rpc<T>(page: Page, method: string, data: Record<string, unknown> = {}): Promise<T> {
   const res = await page.request.post(`/v1/rpc/${method}`, { data });
   const frame = (await res.json()) as RpcFrame<T>;
   expect(frame.ok, `${method}: ${frame.error?.message ?? ""}`).toBe(true);
@@ -41,9 +37,7 @@ async function findFinishedTaskRun(page: Page): Promise<RunRow> {
       async () => {
         const runs = await rpc<RunRow[]>(page, "listRuns");
         found = runs.find(
-          (run) =>
-            (run.workflowKey ?? run.workflowName) === "e2e-task" &&
-            FINISHED.has(run.status ?? ""),
+          (run) => (run.workflowKey ?? run.workflowName) === "e2e-task" && FINISHED.has(run.status ?? ""),
         );
         return found !== undefined;
       },
@@ -127,9 +121,7 @@ test("selecting a tree node loads its real output", async ({ page }) => {
 
   // Until a node is explicitly selected, the detail pane offers to load output.
   await expect(page.getByTestId("gateway-node-detail")).toBeVisible();
-  await expect(page.getByTestId("gateway-node-detail")).toContainText(
-    "Select this node to load its output.",
-  );
+  await expect(page.getByTestId("gateway-node-detail")).toContainText("Select this node to load its output.");
 
   // Selecting the compute task highlights the row and loads its REAL output
   // over the getNodeOutput RPC — the literal { value: 42 } the seed task returns.

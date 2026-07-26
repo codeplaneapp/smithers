@@ -22,13 +22,7 @@ describe("mdxPlugin", () => {
     const mdxPath = join(dir, "fixture.mdx");
     writeFileSync(
       mdxPath,
-      [
-        'export const title = "Smithers MDX";',
-        "",
-        "# {title}",
-        "",
-        "Loaded through the public mdxPlugin.",
-      ].join("\n"),
+      ['export const title = "Smithers MDX";', "", "# {title}", "", "Loaded through the public mdxPlugin."].join("\n"),
     );
 
     mdxPlugin();

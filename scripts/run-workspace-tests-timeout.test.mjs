@@ -94,10 +94,7 @@ describe.skipIf(process.platform === "win32")("run-workspace-tests timeout", () 
     try {
       mkdirSync(binDir, { recursive: true });
       mkdirSync(packageDir, { recursive: true });
-      writeFileSync(
-        join(root, "package.json"),
-        JSON.stringify({ private: true, workspaces: ["packages/*"] }),
-      );
+      writeFileSync(join(root, "package.json"), JSON.stringify({ private: true, workspaces: ["packages/*"] }));
       writeFileSync(
         join(packageDir, "package.json"),
         JSON.stringify({ name: "@fixture/hung", scripts: { test: "unused" } }),
@@ -132,9 +129,7 @@ setInterval(() => {}, 1_000);
       ]);
       if ("result" in readyOrExit) {
         runnerExited = true;
-        throw new Error(
-          `Workspace test runner exited before starting its test command: ${readyOrExit.result.stderr}`,
-        );
+        throw new Error(`Workspace test runner exited before starting its test command: ${readyOrExit.result.stderr}`);
       }
       hungPid = Number(readFileSync(pidFile, "utf8"));
 

@@ -11,13 +11,9 @@ import { HermesAgent } from "../src/HermesAgent.js";
  *   - are deterministic in structure but non-deterministic in model output
  */
 
-const hasHermesBackend =
-  process.env.HERMES_BASE_URL !== undefined &&
-  process.env.HERMES_BASE_URL.trim() !== "";
+const hasHermesBackend = process.env.HERMES_BASE_URL !== undefined && process.env.HERMES_BASE_URL.trim() !== "";
 
-describe.skipIf(!hasHermesBackend)(
-  "HermesAgent E2E (real backend)",
-  () => {
+describe.skipIf(!hasHermesBackend)("HermesAgent E2E (real backend)", () => {
   it("sends a simple prompt and gets a text response", async () => {
     const agent = new HermesAgent();
 
@@ -46,5 +42,4 @@ describe.skipIf(!hasHermesBackend)(
     expect(result.text.toLowerCase()).toContain("hello");
     expect(streamedText.toLowerCase()).toContain("hello");
   }, 120_000);
-  },
-);
+});

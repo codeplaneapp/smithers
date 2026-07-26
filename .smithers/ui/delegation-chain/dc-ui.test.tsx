@@ -45,7 +45,11 @@ const { PollForm, QuestionForm, QuestionsPanel, RefinedPromptApproval } = await 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 type GraphNode = DelegationGraph["nodes"][string];
-type Harness = { container: HTMLDivElement; render: (element: ReactElement) => Promise<void>; unmount: () => Promise<void> };
+type Harness = {
+  container: HTMLDivElement;
+  render: (element: ReactElement) => Promise<void>;
+  unmount: () => Promise<void>;
+};
 
 const harnesses: Harness[] = [];
 
@@ -97,9 +101,13 @@ async function setInputValue(input: HTMLTextAreaElement | HTMLInputElement, valu
   const prototype = input.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
   setter?.call(input, value);
-  (input as HTMLInputElement & { _valueTracker?: { setValue: (value: string) => void } })._valueTracker?.setValue(previous);
+  (input as HTMLInputElement & { _valueTracker?: { setValue: (value: string) => void } })._valueTracker?.setValue(
+    previous,
+  );
   await act(async () => {
-    input.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: value, inputType: "insertText" }));
+    input.dispatchEvent(
+      new InputEvent("input", { bubbles: true, composed: true, data: value, inputType: "insertText" }),
+    );
     input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
   });
 }
@@ -147,9 +155,21 @@ function attentionGraph(): DelegationGraph {
     makeNode({ logicalId: "root", tier: "fable", kind: "chunk", attention: { self: false, descendants: 2 } }),
     makeNode({ logicalId: "root/core", tier: "opus", kind: "chunk" }),
     makeNode({ logicalId: "root/ui", tier: "opus", kind: "chunk", attention: { self: false, descendants: 1 } }),
-    makeNode({ logicalId: "root/a", tier: "opus", kind: "chunk", status: "awaiting-human", attention: { self: true, descendants: 0 } }),
+    makeNode({
+      logicalId: "root/a",
+      tier: "opus",
+      kind: "chunk",
+      status: "awaiting-human",
+      attention: { self: true, descendants: 0 },
+    }),
     makeNode({ logicalId: "root/ui/canvas", kind: "leaf" }),
-    makeNode({ logicalId: "p1", kind: "poc", tier: "haiku", status: "awaiting-human", attention: { self: true, descendants: 0 } }),
+    makeNode({
+      logicalId: "p1",
+      kind: "poc",
+      tier: "haiku",
+      status: "awaiting-human",
+      attention: { self: true, descendants: 0 },
+    }),
   ];
   const edges: DelegationGraph["edges"] = [
     { from: "root", to: "root/core", kind: "child" },
@@ -185,10 +205,7 @@ describe("delegationToFlow", () => {
   });
 
   test("drops edges whose endpoints are not in the graph yet (streaming)", () => {
-    const graph = makeGraph(
-      [makeNode({ logicalId: "root" })],
-      [{ from: "root", to: "root/unborn", kind: "child" }],
-    );
+    const graph = makeGraph([makeNode({ logicalId: "root" })], [{ from: "root", to: "root/unborn", kind: "child" }]);
     const { nodes, edges } = delegationToFlow(graph);
     expect(nodes.length).toBe(1);
     expect(edges.length).toBe(0);
@@ -235,7 +252,10 @@ describe("budgetBarModel (run-level cost bar)", () => {
   });
 
   test("over budget clamps the fill and flips the over flag", () => {
-    const model = budgetBarModel({ predicted: { tokens: 1, costUsd: 11.4, minutes: 30 }, actual: { costUsd: 12.5, minutes: 31 } });
+    const model = budgetBarModel({
+      predicted: { tokens: 1, costUsd: 11.4, minutes: 30 },
+      actual: { costUsd: 12.5, minutes: 31 },
+    });
     expect(model.over).toBe(true);
     expect(model.fraction).toBe(1);
     expect(model.percent).toBe(100);
@@ -250,7 +270,11 @@ describe("budgetBarModel (run-level cost bar)", () => {
   });
 
   test("BudgetBar renders label and over-budget styling", async () => {
-    await mount(<BudgetBar budget={{ predicted: { tokens: 1, costUsd: 11.4, minutes: 30 }, actual: { costUsd: 3.2, minutes: 8 } }} />);
+    await mount(
+      <BudgetBar
+        budget={{ predicted: { tokens: 1, costUsd: 11.4, minutes: 30 }, actual: { costUsd: 3.2, minutes: 8 } }}
+      />,
+    );
     expect(byTestId("dc-budget-label").textContent).toBe("$3.20 of ~$11.40 · ~22 min left");
     expect(byTestId("dc-budget").className).not.toContain("is-over");
 
@@ -264,19 +288,26 @@ describe("budgetBarModel (run-level cost bar)", () => {
 
 describe("estimateChipModel (node estimate chip)", () => {
   test("predicted vs actual", () => {
-    expect(estimateChipModel({ estimate: { tokens: 1, costUsd: 1.2, minutes: 10 }, actual: { costUsd: 0.95 } })).toEqual({
+    expect(
+      estimateChipModel({ estimate: { tokens: 1, costUsd: 1.2, minutes: 10 }, actual: { costUsd: 0.95 } }),
+    ).toEqual({
       text: "~$1.20 → $0.95",
       over: false,
     });
   });
   test("red when actual exceeds predicted", () => {
-    expect(estimateChipModel({ estimate: { tokens: 1, costUsd: 1.2, minutes: 10 }, actual: { costUsd: 1.5 } })).toEqual({
-      text: "~$1.20 → $1.50",
-      over: true,
-    });
+    expect(estimateChipModel({ estimate: { tokens: 1, costUsd: 1.2, minutes: 10 }, actual: { costUsd: 1.5 } })).toEqual(
+      {
+        text: "~$1.20 → $1.50",
+        over: true,
+      },
+    );
   });
   test("prediction only, and absent entirely", () => {
-    expect(estimateChipModel({ estimate: { tokens: 1, costUsd: 1.2, minutes: 10 } })).toEqual({ text: "~$1.20", over: false });
+    expect(estimateChipModel({ estimate: { tokens: 1, costUsd: 1.2, minutes: 10 } })).toEqual({
+      text: "~$1.20",
+      over: false,
+    });
     expect(estimateChipModel({})).toBe(null);
   });
 });
@@ -358,7 +389,15 @@ describe("NodeInspector", () => {
       },
       {
         version: 2,
-        exec: [{ logicalId: "root/ui", attempt: 1, summary: "built the canvas", artifacts: ["dc-graph.tsx"], actual: { costUsd: 0.5 } }],
+        exec: [
+          {
+            logicalId: "root/ui",
+            attempt: 1,
+            summary: "built the canvas",
+            artifacts: ["dc-graph.tsx"],
+            actual: { costUsd: 0.5 },
+          },
+        ],
       },
     ] as unknown as GraphNode["versions"],
   });
@@ -468,7 +507,9 @@ describe("NodeInspector", () => {
     await mount(
       <NodeInspector
         node={probeNode}
-        actions={{ submitEdit: async (logicalId, editedOutput, note) => void edits.push({ logicalId, editedOutput, note }) }}
+        actions={{
+          submitEdit: async (logicalId, editedOutput, note) => void edits.push({ logicalId, editedOutput, note }),
+        }}
       />,
     );
     expect(byTestId("dc-probe-edit-hint").textContent).toContain("edits to a probe replan its parent");
@@ -492,7 +533,9 @@ describe("NodeInspector", () => {
     });
     const harness = await mount(<NodeInspector node={approvedGoal} actions={{ submitEdit: async () => {} }} />);
     expect((byTestId("dc-edit-toggle") as HTMLButtonElement).disabled).toBe(true);
-    expect(byTestId("dc-goal-edit-hint").textContent).toContain("goal is locked after approval — edit the plan nodes instead");
+    expect(byTestId("dc-goal-edit-hint").textContent).toContain(
+      "goal is locked after approval — edit the plan nodes instead",
+    );
     // Pre-approval (goal approval pending → awaiting-human) the prompt is
     // still the human's to shape.
     const pendingGoal = makeNode({
@@ -525,8 +568,18 @@ describe("question flow", () => {
     reason: "the canvas is the point",
     resolved: false,
   } as unknown as DelegationGraph["pendingQuestions"][number];
-  const preparedA = { ...selectQuestion, seq: 2, header: "Open-source intent", nodeId: "dc:root:question-2" } as typeof selectQuestion;
-  const preparedB = { ...selectQuestion, seq: 3, header: "Go posture", nodeId: "dc:root:question-3" } as typeof selectQuestion;
+  const preparedA = {
+    ...selectQuestion,
+    seq: 2,
+    header: "Open-source intent",
+    nodeId: "dc:root:question-2",
+  } as typeof selectQuestion;
+  const preparedB = {
+    ...selectQuestion,
+    seq: 3,
+    header: "Go posture",
+    nodeId: "dc:root:question-3",
+  } as typeof selectQuestion;
 
   test("questionTarget prefers the row's node id and falls back to the contract scheme", () => {
     expect(questionTarget(selectQuestion)).toEqual({ nodeId: "dc:root:question-1", iteration: 0 });
@@ -556,7 +609,9 @@ describe("question flow", () => {
   });
 
   test("pendingQuestionSeqsOf parses question seqs out of pending approval node ids", () => {
-    expect(pendingQuestionSeqsOf(["dc:root:question-3", "dc:goal:approve", "dc:root:question-1", "dc-poll"])).toEqual([1, 3]);
+    expect(pendingQuestionSeqsOf(["dc:root:question-3", "dc:goal:approve", "dc:root:question-1", "dc-poll"])).toEqual([
+      1, 3,
+    ]);
     expect(pendingQuestionSeqsOf([])).toEqual([]);
   });
 
@@ -575,7 +630,11 @@ describe("question flow", () => {
     expect(byTestId("dc-question-waiting").textContent).toContain("waiting for question 2");
     // The HumanTask arrives → the same form becomes submittable.
     await harness.render(
-      <QuestionsPanel questions={[preparedA, preparedB]} actions={actions} pendingApprovalIds={new Set(["dc:root:question-2"])} />,
+      <QuestionsPanel
+        questions={[preparedA, preparedB]}
+        actions={actions}
+        pendingApprovalIds={new Set(["dc:root:question-2"])}
+      />,
     );
     expect(maybeByTestId("dc-question-waiting")).toBe(null);
     expect((byTestId("dc-question-2-submit") as HTMLButtonElement).disabled).toBe(false);
@@ -611,7 +670,13 @@ describe("question flow", () => {
     await click(byTestId("dc-question-5-submit"));
     expect(values).toEqual([false]);
 
-    const textQuestion = { ...selectQuestion, seq: 6, kind: "text", options: undefined, recommended: "default answer" } as typeof selectQuestion;
+    const textQuestion = {
+      ...selectQuestion,
+      seq: 6,
+      kind: "text",
+      options: undefined,
+      recommended: "default answer",
+    } as typeof selectQuestion;
     await mount(<QuestionForm question={textQuestion} onAnswer={(value) => values.push(value)} />);
     const input = byTestId("dc-question-6-text") as HTMLTextAreaElement;
     expect(input.value).toBe("default answer");
@@ -621,7 +686,13 @@ describe("question flow", () => {
   });
 
   test("refined prompt renders full-width in the editor and Approve submits the edited text", async () => {
-    const goal = makeNode({ logicalId: "goal", kind: "goal", tier: "fable", status: "awaiting-human", attention: { self: true, descendants: 0 } });
+    const goal = makeNode({
+      logicalId: "goal",
+      kind: "goal",
+      tier: "fable",
+      status: "awaiting-human",
+      attention: { self: true, descendants: 0 },
+    });
     const graph = makeGraph([goal], [], { phase: "goal", refinedPrompt: "Build the delegation-chain feature." });
     expect(goalApprovalTarget(graph)).toEqual({ nodeId: "dc:goal:approve", iteration: 0 });
     const answers: Array<{ nodeId: string; iteration: number; value: unknown }> = [];
@@ -653,7 +724,13 @@ describe("question flow", () => {
   });
 
   test("empty refined prompt still shows the approval editor with a warning; Approve requires text", async () => {
-    const goal = makeNode({ logicalId: "goal", kind: "goal", tier: "fable", status: "awaiting-human", attention: { self: true, descendants: 0 } });
+    const goal = makeNode({
+      logicalId: "goal",
+      kind: "goal",
+      tier: "fable",
+      status: "awaiting-human",
+      attention: { self: true, descendants: 0 },
+    });
     const graph = makeGraph([goal], [], { phase: "goal", refinedPrompt: "" });
     // App-level gating: a degraded agent (schema defaults) must still surface
     // the approval instead of leaving the paused run with nothing actionable.
@@ -717,7 +794,9 @@ describe("question flow", () => {
     const doneGoal = makeNode({ logicalId: "goal", kind: "goal", tier: "fable", status: "done" });
     // Unresolved questions win: the question forms are the actionable surface.
     expect(
-      goalApprovalPendingOf(makeGraph([pendingGoal], [], { phase: "goal", refinedPrompt: "x", pendingQuestions: [unresolvedQuestion] })),
+      goalApprovalPendingOf(
+        makeGraph([pendingGoal], [], { phase: "goal", refinedPrompt: "x", pendingQuestions: [unresolvedQuestion] }),
+      ),
     ).toBe(false);
     // Goal awaiting-human suffices even before/without a dcGoal row.
     expect(goalApprovalPendingOf(makeGraph([pendingGoal], [], { phase: "goal" }))).toBe(true);
@@ -797,7 +876,13 @@ describe("scores panel", () => {
 
 describe("developer preview (dcDevPreview gate)", () => {
   function baseNode(logicalId = "root/app"): GraphNode {
-    return makeNode({ logicalId, kind: "leaf", tier: "sonnet", status: "running", output: { summary: "built the app" } });
+    return makeNode({
+      logicalId,
+      kind: "leaf",
+      tier: "sonnet",
+      status: "running",
+      output: { summary: "built the app" },
+    });
   }
   function withDevPreview(node: GraphNode, devPreview: Record<string, unknown>): GraphNode {
     return { ...node, devPreview } as GraphNode;
@@ -820,7 +905,11 @@ describe("developer preview (dcDevPreview gate)", () => {
   });
 
   test("gate chips render the preview gate method with its kind", async () => {
-    expect(gateLabel({ method: "preview", kind: "app", brief: "click through the app" } as unknown as Parameters<typeof gateLabel>[0])).toBe("preview·app");
+    expect(
+      gateLabel({ method: "preview", kind: "app", brief: "click through the app" } as unknown as Parameters<
+        typeof gateLabel
+      >[0]),
+    ).toBe("preview·app");
     const gated = makeNode({
       logicalId: "root/gated",
       gates: [{ method: "preview", kind: "slideshow", brief: "progress deck" }] as unknown as GraphNode["gates"],
@@ -842,7 +931,9 @@ describe("developer preview (dcDevPreview gate)", () => {
   });
 
   test("html artifact renders in a sandboxed iframe", async () => {
-    await mount(<DevPreviewPanel node={withDevPreview(baseNode(), htmlPreview)} actions={{ submitEdit: async () => {} }} />);
+    await mount(
+      <DevPreviewPanel node={withDevPreview(baseNode(), htmlPreview)} actions={{ submitEdit: async () => {} }} />,
+    );
     expect(byTestId("dc-devpreview-built").textContent).toBe("built");
     const frame = byTestId("dc-devpreview-html");
     expect(frame.tagName.toLowerCase()).toBe("iframe");
@@ -858,7 +949,9 @@ describe("developer preview (dcDevPreview gate)", () => {
       artifact: { type: "url", url: "http://localhost:7777/explorer" },
       summary: "Explore the built API.",
     };
-    await mount(<DevPreviewPanel node={withDevPreview(baseNode(), urlPreview)} actions={{ submitEdit: async () => {} }} />);
+    await mount(
+      <DevPreviewPanel node={withDevPreview(baseNode(), urlPreview)} actions={{ submitEdit: async () => {} }} />,
+    );
     const link = byTestId("dc-devpreview-url");
     expect(link.getAttribute("href")).toBe("http://localhost:7777/explorer");
     expect(link.getAttribute("target")).toBe("_blank");
@@ -874,14 +967,19 @@ describe("developer preview (dcDevPreview gate)", () => {
       instructions: "$ smithers up demo\n$ smithers ps",
       summary: "Drive the CLI yourself.",
     };
-    await mount(<DevPreviewPanel node={withDevPreview(baseNode(), terminalPreview)} actions={{ submitEdit: async () => {} }} />);
+    await mount(
+      <DevPreviewPanel node={withDevPreview(baseNode(), terminalPreview)} actions={{ submitEdit: async () => {} }} />,
+    );
     expect(byTestId("dc-devpreview-markdown").textContent).toContain("Run it");
     expect(byTestId("dc-devpreview-instructions").textContent).toContain("$ smithers ps");
   });
 
   test("builtOk=false reads as a failed required gate", async () => {
     await mount(
-      <DevPreviewPanel node={withDevPreview(baseNode(), { ...htmlPreview, builtOk: false })} actions={{ submitEdit: async () => {} }} />,
+      <DevPreviewPanel
+        node={withDevPreview(baseNode(), { ...htmlPreview, builtOk: false })}
+        actions={{ submitEdit: async () => {} }}
+      />,
     );
     const badge = byTestId("dc-devpreview-built");
     expect(badge.className).toContain("bad");
@@ -894,7 +992,9 @@ describe("developer preview (dcDevPreview gate)", () => {
     await mount(
       <DevPreviewPanel
         node={node}
-        actions={{ submitEdit: async (logicalId, editedOutput, note) => void edits.push({ logicalId, editedOutput, note }) }}
+        actions={{
+          submitEdit: async (logicalId, editedOutput, note) => void edits.push({ logicalId, editedOutput, note }),
+        }}
       />,
     );
     expect((byTestId("dc-devpreview-request-changes") as HTMLButtonElement).disabled).toBe(true);
@@ -916,12 +1016,17 @@ describe("developer preview (dcDevPreview gate)", () => {
     await click(byTestId("dc-devpreview-invalidate"));
     // The send clears the textarea; a second invalidate uses the default reason.
     await click(byTestId("dc-devpreview-invalidate"));
-    expect(edits.map((edit) => edit.note)).toEqual(["invalidate: wrong stack", "invalidate: rejected from developer preview"]);
+    expect(edits.map((edit) => edit.note)).toEqual([
+      "invalidate: wrong stack",
+      "invalidate: rejected from developer preview",
+    ]);
     expect(edits.every((edit) => edit.editedOutput === node.output)).toBe(true);
   });
 
   test("NodeInspector embeds the developer preview panel", async () => {
-    await mount(<NodeInspector node={withDevPreview(baseNode(), htmlPreview)} actions={{ submitEdit: async () => {} }} />);
+    await mount(
+      <NodeInspector node={withDevPreview(baseNode(), htmlPreview)} actions={{ submitEdit: async () => {} }} />,
+    );
     expect(maybeByTestId("dc-devpreview")).not.toBe(null);
   });
 });
@@ -966,7 +1071,9 @@ describe("MarkdownPreview (trimmed, init-pack safe)", () => {
   test("renders headings, inline marks, lists, and links", async () => {
     await mount(
       <MarkdownPreview
-        markdown={"## Plan\n\nUse `foldDelegation` with **pure** *reducers*.\n\n- first\n- second\n\n[docs](https://smithers.sh/docs) and [spec](specs/plan.md)"}
+        markdown={
+          "## Plan\n\nUse `foldDelegation` with **pure** *reducers*.\n\n- first\n- second\n\n[docs](https://smithers.sh/docs) and [spec](specs/plan.md)"
+        }
       />,
     );
     const preview = byTestId("dc-markdown-preview");

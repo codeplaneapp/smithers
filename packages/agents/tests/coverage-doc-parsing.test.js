@@ -43,7 +43,14 @@ describe("Mistral OCR provider", () => {
   test("returns text sources verbatim without a network call", async () => {
     let called = 0;
     const result = await parse(
-      { provider: "mistral-ocr", apiKey: "k", fetch: async () => { called += 1; return Response.json({}); } },
+      {
+        provider: "mistral-ocr",
+        apiKey: "k",
+        fetch: async () => {
+          called += 1;
+          return Response.json({});
+        },
+      },
       { source: { type: "text", text: "inline text" } },
     );
     expect(result).toMatchObject({ provider: "mistral-ocr", text: "inline text" });
@@ -102,7 +109,11 @@ describe("Firecrawl + LlamaParse error and shape branches", () => {
   test("postMultipart surfaces a non-ok provider response", async () => {
     await expect(
       parse(
-        { provider: "firecrawl", apiKey: "k", fetch: async () => new Response("", { status: 413, statusText: "Too Large" }) },
+        {
+          provider: "firecrawl",
+          apiKey: "k",
+          fetch: async () => new Response("", { status: 413, statusText: "Too Large" }),
+        },
         { source: { type: "base64", data: b64("x"), mimeType: "application/pdf" } },
       ),
     ).rejects.toThrow(/Document parsing provider failed \(413\)/);
@@ -206,13 +217,7 @@ describe("Firecrawl + LlamaParse error and shape branches", () => {
     for (const mimeType of mimes) {
       await parse(opts, { source: { type: "base64", data: b64("x"), mimeType } });
     }
-    expect(names).toEqual([
-      "document.pdf",
-      "document.html",
-      "document.docx",
-      "document.xlsx",
-      "document.bin",
-    ]);
+    expect(names).toEqual(["document.pdf", "document.html", "document.docx", "document.xlsx", "document.bin"]);
   });
 
   test("sourceToBlob rejects a source type it cannot upload", async () => {

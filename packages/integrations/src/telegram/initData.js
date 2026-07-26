@@ -134,9 +134,7 @@ export function parseTelegramInitData(initData) {
     all[key] = value;
   }
   const authDateRaw = params.get("auth_date");
-  const authDate = authDateRaw != null && /^\d+$/.test(authDateRaw)
-    ? Number.parseInt(authDateRaw, 10)
-    : null;
+  const authDate = authDateRaw != null && /^\d+$/.test(authDateRaw) ? Number.parseInt(authDateRaw, 10) : null;
   return {
     raw,
     hash: params.get("hash"),
@@ -230,7 +228,13 @@ export async function verifyTelegramWebAppInitData(initData, botToken, options =
     throw new SmithersError("UNSUPPORTED", "Web Crypto (crypto.subtle) is not available in this runtime.");
   }
   // secret_key = HMAC_SHA256(key="WebAppData", message=botToken)
-  const webAppDataKey = await subtle.importKey("raw", encoder.encode("WebAppData"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const webAppDataKey = await subtle.importKey(
+    "raw",
+    encoder.encode("WebAppData"),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
   const secret = await subtle.sign("HMAC", webAppDataKey, encoder.encode(botToken));
   const dataCheckString = buildDataCheckString(params, new Set(["hash"]));
   const secretKey = await subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -287,7 +291,9 @@ export async function verifyTelegramWebAppInitDataSignature(initData, botId, opt
   try {
     key = await subtle.importKey("raw", hexToBytes(publicKeyHex), { name: "Ed25519" }, false, ["verify"]);
   } catch (cause) {
-    throw new SmithersError("UNSUPPORTED", "Ed25519 verification is not supported in this runtime.", undefined, { cause });
+    throw new SmithersError("UNSUPPORTED", "Ed25519 verification is not supported in this runtime.", undefined, {
+      cause,
+    });
   }
   const ok = await subtle.verify("Ed25519", key, signatureBytes, encoder.encode(message));
   if (!ok) {

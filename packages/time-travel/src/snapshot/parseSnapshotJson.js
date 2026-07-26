@@ -12,14 +12,14 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
  * @returns {T}
  */
 export function parseSnapshotJson(json, field, context = {}) {
-    try {
-        return JSON.parse(json);
-    } catch (cause) {
-        throw new SmithersError(
-            "DB_QUERY_FAILED",
-            `Corrupt snapshot data: ${field} is not valid JSON`,
-            { field, ...context },
-            { cause },
-        );
-    }
+  try {
+    return JSON.parse(json);
+  } catch (cause) {
+    throw new SmithersError(
+      "DB_QUERY_FAILED",
+      `Corrupt snapshot data: ${field} is not valid JSON`,
+      { field, ...context },
+      { cause },
+    );
+  }
 }

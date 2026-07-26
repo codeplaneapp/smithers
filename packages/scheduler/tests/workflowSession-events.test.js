@@ -27,9 +27,7 @@ function makeEventDescriptor(overrides = {}) {
 
 function makeGraph(descriptor) {
   return {
-    xml: el("smithers:workflow", {}, [
-      el("smithers:task", { id: descriptor.nodeId }),
-    ]),
+    xml: el("smithers:workflow", {}, [el("smithers:task", { id: descriptor.nodeId })]),
     tasks: [descriptor],
     mountedTaskIds: new Set([`${descriptor.nodeId}::${descriptor.iteration}`]),
   };
@@ -52,17 +50,13 @@ describe("makeWorkflowSession event and signal delivery", () => {
       reason: { _tag: "Event", eventName: "expected-event" },
     });
 
-    const afterLegacySignal = Effect.runSync(
-      session.signalReceived("legacy-signal", { ignored: true }),
-    );
+    const afterLegacySignal = Effect.runSync(session.signalReceived("legacy-signal", { ignored: true }));
     expect(afterLegacySignal).toEqual({
       _tag: "Wait",
       reason: { _tag: "Event", eventName: "expected-event" },
     });
 
-    const afterExpectedSignal = Effect.runSync(
-      session.signalReceived("expected-event", { ok: true }),
-    );
+    const afterExpectedSignal = Effect.runSync(session.signalReceived("expected-event", { ok: true }));
     expect(afterExpectedSignal).toEqual({
       _tag: "Finished",
       result: {

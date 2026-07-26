@@ -63,15 +63,15 @@ function extractPhase(implementValue: unknown, validateValue: unknown, reviewVal
   const validate = unwrapRow(validateValue);
   const review = unwrapRow(reviewValue);
   return {
-    implementSummary: implement ? asString(implement.summary) ?? null : null,
+    implementSummary: implement ? (asString(implement.summary) ?? null) : null,
     filesChanged:
       implement && Array.isArray(implement.filesChanged)
         ? implement.filesChanged.filter((f): f is string => typeof f === "string")
         : [],
-    validated: validate ? asBool(validate.allPassed) ?? true : undefined,
-    failingSummary: validate ? asString(validate.failingSummary) ?? null : null,
+    validated: validate ? (asBool(validate.allPassed) ?? true) : undefined,
+    failingSummary: validate ? (asString(validate.failingSummary) ?? null) : null,
     approved: review ? asBool(review.approved) : undefined,
-    reviewFeedback: review ? asString(review.feedback) ?? null : null,
+    reviewFeedback: review ? (asString(review.feedback) ?? null) : null,
   };
 }
 
@@ -173,7 +173,23 @@ function App() {
 
   const phaseStates = useMemo(
     () => raw.map(([i, v, r]) => extractPhase(i.data, v.data, r.data)),
-    [p1i.data, p1v.data, p1r.data, p2i.data, p2v.data, p2r.data, p3i.data, p3v.data, p3r.data, p4i.data, p4v.data, p4r.data, p5i.data, p5v.data, p5r.data],
+    [
+      p1i.data,
+      p1v.data,
+      p1r.data,
+      p2i.data,
+      p2v.data,
+      p2r.data,
+      p3i.data,
+      p3v.data,
+      p3r.data,
+      p4i.data,
+      p4v.data,
+      p4r.data,
+      p5i.data,
+      p5v.data,
+      p5r.data,
+    ],
   );
   const polish = useMemo(() => unwrapRow(polishOut.data), [polishOut.data]);
 
@@ -227,17 +243,27 @@ function App() {
       <header className="topbar">
         <div className="title-group">
           <h1>Implement Packs — Share workflows like skills</h1>
-          <span className="pill" data-testid="packs-runid">{shortRunId(activeRunId)}</span>
+          <span className="pill" data-testid="packs-runid">
+            {shortRunId(activeRunId)}
+          </span>
           {activeRun ? (
-            <span className={"badge " + statusClass(activeRun.status)} data-testid="packs-status">{activeRun.status ?? "idle"}</span>
+            <span className={"badge " + statusClass(activeRun.status)} data-testid="packs-status">
+              {activeRun.status ?? "idle"}
+            </span>
           ) : null}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="button" onClick={() => void refresh()} disabled={busy}>Refresh</button>
+          <button className="button" onClick={() => void refresh()} disabled={busy}>
+            Refresh
+          </button>
           {activeRun && statusClass(activeRun.status) === "running" ? (
-            <button className="button danger" onClick={() => void cancel()} disabled={busy}>Cancel</button>
+            <button className="button danger" onClick={() => void cancel()} disabled={busy}>
+              Cancel
+            </button>
           ) : null}
-          <button className="button primary" data-testid="packs-launch" onClick={() => void launch()} disabled={busy}>Launch</button>
+          <button className="button primary" data-testid="packs-launch" onClick={() => void launch()} disabled={busy}>
+            Launch
+          </button>
         </div>
       </header>
 
@@ -256,7 +282,8 @@ function App() {
                   <span
                     key={i}
                     className={
-                      "rail-step " + (phaseDone(s) ? "ok" : phaseBlocked(s) ? "err" : s.implementSummary !== null ? "active" : "")
+                      "rail-step " +
+                      (phaseDone(s) ? "ok" : phaseBlocked(s) ? "err" : s.implementSummary !== null ? "active" : "")
                     }
                   />
                 ))}
@@ -269,11 +296,17 @@ function App() {
                   <section className="phase" key={phase.key} data-testid={"packs-phase-" + phase.key}>
                     <div className="phase-head">
                       <span className={"phase-dot " + dot} />
-                      <span className="phase-title">{i + 1}. {phase.title}</span>
+                      <span className="phase-title">
+                        {i + 1}. {phase.title}
+                      </span>
                       <span className="phase-meta">
                         <span className={"step " + (s.implementSummary !== null ? "ok" : "")}>luna · implement</span>
-                        <span className={"step " + (s.validated === undefined ? "" : s.validated ? "ok" : "err")}>terra · validate</span>
-                        <span className={"step " + (s.approved === undefined ? "" : s.approved ? "ok" : "err")}>sol · review</span>
+                        <span className={"step " + (s.validated === undefined ? "" : s.validated ? "ok" : "err")}>
+                          terra · validate
+                        </span>
+                        <span className={"step " + (s.approved === undefined ? "" : s.approved ? "ok" : "err")}>
+                          sol · review
+                        </span>
                       </span>
                     </div>
                     {s.implementSummary !== null ? (
@@ -284,7 +317,11 @@ function App() {
                           <>
                             <div className="kv">Files changed</div>
                             <div className="chips">
-                              {s.filesChanged.map((f, j) => <span className="chip" key={j}>{f}</span>)}
+                              {s.filesChanged.map((f, j) => (
+                                <span className="chip" key={j}>
+                                  {f}
+                                </span>
+                              ))}
                             </div>
                           </>
                         ) : null}
@@ -321,7 +358,11 @@ function App() {
                         <div className="chips">
                           {polish.changesMade
                             .filter((c): c is string => typeof c === "string")
-                            .map((c, j) => <span className="chip" key={j}>{c}</span>)}
+                            .map((c, j) => (
+                              <span className="chip" key={j}>
+                                {c}
+                              </span>
+                            ))}
                         </div>
                       </>
                     ) : null}
@@ -333,8 +374,17 @@ function App() {
             </>
           ) : (
             <div className="empty" data-testid="packs-empty">
-              <div>Implements the packs feature from research/packs-share-workflows-like-skills.md in five gated phases.</div>
-              <button className="button primary" style={{ marginTop: 14 }} onClick={() => void launch()} disabled={busy}>Launch</button>
+              <div>
+                Implements the packs feature from research/packs-share-workflows-like-skills.md in five gated phases.
+              </div>
+              <button
+                className="button primary"
+                style={{ marginTop: 14 }}
+                onClick={() => void launch()}
+                disabled={busy}
+              >
+                Launch
+              </button>
             </div>
           )}
         </div>

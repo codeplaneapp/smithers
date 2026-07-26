@@ -95,9 +95,7 @@ describe("gateway connection event writer (bounded broadcast delivery)", () => {
     expect(writer.queue).toHaveLength(total);
     expect(writer.queuedBytes).toBeGreaterThan(0);
     expect(writer.queuedBytes).toBeLessThanOrEqual(QUEUE_MAX_BYTES);
-    expect(gateway.getConnectionBufferedEventBytes(connection)).toBe(
-      16 * 1024 * 1024 + writer.queuedBytes,
-    );
+    expect(gateway.getConnectionBufferedEventBytes(connection)).toBe(16 * 1024 * 1024 + writer.queuedBytes);
 
     // Socket recovers: the retry loop drains the whole backlog in order.
     connection.ws.bufferedAmount = 0;
@@ -160,18 +158,12 @@ describe("gateway connection event writer (bounded broadcast delivery)", () => {
     connection.ws.bufferedAmount = 0;
     await sleep(80);
     expect(
-      connection.sent.filter(
-        (frame) => frame.event === "node.started" && frame.payload.nodeId.startsWith("c"),
-      ),
+      connection.sent.filter((frame) => frame.event === "node.started" && frame.payload.nodeId.startsWith("c")),
     ).toHaveLength(congested);
     expect(
-      connection.sent.filter(
-        (frame) => frame.event === "run.event" && frame.payload.payload.nodeId.startsWith("c"),
-      ),
+      connection.sent.filter((frame) => frame.event === "run.event" && frame.payload.payload.nodeId.startsWith("c")),
     ).toHaveLength(congested);
-    const seqs = connection.sent
-      .filter((frame) => frame.event !== "run.heartbeat")
-      .map((frame) => frame.seq);
+    const seqs = connection.sent.filter((frame) => frame.event !== "run.heartbeat").map((frame) => frame.seq);
     expect([...seqs].sort((a, b) => a - b)).toEqual(seqs);
     expect(connection.eventWriter.queue).toHaveLength(0);
     expect(connection.eventWriter.queuedBytes).toBe(0);

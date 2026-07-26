@@ -10,9 +10,7 @@ describe("reasoning summary safety boundary", () => {
     const model = parseAgentOutput({ reasoningSummary: "Provider disclosed summary" });
     expect(model?.reasoningSummary).toBe("Provider disclosed summary");
     expect(model?.reasoning).toBe("Provider disclosed summary");
-    expect(parseAgentOutput({ reasoning_summary: "Snake summary" })?.reasoningSummary).toBe(
-      "Snake summary",
-    );
+    expect(parseAgentOutput({ reasoning_summary: "Snake summary" })?.reasoningSummary).toBe("Snake summary");
   });
 
   test("raw reasoning/thinking/thought transcripts are never surfaced as summaries", () => {
@@ -118,9 +116,7 @@ describe("reasoning summary safety boundary", () => {
 
   test("parses tool durationMs through to the render model", () => {
     const model = parseAgentOutput({
-      toolCalls: [
-        { toolName: "search", input: { q: "x" }, state: "completed", durationMs: 1200 },
-      ],
+      toolCalls: [{ toolName: "search", input: { q: "x" }, state: "completed", durationMs: 1200 }],
     });
     expect(model?.toolCalls[0]).toMatchObject({ name: "search", durationMs: 1200 });
     const html = renderToStaticMarkup(<AgentOutput model={model!} />);

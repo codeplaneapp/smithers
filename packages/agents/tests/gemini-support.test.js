@@ -5,11 +5,13 @@ describe("GeminiAgent sunset stub", () => {
   test("fails with Antigravity migration guidance instead of launching gemini", async () => {
     const agent = new GeminiAgent({ model: "gemini-3.5-flash" });
 
-    await expect(agent.buildCommand({
-      cwd: "/tmp/project",
-      prompt: "ping",
-      options: {},
-    })).rejects.toThrow("Gemini CLI support has been sunset");
+    await expect(
+      agent.buildCommand({
+        cwd: "/tmp/project",
+        prompt: "ping",
+        options: {},
+      }),
+    ).rejects.toThrow("Gemini CLI support has been sunset");
 
     await expect(agent.generate({ messages: [{ role: "user", content: "ping" }] })).rejects.toThrow("AntigravityAgent");
     expect(GEMINI_SUNSET_MESSAGE).toContain('new AntigravityAgent({ model: "gemini-3.5-flash", cwd: process.cwd() })');

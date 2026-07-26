@@ -27,13 +27,7 @@ export function MessageResponse({
       {...props}
     >
       <Markdown content={content} onLinkClick={onLinkClick} />
-      {streaming ? (
-        <span
-          data-slot="message-response-caret"
-          className="sui-response-caret"
-          aria-hidden="true"
-        />
-      ) : null}
+      {streaming ? <span data-slot="message-response-caret" className="sui-response-caret" aria-hidden="true" /> : null}
     </div>
   );
 }

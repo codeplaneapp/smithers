@@ -23,7 +23,11 @@ describe("custom provider abort propagation", () => {
     });
     await expect(
       toolset.tools.parse_document.execute(
-        { source: { type: "url", url: "https://example.com/report.pdf" }, outputFormat: "markdown", instructions: "tables" },
+        {
+          source: { type: "url", url: "https://example.com/report.pdf" },
+          outputFormat: "markdown",
+          instructions: "tables",
+        },
         { ...callOptions, abortSignal: controller.signal },
       ),
     ).resolves.toEqual({ provider: "custom-capture", text: "parsed url", metadata: { title: "Fixture" } });

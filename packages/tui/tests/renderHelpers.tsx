@@ -21,10 +21,7 @@ export const describeHeadlessRender = describe.skipIf(process.platform === "win3
  * through `act` here keeps the render tests warning-free without weakening what
  * they assert. Returned `waitForVisualIdle`/`flush` are likewise act-wrapped.
  */
-export async function renderForTest(
-  node: ReactNode,
-  options: TestRenderOptions,
-): Promise<TestRenderResult> {
+export async function renderForTest(node: ReactNode, options: TestRenderOptions): Promise<TestRenderResult> {
   let result!: TestRenderResult;
   // Render AND drain the initial post-mount frames inside a single continuous
   // act scope. Splitting them lets a renderer timer fire a React state update in

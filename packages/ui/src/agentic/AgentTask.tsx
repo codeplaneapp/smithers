@@ -1,12 +1,5 @@
 /** @jsxImportSource react */
-import {
-  createContext,
-  useContext,
-  useId,
-  useState,
-  type ComponentProps,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useId, useState, type ComponentProps, type ReactNode } from "react";
 import { cn } from "../cn";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { StatusPill } from "../status-pill";
@@ -101,7 +94,9 @@ export function AgentTaskTrigger({ className, children, onClick, ...props }: Com
       }}
       {...props}
     >
-      <span className="sui-agenttask-chevron" aria-hidden="true">›</span>
+      <span className="sui-agenttask-chevron" aria-hidden="true">
+        ›
+      </span>
       {children ?? (
         <>
           <span className="sui-agenttask-title">{title}</span>
@@ -134,12 +129,5 @@ export function AgentTaskContent({ className, ...props }: ComponentProps<"div">)
 export function AgentTaskGroup({ className, ...props }: ComponentProps<"div">) {
   useInjectUiCss();
   useInjectLaneCss(PLANS_TASKS_QUEUES_CSS_ID, plansTasksQueuesCss);
-  return (
-    <div
-      data-slot="agent-task-group"
-      role="list"
-      className={cn("sui-agenttask-group", className)}
-      {...props}
-    />
-  );
+  return <div data-slot="agent-task-group" role="list" className={cn("sui-agenttask-group", className)} {...props} />;
 }

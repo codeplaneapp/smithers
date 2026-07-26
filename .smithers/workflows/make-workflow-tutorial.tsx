@@ -141,9 +141,10 @@ async function readRepoContext() {
   const parts: string[] = [];
 
   // Source file tree (cheap, no LLM — same pattern as sync-features.tsx bootstrap)
-  const tree = await $`find . -type f \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" \) -not -path "*/node_modules/*" -not -path "*/.smithers/*" -not -path "*/.git/*" | sort | head -80`
-    .nothrow()
-    .quiet();
+  const tree =
+    await $`find . -type f \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" \) -not -path "*/node_modules/*" -not -path "*/.smithers/*" -not -path "*/.git/*" | sort | head -80`
+      .nothrow()
+      .quiet();
   parts.push("=== SOURCE FILES ===", (tree.stdout?.toString() ?? "").trim());
 
   const pkg = await $`cat package.json 2>/dev/null || echo "{}"`.nothrow().quiet();
@@ -261,8 +262,7 @@ async function launchBuild(
   pick: { workflowName: string; workflowGoal: string; additionalContext: string | null },
   buildRunId: string,
 ) {
-  const uiNote =
-    ` Also build a custom .smithers/ui/${pick.workflowName}.tsx for it so users can watch it live in the browser: compose it from the smithers-orchestrator/gateway-ui run widgets (WorkflowUiShell, RunTree, RunEventLog, ApprovalPanel, ...) and smithers-orchestrator/ui primitives over the smithers-orchestrator/gateway-react hooks, not hand-rolled markup.`;
+  const uiNote = ` Also build a custom .smithers/ui/${pick.workflowName}.tsx for it so users can watch it live in the browser: compose it from the smithers-orchestrator/gateway-ui run widgets (WorkflowUiShell, RunTree, RunEventLog, ApprovalPanel, ...) and smithers-orchestrator/ui primitives over the smithers-orchestrator/gateway-react hooks, not hand-rolled markup.`;
   const prompt =
     `Build a Smithers workflow named "${pick.workflowName}". ` +
     `Goal: ${pick.workflowGoal}.` +
@@ -270,9 +270,10 @@ async function launchBuild(
     uiNote;
   const input = JSON.stringify({ prompt, review: false });
 
-  let res = await $`${smithersBunx()} smithers-orchestrator up ${BUILD_WF} --run-id ${buildRunId} --input ${input} --detach`
-    .nothrow()
-    .quiet();
+  let res =
+    await $`${smithersBunx()} smithers-orchestrator up ${BUILD_WF} --run-id ${buildRunId} --input ${input} --detach`
+      .nothrow()
+      .quiet();
   let tail = `${res.stdout?.toString() ?? ""}\n${res.stderr?.toString() ?? ""}`.trim();
 
   if (res.exitCode !== 0 && /ALREADY[_ ]?EXISTS/i.test(tail)) {
@@ -291,10 +292,9 @@ async function launchBuild(
 }
 
 async function pollBuild(childRunId: string) {
-  const res =
-    await $`${smithersBunx()} smithers-orchestrator inspect ${childRunId} --format json --full-output`
-      .nothrow()
-      .quiet();
+  const res = await $`${smithersBunx()} smithers-orchestrator inspect ${childRunId} --format json --full-output`
+    .nothrow()
+    .quiet();
   const raw = res.stdout?.toString() ?? "";
   let status = "unknown";
   let runState = "unknown";
@@ -302,7 +302,9 @@ async function pollBuild(childRunId: string) {
     const j: any = parseFirstJsonObject(raw);
     status = j?.run?.status ?? j?.status ?? "unknown";
     runState = j?.runState?.state ?? status;
-  } catch { /* malformed inspect output remains unknown */ }
+  } catch {
+    /* malformed inspect output remains unknown */
+  }
   const terminal = ["finished", "failed", "cancelled", "continued"].includes(status);
   const stale = runState === "stale" || runState === "orphaned";
   let resumed = false;
@@ -313,8 +315,7 @@ async function pollBuild(childRunId: string) {
         .quiet();
     resumed = r.exitCode === 0;
   }
-  const needsAttention =
-    (stale && !resumed) || status === "waiting-approval" || status === "failed";
+  const needsAttention = (stale && !resumed) || status === "waiting-approval" || status === "failed";
   return { status, terminal, needsAttention, resumed, detail: raw.slice(0, 3_000) };
 }
 
@@ -461,16 +462,7 @@ const outputSchema = z.looseObject({
 
 // ─── Workflow ──────────────────────────────────────────────────────────────────
 
-const {
-  Workflow,
-  Task,
-  Sequence,
-  Branch,
-  Loop,
-  Timer,
-  smithers,
-  outputs,
-} = createSmithers({
+const { Workflow, Task, Sequence, Branch, Loop, Timer, smithers, outputs } = createSmithers({
   input: inputSchema,
   bootstrap: bootstrapSchema,
   sessions: sessionsSchema,
@@ -495,9 +487,8 @@ export default smithers((ctx) => {
   const pick = ctx.outputMaybe("pick", { nodeId: "pick" });
   const buildLaunch = ctx.outputMaybe("buildLaunch", { nodeId: "build-launch" });
 
-  const childRunId = typeof buildLaunch?.childRunId === "string" && buildLaunch.childRunId.trim()
-    ? buildLaunch.childRunId
-    : null;
+  const childRunId =
+    typeof buildLaunch?.childRunId === "string" && buildLaunch.childRunId.trim() ? buildLaunch.childRunId : null;
   const launched = buildLaunch?.launched === true && childRunId !== null;
   const launchFailed = Boolean(buildLaunch) && !launched;
 
@@ -505,8 +496,7 @@ export default smithers((ctx) => {
   const buildEnded = lastPoll?.terminal === true;
   const monitorPolls = (ctx as any).iterationCount("monitorPoll", "monitor-poll");
   const lastTriage = (ctx as any).latest("triage", "monitor-triage");
-  const monitorStopped =
-    buildEnded || lastTriage?.escalate === true || monitorPolls >= MONITOR_MAX_ITERATIONS;
+  const monitorStopped = buildEnded || lastTriage?.escalate === true || monitorPolls >= MONITOR_MAX_ITERATIONS;
 
   const diveDeeper = ctx.outputMaybe("diveDeeper", { nodeId: "dive-deeper" });
 
@@ -592,19 +582,11 @@ export default smithers((ctx) => {
                   (ctx as any).latest("monitorPoll", "monitor-poll")?.terminal !== true
                 }
                 then={
-                  <Task
-                    id="monitor-triage"
-                    output={outputs.triage}
-                    agent={agents.planning}
-                  >
+                  <Task id="monitor-triage" output={outputs.triage} agent={agents.planning}>
                     <TriagePrompt
                       childRunId={childRunId as string}
-                      status={
-                        (ctx as any).latest("monitorPoll", "monitor-poll")?.status ?? "unknown"
-                      }
-                      detail={
-                        (ctx as any).latest("monitorPoll", "monitor-poll")?.detail ?? ""
-                      }
+                      status={(ctx as any).latest("monitorPoll", "monitor-poll")?.status ?? "unknown"}
+                      detail={(ctx as any).latest("monitorPoll", "monitor-poll")?.detail ?? ""}
                     />
                   </Task>
                 }

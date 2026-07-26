@@ -130,14 +130,19 @@ function repoRootDir(): string {
 const repoRoot = repoRootDir();
 
 function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 50) || "item";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 50) || "item"
+  );
 }
 
-function buildFeedback(validate: z.infer<typeof validateOutputSchema> | undefined, reviewFeedback: string | null): string | null {
+function buildFeedback(
+  validate: z.infer<typeof validateOutputSchema> | undefined,
+  reviewFeedback: string | null,
+): string | null {
   const parts: string[] = [];
   if (validate && validate.allPassed === false && validate.failingSummary) {
     parts.push(`VALIDATION FAILED:\n${validate.failingSummary}`);
@@ -150,7 +155,10 @@ function buildFeedback(validate: z.infer<typeof validateOutputSchema> | undefine
 
 function describeItems(group: Group): string {
   return group.items
-    .map((it, i) => `  ${i + 1}. issue #${it.issueNumber}${it.checkbox ? ` · checkbox: "${it.checkbox}"` : " (whole issue)"} — ${it.summary}`)
+    .map(
+      (it, i) =>
+        `  ${i + 1}. issue #${it.issueNumber}${it.checkbox ? ` · checkbox: "${it.checkbox}"` : " (whole issue)"} — ${it.summary}`,
+    )
     .join("\n");
 }
 
@@ -164,8 +172,10 @@ function buildDiscoverPrompt(opts: {
   const filters: string[] = [];
   if (opts.labels.length) filters.push(`Only consider issues with one of these labels: ${opts.labels.join(", ")}.`);
   if (opts.includeIssues.length) filters.push(`ONLY consider these issue numbers: ${opts.includeIssues.join(", ")}.`);
-  if (opts.excludeIssues.length) filters.push(`EXCLUDE these issue numbers entirely: ${opts.excludeIssues.join(", ")}.`);
-  if (opts.maxGroups > 0) filters.push(`Return at most ${opts.maxGroups} groups; prioritize the highest-value / most-blocking work first.`);
+  if (opts.excludeIssues.length)
+    filters.push(`EXCLUDE these issue numbers entirely: ${opts.excludeIssues.join(", ")}.`);
+  if (opts.maxGroups > 0)
+    filters.push(`Return at most ${opts.maxGroups} groups; prioritize the highest-value / most-blocking work first.`);
   const filterText = filters.length ? `\nFilters:\n- ${filters.join("\n- ")}\n` : "";
 
   return `You are the Codex Sol planning agent. Build the work plan for opening ONE GitHub PR per unresolved unit of work in the repository ${opts.repo}. Do NOT write any code or open any PRs in this step — only discover, decompose, rate, and group. Return the structured \`groups\` array.
@@ -277,7 +287,9 @@ function renderGroup(opts: {
   const plan = ctx.outputMaybe("plan", { nodeId: `${key}:plan` }) as z.infer<typeof planSchema> | undefined;
 
   // Per-group loop control, scoped to THIS group's nodes.
-  const validate = ctx.outputMaybe("validate", { nodeId: `${key}:validate` }) as z.infer<typeof validateOutputSchema> | undefined;
+  const validate = ctx.outputMaybe("validate", { nodeId: `${key}:validate` }) as
+    | z.infer<typeof validateOutputSchema>
+    | undefined;
   const gate = reviewGate(ctx, `${key}:review-moderator`);
   const validationPassed = validate !== undefined && validate.allPassed !== false;
   const done = validationPassed && gate.approved;

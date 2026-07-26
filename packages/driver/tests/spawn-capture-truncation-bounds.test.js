@@ -11,9 +11,7 @@ const tmpDir = process.cwd();
  * @returns {Promise<import("../src/SpawnCaptureResult.ts").SpawnCaptureResult>}
  */
 async function run(command, args, options) {
-  const exit = await Effect.runPromiseExit(
-    spawnCaptureEffect(command, args, { cwd: tmpDir, ...options }),
-  );
+  const exit = await Effect.runPromiseExit(spawnCaptureEffect(command, args, { cwd: tmpDir, ...options }));
   if (Exit.isSuccess(exit)) return exit.value;
   const failureOption = Cause.failureOption(exit.cause);
   if (failureOption._tag === "Some") throw failureOption.value;
@@ -23,22 +21,14 @@ async function run(command, args, options) {
 describe("spawnCaptureEffect — exact-cap boundaries", () => {
   test("output exactly at maxOutputBytes is kept untruncated", async () => {
     const n = 4_096;
-    const result = await run(
-      "node",
-      ["-e", `process.stdout.write('x'.repeat(${n}))`],
-      { maxOutputBytes: n },
-    );
+    const result = await run("node", ["-e", `process.stdout.write('x'.repeat(${n}))`], { maxOutputBytes: n });
     expect(result.stdoutTruncated).toBe(false);
     expect(result.stdout).toHaveLength(n);
   });
 
   test("output one byte past maxOutputBytes trips truncation to the cap", async () => {
     const n = 4_096;
-    const result = await run(
-      "node",
-      ["-e", `process.stdout.write('x'.repeat(${n + 1}))`],
-      { maxOutputBytes: n },
-    );
+    const result = await run("node", ["-e", `process.stdout.write('x'.repeat(${n + 1}))`], { maxOutputBytes: n });
     expect(result.stdoutTruncated).toBe(true);
     expect(Buffer.byteLength(result.stdout, "utf8")).toBe(n);
   });
@@ -50,8 +40,7 @@ describe("spawnCaptureEffect — UTF-8 boundary safety under truncation", () => 
   test("tail keep never starts mid-codepoint", async () => {
     // 4-byte emoji straddles the cap start: 100 filler bytes, then emoji,
     // cap of 102 lands inside the emoji.
-    const script =
-      "process.stdout.write('x'.repeat(100) + '\\u{1F600}'.repeat(50))";
+    const script = "process.stdout.write('x'.repeat(100) + '\\u{1F600}'.repeat(50))";
     const result = await run("node", ["-e", script], {
       maxOutputBytes: 102,
       truncateKeep: "tail",
@@ -63,8 +52,7 @@ describe("spawnCaptureEffect — UTF-8 boundary safety under truncation", () => 
   });
 
   test("head keep never ends mid-codepoint", async () => {
-    const script =
-      "process.stdout.write('\\u{1F600}'.repeat(50) + 'x'.repeat(100))";
+    const script = "process.stdout.write('\\u{1F600}'.repeat(50) + 'x'.repeat(100))";
     const result = await run("node", ["-e", script], {
       maxOutputBytes: 102,
       truncateKeep: "head",
@@ -76,8 +64,7 @@ describe("spawnCaptureEffect — UTF-8 boundary safety under truncation", () => 
   });
 
   test("stderr head truncation is boundary-safe too", async () => {
-    const script =
-      "process.stderr.write('\\u4F60'.repeat(2000)); process.exit(1)";
+    const script = "process.stderr.write('\\u4F60'.repeat(2000)); process.exit(1)";
     const result = await run("node", ["-e", script], {
       maxOutputBytes: 100,
       expectedExitCodes: [1],

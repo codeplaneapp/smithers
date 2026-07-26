@@ -80,25 +80,29 @@ export default smithers(() => (
  * used to strand the Output panel on "No output recorded for this node.".
  */
 function writeSlowFakeClaudeBinary(dir, delayMs = 5_000) {
-  return writeExecutable(dir, "claude", [
-    `#!${process.execPath}`,
-    "const args = process.argv.slice(2);",
-    "if (args.join(' ') === 'auth status') {",
-    "  process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }) + '\\n');",
-    "  process.exit(0);",
-    "}",
-    "const payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE;",
-    `setTimeout(() => {`,
-    "  process.stdout.write(JSON.stringify({",
-    '    type: "turn_end",',
-    "    message: {",
-    '      role: "assistant",',
-    '      content: [{ type: "text", text: "```json\\n" + payload + "\\n```\\n" }],',
-    "    },",
-    "  }) + \"\\n\");",
-    `}, ${delayMs});`,
-    "",
-  ].join("\n"));
+  return writeExecutable(
+    dir,
+    "claude",
+    [
+      `#!${process.execPath}`,
+      "const args = process.argv.slice(2);",
+      "if (args.join(' ') === 'auth status') {",
+      "  process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }) + '\\n');",
+      "  process.exit(0);",
+      "}",
+      "const payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE;",
+      `setTimeout(() => {`,
+      "  process.stdout.write(JSON.stringify({",
+      '    type: "turn_end",',
+      "    message: {",
+      '      role: "assistant",',
+      '      content: [{ type: "text", text: "```json\\n" + payload + "\\n```\\n" }],',
+      "    },",
+      '  }) + "\\n");',
+      `}, ${delayMs});`,
+      "",
+    ].join("\n"),
+  );
 }
 
 function findOpenPort() {
@@ -146,93 +150,103 @@ async function stopGateway(process) {
   }
 }
 
-browserTest("monitor node inspector shows the prompt, recovers stale output, and collapses sections", async () => {
-  const binDir = createExecutableDir();
-  writeSlowFakeClaudeBinary(binDir);
-  writeFakeCodexBinary(binDir);
-  writeFakeAntigravityBinary(binDir);
-  const repo = createTempRepo();
-  pinSqliteBackend(repo.dir);
-  const env = {
-    HOME: repo.dir,
-    PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
-    ANTHROPIC_API_KEY: "",
-    OPENAI_API_KEY: "sk-test-openai-key",
-    GEMINI_API_KEY: "",
-    GOOGLE_API_KEY: "",
-    SMITHERS_FAKE_AGENT_RESPONSE: JSON.stringify({ summary: AGENT_SUMMARY }),
-  };
-  repo.write(".claude/.credentials.json", "{}\n");
-  repo.write(".codex/auth.json", "{}\n");
-  repo.write(".gemini/antigravity-cli/settings.json", "{}\n");
+browserTest(
+  "monitor node inspector shows the prompt, recovers stale output, and collapses sections",
+  async () => {
+    const binDir = createExecutableDir();
+    writeSlowFakeClaudeBinary(binDir);
+    writeFakeCodexBinary(binDir);
+    writeFakeAntigravityBinary(binDir);
+    const repo = createTempRepo();
+    pinSqliteBackend(repo.dir);
+    const env = {
+      HOME: repo.dir,
+      PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
+      ANTHROPIC_API_KEY: "",
+      OPENAI_API_KEY: "sk-test-openai-key",
+      GEMINI_API_KEY: "",
+      GOOGLE_API_KEY: "",
+      SMITHERS_FAKE_AGENT_RESPONSE: JSON.stringify({ summary: AGENT_SUMMARY }),
+    };
+    repo.write(".claude/.credentials.json", "{}\n");
+    repo.write(".codex/auth.json", "{}\n");
+    repo.write(".gemini/antigravity-cli/settings.json", "{}\n");
 
-  expect(runSmithers(["init"], { cwd: repo.dir, format: "json", env }).exitCode).toBe(0);
-  repo.write(".smithers/workflows/inspector-probe.tsx", WORKFLOW);
+    expect(runSmithers(["init"], { cwd: repo.dir, format: "json", env }).exitCode).toBe(0);
+    repo.write(".smithers/workflows/inspector-probe.tsx", WORKFLOW);
 
-  const port = await findOpenPort();
-  const base = `http://127.0.0.1:${port}`;
-  // The real CLI gateway owns the Monitor mount at /monitor.
-  const gatewayProc = spawn(process.execPath, ["run", CLI_ENTRY, "gateway", "--port", String(port)], {
-    cwd: repo.dir,
-    env: { ...process.env, ...env, PORT: String(port), HOST: "127.0.0.1" },
-    stdio: "ignore",
-  });
-  let browser;
-  try {
-    expect(await waitForHealth(base)).toBe(true);
-    const runId = "monitor-inspector-run";
-    const launched = await rpc(base, "launchRun", {
-      workflow: "inspector-probe",
-      input: {},
-      runId,
+    const port = await findOpenPort();
+    const base = `http://127.0.0.1:${port}`;
+    // The real CLI gateway owns the Monitor mount at /monitor.
+    const gatewayProc = spawn(process.execPath, ["run", CLI_ENTRY, "gateway", "--port", String(port)], {
+      cwd: repo.dir,
+      env: { ...process.env, ...env, PORT: String(port), HOST: "127.0.0.1" },
+      stdio: "ignore",
     });
-    expect(launched.runId).toBe(runId);
+    let browser;
+    try {
+      expect(await waitForHealth(base)).toBe(true);
+      const runId = "monitor-inspector-run";
+      const launched = await rpc(base, "launchRun", {
+        workflow: "inspector-probe",
+        input: {},
+        runId,
+      });
+      expect(launched.runId).toBe(runId);
 
-    browser = await CHROMIUM.launch({ headless: true });
-    const page = await browser.newPage();
-    // Deep-link straight into the node inspector while the task is RUNNING.
-    await page.goto(`${base}/monitor?runId=${runId}&nodeId=probe`, { waitUntil: "domcontentloaded" });
-    await page.waitForSelector('[data-testid="monitor-root"]', { timeout: 20_000 });
-    await page.waitForSelector('[data-testid="monitor-inspector"]', { timeout: 30_000 });
+      browser = await CHROMIUM.launch({ headless: true });
+      const page = await browser.newPage();
+      // Deep-link straight into the node inspector while the task is RUNNING.
+      await page.goto(`${base}/monitor?runId=${runId}&nodeId=probe`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector('[data-testid="monitor-root"]', { timeout: 20_000 });
+      await page.waitForSelector('[data-testid="monitor-inspector"]', { timeout: 30_000 });
 
-    // Sections are collapsible <details> elements, open by default.
-    for (const testId of ["monitor-node-details", "monitor-node-output", "monitor-node-transcript"]) {
-      expect(await page.locator(`[data-testid="${testId}"]`).evaluate((el) => el.tagName)).toBe("DETAILS");
-      expect(await page.locator(`[data-testid="${testId}"]`).evaluate((el) => el.open)).toBe(true);
+      // Sections are collapsible <details> elements, open by default.
+      for (const testId of ["monitor-node-details", "monitor-node-output", "monitor-node-transcript"]) {
+        expect(await page.locator(`[data-testid="${testId}"]`).evaluate((el) => el.tagName)).toBe("DETAILS");
+        expect(await page.locator(`[data-testid="${testId}"]`).evaluate((el) => el.open)).toBe(true);
+      }
+      expect((await page.locator('[data-testid="monitor-node-details"]').textContent()) ?? "").toContain("probe");
+
+      // 1 — The task's initial prompt is shown (recorded in attempt metadata the
+      // moment the attempt started, so it renders even while the node runs).
+      await page.waitForFunction(
+        (expected) =>
+          (document.querySelector('[data-testid="monitor-node-prompt"]')?.textContent ?? "").includes(expected),
+        PROMPT,
+        { timeout: 30_000 },
+      );
+
+      // 2 — The Output section must NOT strand on the stale fallback: the first
+      // fetch landed while the node was running, so without a refetch on the
+      // lifecycle change this wait would time out with "No output recorded…".
+      await page.waitForFunction(
+        (expected) =>
+          (document.querySelector('[data-testid="monitor-node-output"]')?.textContent ?? "").includes(expected),
+        AGENT_SUMMARY,
+        { timeout: 60_000 },
+      );
+      const outputText = (await page.locator('[data-testid="monitor-node-output"]').textContent()) ?? "";
+      expect(outputText).not.toContain("No output recorded for this node.");
+      expect(outputText).not.toContain("running — structured output lands here");
+
+      // 3 — Sections collapse and re-expand via their summary rows.
+      const promptSection = page.locator('[data-testid="monitor-node-prompt"]');
+      await page.waitForSelector('[data-testid="monitor-node-prompt"] .mon-section-body');
+      await promptSection.locator("summary").click();
+      expect(await promptSection.evaluate((el) => el.open)).toBe(false);
+      expect(await page.locator('[data-testid="monitor-node-prompt"] .mon-section-body').count()).toBe(0);
+      await promptSection.locator("summary").click();
+      expect(await promptSection.evaluate((el) => el.open)).toBe(true);
+      await page.waitForSelector('[data-testid="monitor-node-prompt"] .mon-section-body');
+    } finally {
+      try {
+        await browser?.close();
+      } catch {}
+      try {
+        await stopGateway(gatewayProc);
+      } catch {}
     }
-    expect((await page.locator('[data-testid="monitor-node-details"]').textContent()) ?? "").toContain("probe");
-
-    // 1 — The task's initial prompt is shown (recorded in attempt metadata the
-    // moment the attempt started, so it renders even while the node runs).
-    await page.waitForFunction(
-      (expected) => (document.querySelector('[data-testid="monitor-node-prompt"]')?.textContent ?? "").includes(expected),
-      PROMPT,
-      { timeout: 30_000 },
-    );
-
-    // 2 — The Output section must NOT strand on the stale fallback: the first
-    // fetch landed while the node was running, so without a refetch on the
-    // lifecycle change this wait would time out with "No output recorded…".
-    await page.waitForFunction(
-      (expected) => (document.querySelector('[data-testid="monitor-node-output"]')?.textContent ?? "").includes(expected),
-      AGENT_SUMMARY,
-      { timeout: 60_000 },
-    );
-    const outputText = (await page.locator('[data-testid="monitor-node-output"]').textContent()) ?? "";
-    expect(outputText).not.toContain("No output recorded for this node.");
-    expect(outputText).not.toContain("running — structured output lands here");
-
-    // 3 — Sections collapse and re-expand via their summary rows.
-    const promptSection = page.locator('[data-testid="monitor-node-prompt"]');
-    await page.waitForSelector('[data-testid="monitor-node-prompt"] .mon-section-body');
-    await promptSection.locator("summary").click();
-    expect(await promptSection.evaluate((el) => el.open)).toBe(false);
-    expect(await page.locator('[data-testid="monitor-node-prompt"] .mon-section-body').count()).toBe(0);
-    await promptSection.locator("summary").click();
-    expect(await promptSection.evaluate((el) => el.open)).toBe(true);
-    await page.waitForSelector('[data-testid="monitor-node-prompt"] .mon-section-body');
-  } finally {
-    try { await browser?.close(); } catch {}
-    try { await stopGateway(gatewayProc); } catch {}
-  }
-}, 180_000);
+  },
+  180_000,
+);

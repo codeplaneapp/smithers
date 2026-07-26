@@ -27,14 +27,13 @@ describe("OpenClawAgent error extraction", () => {
     try {
       process.env.PATH = prependPath(fake.dir, originalPath);
       const agent = new OpenClawAgent({ env: { PATH: process.env.PATH } });
-      await expect(
-        agent.generate({ messages: [{ role: "user", content: "do work" }] }),
-      ).rejects.toThrow(/openclaw json failure/);
+      await expect(agent.generate({ messages: [{ role: "user", content: "do work" }] })).rejects.toThrow(
+        /openclaw json failure/,
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
-
 });
 
 // ---------------------------------------------------------------------------

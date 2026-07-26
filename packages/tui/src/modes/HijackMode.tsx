@@ -66,8 +66,8 @@ export function Selecting({
   return (
     <box width="100%" height="100%" flexDirection="column">
       <box width="100%" height={2} flexDirection="column">
-        <text fg="#ffaf00">  HIJACK — select a running node to hand off to</text>
-        <text fg="#555555">  j/k or arrows to navigate  ↵ confirm  Esc cancel</text>
+        <text fg="#ffaf00"> HIJACK — select a running node to hand off to</text>
+        <text fg="#555555"> j/k or arrows to navigate ↵ confirm Esc cancel</text>
       </box>
       <select
         // The renderer focus system routes keys straight to a focused select,
@@ -130,15 +130,17 @@ export function HandingOff({
     // owns the real terminal while suspended; detached forms the killable group.
     return startHijackSession({
       renderer,
-      spawnChild: () =>
-        spawn(cmd.command, cmd.args, { stdio: "inherit", detached: SUPPORTS_PROCESS_GROUPS }),
+      spawnChild: () => spawn(cmd.command, cmd.args, { stdio: "inherit", detached: SUPPORTS_PROCESS_GROUPS }),
       onDone: (code) => onDoneRef.current(code),
     });
   }, [runId, nodeId, renderer]);
 
   return (
     <box width="100%" height="100%">
-      <text fg="#ffaf00">  Handing off to smithers hijack {runId} ({node.name ?? node.id})…</text>
+      <text fg="#ffaf00">
+        {" "}
+        Handing off to smithers hijack {runId} ({node.name ?? node.id})…
+      </text>
     </box>
   );
 }
@@ -168,18 +170,12 @@ export function Returned({
 
   return (
     <box width="100%" height="100%" flexDirection="column" justifyContent="center" alignItems="center">
-      <box
-        width={64}
-        height={7}
-        flexDirection="column"
-        border={true}
-        borderColor="#00d7ff"
-      >
-        <text fg="#00d7ff">  Returned from hijack: {node.name ?? node.id}</text>
-        <text fg="#888888">  {hijackExitMessage(exitCode)}</text>
-        <text fg="#888888">  {resumedNote}</text>
+      <box width={64} height={7} flexDirection="column" border={true} borderColor="#00d7ff">
+        <text fg="#00d7ff"> Returned from hijack: {node.name ?? node.id}</text>
+        <text fg="#888888"> {hijackExitMessage(exitCode)}</text>
+        <text fg="#888888"> {resumedNote}</text>
         <text> </text>
-        <text fg="#ffffff">  [d] dismiss</text>
+        <text fg="#ffffff"> [d] dismiss</text>
       </box>
     </box>
   );
@@ -208,8 +204,8 @@ export function HijackMode({
   if (resolveCli() === null) {
     return (
       <box width="100%" height="100%" flexDirection="column">
-        <text fg="#ff5f5f">  HIJACK unavailable — cannot resolve the smithers CLI.</text>
-        <text fg="#555555">  Set SMITHERS_CLI or launch the monitor via `smithers up --interactive`.</text>
+        <text fg="#ff5f5f"> HIJACK unavailable — cannot resolve the smithers CLI.</text>
+        <text fg="#555555"> Set SMITHERS_CLI or launch the monitor via `smithers up --interactive`.</text>
       </box>
     );
   }
@@ -252,7 +248,7 @@ export function HijackMode({
   if (candidates.length === 0) {
     return (
       <box width="100%" height="100%">
-        <text fg="#555555">  HIJACK — no running nodes available to hand off to</text>
+        <text fg="#555555"> HIJACK — no running nodes available to hand off to</text>
       </box>
     );
   }

@@ -73,14 +73,7 @@ export function createTranscriptionTool(options) {
       signal?.throwIfAborted();
       const request = normalizeInput(input);
       if (provider === "whisper") {
-        return transcribeWithWhisper(
-          options,
-          request,
-          fetchImpl,
-          signal,
-          maxResponseBytes,
-          audioResponseBodyLimit,
-        );
+        return transcribeWithWhisper(options, request, fetchImpl, signal, maxResponseBytes, audioResponseBodyLimit);
       }
       if (provider === "deepgram") {
         // Deepgram receives the URL as JSON and downloads it server-side. Keep
@@ -244,14 +237,7 @@ function stripBrackets(host) {
  * @param {ResponseBodyLimit} audioResponseBodyLimit
  * @returns {Promise<import("./createTranscriptionTool.ts").TranscriptionToolResult>}
  */
-async function transcribeWithWhisper(
-  options,
-  input,
-  fetchImpl,
-  signal,
-  maxResponseBytes,
-  audioResponseBodyLimit,
-) {
+async function transcribeWithWhisper(options, input, fetchImpl, signal, maxResponseBytes, audioResponseBodyLimit) {
   const form = new FormData();
   form.set("model", options.model ?? "whisper-1");
   form.set("response_format", "verbose_json");
@@ -266,9 +252,7 @@ async function transcribeWithWhisper(
       ...(options.audioUrlResolver ? { resolver: options.audioUrlResolver } : {}),
       ...(options.audioUrlMaxRedirects !== undefined ? { maxRedirects: options.audioUrlMaxRedirects } : {}),
       ...(options.allowedAudioHosts ? { allowedAudioHosts: options.allowedAudioHosts } : {}),
-      ...(options.allowPrivateAudioUrl !== undefined
-        ? { allowPrivateAudioUrl: options.allowPrivateAudioUrl }
-        : {}),
+      ...(options.allowPrivateAudioUrl !== undefined ? { allowPrivateAudioUrl: options.allowPrivateAudioUrl } : {}),
       ...(signal ? { signal } : {}),
     });
     await assertOk(
@@ -286,7 +270,10 @@ async function transcribeWithWhisper(
       audioResponseBodyLimit.usesCanonicalOption,
     );
     const blob = new Blob([bytes], { type: audioResponse.headers.get("content-type") ?? "" });
-    form.set("file", new File([blob], filenameForMime(input.mimeType ?? blob.type), { type: input.mimeType ?? blob.type }));
+    form.set(
+      "file",
+      new File([blob], filenameForMime(input.mimeType ?? blob.type), { type: input.mimeType ?? blob.type }),
+    );
   }
 
   const response = await fetchImpl(options.baseUrl ?? "https://api.openai.com/v1/audio/transcriptions", {
@@ -382,8 +369,7 @@ async function readResponseBytes(response, action, maxBytes, signal, usesCanonic
   return readBoundedResponseBody(response, {
     maxBytes,
     ...(signal ? { signal } : {}),
-    createTooLargeError: (limit) =>
-      transcriptionResponseBodyTooLargeError(action, limit, usesCanonicalOption),
+    createTooLargeError: (limit) => transcriptionResponseBodyTooLargeError(action, limit, usesCanonicalOption),
   });
 }
 

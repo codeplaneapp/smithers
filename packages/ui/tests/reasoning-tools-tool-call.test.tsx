@@ -126,9 +126,7 @@ describe("ToolCall compound anatomy", () => {
   });
 
   test("legacy mode renders durationMs in the heading when terminal", () => {
-    const html = renderToStaticMarkup(
-      <ToolCall name="search" state="output-available" durationMs={250} result="ok" />,
-    );
+    const html = renderToStaticMarkup(<ToolCall name="search" state="output-available" durationMs={250} result="ok" />);
     expect(html).toContain("250ms");
     expect(html).toContain('data-slot="tool-call-duration"');
   });
@@ -211,7 +209,7 @@ describe("ToolCallOutput parts", () => {
     );
     expect(html).toContain("Found it");
     expect(html).toContain("&quot;hits&quot;");
-    expect(html).toContain('<img');
+    expect(html).toContain("<img");
     expect(html).toContain('alt="chart of hits"');
     expect(html).toContain('data-slot="code-block"');
     expect(html).toContain("return 1;");
@@ -224,9 +222,7 @@ describe("ToolCallOutput parts", () => {
       <ToolCall name="inspect" state="running" defaultOpen>
         <ToolCallHeader />
         <ToolCallContent>
-          <ToolCallOutput
-            parts={[{ kind: "code", code: "return 1", partial: true }]}
-          />
+          <ToolCallOutput parts={[{ kind: "code", code: "return 1", partial: true }]} />
         </ToolCallContent>
       </ToolCall>,
     );

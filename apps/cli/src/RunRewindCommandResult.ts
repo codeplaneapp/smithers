@@ -1,3 +1,3 @@
 export type RunRewindCommandResult = {
-    exitCode: number;
+  exitCode: number;
 };

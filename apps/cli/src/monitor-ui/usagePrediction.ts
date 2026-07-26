@@ -195,10 +195,7 @@ function medianRate(samples: readonly RateSample[]): ThroughputRate | undefined 
  * token event and timing row share a node, iteration, and attempt identity.
  * Zero-length or backwards timing windows are ignored.
  */
-export function buildRateModel(
-  events: readonly TokenUsageEvent[],
-  timings: readonly NodeTiming[],
-): RateModel {
+export function buildRateModel(events: readonly TokenUsageEvent[], timings: readonly NodeTiming[]): RateModel {
   const modelByNode = new Map<string, string>();
   const tokensByAttempt = new Map<string, AttemptTokens>();
 
@@ -265,30 +262,25 @@ export function buildRateModel(
 
 /** Resolve the best throughput evidence for a node: node, model, then run. */
 export function rateForNode(nodeId: string, rates: RateModel): ThroughputRate | undefined {
-  return rates.perNode.get(nodeId) ??
+  return (
+    rates.perNode.get(nodeId) ??
     (rates.modelByNode.get(nodeId) ? rates.perModel.get(rates.modelByNode.get(nodeId)!) : undefined) ??
-    rates.global;
+    rates.global
+  );
 }
 
 /** Estimate unreported in-flight spend from elapsed wall time and the best rate. */
-export function estimateInFlight(
-  nodeId: string,
-  elapsedMs: number,
-  rates: RateModel,
-): number | undefined {
+export function estimateInFlight(nodeId: string, elapsedMs: number, rates: RateModel): number | undefined {
   const rate = rateForNode(nodeId, rates);
   if (!rate || !Number.isFinite(elapsedMs)) return undefined;
-  return Math.max(0, elapsedMs) * rate.totalTokensPerSecond / 1_000;
+  return (Math.max(0, elapsedMs) * rate.totalTokensPerSecond) / 1_000;
 }
 
 /**
  * Predict a node duration from its completed attempts. The p25/median/p75
  * quantiles use linear interpolation; fewer than two samples stays unknown.
  */
-export function predictNodeDurationMs(
-  nodeId: string,
-  timings: readonly NodeTiming[],
-): DurationPrediction | undefined {
+export function predictNodeDurationMs(nodeId: string, timings: readonly NodeTiming[]): DurationPrediction | undefined {
   const durations = timings
     .filter(
       (timing) =>
@@ -316,9 +308,10 @@ function normalizedStatus(status: string | undefined): string {
   return (status ?? "").trim().toLowerCase().replaceAll("_", "-");
 }
 
-function treeLeaves(
-  tree: TreeNode | readonly TreeNode[] | null | undefined,
-): { leaves: LeafWork[]; allIds: Set<string> } {
+function treeLeaves(tree: TreeNode | readonly TreeNode[] | null | undefined): {
+  leaves: LeafWork[];
+  allIds: Set<string>;
+} {
   const leaves: LeafWork[] = [];
   const allIds = new Set<string>();
   const roots = Array.isArray(tree) ? tree : tree ? [tree] : [];
@@ -355,7 +348,8 @@ function maxObservedConcurrency(
     if (
       timing.finishedAtMs === undefined &&
       (!live || (timing.status !== undefined && TERMINAL_STATUSES.has(normalizedStatus(timing.status))))
-    ) continue;
+    )
+      continue;
     const end = timing.finishedAtMs ?? nowMs;
     if (end <= timing.startedAtMs) continue;
     edges.push({ at: timing.startedAtMs, delta: 1 }, { at: end, delta: -1 });
@@ -445,8 +439,8 @@ export function predictRunUsage(input: {
   const inFlightTokens = !live
     ? undefined
     : inFlightEstimates.some((estimate) => estimate === undefined)
-    ? undefined
-    : inFlightEstimates.reduce<number>((sum, estimate) => sum + estimate!, 0);
+      ? undefined
+      : inFlightEstimates.reduce<number>((sum, estimate) => sum + estimate!, 0);
 
   let pendingLow = 0;
   let pendingHigh = 0;
@@ -505,9 +499,10 @@ export function predictRunUsage(input: {
   for (const nodeId of nodeIds) {
     const duration = predictNodeDurationMs(nodeId, input.timings);
     const estimates = estimatesByNode.get(nodeId);
-    const nodeInFlight = estimates && !estimates.some((estimate) => estimate === undefined)
-      ? estimates.reduce<number>((sum, estimate) => sum + estimate!, 0)
-      : undefined;
+    const nodeInFlight =
+      estimates && !estimates.some((estimate) => estimate === undefined)
+        ? estimates.reduce<number>((sum, estimate) => sum + estimate!, 0)
+        : undefined;
     perNode.set(nodeId, {
       spent: fold.perNode.get(nodeId) ?? 0,
       ...(nodeInFlight !== undefined ? { inFlight: nodeInFlight } : {}),
@@ -527,7 +522,7 @@ export function predictRunUsage(input: {
   };
 }
 function compact(value: number, divisor: number, suffix: string): string {
-  const rounded = Math.round(value / divisor * 10) / 10;
+  const rounded = Math.round((value / divisor) * 10) / 10;
   return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}${suffix}`;
 }
 
@@ -640,10 +635,7 @@ export type NodeUsageBreakdown = {
  * per-(iteration, attempt) breakdown with the model seen on each. Undefined
  * when the node reported no usage at all, so the UI can stay silent.
  */
-export function nodeUsageBreakdown(
-  events: readonly TokenUsageEvent[],
-  nodeId: string,
-): NodeUsageBreakdown | undefined {
+export function nodeUsageBreakdown(events: readonly TokenUsageEvent[], nodeId: string): NodeUsageBreakdown | undefined {
   let found = false;
   let input = 0;
   let output = 0;

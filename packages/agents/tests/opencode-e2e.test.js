@@ -25,10 +25,7 @@ try {
     stdio: "pipe",
     encoding: "utf8",
   });
-  supportsOpenCodeE2EFlags =
-    helpText.includes("--dir") &&
-    helpText.includes("--format") &&
-    /\B-f\b/.test(helpText);
+  supportsOpenCodeE2EFlags = helpText.includes("--dir") && helpText.includes("--format") && /\B-f\b/.test(helpText);
 } catch {
   isOpenCodeInstalled = false;
   supportsOpenCodeE2EFlags = false;
@@ -37,123 +34,120 @@ try {
 describe.skipIf(!runRealAgentE2E || !isOpenCodeInstalled || !supportsOpenCodeE2EFlags)(
   "OpenCodeAgent E2E (real CLI)",
   () => {
-  /** @type {string} */
-  let tmpDir;
+    /** @type {string} */
+    let tmpDir;
 
-  beforeAll(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "smithers-opencode-e2e-"));
-    // Create a minimal project so --dir has something to work with
-    await writeFile(join(tmpDir, "hello.js"), 'console.log("hello world");\n');
-  });
-
-  afterAll(async () => {
-    if (tmpDir) {
-      await rm(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it("sends a simple prompt and gets a text response", async () => {
-    const agent = new OpenCodeAgent({
-      model: "github-copilot/claude-sonnet-4.6",
-      yolo: true,
+    beforeAll(async () => {
+      tmpDir = await mkdtemp(join(tmpdir(), "smithers-opencode-e2e-"));
+      // Create a minimal project so --dir has something to work with
+      await writeFile(join(tmpDir, "hello.js"), 'console.log("hello world");\n');
     });
 
-    const result = await agent.generate({
-      prompt: "What is 2+2? Reply with ONLY the number, nothing else.",
-      rootDir: tmpDir,
+    afterAll(async () => {
+      if (tmpDir) {
+        await rm(tmpDir, { recursive: true, force: true });
+      }
     });
 
-    expect(result).toBeDefined();
-    expect(result.text).toBeDefined();
-    expect(result.text.length).toBeGreaterThan(0);
-    // The response should contain "4" somewhere
-    expect(result.text).toContain("4");
-  }, 120_000);
+    it("sends a simple prompt and gets a text response", async () => {
+      const agent = new OpenCodeAgent({
+        model: "github-copilot/claude-sonnet-4.6",
+        yolo: true,
+      });
 
-  it("emits events with correct structure", async () => {
-    /** @type {import("../src/BaseCliAgent/index.ts").AgentCliEvent[]} */
-    const events = [];
+      const result = await agent.generate({
+        prompt: "What is 2+2? Reply with ONLY the number, nothing else.",
+        rootDir: tmpDir,
+      });
 
-    const agent = new OpenCodeAgent({
-      model: "github-copilot/claude-sonnet-4.6",
-      yolo: true,
-    });
+      expect(result).toBeDefined();
+      expect(result.text).toBeDefined();
+      expect(result.text.length).toBeGreaterThan(0);
+      // The response should contain "4" somewhere
+      expect(result.text).toContain("4");
+    }, 120_000);
 
-    const result = await agent.generate({
-      prompt: "Say 'hello' and nothing else.",
-      rootDir: tmpDir,
-      onEvent: (event) => events.push(event),
-    });
+    it("emits events with correct structure", async () => {
+      /** @type {import("../src/BaseCliAgent/index.ts").AgentCliEvent[]} */
+      const events = [];
 
-    expect(result).toBeDefined();
-    expect(result.text.toLowerCase()).toContain("hello");
+      const agent = new OpenCodeAgent({
+        model: "github-copilot/claude-sonnet-4.6",
+        yolo: true,
+      });
 
-    // Should have emitted a "started" event
-    const started = events.find((e) => e.type === "started");
-    expect(started).toBeDefined();
-    expect(started.engine).toBe("opencode");
+      const result = await agent.generate({
+        prompt: "Say 'hello' and nothing else.",
+        rootDir: tmpDir,
+        onEvent: (event) => events.push(event),
+      });
 
-    // Should have emitted a "completed" event
-    const completed = events.find((e) => e.type === "completed");
-    expect(completed).toBeDefined();
-    expect(completed.engine).toBe("opencode");
-    expect(completed.ok).toBe(true);
-  }, 120_000);
+      expect(result).toBeDefined();
+      expect(result.text.toLowerCase()).toContain("hello");
 
-  it("respects --dir for working directory", async () => {
-    const agent = new OpenCodeAgent({
-      model: "github-copilot/claude-sonnet-4.6",
-      yolo: true,
-    });
+      // Should have emitted a "started" event
+      const started = events.find((e) => e.type === "started");
+      expect(started).toBeDefined();
+      expect(started.engine).toBe("opencode");
 
-    const result = await agent.generate({
-      prompt:
-        "List the files in the current directory. Just output the filenames, one per line.",
-      rootDir: tmpDir,
-    });
+      // Should have emitted a "completed" event
+      const completed = events.find((e) => e.type === "completed");
+      expect(completed).toBeDefined();
+      expect(completed.engine).toBe("opencode");
+      expect(completed.ok).toBe(true);
+    }, 120_000);
 
-    expect(result).toBeDefined();
-    // Should see our hello.js file
-    expect(result.text).toContain("hello.js");
-  }, 120_000);
+    it("respects --dir for working directory", async () => {
+      const agent = new OpenCodeAgent({
+        model: "github-copilot/claude-sonnet-4.6",
+        yolo: true,
+      });
 
-  it("passes OPENCODE_PERMISSION env var correctly (yolo mode)", async () => {
-    // yolo=true should set OPENCODE_PERMISSION='"allow"' which auto-approves
-    // tool calls. We verify indirectly: if permission is set correctly, the
-    // agent can execute tools without prompting and return a result.
-    const agent = new OpenCodeAgent({
-      model: "github-copilot/claude-sonnet-4.6",
-      yolo: true,
-    });
+      const result = await agent.generate({
+        prompt: "List the files in the current directory. Just output the filenames, one per line.",
+        rootDir: tmpDir,
+      });
 
-    const result = await agent.generate({
-      prompt:
-        "Read the file hello.js and tell me what it prints. Reply with ONLY the output string, nothing else.",
-      rootDir: tmpDir,
-    });
+      expect(result).toBeDefined();
+      // Should see our hello.js file
+      expect(result.text).toContain("hello.js");
+    }, 120_000);
 
-    expect(result).toBeDefined();
-    expect(result.text).toContain("hello world");
-  }, 120_000);
+    it("passes OPENCODE_PERMISSION env var correctly (yolo mode)", async () => {
+      // yolo=true should set OPENCODE_PERMISSION='"allow"' which auto-approves
+      // tool calls. We verify indirectly: if permission is set correctly, the
+      // agent can execute tools without prompting and return a result.
+      const agent = new OpenCodeAgent({
+        model: "github-copilot/claude-sonnet-4.6",
+        yolo: true,
+      });
 
-  it("handles file attachments via -f flag", async () => {
-    const testFile = join(tmpDir, "data.txt");
-    await writeFile(testFile, "The secret number is 42.\n");
+      const result = await agent.generate({
+        prompt: "Read the file hello.js and tell me what it prints. Reply with ONLY the output string, nothing else.",
+        rootDir: tmpDir,
+      });
 
-    const agent = new OpenCodeAgent({
-      model: "github-copilot/claude-sonnet-4.6",
-      yolo: true,
-      attachFiles: [testFile],
-    });
+      expect(result).toBeDefined();
+      expect(result.text).toContain("hello world");
+    }, 120_000);
 
-    const result = await agent.generate({
-      prompt:
-        "What is the secret number in the attached file? Reply with ONLY the number.",
-      rootDir: tmpDir,
-    });
+    it("handles file attachments via -f flag", async () => {
+      const testFile = join(tmpDir, "data.txt");
+      await writeFile(testFile, "The secret number is 42.\n");
 
-    expect(result).toBeDefined();
-    expect(result.text).toContain("42");
-  }, 120_000);
-  }
+      const agent = new OpenCodeAgent({
+        model: "github-copilot/claude-sonnet-4.6",
+        yolo: true,
+        attachFiles: [testFile],
+      });
+
+      const result = await agent.generate({
+        prompt: "What is the secret number in the attached file? Reply with ONLY the number.",
+        rootDir: tmpDir,
+      });
+
+      expect(result).toBeDefined();
+      expect(result.text).toContain("42");
+    }, 120_000);
+  },
 );

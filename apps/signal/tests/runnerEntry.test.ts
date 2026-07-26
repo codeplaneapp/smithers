@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { getR2Object, putR2Object } from "../../../.smithers/lib/daily-ceo-intel/cloudflare";
 import { runOnce } from "../runner/src/entry";
 
-const CF_ENV_KEYS = ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_KV_NAMESPACE_ID", "CLOUDFLARE_R2_BUCKET"] as const;
+const CF_ENV_KEYS = [
+  "CLOUDFLARE_ACCOUNT_ID",
+  "CLOUDFLARE_API_TOKEN",
+  "CLOUDFLARE_KV_NAMESPACE_ID",
+  "CLOUDFLARE_R2_BUCKET",
+] as const;
 const originalEnv = Object.fromEntries(CF_ENV_KEYS.map((key) => [key, process.env[key]]));
 const originalSpawn = Bun.spawn;
 const originalFetch = globalThis.fetch;
@@ -60,7 +65,8 @@ function mockSpawn(scenario: SpawnScenario): void {
     }
     if (sub === "output") {
       const nodeId = argv[3];
-      const out = nodeId === "publish" ? scenario.publishOutput : nodeId === "finalize" ? scenario.finalizeOutput : null;
+      const out =
+        nodeId === "publish" ? scenario.publishOutput : nodeId === "finalize" ? scenario.finalizeOutput : null;
       return {
         stdout: out === null || out === undefined ? "" : JSON.stringify(out),
         stderr: "",
@@ -76,7 +82,10 @@ describe("cloudflare.ts: getR2Object (used by the runner's state sync-down)", ()
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => new Response(null, { status: 404 })) as typeof fetch;
     try {
-      const result = await getR2Object({ accountId: "a", apiToken: "t", kvNamespaceId: "k", r2Bucket: "b" }, "state/ceo-intel.sqlite");
+      const result = await getR2Object(
+        { accountId: "a", apiToken: "t", kvNamespaceId: "k", r2Bucket: "b" },
+        "state/ceo-intel.sqlite",
+      );
       expect(result).toBeNull();
     } finally {
       globalThis.fetch = originalFetch;
@@ -87,7 +96,10 @@ describe("cloudflare.ts: getR2Object (used by the runner's state sync-down)", ()
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 })) as typeof fetch;
     try {
-      const result = await getR2Object({ accountId: "a", apiToken: "t", kvNamespaceId: "k", r2Bucket: "b" }, "state/ceo-intel.sqlite");
+      const result = await getR2Object(
+        { accountId: "a", apiToken: "t", kvNamespaceId: "k", r2Bucket: "b" },
+        "state/ceo-intel.sqlite",
+      );
       expect(result).toEqual(new Uint8Array([1, 2, 3]));
     } finally {
       globalThis.fetch = originalFetch;
@@ -98,7 +110,9 @@ describe("cloudflare.ts: getR2Object (used by the runner's state sync-down)", ()
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => new Response(null, { status: 500 })) as typeof fetch;
     try {
-      await expect(getR2Object({ accountId: "a", apiToken: "t", kvNamespaceId: "k", r2Bucket: "b" }, "state/ceo-intel.sqlite")).rejects.toThrow(/HTTP 500/);
+      await expect(
+        getR2Object({ accountId: "a", apiToken: "t", kvNamespaceId: "k", r2Bucket: "b" }, "state/ceo-intel.sqlite"),
+      ).rejects.toThrow(/HTTP 500/);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -115,7 +129,12 @@ describe("cloudflare.ts: putR2Object accepts binary bodies (sqlite state sync-up
     }) as typeof fetch;
     try {
       const bytes = new Uint8Array([9, 9, 9]);
-      await putR2Object({ accountId: "a", apiToken: "t", kvNamespaceId: "k", r2Bucket: "b" }, "state/ceo-intel.sqlite", bytes, "application/vnd.sqlite3");
+      await putR2Object(
+        { accountId: "a", apiToken: "t", kvNamespaceId: "k", r2Bucket: "b" },
+        "state/ceo-intel.sqlite",
+        bytes,
+        "application/vnd.sqlite3",
+      );
       expect(capturedBody).toBe(bytes);
     } finally {
       globalThis.fetch = originalFetch;
@@ -126,7 +145,10 @@ describe("cloudflare.ts: putR2Object accepts binary bodies (sqlite state sync-up
 describe("entry.ts: runOnce() orchestration", () => {
   test("no Cloudflare credentials: ok reflects only the CLI exit code (archive-only expected)", async () => {
     clearCfCreds();
-    mockSpawn({ upExitCode: 0, publishOutput: { published: false, skippedReason: "Cloudflare credentials are not present in env." } });
+    mockSpawn({
+      upExitCode: 0,
+      publishOutput: { published: false, skippedReason: "Cloudflare credentials are not present in env." },
+    });
     const result = await runOnce({ dbPath: runtimeDbPath });
     expect(result.ok).toBe(true);
     expect(result.cliExitCode).toBe(0);
@@ -140,7 +162,11 @@ describe("entry.ts: runOnce() orchestration", () => {
     mockR2Fetch();
     mkdirSync(join(runtimeDbPath, ".."), { recursive: true });
     await Bun.write(runtimeDbPath, new Uint8Array([1, 2, 3]));
-    mockSpawn({ upExitCode: 0, publishOutput: { published: true, idempotentSkip: false }, finalizeOutput: { status: "published" } });
+    mockSpawn({
+      upExitCode: 0,
+      publishOutput: { published: true, idempotentSkip: false },
+      finalizeOutput: { status: "published" },
+    });
     const result = await runOnce({ dbPath: runtimeDbPath });
     expect(result.ok).toBe(true);
     expect(result.published).toBe(true);
@@ -151,7 +177,14 @@ describe("entry.ts: runOnce() orchestration", () => {
   test("idempotentSkip counts as published (duplicate-publish is not a failure)", async () => {
     setCfCreds();
     mockR2Fetch();
-    mockSpawn({ upExitCode: 0, publishOutput: { published: false, idempotentSkip: true, skippedReason: "Already delivered for this issue date; KV writes skipped." } });
+    mockSpawn({
+      upExitCode: 0,
+      publishOutput: {
+        published: false,
+        idempotentSkip: true,
+        skippedReason: "Already delivered for this issue date; KV writes skipped.",
+      },
+    });
     const result = await runOnce({ dbPath: runtimeDbPath });
     expect(result.ok).toBe(true);
     expect(result.published).toBe(true);
@@ -161,7 +194,14 @@ describe("entry.ts: runOnce() orchestration", () => {
   test("with Cloudflare credentials: ok=false when the composed issue was not published (verifier rejection etc.)", async () => {
     setCfCreds();
     mockR2Fetch();
-    mockSpawn({ upExitCode: 0, publishOutput: { published: false, idempotentSkip: false, skippedReason: "The composed issue failed verification." } });
+    mockSpawn({
+      upExitCode: 0,
+      publishOutput: {
+        published: false,
+        idempotentSkip: false,
+        skippedReason: "The composed issue failed verification.",
+      },
+    });
     const result = await runOnce({ dbPath: runtimeDbPath });
     expect(result.ok).toBe(false);
     expect(result.published).toBe(false);
@@ -175,7 +215,9 @@ describe("entry.ts: runOnce() orchestration", () => {
     expect(result.ok).toBe(false);
     expect(result.cliExitCode).toBe(1);
     expect(result.published).toBe(false);
-    expect(result.errors.some((e) => e.includes("smithers up exited 1") && e.includes("boom: workflow crashed"))).toBe(true);
+    expect(result.errors.some((e) => e.includes("smithers up exited 1") && e.includes("boom: workflow crashed"))).toBe(
+      true,
+    );
   });
 
   test("non-zero CLI exit code short-circuits reading publish/finalize node output", async () => {

@@ -1,4 +1,3 @@
-
 /** @typedef {import("@smithers-orchestrator/graph/types").ExtractGraph} ExtractGraph */
 /** @typedef {{ extractGraph?: ExtractGraph }} CoreModule */
 /** @typedef {{ resolveWorktreePath?: (path: string, opts?: { baseRootDir?: string; workflowPath?: string | null }) => string }} WorktreePathModule */
@@ -10,27 +9,28 @@ const LOCAL_GRAPH_SPECIFIER = "../../graph/src/index.js";
  * @returns {Promise<CoreModule | null>}
  */
 export async function importCoreModule(specifier) {
-    try {
-        return (await import(specifier));
-    }
-    catch {
-        return null;
-    }
+  try {
+    return await import(specifier);
+  } catch {
+    return null;
+  }
 }
 /**
  * @returns {Promise<ExtractGraph>}
  */
 export async function resolveExtractGraph(importModule = importCoreModule) {
-    const packageExtractGraph = (await importModule(GRAPH_SPECIFIER))?.extractGraph;
-    if (typeof packageExtractGraph === "function") {
-        return packageExtractGraph;
-    }
-    const localExtractGraph = (await importModule(LOCAL_GRAPH_SPECIFIER))?.extractGraph;
-    if (typeof localExtractGraph === "function") {
-        return localExtractGraph;
-    }
-    throw new Error("Unable to load extractGraph from @smithers-orchestrator/graph. " +
-        "Install @smithers-orchestrator/graph and ensure it exports extractGraph.");
+  const packageExtractGraph = (await importModule(GRAPH_SPECIFIER))?.extractGraph;
+  if (typeof packageExtractGraph === "function") {
+    return packageExtractGraph;
+  }
+  const localExtractGraph = (await importModule(LOCAL_GRAPH_SPECIFIER))?.extractGraph;
+  if (typeof localExtractGraph === "function") {
+    return localExtractGraph;
+  }
+  throw new Error(
+    "Unable to load extractGraph from @smithers-orchestrator/graph. " +
+      "Install @smithers-orchestrator/graph and ensure it exports extractGraph.",
+  );
 }
 /**
  * Node-default `<Worktree path>` resolver, loaded lazily (via a
@@ -46,15 +46,12 @@ export async function resolveExtractGraph(importModule = importCoreModule) {
  * @returns {Promise<((path: string, opts?: { baseRootDir?: string; workflowPath?: string | null }) => string) | undefined>}
  */
 export async function resolveDefaultWorktreePathResolver(importModule = importCoreModule) {
-    const modules = [
-        await importModule(GRAPH_SPECIFIER),
-        await importModule(LOCAL_GRAPH_SPECIFIER),
-    ];
-    for (const mod of modules) {
-        const fn = mod?.resolveWorktreePath;
-        if (typeof fn === "function") {
-            return fn;
-        }
+  const modules = [await importModule(GRAPH_SPECIFIER), await importModule(LOCAL_GRAPH_SPECIFIER)];
+  for (const mod of modules) {
+    const fn = mod?.resolveWorktreePath;
+    if (typeof fn === "function") {
+      return fn;
     }
-    return undefined;
+  }
+  return undefined;
 }

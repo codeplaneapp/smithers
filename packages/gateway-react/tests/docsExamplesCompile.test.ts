@@ -29,11 +29,7 @@ function extractFirstCodeBlock(mdx: string, lang: string): string {
   return mdx.slice(after, end);
 }
 
-function compile(opts: {
-  source: string;
-  fileName: string;
-  jsx: boolean;
-}): { ok: boolean; output: string } {
+function compile(opts: { source: string; fileName: string; jsx: boolean }): { ok: boolean; output: string } {
   const dir = mkdtempSync(join(tmpdir(), "smithers-docs-typecheck-"));
   writeFileSync(join(dir, opts.fileName), opts.source);
   const tsconfig = {
@@ -67,10 +63,7 @@ function compile(opts: {
 
 describe("docs custom-workflow-ui examples", () => {
   test("workflow-ui-react.mdx first tsx block compiles against real packages", () => {
-    const mdx = readFileSync(
-      resolve(REPO_ROOT, "docs/examples/workflow-ui-react.mdx"),
-      "utf8",
-    );
+    const mdx = readFileSync(resolve(REPO_ROOT, "docs/examples/workflow-ui-react.mdx"), "utf8");
     const source = extractFirstCodeBlock(mdx, "tsx");
     const result = compile({ source, fileName: "snippet.tsx", jsx: true });
     if (!result.ok) {
@@ -80,10 +73,7 @@ describe("docs custom-workflow-ui examples", () => {
   }, 20_000);
 
   test("workflow-ui-vanilla.mdx first ts block compiles against real packages", () => {
-    const mdx = readFileSync(
-      resolve(REPO_ROOT, "docs/examples/workflow-ui-vanilla.mdx"),
-      "utf8",
-    );
+    const mdx = readFileSync(resolve(REPO_ROOT, "docs/examples/workflow-ui-vanilla.mdx"), "utf8");
     const source = extractFirstCodeBlock(mdx, "ts");
     const result = compile({ source, fileName: "snippet.ts", jsx: false });
     if (!result.ok) {

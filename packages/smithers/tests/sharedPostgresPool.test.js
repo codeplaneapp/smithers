@@ -115,7 +115,8 @@ const pg = {
   types: { getTypeParser: () => (value) => value },
 };
 
-const url = "postgresql://USER:secret@EXAMPLE.test:5432/smithers?application_name=gateway&password=query-secret&sslmode=require";
+const url =
+  "postgresql://USER:secret@EXAMPLE.test:5432/smithers?application_name=gateway&password=query-secret&sslmode=require";
 
 afterEach(async () => {
   // Every test must release its own leases; this guard catches a regression in
@@ -127,9 +128,18 @@ afterEach(async () => {
 describe("shared PostgreSQL pools", () => {
   test("normalizes equivalent URLs and shares one configured bounded pool", async () => {
     const first = await acquireSharedPostgresPool({ pg, connectionString: url, max: 3 });
-    const second = await acquireSharedPostgresPool({ pg, connectionString: "postgres://USER:secret@example.test/smithers?sslmode=require&password=query-secret&application_name=gateway", max: 3 });
+    const second = await acquireSharedPostgresPool({
+      pg,
+      connectionString:
+        "postgres://USER:secret@example.test/smithers?sslmode=require&password=query-secret&application_name=gateway",
+      max: 3,
+    });
 
-    expect(normalizePostgresConnectionIdentity(url)).toBe(normalizePostgresConnectionIdentity("postgres://USER:secret@example.test/smithers?sslmode=require&password=query-secret&application_name=gateway"));
+    expect(normalizePostgresConnectionIdentity(url)).toBe(
+      normalizePostgresConnectionIdentity(
+        "postgres://USER:secret@example.test/smithers?sslmode=require&password=query-secret&application_name=gateway",
+      ),
+    );
     expect(pools).toHaveLength(1);
     expect(pools[0].options.max).toBe(3);
     expect(sharedPostgresPoolCount()).toBe(1);
@@ -142,7 +152,10 @@ describe("shared PostgreSQL pools", () => {
 
   test("isolates distinct normalized URLs", async () => {
     const first = await acquireSharedPostgresPool({ pg, connectionString: url });
-    const second = await acquireSharedPostgresPool({ pg, connectionString: "postgres://USER:secret@example.test/other" });
+    const second = await acquireSharedPostgresPool({
+      pg,
+      connectionString: "postgres://USER:secret@example.test/other",
+    });
 
     expect(pools).toHaveLength(2);
     await first.close();
@@ -153,14 +166,17 @@ describe("shared PostgreSQL pools", () => {
     const previousPort = process.env.PGPORT;
     try {
       process.env.PGPORT = "6543";
-      expect(normalizePostgresConnectionIdentity("postgres://example.test/smithers"))
-        .not.toBe(normalizePostgresConnectionIdentity("postgres://example.test:5432/smithers"));
-      expect(normalizePostgresConnectionIdentity("postgres://%2Ftmp%2FPgSock/smithers"))
-        .not.toBe(normalizePostgresConnectionIdentity("postgres://%2Ftmp%2Fpgsock/smithers"));
+      expect(normalizePostgresConnectionIdentity("postgres://example.test/smithers")).not.toBe(
+        normalizePostgresConnectionIdentity("postgres://example.test:5432/smithers"),
+      );
+      expect(normalizePostgresConnectionIdentity("postgres://%2Ftmp%2FPgSock/smithers")).not.toBe(
+        normalizePostgresConnectionIdentity("postgres://%2Ftmp%2Fpgsock/smithers"),
+      );
 
       delete process.env.PGPORT;
-      expect(normalizePostgresConnectionIdentity("postgres://example.test/smithers"))
-        .toBe(normalizePostgresConnectionIdentity("postgres://example.test:5432/smithers"));
+      expect(normalizePostgresConnectionIdentity("postgres://example.test/smithers")).toBe(
+        normalizePostgresConnectionIdentity("postgres://example.test:5432/smithers"),
+      );
     } finally {
       if (previousPort === undefined) delete process.env.PGPORT;
       else process.env.PGPORT = previousPort;
@@ -205,7 +221,9 @@ describe("shared PostgreSQL pools", () => {
     expect(resolvePostgresAcquireTimeoutMs(undefined, "250")).toBe(250);
     expect(() => resolvePostgresAcquireTimeoutMs(undefined, "0")).toThrow(RangeError);
     const redacted = redactPostgresIdentity(normalizePostgresConnectionIdentity(url));
-    expect(redacted).toBe("postgres://example.test:5432/smithers?application_name=gateway&password=***&sslmode=require");
+    expect(redacted).toBe(
+      "postgres://example.test:5432/smithers?application_name=gateway&password=***&sslmode=require",
+    );
     expect(redacted).not.toContain("USER");
     expect(redacted).not.toContain("query-secret");
 

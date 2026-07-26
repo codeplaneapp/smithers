@@ -121,21 +121,14 @@ describe("run-workspace-tests sharding", () => {
 
   test("excluding every package yields an empty shard and still exits 0", () => {
     const dir = scaffoldWorkspace();
-    const result = runScript(dir, [
-      "--list",
-      "--exclude",
-      "apps/cli,packages/engine,packages/zeta,.smithers",
-    ]);
+    const result = runScript(dir, ["--list", "--exclude", "apps/cli,packages/engine,packages/zeta,.smithers"]);
     expect(result.status, `stderr:\n${result.stderr}`).toBe(0);
     expect(result.stdout).toContain("Running workspace test shard 1/1 with 0/0 packages");
   });
 
   test("fails loudly on workspace patterns it cannot expand", () => {
     const dir = tempRoot("smithers-shard-badpattern-");
-    write(
-      join(dir, "package.json"),
-      JSON.stringify({ name: "fixture-root", workspaces: ["packages/*/src"] }),
-    );
+    write(join(dir, "package.json"), JSON.stringify({ name: "fixture-root", workspaces: ["packages/*/src"] }));
     const result = runScript(dir, ["--list"]);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Unsupported workspace pattern: packages/*/src");

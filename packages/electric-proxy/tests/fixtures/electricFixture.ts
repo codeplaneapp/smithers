@@ -74,7 +74,20 @@ async function findFreeTcpPort(): Promise<string> {
 
 function psql(sql: string): string {
   return run("docker", [
-    ...compose("exec", "-T", "postgres", "psql", "-U", "smithers", "-d", "smithers", "-v", "ON_ERROR_STOP=1", "-c", sql),
+    ...compose(
+      "exec",
+      "-T",
+      "postgres",
+      "psql",
+      "-U",
+      "smithers",
+      "-d",
+      "smithers",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-c",
+      sql,
+    ),
   ]);
 }
 

@@ -60,7 +60,9 @@ describe("Artifact family", () => {
     expect(container!.querySelector('[data-slot="artifact-title"]')!.tagName).toBe("H3");
     expect(container!.querySelector('[data-slot="artifact-description"]')!.tagName).toBe("P");
     expect(container!.querySelector('[data-slot="artifact-actions"]')!.getAttribute("role")).toBe("toolbar");
-    expect(container!.querySelector('[data-slot="artifact-actions"]')!.getAttribute("aria-label")).toBe("Artifact actions");
+    expect(container!.querySelector('[data-slot="artifact-actions"]')!.getAttribute("aria-label")).toBe(
+      "Artifact actions",
+    );
     expect(container!.querySelector('[data-slot="artifact-content"]')!.textContent).toBe("body");
   });
 
@@ -69,7 +71,11 @@ describe("Artifact family", () => {
     await render(
       <ArtifactActions>
         <ArtifactAction label="Download" tooltip="Download file" icon={<svg />} />
-        <ArtifactClose onClose={() => { closed += 1; }} />
+        <ArtifactClose
+          onClose={() => {
+            closed += 1;
+          }}
+        />
       </ArtifactActions>,
     );
     const action = container!.querySelector('[data-slot="artifact-action"]') as HTMLButtonElement;
@@ -83,7 +89,11 @@ describe("Artifact family", () => {
 
   test("renders under data-theme=dark", async () => {
     document.documentElement.dataset.theme = "dark";
-    await render(<Artifact><ArtifactContent>dark</ArtifactContent></Artifact>);
+    await render(
+      <Artifact>
+        <ArtifactContent>dark</ArtifactContent>
+      </Artifact>,
+    );
     expect(container!.querySelector('[data-slot="artifact"]')!.textContent).toContain("dark");
   });
 });
@@ -100,7 +110,8 @@ describe("Snippet", () => {
   });
 
   test("hides the copy button without a callback or clipboard", async () => {
-    const original = Object.getOwnPropertyDescriptor(Navigator.prototype, "clipboard") ??
+    const original =
+      Object.getOwnPropertyDescriptor(Navigator.prototype, "clipboard") ??
       Object.getOwnPropertyDescriptor(navigator, "clipboard");
     Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
     try {

@@ -27,11 +27,10 @@ describe("verifyOidc", () => {
     const rsa = await rsaKeypair("kid-mixed-rsa");
     const rsaWithoutAlg = { ...rsa.publicJwk };
     delete rsaWithoutAlg.alg;
-    const ec = (await crypto.subtle.generateKey(
-      { name: "ECDSA", namedCurve: "P-256" },
-      true,
-      ["sign", "verify"],
-    )) as CryptoKeyPair;
+    const ec = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+      "sign",
+      "verify",
+    ])) as CryptoKeyPair;
     const ecJwk = await crypto.subtle.exportKey("jwk", ec.publicKey);
     const jwks = serveMutableJwks([
       { ...ecJwk, kid: "kid-mixed-ec", alg: "ES256", use: "sig" },
@@ -66,10 +65,7 @@ describe("verifyOidc", () => {
       ["sign", "verify"],
     )) as CryptoKeyPair;
     const rs512Jwk = await crypto.subtle.exportKey("jwk", rs512.publicKey);
-    const jwks = serveMutableJwks([
-      { ...rs512Jwk, kid: "kid-mixed-rs512", alg: "RS512", use: "sig" },
-      rs256.publicJwk,
-    ]);
+    const jwks = serveMutableJwks([{ ...rs512Jwk, kid: "kid-mixed-rs512", alg: "RS512", use: "sig" }, rs256.publicJwk]);
     const now = Date.now();
     try {
       const token = await signTestJwt(rs256, baseClaims(Math.floor(now / 1000) + 600));
@@ -151,9 +147,7 @@ describe("verifyOidc", () => {
 
       jwks.setKeys([keyA.publicJwk, keyB.publicJwk]);
       const tokenB = await signTestJwt(keyB, baseClaims(exp));
-      expect(
-        (await verifyOidc(tokenB, jwks.url, now + JWKS_REFRESH_COOLDOWN_MS + 2)).ok,
-      ).toBe(true);
+      expect((await verifyOidc(tokenB, jwks.url, now + JWKS_REFRESH_COOLDOWN_MS + 2)).ok).toBe(true);
       expect(jwks.requestCount).toBe(3);
     } finally {
       jwks.stop();
@@ -175,9 +169,7 @@ describe("verifyOidc", () => {
       expect(jwks.requestCount).toBe(1);
 
       jwks.setKeys([key.publicJwk]);
-      expect(
-        (await verifyOidc(token, jwks.url, now + JWKS_REFRESH_COOLDOWN_MS)).ok,
-      ).toBe(true);
+      expect((await verifyOidc(token, jwks.url, now + JWKS_REFRESH_COOLDOWN_MS)).ok).toBe(true);
       expect(jwks.requestCount).toBe(2);
     } finally {
       jwks.stop();
@@ -207,15 +199,7 @@ describe("verifyOidc", () => {
       expect(jwks.requestCount).toBe(2);
 
       jwks.setKeys([keyA.publicJwk, keyB.publicJwk]);
-      expect(
-        (
-          await verifyOidc(
-            tokenB,
-            jwks.url,
-            expiredAt + JWKS_REFRESH_COOLDOWN_MS,
-          )
-        ).ok,
-      ).toBe(true);
+      expect((await verifyOidc(tokenB, jwks.url, expiredAt + JWKS_REFRESH_COOLDOWN_MS)).ok).toBe(true);
       expect(jwks.requestCount).toBe(3);
     } finally {
       jwks.stop();
@@ -239,15 +223,7 @@ describe("verifyOidc", () => {
       expect(jwks.requestCount).toBe(2);
 
       jwks.setKeys([key.publicJwk]);
-      expect(
-        (
-          await verifyOidc(
-            token,
-            jwks.url,
-            expiredAt + JWKS_REFRESH_COOLDOWN_MS,
-          )
-        ).ok,
-      ).toBe(true);
+      expect((await verifyOidc(token, jwks.url, expiredAt + JWKS_REFRESH_COOLDOWN_MS)).ok).toBe(true);
       expect(jwks.requestCount).toBe(3);
     } finally {
       jwks.stop();
@@ -272,9 +248,7 @@ describe("verifyOidc", () => {
       expect(jwks.requestCount).toBe(1);
 
       jwks.setKeys([key.publicJwk]);
-      expect(
-        (await verifyOidc(token, jwks.url, now + JWKS_REFRESH_COOLDOWN_MS)).ok,
-      ).toBe(true);
+      expect((await verifyOidc(token, jwks.url, now + JWKS_REFRESH_COOLDOWN_MS)).ok).toBe(true);
       expect(jwks.requestCount).toBe(2);
     } finally {
       jwks.stop();
@@ -299,9 +273,7 @@ describe("verifyOidc", () => {
       expect(jwks.requestCount).toBe(1);
 
       jwks.setKeys([key.publicJwk]);
-      expect(
-        (await verifyOidc(token, jwks.url, now + JWKS_REFRESH_COOLDOWN_MS)).ok,
-      ).toBe(true);
+      expect((await verifyOidc(token, jwks.url, now + JWKS_REFRESH_COOLDOWN_MS)).ok).toBe(true);
       expect(jwks.requestCount).toBe(2);
     } finally {
       jwks.stop();

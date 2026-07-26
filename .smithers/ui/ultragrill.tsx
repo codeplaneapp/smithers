@@ -80,12 +80,25 @@ function Markdown(props: { text: string }) {
         const h = line.match(/^(#{1,4})\s+(.*)$/);
         if (h) {
           const lvl = h[1].length;
-          return <div key={i} className={"md-h md-h" + lvl}>{h[2]}</div>;
+          return (
+            <div key={i} className={"md-h md-h" + lvl}>
+              {h[2]}
+            </div>
+          );
         }
         const li = line.match(/^\s*[-*]\s+(.*)$/);
-        if (li) return <div key={i} className="md-li">• {li[1]}</div>;
+        if (li)
+          return (
+            <div key={i} className="md-li">
+              • {li[1]}
+            </div>
+          );
         if (line.trim() === "") return <div key={i} className="md-sp" />;
-        return <div key={i} className="md-p">{line}</div>;
+        return (
+          <div key={i} className="md-p">
+            {line}
+          </div>
+        );
       })}
     </div>
   );
@@ -170,7 +183,9 @@ function WorkerPane(props: { runId: string | undefined; index: number | null }) 
         {work && work.artifact ? (
           <Markdown text={work.artifact} />
         ) : (
-          <div className="empty" style={{ margin: "24px auto" }}>The living spec will appear here as the worker updates it.</div>
+          <div className="empty" style={{ margin: "24px auto" }}>
+            The living spec will appear here as the worker updates it.
+          </div>
         )}
       </div>
       <div className="questions">
@@ -185,7 +200,9 @@ function WorkerPane(props: { runId: string | undefined; index: number | null }) 
             ))}
           </ul>
         ) : (
-          <div className="muted" style={{ color: "var(--muted)" }}>No open questions yet — say what you want built.</div>
+          <div className="muted" style={{ color: "var(--muted)" }}>
+            No open questions yet — say what you want built.
+          </div>
         )}
       </div>
     </>
@@ -273,7 +290,12 @@ function App() {
     if (!text || !activeRunId) return;
     setBusy(true);
     try {
-      await actions.submitSignal({ runId: activeRunId, signalName: "utterance", correlationKey: "utterance", payload: { text, end: false } });
+      await actions.submitSignal({
+        runId: activeRunId,
+        signalName: "utterance",
+        correlationKey: "utterance",
+        payload: { text, end: false },
+      });
       // Stamp the directive on the same scale as worker activity: the max worker
       // event seq seen so far plus 0.5, so it sorts after prior activity and
       // before the (higher-seq) worker turn this directive spawns.
@@ -288,7 +310,12 @@ function App() {
     if (!activeRunId) return;
     setBusy(true);
     try {
-      await actions.submitSignal({ runId: activeRunId, signalName: "utterance", correlationKey: "utterance", payload: { text: "", end: true } });
+      await actions.submitSignal({
+        runId: activeRunId,
+        signalName: "utterance",
+        correlationKey: "utterance",
+        payload: { text: "", end: true },
+      });
     } finally {
       setBusy(false);
     }
@@ -301,14 +328,24 @@ function App() {
       <header className="topbar">
         <div className="title-group">
           <h1>UltraGrill</h1>
-          <span className="pill"><span className="mono">{hasRun ? shortRunId(activeRunId) : "no session"}</span></span>
-          {hasRun ? <span className={"badge " + statusClass(runStatus)} data-testid="ug-status">{runStatus ?? "idle"}</span> : null}
+          <span className="pill">
+            <span className="mono">{hasRun ? shortRunId(activeRunId) : "no session"}</span>
+          </span>
+          {hasRun ? (
+            <span className={"badge " + statusClass(runStatus)} data-testid="ug-status">
+              {runStatus ?? "idle"}
+            </span>
+          ) : null}
           {hasRun ? <span className="pill">{events.length} events</span> : null}
         </div>
         <div className="toolbar">
-          <button className="button" data-testid="ug-refresh" onClick={() => void refresh()} disabled={busy}>Refresh</button>
+          <button className="button" data-testid="ug-refresh" onClick={() => void refresh()} disabled={busy}>
+            Refresh
+          </button>
           {hasRun && statusClass(runStatus) === "running" ? (
-            <button className="button danger" data-testid="ug-end" onClick={() => void end()} disabled={busy}>End session</button>
+            <button className="button danger" data-testid="ug-end" onClick={() => void end()} disabled={busy}>
+              End session
+            </button>
           ) : null}
         </div>
       </header>
@@ -316,9 +353,19 @@ function App() {
       {!hasRun ? (
         <div className="launch-form" data-testid="ug-empty">
           <h2>Start a collaboration session</h2>
-          <p>Say what you want built. A worker carries out each directive, keeps a living spec in sync, and asks clarifying questions you can answer or ignore. The session runs until you end it.</p>
-          <input value={goal} onChange={(e) => setGoal(e.currentTarget.value)} placeholder="Session goal" data-testid="ug-goal" />
-          <button className="button primary" data-testid="ug-launch" onClick={() => void launch()} disabled={busy}>Start session</button>
+          <p>
+            Say what you want built. A worker carries out each directive, keeps a living spec in sync, and asks
+            clarifying questions you can answer or ignore. The session runs until you end it.
+          </p>
+          <input
+            value={goal}
+            onChange={(e) => setGoal(e.currentTarget.value)}
+            placeholder="Session goal"
+            data-testid="ug-goal"
+          />
+          <button className="button primary" data-testid="ug-launch" onClick={() => void launch()} disabled={busy}>
+            Start session
+          </button>
           {runs.length > 0 ? (
             <div className="side-runs" style={{ marginTop: 18 }}>
               {runs.map((r) => (
@@ -334,7 +381,9 @@ function App() {
         <div className="main">
           {/* ── conversation + composer ─────────────────────────────── */}
           <div className="col left">
-            <div className="col-head">Conversation <span>{sent.length} sent</span></div>
+            <div className="col-head">
+              Conversation <span>{sent.length} sent</span>
+            </div>
             <div className="feed" data-testid="ug-feed">
               {feed.length === 0 ? (
                 <div className="activity">Say what you want built to begin.</div>
@@ -348,7 +397,9 @@ function App() {
                   ) : (
                     <div key={i} className="activity" data-testid="ug-feed-worker">
                       <span className="mono">worker:{row.idx}</span>
-                      <span className={"ev " + row.state}>{row.state === "done" ? "finished turn" : row.state === "active" ? "working…" : "failed"}</span>
+                      <span className={"ev " + row.state}>
+                        {row.state === "done" ? "finished turn" : row.state === "active" ? "working…" : "failed"}
+                      </span>
                     </div>
                   ),
                 )
@@ -361,10 +412,20 @@ function App() {
                 placeholder="Tell the worker what to do… (text now; voice is a follow-on)"
                 onChange={(e) => setDraft(e.currentTarget.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void send(); }
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    void send();
+                  }
                 }}
               />
-              <button className="button primary" data-testid="ug-send" onClick={() => void send()} disabled={busy || !draft.trim()}>Send</button>
+              <button
+                className="button primary"
+                data-testid="ug-send"
+                onClick={() => void send()}
+                disabled={busy || !draft.trim()}
+              >
+                Send
+              </button>
             </div>
           </div>
 

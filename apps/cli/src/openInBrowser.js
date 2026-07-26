@@ -11,16 +11,15 @@ import { pathToFileURL } from "node:url";
  * @returns {boolean} true if a launcher was spawned, false if none is available.
  */
 export function openInBrowser(target) {
-    const url = /^[a-z]+:\/\//i.test(target) ? target : pathToFileURL(target).href;
-    const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
-    const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
-    try {
-        const proc = spawn(cmd, args, { stdio: "ignore", detached: true });
-        proc.unref();
-        proc.on("error", () => { });
-        return true;
-    }
-    catch {
-        return false;
-    }
+  const url = /^[a-z]+:\/\//i.test(target) ? target : pathToFileURL(target).href;
+  const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
+  const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
+  try {
+    const proc = spawn(cmd, args, { stdio: "ignore", detached: true });
+    proc.unref();
+    proc.on("error", () => {});
+    return true;
+  } catch {
+    return false;
+  }
 }

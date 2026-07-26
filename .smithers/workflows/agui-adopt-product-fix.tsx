@@ -65,7 +65,10 @@ function version(row: RawRow): number {
   return Number.isFinite(iteration) ? iteration : 0;
 }
 function latest(list: RawRow[]): RawRow | undefined {
-  return list.reduce<RawRow | undefined>((best, row) => !best || version(row) >= version(best) ? row : best, undefined);
+  return list.reduce<RawRow | undefined>(
+    (best, row) => (!best || version(row) >= version(best) ? row : best),
+    undefined,
+  );
 }
 
 export default smithers((ctx) => {
@@ -75,14 +78,25 @@ export default smithers((ctx) => {
   const review = latest(rows(ctx, "aguiReview").filter((row) => row.laneId === "adopt-product" && row.seat === "sol"));
   const validationCurrent = impl !== undefined && validation !== undefined && version(validation) === version(impl);
   const reviewCurrent = validationCurrent && review !== undefined && version(review) === version(validation);
-  const done = impl?.status === "implemented" && validationCurrent && validation?.allPassed === true && reviewCurrent && review?.approved === true;
+  const done =
+    impl?.status === "implemented" &&
+    validationCurrent &&
+    validation?.allPassed === true &&
+    reviewCurrent &&
+    review?.approved === true;
   const attempts = rows(ctx, "aguiImplFix").length;
 
   const feedback = [
-    impl && impl.status !== "implemented" ? `IMPLEMENTATION ${String(impl.status).toUpperCase()}:\n${String(impl.summary ?? "")}` : "",
-    validationCurrent && validation?.allPassed === false ? `VALIDATION FAILED:\n${String(validation.failingSummary ?? validation.summary ?? "")}` : "",
+    impl && impl.status !== "implemented"
+      ? `IMPLEMENTATION ${String(impl.status).toUpperCase()}:\n${String(impl.summary ?? "")}`
+      : "",
+    validationCurrent && validation?.allPassed === false
+      ? `VALIDATION FAILED:\n${String(validation.failingSummary ?? validation.summary ?? "")}`
+      : "",
     reviewCurrent && review?.approved === false ? `SOL RE-REVIEW NOT LGTM:\n${String(review.feedback ?? "")}` : "",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   return (
     <Workflow name="agui-adopt-product-fix">
@@ -90,7 +104,14 @@ export default smithers((ctx) => {
       <Sequence>
         <Loop id="fix-loop" until={done} maxIterations={input.maxIterations} onMaxReached="return-last">
           <Sequence>
-            <Task id="fix-implement" output={outputs.aguiImplFix} agent={kimiImplementMulti} retries={2} timeoutMs={90 * 60_000} heartbeatTimeoutMs={15 * 60_000}>
+            <Task
+              id="fix-implement"
+              output={outputs.aguiImplFix}
+              agent={kimiImplementMulti}
+              retries={2}
+              timeoutMs={90 * 60_000}
+              heartbeatTimeoutMs={15 * 60_000}
+            >
               {[
                 `Close Sol's cross-seat findings on Multi's adopt-product lane in ${MULTI_ROOT}. Return laneId=adopt-product exactly.`,
                 `THE FROZEN FINDINGS LIST (fix exactly these; anything else is out of scope):\n${FROZEN_FINDINGS}`,
@@ -98,9 +119,18 @@ export default smithers((ctx) => {
                 "Definition of done: every finding closed with focused tests (red before, green after), pnpm check:ui-architecture + pnpm typecheck green, the focused adoption suite green, work committed via jj with explicit pathspecs.",
                 feedback ? `Previous-attempt feedback (close ALL of it):\n${feedback}` : "",
                 "Return status=implemented only when the checks pass.",
-              ].filter(Boolean).join("\n\n")}
+              ]
+                .filter(Boolean)
+                .join("\n\n")}
             </Task>
-            <Task id="fix-validate" output={outputs.aguiValidation} agent={validateChainMulti} retries={2} timeoutMs={40 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+            <Task
+              id="fix-validate"
+              output={outputs.aguiValidation}
+              agent={validateChainMulti}
+              retries={2}
+              timeoutMs={40 * 60_000}
+              heartbeatTimeoutMs={10 * 60_000}
+            >
               {[
                 "Validate the adopt-product fix round in the Multi repo. Return laneId=adopt-product exactly.",
                 `Implementation report:\n${JSON.stringify(impl ?? null, null, 2)}`,
@@ -110,7 +140,14 @@ export default smithers((ctx) => {
               ].join("\n\n")}
             </Task>
             {validationCurrent && validation?.allPassed === true && validation?.diffNonEmpty === true ? (
-              <Task id="fix-review-sol" output={outputs.aguiReview} agent={solChainMulti} retries={2} timeoutMs={40 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+              <Task
+                id="fix-review-sol"
+                output={outputs.aguiReview}
+                agent={solChainMulti}
+                retries={2}
+                timeoutMs={40 * 60_000}
+                heartbeatTimeoutMs={10 * 60_000}
+              >
                 {[
                   "SCOPE-LOCKED sol-seat re-review of Multi's adopt-product lane after the fix round. Do NOT edit files. Return laneId=adopt-product, seat=sol, reviewer=<your model identity>.",
                   `THE FROZEN FINDINGS LIST (your prior findings):\n${FROZEN_FINDINGS}`,

@@ -27,34 +27,38 @@ const PAGE_SIZE = 200;
  * @param {number} filler
  */
 function makeBurstThenFailedAdapter(filler) {
-    let ticks = 0;
-    /** @type {{ seq: number; type: string; payloadJson?: string }[]} */
-    const log = [];
-    for (let seq = 1; seq <= filler; seq += 1) {
-        log.push({ seq, type: "TaskStateChanged", payloadJson: JSON.stringify({ nodeId: `task-${seq}` }) });
-    }
-    log.push({ seq: filler + 1, type: "RunFailed", payloadJson: JSON.stringify({ error: { message: "guard task threw" } }) });
-    return {
-        async listRuns() {
-            ticks += 1;
-            return [{ runId: RUN_ID, status: ticks >= 2 ? "failed" : "running" }];
-        },
-        async getLastEventSeq() {
-            return 0;
-        },
-        async listEventHistory(_runId, { afterSeq, limit }) {
-            if (ticks < 2) {
-                return [];
-            }
-            return log.filter((row) => row.seq > afterSeq).slice(0, limit);
-        },
-        async listPendingApprovals() {
-            return [];
-        },
-        async listPendingHumanRequests() {
-            return [];
-        },
-    };
+  let ticks = 0;
+  /** @type {{ seq: number; type: string; payloadJson?: string }[]} */
+  const log = [];
+  for (let seq = 1; seq <= filler; seq += 1) {
+    log.push({ seq, type: "TaskStateChanged", payloadJson: JSON.stringify({ nodeId: `task-${seq}` }) });
+  }
+  log.push({
+    seq: filler + 1,
+    type: "RunFailed",
+    payloadJson: JSON.stringify({ error: { message: "guard task threw" } }),
+  });
+  return {
+    async listRuns() {
+      ticks += 1;
+      return [{ runId: RUN_ID, status: ticks >= 2 ? "failed" : "running" }];
+    },
+    async getLastEventSeq() {
+      return 0;
+    },
+    async listEventHistory(_runId, { afterSeq, limit }) {
+      if (ticks < 2) {
+        return [];
+      }
+      return log.filter((row) => row.seq > afterSeq).slice(0, limit);
+    },
+    async listPendingApprovals() {
+      return [];
+    },
+    async listPendingHumanRequests() {
+      return [];
+    },
+  };
 }
 
 /**
@@ -63,25 +67,25 @@ function makeBurstThenFailedAdapter(filler) {
  * the event write did not (yet). The monitor must still report the failure.
  */
 function makeStatusFlipWithoutEventAdapter() {
-    let ticks = 0;
-    return {
-        async listRuns() {
-            ticks += 1;
-            return [{ runId: RUN_ID, status: ticks >= 2 ? "failed" : "running" }];
-        },
-        async getLastEventSeq() {
-            return 3;
-        },
-        async listEventHistory() {
-            return [];
-        },
-        async listPendingApprovals() {
-            return [];
-        },
-        async listPendingHumanRequests() {
-            return [];
-        },
-    };
+  let ticks = 0;
+  return {
+    async listRuns() {
+      ticks += 1;
+      return [{ runId: RUN_ID, status: ticks >= 2 ? "failed" : "running" }];
+    },
+    async getLastEventSeq() {
+      return 3;
+    },
+    async listEventHistory() {
+      return [];
+    },
+    async listPendingApprovals() {
+      return [];
+    },
+    async listPendingHumanRequests() {
+      return [];
+    },
+  };
 }
 
 /**
@@ -89,63 +93,63 @@ function makeStatusFlipWithoutEventAdapter() {
  * History must not be replayed and no terminal line may be synthesized.
  */
 function makePreMonitorFailedAdapter() {
-    return {
-        async listRuns() {
-            return [{ runId: RUN_ID, status: "failed" }];
-        },
-        async getLastEventSeq() {
-            return 5;
-        },
-        async listEventHistory(_runId, { afterSeq, limit }) {
-            return [{ seq: 5, type: "RunFailed", payloadJson: "{}" }].filter((row) => row.seq > afterSeq).slice(0, limit);
-        },
-        async listPendingApprovals() {
-            return [];
-        },
-        async listPendingHumanRequests() {
-            return [];
-        },
-    };
+  return {
+    async listRuns() {
+      return [{ runId: RUN_ID, status: "failed" }];
+    },
+    async getLastEventSeq() {
+      return 5;
+    },
+    async listEventHistory(_runId, { afterSeq, limit }) {
+      return [{ seq: 5, type: "RunFailed", payloadJson: "{}" }].filter((row) => row.seq > afterSeq).slice(0, limit);
+    },
+    async listPendingApprovals() {
+      return [];
+    },
+    async listPendingHumanRequests() {
+      return [];
+    },
+  };
 }
 
 /** @param {any} adapter @param {number} ticks */
 async function collectLines(adapter, ticks) {
-    const lines = [];
-    await runClaudeMonitor(adapter, {
-        ticks,
-        intervalMs: 250,
-        write: (line) => lines.push(JSON.parse(line)),
-    });
-    return lines;
+  const lines = [];
+  await runClaudeMonitor(adapter, {
+    ticks,
+    intervalMs: 250,
+    write: (line) => lines.push(JSON.parse(line)),
+  });
+  return lines;
 }
 
 describe("runClaudeMonitor run-failed delivery", () => {
-    test("a >1 page burst of trailing events does not hide the RunFailed row from the final scan", async () => {
-        // 3 ticks: first-sight, final scan, and a tick that must stay silent.
-        const lines = await collectLines(makeBurstThenFailedAdapter(PAGE_SIZE + 30), 3);
-        const failures = lines.filter((line) => line.kind === "run-failed" && line.runId === RUN_ID);
-        expect(failures.length, JSON.stringify(lines)).toBe(1);
-        expect(failures[0].summary).toContain(RUN_ID);
-        expect(failures[0].action).toContain(RUN_ID);
-    });
+  test("a >1 page burst of trailing events does not hide the RunFailed row from the final scan", async () => {
+    // 3 ticks: first-sight, final scan, and a tick that must stay silent.
+    const lines = await collectLines(makeBurstThenFailedAdapter(PAGE_SIZE + 30), 3);
+    const failures = lines.filter((line) => line.kind === "run-failed" && line.runId === RUN_ID);
+    expect(failures.length, JSON.stringify(lines)).toBe(1);
+    expect(failures[0].summary).toContain(RUN_ID);
+    expect(failures[0].action).toContain(RUN_ID);
+  });
 
-    test("a status flip whose RunFailed event row is not yet visible still emits one run-failed line", async () => {
-        const lines = await collectLines(makeStatusFlipWithoutEventAdapter(), 3);
-        const failures = lines.filter((line) => line.kind === "run-failed" && line.runId === RUN_ID);
-        expect(failures.length, JSON.stringify(lines)).toBe(1);
-        expect(failures[0].summary).toBe(`Run ${RUN_ID} failed.`);
-    });
+  test("a status flip whose RunFailed event row is not yet visible still emits one run-failed line", async () => {
+    const lines = await collectLines(makeStatusFlipWithoutEventAdapter(), 3);
+    const failures = lines.filter((line) => line.kind === "run-failed" && line.runId === RUN_ID);
+    expect(failures.length, JSON.stringify(lines)).toBe(1);
+    expect(failures[0].summary).toBe(`Run ${RUN_ID} failed.`);
+  });
 
-    test("a run that failed before the monitor started stays silent (no replay, no synthesis)", async () => {
-        const lines = await collectLines(makePreMonitorFailedAdapter(), 3);
-        expect(lines, JSON.stringify(lines)).toEqual([]);
-    });
+  test("a run that failed before the monitor started stays silent (no replay, no synthesis)", async () => {
+    const lines = await collectLines(makePreMonitorFailedAdapter(), 3);
+    expect(lines, JSON.stringify(lines)).toEqual([]);
+  });
 
-    test("a RunFailed row found on the final scan is emitted once, without a synthesized duplicate", async () => {
-        // Burst below one page: the real event is on the first page of the
-        // final scan; the status-derived fallback must not double it.
-        const lines = await collectLines(makeBurstThenFailedAdapter(10), 3);
-        const failures = lines.filter((line) => line.kind === "run-failed" && line.runId === RUN_ID);
-        expect(failures.length, JSON.stringify(lines)).toBe(1);
-    });
+  test("a RunFailed row found on the final scan is emitted once, without a synthesized duplicate", async () => {
+    // Burst below one page: the real event is on the first page of the
+    // final scan; the status-derived fallback must not double it.
+    const lines = await collectLines(makeBurstThenFailedAdapter(10), 3);
+    const failures = lines.filter((line) => line.kind === "run-failed" && line.runId === RUN_ID);
+    expect(failures.length, JSON.stringify(lines)).toBe(1);
+  });
 });

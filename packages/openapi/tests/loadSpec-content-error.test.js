@@ -17,10 +17,10 @@ import { loadSpecEffect } from "../src/loadSpecEffect.js";
  * @returns {string}
  */
 function writeTempSpec(content) {
-    const dir = mkdtempSync(join(tmpdir(), "openapi-broken-"));
-    const filePath = join(dir, "openapi.json");
-    writeFileSync(filePath, content, "utf8");
-    return filePath;
+  const dir = mkdtempSync(join(tmpdir(), "openapi-broken-"));
+  const filePath = join(dir, "openapi.json");
+  writeFileSync(filePath, content, "utf8");
+  return filePath;
 }
 
 // Broken JSON that also fails YAML parsing — guarantees parseSpecText throws
@@ -28,25 +28,21 @@ function writeTempSpec(content) {
 const brokenContent = '{ "openapi": "3.0.0", "paths": { ';
 
 describe("loadSpec surfaces content-parse errors for real file paths", () => {
-    test("loadSpecSync reports the genuine parse error, not the path", () => {
-        const filePath = writeTempSpec(brokenContent);
-        // Before the fix, the readFileSync content threw inside the try, the
-        // catch re-parsed the *file path string* as YAML (a valid scalar),
-        // and surfaced the misleading "...does not appear to be a valid
-        // OpenAPI spec" error. The corrected behavior surfaces the real
-        // content-parse failure.
-        expect(() => loadSpecSync(filePath)).toThrow(
-            "Failed to parse OpenAPI spec as JSON or YAML",
-        );
-        expect(() => loadSpecSync(filePath)).not.toThrow(
-            /does not appear to be a valid OpenAPI spec/,
-        );
-    });
+  test("loadSpecSync reports the genuine parse error, not the path", () => {
+    const filePath = writeTempSpec(brokenContent);
+    // Before the fix, the readFileSync content threw inside the try, the
+    // catch re-parsed the *file path string* as YAML (a valid scalar),
+    // and surfaced the misleading "...does not appear to be a valid
+    // OpenAPI spec" error. The corrected behavior surfaces the real
+    // content-parse failure.
+    expect(() => loadSpecSync(filePath)).toThrow("Failed to parse OpenAPI spec as JSON or YAML");
+    expect(() => loadSpecSync(filePath)).not.toThrow(/does not appear to be a valid OpenAPI spec/);
+  });
 
-    test("loadSpecEffect reports the genuine parse error, not the path", async () => {
-        const filePath = writeTempSpec(brokenContent);
-        await expect(
-            Effect.runPromise(loadSpecEffect(filePath)),
-        ).rejects.toThrow("Failed to parse OpenAPI spec as JSON or YAML");
-    });
+  test("loadSpecEffect reports the genuine parse error, not the path", async () => {
+    const filePath = writeTempSpec(brokenContent);
+    await expect(Effect.runPromise(loadSpecEffect(filePath))).rejects.toThrow(
+      "Failed to parse OpenAPI spec as JSON or YAML",
+    );
+  });
 });

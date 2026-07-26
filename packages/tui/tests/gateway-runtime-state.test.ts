@@ -48,11 +48,7 @@ async function removeTempDir(dir: string) {
 }
 
 /** Write a state file under `stateDir` keyed by `workspaceRoot`, returning its path. */
-function writeState(
-  stateDir: string,
-  workspaceRoot: string,
-  state: Record<string, unknown>,
-): string {
+function writeState(stateDir: string, workspaceRoot: string, state: Record<string, unknown>): string {
   mkdirSync(stateDir, { recursive: true });
   const { stateFile } = workspaceGatewayStatePath(workspaceRoot, { SMITHERS_GATEWAY_STATE_DIR: stateDir });
   writeFileSync(stateFile, JSON.stringify(state), { mode: 0o600 });
@@ -213,7 +209,9 @@ describe("state path parity with the CLI writer (gateway-runtime.js)", () => {
     const workspaceRoot = tempDir("smx-ws-");
     const stateDir = tempDir("smx-state-");
     const env = { SMITHERS_GATEWAY_STATE_DIR: stateDir };
-    expect(workspaceGatewayStatePath(workspaceRoot, env).stateFile).toBe(gatewayRuntimePaths(workspaceRoot, env).stateFile);
+    expect(workspaceGatewayStatePath(workspaceRoot, env).stateFile).toBe(
+      gatewayRuntimePaths(workspaceRoot, env).stateFile,
+    );
   });
 
   test("a Linux-style XDG_RUNTIME_DIR env keys identically on both sides", () => {
@@ -221,6 +219,8 @@ describe("state path parity with the CLI writer (gateway-runtime.js)", () => {
     // the shared inputs must still yield identical paths per platform.
     const workspaceRoot = tempDir("smx-ws-");
     const env = { XDG_RUNTIME_DIR: tempDir("smx-xdg-") };
-    expect(workspaceGatewayStatePath(workspaceRoot, env).stateFile).toBe(gatewayRuntimePaths(workspaceRoot, env).stateFile);
+    expect(workspaceGatewayStatePath(workspaceRoot, env).stateFile).toBe(
+      gatewayRuntimePaths(workspaceRoot, env).stateFile,
+    );
   });
 });

@@ -1,14 +1,7 @@
 // smithers-display-name: Local UI Feature Swarm
 // smithers-source: authored
 /** @jsxImportSource smithers-orchestrator */
-import {
-  ClaudeCodeAgent,
-  Parallel,
-  Sequence,
-  Task,
-  Worktree,
-  createSmithers,
-} from "smithers-orchestrator";
+import { ClaudeCodeAgent, Parallel, Sequence, Task, Worktree, createSmithers } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { z } from "zod/v4";
@@ -120,12 +113,45 @@ const claudeFallback = new ClaudeCodeAgent({
 });
 
 const solModel = process.env.SMITHERS_LOCAL_UI_SOL_MODEL ?? process.env.SMITHERS_LOCAL_UI_CODEX_MODEL ?? "gpt-5.6-sol";
-const lunaModel = process.env.SMITHERS_LOCAL_UI_LUNA_MODEL ?? process.env.SMITHERS_LOCAL_UI_CODEX_MODEL ?? "gpt-5.6-luna";
-const solPrimary = codexFirst({ model: solModel, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [claudeFallback]);
-const solSecondary = codexFirst({ model: solModel, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [claudeFallback]);
-const luna = codexFirst({ model: lunaModel, config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [claudeFallback]);
+const lunaModel =
+  process.env.SMITHERS_LOCAL_UI_LUNA_MODEL ?? process.env.SMITHERS_LOCAL_UI_CODEX_MODEL ?? "gpt-5.6-luna";
+const solPrimary = codexFirst(
+  {
+    model: solModel,
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
+  [claudeFallback],
+);
+const solSecondary = codexFirst(
+  {
+    model: solModel,
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
+  [claudeFallback],
+);
+const luna = codexFirst(
+  {
+    model: lunaModel,
+    config: { model_reasoning_effort: "medium" },
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
+  [claudeFallback],
+);
 const mergeLuna = codexFirst(
-  { model: lunaModel, config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true, cwd: repoRoot },
+  {
+    model: lunaModel,
+    config: { model_reasoning_effort: "medium" },
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+    cwd: repoRoot,
+  },
   [new ClaudeCodeAgent({ model: process.env.SMITHERS_LOCAL_UI_CLAUDE_MODEL ?? "claude-sonnet-5", cwd: repoRoot })],
 );
 
@@ -193,8 +219,7 @@ const FEATURES: Feature[] = [
     id: "vcs",
     title: "Local VCS surface",
     priority: 94,
-    summary:
-      "Add a local git/jj status surface using the user's machine and workspace, not JJHub APIs.",
+    summary: "Add a local git/jj status surface using the user's machine and workspace, not JJHub APIs.",
     acceptanceCriteria: [
       "Adds /vcs routing/nav/dock integration.",
       "Detects git and jj working-tree state locally and presents status/bookmarks/changes.",
@@ -223,8 +248,7 @@ const FEATURES: Feature[] = [
     id: "run-diffs",
     title: "Real run and node diffs",
     priority: 90,
-    summary:
-      "Wire the diff canvas to real gateway node diff data instead of AUTH_REFACTOR_DIFF.",
+    summary: "Wire the diff canvas to real gateway node diff data instead of AUTH_REFACTOR_DIFF.",
     acceptanceCriteria: [
       "Diff routes fetch real diff data for the selected run/node/diff id.",
       "The existing large diff, binary, rename, collapse, and pagination UI still works.",
@@ -267,8 +291,7 @@ const FEATURES: Feature[] = [
     id: "agent-mutations",
     title: "Persistent local agent account mutations",
     priority: 84,
-    summary:
-      "Replace client-only register/remove/test echoes with real local gateway/CLI account mutations.",
+    summary: "Replace client-only register/remove/test echoes with real local gateway/CLI account mutations.",
     acceptanceCriteria: [
       "Register, remove, and test account actions persist through the same registry used by smithers agents.",
       "Raw API keys are never echoed into logs, UI, or tests.",
@@ -297,8 +320,7 @@ const FEATURES: Feature[] = [
     id: "approval-history",
     title: "Persistent approval history",
     priority: 80,
-    summary:
-      "Persist approved/denied approval decisions so the History tab is not only optimistic client state.",
+    summary: "Persist approved/denied approval decisions so the History tab is not only optimistic client state.",
     acceptanceCriteria: [
       "Approval decisions survive reload and are queryable from the gateway/local DB.",
       "Pending approvals remain live and decisions reconcile without duplicate history rows.",
@@ -365,13 +387,23 @@ const FEATURES: Feature[] = [
       "No cloud-only surfaces are added.",
       "Tests cover nav menu and route derivation.",
     ],
-    likelyFiles: ["apps/smithers/src/navMenu.ts", "apps/smithers/src/apps/appCatalog.ts", "apps/smithers/src/CommandMenu.tsx"],
+    likelyFiles: [
+      "apps/smithers/src/navMenu.ts",
+      "apps/smithers/src/apps/appCatalog.ts",
+      "apps/smithers/src/CommandMenu.tsx",
+    ],
     suggestedChecks: ["pnpm -C apps/smithers test", "pnpm typecheck"],
   },
 ];
 
 function slug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64) || "feature";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 64) || "feature"
+  );
 }
 
 function featureById(id: string): Feature | undefined {
@@ -404,11 +436,7 @@ function featureDone(ctx: any, featureId: string): boolean {
   const implementation = latestForFeature<Implementation>(ctx.outputs.implementation, featureId);
   const claudeReview = latestForFeature<Review>(ctx.outputs.reviewClaude, featureId);
   const codexReview = latestForFeature<Review>(ctx.outputs.reviewCodex, featureId);
-  return (
-    implementation?.status === "implemented" &&
-    claudeReview?.approved === true &&
-    codexReview?.approved === true
-  );
+  return implementation?.status === "implemented" && claudeReview?.approved === true && codexReview?.approved === true;
 }
 
 function featureMerged(ctx: any, featureId: string): boolean {
@@ -482,7 +510,9 @@ function planSynthesisPrompt(feature: Feature, plans: Plan[]): string {
     featureBrief(feature),
     "",
     "Panel plan rows:",
-    plans.length ? JSON.stringify(plans, null, 2) : "No plan rows are visible yet; return approved=false and explain that the implementation must follow the feature brief only.",
+    plans.length
+      ? JSON.stringify(plans, null, 2)
+      : "No plan rows are visible yet; return approved=false and explain that the implementation must follow the feature brief only.",
     "",
     "Return JSON with featureId exactly the feature id, approved, summary, selectedApproach, rejectedIdeas, implementationPromptAddendum, and checks.",
   ].join("\n");
@@ -535,7 +565,9 @@ function reviewPrompt(
     featureBrief(feature),
     "",
     "Implementation self-report:",
-    implementation ? JSON.stringify(implementation, null, 2) : "No implementation report is visible yet; inspect the worktree directly.",
+    implementation
+      ? JSON.stringify(implementation, null, 2)
+      : "No implementation report is visible yet; inspect the worktree directly.",
     "",
     "Review requirements:",
     "- Inspect git/jj diff and changed files in full.",
@@ -575,7 +607,9 @@ function mergePrompt(feature: Feature, worktreePath: string, branch: string, gat
 }
 
 function finalResult(features: Feature[], merges: MergeResult[] | undefined): z.infer<typeof finalSchema> {
-  const merged = features.filter((feature) => latestForFeature(merges, feature.id)?.mergedToMain === true).map((feature) => feature.id);
+  const merged = features
+    .filter((feature) => latestForFeature(merges, feature.id)?.mergedToMain === true)
+    .map((feature) => feature.id);
   const unmerged = features.filter((feature) => !merged.includes(feature.id)).map((feature) => feature.id);
   return {
     merged,
@@ -634,7 +668,12 @@ export default smithers((ctx) => {
                       {planSynthesisPrompt(feature, plans)}
                     </Task>
 
-                    <Loop id={`${feature.id}:review-loop`} until={done} maxIterations={maxReviewIterations} onMaxReached="return-last">
+                    <Loop
+                      id={`${feature.id}:review-loop`}
+                      until={done}
+                      maxIterations={maxReviewIterations}
+                      onMaxReached="return-last"
+                    >
                       <Sequence>
                         <Task
                           id={`${feature.id}:implement`}

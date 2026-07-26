@@ -27,9 +27,9 @@ export const DC_SKIP_PREVIEW_SIGNAL = "dc-skip-preview";
 
 /** A delegation node's predicted (or measured) resource envelope. */
 export const estimateSchema = z.object({
-	tokens: z.number(),
-	costUsd: z.number(),
-	minutes: z.number(),
+  tokens: z.number(),
+  costUsd: z.number(),
+  minutes: z.number(),
 });
 
 /** Developer-preview gate kinds: what artifact proves the node's work is showable. */
@@ -43,10 +43,10 @@ export const devPreviewKindSchema = z.enum(["app", "terminal", "api", "throwaway
  * UI's invalidate / request-changes affordances (which emit dc-edit rounds).
  */
 export const gateSchema = z.discriminatedUnion("method", [
-	z.object({ method: z.literal("review"), tier: tierSchema, brief: z.string() }),
-	z.object({ method: z.literal("check"), command: z.string() }),
-	z.object({ method: z.literal("approval"), policyMatch: z.string() }),
-	z.object({ method: z.literal("preview"), kind: devPreviewKindSchema, brief: z.string() }),
+  z.object({ method: z.literal("review"), tier: tierSchema, brief: z.string() }),
+  z.object({ method: z.literal("check"), command: z.string() }),
+  z.object({ method: z.literal("approval"), policyMatch: z.string() }),
+  z.object({ method: z.literal("preview"), kind: devPreviewKindSchema, brief: z.string() }),
 ]);
 
 /**
@@ -56,23 +56,23 @@ export const gateSchema = z.discriminatedUnion("method", [
  * burning validation retries — the GrillMe precedent.
  */
 export const dcGoalSchema = z.object({
-	logicalId: z.string().default("goal"),
-	refinedPrompt: z.string().default(""),
-	assumptions: z.array(z.string()).default([]),
-	questionsAsked: z.number().int().default(0),
+  logicalId: z.string().default("goal"),
+  refinedPrompt: z.string().default(""),
+  assumptions: z.array(z.string()).default([]),
+  questionsAsked: z.number().int().default(0),
 });
 
 /** Rendered form metadata for one goal-refinement question (haiku prefetch renders these ahead of the user). */
 export const dcQuestionSchema = z.object({
-	logicalId: z.string(),
-	seq: z.number().int(),
-	question: z.string(),
-	header: z.string(),
-	kind: z.enum(["select", "confirm", "text"]),
-	options: z.array(z.object({ label: z.string(), description: z.string() })).optional(),
-	recommended: z.string(),
-	reason: z.string(),
-	resolved: z.boolean(),
+  logicalId: z.string(),
+  seq: z.number().int(),
+  question: z.string(),
+  header: z.string(),
+  kind: z.enum(["select", "confirm", "text"]),
+  options: z.array(z.object({ label: z.string(), description: z.string() })).optional(),
+  recommended: z.string(),
+  reason: z.string(),
+  resolved: z.boolean(),
 });
 
 /**
@@ -82,18 +82,20 @@ export const dcQuestionSchema = z.object({
  * dcQuestion rows from it.
  */
 export const dcForecastSchema = z.object({
-	logicalId: z.string().default("goal"),
-	total: z.number().int().default(0),
-	questions: z.array(
-		z.object({
-			seq: z.number().int(),
-			question: z.string(),
-			kind: z.enum(["select", "confirm", "text"]),
-			options: z.array(z.object({ label: z.string(), description: z.string() })).optional(),
-			recommended: z.string(),
-			reason: z.string(),
-		}),
-	).default([]),
+  logicalId: z.string().default("goal"),
+  total: z.number().int().default(0),
+  questions: z
+    .array(
+      z.object({
+        seq: z.number().int(),
+        question: z.string(),
+        kind: z.enum(["select", "confirm", "text"]),
+        options: z.array(z.object({ label: z.string(), description: z.string() })).optional(),
+        recommended: z.string(),
+        reason: z.string(),
+      }),
+    )
+    .default([]),
 });
 
 /**
@@ -102,8 +104,8 @@ export const dcForecastSchema = z.object({
  * (possibly edited) refinedPrompt becomes the root planning brief.
  */
 export const dcGoalApprovalSchema = z.object({
-	approved: z.boolean(),
-	refinedPrompt: z.string(),
+  approved: z.boolean(),
+  refinedPrompt: z.string(),
 });
 
 /**
@@ -113,56 +115,56 @@ export const dcGoalApprovalSchema = z.object({
  * physical id the gateway's getNodeOutput/getNodeDiff reject.
  */
 const logicalIdSchema = z
-	.string()
-	.regex(
-		/^[a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)*$/,
-		'logicalId must be path-style with segments of [a-zA-Z0-9_-] joined by "/"',
-	)
-	.max(128);
+  .string()
+  .regex(
+    /^[a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)*$/,
+    'logicalId must be path-style with segments of [a-zA-Z0-9_-] joined by "/"',
+  )
+  .max(128);
 
 /** One row per delegating node: its children, risks, and resource estimates. Replans append superseding rows. */
 export const dcPlanSchema = z.object({
-	logicalId: logicalIdSchema,
-	tier: tierSchema,
-	title: z.string(),
-	brief: z.string(),
-	children: z.array(
-		z.object({
-			logicalId: logicalIdSchema,
-			tier: tierSchema,
-			kind: z.enum(["chunk", "leaf"]),
-			title: z.string(),
-			brief: z.string(),
-			estimate: estimateSchema,
-		}),
-	),
-	subtreeEstimate: estimateSchema,
-	risks: z.array(
-		z.object({
-			id: z.string(),
-			description: z.string(),
-			probe: z.enum(["poc", "research"]).nullable(),
-			reason: z.string(),
-		}),
-	),
-	// v2 higher-order orchestration: reserved. A "workflow" node will AUTHOR a
-	// bespoke smithers workflow (its own state machine over the standard
-	// component library) as its execution strategy instead of decomposing into
-	// task subtrees. Deferred for UI/debuggability complexity; default "tasks".
-	orchestration: z.enum(["tasks", "workflow"]).optional(),
+  logicalId: logicalIdSchema,
+  tier: tierSchema,
+  title: z.string(),
+  brief: z.string(),
+  children: z.array(
+    z.object({
+      logicalId: logicalIdSchema,
+      tier: tierSchema,
+      kind: z.enum(["chunk", "leaf"]),
+      title: z.string(),
+      brief: z.string(),
+      estimate: estimateSchema,
+    }),
+  ),
+  subtreeEstimate: estimateSchema,
+  risks: z.array(
+    z.object({
+      id: z.string(),
+      description: z.string(),
+      probe: z.enum(["poc", "research"]).nullable(),
+      reason: z.string(),
+    }),
+  ),
+  // v2 higher-order orchestration: reserved. A "workflow" node will AUTHOR a
+  // bespoke smithers workflow (its own state machine over the standard
+  // component library) as its execution strategy instead of decomposing into
+  // task subtrees. Deferred for UI/debuggability complexity; default "tasks".
+  orchestration: z.enum(["tasks", "workflow"]).optional(),
 });
 
 /** Zero-backpressure haiku render of a leaf's expected output. NEVER executed — calibration only. */
 export const dcPreviewSchema = z.object({
-	logicalId: z.string(),
-	expectedOutput: z.string(),
+  logicalId: z.string(),
+  expectedOutput: z.string(),
 });
 
 /** A node's declared backpressure gates and logical dependencies. */
 export const dcGatesSchema = z.object({
-	logicalId: z.string(),
-	gates: z.array(gateSchema),
-	depsLogical: z.array(logicalIdSchema),
+  logicalId: z.string(),
+  gates: z.array(gateSchema),
+  depsLogical: z.array(logicalIdSchema),
 });
 
 /**
@@ -171,41 +173,41 @@ export const dcGatesSchema = z.object({
  * the node redelegates with the failure folded into the next attempt.
  */
 export const dcDevPreviewSchema = z.object({
-	logicalId: z.string(),
-	kind: devPreviewKindSchema,
-	title: z.string(),
-	builtOk: z.boolean(),
-	artifact: z.object({
-		type: z.enum(["html", "url", "markdown"]),
-		content: z.string().optional(),
-		url: z.string().optional(),
-	}),
-	instructions: z.string().optional(),
-	summary: z.string(),
+  logicalId: z.string(),
+  kind: devPreviewKindSchema,
+  title: z.string(),
+  builtOk: z.boolean(),
+  artifact: z.object({
+    type: z.enum(["html", "url", "markdown"]),
+    content: z.string().optional(),
+    url: z.string().optional(),
+  }),
+  instructions: z.string().optional(),
+  summary: z.string(),
 });
 
 /** A risk probe's finding. The report is delivered to the NEAREST PARENT only. */
 export const dcProbeSchema = z.object({
-	probeId: z.string(),
-	parentLogicalId: z.string(),
-	kind: z.enum(["poc", "research"]),
-	question: z.string(),
-	answer: z.string(),
-	report: z.string(),
-	planImpact: z.enum(["changes", "confirms", "none"]),
-	proposedChange: z.string().optional(),
+  probeId: z.string(),
+  parentLogicalId: z.string(),
+  kind: z.enum(["poc", "research"]),
+  question: z.string(),
+  answer: z.string(),
+  report: z.string(),
+  planImpact: z.enum(["changes", "confirms", "none"]),
+  proposedChange: z.string().optional(),
 });
 
 /** A replan decision for one affected node. `invalidated` bumps the node version; prior versions stay archived. */
 export const dcReplanSchema = z.object({
-	round: z.number().int(),
-	logicalId: z.string(),
-	decision: z.enum(["invalidated", "reaffirmed"]),
-	reason: z.string(),
-	trigger: z.object({
-		type: z.enum(["probe", "user-edit", "review-fail"]),
-		ref: z.string(),
-	}),
+  round: z.number().int(),
+  logicalId: z.string(),
+  decision: z.enum(["invalidated", "reaffirmed"]),
+  reason: z.string(),
+  trigger: z.object({
+    type: z.enum(["probe", "user-edit", "review-fail"]),
+    ref: z.string(),
+  }),
 });
 
 /**
@@ -215,32 +217,32 @@ export const dcReplanSchema = z.object({
  * fails, never a reason to fail the exec).
  */
 export const dcExecSchema = z.object({
-	logicalId: z.string(),
-	attempt: z.number().int(),
-	summary: z.string(),
-	artifacts: z.array(z.string()),
-	actual: z
-		.object({
-			tokens: z.number().optional(),
-			costUsd: z.number().optional(),
-			minutes: z.number().optional(),
-		})
-		.optional(),
-	commitRange: z
-		.object({
-			from: z.string(),
-			to: z.string(),
-			vcs: z.enum(["jj", "git"]),
-		})
-		.optional(),
+  logicalId: z.string(),
+  attempt: z.number().int(),
+  summary: z.string(),
+  artifacts: z.array(z.string()),
+  actual: z
+    .object({
+      tokens: z.number().optional(),
+      costUsd: z.number().optional(),
+      minutes: z.number().optional(),
+    })
+    .optional(),
+  commitRange: z
+    .object({
+      from: z.string(),
+      to: z.string(),
+      vcs: z.enum(["jj", "git"]),
+    })
+    .optional(),
 });
 
 /** A review/check gate verdict for one execution attempt. */
 export const dcReviewSchema = z.object({
-	logicalId: z.string(),
-	attempt: z.number().int(),
-	verdict: z.enum(["pass", "fail"]),
-	feedback: z.string(),
+  logicalId: z.string(),
+  attempt: z.number().int(),
+  verdict: z.enum(["pass", "fail"]),
+  feedback: z.string(),
 });
 
 /**
@@ -248,34 +250,34 @@ export const dcReviewSchema = z.object({
  * provided). Shape mirrors the stock `<Approval>` decision payload.
  */
 export const dcApprovalSchema = z.object({
-	approved: z.boolean(),
-	note: z.string().nullable().optional(),
-	decidedBy: z.string().nullable(),
-	decidedAt: z.string().nullable(),
+  approved: z.boolean(),
+  note: z.string().nullable().optional(),
+  decidedBy: z.string().nullable(),
+  decidedAt: z.string().nullable(),
 });
 
 /** Live user-edit signal payload (event name `dc-edit`). Each edit triggers a replan round. */
 export const dcEditSchema = z.object({
-	editId: z.string(),
-	logicalId: z.string(),
-	editedOutput: z.unknown(),
-	note: z.string().optional(),
+  editId: z.string(),
+  logicalId: z.string(),
+  editedOutput: z.unknown(),
+  note: z.string().optional(),
 });
 
 /** Skip-previews signal payload (event name `dc-skip-preview`). */
 export const dcSkipSchema = z.object({
-	skipped: z.boolean(),
+  skipped: z.boolean(),
 });
 
 /** End-of-run satisfaction poll (HumanTask json form). */
 export const dcPollSchema = z.object({
-	answers: z.array(
-		z.object({
-			question: z.string(),
-			rating: z.number().int().min(1).max(5),
-		}),
-	),
-	comment: z.string().optional(),
+  answers: z.array(
+    z.object({
+      question: z.string(),
+      rating: z.number().int().min(1).max(5),
+    }),
+  ),
+  comment: z.string().optional(),
 });
 
 /**
@@ -284,18 +286,18 @@ export const dcPollSchema = z.object({
  * breach fails the guard task (error into the run); >= 80% emits a `warn` row.
  */
 export const dcBudgetSchema = z.object({
-	logicalId: z.string(),
-	level: z.enum(["ok", "warn"]),
-	totalUsd: z.number(),
-	maxUsd: z.number().nullable(),
-	totalMinutes: z.number(),
-	maxMinutes: z.number().nullable(),
+  logicalId: z.string(),
+  level: z.enum(["ok", "warn"]),
+  totalUsd: z.number(),
+  maxUsd: z.number().nullable(),
+  totalMinutes: z.number(),
+  maxMinutes: z.number().nullable(),
 });
 
 /** Run-level scoring digest (internal): the row delegation run scorers evaluate. */
 export const dcScoreSchema = z.object({
-	logicalId: z.string(),
-	summary: z.string(),
+  logicalId: z.string(),
+  summary: z.string(),
 });
 
 /**
@@ -303,22 +305,22 @@ export const dcScoreSchema = z.object({
  * `createSmithers({ ...delegationSchemas })` to register them.
  */
 export const delegationSchemas = {
-	dcGoal: dcGoalSchema,
-	dcQuestion: dcQuestionSchema,
-	dcForecast: dcForecastSchema,
-	dcGoalApproval: dcGoalApprovalSchema,
-	dcPlan: dcPlanSchema,
-	dcPreview: dcPreviewSchema,
-	dcDevPreview: dcDevPreviewSchema,
-	dcGates: dcGatesSchema,
-	dcProbe: dcProbeSchema,
-	dcReplan: dcReplanSchema,
-	dcExec: dcExecSchema,
-	dcReview: dcReviewSchema,
-	dcApproval: dcApprovalSchema,
-	dcEdit: dcEditSchema,
-	dcSkip: dcSkipSchema,
-	dcPoll: dcPollSchema,
-	dcBudget: dcBudgetSchema,
-	dcScore: dcScoreSchema,
+  dcGoal: dcGoalSchema,
+  dcQuestion: dcQuestionSchema,
+  dcForecast: dcForecastSchema,
+  dcGoalApproval: dcGoalApprovalSchema,
+  dcPlan: dcPlanSchema,
+  dcPreview: dcPreviewSchema,
+  dcDevPreview: dcDevPreviewSchema,
+  dcGates: dcGatesSchema,
+  dcProbe: dcProbeSchema,
+  dcReplan: dcReplanSchema,
+  dcExec: dcExecSchema,
+  dcReview: dcReviewSchema,
+  dcApproval: dcApprovalSchema,
+  dcEdit: dcEditSchema,
+  dcSkip: dcSkipSchema,
+  dcPoll: dcPollSchema,
+  dcBudget: dcBudgetSchema,
+  dcScore: dcScoreSchema,
 };

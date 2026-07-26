@@ -8,12 +8,7 @@ import type { RunNode } from "./Run";
  * Steps: plan → edit-files (auth/session.ts, auth/token.ts) → run-tests.
  * The deploy gate is surfaced as a separate approval card, not a tree node.
  */
-function frame(
-  plan: RunNode,
-  edit: RunNode,
-  tests: RunNode,
-  status: RunNode["status"],
-): RunNode {
+function frame(plan: RunNode, edit: RunNode, tests: RunNode, status: RunNode["status"]): RunNode {
   return {
     id: "workflow",
     name: "workflow",
@@ -103,12 +98,7 @@ const TESTS_OK: RunNode = {
 
 export const AUTH_REFACTOR_FRAMES: RunNode[] = [
   // 0 — planning
-  frame(
-    PLAN_RUNNING,
-    editFiles("queued", "queued", [TOKEN_QUEUED], []),
-    TESTS_QUEUED,
-    "running",
-  ),
+  frame(PLAN_RUNNING, editFiles("queued", "queued", [TOKEN_QUEUED], []), TESTS_QUEUED, "running"),
   // 1 — editing, first file in flight
   frame(
     PLAN_OK,

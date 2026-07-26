@@ -121,7 +121,9 @@ describe("createSmithersElectricProxy", () => {
     });
 
     const response = await proxy.fetch(
-      new Request("http://proxy.local/v1/shape?table=_smithers_events&where=run_id+%3D+%27run-1%27+OR+run_id+%3D+%27run-2%27"),
+      new Request(
+        "http://proxy.local/v1/shape?table=_smithers_events&where=run_id+%3D+%27run-1%27+OR+run_id+%3D+%27run-2%27",
+      ),
     );
 
     expect(response.status).toBe(400);
@@ -136,11 +138,13 @@ describe("createSmithersElectricProxy", () => {
       rateLimits: { openPerMinute: 1, activeMax: 1 },
       fetchClient: async () => {
         upstreamHits += 1;
-        return new Response(new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(new TextEncoder().encode("event: up\ndata: {}\n\n"));
-          },
-        }));
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("event: up\ndata: {}\n\n"));
+            },
+          }),
+        );
       },
     });
 

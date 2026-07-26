@@ -3,11 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import {
-  ChainOfThought,
-  chainOfThoughtStepStatus,
-  SMITHERS_UI_STYLE_ATTR,
-} from "../src/index";
+import { ChainOfThought, chainOfThoughtStepStatus, SMITHERS_UI_STYLE_ATTR } from "../src/index";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

@@ -33,11 +33,12 @@ function finding(overrides: Partial<Record<string, unknown>> = {}) {
   } as never;
 }
 
-function prFile(filename: string, lines: number[], overrides: Partial<PullRequestFile> = {}): [string, PullRequestFile] {
-  return [
-    filename,
-    { filename, additions: 5, deletions: 2, commentableLines: new Set(lines), ...overrides },
-  ];
+function prFile(
+  filename: string,
+  lines: number[],
+  overrides: Partial<PullRequestFile> = {},
+): [string, PullRequestFile] {
+  return [filename, { filename, additions: 5, deletions: 2, commentableLines: new Set(lines), ...overrides }];
 }
 
 const widgetFiles = new Map<string, PullRequestFile>([prFile("src/widget.ts", [1, 2, 3, 4, 10, 11, 12, 13, 14])]);
@@ -146,7 +147,7 @@ describe("buildPullRequestReview", () => {
   });
 
   test("suggestion code containing backtick fences cannot break out of its fence", () => {
-    const evil = 'code();\n```\n**injected markdown**\n```suggestion\nmore();';
+    const evil = "code();\n```\n**injected markdown**\n```suggestion\nmore();";
     const payload = buildPullRequestReview({
       story,
       findings: [finding({ startLine: 4, endLine: 4, suggestionCode: evil })],

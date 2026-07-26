@@ -71,7 +71,15 @@ const clickByPoint: BrowserClickAction = { kind: "click", point: { x: 1, y: 2 } 
 const outcome: BrowserOutcome = { ok: true };
 const slice: BrowserContextSlice = "screenshot";
 const screenshot: BrowserScreenshot = { data: "jpeg", mediaType: "image/jpeg" };
-const selection: BrowserSelection = { locator: { css: "button" }, role: "button", name: "Go", text: "Go", fingerprint: "button:Go", rect: { x: 0, y: 0, width: 10, height: 10 }, viewport: { width: 100, height: 100 } };
+const selection: BrowserSelection = {
+  locator: { css: "button" },
+  role: "button",
+  name: "Go",
+  text: "Go",
+  fingerprint: "button:Go",
+  rect: { x: 0, y: 0, width: 10, height: 10 },
+  viewport: { width: 100, height: 100 },
+};
 const action: BrowserAction = clickByLocator;
 const actor: BrowserActor = "agent";
 const viewport: BrowserViewport = { width: 100, height: 100 };
@@ -86,4 +94,20 @@ const summary: BrowserSummary = { count: 1 };
 const clickWithBoth: BrowserClickAction = { kind: "click", locator: { css: "button" }, point };
 // @ts-expect-error click requires one target
 const clickWithNeither: BrowserClickAction = { kind: "click" };
-void [clickByPoint, outcome, slice, screenshot, selection, action, viewport, rectangle, modifier, redaction, journal, activity, summary, clickWithBoth, clickWithNeither];
+void [
+  clickByPoint,
+  outcome,
+  slice,
+  screenshot,
+  selection,
+  action,
+  viewport,
+  rectangle,
+  modifier,
+  redaction,
+  journal,
+  activity,
+  summary,
+  clickWithBoth,
+  clickWithNeither,
+];

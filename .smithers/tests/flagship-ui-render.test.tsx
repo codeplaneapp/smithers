@@ -13,8 +13,13 @@ reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 
 const run = { runId: "run-flagship", workflowKey: "review", status: "running" };
 let mockedRun: typeof run | undefined = run;
-let mockedEvents: unknown[] = [{ payload: { event: "node.finished", payload: { nodeId: "ci-postgres:ready", iteration: 0 } } }];
-const output = { data: { row: { reviewer: "fixture reviewer", approved: true, feedback: "looks good", issues: [] } }, refetch: async () => {} };
+let mockedEvents: unknown[] = [
+  { payload: { event: "node.finished", payload: { nodeId: "ci-postgres:ready", iteration: 0 } } },
+];
+const output = {
+  data: { row: { reviewer: "fixture reviewer", approved: true, feedback: "looks good", issues: [] } },
+  refetch: async () => {},
+};
 
 mock.module("smithers-orchestrator/gateway-react", () => ({
   ...gatewayReact,
@@ -30,7 +35,11 @@ mock.module("smithers-orchestrator/gateway-ui", () => ({
   ...gatewayUi,
   NodeOutputView: ({ nodeId }: { nodeId?: string }) => <div data-testid="node-output">{nodeId}</div>,
   RunEventLog: () => <div data-testid="event-log" />,
-  RunTree: ({ onSelectNode }: { onSelectNode?: (node: { id: string }) => void }) => <button data-testid="run-tree" onClick={() => onSelectNode?.({ id: "ci-postgres:ready" })}>tree</button>,
+  RunTree: ({ onSelectNode }: { onSelectNode?: (node: { id: string }) => void }) => (
+    <button data-testid="run-tree" onClick={() => onSelectNode?.({ id: "ci-postgres:ready" })}>
+      tree
+    </button>
+  ),
 }));
 
 let root: Root;
@@ -119,14 +128,27 @@ describe("flagship pack UI composition", () => {
     expect(isolatedStatus()?.getAttribute("data-status")).toBe("pending");
 
     mockedRun = { ...run, status: "cancelled" };
-    mockedEvents = [{ payload: { event: "node.cancelled", payload: { nodeId: "ci-postgres:implement", iteration: 0 } } }];
+    mockedEvents = [
+      { payload: { event: "node.cancelled", payload: { nodeId: "ci-postgres:implement", iteration: 0 } } },
+    ];
     await act(async () => root.render(<IssueBlitzApp />));
     expect(runStatus()?.getAttribute("data-status")).toBe("cancelled");
     expect(isolatedStatus()?.getAttribute("data-status")).toBe("pending");
 
     mockedRun = { ...run, status: "finished" };
-    mockedEvents = ["ci-postgres", "e2e-orphans", "dual-react", "url-schemes", "pack-home", "pack-scan", "workflow-dirs", "dead-code", "mcp-confirm", "coerce-props", "audit-atomic"]
-      .map((item) => ({ payload: { event: "node.finished", payload: { nodeId: `${item}:ready`, iteration: 0 } } }));
+    mockedEvents = [
+      "ci-postgres",
+      "e2e-orphans",
+      "dual-react",
+      "url-schemes",
+      "pack-home",
+      "pack-scan",
+      "workflow-dirs",
+      "dead-code",
+      "mcp-confirm",
+      "coerce-props",
+      "audit-atomic",
+    ].map((item) => ({ payload: { event: "node.finished", payload: { nodeId: `${item}:ready`, iteration: 0 } } }));
     await act(async () => root.render(<IssueBlitzApp />));
     expect(runStatus()?.getAttribute("data-status")).toBe("finished");
     expect(isolatedStatus()?.getAttribute("data-status")).toBe("done");

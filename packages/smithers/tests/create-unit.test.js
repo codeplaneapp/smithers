@@ -7,11 +7,7 @@ import React from "react";
 import { z } from "zod";
 import { createSmithers } from "../src/create.js";
 import { prepareOutputSchemas } from "../src/prepareOutputSchemas.js";
-import {
-  createExternalSmithers,
-  hostNodeToReact,
-  serializeCtx,
-} from "../src/external/create-external-smithers.js";
+import { createExternalSmithers, hostNodeToReact, serializeCtx } from "../src/external/create-external-smithers.js";
 
 let tempDirs = [];
 const CWD_BEFORE = process.cwd();
@@ -91,27 +87,20 @@ describe("createSmithers", () => {
       expect(api.outputs.second).not.toBe(shared);
       expect(api.ambiguousZodSchemas).toBeUndefined();
 
-      const workflow = api.smithers(
-        () => React.createElement(api.Workflow, { name: "workflow" }, "child"),
-        {
-          alertPolicy: {
-            defaults: { labels: { priority: "high" } },
-            rules: {
-              slow: { severity: "critical", labels: { route: "dev" } },
-              failed: { severity: "page" },
-            },
-            reactions: { slack: { kind: "webhook", url: "https://slack.test" } },
+      const workflow = api.smithers(() => React.createElement(api.Workflow, { name: "workflow" }, "child"), {
+        alertPolicy: {
+          defaults: { labels: { priority: "high" } },
+          rules: {
+            slow: { severity: "critical", labels: { route: "dev" } },
+            failed: { severity: "page" },
           },
+          reactions: { slack: { kind: "webhook", url: "https://slack.test" } },
         },
-      );
+      });
 
       expect(workflow.readableName).toBe("Readable");
       expect(workflow.description).toBe("Description");
-      expect([...workflow.schemaRegistry.keys()].sort()).toEqual([
-        "first",
-        "result",
-        "second",
-      ]);
+      expect([...workflow.schemaRegistry.keys()].sort()).toEqual(["first", "result", "second"]);
       expect(workflow.ambiguousZodSchemas.has(shared)).toBe(true);
       expect(workflow.zodToKeyName.get(api.outputs.first)).toBe("first");
       expect(workflow.zodToKeyName.get(api.outputs.second)).toBe("second");
@@ -199,14 +188,12 @@ describe("createSmithers", () => {
       expect(second).not.toBe(first);
       expect(second.db).toBe(first.db);
 
-      const workflow = second.smithers(() =>
-        React.createElement(second.Workflow, { name: "hot" }),
-      );
+      const workflow = second.smithers(() => React.createElement(second.Workflow, { name: "hot" }));
       expect(workflow.opts.alertPolicy.defaults.labels.module).toBe("second");
 
-      expect(() =>
-        createSmithers({ result: z.object({ value: z.number() }) }, { dbPath }),
-      ).toThrow("Schema change detected");
+      expect(() => createSmithers({ result: z.object({ value: z.number() }) }, { dbPath })).toThrow(
+        "Schema change detected",
+      );
     } finally {
       closeApi(first);
     }
@@ -269,18 +256,12 @@ describe("createSmithers", () => {
   test("refreshes hot object policies that share the same JSON Schema", () => {
     process.env.SMITHERS_HOT = "1";
     const dbPath = makeDbPath("smithers-hot-object-policy-");
-    const first = createSmithers(
-      { result: z.object({ value: z.string() }).strip() },
-      { dbPath },
-    );
+    const first = createSmithers({ result: z.object({ value: z.string() }).strip() }, { dbPath });
 
     try {
       expect(first.outputs.result.parse({ value: "ok", extra: true })).toEqual({ value: "ok" });
 
-      const second = createSmithers(
-        { result: z.object({ value: z.string() }).strict() },
-        { dbPath },
-      );
+      const second = createSmithers({ result: z.object({ value: z.string() }).strict() }, { dbPath });
       expect(second.outputs.result.safeParse({ value: "ok", extra: true }).success).toBe(false);
     } finally {
       closeApi(first);
@@ -290,18 +271,12 @@ describe("createSmithers", () => {
   test("refreshes exact optional semantics that share the same JSON Schema", () => {
     process.env.SMITHERS_HOT = "1";
     const dbPath = makeDbPath("smithers-hot-exact-optional-");
-    const first = createSmithers(
-      { result: z.object({ value: z.string().optional() }) },
-      { dbPath },
-    );
+    const first = createSmithers({ result: z.object({ value: z.string().optional() }) }, { dbPath });
 
     try {
       expect(first.outputs.result.safeParse({ value: undefined }).success).toBe(true);
 
-      const second = createSmithers(
-        { result: z.object({ value: z.string().exactOptional() }) },
-        { dbPath },
-      );
+      const second = createSmithers({ result: z.object({ value: z.string().exactOptional() }) }, { dbPath });
       expect(second.outputs.result.safeParse({ value: undefined }).success).toBe(false);
     } finally {
       closeApi(first);
@@ -354,10 +329,7 @@ describe("createSmithers", () => {
     sqlite.exec(`CREATE TABLE input (run_id TEXT PRIMARY KEY)`);
     sqlite.close();
 
-    const api = createSmithers(
-      { result: z.object({ value: z.string() }) },
-      { dbPath },
-    );
+    const api = createSmithers({ result: z.object({ value: z.string() }) }, { dbPath });
 
     try {
       const columns = api.db.$client.query(`PRAGMA table_info("input")`).all();
@@ -391,10 +363,7 @@ describe("createSmithers", () => {
 
   test("respects the journalMode option", () => {
     const dbPath = makeDbPath("smithers-journalmode-");
-    const api = createSmithers(
-      { result: z.object({ value: z.string() }) },
-      { dbPath, journalMode: "DELETE" },
-    );
+    const api = createSmithers({ result: z.object({ value: z.string() }) }, { dbPath, journalMode: "DELETE" });
     try {
       const [row] = api.db.$client.query("PRAGMA journal_mode").all();
       expect(row.journal_mode).toBe("delete");
@@ -541,22 +510,10 @@ describe("createExternalSmithers", () => {
     });
 
     try {
-      expect(Object.keys(workflow.tables).sort()).toEqual([
-        "first",
-        "result",
-        "second",
-      ]);
-      expect([...workflow.schemaRegistry.keys()].sort()).toEqual([
-        "first",
-        "result",
-        "second",
-      ]);
+      expect(Object.keys(workflow.tables).sort()).toEqual(["first", "result", "second"]);
+      expect([...workflow.schemaRegistry.keys()].sort()).toEqual(["first", "result", "second"]);
       expect(workflow.ambiguousZodSchemas.has(shared)).toBe(true);
-      expect([...workflow.zodToKeyName.values()].sort()).toEqual([
-        "first",
-        "result",
-        "second",
-      ]);
+      expect([...workflow.zodToKeyName.values()].sort()).toEqual(["first", "result", "second"]);
 
       const element = workflow.build({
         runId: "run",

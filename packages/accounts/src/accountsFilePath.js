@@ -8,5 +8,5 @@ import { accountsRoot } from "./accountsRoot.js";
  * @returns {string}
  */
 export function accountsFilePath(env = process.env) {
-    return join(accountsRoot(env), "accounts.json");
+  return join(accountsRoot(env), "accounts.json");
 }

@@ -2,27 +2,10 @@
 // n8n-style workflow graph, ported from multi's workflow graph idiom. ReactFlow
 // renders the canvas; dagre computes a left-to-right layout.
 import { memo, useMemo } from "react";
-import {
-  Background,
-  Controls,
-  Handle,
-  Position,
-  ReactFlow,
-  type Edge,
-  type Node,
-  type NodeProps,
-} from "@xyflow/react";
+import { Background, Controls, Handle, Position, ReactFlow, type Edge, type Node, type NodeProps } from "@xyflow/react";
 import dagre from "dagre";
 
-export type NodeKind =
-  | "agent"
-  | "compute"
-  | "approval"
-  | "merge"
-  | "loop"
-  | "branch"
-  | "signal"
-  | "human";
+export type NodeKind = "agent" | "compute" | "approval" | "merge" | "loop" | "branch" | "signal" | "human";
 
 export type FlowNodeData = {
   label: string;

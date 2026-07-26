@@ -134,7 +134,12 @@ describe("resolveReviewTarget", () => {
     const commit = await resolveReviewTarget({ ...normalizeOpenCodeReviewInput({}), repo: dir, commit: "HEAD" });
     expect(commit.mode).toBe("commit");
     expect(commit.ref).toBe("HEAD");
-    const range = await resolveReviewTarget({ ...normalizeOpenCodeReviewInput({}), repo: dir, from: "HEAD", to: "HEAD" });
+    const range = await resolveReviewTarget({
+      ...normalizeOpenCodeReviewInput({}),
+      repo: dir,
+      from: "HEAD",
+      to: "HEAD",
+    });
     expect(range.mode).toBe("range");
     expect(range.ref).toBe("HEAD..HEAD");
   });
@@ -239,7 +244,12 @@ describe("previewOpenCodeReview + buildNativeReviewPrompt (real git)", () => {
     git(dir, ["add", "."]);
     git(dir, ["commit", "-m", "second"]);
 
-    const range = await previewOpenCodeReview({ ...normalizeOpenCodeReviewInput({}), repo: dir, from: "HEAD~1", to: "HEAD" });
+    const range = await previewOpenCodeReview({
+      ...normalizeOpenCodeReviewInput({}),
+      repo: dir,
+      from: "HEAD~1",
+      to: "HEAD",
+    });
     expect(range.totalFiles).toBeGreaterThan(0);
     const commit = await previewOpenCodeReview({ ...normalizeOpenCodeReviewInput({}), repo: dir, commit: "HEAD" });
     expect(commit.totalFiles).toBeGreaterThan(0);
@@ -257,7 +267,10 @@ describe("previewOpenCodeReview + buildNativeReviewPrompt (real git)", () => {
     const badRule = join(dir, "bad-rule.json");
     write(badRule, "[]");
     // The repo-level rule provides the real include/exclude.
-    write(join(dir, ".opencodereview/rule.json"), JSON.stringify({ include: ["src/app.ts"], exclude: ["src/skip.ts"] }));
+    write(
+      join(dir, ".opencodereview/rule.json"),
+      JSON.stringify({ include: ["src/app.ts"], exclude: ["src/skip.ts"] }),
+    );
 
     const preview = await previewOpenCodeReview({ ...normalizeOpenCodeReviewInput({}), repo: dir, rule: badRule });
     const skip = preview.entries.find((e) => e.path === "src/skip.ts");

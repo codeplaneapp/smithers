@@ -124,9 +124,7 @@ describe("PierreDiffView markup", () => {
   });
 
   test("empty-state honors a custom label and passthrough className", () => {
-    const html = renderToStaticMarkup(
-      <PierreDiffView patch="" className="my-frame" emptyLabel="Nothing changed" />,
-    );
+    const html = renderToStaticMarkup(<PierreDiffView patch="" className="my-frame" emptyLabel="Nothing changed" />);
     expect(html).toContain("Nothing changed");
     expect(html).toContain("my-frame");
   });

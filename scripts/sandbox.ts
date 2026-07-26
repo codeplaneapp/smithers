@@ -26,7 +26,10 @@ function gcloud(args: string[]): void {
 const cmd = process.argv[2];
 
 function vmName(): string {
-  const ts = new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14);
+  const ts = new Date()
+    .toISOString()
+    .replace(/[-:T.Z]/g, "")
+    .slice(0, 14);
   return `sandbox-${ts}`;
 }
 
@@ -61,9 +64,7 @@ if (cmd === "up") {
   }
   const { name, zone } = (state ?? {}) as Record<string, unknown>;
   if (!isSafeResource(name) || !isSafeResource(zone)) {
-    console.error(
-      `Invalid ${STATE_FILE}: name and zone must be lowercase letters, digits, and hyphens.`,
-    );
+    console.error(`Invalid ${STATE_FILE}: name and zone must be lowercase letters, digits, and hyphens.`);
     process.exit(1);
   }
   console.log(`Deleting ${name}...`);

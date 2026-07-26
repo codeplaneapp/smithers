@@ -60,11 +60,7 @@ async function mount(gw: InMemoryGateway, element: ReactElement): Promise<Harnes
   activeHarnesses.push(harness);
   await act(async () => {
     root.render(
-      createElement(
-        SmithersCollectionsProvider,
-        { mode: { kind: "local" as const, apiBaseUrl: gw.baseUrl } },
-        element,
-      ),
+      createElement(SmithersCollectionsProvider, { mode: { kind: "local" as const, apiBaseUrl: gw.baseUrl } }, element),
     );
   });
   await harness.flush();
@@ -124,16 +120,22 @@ describe("NodeChatStream (live SSE)", () => {
       runs: [{ runId: "run-a", workflowKey: "fleet", status: "running" }],
       events: {
         "run-a": [
-          { runId: "run-a", seq: 1, event: "NodeOutput", payload: { nodeId: "a:implement", text: "Early transcript.", stream: "stdout" } },
+          {
+            runId: "run-a",
+            seq: 1,
+            event: "NodeOutput",
+            payload: { nodeId: "a:implement", text: "Early transcript.", stream: "stdout" },
+          },
           ...unrelated,
         ],
       },
     });
-    const harness = await mount(
-      gw,
-      createElement(NodeChatStream, { runId: "run-a", nodeId: "a:implement" }),
+    const harness = await mount(gw, createElement(NodeChatStream, { runId: "run-a", nodeId: "a:implement" }));
+    await waitFor(
+      harness,
+      () => harness.container.textContent?.includes("Early transcript.") === true,
+      "early transcript",
     );
-    await waitFor(harness, () => harness.container.textContent?.includes("Early transcript.") === true, "early transcript");
     expect(harness.container.textContent).toContain("Early transcript.");
     expect(harness.container.textContent).not.toContain("unrelated-1024");
   }, 20_000);
@@ -144,7 +146,12 @@ describe("NodeChatStream (live SSE)", () => {
       events: {
         "run-a": [
           { runId: "run-a", seq: 1, event: "NodeStarted", payload: { nodeId: "a:implement" } },
-          { runId: "run-a", seq: 2, event: "NodeOutput", payload: { nodeId: "a:implement", iteration: 0, attempt: 1, text: "Reading the spec.", stream: "stdout" } },
+          {
+            runId: "run-a",
+            seq: 2,
+            event: "NodeOutput",
+            payload: { nodeId: "a:implement", iteration: 0, attempt: 1, text: "Reading the spec.", stream: "stdout" },
+          },
           {
             runId: "run-a",
             seq: 3,
@@ -154,7 +161,11 @@ describe("NodeChatStream (live SSE)", () => {
               iteration: 0,
               attempt: 1,
               engine: "opencode",
-              event: { type: "action", phase: "started", action: { kind: "tool", id: "t1", title: "Bash", detail: { input: { cmd: "bun test" } } } },
+              event: {
+                type: "action",
+                phase: "started",
+                action: { kind: "tool", id: "t1", title: "Bash", detail: { input: { cmd: "bun test" } } },
+              },
             },
           },
         ],
@@ -171,10 +182,17 @@ describe("NodeChatStream (live SSE)", () => {
     );
     expect(harness.container.querySelector('[data-slot="chat-message"]')).not.toBeNull();
     expect(harness.container.textContent).toContain("Bash");
-    expect(harness.container.querySelector('[data-slot="node-chat-stream"]')?.getAttribute("data-status")).toBe("running");
+    expect(harness.container.querySelector('[data-slot="node-chat-stream"]')?.getAttribute("data-status")).toBe(
+      "running",
+    );
 
     gw.pushEvents("run-a", [
-      { runId: "run-a", seq: 4, event: "NodeOutput", payload: { nodeId: "a:implement", iteration: 0, attempt: 1, text: " Done.", stream: "stdout" } },
+      {
+        runId: "run-a",
+        seq: 4,
+        event: "NodeOutput",
+        payload: { nodeId: "a:implement", iteration: 0, attempt: 1, text: " Done.", stream: "stdout" },
+      },
       { runId: "run-a", seq: 5, event: "NodeFinished", payload: { nodeId: "a:implement" } },
     ]);
     // The tool call sits between the two text chunks, so the pushed chunk
@@ -228,11 +246,9 @@ describe("FleetTable (live run tree)", () => {
       el.getAttribute("data-status"),
     );
     await waitFor(harness, () => harness.container.querySelector('[data-status="running"]') !== null, "live statuses");
-    expect([...harness.container.querySelectorAll("tbody [data-status]")].map((el) => el.getAttribute("data-status"))).toEqual([
-      "running",
-      "failed",
-      "queued",
-    ]);
+    expect(
+      [...harness.container.querySelectorAll("tbody [data-status]")].map((el) => el.getAttribute("data-status")),
+    ).toEqual(["running", "failed", "queued"]);
     void pills;
     expect(harness.container.querySelector('tr[aria-selected="true"]')?.textContent).toContain("Item A");
     click(harness.container.querySelectorAll("tbody tr")[2] ?? null);
@@ -247,18 +263,10 @@ describe("NodeStageStrip (live run tree)", () => {
       gw,
       createElement(NodeStageStrip, {
         runId: "run-a",
-        stages: [
-          { nodeId: "preflight" },
-          { nodeId: "spec-write", label: "spec" },
-          { nodeId: "deploy" },
-        ],
+        stages: [{ nodeId: "preflight" }, { nodeId: "spec-write", label: "spec" }, { nodeId: "deploy" }],
       }),
     );
-    await waitFor(
-      harness,
-      () => harness.container.textContent?.includes("spec") === true,
-      "stage chips to render",
-    );
+    await waitFor(harness, () => harness.container.textContent?.includes("spec") === true, "stage chips to render");
     const strip = harness.container.querySelector('[data-slot="stage-strip"]') ?? harness.container;
     expect(strip.textContent).toContain("preflight");
     expect(strip.textContent).toContain("deploy");

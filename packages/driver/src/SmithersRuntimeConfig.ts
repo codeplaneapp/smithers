@@ -16,8 +16,5 @@ export type SmithersRuntimeConfig = {
    * absent, `SmithersCtx.resolveWorktreePath()` throws a typed
    * `RuntimeCapabilityError` instead of falling back to a Node-only import.
    */
-  resolveWorktreePath?: (
-    path: string,
-    opts?: { baseRootDir?: string; workflowPath?: string | null },
-  ) => string;
+  resolveWorktreePath?: (path: string, opts?: { baseRootDir?: string; workflowPath?: string | null }) => string;
 };

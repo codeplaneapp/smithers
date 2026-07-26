@@ -21,7 +21,7 @@ import { accountsRoot } from "@smithers-orchestrator/accounts";
  * @returns {string}
  */
 export function workflowIdFromPath(workflowPath) {
-    return basename(String(workflowPath)).replace(/\.(tsx|mdx|jsx|ts|js)$/i, "");
+  return basename(String(workflowPath)).replace(/\.(tsx|mdx|jsx|ts|js)$/i, "");
 }
 
 /**
@@ -36,23 +36,19 @@ export function workflowIdFromPath(workflowPath) {
  * @returns {boolean}
  */
 export function hasCustomUi(workflowId, cwd, exists = existsSync, read = readFileSync) {
-    if (!workflowId) return false;
-    const candidates = [
-        resolve(cwd, ".smithers"),
-        accountsRoot(),
-    ];
-    return candidates.some((packDir) => {
-        const uiPath = resolve(packDir, "ui", `${workflowId}.tsx`);
-        const workflowPath = resolve(packDir, "workflows", `${workflowId}.tsx`);
-        if (!exists(uiPath) || !exists(workflowPath)) return false;
-        try {
-            const source = read(workflowPath, "utf8");
-            return source.includes("<UI") && source.includes(`../ui/${workflowId}.tsx`);
-        }
-        catch {
-            return false;
-        }
-    });
+  if (!workflowId) return false;
+  const candidates = [resolve(cwd, ".smithers"), accountsRoot()];
+  return candidates.some((packDir) => {
+    const uiPath = resolve(packDir, "ui", `${workflowId}.tsx`);
+    const workflowPath = resolve(packDir, "workflows", `${workflowId}.tsx`);
+    if (!exists(uiPath) || !exists(workflowPath)) return false;
+    try {
+      const source = read(workflowPath, "utf8");
+      return source.includes("<UI") && source.includes(`../ui/${workflowId}.tsx`);
+    } catch {
+      return false;
+    }
+  });
 }
 
 /**
@@ -63,31 +59,31 @@ export function hasCustomUi(workflowId, cwd, exists = existsSync, read = readFil
  * @returns {{ id: string; title: string; how: string }[]}
  */
 export function buildMonitoringOptions({ runId, workflowId, hasUi }) {
-    const uiStep = hasUi
-        ? `run \`smithers ui ${runId}\` (a custom UI already exists for "${workflowId}")`
-        : `author \`.smithers/ui/${workflowId}.tsx\` by composing the smithers-orchestrator/gateway-ui widgets and smithers-orchestrator/ui primitives over the gateway-react hooks, add \`<UI entry="../ui/${workflowId}.tsx" />\` to the workflow, then run \`smithers ui ${runId}\``;
-    return [
-        {
-            id: "monitor-ui",
-            title: "Smithers Monitor (live, zero setup)",
-            how: `Run \`smithers monitor ${runId}\` — opens the gateway's live web UI focused on this run (status, execution tree, events, approvals), no code required.`,
-        },
-        {
-            id: "cron-report",
-            title: "Status-report cron (hands-off)",
-            how: `Schedule a job that every 5 minutes reads \`smithers inspect ${runId} --format json\` and reports the run's status to the user.`,
-        },
-        {
-            id: "live-ui",
-            title: "Live custom UI (richest, most work)",
-            how: `Open a real-time browser UI that updates as the run advances: ${uiStep}.`,
-        },
-        {
-            id: "html-page",
-            title: "Quick HTML page (fastest)",
-            how: `Write a static HTML status page from \`smithers inspect ${runId}\`, open it in the browser, and refresh it about every 5 minutes.`,
-        },
-    ];
+  const uiStep = hasUi
+    ? `run \`smithers ui ${runId}\` (a custom UI already exists for "${workflowId}")`
+    : `author \`.smithers/ui/${workflowId}.tsx\` by composing the smithers-orchestrator/gateway-ui widgets and smithers-orchestrator/ui primitives over the gateway-react hooks, add \`<UI entry="../ui/${workflowId}.tsx" />\` to the workflow, then run \`smithers ui ${runId}\``;
+  return [
+    {
+      id: "monitor-ui",
+      title: "Smithers Monitor (live, zero setup)",
+      how: `Run \`smithers monitor ${runId}\` — opens the gateway's live web UI focused on this run (status, execution tree, events, approvals), no code required.`,
+    },
+    {
+      id: "cron-report",
+      title: "Status-report cron (hands-off)",
+      how: `Schedule a job that every 5 minutes reads \`smithers inspect ${runId} --format json\` and reports the run's status to the user.`,
+    },
+    {
+      id: "live-ui",
+      title: "Live custom UI (richest, most work)",
+      how: `Open a real-time browser UI that updates as the run advances: ${uiStep}.`,
+    },
+    {
+      id: "html-page",
+      title: "Quick HTML page (fastest)",
+      how: `Write a static HTML status page from \`smithers inspect ${runId}\`, open it in the browser, and refresh it about every 5 minutes.`,
+    },
+  ];
 }
 
 /**
@@ -97,11 +93,11 @@ export function buildMonitoringOptions({ runId, workflowId, hasUi }) {
  * @returns {{ text: string; options: { id: string; title: string; how: string }[] }}
  */
 export function buildMonitoringGuidance({ runId, workflowId, hasUi }) {
-    const options = buildMonitoringOptions({ runId, workflowId, hasUi });
-    const lines = [
-        `Run ${runId} is now executing in the background, where the user has no view into its progress.`,
-        `Offer the user one of these ways to watch it, then set up whichever they pick:`,
-        ...options.map((o, i) => `  ${i + 1}. ${o.title}: ${o.how}`),
-    ];
-    return { text: lines.join("\n"), options };
+  const options = buildMonitoringOptions({ runId, workflowId, hasUi });
+  const lines = [
+    `Run ${runId} is now executing in the background, where the user has no view into its progress.`,
+    `Offer the user one of these ways to watch it, then set up whichever they pick:`,
+    ...options.map((o, i) => `  ${i + 1}. ${o.title}: ${o.how}`),
+  ];
+  return { text: lines.join("\n"), options };
 }

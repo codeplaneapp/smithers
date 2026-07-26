@@ -131,9 +131,7 @@ export function NodeChatStream({
       <EmptyState
         title={streaming ? "Agent starting…" : "No agent output yet"}
         description={
-          streaming
-            ? "Waiting for the first chunk from the agent."
-            : "This node has not produced chat output."
+          streaming ? "Waiting for the first chunk from the agent." : "This node has not produced chat output."
         }
       />
     );
@@ -182,9 +180,7 @@ export function NodeChatStream({
             {title ?? nodeId ?? "Agent chat"}
           </span>
           {subtitle || transcript.engine ? (
-            <span style={{ fontSize: 11, color: theme.textDim }}>
-              {subtitle ?? transcript.engine}
-            </span>
+            <span style={{ fontSize: 11, color: theme.textDim }}>{subtitle ?? transcript.engine}</span>
           ) : null}
         </span>
         <StatusPill status={resolvedStatus ?? "pending"} />

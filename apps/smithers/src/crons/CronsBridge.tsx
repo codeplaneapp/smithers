@@ -1,12 +1,6 @@
 import { useEffect } from "react";
-import {
-  useGatewayCrons,
-  useGatewayMutation,
-} from "@smithers-orchestrator/gateway-react";
-import {
-  gatewayKeys,
-  type GatewayCronRow,
-} from "@smithers-orchestrator/gateway-client";
+import { useGatewayCrons, useGatewayMutation } from "@smithers-orchestrator/gateway-react";
+import { gatewayKeys, type GatewayCronRow } from "@smithers-orchestrator/gateway-client";
 import { useLocalModeRefetch } from "../sync/useLocalModeRefetch";
 import { describeCron, nameFromWorkflowPath, type Cron } from "./crons";
 import { bindCronActions, useCronsStore } from "./cronsStore";
@@ -40,9 +34,7 @@ type CronDeleteVars = { cronId: string };
  * wire → coalesce null away so the detail pane only shows a real error block.
  */
 export function toCron(row: GatewayCronRow): Cron {
-  const workflowRef = typeof row.workflow === "string" && row.workflow.trim() !== ""
-    ? row.workflow
-    : row.workflowPath;
+  const workflowRef = typeof row.workflow === "string" && row.workflow.trim() !== "" ? row.workflow : row.workflowPath;
   return {
     id: row.cronId,
     name: nameFromWorkflowPath(workflowRef),
@@ -50,9 +42,7 @@ export function toCron(row: GatewayCronRow): Cron {
     workflowPath: workflowRef,
     enabled: row.enabled === true,
     nextHint: describeCron(row.pattern),
-    errorJson: typeof row.errorJson === "string" && row.errorJson.trim() !== ""
-      ? row.errorJson
-      : undefined,
+    errorJson: typeof row.errorJson === "string" && row.errorJson.trim() !== "" ? row.errorJson : undefined,
   };
 }
 
@@ -94,9 +84,7 @@ export function CronsBridge() {
       if (state.selectedId && crons.some((cron) => cron.id === state.selectedId)) {
         selectedId = state.selectedId;
       } else if (prior) {
-        const reborn = crons.find(
-          (cron) => cron.workflowPath === prior.workflowPath && cron.pattern === prior.pattern,
-        );
+        const reborn = crons.find((cron) => cron.workflowPath === prior.workflowPath && cron.pattern === prior.pattern);
         selectedId = reborn?.id ?? null;
       }
       return { crons, selectedId };

@@ -222,9 +222,7 @@ describe("createHttpTool redirects", () => {
   });
 
   test("caps runaway redirect chains at the fetch spec's 20-hop limit", async () => {
-    await expect(secretTool().execute({ url: `${apiUrl}/loop` }, callOptions)).rejects.toThrow(
-      /exceeded 20 redirects/,
-    );
+    await expect(secretTool().execute({ url: `${apiUrl}/loop` }, callOptions)).rejects.toThrow(/exceeded 20 redirects/);
     // 1 original request + 20 followed hops, then the budget trips.
     expect(requests.length).toBe(21);
   });

@@ -1094,8 +1094,6 @@ export const FeatureGroups = {
     "TIME_TRAVEL_JUMP_ERROR_CODES",
   ],
 
-
-
   // Source: packages/openapi/src
   OPENAPI_INTEGRATION: [
     "OPENAPI_SPEC_PARSING",
@@ -2418,6 +2416,4 @@ for (const group of Object.values(FeatureGroups) as readonly (readonly FeatureNa
   }
 }
 
-export const Features = Object.freeze(
-  Object.fromEntries(featureEntries) as Record<FeatureName, FeatureName>,
-);
+export const Features = Object.freeze(Object.fromEntries(featureEntries) as Record<FeatureName, FeatureName>);

@@ -21,12 +21,14 @@ import { tokens } from "../src/tokens";
 
 /** Strip every var(--x, fallback) expression, including rgba fallbacks. */
 function stripVarFallbacks(css: string): string {
-  return css
-    // Shadow tokens carry a full shadow list (with raw rgb() stops) as their
-    // light fallback; strip them first so the raw-color rules below only see
-    // colors outside sanctioned fallback position.
-    .replace(/var\(--shadow-[123],\s*(?:[^()]|rgba?\([^)]*\))*\)/g, "VAR")
-    .replace(/var\(--[\w-]+(?:,\s*(?:#[0-9a-fA-F]{3,8}|rgba?\([^)]*\)|[\w\s.%-]+))?\)/g, "VAR");
+  return (
+    css
+      // Shadow tokens carry a full shadow list (with raw rgb() stops) as their
+      // light fallback; strip them first so the raw-color rules below only see
+      // colors outside sanctioned fallback position.
+      .replace(/var\(--shadow-[123],\s*(?:[^()]|rgba?\([^)]*\))*\)/g, "VAR")
+      .replace(/var\(--[\w-]+(?:,\s*(?:#[0-9a-fA-F]{3,8}|rgba?\([^)]*\)|[\w\s.%-]+))?\)/g, "VAR")
+  );
 }
 
 describe("css contract", () => {
@@ -72,7 +74,12 @@ describe("css contract", () => {
     }
     expect(lightValues.get("--bg")).toBe("#fafafa");
 
-    const sources = [smithersUiCss, Object.values(tokens).filter((v) => typeof v === "string").join("\n")];
+    const sources = [
+      smithersUiCss,
+      Object.values(tokens)
+        .filter((v) => typeof v === "string")
+        .join("\n"),
+    ];
     let checked = 0;
     for (const source of sources) {
       for (const m of source.matchAll(/var\((--[\w-]+),\s*(#[0-9a-fA-F]{3,8}|rgba?\([^)]*\)|[\d\s]+)\)/g)) {
@@ -92,8 +99,12 @@ describe("css contract", () => {
   test("focus ring follows the house recipe through the --ring custom properties", () => {
     // Routed through --ring/--ring-border so a host that themes the ring
     // re-themes these components; the fallbacks stay the house recipe.
-    expect(smithersUiCss).toContain("border-color:var(--ring-border, color-mix(in srgb, var(--brand, #6d56d8) 50%, transparent))");
-    expect(smithersUiCss).toContain("0 0 0 3px var(--ring, color-mix(in srgb, var(--brand, #6d56d8) 22%, transparent))");
+    expect(smithersUiCss).toContain(
+      "border-color:var(--ring-border, color-mix(in srgb, var(--brand, #6d56d8) 50%, transparent))",
+    );
+    expect(smithersUiCss).toContain(
+      "0 0 0 3px var(--ring, color-mix(in srgb, var(--brand, #6d56d8) 22%, transparent))",
+    );
   });
 
   test("the default button variant is the house tinted primary, not a solid fill", () => {

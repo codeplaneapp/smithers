@@ -127,10 +127,7 @@ describe("resolveFrameIdx", () => {
 
 describe("extractNodeSnapshots", () => {
   it("returns empty array when no events have nodeId", () => {
-    const events = [
-      frame(1, "run.heartbeat"),
-      frame(2, "run.event", { text: "hello" }),
-    ];
+    const events = [frame(1, "run.heartbeat"), frame(2, "run.event", { text: "hello" })];
     expect(extractNodeSnapshots(events, 999)).toHaveLength(0);
   });
 
@@ -177,37 +174,25 @@ describe("extractNodeSnapshots", () => {
   });
 
   it("infers done status from node.end event name", () => {
-    const events = [
-      frame(1, "node.start", { nodeId: "n-1" }),
-      frame(2, "node.end", { nodeId: "n-1" }),
-    ];
+    const events = [frame(1, "node.start", { nodeId: "n-1" }), frame(2, "node.end", { nodeId: "n-1" })];
     const snap = extractNodeSnapshots(events, 999);
     expect(snap[0]!.status).toBe("done");
   });
 
   it("infers failed status from node.fail event name", () => {
-    const events = [
-      frame(1, "node.start", { nodeId: "n-1" }),
-      frame(2, "node.fail", { nodeId: "n-1" }),
-    ];
+    const events = [frame(1, "node.start", { nodeId: "n-1" }), frame(2, "node.fail", { nodeId: "n-1" })];
     const snap = extractNodeSnapshots(events, 999);
     expect(snap[0]!.status).toBe("failed");
   });
 
   it("infers cancelled status from node.cancel event name", () => {
-    const events = [
-      frame(1, "node.start", { nodeId: "n-1" }),
-      frame(2, "node.cancel", { nodeId: "n-1" }),
-    ];
+    const events = [frame(1, "node.start", { nodeId: "n-1" }), frame(2, "node.cancel", { nodeId: "n-1" })];
     const snap = extractNodeSnapshots(events, 999);
     expect(snap[0]!.status).toBe("cancelled");
   });
 
   it("infers waiting status from approval.request event", () => {
-    const events = [
-      frame(1, "node.start", { nodeId: "n-1" }),
-      frame(2, "approval.request", { nodeId: "n-1" }),
-    ];
+    const events = [frame(1, "node.start", { nodeId: "n-1" }), frame(2, "approval.request", { nodeId: "n-1" })];
     const snap = extractNodeSnapshots(events, 999);
     expect(snap[0]!.status).toBe("waiting");
   });

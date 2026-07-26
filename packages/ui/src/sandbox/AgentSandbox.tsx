@@ -1,5 +1,14 @@
 /** @jsxImportSource react */
-import { createContext, useContext, useEffect, useId, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { cn } from "../cn";
 import { EmptyState } from "../empty-state";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
@@ -121,7 +130,9 @@ export function AgentSandbox({
           aria-controls={contentId}
           onClick={toggle}
         >
-          <span className="sui-sandbox-chevron" aria-hidden="true">›</span>
+          <span className="sui-sandbox-chevron" aria-hidden="true">
+            ›
+          </span>
           <span>Sandbox</span>
         </button>
         {children ?? (
@@ -146,10 +157,14 @@ export function AgentSandboxHeader({ className, children, ...props }: ComponentP
       {ctx && (ctx.workspace !== undefined || ctx.repository !== undefined) ? (
         <span className="sui-sandbox-identity">
           {ctx.repository !== undefined ? (
-            <span data-slot="agent-sandbox-repository" className="sui-sandbox-repository">{ctx.repository}</span>
+            <span data-slot="agent-sandbox-repository" className="sui-sandbox-repository">
+              {ctx.repository}
+            </span>
           ) : null}
           {ctx.workspace !== undefined ? (
-            <span data-slot="agent-sandbox-workspace" className="sui-sandbox-workspace">{ctx.workspace}</span>
+            <span data-slot="agent-sandbox-workspace" className="sui-sandbox-workspace">
+              {ctx.workspace}
+            </span>
           ) : null}
         </span>
       ) : null}

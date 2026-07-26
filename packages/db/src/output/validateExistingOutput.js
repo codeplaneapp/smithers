@@ -7,10 +7,10 @@ import { createSelectSchema } from "drizzle-zod";
  * @returns {{ ok: boolean; data?: any; error?: import("zod").ZodError; }}
  */
 export function validateExistingOutput(table, payload) {
-    const schema = createSelectSchema(table);
-    const result = schema.safeParse(payload);
-    if (result.success) {
-        return { ok: true, data: result.data };
-    }
-    return { ok: false, error: result.error };
+  const schema = createSelectSchema(table);
+  const result = schema.safeParse(payload);
+  if (result.success) {
+    return { ok: true, data: result.data };
+  }
+  return { ok: false, error: result.error };
 }

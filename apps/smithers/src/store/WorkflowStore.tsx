@@ -63,8 +63,8 @@ export function WorkflowStoreContent({
         <header className="store-header">
           <h1 className="store-title">Workflow Store</h1>
           <p className="store-subtitle">
-            Open an installed workflow to drop into a guided task. The catalog is
-            the live set of workflows registered on your gateway.
+            Open an installed workflow to drop into a guided task. The catalog is the live set of workflows registered
+            on your gateway.
           </p>
         </header>
 
@@ -93,9 +93,7 @@ export function WorkflowStoreContent({
               onClick={() => openWorkflow(workflow)}
             >
               <StoreCardBody workflow={workflow} />
-              <span
-                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}
-              >
+              <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
                 <span className="store-open">Open →</span>
                 {EDITABLE_IDS.has(workflow.id) ? (
                   // Edit jumps straight to the workflow editor surface. It lives

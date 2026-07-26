@@ -1,9 +1,5 @@
 import { expect, test } from "@playwright/test";
-import {
-  expectNoPageErrors,
-  openRenderedSurface,
-  trackPageErrors,
-} from "./surfaceTestUtils";
+import { expectNoPageErrors, openRenderedSurface, trackPageErrors } from "./surfaceTestUtils";
 
 test.beforeEach(async ({ page }) => {
   await openRenderedSurface(page, "gallery");
@@ -44,14 +40,14 @@ test("streaming transcript pins the scroller to the latest chunk", async ({ page
   expect(atBottom).toBe(true);
 
   // Scrolling up breaks the follow and surfaces the jump-to-latest affordance.
-  await viewport.evaluate((el) => { el.scrollTop = 0; });
+  await viewport.evaluate((el) => {
+    el.scrollTop = 0;
+  });
   await viewport.dispatchEvent("scroll");
   await expect(page.getByRole("button", { name: "Jump to latest" })).toBeVisible();
   await page.getByRole("button", { name: "Jump to latest" }).click();
   await expect
-    .poll(() =>
-      viewport.evaluate((el) => Math.abs(el.scrollHeight - el.scrollTop - el.clientHeight) < 24),
-    )
+    .poll(() => viewport.evaluate((el) => Math.abs(el.scrollHeight - el.scrollTop - el.clientHeight) < 24))
     .toBe(true);
   expectNoPageErrors(pageErrors);
 });
@@ -192,8 +188,7 @@ test("test failure and stack trace render", async ({ page }) => {
 
 test("theme switching drives the explicit data-theme override", async ({ page }) => {
   const pageErrors = trackPageErrors(page);
-  const token = () =>
-    page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bg").trim());
+  const token = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bg").trim());
   await page.emulateMedia({ colorScheme: "light" });
   const lightToken = await token();
   await page.getByTestId("theme-toggle").click();

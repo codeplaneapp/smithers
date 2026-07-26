@@ -29,13 +29,13 @@ afterEach(async () => {
   }
 });
 
-type PgConnection = { query: (query: { text: string; values?: unknown[] }) => Promise<{ rows: Record<string, unknown>[] }> };
+type PgConnection = {
+  query: (query: { text: string; values?: unknown[] }) => Promise<{ rows: Record<string, unknown>[] }>;
+};
 
 /** Evaluate a compiled Electric predicate against the real `_smithers_docs` table. */
 async function shapePaths(connection: PgConnection, where: string | undefined): Promise<string[]> {
-  const text = where
-    ? `SELECT path FROM _smithers_docs WHERE ${where}`
-    : "SELECT path FROM _smithers_docs";
+  const text = where ? `SELECT path FROM _smithers_docs WHERE ${where}` : "SELECT path FROM _smithers_docs";
   const result = await connection.query({ text });
   return result.rows.map((row) => String(row.path)).sort();
 }
@@ -88,8 +88,7 @@ describe("multiplayer docs/tickets predicate parity (real pglite)", () => {
       { includeDeleted: true, updatedAfterMs: now + 45 },
     ];
     for (const filter of docFilters) {
-      expect(await shapePaths(connection, docsShapeWhere(filter)))
-        .toEqual(rpcPaths(await adapter.listDocs(filter)));
+      expect(await shapePaths(connection, docsShapeWhere(filter))).toEqual(rpcPaths(await adapter.listDocs(filter)));
     }
 
     // The default docs predicate hides tombstones even with no filter at all.
@@ -130,7 +129,9 @@ describe("docsShapeWhere / ticketsShapeWhere compilation", () => {
     expect(docsShapeWhere({ includeDeleted: true })).toBeUndefined();
     expect(docsShapeWhere({ includeDeleted: true, kind: "plan" })).toBe("kind = 'plan'");
     expect(docsShapeWhere({ updatedAfterMs: 100.9 })).toBe("deleted_at_ms IS NULL AND updated_at_ms > 100");
-    expect(docsShapeWhere({ kind: "doc", updatedAfterMs: 5, includeDeleted: true })).toBe("kind = 'doc' AND updated_at_ms > 5");
+    expect(docsShapeWhere({ kind: "doc", updatedAfterMs: 5, includeDeleted: true })).toBe(
+      "kind = 'doc' AND updated_at_ms > 5",
+    );
     // Non-finite updatedAfterMs is ignored, matching the adapter's validation.
     expect(docsShapeWhere({ updatedAfterMs: Number.NaN })).toBe("deleted_at_ms IS NULL");
     expect(docsShapeWhere({ updatedAfterMs: Number.POSITIVE_INFINITY })).toBe("deleted_at_ms IS NULL");
@@ -174,15 +175,13 @@ describe("multiplayer docs/tickets Electric wiring", () => {
       { load: async () => {} },
     );
 
-    const collections = await (createSmithersCollections as unknown as (
-      mode: typeof multiplayerMode,
-      qc: QueryClient,
-      load: () => Promise<typeof fakeElectric>,
-    ) => Promise<SmithersCollections>)(
-      multiplayerMode,
-      queryClient,
-      async () => fakeElectric,
-    );
+    const collections = await (
+      createSmithersCollections as unknown as (
+        mode: typeof multiplayerMode,
+        qc: QueryClient,
+        load: () => Promise<typeof fakeElectric>,
+      ) => Promise<SmithersCollections>
+    )(multiplayerMode, queryClient, async () => fakeElectric);
     cleanups.push(() => {
       collections.close();
       queryClient.clear();
@@ -192,7 +191,10 @@ describe("multiplayer docs/tickets Electric wiring", () => {
     expect(configs.at(-1)).toEqual({ shape: "docs", where: "deleted_at_ms IS NULL" });
 
     collections.docs({ filter: { kind: "doc", updatedAfterMs: 100 } });
-    expect(configs.at(-1)).toEqual({ shape: "docs", where: "deleted_at_ms IS NULL AND kind = 'doc' AND updated_at_ms > 100" });
+    expect(configs.at(-1)).toEqual({
+      shape: "docs",
+      where: "deleted_at_ms IS NULL AND kind = 'doc' AND updated_at_ms > 100",
+    });
 
     collections.docs({ filter: { includeDeleted: true } });
     expect(configs.at(-1)).toEqual({ shape: "docs", where: undefined });

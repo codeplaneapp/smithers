@@ -18,11 +18,11 @@ declare function isIntegrationError(error: unknown): error is IntegrationError;
  */
 declare class IntegrationError extends SmithersError {
     /**
-   * @param {IntegrationErrorReason} reason
-   * @param {string} message
-   * @param {Record<string, unknown>} [details]
-   * @param {{ cause?: unknown }} [options]
-   */
+     * @param {IntegrationErrorReason} reason
+     * @param {string} message
+     * @param {Record<string, unknown>} [details]
+     * @param {{ cause?: unknown }} [options]
+     */
     constructor(reason: IntegrationErrorReason, message: string, details?: Record<string, unknown>, options?: {
         cause?: unknown;
     });

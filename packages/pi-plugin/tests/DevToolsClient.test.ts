@@ -134,12 +134,14 @@ describe("DevToolsClient", () => {
       "Gateway HTTP 503",
     );
 
-    const rpcFailure = await httpFixture((body) => Response.json({
-      type: "res",
-      id: body.id,
-      ok: false,
-      error: { code: "RUN_LOCKED", message: "run is locked" },
-    }));
+    const rpcFailure = await httpFixture((body) =>
+      Response.json({
+        type: "res",
+        id: body.id,
+        ok: false,
+        error: { code: "RUN_LOCKED", message: "run is locked" },
+      }),
+    );
     servers.push(rpcFailure.server);
     await expectSmithersError(
       new DevToolsClient({ baseUrl: rpcFailure.baseUrl }).cancel("run-client"),
@@ -160,26 +162,32 @@ describe("DevToolsClient", () => {
           return;
         }
         if (frame.method === "streamDevTools" && frame.params.afterSeq === 10) {
-          ws.send(JSON.stringify({
-            type: "res",
-            id: frame.id,
-            ok: false,
-            error: { code: "SeqOutOfRange", message: "stale" },
-          }));
+          ws.send(
+            JSON.stringify({
+              type: "res",
+              id: frame.id,
+              ok: false,
+              error: { code: "SeqOutOfRange", message: "stale" },
+            }),
+          );
           return;
         }
         if (frame.method === "streamDevTools") {
           ws.send(JSON.stringify({ type: "res", id: frame.id, ok: true, payload: { streamId: "wanted" } }));
-          ws.send(JSON.stringify({
-            type: "event",
-            event: "devtools.event",
-            payload: { streamId: "other", event: { type: "snapshot", ...snapshot(1) } },
-          }));
-          ws.send(JSON.stringify({
-            type: "event",
-            event: "devtools.event",
-            payload: { streamId: "wanted", event: { type: "snapshot", ...snapshot(2) } },
-          }));
+          ws.send(
+            JSON.stringify({
+              type: "event",
+              event: "devtools.event",
+              payload: { streamId: "other", event: { type: "snapshot", ...snapshot(1) } },
+            }),
+          );
+          ws.send(
+            JSON.stringify({
+              type: "event",
+              event: "devtools.event",
+              payload: { streamId: "wanted", event: { type: "snapshot", ...snapshot(2) } },
+            }),
+          );
         }
       });
     });
@@ -218,11 +226,13 @@ describe("DevToolsClient", () => {
         if (frame.method === "streamDevTools") {
           streamRequests.push(frame.params);
           ws.send(JSON.stringify({ type: "res", id: frame.id, ok: true, payload: { streamId: "stream-1" } }));
-          ws.send(JSON.stringify({
-            type: "event",
-            event: "devtools.event",
-            payload: { streamId: "stream-1", event: { type: "snapshot", ...snapshot(5) } },
-          }));
+          ws.send(
+            JSON.stringify({
+              type: "event",
+              event: "devtools.event",
+              payload: { streamId: "stream-1", event: { type: "snapshot", ...snapshot(5) } },
+            }),
+          );
         }
       });
     });
@@ -258,11 +268,13 @@ describe("DevToolsClient", () => {
         }
         if (frame.method === "streamDevTools") {
           ws.send(JSON.stringify({ type: "res", id: frame.id, ok: true, payload: { streamId: "stream-1" } }));
-          ws.send(JSON.stringify({
-            type: "event",
-            event: "devtools.error",
-            payload: { streamId: "stream-1", error: { code: "BROKEN", message: "broken stream" } },
-          }));
+          ws.send(
+            JSON.stringify({
+              type: "event",
+              event: "devtools.error",
+              payload: { streamId: "stream-1", error: { code: "BROKEN", message: "broken stream" } },
+            }),
+          );
         }
       });
     });
@@ -270,8 +282,7 @@ describe("DevToolsClient", () => {
     if (typeof address === "string" || address === null) {
       throw new Error("expected TCP server address");
     }
-    const stream = new DevToolsClient({ baseUrl: `http://127.0.0.1:${address.port}` })
-      .streamDevTools("run-client");
+    const stream = new DevToolsClient({ baseUrl: `http://127.0.0.1:${address.port}` }).streamDevTools("run-client");
 
     await expectSmithersError(stream.next(), "BROKEN", "broken stream");
   });
@@ -286,8 +297,7 @@ describe("DevToolsClient", () => {
     if (typeof address === "string" || address === null) {
       throw new Error("expected TCP server address");
     }
-    const stream = new DevToolsClient({ baseUrl: `http://127.0.0.1:${address.port}` })
-      .streamDevTools("run-client");
+    const stream = new DevToolsClient({ baseUrl: `http://127.0.0.1:${address.port}` }).streamDevTools("run-client");
 
     await expectSmithersError(stream.next(), "PI_GATEWAY_TIMEOUT", "connect.challenge");
   }, 10_000);
@@ -320,8 +330,7 @@ describe("DevToolsClient", () => {
     if (typeof address === "string" || address === null) {
       throw new Error("expected TCP server address");
     }
-    const stream = new DevToolsClient({ baseUrl: `http://127.0.0.1:${address.port}` })
-      .streamDevTools("run-client");
+    const stream = new DevToolsClient({ baseUrl: `http://127.0.0.1:${address.port}` }).streamDevTools("run-client");
 
     await expectSmithersError(stream.next(), "PI_GATEWAY_CLOSED", "closed");
   }, 15_000);

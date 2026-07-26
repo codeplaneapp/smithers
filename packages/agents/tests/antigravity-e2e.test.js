@@ -25,17 +25,13 @@ try {
     stdio: "pipe",
     encoding: "utf8",
   });
-  supportsAgyE2EFlags =
-    helpText.includes("--cwd") &&
-    helpText.includes("-p");
+  supportsAgyE2EFlags = helpText.includes("--cwd") && helpText.includes("-p");
 } catch {
   isAgyInstalled = false;
   supportsAgyE2EFlags = false;
 }
 
-describe.skipIf(!runRealAgentE2E || !isAgyInstalled || !supportsAgyE2EFlags)(
-  "AntigravityAgent E2E (real CLI)",
-  () => {
+describe.skipIf(!runRealAgentE2E || !isAgyInstalled || !supportsAgyE2EFlags)("AntigravityAgent E2E (real CLI)", () => {
   /** @type {string} */
   let tmpDir;
 
@@ -93,13 +89,11 @@ describe.skipIf(!runRealAgentE2E || !isAgyInstalled || !supportsAgyE2EFlags)(
     const agent = new AntigravityAgent({ yolo: true });
 
     const result = await agent.generate({
-      prompt:
-        "List the files in the current directory. Just output the filenames, one per line.",
+      prompt: "List the files in the current directory. Just output the filenames, one per line.",
       rootDir: tmpDir,
     });
 
     expect(result).toBeDefined();
     expect(result.text).toContain("hello.js");
   }, 120_000);
-  }
-);
+});

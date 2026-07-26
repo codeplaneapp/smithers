@@ -1,11 +1,6 @@
 // smithers-source: seeded
 /** @jsxImportSource smithers-orchestrator */
-import {
-  Sequence,
-  Task,
-  type AgentLike,
-  type OutputTarget,
-} from "smithers-orchestrator";
+import { Sequence, Task, type AgentLike, type OutputTarget } from "smithers-orchestrator";
 import type { ScorersMap } from "@smithers-orchestrator/scorers";
 import { LoopUntilScored } from "../LoopUntilScored";
 import ExtractPromptInstructions from "../../prompts/extract-prompt.mdx";
@@ -135,9 +130,7 @@ function emitProvided(prompt: string): RctfPromptOutput {
 }
 
 function emitCached(cached: CachedPrompt): RctfPromptOutput {
-  const structured = isStructured(cached.structured)
-    ? cached.structured
-    : emptyStructured();
+  const structured = isStructured(cached.structured) ? cached.structured : emptyStructured();
   return {
     prompt: cached.prompt,
     structured,
@@ -174,11 +167,7 @@ function isStructured(s: unknown): s is RctfPromptOutput["structured"] {
   );
 }
 
-function renderScoreBanner(
-  score: number | null | undefined,
-  threshold: number,
-  stakes: Stakes,
-): string {
+function renderScoreBanner(score: number | null | undefined, threshold: number, stakes: Stakes): string {
   if (typeof score !== "number") {
     return `Score: pending. Threshold: ${threshold} (stakes: ${stakes}).`;
   }

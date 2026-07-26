@@ -71,66 +71,58 @@ const DEFAULT_COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
  * @returns {{append: (chunk: Uint8Array | string) => void, toString: () => string, truncated: boolean}}
  */
 function createTailBuffer(maxBytes) {
-    const buffer = Buffer.allocUnsafe(maxBytes);
-    let start = 0;
-    let length = 0;
-    let totalBytes = 0;
-    let truncated = false;
+  const buffer = Buffer.allocUnsafe(maxBytes);
+  let start = 0;
+  let length = 0;
+  let totalBytes = 0;
+  let truncated = false;
 
-    return {
-        append(chunk) {
-            const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-            totalBytes += bytes.length;
-            if (bytes.length === 0)
-                return;
-            if (maxBytes === 0) {
-                truncated = true;
-                return;
-            }
-            if (bytes.length >= maxBytes) {
-                bytes.subarray(bytes.length - maxBytes).copy(buffer);
-                start = 0;
-                length = maxBytes;
-                if (totalBytes > maxBytes)
-                    truncated = true;
-                return;
-            }
-            const writeAt = (start + length) % maxBytes;
-            const firstLength = Math.min(bytes.length, maxBytes - writeAt);
-            bytes.copy(buffer, writeAt, 0, firstLength);
-            if (firstLength < bytes.length)
-                bytes.copy(buffer, 0, firstLength);
-            if (length + bytes.length > maxBytes) {
-                start = (start + length + bytes.length - maxBytes) % maxBytes;
-                length = maxBytes;
-                truncated = true;
-            }
-            else {
-                length += bytes.length;
-            }
-            if (totalBytes > maxBytes)
-                truncated = true;
-        },
-        toString() {
-            if (length === 0)
-                return "";
-            const output = Buffer.allocUnsafe(length);
-            const firstLength = Math.min(length, maxBytes - start);
-            buffer.copy(output, 0, start, start + firstLength);
-            if (firstLength < length)
-                buffer.copy(output, firstLength, 0, length - firstLength);
-            // A byte stream can be cut at an arbitrary UTF-8 boundary when the
-            // tail rolls over. Drop continuation bytes at the front rather
-            // than returning a replacement character for a partial codepoint.
-            let boundary = 0;
-            while (boundary < output.length && (output[boundary] & 0xc0) === 0x80)
-                boundary++;
-            return output.subarray(boundary).toString("utf8");
-        },
-        get truncated() {
-            return truncated;
-        },
-    };
+  return {
+    append(chunk) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += bytes.length;
+      if (bytes.length === 0) return;
+      if (maxBytes === 0) {
+        truncated = true;
+        return;
+      }
+      if (bytes.length >= maxBytes) {
+        bytes.subarray(bytes.length - maxBytes).copy(buffer);
+        start = 0;
+        length = maxBytes;
+        if (totalBytes > maxBytes) truncated = true;
+        return;
+      }
+      const writeAt = (start + length) % maxBytes;
+      const firstLength = Math.min(bytes.length, maxBytes - writeAt);
+      bytes.copy(buffer, writeAt, 0, firstLength);
+      if (firstLength < bytes.length) bytes.copy(buffer, 0, firstLength);
+      if (length + bytes.length > maxBytes) {
+        start = (start + length + bytes.length - maxBytes) % maxBytes;
+        length = maxBytes;
+        truncated = true;
+      } else {
+        length += bytes.length;
+      }
+      if (totalBytes > maxBytes) truncated = true;
+    },
+    toString() {
+      if (length === 0) return "";
+      const output = Buffer.allocUnsafe(length);
+      const firstLength = Math.min(length, maxBytes - start);
+      buffer.copy(output, 0, start, start + firstLength);
+      if (firstLength < length) buffer.copy(output, firstLength, 0, length - firstLength);
+      // A byte stream can be cut at an arbitrary UTF-8 boundary when the
+      // tail rolls over. Drop continuation bytes at the front rather
+      // than returning a replacement character for a partial codepoint.
+      let boundary = 0;
+      while (boundary < output.length && (output[boundary] & 0xc0) === 0x80) boundary++;
+      return output.subarray(boundary).toString("utf8");
+    },
+    get truncated() {
+      return truncated;
+    },
+  };
 }
 
 /**
@@ -140,16 +132,13 @@ function createTailBuffer(maxBytes) {
  * @returns {boolean}
  */
 function checkPassed(row) {
-    if (row == null)
-        return false;
-    if (typeof row === "object") {
-        const r = /** @type {Record<string, unknown>} */ (row);
-        if (r.passed === false || r.ok === false || r.failed === true)
-            return false;
-        if (r.error != null && r.error !== false)
-            return false;
-    }
-    return true;
+  if (row == null) return false;
+  if (typeof row === "object") {
+    const r = /** @type {Record<string, unknown>} */ (row);
+    if (r.passed === false || r.ok === false || r.failed === true) return false;
+    if (r.error != null && r.error !== false) return false;
+  }
+  return true;
 }
 
 /**
@@ -160,11 +149,9 @@ function checkPassed(row) {
  * @returns {boolean}
  */
 function resolveVerdict(strategy, passCount, total) {
-    if (strategy === "any-pass")
-        return passCount > 0;
-    if (strategy === "majority")
-        return passCount * 2 > total;
-    return total > 0 && passCount === total;
+  if (strategy === "any-pass") return passCount > 0;
+  if (strategy === "majority") return passCount * 2 > total;
+  return total > 0 && passCount === total;
 }
 
 /**
@@ -172,12 +159,11 @@ function resolveVerdict(strategy, passCount, total) {
  * @returns {CheckConfig[]}
  */
 function normalizeChecks(checks) {
-    if (Array.isArray(checks))
-        return checks;
-    return Object.entries(checks).map(([key, cfg]) => ({
-        id: key,
-        ...cfg,
-    }));
+  if (Array.isArray(checks)) return checks;
+  return Object.entries(checks).map(([key, cfg]) => ({
+    id: key,
+    ...cfg,
+  }));
 }
 /**
  * Execute a shell check and convert the process result into the same pass/fail
@@ -188,113 +174,112 @@ function normalizeChecks(checks) {
  * @returns {Promise<Record<string, unknown>>}
  */
 async function runCommandCheck(command, timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS) {
-    const runtime = getTaskRuntime();
-    const cwd = runtime?.rootDir ?? process.cwd();
-    return await new Promise((resolve) => {
-        const stdout = createTailBuffer(COMMAND_MAX_BUFFER);
-        const stderr = createTailBuffer(COMMAND_MAX_BUFFER);
-        let child;
+  const runtime = getTaskRuntime();
+  const cwd = runtime?.rootDir ?? process.cwd();
+  return await new Promise((resolve) => {
+    const stdout = createTailBuffer(COMMAND_MAX_BUFFER);
+    const stderr = createTailBuffer(COMMAND_MAX_BUFFER);
+    let child;
+    try {
+      child = spawn(command, {
+        cwd,
+        shell: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        // The shell wrapper must die as a TREE on timeout: detached
+        // gives it its own process group so killTree can signal the
+        // whole group on POSIX (CI's shell does not exec the command,
+        // so signalling only the wrapper leaves the real process
+        // holding the pipes and `close` never fires).
+        detached: process.platform !== "win32",
+      });
+    } catch (error) {
+      const err = /** @type {Error} */ (error);
+      resolve({
+        passed: false,
+        ok: false,
+        command,
+        exitCode: null,
+        signal: null,
+        stdout: "",
+        stderr: "",
+        error: err.message,
+      });
+      return;
+    }
+    let spawnError = null;
+    let timedOut = false;
+    /** @param {NodeJS.Signals} signal */
+    const killTree = (signal) => {
+      // shell:true wraps the command: signalling only the wrapper leaves
+      // the real process holding the inherited pipes and `close` never
+      // fires. Windows fells the tree with taskkill; POSIX signals the
+      // detached process group.
+      if (process.platform === "win32" && typeof child.pid === "number") {
+        spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+        return;
+      }
+      if (typeof child.pid === "number") {
         try {
-            child = spawn(command, {
-                cwd,
-                shell: true,
-                stdio: ["ignore", "pipe", "pipe"],
-                // The shell wrapper must die as a TREE on timeout: detached
-                // gives it its own process group so killTree can signal the
-                // whole group on POSIX (CI's shell does not exec the command,
-                // so signalling only the wrapper leaves the real process
-                // holding the pipes and `close` never fires).
-                detached: process.platform !== "win32",
-            });
+          process.kill(-child.pid, signal);
+          return;
+        } catch {
+          // group already reaped (or not a leader); fall through
         }
-        catch (error) {
-            const err = /** @type {Error} */ (error);
-            resolve({
-                passed: false,
-                ok: false,
-                command,
-                exitCode: null,
-                signal: null,
-                stdout: "",
-                stderr: "",
-                error: err.message,
-            });
-            return;
-        }
-        let spawnError = null;
-        let timedOut = false;
-        /** @param {NodeJS.Signals} signal */
-        const killTree = (signal) => {
-            // shell:true wraps the command: signalling only the wrapper leaves
-            // the real process holding the inherited pipes and `close` never
-            // fires. Windows fells the tree with taskkill; POSIX signals the
-            // detached process group.
-            if (process.platform === "win32" && typeof child.pid === "number") {
-                spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
-                return;
-            }
-            if (typeof child.pid === "number") {
-                try {
-                    process.kill(-child.pid, signal);
-                    return;
-                } catch {
-                    // group already reaped (or not a leader); fall through
-                }
-            }
-            child.kill(signal);
-        };
-        const timer = timeoutMs > 0
-            ? setTimeout(() => {
-                timedOut = true;
-                killTree("SIGTERM");
-                const hardKill = setTimeout(() => killTree("SIGKILL"), 5_000);
-                hardKill.unref?.();
-            }, timeoutMs)
-            : null;
-        timer?.unref?.();
-        const onAbort = () => killTree("SIGTERM");
-        runtime?.signal?.addEventListener?.("abort", onAbort, { once: true });
-        child.stdout?.on("data", (chunk) => stdout.append(chunk));
-        child.stderr?.on("data", (chunk) => stderr.append(chunk));
-        child.on("error", (error) => {
-            spawnError = /** @type {Error} */ (error);
-        });
-        child.on("close", (exitCode, signal) => {
-            if (timer) clearTimeout(timer);
-            runtime?.signal?.removeEventListener?.("abort", onAbort);
-            const actualExitCode = typeof exitCode === "number" ? exitCode : null;
-            const actualSignal = typeof signal === "string" ? signal : null;
-            const passed = spawnError == null && actualExitCode === 0 && actualSignal == null;
-            const result = {
-                passed,
-                ok: passed,
-                command,
-                exitCode: actualExitCode,
-                signal: actualSignal,
-                stdout: stdout.toString(),
-                stderr: stderr.toString(),
-            };
-            if (spawnError) {
-                result.error = spawnError.message;
-            }
-            else if (!passed) {
-                result.error = actualSignal
-                    ? `Command terminated by ${actualSignal}`
-                    : `Command exited with code ${actualExitCode ?? "unknown"}`;
-            }
-            if (timedOut) {
-                result.passed = false;
-                result.ok = false;
-                result.timedOut = true;
-                result.error = `Command exceeded the ${timeoutMs}ms timeout and was killed`;
-            }
-            if (stdout.truncated || stderr.truncated) {
-                result.truncated = true;
-                result.diagnostic = `Command output exceeded the ${COMMAND_MAX_BUFFER}-byte capture limit; only the tail was retained`;
-            }
-            resolve(result);
-        });
+      }
+      child.kill(signal);
+    };
+    const timer =
+      timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            killTree("SIGTERM");
+            const hardKill = setTimeout(() => killTree("SIGKILL"), 5_000);
+            hardKill.unref?.();
+          }, timeoutMs)
+        : null;
+    timer?.unref?.();
+    const onAbort = () => killTree("SIGTERM");
+    runtime?.signal?.addEventListener?.("abort", onAbort, { once: true });
+    child.stdout?.on("data", (chunk) => stdout.append(chunk));
+    child.stderr?.on("data", (chunk) => stderr.append(chunk));
+    child.on("error", (error) => {
+      spawnError = /** @type {Error} */ (error);
     });
+    child.on("close", (exitCode, signal) => {
+      if (timer) clearTimeout(timer);
+      runtime?.signal?.removeEventListener?.("abort", onAbort);
+      const actualExitCode = typeof exitCode === "number" ? exitCode : null;
+      const actualSignal = typeof signal === "string" ? signal : null;
+      const passed = spawnError == null && actualExitCode === 0 && actualSignal == null;
+      const result = {
+        passed,
+        ok: passed,
+        command,
+        exitCode: actualExitCode,
+        signal: actualSignal,
+        stdout: stdout.toString(),
+        stderr: stderr.toString(),
+      };
+      if (spawnError) {
+        result.error = spawnError.message;
+      } else if (!passed) {
+        result.error = actualSignal
+          ? `Command terminated by ${actualSignal}`
+          : `Command exited with code ${actualExitCode ?? "unknown"}`;
+      }
+      if (timedOut) {
+        result.passed = false;
+        result.ok = false;
+        result.timedOut = true;
+        result.error = `Command exceeded the ${timeoutMs}ms timeout and was killed`;
+      }
+      if (stdout.truncated || stderr.truncated) {
+        result.truncated = true;
+        result.diagnostic = `Command output exceeded the ${COMMAND_MAX_BUFFER}-byte capture limit; only the tail was retained`;
+      }
+      resolve(result);
+    });
+  });
 }
 /**
  * <CheckSuite> — Parallel checks with auto-aggregated pass/fail verdict.
@@ -303,66 +288,68 @@ async function runCommandCheck(command, timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS) 
  * @param {CheckSuiteProps} props
  */
 export function CheckSuite(props) {
-    if (props.skipIf)
-        return null;
-    const ctx = React.useContext(SmithersContext);
-    const { id, checks, verdictOutput, strategy = "all-pass", maxConcurrency, continueOnFail = true, } = props;
-    const prefix = id ?? "checksuite";
-    const normalized = normalizeChecks(checks);
-    // Build parallel check tasks
-    const checkTasks = normalized.map((check) => {
-        const taskId = `${prefix}-${check.id}`;
-        const taskProps = {
-            key: taskId,
-            id: taskId,
-            output: verdictOutput,
-            continueOnFail,
-            label: check.label ?? check.id,
-        };
-        if (check.command) {
-            return React.createElement(Task, taskProps, () => runCommandCheck(check.command ?? "", check.timeoutMs));
-        }
-        const childContent = `Run check: ${check.label ?? check.id}`;
-        if (check.agent) {
-            taskProps.agent = check.agent;
-        }
-        return React.createElement(Task, taskProps, childContent);
-    });
-    const parallelEl = React.createElement(Parallel, { maxConcurrency }, ...checkTasks);
-    // The verdict depends on every check. We use dependsOn (the mechanism the
-    // graph extractor honors) so the verdict only runs once all checks have
-    // produced output — a `needs` map alone is ignored when no `deps` are set.
-    const checkIds = normalized.map((check) => `${prefix}-${check.id}`);
-    // Compute the aggregate verdict from the per-check outputs. Reads are taken
-    // from the workflow context at render time and captured in the closure; the
-    // component re-renders reactively as each check's output becomes available,
-    // and the engine defers execution until every dependency has completed.
-    const verdictTask = React.createElement(Task, {
-        id: `${prefix}-verdict`,
-        output: verdictOutput,
-        dependsOn: checkIds,
-        label: "verdict",
-    }, () => {
-        let passCount = 0;
-        const results = {};
-        for (const check of normalized) {
-            const checkId = `${prefix}-${check.id}`;
-            const row = ctx?.outputMaybe(verdictOutput, { nodeId: checkId });
-            const passed = checkPassed(row);
-            results[check.id] = passed;
-            if (passed)
-                passCount += 1;
-        }
-        const total = normalized.length;
-        return {
-            passed: resolveVerdict(strategy, passCount, total),
-            passCount,
-            total,
-            strategy,
-            results,
-        };
-    });
-    return React.createElement(Sequence, null, parallelEl, verdictTask);
+  if (props.skipIf) return null;
+  const ctx = React.useContext(SmithersContext);
+  const { id, checks, verdictOutput, strategy = "all-pass", maxConcurrency, continueOnFail = true } = props;
+  const prefix = id ?? "checksuite";
+  const normalized = normalizeChecks(checks);
+  // Build parallel check tasks
+  const checkTasks = normalized.map((check) => {
+    const taskId = `${prefix}-${check.id}`;
+    const taskProps = {
+      key: taskId,
+      id: taskId,
+      output: verdictOutput,
+      continueOnFail,
+      label: check.label ?? check.id,
+    };
+    if (check.command) {
+      return React.createElement(Task, taskProps, () => runCommandCheck(check.command ?? "", check.timeoutMs));
+    }
+    const childContent = `Run check: ${check.label ?? check.id}`;
+    if (check.agent) {
+      taskProps.agent = check.agent;
+    }
+    return React.createElement(Task, taskProps, childContent);
+  });
+  const parallelEl = React.createElement(Parallel, { maxConcurrency }, ...checkTasks);
+  // The verdict depends on every check. We use dependsOn (the mechanism the
+  // graph extractor honors) so the verdict only runs once all checks have
+  // produced output — a `needs` map alone is ignored when no `deps` are set.
+  const checkIds = normalized.map((check) => `${prefix}-${check.id}`);
+  // Compute the aggregate verdict from the per-check outputs. Reads are taken
+  // from the workflow context at render time and captured in the closure; the
+  // component re-renders reactively as each check's output becomes available,
+  // and the engine defers execution until every dependency has completed.
+  const verdictTask = React.createElement(
+    Task,
+    {
+      id: `${prefix}-verdict`,
+      output: verdictOutput,
+      dependsOn: checkIds,
+      label: "verdict",
+    },
+    () => {
+      let passCount = 0;
+      const results = {};
+      for (const check of normalized) {
+        const checkId = `${prefix}-${check.id}`;
+        const row = ctx?.outputMaybe(verdictOutput, { nodeId: checkId });
+        const passed = checkPassed(row);
+        results[check.id] = passed;
+        if (passed) passCount += 1;
+      }
+      const total = normalized.length;
+      return {
+        passed: resolveVerdict(strategy, passCount, total),
+        passCount,
+        total,
+        strategy,
+        results,
+      };
+    },
+  );
+  return React.createElement(Sequence, null, parallelEl, verdictTask);
 }
 ```
 
@@ -384,20 +371,23 @@ SmithersContext.displayName = "SmithersContext";
  * @returns {{ SmithersContext: React.Context<SmithersCtx<Schema> | null>, useCtx: () => SmithersCtx<Schema> }}
  */
 export function createSmithersContext() {
-    /** @type {React.Context<SmithersCtx<Schema> | null>} */
-    const Context = React.createContext(null);
-    Context.displayName = "SmithersContext";
-    /**
+  /** @type {React.Context<SmithersCtx<Schema> | null>} */
+  const Context = React.createContext(null);
+  Context.displayName = "SmithersContext";
+  /**
    * @returns {SmithersCtx<Schema>}
    */
-    function useCtx() {
-        const ctx = React.useContext(Context);
-        if (!ctx) {
-            throw new SmithersError("CONTEXT_OUTSIDE_WORKFLOW", "useCtx() must be called inside a <Workflow> created by createSmithers()");
-        }
-        return ctx;
+  function useCtx() {
+    const ctx = React.useContext(Context);
+    if (!ctx) {
+      throw new SmithersError(
+        "CONTEXT_OUTSIDE_WORKFLOW",
+        "useCtx() must be called inside a <Workflow> created by createSmithers()",
+      );
     }
-    return { SmithersContext: Context, useCtx };
+    return ctx;
+  }
+  return { SmithersContext: Context, useCtx };
 }
 ```
 
@@ -414,23 +404,26 @@ const storage = new AsyncLocalStorage();
  * @returns {T}
  */
 export function withTaskRuntime(runtime, execute) {
-    return storage.run(runtime, execute);
+  return storage.run(runtime, execute);
 }
 /**
  * @returns {SmithersTaskRuntime | undefined}
  */
 export function getTaskRuntime() {
-    return storage.getStore();
+  return storage.getStore();
 }
 /**
  * @returns {SmithersTaskRuntime}
  */
 export function requireTaskRuntime() {
-    const runtime = storage.getStore();
-    if (!runtime) {
-        throw new SmithersError("TASK_RUNTIME_UNAVAILABLE", "Smithers task runtime is only available while a builder step is executing.");
-    }
-    return runtime;
+  const runtime = storage.getStore();
+  if (!runtime) {
+    throw new SmithersError(
+      "TASK_RUNTIME_UNAVAILABLE",
+      "Smithers task runtime is only available while a builder step is executing.",
+    );
+  }
+  return runtime;
 }
 ```
 
@@ -442,17 +435,16 @@ import React from "react";
  * @param {SequenceProps} props
  */
 export function Sequence(props) {
-    if (props.skipIf)
-        return null;
-    // Sequence carries only a display label; pass a sanitized bag (align with
-    // the sanitizing structural components) so control props don't leak through.
-    // `label` names the phase group in run views (graph, the Claude /workflows
-    // mirror) and is preserved in the persisted frame XML.
-    const next = {
-        ...(props.label === undefined ? {} : { label: props.label }),
-        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
-    };
-    return React.createElement("smithers:sequence", next, props.children);
+  if (props.skipIf) return null;
+  // Sequence carries only a display label; pass a sanitized bag (align with
+  // the sanitizing structural components) so control props don't leak through.
+  // `label` names the phase group in run views (graph, the Claude /workflows
+  // mirror) and is preserved in the persisted frame XML.
+  const next = {
+    ...(props.label === undefined ? {} : { label: props.label }),
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+  };
+  return React.createElement("smithers:sequence", next, props.children);
 }
 ```
 
@@ -464,19 +456,18 @@ import React from "react";
  * @param {ParallelProps} props
  */
 export function Parallel(props) {
-    if (props.skipIf)
-        return null;
-    // Align prop sanitization with other structural components. `label` names
-    // the phase group in run views (graph, the Claude /workflows mirror).
-    const next = {
-        maxConcurrency: props.maxConcurrency,
-        subtreeConcurrency: props.subtreeConcurrency,
-        id: props.id,
-        ...(props.label === undefined ? {} : { label: props.label }),
-        ...(props.priority === undefined ? {} : { priority: props.priority }),
-        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
-    };
-    return React.createElement("smithers:parallel", next, props.children);
+  if (props.skipIf) return null;
+  // Align prop sanitization with other structural components. `label` names
+  // the phase group in run views (graph, the Claude /workflows mirror).
+  const next = {
+    maxConcurrency: props.maxConcurrency,
+    subtreeConcurrency: props.subtreeConcurrency,
+    id: props.id,
+    ...(props.label === undefined ? {} : { label: props.label }),
+    ...(props.priority === undefined ? {} : { priority: props.priority }),
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+  };
+  return React.createElement("smithers:parallel", next, props.children);
 }
 ```
 
@@ -512,13 +503,13 @@ import type { CheckConfig } from "./CheckConfig.ts";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type CheckSuiteProps = {
-	id?: string;
-	checks: CheckConfig[] | Record<string, Omit<CheckConfig, "id">>;
-	verdictOutput: OutputTarget;
-	strategy?: "all-pass" | "majority" | "any-pass";
-	maxConcurrency?: number;
-	continueOnFail?: boolean;
-	skipIf?: boolean;
+  id?: string;
+  checks: CheckConfig[] | Record<string, Omit<CheckConfig, "id">>;
+  verdictOutput: OutputTarget;
+  strategy?: "all-pass" | "majority" | "any-pass";
+  maxConcurrency?: number;
+  continueOnFail?: boolean;
+  skipIf?: boolean;
 };
 ```
 
@@ -526,16 +517,16 @@ export type CheckSuiteProps = {
 import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
 
 export type CheckConfig = {
-	id: string;
-	agent?: AgentLike;
-	command?: string;
-	label?: string;
-	/**
-	 * Kill `command` (SIGTERM) if it hasn't exited after this many
-	 * milliseconds, so a hanging check can't wedge the run. Defaults to 10
-	 * minutes; pass `0` to disable the timeout for this check.
-	 */
-	timeoutMs?: number;
+  id: string;
+  agent?: AgentLike;
+  command?: string;
+  label?: string;
+  /**
+   * Kill `command` (SIGTERM) if it hasn't exited after this many
+   * milliseconds, so a hanging check can't wedge the run. Defaults to 10
+   * minutes; pass `0` to disable the timeout for this check.
+   */
+  timeoutMs?: number;
 };
 ```
 </CodeGroup>

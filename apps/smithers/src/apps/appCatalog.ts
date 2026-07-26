@@ -116,21 +116,12 @@ export function getApp(id: AppId): App | undefined {
  * (home, askme, a run surface, a utility surface). Surface apps match by kind;
  * the store app matches the `store` view.
  */
-export function activeAppId(route: {
-  view: View;
-  surface: Surface | null;
-}): AppId | null {
+export function activeAppId(route: { view: View; surface: Surface | null }): AppId | null {
   if (route.surface) {
-    const match = APPS.find(
-      (app) =>
-        app.target.kind === "surface" &&
-        app.target.surface.kind === route.surface!.kind,
-    );
+    const match = APPS.find((app) => app.target.kind === "surface" && app.target.surface.kind === route.surface!.kind);
     return match?.id ?? null;
   }
-  const match = APPS.find(
-    (app) => app.target.kind === "view" && app.target.view === route.view,
-  );
+  const match = APPS.find((app) => app.target.kind === "view" && app.target.view === route.view);
   return match?.id ?? null;
 }
 
@@ -145,10 +136,7 @@ export function activeAppId(route: {
  * which is honest. Full app↔workflow parity is a real-dev-gateway concern (the
  * full default pack), not a probe-gateway one (see docs/p1a-plan.md risk #3).
  */
-export function workflowsForApp(
-  id: AppId,
-  workflows: readonly StoreWorkflow[],
-): StoreWorkflow[] {
+export function workflowsForApp(id: AppId, workflows: readonly StoreWorkflow[]): StoreWorkflow[] {
   const app = getApp(id);
   if (!app) return [];
   const byId = new Map(workflows.map((workflow) => [workflow.id, workflow]));

@@ -26,21 +26,18 @@ describe("GET /metrics", () => {
     const env = await buildTestEnv();
     const worker = makeWorker();
     // Seed: one registered repo, one reviewed PR this month, one usage row.
-    await env.DB
-      .prepare(
-        "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
-      )
+    await env.DB.prepare(
+      "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
       .bind(REPO, "auto", 5, 25, Date.now())
       .run();
     const monthKey = new Date().toISOString().slice(0, 7);
-    await env.DB
-      .prepare("INSERT INTO reviewed_prs (repo, pr, month, first_seen_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO reviewed_prs (repo, pr, month, first_seen_at) VALUES (?, ?, ?, ?)")
       .bind(REPO, 1, monthKey, Date.now())
       .run();
-    await env.DB
-      .prepare(
-        "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      )
+    await env.DB.prepare(
+      "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
       .bind("e1", REPO, 1, "claude-sonnet-4-6", 100, 50, 200, 4000, 0.001, "messages", Date.now())
       .run();
     const res = await worker.fetch(

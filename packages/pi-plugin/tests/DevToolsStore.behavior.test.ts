@@ -127,7 +127,10 @@ describe("DevToolsStore historical controls", () => {
     let resolveScrub: ((snapshot: DevToolsSnapshot) => void) | undefined;
     const store = new DevToolsStore({
       client: fakeClient({
-        getDevToolsSnapshot: () => new Promise<DevToolsSnapshot>((resolve) => { resolveScrub = resolve; }),
+        getDevToolsSnapshot: () =>
+          new Promise<DevToolsSnapshot>((resolve) => {
+            resolveScrub = resolve;
+          }),
         streamDevTools: async function* () {},
       }),
     });
@@ -156,9 +159,8 @@ describe("DevToolsStore historical controls", () => {
           calls.push(`${frameNo}:${confirm}`);
           return { auditRowId: "audit-rewind" };
         },
-        getDevToolsSnapshot: async (_runId, frameNo) => frameNo === 1
-          ? snapshot(1, [task(3, "task:past", "finished")])
-          : afterRewind,
+        getDevToolsSnapshot: async (_runId, frameNo) =>
+          frameNo === 1 ? snapshot(1, [task(3, "task:past", "finished")]) : afterRewind,
         streamDevTools: async function* () {},
       }),
     });

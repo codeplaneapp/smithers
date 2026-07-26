@@ -25,18 +25,13 @@ try {
     stdio: "pipe",
     encoding: "utf8",
   });
-  supportsPiE2EFlags =
-    helpText.includes("--print") &&
-    helpText.includes("--mode") &&
-    helpText.includes("--no-session");
+  supportsPiE2EFlags = helpText.includes("--print") && helpText.includes("--mode") && helpText.includes("--no-session");
 } catch {
   isPiInstalled = false;
   supportsPiE2EFlags = false;
 }
 
-describe.skipIf(!runRealAgentE2E || !isPiInstalled || !supportsPiE2EFlags)(
-  "PiAgent E2E (real CLI)",
-  () => {
+describe.skipIf(!runRealAgentE2E || !isPiInstalled || !supportsPiE2EFlags)("PiAgent E2E (real CLI)", () => {
   /** @type {string} */
   let tmpDir;
 
@@ -93,5 +88,4 @@ describe.skipIf(!runRealAgentE2E || !isPiInstalled || !supportsPiE2EFlags)(
     expect(completed.engine).toBe("pi");
     expect(completed.ok).toBe(true);
   }, 120_000);
-  }
-);
+});

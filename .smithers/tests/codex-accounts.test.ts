@@ -9,24 +9,23 @@ describe("subscriptionCodexFirst", () => {
   test("uses only explicit subscription config directories before fallbacks", async () => {
     const home = await mkdtemp(join(tmpdir(), "smithers-codex-subscriptions-"));
     try {
-      await writeFile(join(home, "accounts.json"), JSON.stringify({
-        accounts: [
-          { provider: "codex", configDir: "/subscriptions/codex-a" },
-          { provider: "openai-api", apiKey: "must-not-be-used" },
-          { provider: "codex", configDir: "/subscriptions/codex-a" },
-          { provider: "codex", configDir: "/subscriptions/codex-b" },
-        ],
-      }));
+      await writeFile(
+        join(home, "accounts.json"),
+        JSON.stringify({
+          accounts: [
+            { provider: "codex", configDir: "/subscriptions/codex-a" },
+            { provider: "openai-api", apiKey: "must-not-be-used" },
+            { provider: "codex", configDir: "/subscriptions/codex-a" },
+            { provider: "codex", configDir: "/subscriptions/codex-b" },
+          ],
+        }),
+      );
       const fallback = { generate: async () => ({ text: "fallback" }) } as any;
-      const agents = subscriptionCodexFirst(
-        { model: "gpt-5.6-sol", inheritEnv: false },
-        [fallback],
-        {
-          SMITHERS_HOME: home,
-          CODEX_HOME: "/ambient/codex",
-          OPENAI_API_KEY: "ambient-api-key",
-        },
-      ) as any[];
+      const agents = subscriptionCodexFirst({ model: "gpt-5.6-sol", inheritEnv: false }, [fallback], {
+        SMITHERS_HOME: home,
+        CODEX_HOME: "/ambient/codex",
+        OPENAI_API_KEY: "ambient-api-key",
+      }) as any[];
 
       expect(agents).toHaveLength(3);
       expect(agents.slice(0, 2).map((agent) => agent.opts.configDir)).toEqual([
@@ -45,20 +44,16 @@ describe("subscriptionCodexFirst", () => {
     try {
       await writeFile(join(home, "accounts.json"), JSON.stringify({ accounts: [] }));
       const fallback = { generate: async () => ({ text: "fallback" }) } as any;
-      expect(subscriptionCodexFirst(
-        { model: "gpt-5.6-sol", inheritEnv: false },
-        [fallback],
-        { SMITHERS_HOME: home },
-      )).toEqual([fallback]);
+      expect(
+        subscriptionCodexFirst({ model: "gpt-5.6-sol", inheritEnv: false }, [fallback], { SMITHERS_HOME: home }),
+      ).toEqual([fallback]);
     } finally {
       await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
     }
   });
 
   test("rejects API keys on the subscription-only path", () => {
-    expect(() => subscriptionCodexFirst({ apiKey: "not-allowed" })).toThrow(
-      "does not accept API-key credentials",
-    );
+    expect(() => subscriptionCodexFirst({ apiKey: "not-allowed" })).toThrow("does not accept API-key credentials");
   });
 });
 
@@ -68,10 +63,13 @@ describe("codexPaused kill-switch", () => {
   test("codex-paused.json marker flips codexFirst and subscriptionCodexFirst to fallbacks only", async () => {
     const home = await mkdtemp(join(tmpdir(), "smithers-codex-paused-"));
     try {
-      await writeFile(join(home, "codex-paused.json"), JSON.stringify({
-        reason: "codex usage limit hit",
-        pausedAt: "2026-07-11T20:30:00Z",
-      }));
+      await writeFile(
+        join(home, "codex-paused.json"),
+        JSON.stringify({
+          reason: "codex usage limit hit",
+          pausedAt: "2026-07-11T20:30:00Z",
+        }),
+      );
       const env = { SMITHERS_HOME: home };
       expect(codexPaused(env)).toBe(true);
       expect(codexFirst({ model: "gpt-5.6-luna" }, [fallback], env)).toEqual([fallback]);

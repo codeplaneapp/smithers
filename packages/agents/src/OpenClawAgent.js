@@ -1,10 +1,4 @@
-import {
-  BaseCliAgent,
-  pushFlag,
-  isRecord,
-  asString,
-  extractTextFromJsonValue,
-} from "./BaseCliAgent/index.js";
+import { BaseCliAgent, pushFlag, isRecord, asString, extractTextFromJsonValue } from "./BaseCliAgent/index.js";
 
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/CliOutputInterpreter.ts").CliOutputInterpreter} CliOutputInterpreter */
@@ -77,22 +71,26 @@ export class OpenClawAgent extends BaseCliAgent {
         sessionId = extractOpenClawSessionId(line) ?? sessionId;
         if (emittedStarted) return [];
         emittedStarted = true;
-        return [{
-          type: "started",
-          engine: this.cliEngine,
-          title: "OpenClaw",
-          resume: sessionId,
-        }];
-      },
-      onExit: (result) => {
-        sessionId = extractOpenClawSessionId(result.stdout) ?? sessionId;
-        const started = !emittedStarted
-          ? [{
+        return [
+          {
             type: "started",
             engine: this.cliEngine,
             title: "OpenClaw",
             resume: sessionId,
-          }]
+          },
+        ];
+      },
+      onExit: (result) => {
+        sessionId = extractOpenClawSessionId(result.stdout) ?? sessionId;
+        const started = !emittedStarted
+          ? [
+              {
+                type: "started",
+                engine: this.cliEngine,
+                title: "OpenClaw",
+                resume: sessionId,
+              },
+            ]
           : [];
         const ok = !result.exitCode || result.exitCode === 0;
         const answer = ok ? extractOpenClawAnswer(result.stdout) : undefined;
@@ -104,10 +102,11 @@ export class OpenClawAgent extends BaseCliAgent {
             ok,
             answer: answer || undefined,
             resume: sessionId,
-            error:
-              ok
-                ? undefined
-                : result.stderr.trim() || extractOpenClawError(result.stdout) || `OpenClaw exited with code ${result.exitCode}`,
+            error: ok
+              ? undefined
+              : result.stderr.trim() ||
+                extractOpenClawError(result.stdout) ||
+                `OpenClaw exited with code ${result.exitCode}`,
           },
         ];
       },
@@ -120,8 +119,7 @@ export class OpenClawAgent extends BaseCliAgent {
   async buildCommand(params) {
     const args = ["agent"];
 
-    const resumeSession =
-      typeof params.options?.resumeSession === "string" ? params.options.resumeSession : undefined;
+    const resumeSession = typeof params.options?.resumeSession === "string" ? params.options.resumeSession : undefined;
     const session = resumeSession ?? this.opts.sessionId ?? this.opts.session;
     this.issuedSessionId = session;
 

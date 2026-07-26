@@ -8,9 +8,7 @@ function capture(spec: string, title: string) {
 
 describe("capture-gifs slug collisions", () => {
   test("derives the existing kebab-case slug format", () => {
-    expect(gifSlugForCapture(capture("tests/workflow.spec.ts", "Run a workflow"))).toBe(
-      "workflow-spec-run-a-workflow",
-    );
+    expect(gifSlugForCapture(capture("tests/workflow.spec.ts", "Run a workflow"))).toBe("workflow-spec-run-a-workflow");
   });
 
   test("rejects titles that differ only by case or punctuation", () => {
@@ -33,7 +31,9 @@ describe("capture-gifs slug collisions", () => {
         capture("tests/admin/workflow.spec.ts", "Run a workflow"),
         capture("tests/user/workflow.spec.ts", "Run a workflow"),
       ]),
-    ).toThrow(/workflow-spec-run-a-workflow[\s\S]*tests\/admin\/workflow\.spec\.ts[\s\S]*tests\/user\/workflow\.spec\.ts/);
+    ).toThrow(
+      /workflow-spec-run-a-workflow[\s\S]*tests\/admin\/workflow\.spec\.ts[\s\S]*tests\/user\/workflow\.spec\.ts/,
+    );
   });
 
   test("allows captures whose derived slugs are distinct", () => {

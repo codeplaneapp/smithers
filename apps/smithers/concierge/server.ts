@@ -2,10 +2,7 @@ import { chat, toServerSentEventsResponse } from "@tanstack/ai";
 import { openaiCompatible } from "@tanstack/ai-openai/compatible";
 import { accountIdFromToken } from "./accountIdFromToken";
 import { isAccessTokenExpired } from "./isAccessTokenExpired";
-import {
-  type ChatApi,
-  resolveConciergeModelConfig,
-} from "./resolveConciergeModelConfig";
+import { type ChatApi, resolveConciergeModelConfig } from "./resolveConciergeModelConfig";
 import { type ChatMessage, type ValidationResult, validateChatBody } from "./validateChatBody";
 
 const PORT = Number(process.env.SMITHERS_CONCIERGE_PORT ?? "5179");
@@ -26,8 +23,7 @@ function resolveChatApi(usingSubscription: boolean, chatApiEnv: string | undefin
   return (chatApiEnv ?? DEFAULT_CHAT_API) as ChatApi;
 }
 
-const DEFAULT_CHAT_SYSTEM_PROMPT =
-  "You are Smithers, a helpful AI assistant. Answer clearly and concisely.";
+const DEFAULT_CHAT_SYSTEM_PROMPT = "You are Smithers, a helpful AI assistant. Answer clearly and concisely.";
 
 /** ChatGPT-backed Responses endpoint base. The adapter appends `/responses`. */
 const CODEX_RESPONSES_BASE_URL = "https://chatgpt.com/backend-api/codex";
@@ -228,10 +224,7 @@ function rejectDisallowedBrowserOrigin(request: Request): Response | null {
 }
 
 /** The local gateway whose registered workflows the concierge can background. */
-const GATEWAY_BASE = (process.env.SMITHERS_GATEWAY_PROXY_TARGET ?? "http://127.0.0.1:7331").replace(
-  /\/+$/,
-  "",
-);
+const GATEWAY_BASE = (process.env.SMITHERS_GATEWAY_PROXY_TARGET ?? "http://127.0.0.1:7331").replace(/\/+$/, "");
 
 type WorkflowSummary = { key: string; readableName?: string; description?: string };
 
@@ -265,10 +258,7 @@ async function buildSystemPrompt(clientSystem: string | undefined): Promise<stri
   if (workflows.length === 0) return base;
 
   const list = workflows
-    .map(
-      (w) =>
-        `- ${w.key}${w.readableName ? ` (${w.readableName})` : ""}${w.description ? `: ${w.description}` : ""}`,
-    )
+    .map((w) => `- ${w.key}${w.readableName ? ` (${w.readableName})` : ""}${w.description ? `: ${w.description}` : ""}`)
     .join("\n");
   const hasCreate = workflows.some((w) => w.key === "create-workflow");
 

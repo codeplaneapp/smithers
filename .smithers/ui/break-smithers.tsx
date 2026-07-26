@@ -2,7 +2,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";
 import { useGatewayNodeOutput, useGatewayRuns, useGatewayRunTree } from "smithers-orchestrator/gateway-react";
-import { ConnectionBadge, RunEventLog, RunTree, StatusPill, WorkflowUiShell, theme } from "smithers-orchestrator/gateway-ui";
+import {
+  ConnectionBadge,
+  RunEventLog,
+  RunTree,
+  StatusPill,
+  WorkflowUiShell,
+  theme,
+} from "smithers-orchestrator/gateway-ui";
 
 const WORKFLOW = "break-smithers";
 
@@ -56,7 +63,17 @@ function Badge({ text, color }: { text: string; color: string }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-      <span style={{ fontSize: 11, color: theme.textDim ?? "#8a8f98", minWidth: 70, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span>
+      <span
+        style={{
+          fontSize: 11,
+          color: theme.textDim ?? "#8a8f98",
+          minWidth: 70,
+          textTransform: "uppercase",
+          letterSpacing: 0.5,
+        }}
+      >
+        {label}
+      </span>
       <span style={{ fontSize: 13, color: theme.text ?? "#e6e6e6" }}>{children}</span>
     </div>
   );
@@ -65,7 +82,17 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 /** One completed/active loop round: the haiku suite result, the friction Opus
  *  found, the eval it authored, and the local commit. Refetches whenever any of
  *  its node statuses change (the `sig` prop), so it fills in live as the round runs. */
-function RoundCard({ runId, iteration, sig, active }: { runId: string; iteration: number; sig: string; active: boolean }) {
+function RoundCard({
+  runId,
+  iteration,
+  sig,
+  active,
+}: {
+  runId: string;
+  iteration: number;
+  sig: string;
+  active: boolean;
+}) {
   const evalRun = useGatewayNodeOutput({ runId, nodeId: "run-haiku", iteration });
   const friction = useGatewayNodeOutput({ runId, nodeId: "break", iteration });
   const authored = useGatewayNodeOutput({ runId, nodeId: "author", iteration });
@@ -80,14 +107,16 @@ function RoundCard({ runId, iteration, sig, active }: { runId: string; iteration
   }, [sig]);
 
   const e = rowOf(evalRun) as { suite?: string; ok?: boolean; exitCode?: number } | undefined;
-  const f = rowOf(friction) as { title?: string; area?: string; severity?: string; kind?: string; whatWasBad?: string } | undefined;
+  const f = rowOf(friction) as
+    | { title?: string; area?: string; severity?: string; kind?: string; whatWasBad?: string }
+    | undefined;
   const a = rowOf(authored) as { id?: string; verify?: string; tier?: string } | undefined;
   const c = rowOf(committed) as { committed?: boolean; message?: string; note?: string } | undefined;
 
   return (
     <div
       style={{
-        border: `1px solid ${active ? theme.accent ?? "#5b8def" : theme.border ?? "#2a2d34"}`,
+        border: `1px solid ${active ? (theme.accent ?? "#5b8def") : (theme.border ?? "#2a2d34")}`,
         borderRadius: 10,
         padding: 14,
         background: theme.panel ?? "#16181d",
@@ -101,7 +130,9 @@ function RoundCard({ runId, iteration, sig, active }: { runId: string; iteration
         <span style={{ fontSize: 15, fontWeight: 700, color: theme.text ?? "#e6e6e6" }}>Round {iteration}</span>
         {active ? <Badge text="live" color="#5b8def" /> : null}
         {e?.suite ? <span style={{ fontSize: 12, color: theme.textDim ?? "#8a8f98" }}>suite: {e.suite}</span> : null}
-        {e ? <Badge text={e.ok ? "evals ok" : `evals exit ${e.exitCode}`} color={e.ok ? "#3aa675" : "#e5484d"} /> : null}
+        {e ? (
+          <Badge text={e.ok ? "evals ok" : `evals exit ${e.exitCode}`} color={e.ok ? "#3aa675" : "#e5484d"} />
+        ) : null}
       </div>
 
       {f ? (
@@ -112,7 +143,9 @@ function RoundCard({ runId, iteration, sig, active }: { runId: string; iteration
             {f.kind ? <Badge text={f.kind} color={KIND_COLOR[f.kind] ?? "#8a8f98"} /> : null}
             {f.area ? <span style={{ fontSize: 12, color: theme.textDim ?? "#8a8f98" }}>{f.area}</span> : null}
           </div>
-          {f.whatWasBad ? <div style={{ fontSize: 12, color: theme.textDim ?? "#9aa0a6", lineHeight: 1.5 }}>{f.whatWasBad}</div> : null}
+          {f.whatWasBad ? (
+            <div style={{ fontSize: 12, color: theme.textDim ?? "#9aa0a6", lineHeight: 1.5 }}>{f.whatWasBad}</div>
+          ) : null}
         </div>
       ) : (
         <div style={{ fontSize: 12, color: theme.textDim ?? "#8a8f98" }}>· breaking smithers…</div>
@@ -121,7 +154,11 @@ function RoundCard({ runId, iteration, sig, active }: { runId: string; iteration
       {a?.id ? (
         <Field label="eval">
           <code style={{ background: "#00000033", padding: "1px 6px", borderRadius: 4 }}>{a.id}</code>
-          {a.verify ? <span style={{ marginLeft: 8, fontSize: 12, color: theme.textDim ?? "#8a8f98" }}>verify: {a.verify} · {a.tier}</span> : null}
+          {a.verify ? (
+            <span style={{ marginLeft: 8, fontSize: 12, color: theme.textDim ?? "#8a8f98" }}>
+              verify: {a.verify} · {a.tier}
+            </span>
+          ) : null}
         </Field>
       ) : null}
 
@@ -142,16 +179,14 @@ function App() {
   const runsRaw = useGatewayRuns({ filter: { workflow: WORKFLOW, limit: 10 } });
   const runs = (runsRaw.data ?? []) as Array<{ runId: string; status?: string; createdAtMs?: number }>;
   // Pin to the run the URL names (smithers ui appends ?runId=…); fall back to newest.
-  const urlRunId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("runId") ?? undefined : undefined;
+  const urlRunId =
+    typeof window !== "undefined" ? (new URLSearchParams(window.location.search).get("runId") ?? undefined) : undefined;
   const runId = urlRunId ?? runs[0]?.runId;
 
   const { nodes, status } = useGatewayRunTree(runId);
   const nodesLite = nodes as unknown as NodeLite[];
 
-  const maxRound = useMemo(
-    () => nodesLite.reduce((m, n) => Math.max(m, n.iteration ?? 0), 0),
-    [nodesLite],
-  );
+  const maxRound = useMemo(() => nodesLite.reduce((m, n) => Math.max(m, n.iteration ?? 0), 0), [nodesLite]);
 
   const running = nodesLite.find((n) => n.status === "running");
 
@@ -209,23 +244,56 @@ function App() {
           </div>
         </section>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr)",
+            gap: 16,
+            alignItems: "start",
+          }}
+        >
           {/* Left: the round-by-round EDD feed. */}
           <section style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
             <div style={{ fontSize: 12, color: theme.textDim ?? "#8a8f98", fontFamily: "monospace" }}>{runId}</div>
             {rounds.map((i) => (
-              <RoundCard key={i} runId={runId} iteration={i} sig={sigFor(i)} active={i === maxRound && status === "running"} />
+              <RoundCard
+                key={i}
+                runId={runId}
+                iteration={i}
+                sig={sigFor(i)}
+                active={i === maxRound && status === "running"}
+              />
             ))}
           </section>
 
           {/* Right: live low-level views. */}
           <section style={{ display: "flex", flexDirection: "column", gap: 12, position: "sticky", top: 12 }}>
             <div>
-              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: theme.textDim ?? "#8a8f98", marginBottom: 6 }}>Run tree</div>
+              <div
+                style={{
+                  fontSize: 11,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                  color: theme.textDim ?? "#8a8f98",
+                  marginBottom: 6,
+                }}
+              >
+                Run tree
+              </div>
               <RunTree runId={runId} style={{ maxHeight: 320 }} />
             </div>
             <div>
-              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: theme.textDim ?? "#8a8f98", marginBottom: 6 }}>Live events</div>
+              <div
+                style={{
+                  fontSize: 11,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                  color: theme.textDim ?? "#8a8f98",
+                  marginBottom: 6,
+                }}
+              >
+                Live events
+              </div>
               <RunEventLog runId={runId} style={{ maxHeight: 360 }} />
             </div>
           </section>

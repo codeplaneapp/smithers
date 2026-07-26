@@ -15,7 +15,13 @@ import { stripAutoColumns } from "@smithers-orchestrator/db/react-output";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { WaitForEvent } from "@smithers-orchestrator/components";
 import { integrationEventName } from "../../core/signalNames.js";
-import { GitHubWebhookPayloadSchema, GitHubIssueCommentEventSchema, GitHubIssuesEventSchema, GitHubPullRequestEventSchema, GitHubPushEventSchema, } from "../schemas.js";
+import {
+  GitHubWebhookPayloadSchema,
+  GitHubIssueCommentEventSchema,
+  GitHubIssuesEventSchema,
+  GitHubPullRequestEventSchema,
+  GitHubPushEventSchema,
+} from "../schemas.js";
 
 /**
  * Correlation id for a GitHub listener: most specific form the props allow.
@@ -24,10 +30,10 @@ import { GitHubWebhookPayloadSchema, GitHubIssueCommentEventSchema, GitHubIssues
  * @returns {string | undefined}
  */
 export function githubCorrelationId(repo, number) {
-    if (repo && typeof number === "number") {
-        return `${repo}#${number}`;
-    }
-    return repo || undefined;
+  if (repo && typeof number === "number") {
+    return `${repo}#${number}`;
+  }
+  return repo || undefined;
 }
 
 /**
@@ -41,43 +47,49 @@ export function githubCorrelationId(repo, number) {
  * @param {OnWebhookProps<Schema>} props
  */
 export function OnWebhook(props) {
-    if (props.skipIf)
-        return null;
-    if (typeof props.number === "number" && !props.repo) {
-        throw new SmithersError("INVALID_INPUT", "GitHub OnWebhook `number` requires `repo` (correlation is `<owner>/<repo>#<number>`).", { id: props.id, number: props.number });
-    }
-    const smithersContext = props.smithersContext ?? SmithersContext;
-    const ctx = React.useContext(smithersContext);
-    const schema = props.schema ?? /** @type {Schema} */ (/** @type {unknown} */ (GitHubWebhookPayloadSchema));
-    const eventName = integrationEventName("github", props.action ? `${props.event}.${props.action}` : props.event);
-    const correlationId = githubCorrelationId(props.repo, props.number);
-    const waitNode = React.createElement(WaitForEvent, {
-        id: props.id,
-        key: props.key,
-        event: eventName,
-        correlationId,
-        output: schema,
-        outputSchema: schema,
-        timeoutMs: props.timeoutMs,
-        onTimeout: props.onTimeout,
-        async: props.async,
-        dependsOn: props.dependsOn,
-        needs: props.needs,
-        label: props.label ?? `github:${props.action ? `${props.event}.${props.action}` : props.event}`,
-        meta: props.meta,
-    });
-    if (!props.children) {
-        return waitNode;
-    }
-    if (!ctx) {
-        throw new SmithersError("CONTEXT_OUTSIDE_WORKFLOW", "GitHub listener children require a workflow context. Build the workflow with createSmithers().");
-    }
-    const row = ctx.outputMaybe(schema, { nodeId: props.id });
-    if (row === undefined) {
-        return waitNode;
-    }
-    const payload = schema.parse(stripAutoColumns(row));
-    return React.createElement(React.Fragment, null, waitNode, props.children(payload));
+  if (props.skipIf) return null;
+  if (typeof props.number === "number" && !props.repo) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      "GitHub OnWebhook `number` requires `repo` (correlation is `<owner>/<repo>#<number>`).",
+      { id: props.id, number: props.number },
+    );
+  }
+  const smithersContext = props.smithersContext ?? SmithersContext;
+  const ctx = React.useContext(smithersContext);
+  const schema = props.schema ?? /** @type {Schema} */ (/** @type {unknown} */ (GitHubWebhookPayloadSchema));
+  const eventName = integrationEventName("github", props.action ? `${props.event}.${props.action}` : props.event);
+  const correlationId = githubCorrelationId(props.repo, props.number);
+  const waitNode = React.createElement(WaitForEvent, {
+    id: props.id,
+    key: props.key,
+    event: eventName,
+    correlationId,
+    output: schema,
+    outputSchema: schema,
+    timeoutMs: props.timeoutMs,
+    onTimeout: props.onTimeout,
+    async: props.async,
+    dependsOn: props.dependsOn,
+    needs: props.needs,
+    label: props.label ?? `github:${props.action ? `${props.event}.${props.action}` : props.event}`,
+    meta: props.meta,
+  });
+  if (!props.children) {
+    return waitNode;
+  }
+  if (!ctx) {
+    throw new SmithersError(
+      "CONTEXT_OUTSIDE_WORKFLOW",
+      "GitHub listener children require a workflow context. Build the workflow with createSmithers().",
+    );
+  }
+  const row = ctx.outputMaybe(schema, { nodeId: props.id });
+  if (row === undefined) {
+    return waitNode;
+  }
+  const payload = schema.parse(stripAutoColumns(row));
+  return React.createElement(React.Fragment, null, waitNode, props.children(payload));
 }
 
 /**
@@ -86,11 +98,11 @@ export function OnWebhook(props) {
  * @param {GitHubSugarListenerProps<Schema> & { action?: string }} props
  */
 export function OnPullRequest(props) {
-    return OnWebhook({
-        schema: /** @type {any} */ (GitHubPullRequestEventSchema),
-        ...props,
-        event: "pull_request",
-    });
+  return OnWebhook({
+    schema: /** @type {any} */ (GitHubPullRequestEventSchema),
+    ...props,
+    event: "pull_request",
+  });
 }
 
 /**
@@ -99,12 +111,12 @@ export function OnPullRequest(props) {
  * @param {GitHubSugarListenerProps<Schema>} props
  */
 export function OnIssueOpened(props) {
-    return OnWebhook({
-        schema: /** @type {any} */ (GitHubIssuesEventSchema),
-        action: "opened",
-        ...props,
-        event: "issues",
-    });
+  return OnWebhook({
+    schema: /** @type {any} */ (GitHubIssuesEventSchema),
+    action: "opened",
+    ...props,
+    event: "issues",
+  });
 }
 
 /**
@@ -113,12 +125,12 @@ export function OnIssueOpened(props) {
  * @param {GitHubSugarListenerProps<Schema> & { action?: string }} props
  */
 export function OnIssueComment(props) {
-    return OnWebhook({
-        schema: /** @type {any} */ (GitHubIssueCommentEventSchema),
-        action: "created",
-        ...props,
-        event: "issue_comment",
-    });
+  return OnWebhook({
+    schema: /** @type {any} */ (GitHubIssueCommentEventSchema),
+    action: "created",
+    ...props,
+    event: "issue_comment",
+  });
 }
 
 /**
@@ -127,9 +139,9 @@ export function OnIssueComment(props) {
  * @param {GitHubSugarListenerProps<Schema>} props
  */
 export function OnPush(props) {
-    return OnWebhook({
-        schema: /** @type {any} */ (GitHubPushEventSchema),
-        ...props,
-        event: "push",
-    });
+  return OnWebhook({
+    schema: /** @type {any} */ (GitHubPushEventSchema),
+    ...props,
+    event: "push",
+  });
 }

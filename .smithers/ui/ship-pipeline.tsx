@@ -157,7 +157,8 @@ function eventInfo(ev: unknown): EventInfo {
   const inner = isRecord(frame.payload) ? frame.payload : {};
   const nodePayload = isRecord(inner.payload) ? inner.payload : {};
   const nodeId = asString(nodePayload.nodeId) ?? asString(inner.nodeId) ?? asString(frame.nodeId) ?? "";
-  const type = asString(inner.event) ?? asString(frame.event) ?? asString(frame.type) ?? asString(nodePayload.state) ?? "";
+  const type =
+    asString(inner.event) ?? asString(frame.event) ?? asString(frame.type) ?? asString(nodePayload.state) ?? "";
   const seq = typeof inner.seq === "number" ? inner.seq : typeof frame.seq === "number" ? frame.seq : 0;
   return { nodeId, type, seq };
 }
@@ -312,7 +313,14 @@ function statusClass(status: string | undefined) {
   return "";
 }
 
-function Panel(props: { title: string; testId: string; badge?: { text: string; cls: string } | null; pending: boolean; pendingText: string; children?: any }) {
+function Panel(props: {
+  title: string;
+  testId: string;
+  badge?: { text: string; cls: string } | null;
+  pending: boolean;
+  pendingText: string;
+  children?: any;
+}) {
   const [open, setOpen] = useState(true);
   return (
     <div className="panel" data-testid={props.testId}>
@@ -323,7 +331,11 @@ function Panel(props: { title: string; testId: string; badge?: { text: string; c
         </div>
         <span className="muted">{open ? "collapse" : "expand"}</span>
       </div>
-      {open ? <div className="panel-body">{props.pending ? <div className="muted">{props.pendingText}</div> : props.children}</div> : null}
+      {open ? (
+        <div className="panel-body">
+          {props.pending ? <div className="muted">{props.pendingText}</div> : props.children}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -367,26 +379,60 @@ function TicketDetail(props: { runId: string | undefined; ticket: TicketRef; eve
       <div className="ticket-head">
         <h2>{ticket.title}</h2>
         <span className="mono">ship/{slug}</span>
-        {ship ? <span className={"badge " + (ship.status === "merged" ? "landed" : ship.status === "failed" ? "failed" : "queued")}>{ship.status}</span> : null}
+        {ship ? (
+          <span
+            className={
+              "badge " + (ship.status === "merged" ? "landed" : ship.status === "failed" ? "failed" : "queued")
+            }
+          >
+            {ship.status}
+          </span>
+        ) : null}
       </div>
 
-      <Panel title="Research" testId="st-research" badge={research ? { text: "ready", cls: "ok" } : null} pending={research === null} pendingText="Gathering context…">
+      <Panel
+        title="Research"
+        testId="st-research"
+        badge={research ? { text: "ready", cls: "ok" } : null}
+        pending={research === null}
+        pendingText="Gathering context…"
+      >
         {research ? (
           <>
             <div className="summary-text">{research.summary}</div>
             {research.keyFindings.length > 0 ? (
-              <ul className="findings">{research.keyFindings.map((f, i) => <li key={i}><span className="dot" /><span>{f}</span></li>)}</ul>
+              <ul className="findings">
+                {research.keyFindings.map((f, i) => (
+                  <li key={i}>
+                    <span className="dot" />
+                    <span>{f}</span>
+                  </li>
+                ))}
+              </ul>
             ) : null}
           </>
         ) : null}
       </Panel>
 
-      <Panel title="Plan" testId="st-plan" badge={plan ? { text: "ready", cls: "ok" } : null} pending={plan === null} pendingText="Creating plan…">
+      <Panel
+        title="Plan"
+        testId="st-plan"
+        badge={plan ? { text: "ready", cls: "ok" } : null}
+        pending={plan === null}
+        pendingText="Creating plan…"
+      >
         {plan ? (
           <>
             <div className="summary-text">{plan.summary}</div>
             {plan.steps.length > 0 ? (
-              <ol className="steps">{plan.steps.map((s, i) => <li key={i}><span className="step-num">{i + 1}</span><span>{s}</span></li>)}</ol>
+              <ol className="steps">
+                {plan.steps.map((s, i) => (
+                  <li key={i}>
+                    <span className="step-num">{i + 1}</span>
+                    <span>{s}</span>
+                  </li>
+                ))}
+              </ol>
             ) : null}
           </>
         ) : null}
@@ -395,7 +441,13 @@ function TicketDetail(props: { runId: string | undefined; ticket: TicketRef; eve
       <Panel
         title="Implement"
         testId="st-implement"
-        badge={implement ? (implement.allTestsPassing ? { text: "tests pass", cls: "ok" } : { text: "tests fail", cls: "err" }) : null}
+        badge={
+          implement
+            ? implement.allTestsPassing
+              ? { text: "tests pass", cls: "ok" }
+              : { text: "tests fail", cls: "err" }
+            : null
+        }
         pending={implement === null}
         pendingText="Implementing…"
       >
@@ -403,8 +455,14 @@ function TicketDetail(props: { runId: string | undefined; ticket: TicketRef; eve
           <>
             <div className="summary-text">{implement.summary}</div>
             {implement.filesChanged.length > 0 ? (
-              <ul className="files">{implement.filesChanged.map((f, i) => <li key={i}>{f}</li>)}</ul>
-            ) : <div className="muted">No files changed yet.</div>}
+              <ul className="files">
+                {implement.filesChanged.map((f, i) => (
+                  <li key={i}>{f}</li>
+                ))}
+              </ul>
+            ) : (
+              <div className="muted">No files changed yet.</div>
+            )}
           </>
         ) : null}
       </Panel>
@@ -419,7 +477,11 @@ function TicketDetail(props: { runId: string | undefined; ticket: TicketRef; eve
         {validate ? (
           <>
             <div className="summary-text">{validate.summary}</div>
-            {validate.failingSummary ? <div className="muted" style={{ marginTop: 6 }}>{validate.failingSummary}</div> : null}
+            {validate.failingSummary ? (
+              <div className="muted" style={{ marginTop: 6 }}>
+                {validate.failingSummary}
+              </div>
+            ) : null}
           </>
         ) : null}
       </Panel>
@@ -434,7 +496,11 @@ function TicketDetail(props: { runId: string | undefined; ticket: TicketRef; eve
         {review ? (
           <>
             <strong>{review.reviewer}</strong>
-            {review.feedback ? <div className="muted" style={{ marginTop: 6 }}>{review.feedback}</div> : null}
+            {review.feedback ? (
+              <div className="muted" style={{ marginTop: 6 }}>
+                {review.feedback}
+              </div>
+            ) : null}
           </>
         ) : null}
       </Panel>
@@ -442,19 +508,33 @@ function TicketDetail(props: { runId: string | undefined; ticket: TicketRef; eve
       <Panel
         title="Commit → Merge to main"
         testId="st-merge"
-        badge={ship ? (ship.status === "merged" ? { text: "landed", cls: "landed" } : ship.status === "failed" ? { text: "failed", cls: "err" } : { text: ship.status, cls: "queued" }) : null}
+        badge={
+          ship
+            ? ship.status === "merged"
+              ? { text: "landed", cls: "landed" }
+              : ship.status === "failed"
+                ? { text: "failed", cls: "err" }
+                : { text: ship.status, cls: "queued" }
+            : null
+        }
         pending={ship === null}
         pendingText="Awaiting implementation to finish…"
       >
         {ship ? (
           <>
-            {ship.branch ? <div className="mono muted" style={{ marginBottom: 6 }}>{ship.branch} → main</div> : null}
+            {ship.branch ? (
+              <div className="mono muted" style={{ marginBottom: 6 }}>
+                {ship.branch} → main
+              </div>
+            ) : null}
             <div className="summary-text">{ship.summary}</div>
           </>
         ) : null}
       </Panel>
 
-      <p className="section-head" style={{ marginTop: 16 }}>Live activity</p>
+      <p className="section-head" style={{ marginTop: 16 }}>
+        Live activity
+      </p>
       {activity.length > 0 ? (
         <ul className="activity" data-testid="ticket-activity">
           {activity.map((a) => (
@@ -496,7 +576,10 @@ function App() {
 
   const tickets = useMemo(() => extractManifest(manifestOut.data), [manifestOut.data]);
   const events = stream.events ?? [];
-  const treeEvents = useMemo(() => eventsFromRunTree(runTree.nodes as ReadonlyArray<Record<string, unknown>>), [runTree.nodes]);
+  const treeEvents = useMemo(
+    () => eventsFromRunTree(runTree.nodes as ReadonlyArray<Record<string, unknown>>),
+    [runTree.nodes],
+  );
   const displayEvents = events.length > 0 ? events : treeEvents;
   const nodeStatus = useMemo(() => buildNodeStatus(displayEvents), [displayEvents]);
 
@@ -557,19 +640,33 @@ function App() {
       <header className="topbar">
         <div className="title-group">
           <h1>Ship Pipeline</h1>
-          <span className="pill" data-testid="ship-runid"><span className="mono">{hasRun ? shortRunId(activeRunId) : "No run"}</span></span>
-          {hasRun ? <span className={"badge " + statusClass(runStatus)} data-testid="ship-status">{runStatus ?? "idle"}</span> : null}
+          <span className="pill" data-testid="ship-runid">
+            <span className="mono">{hasRun ? shortRunId(activeRunId) : "No run"}</span>
+          </span>
+          {hasRun ? (
+            <span className={"badge " + statusClass(runStatus)} data-testid="ship-status">
+              {runStatus ?? "idle"}
+            </span>
+          ) : null}
           {hasRun && tickets.length > 0 ? (
-            <span className="pill progress-pill" data-testid="ship-progress"><b>{landed.length}</b>/{tickets.length} landed</span>
+            <span className="pill progress-pill" data-testid="ship-progress">
+              <b>{landed.length}</b>/{tickets.length} landed
+            </span>
           ) : null}
           {hasRun ? <span className="pill">{eventCount} events</span> : null}
         </div>
         <div className="toolbar">
-          <button className="button" data-testid="ship-refresh" onClick={() => void refresh()} disabled={busy}>Refresh</button>
+          <button className="button" data-testid="ship-refresh" onClick={() => void refresh()} disabled={busy}>
+            Refresh
+          </button>
           {statusClass(runStatus) === "running" ? (
-            <button className="button danger" data-testid="ship-cancel" onClick={() => void cancel()} disabled={busy}>Cancel</button>
+            <button className="button danger" data-testid="ship-cancel" onClick={() => void cancel()} disabled={busy}>
+              Cancel
+            </button>
           ) : null}
-          <button className="button primary" data-testid="ship-launch" onClick={() => void launch()} disabled={busy}>Launch</button>
+          <button className="button primary" data-testid="ship-launch" onClick={() => void launch()} disabled={busy}>
+            Launch
+          </button>
         </div>
       </header>
 
@@ -579,15 +676,45 @@ function App() {
           {!hasRun ? (
             <div className="launch-form" data-testid="ship-empty">
               <h2>Ship a ticket queue</h2>
-              <p>Each ticket runs research → plan → implement → validate → review in its own worktree, then commits and merges to the base branch serially, so the branch advances one ticket at a time.</p>
-              <input className="prompt dir" value={ticketsDir} onChange={(e) => setTicketsDir(e.currentTarget.value)} placeholder="Tickets directory" data-testid="ship-ticketsdir" />
-              <div className="field"><label>Base branch</label><input className="prompt" style={{ width: 160 }} value={baseBranch} onChange={(e) => setBaseBranch(e.currentTarget.value)} /></div>
-              <div className="field"><label>Test-driven (tests first)</label><input type="checkbox" checked={tdd} onChange={(e) => setTdd(e.currentTarget.checked)} /></div>
-              <button className="button primary" data-testid="ship-launch-empty" onClick={() => void launch()} disabled={busy} style={{ marginTop: 14 }}>Launch Ship</button>
+              <p>
+                Each ticket runs research → plan → implement → validate → review in its own worktree, then commits and
+                merges to the base branch serially, so the branch advances one ticket at a time.
+              </p>
+              <input
+                className="prompt dir"
+                value={ticketsDir}
+                onChange={(e) => setTicketsDir(e.currentTarget.value)}
+                placeholder="Tickets directory"
+                data-testid="ship-ticketsdir"
+              />
+              <div className="field">
+                <label>Base branch</label>
+                <input
+                  className="prompt"
+                  style={{ width: 160 }}
+                  value={baseBranch}
+                  onChange={(e) => setBaseBranch(e.currentTarget.value)}
+                />
+              </div>
+              <div className="field">
+                <label>Test-driven (tests first)</label>
+                <input type="checkbox" checked={tdd} onChange={(e) => setTdd(e.currentTarget.checked)} />
+              </div>
+              <button
+                className="button primary"
+                data-testid="ship-launch-empty"
+                onClick={() => void launch()}
+                disabled={busy}
+                style={{ marginTop: 14 }}
+              >
+                Launch Ship
+              </button>
             </div>
           ) : (
             <>
-              <p className="section-head">Pipeline <span>{tickets.length} tickets</span></p>
+              <p className="section-head">
+                Pipeline <span>{tickets.length} tickets</span>
+              </p>
               {tickets.length === 0 ? (
                 <div className="muted">Waiting for the ticket manifest…</div>
               ) : (
@@ -596,16 +723,31 @@ function App() {
                     const prog = progressByTicket[t.slug];
                     return (
                       <li key={t.slug}>
-                        <button className={"ticket" + (t.slug === activeSlug ? " active" : "")} data-testid={"ship-ticket-" + t.slug} onClick={() => selectSlug(t.slug)}>
+                        <button
+                          className={"ticket" + (t.slug === activeSlug ? " active" : "")}
+                          data-testid={"ship-ticket-" + t.slug}
+                          onClick={() => selectSlug(t.slug)}
+                        >
                           <div className="ticket-top">
-                            <span className="ticket-title"><span className="ticket-num">{String(i + 1).padStart(2, "0")}</span>{t.title}</span>
+                            <span className="ticket-title">
+                              <span className="ticket-num">{String(i + 1).padStart(2, "0")}</span>
+                              {t.title}
+                            </span>
                             <span className={"badge " + (prog?.overall ?? "queued")}>{prog?.overall ?? "queued"}</span>
                           </div>
                           <div className="ticket-caption">{prog?.caption}</div>
                           <div className="strip">
-                            {(prog?.stages ?? STAGES.map((s) => ({ ...s, state: "pending" as StageState }))).map((s) => (
-                              <span key={s.key} className={"seg " + (s.state === "pending" ? "" : s.state)} title={s.label + " · " + s.state}>{s.abbr}</span>
-                            ))}
+                            {(prog?.stages ?? STAGES.map((s) => ({ ...s, state: "pending" as StageState }))).map(
+                              (s) => (
+                                <span
+                                  key={s.key}
+                                  className={"seg " + (s.state === "pending" ? "" : s.state)}
+                                  title={s.label + " · " + s.state}
+                                >
+                                  {s.abbr}
+                                </span>
+                              ),
+                            )}
                           </div>
                         </button>
                       </li>
@@ -622,7 +764,9 @@ function App() {
           {hasRun && selectedTicket ? (
             <TicketDetail runId={activeRunId} ticket={selectedTicket} events={displayEvents} />
           ) : (
-            <div className="empty" data-testid="ship-detail-empty">{hasRun ? "Select a ticket to watch its research → merge detail." : "Launch a run to watch tickets ship."}</div>
+            <div className="empty" data-testid="ship-detail-empty">
+              {hasRun ? "Select a ticket to watch its research → merge detail." : "Launch a run to watch tickets ship."}
+            </div>
           )}
         </div>
 
@@ -633,7 +777,12 @@ function App() {
             {landed.length > 0 ? (
               <ul className="ledger" data-testid="ship-ledger">
                 {landed.map((t) => (
-                  <li className="ledger-row" key={t.slug} onClick={() => selectSlug(t.slug)} style={{ cursor: "pointer" }}>
+                  <li
+                    className="ledger-row"
+                    key={t.slug}
+                    onClick={() => selectSlug(t.slug)}
+                    style={{ cursor: "pointer" }}
+                  >
                     <span className="ledger-dot">✓</span>
                     <span className="ledger-body">
                       <span className="ledger-title">{t.title}</span>
@@ -648,7 +797,15 @@ function App() {
           </div>
           <div className="side-head">Recent runs</div>
           {runs.map((r) => (
-            <button key={r.runId} className={"run-row" + (r.runId === activeRunId ? " active" : "")} data-testid={"ship-run-" + r.runId} onClick={() => { setSelectedRunId(r.runId); setSelectedSlug(undefined); }}>
+            <button
+              key={r.runId}
+              className={"run-row" + (r.runId === activeRunId ? " active" : "")}
+              data-testid={"ship-run-" + r.runId}
+              onClick={() => {
+                setSelectedRunId(r.runId);
+                setSelectedSlug(undefined);
+              }}
+            >
               <span className="mono">{shortRunId(r.runId)}</span>
               <span className={"badge " + statusClass(r.status)}>{r.status ?? "?"}</span>
             </button>

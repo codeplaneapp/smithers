@@ -8,7 +8,8 @@ export interface SiteEnv {
 }
 
 const SECURITY_HEADERS = {
-  "content-security-policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+  "content-security-policy":
+    "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
   "cross-origin-opener-policy": "same-origin",
   "permissions-policy": "camera=(), microphone=(), geolocation=()",
   "referrer-policy": "no-referrer",
@@ -65,7 +66,10 @@ async function fetchIndex(request: Request, env: SiteEnv): Promise<Response> {
   const url = new URL(request.url);
   url.pathname = "/index.html";
   url.search = "";
-  return withHeaders(await env.ASSETS.fetch(new Request(url, request)), { ...SECURITY_HEADERS, "cache-control": "public, max-age=60" });
+  return withHeaders(await env.ASSETS.fetch(new Request(url, request)), {
+    ...SECURITY_HEADERS,
+    "cache-control": "public, max-age=60",
+  });
 }
 
 export default {
@@ -83,7 +87,8 @@ export default {
     if (url.pathname.startsWith("/api/")) return json({ error: "not found" }, 404, "no-store");
 
     const assetResponse = await env.ASSETS.fetch(request);
-    if (assetResponse.status !== 404) return withHeaders(assetResponse, { ...SECURITY_HEADERS, "cache-control": "public, max-age=300" });
+    if (assetResponse.status !== 404)
+      return withHeaders(assetResponse, { ...SECURITY_HEADERS, "cache-control": "public, max-age=300" });
 
     return fetchIndex(request, env);
   },

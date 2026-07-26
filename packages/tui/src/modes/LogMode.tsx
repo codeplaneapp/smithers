@@ -31,13 +31,7 @@ export function LogMode({ runId }: { runId: string }) {
  * owns only local UI state: the follow toggle and the per-attempt filter. This
  * is the exact component the render tests mount with canned data.
  */
-export function LogView({
-  events,
-  streaming = false,
-}: {
-  events: GatewayEventFrame[];
-  streaming?: boolean;
-}) {
+export function LogView({ events, streaming = false }: { events: GatewayEventFrame[]; streaming?: boolean }) {
   const { width } = useTerminalDimensions();
   const compact = width < COMPACT_WIDTH;
   const overlayOpen = useOverlayOpen();
@@ -112,17 +106,9 @@ export function LogView({
         <text fg="#555555">{`  ${filteredEvents.length}/${events.length} events`}</text>
         {streaming ? <text fg="#555555">{"  ●"}</text> : null}
         <text fg="#555555">{compact ? "  [f][[][]]" : "  [f] follow  [[] prev  []] next"}</text>
-        {attemptLabel ? (
-          <text fg="#888888">{`  attempt:${attemptLabel}`}</text>
-        ) : null}
+        {attemptLabel ? <text fg="#888888">{`  attempt:${attemptLabel}`}</text> : null}
       </box>
-      <scrollbox
-        width="100%"
-        flexGrow={1}
-        scrollY
-        stickyScroll={follow}
-        stickyStart="bottom"
-      >
+      <scrollbox width="100%" flexGrow={1} scrollY stickyScroll={follow} stickyStart="bottom">
         {filteredEvents.length === 0 ? (
           <text fg="#444444">{"  (no events)"}</text>
         ) : (
@@ -137,7 +123,9 @@ export function LogView({
                 <text fg="#444444">{`${seqStr} `}</text>
                 <text fg="#555555">{`[${tag}]`}</text>
                 <text fg="#444444">{" │ "}</text>
-                <text fg="#cccccc" wrapMode="char">{text}</text>
+                <text fg="#cccccc" wrapMode="char">
+                  {text}
+                </text>
               </box>
             );
           })

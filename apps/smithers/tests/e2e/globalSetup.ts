@@ -129,9 +129,7 @@ export default async function globalSetup(): Promise<void> {
   });
   await waitFor("seeded scores for task runs", async () => {
     if (scoredRunIds.length !== 2) return false;
-    const rows = await Promise.all(
-      scoredRunIds.map((runId) => rpc("listScores", { runId }) as Promise<unknown[]>),
-    );
+    const rows = await Promise.all(scoredRunIds.map((runId) => rpc("listScores", { runId }) as Promise<unknown[]>));
     return rows.every((scores) => Array.isArray(scores) && scores.length >= 2);
   });
 
@@ -169,5 +167,7 @@ export default async function globalSetup(): Promise<void> {
     return Array.isArray(body.data?.candidates) && body.data.candidates.length > 0;
   });
 
-  console.log("[e2e] gateway seeded: 9 runs, 4 pending approvals, monitor trees, scores, memory, accounts, prompts, tickets");
+  console.log(
+    "[e2e] gateway seeded: 9 runs, 4 pending approvals, monitor trees, scores, memory, accounts, prompts, tickets",
+  );
 }

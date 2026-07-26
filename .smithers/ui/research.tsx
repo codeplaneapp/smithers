@@ -58,7 +58,11 @@ function extractPrompt(runData: unknown): string | undefined {
 function extractTimes(runData: unknown, fallbackCreated: number | undefined) {
   const r = isRecord(runData) ? runData : {};
   const started =
-    asNumber(r.startedAt) ?? asNumber(r.startedAtMs) ?? asNumber(r.createdAtMs) ?? asNumber(r.createdAt) ?? fallbackCreated;
+    asNumber(r.startedAt) ??
+    asNumber(r.startedAtMs) ??
+    asNumber(r.createdAtMs) ??
+    asNumber(r.createdAt) ??
+    fallbackCreated;
   const finished = asNumber(r.finishedAt) ?? asNumber(r.finishedAtMs);
   return { started, finished };
 }
@@ -177,10 +181,7 @@ function App() {
   const actions = useGatewayActions();
 
   const researchRuns = useMemo(
-    () =>
-      ((runsQuery.data ?? []) as RunSummary[]).filter(
-        (r) => !r.workflowKey || r.workflowKey === WORKFLOW_KEY,
-      ),
+    () => ((runsQuery.data ?? []) as RunSummary[]).filter((r) => !r.workflowKey || r.workflowKey === WORKFLOW_KEY),
     [runsQuery.data],
   );
 
@@ -336,7 +337,11 @@ function App() {
               <section className="card" data-testid="research-query">
                 <h2>Research query</h2>
                 <div className="query-text">{queryPrompt ?? "(no prompt recorded for this run)"}</div>
-                {errorMsg ? <div className="error-text" style={{ marginTop: 10 }}>{errorMsg}</div> : null}
+                {errorMsg ? (
+                  <div className="error-text" style={{ marginTop: 10 }}>
+                    {errorMsg}
+                  </div>
+                ) : null}
               </section>
 
               <section className="stream" data-testid="research-stream">
@@ -387,10 +392,7 @@ function App() {
                           <li key={i} data-testid="research-finding">
                             <span className="find-dot" />
                             <span className="find-text">{f}</span>
-                            <button
-                              className="button ghost tiny find-copy"
-                              onClick={() => copy(f, "finding-" + i)}
-                            >
+                            <button className="button ghost tiny find-copy" onClick={() => copy(f, "finding-" + i)}>
                               {copied === "finding-" + i ? "Copied" : "Copy"}
                             </button>
                           </li>

@@ -1,12 +1,5 @@
 /** @jsxImportSource react */
-import {
-  createContext,
-  useContext,
-  useId,
-  useState,
-  type ComponentProps,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useId, useState, type ComponentProps, type ReactNode } from "react";
 import { cn } from "../cn";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { formatStatus, normalizeStatus, statusClass } from "../status";
@@ -37,15 +30,7 @@ const QueueItemContext = createContext<QueueItemContextValue>({ status: undefine
 /** Region grouping queued work into collapsible sections. */
 export function Queue({ className, ...props }: ComponentProps<"div">) {
   useQueueCss();
-  return (
-    <div
-      data-slot="queue"
-      role="region"
-      aria-label="Queue"
-      className={cn("sui-queue", className)}
-      {...props}
-    />
-  );
+  return <div data-slot="queue" role="region" aria-label="Queue" className={cn("sui-queue", className)} {...props} />;
 }
 
 export type QueueSectionProps = Omit<ComponentProps<"div">, "children"> & {
@@ -111,7 +96,9 @@ export function QueueSectionTrigger({ className, children, onClick, ...props }: 
       }}
       {...props}
     >
-      <span className="sui-queue-section-chevron" aria-hidden="true">›</span>
+      <span className="sui-queue-section-chevron" aria-hidden="true">
+        ›
+      </span>
       {children}
     </button>
   );
@@ -129,12 +116,12 @@ export function QueueSectionLabel({ label, count, icon, className, ...props }: Q
   return (
     <span data-slot="queue-section-label" className={cn("sui-queue-section-label", className)} {...props}>
       {icon !== undefined ? (
-        <span className="sui-queue-section-icon" aria-hidden="true">{icon}</span>
+        <span className="sui-queue-section-icon" aria-hidden="true">
+          {icon}
+        </span>
       ) : null}
       {label}
-      {count !== undefined ? (
-        <span className="sui-queue-section-count">{count}</span>
-      ) : null}
+      {count !== undefined ? <span className="sui-queue-section-count">{count}</span> : null}
     </span>
   );
 }
@@ -161,14 +148,7 @@ export function QueueSectionContent({ className, ...props }: ComponentProps<"div
 /** The list of queue items inside a section. */
 export function QueueList({ className, ...props }: ComponentProps<"ul">) {
   useQueueCss();
-  return (
-    <ul
-      data-slot="queue-list"
-      role="list"
-      className={cn("sui-queue-list", className)}
-      {...props}
-    />
-  );
+  return <ul data-slot="queue-list" role="list" className={cn("sui-queue-list", className)} {...props} />;
 }
 
 export type QueueItemProps = Omit<ComponentProps<"li">, "title"> & {
@@ -216,9 +196,7 @@ export type QueueItemIndicatorProps = Omit<ComponentProps<"span">, "children"> &
 export function QueueItemIndicator({ completed, status, className, ...props }: QueueItemIndicatorProps) {
   useQueueCss();
   const context = useContext(QueueItemContext);
-  const resolved = status !== undefined || completed !== undefined
-    ? resolveQueueItem(status, completed)
-    : context;
+  const resolved = status !== undefined || completed !== undefined ? resolveQueueItem(status, completed) : context;
   return (
     <span
       data-slot="queue-item-indicator"
@@ -249,11 +227,5 @@ export function QueueItemContent({ className, ...props }: ComponentProps<"div">)
 /** Secondary descriptive text of a queue item. */
 export function QueueItemDescription({ className, ...props }: ComponentProps<"div">) {
   useQueueCss();
-  return (
-    <div
-      data-slot="queue-item-description"
-      className={cn("sui-queue-item-description", className)}
-      {...props}
-    />
-  );
+  return <div data-slot="queue-item-description" className={cn("sui-queue-item-description", className)} {...props} />;
 }

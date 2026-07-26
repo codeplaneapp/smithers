@@ -76,70 +76,87 @@ import { Task } from "./Task.js";
  * @param {GatherAndSynthesizeProps} props
  */
 export function GatherAndSynthesize(props) {
-    if (props.skipIf)
-        return null;
-    const { id, sources, synthesizer, gatherOutput, synthesisOutput, gatheredResults, maxConcurrency, synthesisPrompt, children, } = props;
-    const prefix = id ?? "gather-and-synthesize";
-    const sourceNames = Object.keys(sources);
-    // Step 1: Parallel gather from all sources
-    const gatherTasks = sourceNames.map((name) => {
-        const source = sources[name];
-        const output = source.output ?? gatherOutput;
-        const taskId = `${prefix}-gather-${name}`;
-        const content = source.children ??
-            source.prompt ??
-            `Gather data from source "${name}".`;
-        return React.createElement(Task, {
-            key: taskId,
-            id: taskId,
-            output,
-            agent: source.agent,
-            label: `Gather: ${name}`,
-            children: content,
-        });
+  if (props.skipIf) return null;
+  const {
+    id,
+    sources,
+    synthesizer,
+    gatherOutput,
+    synthesisOutput,
+    gatheredResults,
+    maxConcurrency,
+    synthesisPrompt,
+    children,
+  } = props;
+  const prefix = id ?? "gather-and-synthesize";
+  const sourceNames = Object.keys(sources);
+  // Step 1: Parallel gather from all sources
+  const gatherTasks = sourceNames.map((name) => {
+    const source = sources[name];
+    const output = source.output ?? gatherOutput;
+    const taskId = `${prefix}-gather-${name}`;
+    const content = source.children ?? source.prompt ?? `Gather data from source "${name}".`;
+    return React.createElement(Task, {
+      key: taskId,
+      id: taskId,
+      output,
+      agent: source.agent,
+      label: `Gather: ${name}`,
+      children: content,
     });
-    const gatherParallel = React.createElement(Parallel, {
-        key: `${prefix}-gather`,
-        id: `${prefix}-gather`,
-        maxConcurrency,
-    }, ...gatherTasks);
-    // Step 2: Build needs + deps maps — the synthesis task depends on all gather
-    // tasks (`needs` gates it until they are terminal) and resolves each gather's
-    // output into its prompt (`deps`; `needs` alone is cache-context only and
-    // injects nothing). `depsOptional` lets a failed gather be omitted rather
-    // than deferring the synthesis forever.
-    const needs = {};
-    const deps = {};
-    for (const name of sourceNames) {
-        needs[name] = `${prefix}-gather-${name}`;
-        deps[name] = sources[name].output ?? gatherOutput;
-    }
-    // Build synthesis prompt from gathered results
-    const explicitPrompt = children ?? synthesisPrompt ??
-        (gatheredResults
-            ? `Synthesize the following gathered data into a unified result:\n\n${Object.entries(gatheredResults)
-                .map(([name, data]) => `## ${name}\n${JSON.stringify(data, null, 2)}`)
-                .join("\n\n")}`
-            : undefined);
-    const synthesisContent = explicitPrompt ??
-        ((resolved) => {
-            const gatheredText = sourceNames
-                .map((name) => `## ${name}\n${name in resolved ? JSON.stringify(resolved[name]) : "(no data — this source failed)"}`)
-                .join("\n\n");
-            return `Synthesize the gathered data from sources: ${sourceNames.join(", ")}.\n\n${gatheredText}`;
-        });
-    const synthesisTask = React.createElement(Task, {
-        key: `${prefix}-synthesize`,
-        id: `${prefix}-synthesize`,
-        output: synthesisOutput,
-        agent: synthesizer,
-        needs,
-        deps,
-        depsOptional: true,
-        label: "Synthesize",
-        children: synthesisContent,
+  });
+  const gatherParallel = React.createElement(
+    Parallel,
+    {
+      key: `${prefix}-gather`,
+      id: `${prefix}-gather`,
+      maxConcurrency,
+    },
+    ...gatherTasks,
+  );
+  // Step 2: Build needs + deps maps — the synthesis task depends on all gather
+  // tasks (`needs` gates it until they are terminal) and resolves each gather's
+  // output into its prompt (`deps`; `needs` alone is cache-context only and
+  // injects nothing). `depsOptional` lets a failed gather be omitted rather
+  // than deferring the synthesis forever.
+  const needs = {};
+  const deps = {};
+  for (const name of sourceNames) {
+    needs[name] = `${prefix}-gather-${name}`;
+    deps[name] = sources[name].output ?? gatherOutput;
+  }
+  // Build synthesis prompt from gathered results
+  const explicitPrompt =
+    children ??
+    synthesisPrompt ??
+    (gatheredResults
+      ? `Synthesize the following gathered data into a unified result:\n\n${Object.entries(gatheredResults)
+          .map(([name, data]) => `## ${name}\n${JSON.stringify(data, null, 2)}`)
+          .join("\n\n")}`
+      : undefined);
+  const synthesisContent =
+    explicitPrompt ??
+    ((resolved) => {
+      const gatheredText = sourceNames
+        .map(
+          (name) =>
+            `## ${name}\n${name in resolved ? JSON.stringify(resolved[name]) : "(no data — this source failed)"}`,
+        )
+        .join("\n\n");
+      return `Synthesize the gathered data from sources: ${sourceNames.join(", ")}.\n\n${gatheredText}`;
     });
-    return React.createElement(Sequence, null, gatherParallel, synthesisTask);
+  const synthesisTask = React.createElement(Task, {
+    key: `${prefix}-synthesize`,
+    id: `${prefix}-synthesize`,
+    output: synthesisOutput,
+    agent: synthesizer,
+    needs,
+    deps,
+    depsOptional: true,
+    label: "Synthesize",
+    children: synthesisContent,
+  });
+  return React.createElement(Sequence, null, gatherParallel, synthesisTask);
 }
 ```
 
@@ -151,17 +168,16 @@ import React from "react";
  * @param {SequenceProps} props
  */
 export function Sequence(props) {
-    if (props.skipIf)
-        return null;
-    // Sequence carries only a display label; pass a sanitized bag (align with
-    // the sanitizing structural components) so control props don't leak through.
-    // `label` names the phase group in run views (graph, the Claude /workflows
-    // mirror) and is preserved in the persisted frame XML.
-    const next = {
-        ...(props.label === undefined ? {} : { label: props.label }),
-        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
-    };
-    return React.createElement("smithers:sequence", next, props.children);
+  if (props.skipIf) return null;
+  // Sequence carries only a display label; pass a sanitized bag (align with
+  // the sanitizing structural components) so control props don't leak through.
+  // `label` names the phase group in run views (graph, the Claude /workflows
+  // mirror) and is preserved in the persisted frame XML.
+  const next = {
+    ...(props.label === undefined ? {} : { label: props.label }),
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+  };
+  return React.createElement("smithers:sequence", next, props.children);
 }
 ```
 
@@ -173,19 +189,18 @@ import React from "react";
  * @param {ParallelProps} props
  */
 export function Parallel(props) {
-    if (props.skipIf)
-        return null;
-    // Align prop sanitization with other structural components. `label` names
-    // the phase group in run views (graph, the Claude /workflows mirror).
-    const next = {
-        maxConcurrency: props.maxConcurrency,
-        subtreeConcurrency: props.subtreeConcurrency,
-        id: props.id,
-        ...(props.label === undefined ? {} : { label: props.label }),
-        ...(props.priority === undefined ? {} : { priority: props.priority }),
-        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
-    };
-    return React.createElement("smithers:parallel", next, props.children);
+  if (props.skipIf) return null;
+  // Align prop sanitization with other structural components. `label` names
+  // the phase group in run views (graph, the Claude /workflows mirror).
+  const next = {
+    maxConcurrency: props.maxConcurrency,
+    subtreeConcurrency: props.subtreeConcurrency,
+    id: props.id,
+    ...(props.label === undefined ? {} : { label: props.label }),
+    ...(props.priority === undefined ? {} : { priority: props.priority }),
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+  };
+  return React.createElement("smithers:parallel", next, props.children);
 }
 ```
 
@@ -223,23 +238,23 @@ import type { OutputTarget } from "./OutputTarget.ts";
 import type { SourceDef } from "./SourceDef.ts";
 
 export type GatherAndSynthesizeProps = {
-	id?: string;
-	/** Record mapping source names to source definitions. */
-	sources: Record<string, SourceDef>;
-	/** Agent that synthesizes gathered data. */
-	synthesizer: AgentLike;
-	/** Default output schema for each source gather task. */
-	gatherOutput: OutputTarget;
-	/** Output schema for the synthesis task. */
-	synthesisOutput: OutputTarget;
-	/** Gathered results keyed by source name. Typically from ctx.outputMaybe(). */
-	gatheredResults?: Record<string, unknown> | null;
-	/** Max parallel gatherers. */
-	maxConcurrency?: number;
-	/** Prompt for the synthesis task. If omitted, a default prompt is generated. */
-	synthesisPrompt?: string;
-	skipIf?: boolean;
-	children?: React.ReactNode;
+  id?: string;
+  /** Record mapping source names to source definitions. */
+  sources: Record<string, SourceDef>;
+  /** Agent that synthesizes gathered data. */
+  synthesizer: AgentLike;
+  /** Default output schema for each source gather task. */
+  gatherOutput: OutputTarget;
+  /** Output schema for the synthesis task. */
+  synthesisOutput: OutputTarget;
+  /** Gathered results keyed by source name. Typically from ctx.outputMaybe(). */
+  gatheredResults?: Record<string, unknown> | null;
+  /** Max parallel gatherers. */
+  maxConcurrency?: number;
+  /** Prompt for the synthesis task. If omitted, a default prompt is generated. */
+  synthesisPrompt?: string;
+  skipIf?: boolean;
+  children?: React.ReactNode;
 };
 ```
 
@@ -249,12 +264,12 @@ import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type SourceDef = {
-	agent: AgentLike;
-	/** Prompt for this source. A string or ReactNode. */
-	prompt?: string;
-	/** Output schema for this specific source. Overrides `gatherOutput`. */
-	output?: OutputTarget;
-	children?: React.ReactNode;
+  agent: AgentLike;
+  /** Prompt for this source. A string or ReactNode. */
+  prompt?: string;
+  /** Output schema for this specific source. Overrides `gatherOutput`. */
+  output?: OutputTarget;
+  children?: React.ReactNode;
 };
 ```
 </CodeGroup>

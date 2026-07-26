@@ -182,16 +182,18 @@ function App() {
     return list.find((a) => a.runId === activeRunId && a.nodeId === "approve-landing");
   }, [approvalsQuery.data, activeRunId]);
 
-  const merged = useMemo(() => issues.filter((i) => nodeStatus.get(`merge-${i.number}`) === "done").length, [issues, nodeStatus]);
+  const merged = useMemo(
+    () => issues.filter((i) => nodeStatus.get(`merge-${i.number}`) === "done").length,
+    [issues, nodeStatus],
+  );
   const allMerged = issues.length > 0 && merged === issues.length;
 
   async function refresh() {
-    await Promise.all([
-      runsQuery.refetch(),
-      runDetail.refetch(),
-      approvalsQuery.refetch(),
-      discoverOut.refetch(),
-    ].filter(Boolean) as Promise<unknown>[]);
+    await Promise.all(
+      [runsQuery.refetch(), runDetail.refetch(), approvalsQuery.refetch(), discoverOut.refetch()].filter(
+        Boolean,
+      ) as Promise<unknown>[],
+    );
   }
   async function launch() {
     setBusy(true);
@@ -236,42 +238,88 @@ function App() {
       <WorkflowUiStyles mode="theme" />
       <header className="topbar">
         <h1>Close Issues · Codex</h1>
-        <span className="pill"><span className="mono">{shortRunId(activeRunId)}</span></span>
-        {activeRunId ? <span className={"badge " + statusClass(runStatus)} data-testid="run-status">{runStatus ?? "idle"}</span> : null}
-        <span className="pill">{events.length} events</span>
-        {issues.length > 0 ? <span className="pill" data-testid="merged-count">{merged}/{issues.length} merged</span> : null}
-        <span className="spacer" />
-        <button className="button" onClick={() => void refresh()} disabled={busy}>Refresh</button>
-        {activeRun && statusClass(runStatus) === "running" ? (
-          <button className="button danger" onClick={() => void cancel()} disabled={busy}>Cancel</button>
+        <span className="pill">
+          <span className="mono">{shortRunId(activeRunId)}</span>
+        </span>
+        {activeRunId ? (
+          <span className={"badge " + statusClass(runStatus)} data-testid="run-status">
+            {runStatus ?? "idle"}
+          </span>
         ) : null}
-        <button className="button primary" data-testid="launch" onClick={() => void launch()} disabled={busy}>Run</button>
+        <span className="pill">{events.length} events</span>
+        {issues.length > 0 ? (
+          <span className="pill" data-testid="merged-count">
+            {merged}/{issues.length} merged
+          </span>
+        ) : null}
+        <span className="spacer" />
+        <button className="button" onClick={() => void refresh()} disabled={busy}>
+          Refresh
+        </button>
+        {activeRun && statusClass(runStatus) === "running" ? (
+          <button className="button danger" onClick={() => void cancel()} disabled={busy}>
+            Cancel
+          </button>
+        ) : null}
+        <button className="button primary" data-testid="launch" onClick={() => void launch()} disabled={busy}>
+          Run
+        </button>
       </header>
 
       <div className="content">
         {!activeRunId ? (
           <div className="empty" data-testid="no-run">
-            <p>No run yet. This workflow finds every open issue not authored by roninjin10, lets Codex fix and review each one in its own worktree, then lands them through a merge queue after you approve.</p>
-            <button className="button primary" onClick={() => void launch()} disabled={busy}>Run it</button>
+            <p>
+              No run yet. This workflow finds every open issue not authored by roninjin10, lets Codex fix and review
+              each one in its own worktree, then lands them through a merge queue after you approve.
+            </p>
+            <button className="button primary" onClick={() => void launch()} disabled={busy}>
+              Run it
+            </button>
           </div>
         ) : (
           <>
             {allMerged ? (
-              <div className="banner done" data-testid="banner-done">✓ All {issues.length} fixes landed on main — their issues are now closed.</div>
+              <div className="banner done" data-testid="banner-done">
+                ✓ All {issues.length} fixes landed on main — their issues are now closed.
+              </div>
             ) : (
-              <div className="banner progress" data-testid="banner-progress">○ {summary || "Discovering open issues…"}</div>
+              <div className="banner progress" data-testid="banner-progress">
+                ○ {summary || "Discovering open issues…"}
+              </div>
             )}
 
-            {summary ? <div className="summary" data-testid="discover-summary">{summary}</div> : null}
+            {summary ? (
+              <div className="summary" data-testid="discover-summary">
+                {summary}
+              </div>
+            ) : null}
 
             {pendingApproval ? (
               <div className="gate" data-testid="approval-gate">
                 <h2>⏸ Approval required — land these fixes to main?</h2>
-                <pre>{pendingApproval.request?.summary ?? "Review the prepared PRs, then approve to start the merge queue."}</pre>
+                <pre>
+                  {pendingApproval.request?.summary ??
+                    "Review the prepared PRs, then approve to start the merge queue."}
+                </pre>
                 <div className="gate-actions">
-                  <input className="note" placeholder="optional note" value={note} onChange={(e) => setNote(e.currentTarget.value)} />
-                  <button className="button danger" data-testid="deny" onClick={() => void decide(false)} disabled={busy}>Deny</button>
-                  <button className="button ok" data-testid="approve" onClick={() => void decide(true)} disabled={busy}>Approve &amp; land</button>
+                  <input
+                    className="note"
+                    placeholder="optional note"
+                    value={note}
+                    onChange={(e) => setNote(e.currentTarget.value)}
+                  />
+                  <button
+                    className="button danger"
+                    data-testid="deny"
+                    onClick={() => void decide(false)}
+                    disabled={busy}
+                  >
+                    Deny
+                  </button>
+                  <button className="button ok" data-testid="approve" onClick={() => void decide(true)} disabled={busy}>
+                    Approve &amp; land
+                  </button>
                 </div>
               </div>
             ) : null}
@@ -285,7 +333,12 @@ function App() {
                     {PHASES.map((phase) => {
                       const st = nodeStatus.get(phase.node(issue.number)) ?? "pending";
                       return (
-                        <div className="phase" key={phase.key} data-testid={"issue-" + issue.number + "-" + phase.key} data-status={st}>
+                        <div
+                          className="phase"
+                          key={phase.key}
+                          data-testid={"issue-" + issue.number + "-" + phase.key}
+                          data-status={st}
+                        >
                           <div className={"dot " + st} />
                           <div className="phase-label">{phase.label}</div>
                         </div>

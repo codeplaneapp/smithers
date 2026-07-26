@@ -61,16 +61,9 @@ export function LoopUntilScored({
   children,
 }: LoopUntilScoredProps) {
   const hasScore = typeof currentScore === "number";
-  const until = hasScore
-    ? currentScore >= threshold
-    : onPending === "stop";
+  const until = hasScore ? currentScore >= threshold : onPending === "stop";
   return (
-    <Loop
-      id={`${idPrefix}:loop`}
-      until={until}
-      maxIterations={maxIterations}
-      onMaxReached={onMaxReached}
-    >
+    <Loop id={`${idPrefix}:loop`} until={until} maxIterations={maxIterations} onMaxReached={onMaxReached}>
       {children}
     </Loop>
   );

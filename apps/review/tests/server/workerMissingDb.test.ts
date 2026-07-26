@@ -84,8 +84,9 @@ describe("worker without a walkthrough storage binding", () => {
     const worker = makeWorker();
     const env = await buildTestEnv();
     const id = "abc12345";
-    await env.DB
-      .prepare("INSERT INTO walkthroughs (id, repo, pr, bytes, session_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+    await env.DB.prepare(
+      "INSERT INTO walkthroughs (id, repo, pr, bytes, session_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
       .bind(id, "smithersai/smithers", 1, 1, null, Date.now())
       .run();
     env.WALKTHROUGHS = undefined as unknown as ReviewWorkerEnv["WALKTHROUGHS"];

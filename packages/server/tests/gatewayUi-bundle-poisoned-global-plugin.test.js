@@ -40,18 +40,21 @@ describe("gateway UI bundling under a poisoned global Bun.plugin", () => {
     tempDir = undefined;
   });
 
-  test(
-    "bundles a react-importing entry even with the engine's global plugin installed",
-    async () => {
-      tempDir = mkdtempSync(join(serverRoot, ".smithers-ui-poison-"));
-      const entry = join(tempDir, "entry-react.js");
-      writeFileSync(entry, [
+  test("bundles a react-importing entry even with the engine's global plugin installed", async () => {
+    tempDir = mkdtempSync(join(serverRoot, ".smithers-ui-poison-"));
+    const entry = join(tempDir, "entry-react.js");
+    writeFileSync(
+      entry,
+      [
         'import * as React from "react";',
         'export const marker = "POISON_FALLBACK_OK";',
         "console.log(marker, React.version);",
-      ].join("\n"));
-      const runner = join(tempDir, "runner.js");
-      writeFileSync(runner, [
+      ].join("\n"),
+    );
+    const runner = join(tempDir, "runner.js");
+    writeFileSync(
+      runner,
+      [
         `await import(${JSON.stringify(engineResolutionModule)});`,
         `const { bundleGatewayUiEntry } = await import(${JSON.stringify(bundleModule)});`,
         'import { writeFileSync } from "node:fs";',
@@ -62,17 +65,16 @@ describe("gateway UI bundling under a poisoned global Bun.plugin", () => {
         "} catch (error) {",
         "  writeFileSync(outPath, JSON.stringify({ ok: false, message: String(error && error.message || error) }));",
         "}",
-      ].join("\n"));
-      const outPath = join(tempDir, "result.json");
-      const exitCode = await runChild(runner, outPath);
-      expect(existsSync(outPath)).toBe(true);
-      const result = JSON.parse(readFileSync(outPath, "utf8"));
-      // Holds under both bun behaviors: if the global plugin leaks into
-      // Bun.build, the subprocess retry rescues the bundle; if a future bun
-      // stops leaking, the in-process build succeeds directly.
-      expect(result).toEqual({ ok: true, hasMarker: true, bytes: expect.any(Number) });
-      expect(exitCode).toBe(0);
-    },
-    180_000,
-  );
+      ].join("\n"),
+    );
+    const outPath = join(tempDir, "result.json");
+    const exitCode = await runChild(runner, outPath);
+    expect(existsSync(outPath)).toBe(true);
+    const result = JSON.parse(readFileSync(outPath, "utf8"));
+    // Holds under both bun behaviors: if the global plugin leaks into
+    // Bun.build, the subprocess retry rescues the bundle; if a future bun
+    // stops leaking, the in-process build succeeds directly.
+    expect(result).toEqual({ ok: true, hasMarker: true, bytes: expect.any(Number) });
+    expect(exitCode).toBe(0);
+  }, 180_000);
 });

@@ -33,7 +33,10 @@ describe("monitor site worker", () => {
   });
 
   test("reports health without touching static assets", async () => {
-    const response = await createMonitorSiteWorker().fetch(new Request("https://monitor.smithers.sh/healthz"), makeEnv());
+    const response = await createMonitorSiteWorker().fetch(
+      new Request("https://monitor.smithers.sh/healthz"),
+      makeEnv(),
+    );
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, service: "monitor-site" });
   });

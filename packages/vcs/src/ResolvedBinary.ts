@@ -6,6 +6,6 @@
  * - `path`: the bare command name, left for the OS to resolve against `PATH`
  */
 export type ResolvedBinary = {
-	path: string;
-	source: "env" | "bundled" | "path";
+  path: string;
+  source: "env" | "bundled" | "path";
 };

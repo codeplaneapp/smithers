@@ -47,7 +47,11 @@ export function AgentCard({
       {provider || model ? (
         <span className="sui-agentcard-identity">
           {provider ? <span className="sui-agentcard-provider">{provider}</span> : null}
-          {provider && model ? <span className="sui-agentcard-identity-sep" aria-hidden="true">/</span> : null}
+          {provider && model ? (
+            <span className="sui-agentcard-identity-sep" aria-hidden="true">
+              /
+            </span>
+          ) : null}
           {model ? <span className="sui-agentcard-model">{model}</span> : null}
         </span>
       ) : null}

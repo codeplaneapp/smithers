@@ -16,8 +16,8 @@ try {
   // WebPreview tests render iframes pointing at real URLs; happy-dom would
   // otherwise perform genuine network fetches, which hang in networkless
   // CI sandboxes and fail the packages/ui gate.
-  (globalThis as { happyDOM?: { settings: Record<string, unknown> } }).happyDOM!
-    .settings.disableIframePageLoading = true;
+  (globalThis as { happyDOM?: { settings: Record<string, unknown> } }).happyDOM!.settings.disableIframePageLoading =
+    true;
 } catch {
   /* already registered in this bun process */
 }

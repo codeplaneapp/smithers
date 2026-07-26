@@ -20,35 +20,37 @@ const dir = mkdtempSync(join(tmpdir(), "smithers-close-exit-"));
 const runId = `single-runner-close-exit-${process.pid}`;
 
 async function main() {
-    if (typeof Bun === "undefined") {
-        throw new Error("fixture must run under Bun");
-    }
-    const G = Smithers.workflow({
-        name: "single-runner-close-exit",
-        input: Schema.Struct({ repo: Schema.String }),
-    });
-    const step = G.step("compute", {
-        output: Schema.Struct({ value: Schema.String }),
-        run: ({ input }) => ({ value: `closed:${input.repo}` }),
-    });
-    const wf = G.from(step);
-    const result = await Effect.runPromise(wf.execute({ repo: "smithers" }, { runId }).pipe(Effect.provide(Smithers.sqlite({ filename: join(dir, "db.sqlite") }))));
-    if (result?.value !== "closed:smithers") {
-        throw new Error(`unexpected extracted output: ${JSON.stringify(result)}`);
-    }
-    console.log(`RUN_FINISHED ${runId}`);
-    await closeSingleRunnerRuntime();
-    console.log("RUNTIME_CLOSED");
+  if (typeof Bun === "undefined") {
+    throw new Error("fixture must run under Bun");
+  }
+  const G = Smithers.workflow({
+    name: "single-runner-close-exit",
+    input: Schema.Struct({ repo: Schema.String }),
+  });
+  const step = G.step("compute", {
+    output: Schema.Struct({ value: Schema.String }),
+    run: ({ input }) => ({ value: `closed:${input.repo}` }),
+  });
+  const wf = G.from(step);
+  const result = await Effect.runPromise(
+    wf
+      .execute({ repo: "smithers" }, { runId })
+      .pipe(Effect.provide(Smithers.sqlite({ filename: join(dir, "db.sqlite") }))),
+  );
+  if (result?.value !== "closed:smithers") {
+    throw new Error(`unexpected extracted output: ${JSON.stringify(result)}`);
+  }
+  console.log(`RUN_FINISHED ${runId}`);
+  await closeSingleRunnerRuntime();
+  console.log("RUNTIME_CLOSED");
 }
 
 try {
-    await main();
-}
-catch (error) {
-    console.error(`FAIL: ${error?.stack ?? error}`);
-    process.exitCode = 1;
-}
-finally {
-    rmSync(dir, { recursive: true, force: true });
+  await main();
+} catch (error) {
+  console.error(`FAIL: ${error?.stack ?? error}`);
+  process.exitCode = 1;
+} finally {
+  rmSync(dir, { recursive: true, force: true });
 }
 // No process.exit(): the event loop must drain by itself.

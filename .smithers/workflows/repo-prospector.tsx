@@ -308,7 +308,12 @@ export default smithers((ctx) => {
             const throttled = !force && sinceLast < THROTTLE_MS;
             if (throttled) {
               const mins = Math.ceil((THROTTLE_MS - sinceLast) / 60000);
-              return { proceed: false, reason: `throttled — ~${mins} min until the next window`, seen, seenCount: seen.length };
+              return {
+                proceed: false,
+                reason: `throttled — ~${mins} min until the next window`,
+                seen,
+                seenCount: seen.length,
+              };
             }
             // Reserve this 15-minute window so cron ticks line up regardless of outcome.
             writeLedger({ ...ledger, lastRunAt: now });
@@ -376,7 +381,10 @@ export default smithers((ctx) => {
               for (let i = 0; i < 3 && !created; i++) {
                 const r = tryGh(["repo", "fork", full, "--default-branch-only"], workDir);
                 if (r.ok || /already exists/i.test(r.out)) created = true;
-                else { createErr = r.out; await sleep(5000); }
+                else {
+                  createErr = r.out;
+                  await sleep(5000);
+                }
               }
               // GitHub replicates forks asynchronously — poll until it resolves (~up to 180s).
               let exists = false;
@@ -385,19 +393,47 @@ export default smithers((ctx) => {
                 else await sleep(3000);
               }
               if (!exists) {
-                return { forked: false, forkFullName, clonePath: "", branch, defaultBranch, note: `fork never resolved (create ${created ? "reported ok" : `failed: ${createErr.slice(0, 200)}`})` };
+                return {
+                  forked: false,
+                  forkFullName,
+                  clonePath: "",
+                  branch,
+                  defaultBranch,
+                  note: `fork never resolved (create ${created ? "reported ok" : `failed: ${createErr.slice(0, 200)}`})`,
+                };
               }
               rmSync(clonePath, { recursive: true, force: true });
               const cloned = tryGh(["repo", "clone", forkFullName, clonePath, "--", "--depth=1"]);
               if (!cloned.ok) {
-                return { forked: true, forkFullName, clonePath: "", branch, defaultBranch, note: `clone failed: ${cloned.out.slice(0, 300)}` };
+                return {
+                  forked: true,
+                  forkFullName,
+                  clonePath: "",
+                  branch,
+                  defaultBranch,
+                  note: `clone failed: ${cloned.out.slice(0, 300)}`,
+                };
               }
               try {
                 execFileSync("git", ["-C", clonePath, "checkout", "-b", branch], { encoding: "utf8" });
               } catch (e: unknown) {
-                return { forked: true, forkFullName, clonePath, branch, defaultBranch, note: `branch create failed: ${String(e).slice(0, 200)}` };
+                return {
+                  forked: true,
+                  forkFullName,
+                  clonePath,
+                  branch,
+                  defaultBranch,
+                  note: `branch create failed: ${String(e).slice(0, 200)}`,
+                };
               }
-              return { forked: true, forkFullName, clonePath, branch, defaultBranch, note: "forked, cloned (depth 1), branched" };
+              return {
+                forked: true,
+                forkFullName,
+                clonePath,
+                branch,
+                defaultBranch,
+                note: "forked, cloned (depth 1), branched",
+              };
             }}
           </Task>
         ) : null}
@@ -421,20 +457,61 @@ export default smithers((ctx) => {
               const repo = discover?.repo ?? "";
               const forkFullName = fork?.forkFullName ?? `${FORK_OWNER}/${repo}`;
               const compareUrl = `https://github.com/${owner}/${repo}/compare/${base}...${FORK_OWNER}:${repo}:${branch}?expand=1`;
-              const base0 = { pushed: false, commitSha: "", filesChanged: [] as string[], compareUrl, forkFullName, branch };
+              const base0 = {
+                pushed: false,
+                commitSha: "",
+                filesChanged: [] as string[],
+                compareUrl,
+                forkFullName,
+                branch,
+              };
               if (!clonePath) return { ...base0, note: "no clone path from fork step" };
               const git = (args: string[]) => {
-                try { return { ok: true, out: execFileSync("git", ["-C", clonePath, ...args], { encoding: "utf8" }) }; }
-                catch (e: unknown) { return { ok: false, out: String((e as { stderr?: unknown; message?: unknown })?.stderr ?? (e as { message?: unknown })?.message ?? e) }; }
+                try {
+                  return { ok: true, out: execFileSync("git", ["-C", clonePath, ...args], { encoding: "utf8" }) };
+                } catch (e: unknown) {
+                  return {
+                    ok: false,
+                    out: String(
+                      (e as { stderr?: unknown; message?: unknown })?.stderr ??
+                        (e as { message?: unknown })?.message ??
+                        e,
+                    ),
+                  };
+                }
               };
               const sha = git(["rev-parse", "HEAD"]).out.trim();
               const ahead = git(["rev-list", "--count", `origin/${base}..HEAD`]).out.trim();
-              if (ahead === "" || ahead === "0") return { ...base0, commitSha: sha, note: `no commit ahead of origin/${base} — implement left nothing to push` };
-              const files = git(["diff", "--name-only", `origin/${base}..HEAD`]).out.split("\n").map((s) => s.trim()).filter(Boolean);
+              if (ahead === "" || ahead === "0")
+                return {
+                  ...base0,
+                  commitSha: sha,
+                  note: `no commit ahead of origin/${base} — implement left nothing to push`,
+                };
+              const files = git(["diff", "--name-only", `origin/${base}..HEAD`])
+                .out.split("\n")
+                .map((s) => s.trim())
+                .filter(Boolean);
               const push = git(["push", "-u", "origin", branch]);
               let verified = false;
-              try { execFileSync("gh", ["api", `repos/${forkFullName}/branches/${branch}`, "--jq", ".name"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); verified = true; } catch { /* not on fork */ }
-              return { pushed: verified, commitSha: sha, filesChanged: files, compareUrl, forkFullName, branch, note: verified ? "pushed + verified on fork" : `push/verify failed: ${push.out.slice(0, 200)}` };
+              try {
+                execFileSync("gh", ["api", `repos/${forkFullName}/branches/${branch}`, "--jq", ".name"], {
+                  encoding: "utf8",
+                  stdio: ["ignore", "pipe", "ignore"],
+                });
+                verified = true;
+              } catch {
+                /* not on fork */
+              }
+              return {
+                pushed: verified,
+                commitSha: sha,
+                filesChanged: files,
+                compareUrl,
+                forkFullName,
+                branch,
+                note: verified ? "pushed + verified on fork" : `push/verify failed: ${push.out.slice(0, 200)}`,
+              };
             }}
           </Task>
         ) : null}
@@ -489,11 +566,28 @@ export default smithers((ctx) => {
                   ["issue", "create", "--repo", discover?.fullName ?? d.to, "--title", d.subject, "--body", d.body],
                   { encoding: "utf8" },
                 );
-                const issueUrl = out.trim().split(/\s+/).find((t) => t.startsWith("http")) ?? out.trim();
-                return { action: "created-issue" as const, sent: true, issueUrl, note: "issue created on upstream repo" };
+                const issueUrl =
+                  out
+                    .trim()
+                    .split(/\s+/)
+                    .find((t) => t.startsWith("http")) ?? out.trim();
+                return {
+                  action: "created-issue" as const,
+                  sent: true,
+                  issueUrl,
+                  note: "issue created on upstream repo",
+                };
               } catch (err: unknown) {
-                const msg = (err as { stderr?: unknown; message?: unknown })?.stderr ?? (err as { message?: unknown })?.message ?? String(err);
-                return { action: "draft-only" as const, sent: false, issueUrl: null, note: `gh issue create failed: ${String(msg).slice(0, 500)}` };
+                const msg =
+                  (err as { stderr?: unknown; message?: unknown })?.stderr ??
+                  (err as { message?: unknown })?.message ??
+                  String(err);
+                return {
+                  action: "draft-only" as const,
+                  sent: false,
+                  issueUrl: null,
+                  note: `gh issue create failed: ${String(msg).slice(0, 500)}`,
+                };
               }
             }}
           </Task>

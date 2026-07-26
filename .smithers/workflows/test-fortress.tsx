@@ -30,23 +30,23 @@ export const inputSchema = z.object({
   /** Max Codex review↔fix rounds before returning last. */
   codexRounds: z.number().int().min(1).max(10).default(5),
   /** Which test tracks to run. */
-  tracks: z.array(z.enum(["unit", "e2e"])).min(1).refine((value) => new Set(value).size === value.length, "tracks must be unique").default(["unit", "e2e"]),
+  tracks: z
+    .array(z.enum(["unit", "e2e"]))
+    .min(1)
+    .refine((value) => new Set(value).size === value.length, "tracks must be unique")
+    .default(["unit", "e2e"]),
   /** Skip the features.ts discovery swarm (jump straight to hardening). */
   skipDiscovery: z.boolean().default(false),
 });
 
 const discoverySchema = z.object({
-  additions: z
-    .array(z.object({ group: z.string(), features: z.array(z.string()) }))
-    .default([]),
+  additions: z.array(z.object({ group: z.string(), features: z.array(z.string()) })).default([]),
   scannedAreas: z.array(z.string()).default([]),
   notes: z.string().default(""),
 });
 
 const mergeSchema = z.object({
-  addedFeatures: z
-    .array(z.object({ group: z.string(), features: z.array(z.string()) }))
-    .default([]),
+  addedFeatures: z.array(z.object({ group: z.string(), features: z.array(z.string()) })).default([]),
   groupsCreated: z.array(z.string()).default([]),
   totalAdded: z.number().int().default(0),
   summary: z.string(),
@@ -139,9 +139,7 @@ function discoveryPrompt(areas: string[], shardIndex: number): string {
   ].join("\n");
 }
 
-function mergePrompt(
-  discoveries: (z.infer<typeof discoverySchema> | undefined)[],
-): string {
+function mergePrompt(discoveries: (z.infer<typeof discoverySchema> | undefined)[]): string {
   const proposals = discoveries
     .map((d, shard) => ({
       shard,
@@ -169,9 +167,7 @@ function mergePrompt(
   ].join("\n");
 }
 
-function codexFixPrompt(
-  review: z.infer<typeof codexReviewSchema> | undefined,
-): string {
+function codexFixPrompt(review: z.infer<typeof codexReviewSchema> | undefined): string {
   if (!review || review.lgtm || review.issues.length === 0) {
     return [
       "# Address Codex review feedback",
@@ -190,9 +186,7 @@ function codexFixPrompt(
     review.summary,
     "",
     "## Issues",
-    ...review.issues.map(
-      (i) => `- [${i.severity}] ${i.file ?? "(no file)"}: ${i.description}`,
-    ),
+    ...review.issues.map((i) => `- [${i.severity}] ${i.file ?? "(no file)"}: ${i.description}`),
   ].join("\n");
 }
 
@@ -213,12 +207,20 @@ function codexReviewPrompt(): string {
 }
 
 function featureSlug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "item";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "item"
+  );
 }
 
 function rawRows(ctx: any, channel: string): Array<Record<string, unknown>> {
   const rows = typeof ctx.outputs === "function" ? ctx.outputs(channel) : ctx.outputs?.[channel];
-  return Array.isArray(rows) ? rows.filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null) : [];
+  return Array.isArray(rows)
+    ? rows.filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null)
+    : [];
 }
 
 export default smithers((ctx) => {
@@ -232,11 +234,11 @@ export default smithers((ctx) => {
   const tracks = input.tracks ?? ["unit", "e2e"];
   const skipDiscovery = input.skipDiscovery ?? false;
 
-  const groupMap = new Map<string, string[]>(Object.entries(
-    FeatureGroups as Record<string, readonly string[]>,
-  )
-    .filter(([, features]) => Array.isArray(features) && features.length > 0)
-    .map(([name, features]) => [name, [...features]] as [string, string[]]));
+  const groupMap = new Map<string, string[]>(
+    Object.entries(FeatureGroups as Record<string, readonly string[]>)
+      .filter(([, features]) => Array.isArray(features) && features.length > 0)
+      .map(([name, features]) => [name, [...features]] as [string, string[]]),
+  );
   const discoveryMerge = ctx.latest(outputs.merge, "tf:discover:merge") as z.infer<typeof mergeSchema> | undefined;
   for (const addition of discoveryMerge?.addedFeatures ?? []) {
     const existing = groupMap.get(addition.group) ?? [];
@@ -244,9 +246,7 @@ export default smithers((ctx) => {
   }
   const allGroups: FeatureWorkItem[] = [...groupMap].map(([name, features]) => ({ name, features }));
 
-  const selected = allGroups.filter(
-    (g) => requested.size === 0 || requested.has(g.name),
-  );
+  const selected = allGroups.filter((g) => requested.size === 0 || requested.has(g.name));
   const groups = limit > 0 ? selected.slice(0, limit) : selected;
 
   const shards = shard(SCAN_AREAS, discoveryAgents);
@@ -255,24 +255,33 @@ export default smithers((ctx) => {
   // are simply absent). Sequence ordering runs merge after the swarm; reading
   // via ctx instead of needs/deps means a failed shard cannot dangle a
   // dependency into DEPENDENCY_DEADLOCK.
-  const discoveries = shards.map((_, index) =>
-    ctx.outputMaybe(outputs.discovery, { nodeId: `tf:discover:${index}` }) as
-      | z.infer<typeof discoverySchema>
-      | undefined,
+  const discoveries = shards.map(
+    (_, index) =>
+      ctx.outputMaybe(outputs.discovery, { nodeId: `tf:discover:${index}` }) as
+        | z.infer<typeof discoverySchema>
+        | undefined,
   );
 
-  const latestReview = ctx.latest(outputs.codexReview, "tf:codex:review") as z.infer<typeof codexReviewSchema> | undefined;
+  const latestReview = ctx.latest(outputs.codexReview, "tf:codex:review") as
+    | z.infer<typeof codexReviewSchema>
+    | undefined;
   const codexApproved = latestReview?.lgtm === true;
   const verdictRows = rawRows(ctx, "tfVerdict");
   const selectedTracks = tracks.filter((track): track is "unit" | "e2e" => track === "unit" || track === "e2e");
-  const verdictStates = selectedTracks.flatMap((track) => groups.map((group) => {
-    const nodeId = `tf:${track}:${featureSlug(group.name)}:judge`;
-    const rows = verdictRows.filter((row) => row.nodeId === nodeId);
-    const current = rows.at(-1);
-    return { trivial: current?.verdict === "trivial", exhausted: rows.length >= maxRounds && current?.verdict !== "trivial" };
-  }));
+  const verdictStates = selectedTracks.flatMap((track) =>
+    groups.map((group) => {
+      const nodeId = `tf:${track}:${featureSlug(group.name)}:judge`;
+      const rows = verdictRows.filter((row) => row.nodeId === nodeId);
+      const current = rows.at(-1);
+      return {
+        trivial: current?.verdict === "trivial",
+        exhausted: rows.length >= maxRounds && current?.verdict !== "trivial",
+      };
+    }),
+  );
   const selectionResolved = requested.size === 0 || [...requested].every((name) => groupMap.has(name));
-  const trackComplete = selectionResolved && (verdictStates.length === 0 || verdictStates.every((state) => state.trivial));
+  const trackComplete =
+    selectionResolved && (verdictStates.length === 0 || verdictStates.every((state) => state.trivial));
   const codexAttempts = rawRows(ctx, "codexReview").filter((row) => row.nodeId === "tf:codex:review").length;
   const complete = trackComplete && codexApproved;
   const exhausted = !complete && (verdictStates.some((state) => state.exhausted) || codexAttempts >= codexRounds);
@@ -344,12 +353,7 @@ export default smithers((ctx) => {
         </Parallel>
 
         {/* Phase 3 — Codex reviews every change in a loop until LGTM */}
-        <Loop
-          id="tf:codex:loop"
-          until={codexApproved}
-          maxIterations={codexRounds}
-          onMaxReached="return-last"
-        >
+        <Loop id="tf:codex:loop" until={codexApproved} maxIterations={codexRounds} onMaxReached="return-last">
           <Sequence>
             <Task
               id="tf:codex:fix"

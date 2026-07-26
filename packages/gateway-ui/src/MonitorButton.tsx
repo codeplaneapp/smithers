@@ -30,9 +30,7 @@ export type MonitorHrefOptions = {
  */
 export function monitorHref(runId?: string, options: MonitorHrefOptions = {}): string {
   const path = options.monitorPath ?? DEFAULT_MONITOR_PATH;
-  const origin =
-    options.baseUrl ??
-    (typeof globalThis.location !== "undefined" ? globalThis.location.origin : "");
+  const origin = options.baseUrl ?? (typeof globalThis.location !== "undefined" ? globalThis.location.origin : "");
   const base = `${origin}${path}`;
   return runId ? `${base}?runId=${encodeURIComponent(runId)}` : base;
 }

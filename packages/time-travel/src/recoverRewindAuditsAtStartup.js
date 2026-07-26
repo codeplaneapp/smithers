@@ -26,8 +26,7 @@ export async function recoverRewindAuditsAtStartup(adapter, options = {}) {
     if (recovered.length > 0) {
       options.onRecovered?.(recovered.length);
     }
-  }
-  catch (error) {
+  } catch (error) {
     options.onError?.(error);
   }
 }

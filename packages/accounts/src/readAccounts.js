@@ -11,10 +11,10 @@ import { parseAccountsFile } from "./parseAccountsFile.js";
  * @returns {import("./AccountsFile.ts").AccountsFile}
  */
 export function readAccounts(env = process.env) {
-    const path = accountsFilePath(env);
-    if (!existsSync(path)) {
-        return { version: 1, accounts: [] };
-    }
-    const raw = readFileSync(path, "utf8");
-    return parseAccountsFile(raw);
+  const path = accountsFilePath(env);
+  if (!existsSync(path)) {
+    return { version: 1, accounts: [] };
+  }
+  const raw = readFileSync(path, "utf8");
+  return parseAccountsFile(raw);
 }

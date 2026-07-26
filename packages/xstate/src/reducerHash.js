@@ -16,9 +16,15 @@ import { stableHash } from "./stableHash.js";
  * @returns {string}
  */
 export function hashReducer(machine, sources) {
-    const machineDigest = toHashable({ config: machine.config, implementations: machine.implementations }, new WeakSet(), 0);
-    const sourcesDigest = sources.map((source, index) => toHashable({ index, kind: source.kind, seed: /** @type {any} */ (source).hashSeed }, new WeakSet(), 0));
-    return stableHash([machineDigest, sourcesDigest]);
+  const machineDigest = toHashable(
+    { config: machine.config, implementations: machine.implementations },
+    new WeakSet(),
+    0,
+  );
+  const sourcesDigest = sources.map((source, index) =>
+    toHashable({ index, kind: source.kind, seed: /** @type {any} */ (source).hashSeed }, new WeakSet(), 0),
+  );
+  return stableHash([machineDigest, sourcesDigest]);
 }
 
 /** Deep enough to reach a zod schema's `{ type, shape }` internals a few
@@ -46,20 +52,20 @@ const MAX_HASH_DEPTH = 16;
  * @returns {unknown}
  */
 function toHashable(value, seen, depth) {
-    if (typeof value === "function") {
-        if (seen.has(value)) return "[circular]";
-        seen.add(value);
-        return { fn: value.toString(), props: walkOwnKeys(value, seen, depth) };
-    }
-    if (value === null || typeof value !== "object") return value;
+  if (typeof value === "function") {
     if (seen.has(value)) return "[circular]";
-    if (depth >= MAX_HASH_DEPTH) return "<max-depth>";
-    if (Array.isArray(value)) {
-        seen.add(value);
-        return value.map((entry) => toHashable(entry, seen, depth + 1));
-    }
     seen.add(value);
-    return walkOwnKeys(value, seen, depth);
+    return { fn: value.toString(), props: walkOwnKeys(value, seen, depth) };
+  }
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return "[circular]";
+  if (depth >= MAX_HASH_DEPTH) return "<max-depth>";
+  if (Array.isArray(value)) {
+    seen.add(value);
+    return value.map((entry) => toHashable(entry, seen, depth + 1));
+  }
+  seen.add(value);
+  return walkOwnKeys(value, seen, depth);
 }
 
 /**
@@ -69,16 +75,15 @@ function toHashable(value, seen, depth) {
  * @returns {Record<string, unknown>}
  */
 function walkOwnKeys(value, seen, depth) {
-    if (depth >= MAX_HASH_DEPTH) return { "<max-depth>": true };
-    /** @type {Record<string, unknown>} */
-    const out = {};
-    for (const key of Object.keys(value)) {
-        try {
-            out[key] = toHashable(/** @type {Record<string, unknown>} */ (value)[key], seen, depth + 1);
-        }
-        catch {
-            out[key] = "<unreadable>";
-        }
+  if (depth >= MAX_HASH_DEPTH) return { "<max-depth>": true };
+  /** @type {Record<string, unknown>} */
+  const out = {};
+  for (const key of Object.keys(value)) {
+    try {
+      out[key] = toHashable(/** @type {Record<string, unknown>} */ (value)[key], seen, depth + 1);
+    } catch {
+      out[key] = "<unreadable>";
     }
-    return out;
+  }
+  return out;
 }

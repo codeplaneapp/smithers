@@ -76,9 +76,7 @@ for (const [file, count] of observed) {
 for (const [file, count] of allowedSkips) {
   const actual = observed.get(file) ?? 0;
   if (actual !== count) {
-    console.error(
-      `[fault-skip-audit] tracked skip count changed in ${file}: expected ${count}, found ${actual}`,
-    );
+    console.error(`[fault-skip-audit] tracked skip count changed in ${file}: expected ${count}, found ${actual}`);
     failed = true;
   }
 }

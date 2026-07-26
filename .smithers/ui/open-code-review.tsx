@@ -267,7 +267,8 @@ function App() {
   const runsQuery = useGatewayRuns({ filter: { limit: 20 } });
   const actions = useGatewayActions();
   const runs = useMemo(
-    () => ((runsQuery.data ?? []) as RunSummary[]).filter((run) => !run.workflowKey || run.workflowKey === WORKFLOW_KEY),
+    () =>
+      ((runsQuery.data ?? []) as RunSummary[]).filter((run) => !run.workflowKey || run.workflowKey === WORKFLOW_KEY),
     [runsQuery.data],
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? runs[0]?.runId;
@@ -291,7 +292,15 @@ function App() {
   const hasReview = review !== null;
   const hasSummary = summary !== null;
   const isRunFullyComplete = hasTarget && hasPreview && hasReview && hasSummary;
-  const activeStage = !hasTarget ? "target" : !hasPreview ? "preview" : !hasReview ? "review" : !hasSummary ? "summary" : "";
+  const activeStage = !hasTarget
+    ? "target"
+    : !hasPreview
+      ? "preview"
+      : !hasReview
+        ? "review"
+        : !hasSummary
+          ? "summary"
+          : "";
   const reviewableEntries = preview?.entries.filter((entry) => entry.willReview) ?? [];
   const excludedEntries = preview?.entries.filter((entry) => !entry.willReview) ?? [];
   const totalTokens = review?.summary?.totalTokens ?? summary?.totalTokens ?? 0;
@@ -304,13 +313,7 @@ function App() {
       reviewOut.refetch(),
       summaryOut.refetch(),
     ]);
-  }, [
-    runsQuery.refetch,
-    targetOut.refetch,
-    previewOut.refetch,
-    reviewOut.refetch,
-    summaryOut.refetch,
-  ]);
+  }, [runsQuery.refetch, targetOut.refetch, previewOut.refetch, reviewOut.refetch, summaryOut.refetch]);
   useEffect(() => {
     if (!activeRunId || eventCount <= 0) return;
     const timeout = window.setTimeout(() => {
@@ -365,50 +368,95 @@ function App() {
         <span className={"badge " + workflowStatus} data-testid="ocr-workflow-status">
           {summary?.status ?? review?.status ?? activeRun?.status ?? "idle"}
         </span>
-        <span className="badge runid" data-testid="ocr-runid">{activeRunId ? shortRunId(activeRunId) : "No run"}</span>
-        <span className="badge runid" data-testid="ocr-events">{eventCount} events</span>
+        <span className="badge runid" data-testid="ocr-runid">
+          {activeRunId ? shortRunId(activeRunId) : "No run"}
+        </span>
+        <span className="badge runid" data-testid="ocr-events">
+          {eventCount} events
+        </span>
         <div className="toolbar">
-          <button className="button" data-testid="ocr-refresh" onClick={() => void refresh()} disabled={busy}>Refresh</button>
+          <button className="button" data-testid="ocr-refresh" onClick={() => void refresh()} disabled={busy}>
+            Refresh
+          </button>
           {runStatus === "running" ? (
-            <button className="button danger" data-testid="ocr-cancel" onClick={() => void cancel()} disabled={busy}>Cancel</button>
+            <button className="button danger" data-testid="ocr-cancel" onClick={() => void cancel()} disabled={busy}>
+              Cancel
+            </button>
           ) : null}
-          <button className="button primary" data-testid="ocr-launch" onClick={() => void launch()} disabled={busy}>Run Review</button>
+          <button className="button primary" data-testid="ocr-launch" onClick={() => void launch()} disabled={busy}>
+            Run Review
+          </button>
         </div>
       </header>
 
       <div className="layout">
         <aside className="left">
-          <div className="section-head"><span>Run input</span></div>
+          <div className="section-head">
+            <span>Run input</span>
+          </div>
           <div className="form">
             <label className="field">
               <span>Repo</span>
-              <input className="input" data-testid="ocr-input-repo" value={repo} onChange={(e) => setRepo(e.currentTarget.value)} />
+              <input
+                className="input"
+                data-testid="ocr-input-repo"
+                value={repo}
+                onChange={(e) => setRepo(e.currentTarget.value)}
+              />
             </label>
             <div className="two">
               <label className="field">
                 <span>From</span>
-                <input className="input" data-testid="ocr-input-from" value={fromRef} onChange={(e) => setFromRef(e.currentTarget.value)} />
+                <input
+                  className="input"
+                  data-testid="ocr-input-from"
+                  value={fromRef}
+                  onChange={(e) => setFromRef(e.currentTarget.value)}
+                />
               </label>
               <label className="field">
                 <span>To</span>
-                <input className="input" data-testid="ocr-input-to" value={toRef} onChange={(e) => setToRef(e.currentTarget.value)} />
+                <input
+                  className="input"
+                  data-testid="ocr-input-to"
+                  value={toRef}
+                  onChange={(e) => setToRef(e.currentTarget.value)}
+                />
               </label>
             </div>
             <label className="field">
               <span>Commit</span>
-              <input className="input" data-testid="ocr-input-commit" value={commit} onChange={(e) => setCommit(e.currentTarget.value)} />
+              <input
+                className="input"
+                data-testid="ocr-input-commit"
+                value={commit}
+                onChange={(e) => setCommit(e.currentTarget.value)}
+              />
             </label>
             <label className="field">
               <span>Background</span>
-              <textarea className="textarea" data-testid="ocr-input-background" value={background} onChange={(e) => setBackground(e.currentTarget.value)} />
+              <textarea
+                className="textarea"
+                data-testid="ocr-input-background"
+                value={background}
+                onChange={(e) => setBackground(e.currentTarget.value)}
+              />
             </label>
             <label className="check">
-              <input data-testid="ocr-input-run-review" type="checkbox" checked={runReview} onChange={(e) => setRunReview(e.currentTarget.checked)} />
+              <input
+                data-testid="ocr-input-run-review"
+                type="checkbox"
+                checked={runReview}
+                onChange={(e) => setRunReview(e.currentTarget.checked)}
+              />
               <span>Run native review</span>
             </label>
           </div>
 
-          <div className="section-head"><span>Recent runs</span><span>{runs.length}</span></div>
+          <div className="section-head">
+            <span>Recent runs</span>
+            <span>{runs.length}</span>
+          </div>
           {runs.map((run) => (
             <button
               key={run.runId}
@@ -450,12 +498,20 @@ function App() {
           </div>
 
           {summary ? (
-            <div className={"alert " + statusClass(summary.status)} data-testid="ocr-summary-message">{summary.message}</div>
+            <div className={"alert " + statusClass(summary.status)} data-testid="ocr-summary-message">
+              {summary.message}
+            </div>
           ) : activeRunId ? null : (
-            <div className="empty" data-testid="ocr-empty">No run selected.</div>
+            <div className="empty" data-testid="ocr-empty">
+              No run selected.
+            </div>
           )}
 
-          {review?.error ? <div className="alert err" data-testid="ocr-error">{review.error}</div> : null}
+          {review?.error ? (
+            <div className="alert err" data-testid="ocr-error">
+              {review.error}
+            </div>
+          ) : null}
 
           <div className="panel" data-testid="ocr-comments-panel">
             <div className="panel-title">
@@ -466,15 +522,22 @@ function App() {
               review.comments.map((comment, index) => (
                 <article className="comment" data-testid={"ocr-comment-" + index} key={index}>
                   <div className="comment-head">
-                    <span className="path">{comment.path}{lineRange(comment) ? ":" + lineRange(comment) : ""}</span>
-                    <span className="badge">{comment.startLine && comment.startLine > 0 ? "positioned" : "unpositioned"}</span>
+                    <span className="path">
+                      {comment.path}
+                      {lineRange(comment) ? ":" + lineRange(comment) : ""}
+                    </span>
+                    <span className="badge">
+                      {comment.startLine && comment.startLine > 0 ? "positioned" : "unpositioned"}
+                    </span>
                   </div>
                   <div className="comment-body">{comment.content}</div>
                   {comment.suggestionCode ? <pre className="code">{comment.suggestionCode}</pre> : null}
                 </article>
               ))
             ) : (
-              <div className="empty" data-testid="ocr-comments-empty">No comments.</div>
+              <div className="empty" data-testid="ocr-comments-empty">
+                No comments.
+              </div>
             )}
           </div>
 
@@ -502,32 +565,59 @@ function App() {
                         <span className="plus">+{entry.insertions}</span>{" "}
                         <span className="minus">-{entry.deletions}</span>
                       </td>
-                      <td>{entry.willReview ? "review" : <span className="reason">{entry.excludeReason || "exclude"}</span>}</td>
+                      <td>
+                        {entry.willReview ? (
+                          "review"
+                        ) : (
+                          <span className="reason">{entry.excludeReason || "exclude"}</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             ) : (
-              <div className="empty" data-testid="ocr-preview-empty">No preview.</div>
+              <div className="empty" data-testid="ocr-preview-empty">
+                No preview.
+              </div>
             )}
           </div>
         </section>
 
         <aside className="right">
-          <div className="section-head"><span>Target</span></div>
-          <div className="form">
-            <div className="field"><span>Mode</span><div className="mono">{asString(target?.mode) ?? "-"}</div></div>
-            <div className="field"><span>Ref</span><div className="mono">{asString(target?.ref) ?? "-"}</div></div>
-            <div className="field"><span>Reviewer</span><div className="mono muted">{review?.reviewer ?? "smithers-native"}</div></div>
+          <div className="section-head">
+            <span>Target</span>
           </div>
-          <div className="section-head"><span>Review queue</span><span>{reviewableEntries.length}</span></div>
+          <div className="form">
+            <div className="field">
+              <span>Mode</span>
+              <div className="mono">{asString(target?.mode) ?? "-"}</div>
+            </div>
+            <div className="field">
+              <span>Ref</span>
+              <div className="mono">{asString(target?.ref) ?? "-"}</div>
+            </div>
+            <div className="field">
+              <span>Reviewer</span>
+              <div className="mono muted">{review?.reviewer ?? "smithers-native"}</div>
+            </div>
+          </div>
+          <div className="section-head">
+            <span>Review queue</span>
+            <span>{reviewableEntries.length}</span>
+          </div>
           {reviewableEntries.map((entry, index) => (
             <div className="comment" data-testid={"ocr-queue-" + index} key={entry.path}>
               <div className="path">{entry.path}</div>
-              <div className="num"><span className="plus">+{entry.insertions}</span> <span className="minus">-{entry.deletions}</span></div>
+              <div className="num">
+                <span className="plus">+{entry.insertions}</span> <span className="minus">-{entry.deletions}</span>
+              </div>
             </div>
           ))}
-          <div className="section-head"><span>Excluded</span><span>{excludedEntries.length}</span></div>
+          <div className="section-head">
+            <span>Excluded</span>
+            <span>{excludedEntries.length}</span>
+          </div>
           {excludedEntries.map((entry, index) => (
             <div className="comment" data-testid={"ocr-excluded-" + index} key={entry.path}>
               <div className="path">{entry.path}</div>

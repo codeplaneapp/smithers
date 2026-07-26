@@ -37,12 +37,10 @@ export const SOTA_REGISTRY_URL =
   "https://raw.githubusercontent.com/smithersai/smithers/main/docs/data/sota-models.json";
 
 /** The docs sidebar is the authoritative published changelog index. */
-export const CHANGELOG_INDEX_URL =
-  "https://raw.githubusercontent.com/smithersai/smithers/main/docs/docs.json";
+export const CHANGELOG_INDEX_URL = "https://raw.githubusercontent.com/smithersai/smithers/main/docs/docs.json";
 
 /** Raw GitHub URL prefix for published changelog MDX files. */
-export const CHANGELOG_RAW_BASE_URL =
-  "https://raw.githubusercontent.com/smithersai/smithers/main/docs/changelogs";
+export const CHANGELOG_RAW_BASE_URL = "https://raw.githubusercontent.com/smithersai/smithers/main/docs/changelogs";
 
 /** Default network timeout for the registry probe. Kept short so the one
  * throttled check a day never noticeably stalls a command. */
@@ -162,12 +160,7 @@ export function detectInstallMethod(opts = {}) {
   if (has("/.yarn/") || has("/yarn/global") || has("/.config/yarn/global")) {
     return { kind: "global", manager: "yarn", path };
   }
-  if (
-    has("/lib/node_modules/") ||
-    has("/.npm-global/") ||
-    has("/.npm-packages/") ||
-    has("/.nvm/versions/node/")
-  ) {
+  if (has("/lib/node_modules/") || has("/.npm-global/") || has("/.npm-packages/") || has("/.nvm/versions/node/")) {
     return { kind: "global", manager: "npm", path };
   }
 

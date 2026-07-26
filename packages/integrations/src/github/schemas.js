@@ -5,23 +5,23 @@ import { z } from "zod";
 // render-props get typed access without ever rejecting a real delivery.
 
 export const GitHubUserSchema = z
-    .object({
+  .object({
     login: z.string(),
     id: z.number().optional(),
-})
-    .passthrough();
+  })
+  .passthrough();
 
 export const GitHubRepositorySchema = z
-    .object({
+  .object({
     full_name: z.string(),
     name: z.string().optional(),
     owner: GitHubUserSchema.optional(),
     default_branch: z.string().optional(),
-})
-    .passthrough();
+  })
+  .passthrough();
 
 export const GitHubPullRequestSchema = z
-    .object({
+  .object({
     number: z.number(),
     title: z.string().optional(),
     state: z.string().optional(),
@@ -32,11 +32,11 @@ export const GitHubPullRequestSchema = z
     user: GitHubUserSchema.optional(),
     head: z.object({ ref: z.string(), sha: z.string() }).passthrough().optional(),
     base: z.object({ ref: z.string(), sha: z.string().optional() }).passthrough().optional(),
-})
-    .passthrough();
+  })
+  .passthrough();
 
 export const GitHubIssueSchema = z
-    .object({
+  .object({
     number: z.number(),
     title: z.string().optional(),
     state: z.string().optional(),
@@ -44,64 +44,70 @@ export const GitHubIssueSchema = z
     body: z.string().nullable().optional(),
     user: GitHubUserSchema.optional(),
     labels: z.array(z.unknown()).optional(),
-})
-    .passthrough();
+  })
+  .passthrough();
 
 export const GitHubCommentSchema = z
-    .object({
+  .object({
     id: z.number().optional(),
     body: z.string().optional(),
     html_url: z.string().optional(),
     user: GitHubUserSchema.optional(),
-})
-    .passthrough();
+  })
+  .passthrough();
 
 /** `pull_request` webhook payload (validated fields only; rest passthrough). */
 export const GitHubPullRequestEventSchema = z
-    .object({
+  .object({
     action: z.string(),
     number: z.number().optional(),
     pull_request: GitHubPullRequestSchema,
     repository: GitHubRepositorySchema,
     sender: GitHubUserSchema.optional(),
-})
-    .passthrough();
+  })
+  .passthrough();
 
 /** `issues` webhook payload. */
 export const GitHubIssuesEventSchema = z
-    .object({
+  .object({
     action: z.string(),
     issue: GitHubIssueSchema,
     repository: GitHubRepositorySchema,
     sender: GitHubUserSchema.optional(),
-})
-    .passthrough();
+  })
+  .passthrough();
 
 /** `issue_comment` webhook payload. */
 export const GitHubIssueCommentEventSchema = z
-    .object({
+  .object({
     action: z.string(),
     issue: GitHubIssueSchema,
     comment: GitHubCommentSchema,
     repository: GitHubRepositorySchema,
     sender: GitHubUserSchema.optional(),
-})
-    .passthrough();
+  })
+  .passthrough();
 
 /** `push` webhook payload. */
 export const GitHubPushEventSchema = z
-    .object({
+  .object({
     ref: z.string(),
     before: z.string().optional(),
     after: z.string().optional(),
     repository: GitHubRepositorySchema,
-    commits: z.array(z.object({
-        id: z.string().optional(),
-        message: z.string().optional(),
-    }).passthrough()).optional(),
+    commits: z
+      .array(
+        z
+          .object({
+            id: z.string().optional(),
+            message: z.string().optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
     pusher: z.object({ name: z.string().optional() }).passthrough().optional(),
-})
-    .passthrough();
+  })
+  .passthrough();
 
 /** Fallback payload schema for `OnWebhook` when no schema prop is given. */
 export const GitHubWebhookPayloadSchema = z.object({}).passthrough();
@@ -112,25 +118,25 @@ export const GitHubWebhookPayloadSchema = z.object({}).passthrough();
 // ---------------------------------------------------------------------------
 
 export const GitHubCommentOutputSchema = z.object({
-    id: z.number(),
-    url: z.string(),
+  id: z.number(),
+  url: z.string(),
 });
 
 export const GitHubIssueOutputSchema = z.object({
-    number: z.number(),
-    url: z.string(),
+  number: z.number(),
+  url: z.string(),
 });
 
 export const GitHubPullRequestOutputSchema = z.object({
-    number: z.number(),
-    url: z.string(),
+  number: z.number(),
+  url: z.string(),
 });
 
 export const GitHubLabelsOutputSchema = z.object({
-    labels: z.string(),
+  labels: z.string(),
 });
 
 export const GitHubCommitStatusOutputSchema = z.object({
-    state: z.string(),
-    url: z.string(),
+  state: z.string(),
+  url: z.string(),
 });

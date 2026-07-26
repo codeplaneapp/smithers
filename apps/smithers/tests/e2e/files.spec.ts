@@ -68,9 +68,7 @@ test("shows dirty state, save success, and real backend save failure feedback", 
   // response is mocked: this is the actual NOT_EDITABLE backend path.
   await writeFile(editablePath, "x".repeat(512 * 1024 + 1));
   await page.getByTestId("files-save").click();
-  await expect(page.locator(".files-alert")).toContainText(
-    "This file is not editable through the local UI.",
-  );
+  await expect(page.locator(".files-alert")).toContainText("This file is not editable through the local UI.");
   await writeFile(editablePath, "editable restored\n");
   expectNoPageErrors(pageErrors);
 });

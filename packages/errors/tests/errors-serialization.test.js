@@ -207,13 +207,7 @@ describe("tagged-error payloads keep numeric fields finite across a round-trip",
   test("TaskHeartbeatTimeout numerics stay finite when omitted", () => {
     const err = new TaskHeartbeatTimeout({ message: "stale", nodeId: "n" });
     const round = JSON.parse(JSON.stringify(toTaggedErrorPayload(err)));
-    for (const key of [
-      "iteration",
-      "attempt",
-      "timeoutMs",
-      "staleForMs",
-      "lastHeartbeatAtMs",
-    ]) {
+    for (const key of ["iteration", "attempt", "timeoutMs", "staleForMs", "lastHeartbeatAtMs"]) {
       expect(typeof round[key]).toBe("number");
       expect(Number.isFinite(round[key])).toBe(true);
     }

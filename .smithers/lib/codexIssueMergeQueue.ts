@@ -70,7 +70,9 @@ export function panelWinnerFromScore(score: { sol?: number; fable?: number } | u
   return Number(score.sol) > Number(score.fable) ? "sol" : "fable";
 }
 
-export function tallyPanelWins(rows: Array<{ panelScore?: { sol?: number; fable?: number; winner?: PanelWinner } }> | undefined): Record<PanelWinner, number> {
+export function tallyPanelWins(
+  rows: Array<{ panelScore?: { sol?: number; fable?: number; winner?: PanelWinner } }> | undefined,
+): Record<PanelWinner, number> {
   const totals: Record<PanelWinner, number> = { sol: 0, fable: 0, tie: 0 };
   for (const row of rows ?? []) {
     // The numeric comparison is authoritative. A moderator cannot inflate a
@@ -92,11 +94,13 @@ export function planningPanelIsComplete(
   fable: PlanningContribution | undefined,
   moderator: IssueKeyed | undefined,
 ): boolean {
-  return sol?.issueNumber === issueNumber
-    && sol.planner === "sol"
-    && fable?.issueNumber === issueNumber
-    && fable.planner === "fable"
-    && moderator?.issueNumber === issueNumber;
+  return (
+    sol?.issueNumber === issueNumber &&
+    sol.planner === "sol" &&
+    fable?.issueNumber === issueNumber &&
+    fable.planner === "fable" &&
+    moderator?.issueNumber === issueNumber
+  );
 }
 
 export function reviewPanelIsComplete(
@@ -105,14 +109,16 @@ export function reviewPanelIsComplete(
   fable: PanelReviewVerdict | undefined,
   moderator: ReviewVerdict | undefined,
 ): boolean {
-  return sol?.issueNumber === issueNumber
-    && sol.reviewer === "sol"
-    && fable?.issueNumber === issueNumber
-    && fable.reviewer === "fable"
-    && moderator?.issueNumber === issueNumber
-    && !!moderator.headSha
-    && sol.headSha === moderator.headSha
-    && fable.headSha === moderator.headSha;
+  return (
+    sol?.issueNumber === issueNumber &&
+    sol.reviewer === "sol" &&
+    fable?.issueNumber === issueNumber &&
+    fable.reviewer === "fable" &&
+    moderator?.issueNumber === issueNumber &&
+    !!moderator.headSha &&
+    sol.headSha === moderator.headSha &&
+    fable.headSha === moderator.headSha
+  );
 }
 
 /**
@@ -126,10 +132,12 @@ export function candidateIsReady(
   gate: LocalGateVerdict | undefined,
 ): boolean {
   if (!candidate?.ready || !candidate.headSha) return false;
-  return review?.approved === true
-    && review.headSha === candidate.headSha
-    && gate?.passed === true
-    && gate.headSha === candidate.headSha;
+  return (
+    review?.approved === true &&
+    review.headSha === candidate.headSha &&
+    gate?.passed === true &&
+    gate.headSha === candidate.headSha
+  );
 }
 
 export function issueIsReady(
@@ -147,27 +155,36 @@ export function issueIsReady(
     );
     return latest?.approved === true && latest.headSha === candidate?.headSha;
   });
-  return candidateIsReady(
-    candidate,
-    latestForIssue(reviews, issueNumber),
-    latestForIssue((gates ?? []).filter((gate) => gate.phase === undefined || gate.phase === "candidate"), issueNumber),
-  ) && panelApproved;
+  return (
+    candidateIsReady(
+      candidate,
+      latestForIssue(reviews, issueNumber),
+      latestForIssue(
+        (gates ?? []).filter((gate) => gate.phase === undefined || gate.phase === "candidate"),
+        issueNumber,
+      ),
+    ) && panelApproved
+  );
 }
 
 export function mergeIsVerified(
-  merge: {
-    status?: string;
-    headSha?: string;
-    localMainSha?: string;
-    gatePassed?: boolean;
-    verified?: boolean;
-  } | undefined,
+  merge:
+    | {
+        status?: string;
+        headSha?: string;
+        localMainSha?: string;
+        gatePassed?: boolean;
+        verified?: boolean;
+      }
+    | undefined,
 ): boolean {
-  return merge?.status === "merged"
-    && !!merge.headSha
-    && merge.localMainSha === merge.headSha
-    && merge.gatePassed === true
-    && merge.verified === true;
+  return (
+    merge?.status === "merged" &&
+    !!merge.headSha &&
+    merge.localMainSha === merge.headSha &&
+    merge.gatePassed === true &&
+    merge.verified === true
+  );
 }
 
 export function recordedMergeChain(
@@ -222,7 +239,11 @@ export function recordedMergeChain(
     cursor = edge.localMainSha!;
   }
   if (used.size !== edges.size) {
-    return failure("Recorded merge rows contain a verified branch or orphan outside the published chain.", issueNumbers, cursor);
+    return failure(
+      "Recorded merge rows contain a verified branch or orphan outside the published chain.",
+      issueNumbers,
+      cursor,
+    );
   }
   const reachesCurrentMain = cursor === currentMainSha;
   return {
@@ -242,10 +263,12 @@ export function recordedMergeChain(
  * repository query catches any issue left outside that processing batch.
  */
 export function isUnfilteredAllRepoMode(scope: IssueScope): boolean {
-  return (scope.issueNumbers?.length ?? 0) === 0
-    && (scope.excludeNumbers?.length ?? 0) === 0
-    && (scope.labels?.length ?? 0) === 0
-    && (scope.excludeAuthors?.length ?? 0) === 0;
+  return (
+    (scope.issueNumbers?.length ?? 0) === 0 &&
+    (scope.excludeNumbers?.length ?? 0) === 0 &&
+    (scope.labels?.length ?? 0) === 0 &&
+    (scope.excludeAuthors?.length ?? 0) === 0
+  );
 }
 
 export function publicationIsSuccessful(completion: PublicationCompletion): boolean {
@@ -260,22 +283,28 @@ export function uniqueSortedIssueNumbers(values: readonly number[]): number[] {
 
 /** Public issue agents may not change automation that receives repository credentials. */
 export function protectedAutomationPaths(paths: readonly string[]): string[] {
-  return [...new Set(paths.filter((path) => {
-    if (!path || path.includes("\0")) return true;
-    const normalized = path.replaceAll("\\", "/").replace(/^\.\//, "");
-    if (normalized.startsWith("/") || normalized.split("/").includes("..")) return true;
-    return PROTECTED_AUTOMATION_PATH_PREFIXES.some((prefix) =>
-      normalized === prefix.slice(0, -1) || normalized.startsWith(prefix)
-    );
-  }))].sort();
+  return [
+    ...new Set(
+      paths.filter((path) => {
+        if (!path || path.includes("\0")) return true;
+        const normalized = path.replaceAll("\\", "/").replace(/^\.\//, "");
+        if (normalized.startsWith("/") || normalized.split("/").includes("..")) return true;
+        return PROTECTED_AUTOMATION_PATH_PREFIXES.some(
+          (prefix) => normalized === prefix.slice(0, -1) || normalized.startsWith(prefix),
+        );
+      }),
+    ),
+  ].sort();
 }
 
 export function parsePaginatedOpenIssueNumbers(value: unknown): number[] {
   if (!Array.isArray(value)) throw new Error("Authoritative open-issue query returned a non-array response.");
-  if (!value.every((page) => Array.isArray(page))) throw new Error("Authoritative open-issue pagination returned a malformed page.");
+  if (!value.every((page) => Array.isArray(page)))
+    throw new Error("Authoritative open-issue pagination returned a malformed page.");
   const issueNumbers: number[] = [];
   for (const row of value.flat() as unknown[]) {
-    if (!row || typeof row !== "object" || Array.isArray(row)) throw new Error("Authoritative open-issue pagination returned a malformed row.");
+    if (!row || typeof row !== "object" || Array.isArray(row))
+      throw new Error("Authoritative open-issue pagination returned a malformed row.");
     const record = row as Record<string, unknown>;
     const number = Number(record.number);
     if (!Number.isInteger(number) || number <= 0 || String(record.state ?? "").toLowerCase() !== "open") {
@@ -327,17 +356,18 @@ export function exactShaPushRefspec(sha: string, branch: string): string {
     return code <= 32 || code === 127;
   });
   if (
-    !branch
-    || branch.startsWith("/")
-    || branch.endsWith("/")
-    || branch.endsWith(".")
-    || branch.endsWith(".lock")
-    || branch.includes("..")
-    || branch.includes("@{")
-    || branch.includes("//")
-    || hasControlOrSpace
-    || /[~^:?*[\]\\]/.test(branch)
-  ) throw new Error(`Invalid branch name: ${branch}`);
+    !branch ||
+    branch.startsWith("/") ||
+    branch.endsWith("/") ||
+    branch.endsWith(".") ||
+    branch.endsWith(".lock") ||
+    branch.includes("..") ||
+    branch.includes("@{") ||
+    branch.includes("//") ||
+    hasControlOrSpace ||
+    /[~^:?*[\]\\]/.test(branch)
+  )
+    throw new Error(`Invalid branch name: ${branch}`);
   return `${sha}:refs/heads/${branch}`;
 }
 

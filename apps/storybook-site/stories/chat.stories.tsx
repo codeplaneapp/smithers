@@ -1,12 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import {
-  Attachment,
-  Bubble,
-  ChatMessage,
-  ChatTranscript,
-  Marker,
-  Shimmer,
-} from "@smithers-orchestrator/ui";
+import { Attachment, Bubble, ChatMessage, ChatTranscript, Marker, Shimmer } from "@smithers-orchestrator/ui";
 
 const meta: Meta = {
   title: "Chat/Transcript",
@@ -19,9 +12,7 @@ export const Transcript: Story = {
   render: () => (
     <ChatTranscript pending pendingLabel="Agent is working" style={{ maxWidth: 640 }}>
       <ChatMessage role="user">Please inspect the parser and fix the failing test.</ChatMessage>
-      <ChatMessage role="assistant">
-        Reading tests/parser.test.ts to find the failing assertion.
-      </ChatMessage>
+      <ChatMessage role="assistant">Reading tests/parser.test.ts to find the failing assertion.</ChatMessage>
       <ChatMessage role="assistant" variant="terminal" label="Shell">
         $ bun test tests/parser.test.ts
       </ChatMessage>
@@ -34,8 +25,7 @@ export const Bubbles: Story = {
     <div style={{ display: "grid", gap: "0.75rem", maxWidth: 640 }}>
       <Bubble variant="user">Ship the release notes for 0.30.0.</Bubble>
       <Bubble variant="assistant">
-        Drafted. The changelog covers 34 commits; the highlights lead with the
-        new approval surface.
+        Drafted. The changelog covers 34 commits; the highlights lead with the new approval surface.
       </Bubble>
       <Bubble variant="system">Run resumed from checkpoint 12.</Bubble>
     </div>

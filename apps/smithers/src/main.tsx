@@ -1,10 +1,7 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
-import {
-  SmithersCollectionsProvider,
-  SmithersGatewayProvider,
-} from "@smithers-orchestrator/gateway-react";
+import { SmithersCollectionsProvider, SmithersGatewayProvider } from "@smithers-orchestrator/gateway-react";
 import { WorkflowUiStyles } from "@smithers-orchestrator/gateway-ui";
 import { bindRouteStore } from "./app/bindRouteStore";
 import { router } from "./app/router";

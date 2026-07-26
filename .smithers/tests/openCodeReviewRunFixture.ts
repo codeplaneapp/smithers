@@ -26,7 +26,7 @@ const fakeReviewAgent: AgentLike = {
           {
             content: "Guard against null before trimming.",
             existingCode: "return value!.trim().toUpperCase();",
-            suggestionCode: "if (value == null) return \"\";\nreturn value.trim().toUpperCase();",
+            suggestionCode: 'if (value == null) return "";\nreturn value.trim().toUpperCase();',
             startLine: 2,
             endLine: 2,
             severity: "major",
@@ -41,8 +41,9 @@ const fakeReviewAgent: AgentLike = {
 };
 
 const gateway = new Gateway({ heartbeatMs: 250 });
-const workflow = (mod as { createOpenCodeReviewWorkflow: (agents: AgentLike[]) => Parameters<typeof gateway.register>[1] })
-  .createOpenCodeReviewWorkflow([fakeReviewAgent]);
+const workflow = (
+  mod as { createOpenCodeReviewWorkflow: (agents: AgentLike[]) => Parameters<typeof gateway.register>[1] }
+).createOpenCodeReviewWorkflow([fakeReviewAgent]);
 gateway.register("open-code-review", workflow, {
   ui: { entry: uiEntry, title: "Open Code Review" },
 });

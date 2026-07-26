@@ -8,18 +8,18 @@ import { ensureSqlMessageStorageEffect } from "./sql-message-storage.js";
  * @returns {Effect.Effect<void, _SmithersError>}
  */
 export function ensureSmithersTablesEffect(db) {
-    return ensureSqlMessageStorageEffect(db).pipe(Effect.withLogSpan("db:ensure-smithers-tables"));
+  return ensureSqlMessageStorageEffect(db).pipe(Effect.withLogSpan("db:ensure-smithers-tables"));
 }
 /**
  * @param {_BunSQLiteDatabase<Record<string, unknown>>} db
  */
 export function ensureSmithersTables(db) {
-    // Postgres schema initialization is asynchronous and cannot be driven by
-    // runSync. The Postgres/PGlite entry points ensure the schema (awaited)
-    // before the engine starts, so this synchronous SQLite helper is a no-op
-    // for a Postgres connection descriptor.
-    if (db && typeof db === "object" && /** @type {any} */ (db).dialect === "postgres") {
-        return;
-    }
-    Effect.runSync(ensureSmithersTablesEffect(db));
+  // Postgres schema initialization is asynchronous and cannot be driven by
+  // runSync. The Postgres/PGlite entry points ensure the schema (awaited)
+  // before the engine starts, so this synchronous SQLite helper is a no-op
+  // for a Postgres connection descriptor.
+  if (db && typeof db === "object" && /** @type {any} */ (db).dialect === "postgres") {
+    return;
+  }
+  Effect.runSync(ensureSmithersTablesEffect(db));
 }

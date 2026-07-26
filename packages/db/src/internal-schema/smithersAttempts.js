@@ -1,5 +1,7 @@
-import { integer, sqliteTable, text, primaryKey, } from "drizzle-orm/sqlite-core";
-export const smithersAttempts = sqliteTable("_smithers_attempts", {
+import { integer, sqliteTable, text, primaryKey } from "drizzle-orm/sqlite-core";
+export const smithersAttempts = sqliteTable(
+  "_smithers_attempts",
+  {
     runId: text("run_id").notNull(),
     nodeId: text("node_id").notNull(),
     iteration: integer("iteration").notNull().default(0),
@@ -15,6 +17,8 @@ export const smithersAttempts = sqliteTable("_smithers_attempts", {
     metaJson: text("meta_json"),
     responseText: text("response_text"),
     jjCwd: text("jj_cwd"),
-}, (t) => ({
+  },
+  (t) => ({
     pk: primaryKey({ columns: [t.runId, t.nodeId, t.iteration, t.attempt] }),
-}));
+  }),
+);

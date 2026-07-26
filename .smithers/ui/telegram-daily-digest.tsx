@@ -54,10 +54,7 @@ function App() {
   const runsQuery = useGatewayRuns({ filter: { limit: 30 } });
   const actions = useGatewayActions();
   const runs = useMemo(
-    () =>
-      ((runsQuery.data ?? []) as Run[]).filter(
-        (run) => !run.workflowKey || run.workflowKey === WORKFLOW_KEY,
-      ),
+    () => ((runsQuery.data ?? []) as Run[]).filter((run) => !run.workflowKey || run.workflowKey === WORKFLOW_KEY),
     [runsQuery.data],
   );
   const activeRunId = selectedRunId ?? runs[0]?.runId;
@@ -66,7 +63,9 @@ function App() {
   const reportQuery = useGatewayNodeOutput({ runId: activeRunId, nodeId: "write-report", iteration: 0 });
   const output = useMemo(() => extractOutput(outputQuery.data), [outputQuery.data]);
   const report = useMemo(() => asText(reportQuery.data), [reportQuery.data]);
-  const status = (isRecord(runQuery.data) && typeof runQuery.data.status === "string" ? runQuery.data.status : null) ?? output?.status;
+  const status =
+    (isRecord(runQuery.data) && typeof runQuery.data.status === "string" ? runQuery.data.status : null) ??
+    output?.status;
 
   async function refresh() {
     await Promise.all([runsQuery.refetch(), runQuery.refetch?.(), outputQuery.refetch(), reportQuery.refetch()]);
@@ -75,9 +74,7 @@ function App() {
   async function launch() {
     setBusy(true);
     try {
-      const input = transcript.trim()
-        ? { source: "text", transcript, dryRun: true }
-        : { source: "auto", dryRun: true };
+      const input = transcript.trim() ? { source: "text", transcript, dryRun: true } : { source: "auto", dryRun: true };
       const run = await actions.launchRun({ workflow: WORKFLOW_KEY, input });
       setSelectedRunId(run.runId);
       await refresh();

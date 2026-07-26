@@ -7,9 +7,7 @@
  * @returns {value is DelegationEvent}
  */
 function isDelegationEvent(value) {
-    return (typeof value === "object" &&
-        value !== null &&
-        typeof (/** @type {{ t?: unknown }} */ (value).t) === "string");
+  return typeof value === "object" && value !== null && typeof (/** @type {{ t?: unknown }} */ (value).t) === "string";
 }
 
 /**
@@ -17,26 +15,23 @@ function isDelegationEvent(value) {
  * @returns {DelegationEventsPayload | null}
  */
 function toPayload(candidate) {
-    if (Array.isArray(candidate)) {
-        const events = candidate.filter(isDelegationEvent);
-        return events.length > 0 ? { events } : null;
+  if (Array.isArray(candidate)) {
+    const events = candidate.filter(isDelegationEvent);
+    return events.length > 0 ? { events } : null;
+  }
+  if (typeof candidate === "object" && candidate !== null) {
+    const events = /** @type {{ events?: unknown }} */ (candidate).events;
+    if (Array.isArray(events)) {
+      const filteredEvents = events.filter(isDelegationEvent);
+      if (filteredEvents.length === 0) return null;
+      const nodes = /** @type {{ nodes?: unknown }} */ (candidate).nodes;
+      return {
+        events: filteredEvents,
+        nodes: Array.isArray(nodes) ? /** @type {{ id: string; kind?: string }[]} */ (nodes) : undefined,
+      };
     }
-    if (typeof candidate === "object" && candidate !== null) {
-        const events = /** @type {{ events?: unknown }} */ (candidate).events;
-        if (Array.isArray(events)) {
-            const filteredEvents = events.filter(isDelegationEvent);
-            if (filteredEvents.length === 0)
-                return null;
-            const nodes = /** @type {{ nodes?: unknown }} */ (candidate).nodes;
-            return {
-                events: filteredEvents,
-                nodes: Array.isArray(nodes)
-                    ? /** @type {{ id: string; kind?: string }[]} */ (nodes)
-                    : undefined,
-            };
-        }
-    }
-    return null;
+  }
+  return null;
 }
 
 /**
@@ -51,7 +46,7 @@ function toPayload(candidate) {
  * @returns {DelegationEventsPayload | null}
  */
 export function extractDelegationEvents(input) {
-    return toPayload(input.output) ?? toPayload(input.context);
+  return toPayload(input.output) ?? toPayload(input.context);
 }
 
 /**
@@ -76,56 +71,43 @@ const PLANNING_KINDS = new Set(["goal", "chunk"]);
  * @returns {string[]}
  */
 export function resolvePlanningNodes(payload) {
-    /** @type {Map<string, string | undefined>} kind by id, when known */
-    const kinds = new Map();
-    for (const node of payload.nodes ?? []) {
-        if (typeof node?.id === "string")
-            kinds.set(node.id, node.kind);
-    }
-    for (const event of payload.events) {
-        if (event.t === "CHILDREN_DECLARED" && Array.isArray(event.children)) {
-            for (const child of event.children) {
-                if (typeof child?.id === "string" && !kinds.has(child.id)) {
-                    kinds.set(child.id, child.kind);
-                }
-            }
+  /** @type {Map<string, string | undefined>} kind by id, when known */
+  const kinds = new Map();
+  for (const node of payload.nodes ?? []) {
+    if (typeof node?.id === "string") kinds.set(node.id, node.kind);
+  }
+  for (const event of payload.events) {
+    if (event.t === "CHILDREN_DECLARED" && Array.isArray(event.children)) {
+      for (const child of event.children) {
+        if (typeof child?.id === "string" && !kinds.has(child.id)) {
+          kinds.set(child.id, child.kind);
         }
+      }
     }
-    /** @type {Set<string>} */
-    const candidates = new Set();
-    /** @type {Set<string>} */
-    const probeIds = new Set();
-    for (const event of payload.events) {
-        if (typeof event.probe === "string")
-            probeIds.add(event.probe);
-        for (const id of [
-            event.node,
-            event.parent,
-            event.toParent,
-            event.from,
-        ]) {
-            if (typeof id === "string")
-                candidates.add(id);
-        }
+  }
+  /** @type {Set<string>} */
+  const candidates = new Set();
+  /** @type {Set<string>} */
+  const probeIds = new Set();
+  for (const event of payload.events) {
+    if (typeof event.probe === "string") probeIds.add(event.probe);
+    for (const id of [event.node, event.parent, event.toParent, event.from]) {
+      if (typeof id === "string") candidates.add(id);
     }
-    const planning = [];
-    for (const id of candidates) {
-        if (probeIds.has(id))
-            continue;
-        const kind = kinds.get(id);
-        if (kind !== undefined && !PLANNING_KINDS.has(kind))
-            continue;
-        planning.push(id);
+  }
+  const planning = [];
+  for (const id of candidates) {
+    if (probeIds.has(id)) continue;
+    const kind = kinds.get(id);
+    if (kind !== undefined && !PLANNING_KINDS.has(kind)) continue;
+    planning.push(id);
+  }
+  // Explicitly declared planning nodes count even if the events never
+  // mention them (a silent chunk is still a correct negative).
+  for (const [id, kind] of kinds) {
+    if (kind !== undefined && PLANNING_KINDS.has(kind) && !probeIds.has(id) && !planning.includes(id)) {
+      planning.push(id);
     }
-    // Explicitly declared planning nodes count even if the events never
-    // mention them (a silent chunk is still a correct negative).
-    for (const [id, kind] of kinds) {
-        if (kind !== undefined &&
-            PLANNING_KINDS.has(kind) &&
-            !probeIds.has(id) &&
-            !planning.includes(id)) {
-            planning.push(id);
-        }
-    }
-    return planning;
+  }
+  return planning;
 }

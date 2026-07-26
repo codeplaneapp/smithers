@@ -33,23 +33,12 @@ export type MetricsSnapshot = ReadonlyMap<string, MetricEntry>;
 
 export type MetricsServiceShape = {
   readonly increment: (name: MetricName, labels?: MetricLabels) => Effect.Effect<void>;
-  readonly incrementBy: (
-    name: MetricName,
-    value: number,
-    labels?: MetricLabels,
-  ) => Effect.Effect<void>;
+  readonly incrementBy: (name: MetricName, value: number, labels?: MetricLabels) => Effect.Effect<void>;
   readonly gauge: (name: MetricName, value: number, labels?: MetricLabels) => Effect.Effect<void>;
-  readonly histogram: (
-    name: MetricName,
-    value: number,
-    labels?: MetricLabels,
-  ) => Effect.Effect<void>;
+  readonly histogram: (name: MetricName, value: number, labels?: MetricLabels) => Effect.Effect<void>;
   readonly recordEvent: (event: SmithersMetricEvent) => Effect.Effect<void>;
   readonly updateProcessMetrics: () => Effect.Effect<void>;
-  readonly updateAsyncExternalWaitPending: (
-    kind: "approval" | "event",
-    delta: number,
-  ) => Effect.Effect<void>;
+  readonly updateAsyncExternalWaitPending: (kind: "approval" | "event", delta: number) => Effect.Effect<void>;
   readonly renderPrometheus: () => Effect.Effect<string>;
   readonly snapshot: () => Effect.Effect<MetricsSnapshot>;
 };

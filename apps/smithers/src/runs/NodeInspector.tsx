@@ -36,7 +36,15 @@ function ToolCallRow({ call }: { call: ToolCall }) {
 /** One props-table row: mono key (accent for prompt keys), a formatted value
  *  with an [expand]/[collapse] toggle for long strings, a per-value copy button,
  *  and an "open prompt ↗" link when the key names a prompt. */
-function PropRowView({ node, propKey, value }: { node: RunNode; propKey: string; value: ReturnType<typeof propRows>[number]["value"] }) {
+function PropRowView({
+  node,
+  propKey,
+  value,
+}: {
+  node: RunNode;
+  propKey: string;
+  value: ReturnType<typeof propRows>[number]["value"];
+}) {
   const path = `${node.id}/${propKey}`;
   const expanded = useCardUiStore((state) => state.propExpandedByPath[path] ?? false);
   const toggleExpanded = useCardUiStore((state) => state.togglePropExpanded);
@@ -50,11 +58,7 @@ function PropRowView({ node, propKey, value }: { node: RunNode; propKey: string;
       <span className={`prop-value prop-${fmt.tone}${clamp ? " is-clamped" : ""}`}>
         {fmt.text}
         {fmt.expandable ? (
-          <button
-            type="button"
-            className="prop-expand"
-            onClick={() => toggleExpanded(path)}
-          >
+          <button type="button" className="prop-expand" onClick={() => toggleExpanded(path)}>
             {expanded ? "[collapse]" : "[expand]"}
           </button>
         ) : null}
@@ -88,15 +92,7 @@ function PropRowView({ node, propKey, value }: { node: RunNode; propKey: string;
  *  Props tab plus a role description; task nodes show the full set. The active
  *  tab falls back to a sensible default whenever the stored tab is not valid for
  *  the current node, so selecting a node re-defaults without a useEffect. */
-export function NodeInspector({
-  run,
-  node,
-  runId,
-}: {
-  run: Run;
-  node: RunNode;
-  runId: string;
-}) {
+export function NodeInspector({ run, node, runId }: { run: Run; node: RunNode; runId: string }) {
   const say = useChatStore((state) => state.say);
   const storedTab = useCardUiStore((state) => state.inspectorTab);
   const setTab = useCardUiStore((state) => state.setInspectorTab);
@@ -116,11 +112,7 @@ export function NodeInspector({
         {crumbs.map((crumb, i) => (
           <span key={crumb.id} style={{ display: "contents" }}>
             {i > 0 ? <span className="inspect-crumb-sep">›</span> : null}
-            <button
-              type="button"
-              className="inspect-crumb"
-              onClick={() => selectNode(crumb.id)}
-            >
+            <button type="button" className="inspect-crumb" onClick={() => selectNode(crumb.id)}>
               {crumb.name}
             </button>
           </span>
@@ -159,11 +151,7 @@ export function NodeInspector({
               <p className="node-empty">No output yet.</p>
             )}
             {node.status === "failed" || node.status === "running" ? (
-              <button
-                className="btn"
-                type="button"
-                onClick={() => say(`Retrying ${node.name}…`)}
-              >
+              <button className="btn" type="button" onClick={() => say(`Retrying ${node.name}…`)}>
                 ↻ Retry node
               </button>
             ) : null}
@@ -189,11 +177,7 @@ export function NodeInspector({
                 node.toolCalls?.[0]?.verb ?? "Read"
               } ${node.toolCalls?.[0]?.target ?? node.name}`}
             </pre>
-            <button
-              className="btn"
-              type="button"
-              onClick={() => openSurface({ kind: "logs", runId })}
-            >
+            <button className="btn" type="button" onClick={() => openSurface({ kind: "logs", runId })}>
               Open full logs →
             </button>
           </>
@@ -203,18 +187,10 @@ export function NodeInspector({
           <>
             <p className="node-output-text">
               {node.toolCalls?.length
-                ? `${node.toolCalls.length} file change${
-                    node.toolCalls.length > 1 ? "s" : ""
-                  } in this node.`
+                ? `${node.toolCalls.length} file change${node.toolCalls.length > 1 ? "s" : ""} in this node.`
                 : "No file changes in this node."}
             </p>
-            <button
-              className="btn"
-              type="button"
-              onClick={() =>
-                openSurface({ kind: "diff", runId, diffId: "auth" })
-              }
-            >
+            <button className="btn" type="button" onClick={() => openSurface({ kind: "diff", runId, diffId: "auth" })}>
               Review in canvas →
             </button>
           </>
@@ -224,17 +200,10 @@ export function NodeInspector({
           <>
             <div className="props">
               {rows.map((row) => (
-                <PropRowView
-                  key={row.key}
-                  node={node}
-                  propKey={row.key}
-                  value={row.value}
-                />
+                <PropRowView key={row.key} node={node} propKey={row.key} value={row.value} />
               ))}
             </div>
-            {container ? (
-              <p className="node-role-desc">{nodeRoleDescription(node)}</p>
-            ) : null}
+            {container ? <p className="node-role-desc">{nodeRoleDescription(node)}</p> : null}
           </>
         ) : null}
       </div>

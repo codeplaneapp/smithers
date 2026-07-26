@@ -45,10 +45,7 @@ export function ConnectionBadge({ className, style }: ConnectionBadgeProps) {
         ...style,
       }}
     >
-      <span
-        aria-hidden
-        style={{ width: 8, height: 8, borderRadius: 999, background: color }}
-      />
+      <span aria-hidden style={{ width: 8, height: 8, borderRadius: 999, background: color }} />
       {LABEL[status] ?? status}
     </span>
   );

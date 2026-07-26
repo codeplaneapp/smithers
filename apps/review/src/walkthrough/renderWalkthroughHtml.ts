@@ -332,11 +332,14 @@ export async function renderWalkthroughHtml(opts: {
 
   // When a quiz exists the impact chip links to it, so the impact reasons are
   // reachable without hovering the title tooltip.
-  const impactChipInner = opts.impact
-    ? `impact <strong>${escapeHtml(opts.impact.level)}</strong>`
-    : "";
+  const impactChipInner = opts.impact ? `impact <strong>${escapeHtml(opts.impact.level)}</strong>` : "";
   const impactChipTitle = opts.impact
-    ? escapeHtml(opts.impact.reasons.map((reason) => reason.signal).slice(0, 6).join("; "))
+    ? escapeHtml(
+        opts.impact.reasons
+          .map((reason) => reason.signal)
+          .slice(0, 6)
+          .join("; "),
+      )
     : "";
   const impactChip = opts.impact
     ? quizSection !== ""

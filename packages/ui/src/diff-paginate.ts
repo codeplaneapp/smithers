@@ -88,10 +88,7 @@ export const PAGINATE_VISIBLE = 1000;
  * plus how many lines were hidden, so the view can label the "Expand remaining
  * N lines" button.
  */
-export function paginateHunks(
-  file: DiffFile,
-  visibleCount: number,
-): { hunks: Hunk[]; hidden: number } {
+export function paginateHunks(file: DiffFile, visibleCount: number): { hunks: Hunk[]; hidden: number } {
   const all = groupHunks(file);
   const total = all.reduce((sum, hunk) => sum + hunk.lines.length, 0);
   if (visibleCount >= total) return { hunks: all, hidden: 0 };

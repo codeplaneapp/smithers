@@ -16,15 +16,15 @@
  * @returns {Record<string, unknown>}
  */
 export function buildOtelAttributes(base, annotations) {
-    /** @type {Record<string, unknown>} */
-    const attributes = {};
-    for (const [key, value] of Object.entries(base)) {
-        if (value !== undefined) attributes[key] = value;
-    }
-    for (const [key, value] of Object.entries(annotations)) {
-        attributes[key.startsWith("custom.") ? key : `custom.${key}`] = value;
-    }
-    return attributes;
+  /** @type {Record<string, unknown>} */
+  const attributes = {};
+  for (const [key, value] of Object.entries(base)) {
+    if (value !== undefined) attributes[key] = value;
+  }
+  for (const [key, value] of Object.entries(annotations)) {
+    attributes[key.startsWith("custom.") ? key : `custom.${key}`] = value;
+  }
+  return attributes;
 }
 
 /**
@@ -40,17 +40,17 @@ export function buildOtelAttributes(base, annotations) {
  * @returns {OtelLogRecord}
  */
 export function buildOtelLogRecord(body, attributes, severity) {
-    return {
-        body: JSON.stringify({
-            category: body.category,
-            payload: body.payload,
-            raw: body.raw,
-            redaction: body.redaction,
-            annotations: body.annotations,
-        }),
-        attributes,
-        severity,
-    };
+  return {
+    body: JSON.stringify({
+      category: body.category,
+      payload: body.payload,
+      raw: body.raw,
+      redaction: body.redaction,
+      annotations: body.annotations,
+    }),
+    attributes,
+    severity,
+  };
 }
 
 /**
@@ -58,17 +58,17 @@ export function buildOtelLogRecord(body, attributes, severity) {
  * @returns {OtelLogSeverity}
  */
 export function inferCanonicalSeverity(event) {
-    if (event.event.kind === "capture.error") {
-        // Truncated output is a non-fatal capture issue, not an error
-        if (event.payload?.reason === "truncated-json-stream") {
-            return "WARN";
-        }
-        return "ERROR";
+  if (event.event.kind === "capture.error") {
+    // Truncated output is a non-fatal capture issue, not an error
+    if (event.payload?.reason === "truncated-json-stream") {
+      return "WARN";
     }
-    if (event.event.kind === "capture.warning" || event.event.kind === "stderr") {
-        return "WARN";
-    }
-    return "INFO";
+    return "ERROR";
+  }
+  if (event.event.kind === "capture.warning" || event.event.kind === "stderr") {
+    return "WARN";
+  }
+  return "INFO";
 }
 
 /**
@@ -76,19 +76,21 @@ export function inferCanonicalSeverity(event) {
  * @returns {OtelLogSeverity}
  */
 export function inferSessionSeverity(raw) {
-    const row = /** @type {any} */ (raw);
-    const rowType = String(row?.type ?? "").toLowerCase();
-    if (row?.is_error === true ||
-        row?.isError === true ||
-        row?.error ||
-        row?.errorMessage ||
-        row?.message?.stopReason === "error" ||
-        row?.message?.errorMessage ||
-        rowType.includes("error")) {
-        return "ERROR";
-    }
-    if (rowType.includes("warning")) return "WARN";
-    return "INFO";
+  const row = /** @type {any} */ (raw);
+  const rowType = String(row?.type ?? "").toLowerCase();
+  if (
+    row?.is_error === true ||
+    row?.isError === true ||
+    row?.error ||
+    row?.errorMessage ||
+    row?.message?.stopReason === "error" ||
+    row?.message?.errorMessage ||
+    rowType.includes("error")
+  ) {
+    return "ERROR";
+  }
+  if (rowType.includes("warning")) return "WARN";
+  return "INFO";
 }
 
 /**
@@ -96,5 +98,5 @@ export function inferSessionSeverity(raw) {
  * @returns {boolean}
  */
 export function shouldExportTraceEventToOtel(event) {
-    return event.event.kind !== "artifact.created";
+  return event.event.kind !== "artifact.created";
 }

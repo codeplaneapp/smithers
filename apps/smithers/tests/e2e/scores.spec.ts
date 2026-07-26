@@ -1,9 +1,5 @@
 import { expect, test } from "@playwright/test";
-import {
-  expectNoPageErrors,
-  openRenderedSurface,
-  trackPageErrors,
-} from "./surfaceTestUtils";
+import { expectNoPageErrors, openRenderedSurface, trackPageErrors } from "./surfaceTestUtils";
 
 test("renders the scores empty state", async ({ page }) => {
   const pageErrors = trackPageErrors(page);
@@ -18,9 +14,10 @@ test("switches score tabs and updates content when another scored run is selecte
   const selector = page.getByTestId("scores-run-selector");
   await expect(selector).toBeVisible();
   await expect.poll(async () => selector.locator("option").filter({ hasText: "e2e-task" }).count()).toBe(2);
-  const values = await selector.locator("option").filter({ hasText: "e2e-task" }).evaluateAll(
-    (options) => options.map((option) => (option as HTMLOptionElement).value),
-  );
+  const values = await selector
+    .locator("option")
+    .filter({ hasText: "e2e-task" })
+    .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value));
 
   await selector.selectOption(values[0]);
   await expect(page.getByTestId("scores-tab-summary")).toContainText("Quality");

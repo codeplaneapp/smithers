@@ -83,10 +83,7 @@ export type TelegramClientService = {
    * `parameters.retry_after`. Fails with a SmithersError (code
    * `TELEGRAM_API_ERROR`) that never contains the bot token.
    */
-  call: (
-    method: string,
-    params?: Record<string, unknown>,
-  ) => Effect.Effect<unknown, SmithersError>;
+  call: (method: string, params?: Record<string, unknown>) => Effect.Effect<unknown, SmithersError>;
   /**
    * High-level send: chunks at 4096 chars on paragraph/sentence boundaries,
    * converts markdown → MarkdownV2, falls back to plain text on a 400
@@ -121,8 +118,5 @@ export type TelegramClientService = {
    * from a Mini App launched by an inline-keyboard `web_app` button. `result`
    * is a Bot API `InlineQueryResult`. Returns the `SentWebAppMessage`.
    */
-  answerWebAppQuery: (
-    webAppQueryId: string,
-    result: Record<string, unknown>,
-  ) => Effect.Effect<unknown, SmithersError>;
+  answerWebAppQuery: (webAppQueryId: string, result: Record<string, unknown>) => Effect.Effect<unknown, SmithersError>;
 };

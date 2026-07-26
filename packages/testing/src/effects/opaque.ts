@@ -1,2 +1,8 @@
-export const opaqueEffect = (description = "unmediated external effect"): Readonly<{ readonly kind: "opaque-effect"; readonly description: string }> => Object.freeze({ kind: "opaque-effect", description });
-export const isOpaqueEffect = (value: unknown): value is { readonly kind: "opaque-effect"; readonly description: string } => !!value && typeof value === "object" && (value as { readonly kind?: unknown }).kind === "opaque-effect";
+export const opaqueEffect = (
+  description = "unmediated external effect",
+): Readonly<{ readonly kind: "opaque-effect"; readonly description: string }> =>
+  Object.freeze({ kind: "opaque-effect", description });
+export const isOpaqueEffect = (
+  value: unknown,
+): value is { readonly kind: "opaque-effect"; readonly description: string } =>
+  !!value && typeof value === "object" && (value as { readonly kind?: unknown }).kind === "opaque-effect";

@@ -18,12 +18,7 @@ function createOutputTable() {
   return { schema, table };
 }
 
-function createResolvedRun(options?: {
-  outputTableName?: string;
-  nodeState?: string;
-  attempts?: any[];
-  table?: any;
-}) {
+function createResolvedRun(options?: { outputTableName?: string; nodeState?: string; attempts?: any[]; table?: any }) {
   const { table } = createOutputTable();
   const outputTableName = options?.outputTableName ?? "result";
   const nodeState = options?.nodeState ?? "pending";
@@ -593,16 +588,8 @@ describe("getNodeOutputRoute observability", () => {
       }),
     });
     const metricsAfter = renderPrometheusMetrics();
-    const producedBefore = countMetricWithLabel(
-      metricsBefore,
-      "smithers_node_output_request_total",
-      "produced",
-    );
-    const producedAfter = countMetricWithLabel(
-      metricsAfter,
-      "smithers_node_output_request_total",
-      "produced",
-    );
+    const producedBefore = countMetricWithLabel(metricsBefore, "smithers_node_output_request_total", "produced");
+    const producedAfter = countMetricWithLabel(metricsAfter, "smithers_node_output_request_total", "produced");
     expect(producedAfter).toBeGreaterThan(producedBefore);
     // All four Prometheus-renamed metric lines must appear with underscores
     // (not dots).
@@ -665,17 +652,9 @@ describe("getNodeOutputRoute observability", () => {
       }),
     });
     const metricsAfter = renderPrometheusMetrics();
-    expect(metricsAfter).toContain(
-      "smithers_node_output_schema_conversion_error_total",
-    );
-    const beforeCount = countMetricLine(
-      metricsBefore,
-      "smithers_node_output_schema_conversion_error_total",
-    );
-    const afterCount = countMetricLine(
-      metricsAfter,
-      "smithers_node_output_schema_conversion_error_total",
-    );
+    expect(metricsAfter).toContain("smithers_node_output_schema_conversion_error_total");
+    const beforeCount = countMetricLine(metricsBefore, "smithers_node_output_schema_conversion_error_total");
+    const afterCount = countMetricLine(metricsAfter, "smithers_node_output_schema_conversion_error_total");
     expect(afterCount).toBeGreaterThanOrEqual(beforeCount + 1);
   });
 

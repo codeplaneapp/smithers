@@ -46,7 +46,10 @@ export function parseFirstJsonObject(text: string): Record<string, unknown> | nu
       else if (ch === '"') inString = false;
       continue;
     }
-    if (ch === '"') { inString = true; continue; }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
     if ((ch === "{" || ch === "[") && stack.length === 0) {
       const value = parseBalancedCandidate(text, i, ch, ch === "{" ? "}" : "]");
       if (ch === "{" && value && typeof value === "object" && !Array.isArray(value)) {
@@ -76,8 +79,11 @@ function parseBalancedCandidate(text: string, start: number, opening: string, cl
     else if (ch === closing) {
       depth -= 1;
       if (depth === 0) {
-        try { return JSON.parse(text.slice(start, i + 1)); }
-        catch { return null; }
+        try {
+          return JSON.parse(text.slice(start, i + 1));
+        } catch {
+          return null;
+        }
       }
     }
   }

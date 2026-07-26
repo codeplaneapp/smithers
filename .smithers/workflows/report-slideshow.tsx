@@ -16,9 +16,7 @@ const inputSchema = z.object({
   // Named targetRunId (not runId): the engine reserves input.runId for the
   // run's own id, so a workflow that reports on ANOTHER run must use a
   // different field name.
-  targetRunId: z
-    .string()
-    .describe("The Smithers run id to build a slideshow report from."),
+  targetRunId: z.string().describe("The Smithers run id to build a slideshow report from."),
   title: z
     .string()
     .nullable()
@@ -89,7 +87,9 @@ function pickArray(value: unknown): unknown[] {
  * `inspect --format json` varies by version, so probe a few likely keys and
  * fall back to an empty list rather than throwing.
  */
-function flattenNodes(parsed: Record<string, unknown>): Array<{ id: string; type: string; status: string; summary: string }> {
+function flattenNodes(
+  parsed: Record<string, unknown>,
+): Array<{ id: string; type: string; status: string; summary: string }> {
   const candidates = [parsed.nodes, parsed.steps, parsed.tasks];
   const list = candidates.find((c) => Array.isArray(c) && c.length > 0);
   return pickArray(list).map((n) => {
@@ -125,9 +125,14 @@ export default smithers((ctx) => {
             let stderr = "";
             let exitCode = 0;
             try {
-              stdout = execFileSync(process.env.SMITHERS_CLI ?? "smithers", ["inspect", runId, "--format", "json", "--full-output"], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
+              stdout = execFileSync(
+                process.env.SMITHERS_CLI ?? "smithers",
+                ["inspect", runId, "--format", "json", "--full-output"],
+                { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
+              );
             } catch (error) {
-              exitCode = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 1;
+              exitCode =
+                typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 1;
               stdout = String((error as { stdout?: unknown }).stdout ?? "");
               stderr = String((error as { stderr?: unknown }).stderr ?? "");
             }
@@ -152,7 +157,8 @@ export default smithers((ctx) => {
             const runStateRecord = (parsed.runState ?? {}) as Record<string, unknown>;
             const nodes = ok ? flattenNodes(parsed) : [];
             const state = ok
-              ? asString(runRecord.status ?? runStateRecord.state ?? parsed.status ?? parsed.state ?? "unknown") || "unknown"
+              ? asString(runRecord.status ?? runStateRecord.state ?? parsed.status ?? parsed.state ?? "unknown") ||
+                "unknown"
               : "unknown";
             const summary = ok
               ? `Run ${runId} is "${state}" with ${nodes.length} node(s).`
@@ -170,13 +176,7 @@ export default smithers((ctx) => {
 
         {/* 2 — Render a self-contained HTML slideshow from the captured state. */}
         <Task id="render" output={outputs.render} agent={agents.implement} deps={{ gather: outputs.gather }}>
-          {(deps) => (
-            <RenderPrompt
-              runId={runId}
-              title={fallbackTitle}
-              gather={deps.gather}
-            />
-          )}
+          {(deps) => <RenderPrompt runId={runId} title={fallbackTitle} gather={deps.gather} />}
         </Task>
 
         {/* 3 — Surface a concise, human-meaningful terminal summary. */}

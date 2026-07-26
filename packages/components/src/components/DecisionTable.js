@@ -17,26 +17,25 @@ import { Parallel } from "./Parallel.js";
  * @param {DecisionTableProps} props
  */
 export function DecisionTable(props) {
-    if (props.skipIf)
-        return null;
-    const { rules, strategy = "first-match" } = props;
-    if (strategy === "all-match") {
-        const matching = rules.filter((r) => r.when).map((r) => r.then);
-        if (matching.length === 0) {
-            return props.default ?? null;
-        }
-        return React.createElement(Parallel, { id: props.id }, ...matching);
+  if (props.skipIf) return null;
+  const { rules, strategy = "first-match" } = props;
+  if (strategy === "all-match") {
+    const matching = rules.filter((r) => r.when).map((r) => r.then);
+    if (matching.length === 0) {
+      return props.default ?? null;
     }
-    // "first-match": build nested Branches from the last rule backward.
-    // The innermost else is the default fallback.
-    let fallback = props.default ?? null;
-    for (let i = rules.length - 1; i >= 0; i--) {
-        const rule = rules[i];
-        fallback = React.createElement(Branch, {
-            if: rule.when,
-            then: rule.then,
-            else: fallback,
-        });
-    }
-    return fallback;
+    return React.createElement(Parallel, { id: props.id }, ...matching);
+  }
+  // "first-match": build nested Branches from the last rule backward.
+  // The innermost else is the default fallback.
+  let fallback = props.default ?? null;
+  for (let i = rules.length - 1; i >= 0; i--) {
+    const rule = rules[i];
+    fallback = React.createElement(Branch, {
+      if: rule.when,
+      then: rule.then,
+      else: fallback,
+    });
+  }
+  return fallback;
 }

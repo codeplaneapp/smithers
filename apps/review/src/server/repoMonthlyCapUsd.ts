@@ -5,9 +5,6 @@
  * per session — stops re-minted sessions (which reset the per-session cap back
  * to zero) from driving unbounded spend on an already-reviewed PR.
  */
-export function repoMonthlyCapUsd(registration: {
-  prs_per_month: number;
-  spend_cap_usd: number;
-}): number {
+export function repoMonthlyCapUsd(registration: { prs_per_month: number; spend_cap_usd: number }): number {
   return registration.prs_per_month * registration.spend_cap_usd;
 }

@@ -72,13 +72,19 @@ export function App() {
             <Spinner /> Loading the day's issue…
           </div>
         ) : issue === null ? (
-          <EmptyState title="No issue published yet" description="The Smithers Signal publishes daily by 7am ET. Check back soon, or browse the archive." />
+          <EmptyState
+            title="No issue published yet"
+            description="The Smithers Signal publishes daily by 7am ET. Check back soon, or browse the archive."
+          />
         ) : (
           <IssueView issue={issue} />
         )}
       </main>
       <footer className="signal-footer">
-        <p>The Smithers Signal — a daily, deterministic-first intelligence brief generated and published by a durable Smithers workflow.</p>
+        <p>
+          The Smithers Signal — a daily, deterministic-first intelligence brief generated and published by a durable
+          Smithers workflow.
+        </p>
       </footer>
     </div>
   );

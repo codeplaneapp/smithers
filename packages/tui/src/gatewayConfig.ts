@@ -47,9 +47,7 @@ export function parseGatewayPortEnv(raw: string | undefined): number | undefined
   if (raw === undefined || raw.trim() === "") return undefined;
   const port = Number(raw);
   if (!isValidGatewayPort(port)) {
-    throw new GatewayConfigError(
-      `invalid SMITHERS_GATEWAY_PORT "${raw}" (expected an integer 1-65535)`,
-    );
+    throw new GatewayConfigError(`invalid SMITHERS_GATEWAY_PORT "${raw}" (expected an integer 1-65535)`);
   }
   return port;
 }
@@ -88,10 +86,7 @@ export interface GatewayConfig {
  * client MUST send the same token or every RPC/WS call is rejected while
  * `/health` (unauthenticated) still passes.
  */
-function resolveToken(
-  tokenArg: string | undefined,
-  env: Record<string, string | undefined>,
-): string | undefined {
+function resolveToken(tokenArg: string | undefined, env: Record<string, string | undefined>): string | undefined {
   // Skip EMPTY values at each level (not just at the end): `--token=` or an
   // empty SMITHERS_TOKEN must fall through to SMITHERS_API_KEY — the same way
   // the CLI resolves auth — instead of masking a real key with "".

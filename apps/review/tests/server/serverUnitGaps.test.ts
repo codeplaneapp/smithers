@@ -15,13 +15,13 @@ import { signTestJwt } from "./helpers/signTestJwt.ts";
 import { serveFixtureAnthropic } from "./helpers/serveFixtureAnthropic.ts";
 
 const SSE_USAGE = [
-  'event: message_start',
+  "event: message_start",
   'data: {"type":"message_start","message":{"id":"m1","model":"claude-sonnet-4-6","usage":{"input_tokens":10,"output_tokens":1}}}',
   "",
-  'event: message_delta',
+  "event: message_delta",
   'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":10,"output_tokens":5}}',
   "",
-  'event: message_stop',
+  "event: message_stop",
   'data: {"type":"message_stop"}',
   "",
 ].join("\n");
@@ -34,10 +34,9 @@ afterEach(() => {
 async function seedSession(env: ReviewWorkerEnv, repo: string, spendCapUsd = 1) {
   const token = "srs_gaptoken";
   const hash = await sha256Hex(token);
-  await env.DB
-    .prepare(
-      "INSERT INTO sessions (hash, repo, pr, expires_at, spend_cap_usd, spent_usd, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    )
+  await env.DB.prepare(
+    "INSERT INTO sessions (hash, repo, pr, expires_at, spend_cap_usd, spent_usd, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
     .bind(hash, repo, 1, Date.now() + 60_000, spendCapUsd, 0, Date.now())
     .run();
   return token;
@@ -120,19 +119,18 @@ describe("handleAdminRepos gaps", () => {
     const env = await buildTestEnv();
     const worker = fixedWorker({});
     const now = Date.now();
-    await env.DB
-      .prepare("INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)")
+    await env.DB.prepare(
+      "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
       .bind("octo/widgets", "auto", 5, 25, now)
       .run();
-    await env.DB
-      .prepare(
-        "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      )
+    await env.DB.prepare(
+      "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
       .bind("u1", "octo/widgets", 1, "claude-sonnet-4-6", 0, 0, 0.5, "messages", now)
       .run();
     const month = new Date(now).toISOString().slice(0, 7);
-    await env.DB
-      .prepare("INSERT INTO reviewed_prs (repo, pr, month, first_seen_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO reviewed_prs (repo, pr, month, first_seen_at) VALUES (?, ?, ?, ?)")
       .bind("octo/widgets", 1, month, now)
       .run();
 
@@ -141,7 +139,9 @@ describe("handleAdminRepos gaps", () => {
       env,
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { repos: Array<{ repo: string; usage: { spendUsd: number; prsThisMonth: number } }> };
+    const body = (await res.json()) as {
+      repos: Array<{ repo: string; usage: { spendUsd: number; prsThisMonth: number } }>;
+    };
     expect(body.repos[0].usage.spendUsd).toBeCloseTo(0.5, 6);
     expect(body.repos[0].usage.prsThisMonth).toBe(1);
   });
@@ -202,7 +202,10 @@ describe("handleAnthropic gaps", () => {
     // Drop usage_events so recordUsage's INSERT throws inside the deferred metering.
     await env.DB.exec("DROP TABLE usage_events");
     const meterings: Promise<unknown>[] = [];
-    const worker = fixedWorker({ anthropicBaseUrl: fixture.baseUrl, waitUntil: (p: Promise<unknown>) => meterings.push(p) });
+    const worker = fixedWorker({
+      anthropicBaseUrl: fixture.baseUrl,
+      waitUntil: (p: Promise<unknown>) => meterings.push(p),
+    });
     const errorSpy = spyOn(console, "error").mockImplementation(() => undefined);
     try {
       const res = await worker.fetch(
@@ -254,8 +257,7 @@ describe("handleSessions gaps", () => {
     const env = await buildTestEnv();
     const worker = fixedWorker({});
     const apiKey = "srk_sessionscope";
-    await env.DB
-      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
       .bind(await sha256Hex(apiKey), "octo", JSON.stringify(["octo/widgets"]), Date.now())
       .run();
 
@@ -372,16 +374,14 @@ describe("lookupApiKey", () => {
     expect(await lookupApiKey(env.DB, "srk_missing")).toBeNull();
 
     const badKey = "srk_badrepos";
-    await env.DB
-      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
       .bind(await sha256Hex(badKey), "octo", "not json", Date.now())
       .run();
     const bad = await lookupApiKey(env.DB, badKey);
     expect(bad?.repos).toEqual([]);
 
     const mixedKey = "srk_mixedrepos";
-    await env.DB
-      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
       .bind(await sha256Hex(mixedKey), "octo", JSON.stringify(["a/b", 42, "c/d"]), Date.now())
       .run();
     const mixed = await lookupApiKey(env.DB, mixedKey);

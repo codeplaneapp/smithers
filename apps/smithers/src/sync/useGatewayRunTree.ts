@@ -26,9 +26,7 @@ function flattenTree(root: RunNode | null): RunNode[] {
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 function asString(value: unknown): string | undefined {
@@ -151,10 +149,7 @@ export function useGatewayRunTree(runId: string | undefined): GatewayRunTreeStat
 
       void (async () => {
         try {
-          for await (const frame of client.streamRunEventsResilient(
-            { runId, afterSeq: 0 },
-            { signal },
-          )) {
+          for await (const frame of client.streamRunEventsResilient({ runId, afterSeq: 0 }, { signal })) {
             if (signal.aborted || generationRef.current !== generation) return;
             const status = statusFromRunEvent(frame);
             if (!status) continue;
@@ -178,8 +173,5 @@ export function useGatewayRunTree(runId: string | undefined): GatewayRunTreeStat
     };
   }, [client, runId]);
 
-  return useMemo(
-    () => state,
-    [state],
-  );
+  return useMemo(() => state, [state]);
 }

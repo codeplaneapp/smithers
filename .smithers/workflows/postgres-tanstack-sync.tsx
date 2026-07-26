@@ -249,15 +249,31 @@ const { Workflow, Task, Sequence, Parallel, Approval, Worktree, smithers, output
 const opusFallback = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
 const sonnetFallback = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
 const solAgent = codexFirst(
-  { model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-sol",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [opusFallback],
 );
 const lunaAgent = codexFirst(
-  { model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-luna",
+    config: { model_reasoning_effort: "medium" },
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [sonnetFallback],
 );
 const terraAgent = codexFirst(
-  { model: "gpt-5.6-terra", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-terra",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [sonnetFallback],
 );
 
@@ -280,7 +296,8 @@ function latest<T>(rows: T[] | undefined): T | undefined {
 
 /** Deterministic commit of a worktree's working tree onto its branch. */
 function commitWorktree(path: string, branch: string, subject: string) {
-  const git = (args: string[]) => execFileSync("git", args, { cwd: path, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const git = (args: string[]) =>
+    execFileSync("git", args, { cwd: path, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   const base = { branch, committed: false, sha: null as string | null, summary: "" };
   try {
     const dirty = git(["status", "--porcelain"]).trim();
@@ -293,13 +310,17 @@ function commitWorktree(path: string, branch: string, subject: string) {
     const sha = git(["rev-parse", "HEAD"]).trim();
     return { ...base, committed: true, sha, summary: `Committed ${branch} @ ${sha.slice(0, 10)}.` };
   } catch (err) {
-    return { ...base, summary: `Commit failed on ${branch}: ${String(err instanceof Error ? err.message : err).slice(0, 600)}` };
+    return {
+      ...base,
+      summary: `Commit failed on ${branch}: ${String(err instanceof Error ? err.message : err).slice(0, 600)}`,
+    };
   }
 }
 
 /** After approval: push the integrate branch and open a DRAFT PR (never auto-merges main). */
 function openLandingPr(path: string, branch: string) {
-  const git = (args: string[]) => execFileSync("git", args, { cwd: path, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const git = (args: string[]) =>
+    execFileSync("git", args, { cwd: path, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   const gh = (args: string[]) => execFileSync("gh", args, { cwd: path, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   const base = { pushed: false, prNumber: null as number | null, prUrl: null as string | null, summary: "" };
   try {
@@ -327,7 +348,19 @@ function openLandingPr(path: string, branch: string) {
     let prUrl: string;
     let prNumber: number;
     try {
-      prUrl = gh(["pr", "create", "--draft", "--head", branch, "--base", "main", "--title", title, "--body", body]).trim();
+      prUrl = gh([
+        "pr",
+        "create",
+        "--draft",
+        "--head",
+        branch,
+        "--base",
+        "main",
+        "--title",
+        title,
+        "--body",
+        body,
+      ]).trim();
       prNumber = Number(prUrl.split("/").pop());
     } catch {
       const view = gh(["pr", "view", branch, "--json", "number,url"]);
@@ -468,8 +501,7 @@ const SPEC_P2: PhaseSpec = {
   branch: "pgts/p2-client-persistence",
   wtName: "pgts-p2-client-persistence",
   designRef: "§5.1, §5.2, §5.4, §5.6; rollout §12.2",
-  goal:
-    "Wrap synced collections in persistedCollectionOptions to SQLite (SQLite-WASM/OPFS web, bun:sqlite native), introduce the pluggable SyncSource seam, and close PR #286's two edges. No backend change — this alone delivers warm reload + offline reads.",
+  goal: "Wrap synced collections in persistedCollectionOptions to SQLite (SQLite-WASM/OPFS web, bun:sqlite native), introduce the pluggable SyncSource seam, and close PR #286's two edges. No backend change — this alone delivers warm reload + offline reads.",
   build: [
     "Define a SyncSource interface in packages/gateway-client (collection(def: CollectionDef<Row>) → CollectionConfig<Row>; status() → ConnectionObserver), extending the existing SyncTransport seam (createSmithersGatewayTransport.ts). Refactor createGatewayCollection to be the GATEWAY implementation of SyncSource; createGatewayCollections (the registry apps/smithers mounts via SyncProvider) takes a SyncSource instead of hard-wiring the transport.",
     "Wrap every synced collection in persistedCollectionOptions({ persistence, schemaVersion }) in packages/gateway-react; add platform persistence adapters — SQLite-WASM/OPFS for the web PWA, bun:sqlite for the Electrobun native build (one file under the app data dir). Lazy-load the adapter so it does not bloat the no-persistence path.",
@@ -494,7 +526,11 @@ const SPEC_P2: PhaseSpec = {
     "runEvents stays a bounded ring (maxRows 1024); persisted collections EXCLUDE large blobs.",
     "Add slow-consumer and large-burst tests; persistence writes do not grow memory without bound.",
   ],
-  packages: ["@smithers-orchestrator/gateway-client", "@smithers-orchestrator/gateway-react", "@smithers-orchestrator/smithers"],
+  packages: [
+    "@smithers-orchestrator/gateway-client",
+    "@smithers-orchestrator/gateway-react",
+    "@smithers-orchestrator/smithers",
+  ],
   commitSubject: "✨ feat(sync): client SQLite persistence + pluggable SyncSource seam (close PR #286 edges)",
 };
 
@@ -505,8 +541,7 @@ const SPEC_P3: PhaseSpec = {
   branch: "pgts/p3-pglite-backend",
   wtName: "pgts-p3-pglite-backend",
   designRef: "§4.1, §4.2, §7; rollout §12.3",
-  goal:
-    "Make PGlite the default local backend for fresh dirs via an async openSmithersBackend factory, and add a versioned Postgres migration runner mirroring SQLite. No data migration yet (that is phase 4).",
+  goal: "Make PGlite the default local backend for fresh dirs via an async openSmithersBackend factory, and add a versioned Postgres migration runner mirroring SQLite. No data migration yet (that is phase 4).",
   build: [
     "Add packages/smithers openSmithersBackend(opts) async factory that resolves the backend from SMITHERS_BACKEND=pglite|sqlite|postgres (env) or `backend` in smithers.config.ts, defaulting to pglite for fresh .smithers/ dirs, and returns the right API. createSmithers (sync, bun:sqlite) stays for back-compat AND as the migration source — do not remove it.",
     "Move the apps/cli gateway/up wiring and the gateway/server boot path onto openSmithersBackend (createSmithersPostgres is async; createSmithers is sync). Add a --backend flag.",
@@ -527,7 +562,12 @@ const SPEC_P3: PhaseSpec = {
   backpressure: [
     "The PGlite socket-server path does not block the engine event loop; the gateway's bounded replay window is unchanged.",
   ],
-  packages: ["@smithers-orchestrator/db", "smithers-orchestrator", "@smithers-orchestrator/server", "@smithers-orchestrator/cli"],
+  packages: [
+    "@smithers-orchestrator/db",
+    "smithers-orchestrator",
+    "@smithers-orchestrator/server",
+    "@smithers-orchestrator/cli",
+  ],
   commitSubject: "✨ feat(db): PGlite local backend (openSmithersBackend) + versioned Postgres migration runner",
 };
 
@@ -538,8 +578,7 @@ const SPEC_P4: PhaseSpec = {
   branch: "pgts/p4-smithers-migrate",
   wtName: "pgts-p4-smithers-migrate",
   designRef: "§9, §7 (packages/errors); rollout §12.4",
-  goal:
-    "A one-shot `smithers migrate` that bulk-copies bun:sqlite → PGlite/Postgres through the dialect seam, plus first-launch detection that FAILS LOUD with SMITHERS_MIGRATION_REQUIRED — never silently degrades.",
+  goal: "A one-shot `smithers migrate` that bulk-copies bun:sqlite → PGlite/Postgres through the dialect seam, plus first-launch detection that FAILS LOUD with SMITHERS_MIGRATION_REQUIRED — never silently degrades.",
   build: [
     "Add apps/cli `smithers migrate [--to pglite|postgres] [--url <pg-url>] [--keep-sqlite]`: open the legacy .smithers/smithers.db (bun:sqlite) READ-ONLY; boot the target + run the full versioned schema init; bulk-copy every _smithers_* table and every output table through the dialect seam (row-for-row, parameter re-encoding only; storage is mirrored, so pg.types.setTypeParser(20, Number) keeps BIGINT booleans correct); copy _smithers_schema_migrations; verify per-table counts; on success write a migrated.json marker; keep the old .db as a backup unless --keep-sqlite=false. The copy NEVER mutates the source.",
     "Add a SMITHERS_MIGRATION_REQUIRED error code to packages/errors with an actionable message naming the file, the run count, the schema version, and the EXACT next command (smithers migrate / --backend sqlite).",
@@ -557,7 +596,13 @@ const SPEC_P4: PhaseSpec = {
   backpressure: [
     "Bulk copy batches rows (bounded memory) rather than loading whole tables; large blob columns (outputs/diffs) copy without buffering an entire table in memory.",
   ],
-  packages: ["@smithers-orchestrator/db", "smithers-orchestrator", "@smithers-orchestrator/errors", "@smithers-orchestrator/server", "@smithers-orchestrator/cli"],
+  packages: [
+    "@smithers-orchestrator/db",
+    "smithers-orchestrator",
+    "@smithers-orchestrator/errors",
+    "@smithers-orchestrator/server",
+    "@smithers-orchestrator/cli",
+  ],
   commitSubject: "✨ feat(cli): smithers migrate + fail-loud SMITHERS_MIGRATION_REQUIRED detection",
 };
 
@@ -586,7 +631,11 @@ const SPEC_P5: PhaseSpec = {
   backpressure: [
     "Honor the gateway per-connection outbound queue and BackpressureDisconnect; optimistic writes do not bypass the bounded write path.",
   ],
-  packages: ["@smithers-orchestrator/gateway-client", "@smithers-orchestrator/gateway-react", "@smithers-orchestrator/smithers"],
+  packages: [
+    "@smithers-orchestrator/gateway-client",
+    "@smithers-orchestrator/gateway-react",
+    "@smithers-orchestrator/smithers",
+  ],
   commitSubject: "✨ feat(sync): unify writes onto TanStack DB optimistic transactions ($synced surfaced)",
 };
 
@@ -616,8 +665,15 @@ const SPEC_P6: PhaseSpec = {
   backpressure: [
     "Tickets are small and persisted; the docs collection is bounded; the watcher debounces bursts of edits.",
   ],
-  packages: ["@smithers-orchestrator/db", "@smithers-orchestrator/engine", "@smithers-orchestrator/gateway-client", "@smithers-orchestrator/gateway-react", "@smithers-orchestrator/smithers"],
-  commitSubject: "✨ feat(sync): _smithers_docs table + DB-backed file sync (watcher + tickets collection + materializer)",
+  packages: [
+    "@smithers-orchestrator/db",
+    "@smithers-orchestrator/engine",
+    "@smithers-orchestrator/gateway-client",
+    "@smithers-orchestrator/gateway-react",
+    "@smithers-orchestrator/smithers",
+  ],
+  commitSubject:
+    "✨ feat(sync): _smithers_docs table + DB-backed file sync (watcher + tickets collection + materializer)",
 };
 
 const SPEC_P7: PhaseSpec = {
@@ -648,13 +704,20 @@ const SPEC_P7: PhaseSpec = {
   backpressure: [
     "Honor the Electric proxy rate limits (60 shape-opens/min, 50 active) and a 4 MiB per-frame payload bound; reject or queue excess. Add slow-consumer and large-burst tests against the proxy fixture.",
   ],
-  packages: ["@smithers-orchestrator/electric-proxy", "@smithers-orchestrator/gateway-client", "@smithers-orchestrator/gateway-react", "@smithers-orchestrator/server", "@smithers-orchestrator/smithers"],
+  packages: [
+    "@smithers-orchestrator/electric-proxy",
+    "@smithers-orchestrator/gateway-client",
+    "@smithers-orchestrator/gateway-react",
+    "@smithers-orchestrator/server",
+    "@smithers-orchestrator/smithers",
+  ],
   commitSubject: "✨ feat(sync): Electric cloud source — smithers-electric-proxy + shapes + txid-commit writes",
 };
 
 // ── Prompt blocks ──────────────────────────────────────────────────────────────
 function designBlock(design: Design | undefined): string {
-  if (!design) return "No prior design output is available; derive the contracts yourself from the ARCHITECTURE and the design doc.";
+  if (!design)
+    return "No prior design output is available; derive the contracts yourself from the ARCHITECTURE and the design doc.";
   return [
     "--- FROZEN CONTRACTS (produced by the design step; treat as hard contracts) ---",
     `Summary: ${design.summary}`,
@@ -673,7 +736,10 @@ function designBlock(design: Design | undefined): string {
 
 function reviewFeedbackBlock(opus?: Review, codex?: Review): string {
   const parts: string[] = [];
-  for (const [who, r] of [["OPUS", opus], ["CODEX", codex]] as const) {
+  for (const [who, r] of [
+    ["OPUS", opus],
+    ["CODEX", codex],
+  ] as const) {
     if (r && !r.approved) {
       parts.push(`${who} REVIEW — CHANGES REQUIRED:\n${r.feedback}`);
       for (const i of r.issues ?? []) {
@@ -781,7 +847,9 @@ function verifyPrompt(spec: PhaseSpec, feedback: string, runE2e: boolean): strin
     "",
     ARCH,
     "",
-    feedback ? `Apply ALL of this review feedback first:\n${feedback}\n` : "No blocking review feedback; verify and harden.",
+    feedback
+      ? `Apply ALL of this review feedback first:\n${feedback}\n`
+      : "No blocking review feedback; verify and harden.",
     "",
     `Then make the stack GREEN: run \`pnpm install\` (if node_modules absent), and for each of`,
     `[${spec.packages.join(", ")}] run \`pnpm --filter <pkg> typecheck\` and \`pnpm --filter <pkg> test\`. ${e2eLine}`,
@@ -917,18 +985,46 @@ function milestone(m: {
   return (
     <Worktree path={wt(s.wtName)} branch={s.branch} baseBranch={m.baseBranch}>
       <Sequence>
-        <Task id={`${s.key}-impl`} output={m.outImpl} agent={lunaAgent} retries={RETRIES} timeoutMs={IMPL_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+        <Task
+          id={`${s.key}-impl`}
+          output={m.outImpl}
+          agent={lunaAgent}
+          retries={RETRIES}
+          timeoutMs={IMPL_TIMEOUT_MS}
+          heartbeatTimeoutMs={HEARTBEAT_MS}
+        >
           {implPrompt(s, m.design, m.feedback)}
         </Task>
         <Parallel maxConcurrency={2}>
-          <Task id={`${s.key}-review-opus`} output={m.outReviewOpus} agent={solAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+          <Task
+            id={`${s.key}-review-opus`}
+            output={m.outReviewOpus}
+            agent={solAgent}
+            retries={RETRIES}
+            timeoutMs={REVIEW_TIMEOUT_MS}
+            heartbeatTimeoutMs={HEARTBEAT_MS}
+          >
             {reviewPrompt(s, "opus")}
           </Task>
-          <Task id={`${s.key}-review-codex`} output={m.outReviewCodex} agent={solAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+          <Task
+            id={`${s.key}-review-codex`}
+            output={m.outReviewCodex}
+            agent={solAgent}
+            retries={RETRIES}
+            timeoutMs={REVIEW_TIMEOUT_MS}
+            heartbeatTimeoutMs={HEARTBEAT_MS}
+          >
             {reviewPrompt(s, "codex")}
           </Task>
         </Parallel>
-        <Task id={`${s.key}-verify`} output={m.outVerify} agent={terraAgent} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+        <Task
+          id={`${s.key}-verify`}
+          output={m.outVerify}
+          agent={terraAgent}
+          retries={RETRIES}
+          timeoutMs={VERIFY_TIMEOUT_MS}
+          heartbeatTimeoutMs={HEARTBEAT_MS}
+        >
           {verifyPrompt(s, m.feedback, m.runE2e)}
         </Task>
         <Task id={`${s.key}-commit`} output={m.outCommit} timeoutMs={COMMIT_TIMEOUT_MS}>
@@ -964,7 +1060,14 @@ export default smithers((ctx) => {
     <Workflow name="postgres-tanstack-sync">
       <Sequence>
         {/* Phase 0 — freeze the contracts (read-only, repo root). */}
-        <Task id="design" output={outputs.design} agent={solAgent} retries={RETRIES} timeoutMs={DESIGN_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+        <Task
+          id="design"
+          output={outputs.design}
+          agent={solAgent}
+          retries={RETRIES}
+          timeoutMs={DESIGN_TIMEOUT_MS}
+          heartbeatTimeoutMs={HEARTBEAT_MS}
+        >
           {designPrompt()}
         </Task>
 
@@ -1040,7 +1143,14 @@ export default smithers((ctx) => {
 
         {/* ── Phase-7 GATE (always visible in the graph) ── */}
         {/* Read-only verification that PGlite cannot be an Electric source + cloud infra is ready. */}
-        <Task id="phase7-gate" output={outputs.phase7Gate} agent={solAgent} retries={RETRIES} timeoutMs={GATE_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+        <Task
+          id="phase7-gate"
+          output={outputs.phase7Gate}
+          agent={solAgent}
+          retries={RETRIES}
+          timeoutMs={GATE_TIMEOUT_MS}
+          heartbeatTimeoutMs={HEARTBEAT_MS}
+        >
           {phase7GatePrompt()}
         </Task>
         <Approval
@@ -1082,18 +1192,45 @@ export default smithers((ctx) => {
         <Worktree path={wt(INTEGRATE_WT)} branch={INTEGRATE_BRANCH} baseBranch={integrateBase}>
           <Sequence>
             <Parallel maxConcurrency={2}>
-              <Task id="obs-audit" output={outputs.obsAudit} agent={solAgent} retries={RETRIES} timeoutMs={AUDIT_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task
+                id="obs-audit"
+                output={outputs.obsAudit}
+                agent={solAgent}
+                retries={RETRIES}
+                timeoutMs={AUDIT_TIMEOUT_MS}
+                heartbeatTimeoutMs={HEARTBEAT_MS}
+              >
                 {obsAuditPrompt()}
               </Task>
-              <Task id="bp-audit" output={outputs.bpAudit} agent={solAgent} retries={RETRIES} timeoutMs={AUDIT_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task
+                id="bp-audit"
+                output={outputs.bpAudit}
+                agent={solAgent}
+                retries={RETRIES}
+                timeoutMs={AUDIT_TIMEOUT_MS}
+                heartbeatTimeoutMs={HEARTBEAT_MS}
+              >
                 {bpAuditPrompt()}
               </Task>
             </Parallel>
-            <Task id="integrate" output={outputs.integrate} agent={lunaAgent} retries={RETRIES} timeoutMs={INTEGRATE_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+            <Task
+              id="integrate"
+              output={outputs.integrate}
+              agent={lunaAgent}
+              retries={RETRIES}
+              timeoutMs={INTEGRATE_TIMEOUT_MS}
+              heartbeatTimeoutMs={HEARTBEAT_MS}
+            >
               {integratePrompt(integrateBase, runE2e)}
             </Task>
             <Task id="integrate-commit" output={outputs.integrateCommit} timeoutMs={COMMIT_TIMEOUT_MS}>
-              {() => commitWorktree(wt(INTEGRATE_WT), INTEGRATE_BRANCH, "✨ feat(sync): integrate Postgres-of-record + TanStack DB → SQLite sync (phases 2–7)")}
+              {() =>
+                commitWorktree(
+                  wt(INTEGRATE_WT),
+                  INTEGRATE_BRANCH,
+                  "✨ feat(sync): integrate Postgres-of-record + TanStack DB → SQLite sync (phases 2–7)",
+                )
+              }
             </Task>
           </Sequence>
         </Worktree>

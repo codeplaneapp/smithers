@@ -11,32 +11,32 @@ import { extractGeneratedDetectionProviderIds, generateAgentsTs } from "../agent
  * @returns {{ rewritten: boolean; path: string | null; reason?: string }}
  */
 export function regenerateAgentsTsIfPresent(cwd = process.cwd()) {
-    const path = join(cwd, ".smithers", "agents.ts");
-    if (!existsSync(path)) {
-        return { rewritten: false, path: null, reason: "no .smithers/agents.ts in cwd" };
-    }
-    const existing = readFileSync(path, "utf8");
-    if (!existing.startsWith("// smithers-source: generated")) {
-        return { rewritten: false, path, reason: "agents.ts has been edited by hand; not overwriting" };
-    }
-    const scaffoldFiles = {
-        claude: "claude-code.ts",
-        codex: "codex.ts",
-        opencode: "opencode.ts",
-        antigravity: "antigravity.ts",
-        gemini: "gemini.ts",
-    };
-    const scaffoldProviderIds = Object.entries(scaffoldFiles)
-        .filter(([, file]) => existsSync(join(cwd, ".smithers", "agents", file)))
-        .map(([providerId]) => providerId);
-    const next = generateAgentsTs(process.env, {
-        cwd,
-        preserveProviderIds: extractGeneratedDetectionProviderIds(existing),
-        scaffoldProviderIds,
-    });
-    if (next === existing) {
-        return { rewritten: false, path, reason: "no changes" };
-    }
-    writeFileSync(path, next, "utf8");
-    return { rewritten: true, path };
+  const path = join(cwd, ".smithers", "agents.ts");
+  if (!existsSync(path)) {
+    return { rewritten: false, path: null, reason: "no .smithers/agents.ts in cwd" };
+  }
+  const existing = readFileSync(path, "utf8");
+  if (!existing.startsWith("// smithers-source: generated")) {
+    return { rewritten: false, path, reason: "agents.ts has been edited by hand; not overwriting" };
+  }
+  const scaffoldFiles = {
+    claude: "claude-code.ts",
+    codex: "codex.ts",
+    opencode: "opencode.ts",
+    antigravity: "antigravity.ts",
+    gemini: "gemini.ts",
+  };
+  const scaffoldProviderIds = Object.entries(scaffoldFiles)
+    .filter(([, file]) => existsSync(join(cwd, ".smithers", "agents", file)))
+    .map(([providerId]) => providerId);
+  const next = generateAgentsTs(process.env, {
+    cwd,
+    preserveProviderIds: extractGeneratedDetectionProviderIds(existing),
+    scaffoldProviderIds,
+  });
+  if (next === existing) {
+    return { rewritten: false, path, reason: "no changes" };
+  }
+  writeFileSync(path, next, "utf8");
+  return { rewritten: true, path };
 }

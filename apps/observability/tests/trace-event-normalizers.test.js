@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  extractProviderSessionCorrelation,
-  normalizeStructuredEventForFamily,
-} from "../src/_traceEventNormalizers.js";
+import { extractProviderSessionCorrelation, normalizeStructuredEventForFamily } from "../src/_traceEventNormalizers.js";
 
 describe("extractProviderSessionCorrelation", () => {
   test("codex correlates by thread_id", () => {

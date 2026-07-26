@@ -27,10 +27,9 @@ async function seedSession(
   }: { token?: string; repo?: string; pr?: number; now?: number } = {},
 ) {
   const hash = await sha256Hex(token);
-  await env.DB
-    .prepare(
-      "INSERT INTO sessions (hash, repo, pr, expires_at, spend_cap_usd, spent_usd, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    )
+  await env.DB.prepare(
+    "INSERT INTO sessions (hash, repo, pr, expires_at, spend_cap_usd, spent_usd, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
     .bind(hash, repo, pr, now + 3_600_000, 25, 0, now)
     .run();
   return { token, hash, repo, pr };
@@ -44,44 +43,36 @@ describe("/api/plan", () => {
     const month = monthKey(NOW);
     const monthStart = Date.UTC(2026, 6, 1);
 
-    await env.DB
-      .prepare(
-        "INSERT INTO repos (repo, mode, quiz, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-      )
+    await env.DB.prepare(
+      "INSERT INTO repos (repo, mode, quiz, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
       .bind("octo/widgets", "comment", "on", 12, 3.5, NOW)
       .run();
-    await env.DB
-      .prepare("INSERT INTO reviewed_prs (repo, pr, month, first_seen_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO reviewed_prs (repo, pr, month, first_seen_at) VALUES (?, ?, ?, ?)")
       .bind("octo/widgets", 1, month, NOW - 1_000)
       .run();
-    await env.DB
-      .prepare("INSERT INTO reviewed_prs (repo, pr, month, first_seen_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO reviewed_prs (repo, pr, month, first_seen_at) VALUES (?, ?, ?, ?)")
       .bind("octo/widgets", 2, month, NOW)
       .run();
-    await env.DB
-      .prepare("INSERT INTO reviewed_prs (repo, pr, month, first_seen_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO reviewed_prs (repo, pr, month, first_seen_at) VALUES (?, ?, ?, ?)")
       .bind("octo/widgets", 3, "2026-06", NOW)
       .run();
-    await env.DB
-      .prepare("INSERT INTO reviewed_prs (repo, pr, month, first_seen_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO reviewed_prs (repo, pr, month, first_seen_at) VALUES (?, ?, ?, ?)")
       .bind("octo/other", 1, month, NOW)
       .run();
-    await env.DB
-      .prepare(
-        "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      )
+    await env.DB.prepare(
+      "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
       .bind("usage-1", "octo/widgets", 1, "claude-sonnet-4-6", 1000, 200, 1.25, "review", monthStart + 1_000)
       .run();
-    await env.DB
-      .prepare(
-        "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      )
+    await env.DB.prepare(
+      "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
       .bind("usage-2", "octo/widgets", 2, "claude-sonnet-4-6", 2000, 300, 0.75, "review", NOW)
       .run();
-    await env.DB
-      .prepare(
-        "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      )
+    await env.DB.prepare(
+      "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
       .bind("usage-old", "octo/widgets", 3, "claude-sonnet-4-6", 1000, 200, 9, "review", monthStart - 1)
       .run();
 
@@ -142,8 +133,7 @@ describe("/api/plan", () => {
     const apiKey = "srk_testkey";
     const hash = await sha256Hex(apiKey);
 
-    await env.DB
-      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
       .bind(hash, "octo", JSON.stringify(["octo/widgets"]), NOW)
       .run();
 

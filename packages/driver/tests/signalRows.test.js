@@ -21,15 +21,29 @@ describe("SmithersCtx.signalRows", () => {
   test("filters by signalName and parses a JSON-string payload", () => {
     const ctx = makeCtx([
       { seq: 0, signalName: "OTHER", correlationId: null, payloadJson: JSON.stringify({ x: 1 }), receivedAtMs: 10 },
-      { seq: 1, signalName: "REVISE", correlationId: null, payloadJson: JSON.stringify({ feedback: "tighten it up" }), receivedAtMs: 20 },
+      {
+        seq: 1,
+        signalName: "REVISE",
+        correlationId: null,
+        payloadJson: JSON.stringify({ feedback: "tighten it up" }),
+        receivedAtMs: 20,
+      },
     ]);
     const rows = ctx.signalRows("REVISE");
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toEqual({ payload: { feedback: "tighten it up" }, signalName: "REVISE", correlationId: null, seq: 1, receivedAtMs: 20 });
+    expect(rows[0]).toEqual({
+      payload: { feedback: "tighten it up" },
+      signalName: "REVISE",
+      correlationId: null,
+      seq: 1,
+      receivedAtMs: 20,
+    });
   });
 
   test("accepts an already-parsed payload (test convenience)", () => {
-    const ctx = makeCtx([{ seq: 0, signalName: "REVISE", correlationId: null, payloadJson: { feedback: "ok" }, receivedAtMs: 5 }]);
+    const ctx = makeCtx([
+      { seq: 0, signalName: "REVISE", correlationId: null, payloadJson: { feedback: "ok" }, receivedAtMs: 5 },
+    ]);
     expect(ctx.signalRows("REVISE")[0].payload).toEqual({ feedback: "ok" });
   });
 
@@ -68,7 +82,9 @@ describe("SmithersCtx.signalRows", () => {
   });
 
   test("throws a typed error when a row is missing its provenance seq", () => {
-    const ctx = makeCtx([{ seq: undefined, signalName: "REVISE", correlationId: null, payloadJson: "{}", receivedAtMs: 1 }]);
+    const ctx = makeCtx([
+      { seq: undefined, signalName: "REVISE", correlationId: null, payloadJson: "{}", receivedAtMs: 1 },
+    ]);
     expect(() => ctx.signalRows("REVISE")).toThrow(SmithersError);
     try {
       ctx.signalRows("REVISE");
@@ -79,7 +95,9 @@ describe("SmithersCtx.signalRows", () => {
   });
 
   test("throws a typed error on invalid JSON payload", () => {
-    const ctx = makeCtx([{ seq: 0, signalName: "REVISE", correlationId: null, payloadJson: "{not json", receivedAtMs: 1 }]);
+    const ctx = makeCtx([
+      { seq: 0, signalName: "REVISE", correlationId: null, payloadJson: "{not json", receivedAtMs: 1 },
+    ]);
     expect(() => ctx.signalRows("REVISE")).toThrow(SmithersError);
     try {
       ctx.signalRows("REVISE");

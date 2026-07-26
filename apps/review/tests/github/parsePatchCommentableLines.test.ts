@@ -37,13 +37,7 @@ describe("parsePatchCommentableLines", () => {
   });
 
   test('the "\\ No newline at end of file" marker does not consume a line number', () => {
-    const patch = [
-      "@@ -1,2 +1,2 @@",
-      " context",
-      "-old last",
-      "+new last",
-      "\\ No newline at end of file",
-    ].join("\n");
+    const patch = ["@@ -1,2 +1,2 @@", " context", "-old last", "+new last", "\\ No newline at end of file"].join("\n");
     expect(parsePatchCommentableLines(patch)).toEqual(new Set([1, 2]));
   });
 

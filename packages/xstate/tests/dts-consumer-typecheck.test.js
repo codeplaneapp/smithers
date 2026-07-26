@@ -15,7 +15,21 @@ describe("emitted @smithers-orchestrator/xstate declarations", () => {
     const source = join(import.meta.dir, "dts-consumer-fixture.ts");
     const tsc = join(repoRoot, "node_modules/typescript/bin/tsc");
     const result = Bun.spawnSync({
-      cmd: ["node", tsc, "--ignoreConfig", "--noEmit", "--strict", "--skipLibCheck", "--module", "ESNext", "--moduleResolution", "bundler", "--target", "ESNext", source],
+      cmd: [
+        "node",
+        tsc,
+        "--ignoreConfig",
+        "--noEmit",
+        "--strict",
+        "--skipLibCheck",
+        "--module",
+        "ESNext",
+        "--moduleResolution",
+        "bundler",
+        "--target",
+        "ESNext",
+        source,
+      ],
       cwd: repoRoot,
       stdout: "pipe",
       stderr: "pipe",

@@ -25,10 +25,7 @@ function hasUnclassifiedWarnings(report) {
  */
 function blockRevertible(report, reason) {
   return {
-    blocking: [
-      ...report.blocking,
-      ...report.revertible.map((effect) => ({ ...effect, reason })),
-    ],
+    blocking: [...report.blocking, ...report.revertible.map((effect) => ({ ...effect, reason }))],
     revertible: [],
     warnings: report.warnings,
   };
@@ -47,17 +44,17 @@ function resolveHandlers(report, registry) {
   const blocking = [...report.blocking];
   const revertible = [];
   for (const effect of report.revertible) {
-    const handler = effect.kind === "tool"
-      ? registry.tools.get(effect.toolName)?.revert
-      : registry.tasks.get(effect.nodeId)?.revert;
+    const handler =
+      effect.kind === "tool" ? registry.tools.get(effect.toolName)?.revert : registry.tasks.get(effect.nodeId)?.revert;
     if (typeof handler === "function") {
       revertible.push(effect);
     } else {
       blocking.push({
         ...effect,
-        reason: effect.kind === "tool" && effect.hasRevert
-          ? `The journal records hasRevert=true for tool ${effect.toolName}, but no matching defineTool instance was enumerable from task agents or exported workflow tool registries. Closed-over compute-task tools must be exported in a tool registry.`
-          : `No revert handler could be resolved for ${effect.kind} ${effect.kind === "tool" ? effect.toolName : effect.nodeId}.`,
+        reason:
+          effect.kind === "tool" && effect.hasRevert
+            ? `The journal records hasRevert=true for tool ${effect.toolName}, but no matching defineTool instance was enumerable from task agents or exported workflow tool registries. Closed-over compute-task tools must be exported in a tool registry.`
+            : `No revert handler could be resolved for ${effect.kind} ${effect.kind === "tool" ? effect.toolName : effect.nodeId}.`,
       });
     }
   }
@@ -109,8 +106,14 @@ export async function guardEffectBoundary(db, params) {
         revertible: [],
         warnings: [
           ...report.warnings,
-          ...report.blocking.map((effect) => ({ ...effect, reason: "Fork warning: effect may execute again if the child is resumed." })),
-          ...report.revertible.map((effect) => ({ ...effect, reason: "Fork warning: effect may execute again if the child is resumed." })),
+          ...report.blocking.map((effect) => ({
+            ...effect,
+            reason: "Fork warning: effect may execute again if the child is resumed.",
+          })),
+          ...report.revertible.map((effect) => ({
+            ...effect,
+            reason: "Fork warning: effect may execute again if the child is resumed.",
+          })),
         ],
       },
       opId: randomUUID(),
@@ -154,9 +157,7 @@ export async function guardEffectBoundary(db, params) {
       ...report,
       blocking: report.blocking.map((effect) => ({
         ...effect,
-        reason: effect.reason
-          ? `Forced crossing: ${effect.reason}`
-          : "Forced crossing without a revert handler.",
+        reason: effect.reason ? `Forced crossing: ${effect.reason}` : "Forced crossing without a revert handler.",
       })),
     };
     await recordForcedEffectBoundary(db, {

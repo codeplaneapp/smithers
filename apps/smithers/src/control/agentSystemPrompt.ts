@@ -1,9 +1,7 @@
 import { APP_ACTIONS } from "./agentTools";
 
 function getControlInstructions() {
-  const catalog = APP_ACTIONS.map(
-    (action) => `- ${action.name}(${action.argHint}) — ${action.description}`,
-  ).join("\n");
+  const catalog = APP_ACTIONS.map((action) => `- ${action.name}(${action.argHint}) — ${action.description}`).join("\n");
 
   return `## Driving the Smithers app
 You can operate this app for the user: launch and background Smithers workflows, change the theme, switch views, set the project, type into the composer, and more. To act, end your reply with exactly one fenced code block tagged \`smithers:action\` holding one JSON object per line (JSONL). Keep your prose reply to one short sentence and never restate the JSON in prose.

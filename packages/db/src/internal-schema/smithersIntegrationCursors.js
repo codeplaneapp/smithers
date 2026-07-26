@@ -12,7 +12,7 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
  *  - `updatedAtMs`   last persist (Unix epoch ms).
  */
 export const smithersIntegrationCursors = sqliteTable("_smithers_integration_cursors", {
-    sourceId: text("source_id").primaryKey(),
-    cursor: text("cursor"),
-    updatedAtMs: integer("updated_at_ms").notNull(),
+  sourceId: text("source_id").primaryKey(),
+  cursor: text("cursor"),
+  updatedAtMs: integer("updated_at_ms").notNull(),
 });

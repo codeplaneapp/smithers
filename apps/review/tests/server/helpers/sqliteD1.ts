@@ -1,10 +1,5 @@
 import { Database } from "bun:sqlite";
-import type {
-  D1Database,
-  D1ExecResult,
-  D1PreparedStatement,
-  D1Result,
-} from "../../../src/server/d1.ts";
+import type { D1Database, D1ExecResult, D1PreparedStatement, D1Result } from "../../../src/server/d1.ts";
 
 /**
  * bun:sqlite shaped to look like Cloudflare D1, just enough for the worker.

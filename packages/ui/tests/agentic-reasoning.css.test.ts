@@ -21,7 +21,11 @@ describe("agentic reasoning CSS", () => {
   });
 
   test("routes active chain steps through the shared running color", () => {
-    expect(agenticReasoningCss).toContain(".sui-cot-step[data-status-class='run'] .sui-cot-step-dot { background:var(--brand, #6d56d8); }");
-    expect(agenticReasoningCss).not.toContain(".sui-cot-step[data-status='running'] .sui-cot-step-dot { background:var(--info");
+    expect(agenticReasoningCss).toContain(
+      ".sui-cot-step[data-status-class='run'] .sui-cot-step-dot { background:var(--brand, #6d56d8); }",
+    );
+    expect(agenticReasoningCss).not.toContain(
+      ".sui-cot-step[data-status='running'] .sui-cot-step-dot { background:var(--info",
+    );
   });
 });

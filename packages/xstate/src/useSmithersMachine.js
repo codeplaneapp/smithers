@@ -51,11 +51,18 @@ const machinesByCtx = new WeakMap();
  * @returns {import("xstate").SnapshotFrom<TMachine>}
  */
 export function useSmithersMachine(machine, options) {
-    const ctx = React.useContext(SmithersContext);
-    if (!ctx) {
-        throw new SmithersError("XSTATE_OUTSIDE_WORKFLOW", "useSmithersMachine() must be called inside a <Workflow> render created by createSmithers().");
-    }
-    return computeMachineState(/** @type {import("./EventSource.ts").SmithersCtxLike & { runId: string }} */ (/** @type {unknown} */ (ctx)), machine, options);
+  const ctx = React.useContext(SmithersContext);
+  if (!ctx) {
+    throw new SmithersError(
+      "XSTATE_OUTSIDE_WORKFLOW",
+      "useSmithersMachine() must be called inside a <Workflow> render created by createSmithers().",
+    );
+  }
+  return computeMachineState(
+    /** @type {import("./EventSource.ts").SmithersCtxLike & { runId: string }} */ (/** @type {unknown} */ (ctx)),
+    machine,
+    options,
+  );
 }
 
 /**
@@ -71,15 +78,20 @@ export function useSmithersMachine(machine, options) {
  * @returns {import("xstate").SnapshotFrom<TMachine>}
  */
 export function computeMachineState(ctx, machine, options) {
-    if (!options || typeof options.id !== "string" || options.id.trim() === "") {
-        throw new SmithersError("XSTATE_MACHINE_ID_REQUIRED", "useSmithersMachine() requires a non-empty { id } so multiple machines, caches, and error messages stay distinguishable.");
-    }
-    const id = options.id;
-    registerMachineId(ctx, id, machine);
-    lintMachine(id, machine);
-    const sources = options.events ?? [];
-    const events = collectEvents(ctx, id, sources);
-    return /** @type {import("xstate").SnapshotFrom<TMachine>} */ (foldWithCache(ctx.runId, id, machine, sources, options.input, events));
+  if (!options || typeof options.id !== "string" || options.id.trim() === "") {
+    throw new SmithersError(
+      "XSTATE_MACHINE_ID_REQUIRED",
+      "useSmithersMachine() requires a non-empty { id } so multiple machines, caches, and error messages stay distinguishable.",
+    );
+  }
+  const id = options.id;
+  registerMachineId(ctx, id, machine);
+  lintMachine(id, machine);
+  const sources = options.events ?? [];
+  const events = collectEvents(ctx, id, sources);
+  return /** @type {import("xstate").SnapshotFrom<TMachine>} */ (
+    foldWithCache(ctx.runId, id, machine, sources, options.input, events)
+  );
 }
 
 /**
@@ -88,16 +100,20 @@ export function computeMachineState(ctx, machine, options) {
  * @param {object} machine
  */
 function registerMachineId(ctx, id, machine) {
-    let registry = machinesByCtx.get(ctx);
-    if (!registry) {
-        registry = new Map();
-        machinesByCtx.set(ctx, registry);
-    }
-    const existing = registry.get(id);
-    if (existing && existing !== machine) {
-        throw new SmithersError("XSTATE_MACHINE_ID_CONFLICT", `Two different machines used id "${id}" in the same render. Give each useSmithersMachine call a distinct id — and define machines at module scope, not inside the component body, so identity is stable across renders.`, { machineId: id });
-    }
-    registry.set(id, machine);
+  let registry = machinesByCtx.get(ctx);
+  if (!registry) {
+    registry = new Map();
+    machinesByCtx.set(ctx, registry);
+  }
+  const existing = registry.get(id);
+  if (existing && existing !== machine) {
+    throw new SmithersError(
+      "XSTATE_MACHINE_ID_CONFLICT",
+      `Two different machines used id "${id}" in the same render. Give each useSmithersMachine call a distinct id — and define machines at module scope, not inside the component body, so identity is stable across renders.`,
+      { machineId: id },
+    );
+  }
+  registry.set(id, machine);
 }
 
 /**
@@ -107,19 +123,23 @@ function registerMachineId(ctx, id, machine) {
  * @returns {FoldEvent[]}
  */
 function collectEvents(ctx, id, sources) {
-    /** @type {FoldEvent[]} */
-    const events = [];
-    sources.forEach((source, declarationIndex) => {
-        if (!source || typeof source.collect !== "function") {
-            throw new SmithersError("XSTATE_EVENT_SOURCE_INVALID", `Machine "${id}" events[${declarationIndex}] is not an event source. Use taskOutput(), approvalDecided(), eventReceived(), or timedOut().`, { machineId: id, declarationIndex });
-        }
-        for (const entry of source.collect(ctx)) {
-            entry.events.forEach((event, subIndex) => {
-                events.push({ seq: entry.seq, declarationIndex, subIndex, event });
-            });
-        }
-    });
-    return orderFoldEvents(events);
+  /** @type {FoldEvent[]} */
+  const events = [];
+  sources.forEach((source, declarationIndex) => {
+    if (!source || typeof source.collect !== "function") {
+      throw new SmithersError(
+        "XSTATE_EVENT_SOURCE_INVALID",
+        `Machine "${id}" events[${declarationIndex}] is not an event source. Use taskOutput(), approvalDecided(), eventReceived(), or timedOut().`,
+        { machineId: id, declarationIndex },
+      );
+    }
+    for (const entry of source.collect(ctx)) {
+      entry.events.forEach((event, subIndex) => {
+        events.push({ seq: entry.seq, declarationIndex, subIndex, event });
+      });
+    }
+  });
+  return orderFoldEvents(events);
 }
 
 /**
@@ -132,35 +152,36 @@ function collectEvents(ctx, id, sources) {
  * @returns {import("xstate").AnyMachineSnapshot}
  */
 function foldWithCache(runId, id, machine, sources, input, events) {
-    const reducerHash = hashReducer(machine, sources);
-    const instanceKey = `${runId}::${id}`;
-    const cacheKey = `${instanceKey}::${reducerHash}`;
-    const inputHash = stableHash(input);
-    const eventHashes = hashFoldEvents(events);
-    const cached = foldCache.get(cacheKey);
-    if (!cached) {
-        warnIfReinterpreting(instanceKey, id, cacheKey);
-    }
-    else {
-        // Touch: move to the most-recently-used end for LRU eviction.
-        foldCache.delete(cacheKey);
-    }
-    if (cached &&
-        cached.inputHash === inputHash &&
-        eventHashes.length >= cached.eventHashes.length &&
-        cached.eventHashes.every((hash, i) => hash === eventHashes[i])) {
-        const { snapshot, folded } = foldMachineState(machine, {
-            id,
-            input,
-            events,
-            startAt: { snapshot: cached.snapshot, alreadyFolded: cached.folded },
-        });
-        setCacheEntry(cacheKey, { inputHash, eventHashes, snapshot, folded });
-        return snapshot;
-    }
-    const { snapshot, folded } = foldMachineState(machine, { id, input, events });
+  const reducerHash = hashReducer(machine, sources);
+  const instanceKey = `${runId}::${id}`;
+  const cacheKey = `${instanceKey}::${reducerHash}`;
+  const inputHash = stableHash(input);
+  const eventHashes = hashFoldEvents(events);
+  const cached = foldCache.get(cacheKey);
+  if (!cached) {
+    warnIfReinterpreting(instanceKey, id, cacheKey);
+  } else {
+    // Touch: move to the most-recently-used end for LRU eviction.
+    foldCache.delete(cacheKey);
+  }
+  if (
+    cached &&
+    cached.inputHash === inputHash &&
+    eventHashes.length >= cached.eventHashes.length &&
+    cached.eventHashes.every((hash, i) => hash === eventHashes[i])
+  ) {
+    const { snapshot, folded } = foldMachineState(machine, {
+      id,
+      input,
+      events,
+      startAt: { snapshot: cached.snapshot, alreadyFolded: cached.folded },
+    });
     setCacheEntry(cacheKey, { inputHash, eventHashes, snapshot, folded });
     return snapshot;
+  }
+  const { snapshot, folded } = foldMachineState(machine, { id, input, events });
+  setCacheEntry(cacheKey, { inputHash, eventHashes, snapshot, folded });
+  return snapshot;
 }
 
 /**
@@ -175,16 +196,18 @@ function foldWithCache(runId, id, machine, sources, input, events) {
  * @param {string} cacheKey
  */
 function warnIfReinterpreting(instanceKey, id, cacheKey) {
-    const prefix = `${instanceKey}::`;
-    for (const key of foldCache.keys()) {
-        if (key !== cacheKey && key.startsWith(prefix)) {
-            if (!reinterpretationWarned.has(instanceKey)) {
-                console.warn(`[smithers-xstate] Machine "${id}" reducer changed mid-run (definition hash mismatch); folded history will be reinterpreted under the new machine/event-source definition. Prefer fork-and-migrate for deliberate mid-run machine changes.`);
-                reinterpretationWarned.add(instanceKey);
-            }
-            return;
-        }
+  const prefix = `${instanceKey}::`;
+  for (const key of foldCache.keys()) {
+    if (key !== cacheKey && key.startsWith(prefix)) {
+      if (!reinterpretationWarned.has(instanceKey)) {
+        console.warn(
+          `[smithers-xstate] Machine "${id}" reducer changed mid-run (definition hash mismatch); folded history will be reinterpreted under the new machine/event-source definition. Prefer fork-and-migrate for deliberate mid-run machine changes.`,
+        );
+        reinterpretationWarned.add(instanceKey);
+      }
+      return;
     }
+  }
 }
 
 /**
@@ -192,12 +215,12 @@ function warnIfReinterpreting(instanceKey, id, cacheKey) {
  * @param {{ inputHash: string; eventHashes: string[]; snapshot: import("xstate").AnyMachineSnapshot; folded: number }} entry
  */
 function setCacheEntry(cacheKey, entry) {
-    foldCache.set(cacheKey, entry);
-    while (foldCache.size > MAX_CACHE_ENTRIES) {
-        const oldestKey = foldCache.keys().next().value;
-        if (oldestKey === undefined) break;
-        foldCache.delete(oldestKey);
-    }
+  foldCache.set(cacheKey, entry);
+  while (foldCache.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = foldCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    foldCache.delete(oldestKey);
+  }
 }
 
 /** Test seam. */

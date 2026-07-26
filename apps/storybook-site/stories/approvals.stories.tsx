@@ -28,9 +28,7 @@ export const Approval: Story = {
         summary="This drops the staging database."
         risk="high"
         proposedActions={["DROP DATABASE staging", "Notify #ops"]}
-        resources={[
-          { id: "db", label: "staging-db", kind: "postgres", href: "https://example.com/db" },
-        ]}
+        resources={[{ id: "db", label: "staging-db", kind: "postgres", href: "https://example.com/db" }]}
       />
     </div>
   ),

@@ -9,10 +9,7 @@ import type { SdkAgentOptions } from "./SdkAgentOptions";
  * OpenAI-compatible endpoint: point `baseURL` at the Hermes server. These mirror
  * the string-model form of `OpenAIAgentOptions`.
  */
-export type HermesAgentOptions<
-  CALL_OPTIONS = never,
-  TOOLS extends ToolSet = {},
-> = Omit<
+export type HermesAgentOptions<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = Omit<
   SdkAgentOptions<CALL_OPTIONS, TOOLS, LanguageModel>,
   "model"
 > & {

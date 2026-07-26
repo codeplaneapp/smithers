@@ -342,7 +342,14 @@ describe("DevToolsRunStore event processing", () => {
     const store = new DevToolsRunStore();
     // Unknown run id.
     expect(store.getTaskState("nope", "n1")).toBeUndefined();
-    store.processEngineEvent({ type: "NodeStarted", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 1, attempt: 1 });
+    store.processEngineEvent({
+      type: "NodeStarted",
+      runId: "r1",
+      nodeId: "n1",
+      iteration: 0,
+      timestampMs: 1,
+      attempt: 1,
+    });
     // Run exists but the node id never appears.
     expect(store.getTaskState("r1", "ghost")).toBeUndefined();
     // Exact-iteration lookup that does not exist.
@@ -351,9 +358,25 @@ describe("DevToolsRunStore event processing", () => {
 
   test("ToolCallFinished without a matching ToolCallStarted is a harmless no-op", () => {
     const store = new DevToolsRunStore();
-    store.processEngineEvent({ type: "NodeStarted", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 1, attempt: 1 });
+    store.processEngineEvent({
+      type: "NodeStarted",
+      runId: "r1",
+      nodeId: "n1",
+      iteration: 0,
+      timestampMs: 1,
+      attempt: 1,
+    });
     // No prior ToolCallStarted for seq 5 -> find() misses, branch leaves toolCalls untouched.
-    store.processEngineEvent({ type: "ToolCallFinished", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 2, toolName: "search", seq: 5, status: "success" });
+    store.processEngineEvent({
+      type: "ToolCallFinished",
+      runId: "r1",
+      nodeId: "n1",
+      iteration: 0,
+      timestampMs: 2,
+      toolName: "search",
+      seq: 5,
+      status: "success",
+    });
     expect(store.getTaskState("r1", "n1")?.toolCalls).toHaveLength(0);
   });
 
@@ -484,11 +507,25 @@ describe("DevToolsRunStore event processing", () => {
     expect(store.getRun("r1")?.status).toBe("waiting-approval");
 
     // First gate clears, but the second is still pending: run must remain blocked.
-    store.processEngineEvent({ type: "NodeFinished", runId: "r1", nodeId: "a", iteration: 0, timestampMs: 3, attempt: 1 });
+    store.processEngineEvent({
+      type: "NodeFinished",
+      runId: "r1",
+      nodeId: "a",
+      iteration: 0,
+      timestampMs: 3,
+      attempt: 1,
+    });
     expect(store.getRun("r1")?.status).toBe("waiting-approval");
 
     // Second gate clears too: now the run resumes.
-    store.processEngineEvent({ type: "NodeFinished", runId: "r1", nodeId: "b", iteration: 0, timestampMs: 4, attempt: 1 });
+    store.processEngineEvent({
+      type: "NodeFinished",
+      runId: "r1",
+      nodeId: "b",
+      iteration: 0,
+      timestampMs: 4,
+      attempt: 1,
+    });
     expect(store.getRun("r1")?.status).toBe("running");
   });
 
@@ -496,11 +533,24 @@ describe("DevToolsRunStore event processing", () => {
     const store = new DevToolsRunStore();
     store.processEngineEvent({ type: "RunStarted", runId: "r1", timestampMs: 0 });
     store.processEngineEvent({ type: "NodeWaitingTimer", runId: "r1", nodeId: "timer", iteration: 0, timestampMs: 1 });
-    store.processEngineEvent({ type: "NodeWaitingApproval", runId: "r1", nodeId: "approval", iteration: 0, timestampMs: 2 });
+    store.processEngineEvent({
+      type: "NodeWaitingApproval",
+      runId: "r1",
+      nodeId: "approval",
+      iteration: 0,
+      timestampMs: 2,
+    });
     expect(store.getRun("r1")?.status).toBe("waiting-approval");
 
     // Approval clears; the timer node is still parked, so the run reflects the timer block.
-    store.processEngineEvent({ type: "NodeFinished", runId: "r1", nodeId: "approval", iteration: 0, timestampMs: 3, attempt: 1 });
+    store.processEngineEvent({
+      type: "NodeFinished",
+      runId: "r1",
+      nodeId: "approval",
+      iteration: 0,
+      timestampMs: 3,
+      attempt: 1,
+    });
     expect(store.getRun("r1")?.status).toBe("waiting-timer");
     expect(store.getTaskState("r1", "timer")?.status).toBe("waiting-timer");
   });
@@ -524,7 +574,16 @@ describe("DevToolsRunStore event processing", () => {
       { type: "RunStarted", runId: "r1", timestampMs: 1 },
       { type: "NodeStarted", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 2, attempt: 1 },
       { type: "ToolCallStarted", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 2, toolName: "search", seq: 1 },
-      { type: "ToolCallFinished", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 3, toolName: "search", seq: 1, status: "success" },
+      {
+        type: "ToolCallFinished",
+        runId: "r1",
+        nodeId: "n1",
+        iteration: 0,
+        timestampMs: 3,
+        toolName: "search",
+        seq: 1,
+        status: "success",
+      },
       { type: "ToolCallStarted", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 3, toolName: "search", seq: 2 },
       { type: "NodeWaitingApproval", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 3 },
       { type: "NodeFinished", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 4, attempt: 1 },
@@ -712,11 +771,7 @@ describe("DevToolsRunStore retention/eviction", () => {
     }
     const tasks = store.getRun("r1")?.tasks;
     expect(tasks?.size).toBe(3);
-    expect([...(tasks?.keys() ?? [])]).toEqual([
-      "loop-body::7",
-      "loop-body::8",
-      "loop-body::9",
-    ]);
+    expect([...(tasks?.keys() ?? [])]).toEqual(["loop-body::7", "loop-body::8", "loop-body::9"]);
     // The surviving newest iteration keeps its state; the evicted ones are gone.
     expect(store.getTaskState("r1", "loop-body", 9)?.status).toBe("started");
     expect(store.getTaskState("r1", "loop-body", 0)).toBeUndefined();

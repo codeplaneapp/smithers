@@ -1,5 +1,15 @@
 /** @jsxImportSource react */
-import { createContext, useContext, useEffect, useId, useRef, useState, type ComponentProps, type KeyboardEvent, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ComponentProps,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { cn } from "../cn";
 import { REASONING_TOOLS_CSS_ID, reasoningToolsCss } from "../agentic/reasoningToolsCss";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
@@ -7,10 +17,7 @@ import { useInjectUiCss } from "../styles";
 
 export type HighlightedToken = { text: string; color?: string };
 export type HighlightLine = readonly HighlightedToken[];
-export type CodeBlockHighlighter = (
-  code: string,
-  language: string | undefined,
-) => readonly HighlightLine[] | null;
+export type CodeBlockHighlighter = (code: string, language: string | undefined) => readonly HighlightLine[] | null;
 
 export type CodeBlockProps = Omit<ComponentProps<"div">, "onCopy" | "children"> & {
   code: string;
@@ -47,8 +54,7 @@ export function CodeBlock({
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const isWrapControlled = controlledWrap !== undefined;
   const wrap = isWrapControlled ? controlledWrap : uncontrolledWrap;
-  const hasClipboard =
-    typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function";
+  const hasClipboard = typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function";
   const canCopy = showCopy && (onCopyCode !== undefined || hasClipboard);
 
   useEffect(
@@ -66,8 +72,7 @@ export function CodeBlock({
       highlighted = null;
     }
   }
-  const lines: readonly HighlightLine[] =
-    highlighted ?? code.split("\n").map((line) => [{ text: line }]);
+  const lines: readonly HighlightLine[] = highlighted ?? code.split("\n").map((line) => [{ text: line }]);
 
   function toggleWrap() {
     const next = !wrap;
@@ -156,13 +161,7 @@ export type CodeBlockHeaderProps = ComponentProps<"div">;
 export function CodeBlockHeader({ className, ...props }: CodeBlockHeaderProps) {
   useInjectUiCss();
   useInjectLaneCss(REASONING_TOOLS_CSS_ID, reasoningToolsCss);
-  return (
-    <div
-      data-slot="code-block-header"
-      className={cn("sui-codeblock-header", className)}
-      {...props}
-    />
-  );
+  return <div data-slot="code-block-header" className={cn("sui-codeblock-header", className)} {...props} />;
 }
 
 export type CodeBlockFilenameProps = Omit<ComponentProps<"span">, "children"> & {
@@ -175,14 +174,8 @@ export function CodeBlockFilename({ name, icon, className, ...props }: CodeBlock
   useInjectUiCss();
   useInjectLaneCss(REASONING_TOOLS_CSS_ID, reasoningToolsCss);
   return (
-    <span
-      data-slot="code-block-filename"
-      className={cn("sui-codeblock-filename", className)}
-      {...props}
-    >
-      {icon != null ? (
-        <span aria-hidden="true">{icon}</span>
-      ) : null}
+    <span data-slot="code-block-filename" className={cn("sui-codeblock-filename", className)} {...props}>
+      {icon != null ? <span aria-hidden="true">{icon}</span> : null}
       {name}
     </span>
   );
@@ -239,12 +232,12 @@ export function CodeBlockTabs({
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     if (items.length === 0) return;
     const focusedIndex = tabRefs.current.findIndex((el) => el !== null && el === event.target);
-    const activeIndex = Math.max(0, items.findIndex((item) => item.id === activeId));
+    const activeIndex = Math.max(
+      0,
+      items.findIndex((item) => item.id === activeId),
+    );
     const index = focusedIndex >= 0 ? focusedIndex : activeIndex;
-    const next =
-      event.key === "ArrowRight"
-        ? (index + 1) % items.length
-        : (index - 1 + items.length) % items.length;
+    const next = event.key === "ArrowRight" ? (index + 1) % items.length : (index - 1 + items.length) % items.length;
     event.preventDefault();
     onActiveIdChange(items[next]!.id);
     tabRefs.current[next]?.focus();
@@ -306,9 +299,7 @@ export function CodeBlockGroup({
   useInjectLaneCss(REASONING_TOOLS_CSS_ID, reasoningToolsCss);
   const baseId = useId();
   const isControlled = controlledActiveId !== undefined;
-  const [uncontrolledActiveId, setUncontrolledActiveId] = useState(
-    () => defaultActiveId ?? items[0]?.id ?? "",
-  );
+  const [uncontrolledActiveId, setUncontrolledActiveId] = useState(() => defaultActiveId ?? items[0]?.id ?? "");
   const currentId = isControlled ? controlledActiveId : uncontrolledActiveId;
   const active = items.find((item) => item.id === currentId) ?? items[0];
 
@@ -318,11 +309,7 @@ export function CodeBlockGroup({
   }
 
   return (
-    <div
-      data-slot="code-block-group"
-      className={cn("sui-codeblock-group", className)}
-      {...props}
-    >
+    <div data-slot="code-block-group" className={cn("sui-codeblock-group", className)} {...props}>
       <CodeBlockTabsIdContext.Provider value={baseId}>
         {items.length ? (
           <CodeBlockHeader className="sui-codeblock-group-header">

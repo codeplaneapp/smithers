@@ -176,49 +176,45 @@ function tempRepo(): string {
 }
 
 describe("main (agentless full run, subprocess)", () => {
-  test(
-    "runs the workflow, reports progress + summary, tolerates publish failure, writes the summary file",
-    () => {
-      const repo = tempRepo();
-      const work = mkdtempSync(join(tmpdir(), "review-main-work-"));
-      tempDirs.push(work);
-      const outPath = join(work, "walkthrough.html");
-      const summaryPath = join(work, "summary.json");
+  test("runs the workflow, reports progress + summary, tolerates publish failure, writes the summary file", () => {
+    const repo = tempRepo();
+    const work = mkdtempSync(join(tmpdir(), "review-main-work-"));
+    tempDirs.push(work);
+    const outPath = join(work, "walkthrough.html");
+    const summaryPath = join(work, "summary.json");
 
-      const result = spawnMain(
-        [repo, "--no-review", "--no-narrate", "--publish", "--out", outPath, "--db", join(work, "review.db")],
-        {
-          // A port nothing listens on: publish must fail without failing the run.
-          SMITHERS_REVIEW_PUBLISH_URL: "http://127.0.0.1:9",
-          SMITHERS_REVIEW_PUBLISH_TOKEN: "srs_test",
-          SMITHERS_REVIEW_SUMMARY_PATH: summaryPath,
-          GITHUB_ACTIONS: "true",
-        },
-      );
+    const result = spawnMain(
+      [repo, "--no-review", "--no-narrate", "--publish", "--out", outPath, "--db", join(work, "review.db")],
+      {
+        // A port nothing listens on: publish must fail without failing the run.
+        SMITHERS_REVIEW_PUBLISH_URL: "http://127.0.0.1:9",
+        SMITHERS_REVIEW_PUBLISH_TOKEN: "srs_test",
+        SMITHERS_REVIEW_SUMMARY_PATH: summaryPath,
+        GITHUB_ACTIONS: "true",
+      },
+    );
 
-      expect(result.exitCode).toBe(0);
-      expect(existsSync(outPath)).toBe(true);
-      expect(result.stderr).toContain("walkthrough: rendering HTML…");
-      expect(result.stderr).toContain("findings: none");
-      expect(result.stderr).toContain("publish failed (non-fatal)");
-      expect(result.stdout).toContain("::warning::smithers review publish failed");
-      expect(result.stdout).toContain(`Walkthrough: ${outPath}`);
+    expect(result.exitCode).toBe(0);
+    expect(existsSync(outPath)).toBe(true);
+    expect(result.stderr).toContain("walkthrough: rendering HTML…");
+    expect(result.stderr).toContain("findings: none");
+    expect(result.stderr).toContain("publish failed (non-fatal)");
+    expect(result.stdout).toContain("::warning::smithers review publish failed");
+    expect(result.stdout).toContain(`Walkthrough: ${outPath}`);
 
-      const summary = JSON.parse(readFileSync(summaryPath, "utf8")) as {
-        files: number;
-        findings: number;
-        publishError: string;
-        severity: Record<string, number>;
-        impact: string;
-        questions: number;
-      };
-      expect(summary.files).toBe(1);
-      expect(summary.findings).toBe(0);
-      expect(summary.publishError).not.toBe("");
-      expect(summary.severity).toEqual({ critical: 0, major: 0, minor: 0, info: 0 });
-      expect(summary.impact).toBe("low");
-      expect(summary.questions).toBe(0);
-    },
-    120_000,
-  );
+    const summary = JSON.parse(readFileSync(summaryPath, "utf8")) as {
+      files: number;
+      findings: number;
+      publishError: string;
+      severity: Record<string, number>;
+      impact: string;
+      questions: number;
+    };
+    expect(summary.files).toBe(1);
+    expect(summary.findings).toBe(0);
+    expect(summary.publishError).not.toBe("");
+    expect(summary.severity).toEqual({ critical: 0, major: 0, minor: 0, info: 0 });
+    expect(summary.impact).toBe("low");
+    expect(summary.questions).toBe(0);
+  }, 120_000);
 });

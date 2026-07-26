@@ -1,5 +1,7 @@
-import { integer, sqliteTable, text, primaryKey, uniqueIndex, } from "drizzle-orm/sqlite-core";
-export const smithersToolCalls = sqliteTable("_smithers_tool_calls", {
+import { integer, sqliteTable, text, primaryKey, uniqueIndex } from "drizzle-orm/sqlite-core";
+export const smithersToolCalls = sqliteTable(
+  "_smithers_tool_calls",
+  {
     runId: text("run_id").notNull(),
     nodeId: text("node_id").notNull(),
     iteration: integer("iteration").notNull().default(0),
@@ -20,14 +22,16 @@ export const smithersToolCalls = sqliteTable("_smithers_tool_calls", {
     hasRevert: integer("has_revert", { mode: "boolean" }),
     idempotencyKey: text("idempotency_key"),
     revertStatus: text("revert_status", {
-        enum: ["reverting", "reverted", "revert-failed", "revert-stale"],
+      enum: ["reverting", "reverted", "revert-failed", "revert-stale"],
     }),
     revertedAtMs: integer("reverted_at_ms"),
     revertErrorJson: text("revert_error_json"),
     forcedPastJson: text("forced_past_json"),
-}, (t) => ({
+  },
+  (t) => ({
     pk: primaryKey({
-        columns: [t.runId, t.nodeId, t.iteration, t.attempt, t.seq],
+      columns: [t.runId, t.nodeId, t.iteration, t.attempt, t.seq],
     }),
     callTokenUnique: uniqueIndex("_smithers_tool_calls_call_token_uidx").on(t.callToken),
-}));
+  }),
+);

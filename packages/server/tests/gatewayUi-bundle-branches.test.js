@@ -83,7 +83,11 @@ describe("gateway UI bundle branch coverage", () => {
     const entry = join(tempDir, "entry.tsx");
     writeFileSync(
       entry,
-      ['import * as GatewayClient from "@smithers-orchestrator/gateway-client";', "console.log(GatewayClient);", ""].join("\n"),
+      [
+        'import * as GatewayClient from "@smithers-orchestrator/gateway-client";',
+        "console.log(GatewayClient);",
+        "",
+      ].join("\n"),
     );
     const body = await bundleGatewayUiEntry({ entry }, new Map());
     expect(body.length).toBeGreaterThan(0);

@@ -21,16 +21,11 @@ test.describe("control request dialog", () => {
 
     await expect(dialog).toBeVisible();
     await expect(dialog).toHaveAccessibleName(dialogName);
-    await expect(dialog).toHaveAccessibleDescription(
-      new RegExp(`${reason}.*Switch to dark theme`),
-    );
+    await expect(dialog).toHaveAccessibleDescription(new RegExp(`${reason}.*Switch to dark theme`));
     await expect(dialog).toHaveAttribute("aria-modal", "true");
     await expect(dialog).toHaveAttribute("aria-labelledby", "control-dialog-title");
     await expect(dialog).toHaveAttribute("aria-describedby", "control-dialog-description");
-    await expect(dialog.getByRole("heading", { name: dialogName })).toHaveAttribute(
-      "id",
-      "control-dialog-title",
-    );
+    await expect(dialog.getByRole("heading", { name: dialogName })).toHaveAttribute("id", "control-dialog-title");
     await expect(dialog.getByText(reason)).toBeVisible();
     await expect(dialog.getByText("Switch to dark theme")).toBeVisible();
     await expect(deny).toHaveAccessibleName("Deny");

@@ -49,7 +49,9 @@ describe("server run lifecycle continuations", () => {
     // Let fire-and-forget run continuations settle before deleting their DBs.
     await sleep(700);
     if (testDir) {
-      try { rmSync(testDir, { recursive: true, force: true }); } catch {}
+      try {
+        rmSync(testDir, { recursive: true, force: true });
+      } catch {}
       testDir = undefined;
     }
   });

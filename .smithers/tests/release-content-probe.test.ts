@@ -33,7 +33,11 @@ beforeAll(() => {
 
 afterAll(() => {
   process.chdir(previousCwd);
-  try { rmSync(repoDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
+  try {
+    rmSync(repoDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch {
+    /* best-effort temp cleanup */
+  }
 });
 
 describe("probeRelease version resolution", () => {

@@ -122,9 +122,7 @@ describe("ActivityTimeline", () => {
 
   test("renders under the dark theme", async () => {
     document.documentElement.dataset.theme = "dark";
-    await render(
-      <ActivityTimeline items={[{ id: "d1", kind: "failure", title: "Boom", status: "failed" }]} />,
-    );
+    await render(<ActivityTimeline items={[{ id: "d1", kind: "failure", title: "Boom", status: "failed" }]} />);
     const item = container!.querySelector('[data-slot="activity-item"]')!;
     expect(item.getAttribute("data-kind")).toBe("failure");
     expect(item.querySelector(".sui-activity-marker")?.textContent).toBe("✕");

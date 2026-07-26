@@ -182,9 +182,21 @@ function App() {
   const runStatusClass = statusClass(activeRun?.status);
 
   const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
-  const implementOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "improve-test-coverage:implement", iteration: 0 });
-  const validateOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "improve-test-coverage:validate", iteration: 0 });
-  const reviewOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "improve-test-coverage:review:0", iteration: 0 });
+  const implementOut = useGatewayNodeOutput({
+    runId: activeRunId,
+    nodeId: "improve-test-coverage:implement",
+    iteration: 0,
+  });
+  const validateOut = useGatewayNodeOutput({
+    runId: activeRunId,
+    nodeId: "improve-test-coverage:validate",
+    iteration: 0,
+  });
+  const reviewOut = useGatewayNodeOutput({
+    runId: activeRunId,
+    nodeId: "improve-test-coverage:review:0",
+    iteration: 0,
+  });
 
   const implement = useMemo(() => extractImplement(implementOut.data), [implementOut.data]);
   const validate = useMemo(() => extractValidate(validateOut.data), [validateOut.data]);
@@ -202,12 +214,7 @@ function App() {
   }
 
   async function refresh() {
-    await Promise.all([
-      runsQuery.refetch(),
-      implementOut.refetch(),
-      validateOut.refetch(),
-      reviewOut.refetch(),
-    ]);
+    await Promise.all([runsQuery.refetch(), implementOut.refetch(), validateOut.refetch(), reviewOut.refetch()]);
   }
   async function launch() {
     setBusy(true);
@@ -253,11 +260,17 @@ function App() {
             <span className="mono">{activeRunId ? shortRunId(activeRunId) : "No run"}</span>
           </span>
           {activeRun ? (
-            <span className={"badge " + runStatusClass} data-testid="improve-test-coverage-status">{activeRun.status ?? "idle"}</span>
+            <span className={"badge " + runStatusClass} data-testid="improve-test-coverage-status">
+              {activeRun.status ?? "idle"}
+            </span>
           ) : null}
           {activeRunId ? (
             <span className="iter-pill" data-testid="improve-test-coverage-iteration">
-              {runStatusClass === "finished" ? "complete" : runStatusClass === "running" ? "running (max 3)" : "iteration / 3"}
+              {runStatusClass === "finished"
+                ? "complete"
+                : runStatusClass === "running"
+                  ? "running (max 3)"
+                  : "iteration / 3"}
             </span>
           ) : null}
         </div>
@@ -269,14 +282,42 @@ function App() {
             onChange={(e) => setPrompt(e.currentTarget.value)}
             placeholder="What coverage should we improve?"
           />
-          <button className="button" data-testid="improve-test-coverage-refresh" onClick={() => void refresh()} disabled={busy}>Refresh</button>
+          <button
+            className="button"
+            data-testid="improve-test-coverage-refresh"
+            onClick={() => void refresh()}
+            disabled={busy}
+          >
+            Refresh
+          </button>
           {activeRun && runStatusClass === "running" ? (
-            <button className="button danger" data-testid="improve-test-coverage-cancel" onClick={() => void cancel()} disabled={busy}>Cancel</button>
+            <button
+              className="button danger"
+              data-testid="improve-test-coverage-cancel"
+              onClick={() => void cancel()}
+              disabled={busy}
+            >
+              Cancel
+            </button>
           ) : null}
           {activeRun && (runStatusClass === "finished" || runStatusClass === "failed") ? (
-            <button className="button" data-testid="improve-test-coverage-resume" onClick={() => void launch()} disabled={busy}>Retry</button>
+            <button
+              className="button"
+              data-testid="improve-test-coverage-resume"
+              onClick={() => void launch()}
+              disabled={busy}
+            >
+              Retry
+            </button>
           ) : null}
-          <button className="button primary" data-testid="improve-test-coverage-launch" onClick={() => void launch()} disabled={busy}>Launch</button>
+          <button
+            className="button primary"
+            data-testid="improve-test-coverage-launch"
+            onClick={() => void launch()}
+            disabled={busy}
+          >
+            Launch
+          </button>
         </div>
       </header>
 
@@ -316,7 +357,9 @@ function App() {
                         ))}
                       </ul>
                     ) : (
-                      <div className="inline-empty" data-testid="improve-test-coverage-files-empty">No files changed reported yet.</div>
+                      <div className="inline-empty" data-testid="improve-test-coverage-files-empty">
+                        No files changed reported yet.
+                      </div>
                     )}
                   </>
                 ) : (
@@ -338,7 +381,9 @@ function App() {
                     <>
                       <div className="summary-text">{validate.summary}</div>
                       {validate.failingSummary ? (
-                        <div className="fail-box" data-testid="improve-test-coverage-failing">{validate.failingSummary}</div>
+                        <div className="fail-box" data-testid="improve-test-coverage-failing">
+                          {validate.failingSummary}
+                        </div>
                       ) : null}
                     </>
                   ) : (
@@ -371,7 +416,9 @@ function App() {
                           </div>
                         ))
                       ) : (
-                        <div className="inline-empty" data-testid="improve-test-coverage-issues-empty">No issues raised by this reviewer.</div>
+                        <div className="inline-empty" data-testid="improve-test-coverage-issues-empty">
+                          No issues raised by this reviewer.
+                        </div>
                       )}
                     </div>
                   ) : (
@@ -392,8 +439,16 @@ function App() {
           ) : (
             <div className="hero" data-testid="improve-test-coverage-empty">
               <h2>Improve Test Coverage</h2>
-              <p>Add high-impact missing tests for this repository. Start a run to find the gaps and verify the new tests pass.</p>
-              <button className="button primary" data-testid="improve-test-coverage-launch-empty" onClick={() => void launch()} disabled={busy}>
+              <p>
+                Add high-impact missing tests for this repository. Start a run to find the gaps and verify the new tests
+                pass.
+              </p>
+              <button
+                className="button primary"
+                data-testid="improve-test-coverage-launch-empty"
+                onClick={() => void launch()}
+                disabled={busy}
+              >
                 Launch run
               </button>
             </div>

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { parseTicketFleetDispositionRows, ticketFleetDisposition, type TicketFleetLaneFacts } from "../lib/ticketFleetDisposition";
+import {
+  parseTicketFleetDispositionRows,
+  ticketFleetDisposition,
+  type TicketFleetLaneFacts,
+} from "../lib/ticketFleetDisposition";
 
 const lane = (issueNumber: number, overrides: Partial<TicketFleetLaneFacts> = {}): TicketFleetLaneFacts => ({
   issueNumber,
@@ -27,12 +31,17 @@ describe("ticketFleetDisposition", () => {
   test("accounts for all 17 selected issues when only four land", () => {
     const landed = new Set([564, 594, 632, 789]);
     const issueNumbers = [564, 594, 632, 789, 801, 802, 803, 804, 805, 806, 807, 808, 809, 810, 811, 812, 813];
-    const result = ticketFleetDisposition(issueNumbers.map((issueNumber) => landed.has(issueNumber)
-      ? lane(issueNumber, { landed: true, landedSha: `sha-${issueNumber}`, readiness: { ready: true } })
-      : lane(issueNumber, { readiness: { ready: false, reason: `#${issueNumber} failed readiness` } })), {
-      maxEvictions: 2,
-      finalizeUnresolved: true,
-    });
+    const result = ticketFleetDisposition(
+      issueNumbers.map((issueNumber) =>
+        landed.has(issueNumber)
+          ? lane(issueNumber, { landed: true, landedSha: `sha-${issueNumber}`, readiness: { ready: true } })
+          : lane(issueNumber, { readiness: { ready: false, reason: `#${issueNumber} failed readiness` } }),
+      ),
+      {
+        maxEvictions: 2,
+        finalizeUnresolved: true,
+      },
+    );
 
     expect(result.counts).toEqual({
       selected: 17,
@@ -51,29 +60,35 @@ describe("ticketFleetDisposition", () => {
   });
 
   test("parks a lane only after it reaches the eviction limit", () => {
-    const result = ticketFleetDisposition([
-      lane(41, { readiness: { ready: true }, evictionCount: 2 }),
-    ], { maxEvictions: 2, finalizeUnresolved: false });
+    const result = ticketFleetDisposition([lane(41, { readiness: { ready: true }, evictionCount: 2 })], {
+      maxEvictions: 2,
+      finalizeUnresolved: false,
+    });
 
-    expect(result.rows).toEqual([{
-      issueNumber: 41,
-      kind: "parked",
-      reason: "Parked after 2 merge-train evictions.",
-      terminal: true,
-    }]);
+    expect(result.rows).toEqual([
+      {
+        issueNumber: 41,
+        kind: "parked",
+        reason: "Parked after 2 merge-train evictions.",
+        terminal: true,
+      },
+    ]);
     expect(result.counts.parked).toBe(1);
     expect(result.allTerminal).toBe(true);
     expect(result.successful).toBe(false);
   });
 
   test("records a denied required approval as terminal unlanded", () => {
-    const result = ticketFleetDisposition([
-      lane(42, {
-        readiness: { ready: true },
-        needsApproval: true,
-        approval: { approved: false, reason: "Risk owner declined the merge." },
-      }),
-    ], { maxEvictions: 2, finalizeUnresolved: false });
+    const result = ticketFleetDisposition(
+      [
+        lane(42, {
+          readiness: { ready: true },
+          needsApproval: true,
+          approval: { approved: false, reason: "Risk owner declined the merge." },
+        }),
+      ],
+      { maxEvictions: 2, finalizeUnresolved: false },
+    );
 
     expect(result.rows[0]).toEqual({
       issueNumber: 42,
@@ -86,29 +101,35 @@ describe("ticketFleetDisposition", () => {
   });
 
   test("settles a simulated dry-run landing without counting it as landed", () => {
-    const result = ticketFleetDisposition([
-      lane(43, {
-        readiness: { ready: true },
-        simulated: true,
-        landedSha: "simulated-43",
-      }),
-    ], { maxEvictions: 2, finalizeUnresolved: false });
+    const result = ticketFleetDisposition(
+      [
+        lane(43, {
+          readiness: { ready: true },
+          simulated: true,
+          landedSha: "simulated-43",
+        }),
+      ],
+      { maxEvictions: 2, finalizeUnresolved: false },
+    );
 
-    expect(result.rows).toEqual([{
-      issueNumber: 43,
-      kind: "unlanded",
-      reason: "Dry run simulated a merge-train landing at simulated-43; no push to main occurred.",
-      terminal: true,
-    }]);
+    expect(result.rows).toEqual([
+      {
+        issueNumber: 43,
+        kind: "unlanded",
+        reason: "Dry run simulated a merge-train landing at simulated-43; no push to main occurred.",
+        terminal: true,
+      },
+    ]);
     expect(result.counts).toMatchObject({ landed: 0, unlanded: 1, pending: 0 });
     expect(result.allTerminal).toBe(true);
     expect(result.successful).toBe(false);
   });
 
   test("actual landing outranks contradictory simulated provenance", () => {
-    const result = ticketFleetDisposition([
-      lane(44, { landed: true, simulated: true, landedSha: "actual-44" }),
-    ], { maxEvictions: 2, finalizeUnresolved: false });
+    const result = ticketFleetDisposition([lane(44, { landed: true, simulated: true, landedSha: "actual-44" })], {
+      maxEvictions: 2,
+      finalizeUnresolved: false,
+    });
 
     expect(result.rows[0]).toMatchObject({ kind: "landed", terminal: true });
     expect(result.counts).toMatchObject({ landed: 1, unlanded: 0 });

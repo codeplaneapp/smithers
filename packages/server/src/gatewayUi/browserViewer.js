@@ -4,7 +4,12 @@ function safeJson(value) {
 
 function validOrigin(value) {
   if (!value) return "";
-  try { const url = new URL(value); return (url.protocol === "http:" || url.protocol === "https:") && url.origin === value ? value : ""; } catch { return ""; }
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:") && url.origin === value ? value : "";
+  } catch {
+    return "";
+  }
 }
 
 /** Render the credential-free stationary browser viewer. */

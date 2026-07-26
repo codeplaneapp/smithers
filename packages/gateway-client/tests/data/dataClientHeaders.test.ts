@@ -109,7 +109,10 @@ describe("createSmithersDataClient custom headers", () => {
     class FakeEventSource {
       onopen: ((event: Event) => void) | null = null;
       onerror: ((event: Event) => void) | null = null;
-      constructor(public url: string, init?: EventSourceInit & { headers?: Record<string, string> }) {
+      constructor(
+        public url: string,
+        init?: EventSourceInit & { headers?: Record<string, string> },
+      ) {
         inits.push(init?.headers);
         queueMicrotask(() => this.onopen?.(new Event("open")));
       }
@@ -120,7 +123,9 @@ describe("createSmithersDataClient custom headers", () => {
     const client = createSmithersDataClient({
       mode: { kind: "local", apiBaseUrl: "http://gateway.test/", token: "tok" },
       headers: { "x-api-key": "key-1" },
-      EventSource: FakeEventSource as unknown as NonNullable<Parameters<typeof createSmithersDataClient>[0]["EventSource"]>,
+      EventSource: FakeEventSource as unknown as NonNullable<
+        Parameters<typeof createSmithersDataClient>[0]["EventSource"]
+      >,
     });
     const unsubscribe = client.stream.subscribe(() => {});
     await waitFor(() => inits.length > 0);

@@ -27,14 +27,17 @@ function adapterFor(outputTable: string, opts?: { state?: string; attempts?: any
   };
 }
 
-function invoke(workflow: any, opts?: {
-  selectOutputRowImpl?: any;
-  iteration?: unknown;
-  adapter?: any;
-  outputTable?: string;
-  state?: string;
-  attempts?: any[];
-}) {
+function invoke(
+  workflow: any,
+  opts?: {
+    selectOutputRowImpl?: any;
+    iteration?: unknown;
+    adapter?: any;
+    outputTable?: string;
+    state?: string;
+    attempts?: any[];
+  },
+) {
   const outputTable = opts?.outputTable ?? "result";
   return getNodeOutputRoute({
     runId: "run_1",
@@ -130,9 +133,9 @@ describe("getNodeOutputRoute row + error branches", () => {
   }
 
   test("non-object row yields MalformedOutputRow", async () => {
-    await expect(
-      invoke(registryWorkflow(), { selectOutputRowImpl: async () => 42 }),
-    ).rejects.toMatchObject({ code: "MalformedOutputRow" });
+    await expect(invoke(registryWorkflow(), { selectOutputRowImpl: async () => 42 })).rejects.toMatchObject({
+      code: "MalformedOutputRow",
+    });
   });
 
   test("payload-only row is unwrapped to its payload", async () => {

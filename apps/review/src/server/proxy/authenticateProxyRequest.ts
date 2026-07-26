@@ -51,10 +51,9 @@ export async function authenticateProxyRequest(
   if (!credential) return null;
 
   const hash = await sha256Hex(credential);
-  const session = await env.DB
-    .prepare(
-      "SELECT hash, repo, pr, expires_at, spend_cap_usd, spent_usd FROM sessions WHERE hash = ?",
-    )
+  const session = await env.DB.prepare(
+    "SELECT hash, repo, pr, expires_at, spend_cap_usd, spent_usd FROM sessions WHERE hash = ?",
+  )
     .bind(hash)
     .first<SessionRow>();
   if (session) {

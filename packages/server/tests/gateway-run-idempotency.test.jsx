@@ -21,10 +21,7 @@ function makeDbPath(name) {
 }
 
 function createWorkflow(dbPath) {
-  const { smithers, Workflow, Task, outputs } = createSmithers(
-    { out: z.object({ value: z.number() }) },
-    { dbPath },
-  );
+  const { smithers, Workflow, Task, outputs } = createSmithers({ out: z.object({ value: z.number() }) }, { dbPath });
   return smithers(() => (
     <Workflow name="idem">
       <Task id="a" output={outputs.out}>
@@ -43,10 +40,7 @@ function deferred() {
 }
 
 function createSequencedWorkflow(dbPath) {
-  const api = createSmithers(
-    { out: z.object({ value: z.number() }) },
-    { dbPath },
-  );
+  const api = createSmithers({ out: z.object({ value: z.number() }) }, { dbPath });
   const started = [deferred(), deferred()];
   const releases = [deferred(), deferred()];
   let taskInvocations = 0;
@@ -93,9 +87,9 @@ describe("gateway run-id ownership", () => {
     gateway.register("idem", createWorkflow(dbPath));
     // A run is already live under this id (seeded to avoid a launch race).
     gateway.activeRuns.set("shared-id", { workflowKey: "idem" });
-    await expect(
-      gateway.startRun("idem", {}, AUTH, "shared-id", { resume: false }),
-    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(gateway.startRun("idem", {}, AUTH, "shared-id", { resume: false })).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
     // The original record is intact — the guard fired before clobbering it.
     expect(gateway.activeRuns.get("shared-id")).toEqual({ workflowKey: "idem" });
   });
@@ -169,12 +163,7 @@ describe("gateway run-id ownership", () => {
       return pending;
     };
 
-    const resumes = Array.from({ length: 8 }, () => gateway.resumeRunIfNeeded(
-      runId,
-      "idem",
-      yieldingAdapter,
-      AUTH,
-    ));
+    const resumes = Array.from({ length: 8 }, () => gateway.resumeRunIfNeeded(runId, "idem", yieldingAdapter, AUTH));
     await lookupStarted.promise;
     const lookupCallsWhileYielded = lookupCalls;
     releaseLookup.resolve();

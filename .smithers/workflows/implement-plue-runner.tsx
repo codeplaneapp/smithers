@@ -23,10 +23,7 @@ import {
   validateOutputSchema,
   validationLoopState,
 } from "../components/ValidationLoop";
-import {
-  reviewOutputSchema,
-  reviewSynthesisSchema,
-} from "../components/Review";
+import { reviewOutputSchema, reviewSynthesisSchema } from "../components/Review";
 
 const SPEC = ".smithers/specs/run-on-plue.md";
 const SMITHERS_REPO = ".";
@@ -286,11 +283,7 @@ VALIDATION:
 Commit docs with explicit pathspecs ("📝 docs: plue runner + provider docs",
 one commit per repo).`;
 
-function milestoneState(
-  ctx: Parameters<Parameters<typeof smithers>[0]>[0],
-  prefix: string,
-  maxIterations: number,
-) {
+function milestoneState(ctx: Parameters<Parameters<typeof smithers>[0]>[0], prefix: string, maxIterations: number) {
   return validationLoopState(ctx, { prefix, maxIterations });
 }
 
@@ -346,7 +339,9 @@ run-on-plue with the demo child).`;
               ) : null}
               {state.exhausted ? (
                 <Task id={`${prefix}:exhausted`} output={outputs.failure} retries={0}>
-                  {() => { throw new Error(`Implement Plue Runner exhausted ${prefix} after ${maxIterations} attempts`); }}
+                  {() => {
+                    throw new Error(`Implement Plue Runner exhausted ${prefix} after ${maxIterations} attempts`);
+                  }}
                 </Task>
               ) : null}
             </Sequence>

@@ -18,25 +18,24 @@ import { join } from "node:path";
  * @returns {{ accessToken: string; expiresAt?: number } | null}
  */
 export function readClaudeCredentials(account, platform = process.platform, spawn = spawnSync) {
-    if (account.configDir) {
-        const path = join(account.configDir, ".credentials.json");
-        if (existsSync(path)) {
-            const parsed = parseCredentials(readFileSafe(path));
-            if (parsed) return parsed;
-        }
+  if (account.configDir) {
+    const path = join(account.configDir, ".credentials.json");
+    if (existsSync(path)) {
+      const parsed = parseCredentials(readFileSafe(path));
+      if (parsed) return parsed;
     }
-    if (platform === "darwin") {
-        const result = spawn(
-            "security",
-            ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
-            { stdio: ["ignore", "pipe", "ignore"], timeout: 4_000 },
-        );
-        if (result.status === 0) {
-            const parsed = parseCredentials(result.stdout?.toString("utf8") ?? "");
-            if (parsed) return parsed;
-        }
+  }
+  if (platform === "darwin") {
+    const result = spawn("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"], {
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 4_000,
+    });
+    if (result.status === 0) {
+      const parsed = parseCredentials(result.stdout?.toString("utf8") ?? "");
+      if (parsed) return parsed;
     }
-    return null;
+  }
+  return null;
 }
 
 /**
@@ -44,11 +43,11 @@ export function readClaudeCredentials(account, platform = process.platform, spaw
  * @returns {string}
  */
 function readFileSafe(path) {
-    try {
-        return readFileSync(path, "utf8");
-    } catch {
-        return "";
-    }
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -56,15 +55,15 @@ function readFileSafe(path) {
  * @returns {{ accessToken: string; expiresAt?: number } | null}
  */
 function parseCredentials(raw) {
-    if (!raw.trim()) return null;
-    try {
-        const json = JSON.parse(raw);
-        const oauth = json?.claudeAiOauth;
-        const accessToken = oauth?.accessToken;
-        if (typeof accessToken !== "string" || accessToken === "") return null;
-        const expiresAt = typeof oauth?.expiresAt === "number" ? oauth.expiresAt : undefined;
-        return { accessToken, expiresAt };
-    } catch {
-        return null;
-    }
+  if (!raw.trim()) return null;
+  try {
+    const json = JSON.parse(raw);
+    const oauth = json?.claudeAiOauth;
+    const accessToken = oauth?.accessToken;
+    if (typeof accessToken !== "string" || accessToken === "") return null;
+    const expiresAt = typeof oauth?.expiresAt === "number" ? oauth.expiresAt : undefined;
+    return { accessToken, expiresAt };
+  } catch {
+    return null;
+  }
 }

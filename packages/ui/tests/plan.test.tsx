@@ -123,8 +123,8 @@ describe("Plan", () => {
   });
 
   test("maps every plan status to the shared vocabulary", () => {
-    expect(["pending", "active", "done", "failed", "skipped"].map((status) =>
-      planStepStatus(status as PlanStep["status"]),
-    )).toEqual(["pending", "running", "complete", "failed", "skipped"]);
+    expect(
+      ["pending", "active", "done", "failed", "skipped"].map((status) => planStepStatus(status as PlanStep["status"])),
+    ).toEqual(["pending", "running", "complete", "failed", "skipped"]);
   });
 });

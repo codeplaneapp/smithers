@@ -1,10 +1,5 @@
 /** @jsxImportSource react */
-import type {
-  ComponentProps,
-  FormEvent,
-  KeyboardEvent as ReactKeyboardEvent,
-  ReactNode,
-} from "react";
+import type { ComponentProps, FormEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { Button } from "../button";
 import { cn } from "../cn";
 import { useInjectUiCss } from "../styles";

@@ -43,7 +43,9 @@ const inputSchema = z.object({
     .string()
     .nullable()
     .default(null)
-    .describe("Path to a Telegram Desktop JSON export, Bot API updates JSON, plain text transcript, or JSONL message log."),
+    .describe(
+      "Path to a Telegram Desktop JSON export, Bot API updates JSON, plain text transcript, or JSONL message log.",
+    ),
   sinceHours: z
     .number()
     .int()
@@ -68,13 +70,17 @@ const inputSchema = z.object({
     .nullable()
     .default(null)
     .describe("Maximum transcript characters sent to the summarizer."),
-  topicHint: z
+  topicHint: z.string().nullable().default(null).describe("Optional context about what the group cares about."),
+  openaiApiKeyEnv: z
     .string()
     .nullable()
     .default(null)
-    .describe("Optional context about what the group cares about."),
-  openaiApiKeyEnv: z.string().nullable().default(null).describe(`Environment variable containing the OpenAI API key. Defaults to ${DEFAULT_OPENAI_KEY_ENV}.`),
-  openaiModel: z.string().nullable().default(null).describe(`Primary summarizer model. Defaults to ${DEFAULT_OPENAI_MODEL_ENV}, then ${DEFAULT_OPENAI_MODEL}.`),
+    .describe(`Environment variable containing the OpenAI API key. Defaults to ${DEFAULT_OPENAI_KEY_ENV}.`),
+  openaiModel: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe(`Primary summarizer model. Defaults to ${DEFAULT_OPENAI_MODEL_ENV}, then ${DEFAULT_OPENAI_MODEL}.`),
   kimiApiKeyEnv: z
     .string()
     .nullable()
@@ -169,9 +175,7 @@ const digestSchema = z.object({
       }),
     )
     .default([]),
-  notableLinks: z
-    .array(z.object({ label: z.string(), url: z.string(), context: z.string().default("") }))
-    .default([]),
+  notableLinks: z.array(z.object({ label: z.string(), url: z.string(), context: z.string().default("") })).default([]),
   actionItems: z.array(z.string()).default([]),
   openQuestions: z.array(z.string()).default([]),
   caveats: z.array(z.string()).default([]),
@@ -601,7 +605,9 @@ async function telegramCall<T>(token: string, method: string, body: Record<strin
   return parsed.result as T;
 }
 
-async function collectTelegramUpdates(input: NormalizedInput): Promise<{ updates: unknown[]; nextUpdateId: number | null; warnings: string[] }> {
+async function collectTelegramUpdates(
+  input: NormalizedInput,
+): Promise<{ updates: unknown[]; nextUpdateId: number | null; warnings: string[] }> {
   const token = envString(input.telegramBotTokenEnv);
   if (!token) {
     return {
@@ -694,7 +700,10 @@ async function collectMessages(input: NormalizedInput): Promise<CollectOutput> {
   };
 }
 
-function transcriptForPrompt(collect: CollectOutput, input: NormalizedInput): { transcript: string; truncated: boolean } {
+function transcriptForPrompt(
+  collect: CollectOutput,
+  input: NormalizedInput,
+): { transcript: string; truncated: boolean } {
   const lines = collect.messages.map((message, index) => {
     const when = message.at ?? "no timestamp";
     const url = message.url ? ` (${message.url})` : "";
@@ -918,7 +927,9 @@ function renderDigestMarkdown(collect: CollectOutput, digest: DigestOutput, inpu
     : "## Topics\n\nNo topics found.";
 
   const links = digest.notableLinks.length
-    ? digest.notableLinks.map((link) => `- ${link.label}: ${link.url}${link.context ? ` (${link.context})` : ""}`).join("\n")
+    ? digest.notableLinks
+        .map((link) => `- ${link.label}: ${link.url}${link.context ? ` (${link.context})` : ""}`)
+        .join("\n")
     : "- None";
 
   return [
@@ -1062,7 +1073,11 @@ async function publishDigest(report: ReportOutput, input: NormalizedInput): Prom
   };
 }
 
-function acknowledgeTelegram(collect: CollectOutput, publish: PublishOutput, input: NormalizedInput): z.infer<typeof ackSchema> {
+function acknowledgeTelegram(
+  collect: CollectOutput,
+  publish: PublishOutput,
+  input: NormalizedInput,
+): z.infer<typeof ackSchema> {
   if (collect.source !== "telegramBotApi" || collect.nextUpdateId === null) {
     return {
       acknowledged: false,

@@ -16,11 +16,7 @@ interface MintBody {
  * trip it through the database, and never allow a list endpoint that could
  * leak it (only hashes are listable, intentionally not exposed here).
  */
-export async function handleAdminKeys(
-  request: Request,
-  env: ReviewWorkerEnv,
-  now: number,
-): Promise<Response> {
+export async function handleAdminKeys(request: Request, env: ReviewWorkerEnv, now: number): Promise<Response> {
   const expected = `Bearer ${env.ADMIN_TOKEN ?? ""}`;
   const got = request.headers.get("authorization") ?? "";
   if (!env.ADMIN_TOKEN || !timingSafeStringEqual(got, expected)) {
@@ -44,10 +40,9 @@ export async function handleAdminKeys(
   }
   const key = `srk_${randomTokenHex(24)}`;
   const hash = await sha256Hex(key);
-  await env.DB
-    .prepare(
-      "INSERT INTO api_keys (hash, owner, repos_json, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
-    )
+  await env.DB.prepare(
+    "INSERT INTO api_keys (hash, owner, repos_json, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
+  )
     .bind(hash, body.owner, JSON.stringify(repos), spendCapUsd, now)
     .run();
   return Response.json({ key, owner: body.owner, repos, spendCapUsd }, { status: 201 });

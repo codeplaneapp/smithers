@@ -64,12 +64,7 @@ function joinParts(value: unknown, acceptedTypes?: ReadonlySet<string>): string 
 
 const RESPONSE_PART_TYPES = new Set(["text", "output_text", "message", "assistant"]);
 const REASONING_SUMMARY_PART_TYPES = new Set(["summary", "summary_text", "reasoning_summary"]);
-const REASONING_CONTAINER_PART_TYPES = new Set([
-  "reasoning",
-  "thinking",
-  "thought",
-  ...REASONING_SUMMARY_PART_TYPES,
-]);
+const REASONING_CONTAINER_PART_TYPES = new Set(["reasoning", "thinking", "thought", ...REASONING_SUMMARY_PART_TYPES]);
 const TOOL_PART_TYPES = new Set(["tool-call", "tool_call", "tool-use", "tool_use"]);
 
 function contentParts(record: UnknownRecord): unknown {
@@ -81,9 +76,7 @@ function responseText(record: UnknownRecord): string | undefined {
   const direct = readString(record, ["markdown", "text", "response", "message", "output"]);
   if (direct) return direct;
   const message = isRecord(record.message) ? record.message : undefined;
-  const messageText = message
-    ? readString(message, ["markdown", "text", "response", "output"])
-    : undefined;
+  const messageText = message ? readString(message, ["markdown", "text", "response", "output"]) : undefined;
   if (messageText) return messageText;
   return joinParts(contentParts(record), RESPONSE_PART_TYPES);
 }
@@ -112,9 +105,7 @@ function summaryFromPart(value: unknown): string | undefined {
   const nested = value.summary;
   if (typeof nested === "string") return nested.trim() ? nested : undefined;
   if (Array.isArray(nested)) {
-    const texts = nested
-      .map((part) => summaryFromPart(part))
-      .filter((part): part is string => part !== undefined);
+    const texts = nested.map((part) => summaryFromPart(part)).filter((part): part is string => part !== undefined);
     if (texts.length) return texts.join("\n\n");
   }
   if (REASONING_SUMMARY_PART_TYPES.has(type.toLowerCase())) {
@@ -131,20 +122,23 @@ function reasoningSummaryText(record: UnknownRecord): string | undefined {
     ...readArray(record, ["reasoning", "thinking", "thought"]),
     ...(Array.isArray(content) ? content : []),
   ];
-  const texts = candidates
-    .map((part) => summaryFromPart(part))
-    .filter((part): part is string => part !== undefined);
+  const texts = candidates.map((part) => summaryFromPart(part)).filter((part): part is string => part !== undefined);
   return texts.length ? texts.join("\n\n") : undefined;
 }
 
 function normalizeToolState(value: unknown, call: UnknownRecord, streaming: boolean): ToolCallState {
   const state = typeof value === "string" ? value.toLowerCase().replaceAll("_", "-") : "";
   if (
-    state === "input-streaming" || state === "input-available" ||
-    state === "approval-requested" || state === "approval-responded" ||
-    state === "running" || state === "output-available" ||
-    state === "output-error" || state === "output-denied"
-  ) return state;
+    state === "input-streaming" ||
+    state === "input-available" ||
+    state === "approval-requested" ||
+    state === "approval-responded" ||
+    state === "running" ||
+    state === "output-available" ||
+    state === "output-error" ||
+    state === "output-denied"
+  )
+    return state;
   if (["streaming", "partial"].includes(state)) return "input-streaming";
   if (["pending", "ready", "queued"].includes(state)) return "input-available";
   if (["in-progress", "inprogress", "active"].includes(state)) return "running";
@@ -190,21 +184,27 @@ function parseToolCall(
 ): AgentOutputToolCall | undefined {
   if (!isRecord(value)) return undefined;
   const functionCall = isRecord(value.function) ? value.function : undefined;
-  const name = readString(value, ["toolName", "tool_name", "name", "tool"])
-    ?? (functionCall ? readString(functionCall, ["name"]) : undefined);
+  const name =
+    readString(value, ["toolName", "tool_name", "name", "tool"]) ??
+    (functionCall ? readString(functionCall, ["name"]) : undefined);
   if (!name) return undefined;
   const id = readString(value, ["toolCallId", "tool_call_id", "id"]) ?? `${name}:${index}`;
   const matchedResult = resultById.get(id);
   const args = value.input ?? value.args ?? value.arguments ?? functionCall?.arguments;
   const result = value.result ?? value.output ?? matchedResult?.result ?? matchedResult?.output;
   const error = value.errorText ?? value.error_text ?? value.error ?? matchedResult?.error;
-  const durationMs = readNumber(value, ["durationMs", "duration_ms"])
-    ?? (matchedResult ? readNumber(matchedResult, ["durationMs", "duration_ms"]) : undefined);
-  const state = normalizeToolState(value.state ?? value.status ?? matchedResult?.state ?? matchedResult?.status, {
-    ...value,
-    ...(result === undefined ? {} : { result }),
-    ...(error === undefined ? {} : { error }),
-  }, streaming);
+  const durationMs =
+    readNumber(value, ["durationMs", "duration_ms"]) ??
+    (matchedResult ? readNumber(matchedResult, ["durationMs", "duration_ms"]) : undefined);
+  const state = normalizeToolState(
+    value.state ?? value.status ?? matchedResult?.state ?? matchedResult?.status,
+    {
+      ...value,
+      ...(result === undefined ? {} : { result }),
+      ...(error === undefined ? {} : { error }),
+    },
+    streaming,
+  );
   return {
     id,
     name,
@@ -266,11 +266,7 @@ export function parseAgentOutput(value: unknown): AgentOutputModel | null {
   return parseValue(value, false, new WeakSet<object>());
 }
 
-function parseValue(
-  value: unknown,
-  inheritedStreaming: boolean,
-  seen: WeakSet<object>,
-): AgentOutputModel | null {
+function parseValue(value: unknown, inheritedStreaming: boolean, seen: WeakSet<object>): AgentOutputModel | null {
   if (typeof value === "string") {
     return value.trim() ? { response: value, toolCalls: [], streaming: inheritedStreaming } : null;
   }
@@ -279,8 +275,9 @@ function parseValue(
   seen.add(value);
 
   const status = readString(value, ["status", "state"]);
-  const streaming = readBoolean(value, ["streaming", "isStreaming", "is_streaming"])
-    ?? (status
+  const streaming =
+    readBoolean(value, ["streaming", "isStreaming", "is_streaming"]) ??
+    (status
       ? ["streaming", "running", "in-progress", "in_progress"].includes(status.toLowerCase())
       : inheritedStreaming);
   const response = responseText(value);

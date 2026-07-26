@@ -1,4 +1,4 @@
 export type WorkflowCta = {
-    command: string;
-    description: string;
+  command: string;
+  description: string;
 };

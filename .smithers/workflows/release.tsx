@@ -175,7 +175,10 @@ export default smithers((ctx) => {
               if (lastReleaseRef) {
                 try {
                   const out = run(`git log ${lastReleaseRef}..HEAD --oneline --no-merges`);
-                  commitsSinceRelease = out.split("\n").map((l) => l.trim()).filter(Boolean);
+                  commitsSinceRelease = out
+                    .split("\n")
+                    .map((l) => l.trim())
+                    .filter(Boolean);
                 } catch {
                   commitsSinceRelease = [];
                 }
@@ -244,9 +247,7 @@ export default smithers((ctx) => {
               };
               const group = findChangelogGroup(docs);
               if (!group) {
-                throw new Error(
-                  `Could not find a "Changelog" group in docs/docs.json to register ${pageId}.`,
-                );
+                throw new Error(`Could not find a "Changelog" group in docs/docs.json to register ${pageId}.`);
               }
               if (!group.pages.includes(pageId)) {
                 // Newest first — prepend so the latest release sits at the top.
@@ -263,9 +264,7 @@ export default smithers((ctx) => {
             const since = probe.lastPublishedVersion
               ? `v${probe.lastPublishedVersion}`
               : "(no published version found on npm)";
-            console.log(
-              `[release] v${probe.nextVersion} covers ${probe.commitCount} commit(s) since ${since}:`,
-            );
+            console.log(`[release] v${probe.nextVersion} covers ${probe.commitCount} commit(s) since ${since}:`);
             for (const line of probe.commitsSinceRelease) console.log(`  ${line}`);
             console.log(
               `[release] Confirm ${probe.changelogPath} reflects all ${probe.commitCount} commit(s) above before publishing.`,
@@ -289,10 +288,7 @@ export default smithers((ctx) => {
             const probe = ctx.outputMaybe(outputs.probe, { nodeId: "probe" });
             if (!probe) throw new Error("probe did not complete");
             const { hasApprovedMarketingContent } = await import("../lib/release-content/files");
-            const result = hasApprovedMarketingContent(
-              probe.nextVersion,
-              ctx.input.marketingArtifactDir,
-            );
+            const result = hasApprovedMarketingContent(probe.nextVersion, ctx.input.marketingArtifactDir);
             if (!result.ok) {
               throw new Error(
                 `${result.message}\n` +
@@ -313,11 +309,7 @@ export default smithers((ctx) => {
           <FeatureDocSyncAuditPrompt />
         </Task>
 
-        <Task
-          id="feature-doc-sync-gate"
-          output={outputs.featureDocSyncGate}
-          skipIf={ctx.input.skipFeatureDocSync}
-        >
+        <Task id="feature-doc-sync-gate" output={outputs.featureDocSyncGate} skipIf={ctx.input.skipFeatureDocSync}>
           {async () => {
             const audit = ctx.outputMaybe(outputs.featureDocSync, {
               nodeId: "feature-doc-sync",
@@ -328,9 +320,7 @@ export default smithers((ctx) => {
                 audit.missingFeatures.length
                   ? `Missing from .smithers/specs/features.ts:\n  - ${audit.missingFeatures.join("\n  - ")}`
                   : "",
-                audit.missingDocs.length
-                  ? `Missing from docs/:\n  - ${audit.missingDocs.join("\n  - ")}`
-                  : "",
+                audit.missingDocs.length ? `Missing from docs/:\n  - ${audit.missingDocs.join("\n  - ")}` : "",
               ]
                 .filter(Boolean)
                 .join("\n\n");
@@ -367,9 +357,9 @@ export default smithers((ctx) => {
             const probe = ctx.outputMaybe(outputs.probe, { nodeId: "probe" });
             if (!probe) throw new Error("probe did not complete");
             execSync(`pnpm version ${probe.bump}`, { cwd: process.cwd(), stdio: "inherit" });
-            const pkg = JSON.parse(
-              fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
-            ) as { version: string };
+            const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8")) as {
+              version: string;
+            };
             return { newVersion: pkg.version };
           }}
         </Task>

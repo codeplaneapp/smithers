@@ -32,14 +32,8 @@ export const reviewOutputSchema = z.object({
 // every panelist. MUST be a distinct schema object from reviewOutputSchema so
 // it resolves to its own output channel (channels are keyed by schema identity).
 export const reviewSynthesisSchema = z.object({
-  approved: z
-    .boolean()
-    .describe(
-      "true ONLY if there are no remaining critical or major issues across all reviewers",
-    ),
-  feedback: z
-    .string()
-    .describe("consolidated, actionable feedback merged from every reviewer"),
+  approved: z.boolean().describe("true ONLY if there are no remaining critical or major issues across all reviewers"),
+  feedback: z.string().describe("consolidated, actionable feedback merged from every reviewer"),
   issues: z.array(reviewIssueSchema).default([]),
 });
 
@@ -128,13 +122,8 @@ export type ReviewGate = {
  * `done` built on it advances and the feedback threaded into the next
  * implement attempt reflects the latest review.
  */
-export function reviewGate(
-  ctx: { latest: (channel: string, nodeId: string) => unknown },
-  nodeId: string,
-): ReviewGate {
-  const verdict = ctx.latest("reviewSynthesis", nodeId) as
-    | z.infer<typeof reviewSynthesisSchema>
-    | undefined;
+export function reviewGate(ctx: { latest: (channel: string, nodeId: string) => unknown }, nodeId: string): ReviewGate {
+  const verdict = ctx.latest("reviewSynthesis", nodeId) as z.infer<typeof reviewSynthesisSchema> | undefined;
   const approved = verdict?.approved === true;
   let feedback: string | null = null;
   if (verdict && !approved) {
