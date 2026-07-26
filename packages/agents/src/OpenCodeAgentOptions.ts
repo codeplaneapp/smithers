@@ -14,6 +14,13 @@ export type OpenCodeAgentOptions = BaseCliAgentOptions & {
   continueSession?: boolean;
   /** Resume a specific session by ID */
   sessionId?: string;
-  /** Provider-specific model variant/reasoning effort level */
+  /**
+   * Provider-specific model variant/reasoning-effort level (OpenCode `--variant`).
+   *
+   * OpenCode has no fixed effort ladder: the shared {@link BaseCliAgentOptions.effort}
+   * option maps onto this provider-defined string when `variant` is unset (an
+   * explicit `variant` always wins). Providers that expose no variant knob
+   * treat `effort` as unsupported.
+   */
   variant?: string;
 };

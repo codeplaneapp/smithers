@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
-import { auto, fakeAgent } from "../src/index.ts";
+import { auto, fakeAgent } from "../../src/index.ts";
 
 const resultSchema = z.object({
   summary: z.string(),

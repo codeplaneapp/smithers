@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import type { TaskDescriptor } from "@smthrs/graph";
-import { runTask } from "../src/index.ts";
+import { runTask } from "../../src/index.ts";
 
 const outputSchema = z.object({ message: z.string() });
 

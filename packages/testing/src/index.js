@@ -1034,7 +1034,7 @@ var init_CleanupScope = __esm({
         if (pending.length && Date.now() < deadline) {
           await Promise.race([
             Promise.allSettled(pending.map((entry) => entry.operation)),
-            new Promise((resolve3) => setTimeout(resolve3, Math.max(0, deadline - Date.now())))
+            new Promise((resolve4) => setTimeout(resolve4, Math.max(0, deadline - Date.now())))
           ]);
         }
         if (error) throw error;
@@ -1142,13 +1142,87 @@ var init_ambiguity = __esm({
   }
 });
 
+// src/runWorkflowScenario.ts
+function isEffectLike(value) {
+  return typeof value === "object" && value !== null && "pipe" in value && typeof value.pipe === "function";
+}
+async function settleRunResult(raw) {
+  let value = raw;
+  if (isEffectLike(value)) {
+    const { Effect: Effect5 } = await import("effect");
+    value = await Effect5.runPromise(value);
+  }
+  if (value && typeof value === "object" && "then" in value && typeof value.then === "function") {
+    value = await value;
+  }
+  if (value && typeof value === "object") {
+    return value;
+  }
+  return { value };
+}
+async function runWorkflowScenario(options) {
+  const runId = typeof options.runId === "string" && options.runId !== "" ? options.runId : `scenario-${Date.now().toString(36)}`;
+  const clock = options.clock ?? {
+    nowMs: () => Date.now(),
+    advance: () => void 0,
+    advanceToNextTimer: () => void 0,
+    pending: () => []
+  };
+  if (options.beforeRun) {
+    await options.beforeRun({ runId, clock });
+  }
+  const rootDir = typeof options.rootDir === "string" && options.rootDir !== "" ? options.rootDir : process.cwd();
+  const runOpts = {
+    runId,
+    rootDir,
+    // Engine requires input object (even empty).
+    input: options.input ?? {},
+    resume: options.resume === true
+  };
+  if (options.onProgress) {
+    runOpts.onProgress = options.onProgress;
+  }
+  let runWorkflowFn = options.runWorkflowFn;
+  if (!runWorkflowFn) {
+    const mod = await import("smithers-orchestrator");
+    const rw = mod.runWorkflow;
+    if (typeof rw !== "function") {
+      throw new Error("runWorkflowScenario: smithers-orchestrator.runWorkflow not available; pass runWorkflowFn");
+    }
+    runWorkflowFn = rw;
+  }
+  const raw = await Promise.resolve(runWorkflowFn(options.workflow, runOpts));
+  const result = await settleRunResult(raw);
+  const status = typeof result.status === "string" ? result.status : typeof result.run?.status === "string" ? String(result.run.status) : "unknown";
+  const resolvedRunId = typeof result.runId === "string" && result.runId !== "" ? result.runId : typeof result.run?.runId === "string" ? String(result.run.runId) : runId;
+  return {
+    runId: resolvedRunId,
+    status,
+    result,
+    clock
+  };
+}
+var init_runWorkflowScenario = __esm({
+  "src/runWorkflowScenario.ts"() {
+    "use strict";
+  }
+});
+
 // src/runScenario.ts
 var runScenario_exports = {};
 __export(runScenario_exports, {
-  runScenario: () => runScenario
+  runKernelScenario: () => runKernelScenario,
+  runScenario: () => runScenario,
+  runWorkflowScenario: () => runWorkflowScenario
 });
 import { Effect as Effect5, Fiber as Fiber3 } from "effect";
-var faultFor, dbOperationKind, processOperationKind, faultError, adapterFailure, settleKernel, runScenario;
+async function runScenario(arg, options) {
+  if (arg && typeof arg === "object" && "workflow" in arg) {
+    return runWorkflowScenario(arg);
+  }
+  return runKernelScenario(arg, options ?? {});
+}
+var faultFor, dbOperationKind, processOperationKind, faultError, adapterFailure, settleKernel, runKernelScenario;
 var init_runScenario = __esm({
   "src/runScenario.ts"() {
     "use strict";
@@ -1164,6 +1238,8 @@ var init_runScenario = __esm({
     init_journalModel();
     init_ambiguity();
     init_canonicalize();
+    init_runWorkflowScenario();
+    init_runWorkflowScenario();
     faultFor = (faults, operation, phase) => faults.find((fault2) => fault2.operation === operation && fault2.phase === phase);
     dbOperationKind = (name) => {
       const base = name.replace(/#\d+$/, "");
@@ -1222,7 +1298,7 @@ var init_runScenario = __esm({
       if (error !== void 0) throw error;
       return value;
     };
-    runScenario = async (ast, options = {}) => {
+    runKernelScenario = async (ast, options = {}) => {
       const seed = options.seed ?? ast.seed ?? 0;
       const harness = options.harness ?? unitSimHarness();
       const kernel = makeKernel(seed, options.controlLog ?? []);
@@ -1435,8 +1511,8 @@ var init_runScenario = __esm({
           let release;
           const gate = {
             arrived: /* @__PURE__ */ new Set(),
-            promise: new Promise((resolve3) => {
-              release = resolve3;
+            promise: new Promise((resolve4) => {
+              release = resolve4;
             }),
             release
           };
@@ -1749,7 +1825,7 @@ var init_runScenario = __esm({
                     return value2;
                   });
                 },
-                sleep: (ms) => new Promise((resolve3, reject) => {
+                sleep: (ms) => new Promise((resolve4, reject) => {
                   const wakeup = `${selected.id}:timer:${ms}`;
                   let settled = false;
                   const finish = (action) => {
@@ -1805,7 +1881,7 @@ var init_runScenario = __esm({
                     journal.deliverWakeup(wakeup);
                     if (!suppliedFire) runtimeKernel.controls.append({ type: "timer-fire", timer: timerId });
                     kernel.trace.emit({ type: "wait", id, data: { state: "timer-fired", ms, timer: timerId } });
-                    finish(resolve3);
+                    finish(resolve4);
                   });
                   cleanup.register("virtual-timer", String(timer), () => {
                     kernel.clock.cancel(timer);
@@ -3903,6 +3979,359 @@ function toHaveFinished(received) {
 }
 var simMatchers = { toHaveExecuted, toHaveExecutedInOrder, toHaveFinished };
 
+// src/agentTraceVector.ts
+import { readFileSync } from "fs";
+import { extname } from "path";
+var AGENT_TRACE_VECTOR_VERSION = 1;
+function parseAgentTraceVector(raw, path) {
+  const loc = path ? ` (${path})` : "";
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new TypeError(`Agent trace vector must be an object${loc}`);
+  }
+  const o = raw;
+  const version = o.version;
+  if (version !== 1 && version !== "1") {
+    throw new TypeError(`Agent trace vector version must be 1${loc}, got ${String(version)}`);
+  }
+  if (typeof o.id !== "string" || o.id === "") {
+    throw new TypeError(`Agent trace vector requires non-empty string id${loc}`);
+  }
+  if (!Array.isArray(o.turns) || o.turns.length === 0) {
+    throw new TypeError(`Agent trace vector "${o.id}" requires a non-empty turns array${loc}`);
+  }
+  const turns = o.turns.map((turn, i) => parseTurn(turn, `${loc} turn[${i}]`));
+  return {
+    version: 1,
+    id: o.id,
+    engineHint: typeof o.engineHint === "string" ? o.engineHint : void 0,
+    turns
+  };
+}
+function parseTurn(raw, loc) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new TypeError(`Turn must be an object${loc}`);
+  }
+  const t = raw;
+  if (!t.result || typeof t.result !== "object" || Array.isArray(t.result)) {
+    throw new TypeError(`Turn requires result${loc}`);
+  }
+  const result = parseResult(t.result, loc);
+  let stream;
+  if (t.stream !== void 0) {
+    if (!Array.isArray(t.stream)) {
+      throw new TypeError(`Turn stream must be an array${loc}`);
+    }
+    stream = t.stream.map((ev, j) => parseStreamEvent(ev, `${loc} stream[${j}]`));
+  }
+  let when;
+  if (t.when !== void 0) {
+    if (!t.when || typeof t.when !== "object" || Array.isArray(t.when)) {
+      throw new TypeError(`Turn when must be an object${loc}`);
+    }
+    const w = t.when;
+    when = {};
+    if (typeof w.callIndex === "number") when.callIndex = w.callIndex;
+    if (typeof w.attempt === "number") when.attempt = w.attempt;
+    if (typeof w.iteration === "number") when.iteration = w.iteration;
+    if (typeof w.promptIncludes === "string") when.promptIncludes = w.promptIncludes;
+  }
+  return { when, stream, result };
+}
+function parseResult(raw, loc) {
+  const r = raw;
+  const kind = r.kind;
+  if (kind === "ok") {
+    return {
+      kind: "ok",
+      output: r.output,
+      text: typeof r.text === "string" ? r.text : void 0,
+      files: r.files && typeof r.files === "object" && !Array.isArray(r.files) ? r.files : void 0
+    };
+  }
+  if (kind === "fail") {
+    if (typeof r.error !== "string" || r.error === "") {
+      throw new TypeError(`fail result requires error string${loc}`);
+    }
+    return { kind: "fail", error: r.error, retryable: r.retryable === true };
+  }
+  if (kind === "hang") {
+    return { kind: "hang", ms: typeof r.ms === "number" ? r.ms : void 0 };
+  }
+  throw new TypeError(`Unknown result.kind ${String(kind)}${loc}`);
+}
+function parseStreamEvent(raw, loc) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new TypeError(`Stream event must be an object${loc}`);
+  }
+  const e = raw;
+  const t = e.t;
+  if (t === "delay") {
+    if (typeof e.ms !== "number") throw new TypeError(`delay requires ms${loc}`);
+    return { t: "delay", ms: e.ms };
+  }
+  if (t === "text") {
+    if (typeof e.text !== "string") throw new TypeError(`text requires text${loc}`);
+    return { t: "text", text: e.text };
+  }
+  if (t === "tool_start") {
+    if (typeof e.name !== "string") throw new TypeError(`tool_start requires name${loc}`);
+    return { t: "tool_start", name: e.name, input: e.input };
+  }
+  if (t === "tool_end") {
+    if (typeof e.name !== "string") throw new TypeError(`tool_end requires name${loc}`);
+    return { t: "tool_end", name: e.name, output: e.output };
+  }
+  if (t === "progress") {
+    if (typeof e.message !== "string") throw new TypeError(`progress requires message${loc}`);
+    return { t: "progress", message: e.message };
+  }
+  throw new TypeError(`Unknown stream event t=${String(t)}${loc}`);
+}
+function loadAgentTraceVector(path) {
+  const text = readFileSync(path, "utf8");
+  const ext = extname(path).toLowerCase();
+  if (ext === ".jsonl") {
+    const lines = text.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+    if (lines.length === 0) {
+      throw new TypeError(`Empty JSONL agent trace vector: ${path}`);
+    }
+    return parseAgentTraceVector(JSON.parse(lines[0]), path);
+  }
+  return parseAgentTraceVector(JSON.parse(text), path);
+}
+function flattenGeneratePrompt(args) {
+  if (!args) return "";
+  if (typeof args.prompt === "string") return args.prompt;
+  if (Array.isArray(args.messages)) {
+    return args.messages.map((m) => {
+      if (!m || typeof m !== "object") return "";
+      const c = m.content;
+      return typeof c === "string" ? c : JSON.stringify(c ?? "");
+    }).join("\n");
+  }
+  if (args.prompt != null) return JSON.stringify(args.prompt);
+  return "";
+}
+function selectTurn(vector, used, ctx) {
+  for (let i = 0; i < vector.turns.length; i++) {
+    if (used.has(i)) continue;
+    const turn = vector.turns[i];
+    const w = turn.when;
+    if (!w) continue;
+    if (w.callIndex !== void 0 && w.callIndex !== ctx.callIndex) continue;
+    if (w.attempt !== void 0 && w.attempt !== ctx.attempt) continue;
+    if (w.iteration !== void 0 && w.iteration !== ctx.iteration) continue;
+    if (w.promptIncludes !== void 0 && !ctx.promptText.includes(w.promptIncludes)) continue;
+    return { index: i, turn };
+  }
+  for (let i = 0; i < vector.turns.length; i++) {
+    if (used.has(i)) continue;
+    const turn = vector.turns[i];
+    if (turn.when && Object.keys(turn.when).length > 0) continue;
+    return { index: i, turn };
+  }
+  throw new Error(
+    `Agent trace vector "${vector.id}": no matching unused turn for callIndex=${ctx.callIndex}` + (ctx.attempt !== void 0 ? ` attempt=${ctx.attempt}` : "") + (ctx.iteration !== void 0 ? ` iteration=${ctx.iteration}` : "") + (ctx.promptText ? ` promptExcerpt=${JSON.stringify(ctx.promptText.slice(0, 80))}` : "")
+  );
+}
+
+// src/virtualClock.ts
+function createVirtualClock(options = {}) {
+  const mode = options.mode === "real" ? "real" : "virtual";
+  let current = typeof options.startMs === "number" && Number.isFinite(options.startMs) ? options.startMs : 0;
+  async function advance(ms) {
+    const n = typeof ms === "number" && Number.isFinite(ms) && ms > 0 ? ms : 0;
+    if (mode === "real") {
+      if (n > 0) {
+        await new Promise((r) => setTimeout(r, n));
+      }
+      return;
+    }
+    current += n;
+  }
+  return {
+    mode,
+    now() {
+      return mode === "real" ? Date.now() : current;
+    },
+    advance,
+    sleep: advance,
+    setNow(ms) {
+      if (mode === "virtual" && typeof ms === "number" && Number.isFinite(ms)) {
+        current = ms;
+      }
+    }
+  };
+}
+
+// src/scriptedAgent.ts
+import { mkdir as mkdir2, writeFile } from "fs/promises";
+import { dirname as dirname2, isAbsolute as isAbsolute2, relative as relative2, resolve as resolve2 } from "path";
+function assertSafeRelativePath2(path) {
+  if (isAbsolute2(path) || path.split(/[\\/]+/).includes("..")) {
+    throw new TypeError(`Scripted agent file path must stay inside rootDir: ${path}`);
+  }
+}
+async function writeFiles2(rootDir, files) {
+  if (!files || Object.keys(files).length === 0) return;
+  if (!rootDir) {
+    throw new TypeError("Scripted agent files require a rootDir");
+  }
+  const root = resolve2(rootDir);
+  for (const [name, contents] of Object.entries(files)) {
+    assertSafeRelativePath2(name);
+    const target = resolve2(root, name);
+    const rel = relative2(root, target);
+    if (rel.startsWith("..") || isAbsolute2(rel)) {
+      throw new TypeError(`Scripted agent file path must stay inside rootDir: ${name}`);
+    }
+    await mkdir2(dirname2(target), { recursive: true });
+    await writeFile(target, contents);
+  }
+}
+function scriptedAgent(vector, options = {}) {
+  const clock = options.clock ?? createVirtualClock();
+  const calls = [];
+  const used = /* @__PURE__ */ new Set();
+  let callIndex = 0;
+  const agent = {
+    id: options.id ?? `scripted:${vector.id}`,
+    model: options.model ?? "scripted-agent",
+    tools: {},
+    supportsNativeStructuredOutput: options.supportsNativeStructuredOutput ?? true,
+    calls,
+    vector,
+    clock,
+    get usedTurnIndexes() {
+      return used;
+    },
+    async generate(args = {}) {
+      const rootDir = typeof args.rootDir === "string" ? args.rootDir : void 0;
+      const taskContext = args.taskContext && typeof args.taskContext === "object" ? args.taskContext : void 0;
+      const attempt = typeof taskContext?.attempt === "number" ? taskContext.attempt : typeof args.retryAttempt === "number" ? args.retryAttempt : void 0;
+      const iteration = typeof taskContext?.iteration === "number" ? taskContext.iteration : void 0;
+      const promptText = flattenGeneratePrompt(args);
+      const call = {
+        args,
+        prompt: args.prompt,
+        rootDir,
+        taskContext
+      };
+      calls.push(call);
+      const { index, turn } = selectTurn(vector, used, {
+        callIndex,
+        attempt,
+        iteration,
+        promptText
+      });
+      used.add(index);
+      callIndex += 1;
+      const onStdout = typeof args.onStdout === "function" ? args.onStdout : void 0;
+      const onEvent = typeof args.onEvent === "function" ? args.onEvent : void 0;
+      if (options.pacing) {
+        const lo = Math.max(0, options.pacing.minMs);
+        const hi = Math.max(lo, options.pacing.maxMs);
+        const thinkMs = lo + Math.floor(Math.random() * (hi - lo + 1));
+        onStdout?.(`[scripted] thinking ${thinkMs}ms\u2026
+`);
+        await clock.advance(thinkMs);
+      }
+      if (Array.isArray(turn.stream)) {
+        for (const ev of turn.stream) {
+          if (ev.t === "delay") {
+            await clock.advance(ev.ms);
+          } else if (ev.t === "text") {
+            onStdout?.(ev.text);
+            onEvent?.({ type: "text", text: ev.text });
+            if (clock.mode === "real" && options.pacing) {
+              await clock.advance(80 + Math.floor(Math.random() * 120));
+            }
+          } else if (ev.t === "tool_start") {
+            onEvent?.({ type: "tool_start", name: ev.name, input: ev.input });
+            onStdout?.(`[tool_start ${ev.name}]
+`);
+          } else if (ev.t === "tool_end") {
+            onEvent?.({ type: "tool_end", name: ev.name, output: ev.output });
+            onStdout?.(`[tool_end ${ev.name}]
+`);
+          } else if (ev.t === "progress") {
+            onEvent?.({ type: "progress", message: ev.message });
+            onStdout?.(`${ev.message}
+`);
+          }
+        }
+      }
+      const result = turn.result;
+      if (result.kind === "hang") {
+        const ms = result.ms ?? 6e4;
+        if (clock.mode === "real") {
+          const signal = args.abortSignal;
+          await Promise.race([
+            clock.advance(ms),
+            signal ? new Promise((_, reject) => {
+              const onAbort = () => {
+                const err = new Error("Scripted agent aborted during hang");
+                err.name = "AbortError";
+                reject(err);
+              };
+              if (signal.aborted) onAbort();
+              else signal.addEventListener("abort", onAbort, { once: true });
+            }) : new Promise(() => {
+            })
+          ]);
+        } else {
+          await clock.advance(ms);
+        }
+        throw Object.assign(new Error(`Scripted agent hang after ${ms}ms (vector ${vector.id})`), {
+          code: "AGENT_TIMEOUT",
+          details: { failureRetryable: false }
+        });
+      }
+      if (result.kind === "fail") {
+        const err = Object.assign(new Error(result.error), {
+          code: result.retryable === false ? "AGENT_SCRIPT_FAIL" : "AGENT_SCRIPT_FAIL_RETRYABLE",
+          details: { failureRetryable: result.retryable === true ? void 0 : false }
+        });
+        if (result.retryable === true) {
+          delete err.details.failureRetryable;
+        }
+        throw err;
+      }
+      let output = result.output;
+      if (options.schema && output !== void 0) {
+        const parsed = options.schema.safeParse(output);
+        if (!parsed.success) {
+          const issues = parsed.error.issues.map(
+            (issue) => issue && typeof issue === "object" && "message" in issue ? String(issue.message) : JSON.stringify(issue)
+          ).join("; ");
+          throw new TypeError(`Scripted agent output failed validation: ${issues}`);
+        }
+        output = parsed.data;
+      }
+      await writeFiles2(rootDir, result.files);
+      const generated = {};
+      if (output !== void 0) generated.output = output;
+      if (typeof result.text === "string") generated.text = result.text;
+      generated.text = generated.text ?? (typeof output === "object" && output !== null ? JSON.stringify(output) : typeof output === "string" ? output : `scripted:${vector.id}`);
+      return {
+        ...generated,
+        response: {
+          messages: [{ role: "assistant", content: generated.text }]
+        }
+      };
+    },
+    lastPrompt() {
+      return calls.at(-1)?.prompt;
+    },
+    reset() {
+      calls.length = 0;
+      used.clear();
+      callIndex = 0;
+    }
+  };
+  return agent;
+}
+
 // src/index.ts
 init_builder();
 init_compile();
@@ -4133,7 +4562,7 @@ var loadReplayBundle = (serialized) => {
   return Object.freeze({ ...bundle, runnerBindings: value.runnerBindings ?? {} });
 };
 var replayBundle = async (bundle, options = {}) => {
-  const { runScenario: runScenario2 } = await Promise.resolve().then(() => (init_runScenario(), runScenario_exports));
+  const { runKernelScenario: runKernelScenario2 } = await Promise.resolve().then(() => (init_runScenario(), runScenario_exports));
   if (bundle.replayIdentity !== replayIdentity({ ast: bundle.ast, seed: bundle.seed, controlLog: bundle.controlLog }))
     throw new Error("REPLAY_IDENTITY_MISMATCH");
   const selectedHarness = options.harness?.name ?? "unit-sim";
@@ -4156,7 +4585,7 @@ var replayBundle = async (bundle, options = {}) => {
   }
   const missing = bundle.ast.steps.filter((step2) => step2.runnerBinding && !runners2[step2.id] && !stepRunner(step2)).map((step2) => step2.id);
   if (missing.length) throw new Error(`REPLAY_RUNNER_MISSING: ${missing.join(", ")}`);
-  return runScenario2(bundle.ast, {
+  return runKernelScenario2(bundle.ast, {
     ...options,
     ...Object.keys(runners2).length ? { stepRunners: runners2 } : {},
     seed: bundle.seed,
@@ -4179,7 +4608,7 @@ var dryRun = (ast, options = {}) => {
     replayBundle: makeReplayBundle({ ast, seed, controlLog: controls, harness: harness?.name }),
     plannedSteps: ast.steps.map((step2) => step2.id),
     executesAgents: false,
-    run: () => runScenario(ast, options)
+    run: () => runKernelScenario(ast, options)
   };
 };
 
@@ -4520,7 +4949,7 @@ var shrink = async (ast, controls, failure2, options = {}) => {
       );
       if (!compileScenario(candidate).ok || !controlsValid(candidate, candidateControls)) continue;
       tried++;
-      const result = await runScenario(candidate, {
+      const result = await runKernelScenario(candidate, {
         ...options,
         controlLog: candidateControls,
         seed: options.seed ?? candidate.seed
@@ -4537,7 +4966,7 @@ var shrink = async (ast, controls, failure2, options = {}) => {
     const candidateControls = currentControls.filter((_, index) => index !== i);
     if (candidateControls.length === currentControls.length || !controlsValid(current, candidateControls)) continue;
     tried++;
-    const result = await runScenario(current, {
+    const result = await runKernelScenario(current, {
       ...options,
       controlLog: candidateControls,
       seed: options.seed ?? current.seed
@@ -4821,26 +5250,26 @@ var realDbAdapter = (options) => {
 init_Harness();
 import { realpathSync } from "fs";
 import { fileURLToPath } from "url";
-import { dirname as dirname2, resolve as resolve2 } from "path";
+import { dirname as dirname3, resolve as resolve3 } from "path";
 var repositoryRunner = () => {
-  let dir = dirname2(fileURLToPath(import.meta.url));
+  let dir = dirname3(fileURLToPath(import.meta.url));
   for (let depth = 0; depth < 8; depth++) {
     try {
-      return realpathSync(resolve2(dir, "e2e/harness/engineChildRunner.ts"));
+      return realpathSync(resolve3(dir, "e2e/harness/engineChildRunner.ts"));
     } catch {
-      dir = resolve2(dir, "..");
+      dir = resolve3(dir, "..");
     }
   }
   throw Object.assign(new Error("real process admission requires the repository-owned engineChildRunner"), {
     code: "ADMISSION_FAILED"
   });
 };
-var exited = (child, budgetMs = 1e3) => new Promise((resolve3) => {
-  if (child.exitCode !== null || child.signalCode !== null) return resolve3();
+var exited = (child, budgetMs = 1e3) => new Promise((resolve4) => {
+  if (child.exitCode !== null || child.signalCode !== null) return resolve4();
   let timer;
   const done = () => {
     if (timer) clearTimeout(timer);
-    resolve3();
+    resolve4();
   };
   child.once("exit", done);
   timer = setTimeout(done, budgetMs);
@@ -4874,7 +5303,7 @@ var verifyProtocol = async (resource, expectedRunner, nonce, marker) => {
   });
   const deadline = Date.now() + 250;
   while (!stdout.includes(`${marker}:${nonce}`) && Date.now() < deadline)
-    await new Promise((resolve3) => setTimeout(resolve3, 10));
+    await new Promise((resolve4) => setTimeout(resolve4, 10));
   const nonceInArgv = args.some((arg) => String(arg) === nonce);
   const identityVerified = Boolean(resource.child) && verifiedChild(resource, expectedRunner, nonce) && Number.isInteger(resource.pid) && executable === "bun" && productionRunner && nonceInArgv;
   const markerVerified = stdout.includes(`${marker}:${nonce}`) || identityVerified && await resource.handshake(nonce) === nonce;
@@ -5003,7 +5432,7 @@ var realProcessAdapter = (options) => {
         const deadline = Date.now() + 3e4;
         let inFlight = (await spawned.observeDurableState()).effectApplied;
         while (!inFlight && Date.now() < deadline && spawned.child.exitCode === null && spawned.child.signalCode === null) {
-          await new Promise((resolve3) => setTimeout(resolve3, 50));
+          await new Promise((resolve4) => setTimeout(resolve4, 50));
           inFlight = (await spawned.observeDurableState()).effectApplied;
         }
         if (!inFlight || spawned.child.exitCode !== null || spawned.child.signalCode !== null)
@@ -5094,7 +5523,425 @@ var realProcessAdapter = (options) => {
     "e2e-real-process"
   );
 };
+
+// src/runEffect.ts
+async function runMaybeEffect(value) {
+  if (value == null) {
+    return value;
+  }
+  if (typeof value.then === "function") {
+    return value;
+  }
+  if (typeof value.pipe === "function") {
+    const effectMod = await import("effect");
+    const Effect5 = effectMod.Effect;
+    return Effect5.runPromise(value);
+  }
+  return value;
+}
+
+// src/scenarioAssert.ts
+async function listNodes(adapter, runId) {
+  const rows = await runMaybeEffect(adapter.listNodes(runId));
+  return Array.isArray(rows) ? rows : [];
+}
+async function listEventsByType(adapter, runId, type) {
+  if (!adapter.listEventsByType) return [];
+  const rows = await runMaybeEffect(adapter.listEventsByType(runId, type));
+  return (rows ?? []).map((row) => {
+    try {
+      return JSON.parse(String(row.payloadJson ?? "{}"));
+    } catch {
+      return {};
+    }
+  });
+}
+async function expectRunStatus(adapter, runId, status) {
+  if (!adapter.getRun) {
+    throw new Error("adapter.getRun required for expectRunStatus");
+  }
+  const run = await runMaybeEffect(adapter.getRun(runId));
+  const actual = run?.status;
+  if (actual !== status) {
+    throw new Error(`Expected run status ${status}, got ${String(actual)}`);
+  }
+}
+async function expectNodeState(adapter, runId, nodeId, state) {
+  const nodes = await listNodes(adapter, runId);
+  const node = nodes.find((n) => n.nodeId === nodeId);
+  if (!node) {
+    throw new Error(`Node ${nodeId} not found in run ${runId} (nodes: ${nodes.map((n) => n.nodeId).join(",")})`);
+  }
+  if (node.state !== state) {
+    throw new Error(`Expected node ${nodeId} state ${state}, got ${String(node.state)}`);
+  }
+}
+async function expectNodeStates(adapter, runId, expected) {
+  for (const [nodeId, state] of Object.entries(expected)) {
+    await expectNodeState(adapter, runId, nodeId, state);
+  }
+}
+async function tallyNodeStates(adapter, runId) {
+  const nodes = await listNodes(adapter, runId);
+  const t = { working: 0, failed: 0, done: 0, blocked: 0, other: 0, total: nodes.length };
+  for (const n of nodes) {
+    switch (n.state) {
+      case "in-progress":
+        t.working += 1;
+        break;
+      case "failed":
+        t.failed += 1;
+        break;
+      case "finished":
+        t.done += 1;
+        break;
+      case "waiting-approval":
+      case "waiting-event":
+      case "waiting-timer":
+        t.blocked += 1;
+        break;
+      default:
+        t.other += 1;
+    }
+  }
+  return t;
+}
+async function expectSteerConsumed(adapter, runId, opts) {
+  if (!adapter.listSteers) {
+    throw new Error("adapter.listSteers required for expectSteerConsumed");
+  }
+  const steers = await runMaybeEffect(adapter.listSteers(runId));
+  const consumed = (steers ?? []).filter((n) => n.status === "consumed");
+  const filtered = opts?.nodeId ? consumed.filter((n) => n.nodeId === opts.nodeId) : consumed;
+  const min = opts?.minCount ?? 1;
+  if (filtered.length < min) {
+    throw new Error(
+      `Expected at least ${min} consumed steer(s)${opts?.nodeId ? ` for ${opts.nodeId}` : ""}, got ${filtered.length}`
+    );
+  }
+  if (adapter.listEventsByType) {
+    const events = await listEventsByType(adapter, runId, "SteerConsumed");
+    if (events.length < min) {
+      throw new Error(`Expected SteerConsumed events >= ${min}, got ${events.length}`);
+    }
+  }
+}
+async function expectEventCount(adapter, runId, type, count) {
+  const events = await listEventsByType(adapter, runId, type);
+  if (events.length !== count) {
+    throw new Error(`Expected ${count} ${type} event(s), got ${events.length}`);
+  }
+}
+function expectSoftPinBoard(openedNodeIds, opts = {}) {
+  const workerRe = opts.workerPattern ?? /(?:^|[/:._-])(?:worker|fix|shard|leaf)[-_]?\d+$/i;
+  const maxStages = opts.maxStages ?? 1;
+  const allowedFailWorkers = new Set(opts.mustInclude ?? []);
+  const workers = openedNodeIds.filter((id) => workerRe.test(id));
+  const stages = openedNodeIds.filter((id) => !workerRe.test(id) && !id.startsWith("gate:"));
+  const unexpectedWorkers = workers.filter((w) => !allowedFailWorkers.has(w));
+  if (unexpectedWorkers.length > 0) {
+    throw new Error(`Workers should stay board-only, opened: ${unexpectedWorkers.join(", ")}`);
+  }
+  if (stages.length > maxStages) {
+    throw new Error(`Expected at most ${maxStages} stage tab(s), opened: ${stages.join(", ")}`);
+  }
+  for (const id of opts.mustInclude ?? []) {
+    if (!openedNodeIds.includes(id)) {
+      throw new Error(`Expected opened tab ${id}, got [${openedNodeIds.join(", ")}]`);
+    }
+  }
+  for (const id of opts.mustExclude ?? []) {
+    if (openedNodeIds.includes(id)) {
+      throw new Error(`Expected no tab for ${id}`);
+    }
+  }
+}
+
+// src/herdrBridge.ts
+import { createHerdrClient, createHerdrRunSurface } from "@smithers-orchestrator/herdr";
+var STUB_SLEEP = ["bash", "-c", "exec sleep 3600"];
+async function tryCreateHerdrBridge(opts) {
+  const log = opts.logger ?? ((level, msg) => {
+    if (level === "warn") console.warn(`[herdr-bridge] ${msg}`);
+  });
+  const client = createHerdrClient({
+    session: opts.session,
+    logger: () => {
+    }
+  });
+  const pong = await client.ping().catch(() => void 0);
+  if (!pong) {
+    log("warn", `no herdr server at ${client.socketPath}; running without mirror`);
+    return null;
+  }
+  const stub = opts.stubPanes !== false;
+  const attachEagerly = opts.attachEagerly !== false;
+  const paneCommands = {};
+  if (stub) {
+    paneCommands.overviewCommand = () => STUB_SLEEP;
+    paneCommands.tailCommand = () => STUB_SLEEP;
+    paneCommands.gateCommand = () => STUB_SLEEP;
+  } else {
+    const cliPath = opts.cliPath;
+    if (typeof cliPath !== "string" || cliPath === "") {
+      throw new Error("tryCreateHerdrBridge: cliPath is required when stubPanes=false (path to apps/cli/src/index.js)");
+    }
+    const bin = process.execPath;
+    const dbFile = typeof opts.cwd === "string" && opts.cwd !== "" ? `${opts.cwd.replace(/\/$/, "")}/smithers.db` : "smithers.db";
+    paneCommands.overviewCommand = () => {
+      const argv = [bin, cliPath, "top", "--db", dbFile];
+      if (opts.cwd) argv.push("--cwd", opts.cwd);
+      return argv;
+    };
+    paneCommands.tailCommand = (ctx) => [
+      bin,
+      cliPath,
+      "tail",
+      ctx.runId,
+      "--node",
+      ctx.nodeId,
+      "--hud",
+      "--linger"
+    ];
+    paneCommands.gateCommand = (ctx) => [
+      bin,
+      cliPath,
+      "approve",
+      ctx.runId,
+      "--watch",
+      "--node",
+      ctx.nodeId
+    ];
+    log("debug", `live panes via ${bin} ${cliPath} (cwd must contain smithers.db)`);
+  }
+  const surface = createHerdrRunSurface({
+    client,
+    workspaceLabel: opts.workspaceLabel,
+    cwd: opts.cwd,
+    softPinSlots: opts.softPinSlots ?? 1,
+    tabCap: opts.tabCap ?? 6,
+    autoOpen: { stage: true, workers: false, gates: true, failures: true },
+    closeWorkspaceOnFinish: false,
+    // Live UI: harness|overview split. Stubs/machine: tabs/full-width overview.
+    chrome: opts.chrome ?? (stub ? "tabs" : "split"),
+    harnessCommand: opts.harnessCommand ?? (stub ? "none" : "auto"),
+    dock: opts.dock === true,
+    renameWorkspaceOnDock: opts.renameWorkspaceOnDock === true,
+    logger: (level, msg, data) => log(level, msg, data),
+    ...paneCommands
+  });
+  const bridgeClient = client;
+  if (attachEagerly) {
+    await surface.attach(opts.runId);
+    if (opts.focusWorkspace !== false) {
+      await focusHerdrWorkspaceByLabel(bridgeClient, {
+        workspaceLabel: opts.workspaceLabel,
+        runId: opts.runId
+      });
+    }
+  }
+  let focusScheduled = attachEagerly && opts.focusWorkspace !== false;
+  return {
+    surface: {
+      onEvent: (event) => surface.onEvent(event),
+      attach: (id) => surface.attach(id),
+      close: () => surface.close()
+    },
+    client: bridgeClient,
+    workspaceLabel: opts.workspaceLabel,
+    runId: opts.runId,
+    onProgress(event) {
+      surface.onEvent(event);
+      if (!focusScheduled && opts.focusWorkspace !== false) {
+        focusScheduled = true;
+        void (async () => {
+          await new Promise((r) => setTimeout(r, 150));
+          await focusHerdrWorkspaceByLabel(bridgeClient, {
+            workspaceLabel: opts.workspaceLabel,
+            runId: opts.runId
+          });
+        })();
+      }
+    },
+    async close() {
+      await surface.close();
+    }
+  };
+}
+async function focusHerdrWorkspaceByLabel(client, opts) {
+  const snap = await snapshotHerdrWorkspace(client, opts);
+  if (!snap) return false;
+  await client.tryCall("workspace.focus", { workspace_id: snap.workspaceId });
+  return true;
+}
+function isCampaignWorkspaceLabel(label) {
+  const bare = label.replace(/^[✓✗◻]\s+/, "");
+  return /^core-(hello|sequence|parallel|hitl|steer|retry|loop|hang|stream|mixed|branch|continue|system)\b/.test(bare) || /\bcamp-[a-z0-9]+-/i.test(bare) || bare.startsWith("core-");
+}
+async function tryCloseCampaignHerdrWorkspaces(client) {
+  const list = await client.tryCall("workspace.list", {});
+  let n = 0;
+  for (const w of list?.workspaces ?? []) {
+    if (typeof w.label === "string" && isCampaignWorkspaceLabel(w.label) && typeof w.workspace_id === "string") {
+      await client.tryCall("workspace.close", { workspace_id: w.workspace_id });
+      n += 1;
+    }
+  }
+  return n;
+}
+async function snapshotHerdrWorkspace(client, opts) {
+  const list = await client.tryCall("workspace.list", {});
+  const workspaces = list?.workspaces ?? [];
+  const ws = workspaces.find(
+    (w) => typeof w.label === "string" && (w.label === opts.workspaceLabel || w.label.endsWith(` ${opts.runId}`) || w.label.includes(opts.runId))
+  );
+  if (!ws || typeof ws.workspace_id !== "string") {
+    return null;
+  }
+  const tabsRes = await client.tryCall("tab.list", { workspace_id: ws.workspace_id });
+  const agentsRes = await client.tryCall("agent.list", {});
+  const agents = (agentsRes?.agents ?? []).filter((a) => a.workspace_id === ws.workspace_id);
+  return {
+    workspaceId: ws.workspace_id,
+    label: String(ws.label ?? ""),
+    tabs: tabsRes?.tabs ?? [],
+    agents
+  };
+}
+async function assertHerdrBridge(client, opts) {
+  const snap = await snapshotHerdrWorkspace(client, opts);
+  if (!snap) {
+    throw new Error(`herdr workspace not found for run ${opts.runId} (label ${opts.workspaceLabel})`);
+  }
+  const labels = snap.tabs.map((t) => t.label);
+  if (opts.expectCockpit !== false) {
+    const hasCockpit = labels.some((l) => l === "cockpit" || l === "overview");
+    if (!hasCockpit) {
+      throw new Error(`expected cockpit/overview tab, got [${labels.join(", ")}]`);
+    }
+  }
+  for (const want of opts.mustIncludeTabLabels ?? []) {
+    if (!labels.some((l) => l === want || l.includes(want))) {
+      throw new Error(`expected tab containing "${want}", got [${labels.join(", ")}]`);
+    }
+  }
+  for (const ban of opts.mustExcludeTabLabels ?? []) {
+    if (labels.some((l) => l === ban || l.includes(ban))) {
+      throw new Error(`unexpected tab "${ban}" in [${labels.join(", ")}]`);
+    }
+  }
+  if (typeof opts.maxDetailTabs === "number") {
+    const detail = labels.filter((l) => l !== "cockpit" && l !== "overview");
+    if (detail.length > opts.maxDetailTabs) {
+      throw new Error(`expected \u2264${opts.maxDetailTabs} detail tabs, got ${detail.length}: [${detail.join(", ")}]`);
+    }
+  }
+  if (opts.requireAgentStatus) {
+    const hit = snap.agents.some((a) => a.agent_status === opts.requireAgentStatus);
+    if (!hit) {
+      const statuses = snap.agents.map((a) => `${a.name}:${a.agent_status}`).join(", ");
+      throw new Error(`expected an agent with status ${opts.requireAgentStatus}, got [${statuses}]`);
+    }
+  }
+  return snap;
+}
+async function tryCloseHerdrWorkspacesForRun(client, runId) {
+  const list = await client.tryCall("workspace.list", {});
+  let n = 0;
+  for (const w of list?.workspaces ?? []) {
+    if (typeof w.label === "string" && w.label.includes(runId) && typeof w.workspace_id === "string") {
+      await client.tryCall("workspace.close", { workspace_id: w.workspace_id });
+      n += 1;
+    }
+  }
+  return n;
+}
+async function tryOpenHerdrClient(opts) {
+  const client = createHerdrClient({
+    session: opts?.session,
+    logger: () => {
+    }
+  });
+  const pong = await client.ping().catch(() => void 0);
+  if (!pong) return null;
+  return client;
+}
+
+// src/campaign.ts
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+async function runCampaign(options) {
+  const log = options.log ?? ((msg) => console.log(msg));
+  const repeat = Math.max(1, options.repeat ?? 1);
+  const onFail = options.onFail ?? "stop";
+  const herdr = options.herdr === true;
+  const campaignId = `camp-${Date.now().toString(36)}`;
+  let scenarios = options.scenarios;
+  if (options.only?.length) {
+    const allow = new Set(options.only);
+    scenarios = scenarios.filter((s) => allow.has(s.id));
+  }
+  const results = [];
+  log(
+    `[campaign] start id=${campaignId} scenarios=${scenarios.length} repeat=${repeat} herdr=${herdr}` + (options.herdrSession ? ` session=${options.herdrSession}` : "")
+  );
+  for (let iteration = 0; iteration < repeat; iteration++) {
+    log(`[campaign] iteration ${iteration + 1}/${repeat}`);
+    for (const scenario2 of scenarios) {
+      const t0 = Date.now();
+      log(`[campaign] \u2192 ${scenario2.id}: ${scenario2.title}`);
+      try {
+        if (options.onScenarioStart) {
+          await options.onScenarioStart({ scenario: scenario2, iteration, campaignId });
+        }
+        const out = await scenario2.run({
+          iteration,
+          herdr,
+          herdrSession: options.herdrSession,
+          requireHerdr: options.requireHerdr === true,
+          liveUi: options.liveUi === true,
+          opsMode: options.opsMode === true,
+          campaignId,
+          log
+        });
+        if (options.requireHerdr && herdr && out && out.herdr === false) {
+          throw new Error(
+            `herdr required but scenario ${scenario2.id} did not attach a mirror (is herdr --session ${options.herdrSession ?? "default"} running?)`
+          );
+        }
+        const durationMs = Date.now() - t0;
+        results.push({
+          id: scenario2.id,
+          ok: true,
+          runId: out?.runId,
+          herdr: out?.herdr,
+          durationMs
+        });
+        log(`[campaign] \u2713 ${scenario2.id} (${durationMs}ms)`);
+      } catch (err) {
+        const durationMs = Date.now() - t0;
+        const error = err instanceof Error ? err.message : String(err);
+        results.push({ id: scenario2.id, ok: false, error, durationMs });
+        log(`[campaign] \u2717 ${scenario2.id}: ${error}`);
+        if (onFail === "stop") {
+          return { ok: false, results, iterations: iteration + 1, herdr };
+        }
+      }
+      if (options.pauseMs && options.pauseMs > 0) {
+        await sleep(options.pauseMs);
+      }
+    }
+    if (iteration + 1 < repeat && options.iterationPauseMs && options.iterationPauseMs > 0) {
+      await sleep(options.iterationPauseMs);
+    }
+  }
+  const ok = results.every((r) => r.ok);
+  log(`[campaign] done ok=${ok} results=${results.length}`);
+  return { ok, results, iterations: repeat, herdr };
+}
 export {
+  AGENT_TRACE_VECTOR_VERSION,
   BoundedWaitError,
   CanonicalizeError,
   CleanupScope,
@@ -5108,6 +5955,7 @@ export {
   VirtualClock,
   WorkflowCoverageError,
   ambiguity,
+  assertHerdrBridge,
   assertNoLeaks,
   auto,
   barrier,
@@ -5118,6 +5966,7 @@ export {
   compileScenario,
   contractProbe,
   coverWorkflow,
+  createVirtualClock,
   cutPoint,
   dryRun,
   e2eDescriptor,
@@ -5125,19 +5974,30 @@ export {
   expectAmbiguity,
   expectEffect,
   expectFullCoverage,
+  expectEventCount,
+  expectNodeState,
+  expectNodeStates,
+  expectRunStatus,
+  expectSoftPinBoard,
+  expectSteerConsumed,
   expectTrace,
   extension,
   fakeAgent,
   fault,
   firstDivergence,
+  flattenGeneratePrompt,
+  focusHerdrWorkspaceByLabel,
   integrationHarness,
   isAuto,
+  isCampaignWorkspaceLabel,
   isOpaqueEffect,
+  loadAgentTraceVector,
   loadReplayBundle,
   makeHarness,
   makeReplayBundle,
   mediatedEffect,
   opaqueEffect,
+  parseAgentTraceVector,
   realDbAdapter,
   realDbCutPoints,
   realProcessAdapter,
@@ -5146,9 +6006,15 @@ export {
   replayBundle,
   replayIdentity,
   requiredCapabilities,
+  runCampaign,
+  runKernelScenario,
+  runMaybeEffect,
   runScenario,
   runTask,
+  runWorkflowScenario,
   scenario,
+  scriptedAgent,
+  selectTurn,
   serializeBoundaryError,
   serializeReplayBundle,
   serializeSimulationDurableError,
@@ -5157,9 +6023,15 @@ export {
   simulate,
   simulationNativeError,
   simulationSmithersError,
+  snapshotHerdrWorkspace,
   step,
+  tallyNodeStates,
   toHaveExecuted,
   toHaveExecutedInOrder,
   toHaveFinished,
+  tryCloseCampaignHerdrWorkspaces,
+  tryCloseHerdrWorkspacesForRun,
+  tryCreateHerdrBridge,
+  tryOpenHerdrClient,
   unitSimHarness
 };

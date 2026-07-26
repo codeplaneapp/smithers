@@ -107,7 +107,7 @@ describe("find db helpers", () => {
     const nested = join(root, "a", "b");
     mkdirSync(nested, { recursive: true });
     try {
-      expect(() => findSmithersDb(nested, sandboxedMarkerChecks(root))).toThrow(/No smithers\.db found/);
+      expect(() => findSmithersDb(nested, sandboxedMarkerChecks(root))).toThrow(/No smithers workspace found from/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -265,8 +265,10 @@ describe("buildHijackLaunchSpec", () => {
       const spec = buildHijackLaunchSpec({ engine: "claude-code", mode: "native-cli", resume: "r", cwd: "/c" });
       expect(spec.command).toBe("claude");
       expect(spec.args).toEqual(["--resume", "r"]);
-      expect(spec.env.CLAUDE_CODE_ENTRYPOINT).toBe("");
-      expect(spec.env.CLAUDECODE).toBe("");
+      // Entry-point markers must be absent (not empty-string) so Claude does
+      // not force print-mode resume (deferred tool marker path).
+      expect(spec.env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
+      expect(spec.env.CLAUDECODE).toBeUndefined();
     } finally {
       if (prevEntry === undefined) delete process.env.CLAUDE_CODE_ENTRYPOINT;
       else process.env.CLAUDE_CODE_ENTRYPOINT = prevEntry;

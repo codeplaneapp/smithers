@@ -2721,7 +2721,7 @@
   {
     "tests": [
       "packages/testing/tests/simulate.test.ts",
-      "packages/testing/tests/fakeAgent.test.ts",
+      "packages/testing/tests/unit/fakeAgent.test.ts",
       "packages/testing/tests/runtimeConformance.test.ts",
       "packages/testing/tests/replay-identity-fresh-process.test.ts",
       "e2e/testing-framework/real-db-integration.test.ts",
@@ -2974,6 +2974,80 @@
       {
         "label": "Cron RPC",
         "href": "docs/rpc/cron-create.mdx"
+      }
+    ]
+  },
+  {
+    "tests": [
+      "packages/herdr/tests/createHerdrRunSurface.test.js",
+      "packages/herdr/tests/cockpitPolicy.test.js",
+      "apps/cli/tests/herdr-cli.e2e.test.js",
+      "apps/cli/tests/herdr-full-loop.e2e.test.js",
+      "apps/cli/tests/smithers-top.test.js",
+      "apps/cli/tests/steer-command.e2e.test.js",
+      "apps/cli/tests/tail-steer-keys.test.js",
+      "apps/cli/tests/approve-watch.e2e.test.js"
+    ],
+    "observability": [
+      "SteerQueued / SteerConsumed / SteerExpired events carry runId, nodeId, steerId, and attempt/iteration attribution.",
+      "RunHijackRequested / RunHijacked mark the park-and-hand-off transition; attempt effort is queryable on _smithers_attempts.effort."
+    ],
+    "debug": [
+      "smithers herdr status reports server version, protocol, and client compatibility; a missing server makes --herdr a silent no-op.",
+      "smithers inspect <runId> lists queued/consumed/expired steers; smithers why <runId> shows steers alongside blockers."
+    ],
+    "architecture": [
+      "packages/herdr owns the herdr client and HerdrRunSurface; it renders and relays only \u2014 Smithers keeps execution, isolation, and durability.",
+      "apps/cli/src/herdr.js mirrors runs into workspaces/panes; smithers-top.js is the portable workflow supervisor (gateway-sourced by default, --direct for local store).",
+      "packages/engine/src/steers.js queues and expires steers; the engine consumes them at the next generate() boundary."
+    ],
+    "changes": [
+      "2026-07-26 initial record: herdr supervision, steer, hijack, first-class effort, and approve/deny auto-resume shipped in 0.32.0."
+    ],
+    "diffHints": [
+      "packages/herdr/src/HerdrRunSurface.ts",
+      "apps/cli/src/herdr.js",
+      "apps/cli/src/smithers-top.js",
+      "apps/cli/src/steer.js",
+      "packages/engine/src/steers.js"
+    ],
+    "missing": [
+      "Mid-turn steer injection (landing an instruction between an agent's tool calls) is deferred; steers apply at the next generate() boundary."
+    ],
+    "id": "herdr-supervision",
+    "title": "Herdr supervision, steer, and hijack",
+    "summary": "Mirror a run into a herdr terminal workspace and supervise it beside your coding agent: a pane per agent node, a cockpit outline, one-key steer, live hijack, first-class reasoning effort, and approve/deny auto-resume. Fully degradable.",
+    "status": "shipped",
+    "priority": "p1",
+    "owner": "smithers-maintainers",
+    "tier": "feature",
+    "group": "Recover & replay",
+    "userValue": "Watch and steer long-running agent workflows from the same terminal as the agent driving them, without leaving the CLI.",
+    "capabilities": [
+      "Mirror any run into a herdr workspace (smithers up --herdr / herdr attach).",
+      "Portable workflow supervisor board (smithers supervisor, alias top).",
+      "Queue a durable steer against a running node (smithers steer).",
+      "Hand off a live agent session and resume afterwards (smithers hijack).",
+      "Answer approval gates in-pane with auto-resume (smithers approve --watch)."
+    ],
+    "endpoints": [
+      {
+        "doc": "docs/integrations/herdr.mdx",
+        "name": "herdr integration"
+      }
+    ],
+    "links": [
+      {
+        "href": "docs/integrations/herdr.mdx",
+        "label": "herdr integration"
+      },
+      {
+        "href": "docs/guide/workflow-supervisor.mdx",
+        "label": "workflow supervisor"
+      },
+      {
+        "href": "docs/guide/watch-and-steer.mdx",
+        "label": "watch and steer"
       }
     ]
   }

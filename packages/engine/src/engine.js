@@ -43,6 +43,7 @@ import { resolveForkAgentState } from "./resolveForkSessionMessages.js";
 import { getDefinedToolMetadata } from "./getDefinedToolMetadata.js";
 import { captureSnapshotEffect, loadLatestSnapshot, parseSnapshot } from "@smthrs/time-travel/snapshot";
 import { EventBus } from "./events.js";
+import { expireQueuedSteersForRun } from "./steers.js";
 import { AgentTraceCollector } from "./AgentTraceCollector.js";
 import { getJjPointer, runJj, workspaceAdd } from "@smthrs/vcs/jj";
 import { findVcsRoot } from "@smthrs/vcs/find-root";
@@ -3054,6 +3055,7 @@ async function markUnattendedResumeFailed(adapter, eventBus, runId, error, onErr
       timestampMs: failedAtMs,
     }),
   );
+  await expireQueuedSteersForRun(adapter, eventBus, runId, failedAtMs);
 }
 /**
  * @param {AbortController} controller
@@ -5583,6 +5585,104 @@ async function legacyExecuteTask(
           hijackCapableEngine ??
           (typeof effectiveAgent.constructor?.name === "string" ? effectiveAgent.constructor.name : null);
         attemptMeta.agentEngine = currentAgentEngine;
+        // Persist reasoning/effort when the agent config exposes it so
+        // supervisor / node detail can show "model xhigh" without re-deriving CLI flags.
+        // Precedence mirrors what each adapter ACTUALLY applies at spawn — see
+        // the cascade + rationale below (adapter-winning sources first).
+        const agentOpts =
+          effectiveAgent.opts && typeof effectiveAgent.opts === "object"
+            ? effectiveAgent.opts
+            : effectiveAgent.options && typeof effectiveAgent.options === "object"
+              ? effectiveAgent.options
+              : null;
+        /**
+         * @param {unknown} settings
+         * @returns {string | null}
+         */
+        const effortFromSettings = (settings) => {
+          if (typeof settings === "string" && settings !== "") {
+            try {
+              const parsed = JSON.parse(settings);
+              if (parsed && typeof parsed === "object" && typeof parsed.effortLevel === "string") {
+                return parsed.effortLevel;
+              }
+            } catch {
+              return null;
+            }
+          }
+          if (settings && typeof settings === "object" && !Array.isArray(settings)) {
+            const e = /** @type {Record<string, unknown>} */ (settings).effortLevel;
+            if (typeof e === "string" && e !== "") return e;
+          }
+          return null;
+        };
+        /**
+         * @param {unknown} extraArgs
+         * @returns {string | null}
+         */
+        const effortFromExtraArgs = (extraArgs) => {
+          if (!Array.isArray(extraArgs)) return null;
+          for (let i = 0; i < extraArgs.length; i++) {
+            const a = extraArgs[i];
+            if (a === "--settings" && typeof extraArgs[i + 1] === "string") {
+              return effortFromSettings(extraArgs[i + 1]);
+            }
+            if (typeof a === "string" && a.startsWith("--settings=")) {
+              return effortFromSettings(a.slice("--settings=".length));
+            }
+          }
+          return null;
+        };
+        const configObj =
+          agentOpts && agentOpts.config && typeof agentOpts.config === "object" && !Array.isArray(agentOpts.config)
+            ? /** @type {Record<string, unknown>} */ (agentOpts.config)
+            : null;
+        // Record the effort each adapter ACTUALLY applies at spawn. In every
+        // adapter an adapter-specific source WINS over the first-class
+        // `effort`, so those rank first here — and they don't cross-contaminate
+        // (variant is OpenCode-only, model_reasoning_effort is Codex-only,
+        // `--settings` effortLevel is Claude-only):
+        //   OpenCode: an explicit `variant` wins over `effort` (OpenCodeAgent.js)
+        //   Claude:   `--settings` effortLevel (inline JSON; extraArgs > opts)
+        //             wins over `effort` (ClaudeCodeAgent.js)
+        //   Codex:    `config.model_reasoning_effort` wins over `effort` (CodexAgent.js)
+        // The first-class `effort` is the fallback each adapter uses when no
+        // adapter-specific source is set. (A Claude settings FILE's effortLevel
+        // IS applied at spawn but stays opaque to this recorder — an accepted
+        // display limit.) `config.effort` is NOT a reasoning-effort input for
+        // any adapter (Codex forwards it as a raw `-c effort=`), so it ranks
+        // LAST — below the first-class effort it must never override.
+        const effortCandidate =
+          (typeof effectiveAgent.variant === "string" && effectiveAgent.variant) ||
+          (agentOpts && typeof agentOpts.variant === "string" && agentOpts.variant) ||
+          (agentOpts ? effortFromExtraArgs(agentOpts.extraArgs) : null) ||
+          (agentOpts ? effortFromSettings(agentOpts.settings) : null) ||
+          (configObj && typeof configObj.model_reasoning_effort === "string"
+            ? configObj.model_reasoning_effort
+            : null) ||
+          (typeof effectiveAgent.effort === "string" && effectiveAgent.effort) ||
+          (typeof effectiveAgent.reasoningEffort === "string" && effectiveAgent.reasoningEffort) ||
+          (typeof effectiveAgent.thinking === "string" && effectiveAgent.thinking) ||
+          (agentOpts && typeof agentOpts.effort === "string" && agentOpts.effort) ||
+          (agentOpts && typeof agentOpts.reasoningEffort === "string" && agentOpts.reasoningEffort) ||
+          (agentOpts && typeof agentOpts.thinking === "string" && agentOpts.thinking) ||
+          (configObj && typeof configObj.effort === "string" ? configObj.effort : null) ||
+          null;
+        if (effortCandidate) {
+          attemptMeta.effort = effortCandidate;
+        }
+        // Persist the project directory the agent session is keyed by
+        // (Claude --resume is per-project). Prefer agent.cwd / opts.cwd over
+        // worktree/rootDir so plain-cwd lanes hijack correctly.
+        const agentCwdCandidate =
+          (typeof effectiveAgent.cwd === "string" && effectiveAgent.cwd) ||
+          (agentOpts && typeof agentOpts.cwd === "string" && agentOpts.cwd) ||
+          (typeof desc.worktreePath === "string" && desc.worktreePath) ||
+          (typeof toolConfig.rootDir === "string" && toolConfig.rootDir) ||
+          null;
+        if (agentCwdCandidate) {
+          attemptMeta.agentCwd = agentCwdCandidate;
+        }
         const heartbeatCheckpoint =
           previousHeartbeat && typeof previousHeartbeat === "object" && !Array.isArray(previousHeartbeat)
             ? previousHeartbeat
@@ -5845,6 +5945,10 @@ async function legacyExecuteTask(
         await Effect.runPromise(
           adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
             metaJson: JSON.stringify(attemptMeta),
+            // Promote effort to the first-class column alongside the
+            // meta_json back-compat blob so it is queryable and both the
+            // direct-db and gateway display paths can surface it.
+            ...(effortCandidate ? { effort: effortCandidate } : {}),
           }),
         );
         if (isPreflightCapableAgent(effectiveAgent)) {
@@ -5996,6 +6100,65 @@ async function legacyExecuteTask(
           : null;
         if (worktreeIsolationNotice && !effectivePrompt.includes(WORKTREE_ISOLATION_NOTICE_MARKER)) {
           effectivePrompt = `${worktreeIsolationNotice}\n\n${effectivePrompt}`;
+        }
+        // --- STEER consumption ---
+        // Drain any steers queued against this node and fold
+        // them into the call about to be made. Exactly one indexed read
+        // on the zero-steer hot path. Injected BEFORE the structured
+        // output schema wrap below so the JSON contract (first char `{`,
+        // last char `}`) is preserved. Consumption is marked before
+        // generate() so a retry/replay does not re-inject a steer once the
+        // attempt's conversation has been durably persisted (streaming
+        // checkpoint / post-generate updateAttempt). Delivery is best-effort
+        // at-most-once: a crash in the narrow window between marking a steer
+        // consumed and that first durable write may drop the steer.
+        const queuedSteers = await Effect.runPromise(adapter.listQueuedSteers(runId, desc.nodeId));
+        if (queuedSteers.length > 0) {
+          const steerMessages = queuedSteers.map((steer) => ({
+            role: "user",
+            content: steer.message,
+          }));
+          if (guidedResumeMessages?.length) {
+            // Messages / guided-resume mode: append the steers as new
+            // user turns. guidedResumeMessages is the array handed to
+            // generate() AND (by reference) attemptMeta.agentConversation;
+            // conversationMessages is the separate snapshot persisted
+            // for CLI agents — keep both in sync so the steer lands in
+            // the durable conversation as well as reaching the agent.
+            guidedResumeMessages.push(...steerMessages);
+            if (conversationMessages) {
+              conversationMessages.push(...steerMessages);
+            }
+          } else {
+            // Prompt mode (and the fork base built from effectivePrompt
+            // below): fold the steer text into the user turn as trailing
+            // content, still ahead of the schema wrap. It rides the
+            // persisted `{ role: "user", content: effectivePrompt }`
+            // turn, so it is captured in agentConversation too.
+            const steerText = steerMessages.map((message) => message.content).join("\n\n");
+            effectivePrompt = effectivePrompt.length > 0 ? `${effectivePrompt}\n\n${steerText}` : steerText;
+          }
+          const consumedAtMs = nowMs();
+          for (const steer of queuedSteers) {
+            await Effect.runPromise(
+              adapter.markSteerConsumed(steer.steerId, {
+                consumedAtMs,
+                consumedByAttempt: attemptNo,
+                consumedByIteration: desc.iteration,
+              }),
+            );
+            await Effect.runPromise(
+              eventBus.emitEventWithPersist({
+                type: "SteerConsumed",
+                runId,
+                nodeId: desc.nodeId,
+                iteration: desc.iteration,
+                attempt: attemptNo,
+                steerId: steer.steerId,
+                timestampMs: consumedAtMs,
+              }),
+            );
+          }
         }
         supportsNativeStructuredOutput = effectiveAgent.supportsNativeStructuredOutput === true;
         if (desc.outputTable && !supportsNativeStructuredOutput) {
@@ -9689,6 +9852,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             timestampMs: nowMs(),
           }),
         );
+        await expireQueuedSteersForRun(adapter, eventBus, runId);
       }
       await annotateRunSpan({ status: "failed" });
       return { runId, status: "failed", error: errorInfo };
@@ -9718,6 +9882,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
         ...(exhaustedLoops.length > 0 ? { exhaustedLoops } : {}),
       }),
     );
+    await expireQueuedSteersForRun(adapter, eventBus, runId);
     void Effect.runPromise(Metric.update(runDuration, performance.now() - runStartPerformanceMs));
     logInfo(
       "workflow run finished",
@@ -10453,6 +10618,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
           timestampMs: nowMs(),
         }),
       );
+      await expireQueuedSteersForRun(adapter, eventBus, runId);
     }
     await annotateRunSpan({ status: "failed" });
     return { runId, status: "failed", error: errorInfo };

@@ -56,7 +56,7 @@ export const replayBundle = async (
   bundle: ReplayBundle,
   options: Omit<RunScenarioOptions, "seed" | "controlLog"> = {},
 ): Promise<ScenarioResult> => {
-  const { runScenario } = await import("../runScenario.ts");
+  const { runKernelScenario } = await import("../runScenario.ts");
   if (bundle.replayIdentity !== replayIdentity({ ast: bundle.ast, seed: bundle.seed, controlLog: bundle.controlLog }))
     throw new Error("REPLAY_IDENTITY_MISMATCH");
   const selectedHarness = options.harness?.name ?? "unit-sim";
@@ -85,7 +85,7 @@ export const replayBundle = async (
     .filter((step) => step.runnerBinding && !runners[step.id] && !stepRunner(step))
     .map((step) => step.id);
   if (missing.length) throw new Error(`REPLAY_RUNNER_MISSING: ${missing.join(", ")}`);
-  return runScenario(bundle.ast, {
+  return runKernelScenario(bundle.ast, {
     ...options,
     ...(Object.keys(runners).length ? { stepRunners: runners } : {}),
     seed: bundle.seed,

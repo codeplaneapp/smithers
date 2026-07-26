@@ -2,9 +2,17 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { SmithersDb } from "@smthrs/db/adapter";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
+import { isRetryableSqliteWriteError } from "@smithers-orchestrator/db/isRetryableSqliteWriteError";
 import { SmithersError } from "@smthrs/errors/SmithersError";
 import { openSmithersBackend } from "./openSmithersBackend.js";
 import { resolveSmithersBackendChoice } from "./resolveSmithersBackendChoice.js";
+
+/** Per-attempt lock wait for the run-table probe. Long enough for a normal frame
+ * commit by a concurrent writer to clear; short enough not to hang a CLI read. */
+const RUNS_TABLE_PROBE_BUSY_TIMEOUT_MS = 500;
+
+/** Retries after the busy_timeout still reports a lock, before assuming present. */
+const RUNS_TABLE_PROBE_MAX_ATTEMPTS = 3;
 
 async function openSqliteStore(dbPath, opts = {}) {
   const { Database } = await import("bun:sqlite");
@@ -45,23 +53,59 @@ async function openSqliteStore(dbPath, opts = {}) {
   };
 }
 
+/**
+ * Whether an existing SQLite file already carries the `_smithers_runs` table
+ * (i.e. it is a real Smithers store, not an empty or unrelated file). This gates
+ * the read path's "No Smithers run history" not-found error, so a WRONG answer
+ * here is user-visible: a transient read race must never be reported as "no run
+ * history".
+ *
+ * Two properties matter and the old `{ readonly: true }` probe that swallowed
+ * every error into `false` had neither:
+ *
+ *  - Opened WRITABLE (never `{ readonly: true }`): a WAL database needs write
+ *    access to the `-shm` wal-index to register as a reader, so a read-only handle
+ *    races a live `smithers up` writer and can spuriously fail. `busy_timeout`
+ *    lets a brief writer lock (a frame commit) clear instead of erroring at once.
+ *  - A transient lock/IO race is DISTINGUISHED from a genuinely unreadable file.
+ *    A lock means the file IS a live, contended store, which by definition already
+ *    has the runs table, so we retry briefly and then assume present rather than
+ *    reporting the campaign-observed false "no run history". Only a genuinely
+ *    unreadable file (missing / corrupt / not-a-database) resolves to `false`.
+ *
+ * @param {string} dbPath
+ * @returns {Promise<boolean>}
+ */
 async function sqliteHasRunsTable(dbPath) {
   if (!existsSync(dbPath)) {
     return false;
   }
   const { Database } = await import("bun:sqlite");
-  let sqlite;
-  try {
-    sqlite = new Database(dbPath, { readonly: true });
-    const row = sqlite.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_runs'").get();
-    return Boolean(row);
-  } catch {
-    return false;
-  } finally {
+  for (let attempt = 1; ; attempt += 1) {
+    let sqlite;
     try {
-      sqlite?.close();
-    } catch {
-      // best-effort read-only probe cleanup
+      sqlite = new Database(dbPath);
+      sqlite.run(`PRAGMA busy_timeout = ${RUNS_TABLE_PROBE_BUSY_TIMEOUT_MS}`);
+      const row = sqlite.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_runs'").get();
+      return Boolean(row);
+    } catch (error) {
+      if (!isRetryableSqliteWriteError(error)) {
+        // Genuinely unreadable (missing / corrupt / not-a-database): not a store.
+        return false;
+      }
+      if (attempt >= RUNS_TABLE_PROBE_MAX_ATTEMPTS) {
+        // Still locked after busy_timeout + retries: this is a live, contended
+        // store (which has the runs table). Reporting "no run history" here was
+        // the bug — assume present rather than falsely denying run history.
+        return true;
+      }
+      await new Promise((resolveFn) => setTimeout(resolveFn, 100));
+    } finally {
+      try {
+        sqlite?.close();
+      } catch {
+        // best-effort probe cleanup
+      }
     }
   }
 }

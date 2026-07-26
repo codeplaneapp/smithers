@@ -558,7 +558,28 @@ export class CodexAgent extends BaseCliAgent {
     const resumeSession = typeof params.options?.resumeSession === "string" ? params.options.resumeSession : undefined;
     const args = resumeSession ? ["exec", "resume"] : ["exec"];
     const yoloEnabled = this.opts.yolo ?? this.yolo;
-    const configOverrides = normalizeCodexConfig(this.opts.config);
+    // First-class effort → model_reasoning_effort (explicit config wins).
+    // Documented ceiling: Codex historically accepts only
+    // minimal | low | medium | high (xhigh on newer gpt-5-codex). This is a
+    // pass-through — `max` from the shared ladder is NOT a Codex value, so
+    // forwarding it is the caller's responsibility (Codex will reject it).
+    const effort =
+      (typeof this.opts.effort === "string" && this.opts.effort) ||
+      (typeof this.effort === "string" && this.effort) ||
+      null;
+    /** @type {Record<string, unknown> | undefined} */
+    let configForNorm = this.opts.config;
+    if (effort) {
+      const base =
+        configForNorm && typeof configForNorm === "object" && !Array.isArray(configForNorm)
+          ? { .../** @type {Record<string, unknown>} */ (configForNorm) }
+          : {};
+      if (base.model_reasoning_effort == null) {
+        base.model_reasoning_effort = effort;
+      }
+      configForNorm = base;
+    }
+    const configOverrides = normalizeCodexConfig(configForNorm);
     for (const entry of configOverrides) {
       args.push("-c", entry);
     }

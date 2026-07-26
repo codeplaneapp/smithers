@@ -598,6 +598,65 @@ describe("DB migration edges", () => {
     sqlite.close();
   });
 
+  test("0033 adds the first-class effort column; a legacy meta_json-only row reads clean", () => {
+    const sqlite = new Database(":memory:");
+    // Pre-0033 attempts table: NO effort column. A legacy row smuggled effort
+    // inside meta_json (the old back-compat path).
+    sqlite.exec(`
+      CREATE TABLE _smithers_attempts (
+        run_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        iteration INTEGER NOT NULL DEFAULT 0,
+        attempt INTEGER NOT NULL,
+        state TEXT NOT NULL,
+        started_at_ms INTEGER NOT NULL,
+        meta_json TEXT,
+        PRIMARY KEY (run_id, node_id, iteration, attempt)
+      );
+      INSERT INTO _smithers_attempts (run_id, node_id, iteration, attempt, state, started_at_ms, meta_json)
+        VALUES ('legacy', 'setup', 0, 1, 'finished', 1000,
+          '{"agentEngine":"claude-code","agentModel":"claude-sonnet-4","effort":"high"}');
+    `);
+    const db = drizzle(sqlite);
+    ensureSmithersTables(db);
+
+    // The migration promoted effort to a first-class column...
+    const cols = sqlite
+      .query('PRAGMA table_info("_smithers_attempts")')
+      .all()
+      .map((c) => c.name);
+    expect(cols).toContain("effort");
+    expect(migrationRows(sqlite).map((row) => row.id)).toContain("0033_attempt_effort_column");
+
+    // ...and the legacy row still reads clean: the new column is NULL (never
+    // backfilled from the blob) while the old meta_json value survives intact.
+    const row = sqlite.query("SELECT effort, meta_json FROM _smithers_attempts WHERE node_id = ?").get("setup");
+    expect(row.effort).toBeNull();
+    expect(JSON.parse(row.meta_json).effort).toBe("high");
+    sqlite.close();
+  });
+
+  test("effort persists to the first-class column through the adapter round-trip", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    ensureSmithersTables(db);
+    const adapter = new SmithersDb(db);
+    await adapter.insertAttempt({
+      runId: "run-1",
+      nodeId: "worker",
+      iteration: 0,
+      attempt: 1,
+      state: "finished",
+      startedAtMs: 1000,
+      metaJson: JSON.stringify({ agentModel: "claude-sonnet-5", effort: "xhigh" }),
+      effort: "xhigh",
+    });
+    const attempts = await adapter.listAttemptsForRun("run-1");
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0].effort).toBe("xhigh");
+    sqlite.close();
+  });
+
   test("0014 current-indexes upgrades a store whose ledger predates _smithers_docs", () => {
     // Regression: the `_smithers_docs` index lives in the current-index list that
     // migration 0014 runs, but the table is only created by 0018. A store whose
@@ -670,6 +729,73 @@ describe("DB migration edges", () => {
       .query("SELECT name FROM sqlite_master WHERE type='index' AND name = '_smithers_docs_kind_live_idx'")
       .get();
     expect(docsIndex).toBeTruthy();
+    sqlite.close();
+  });
+
+  test("0034 creates the steer inbox table + index for a store whose ledger predates it", () => {
+    const sqlite = new Database(":memory:");
+    sqlite.exec(`
+      CREATE TABLE _smithers_schema_migrations (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        applied_at_ms INTEGER NOT NULL,
+        checksum TEXT,
+        destructive INTEGER NOT NULL DEFAULT 0,
+        details_json TEXT
+      );
+      CREATE TABLE _smithers_runs (
+        run_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL
+      );
+    `);
+    // Record every prior migration as applied so only 0033/0034 remain to run.
+    // 0025_snapshot_contents is deliberately NOT pre-applied: it creates the
+    // snapshot tables the post-migration trigger repair depends on, so a ledger
+    // claiming 0025 without those tables is not a state a real store reaches.
+    for (const id of [
+      "0001_current_tables",
+      "0002_attempt_legacy_columns",
+      "0003_run_legacy_columns",
+      "0004_approval_payload_columns",
+      "0005_alert_model_extensions",
+      "0006_frame_encoding_column",
+      "0007_event_timestamp_column",
+      "0011_add_node_diffs",
+      "0012_add_time_travel_audit",
+      "0013_run_owned_foreign_keys",
+      "0014_current_indexes",
+      "0015_add_workspace_states",
+      "0016_add_workspace_checkpoints",
+      "0017_add_scorer_context_columns",
+      "0018_add_docs",
+      "0019_add_integration_tables",
+      "0020_run_pause_column",
+      "0021_memory_fact_provenance_columns",
+      "0022_memory_message_iteration_column",
+      "0023_add_memory_notes",
+      "0026_drop_snapshot_prototype_triggers",
+      "0027_add_rewind_leases",
+      "0028_sandbox_heartbeat_column",
+      "0029_integration_delivery_claims",
+      "0030_output_provenance",
+      "0031_side_effect_journal",
+      "0032_tool_call_tokens",
+    ]) {
+      sqlite.run("INSERT INTO _smithers_schema_migrations (id, name, applied_at_ms) VALUES (?, ?, ?)", [id, id, 1]);
+    }
+    const db = drizzle(sqlite);
+
+    expect(() => ensureSmithersTables(db)).not.toThrow();
+
+    const table = sqlite.query("SELECT name FROM sqlite_master WHERE type='table' AND name = '_smithers_steers'").get();
+    expect(table).toBeTruthy();
+    const index = sqlite
+      .query("SELECT name FROM sqlite_master WHERE type='index' AND name = '_smithers_steers_queued_idx'")
+      .get();
+    expect(index).toBeTruthy();
+    const ledger = migrationRows(sqlite).map((row) => row.id);
+    expect(ledger).toContain("0034_add_steers");
     sqlite.close();
   });
 

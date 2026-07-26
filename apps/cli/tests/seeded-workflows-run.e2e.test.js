@@ -405,6 +405,10 @@ function initWorkflowPack() {
     OPENAI_API_KEY: "",
     GEMINI_API_KEY: "",
     GOOGLE_API_KEY: "",
+    // Several seeded-workflow cases deliberately fail. Keep those failures
+    // from spawning detached autopsies that can outlive this fixture's fake
+    // agent binaries and fall through to real credentials on the host.
+    SMITHERS_POST_FAILURE: "0",
     SMITHERS_FAKE_AGENT_RESPONSE: AGENT_RESPONSE,
     SMITHERS_SHARE_REGISTRY_README: repo.path("registry-readme.md"),
   };
@@ -692,6 +696,7 @@ for (const mode of ["missing", "malformed", "mismatched", "wrong-path"]) {
       });
       expect(terminal.exitCode).toBe(0);
       expect(jsonOutput(terminal)).toMatchObject({ status: "built", skill_path: null });
+      expect(result.stderr).not.toContain("Post-failure autopsy launched");
       expect(repo.read(".smithers/test-document-attempts")).toBe("3");
       expect(repo.read(".smithers/test-scaffold-count")).toBe("1");
       expect(repo.read(".smithers/workflows/mock-workflow.tsx")).toBe(EXPECTED_WORKFLOW);

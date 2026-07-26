@@ -196,6 +196,12 @@ const LEGACY_COLUMN_MIGRATIONS = [
     table: "_smithers_memory_messages",
     columns: [["iteration", "iteration INTEGER"]],
   },
+  {
+    id: "0033_attempt_effort_column",
+    name: "Add first-class effort column to attempts",
+    table: "_smithers_attempts",
+    columns: [["effort", "effort TEXT"]],
+  },
 ];
 
 const EXTRA_INDEX_STATEMENTS = [
@@ -1946,6 +1952,32 @@ function buildMigrations(context) {
           archiveTable: "_smithers_tool_call_archive",
           column: "call_token",
         };
+      },
+    },
+    {
+      id: "0034_add_steers",
+      name: "Add durable steer inbox table",
+      checksum: "packages/db/migrations/0034_add_steers.sql",
+      isApplied: (sqlite) => tableExists(sqlite, "_smithers_steers"),
+      isAppliedPostgres: (pgConn) => tableExistsPostgres(pgConn, "_smithers_steers"),
+      up: (sqlite) => {
+        sqlite.run(createTableStatementFor("_smithers_steers", context.createTableStatements));
+        sqlite.run(`CREATE INDEX IF NOT EXISTS _smithers_steers_queued_idx
+    ON _smithers_steers (run_id, node_id, status, created_at_ms)`);
+        return { table: "_smithers_steers" };
+      },
+      upPostgres: async (pgConn) => {
+        await pgConn.query({
+          text: translateDdl(POSTGRES, createTableStatementFor("_smithers_steers", context.createTableStatements)),
+        });
+        await pgConn.query({
+          text: translateDdl(
+            POSTGRES,
+            `CREATE INDEX IF NOT EXISTS _smithers_steers_queued_idx
+    ON _smithers_steers (run_id, node_id, status, created_at_ms)`,
+          ),
+        });
+        return { table: "_smithers_steers" };
       },
     },
     {

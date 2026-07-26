@@ -189,6 +189,7 @@
     "@smthrs/gateway-ui": "workspace:*",
     "@smthrs/gcp": "workspace:*",
     "@smthrs/graph": "workspace:*",
+    "@smthrs/herdr": "workspace:*",
     "@smthrs/integrations": "workspace:*",
     "@smthrs/memory": "workspace:*",
     "@smthrs/microsandbox": "workspace:*",

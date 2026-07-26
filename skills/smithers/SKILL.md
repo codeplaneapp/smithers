@@ -228,13 +228,19 @@ before every workflow you build, and the rest of this skill assumes them.
    user. See [Authoring new workflows](#authoring-new-workflows).
 3. **Proactively offer to visualize, every time.** Whenever a workflow or run is
    in play, suggest ways to *see* it instead of leaving the user with prose:
-   - **Open the Smithers Monitor proactively.** Whenever you start or attach to
-     a run, explicitly run `smithers monitor <run-id>` so the live web UI
-     (status, execution tree, per-node live output, events, approvals) opens in
-     the user's browser without being asked. `smithers up` and
-     `smithers workflow run` do not open a browser themselves. Browser opening
-     belongs to `smithers monitor`, `smithers gui`, and `smithers ui`; use
-     `smithers ui <run-id>` when you want the workflow's custom UI instead.
+   - **Match the view to where the user already is.** If you are in a herdr
+     terminal workspace (`HERDR_ENV=1`) or the user has a `smithers supervisor`
+     open, that terminal cockpit **is** their live view: do **not** open the
+     browser Monitor. Mirror the run into it with `smithers up … --herdr` and
+     let the supervisor pick it up (it polls the workspace store and shows every
+     run automatically); the user drives steer/hijack from the node panes or the
+     supervisor's `Enter`. Only when there is **no** terminal cockpit, open the
+     Smithers Monitor proactively: run `smithers monitor <run-id>` so the live
+     web UI (status, execution tree, per-node live output, events, approvals)
+     opens in the user's browser without being asked (pass `--no-open` to just
+     print the URL). `smithers up` / `smithers workflow run` never open a browser
+     themselves; browser opening belongs to `smithers monitor`, `smithers gui`,
+     and `smithers ui`. Use `smithers ui <run-id>` for a workflow's custom UI.
    - `smithers graph <file>.tsx` renders the workflow graph without executing
      (also your pre-run sanity check; it must exit 0).
    - `smithers tree <run-id>` prints the run's live node tree, and
@@ -576,7 +582,7 @@ The same substrate carries the concerns you'd otherwise bolt on later:
 - **Observability / serving**: `smithers observability --detach` (Grafana/Prometheus/Tempo/OTLP); `smithers observability --down` stops it; `smithers up … --serve --metrics` exposes an HTTP API, SSE event stream, and `/metrics`. A workflow can even serve its own React front-end.
 - **Agents**: pluggable runtimes (claude, codex, antigravity, kimi, amp, forge, Effect-native) configured in `agents.ts`; `agent={[primary, fallback]}` falls back on failure.
 - **Tools**: built-in `read`/`write`/`edit`/`bash`/`grep`/`ls` with path containment (`--root`); `smithers openapi <spec>` generates typed AI SDK tools from an OpenAPI spec.
-- **Integrations**: run Smithers itself as an MCP server (`smithers mcp add`), sync skills into agent dirs (`smithers skills add`), durable schedules (`smithers cron`), pager-style `smithers alerts`, a structured `<HumanTask>` queue (`smithers human`), and `smithers hijack` to hand off a live agent session.
+- **Integrations**: run Smithers itself as an MCP server (`smithers mcp add`), sync skills into agent dirs (`smithers skills add`), durable schedules (`smithers cron`), pager-style `smithers alerts`, a structured `<HumanTask>` queue (`smithers human`), and `smithers hijack` to hand off a live agent session. Optionally mirror a run into a [herdr](https://herdr.dev) terminal workspace with `smithers up … --herdr` (a pane per agent node running `smithers tail`, plus `smithers herdr attach <run-id>` / `smithers herdr status`); it is fully degradable and never affects the run.
 - **Lower-level API**: `Smithers.workflow().step(...)` exposes the raw Effect-ts surface (Schedules, Layers, fibers); mix it with JSX in one workflow.
 
 ## The `.smithers/` folder
@@ -675,6 +681,9 @@ smithers up workflow.tsx --run-id <id> --resume true          # resume after a c
 smithers ps                                                   # list runs
 smithers inspect <run-id>                                     # full run state
 smithers logs <run-id> -f                                     # follow events
+smithers tail <run-id> --node <node-id>                       # tail one node's agent output verbatim
+smithers up workflow.tsx --herdr                              # also mirror the run into a herdr workspace
+smithers herdr attach <run-id>                                # mirror an already-running run into herdr
 smithers approve <run-id> --node review --by alice            # clear an approval gate
 smithers deny <run-id> --node review --by alice               # reject an approval gate
 smithers signal <run-id> <signal-name> --data '{}'            # deliver a Signal/WaitForEvent payload

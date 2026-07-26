@@ -137,3 +137,18 @@ export function rewriteBareResumeFlagArgv(argv) {
     arg === "--resume" && (argv[index + 1] === undefined || argv[index + 1]?.startsWith("-")) ? "--resume=true" : arg,
   );
 }
+
+/**
+ * Same fix as {@link rewriteBareResumeFlagArgv} for the union-typed `--herdr`
+ * flag: a bare `--herdr --run-id value` would otherwise consume `--run-id` as the
+ * herdr session value. Rewriting a bare `--herdr` (nothing or another flag next)
+ * to `--herdr=true` keeps `--herdr=<session>` working while making the bare form a
+ * clean boolean.
+ *
+ * @param {string[]} argv
+ */
+export function rewriteBareHerdrFlagArgv(argv) {
+  return argv.map((arg, index) =>
+    arg === "--herdr" && (argv[index + 1] === undefined || argv[index + 1]?.startsWith("-")) ? "--herdr=true" : arg,
+  );
+}

@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "@smthrs/db/adapter";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { runsDueForQuotaResume } from "../../../packages/engine/src/engine.js";
+import { denyNode } from "../../../packages/engine/src/approvals.js";
 import { cascadeCancelRun } from "../src/cancel-cascade.js";
 import { SUPERVISOR_EVENT_RUN_ID, supervisorLoopEffect, supervisorPollEffect } from "../src/supervisor.js";
 const now = Date.now();
@@ -39,6 +40,15 @@ function runRow(runId, extra = {}) {
 async function listEventTypes(adapter, runId) {
   const events = await adapter.listEvents(runId, -1, 500);
   return events.map((event) => event.type);
+}
+/**
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ */
+async function skipReasonFor(adapter, runId) {
+  const events = await adapter.listEvents(runId, -1, 50);
+  const skip = events.find((event) => event.type === "RunAutoResumeSkipped");
+  return skip ? JSON.parse(skip.payloadJson).reason : null;
 }
 /**
  * Seed a waiting-event run whose approval gate was decided while the run was
@@ -82,6 +92,103 @@ async function insertApprovalDecidedRun(adapter, runId, opts = {}) {
     note: null,
     decidedBy: decided ? "user:test" : null,
   });
+}
+/**
+ * Seed a run parked PURELY on the approval gate: it persists as
+ * `waiting-approval` (engine markRunWaiting), which the waiting-event scan never
+ * sees. After the operator recorded the decision detached, the gate node is
+ * re-armed to "pending" and the approval is decided, but no engine is alive to
+ * act on it. This is the exact gap the waiting-approval supervisor branch fills.
+ *
+ * NOTE: this seeds an APPROVED or still-REQUESTED gate only. A denied gate is
+ * deliberately NOT expressible here — denyNode moves the node to state "failed"
+ * (and the run to waiting-event), so a (denied + pending-node) fixture is a state
+ * the engine never produces. Denied runs are seeded through the real engine path
+ * by {@link insertRealDeniedDetachedRun} so a test can never re-mask the denied
+ * resume gap with an impossible fixture.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {{ approvalStatus?: "approved" | "requested"; runtimeOwnerId?: string | null }} [opts]
+ */
+async function insertGateDecidedRun(adapter, runId, opts = {}) {
+  const approvalStatus = opts.approvalStatus ?? "approved";
+  const decided = approvalStatus === "approved";
+  await adapter.insertRun(
+    runRow(runId, {
+      status: "waiting-approval",
+      heartbeatAtMs: now - 60_000,
+      runtimeOwnerId: opts.runtimeOwnerId ?? "pid:99999:owner",
+    }),
+  );
+  await adapter.insertNode({
+    runId,
+    nodeId: "review",
+    iteration: 0,
+    // approveNode re-arms the gate node to "pending"; that's what
+    // listResumableDecidedApprovals joins against. (A run stays waiting-approval
+    // with an approved gate only while a sibling gate is still pending.)
+    state: "pending",
+    lastAttempt: 1,
+    updatedAtMs: now - 2_000,
+    outputTable: "",
+    label: "approval:review",
+  });
+  await adapter.insertOrUpdateApproval({
+    runId,
+    nodeId: "review",
+    iteration: 0,
+    status: approvalStatus,
+    requestedAtMs: now - 2_000,
+    decidedAtMs: decided ? now - 1_000 : null,
+    note: null,
+    decidedBy: decided ? "user:test" : null,
+  });
+}
+/**
+ * Seed a run parked at a gate and DENY it through the real engine `denyNode`
+ * path — no hand-forged fixture. This is what a gateway / serve API / interactive
+ * `approve --watch` denial does. denyNode moves the gate node to state "failed"
+ * and (0 pending remaining) the run to status "waiting-event": the exact state a
+ * detached deny leaves behind. The heartbeat is stale and the runtime owner is a
+ * dead pid, so the run is a genuine orphan awaiting the supervisor safety net —
+ * and the pending-node-only query the supervisor used to gate on would silently
+ * skip it.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ */
+async function insertRealDeniedDetachedRun(adapter, runId) {
+  await adapter.insertRun(
+    runRow(runId, {
+      status: "waiting-approval",
+      heartbeatAtMs: now - 60_000,
+      runtimeOwnerId: "pid:99999:owner",
+    }),
+  );
+  await adapter.insertNode({
+    runId,
+    nodeId: "review",
+    iteration: 0,
+    state: "waiting-approval",
+    lastAttempt: 1,
+    updatedAtMs: now - 2_000,
+    outputTable: "",
+    label: "approval:review",
+  });
+  await adapter.insertOrUpdateApproval({
+    runId,
+    nodeId: "review",
+    iteration: 0,
+    status: "requested",
+    requestedAtMs: now - 2_000,
+    decidedAtMs: null,
+    note: null,
+    decidedBy: null,
+  });
+  // Drive the REAL deny path. Post-conditions (asserted by callers): the gate
+  // node is "failed" and the run is "waiting-event".
+  await Effect.runPromise(denyNode(adapter, runId, "review", 0, "denied by test", "user:test"));
 }
 describe("supervisor poll core", () => {
   test("auto-resumes stale runs", async () => {
@@ -623,6 +730,120 @@ describe("supervisor poll core", () => {
     expect(summary.resumedCount).toBe(0);
     expect(resumed).toHaveLength(0);
     expect(await listEventTypes(adapter, "run-approval-pending")).not.toContain("RunAutoResumed");
+    sqlite.close();
+  });
+  test("resumes a waiting-approval run whose gate was decided (approved) while detached", async () => {
+    const { adapter, sqlite } = createTestDb();
+    const resumed = [];
+    await insertGateDecidedRun(adapter, "run-gate-approved");
+    const summary = await Effect.runPromise(
+      supervisorPollEffect({
+        adapter,
+        staleThresholdMs: 30_000,
+        maxConcurrent: 3,
+        supervisorId: "gate-resume",
+        deps: {
+          now: () => now,
+          workflowExists: () => true,
+          isPidAlive: () => false,
+          spawnResumeDetached: (_workflowPath, runId) => {
+            resumed.push(runId);
+            return 9490;
+          },
+        },
+      }),
+    );
+    expect(summary.staleCount).toBe(0);
+    expect(summary.resumedCount).toBe(1);
+    expect(summary.skippedCount).toBe(0);
+    expect(resumed).toEqual(["run-gate-approved"]);
+    expect(await listEventTypes(adapter, "run-gate-approved")).toContain("RunAutoResumed");
+    const run = await adapter.getRun("run-gate-approved");
+    expect(run?.runtimeOwnerId).toBe("supervisor:gate-resume");
+    sqlite.close();
+  });
+  test("resumes a genuinely-denied detached run (real denyNode: node failed, run waiting-event)", async () => {
+    const { adapter, sqlite } = createTestDb();
+    const resumed = [];
+    await insertRealDeniedDetachedRun(adapter, "run-gate-denied");
+    // Guard the fixture against silently reverting to an impossible state:
+    // a real deny leaves the gate node "failed" and the run "waiting-event".
+    // (The old pending-node-only supervisor query dropped exactly this, so a
+    // pending-node fixture would have masked the resume gap.)
+    expect((await adapter.getNode("run-gate-denied", "review", 0))?.state).toBe("failed");
+    expect((await adapter.getRun("run-gate-denied"))?.status).toBe("waiting-event");
+    const summary = await Effect.runPromise(
+      supervisorPollEffect({
+        adapter,
+        staleThresholdMs: 30_000,
+        maxConcurrent: 3,
+        supervisorId: "gate-denied-resume",
+        deps: {
+          now: () => now,
+          workflowExists: () => true,
+          isPidAlive: () => false,
+          spawnResumeDetached: (_workflowPath, runId) => {
+            resumed.push(runId);
+            return 9491;
+          },
+        },
+      }),
+    );
+    expect(summary.resumedCount).toBe(1);
+    expect(resumed).toEqual(["run-gate-denied"]);
+    expect(await listEventTypes(adapter, "run-gate-denied")).toContain("RunAutoResumed");
+    sqlite.close();
+  });
+  test("does not resume a waiting-approval run whose gate is still undecided", async () => {
+    const { adapter, sqlite } = createTestDb();
+    const resumed = [];
+    await insertGateDecidedRun(adapter, "run-gate-pending", { approvalStatus: "requested" });
+    const summary = await Effect.runPromise(
+      supervisorPollEffect({
+        adapter,
+        staleThresholdMs: 30_000,
+        maxConcurrent: 3,
+        deps: {
+          now: () => now,
+          workflowExists: () => true,
+          isPidAlive: () => false,
+          spawnResumeDetached: (_workflowPath, runId) => {
+            resumed.push(runId);
+            return 9492;
+          },
+        },
+      }),
+    );
+    expect(summary.resumedCount).toBe(0);
+    expect(resumed).toHaveLength(0);
+    expect(await listEventTypes(adapter, "run-gate-pending")).not.toContain("RunAutoResumed");
+    sqlite.close();
+  });
+  test("does not resume a waiting-approval gate whose owner pid is still alive", async () => {
+    const { adapter, sqlite } = createTestDb();
+    const resumed = [];
+    await insertGateDecidedRun(adapter, "run-gate-live-owner", {
+      runtimeOwnerId: `pid:${process.pid}:live-driver`,
+    });
+    const summary = await Effect.runPromise(
+      supervisorPollEffect({
+        adapter,
+        staleThresholdMs: 30_000,
+        maxConcurrent: 3,
+        deps: {
+          now: () => now,
+          workflowExists: () => true,
+          // real isPidAlive: process.pid is genuinely alive
+          spawnResumeDetached: (_workflowPath, runId) => {
+            resumed.push(runId);
+            return 9493;
+          },
+        },
+      }),
+    );
+    expect(summary.resumedCount).toBe(0);
+    expect(resumed).toHaveLength(0);
+    expect(await skipReasonFor(adapter, "run-gate-live-owner")).toBe("pid-alive");
     sqlite.close();
   });
   test("rate-limits an approval-decided run behind a stale run when slots are exhausted", async () => {

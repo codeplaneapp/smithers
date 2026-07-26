@@ -403,7 +403,8 @@ describe("CLI pause integration gaps", () => {
         timeoutMs: COMMAND_TIMEOUT_MS,
       });
 
-      expect(result.exitCode).toBe(2);
+      // A successful park exits 0 (ratified: pause exit 0, was 2/cancelled).
+      expect(result.exitCode).toBe(0);
       expect(result.json).toMatchObject({ runId: "pause-live", status: "pause-requested" });
       const run = await adapter.getRun("pause-live");
       expect(run?.status).toBe("running");

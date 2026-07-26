@@ -268,6 +268,48 @@ describe("openSmithersStore — read/write and postgres paths", () => {
     });
   });
 
+  test("sqlite read tolerates a transient write lock instead of reporting no run history", async () => {
+    const cwd = makeWorkspace("open-store-sqlite-locked");
+    // Provision a real store with the runs table and a row, then release it.
+    const write = await openSmithersStore({ cwd, mode: "write", env: {} });
+    const dbPath = write.dbPath;
+    await write.adapter.insertRun({
+      runId: "locked-run",
+      workflowName: "lock-fixture",
+      status: "finished",
+      createdAtMs: Date.now(),
+      startedAtMs: Date.now(),
+      finishedAtMs: Date.now(),
+    });
+    await write.cleanup?.();
+
+    // Hold an EXCLUSIVE write lock on a separate connection so every other
+    // connection's read races straight into a lock — exactly the transient
+    // contention the campaign hit under parallel runs. Pre-fix, the run-table
+    // probe swallowed that lock into a false "no run history" and the read failed
+    // CLI_DB_NOT_FOUND; the fix must instead treat a locked, live store as present.
+    const { Database } = await import("bun:sqlite");
+    const locker = new Database(dbPath);
+    locker.run("PRAGMA busy_timeout = 0");
+    // Force rollback-journal mode so the exclusive lock blocks other readers
+    // deterministically (independent of the driver's default journal mode).
+    locker.run("PRAGMA journal_mode = DELETE");
+    locker.run("BEGIN EXCLUSIVE");
+    try {
+      const store = await openSmithersStore({ cwd, mode: "read", env: {}, wait: { timeoutMs: 0 } });
+      // The read opened the store rather than denying run history.
+      expect(store.adapter).toBeDefined();
+      await store.cleanup?.();
+    } finally {
+      try {
+        locker.run("ROLLBACK");
+      } catch {
+        // best-effort unlock
+      }
+      locker.close();
+    }
+  });
+
   test("a non-not-found error propagates immediately without retrying", async () => {
     const cwd = makeWorkspace("open-store-invalid-backend");
     await expect(

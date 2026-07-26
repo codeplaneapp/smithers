@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "id": "worker-fail",
+  "engineHint": "any",
+  "turns": [
+    {
+      "stream": [{ "t": "text", "text": "worker exploding\n" }],
+      "result": {
+        "kind": "fail",
+        "error": "simulated worker failure: auth tests",
+        "retryable": false
+      }
+    }
+  ]
+}

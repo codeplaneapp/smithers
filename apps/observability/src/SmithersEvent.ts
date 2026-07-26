@@ -433,6 +433,31 @@ export type SmithersEvent =
       timestampMs: number;
     }
   | {
+      type: "SteerQueued";
+      runId: string;
+      nodeId: string;
+      steerId: string;
+      message: string;
+      author?: string;
+      timestampMs: number;
+    }
+  | {
+      type: "SteerConsumed";
+      runId: string;
+      nodeId: string;
+      iteration: number;
+      attempt: number;
+      steerId: string;
+      timestampMs: number;
+    }
+  | {
+      type: "SteerExpired";
+      runId: string;
+      nodeId: string;
+      steerId: string;
+      timestampMs: number;
+    }
+  | {
       type: "ToolCallStarted";
       runId: string;
       nodeId: string;

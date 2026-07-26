@@ -259,6 +259,12 @@ export function formatEventLine(event, baseMs, options) {
       return `${prefix}✓ Auto-approved: ${payload?.nodeId ?? "?"}`;
     case "ApprovalDenied":
       return `${prefix}✗ Denied: ${payload?.nodeId ?? "?"}`;
+    case "SteerQueued":
+      return `${prefix}↪ steer queued: ${truncateText(String(payload?.message ?? ""), 100)}`.trim();
+    case "SteerConsumed":
+      return `${prefix}✓ steer consumed by attempt ${payload?.attempt ?? 1}`;
+    case "SteerExpired":
+      return `${prefix}✗ steer expired — node finished first; press h to hijack`;
     case "ToolCallStarted":
       return `${prefix}🔧 ${payload?.nodeId ?? "?"} → ${payload?.toolName ?? "tool"} (attempt ${payload?.attempt ?? 1})`;
     case "ToolCallFinished":

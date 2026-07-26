@@ -462,8 +462,15 @@ export class OpenCodeAgent extends BaseCliAgent {
     }
     pushFlag(args, "--session", explicitSession);
 
-    // Variant / reasoning effort
-    pushFlag(args, "--variant", this.opts.variant);
+    // Variant / reasoning effort. OpenCode has no fixed effort ladder, so the
+    // shared first-class `effort` option defaults the provider-defined variant
+    // string when the user did not set `variant` explicitly (explicit wins).
+    const variant =
+      (typeof this.opts.variant === "string" && this.opts.variant) ||
+      (typeof this.opts.effort === "string" && this.opts.effort) ||
+      (typeof this.effort === "string" && this.effort) ||
+      undefined;
+    pushFlag(args, "--variant", variant);
 
     // Yolo mode: auto-approve all tool calls.
     // OpenCode parses OPENCODE_PERMISSION with JSON.parse() and expects a

@@ -4,6 +4,7 @@ export type EventCategory =
   | "frame"
   | "memory"
   | "node"
+  | "steer"
   | "openapi"
   | "output"
   | "revert"

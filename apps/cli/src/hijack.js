@@ -1,5 +1,8 @@
 import { spawn } from "node:child_process";
 import { accountToProviderEnv, getAccount } from "@smthrs/accounts";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { SmithersError } from "@smthrs/errors";
 import { registeredAgentLabel } from "./registered-agent-id.js";
 /** @typedef {import("./HijackCandidate.ts").HijackCandidate} HijackCandidate */
@@ -7,6 +10,52 @@ import { registeredAgentLabel } from "./registered-agent-id.js";
 /** @typedef {import("./NativeHijackEngine.ts").NativeHijackEngine} NativeHijackEngine */
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 
+/**
+ * Locate the project directory Claude Code used for a session id.
+ * Claude keys sessions under `~/.claude/projects/<slug>/<sessionId>.jsonl`
+ * and each transcript line carries `cwd`.
+ *
+ * @param {string} sessionId
+ * @param {{ home?: string }} [opts]
+ * @returns {string | null}
+ */
+export function resolveClaudeSessionCwd(sessionId, opts = {}) {
+  if (typeof sessionId !== "string" || sessionId === "") return null;
+  const home = opts.home ?? homedir();
+  const projectsRoot = join(home, ".claude", "projects");
+  if (!existsSync(projectsRoot)) return null;
+  let projectDirs;
+  try {
+    projectDirs = readdirSync(projectsRoot, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch {
+    return null;
+  }
+  for (const dir of projectDirs) {
+    const file = join(projectsRoot, dir, `${sessionId}.jsonl`);
+    if (!existsSync(file)) continue;
+    try {
+      // Read a small prefix — cwd appears on early lines.
+      const buf = readFileSync(file, { encoding: "utf8" });
+      const head = buf.slice(0, 64_000);
+      for (const line of head.split("\n")) {
+        if (!line.includes('"cwd"')) continue;
+        try {
+          const row = JSON.parse(line);
+          if (typeof row?.cwd === "string" && row.cwd !== "") {
+            return row.cwd;
+          }
+        } catch {
+          /* next line */
+        }
+      }
+    } catch {
+      /* next project */
+    }
+  }
+  return null;
+}
 /**
  * @param {string | null} [metaJson]
  * @returns {Record<string, unknown>}
@@ -117,6 +166,18 @@ export async function resolveHijackCandidate(adapter, runId, target) {
     const extracted = extractContinuationFromMeta(meta);
     if (!extracted) continue;
     if (target && target !== extracted.engine && target !== attempt.nodeId) continue;
+    // Prefer the cwd the agent actually used for its session:
+    // 1) meta.agentCwd (persisted by engine for new attempts)
+    // 2) Claude session transcript lookup (covers 0.27 / pre-agentCwd runs)
+    // 3) jjCwd (worktree isolation)
+    // 4) process.cwd() last resort
+    const metaCwd =
+      (typeof meta.agentCwd === "string" && meta.agentCwd) || (typeof meta.cwd === "string" && meta.cwd) || null;
+    const resumeId = extracted.mode === "native-cli" ? extracted.resume : undefined;
+    const sessionCwd =
+      !metaCwd && extracted.engine === "claude-code" && typeof resumeId === "string"
+        ? resolveClaudeSessionCwd(resumeId)
+        : null;
     return {
       runId,
       nodeId: attempt.nodeId,
@@ -124,10 +185,10 @@ export async function resolveHijackCandidate(adapter, runId, target) {
       attempt: attempt.attempt,
       engine: extracted.engine,
       mode: extracted.mode,
-      resume: extracted.mode === "native-cli" ? extracted.resume : undefined,
+      resume: resumeId,
       messages: extracted.mode === "conversation" ? extracted.messages : undefined,
       accountLabel: extracted.accountLabel,
-      cwd: attempt.jjCwd ?? process.cwd(),
+      cwd: metaCwd || sessionCwd || attempt.jjCwd || process.cwd(),
       ...(extracted.config ? { config: extracted.config } : {}),
     };
   }
@@ -264,6 +325,8 @@ export function buildHijackLaunchSpec(candidate, baseEnv = process.env) {
     if (candidate.engine === "kimi") env.KIMI_SHARE_DIR = config.configDir;
   }
   if (candidate.engine === "claude-code") {
+    // Strip print/SDK entrypoint markers so interactive resume is not forced
+    // into --print (which then demands a deferred tool marker or a prompt).
     if (env.CLAUDE_CODE_ENTRYPOINT) env.CLAUDE_CODE_ENTRYPOINT = "";
     if (env.CLAUDECODE) env.CLAUDECODE = "";
     const args = ["--resume", candidate.resume];
@@ -277,12 +340,16 @@ export function buildHijackLaunchSpec(candidate, baseEnv = process.env) {
     if (config.dangerouslySkipPermissions === true) args.push("--dangerously-skip-permissions");
     if (config.permissionMode) args.push("--permission-mode", config.permissionMode);
     if (config.model) args.push("--model", config.model);
+    delete env.CLAUDE_CODE_ENTRYPOINT;
+    delete env.CLAUDECODE;
+    // Explicit interactive resume. Do NOT pass a trailing prompt: that would
+    // auto-send a user turn. A real TTY is required (caller must not pipe stdin).
     return {
-      command: "claude",
-      args,
-      cwd: candidate.cwd,
-      env,
-    };
+    command: "claude",
+    args,
+    cwd: candidate.cwd,
+    env,
+  };
   }
   if (candidate.engine === "antigravity") {
     const args = ["--conversation", candidate.resume];

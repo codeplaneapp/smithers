@@ -63,32 +63,69 @@ describe("ClaudeCodeAgent option combinations", () => {
     expect(command.args).not.toContain("opts-session");
   });
 
-  test("durability settings stay additive with user settings and env merges all account vars", async () => {
+  test("durability settings MERGE into a user settings FILE as ONE --settings; env merges all account vars", async () => {
+    // `claude --settings <file-or-json>` is single-valued (last-wins), so a
+    // durability hook cannot ride as a SECOND --settings alongside a user file —
+    // it must merge INTO the file's content. Read a real settings file and prove
+    // the merged single flag carries both the file's keys and the durability hook.
+    const dir = await mkdtemp(join(tmpdir(), "smithers-usersettings-"));
+    const settingsFile = join(dir, "user-settings.json");
+    await Bun.write(
+      settingsFile,
+      JSON.stringify({ permissions: { allow: ["Bash"] }, hooks: { PreToolUse: [{ matcher: "Bash" }] } }),
+    );
+    try {
+      const command = await new ClaudeCodeAgent({
+        model: "m",
+        settings: settingsFile,
+        configDir: "/tmp/claude-config",
+        apiKey: "sk-test",
+      }).buildCommand({
+        cwd: dir,
+        prompt: "hello",
+        options: { durabilitySocket: "/tmp/snap.sock" },
+      });
+
+      const settingsValues = command.args
+        .map((arg, index) => (arg === "--settings" ? command.args[index + 1] : undefined))
+        .filter((value) => value !== undefined);
+      // Exactly ONE --settings — the user file merged with the durability hook.
+      expect(settingsValues).toHaveLength(1);
+      const merged = JSON.parse(settingsValues[0]);
+      // The user file's own keys survive...
+      expect(merged.permissions).toEqual({ allow: ["Bash"] });
+      // ...and the durability hook is folded in (arrays concatenate: the file's
+      // PreToolUse stays, our PostToolUse is added).
+      expect(merged.hooks.PreToolUse[0].matcher).toBe("Bash");
+      expect(merged.hooks.PostToolUse[0].hooks[0].command).toBe("smithers snapshot-hook");
+
+      expect(command.env).toEqual({
+        SMITHERS_SNAPSHOT_SOCK: "/tmp/snap.sock",
+        CLAUDE_CONFIG_DIR: "/tmp/claude-config",
+        ANTHROPIC_API_KEY: "sk-test",
+      });
+      expect(command.args[command.args.length - 1]).toBe("hello");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("an UNREADABLE user settings FILE is preserved verbatim as the sole --settings (never clobbered)", async () => {
+    // When we cannot read/parse the file, we must NOT emit our own JSON as a
+    // second flag (that would clobber the user's file). Preserve the path.
     const command = await new ClaudeCodeAgent({
       model: "m",
-      settings: "user-settings.json",
-      configDir: "/tmp/claude-config",
-      apiKey: "sk-test",
+      settings: "/does/not/exist/user-settings.json",
     }).buildCommand({
       cwd: "/tmp/project",
       prompt: "hello",
       options: { durabilitySocket: "/tmp/snap.sock" },
     });
-
     const settingsValues = command.args
       .map((arg, index) => (arg === "--settings" ? command.args[index + 1] : undefined))
       .filter((value) => value !== undefined);
-    expect(settingsValues).toHaveLength(2);
-    expect(settingsValues[0]).toBe("user-settings.json");
-    const injected = JSON.parse(settingsValues[1]);
-    expect(injected.hooks.PostToolUse[0].hooks[0].command).toBe("smithers snapshot-hook");
-
-    expect(command.env).toEqual({
-      SMITHERS_SNAPSHOT_SOCK: "/tmp/snap.sock",
-      CLAUDE_CONFIG_DIR: "/tmp/claude-config",
-      ANTHROPIC_API_KEY: "sk-test",
-    });
-    expect(command.args[command.args.length - 1]).toBe("hello");
+    expect(settingsValues).toHaveLength(1);
+    expect(settingsValues[0]).toBe("/does/not/exist/user-settings.json");
   });
 
   test("tools boundary values: empty string and 'default' pass through, empty list drops the flag", async () => {

@@ -64,16 +64,39 @@ bunx smthrs bug --run <failed-run-id>
 
 `bunx smthrs bug` attaches the run's workflow name, status, error, and recent events (secrets scrubbed) along with the Smithers version and platform. See the [CLI catalog](/cli/overview) for its flags.
 
+## When it fires
+
+The autopsy only investigates a *genuine, unexpected* task error. When a run fails, the CLI first classifies why, reading the ledger the cause is already recorded in, and only autopsies a real error:
+
+| Terminal cause | Autopsy? | Why |
+| --- | --- | --- |
+| An unexpected task error (a compute task throwing, a schema mismatch, an agent fault) | **yes** | The cause is not yet recorded; that's what the autopsy finds. |
+| A human-denied approval gate that failed the run (`bunx smithers-orchestrator deny`, default `onDeny: 'fail'`) | no | You already decided; the denial and its note are in the ledger. |
+| An operator cancel (`bunx smithers-orchestrator cancel` / `down`) | no | The cancellation is recorded. |
+| A quota park (`waiting-quota`) | no | The run is waiting on quota, not broken. |
+
+Skipping these avoids spending agent tokens autopsying a decision whose cause is already known. When a run fails for a non-error reason the CLI prints a single line noting the skip instead of launching the autopsy.
+
+The classification is scoped to the run's *terminal* cause, not its whole history. A denial on a gate whose `onDeny` is `'continue'` or `'skip'` lets the run keep going; if a later task then throws, that genuine error is the terminal cause, not the earlier denial, so the autopsy still fires.
+
 ## Opting out
 
-On by default; turn it off with either:
+On by default; turn it off with any of:
 
-- the `--no-post-failure` flag on `bunx smthrs up` / `bunx smthrs workflow run`, or
-- the `SMITHERS_POST_FAILURE=0` environment variable.
+- the `--no-post-failure` flag on `bunx smthrs up` / `bunx smthrs workflow run`,
+- the `SMITHERS_POST_FAILURE=0` environment variable, or
+- a per-workflow opt-out for workflows that fail deliberately (fault-injection suites, negative tests): pass `postFailureAutopsy: false` in the workflow options so a failure of that workflow never autopsies itself:
+
+  ```tsx
+  export default smithers((ctx) => <Workflow name="deliberately-fails">…</Workflow>, {
+    postFailureAutopsy: false,
+  });
+  ```
 
 It also skips itself automatically:
 
 - when the failing workflow is `post-failure` itself or another ops workflow (`triage-run`, `init`), so autopsies never recurse; the launched autopsy runs with `SMITHERS_POST_FAILURE=0` in its environment for the same reason;
+- when the terminal cause is a human deny, a cancel, or a quota park (see [When it fires](#when-it-fires));
 - when the `post-failure` workflow is not installed, printing the manual command instead:
 
 ```bash

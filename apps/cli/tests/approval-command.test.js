@@ -220,4 +220,53 @@ describe("smithers approval commands", () => {
       sqlite.close();
     }
   });
+
+  // --- auto-resume opt-out (--no-resume) -----------------------------------
+  // A real workflow file is present so the DEFAULT path WOULD relaunch the
+  // engine (see approve-auto-resume-unit.test.js). With --no-resume the
+  // command only records the decision: no `resumed` key, run stays parked.
+  test("approve --no-resume records the decision without relaunching the engine", async () => {
+    const repo = createTempRepo();
+    const { sqlite, adapter } = openRepoDb(repo);
+    try {
+      repo.write("workflow.tsx", "export default {};\n");
+      await insertApprovalRun(adapter, "no-resume-approve");
+      await insertApprovalRow(adapter, "no-resume-approve");
+
+      const result = runSmithers(["approve", "no-resume-approve", "--by", "tester", "--no-resume"], {
+        cwd: repo.dir,
+        format: "json",
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json?.status).toBe("approved");
+      // --no-resume opted out: the auto-resume never fired.
+      expect(result.json?.resumed).toBeUndefined();
+      expect((await adapter.getApproval("no-resume-approve", "gate", 0))?.status).toBe("approved");
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("deny --no-resume records the decision without relaunching the engine", async () => {
+    const repo = createTempRepo();
+    const { sqlite, adapter } = openRepoDb(repo);
+    try {
+      repo.write("workflow.tsx", "export default {};\n");
+      await insertApprovalRun(adapter, "no-resume-deny");
+      await insertApprovalRow(adapter, "no-resume-deny");
+
+      const result = runSmithers(["deny", "no-resume-deny", "--by", "tester", "--no-resume"], {
+        cwd: repo.dir,
+        format: "json",
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.json?.status).toBe("denied");
+      expect(result.json?.resumed).toBeUndefined();
+      expect((await adapter.getApproval("no-resume-deny", "gate", 0))?.status).toBe("denied");
+    } finally {
+      sqlite.close();
+    }
+  });
 });
