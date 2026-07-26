@@ -1,4 +1,8 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
+
+// Lease-expiry waits push several of these tests past bun's 5s default on the
+// slower Windows CI runners (observed 5.2-6.2s); the work is real, not hung.
+setDefaultTimeout(20_000);
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
