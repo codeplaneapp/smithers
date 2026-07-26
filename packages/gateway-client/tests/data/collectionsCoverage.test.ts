@@ -213,7 +213,10 @@ describe("createSmithersCollections multiplayer shape mapping", () => {
       ) => Promise<ReturnType<typeof createSmithersCollections> extends Promise<infer R> ? R : never>
     )(multiplayerMode, queryClient, async () => fakeElectric);
 
-    collections.runs();
+    // Default runs() deliberately routes through the RPC query collection now
+    // (system-run exclusion lives in config_json, which the Electric proxy
+    // cannot filter); only the explicit includeSystem debug list syncs a shape.
+    collections.runs({ filter: { includeSystem: true } });
     collections.run("run-1");
     collections.runTree("run-1");
     collections.approvals({ filter: { runId: "run-1" } });

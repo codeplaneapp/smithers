@@ -3,11 +3,13 @@ import { createFerricSiteWorker, type FerricSiteEnv } from "../src/worker.ts";
 
 function envWith(pages: Record<string, string>): FerricSiteEnv {
   return {
-    async fetch(request: Request) {
-      const url = new URL(request.url);
-      const body = pages[url.pathname];
-      if (body === undefined) return new Response("not found", { status: 404 });
-      return new Response(body, { status: 200, headers: { "content-type": "text/html" } });
+    ASSETS: {
+      async fetch(request: Request) {
+        const url = new URL(request.url);
+        const body = pages[url.pathname];
+        if (body === undefined) return new Response("not found", { status: 404 });
+        return new Response(body, { status: 200, headers: { "content-type": "text/html" } });
+      },
     },
   };
 }
@@ -58,10 +60,7 @@ describe("ferric-site worker", () => {
   });
 
   test("rejects non-GET methods", async () => {
-    const res = await worker.fetch(
-      new Request("https://ferric.smithers.sh/", { method: "POST" }),
-      envWith({}),
-    );
+    const res = await worker.fetch(new Request("https://ferric.smithers.sh/", { method: "POST" }), envWith({}));
     expect(res.status).toBe(405);
     expect(res.headers.get("allow")).toBe("GET, HEAD");
   });
