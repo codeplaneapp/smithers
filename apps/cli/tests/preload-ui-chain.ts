@@ -18,6 +18,10 @@ try {
   await import("react");
   await import("smithers-orchestrator/ui");
   await import("smithers-orchestrator/gateway-ui");
+  // react-dom/client is its own module record; the loader race resurfaced
+  // through react-dom-client.development.js once everything else was settled.
+  // gateway-react's createGatewayReactRoot imports it statically.
+  await import("smithers-orchestrator/gateway-react");
 } finally {
   await GlobalRegistrator.unregister();
   globalThis.fetch = nativeFetch;
