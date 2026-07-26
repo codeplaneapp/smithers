@@ -174,7 +174,11 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     const scripts = json("package.json").scripts;
     expect(scripts.typecheck).toBe("tsc --noEmit");
     expect(scripts["typecheck:examples"]).toBe("tsc -p examples/tsconfig.json --noEmit");
-    expect(scripts.lint).toBe("node scripts/lint.mjs");
+    // `lint` chains both tools of the Oxc toolchain so the everyday command
+    // checks lint rules and formatting in one go.
+    expect(scripts.lint).toBe("node scripts/lint.mjs && node scripts/format.mjs --check");
+    expect(scripts.format).toBe("node scripts/format.mjs --write");
+    expect(scripts["format:check"]).toBe("node scripts/format.mjs --check");
     expect(scripts.release).toBe("node scripts/publish.mjs");
     expect(scripts.coverage).toBe("node scripts/coverage.mjs");
     expect(scripts.docs).toBe("cd docs && bunx mintlify dev");

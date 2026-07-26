@@ -14,13 +14,14 @@ describe("published SmithersDb sandbox declarations", () => {
   test("publish every pinned sandbox adapter method", () => {
     const adapterSource = readFileSync(adapterSourcePath, "utf8");
     const declarations = readFileSync(declarationPath, "utf8");
-    const runtimeMethods = PINNED_SANDBOX_METHODS.filter((method) =>
-      new RegExp(`^    ${method}\\(`, "m").test(adapterSource),
-    );
+    // Match any leading indent: what is pinned here is that the method is
+    // declared at all, not the width the formatter happens to print it with.
+    const declaredAt = (method) => new RegExp(`^\\s+${method}\\(`, "m");
+    const runtimeMethods = PINNED_SANDBOX_METHODS.filter((method) => declaredAt(method).test(adapterSource));
 
     expect(runtimeMethods).toEqual(PINNED_SANDBOX_METHODS);
 
-    const missingMethods = runtimeMethods.filter((method) => !new RegExp(`^    ${method}\\(`, "m").test(declarations));
+    const missingMethods = runtimeMethods.filter((method) => !declaredAt(method).test(declarations));
     expect(missingMethods).toEqual([]);
   });
 });
