@@ -241,6 +241,7 @@
   },
   "dependencies": {
     "@milkdown/crepe": "7.21.2",
+    "@opentelemetry/propagator-jaeger": "2.9.0",
     "@xyflow/react": "^12.10.2",
     "dagre": "^0.8.5"
   }
