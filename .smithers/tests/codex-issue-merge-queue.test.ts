@@ -334,14 +334,17 @@ describe("codex issue local merge queue graph contract", () => {
     expect(source).toContain("panelistOutput={outputs.planPanel}");
     expect(source).toContain("panelistOutput={outputs.reviewPanel}");
     expect(source).toContain("moderator={moderator}");
-    expect(source).toContain('codexRole("gpt-5.6-terra", "read"');
+    // Regex, not a literal: the formatter is free to wrap a call's arguments.
+    expect(source).toMatch(/codexRole\(\s*"gpt-5\.6-terra",\s*"read"/);
     expect(source).toContain("panelScore: panelScoreSchema");
     expect(source).toContain('strategy="synthesize"');
     expect(source).toContain('strategy="consensus"');
     expect(source).toContain(':review-and-local-ci"} maxConcurrency={2}');
-    const researchTask = source.indexOf('<Task id={"i" + n + ":research"');
-    const planningPanel = source.indexOf('<Panel id={"i" + n + ":planning-panel"');
-    const fixLoop = source.indexOf('<Loop id={"i" + n + ":fix-loop"');
+    // Anchor on the id props alone: the element's other props may be wrapped
+    // one per line, so the tag name is not adjacent to its id any more.
+    const researchTask = source.indexOf('id={"i" + n + ":research"}');
+    const planningPanel = source.indexOf('id={"i" + n + ":planning-panel"}');
+    const fixLoop = source.indexOf('id={"i" + n + ":fix-loop"}');
     expect(researchTask).toBeLessThan(planningPanel);
     expect(planningPanel).toBeLessThan(fixLoop);
   });
@@ -360,7 +363,7 @@ describe("codex issue local merge queue graph contract", () => {
       expect(source).toContain(`:${id}`);
     }
     expect(source).toContain(':queue-review-and-local-ci"} maxConcurrency={2}');
-    expect(source).toContain("review?.approved === true && review.headSha === prep.headSha");
+    expect(source).toMatch(/review\?\.approved === true &&\s*review\.headSha === prep\.headSha/);
     expect(source).toContain("runSandboxedGate(");
     expect(source).toContain("pnpm typecheck && pnpm test");
     expect(source).toContain('git(["update-ref", "refs/heads/main", prep.headSha, prep.baseSha]');
@@ -373,12 +376,13 @@ describe("codex issue local merge queue graph contract", () => {
     }
     const finalGate = source.indexOf('id="final-main-gate"');
     const publish = source.indexOf('id="publish-main"');
-    const close = source.indexOf('<Task key={"close-" + issue.number} id={"i" + issue.number + ":close-issue"');
+    // Anchor on the id prop alone: the surrounding props may be wrapped one per line.
+    const close = source.indexOf('id={"i" + issue.number + ":close-issue"}');
     expect(finalGate).toBeGreaterThan(-1);
     expect(finalGate).toBeLessThan(publish);
     expect(publish).toBeLessThan(close);
     expect(source).toContain('localMainSha + ":refs/heads/main"');
-    expect(source).toContain('execFileSync("gh", ["issue", "close"');
+    expect(source).toMatch(/execFileSync\(\s*"gh",\s*\[\s*"issue",\s*"close"/);
     expect(source).toContain('"Refs #" + issue.number');
     expect(source).not.toContain("Closes #");
   });

@@ -117,7 +117,7 @@ describe("codex issue merge watchdog", () => {
 
   test("uses subscription-only sandboxed provider fallbacks for untrusted diagnostics", () => {
     const source = readFileSync(watchdogScript, "utf8");
-    expect(source).toContain("subscriptionCodexFirst({");
+    expect(source).toMatch(/subscriptionCodexFirst\(\s*\{/);
     expect(source).toContain("buildPublicIssueAgentPolicy(");
     expect(source).not.toContain('smithersRuntimeAccess: "write"');
     expect(source).not.toContain("claudeBashAllowRules");
