@@ -179,6 +179,68 @@ describe("createSmithersDataClient change stream", () => {
     expect(settled).toBe(true);
   });
 
+  test("a mutation-only client closes the stream its waitForSeq opened", async () => {
+    let streamOpens = 0;
+    let streamAborted = false;
+    const client = createSmithersDataClient({
+      mode: { kind: "local", apiBaseUrl: "http://gateway.test/" },
+      fetch: (async (url: string | URL | Request, init?: RequestInit) => {
+        if (String(url).includes("/v1/api/stream")) {
+          streamOpens += 1;
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode("event: change\ndata: {\"seq\":5,\"collections\":[\"runs\"]}\n\n"));
+            },
+          });
+          init?.signal?.addEventListener("abort", () => { streamAborted = true; });
+          return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+        }
+        return new Response(JSON.stringify({ ok: true, data: { runId: "r1" }, seq: 5 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as unknown as typeof fetch,
+    });
+
+    // The mutation's waitForSeq is the only thing that opens the stream; once
+    // the seq streams back nothing consumes it, so it must not stay connected.
+    await client.api.cancelRun({ runId: "r1" } as never);
+    expect(streamOpens).toBe(1);
+    expect(streamAborted).toBe(true);
+    expect(client.stream.status().status).toBe("idle");
+
+    client.close();
+  });
+
+  test("a waiter resolving does not close the stream out from under a subscriber", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    let streamAborted = false;
+    const events: SmithersStreamEvent[] = [];
+    const client = createSmithersDataClient({
+      mode: { kind: "local", apiBaseUrl: "http://gateway.test/" },
+      fetch: (async (_url: string | URL | Request, init?: RequestInit) => {
+        const body = new ReadableStream<Uint8Array>({ start(next) { controller = next; } });
+        init?.signal?.addEventListener("abort", () => { streamAborted = true; });
+        return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+      }) as unknown as typeof fetch,
+    });
+
+    const unsubscribe = client.stream.subscribe((event) => events.push(event));
+    await waitFor(() => client.stream.status().status === "online");
+    const pending = client.stream.waitForSeq(4);
+    controller.enqueue(encoder.encode("event: change\ndata: {\"seq\":4,\"collections\":[\"runs\"]}\n\n"));
+    await pending;
+
+    expect(streamAborted).toBe(false);
+    expect(client.stream.status().status).toBe("online");
+    // Still live: a later frame reaches the subscriber.
+    controller.enqueue(encoder.encode("event: change\ndata: {\"seq\":6,\"collections\":[]}\n\n"));
+    await waitFor(() => events.some((event) => event.seq === 6));
+
+    unsubscribe();
+    client.close();
+  });
+
   test("a 401 stream response flips status to unauthorized without reconnecting", async () => {
     const client = createSmithersDataClient({
       mode: { kind: "local", apiBaseUrl: "http://gateway.test/", token: "bad" },

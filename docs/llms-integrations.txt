@@ -150,23 +150,26 @@ OpenClaw agent, `sessionId` to resume a session with `--session-id`, `workspace`
 to set the workspace path, and `continueSession` when the installed CLI should
 continue its active session.
 
-## Default routing: Codex builds, Claude gates
+## Default routing: Claude builds and gates, Codex checks
 
 When `bunx smithers-orchestrator init` detects usable Codex authentication,
-its generated building pools start with Codex workers using exact model pins,
-and the orchestration seats run on Claude:
+its generated implementation pool starts with Claude Opus 5, the checking
+pools start with Codex workers using exact model pins, and the orchestration
+seats run on Claude:
 
 | Work | Model |
 |---|---|
-| The hardest implementation, final review, and the deepest reasoning | `gpt-5.6-sol` |
-| **Substantial implementation, validation, and tool-heavy checking** | `gpt-5.6-terra` |
+| **Substantial implementation: the default build seat** | `claude-opus-5` |
+| Final code review, second opinions, and the deepest Codex reasoning | `gpt-5.6-sol` |
+| Validation, structured checking, and tool-heavy verification | `gpt-5.6-terra` |
 | Trivial, minimal-risk edits, cheap passes, and research gathering | `gpt-5.6-luna` |
-| Orchestration and gating: scope, direction, progress, done-or-not | `claude-opus-4-8` |
+| Orchestration and gating: scope, direction, progress, done-or-not | `claude-opus-5` |
 | Planning, design freezes, and premium judgment calls | `claude-fable-5` |
 
-Start substantial implementation on Terra; escalate to Sol for ambiguity,
-high-stakes decisions, novel architecture, final review, or repeated failure;
-keep Luna on trivial, minimal-risk work only. Never give GPT-5.6 Sol or Terra
+Start substantial implementation on Claude Opus 5, escalating to Fable 5 for
+the most ambitious builds; Sol takes final review and second opinions, Terra
+takes validation and tool-heavy checking, and Luna stays on trivial,
+minimal-risk work only. Never give GPT-5.6 Sol or Terra
 the orchestration or gating seat; those decisions run on Claude, with Codex
 Sol behind it only as an availability fallback. Other adapters stay later in
 automatic sequential fallback chains, while an explicitly constructed
@@ -1168,6 +1171,8 @@ Tools sandbox to `rootDir` (default: workflow directory).
 
 Smithers creates the `_smithers_tool_calls` table and exposes adapter methods to insert and list rows. The engine durably records the start of every `defineTool()` invocation before executing it, then reads those rows on retry to detect previously invoked non-idempotent side-effect tools. This start-first record is intentional: a process crash after the external side effect cannot erase the evidence needed for replay protection.
 
+Each invocation receives a unique `callToken`. Completion and failure updates match only that token, so a late completion cannot overwrite a replacement row that reused the task key after time travel.
+
 | Field | Description |
 |---|---|
 | `runId` | Workflow run ID |
@@ -1175,6 +1180,7 @@ Smithers creates the `_smithers_tool_calls` table and exposes adapter methods to
 | `iteration` | Loop iteration |
 | `attempt` | Retry attempt number |
 | `seq` | Sequential call counter within the task |
+| `callToken` | Unique identity for this invocation, used to fence completion and failure updates |
 | `toolName` | `read`, `write`, `edit`, `grep`, or `bash` |
 | `inputJson` | Serialized input arguments |
 | `outputJson` | Reserved for a serialized output; `null` in start records |
@@ -1397,16 +1403,18 @@ Returns combined stdout and stderr; working directory defaults to `rootDir`. Tim
 
 Controlled by `allowNetwork` in `RunOptions`, `--allow-network` on CLI, or server config. Default: blocked.
 
-When blocked, Smithers tokenizes `cmd` plus `args`. Executable basenames are
-matched for known network tools, URL tokens are blocked by prefix, and `git`
-plus a remote-operation token is blocked.
+When blocked, Smithers matches the invoked executable, arguments that are
+themselves URLs, and git's resolved subcommand. Argument *text* is never
+scanned, so local commands that merely mention a network tool or a URL still
+run: `git commit -m "fetch upstream"`, `echo "run npm install"`.
 
 | Category | Match |
 |---|---|
 | HTTP clients | executable basename `curl` or `wget` |
-| URL tokens | any token starting with `http://` or `https://` |
+| URL arguments | an argument that *is* a `http://` or `https://` URL (the whole argument, or the value in `--flag=<url>`) |
 | Package managers | executable basename `npm`, `bun`, or `pip` |
-| Git remote ops | `git` plus a `push`, `pull`, `fetch`, `clone`, or `remote` token |
+| Git remote ops | `git` whose subcommand is `push`, `pull`, `fetch`, `clone`, or `remote` |
+| Shell payloads | a command position inside `sh -c` / `bash -lc "..."` matching any row above |
 
 Local git commands (`git status`, `git diff`, `git log`) are allowed.
 
@@ -1416,9 +1424,9 @@ Local git commands (`git status`, `git diff`, `git log`) are allowed.
 network-deny profile (when available). On Linux and every other platform,
 including Smithers' CI, cloud, and production environments, `allowNetwork:false`
 cannot enforce a kernel sandbox and falls back to the
-token/basename denylist above: best-effort defense-in-depth, not a security
-boundary, trivially bypassed by a shell, an interpreter (`python -c` assembling a URL from parts,
-bash `/dev/tcp`), or a renamed binary. Unenforced isolation logs a
+executable/URL denylist above: best-effort defense-in-depth, not a security
+boundary, trivially bypassed by an interpreter (`python -c` assembling a URL from parts,
+bash `/dev/tcp`), a nested shell, or a renamed binary. Unenforced isolation logs a
 `TOOL_NETWORK_ISOLATION_UNENFORCED` observability warning. **Do not rely on
 `allowNetwork:false` to sandbox untrusted code**: run it under a real
 [`<Sandbox>`](/components/sandbox) provider with egress controls instead.

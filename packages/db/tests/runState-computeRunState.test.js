@@ -156,7 +156,7 @@ describe("computeRunState", () => {
         });
     });
 
-    test("waiting-event pulls correlationKey from attempt metaJson", async () => {
+    test("waiting-event pulls correlationKey from the engine's wait-for-event attempt metaJson", async () => {
         const adapter = makeAdapter({
             run: makeRun({ status: "waiting-event" }),
             nodes: [{ nodeId: "e-1", iteration: 0, state: "waiting-event" }],
@@ -165,7 +165,17 @@ describe("computeRunState", () => {
                     {
                         state: "waiting-event",
                         metaJson: JSON.stringify({
-                            event: { correlationKey: "order:42" },
+                            kind: "wait-for-event",
+                            waitForEvent: {
+                                signalName: "order-updated",
+                                correlationId: "order:42",
+                                onTimeout: "fail",
+                                waitAsync: false,
+                                startedAtMs: NOW,
+                                resolvedSignalSeq: null,
+                                receivedAtMs: null,
+                                timedOutAtMs: null,
+                            },
                         }),
                     },
                 ],
@@ -176,6 +186,36 @@ describe("computeRunState", () => {
             kind: "event",
             nodeId: "e-1",
             correlationKey: "order:42",
+        });
+    });
+
+    test("waiting-event falls back to signalName when the wait has no correlationId", async () => {
+        const adapter = makeAdapter({
+            run: makeRun({ status: "waiting-event" }),
+            nodes: [{ nodeId: "e-1", iteration: 0, state: "waiting-event" }],
+            attemptsByKey: {
+                "run-1|e-1|0": [
+                    {
+                        state: "waiting-event",
+                        metaJson: JSON.stringify({
+                            kind: "wait-for-event",
+                            waitForEvent: {
+                                signalName: "order-updated",
+                                correlationId: null,
+                                onTimeout: "fail",
+                                waitAsync: false,
+                                startedAtMs: NOW,
+                            },
+                        }),
+                    },
+                ],
+            },
+        });
+        const view = await computeRunState(adapter, "run-1", { now: NOW });
+        expect(view.blocked).toEqual({
+            kind: "event",
+            nodeId: "e-1",
+            correlationKey: "order-updated",
         });
     });
 

@@ -30,6 +30,21 @@ function makeRequest(overrides = {}) {
 }
 
 /**
+ * Model the real SDK's additive `extendTimeout` semantics: a sandbox lives for
+ * its create `timeout` plus every extension, so this is the lifetime Vercel
+ * actually bills and plan-caps.
+ *
+ * @param {{ createCalls: unknown[]; sandboxes: unknown[] }} env
+ * @param {number} index
+ * @returns {number}
+ */
+function totalLifetimeMs(env, index) {
+	const created = /** @type {{ timeout?: number }} */ (env.createCalls[index])?.timeout ?? 0;
+	const extensions = /** @type {{ extendTimeoutCalls: number[] }} */ (env.sandboxes[index]).extendTimeoutCalls;
+	return extensions.reduce((total, ms) => total + ms, created);
+}
+
+/**
  * Ensure ambient Vercel credentials never leak into option-driven tests.
  */
 function withoutVercelEnv(run) {
@@ -360,11 +375,22 @@ describe("createVercelSandboxProvider", () => {
 			const { request, heartbeats } = makeRequest();
 			await provider.run(request);
 			expect(env.createCalls[0].timeout).toBe(5 * 60_000);
-			expect(env.sandboxes[0].extendTimeoutCalls).toEqual([10 * 60_000]);
+			// extendTimeout extends BY its argument, so only the remaining delta is
+			// sent; the resulting lifetime is exactly the requested duration.
+			expect(env.sandboxes[0].extendTimeoutCalls).toEqual([5 * 60_000]);
+			expect(totalLifetimeMs(env, 0)).toBe(10 * 60_000);
 			const warn = heartbeats.find((h) => String(h?.stage ?? "").endsWith("-timeout-extend"));
 			expect(warn).toBeDefined();
 			expect(warn.level).toBe("warn");
 			expect(warn.requestedMs).toBe(10 * 60_000);
+		});
+
+		test("a duration exactly at the plan cap does not overshoot it", async () => {
+			const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
+			const provider = createVercelSandboxProvider({ client: env, oidcToken: "t", timeoutMs: 45 * 60_000 });
+			await provider.run(makeRequest().request);
+			expect(env.sandboxes[0].extendTimeoutCalls).toEqual([40 * 60_000]);
+			expect(totalLifetimeMs(env, 0)).toBe(45 * 60_000);
 		});
 
 		test("a duration above the plan cap throws INVALID_INPUT", async () => {
@@ -386,7 +412,8 @@ describe("createVercelSandboxProvider", () => {
 				const env = createMockVercelSandboxEnvironment(() => ({ status: "finished" }));
 				const provider = createVercelSandboxProvider({ client: env, oidcToken: "t", timeoutMs: 60 * 60_000, maxDurationMs: 90 * 60_000 });
 				await provider.run(makeRequest().request);
-				expect(env.sandboxes[0].extendTimeoutCalls).toEqual([60 * 60_000]);
+				expect(env.sandboxes[0].extendTimeoutCalls).toEqual([55 * 60_000]);
+				expect(totalLifetimeMs(env, 0)).toBe(60 * 60_000);
 			});
 
 			test("post-create setup failure destroys the created sandbox", async () => {

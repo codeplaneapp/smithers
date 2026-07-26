@@ -14,6 +14,13 @@
 /** @typedef {import("./gatewayRpcTypes.ts").HijackRunRequest} HijackRunRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").HijackRunResponse} HijackRunResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").RewindRunRequest} RewindRunRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").RewindRunResponse} RewindRunResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").CrossedEffect} CrossedEffect */
+/** @typedef {import("./gatewayRpcTypes.ts").EffectBoundaryReport} EffectBoundaryReport */
+/** @typedef {import("./gatewayRpcTypes.ts").EffectRevertStarted} EffectRevertStarted */
+/** @typedef {import("./gatewayRpcTypes.ts").EffectRevertFinished} EffectRevertFinished */
+/** @typedef {import("./gatewayRpcTypes.ts").EffectRevertFailed} EffectRevertFailed */
+/** @typedef {import("./gatewayRpcTypes.ts").SideEffectBoundaryCrossed} SideEffectBoundaryCrossed */
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitApprovalRequest} SubmitApprovalRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitApprovalResponse} SubmitApprovalResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitSignalRequest} SubmitSignalRequest */
@@ -105,6 +112,7 @@
 /** @typedef {import("./gatewayRpcTypes.ts").BrowserPickResponse} BrowserPickResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").CloseBrowserSessionResponse} CloseBrowserSessionResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").ListBrowserSessionsResponse} ListBrowserSessionsResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").GatewayRpcErrorDetails} GatewayRpcErrorDetails */
 /**
  * @template [Payload=unknown]
  * @typedef {import("./gatewayRpcTypes.ts").GatewayEventFrame<Payload>} GatewayEventFrame

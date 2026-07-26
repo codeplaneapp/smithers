@@ -4,7 +4,7 @@ icon: "list-check"
 description: "Say the outcome you want. Your agent picks a proven Smithers workflow and runs it for you."
 ---
 
-You talk to your coding agent instead of writing workflows or running the CLI yourself. It uses `create-workflow` to author the durable recipe you need, or copies a matching pattern from `examples/init-pack/` (patterns `init` doesn't install), then drives it to a validated result. This page catalogs those patterns: each row pairs what you say with what Smithers runs.
+You talk to your coding agent instead of writing workflows or running the CLI yourself. It uses `create-workflow` to author the durable recipe you need, or copies a matching pattern from `examples/init-pack/` (patterns `init` doesn't install), then drives it to a validated result. This page catalogs those patterns: each row pairs what you say with what Smithers runs. For everything *around* a run (plugging in your own logging, alerting, time travel, memory, evals, accounts, packs), see [Platform Capabilities](/guide/capabilities).
 
 ## Build
 
@@ -133,7 +133,10 @@ source, then writes concise agent-facing skill docs under `.smithers/skills/`.
 
 ## Read next
 
-<CardGroup cols={3}>
+<CardGroup cols={2}>
+  <Card title="Platform capabilities" icon="toolbox" href="/guide/capabilities">
+    **Reference:** custom logging, alerting, time travel, memory, evals, accounts, and packs, with the prompt that asks for each.
+  </Card>
   <Card title="Talk to your agent" icon="comments" href="/guide/talk-to-your-agent">
     **How-to:** phrase the outcomes above so your agent picks the right one.
   </Card>

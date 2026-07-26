@@ -4,12 +4,15 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { Task, Workflow, runWorkflow } from "smithers-orchestrator";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { Effect } from "effect";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 const END_TO_END_TIMEOUT_MS = 15_000;
 const jjTimeTravelTest = hasJjBinary() ? test : test.skip;
 function hasJjBinary() {
@@ -269,6 +272,90 @@ describe("timeTravel e2e", () => {
             expect(node?.state).toBe("pending");
         }
         finally {
+            cleanup();
+        }
+    }, END_TO_END_TIMEOUT_MS);
+    test("a crash after compensation but before truncation converges on retry", async () => {
+        const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+        const adapter = new SmithersDb(db);
+        const { timeTravel } = await import("../src/timetravel.js");
+        const workflowPath = fileURLToPath(new URL("./fixtures/effect-boundary-workflow.jsx", import.meta.url));
+        try {
+            const workflow = buildThreeTaskWorkflow(smithers, outputs);
+            const result = await Effect.runPromise(runWorkflow(workflow, {
+                input: {},
+                runId: "timetravel-crash-convergence",
+            }));
+            const targetAttempt = (await adapter.listAttempts(result.runId, "implement", 0))[0];
+            const workflowHash = createHash("sha256")
+                .update(readFileSync(workflowPath, "utf8"))
+                .digest("hex");
+            await adapter.updateRun(result.runId, {
+                workflowPath,
+                workflowHash,
+                configJson: null,
+            });
+            await Effect.runPromise(adapter.insertToolCall({
+                runId: result.runId,
+                nodeId: "implement",
+                iteration: 0,
+                attempt: targetAttempt.attempt,
+                seq: 1,
+                toolName: "undoable-tool",
+                inputJson: '{"value":7}',
+                outputJson: '{"result":7}',
+                startedAtMs: targetAttempt.startedAtMs + 1,
+                finishedAtMs: targetAttempt.startedAtMs + 2,
+                status: "succeeded",
+                errorJson: null,
+                kind: "tool",
+                sideEffect: true,
+                idempotent: false,
+                acceptsIdempotencyKey: true,
+                hasRevert: true,
+                idempotencyKey: "crash-key",
+                revertStatus: null,
+                revertedAtMs: null,
+                revertErrorJson: null,
+                forcedPastJson: null,
+            }));
+            const framesBefore = await adapter.listFrames(result.runId, 1_000);
+            globalThis.__smithersEffectBoundaryReverts = [];
+
+            await expect(timeTravel(adapter, {
+                runId: result.runId,
+                nodeId: "implement",
+                restoreVcs: false,
+                hooks: {
+                    afterEffectReverts: () => {
+                        throw new Error("injected crash before truncation");
+                    },
+                },
+            })).rejects.toThrow("injected crash before truncation");
+            expect(globalThis.__smithersEffectBoundaryReverts).toHaveLength(1);
+            expect(await adapter.listFrames(result.runId, 1_000)).toHaveLength(framesBefore.length);
+            expect((await adapter.listAttempts(result.runId, "implement", 0))[0]?.state).toBe("finished");
+
+            const retried = await timeTravel(adapter, {
+                runId: result.runId,
+                nodeId: "implement",
+                restoreVcs: false,
+            });
+            expect(retried.success).toBe(true);
+            expect(globalThis.__smithersEffectBoundaryReverts).toHaveLength(1);
+            expect((await adapter.listAttempts(result.runId, "implement", 0))[0]?.state).toBe("cancelled");
+            expect(await adapter.internalStorage.queryAll(
+                `SELECT revert_status FROM _smithers_tool_call_archive WHERE run_id = ?`,
+                [result.runId],
+            )).toEqual([{ revertStatus: "reverted" }]);
+            expect(await adapter.internalStorage.queryAll(
+                `SELECT result FROM _smithers_time_travel_audit
+                  WHERE run_id = ? ORDER BY id`,
+                [result.runId],
+            )).toEqual([{ result: "failed" }, { result: "success" }]);
+        }
+        finally {
+            delete globalThis.__smithersEffectBoundaryReverts;
             cleanup();
         }
     }, END_TO_END_TIMEOUT_MS);

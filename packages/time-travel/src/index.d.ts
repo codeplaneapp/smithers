@@ -1,8 +1,49 @@
-import { SmithersEvent } from '@smithers-orchestrator/observability/SmithersEvent';
+import * as _smithers_orchestrator_observability_SmithersEvent from '@smithers-orchestrator/observability/SmithersEvent';
+import { SmithersEvent as SmithersEvent$1 } from '@smithers-orchestrator/observability/SmithersEvent';
 import * as _smithers_orchestrator_db_adapter from '@smithers-orchestrator/db/adapter';
-import { SmithersDb as SmithersDb$e } from '@smithers-orchestrator/db/adapter';
+import { SmithersDb as SmithersDb$g } from '@smithers-orchestrator/db/adapter';
 export { replaysStarted, runForksCreated, snapshotDuration, snapshotsCaptured } from '@smithers-orchestrator/observability/metrics';
 import * as drizzle_orm_sqlite_core from 'drizzle-orm/sqlite-core';
+
+type CrossedEffect$1 = {
+    kind: "tool" | "task";
+    toolName: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    seq: number;
+    effectStatus: "succeeded" | "unknown";
+    idempotent: boolean;
+    hasRevert: boolean;
+    startedAtMs: number;
+    reason?: string;
+};
+
+type EffectBoundaryReport$4 = {
+    blocking: CrossedEffect$1[];
+    revertible: CrossedEffect$1[];
+    warnings: CrossedEffect$1[];
+};
+
+type EffectBoundaryAttempt = {
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+};
+
+type EffectBoundaryToolMetadata = {
+    name: string;
+    sideEffect: boolean;
+    idempotent: boolean;
+    hasRevert?: boolean;
+};
+
+type EffectBoundaryParams$2 = {
+    runId: string;
+    cutoffMs?: number;
+    attempts?: readonly EffectBoundaryAttempt[];
+    toolMetadata?: ReadonlyMap<string, EffectBoundaryToolMetadata>;
+};
 
 type TimeTravelResult$2 = {
     success: boolean;
@@ -10,6 +51,7 @@ type TimeTravelResult$2 = {
     vcsRestored: boolean;
     resetNodes: string[];
     error?: string;
+    effectBoundary: EffectBoundaryReport$4;
 };
 
 type TimeTravelOptions$2 = {
@@ -19,13 +61,20 @@ type TimeTravelOptions$2 = {
     attempt?: number;
     resetDependents?: boolean;
     restoreVcs?: boolean;
-    onProgress?: (event: SmithersEvent) => void;
+    force?: boolean;
+    noRevert?: boolean;
+    caller?: string;
+    onProgress?: (event: SmithersEvent$1) => void;
+    hooks?: {
+        afterEffectReverts?: () => Promise<void> | void;
+    };
 };
 
 type RevertResult$2 = {
     success: boolean;
     error?: string;
     jjPointer?: string;
+    effectBoundary: EffectBoundaryReport$4;
 };
 
 type RevertOptions$2 = {
@@ -33,35 +82,46 @@ type RevertOptions$2 = {
     nodeId: string;
     iteration: number;
     attempt: number;
-    onProgress?: (event: SmithersEvent) => void;
+    force?: boolean;
+    noRevert?: boolean;
+    caller?: string;
+    onProgress?: (event: SmithersEvent$1) => void;
+    hooks?: {
+        afterEffectReverts?: () => Promise<void> | void;
+    };
 };
 
-type RewindAuditResult$4 = "success" | "failed" | "partial" | "in_progress";
+type RewindAuditResult$4 = "success" | "failed" | "partial" | "in_progress"
+/** Refused before any mutation (Busy/RateLimited); never counts against the quota. */
+ | "rejected";
 
 type RewindLockHandle$2 = {
     runId: string;
     ownerToken: string;
     readonly expiresAtMs: number;
     renew: () => Promise<boolean>;
+    checkStillHeld: () => Promise<boolean>;
     release: () => Promise<boolean>;
 };
 
-type JumpStepName$1 = "snapshot-pre-jump" | "pause-event-loop" | "revert-sandboxes" | "truncate-frames" | "truncate-attempts" | "truncate-outputs" | "invalidate-diffs" | "rebuild-reconciler" | "resume-event-loop";
+type JumpStepName$1 = "snapshot-pre-jump" | "pause-event-loop" | "revert-effects" | "revert-sandboxes" | "truncate-frames" | "truncate-attempts" | "truncate-outputs" | "invalidate-diffs" | "rebuild-reconciler" | "resume-event-loop";
 
 type JumpToFrameInput$2 = {
-    adapter: SmithersDb$e;
+    adapter: SmithersDb$g;
     runId: unknown;
     frameNo: unknown;
     confirm?: unknown;
     caller?: string;
     /** Bypass the live-run guard (rewind a run that still looks actively driven). */
     force?: unknown;
+    /** Skip registered compensation handlers; crossed effects then require force. */
+    noRevert?: unknown;
     pauseRunLoop?: () => Promise<void> | void;
     resumeRunLoop?: () => Promise<void> | void;
     captureReconcilerState?: () => Promise<unknown> | unknown;
     restoreReconcilerState?: (snapshot: unknown) => Promise<void> | void;
     rebuildReconcilerState?: (xmlJson: string) => Promise<void> | void;
-    emitEvent?: (event: SmithersEvent) => Promise<void> | void;
+    emitEvent?: (event: SmithersEvent$1) => Promise<void> | void;
     getCurrentPointerImpl?: (cwd?: string) => Promise<string | null>;
     revertToPointerImpl?: (pointer: string, cwd?: string) => Promise<{
         success: boolean;
@@ -87,6 +147,7 @@ type JumpResult$2 = {
     deletedAttempts: number;
     invalidatedDiffs: number;
     durationMs: number;
+    effectBoundary: EffectBoundaryReport$4;
 };
 
 type VcsTag$2 = {
@@ -231,6 +292,7 @@ type ReplayResult$2 = {
     vcsRestored: boolean;
     vcsPointer: string | null;
     vcsError?: string;
+    effectBoundary: EffectBoundaryReport$4;
 };
 
 /**
@@ -255,6 +317,7 @@ type ReplayParams$2 = {
     workflowPath?: string;
     workflowHash?: string | null;
     entryWorkflowHash?: string | null;
+    force?: boolean;
 };
 
 /**
@@ -286,6 +349,11 @@ type ForkParams$2 = {
     workflowPath?: string | null;
     workflowHash?: string | null;
     entryWorkflowHash?: string | null;
+    force?: boolean;
+    /** True when the caller will immediately resume the child. */
+    autoRun?: boolean;
+    /** Internal operation label used by replay. */
+    operation?: "fork" | "replay";
 };
 
 /**
@@ -293,20 +361,77 @@ type ForkParams$2 = {
  * @param {RevertOptions} opts
  * @returns {Promise<RevertResult>}
  */
-declare function revertToAttempt(adapter: SmithersDb$d, opts: RevertOptions$1): Promise<RevertResult$1>;
+declare function revertToAttempt(adapter: SmithersDb$f, opts: RevertOptions$1): Promise<RevertResult$1>;
 type RevertOptions$1 = RevertOptions$2;
 type RevertResult$1 = RevertResult$2;
-type SmithersDb$d = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersDb$f = _smithers_orchestrator_db_adapter.SmithersDb;
 
 /**
  * @param {SmithersDb} adapter
  * @param {TimeTravelOptions} opts
  * @returns {Promise<TimeTravelResult>}
  */
-declare function timeTravel(adapter: SmithersDb$c, opts: TimeTravelOptions$1): Promise<TimeTravelResult$1>;
-type SmithersDb$c = _smithers_orchestrator_db_adapter.SmithersDb;
+declare function timeTravel(adapter: SmithersDb$e, opts: TimeTravelOptions$1): Promise<TimeTravelResult$1>;
+type SmithersDb$e = _smithers_orchestrator_db_adapter.SmithersDb;
 type TimeTravelOptions$1 = TimeTravelOptions$2;
 type TimeTravelResult$1 = TimeTravelResult$2;
+
+/**
+ * Assess the external effects crossed by a destructive or branching
+ * time-travel boundary. This function only classifies; callers decide whether
+ * to compensate, block, warn, or force the crossing.
+ *
+ * @param {SmithersDb} db
+ * @param {EffectBoundaryParams} params
+ * @returns {Promise<EffectBoundaryReport>}
+ */
+declare function assessEffectBoundary(db: SmithersDb$d, params: EffectBoundaryParams$1): Promise<EffectBoundaryReport$3>;
+type SmithersDb$d = _smithers_orchestrator_db_adapter.SmithersDb;
+type EffectBoundaryParams$1 = EffectBoundaryParams$2;
+type EffectBoundaryReport$3 = EffectBoundaryReport$4;
+
+type EffectTaskHandler = {
+    revert?: (context: Record<string, unknown>) => Promise<void>;
+};
+
+type EffectToolHandler = EffectBoundaryToolMetadata & {
+    revert?: (input: unknown, context: Record<string, unknown>) => Promise<void>;
+};
+
+type EffectHandlerRegistry$1 = {
+    toolMetadata: ReadonlyMap<string, EffectBoundaryToolMetadata>;
+    tools: ReadonlyMap<string, EffectToolHandler>;
+    tasks: ReadonlyMap<string, EffectTaskHandler>;
+};
+
+/**
+ * Run resolved compensation handlers in reverse chronological order. Each
+ * effect row is journaled before and after its handler. A failure aborts with
+ * the boundary report and leaves all history intact.
+ *
+ * @param {SmithersDb} db
+ * @param {{
+ *   runId: string;
+ *   operation: string;
+ *   report: EffectBoundaryReport;
+ *   registry: EffectHandlerRegistry;
+ *   checkStillHeld?: () => Promise<boolean>;
+ *   onProgress?: (event: SmithersEvent) => void;
+ * }} params
+ * @returns {Promise<EffectBoundaryReport>}
+ */
+declare function executeEffectReverts(db: SmithersDb$c, params: {
+    runId: string;
+    operation: string;
+    report: EffectBoundaryReport$2;
+    registry: EffectHandlerRegistry;
+    checkStillHeld?: () => Promise<boolean>;
+    onProgress?: (event: SmithersEvent) => void;
+}): Promise<EffectBoundaryReport$2>;
+type SmithersDb$c = _smithers_orchestrator_db_adapter.SmithersDb;
+type SmithersEvent = _smithers_orchestrator_observability_SmithersEvent.SmithersEvent;
+type EffectBoundaryReport$2 = EffectBoundaryReport$4;
+type EffectHandlerRegistry = EffectHandlerRegistry$1;
 
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./ReplayParams.ts").ReplayParams} ReplayParams */
@@ -413,6 +538,7 @@ type SnapshotDiff$1 = SnapshotDiff$2;
 
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("../BranchInfo.ts").BranchInfo} BranchInfo */
+/** @typedef {import("../EffectBoundaryReport.ts").EffectBoundaryReport} EffectBoundaryReport */
 /** @typedef {import("../ForkParams.ts").ForkParams} ForkParams */
 /** @typedef {import("../snapshot/Snapshot.ts").Snapshot} Snapshot */
 /**
@@ -420,12 +546,13 @@ type SnapshotDiff$1 = SnapshotDiff$2;
  *
  * @param {SmithersDb} adapter
  * @param {ForkParams} params
- * @returns {Promise<{ runId: string; branch: BranchInfo; snapshot: Snapshot }>}
+ * @returns {Promise<{ runId: string; branch: BranchInfo; snapshot: Snapshot; effectBoundary: EffectBoundaryReport }>}
  */
 declare function forkRun(adapter: SmithersDb$9, params: ForkParams$1): Promise<{
     runId: string;
     branch: BranchInfo$1;
     snapshot: Snapshot$1;
+    effectBoundary: EffectBoundaryReport$1;
 }>;
 /**
  * List branches that were forked from the given parent run.
@@ -445,6 +572,7 @@ declare function listBranches(adapter: SmithersDb$9, parentRunId: string): Promi
 declare function getBranchInfo(adapter: SmithersDb$9, runId: string): Promise<BranchInfo$1 | undefined>;
 type SmithersDb$9 = _smithers_orchestrator_db_adapter.SmithersDb;
 type BranchInfo$1 = BranchInfo$2;
+type EffectBoundaryReport$1 = EffectBoundaryReport$4;
 type ForkParams$1 = ForkParams$2;
 type Snapshot$1 = Snapshot$5;
 
@@ -1173,7 +1301,9 @@ type RewindAuditResult$2 = RewindAuditResult$4;
 /**
  * Count audit rows for one caller and run in a time window.
  * Only counts terminal (non-in_progress) rows so that a live attempt
- * does not itself blow the rate-limit quota.
+ * does not itself blow the rate-limit quota, and skips `rejected` rows so
+ * that retries of a refused rewind cannot keep refreshing the window and
+ * lock the caller out indefinitely.
  *
  * @param {SmithersDb} adapter
  * @param {{ runId: string; caller: string; sinceMs: number; }} input
@@ -1256,5 +1386,8 @@ type RevertOptions = RevertOptions$2;
 type RevertResult = RevertResult$2;
 type TimeTravelOptions = TimeTravelOptions$2;
 type TimeTravelResult = TimeTravelResult$2;
+type CrossedEffect = CrossedEffect$1;
+type EffectBoundaryParams = EffectBoundaryParams$2;
+type EffectBoundaryReport = EffectBoundaryReport$4;
 
-export { type BranchInfo, type ForkParams, JUMP_MAX_FRAME_NO, JUMP_RUN_ID_PATTERN, type JumpResult, type JumpStepName, JumpToFrameError, type JumpToFrameInput, type NodeChange, type NodeSnapshot, type OutputChange, type ParsedSnapshot, REWIND_LEASE_TTL_MS, REWIND_RATE_LIMIT_MAX, REWIND_RATE_LIMIT_WINDOW_MS, type RalphChange, type RalphSnapshot, type ReplayParams, type ReplayResult, type RevertOptions, type RevertResult, type RewindAuditResult, type RewindLockHandle, type RunTimeline, type Snapshot, type SnapshotData, type SnapshotDiff, type TimeTravelOptions, type TimeTravelResult, type TimelineFrame, type TimelineTree, type VcsTag, acquireRewindLock, buildTimeline, buildTimelineTree, captureSnapshot, countRecentRewindAuditRows, diffRawSnapshots, diffSnapshots, evaluateRewindRateLimit, forkRun, formatDiffAsJson, formatDiffForTui, formatTimelineAsJson, formatTimelineForTui, getBranchInfo, hasRewindLock, jumpToFrame, listBranches, listRewindAuditRows, listSnapshots, loadLatestSnapshot, loadSnapshot, loadVcsTag, parseSnapshot, recoverInProgressRewindAudits, replayFromCheckpoint, rerunAtRevision, resetRewindLocksForTests, resolveWorkflowAtRevision, revertToAttempt, smithersBranches, smithersSnapshots, smithersVcsTags, tagSnapshotVcs, timeTravel, updateRewindAuditRow, validateJumpFrameNo, validateJumpRunId, writeRewindAuditRow };
+export { type BranchInfo, type CrossedEffect, type EffectBoundaryParams, type EffectBoundaryReport, type ForkParams, JUMP_MAX_FRAME_NO, JUMP_RUN_ID_PATTERN, type JumpResult, type JumpStepName, JumpToFrameError, type JumpToFrameInput, type NodeChange, type NodeSnapshot, type OutputChange, type ParsedSnapshot, REWIND_LEASE_TTL_MS, REWIND_RATE_LIMIT_MAX, REWIND_RATE_LIMIT_WINDOW_MS, type RalphChange, type RalphSnapshot, type ReplayParams, type ReplayResult, type RevertOptions, type RevertResult, type RewindAuditResult, type RewindLockHandle, type RunTimeline, type Snapshot, type SnapshotData, type SnapshotDiff, type TimeTravelOptions, type TimeTravelResult, type TimelineFrame, type TimelineTree, type VcsTag, acquireRewindLock, assessEffectBoundary, buildTimeline, buildTimelineTree, captureSnapshot, countRecentRewindAuditRows, diffRawSnapshots, diffSnapshots, evaluateRewindRateLimit, executeEffectReverts, forkRun, formatDiffAsJson, formatDiffForTui, formatTimelineAsJson, formatTimelineForTui, getBranchInfo, hasRewindLock, jumpToFrame, listBranches, listRewindAuditRows, listSnapshots, loadLatestSnapshot, loadSnapshot, loadVcsTag, parseSnapshot, recoverInProgressRewindAudits, replayFromCheckpoint, rerunAtRevision, resetRewindLocksForTests, resolveWorkflowAtRevision, revertToAttempt, smithersBranches, smithersSnapshots, smithersVcsTags, tagSnapshotVcs, timeTravel, updateRewindAuditRow, validateJumpFrameNo, validateJumpRunId, writeRewindAuditRow };

@@ -305,6 +305,14 @@ describe("misc primitives", () => {
     expect(html).toContain("translateX(-60%)");
   });
 
+  test("Progress scales the indicator by max and clamps out-of-range values", () => {
+    const scaled = renderToStaticMarkup(<Progress value={25} max={50} />);
+    expect(scaled).toContain('aria-valuemax="50"');
+    expect(scaled).toContain("translateX(-50%)");
+    expect(renderToStaticMarkup(<Progress value={80} max={50} />)).toContain("translateX(-0%)");
+    expect(renderToStaticMarkup(<Progress value={-10} />)).toContain("translateX(-100%)");
+  });
+
   test("Separator renders orientation data attributes", () => {
     expect(renderToStaticMarkup(<Separator />)).toContain('data-orientation="horizontal"');
     expect(renderToStaticMarkup(<Separator orientation="vertical" />)).toContain('data-orientation="vertical"');

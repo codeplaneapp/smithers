@@ -522,6 +522,94 @@ describe("process helpers and bash tool", () => {
     });
   });
 
+  test("network guard reads the invoked executable, not argument text", async () => {
+    const root = await makeRoot();
+    // A stand-in `git` so the guard resolves the same executable basename
+    // without depending on a real git install.
+    const gitStub = join(root, "git");
+    writeFileSync(gitStub, '#!/bin/sh\necho "$@"\n', { mode: 0o755 });
+
+    await withToolCtx(root, { allowNetwork: false }, async () => {
+      // Local commands whose arguments merely mention a network tool, a remote
+      // git verb, or a URL run no network I/O and must not be rejected.
+      expect(
+        (await bashTool("/bin/echo", ["please run npm install"])).trim(),
+      ).toBe("please run npm install");
+      expect(
+        (
+          await bashTool(gitStub, ["commit", "-m", "fetch upstream changes"])
+        ).trim(),
+      ).toBe("commit -m fetch upstream changes");
+      expect(
+        (await bashTool(gitStub, ["commit", "-m", "see https://x"])).trim(),
+      ).toBe("commit -m see https://x");
+
+      // Real remote operations are still blocked, including behind git's
+      // value-taking global flags.
+      await expectSmithersCode(
+        bashTool(gitStub, ["fetch"]),
+        "TOOL_GIT_REMOTE_DISABLED",
+      );
+      await expectSmithersCode(
+        bashTool(gitStub, ["-C", root, "--no-pager", "push"]),
+        "TOOL_GIT_REMOTE_DISABLED",
+      );
+      // Arguments that are themselves URLs still count as network use.
+      await expectSmithersCode(
+        bashTool(gitStub, ["clone", "https://example.com/x"]),
+        "TOOL_NETWORK_DISABLED",
+      );
+      await expectSmithersCode(
+        bashTool("/bin/echo", ["--url=https://example.com"]),
+        "TOOL_NETWORK_DISABLED",
+      );
+      // A whole command line passed as `cmd` is still resolved to its leading
+      // executable rather than falling through to a spawn failure.
+      await expectSmithersCode(
+        bashTool("curl https://example.com"),
+        "TOOL_NETWORK_DISABLED",
+      );
+    });
+  });
+
+  test("network guard checks shell -c payloads in command position", async () => {
+    const root = await makeRoot();
+    await withToolCtx(root, { allowNetwork: false }, async () => {
+      // Interpreters run their payload, so its command positions are blocked.
+      await expectSmithersCode(
+        bashTool("/bin/sh", ["-c", "curl https://example.com"]),
+        "TOOL_NETWORK_DISABLED",
+      );
+      await expectSmithersCode(
+        bashTool("/bin/bash", ["-lc", "cd /tmp && npm install"]),
+        "TOOL_NETWORK_DISABLED",
+      );
+      await expectSmithersCode(
+        bashTool("/bin/sh", ["-c", "echo $(wget -qO- https://example.com)"]),
+        "TOOL_NETWORK_DISABLED",
+      );
+      await expectSmithersCode(
+        bashTool("/bin/sh", ["-c", "git -C /repo push"]),
+        "TOOL_GIT_REMOTE_DISABLED",
+      );
+
+      // Prose inside the payload is not a command position.
+      expect(
+        (
+          await bashTool("/bin/sh", ["-c", "echo 'please run npm install'"])
+        ).trim(),
+      ).toBe("please run npm install");
+      expect(
+        (
+          await bashTool("/bin/sh", [
+            "-c",
+            "echo 'git commit -m \"fetch upstream\"'",
+          ])
+        ).trim(),
+      ).toBe('git commit -m "fetch upstream"');
+    });
+  });
+
   test("reports whether OS-level network isolation is actually enforced", async () => {
     // macOS with sandbox-exec is the only real kernel sandbox: enforced.
     await withPlatform("darwin", () =>

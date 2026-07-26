@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { runSnapshotsOnce } from "../src/snapshots.js";
-import { pickTargetCheckpoint, runRestoreOnce } from "../src/restore.js";
+import { defaultRevert, pickTargetCheckpoint, runRestoreOnce } from "../src/restore.js";
 
 function capture() {
     let out = "";
@@ -240,5 +243,101 @@ describe("smithers restore", () => {
         });
         expect(r.exitCode).toBe(1);
         expect(err.get()).toContain("commit gone");
+    });
+
+    test("the timeout and abort signal reach the revert runner", async () => {
+        /** @type {Array<unknown>} */
+        const seen = [];
+        const controller = new AbortController();
+        const r = await runRestoreOnce({
+            adapter: { async listWorkspaceCheckpoints() { return cps; } },
+            runId: "r1", nodeId: "n1", stdout: capture(), stderr: capture(),
+            timeoutMs: 1234,
+            signal: controller.signal,
+            revert: async (_commitId, _cwd, options) => { seen.push(options); return { success: true }; },
+        });
+        expect(r.exitCode).toBe(0);
+        expect(seen).toEqual([{ timeoutMs: 1234, signal: controller.signal }]);
+    });
+});
+
+describe("smithers restore jj invocation", () => {
+    /**
+     * A stand-in `jj` on disk, picked up through the SMITHERS_JJ_PATH override.
+     * @param {string} body
+     */
+    function withFakeJj(body, fn) {
+        const dir = mkdtempSync(join(tmpdir(), "smithers-restore-"));
+        const bin = join(dir, "jj");
+        writeFileSync(bin, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+        const previous = process.env.SMITHERS_JJ_PATH;
+        process.env.SMITHERS_JJ_PATH = bin;
+        return (async () => {
+            try { return await fn(dir); }
+            finally {
+                if (previous === undefined) delete process.env.SMITHERS_JJ_PATH;
+                else process.env.SMITHERS_JJ_PATH = previous;
+                rmSync(dir, { recursive: true, force: true });
+            }
+        })();
+    }
+
+    test("passes the checkpoint commit to jj restore and reports success", async () => {
+        await withFakeJj('printf "%s" "$*" > "$(dirname "$0")/argv"; exit 0', async (dir) => {
+            const result = await defaultRevert("cafebabe", dir, { timeoutMs: 30_000 });
+            expect(result).toEqual({ success: true });
+            expect(readFileSync(join(dir, "argv"), "utf8")).toBe("restore --from cafebabe");
+        });
+    });
+
+    test("a non-zero jj reports its stderr", async () => {
+        await withFakeJj('echo "commit gone" >&2; exit 3', async (dir) => {
+            const result = await defaultRevert("cafebabe", dir, { timeoutMs: 30_000 });
+            expect(result.success).toBe(false);
+            expect(result.error).toBe("commit gone");
+        });
+    });
+
+    test("a hung jj restore times out instead of blocking the event loop", async () => {
+        // Regression: this used to be a spawnSync, so a jj stuck on a repo lock
+        // or a slow filesystem froze the CLI *and* the in-process MCP server
+        // (no other tool call, cancellation, or shutdown could be serviced)
+        // until jj exited on its own — which it may never do.
+        await withFakeJj("exec sleep 5", async (dir) => {
+            let ticked = false;
+            const ticker = setTimeout(() => { ticked = true; }, 100);
+            const startedAtMs = Date.now();
+            try {
+                const result = await defaultRevert("cafebabe", dir, { timeoutMs: 400 });
+                expect(result.success).toBe(false);
+                expect(result.error).toContain("timed out");
+                // The loop kept running while jj was live, and we did not wait
+                // out the full 5s sleep.
+                expect(ticked).toBe(true);
+                expect(Date.now() - startedAtMs).toBeLessThan(4_000);
+            }
+            finally { clearTimeout(ticker); }
+        });
+    });
+
+    test("an already-aborted signal never spawns jj at all", async () => {
+        await withFakeJj('printf "%s" "$*" > "$(dirname "$0")/argv"; exit 0', async (dir) => {
+            const result = await defaultRevert("cafebabe", dir, { signal: AbortSignal.abort() });
+            expect(result.success).toBe(false);
+            expect(result.error).toContain("aborted");
+            // A cancelled restore is destructive-if-run: jj must not have been invoked.
+            expect(() => readFileSync(join(dir, "argv"), "utf8")).toThrow();
+        });
+    });
+
+    test("an aborted restore terminates jj and resolves a typed failure", async () => {
+        await withFakeJj("exec sleep 5", async (dir) => {
+            const controller = new AbortController();
+            const pending = defaultRevert("cafebabe", dir, { timeoutMs: 30_000, signal: controller.signal });
+            controller.abort();
+            const result = await pending;
+            expect(result.success).toBe(false);
+            expect(result.error).toContain("aborted");
+        });
     });
 });

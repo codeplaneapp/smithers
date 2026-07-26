@@ -51,6 +51,10 @@ export function formatUsageReports(reports, nowMs = Date.now()) {
             const used = usedCell(w) + (w.unit === "estimated" ? " (est)" : "");
             rows.push([r.accountLabel, r.provider, plan, w.label, used, formatRelativeReset(w.resetsAt, nowMs)]);
         }
+        // A probe can fail (e.g. HTTP 429) and still return windows; surface the reason anyway.
+        if (r.error !== undefined) {
+            rows.push([r.accountLabel, r.provider, plan, "—", r.error, ""]);
+        }
     }
     const widths = header.map((_, col) => Math.max(...rows.map((row) => row[col].length)));
     return rows

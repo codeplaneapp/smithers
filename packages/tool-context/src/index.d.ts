@@ -53,6 +53,10 @@ type ToolContext = {
      */
     rootDir?: string | undefined;
     /**
+     * - Cancellation signal for the current task.
+     */
+    signal?: AbortSignal | undefined;
+    /**
      * - Explicit idempotency key override.
      */
     idempotencyKey?: string | undefined;
@@ -79,16 +83,31 @@ type DefinedRuntimeTool = {
     [key: symbol]: unknown;
 };
 
-/**
- * @param {unknown} value
- * @returns {{ name: string; sideEffect: boolean; idempotent: boolean; acceptsIdempotencyKey: boolean } | null}
- */
-declare function getDefinedToolMetadata(value: unknown): {
+type ToolRevertContext<Output = unknown> = {
+    output: Output | null;
+    effectStatus: "succeeded" | "unknown";
+    idempotencyKey: string | null;
+    runId: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    toolCallSeq: number;
+};
+
+type DefinedToolMetadata = {
     name: string;
     sideEffect: boolean;
     idempotent: boolean;
     acceptsIdempotencyKey: boolean;
-} | null;
+    hasRevert: boolean;
+    revert?: (args: unknown, ctx: ToolRevertContext) => Promise<void>;
+};
+
+/**
+ * @param {unknown} value
+ * @returns {import("./DefinedToolMetadata.ts").DefinedToolMetadata | null}
+ */
+declare function getDefinedToolMetadata(value: unknown): DefinedToolMetadata | null;
 /**
  * Shared low-level implementation used by the facade and engine-created
  * tools, so both receive the same ambient run context and durability hooks.
@@ -101,6 +120,7 @@ declare function getDefinedToolMetadata(value: unknown): {
  *   sideEffect?: boolean;
  *   idempotent?: boolean;
  *   execute: (args: import("zod").output<Schema>, ctx: Record<string, any>) => Result | Promise<Result>;
+ *   revert?: (args: import("zod").output<Schema>, ctx: import("./ToolRevertContext.ts").ToolRevertContext<Awaited<Result>>) => Promise<void>;
  * }} options
  * @returns {import("./DefinedRuntimeTool.ts").DefinedRuntimeTool}
  */
@@ -111,6 +131,7 @@ declare function defineTool<Schema extends zod.ZodTypeAny, Result>(options: {
     sideEffect?: boolean;
     idempotent?: boolean;
     execute: (args: zod.output<Schema>, ctx: Record<string, any>) => Result | Promise<Result>;
+    revert?: (args: zod.output<Schema>, ctx: ToolRevertContext<Awaited<Result>>) => Promise<void>;
 }): DefinedRuntimeTool;
 
 export { type ToolContext, defineTool, getDefinedToolMetadata, getToolContext, getToolIdempotencyKey, nextToolSeq, runWithToolContext };

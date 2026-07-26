@@ -2,6 +2,8 @@ import { describe, it, expect } from "bun:test";
 import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 import {
   runningNodes,
+  pinnedHijackRows,
+  ENDED_ROW_STATUS,
   nodeSelectOption,
   hijackExitMessage,
   startHijackSession,
@@ -41,6 +43,55 @@ describe("runningNodes", () => {
     const statuses = ["waiting", "queued", "done", "failed", "error", "pending"];
     const nodes = statuses.map((s, i) => node(`n${i}`, { status: s }));
     expect(runningNodes(nodes)).toHaveLength(0);
+  });
+});
+
+// ─── pinnedHijackRows ─────────────────────────────────────────────────────────
+
+describe("pinnedHijackRows", () => {
+  it("starts from the live candidates", () => {
+    const rows = pinnedHijackRows([], [node("a", { status: "running" }), node("b", { status: "running" })]);
+    expect(rows.map((n) => n.id)).toEqual(["a", "b"]);
+  });
+
+  it("keeps a dropped candidate in place so later rows never shift up", () => {
+    const prev = ["a", "b", "c"].map((id) => node(id, { status: "running" }));
+    // "a" finishes and leaves hijackCandidates — its row must stay put, or the
+    // select's numeric highlight would slide from "b" onto "c".
+    const rows = pinnedHijackRows(prev, [prev[1]!, prev[2]!]);
+    expect(rows.map((n) => n.id)).toEqual(["a", "b", "c"]);
+    expect(rows[0]!.status).toBe(ENDED_ROW_STATUS);
+    expect(rows[1]).toBe(prev[1]!);
+  });
+
+  it("appends fresh candidates after the pinned rows", () => {
+    const a = node("a", { status: "running" });
+    const b = node("b", { status: "running" });
+    const rows = pinnedHijackRows([a], [a, b]);
+    expect(rows.map((n) => n.id)).toEqual(["a", "b"]);
+  });
+
+  it("refreshes pinned rows from the latest candidate data", () => {
+    const stale = node("a", { status: "running", name: "old" });
+    const fresh = node("a", { status: "running", name: "new" });
+    expect(pinnedHijackRows([stale], [fresh])[0]).toBe(fresh);
+  });
+
+  it("returns the same array when nothing moved (memoizable)", () => {
+    const prev = [node("a", { status: "running" })];
+    expect(pinnedHijackRows(prev, prev)).toBe(prev);
+    // An already-ended row stays identical too — no new object per frame.
+    const ended = pinnedHijackRows(prev, []);
+    expect(pinnedHijackRows(ended, [])).toBe(ended);
+  });
+
+  it("pins by row key so duplicate-id attempts stay distinct rows", () => {
+    const attempt0 = node("loop-body", { key: "k-7", iteration: 0, status: "running" });
+    const attempt1 = node("loop-body", { key: "k-9", iteration: 1, status: "running" });
+    const rows = pinnedHijackRows([attempt0, attempt1], [attempt1]);
+    expect(rows.map((n) => n.key)).toEqual(["k-7", "k-9"]);
+    expect(rows[0]!.status).toBe(ENDED_ROW_STATUS);
+    expect(rows[1]).toBe(attempt1);
   });
 });
 

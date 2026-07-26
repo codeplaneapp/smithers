@@ -419,6 +419,12 @@ async function openInspector(ctx: ExtensionContext, run: TrackedRun) {
     ctx.ui.notify("/smithers requires interactive mode", "error");
     return;
   }
+  // Closing the inspector disconnects the run's shared store (RunInspector.dispose),
+  // and the run stays cached, so re-arm the stream before mounting again; otherwise
+  // every reopen shows a frozen tree whose action keys are silent no-ops.
+  if (run.store.runId === undefined || run.store.connectionState.kind === "disconnected") {
+    run.store.connect(run.runId);
+  }
   await ctx.ui.custom((_tui: unknown, theme: any, _kb: unknown, done: () => void) =>
     new RunInspector(run.store, run.client, {
       workflowName: run.workflowName,

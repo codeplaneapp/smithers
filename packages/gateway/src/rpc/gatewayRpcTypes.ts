@@ -8,6 +8,7 @@
  */
 import type {
   GatewayRpcErrorCode,
+  GatewayRpcErrorDetails as ProtocolGatewayRpcErrorDetails,
   GatewayRpcMethod,
   SmithersApiVersion,
 } from "@smithers-orchestrator/protocol/gateway-rpc";
@@ -81,6 +82,13 @@ export type {
   ResumeRunRequest,
   ResumeRunResponse,
   RewindRunRequest,
+  RewindRunResponse,
+  CrossedEffect,
+  EffectBoundaryReport,
+  EffectRevertStarted,
+  EffectRevertFinished,
+  EffectRevertFailed,
+  SideEffectBoundaryCrossed,
   SmithersApiVersion,
   StreamDevToolsRequest,
   StreamRunEventsRequest,
@@ -94,6 +102,8 @@ export type {
   BrowserSource, BrowserLocator, BrowserSnapshot, BrowserAction, CreateBrowserSessionRequest, BrowserActRequest, BrowserContextRequest, BrowserPickRequest, CloseBrowserSessionRequest, CreateBrowserSessionResponse, BrowserActResponse, BrowserContextResponse, BrowserPickResponse, CloseBrowserSessionResponse, ListBrowserSessionsResponse,
   BrowserActor, BrowserViewport, BrowserPoint, BrowserRectangle, BrowserModifier, BrowserRedaction, BrowserOutcome, BrowserJournalEntry, BrowserContextSlice, BrowserSummary, BrowserClickAction, BrowserFrameEvent, BrowserActivityEvent, BrowserScreenshot, BrowserSelection,
 } from "@smithers-orchestrator/protocol/gateway-rpc";
+
+export type GatewayRpcErrorDetails = ProtocolGatewayRpcErrorDetails;
 
 export type JsonSchema = {
   readonly type?: string | readonly string[];

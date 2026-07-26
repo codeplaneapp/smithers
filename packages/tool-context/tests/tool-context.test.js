@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { getToolContext, getToolIdempotencyKey, nextToolSeq, runWithToolContext } from "../src/index.js";
+import { z } from "zod";
+import {
+    defineTool,
+    getDefinedToolMetadata,
+    getToolContext,
+    getToolIdempotencyKey,
+    nextToolSeq,
+    runWithToolContext,
+} from "../src/index.js";
 
 describe("tool-context", () => {
     test("getToolContext is undefined outside a run scope", () => {
@@ -67,5 +75,95 @@ describe("tool-context", () => {
         expect(nextToolSeq(withExistingSeq)).toBe(42);
         expect(nextToolSeq(withNullSeq)).toBe(1);
         expect(nextToolSeq(withFalseSeq)).toBe(1);
+    });
+
+    test("rejects revert without sideEffect:true at definition time", () => {
+        expect(() => defineTool({
+            name: "invalid-revert",
+            schema: z.object({ id: z.string() }),
+            execute: async () => "ok",
+            revert: async () => {},
+        })).toThrow("revert requires sideEffect:true");
+    });
+
+    test("stamps hasRevert and preserves the revert handler with the documented context shape", async () => {
+        const seen = [];
+        const revert = async (args, ctx) => {
+            seen.push({ args, ctx });
+        };
+        const defined = defineTool({
+            name: "revertible-send",
+            schema: z.object({ channel: z.string() }),
+            sideEffect: true,
+            idempotent: false,
+            execute: async (_args, _ctx) => ({ messageId: "m-1" }),
+            revert,
+        });
+
+        const metadata = getDefinedToolMetadata(defined);
+        expect(metadata).toMatchObject({
+            name: "revertible-send",
+            sideEffect: true,
+            idempotent: false,
+            acceptsIdempotencyKey: true,
+            hasRevert: true,
+            revert,
+        });
+
+        const ctx = {
+            output: { messageId: "m-1" },
+            effectStatus: "succeeded",
+            idempotencyKey: "effect-key",
+            runId: "run-1",
+            nodeId: "announce",
+            iteration: 2,
+            attempt: 3,
+            toolCallSeq: 4,
+        };
+        await metadata.revert({ channel: "alerts" }, ctx);
+        expect(seen).toEqual([{ args: { channel: "alerts" }, ctx }]);
+    });
+
+    test.each([
+        ["finished", async () => ({ ok: true }), "succeeded"],
+        ["failed", async () => { throw new Error("send failed"); }, "unknown"],
+    ])("stamps provenance on every %s journal phase", async (_label, execute, terminalStatus) => {
+        const calls = [];
+        const defined = defineTool({
+            name: "journalled-send",
+            schema: z.object({ value: z.number() }),
+            sideEffect: true,
+            idempotent: false,
+            execute: async (args, ctx) => execute(args, ctx),
+            revert: async () => {},
+        });
+        const invocation = runWithToolContext({
+            runId: "run-1",
+            nodeId: "task-1",
+            iteration: 2,
+            attempt: 3,
+            recordToolCall: (call) => calls.push(call),
+        }, () => defined.execute({ value: 1 }, {}));
+
+        if (terminalStatus === "unknown") {
+            await expect(invocation).rejects.toThrow("send failed");
+        }
+        else {
+            await expect(invocation).resolves.toEqual({ ok: true });
+        }
+
+        expect(calls.map((call) => call.phase)).toEqual(["started", _label]);
+        for (const call of calls) {
+            expect(call).toMatchObject({
+                kind: "tool",
+                toolName: "journalled-send",
+                sideEffect: true,
+                idempotent: false,
+                acceptsIdempotencyKey: true,
+                hasRevert: true,
+                idempotencyKey: "smithers:run-1:task-1:2",
+            });
+        }
+        expect(calls.at(-1).effectStatus).toBe(terminalStatus);
     });
 });

@@ -73,7 +73,7 @@ const { smithers, Workflow, Task, Loop, ContinueAsNew, outputs } = api;
 // <Worktree>). Graph rendering does not run the agent; these are the real
 // flags a live run needs.
 const worker = new ClaudeCodeAgent({
-  model: "claude-opus-4-8",
+  model: "claude-opus-5",
   permissionMode: "bypassPermissions",
   dangerouslySkipPermissions: true,
 });

@@ -484,6 +484,61 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SqlMessageStorage post
         }
     }, 60_000);
 
+    test("insertIgnoreReturningInserted reports the ON CONFLICT DO NOTHING loser", async () => {
+        const row = {
+            sourceId: "pg-insert-ignore-returning",
+            dedupeKey: "delivery-1",
+            eventName: "integration:pg:test",
+            receivedAtMs: 1_000,
+        };
+        expect(await storage.insertIgnoreReturningInserted("_smithers_integration_deliveries", row)).toBe(true);
+        expect(await storage.insertIgnoreReturningInserted("_smithers_integration_deliveries", {
+            ...row,
+            receivedAtMs: 9_999,
+        })).toBe(false);
+        expect(await storage.queryOne(`SELECT received_at_ms
+            FROM _smithers_integration_deliveries
+            WHERE source_id = ? AND dedupe_key = ?`, [row.sourceId, row.dedupeKey])).toEqual({ receivedAtMs: 1_000 });
+    });
+
+    // PGlite's socket server serializes the peer's first query behind an open
+    // transaction, so neither redelivery can reach ON CONFLICT while the other
+    // is uncommitted. Real PostgreSQL permits both connections to overlap here.
+    test.skipIf(!PG_URL)("only one concurrent insertIntegrationDeliveryIfNew claims the first delivery", async () => {
+        const peer = await connectPeerClient();
+        try {
+            // Smithers' postgres transactions run at READ COMMITTED, so both
+            // redeliveries look new until one commits — the dedupe verdict has
+            // to come from the insert, not from a prior read. The barrier holds
+            // both inserts until both transactions are open so the loser hits
+            // ON CONFLICT DO NOTHING, which no-ops silently instead of raising.
+            const waitForPeer = twoPartyBarrier();
+            const table = "_smithers_integration_deliveries";
+            const first = postgresAdapter(blockFirstInsert(client, table, waitForPeer));
+            const second = postgresAdapter(blockFirstInsert(peer, table, waitForPeer));
+            const row = {
+                sourceId: "pg-dedupe-race",
+                dedupeKey: "delivery-1",
+                eventName: "integration:pg:test",
+                receivedAtMs: 1_000,
+            };
+            const verdicts = await Promise.all([
+                first.insertIntegrationDeliveryIfNew(row),
+                second.insertIntegrationDeliveryIfNew({ ...row, receivedAtMs: 9_999 }),
+            ]);
+            expect(verdicts.filter((verdict) => verdict === true)).toHaveLength(1);
+            expect(await first.insertIntegrationDeliveryIfNew(row)).toBe(false);
+
+            const persisted = await storage.queryAll(`SELECT received_at_ms
+                FROM ${table}
+                WHERE source_id = ? AND dedupe_key = ?`, [row.sourceId, row.dedupeKey]);
+            expect(persisted).toHaveLength(1);
+        }
+        finally {
+            await peer.end().catch(() => {});
+        }
+    }, 60_000);
+
     test("independent postgres adapters allocate and persist every event seq", async () => {
         const runId = "pg-cross-adapter-event-race";
         await storage.upsert(

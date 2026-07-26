@@ -302,7 +302,7 @@ function renderMdx(registry: SotaRegistry, benchmarks: Benchmark[]): string {
   lines.push("## Role defaults");
   lines.push("");
   lines.push(
-    "The workflow role seats resolve to these ids (Codex builds and reviews; Claude orchestrates and gates); see [Recipes](/recipes) for practical workflow patterns:",
+    "The workflow role seats resolve to these ids (Claude builds and gates; Codex reviews and validates); see [Recipes](/recipes) for practical workflow patterns:",
   );
   lines.push("");
   lines.push("| Role | Default model |");

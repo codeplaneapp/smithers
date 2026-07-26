@@ -18,4 +18,17 @@ export type SmithersDevToolsOptions = {
    * Default 10000. Pass Infinity to disable eviction.
    */
   maxEventsPerRun?: number;
+  /**
+   * Max task states retained per run before FIFO-evicting the oldest. One
+   * state exists per `(nodeId, iteration)`, so a looping run grows this with
+   * iterations, not node count. Default 5000. Pass Infinity to disable
+   * eviction.
+   */
+  maxTasksPerRun?: number;
+  /**
+   * Max tool calls retained per task before FIFO-evicting the oldest. Status
+   * updates still land on any retained call. Default 1000. Pass Infinity to
+   * disable eviction.
+   */
+  maxToolCallsPerTask?: number;
 };

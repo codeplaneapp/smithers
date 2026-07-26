@@ -9,10 +9,25 @@ Each successful task attempt captures the current [JJ](https://jj-vcs.github.io/
 
 ```bash
 bunx smithers-orchestrator revert workflow.tsx \
-  --run-id RUN_ID --node-id NODE_ID [--attempt N=1] [--iteration N=0]
+  --run-id RUN_ID --node-id NODE_ID [--attempt N=1] [--iteration N=0] \
+  [--force] [--no-revert]
 ```
 
 Revert restores files only, without altering JJ history; the restoration creates a new change on top of the current working copy.
+
+Before restoring files, `revert` checks every marked external effect that
+would be crossed. It runs registered handlers in reverse order, then prints an
+effect-boundary report. The report is printed for blocked, compensated,
+forced, and clean operations.
+
+`--no-revert` skips handlers. `--force` crosses any effects that remain,
+records `SideEffectBoundaryCrossed`, and marks the run for attention. Without
+`--force`, unresolved `succeeded`, `unknown`, `revert-failed`, or
+`revert-stale` effects stop the command with
+`TIME_TRAVEL_SIDE_EFFECT_BLOCKED`.
+
+Git commits, branch changes, worktree writes, and `git push` are exempt.
+GitHub issues, comments, releases, and PR merge state are external effects.
 
 ## Requirements
 
@@ -43,6 +58,8 @@ type RevertOptions = {
   nodeId: string;
   iteration: number;
   attempt: number;
+  force?: boolean;
+  noRevert?: boolean;
   onProgress?: (event: SmithersEvent) => void;
 };
 
@@ -50,6 +67,7 @@ type RevertResult = {
   success: boolean;
   error?: string;
   jjPointer?: string;
+  effectBoundary: EffectBoundaryReport;
 };
 
 function revertToAttempt(adapter: SmithersDb, opts: RevertOptions): Promise<RevertResult>;
@@ -76,6 +94,8 @@ type TimeTravelOptions = {
   attempt?: number;
   resetDependents?: boolean;
   restoreVcs?: boolean;
+  force?: boolean;
+  noRevert?: boolean;
   onProgress?: (event: SmithersEvent) => void;
 };
 
@@ -85,6 +105,7 @@ type TimeTravelResult = {
   vcsRestored: boolean;
   resetNodes: string[];
   error?: string;
+  effectBoundary: EffectBoundaryReport;
 };
 
 function timeTravel(adapter: SmithersDb, opts: TimeTravelOptions): Promise<TimeTravelResult>;

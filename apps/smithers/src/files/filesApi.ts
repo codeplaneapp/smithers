@@ -27,6 +27,8 @@ export type FileReadResult = {
   name: string;
   size: number;
   mtimeMs: number;
+  /** Optimistic-concurrency token; echo it back on save. Null when not editable. */
+  revision: string | null;
   kind: "text" | "binary";
   editable: boolean;
   previewText: string | null;
@@ -67,11 +69,12 @@ export async function fetchFile(path: string): Promise<FileReadResponse> {
 export async function saveFile(
   path: string,
   content: string,
+  revision: string,
 ): Promise<FileReadResponse> {
   const response = await fetch("/api/files/write", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path, content }),
+    body: JSON.stringify({ path, content, revision }),
   });
   return readJson<FileReadResponse>(response);
 }

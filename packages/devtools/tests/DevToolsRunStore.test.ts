@@ -264,6 +264,50 @@ describe("DevToolsRunStore event processing", () => {
     expect(task?.toolCalls[0]?.status).toBe("success");
   });
 
+  test("replayed ToolCallStarted upserts by (name, seq) instead of duplicating", () => {
+    const store = new DevToolsRunStore();
+    const base = { runId: "r1", nodeId: "n1", iteration: 0 };
+    const started = { ...base, type: "ToolCallStarted", timestampMs: 1, toolName: "search", seq: 1 };
+    const finished = {
+      ...base,
+      type: "ToolCallFinished",
+      timestampMs: 2,
+      toolName: "search",
+      seq: 1,
+      status: "success",
+    };
+    store.processEngineEvent(started);
+    store.processEngineEvent(finished);
+    // A reconnect replays the log from the start.
+    store.processEngineEvent(started);
+    store.processEngineEvent(finished);
+
+    const task = store.getTaskState("r1", "n1");
+    expect(task?.toolCalls).toHaveLength(1);
+    expect(task?.toolCalls[0]?.status).toBe("success");
+
+    // Same tool at a different seq is a distinct call, not a duplicate.
+    store.processEngineEvent({ ...started, timestampMs: 3, seq: 2 });
+    expect(store.getTaskState("r1", "n1")?.toolCalls).toHaveLength(2);
+  });
+
+  test("a replayed ToolCallStarted does not wipe the status already recorded for that call", () => {
+    const store = new DevToolsRunStore();
+    const base = { runId: "r1", nodeId: "n1", iteration: 0 };
+    store.processEngineEvent({ ...base, type: "ToolCallStarted", timestampMs: 1, toolName: "search", seq: 1 });
+    store.processEngineEvent({
+      ...base,
+      type: "ToolCallFinished",
+      timestampMs: 2,
+      toolName: "search",
+      seq: 1,
+      status: "error",
+    });
+    // Duplicate Started with no trailing Finished: the recorded status must survive.
+    store.processEngineEvent({ ...base, type: "ToolCallStarted", timestampMs: 3, toolName: "search", seq: 1 });
+    expect(store.getTaskState("r1", "n1")?.toolCalls[0]?.status).toBe("error");
+  });
+
   test("getTaskState with iteration returns exact iteration", () => {
     const store = new DevToolsRunStore();
     store.processEngineEvent({
@@ -479,6 +523,9 @@ describe("DevToolsRunStore event processing", () => {
     const events = [
       { type: "RunStarted", runId: "r1", timestampMs: 1 },
       { type: "NodeStarted", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 2, attempt: 1 },
+      { type: "ToolCallStarted", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 2, toolName: "search", seq: 1 },
+      { type: "ToolCallFinished", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 3, toolName: "search", seq: 1, status: "success" },
+      { type: "ToolCallStarted", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 3, toolName: "search", seq: 2 },
       { type: "NodeWaitingApproval", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 3 },
       { type: "NodeFinished", runId: "r1", nodeId: "n1", iteration: 0, timestampMs: 4, attempt: 1 },
       { type: "NodeStarted", runId: "r1", nodeId: "n2", iteration: 0, timestampMs: 5, attempt: 1 },
@@ -505,6 +552,13 @@ describe("DevToolsRunStore event processing", () => {
     expect(doublePass.getTaskState("r1", "n1")?.finishedAt).toBe(4);
     expect(doublePass.getTaskState("r1", "n2")?.status).toBe("finished");
     expect(doublePass.getTaskState("r1", "n2")?.finishedAt).toBe(6);
+    // Tool calls converge to the single-pass list, statuses intact.
+    expect(doublePass.getTaskState("r1", "n1")?.toolCalls).toEqual(
+      singlePass.getTaskState("r1", "n1")?.toolCalls ?? [],
+    );
+    expect(doublePass.getTaskState("r1", "n1")?.toolCalls).toHaveLength(2);
+    expect(doublePass.getTaskState("r1", "n1")?.toolCalls[0]?.status).toBe("success");
+    expect(doublePass.getTaskState("r1", "n1")?.toolCalls[1]?.status).toBeUndefined();
     // The replay appended its events; the read-model state is still correct.
     expect(b?.events).toHaveLength(events.length * 2);
   });
@@ -625,6 +679,153 @@ describe("DevToolsRunStore retention/eviction", () => {
     expect(store.runs.size).toBe(1);
     expect(store.getRun("r1")?.frameNo).toBe(4);
     expect(store.getRun("r2")).toBeUndefined();
+  });
+
+  test("task states grow one per (nodeId, iteration) under the default cap", () => {
+    const store = new DevToolsRunStore();
+    for (let iteration = 0; iteration < 40; iteration++) {
+      store.processEngineEvent({
+        type: "NodeStarted",
+        runId: "r1",
+        nodeId: "loop-body",
+        iteration,
+        attempt: 1,
+        timestampMs: iteration,
+      });
+    }
+    // One entry per iteration of the same node — the growth vector a looping
+    // run exercises.
+    expect(store.getRun("r1")?.tasks.size).toBe(40);
+  });
+
+  test("caps task states per run with FIFO eviction, keeping the newest iterations", () => {
+    const store = new DevToolsRunStore({ maxTasksPerRun: 3 });
+    for (let iteration = 0; iteration < 10; iteration++) {
+      store.processEngineEvent({
+        type: "NodeStarted",
+        runId: "r1",
+        nodeId: "loop-body",
+        iteration,
+        attempt: 1,
+        timestampMs: iteration,
+      });
+    }
+    const tasks = store.getRun("r1")?.tasks;
+    expect(tasks?.size).toBe(3);
+    expect([...(tasks?.keys() ?? [])]).toEqual([
+      "loop-body::7",
+      "loop-body::8",
+      "loop-body::9",
+    ]);
+    // The surviving newest iteration keeps its state; the evicted ones are gone.
+    expect(store.getTaskState("r1", "loop-body", 9)?.status).toBe("started");
+    expect(store.getTaskState("r1", "loop-body", 0)).toBeUndefined();
+  });
+
+  test("Infinity disables task eviction; invalid task cap falls back to the default", () => {
+    const unbounded = new DevToolsRunStore({
+      maxTasksPerRun: Number.POSITIVE_INFINITY,
+    });
+    const defaulted = new DevToolsRunStore({ maxTasksPerRun: -1 });
+    for (const store of [unbounded, defaulted]) {
+      for (let iteration = 0; iteration < 60; iteration++) {
+        store.processEngineEvent({
+          type: "NodeStarted",
+          runId: "r1",
+          nodeId: "loop-body",
+          iteration,
+          attempt: 1,
+          timestampMs: iteration,
+        });
+      }
+    }
+    expect(unbounded.getRun("r1")?.tasks.size).toBe(60);
+    // A negative cap is nonsensical, so it falls back to the default (5000).
+    expect(defaulted.getRun("r1")?.tasks.size).toBe(60);
+  });
+
+  test("caps tool calls per task with FIFO eviction, keeping the newest calls", () => {
+    const store = new DevToolsRunStore({ maxToolCallsPerTask: 3 });
+    const base = { runId: "r1", nodeId: "n1", iteration: 0 };
+    for (let seq = 0; seq < 10; seq++) {
+      store.processEngineEvent({
+        ...base,
+        type: "ToolCallStarted",
+        timestampMs: seq,
+        toolName: "search",
+        seq,
+      });
+    }
+    const toolCalls = store.getTaskState("r1", "n1")?.toolCalls ?? [];
+    expect(toolCalls).toHaveLength(3);
+    expect(toolCalls.map((t) => t.seq)).toEqual([7, 8, 9]);
+  });
+
+  test("status updates still land on retained calls after tool-call eviction", () => {
+    const store = new DevToolsRunStore({ maxToolCallsPerTask: 2 });
+    const base = { runId: "r1", nodeId: "n1", iteration: 0 };
+    for (let seq = 0; seq < 4; seq++) {
+      store.processEngineEvent({
+        ...base,
+        type: "ToolCallStarted",
+        timestampMs: seq,
+        toolName: "search",
+        seq,
+      });
+    }
+    // A Finished for an evicted call is a no-op; a retained one still records.
+    store.processEngineEvent({
+      ...base,
+      type: "ToolCallFinished",
+      timestampMs: 5,
+      toolName: "search",
+      seq: 0,
+      status: "success",
+    });
+    store.processEngineEvent({
+      ...base,
+      type: "ToolCallFinished",
+      timestampMs: 6,
+      toolName: "search",
+      seq: 3,
+      status: "error",
+    });
+    const toolCalls = store.getTaskState("r1", "n1")?.toolCalls ?? [];
+    expect(toolCalls.map((t) => t.seq)).toEqual([2, 3]);
+    expect(toolCalls[1]?.status).toBe("error");
+    // The dedup upsert must not resurrect an evicted call's slot ordering.
+    store.processEngineEvent({
+      ...base,
+      type: "ToolCallStarted",
+      timestampMs: 7,
+      toolName: "search",
+      seq: 3,
+    });
+    expect(store.getTaskState("r1", "n1")?.toolCalls).toHaveLength(2);
+    expect(store.getTaskState("r1", "n1")?.toolCalls[1]?.status).toBe("error");
+  });
+
+  test("Infinity disables tool-call eviction; invalid tool-call cap falls back to the default", () => {
+    const unbounded = new DevToolsRunStore({
+      maxToolCallsPerTask: Number.POSITIVE_INFINITY,
+    });
+    const defaulted = new DevToolsRunStore({ maxToolCallsPerTask: 0 });
+    for (const store of [unbounded, defaulted]) {
+      for (let seq = 0; seq < 60; seq++) {
+        store.processEngineEvent({
+          runId: "r1",
+          nodeId: "n1",
+          iteration: 0,
+          type: "ToolCallStarted",
+          timestampMs: seq,
+          toolName: "search",
+          seq,
+        });
+      }
+    }
+    expect(unbounded.getTaskState("r1", "n1")?.toolCalls).toHaveLength(60);
+    // A non-positive cap is nonsensical, so it falls back to the default (1000).
+    expect(defaulted.getTaskState("r1", "n1")?.toolCalls).toHaveLength(60);
   });
 
   test("Infinity disables eviction; invalid cap falls back to the default", () => {

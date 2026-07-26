@@ -5,7 +5,9 @@ import { resolveRewindAuditClient } from "./resolveRewindAuditClient.js";
 /**
  * Count audit rows for one caller and run in a time window.
  * Only counts terminal (non-in_progress) rows so that a live attempt
- * does not itself blow the rate-limit quota.
+ * does not itself blow the rate-limit quota, and skips `rejected` rows so
+ * that retries of a refused rewind cannot keep refreshing the window and
+ * lock the caller out indefinitely.
  *
  * @param {SmithersDb} adapter
  * @param {{ runId: string; caller: string; sinceMs: number; }} input
@@ -20,7 +22,7 @@ export async function countRecentRewindAuditRows(adapter, input) {
         WHERE run_id = ?
           AND caller = ?
           AND timestamp_ms >= ?
-          AND result <> 'in_progress'`,
+          AND result NOT IN ('in_progress', 'rejected')`,
       [input.runId, input.caller, input.sinceMs],
     )
   );

@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,6 +31,38 @@ function git(cwd, args) {
             : rej(new Error(`git ${args.join(" ")} failed in ${cwd} (exit ${code}): ${stderr}`))));
     });
 }
+
+/**
+ * @param {string} cwd
+ * @param {string[]} args
+ */
+function jj(cwd, args) {
+    return new Promise((res, rej) => {
+        const child = spawn("jj", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+        let stderr = "";
+        let stdout = "";
+        child.stdout?.on("data", (chunk) => (stdout += chunk.toString()));
+        child.stderr?.on("data", (chunk) => (stderr += chunk.toString()));
+        child.on("close", (code) => (code === 0
+            ? res(stdout)
+            : rej(new Error(`jj ${args.join(" ")} failed in ${cwd} (exit ${code}): ${stderr}`))));
+    });
+}
+
+// jj takes its identity from the environment, so the suite does not depend on
+// the machine having a user-level jj config.
+process.env.JJ_USER ??= "smithers-test";
+process.env.JJ_EMAIL ??= "test@smithers.sh";
+
+const jjAvailable = (() => {
+    try {
+        return spawnSync("jj", ["--version"], { stdio: "ignore" }).status === 0;
+    }
+    catch {
+        return false;
+    }
+})();
+const describeIfJj = jjAvailable ? describe : describe.skip;
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "smithers-worktree-reap-")));
 let seq = 0;
@@ -228,5 +260,67 @@ describe("worktree reaping", () => {
         expect(result.removed).toHaveLength(0);
         expect(result.skipped).toEqual([{ path, runId: "run-2", reason: "run-running" }]);
         expect(existsSync(path)).toBe(true);
+    });
+});
+
+describeIfJj("jj workspace reaping", () => {
+    /**
+     * A jj lane workspace of a colocated repo, created through the same engine
+     * path production uses.
+     *
+     * @param {string} lane
+     * @param {string} runId
+     */
+    async function createJjLane(lane, runId) {
+        const path = join(root, `${lane}-${seq++}`);
+        await I.ensureWorktree(repo, path, `smithers/${lane}`, "main", { runId, workflowName: "test-flow" });
+        return path;
+    }
+
+    beforeEach(async () => {
+        await jj(repo, ["git", "init", "--colocate"]);
+    });
+
+    test("a lane squash-landed onto the base branch is reaped, and is kept until it lands", async () => {
+        const path = await createJjLane("lane-a", "run-1");
+        runStatuses.set("run-1", "finished");
+        writeFileSync(join(path, "agent-work.txt"), "hours of work\n");
+        await jj(path, ["describe", "-m", "lane work"]);
+        await jj(path, ["new"]);
+
+        const kept = await reapWorktrees({ rootDir: repo, getRunStatus });
+        expect(kept.skipped).toEqual([{ path, runId: "run-1", reason: "unsaved-work" }]);
+        expect(existsSync(path)).toBe(true);
+
+        // Land it the way the merge queue does: identical content, brand new
+        // commit id. Ancestry alone still says the lane commit is nowhere else.
+        await jj(repo, ["new", "main", "-m", "landed lane work"]);
+        await jj(repo, ["restore", "--from", "smithers/lane-a"]);
+        await jj(repo, ["bookmark", "set", "main", "-r", "@", "--allow-backwards"]);
+        await jj(repo, ["new", "main"]);
+
+        const result = await reapWorktrees({ rootDir: repo, getRunStatus });
+        expect(result.skipped).toHaveLength(0);
+        expect(result.removed.map((entry) => entry.path)).toEqual([path]);
+        expect(existsSync(path)).toBe(false);
+    });
+
+    test("uncommitted work in a landed lane still survives", async () => {
+        const path = await createJjLane("lane-b", "run-1");
+        runStatuses.set("run-1", "finished");
+        writeFileSync(join(path, "agent-work.txt"), "hours of work\n");
+        await jj(path, ["describe", "-m", "lane work"]);
+        await jj(path, ["new"]);
+        await jj(repo, ["new", "main", "-m", "landed lane work"]);
+        await jj(repo, ["restore", "--from", "smithers/lane-b"]);
+        await jj(repo, ["bookmark", "set", "main", "-r", "@", "--allow-backwards"]);
+        await jj(repo, ["new", "main"]);
+        writeFileSync(join(path, "not-landed.txt"), "written after the lane landed\n");
+
+        const result = await reapWorktrees({ rootDir: repo, getRunStatus });
+
+        expect(result.removed).toHaveLength(0);
+        expect(result.skipped).toEqual([{ path, runId: "run-1", reason: "unsaved-work" }]);
+        expect(existsSync(join(path, "not-landed.txt"))).toBe(true);
     });
 });

@@ -118,6 +118,10 @@ millis from the stored row) and surface `stateVersion: 0`.
 | `TimeTravelStarted` | `runId`, `nodeId`, `iteration`, `attempt`, `jjPointer?`, `timestampMs` |
 | `TimeTravelFinished` | `runId`, `nodeId`, `iteration`, `attempt`, `jjPointer?`, `success`, `vcsRestored`, `resetNodes`, `error?`, `timestampMs` |
 | `TimeTravelJumped` | `runId`, `fromFrameNo`, `toFrameNo`, `timestampMs`, `caller?` |
+| `EffectRevertStarted` | `runId`, `operation`, `kind`, `toolName`, `nodeId`, `iteration`, `attempt`, `seq`, `effectStatus`, `timestampMs` |
+| `EffectRevertFinished` | `runId`, `operation`, `kind`, `toolName`, `nodeId`, `iteration`, `attempt`, `seq`, `timestampMs` |
+| `EffectRevertFailed` | `runId`, `operation`, `kind`, `toolName`, `nodeId`, `iteration`, `attempt`, `seq`, `error`, `timestampMs` |
+| `SideEffectBoundaryCrossed` | `runId`, `opId`, `operation`, `report`, `parentRunId?`, `warningOnly?`, `lateCompletion?`, `archivedByOp?`, `timestampMs` |
 | `WorkflowReloadDetected` | `runId`, `changedFiles`, `timestampMs` |
 | `WorkflowReloaded` | `runId`, `generation`, `changedFiles`, `timestampMs` |
 | `WorkflowReloadFailed` | `runId`, `error`, `changedFiles`, `timestampMs` |

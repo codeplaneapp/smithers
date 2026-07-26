@@ -6,6 +6,8 @@ import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { requireTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { TaskHeartbeatTimeout } from "@smithers-orchestrator/errors/TaskHeartbeatTimeout";
+import { defineTool } from "@smithers-orchestrator/tool-context";
+import { archiveDiscardedEffects } from "@smithers-orchestrator/time-travel/archiveDiscardedEffects";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import {
@@ -35,6 +37,14 @@ function makeEventBus({ failFlush = false } = {}) {
         },
         flush: () => failFlush ? Effect.fail(new Error("flush boom")) : Effect.void,
     };
+}
+
+function deferred() {
+    let resolve;
+    const promise = new Promise((next) => {
+        resolve = next;
+    });
+    return { promise, resolve };
 }
 
 function makeDesc(tables, overrides = {}) {
@@ -146,6 +156,7 @@ describe("compute task bridge pure helpers", () => {
         expect(canExecuteBridgeManagedComputeTask({ computeFn: () => ({}) }, false)).toBe(true);
         expect(canExecuteBridgeManagedComputeTask({ computeFn: () => ({}) }, true)).toBe(false);
         expect(canExecuteBridgeManagedComputeTask({ computeFn: () => ({}), cachePolicy: {} }, false)).toBe(false);
+        expect(canExecuteBridgeManagedComputeTask({ computeFn: () => ({}), sideEffect: { idempotent: false } }, false)).toBe(false);
         expect(canExecuteBridgeManagedComputeTask({ computeFn: null }, false)).toBe(false);
         expect(canExecuteBridgeManagedComputeTask({ computeFn: () => ({}), agent: {} }, false)).toBe(false);
         expect(canExecuteBridgeManagedComputeTask({ computeFn: () => ({}), worktreePath: "/tmp/wt" }, false)).toBe(false);
@@ -290,6 +301,191 @@ describe("compute task bridge execution branches", () => {
             const attempts = await Effect.runPromise(result.adapter.listAttempts(result.runId, "heartbeat-task-fails", 0));
             expect(attempts[0]?.state).toBe("failed");
             expect(JSON.parse(attempts[0]?.errorJson ?? "{}").message).toContain("failed before stale");
+        }
+        finally {
+            result.cleanup();
+        }
+    });
+
+    test("marks intended compute-tool rows unknown when the compute task fails", async () => {
+        const entered = deferred();
+        const hangingTool = defineTool({
+            name: "compute-failure-in-flight",
+            schema: z.object({}),
+            sideEffect: true,
+            idempotent: false,
+            execute: async (_input, _context) => {
+                entered.resolve();
+                await new Promise(() => {});
+            },
+        });
+        const result = await runBridge({
+            descOverrides: {
+                nodeId: "compute-tool-failure",
+                runId: "compute-tool-failure-run",
+                computeFn: async () => {
+                    void hangingTool.execute({});
+                    await entered.promise;
+                    throw new Error("compute failed while tool was in flight");
+                },
+            },
+        });
+        try {
+            const rows = await Effect.runPromise(result.adapter.listToolCalls(
+                result.runId,
+                "compute-tool-failure",
+                0,
+            ));
+            expect(rows).toHaveLength(1);
+            expect(rows[0]).toMatchObject({
+                toolName: "compute-failure-in-flight",
+                status: "unknown",
+                errorJson: expect.stringContaining("compute failed while tool was in flight"),
+            });
+        }
+        finally {
+            result.cleanup();
+        }
+    });
+
+    test("bridge stale completion is token-fenced after primary-key reuse", async () => {
+        const entered = deferred();
+        const release = deferred();
+        let staleCompletion;
+        let receivedSignal;
+        const hangingTool = defineTool({
+            name: "bridge-late-completion",
+            schema: z.object({}),
+            sideEffect: true,
+            idempotent: false,
+            execute: async (_input, context) => {
+                receivedSignal = context.signal;
+                entered.resolve();
+                await release.promise;
+                return { generation: "stale" };
+            },
+        });
+        const result = await runBridge({
+            descOverrides: {
+                nodeId: "bridge-late-completion",
+                runId: "bridge-late-completion-run",
+                computeFn: async () => {
+                    staleCompletion = hangingTool.execute({});
+                    await entered.promise;
+                    throw new Error("compute failed while bridge tool was in flight");
+                },
+            },
+        });
+        try {
+            expect(receivedSignal).toBeInstanceOf(AbortSignal);
+            const staleRow = (await Effect.runPromise(result.adapter.listToolCalls(
+                result.runId,
+                "bridge-late-completion",
+                0,
+            )))[0];
+            const staleCallToken = String(staleRow.callToken);
+            expect(staleRow).toMatchObject({
+                status: "unknown",
+                callToken: expect.any(String),
+            });
+            await archiveDiscardedEffects(result.adapter, {
+                runId: result.runId,
+                opId: "bridge-rewind",
+                archivedAtMs: Date.now(),
+                archiveReason: "rewind",
+                attempts: [{
+                    nodeId: "bridge-late-completion",
+                    iteration: 0,
+                    attempt: 1,
+                }],
+            });
+            const freshCallToken = crypto.randomUUID();
+            await Effect.runPromise(result.adapter.insertToolCall({
+                ...staleRow,
+                callToken: freshCallToken,
+                inputJson: '{"generation":"fresh"}',
+                outputJson: null,
+                startedAtMs: Date.now(),
+                finishedAtMs: null,
+                status: "intended",
+                errorJson: null,
+                revertStatus: null,
+                revertedAtMs: null,
+                revertErrorJson: null,
+                forcedPastJson: null,
+            }));
+
+            release.resolve();
+            await staleCompletion;
+
+            expect(await result.adapter.internalStorage.queryOne(
+                `SELECT status, output_json FROM _smithers_tool_calls WHERE call_token = ?`,
+                [freshCallToken],
+            )).toEqual({ status: "intended", outputJson: null });
+            expect(await result.adapter.internalStorage.queryOne(
+                `SELECT status, output_json FROM _smithers_tool_call_archive WHERE call_token = ?`,
+                [staleCallToken],
+            )).toEqual({ status: "succeeded", outputJson: '{"generation":"stale"}' });
+            expect(await Effect.runPromise(result.adapter.listEventsByType(
+                result.runId,
+                "SideEffectBoundaryCrossed",
+            ))).toHaveLength(1);
+        }
+        finally {
+            release.resolve();
+            await staleCompletion?.catch(() => undefined);
+            result.cleanup();
+        }
+    });
+
+    test("marks intended compute-tool rows unknown when the compute task is cancelled", async () => {
+        const entered = deferred();
+        let receivedSignal;
+        const hangingTool = defineTool({
+            name: "compute-cancel-in-flight",
+            schema: z.object({}),
+            sideEffect: true,
+            idempotent: false,
+            execute: async (_input, context) => {
+                receivedSignal = context.signal;
+                entered.resolve();
+                await new Promise((_, reject) => {
+                    if (context.signal?.aborted) {
+                        reject(context.signal.reason);
+                        return;
+                    }
+                    context.signal?.addEventListener("abort", () => reject(context.signal.reason), {
+                        once: true,
+                    });
+                });
+            },
+        });
+        const controller = new AbortController();
+        const running = runBridge({
+            descOverrides: {
+                nodeId: "compute-tool-cancel",
+                runId: "compute-tool-cancel-run",
+                computeFn: async () => await hangingTool.execute({}),
+            },
+            signal: controller.signal,
+        });
+        await entered.promise;
+        controller.abort(new Error("cancel compute with tool in flight"));
+        const result = await running;
+        try {
+            expect(receivedSignal).toBeInstanceOf(AbortSignal);
+            expect(receivedSignal.aborted).toBe(true);
+            const rows = await Effect.runPromise(result.adapter.listToolCalls(
+                result.runId,
+                "compute-tool-cancel",
+                0,
+            ));
+            expect(rows).toHaveLength(1);
+            expect(rows[0]).toMatchObject({
+                toolName: "compute-cancel-in-flight",
+                status: "unknown",
+                errorJson: expect.stringContaining("cancel compute with tool in flight"),
+            });
         }
         finally {
             result.cleanup();

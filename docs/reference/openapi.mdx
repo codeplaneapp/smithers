@@ -281,7 +281,12 @@ import type { OpenApiSpec } from "smithers-orchestrator";
 type OpenApiSpec = {
   openapi: string;
   info: { title: string; version: string; description?: string };
-  servers?: Array<{ url: string; description?: string }>;
+  servers?: Array<{
+    url: string;
+    description?: string;
+    /** `{var}` placeholders in `url` resolve from these defaults. */
+    variables?: Record<string, { default: string; enum?: string[]; description?: string }>;
+  }>;
   paths: Record<string, OpenApiPathItem>;
   components?: { schemas?: Record<string, OpenApiSchemaObject>; /* ... */ };
 };

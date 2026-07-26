@@ -1,6 +1,14 @@
 import "./style.css";
 import { sections } from "./slides";
 
+/** Single-file build support: scripts/build-single.ts inlines every shot and
+ *  narration clip as data URIs under window.__DECK_ASSETS__. */
+type DeckAssets = {
+  shots?: Record<string, string>;
+  narration?: { manifest: { steps: { file: string; durationMs: number }[] }; files: Record<string, string> };
+};
+const EMBEDDED = (window as unknown as { __DECK_ASSETS__?: DeckAssets }).__DECK_ASSETS__;
+
 interface Step {
   section: number;
   beat: number;
@@ -29,6 +37,14 @@ app.innerHTML = `
     <kbd>←</kbd><kbd>→</kbd> navigate · <kbd>N</kbd> notes · <kbd>P</kbd> rehearse · <kbd>T</kbd> 3:00 timer · <kbd>F</kbd> fullscreen
   </div>
 `;
+
+if (EMBEDDED?.shots) {
+  app.querySelectorAll<HTMLImageElement>("img").forEach((img) => {
+    const key = img.getAttribute("src") ?? "";
+    const inline = EMBEDDED.shots?.[key];
+    if (inline) img.src = inline;
+  });
+}
 
 const slideEls = Array.from(app.querySelectorAll<HTMLElement>(".slide"));
 const counterEl = document.getElementById("counter")!;
@@ -111,6 +127,10 @@ let rehearsalOn = false;
 
 async function loadNarration(): Promise<NarrationStep[] | null> {
   if (narration) return narration;
+  if (EMBEDDED?.narration) {
+    narration = EMBEDDED.narration.manifest.steps;
+    return narration;
+  }
   try {
     const res = await fetch("narration/manifest.json");
     if (!res.ok) return null;
@@ -158,7 +178,9 @@ async function toggleRehearsal(): Promise<void> {
       return;
     }
     goto(i);
-    const audio = new Audio(`narration/${narrationSteps[i].file}`);
+    const audio = new Audio(
+      EMBEDDED?.narration?.files[narrationSteps[i].file] ?? `narration/${narrationSteps[i].file}`,
+    );
     rehearsalAudio = audio;
     audio.onended = () => playFrom(i + 1);
     audio.onerror = () => playFrom(i + 1);

@@ -32,6 +32,39 @@ describe("Task component", () => {
       </Task>);
         expect(result.tasks[0].staticPayload).toEqual({ value: 42 });
     });
+    test("passes boolean and object sideEffect forms through every task kind", async () => {
+        const revert = async () => {};
+        const agent = { generate: async () => ({ value: 1 }) };
+        const result = await render(<Workflow name="effects">
+            <Task id="agent-boolean" output="out" agent={agent} sideEffect>
+                Agent effect
+            </Task>
+            <Task id="agent-object" output="out" agent={agent} sideEffect={{ idempotent: true, revert }}>
+                Agent effect
+            </Task>
+            <Task id="compute-boolean" output="out" sideEffect>
+                {() => ({ value: 2 })}
+            </Task>
+            <Task id="compute-object" output="out" sideEffect={{ idempotent: true, revert }}>
+                {() => ({ value: 2 })}
+            </Task>
+            <Task id="static-boolean" output="out" sideEffect>
+                {{ value: 3 }}
+            </Task>
+            <Task id="static-object" output="out" sideEffect={{ idempotent: true, revert }}>
+                {{ value: 3 }}
+            </Task>
+        </Workflow>);
+
+        expect(result.tasks.map((task) => [task.kind, task.sideEffect])).toEqual([
+            ["agent", { idempotent: false }],
+            ["agent", { idempotent: true, revert }],
+            ["compute", { idempotent: false }],
+            ["compute", { idempotent: true, revert }],
+            ["static", { idempotent: false }],
+            ["static", { idempotent: true, revert }],
+        ]);
+    });
     test("agent chain with fallbackAgent", async () => {
         const primary = { id: "p", generate: async () => ({}) };
         const fallback = { id: "f", generate: async () => ({}) };

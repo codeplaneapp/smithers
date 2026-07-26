@@ -241,29 +241,56 @@ function isAbortError(error) {
         error.name === "AbortError");
 }
 /**
+ * A sleep the caller can hang up on. `Promise.race` never cancels its losers,
+ * so a deadline that loses to a real completion must be torn down by hand:
+ * `cancel()` clears the timer and detaches the `'abort'` listener from the
+ * long-lived run signal instead of leaking both until the timer elapses (#705).
+ * @param {number} ms
+ * @param {AbortSignal} [signal]
+ * @returns {{ promise: Promise<void>, cancel: () => void }}
+ */
+function cancellableSleep(ms, signal) {
+    if (signal?.aborted) {
+        const error = new Error("Task aborted");
+        error.name = "AbortError";
+        return { promise: Promise.reject(error), cancel: () => { } };
+    }
+    if (ms <= 0)
+        return { promise: Promise.resolve(), cancel: () => { } };
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timeout;
+    /** @type {(() => void) | undefined} */
+    let onAbort;
+    const promise = new Promise((resolve, reject) => {
+        timeout = setTimeout(resolve, ms);
+        if (signal) {
+            onAbort = () => {
+                const error = new Error("Task aborted");
+                error.name = "AbortError";
+                reject(error);
+            };
+            signal.addEventListener("abort", onAbort, { once: true });
+        }
+    });
+    const cancel = () => {
+        if (timeout)
+            clearTimeout(timeout);
+        timeout = undefined;
+        if (signal && onAbort)
+            signal.removeEventListener("abort", onAbort);
+        onAbort = undefined;
+    };
+    // Settling on its own (timer fired, or the signal aborted) tears down just
+    // as cancelling does; `cancel` is idempotent, so both paths are safe.
+    return { promise: promise.finally(cancel), cancel };
+}
+/**
  * @param {number} ms
  * @param {AbortSignal} [signal]
  * @returns {Promise<void>}
  */
 async function sleepWithAbort(ms, signal) {
-    if (signal?.aborted) {
-        const error = new Error("Task aborted");
-        error.name = "AbortError";
-        throw error;
-    }
-    if (ms <= 0)
-        return;
-    let timeout;
-    const sleep = new Promise((resolve) => {
-        timeout = setTimeout(resolve, ms);
-    });
-    try {
-        await withAbort(sleep, signal);
-    }
-    finally {
-        if (timeout)
-            clearTimeout(timeout);
-    }
+    await cancellableSleep(ms, signal).promise;
 }
 /**
  * @template {unknown} [Schema=unknown]
@@ -708,8 +735,11 @@ export class WorkflowDriver {
                 waitedTasks = [...this.inflightTaskDescriptors.values()];
                 waitStart = performance.now();
                 const racers = [...this.inflightTasks.values()];
+                /** @type {{ cancel: () => void } | null} */
+                let deadline = null;
                 if (deadlineMs != null) {
-                    racers.push(sleepWithAbort(deadlineMs, this.activeOptions?.signal).then(() => null));
+                    deadline = cancellableSleep(deadlineMs, this.activeOptions?.signal);
+                    racers.push(deadline.promise.then(() => null));
                 }
                 try {
                     await Promise.race(racers);
@@ -718,6 +748,13 @@ export class WorkflowDriver {
                     if (!this.activeOptions?.signal?.aborted || !isAbortError(error)) {
                         throw error;
                     }
+                }
+                finally {
+                    // A completion that wins the race would otherwise orphan the
+                    // deadline's timer and abort listener — one fresh pair per
+                    // completion, since `handleWait` re-enters here for every
+                    // one while tasks stay in flight (#705).
+                    deadline?.cancel();
                 }
             }
         }

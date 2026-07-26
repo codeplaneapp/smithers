@@ -9,6 +9,7 @@ import {
   extractNodeSnapshots,
   nodeStatusGlyph,
   nodeStatusColor,
+  resolveFrameIdx,
   snapshotKey,
 } from "./timelineUtils.ts";
 import { unwrapEvent } from "./eventFrame.ts";
@@ -154,18 +155,23 @@ export function TimelineView({
   const compact = width < COMPACT_WIDTH;
   const overlayOpen = useOverlayOpen();
 
-  // selectedIdx = -1 means "live" (show latest frame)
-  const [selectedIdx, setSelectedIdx] = useState(-1);
+  // The scrub position is anchored on the pinned frame's `seq`, NOT a raw array
+  // index: `events` is a bounded ring that evicts oldest-first while the run
+  // streams, so an index silently slides onto a later frame (see
+  // resolveFrameIdx). `null` means "live" (follow the latest frame); the index
+  // is DERIVED each render, which also keeps j/k responsive when the list
+  // shrinks under the selection.
+  const [anchorSeq, setAnchorSeq] = useState<number | null>(null);
 
-  const safeIdx =
-    events.length === 0
-      ? 0
-      : selectedIdx < 0
-        ? events.length - 1
-        : Math.min(selectedIdx, events.length - 1);
-
-  const isLive = selectedIdx < 0;
+  const safeIdx = resolveFrameIdx(events, anchorSeq);
+  const isLive = anchorSeq === null;
   const selectedEvent = events[safeIdx];
+
+  /** Pin the scrub to a concrete frame (no-op for out-of-range indices). */
+  const anchorTo = (idx: number) => {
+    const target = events[idx];
+    if (target) setAnchorSeq(target.seq);
+  };
 
   useKeyboard((e) => {
     // Keys must not leak through an open help overlay, and ctrl/meta chords
@@ -173,24 +179,15 @@ export function TimelineView({
     if (overlayOpen || isModifiedKeyEvent(e)) return;
     const key = e.name;
     if (key === "j" || key === "right") {
-      setSelectedIdx((prev) => {
-        if (events.length === 0) return -1;
-        const cur = prev < 0 ? events.length - 1 : prev;
-        const next = cur + 1;
-        return next >= events.length ? events.length - 1 : next;
-      });
+      anchorTo(Math.min(safeIdx + 1, events.length - 1));
     } else if (key === "k" || key === "left") {
-      setSelectedIdx((prev) => {
-        if (events.length === 0) return -1;
-        const cur = prev < 0 ? events.length - 1 : prev;
-        return Math.max(0, cur - 1);
-      });
+      anchorTo(Math.max(safeIdx - 1, 0));
     } else if (key === "l" && e.shift) {
       // Shift+L = back to live. parseKeypress lowercases shifted letters
       // (raw "L" and kitty CSI both arrive as { name: "l", shift: true }), so
       // matching the literal name "L" would be dead code — and App.tsx's bare
       // `l` Logs alias is shift-guarded so this binding can be reached at all.
-      setSelectedIdx(-1);
+      setAnchorSeq(null);
     }
   });
 

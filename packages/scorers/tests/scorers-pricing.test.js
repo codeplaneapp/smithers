@@ -9,6 +9,12 @@ describe("modelTokenPrices", () => {
             cacheWrite: 12.5,
             cacheRead: 1,
         });
+        expect(modelTokenPrices("claude-opus-5")).toEqual({
+            input: 5,
+            output: 25,
+            cacheWrite: 6.25,
+            cacheRead: 0.5,
+        });
         expect(modelTokenPrices("claude-opus-4-8")).toEqual({
             input: 5,
             output: 25,

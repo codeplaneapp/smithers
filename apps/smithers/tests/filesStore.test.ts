@@ -81,8 +81,22 @@ describe("files store", () => {
     const state = useFilesStore.getState();
     expect(state.saveError).toBeNull();
     expect(state.saved).toBe("second\n");
+    expect(state.file?.revision).toMatch(/^sha256-[0-9a-f]{64}$/);
     expect(
       readFileSync(join(tempDir, "workspace", "src", "note.txt"), "utf8"),
     ).toBe("second\n");
+  });
+
+  test("reports a conflict instead of clobbering a file changed since the read", async () => {
+    await useFilesStore.getState().selectFile("src/note.txt");
+    useFilesStore.getState().editDraft("mine\n");
+    writeFileSync(join(tempDir, "workspace", "src", "note.txt"), "theirs\n");
+
+    await useFilesStore.getState().saveSelected();
+    const state = useFilesStore.getState();
+    expect(state.saveError).toContain("changed on disk");
+    expect(
+      readFileSync(join(tempDir, "workspace", "src", "note.txt"), "utf8"),
+    ).toBe("theirs\n");
   });
 });

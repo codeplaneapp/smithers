@@ -5,6 +5,7 @@ import { resolveStableId } from "./utils/tree-ids.js";
 import { coerceFiniteNumber } from "./utils/numeric-props.js";
 import { DEFAULT_MERGE_QUEUE_CONCURRENCY, MERGE_QUEUE_PRIORITY, WORKTREE_EMPTY_PATH_ERROR } from "./constants.js";
 import { normalizeTaskMemoryConfig } from "./normalizeTaskMemoryConfig.js";
+import { normalizeTaskSideEffect } from "./normalizeTaskSideEffect.js";
 /** @typedef {import("./TaskDescriptor.ts").TaskDescriptor} TaskDescriptor */
 /** @typedef {import("./XmlNode.ts").XmlNode} XmlNode */
 /** @typedef {import("./ExtractOptions.ts").ExtractOptions} ExtractOptions */
@@ -803,6 +804,7 @@ export function extractGraph(root, opts) {
                 ...output,
                 ...proofBindingProps(raw),
                 kind: /** @type {TaskDescriptor["kind"]} */ (taskKind),
+                sideEffect: normalizeTaskSideEffect(raw.sideEffect),
                 forkSource: typeof raw.fork === "string" && raw.fork ? raw.fork : undefined,
                 needsApproval: Boolean(raw.needsApproval),
                 waitAsync: Boolean(raw.waitAsync),

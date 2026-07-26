@@ -31,7 +31,7 @@ function defaultToolContext() {
 
 /**
  * @param {unknown} value
- * @returns {{ name: string; sideEffect: boolean; idempotent: boolean; acceptsIdempotencyKey: boolean } | null}
+ * @returns {import("./DefinedToolMetadata.ts").DefinedToolMetadata | null}
  */
 export function getDefinedToolMetadata(value) {
     return value && typeof value === "object"
@@ -51,12 +51,17 @@ export function getDefinedToolMetadata(value) {
  *   sideEffect?: boolean;
  *   idempotent?: boolean;
  *   execute: (args: import("zod").output<Schema>, ctx: Record<string, any>) => Result | Promise<Result>;
+ *   revert?: (args: import("zod").output<Schema>, ctx: import("./ToolRevertContext.ts").ToolRevertContext<Awaited<Result>>) => Promise<void>;
  * }} options
  * @returns {import("./DefinedRuntimeTool.ts").DefinedRuntimeTool}
  */
 export function defineTool(options) {
     const sideEffect = options.sideEffect ?? false;
     const idempotent = options.idempotent ?? !sideEffect;
+    const hasRevert = typeof options.revert === "function";
+    if (options.revert !== undefined && !sideEffect) {
+        throw new TypeError(`defineTool(${options.name}): revert requires sideEffect:true.`);
+    }
     if (sideEffect && !idempotent && options.execute.length < 2) {
         warnMissingContextParam(options.name);
     }
@@ -74,20 +79,42 @@ export function defineTool(options) {
                 idempotent,
             };
             const seq = toolContext ? nextToolSeq(toolContext) : 0;
+            const idempotencyKey = options.execute.length >= 2 ? definedContext.idempotencyKey : null;
+            const journalProvenance = {
+                kind: "tool",
+                toolName: options.name,
+                sideEffect,
+                idempotent,
+                acceptsIdempotencyKey: options.execute.length >= 2,
+                hasRevert,
+                idempotencyKey,
+            };
             await toolContext?.recordToolCall?.({
                 phase: "started",
+                effectStatus: "intended",
                 seq,
-                toolName: options.name,
                 input: args,
-                idempotencyKey: options.execute.length >= 2 ? definedContext.idempotencyKey : null,
+                ...journalProvenance,
             });
             let result;
             try {
                 result = await options.execute(args, definedContext);
-                await toolContext?.recordToolCall?.({ phase: "finished", seq, toolName: options.name, output: result });
+                await toolContext?.recordToolCall?.({
+                    phase: "finished",
+                    effectStatus: "succeeded",
+                    seq,
+                    output: result,
+                    ...journalProvenance,
+                });
             }
             catch (error) {
-                await toolContext?.recordToolCall?.({ phase: "failed", seq, toolName: options.name, error });
+                await toolContext?.recordToolCall?.({
+                    phase: "failed",
+                    effectStatus: "unknown",
+                    seq,
+                    error,
+                    ...journalProvenance,
+                });
                 throw error;
             }
             if (sideEffect && typeof definedContext.durabilitySnapshot === "function") {
@@ -106,6 +133,8 @@ export function defineTool(options) {
         sideEffect,
         idempotent,
         acceptsIdempotencyKey: options.execute.length >= 2,
+        hasRevert,
+        ...(hasRevert ? { revert: options.revert } : {}),
     };
     return wrapped;
 }

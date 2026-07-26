@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { ProofBinding } from './ProofBinding.js';
+import { TaskSideEffect } from './TaskSideEffect.js';
+import './TaskRevertContext.js';
 
 type XmlNode = XmlElement | XmlText;
 type XmlElement = {
@@ -143,6 +145,8 @@ type TaskDescriptor = {
     ordinal: number;
     iteration: number;
     kind?: "agent" | "compute" | "static" | "human";
+    /** Coarse external-side-effect marking for this task attempt. */
+    sideEffect?: TaskSideEffect;
     ralphId?: string;
     dependsOn?: string[];
     needs?: Record<string, string>;

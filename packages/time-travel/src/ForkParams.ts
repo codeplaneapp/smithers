@@ -11,4 +11,9 @@ export type ForkParams = {
   workflowPath?: string | null;
   workflowHash?: string | null;
   entryWorkflowHash?: string | null;
+  force?: boolean;
+  /** True when the caller will immediately resume the child. */
+  autoRun?: boolean;
+  /** Internal operation label used by replay. */
+  operation?: "fork" | "replay";
 };

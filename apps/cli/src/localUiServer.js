@@ -2,7 +2,9 @@ import { createServer } from "node:http";
 import { connect as netConnect, isIP } from "node:net";
 import { request as httpRequest } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import {
+  chmodSync,
   closeSync,
   existsSync,
   lstatSync,
@@ -11,6 +13,8 @@ import {
   readdirSync,
   realpathSync,
   readSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -828,6 +832,18 @@ function listWorkspaceTree(workspaceRoot, inputPath) {
   };
 }
 
+/**
+ * A file's revision: the content hash `read` hands out and `write` requires
+ * back. It is the optimistic-concurrency token — a save carrying a revision
+ * that no longer matches the bytes on disk (an agent or another editor wrote
+ * the file since the read) is rejected instead of clobbering the newer file.
+ * Only fully-read editable files get one; binary and truncated previews are
+ * not writable anyway.
+ */
+function fileRevision(bytes) {
+  return `sha256-${createHash("sha256").update(bytes).digest("hex")}`;
+}
+
 function readWorkspaceFile(workspaceRoot, inputPath) {
   const resolved = resolveWorkspaceFilePath(workspaceRoot, inputPath);
   if (!resolved.ok) return resolved;
@@ -849,6 +865,7 @@ function readWorkspaceFile(workspaceRoot, inputPath) {
         name: basename(resolved.realPath),
         size: st.size,
         mtimeMs: st.mtimeMs,
+        revision: null,
         kind: "binary",
         editable: false,
         previewText: null,
@@ -871,6 +888,7 @@ function readWorkspaceFile(workspaceRoot, inputPath) {
       name: basename(resolved.realPath),
       size: st.size,
       mtimeMs: st.mtimeMs,
+      revision: fullRead ? fileRevision(bytes) : null,
       kind: "text",
       editable: fullRead,
       previewText: text,
@@ -897,13 +915,48 @@ async function readJsonBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-function writeWorkspaceFile(workspaceRoot, inputPath, content) {
+/**
+ * Saves land in a sibling temp file that inherits the target's permission bits
+ * and is then renamed over the target, so a reader (an agent, a watcher, the
+ * editor itself) never observes a half-written file and a failed save leaves
+ * the original bytes and mode untouched. The temp file is a sibling so the
+ * rename stays within one filesystem — the only way it is atomic.
+ */
+function writeFileAtomicSync(targetPath, content, mode) {
+  const tempPath = join(
+    dirname(targetPath),
+    `.${basename(targetPath)}.smithers-${randomUUID()}.tmp`,
+  );
+  try {
+    writeFileSync(tempPath, content, { encoding: "utf8", mode });
+    // writeFileSync's mode is masked by the process umask; set it outright.
+    chmodSync(tempPath, mode);
+    renameSync(tempPath, targetPath);
+  } catch (err) {
+    try {
+      rmSync(tempPath, { force: true });
+    } catch {
+      // Best effort: the target is already intact either way.
+    }
+    throw err;
+  }
+}
+
+function writeWorkspaceFile(workspaceRoot, inputPath, content, revision) {
   if (typeof content !== "string") {
     return {
       ok: false,
       status: 400,
       code: "INVALID_CONTENT",
       message: "Content must be a string.",
+    };
+  }
+  if (typeof revision !== "string" || revision === "") {
+    return {
+      ok: false,
+      status: 400,
+      code: "MISSING_REVISION",
+      message: "Include the revision returned by the last read of this file.",
     };
   }
   if (Buffer.byteLength(content, "utf8") > FILE_EDIT_BYTES) {
@@ -934,7 +987,25 @@ function writeWorkspaceFile(workspaceRoot, inputPath, content) {
       message: "This file is not editable through the local UI.",
     };
   }
-  writeFileSync(resolved.realPath, content, "utf8");
+  if (fileRevision(readFileSync(resolved.realPath)) !== revision) {
+    return {
+      ok: false,
+      status: 409,
+      code: "STALE_REVISION",
+      message:
+        "This file changed on disk after you opened it. Reload it before saving.",
+    };
+  }
+  try {
+    writeFileAtomicSync(resolved.realPath, content, st.mode & 0o777);
+  } catch (err) {
+    return {
+      ok: false,
+      status: 500,
+      code: "WRITE_FAILED",
+      message: `Could not save this file: ${err?.message ?? String(err)}`,
+    };
+  }
   return readWorkspaceFile(workspaceRoot, resolved.relativePath);
 }
 
@@ -982,6 +1053,7 @@ async function handleFilesApi(req, res, url, workspaceRoot) {
           workspaceRoot,
           body.path,
           body.content,
+          body.revision,
         );
         if (!result.ok)
           fileApiError(res, result.status, result.code, result.message);

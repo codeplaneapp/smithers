@@ -47,18 +47,53 @@ async function jj(args, cwd) {
 }
 
 /**
+ * Are these commits already on the base branch in everything but identity? A
+ * lane lands by squash or cherry-pick, which rewrites the commit, so ancestry
+ * keeps answering "exists nowhere else" for work that is wholly upstream. Patch
+ * ids see through the rewrite: `git cherry` prefixes a commit with `-` when the
+ * upstream ref already carries an equivalent patch and `+` when it does not. A
+ * commit git will not rule on (a merge, an unreadable ref) counts as unsaved.
+ *
+ * @param {string} gitDir
+ * @param {readonly string[]} upstreamRefs
+ * @param {readonly string[]} commits
+ * @returns {Promise<boolean>}
+ */
+async function patchesAreUpstream(gitDir, upstreamRefs, commits) {
+    for (const commit of commits) {
+        let landed = false;
+        for (const ref of upstreamRefs) {
+            const res = await runGit(gitDir, ["cherry", ref, commit]);
+            if (res.code !== 0)
+                continue;
+            const line = res.stdout.split("\n").find((entry) => entry.trim().endsWith(commit));
+            if (line?.trimStart().startsWith("-")) {
+                landed = true;
+                break;
+            }
+        }
+        if (!landed)
+            return false;
+    }
+    return true;
+}
+
+/**
  * Does this jj workspace hold work that exists nowhere else? One revset answers
  * both halves of the question: `::@` includes the auto-snapshotted working copy,
  * so uncommitted edits make `@` non-empty, and anything already merged into the
  * base branch drops out of `~::base`. Empty commits carry no work and are
- * ignored. A revset that will not evaluate (no such base) reports "unsaved" —
- * the reaper must never guess in the direction of deletion.
+ * ignored. Whatever survives is only a *candidate*: a squash-landed lane keeps
+ * its own commit ids, so the candidates are re-checked by patch id before the
+ * workspace is called unsaved. A revset that will not evaluate (no such base)
+ * reports "unsaved" — the reaper must never guess in the direction of deletion.
  *
  * @param {string} worktreePath
  * @param {string | undefined} baseBranch
+ * @param {string} rootDir
  * @returns {Promise<boolean>}
  */
-async function jjWorkspaceHasUnsavedWork(worktreePath, baseBranch) {
+async function jjWorkspaceHasUnsavedWork(worktreePath, baseBranch, rootDir) {
     const base = baseBranch ?? "main";
     const revsets = [
         `::@ & ~::(${base} | ${base}@origin) & ~empty()`,
@@ -66,9 +101,13 @@ async function jjWorkspaceHasUnsavedWork(worktreePath, baseBranch) {
         "::@ & ~::trunk() & ~empty()",
     ];
     for (const revset of revsets) {
-        const res = await jj(["log", "--no-graph", "-r", revset, "-T", '"x\\n"'], worktreePath);
-        if (res.code === 0)
-            return res.stdout.trim() !== "";
+        const res = await jj(["log", "--no-graph", "-r", revset, "-T", 'commit_id ++ "\\n"'], worktreePath);
+        if (res.code !== 0)
+            continue;
+        const commits = res.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+        if (commits.length === 0)
+            return false;
+        return !(await patchesAreUpstream(rootDir, [`origin/${base}`, base], commits));
     }
     return true;
 }
@@ -109,7 +148,7 @@ async function gitWorktreeHasUnsavedWork(worktreePath, rootDir) {
  */
 function hasUnsavedWork(worktree, rootDir) {
     return worktree.owner.vcsType === "jj"
-        ? jjWorkspaceHasUnsavedWork(worktree.path, worktree.owner.baseBranch)
+        ? jjWorkspaceHasUnsavedWork(worktree.path, worktree.owner.baseBranch, rootDir)
         : gitWorktreeHasUnsavedWork(worktree.path, rootDir);
 }
 

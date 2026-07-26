@@ -7,5 +7,11 @@ export type TimeTravelOptions = {
   attempt?: number;
   resetDependents?: boolean;
   restoreVcs?: boolean;
+  force?: boolean;
+  noRevert?: boolean;
+  caller?: string;
   onProgress?: (event: SmithersEvent) => void;
+  hooks?: {
+    afterEffectReverts?: () => Promise<void> | void;
+  };
 };

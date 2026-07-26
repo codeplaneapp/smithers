@@ -59,8 +59,10 @@ function shellQuote(value) {
 const CLI = workflowArgs.cwd
   ? `cd ${shellQuote(workflowArgs.cwd)} && bunx smithers-orchestrator`
   : 'bunx smithers-orchestrator'
-const startedBySession = typeof process.env.CLAUDE_CODE_SESSION_ID === 'string' && process.env.CLAUDE_CODE_SESSION_ID.trim()
-  ? ` --started-by-session ${shellQuote(process.env.CLAUDE_CODE_SESSION_ID)}`
+// The Workflow script sandbox has no Node globals — `process` may not exist.
+const sessionId = globalThis.process?.env?.CLAUDE_CODE_SESSION_ID
+const startedBySession = typeof sessionId === 'string' && sessionId.trim()
+  ? ` --started-by-session ${shellQuote(sessionId)}`
   : ''
 const startedByPrompt = workflowArgs.startedByPrompt === undefined
   ? ''

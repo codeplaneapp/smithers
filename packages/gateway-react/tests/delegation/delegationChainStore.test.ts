@@ -8,6 +8,7 @@ import { GatewayRpcError } from "@smithers-orchestrator/gateway-client";
 import {
   createDelegationChainStore,
   EVENT_HISTORY_PAGE_SIZE,
+  MAX_OUTPUT_FETCH_ATTEMPTS,
   type DelegationChainApi,
   type DelegationChainInputs,
   type DelegationChainStore,
@@ -240,6 +241,114 @@ describe("createDelegationChainStore — record assembly", () => {
       );
       await waitFor(() => store.getSnapshot().graph.nodes["root/c1"]?.status === "done");
       expect(fixture.calls.getNodeOutput.get(key)).toBe(callsAfterFirst + 1);
+    } finally {
+      unsubscribe();
+      store.dispose();
+    }
+  });
+
+  test("a finish that arrives after the event ring evicted the previous one still refetches", async () => {
+    // The live buffer is a bounded ring (`useGatewayRunEvents` caps it at
+    // RING_SIZE frames). Counting finish ticks off that window alone makes the
+    // marker DROP BACK when the first finish is evicted, so the next finish
+    // recomputes to the count the cache entry already recorded and the newly
+    // produced row is never fetched. Ticks must accumulate instead.
+    const RING_SIZE = 1000;
+    const key = "dc:root:c1:exec\x000";
+    const fixture = makeApiFixture({ history: [], outputs: new Map() });
+    const frames: Array<{ seq: number; event: string; payload?: unknown }> = [
+      { seq: 1, event: "node.finished", payload: { runId: RUN_ID, nodeId: "dc:root:c1:exec", iteration: 0 } },
+    ];
+    const ring = () => frames.slice(Math.max(0, frames.length - RING_SIZE));
+    const { store, updates, unsubscribe } = trackedStore(fixture.api);
+    try {
+      store.push(inputs({ events: ring() }));
+      await waitFor(() => store.getSnapshot().hydrated);
+      await settle(updates);
+      const callsAfterFirst = fixture.calls.getNodeOutput.get(key) ?? 0;
+      expect(callsAfterFirst).toBeGreaterThanOrEqual(1);
+
+      // Enough unrelated frames to push the first finish out of the ring.
+      for (let seq = 2; seq <= RING_SIZE + 200; seq += 1) {
+        frames.push({ seq, event: "node.started", payload: { runId: RUN_ID, nodeId: "not-a-delegation-node" } });
+      }
+      const evicted = ring();
+      expect(evicted).toHaveLength(RING_SIZE);
+      expect(evicted.some((frame) => frame.event === "node.finished")).toBe(false);
+      store.push(inputs({ events: evicted }));
+      await settle(updates);
+      expect(fixture.calls.getNodeOutput.get(key)).toBe(callsAfterFirst);
+
+      // The row lands durably and the node finishes again. Only ONE finish for
+      // it is in the window now — the same windowed count as the first batch.
+      fixture.outputs.set(key, execC1);
+      frames.push({
+        seq: frames.length + 1,
+        event: "node.finished",
+        payload: { runId: RUN_ID, nodeId: "dc:root:c1:exec", iteration: 0 },
+      });
+      store.push(inputs({ events: ring() }));
+      await waitFor(() => store.getSnapshot().graph.nodes["root/c1"]?.status === "done", 2000);
+      expect((store.getSnapshot().graph.nodes["root/c1"]!.output as DcExecRow).summary).toBe("built c1");
+      expect(fixture.calls.getNodeOutput.get(key)).toBe(callsAfterFirst + 1);
+    } finally {
+      unsubscribe();
+      store.dispose();
+    }
+  });
+
+  test("a transient getNodeOutput failure is retried until it succeeds, without another finish event", async () => {
+    // The node finished exactly once and the first fetch died on the wire.
+    // Before the fix the error entry captured that finish count and was only
+    // ever re-fetched on a NEW finish event — which never comes for a node
+    // that is already done, stranding the row forever.
+    let fetches = 0;
+    const flakyApi: DelegationChainApi = {
+      listRunEvents: async () => [],
+      getNodeOutput: async () => {
+        fetches += 1;
+        if (fetches === 1) throw new Error("socket hang up");
+        return { status: "produced", row: planRow };
+      },
+    };
+    const { store, updates, unsubscribe } = trackedStore(flakyApi);
+    try {
+      // A single batch, pushed once: no further input and no second finish.
+      store.push(
+        inputs({ events: [{ event: "node.finished", payload: { runId: RUN_ID, nodeId: "dc:root:plan", iteration: 0 } }] }),
+      );
+      await waitFor(() => store.getSnapshot().hydrated);
+      await settle(updates);
+      const snapshot = store.getSnapshot();
+      expect(fetches).toBe(2);
+      expect((snapshot.graph.nodes.root!.output as DcPlanRow).brief).toBe("Plan for root");
+      expect(snapshot.recordErrors).toHaveLength(0);
+    } finally {
+      unsubscribe();
+      store.dispose();
+    }
+  });
+
+  test("a permanently failing getNodeOutput stops after the bounded retries and still hydrates", async () => {
+    let fetches = 0;
+    const brokenApi: DelegationChainApi = {
+      listRunEvents: async () => [],
+      getNodeOutput: async () => {
+        fetches += 1;
+        throw new GatewayRpcError({ method: "getNodeOutput", code: "InternalError", message: "kaboom" });
+      },
+    };
+    const { store, updates, unsubscribe } = trackedStore(brokenApi);
+    try {
+      store.push(
+        inputs({ events: [{ event: "node.finished", payload: { runId: RUN_ID, nodeId: "dc:root:plan", iteration: 0 } }] }),
+      );
+      await waitFor(() => store.getSnapshot().hydrated);
+      await settle(updates);
+      // The retry budget is spent, then the entry goes quiet (no hot reconcile
+      // loop) and the failure surfaces as a record error.
+      expect(fetches).toBe(MAX_OUTPUT_FETCH_ATTEMPTS);
+      expect(store.getSnapshot().recordErrors).toHaveLength(1);
     } finally {
       unsubscribe();
       store.dispose();

@@ -47,7 +47,7 @@ const ns = { kind: "workflow" as const, id: "code-review" };
 
 ## Local SQLite or Hindsight
 
-The `<Memory>` component has two modes: without `HINDSIGHT_URL` it uses local SQLite facts and keyword recall; with it, Hindsight adds semantic recall, mental-model primers, and retention. Hindsight itself runs on Postgres 15+ with pgvector, so it's documented and deployed as a Postgres-family feature.
+The `<Memory>` component has two modes: without `HINDSIGHT_URL` it uses local SQLite facts and keyword recall; with it, Hindsight adds semantic recall, mental-model primers, and retention. Hindsight itself runs on Postgres 15+ with pgvector, so it's documented and deployed as a Postgres-family feature. `HINDSIGHT_URL` points at a Hindsight deployment the human has set up (Hindsight Cloud signup or a self-hosted Docker/Helm install); that human step is covered in [Set Up Semantic Memory](/guide/setup/semantic-memory).
 
 | Capability | SQLite local (`HINDSIGHT_URL` unset) | Hindsight on Postgres (`HINDSIGHT_URL` set) |
 |---|---|---|

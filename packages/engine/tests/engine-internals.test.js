@@ -254,11 +254,84 @@ describe("engine internals: errors, heartbeat and continuation helpers", () => {
             { toolName: "charge", attempt: 1, seq: 4, status: "completed" },
             { toolName: "read-card", attempt: 1, seq: 5, status: "completed" },
         ], [{ tools: { charge, safe } }], 2);
-        expect(warnings).toEqual([{ toolName: "charge", attempt: 1, seq: 4, status: "completed" }]);
+        expect(warnings).toEqual([{
+            kind: "tool",
+            toolName: "charge",
+            attempt: 1,
+            seq: 4,
+            status: "completed",
+            hasRevert: false,
+        }]);
         expect(I.collectToolResumeWarnings(warnings, [], 1)).toEqual([]);
+
+        expect(I.collectReplayUnsafeToolCalls([
+            {
+                kind: "tool",
+                toolName: "persisted-tool",
+                attempt: 1,
+                seq: 1,
+                status: "unknown",
+                sideEffect: true,
+                idempotent: false,
+                acceptsIdempotencyKey: false,
+                hasRevert: true,
+            },
+            {
+                kind: "task",
+                toolName: "coarse-task",
+                attempt: 1,
+                seq: 0,
+                status: "intended",
+                sideEffect: true,
+                idempotent: false,
+                acceptsIdempotencyKey: false,
+                hasRevert: false,
+            },
+            {
+                kind: "tool",
+                toolName: "persisted-safe",
+                attempt: 1,
+                seq: 2,
+                status: "succeeded",
+                sideEffect: false,
+                idempotent: false,
+                acceptsIdempotencyKey: false,
+                hasRevert: false,
+            },
+        ], [], 2)).toEqual([
+            { kind: "task", toolName: "coarse-task", attempt: 1, seq: 0, hasRevert: false },
+            { kind: "tool", toolName: "persisted-tool", attempt: 1, seq: 1, hasRevert: true },
+        ]);
+
+        expect(I.collectReplayUnsafeToolCalls([
+            {
+                toolName: "charge",
+                attempt: 1,
+                seq: 4,
+                status: "started",
+                kind: null,
+                sideEffect: null,
+                idempotent: null,
+                acceptsIdempotencyKey: null,
+                hasRevert: null,
+            },
+        ], [{ tools: { charge } }], 2)).toEqual([
+            { kind: "tool", toolName: "charge", attempt: 1, seq: 4, hasRevert: false },
+        ]);
+        expect(I.collectReplayUnsafeToolCalls([
+            {
+                toolName: "unclassified-legacy",
+                attempt: 1,
+                seq: 1,
+                status: "started",
+                sideEffect: null,
+                idempotent: null,
+            },
+        ], [], 2)).toEqual([]);
 
         const message = I.buildToolResumeWarningMessage([
             ...warnings,
+            { kind: "tool", toolName: "revertible", attempt: 1, seq: 9, status: "unknown", hasRevert: true },
             { toolName: "a", attempt: 1, seq: 1, status: "done" },
             { toolName: "b", attempt: 1, seq: 2, status: "done" },
             { toolName: "c", attempt: 1, seq: 3, status: "done" },
@@ -266,7 +339,8 @@ describe("engine internals: errors, heartbeat and continuation helpers", () => {
             { toolName: "e", attempt: 1, seq: 5, status: "done" },
         ]);
         expect(message).toContain("Previous attempts");
-        expect(message).toContain("and 1 more");
+        expect(message).toContain("registered revert handler");
+        expect(message).toContain("and 2 more");
         expect(I.buildToolResumeWarningMessage([])).toBeNull();
         expect(I.hasToolResumeWarningMessage([{ role: "user", content: message }])).toBe(true);
         expect(I.hasToolResumeWarningMessage([{ toJSON() { throw new Error("no"); } }])).toBe(false);
@@ -860,6 +934,7 @@ describe("engine internals: cancellation maintenance", () => {
             ]),
             getNode: () => Effect.succeed({ outputTable: "out", label: "Active" }),
             updateAttempt: (...args) => Effect.sync(() => calls.push(["updateAttempt", args])),
+            markToolCallsUnknownForAttempt: (...args) => Effect.sync(() => calls.push(["markToolCallsUnknownForAttempt", args])),
             insertNode: (row) => Effect.sync(() => calls.push(["insertNode", row])),
             withTransaction: (_label, effect) => Effect.runPromise(effect),
         };

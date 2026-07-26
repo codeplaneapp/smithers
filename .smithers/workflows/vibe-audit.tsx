@@ -36,18 +36,16 @@ const inputSchema = z.object({
   repo: z.string().default("acme/payments-api"),
 });
 
-const { Workflow, Task, smithers, outputs } = createSmithers(
-  {
-    vaInjection: strategySchema,
-    vaAuth: strategySchema,
-    vaSecrets: strategySchema,
-    vaDeps: strategySchema,
-    vaDedupe: dedupeSchema,
-    vaTriage: triageSchema,
-    vaReport: reportSchema,
-  },
-  { input: inputSchema },
-);
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  input: inputSchema,
+  vaInjection: strategySchema,
+  vaAuth: strategySchema,
+  vaSecrets: strategySchema,
+  vaDeps: strategySchema,
+  vaDedupe: dedupeSchema,
+  vaTriage: triageSchema,
+  vaReport: reportSchema,
+});
 
 type Finding = z.infer<typeof findingSchema>;
 

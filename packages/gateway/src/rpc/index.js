@@ -2,9 +2,11 @@
 /** @typedef {import("./gatewayRpcTypes.ts").SmithersApiVersion} SmithersApiVersion */
 /** @typedef {import("./gatewayRpcTypes.ts").JsonSchema} JsonSchema */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayRpcErrorCode} GatewayRpcErrorCode */
+/** @typedef {import("./gatewayRpcTypes.ts").GatewayRpcErrorDetails} GatewayRpcErrorDetails */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayRpcErrorDefinition} GatewayRpcErrorDefinition */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayRpcDefinition} GatewayRpcDefinition */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayRpcMethod} GatewayRpcMethod */
+/** @typedef {import("./gatewayRpcTypes.ts").GatewayResponseFrame} GatewayResponseFrame */
 /** @typedef {import("./gatewayRpcTypes.ts").LaunchRunRequest} LaunchRunRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").LaunchRunResponse} LaunchRunResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").ResumeRunRequest} ResumeRunRequest */
@@ -16,6 +18,13 @@
 /** @typedef {import("./gatewayRpcTypes.ts").HijackRunRequest} HijackRunRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").HijackRunResponse} HijackRunResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").RewindRunRequest} RewindRunRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").RewindRunResponse} RewindRunResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").CrossedEffect} CrossedEffect */
+/** @typedef {import("./gatewayRpcTypes.ts").EffectBoundaryReport} EffectBoundaryReport */
+/** @typedef {import("./gatewayRpcTypes.ts").EffectRevertStarted} EffectRevertStarted */
+/** @typedef {import("./gatewayRpcTypes.ts").EffectRevertFinished} EffectRevertFinished */
+/** @typedef {import("./gatewayRpcTypes.ts").EffectRevertFailed} EffectRevertFailed */
+/** @typedef {import("./gatewayRpcTypes.ts").SideEffectBoundaryCrossed} SideEffectBoundaryCrossed */
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitApprovalRequest} SubmitApprovalRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitApprovalResponse} SubmitApprovalResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").SubmitSignalRequest} SubmitSignalRequest */
@@ -239,6 +248,24 @@ const runRecord = objectSchema(
   "Current run record, including node-state counts and optional derived runState.",
   true,
 );
+const crossedEffectSchema = objectSchema({
+  kind: { type: "string", enum: ["tool", "task"] },
+  toolName: stringSchema("Defined tool name or task node id."),
+  nodeId,
+  iteration,
+  attempt: integerSchema("Attempt number.", 1),
+  seq: integerSchema("Tool-call sequence.", 0),
+  effectStatus: { type: "string", enum: ["succeeded", "unknown"] },
+  idempotent: booleanSchema("Whether the original effect is idempotent."),
+  hasRevert: booleanSchema("Whether a revert handler was registered."),
+  startedAtMs: integerSchema("Effect start time.", 0),
+  reason: stringSchema("Disposition explanation."),
+}, ["kind", "toolName", "nodeId", "iteration", "attempt", "seq", "effectStatus", "idempotent", "hasRevert", "startedAtMs"]);
+const effectBoundaryReportSchema = objectSchema({
+  blocking: arraySchema(crossedEffectSchema, "Uncompensated effects that block the operation."),
+  revertible: arraySchema(crossedEffectSchema, "Effects with registered compensation handlers."),
+  warnings: arraySchema(crossedEffectSchema, "Legacy or previously forced effects that do not block."),
+}, ["blocking", "revertible", "warnings"]);
 const browserErrors = ["InvalidRequest", "Unauthorized", "Forbidden", "REVISION_CONFLICT", "SSRF_BLOCKED", "QUOTA_EXCEEDED", "Internal"];
 const browserSourceSchema = { oneOf: [objectSchema({ kind: { const: "url" }, url: stringSchema("Public http or https URL.", 1) }, ["kind", "url"]), objectSchema({ kind: { const: "dev-server" }, port: integerSchema("Declared loopback port.", 1), path: stringSchema("Absolute path on the dev server.", 1) }, ["kind", "port"])], description: "Browser navigation source." };
 const browserViewportSchema = objectSchema({ width: { ...integerSchema("Viewport width.", 1), maximum: 3840 }, height: { ...integerSchema("Viewport height.", 1), maximum: 2160 } }, ["width", "height"]);
@@ -282,6 +309,7 @@ export const GATEWAY_RPC_ERRORS = {
   UnsupportedSandbox: { version: SMITHERS_API_VERSION, code: "UnsupportedSandbox", httpStatus: 501, description: "A sandbox cannot be rewound safely." },
   VcsError: { version: SMITHERS_API_VERSION, code: "VcsError", httpStatus: 500, description: "A version-control operation failed." },
   RewindFailed: { version: SMITHERS_API_VERSION, code: "RewindFailed", httpStatus: 500, description: "The rewind failed and the run may need attention." },
+  TIME_TRAVEL_SIDE_EFFECT_BLOCKED: { version: SMITHERS_API_VERSION, code: "TIME_TRAVEL_SIDE_EFFECT_BLOCKED", httpStatus: 409, description: "The requested time travel crosses an unresolved external side effect." },
   Internal: { version: SMITHERS_API_VERSION, code: "Internal", httpStatus: 500, description: "The Gateway encountered an internal error." },
   REVISION_CONFLICT: { version: SMITHERS_API_VERSION, code: "REVISION_CONFLICT", httpStatus: 409, description: "The browser session revision is stale." },
   SSRF_BLOCKED: { version: SMITHERS_API_VERSION, code: "SSRF_BLOCKED", httpStatus: 400, description: "The browser destination is not allowed." },
@@ -423,11 +451,26 @@ export const GATEWAY_RPC_DEFINITIONS = [
     maturity: "stable",
     transport: "http+websocket",
     requiredScope: "run:admin",
-    requestSchema: objectSchema({ runId, frameNo: integerSchema("Target frame number.", 0), confirm: { const: true, description: "Must be true." } }, ["runId", "frameNo", "confirm"]),
-    responseSchema: objectSchema({}, [], "JumpResult payload.", true),
-    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "FrameOutOfRange", "Busy", "RateLimited", "UnsupportedSandbox", "VcsError", "RewindFailed"],
-    exampleRequest: { runId: "run_01", frameNo: 4, confirm: true },
-    exampleResponse: { ok: true, newFrameNo: 4, revertedSandboxes: 0, deletedFrames: 2 },
+    requestSchema: objectSchema({
+      runId,
+      frameNo: integerSchema("Target frame number.", 0),
+      confirm: { const: true, description: "Must be true." },
+      force: booleanSchema("Cross unresolved effects and mark the run needs-attention."),
+      noRevert: booleanSchema("Skip registered revert handlers."),
+    }, ["runId", "frameNo", "confirm"]),
+    responseSchema: objectSchema({
+      ok: { const: true },
+      newFrameNo: integerSchema("Committed target frame.", 0),
+      revertedSandboxes: integerSchema("Reverted sandbox count.", 0),
+      deletedFrames: integerSchema("Discarded frame count.", 0),
+      deletedAttempts: integerSchema("Discarded attempt count.", 0),
+      invalidatedDiffs: integerSchema("Invalidated diff count.", 0),
+      durationMs: integerSchema("Operation duration.", 0),
+      effectBoundary: effectBoundaryReportSchema,
+    }, ["ok", "newFrameNo", "revertedSandboxes", "deletedFrames", "deletedAttempts", "invalidatedDiffs", "durationMs", "effectBoundary"]),
+    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "FrameOutOfRange", "Busy", "RateLimited", "UnsupportedSandbox", "VcsError", "RewindFailed", "TIME_TRAVEL_SIDE_EFFECT_BLOCKED"],
+    exampleRequest: { runId: "run_01", frameNo: 4, confirm: true, force: false, noRevert: false },
+    exampleResponse: { ok: true, newFrameNo: 4, revertedSandboxes: 0, deletedFrames: 2, deletedAttempts: 1, invalidatedDiffs: 0, durationMs: 12, effectBoundary: { blocking: [], revertible: [], warnings: [] } },
   },
   {
     version: SMITHERS_API_VERSION,

@@ -102,6 +102,7 @@ function makeCancellationAdapter(attempts, opts = {}) {
         listInProgressAttempts: () => Effect.succeed(attempts),
         getNode: () => Effect.succeed(opts.node === undefined ? { outputTable: "out", label: "L" } : opts.node),
         updateAttempt: (...args) => Effect.sync(() => calls.push(["updateAttempt", args])),
+        markToolCallsUnknownForAttempt: (...args) => Effect.sync(() => calls.push(["markToolCallsUnknownForAttempt", args])),
         insertNode: (row) => Effect.sync(() => calls.push(["insertNode", row])),
         withTransaction: (_label, effect) => Effect.runPromise(effect),
     };
@@ -142,6 +143,9 @@ describe("engine internals: stale attempt cancellation boundaries", () => {
         });
         const update = calls.find(([kind]) => kind === "updateAttempt")?.[1];
         expect(update?.[4]).toMatchObject({ state: "cancelled" });
+        expect(calls.find(([kind]) => kind === "markToolCallsUnknownForAttempt")?.[1].slice(0, 5)).toEqual([
+            "run", "stale", 2, 3, expect.any(Number),
+        ]);
     });
 });
 
@@ -164,6 +168,7 @@ describe("engine internals: cancelInProgress boundaries", () => {
         await I.cancelInProgress(adapter, "run", eventBus);
         const insert = calls.find(([kind]) => kind === "insertNode")?.[1];
         expect(insert).toMatchObject({ state: "cancelled", outputTable: "", label: null });
+        expect(calls.some(([kind]) => kind === "markToolCallsUnknownForAttempt")).toBe(true);
         expect(events).toMatchObject([
             { type: "NodeCancelled", nodeId: "ghost", attempt: 1, reason: "unmounted" },
         ]);

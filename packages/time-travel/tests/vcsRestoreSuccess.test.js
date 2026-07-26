@@ -159,7 +159,11 @@ describe("VCS restore success paths", () => {
                 onProgress: (event) => events.push(event),
             });
 
-            expect(result).toEqual({ success: true, jjPointer: "change-target" });
+            expect(result).toEqual({
+                success: true,
+                jjPointer: "change-target",
+                effectBoundary: { blocking: [], revertible: [], warnings: [] },
+            });
             expect(restoreCalls).toEqual([{ pointer: "change-target", cwd: "/repo" }]);
             expect(events.map((event) => event.type)).toEqual(["RevertStarted", "RevertFinished"]);
             expect(events.at(-1)).toMatchObject({ success: true, error: undefined });
@@ -188,7 +192,11 @@ describe("VCS restore success paths", () => {
                 attempt: 1,
             });
 
-            expect(result).toEqual({ success: true, jjPointer: "change-target" });
+            expect(result).toEqual({
+                success: true,
+                jjPointer: "change-target",
+                effectBoundary: { blocking: [], revertible: [], warnings: [] },
+            });
             expect((await adapter.listFrames(runId, 10))).toEqual([]);
         } finally {
             sqlite.close();
@@ -257,7 +265,12 @@ describe("VCS restore success paths", () => {
                 onProgress: (event) => events.push(event),
             });
 
-            expect(result).toEqual({ success: false, error: "restore failed", jjPointer: "change-fail" });
+            expect(result).toEqual({
+                success: false,
+                error: "restore failed",
+                jjPointer: "change-fail",
+                effectBoundary: { blocking: [], revertible: [], warnings: [] },
+            });
             expect(restoreCalls).toEqual([{ pointer: "change-fail", cwd: "/repo" }]);
             expect(events.map((event) => event.type)).toEqual(["RevertStarted", "RevertFinished"]);
             expect(events.at(-1)).toMatchObject({ success: false, error: "restore failed", jjPointer: "change-fail" });
@@ -386,6 +399,72 @@ describe("VCS restore success paths", () => {
         }
     });
 
+    test("timeTravel flags the run when the DB reset fails after VCS restore", async () => {
+        restoreCalls.length = 0;
+        const { adapter, sqlite } = buildDb();
+        try {
+            const runId = "run-time-travel-cleanup-fails";
+            await seedRun(adapter, runId);
+            const beforeFrames = await adapter.listFrames(runId, 10);
+            const failingAdapter = Object.create(adapter);
+            failingAdapter.deleteFramesAfter = () => Effect.fail(new Error("delete frames failed"));
+            const { timeTravel } = await import("../src/timetravel.js");
+            const events = [];
+
+            // The working copy is already rewound, so a rolled-back transaction
+            // leaves the DB ahead of the filesystem: that must be flagged.
+            await expect(timeTravel(failingAdapter, {
+                runId,
+                nodeId: "target",
+                restoreVcs: true,
+                onProgress: (event) => events.push(event),
+            })).rejects.toThrow("delete frames failed");
+
+            expect(restoreCalls).toEqual([{ pointer: "change-target", cwd: "/repo" }]);
+            expect(await adapter.listFrames(runId, 10)).toEqual(beforeFrames);
+            expect(events.map((event) => event.type)).toEqual([
+                "TimeTravelStarted",
+                "TimeTravelFinished",
+            ]);
+            expect(events.at(-1)).toMatchObject({ success: false, vcsRestored: true });
+            expect(events.at(-1)?.error).toContain("delete frames failed");
+            const run = await Effect.runPromise(adapter.getRun(runId));
+            expect(["needs_attention", "failed"]).toContain(run?.status);
+            expect(JSON.parse(run?.errorJson ?? "{}")).toMatchObject({
+                code: "TimeTravelFailed",
+                needsAttention: true,
+            });
+        } finally {
+            sqlite.close();
+        }
+    });
+
+    test("timeTravel does not flag the run when the DB reset fails with no VCS restore", async () => {
+        restoreCalls.length = 0;
+        const { adapter, sqlite } = buildDb();
+        try {
+            const runId = "run-time-travel-cleanup-fails-no-vcs";
+            await seedRun(adapter, runId);
+            const before = await Effect.runPromise(adapter.getRun(runId));
+            const failingAdapter = Object.create(adapter);
+            failingAdapter.deleteFramesAfter = () => Effect.fail(new Error("delete frames failed"));
+            const { timeTravel } = await import("../src/timetravel.js");
+
+            // Nothing touched the working copy, so the rollback already left
+            // DB and filesystem consistent: no attention marker is warranted.
+            await expect(timeTravel(failingAdapter, {
+                runId,
+                nodeId: "target",
+                restoreVcs: false,
+            })).rejects.toThrow("delete frames failed");
+
+            expect(restoreCalls).toEqual([]);
+            expect(await Effect.runPromise(adapter.getRun(runId))).toEqual(before);
+        } finally {
+            sqlite.close();
+        }
+    });
+
     test("timeTravel leaves durable state untouched when VCS restore fails", async () => {
         restoreCalls.length = 0;
         const { adapter, sqlite } = buildDb();
@@ -415,6 +494,7 @@ describe("VCS restore success paths", () => {
                 vcsRestored: false,
                 resetNodes: [],
                 error: "restore failed",
+                effectBoundary: { blocking: [], revertible: [], warnings: [] },
             });
             expect(restoreCalls).toEqual([{ pointer: "change-fail", cwd: "/repo" }]);
             expect(events.map((event) => event.type)).toEqual([

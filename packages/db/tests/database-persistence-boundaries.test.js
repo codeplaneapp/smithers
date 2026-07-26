@@ -97,6 +97,7 @@ describe("database persistence boundary coverage", () => {
                 "_smithers_schema_migrations",
                 "_smithers_sandboxes",
                 "_smithers_tool_calls",
+                "_smithers_tool_call_archive",
                 "_smithers_events",
                 "_smithers_ralph",
                 "_smithers_cron",

@@ -247,6 +247,79 @@ function parseEventPayload(row) {
         return null;
     }
 }
+
+/**
+ * @param {DbEventRow[]} events
+ * @returns {{ blocker: WhyBlocker; operation: string; lateCompletion: boolean } | null}
+ */
+function latestForcedEffectBoundary(events) {
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+        const row = events[index];
+        if (row.type !== "SideEffectBoundaryCrossed")
+            continue;
+        const payload = parseEventPayload(row);
+        if (!payload)
+            continue;
+        if (parseBoolean(payload.warningOnly))
+            continue;
+        const report = isRecord(payload.report) ? payload.report : {};
+        const blockingCount = Array.isArray(report.blocking) ? report.blocking.length : 0;
+        const revertibleCount = Array.isArray(report.revertible) ? report.revertible.length : 0;
+        const warningCount = Array.isArray(report.warnings) ? report.warnings.length : 0;
+        const crossedCount = blockingCount + revertibleCount;
+        const operation = parseString(payload.operation) ?? "time travel";
+        const opId = parseString(payload.opId);
+        const lateCompletion = parseBoolean(payload.lateCompletion);
+        const archivedByOp = parseString(payload.archivedByOp);
+        const timestampMs = parseNumber(payload.timestampMs) ?? row.timestampMs;
+        const countLabel = `${crossedCount} external effect${crossedCount === 1 ? "" : "s"}`;
+        const context = [
+            `Operation: ${operation}`,
+            ...(opId ? [`Operation id: ${opId}`] : []),
+            ...(archivedByOp ? [`Archived by operation: ${archivedByOp}`] : []),
+            `Report: ${blockingCount} blocking, ${revertibleCount} revertible, ${warningCount} warnings`,
+            lateCompletion
+                ? "The external effect completed after its live journal row was reverted or archived."
+                : "The run row was not changed by this audit record.",
+        ];
+        return {
+            operation,
+            lateCompletion,
+            blocker: {
+                kind: "side-effect-boundary-crossed",
+                nodeId: "(run-level)",
+                iteration: null,
+                reason: lateCompletion
+                    ? "External effect completed after its journal row was reverted or archived"
+                    : `Forced ${operation} crossed ${countLabel} without safely reverting ${crossedCount === 1 ? "it" : "them"}`,
+                waitingSince: timestampMs,
+                unblocker: `smithers inspect ${row.runId}`,
+                context: context.join("\n"),
+            },
+        };
+    }
+    return null;
+}
+
+/**
+ * @param {DbEventRow[]} events
+ * @returns {string | null}
+ */
+function latestWarningEffectBoundaryInformation(events) {
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+        const row = events[index];
+        if (row.type !== "SideEffectBoundaryCrossed")
+            continue;
+        const payload = parseEventPayload(row);
+        if (!payload || !parseBoolean(payload.warningOnly))
+            continue;
+        const report = isRecord(payload.report) ? payload.report : {};
+        const warningCount = Array.isArray(report.warnings) ? report.warnings.length : 0;
+        const operation = parseString(payload.operation) ?? "time travel";
+        return `Informational ${operation} warning recorded for ${warningCount} external effect${warningCount === 1 ? "" : "s"}; no side-effect crossing was forced.`;
+    }
+    return null;
+}
 /**
  * @param {string | null | undefined} xmlJson
  * @returns {Map<string, DescriptorMetadata>}
@@ -580,18 +653,26 @@ function buildDiagnosis(params) {
     const status = run.status === "continued" && run.finishedAtMs == null
         ? "running"
         : String(run.status ?? "unknown");
+    const forcedBoundary = latestForcedEffectBoundary(events);
+    const boundaryInformation = latestWarningEffectBoundaryInformation(events);
+    const information = boundaryInformation ? [boundaryInformation] : [];
     if (status === "finished" || status === "cancelled") {
-        const summary = status === "finished"
-            ? "Run is finished, nothing is blocked."
-            : typeof run.finishedAtMs === "number"
-                ? `Run was cancelled at ${new Date(run.finishedAtMs).toISOString()}.`
-                : "Run was cancelled.";
+        const summary = forcedBoundary
+            ? forcedBoundary.lateCompletion
+                ? `Run is ${status}; an external effect completed after its journal row was archived and needs attention.`
+                : `Run is ${status}; a forced ${forcedBoundary.operation} side-effect crossing needs attention.`
+            : status === "finished"
+                ? "Run is finished, nothing is blocked."
+                : typeof run.finishedAtMs === "number"
+                    ? `Run was cancelled at ${new Date(run.finishedAtMs).toISOString()}.`
+                    : "Run was cancelled.";
         return {
             runId,
             status,
             summary,
             generatedAtMs: nowMs,
-            blockers: [],
+            blockers: forcedBoundary ? [forcedBoundary.blocker] : [],
+            information,
             currentNodeId: firstCurrentNode(nodes),
         };
     }
@@ -602,6 +683,7 @@ function buildDiagnosis(params) {
             summary: "Run was gracefully paused; resume with `smithers up --resume <runId>`.",
             generatedAtMs: nowMs,
             blockers: [],
+            information,
             currentNodeId: firstCurrentNode(nodes),
         };
     }
@@ -648,7 +730,7 @@ function buildDiagnosis(params) {
         if (insight)
             retryInsightsByNode.set(key, insight);
     }
-    const blockers = [];
+    const blockers = forcedBoundary ? [forcedBoundary.blocker] : [];
     const runError = parseObjectJson(run.errorJson);
     const runErrorDetails = isRecord(runError.details) ? runError.details : {};
     for (const node of nodes.filter((entry) => entry.state === "bound-stale")) {
@@ -1038,6 +1120,7 @@ function buildDiagnosis(params) {
         summary,
         generatedAtMs: nowMs,
         blockers: dedupedBlockers.sort((left, right) => left.waitingSince - right.waitingSince),
+        information,
         currentNodeId: firstCurrentNode(nodes),
     };
 }
@@ -1062,16 +1145,28 @@ export function diagnoseRunEffect(adapter, runId, nowMs = Date.now()) {
             return yield* Effect.fail(new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`));
         }
         const afterSeq = Math.max(-1, (lastSeq ?? -1) - RECENT_EVENTS_LIMIT);
-        const events = yield* adapter.listEventHistoryEffect(runId, {
-            afterSeq,
-            limit: RECENT_EVENTS_LIMIT,
-        });
+        const [events, forcedBoundaryEvents] = yield* Effect.all([
+            adapter.listEventHistoryEffect(runId, {
+                afterSeq,
+                limit: RECENT_EVENTS_LIMIT,
+            }),
+            typeof adapter.listEventsByTypeEffect === "function"
+                ? adapter.listEventsByTypeEffect(runId, "SideEffectBoundaryCrossed")
+                : Effect.succeed([]),
+        ]);
+        const eventRows = [...(events ?? [])];
+        const seenEventSeqs = new Set(eventRows.map((row) => row.seq));
+        for (const row of forcedBoundaryEvents ?? []) {
+            if (!seenEventSeqs.has(row.seq))
+                eventRows.push(row);
+        }
+        eventRows.sort((left, right) => left.seq - right.seq);
         const diagnosis = buildDiagnosis({
             run: run,
             nodes: nodes ?? [],
             approvals: approvals,
             attempts: attempts ?? [],
-            events: events ?? [],
+            events: eventRows,
             lastFrame: lastFrame,
             nowMs,
         });
@@ -1086,14 +1181,16 @@ export function diagnoseRunEffect(adapter, runId, nowMs = Date.now()) {
  * @returns {string}
  */
 export function renderWhyDiagnosisHuman(diagnosis) {
-    if (diagnosis.status === "finished") {
+    const information = diagnosis.information ?? [];
+    if (diagnosis.status === "finished" && diagnosis.blockers.length === 0 && information.length === 0) {
         return "Run is finished, nothing is blocked.";
     }
-    if (diagnosis.status === "cancelled") {
+    if (diagnosis.status === "cancelled" && diagnosis.blockers.length === 0 && information.length === 0) {
         return diagnosis.summary;
     }
     if (diagnosis.status === "running" &&
         diagnosis.blockers.length === 0 &&
+        information.length === 0 &&
         diagnosis.summary.startsWith("Run is executing normally")) {
         return diagnosis.summary;
     }
@@ -1102,6 +1199,10 @@ export function renderWhyDiagnosisHuman(diagnosis) {
     if (diagnosis.blockers.length === 0) {
         lines.push("");
         lines.push(diagnosis.summary);
+        for (const entry of information) {
+            lines.push("");
+            lines.push(`  Info: ${entry}`);
+        }
         return lines.join("\n");
     }
     for (const blocker of diagnosis.blockers) {
@@ -1122,6 +1223,10 @@ export function renderWhyDiagnosisHuman(diagnosis) {
                 lines.push(`  ${line}`);
             }
         }
+    }
+    for (const entry of information) {
+        lines.push("");
+        lines.push(`  Info: ${entry}`);
     }
     return lines.join("\n");
 }
@@ -1150,6 +1255,7 @@ export function diagnosisCtaCommands(diagnosis) {
         "engine-busy": "Tail busy engine logs",
         "dependency-failed": "Resume after dependency fix",
         "approval-decided-resume-required": "Resume run after recorded approval",
+        "side-effect-boundary-crossed": "Inspect forced side-effect crossing",
     };
     const unique = new Map();
     for (const blocker of diagnosis.blockers) {

@@ -12,7 +12,7 @@ export const CLI_ERROR_MESSAGES = Object.freeze({
     // Input validation
     InvalidRunId: {
         message: "The run id is not in the expected shape.",
-        hint: "Run ids must match /^[a-z0-9_-]{1,64}$/. Check for typos or pick a run from `smithers ps`.",
+        hint: "Run ids must match /^[a-z0-9_-][a-z0-9_.-]{0,63}$/. Check for typos or pick a run from `smithers ps`.",
         exitCode: EXIT_USER_ERROR,
     },
     InvalidNodeId: {
@@ -112,6 +112,11 @@ export const CLI_ERROR_MESSAGES = Object.freeze({
         message: "The rewind did not complete successfully.",
         hint: "Check `smithers why <runId>` for details and retry after addressing the cause.",
         exitCode: EXIT_SERVER_ERROR,
+    },
+    TIME_TRAVEL_SIDE_EFFECT_BLOCKED: {
+        message: "The operation crosses an unresolved external side effect.",
+        hint: "Inspect the effect report, add a revert handler, or rerun with --force if the external effect is already handled.",
+        exitCode: EXIT_USER_ERROR,
     },
     RateLimited: {
         message: "Too many rewind attempts in a short window.",

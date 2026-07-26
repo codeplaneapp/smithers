@@ -376,6 +376,36 @@ describe("Gateway.mapEvent — SmithersEvent→wire mapping", () => {
         expect(result?.payload).toMatchObject({ caller: null });
     });
 
+    test("SideEffectBoundaryCrossed maps late completion details", () => {
+        const report = {
+            blocking: [{ nodeId: "send", iteration: 0, attempt: 1, seq: 1 }],
+            revertible: [],
+            warnings: [],
+        };
+        const result = gateway.mapEvent({
+            type: "SideEffectBoundaryCrossed",
+            runId: "run-1",
+            opId: "late-tool-call",
+            operation: "late-tool-completion",
+            report,
+            lateCompletion: true,
+            archivedByOp: "rewind-op",
+            timestampMs: 2000,
+        });
+        expect(result).toEqual({
+            event: "run.side_effect_boundary_crossed",
+            payload: {
+                runId: "run-1",
+                opId: "late-tool-call",
+                operation: "late-tool-completion",
+                report,
+                lateCompletion: true,
+                archivedByOp: "rewind-op",
+                timestampMs: 2000,
+            },
+        });
+    });
+
     test("RunFinished → run.completed status=finished", () => {
         const result = gateway.mapEvent({
             type: "RunFinished",

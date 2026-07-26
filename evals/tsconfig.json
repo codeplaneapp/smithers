@@ -179,6 +179,7 @@
   ],
   "exclude": [
     "./_inventory/**/*",
+    "./suites/authoring-side-effects/fixtures/**/*",
     "./node_modules/**/*",
     "./harness/.report/**/*",
     "./**/node_modules/**/*"

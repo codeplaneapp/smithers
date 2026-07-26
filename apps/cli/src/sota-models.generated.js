@@ -4,14 +4,14 @@
 // default. Code refers to stable slots (codexSol, codexTerra, codex, ...) so a model
 // bump is a registry edit, not a code change. See docs/reference/sota-models.mdx.
 
-export const SOTA_REGISTRY_VERSION = 5;
+export const SOTA_REGISTRY_VERSION = 7;
 
-export const SOTA_REGISTRY_UPDATED_AT = "2026-07-21";
+export const SOTA_REGISTRY_UPDATED_AT = "2026-07-24";
 
 /** Stable handle → current best model id for that seat. */
 export const SOTA_SLOTS = Object.freeze({
   "fable": "claude-fable-5",
-  "opus": "claude-opus-4-8",
+  "opus": "claude-opus-5",
   "sonnet": "claude-sonnet-5",
   "haiku": "claude-haiku-4-5",
   "codexSol": "gpt-5.6-sol",
@@ -27,14 +27,14 @@ export const SOTA_SLOTS = Object.freeze({
 
 /** Workflow role → current best model id. */
 export const SOTA_ROLE_MODELS = Object.freeze({
-  "orchestrator": "claude-opus-4-8",
+  "orchestrator": "claude-opus-5",
   "planning": "claude-fable-5",
   "review": "gpt-5.6-sol",
-  "smart": "gpt-5.6-sol",
+  "smart": "claude-opus-5",
   "midTier": "gpt-5.6-terra",
   "smartTool": "gpt-5.6-terra",
   "validate": "gpt-5.6-terra",
-  "implement": "gpt-5.6-terra",
+  "implement": "claude-opus-5",
   "cheapFast": "gpt-5.6-luna",
   "ui": "gpt-5.6-terra",
   "realtime": "gpt-5.3-codex-spark",
@@ -70,11 +70,33 @@ export const SOTA_MODELS = Object.freeze([
       "review",
       "smart"
     ],
-    "description": "Anthropic's Mythos-class model for ambitious, long, complex knowledge and coding work. Developers can use `claude-fable-5` through the Claude API at $10 per million input tokens and $50 per million output tokens. Anthropic's July 1 redeployment restored access on Claude Platform, Claude.ai, Claude Code, and Claude Cowork; the temporary included window for eligible subscription plans runs through July 12, 2026 at 11:59:59 PM PT ([promotion details](https://support.claude.com/en/articles/15424964-claude-fable-5-promotional-access)), and cloud-platform availability remains subject to the marketplace, provider, and account. Its updated safeguards may reroute blocked requests to Opus 4.8 and may false-positive during routine coding and debugging. Current Claude applications and Claude Code enable that switching by default, while API customers must opt in and configure it ([default product behavior and API opt-in](https://support.claude.com/en/articles/15363606-why-claude-switched-models-in-your-conversation-with-fable-5)); treat the notice as current product behavior rather than a permanent provider guarantee. Smithers runs planning and design-freeze steps on Fable, escalates unusually consequential orchestration calls to it (Opus 4.8 holds the orchestrator default), and keeps it as the non-Codex fallback for Sol-backed review and smart work. Claude Code uses `claude-fable-5`; Smithers' OpenCode configuration uses the provider-qualified id `anthropic/claude-fable-5`. See [Anthropic's launch announcement](https://www.anthropic.com/news/claude-fable-5-mythos-5), [redeployment update](https://www.anthropic.com/news/redeploying-fable-5), and [current Fable availability](https://www.anthropic.com/claude/fable)."
+    "description": "Anthropic's Mythos-class model for ambitious, long, complex knowledge and coding work. Developers can use `claude-fable-5` through the Claude API at $10 per million input tokens and $50 per million output tokens. Anthropic's July 1 redeployment restored access on Claude Platform, Claude.ai, Claude Code, and Claude Cowork; the temporary included window for eligible subscription plans runs through July 12, 2026 at 11:59:59 PM PT ([promotion details](https://support.claude.com/en/articles/15424964-claude-fable-5-promotional-access)), and cloud-platform availability remains subject to the marketplace, provider, and account. Its updated safeguards may reroute blocked requests to Opus 4.8 and may false-positive during routine coding and debugging. Current Claude applications and Claude Code enable that switching by default, while API customers must opt in and configure it ([default product behavior and API opt-in](https://support.claude.com/en/articles/15363606-why-claude-switched-models-in-your-conversation-with-fable-5)); treat the notice as current product behavior rather than a permanent provider guarantee. Smithers runs planning and design-freeze steps on Fable, escalates unusually consequential orchestration calls to it (Opus 5 holds the orchestrator default), and keeps it as the non-Codex fallback for Sol-backed review and smart work. Claude Code uses `claude-fable-5`; Smithers' OpenCode configuration uses the provider-qualified id `anthropic/claude-fable-5`. See [Anthropic's launch announcement](https://www.anthropic.com/news/claude-fable-5-mythos-5), [redeployment update](https://www.anthropic.com/news/redeploying-fable-5), and [current Fable availability](https://www.anthropic.com/claude/fable)."
+  },
+  {
+    "id": "claude-opus-5",
+    "slot": "opus",
+    "provider": "anthropic",
+    "name": "Claude Opus 5",
+    "status": "sota",
+    "released": "2026-07-24",
+    "engines": [
+      "claude",
+      "opencode"
+    ],
+    "badges": [
+      "best-orchestrator",
+      "smartest-coder"
+    ],
+    "roles": [
+      "orchestrator",
+      "smart",
+      "implement"
+    ],
+    "description": "Anthropic's new Opus flagship and, as of registry v7, both the default Smithers orchestrator and the default implementer: a drop-in replacement for Opus 4.8 at the same $5/$25 per-million-token pricing with a step change in agentic capability. Launch benchmarks: 43.3% on Frontier-Bench v0.1 (Fable 5 33.7%, GPT-5.6 Sol 34.4%; more than double Opus 4.8 at lower cost per task), 30.2% on ARC-AGI-3 (next best 7.8%), 70.6% on OSWorld 2.0 (above Fable 5 at roughly a third of the cost), within 0.5% of Fable 5's peak CursorBench 3.2 score at half the cost per task, and about 1.5x the next-best pass rate on Zapier AutomationBench; Anthropic also reports matching Opus 4.8's max-reasoning quality with ~26% fewer tokens at lower effort. Substantial implementation starts here: it took the seat from GPT-5.6 Terra/Sol because it beats Sol on agentic coding at lower output cost ($25 vs $30 per million tokens), with Fable 5 for the most ambitious builds and Codex Sol/Terra reviewing and validating the output. Orchestration and gating decisions (scope, choosing direction, judging progress, deciding whether work is done, approving or denying gates) also run here, at medium reasoning effort, rather than on GPT-5.6 Sol or Terra, which are strong reviewers but poor gatekeepers. API differences from Opus 4.8: thinking is on by default (omitting `thinking` runs adaptive), disabling thinking is only accepted at effort `high` or below, rate limits draw from a new bucket separate from the combined Opus 4.x pool, and elevated cybersecurity safeguards can return `stop_reason: \"refusal\"` with Opus 4.8 as the recommended fallback target. See [Anthropic's launch announcement](https://www.anthropic.com/news/claude-opus-5)."
   },
   {
     "id": "claude-opus-4-8",
-    "slot": "opus",
+    "slot": null,
     "provider": "anthropic",
     "name": "Claude Opus 4.8",
     "status": "current",
@@ -82,14 +104,9 @@ export const SOTA_MODELS = Object.freeze([
       "claude",
       "opencode"
     ],
-    "badges": [
-      "best-orchestrator"
-    ],
-    "roles": [
-      "orchestrator",
-      "smart"
-    ],
-    "description": "Anthropic's Opus tier and the default Smithers orchestrator. Orchestration and gating decisions (scope, choosing direction, judging progress, deciding whether work is done, approving or denying gates) run here at medium reasoning effort rather than on GPT-5.6 Sol or Terra, which are strong reviewers but poor gatekeepers. Also a top-shelf generalist and the always-present fallback behind Fable in the smart, planning, and review pools."
+    "badges": [],
+    "roles": [],
+    "description": "The previous Opus flagship, superseded by Claude Opus 5 (same pricing, drop-in API surface) as the default Smithers orchestrator and implementer. Retained as a compatibility fallback: it is Anthropic's recommended refusal-fallback target for Fable 5 and Opus 5 safeguard reroutes, and it draws from the combined Opus 4.x rate-limit bucket, which is separate from Opus 5's. This provides useful headroom when Opus 5 quota is tight."
   },
   {
     "id": "claude-sonnet-5",
@@ -107,7 +124,7 @@ export const SOTA_MODELS = Object.freeze([
       "implement",
       "cheapFast"
     ],
-    "description": "The newest Sonnet: fast, cheap, 1M context. It is the primary non-Codex fallback for Codex-backed research, implementation, validation, mid-tier, and tool-heavy work when Codex is unavailable; Sol-backed review and smart work fall back to Fable instead, and orchestration and planning already run on Claude (Opus 4.8 and Fable 5)."
+    "description": "The newest Sonnet: fast, cheap, 1M context. It is the primary non-Codex fallback for the Codex-backed checking seats (research, validation, mid-tier, tool-heavy) when Codex is unavailable, and the cheap Claude-native build lane behind Opus 5 in the implementation pool; Sol-backed review falls back to Fable instead, and building, orchestration, and planning already run on Claude (Opus 5 and Fable 5)."
   },
   {
     "id": "claude-haiku-4-5",
@@ -134,14 +151,13 @@ export const SOTA_MODELS = Object.freeze([
       "pi"
     ],
     "badges": [
-      "smartest-reviewer",
-      "smartest-coder"
+      "smartest-reviewer"
     ],
     "roles": [
       "review",
       "smart"
     ],
-    "description": "OpenAI's GPT-5.6 flagship for the hardest reasoning, coding, and judgment-heavy work. Use Sol for the hardest implementation, final code review, ambiguous or high-stakes changes, and recovery when a lower-cost pass is not enough. Do not use Sol for orchestration or gating (scope, direction, progress, done-or-not): it is a strong reviewer but a poor gatekeeper, and those seats belong to Claude (Opus 4.8 by default). See [OpenAI's GPT-5.6 release](https://openai.com/index/gpt-5-6/)."
+    "description": "OpenAI's GPT-5.6 flagship and the smartest reviewer in the roster. Use Sol for final code review, second opinions on the hardest or most ambiguous changes, and the deepest Codex-side reasoning. As of registry v7 default implementation runs on Claude Opus 5, which outbenchmarks Sol on agentic coding (Frontier-Bench v0.1 43.3% vs 34.4%) at lower output cost; Sol stays in the smart pool as the Codex-side fallback. Do not use Sol for orchestration or gating (scope, direction, progress, done-or-not): it is a strong reviewer but a poor gatekeeper, and those seats belong to Claude (Opus 5 by default). See [OpenAI's GPT-5.6 release](https://openai.com/index/gpt-5-6/)."
   },
   {
     "id": "gpt-5.6-terra",
@@ -161,7 +177,7 @@ export const SOTA_MODELS = Object.freeze([
       "validate",
       "ui"
     ],
-    "description": "OpenAI's balanced GPT-5.6 model and the default implementer: substantial implementation starts on Terra, as do validation, structured checking, and explicitly tool-heavy work. Escalate to Sol when the change is genuinely hard, ambiguous, or high-stakes. Like Sol, Terra does not orchestrate or gate; its validation findings feed the Claude orchestrator's decision. See [OpenAI's GPT-5.6 release](https://openai.com/index/gpt-5-6/)."
+    "description": "OpenAI's balanced GPT-5.6 model and the default checking tier: validation, structured checking, and explicitly tool-heavy verification run on Terra, and it remains the deliberate Codex-side build lane when you want a second implementation engine. Default implementation moved to Claude Opus 5 in registry v7. Escalate review to Sol when the check is genuinely hard, ambiguous, or high-stakes. Like Sol, Terra does not orchestrate or gate; its validation findings feed the Claude orchestrator's decision. See [OpenAI's GPT-5.6 release](https://openai.com/index/gpt-5-6/)."
   },
   {
     "id": "gpt-5.6-luna",
@@ -181,7 +197,7 @@ export const SOTA_MODELS = Object.freeze([
       "cheapFast",
       "research"
     ],
-    "description": "OpenAI's fastest and most affordable GPT-5.6 tier. In Smithers, Luna handles trivial, minimal-risk work only: tiny scoped edits, mechanical transforms, quick research and lookups, and high-volume cheap passes. Substantial implementation starts on Terra instead, with Sol for the hardest changes; escalate rather than letting Luna carry work with real blast radius. See [OpenAI's GPT-5.6 release](https://openai.com/index/gpt-5-6/) and the [GPT-5.6 preview release](https://openai.com/index/previewing-gpt-5-6-sol/)."
+    "description": "OpenAI's fastest and most affordable GPT-5.6 tier. In Smithers, Luna handles trivial, minimal-risk work only: tiny scoped edits, mechanical transforms, quick research and lookups, and high-volume cheap passes. Substantial implementation starts on Claude Opus 5 instead (Terra for a deliberate Codex-side lane); escalate rather than letting Luna carry work with real blast radius. See [OpenAI's GPT-5.6 release](https://openai.com/index/gpt-5-6/) and the [GPT-5.6 preview release](https://openai.com/index/previewing-gpt-5-6-sol/)."
   },
   {
     "id": "gpt-5.5",

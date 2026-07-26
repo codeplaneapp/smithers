@@ -103,7 +103,10 @@ export function createVercelSandboxProvider(options = {}) {
 							capMs: maxDurationMs,
 						}));
 						if (typeof sandbox.extendTimeout === "function") {
-							await sandbox.extendTimeout(desiredMs);
+							// extendTimeout extends the lifetime BY its argument, so send the
+							// remaining delta; passing the absolute target would overshoot the
+							// cap by createTimeoutMs.
+							await sandbox.extendTimeout(desiredMs - createTimeoutMs);
 						}
 					}
 

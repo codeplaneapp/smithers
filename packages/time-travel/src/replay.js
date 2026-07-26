@@ -2,7 +2,7 @@
 /** @typedef {import("./ReplayResult.ts").ReplayResult} ReplayResult */
 // @smithers-type-exports-end
 
-import { Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import * as BunContext from "@effect/platform-bun/BunContext";
 import { replayFromCheckpoint as replayFromCheckpointEffect } from "./replayFromCheckpointEffect.js";
 export { replayFromCheckpointEffect };
@@ -17,6 +17,10 @@ export { replayFromCheckpointEffect };
  * @param {ReplayParams} params
  * @returns {Promise<ReplayResult>}
  */
-export function replayFromCheckpoint(adapter, params) {
-    return Effect.runPromise(replayFromCheckpointEffect(adapter, params).pipe(Effect.provide(BunContext.layer)));
+export async function replayFromCheckpoint(adapter, params) {
+    const exit = await Effect.runPromiseExit(
+        replayFromCheckpointEffect(adapter, params).pipe(Effect.provide(BunContext.layer)),
+    );
+    if (Exit.isSuccess(exit)) return exit.value;
+    throw Cause.squash(exit.cause);
 }

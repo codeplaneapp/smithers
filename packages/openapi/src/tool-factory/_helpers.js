@@ -13,6 +13,7 @@ import { SPEC_SOURCE_URL } from "../specSourceUrl.js";
 /** @typedef {import("../OpenApiTool.ts").OpenApiTool} OpenApiTool */
 /** @typedef {import("../OpenApiToolsOptions.ts").OpenApiToolsOptions} OpenApiToolsOptions */
 /** @typedef {import("../ParsedOperation.ts").ParsedOperation} ParsedOperation */
+/** @typedef {NonNullable<OpenApiSpec["servers"]>[number]} ServerObject */
 
 // Last-resort base URL, used only when the spec declares no servers[] and the
 // caller passed no `baseUrl` option — requests then fail loudly against
@@ -85,10 +86,88 @@ export function buildAuthHeaders(options) {
     return headers;
 }
 /**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isPlainObject(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+/**
+ * A value expanded per OpenAPI's `style: simple` (the default for path and
+ * header parameters): either a scalar, or the segments an array/object expands
+ * to. Segments stay split so each one can be percent-encoded on its own and the
+ * "," / "=" delimiters survive as delimiters instead of becoming data.
+ *
+ * @typedef {string | Array<string | [string, string]>} SimpleStyleValue
+ */
+/**
+ * Expand a path/header parameter value per `style: simple`: an array becomes
+ * one segment per element ("a,b"), an object becomes "key,value" segments — or
+ * "key=value" segments when `explode` is set.
+ *
+ * @param {unknown} value
+ * @param {boolean} explode
+ * @returns {SimpleStyleValue}
+ */
+function toSimpleStyleValue(value, explode) {
+    if (Array.isArray(value))
+        return value.map((item) => String(item));
+    if (isPlainObject(value)) {
+        const entries = Object.entries(value).filter(([, item]) => item !== undefined);
+        return explode
+            ? entries.map(([key, item]) => /** @type {[string, string]} */ ([key, String(item)]))
+            : entries.flatMap(([key, item]) => [key, String(item)]);
+    }
+    return String(value);
+}
+/**
+ * Join a `style: simple` value, applying `encode` per segment.
+ *
+ * @param {SimpleStyleValue} value
+ * @param {(part: string) => string} encode
+ * @returns {string}
+ */
+function joinSimpleStyleValue(value, encode) {
+    if (!Array.isArray(value))
+        return encode(value);
+    return value
+        .map((segment) => (Array.isArray(segment) ? `${encode(segment[0])}=${encode(segment[1])}` : encode(segment)))
+        .join(",");
+}
+/**
+ * Expand a query parameter into the `[name, value]` entries its OpenAPI
+ * serialization produces. Defaults are `style: form` with `explode: true`, so
+ * an array becomes one entry per element and an object one entry per property.
+ *
+ * @param {ParameterObject} param
+ * @param {unknown} value
+ * @returns {Array<[string, string]>}
+ */
+function toQueryEntries(param, value) {
+    const style = param.style ?? "form";
+    const explode = param.explode ?? style === "form";
+    if (Array.isArray(value)) {
+        if (explode)
+            return value.map((item) => /** @type {[string, string]} */ ([param.name, String(item)]));
+        const delimiter = style === "spaceDelimited" ? " " : style === "pipeDelimited" ? "|" : ",";
+        return [[param.name, value.map((item) => String(item)).join(delimiter)]];
+    }
+    if (isPlainObject(value)) {
+        const entries = Object.entries(value).filter(([, item]) => item !== undefined);
+        if (style === "deepObject")
+            return entries.map(([key, item]) => /** @type {[string, string]} */ ([`${param.name}[${key}]`, String(item)]));
+        if (explode)
+            return entries.map(([key, item]) => /** @type {[string, string]} */ ([key, String(item)]));
+        return [[param.name, entries.flatMap(([key, item]) => [key, String(item)]).join(",")]];
+    }
+    return [[param.name, String(value)]];
+}
+/**
  * @param {string} baseUrl
  * @param {string} path
- * @param {Record<string, string>} pathParams
- * @param {Record<string, string>} queryParams
+ * @param {Record<string, SimpleStyleValue>} pathParams
+ * @param {Record<string, string | string[]>} queryParams - An array value emits
+ *   one query entry per element (OpenAPI `style: form`, `explode: true`).
  * @param {OpenApiToolsOptions} options
  * @returns {string}
  */
@@ -96,7 +175,7 @@ export function buildUrl(baseUrl, path, pathParams, queryParams, options) {
     // Substitute path parameters
     let url = path;
     for (const [key, value] of Object.entries(pathParams)) {
-        url = url.replaceAll(`{${key}}`, encodeURIComponent(value));
+        url = url.replaceAll(`{${key}}`, joinSimpleStyleValue(value, encodeURIComponent));
     }
     // Join the server base path with the operation path so a base URL with a
     // path component (e.g. https://api.example.com/v2) is preserved. Passing an
@@ -108,7 +187,9 @@ export function buildUrl(baseUrl, path, pathParams, queryParams, options) {
     fullUrl.pathname = opPath ? `${basePath}/${opPath}` : basePath || "/";
     // Add query parameters
     for (const [key, value] of Object.entries(queryParams)) {
-        fullUrl.searchParams.set(key, value);
+        for (const entry of Array.isArray(value) ? value : [value]) {
+            fullUrl.searchParams.append(key, entry);
+        }
     }
     // Add API key to query if configured
     if (options.auth?.type === "apiKey" && options.auth.in === "query") {
@@ -465,31 +546,35 @@ async function readResponseBodyBytes(response, maxBytes, signal) {
  */
 export async function executeRequest(operation, args, baseUrl, options, signal) {
     const maxResponseBodyBytes = resolveMaxResponseBodyBytes(options);
-    /** @type {Record<string, string>} */
+    /** @type {Record<string, SimpleStyleValue>} */
     const pathParams = {};
-    /** @type {Record<string, string>} */
+    /** @type {Record<string, string[]>} */
     const queryParams = {};
     // Reserve every operator-controlled header before accepting model-supplied
     // parameters. Header names are case-insensitive, regardless of how the
     // OpenAPI operation spells them.
     const headers = buildAuthHeaders(options);
     const reservedHeaderNames = new Set(Object.keys(headers).map((name) => name.toLowerCase()));
-    // Sort parameters into buckets
+    // Sort parameters into buckets. Array/object values are expanded per the
+    // parameter's OpenAPI serialization style — `String(value)` would collapse
+    // them into one "a,b" query entry (or "[object Object]") that the upstream
+    // API reads as a single literal value.
     for (const param of operation.parameters) {
         const value = args[param.name];
         if (value === undefined)
             continue;
-        const strValue = String(value);
         switch (param.in) {
             case "path":
-                pathParams[param.name] = strValue;
+                pathParams[param.name] = toSimpleStyleValue(value, param.explode ?? false);
                 break;
             case "query":
-                queryParams[param.name] = strValue;
+                for (const [name, entry] of toQueryEntries(param, value)) {
+                    (queryParams[name] ??= []).push(entry);
+                }
                 break;
             case "header":
                 if (!reservedHeaderNames.has(param.name.toLowerCase())) {
-                    setHeader(headers, param.name, strValue);
+                    setHeader(headers, param.name, joinSimpleStyleValue(toSimpleStyleValue(value, param.explode ?? false), (part) => part));
                 }
                 break;
         }
@@ -680,16 +765,40 @@ function isAbsoluteUrl(url) {
     }
 }
 /**
- * Resolve a spec `servers[].url` to an absolute URL. Absolute URLs pass through
- * unchanged. A relative URL (e.g. the Swagger Petstore's "/api/v3") is resolved
- * against the URL the spec was loaded from; if that base is unknown, throw a
- * clear error naming the relative URL so the caller can pass `baseUrl`.
+ * Substitute OpenAPI server variables ("https://{region}.api.example.com") with
+ * the defaults declared in `servers[].variables`. A `{name}` with no declared
+ * default is left in place for `resolveServerUrl` to reject — a templated host
+ * would otherwise be used verbatim and fail with an opaque DNS error per call.
  *
- * @param {string} serverUrl
+ * @param {ServerObject} server
+ * @returns {string}
+ */
+function substituteServerVariables(server) {
+    const variables = server.variables;
+    if (!variables)
+        return server.url;
+    return server.url.replace(/\{([^{}]*)\}/g, (placeholder, name) => {
+        const value = variables[name]?.default;
+        return typeof value === "string" ? value : placeholder;
+    });
+}
+/**
+ * Resolve a spec `servers[]` entry to an absolute URL. Server variables are
+ * substituted with their declared defaults first. Absolute URLs then pass
+ * through unchanged. A relative URL (e.g. the Swagger Petstore's "/api/v3") is
+ * resolved against the URL the spec was loaded from; if that base is unknown,
+ * throw a clear error naming the relative URL so the caller can pass `baseUrl`.
+ *
+ * @param {ServerObject} server
  * @param {OpenApiSpec} spec
  * @returns {string}
  */
-function resolveServerUrl(serverUrl, spec) {
+function resolveServerUrl(server, spec) {
+    const serverUrl = substituteServerVariables(server);
+    const unresolved = serverUrl.match(/\{[^{}]*\}/);
+    if (unresolved)
+        throw new Error(`OpenAPI spec server URL "${server.url}" leaves variable "${unresolved[0]}" unresolved because it declares no default under \`servers[].variables\`. `
+            + `Pass an absolute base URL via the \`baseUrl\` option (e.g. { baseUrl: "https://us.api.example.com" }).`);
     if (isAbsoluteUrl(serverUrl))
         return serverUrl;
     const sourceUrl = /** @type {Record<PropertyKey, unknown>} */ (spec)[SPEC_SOURCE_URL];
@@ -708,7 +817,7 @@ export function resolveBaseUrl(spec, options) {
     if (options.baseUrl)
         return options.baseUrl;
     if (spec.servers && spec.servers.length > 0)
-        return resolveServerUrl(spec.servers[0].url, spec);
+        return resolveServerUrl(spec.servers[0], spec);
     return FALLBACK_BASE_URL;
 }
 /**

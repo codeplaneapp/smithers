@@ -11,6 +11,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
  * @property {number} [iteration] - The node iteration (defaults to 0 in keys).
  * @property {number} [attempt] - The attempt number for the current node.
  * @property {string} [rootDir] - The working directory / VCS root for the tool.
+ * @property {AbortSignal} [signal] - Cancellation signal for the current task.
  * @property {string} [idempotencyKey] - Explicit idempotency key override.
  * @property {number} [seq] - Monotonic per-context tool sequence (mutated by nextToolSeq).
  * @property {(label?: string, toolUseId?: string) => unknown} [durabilitySnapshot] - Hook to snapshot workspace durability mid-tool.

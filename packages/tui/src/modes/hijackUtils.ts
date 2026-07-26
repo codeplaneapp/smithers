@@ -103,6 +103,41 @@ export function hijackCandidates(
   return result;
 }
 
+/** Status a pinned row shows once its live session is gone (see {@link pinnedHijackRows}). */
+export const ENDED_ROW_STATUS = "ended";
+
+/**
+ * Pin the picker's rows to stable positions across candidate churn.
+ *
+ * The select highlights by numeric INDEX (its `options` setter only clamps the
+ * index, it never re-anchors to the selected value) while
+ * {@link hijackCandidates} is recomputed from live events on every frame — so a
+ * node completing and dropping out would slide every later row UP under the
+ * operator's highlight, and Enter would hand the terminal to a node they never
+ * pointed at. Rows the picker has already shown therefore keep their position —
+ * refreshed from the live candidate, or marked {@link ENDED_ROW_STATUS} once
+ * their session is gone — and fresh candidates append at the end, so a row index
+ * can never change meaning while the picker stays open. Returns `prev` itself
+ * when nothing moved so callers can memoize on the result.
+ */
+export function pinnedHijackRows(
+  prev: readonly GatewayRunNode[],
+  candidates: readonly GatewayRunNode[],
+): readonly GatewayRunNode[] {
+  const live = new Map(candidates.map((n) => [runNodeKey(n), n] as const));
+  const pinned = new Set(prev.map((n) => runNodeKey(n)));
+  const rows = prev.map((row) => {
+    const current = live.get(runNodeKey(row));
+    if (current) return current;
+    return row.status === ENDED_ROW_STATUS ? row : { ...row, status: ENDED_ROW_STATUS };
+  });
+  for (const node of candidates) {
+    if (!pinned.has(runNodeKey(node))) rows.push(node);
+  }
+  const unchanged = rows.length === prev.length && rows.every((row, i) => row === prev[i]);
+  return unchanged ? prev : rows;
+}
+
 export function nodeSelectOption(node: GatewayRunNode): SelectOption {
   // The select `value` is the UNIQUE row key (runNodeKey), NOT the logical id:
   // loop/retry attempts share a logical `id`, so keying the option on `id` would

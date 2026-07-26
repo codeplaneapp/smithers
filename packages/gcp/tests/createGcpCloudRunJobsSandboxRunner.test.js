@@ -221,6 +221,41 @@ describe("createGcpCloudRunJobsSandboxRunner", () => {
 		expect(String(deleted[0].name)).toContain("/executions/");
 	});
 
+	test("abort during the createJob setup window still cancels and rejects", async () => {
+		const cancelled = [];
+		let lroCancelled = false;
+		const controller = new AbortController();
+		const client = {
+			jobPath: (p, l, j) => `projects/${p}/locations/${l}/jobs/${j}`,
+			locationPath: (p, l) => `projects/${p}/locations/${l}`,
+			async createJob() {
+				// The createJob LRO is the multi-second setup window. Aborting inside
+				// it lands before any abort listener could have been attached.
+				return [{ promise: async () => { controller.abort(); return [{}]; } }];
+			},
+			async runJob(request) {
+				return [{
+					// Cloud Run eventually finishes on its own; the abort must win
+					// rather than the run blocking until the execution completes.
+					promise: () => new Promise((resolve) => {
+						setTimeout(() => resolve([{ name: `${request.name}/executions/exec-setup`, succeededCount: 1 }]), 20);
+					}),
+					cancel: async () => { lroCancelled = true; },
+					metadata: { name: `${request.name}/executions/exec-setup` },
+				}];
+			},
+			async cancelExecution(request) {
+				cancelled.push(request);
+				return [{ promise: async () => [{}] }];
+			},
+		};
+		const runner = createGcpCloudRunJobsSandboxRunner({ jobsClient: client, ...BASE, createJob: true, image: "img" });
+		await expect(runner.run({ command: "x", env: {}, signal: controller.signal })).rejects.toThrow(/cancel/i);
+		expect(lroCancelled).toBe(true);
+		expect(cancelled.length).toBe(1);
+		expect(String(cancelled[0].name)).toContain("/executions/");
+	});
+
 	test("abort after runJob starts rejects promptly and attempts cancellation", async () => {
 		const cancelled = [];
 		let lroCancelled = false;

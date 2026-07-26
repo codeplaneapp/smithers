@@ -137,6 +137,79 @@ describe("WorkflowDriver.nextCompletionDecision — deadline racer", () => {
     expect(result).toEqual({ runId: "r1", status: "waiting-event" });
   });
 
+  test("tears the deadline down when a completion wins the race", async () => {
+    // `Promise.race` does not cancel its losers, so a long deadline that loses
+    // to a real completion used to leak both its timer and its `'abort'`
+    // listener on the run signal for the full window — one fresh pair per
+    // completion, since `handleWait` re-enters here while tasks stay in flight.
+    const controller = new AbortController();
+    const { signal } = controller;
+    let added = 0;
+    let removed = 0;
+    const realAdd = signal.addEventListener.bind(signal);
+    const realRemove = signal.removeEventListener.bind(signal);
+    signal.addEventListener = (type, ...rest) => {
+      if (type === "abort") added += 1;
+      return realAdd(type, ...rest);
+    };
+    signal.removeEventListener = (type, ...rest) => {
+      if (type === "abort") removed += 1;
+      return realRemove(type, ...rest);
+    };
+
+    /** Timers armed during the wait that neither fired nor were cleared. */
+    const pending = new Set();
+    const realSetTimeout = globalThis.setTimeout;
+    const realClearTimeout = globalThis.clearTimeout;
+    globalThis.setTimeout = (fn, ms, ...rest) => {
+      let id;
+      id = realSetTimeout(
+        (...args) => {
+          pending.delete(id);
+          return fn?.(...args);
+        },
+        ms,
+        ...rest,
+      );
+      pending.add(id);
+      return id;
+    };
+    globalThis.clearTimeout = (id) => {
+      pending.delete(id);
+      return realClearTimeout(id);
+    };
+
+    try {
+      const driver = new WorkflowDriver({
+        workflow: { db: {} },
+        db: {},
+        runtime: { runPromise: async (value) => value },
+        executeTask: () =>
+          new Promise((resolve) => realSetTimeout(() => resolve({ ok: true }), 5)),
+        session: {
+          taskCompleted: () => ({ _tag: "Execute", tasks: [] }),
+        },
+      });
+      driver.activeRunId = "r1";
+      driver.activeOptions = { input: {}, signal };
+      driver.startInflightTask(
+        { nodeId: "a", iteration: 0 },
+        { runId: "r1", options: driver.activeOptions, signal },
+      );
+
+      const result = await driver.nextCompletionDecision(300_000);
+
+      expect(result).toEqual({ _tag: "Execute", tasks: [] });
+      // Every listener the wait installed was detached again.
+      expect(removed).toBe(added);
+      // No ~5-minute deadline timer left holding the event loop open.
+      expect(pending.size).toBe(0);
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      globalThis.clearTimeout = realClearTimeout;
+    }
+  });
+
   test("cancels the run when aborted during the deadline wait", async () => {
     const controller = new AbortController();
     let cancellations = 0;

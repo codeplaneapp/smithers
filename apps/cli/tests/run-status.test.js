@@ -11,6 +11,7 @@ import {
     isQuotaAttemptFailure,
     parseFrameDependsOn,
     renderRunStatusHuman,
+    runStatusCtaCommands,
     summarizeRunStatus,
 } from "../src/run-status.js";
 
@@ -328,6 +329,141 @@ describe("summarizeRunStatus verdicts (real sqlite rows)", () => {
             }
             const failed = await buildRunStatusSummary(adapter, "failed-run", { nowMs: NOW });
             expect(failed.reason).toContain("boom");
+        }
+        finally {
+            sqlite.close();
+        }
+    });
+
+    test("surfaces a forced side-effect crossing without changing a finished run verdict", async () => {
+        const { sqlite, adapter } = createMemoryDb();
+        try {
+            await seedRun(adapter, "forced-finished", {
+                status: "finished",
+                finishedAtMs: NOW - MIN,
+                heartbeatAtMs: null,
+            });
+            await adapter.insertEventWithNextSeq({
+                runId: "forced-finished",
+                type: "SideEffectBoundaryCrossed",
+                timestampMs: NOW - 30_000,
+                payloadJson: JSON.stringify({
+                    type: "SideEffectBoundaryCrossed",
+                    runId: "forced-finished",
+                    operation: "replay",
+                    opId: "forced-op",
+                    timestampMs: NOW - 30_000,
+                    report: {
+                        blocking: [{ nodeId: "send", iteration: 0, attempt: 1, seq: 1 }],
+                        revertible: [],
+                        warnings: [],
+                    },
+                }),
+            });
+
+            const summary = await buildRunStatusSummary(adapter, "forced-finished", { nowMs: NOW });
+
+            expect(summary.status).toBe("finished");
+            expect(summary.verdict).toBe("done");
+            expect(summary.attention).toMatchObject({
+                operation: "replay",
+                opId: "forced-op",
+                crossedCount: 1,
+            });
+            expect(renderRunStatusHuman(summary)).toContain("Attention forced replay crossed 1 external effect");
+            expect(runStatusCtaCommands(summary)[0]).toEqual({
+                command: "why forced-finished",
+                description: "Explain blockers in depth",
+            });
+        }
+        finally {
+            sqlite.close();
+        }
+    });
+
+    test("surfaces late completion of an archived tool as needs-attention", async () => {
+        const { sqlite, adapter } = createMemoryDb();
+        try {
+            await seedRun(adapter, "late-tool", {
+                status: "failed",
+                finishedAtMs: NOW - MIN,
+                heartbeatAtMs: null,
+            });
+            await adapter.insertEventWithNextSeq({
+                runId: "late-tool",
+                type: "SideEffectBoundaryCrossed",
+                timestampMs: NOW - 30_000,
+                payloadJson: JSON.stringify({
+                    type: "SideEffectBoundaryCrossed",
+                    runId: "late-tool",
+                    operation: "late-tool-completion",
+                    opId: "late-call",
+                    lateCompletion: true,
+                    archivedByOp: "rewind-op",
+                    timestampMs: NOW - 30_000,
+                    report: {
+                        blocking: [{ nodeId: "send", iteration: 0, attempt: 1, seq: 1 }],
+                        revertible: [],
+                        warnings: [],
+                    },
+                }),
+            });
+
+            const summary = await buildRunStatusSummary(adapter, "late-tool", { nowMs: NOW });
+
+            expect(summary.attention).toMatchObject({
+                lateCompletion: true,
+                archivedByOp: "rewind-op",
+            });
+            expect(renderRunStatusHuman(summary)).toContain(
+                "Attention external effect completed after its journal row was reverted or archived",
+            );
+        }
+        finally {
+            sqlite.close();
+        }
+    });
+
+    test("renders warning-only fork crossings as information without forced attention", async () => {
+        const { sqlite, adapter } = createMemoryDb();
+        try {
+            await seedRun(adapter, "warning-only-fork", {
+                status: "finished",
+                finishedAtMs: NOW - MIN,
+                heartbeatAtMs: null,
+            });
+            await adapter.insertEventWithNextSeq({
+                runId: "warning-only-fork",
+                type: "SideEffectBoundaryCrossed",
+                timestampMs: NOW - 30_000,
+                payloadJson: JSON.stringify({
+                    type: "SideEffectBoundaryCrossed",
+                    runId: "warning-only-fork",
+                    operation: "fork",
+                    opId: "warning-op",
+                    warningOnly: true,
+                    timestampMs: NOW - 30_000,
+                    report: {
+                        blocking: [],
+                        revertible: [],
+                        warnings: [{ nodeId: "send", iteration: 0, attempt: 1, seq: 1 }],
+                    },
+                }),
+            });
+
+            const summary = await buildRunStatusSummary(adapter, "warning-only-fork", { nowMs: NOW });
+            const rendered = renderRunStatusHuman(summary);
+
+            expect(summary.attention).toBeUndefined();
+            expect(summary.information).toMatchObject({
+                operation: "fork",
+                warningCount: 1,
+            });
+            expect(rendered).toContain("Info     fork recorded 1 side-effect warning; no crossing was forced");
+            expect(rendered).not.toContain("Attention");
+            expect(rendered).not.toContain("forced fork crossed 0");
+            expect(runStatusCtaCommands(summary).some((entry) => entry.command === "why warning-only-fork"))
+                .toBe(false);
         }
         finally {
             sqlite.close();

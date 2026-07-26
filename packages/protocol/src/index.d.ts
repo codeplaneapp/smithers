@@ -197,7 +197,7 @@ type NodeOutputErrorCode = "InvalidRunId" | "InvalidNodeId" | "InvalidIteration"
 
 type NodeDiffErrorCode = "InvalidRunId" | "InvalidNodeId" | "InvalidIteration" | "RunNotFound" | "NodeNotFound" | "AttemptNotFound" | "AttemptNotFinished" | "VcsError" | "WorkingTreeDirty" | "DiffTooLarge";
 
-type JumpToFrameErrorCode = "InvalidRunId" | "InvalidFrameNo" | "RunNotFound" | "FrameOutOfRange" | "ConfirmationRequired" | "Busy" | "UnsupportedSandbox" | "VcsError" | "RewindFailed" | "RateLimited" | "Unauthorized";
+type JumpToFrameErrorCode = "InvalidRunId" | "InvalidFrameNo" | "RunNotFound" | "FrameOutOfRange" | "ConfirmationRequired" | "Busy" | "UnsupportedSandbox" | "VcsError" | "RewindFailed" | "TIME_TRAVEL_SIDE_EFFECT_BLOCKED" | "RateLimited" | "Unauthorized";
 
 type DevToolsErrorCode = "RunNotFound" | "InvalidRunId" | "FrameOutOfRange" | "SeqOutOfRange" | "BackpressureDisconnect" | "Unauthorized" | "InvalidDelta";
 
@@ -208,6 +208,66 @@ type DevToolsErrorCode = "RunNotFound" | "InvalidRunId" | "FrameOutOfRange" | "S
 declare const DEVTOOLS_ERROR_CODES: readonly ["RunNotFound", "InvalidRunId", "FrameOutOfRange", "SeqOutOfRange", "BackpressureDisconnect", "Unauthorized", "InvalidDelta"];
 declare const NODE_OUTPUT_ERROR_CODES: readonly ["InvalidRunId", "InvalidNodeId", "InvalidIteration", "RunNotFound", "NodeNotFound", "IterationNotFound", "NodeHasNoOutput", "SchemaConversionError", "MalformedOutputRow", "PayloadTooLarge"];
 declare const NODE_DIFF_ERROR_CODES: readonly ["InvalidRunId", "InvalidNodeId", "InvalidIteration", "RunNotFound", "NodeNotFound", "AttemptNotFound", "AttemptNotFinished", "VcsError", "WorkingTreeDirty", "DiffTooLarge"];
-declare const JUMP_TO_FRAME_ERROR_CODES: readonly ["InvalidRunId", "InvalidFrameNo", "RunNotFound", "FrameOutOfRange", "ConfirmationRequired", "Busy", "UnsupportedSandbox", "VcsError", "RewindFailed", "RateLimited", "Unauthorized"];
+declare const JUMP_TO_FRAME_ERROR_CODES: readonly ["InvalidRunId", "InvalidFrameNo", "RunNotFound", "FrameOutOfRange", "ConfirmationRequired", "Busy", "UnsupportedSandbox", "VcsError", "RewindFailed", "TIME_TRAVEL_SIDE_EFFECT_BLOCKED", "RateLimited", "Unauthorized"];
 
-export { DEVTOOLS_ERROR_CODES, DEVTOOLS_PROTOCOL_VERSION, type DevToolsAgentRef, type DevToolsAgentSummary, type DevToolsDelta, type DevToolsDeltaOp, type DevToolsErrorCode, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, type DevToolsRunState, type DevToolsSnapshot, JUMP_TO_FRAME_ERROR_CODES, type JumpToFrameErrorCode, NODE_DIFF_ERROR_CODES, NODE_OUTPUT_ERROR_CODES, type NodeDiffErrorCode, type NodeOutputErrorCode };
+type CrossedEffect = {
+    kind: "tool" | "task";
+    toolName: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    seq: number;
+    effectStatus: "succeeded" | "unknown";
+    idempotent: boolean;
+    hasRevert: boolean;
+    startedAtMs: number;
+    reason?: string;
+};
+type EffectBoundaryReport = {
+    blocking: CrossedEffect[];
+    revertible: CrossedEffect[];
+    warnings: CrossedEffect[];
+};
+type EffectRevertStarted = {
+    type: "EffectRevertStarted";
+    runId: string;
+    operation: string;
+    kind: "tool" | "task";
+    toolName: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    seq: number;
+    effectStatus: "succeeded" | "unknown";
+    timestampMs: number;
+};
+type EffectRevertFinished = {
+    type: "EffectRevertFinished";
+    runId: string;
+    operation: string;
+    kind: "tool" | "task";
+    toolName: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    seq: number;
+    timestampMs: number;
+};
+type EffectRevertFailed = Omit<EffectRevertFinished, "type"> & {
+    type: "EffectRevertFailed";
+    error: string;
+};
+type SideEffectBoundaryCrossed = {
+    type: "SideEffectBoundaryCrossed";
+    runId: string;
+    opId: string;
+    operation: string;
+    report: EffectBoundaryReport;
+    timestampMs: number;
+    parentRunId?: string;
+    warningOnly?: boolean;
+    lateCompletion?: boolean;
+    archivedByOp?: string;
+};
+
+export { type CrossedEffect, DEVTOOLS_ERROR_CODES, DEVTOOLS_PROTOCOL_VERSION, type DevToolsAgentRef, type DevToolsAgentSummary, type DevToolsDelta, type DevToolsDeltaOp, type DevToolsErrorCode, type DevToolsEvent, type DevToolsNode, type DevToolsNodeType, type DevToolsRunState, type DevToolsSnapshot, type EffectBoundaryReport, type EffectRevertFailed, type EffectRevertFinished, type EffectRevertStarted, JUMP_TO_FRAME_ERROR_CODES, type JumpToFrameErrorCode, NODE_DIFF_ERROR_CODES, NODE_OUTPUT_ERROR_CODES, type NodeDiffErrorCode, type NodeOutputErrorCode, type SideEffectBoundaryCrossed };

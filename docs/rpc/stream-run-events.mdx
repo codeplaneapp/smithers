@@ -18,3 +18,8 @@ Errors are versioned as `v1` and include `InvalidRequest`, `Unauthorized`, `Forb
 - **Reconnect:** pass the last seen `seq` as `afterSeq`.
 - **Gap resync:** if `seq` was truncated (default window `10000`), the stream emits `GapResync { fromSeq, toSeq }` with a full run snapshot, then resumes.
 - **Heartbeat:** `Heartbeat` frames are emitted separately from event frames.
+
+`SideEffectBoundaryCrossed` rows include `lateCompletion: true` and
+`archivedByOp` when applicable after a detached tool completed after its live
+journal row was reverted or archived. A still-live row moves to
+`revert-stale`.

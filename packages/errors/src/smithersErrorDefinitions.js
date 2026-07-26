@@ -43,6 +43,11 @@ export const smithersErrorDefinitions = {
         when: "A requested time-travel snapshot or frame does not exist.",
         details: "{ runId, frameNo }",
     },
+    TIME_TRAVEL_SIDE_EFFECT_BLOCKED: {
+        category: "engine",
+        when: "A time-travel operation would cross an external side effect that was not reverted or explicitly forced.",
+        details: "{ runId, operation, report }",
+    },
     VCS_WORKSPACE_CREATE_FAILED: {
         category: "engine",
         when: "Smithers fails to materialize a jj workspace for time-travel or replay.",

@@ -251,6 +251,17 @@ async function waitForActiveRunPopulated(beforeAgentStart: (...args: any[]) => a
   throw new Error("active run never populated from the gateway stream");
 }
 
+// Poll until a store's devtools stream is live again, proving connect() re-armed it.
+async function waitForStreaming(store: { connectionState: { kind: string } }) {
+  for (let i = 0; i < 200; i++) {
+    if (store.connectionState.kind === "streaming") {
+      return;
+    }
+    await sleep(10);
+  }
+  throw new Error(`store never reached streaming (was ${store.connectionState.kind})`);
+}
+
 describe("pi-plugin extension commands", () => {
   const servers: Server[] = [];
 
@@ -569,6 +580,52 @@ describe("pi-plugin extension commands", () => {
     expect(opened).toBe(true);
 
     await pi.handlers.get("session_shutdown")!();
+  });
+
+  test("reopening the inspector re-arms the store the previous close disconnected", async () => {
+    const fixture = await gatewayFixture(waitingSnapshot("run-x"));
+    servers.push(fixture.server);
+    const pi = await boot({ "smithers-url": fixture.baseUrl });
+    const shutdown = pi.handlers.get("session_shutdown")!;
+    const smithers = pi.commands.get("smithers");
+
+    const inspectors: RunInspector[] = [];
+    const { ctx } = makeCtx({
+      hasUI: true,
+      // pi's showExtensionCustom disposes the component when its `close` runs,
+      // which is what RunInspector passes as onClose (q/escape).
+      custom: async (factory) => {
+        inspectors.push(factory(null, plainTheme, null, () => {}) as RunInspector);
+      },
+    });
+    const storeOf = (inspector: RunInspector) => (inspector as unknown as { store: any }).store;
+
+    await smithers.handler("run-x", ctx);
+    const store = storeOf(inspectors[0]);
+    await waitForStreaming(store);
+    const eventsBeforeClose = store.eventsApplied;
+
+    // q/escape -> pi close -> dispose -> the shared store is torn down, but the
+    // TrackedRun stays cached.
+    inspectors[0].dispose();
+    expect(store.runId).toBeUndefined();
+    expect(store.connectionState.kind).toBe("disconnected");
+
+    // Reopen with no arg: resolves the cached run via activeRunId, bypassing trackRun.
+    await smithers.handler("", ctx);
+    expect(storeOf(inspectors[1])).toBe(store);
+    expect(store.runId).toBe("run-x");
+    await waitForStreaming(store);
+    expect(store.eventsApplied).toBeGreaterThan(eventsBeforeClose);
+
+    // And again by explicit run id, through trackRun's cache-hit branch.
+    inspectors[1].dispose();
+    await smithers.handler("run-x", ctx);
+    expect(storeOf(inspectors[2])).toBe(store);
+    expect(store.runId).toBe("run-x");
+    await waitForStreaming(store);
+
+    await shutdown();
   });
 
   test("/smithers-watch prompts when no id is given and completes tracked run ids", async () => {

@@ -48,18 +48,42 @@
   "navigation": {
     "tabs": [
       {
-        "tab": "For Humans",
+        "tab": "Home",
+        "groups": [
+          {
+            "group": "Welcome",
+            "pages": [
+              "index"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Product API",
         "groups": [
           {
             "group": "Start here",
             "pages": [
-              "index"
+              "guide/what-is-smithers"
             ]
           },
           {
             "group": "Tutorials",
             "pages": [
               "guide/get-started"
+            ]
+          },
+          {
+            "group": "Set up",
+            "pages": [
+              "guide/setup/claude-code",
+              "guide/setup/codex",
+              "guide/setup/cursor",
+              "guide/setup/copilot",
+              "guide/setup/pi",
+              "guide/setup/hermes",
+              "guide/setup/openclaw",
+              "guide/setup/semantic-memory"
             ]
           },
           {
@@ -73,13 +97,13 @@
           {
             "group": "Reference",
             "pages": [
-              "guide/what-you-can-do"
+              "guide/what-you-can-do",
+              "guide/capabilities"
             ]
           },
           {
             "group": "Explanation",
             "pages": [
-              "guide/what-is-smithers",
               "guide/concepts",
               "guide/context-engineering"
             ]
@@ -95,7 +119,7 @@
         ]
       },
       {
-        "tab": "For Agents",
+        "tab": "Technical API",
         "groups": [
       {
         "group": "Start",

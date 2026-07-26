@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useKeyboard } from "@opentui/react";
 import { spawn } from "node:child_process";
 import { useRunTree, useRunEvents, TUI_EVENT_CAP } from "../data.ts";
@@ -9,6 +9,7 @@ import { isModifiedKeyEvent } from "./treeUtils.ts";
 import { runNodeKey, type GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 import {
   hijackCandidates,
+  pinnedHijackRows,
   nodeSelectOption,
   hijackExitMessage,
   startHijackSession,
@@ -47,7 +48,14 @@ export function Selecting({
   onSelect: (node: GatewayRunNode) => void;
   onCancel: () => void;
 }) {
-  const selectOptions = nodes.map(nodeSelectOption);
+  // `nodes` is recomputed from live events on every frame while the select keeps
+  // its highlight by numeric index, so pin the rows the picker has already shown
+  // to their positions: a node completing mid-selection can then never slide the
+  // list up under the highlight and hand the terminal to a different session.
+  const rowsRef = useRef<readonly GatewayRunNode[]>([]);
+  const rows = pinnedHijackRows(rowsRef.current, nodes);
+  rowsRef.current = rows;
+  const selectOptions = useMemo(() => rows.map(nodeSelectOption), [rows]);
   const overlayOpen = useOverlayOpen();
 
   useKeyboard((e) => {
@@ -79,7 +87,7 @@ export function Selecting({
           // Resolve by the unique row key the option carries (see
           // nodeSelectOption), so the exact attempt the user highlighted is the
           // one handed off — not the first row that shares its logical id.
-          const node = nodes.find((n) => runNodeKey(n) === opt.value);
+          const node = rows.find((n) => runNodeKey(n) === opt.value);
           if (node) onSelect(node);
         }}
       />

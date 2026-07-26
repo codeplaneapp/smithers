@@ -1,7 +1,7 @@
 import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
 
 export const DETACHED_ADMISSION_NONCE_ENV = "SMITHERS_DETACHED_ADMISSION_NONCE";
-export const DETACHED_ADMISSION_TIMEOUT_MS = 10_000;
+export const DETACHED_ADMISSION_TIMEOUT_MS = 30_000;
 
 const LOG_TAIL_BYTES = 32 * 1024;
 const POLL_INTERVAL_MS = 50;

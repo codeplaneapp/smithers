@@ -257,6 +257,7 @@ const CREATE_TABLE_STATEMENTS = [
     iteration INTEGER NOT NULL DEFAULT 0,
     attempt INTEGER NOT NULL,
     seq INTEGER NOT NULL,
+    call_token TEXT,
     tool_name TEXT NOT NULL,
     input_json TEXT,
     output_json TEXT,
@@ -264,7 +265,46 @@ const CREATE_TABLE_STATEMENTS = [
     finished_at_ms INTEGER,
     status TEXT NOT NULL,
     error_json TEXT,
+    kind TEXT,
+    side_effect INTEGER,
+    idempotent INTEGER,
+    accepts_idempotency_key INTEGER,
+    has_revert INTEGER,
+    idempotency_key TEXT,
+    revert_status TEXT /* null | reverting | reverted | revert-failed | revert-stale */,
+    reverted_at_ms INTEGER,
+    revert_error_json TEXT,
+    forced_past_json TEXT,
     PRIMARY KEY (run_id, node_id, iteration, attempt, seq)
+  )`,
+    `CREATE TABLE IF NOT EXISTS _smithers_tool_call_archive (
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    iteration INTEGER NOT NULL DEFAULT 0,
+    attempt INTEGER NOT NULL,
+    seq INTEGER NOT NULL,
+    call_token TEXT,
+    tool_name TEXT NOT NULL,
+    input_json TEXT,
+    output_json TEXT,
+    started_at_ms INTEGER NOT NULL,
+    finished_at_ms INTEGER,
+    status TEXT NOT NULL,
+    error_json TEXT,
+    kind TEXT,
+    side_effect INTEGER,
+    idempotent INTEGER,
+    accepts_idempotency_key INTEGER,
+    has_revert INTEGER,
+    idempotency_key TEXT,
+    revert_status TEXT /* null | reverting | reverted | revert-failed | revert-stale */,
+    reverted_at_ms INTEGER,
+    revert_error_json TEXT,
+    forced_past_json TEXT,
+    archived_by_op TEXT NOT NULL,
+    archived_at_ms INTEGER NOT NULL,
+    archive_reason TEXT NOT NULL,
+    PRIMARY KEY (run_id, node_id, iteration, attempt, seq, archived_by_op)
   )`,
     `CREATE TABLE IF NOT EXISTS _smithers_workspace_states (
     run_id TEXT NOT NULL,
@@ -1064,6 +1104,23 @@ export class SqlMessageStorage {
         const filteredRow = this.filterKnownColumns(table, row);
         const { statement, params } = buildInsertSql(table, filteredRow, { orIgnore: true }, this.dialect);
         return this.execute(statement, params);
+    }
+    /**
+   * Like {@link insertIgnore} but reports whether *this* call is the one that
+   * inserted the row. The verdict comes from the insert's own `RETURNING`
+   * rows, never from a preceding `SELECT`: PostgreSQL runs Smithers'
+   * transactions at READ COMMITTED, so two concurrent claimants can both read
+   * no row, and `ON CONFLICT DO NOTHING` then silently no-ops for the loser
+   * instead of raising. Only the winner gets a row back.
+   * @param {string} table
+   * @param {Record<string, unknown>} row
+   * @returns {Promise<boolean>}
+   */
+    async insertIgnoreReturningInserted(table, row) {
+        const filteredRow = this.filterKnownColumns(table, row);
+        const { statement, params } = buildInsertSql(table, filteredRow, { orIgnore: true }, this.dialect);
+        const rows = await this.queryAllRaw(`${statement} RETURNING 1`, params);
+        return rows.length > 0;
     }
     /**
    * @param {string} table

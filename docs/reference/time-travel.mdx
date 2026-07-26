@@ -24,9 +24,10 @@ import type {
 } from "smithers-orchestrator";
 ```
 
-Both take the run's `SmithersDb` adapter as their first argument. Neither throws
-for a missing attempt or pointer: both report failure via the returned `success`
-boolean, so inspect `result.success` rather than wrapping the call in `try`/`catch`.
+Both take the run's `SmithersDb` adapter as their first argument. A missing
+attempt or pointer returns `success: false`. Crossing an unresolved external
+effect throws `TIME_TRAVEL_SIDE_EFFECT_BLOCKED` with the boundary report in
+the error details.
 
 ## timeTravel
 
@@ -67,6 +68,13 @@ function timeTravel(adapter: SmithersDb, opts: TimeTravelOptions): Promise<TimeT
       Restore the working copy from the attempt's JJ pointer before resetting
       nodes. Set `false` to reset DB state without touching the filesystem.
     </ParamField>
+    <ParamField path="force" type="boolean" default="false">
+      Cross unresolved external effects, record the crossing, and mark the run
+      for attention.
+    </ParamField>
+    <ParamField path="noRevert" type="boolean" default="false">
+      Skip registered compensation handlers. Skipped effects require `force`.
+    </ParamField>
     <ParamField path="onProgress" type="(event: SmithersEvent) => void">
       Callback for `TimeTravelStarted` / `TimeTravelFinished` events. See
       [`SmithersEvent`](/reference/types).
@@ -89,6 +97,10 @@ function timeTravel(adapter: SmithersDb, opts: TimeTravelOptions): Promise<TimeT
     </ResponseField>
     <ResponseField name="resetNodes" type="string[]">
       The node ids flipped back to `pending`, deduplicated.
+    </ResponseField>
+    <ResponseField name="effectBoundary" type="EffectBoundaryReport">
+      Unconditional report with `blocking`, `revertible`, and `warnings`
+      arrays.
     </ResponseField>
     <ResponseField name="error" type="string">
       Failure reason. Present only when `success` is `false`.
@@ -142,6 +154,12 @@ function revertToAttempt(adapter: SmithersDb, opts: RevertOptions): Promise<Reve
     <ParamField path="attempt" type="number" required>
       Attempt number to restore.
     </ParamField>
+    <ParamField path="force" type="boolean" default="false">
+      Cross unresolved external effects and mark the run for attention.
+    </ParamField>
+    <ParamField path="noRevert" type="boolean" default="false">
+      Skip registered compensation handlers. Skipped effects require `force`.
+    </ParamField>
     <ParamField path="onProgress" type="(event: SmithersEvent) => void">
       Callback for `RevertStarted` / `RevertFinished` events. See
       [`SmithersEvent`](/reference/types).
@@ -161,6 +179,10 @@ function revertToAttempt(adapter: SmithersDb, opts: RevertOptions): Promise<Reve
     </ResponseField>
     <ResponseField name="error" type="string">
       Failure reason. Present only when `success` is `false`.
+    </ResponseField>
+    <ResponseField name="effectBoundary" type="EffectBoundaryReport">
+      Unconditional report with `blocking`, `revertible`, and `warnings`
+      arrays.
     </ResponseField>
   </Expandable>
 </ResponseField>
@@ -182,6 +204,28 @@ workspace; the target attempt must have completed while JJ was available
 (otherwise no pointer was captured). See [Revert](/runtime/revert) for the
 requirements and the equivalent CLI command.
 </Note>
+
+## External-effect boundary
+
+Marked tool calls and Tasks are checked before history moves. Discard
+operations compensate entries with a registered handler before changing VCS
+or database history. Replays and running forks never compensate the parent
+run. Every result carries:
+
+```ts
+type EffectBoundaryReport = {
+  blocking: CrossedEffect[];
+  revertible: CrossedEffect[];
+  warnings: CrossedEffect[];
+};
+```
+
+The guard treats `unknown` like `succeeded`. A process may stop after an
+external API accepted a request but before Smithers recorded the response.
+Pass `force: true` only when double execution or external drift is acceptable.
+
+Git commits, ref changes, worktree writes, and `git push` are exempt. GitHub
+API mutations are not.
 
 **Source** [`revert.js`](https://github.com/smithersai/smithers/blob/main/packages/time-travel/src/revert.js) · [`RevertOptions.ts`](https://github.com/smithersai/smithers/blob/main/packages/time-travel/src/RevertOptions.ts) · **Tests** [`revert.test.js`](https://github.com/smithersai/smithers/blob/main/packages/time-travel/tests/revert.test.js) · **See also** [Revert](/runtime/revert), [`timeTravel`](#timetravel)
 

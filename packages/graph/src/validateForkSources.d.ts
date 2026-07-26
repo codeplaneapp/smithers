@@ -1,6 +1,8 @@
 import { TaskDescriptor as TaskDescriptor$1 } from './types.js';
 import 'zod';
 import './ProofBinding.js';
+import './TaskSideEffect.js';
+import './TaskRevertContext.js';
 
 /**
  * Validate `<Task fork>` references across the extracted task list. Throws a

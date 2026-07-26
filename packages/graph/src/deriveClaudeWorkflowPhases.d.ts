@@ -4,6 +4,8 @@ import { GraphSnapshot as GraphSnapshot$1, TaskDescriptor as TaskDescriptor$1 } 
 import './ClaudeWorkflowPhase.js';
 import 'zod';
 import './ProofBinding.js';
+import './TaskSideEffect.js';
+import './TaskRevertContext.js';
 
 /**
  * Derive a Claude Code /workflows phase plan from a live GraphSnapshot

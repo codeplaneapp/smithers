@@ -30,6 +30,7 @@ export type GatewayRpcErrorCode =
   | "UnsupportedSandbox"
   | "VcsError"
   | "RewindFailed"
+  | "TIME_TRAVEL_SIDE_EFFECT_BLOCKED"
   | "Internal"
   | "REVISION_CONFLICT"
   | "SSRF_BLOCKED"
@@ -188,6 +189,84 @@ export type RewindRunRequest = {
   runId: string;
   frameNo: number;
   confirm: true;
+  force?: boolean;
+  noRevert?: boolean;
+};
+
+export type CrossedEffect = {
+  kind: "tool" | "task";
+  toolName: string;
+  nodeId: string;
+  iteration: number;
+  attempt: number;
+  seq: number;
+  effectStatus: "succeeded" | "unknown";
+  idempotent: boolean;
+  hasRevert: boolean;
+  startedAtMs: number;
+  reason?: string;
+};
+
+export type EffectBoundaryReport = {
+  blocking: CrossedEffect[];
+  revertible: CrossedEffect[];
+  warnings: CrossedEffect[];
+};
+
+export type RewindRunResponse = {
+  ok: true;
+  newFrameNo: number;
+  revertedSandboxes: number;
+  deletedFrames: number;
+  deletedAttempts: number;
+  invalidatedDiffs: number;
+  durationMs: number;
+  effectBoundary: EffectBoundaryReport;
+};
+
+export type EffectRevertStarted = {
+  type: "EffectRevertStarted";
+  runId: string;
+  operation: string;
+  kind: "tool" | "task";
+  toolName: string;
+  nodeId: string;
+  iteration: number;
+  attempt: number;
+  seq: number;
+  effectStatus: "succeeded" | "unknown";
+  timestampMs: number;
+};
+
+export type EffectRevertFinished = {
+  type: "EffectRevertFinished";
+  runId: string;
+  operation: string;
+  kind: "tool" | "task";
+  toolName: string;
+  nodeId: string;
+  iteration: number;
+  attempt: number;
+  seq: number;
+  timestampMs: number;
+};
+
+export type EffectRevertFailed = Omit<EffectRevertFinished, "type"> & {
+  type: "EffectRevertFailed";
+  error: string;
+};
+
+export type SideEffectBoundaryCrossed = {
+  type: "SideEffectBoundaryCrossed";
+  runId: string;
+  opId: string;
+  operation: string;
+  report: EffectBoundaryReport;
+  timestampMs: number;
+  parentRunId?: string;
+  warningOnly?: boolean;
+  lateCompletion?: boolean;
+  archivedByOp?: string;
 };
 
 export type SubmitApprovalRequest = {
@@ -598,6 +677,10 @@ export type GatewayEventFrame<Payload = unknown> = {
 export type BrowserFrameEvent = { sessionId: string; seq: number; jpegBase64: string; viewport: { width: number; height: number } };
 export type BrowserActivityEvent = { sessionId: string; actionId: string; actor: Exclude<BrowserActor, "page">; revision: number; action: BrowserAction; result: BrowserOutcome };
 
+export type GatewayRpcErrorDetails = Record<string, unknown> & {
+  report?: EffectBoundaryReport;
+};
+
 export type GatewayResponseFrame<Payload = unknown> =
   | {
       type: "res";
@@ -617,6 +700,6 @@ export type GatewayResponseFrame<Payload = unknown> =
         message: string;
         requiredScope?: string;
         refresh?: string;
-        details?: unknown;
+        details?: GatewayRpcErrorDetails;
       };
     };

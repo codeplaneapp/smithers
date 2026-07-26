@@ -294,6 +294,31 @@ describe("POST /api/sessions (OIDC)", () => {
     expect(((await res.json()) as { error: string }).error).toContain("expired");
   });
 
+  test("returns a 503 JSON error when the issuer's JWKS is down", async () => {
+    const env = await buildTestEnv();
+    await registerRepo(env, REPO);
+    const flaky = serveMutableJwks([keypair.publicJwk]);
+    flaky.setResponse({ error: "unavailable" }, 503);
+    const worker = makeWorker(flaky.url);
+    const token = await signTestJwt(keypair, baseClaims(REPO, 7, Math.floor(Date.now() / 1000) + 600));
+    try {
+      const res = await worker.fetch(
+        new Request("https://review.test/api/sessions", {
+          method: "POST",
+          body: JSON.stringify({ oidcToken: token }),
+        }),
+        env,
+      );
+      // A transient upstream blip must stay inside the documented JSON error
+      // contract, not escape as an unhandled throw the runtime turns into a
+      // bare 500 the action cannot tell apart from a hard auth failure.
+      expect(res.status).toBe(503);
+      expect(((await res.json()) as { error: string }).error).toContain("jwks-unavailable");
+    } finally {
+      flaky.stop();
+    }
+  });
+
   test("returns 403 with a registration hint for unknown repos", async () => {
     const env = await buildTestEnv();
     const worker = makeWorker(jwks.url);

@@ -61,6 +61,17 @@ test("a stale smithers skill is rewritten to the bundled version", () => {
   expect(readFileSync(join(f.claudeSkill("smithers"), "llms-full.txt"), "utf8")).toBe(CURRENT_BUNDLE);
 });
 
+test("a stale llms-full bundle is rewritten even when SKILL.md is current", () => {
+  const f = fixture();
+  writeSkillDir(f.claudeSkill("smithers"), CURRENT_SKILL, "old bundle\n");
+
+  const result = refresh(f);
+
+  expect(result.changed).toBe(true);
+  expect(result.updated.some((u) => u.reason === "stale")).toBe(true);
+  expect(readFileSync(join(f.claudeSkill("smithers"), "llms-full.txt"), "utf8")).toBe(CURRENT_BUNDLE);
+});
+
 test("an up-to-date skill is left untouched (idempotent)", () => {
   const f = fixture();
   writeSkillDir(f.claudeSkill("smithers"), CURRENT_SKILL, CURRENT_BUNDLE);
@@ -129,6 +140,17 @@ test("ensureCuratedSkillsFresh scans once then short-circuits until the source c
   // Second call moments later with the same bundled source: throttled to null.
   const second = ensureCuratedSkillsFresh({ homeDir: f.homeDir, sourceDir: f.sourceDir, env: {}, now: 2000 });
   expect(second).toBeNull();
+
+  // A docs-only package change must invalidate the marker too.
+  writeFileSync(join(f.sourceDir, "llms-full.txt"), "LLMS-FULL BUNDLE v3\n");
+  const docsChanged = ensureCuratedSkillsFresh({
+    homeDir: f.homeDir,
+    sourceDir: f.sourceDir,
+    env: {},
+    now: 2500,
+  });
+  expect(docsChanged?.changed).toBe(true);
+  expect(readFileSync(join(f.claudeSkill("smithers"), "llms-full.txt"), "utf8")).toBe("LLMS-FULL BUNDLE v3\n");
 
   // Opt-out env always returns null.
   const optedOut = ensureCuratedSkillsFresh({

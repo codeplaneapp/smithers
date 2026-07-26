@@ -36,6 +36,7 @@ import type {
   ListWorkflowsResponse,
   NodeRequest,
   RewindRunRequest,
+  RewindRunResponse,
   ResumeRunRequest,
   ResumeRunResponse,
   StreamDevToolsRequest,
@@ -120,7 +121,7 @@ export type GatewayRpcResponseMap = {
   cancelRun: CancelRunResponse;
   pauseRun: PauseRunResponse;
   hijackRun: HijackRunResponse;
-  rewindRun: Record<string, unknown>;
+  rewindRun: RewindRunResponse;
   submitApproval: SubmitApprovalResponse;
   submitSignal: Record<string, unknown>;
   getRun: Record<string, unknown>;

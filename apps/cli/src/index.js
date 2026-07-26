@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 import { setJsonMode } from "./util/logger.ts";
 import { ensureCuratedSkillsFresh, formatRefreshNotice } from "./refreshCuratedSkills.js";
+import { curatedSkillStatus, formatCuratedSkillList, formatSkillsAddSummary, syncCuratedSkill } from "./curatedSkillSync.js";
+import { syncSkillsAfterUpgrade } from "./syncSkillsAfterUpgrade.js";
 import { extractBackendFlag, findFirstPositionalIndex, rewriteBareResumeFlagArgv } from "./argv-utils.js";
 import { CHAT_CREATE_PROMPT, INLINE_CHAT_ENGINES, buildInlineChatWorkflow } from "./buildInlineChatWorkflow.js";
 import { readBackendMarkerForCwd } from "./readBackendMarkerForCwd.js";
@@ -42,12 +44,12 @@ import { findAndOpenDb, findSmithersDb } from "./find-db.js";
 import { cliWorkspace } from "./cliWorkspace.js";
 import { cascadeCancelRun, finalizeCancelledOwnedRun, isCancellableRunStatus, listCascadeLineage } from "./cancel-cascade.js";
 import { isDaemonDisabled } from "./isDaemonDisabled.js";
-import { assertGatewayRuntimeStateFileTrusted, canonicalWorkspacePath, claimGatewayAutostartLock, claimGatewayDaemonStartLock, clearGatewayRuntimeState, discoverWorkspaceGateway, gatewayRuntimePaths, isGatewayPidAlive, mintGatewayToken, probeGatewayHealthIdentity, readGatewayRuntimeState, resolveGatewayBearer, verifyGatewayHealthIdentity, waitForWorkspaceGateway, writeGatewayRuntimeState } from "./gateway-runtime.js";
+import { assertGatewayRuntimeStateFileTrusted, canonicalWorkspacePath, claimGatewayAutostartLock, claimGatewayDaemonStartLock, clearGatewayRuntimeState, describeGatewayStartInProgress, discoverWorkspaceGateway, gatewayAutostartWaitMs, gatewayRuntimePaths, isGatewayPidAlive, mintGatewayToken, probeGatewayHealthIdentity, readGatewayRuntimeState, resolveGatewayBearer, verifyGatewayHealthIdentity, waitForWorkspaceGateway, writeGatewayRuntimeState } from "./gateway-runtime.js";
 import { buildAskKindFields, buildAskPromptText, buildAskUniqueToken, formatAskHumanResolveHelp, parseChoices, resolveAskHumanContext, } from "./ask-human.js";
 import { chatAttemptKey, formatChatAttemptHeader, formatChatBlock, parseAgentEvent, parseChatAttemptMeta, parseNodeOutputEvent, selectChatAttempts, } from "./chat.js";
 import { buildHijackLaunchSpec, isNativeHijackCandidate, launchHijackSession, resolveHijackCandidate, waitForHijackCandidate, } from "./hijack.js";
 import { mcpAddFallbackMessage } from "./agent-wiring/mcpAddFallbackMessage.js";
-import { parseAgentWiringArgv } from "./agent-wiring/parseAgentWiringArgv.js";
+import { parseAgentWiringArgv, parseSkillsSubcommandArgv } from "./agent-wiring/parseAgentWiringArgv.js";
 import { EXTRA_MCP_AGENTS, EXTRA_SKILL_AGENTS, wireExtraAgents } from "./agent-wiring/wireExtraAgents.js";
 import { launchConversationHijackSession, persistConversationHijackHandoff, } from "./hijack-session.js";
 import { colorizeEventText, formatAge, formatElapsedCompact, formatEventLine, formatRelativeOffset, } from "./format.js";
@@ -76,7 +78,7 @@ import { whatHappened } from "./what-happened.js";
 import { openInBrowser } from "./openInBrowser.js";
 import { parseCliErrorFromStderr } from "./util/errorMessage.js";
 import { runBugCommand } from "./runBugCommand.js";
-import { discoverWorkflows, resolveWorkflow, createWorkflowFile, renderWorkflowSkill, writeWorkflowSkillFiles, resolvePackDirs, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
+import { countDiscoverableWorkflows, discoverWorkflows, resolveWorkflow, createWorkflowFile, renderWorkflowSkill, writeWorkflowSkillFiles, resolvePackDirs, summarizeWorkflowInputSchema, workflowInputJsonSchema } from "./workflows.js";
 import { addPack, removePack, listPacks, listLockedPacks, updatePack, ejectPack } from "./packs.js";
 import { sharePack } from "./share.js";
 import { createEvalsExtension } from "./evals-extension.js";
@@ -128,6 +130,7 @@ import {
 } from "./update-check.js";
 import { SOTA_REGISTRY_VERSION } from "./sota-models.generated.js";
 import { reportReplayResult } from "./reportReplayResult.js";
+import { renderEffectBoundaryReport } from "./renderEffectBoundaryReport.js";
 import { buildClaudeMirrorTick } from "./claude-mirror/buildClaudeMirrorTick.js";
 import { buildClaudeNodeWait } from "./claude-mirror/buildClaudeNodeWait.js";
 import { runClaudeMonitor } from "./claude-mirror/runClaudeMonitor.js";
@@ -1837,6 +1840,7 @@ const eventsOptions = z.object({
     groupBy: z.string().optional().describe("Group output by \"node\" or \"attempt\""),
     watch: z.boolean().default(false).describe("Watch mode: append new events as they arrive"),
     interval: z.number().positive().default(2).describe("Watch poll interval in seconds"),
+    history: z.boolean().default(false).describe("Replay existing history before tailing in watch mode (watch starts at the live cursor by default)"),
     raw: z.boolean().default(false).describe("Include raw agent chunk/tool history instead of the default lifecycle-only view"),
 });
 const chatArgs = z.object({
@@ -1964,6 +1968,8 @@ const revertOptions = z.object({
     nodeId: z.string().describe("Node ID to revert to"),
     attempt: z.number().int().min(1).default(1).describe("Attempt number"),
     iteration: z.number().int().min(0).default(0).describe("Loop iteration number"),
+    force: z.boolean().default(false).describe("Cross unresolved effects; mark needs-attention"),
+    revert: z.boolean().default(true).describe("Compensate effects; --no-revert skips"),
 });
 const workflowPathArgs = z.object({
     name: z.string().describe("Workflow ID"),
@@ -3031,9 +3037,13 @@ async function ensureWorkspaceGateway(workspace, preferredPort) {
     if (discovered) {
         return { base: discovered.state.url, token: discovered.state.token, started: false };
     }
-    const lock = claimGatewayAutostartLock(workspace);
+    // Size the wait to the boot it is waiting on: a ~130-workflow pack keeps a
+    // core busy well past listen(), and a flat budget timed out on it (#1362).
+    // The count is a directory listing, so it costs nothing to read up front.
+    const workflowCount = countDiscoverableWorkflows(workspace);
+    const lock = claimGatewayAutostartLock(workspace, process.env, { workflowCount });
     if (!lock) {
-        const awaited = await waitForWorkspaceGateway(workspace);
+        const awaited = await waitForWorkspaceGateway(workspace, { workflowCount });
         return awaited ? { base: awaited.state.url, token: awaited.state.token, started: false } : null;
     }
     let child;
@@ -3071,14 +3081,15 @@ async function ensureWorkspaceGateway(workspace, preferredPort) {
         catch { }
     }
     try {
-        // Gateway boot loads + compiles every workspace workflow before it
-        // listens, so allow generous time for the state file to appear.
+        // Gateway boot binds before it loads workflows, but a large pack keeps
+        // transpiling afterwards, so the state file can lag the spawn on a busy
+        // machine. The budget scales with the pack (see gatewayAutostartWaitMs).
         const childFailure = new Promise((resolvePromise) => {
             child.once("error", (error) => resolvePromise({ kind: "error", error }));
             child.once("exit", (code, signal) => resolvePromise({ kind: "exit", code, signal }));
         });
         const result = await Promise.race([
-            waitForWorkspaceGateway(workspace).then((awaited) => ({ kind: "ready", awaited })),
+            waitForWorkspaceGateway(workspace, { workflowCount }).then((awaited) => ({ kind: "ready", awaited })),
             childFailure.then((failure) => ({ kind: "failed", failure })),
         ]);
         if (result.kind === "failed") {
@@ -3523,11 +3534,16 @@ async function runGatewayCommand(options) {
     const workspace = localWorkspace ?? dirname(dbPath);
     const startLock = claimGatewayDaemonStartLock(workspace);
     if (!startLock) {
-        const winner = await waitForWorkspaceGateway(workspace);
+        const workflowCount = countDiscoverableWorkflows(workspace);
+        const waitedMs = gatewayAutostartWaitMs(workflowCount);
+        const winner = await waitForWorkspaceGateway(workspace, { workflowCount });
         if (winner) {
             throw gatewayAlreadyRunningError(workspace, winner.state);
         }
-        throw new SmithersError("GATEWAY_START_IN_PROGRESS", `Another gateway start is already in progress for ${workspace}, but no healthy gateway became discoverable before the wait timed out.`, { workspace });
+        // The other boot is still running — say so, with its age and progress,
+        // instead of implying no gateway will ever appear (#1362).
+        const inProgress = describeGatewayStartInProgress(workspace, { waitedMs });
+        throw new SmithersError("GATEWAY_START_IN_PROGRESS", inProgress.message, inProgress.details);
     }
     let startLockReleased = false;
     const releaseStartLock = () => {
@@ -6413,6 +6429,13 @@ const cli = Cli.create({
             if (c.options.watch) {
                 watchIntervalMs = resolveWatchIntervalMsOrFail("events", c.options.interval, fail);
             }
+            // Tailing a live run starts at the CURRENT cursor: replaying the whole
+            // event log before the first new event buries what `--watch` is for.
+            // `--history` (or an explicit `--since` window) opts back into the
+            // replay, and a terminal run still prints history because there is
+            // nothing left to tail. (#1355)
+            const willTail = c.options.watch && !isRunStatusTerminal(run.status);
+            const replayHistory = !willTail || c.options.history || query.sinceTimestampMs !== undefined;
             const filters = {
                 nodeId: query.nodeId,
                 type: query.typeName,
@@ -6421,11 +6444,12 @@ const cli = Cli.create({
                 json: query.json,
                 groupBy,
                 watch: c.options.watch,
+                history: replayHistory,
             };
             const baseMs = run.startedAtMs ??
                 run.createdAtMs ??
                 Date.now();
-            const totalCount = query.defaultLimitUsed && !query.json
+            const totalCount = replayHistory && query.defaultLimitUsed && !query.json
                 ? await countEventHistory(adapter, c.args.runId, {
                     nodeId: query.nodeId,
                     eventTypes: query.eventTypes,
@@ -6434,8 +6458,8 @@ const cli = Cli.create({
                 : undefined;
             const groupedEvents = [];
             let emitted = 0;
-            let lastSeq = -1;
-            while (emitted < query.limit) {
+            let lastSeq = replayHistory ? -1 : ((await adapter.getLastEventSeq(c.args.runId)) ?? -1);
+            while (replayHistory && emitted < query.limit) {
                 const pageLimit = Math.min(EVENTS_PAGE_SIZE, query.limit - emitted);
                 const page = await queryEventHistoryPage(adapter, c.args.runId, {
                     afterSeq: lastSeq,
@@ -6478,7 +6502,7 @@ const cli = Cli.create({
                 totalCount > query.limit) {
                 yield `showing first ${query.limit} of ${totalCount} events, use --limit to see more`;
             }
-            if (c.options.watch && !isRunStatusTerminal(run.status)) {
+            if (willTail) {
                 /**
        * @param {EventHistoryRow[]} events
        */
@@ -8316,8 +8340,12 @@ const cli = Cli.create({
                     nodeId: c.options.nodeId,
                     iteration: c.options.iteration,
                     attempt: c.options.attempt,
+                    force: c.options.force,
+                    noRevert: !c.options.revert,
+                    caller: "cli",
                     onProgress: (e) => console.log(JSON.stringify(e)),
                 });
+                process.stderr.write(renderEffectBoundaryReport(result.effectBoundary));
                 process.exitCode = result.success ? 0 : 1;
                 return c.ok(result);
             }
@@ -8326,6 +8354,7 @@ const cli = Cli.create({
             }
         }
         catch (err) {
+            process.stderr.write(renderEffectBoundaryReport(err?.details?.report));
             return fail({ code: "REVERT_FAILED", message: err?.message ?? String(err), exitCode: 1 });
         }
     },
@@ -8404,6 +8433,7 @@ const cli = Cli.create({
         deps: z.boolean().default(true).describe("Also reset dependents. Use --no-deps to reset only this node."),
         resume: z.boolean().default(false).describe("Resume the workflow after time travel"),
         force: z.boolean().default(false).describe("Force even if run is still running"),
+        revert: z.boolean().default(true).describe("Compensate effects; --no-revert skips"),
     }),
     alias: { runId: "r", nodeId: "n", attempt: "a" },
     async run(c) {
@@ -8426,8 +8456,12 @@ const cli = Cli.create({
                     attempt: c.options.attempt,
                     resetDependents: c.options.deps,
                     restoreVcs: c.options.vcs,
+                    force: c.options.force,
+                    noRevert: !c.options.revert,
+                    caller: "cli",
                     onProgress: (e) => console.log(JSON.stringify(e)),
                 });
+                process.stderr.write(renderEffectBoundaryReport(result.effectBoundary));
                 if (!result.success || !c.options.resume) {
                     process.exitCode = result.success ? 0 : 1;
                     return c.ok(result);
@@ -8461,6 +8495,7 @@ const cli = Cli.create({
             }
         }
         catch (err) {
+            process.stderr.write(renderEffectBoundaryReport(err?.details?.report));
             return fail({ code: "TIMETRAVEL_FAILED", message: err?.message ?? String(err), exitCode: 1 });
         }
     },
@@ -8599,6 +8634,7 @@ const cli = Cli.create({
         input: z.string().optional().describe("Input overrides as JSON string"),
         label: z.string().optional().describe("Branch label for the fork"),
         restoreVcs: z.boolean().default(false).describe("Restore jj filesystem state to the source frame's revision"),
+        force: z.boolean().default(false).describe("Cross unresolved effects; mark parent needs-attention"),
     }),
     alias: { runId: "r", frame: "f", node: "n", input: "i", label: "l" },
     async run(c) {
@@ -8626,7 +8662,9 @@ const cli = Cli.create({
                     workflowPath: resolvedReplayWorkflowPath,
                     workflowHash: await readWorkflowGraphHash(resolvedReplayWorkflowPath),
                     entryWorkflowHash: await readWorkflowEntryHash(resolvedReplayWorkflowPath),
+                    force: c.options.force,
                 });
+                process.stderr.write(renderEffectBoundaryReport(result.effectBoundary));
                 reportReplayResult({
                     result,
                     parentRunId: c.options.runId,
@@ -8654,6 +8692,7 @@ const cli = Cli.create({
                     parentFrame: c.options.frame,
                     vcsRestored: result.vcsRestored,
                     status: runResult.status,
+                    effectBoundary: result.effectBoundary,
                 }, {
                     cta: buildAgentNextSteps({
                         workflowId: workflowIdFromPath(c.args.workflow),
@@ -8667,6 +8706,7 @@ const cli = Cli.create({
             }
         }
         catch (err) {
+            process.stderr.write(renderEffectBoundaryReport(err?.details?.report));
             return fail({ code: "REPLAY_FAILED", message: err?.message ?? String(err), exitCode: 1 });
         }
     },
@@ -8834,6 +8874,8 @@ const cli = Cli.create({
     options: z.object({
         yes: z.boolean().default(false).describe("Skip confirmation"),
         json: z.boolean().default(false).describe("Emit JumpResult JSON"),
+        force: z.boolean().default(false).describe("Cross unresolved effects; mark needs-attention"),
+        revert: z.boolean().default(true).describe("Compensate effects; --no-revert skips"),
     }),
     alias: { json: "j" },
     run(c) {
@@ -8847,6 +8889,8 @@ const cli = Cli.create({
                     frameNo: c.args.frameNo,
                     yes: c.options.yes,
                     json: c.options.json,
+                    force: c.options.force,
+                    noRevert: !c.options.revert,
                     stdin: process.stdin,
                     stdout: io.stdout,
                     stderr: io.stderr,
@@ -8873,6 +8917,7 @@ const cli = Cli.create({
         input: z.string().optional().describe("Input overrides as JSON string"),
         label: z.string().optional().describe("Branch label"),
         run: z.boolean().default(false).describe("Immediately start the forked run"),
+        force: z.boolean().default(false).describe("Allow --run to cross unresolved external effects"),
     }),
     alias: { runId: "r", frame: "f", resetNode: "n", input: "i", label: "l" },
     async run(c) {
@@ -8896,7 +8941,10 @@ const cli = Cli.create({
                     workflowPath: resolvedForkWorkflowPath,
                     workflowHash: await readWorkflowGraphHash(resolvedForkWorkflowPath),
                     entryWorkflowHash: await readWorkflowEntryHash(resolvedForkWorkflowPath),
+                    force: c.options.force,
+                    autoRun: c.options.run,
                 });
+                process.stderr.write(renderEffectBoundaryReport(result.effectBoundary));
                 process.stderr.write(`[smithers] Forked run ${result.runId} from ${c.options.runId}:${c.options.frame}\n`);
                 if (c.options.run) {
                     process.stderr.write(`[smithers] Starting forked run...\n`);
@@ -8920,6 +8968,7 @@ const cli = Cli.create({
                         parentFrame: c.options.frame,
                         started: true,
                         status: runResult.status,
+                        effectBoundary: result.effectBoundary,
                     }, {
                         cta: buildAgentNextSteps({
                             workflowId: workflowIdFromPath(c.args.workflow),
@@ -8933,6 +8982,7 @@ const cli = Cli.create({
                     parentRunId: c.options.runId,
                     parentFrame: c.options.frame,
                     started: false,
+                    effectBoundary: result.effectBoundary,
                 }, {
                     cta: withAgentNextSteps({
                         workflowId: workflowIdFromPath(c.args.workflow),
@@ -8949,6 +8999,7 @@ const cli = Cli.create({
             }
         }
         catch (err) {
+            process.stderr.write(renderEffectBoundaryReport(err?.details?.report));
             return fail({ code: "FORK_FAILED", message: err?.message ?? String(err), exitCode: 1 });
         }
     },
@@ -9205,10 +9256,22 @@ const cli = Cli.create({
             return c.error({ message: `Upgrade command exited with code ${result.exitCode}.`, code: "UPDATE_FAILED" });
         }
         process.stderr.write(`✓ Upgraded to ${latest}.\n`);
+        // An upgrade must leave every Smithers-owned skill current — the
+        // generated command skills AND the curated `smithers` skill — or the
+        // agent keeps reading the previous release's SKILL.md/llms-full.txt
+        // with no warning (#1377). No TTY gate: agent/CI upgrades sync too.
+        const skillSync = await syncSkillsAfterUpgrade({
+            commandSkillsInstalled: hasInstalledCommandSkills(),
+            version: latest,
+        });
+        if (skillSync.notice) process.stderr.write(`${skillSync.notice}\n`);
+        if (skillSync.error) {
+            process.stderr.write(`⚠ Post-upgrade skill sync: ${skillSync.error}. Run \`smithers skills add\` to finish it.\n`);
+        }
         if (sotaBehind) {
             process.stderr.write("New SOTA models are in. Run `smithers init` to refresh installed workflows to the latest agents.\n");
         }
-        return c.ok({ current, latest, updateAvailable: true, action: "upgraded", command: plan.command, sotaVersion: SOTA_REGISTRY_VERSION, sotaLatest: remoteSota });
+        return c.ok({ current, latest, updateAvailable: true, action: "upgraded", command: plan.command, sotaVersion: SOTA_REGISTRY_VERSION, sotaLatest: remoteSota, skillSync: { via: skillSync.via, ok: skillSync.ok } });
     },
 })
     .command("usage", {
@@ -9246,6 +9309,38 @@ if (!(cliCommands instanceof Map)) {
     throw new Error("Could not resolve Smithers CLI commands for input bounds.");
 }
 wrapCliCommandHandlersWithInputBounds(cliCommands);
+/**
+ * How many generated command skills the framework manages, so a successful
+ * `skills add` can state both halves of what it synced (command skills + the
+ * curated skill). Returns null when the count is unavailable rather than
+ * guessing. (#1377)
+ *
+ * @returns {Promise<number | null>}
+ */
+/**
+ * Whether a previous `skills add` installed the generated command skills. Gates
+ * the post-upgrade re-sync so `update` never installs command skills for a user
+ * who never opted in (same guard the init-time re-sync uses).
+ *
+ * @returns {boolean}
+ */
+function hasInstalledCommandSkills() {
+    try {
+        return Boolean(SyncSkills.readHash("smithers") && SyncSkills.hasInstalledSkills("smithers", {}));
+    }
+    catch {
+        return false;
+    }
+}
+async function countCommandSkills() {
+    try {
+        const skills = await SyncSkills.list("smithers", cliCommands, { description: CLI_DESCRIPTION });
+        return Array.isArray(skills) ? skills.length : null;
+    }
+    catch {
+        return null;
+    }
+}
 /**
  * Resolve a leaf command entry (with its args/options zod schemas) from a
  * resolved command path such as "inspect" or "workflow run".
@@ -9913,7 +10008,7 @@ async function main() {
         !argv.includes("--version") &&
         !argv.includes("--help") &&
         !argv.includes("-h")) {
-        const refreshNotice = formatRefreshNotice(ensureCuratedSkillsFresh());
+        const refreshNotice = formatRefreshNotice(ensureCuratedSkillsFresh({ version: readPackageVersion() }));
         if (refreshNotice) console.error(refreshNotice);
     }
     // A successful `smithers init` installs/refreshes skills, so it must not end
@@ -10019,6 +10114,31 @@ async function main() {
         }
         catch (err) {
             console.error(`⚠ Smithers agent wiring skipped: ${err?.message ?? String(err)}`);
+        }
+    }
+    // Smithers owns two skill sets: the generated command skills the framework
+    // just synced, and the curated `smithers` skill (SKILL.md + llms-full.txt).
+    // `skills add` syncs BOTH and `skills list` reports both — deliberately with
+    // no `process.stderr.isTTY` gate, so an agent/CI session upgrading the
+    // package gets exactly what a human at a terminal gets (#1377).
+    const skillsSubcommand = parseSkillsSubcommandArgv(argv);
+    if (skillsSubcommand === "add" && serveSucceeded) {
+        try {
+            const version = readPackageVersion();
+            const { status, optedOut } = syncCuratedSkill({ version });
+            console.error(formatSkillsAddSummary({ status, commandSkillCount: await countCommandSkills(), optedOut }));
+        }
+        catch (err) {
+            console.error(`⚠ Curated \`smithers\` skill sync skipped: ${err?.message ?? String(err)}`);
+        }
+    }
+    else if (skillsSubcommand === "list" && serveSucceeded) {
+        try {
+            console.error("");
+            console.error(formatCuratedSkillList(curatedSkillStatus({ version: readPackageVersion() })));
+        }
+        catch (err) {
+            console.error(`⚠ Curated \`smithers\` skill status unavailable: ${err?.message ?? String(err)}`);
         }
     }
     // `mcp add` failed inside the registration helper and we did not recover it

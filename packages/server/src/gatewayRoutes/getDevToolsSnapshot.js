@@ -1,5 +1,6 @@
 import { snapshotSerialize } from "@smithers-orchestrator/devtools";
 import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
+import { RUN_ID_PATTERN } from "./RUN_ID_PATTERN.js";
 
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsNode} DevToolsNode */
@@ -7,7 +8,7 @@ import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
 /** @typedef {import("@smithers-orchestrator/protocol/devtools").DevToolsNodeType} DevToolsNodeType */
 /** @typedef {import("@smithers-orchestrator/devtools/snapshotSerializer").SnapshotSerializerWarning} SnapshotSerializerWarning */
 
-export const DEVTOOLS_RUN_ID_PATTERN = /^[a-z0-9_-]{1,64}$/;
+export const DEVTOOLS_RUN_ID_PATTERN = RUN_ID_PATTERN;
 export const DEVTOOLS_MAX_FRAME_NO = 2_147_483_647;
 export const DEVTOOLS_TREE_MAX_DEPTH = 256;
 
@@ -164,7 +165,7 @@ export function emptyDevToolsRoot() {
  */
 export function validateRunId(runId) {
     if (!DEVTOOLS_RUN_ID_PATTERN.test(runId)) {
-        throw new DevToolsRouteError("InvalidRunId", "runId must match /^[a-z0-9_-]{1,64}$/.");
+        throw new DevToolsRouteError("InvalidRunId", "runId must match /^[a-z0-9_-][a-z0-9_.-]{0,63}$/.");
     }
     return runId;
 }

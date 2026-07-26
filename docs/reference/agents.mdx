@@ -192,14 +192,16 @@ omit `model`, the underlying CLI picks its own default. Each class adds a few
 vendor-specific options on top of the shared base below.
 
 <Note>
-In Smithers-generated workflows, Codex builds and Claude gates: start
-substantial implementation on Terra (`gpt-5.6-terra`), escalate to Sol
-(`gpt-5.6-sol`) for ambiguity, high stakes, novel architecture, final review,
-or repeated failure, and keep Luna (`gpt-5.6-luna`) on trivial, minimal-risk
-edits, cheap passes, and research gathering. Orchestration and gating (scope,
-direction, progress, done-or-not) run on Claude: `claude-opus-4-8` by
-default, `claude-fable-5` for planning. Non-Codex CLI agents enter automatic
-building pools only when Codex is unavailable or fails; explicitly
+In Smithers-generated workflows, Claude builds and gates and Codex checks:
+substantial implementation starts on Claude Opus 5 (`claude-opus-5`),
+escalating to Fable (`claude-fable-5`) for the most ambitious builds. Sol
+(`gpt-5.6-sol`) takes final code review and second opinions, Terra
+(`gpt-5.6-terra`) takes validation and tool-heavy checking, and Luna
+(`gpt-5.6-luna`) stays on trivial, minimal-risk edits, cheap passes, and
+research gathering. Orchestration and gating (scope, direction, progress,
+done-or-not) also run on Claude: `claude-opus-5` by default,
+`claude-fable-5` for planning. Other CLI agents enter the automatic pools
+only when earlier entries are unavailable or fail; explicitly
 constructed agents always run as written.
 See [SOTA role defaults](/reference/sota-models#role-defaults).
 </Note>

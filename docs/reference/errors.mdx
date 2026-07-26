@@ -91,6 +91,7 @@ try {
 | `WORKTREE_CREATE_FAILED` | Smithers fails to create or hydrate a git or jj worktree for a task. | `{ worktreePath, vcsType, branch? }` |
 | `VCS_NOT_FOUND` | No supported git or jj repository root is found for the workflow. | `{ rootDir }` |
 | `SNAPSHOT_NOT_FOUND` | A requested time-travel snapshot or frame does not exist. | `{ runId, frameNo }` |
+| `TIME_TRAVEL_SIDE_EFFECT_BLOCKED` | A time-travel operation would cross an external side effect that was not reverted or explicitly forced. | `{ runId, operation, report }` |
 | `VCS_WORKSPACE_CREATE_FAILED` | Smithers fails to materialize a jj workspace for time-travel or replay. | `{ runId, frameNo, vcsPointer, workspacePath }` |
 | `TASK_EMPTY_PROMPT` | A `<Task>` prompt renders to an empty string, invoking the agent with no input. | `{ nodeId, iteration }` |
 | `WORKFLOW_RENDER_FAILED` | The workflow component throws while rendering the graph (e.g. a hook called outside a component render, or a bug in the workflow function). | `{ workflowPath }` |

@@ -38,13 +38,13 @@ export function resolveOneshotChain(detections, options = {}) {
     }
     if (requestedEngine && !usable.has(requestedEngine)) throw new SmithersError("NO_USABLE_AGENTS", `Requested oneshot agent "${options.agent ?? requestedEngine}" is unavailable.`);
     const claudeEngine = usable.has("claude") ? "claude" : usable.has("opencode") ? "opencode" : null;
+    // Opus leads: Claude Opus 5 is the default implementer (registry v7), with
+    // Codex Sol, Kimi K3, and Fable as availability fallbacks in that order.
     const defaults = [
+        ...(claudeEngine ? [{ engine: claudeEngine, model: claudeEngine === "opencode" ? `anthropic/${SOTA_SLOTS.opus}` : SOTA_SLOTS.opus }] : []),
         ...(usable.has("codex") ? [{ engine: "codex", model: SOTA_SLOTS.codexSol }] : []),
         ...(usable.has("kimi") ? [{ engine: "kimi", model: ONESHOT_KIMI_MODEL }] : []),
-        ...(claudeEngine ? [
-            { engine: claudeEngine, model: claudeEngine === "opencode" ? `anthropic/${SOTA_SLOTS.fable}` : SOTA_SLOTS.fable },
-            { engine: claudeEngine, model: claudeEngine === "opencode" ? `anthropic/${SOTA_SLOTS.opus}` : SOTA_SLOTS.opus },
-        ] : []),
+        ...(claudeEngine ? [{ engine: claudeEngine, model: claudeEngine === "opencode" ? `anthropic/${SOTA_SLOTS.fable}` : SOTA_SLOTS.fable }] : []),
     ];
     const chain = requestedEngine
         ? [{ engine: requestedEngine, model: requestedModel ?? defaults.find((item) => item.engine === requestedEngine)?.model ?? SOTA_SLOTS.fable }, ...defaults.filter((item) => item.engine !== requestedEngine)]

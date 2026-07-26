@@ -10,4 +10,5 @@ export type WhyBlockerKind =
     | "stale-heartbeat"
     | "engine-busy"
     | "dependency-failed"
-    | "approval-decided-resume-required";
+    | "approval-decided-resume-required"
+    | "side-effect-boundary-crossed";

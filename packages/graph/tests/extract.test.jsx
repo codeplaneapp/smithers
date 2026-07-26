@@ -65,6 +65,65 @@ describe("extractGraph", () => {
 		expect(result.tasks[0].staticPayload).toEqual({ value: 1 });
 	});
 
+	test("normalizes boolean and object sideEffect forms for every task kind", () => {
+		const revert = async () => {};
+		const agent = { generate: async () => ({}) };
+		const compute = () => ({ value: 2 });
+		const root = hostEl("smithers:workflow", {}, [
+			hostEl("smithers:task", {
+				id: "agent-boolean",
+				output: "out",
+				agent,
+				__smithersKind: "agent",
+				sideEffect: true,
+			}),
+			hostEl("smithers:task", {
+				id: "agent-object",
+				output: "out",
+				agent,
+				__smithersKind: "agent",
+				sideEffect: { idempotent: true, revert },
+			}),
+			hostEl("smithers:task", {
+				id: "compute-boolean",
+				output: "out",
+				__smithersKind: "compute",
+				__smithersComputeFn: compute,
+				sideEffect: true,
+			}),
+			hostEl("smithers:task", {
+				id: "compute-object",
+				output: "out",
+				__smithersKind: "compute",
+				__smithersComputeFn: compute,
+				sideEffect: { idempotent: true, revert },
+			}),
+			hostEl("smithers:task", {
+				id: "static-boolean",
+				output: "out",
+				__smithersKind: "static",
+				__smithersPayload: { value: 3 },
+				sideEffect: true,
+			}),
+			hostEl("smithers:task", {
+				id: "static-object",
+				output: "out",
+				__smithersKind: "static",
+				__smithersPayload: { value: 3 },
+				sideEffect: { idempotent: true, revert },
+			}),
+		]);
+
+		expect(extractGraph(root).tasks.map((task) => [task.kind, task.sideEffect])).toEqual([
+			["agent", { idempotent: false }],
+			["agent", { idempotent: true, revert }],
+			["compute", { idempotent: false }],
+			["compute", { idempotent: true, revert }],
+			["static", { idempotent: false }],
+			["static", { idempotent: true, revert }],
+		]);
+	});
+
 	test("extracts ordinals in order", () => {
 		const root = hostEl("smithers:workflow", {}, [
 			hostEl("smithers:task", { id: "a", output: "t" }),

@@ -50,9 +50,22 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** Bound the plugin-dir walk so a big ~/.claude/plugins tree stays cheap. */
 const PLUGIN_SCAN_MAX_DEPTH = 6;
 
-/** @param {string} file */
-function sha256File(file) {
-  return createHash("sha256").update(readFileSync(file)).digest("hex");
+/**
+ * Hash both files that make up the curated skill. A current SKILL.md paired
+ * with an old docs bundle is still stale.
+ *
+ * @param {{ skillMd: string; llmsFull: string }} files
+ */
+export function hashCuratedSkillFiles(files) {
+  const hash = createHash("sha256");
+  for (const file of [files.skillMd, files.llmsFull]) {
+    const content = readFileSync(file);
+    hash.update(String(content.byteLength));
+    hash.update("\0");
+    hash.update(content);
+    hash.update("\0");
+  }
+  return hash.digest("hex");
 }
 
 /**
@@ -163,7 +176,7 @@ export function refreshCuratedSkills(opts = {}) {
   if (!source) return result;
 
   const detections = opts.detections ?? detectAvailableAgents(env);
-  const sourceHash = sha256File(source.skillMd);
+  const sourceHash = hashCuratedSkillFiles(source);
   // Honor deselections persisted during `smithers init`: skip any agent the
   // user explicitly opted out of so upgrades don't re-add a skill they removed.
   const deselected = new Set(loadSkillDeselections(homeDir));
@@ -195,11 +208,14 @@ export function refreshCuratedSkills(opts = {}) {
         } else {
           let destHash = null;
           try {
-            destHash = sha256File(join(dest, "SKILL.md"));
+            destHash = hashCuratedSkillFiles({
+              skillMd: join(dest, "SKILL.md"),
+              llmsFull: join(dest, "llms-full.txt"),
+            });
           } catch {
             /* fall through to rewrite */
           }
-          if (destHash === sourceHash && existsSync(join(dest, "llms-full.txt"))) {
+          if (destHash === sourceHash) {
             result.fresh.push({ agent: target.displayName, path: dest });
           } else {
             writeSkill(dest, target.displayName, "stale");
@@ -262,7 +278,7 @@ function readMarker(markerPath) {
  * (a CLI upgrade carrying a new skill), OR more than a day has elapsed (to catch
  * externally-introduced stale/plugin copies). `force` bypasses the throttle.
  *
- * @param {{ homeDir?: string; env?: NodeJS.ProcessEnv; sourceDir?: string; now?: number; force?: boolean }} [opts]
+ * @param {{ homeDir?: string; env?: NodeJS.ProcessEnv; sourceDir?: string; now?: number; force?: boolean; version?: string | null; detections?: import("./AgentAvailability.ts").AgentAvailability[] }} [opts]
  * @returns {RefreshResult | null}
  */
 export function ensureCuratedSkillsFresh(opts = {}) {
@@ -272,7 +288,7 @@ export function ensureCuratedSkillsFresh(opts = {}) {
     const homeDir = opts.homeDir ?? env.HOME ?? homedir();
     const source = resolveSkillSource(opts.sourceDir);
     if (!source) return null;
-    const sourceHash = sha256File(source.skillMd);
+    const sourceHash = hashCuratedSkillFiles(source);
     const markerPath = join(homeDir, ".smithers", "skill-refresh.json");
     const marker = readMarker(markerPath);
     const nowMs = opts.now ?? Date.now();
@@ -282,13 +298,16 @@ export function ensureCuratedSkillsFresh(opts = {}) {
     const needScan = opts.force || needContentUpdate || nowMs - lastScanMs > DAY_MS;
     if (!needScan) return null;
 
-    const result = refreshCuratedSkills({ homeDir, env, sourceDir: opts.sourceDir });
+    const result = refreshCuratedSkills({ homeDir, env, sourceDir: opts.sourceDir, detections: opts.detections });
     try {
       mkdirSync(dirname(markerPath), { recursive: true });
-      writeFileSync(
-        markerPath,
-        `${JSON.stringify({ appliedHash: sourceHash, lastScanMs: nowMs }, null, 2)}\n`,
-      );
+      // `appliedVersion` lets `skills list` name the release that wrote an
+      // installed copy; the hash is what actually decides staleness.
+      const applied = { appliedHash: sourceHash, lastScanMs: nowMs };
+      const carried = marker.appliedHash === sourceHash && typeof marker.appliedVersion === "string" ? marker.appliedVersion : null;
+      const version = opts.version ?? carried;
+      if (version) applied.appliedVersion = version;
+      writeFileSync(markerPath, `${JSON.stringify(applied, null, 2)}\n`);
     } catch {
       /* a missing marker just means we re-scan next time — harmless */
     }

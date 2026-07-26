@@ -40,6 +40,7 @@ import { startDocFileSync } from "./startDocFileSync.js";
 import { failedRestoreToSurface, restoreWorkspaceToLatestCheckpoint } from "./restoreWorkspace.js";
 import { appendGap, defaultGapSpoolPath } from "./durabilityGapSpool.js";
 import { runWithToolContext } from "@smithers-orchestrator/tool-context";
+import { createToolJournalContext } from "./createToolJournalContext.js";
 import { vcsToolingStatus } from "@smithers-orchestrator/vcs/vcsToolingStatus";
 import { getDefaultPlatformLayer, getPlatformLayer, withPlatformLayer } from "./platform-layer.js";
 import { sleep } from "./sleep.js";
@@ -711,7 +712,39 @@ function collectDefinedToolMetadata(agents) {
     return metadataByName;
 }
 /**
- * @param {Array<{ toolName?: string; attempt?: number; seq?: number; status?: string }>} toolCalls
+ * Prefer call-time provenance. Only all-null legacy rows consult the current
+ * workflow registry; an unresolvable legacy row stays unclassified and safe.
+ * @param {Record<string, unknown>} call
+ * @param {Map<string, ReturnType<typeof getDefinedToolMetadata>>} metadataByName
+ * @returns {{ kind: "tool" | "task"; sideEffect: boolean; idempotent: boolean; acceptsIdempotencyKey: boolean; hasRevert: boolean } | null}
+ */
+function classifyJournalEffect(call, metadataByName) {
+    if (call.revertStatus === "reverted" || call.status === "reverted") {
+        return null;
+    }
+    if (call.sideEffect !== null && call.sideEffect !== undefined) {
+        return {
+            kind: call.kind === "task" ? "task" : "tool",
+            sideEffect: Boolean(call.sideEffect),
+            idempotent: Boolean(call.idempotent),
+            acceptsIdempotencyKey: Boolean(call.acceptsIdempotencyKey),
+            hasRevert: Boolean(call.hasRevert),
+        };
+    }
+    const metadata = metadataByName.get(String(call.toolName ?? ""));
+    if (!metadata) {
+        return null;
+    }
+    return {
+        kind: "tool",
+        sideEffect: metadata.sideEffect,
+        idempotent: metadata.idempotent,
+        acceptsIdempotencyKey: metadata.acceptsIdempotencyKey === true,
+        hasRevert: metadata.hasRevert === true,
+    };
+}
+/**
+ * @param {Array<Record<string, unknown>>} toolCalls
  * @param {any[]} agents
  * @param {number} currentAttempt
  * @returns {ToolResumeWarning[]}
@@ -724,16 +757,20 @@ function collectToolResumeWarnings(toolCalls, agents, currentAttempt) {
     return toolCalls
         .filter((call) => typeof call.attempt === "number" && call.attempt < currentAttempt)
         .filter((call) => {
-        const toolName = typeof call.toolName === "string" ? call.toolName : "";
-        const metadata = metadataByName.get(toolName);
-        return Boolean(metadata?.sideEffect && metadata.idempotent === false);
+        const classification = classifyJournalEffect(call, metadataByName);
+        return Boolean(classification?.sideEffect && classification.idempotent === false);
     })
-        .map((call) => ({
+        .map((call) => {
+        const classification = classifyJournalEffect(call, metadataByName);
+        return {
+        kind: classification?.kind ?? "tool",
         toolName: String(call.toolName ?? ""),
         attempt: Number(call.attempt ?? 0),
         seq: Number(call.seq ?? 0),
         status: String(call.status ?? "unknown"),
-    }));
+        hasRevert: classification?.hasRevert ?? false,
+    };
+    });
 }
 
 function collectReplayUnsafeToolCalls(toolCalls, agents, currentAttempt) {
@@ -742,11 +779,20 @@ function collectReplayUnsafeToolCalls(toolCalls, agents, currentAttempt) {
     return toolCalls
         .filter((call) => typeof call.attempt === "number" && call.attempt < currentAttempt)
         .filter((call) => {
-        const metadata = metadataByName.get(String(call.toolName ?? ""));
-        if (!metadata?.sideEffect || metadata.idempotent !== false) return false;
-        return metadata.acceptsIdempotencyKey !== true;
+        const classification = classifyJournalEffect(call, metadataByName);
+        if (!classification?.sideEffect || classification.idempotent !== false) return false;
+        return classification.acceptsIdempotencyKey !== true;
     })
-        .map((call) => ({ toolName: String(call.toolName), attempt: Number(call.attempt), seq: Number(call.seq) }))
+        .map((call) => {
+        const classification = classifyJournalEffect(call, metadataByName);
+        return {
+            kind: classification?.kind ?? "tool",
+            toolName: String(call.toolName),
+            attempt: Number(call.attempt),
+            seq: Number(call.seq),
+            hasRevert: classification?.hasRevert ?? false,
+        };
+    })
         .sort((left, right) => left.toolName.localeCompare(right.toolName)
         || left.attempt - right.attempt
         || left.seq - right.seq);
@@ -831,12 +877,13 @@ function buildToolResumeWarningMessage(warnings) {
     }
     const shownWarnings = warnings.slice(0, 5);
     const lines = [
-        `${TOOL_RESUME_WARNING_MARKER} Previous attempts in this task already called non-idempotent side-effect tools.`,
+        `${TOOL_RESUME_WARNING_MARKER} Previous attempts in this task already ran non-idempotent side effects.`,
         "Those side effects may already have happened before the interruption or retry.",
         "Do not blindly call them again. Verify external state first or continue from the prior result.",
         "Smithers will reuse the same ctx.idempotencyKey for defineTool retries.",
-        "Previously called tools:",
-        ...shownWarnings.map((warning) => `- ${warning.toolName} (attempt ${warning.attempt}, seq ${warning.seq}, status ${warning.status})`),
+        "A registered revert handler can compensate discard-time travel, but does not make forward replay safe.",
+        "Previously recorded effects:",
+        ...shownWarnings.map((warning) => `- ${warning.kind ?? "tool"} ${warning.toolName} (attempt ${warning.attempt}, seq ${warning.seq}, status ${warning.status}${warning.hasRevert ? ", registered revert handler" : ""})`),
     ];
     if (warnings.length > shownWarnings.length) {
         lines.push(`- ...and ${warnings.length - shownWarnings.length} more`);
@@ -3323,6 +3370,13 @@ async function cancelInProgress(adapter, runId, eventBus) {
                 state: "cancelled",
                 finishedAtMs: cancelledAtMs,
             });
+            yield* adapter.markToolCallsUnknownForAttempt(
+                runId,
+                attempt.nodeId,
+                attempt.iteration,
+                attempt.attempt,
+                cancelledAtMs,
+            );
             yield* adapter.insertNode({
                 runId,
                 nodeId: attempt.nodeId,
@@ -3360,6 +3414,13 @@ async function cancelStaleAttempts(adapter, runId) {
                     state: "cancelled",
                     finishedAtMs: now,
                 });
+                yield* adapter.markToolCallsUnknownForAttempt(
+                    runId,
+                    attempt.nodeId,
+                    attempt.iteration,
+                    attempt.attempt,
+                    now,
+                );
                 yield* adapter.insertNode({
                     runId,
                     nodeId: attempt.nodeId,
@@ -3426,6 +3487,15 @@ async function cancelPendingExternalWaits(adapter, runId, cancelledAtMs = nowMs(
             state: "cancelled",
             finishedAtMs: cancelledAtMs,
         }));
+        if (typeof adapter.markToolCallsUnknownForAttempt === "function") {
+            await Effect.runPromise(adapter.markToolCallsUnknownForAttempt(
+                runId,
+                attempt.nodeId,
+                attempt.iteration ?? 0,
+                attempt.attempt,
+                cancelledAtMs,
+            ));
+        }
         const nodeEvent = { type: "NodeCancelled", runId, nodeId: attempt.nodeId, iteration: attempt.iteration ?? 0, attempt: attempt.attempt, reason: "run-cancelled", timestampMs: cancelledAtMs };
         await emitCancellationEvent(nodeEvent);
         if (attempt.state === "waiting-timer") {
@@ -3530,6 +3600,15 @@ async function cancelPendingExternalWaits(adapter, runId, cancelledAtMs = nowMs(
                 state: "cancelled",
                 finishedAtMs: cancelledAtMs,
             }));
+            if (typeof adapter.markToolCallsUnknownForAttempt === "function") {
+                await Effect.runPromise(adapter.markToolCallsUnknownForAttempt(
+                    runId,
+                    node.nodeId,
+                    node.iteration ?? 0,
+                    attempt.attempt,
+                    cancelledAtMs,
+                ));
+            }
         }
         await Effect.runPromise(adapter.insertNode({
             ...node,
@@ -3979,6 +4058,10 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
     let handleAgentEvent;
     let handleSdkStepFinish;
     let handleProcess;
+    /** @type {ReturnType<typeof createToolJournalContext> | null} */
+    let taskEffectJournalContext = null;
+    /** @type {Array<ReturnType<typeof createToolJournalContext>>} */
+    const activeToolJournalContexts = [];
     // Callback output is only durable evidence after the same fenced heartbeat
     // has proved this executor still owns the attempt. Keep this shared by the
     // primary generation and every schema-repair generation.
@@ -4435,7 +4518,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                             authorizedAttempt,
                             fingerprint,
                             offending: replayUnsafeToolCalls,
-                            prompt: "Replay would re-execute non-idempotent side-effect tools without a usable idempotency key.",
+                            prompt: "Replay would re-execute non-idempotent side effects without a usable idempotency key. Registered revert handlers do not make forward replay safe.",
                         };
                         yield* adapter.insertOrUpdateApproval({
                             runId,
@@ -4492,6 +4575,31 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             }
             const toolResumeWarnings = collectToolResumeWarnings(priorToolCalls, allAgents, attemptNo);
             const toolResumeWarningMessage = buildToolResumeWarningMessage(toolResumeWarnings);
+            if (desc.sideEffect) {
+                taskEffectJournalContext = createToolJournalContext({
+                    adapter,
+                    eventBus,
+                    runId,
+                    nodeId: desc.nodeId,
+                    iteration: desc.iteration,
+                    attempt: attemptNo,
+                    rootDir: taskRoot,
+                    abortSignal: taskSignal,
+                });
+                activeToolJournalContexts.push(taskEffectJournalContext);
+                await taskEffectJournalContext.recordToolCall({
+                    phase: "started",
+                    seq: 0,
+                    toolName: desc.nodeId,
+                    input: null,
+                    kind: "task",
+                    sideEffect: true,
+                    idempotent: desc.sideEffect.idempotent,
+                    acceptsIdempotencyKey: false,
+                    hasRevert: typeof desc.sideEffect.revert === "function",
+                    idempotencyKey: null,
+                });
+            }
             emitOutput = (text, stream) => {
                 if (heartbeatOwnerLost) return;
                 recordInternalHeartbeat();
@@ -5071,39 +5179,22 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 // context (run/node/cwd + a Tier 1 snapshot hook) so defineTool
                 // snapshots after each side-effect tool. Only when durability is
                 // active; null leaves the generate call exactly as before.
+                const agentToolJournalContext = createToolJournalContext({
+                    adapter,
+                    eventBus,
+                    runId,
+                    nodeId: desc.nodeId,
+                    iteration: desc.iteration,
+                    attempt: attemptNo,
+                    rootDir: taskRoot,
+                    abortSignal: taskSignal,
+                });
+                activeToolJournalContexts.push(agentToolJournalContext);
                 const toolCtx = {
-                        runId,
-                        nodeId: desc.nodeId,
-                        iteration: desc.iteration,
-                        attempt: attemptNo,
-                        rootDir: taskRoot,
+                        ...agentToolJournalContext,
                         ...(durability.active
                             ? { durabilitySnapshot: (label, toolUseId) => durability.snapshot({ source: "wrap", tier: 1, label, toolUseId }) }
                             : {}),
-                        recordToolCall: async (call) => {
-                            const timestampMs = nowMs();
-                            if (call.phase !== "started") return;
-                            const row = {
-                                runId,
-                                nodeId: desc.nodeId,
-                                iteration: desc.iteration,
-                                attempt: attemptNo,
-                                seq: Number(call.seq),
-                                toolName: String(call.toolName),
-                                inputJson: JSON.stringify(call.input ?? null),
-                                outputJson: null,
-                                startedAtMs: timestampMs,
-                                finishedAtMs: null,
-                                status: "started",
-                                errorJson: null,
-                            };
-                            await Effect.runPromise(adapter.insertToolCall(row));
-                            await Effect.runPromise(eventBus.emitEventWithPersist({
-                                type: "ToolCallStarted",
-                                ...row,
-                                timestampMs,
-                            }));
-                        },
                     };
                 let result;
                 try {
@@ -5648,6 +5739,17 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 }
             }
             else if (desc.computeFn) {
+                const computeToolContext = createToolJournalContext({
+                    adapter,
+                    eventBus,
+                    runId,
+                    nodeId: desc.nodeId,
+                    iteration: desc.iteration,
+                    attempt: attemptNo,
+                    rootDir: taskRoot,
+                    abortSignal: taskSignal,
+                });
+                activeToolJournalContexts.push(computeToolContext);
                 const computePromise = Promise.resolve().then(() => withTaskRuntime({
                     runId,
                     stepId: desc.nodeId,
@@ -5660,7 +5762,7 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                         queueHeartbeat(data);
                     },
                     lastHeartbeat: previousHeartbeat,
-                }, () => desc.computeFn()));
+                }, () => runWithToolContext(computeToolContext, () => desc.computeFn())));
                 const races = [computePromise];
                 const abort = abortPromise(taskSignal);
                 if (abort)
@@ -6005,6 +6107,20 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 metaJson: JSON.stringify(attemptMeta),
                 responseText,
             });
+            if (taskEffectJournalContext) {
+                yield* taskEffectJournalContext.recordToolCallEffect({
+                    phase: "finished",
+                    seq: 0,
+                    toolName: desc.nodeId,
+                    kind: "task",
+                    sideEffect: true,
+                    idempotent: desc.sideEffect?.idempotent ?? false,
+                    acceptsIdempotencyKey: false,
+                    hasRevert: typeof desc.sideEffect?.revert === "function",
+                    idempotencyKey: null,
+                    output: payload,
+                }, completedAtMs, { inTransaction: true });
+            }
             yield* adapter.insertNode({
                 runId,
                 nodeId: desc.nodeId,
@@ -6120,6 +6236,13 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
                 const claimed = yield* adapter.claimAttemptTerminal(runId, desc.nodeId, desc.iteration, attemptNo, executionOwnerId, "cancelled", cancelledAtMs, JSON.stringify(errorToJson(effectiveError)));
                 if (!claimed) return false;
                 yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, { metaJson: JSON.stringify(attemptMeta), responseText });
+                for (const journalContext of activeToolJournalContexts) {
+                    yield* journalContext.failPendingToolCallsEffect(
+                        effectiveError,
+                        cancelledAtMs,
+                        { inTransaction: true },
+                    );
+                }
                 yield* adapter.insertNode({
                     runId,
                     nodeId: desc.nodeId,
@@ -6206,6 +6329,13 @@ async function legacyExecuteTask(adapter, db, runId, desc, descriptorMap, inputT
             yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
                 metaJson: JSON.stringify(attemptMeta), responseText,
             });
+            for (const journalContext of activeToolJournalContexts) {
+                yield* journalContext.failPendingToolCallsEffect(
+                    effectiveError,
+                    failedAtMs,
+                    { inTransaction: true },
+                );
+            }
             yield* adapter.insertNode({
                 runId,
                 nodeId: desc.nodeId,

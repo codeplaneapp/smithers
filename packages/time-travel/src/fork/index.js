@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import { forkRun as forkRunEffect } from "./forkRunEffect.js";
 import { getBranchInfo as getBranchInfoEffect } from "./getBranchInfoEffect.js";
 import { listBranches as listBranchesEffect } from "./listBranchesEffect.js";
@@ -6,6 +6,7 @@ export { forkRunEffect, getBranchInfoEffect, listBranchesEffect, };
 
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("../BranchInfo.ts").BranchInfo} BranchInfo */
+/** @typedef {import("../EffectBoundaryReport.ts").EffectBoundaryReport} EffectBoundaryReport */
 /** @typedef {import("../ForkParams.ts").ForkParams} ForkParams */
 /** @typedef {import("../snapshot/Snapshot.ts").Snapshot} Snapshot */
 
@@ -14,10 +15,12 @@ export { forkRunEffect, getBranchInfoEffect, listBranchesEffect, };
  *
  * @param {SmithersDb} adapter
  * @param {ForkParams} params
- * @returns {Promise<{ runId: string; branch: BranchInfo; snapshot: Snapshot }>}
+ * @returns {Promise<{ runId: string; branch: BranchInfo; snapshot: Snapshot; effectBoundary: EffectBoundaryReport }>}
  */
-export function forkRun(adapter, params) {
-    return Effect.runPromise(forkRunEffect(adapter, params));
+export async function forkRun(adapter, params) {
+    const exit = await Effect.runPromiseExit(forkRunEffect(adapter, params));
+    if (Exit.isSuccess(exit)) return exit.value;
+    throw Cause.squash(exit.cause);
 }
 /**
  * List branches that were forked from the given parent run.

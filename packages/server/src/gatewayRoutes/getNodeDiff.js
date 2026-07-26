@@ -3,12 +3,12 @@ import { Effect, Metric } from "effect";
 import { NodeDiffCache, NodeDiffTooLargeError } from "@smithers-orchestrator/db/cache/nodeDiffCache";
 import { computeDiffBundleBetweenRefs } from "@smithers-orchestrator/engine/effect/diff-bundle";
 import { runPromise } from "../smithersRuntime.js";
+import { RUN_ID_PATTERN } from "./RUN_ID_PATTERN.js";
 
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("@smithers-orchestrator/db/adapter").AttemptRow} AttemptRow */
 /** @typedef {import("./GetNodeDiffRouteResult.js").GetNodeDiffRouteResult} GetNodeDiffRouteResult */
 /** @typedef {import("./DiffSummary.js").DiffSummary} DiffSummary */
-const RUN_ID_PATTERN = /^[a-z0-9_-]{1,64}$/;
 const NODE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,128}$/;
 const ITERATION_MAX = 2_147_483_647;
 const CACHE_ROW_GAUGE_EMIT_MS = 5 * 60 * 1000;
@@ -70,7 +70,7 @@ class GetNodeDiffError extends Error {
  */
 function validateRunId(runId) {
     if (typeof runId !== "string" || !RUN_ID_PATTERN.test(runId)) {
-        throw new GetNodeDiffError("InvalidRunId", "runId must match /^[a-z0-9_-]{1,64}$/.");
+        throw new GetNodeDiffError("InvalidRunId", "runId must match /^[a-z0-9_-][a-z0-9_.-]{0,63}$/.");
     }
     return runId;
 }

@@ -214,6 +214,9 @@ export class DevToolsStore {
   private liveSnapshot: SnapshotWithRunState | undefined;
   private liveLatestFrameNo = 0;
   private awaitingSnapshotAfterGapResync = false;
+  // Monotonic token so overlapping scrubs settle on the last frame requested,
+  // not the last response to arrive.
+  private scrubRequestId = 0;
 
   constructor(options: StoreOptions = {}) {
     this.client = options.client ?? new DevToolsClient();
@@ -382,9 +385,13 @@ export class DevToolsStore {
       return;
     }
 
+    const requestId = ++this.scrubRequestId;
     this.mode = { kind: "historical", frameNo: targetFrame };
     try {
       const snapshot = await this.client.getDevToolsSnapshot(this.runId, targetFrame);
+      if (requestId !== this.scrubRequestId) {
+        return;
+      }
       this.tree = snapshot.root;
       this.seq = snapshot.seq;
       this.mode = { kind: "historical", frameNo: snapshot.frameNo };
@@ -392,12 +399,16 @@ export class DevToolsStore {
       this.refreshRunningState();
       this.updateGhostState();
     } catch (error) {
+      if (requestId !== this.scrubRequestId) {
+        return;
+      }
       this.scrubError = error instanceof Error ? error : new Error(String(error));
     }
     this.emit();
   }
 
   returnToLive() {
+    this.scrubRequestId += 1;
     if (this.mode.kind !== "historical") {
       return;
     }

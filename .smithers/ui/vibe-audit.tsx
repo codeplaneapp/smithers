@@ -1,7 +1,8 @@
 /** @jsxImportSource react */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import {
   createGatewayReactRoot,
+  type NodeStatus,
   useGatewayNodeOutput,
   useGatewayRunEvents,
   useGatewayRuns,
@@ -13,10 +14,54 @@ import {
   RunTree,
   StatusPill,
   WorkflowUiShell,
-  theme,
+  WorkflowUiStyles,
 } from "smithers-orchestrator/gateway-ui";
 
 const WORKFLOW = "vibe-audit";
+
+/** The completed tone of a run/node from `useGatewayRunTree`. `NodeStatus` has
+ *  no `"finished"` member, so a stale literal silently never matches — typing
+ *  the constant makes that a compile error instead. */
+const COMPLETED: NodeStatus = "ok";
+
+/** Board layout, injected through `WorkflowUiStyles` (pack UIs render no raw
+ *  `<style>` tag and no `style` prop) so the styleguide tokens stay the single
+ *  source of truth for color, spacing, and type. */
+const VIBE_AUDIT_CSS = `
+.va-board { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+.va-main { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.va-side { display: flex; flex-direction: column; gap: var(--sp-3); position: sticky; top: var(--sp-3); }
+.va-strategies { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
+.va-pipeline { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--sp-2); }
+.va-inline { display: flex; align-items: center; gap: var(--sp-2); }
+.va-card { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; padding: var(--sp-3); border: 1px solid var(--border-solid); border-radius: var(--r-2); background: var(--panel); }
+.va-card.running { border-color: var(--accent); }
+.va-card.parked { border-color: var(--warn); }
+.va-card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.va-card-title { font-size: var(--fs-4); font-weight: 700; color: var(--text); }
+.va-card-parked { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); }
+.va-card-meta { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-2); color: var(--text-muted); }
+.va-card-count { color: var(--text); font-weight: 600; }
+.va-note { font-size: var(--fs-1); color: var(--text-muted); }
+.va-step { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border-solid); border-radius: var(--r-2); background: var(--panel); }
+.va-step.running { border-color: var(--accent); }
+.va-step-label { min-width: 64px; font-size: var(--fs-3); font-weight: 700; color: var(--text); }
+.va-step-detail { font-size: var(--fs-2); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.va-panel { border: 1px solid var(--border-solid); border-radius: var(--r-2); background: var(--panel); }
+.va-panel-title { padding: var(--sp-2) var(--sp-3); font-size: var(--fs-1); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+.va-side-title { margin-bottom: var(--sp-1); font-size: var(--fs-1); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+.va-findings { display: flex; flex-direction: column; }
+.va-finding { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--border-solid); }
+.va-finding-title { flex: 1; min-width: 0; font-size: var(--fs-3); color: var(--text); }
+.va-finding-file { font-size: var(--fs-1); color: var(--text-muted); }
+.va-empty { padding: var(--sp-5); text-align: center; font-size: var(--fs-2); color: var(--text-muted); }
+.va-badge { padding: 2px 8px; border-radius: var(--r-full); font-size: var(--fs-1); font-weight: 600; white-space: nowrap; color: var(--inverse-text); background: var(--nit); }
+.va-badge.danger { background: var(--bad); }
+.va-badge.warning { background: var(--warn); }
+.va-badge.success { background: var(--ok); }
+.va-tree { max-height: 360px; }
+.va-events { max-height: 320px; }
+`;
 
 const STRATEGIES = [
   { nodeId: "injection-scan", label: "Injection scan" },
@@ -33,6 +78,7 @@ const PIPELINE = [
 
 type NodeLite = { id: string; status: string; error?: string };
 type Finding = { findingKey?: string; title?: string; file?: string; severity?: string };
+type BadgeTone = "danger" | "warning" | "success" | "muted";
 
 function rowOf(state: { data?: Record<string, unknown> }): Record<string, unknown> | undefined {
   const d = state?.data;
@@ -40,23 +86,27 @@ function rowOf(state: { data?: Record<string, unknown> }): Record<string, unknow
   return d;
 }
 
-const SEV_COLOR: Record<string, string> = { high: "#e5484d", medium: "#f5a623", low: "#3aa675" };
+const SEV_TONE: Record<string, BadgeTone> = { high: "danger", medium: "warning", low: "success" };
 
-function Badge({ text, color }: { text: string; color: string }) {
-  return (
-    <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, color: "#fff", background: color, whiteSpace: "nowrap" }}>
-      {text}
-    </span>
-  );
+function Badge({ text, tone }: { text: string; tone: BadgeTone }) {
+  return <span className={`va-badge ${tone}`}>{text}</span>;
 }
 
 function nodeStatus(nodes: readonly NodeLite[], id: string): NodeLite | undefined {
   return nodes.find((n) => n.id === id);
 }
 
+/** The demo's parked-on-quota -> recovered-on-fallback beat for one node: a
+ *  rate-limited node is parked until it completes, and completion is
+ *  {@link COMPLETED}. */
+export function quotaBeat(status: string, rateLimited: boolean): "none" | "parked" | "recovered" {
+  if (!rateLimited) return "none";
+  return status === COMPLETED ? "recovered" : "parked";
+}
+
 /** One audit strategy card: status, agent, finding count, and the parked-on-quota
  *  -> fallback-agent story when the node's first attempt rate-limits. */
-function StrategyCard({ runId, nodeId, label, node, sig, rateLimited }: { runId: string; nodeId: string; label: string; node: NodeLite | undefined; sig: string; rateLimited: boolean }) {
+export function StrategyCard({ runId, nodeId, label, node, sig, rateLimited }: { runId: string; nodeId: string; label: string; node: NodeLite | undefined; sig: string; rateLimited: boolean }) {
   const output = useGatewayNodeOutput({ runId, nodeId });
   useEffect(() => {
     void output.refetch?.();
@@ -64,37 +114,26 @@ function StrategyCard({ runId, nodeId, label, node, sig, rateLimited }: { runId:
   }, [sig]);
   const row = rowOf(output) as { agentUsed?: string; findingCount?: number } | undefined;
   const status = node?.status ?? "queued";
-  const parked = rateLimited && status !== "finished";
-  const recovered = rateLimited && status === "finished";
+  const beat = quotaBeat(status, rateLimited);
+  const parked = beat === "parked";
 
   return (
-    <div
-      style={{
-        border: `1px solid ${parked ? "#f5a623" : status === "running" ? (theme.accent ?? "#5b8def") : (theme.border ?? "#2a2d34")}`,
-        borderRadius: 10,
-        padding: 14,
-        background: theme.panel ?? "#16181d",
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-        minWidth: 0,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
-        <span style={{ fontSize: 14, fontWeight: 700, color: theme.text ?? "#e6e6e6" }}>{label}</span>
+    <div className={`va-card ${parked ? "parked" : status === "running" ? "running" : ""}`} data-testid={`va-strategy-${nodeId}`}>
+      <div className="va-card-head">
+        <span className="va-card-title">{label}</span>
         <StatusPill status={parked ? "waiting" : status} />
       </div>
       {parked ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <Badge text="rate-limited · parked on quota" color="#f5a623" />
-          <span style={{ fontSize: 11, color: theme.textDim ?? "#8a8f98" }}>anthropic 429 — retrying on fallback agent…</span>
+        <div className="va-card-parked">
+          <Badge text="rate-limited · parked on quota" tone="warning" />
+          <span className="va-note">anthropic 429 — retrying on fallback agent…</span>
         </div>
       ) : null}
-      {recovered ? <Badge text="recovered on fallback agent" color="#3aa675" /> : null}
-      <div style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 12, color: theme.textDim ?? "#8a8f98" }}>
+      {beat === "recovered" ? <Badge text="recovered on fallback agent" tone="success" /> : null}
+      <div className="va-card-meta">
         <span>{row?.agentUsed ? `agent: ${row.agentUsed}` : status === "running" ? "scanning…" : parked ? "waiting for retry" : "queued"}</span>
         {typeof row?.findingCount === "number" ? (
-          <span style={{ color: theme.text ?? "#e6e6e6", fontWeight: 600 }}>{row.findingCount} findings</span>
+          <span className="va-card-count">{row.findingCount} findings</span>
         ) : null}
       </div>
     </div>
@@ -121,10 +160,10 @@ function PipelineCard({ runId, nodeId, label, node, sig }: { runId: string; node
             : "waiting on strategies";
 
   return (
-    <div style={{ border: `1px solid ${status === "running" ? (theme.accent ?? "#5b8def") : (theme.border ?? "#2a2d34")}`, borderRadius: 10, padding: "10px 14px", background: theme.panel ?? "#16181d", display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-      <span style={{ fontSize: 13, fontWeight: 700, color: theme.text ?? "#e6e6e6", minWidth: 64 }}>{label}</span>
+    <div className={`va-step ${status === "running" ? "running" : ""}`}>
+      <span className="va-step-label">{label}</span>
       <StatusPill status={status} />
-      <span style={{ fontSize: 12, color: theme.textDim ?? "#8a8f98", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{detail}</span>
+      <span className="va-step-detail">{detail}</span>
     </div>
   );
 }
@@ -145,26 +184,22 @@ function FindingsTable({ runId, sig, done }: { runId: string; sig: string; done:
   }, [row?.triagedJson]);
 
   if (findings.length === 0) {
-    return (
-      <div style={{ padding: 18, textAlign: "center", fontSize: 12, color: theme.textDim ?? "#8a8f98" }}>
-        {done ? "No findings." : "Findings land here as strategies report…"}
-      </div>
-    );
+    return <div className="va-empty">{done ? "No findings." : "Findings land here as strategies report…"}</div>;
   }
   return (
-    <div style={{ display: "flex", flexDirection: "column" }}>
+    <div className="va-findings">
       {findings.map((f) => (
-        <div key={f.findingKey} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 12px", borderTop: `1px solid ${theme.border ?? "#2a2d34"}` }}>
-          <Badge text={(f.severity ?? "info").toUpperCase()} color={SEV_COLOR[f.severity ?? ""] ?? "#8a8f98"} />
-          <span style={{ fontSize: 13, color: theme.text ?? "#e6e6e6", flex: 1, minWidth: 0 }}>{f.title}</span>
-          <code style={{ fontSize: 11, color: theme.textDim ?? "#8a8f98" }}>{f.file}</code>
+        <div key={f.findingKey} className="va-finding">
+          <Badge text={(f.severity ?? "info").toUpperCase()} tone={SEV_TONE[f.severity ?? ""] ?? "muted"} />
+          <span className="va-finding-title">{f.title}</span>
+          <code className="va-finding-file">{f.file}</code>
         </div>
       ))}
     </div>
   );
 }
 
-function App() {
+export function VibeAuditApp() {
   const runsRaw = useGatewayRuns({ filter: { workflow: WORKFLOW, limit: 10 } });
   const runs = (runsRaw.data ?? []) as Array<{ runId: string; status?: string }>;
   const urlRunId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("runId") ?? undefined : undefined;
@@ -190,20 +225,20 @@ function App() {
     const nodeId = payload?.nodeId ?? payload?.payload?.nodeId;
     if (typeof nodeId === "string") rateLimitedNodes.add(nodeId);
   }
-  const done = status === "finished";
+  const done = status === COMPLETED;
   const repo = "smithersai/payments-api";
 
   return (
     <WorkflowUiShell
       title="vibe-audit · security review"
       meta={
-        <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <span className="va-inline">
           <span className="pill">repo: {repo}</span>
           <span className="pill">4 strategies · parallel</span>
         </span>
       }
       actions={
-        <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <span className="va-inline">
           <StatusPill status={status} />
           <ConnectionBadge className="chip" />
         </span>
@@ -211,39 +246,37 @@ function App() {
     >
       {!runId ? (
         <section className="card">
-          <div style={{ padding: 24, textAlign: "center", color: theme.textDim ?? "#8a8f98" }}>
+          <div className="va-empty">
             No <code>vibe-audit</code> run yet.
           </div>
         </section>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.5fr) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
-          <section style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div className="va-board">
+          <section className="va-main">
+            <div className="va-strategies">
               {STRATEGIES.map((s) => (
                 <StrategyCard key={s.nodeId} runId={runId} nodeId={s.nodeId} label={s.label} node={nodeStatus(nodesLite, s.nodeId)} sig={sig} rateLimited={rateLimitedNodes.has(s.nodeId)} />
               ))}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+            <div className="va-pipeline">
               {PIPELINE.map((p) => (
                 <PipelineCard key={p.nodeId} runId={runId} nodeId={p.nodeId} label={p.label} node={nodeStatus(nodesLite, p.nodeId)} sig={sig} />
               ))}
             </div>
-            <div style={{ border: `1px solid ${theme.border ?? "#2a2d34"}`, borderRadius: 10, background: theme.panel ?? "#16181d" }}>
-              <div style={{ padding: "10px 12px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: theme.textDim ?? "#8a8f98" }}>
-                Triaged findings
-              </div>
+            <div className="va-panel">
+              <div className="va-panel-title">Triaged findings</div>
               <FindingsTable runId={runId} sig={sig} done={done} />
             </div>
           </section>
 
-          <section style={{ display: "flex", flexDirection: "column", gap: 12, position: "sticky", top: 12 }}>
+          <section className="va-side">
             <div>
-              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: theme.textDim ?? "#8a8f98", marginBottom: 6 }}>Run tree</div>
-              <RunTree runId={runId} style={{ maxHeight: 360 }} />
+              <div className="va-side-title">Run tree</div>
+              <RunTree runId={runId} className="va-tree" />
             </div>
             <div>
-              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, color: theme.textDim ?? "#8a8f98", marginBottom: 6 }}>Live events</div>
-              <RunEventLog runId={runId} style={{ maxHeight: 320 }} />
+              <div className="va-side-title">Live events</div>
+              <RunEventLog runId={runId} className="va-events" />
             </div>
           </section>
         </div>
@@ -252,4 +285,13 @@ function App() {
   );
 }
 
-createGatewayReactRoot(<App />);
+// Guard the mount so this module can be imported by unit tests (which exercise
+// the exported pure helpers and cards); the gateway-served page has #root.
+if (typeof document !== "undefined" && document.getElementById("root")) {
+  createGatewayReactRoot(
+    <>
+      <WorkflowUiStyles extra={VIBE_AUDIT_CSS} />
+      <VibeAuditApp />
+    </>,
+  );
+}

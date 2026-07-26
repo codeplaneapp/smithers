@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { Effect } from "effect";
 import {
   JumpToFrameError,
   jumpToFrame,
@@ -141,6 +142,74 @@ function makeNoVcsHooks() {
     getCurrentPointerImpl: async (_cwd?: string) => "pre-pointer",
     revertToPointerImpl: async (_pointer: string, _cwd?: string) => ({ success: true }),
   };
+}
+
+async function insertBlockingRewindEffect(adapter: SmithersDb, runId: string) {
+  await Effect.runPromise(adapter.insertToolCall({
+    runId,
+    nodeId: "task:two",
+    iteration: 0,
+    attempt: 1,
+    seq: 1,
+    toolName: "unrevertible-rewind-effect",
+    inputJson: "{}",
+    outputJson: "{}",
+    startedAtMs: 250,
+    finishedAtMs: 260,
+    status: "succeeded",
+    errorJson: null,
+    kind: "tool",
+    sideEffect: true,
+    idempotent: false,
+    acceptsIdempotencyKey: false,
+    hasRevert: false,
+    idempotencyKey: null,
+    revertStatus: null,
+    revertedAtMs: null,
+    revertErrorJson: null,
+    forcedPastJson: null,
+  }));
+}
+
+function rewindRunState(run: Awaited<ReturnType<SmithersDb["getRun"]>>) {
+  return {
+    status: run?.status ?? null,
+    finishedAtMs: run?.finishedAtMs ?? null,
+    heartbeatAtMs: run?.heartbeatAtMs ?? null,
+    runtimeOwnerId: run?.runtimeOwnerId ?? null,
+    cancelRequestedAtMs: run?.cancelRequestedAtMs ?? null,
+    hijackRequestedAtMs: run?.hijackRequestedAtMs ?? null,
+    hijackTarget: run?.hijackTarget ?? null,
+    errorJson: run?.errorJson ?? null,
+  };
+}
+
+async function rewindTransition(status: "running" | "finished", forced: boolean) {
+  const { adapter, sqlite } = setupDb();
+  const runId = `${forced ? "forced" : "unforced"}-${status}-transition`;
+  try {
+    await seedRun(adapter, runId);
+    await adapter.updateRun(runId, {
+      status,
+      finishedAtMs: status === "finished" ? 999 : null,
+      heartbeatAtMs: 1,
+      runtimeOwnerId: "stale-engine-owner",
+      errorJson: JSON.stringify({ previous: true }),
+    });
+    if (forced) await insertBlockingRewindEffect(adapter, runId);
+    await jumpToFrame({
+      adapter,
+      runId,
+      frameNo: 1,
+      confirm: true,
+      force: forced,
+      nowMs: () => 100_000,
+      ...makeNoVcsHooks(),
+    });
+    return rewindRunState(await adapter.getRun(runId));
+  } finally {
+    sqlite.close();
+  }
 }
 
 describe("jumpToFrame", () => {
@@ -450,7 +519,74 @@ describe("jumpToFrame", () => {
 
       const audits = await listRewindAuditRows(adapter, { runId: "run-rate" });
       expect(audits).toHaveLength(11);
-      expect(audits[10]?.result).toBe("failed");
+      expect(audits[10]?.result).toBe("rejected");
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("rate limit: rejected retries do not extend the lockout past the window", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      await seedRun(adapter, "run-rate-retry");
+      const client = (adapter as any).db.session.client;
+      const t0 = 10_000_000;
+      const rateLimit = { maxPerWindow: 2, windowMs: 60_000 };
+      for (let index = 0; index < 2; index += 1) {
+        client
+          .query(
+            `INSERT INTO _smithers_time_travel_audit (
+               run_id,
+               from_frame_no,
+               to_frame_no,
+               caller,
+               timestamp_ms,
+               result,
+               duration_ms
+             ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run("run-rate-retry", 2, 1, "user:owner", t0, "success", 10);
+      }
+
+      // Two rejected retries inside the window; each writes an audit row.
+      for (const offsetMs of [1_000, 59_000]) {
+        await expect(
+          jumpToFrame({
+            adapter,
+            runId: "run-rate-retry",
+            frameNo: 1,
+            confirm: true,
+            caller: "user:owner",
+            rateLimit,
+            nowMs: () => t0 + offsetMs,
+            ...makeNoVcsHooks(),
+          }),
+        ).rejects.toMatchObject({ code: "RateLimited" });
+      }
+
+      // Once the two real rewinds age out, the quota must drain even though the
+      // rejection rows are still inside the trailing window.
+      await expect(
+        jumpToFrame({
+          adapter,
+          runId: "run-rate-retry",
+          frameNo: 1,
+          confirm: true,
+          caller: "user:owner",
+          rateLimit,
+          nowMs: () => t0 + 61_000,
+          ...makeNoVcsHooks(),
+        }),
+      ).resolves.toMatchObject({ ok: true });
+
+      const audits = await listRewindAuditRows(adapter, { runId: "run-rate-retry" });
+      expect(audits.map((row) => row.result)).toEqual([
+        "success",
+        "success",
+        "rejected",
+        "rejected",
+        "success",
+      ]);
     } finally {
       sqlite.close();
     }
@@ -538,6 +674,154 @@ describe("jumpToFrame", () => {
           .map((frame) => frame.frameNo)
           .sort((a, b) => a - b),
       ).toEqual([0, 1, 2]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("lease steal during sandbox restoration skips stale-owner rollback", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      const runId = "run-lease-stolen-during-sandbox";
+      await seedRun(adapter, runId);
+      let currentPointer = "pre-pointer";
+      const pointerWrites: string[] = [];
+
+      await expect(
+        jumpToFrame({
+          adapter,
+          runId,
+          frameNo: 1,
+          confirm: true,
+          caller: "user:owner",
+          getCurrentPointerImpl: async () => currentPointer,
+          revertToPointerImpl: async (pointer: string) => {
+            pointerWrites.push(pointer);
+            currentPointer = pointer;
+            return { success: true };
+          },
+          hooks: {
+            afterStep: (step) => {
+              if (step !== "revert-sandboxes") return;
+              sqlite
+                .query(
+                  `UPDATE _smithers_rewind_leases
+                      SET owner_token = ?, expires_at_ms = ?
+                    WHERE run_id = ?`,
+                )
+                .run("replacement-owner", Date.now() + 60_000, runId);
+              currentPointer = "replacement-owner-pointer";
+              throw new Error("replacement owner took over after sandbox restore");
+            },
+          },
+        } as never),
+      ).rejects.toMatchObject({
+        code: "Busy",
+        details: { rollbackSkipped: true },
+      });
+
+      expect(pointerWrites).toEqual(["ptr-one"]);
+      expect(currentPointer).toBe("replacement-owner-pointer");
+      const audits = await listRewindAuditRows(adapter, { runId });
+      expect(audits.at(-1)?.result).toBe("partial");
+      const durableNotes = await adapter.listEventsByType(runId, "TimeTravelFinished");
+      expect(durableNotes).toHaveLength(1);
+      expect(JSON.parse(durableNotes[0].payloadJson)).toMatchObject({
+        success: false,
+        error: expect.stringContaining("rollback skipped because lease ownership was lost"),
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("lease loss after one sandbox rollback skips every remaining sandbox and reconciler write", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      const runId = "run-lease-stolen-mid-rollback";
+      await seedRun(adapter, runId);
+      sqlite.query(`
+        UPDATE _smithers_attempts
+           SET jj_cwd = ?
+         WHERE run_id = ? AND node_id = ?
+      `).run("/tmp/sandbox-b", runId, "task:two");
+      await adapter.insertAttempt({
+        runId,
+        nodeId: "sandbox-b-base",
+        iteration: 0,
+        attempt: 1,
+        state: "finished",
+        startedAtMs: 120,
+        finishedAtMs: 130,
+        jjPointer: "ptr-b-base",
+        jjCwd: "/tmp/sandbox-b",
+      });
+      await adapter.insertAttempt({
+        runId,
+        nodeId: "task:one",
+        iteration: 0,
+        attempt: 2,
+        state: "finished",
+        startedAtMs: 240,
+        finishedAtMs: 245,
+        jjPointer: "ptr-one-retry",
+        jjCwd: "/tmp/sandbox-a",
+      });
+
+      const rollbackWrites: Array<{ pointer: string; cwd?: string }> = [];
+      let reconcilerRestored = false;
+      await expect(jumpToFrame({
+        adapter,
+        runId,
+        frameNo: 1,
+        confirm: true,
+        caller: "user:owner",
+        getCurrentPointerImpl: async (cwd?: string) => `pre:${cwd}`,
+        revertToPointerImpl: async (pointer: string, cwd?: string) => {
+          if (pointer.startsWith("pre:")) {
+            rollbackWrites.push({ pointer, cwd });
+            if (rollbackWrites.length === 1) {
+              sqlite.query(`
+                UPDATE _smithers_rewind_leases
+                   SET owner_token = ?, expires_at_ms = ?
+                 WHERE run_id = ?
+              `).run("replacement-owner", Date.now() + 60_000, runId);
+            }
+          }
+          return { success: true };
+        },
+        captureReconcilerState: async () => ({ before: true }),
+        restoreReconcilerState: async () => {
+          reconcilerRestored = true;
+        },
+        hooks: {
+          afterStep: (step) => {
+            if (step === "revert-sandboxes") {
+              throw new Error("force rollback after both forward restores");
+            }
+          },
+        },
+      } as never)).rejects.toMatchObject({
+        code: "Busy",
+        details: {
+          rollbackSkipped: true,
+          rollbackRestoredSandboxes: [expect.any(String)],
+          rollbackSkippedSandboxes: [expect.any(String)],
+          rollbackReconcilerSkipped: true,
+        },
+      });
+
+      expect(rollbackWrites).toHaveLength(1);
+      expect(reconcilerRestored).toBe(false);
+      const durableNotes = await adapter.listEventsByType(runId, "TimeTravelFinished");
+      expect(durableNotes).toHaveLength(1);
+      expect(JSON.parse(durableNotes[0].payloadJson)).toMatchObject({
+        success: false,
+        rollbackRestoredSandboxes: [expect.any(String)],
+        rollbackSkippedSandboxes: [expect.any(String)],
+        rollbackReconcilerSkipped: true,
+        error: expect.stringContaining("Restored sandboxes:"),
+      });
     } finally {
       sqlite.close();
     }
@@ -674,6 +958,42 @@ describe("jumpToFrame", () => {
     } finally {
       sqlite.close();
     }
+  });
+
+  test("forced rewind of a running run matches unforced run-state transitions byte-for-byte", async () => {
+    const [unforced, forced] = await Promise.all([
+      rewindTransition("running", false),
+      rewindTransition("running", true),
+    ]);
+    expect(JSON.stringify(forced)).toBe(JSON.stringify(unforced));
+    expect(forced).toEqual({
+      status: "running",
+      finishedAtMs: null,
+      heartbeatAtMs: null,
+      runtimeOwnerId: null,
+      cancelRequestedAtMs: null,
+      hijackRequestedAtMs: null,
+      hijackTarget: null,
+      errorJson: null,
+    });
+  });
+
+  test("forced rewind of a finished run matches unforced run-state transitions byte-for-byte", async () => {
+    const [unforced, forced] = await Promise.all([
+      rewindTransition("finished", false),
+      rewindTransition("finished", true),
+    ]);
+    expect(JSON.stringify(forced)).toBe(JSON.stringify(unforced));
+    expect(forced).toEqual({
+      status: "running",
+      finishedAtMs: null,
+      heartbeatAtMs: null,
+      runtimeOwnerId: null,
+      cancelRequestedAtMs: null,
+      hijackRequestedAtMs: null,
+      hijackTarget: null,
+      errorJson: null,
+    });
   });
 });
 

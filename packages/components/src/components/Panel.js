@@ -43,7 +43,22 @@ export function Panel(props) {
     const normalized = panelists.map(normalizePanelist);
     // Single source of the panelist task ids: the tasks, needs, and deps maps
     // below all key off these, so the derivation can never drift.
-    const taskIds = normalized.map((p, i) => `${prefix}-${p.label ?? p.role ?? `panelist-${i}`}`);
+    //
+    // Two panelists sharing a label/role (two "security" reviewers) is a natural
+    // config, so suffix later collisions instead of emitting duplicate Task ids —
+    // otherwise graph extraction throws DUPLICATE_ID and the needs/deps maps
+    // collapse a panelist via object-key overwrite. `${prefix}-moderator` is
+    // reserved by the moderator task below.
+    const seenIds = new Set([`${prefix}-moderator`]);
+    const taskIds = normalized.map((p, i) => {
+        const base = `${prefix}-${p.label ?? p.role ?? `panelist-${i}`}`;
+        let taskId = base;
+        let suffix = i;
+        while (seenIds.has(taskId))
+            taskId = `${base}-${suffix++}`;
+        seenIds.add(taskId);
+        return taskId;
+    });
     // Build parallel panelist tasks
     const panelistTasks = normalized.map((p, i) => {
         const taskId = taskIds[i];

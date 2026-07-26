@@ -40,6 +40,10 @@ type ParameterObject$1 = {
     required?: boolean;
     schema?: SchemaObject$1 | RefObject$1;
     deprecated?: boolean;
+    /** Serialization style; defaults to `form` for query, `simple` otherwise. */
+    style?: "matrix" | "label" | "form" | "simple" | "spaceDelimited" | "pipeDelimited" | "deepObject";
+    /** Defaults to `true` for `style: form`, `false` otherwise. */
+    explode?: boolean;
 };
 
 type MediaTypeObject = {
@@ -137,6 +141,11 @@ type OpenApiSpec$b = {
     servers?: Array<{
         url: string;
         description?: string;
+        variables?: Record<string, {
+            default: string;
+            enum?: string[];
+            description?: string;
+        }>;
     }>;
     paths: Record<string, PathItem>;
     components?: {

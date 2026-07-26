@@ -139,14 +139,48 @@ bunx smithers-orchestrator ui RUN_ID
 
 ## Time-travel commands compared
 
-Four near-synonym commands roll history back in different ways. Pick by what each acts on:
+Five commands cross historical boundaries. Pick by what each acts on:
 
 | Command | Acts on | Behavior |
 | --- | --- | --- |
 | `rewind` | a run | Rewinds a run to a previous frame. Args: `RUN_ID FRAME_NO`. |
 | `replay` | a snapshot checkpoint | Forks from a checkpoint and resumes execution (time-travel fork). Takes a workflow. |
+| `fork` | a snapshot checkpoint | Creates a child run. `--run` also resumes it. |
 | `timetravel` | a past task state | Reverts filesystem plus DB state to a previous task state, then optionally resumes. Takes a workflow. |
 | `revert` | the workspace | Reverts the workspace to a previous task attempt's filesystem state only, no DB reset. Takes a workflow. |
+
+Every command prints an effect-boundary report, including a clean report when
+no effects are crossed. `revert`, `timetravel`, and `rewind` run registered
+compensation handlers before discarding history. Pass `--no-revert` to skip
+them; skipped effects become blockers. `replay` and `fork --run` never
+compensate the parent run's effects.
+
+```bash
+bunx smithers-orchestrator revert workflow.tsx \
+  --run-id RUN_ID --node-id NODE_ID --attempt 1 [--force] [--no-revert]
+
+bunx smithers-orchestrator timetravel workflow.tsx \
+  --run-id RUN_ID --node-id NODE_ID [--force] [--no-revert]
+
+bunx smithers-orchestrator rewind RUN_ID FRAME_NO \
+  [--force] [--no-revert]
+
+bunx smithers-orchestrator replay workflow.tsx \
+  --run-id RUN_ID --frame FRAME_NO [--force]
+
+bunx smithers-orchestrator fork workflow.tsx \
+  --run-id RUN_ID --frame FRAME_NO --run [--force]
+```
+
+Without `--force`, crossed `succeeded`, `unknown`, `revert-failed`, or
+`revert-stale` effects stop the operation with
+`TIME_TRAVEL_SIDE_EFFECT_BLOCKED`. With
+`--force`, Smithers records `SideEffectBoundaryCrossed` and marks the run for
+attention. A plain `fork` without `--run` does not re-execute anything, so it
+reports a warning instead of blocking.
+
+Git commits, branch and ref changes, worktree writes, and `git push` are
+exempt. GitHub API mutations such as issues, comments, and PR merges are not.
 
 See [Time-travel API](/reference/time-travel) and [Revert](/runtime/revert) for the programmatic surface.
 
@@ -408,15 +442,16 @@ commands[102]:
     purpose: Query run event history with filters, grouping, and NDJSON output
     args[1]{name,type,required,desc}:
       runId,string,true,Run ID
-    flags[8]{name,short,type,default,desc}:
+    flags[9]{name,short,type,default,desc}:
       node,n,string,,Filter by node ID
       type,t,string,,"Category: agent|approval|frame|memory|node|openapi|output|revert|run|sandbox|scorer|snapshot|supervisor|timer|token|tool-call|workflow"
       since,s,string,,Recent duration window such as 5m or 2h
       limit,l,number,1000,Max events; capped at 100000
       json,j,boolean,false,Emit NDJSON
       group-by,,string,,"node | attempt"
-      watch,w,boolean,false,Append new events as they arrive
+      watch,w,boolean,false,Append new events as they arrive from the live cursor
       interval,i,number,2,Watch poll seconds
+      history,,boolean,false,Replay existing history before tailing in watch mode
   - name: chat
     purpose: Show agent chat output for the latest run or a specific run
     args[1]{name,type,required,desc}:
@@ -596,11 +631,13 @@ commands[102]:
     purpose: Revert the workspace to a previous task attempt's filesystem state
     args[1]{name,type,required,desc}:
       workflow,string,true,Workflow file path
-    flags[4]{name,short,type,default,desc}:
+    flags[6]{name,short,type,default,desc}:
       run-id,r,string,,Run ID
       node-id,n,string,,Node ID
       attempt,,number,1,Attempt number
       iteration,,number,0,Loop iteration
+      force,,boolean,false,Cross unresolved effects and mark the run needs-attention
+      revert,,boolean,true,Run compensation handlers; use --no-revert to skip
   - name: retry-task
     purpose: Retry a specific task within a run, then resume the workflow
     args[1]{name,type,required,desc}:
@@ -615,7 +652,7 @@ commands[102]:
     purpose: Time-travel to a task state; revert filesystem, reset DB, optionally resume
     args[1]{name,type,required,desc}:
       workflow,string,true,Workflow file path
-    flags[8]{name,short,type,default,desc}:
+    flags[9]{name,short,type,default,desc}:
       run-id,r,string,,Run ID
       node-id,n,string,,Task/node ID
       iteration,,number,0,Loop iteration
@@ -624,28 +661,31 @@ commands[102]:
       no-deps,,boolean,false,Only reset this node
       resume,,boolean,false,Resume after time travel
       force,,boolean,false,Force even if run is still running
+      revert,,boolean,true,Run compensation handlers; use --no-revert to skip
   - name: replay
     purpose: Fork from a checkpoint and resume execution
     args[1]{name,type,required,desc}:
       workflow,string,true,Workflow file path
-    flags[6]{name,short,type,default,desc}:
+    flags[7]{name,short,type,default,desc}:
       run-id,r,string,,Source run ID
       frame,f,number,,Frame number to fork from
       node,n,string,,Node ID to reset to pending
       input,i,string,,Input overrides as JSON
       label,l,string,,Branch label for the fork
       restore-vcs,,boolean,false,Restore jj filesystem state to source frame revision
+      force,,boolean,false,Cross unresolved effects and mark the parent needs-attention
   - name: fork
     purpose: Create a branched run from a snapshot checkpoint
     args[1]{name,type,required,desc}:
       workflow,string,true,Workflow file path
-    flags[6]{name,short,type,default,desc}:
+    flags[7]{name,short,type,default,desc}:
       run-id,r,string,,Source run ID
       frame,f,number,,Frame number to fork from
       reset-node,n,string,,Node ID to reset to pending
       input,i,string,,Input overrides as JSON
       label,l,string,,Branch label
       run,,boolean,false,Immediately start the forked run
+      force,,boolean,false,Allow --run to cross unresolved external effects
   - name: timeline
     purpose: View execution timeline for a run and its forks
     args[1]{name,type,required,desc}:
@@ -711,9 +751,11 @@ commands[102]:
     args[2]{name,type,required,desc}:
       runId,string,true,Run ID to rewind
       frameNo,number,true,Target frame number
-    flags[2]{name,short,type,default,desc}:
+    flags[4]{name,short,type,default,desc}:
       yes,,boolean,false,Skip confirmation prompt
       json,j,boolean,false,Emit JumpResult JSON
+      force,,boolean,false,Cross unresolved effects and mark the run needs-attention
+      revert,,boolean,true,Run compensation handlers; use --no-revert to skip
   - name: snapshots
     purpose: List durability snapshots (workspace checkpoints) for a run
     args[1]{name,type,required,desc}:
@@ -1028,7 +1070,7 @@ commands[102]:
 
 - **Detached mode** (`up --detach`): preflight-renders the workflow graph before spawning anything (a parse, import, or graph error prints `file:line:col` on stderr and exits non-zero with no run created), then redirects stdout/stderr to a log file, waits up to 10s for proof the run was admitted, prints `runId`/`pid`/`logFile`, and exits. A child that dies before admission prints its log tail and exits non-zero instead of a success run ID. The same preflight and admission gate covers `workflow run --detach` and detached `--resume`.
 - **Serve mode** (`up --serve`): starts the HTTP app and keeps the process alive until interrupted. Add `--supervise` to run stale-run recovery in the same process.
-- **Watch mode**: `ps`, `events`, `inspect`, `node`, and `tree` have watch-style behavior. They stop cleanly on SIGINT and most stop when the run becomes terminal.
+- **Watch mode**: `ps`, `events`, `inspect`, `node`, and `tree` have watch-style behavior. They stop cleanly on SIGINT and most stop when the run becomes terminal. `events --watch` on a live run starts at the current event cursor and only prints events appended after startup; pass `--history` (or a `--since` window) to replay matching history first.
 - **DevTools commands**: `tree`, `diff`, `output`, and `rewind` intentionally use command-scoped `--json`/`-j` and return exit code `1` for parser/user errors.
 - **Account commands**: `agents add|list|remove|test` manage `~/.smithers/accounts.json`; subscription providers use CLI config directories, API providers use API keys. Legacy entries with an unknown provider are preserved across `add`/`remove`; `agents remove <label>` deletes one.
 - **Output format**: all commands honour `--format toon|json|yaml|md|jsonl`; `--filter-output <key.path>` extracts a nested field from JSON output.

@@ -2731,6 +2731,35 @@ export class Gateway {
         return mounts.sort((left, right) => right.config.path.length - left.config.path.length);
     }
     /**
+   * Where to send a request for the conventional `/workflows/<key>` route when
+   * the workflow mounts its UI somewhere else (a `<UI path="…">` declaration).
+   * The conventional route is the only one clients can construct without
+   * loading the module, so it is also the route that triggers a lazy
+   * registration — a workflow whose module loads AFTER listen() would
+   * otherwise register, mount its UI at the declared path, and still 404 the
+   * request that loaded it (#1362).
+   *
+   * @param {string} workflowKey
+   * @param {URL} url
+   * @returns {string | null}
+   */
+    workflowUiMountRedirect(workflowKey, url) {
+        const conventionalPath = `/workflows/${encodeURIComponent(workflowKey)}`;
+        // Only the mount root redirects: asset paths belong to the real mount.
+        if (url.pathname !== conventionalPath && url.pathname !== `${conventionalPath}/`) {
+            return null;
+        }
+        const entry = this.workflows.get(workflowKey);
+        if (!entry) {
+            return null;
+        }
+        const ui = this.resolvedUiFor(workflowKey, entry);
+        if (!ui || ui.path === url.pathname) {
+            return null;
+        }
+        return `${ui.path}${url.search}`;
+    }
+    /**
    * @param {string} pathname
    * @returns {GatewayUiMount | null}
    */
@@ -2864,6 +2893,13 @@ export class Gateway {
         }
         const uiMatch = this.resolveUiMatch(url.pathname);
         if (!uiMatch) {
+            const declaredMount = requestedWorkflowKey
+                ? this.workflowUiMountRedirect(requestedWorkflowKey, url)
+                : null;
+            if (declaredMount) {
+                sendRedirect(res, declaredMount);
+                return true;
+            }
             return false;
         }
         const uiAuthFailure = await authorizeGatewayUiRequest({
@@ -7890,6 +7926,21 @@ a { color: var(--brand); }</style>
                         caller: event.caller ?? null,
                     },
                 };
+            case "SideEffectBoundaryCrossed":
+                return {
+                    event: "run.side_effect_boundary_crossed",
+                    payload: {
+                        runId: event.runId,
+                        opId: event.opId,
+                        operation: event.operation,
+                        report: event.report,
+                        timestampMs: event.timestampMs,
+                        ...(event.parentRunId != null ? { parentRunId: event.parentRunId } : {}),
+                        ...(event.warningOnly != null ? { warningOnly: event.warningOnly } : {}),
+                        ...(event.lateCompletion != null ? { lateCompletion: event.lateCompletion } : {}),
+                        ...(event.archivedByOp != null ? { archivedByOp: event.archivedByOp } : {}),
+                    },
+                };
             case "RunFinished":
                 return {
                     event: "run.completed",
@@ -8677,6 +8728,8 @@ a { color: var(--brand); }</style>
                     return responseError(frame.id, "InvalidFrameNo", "frameNo is required");
                 }
                 const confirm = asBoolean(params.confirm);
+                const force = asBoolean(params.force);
+                const noRevert = asBoolean(params.noRevert);
                 const resolved = await this.resolveRun(runId);
                 if (!resolved) {
                     return responseError(frame.id, "RunNotFound", `Run not found: ${runId}`);
@@ -8717,6 +8770,8 @@ a { color: var(--brand); }</style>
                         runId,
                         frameNo,
                         confirm,
+                        force,
+                        noRevert,
                         caller: connection.userId ?? "gateway",
                         pauseRunLoop: async () => {
                             if (!active) {
@@ -8761,7 +8816,12 @@ a { color: var(--brand); }</style>
                 }
                 catch (error) {
                     if (error instanceof JumpToFrameError) {
-                        return responseError(frame.id, error.code, error.message);
+                        return responseError(
+                            frame.id,
+                            error.code,
+                            error.message,
+                            error.details ? { details: error.details } : {},
+                        );
                     }
                     throw error;
                 }

@@ -50,6 +50,7 @@ export async function acquireRewindLock(adapter, runId, options = {}) {
   if (!Number.isFinite(leaseTtlMs) || leaseTtlMs <= 0) {
     throw new TypeError("leaseTtlMs must be a positive finite number.");
   }
+  const storage = resolveStorage(adapter);
 
   // This advisory guard avoids needless DB work for callers in the same
   // process. The durable row below remains the source of truth.
@@ -59,7 +60,6 @@ export async function acquireRewindLock(adapter, runId, options = {}) {
 
   const ownerToken = randomUUID();
   rewindLockStore.set(runId, ownerToken);
-  const storage = resolveStorage(adapter);
   let expiresAtMs = nowMs() + leaseTtlMs;
 
   try {
@@ -91,6 +91,8 @@ export async function acquireRewindLock(adapter, runId, options = {}) {
 
   let released = false;
   let renewing = false;
+  /** @type {Error | null} */
+  let fencingError = null;
   /** @type {ReturnType<typeof setInterval> | null} */
   let renewalTimer = null;
 
@@ -100,23 +102,50 @@ export async function acquireRewindLock(adapter, runId, options = {}) {
     }
   };
 
+  /**
+   * @param {unknown} cause
+   */
+  const tripFence = (cause) => {
+    if (!fencingError) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      fencingError = new Error(
+        `Rewind lease renewal failed for ${runId}: ${detail}`,
+        cause instanceof Error ? { cause } : undefined,
+      );
+    }
+    loseLocalOwnership();
+    if (renewalTimer) {
+      clearInterval(renewalTimer);
+      renewalTimer = null;
+    }
+  };
+
   const renew = async () => {
+    if (fencingError) {
+      throw fencingError;
+    }
     if (released || rewindLockStore.get(runId) !== ownerToken) {
       return false;
     }
     const renewedAtMs = nowMs();
     const nextExpiresAtMs = renewedAtMs + leaseTtlMs;
-    const rows = await runWrite(adapter, `renew rewind lease ${runId}`, () =>
-      storage.queryAllRaw(
-        `UPDATE _smithers_rewind_leases
-            SET expires_at_ms = ?
-          WHERE run_id = ?
-            AND owner_token = ?
-            AND expires_at_ms > ?
-        RETURNING owner_token`,
-        [nextExpiresAtMs, runId, ownerToken, renewedAtMs],
-      ),
-    );
+    let rows;
+    try {
+      rows = await runWrite(adapter, `renew rewind lease ${runId}`, () =>
+        storage.queryAllRaw(
+          `UPDATE _smithers_rewind_leases
+              SET expires_at_ms = ?
+            WHERE run_id = ?
+              AND owner_token = ?
+              AND expires_at_ms > ?
+          RETURNING owner_token`,
+          [nextExpiresAtMs, runId, ownerToken, renewedAtMs],
+        ),
+      );
+    } catch (error) {
+      tripFence(error);
+      throw fencingError;
+    }
     const renewedToken = rows[0]?.owner_token ?? rows[0]?.ownerToken;
     if (renewedToken !== ownerToken) {
       loseLocalOwnership();
@@ -130,6 +159,43 @@ export async function acquireRewindLock(adapter, runId, options = {}) {
     return true;
   };
 
+  const checkStillHeld = async () => {
+    if (fencingError) {
+      throw fencingError;
+    }
+    if (released || rewindLockStore.get(runId) !== ownerToken) {
+      return false;
+    }
+    const checkedAtMs = nowMs();
+    let rows;
+    try {
+      // A no-op UPDATE both verifies ownership and locks the lease row for the
+      // lifetime of an enclosing destructive transaction.
+      rows = await storage.queryAllRaw(
+        `UPDATE _smithers_rewind_leases
+            SET expires_at_ms = expires_at_ms
+          WHERE run_id = ?
+            AND owner_token = ?
+            AND expires_at_ms > ?
+        RETURNING owner_token`,
+        [runId, ownerToken, checkedAtMs],
+      );
+    } catch (error) {
+      tripFence(error);
+      throw fencingError;
+    }
+    const heldToken = rows[0]?.owner_token ?? rows[0]?.ownerToken;
+    if (heldToken !== ownerToken) {
+      loseLocalOwnership();
+      if (renewalTimer) {
+        clearInterval(renewalTimer);
+        renewalTimer = null;
+      }
+      return false;
+    }
+    return true;
+  };
+
   if (options.autoRenew !== false) {
     renewalTimer = setInterval(() => {
       if (renewing || released) {
@@ -137,7 +203,9 @@ export async function acquireRewindLock(adapter, runId, options = {}) {
       }
       renewing = true;
       void renew()
-        .catch(() => undefined)
+        .catch((error) => {
+          tripFence(error);
+        })
         .finally(() => {
           renewing = false;
         });
@@ -152,6 +220,7 @@ export async function acquireRewindLock(adapter, runId, options = {}) {
       return expiresAtMs;
     },
     renew,
+    checkStillHeld,
     async release() {
       if (released) {
         return false;

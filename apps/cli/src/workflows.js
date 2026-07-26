@@ -2,7 +2,7 @@
 /** @typedef {import("./WorkflowSourceType.ts").WorkflowSourceType} WorkflowSourceType */
 // @smithers-type-exports-end
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { accountsRoot } from "@smithers-orchestrator/accounts";
@@ -281,12 +281,7 @@ export function evaluateEligibility(gating, env) {
 function binaryOnPath(bin, env) {
     // Absolute/relative path form: check directly.
     if (bin.includes("/")) {
-        try {
-            return statSync(bin).isFile();
-        }
-        catch {
-            return false;
-        }
+        return isExecutableFile(bin);
     }
     const pathValue = env.PATH ?? "";
     const pathExts = process.platform === "win32" ? (env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";") : [""];
@@ -294,16 +289,33 @@ function binaryOnPath(bin, env) {
         if (!dir)
             continue;
         for (const ext of pathExts) {
-            try {
-                if (statSync(join(dir, bin + ext)).isFile())
-                    return true;
-            }
-            catch {
-                // keep scanning
-            }
+            if (isExecutableFile(join(dir, bin + ext)))
+                return true;
         }
     }
     return false;
+}
+/**
+ * A required-bin only counts as present when it is a regular file this user can
+ * actually execute. Existence alone (`isFile()`) marks a non-executable file
+ * eligible, so the workflow is advertised as runnable and then dies with
+ * EACCES/ENOEXEC at launch — exactly the case the gate exists to catch. Windows
+ * has no execute bit (`X_OK` degrades to `F_OK` there), so PATHEXT remains the
+ * runnability signal on that platform.
+ *
+ * @param {string} candidate
+ * @returns {boolean}
+ */
+function isExecutableFile(candidate) {
+    try {
+        if (!statSync(candidate).isFile())
+            return false;
+        accessSync(candidate, fsConstants.X_OK);
+        return true;
+    }
+    catch {
+        return false;
+    }
 }
 /**
  * @param {string | undefined} raw
@@ -641,6 +653,31 @@ export function discoverWorkflows(from = process.cwd(), env = process.env) {
         }
     }
     return discovered.sort((a, b) => a.id.localeCompare(b.id));
+}
+/**
+ * How many workflows a gateway boot in `from` would discover, counted from the
+ * directory listing alone — no metadata parse, no module load. Autostart
+ * waiters size their wait budget with this (#1362), so it must stay cheap.
+ *
+ * @param {string} [from] Directory to search from (default: cwd).
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {number}
+ */
+export function countDiscoverableWorkflows(from = process.cwd(), env = process.env) {
+    const seen = new Set();
+    for (const { dir } of resolveWorkflowDirs(from, env)) {
+        try {
+            if (!existsSync(dir) || !statSync(dir).isDirectory())
+                continue;
+            for (const { id } of enumerateWorkflowEntries(dir)) {
+                seen.add(id);
+            }
+        }
+        catch {
+            // A budget estimate must never be the thing that fails a command.
+        }
+    }
+    return seen.size;
 }
 /**
  * @param {string} name

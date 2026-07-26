@@ -101,9 +101,45 @@ function makeFakeTimeTravelAdapter(overrides = {}) {
             insertNode: [],
             updateRun: [],
         },
+        leaseOwner: null,
+        nextAuditId: 1,
         ...overrides,
     };
+    const internalStorage = {
+        dialect: "sqlite",
+        queryAll: async () => [],
+        queryOne: async (sql) => {
+            if (sql.includes("_smithers_time_travel_audit")) {
+                return { id: state.nextAuditId++ };
+            }
+            return undefined;
+        },
+        execute: async () => {},
+        queryAllRaw: async (sql, params) => {
+            if (sql.includes("INSERT INTO _smithers_rewind_leases")) {
+                state.leaseOwner = params[1];
+                return [{ owner_token: state.leaseOwner }];
+            }
+            if (sql.includes("UPDATE _smithers_rewind_leases")) {
+                const ownerToken = sql.includes("SET expires_at_ms = expires_at_ms")
+                    ? params[1]
+                    : params[2];
+                return state.leaseOwner === ownerToken
+                    ? [{ owner_token: state.leaseOwner }]
+                    : [];
+            }
+            if (sql.includes("DELETE FROM _smithers_rewind_leases")) {
+                const owner = state.leaseOwner;
+                if (owner !== params[1]) return [];
+                state.leaseOwner = null;
+                return [{ owner_token: owner }];
+            }
+            return [];
+        },
+    };
     const adapter = {
+        internalStorage,
+        write: async (_label, operation) => await operation(),
         listAttempts: (runId, nodeId, iteration) => {
             const attempts = state.attemptsForTarget.filter(
                 (attempt) => attempt.runId === runId && attempt.nodeId === nodeId && attempt.iteration === iteration,
@@ -291,7 +327,9 @@ describe("rewind validation and rate-limit boundaries", () => {
     test("validateJumpRunId enforces slug length and lowercase shape", () => {
         expect(validateJumpRunId("a")).toBe("a");
         expect(validateJumpRunId("a".repeat(64))).toBe("a".repeat(64));
-        for (const invalid of ["", "a".repeat(65), "RunUpper", "run.with.dot"]) {
+        // `up --run-id` creates dotted ids, so rewinding one must work too.
+        expect(validateJumpRunId("run.with.dot")).toBe("run.with.dot");
+        for (const invalid of ["", "a".repeat(65), "RunUpper", ".leading.dot", ".."]) {
             let caught;
             try {
                 validateJumpRunId(invalid);

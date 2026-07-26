@@ -426,6 +426,79 @@ describe("getUsageForAccounts cache decisions", () => {
         expect(reports[0]).toMatchObject({ stale: true, error: "cached-floor" });
     });
 
+    test("--fresh re-probes a claude-code account whose cached report is a failure", async () => {
+        const env = { SMITHERS_HOME: tempDir() };
+        const claudeConfig = tempDir();
+        // the credential the user just refreshed after the cached probe failed
+        writeFileSync(join(claudeConfig, ".credentials.json"), JSON.stringify({
+            claudeAiOauth: { accessToken: "refreshed-token", expiresAt: 99999999999999 },
+        }));
+        writeUsageCache({
+            version: 1,
+            entries: {
+                claude: {
+                    identity: { provider: "claude-code", configDir: claudeConfig },
+                    report: {
+                        accountLabel: "claude",
+                        provider: "claude-code",
+                        authMode: "subscription",
+                        source: "none",
+                        stale: false,
+                        estimate: false,
+                        fetchedAt: "2026-06-03T00:00:00.000Z",
+                        windows: [],
+                        error: "Claude OAuth token expired; run `claude` to refresh",
+                    },
+                },
+            },
+        }, env);
+        globalThis.fetch = mock(async () => jsonResponse(200, {
+            five_hour: { utilization: 10, resets_at: "2026-06-03T05:00:00.000Z" },
+        }));
+
+        // age 30s, far inside the 180s floor: the floor may not pin a failure
+        const reports = await getUsageForAccounts(
+            [{ label: "claude", provider: "claude-code", configDir: claudeConfig }],
+            { env, fresh: true, nowMs: Date.parse("2026-06-03T00:00:30.000Z") },
+        );
+
+        expect(reports[0]).toMatchObject({ stale: false, source: "oauth", error: undefined });
+        expect(readUsageCache(env).entries.claude.report.source).toBe("oauth");
+    });
+
+    test("a cached claude-code failure still serves the soft interval without --fresh", async () => {
+        const env = { SMITHERS_HOME: tempDir() };
+        writeUsageCache({
+            version: 1,
+            entries: {
+                claude: {
+                    identity: { provider: "claude-code", configDir: "/x" },
+                    report: {
+                        accountLabel: "claude",
+                        provider: "claude-code",
+                        authMode: "subscription",
+                        source: "none",
+                        stale: false,
+                        estimate: false,
+                        fetchedAt: "2026-06-03T00:00:00.000Z",
+                        windows: [],
+                        error: "Claude usage endpoint rate limited (429); try again shortly",
+                    },
+                },
+            },
+        }, env);
+        const fetchMock = mock(async () => jsonResponse(200, {}));
+        globalThis.fetch = fetchMock;
+
+        const reports = await getUsageForAccounts(
+            [{ label: "claude", provider: "claude-code", configDir: "/x" }],
+            { env, nowMs: Date.parse("2026-06-03T00:02:59.000Z") },
+        );
+
+        expect(reports[0]).toMatchObject({ stale: true, error: "Claude usage endpoint rate limited (429); try again shortly" });
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     test("cache write failures do not fail usage collection", async () => {
         const rootFile = join(tempDir(), "not-a-dir");
         writeFileSync(rootFile, "already a file");
@@ -711,5 +784,20 @@ describe("pure helper branches", () => {
 
         expect(out).toContain("boom happened");
         expect(out).toContain("not supported");
+    });
+
+    test("formatUsageReports surfaces the error even when the report also has windows", () => {
+        const out = formatUsageReports([
+            {
+                accountLabel: "throttled", provider: "anthropic-api", authMode: "api-key",
+                source: "headers", stale: false, estimate: false,
+                fetchedAt: "2026-06-03T00:00:00.000Z",
+                windows: [{ id: "requests-per-min", label: "requests/min", unit: "count", used: 100, remaining: 0, limit: 100 }],
+                error: "Rate limited (429) — retry after 12s",
+            },
+        ], Date.parse("2026-06-03T00:00:00.000Z"));
+
+        expect(out).toContain("0/100 left");
+        expect(out).toContain("Rate limited (429) — retry after 12s");
     });
 });

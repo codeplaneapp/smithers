@@ -71,6 +71,7 @@ function resolveOidcPullRequestNumber(
  *  - 401 OIDC fails signature/issuer/audience/expiry, or unknown api key
  *  - 403 repo not registered, api key not authorized for repo, or unscoped api key
  *  - 402 plan quota for this calendar month is spent
+ *  - 503 the issuer's JWKS is unreachable, so the token cannot be judged yet
  */
 export async function handleSessions(
   request: Request,
@@ -91,7 +92,12 @@ export async function handleSessions(
 
   if (typeof body.oidcToken === "string" && body.oidcToken.length > 0) {
     const outcome = await verifyOidc(body.oidcToken, deps.jwksUrl, now, deps.fetchUpstream);
-    if (!outcome.ok) return jsonError(401, `oidc: ${outcome.reason}`);
+    if (!outcome.ok) {
+      // A JWKS outage says nothing about the token: answer a retryable 503 so
+      // the action can tell an upstream blip from a hard auth failure.
+      const status = outcome.reason === "jwks-unavailable" ? 503 : 401;
+      return jsonError(status, `oidc: ${outcome.reason}`);
+    }
     const claims = outcome.claims;
     if (typeof claims.repository !== "string" || claims.repository.length === 0) {
       return jsonError(401, "oidc: missing repository claim");

@@ -15,7 +15,7 @@ import { computeVerdict, type VerifySpec } from "./verify.ts";
 import type { CandidateReport } from "./report-schema.ts";
 
 function spec(over: Partial<VerifySpec>): VerifySpec {
-  return { kind: "query", must: [], mustNot: [], answer: null, rubric: null, sql: null, expect: null, db: null, required: [], ...over };
+  return { kind: "query", must: [], mustNot: [], answer: null, rubric: null, sql: null, expect: null, db: null, required: [], requireIdempotencyKey: false, requireRevert: false, repoRoot: null, ...over };
 }
 
 function report(sql: string): CandidateReport {
@@ -67,7 +67,7 @@ describe("query verifier whole-cell matching", () => {
 
 describe("must/mustNot JSX-tag tokens tolerate the createSmithers factory namespace", () => {
   function containsSpec(over: Partial<VerifySpec>): VerifySpec {
-    return { kind: "contains", must: [], mustNot: [], answer: null, rubric: null, sql: null, expect: null, db: null, required: [], ...over };
+    return { kind: "contains", must: [], mustNot: [], answer: null, rubric: null, sql: null, expect: null, db: null, required: [], requireIdempotencyKey: false, requireRevert: false, repoRoot: null, ...over };
   }
 
   // Bug: `must: ["<Task"]` false-failed the documented createSmithers factory
@@ -104,9 +104,71 @@ describe("must/mustNot JSX-tag tokens tolerate the createSmithers factory namesp
   });
 });
 
+describe("side-effect-marking verifier", () => {
+  const sideEffectSpec = (over: Partial<VerifySpec> = {}): VerifySpec => ({
+    kind: "side-effect-marking",
+    must: [],
+    mustNot: [],
+    answer: null,
+    rubric: null,
+    sql: null,
+    expect: null,
+    db: null,
+    required: [],
+    requireIdempotencyKey: false,
+    requireRevert: false,
+    repoRoot: "/repo",
+    ...over,
+  });
+
+  test("delegates to the deterministic scorer without a judge", async () => {
+    const good = `defineTool({
+      name: "announce",
+      sideEffect: true,
+      execute: (args, ctx) => slack.chat.postMessage({ ...args, key: ctx.idempotencyKey }),
+    })`;
+    const bad = good.replace("sideEffect: true,", "");
+    expect((await computeVerdict(sideEffectSpec({ requireIdempotencyKey: true }), report(good))).passed).toBe(true);
+    const verdict = await computeVerdict(sideEffectSpec(), report(bad));
+    expect(verdict.passed).toBe(false);
+    expect(verdict.method).toBe("side-effect-marking");
+    expect(verdict.checks.some((check) => check.name.startsWith("unmarked-effect:"))).toBe(true);
+  });
+
+  test("requires verify-then-undo when the case requests clean time travel", async () => {
+    const blind = `defineTool({
+      name: "announce",
+      sideEffect: true,
+      execute: (args) => slack.chat.postMessage(args),
+      revert: (args, ctx) => slack.chat.delete({ channel: args.channel, ts: ctx.output.ts }),
+    })`;
+    const verdict = await computeVerdict(sideEffectSpec({ requireRevert: true }), report(blind));
+    expect(verdict.passed).toBe(false);
+    expect(verdict.checks.some((check) => check.name.startsWith("missing-revert:"))).toBe(true);
+
+    const unknownOnly = `defineTool({
+      name: "announce",
+      sideEffect: true,
+      execute: (args) => slack.chat.postMessage(args),
+      revert: async (args, ctx) => {
+        if (ctx.effectStatus === "unknown") {
+          const message = await findMessageByKey(ctx.idempotencyKey);
+          if (message) await slack.chat.delete({ channel: args.channel, ts: message.ts });
+        }
+      },
+    })`;
+    const polarityVerdict = await computeVerdict(
+      sideEffectSpec({ requireRevert: true }),
+      report(unknownOnly),
+    );
+    expect(polarityVerdict.passed).toBe(false);
+    expect(polarityVerdict.checks.some((check) => check.name.startsWith("missing-revert:"))).toBe(true);
+  });
+});
+
 describe("build verifier resolves and structurally uses UI requirements", () => {
   function buildSpec(over: Partial<VerifySpec>): VerifySpec {
-    return { kind: "build", must: [], mustNot: [], answer: null, rubric: null, sql: null, expect: null, db: null, required: [], ...over };
+    return { kind: "build", must: [], mustNot: [], answer: null, rubric: null, sql: null, expect: null, db: null, required: [], requireIdempotencyKey: false, requireRevert: false, repoRoot: null, ...over };
   }
 
   const reportUi = (artifact: string): CandidateReport => ({ artifact } as unknown as CandidateReport);

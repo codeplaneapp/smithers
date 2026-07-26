@@ -5,5 +5,11 @@ export type RevertOptions = {
   nodeId: string;
   iteration: number;
   attempt: number;
+  force?: boolean;
+  noRevert?: boolean;
+  caller?: string;
   onProgress?: (event: SmithersEvent) => void;
+  hooks?: {
+    afterEffectReverts?: () => Promise<void> | void;
+  };
 };

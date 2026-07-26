@@ -292,6 +292,10 @@ export function createGcpCloudRunJobsSandboxRunner(options) {
 					};
 					signal.addEventListener("abort", onAbort, { once: true });
 					removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+					// The abort can land while ensureJob()/runJob() are still in
+					// flight, before any listener exists. A listener added to an
+					// already-aborted signal never fires, so re-check here.
+					if (signal.aborted) onAbort();
 				}
 			}).finally(() => {
 				removeAbortListener?.();

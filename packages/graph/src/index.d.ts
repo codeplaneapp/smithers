@@ -11,6 +11,8 @@ export { deriveClaudeWorkflowPhasesFromFrame } from './deriveClaudeWorkflowPhase
 export { resetRelativeWorktreePathWarningForTest, resolveWorktreePath } from './worktree-path.js';
 export { escapeSmithersDir } from './escapeSmithersDir.js';
 import 'zod';
+import './TaskSideEffect.js';
+import './TaskRevertContext.js';
 
 type AgentLike = AgentLike$1;
 type ApprovalOption = ApprovalOption$1;

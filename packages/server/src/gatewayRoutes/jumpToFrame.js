@@ -19,6 +19,7 @@ import { jumpToFrame, JumpToFrameError } from "@smithers-orchestrator/time-trave
  *   frameNo: unknown;
  *   confirm?: unknown;
  *   force?: unknown;
+ *   noRevert?: unknown;
  *   caller?: string;
  *   pauseRunLoop?: () => Promise<void> | void;
  *   resumeRunLoop?: () => Promise<void> | void;
@@ -72,6 +73,7 @@ export async function jumpToFrameRoute(input) {
     frameNo: input.frameNo,
     confirm: input.confirm,
     force: input.force,
+    noRevert: input.noRevert,
     caller: input.caller,
     pauseRunLoop: input.pauseRunLoop,
     resumeRunLoop: input.resumeRunLoop,

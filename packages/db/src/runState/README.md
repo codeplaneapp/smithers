@@ -8,7 +8,11 @@ Derives the user-facing `RunStateView` (running / waiting-* / stale / orphaned
   `computeRunState` resolves the run first (throws `RUN_NOT_FOUND`).
 - `parseEventMeta` / `parseTimerMeta` leniently parse attempt `meta_json`
   written by the engine's durable-deferred bridge; malformed JSON degrades to
-  `null`, never throws.
+  `null`, never throws. `parseEventMeta` delegates to the package-level
+  `parseWaitForEventAttemptSnapshot` so the blocked reason reads the same
+  `{ waitForEvent: { signalName, correlationId } }` shape the adapter's
+  `findRunsAwaitingEvent` matches on, and reports `correlationId` (or the
+  `signalName` when the wait declares none) as the `correlationKey`.
 - `RUN_STATE_HEARTBEAT_STALE_MS` (30s) is the running→stale threshold; a stale
   run is only reported `"orphaned"` when its owner is not demonstrably alive:
   no `runtimeOwnerId` at all (nothing for the supervisor to take over), or a

@@ -10,6 +10,8 @@ export type JumpToFrameInput = {
   caller?: string;
   /** Bypass the live-run guard (rewind a run that still looks actively driven). */
   force?: unknown;
+  /** Skip registered compensation handlers; crossed effects then require force. */
+  noRevert?: unknown;
   pauseRunLoop?: () => Promise<void> | void;
   resumeRunLoop?: () => Promise<void> | void;
   captureReconcilerState?: () => Promise<unknown> | unknown;

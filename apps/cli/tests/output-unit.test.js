@@ -117,8 +117,21 @@ describe("output helpers", () => {
         expect(stdout).toBe("null\n");
     });
 
+    // `up --run-id` accepts dotted ids and inspect/status/events read them
+    // back, so `output` must not reject them either.
+    test("accepts dotted run ids the create path allows", async () => {
+        const runId = "orchb-r1-panel-review-vbt-1.2.0-roadmap";
+        const { result, stdout, stderr } = await runRaw({ runId }, { run: { runId } });
+
+        expect(stderr).toBe("");
+        expect(result.exitCode).toBe(0);
+        expect(stdout).toBe("{\"value\":42}\n");
+    });
+
     test("maps raw output validation failures to cli errors", async () => {
         expect((await runRaw({ runId: "INVALID!" })).result.exitCode).not.toBe(0);
+        expect((await runRaw({ runId: "../etc/passwd" })).stderr).toContain("InvalidRunId");
+        expect((await runRaw({ runId: ".." })).stderr).toContain("InvalidRunId");
         expect((await runRaw({ nodeId: "bad node" })).result.exitCode).not.toBe(0);
         expect((await runRaw({}, { run: null })).stderr).toContain("RunNotFound");
         expect((await runRaw({}, { node: null })).stderr).toContain("NodeNotFound");

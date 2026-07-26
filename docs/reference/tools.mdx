@@ -285,11 +285,14 @@ after `ctx.timeoutMs` (default 60s, hard cap one hour).
 <Note>
 Network is blocked unless `allowNetwork` is enabled (`RunOptions`,
 `--allow-network`, or server config): Smithers then rejects commands whose
-executable basename is `curl`, `wget`, `npm`, `bun`, or `pip`, any token
-beginning with `http://` or `https://`, and `git` together with a `push`,
-`pull`, `fetch`, `clone`, or `remote` token (throwing `TOOL_NETWORK_DISABLED`
-or `TOOL_GIT_REMOTE_DISABLED`). Local git commands such as `git status` are
-allowed.
+executable basename is `curl`, `wget`, `npm`, `bun`, or `pip`, any argument
+that is itself a `http://` or `https://` URL (whole argument or `--flag=<url>`
+value), and `git` whose subcommand is `push`, `pull`, `fetch`, `clone`, or
+`remote` (throwing `TOOL_NETWORK_DISABLED` or `TOOL_GIT_REMOTE_DISABLED`).
+Only the invoked executable and real URL arguments are matched, so local
+commands such as `git status` or `git commit -m "fetch upstream changes"` are
+allowed. A shell `-c` payload (`sh -c "curl https://x"`) is matched in command
+position, so it is blocked too.
 </Note>
 
 <Warning>

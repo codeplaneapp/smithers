@@ -56,6 +56,26 @@ describe("markdownComponents", () => {
         test("ol wraps children with newline", () => {
             expect(render("ol", {}, "content")).toBe("content\n");
         });
+        test("ol numbers its items instead of bulleting them", () => {
+            const Li = markdownComponents.li;
+            const result = render("ol", {}, React.createElement(Li, null, "First"), React.createElement(Li, null, "Second"));
+            expect(result).toBe("1. First\n2. Second\n\n");
+        });
+        test("ol counts from the start attribute", () => {
+            const Li = markdownComponents.li;
+            const result = render("ol", { start: 3 }, React.createElement(Li, null, "Third"), React.createElement(Li, null, "Fourth"));
+            expect(result).toBe("3. Third\n4. Fourth\n\n");
+        });
+        test("ol numbers past the whitespace nodes MDX emits between items", () => {
+            const Li = markdownComponents.li;
+            const result = render("ol", {}, "\n", React.createElement(Li, null, "First"), "\n", React.createElement(Li, null, "Second"), "\n");
+            expect(result).toBe("\n1. First\n\n2. Second\n\n\n");
+        });
+        test("ul leaves its items as bullets", () => {
+            const Li = markdownComponents.li;
+            const result = render("ul", {}, React.createElement(Li, null, "Item"));
+            expect(result).toBe("- Item\n\n");
+        });
     });
     describe("code", () => {
         test("inline code renders with backticks", () => {

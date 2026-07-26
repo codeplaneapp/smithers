@@ -22,6 +22,8 @@ describe("published TaskDescriptor declarations", () => {
 		expect(publishedTaskDescriptor).toContain("forkSource?: string;");
 		expect(sourceTaskDescriptor).toContain('kind?: "agent" | "compute" | "static" | "human";');
 		expect(publishedTaskDescriptor).toContain('kind?: "agent" | "compute" | "static" | "human";');
+		expect(sourceTaskDescriptor).toContain("sideEffect?: TaskSideEffect;");
+		expect(publishedTaskDescriptor).toContain("sideEffect?: TaskSideEffect;");
 		expect(publishedTaskDescriptor.indexOf("needs?: Record<string, string>;")).toBeLessThan(
 			publishedTaskDescriptor.indexOf("forkSource?: string;"),
 		);

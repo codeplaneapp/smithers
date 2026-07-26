@@ -254,6 +254,88 @@ test("events --watch appends new events without clearing the screen", async () =
         sqlite.close();
     }
 }, 30_000);
+/**
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {string} marker
+ * @param {number} timestampMs
+ */
+async function insertMarkerEvent(adapter, runId, marker, timestampMs) {
+    await adapter.insertEventWithNextSeq({
+        runId,
+        timestampMs,
+        type: "RunHeartbeat",
+        payloadJson: JSON.stringify({
+            type: "RunHeartbeat",
+            runId,
+            timestampMs,
+            marker,
+        }),
+    });
+}
+test("events --watch tails from the live cursor instead of replaying history", async () => {
+    const repo = createTempRepo();
+    const { sqlite, adapter } = openRepoDb(repo);
+    let processRef;
+    try {
+        await insertRun(adapter, "watch-cursor-run", "running");
+        const before = Date.now();
+        await insertMarkerEvent(adapter, "watch-cursor-run", "historical-a", before - 1_000);
+        await insertMarkerEvent(adapter, "watch-cursor-run", "historical-b", before - 500);
+        processRef = spawnSmithersLive(["events", "watch-cursor-run", "--watch", "--interval", "0.2", "--json", "--raw"], { cwd: repo.dir });
+        await waitForMatch(processRef.readStderr, "--interval clamped to 500ms", WATCH_STARTUP_TIMEOUT_MS);
+        await sleep(1_000);
+        const now = Date.now();
+        await insertMarkerEvent(adapter, "watch-cursor-run", "live-tail", now);
+        await waitForMatch(processRef.readStdout, "live-tail");
+        await adapter.updateRun("watch-cursor-run", {
+            status: "finished",
+            finishedAtMs: now + 10,
+        });
+        const exit = await waitForExit(processRef.exited);
+        expect(exit.exitCode).toBe(0);
+        const stdout = processRef.readStdout();
+        expect(stdout).toContain("live-tail");
+        expect(stdout).not.toContain("historical-a");
+        expect(stdout).not.toContain("historical-b");
+    }
+    finally {
+        if (processRef) {
+            await ensureProcessStopped(processRef);
+        }
+        sqlite.close();
+    }
+}, 30_000);
+test("events --watch --history replays existing history before tailing", async () => {
+    const repo = createTempRepo();
+    const { sqlite, adapter } = openRepoDb(repo);
+    let processRef;
+    try {
+        await insertRun(adapter, "watch-history-run", "running");
+        const before = Date.now();
+        await insertMarkerEvent(adapter, "watch-history-run", "historical-a", before - 1_000);
+        processRef = spawnSmithersLive(["events", "watch-history-run", "--watch", "--history", "--interval", "0.2", "--json", "--raw"], { cwd: repo.dir });
+        await waitForMatch(processRef.readStdout, "historical-a", WATCH_STARTUP_TIMEOUT_MS);
+        const now = Date.now();
+        await insertMarkerEvent(adapter, "watch-history-run", "live-tail", now);
+        await waitForMatch(processRef.readStdout, "live-tail");
+        await adapter.updateRun("watch-history-run", {
+            status: "finished",
+            finishedAtMs: now + 10,
+        });
+        const exit = await waitForExit(processRef.exited);
+        expect(exit.exitCode).toBe(0);
+        const stdout = processRef.readStdout();
+        expect(stdout).toContain("historical-a");
+        expect(stdout).toContain("live-tail");
+    }
+    finally {
+        if (processRef) {
+            await ensureProcessStopped(processRef);
+        }
+        sqlite.close();
+    }
+}, 30_000);
 test("node --watch re-renders and auto-exits when run becomes terminal", async () => {
     const repo = createTempRepo();
     const { sqlite, adapter } = openRepoDb(repo);

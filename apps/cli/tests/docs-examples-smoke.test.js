@@ -95,8 +95,8 @@ const CURRENT_MODEL_DOCS = {
         required: ["claude-sonnet-5"],
     },
     "docs/why/background-agents.mdx": {
-        banned: ["claude-opus-4-5"],
-        required: ["claude-opus-4-8"],
+        banned: ["claude-opus-4-5", "claude-opus-4-8"],
+        required: ["claude-opus-5"],
     },
 };
 

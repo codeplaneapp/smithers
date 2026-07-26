@@ -23,6 +23,8 @@ import {
   type HijackRunRequest,
   type HijackRunResponse,
   type RewindRunRequest,
+  type RewindRunResponse,
+  type GatewayResponseFrame,
   type SubmitApprovalRequest,
   type SubmitApprovalResponse,
   type SubmitSignalRequest,
@@ -61,6 +63,7 @@ import {
   type CreateTicketRequest,
   type UpdateTicketRequest,
   type DeleteTicketRequest,
+  type SideEffectBoundaryCrossed,
 } from "../src/rpc/index.js";
 import type {
   GatewayRpcMethod as ProtocolGatewayRpcMethod,
@@ -190,6 +193,22 @@ describe("Gateway RPC contract", () => {
 
     expect(gatewayMethod).toBe("launchRun");
     expect(gatewayRequest).toEqual({ workflow: "deploy" });
+  });
+
+  test("side-effect boundary events expose late archived completions", () => {
+    const event = {
+      type: "SideEffectBoundaryCrossed",
+      runId: "run_01",
+      opId: "late-tool-call",
+      operation: "late-tool-completion",
+      report: { blocking: [], revertible: [], warnings: [] },
+      lateCompletion: true,
+      archivedByOp: "rewind-op",
+      timestampMs: 1710000000000,
+    } satisfies SideEffectBoundaryCrossed;
+
+    expect(event.lateCompletion).toBe(true);
+    expect(event.archivedByOp).toBe("rewind-op");
   });
 
   test("launchRun publishes closed startedBy attribution with documented bounds", () => {
@@ -695,8 +714,17 @@ describe("Gateway RPC contract", () => {
       },
       {
         method: "rewindRun",
-        request: { runId: "r1", frameNo: 2, confirm: true } satisfies RewindRunRequest,
-        response: { ok: true },
+        request: { runId: "r1", frameNo: 2, confirm: true, force: true, noRevert: true } satisfies RewindRunRequest,
+        response: {
+          ok: true,
+          newFrameNo: 2,
+          revertedSandboxes: 0,
+          deletedFrames: 1,
+          deletedAttempts: 1,
+          invalidatedDiffs: 0,
+          durationMs: 5,
+          effectBoundary: { blocking: [], revertible: [], warnings: [] },
+        } satisfies RewindRunResponse,
       },
       {
         method: "submitApproval",
@@ -925,5 +953,39 @@ describe("Gateway RPC contract", () => {
         expect(resErrors, `${method} TS-typed response failed schema validation: ${resErrors.join("; ")}`).toEqual([]);
       }
     }
+  });
+
+  test("blocked rewind error frames expose a typed effect boundary report", () => {
+    const frame: GatewayResponseFrame = {
+      type: "res",
+      id: "rewind-blocked",
+      ok: false,
+      error: {
+        code: "TIME_TRAVEL_SIDE_EFFECT_BLOCKED",
+        message: "Time travel is blocked.",
+        details: {
+          runId: "r1",
+          operation: "rewind",
+          report: {
+            blocking: [{
+              kind: "tool",
+              toolName: "publish",
+              nodeId: "task",
+              iteration: 0,
+              attempt: 1,
+              seq: 1,
+              effectStatus: "unknown",
+              idempotent: false,
+              hasRevert: false,
+              startedAtMs: 1,
+            }],
+            revertible: [],
+            warnings: [],
+          },
+        },
+      },
+    };
+
+    expect(frame.error.details?.report?.blocking[0]?.toolName).toBe("publish");
   });
 });

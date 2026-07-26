@@ -11,7 +11,7 @@ export function validateJumpRunId(runId) {
   if (typeof runId !== "string" || !JUMP_RUN_ID_PATTERN.test(runId)) {
     throw new JumpToFrameError(
       "InvalidRunId",
-      "runId must match /^[a-z0-9_-]{1,64}$/.",
+      "runId must match /^[a-z0-9_-][a-z0-9_.-]{0,63}$/.",
     );
   }
   return runId;

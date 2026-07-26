@@ -4,6 +4,8 @@ import { XmlNode as XmlNode$1 } from './types.js';
 import './ClaudeWorkflowPhase.js';
 import 'zod';
 import './ProofBinding.js';
+import './TaskSideEffect.js';
+import './TaskRevertContext.js';
 
 /**
  * Core phase-plan walk shared by the live-snapshot and persisted-frame

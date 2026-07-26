@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import React from "react";
@@ -83,6 +83,46 @@ describe("Gateway workflow readiness", () => {
     const [one, two] = await Promise.all([first, second]);
     expect(one.ok).toBe(true);
     expect(two.ok).toBe(true);
+  }, 20_000);
+
+  test("a workflow registered after listen serves its declared UI mount", async () => {
+    // The lazy registry loads workflow modules after listen(), so the mount
+    // path a workflow declares with <UI path="…"> is unknowable until then.
+    // Clients can only construct the conventional /workflows/<key> route, so
+    // that route must both trigger the registration AND land on the real mount
+    // — no gateway restart (#1362).
+    const root = mkdtempSync(join(tmpdir(), "smithers-lazy-ui-mount-"));
+    dbPath = join(root, "late.db");
+    const api = createSmithers({}, { dbPath });
+    const late = api.smithers(() => React.createElement(api.Workflow, { name: "late" }));
+    mkdirSync(join(root, "workflows"), { recursive: true });
+    mkdirSync(join(root, "ui"), { recursive: true });
+    const entryFile = join(root, "workflows", "late.tsx");
+    const uiEntry = join(root, "ui", "late-ui.tsx");
+    writeFileSync(entryFile, "// entry\n", "utf8");
+    writeFileSync(uiEntry, "// ui\n", "utf8");
+
+    gateway = new Gateway({
+      workflowRegistryRefresh: async (key: string) => {
+        if (key === "late") {
+          gateway!.register("late", late, { entryFile, ui: { entry: uiEntry, path: "/custom-mount" } });
+        }
+      },
+    });
+    const server = await gateway.listen({ host: "127.0.0.1", port: 0 });
+    const port = (server.address() as { port: number }).port;
+
+    const redirect = await fetch(`http://127.0.0.1:${port}/workflows/late?runId=run-1`, { redirect: "manual" });
+    expect(redirect.status).toBe(302);
+    expect(redirect.headers.get("location")).toBe("/custom-mount?runId=run-1");
+    expect(gateway.workflows.has("late")).toBe(true);
+    const served = await fetch(`http://127.0.0.1:${port}/workflows/late?runId=run-1`);
+    expect(served.status).toBe(200);
+    expect(await served.text()).toContain("/custom-mount");
+
+    // An unknown key still 404s rather than redirecting anywhere.
+    expect((await fetch(`http://127.0.0.1:${port}/workflows/never`, { redirect: "manual" })).status).toBe(404);
+    rmSync(root, { recursive: true, force: true });
   }, 20_000);
 
   test("aggregate workflow lists wait for registry readiness", async () => {

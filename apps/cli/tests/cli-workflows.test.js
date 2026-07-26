@@ -1,8 +1,9 @@
 import { describe, expect, test, afterEach } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+    countDiscoverableWorkflows,
     createWorkflowFile,
     discoverWorkflows,
     renderWorkflowSkill,
@@ -159,6 +160,54 @@ describe("discoverWorkflows", () => {
     });
 });
 
+describe("countDiscoverableWorkflows", () => {
+    const dirs = [];
+    afterEach(() => {
+        for (const d of dirs) {
+            try {
+                rmSync(d, { recursive: true, force: true });
+            }
+            catch { }
+        }
+        dirs.length = 0;
+    });
+
+    function isolatedEnv() {
+        const home = makeTempDir();
+        dirs.push(home);
+        return { ...process.env, SMITHERS_HOME: home, SMITHERS_WORKFLOW_PATHS: "" };
+    }
+
+    test("counts what a gateway boot would load, without parsing metadata", () => {
+        const root = makeTempDir();
+        dirs.push(root);
+        const env = isolatedEnv();
+        expect(countDiscoverableWorkflows(root, env)).toBe(0);
+        const wfDir = join(root, ".smithers", "workflows");
+        mkdirSync(wfDir, { recursive: true });
+        for (let index = 0; index < 130; index += 1) {
+            writeFileSync(join(wfDir, `wf-${index}.tsx`), "export default {};");
+        }
+        // Directory-form workflows count once; a bare directory does not.
+        mkdirSync(join(wfDir, "bundled"), { recursive: true });
+        writeFileSync(join(wfDir, "bundled", "workflow.tsx"), "export default {};");
+        mkdirSync(join(wfDir, "not-a-workflow"), { recursive: true });
+        expect(countDiscoverableWorkflows(root, env)).toBe(131);
+    });
+
+    test("counts a file discoverWorkflows would reject, so the budget never under-counts a slow boot", () => {
+        const root = makeTempDir();
+        dirs.push(root);
+        const env = isolatedEnv();
+        const wfDir = join(root, ".smithers", "workflows");
+        mkdirSync(wfDir, { recursive: true });
+        writeFileSync(join(wfDir, "ok.tsx"), "export default {};");
+        writeFileSync(join(wfDir, "future.tsx"), "// smithers-metadata-version: 99\nexport default {};");
+        expect(discoverWorkflows(root, env).map((workflow) => workflow.id)).toEqual(["ok"]);
+        expect(countDiscoverableWorkflows(root, env)).toBe(2);
+    });
+});
+
 describe("discoverWorkflows — skill-parity spec", () => {
     const dirs = [];
     afterEach(() => {
@@ -290,6 +339,37 @@ describe("discoverWorkflows — skill-parity spec", () => {
         const wf = discoverWorkflows(root)[0];
         expect(wf.eligible).toBe(false);
         expect(wf.ineligibleReasons.join(" ")).toContain("definitely-not-a-real-binary-xyz");
+    });
+
+    test.skipIf(process.platform === "win32")("required-bins: a non-executable file on PATH is not a binary", () => {
+        const { root } = seed({
+            "needs-bin.tsx": [
+                "/* smithers",
+                "required-bins: [smithers-test-fake-bin]",
+                "*/",
+                "export default {};",
+            ].join("\n"),
+        });
+        const binDir = join(root, "fake-bin");
+        mkdirSync(binDir, { recursive: true });
+        const bin = join(binDir, "smithers-test-fake-bin");
+        // A regular file that exists but cannot be executed: launching the
+        // workflow would fail with EACCES, so the gate must reject it.
+        writeFileSync(bin, "#!/bin/sh\nexit 0\n", { mode: 0o644 });
+        const env = { ...process.env, PATH: binDir };
+        expect(discoverWorkflows(root, env)[0].eligible).toBe(false);
+        chmodSync(bin, 0o755);
+        expect(discoverWorkflows(root, env)[0].eligible).toBe(true);
+    });
+
+    test.skipIf(process.platform === "win32")("required-bins: a non-executable path entry is not a binary", () => {
+        const { root, wfDir } = seed({});
+        const bin = join(root, "tool.sh");
+        writeFileSync(bin, "#!/bin/sh\nexit 0\n", { mode: 0o644 });
+        writeFileSync(join(wfDir, "needs-bin.tsx"), ["/* smithers", `required-bins: [${bin}]`, "*/", "export default {};"].join("\n"));
+        expect(discoverWorkflows(root)[0].eligible).toBe(false);
+        chmodSync(bin, 0o755);
+        expect(discoverWorkflows(root)[0].eligible).toBe(true);
     });
 
     test("disable-model-invocation and user-invocable flags parse", () => {

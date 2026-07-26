@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { Effect } from "effect";
 import { captureSnapshot } from "../src/snapshot/index.js";
 import { replayFromCheckpoint, } from "../src/replay.js";
 import { loadSnapshot, parseSnapshot } from "../src/snapshot/index.js";
@@ -60,6 +61,80 @@ describe("replayFromCheckpoint", () => {
         expect(result.vcsRestored).toBe(false);
         expect(result.vcsPointer).toBeNull();
         expect(result.vcsError).toBeUndefined();
+    });
+    test("forced replay leaves a finished parent run row entirely untouched", async () => {
+        const { adapter, sqlite } = createTestDb();
+        await adapter.insertRun({
+            runId: "finished-parent",
+            workflowName: "parent",
+            status: "finished",
+            createdAtMs: 1,
+            startedAtMs: 2,
+            finishedAtMs: 3,
+            heartbeatAtMs: null,
+            runtimeOwnerId: null,
+            errorJson: null,
+        });
+        const snapshot = await captureSnapshot(adapter, "finished-parent", 0, sampleData());
+        await Effect.runPromise(adapter.insertToolCall({
+            runId: "finished-parent",
+            nodeId: "analyze",
+            iteration: 0,
+            attempt: 1,
+            seq: 1,
+            toolName: "published",
+            inputJson: "{}",
+            outputJson: "{}",
+            startedAtMs: snapshot.createdAtMs + 1,
+            finishedAtMs: snapshot.createdAtMs + 2,
+            status: "succeeded",
+            errorJson: null,
+            kind: "tool",
+            sideEffect: true,
+            idempotent: false,
+            acceptsIdempotencyKey: false,
+            hasRevert: false,
+            idempotencyKey: null,
+            revertStatus: null,
+            revertedAtMs: null,
+            revertErrorJson: null,
+            forcedPastJson: null,
+        }));
+        const before = await adapter.getRun("finished-parent");
+
+        await replayFromCheckpoint(adapter, {
+            parentRunId: "finished-parent",
+            frameNo: 0,
+            force: true,
+        });
+
+        expect(await adapter.getRun("finished-parent")).toEqual(before);
+        expect(sqlite.query(
+            `SELECT type FROM _smithers_events WHERE run_id = ? ORDER BY seq`,
+        ).all("finished-parent").map((row) => row.type))
+            .toContain("SideEffectBoundaryCrossed");
+    });
+    test("refuses replay from a live parent without force", async () => {
+        const { adapter } = createTestDb();
+        const parentRunId = "live-replay-parent";
+        await adapter.insertRun({
+            runId: parentRunId,
+            workflowName: "live-parent",
+            status: "running",
+            createdAtMs: Date.now() - 1_000,
+            startedAtMs: Date.now() - 900,
+            heartbeatAtMs: Date.now(),
+            runtimeOwnerId: null,
+        });
+        await captureSnapshot(adapter, parentRunId, 0, sampleData());
+
+        await expect(replayFromCheckpoint(adapter, {
+            parentRunId,
+            frameNo: 0,
+        })).rejects.toMatchObject({
+            code: "INVALID_INPUT",
+            message: expect.stringContaining("still running"),
+        });
     });
     test("re-blesses workflow hashes so a replayed edit resumes (regression: replay ignored the new source)", async () => {
         const { adapter } = createTestDb();

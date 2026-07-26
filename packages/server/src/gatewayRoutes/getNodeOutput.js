@@ -6,10 +6,10 @@ import { runPromise } from "../smithersRuntime.js";
 import { NodeOutputRouteError } from "./NodeOutputRouteError.js";
 import { NODE_OUTPUT_WARN_BYTES } from "./NODE_OUTPUT_WARN_BYTES.js";
 import { NODE_OUTPUT_MAX_BYTES } from "./NODE_OUTPUT_MAX_BYTES.js";
+import { RUN_ID_PATTERN } from "./RUN_ID_PATTERN.js";
 
 /** @typedef {import("./NodeOutputResponse.js").NodeOutputResponse} NodeOutputResponse */
 
-const RUN_ID_PATTERN = /^[a-z0-9_-]{1,64}$/;
 const NODE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,128}$/;
 const INT32_MAX = 2_147_483_647;
 
@@ -306,7 +306,7 @@ export async function getNodeOutputRoute(params) {
 function parseRunId(value) {
     const runId = asString(value);
     if (!runId || !RUN_ID_PATTERN.test(runId)) {
-        throw new NodeOutputRouteError("InvalidRunId", "runId must match /^[a-z0-9_-]{1,64}$/.");
+        throw new NodeOutputRouteError("InvalidRunId", "runId must match /^[a-z0-9_-][a-z0-9_.-]{0,63}$/.");
     }
     return runId;
 }

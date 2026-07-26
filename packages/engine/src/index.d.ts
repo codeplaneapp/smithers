@@ -36,6 +36,7 @@ import * as RpcGroup from '@effect/rpc/RpcGroup';
 import * as zod from 'zod';
 import { z } from 'zod';
 import * as _smithers_orchestrator_graph_ProofBinding from '@smithers-orchestrator/graph/ProofBinding';
+import * as _smithers_orchestrator_graph_TaskSideEffect from '@smithers-orchestrator/graph/TaskSideEffect';
 import * as _smithers_orchestrator_graph_types from '@smithers-orchestrator/graph/types';
 import * as _smithers_orchestrator_errors_toSmithersError from '@smithers-orchestrator/errors/toSmithersError';
 export { SqlMessageStorage, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, getSqlMessageStorage } from '@smithers-orchestrator/db/sql-message-storage';
@@ -542,13 +543,15 @@ declare function createDocWatcher(deps: {
 
 /**
  * @param {unknown} value
- * @returns {| { name: string; sideEffect: boolean; idempotent: boolean; acceptsIdempotencyKey?: boolean; } | null}
+ * @returns {| { name: string; sideEffect: boolean; idempotent: boolean; acceptsIdempotencyKey?: boolean; hasRevert?: boolean; revert?: Function; } | null}
  */
 declare function getDefinedToolMetadata(value: unknown): {
     name: string;
     sideEffect: boolean;
     idempotent: boolean;
     acceptsIdempotencyKey?: boolean;
+    hasRevert?: boolean;
+    revert?: Function;
 } | null;
 
 type HumanRequestStatus$1 = "pending" | "answered" | "cancelled" | "expired";
@@ -3133,6 +3136,7 @@ declare function applyOptimizationArtifactToTasks(tasks: _smithers_orchestrator_
     ordinal: number;
     iteration: number;
     kind?: "agent" | "compute" | "static" | "human";
+    sideEffect?: _smithers_orchestrator_graph_TaskSideEffect.TaskSideEffect;
     ralphId?: string;
     dependsOn?: string[];
     needs?: Record<string, string>;

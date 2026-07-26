@@ -18,8 +18,12 @@
  *   `listRunEvents` backfill plus live-frame accumulation), so loop
  *   iterations the tree already replaced survive reloads and late joins.
  * - `getNodeOutput` fetches each (nodeId, iteration) exactly once; a missing
- *   or errored output is re-fetched only when a finish event for that node
- *   arrives (event-driven invalidation), never on every frame.
+ *   output is re-fetched only when a finish event for that node arrives
+ *   (event-driven invalidation), never on every frame. An UNEXPECTED
+ *   transport/RPC failure is instead retried on later reconciles with
+ *   exponential backoff, bounded by `MAX_OUTPUT_FETCH_ATTEMPTS`, because the
+ *   node may already have finished — waiting for another finish event would
+ *   strand the row forever.
  * - The pure `foldDelegation` reducer turns the assembled records into the
  *   graph; malformed/unknown rows surface as errors instead of throwing.
  */
@@ -51,6 +55,19 @@ const EXPECTED_OUTPUT_ERRORS = new Set(["NodeHasNoOutput", "NodeNotFound", "Iter
 export const EVENT_HISTORY_PAGE_SIZE = 500;
 
 /**
+ * Total `getNodeOutput` attempts per target while it keeps failing
+ * UNEXPECTEDLY (dropped socket, 5xx, an RPC code outside
+ * `EXPECTED_OUTPUT_ERRORS`): the first attempt plus bounded backoff retries.
+ * Such a failure says nothing about the durable row, so it must not be gated
+ * behind the next finish event — the node may already be done. A new finish
+ * tick refreshes the budget.
+ */
+export const MAX_OUTPUT_FETCH_ATTEMPTS = 3;
+
+/** First retry delay; doubles per prior failed attempt (150ms, then 300ms). */
+export const OUTPUT_FETCH_RETRY_BASE_MS = 150;
+
+/**
  * The two gateway RPCs the pipeline needs, stated structurally so the real
  * `SmithersApi` satisfies it and tests can seed a deterministic fixture.
  */
@@ -67,7 +84,8 @@ export type DelegationChainApi = {
 export type DelegationChainInputs = {
   treeNodes: ReadonlyArray<{ id: string; iteration?: number | undefined }>;
   treeLoading: boolean;
-  events: ReadonlyArray<{ event: string; payload?: unknown }>;
+  /** Live event frames; `seq` is the durable run-event sequence when known. */
+  events: ReadonlyArray<{ event: string; payload?: unknown; seq?: number | undefined }>;
   approvals: ReadonlyArray<{ runId: string; nodeId: string; iteration: number }>;
 };
 
@@ -97,7 +115,22 @@ export type DelegationChainStore = {
 type OutputCacheEntry =
   | { state: "produced"; record: DelegationOutputRecord }
   | { state: "missing"; finishCount: number }
-  | { state: "error"; finishCount: number; error: Error };
+  /** `attempts` counts consecutive unexpected failures (retry budget spent). */
+  | { state: "error"; finishCount: number; attempts: number; error: Error };
+
+/** A (nodeId, iteration) pair scheduled for a `getNodeOutput` call. */
+type DueFetch = DelegationFetchTarget & {
+  key: string;
+  /** Unexpected failures already suffered for this key; 0 for a fresh fetch. */
+  attempts: number;
+  /** Accumulated finish tick this fetch answers; recorded on the settled entry. */
+  finishCount: number;
+};
+
+/** Backoff before a retry attempt; 0 for the first (non-retry) attempt. */
+function retryDelayMs(attempts: number): number {
+  return attempts === 0 ? 0 : OUTPUT_FETCH_RETRY_BASE_MS * 2 ** (attempts - 1);
+}
 
 type StoreMessage = Data.TaggedEnum<{
   /** React pushed a new input batch. */
@@ -139,24 +172,53 @@ function mergeTargets(
 }
 
 /**
- * Completion ticks per node id, so missing outputs are only refetched when
- * something actually finished (not on every event frame). Durable history
- * rows carry the persisted engine type (`NodeFinished`); live wire frames
- * use `node.finished` — accept both spellings.
+ * Completion tick for one node id. `count` is the marker compared against the
+ * cache entry; `lastSeq` is the highest durable run-event seq already folded
+ * into it, so the same frame is never counted twice as the window slides.
  */
-function countFinishes(events: ReadonlyArray<{ event: string; payload?: unknown }>): Map<string, number> {
-  const counts = new Map<string, number>();
+type FinishMark = { readonly count: number; readonly lastSeq: number };
+
+/** Durable history rows persist `NodeFinished`; live wire frames use `node.finished`. */
+const FINISH_EVENTS = new Set(["node.finished", "NodeFinished", "node.failed", "NodeFailed"]);
+
+/**
+ * Accumulate completion ticks per node id, so missing outputs are only
+ * refetched when something actually finished (not on every event frame).
+ *
+ * Ticks MUST accumulate rather than be counted off the current window: the
+ * live event buffer is a bounded ring, so once it evicts an old finish frame a
+ * windowed count DROPS BACK, and the next finish for that node recomputes to
+ * the same number the cache entry already recorded — the refetch never fires
+ * and the newly produced output is never displayed. Frames carrying a durable
+ * `seq` are therefore folded in exactly once (per-node cursor); frames without
+ * one can only be counted per batch, so their count is merged as a maximum.
+ * Either way the marker never decreases.
+ */
+function accumulateFinishes(
+  previous: ReadonlyMap<string, FinishMark>,
+  events: DelegationChainInputs["events"],
+): ReadonlyMap<string, FinishMark> {
+  let next: Map<string, FinishMark> | null = null;
+  const seqless = new Map<string, number>();
   for (const frame of events) {
-    if (
-      frame.event !== "node.finished" && frame.event !== "NodeFinished" &&
-      frame.event !== "node.failed" && frame.event !== "NodeFailed"
-    ) continue;
+    if (!FINISH_EVENTS.has(frame.event)) continue;
     const payload = isRecord(frame.payload) ? frame.payload : {};
     const nodeId = typeof payload.nodeId === "string" ? payload.nodeId : undefined;
     if (!nodeId) continue;
-    counts.set(nodeId, (counts.get(nodeId) ?? 0) + 1);
+    if (typeof frame.seq !== "number") {
+      seqless.set(nodeId, (seqless.get(nodeId) ?? 0) + 1);
+      continue;
+    }
+    const mark = (next ?? previous).get(nodeId);
+    if (mark !== undefined && frame.seq <= mark.lastSeq) continue;
+    (next ??= new Map(previous)).set(nodeId, { count: (mark?.count ?? 0) + 1, lastSeq: frame.seq });
   }
-  return counts;
+  for (const [nodeId, count] of seqless) {
+    const mark = (next ?? previous).get(nodeId);
+    if (mark !== undefined && count <= mark.count) continue;
+    (next ??= new Map(previous)).set(nodeId, { count, lastSeq: mark?.lastSeq ?? 0 });
+  }
+  return next ?? previous;
 }
 
 type FoldMemo = {
@@ -178,6 +240,7 @@ export function createDelegationChainStore(options: {
       const inputs = yield* Ref.make<DelegationChainInputs>(INITIAL_INPUTS);
       const eventTargets = yield* Ref.make<ReadonlyMap<string, DelegationFetchTarget>>(new Map());
       const cache = yield* Ref.make<ReadonlyMap<string, OutputCacheEntry>>(new Map());
+      const finishMarks = yield* Ref.make<ReadonlyMap<string, FinishMark>>(new Map());
       const inFlight = yield* Ref.make<ReadonlySet<string>>(new Set());
       const hydrated = yield* Ref.make(false);
       const historyError = yield* Ref.make<Error | undefined>(undefined);
@@ -254,20 +317,18 @@ export function createDelegationChainStore(options: {
         });
 
       /** One parallel `getNodeOutput` batch; settles back through the queue. */
-      const fetchOutputs = (
-        due: ReadonlyArray<{ key: string } & DelegationFetchTarget>,
-        finishCounts: ReadonlyMap<string, number>,
-      ) =>
+      const fetchOutputs = (due: ReadonlyArray<DueFetch>) =>
         Effect.gen(function* () {
           if (runId === undefined) return;
           const results = yield* Effect.forEach(
             due,
-            ({ key, nodeId, iteration }) => {
-              const finishCount = finishCounts.get(nodeId) ?? 0;
-              return Effect.tryPromise({
+            ({ key, nodeId, iteration, attempts, finishCount }) => {
+              const delay = retryDelayMs(attempts);
+              const request = Effect.tryPromise({
                 try: () => api.getNodeOutput({ runId, nodeId, iteration }),
                 catch: (cause) => cause,
-              }).pipe(
+              });
+              return (delay > 0 ? request.pipe(Effect.delay(delay)) : request).pipe(
                 Effect.map((response): OutputCacheEntry => {
                   const row = isRecord(response) && isRecord(response.row) ? response.row : undefined;
                   const produced = isRecord(response) && response.status === "produced" && row !== undefined;
@@ -284,7 +345,7 @@ export function createDelegationChainStore(options: {
                     return Effect.succeed({ state: "missing", finishCount });
                   }
                   const error = cause instanceof Error ? cause : new Error(String(cause));
-                  return Effect.succeed({ state: "error", finishCount, error });
+                  return Effect.succeed({ state: "error", finishCount, attempts: attempts + 1, error });
                 }),
                 Effect.map((entry) => ({ key, entry })),
               );
@@ -315,18 +376,26 @@ export function createDelegationChainStore(options: {
         }
 
         if (runId !== undefined) {
-          const finishCounts = countFinishes(inputsNow.events);
+          const finishMarksNow = yield* Ref.get(finishMarks);
           const cacheNow = yield* Ref.get(cache);
           const inFlightNow = yield* Ref.get(inFlight);
-          const due: Array<{ key: string } & DelegationFetchTarget> = [];
+          const due: DueFetch[] = [];
           for (const [key, target] of targets) {
             const entry = cacheNow.get(key);
             if (entry?.state === "produced") continue;
-            const finishCount = finishCounts.get(target.nodeId) ?? 0;
-            if (entry && entry.finishCount >= finishCount && entry.state !== "error") continue;
-            if (entry?.state === "error" && entry.finishCount >= finishCount) continue;
+            const finishCount = finishMarksNow.get(target.nodeId)?.count ?? 0;
+            // A new finish tick invalidates the entry and resets its retry
+            // budget. Without one, only an errored entry is still due: an
+            // unexpected failure is finish-independent (the node may already be
+            // done), so it is retried with backoff until the budget runs out.
+            // A `missing` entry stays purely event-driven.
+            let attempts = 0;
+            if (entry !== undefined && entry.finishCount >= finishCount) {
+              if (entry.state !== "error" || entry.attempts >= MAX_OUTPUT_FETCH_ATTEMPTS) continue;
+              attempts = entry.attempts;
+            }
             if (inFlightNow.has(key)) continue;
-            due.push({ key, ...target });
+            due.push({ key, ...target, attempts, finishCount });
           }
           if (due.length > 0) {
             yield* Ref.update(inFlight, (previous) => {
@@ -334,7 +403,7 @@ export function createDelegationChainStore(options: {
               for (const item of due) next.add(item.key);
               return next;
             });
-            yield* Effect.forkIn(fetchOutputs(due, finishCounts), scope);
+            yield* Effect.forkIn(fetchOutputs(due), scope);
           } else if (inFlightNow.size === 0 && !(yield* Ref.get(hydrated)) && !inputsNow.treeLoading) {
             // Only hydrate when nothing is outstanding: in-flight keys are
             // excluded from `due`, so an empty `due` with a forked fetch still
@@ -355,6 +424,9 @@ export function createDelegationChainStore(options: {
               // listener deliveries) add their (nodeId, iteration) pairs.
               const found = delegationTargetsFromEvents(next.events);
               if (found.size > 0) yield* Ref.update(eventTargets, (previous) => mergeTargets(previous, found));
+              // Finish ticks accumulate across batches: the window is a ring,
+              // so counting off it alone loses ticks once frames are evicted.
+              yield* Ref.update(finishMarks, (previous) => accumulateFinishes(previous, next.events));
               yield* reconcile;
             }),
           HistoryLoaded: ({ targets: found, error }) =>

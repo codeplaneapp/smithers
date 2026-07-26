@@ -6,7 +6,7 @@
  * do not depend on the gateway implementation.
  */
 type SmithersApiVersion$1 = "v1";
-type GatewayRpcErrorCode$1 = "InvalidRequest" | "InvalidInput" | "Unauthorized" | "Forbidden" | "RunNotFound" | "ScoreNotFound" | "RUN_NOT_ACTIVE" | "CronNotFound" | "TicketNotFound" | "NodeNotFound" | "IterationNotFound" | "NodeHasNoOutput" | "FrameOutOfRange" | "SeqOutOfRange" | "Busy" | "AlreadyDecided" | "RateLimited" | "PayloadTooLarge" | "BackpressureDisconnect" | "UnsupportedSandbox" | "VcsError" | "RewindFailed" | "Internal" | "REVISION_CONFLICT" | "SSRF_BLOCKED" | "QUOTA_EXCEEDED";
+type GatewayRpcErrorCode$1 = "InvalidRequest" | "InvalidInput" | "Unauthorized" | "Forbidden" | "RunNotFound" | "ScoreNotFound" | "RUN_NOT_ACTIVE" | "CronNotFound" | "TicketNotFound" | "NodeNotFound" | "IterationNotFound" | "NodeHasNoOutput" | "FrameOutOfRange" | "SeqOutOfRange" | "Busy" | "AlreadyDecided" | "RateLimited" | "PayloadTooLarge" | "BackpressureDisconnect" | "UnsupportedSandbox" | "VcsError" | "RewindFailed" | "TIME_TRAVEL_SIDE_EFFECT_BLOCKED" | "Internal" | "REVISION_CONFLICT" | "SSRF_BLOCKED" | "QUOTA_EXCEEDED";
 type GatewayRpcMethod$1 = "launchRun" | "resumeRun" | "cancelRun" | "pauseRun" | "hijackRun" | "rewindRun" | "submitApproval" | "submitSignal" | "getRun" | "listRunTokenUsage" | "listRuns" | "getSchemaSignature" | "listWorkflows" | "listApprovals" | "listDocs" | "streamRunEvents" | "streamDevTools" | "getDevToolsSnapshot" | "getNodeOutput" | "getNodeDiff" | "getRunDiff" | "whatHappened" | "cronList" | "cronCreate" | "cronDelete" | "cronRun" | "listAccounts" | "listUsageReports" | "listMemoryFacts" | "listPrompts" | "listScores" | "listScoresForRuns" | "getScoreDetail" | "listTickets" | "createTicket" | "updateTicket" | "deleteTicket" | "createBrowserSession" | "browserAct" | "browserContext" | "browserPick" | "closeBrowserSession" | "listBrowserSessions";
 type BrowserActor$1 = "user" | "agent" | "page";
 type BrowserViewport$1 = {
@@ -255,6 +255,77 @@ type RewindRunRequest$1 = {
     runId: string;
     frameNo: number;
     confirm: true;
+    force?: boolean;
+    noRevert?: boolean;
+};
+type CrossedEffect$1 = {
+    kind: "tool" | "task";
+    toolName: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    seq: number;
+    effectStatus: "succeeded" | "unknown";
+    idempotent: boolean;
+    hasRevert: boolean;
+    startedAtMs: number;
+    reason?: string;
+};
+type EffectBoundaryReport$1 = {
+    blocking: CrossedEffect$1[];
+    revertible: CrossedEffect$1[];
+    warnings: CrossedEffect$1[];
+};
+type RewindRunResponse$1 = {
+    ok: true;
+    newFrameNo: number;
+    revertedSandboxes: number;
+    deletedFrames: number;
+    deletedAttempts: number;
+    invalidatedDiffs: number;
+    durationMs: number;
+    effectBoundary: EffectBoundaryReport$1;
+};
+type EffectRevertStarted$1 = {
+    type: "EffectRevertStarted";
+    runId: string;
+    operation: string;
+    kind: "tool" | "task";
+    toolName: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    seq: number;
+    effectStatus: "succeeded" | "unknown";
+    timestampMs: number;
+};
+type EffectRevertFinished$1 = {
+    type: "EffectRevertFinished";
+    runId: string;
+    operation: string;
+    kind: "tool" | "task";
+    toolName: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    seq: number;
+    timestampMs: number;
+};
+type EffectRevertFailed$1 = Omit<EffectRevertFinished$1, "type"> & {
+    type: "EffectRevertFailed";
+    error: string;
+};
+type SideEffectBoundaryCrossed$1 = {
+    type: "SideEffectBoundaryCrossed";
+    runId: string;
+    opId: string;
+    operation: string;
+    report: EffectBoundaryReport$1;
+    timestampMs: number;
+    parentRunId?: string;
+    warningOnly?: boolean;
+    lateCompletion?: boolean;
+    archivedByOp?: string;
 };
 type SubmitApprovalRequest$1 = {
     runId: string;
@@ -617,6 +688,9 @@ type BrowserActivityEvent$1 = {
     action: BrowserAction$1;
     result: BrowserOutcome$1;
 };
+type GatewayRpcErrorDetails$1 = Record<string, unknown> & {
+    report?: EffectBoundaryReport$1;
+};
 type GatewayResponseFrame$1<Payload = unknown> = {
     type: "res";
     id: string;
@@ -634,7 +708,7 @@ type GatewayResponseFrame$1<Payload = unknown> = {
         message: string;
         requiredScope?: string;
         refresh?: string;
-        details?: unknown;
+        details?: GatewayRpcErrorDetails$1;
     };
 };
 
@@ -653,6 +727,13 @@ type PauseRunResponse = PauseRunResponse$1;
 type HijackRunRequest = HijackRunRequest$1;
 type HijackRunResponse = HijackRunResponse$1;
 type RewindRunRequest = RewindRunRequest$1;
+type RewindRunResponse = RewindRunResponse$1;
+type CrossedEffect = CrossedEffect$1;
+type EffectBoundaryReport = EffectBoundaryReport$1;
+type EffectRevertStarted = EffectRevertStarted$1;
+type EffectRevertFinished = EffectRevertFinished$1;
+type EffectRevertFailed = EffectRevertFailed$1;
+type SideEffectBoundaryCrossed = SideEffectBoundaryCrossed$1;
 type SubmitApprovalRequest = SubmitApprovalRequest$1;
 type SubmitApprovalResponse = SubmitApprovalResponse$1;
 type SubmitSignalRequest = SubmitSignalRequest$1;
@@ -744,7 +825,8 @@ type BrowserSelection = BrowserSelection$1;
 type BrowserPickResponse = BrowserPickResponse$1;
 type CloseBrowserSessionResponse = CloseBrowserSessionResponse$1;
 type ListBrowserSessionsResponse = ListBrowserSessionsResponse$1;
+type GatewayRpcErrorDetails = GatewayRpcErrorDetails$1;
 type GatewayEventFrame<Payload = unknown> = GatewayEventFrame$1<Payload>;
 type GatewayResponseFrame<Payload = unknown> = GatewayResponseFrame$1<Payload>;
 
-export type { BrowserActRequest, BrowserActResponse, BrowserAction, BrowserActivityEvent, BrowserActor, BrowserClickAction, BrowserContextRequest, BrowserContextResponse, BrowserContextSlice, BrowserFrameEvent, BrowserJournalEntry, BrowserLocator, BrowserModifier, BrowserOutcome, BrowserPickRequest, BrowserPickResponse, BrowserPoint, BrowserRectangle, BrowserRedaction, BrowserScreenshot, BrowserSelection, BrowserSnapshot, BrowserSource, BrowserSummary, BrowserViewport, CancelRunRequest, CancelRunResponse, CloseBrowserSessionRequest, CloseBrowserSessionResponse, CreateBrowserSessionRequest, CreateBrowserSessionResponse, CreateTicketRequest, CronCreateRequest, CronDeleteRequest, CronListRequest, CronRunRequest, DeleteTicketRequest, GatewayAccount, GatewayApprovalSummary, GatewayComparisonScoreRow, GatewayDiffBundle, GatewayDiffPatch, GatewayDocKind, GatewayDocRow, GatewayEventFrame, GatewayMemoryFact, GatewayPrompt, GatewayResponseFrame, GatewayRpcErrorCode, GatewayRpcMethod, GatewayScoreDetail, GatewayScoreRow, GatewayTicketRow, GatewayWorkflowSummary, GetDevToolsSnapshotRequest, GetDevToolsSnapshotResponse, GetRunDiffOversizedResponse, GetRunDiffRequest, GetRunDiffResponse, GetRunRequest, GetSchemaSignatureRequest, GetSchemaSignatureResponse, GetScoreDetailRequest, GetScoreDetailResponse, HijackRunRequest, HijackRunResponse, LaunchRunRequest, LaunchRunResponse, ListAccountsRequest, ListAccountsResponse, ListApprovalsRequest, ListApprovalsResponse, ListBrowserSessionsResponse, ListDocsRequest, ListDocsResponse, ListMemoryFactsRequest, ListMemoryFactsResponse, ListPromptsRequest, ListPromptsResponse, ListRunTokenUsageRequest, ListRunTokenUsageResponse, ListRunsRequest, ListScoresForRunsRequest, ListScoresForRunsResponse, ListScoresRequest, ListScoresResponse, ListTicketsRequest, ListTicketsResponse, ListWorkflowsRequest, ListWorkflowsResponse, NodeRequest, PauseRunRequest, PauseRunResponse, ResumeRunRequest, ResumeRunResponse, RewindRunRequest, RunStartedBy, RunTokenUsageEvent, SmithersApiVersion, StreamDevToolsRequest, StreamRunEventsRequest, StreamRunEventsResponse, SubmitApprovalRequest, SubmitApprovalResponse, SubmitSignalRequest, UpdateTicketRequest, WhatHappenedRequest, WhatHappenedResponse };
+export type { BrowserActRequest, BrowserActResponse, BrowserAction, BrowserActivityEvent, BrowserActor, BrowserClickAction, BrowserContextRequest, BrowserContextResponse, BrowserContextSlice, BrowserFrameEvent, BrowserJournalEntry, BrowserLocator, BrowserModifier, BrowserOutcome, BrowserPickRequest, BrowserPickResponse, BrowserPoint, BrowserRectangle, BrowserRedaction, BrowserScreenshot, BrowserSelection, BrowserSnapshot, BrowserSource, BrowserSummary, BrowserViewport, CancelRunRequest, CancelRunResponse, CloseBrowserSessionRequest, CloseBrowserSessionResponse, CreateBrowserSessionRequest, CreateBrowserSessionResponse, CreateTicketRequest, CronCreateRequest, CronDeleteRequest, CronListRequest, CronRunRequest, CrossedEffect, DeleteTicketRequest, EffectBoundaryReport, EffectRevertFailed, EffectRevertFinished, EffectRevertStarted, GatewayAccount, GatewayApprovalSummary, GatewayComparisonScoreRow, GatewayDiffBundle, GatewayDiffPatch, GatewayDocKind, GatewayDocRow, GatewayEventFrame, GatewayMemoryFact, GatewayPrompt, GatewayResponseFrame, GatewayRpcErrorCode, GatewayRpcErrorDetails, GatewayRpcMethod, GatewayScoreDetail, GatewayScoreRow, GatewayTicketRow, GatewayWorkflowSummary, GetDevToolsSnapshotRequest, GetDevToolsSnapshotResponse, GetRunDiffOversizedResponse, GetRunDiffRequest, GetRunDiffResponse, GetRunRequest, GetSchemaSignatureRequest, GetSchemaSignatureResponse, GetScoreDetailRequest, GetScoreDetailResponse, HijackRunRequest, HijackRunResponse, LaunchRunRequest, LaunchRunResponse, ListAccountsRequest, ListAccountsResponse, ListApprovalsRequest, ListApprovalsResponse, ListBrowserSessionsResponse, ListDocsRequest, ListDocsResponse, ListMemoryFactsRequest, ListMemoryFactsResponse, ListPromptsRequest, ListPromptsResponse, ListRunTokenUsageRequest, ListRunTokenUsageResponse, ListRunsRequest, ListScoresForRunsRequest, ListScoresForRunsResponse, ListScoresRequest, ListScoresResponse, ListTicketsRequest, ListTicketsResponse, ListWorkflowsRequest, ListWorkflowsResponse, NodeRequest, PauseRunRequest, PauseRunResponse, ResumeRunRequest, ResumeRunResponse, RewindRunRequest, RewindRunResponse, RunStartedBy, RunTokenUsageEvent, SideEffectBoundaryCrossed, SmithersApiVersion, StreamDevToolsRequest, StreamRunEventsRequest, StreamRunEventsResponse, SubmitApprovalRequest, SubmitApprovalResponse, SubmitSignalRequest, UpdateTicketRequest, WhatHappenedRequest, WhatHappenedResponse };

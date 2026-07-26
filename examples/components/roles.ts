@@ -73,7 +73,7 @@ const implementerOptions = {
 // Non-Codex agents are fallbacks only. They remain constructible so a pack
 // installed on a machine without Codex still has useful defaults.
 const fable = new ClaudeCodeAgent({ model: "claude-fable-5", env: testAgentEnv });
-const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8", env: testAgentEnv });
+const opus = new ClaudeCodeAgent({ model: "claude-opus-5", env: testAgentEnv });
 const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-5", env: testAgentEnv });
 const kimi = new KimiAgent({ model: "kimi-k2.7-code", env: testAgentEnv });
 

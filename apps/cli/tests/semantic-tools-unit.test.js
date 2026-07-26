@@ -125,6 +125,45 @@ function eventRow(overrides = {}) {
     };
 }
 
+function makeEmptyEffectStorage() {
+    const leases = new Map();
+    let nextAuditId = 1;
+    return {
+        dialect: "postgres",
+        queryAll: async (sql) => {
+            if (sql.includes("_smithers_tool_calls") || sql.includes("_smithers_tool_call_archive")) {
+                return [];
+            }
+            throw new Error(`unexpected queryAll: ${sql}`);
+        },
+        queryAllRaw: async (sql, params) => {
+            if (sql.includes("INSERT INTO _smithers_rewind_leases")) {
+                leases.set(params[0], params[1]);
+                return [{ owner_token: params[1] }];
+            }
+            if (sql.includes("UPDATE _smithers_rewind_leases")) {
+                return leases.get(params[1]) === params[2] ? [{ owner_token: params[2] }] : [];
+            }
+            if (sql.includes("DELETE FROM _smithers_rewind_leases")) {
+                const owned = leases.get(params[0]) === params[1];
+                if (owned) leases.delete(params[0]);
+                return owned ? [{ owner_token: params[1] }] : [];
+            }
+            throw new Error(`unexpected queryAllRaw: ${sql}`);
+        },
+        queryOne: async (sql) => {
+            if (sql.includes("INSERT INTO _smithers_time_travel_audit")) {
+                return { id: nextAuditId++ };
+            }
+            throw new Error(`unexpected queryOne: ${sql}`);
+        },
+        execute: async (sql) => {
+            if (sql.includes("_smithers_time_travel_audit")) return;
+            throw new Error(`unexpected execute: ${sql}`);
+        },
+    };
+}
+
 function makeSemanticAdapter(overrides = {}) {
     const baseRun = runRow();
     const childRun = runRow({
@@ -246,6 +285,7 @@ function makeSemanticAdapter(overrides = {}) {
         ],
         listEventHistoryCalls: [],
         upserts: [],
+        internalStorage: makeEmptyEffectStorage(),
         latestChildByRunId: new Map([
             ["run-1", { runId: "child-run" }],
             ["child-run", { runId: "child-run" }],
@@ -256,6 +296,7 @@ function makeSemanticAdapter(overrides = {}) {
     const adapter = {
         internalStorage: state.internalStorage,
         db: state.db,
+        write: async (_label, operation) => await operation(),
         listRuns: async (limit, status) => state.runs
             .filter((run) => !status || run.status === status)
             .slice(0, limit),
@@ -436,6 +477,9 @@ function makePostgresTimeTravelStorage({ snapshots = [], branches = [], contents
     return {
         dialect: "postgres",
         queryAll: async (sql, params) => {
+            if (sql.includes("_smithers_tool_calls") || sql.includes("_smithers_tool_call_archive")) {
+                return [];
+            }
             if (sql.includes("_smithers_output_provenance")) {
                 return [];
             }
@@ -1275,6 +1319,11 @@ describe("semantic tool definitions", () => {
         expect(fork.structuredContent.ok).toBe(true);
         expect(fork.structuredContent.data.parentRunId).toBe("run-1");
         expect(fork.structuredContent.data.parentFrameNo).toBe(2);
+        expect(fork.structuredContent.data.effectBoundary).toEqual({
+            blocking: [],
+            revertible: [],
+            warnings: [],
+        });
         expect(fork.structuredContent.data.branch.branchLabel).toBe("semantic fork");
         expect(JSON.parse(fork.structuredContent.data.snapshot.inputJson)).toEqual({
             prompt: "override",
@@ -1298,6 +1347,11 @@ describe("semantic tool definitions", () => {
         expect(replay.structuredContent.data.parentRunId).toBe("run-1");
         expect(replay.structuredContent.data.vcsRestored).toBe(false);
         expect(replay.structuredContent.data.vcsPointer).toBeNull();
+        expect(replay.structuredContent.data.effectBoundary).toEqual({
+            blocking: [],
+            revertible: [],
+            warnings: [],
+        });
 
         const blocked = await harness.call("time_travel", {
             runId: "running-run",
@@ -1589,6 +1643,11 @@ describe("semantic tool definitions", () => {
         expect(jjFails.structuredContent.data.runId).toBe("run-1");
         expect(jjFails.structuredContent.data.nodeId).toBe("artifact-node");
         expect(jjFails.structuredContent.data.attempt).toBe(1);
+        expect(jjFails.structuredContent.data.effectBoundary).toEqual({
+            blocking: [],
+            revertible: [],
+            warnings: [],
+        });
         expect(jjFails.structuredContent.data.run).toMatchObject({ runId: "run-1" });
     });
 
