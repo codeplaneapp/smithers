@@ -180,6 +180,7 @@ try {
 | `DB_REQUIRES_BUN_SQLITE` | The database adapter is not backed by a Bun SQLite client with `exec()`. | -- |
 | `DB_QUERY_FAILED` | A database read query throws or rejects while running inside an Effect. | -- |
 | `DB_WRITE_FAILED` | A database write or migration fails, including after SQLite retry exhaustion. | -- |
+| `PG_POOL_SATURATED` | Every connection in the shared PostgreSQL pool stayed busy for a full acquire wait, so the bound is too low for the concurrent workflows or a query is leaking a client. | `{ identity, max, maxSource, acquireTimeoutMs, totalCount, idleCount, waitingCount, configKnob }` |
 | `SMITHERS_BACKEND_CONFLICT` | Multiple Smithers backend stores contain run history and no `migrated.json` receipt explains the divergence. | `{ populatedBackends, stores }` |
 | `SMITHERS_MIGRATION_REQUIRED` | A physical Smithers store has run data but the resolved backend points elsewhere, so the history stays invisible until you migrate or pin the existing backend. | `{ sourceBackend, targetBackend, dbPath?, location?, runCount, schemaVersion, resolvedBackend? }` |
 | `STORAGE_ERROR` | A storage service operation fails before surfacing a more specific database code. | -- |

@@ -1576,6 +1576,8 @@ function checkCreateSmithersPostgresDocsMatchFactory() {
     [TYPES_REFERENCE, "Promise<CreateSmithersApi<Schemas> & { close: () => Promise<void> }>;"],
     [PRODUCTION_HARDENING_GUIDE, 'pass a node-postgres connection config with `{ provider: "postgres", connection }`'],
     [PRODUCTION_HARDENING_GUIDE, "SMITHERS_POSTGRES_POOL_MAX"],
+    [PRODUCTION_HARDENING_GUIDE, "SMITHERS_POSTGRES_ACQUIRE_TIMEOUT_MS"],
+    [PRODUCTION_HARDENING_GUIDE, "PG_POOL_SATURATED"],
     [PRODUCTION_HARDENING_GUIDE, 'run an in-process PGlite with `{ provider: "pglite", dataDir }`'],
     [PRODUCTION_HARDENING_GUIDE, "returns the same `createSmithers` API plus a `close()` teardown"],
   ];

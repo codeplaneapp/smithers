@@ -709,6 +709,14 @@ declare namespace smithersErrorDefinitions {
         let when_69: string;
         export { when_69 as when };
     }
+    namespace PG_POOL_SATURATED {
+        let category_pgpool: string;
+        export { category_pgpool as category };
+        let when_pgpool: string;
+        export { when_pgpool as when };
+        let details_pgpool: string;
+        export { details_pgpool as details };
+    }
     namespace SMITHERS_MIGRATION_REQUIRED {
         let category_mig: string;
         export { category_mig as category };

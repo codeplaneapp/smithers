@@ -8,7 +8,9 @@ export type CreateSmithersOptions = {
 	journalMode?: string;
 	/**
 	 * Maximum connections in the process-local PostgreSQL pool for this URL.
-	 * Defaults to 10; all owners of one normalized URL must use one value.
+	 * Defaults to 16; all owners of one normalized URL must use one value.
+	 * Exceeding it fails an acquire with `PG_POOL_SATURATED` rather than queueing
+	 * forever.
 	 */
 	postgresPoolMax?: number;
 	/**

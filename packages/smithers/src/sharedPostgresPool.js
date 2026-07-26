@@ -2,9 +2,19 @@
  * Process-local PostgreSQL pool registry. Each normalized URL owns at most one
  * bounded node-postgres pool; callers receive a reference-counted lease.
  */
-const DEFAULT_POSTGRES_POOL_MAX = 10;
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 
-/** @type {Map<string, { pool: any; max: number; owners: number; closing?: Promise<void> }>} */
+const DEFAULT_POSTGRES_POOL_MAX = 16;
+/**
+ * Bounded wait for a pooled connection. Without it node-postgres queues an
+ * acquire forever, so a saturated pool hangs the caller instead of surfacing
+ * the actionable `PG_POOL_SATURATED` error below.
+ */
+const DEFAULT_POSTGRES_ACQUIRE_TIMEOUT_MS = 10_000;
+/** node-postgres' fixed message for "waited past connectionTimeoutMillis for a pooled client". */
+const POOL_ACQUIRE_TIMEOUT_MESSAGE = "timeout exceeded when trying to connect";
+
+/** @type {Map<string, { pool: any; max: number; maxSource: "option" | "env" | "default"; acquireTimeoutMs: number; owners: number; closing?: Promise<void> }>} */
 const poolsByIdentity = new Map();
 
 /**
@@ -32,8 +42,30 @@ export function normalizePostgresConnectionIdentity(connectionString) {
 }
 
 /**
+ * Strip the password out of a pool identity so it can appear in errors, logs,
+ * and diagnostics. The identity is only ever built from a connection URL the
+ * caller supplied, and the password is the one part of it that must never
+ * reach an error message.
+ *
+ * @param {string} identity Normalized pool identity.
+ * @returns {string} Identity with any password replaced by `***`.
+ */
+export function redactPostgresIdentity(identity) {
+    try {
+        const url = new URL(identity);
+        if (url.password) {
+            url.password = "***";
+        }
+        return url.toString();
+    }
+    catch {
+        return "postgres://<unparseable-url>";
+    }
+}
+
+/**
  * Resolve the bounded PostgreSQL pool capacity from an explicit option or
- * `SMITHERS_POSTGRES_POOL_MAX` and otherwise return the safe default of ten.
+ * `SMITHERS_POSTGRES_POOL_MAX` and otherwise return the safe default of 16.
  *
  * @param {number | undefined} configuredMax Explicit pool capacity.
  * @param {string | undefined} environmentMax Environment configuration.
@@ -49,17 +81,103 @@ export function resolvePostgresPoolMax(configuredMax, environmentMax = process.e
 }
 
 /**
+ * Report where a resolved pool bound came from, so a saturation error can say
+ * whether the cap is the shipped default or something the deployment chose.
+ *
+ * @param {number | undefined} configuredMax Explicit pool capacity.
+ * @param {string | undefined} environmentMax Environment configuration.
+ * @returns {"option" | "env" | "default"} Origin of the effective bound.
+ */
+export function postgresPoolMaxSource(configuredMax, environmentMax = process.env.SMITHERS_POSTGRES_POOL_MAX) {
+    if (configuredMax !== undefined)
+        return "option";
+    return environmentMax === undefined ? "default" : "env";
+}
+
+/**
+ * Resolve how long an acquire may wait for a pooled connection before the pool
+ * is declared saturated.
+ *
+ * @param {number | undefined} configuredMs Explicit bounded wait.
+ * @param {string | undefined} environmentMs Environment configuration.
+ * @returns {number} Positive integer milliseconds.
+ * @throws {RangeError} When a configured wait lacks a positive integer value.
+ */
+export function resolvePostgresAcquireTimeoutMs(configuredMs, environmentMs = process.env.SMITHERS_POSTGRES_ACQUIRE_TIMEOUT_MS) {
+    const value = configuredMs ?? (environmentMs === undefined ? DEFAULT_POSTGRES_ACQUIRE_TIMEOUT_MS : Number(environmentMs));
+    if (!Number.isSafeInteger(value) || value <= 0) {
+        throw new RangeError("PostgreSQL pool acquire timeout must be a positive integer number of milliseconds.");
+    }
+    return value;
+}
+
+/**
+ * True when node-postgres rejected because the acquire waited past
+ * `connectionTimeoutMillis` for a pooled client. node-postgres uses a distinct
+ * message ("Connection terminated due to connection timeout") when a *new*
+ * socket fails to connect in time, so this does not mislabel a network stall.
+ *
+ * @param {unknown} error Rejection from `pool.connect()` / `pool.query()`.
+ * @returns {boolean} Whether the rejection means the bound was reached.
+ */
+function isPoolAcquireTimeout(error) {
+    return error instanceof Error && error.message === POOL_ACQUIRE_TIMEOUT_MESSAGE;
+}
+
+/**
+ * Turn node-postgres' bare acquire timeout into an error an operator can act
+ * on: which pool, what the cap is and where it came from, what the pool was
+ * doing, why that happens, and the exact knob that raises it.
+ *
+ * @param {unknown} error Rejection from `pool.connect()` / `pool.query()`.
+ * @param {{ pool: any; max: number; maxSource: "option" | "env" | "default"; acquireTimeoutMs: number }} entry Registry entry for the saturated pool.
+ * @param {string} identity Normalized pool identity.
+ * @returns {unknown} A `PG_POOL_SATURATED` SmithersError, or the original error.
+ */
+function toPoolSaturationError(error, entry, identity) {
+    if (!isPoolAcquireTimeout(error)) {
+        return error;
+    }
+    const redacted = redactPostgresIdentity(identity);
+    const suggested = entry.max * 2;
+    const capOrigin = entry.maxSource === "default"
+        ? `the default ${DEFAULT_POSTGRES_POOL_MAX}`
+        : `explicitly configured, default ${DEFAULT_POSTGRES_POOL_MAX}`;
+    const summary = [
+        `PostgreSQL pool ${redacted} is saturated: all ${entry.max} connections (${capOrigin}) were busy`,
+        `for the full ${entry.acquireTimeoutMs}ms acquire wait.`,
+        `Pool now: ${entry.pool.totalCount ?? 0} open, ${entry.pool.idleCount ?? 0} idle, ${entry.pool.waitingCount ?? 0} waiting.`,
+        "Likely causes: more concurrent workflows than pooled connections, or a leaked/stuck query still holding a client.",
+        `Raise the cap with SMITHERS_POSTGRES_POOL_MAX (for example SMITHERS_POSTGRES_POOL_MAX=${suggested})`,
+        `or pass postgresPoolMax: ${suggested} to openSmithersBackend()/createSmithersPostgres().`,
+    ].join(" ");
+    return new SmithersError("PG_POOL_SATURATED", summary, {
+        identity: redacted,
+        max: entry.max,
+        maxSource: entry.maxSource,
+        acquireTimeoutMs: entry.acquireTimeoutMs,
+        totalCount: entry.pool.totalCount ?? 0,
+        idleCount: entry.pool.idleCount ?? 0,
+        waitingCount: entry.pool.waitingCount ?? 0,
+        configKnob: "SMITHERS_POSTGRES_POOL_MAX",
+    }, error);
+}
+
+/**
  * A logical PostgreSQL connection backed by a shared pool. It pins a pool
  * client from BEGIN through COMMIT/ROLLBACK, preserving transaction affinity
  * while non-transactional queries use the bounded shared pool.
  */
 class TransactionalPoolConnection {
     /**
-     * @param {any} pool node-postgres Pool.
+     * @param {{ pool: any; max: number; maxSource: "option" | "env" | "default"; acquireTimeoutMs: number }} entry Registry entry for the shared pool.
+     * @param {string} identity Normalized pool identity.
      * @param {() => Promise<void>} releaseLease Releases this owner's pool reference.
      */
-    constructor(pool, releaseLease) {
-        this.pool = pool;
+    constructor(entry, identity, releaseLease) {
+        this.entry = entry;
+        this.pool = entry.pool;
+        this.identity = identity;
         this.releaseLease = releaseLease;
         this.transactionClient = null;
         this.closed = false;
@@ -80,7 +198,13 @@ class TransactionalPoolConnection {
             if (this.transactionClient) {
                 throw new Error("Nested PostgreSQL transactions are not supported.");
             }
-            const client = await this.pool.connect();
+            let client;
+            try {
+                client = await this.pool.connect();
+            }
+            catch (error) {
+                throw toPoolSaturationError(error, this.entry, this.identity);
+            }
             this.transactionClient = client;
             try {
                 return await client.query(query);
@@ -92,7 +216,12 @@ class TransactionalPoolConnection {
         }
         const client = this.transactionClient;
         if (!client) {
-            return this.pool.query(query);
+            try {
+                return await this.pool.query(query);
+            }
+            catch (error) {
+                throw toPoolSaturationError(error, this.entry, this.identity);
+            }
         }
         if (command === "COMMIT" || command === "ROLLBACK") {
             try {
@@ -148,13 +277,15 @@ class TransactionalPoolConnection {
  * A normalized URL shares a pool; conflicting bounds reject rather than
  * silently creating an unbounded second pool.
  *
- * @param {{ pg: { Pool: new (options: object) => any; types: { getTypeParser: (oid: number, format?: string) => (value: string) => unknown } }; connectionString: string; max?: number; environmentMax?: string }} options Pool configuration.
+ * @param {{ pg: { Pool: new (options: object) => any; types: { getTypeParser: (oid: number, format?: string) => (value: string) => unknown } }; connectionString: string; max?: number; environmentMax?: string; acquireTimeoutMs?: number; environmentAcquireTimeoutMs?: string }} options Pool configuration.
  * @returns {Promise<{ connection: { query: (query: { text: string; values?: unknown[] }) => Promise<any>; close: () => Promise<void> }; close: () => Promise<void>; identity: string; max: number }>} Lease and logical connection.
  * @throws {RangeError | TypeError} When the connection identity or bound lacks validity.
  */
 export async function acquireSharedPostgresPool(options) {
     const identity = normalizePostgresConnectionIdentity(options.connectionString);
     const max = resolvePostgresPoolMax(options.max, options.environmentMax);
+    const maxSource = postgresPoolMaxSource(options.max, options.environmentMax);
+    const acquireTimeoutMs = resolvePostgresAcquireTimeoutMs(options.acquireTimeoutMs, options.environmentAcquireTimeoutMs);
     let entry = poolsByIdentity.get(identity);
     if (entry?.closing) {
         await entry.closing;
@@ -166,15 +297,22 @@ export async function acquireSharedPostgresPool(options) {
                 ? (value) => (value === null ? null : Number(value))
                 : options.pg.types.getTypeParser(oid, format),
         };
-        entry = {
-            pool: new options.pg.Pool({ connectionString: options.connectionString, max, types }),
+        const pool = new options.pg.Pool({
+            connectionString: options.connectionString,
             max,
-            owners: 0,
-        };
+            types,
+            connectionTimeoutMillis: acquireTimeoutMs,
+        });
+        // node-postgres re-emits idle-client errors (server restart, network
+        // drop) on the pool, and an unhandled 'error' event takes down the whole
+        // host process. The pool already discards the broken client; owners see
+        // the failure on their next query.
+        pool.on?.("error", () => {});
+        entry = { pool, max, maxSource, acquireTimeoutMs, owners: 0 };
         poolsByIdentity.set(identity, entry);
     }
     else if (entry.max !== max) {
-        throw new RangeError(`PostgreSQL pool ${identity} already has max ${entry.max}; requested ${max}.`);
+        throw new RangeError(`PostgreSQL pool ${redactPostgresIdentity(identity)} already has max ${entry.max}; requested ${max}.`);
     }
     entry.owners += 1;
     let released = false;
@@ -194,7 +332,7 @@ export async function acquireSharedPostgresPool(options) {
         });
         await entry.closing;
     };
-    const connection = new TransactionalPoolConnection(entry.pool, releaseLease);
+    const connection = new TransactionalPoolConnection(entry, identity, releaseLease);
     return { connection, close: () => connection.close(), identity, max };
 }
 

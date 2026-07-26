@@ -9672,7 +9672,7 @@ type KnownSmithersErrorCode =
   | "TOOL_PATCH_TOO_LARGE" | "TOOL_PATCH_FAILED" | "TOOL_NETWORK_DISABLED"
   | "TOOL_GIT_REMOTE_DISABLED" | "TOOL_COMMAND_FAILED" | "TOOL_GREP_FAILED"
   | "AGENT_CLI_ERROR" | "AGENT_QUOTA_EXCEEDED" | "AGENT_CONFIG_INVALID" | "AGENT_RPC_FILE_ARGS" | "AGENT_BUILD_COMMAND" | "AGENT_DIAGNOSTIC_TIMEOUT"
-  | "DB_MISSING_COLUMNS" | "DB_REQUIRES_BUN_SQLITE" | "DB_QUERY_FAILED" | "DB_WRITE_FAILED"
+  | "DB_MISSING_COLUMNS" | "DB_REQUIRES_BUN_SQLITE" | "DB_QUERY_FAILED" | "DB_WRITE_FAILED" | "PG_POOL_SATURATED"
   | "SMITHERS_BACKEND_CONFLICT" | "SMITHERS_MIGRATION_REQUIRED"
   | "STORAGE_ERROR" | "INTERNAL_ERROR" | "PROCESS_ABORTED" | "PROCESS_TIMEOUT"
   | "PROCESS_IDLE_TIMEOUT" | "PROCESS_SPAWN_FAILED" | "TASK_RUNTIME_UNAVAILABLE"
@@ -10146,7 +10146,7 @@ type CreateSmithersOptions = {
   alertPolicy?: SmithersAlertPolicy;
   dbPath?: string;
   journalMode?: string;
-  /** Maximum connections in the shared PostgreSQL pool for one normalized URL; defaults to 10. */
+  /** Maximum connections in the shared PostgreSQL pool for one normalized URL; defaults to 16. */
   postgresPoolMax?: number;
 };
 
@@ -10445,6 +10445,7 @@ try {
 | `DB_REQUIRES_BUN_SQLITE` | The database adapter is not backed by a Bun SQLite client with `exec()`. | -- |
 | `DB_QUERY_FAILED` | A database read query throws or rejects while running inside an Effect. | -- |
 | `DB_WRITE_FAILED` | A database write or migration fails, including after SQLite retry exhaustion. | -- |
+| `PG_POOL_SATURATED` | Every connection in the shared PostgreSQL pool stayed busy for a full acquire wait, so the bound is too low for the concurrent workflows or a query is leaking a client. | `{ identity, max, maxSource, acquireTimeoutMs, totalCount, idleCount, waitingCount, configKnob }` |
 | `SMITHERS_BACKEND_CONFLICT` | Multiple Smithers backend stores contain run history and no `migrated.json` receipt explains the divergence. | `{ populatedBackends, stores }` |
 | `SMITHERS_MIGRATION_REQUIRED` | A physical Smithers store has run data but the resolved backend points elsewhere, so the history stays invisible until you migrate or pin the existing backend. | `{ sourceBackend, targetBackend, dbPath?, location?, runCount, schemaVersion, resolvedBackend? }` |
 | `STORAGE_ERROR` | A storage service operation fails before surfacing a more specific database code. | -- |
@@ -16757,9 +16758,11 @@ Runs started through the gateway expose `ctx.auth = { triggeredBy, role, scopes,
 
 ## PostgreSQL pool sharing
 
-A Gateway process that registers several workflows against one normalized PostgreSQL URL shares one process-local `pg.Pool`; registrations do not retain one PostgreSQL client each. The pool admits at most 10 connections by default. Set `SMITHERS_POSTGRES_POOL_MAX` to a positive integer before Gateway startup, or pass `postgresPoolMax` to `openSmithersBackend` / `createSmithersPostgres` for embedded hosts. All registrations using one normalized URL must use the same bound; a conflicting bound rejects instead of allocating another pool.
+A Gateway process that registers several workflows against one normalized PostgreSQL URL shares one process-local `pg.Pool`; registrations do not retain one PostgreSQL client each. The pool admits at most 16 connections by default. Set `SMITHERS_POSTGRES_POOL_MAX` to a positive integer before Gateway startup, or pass `postgresPoolMax` to `openSmithersBackend` / `createSmithersPostgres` for embedded hosts. All registrations using one normalized URL must use the same bound; a conflicting bound rejects instead of allocating another pool.
 
 Each backend opening holds one reference. Closing a workflow backend releases its reference, and the final release closes the shared pool. Transactions pin one pool client from `BEGIN` through `COMMIT` or `ROLLBACK`; ordinary queries return to the bounded pool. SQLite, PGlite, and custom caller-provided PostgreSQL connections retain their existing connection behavior. Smithers scopes BIGINT parsing to its own pool/client configuration and does not mutate node-postgres' process-global type parsers.
+
+An acquire waits a bounded 10 seconds for a free connection; set `SMITHERS_POSTGRES_ACQUIRE_TIMEOUT_MS` to change it. Waiting past that bound means every pooled connection stayed busy, so Smithers raises `PG_POOL_SATURATED` instead of queueing forever. The error names the pool (with the password redacted), the cap and whether it is the default 16, the live open/idle/waiting counts, and the exact knob and value that raise the cap.
 
 ## Notes
 

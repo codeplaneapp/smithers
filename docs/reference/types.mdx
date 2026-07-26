@@ -1491,7 +1491,7 @@ type KnownSmithersErrorCode =
   | "TOOL_PATCH_TOO_LARGE" | "TOOL_PATCH_FAILED" | "TOOL_NETWORK_DISABLED"
   | "TOOL_GIT_REMOTE_DISABLED" | "TOOL_COMMAND_FAILED" | "TOOL_GREP_FAILED"
   | "AGENT_CLI_ERROR" | "AGENT_QUOTA_EXCEEDED" | "AGENT_CONFIG_INVALID" | "AGENT_RPC_FILE_ARGS" | "AGENT_BUILD_COMMAND" | "AGENT_DIAGNOSTIC_TIMEOUT"
-  | "DB_MISSING_COLUMNS" | "DB_REQUIRES_BUN_SQLITE" | "DB_QUERY_FAILED" | "DB_WRITE_FAILED"
+  | "DB_MISSING_COLUMNS" | "DB_REQUIRES_BUN_SQLITE" | "DB_QUERY_FAILED" | "DB_WRITE_FAILED" | "PG_POOL_SATURATED"
   | "SMITHERS_BACKEND_CONFLICT" | "SMITHERS_MIGRATION_REQUIRED"
   | "STORAGE_ERROR" | "INTERNAL_ERROR" | "PROCESS_ABORTED" | "PROCESS_TIMEOUT"
   | "PROCESS_IDLE_TIMEOUT" | "PROCESS_SPAWN_FAILED" | "TASK_RUNTIME_UNAVAILABLE"
@@ -1965,7 +1965,7 @@ type CreateSmithersOptions = {
   alertPolicy?: SmithersAlertPolicy;
   dbPath?: string;
   journalMode?: string;
-  /** Maximum connections in the shared PostgreSQL pool for one normalized URL; defaults to 10. */
+  /** Maximum connections in the shared PostgreSQL pool for one normalized URL; defaults to 16. */
   postgresPoolMax?: number;
 };
 

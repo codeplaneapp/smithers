@@ -377,6 +377,11 @@ export const smithersErrorDefinitions = {
         category: "database",
         when: "A database write or migration fails, including after SQLite retry exhaustion.",
     },
+    PG_POOL_SATURATED: {
+        category: "database",
+        when: "Every connection in the shared PostgreSQL pool stayed busy for a full acquire wait, so the bound is too low for the concurrent workflows or a query is leaking a client.",
+        details: "{ identity, max, maxSource, acquireTimeoutMs, totalCount, idleCount, waitingCount, configKnob }",
+    },
     SMITHERS_MIGRATION_REQUIRED: {
         category: "cli",
         when: "A physical Smithers store holds run data but the resolved backend points at another store with no migrated.json receipt, or the store schema version is unsatisfiable in place.",
