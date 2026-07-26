@@ -3962,7 +3962,7 @@ function checkGatewaySdkDocsMatchExports() {
     [GATEWAY_CLIENT_INDEX, 'export { smithersCollectionKeys } from "./data/smithersCollectionKeys.ts";'],
     [GATEWAY_CLIENT_INDEX, 'export type { WorkspaceMode } from "./data/WorkspaceMode.ts";'],
     [GATEWAY_CLIENT_INDEX, "GatewayExtensionStreamFrame"],
-    [GATEWAY_CLIENT_RPC_TYPE_MAP, "listRuns: Array<Record<string, unknown>>;"],
+    [GATEWAY_CLIENT_RPC_TYPE_MAP, "listRuns: ListRunsResponse;"],
     [GATEWAY_CLIENT_RPC_TYPE_MAP, "listWorkflows: ListWorkflowsResponse;"],
     [GATEWAY_CLIENT_RPC_TYPE_MAP, "listApprovals: ListApprovalsResponse;"],
     [GATEWAY_CLIENT_RPC_TYPE_MAP, "getNodeOutput: Record<string, unknown>;"],

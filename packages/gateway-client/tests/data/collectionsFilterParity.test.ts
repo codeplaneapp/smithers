@@ -60,7 +60,7 @@ async function seededPglite() {
       workflowName: "value",
       status: run.status,
       createdAtMs: run.createdAtMs,
-      configJson: JSON.stringify({ gatewayWorkflowKey: "value" }),
+      configJson: JSON.stringify({ gatewayWorkflowKey: "value", gatewaySystem: false }),
     });
   }
 
@@ -108,7 +108,7 @@ describe("Electric pushdown predicates match the RPC rows on a seeded dataset", 
     const { adapter, shapeRows } = await seededPglite();
 
     // status: "finished" — a plain equality pushdown.
-    const finishedWhere = runsShapeWhere({ filter: { status: "finished" } });
+    const finishedWhere = runsShapeWhere({ filter: { status: "finished", includeSystem: true } });
     expect(finishedWhere).toEqual({ where: "status = 'finished'" });
     const electricFinished = sortByRunId(
       (await shapeRows("_smithers_runs", finishedWhere?.where)).map((row) => mapSmithersElectricRow("runs", row)),
@@ -120,7 +120,7 @@ describe("Electric pushdown predicates match the RPC rows on a seeded dataset", 
     expect(electricFinished.map((row) => row.runId)).toEqual(["run-finished"]);
 
     // status: "running" — the adapter's special case also matches "continued".
-    const runningWhere = runsShapeWhere({ filter: { status: "running" } });
+    const runningWhere = runsShapeWhere({ filter: { status: "running", includeSystem: true } });
     expect(runningWhere).toEqual({ where: "(status = 'running' OR status = 'continued')" });
     const electricRunning = sortByRunId(
       (await shapeRows("_smithers_runs", runningWhere?.where)).map((row) => mapSmithersElectricRow("runs", row)),
@@ -132,7 +132,7 @@ describe("Electric pushdown predicates match the RPC rows on a seeded dataset", 
     expect(electricRunning.map((row) => row.runId)).toEqual(["run-continued", "run-running"]);
 
     // No filter — every run syncs (no where clause at all).
-    const allWhere = runsShapeWhere({});
+    const allWhere = runsShapeWhere({ filter: { includeSystem: true } });
     expect(allWhere).toEqual({});
     const electricAll = sortByRunId(
       (await shapeRows("_smithers_runs", undefined)).map((row) => mapSmithersElectricRow("runs", row)),
@@ -166,21 +166,25 @@ describe("Electric pushdown predicates match the RPC rows on a seeded dataset", 
 
 describe("pushdown validation falls back to the RPC-backed collection", () => {
   test("filters an Electric shape cannot represent return no pushdown", () => {
+    // Ordinary visibility requires JSON metadata classification, so every
+    // default list uses the RPC. Only explicit debug lists may use Electric.
+    expect(runsShapeWhere({})).toBeUndefined();
+    expect(runsShapeWhere({ filter: { includeSystem: false } })).toBeUndefined();
     // Shapes have no ORDER BY/LIMIT.
-    expect(runsShapeWhere({ filter: { limit: 5 } })).toBeUndefined();
-    expect(runsShapeWhere({ filter: { offset: 0 } })).toBeUndefined();
-    expect(runsShapeWhere({ filter: { offset: 10 } })).toBeUndefined();
+    expect(runsShapeWhere({ filter: { limit: 5, includeSystem: true } })).toBeUndefined();
+    expect(runsShapeWhere({ filter: { offset: 0, includeSystem: true } })).toBeUndefined();
+    expect(runsShapeWhere({ filter: { offset: 10, includeSystem: true } })).toBeUndefined();
     expect(approvalsShapeWhere({ filter: { limit: 1 } })).toBeUndefined();
     // Workflow matching resolves gateway workflow keys in JS.
-    expect(runsShapeWhere({ filter: { workflow: "deploy" } })).toBeUndefined();
+    expect(runsShapeWhere({ filter: { workflow: "deploy", includeSystem: true } })).toBeUndefined();
     expect(approvalsShapeWhere({ filter: { workflow: "deploy" } })).toBeUndefined();
     // Values outside the conservative literal charset are never interpolated.
-    expect(runsShapeWhere({ filter: { status: "fin'ished" } })).toBeUndefined();
-    expect(runsShapeWhere({ filter: { status: "has space" } })).toBeUndefined();
+    expect(runsShapeWhere({ filter: { status: "fin'ished", includeSystem: true } })).toBeUndefined();
+    expect(runsShapeWhere({ filter: { status: "has space", includeSystem: true } })).toBeUndefined();
     expect(approvalsShapeWhere({ filter: { runId: "run' OR 1=1 --" } })).toBeUndefined();
     // Safe run values push down. Approval reads remain RPC-backed because run
     // liveness and waiting-node fallback cannot be expressed by their shape.
-    expect(runsShapeWhere({ filter: { status: "waiting-approval" } })).toEqual({
+    expect(runsShapeWhere({ filter: { status: "waiting-approval", includeSystem: true } })).toEqual({
       where: "status = 'waiting-approval'",
     });
     expect(approvalsShapeWhere({ filter: { runId: "wf_18a3.run:1" } })).toBeUndefined();
@@ -196,8 +200,8 @@ const multiplayerMode = {
 };
 
 const apiRuns = [
-  { runId: "run-1", workflowKey: "value", status: "finished" },
-  { runId: "run-2", workflowKey: "value", status: "failed" },
+  { runId: "run-1", workflowKey: "value", status: "finished", system: false },
+  { runId: "run-2", workflowKey: "value", status: "failed", system: false },
 ];
 const apiApprovals = [{ runId: "run-1", nodeId: "gate", iteration: 0 }];
 
@@ -247,28 +251,29 @@ async function recordingCollections(fetchImpl: typeof fetch) {
 }
 
 describe("multiplayer collections honor run and approval filters", () => {
-  test("safe run filters use Electric while approvals preserve RPC semantics", async () => {
+  test("ordinary runs use visibility-safe RPC while explicit debug filters may use Electric", async () => {
     const { fetchImpl, calls } = routingFetch();
     const { collections, shapes } = await recordingCollections(fetchImpl);
 
-    collections.runs();
-    collections.runs({ filter: { status: "failed" } });
-    collections.runs({ filter: { status: "running" } });
+    const ordinary = collections.runs();
+    collections.runs({ filter: { status: "failed", includeSystem: true } });
+    collections.runs({ filter: { status: "running", includeSystem: true } });
     const approvals = collections.approvals();
     const runApprovals = collections.approvals({ filter: { runId: "run-1" } });
 
     expect(shapes).toEqual([
-      { shape: "runs" },
       { shape: "runs", where: "status = 'failed'" },
       { shape: "runs", where: "(status = 'running' OR status = 'continued')" },
     ]);
 
+    await ordinary.preload();
     await approvals.preload();
     await runApprovals.preload();
     expect(calls.filter((call) => call.path === "/v1/api/approvals").map((call) => call.search.toString())).toEqual([
       "",
       "runId=run-1",
     ]);
+    expect(calls.filter((call) => call.path === "/v1/api/runs").map((call) => call.search.toString())).toEqual([""]);
   });
 
   test("limit, workflow, and unsafe filters use the RPC-backed collection with the filter forwarded", async () => {

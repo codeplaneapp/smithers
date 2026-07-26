@@ -575,6 +575,17 @@ function runStartedByFromRow(row) {
     return undefined;
   }
 }
+
+/**
+ * Read the immutable visibility stamp. Missing/malformed historical config is
+ * internal by default so an unknown row can never leak into an ordinary list.
+ * @param {{ configJson?: string | null } | null | undefined} row
+ * @returns {boolean}
+ */
+function runSystemFromRow(row) {
+  const config = parseJson(typeof row?.configJson === "string" ? row.configJson : null);
+  return typeof config?.gatewaySystem === "boolean" ? config.gatewaySystem : true;
+}
 /**
  * @param {ServerResponse} res
  * @param {number} status
@@ -4216,10 +4227,16 @@ a { color: var(--brand); }</style>
       return {
         method: "listRuns",
         params: {
-          limit: queryPositiveInt(url.searchParams, "limit"),
-          offset: queryNonNegativeInt(url.searchParams, "offset"),
-          status: queryString(url.searchParams, "status"),
-          workflow: queryString(url.searchParams, "workflow"),
+          filter: {
+            limit: queryPositiveInt(url.searchParams, "limit"),
+            offset: queryNonNegativeInt(url.searchParams, "offset"),
+            status: queryString(url.searchParams, "status"),
+            workflow: queryString(url.searchParams, "workflow"),
+            includeSystem:
+              queryString(url.searchParams, "includeSystem") === undefined
+                ? undefined
+                : url.searchParams.get("includeSystem") === "true",
+          },
         },
       };
     }
@@ -5994,6 +6011,12 @@ a { color: var(--brand); }</style>
         workflow: workflowKey,
       });
     }
+    // New-run admission remains synchronous through the in-memory reservation
+    // below, preserving the duplicate-id race guard. Resume may read the
+    // durable stamp because concurrent resumes are serialized by
+    // `resumeRunIfNeeded` before they reach this method.
+    const storedRun = options?.resume ? await this.adapterForWorkflow(entry.workflow).getRun(runId) : undefined;
+    const system = options?.resume ? runSystemFromRow(storedRun) : Boolean(entry.system);
     const abort = new AbortController();
     const record = {
       workflowKey,
@@ -6057,6 +6080,11 @@ a { color: var(--brand); }</style>
         config: {
           gatewayWorkflowKey: workflowKey,
           gatewayTriggeredBy: auth.triggeredBy,
+          // Resume deliberately omits the field: the engine merges the stored
+          // config first, preserving the creation-time value across manifest
+          // reclassification. Historical unstamped runs remain unstamped and
+          // therefore fail closed in listings.
+          ...(!options?.resume ? { gatewaySystem: system } : {}),
         },
         auth: {
           triggeredBy: auth.triggeredBy,
@@ -6143,7 +6171,7 @@ a { color: var(--brand); }</style>
     };
     const inflightPromise = runPromise.then(cleanupOwnedRun, cleanupOwnedRun);
     this.inflightRuns.set(runId, inflightPromise);
-    return { runId, workflow: workflowKey };
+    return { runId, workflow: workflowKey, system };
   }
   /**
    * @param {string} runId
@@ -7419,8 +7447,9 @@ a { color: var(--brand); }</style>
    * @param {string} [status]
    * @param {string} [workflow]
    * @param {number} [offset] Rows to skip after the newest-first sort (server-side pagination).
+   * @param {boolean} [includeSystem] Include internal and historical unstamped runs.
    */
-  async listRunsAcrossWorkflows(limit = 50, status, workflow, offset = 0) {
+  async listRunsAcrossWorkflows(limit = 50, status, workflow, offset = 0, includeSystem = false) {
     const registeredKeys = new Set(this.workflows.keys());
     const seenAdapters = new Set();
     const byRunId = new Map();
@@ -7434,7 +7463,7 @@ a { color: var(--brand); }</style>
       seenAdapters.add(adapter);
       // Each adapter's query is newest-first LIMIT; overfetch by the offset
       // so the merged window still contains the page being asked for.
-      const rows = await adapter.listRuns(limit + offset, status, workflow);
+      const rows = await adapter.listRuns(limit + offset, status, workflow, { includeSystem });
       for (const row of rows) {
         if (byRunId.has(row.runId)) {
           continue;
@@ -7444,9 +7473,14 @@ a { color: var(--brand); }</style>
           continue;
         }
         const rowStartedBy = runStartedByFromRow(row);
+        const system = runSystemFromRow(row);
+        if (!includeSystem && system) {
+          continue;
+        }
         byRunId.set(row.runId, {
           ...row,
           workflowKey,
+          system,
           ...(rowStartedBy ? { startedBy: rowStartedBy } : {}),
         });
       }
@@ -8470,17 +8504,21 @@ a { color: var(--brand); }</style>
       case "listRuns": {
         await this.awaitWorkflowRegistryReady();
         const filter = asObject(params.filter) ?? {};
-        const limit = asOptionalPositiveInt(params.limit ?? filter.limit, "limit") ?? 50;
-        const status = asString(params.status) ?? asString(filter.status);
-        const workflow = asString(params.workflow) ?? asString(filter.workflow);
+        const limit = asOptionalPositiveInt(filter.limit, "limit") ?? 50;
+        const status = asString(filter.status);
+        const workflow = asString(filter.workflow);
+        const includeSystem = asBoolean(filter.includeSystem) ?? false;
         // offset pages the newest-first result server-side; 0 is valid
         // (asOptionalPositiveInt rejects it), so parse non-negative here.
-        const offsetRaw = params.offset ?? filter.offset;
+        const offsetRaw = filter.offset;
         const offset = offsetRaw === undefined || offsetRaw === null ? 0 : offsetRaw;
         if (typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < 0) {
           return responseError(frame.id, "INVALID_REQUEST", "offset must be a non-negative integer");
         }
-        return responseOk(frame.id, await this.listRunsAcrossWorkflows(limit, status, workflow, offset));
+        return responseOk(
+          frame.id,
+          await this.listRunsAcrossWorkflows(limit, status, workflow, offset, includeSystem),
+        );
       }
       case "getSchemaSignature": {
         const firstEntry = this.workflows.values().next().value;
@@ -8710,6 +8748,7 @@ a { color: var(--brand); }</style>
         return responseOk(frame.id, {
           ...run,
           workflowKey: resolved.workflowKey,
+          system: runSystemFromRow(run),
           summary: summary.reduce((acc, row) => {
             acc[row.state] = row.count;
             return acc;

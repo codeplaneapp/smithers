@@ -201,6 +201,11 @@ function shapeLiteral(value: string): string | undefined {
  */
 export function runsShapeWhere(params: ListRunsRequest): { where?: string } | undefined {
   const filter = params.filter ?? {};
+  // `gatewaySystem` is an immutable boolean inside config_json. The Electric
+  // proxy intentionally accepts only simple column predicates, so it cannot
+  // safely parse that JSON. Ordinary lists therefore use the RPC, whose SQL
+  // filter runs before LIMIT/OFFSET. Explicit debug lists may sync every row.
+  if (filter.includeSystem !== true) return undefined;
   if (filter.limit !== undefined || filter.offset !== undefined || filter.workflow !== undefined) return undefined;
   if (filter.status === undefined) return {};
   const status = shapeLiteral(filter.status);

@@ -108,6 +108,7 @@ function listRunsSearch(params: ListRunsRequest = {}) {
   append(search, "workflow", params.filter?.workflow);
   append(search, "limit", params.filter?.limit);
   append(search, "offset", params.filter?.offset);
+  append(search, "includeSystem", params.filter?.includeSystem);
   return search;
 }
 

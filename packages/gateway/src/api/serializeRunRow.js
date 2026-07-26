@@ -32,7 +32,9 @@ export function serializeRunRow(row) {
   let config;
   if (typeof normalized.configJson === "string") {
     try {
-      config = /** @type {{ gatewayWorkflowKey?: unknown; startedBy?: unknown }} */ (JSON.parse(normalized.configJson));
+      config = /** @type {{ gatewayWorkflowKey?: unknown; gatewaySystem?: unknown; startedBy?: unknown }} */ (
+        JSON.parse(normalized.configJson)
+      );
     } catch {
       // Malformed run config stays opaque on the wire.
     }
@@ -42,6 +44,16 @@ export function serializeRunRow(row) {
   }
   const startedBy = validStartedBy(config?.startedBy);
   if (startedBy) normalized.startedBy = startedBy;
+  // Visibility is fail-closed. New gateway runs persist a boolean stamp;
+  // historical or malformed rows are internal until an explicit debug list
+  // opts into them. Preserve an already-projected trusted server response
+  // (launch/get/list) which carries no configJson.
+  normalized.system =
+    typeof config?.gatewaySystem === "boolean"
+      ? config.gatewaySystem
+      : typeof normalized.system === "boolean"
+        ? normalized.system
+        : true;
   if (normalized.workflowKey === undefined && typeof normalized.workflowName === "string") {
     normalized.workflowKey = normalized.workflowName;
   }

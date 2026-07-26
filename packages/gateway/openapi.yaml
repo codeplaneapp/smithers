@@ -157,9 +157,13 @@ paths:
                       workflow:
                         type: string
                         description: "Registered Gateway workflow key."
+                      system:
+                        type: boolean
+                        description: "Whether the launched workflow is an internal system workflow."
                     required:
                       - runId
                       - workflow
+                      - system
                     additionalProperties: false
               example:
                 type: res
@@ -169,6 +173,7 @@ paths:
                 payload:
                   runId: deploy-abc123
                   workflow: deploy
+                  system: false
         400:
           description: "The request input failed validation."
           content:
@@ -4025,6 +4030,9 @@ paths:
                       workflowKey:
                         type: string
                         description: "Registered Gateway workflow key."
+                      system:
+                        type: boolean
+                        description: "Whether this run belongs to an internal system workflow."
                       status:
                         type: string
                         description: "Persisted run status."
@@ -4082,6 +4090,7 @@ paths:
                         additionalProperties: true
                     required:
                       - runId
+                      - system
                     additionalProperties: true
               example:
                 type: res
@@ -4092,6 +4101,7 @@ paths:
                   runId: run_01
                   status: finished
                   workflowKey: deploy
+                  system: false
                   summary:
                     finished: 3
                   runState:
@@ -4925,6 +4935,9 @@ paths:
                         workflow:
                           type: string
                           description: "Optional workflow key filter."
+                        includeSystem:
+                          type: boolean
+                          description: "Include internal system runs; they are excluded by default."
                       required: []
                       additionalProperties: false
                   required: []
@@ -4987,9 +5000,13 @@ paths:
                           type: integer
                           minimum: 0
                           description: "Unix epoch milliseconds."
+                        system:
+                          type: boolean
+                          description: "Whether this run belongs to an internal system workflow."
                       required:
                         - runId
                         - status
+                        - system
                       additionalProperties: true
               example:
                 type: res
@@ -5002,6 +5019,7 @@ paths:
                     workflowKey: deploy
                     status: finished
                     createdAtMs: 1710000000000
+                    system: false
         400:
           description: "The request shape is invalid."
           content:
@@ -5692,6 +5710,7 @@ paths:
                         - key
                         - hasUi
                         - uiPath
+                        - system
                       additionalProperties: false
               example:
                 type: res
@@ -11160,9 +11179,13 @@ paths:
                       workflow:
                         type: string
                         description: "Registered Gateway workflow key."
+                      system:
+                        type: boolean
+                        description: "Whether the launched workflow is an internal system workflow."
                     required:
                       - runId
                       - workflow
+                      - system
                     additionalProperties: false
               example:
                 type: res
@@ -11172,6 +11195,7 @@ paths:
                 payload:
                   runId: run_02
                   workflow: deploy
+                  system: false
         400:
           description: "The request input failed validation."
           content:
@@ -20300,9 +20324,13 @@ paths:
                       workflow:
                         type: string
                         description: "Registered Gateway workflow key."
+                      system:
+                        type: boolean
+                        description: "Whether the launched workflow is an internal system workflow."
                     required:
                       - runId
                       - workflow
+                      - system
                     additionalProperties: false
                   txid:
                     type: string

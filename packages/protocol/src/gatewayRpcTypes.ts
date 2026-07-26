@@ -214,6 +214,8 @@ export type LaunchRunRequest = {
 export type LaunchRunResponse = {
   runId: string;
   workflow: string;
+  /** Immutable visibility copied from the registered workflow when the run was created. */
+  system: boolean;
 };
 
 export type ResumeRunRequest = {
@@ -430,8 +432,22 @@ export type ListRunsRequest = {
     /** Rows to skip after the newest-first sort — server-side pagination with `limit`. */
     offset?: number;
     workflow?: string;
+    /** System runs are excluded unless an explicit debug surface opts in. */
+    includeSystem?: boolean;
   };
 };
+
+export type GatewayRunSummary = Record<string, unknown> & {
+  runId: string;
+  workflowKey?: string;
+  status?: string;
+  createdAtMs?: number;
+  /** Missing historical metadata is projected as `true` (fail closed). */
+  system: boolean;
+  startedBy?: RunStartedBy;
+};
+
+export type ListRunsResponse = GatewayRunSummary[];
 
 export type GetSchemaSignatureRequest = Record<string, never>;
 
@@ -448,7 +464,7 @@ export type GatewayWorkflowSummary = {
   hasUi: boolean;
   uiPath: string | null;
   /** True for internal plumbing workflows (e.g. init) hidden from default listings. */
-  system?: boolean;
+  system: boolean;
 };
 
 export type ListWorkflowsRequest = {

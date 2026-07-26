@@ -610,4 +610,69 @@ describe("Gateway UI", () => {
     expect(withSystemListed.payload.map((w) => w.key)).toEqual(["init", "main"]);
     expect(withSystemListed.payload.find((w) => w.key === "init").system).toBe(true);
   });
+
+  test("system runs are durably stamped, hidden before pagination, and debug-visible", async () => {
+    tempDir = mkdtempSync(join(process.cwd(), ".smithers-system-runs-"));
+    const workflow = createValueWorkflow(join(tempDir, "runs.db"));
+    gateway = new Gateway();
+    gateway.register("main", workflow);
+    const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const port = getPort(server);
+    const auth = { triggeredBy: "test", scopes: ["*"], role: "operator" };
+
+    const publicLaunch = await gateway.startRun("main", {}, auth, "public-run", { resume: false });
+    expect(publicLaunch.system).toBe(false);
+    await waitFor(async () => {
+      const response = await postRpc(port, "listRuns", { filter: { includeSystem: true } });
+      const body = await response.json();
+      expect(body.payload.some((run) => run.runId === "public-run")).toBe(true);
+    });
+
+    // Reclassifying a workflow affects future runs only. The existing run's
+    // creation-time stamp remains authoritative.
+    gateway.register("main", workflow, { system: true });
+    const systemLaunch = await gateway.startRun("main", {}, auth, "system-run", { resume: false });
+    expect(systemLaunch.system).toBe(true);
+
+    const adapter = gateway.adapterForWorkflow(workflow);
+    await adapter.insertRun({
+      runId: "historical-run",
+      workflowName: "main",
+      status: "finished",
+      createdAtMs: Date.now() + 10_000,
+      configJson: JSON.stringify({ gatewayWorkflowKey: "main" }),
+    });
+
+    const debugRows = await waitFor(async () => {
+      const response = await postRpc(port, "listRuns", { filter: { includeSystem: true, limit: 10 } });
+      const body = await response.json();
+      expect(body.payload.map((run) => run.runId)).toEqual(
+        expect.arrayContaining(["public-run", "system-run", "historical-run"]),
+      );
+      return body.payload;
+    });
+    expect(debugRows.find((run) => run.runId === "public-run")?.system).toBe(false);
+    expect(debugRows.find((run) => run.runId === "system-run")?.system).toBe(true);
+    expect(debugRows.find((run) => run.runId === "historical-run")?.system).toBe(true);
+
+    const debugRestResponse = await fetch(`http://127.0.0.1:${port}/v1/api/runs?includeSystem=true&limit=10`);
+    const debugRest = await debugRestResponse.json();
+    expect(debugRestResponse.status).toBe(200);
+    expect(debugRest.data.map((run) => run.runId)).toEqual(
+      expect.arrayContaining(["public-run", "system-run", "historical-run"]),
+    );
+
+    // Both newer hidden rows are filtered in storage before LIMIT, so the older
+    // public row still fills a one-row ordinary REST page. This also proves the
+    // REST query is translated into the canonical nested RPC filter.
+    const ordinaryResponse = await fetch(`http://127.0.0.1:${port}/v1/api/runs?limit=1`);
+    const ordinary = await ordinaryResponse.json();
+    expect(ordinaryResponse.status).toBe(200);
+    expect(ordinary.data.map((run) => run.runId)).toEqual(["public-run"]);
+
+    const publicConfig = JSON.parse((await adapter.getRun("public-run")).configJson);
+    const systemConfig = JSON.parse((await adapter.getRun("system-run")).configJson);
+    expect(publicConfig.gatewaySystem).toBe(false);
+    expect(systemConfig.gatewaySystem).toBe(true);
+  });
 });

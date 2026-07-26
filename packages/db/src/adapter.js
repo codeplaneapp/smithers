@@ -384,6 +384,23 @@ function gatewayWorkflowKeyNeedle(workflow) {
 }
 
 /**
+ * Only an explicit top-level false stamp is public. Parsing in the listing
+ * layer keeps malformed, missing, string-valued, and nested historical fields
+ * fail-closed without relying on dialect-specific JSON SQL.
+ * @param {RunRow} row
+ * @returns {boolean}
+ */
+function isPublicGatewayRun(row) {
+  if (typeof row.configJson !== "string") return false;
+  try {
+    const config = JSON.parse(row.configJson);
+    return Boolean(config && typeof config === "object" && !Array.isArray(config) && config.gatewaySystem === false);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * @param {AlertRow} row
  */
 function validateAlertRow(row) {
@@ -1489,9 +1506,10 @@ export class SmithersDb {
   /**
    * @param {string} [status]
    * @param {string} [workflow]
+   * @param {{ includeSystem?: boolean }} [options]
    * @returns {RunnableEffect<RunRow[], SmithersError>}
    */
-  listRuns(limit = 50, status, workflow) {
+  listRuns(limit = 50, status, workflow, options = {}) {
     return this.read(`list runs ${status ?? "all"}`, async () => {
       const clauses = [];
       const params = [];
@@ -1509,6 +1527,32 @@ export class SmithersDb {
         params.push(workflow, gatewayWorkflowKeyNeedle(workflow));
       }
       const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+      if (options.includeSystem === false) {
+        // Filter before the caller-visible LIMIT. A bounded paged scan avoids
+        // loading the full run table while guaranteeing that newer system or
+        // malformed historical rows cannot crowd public rows out of a page.
+        const normalizedLimit = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 50;
+        if (normalizedLimit === 0) return [];
+        const batchSize = Math.max(50, normalizedLimit);
+        const publicRows = [];
+        let offset = 0;
+        for (;;) {
+          const batch = await this.internalStorage.queryAll(
+            `SELECT *
+             FROM _smithers_runs
+             ${whereSql}
+             ORDER BY created_at_ms DESC
+             LIMIT ? OFFSET ?`,
+            [...params, batchSize, offset],
+          );
+          for (const row of batch) {
+            if (isPublicGatewayRun(row)) publicRows.push(row);
+            if (publicRows.length >= normalizedLimit) return publicRows.slice(0, normalizedLimit);
+          }
+          if (batch.length < batchSize) return publicRows;
+          offset += batch.length;
+        }
+      }
       const rows = await this.internalStorage.queryAll(
         `SELECT *
          FROM _smithers_runs

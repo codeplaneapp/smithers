@@ -38,6 +38,8 @@
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayDiffBundle} GatewayDiffBundle */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayDiffPatch} GatewayDiffPatch */
 /** @typedef {import("./gatewayRpcTypes.ts").ListRunsRequest} ListRunsRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").GatewayRunSummary} GatewayRunSummary */
+/** @typedef {import("./gatewayRpcTypes.ts").ListRunsResponse} ListRunsResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").GetSchemaSignatureRequest} GetSchemaSignatureRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GetSchemaSignatureResponse} GetSchemaSignatureResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayWorkflowSummary} GatewayWorkflowSummary */
@@ -220,8 +222,9 @@ const runSummary = objectSchema(
     workflowKey: workflow,
     status: stringSchema("Current run status."),
     createdAtMs: integerSchema("Unix epoch milliseconds.", 0),
+    system: booleanSchema("Whether this run belongs to an internal system workflow."),
   },
-  ["runId", "status"],
+  ["runId", "status", "system"],
   "Run summary view.",
   true,
 );
@@ -241,6 +244,7 @@ const runRecord = objectSchema(
   {
     runId,
     workflowKey: workflow,
+    system: booleanSchema("Whether this run belongs to an internal system workflow."),
     status: stringSchema("Persisted run status."),
     createdAtMs: integerSchema("Unix epoch milliseconds.", 0),
     startedAtMs: { type: ["integer", "null"], minimum: 0, description: "Unix epoch milliseconds." },
@@ -248,7 +252,7 @@ const runRecord = objectSchema(
     summary: objectSchema({}, [], "Counts keyed by persisted node state.", true),
     runState: runStateView,
   },
-  ["runId"],
+  ["runId", "system"],
   "Current run record, including node-state counts and optional derived runState.",
   true,
 );
@@ -821,14 +825,17 @@ export const GATEWAY_RPC_DEFINITIONS = [
       },
       ["workflow"],
     ),
-    responseSchema: objectSchema({ runId, workflow }, ["runId", "workflow"]),
+    responseSchema: objectSchema(
+      { runId, workflow, system: booleanSchema("Whether the launched workflow is an internal system workflow.") },
+      ["runId", "workflow", "system"],
+    ),
     errors: ["InvalidRequest", "InvalidInput", "Unauthorized", "Forbidden", "Internal"],
     exampleRequest: {
       workflow: "deploy",
       input: { sha: "abc123" },
       options: { runId: "deploy-abc123", allowNetwork: true, startedBy: { harness: "codex", sessionId: "thread_123" } },
     },
-    exampleResponse: { runId: "deploy-abc123", workflow: "deploy" },
+    exampleResponse: { runId: "deploy-abc123", workflow: "deploy", system: false },
   },
   {
     version: SMITHERS_API_VERSION,
@@ -1051,6 +1058,7 @@ export const GATEWAY_RPC_DEFINITIONS = [
       runId: "run_01",
       status: "finished",
       workflowKey: "deploy",
+      system: false,
       summary: { finished: 3 },
       runState: { runId: "run_01", state: "succeeded", computedAt: "2026-01-01T00:00:00.000Z" },
     },
@@ -1142,12 +1150,15 @@ export const GATEWAY_RPC_DEFINITIONS = [
             "Rows to skip after the newest-first sort (server-side pagination); a safe non-negative integer.",
         },
         workflow: stringSchema("Optional workflow key filter."),
+        includeSystem: booleanSchema("Include internal system runs; they are excluded by default."),
       }),
     }),
     responseSchema: arraySchema(runSummary, "Run summaries."),
     errors: ["InvalidRequest", "Unauthorized", "Forbidden", "Internal"],
     exampleRequest: { filter: { status: "finished", limit: 20, workflow: "deploy" } },
-    exampleResponse: [{ runId: "run_01", workflowKey: "deploy", status: "finished", createdAtMs: 1710000000000 }],
+    exampleResponse: [
+      { runId: "run_01", workflowKey: "deploy", status: "finished", createdAtMs: 1710000000000, system: false },
+    ],
   },
   {
     version: SMITHERS_API_VERSION,
@@ -1195,7 +1206,7 @@ export const GATEWAY_RPC_DEFINITIONS = [
           uiPath: { type: ["string", "null"], description: "Mounted UI path when present." },
           system: booleanSchema("Whether this is a system (internal plumbing) workflow hidden from default listings."),
         },
-        ["key", "hasUi", "uiPath"],
+        ["key", "hasUi", "uiPath", "system"],
       ),
       "Registered workflow summaries.",
     ),
@@ -1564,10 +1575,13 @@ export const GATEWAY_RPC_DEFINITIONS = [
       workflow,
       input: objectSchema({}, [], "Workflow input.", true),
     }),
-    responseSchema: objectSchema({ runId, workflow }, ["runId", "workflow"]),
+    responseSchema: objectSchema(
+      { runId, workflow, system: booleanSchema("Whether the launched workflow is an internal system workflow.") },
+      ["runId", "workflow", "system"],
+    ),
     errors: ["InvalidRequest", "InvalidInput", "Unauthorized", "Forbidden", "CronNotFound", "Internal"],
     exampleRequest: { cronId: "cron_01", input: { dryRun: true } },
-    exampleResponse: { runId: "run_02", workflow: "deploy" },
+    exampleResponse: { runId: "run_02", workflow: "deploy", system: false },
   },
   {
     version: SMITHERS_API_VERSION,

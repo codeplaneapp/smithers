@@ -221,7 +221,7 @@ describe("SmithersGatewayClient HTTP RPC", () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetchImpl: typeof fetch = async (url, init) => {
       calls.push({ url: String(url), init: init ?? {} });
-      return okResponse({ runId: "run-1", workflow: "deploy" });
+      return okResponse({ runId: "run-1", workflow: "deploy", system: false });
     };
     const client = new SmithersGatewayClient({
       baseUrl: "http://gateway.local///",
@@ -232,7 +232,7 @@ describe("SmithersGatewayClient HTTP RPC", () => {
 
     const result = await client.launchRun({ workflow: "deploy", input: { sha: "abc123" } });
 
-    expect(result).toEqual({ runId: "run-1", workflow: "deploy" });
+    expect(result).toEqual({ runId: "run-1", workflow: "deploy", system: false });
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe("http://gateway.local/v1/rpc/launchRun");
     expect(calls[0].init.method).toBe("POST");

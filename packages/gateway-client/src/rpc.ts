@@ -59,6 +59,8 @@ export type {
   ListPromptsRequest,
   ListPromptsResponse,
   ListRunsRequest,
+  ListRunsResponse,
+  GatewayRunSummary,
   ListScoresForRunsRequest,
   ListScoresForRunsResponse,
   ListScoresRequest,

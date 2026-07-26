@@ -245,6 +245,50 @@ describe("SmithersDb adapter", () => {
     const runs = await adapter.listRuns(3);
     expect(runs.length).toBe(3);
   });
+  test("listRuns excludes system and unstamped historical rows before applying limit", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertRun(
+      runRow("public", "finished", {
+        createdAtMs: now,
+        configJson: JSON.stringify({ gatewayWorkflowKey: "public", gatewaySystem: false }),
+      }),
+    );
+    await adapter.insertRun(
+      runRow("system", "finished", {
+        createdAtMs: now + 2,
+        configJson: JSON.stringify({ gatewayWorkflowKey: "system", gatewaySystem: true }),
+      }),
+    );
+    await adapter.insertRun(
+      runRow("historical", "finished", {
+        createdAtMs: now + 1,
+        configJson: JSON.stringify({ gatewayWorkflowKey: "public" }),
+      }),
+    );
+    await adapter.insertRun(
+      runRow("nested-impostor", "finished", {
+        createdAtMs: now + 3,
+        configJson: JSON.stringify({ gatewayWorkflowKey: "public", nested: { gatewaySystem: false } }),
+      }),
+    );
+    await adapter.insertRun(
+      runRow("malformed", "finished", {
+        createdAtMs: now + 4,
+        configJson: "{",
+      }),
+    );
+
+    expect((await adapter.listRuns(1, undefined, undefined, { includeSystem: false })).map((run) => run.runId)).toEqual([
+      "public",
+    ]);
+    expect((await adapter.listRuns(5, undefined, undefined, { includeSystem: true })).map((run) => run.runId)).toEqual([
+      "malformed",
+      "nested-impostor",
+      "system",
+      "historical",
+      "public",
+    ]);
+  });
   test("insertNode and getNode", async () => {
     const { adapter } = createTestDb();
     await adapter.insertNode(nodeRow("r1", "n1"));

@@ -3,6 +3,7 @@ export type GatewayRunRow = Record<string, unknown> & {
   workflowKey?: string;
   status?: string;
   createdAtMs?: number;
+  system: boolean;
   startedAtMs?: number;
   finishedAtMs?: number;
   summary?: unknown;

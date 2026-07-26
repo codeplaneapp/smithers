@@ -56,14 +56,14 @@ describe("Electric row-shape parity", () => {
       createdAtMs: now,
       startedAtMs: now + 1,
       finishedAtMs: now + 2,
-      configJson: JSON.stringify({ gatewayWorkflowKey: "value" }),
+      configJson: JSON.stringify({ gatewayWorkflowKey: "value", gatewaySystem: false }),
     });
     await adapter.insertRun({
       runId: approvalRunId,
       workflowName: "value",
       status: "waiting-approval",
       createdAtMs: now,
-      configJson: JSON.stringify({ gatewayWorkflowKey: "value" }),
+      configJson: JSON.stringify({ gatewayWorkflowKey: "value", gatewaySystem: false }),
     });
     await adapter.insertEventWithNextSeq({
       runId,

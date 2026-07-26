@@ -777,7 +777,9 @@ declare class SmithersDb {
    * @param {string} [workflow]
    * @returns {RunnableEffect<RunRow[], SmithersError>}
    */
-    listRuns(limit?: number, status?: string, workflow?: string): RunnableEffect<RunRow[], SmithersError$1>;
+    listRuns(limit?: number, status?: string, workflow?: string, options?: {
+        includeSystem?: boolean;
+    }): RunnableEffect<RunRow[], SmithersError$1>;
     /**
    * @param {number} staleBeforeMs
    * @returns {RunnableEffect<StaleRunRecord[], SmithersError>}

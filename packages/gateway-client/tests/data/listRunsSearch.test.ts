@@ -52,4 +52,11 @@ describe("createSmithersDataClient listRuns query", () => {
     expect(new URL(urls[1]).searchParams.get("offset")).toBe("10");
     client.close();
   });
+
+  test("forwards the explicit system-run debug opt-in", async () => {
+    const { client, urls } = clientWithCapture();
+    await client.api.listRuns({ filter: { includeSystem: true } });
+    expect(new URL(urls[0]).searchParams.get("includeSystem")).toBe("true");
+    client.close();
+  });
 });

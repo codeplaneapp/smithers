@@ -34,9 +34,11 @@ import {
   type GetRunDiffRequest,
   type GetRunDiffResponse,
   type ListRunsRequest,
+  type ListRunsResponse,
   type GetSchemaSignatureRequest,
   type GetSchemaSignatureResponse,
   type ListWorkflowsRequest,
+  type ListWorkflowsResponse,
   type ListApprovalsRequest,
   type ListDocsRequest,
   type StreamRunEventsRequest,
@@ -235,6 +237,7 @@ describe("Gateway RPC contract", () => {
       {
         runId: "run_01",
         workflowKey: "deploy",
+        system: false,
         status: "pending",
         createdAtMs: 1710000000000,
         startedAtMs: null,
@@ -366,6 +369,10 @@ describe("Gateway RPC contract", () => {
       minimum: 0,
       maximum: Number.MAX_SAFE_INTEGER,
     });
+    expect(list.requestSchema.properties?.filter?.properties?.includeSystem).toEqual(
+      expect.objectContaining({ type: "boolean" }),
+    );
+    expect(list.responseSchema.items?.required).toContain("system");
   });
 
   test("pins exact required scopes for every stable RPC method", () => {
@@ -735,7 +742,7 @@ describe("Gateway RPC contract", () => {
           input: { sha: "abc" },
           options: { runId: "r1", idempotencyKey: "k1" },
         } satisfies LaunchRunRequest,
-        response: { runId: "r1", workflow: "deploy" } satisfies LaunchRunResponse,
+        response: { runId: "r1", workflow: "deploy", system: false } satisfies LaunchRunResponse,
       },
       {
         method: "resumeRun",
@@ -789,7 +796,7 @@ describe("Gateway RPC contract", () => {
       {
         method: "getRun",
         request: { runId: "r1" } satisfies GetRunRequest,
-        response: { runId: "r1" },
+        response: { runId: "r1", system: false },
       },
       {
         method: "listRunTokenUsage",
@@ -820,8 +827,8 @@ describe("Gateway RPC contract", () => {
       },
       {
         method: "listRuns",
-        request: { filter: { status: "finished", limit: 10 } } satisfies ListRunsRequest,
-        response: [],
+        request: { filter: { status: "finished", limit: 10, includeSystem: true } } satisfies ListRunsRequest,
+        response: [{ runId: "r1", workflowKey: "deploy", status: "finished", system: false }] satisfies ListRunsResponse,
       },
       {
         method: "getSchemaSignature",
@@ -831,7 +838,7 @@ describe("Gateway RPC contract", () => {
       {
         method: "listWorkflows",
         request: { filter: { hasUi: true } } satisfies ListWorkflowsRequest,
-        response: [],
+        response: [{ key: "deploy", hasUi: true, uiPath: "/workflows/deploy", system: false }] satisfies ListWorkflowsResponse,
       },
       {
         method: "listApprovals",
@@ -907,7 +914,7 @@ describe("Gateway RPC contract", () => {
       {
         method: "cronRun",
         request: { cronId: "c1", workflow: "deploy", input: {} } satisfies CronRunRequest,
-        response: { runId: "r1", workflow: "deploy" },
+        response: { runId: "r1", workflow: "deploy", system: false },
       },
       {
         method: "listAccounts",
