@@ -358,7 +358,9 @@ describe("WorkflowGraph mounted accessible tree", () => {
     // which can land a commit after act() returns on a loaded runner — poll
     // for each gesture's observable result instead of asserting immediately.
     const flushUntil = async (condition: () => boolean) => {
-      const deadline = Date.now() + 5_000;
+      // 20s, not 5s: instrumented coverage runs are slow enough that the
+      // first gesture commit can take longer than 5s on CI runners.
+      const deadline = Date.now() + 20_000;
       while (!condition() && Date.now() < deadline) {
         await act(async () => {
           await new Promise((resolve) => setTimeout(resolve, 10));

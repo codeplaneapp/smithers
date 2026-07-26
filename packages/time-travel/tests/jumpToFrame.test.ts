@@ -1,4 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
+
+// Frame surgery over real stores runs just past bun's 5s default on the
+// slower Windows CI runners (observed 5.0s); the work is real, not hung.
+setDefaultTimeout(20_000);
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
