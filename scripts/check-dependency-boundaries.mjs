@@ -176,9 +176,14 @@ function importSpecifiersForFile(file) {
   );
   /** @type {Set<string>} */
   const specifiers = new Set();
+  /** Character ranges of string/template literals, so the regex sweep below skips their contents. @type {[number, number][]} */
+  const literalRanges = [];
 
   /** @param {ts.Node} node */
   function visit(node) {
+    if (ts.isStringLiteralLike(node) || ts.isTemplateLiteral(node)) {
+      literalRanges.push([node.getStart(sourceFile), node.getEnd()]);
+    }
     if (
       (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
       node.moduleSpecifier &&
@@ -217,7 +222,16 @@ function importSpecifiersForFile(file) {
   }
 
   visit(sourceFile);
-  for (const match of text.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)) {
+
+  // Belt-and-braces sweep for dynamic imports the AST walk can miss, run over a
+  // copy with string and template literals blanked out. Without that, a dynamic
+  // import quoted *inside* a string literal (a doc assertion needle, or the
+  // workflow sources embedded in the generated pack) reads as a real import.
+  const outsideLiterals = literalRanges.reduce(
+    (acc, [start, end]) => acc.slice(0, start) + " ".repeat(end - start) + acc.slice(end),
+    text,
+  );
+  for (const match of outsideLiterals.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)) {
     specifiers.add(match[1]);
   }
   return [...specifiers].sort();

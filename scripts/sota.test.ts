@@ -140,7 +140,9 @@ describe("the checked-in registry", () => {
       expect(workflow(file)).toMatch(/id=\{`[^`]+:review-codex`\}[\s\S]+?agent=\{solReviewer\}/);
     }
 
-    expect(workflow("tanstack-db-sync-engine.tsx")).toMatch(/review-sonnet[^\n]+agent=\{secondaryReviewAgent\}/);
+    // `[^>]*` rather than `[^\n]*`: the props stay inside one opening tag, but
+    // the formatter is free to put each of them on its own line.
+    expect(workflow("tanstack-db-sync-engine.tsx")).toMatch(/review-sonnet[^>]*agent=\{secondaryReviewAgent\}/);
     expect(workflow("smithering.tsx")).toMatch(/id="route"[^>]+agent=\{sol\}/);
     expect(workflow("smithering.tsx")).toMatch(/id="design:draft"[^>]+agent=\{sol\}/);
     const sweep = workflow("sweep.tsx");
