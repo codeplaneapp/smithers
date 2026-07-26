@@ -53,6 +53,14 @@ const BLURBS = {
     "The campaign's single Smithers binding, so every reader and writer resolves to the same registered output targets.",
   ".smithers/components/ferric/ferricAgents.ts":
     "The sandwich: Fable plans and gates, Terra and Sol implement, Opus reviews, Luna does mechanical work — all with autonomous-run flags, without which a detached run stalls at the first file edit.",
+  ".smithers/components/accounts/accountPool.ts":
+    "The selection policy. Given a role, order the registered accounts best-first — conserving the scarce model tier for the work only it can do, keeping session-exhausted accounts in the chain in case their window resets, and rotating per lane so concurrent lanes never stack on one account.",
+  ".smithers/components/accounts/accountAgents.ts":
+    "Turns that ordering into agent fallback chains bound to each account's config directory. Selection returns an order, not a winner, so quota death costs one hop instead of parking the run.",
+  ".smithers/components/accounts/RefreshAccountUsage.tsx":
+    "Probes every account's live quota into a snapshot. Render is synchronous and must never hit the network, so the probe is a task and selection reads its file.",
+  ".smithers/scripts/accounts-login.mjs":
+    "Provisions the fleet's isolated config directories and drives each vendor's browser OAuth for the ones missing credentials. Idempotent: re-running only touches what is missing.",
   ".smithers/components/ferric/ferricConfig.ts":
     "Run configuration, milestone ladder, budget envelopes, and the symlink-resolved worktree root.",
 };
@@ -71,6 +79,10 @@ function collect() {
     ...readdirSync(join(repo, ".smithers/components/ferric"))
       .sort()
       .map((f) => `.smithers/components/ferric/${f}`),
+    ...readdirSync(join(repo, ".smithers/components/accounts"))
+      .sort()
+      .map((f) => `.smithers/components/accounts/${f}`),
+    ".smithers/scripts/accounts-login.mjs",
     ...readdirSync(join(repo, ".smithers/prompts"))
       .filter((f) => f.startsWith("ferric-") && f.endsWith(".mdx"))
       .sort()
