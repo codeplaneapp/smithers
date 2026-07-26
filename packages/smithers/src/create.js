@@ -596,7 +596,7 @@ export async function createSmithersCloudflare(schemas, opts) {
  *
  * @template {Record<string, import("zod").ZodObject<any>>} Schemas
  * @param {Schemas} schemas
- * @param {CreateSmithersOptions & ({ provider: "postgres"; connectionString?: string; connection?: object } | { provider: "pglite"; dataDir?: string })} opts
+ * @param {CreateSmithersOptions & { env?: Record<string, string | undefined> } & ({ provider: "postgres"; connectionString?: string; connection?: object } | { provider: "pglite"; dataDir?: string })} opts
  * @returns {Promise<import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> & { close: () => Promise<void> }>}
  */
 export async function createSmithersPostgres(schemas, opts) {
@@ -607,58 +607,62 @@ export async function createSmithersPostgres(schemas, opts) {
     /** @type {Array<() => Promise<void>>} */
     const teardown = [];
     let connectionString = opts?.connectionString;
-    if (provider === "pglite") {
-        const { PGlite } = await import("@electric-sql/pglite");
-        const { PGLiteSocketServer } = await import("@electric-sql/pglite-socket");
-        const pglite = await PGlite.create(opts?.dataDir || undefined);
-        const port = await findFreePgPort();
-        const server = new PGLiteSocketServer({ db: pglite, host: "127.0.0.1", port, maxConnections: 5 });
-        await server.start();
-        teardown.push(async () => {
-            await server.stop().catch(() => {});
-            await pglite.close().catch(() => {});
-            // A PGlite instance maps >1GB of WASM memory under bun, and WASM
-            // memory.grow applies no JS heap pressure, so without an explicit
-            // collection here a follow-up embedded instance (re-open, second
-            // migration, verification pass) stacks on top of this one's
-            // still-resident memory and the process dies with a Bus error
-            // near the ~2GB WASM ceiling.
-            globalThis.Bun?.gc?.(true);
-        });
-        connectionString = `postgres://postgres@127.0.0.1:${port}/postgres`;
-    }
-    const pgModule = await import("pg");
-    const pg = pgModule.default ?? pgModule;
     let client;
-    if (provider === "postgres" && connectionString) {
-        const pool = await acquireSharedPostgresPool({
-            pg,
-            connectionString,
-            max: opts?.postgresPoolMax,
-        });
-        client = pool.connection;
-        teardown.push(pool.close);
-    }
-    else {
-        // BIGINT (ms timestamps, counters) → JS number, matching SQLite's behavior.
-        // Scoped to this client's `types` config (not `pg.types.setTypeParser`,
-        // which is a process-global singleton shared by every pg.Client/Pool and
-        // would corrupt BIGINT reads for unrelated clients in the host process).
-        // (Text format only, matching setTypeParser's default; binary values are Buffers.)
-        const bigintTypes = {
-            getTypeParser: (oid, format) => oid === 20 && format !== "binary"
-                ? (value) => (value === null ? null : Number(value))
-                : pg.types.getTypeParser(oid, format),
-        };
-        client = new pg.Client({ ...(connectionString ? { connectionString } : opts?.connection), types: bigintTypes });
-        await client.connect();
-        teardown.push(async () => {
-            await client.end().catch(() => {});
-        });
-    }
     /** @type {{ api: import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> }} */
     let built;
     try {
+        if (provider === "pglite") {
+            const { PGlite } = await import("@electric-sql/pglite");
+            const { PGLiteSocketServer } = await import("@electric-sql/pglite-socket");
+            const pglite = await PGlite.create(opts?.dataDir || undefined);
+            let server;
+            // Register teardown as soon as PGlite exists: port discovery or
+            // socket startup can fail before a pg client is available.
+            teardown.push(async () => {
+                await server?.stop().catch(() => {});
+                await pglite.close().catch(() => {});
+                // A PGlite instance maps >1GB of WASM memory under bun, and WASM
+                // memory.grow applies no JS heap pressure, so without an explicit
+                // collection here a follow-up embedded instance (re-open, second
+                // migration, verification pass) stacks on top of this one's
+                // still-resident memory and the process dies with a Bus error
+                // near the ~2GB WASM ceiling.
+                globalThis.Bun?.gc?.(true);
+            });
+            const port = await findFreePgPort();
+            server = new PGLiteSocketServer({ db: pglite, host: "127.0.0.1", port, maxConnections: 5 });
+            await server.start();
+            connectionString = `postgres://postgres@127.0.0.1:${port}/postgres`;
+        }
+        const pgModule = await import("pg");
+        const pg = pgModule.default ?? pgModule;
+        if (provider === "postgres" && connectionString) {
+            const pool = await acquireSharedPostgresPool({
+                pg,
+                connectionString,
+                max: opts?.postgresPoolMax,
+                environment: opts?.env,
+            });
+            client = pool.connection;
+            teardown.push(pool.close);
+        }
+        else {
+            // BIGINT (ms timestamps, counters) → JS number, matching SQLite's behavior.
+            // Scoped to this client's `types` config (not `pg.types.setTypeParser`,
+            // which is a process-global singleton shared by every pg.Client/Pool and
+            // would corrupt BIGINT reads for unrelated clients in the host process).
+            // (Text format only, matching setTypeParser's default; binary values are Buffers.)
+            const bigintTypes = {
+                getTypeParser: (oid, format) => oid === 20 && format !== "binary"
+                    ? (value) => (value === null ? null : Number(value))
+                    : pg.types.getTypeParser(oid, format),
+            };
+            client = new pg.Client({ ...(connectionString ? { connectionString } : opts?.connection), types: bigintTypes });
+            teardown.push(async () => {
+                await client.end().catch(() => {});
+            });
+            await client.connect();
+        }
         // 3. Postgres descriptor consumed by the engine + adapter. The Drizzle table
         // objects (snake_case columns identical to the DDL below) are attached only
         // for column/name metadata; the engine's reads/writes against this descriptor

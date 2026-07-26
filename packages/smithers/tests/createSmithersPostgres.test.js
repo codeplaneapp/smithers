@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { z } from "zod";
 import { createSmithersPostgres } from "../src/create.js";
+import { sharedPostgresPoolCount } from "../src/sharedPostgresPool.js";
 
 setDefaultTimeout(60_000);
 
@@ -11,6 +12,7 @@ afterEach(async () => {
   for (const fn of cleanups.splice(0).reverse()) {
     await fn().catch(() => {});
   }
+  expect(sharedPostgresPoolCount()).toBe(0);
 });
 
 // PGlite's socket server currently desyncs node-postgres on Windows CI. The
@@ -68,9 +70,11 @@ describe.skipIf(process.platform === "win32")("createSmithersPostgres", () => {
         {
           provider: "postgres",
           connectionString: "postgres://invalid_host_that_does_not_exist/db",
+          env: { SMITHERS_POSTGRES_ACQUIRE_TIMEOUT_MS: "50" },
         },
       ),
     ).rejects.toThrow();
+    expect(sharedPostgresPoolCount()).toBe(0);
   });
 });
 

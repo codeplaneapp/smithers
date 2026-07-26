@@ -428,10 +428,12 @@ declare function createSmithersCloudflare<Schemas extends Record<string, zod.Zod
  *
  * @template {Record<string, import("zod").ZodObject<any>>} Schemas
  * @param {Schemas} schemas
- * @param {CreateSmithersOptions & ({ provider: "postgres"; connectionString?: string; connection?: object } | { provider: "pglite"; dataDir?: string })} opts
+ * @param {CreateSmithersOptions & { env?: Record<string, string | undefined> } & ({ provider: "postgres"; connectionString?: string; connection?: object } | { provider: "pglite"; dataDir?: string })} opts
  * @returns {Promise<import("./CreateSmithersApi.ts").CreateSmithersApi<Schemas> & { close: () => Promise<void> }>}
  */
-declare function createSmithersPostgres<Schemas extends Record<string, zod.ZodObject<any>>>(schemas: Schemas, opts: CreateSmithersOptions$1 & ({
+declare function createSmithersPostgres<Schemas extends Record<string, zod.ZodObject<any>>>(schemas: Schemas, opts: CreateSmithersOptions$1 & {
+    env?: Record<string, string | undefined>;
+} & ({
     provider: "postgres";
     connectionString?: string;
     connection?: object;

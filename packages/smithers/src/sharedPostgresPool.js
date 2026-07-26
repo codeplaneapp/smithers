@@ -32,9 +32,16 @@ export function normalizePostgresConnectionIdentity(connectionString) {
         throw new TypeError("PostgreSQL connectionString must use postgres: or postgresql:.");
     }
     url.protocol = "postgres:";
-    url.hostname = url.hostname.toLowerCase();
-    if (url.port === "5432") {
-        url.port = "";
+    // Encoded absolute hosts are Unix-socket directories, where filesystem
+    // case is significant. DNS names are case-insensitive.
+    if (!/^%2f/i.test(url.hostname)) {
+        url.hostname = url.hostname.toLowerCase();
+    }
+    // node-postgres consults PGPORT when a URL omits the port. Materialize the
+    // effective value so an ambient non-default port can never collide with an
+    // explicit :5432 URL and route an owner to the wrong database server.
+    if (!url.port && !url.searchParams.has("port")) {
+        url.port = process.env.PGPORT || "5432";
     }
     url.hash = "";
     url.searchParams.sort();
@@ -75,7 +82,7 @@ export function redactPostgresIdentity(identity) {
  * @returns {number} Positive integer pool capacity.
  * @throws {RangeError} When a configured capacity lacks a positive integer value.
  */
-export function resolvePostgresPoolMax(configuredMax, environmentMax = process.env.SMITHERS_POSTGRES_POOL_MAX) {
+export function resolvePostgresPoolMax(configuredMax, environmentMax) {
     const value = configuredMax ?? (environmentMax === undefined ? DEFAULT_POSTGRES_POOL_MAX : Number(environmentMax));
     if (!Number.isSafeInteger(value) || value <= 0) {
         throw new RangeError("PostgreSQL pool max must be a positive integer.");
@@ -91,7 +98,7 @@ export function resolvePostgresPoolMax(configuredMax, environmentMax = process.e
  * @param {string | undefined} environmentMax Environment configuration.
  * @returns {"option" | "env" | "default"} Origin of the effective bound.
  */
-export function postgresPoolMaxSource(configuredMax, environmentMax = process.env.SMITHERS_POSTGRES_POOL_MAX) {
+export function postgresPoolMaxSource(configuredMax, environmentMax) {
     if (configuredMax !== undefined)
         return "option";
     return environmentMax === undefined ? "default" : "env";
@@ -106,7 +113,7 @@ export function postgresPoolMaxSource(configuredMax, environmentMax = process.en
  * @returns {number} Positive integer milliseconds.
  * @throws {RangeError} When a configured wait lacks a positive integer value.
  */
-export function resolvePostgresAcquireTimeoutMs(configuredMs, environmentMs = process.env.SMITHERS_POSTGRES_ACQUIRE_TIMEOUT_MS) {
+export function resolvePostgresAcquireTimeoutMs(configuredMs, environmentMs) {
     const value = configuredMs ?? (environmentMs === undefined ? DEFAULT_POSTGRES_ACQUIRE_TIMEOUT_MS : Number(environmentMs));
     if (!Number.isSafeInteger(value) || value <= 0) {
         throw new RangeError("PostgreSQL pool acquire timeout must be a positive integer number of milliseconds.");
@@ -183,6 +190,9 @@ class TransactionalPoolConnection {
         this.identity = identity;
         this.releaseLease = releaseLease;
         this.transactionClient = null;
+        this.transactionStart = null;
+        this.transactionQueue = Promise.resolve();
+        this.closePromise = null;
         this.closed = false;
     }
 
@@ -198,24 +208,22 @@ class TransactionalPoolConnection {
         }
         const command = query.text.trim().toUpperCase();
         if (command === "BEGIN") {
-            if (this.transactionClient) {
+            if (this.transactionClient || this.transactionStart) {
                 throw new Error("Nested PostgreSQL transactions are not supported.");
             }
-            let client;
+            const start = this.beginTransaction(query);
+            this.transactionStart = start;
             try {
-                client = await this.pool.connect();
+                return await start;
             }
-            catch (error) {
-                throw toPoolSaturationError(error, this.entry, this.identity);
+            finally {
+                if (this.transactionStart === start) {
+                    this.transactionStart = null;
+                }
             }
-            this.transactionClient = client;
-            try {
-                return await client.query(query);
-            }
-            catch (error) {
-                this.releaseTransactionClient(error);
-                throw error;
-            }
+        }
+        if (this.transactionStart) {
+            await this.transactionStart;
         }
         const client = this.transactionClient;
         if (!client) {
@@ -226,9 +234,16 @@ class TransactionalPoolConnection {
                 throw toPoolSaturationError(error, this.entry, this.identity);
             }
         }
-        if (command === "COMMIT" || command === "ROLLBACK") {
+        const operation = this.transactionQueue.then(async () => {
+            const pinnedClient = this.transactionClient;
+            if (!pinnedClient) {
+                throw new Error("PostgreSQL transaction has already ended.");
+            }
+            if (command !== "COMMIT" && command !== "ROLLBACK") {
+                return pinnedClient.query(query);
+            }
             try {
-                return await client.query(query);
+                return await pinnedClient.query(query);
             }
             catch (error) {
                 this.releaseTransactionClient(error);
@@ -237,8 +252,40 @@ class TransactionalPoolConnection {
             finally {
                 this.releaseTransactionClient();
             }
+        });
+        // Keep the queue usable after a failed statement while preserving the
+        // original rejection for the caller.
+        this.transactionQueue = operation.then(() => {}, () => {});
+        return operation;
+    }
+
+    /**
+     * Acquire and pin a client for a new transaction. If shutdown wins the
+     * race while connect() is queued, return the acquired client immediately
+     * instead of stranding pool.end() behind an owner that already closed.
+     * @param {{ text: string; values?: unknown[] }} query BEGIN query.
+     * @returns {Promise<any>} BEGIN result.
+     */
+    async beginTransaction(query) {
+        let client;
+        try {
+            client = await this.pool.connect();
         }
-        return client.query(query);
+        catch (error) {
+            throw toPoolSaturationError(error, this.entry, this.identity);
+        }
+        if (this.closed) {
+            client.release();
+            throw new Error("PostgreSQL connection closed while beginning a transaction.");
+        }
+        this.transactionClient = client;
+        try {
+            return await client.query(query);
+        }
+        catch (error) {
+            this.releaseTransactionClient(error);
+            throw error;
+        }
     }
 
     /** Release the client pin after a terminal transaction command. */
@@ -253,11 +300,22 @@ class TransactionalPoolConnection {
      * process-local pool reference. Repeated calls have no effect.
      * @returns {Promise<void>} Completion after all owned resources release.
      */
-    async close() {
-        if (this.closed) {
-            return;
+    close() {
+        if (this.closePromise) {
+            return this.closePromise;
         }
         this.closed = true;
+        this.closePromise = this.closeResources();
+        return this.closePromise;
+    }
+
+    /** @returns {Promise<void>} Completion after transaction and lease cleanup. */
+    async closeResources() {
+        // A BEGIN may still be waiting for a pool client. Let it either pin a
+        // client or observe `closed`, then drain any already-accepted pinned
+        // queries before deciding whether a rollback is needed.
+        await this.transactionStart?.catch(() => {});
+        await this.transactionQueue;
         const client = this.transactionClient;
         this.transactionClient = null;
         let rollbackError;
@@ -280,15 +338,18 @@ class TransactionalPoolConnection {
  * A normalized URL shares a pool; conflicting bounds reject rather than
  * silently creating an unbounded second pool.
  *
- * @param {{ pg: { Pool: new (options: object) => any; types: { getTypeParser: (oid: number, format?: string) => (value: string) => unknown } }; connectionString: string; max?: number; environmentMax?: string; acquireTimeoutMs?: number; environmentAcquireTimeoutMs?: string }} options Pool configuration.
+ * @param {{ pg: { Pool: new (options: object) => any; types: { getTypeParser: (oid: number, format?: string) => (value: string) => unknown } }; connectionString: string; max?: number; environment?: Record<string, string | undefined>; acquireTimeoutMs?: number }} options Pool configuration.
  * @returns {Promise<{ connection: { query: (query: { text: string; values?: unknown[] }) => Promise<any>; close: () => Promise<void> }; close: () => Promise<void>; identity: string; max: number }>} Lease and logical connection.
  * @throws {RangeError | TypeError} When the connection identity or bound lacks validity.
  */
 export async function acquireSharedPostgresPool(options) {
     const identity = normalizePostgresConnectionIdentity(options.connectionString);
-    const max = resolvePostgresPoolMax(options.max, options.environmentMax);
-    const maxSource = postgresPoolMaxSource(options.max, options.environmentMax);
-    const acquireTimeoutMs = resolvePostgresAcquireTimeoutMs(options.acquireTimeoutMs, options.environmentAcquireTimeoutMs);
+    const environment = options.environment ?? process.env;
+    const environmentMax = environment.SMITHERS_POSTGRES_POOL_MAX;
+    const environmentAcquireTimeoutMs = environment.SMITHERS_POSTGRES_ACQUIRE_TIMEOUT_MS;
+    const max = resolvePostgresPoolMax(options.max, environmentMax);
+    const maxSource = postgresPoolMaxSource(options.max, environmentMax);
+    const acquireTimeoutMs = resolvePostgresAcquireTimeoutMs(options.acquireTimeoutMs, environmentAcquireTimeoutMs);
     let entry = poolsByIdentity.get(identity);
     if (entry?.closing) {
         await entry.closing;
@@ -316,6 +377,9 @@ export async function acquireSharedPostgresPool(options) {
     }
     else if (entry.max !== max) {
         throw new RangeError(`PostgreSQL pool ${redactPostgresIdentity(identity)} already has max ${entry.max}; requested ${max}.`);
+    }
+    else if (entry.acquireTimeoutMs !== acquireTimeoutMs) {
+        throw new RangeError(`PostgreSQL pool ${redactPostgresIdentity(identity)} already has acquire timeout ${entry.acquireTimeoutMs}ms; requested ${acquireTimeoutMs}ms.`);
     }
     entry.owners += 1;
     let released = false;

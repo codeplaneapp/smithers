@@ -149,15 +149,55 @@ describe("shared PostgreSQL pools", () => {
     await second.close();
   });
 
+  test("normalizes effective ports without folding case-sensitive Unix sockets", () => {
+    const previousPort = process.env.PGPORT;
+    try {
+      process.env.PGPORT = "6543";
+      expect(normalizePostgresConnectionIdentity("postgres://example.test/smithers"))
+        .not.toBe(normalizePostgresConnectionIdentity("postgres://example.test:5432/smithers"));
+      expect(normalizePostgresConnectionIdentity("postgres://%2Ftmp%2FPgSock/smithers"))
+        .not.toBe(normalizePostgresConnectionIdentity("postgres://%2Ftmp%2Fpgsock/smithers"));
+
+      delete process.env.PGPORT;
+      expect(normalizePostgresConnectionIdentity("postgres://example.test/smithers"))
+        .toBe(normalizePostgresConnectionIdentity("postgres://example.test:5432/smithers"));
+    } finally {
+      if (previousPort === undefined) delete process.env.PGPORT;
+      else process.env.PGPORT = previousPort;
+    }
+  });
+
   test("defaults to sixteen, accepts an environment bound, and rejects conflicting owners", async () => {
     expect(resolvePostgresPoolMax(undefined, undefined)).toBe(16);
     expect(resolvePostgresPoolMax(undefined, "4")).toBe(4);
     expect(() => resolvePostgresPoolMax(undefined, "0")).toThrow(RangeError);
 
-    const first = await acquireSharedPostgresPool({ pg, connectionString: url, environmentMax: "4" });
+    const first = await acquireSharedPostgresPool({
+      pg,
+      connectionString: url,
+      environment: { SMITHERS_POSTGRES_POOL_MAX: "4" },
+    });
     expect(pools[0].options.max).toBe(4);
     await expect(acquireSharedPostgresPool({ pg, connectionString: url, max: 5 })).rejects.toThrow(/already has max 4/);
     await first.close();
+  });
+
+  test("uses an injected environment without leaking process pool settings", async () => {
+    const previousMax = process.env.SMITHERS_POSTGRES_POOL_MAX;
+    const previousTimeout = process.env.SMITHERS_POSTGRES_ACQUIRE_TIMEOUT_MS;
+    process.env.SMITHERS_POSTGRES_POOL_MAX = "99";
+    process.env.SMITHERS_POSTGRES_ACQUIRE_TIMEOUT_MS = "999";
+    try {
+      const lease = await acquireSharedPostgresPool({ pg, connectionString: url, environment: {} });
+      expect(pools[0].options.max).toBe(16);
+      expect(pools[0].options.connectionTimeoutMillis).toBe(10_000);
+      await lease.close();
+    } finally {
+      if (previousMax === undefined) delete process.env.SMITHERS_POSTGRES_POOL_MAX;
+      else process.env.SMITHERS_POSTGRES_POOL_MAX = previousMax;
+      if (previousTimeout === undefined) delete process.env.SMITHERS_POSTGRES_ACQUIRE_TIMEOUT_MS;
+      else process.env.SMITHERS_POSTGRES_ACQUIRE_TIMEOUT_MS = previousTimeout;
+    }
   });
 
   test("bounds the acquire wait and never prints the password", async () => {
@@ -165,7 +205,7 @@ describe("shared PostgreSQL pools", () => {
     expect(resolvePostgresAcquireTimeoutMs(undefined, "250")).toBe(250);
     expect(() => resolvePostgresAcquireTimeoutMs(undefined, "0")).toThrow(RangeError);
     const redacted = redactPostgresIdentity(normalizePostgresConnectionIdentity(url));
-    expect(redacted).toBe("postgres://example.test/smithers?application_name=gateway&password=***&sslmode=require");
+    expect(redacted).toBe("postgres://example.test:5432/smithers?application_name=gateway&password=***&sslmode=require");
     expect(redacted).not.toContain("USER");
     expect(redacted).not.toContain("query-secret");
 
@@ -230,6 +270,20 @@ describe("shared PostgreSQL pools", () => {
     await lease.close();
   });
 
+  test("rejects conflicting acquire waits for owners of one pool", async () => {
+    const first = await acquireSharedPostgresPool({ pg, connectionString: url, max: 2, acquireTimeoutMs: 25 });
+    const error = await acquireSharedPostgresPool({
+      pg,
+      connectionString: url,
+      max: 2,
+      acquireTimeoutMs: 50,
+    }).catch((caught) => caught);
+    expect(error).toBeInstanceOf(RangeError);
+    expect(error.message).toContain("already has acquire timeout 25ms");
+    expect(error.message).not.toContain("secret");
+    await first.close();
+  });
+
   test("pins BEGIN through COMMIT to one client and returns non-transactional work to the pool", async () => {
     const lease = await acquireSharedPostgresPool({ pg, connectionString: url });
     await lease.connection.query({ text: "SELECT outside" });
@@ -260,5 +314,69 @@ describe("shared PostgreSQL pools", () => {
     expect(pools[0].clients[0].released).toBe(1);
     expect(pools[0].idleCount).toBe(pools[0].totalCount);
     expect(pools[0].ended).toBe(1);
+  });
+
+  test("shutdown cannot strand a BEGIN waiting for a pooled client", async () => {
+    const lease = await acquireSharedPostgresPool({
+      pg,
+      connectionString: url,
+      max: 1,
+      acquireTimeoutMs: 100,
+    });
+    const held = await pools[0].connect();
+    const beginning = lease.connection.query({ text: "BEGIN" });
+    await Promise.resolve();
+    const nested = lease.connection.query({ text: "BEGIN" }).catch((error) => error);
+    const closing = lease.close();
+
+    held.release();
+
+    await expect(beginning).rejects.toThrow("closed while beginning");
+    expect((await nested).message).toContain("Nested PostgreSQL transactions");
+    await closing;
+    expect(pools[0].checkedOut).toBe(0);
+    expect(pools[0].ended).toBe(1);
+  });
+
+  test("repeated close calls wait for the same in-flight transaction cleanup", async () => {
+    const lease = await acquireSharedPostgresPool({ pg, connectionString: url });
+    await lease.connection.query({ text: "BEGIN" });
+
+    const firstClose = lease.close();
+    const secondClose = lease.close();
+    await Promise.all([firstClose, secondClose]);
+
+    expect(pools[0].clients[0].released).toBe(1);
+    expect(pools[0].ended).toBe(1);
+  });
+
+  test("shutdown waits for an in-flight transaction query before rollback", async () => {
+    const lease = await acquireSharedPostgresPool({ pg, connectionString: url });
+    await lease.connection.query({ text: "BEGIN" });
+    const client = pools[0].clients[0];
+    const queryClient = client.query.bind(client);
+    let finishSlowQuery;
+    const slowQueryGate = new Promise((resolve) => {
+      finishSlowQuery = resolve;
+    });
+    client.query = async (query) => {
+      if (query.text === "SELECT slow") await slowQueryGate;
+      return queryClient(query);
+    };
+
+    const slowQuery = lease.connection.query({ text: "SELECT slow" });
+    await Promise.resolve();
+    let closeFinished = false;
+    const closing = lease.close().then(() => {
+      closeFinished = true;
+    });
+    await Promise.resolve();
+    expect(closeFinished).toBe(false);
+
+    finishSlowQuery();
+    await slowQuery;
+    await closing;
+    expect(pools[0].queries.map(({ query }) => query.text)).toContain("ROLLBACK");
+    expect(pools[0].checkedOut).toBe(0);
   });
 });
