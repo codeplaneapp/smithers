@@ -5,8 +5,8 @@ import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
 function buildRuntimeConfig(options) {
   return {
     ...options.runtimeConfig,
-    ...(options.baseRootDir !== void 0 ? { baseRootDir: options.baseRootDir } : {}),
-    ...(options.workflowPath !== void 0 ? { workflowPath: options.workflowPath } : {}),
+    ...options.baseRootDir !== void 0 ? { baseRootDir: options.baseRootDir } : {},
+    ...options.workflowPath !== void 0 ? { workflowPath: options.workflowPath } : {}
   };
 }
 function buildExtractOptions(options) {
@@ -14,7 +14,7 @@ function buildExtractOptions(options) {
     defaultIteration: options.iteration ?? 0,
     ralphIterations: options.iterations,
     baseRootDir: options.baseRootDir ?? options.runtimeConfig?.baseRootDir,
-    workflowPath: options.workflowPath ?? options.runtimeConfig?.workflowPath ?? null,
+    workflowPath: options.workflowPath ?? options.runtimeConfig?.workflowPath ?? null
   };
 }
 async function renderWorkflow(workflow, options = {}) {
@@ -26,10 +26,13 @@ async function renderWorkflow(workflow, options = {}) {
     auth: options.auth ?? null,
     outputs: options.outputs ?? {},
     zodToKeyName: workflow.zodToKeyName,
-    runtimeConfig: buildRuntimeConfig(options),
+    runtimeConfig: buildRuntimeConfig(options)
   });
   const renderer = options.renderer ?? new SmithersRenderer();
-  const graph = await renderer.render(workflow.build(ctx), buildExtractOptions(options));
+  const graph = await renderer.render(
+    workflow.build(ctx),
+    buildExtractOptions(options)
+  );
   const baseRootDir = options.baseRootDir ?? options.runtimeConfig?.baseRootDir;
   const workflowPath = options.workflowPath ?? options.runtimeConfig?.workflowPath ?? null;
   const engineHelpers = await import("@smithers-orchestrator/engine/engine");
@@ -37,11 +40,11 @@ async function renderWorkflow(workflow, options = {}) {
   engineHelpers.resolveTaskOutputs(graph.tasks, workflow);
   computeHelpers.attachSubflowComputeFns(graph.tasks, workflow, {
     rootDir: baseRootDir,
-    workflowPath,
+    workflowPath
   });
   computeHelpers.attachSandboxComputeFns(graph.tasks, workflow, {
     rootDir: baseRootDir,
-    workflowPath,
+    workflowPath
   });
   return {
     ...graph,
@@ -51,7 +54,9 @@ async function renderWorkflow(workflow, options = {}) {
     ctx,
     toXml() {
       return canonicalizeXml(graph.xml);
-    },
+    }
   };
 }
-export { renderWorkflow };
+export {
+  renderWorkflow
+};

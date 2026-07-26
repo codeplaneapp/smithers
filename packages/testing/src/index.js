@@ -1,11 +1,11 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) =>
-  function __init() {
-    return (fn && (res = (0, fn[__getOwnPropNames(fn)[0]])((fn = 0))), res);
-  };
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __export = (target, all) => {
-  for (var name in all) __defProp(target, name, { get: all[name], enumerable: true });
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
 };
 
 // src/scenario/ast.ts
@@ -18,25 +18,11 @@ var init_ast = __esm({
         if (child && typeof child === "object" && !Object.isFrozen(child)) freezeScenario(child);
       return Object.freeze(value);
     };
-  },
+  }
 });
 
 // src/scenario/statelessSource.ts
-var RESERVED,
-  UNPROVABLE,
-  SIMPLE_PARAMS,
-  NUMERIC_LITERALS,
-  COERCION_CHARS,
-  BLOCK_KEYWORDS,
-  isIdentStart,
-  isIdentPart,
-  stripLiterals,
-  matchingParen,
-  nextNonSpace,
-  prevNonSpace,
-  wordEndingAt,
-  parseOuterForm,
-  provablyStatelessSource;
+var RESERVED, UNPROVABLE, SIMPLE_PARAMS, NUMERIC_LITERALS, COERCION_CHARS, BLOCK_KEYWORDS, isIdentStart, isIdentPart, stripLiterals, matchingParen, nextNonSpace, prevNonSpace, wordEndingAt, parseOuterForm, provablyStatelessSource;
 var init_statelessSource = __esm({
   "src/scenario/statelessSource.ts"() {
     "use strict";
@@ -64,7 +50,7 @@ var init_statelessSource = __esm({
       "var",
       "true",
       "false",
-      "null",
+      "null"
     ]);
     UNPROVABLE = /* @__PURE__ */ new Set([
       "this",
@@ -88,11 +74,10 @@ var init_statelessSource = __esm({
       "in",
       "instanceof",
       "throw",
-      "yield",
+      "yield"
     ]);
     SIMPLE_PARAMS = /^\s*(?:[A-Za-z_$][\w$]*\s*(?:,\s*[A-Za-z_$][\w$]*\s*)*,?\s*)?$/;
-    NUMERIC_LITERALS =
-      /(?<![\w$.])(?:0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)/g;
+    NUMERIC_LITERALS = /(?<![\w$.])(?:0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)/g;
     COERCION_CHARS = /* @__PURE__ */ new Set(["+", "-", "*", "%", "~", "^", "<", ">", "[", "]"]);
     BLOCK_KEYWORDS = /* @__PURE__ */ new Set(["else", "do", "try", "finally", "catch"]);
     isIdentStart = (ch) => /[A-Za-z_$]/.test(ch);
@@ -108,13 +93,13 @@ var init_statelessSource = __esm({
           continue;
         }
         if (ch === "/" && source[i + 1] === "/") {
-          for (; i < source.length && source[i] !== "\n"; i++);
+          for (; i < source.length && source[i] !== "\n"; i++) ;
           out += " ";
           continue;
         }
         if (ch === "/" && source[i + 1] === "*") {
           i += 2;
-          for (; i + 1 < source.length && !(source[i] === "*" && source[i + 1] === "/"); i++);
+          for (; i + 1 < source.length && !(source[i] === "*" && source[i + 1] === "/"); i++) ;
           i++;
           out += " ";
           continue;
@@ -249,16 +234,12 @@ var init_statelessSource = __esm({
             while (end < body.length && isIdentPart(body[end])) end++;
             const word = body.slice(i, end);
             const headDeclaration = body[prevNonSpace(body, i - 1)] === "(";
-            if (
-              word === "var" ||
-              ((word === "const" || word === "let") && !headDeclaration && depth === (outer.blockBody ? 1 : 0))
-            ) {
+            if (word === "var" || (word === "const" || word === "let") && !headDeclaration && depth === (outer.blockBody ? 1 : 0)) {
               const nameStart = nextNonSpace(body, end);
               if (isIdentStart(body[nameStart] ?? "")) {
                 let nameEnd = nameStart;
                 while (nameEnd < body.length && isIdentPart(body[nameEnd])) nameEnd++;
-                if (word === "var" || body[nextNonSpace(body, nameEnd)] === "=")
-                  locals.add(body.slice(nameStart, nameEnd));
+                if (word === "var" || body[nextNonSpace(body, nameEnd)] === "=") locals.add(body.slice(nameStart, nameEnd));
               }
             }
             i = end - 1;
@@ -276,7 +257,7 @@ var init_statelessSource = __esm({
           }
           continue;
         }
-        if (!isIdentStart(ch) || (i > 0 && isIdentPart(body[i - 1]))) continue;
+        if (!isIdentStart(ch) || i > 0 && isIdentPart(body[i - 1])) continue;
         let end = i;
         while (end < body.length && isIdentPart(body[end])) end++;
         const word = body.slice(i, end);
@@ -291,21 +272,11 @@ var init_statelessSource = __esm({
       }
       return true;
     };
-  },
+  }
 });
 
 // src/scenario/builder.ts
-var intrinsicFunctionToString,
-  runnerSource,
-  runners,
-  runnersByBinding,
-  validRunnerBinding,
-  stepRunner,
-  step,
-  barrier,
-  fault,
-  extension,
-  scenario;
+var intrinsicFunctionToString, runnerSource, runners, runnersByBinding, validRunnerBinding, stepRunner, step, barrier, fault, extension, scenario;
 var init_builder = __esm({
   "src/scenario/builder.ts"() {
     "use strict";
@@ -316,25 +287,23 @@ var init_builder = __esm({
     runners = /* @__PURE__ */ new WeakMap();
     runnersByBinding = /* @__PURE__ */ new Map();
     validRunnerBinding = (binding) => typeof binding === "string" && binding.trim().length > 0;
-    stepRunner = (stepValue) =>
-      runners.get(stepValue) ??
-      (validRunnerBinding(stepValue.runnerBinding) ? runnersByBinding.get(stepValue.runnerBinding) : void 0);
+    stepRunner = (stepValue) => runners.get(stepValue) ?? (validRunnerBinding(stepValue.runnerBinding) ? runnersByBinding.get(stepValue.runnerBinding) : void 0);
     step = (id, options = {}) => {
       const explicitBinding = options.runnerBinding !== void 0;
       if (explicitBinding && !validRunnerBinding(options.runnerBinding)) {
         throw Object.assign(
           new Error(
-            `RUNNER_BINDING_INVALID: runnerBinding must be a non-empty stable string (step ${id}); an empty, whitespace-only, or non-string binding cannot name one behavior across processes and would strand its executable outside the canonical AST`,
+            `RUNNER_BINDING_INVALID: runnerBinding must be a non-empty stable string (step ${id}); an empty, whitespace-only, or non-string binding cannot name one behavior across processes and would strand its executable outside the canonical AST`
           ),
-          { code: "RUNNER_BINDING_INVALID", details: { step: id, runnerBinding: options.runnerBinding } },
+          { code: "RUNNER_BINDING_INVALID", details: { step: id, runnerBinding: options.runnerBinding } }
         );
       }
       if (explicitBinding && options.runnerBinding.startsWith("anonymous:")) {
         throw Object.assign(
           new Error(
-            `RUNNER_BINDING_CONFLICT: the anonymous: namespace is retired framework-issued identity; provide a caller-owned runnerBinding`,
+            `RUNNER_BINDING_CONFLICT: the anonymous: namespace is retired framework-issued identity; provide a caller-owned runnerBinding`
           ),
-          { code: "RUNNER_BINDING_CONFLICT", details: { runnerBinding: options.runnerBinding, explicitBinding } },
+          { code: "RUNNER_BINDING_CONFLICT", details: { runnerBinding: options.runnerBinding, explicitBinding } }
         );
       }
       if (options.run && !explicitBinding) {
@@ -342,16 +311,16 @@ var init_builder = __esm({
         if (!provablyStatelessSource(source)) {
           throw Object.assign(
             new Error(
-              "RUNNER_BINDING_AMBIGUOUS: callback statelessness is not provable from source; provide an explicit stable runnerBinding",
+              "RUNNER_BINDING_AMBIGUOUS: callback statelessness is not provable from source; provide an explicit stable runnerBinding"
             ),
-            { code: "RUNNER_BINDING_AMBIGUOUS" },
+            { code: "RUNNER_BINDING_AMBIGUOUS" }
           );
         }
         throw Object.assign(
           new Error(
-            `RUNNER_BINDING_REQUIRED: anonymous executable identities are retired \u2014 every run callback requires an explicit caller-supplied stable runnerBinding (step ${id}); the caller owns keeping the binding pointed at one behavior across processes`,
+            `RUNNER_BINDING_REQUIRED: anonymous executable identities are retired \u2014 every run callback requires an explicit caller-supplied stable runnerBinding (step ${id}); the caller owns keeping the binding pointed at one behavior across processes`
           ),
-          { code: "RUNNER_BINDING_REQUIRED", details: { step: id } },
+          { code: "RUNNER_BINDING_REQUIRED", details: { step: id } }
         );
       }
       const runnerBinding = options.runnerBinding;
@@ -360,20 +329,20 @@ var init_builder = __esm({
         if (prior && prior !== options.run) {
           throw Object.assign(
             new Error(
-              `RUNNER_BINDING_CONFLICT: ${runnerBinding} names multiple executables; provide an explicit stable runnerBinding`,
+              `RUNNER_BINDING_CONFLICT: ${runnerBinding} names multiple executables; provide an explicit stable runnerBinding`
             ),
-            { code: "RUNNER_BINDING_CONFLICT", details: { runnerBinding, explicitBinding } },
+            { code: "RUNNER_BINDING_CONFLICT", details: { runnerBinding, explicitBinding } }
           );
         }
       }
       const value = freezeScenario({
         kind: "step",
         id,
-        ...(options.input === void 0 ? {} : { input: options.input }),
-        dependsOn: [...(options.dependsOn ?? [])],
-        capabilities: [...(options.capabilities ?? [])],
-        ...(options.extension ? { extension: options.extension } : {}),
-        ...(runnerBinding === void 0 ? {} : { runnerBinding }),
+        ...options.input === void 0 ? {} : { input: options.input },
+        dependsOn: [...options.dependsOn ?? []],
+        capabilities: [...options.capabilities ?? []],
+        ...options.extension ? { extension: options.extension } : {},
+        ...runnerBinding === void 0 ? {} : { runnerBinding }
       });
       const executable = options.run;
       if (executable) {
@@ -384,20 +353,18 @@ var init_builder = __esm({
       return value;
     };
     barrier = (id, parties, budget = 100) => freezeScenario({ kind: "barrier", id, parties: [...parties], budget });
-    fault = (id, phase, operation, outcome) =>
-      freezeScenario({ kind: "fault", id, phase, operation, ...(outcome === void 0 ? {} : { outcome }) });
+    fault = (id, phase, operation, outcome) => freezeScenario({ kind: "fault", id, phase, operation, ...outcome === void 0 ? {} : { outcome } });
     extension = (name, value) => freezeScenario({ kind: "extension", name, value });
-    scenario = (name, options = {}) =>
-      freezeScenario({
-        version: 1,
-        name,
-        ...(options.seed === void 0 ? {} : { seed: options.seed }),
-        steps: [...(options.steps ?? [])],
-        barriers: [...(options.barriers ?? [])],
-        faults: [...(options.faults ?? [])],
-        extensions: [...(options.extensions ?? [])],
-      });
-  },
+    scenario = (name, options = {}) => freezeScenario({
+      version: 1,
+      name,
+      ...options.seed === void 0 ? {} : { seed: options.seed },
+      steps: [...options.steps ?? []],
+      barriers: [...options.barriers ?? []],
+      faults: [...options.faults ?? []],
+      extensions: [...options.extensions ?? []]
+    });
+  }
 });
 
 // src/harness/capabilities.ts
@@ -405,17 +372,14 @@ var admitCapabilities, requiredCapabilities;
 var init_capabilities = __esm({
   "src/harness/capabilities.ts"() {
     "use strict";
-    admitCapabilities = (harness, requested, policy = "fail") =>
-      requested.map((capability) =>
-        harness.capabilities.has(capability)
-          ? { kind: "supported", harness: harness.name, capability }
-          : {
-              kind: policy === "skip" ? "capability-skip" : "capability-failure",
-              harness: harness.name,
-              capability,
-              hint: "Choose a harness that declares this capability.",
-            },
-      );
+    admitCapabilities = (harness, requested, policy = "fail") => requested.map(
+      (capability) => harness.capabilities.has(capability) ? { kind: "supported", harness: harness.name, capability } : {
+        kind: policy === "skip" ? "capability-skip" : "capability-failure",
+        harness: harness.name,
+        capability,
+        hint: "Choose a harness that declares this capability."
+      }
+    );
     requiredCapabilities = (ast) => {
       const result = /* @__PURE__ */ new Set();
       for (const step2 of ast.steps) for (const capability of step2.capabilities) result.add(capability);
@@ -424,7 +388,7 @@ var init_capabilities = __esm({
       if (ast.extensions.length) result.add("explicit-interleaving");
       return [...result];
     };
-  },
+  }
 });
 
 // src/scenario/compile.ts
@@ -454,7 +418,7 @@ var init_compile = __esm({
       "lease:during-task",
       "resume:before-task",
       "resume:during-task",
-      "cancellation:during-task",
+      "cancellation:during-task"
     ]);
     compileScenario = (ast, registeredExtensions = /* @__PURE__ */ new Set()) => {
       const diagnostics = [];
@@ -486,50 +450,41 @@ var init_compile = __esm({
       const barriers = new Set(ast.barriers.map((b) => b.id));
       for (const b of ast.barriers) {
         if (!Number.isInteger(b.budget) || b.budget < 1)
-          diagnostics.push({
-            code: "INVALID_BARRIER_BUDGET",
-            message: `barrier ${b.id} has invalid budget`,
-            node: b.id,
-          });
+          diagnostics.push({ code: "INVALID_BARRIER_BUDGET", message: `barrier ${b.id} has invalid budget`, node: b.id });
         for (const party of b.parties)
           if (!ids.has(party))
             diagnostics.push({
               code: "UNKNOWN_BARRIER_PARTY",
               message: `barrier ${b.id} names unknown step ${party}`,
-              node: b.id,
+              node: b.id
             });
         if (barriers.has(b.id) && ast.barriers.indexOf(b) !== ast.barriers.findIndex((x) => x.id === b.id))
           diagnostics.push({ code: "DUPLICATE_BARRIER_ID", message: `duplicate barrier id ${b.id}`, node: b.id });
       }
       for (const f of ast.faults)
-        if (
-          !validPairs.has(`${f.operation}:${f.phase}`) &&
-          !(f.operation === "task" && ["before-task", "during-task", "after-task"].includes(f.phase))
-        )
+        if (!validPairs.has(`${f.operation}:${f.phase}`) && !(f.operation === "task" && ["before-task", "during-task", "after-task"].includes(f.phase)))
           diagnostics.push({
             code: "UNSUPPORTED_FAULT_CUT_POINT",
             message: `fault ${f.id} cannot target ${f.operation} at ${f.phase}`,
-            node: f.id,
+            node: f.id
           });
       for (const ext of ast.extensions)
         if (!registeredExtensions.has(ext.name))
           diagnostics.push({
             code: "UNREGISTERED_EXTENSION",
             message: `extension ${ext.name} has no executor`,
-            node: ext.name,
+            node: ext.name
           });
       for (const step2 of ast.steps)
         if (step2.extension && !registeredExtensions.has(step2.extension))
           diagnostics.push({
             code: "UNREGISTERED_STEP_EXTENSION",
             message: `step ${step2.id} references extension ${step2.extension} with no executor`,
-            node: step2.id,
+            node: step2.id
           });
-      return diagnostics.length
-        ? { ok: false, diagnostics, requiredCapabilities: requiredCapabilities(ast) }
-        : { ok: true, requiredCapabilities: requiredCapabilities(ast) };
+      return diagnostics.length ? { ok: false, diagnostics, requiredCapabilities: requiredCapabilities(ast) } : { ok: true, requiredCapabilities: requiredCapabilities(ast) };
     };
-  },
+  }
 });
 
 // src/scenario/canonicalize.ts
@@ -555,19 +510,14 @@ var init_canonicalize = __esm({
       if (typeof value !== "object") throw new CanonicalizeError("Unsupported value at " + path);
       if (seen.has(value)) throw new CanonicalizeError("Circular value at " + path);
       seen.add(value);
-      const result = Array.isArray(value)
-        ? "[" + value.map((item, i) => encode(item, path + "[" + i + "]", seen)).join(",") + "]"
-        : "{" +
-          Object.keys(value)
-            .sort()
-            .map((key) => JSON.stringify(key) + ":" + encode(value[key], path + "." + key, seen))
-            .join(",") +
-          "}";
+      const result = Array.isArray(value) ? "[" + value.map((item, i) => encode(item, path + "[" + i + "]", seen)).join(",") + "]" : "{" + Object.keys(value).sort().map(
+        (key) => JSON.stringify(key) + ":" + encode(value[key], path + "." + key, seen)
+      ).join(",") + "}";
       seen.delete(value);
       return result;
     };
     canonicalize = (value) => encode(value);
-  },
+  }
 });
 
 // src/scenario/replayIdentity.ts
@@ -577,12 +527,8 @@ var init_replayIdentity = __esm({
   "src/scenario/replayIdentity.ts"() {
     "use strict";
     init_canonicalize();
-    replayIdentity = (input) =>
-      "ri1:" +
-      createHash("sha256")
-        .update(canonicalize({ ast: input.ast, seed: input.seed, controlLog: input.controlLog ?? [] }))
-        .digest("hex");
-  },
+    replayIdentity = (input) => "ri1:" + createHash("sha256").update(canonicalize({ ast: input.ast, seed: input.seed, controlLog: input.controlLog ?? [] })).digest("hex");
+  }
 });
 
 // src/kernel/VirtualClock.ts
@@ -598,8 +544,7 @@ var init_VirtualClock = __esm({
         return this.current;
       }
       sleep(ms, callback) {
-        if (!Number.isFinite(ms) || ms < 0)
-          throw new RangeError("virtual sleep requires a finite non-negative duration");
+        if (!Number.isFinite(ms) || ms < 0) throw new RangeError("virtual sleep requires a finite non-negative duration");
         const timer = { id: this.nextId++, at: this.current + ms, callback };
         this.timers.push(timer);
         this.timers.sort((a, b) => a.at - b.at || a.id - b.id);
@@ -621,8 +566,7 @@ var init_VirtualClock = __esm({
         return true;
       }
       runUntilIdle(limit = 1e4) {
-        if (!Number.isInteger(limit) || limit < 1)
-          throw new RangeError("virtual-time limit must be a positive integer");
+        if (!Number.isInteger(limit) || limit < 1) throw new RangeError("virtual-time limit must be a positive integer");
         let steps = 0;
         while (this.timers.length) {
           const timer = this.timers[0];
@@ -631,7 +575,7 @@ var init_VirtualClock = __esm({
             if (++steps > limit)
               throw Object.assign(new Error("VIRTUAL_TIME_BUDGET_EXHAUSTED: virtual-time callback budget exhausted"), {
                 code: "VIRTUAL_TIME_BUDGET_EXHAUSTED",
-                details: { limit, now: this.current },
+                details: { limit, now: this.current }
               });
             this.timers.shift()?.callback();
           }
@@ -648,13 +592,13 @@ var init_VirtualClock = __esm({
         while (this.timers[0]?.at <= this.current) {
           if (++steps > 1e4)
             throw Object.assign(new Error("virtual-time callback budget exhausted"), {
-              code: "VIRTUAL_TIME_BUDGET_EXHAUSTED",
+              code: "VIRTUAL_TIME_BUDGET_EXHAUSTED"
             });
           this.timers.shift()?.callback();
         }
       }
     };
-  },
+  }
 });
 
 // src/kernel/SeededScheduler.ts
@@ -679,11 +623,11 @@ var init_SeededScheduler = __esm({
         return [...this.decisions];
       }
       next() {
-        this.state = (Math.imul(this.state, 1664525) + 1013904223) >>> 0;
+        this.state = Math.imul(this.state, 1664525) + 1013904223 >>> 0;
         return this.state;
       }
     };
-  },
+  }
 });
 
 // src/kernel/ControlBus.ts
@@ -773,7 +717,7 @@ var init_ControlBus = __esm({
         return [...this.pending];
       }
     };
-  },
+  }
 });
 
 // src/kernel/TraceCollector.ts
@@ -796,7 +740,7 @@ var init_TraceCollector = __esm({
         return [...this.events];
       }
     };
-  },
+  }
 });
 
 // src/harness/Harness.ts
@@ -808,7 +752,7 @@ function makeHarness(kind, config = {}) {
       "explicit-interleaving",
       "barriers",
       "mediated-effects",
-      "durability-faults",
+      "durability-faults"
     ],
     "integration-real-db": [
       "virtual-time",
@@ -818,18 +762,16 @@ function makeHarness(kind, config = {}) {
       "mediated-effects",
       "real-db",
       "native-error-parity",
-      "durability-faults",
+      "durability-faults"
     ],
-    "e2e-real-process": ["real-process", "native-error-parity", "durability-faults"],
+    "e2e-real-process": ["real-process", "native-error-parity", "durability-faults"]
   };
   const requestedCapabilities = (config.capabilities ?? defaults[kind]).filter(
-    (capability) => !(capability === "native-error-parity" && typeof config.adapter?.serializeError !== "function"),
+    (capability) => !(capability === "native-error-parity" && typeof config.adapter?.serializeError !== "function")
   );
   const forbiddenForUnit = /* @__PURE__ */ new Set(["real-db", "real-process", "native-error-parity"]);
   const capabilities = new Set(
-    kind === "unit-sim"
-      ? requestedCapabilities.filter((capability) => !forbiddenForUnit.has(capability))
-      : requestedCapabilities,
+    kind === "unit-sim" ? requestedCapabilities.filter((capability) => !forbiddenForUnit.has(capability)) : requestedCapabilities
   );
   const name = config.name ?? kind;
   const admit = (requested) => {
@@ -842,25 +784,13 @@ function makeHarness(kind, config = {}) {
           kind: config.policy === "skip" ? "capability-skip" : "capability-failure",
           harness: name,
           capability,
-          hint: "unit-sim cannot claim a real production capability",
-        })),
+          hint: "unit-sim cannot claim a real production capability"
+        }))
       ];
     const crossKind = requestedCapabilities.some(
-      (capability) =>
-        (kind === "integration-real-db" && capability === "real-process") ||
-        (kind === "e2e-real-process" &&
-          (capability === "real-db" ||
-            ["virtual-time", "seeded-interleaving", "explicit-interleaving", "barriers"].includes(capability))),
+      (capability) => kind === "integration-real-db" && capability === "real-process" || kind === "e2e-real-process" && (capability === "real-db" || ["virtual-time", "seeded-interleaving", "explicit-interleaving", "barriers"].includes(capability))
     );
-    if (
-      kind !== "unit-sim" &&
-      (crossKind ||
-        !config.adapter ||
-        trustedAdapterKind(config.adapter) !== kind ||
-        typeof config.adapter.admissionProbe !== "function" ||
-        typeof config.adapter.runStep !== "function" ||
-        !config.adapter.verifiedProductionIdentity)
-    ) {
+    if (kind !== "unit-sim" && (crossKind || !config.adapter || trustedAdapterKind(config.adapter) !== kind || typeof config.adapter.admissionProbe !== "function" || typeof config.adapter.runStep !== "function" || !config.adapter.verifiedProductionIdentity)) {
       const capability = kind === "e2e-real-process" ? "real-process" : "real-db";
       return [
         ...decisions,
@@ -868,8 +798,8 @@ function makeHarness(kind, config = {}) {
           kind: config.policy === "skip" ? "capability-skip" : "capability-failure",
           harness: name,
           capability,
-          hint: "declaration is not proof: a verified production adapter with admissionProbe, runStep, and identity is required",
-        },
+          hint: "declaration is not proof: a verified production adapter with admissionProbe, runStep, and identity is required"
+        }
       ];
     }
     return decisions;
@@ -881,7 +811,7 @@ function makeHarness(kind, config = {}) {
     config,
     adapter: config.adapter,
     admit,
-    admitScenario: (ast, requested = []) => admit([...requiredCapabilities(ast), ...requested]),
+    admitScenario: (ast, requested = []) => admit([...requiredCapabilities(ast), ...requested])
   };
 }
 function integrationHarness(config = {}) {
@@ -902,7 +832,7 @@ var init_Harness = __esm({
     };
     trustedAdapterKind = (adapter) => trustedAdapters.get(adapter);
     unitSimHarness = (config = {}) => makeHarness("unit-sim", config);
-  },
+  }
 });
 
 // src/kernel/boundary.ts
@@ -918,13 +848,13 @@ var init_boundary = __esm({
           name: String(value.name ?? error.constructor?.name ?? "Error"),
           code: String(value.code ?? "HARNESS_ERROR"),
           message: String(value.message ?? error),
-          ...(value.fidelity === "simulation" || value.fidelity === "native" ? { fidelity: value.fidelity } : {}),
-          ...(typeof value.tag === "string" ? { tag: value.tag } : {}),
-          ...(typeof value.summary === "string" ? { summary: value.summary } : {}),
-          ...(typeof value.docsUrl === "string" ? { docsUrl: value.docsUrl } : {}),
-          ...(value.serialized === void 0 ? {} : { serialized: value.serialized }),
-          ...(value.details === void 0 ? {} : { details: value.details }),
-          ...(value.cause === void 0 ? {} : { cause: toHarnessError(value.cause) }),
+          ...value.fidelity === "simulation" || value.fidelity === "native" ? { fidelity: value.fidelity } : {},
+          ...typeof value.tag === "string" ? { tag: value.tag } : {},
+          ...typeof value.summary === "string" ? { summary: value.summary } : {},
+          ...typeof value.docsUrl === "string" ? { docsUrl: value.docsUrl } : {},
+          ...value.serialized === void 0 ? {} : { serialized: value.serialized },
+          ...value.details === void 0 ? {} : { details: value.details },
+          ...value.cause === void 0 ? {} : { cause: toHarnessError(value.cause) }
         };
       }
       return { name: "Error", code: "HARNESS_ERROR", message: String(error) };
@@ -933,14 +863,15 @@ var init_boundary = __esm({
       const fiber = Effect2.runFork(Effect2.exit(program));
       const promise = Effect2.runPromise(Fiber.join(fiber)).then((exit) => {
         if (Exit.isSuccess(exit)) return { ok: true, value: exit.value };
-        const cause = Option.getOrElse(Cause.failureOption(exit.cause), () =>
-          Option.getOrElse(Cause.dieOption(exit.cause), () => new Error("kernel program failed")),
+        const cause = Option.getOrElse(
+          Cause.failureOption(exit.cause),
+          () => Option.getOrElse(Cause.dieOption(exit.cause), () => new Error("kernel program failed"))
         );
         return { ok: false, error: toHarnessError(cause) };
       });
       return { promise, interrupt: () => Effect2.runPromise(Fiber.interrupt(fiber)) };
     };
-  },
+  }
 });
 
 // src/kernel/KernelRuntime.ts
@@ -953,7 +884,8 @@ var init_KernelRuntime = __esm({
     init_SeededScheduler();
     init_TraceCollector();
     init_VirtualClock();
-    KernelRuntimeService = class extends Context.Tag("@smithers/testing/KernelRuntime")() {};
+    KernelRuntimeService = class extends Context.Tag("@smithers/testing/KernelRuntime")() {
+    };
     kernelLayer = (kernel) => Layer.succeed(KernelRuntimeService, kernel);
     makeKernel = (seed, controls = []) => {
       const clock = new VirtualClock();
@@ -964,31 +896,30 @@ var init_KernelRuntime = __esm({
         // This is the kernel's scheduling boundary. Ready tasks are Effect values,
         // forked and raced by the Effect runtime; the public runner never owns the
         // task fibers or implements a Promise race itself.
-        runReadySet: (tasks) =>
-          Effect3.gen(function* () {
-            const fresh = tasks.filter(({ stepId }) => !active.has(stepId));
-            for (const { stepId, effect } of fresh) active.set(stepId, yield* Effect3.fork(effect));
-            if (!active.size) throw new Error("KERNEL_NO_ACTIVE_FIBERS");
-            const winner = yield* Effect3.raceAll(
-              [...active.entries()].map(([stepId, fiber]) =>
-                Fiber2.join(fiber).pipe(
-                  Effect3.either,
-                  Effect3.map((exit) => ({ stepId, exit })),
-                ),
-              ),
-            );
-            active.delete(winner.stepId);
-            if (Either.isLeft(winner.exit)) {
-              yield* Effect3.all([...active.values()].map((fiber) => Fiber2.interrupt(fiber)));
-              active.clear();
-              return yield* Effect3.fail(winner.exit.left);
-            }
-            return { stepId: winner.stepId, value: winner.exit.right };
-          }),
+        runReadySet: (tasks) => Effect3.gen(function* () {
+          const fresh = tasks.filter(({ stepId }) => !active.has(stepId));
+          for (const { stepId, effect } of fresh) active.set(stepId, yield* Effect3.fork(effect));
+          if (!active.size) throw new Error("KERNEL_NO_ACTIVE_FIBERS");
+          const winner = yield* Effect3.raceAll(
+            [...active.entries()].map(
+              ([stepId, fiber]) => Fiber2.join(fiber).pipe(
+                Effect3.either,
+                Effect3.map((exit) => ({ stepId, exit }))
+              )
+            )
+          );
+          active.delete(winner.stepId);
+          if (Either.isLeft(winner.exit)) {
+            yield* Effect3.all([...active.values()].map((fiber) => Fiber2.interrupt(fiber)));
+            active.clear();
+            return yield* Effect3.fail(winner.exit.left);
+          }
+          return { stepId: winner.stepId, value: winner.exit.right };
+        })
       });
       return Object.freeze({ ...runtime, executor });
     };
-  },
+  }
 });
 
 // src/internal/deterministicIds.ts
@@ -997,9 +928,9 @@ var init_deterministicIds = __esm({
   "src/internal/deterministicIds.ts"() {
     "use strict";
     mix = (value) => {
-      value = Math.imul(value ^ (value >>> 16), 73244475);
-      value = Math.imul(value ^ (value >>> 16), 73244475);
-      return (value ^ (value >>> 16)) >>> 0;
+      value = Math.imul(value ^ value >>> 16, 73244475);
+      value = Math.imul(value ^ value >>> 16, 73244475);
+      return (value ^ value >>> 16) >>> 0;
     };
     deterministicIds = (seed) => {
       let state = mix(seed >>> 0);
@@ -1008,10 +939,10 @@ var init_deterministicIds = __esm({
           state = mix(state + 2654435769);
           return prefix + "-" + state.toString(36).padStart(7, "0");
         },
-        snapshot: () => state,
+        snapshot: () => state
       };
     };
-  },
+  }
 });
 
 // src/cleanup/CleanupScope.ts
@@ -1075,15 +1006,14 @@ var init_CleanupScope = __esm({
                 Promise.resolve(entry.dispose()),
                 new Promise((_, reject) => {
                   timer = setTimeout(
-                    () =>
-                      reject(
-                        Object.assign(new Error(`cleanup timed out: ${entry.resource.kind}/${entry.resource.id}`), {
-                          code: "CLEANUP_TIMEOUT",
-                        }),
-                      ),
-                    Math.max(0, deadline - Date.now()),
+                    () => reject(
+                      Object.assign(new Error(`cleanup timed out: ${entry.resource.kind}/${entry.resource.id}`), {
+                        code: "CLEANUP_TIMEOUT"
+                      })
+                    ),
+                    Math.max(0, deadline - Date.now())
                   );
-                }),
+                })
               ]);
               disposed = true;
             } finally {
@@ -1092,7 +1022,7 @@ var init_CleanupScope = __esm({
           } catch (cause) {
             error ??= Object.assign(new Error(`CLEANUP_FAILED: ${entry.resource.kind}/${entry.resource.id}`), {
               code: "CLEANUP_FAILED",
-              cause,
+              cause
             });
           }
           if (!disposed) failed.push(entry);
@@ -1102,13 +1032,13 @@ var init_CleanupScope = __esm({
         if (pending.length && Date.now() < deadline) {
           await Promise.race([
             Promise.allSettled(pending.map((entry) => entry.operation)),
-            new Promise((resolve3) => setTimeout(resolve3, Math.max(0, deadline - Date.now()))),
+            new Promise((resolve3) => setTimeout(resolve3, Math.max(0, deadline - Date.now())))
           ]);
         }
         if (error) throw error;
       }
     };
-  },
+  }
 });
 
 // src/cleanup/leakAssertions.ts
@@ -1121,10 +1051,10 @@ var init_leakAssertions = __esm({
       if (leaks.length)
         throw Object.assign(new Error(`CLEANUP_LEAK: ${leaks.map((x) => `${x.kind}/${x.id}`).join(", ")}`), {
           code: "CLEANUP_LEAK",
-          details: { leaks },
+          details: { leaks }
         });
     };
-  },
+  }
 });
 
 // src/durability/journalModel.ts
@@ -1164,7 +1094,7 @@ var init_journalModel = __esm({
         if (this.leaseState(id) !== "owned" || this.owners.get(id) !== owner)
           throw Object.assign(new Error(`lease fenced for ${id}`), {
             code: "LEASE_FENCED",
-            details: { id, owner, currentOwner: this.owners.get(id) },
+            details: { id, owner, currentOwner: this.owners.get(id) }
           });
       }
       loseLease(id) {
@@ -1190,11 +1120,11 @@ var init_journalModel = __esm({
         return {
           journal: Object.fromEntries(this.states),
           leases: Object.fromEntries(this.leases),
-          wakeups: Object.fromEntries(this.wakeups),
+          wakeups: Object.fromEntries(this.wakeups)
         };
       }
     };
-  },
+  }
 });
 
 // src/durability/ambiguity.ts
@@ -1202,19 +1132,18 @@ var ambiguity;
 var init_ambiguity = __esm({
   "src/durability/ambiguity.ts"() {
     "use strict";
-    ambiguity = (outcome, details = {}) =>
-      Object.freeze({
-        outcome,
-        guaranteed: outcome === "journal-applied-ack-missing" ? "journal-cas-only" : "at-least-once",
-        details: Object.freeze({ ...details }),
-      });
-  },
+    ambiguity = (outcome, details = {}) => Object.freeze({
+      outcome,
+      guaranteed: outcome === "journal-applied-ack-missing" ? "journal-cas-only" : "at-least-once",
+      details: Object.freeze({ ...details })
+    });
+  }
 });
 
 // src/runScenario.ts
 var runScenario_exports = {};
 __export(runScenario_exports, {
-  runScenario: () => runScenario,
+  runScenario: () => runScenario
 });
 import { Effect as Effect4, Fiber as Fiber3, Option as Option2 } from "effect";
 var faultFor, dbOperationKind, processOperationKind, faultError, adapterFailure, settleKernel, runScenario;
@@ -1233,8 +1162,7 @@ var init_runScenario = __esm({
     init_journalModel();
     init_ambiguity();
     init_canonicalize();
-    faultFor = (faults, operation, phase) =>
-      faults.find((fault2) => fault2.operation === operation && fault2.phase === phase);
+    faultFor = (faults, operation, phase) => faults.find((fault2) => fault2.operation === operation && fault2.phase === phase);
     dbOperationKind = (name) => {
       const base = name.replace(/#\d+$/, "");
       if (base === "claimAttemptCompletion" || base === "completeRun") return "completion-cas";
@@ -1243,19 +1171,18 @@ var init_runScenario = __esm({
       if (base === "requestRunCancel" || base === "claimRunCancellation") return "cancellation";
       return void 0;
     };
-    processOperationKind = (name) => (name.replace(/#\d+$/, "") === "runWorkflow" ? "resume" : void 0);
-    faultError = (fault2) =>
-      Object.assign(new Error(`fault injected at ${fault2.id}`), {
-        code: "DURABILITY_FAULT_INJECTED",
-        details: fault2,
-        fidelity: "simulation",
-      });
+    processOperationKind = (name) => name.replace(/#\d+$/, "") === "runWorkflow" ? "resume" : void 0;
+    faultError = (fault2) => Object.assign(new Error(`fault injected at ${fault2.id}`), {
+      code: "DURABILITY_FAULT_INJECTED",
+      details: fault2,
+      fidelity: "simulation"
+    });
     adapterFailure = (adapter, cause) => {
       if (!adapter) return cause;
       const error = cause instanceof Error ? cause : new Error(String(cause));
       return Object.assign(error, {
         fidelity: "native",
-        ...(adapter.serializeError ? { serialized: adapter.serializeError(cause) } : {}),
+        ...adapter.serializeError ? { serialized: adapter.serializeError(cause) } : {}
       });
     };
     settleKernel = async (promise, kernel, budget) => {
@@ -1270,7 +1197,7 @@ var init_runScenario = __esm({
         (e) => {
           done = true;
           error = e;
-        },
+        }
       );
       for (let turn = 0; !done && turn < budget; turn++) {
         for (let microtask = 0; microtask < Math.min(64, Math.max(1, budget)); microtask++) await Promise.resolve();
@@ -1283,7 +1210,7 @@ var init_runScenario = __esm({
       if (!done)
         throw Object.assign(new Error("BOUNDED_WAIT_EXHAUSTED: kernel did not settle"), {
           code: "BOUNDED_WAIT_EXHAUSTED",
-          details: { budget },
+          details: { budget }
         });
       if (error !== void 0) throw error;
       return value;
@@ -1292,27 +1219,16 @@ var init_runScenario = __esm({
       const seed = options.seed ?? ast.seed ?? 0;
       const harness = options.harness ?? unitSimHarness();
       const kernel = makeKernel(seed, options.controlLog ?? []);
-      const unboundRunner = ast.steps
-        .filter(
-          (step2) =>
-            (options.stepRunners?.[step2.id] !== void 0 || stepRunner(step2) !== void 0) &&
-            !validRunnerBinding(step2.runnerBinding),
-        )
-        .map((step2) => step2.id);
-      const invalidBinding = ast.steps
-        .filter((step2) => step2.runnerBinding !== void 0 && !validRunnerBinding(step2.runnerBinding))
-        .map((step2) => step2.id);
-      const retiredBinding = ast.steps
-        .filter((step2) => typeof step2.runnerBinding === "string" && step2.runnerBinding.startsWith("anonymous:"))
-        .map((step2) => step2.id);
+      const unboundRunner = ast.steps.filter(
+        (step2) => (options.stepRunners?.[step2.id] !== void 0 || stepRunner(step2) !== void 0) && !validRunnerBinding(step2.runnerBinding)
+      ).map((step2) => step2.id);
+      const invalidBinding = ast.steps.filter((step2) => step2.runnerBinding !== void 0 && !validRunnerBinding(step2.runnerBinding)).map((step2) => step2.id);
+      const retiredBinding = ast.steps.filter((step2) => typeof step2.runnerBinding === "string" && step2.runnerBinding.startsWith("anonymous:")).map((step2) => step2.id);
       const capabilityReport = harness.admitScenario(ast, options.capabilities ?? []);
       const compiled = compileScenario(ast, new Set(Object.keys(harness.adapter?.extensionExecutors ?? {})));
       const knownFaults = new Set(ast.faults.map((item) => item.id));
       const invalidControl = (options.controlLog ?? []).find(
-        (control) =>
-          (control.type === "inject-fault" && !knownFaults.has(control.fault)) ||
-          (control.type === "release-barrier" && !ast.barriers.some((item) => item.id === control.barrier)) ||
-          (control.type === "task-restart" && !ast.steps.some((item) => item.id === control.step)),
+        (control) => control.type === "inject-fault" && !knownFaults.has(control.fault) || control.type === "release-barrier" && !ast.barriers.some((item) => item.id === control.barrier) || control.type === "task-restart" && !ast.steps.some((item) => item.id === control.step)
       );
       for (const decision of capabilityReport)
         kernel.trace.emit({ type: "capability", data: { kind: decision.kind, capability: decision.capability } });
@@ -1322,7 +1238,7 @@ var init_runScenario = __esm({
         controlLog: kernel.controls.log(),
         capabilityReport,
         ambiguity: [],
-        determinismReport: { deterministic: true, residues: [] },
+        determinismReport: { deterministic: true, residues: [] }
       };
       if (unboundRunner.length)
         return {
@@ -1335,8 +1251,8 @@ var init_runScenario = __esm({
             code: "RUNNER_BINDING_REQUIRED",
             message: `step runner(s) require explicit stable runnerBinding: ${unboundRunner.join(", ")}`,
             details: { steps: unboundRunner },
-            fidelity: "simulation",
-          },
+            fidelity: "simulation"
+          }
         };
       if (invalidBinding.length)
         return {
@@ -1349,8 +1265,8 @@ var init_runScenario = __esm({
             code: "RUNNER_BINDING_INVALID",
             message: `runnerBinding must be a non-empty stable string: ${invalidBinding.join(", ")}`,
             details: { steps: invalidBinding },
-            fidelity: "simulation",
-          },
+            fidelity: "simulation"
+          }
         };
       if (retiredBinding.length)
         return {
@@ -1363,8 +1279,8 @@ var init_runScenario = __esm({
             code: "RUNNER_BINDING_CONFLICT",
             message: `the anonymous: binding namespace is retired framework-issued identity and cannot execute: ${retiredBinding.join(", ")}`,
             details: { steps: retiredBinding },
-            fidelity: "simulation",
-          },
+            fidelity: "simulation"
+          }
         };
       const failed = capabilityReport.find((d) => d.kind === "capability-failure");
       const skipped = capabilityReport.find((d) => d.kind === "capability-skip");
@@ -1374,17 +1290,15 @@ var init_runScenario = __esm({
           status: failed ? "capability-failure" : "capability-skip",
           outputs: {},
           trace: kernel.trace.snapshot(),
-          ...(failed && harness.kind !== "unit-sim"
-            ? {
-                error: {
-                  name: "HarnessCapabilityError",
-                  code: "ADMISSION_FAILED",
-                  message: failed.hint ?? "real harness admission failed",
-                  details: failed,
-                  fidelity: "native",
-                },
-              }
-            : {}),
+          ...failed && harness.kind !== "unit-sim" ? {
+            error: {
+              name: "HarnessCapabilityError",
+              code: "ADMISSION_FAILED",
+              message: failed.hint ?? "real harness admission failed",
+              details: failed,
+              fidelity: "native"
+            }
+          } : {}
         };
       if (invalidControl)
         return {
@@ -1397,8 +1311,8 @@ var init_runScenario = __esm({
             code: "CONTROL_INVALID",
             message: `control ${invalidControl.type} is not applicable to this scenario`,
             details: invalidControl,
-            fidelity: "simulation",
-          },
+            fidelity: "simulation"
+          }
         };
       if (!compiled.ok)
         return {
@@ -1411,8 +1325,8 @@ var init_runScenario = __esm({
             code: "SCENARIO_INVALID",
             message: compiled.diagnostics.map((d) => `${d.code}: ${d.message}`).join("; "),
             details: compiled.diagnostics,
-            fidelity: "simulation",
-          },
+            fidelity: "simulation"
+          }
         };
       if (harness.kind !== "unit-sim" && !harness.adapter)
         return {
@@ -1426,13 +1340,13 @@ var init_runScenario = __esm({
               kind: "capability-failure",
               harness: harness.name,
               capability: harness.kind === "e2e-real-process" ? "real-process" : "real-db",
-              hint: "declaration is not proof: an executable adapter is required",
-            },
-          ],
+              hint: "declaration is not proof: an executable adapter is required"
+            }
+          ]
         };
       if (harness.kind !== "unit-sim" && harness.adapter) {
         const unsupported = ast.faults.filter(
-          (candidate) => !harness.adapter?.supportedCutPoints?.has(`${candidate.operation}:${candidate.phase}`),
+          (candidate) => !harness.adapter?.supportedCutPoints?.has(`${candidate.operation}:${candidate.phase}`)
         );
         if (unsupported.length) {
           const error = {
@@ -1440,13 +1354,13 @@ var init_runScenario = __esm({
             code: "ADMISSION_FAILED",
             message: `real harness cannot execute requested cut point(s): ${unsupported.map((item) => `${item.operation}:${item.phase}`).join(", ")}`,
             details: { unsupported },
-            fidelity: "native",
+            fidelity: "native"
           };
           const decision = {
             kind: harness.config.policy === "skip" ? "capability-skip" : "capability-failure",
             harness: harness.name,
             capability: "durability-faults",
-            hint: error.message,
+            hint: error.message
           };
           return {
             ...base,
@@ -1454,7 +1368,7 @@ var init_runScenario = __esm({
             outputs: {},
             trace: kernel.trace.snapshot(),
             capabilityReport: [...capabilityReport, decision],
-            error,
+            error
           };
         }
       }
@@ -1470,35 +1384,38 @@ var init_runScenario = __esm({
       const ids = deterministicIds(seed);
       const recordAmbiguity = (item, id) => {
         ambiguities.push(item);
-        kernel.trace.emit({ type: "ambiguity", id, data: { outcome: item.outcome, details: item.details } });
+        kernel.trace.emit({
+          type: "ambiguity",
+          id,
+          data: { outcome: item.outcome, details: item.details }
+        });
       };
       const program = Effect4.gen(function* () {
         if (harness.adapter) {
           cleanup.register("harness", harness.name, harness.adapter.cleanup ?? (() => void 0));
           yield* Effect4.tryPromise({
             try: () => Promise.resolve(harness.adapter.admissionProbe()),
-            catch: (cause) =>
-              Object.assign(new Error(`ADMISSION_FAILED: ${harness.name} did not admit its production system`), {
-                code: "ADMISSION_FAILED",
-                cause,
-                details: { native: harness.adapter?.serializeError?.(cause) },
-              }),
+            catch: (cause) => Object.assign(new Error(`ADMISSION_FAILED: ${harness.name} did not admit its production system`), {
+              code: "ADMISSION_FAILED",
+              cause,
+              details: { native: harness.adapter?.serializeError?.(cause) }
+            })
           });
           for (const extension2 of ast.extensions) {
             const executor = harness.adapter.extensionExecutors?.[extension2.name];
             if (!executor)
               throw Object.assign(new Error(`UNREGISTERED_EXTENSION: ${extension2.name}`), {
                 code: "UNREGISTERED_EXTENSION",
-                details: { extension: extension2.name },
+                details: { extension: extension2.name }
               });
             yield* Effect4.tryPromise({
               try: () => Promise.resolve(executor(extension2.name, extension2.value)),
-              catch: (cause) => adapterFailure(harness.adapter, cause),
+              catch: (cause) => adapterFailure(harness.adapter, cause)
             });
             kernel.trace.emit({
               type: "adapter",
               id: extension2.name,
-              data: { identity: harness.adapter.identity, extension: extension2.name, executed: true },
+              data: { identity: harness.adapter.identity, extension: extension2.name, executed: true }
             });
           }
         }
@@ -1514,7 +1431,7 @@ var init_runScenario = __esm({
             promise: new Promise((resolve3) => {
               release = resolve3;
             }),
-            release,
+            release
           };
           barrierGates.set(barrierId, gate);
           return gate;
@@ -1528,12 +1445,12 @@ var init_runScenario = __esm({
             winner: "fault",
             after: "failed",
             stepId,
-            faultId: candidate.id,
+            faultId: candidate.id
           };
           kernel.trace.emit({
             type: "durability",
             id: ids.next(`${operation}:${phase}`),
-            data: { operation, phase, receipt },
+            data: { operation, phase, receipt }
           });
           throw faultError(candidate);
         };
@@ -1541,12 +1458,11 @@ var init_runScenario = __esm({
           if (harness.kind !== "unit-sim") return;
           if (!ast.faults.some((candidate) => candidate.operation === "completion-cas")) return;
           const completionKey = `${stepId}:completion`;
-          const emitReceipt = (phase, receipt) =>
-            kernel.trace.emit({
-              type: "durability",
-              id: ids.next(`completion-cas:${phase}`),
-              data: { operation: "completion-cas", phase, receipt },
-            });
+          const emitReceipt = (phase, receipt) => kernel.trace.emit({
+            type: "durability",
+            id: ids.next(`completion-cas:${phase}`),
+            data: { operation: "completion-cas", phase, receipt }
+          });
           const before = faultFor(ast.faults, "completion-cas", "before-task");
           if (before) {
             emitReceipt("before-task", {
@@ -1556,18 +1472,18 @@ var init_runScenario = __esm({
               after: "not-committed",
               stepId,
               faultId: before.id,
-              journalState: journal.state(completionKey),
+              journalState: journal.state(completionKey)
             });
             throw faultError(before);
           }
           if (!journal.journal(completionKey))
             throw Object.assign(new Error(`duplicate completion journal write ${completionKey}`), {
-              code: "JOURNAL_DUPLICATE",
+              code: "JOURNAL_DUPLICATE"
             });
           kernel.trace.emit({
             type: "durability",
             id: taskId,
-            data: { operation: "completion-journal-write", step: stepId, state: journal.state(completionKey) },
+            data: { operation: "completion-journal-write", step: stepId, state: journal.state(completionKey) }
           });
           const ackFault = faultFor(ast.faults, "completion-cas", "after-journal-before-ack");
           if (ackFault) {
@@ -1580,9 +1496,9 @@ var init_runScenario = __esm({
                 after: "journaled",
                 transition: "completion-journal-applied->ack-missing",
                 journalState: journal.state(completionKey),
-                fault: ackFault.id,
+                fault: ackFault.id
               }),
-              taskId,
+              taskId
             );
             emitReceipt("after-journal-before-ack", {
               before: "completion-journaled",
@@ -1591,7 +1507,7 @@ var init_runScenario = __esm({
               after: "journaled-unacked",
               stepId,
               faultId: ackFault.id,
-              journalState: journal.state(completionKey),
+              journalState: journal.state(completionKey)
             });
             throw faultError(ackFault);
           }
@@ -1599,7 +1515,7 @@ var init_runScenario = __esm({
           kernel.trace.emit({
             type: "durability",
             id: taskId,
-            data: { operation: "completion-ack", step: stepId, state: journal.state(completionKey) },
+            data: { operation: "completion-ack", step: stepId, state: journal.state(completionKey) }
           });
           const afterCompletion = faultFor(ast.faults, "completion-cas", "after-task");
           if (afterCompletion) {
@@ -1610,7 +1526,7 @@ var init_runScenario = __esm({
               after: "acked",
               stepId,
               faultId: afterCompletion.id,
-              journalState: journal.state(completionKey),
+              journalState: journal.state(completionKey)
             });
             throw faultError(afterCompletion);
           }
@@ -1622,10 +1538,7 @@ var init_runScenario = __esm({
           for (const barrier2 of ast.barriers) {
             const arrived = barrier2.parties.every((party) => parked.has(party));
             if (arrived && !releasedBarriers.has(barrier2.id)) {
-              const release =
-                runtimeKernel.controls.peek()?.type === "release-barrier"
-                  ? runtimeKernel.controls.takeNext("release-barrier")
-                  : void 0;
+              const release = runtimeKernel.controls.peek()?.type === "release-barrier" ? runtimeKernel.controls.takeNext("release-barrier") : void 0;
               if (release?.barrier === barrier2.id) {
                 releasedBarriers.add(barrier2.id);
                 for (const party of barrier2.parties) {
@@ -1637,27 +1550,23 @@ var init_runScenario = __esm({
                 kernel.trace.emit({
                   type: "barrier",
                   id: ids.next(barrier2.id),
-                  data: { state: "released", parties: barrier2.parties },
+                  data: { state: "released", parties: barrier2.parties }
                 });
               }
             }
           }
           if (completed.size === ast.steps.length) break;
           const ready = ast.steps.filter(
-            (s) =>
-              !completed.has(s.id) &&
-              !parked.has(s.id) &&
-              !activeTaskIds.has(s.id) &&
-              s.dependsOn.every((d) => completed.has(d)),
+            (s) => !completed.has(s.id) && !parked.has(s.id) && !activeTaskIds.has(s.id) && s.dependsOn.every((d) => completed.has(d))
           );
           if (!ready.length && !activeTaskIds.size) {
             const waiting = ast.barriers.find(
-              (barrier2) => barrier2.parties.every((party) => parked.has(party)) && !releasedBarriers.has(barrier2.id),
+              (barrier2) => barrier2.parties.every((party) => parked.has(party)) && !releasedBarriers.has(barrier2.id)
             );
             if (waiting)
               throw Object.assign(new Error(`barrier ${waiting.id} timed out waiting for release`), {
                 code: "BARRIER_TIMEOUT",
-                details: { barrier: waiting.id, budget: waiting.budget },
+                details: { barrier: waiting.id, budget: waiting.budget }
               });
             throw Object.assign(new Error("no runnable steps remain"), { code: "SCENARIO_DEPENDENCY_UNSATISFIED" });
           }
@@ -1665,7 +1574,7 @@ var init_runScenario = __esm({
             const winner2 = yield* runtimeKernel.executor.runReadySet([]);
             activeTaskIds.delete(winner2.stepId);
             const winnerBarrier2 = ast.barriers.find(
-              (item) => item.parties.includes(winner2.stepId) && !releasedBarriers.has(item.id),
+              (item) => item.parties.includes(winner2.stepId) && !releasedBarriers.has(item.id)
             );
             if (winnerBarrier2) {
               parkedValues.set(winner2.stepId, winner2.value);
@@ -1673,7 +1582,7 @@ var init_runScenario = __esm({
               kernel.trace.emit({
                 type: "barrier",
                 id: ids.next(winnerBarrier2.id),
-                data: { state: "parked", step: winner2.stepId, released: false },
+                data: { state: "parked", step: winner2.stepId, released: false }
               });
             } else {
               completed.add(winner2.stepId);
@@ -1687,7 +1596,7 @@ var init_runScenario = __esm({
             const pin = runtimeKernel.controls.takeApplicablePin(remaining.map((s) => s.id));
             const chosen = runtimeKernel.scheduler.choose(
               remaining,
-              pin ? remaining.findIndex((s) => s.id === pin.choice) : void 0,
+              pin ? remaining.findIndex((s) => s.id === pin.choice) : void 0
             );
             ordered.push(chosen);
             remaining.splice(remaining.indexOf(chosen), 1);
@@ -1699,13 +1608,13 @@ var init_runScenario = __esm({
                 step: chosen.id,
                 ready: ready.map((s) => s.id),
                 choice: chosen.id,
-                controlIndex: Math.max(0, runtimeKernel.controls.consumed() - 1),
-              },
+                controlIndex: Math.max(0, runtimeKernel.controls.consumed() - 1)
+              }
             });
           }
           const executableOrdered = ordered;
-          const tasks = executableOrdered.map((selected) =>
-            Effect4.gen(function* () {
+          const tasks = executableOrdered.map(
+            (selected) => Effect4.gen(function* () {
               const id = ids.next(selected.id);
               kernel.trace.emit({ type: "task", id, data: { state: "started", step: selected.id } });
               const owner = `sim:${seed}`;
@@ -1716,18 +1625,12 @@ var init_runScenario = __esm({
                 effect: (name, operation, effectOptions) => {
                   const effectId = `${selected.id}:${name}`;
                   const idempotencyKey = effectOptions?.idempotencyKey;
-                  const control =
-                    runtimeKernel.controls.takeResolve(effectId) ?? runtimeKernel.controls.takeResolve(name);
+                  const control = runtimeKernel.controls.takeResolve(effectId) ?? runtimeKernel.controls.takeResolve(name);
                   if (control?.outcome === "succeed") {
                     kernel.trace.emit({
                       type: "effect",
                       id,
-                      data: {
-                        name,
-                        state: "resolved",
-                        controlled: true,
-                        ...(idempotencyKey ? { idempotencyKey } : {}),
-                      },
+                      data: { name, state: "resolved", controlled: true, ...idempotencyKey ? { idempotencyKey } : {} }
                     });
                     return Promise.resolve(control.value);
                   }
@@ -1735,8 +1638,8 @@ var init_runScenario = __esm({
                     return Promise.reject(
                       Object.assign(new Error(`effect ${name} failed by control`), {
                         code: "CONTROLLED_EFFECT_FAILURE",
-                        details: control,
-                      }),
+                        details: control
+                      })
                     );
                   if (control?.outcome === "hang") {
                     const pending = new Promise(() => void 0);
@@ -1750,32 +1653,27 @@ var init_runScenario = __esm({
                     cleanup.track({ kind: "mediated-effect", id: effectId }, pending);
                     return pending;
                   };
-                  const run =
-                    control?.outcome === "duplicate"
-                      ? invoke2()
-                          .then(() => invoke2())
-                          .then((value2) => {
-                            recordAmbiguity(
-                              ambiguity("duplicate-delivery", {
-                                step: selected.id,
-                                effect: effectId,
-                                before: journal.state(effectId),
-                                attempted: "redelivery",
-                                winner: "duplicate-delivery",
-                                after: journal.state(effectId),
-                                transition: "effect-resolved->redelivered",
-                                journalState: journal.state(effectId),
-                              }),
-                              id,
-                            );
-                            return value2;
-                          })
-                      : invoke2();
+                  const run = control?.outcome === "duplicate" ? invoke2().then(() => invoke2()).then((value2) => {
+                    recordAmbiguity(
+                      ambiguity("duplicate-delivery", {
+                        step: selected.id,
+                        effect: effectId,
+                        before: journal.state(effectId),
+                        attempted: "redelivery",
+                        winner: "duplicate-delivery",
+                        after: journal.state(effectId),
+                        transition: "effect-resolved->redelivered",
+                        journalState: journal.state(effectId)
+                      }),
+                      id
+                    );
+                    return value2;
+                  }) : invoke2();
                   return run.then((value2) => {
                     kernel.trace.emit({
                       type: "effect",
                       id,
-                      data: { name, state: "requested", ...(idempotencyKey ? { idempotencyKey } : {}) },
+                      data: { name, state: "requested", ...idempotencyKey ? { idempotencyKey } : {} }
                     });
                     const duringEffect = faultFor(ast.faults, "effect", "during-task");
                     if (duringEffect) throw faultError(duringEffect);
@@ -1784,13 +1682,9 @@ var init_runScenario = __esm({
                     kernel.trace.emit({
                       type: "durability",
                       id,
-                      data: { operation: "effect-applied", effect: effectId, state: journal.state(effectId) },
+                      data: { operation: "effect-applied", effect: effectId, state: journal.state(effectId) }
                     });
-                    const effectFault =
-                      (controlledFault?.operation === "effect" &&
-                      controlledFault.phase === "after-effect-before-journal"
-                        ? controlledFault
-                        : void 0) ?? faultFor(ast.faults, "effect", "after-effect-before-journal");
+                    const effectFault = (controlledFault?.operation === "effect" && controlledFault.phase === "after-effect-before-journal" ? controlledFault : void 0) ?? faultFor(ast.faults, "effect", "after-effect-before-journal");
                     if (effectFault) {
                       recordAmbiguity(
                         ambiguity("effect-applied-journal-missing", {
@@ -1801,29 +1695,21 @@ var init_runScenario = __esm({
                           winner: "external-effect",
                           after: "effect-applied",
                           transition: "effect-applied->journal-missing",
-                          fault: effectFault.id,
+                          fault: effectFault.id
                         }),
-                        id,
+                        id
                       );
                       throw faultError(effectFault);
                     }
                     applyCutPoint("attempt-write", "before-task", selected.id);
                     if (!journal.journal(effectId))
-                      throw Object.assign(new Error(`duplicate journal write ${effectId}`), {
-                        code: "JOURNAL_DUPLICATE",
-                      });
+                      throw Object.assign(new Error(`duplicate journal write ${effectId}`), { code: "JOURNAL_DUPLICATE" });
                     kernel.trace.emit({
                       type: "durability",
                       id,
-                      data: { operation: "journal-write", effect: effectId, state: journal.state(effectId) },
+                      data: { operation: "journal-write", effect: effectId, state: journal.state(effectId) }
                     });
-                    const ackFault =
-                      ((controlledFault?.operation === "effect" || controlledFault?.operation === "attempt-write") &&
-                      controlledFault.phase === "after-journal-before-ack"
-                        ? controlledFault
-                        : void 0) ??
-                      faultFor(ast.faults, "effect", "after-journal-before-ack") ??
-                      faultFor(ast.faults, "attempt-write", "after-journal-before-ack");
+                    const ackFault = ((controlledFault?.operation === "effect" || controlledFault?.operation === "attempt-write") && controlledFault.phase === "after-journal-before-ack" ? controlledFault : void 0) ?? faultFor(ast.faults, "effect", "after-journal-before-ack") ?? faultFor(ast.faults, "attempt-write", "after-journal-before-ack");
                     if (ackFault) {
                       recordAmbiguity(
                         ambiguity("journal-applied-ack-missing", {
@@ -1834,9 +1720,9 @@ var init_runScenario = __esm({
                           winner: "journal-write",
                           after: "journaled",
                           transition: "journal-applied->ack-missing",
-                          fault: ackFault.id,
+                          fault: ackFault.id
                         }),
-                        id,
+                        id
                       );
                       throw faultError(ackFault);
                     }
@@ -1844,103 +1730,92 @@ var init_runScenario = __esm({
                     kernel.trace.emit({
                       type: "durability",
                       id,
-                      data: { operation: "ack", effect: effectId, state: journal.state(effectId) },
+                      data: { operation: "ack", effect: effectId, state: journal.state(effectId) }
                     });
-                    const afterAck =
-                      (controlledFault?.operation === "effect" && controlledFault.phase === "after-ack"
-                        ? controlledFault
-                        : void 0) ?? faultFor(ast.faults, "effect", "after-ack");
+                    const afterAck = (controlledFault?.operation === "effect" && controlledFault.phase === "after-ack" ? controlledFault : void 0) ?? faultFor(ast.faults, "effect", "after-ack");
                     if (afterAck) throw faultError(afterAck);
                     kernel.trace.emit({
                       type: "effect",
                       id,
-                      data: { name, state: "resolved", ...(idempotencyKey ? { idempotencyKey } : {}) },
+                      data: { name, state: "resolved", ...idempotencyKey ? { idempotencyKey } : {} }
                     });
                     return value2;
                   });
                 },
-                sleep: (ms) =>
-                  new Promise((resolve3, reject) => {
-                    const wakeup = `${selected.id}:timer:${ms}`;
-                    let settled = false;
-                    const finish = (action) => {
-                      if (!settled) {
-                        settled = true;
-                        action();
-                      }
-                    };
-                    journal.registerWakeup(wakeup);
-                    const eventBefore = faultFor(ast.faults, "event-append", "before-task");
-                    if (eventBefore) return reject(faultError(eventBefore));
-                    const lostFault =
-                      faultFor(ast.faults, "event-append", "during-task") ??
-                      faultFor(ast.faults, "event-append", "after-task");
-                    const timer = kernel.clock.sleep(ms, () => {
-                      const timerId = String(timer);
-                      const suppliedFire = runtimeKernel.controls.takeTimerFire(timerId);
-                      const wrongFire = runtimeKernel.controls.peek()?.type === "timer-fire" && !suppliedFire;
-                      if (wrongFire) {
-                        finish(() =>
-                          reject(
-                            Object.assign(
-                              new Error(`CONTROL_OUT_OF_ORDER: timer ${timerId} was not the supplied timer target`),
-                              {
-                                code: "CONTROL_OUT_OF_ORDER",
-                                details: { expectedTimer: timerId, supplied: runtimeKernel.controls.peek() },
-                              },
-                            ),
-                          ),
-                        );
-                        return;
-                      }
-                      if (lostFault) {
-                        journal.loseWakeup(wakeup);
-                        recordAmbiguity(
-                          ambiguity("lost-wakeup", {
-                            step: selected.id,
-                            wakeup,
-                            before: "registered",
-                            attempted: "wakeup",
-                            winner: "event-loss",
-                            after: "lost",
-                            transition: "registered->lost",
-                            journalState: journal.wakeupState(wakeup),
-                          }),
-                          id,
-                        );
-                        finish(() =>
-                          reject(
-                            lostFault.phase === "during-task"
-                              ? faultError(lostFault)
-                              : Object.assign(new Error("lost wakeup"), { code: "LOST_WAKEUP" }),
-                          ),
-                        );
-                        return;
-                      }
-                      journal.deliverWakeup(wakeup);
-                      if (!suppliedFire) runtimeKernel.controls.append({ type: "timer-fire", timer: timerId });
-                      kernel.trace.emit({ type: "wait", id, data: { state: "timer-fired", ms, timer: timerId } });
-                      finish(resolve3);
-                    });
-                    cleanup.register("virtual-timer", String(timer), () => {
-                      kernel.clock.cancel(timer);
-                      finish(() =>
-                        reject(
-                          Object.assign(new Error("task interrupted while sleeping"), { code: "TASK_INTERRUPTED" }),
-                        ),
+                sleep: (ms) => new Promise((resolve3, reject) => {
+                  const wakeup = `${selected.id}:timer:${ms}`;
+                  let settled = false;
+                  const finish = (action) => {
+                    if (!settled) {
+                      settled = true;
+                      action();
+                    }
+                  };
+                  journal.registerWakeup(wakeup);
+                  const eventBefore = faultFor(ast.faults, "event-append", "before-task");
+                  if (eventBefore) return reject(faultError(eventBefore));
+                  const lostFault = faultFor(ast.faults, "event-append", "during-task") ?? faultFor(ast.faults, "event-append", "after-task");
+                  const timer = kernel.clock.sleep(ms, () => {
+                    const timerId = String(timer);
+                    const suppliedFire = runtimeKernel.controls.takeTimerFire(timerId);
+                    const wrongFire = runtimeKernel.controls.peek()?.type === "timer-fire" && !suppliedFire;
+                    if (wrongFire) {
+                      finish(
+                        () => reject(
+                          Object.assign(
+                            new Error(`CONTROL_OUT_OF_ORDER: timer ${timerId} was not the supplied timer target`),
+                            {
+                              code: "CONTROL_OUT_OF_ORDER",
+                              details: { expectedTimer: timerId, supplied: runtimeKernel.controls.peek() }
+                            }
+                          )
+                        )
                       );
-                    });
-                  }),
-                log: (message, data) =>
-                  kernel.trace.emit({
-                    type: "task",
-                    id,
-                    data: { state: "log", message, ...(data === void 0 ? {} : { data }) },
-                  }),
+                      return;
+                    }
+                    if (lostFault) {
+                      journal.loseWakeup(wakeup);
+                      recordAmbiguity(
+                        ambiguity("lost-wakeup", {
+                          step: selected.id,
+                          wakeup,
+                          before: "registered",
+                          attempted: "wakeup",
+                          winner: "event-loss",
+                          after: "lost",
+                          transition: "registered->lost",
+                          journalState: journal.wakeupState(wakeup)
+                        }),
+                        id
+                      );
+                      finish(
+                        () => reject(
+                          lostFault.phase === "during-task" ? faultError(lostFault) : Object.assign(new Error("lost wakeup"), { code: "LOST_WAKEUP" })
+                        )
+                      );
+                      return;
+                    }
+                    journal.deliverWakeup(wakeup);
+                    if (!suppliedFire) runtimeKernel.controls.append({ type: "timer-fire", timer: timerId });
+                    kernel.trace.emit({ type: "wait", id, data: { state: "timer-fired", ms, timer: timerId } });
+                    finish(resolve3);
+                  });
+                  cleanup.register("virtual-timer", String(timer), () => {
+                    kernel.clock.cancel(timer);
+                    finish(
+                      () => reject(Object.assign(new Error("task interrupted while sleeping"), { code: "TASK_INTERRUPTED" }))
+                    );
+                  });
+                }),
+                log: (message, data) => kernel.trace.emit({
+                  type: "task",
+                  id,
+                  data: { state: "log", message, ...data === void 0 ? {} : { data } }
+                }),
                 opaque: (name, operation) => {
                   kernel.trace.emit({ type: "opaque-effect", id, data: { name, controllable: false } });
                   return Promise.resolve().then(operation);
-                },
+                }
               };
               let productionValue;
               if (runtimeKernel.controls.peek()?.type === "inject-fault") {
@@ -1948,26 +1823,22 @@ var init_runScenario = __esm({
                 controlledFault = ast.faults.find((candidate) => candidate.id === control.fault);
                 kernel.trace.emit({ type: "fault", id: control.fault, data: control.payload });
               }
-              const extensionExecutor = selected.extension
-                ? harness.adapter?.extensionExecutors?.[selected.extension]
-                : void 0;
+              const extensionExecutor = selected.extension ? harness.adapter?.extensionExecutors?.[selected.extension] : void 0;
               if (selected.extension && !extensionExecutor)
                 throw Object.assign(new Error(`UNREGISTERED_STEP_EXTENSION: ${selected.extension}`), {
                   code: "UNREGISTERED_STEP_EXTENSION",
-                  details: { step: selected.id, extension: selected.extension },
+                  details: { step: selected.id, extension: selected.extension }
                 });
               if (selected.extension && extensionExecutor)
                 yield* Effect4.tryPromise({
                   try: () => Promise.resolve(extensionExecutor(selected.id, selected.input)),
-                  catch: (e) => adapterFailure(harness.adapter, e),
+                  catch: (e) => adapterFailure(harness.adapter, e)
                 });
               const runner = options.stepRunners?.[selected.id] ?? stepRunner(selected);
-              const barrierBeforeFault =
-                faultFor(ast.faults, "task", "before-task") ??
-                (harness.kind === "unit-sim" && runner ? faultFor(ast.faults, "resume", "before-task") : void 0);
+              const barrierBeforeFault = faultFor(ast.faults, "task", "before-task") ?? (harness.kind === "unit-sim" && runner ? faultFor(ast.faults, "resume", "before-task") : void 0);
               if (barrierBeforeFault) throw faultError(barrierBeforeFault);
               const preCallbackBarrier = ast.barriers.find(
-                (item) => item.parties.includes(selected.id) && !releasedBarriers.has(item.id),
+                (item) => item.parties.includes(selected.id) && !releasedBarriers.has(item.id)
               );
               const nextControl = runtimeKernel.controls.peek();
               if (preCallbackBarrier) {
@@ -1976,7 +1847,7 @@ var init_runScenario = __esm({
                 kernel.trace.emit({
                   type: "barrier",
                   id: ids.next(preCallbackBarrier.id),
-                  data: { state: "parked", step: selected.id, released: false, beforeCallback: true },
+                  data: { state: "parked", step: selected.id, released: false, beforeCallback: true }
                 });
                 const releaseControl = runtimeKernel.controls.peek();
                 if (preCallbackBarrier.parties.every((party) => gate.arrived.has(party))) {
@@ -1986,13 +1857,13 @@ var init_runScenario = __esm({
                     kernel.trace.emit({
                       type: "barrier",
                       id: ids.next(preCallbackBarrier.id),
-                      data: { state: "released", parties: preCallbackBarrier.parties },
+                      data: { state: "released", parties: preCallbackBarrier.parties }
                     });
                     gate.release();
                   } else {
                     throw Object.assign(new Error(`barrier ${preCallbackBarrier.id} timed out waiting for release`), {
                       code: "BARRIER_TIMEOUT",
-                      details: { barrier: preCallbackBarrier.id, budget: preCallbackBarrier.budget },
+                      details: { barrier: preCallbackBarrier.id, budget: preCallbackBarrier.budget }
                     });
                   }
                 }
@@ -2000,62 +1871,46 @@ var init_runScenario = __esm({
               }
               const injectFault = harness.adapter?.injectFault;
               const duringFault = ast.faults.find(
-                (candidate) =>
-                  candidate.phase === "during-task" &&
-                  (candidate.operation === "task" ||
-                    candidate.operation === "resume" ||
-                    candidate.operation === "lease" ||
-                    candidate.operation === "heartbeat" ||
-                    candidate.operation === "cancellation"),
+                (candidate) => candidate.phase === "during-task" && (candidate.operation === "task" || candidate.operation === "resume" || candidate.operation === "lease" || candidate.operation === "heartbeat" || candidate.operation === "cancellation")
               );
               if (harness.adapter?.runStep && harness.kind !== "unit-sim") {
                 const productionOperation = harness.kind === "e2e-real-process" ? "runWorkflow" : selected.id;
                 const canonicalOperation = productionOperation.replace(/#\d+$/, "");
-                const mappedOperation =
-                  harness.kind === "integration-real-db"
-                    ? dbOperationKind(productionOperation)
-                    : harness.kind === "e2e-real-process"
-                      ? processOperationKind(productionOperation)
-                      : void 0;
-                const fireAtTransition = (candidate, invoked, observedResult) =>
-                  Effect4.gen(function* () {
-                    if (controlledFault?.id === candidate.id) controlledFaultObserved = true;
-                    const observation = injectFault
-                      ? yield* Effect4.tryPromise({
-                          try: () =>
-                            Promise.resolve(
-                              injectFault(candidate, {
-                                operation: mappedOperation,
-                                phase: candidate.phase,
-                                stepId: selected.id,
-                                input: selected.input,
-                                invoked,
-                                result: observedResult,
-                              }),
-                            ),
-                          catch: (e) => adapterFailure(harness.adapter, e),
-                        })
-                      : void 0;
-                    kernel.trace.emit({
-                      type: "durability",
-                      id: ids.next(`${candidate.operation}:${candidate.phase}`),
-                      data: {
-                        operation: candidate.operation,
+                const mappedOperation = harness.kind === "integration-real-db" ? dbOperationKind(productionOperation) : harness.kind === "e2e-real-process" ? processOperationKind(productionOperation) : void 0;
+                const fireAtTransition = (candidate, invoked, observedResult) => Effect4.gen(function* () {
+                  if (controlledFault?.id === candidate.id) controlledFaultObserved = true;
+                  const observation = injectFault ? yield* Effect4.tryPromise({
+                    try: () => Promise.resolve(
+                      injectFault(candidate, {
+                        operation: mappedOperation,
                         phase: candidate.phase,
-                        receipt: {
-                          stepId: selected.id,
-                          faultId: candidate.id,
-                          productionOperation: canonicalOperation,
-                          invoked,
-                          adapter: harness.adapter.identity,
-                          observation,
-                        },
-                      },
-                    });
-                    return observation;
+                        stepId: selected.id,
+                        input: selected.input,
+                        invoked,
+                        result: observedResult
+                      })
+                    ),
+                    catch: (e) => adapterFailure(harness.adapter, e)
+                  }) : void 0;
+                  kernel.trace.emit({
+                    type: "durability",
+                    id: ids.next(`${candidate.operation}:${candidate.phase}`),
+                    data: {
+                      operation: candidate.operation,
+                      phase: candidate.phase,
+                      receipt: {
+                        stepId: selected.id,
+                        faultId: candidate.id,
+                        productionOperation: canonicalOperation,
+                        invoked,
+                        adapter: harness.adapter.identity,
+                        observation
+                      }
+                    }
                   });
-                const transitionFault = (phase) =>
-                  mappedOperation ? faultFor(ast.faults, mappedOperation, phase) : void 0;
+                  return observation;
+                });
+                const transitionFault = (phase) => mappedOperation ? faultFor(ast.faults, mappedOperation, phase) : void 0;
                 const beforeTransition = transitionFault("before-task");
                 if (beforeTransition) {
                   yield* fireAtTransition(beforeTransition, false, void 0);
@@ -2063,12 +1918,12 @@ var init_runScenario = __esm({
                 }
                 productionValue = yield* Effect4.tryPromise({
                   try: () => Promise.resolve(harness.adapter.runStep(productionOperation, selected.input)),
-                  catch: (e) => adapterFailure(harness.adapter, e),
+                  catch: (e) => adapterFailure(harness.adapter, e)
                 });
                 kernel.trace.emit({
                   type: "adapter",
                   id,
-                  data: { identity: harness.adapter.identity, step: selected.id, executed: true },
+                  data: { identity: harness.adapter.identity, step: selected.id, executed: true }
                 });
                 if (canonicalOperation === "claimAttemptCompletion" && productionValue === false) {
                   const input = selected.input;
@@ -2080,9 +1935,9 @@ var init_runScenario = __esm({
                       winner: "existing-owner-or-prior-completion",
                       after: "unchanged",
                       observed: false,
-                      transition: "completion-cas-rejected",
+                      transition: "completion-cas-rejected"
                     }),
-                    id,
+                    id
                   );
                 }
                 const duringTransitionFault = transitionFault("during-task");
@@ -2098,9 +1953,9 @@ var init_runScenario = __esm({
                         source: "real-process-observation",
                         terminatedBy: observation.terminatedBy,
                         resumedStatus: observation.resumedStatus,
-                        resumedOutputPersisted: observation.resumedOutputPersisted === true,
+                        resumedOutputPersisted: observation.resumedOutputPersisted === true
                       }),
-                      id,
+                      id
                     );
                     if (observation.preKillEffectApplied && !observation.journalWritten)
                       recordAmbiguity(
@@ -2110,18 +1965,14 @@ var init_runScenario = __esm({
                           preKillEffectApplied: true,
                           journalWritten: false,
                           outputPersisted: observation.outputPersisted,
-                          resumedOutputPersisted: observation.resumedOutputPersisted === true,
+                          resumedOutputPersisted: observation.resumedOutputPersisted === true
                         }),
-                        id,
+                        id
                       );
                   } else {
                     const transitionReceipt = rawReceipt;
                     const takeover = transitionReceipt?.observed?.leaseTakeover;
-                    if (
-                      mappedOperation === "heartbeat" &&
-                      takeover?.executed === true &&
-                      takeover.oldOwnerHeartbeatRejected === true
-                    ) {
+                    if (mappedOperation === "heartbeat" && takeover?.executed === true && takeover.oldOwnerHeartbeatRejected === true) {
                       recordAmbiguity(
                         ambiguity("lease-lost", {
                           step: selected.id,
@@ -2133,18 +1984,13 @@ var init_runScenario = __esm({
                           transition: "owned->fenced",
                           previousOwner: takeover.previousOwner ?? null,
                           fencingOwner: takeover.fencingOwner ?? null,
-                          observed: takeover.after,
+                          observed: takeover.after
                         }),
-                        id,
+                        id
                       );
                     }
                     const race = transitionReceipt?.observed?.cancellationRace;
-                    if (
-                      mappedOperation === "cancellation" &&
-                      race?.executed === true &&
-                      race.cancelRequested === true &&
-                      race.completionRejected === true
-                    ) {
+                    if (mappedOperation === "cancellation" && race?.executed === true && race.cancelRequested === true && race.completionRejected === true) {
                       recordAmbiguity(
                         ambiguity("cancellation-race", {
                           step: selected.id,
@@ -2152,9 +1998,9 @@ var init_runScenario = __esm({
                           attempted: "completion-cas",
                           winner: "cancellation",
                           transition: "cancel-requested->completion-fenced",
-                          observed: race.after,
+                          observed: race.after
                         }),
-                        id,
+                        id
                       );
                     }
                     throw faultError(duringTransitionFault);
@@ -2174,9 +2020,9 @@ var init_runScenario = __esm({
                       observed: productionValue === true,
                       durable: ackReceipt?.observed ?? null,
                       transition: "journal-applied->ack-missing",
-                      fault: ackTransitionFault.id,
+                      fault: ackTransitionFault.id
                     }),
-                    id,
+                    id
                   );
                   throw faultError(ackTransitionFault);
                 }
@@ -2192,9 +2038,9 @@ var init_runScenario = __esm({
                   ambiguity("cancellation-race", {
                     step: selected.id,
                     reason: cancel.reason ?? "cancelled",
-                    transition: "task-started->cancelled",
+                    transition: "task-started->cancelled"
                   }),
-                  id,
+                  id
                 );
                 throw Object.assign(new Error(cancel.reason ?? "scenario cancelled"), { code: "SCENARIO_CANCELLED" });
               }
@@ -2205,7 +2051,7 @@ var init_runScenario = __esm({
                 kernel.trace.emit({
                   type: "opaque-effect",
                   id,
-                  data: { name: `step:${selected.id}`, controllable: false },
+                  data: { name: `step:${selected.id}`, controllable: false }
                 });
               let value;
               const runTask2 = () => {
@@ -2234,17 +2080,13 @@ var init_runScenario = __esm({
                       ambiguity("restart-in-task", {
                         step: selected.id,
                         transition: "running->killed->restarted",
-                        winner: "resume",
+                        winner: "resume"
                       }),
-                      id,
+                      id
                     );
                     value = yield* Effect4.tryPromise({ try: () => runTask2(), catch: (e) => e });
                   } else {
-                    if (
-                      duringFault.operation === "lease" ||
-                      duringFault.operation === "heartbeat" ||
-                      duringFault.operation === "cancellation"
-                    )
+                    if (duringFault.operation === "lease" || duringFault.operation === "heartbeat" || duringFault.operation === "cancellation")
                       journal.loseLease(selected.id);
                     if (duringFault.operation === "cancellation")
                       recordAmbiguity(
@@ -2254,9 +2096,9 @@ var init_runScenario = __esm({
                           attempted: "cancellation",
                           winner: "cancellation",
                           before: "owned",
-                          after: "cancelled",
+                          after: "cancelled"
                         }),
-                        id,
+                        id
                       );
                     if (duringFault.operation === "lease" || duringFault.operation === "heartbeat")
                       recordAmbiguity(
@@ -2266,9 +2108,9 @@ var init_runScenario = __esm({
                           attempted: "lease-takeover",
                           winner: "lease-takeover",
                           before: "owned",
-                          after: "fenced",
+                          after: "fenced"
                         }),
-                        id,
+                        id
                       );
                     throw faultError(duringFault);
                   }
@@ -2281,9 +2123,9 @@ var init_runScenario = __esm({
                   ambiguity("cancellation-race", {
                     step: selected.id,
                     reason: cancel.reason ?? "cancelled",
-                    transition: "task-completed->cancelled",
+                    transition: "task-completed->cancelled"
                   }),
-                  id,
+                  id
                 );
                 throw Object.assign(new Error(cancel.reason ?? "scenario cancelled"), { code: "SCENARIO_CANCELLED" });
               }
@@ -2297,9 +2139,9 @@ var init_runScenario = __esm({
                     attempted: "resume",
                     winner: "resume",
                     after: "running",
-                    transition: "task-completed->restarted",
+                    transition: "task-completed->restarted"
                   }),
-                  id,
+                  id
                 );
                 if (runner) value = yield* Effect4.tryPromise({ try: () => runTask2(), catch: (e) => e });
               }
@@ -2311,27 +2153,27 @@ var init_runScenario = __esm({
               if (controlledFault && !controlledFaultObserved) {
                 throw Object.assign(
                   new Error(
-                    `CONTROL_UNCONSUMED: inject-fault ${controlledFault.id} armed ${controlledFault.operation}:${controlledFault.phase} but the operation never transitioned`,
+                    `CONTROL_UNCONSUMED: inject-fault ${controlledFault.id} armed ${controlledFault.operation}:${controlledFault.phase} but the operation never transitioned`
                   ),
                   {
                     code: "CONTROL_UNCONSUMED",
                     details: {
                       fault: controlledFault.id,
                       operation: controlledFault.operation,
-                      phase: controlledFault.phase,
-                    },
-                  },
+                      phase: controlledFault.phase
+                    }
+                  }
                 );
               }
               const finalValue = harness.kind === "unit-sim" ? value : productionValue;
               const rendezvous = ast.barriers.find(
-                (item) => item.parties.includes(selected.id) && !releasedBarriers.has(item.id),
+                (item) => item.parties.includes(selected.id) && !releasedBarriers.has(item.id)
               );
               if (rendezvous) {
                 kernel.trace.emit({
                   type: "barrier",
                   id: ids.next(rendezvous.id),
-                  data: { state: "parked", step: selected.id, released: false, beforeCompletion: true },
+                  data: { state: "parked", step: selected.id, released: false, beforeCompletion: true }
                 });
               } else {
                 kernel.trace.emit({
@@ -2340,20 +2182,20 @@ var init_runScenario = __esm({
                   data: {
                     state: "finished",
                     step: selected.id,
-                    resultDigest: canonicalize(finalValue === void 0 ? null : finalValue),
-                  },
+                    resultDigest: canonicalize(finalValue === void 0 ? null : finalValue)
+                  }
                 });
               }
               return finalValue;
-            }),
+            })
           );
           for (const selected of executableOrdered) activeTaskIds.add(selected.id);
           const winner = yield* runtimeKernel.executor.runReadySet(
-            tasks.map((effect, index) => ({ stepId: executableOrdered[index].id, effect })),
+            tasks.map((effect, index) => ({ stepId: executableOrdered[index].id, effect }))
           );
           activeTaskIds.delete(winner.stepId);
           const winnerBarrier = ast.barriers.find(
-            (item) => item.parties.includes(winner.stepId) && !releasedBarriers.has(item.id),
+            (item) => item.parties.includes(winner.stepId) && !releasedBarriers.has(item.id)
           );
           if (winnerBarrier) {
             parkedValues.set(winner.stepId, winner.value);
@@ -2361,7 +2203,7 @@ var init_runScenario = __esm({
             kernel.trace.emit({
               type: "barrier",
               id: ids.next(winnerBarrier.id),
-              data: { state: "parked", step: winner.stepId, released: false },
+              data: { state: "parked", step: winner.stepId, released: false }
             });
           } else {
             outputs[winner.stepId] = winner.value;
@@ -2370,15 +2212,12 @@ var init_runScenario = __esm({
         }
         for (const item of ast.barriers) {
           const pendingRelease = kernel.controls.peek();
-          const release =
-            pendingRelease?.type === "release-barrier" && pendingRelease.barrier === item.id
-              ? kernel.controls.takeNext("release-barrier")
-              : void 0;
+          const release = pendingRelease?.type === "release-barrier" && pendingRelease.barrier === item.id ? kernel.controls.takeNext("release-barrier") : void 0;
           const released = release?.barrier === item.id || releasedBarriers.has(item.id);
           if (!released)
             throw Object.assign(new Error(`barrier ${item.id} timed out waiting for release`), {
               code: "BARRIER_TIMEOUT",
-              details: { barrier: item.id, budget: item.budget },
+              details: { barrier: item.id, budget: item.budget }
             });
           kernel.trace.emit({ type: "barrier", id: item.id, data: { state: "released", parties: item.parties } });
         }
@@ -2386,7 +2225,7 @@ var init_runScenario = __esm({
         if (leftover.length)
           throw Object.assign(new Error(`CONTROL_UNCONSUMED: ${leftover.map((control) => control.type).join(", ")}`), {
             code: "CONTROL_UNCONSUMED",
-            details: { controls: leftover },
+            details: { controls: leftover }
           });
         return outputs;
       });
@@ -2402,15 +2241,14 @@ var init_runScenario = __esm({
               execution.promise,
               new Promise((_, reject) => {
                 deadlineTimer = setTimeout(
-                  () =>
-                    reject(
-                      Object.assign(new Error("BOUNDED_WAIT_EXHAUSTED: real harness did not settle"), {
-                        code: "BOUNDED_WAIT_EXHAUSTED",
-                      }),
-                    ),
-                  Math.max(1, options.waitBudget ?? 1e4),
+                  () => reject(
+                    Object.assign(new Error("BOUNDED_WAIT_EXHAUSTED: real harness did not settle"), {
+                      code: "BOUNDED_WAIT_EXHAUSTED"
+                    })
+                  ),
+                  Math.max(1, options.waitBudget ?? 1e4)
                 );
-              }),
+              })
             ]);
           } finally {
             if (deadlineTimer !== void 0) clearTimeout(deadlineTimer);
@@ -2420,7 +2258,11 @@ var init_runScenario = __esm({
         await execution.interrupt();
         result = {
           ok: false,
-          error: { name: "BoundedWaitError", code: cause.code ?? "BOUNDED_WAIT_EXHAUSTED", message: String(cause) },
+          error: {
+            name: "BoundedWaitError",
+            code: cause.code ?? "BOUNDED_WAIT_EXHAUSTED",
+            message: String(cause)
+          }
         };
       }
       let cleanupFailure;
@@ -2432,7 +2274,7 @@ var init_runScenario = __esm({
       try {
         assertNoLeaks(
           cleanup,
-          kernel.clock.pending().map((timer) => ({ kind: "virtual-timer", id: String(timer.id) })),
+          kernel.clock.pending().map((timer) => ({ kind: "virtual-timer", id: String(timer.id) }))
         );
       } catch (cause) {
         cleanupFailure ??= cause;
@@ -2447,12 +2289,11 @@ var init_runScenario = __esm({
             code: cleanupCode,
             message: String(cleanupFailure.message),
             cause: primary,
-            details: { primary, cleanup: cleanupFailure },
-          },
+            details: { primary, cleanup: cleanupFailure }
+          }
         };
       }
-      if (kernel.trace.snapshot().some((event) => event.type === "opaque-effect"))
-        residues.add("unmediated-opaque-effect");
+      if (kernel.trace.snapshot().some((event) => event.type === "opaque-effect")) residues.add("unmediated-opaque-effect");
       const finalControlLog = kernel.controls.log();
       const identityControls = kernel.controls.pendingControls().length ? replayControls : finalControlLog;
       const finalBase = {
@@ -2460,7 +2301,7 @@ var init_runScenario = __esm({
         controlLog: finalControlLog,
         replayIdentity: replayIdentity({ ast, seed, controlLog: identityControls }),
         ambiguity: ambiguities,
-        determinismReport: { deterministic: residues.size === 0, residues: [...residues] },
+        determinismReport: { deterministic: residues.size === 0, residues: [...residues] }
       };
       if (!result.ok && result.error.code === "ADMISSION_FAILED") {
         const kind = harness.kind === "e2e-real-process" ? "real-process" : "real-db";
@@ -2476,17 +2317,15 @@ var init_runScenario = __esm({
               kind: skippedAdmission ? "capability-skip" : "capability-failure",
               harness: harness.name,
               capability: kind,
-              hint: result.error.message,
-            },
+              hint: result.error.message
+            }
           ],
-          error: result.error,
+          error: result.error
         };
       }
-      return result.ok
-        ? { ...finalBase, status: "finished", outputs: result.value, trace: kernel.trace.snapshot() }
-        : { ...finalBase, status: "failed", outputs, trace: kernel.trace.snapshot(), error: result.error };
+      return result.ok ? { ...finalBase, status: "finished", outputs: result.value, trace: kernel.trace.snapshot() } : { ...finalBase, status: "failed", outputs, trace: kernel.trace.snapshot(), error: result.error };
     };
-  },
+  }
 });
 
 // src/fakeAgent.ts
@@ -2496,10 +2335,12 @@ import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } fr
 import { zodSchemaToJsonExample } from "@smithers-orchestrator/components/zod-to-example";
 var autoMarker = /* @__PURE__ */ Symbol.for("smithers.testing.auto");
 var auto = Object.freeze({
-  [autoMarker]: true,
+  [autoMarker]: true
 });
 function isAuto(value) {
-  return Boolean(value && typeof value === "object" && value[autoMarker] === true);
+  return Boolean(
+    value && typeof value === "object" && value[autoMarker] === true
+  );
 }
 function schemaExample(schema) {
   const raw = zodSchemaToJsonExample(schema);
@@ -2508,14 +2349,12 @@ function schemaExample(schema) {
 }
 function formatIssues(issues) {
   if (issues.length === 0) return "unknown validation failure";
-  return issues
-    .map((issue) => {
-      if (issue && typeof issue === "object" && "message" in issue) {
-        return String(issue.message);
-      }
-      return JSON.stringify(issue);
-    })
-    .join("; ");
+  return issues.map((issue) => {
+    if (issue && typeof issue === "object" && "message" in issue) {
+      return String(issue.message);
+    }
+    return JSON.stringify(issue);
+  }).join("; ");
 }
 function assertSchema(schema, value) {
   const result = schema.safeParse(value);
@@ -2631,7 +2470,7 @@ async function loadPosixFs() {
       openat: libc.func("int openat(int dirfd, const char *path, int flags, ...)"),
       mkdirat: libc.func("int mkdirat(int dirfd, const char *path, int mode)"),
       errno: koffi.errno,
-      errors: koffi.os.errno,
+      errors: koffi.os.errno
     };
   });
   return posixFsPromise;
@@ -2737,8 +2576,7 @@ function writeFileAt(posix, root, path, name, contents) {
       current = next;
       ownsCurrent = true;
     }
-    const flags =
-      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW | closeOnExecFlag();
+    const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW | closeOnExecFlag();
     let file;
     try {
       file = openAt(posix, current, filename, flags, 438);
@@ -2806,7 +2644,7 @@ function buildFakeAgent(schema, script, options = {}) {
         args,
         prompt: args.prompt,
         rootDir: typeof args.rootDir === "string" ? args.rootDir : void 0,
-        taskContext: args.taskContext,
+        taskContext: args.taskContext
       };
       calls.push(call);
       const raw = typeof script === "function" ? await script(args) : script;
@@ -2822,7 +2660,7 @@ function buildFakeAgent(schema, script, options = {}) {
     },
     reset() {
       calls.length = 0;
-    },
+    }
   };
   return agent;
 }
@@ -2836,11 +2674,11 @@ function buildSequenceAgent(schema, entries, options = {}) {
       }
       return entries[index++];
     },
-    options,
+    options
   );
 }
 var fakeAgent = Object.assign(buildFakeAgent, {
-  sequence: buildSequenceAgent,
+  sequence: buildSequenceAgent
 });
 
 // src/renderWorkflow.ts
@@ -2850,8 +2688,8 @@ import { canonicalizeXml } from "@smithers-orchestrator/graph/utils/xml";
 function buildRuntimeConfig(options) {
   return {
     ...options.runtimeConfig,
-    ...(options.baseRootDir !== void 0 ? { baseRootDir: options.baseRootDir } : {}),
-    ...(options.workflowPath !== void 0 ? { workflowPath: options.workflowPath } : {}),
+    ...options.baseRootDir !== void 0 ? { baseRootDir: options.baseRootDir } : {},
+    ...options.workflowPath !== void 0 ? { workflowPath: options.workflowPath } : {}
   };
 }
 function buildExtractOptions(options) {
@@ -2859,7 +2697,7 @@ function buildExtractOptions(options) {
     defaultIteration: options.iteration ?? 0,
     ralphIterations: options.iterations,
     baseRootDir: options.baseRootDir ?? options.runtimeConfig?.baseRootDir,
-    workflowPath: options.workflowPath ?? options.runtimeConfig?.workflowPath ?? null,
+    workflowPath: options.workflowPath ?? options.runtimeConfig?.workflowPath ?? null
   };
 }
 async function renderWorkflow(workflow, options = {}) {
@@ -2871,10 +2709,13 @@ async function renderWorkflow(workflow, options = {}) {
     auth: options.auth ?? null,
     outputs: options.outputs ?? {},
     zodToKeyName: workflow.zodToKeyName,
-    runtimeConfig: buildRuntimeConfig(options),
+    runtimeConfig: buildRuntimeConfig(options)
   });
   const renderer = options.renderer ?? new SmithersRenderer();
-  const graph = await renderer.render(workflow.build(ctx), buildExtractOptions(options));
+  const graph = await renderer.render(
+    workflow.build(ctx),
+    buildExtractOptions(options)
+  );
   const baseRootDir = options.baseRootDir ?? options.runtimeConfig?.baseRootDir;
   const workflowPath = options.workflowPath ?? options.runtimeConfig?.workflowPath ?? null;
   const engineHelpers = await import("@smithers-orchestrator/engine/engine");
@@ -2882,11 +2723,11 @@ async function renderWorkflow(workflow, options = {}) {
   engineHelpers.resolveTaskOutputs(graph.tasks, workflow);
   computeHelpers.attachSubflowComputeFns(graph.tasks, workflow, {
     rootDir: baseRootDir,
-    workflowPath,
+    workflowPath
   });
   computeHelpers.attachSandboxComputeFns(graph.tasks, workflow, {
     rootDir: baseRootDir,
-    workflowPath,
+    workflowPath
   });
   return {
     ...graph,
@@ -2896,7 +2737,7 @@ async function renderWorkflow(workflow, options = {}) {
     ctx,
     toXml() {
       return canonicalizeXml(graph.xml);
-    },
+    }
   };
 }
 
@@ -2914,9 +2755,7 @@ async function runTask(task, options = {}) {
     }
     return validateOutput(task, await task.computeFn());
   }
-  const agent = Array.isArray(task.agent)
-    ? task.agent[Math.min((options.attempt ?? 1) - 1, task.agent.length - 1)]
-    : task.agent;
+  const agent = Array.isArray(task.agent) ? task.agent[Math.min((options.attempt ?? 1) - 1, task.agent.length - 1)] : task.agent;
   if (!agent?.generate) {
     throw new TypeError(`Task ${task.nodeId} has no runnable agent, compute function, or static payload`);
   }
@@ -2928,8 +2767,8 @@ async function runTask(task, options = {}) {
       runId: options.runId,
       nodeId: task.nodeId,
       iteration: task.iteration,
-      attempt: options.attempt ?? 1,
-    },
+      attempt: options.attempt ?? 1
+    }
   });
   if (result && typeof result === "object" && "output" in result) {
     return validateOutput(task, result.output);
@@ -2972,14 +2811,12 @@ function formatAgentTaskIds(agentTaskIds) {
 }
 function formatIssues2(issues) {
   if (issues.length === 0) return "unknown validation failure";
-  return issues
-    .map((issue) => {
-      if (!isObject(issue)) return JSON.stringify(issue);
-      const path = Array.isArray(issue.path) && issue.path.length > 0 ? `${issue.path.map(String).join(".")}: ` : "";
-      const message = "message" in issue ? String(issue.message) : JSON.stringify(issue);
-      return `${path}${message}`;
-    })
-    .join("; ");
+  return issues.map((issue) => {
+    if (!isObject(issue)) return JSON.stringify(issue);
+    const path = Array.isArray(issue.path) && issue.path.length > 0 ? `${issue.path.map(String).join(".")}: ` : "";
+    const message = "message" in issue ? String(issue.message) : JSON.stringify(issue);
+    return `${path}${message}`;
+  }).join("; ");
 }
 function simulatorError(message, code = "SIMULATION_ERROR") {
   const error = new Error(message);
@@ -2992,7 +2829,7 @@ function schemaExample2(task) {
   if (!task.outputSchema) {
     throw simulatorError(
       `simulate(): auto mock for task "${task.nodeId}" requires an outputSchema.`,
-      "AGENT_CONFIG_INVALID",
+      "AGENT_CONFIG_INVALID"
     );
   }
   return JSON.parse(zodSchemaToJsonExample2(task.outputSchema));
@@ -3003,11 +2840,11 @@ function validateTaskOutput(task, value) {
   if (parsed.success) return parsed.data;
   throw simulatorError(
     `simulate(): task "${task.nodeId}" output failed validation: ${formatIssues2(parsed.error.issues)}`,
-    "INVALID_OUTPUT",
+    "INVALID_OUTPUT"
   );
 }
 function isAgentTask(task) {
-  return task.kind === "agent" || (task.agent != null && task.computeFn == null && task.staticPayload === void 0);
+  return task.kind === "agent" || task.agent != null && task.computeFn == null && task.staticPayload === void 0;
 }
 function getTaskRecord(records, nodeId) {
   let record = records.get(nodeId);
@@ -3020,8 +2857,8 @@ function getTaskRecord(records, nodeId) {
 function copyTaskRecord(record) {
   return {
     status: record?.status ?? "pending",
-    outputs: [...(record?.outputs ?? [])],
-    prompts: [...(record?.prompts ?? [])],
+    outputs: [...record?.outputs ?? []],
+    prompts: [...record?.prompts ?? []]
   };
 }
 function resolveMock(mocks, task, agentTask) {
@@ -3062,8 +2899,8 @@ async function materializeMock(mock, task, context, rootDir, runId) {
         runId,
         nodeId: task.nodeId,
         iteration: task.iteration,
-        attempt: 1,
-      },
+        attempt: 1
+      }
     });
     return result.output;
   }
@@ -3074,7 +2911,7 @@ async function materializeMock(mock, task, context, rootDir, runId) {
       attempt: 1,
       prompt: task.prompt,
       rootDir: context.options.rootDir ?? rootDir,
-      outputSchema: task.outputSchema,
+      outputSchema: task.outputSchema
     });
     return normalizeFunctionMockResult(task, result);
   }
@@ -3105,7 +2942,7 @@ function simulate(workflow, options = {}) {
         taskRecords.set(id, { status: "pending", outputs: [], prompts: [] });
       }
       return copyTaskRecord(taskRecords.get(id));
-    },
+    }
   };
   const smithersRenderer = new SmithersRenderer2();
   const renderer = {
@@ -3118,11 +2955,11 @@ function simulate(workflow, options = {}) {
       engineHelpers.resolveTaskOutputs(graph.tasks, workflow);
       computeHelpers.attachSubflowComputeFns(graph.tasks, workflow, {
         rootDir,
-        workflowPath,
+        workflowPath
       });
       computeHelpers.attachSandboxComputeFns(graph.tasks, workflow, {
         rootDir,
-        workflowPath,
+        workflowPath
       });
       latestTasks.clear();
       for (const task of graph.tasks) {
@@ -3130,7 +2967,7 @@ function simulate(workflow, options = {}) {
       }
       latestAgentTaskIds = graph.tasks.filter(isAgentTask).map((task) => task.nodeId);
       return graph;
-    },
+    }
   };
   const executeTask = async (task, context) => {
     const record = getTaskRecord(taskRecords, task.nodeId);
@@ -3147,7 +2984,7 @@ function simulate(workflow, options = {}) {
       } else if (agentTask) {
         throw simulatorError(
           `simulate(): agent task "${task.nodeId}" has no mock. Provide mocks[${JSON.stringify(task.nodeId)}], a glob, "*": auto, or a per-node value. Agent tasks in this run: ${formatAgentTaskIds(latestAgentTaskIds)}`,
-          "AGENT_CONFIG_INVALID",
+          "AGENT_CONFIG_INVALID"
         );
       } else if (task.computeFn) {
         value = await task.computeFn();
@@ -3173,23 +3010,22 @@ function simulate(workflow, options = {}) {
       const driver = new WorkflowDriver({
         workflow,
         runtime: {
-          runPromise: (effect) => Effect.runPromise(effect),
+          runPromise: (effect) => Effect.runPromise(effect)
         },
         renderer,
-        createSession: (sessionOptions) =>
-          makeWorkflowSession({
-            runId: sessionOptions.runId,
-            requireStableFinish: true,
-            requireRerenderOnOutputChange: sessionOptions.options?.requireRerenderOnOutputChange !== false,
-          }),
-        executeTask,
+        createSession: (sessionOptions) => makeWorkflowSession({
+          runId: sessionOptions.runId,
+          requireStableFinish: true,
+          requireRerenderOnOutputChange: sessionOptions.options?.requireRerenderOnOutputChange !== false
+        }),
+        executeTask
       });
       const result = await driver.run({
         runId,
         input: options.input ?? {},
         initialOutputs: {},
         rootDir: options.rootDir,
-        workflowPath: options.workflowPath ?? void 0,
+        workflowPath: options.workflowPath ?? void 0
       });
       handle.status = result.status;
       if (result.output !== void 0) {
@@ -3200,9 +3036,7 @@ function simulate(workflow, options = {}) {
       }
       if (result.status === "failed") {
         handle.error = lastExecutionError ?? result.error;
-        throw handle.error instanceof Error
-          ? handle.error
-          : simulatorError(String(handle.error ?? "simulate(): run failed"));
+        throw handle.error instanceof Error ? handle.error : simulatorError(String(handle.error ?? "simulate(): run failed"));
       }
       return handle;
     } catch (error) {
@@ -3241,10 +3075,7 @@ function toHaveExecuted(received, ids) {
   const pass = missing.length === 0;
   return {
     pass,
-    message: () =>
-      pass
-        ? `Expected simulation not to have executed ${formatValue(ids)}, but actual executed nodes were ${formatValue(executed)}.`
-        : `Expected simulation to have executed ${formatValue(ids)}, but missing ids were ${formatValue(missing)}. Actual executed nodes were ${formatValue(executed)}.`,
+    message: () => pass ? `Expected simulation not to have executed ${formatValue(ids)}, but actual executed nodes were ${formatValue(executed)}.` : `Expected simulation to have executed ${formatValue(ids)}, but missing ids were ${formatValue(missing)}. Actual executed nodes were ${formatValue(executed)}.`
   };
 }
 function toHaveExecutedInOrder(received, ids) {
@@ -3252,20 +3083,14 @@ function toHaveExecutedInOrder(received, ids) {
   const pass = hasSubsequence(executed, ids);
   return {
     pass,
-    message: () =>
-      pass
-        ? `Expected simulation not to have executed in order ${formatValue(ids)}, but actual executed order was ${formatValue(executed)}.`
-        : `Expected simulation to have executed in order ${formatValue(ids)}, but actual executed order was ${formatValue(executed)}.`,
+    message: () => pass ? `Expected simulation not to have executed in order ${formatValue(ids)}, but actual executed order was ${formatValue(executed)}.` : `Expected simulation to have executed in order ${formatValue(ids)}, but actual executed order was ${formatValue(executed)}.`
   };
 }
 function toHaveFinished(received) {
   const pass = received.status === "finished";
   return {
     pass,
-    message: () =>
-      pass
-        ? 'Expected simulation not to have finished, but status was "finished".'
-        : `Expected simulation to have finished, but status was ${formatValue(received.status)}.`,
+    message: () => pass ? 'Expected simulation not to have finished, but status was "finished".' : `Expected simulation to have finished, but status was ${formatValue(received.status)}.`
   };
 }
 var simMatchers = { toHaveExecuted, toHaveExecutedInOrder, toHaveFinished };
@@ -3291,11 +3116,7 @@ var BoundedWaitError = class extends Error {
   code = "WAIT_BUDGET_EXHAUSTED";
 };
 var boundedWait = async (budget, operation) => {
-  if (
-    !Number.isInteger(budget.steps) ||
-    budget.steps < 1 ||
-    (budget.ms !== void 0 && (!Number.isFinite(budget.ms) || budget.ms < 0))
-  )
+  if (!Number.isInteger(budget.steps) || budget.steps < 1 || budget.ms !== void 0 && (!Number.isFinite(budget.ms) || budget.ms < 0))
     throw new BoundedWaitError(budget);
   let steps = budget.steps;
   while (steps-- > 0) {
@@ -3340,13 +3161,14 @@ var simulationClasses = /* @__PURE__ */ new Map();
 var simulationClass = (className) => {
   let ctor = simulationClasses.get(className);
   if (!ctor) {
-    ctor = class extends Error {};
+    ctor = class extends Error {
+    };
     Object.defineProperty(ctor, "name", { value: className });
     Object.defineProperty(ctor.prototype, "name", {
       value: className,
       writable: true,
       enumerable: false,
-      configurable: true,
+      configurable: true
     });
     simulationClasses.set(className, ctor);
   }
@@ -3373,8 +3195,8 @@ var simulationSmithersError = (code, summary, options = {}) => {
     code,
     summary,
     docsUrl,
-    ...(options.details === void 0 ? {} : { details: options.details }),
-    ...(options.cause === void 0 ? {} : { cause: options.cause }),
+    ...options.details === void 0 ? {} : { details: options.details },
+    ...options.cause === void 0 ? {} : { cause: options.cause }
   });
 };
 var durableJsonSafe = (value, seen) => {
@@ -3425,9 +3247,9 @@ var serializeSimulationDurableError = (value) => {
         cause: error.cause,
         summary: error.summary,
         docsUrl: error.docsUrl,
-        details: error.details,
+        details: error.details
       },
-      /* @__PURE__ */ new WeakSet(),
+      /* @__PURE__ */ new WeakSet()
     );
   }
   return durableJsonSafe(value, /* @__PURE__ */ new WeakSet());
@@ -3442,7 +3264,7 @@ var BOUNDARY_KNOWN_FIELDS = /* @__PURE__ */ new Set([
   "cause",
   "stack",
   "fidelity",
-  "serialized",
+  "serialized"
 ]);
 var serializeBoundaryError = (value) => {
   if (!(value instanceof Error)) return value;
@@ -3456,12 +3278,12 @@ var serializeBoundaryError = (value) => {
   return {
     name: error.name,
     message: error.message,
-    ...(error.code === void 0 ? {} : { code: error.code }),
-    ...(error.summary === void 0 ? {} : { summary: error.summary }),
-    ...(error.details === void 0 ? {} : { details: JSON.parse(JSON.stringify(error.details ?? null)) }),
-    ...(error.docsUrl === void 0 ? {} : { docsUrl: error.docsUrl }),
-    ...(Object.keys(native).length === 0 ? {} : { native: JSON.parse(JSON.stringify(native)) }),
-    ...(error.cause === void 0 ? {} : { cause: serializeBoundaryError(error.cause) }),
+    ...error.code === void 0 ? {} : { code: error.code },
+    ...error.summary === void 0 ? {} : { summary: error.summary },
+    ...error.details === void 0 ? {} : { details: JSON.parse(JSON.stringify(error.details ?? null)) },
+    ...error.docsUrl === void 0 ? {} : { docsUrl: error.docsUrl },
+    ...Object.keys(native).length === 0 ? {} : { native: JSON.parse(JSON.stringify(native)) },
+    ...error.cause === void 0 ? {} : { cause: serializeBoundaryError(error.cause) }
   };
 };
 
@@ -3478,22 +3300,21 @@ init_compile();
 init_canonicalize();
 init_replayIdentity();
 init_builder();
-var makeReplayBundle = (input) =>
-  Object.freeze({
-    version: 1,
-    ast: JSON.parse(canonicalize(input.ast)),
-    seed: input.seed,
-    controlLog: JSON.parse(JSON.stringify(input.controlLog)),
-    trace: JSON.parse(JSON.stringify(input.trace ?? [])),
-    ambiguity: JSON.parse(JSON.stringify(input.ambiguity ?? [])),
-    determinism: input.determinism ?? { deterministic: true, residues: [] },
-    harness: input.harness ?? "unit-sim",
-    harnessIdentity: input.harnessIdentity ?? input.harness ?? "unit-sim",
-    runnerBindings: Object.fromEntries(
-      input.ast.steps.filter((step2) => step2.runnerBinding).map((step2) => [step2.id, step2.runnerBinding]),
-    ),
-    replayIdentity: replayIdentity(input),
-  });
+var makeReplayBundle = (input) => Object.freeze({
+  version: 1,
+  ast: JSON.parse(canonicalize(input.ast)),
+  seed: input.seed,
+  controlLog: JSON.parse(JSON.stringify(input.controlLog)),
+  trace: JSON.parse(JSON.stringify(input.trace ?? [])),
+  ambiguity: JSON.parse(JSON.stringify(input.ambiguity ?? [])),
+  determinism: input.determinism ?? { deterministic: true, residues: [] },
+  harness: input.harness ?? "unit-sim",
+  harnessIdentity: input.harnessIdentity ?? input.harness ?? "unit-sim",
+  runnerBindings: Object.fromEntries(
+    input.ast.steps.filter((step2) => step2.runnerBinding).map((step2) => [step2.id, step2.runnerBinding])
+  ),
+  replayIdentity: replayIdentity(input)
+});
 var serializeReplayBundle = (bundle) => JSON.stringify(bundle);
 var loadReplayBundle = (serialized) => {
   const value = JSON.parse(serialized);
@@ -3508,34 +3329,30 @@ var replayBundle = async (bundle, options = {}) => {
   if (bundle.replayIdentity !== replayIdentity({ ast: bundle.ast, seed: bundle.seed, controlLog: bundle.controlLog }))
     throw new Error("REPLAY_IDENTITY_MISMATCH");
   const selectedHarness = options.harness?.name ?? "unit-sim";
-  const selectedIdentity =
-    options.harness?.adapter?.verifiedProductionIdentity ?? options.harness?.adapter?.identity ?? selectedHarness;
+  const selectedIdentity = options.harness?.adapter?.verifiedProductionIdentity ?? options.harness?.adapter?.identity ?? selectedHarness;
   if (selectedHarness !== bundle.harness || selectedIdentity !== bundle.harnessIdentity)
     throw new Error(
-      `REPLAY_HARNESS_MISMATCH: bundle=${bundle.harness}/${bundle.harnessIdentity} selected=${selectedHarness}/${selectedIdentity}`,
+      `REPLAY_HARNESS_MISMATCH: bundle=${bundle.harness}/${bundle.harnessIdentity} selected=${selectedHarness}/${selectedIdentity}`
     );
   const runners2 = options.stepRunners ?? {};
-  const unbound = Object.keys(runners2).filter((id) =>
-    bundle.ast.steps.some((step2) => step2.id === id && !step2.runnerBinding),
+  const unbound = Object.keys(runners2).filter(
+    (id) => bundle.ast.steps.some((step2) => step2.id === id && !step2.runnerBinding)
   );
   if (unbound.length) throw new Error(`RUNNER_BINDING_REQUIRED: ${unbound.join(", ")}`);
   const bindings = /* @__PURE__ */ new Map();
   for (const step2 of bundle.ast.steps) {
     if (!step2.runnerBinding || !runners2[step2.id]) continue;
     const prior = bindings.get(step2.runnerBinding);
-    if (prior && prior !== runners2[step2.id])
-      throw new Error(`REPLAY_RUNNER_BINDING_CONFLICT: ${step2.runnerBinding}`);
+    if (prior && prior !== runners2[step2.id]) throw new Error(`REPLAY_RUNNER_BINDING_CONFLICT: ${step2.runnerBinding}`);
     bindings.set(step2.runnerBinding, runners2[step2.id]);
   }
-  const missing = bundle.ast.steps
-    .filter((step2) => step2.runnerBinding && !runners2[step2.id] && !stepRunner(step2))
-    .map((step2) => step2.id);
+  const missing = bundle.ast.steps.filter((step2) => step2.runnerBinding && !runners2[step2.id] && !stepRunner(step2)).map((step2) => step2.id);
   if (missing.length) throw new Error(`REPLAY_RUNNER_MISSING: ${missing.join(", ")}`);
   return runScenario2(bundle.ast, {
     ...options,
-    ...(Object.keys(runners2).length ? { stepRunners: runners2 } : {}),
+    ...Object.keys(runners2).length ? { stepRunners: runners2 } : {},
     seed: bundle.seed,
-    controlLog: bundle.controlLog,
+    controlLog: bundle.controlLog
   });
 };
 
@@ -3554,7 +3371,7 @@ var dryRun = (ast, options = {}) => {
     replayBundle: makeReplayBundle({ ast, seed, controlLog: controls, harness: harness?.name }),
     plannedSteps: ast.steps.map((step2) => step2.id),
     executesAgents: false,
-    run: () => runScenario(ast, options),
+    run: () => runScenario(ast, options)
   };
 };
 
@@ -3589,7 +3406,7 @@ var EffectLedger = class {
     return {
       requests: [...this.requests],
       outcomes: Object.fromEntries(this.outcomes),
-      journal: Object.fromEntries(this.journal),
+      journal: Object.fromEntries(this.journal)
     };
   }
 };
@@ -3599,7 +3416,7 @@ var mediatedEffect = async (ledger, request, execute) => {
   if (outcome?.kind === "fail") throw outcome.value;
   if (outcome?.kind === "hang")
     throw Object.assign(new Error("effect resolution was not supplied within the run budget"), {
-      code: "EFFECT_WAIT_BUDGET_EXHAUSTED",
+      code: "EFFECT_WAIT_BUDGET_EXHAUSTED"
     });
   if (outcome?.kind === "succeed") {
     ledger.recordJournal(request.id);
@@ -3617,17 +3434,13 @@ var mediatedEffect = async (ledger, request, execute) => {
 };
 
 // src/effects/opaque.ts
-var opaqueEffect = (description = "unmediated external effect") =>
-  Object.freeze({ kind: "opaque-effect", description });
+var opaqueEffect = (description = "unmediated external effect") => Object.freeze({ kind: "opaque-effect", description });
 var isOpaqueEffect = (value) => !!value && typeof value === "object" && value.kind === "opaque-effect";
 
 // src/probes/compareBoundaryShape.ts
-var publicErrorFields = (value) =>
-  Object.fromEntries(
-    ["name", "message", "code", "tag", "summary", "details", "docsUrl", "cause"]
-      .filter((key) => value[key] !== void 0)
-      .map((key) => [key, value[key]]),
-  );
+var publicErrorFields = (value) => Object.fromEntries(
+  ["name", "message", "code", "tag", "summary", "details", "docsUrl", "cause"].filter((key) => value[key] !== void 0).map((key) => [key, value[key]])
+);
 var ownErrorField = (value, key) => {
   const descriptor = Object.getOwnPropertyDescriptor(value, key);
   return descriptor?.get ? descriptor.get.call(value) : descriptor?.value;
@@ -3645,8 +3458,7 @@ var boundarySerializable = (value, seen = /* @__PURE__ */ new Set()) => {
     summary: ownErrorField(record, "summary"),
     details: ownErrorField(record, "details"),
     docsUrl: ownErrorField(record, "docsUrl"),
-    cause:
-      ownErrorField(record, "cause") === void 0 ? void 0 : boundarySerializable(ownErrorField(record, "cause"), seen),
+    cause: ownErrorField(record, "cause") === void 0 ? void 0 : boundarySerializable(ownErrorField(record, "cause"), seen)
   });
 };
 var boundaryShape = (error, serialized) => {
@@ -3660,24 +3472,25 @@ var boundaryShape = (error, serialized) => {
   return {
     name: String(name ?? "Error"),
     className: error && typeof error === "object" ? String(error.constructor?.name ?? "Object") : "Error",
-    ...(value.tag === void 0 ? {} : { tag: String(value.tag) }),
-    ...(value.code === void 0 ? {} : { code: String(value.code) }),
-    ...(message === void 0 ? {} : { message: String(message) }),
-    ...(value.summary === void 0 ? {} : { summary: String(value.summary) }),
+    ...value.tag === void 0 ? {} : { tag: String(value.tag) },
+    ...value.code === void 0 ? {} : { code: String(value.code) },
+    ...message === void 0 ? {} : { message: String(message) },
+    ...value.summary === void 0 ? {} : { summary: String(value.summary) },
     hasCause: causeValue !== void 0,
-    ...(cause ? { cause } : {}),
-    ...(details === void 0 ? {} : { details }),
+    ...cause ? { cause } : {},
+    ...details === void 0 ? {} : { details },
     detailsKeys: details && typeof details === "object" ? Object.keys(details).sort() : [],
-    ...(value.docsUrl === void 0 ? {} : { docsUrl: String(value.docsUrl) }),
-    ...(nativeSerialized === void 0 ? {} : { serialized: nativeSerialized }),
+    ...value.docsUrl === void 0 ? {} : { docsUrl: String(value.docsUrl) },
+    ...nativeSerialized === void 0 ? {} : { serialized: nativeSerialized }
   };
 };
 var equal = (a, b) => {
   if (Object.is(a, b)) return true;
   if (typeof a !== typeof b || !a || !b || typeof a !== "object") return false;
-  const ak = Object.keys(a).sort(),
-    bk = Object.keys(b).sort();
-  return ak.length === bk.length && ak.every((key, index) => key === bk[index] && equal(a[key], b[key]));
+  const ak = Object.keys(a).sort(), bk = Object.keys(b).sort();
+  return ak.length === bk.length && ak.every(
+    (key, index) => key === bk[index] && equal(a[key], b[key])
+  );
 };
 var compareBoundaryShape = (expected, actual) => {
   const fields = [
@@ -3691,11 +3504,9 @@ var compareBoundaryShape = (expected, actual) => {
     "details",
     "detailsKeys",
     "docsUrl",
-    "serialized",
+    "serialized"
   ];
-  const differences = fields
-    .filter((field) => !equal(expected[field], actual[field]))
-    .map((field) => field + " differs");
+  const differences = fields.filter((field) => !equal(expected[field], actual[field])).map((field) => field + " differs");
   if (!equal(expected.cause, actual.cause)) differences.push("cause differs");
   return differences;
 };
@@ -3709,11 +3520,9 @@ var defaultSerialize = (value) => {
       name: value.name,
       message: value.message,
       ...Object.fromEntries(
-        Object.keys(record)
-          .sort()
-          .map((key) => [key, record[key]]),
-      ),
-    }),
+        Object.keys(record).sort().map((key) => [key, record[key]])
+      )
+    })
   );
 };
 var contractProbe = async (name, production, simulated, options = {}) => {
@@ -3736,8 +3545,8 @@ var contractProbe = async (name, production, simulated, options = {}) => {
   const expectedShape = boundaryShape(expected, (options.serializeProduction ?? defaultSerialize)(expected));
   const actualShape = boundaryShape(actual, (options.serializeSimulation ?? defaultSerialize)(actual));
   const differences = [
-    ...(productionThrew === simulationThrew ? [] : ["production and simulation must both throw or both succeed"]),
-    ...compareBoundaryShape(expectedShape, actualShape),
+    ...productionThrew === simulationThrew ? [] : ["production and simulation must both throw or both succeed"],
+    ...compareBoundaryShape(expectedShape, actualShape)
   ];
   return { name, passed: differences.length === 0, expected: expectedShape, actual: actualShape, differences };
 };
@@ -3754,35 +3563,27 @@ var ExactlyOnceUnsupportedError = class extends Error {
     this.name = "ExactlyOnceUnsupportedError";
   }
 };
-var effectEvents = (result, name) =>
-  result.trace.filter((event) => event.type === "effect" && event.data?.name === name);
-var assertion = (name, guarantee, check, message) =>
-  Object.freeze({
-    name,
-    guarantee,
-    assert: (result) => {
-      const events = effectEvents(result, name).filter((event) => event.data?.state === "resolved").length;
-      if (!check(events, result)) throw new Error(`${guarantee} assertion failed for ${name}: ${message}`);
-    },
-  });
-var journaled = (result, name) =>
-  result.trace.filter((event) => {
-    const data = event.data;
-    return (
-      event.type === "durability" &&
-      data?.operation === "journal-write" &&
-      (data.effect === name || String(data.effect ?? "").endsWith(`:${name}`))
-    );
-  }).length;
-var acknowledgements = (result, name) =>
-  result.trace.filter((event) => {
-    const data = event.data;
-    return (
-      event.type === "durability" &&
-      data?.operation === "ack" &&
-      (data.effect === name || String(data.effect ?? "").endsWith(`:${name}`))
-    );
-  }).length;
+var effectEvents = (result, name) => result.trace.filter(
+  (event) => event.type === "effect" && event.data?.name === name
+);
+var assertion = (name, guarantee, check, message) => Object.freeze({
+  name,
+  guarantee,
+  assert: (result) => {
+    const events = effectEvents(result, name).filter(
+      (event) => event.data?.state === "resolved"
+    ).length;
+    if (!check(events, result)) throw new Error(`${guarantee} assertion failed for ${name}: ${message}`);
+  }
+});
+var journaled = (result, name) => result.trace.filter((event) => {
+  const data = event.data;
+  return event.type === "durability" && data?.operation === "journal-write" && (data.effect === name || String(data.effect ?? "").endsWith(`:${name}`));
+}).length;
+var acknowledgements = (result, name) => result.trace.filter((event) => {
+  const data = event.data;
+  return event.type === "durability" && data?.operation === "ack" && (data.effect === name || String(data.effect ?? "").endsWith(`:${name}`));
+}).length;
 var expectEffect = (name) => ({
   name,
   exactlyOnce: () => {
@@ -3793,7 +3594,7 @@ var expectEffect = (name) => ({
       name,
       "at-least-once",
       (events) => events >= 1,
-      "no mediated effect resolution was observed",
+      "no mediated effect resolution was observed"
     );
     if (result) value.assert(result);
     return value;
@@ -3803,7 +3604,7 @@ var expectEffect = (name) => ({
       name,
       "journaled-at-most-once",
       (_events, observed) => journaled(observed, name) <= 1,
-      "more than one journal-write observation was recorded",
+      "more than one journal-write observation was recorded"
     );
     if (result) value.assert(result);
     return value;
@@ -3813,11 +3614,12 @@ var expectEffect = (name) => ({
       ...assertion(
         name,
         "idempotency-key",
-        (events, observed) =>
-          events >= 1 && effectEvents(observed, name).some((event) => event.data?.idempotencyKey === key),
-        key ? `idempotency key ${key} was not observed` : "an idempotency key was not observed",
+        (events, observed) => events >= 1 && effectEvents(observed, name).some(
+          (event) => event.data?.idempotencyKey === key
+        ),
+        key ? `idempotency key ${key} was not observed` : "an idempotency key was not observed"
       ),
-      key,
+      key
     });
     if (result) value.assert(result);
     return value;
@@ -3827,17 +3629,15 @@ var expectEffect = (name) => ({
       name,
       "journal-cas",
       (_events, observed) => journaled(observed, name) === 1 && acknowledgements(observed, name) === 1,
-      "journal CAS did not produce exactly one scoped journal-write followed by its ack",
+      "journal CAS did not produce exactly one scoped journal-write followed by its ack"
     );
     if (result) value.assert(result);
     return value;
-  },
+  }
 });
-var expectTrace =
-  (predicate, message = "trace predicate did not match") =>
-  (result) => {
-    if (!result.trace.some(predicate)) throw new Error(`trace assertion failed: ${message}`);
-  };
+var expectTrace = (predicate, message = "trace predicate did not match") => (result) => {
+  if (!result.trace.some(predicate)) throw new Error(`trace assertion failed: ${message}`);
+};
 var expectAmbiguity = (outcome) => (result) => {
   if (!result.ambiguity.some((item) => item.outcome === outcome))
     throw new Error(`ambiguity assertion failed: ${outcome}`);
@@ -3848,25 +3648,26 @@ var firstField = (left, right) => {
   if (Object.is(left, right)) return void 0;
   if (!left || !right || typeof left !== "object" || typeof right !== "object") return "value";
   const keys = [.../* @__PURE__ */ new Set([...Object.keys(left), ...Object.keys(right)])].sort();
-  return keys.find((key) => JSON.stringify(left[key]) !== JSON.stringify(right[key]));
+  return keys.find(
+    (key) => JSON.stringify(left[key]) !== JSON.stringify(right[key])
+  );
 };
 var firstDivergence = (left, right) => {
   const length = Math.max(left.length, right.length);
   for (let i = 0; i < length; i++) {
     const field = firstField(left[i], right[i]);
-    if (field !== void 0 || (left[i] === void 0) !== (right[i] === void 0)) {
+    if (field !== void 0 || left[i] === void 0 !== (right[i] === void 0)) {
       const leftIndex = left[i]?.data?.controlIndex;
       const rightIndex = right[i]?.data?.controlIndex;
-      const controlIndex =
-        typeof leftIndex === "number" ? leftIndex : typeof rightIndex === "number" ? rightIndex : void 0;
+      const controlIndex = typeof leftIndex === "number" ? leftIndex : typeof rightIndex === "number" ? rightIndex : void 0;
       return {
         index: i,
         sequence: left[i]?.seq ?? right[i]?.seq ?? i,
-        ...(controlIndex === void 0 ? {} : { controlIndex }),
+        ...controlIndex === void 0 ? {} : { controlIndex },
         field,
         left: left[i],
         right: right[i],
-        message: `trace divergence at event ${i}${controlIndex === void 0 ? "" : ` (control ${controlIndex})`}${field ? ` (${field})` : ""}`,
+        message: `trace divergence at event ${i}${controlIndex === void 0 ? "" : ` (control ${controlIndex})`}${field ? ` (${field})` : ""}`
       };
     }
   }
@@ -3881,23 +3682,16 @@ var controlsValid = (ast, controls) => {
   const faults = new Set(ast.faults.map((fault2) => fault2.id));
   const barriers = new Set(ast.barriers.map((barrier2) => barrier2.id));
   return controls.every(
-    (control) =>
-      (control.type !== "pin-interleaving" || steps.has(control.choice)) &&
-      (control.type !== "task-restart" || steps.has(control.step)) &&
-      (control.type !== "inject-fault" || faults.has(control.fault)) &&
-      (control.type !== "release-barrier" || barriers.has(control.barrier)) &&
-      (control.type !== "resolve-effect" || steps.has(control.effect.split(":", 1)[0])),
+    (control) => (control.type !== "pin-interleaving" || steps.has(control.choice)) && (control.type !== "task-restart" || steps.has(control.step)) && (control.type !== "inject-fault" || faults.has(control.fault)) && (control.type !== "release-barrier" || barriers.has(control.barrier)) && (control.type !== "resolve-effect" || steps.has(control.effect.split(":", 1)[0]))
   );
 };
 var removeStep = (ast, id) => {
   const referenced = new Set(ast.steps.flatMap((step2) => step2.dependsOn));
   if (referenced.has(id) || ast.barriers.some((barrier2) => barrier2.parties.includes(id))) return ast;
   const removed = ast.steps.find((step2) => step2.id === id);
-  if (
-    removed?.capabilities.some((capability) =>
-      ast.steps.filter((step2) => step2.id !== id).every((step2) => !step2.capabilities.includes(capability)),
-    )
-  )
+  if (removed?.capabilities.some(
+    (capability) => ast.steps.filter((step2) => step2.id !== id).every((step2) => !step2.capabilities.includes(capability))
+  ))
     return ast;
   return { ...ast, steps: ast.steps.filter((step2) => step2.id !== id) };
 };
@@ -3914,17 +3708,14 @@ var shrink = async (ast, controls, failure, options = {}) => {
       const candidate = removeStep(current, step2.id);
       if (candidate === current) continue;
       const candidateControls = currentControls.filter(
-        (control) =>
-          (control.type !== "pin-interleaving" || control.choice !== step2.id) &&
-          (control.type !== "task-restart" || control.step !== step2.id) &&
-          (control.type !== "resolve-effect" || control.effect.split(":", 1)[0] !== step2.id),
+        (control) => (control.type !== "pin-interleaving" || control.choice !== step2.id) && (control.type !== "task-restart" || control.step !== step2.id) && (control.type !== "resolve-effect" || control.effect.split(":", 1)[0] !== step2.id)
       );
       if (!compileScenario(candidate).ok || !controlsValid(candidate, candidateControls)) continue;
       tried++;
       const result = await runScenario(candidate, {
         ...options,
         controlLog: candidateControls,
-        seed: options.seed ?? candidate.seed,
+        seed: options.seed ?? candidate.seed
       });
       if (await failure(candidate, candidateControls, result)) {
         current = candidate;
@@ -3941,7 +3732,7 @@ var shrink = async (ast, controls, failure, options = {}) => {
     const result = await runScenario(current, {
       ...options,
       controlLog: candidateControls,
-      seed: options.seed ?? current.seed,
+      seed: options.seed ?? current.seed
     });
     if (await failure(current, candidateControls, result)) {
       currentControls = candidateControls;
@@ -3957,29 +3748,44 @@ import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 
 // src/adapters/realDbCutPoints.ts
 var preserve = (value) => value;
-var invoke = (receiver, method, args) => (typeof method === "function" ? method.apply(receiver, [...args]) : void 0);
-var realDbCutPoints = (db) =>
-  Object.freeze({
-    claimAttemptCompletion: (input) =>
-      preserve(
-        invoke(db, db.claimAttemptCompletion, [
-          input.runId,
-          input.nodeId,
-          input.iteration,
-          input.attempt,
-          input.runtimeOwnerId,
-          input.finishedAtMs,
-        ]),
-      ),
-    claimRunForResume: (input) => preserve(invoke(db, db.claimRunForResume, [input])),
-    heartbeatRun: (input) =>
-      preserve(invoke(db, db.heartbeatRun, [input.runId, input.runtimeOwnerId, input.heartbeatAtMs])),
-    completeRun: (input) =>
-      preserve(invoke(db, db.completeRun, [input.runId, input.runtimeOwnerId, input.finishedAtMs])),
-    requestRunCancel: (input) => preserve(invoke(db, db.requestRunCancel, [input.runId, input.cancelRequestedAtMs])),
-    claimRunCancellation: (input) =>
-      preserve(invoke(db, db.claimRunCancellation, [input.runId, input.cancelledAtMs, input.errorJson])),
-  });
+var invoke = (receiver, method, args) => typeof method === "function" ? method.apply(receiver, [...args]) : void 0;
+var realDbCutPoints = (db) => Object.freeze({
+  claimAttemptCompletion: (input) => preserve(
+    invoke(db, db.claimAttemptCompletion, [
+      input.runId,
+      input.nodeId,
+      input.iteration,
+      input.attempt,
+      input.runtimeOwnerId,
+      input.finishedAtMs
+    ])
+  ),
+  claimRunForResume: (input) => preserve(invoke(db, db.claimRunForResume, [input])),
+  heartbeatRun: (input) => preserve(
+    invoke(db, db.heartbeatRun, [
+      input.runId,
+      input.runtimeOwnerId,
+      input.heartbeatAtMs
+    ])
+  ),
+  completeRun: (input) => preserve(
+    invoke(db, db.completeRun, [
+      input.runId,
+      input.runtimeOwnerId,
+      input.finishedAtMs
+    ])
+  ),
+  requestRunCancel: (input) => preserve(
+    invoke(db, db.requestRunCancel, [input.runId, input.cancelRequestedAtMs])
+  ),
+  claimRunCancellation: (input) => preserve(
+    invoke(db, db.claimRunCancellation, [
+      input.runId,
+      input.cancelledAtMs,
+      input.errorJson
+    ])
+  )
+});
 
 // src/adapters/realDbAdapter.ts
 import { existsSync } from "fs";
@@ -3991,7 +3797,7 @@ var realDbAdapter = (options) => {
     "completeRun",
     "requestRunCancel",
     "claimRunCancellation",
-    "heartbeatAttempt",
+    "heartbeatAttempt"
   ]);
   let resource;
   const runDb = async (value) => {
@@ -4004,7 +3810,7 @@ var realDbAdapter = (options) => {
     "completion-cas:after-journal-before-ack",
     "resume:before-task",
     "heartbeat:during-task",
-    "cancellation:during-task",
+    "cancellation:during-task"
   ]);
   return registerTrustedAdapter(
     {
@@ -4013,30 +3819,24 @@ var realDbAdapter = (options) => {
       supportedCutPoints: executableCutPoints,
       admissionProbe: async () => {
         resource = await options.open();
-        if (
-          !(resource instanceof SmithersDb) ||
-          !resource.db ||
-          typeof resource.insertRun !== "function" ||
-          typeof resource.heartbeatRun !== "function" ||
-          typeof resource.close !== "function"
-        ) {
+        if (!(resource instanceof SmithersDb) || !resource.db || typeof resource.insertRun !== "function" || typeof resource.heartbeatRun !== "function" || typeof resource.close !== "function") {
           throw Object.assign(
             new Error(
-              "real-db adapter requires a live SmithersDb backed by Bun SQLite; declarations and echo objects are not proof",
+              "real-db adapter requires a live SmithersDb backed by Bun SQLite; declarations and echo objects are not proof"
             ),
-            { code: "ADMISSION_FAILED" },
+            { code: "ADMISSION_FAILED" }
           );
         }
         if (!resource.path || resource.path === ":memory:" || resource.path.startsWith("file::memory:")) {
           throw Object.assign(new Error("real-db admission requires an on-disk SQLite database"), {
             code: "ADMISSION_FAILED",
-            details: { path: resource.path ?? null },
+            details: { path: resource.path ?? null }
           });
         }
         if (!existsSync(resource.path))
           throw Object.assign(new Error("real-db admission could not verify the on-disk database"), {
             code: "ADMISSION_FAILED",
-            details: { path: resource.path },
+            details: { path: resource.path }
           });
         try {
           const sqlite = resource.db.$client ?? resource.db;
@@ -4044,7 +3844,7 @@ var realDbAdapter = (options) => {
         } catch (cause) {
           throw Object.assign(new Error("real-db admission could not execute SQLite"), {
             code: "ADMISSION_FAILED",
-            cause,
+            cause
           });
         }
         const id = `testing-admission-${crypto.randomUUID()}`;
@@ -4056,14 +3856,14 @@ var realDbAdapter = (options) => {
             createdAtMs: Date.now(),
             startedAtMs: Date.now(),
             heartbeatAtMs: null,
-            runtimeOwnerId: "testing-framework",
-          }),
+            runtimeOwnerId: "testing-framework"
+          })
         );
         await runDb(resource.heartbeatRun(id, "testing-framework", Date.now()));
         const rows = await runDb(resource.listRuns(100, void 0, "testing-framework"));
         if (!rows.some((row) => row.runId === id))
           throw Object.assign(new Error("real-db admission write was not durably readable"), {
-            code: "ADMISSION_FAILED",
+            code: "ADMISSION_FAILED"
           });
       },
       cleanup: async () => {
@@ -4073,7 +3873,7 @@ var realDbAdapter = (options) => {
           try {
             native.query("SELECT 1").get();
             throw Object.assign(new Error("CLEANUP_LEAK: database handle remained open after adapter cleanup"), {
-              code: "CLEANUP_LEAK",
+              code: "CLEANUP_LEAK"
             });
           } catch (error) {
             if (error.code === "CLEANUP_LEAK") throw error;
@@ -4089,18 +3889,20 @@ var realDbAdapter = (options) => {
           const bound = realDbCutPoints(resource)[productionOperation];
           if (typeof bound === "function") {
             const input = args.length === 1 ? args[0] : void 0;
-            if (input && typeof input === "object" && !Array.isArray(input)) return bound(input);
+            if (input && typeof input === "object" && !Array.isArray(input))
+              return bound(input);
             return bound(...args);
           }
         }
         const direct = resource[String(operation)];
-        if (typeof direct === "function") return runDb(direct.apply(resource, [...args]));
+        if (typeof direct === "function")
+          return runDb(direct.apply(resource, [...args]));
         if (productionOperations.has(productionOperation))
           throw Object.assign(
             new Error(
-              `REAL_DB_OPERATION_UNAVAILABLE:${productionOperation} requires the admitted SmithersDb production method`,
+              `REAL_DB_OPERATION_UNAVAILABLE:${productionOperation} requires the admitted SmithersDb production method`
             ),
-            { code: "ADMISSION_FAILED" },
+            { code: "ADMISSION_FAILED" }
           );
         const fn = resource.operations?.[String(operation)];
         if (!fn) throw new Error(`REAL_DB_OPERATION_UNAVAILABLE:${String(operation)}`);
@@ -4118,49 +3920,38 @@ var realDbAdapter = (options) => {
           status: run?.status ?? null,
           runtimeOwnerId: run?.runtimeOwnerId ?? null,
           heartbeatAtMs: run?.heartbeatAtMs ?? null,
-          cancelRequestedAtMs: run?.cancelRequestedAtMs ?? null,
+          cancelRequestedAtMs: run?.cancelRequestedAtMs ?? null
         });
         const observed = {};
         if (input?.runId && input.nodeId !== void 0 && typeof production.getAttempt === "function") {
           const attempt = await runDb(
-            production.getAttempt(input.runId, input.nodeId, input.iteration ?? 0, input.attempt ?? 1),
+            production.getAttempt(input.runId, input.nodeId, input.iteration ?? 0, input.attempt ?? 1)
           );
           if (attempt)
             observed.attempt = {
               state: attempt.state,
               finishedAtMs: attempt.finishedAtMs ?? null,
-              runtimeOwnerId: attempt.runtimeOwnerId ?? null,
+              runtimeOwnerId: attempt.runtimeOwnerId ?? null
             };
         }
-        if (
-          fault2.phase === "during-task" &&
-          context?.invoked === true &&
-          input?.runId &&
-          typeof production.getRun === "function"
-        ) {
-          if (
-            fault2.operation === "heartbeat" &&
-            typeof resource.claimRunForResume === "function" &&
-            typeof resource.heartbeatRun === "function"
-          ) {
+        if (fault2.phase === "during-task" && context?.invoked === true && input?.runId && typeof production.getRun === "function") {
+          if (fault2.operation === "heartbeat" && typeof resource.claimRunForResume === "function" && typeof resource.heartbeatRun === "function") {
             const before = await readRun(input.runId);
             const fencingOwner = "testing-fencing-owner";
             const previousOwner = typeof before?.runtimeOwnerId === "string" ? before.runtimeOwnerId : null;
             const claimHeartbeatAtMs = (before?.heartbeatAtMs ?? 0) + 1;
-            const takeoverClaimed =
-              previousOwner !== null &&
-              (await runDb(
-                resource.claimRunForResume({
-                  runId: input.runId,
-                  expectedStatus: before?.status ?? "running",
-                  expectedRuntimeOwnerId: previousOwner,
-                  expectedHeartbeatAtMs: before?.heartbeatAtMs ?? null,
-                  staleBeforeMs: claimHeartbeatAtMs,
-                  claimOwnerId: fencingOwner,
-                  claimHeartbeatAtMs,
-                  requireStale: false,
-                }),
-              )) === true;
+            const takeoverClaimed = previousOwner !== null && await runDb(
+              resource.claimRunForResume({
+                runId: input.runId,
+                expectedStatus: before?.status ?? "running",
+                expectedRuntimeOwnerId: previousOwner,
+                expectedHeartbeatAtMs: before?.heartbeatAtMs ?? null,
+                staleBeforeMs: claimHeartbeatAtMs,
+                claimOwnerId: fencingOwner,
+                claimHeartbeatAtMs,
+                requireStale: false
+              })
+            ) === true;
             const rejectedHeartbeatAtMs = claimHeartbeatAtMs + 1;
             if (takeoverClaimed && previousOwner !== null)
               await runDb(resource.heartbeatRun(input.runId, previousOwner, rejectedHeartbeatAtMs));
@@ -4169,21 +3960,17 @@ var realDbAdapter = (options) => {
               executed: takeoverClaimed,
               previousOwner,
               fencingOwner,
-              oldOwnerHeartbeatRejected:
-                takeoverClaimed &&
-                after?.runtimeOwnerId === fencingOwner &&
-                after?.heartbeatAtMs === claimHeartbeatAtMs,
+              oldOwnerHeartbeatRejected: takeoverClaimed && after?.runtimeOwnerId === fencingOwner && after?.heartbeatAtMs === claimHeartbeatAtMs,
               before: runProjection(before),
-              after: runProjection(after),
+              after: runProjection(after)
             };
           }
           if (fault2.operation === "cancellation" && typeof resource.completeRun === "function") {
             const before = await readRun(input.runId);
             const completionOwner = before?.runtimeOwnerId ?? "owner";
-            const completionAdmitted =
-              (await runDb(
-                resource.completeRun(input.runId, completionOwner, (before?.cancelRequestedAtMs ?? 0) + 1),
-              )) === true;
+            const completionAdmitted = await runDb(
+              resource.completeRun(input.runId, completionOwner, (before?.cancelRequestedAtMs ?? 0) + 1)
+            ) === true;
             const after = await readRun(input.runId);
             observed.cancellationRace = {
               executed: true,
@@ -4191,7 +3978,7 @@ var realDbAdapter = (options) => {
               completionRejected: !completionAdmitted && after?.status !== "finished",
               winner: completionAdmitted ? "completion" : "cancellation",
               before: runProjection(before),
-              after: runProjection(after),
+              after: runProjection(after)
             };
           }
         }
@@ -4202,7 +3989,7 @@ var realDbAdapter = (options) => {
               status: run.status,
               runtimeOwnerId: run.runtimeOwnerId ?? null,
               heartbeatAtMs: run.heartbeatAtMs ?? null,
-              cancelRequestedAtMs: run.cancelRequestedAtMs ?? null,
+              cancelRequestedAtMs: run.cancelRequestedAtMs ?? null
             };
         }
         return {
@@ -4212,13 +3999,13 @@ var realDbAdapter = (options) => {
           invoked: context?.invoked === true,
           productionIdentity: "@smithers-orchestrator/db/adapter:SmithersDb",
           result: context?.result,
-          observed,
+          observed
         };
       },
       serializeError: options.serializeError,
-      extensionExecutors: options.extensionExecutors,
+      extensionExecutors: options.extensionExecutors
     },
-    "integration-real-db",
+    "integration-real-db"
   );
 };
 
@@ -4237,28 +4024,23 @@ var repositoryRunner = () => {
     }
   }
   throw Object.assign(new Error("real process admission requires the repository-owned engineChildRunner"), {
-    code: "ADMISSION_FAILED",
+    code: "ADMISSION_FAILED"
   });
 };
-var exited = (child, budgetMs = 1e3) =>
-  new Promise((resolve3) => {
-    if (child.exitCode !== null || child.signalCode !== null) return resolve3();
-    let timer;
-    const done = () => {
-      if (timer) clearTimeout(timer);
-      resolve3();
-    };
-    child.once("exit", done);
-    timer = setTimeout(done, budgetMs);
-  });
+var exited = (child, budgetMs = 1e3) => new Promise((resolve3) => {
+  if (child.exitCode !== null || child.signalCode !== null) return resolve3();
+  let timer;
+  const done = () => {
+    if (timer) clearTimeout(timer);
+    resolve3();
+  };
+  child.once("exit", done);
+  timer = setTimeout(done, budgetMs);
+});
 var verifiedChild = (resource, expectedRunner, nonce) => {
   const args = resource.child.spawnargs ?? [];
   if (resource.child.pid !== resource.pid || resource.pid <= 0 || resource.pid === process.pid) return false;
-  if (
-    String(args[0] ?? "")
-      .split("/")
-      .pop() !== "bun"
-  )
+  if (String(args[0] ?? "").split("/").pop() !== "bun")
     return false;
   if (!args[1]) return false;
   try {
@@ -4271,15 +4053,13 @@ var verifiedChild = (resource, expectedRunner, nonce) => {
 var verifyProtocol = async (resource, expectedRunner, nonce, marker) => {
   const args = resource.child?.spawnargs ?? [];
   const executable = args[0] ? String(args[0]).split("/").pop() : "";
-  const productionRunner =
-    args[1] !== void 0 &&
-    (() => {
-      try {
-        return realpathSync(String(args[1])) === expectedRunner;
-      } catch {
-        return false;
-      }
-    })();
+  const productionRunner = args[1] !== void 0 && (() => {
+    try {
+      return realpathSync(String(args[1])) === expectedRunner;
+    } catch {
+      return false;
+    }
+  })();
   let stdout = "";
   resource.child?.stdout?.on("data", (chunk) => {
     stdout += String(chunk);
@@ -4288,15 +4068,8 @@ var verifyProtocol = async (resource, expectedRunner, nonce, marker) => {
   while (!stdout.includes(`${marker}:${nonce}`) && Date.now() < deadline)
     await new Promise((resolve3) => setTimeout(resolve3, 10));
   const nonceInArgv = args.some((arg) => String(arg) === nonce);
-  const identityVerified =
-    Boolean(resource.child) &&
-    verifiedChild(resource, expectedRunner, nonce) &&
-    Number.isInteger(resource.pid) &&
-    executable === "bun" &&
-    productionRunner &&
-    nonceInArgv;
-  const markerVerified =
-    stdout.includes(`${marker}:${nonce}`) || (identityVerified && (await resource.handshake(nonce)) === nonce);
+  const identityVerified = Boolean(resource.child) && verifiedChild(resource, expectedRunner, nonce) && Number.isInteger(resource.pid) && executable === "bun" && productionRunner && nonceInArgv;
+  const markerVerified = stdout.includes(`${marker}:${nonce}`) || identityVerified && await resource.handshake(nonce) === nonce;
   return { verified: identityVerified && markerVerified, read: () => stdout };
 };
 var realProcessAdapter = (options) => {
@@ -4323,25 +4096,25 @@ var realProcessAdapter = (options) => {
         } catch (cause) {
           throw Object.assign(new Error("real process admission requires the repository-owned engineChildRunner"), {
             code: "ADMISSION_FAILED",
-            cause,
+            cause
           });
         }
         if (suppliedRunner !== expectedRunner)
           throw Object.assign(new Error("real process admission rejected: runner identity is not repository-owned"), {
             code: "ADMISSION_FAILED",
-            details: { suppliedRunner, expectedRunner },
+            details: { suppliedRunner, expectedRunner }
           });
         const nonce = challenge();
         const probeChild = await options.probe(nonce);
         tracked.add(probeChild);
         const protocol = await verifyProtocol(probeChild, expectedRunner, nonce, "SMITHERS_ENGINE_HANDSHAKE=probe");
         nonces.delete(nonce);
-        if (!protocol.verified || (probeChild.healthy && !(await probeChild.healthy())))
+        if (!protocol.verified || probeChild.healthy && !await probeChild.healthy())
           throw Object.assign(
             new Error(
-              "real process failed admission: the probe child did not prove the repository production probe protocol",
+              "real process failed admission: the probe child did not prove the repository production probe protocol"
             ),
-            { code: "ADMISSION_FAILED" },
+            { code: "ADMISSION_FAILED" }
           );
         await exited(probeChild.child, 3e4);
         if (probeChild.child.exitCode !== 0)
@@ -4350,18 +4123,18 @@ var realProcessAdapter = (options) => {
             details: {
               pid: probeChild.pid,
               exitCode: probeChild.child.exitCode,
-              signalCode: probeChild.child.signalCode,
-            },
+              signalCode: probeChild.child.signalCode
+            }
           });
         if (protocol.read().includes("SMITHERS_ENGINE_HANDSHAKE=runWorkflow:"))
           throw Object.assign(new Error("real process admission probe illegally claimed the runWorkflow protocol"), {
-            code: "ADMISSION_FAILED",
+            code: "ADMISSION_FAILED"
           });
         const durable = await probeChild.observeDurableState?.();
         if (durable && (durable.effectApplied || durable.outputPersisted))
           throw Object.assign(new Error("real process admission probe must not execute the target workflow"), {
             code: "ADMISSION_FAILED",
-            details: durable,
+            details: durable
           });
         admitted = true;
       },
@@ -4388,7 +4161,7 @@ var realProcessAdapter = (options) => {
         }
         if (operation !== "runWorkflow")
           throw Object.assign(new Error(`REAL_PROCESS_OPERATION_UNAVAILABLE:${String(operation)}`), {
-            code: "ADMISSION_FAILED",
+            code: "ADMISSION_FAILED"
           });
         let expectedRunner;
         try {
@@ -4396,7 +4169,7 @@ var realProcessAdapter = (options) => {
         } catch (cause) {
           throw Object.assign(new Error("real process runWorkflow requires the repository-owned engineChildRunner"), {
             code: "ADMISSION_FAILED",
-            cause,
+            cause
           });
         }
         const nonce = challenge();
@@ -4407,26 +4180,21 @@ var realProcessAdapter = (options) => {
         if (!protocol.verified)
           throw Object.assign(
             new Error("real process runWorkflow child failed executable identity and nonce challenge"),
-            { code: "ADMISSION_FAILED" },
+            { code: "ADMISSION_FAILED" }
           );
         try {
           process.kill(spawned.pid, 0);
         } catch (cause) {
           throw Object.assign(new Error("real process runWorkflow child is not a live production child"), {
             code: "ADMISSION_FAILED",
-            cause,
+            cause
           });
         }
         if (!spawned.observeDurableState)
           throw Object.assign(new Error("REAL_PROCESS_OBSERVATION_UNAVAILABLE"), { code: "ADMISSION_FAILED" });
         const deadline = Date.now() + 3e4;
         let inFlight = (await spawned.observeDurableState()).effectApplied;
-        while (
-          !inFlight &&
-          Date.now() < deadline &&
-          spawned.child.exitCode === null &&
-          spawned.child.signalCode === null
-        ) {
+        while (!inFlight && Date.now() < deadline && spawned.child.exitCode === null && spawned.child.signalCode === null) {
           await new Promise((resolve3) => setTimeout(resolve3, 50));
           inFlight = (await spawned.observeDurableState()).effectApplied;
         }
@@ -4437,8 +4205,8 @@ var realProcessAdapter = (options) => {
               pid: spawned.pid,
               inFlight,
               exitCode: spawned.child.exitCode,
-              signalCode: spawned.child.signalCode,
-            },
+              signalCode: spawned.child.signalCode
+            }
           });
         resource = spawned;
         return spawned.pid;
@@ -4448,7 +4216,7 @@ var realProcessAdapter = (options) => {
         if (!resource) throw new Error("REAL_PROCESS_RUNWORKFLOW_NOT_STARTED");
         if (fault2.operation !== "resume" || fault2.phase !== "during-task")
           throw Object.assign(new Error(`REAL_PROCESS_FAULT_UNAVAILABLE:${fault2.operation}:${fault2.phase}`), {
-            code: "ADMISSION_FAILED",
+            code: "ADMISSION_FAILED"
           });
         const preKill = await resource.observeDurableState?.();
         if (!preKill)
@@ -4458,7 +4226,7 @@ var realProcessAdapter = (options) => {
         if (resource.child.signalCode !== "SIGKILL")
           throw Object.assign(new Error("real process replacement requires observed SIGKILL terminal event"), {
             code: "ADMISSION_FAILED",
-            details: { pid: resource.pid, signalCode: resource.child.signalCode },
+            details: { pid: resource.pid, signalCode: resource.child.signalCode }
           });
         if (!resource.resume || !resource.observeDurableState)
           throw Object.assign(new Error("REAL_PROCESS_OBSERVATION_UNAVAILABLE"), { code: "ADMISSION_FAILED" });
@@ -4466,7 +4234,7 @@ var realProcessAdapter = (options) => {
         const resumed = await resource.resume(nonce);
         if (resumed.pid === resource.pid)
           throw Object.assign(new Error("real process resume must create a distinct child"), {
-            code: "ADMISSION_FAILED",
+            code: "ADMISSION_FAILED"
           });
         let resumedRunner;
         try {
@@ -4474,15 +4242,15 @@ var realProcessAdapter = (options) => {
         } catch (cause) {
           throw Object.assign(new Error("resumed process runner is unavailable"), { code: "ADMISSION_FAILED", cause });
         }
-        if (!verifiedChild(resumed, resumedRunner, nonce) || (await resumed.handshake(nonce)) !== nonce)
+        if (!verifiedChild(resumed, resumedRunner, nonce) || await resumed.handshake(nonce) !== nonce)
           throw Object.assign(new Error("resumed process failed executable identity and nonce challenge"), {
-            code: "ADMISSION_FAILED",
+            code: "ADMISSION_FAILED"
           });
         const exitCode = resumed.child.exitCode;
         if (!resumed.resultStatus)
           throw Object.assign(
             new Error("real process resume must expose an adapter-owned production result observer"),
-            { code: "ADMISSION_FAILED" },
+            { code: "ADMISSION_FAILED" }
           );
         const status = await resumed.resultStatus();
         if (!resumed.observeDurableState)
@@ -4491,12 +4259,12 @@ var realProcessAdapter = (options) => {
         if (exitCode !== 0 || status !== "finished")
           throw Object.assign(new Error("real process resume did not produce a successful production result"), {
             code: "ADMISSION_FAILED",
-            details: { pid: resumed.pid, exitCode, status },
+            details: { pid: resumed.pid, exitCode, status }
           });
         if (!resumedState.outputPersisted)
           throw Object.assign(new Error("real process resume did not durably persist the expected output"), {
             code: "ADMISSION_FAILED",
-            details: { pid: resumed.pid, outputPersisted: resumedState.outputPersisted },
+            details: { pid: resumed.pid, outputPersisted: resumedState.outputPersisted }
           });
         tracked.add(resumed);
         resource = resumed;
@@ -4509,13 +4277,13 @@ var realProcessAdapter = (options) => {
           resumedStatus: status,
           resumedEffectApplied: resumedState.effectApplied,
           resumedJournalWritten: resumedState.journalWritten,
-          resumedOutputPersisted: resumedState.outputPersisted,
+          resumedOutputPersisted: resumedState.outputPersisted
         };
       },
       serializeError: options.serializeError,
-      extensionExecutors: options.extensionExecutors,
+      extensionExecutors: options.extensionExecutors
     },
-    "e2e-real-process",
+    "e2e-real-process"
   );
 };
 export {
@@ -4582,5 +4350,5 @@ export {
   toHaveExecuted,
   toHaveExecutedInOrder,
   toHaveFinished,
-  unitSimHarness,
+  unitSimHarness
 };

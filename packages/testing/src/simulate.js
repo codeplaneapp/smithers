@@ -12,10 +12,12 @@ import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } fr
 import { zodSchemaToJsonExample } from "@smithers-orchestrator/components/zod-to-example";
 var autoMarker = /* @__PURE__ */ Symbol.for("smithers.testing.auto");
 var auto = Object.freeze({
-  [autoMarker]: true,
+  [autoMarker]: true
 });
 function isAuto(value) {
-  return Boolean(value && typeof value === "object" && value[autoMarker] === true);
+  return Boolean(
+    value && typeof value === "object" && value[autoMarker] === true
+  );
 }
 function schemaExample(schema) {
   const raw = zodSchemaToJsonExample(schema);
@@ -24,14 +26,12 @@ function schemaExample(schema) {
 }
 function formatIssues(issues) {
   if (issues.length === 0) return "unknown validation failure";
-  return issues
-    .map((issue) => {
-      if (issue && typeof issue === "object" && "message" in issue) {
-        return String(issue.message);
-      }
-      return JSON.stringify(issue);
-    })
-    .join("; ");
+  return issues.map((issue) => {
+    if (issue && typeof issue === "object" && "message" in issue) {
+      return String(issue.message);
+    }
+    return JSON.stringify(issue);
+  }).join("; ");
 }
 function assertSchema(schema, value) {
   const result = schema.safeParse(value);
@@ -147,7 +147,7 @@ async function loadPosixFs() {
       openat: libc.func("int openat(int dirfd, const char *path, int flags, ...)"),
       mkdirat: libc.func("int mkdirat(int dirfd, const char *path, int mode)"),
       errno: koffi.errno,
-      errors: koffi.os.errno,
+      errors: koffi.os.errno
     };
   });
   return posixFsPromise;
@@ -253,8 +253,7 @@ function writeFileAt(posix, root, path, name, contents) {
       current = next;
       ownsCurrent = true;
     }
-    const flags =
-      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW | closeOnExecFlag();
+    const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW | closeOnExecFlag();
     let file;
     try {
       file = openAt(posix, current, filename, flags, 438);
@@ -322,7 +321,7 @@ function buildFakeAgent(schema, script, options = {}) {
         args,
         prompt: args.prompt,
         rootDir: typeof args.rootDir === "string" ? args.rootDir : void 0,
-        taskContext: args.taskContext,
+        taskContext: args.taskContext
       };
       calls.push(call);
       const raw = typeof script === "function" ? await script(args) : script;
@@ -338,7 +337,7 @@ function buildFakeAgent(schema, script, options = {}) {
     },
     reset() {
       calls.length = 0;
-    },
+    }
   };
   return agent;
 }
@@ -352,11 +351,11 @@ function buildSequenceAgent(schema, entries, options = {}) {
       }
       return entries[index++];
     },
-    options,
+    options
   );
 }
 var fakeAgent = Object.assign(buildFakeAgent, {
-  sequence: buildSequenceAgent,
+  sequence: buildSequenceAgent
 });
 
 // src/simulate.ts
@@ -381,14 +380,12 @@ function formatAgentTaskIds(agentTaskIds) {
 }
 function formatIssues2(issues) {
   if (issues.length === 0) return "unknown validation failure";
-  return issues
-    .map((issue) => {
-      if (!isObject(issue)) return JSON.stringify(issue);
-      const path = Array.isArray(issue.path) && issue.path.length > 0 ? `${issue.path.map(String).join(".")}: ` : "";
-      const message = "message" in issue ? String(issue.message) : JSON.stringify(issue);
-      return `${path}${message}`;
-    })
-    .join("; ");
+  return issues.map((issue) => {
+    if (!isObject(issue)) return JSON.stringify(issue);
+    const path = Array.isArray(issue.path) && issue.path.length > 0 ? `${issue.path.map(String).join(".")}: ` : "";
+    const message = "message" in issue ? String(issue.message) : JSON.stringify(issue);
+    return `${path}${message}`;
+  }).join("; ");
 }
 function simulatorError(message, code = "SIMULATION_ERROR") {
   const error = new Error(message);
@@ -401,7 +398,7 @@ function schemaExample2(task) {
   if (!task.outputSchema) {
     throw simulatorError(
       `simulate(): auto mock for task "${task.nodeId}" requires an outputSchema.`,
-      "AGENT_CONFIG_INVALID",
+      "AGENT_CONFIG_INVALID"
     );
   }
   return JSON.parse(zodSchemaToJsonExample2(task.outputSchema));
@@ -412,11 +409,11 @@ function validateTaskOutput(task, value) {
   if (parsed.success) return parsed.data;
   throw simulatorError(
     `simulate(): task "${task.nodeId}" output failed validation: ${formatIssues2(parsed.error.issues)}`,
-    "INVALID_OUTPUT",
+    "INVALID_OUTPUT"
   );
 }
 function isAgentTask(task) {
-  return task.kind === "agent" || (task.agent != null && task.computeFn == null && task.staticPayload === void 0);
+  return task.kind === "agent" || task.agent != null && task.computeFn == null && task.staticPayload === void 0;
 }
 function getTaskRecord(records, nodeId) {
   let record = records.get(nodeId);
@@ -429,8 +426,8 @@ function getTaskRecord(records, nodeId) {
 function copyTaskRecord(record) {
   return {
     status: record?.status ?? "pending",
-    outputs: [...(record?.outputs ?? [])],
-    prompts: [...(record?.prompts ?? [])],
+    outputs: [...record?.outputs ?? []],
+    prompts: [...record?.prompts ?? []]
   };
 }
 function resolveMock(mocks, task, agentTask) {
@@ -471,8 +468,8 @@ async function materializeMock(mock, task, context, rootDir, runId) {
         runId,
         nodeId: task.nodeId,
         iteration: task.iteration,
-        attempt: 1,
-      },
+        attempt: 1
+      }
     });
     return result.output;
   }
@@ -483,7 +480,7 @@ async function materializeMock(mock, task, context, rootDir, runId) {
       attempt: 1,
       prompt: task.prompt,
       rootDir: context.options.rootDir ?? rootDir,
-      outputSchema: task.outputSchema,
+      outputSchema: task.outputSchema
     });
     return normalizeFunctionMockResult(task, result);
   }
@@ -514,7 +511,7 @@ function simulate(workflow, options = {}) {
         taskRecords.set(id, { status: "pending", outputs: [], prompts: [] });
       }
       return copyTaskRecord(taskRecords.get(id));
-    },
+    }
   };
   const smithersRenderer = new SmithersRenderer();
   const renderer = {
@@ -527,11 +524,11 @@ function simulate(workflow, options = {}) {
       engineHelpers.resolveTaskOutputs(graph.tasks, workflow);
       computeHelpers.attachSubflowComputeFns(graph.tasks, workflow, {
         rootDir,
-        workflowPath,
+        workflowPath
       });
       computeHelpers.attachSandboxComputeFns(graph.tasks, workflow, {
         rootDir,
-        workflowPath,
+        workflowPath
       });
       latestTasks.clear();
       for (const task of graph.tasks) {
@@ -539,7 +536,7 @@ function simulate(workflow, options = {}) {
       }
       latestAgentTaskIds = graph.tasks.filter(isAgentTask).map((task) => task.nodeId);
       return graph;
-    },
+    }
   };
   const executeTask = async (task, context) => {
     const record = getTaskRecord(taskRecords, task.nodeId);
@@ -556,7 +553,7 @@ function simulate(workflow, options = {}) {
       } else if (agentTask) {
         throw simulatorError(
           `simulate(): agent task "${task.nodeId}" has no mock. Provide mocks[${JSON.stringify(task.nodeId)}], a glob, "*": auto, or a per-node value. Agent tasks in this run: ${formatAgentTaskIds(latestAgentTaskIds)}`,
-          "AGENT_CONFIG_INVALID",
+          "AGENT_CONFIG_INVALID"
         );
       } else if (task.computeFn) {
         value = await task.computeFn();
@@ -582,23 +579,22 @@ function simulate(workflow, options = {}) {
       const driver = new WorkflowDriver({
         workflow,
         runtime: {
-          runPromise: (effect) => Effect.runPromise(effect),
+          runPromise: (effect) => Effect.runPromise(effect)
         },
         renderer,
-        createSession: (sessionOptions) =>
-          makeWorkflowSession({
-            runId: sessionOptions.runId,
-            requireStableFinish: true,
-            requireRerenderOnOutputChange: sessionOptions.options?.requireRerenderOnOutputChange !== false,
-          }),
-        executeTask,
+        createSession: (sessionOptions) => makeWorkflowSession({
+          runId: sessionOptions.runId,
+          requireStableFinish: true,
+          requireRerenderOnOutputChange: sessionOptions.options?.requireRerenderOnOutputChange !== false
+        }),
+        executeTask
       });
       const result = await driver.run({
         runId,
         input: options.input ?? {},
         initialOutputs: {},
         rootDir: options.rootDir,
-        workflowPath: options.workflowPath ?? void 0,
+        workflowPath: options.workflowPath ?? void 0
       });
       handle.status = result.status;
       if (result.output !== void 0) {
@@ -609,9 +605,7 @@ function simulate(workflow, options = {}) {
       }
       if (result.status === "failed") {
         handle.error = lastExecutionError ?? result.error;
-        throw handle.error instanceof Error
-          ? handle.error
-          : simulatorError(String(handle.error ?? "simulate(): run failed"));
+        throw handle.error instanceof Error ? handle.error : simulatorError(String(handle.error ?? "simulate(): run failed"));
       }
       return handle;
     } catch (error) {
@@ -624,4 +618,6 @@ function simulate(workflow, options = {}) {
   }
   return handle;
 }
-export { simulate };
+export {
+  simulate
+};

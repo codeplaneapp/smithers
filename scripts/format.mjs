@@ -60,6 +60,9 @@ if (targets.length === 0) {
 // (check:dts for the declaration bundles, check:sota and the workflow-pack
 // generator for `*.generated.*`), so formatting them would guarantee drift.
 targets.push("!**/*.d.{ts,mts,cts}", "!**/*.generated.*");
+// packages/testing ships tsup-bundled .js in src/ (the publish drift gate
+// rebuilds and byte-compares them), so formatting them guarantees drift.
+targets.push("!packages/testing/src/**/*.js");
 
 // Extra flags from the npm script (e.g. `--check` or `--write`).
 const passthrough = process.argv.slice(2);

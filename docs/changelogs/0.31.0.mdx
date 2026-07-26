@@ -146,7 +146,9 @@ bunx smithers-orchestrator up opus5-bug-sweep
 
 ## Reliability and security
 
-A security pin and a broad sweep of bug fixes landed alongside the features:
+This release closes 82 fix commits out of 138 total, most of them triaged,
+fixed, and landed by the `opus5-bug-sweep` workflow above running against this
+repo's own issue tracker. The most noticeable, with a security pin first:
 
 - **CVE-2026-59892 is closed.** The vulnerable `@opentelemetry/propagator-jaeger`
   2.7.1 arrived transitively through `@effect/opentelemetry`; the workspace now
@@ -177,8 +179,32 @@ A security pin and a broad sweep of bug fixes landed alongside the features:
 - **Shared agent pools close cleanly.** Lifecycle races when several tasks
   share one pool are fixed, and OMP agents gained RPC fallback parity.
 - **Long runs stay bounded in the Monitor.** DevTools retains a bounded number
-  of tool calls per task (#869) and finish invalidation stays correct when the
+  of tool calls per task (#869), replaying a full event log no longer
+  duplicates tool calls (#713), and finish invalidation stays correct when the
   event ring evicts (#864).
+- **Time travel got safer on the edges.** A busy or rate-limited rewind
+  retries instead of writing a terminal failed audit (#680), a VCS revert that
+  fails mid-operation now flags the run instead of leaving it silently
+  half-reverted (#679), and `restore` can no longer hang the CLI on an
+  unbounded jj restore (#684).
+- **The TUI stops lying under churn.** The hijack picker follows the node you
+  chose rather than a row index (#726), and timeline scrubbing anchors to the
+  frame, not a drifting ring position (#698).
+- **OpenAPI tools serialize like the spec says.** Array and object params get
+  real form/explode serialization instead of `String()` (#715), templated
+  server URLs substitute their variables (#716), and digit-only string
+  examples stay strings in generated YAML (#703).
+- **Streams and saves hardened.** `streamRunEventsResilient` no longer hangs
+  on a server backpressure disconnect (#702), `mutate()` stops leaking SSE
+  change-streams (#731), and local UI file saves are atomic, mode-preserving,
+  and protected against concurrent overwrites (#909, #910).
+- **Prompt rendering and components.** Ordered lists in agent prompts keep
+  their step numbers (#700), duplicate `Panel` panelist labels no longer
+  collide into a `DUPLICATE_ID` crash (#694), and Telegram message splitting
+  stops breaking MarkdownV2 escapes and surrogate pairs (#739).
+- **Sandboxes respect their limits.** A GCP Cloud Run abort during setup
+  cancels the run (#724) and Vercel `extendTimeout` treats the plan cap as
+  absolute (#741).
 
 ## Docs for humans, docs for agents
 
@@ -194,13 +220,40 @@ reference, and its entry pages now say so.
 
 - **Cursor joins the agent adapters.** `CursorAgent` drives Cursor's headless
   CLI inside workflow tasks, parsing tool calls from its real stream shape,
-  and the agent docs scaffold it alongside Codex.
+  and the agent docs scaffold it alongside Codex. Contributed by Ralf
+  Boltshauser.
+- **Postgres connections stay bounded.** Workflows sharing a Postgres store
+  now draw from one bounded pool (default 16) that fails saturation loudly
+  instead of exhausting the server.
+- **`jjhub-issue-fleet` pack workflow.** Fans each open GitHub issue into its
+  own jjhub sandbox VM with a Codex lane and returns PRs, with a live fleet
+  UI.
 - **Every `@smithers-orchestrator/ui` component has a browsable
   catalog:** 47 stories at
   [storybook.smithers.sh](https://storybook.smithers.sh).
 - **Launching Smithers from the Claude Code native Workflow tool no
   longer crashes.** That tool's script sandbox defines no Node globals,
   so the mirror script stopped referencing the bare `process` global.
+
+## Community thanks
+
+Thank you to the external contributors in this release:
+
+- **Ralf Boltshauser ([@ralfboltshauser](https://github.com/ralfboltshauser))**
+  contributed the whole **`CursorAgent` adapter**: the CLI integration, its
+  stream parsing, and the docs scaffolding alongside Codex.
+- **Leonardo Cascianelli ([@H3xept](https://github.com/H3xept))** kept the OMP
+  engine moving: streaming runs now default to persistent RPC, and tool-call
+  args survive start/update events.
+- **[@mindfather](https://github.com/mindfather)** made shared Postgres pools
+  bounded, the fix behind the pool defaults above.
+- **orbisai0security** reported and patched **CVE-2026-59892**, resolved via
+  the dependency override above.
+- **[@paolohajinz75](https://github.com/paolohajinz75)** added the repo
+  `.editorconfig`.
+
+Running into something? `bunx smithers-orchestrator bug` files a report
+straight from your terminal.
 
 ## Upgrade notes
 
