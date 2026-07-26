@@ -8683,6 +8683,12 @@ async function runWorkflowBodyDriver(workflow, opts) {
     const effectiveAlertPolicy = workflowRef.opts.alertPolicy ?? existingConfig.alertPolicy ?? undefined;
     const runConfig = buildDurabilityConfig(
       {
+        // Fail-closed run visibility: gateway launches stamp gatewaySystem
+        // explicitly (and win via requestedConfig below); every other
+        // launcher (CLI up, direct runWorkflow) is a user-facing run, so
+        // default the stamp to public rather than letting unstamped rows
+        // vanish from includeSystem-filtered listings.
+        gatewaySystem: false,
         ...existingConfigWithoutStartedBy,
         ...requestedConfig,
         maxConcurrency,
