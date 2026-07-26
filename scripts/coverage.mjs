@@ -249,6 +249,11 @@ for (const relDir of selected) {
       "--coverage",
       "--coverage-reporter=lcov",
       `--coverage-dir=${segmentOutDir}`,
+      // Instrumented runs are slower than the plain test jobs, so bun's 5s
+      // default per-test timeout flakes on tests that legitimately take a few
+      // seconds (gateway-ui canvas interactions, engine validation loops).
+      // Give every package a generous ceiling unless its override sets one.
+      ...(segment.args.some((arg) => arg.startsWith("--timeout")) ? [] : ["--timeout=60000"]),
       ...segment.args,
     ];
     console.log(`\n[coverage] ${relDir} (${segment.phase}): bun ${args.join(" ")}`);
