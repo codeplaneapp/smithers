@@ -80,7 +80,7 @@ import {
 } from "@smithers-orchestrator/observability/metrics";
 import { runScorersAsync } from "@smithers-orchestrator/scorers/run-scorers";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { logDebug, logError, logInfo, logWarning } from "@smithers-orchestrator/observability/logging";
 import { isPidAlive, parseRuntimeOwnerPid } from "./runtime-owner.js";
@@ -1051,6 +1051,37 @@ function ensureJjGitExclude(commonGitDir) {
   }
 }
 /**
+ * Resolve a path through symlinks for comparison, falling back to `resolve()`
+ * when it does not exist yet (or cannot be read).
+ *
+ * @param {string} path
+ * @returns {string}
+ */
+function realResolve(path) {
+  try {
+    return realpathSync.native(resolve(path));
+  } catch {
+    return resolve(path);
+  }
+}
+/**
+ * Whether two paths denote the same location once symlinks are resolved.
+ *
+ * `resolve()` alone normalizes but never follows symlinks, so a worktree under
+ * a symlinked root compares unequal against git's answer: on macOS `/tmp` is a
+ * symlink to `/private/tmp`, and `git rev-parse --show-toplevel` reports the
+ * resolved `/private/tmp/...` while the caller passed `/tmp/...`. That made
+ * every `<Worktree path="/tmp/...">` in a jj repo fail with
+ * WORKTREE_CREATE_FAILED on macOS.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function isSamePath(a, b) {
+  return realResolve(a) === realResolve(b);
+}
+/**
  * A jj workspace created below the main checkout has `.jj` but no `.git`.
  * Git-aware child tools then walk past the jj workspace and discover the
  * parent checkout. Attach real git-worktree metadata to the same directory so
@@ -1063,7 +1094,7 @@ function ensureJjGitExclude(commonGitDir) {
  */
 async function ensureJjWorkspaceGitRoot(gitRoot, worktreePath, branch, baseBranch) {
   const existingTop = await runGitCommand(worktreePath, ["rev-parse", "--show-toplevel"]);
-  if (existingTop.code === 0 && resolve(existingTop.stdout.trim()) === resolve(worktreePath)) {
+  if (existingTop.code === 0 && isSamePath(existingTop.stdout.trim(), worktreePath)) {
     const commonDir = await runGitCommand(worktreePath, ["rev-parse", "--git-common-dir"]);
     if (commonDir.code === 0 && commonDir.stdout.trim()) {
       ensureJjGitExclude(resolve(worktreePath, commonDir.stdout.trim()));
@@ -1142,7 +1173,7 @@ async function ensureJjWorkspaceGitRoot(gitRoot, worktreePath, branch, baseBranc
       );
     }
     const verified = await runGitCommand(worktreePath, ["rev-parse", "--show-toplevel"]);
-    if (verified.code !== 0 || resolve(verified.stdout.trim()) !== resolve(worktreePath)) {
+    if (verified.code !== 0 || !isSamePath(verified.stdout.trim(), worktreePath)) {
       throw new SmithersError(
         "WORKTREE_CREATE_FAILED",
         `Git metadata for jj workspace ${worktreePath} does not resolve back to the workspace root.`,
@@ -4542,7 +4573,7 @@ async function legacyExecuteTask(
       const cwdCheckAgents = Array.isArray(desc.agent) ? desc.agent : desc.agent ? [desc.agent] : [];
       for (const a of cwdCheckAgents) {
         const pinned = a?.cwd;
-        if (typeof pinned === "string" && pinned !== "" && resolve(pinned) !== resolve(desc.worktreePath)) {
+        if (typeof pinned === "string" && pinned !== "" && !isSamePath(pinned, desc.worktreePath)) {
           logWarning(
             "agent has a pinned `cwd` that overrides its <Worktree>: the worker will read/write the pinned dir, not the worktree, so its branch may land nothing. Remove the agent's `cwd` and let <Worktree> control it.",
             {
@@ -9292,6 +9323,7 @@ export function runWorkflow(workflow, opts) {
 }
 
 export const __engineInternals = {
+  isSamePath,
   sha256Hex,
   isBlockingAgentActionKind,
   makeAbortError,
