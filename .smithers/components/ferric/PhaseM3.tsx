@@ -24,7 +24,7 @@ export function PhaseM3({ ctx, c }: { ctx: any; c: FerricConfig }) {
   return (
     <Sequence label="M3 — boundary spike (throwaway) + kill gate">
       <Loop id="m3:spike-loop" until={spike?.withinKillGate === true} maxIterations={2} onMaxReached="return-last">
-        <Task id="m3:spike" output={outputs.frcPoc} agent={[sol, terra]} timeoutMs={14_400_000}>
+        <Task id="m3:spike" output={outputs.frcPoc} agent={[...sol, ...terra]} timeoutMs={14_400_000}>
           <M3SpikePrompt repo={c.repo} reactRepo={c.reactRepo} revision={spikeRounds + 1} />
         </Task>
       </Loop>

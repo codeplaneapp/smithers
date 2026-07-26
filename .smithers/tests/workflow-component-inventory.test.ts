@@ -153,6 +153,7 @@ const workflowOwners = {
   ],
   "./tests/ticket-fleet-workflow.test.tsx": ["ticket-fleet.tsx"],
   "./tests/jjhub-issue-fleet-workflow.test.tsx": ["jjhub-issue-fleet.tsx"],
+  "./tests/ferric-campaign-workflows.test.tsx": ["react-rust-port.tsx", "ultrafusion.tsx"],
   "./tests/authoring-benchmark-workflow.test.ts": ["authoring-benchmark.tsx"],
   "./tests/finish-campaigns.test.tsx": ["finish-campaigns.tsx"],
   "./tests/build-agentic-ui-library.test.tsx": ["build-agentic-ui-library.tsx"],

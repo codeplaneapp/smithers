@@ -155,12 +155,9 @@ describe("gateway run-id ownership", () => {
 
     const originalStartRun = gateway.startRun.bind(gateway);
     let resumeStarts = 0;
-    const resumeControllers = [];
     gateway.startRun = (...args) => {
       resumeStarts += 1;
-      const pending = originalStartRun(...args);
-      resumeControllers.push(gateway.activeRuns.get(runId)?.abort);
-      return pending;
+      return originalStartRun(...args);
     };
 
     const resumes = Array.from({ length: 8 }, () => gateway.resumeRunIfNeeded(runId, "idem", yieldingAdapter, AUTH));
@@ -169,6 +166,10 @@ describe("gateway run-id ownership", () => {
     releaseLookup.resolve();
     const outcomes = await Promise.allSettled(resumes);
     await sequenced.started[1].promise;
+    // Registration is async now (the run's visibility stamp persists before
+    // activeRuns registration), so capture the controller once the resumed
+    // workflow has demonstrably started rather than at startRun call time.
+    const resumedAbort = gateway.activeRuns.get(runId)?.abort;
     const resumedInflight = gateway.inflightRuns.get(runId);
 
     try {
@@ -176,13 +177,13 @@ describe("gateway run-id ownership", () => {
       expect(lookupCallsWhileYielded).toBe(1);
       expect(lookupCalls).toBe(1);
       expect(resumeStarts).toBe(1);
-      expect(new Set(resumeControllers).size).toBe(1);
+      expect(resumedAbort).toBeDefined();
       expect(sequenced.taskInvocations()).toBe(2);
       expect(gateway.runRegistry.size).toBe(1);
       expect(gateway.activeRuns.size).toBe(1);
       expect(gateway.inflightRuns.size).toBe(1);
       expect(gateway.runRegistry.get(runId)).toBe(gateway.activeRuns.get(runId));
-      expect(gateway.activeRuns.get(runId)?.abort).toBe(resumeControllers[0]);
+      expect(gateway.activeRuns.get(runId)?.abort).toBe(resumedAbort);
       expect(gateway.inflightResumes.has(runId)).toBe(false);
     } finally {
       sequenced.releases[1].resolve();

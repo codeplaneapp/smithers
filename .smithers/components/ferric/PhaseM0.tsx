@@ -60,7 +60,7 @@ export function PhaseM0({ ctx, c }: { ctx: any; c: FerricConfig }) {
 
       <Loop id="m0:oracle-loop" until={oracle?.ok === true} maxIterations={3} onMaxReached="return-last">
         <Sequence>
-          <Task id="m0:oracle-build" output={outputs.frcSlice} agent={[terra, sol]} timeoutMs={10_800_000}>
+          <Task id="m0:oracle-build" output={outputs.frcSlice} agent={[...terra, ...sol]} timeoutMs={10_800_000}>
             <M0OracleBuildPrompt
               repo={c.repo}
               reactRepo={c.reactRepo}
@@ -151,7 +151,7 @@ export function PhaseM0({ ctx, c }: { ctx: any; c: FerricConfig }) {
       </Task>
 
       <Loop id="m0:poc-loop" until={poc?.withinKillGate === true} maxIterations={2} onMaxReached="return-last">
-        <Task id="m0:poc" output={outputs.frcPoc} agent={[terra, sol]} timeoutMs={10_800_000}>
+        <Task id="m0:poc" output={outputs.frcPoc} agent={[...terra, ...sol]} timeoutMs={10_800_000}>
           <M0PocPrompt repo={c.repo} reactRepo={c.reactRepo} revision={pocRounds + 1} />
         </Task>
       </Loop>
