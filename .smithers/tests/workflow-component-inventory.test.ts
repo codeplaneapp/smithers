@@ -39,6 +39,7 @@ const workflowOwners = {
   "./tests/local-workflows-c-utilities.test.tsx": ["microsandbox-finish.tsx", "review-codex-antigravity.tsx", "review-nokimi.tsx", "run-on-plue.tsx", "test-fortress-monitor.tsx", "trellis.tsx", "vcs.tsx", "verify-push-safety.tsx"],
   "./tests/local-workflows-c-orchestration.test.tsx": ["monitor-redesign.tsx", "orchbench.tsx", "route-and-merge-issues.tsx", "studio-parity-swarm.tsx", "test-fortress.tsx", "ultragrill.tsx", "validated-implement.tsx"],
   "./tests/ticket-fleet-workflow.test.tsx": ["ticket-fleet.tsx"],
+  "./tests/jjhub-issue-fleet-workflow.test.tsx": ["jjhub-issue-fleet.tsx"],
   "./tests/authoring-benchmark-workflow.test.ts": ["authoring-benchmark.tsx"],
   "./tests/finish-campaigns.test.tsx": ["finish-campaigns.tsx"],
   "./tests/build-agentic-ui-library.test.tsx": ["build-agentic-ui-library.tsx"],
