@@ -18,7 +18,10 @@ function expect(condition, message) {
 function assertRuntimeConformance(proof, lane) {
   expect(proof.result?.status === "finished", `run did not finish (${proof.result?.status ?? "missing result"})`);
   expect(proof.stored?.status === "finished", "terminal run state was not persisted");
-  expect(proof.result.output && proof.result.output.answer === 43, "dependent output was not propagated");
+  expect(
+    proof.result.output && proof.result.output.answer === 43,
+    "dependent output was not propagated"
+  );
   expect(proof.generateCalls === 1, `agent was called ${proof.generateCalls} times`);
   expect(
     proof.outputs?.agent_output?.[0] && proof.outputs.agent_output[0].answer === 42,
