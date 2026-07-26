@@ -12,7 +12,7 @@ try {
 }
 globalThis.fetch = nativeFetch;
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { act, createElement, memo, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -38,6 +38,19 @@ import { workflowGraphChromeCss } from "../src/workflowGraphCss";
  */
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+// #1383: the connect gesture waits on xyflow store commits that take tens of
+// seconds on a loaded CI runner, so two budgets have to stay wired together.
+// GESTURE_POLL_MS bounds the polling of a WHOLE test (one absolute deadline
+// shared by every flushUntil call), so two slow gestures cannot stack into
+// twice the window. TEST_BUDGET_MS is handed to bun as that test's own timeout:
+// it matches the 60s scripts/coverage.mjs already grants instrumented packages
+// (never narrowing it) and lifts the plain shards off bun's 5s default, which
+// the 20s poll would otherwise blow through. A poll that outlives its own test
+// keeps looping inside act(), and that zombie act scope swallows the NEXT
+// test's render — the read-only store test then finds 0 nodes instead of 2.
+const GESTURE_POLL_MS = 20_000;
+const TEST_BUDGET_MS = 60_000;
 
 const SPEC: WorkflowSpecNode[] = [
   { id: "plan", label: "Plan the work", kind: "agent", output: "3 steps", status: "done" },
@@ -209,6 +222,38 @@ describe("WorkflowGraph mounted accessible tree", () => {
       },
     };
   }
+
+  /**
+   * xyflow applies gesture state through its own store subscription, which can
+   * land a commit after act() returns on a loaded runner — poll for the
+   * gesture's observable result instead of asserting immediately. The deadline
+   * is absolute and taken once, so every poll in a test shares one window and
+   * the total stays under the budget bun enforces on that test.
+   */
+  function createGesturePoll(windowMs: number) {
+    const deadline = Date.now() + windowMs;
+    return async (condition: () => boolean) => {
+      while (!condition() && Date.now() < deadline) {
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        });
+      }
+    };
+  }
+
+  test("every gesture poll in one test spends a single shared deadline", async () => {
+    const windowMs = 200;
+    const poll = createGesturePoll(windowMs);
+    await poll(() => false); // never satisfied: burns the whole window
+    const secondPollStart = Date.now();
+    await poll(() => false);
+    // A per-call deadline would restart the window here, letting two slow
+    // gestures spend 2 * GESTURE_POLL_MS and time the test out mid-act — the
+    // open act scope that then swallows the next test's render (#1383).
+    expect(Date.now() - secondPollStart).toBeLessThan(windowMs / 2);
+    // ...and one whole-test window has to fit inside the enforced budget.
+    expect(GESTURE_POLL_MS).toBeLessThan(TEST_BUDGET_MS);
+  });
 
   test("the canvas is a listbox that owns every node option card", async () => {
     const { container, unmount } = await mount({ spec: SPEC });
@@ -403,19 +448,10 @@ describe("WorkflowGraph mounted accessible tree", () => {
       const targetHandle = editable.container.querySelector(
         "[data-id='ship'] .react-flow__handle.target",
       ) as HTMLElement;
-      // xyflow applies the gesture state through its own store subscription,
-      // which can land a commit after act() returns on a loaded runner — poll
-      // for each gesture's observable result instead of asserting immediately.
-      const flushUntil = async (condition: () => boolean) => {
-        // 20s, not 5s: instrumented coverage runs are slow enough that the
-        // first gesture commit can take longer than 5s on CI runners.
-        const deadline = Date.now() + 20_000;
-        while (!condition() && Date.now() < deadline) {
-          await act(async () => {
-            await new Promise((resolve) => setTimeout(resolve, 10));
-          });
-        }
-      };
+      // One window for both gestures below, so the poll always gives up before
+      // TEST_BUDGET_MS: a missed commit then fails on its assertion instead of
+      // timing out mid-act and poisoning the next test.
+      const flushUntil = createGesturePoll(GESTURE_POLL_MS);
       await act(async () => {
         sourceHandle.click();
       });
@@ -455,6 +491,7 @@ describe("WorkflowGraph mounted accessible tree", () => {
       expect(observed.edges).toEqual([{ id: "plan->build", source: "plan", target: "build" }]);
       await readOnly.unmount();
     },
+    TEST_BUDGET_MS,
   );
 });
 
