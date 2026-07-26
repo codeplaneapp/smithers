@@ -18,12 +18,14 @@ type EventLine = { ts: number; type: string; nodeId: string };
 const PHASES = ["provider-purge", "local-harness", "conformance-local", "ci-canary", "suite-green"];
 
 const NODE_EXPLAINS: Record<string, string> = {
-  "prep": "verify workspaces + mission brief exist",
-  "docs-improve": "Fable reviews/improves docs, revises specs to Microsandbox-only, writes the work plan, freezes the suite gates",
+  prep: "verify workspaces + mission brief exist",
+  "docs-improve":
+    "Fable reviews/improves docs, revises specs to Microsandbox-only, writes the work plan, freezes the suite gates",
   "docs-check": "deterministic check: workplan on disk, gates parse, zero retired-provider vocabulary in spec+runbook",
   "phase-provider-purge": "Sol removes every retired-provider remnant (code, config, Helm, dashboards, docs)",
   "phase-provider-purge-review": "Sol adversarially reviews its own purge",
-  "phase-local-harness": "Sol builds the REAL local harness: compose deps + HVF Microsandbox + connected controller/API",
+  "phase-local-harness":
+    "Sol builds the REAL local harness: compose deps + HVF Microsandbox + connected controller/API",
   "phase-local-harness-review": "Sol re-runs the harness entrypoint to verify",
   "phase-conformance-local": "Sol makes the full provider-conformance lifecycle + E2E green locally",
   "phase-conformance-local-review": "Sol re-runs the suites to verify the tallies",
@@ -34,15 +36,15 @@ const NODE_EXPLAINS: Record<string, string> = {
   "fable-review": "Fable reviews EVERYTHING and polishes; loop until LGTM",
   "lgtm-fix": "Sol fixes Fable's findings",
   "approve-integration": "HUMAN GATE: integrate drafts into the original repos?",
-  "integrate": "Fable integrates into ~/plue ~/multi ~/smithers (pathspec-scoped jj, no pushes)",
+  integrate: "Fable integrates into ~/plue ~/multi ~/smithers (pathspec-scoped jj, no pushes)",
   "integrate-review": "Sol verifies integration parity, no swept-in WIP, nothing pushed",
   "approve-deploy": "HUMAN GATE: deploy Microsandbox to production?",
-  "deploy": "Fable deploys per the runbook (GKE sandbox cluster, secrets, Helm, migration 000102)",
+  deploy: "Fable deploys per the runbook (GKE sandbox cluster, secrets, Helm, migration 000102)",
   "prod-proof": "Fable proves the full sandbox lifecycle in production",
   "issue-draft": "Sol drafts the upstream Iron/Microsandbox issue (no filing)",
   "approve-file-upstream": "HUMAN GATE: file the upstream issue?",
   "issue-file": "Luna files the approved issue via gh",
-  "summary": "final roll-up of the whole run",
+  summary: "final roll-up of the whole run",
 };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -112,12 +114,15 @@ function eventParts(ev: unknown): EventLine | null {
   if (!isRecord(ev)) return null;
   const payload = isRecord(ev.payload) ? ev.payload : undefined;
   const inner = payload && isRecord(payload.payload) ? payload.payload : undefined;
-  const type = [asString(payload?.event), asString(payload?.type), asString(ev.type), asString(ev.event)]
-    .find((candidate) => candidate && LIFECYCLE_RE.test(candidate)) ?? "";
+  const type =
+    [asString(payload?.event), asString(payload?.type), asString(ev.type), asString(ev.event)].find(
+      (candidate) => candidate && LIFECYCLE_RE.test(candidate),
+    ) ?? "";
   const nodeId = asString(inner?.nodeId) ?? asString(payload?.nodeId) ?? asString(ev.nodeId) ?? "";
-  const ts = [inner?.timestampMs, payload?.timestampMs, ev.timestampMs]
-    .map(Number)
-    .find((candidate) => Number.isFinite(candidate) && candidate > 0) ?? 0;
+  const ts =
+    [inner?.timestampMs, payload?.timestampMs, ev.timestampMs]
+      .map(Number)
+      .find((candidate) => Number.isFinite(candidate) && candidate > 0) ?? 0;
   if (!type || !nodeId) return null;
   const iterRaw = Number(inner?.iteration ?? payload?.iteration ?? 0);
   return { ts, type, nodeId: nodeId + (Number.isFinite(iterRaw) && iterRaw > 0 ? "#" + iterRaw : "") };
@@ -163,8 +168,16 @@ function dotClass(status: NodeStatus | undefined): string {
 function Stage({ label, state }: { label: string; state: NodeState | undefined }) {
   const iter = state && state.iteration > 0 ? " ×" + (state.iteration + 1) : "";
   return (
-    <span className="stage" title={state ? state.status + (state.startedMs ? " · started " + fmtAgo(state.startedMs) + " ago" : "") : "not reached yet"}>
-      <span className={dotClass(state?.status)} /> {label}{iter}
+    <span
+      className="stage"
+      title={
+        state
+          ? state.status + (state.startedMs ? " · started " + fmtAgo(state.startedMs) + " ago" : "")
+          : "not reached yet"
+      }
+    >
+      <span className={dotClass(state?.status)} /> {label}
+      {iter}
     </span>
   );
 }
@@ -185,7 +198,8 @@ function NowRunning({ byNode }: { byNode: Map<string, NodeState> }) {
       <h2>Now</h2>
       {waiting.map(([nodeId]) => (
         <p key={nodeId}>
-          <span className="dot waiting" /> <strong>{nodeId}</strong> is waiting for YOUR decision — use the approval buttons below.
+          <span className="dot waiting" /> <strong>{nodeId}</strong> is waiting for YOUR decision — use the approval
+          buttons below.
         </p>
       ))}
       {running.map(([nodeId, state]) => (
@@ -212,28 +226,34 @@ function ApprovalsPanel({ runId }: { runId: string }) {
       {list.map((entry: any) => (
         <div className="approval" key={entry.nodeId + ":" + entry.iteration}>
           <div className="approvaltext">
-            <div><strong>{String(entry.requestTitle ?? entry.nodeId)}</strong></div>
+            <div>
+              <strong>{String(entry.requestTitle ?? entry.nodeId)}</strong>
+            </div>
             {entry.requestSummary ? <pre className="summarypre">{String(entry.requestSummary)}</pre> : null}
           </div>
           <button
             className="button ok"
-            onClick={() => actions.submitApproval({
-              runId,
-              nodeId: entry.nodeId,
-              iteration: entry.iteration,
-              decision: { approved: true },
-            })}
+            onClick={() =>
+              actions.submitApproval({
+                runId,
+                nodeId: entry.nodeId,
+                iteration: entry.iteration,
+                decision: { approved: true },
+              })
+            }
           >
             Approve
           </button>
           <button
             className="button danger"
-            onClick={() => actions.submitApproval({
-              runId,
-              nodeId: entry.nodeId,
-              iteration: entry.iteration,
-              decision: { approved: false },
-            })}
+            onClick={() =>
+              actions.submitApproval({
+                runId,
+                nodeId: entry.nodeId,
+                iteration: entry.iteration,
+                decision: { approved: false },
+              })
+            }
           >
             Deny
           </button>
@@ -266,12 +286,18 @@ function DocsPanel({ runId }: { runId: string }) {
       <h2>
         Docs phase (Fable)
         {hasVerdict ? (
-          <span className={isTrue(check!.passed) ? "tag ok" : "tag bad"}>{isTrue(check!.passed) ? "passed" : "failed — retrying"}</span>
+          <span className={isTrue(check!.passed) ? "tag ok" : "tag bad"}>
+            {isTrue(check!.passed) ? "passed" : "failed — retrying"}
+          </span>
         ) : (
           <span className="tag">check not run yet</span>
         )}
       </h2>
-      {row?.summary !== undefined ? <p>{String(row.summary)}</p> : <p className="muted">Fable has not returned its docs summary yet.</p>}
+      {row?.summary !== undefined ? (
+        <p>{String(row.summary)}</p>
+      ) : (
+        <p className="muted">Fable has not returned its docs summary yet.</p>
+      )}
       {hasVerdict ? <p className="muted">{String(check!.detail ?? "")}</p> : null}
     </section>
   );
@@ -283,7 +309,9 @@ function FableReviewPanel({ runId }: { runId: string }) {
   const lgtm = isTrue(row.lgtm);
   return (
     <section className="panel">
-      <h2>Fable final review <span className={lgtm ? "tag ok" : "tag bad"}>{lgtm ? "LGTM" : "findings open"}</span></h2>
+      <h2>
+        Fable final review <span className={lgtm ? "tag ok" : "tag bad"}>{lgtm ? "LGTM" : "findings open"}</span>
+      </h2>
       <pre className="summarypre">{String(row.findings ?? "")}</pre>
     </section>
   );
@@ -295,7 +323,9 @@ function SummaryPanel({ runId }: { runId: string }) {
   return (
     <section className="panel">
       <h2>Final summary</h2>
-      <p><strong>{String(row.headline)}</strong></p>
+      <p>
+        <strong>{String(row.headline)}</strong>
+      </p>
       <p>{String(row.summary ?? "")}</p>
     </section>
   );
@@ -366,7 +396,9 @@ function Board({ runId, byNode }: { runId: string; byNode: Map<string, NodeState
   return (
     <>
       <section className="panel">
-        <h2>Pipeline <span className="muted">grey = not reached yet; nodes appear as earlier ones finish</span></h2>
+        <h2>
+          Pipeline <span className="muted">grey = not reached yet; nodes appear as earlier ones finish</span>
+        </h2>
         <div className="stages wraprow">
           {PIPELINE.map((step) => (
             <Stage key={step.nodeId} label={step.label} state={byNode.get(step.nodeId)} />
@@ -374,14 +406,18 @@ function Board({ runId, byNode }: { runId: string; byNode: Map<string, NodeState
         </div>
       </section>
       <section className="panel">
-        <h2>Implementation phases <span className="muted">(Sol implements, then Sol reviews itself; loops up to 3×)</span></h2>
+        <h2>
+          Implementation phases <span className="muted">(Sol implements, then Sol reviews itself; loops up to 3×)</span>
+        </h2>
         <div className="lanegrid">
           {PHASES.map((key) => {
             const impl = byNode.get("phase-" + key);
             const review = byNode.get("phase-" + key + "-review");
             return (
               <div className="lane" key={key}>
-                <div className="lanehead" title={NODE_EXPLAINS["phase-" + key] ?? ""}>{key}</div>
+                <div className="lanehead" title={NODE_EXPLAINS["phase-" + key] ?? ""}>
+                  {key}
+                </div>
                 <div className="stages">
                   <Stage label="implement" state={impl} />
                   <Stage label="self-review" state={review} />
@@ -392,14 +428,19 @@ function Board({ runId, byNode }: { runId: string; byNode: Map<string, NodeState
         </div>
       </section>
       <section className="panel">
-        <h2>Deterministic gates <span className="muted">(frozen by the docs phase; run mechanically, Sol fixes failures)</span></h2>
+        <h2>
+          Deterministic gates{" "}
+          <span className="muted">(frozen by the docs phase; run mechanically, Sol fixes failures)</span>
+        </h2>
         {gates.length === 0 ? (
           <p className="muted">Gates appear once the docs phase publishes them.</p>
         ) : (
           <div className="lanegrid">
             {gates.map((gate) => (
               <div className="lane" key={gate.gateKey}>
-                <div className="lanehead mono" title={gate.command}>{gate.gateKey}</div>
+                <div className="lanehead mono" title={gate.command}>
+                  {gate.gateKey}
+                </div>
                 <div className="stages">
                   <Stage label="fix" state={byNode.get("gate-" + gate.gateKey + "-fix")} />
                   <Stage label="gate" state={byNode.get("gate-" + gate.gateKey)} />
@@ -422,7 +463,9 @@ function App() {
     return (
       <div className="shell">
         <style>{STYLES}</style>
-        <header className="topbar"><h1>Microsandbox Finish</h1></header>
+        <header className="topbar">
+          <h1>Microsandbox Finish</h1>
+        </header>
         <RunPicker />
       </div>
     );
@@ -441,7 +484,9 @@ function App() {
         <span className={"badge " + status}>{status}</span>
         <span className="pill mono">{runId.slice(0, 16)}</span>
         <span className="spacer" />
-        <span className="pill">{doneCount} done · {failedCount} failed</span>
+        <span className="pill">
+          {doneCount} done · {failedCount} failed
+        </span>
         <span className="pill">{stream.streaming ? "live" : "idle"}</span>
       </header>
       <main className="content">

@@ -7,5 +7,7 @@ import { correlationStorage } from "./_correlationStorage.js";
  * @returns {Effect.Effect< CorrelationContext | undefined >}
  */
 export function getCurrentCorrelationContextEffect() {
-    return FiberRef.get(correlationContextFiberRef).pipe(Effect.map((fiberContext) => fiberContext ?? correlationStorage.getStore()));
+  return FiberRef.get(correlationContextFiberRef).pipe(
+    Effect.map((fiberContext) => fiberContext ?? correlationStorage.getStore()),
+  );
 }

@@ -142,10 +142,21 @@ function haikuSuites(root: string): string[] {
 
 const inputSchema = z.object({
   deadlineIso: z
-    .string().datetime({ offset: true })
+    .string()
+    .datetime({ offset: true })
     .describe("Stop the loop once wall-clock time passes this ISO timestamp (e.g. 2026-07-06T22:00:00-04:00)."),
-  maxIterations: z.number().int().min(1).default(500).describe("Hard cap on loop iterations (deadline usually stops it first)."),
-  maxCasesPerSuite: z.number().int().min(1).default(4).describe("Cap haiku cases run per suite each iteration (keeps rounds bounded)."),
+  maxIterations: z
+    .number()
+    .int()
+    .min(1)
+    .default(500)
+    .describe("Hard cap on loop iterations (deadline usually stops it first)."),
+  maxCasesPerSuite: z
+    .number()
+    .int()
+    .min(1)
+    .default(4)
+    .describe("Cap haiku cases run per suite each iteration (keeps rounds bounded)."),
 });
 
 function containedRepoPaths(root: string, paths: string[]): string[] {
@@ -181,9 +192,13 @@ const frictionSchema = z.object({
   title: z.string().describe("One-line name of the friction / bad experience found."),
   area: z.string().describe("Feature-area bucket (cli, concepts, authoring, ui, reports, observability, ...)."),
   severity: z.enum(["low", "medium", "high"]),
-  kind: z.enum(["docs", "code", "eval-only"]).describe("Is the root-cause fix a docs edit, a code change, or is this purely a new eval to add?"),
+  kind: z
+    .enum(["docs", "code", "eval-only"])
+    .describe("Is the root-cause fix a docs edit, a code change, or is this purely a new eval to add?"),
   repro: z.string().describe("Exact steps / command an agent can replay to hit this."),
-  whatWasBad: z.string().describe("Concretely what was wrong, missing, ambiguous, or a bad UX (e.g. an ugly/unreadable agent report)."),
+  whatWasBad: z
+    .string()
+    .describe("Concretely what was wrong, missing, ambiguous, or a bad UX (e.g. an ugly/unreadable agent report)."),
   suggestedFix: z.string().describe("Source-grounded suggested fix (which doc/file, what to change)."),
 });
 
@@ -208,7 +223,9 @@ const wiredSchema = z.object({
 
 const fixedSchema = z.object({
   summary: z.string().describe("What was fixed and why it removes the friction."),
-  files: z.array(z.string()).describe("Repo-relative paths this fix changed (used for the scoped commit). Empty if eval-only."),
+  files: z
+    .array(z.string())
+    .describe("Repo-relative paths this fix changed (used for the scoped commit). Empty if eval-only."),
   regeneratedDocs: z.boolean().describe("Whether `pnpm docs:llms` was run (required if any docs/*.mdx changed)."),
 });
 
@@ -325,7 +342,16 @@ export default smithers((ctx) => {
             {async () => {
               const res = await spawnAsync(
                 process.env.SMITHERS_BREAK_BUN?.trim() || "bun",
-                [join(root, "evals/harness/run-suite.ts"), suite, "--only-model", "haiku", "--max-cases", String(maxCases), "-j", "4"],
+                [
+                  join(root, "evals/harness/run-suite.ts"),
+                  suite,
+                  "--only-model",
+                  "haiku",
+                  "--max-cases",
+                  String(maxCases),
+                  "-j",
+                  "4",
+                ],
                 { cwd: root, timeout: 20 * 60_000, maxBuffer: 64 * 1024 * 1024 },
               );
               const out = `${res.stdout ?? ""}\n${res.stderr ?? ""}`;
@@ -362,7 +388,8 @@ export default smithers((ctx) => {
                   area: authored.area,
                   kind: authored.kind,
                   tier: authored.tier,
-                  verify: authored.verify === "graph" || authored.verify === "judge" ? authored.verify : "deterministic",
+                  verify:
+                    authored.verify === "graph" || authored.verify === "judge" ? authored.verify : "deterministic",
                   task: authored.task,
                   canonicalAnswer: authored.canonicalAnswer ?? "",
                   mustNot: authored.mustNot ?? [],
@@ -433,7 +460,9 @@ export default smithers((ctx) => {
                 return {
                   committed,
                   message: committed ? title : "",
-                  note: committed ? `Committed ${paths.length} path(s) locally.` : `No commit (exit ${res.status}): ${combined.slice(-300).trim()}`,
+                  note: committed
+                    ? `Committed ${paths.length} path(s) locally.`
+                    : `No commit (exit ${res.status}): ${combined.slice(-300).trim()}`,
                 };
               }}
             </Task>

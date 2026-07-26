@@ -23,7 +23,9 @@ function tempHome() {
 afterEach(() => {
   while (tempDirs.length) {
     const dir = tempDirs.pop();
-    try { rmSync(dir, { recursive: true, force: true }); } catch {}
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {}
   }
 });
 
@@ -42,12 +44,18 @@ describe("parseAgentWiringArgv", () => {
   });
 
   test("parses --no-global, --agent, and --command", () => {
-    expect(parseAgentWiringArgv(["mcp", "add", "--no-global", "--agent", "hermes", "-a", "Cursor"]))
-      .toEqual({ kind: "mcp", global: false, agents: ["hermes", "cursor"] });
-    expect(parseAgentWiringArgv(["mcp", "add", "--command", "pnpm smithers --mcp"]))
-      .toEqual({ kind: "mcp", global: true, command: "pnpm", args: ["smithers", "--mcp"] });
-    expect(parseAgentWiringArgv(["skills", "add", "--depth", "2"]))
-      .toEqual({ kind: "skills", global: true });
+    expect(parseAgentWiringArgv(["mcp", "add", "--no-global", "--agent", "hermes", "-a", "Cursor"])).toEqual({
+      kind: "mcp",
+      global: false,
+      agents: ["hermes", "cursor"],
+    });
+    expect(parseAgentWiringArgv(["mcp", "add", "--command", "pnpm smithers --mcp"])).toEqual({
+      kind: "mcp",
+      global: true,
+      command: "pnpm",
+      args: ["smithers", "--mcp"],
+    });
+    expect(parseAgentWiringArgv(["skills", "add", "--depth", "2"])).toEqual({ kind: "skills", global: true });
   });
 });
 
@@ -162,7 +170,10 @@ describe("registerOpenClawMcp", () => {
   test("writes mcp.servers into openclaw.json and preserves other keys", () => {
     const home = tempHome();
     mkdirSync(join(home, ".openclaw"), { recursive: true });
-    writeFileSync(join(home, ".openclaw", "openclaw.json"), JSON.stringify({ channels: { slack: true }, mcp: { servers: { other: { command: "x" } } } }));
+    writeFileSync(
+      join(home, ".openclaw", "openclaw.json"),
+      JSON.stringify({ channels: { slack: true }, mcp: { servers: { other: { command: "x" } } } }),
+    );
     const result = registerOpenClawMcp({ ...MCP, homeDir: home });
     expect(result.registered).toBe(true);
     const config = JSON.parse(readFileSync(result.path, "utf8"));
@@ -202,7 +213,9 @@ describe("registerOpenClawPlugin", () => {
     // an un-tracked build artifact absent on fresh clones / CI / release tarballs.
     expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "index.js"))).toBe(true);
     expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "site", "index.html"))).toBe(true);
-    expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "skills", "orchestrate", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(home, ".openclaw", "extensions", "smithers", "skills", "orchestrate", "SKILL.md"))).toBe(
+      true,
+    );
     const config = JSON.parse(readFileSync(join(home, ".openclaw", "openclaw.json"), "utf8"));
     expect(config.plugins.entries.smithers.enabled).toBe(true);
   });
@@ -284,9 +297,15 @@ describe("wireExtraAgents", () => {
     mkdirSync(join(home, ".hermes"), { recursive: true });
     mkdirSync(join(home, ".openclaw"), { recursive: true });
     const results = wireExtraAgents({ kind: "mcp", homeDir: home });
-    const wired = results.filter((r) => r.registered).map((r) => r.agent).sort();
+    const wired = results
+      .filter((r) => r.registered)
+      .map((r) => r.agent)
+      .sort();
     expect(wired).toEqual(["Hermes", "OpenClaw"]);
-    const plugins = results.filter((r) => r.installedPlugin).map((r) => r.agent).sort();
+    const plugins = results
+      .filter((r) => r.installedPlugin)
+      .map((r) => r.agent)
+      .sort();
     expect(plugins).toEqual(["Hermes", "OpenClaw"]);
   });
 

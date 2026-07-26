@@ -25,9 +25,10 @@ describe("fallbackStory", () => {
       "The paper trail: docs",
     ]);
     expect(story.chapters[0].blocks[0].kind).toBe("prose");
-    expect(
-      story.chapters[0].blocks.filter((block) => block.kind === "diff").map((block) => block.path),
-    ).toEqual(["apps/web/src/app.ts", "apps/web/src/router.ts"]);
+    expect(story.chapters[0].blocks.filter((block) => block.kind === "diff").map((block) => block.path)).toEqual([
+      "apps/web/src/app.ts",
+      "apps/web/src/router.ts",
+    ]);
     expect(story.headline).toBe("Change walkthrough: apps/web");
     expect(story.synopsis).toBe("5 areas changed; apps/web carries most of the churn.");
   });

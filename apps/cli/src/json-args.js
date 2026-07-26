@@ -10,18 +10,17 @@ export const CLI_JSON_ARGUMENT_MAX_BYTES = 1024 * 1024;
  * @returns {string | undefined}
  */
 export function readJsonArgumentPayload(raw, label) {
-    if (!raw)
-        return undefined;
-    if (raw === "-") {
-        const payload = readFileSync(0, "utf8");
-        assertMaxBytes(label, payload, CLI_JSON_ARGUMENT_MAX_BYTES);
-        if (payload.trim().length === 0) {
-            throw new SmithersError("INVALID_JSON", `Invalid JSON for ${label}: stdin was empty`);
-        }
-        return payload;
+  if (!raw) return undefined;
+  if (raw === "-") {
+    const payload = readFileSync(0, "utf8");
+    assertMaxBytes(label, payload, CLI_JSON_ARGUMENT_MAX_BYTES);
+    if (payload.trim().length === 0) {
+      throw new SmithersError("INVALID_JSON", `Invalid JSON for ${label}: stdin was empty`);
     }
-    assertMaxBytes(label, raw, CLI_JSON_ARGUMENT_MAX_BYTES);
-    return raw;
+    return payload;
+  }
+  assertMaxBytes(label, raw, CLI_JSON_ARGUMENT_MAX_BYTES);
+  return raw;
 }
 
 /**
@@ -29,16 +28,15 @@ export function readJsonArgumentPayload(raw, label) {
  * @param {string} label
  */
 export function parseJsonArgument(raw, label) {
-    const payload = readJsonArgumentPayload(raw, label);
-    if (payload === undefined) {
-        return undefined;
-    }
-    try {
-        return JSON.parse(payload);
-    }
-    catch (err) {
-        throw new SmithersError("INVALID_JSON", `Invalid JSON for ${label}: ${err?.message ?? String(err)}`);
-    }
+  const payload = readJsonArgumentPayload(raw, label);
+  if (payload === undefined) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(payload);
+  } catch (err) {
+    throw new SmithersError("INVALID_JSON", `Invalid JSON for ${label}: ${err?.message ?? String(err)}`);
+  }
 }
 
 /**
@@ -56,17 +54,16 @@ export function parseJsonArgument(raw, label) {
  * @returns {{ ok: true, value: unknown } | { ok: false, error: { code: string; message: string; exitCode: number } }}
  */
 export function tryParseJsonInput(raw, label) {
-    try {
-        return { ok: true, value: parseJsonArgument(raw, label) };
-    }
-    catch (err) {
-        return {
-            ok: false,
-            error: {
-                code: err instanceof SmithersError ? err.code : "INVALID_JSON",
-                message: err?.message ?? String(err),
-                exitCode: 4,
-            },
-        };
-    }
+  try {
+    return { ok: true, value: parseJsonArgument(raw, label) };
+  } catch (err) {
+    return {
+      ok: false,
+      error: {
+        code: err instanceof SmithersError ? err.code : "INVALID_JSON",
+        message: err?.message ?? String(err),
+        exitCode: 4,
+      },
+    };
+  }
 }

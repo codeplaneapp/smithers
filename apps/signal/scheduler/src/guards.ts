@@ -16,7 +16,10 @@ export function isWatchdogFireTime(etHour: number, etMinute: number): boolean {
 
 export async function timingSafeEqual(a: string, b: string): Promise<boolean> {
   const encoder = new TextEncoder();
-  const [digestA, digestB] = await Promise.all([crypto.subtle.digest("SHA-256", encoder.encode(a)), crypto.subtle.digest("SHA-256", encoder.encode(b))]);
+  const [digestA, digestB] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(a)),
+    crypto.subtle.digest("SHA-256", encoder.encode(b)),
+  ]);
   const bytesA = new Uint8Array(digestA);
   const bytesB = new Uint8Array(digestB);
   let diff = 0;

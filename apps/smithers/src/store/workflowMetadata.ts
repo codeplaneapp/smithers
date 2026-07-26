@@ -127,8 +127,7 @@ export const WORKFLOW_METADATA: Record<string, WorkflowMetadata> = {
     icon: "🔎",
     category: "Audit",
     color: "#b5532a",
-    starter:
-      "Audit these feature groups for tests, docs, observability, and maintainability gaps:\n\n",
+    starter: "Audit these feature groups for tests, docs, observability, and maintainability gaps:\n\n",
   },
   mission: {
     icon: "🎯",
@@ -140,15 +139,13 @@ export const WORKFLOW_METADATA: Record<string, WorkflowMetadata> = {
     icon: "📌",
     category: "Tickets",
     color: "#d18b1a",
-    starter:
-      "Implement the ticket files in .smithers/tickets/ on worktree branches:\n\n",
+    starter: "Implement the ticket files in .smithers/tickets/ on worktree branches:\n\n",
   },
   "workflow-skill": {
     icon: "📚",
     category: "Docs",
     color: "#356fd2",
-    starter:
-      "Generate agent-facing skill documentation from the local Smithers workflows.",
+    starter: "Generate agent-facing skill documentation from the local Smithers workflows.",
   },
   "create-workflow": {
     icon: "🏗️",
@@ -260,8 +257,6 @@ export function toStoreWorkflow(summary: GatewayWorkflowSummary): StoreWorkflow 
 }
 
 /** Map a live `listWorkflows` payload to the store's `StoreWorkflow[]`. */
-export function mapToStoreWorkflows(
-  summaries: readonly GatewayWorkflowSummary[],
-): StoreWorkflow[] {
+export function mapToStoreWorkflows(summaries: readonly GatewayWorkflowSummary[]): StoreWorkflow[] {
   return summaries.map(toStoreWorkflow);
 }

@@ -28,7 +28,7 @@ describe("KimiAgent output interpreter", () => {
         content: "working on it",
         tool_calls: [
           "not-a-record",
-          { id: "call-1", function: { name: "read_file", arguments: "{\"p\":1}" } },
+          { id: "call-1", function: { name: "read_file", arguments: '{"p":1}' } },
           { function: {} },
         ],
       }),
@@ -40,21 +40,15 @@ describe("KimiAgent output interpreter", () => {
     expect(toolStarts[0].action.title).toBe("read_file");
     expect(toolStarts[1].action.title).toBe("tool");
 
-    const toolResult = interp.onStdoutLine(
-      JSON.stringify({ role: "tool", tool_call_id: "call-1", content: "done" }),
-    );
-    expect(toolResult).toEqual([
-      expect.objectContaining({ type: "action", phase: "completed", message: "done" }),
-    ]);
+    const toolResult = interp.onStdoutLine(JSON.stringify({ role: "tool", tool_call_id: "call-1", content: "done" }));
+    expect(toolResult).toEqual([expect.objectContaining({ type: "action", phase: "completed", message: "done" })]);
 
     // a tool message without an id falls back to a synthetic id
     const toolResultNoId = interp.onStdoutLine(JSON.stringify({ role: "tool", content: "x" }));
     expect(toolResultNoId[0].action.id).toContain("kimi-tool");
 
     const done = interp.onExit({ exitCode: 0, stderr: "" });
-    expect(done).toEqual([
-      expect.objectContaining({ type: "completed", ok: true, answer: "working on it" }),
-    ]);
+    expect(done).toEqual([expect.objectContaining({ type: "completed", ok: true, answer: "working on it" })]);
     // a second exit is a no-op once completed was emitted
     expect(interp.onExit({ exitCode: 0, stderr: "" })).toEqual([]);
   });
@@ -124,12 +118,7 @@ describe("CodexAgent output interpreter", () => {
         item: {
           type: "file_change",
           id: "fc-1",
-          changes: [
-            "not-a-record",
-            { path: "src/a.js", kind: "M" },
-            { path: "only-path" },
-            { kind: "A" },
-          ],
+          changes: ["not-a-record", { path: "src/a.js", kind: "M" }, { path: "only-path" }, { kind: "A" }],
         },
       }),
     );

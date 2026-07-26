@@ -12,14 +12,7 @@ export type SuggestionProps = Omit<ComponentProps<"button">, "onClick" | "childr
 };
 
 /** Ghost pill carrying one prompt suggestion; fires onClick with the suggestion text. */
-export function Suggestion({
-  suggestion,
-  onClick,
-  children,
-  className,
-  type,
-  ...props
-}: SuggestionProps) {
+export function Suggestion({ suggestion, onClick, children, className, type, ...props }: SuggestionProps) {
   useInjectUiCss();
   useInjectLaneCss(SOURCES_CITATIONS_CSS_ID, sourcesCitationsCss);
   return (
@@ -40,14 +33,7 @@ export type SuggestionGroupProps = ComponentProps<"div">;
 const ARROW_SCROLL_PX = 160;
 
 /** Horizontally scrollable row of prompt suggestion chips (not a tablist). */
-export function SuggestionGroup({
-  className,
-  children,
-  role,
-  onWheel,
-  onKeyDown,
-  ...props
-}: SuggestionGroupProps) {
+export function SuggestionGroup({ className, children, role, onWheel, onKeyDown, ...props }: SuggestionGroupProps) {
   useInjectUiCss();
   useInjectLaneCss(SOURCES_CITATIONS_CSS_ID, sourcesCitationsCss);
   const ref = useRef<HTMLDivElement | null>(null);

@@ -143,10 +143,12 @@ describe("recoverInProgressRewindAudits", () => {
         [now + 60_000, "run-renewed", "renewed-owner"],
       );
 
-      expect(await recoverInProgressRewindAudits(second, {
-        nowMs: () => now,
-        staleAfterMs: 1_000,
-      })).toEqual({ recovered: [] });
+      expect(
+        await recoverInProgressRewindAudits(second, {
+          nowMs: () => now,
+          staleAfterMs: 1_000,
+        }),
+      ).toEqual({ recovered: [] });
       expect((await listRewindAuditRows(first, { runId: "run-live" }))[0]?.result).toBe("in_progress");
       expect((await listRewindAuditRows(first, { runId: "run-renewed" }))[0]?.result).toBe("in_progress");
     } finally {
@@ -201,9 +203,7 @@ describe("recoverInProgressRewindAudits", () => {
         recoverInProgressRewindAudits(second, { nowMs: () => now, staleAfterMs: 0 }),
       ]);
 
-      expect([...left.recovered, ...right.recovered]).toEqual([
-        { id: id as number, runId: "run-concurrent" },
-      ]);
+      expect([...left.recovered, ...right.recovered]).toEqual([{ id: id as number, runId: "run-concurrent" }]);
       expect((await listRewindAuditRows(first, { runId: "run-concurrent" }))[0]?.result).toBe("partial");
     } finally {
       secondSqlite.close();
@@ -227,10 +227,12 @@ describe("recoverInProgressRewindAudits", () => {
         return rows;
       }) as typeof second.internalStorage.queryAllRaw;
 
-      expect(await recoverInProgressRewindAudits(second, {
-        nowMs: () => now,
-        staleAfterMs: 0,
-      })).toEqual({ recovered: [{ id: id as number, runId: "run-boundary-lease" }] });
+      expect(
+        await recoverInProgressRewindAudits(second, {
+          nowMs: () => now,
+          staleAfterMs: 0,
+        }),
+      ).toEqual({ recovered: [{ id: id as number, runId: "run-boundary-lease" }] });
       expect(insertedLease).toBe(true);
       expect((await listRewindAuditRows(first, { runId: "run-boundary-lease" }))[0]?.result).toBe("partial");
       expect((await first.getRun("run-boundary-lease"))?.status).toBe("running");
@@ -244,10 +246,12 @@ describe("recoverInProgressRewindAudits", () => {
     const { firstSqlite, secondSqlite, first, second } = setupFileDb();
     try {
       await seedAudit(first, "run-terminal", 1_000, "success", 77);
-      expect(await recoverInProgressRewindAudits(second, {
-        nowMs: () => 500_000,
-        staleAfterMs: 0,
-      })).toEqual({ recovered: [] });
+      expect(
+        await recoverInProgressRewindAudits(second, {
+          nowMs: () => 500_000,
+          staleAfterMs: 0,
+        }),
+      ).toEqual({ recovered: [] });
       expect((await listRewindAuditRows(first, { runId: "run-terminal" }))[0]).toMatchObject({
         result: "success",
         durationMs: 77,

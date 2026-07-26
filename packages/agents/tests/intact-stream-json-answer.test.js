@@ -133,7 +133,13 @@ async function makeMultiTurnClaude(answer) {
       },
     },
     { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: answer }] } },
-    { type: "result", subtype: "success", is_error: false, result: answer, usage: { input_tokens: 10, output_tokens: 5 } },
+    {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: answer,
+      usage: { input_tokens: 10, output_tokens: 5 },
+    },
   ];
   const script = [
     "#!/usr/bin/env node",

@@ -11,13 +11,11 @@ import { readWorktreeOwnerFile, WORKTREE_OWNER_FILE } from "./worktreeOwnerFile.
  * @returns {Promise<string | null>}
  */
 async function resolveGitCommonDir(rootDir) {
-    const res = await runGit(rootDir, ["rev-parse", "--git-common-dir"]);
-    if (res.code !== 0)
-        return null;
-    const raw = res.stdout.trim();
-    if (!raw)
-        return null;
-    return resolve(rootDir, raw);
+  const res = await runGit(rootDir, ["rev-parse", "--git-common-dir"]);
+  if (res.code !== 0) return null;
+  const raw = res.stdout.trim();
+  if (!raw) return null;
+  return resolve(rootDir, raw);
 }
 
 /**
@@ -25,13 +23,12 @@ async function resolveGitCommonDir(rootDir) {
  * @returns {string | null}
  */
 function readWorktreeCheckoutPath(adminDir) {
-    try {
-        const gitdir = readFileSync(join(adminDir, "gitdir"), "utf8").trim();
-        return gitdir ? dirname(resolve(gitdir)) : null;
-    }
-    catch {
-        return null;
-    }
+  try {
+    const gitdir = readFileSync(join(adminDir, "gitdir"), "utf8").trim();
+    return gitdir ? dirname(resolve(gitdir)) : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -45,29 +42,25 @@ function readWorktreeCheckoutPath(adminDir) {
  * @returns {Promise<SmithersWorktree[]>}
  */
 export async function listSmithersWorktrees(rootDir) {
-    const commonDir = await resolveGitCommonDir(rootDir);
-    if (!commonDir)
-        return [];
-    const worktreesDir = join(commonDir, "worktrees");
-    if (!existsSync(worktreesDir))
-        return [];
-    /** @type {SmithersWorktree[]} */
-    const entries = [];
-    for (const name of readdirSync(worktreesDir)) {
-        const adminDir = join(worktreesDir, name);
-        const owner = readWorktreeOwnerFile(join(adminDir, WORKTREE_OWNER_FILE));
-        if (!owner)
-            continue;
-        const path = readWorktreeCheckoutPath(adminDir);
-        if (!path)
-            continue;
-        entries.push({
-            path,
-            adminDir,
-            owner,
-            exists: existsSync(path),
-            locked: existsSync(join(adminDir, "locked")),
-        });
-    }
-    return entries.sort((a, b) => a.path.localeCompare(b.path));
+  const commonDir = await resolveGitCommonDir(rootDir);
+  if (!commonDir) return [];
+  const worktreesDir = join(commonDir, "worktrees");
+  if (!existsSync(worktreesDir)) return [];
+  /** @type {SmithersWorktree[]} */
+  const entries = [];
+  for (const name of readdirSync(worktreesDir)) {
+    const adminDir = join(worktreesDir, name);
+    const owner = readWorktreeOwnerFile(join(adminDir, WORKTREE_OWNER_FILE));
+    if (!owner) continue;
+    const path = readWorktreeCheckoutPath(adminDir);
+    if (!path) continue;
+    entries.push({
+      path,
+      adminDir,
+      owner,
+      exists: existsSync(path),
+      locked: existsSync(join(adminDir, "locked")),
+    });
+  }
+  return entries.sort((a, b) => a.path.localeCompare(b.path));
 }

@@ -16,26 +16,24 @@ import { decodeJwtClaims } from "./decodeJwtClaims.js";
  * @returns {{ accessToken: string; accountId?: string } | null}
  */
 export function readCodexCredentials(account) {
-    if (!account.configDir) return null;
-    const path = join(account.configDir, "auth.json");
-    if (!existsSync(path)) return null;
-    let json;
-    try {
-        json = JSON.parse(readFileSync(path, "utf8"));
-    } catch {
-        return null;
-    }
-    const tokens = json?.tokens;
-    const accessToken = tokens?.access_token;
-    if (typeof accessToken !== "string" || accessToken === "") return null;
-    let accountId = typeof tokens?.account_id === "string" ? tokens.account_id : undefined;
-    if (!accountId) {
-        const claims = decodeJwtClaims(tokens?.id_token);
-        const authClaim = /** @type {Record<string, unknown> | undefined} */ (
-            claims["https://api.openai.com/auth"]
-        );
-        const fromClaim = authClaim?.chatgpt_account_id;
-        if (typeof fromClaim === "string") accountId = fromClaim;
-    }
-    return { accessToken, accountId };
+  if (!account.configDir) return null;
+  const path = join(account.configDir, "auth.json");
+  if (!existsSync(path)) return null;
+  let json;
+  try {
+    json = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+  const tokens = json?.tokens;
+  const accessToken = tokens?.access_token;
+  if (typeof accessToken !== "string" || accessToken === "") return null;
+  let accountId = typeof tokens?.account_id === "string" ? tokens.account_id : undefined;
+  if (!accountId) {
+    const claims = decodeJwtClaims(tokens?.id_token);
+    const authClaim = /** @type {Record<string, unknown> | undefined} */ (claims["https://api.openai.com/auth"]);
+    const fromClaim = authClaim?.chatgpt_account_id;
+    if (typeof fromClaim === "string") accountId = fromClaim;
+  }
+  return { accessToken, accountId };
 }

@@ -10,7 +10,13 @@ describe("serializeRunRow", () => {
         startedBy: { harness: "codex", sessionId: "thread-1", prompt: "explicit", detected: true },
       }),
     });
-    expect(row).toMatchObject({ workflowKey: "deploy", startedBy: { harness: "codex", sessionId: "thread-1", prompt: "explicit", detected: true } });
-    expect(serializeRunRow({ runId: "bad", configJson: JSON.stringify({ startedBy: { harness: "codex", extra: true } }) }).startedBy).toBeUndefined();
+    expect(row).toMatchObject({
+      workflowKey: "deploy",
+      startedBy: { harness: "codex", sessionId: "thread-1", prompt: "explicit", detected: true },
+    });
+    expect(
+      serializeRunRow({ runId: "bad", configJson: JSON.stringify({ startedBy: { harness: "codex", extra: true } }) })
+        .startedBy,
+    ).toBeUndefined();
   });
 });

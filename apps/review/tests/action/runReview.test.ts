@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runReview } from "../../action/src/runReview";
 
-const FAKE_BUN = fileURLToPath(new URL(process.platform === "win32" ? "./fixtures/fake-bun.cmd" : "./fixtures/fake-bun", import.meta.url));
+const FAKE_BUN = fileURLToPath(
+  new URL(process.platform === "win32" ? "./fixtures/fake-bun.cmd" : "./fixtures/fake-bun", import.meta.url),
+);
 
 afterEach(() => {
   delete process.env.SMITHERS_FAKE_BUN_LOG;

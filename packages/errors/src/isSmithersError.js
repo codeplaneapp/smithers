@@ -5,5 +5,5 @@ import { SmithersError } from "./SmithersError.js";
  * @returns {value is SmithersError}
  */
 export function isSmithersError(value) {
-    return value instanceof SmithersError;
+  return value instanceof SmithersError;
 }

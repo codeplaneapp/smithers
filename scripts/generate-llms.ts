@@ -158,10 +158,7 @@ const CORE_PAGES = [
   "reference/sota-models.mdx",
 ];
 
-const MEMORY_PAGES = [
-  "concepts/memory.mdx",
-  "guides/memory-quickstart.mdx",
-];
+const MEMORY_PAGES = ["concepts/memory.mdx", "guides/memory-quickstart.mdx"];
 
 // The UI deep reference. Core already carries the base library page, the
 // gateway-ui widget catalog, the chat component pages, and the custom
@@ -185,10 +182,7 @@ const UI_PAGES = [
   "guides/workflow-ui-design.mdx",
 ];
 
-const OPENAPI_PAGES = [
-  "concepts/openapi-tools.mdx",
-  "guides/openapi-tools-quickstart.mdx",
-];
+const OPENAPI_PAGES = ["concepts/openapi-tools.mdx", "guides/openapi-tools-quickstart.mdx"];
 
 const OBSERVABILITY_PAGES = [
   "integrations/server.mdx",
@@ -197,14 +191,9 @@ const OBSERVABILITY_PAGES = [
   "integrations/mcp-server.mdx",
 ];
 
-const EVENT_PAGES = [
-  "runtime/events.mdx",
-  "reference/event-types.mdx",
-];
+const EVENT_PAGES = ["runtime/events.mdx", "reference/event-types.mdx"];
 
-const EFFECT_PAGES = [
-  "effect/overview.mdx",
-];
+const EFFECT_PAGES = ["effect/overview.mdx"];
 
 const INTEGRATIONS_PAGES = [
   "integrations/integrations.mdx",
@@ -317,8 +306,10 @@ const HEADERS = {
   openapi: "> Smithers OpenAPI tools: turn an OpenAPI spec into AI SDK tools, with auth, filters, and observability.",
   observability: "> Smithers observability surface: HTTP server, gateway, MCP, OpenTelemetry, metrics.",
   effect: "> Smithers Effect-ts authoring API: build workflows as Effect values without JSX or React.",
-  integrations: "> Smithers integrations: agent runtimes (Claude Code, Codex, Gemini, Pi), tool surfaces, ecosystem partners.",
-  events: "> Smithers event surface: how to subscribe, the event categories, and the full SmithersEvent discriminated union.",
+  integrations:
+    "> Smithers integrations: agent runtimes (Claude Code, Codex, Gemini, Pi), tool surfaces, ecosystem partners.",
+  events:
+    "> Smithers event surface: how to subscribe, the event categories, and the full SmithersEvent discriminated union.",
 };
 
 const builds: Array<{ file: string; pages: string[]; header: string; name: string }> = [
@@ -326,9 +317,19 @@ const builds: Array<{ file: string; pages: string[]; header: string; name: strin
   { file: "llms-ui.txt", pages: UI_PAGES, header: HEADERS.ui, name: "Smithers UI" },
   { file: "llms-memory.txt", pages: MEMORY_PAGES, header: HEADERS.memory, name: "Smithers Memory" },
   { file: "llms-openapi.txt", pages: OPENAPI_PAGES, header: HEADERS.openapi, name: "Smithers OpenAPI Tools" },
-  { file: "llms-observability.txt", pages: OBSERVABILITY_PAGES, header: HEADERS.observability, name: "Smithers Observability" },
+  {
+    file: "llms-observability.txt",
+    pages: OBSERVABILITY_PAGES,
+    header: HEADERS.observability,
+    name: "Smithers Observability",
+  },
   { file: "llms-effect.txt", pages: EFFECT_PAGES, header: HEADERS.effect, name: "Smithers Effect API" },
-  { file: "llms-integrations.txt", pages: INTEGRATIONS_PAGES, header: HEADERS.integrations, name: "Smithers Integrations" },
+  {
+    file: "llms-integrations.txt",
+    pages: INTEGRATIONS_PAGES,
+    header: HEADERS.integrations,
+    name: "Smithers Integrations",
+  },
   { file: "llms-events.txt", pages: EVENT_PAGES, header: HEADERS.events, name: "Smithers Events" },
 ];
 
@@ -379,12 +380,11 @@ for (const b of builds) {
     "===============================================================================",
     "",
   ].join("\n");
-  const fullContent = fullHeader + fragmentBodies.join("\n\n===============================================================================\n\n");
+  const fullContent =
+    fullHeader +
+    fragmentBodies.join("\n\n===============================================================================\n\n");
   writeFileSync(resolve(DOCS, "llms-full.txt"), fullContent);
-  const versionedFullResult = versionedArtifacts.write(
-    resolve(DOCS, `llms-full-v${PACKAGE_VERSION}.txt`),
-    fullContent,
-  );
+  const versionedFullResult = versionedArtifacts.write(resolve(DOCS, `llms-full-v${PACKAGE_VERSION}.txt`), fullContent);
   writeFileSync(resolve(PACKAGE_DOCS, "llms-full.txt"), fullContent);
   const bytes = fullContent.length;
   console.log(`\n→ llms-full.txt (full concat)`);
@@ -473,10 +473,7 @@ Examples:
 `;
 
 writeFileSync(resolve(DOCS, "llms.txt"), indexContent);
-const versionedIndexResult = versionedArtifacts.write(
-  resolve(DOCS, `llms-v${PACKAGE_VERSION}.txt`),
-  indexContent,
-);
+const versionedIndexResult = versionedArtifacts.write(resolve(DOCS, `llms-v${PACKAGE_VERSION}.txt`), indexContent);
 writeFileSync(resolve(PACKAGE_DOCS, "llms.txt"), indexContent);
 console.log(`\n→ llms.txt (index)`);
 if (versionedIndexResult === "written") {
@@ -490,4 +487,6 @@ writeFileSync(resolve(CLI_DOCS_DIR, "llms.txt"), indexContent);
 console.log(`\n→ apps/cli/docs/llms.txt (packaged CLI copy)`);
 console.log(`  ${indexContent.length.toLocaleString()} bytes`);
 
-console.log(`\nTotal: ${totalBytes.toLocaleString()} bytes (~${Math.round(totalBytes / 4).toLocaleString()} tokens) across all fragments.`);
+console.log(
+  `\nTotal: ${totalBytes.toLocaleString()} bytes (~${Math.round(totalBytes / 4).toLocaleString()} tokens) across all fragments.`,
+);

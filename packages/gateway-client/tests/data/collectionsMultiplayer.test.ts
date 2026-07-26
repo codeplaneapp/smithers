@@ -123,9 +123,10 @@ describe("createSmithersCollections multiplayer", () => {
     // optimistic insert rolls back.
     const noTxidFetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input));
-      const body = url.pathname === "/v1/api/crons" && init?.method === "POST"
-        ? { ok: true, data: { cronId: "c-no-txid" } }
-        : { ok: true, data: {} };
+      const body =
+        url.pathname === "/v1/api/crons" && init?.method === "POST"
+          ? { ok: true, data: { cronId: "c-no-txid" } }
+          : { ok: true, data: {} };
       return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
     }) as unknown as typeof fetch;
     const client = createSmithersDataClient({ mode: multiplayerMode, fetch: noTxidFetch });

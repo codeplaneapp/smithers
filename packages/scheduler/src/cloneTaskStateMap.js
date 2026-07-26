@@ -1,4 +1,3 @@
-
 /** @typedef {import("./ReadonlyTaskStateMap.ts").ReadonlyTaskStateMap} ReadonlyTaskStateMap */
 /** @typedef {import("./TaskStateMap.ts").TaskStateMap} TaskStateMap */
 /**
@@ -6,5 +5,5 @@
  * @returns {TaskStateMap}
  */
 export function cloneTaskStateMap(states) {
-    return new Map(states);
+  return new Map(states);
 }

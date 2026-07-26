@@ -86,12 +86,7 @@ export function ticketSnippet(content: string, maxLength = 92): string {
 
   for (const line of lines) {
     const trimmed = line.trim();
-    if (
-      trimmed.length === 0 ||
-      trimmed.startsWith("#") ||
-      trimmed.startsWith("---") ||
-      metadataLine(trimmed)
-    ) {
+    if (trimmed.length === 0 || trimmed.startsWith("#") || trimmed.startsWith("---") || metadataLine(trimmed)) {
       continue;
     }
     return truncateSnippet(trimmed, effectiveMax);
@@ -105,9 +100,7 @@ export function searchTickets(tickets: Ticket[], query: string): Ticket[] {
   const needle = query.trim().toLowerCase();
   if (needle.length === 0) return tickets;
   return tickets.filter(
-    (ticket) =>
-      ticket.id.toLowerCase().includes(needle) ||
-      ticket.content.toLowerCase().includes(needle),
+    (ticket) => ticket.id.toLowerCase().includes(needle) || ticket.content.toLowerCase().includes(needle),
   );
 }
 
@@ -139,9 +132,7 @@ export function createTicket(
 
 /** Set one ticket's content and stamp it "just now"; immutable. */
 export function updateTicket(tickets: Ticket[], id: string, content: string): Ticket[] {
-  return tickets.map((ticket) =>
-    ticket.id === id ? { ...ticket, content, updated: "just now" } : ticket,
-  );
+  return tickets.map((ticket) => (ticket.id === id ? { ...ticket, content, updated: "just now" } : ticket));
 }
 
 /** Drop one ticket by id; immutable. */

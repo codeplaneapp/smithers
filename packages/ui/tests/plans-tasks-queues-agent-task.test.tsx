@@ -104,9 +104,7 @@ describe("TaskItem extensions", () => {
     const label = item.querySelector(".sui-taskitem-label")!;
     const chip = item.querySelector('[data-slot="task-item-file"]')!;
     expect(chip.textContent).toContain("src/index.ts");
-    expect(
-      label.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(label.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   test("TaskItemFile renders an optional leading icon", async () => {

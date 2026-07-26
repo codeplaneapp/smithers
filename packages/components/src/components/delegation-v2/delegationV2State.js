@@ -53,9 +53,7 @@ export function delegationV2RowForNode(rows, nodeId, ctx) {
   let selected;
   let selectedIteration = -Infinity;
   for (const row of delegationV2RowsForNode(rows, nodeId, ctx)) {
-    const iteration = Number.isFinite(Number(row?.iteration))
-      ? Number(row.iteration)
-      : 0;
+    const iteration = Number.isFinite(Number(row?.iteration)) ? Number(row.iteration) : 0;
     if (!selected || iteration >= selectedIteration) {
       selected = row;
       selectedIteration = iteration;
@@ -100,10 +98,10 @@ export function buildDelegationV2EvidencePacket(rows, maxChars = 48_000) {
     logicalId: typeof row?.logicalId === "string" ? row.logicalId : undefined,
     role: row?.role,
     work: row?.work,
-	outputContract: row?.outputContract,
-	assignmentDigest: row?.assignmentDigest,
-	acceptanceCriterionIds: row?.acceptanceCriterionIds,
-	programDigest: row?.programDigest,
+    outputContract: row?.outputContract,
+    assignmentDigest: row?.assignmentDigest,
+    acceptanceCriterionIds: row?.acceptanceCriterionIds,
+    programDigest: row?.programDigest,
     status: row?.status,
     product: row?.product,
     blockage: row?.blockage,

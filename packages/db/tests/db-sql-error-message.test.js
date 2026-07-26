@@ -37,16 +37,11 @@ describe("SqlError diagnostic message (SQLite)", () => {
     const storage = new SqlMessageStorage(new Database(":memory:"));
     await storage.ensureSchema();
 
-    const longPredicate = Array.from(
-      { length: 200 },
-      (_, i) => `col_${i} = ${i}`,
-    ).join("   OR   ");
+    const longPredicate = Array.from({ length: 200 }, (_, i) => `col_${i} = ${i}`).join("   OR   ");
 
     let caught;
     try {
-      await storage.queryAll(
-        `SELECT *\n  FROM __missing_table__\n  WHERE ${longPredicate}`,
-      );
+      await storage.queryAll(`SELECT *\n  FROM __missing_table__\n  WHERE ${longPredicate}`);
     } catch (error) {
       caught = error;
     }

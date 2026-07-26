@@ -45,41 +45,50 @@ import { DelegationEditListener } from "./DelegationEditListener.js";
  * @param {DelegationChainProps} props
  */
 export function DelegationChain(props) {
-    if (props.skipIf)
-        return null;
-    const shared = {
-        idPrefix: props.idPrefix,
-        agents: props.agents,
-        outputs: props.outputs,
-        approvalPolicy: props.approvalPolicy,
-        tierOrder: props.tierOrder,
-        maxDepth: props.maxDepth,
-        maxConcurrency: props.maxConcurrency,
-        maxDeriskRounds: props.maxDeriskRounds,
-        poll: props.poll,
-        budget: props.budget,
-        scorers: props.scorers,
-    };
-    const phases = React.createElement(Sequence, { label: "delegation-chain" },
-        React.createElement(GoalRefinement, {
-            ...shared,
-            prompt: props.prompt,
-            maxQuestions: props.maxQuestions,
-            prefetchDepth: props.prefetchDepth,
-        }),
-        React.createElement(DelegationPlanning, shared),
-        React.createElement(DelegationPreview, shared),
-        React.createElement(BackpressurePlanning, shared),
-        React.createElement(DeriskLoop, shared),
-        React.createElement(DelegationExecution, { ...shared, maxAttempts: props.maxAttempts }),
-        React.createElement(DelegationScoring, shared));
-    const body = React.createElement(Parallel, { label: "delegation-chain (with edit listener)" },
-        phases,
-        React.createElement(DelegationEditListener, { ...shared, maxEdits: props.maxEdits }));
-    if (props.budget?.maxMinutes !== undefined) {
-        return React.createElement(Aspects, {
-            latencySlo: { maxMs: props.budget.maxMinutes * 60_000, onExceeded: "fail" },
-        }, body);
-    }
-    return body;
+  if (props.skipIf) return null;
+  const shared = {
+    idPrefix: props.idPrefix,
+    agents: props.agents,
+    outputs: props.outputs,
+    approvalPolicy: props.approvalPolicy,
+    tierOrder: props.tierOrder,
+    maxDepth: props.maxDepth,
+    maxConcurrency: props.maxConcurrency,
+    maxDeriskRounds: props.maxDeriskRounds,
+    poll: props.poll,
+    budget: props.budget,
+    scorers: props.scorers,
+  };
+  const phases = React.createElement(
+    Sequence,
+    { label: "delegation-chain" },
+    React.createElement(GoalRefinement, {
+      ...shared,
+      prompt: props.prompt,
+      maxQuestions: props.maxQuestions,
+      prefetchDepth: props.prefetchDepth,
+    }),
+    React.createElement(DelegationPlanning, shared),
+    React.createElement(DelegationPreview, shared),
+    React.createElement(BackpressurePlanning, shared),
+    React.createElement(DeriskLoop, shared),
+    React.createElement(DelegationExecution, { ...shared, maxAttempts: props.maxAttempts }),
+    React.createElement(DelegationScoring, shared),
+  );
+  const body = React.createElement(
+    Parallel,
+    { label: "delegation-chain (with edit listener)" },
+    phases,
+    React.createElement(DelegationEditListener, { ...shared, maxEdits: props.maxEdits }),
+  );
+  if (props.budget?.maxMinutes !== undefined) {
+    return React.createElement(
+      Aspects,
+      {
+        latencySlo: { maxMs: props.budget.maxMinutes * 60_000, onExceeded: "fail" },
+      },
+      body,
+    );
+  }
+  return body;
 }

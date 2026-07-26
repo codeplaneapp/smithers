@@ -22,32 +22,18 @@ export function LogsCanvas() {
   const toggleHideNoise = useLogsPrefsStore((state) => state.toggleHideNoise);
   const toggleRedact = useLogsPrefsStore((state) => state.toggleRedact);
 
-  const lines = AUTH_REFACTOR_LOG.filter(
-    (line) => !(hideNoise && line.role === "noise"),
-  );
+  const lines = AUTH_REFACTOR_LOG.filter((line) => !(hideNoise && line.role === "noise"));
 
   return (
     <section className="surface" data-testid="logs-canvas">
       <header className="surface-head logs-toolbar">
-        <button
-          type="button"
-          className={follow ? "chip is-on" : "chip"}
-          onClick={toggleFollow}
-        >
+        <button type="button" className={follow ? "chip is-on" : "chip"} onClick={toggleFollow}>
           Follow {follow ? "▾" : "▸"}
         </button>
-        <button
-          type="button"
-          className={hideNoise ? "chip is-on" : "chip"}
-          onClick={toggleHideNoise}
-        >
+        <button type="button" className={hideNoise ? "chip is-on" : "chip"} onClick={toggleHideNoise}>
           Hide noise
         </button>
-        <button
-          type="button"
-          className={redact ? "chip is-on" : "chip"}
-          onClick={toggleRedact}
-        >
+        <button type="button" className={redact ? "chip is-on" : "chip"} onClick={toggleRedact}>
           Redact
         </button>
         <span className="logs-search">search transcript</span>

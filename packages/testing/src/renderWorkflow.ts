@@ -14,16 +14,8 @@ type EngineOutputHelpers = {
   resolveTaskOutputs: (tasks: readonly TaskDescriptor[], workflow: unknown) => void;
 };
 type TaskComputeFnHelpers = {
-  attachSubflowComputeFns: (
-    tasks: readonly TaskDescriptor[],
-    workflow: unknown,
-    opts: ComputeFnOptions,
-  ) => void;
-  attachSandboxComputeFns: (
-    tasks: readonly TaskDescriptor[],
-    workflow: unknown,
-    opts: ComputeFnOptions,
-  ) => void;
+  attachSubflowComputeFns: (tasks: readonly TaskDescriptor[], workflow: unknown, opts: ComputeFnOptions) => void;
+  attachSandboxComputeFns: (tasks: readonly TaskDescriptor[], workflow: unknown, opts: ComputeFnOptions) => void;
 };
 
 type OutputSnapshot = Record<string, unknown[]>;
@@ -103,14 +95,10 @@ export async function renderWorkflow<Schema = unknown>(
   // under Node. Deferring the import keeps the module Node-loadable while the
   // post-render pass still runs when `renderWorkflow` executes under Bun.
   const baseRootDir = options.baseRootDir ?? options.runtimeConfig?.baseRootDir;
-  const workflowPath =
-    options.workflowPath ?? options.runtimeConfig?.workflowPath ?? null;
-  const engineHelpers = (await import(
-    "@smithers-orchestrator/engine/engine"
-  )) as unknown as EngineOutputHelpers;
-  const computeHelpers = (await import(
-    "@smithers-orchestrator/engine/task-compute-fns"
-  )) as unknown as TaskComputeFnHelpers;
+  const workflowPath = options.workflowPath ?? options.runtimeConfig?.workflowPath ?? null;
+  const engineHelpers = (await import("@smithers-orchestrator/engine/engine")) as unknown as EngineOutputHelpers;
+  const computeHelpers =
+    (await import("@smithers-orchestrator/engine/task-compute-fns")) as unknown as TaskComputeFnHelpers;
   engineHelpers.resolveTaskOutputs(graph.tasks, workflow);
   computeHelpers.attachSubflowComputeFns(graph.tasks, workflow, {
     rootDir: baseRootDir,

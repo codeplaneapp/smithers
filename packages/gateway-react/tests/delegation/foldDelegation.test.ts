@@ -116,7 +116,14 @@ const ROOT_PLAN_V1 = plan(
     child("root/packaging", "chunk", "opus", est(40, 4, 20)),
   ],
   est(400, 40, 220),
-  [{ id: "r-reactflow", description: "ReactFlow re-layout under live invalidation", probe: "poc", reason: "jank risk" }],
+  [
+    {
+      id: "r-reactflow",
+      description: "ReactFlow re-layout under live invalidation",
+      probe: "poc",
+      reason: "jank risk",
+    },
+  ],
 );
 
 /** Frame 2 — fable decomposition (goal done, root plan streams children). */
@@ -125,13 +132,21 @@ function frame2Records(): DelegationRecord[] {
 }
 
 const C1_GATES = gates("root/core", [checkGate("bun test"), checkGate("pnpm typecheck"), reviewGate("fable")], []);
-const C2_PLAN_V1 = plan("root/components", "opus", [child("root/components/composites", "leaf", "sonnet", est(70, 7, 30))], est(80, 8, 40));
+const C2_PLAN_V1 = plan(
+  "root/components",
+  "opus",
+  [child("root/components/composites", "leaf", "sonnet", est(70, 7, 30))],
+  est(80, 8, 40),
+);
 const C2_GATES = gates("root/components", [reviewGate("fable"), checkGate("pnpm typecheck")], ["root/core"]);
 const C3_GATES = gates("root/scorers", [checkGate("bun test"), reviewGate("opus")], ["root/core", "root/components"]);
 const C4_PLAN_V1 = plan(
   "root/ui",
   "opus",
-  [child("root/ui/canvas", "leaf", "sonnet", est(40, 4, 20)), child("root/ui/inspector", "leaf", "sonnet", est(30, 3, 20))],
+  [
+    child("root/ui/canvas", "leaf", "sonnet", est(40, 4, 20)),
+    child("root/ui/inspector", "leaf", "sonnet", est(30, 3, 20)),
+  ],
   est(90, 9, 50),
 );
 const C4_GATES = gates("root/ui", [reviewGate("fable"), checkGate("pnpm typecheck")], ["root/core"]);
@@ -158,7 +173,12 @@ function frame4Records(): DelegationRecord[] {
 }
 
 const C2_REPLAN_INVALIDATED = replan(1, "root/components", "invalidated", "probe", "h1");
-const C2_PLAN_V2 = plan("root/components", "opus", [child("root/components/composites", "leaf", "sonnet", est(70, 7, 30))], est(120, 12, 50));
+const C2_PLAN_V2 = plan(
+  "root/components",
+  "opus",
+  [child("root/components/composites", "leaf", "sonnet", est(70, 7, 30))],
+  est(120, 12, 50),
+);
 
 /** Frame 6 — probe findings bubble; c2 invalidated + replanned; cascade. */
 function frame6Records(): DelegationRecord[] {
@@ -174,11 +194,19 @@ function frame6Records(): DelegationRecord[] {
   ];
 }
 
-const C4_EDIT = { editId: "e1", logicalId: "root/ui", editedOutput: "reuse the DDD WYSIWYG editor everywhere", note: "user edit" };
+const C4_EDIT = {
+  editId: "e1",
+  logicalId: "root/ui",
+  editedOutput: "reuse the DDD WYSIWYG editor everywhere",
+  note: "user edit",
+};
 const C4_PLAN_V2 = plan(
   "root/ui",
   "opus",
-  [child("root/ui/canvas", "leaf", "sonnet", est(40, 4, 20)), child("root/ui/inspector", "leaf", "sonnet", est(30, 3, 20))],
+  [
+    child("root/ui/canvas", "leaf", "sonnet", est(40, 4, 20)),
+    child("root/ui/inspector", "leaf", "sonnet", est(30, 3, 20)),
+  ],
   est(100, 10, 55),
 );
 
@@ -197,7 +225,12 @@ function frame7Records(): DelegationRecord[] {
 function frame9Records(): DelegationRecord[] {
   return [
     ...frame7Records(),
-    rec("dcExec", "dc:root/ui/inspector:exec", 0, exec("root/ui/inspector", 1, { tokens: 50, costUsd: 5, minutes: 25 })),
+    rec(
+      "dcExec",
+      "dc:root/ui/inspector:exec",
+      0,
+      exec("root/ui/inspector", 1, { tokens: 50, costUsd: 5, minutes: 25 }),
+    ),
     rec("dcReview", "dc:root/ui/inspector:review", 0, review("root/ui/inspector", 1, "fail")),
     rec("dcExec", "dc:root/ui/inspector:exec", 1, exec("root/ui/inspector", 2, { tokens: 20, costUsd: 2 })),
     rec("dcReview", "dc:root/ui/inspector:review", 1, review("root/ui/inspector", 2, "pass")),
@@ -216,7 +249,10 @@ describe("parseDelegationNodeId / delegationTableForNodeId", () => {
     // Gateway node ids forbid `/`; emitters (components physicalId()) encode
     // logical `/` as `:` — the parser decodes either form to the same logical id.
     expect(parseDelegationNodeId("dc:root:core:plan")).toEqual({ logicalId: "root/core", phase: "plan" });
-    expect(parseDelegationNodeId("dc:root:core:schemas:exec")).toEqual({ logicalId: "root/core/schemas", phase: "exec" });
+    expect(parseDelegationNodeId("dc:root:core:schemas:exec")).toEqual({
+      logicalId: "root/core/schemas",
+      phase: "exec",
+    });
     expect(delegationTableForNodeId("dc:root:ui:dev-preview-2")).toBe("dcDevPreview");
     expect(delegationTableForNodeId("dc:root/core:probe-1")).toBe("dcProbe");
     expect(delegationTableForNodeId("dc:root:gates")).toBe("dcGates");
@@ -352,7 +388,12 @@ describe("foldDelegation — frame 9 (review fail, redelegation attempt history)
   test("a failed review then a fresh attempt stays WITHIN the version", () => {
     const afterFail = foldDelegation([
       ...frame7Records(),
-      rec("dcExec", "dc:root/ui/inspector:exec", 0, exec("root/ui/inspector", 1, { tokens: 50, costUsd: 5, minutes: 25 })),
+      rec(
+        "dcExec",
+        "dc:root/ui/inspector:exec",
+        0,
+        exec("root/ui/inspector", 1, { tokens: 50, costUsd: 5, minutes: 25 }),
+      ),
       rec("dcReview", "dc:root/ui/inspector:review", 0, review("root/ui/inspector", 1, "fail")),
     ]);
     expect(afterFail.nodes["root/ui/inspector"]!.status).toBe("failed");
@@ -360,7 +401,12 @@ describe("foldDelegation — frame 9 (review fail, redelegation attempt history)
 
     const retrying = foldDelegation([
       ...frame7Records(),
-      rec("dcExec", "dc:root/ui/inspector:exec", 0, exec("root/ui/inspector", 1, { tokens: 50, costUsd: 5, minutes: 25 })),
+      rec(
+        "dcExec",
+        "dc:root/ui/inspector:exec",
+        0,
+        exec("root/ui/inspector", 1, { tokens: 50, costUsd: 5, minutes: 25 }),
+      ),
       rec("dcReview", "dc:root/ui/inspector:review", 0, review("root/ui/inspector", 1, "fail")),
       rec("dcExec", "dc:root/ui/inspector:exec", 1, exec("root/ui/inspector", 2, { tokens: 20, costUsd: 2 })),
     ]);
@@ -411,10 +457,9 @@ describe("foldDelegation — determinism", () => {
 describe("foldDelegation — tolerance", () => {
   test("unknown tables are ignored (and reported), not fatal", () => {
     const issues: DelegationFoldIssue[] = [];
-    const graph = foldDelegation(
-      [...frame4Records(), rec("dcBogus", "dc:root:bogus", 0, { anything: true })],
-      { onIgnored: (issue) => issues.push(issue) },
-    );
+    const graph = foldDelegation([...frame4Records(), rec("dcBogus", "dc:root:bogus", 0, { anything: true })], {
+      onIgnored: (issue) => issues.push(issue),
+    });
     expect(issues).toEqual([
       { record: rec("dcBogus", "dc:root:bogus", 0, { anything: true }), reason: "unknown-table" },
     ]);
@@ -422,9 +467,23 @@ describe("foldDelegation — tolerance", () => {
   });
 
   test("malformed rows are collected as issues and skipped", () => {
-    const badPlan = rec("dcPlan", "dc:root/x:plan", 0, { logicalId: "root/x", tier: "opus", title: "x", brief: "x", children: "nope", subtreeEstimate: est(1, 1, 1), risks: [] });
+    const badPlan = rec("dcPlan", "dc:root/x:plan", 0, {
+      logicalId: "root/x",
+      tier: "opus",
+      title: "x",
+      brief: "x",
+      children: "nope",
+      subtreeEstimate: est(1, 1, 1),
+      risks: [],
+    });
     const badExec = rec("dcExec", "dc:root/core:exec", 0, { logicalId: "root/core", attempt: 1, artifacts: [] });
-    const badReplan = rec("dcReplan", "dc:root:replan-1", 0, { round: 1, logicalId: "root", decision: "meh", reason: "?", trigger: { type: "probe", ref: "x" } });
+    const badReplan = rec("dcReplan", "dc:root:replan-1", 0, {
+      round: 1,
+      logicalId: "root",
+      decision: "meh",
+      reason: "?",
+      trigger: { type: "probe", ref: "x" },
+    });
     const issues: DelegationFoldIssue[] = [];
     const graph = foldDelegation([...frame4Records(), badPlan, badExec, badReplan], {
       onIgnored: (issue) => issues.push(issue),
@@ -475,7 +534,10 @@ describe("foldDelegation — awaiting-human & attention rollup", () => {
 
   test("approval-only phases parse as delegation ids but map to no output table", () => {
     expect(parseDelegationNodeId("dc:goal:approve")).toEqual({ logicalId: "goal", phase: "approve" });
-    expect(parseDelegationNodeId("dc:root:core:x:approval-2")).toEqual({ logicalId: "root/core/x", phase: "approval-2" });
+    expect(parseDelegationNodeId("dc:root:core:x:approval-2")).toEqual({
+      logicalId: "root/core/x",
+      phase: "approval-2",
+    });
     expect(delegationTableForNodeId("dc:goal:approve")).toBeNull();
     expect(delegationTableForNodeId("dc:root:core:x:approval-2")).toBeNull();
     // Unknown phases stay excluded from the delegation namespace.
@@ -496,8 +558,18 @@ describe("foldDelegation — awaiting-human & attention rollup", () => {
   function nestedLeafRecords(): DelegationRecord[] {
     return [
       GOAL,
-      rec("dcPlan", "dc:root:plan", 0, plan("root", "fable", [child("root/core", "chunk", "opus", est(20, 2, 10))], est(30, 3, 15))),
-      rec("dcPlan", "dc:root:core:plan", 0, plan("root/core", "opus", [child("root/core/x", "leaf", "sonnet", est(10, 1, 5))], est(20, 2, 10))),
+      rec(
+        "dcPlan",
+        "dc:root:plan",
+        0,
+        plan("root", "fable", [child("root/core", "chunk", "opus", est(20, 2, 10))], est(30, 3, 15)),
+      ),
+      rec(
+        "dcPlan",
+        "dc:root:core:plan",
+        0,
+        plan("root/core", "opus", [child("root/core/x", "leaf", "sonnet", est(10, 1, 5))], est(20, 2, 10)),
+      ),
     ];
   }
 
@@ -576,7 +648,10 @@ describe("foldDelegation — goal phase, questions, skip, poll, scores", () => {
   test("preview rows mark nodes previewing and count as the preview phase", () => {
     const graph = foldDelegation([
       ...frame2Records(),
-      rec("dcPreview", "dc:root/core:preview", 0, { logicalId: "root/core", expectedOutput: "function reduce(state, ev) { … }" }),
+      rec("dcPreview", "dc:root/core:preview", 0, {
+        logicalId: "root/core",
+        expectedOutput: "function reduce(state, ev) { … }",
+      }),
     ]);
     expect(graph.phase).toBe("preview");
     expect(graph.nodes["root/core"]!.status).toBe("previewing");
@@ -611,10 +686,7 @@ describe("foldDelegation — developer previews (preview gates + dcDevPreview)",
   const base = () => [...frame9Records(), rec("dcGates", "dc:root/ui/canvas:gates", 0, CANVAS_GATES)];
 
   test("preview gates are valid gates and executed nodes wait on them", () => {
-    const graph = foldDelegation([
-      ...base(),
-      rec("dcExec", "dc:root/ui/canvas:exec", 0, exec("root/ui/canvas", 1)),
-    ]);
+    const graph = foldDelegation([...base(), rec("dcExec", "dc:root/ui/canvas:exec", 0, exec("root/ui/canvas", 1))]);
     expect(graph.nodes["root/ui/canvas"]!.gates).toEqual([previewGate]);
     // Executed, but the declared developer preview has not reported: not done.
     expect(graph.nodes["root/ui/canvas"]!.status).toBe("running");
@@ -664,7 +736,14 @@ describe("foldDelegation — developer previews (preview gates + dcDevPreview)",
   test("malformed dev-preview rows are tolerated", () => {
     const issues: DelegationFoldIssue[] = [];
     const graph = foldDelegation(
-      [...base(), rec("dcDevPreview", "dc:root/ui/canvas:dev-preview", 0, { logicalId: "root/ui/canvas", kind: "hologram", builtOk: true })],
+      [
+        ...base(),
+        rec("dcDevPreview", "dc:root/ui/canvas:dev-preview", 0, {
+          logicalId: "root/ui/canvas",
+          kind: "hologram",
+          builtOk: true,
+        }),
+      ],
       { onIgnored: (issue) => issues.push(issue) },
     );
     expect(issues.map((issue) => issue.reason)).toEqual(["malformed-row"]);

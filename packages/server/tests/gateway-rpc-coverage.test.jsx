@@ -25,7 +25,9 @@ const cleanups = [];
 
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) {
-    try { await cleanup(); } catch {}
+    try {
+      await cleanup();
+    } catch {}
   }
 });
 
@@ -37,13 +39,12 @@ function makeWorkspace(name) {
 }
 
 function createValueWorkflow(dbPath) {
-  const { smithers, Workflow, Task, outputs } = createSmithers(
-    { result: z.object({ value: z.number() }) },
-    { dbPath },
-  );
+  const { smithers, Workflow, Task, outputs } = createSmithers({ result: z.object({ value: z.number() }) }, { dbPath });
   const workflow = smithers((ctx) => (
     <Workflow name="rpc-cov">
-      <Task id="task1" output={outputs.result}>{{ value: Number(ctx.input?.value ?? 1) }}</Task>
+      <Task id="task1" output={outputs.result}>
+        {{ value: Number(ctx.input?.value ?? 1) }}
+      </Task>
     </Workflow>
   ));
   return { workflow, dbPath };
@@ -100,7 +101,11 @@ describe("gateway disk/DB RPC coverage", () => {
     try {
       symlinkSync(join(promptsDir, "does-not-exist"), join(promptsDir, "dangling-link"));
     } catch {}
-    cleanups.push(() => { try { chmodSync(locked, 0o755); } catch {} });
+    cleanups.push(() => {
+      try {
+        chmodSync(locked, 0o755);
+      } catch {}
+    });
 
     const dbPath = join(root, "wf.db");
     const { workflow } = createValueWorkflow(dbPath);
@@ -192,7 +197,11 @@ describe("gateway disk/DB RPC coverage", () => {
     // Seed >=2 memory facts across namespaces so the cross-workflow sort runs.
     const raw = workflow.db.$client;
     const nowMs = Date.now();
-    for (const [ns, key] of [["alpha", "one"], ["alpha", "two"], ["beta", "one"]]) {
+    for (const [ns, key] of [
+      ["alpha", "one"],
+      ["alpha", "two"],
+      ["beta", "one"],
+    ]) {
       raw.run(
         "INSERT INTO _smithers_memory_facts (namespace, key, value_json, schema_sig, created_at_ms, updated_at_ms, ttl_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
         [ns, key, JSON.stringify({ v: 1 }), "sig", nowMs, nowMs, null],
@@ -207,7 +216,12 @@ describe("gateway disk/DB RPC coverage", () => {
 
     // Ticket CRUD: create -> list -> update (content + status) -> delete, plus
     // the not-found and re-create/revive branches.
-    const created = await rpc(baseUrl, "createTicket", { path: "docs/plan.md", content: "hello", kind: "plan", status: "todo" });
+    const created = await rpc(baseUrl, "createTicket", {
+      path: "docs/plan.md",
+      content: "hello",
+      kind: "plan",
+      status: "todo",
+    });
     expect(created.json.ok).toBe(true);
     expect(created.json.payload.contentHash).toBeDefined();
     // Re-create the same path revives/overwrites (existing row path).
@@ -220,7 +234,11 @@ describe("gateway disk/DB RPC coverage", () => {
     const listedKind = await rpc(baseUrl, "listTickets", { kind: "plan" });
     expect(listedKind.json.ok).toBe(true);
 
-    const updated = await rpc(baseUrl, "updateTicket", { path: "docs/plan.md", content: "updated body", status: "done" });
+    const updated = await rpc(baseUrl, "updateTicket", {
+      path: "docs/plan.md",
+      content: "updated body",
+      status: "done",
+    });
     expect(updated.json.ok).toBe(true);
     expect(updated.json.payload.content).toBe("updated body");
     // Status-only update keeps the existing content/hash.

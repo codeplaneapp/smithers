@@ -3,9 +3,7 @@ import { findDescriptor } from "../src/findDescriptor.js";
 
 describe("findDescriptor", () => {
   test("is a keyed lookup, never a linear scan (issue #546)", () => {
-    const descriptors = new Map([
-      ["someOtherKey", { nodeId: "real", iteration: 0 }],
-    ]);
+    const descriptors = new Map([["someOtherKey", { nodeId: "real", iteration: 0 }]]);
     expect(findDescriptor(descriptors, "real")).toBeUndefined();
   });
 

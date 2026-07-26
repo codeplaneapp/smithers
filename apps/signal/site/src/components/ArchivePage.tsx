@@ -15,7 +15,12 @@ export function ArchivePage(props: { dates: string[]; onOpen: (date: string) => 
           {sorted.map((date) => (
             <li key={date}>
               <button type="button" onClick={() => props.onOpen(date)}>
-                {new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+                {new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", {
+                  weekday: "long",
+                  year: "numeric",
+                  month: "long",
+                  day: "numeric",
+                })}
               </button>
             </li>
           ))}

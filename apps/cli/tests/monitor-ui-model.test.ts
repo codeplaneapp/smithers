@@ -85,7 +85,9 @@ import { predictRunUsage } from "../src/monitor-ui/usagePrediction.ts";
 
 describe("embedded monitor bootstrap", () => {
   test("parses embed selection, validated origin, and explicit theme", () => {
-    expect(embedModeFromSearch("?embed=1&runId=run-1&nodeId=build&hostOrigin=https%3A%2F%2Fhost.example%2F&theme=dark")).toEqual({
+    expect(
+      embedModeFromSearch("?embed=1&runId=run-1&nodeId=build&hostOrigin=https%3A%2F%2Fhost.example%2F&theme=dark"),
+    ).toEqual({
       embed: true,
       runId: "run-1",
       nodeId: "build",
@@ -222,7 +224,15 @@ describe("connection states", () => {
     expect(copy).toContain("credentials or permissions are required");
     expect(copy).toContain("token");
     // No outage vocabulary: an auth failure must not masquerade as one.
-    for (const outageWord of ["offline", "network", "unreachable", "can't reach", "not responding", "restarted", "outage"]) {
+    for (const outageWord of [
+      "offline",
+      "network",
+      "unreachable",
+      "can't reach",
+      "not responding",
+      "restarted",
+      "outage",
+    ]) {
       expect(copy).not.toContain(outageWord);
     }
   });
@@ -241,14 +251,23 @@ describe("connection states", () => {
 
 describe("run grouping", () => {
   test("reads compact attribution defensively and searches harness/session without exposing prompts", () => {
-    expect(startedByOf({
-      configJson: JSON.stringify({ startedBy: { harness: " codex ", sessionId: " thread-1 ", detected: true, prompt: "private" } }),
-    })).toEqual({ harness: "codex", sessionId: "thread-1", detected: true });
+    expect(
+      startedByOf({
+        configJson: JSON.stringify({
+          startedBy: { harness: " codex ", sessionId: " thread-1 ", detected: true, prompt: "private" },
+        }),
+      }),
+    ).toEqual({ harness: "codex", sessionId: "thread-1", detected: true });
     expect(startedByOf({ configJson: "not json" })).toBeUndefined();
-    expect(filterRuns([
-      { runId: "run-a", status: "running", startedBy: { harness: "codex", sessionId: "thread-1" } },
-      { runId: "run-b", status: "running" },
-    ], { status: "all", workflow: "all", text: "thread-1" }).map((run) => run.runId)).toEqual(["run-a"]);
+    expect(
+      filterRuns(
+        [
+          { runId: "run-a", status: "running", startedBy: { harness: "codex", sessionId: "thread-1" } },
+          { runId: "run-b", status: "running" },
+        ],
+        { status: "all", workflow: "all", text: "thread-1" },
+      ).map((run) => run.runId),
+    ).toEqual(["run-a"]);
   });
 
   test("groups waiting runs under needs-attention, first in order", () => {
@@ -259,13 +278,7 @@ describe("run grouping", () => {
       { runId: "d", status: "failed", createdAtMs: 4 },
       { runId: "e", status: "cancelled", createdAtMs: 5 },
     ]);
-    expect(groups.map((group) => group.group)).toEqual([
-      "attention",
-      "active",
-      "completed",
-      "failed",
-      "cancelled",
-    ]);
+    expect(groups.map((group) => group.group)).toEqual(["attention", "active", "completed", "failed", "cancelled"]);
     expect(groups[0]?.runs.map((run) => run.runId)).toEqual(["b"]);
   });
 
@@ -383,7 +396,7 @@ describe("lifecycle predicates", () => {
 
 describe("progress", () => {
   test("derives done/failed/total from the node-state summary", () => {
-    const progress = runProgress({ "finished": 3, "in-progress": 1, "failed": 1, "pending": 1 });
+    const progress = runProgress({ finished: 3, "in-progress": 1, failed: 1, pending: 1 });
     expect(progress).toEqual({ done: 3, failed: 1, total: 6, fraction: 4 / 6 });
   });
 
@@ -408,7 +421,9 @@ describe("progress", () => {
 
   test("runErrorOf reads the run-level errorJson message", () => {
     expect(
-      runErrorOf({ errorJson: JSON.stringify({ name: "SmithersError", code: "WORKFLOW_RENDER_FAILED", message: "render threw" }) }),
+      runErrorOf({
+        errorJson: JSON.stringify({ name: "SmithersError", code: "WORKFLOW_RENDER_FAILED", message: "render threw" }),
+      }),
     ).toBe("render threw");
     expect(runErrorOf({ errorJson: { message: "object form" } })).toBe("object form");
     expect(runErrorOf({ errorJson: "not json" })).toBe("not json");
@@ -583,7 +598,13 @@ describe("event lines", () => {
         iteration: 0,
         attempt: 1,
         engine: "claude",
-        event: { type: "completed", engine: "claude", ok: true, answer: "All tests pass; committed the fix.", resume: "sess-1" },
+        event: {
+          type: "completed",
+          engine: "claude",
+          ok: true,
+          answer: "All tests pass; committed the fix.",
+          resume: "sess-1",
+        },
         timestampMs: 3,
       },
     });
@@ -616,7 +637,14 @@ describe("event lines", () => {
     const line = formatEventLine({
       event: "FrameCommitted",
       seq: 17,
-      payload: { type: "FrameCommitted", runId: "r1", frameNo: 12, xmlHash: "abc123", trigger: "node-finished", timestampMs: 4 },
+      payload: {
+        type: "FrameCommitted",
+        runId: "r1",
+        frameNo: 12,
+        xmlHash: "abc123",
+        trigger: "node-finished",
+        timestampMs: 4,
+      },
     });
     expect(line.detail).toBe("frame 12 · node-finished");
   });
@@ -1106,9 +1134,7 @@ describe("unified diff detection", () => {
   test("recognizes git and bare unified diffs", () => {
     expect(looksLikeUnifiedDiff(gitDiff)).toBe(true);
     expect(looksLikeUnifiedDiff("  \n" + gitDiff)).toBe(true);
-    expect(
-      looksLikeUnifiedDiff("--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-old\n+new"),
-    ).toBe(true);
+    expect(looksLikeUnifiedDiff("--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-old\n+new")).toBe(true);
   });
 
   test("rejects prose, JSON, and header pairs without hunks", () => {
@@ -1171,11 +1197,7 @@ describe("unified diff detection", () => {
       data: {
         seq: 3,
         baseRef: "abc",
-        patches: [
-          { path: "a.ts", diff: "diff --git a/a.ts b/a.ts" },
-          { path: "broken" },
-          "junk",
-        ],
+        patches: [{ path: "a.ts", diff: "diff --git a/a.ts b/a.ts" }, { path: "broken" }, "junk"],
       },
     };
     expect(diffPatchesOf(body)).toEqual([{ path: "a.ts", diff: "diff --git a/a.ts b/a.ts" }]);
@@ -1190,11 +1212,29 @@ describe("timeline", () => {
     const enveloped = nodeStateRowsOf({
       ok: true,
       data: [
-        { node_id: "plan", iteration: 0, state: "finished", last_attempt: 1, updated_at_ms: 50, started_at_ms: 10, finished_at_ms: 40, label: "Plan" },
+        {
+          node_id: "plan",
+          iteration: 0,
+          state: "finished",
+          last_attempt: 1,
+          updated_at_ms: 50,
+          started_at_ms: 10,
+          finished_at_ms: 40,
+          label: "Plan",
+        },
       ],
     });
     expect(enveloped).toEqual([
-      { nodeId: "plan", iteration: 0, state: "finished", lastAttempt: 1, updatedAtMs: 50, label: "Plan", startedAtMs: 10, finishedAtMs: 40 },
+      {
+        nodeId: "plan",
+        iteration: 0,
+        state: "finished",
+        lastAttempt: 1,
+        updatedAtMs: 50,
+        label: "Plan",
+        startedAtMs: 10,
+        finishedAtMs: 40,
+      },
     ]);
     const bare = nodeStateRowsOf([{ nodeId: "x", state: "failed" }, { state: "no-id" }, "junk"]);
     expect(bare).toEqual([{ nodeId: "x", iteration: 0, state: "failed" }]);
@@ -1332,7 +1372,7 @@ describe("parsePrometheusText", () => {
 
   test("skips malformed lines instead of failing the whole scrape", () => {
     const scrape = parsePrometheusText(
-      ["not a metric line", "m{unclosed=\"x} 1", "ok_metric 2", "bad_value abc", ""].join("\n"),
+      ["not a metric line", 'm{unclosed="x} 1', "ok_metric 2", "bad_value abc", ""].join("\n"),
     );
     expect(scrape.samples).toEqual([{ name: "ok_metric", labels: {}, value: 2 }]);
   });
@@ -1401,9 +1441,7 @@ describe("histogramStats", () => {
   });
 
   test("an all-zero histogram (fresh gateway) yields no rows", () => {
-    const empty = parsePrometheusText(
-      ['x_bucket{le="100"} 0', 'x_bucket{le="+Inf"} 0'].join("\n"),
-    );
+    const empty = parsePrometheusText(['x_bucket{le="100"} 0', 'x_bucket{le="+Inf"} 0'].join("\n"));
     expect(histogramStats(empty, "x", [])).toEqual([]);
   });
 
@@ -1588,16 +1626,46 @@ describe("scores", () => {
   const body = {
     ok: true,
     data: [
-      { nodeId: "verify", iteration: 0, attempt: 1, scorerId: "s1", scorerName: "tests-pass", score: 1, scoredAtMs: 100 },
-      { nodeId: "implement", iteration: 0, attempt: 0, scorerId: "s2", scorerName: "diff-quality", score: 0.62, reason: "minor nits", scoredAtMs: 300 },
-      { nodeId: "implement", iteration: 1, attempt: 0, scorerId: "s2", scorerName: "diff-quality", score: 0.31, scoredAtMs: 200 },
+      {
+        nodeId: "verify",
+        iteration: 0,
+        attempt: 1,
+        scorerId: "s1",
+        scorerName: "tests-pass",
+        score: 1,
+        scoredAtMs: 100,
+      },
+      {
+        nodeId: "implement",
+        iteration: 0,
+        attempt: 0,
+        scorerId: "s2",
+        scorerName: "diff-quality",
+        score: 0.62,
+        reason: "minor nits",
+        scoredAtMs: 300,
+      },
+      {
+        nodeId: "implement",
+        iteration: 1,
+        attempt: 0,
+        scorerId: "s2",
+        scorerName: "diff-quality",
+        score: 0.31,
+        scoredAtMs: 200,
+      },
     ],
   };
 
   test("scoreRowsOf reads the wire rows, newest first, tolerating snake_case", () => {
     const rows = scoreRowsOf(body);
     expect(rows.map((row) => row.scoredAtMs)).toEqual([300, 200, 100]);
-    expect(rows[0]).toMatchObject({ nodeId: "implement", scorerName: "diff-quality", score: 0.62, reason: "minor nits" });
+    expect(rows[0]).toMatchObject({
+      nodeId: "implement",
+      scorerName: "diff-quality",
+      score: 0.62,
+      reason: "minor nits",
+    });
     const snake = scoreRowsOf([{ node_id: "n", scorer_id: "x", scorer_name: "X", score: 0.5 }]);
     expect(snake[0]).toMatchObject({ nodeId: "n", scorerName: "X", iteration: 0, attempt: 0 });
   });
@@ -1889,12 +1957,28 @@ describe("rate-limit window rows", () => {
 
 describe("usage share rows", () => {
   test("sorts by spend, scales the largest bar to full width, and caps rows", () => {
-    const rows = usageShareRows(new Map([["codex", 30_000], ["claude", 60_000], ["noop", 0]]), 8);
+    const rows = usageShareRows(
+      new Map([
+        ["codex", 30_000],
+        ["claude", 60_000],
+        ["noop", 0],
+      ]),
+      8,
+    );
     expect(rows).toEqual([
       { key: "claude", tokens: 60_000, fraction: 1 },
       { key: "codex", tokens: 30_000, fraction: 0.5 },
     ]);
-    expect(usageShareRows(new Map([["a", 1], ["b", 2], ["c", 3]]), 2).map((row) => row.key)).toEqual(["c", "b"]);
+    expect(
+      usageShareRows(
+        new Map([
+          ["a", 1],
+          ["b", 2],
+          ["c", 3],
+        ]),
+        2,
+      ).map((row) => row.key),
+    ).toEqual(["c", "b"]);
     expect(usageShareRows(new Map())).toEqual([]);
   });
 });

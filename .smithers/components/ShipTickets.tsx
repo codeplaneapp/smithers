@@ -56,7 +56,12 @@ function parseTitle(content: string, fallback: string): string {
 }
 
 function safeSlug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "ticket";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "ticket"
+  );
 }
 
 function pathHash(value: string): string {
@@ -116,22 +121,22 @@ type RawIteration = { iteration: number; iterationCount: number };
 
 function rawIteration(row: any): RawIteration {
   const iteration = Number.isFinite(Number(row?.iteration)) ? Number(row.iteration) : 0;
-  const iterationCount = Number.isFinite(Number(row?.iterationCount))
-    ? Number(row.iterationCount)
-    : iteration;
+  const iterationCount = Number.isFinite(Number(row?.iterationCount)) ? Number(row.iterationCount) : iteration;
   return { iteration, iterationCount };
 }
 
 function latestRaw(rows: any[], nodeId: string): any | undefined {
-  return rows.filter((row) => row?.nodeId === nodeId).reduce((best, row) => {
-    if (!best) return row;
-    const current = rawIteration(row);
-    const previous = rawIteration(best);
-    return current.iterationCount > previous.iterationCount ||
-      (current.iterationCount === previous.iterationCount && current.iteration >= previous.iteration)
-      ? row
-      : best;
-  }, undefined);
+  return rows
+    .filter((row) => row?.nodeId === nodeId)
+    .reduce((best, row) => {
+      if (!best) return row;
+      const current = rawIteration(row);
+      const previous = rawIteration(best);
+      return current.iterationCount > previous.iterationCount ||
+        (current.iterationCount === previous.iterationCount && current.iteration >= previous.iteration)
+        ? row
+        : best;
+    }, undefined);
 }
 
 /** Per-ticket done/feedback, scoped by slug and paired by current iteration. */
@@ -140,7 +145,9 @@ function buildFeedback(ctx: any, slug: string): { feedback: string | null; done:
   const review = latestRaw(rawRows(ctx, "review"), `${slug}:review:0`);
   const validateVersion = validate ? rawIteration(validate) : null;
   const reviewVersion = review ? rawIteration(review) : null;
-  const sameIteration = validateVersion !== null && reviewVersion !== null &&
+  const sameIteration =
+    validateVersion !== null &&
+    reviewVersion !== null &&
     validateVersion.iteration === reviewVersion.iteration &&
     validateVersion.iterationCount === reviewVersion.iterationCount;
 
@@ -198,18 +205,28 @@ function renderTicket(
     base,
     researchBlock,
     tdd ? "IMPORTANT: Write tests FIRST. The plan MUST start with test steps before any implementation steps." : null,
-  ].filter(Boolean).join("\n\n---\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n---\n");
 
   const implementPrompt = [
     base,
     researchBlock,
-    plan ? `IMPLEMENTATION PLAN:\n${plan.summary}\n\nSteps:\n${plan.steps.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}` : null,
+    plan
+      ? `IMPLEMENTATION PLAN:\n${plan.summary}\n\nSteps:\n${plan.steps.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`
+      : null,
     tdd ? "IMPORTANT: Follow the plan's test-first approach — tests before production code." : null,
-  ].filter(Boolean).join("\n\n---\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n---\n");
 
   return (
     <Sequence key={slug}>
-      <Worktree path={join(process.cwd(), ".worktrees", `ship-${slug}`)} branch={`ship/${slug}`} baseBranch={baseBranch}>
+      <Worktree
+        path={join(process.cwd(), ".worktrees", `ship-${slug}`)}
+        branch={`ship/${slug}`}
+        baseBranch={baseBranch}
+      >
         <Sequence>
           <Task id={`${slug}:research`} output={researchOutputSchema} agent={agents.research}>
             <ResearchPrompt prompt={base} />

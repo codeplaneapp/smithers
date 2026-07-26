@@ -85,7 +85,15 @@ describe("DevToolsStore edge accessors and branches", () => {
           name: "Workflow",
           props: { state: "running" },
           children: [
-            { id: 2, type: "task", name: "keyless", props: { state: "running" }, task: { nodeId: "", kind: "compute", label: "keyless", iteration: 0 }, children: [], depth: 1 },
+            {
+              id: 2,
+              type: "task",
+              name: "keyless",
+              props: { state: "running" },
+              task: { nodeId: "", kind: "compute", label: "keyless", iteration: 0 },
+              children: [],
+              depth: 1,
+            },
           ],
           depth: 0,
         },

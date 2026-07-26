@@ -33,17 +33,13 @@ export const LAUNCHABLES: Launchable[] = [
     id: "implement",
     name: "Implement",
     blurb: "plan → edit → test",
-    fields: [
-      { key: "task", label: "Task", type: "area", placeholder: "Describe the change…" },
-    ],
+    fields: [{ key: "task", label: "Task", type: "area", placeholder: "Describe the change…" }],
   },
   {
     id: "review",
     name: "Open Code Review",
     blurb: "review the current diff",
-    fields: [
-      { key: "target", label: "Target", type: "text", placeholder: "branch or PR #" },
-    ],
+    fields: [{ key: "target", label: "Target", type: "text", placeholder: "branch or PR #" }],
   },
 ];
 

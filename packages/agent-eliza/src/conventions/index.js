@@ -23,8 +23,4 @@ export { loadWorkflowsFromDir, loadWorkflows } from "./loader.js";
 
 export { formatWorkflowsForPrompt } from "./formatter.js";
 
-export {
-  registerWorkflows,
-  toSkill,
-  pluginToElizaPlugin,
-} from "./register.js";
+export { registerWorkflows, toSkill, pluginToElizaPlugin } from "./register.js";

@@ -79,7 +79,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     title: "Status must be earned",
     body:
-      "hello-world's feature is \"partial\", not \"fixed\", because its missing[] list still names a real gap. " +
+      'hello-world\'s feature is "partial", not "fixed", because its missing[] list still names a real gap. ' +
       "A feature only becomes fixed when the evidence (tests that exist and pass) proves it. " +
       "Agents are held to that: they make statuses more true, never more optimistic.",
     hint: "The Audit tab shows what the last audit found: broken, partial, and untested features.",
@@ -88,7 +88,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     title: "Edit docs, dispatch agents",
     body:
       "The Docs tab is a WYSIWYG editor over your product docs. Change the hello-world overview to say " +
-      "\"greeting supports --name\" and hit Dispatch: a workflow run picks up your docs change, triages it " +
+      '"greeting supports --name" and hit Dispatch: a workflow run picks up your docs change, triages it ' +
       "against the code, and implements it. Docs first, code follows.",
     hint: "Only the product docs are yours to edit. Low-level generated docs live behind the Technical docs menu; ask your agent to read those.",
   },
@@ -135,13 +135,19 @@ function SampleFeatureCard({ json }: { json: string }) {
       <div className="feature-card">
         <div className="feature-card-head">
           <strong>{title}</strong>
-          {status ? <span className={`badge ${statusClass(status)}`}>{statusLabels[status as FeatureStatus] ?? formatStatus(status)}</span> : null}
+          {status ? (
+            <span className={`badge ${statusClass(status)}`}>
+              {statusLabels[status as FeatureStatus] ?? formatStatus(status)}
+            </span>
+          ) : null}
         </div>
         {summary ? <p className="feature-card-summary">{summary}</p> : null}
         <div className="feature-card-foot">
           {priority ? <span className="pill muted">P{priority.replace(/^p/i, "")}</span> : null}
           {owner ? <span className="pill">Owner {owner}</span> : null}
-          {tests.length ? <span className="pill">{tests.length === 1 ? "1 test" : `${tests.length} tests`}</span> : null}
+          {tests.length ? (
+            <span className="pill">{tests.length === 1 ? "1 test" : `${tests.length} tests`}</span>
+          ) : null}
         </div>
         {missing.length ? (
           <div className="tutorial-sample-gap">
@@ -194,13 +200,17 @@ export function Tutorial({ open, onClose }: { open: boolean; onClose: () => void
         <div className="tutorial-head">
           <span className="eyebrow">Guided tour · hello-world</span>
           <div className="tutorial-head-actions">
-            <span className="pill">{step + 1} / {TUTORIAL_STEPS.length}</span>
+            <span className="pill">
+              {step + 1} / {TUTORIAL_STEPS.length}
+            </span>
             <button type="button" className="icon-button" aria-label="Close tutorial" onClick={finish}>
               x
             </button>
           </div>
         </div>
-        <h2 id="ddd-tutorial-title" className="tutorial-title">{current.title}</h2>
+        <h2 id="ddd-tutorial-title" className="tutorial-title">
+          {current.title}
+        </h2>
         <p className="tutorial-body">{current.body}</p>
         {current.sample ? <SampleFeatureCard json={current.sample} /> : null}
         <p className="tutorial-hint">{current.hint}</p>

@@ -43,7 +43,16 @@ describe("Sources", () => {
     await render(<Sources sources={[{ id: "one", label: "One" }]} />);
     expect(container!.querySelector('[data-slot="sources-trigger"]')?.textContent).toContain("Used 1 source");
 
-    await act(async () => root!.render(<Sources sources={[{ id: "one", label: "One" }, { id: "two", label: "Two" }]} />));
+    await act(async () =>
+      root!.render(
+        <Sources
+          sources={[
+            { id: "one", label: "One" },
+            { id: "two", label: "Two" },
+          ]}
+        />,
+      ),
+    );
     expect(container!.querySelector('[data-slot="sources-trigger"]')?.textContent).toContain("Used 2 sources");
   });
 

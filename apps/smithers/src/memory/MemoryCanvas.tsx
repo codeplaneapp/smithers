@@ -141,9 +141,7 @@ function FactsMode() {
   const facts = useMemoryStore((state) => state.facts);
   const namespaceFilter = useMemoryStore((state) => state.namespaceFilter);
   const selectFact = useMemoryStore((state) => state.selectFact);
-  const selected = useMemoryStore(
-    (state) => state.facts.find((fact) => fact.id === state.selectedFactId) ?? null,
-  );
+  const selected = useMemoryStore((state) => state.facts.find((fact) => fact.id === state.selectedFactId) ?? null);
 
   // Stable order: most-recently-updated first, so the table reads top-down.
   const visible = factsInNamespace(facts, namespaceFilter).sort((a, b) => b.updatedAtMs - a.updatedAtMs);

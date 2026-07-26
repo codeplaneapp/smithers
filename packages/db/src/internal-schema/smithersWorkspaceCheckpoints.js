@@ -1,5 +1,7 @@
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
-export const smithersWorkspaceCheckpoints = sqliteTable("_smithers_workspace_checkpoints", {
+export const smithersWorkspaceCheckpoints = sqliteTable(
+  "_smithers_workspace_checkpoints",
+  {
     runId: text("run_id").notNull(),
     nodeId: text("node_id").notNull(),
     iteration: integer("iteration").notNull().default(0),
@@ -12,6 +14,8 @@ export const smithersWorkspaceCheckpoints = sqliteTable("_smithers_workspace_che
     label: text("label"),
     toolUseId: text("tool_use_id"),
     createdAtMs: integer("created_at_ms").notNull(),
-}, (t) => ({
+  },
+  (t) => ({
     pk: primaryKey({ columns: [t.runId, t.nodeId, t.iteration, t.attempt, t.seq] }),
-}));
+  }),
+);

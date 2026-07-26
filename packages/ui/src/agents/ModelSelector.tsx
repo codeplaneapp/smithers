@@ -60,7 +60,9 @@ export function ModelSelector({
                     ))}
                   </ModelSelectorGroup>
                 ))
-              : (options ?? []).map((option) => <ModelSelectorItem key={option.id} value={option.id} option={option} />)}
+              : (options ?? []).map((option) => (
+                  <ModelSelectorItem key={option.id} value={option.id} option={option} />
+                ))}
           </ModelSelectorContent>
         </>
       )}
@@ -71,13 +73,17 @@ export function ModelSelector({
 export function ModelSelectorTrigger({ className, ...props }: ComponentProps<typeof SelectTrigger>) {
   useInjectUiCss();
   useInjectLaneCss(AGENT_IDENTITY_CONTEXT_CSS_ID, agentsCss);
-  return <SelectTrigger data-slot="model-selector-trigger" className={cn("sui-model-sel-trigger", className)} {...props} />;
+  return (
+    <SelectTrigger data-slot="model-selector-trigger" className={cn("sui-model-sel-trigger", className)} {...props} />
+  );
 }
 
 export function ModelSelectorContent({ className, ...props }: ComponentProps<typeof SelectContent>) {
   useInjectUiCss();
   useInjectLaneCss(AGENT_IDENTITY_CONTEXT_CSS_ID, agentsCss);
-  return <SelectContent data-slot="model-selector-content" className={cn("sui-model-sel-content", className)} {...props} />;
+  return (
+    <SelectContent data-slot="model-selector-content" className={cn("sui-model-sel-content", className)} {...props} />
+  );
 }
 
 export function ModelSelectorGroup({ className, ...props }: ComponentProps<typeof SelectGroup>) {

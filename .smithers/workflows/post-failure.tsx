@@ -44,16 +44,20 @@ const investigateSchema = z.looseObject({
       "workflow-bug = defect in the user's workflow script/prompts; environment = missing tool/auth/network; agent-flake = transient agent/provider fault; smithers-bug = defect in smithers itself (engine/CLI/components); unknown = evidence too thin.",
     ),
   confidence: z.enum(["low", "medium", "high"]).default("medium"),
-  evidence: z.array(z.string()).default([]).describe("Concrete lines from events/errors/source supporting the verdict."),
+  evidence: z
+    .array(z.string())
+    .default([])
+    .describe("Concrete lines from events/errors/source supporting the verdict."),
   suggestion: z
     .enum(["retry", "resume", "rewind", "edit-workflow-and-reset", "fix-environment", "escalate"])
     .describe("The single best next move for the user."),
-  suggestionDetail: z
-    .string()
-    .describe("What to actually do: the edit to make, the env fix, or why to escalate."),
+  suggestionDetail: z.string().describe("What to actually do: the edit to make, the env fix, or why to escalate."),
   commands: z.array(z.string()).default([]).describe("Exact CLI command(s) implementing the suggestion, in order."),
   bugTitle: z.string().default("").describe("When failureClass=smithers-bug: a one-line bug title."),
-  bugBody: z.string().default("").describe("When failureClass=smithers-bug: the full bug report body (repro, expected vs actual, evidence)."),
+  bugBody: z
+    .string()
+    .default("")
+    .describe("When failureClass=smithers-bug: the full bug report body (repro, expected vs actual, evidence)."),
 });
 
 const bugReportSchema = z.looseObject({
@@ -106,9 +110,7 @@ export default smithers((ctx) => {
   // while graph rendering gets a stable display-only placeholder.
   const inputTargetRunId = ctx.input?.targetRunId;
   const targetRunId =
-    typeof inputTargetRunId === "string" && inputTargetRunId.trim()
-      ? inputTargetRunId.trim()
-      : "<target-run-id>";
+    typeof inputTargetRunId === "string" && inputTargetRunId.trim() ? inputTargetRunId.trim() : "<target-run-id>";
   const workflowPath = ctx.input?.workflowPath ?? null;
 
   const gather = ctx.outputMaybe("gather", { nodeId: "gather" });
@@ -120,8 +122,7 @@ export default smithers((ctx) => {
   // The bug lane is settled when it isn't a smithers bug, when the human
   // denied, or when the report task has run.
   const bugLaneSettled =
-    investigate !== undefined &&
-    (!isSmithersBug || bugApproval?.approved === false || bugReport !== undefined);
+    investigate !== undefined && (!isSmithersBug || bugApproval?.approved === false || bugReport !== undefined);
 
   return (
     <Workflow name="post-failure">
@@ -197,7 +198,9 @@ export default smithers((ctx) => {
           timeoutMs={30 * 60_000}
           deps={{ gather: outputs.gather }}
         >
-          {(deps) => `You are the investigator in a post-failure autopsy. Smithers run "${targetRunId}" failed and this autopsy was launched automatically. Find out WHY, classify the failure, and produce ONE concrete suggestion.
+          {(
+            deps,
+          ) => `You are the investigator in a post-failure autopsy. Smithers run "${targetRunId}" failed and this autopsy was launched automatically. Find out WHY, classify the failure, and produce ONE concrete suggestion.
 
 You have shell access — use it for READ-ONLY digging only: \`bunx smithers-orchestrator inspect ${targetRunId} --format json\`, \`bunx smithers-orchestrator events ${targetRunId}\`, \`bunx smithers-orchestrator output ${targetRunId} <nodeId>\`, reading workflow/prompt source files, checking tool availability (\`which\`, versions), and reading logs. Do NOT mutate anything: no retry, no rewind, no edits, no commits — you only diagnose and recommend.
 
@@ -241,9 +244,10 @@ If (and only if) failureClass is "smithers-bug", also write \`bugTitle\` (one li
         {investigate && isSmithersBug && bugApproval?.approved ? (
           <Task id="report-bug" output={outputs.bugReport}>
             {async () => {
-              const res = await $`${cliRunner} smithers-orchestrator bug --run ${targetRunId} --title ${investigate.bugTitle || "Smithers failure detected by post-failure autopsy"} --body ${investigate.bugBody || investigate.rootCause} --json`
-                .nothrow()
-                .quiet();
+              const res =
+                await $`${cliRunner} smithers-orchestrator bug --run ${targetRunId} --title ${investigate.bugTitle || "Smithers failure detected by post-failure autopsy"} --body ${investigate.bugBody || investigate.rootCause} --json`
+                  .nothrow()
+                  .quiet();
               const text = res.stdout?.toString() ?? "";
               let bugId = "";
               let bugUrl = "";
@@ -258,7 +262,8 @@ If (and only if) failureClass is "smithers-bug", also write \`bugTitle\` (one li
                 filed: res.exitCode === 0,
                 bugId,
                 bugUrl,
-                detail: res.exitCode === 0 ? text.trim().slice(-500) : (res.stderr?.toString() ?? text).trim().slice(-500),
+                detail:
+                  res.exitCode === 0 ? text.trim().slice(-500) : (res.stderr?.toString() ?? text).trim().slice(-500),
               };
             }}
           </Task>

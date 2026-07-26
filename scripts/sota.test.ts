@@ -122,13 +122,16 @@ describe("the checked-in registry", () => {
 
     for (const file of readdirSync(WORKFLOWS_DIR).filter((entry) => entry.endsWith(".tsx"))) {
       const source = workflow(file);
-      if (/reviewAgents=\{agents\.[A-Za-z]+\}/.test(source) || /<Review\b[^>]*agents=\{agents\.[A-Za-z]+\}/s.test(source)) {
+      if (
+        /reviewAgents=\{agents\.[A-Za-z]+\}/.test(source) ||
+        /<Review\b[^>]*agents=\{agents\.[A-Za-z]+\}/s.test(source)
+      ) {
         flatReviewerPools.push(file);
       }
     }
 
     expect(flatReviewerPools).toEqual([]);
-    expect(readFileSync(CLI_WORKFLOW_PACK_PATH, "utf8")).not.toContain('reviewAgents={agents.review}');
+    expect(readFileSync(CLI_WORKFLOW_PACK_PATH, "utf8")).not.toContain("reviewAgents={agents.review}");
     expect(workflow("issue-222-integrations-agent-callable-tool-catalog.tsx")).toContain("reviewAgents={[solPool]}");
 
     const issue522 = workflow("issue-522-components-seven-composite-components-ar.tsx");
@@ -149,7 +152,7 @@ describe("the checked-in registry", () => {
     expect(sweep.match(/work: agents\.implement/g)?.length).toBe(3);
     expect(sweep).not.toMatch(/work: agents\.(smart|smartTool)/);
     expect(workflow("plue-demo-child.tsx")).toContain('model: "gpt-5.6-luna"');
-    expect(workflow("plue-demo-child.tsx")).not.toContain('agent={claude}');
+    expect(workflow("plue-demo-child.tsx")).not.toContain("agent={claude}");
   });
 
   test("shared role chains try registered Codex accounts before non-Codex backups", async () => {
@@ -161,13 +164,16 @@ describe("the checked-in registry", () => {
     const claude = resolve(bin, "claude");
     writeFileSync(claude, "#!/bin/sh\nexit 0\n");
     chmodSync(claude, 0o755);
-    writeFileSync(resolve(root, "accounts.json"), JSON.stringify({
-      version: 1,
-      accounts: [
-        { label: "codex-work", provider: "codex", configDir },
-        { label: "openai-paid", provider: "openai-api", apiKey: "sk-openai-paid" },
-      ],
-    }));
+    writeFileSync(
+      resolve(root, "accounts.json"),
+      JSON.stringify({
+        version: 1,
+        accounts: [
+          { label: "codex-work", provider: "codex", configDir },
+          { label: "openai-paid", provider: "openai-api", apiKey: "sk-openai-paid" },
+        ],
+      }),
+    );
 
     const previousHome = process.env.SMITHERS_HOME;
     const previousTestPath = process.env.SMITHERS_TEST_AGENT_PATH;
@@ -175,7 +181,9 @@ describe("the checked-in registry", () => {
     process.env.SMITHERS_TEST_AGENT_PATH = bin;
     try {
       const nonce = `${Date.now()}-${Math.random()}`;
-      const roles = await import(`${pathToFileURL(resolve(import.meta.dir, "../.smithers/components/roles.ts")).href}?case=${nonce}`);
+      const roles = await import(
+        `${pathToFileURL(resolve(import.meta.dir, "../.smithers/components/roles.ts")).href}?case=${nonce}`
+      );
       for (const chain of [roles.implementer, roles.validator]) {
         expect(chain[0].cliEngine).toBe("codex");
         expect(chain[1].cliEngine).toBe("codex");

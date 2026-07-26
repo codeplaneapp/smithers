@@ -77,9 +77,7 @@ describe("<Terminal> stream seam", () => {
   test("appends incremental output pushed through the write seam", async () => {
     let term: XTerminal | null = null;
     let push: TerminalWriter | null = null;
-    await render(
-      <Terminal onReady={(t) => (term = t)} stream={(write) => void (push = write)} />,
-    );
+    await render(<Terminal onReady={(t) => (term = t)} stream={(write) => void (push = write)} />);
     const ready = await waitFor(() => term);
     const writer = await waitFor(() => push);
 
@@ -97,9 +95,7 @@ describe("<Terminal> stream seam", () => {
   test("runs the stream teardown on unmount", async () => {
     let torn = false;
     let ready = false;
-    await render(
-      <Terminal onReady={() => (ready = true)} stream={() => () => void (torn = true)} />,
-    );
+    await render(<Terminal onReady={() => (ready = true)} stream={() => () => void (torn = true)} />);
     // mount() subscribes right after onReady fires; wait for it before teardown.
     await waitFor(() => ready);
     const r = root!;
@@ -130,27 +126,31 @@ describe("<Terminal> headless rendering", () => {
   // when re-stamped every poll). bun 1.4+ delivers dependably, so local dev
   // and the eventual CI pin bump keep the regression net.
   const bunPre14 = Bun.version.localeCompare("1.4.0", undefined, { numeric: true }) < 0;
-  test.skipIf(bunPre14)("the default palette follows root data-theme toggles", async () => {
-    document.documentElement.setAttribute("data-theme", "light");
-    let term: XTerminal | null = null;
-    await render(<Terminal lines={["theme"]} onReady={(next) => (term = next)} />);
-    let ready = await waitFor(() => term);
-    expect(container?.querySelector('[data-slot="terminal"]')?.getAttribute("data-theme-mode")).toBe("light");
-    expect(ready.options.theme?.background).toBe("#fbfcfd");
+  test.skipIf(bunPre14)(
+    "the default palette follows root data-theme toggles",
+    async () => {
+      document.documentElement.setAttribute("data-theme", "light");
+      let term: XTerminal | null = null;
+      await render(<Terminal lines={["theme"]} onReady={(next) => (term = next)} />);
+      let ready = await waitFor(() => term);
+      expect(container?.querySelector('[data-slot="terminal"]')?.getAttribute("data-theme-mode")).toBe("light");
+      expect(ready.options.theme?.background).toBe("#fbfcfd");
 
-    await act(async () => {
-      document.documentElement.setAttribute("data-theme", "dark");
-      await Promise.resolve();
-    });
-    await waitFor(() => {
-      // Re-stamp each poll: bun 1.3.x's happy-dom can drop a MutationObserver
-      // delivery under CI load; a repeated setAttribute queues a fresh record.
-      document.documentElement.setAttribute("data-theme", "dark");
-      return ready.options.theme?.background === "#07090d";
-    });
-    expect(container?.querySelector('[data-slot="terminal"]')?.getAttribute("data-theme-mode")).toBe("dark");
-    expect(ready.options.theme?.background).toBe("#07090d");
-  }, 20_000);
+      await act(async () => {
+        document.documentElement.setAttribute("data-theme", "dark");
+        await Promise.resolve();
+      });
+      await waitFor(() => {
+        // Re-stamp each poll: bun 1.3.x's happy-dom can drop a MutationObserver
+        // delivery under CI load; a repeated setAttribute queues a fresh record.
+        document.documentElement.setAttribute("data-theme", "dark");
+        return ready.options.theme?.background === "#07090d";
+      });
+      expect(container?.querySelector('[data-slot="terminal"]')?.getAttribute("data-theme-mode")).toBe("dark");
+      expect(ready.options.theme?.background).toBe("#07090d");
+    },
+    20_000,
+  );
 
   test("disables xterm cursor blinking when reduced motion is preferred", async () => {
     window.matchMedia = ((query: string) => ({
@@ -161,7 +161,9 @@ describe("<Terminal> headless rendering", () => {
       removeListener() {},
       addEventListener() {},
       removeEventListener() {},
-      dispatchEvent() { return true; },
+      dispatchEvent() {
+        return true;
+      },
     })) as typeof window.matchMedia;
     let term: XTerminal | null = null;
     await render(<Terminal cursorBlink onReady={(next) => (term = next)} />);
@@ -183,7 +185,9 @@ describe("<Terminal> headless rendering", () => {
       removeEventListener(_type: string, listener: (event: { matches: boolean }) => void) {
         listeners.delete(listener);
       },
-      dispatchEvent() { return true; },
+      dispatchEvent() {
+        return true;
+      },
     })) as typeof window.matchMedia;
     let term: XTerminal | null = null;
     await render(<Terminal cursorBlink onReady={(next) => (term = next)} />);
@@ -212,10 +216,7 @@ describe("<Terminal> headless rendering", () => {
 
 describe("<Terminal> store independence", () => {
   test("the component source imports no Multi app store", () => {
-    const source = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), "../src/adapters/terminal.tsx"),
-      "utf8",
-    );
+    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/adapters/terminal.tsx"), "utf8");
     for (const banned of [
       "preferencesStore",
       "sandboxStore",

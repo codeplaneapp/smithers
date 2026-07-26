@@ -6,5 +6,5 @@ import { parseFrameDelta } from "./parseFrameDelta.js";
  * @returns {string}
  */
 export function applyFrameDeltaJson(previousXmlJson, deltaJson) {
-    return applyFrameDelta(previousXmlJson, parseFrameDelta(deltaJson));
+  return applyFrameDelta(previousXmlJson, parseFrameDelta(deltaJson));
 }

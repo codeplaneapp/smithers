@@ -17,9 +17,7 @@ const inputSchema = z.object({
   // Named targetRunId (not runId): the engine reserves input.runId for the
   // run's own id, so a workflow that inspects ANOTHER run must use a
   // different field name.
-  targetRunId: z
-    .string()
-    .describe("The id of the failed or stuck Smithers run to triage."),
+  targetRunId: z.string().describe("The id of the failed or stuck Smithers run to triage."),
 });
 
 // 1. Deterministic evidence pulled straight from the run's state + event log.
@@ -28,13 +26,8 @@ const gatherSchema = z.looseObject({
     .boolean()
     .default(false)
     .describe("True when inspect returned readable run state; false means the evidence below is degraded."),
-  state: z
-    .string()
-    .describe("The run's overall status (running | waiting-approval | failed | completed | unknown)."),
-  runError: z
-    .string()
-    .default("")
-    .describe("The run-level error message, when the run recorded one."),
+  state: z.string().describe("The run's overall status (running | waiting-approval | failed | completed | unknown)."),
+  runError: z.string().default("").describe("The run-level error message, when the run recorded one."),
   failingNodes: z
     .array(z.object({ id: z.string(), reason: z.string().default("") }))
     .default([])
@@ -43,20 +36,13 @@ const gatherSchema = z.looseObject({
     .array(z.object({ nodeId: z.string(), status: z.string().default("") }))
     .default([])
     .describe("Approval gates the run is still waiting on; non-empty means the run is suspended on a human."),
-  lastEvents: z
-    .array(z.string())
-    .default([])
-    .describe("The tail of the run's event log, most recent last."),
-  summary: z
-    .string()
-    .describe("One line describing what the run state + events show."),
+  lastEvents: z.array(z.string()).default([]).describe("The tail of the run's event log, most recent last."),
+  summary: z.string().describe("One line describing what the run state + events show."),
 });
 
 // 2. The agent's root-cause read of the gathered evidence.
 const diagnoseSchema = z.looseObject({
-  rootCauseHypothesis: z
-    .string()
-    .describe("The single most likely reason the run failed or stalled."),
+  rootCauseHypothesis: z.string().describe("The single most likely reason the run failed or stalled."),
   evidence: z
     .array(z.string())
     .default([])
@@ -72,12 +58,8 @@ const recommendSchema = z.looseObject({
   recommendedAction: z
     .enum(["fix", "rewind", "retry", "escalate"])
     .describe("fix code, rewind to an earlier frame, retry the failing task, or escalate to a human."),
-  command: z
-    .string()
-    .describe("The exact CLI command to run next (e.g. a smithers rewind / retry-task invocation)."),
-  rationale: z
-    .string()
-    .describe("Why this action over the alternatives, grounded in the diagnosis."),
+  command: z.string().describe("The exact CLI command to run next (e.g. a smithers rewind / retry-task invocation)."),
+  rationale: z.string().describe("Why this action over the alternatives, grounded in the diagnosis."),
 });
 
 // 4. The terminal summary surfaced as the run's printed output.
@@ -135,11 +117,26 @@ export default smithers((ctx) => {
           {async () => {
             let inspectText = "";
             let inspectExitCode = 0;
-            try { inspectText = execFileSync(process.env.SMITHERS_CLI ?? "smithers", ["inspect", runId, "--format", "json"], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }); }
-            catch (error) { inspectExitCode = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 1; inspectText = String((error as { stdout?: unknown }).stdout ?? ""); }
+            try {
+              inspectText = execFileSync(
+                process.env.SMITHERS_CLI ?? "smithers",
+                ["inspect", runId, "--format", "json"],
+                { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
+              );
+            } catch (error) {
+              inspectExitCode =
+                typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 1;
+              inspectText = String((error as { stdout?: unknown }).stdout ?? "");
+            }
             let eventsText = "";
-            try { eventsText = execFileSync(process.env.SMITHERS_CLI ?? "smithers", ["events", runId], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }); }
-            catch (error) { eventsText = `${String((error as { stdout?: unknown }).stdout ?? "")}\n${String((error as { stderr?: unknown }).stderr ?? "")}`; }
+            try {
+              eventsText = execFileSync(process.env.SMITHERS_CLI ?? "smithers", ["events", runId], {
+                encoding: "utf8",
+                maxBuffer: 32 * 1024 * 1024,
+              });
+            } catch (error) {
+              eventsText = `${String((error as { stdout?: unknown }).stdout ?? "")}\n${String((error as { stderr?: unknown }).stderr ?? "")}`;
+            }
 
             let state = "unknown";
             let runError = "";
@@ -164,10 +161,12 @@ export default smithers((ctx) => {
                 for (const node of nodes) {
                   const n = asRecord(node);
                   if (!n) continue;
-                  const nodeState = typeof n.state === "string" ? n.state : typeof n.status === "string" ? n.status : "";
+                  const nodeState =
+                    typeof n.state === "string" ? n.state : typeof n.status === "string" ? n.status : "";
                   if (nodeState === "failed" || nodeState === "error" || nodeState === "stuck") {
                     const id = typeof n.id === "string" ? n.id : typeof n.nodeId === "string" ? n.nodeId : "(unknown)";
-                    const reason = typeof n.error === "string" ? n.error : typeof n.reason === "string" ? n.reason : nodeState;
+                    const reason =
+                      typeof n.error === "string" ? n.error : typeof n.reason === "string" ? n.reason : nodeState;
                     failingNodes.push({ id, reason });
                   }
                 }

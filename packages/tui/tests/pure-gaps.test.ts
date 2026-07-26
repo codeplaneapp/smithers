@@ -6,10 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { resolveCliEntry } from "../src/cliEntry.ts";
 import { DEFAULT_GATEWAY_PORT, resolveGatewayConfig } from "../src/gatewayConfig.ts";
-import {
-  resolveMonitorWorkspaceRoot,
-  workspaceGatewayStatePath,
-} from "../src/gatewayRuntimeState.ts";
+import { resolveMonitorWorkspaceRoot, workspaceGatewayStatePath } from "../src/gatewayRuntimeState.ts";
 import {
   resolveGatewayForRun,
   type GatewayCandidate,
@@ -103,20 +100,23 @@ describe("gatewayRuntimeState edge branches", () => {
 
   // The Linux branch additionally requires process.getuid, which does not
   // exist on Windows, so faking process.platform cannot reach it there.
-  test.skipIf(process.platform === "win32")("defaultGatewayRuntimeDir uses XDG_RUNTIME_DIR on Linux, else a uid-scoped tmp dir", () => {
-    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
-    try {
-      Object.defineProperty(process, "platform", { value: "linux", configurable: true });
-      // XDG set → <XDG>/smithers-gateway
-      const withXdg = workspaceGatewayStatePath("/ws", { XDG_RUNTIME_DIR: "/run/user/1000" });
-      expect(withXdg.dir).toBe("/run/user/1000/smithers-gateway");
-      // XDG unset → <tmp>/smithers-gateway-<uid>
-      const noXdg = workspaceGatewayStatePath("/ws", {});
-      expect(noXdg.dir).toContain("smithers-gateway-");
-    } finally {
-      Object.defineProperty(process, "platform", originalPlatform);
-    }
-  });
+  test.skipIf(process.platform === "win32")(
+    "defaultGatewayRuntimeDir uses XDG_RUNTIME_DIR on Linux, else a uid-scoped tmp dir",
+    () => {
+      const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
+      try {
+        Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+        // XDG set → <XDG>/smithers-gateway
+        const withXdg = workspaceGatewayStatePath("/ws", { XDG_RUNTIME_DIR: "/run/user/1000" });
+        expect(withXdg.dir).toBe("/run/user/1000/smithers-gateway");
+        // XDG unset → <tmp>/smithers-gateway-<uid>
+        const noXdg = workspaceGatewayStatePath("/ws", {});
+        expect(noXdg.dir).toContain("smithers-gateway-");
+      } finally {
+        Object.defineProperty(process, "platform", originalPlatform);
+      }
+    },
+  );
 });
 
 // ─── deriveOutputText: produced envelope with a null row ──────────────────────
@@ -140,11 +140,9 @@ describe("readWorkspaceGatewayState unreadable file", () => {
     chmodSync(stateDir, 0o700);
     const workspaceRoot = tempDir("smx-ws-");
     const { stateFile } = workspaceGatewayStatePath(workspaceRoot, { SMITHERS_GATEWAY_STATE_DIR: stateDir });
-    writeFileSync(
-      stateFile,
-      JSON.stringify({ pid: process.pid, url: "http://127.0.0.1:9", workspaceRoot }),
-      { mode: 0o600 },
-    );
+    writeFileSync(stateFile, JSON.stringify({ pid: process.pid, url: "http://127.0.0.1:9", workspaceRoot }), {
+      mode: 0o600,
+    });
     // Owner-only, no read bit: lstat-based trust passes but readFileSync throws
     // EACCES → the reader swallows it and returns null.
     chmodSync(stateFile, 0o000);
@@ -239,7 +237,9 @@ describe("hijackCandidates tree-status fallback", () => {
 
   test("does not duplicate a node already found via events", () => {
     const nodes = [{ id: "n1", name: "n1", kind: "task", status: "running" as const }];
-    const events = [{ type: "event" as const, seq: 1, event: "node.start", payload: { nodeId: "n1" }, stateVersion: 1 }];
+    const events = [
+      { type: "event" as const, seq: 1, event: "node.start", payload: { nodeId: "n1" }, stateVersion: 1 },
+    ];
     const result = hijackCandidates(nodes, events);
     expect(result.map((n) => n.id)).toEqual(["n1"]);
   });

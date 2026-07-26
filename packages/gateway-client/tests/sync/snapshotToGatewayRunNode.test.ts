@@ -74,11 +74,35 @@ describe("snapshotToGatewayRunNode", () => {
         name: "Workflow",
         type: "workflow",
         children: [
-          { id: 2, name: "A", type: "task", task: { nodeId: "a", kind: "compute", state: "finished", attempt: 1 }, children: [] },
-          { id: 3, name: "B", type: "task", task: { nodeId: "b", kind: "agent", state: "in-progress", attempt: 2 }, children: [] },
-          { id: 4, name: "C", type: "task", task: { nodeId: "c", kind: "agent", state: "failed", attempt: 3 }, children: [] },
+          {
+            id: 2,
+            name: "A",
+            type: "task",
+            task: { nodeId: "a", kind: "compute", state: "finished", attempt: 1 },
+            children: [],
+          },
+          {
+            id: 3,
+            name: "B",
+            type: "task",
+            task: { nodeId: "b", kind: "agent", state: "in-progress", attempt: 2 },
+            children: [],
+          },
+          {
+            id: 4,
+            name: "C",
+            type: "task",
+            task: { nodeId: "c", kind: "agent", state: "failed", attempt: 3 },
+            children: [],
+          },
           { id: 5, name: "D", type: "task", task: { nodeId: "d", kind: "agent" }, children: [] },
-          { id: 6, name: "E", type: "approval", task: { nodeId: "e", kind: "static", state: "in-progress" }, children: [] },
+          {
+            id: 6,
+            name: "E",
+            type: "approval",
+            task: { nodeId: "e", kind: "static", state: "in-progress" },
+            children: [],
+          },
         ],
       },
       runState: { state: "running", blocked: { nodeId: "e" } },
@@ -96,7 +120,13 @@ describe("snapshotToGatewayRunNode", () => {
     const container = (id: number, name: string, children: unknown[]) =>
       ({ id, name, type: "sequence", children }) as never;
     const task = (id: number, nodeId: string, state?: string) =>
-      ({ id, name: nodeId, type: "task", task: { nodeId, kind: "agent", ...(state ? { state } : {}) }, children: [] }) as never;
+      ({
+        id,
+        name: nodeId,
+        type: "task",
+        task: { nodeId, kind: "agent", ...(state ? { state } : {}) },
+        children: [],
+      }) as never;
     const tree = snapshotToGatewayRunNode({
       root: {
         id: 1,
@@ -147,7 +177,13 @@ describe("snapshotToGatewayRunNode", () => {
         type: "workflow",
         children: [
           { id: 2, name: "A", type: "task", task: { nodeId: "a", kind: "compute", state: "finished" }, children: [] },
-          { id: 3, name: "B", type: "task", task: { nodeId: "b", kind: "agent", state: "someday-new-state" }, children: [] },
+          {
+            id: 3,
+            name: "B",
+            type: "task",
+            task: { nodeId: "b", kind: "agent", state: "someday-new-state" },
+            children: [],
+          },
           { id: 4, name: "C", type: "task", task: { nodeId: "c", kind: "agent" }, children: [] },
         ],
       },
@@ -323,7 +359,12 @@ describe("snapshotToGatewayRunNode", () => {
 
   test("marks every node ok once the run has finished", () => {
     const done = snapshotToGatewayRunNode({
-      root: { id: 1, name: "Workflow", type: "workflow", children: [{ id: 2, name: "Task", type: "task", task: { nodeId: "a", kind: "agent" }, children: [] }] },
+      root: {
+        id: 1,
+        name: "Workflow",
+        type: "workflow",
+        children: [{ id: 2, name: "Task", type: "task", task: { nodeId: "a", kind: "agent" }, children: [] }],
+      },
       runState: { state: "succeeded" },
     });
     expect(done?.status).toBe("ok");
@@ -366,15 +407,46 @@ describe("snapshotToGatewayRunNode", () => {
 
   test("nodeName falls back label -> props.label -> props.name -> task.nodeId -> node.name", () => {
     // task.label wins over everything.
-    expect(snapshotToGatewayRunNode({ root: { id: 1, name: "struct", type: "task", task: { nodeId: "n", label: "L" }, props: { label: "P", name: "Q" }, children: [] } })?.name).toBe("L");
+    expect(
+      snapshotToGatewayRunNode({
+        root: {
+          id: 1,
+          name: "struct",
+          type: "task",
+          task: { nodeId: "n", label: "L" },
+          props: { label: "P", name: "Q" },
+          children: [],
+        },
+      })?.name,
+    ).toBe("L");
     // No task.label -> props.label.
-    expect(snapshotToGatewayRunNode({ root: { id: 1, name: "struct", type: "task", task: { nodeId: "n" }, props: { label: "P", name: "Q" }, children: [] } })?.name).toBe("P");
+    expect(
+      snapshotToGatewayRunNode({
+        root: {
+          id: 1,
+          name: "struct",
+          type: "task",
+          task: { nodeId: "n" },
+          props: { label: "P", name: "Q" },
+          children: [],
+        },
+      })?.name,
+    ).toBe("P");
     // No labels -> props.name.
-    expect(snapshotToGatewayRunNode({ root: { id: 1, name: "struct", type: "task", task: { nodeId: "n" }, props: { name: "Q" }, children: [] } })?.name).toBe("Q");
+    expect(
+      snapshotToGatewayRunNode({
+        root: { id: 1, name: "struct", type: "task", task: { nodeId: "n" }, props: { name: "Q" }, children: [] },
+      })?.name,
+    ).toBe("Q");
     // No props labels -> task.nodeId.
-    expect(snapshotToGatewayRunNode({ root: { id: 1, name: "struct", type: "task", task: { nodeId: "n" }, children: [] } })?.name).toBe("n");
+    expect(
+      snapshotToGatewayRunNode({ root: { id: 1, name: "struct", type: "task", task: { nodeId: "n" }, children: [] } })
+        ?.name,
+    ).toBe("n");
     // No task at all -> structural node.name.
-    expect(snapshotToGatewayRunNode({ root: { id: 7, name: "struct", type: "sequence", children: [] } })?.name).toBe("struct");
+    expect(snapshotToGatewayRunNode({ root: { id: 7, name: "struct", type: "sequence", children: [] } })?.name).toBe(
+      "struct",
+    );
   });
 
   test("toRunStatus collapses lifecycle states onto the UI tones at the root", () => {

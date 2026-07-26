@@ -1,6 +1,6 @@
 import * as ai from 'ai';
 import { Tool as Tool$1, ToolSet, ToolLoopAgentSettings, LanguageModel, ToolLoopAgent } from 'ai';
-import { B as BaseCliAgentOptions, a as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, b as PiExtensionUiResponse$1, A as AgentGenerateOptions$3, c as BaseCliAgent, C as CliOutputInterpreter$d, d as CodexConfigOverrides, e as AgentCliEvent$1, f as CliOutputInterpreter$e, g as AgentCliActionKind } from './index-CMtjCe6d.js';
+import { B as BaseCliAgentOptions, a as BaseCliAgentOptions$1, P as PiExtensionUiRequest$1, b as PiExtensionUiResponse$1, A as AgentGenerateOptions$3, c as BaseCliAgent, C as CliOutputInterpreter$d, d as CodexConfigOverrides, e as AgentCliEvent$1, f as CliOutputInterpreter$e, g as AgentCliActionKind } from './index-CxBzG_jX.js';
 import * as zod from 'zod';
 import '@smithers-orchestrator/errors/SmithersError';
 import 'effect';
@@ -549,15 +549,15 @@ type AgentLike$1 = {
  */
 declare class AnthropicAgent<CALL_OPTIONS = never, TOOLS = ai.ToolSet> extends ToolLoopAgent<CALL_OPTIONS, TOOLS, any, never> {
     /**
-   * @param {AnthropicAgentOptions<CALL_OPTIONS, TOOLS>} opts
-   */
+     * @param {AnthropicAgentOptions<CALL_OPTIONS, TOOLS>} opts
+     */
     constructor(opts: AnthropicAgentOptions$1<CALL_OPTIONS, TOOLS>);
     hijackEngine: string;
     supportsNativeStructuredOutput: boolean;
     /**
-   * @param {AgentGenerateOptions} [args]
-   * @returns {Promise<GenerateTextResult<TOOLS, never>>}
-   */
+     * @param {AgentGenerateOptions} [args]
+     * @returns {Promise<GenerateTextResult<TOOLS, never>>}
+     */
     generate(args?: AgentGenerateOptions$2): Promise<GenerateTextResult$2<TOOLS, never>>;
 }
 type AgentGenerateOptions$2 = AgentGenerateOptions$3;
@@ -577,15 +577,15 @@ type GenerateTextResult$2 = ai.GenerateTextResult<any, any, any>;
  */
 declare class OpenAIAgent<CALL_OPTIONS = never, TOOLS = ai.ToolSet> extends ToolLoopAgent<CALL_OPTIONS, TOOLS, any, never> {
     /**
-   * @param {OpenAIAgentOptions<CALL_OPTIONS, TOOLS>} opts
-   */
+     * @param {OpenAIAgentOptions<CALL_OPTIONS, TOOLS>} opts
+     */
     constructor(opts: OpenAIAgentOptions$1<CALL_OPTIONS, TOOLS>);
     hijackEngine: string;
     supportsNativeStructuredOutput: boolean;
     /**
-   * @param {AgentGenerateOptions} [args]
-   * @returns {Promise<GenerateTextResult<TOOLS, never>>}
-   */
+     * @param {AgentGenerateOptions} [args]
+     * @returns {Promise<GenerateTextResult<TOOLS, never>>}
+     */
     generate(args?: AgentGenerateOptions$1): Promise<GenerateTextResult$1<TOOLS, never>>;
 }
 type AgentGenerateOptions$1 = AgentGenerateOptions$3;
@@ -662,12 +662,12 @@ declare class AmpAgent extends BaseCliAgent {
     capabilities: AgentCapabilityRegistry$8;
     cliEngine: string;
     /**
-   * @returns {CliOutputInterpreter}
-   */
+     * @returns {CliOutputInterpreter}
+     */
     createOutputInterpreter(): CliOutputInterpreter$c;
     /**
-   * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
-   */
+     * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
+     */
     buildCommand(params: {
         prompt: string;
         systemPrompt?: string;
@@ -763,19 +763,19 @@ type AntigravityAgentOptions$1 = BaseCliAgentOptions & {
 
 declare class AntigravityAgent extends BaseCliAgent {
     /**
-   * @param {AntigravityAgentOptions} [opts]
-   */
+     * @param {AntigravityAgentOptions} [opts]
+     */
     constructor(opts?: AntigravityAgentOptions);
     opts: AntigravityAgentOptions$1;
     capabilities: AgentCapabilityRegistry$b;
     cliEngine: string;
     /**
-   * @returns {CliOutputInterpreter}
-   */
+     * @returns {CliOutputInterpreter}
+     */
     createOutputInterpreter(): CliOutputInterpreter$b;
     /**
-   * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
-   */
+     * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
+     */
     buildCommand(params: {
         prompt: string;
         systemPrompt?: string;
@@ -858,19 +858,19 @@ type ClaudeCodeAgentOptions$1 = BaseCliAgentOptions & {
 
 declare class ClaudeCodeAgent extends BaseCliAgent {
     /**
-   * @param {ClaudeCodeAgentOptions} [opts]
-   */
+     * @param {ClaudeCodeAgentOptions} [opts]
+     */
     constructor(opts?: ClaudeCodeAgentOptions);
     opts: ClaudeCodeAgentOptions$1;
     capabilities: AgentCapabilityRegistry$b;
     cliEngine: string;
     /**
-   * @returns {CliOutputInterpreter}
-   */
+     * @returns {CliOutputInterpreter}
+     */
     createOutputInterpreter(): CliOutputInterpreter$a;
     /**
-   * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
-   */
+     * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
+     */
     buildCommand(params: {
         prompt: string;
         systemPrompt?: string;
@@ -939,20 +939,20 @@ type CodexAgentOptions$1 = BaseCliAgentOptions & {
 
 declare class CodexAgent extends BaseCliAgent {
     /**
-   * @param {CodexAgentOptions} [opts]
-   */
+     * @param {CodexAgentOptions} [opts]
+     */
     constructor(opts?: CodexAgentOptions);
     opts: CodexAgentOptions$1;
     capabilities: AgentCapabilityRegistry$b;
     cliEngine: string;
     supportsNativeStructuredOutput: boolean;
     /**
-   * @returns {CliOutputInterpreter}
-   */
+     * @returns {CliOutputInterpreter}
+     */
     createOutputInterpreter(): CliOutputInterpreter$9;
     /**
-   * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
-   */
+     * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
+     */
     buildCommand(params: {
         prompt: string;
         systemPrompt?: string;
@@ -1012,15 +1012,15 @@ type GeminiAgentOptions$1 = BaseCliAgentOptions & {
  */
 declare class GeminiAgent extends BaseCliAgent {
     /**
-   * @param {GeminiAgentOptions} [opts]
-   */
+     * @param {GeminiAgentOptions} [opts]
+     */
     constructor(opts?: GeminiAgentOptions);
     opts: GeminiAgentOptions$1;
     capabilities: AgentCapabilityRegistry$b;
     cliEngine: string;
     /**
-   * @returns {CliOutputInterpreter}
-   */
+     * @returns {CliOutputInterpreter}
+     */
     createOutputInterpreter(): CliOutputInterpreter$8;
     generate(): Promise<void>;
     buildCommand(): Promise<void>;
@@ -1030,22 +1030,22 @@ type GeminiAgentOptions = GeminiAgentOptions$1;
 
 declare class PiAgent extends BaseCliAgent {
     /**
-   * @param {PiAgentOptions} [opts]
-   */
+     * @param {PiAgentOptions} [opts]
+     */
     constructor(opts?: PiAgentOptions$1);
     opts: PiAgentOptions$2;
     capabilities: AgentCapabilityRegistry$b;
     cliEngine: string;
     issuedSessionRef: any;
     /**
-   * @param {PiGenerateOptions} [options]
-   * @returns {PiMode}
-   */
+     * @param {PiGenerateOptions} [options]
+     * @returns {PiMode}
+     */
     resolveMode(options?: PiGenerateOptions): PiMode;
     /**
-   * @param {{ prompt: string; cwd: string; options?: PiGenerateOptions; mode: PiMode; }} params
-   * @returns {string[]}
-   */
+     * @param {{ prompt: string; cwd: string; options?: PiGenerateOptions; mode: PiMode; }} params
+     * @returns {string[]}
+     */
     buildArgs(params: {
         prompt: string;
         cwd: string;
@@ -1053,18 +1053,18 @@ declare class PiAgent extends BaseCliAgent {
         mode: PiMode;
     }): string[];
     /**
-   * @returns {CliOutputInterpreter}
-   */
+     * @returns {CliOutputInterpreter}
+     */
     createOutputInterpreter(): CliOutputInterpreter$7;
     /**
-   * @param {PiGenerateOptions} [options]
-   * @returns {Promise<GenerateTextResult>}
-   */
+     * @param {PiGenerateOptions} [options]
+     * @returns {Promise<GenerateTextResult>}
+     */
     generate(options?: PiGenerateOptions): Promise<GenerateTextResult>;
     /**
-   * @param {{ prompt: string; systemPrompt?: string; cwd: string; options?: PiGenerateOptions; }} params
-   * @returns {Promise<{ command: string; args: string[]; stdin?: string; outputFormat?: string; outputFile?: string; cleanup?: () => Promise<void>; }>}
-   */
+     * @param {{ prompt: string; systemPrompt?: string; cwd: string; options?: PiGenerateOptions; }} params
+     * @returns {Promise<{ command: string; args: string[]; stdin?: string; outputFormat?: string; outputFile?: string; cleanup?: () => Promise<void>; }>}
+     */
     buildCommand(params: {
         prompt: string;
         systemPrompt?: string;
@@ -1079,8 +1079,8 @@ declare class PiAgent extends BaseCliAgent {
         cleanup?: () => Promise<void>;
     }>;
     /**
-   * @returns {{ provider?: string; model?: string; apiKey?: string }}
-   */
+     * @returns {{ provider?: string; model?: string; apiKey?: string }}
+     */
     diagnosticHints(): {
         provider?: string;
         model?: string;
@@ -1136,20 +1136,20 @@ type KimiAgentOptions$1 = BaseCliAgentOptions & {
 
 declare class KimiAgent extends BaseCliAgent {
     /**
-   * @param {KimiAgentOptions} [opts]
-   */
+     * @param {KimiAgentOptions} [opts]
+     */
     constructor(opts?: KimiAgentOptions);
     opts: KimiAgentOptions$1;
     capabilities: AgentCapabilityRegistry$b;
     cliEngine: string;
     issuedSessionId: any;
     /**
-   * @returns {CliOutputInterpreter}
-   */
+     * @returns {CliOutputInterpreter}
+     */
     createOutputInterpreter(): CliOutputInterpreter$6;
     /**
-   * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
-   */
+     * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
+     */
     buildCommand(params: {
         prompt: string;
         systemPrompt?: string;
@@ -1187,8 +1187,8 @@ type ForgeAgentOptions$1 = BaseCliAgentOptions & {
 
 declare class ForgeAgent extends BaseCliAgent {
     /**
-   * @param {ForgeAgentOptions} [opts]
-   */
+     * @param {ForgeAgentOptions} [opts]
+     */
     constructor(opts?: ForgeAgentOptions);
     opts: ForgeAgentOptions$1;
     /** @type {AgentCapabilityRegistry} */
@@ -1196,12 +1196,12 @@ declare class ForgeAgent extends BaseCliAgent {
     cliEngine: string;
     issuedConversationId: any;
     /**
-   * @returns {CliOutputInterpreter}
-   */
+     * @returns {CliOutputInterpreter}
+     */
     createOutputInterpreter(): CliOutputInterpreter$5;
     /**
-   * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
-   */
+     * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any; }} params
+     */
     buildCommand(params: {
         prompt: string;
         systemPrompt?: string;

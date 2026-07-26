@@ -19,8 +19,15 @@ function makeFixtureWorkspace() {
     mkdirSync(join(dir, rel), { recursive: true });
     writeFileSync(join(dir, rel, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
   };
-  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "fixture-root", private: true, version: "0.28.0" }, null, 2) + "\n");
-  writePkg("packages/alpha", { name: "@fixture/alpha", version: "0.28.0", dependencies: { "@fixture/beta": "workspace:*" } });
+  writeFileSync(
+    join(dir, "package.json"),
+    JSON.stringify({ name: "fixture-root", private: true, version: "0.28.0" }, null, 2) + "\n",
+  );
+  writePkg("packages/alpha", {
+    name: "@fixture/alpha",
+    version: "0.28.0",
+    dependencies: { "@fixture/beta": "workspace:*" },
+  });
   writePkg("packages/beta", { name: "@fixture/beta", version: "0.28.0" });
   writePkg("apps/secret", { name: "@fixture/secret", private: true, version: "0.28.0" });
   return dir;
@@ -119,7 +126,9 @@ describe("syncGatewayClientVersion", () => {
       const clientPath = join(clientDir, "SmithersGatewayClient.ts");
       writeFileSync(clientPath, 'const DEFAULT_CLIENT_VERSION = "0.28.0";\n');
       syncGatewayClientVersion(dir, "0.28.0-next.1752480000.gabcd12345678");
-      expect(readFileSync(clientPath, "utf8")).toBe('const DEFAULT_CLIENT_VERSION = "0.28.0-next.1752480000.gabcd12345678";\n');
+      expect(readFileSync(clientPath, "utf8")).toBe(
+        'const DEFAULT_CLIENT_VERSION = "0.28.0-next.1752480000.gabcd12345678";\n',
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -139,7 +148,10 @@ describe("syncGatewayClientVersion", () => {
 
   test("the real gateway-client source still carries the pin the release scripts rewrite", () => {
     const repoRoot = join(import.meta.dirname, "..");
-    const source = readFileSync(join(repoRoot, "packages", "gateway-client", "src", "SmithersGatewayClient.ts"), "utf8");
+    const source = readFileSync(
+      join(repoRoot, "packages", "gateway-client", "src", "SmithersGatewayClient.ts"),
+      "utf8",
+    );
     expect(/const DEFAULT_CLIENT_VERSION = "[^"]+"/.test(source)).toBe(true);
   });
 });

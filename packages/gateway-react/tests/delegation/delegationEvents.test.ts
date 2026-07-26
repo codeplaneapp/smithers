@@ -4,11 +4,7 @@
 // be TOTAL (unknown tables and malformed rows land on the `Ignored` variant
 // instead of throwing or being silently dropped).
 import { describe, expect, test } from "bun:test";
-import {
-  classifyDelegationRecord,
-  DelegationEvent,
-  TABLE_PRIORITY,
-} from "../../src/delegation/delegationEvents.ts";
+import { classifyDelegationRecord, DelegationEvent, TABLE_PRIORITY } from "../../src/delegation/delegationEvents.ts";
 import { foldDelegation, type DelegationFoldIssue } from "../../src/delegation/foldDelegation.ts";
 import type { DcPlanRow, DelegationRecord } from "../../src/delegation/types.ts";
 
@@ -23,9 +19,7 @@ const planRow: DcPlanRow = {
   tier: "fable",
   title: "root",
   brief: "Plan for root",
-  children: [
-    { logicalId: "root/c1", tier: "sonnet", kind: "leaf", title: "c1", brief: "Build c1", estimate: est },
-  ],
+  children: [{ logicalId: "root/c1", tier: "sonnet", kind: "leaf", title: "c1", brief: "Build c1", estimate: est }],
   subtreeEstimate: est,
   risks: [],
 };
@@ -51,15 +45,61 @@ describe("classifyDelegationRecord — totality", () => {
   test("every known output table has a non-Ignored classification for a valid row", () => {
     const samples: Array<[string, unknown, string]> = [
       ["dcGoal", { logicalId: "root", refinedPrompt: "p", assumptions: [], questionsAsked: 0 }, "GoalRefined"],
-      ["dcQuestion", { logicalId: "root", seq: 1, question: "q", header: "h", kind: "text", recommended: "r", reason: "why", resolved: false }, "QuestionAsked"],
+      [
+        "dcQuestion",
+        {
+          logicalId: "root",
+          seq: 1,
+          question: "q",
+          header: "h",
+          kind: "text",
+          recommended: "r",
+          reason: "why",
+          resolved: false,
+        },
+        "QuestionAsked",
+      ],
       ["dcPlan", planRow, "PlanDeclared"],
       ["dcPreview", { logicalId: "root/c1", expectedOutput: "## out" }, "PreviewWritten"],
       ["dcGates", { logicalId: "root/c1", gates: [], depsLogical: [] }, "GatesDeclared"],
-      ["dcProbe", { probeId: "root/p1", parentLogicalId: "root", kind: "poc", question: "q", answer: "a", report: "# r", planImpact: "none" }, "ProbeReported"],
-      ["dcReplan", { round: 1, logicalId: "root/c1", decision: "reaffirmed", reason: "ok", trigger: { type: "probe", ref: "root/p1" } }, "ReplanDecided"],
+      [
+        "dcProbe",
+        {
+          probeId: "root/p1",
+          parentLogicalId: "root",
+          kind: "poc",
+          question: "q",
+          answer: "a",
+          report: "# r",
+          planImpact: "none",
+        },
+        "ProbeReported",
+      ],
+      [
+        "dcReplan",
+        {
+          round: 1,
+          logicalId: "root/c1",
+          decision: "reaffirmed",
+          reason: "ok",
+          trigger: { type: "probe", ref: "root/p1" },
+        },
+        "ReplanDecided",
+      ],
       ["dcExec", { logicalId: "root/c1", attempt: 1, summary: "done", artifacts: [] }, "ExecFinished"],
       ["dcReview", { logicalId: "root/c1", attempt: 1, verdict: "pass", feedback: "good" }, "ReviewVerdict"],
-      ["dcDevPreview", { logicalId: "root/c1", kind: "slideshow", title: "t", builtOk: true, artifact: { type: "markdown", content: "x" }, summary: "s" }, "DevPreviewBuilt"],
+      [
+        "dcDevPreview",
+        {
+          logicalId: "root/c1",
+          kind: "slideshow",
+          title: "t",
+          builtOk: true,
+          artifact: { type: "markdown", content: "x" },
+          summary: "s",
+        },
+        "DevPreviewBuilt",
+      ],
       ["dcEdit", { editId: "e1", logicalId: "root/c1", editedOutput: {} }, "EditDelivered"],
       ["dcSkip", { skipped: true }, "PreviewsSkipped"],
       ["dcPoll", { answers: [{ question: "q", rating: 5 }] }, "PollSubmitted"],
@@ -68,7 +108,9 @@ describe("classifyDelegationRecord — totality", () => {
     // Guard against vocabulary drift: the sample list covers every priority
     // table except the `_approval` marker (asserted separately below).
     expect(samples.map(([table]) => table).sort()).toEqual(
-      Object.keys(TABLE_PRIORITY).filter((table) => table !== "_approval").sort(),
+      Object.keys(TABLE_PRIORITY)
+        .filter((table) => table !== "_approval")
+        .sort(),
     );
     for (const [table, row, tag] of samples) {
       expect(classifyDelegationRecord(rec(table, `dc:x:${table}`, 0, row))._tag).toBe(tag);

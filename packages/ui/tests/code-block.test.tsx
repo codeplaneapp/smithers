@@ -63,9 +63,7 @@ describe("CodeBlock", () => {
     jest.useFakeTimers();
     try {
       const copied: string[] = [];
-      await render(
-        <CodeBlock code="copy me" copiedDurationMs={1_000} onCopyCode={(code) => copied.push(code)} />,
-      );
+      await render(<CodeBlock code="copy me" copiedDurationMs={1_000} onCopyCode={(code) => copied.push(code)} />);
       const block = container!.querySelector('[data-slot="code-block"]')!;
       const button = container!.querySelector('[data-slot="code-block-copy"]')!;
 
@@ -157,7 +155,11 @@ describe("CodeBlock", () => {
     const copied: string[] = [];
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
-      value: { writeText: async (code: string) => { copied.push(code); } },
+      value: {
+        writeText: async (code: string) => {
+          copied.push(code);
+        },
+      },
     });
     try {
       await render(<CodeBlock code="clipboard fallback" />);
@@ -170,9 +172,7 @@ describe("CodeBlock", () => {
   });
 
   test("showCopy false hides both copy paths", () => {
-    const html = renderToStaticMarkup(
-      <CodeBlock code="hidden copy" showCopy={false} onCopyCode={() => {}} />,
-    );
+    const html = renderToStaticMarkup(<CodeBlock code="hidden copy" showCopy={false} onCopyCode={() => {}} />);
     expect(html).not.toContain('data-slot="code-block-copy"');
   });
 

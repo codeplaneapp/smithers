@@ -21,9 +21,22 @@ export type FeaturesTabProps = {
 };
 
 const TIER_SECTIONS: { tier: string; label: string; blurb: string }[] = [
-  { tier: "feature", label: "End-user features", blurb: "What people can do with the product, grouped by journey. Each links to the docs and endpoints it relies on." },
-  { tier: "platform", label: "Platform", blurb: "Infrastructure that gates production confidence rather than being a feature itself." },
-  { tier: "reference", label: "Reference", blurb: "Shared, cross-cutting docs (architecture, API catalog, backend services) that many features link into." },
+  {
+    tier: "feature",
+    label: "End-user features",
+    blurb:
+      "What people can do with the product, grouped by journey. Each links to the docs and endpoints it relies on.",
+  },
+  {
+    tier: "platform",
+    label: "Platform",
+    blurb: "Infrastructure that gates production confidence rather than being a feature itself.",
+  },
+  {
+    tier: "reference",
+    label: "Reference",
+    blurb: "Shared, cross-cutting docs (architecture, API catalog, backend services) that many features link into.",
+  },
 ];
 
 const STATUS_OPTIONS: Array<"all" | FeatureStatus> = ["all", "fixed", "partial", "broken", "missing-tests", "missing"];
@@ -58,11 +71,19 @@ function featureSearchBlob(feature: Feature): string {
     feature.priority,
     feature.status,
     ...(feature.capabilities ?? []).flatMap((cap) => [cap.title, cap.detail, cap.status ?? ""]),
-    ...(feature.endpoints ?? []).flatMap((endpoint) => [endpoint.method, endpoint.path, endpoint.doc ?? "", endpoint.note ?? ""]),
+    ...(feature.endpoints ?? []).flatMap((endpoint) => [
+      endpoint.method,
+      endpoint.path,
+      endpoint.doc ?? "",
+      endpoint.note ?? "",
+    ]),
     ...(feature.links ?? []).flatMap((link) => [link.label, link.href]),
     ...(feature.tests ?? []),
     ...(feature.missing ?? []),
-  ].filter(Boolean).join(" ").toLowerCase();
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
 }
 
 export function FeaturesTab(props: FeaturesTabProps) {
@@ -86,12 +107,16 @@ export function FeaturesTab(props: FeaturesTabProps) {
       <section className="card">
         <div className="card-head">
           <h2>Product feature spec</h2>
-          <span className="pill">{filteredFeatures.length === features.length ? formatCount(features.length, "feature") : `${formatCount(filteredFeatures.length, "feature")} of ${formatCount(features.length, "feature")}`}</span>
+          <span className="pill">
+            {filteredFeatures.length === features.length
+              ? formatCount(features.length, "feature")
+              : `${formatCount(filteredFeatures.length, "feature")} of ${formatCount(features.length, "feature")}`}
+          </span>
         </div>
         <p>
-          The target product, top to bottom: every end-user feature, the platform it runs on, and the
-          shared reference docs each feature links into. Click any feature to drill into its capabilities,
-          API endpoints, and related docs.
+          The target product, top to bottom: every end-user feature, the platform it runs on, and the shared reference
+          docs each feature links into. Click any feature to drill into its capabilities, API endpoints, and related
+          docs.
         </p>
         <div className="filters" role="search" aria-label="Feature filters">
           <label className="filter-field">
@@ -107,30 +132,54 @@ export function FeaturesTab(props: FeaturesTabProps) {
           </label>
           <label className="filter-field">
             <span>Status</span>
-            <select className="select" value={statusFilter} onChange={(event) => setStatusFilter(event.currentTarget.value as "all" | FeatureStatus)}>
+            <select
+              className="select"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.currentTarget.value as "all" | FeatureStatus)}
+            >
               {STATUS_OPTIONS.map((status) => (
-                <option key={status} value={status}>{status === "all" ? "All statuses" : statusLabels[status]}</option>
+                <option key={status} value={status}>
+                  {status === "all" ? "All statuses" : statusLabels[status]}
+                </option>
               ))}
             </select>
           </label>
           <label className="filter-field">
             <span>Kind</span>
-            <select className="select" value={tierFilter} onChange={(event) => setTierFilter(event.currentTarget.value as "all" | FeatureTier)}>
+            <select
+              className="select"
+              value={tierFilter}
+              onChange={(event) => setTierFilter(event.currentTarget.value as "all" | FeatureTier)}
+            >
               {TIER_OPTIONS.map((tier) => (
-                <option key={tier} value={tier}>{tier === "all" ? "All kinds" : formatFeatureTier(tier)}</option>
+                <option key={tier} value={tier}>
+                  {tier === "all" ? "All kinds" : formatFeatureTier(tier)}
+                </option>
               ))}
             </select>
           </label>
           {filtersActive ? (
-            <button className="button" type="button" onClick={() => { setQuery(""); setStatusFilter("all"); setTierFilter("all"); }}>
+            <button
+              className="button"
+              type="button"
+              onClick={() => {
+                setQuery("");
+                setStatusFilter("all");
+                setTierFilter("all");
+              }}
+            >
               Clear
             </button>
           ) : null}
         </div>
         <div className="status-counts">
-          {(Object.keys(counts) as FeatureStatus[]).filter((status) => counts[status] > 0).map((status) => (
-            <span key={status} className={`badge ${statusClass(status)}`}>{counts[status]} {statusLabels[status]}</span>
-          ))}
+          {(Object.keys(counts) as FeatureStatus[])
+            .filter((status) => counts[status] > 0)
+            .map((status) => (
+              <span key={status} className={`badge ${statusClass(status)}`}>
+                {counts[status]} {statusLabels[status]}
+              </span>
+            ))}
         </div>
       </section>
 
@@ -158,14 +207,24 @@ export function FeaturesTab(props: FeaturesTabProps) {
                     >
                       <div className="feature-card-head">
                         <strong>{feature.title}</strong>
-                        <span className={`badge ${statusClass(feature.status)}`}>{statusLabels[feature.status] ?? feature.status}</span>
+                        <span className={`badge ${statusClass(feature.status)}`}>
+                          {statusLabels[feature.status] ?? feature.status}
+                        </span>
                       </div>
                       <p className="feature-card-summary">{feature.userValue ?? feature.summary}</p>
                       <div className="feature-card-foot">
                         <span className="pill muted">P{feature.priority.replace(/^p/i, "")}</span>
-                        {feature.capabilities?.length ? <span className="pill">{formatCount(feature.capabilities.length, "capability", "capabilities")}</span> : null}
-                        {feature.endpoints?.length ? <span className="pill">{formatCount(feature.endpoints.length, "endpoint")}</span> : null}
-                        {feature.links?.length ? <span className="pill">{formatCount(feature.links.length, "doc")}</span> : null}
+                        {feature.capabilities?.length ? (
+                          <span className="pill">
+                            {formatCount(feature.capabilities.length, "capability", "capabilities")}
+                          </span>
+                        ) : null}
+                        {feature.endpoints?.length ? (
+                          <span className="pill">{formatCount(feature.endpoints.length, "endpoint")}</span>
+                        ) : null}
+                        {feature.links?.length ? (
+                          <span className="pill">{formatCount(feature.links.length, "doc")}</span>
+                        ) : null}
                       </div>
                     </button>
                   ))}

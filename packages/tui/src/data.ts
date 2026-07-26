@@ -9,7 +9,12 @@ import {
 } from "@smithers-orchestrator/gateway-react";
 import type { GatewayAsyncState } from "@smithers-orchestrator/gateway-react";
 import type { UseGatewayRunTreeResult } from "@smithers-orchestrator/gateway-react";
-import type { GatewayRpcPayload, GatewayRunNode, GatewayApprovalRow, GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
+import type {
+  GatewayRpcPayload,
+  GatewayRunNode,
+  GatewayApprovalRow,
+  GatewayEventFrame,
+} from "@smithers-orchestrator/gateway-client";
 
 export type RunData = GatewayAsyncState<GatewayRpcPayload<"getRun">>;
 
@@ -42,7 +47,10 @@ export function tuiEventCap(maxEvents?: number): number {
   return maxEvents ?? TUI_EVENT_CAP;
 }
 
-export function useRunEvents(runId: string, options?: { afterSeq?: number; maxEvents?: number }): {
+export function useRunEvents(
+  runId: string,
+  options?: { afterSeq?: number; maxEvents?: number },
+): {
   events: GatewayEventFrame[];
   lastHeartbeat: GatewayEventFrame | undefined;
   error: Error | undefined;
@@ -53,11 +61,7 @@ export function useRunEvents(runId: string, options?: { afterSeq?: number; maxEv
   return useGatewayRunEvents(runId, { ...options, maxEvents: tuiEventCap(options?.maxEvents) });
 }
 
-export function useNodeOutput(params: {
-  runId: string | undefined;
-  nodeId: string | undefined;
-  iteration?: number;
-}) {
+export function useNodeOutput(params: { runId: string | undefined; nodeId: string | undefined; iteration?: number }) {
   return useGatewayNodeOutput(params);
 }
 
@@ -85,4 +89,11 @@ export function useNodeDiff(params: {
   );
 }
 
-export type { GatewayAsyncState, GatewayRpcPayload, GatewayRunNode, GatewayApprovalRow, GatewayEventFrame, UseGatewayRunTreeResult };
+export type {
+  GatewayAsyncState,
+  GatewayRpcPayload,
+  GatewayRunNode,
+  GatewayApprovalRow,
+  GatewayEventFrame,
+  UseGatewayRunTreeResult,
+};

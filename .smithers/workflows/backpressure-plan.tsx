@@ -22,10 +22,7 @@ const inputSchema = z.object({
 
 // 1. The flat list of testable acceptance criteria pulled out of the prompt.
 const criteriaSchema = z.looseObject({
-  criteria: z
-    .array(z.string())
-    .default([])
-    .describe("One atomic, verifiable acceptance criterion per entry."),
+  criteria: z.array(z.string()).default([]).describe("One atomic, verifiable acceptance criterion per entry."),
 });
 
 // 2. The gate matrix: every criterion mapped to how it is verified and enforced.
@@ -35,16 +32,7 @@ const gatesSchema = z.looseObject({
       z.object({
         criterion: z.string().describe("The acceptance criterion this gate enforces."),
         verificationMethod: z
-          .enum([
-            "schema",
-            "unit_test",
-            "integration_test",
-            "eval",
-            "review",
-            "approval",
-            "trace",
-            "manual_check",
-          ])
+          .enum(["schema", "unit_test", "integration_test", "eval", "review", "approval", "trace", "manual_check"])
           .describe("How the criterion is checked."),
         gateType: z
           .enum(["blocking", "warning", "informational"])
@@ -77,10 +65,7 @@ const verifySchema = z.object({
     .array(z.string())
     .default([])
     .describe("Blocking gates whose verificationMethod is manual_check with no named checker."),
-  invalidGates: z
-    .array(z.string())
-    .default([])
-    .describe("Criteria whose gates violate the gate contract."),
+  invalidGates: z.array(z.string()).default([]).describe("Criteria whose gates violate the gate contract."),
   summary: z.string(),
 });
 
@@ -156,10 +141,14 @@ export default smithers((ctx) => {
               const produced = gateList.map((gate) => gate.criterion);
               const missing = wanted.filter((criterion) => !produced.includes(criterion));
               const orderedMatch =
-                produced.length === wanted.length &&
-                wanted.every((criterion, index) => produced[index] === criterion);
+                produced.length === wanted.length && wanted.every((criterion, index) => produced[index] === criterion);
               const unverifiedBlocking = gateList
-                .filter((gate) => gate.gateType === "blocking" && gate.verificationMethod === "manual_check" && gate.checkedBy.trim().length === 0)
+                .filter(
+                  (gate) =>
+                    gate.gateType === "blocking" &&
+                    gate.verificationMethod === "manual_check" &&
+                    gate.checkedBy.trim().length === 0,
+                )
                 .map((gate) => gate.criterion);
               const invalidGates = gateList
                 .filter((gate) => {
@@ -197,9 +186,7 @@ export default smithers((ctx) => {
               const blockingGates = planGates.filter((gate) => gate.gateType === "blocking").length;
               const humanApprovals = planGates.filter((gate) => gate.humanApprovalRequired).length;
               const planSummary = gates && gates.summary.trim().length > 0 ? gates.summary.trim() : "";
-              const summary = [planSummary, verify.summary]
-                .filter((part) => part.trim().length > 0)
-                .join(" ");
+              const summary = [planSummary, verify.summary].filter((part) => part.trim().length > 0).join(" ");
               return {
                 verdict: verify.match ? "pass" : "fail",
                 criteriaCount: verify.criteriaCount,

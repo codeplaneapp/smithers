@@ -26,14 +26,7 @@ export const RELEASE_TEMPLATES: ReleaseTemplate[] = [
       "explain why production agents need it",
       "CTA",
     ],
-    blogShape: [
-      "capability shift",
-      "old failure modes",
-      "what shipped",
-      "walkthrough",
-      "operator implications",
-      "CTA",
-    ],
+    blogShape: ["capability shift", "old failure modes", "what shipped", "walkthrough", "operator implications", "CTA"],
     referenceExamples: ["OpenAI GPT-4o", "OpenAI ChatGPT agent", "Anthropic Claude 4", "Replit Agent 3"],
   },
   {
@@ -93,8 +86,7 @@ export const RELEASE_TEMPLATES: ReleaseTemplate[] = [
       "background agent",
       "diff bundle",
     ],
-    defaultHook:
-      "Agents are long-running workers that need state, control, permissions, and replay.",
+    defaultHook: "Agents are long-running workers that need state, control, permissions, and replay.",
     requiredProof: ["workflow primitive", "operator action", "failure mode"],
     threadShape: [
       "category statement",
@@ -265,10 +257,7 @@ function channelPlanFor(template: ReleaseTemplate): TemplateSelection["channelPl
   };
 }
 
-export function chooseTemplate(
-  analysis: ReleaseAnalysis,
-  config: ReleaseContentInput["template"],
-): TemplateSelection {
+export function chooseTemplate(analysis: ReleaseAnalysis, config: ReleaseContentInput["template"]): TemplateSelection {
   const blocked = new Set(config.blockedTemplateIds ?? []);
   const allowed = new Set(config.allowedTemplateIds ?? []);
   if (config.forceTemplateId) {
@@ -312,9 +301,7 @@ export function chooseTemplate(
   }
 
   const selected =
-    best ??
-    RELEASE_TEMPLATES.find((template) => template.id === "agent-workflow-primitive") ??
-    RELEASE_TEMPLATES[0];
+    best ?? RELEASE_TEMPLATES.find((template) => template.id === "agent-workflow-primitive") ?? RELEASE_TEMPLATES[0];
   const maxPossible = selected.useWhen.length + 8;
   const confidence = Math.max(0.35, Math.min(0.95, bestScore / Math.max(1, maxPossible)));
 

@@ -31,7 +31,9 @@ export function TaskItemFile({ name, icon, className, ...props }: TaskItemFilePr
   return (
     <span data-slot="task-item-file" className={cn("sui-taskitem-file", className)} {...props}>
       {icon !== undefined ? (
-        <span className="sui-taskitem-file-icon" aria-hidden="true">{icon}</span>
+        <span className="sui-taskitem-file-icon" aria-hidden="true">
+          {icon}
+        </span>
       ) : null}
       {name}
     </span>
@@ -39,15 +41,7 @@ export function TaskItemFile({ name, icon, className, ...props }: TaskItemFilePr
 }
 
 /** A compact status-aware unit-of-work row for plans and standalone lists. */
-export function TaskItem({
-  label,
-  status,
-  files,
-  elapsedSeconds,
-  className,
-  children,
-  ...props
-}: TaskItemProps) {
+export function TaskItem({ label, status, files, elapsedSeconds, className, children, ...props }: TaskItemProps) {
   useInjectUiCss();
   useInjectLaneCss(PLANS_TASKS_QUEUES_CSS_ID, plansTasksQueuesCss);
   const normalized = normalizeStatus(status);
@@ -67,7 +61,9 @@ export function TaskItem({
       {files && files.length > 0 ? (
         <span data-slot="task-item-files" className="sui-taskitem-files">
           {files.map((file) => (
-            <span className="sui-taskitem-file" key={file}>{file}</span>
+            <span className="sui-taskitem-file" key={file}>
+              {file}
+            </span>
           ))}
         </span>
       ) : null}

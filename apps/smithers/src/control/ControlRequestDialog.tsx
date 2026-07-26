@@ -79,20 +79,10 @@ export function ControlRequestDialog() {
         </div>
 
         <div className="control-dialog-actions">
-          <button
-            className="control-deny"
-            ref={denyButtonRef}
-            type="button"
-            onClick={denyControl}
-          >
+          <button className="control-deny" ref={denyButtonRef} type="button" onClick={denyControl}>
             Deny
           </button>
-          <button
-            className="control-allow"
-            ref={allowButtonRef}
-            type="button"
-            onClick={grantControl}
-          >
+          <button className="control-allow" ref={allowButtonRef} type="button" onClick={grantControl}>
             Allow
           </button>
         </div>

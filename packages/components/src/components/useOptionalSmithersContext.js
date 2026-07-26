@@ -8,14 +8,13 @@ import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context
  * error; treating it as "no context yet" preserves the static element shape.
  */
 export function useOptionalSmithersContext() {
-    try {
-        return React.useContext(SmithersContext);
+  try {
+    return React.useContext(SmithersContext);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/Invalid hook call|dispatcher\.useContext|useContext/i.test(message)) {
+      return null;
     }
-    catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (/Invalid hook call|dispatcher\.useContext|useContext/i.test(message)) {
-            return null;
-        }
-        throw error;
-    }
+    throw error;
+  }
 }

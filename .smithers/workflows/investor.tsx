@@ -207,7 +207,9 @@ async function speakStop() {
   let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
   if (narration.child.exitCode === null && narration.child.signalCode === null) {
     forceKillTimer = setTimeout(() => {
-      try { narration.child.kill("SIGKILL"); } catch {}
+      try {
+        narration.child.kill("SIGKILL");
+      } catch {}
     }, 1_000);
   }
 
@@ -226,7 +228,9 @@ function header(title: string, subtitle: string, n: number, total: number) {
   clearScreen();
   hideCursor();
   const tag = "smithers · investor deck";
-  write(`${C.dim}${tag}${C.reset}${" ".repeat(W - tag.length - `${n}/${total}`.length)}${C.dim}${n}/${total}${C.reset}\n`);
+  write(
+    `${C.dim}${tag}${C.reset}${" ".repeat(W - tag.length - `${n}/${total}`.length)}${C.dim}${n}/${total}${C.reset}\n`,
+  );
   hr();
   write(`\n  ${C.bold}${C.yellow}${title}${C.reset}\n`);
   if (subtitle) write(`  ${C.dim}${subtitle}${C.reset}\n`);
@@ -286,7 +290,9 @@ function startKeyboard(onKey: (k: InvestorKey) => void): () => void {
 
   return () => {
     stdin.off("data", handler);
-    try { stdin.setRawMode?.(false); } catch {}
+    try {
+      stdin.setRawMode?.(false);
+    } catch {}
     stdin.pause();
   };
 }
@@ -326,7 +332,9 @@ const SLIDES: Slide[] = [
       for (const line of banner) write(`${C.cyan}${line}${C.reset}\n`);
       write(`\n${C.dim}        the durable control plane for humans + agents doing real work${C.reset}\n`);
       write("\n");
-      write(`     ${C.green}${DATA.downloadsAllTime.toLocaleString()}+ downloads${C.reset}${C.dim}   ·   ${C.reset}${C.yellow}${DATA.stars} stars${C.reset}${C.dim}   ·   ${C.reset}${C.cyan}${DATA.externalContributors}+ external contributors${C.reset}${C.dim}   ·   open source${C.reset}\n`);
+      write(
+        `     ${C.green}${DATA.downloadsAllTime.toLocaleString()}+ downloads${C.reset}${C.dim}   ·   ${C.reset}${C.yellow}${DATA.stars} stars${C.reset}${C.dim}   ·   ${C.reset}${C.cyan}${DATA.externalContributors}+ external contributors${C.reset}${C.dim}   ·   open source${C.reset}\n`,
+      );
       write(`\n\n${C.dim}     press ▸ to continue${C.reset}\n`);
     },
   },
@@ -767,8 +775,12 @@ const SLIDES: Slide[] = [
       "Other people are running our R&D in production, for free, and showing us exactly where to go.",
     render: () => {
       write("\n");
-      write(`   ${C.green}adoption${C.reset} ${C.grey}─▶${C.reset} ${C.cyan}contribute + issues${C.reset} ${C.grey}─▶${C.reset} ${C.yellow}roadmap signal${C.reset} ${C.grey}─▶${C.reset} ${C.magenta}better product${C.reset}\n`);
-      write(`   ${C.dim}…which drives more adoption (${DATA.downloadsLast30d.toLocaleString()}/mo). Distribution cost trends to zero.${C.reset}\n`);
+      write(
+        `   ${C.green}adoption${C.reset} ${C.grey}─▶${C.reset} ${C.cyan}contribute + issues${C.reset} ${C.grey}─▶${C.reset} ${C.yellow}roadmap signal${C.reset} ${C.grey}─▶${C.reset} ${C.magenta}better product${C.reset}\n`,
+      );
+      write(
+        `   ${C.dim}…which drives more adoption (${DATA.downloadsLast30d.toLocaleString()}/mo). Distribution cost trends to zero.${C.reset}\n`,
+      );
       write("\n");
       box(
         "Proof it's working — built on Smithers, by people who don't work here",
@@ -974,8 +986,12 @@ const SLIDES: Slide[] = [
       write("\n\n");
       write(`        ${C.bold}${C.cyan}SMITHERS${C.reset}\n`);
       write(`        ${C.dim}the durable control plane for humans + agents${C.reset}\n\n`);
-      write(`        ${C.green}${DATA.downloadsAllTime.toLocaleString()}+ downloads${C.reset}${C.dim}  ·  ${C.reset}${C.yellow}${DATA.stars} stars${C.reset}${C.dim}  ·  ${C.reset}${C.cyan}${DATA.externalContributors}+ external contributors${C.reset}\n`);
-      write(`        ${C.dim}${DATA.downloadsLast30d.toLocaleString()} downloads in the last 30 days, accelerating${C.reset}\n\n`);
+      write(
+        `        ${C.green}${DATA.downloadsAllTime.toLocaleString()}+ downloads${C.reset}${C.dim}  ·  ${C.reset}${C.yellow}${DATA.stars} stars${C.reset}${C.dim}  ·  ${C.reset}${C.cyan}${DATA.externalContributors}+ external contributors${C.reset}\n`,
+      );
+      write(
+        `        ${C.dim}${DATA.downloadsLast30d.toLocaleString()} downloads in the last 30 days, accelerating${C.reset}\n\n`,
+      );
       write(`        ${C.bold}smithers.sh${C.reset}${C.dim}   ·   github.com/smithersai/smithers${C.reset}\n\n`);
       write(`        ${C.dim}Let's talk.${C.reset}\n\n`);
     },
@@ -1011,11 +1027,27 @@ async function runSlideshow(ctx: Ctx, startAt: number) {
   try {
     stopKeyboard = startKeyboard((key) => {
       clearAutoTimer();
-      if (key === "quit") { quit = true; return; }
-      if (key === "mute") { ctx.muted = !ctx.muted; pendingNav = "replay"; return; }
-      if (key === "replay") { pendingNav = "replay"; return; }
-      if (key === "next" || key === "skip") { pendingNav = "next"; return; }
-      if (key === "prev") { pendingNav = "prev"; return; }
+      if (key === "quit") {
+        quit = true;
+        return;
+      }
+      if (key === "mute") {
+        ctx.muted = !ctx.muted;
+        pendingNav = "replay";
+        return;
+      }
+      if (key === "replay") {
+        pendingNav = "replay";
+        return;
+      }
+      if (key === "next" || key === "skip") {
+        pendingNav = "next";
+        return;
+      }
+      if (key === "prev") {
+        pendingNav = "prev";
+        return;
+      }
     });
 
     while (!quit) {
@@ -1037,10 +1069,17 @@ async function runSlideshow(ctx: Ctx, startAt: number) {
       pendingNav = null;
       clearAutoTimer();
       await speakStop();
-      if (nav === "next" && idx < SLIDES.length - 1) { idx++; dirty = true; }
-      else if (nav === "next" && idx === SLIDES.length - 1) { quit = true; }
-      else if (nav === "prev" && idx > 0) { idx--; dirty = true; }
-      else if (nav === "replay") { dirty = true; }
+      if (nav === "next" && idx < SLIDES.length - 1) {
+        idx++;
+        dirty = true;
+      } else if (nav === "next" && idx === SLIDES.length - 1) {
+        quit = true;
+      } else if (nav === "prev" && idx > 0) {
+        idx--;
+        dirty = true;
+      } else if (nav === "replay") {
+        dirty = true;
+      }
     }
   } finally {
     clearAutoTimer();

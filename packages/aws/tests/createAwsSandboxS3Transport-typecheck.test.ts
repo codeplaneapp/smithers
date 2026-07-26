@@ -9,19 +9,19 @@ const TSC = resolve(REPO_ROOT, "node_modules", "typescript", "bin", "tsc");
 const tempDirs: string[] = [];
 
 afterEach(() => {
-	for (const dir of tempDirs.splice(0)) {
-		rmSync(dir, { recursive: true, force: true });
-	}
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 describe("createAwsSandboxS3Transport public type", () => {
-	test("accepts workdir for direct TypeScript callers", () => {
-		const dir = mkdtempSync(join(tmpdir(), "smithers-aws-s3-transport-"));
-		tempDirs.push(dir);
+  test("accepts workdir for direct TypeScript callers", () => {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-aws-s3-transport-"));
+    tempDirs.push(dir);
 
-		writeFileSync(
-			join(dir, "aws-s3-transport.ts"),
-			`
+    writeFileSync(
+      join(dir, "aws-s3-transport.ts"),
+      `
 				import { createAwsSandboxS3Transport } from "@smithers-orchestrator/aws";
 
 				createAwsSandboxS3Transport({
@@ -35,32 +35,32 @@ describe("createAwsSandboxS3Transport public type", () => {
 					workdir: "/workspace",
 				});
 			`,
-		);
-		writeFileSync(
-			join(dir, "tsconfig.json"),
-			JSON.stringify({
-				compilerOptions: {
-					strict: true,
-					noEmit: true,
-					target: "ESNext",
-					module: "ESNext",
-					moduleResolution: "bundler",
-					paths: {
-						"@smithers-orchestrator/aws": [resolve(REPO_ROOT, "packages/aws/src/index.d.ts")],
-					},
-					skipLibCheck: true,
-					lib: ["ESNext", "DOM", "DOM.Iterable"],
-				},
-				include: ["aws-s3-transport.ts"],
-			}),
-		);
+    );
+    writeFileSync(
+      join(dir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          strict: true,
+          noEmit: true,
+          target: "ESNext",
+          module: "ESNext",
+          moduleResolution: "bundler",
+          paths: {
+            "@smithers-orchestrator/aws": [resolve(REPO_ROOT, "packages/aws/src/index.d.ts")],
+          },
+          skipLibCheck: true,
+          lib: ["ESNext", "DOM", "DOM.Iterable"],
+        },
+        include: ["aws-s3-transport.ts"],
+      }),
+    );
 
-		const result = spawnSync(process.execPath, [TSC, "-p", join(dir, "tsconfig.json")], {
-			cwd: REPO_ROOT,
-			encoding: "utf8",
-		});
+    const result = spawnSync(process.execPath, [TSC, "-p", join(dir, "tsconfig.json")], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+    });
 
-		expect(`${result.stdout}${result.stderr}`).toBe("");
-		expect(result.status).toBe(0);
-	}, 60_000);
+    expect(`${result.stdout}${result.stderr}`).toBe("");
+    expect(result.status).toBe(0);
+  }, 60_000);
 });

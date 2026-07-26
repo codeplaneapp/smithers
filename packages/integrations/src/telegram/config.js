@@ -22,7 +22,7 @@ let moduleConfig = null;
  * @param {TelegramClientConfig | null} config
  */
 export function configureTelegram(config) {
-    moduleConfig = config;
+  moduleConfig = config;
 }
 
 /**
@@ -34,13 +34,16 @@ export function configureTelegram(config) {
  * @returns {TelegramClientConfig}
  */
 export function resolveTelegramConfig(explicit) {
-    const envToken = process.env.SMITHERS_TELEGRAM_BOT_TOKEN;
-    const base = moduleConfig ?? (envToken ? { botToken: envToken } : null);
-    const merged = { ...(base ?? {}), ...(explicit ?? {}) };
-    if (!merged.botToken) {
-        throw new SmithersError("INVALID_INPUT", "No Telegram bot token configured. Pass config={ botToken } to the component, call configureTelegram({ botToken }), or set SMITHERS_TELEGRAM_BOT_TOKEN.");
-    }
-    return /** @type {TelegramClientConfig} */ (merged);
+  const envToken = process.env.SMITHERS_TELEGRAM_BOT_TOKEN;
+  const base = moduleConfig ?? (envToken ? { botToken: envToken } : null);
+  const merged = { ...(base ?? {}), ...(explicit ?? {}) };
+  if (!merged.botToken) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      "No Telegram bot token configured. Pass config={ botToken } to the component, call configureTelegram({ botToken }), or set SMITHERS_TELEGRAM_BOT_TOKEN.",
+    );
+  }
+  return /** @type {TelegramClientConfig} */ (merged);
 }
 
 /**
@@ -48,5 +51,5 @@ export function resolveTelegramConfig(explicit) {
  * @param {Partial<TelegramClientConfig> | undefined} [explicit]
  */
 export function resolveTelegramClient(explicit) {
-    return makeTelegramClient(resolveTelegramConfig(explicit));
+  return makeTelegramClient(resolveTelegramConfig(explicit));
 }

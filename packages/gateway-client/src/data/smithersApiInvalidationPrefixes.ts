@@ -6,13 +6,24 @@ export function smithersApiInvalidationPrefixes(name: string): QueryKey[] {
       return [["smithers", "runs"]];
     case "run_events":
     case "events":
-      return [["smithers", "events"], ["smithers", "runTree"], ["smithers", "runs"]];
+      return [
+        ["smithers", "events"],
+        ["smithers", "runTree"],
+        ["smithers", "runs"],
+      ];
     case "node_outputs":
     case "nodes":
     case "runTree":
-      return [["smithers", "runTree"], ["smithers", "nodes"]];
+      return [
+        ["smithers", "runTree"],
+        ["smithers", "nodes"],
+      ];
     case "approvals":
-      return [["smithers", "approvals"], ["smithers", "runs"], ["smithers", "runTree"]];
+      return [
+        ["smithers", "approvals"],
+        ["smithers", "runs"],
+        ["smithers", "runTree"],
+      ];
     case "workflows":
       return [["smithers", "workflows"]];
     case "docs":
@@ -22,12 +33,18 @@ export function smithersApiInvalidationPrefixes(name: string): QueryKey[] {
     case "scores":
       return [["smithers", "scores"]];
     case "tickets":
-      return [["smithers", "tickets"], ["smithers", "docs"]];
+      return [
+        ["smithers", "tickets"],
+        ["smithers", "docs"],
+      ];
     case "memoryFacts":
     case "memory_facts":
       return [["smithers", "memoryFacts"]];
     case "crons":
-      return [["smithers", "crons"], ["smithers", "runs"]];
+      return [
+        ["smithers", "crons"],
+        ["smithers", "runs"],
+      ];
     default:
       return [["smithers"]];
   }

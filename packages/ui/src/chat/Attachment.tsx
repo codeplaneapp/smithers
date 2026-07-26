@@ -47,15 +47,17 @@ const stateLabels: Record<Exclude<AttachmentState, "ready">, string> = {
 function extensionLabel(name: string): string {
   const dot = name.lastIndexOf(".");
   if (dot < 0 || dot === name.length - 1) return "FILE";
-  return name.slice(dot + 1).toUpperCase().slice(0, 4) || "FILE";
+  return (
+    name
+      .slice(dot + 1)
+      .toUpperCase()
+      .slice(0, 4) || "FILE"
+  );
 }
 
 function attachmentMeta(context: AttachmentContextValue): string {
   if (context.state !== "ready") return stateLabels[context.state];
-  return [
-    typeof context.sizeBytes === "number" ? byteCountString(context.sizeBytes) : undefined,
-    context.mediaType,
-  ]
+  return [typeof context.sizeBytes === "number" ? byteCountString(context.sizeBytes) : undefined, context.mediaType]
     .filter((value): value is string => Boolean(value))
     .join(" · ");
 }
@@ -101,10 +103,9 @@ export function Attachment({
 
   const progressLabel = `${state === "processing" ? "Processing" : state === "error" ? "Failed" : state === "ready" ? "Ready" : "Uploading"} ${name}`;
   const numericProgress = typeof progress === "number" ? Math.max(0, Math.min(100, progress)) : undefined;
-  const readyMeta = [
-    typeof sizeBytes === "number" ? byteCountString(sizeBytes) : undefined,
-    mediaType,
-  ].filter((value): value is string => Boolean(value));
+  const readyMeta = [typeof sizeBytes === "number" ? byteCountString(sizeBytes) : undefined, mediaType].filter(
+    (value): value is string => Boolean(value),
+  );
   const meta = state === "ready" ? readyMeta.join(" · ") : stateLabels[state];
 
   return (
@@ -189,13 +190,7 @@ export function AttachmentMedia({ className, children, ...props }: ComponentProp
 /** Text column of a compound Attachment card. */
 export function AttachmentContent({ className, ...props }: ComponentProps<"div">) {
   useInjectAttachmentCss();
-  return (
-    <div
-      data-slot="attachment-content"
-      className={cn("sui-attachment-content", className)}
-      {...props}
-    />
-  );
+  return <div data-slot="attachment-content" className={cn("sui-attachment-content", className)} {...props} />;
 }
 
 /** Attachment name; defaults to the context name. */
@@ -214,22 +209,14 @@ export function AttachmentDescription({ className, children, ...props }: Compone
   useInjectAttachmentCss();
   const context = useAttachmentContext("AttachmentDescription");
   return (
-    <div
-      data-slot="attachment-description"
-      className={cn("sui-attachment-description", className)}
-      {...props}
-    >
+    <div data-slot="attachment-description" className={cn("sui-attachment-description", className)} {...props}>
       {children ?? attachmentMeta(context)}
     </div>
   );
 }
 
 /** Toolbar row of attachment actions. */
-export function AttachmentActions({
-  className,
-  "aria-label": ariaLabel,
-  ...props
-}: ComponentProps<"div">) {
+export function AttachmentActions({ className, "aria-label": ariaLabel, ...props }: ComponentProps<"div">) {
   useInjectAttachmentCss();
   return (
     <div
@@ -274,19 +261,10 @@ export function AttachmentAction({
 }
 
 /** Full-card button wrapper making the whole attachment clickable. */
-export function AttachmentTrigger({
-  className,
-  type = "button",
-  ...props
-}: ComponentProps<"button">) {
+export function AttachmentTrigger({ className, type = "button", ...props }: ComponentProps<"button">) {
   useInjectAttachmentCss();
   return (
-    <button
-      type={type}
-      data-slot="attachment-trigger"
-      className={cn("sui-attachment-trigger", className)}
-      {...props}
-    />
+    <button type={type} data-slot="attachment-trigger" className={cn("sui-attachment-trigger", className)} {...props} />
   );
 }
 
@@ -300,22 +278,12 @@ export type AttachmentPreviewProps = Omit<ComponentProps<"div">, "children"> & {
  * Image preview or extension tile. Never fabricates a preview: without a src
  * it renders the extension tile instead of guessing at the file's content.
  */
-export function AttachmentPreview({
-  src,
-  alt,
-  mediaType,
-  className,
-  ...props
-}: AttachmentPreviewProps) {
+export function AttachmentPreview({ src, alt, mediaType, className, ...props }: AttachmentPreviewProps) {
   useInjectAttachmentCss();
   const context = useAttachmentContext("AttachmentPreview");
   const showImage = src && (!mediaType || mediaType.startsWith("image/"));
   return (
-    <div
-      data-slot="attachment-preview"
-      className={cn("sui-attachment-preview", className)}
-      {...props}
-    >
+    <div data-slot="attachment-preview" className={cn("sui-attachment-preview", className)} {...props}>
       {showImage ? (
         <img src={src} alt={alt ?? ""} />
       ) : (
@@ -353,12 +321,7 @@ export function AttachmentGroup({ className, children, ...props }: ComponentProp
   useInjectAttachmentCss();
   return (
     <AttachmentGroupContext.Provider value={true}>
-      <div
-        data-slot="attachment-group"
-        role="list"
-        className={cn("sui-attachment-group", className)}
-        {...props}
-      >
+      <div data-slot="attachment-group" role="list" className={cn("sui-attachment-group", className)} {...props}>
         {children}
       </div>
     </AttachmentGroupContext.Provider>

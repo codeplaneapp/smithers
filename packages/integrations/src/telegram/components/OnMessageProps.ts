@@ -24,11 +24,9 @@ export type TelegramListenerBaseProps<Schema extends z.ZodTypeAny> = {
   smithersContext?: React.Context<unknown>;
 };
 
-export type OnMessageProps<Schema extends z.ZodTypeAny> =
-  TelegramListenerBaseProps<Schema> & {
-    /** Listen for edits instead of new messages. */
-    edited?: boolean;
-  };
+export type OnMessageProps<Schema extends z.ZodTypeAny> = TelegramListenerBaseProps<Schema> & {
+  /** Listen for edits instead of new messages. */
+  edited?: boolean;
+};
 
-export type OnCallbackQueryProps<Schema extends z.ZodTypeAny> =
-  TelegramListenerBaseProps<Schema>;
+export type OnCallbackQueryProps<Schema extends z.ZodTypeAny> = TelegramListenerBaseProps<Schema>;

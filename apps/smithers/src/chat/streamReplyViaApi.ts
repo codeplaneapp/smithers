@@ -28,9 +28,7 @@ export async function* streamReplyViaApi({
 
   if (!response.ok || !response.body) {
     const detail = await response.text().catch(() => "");
-    throw new Error(
-      `Chat request failed (${response.status})${detail ? `: ${detail}` : ""}`,
-    );
+    throw new Error(`Chat request failed (${response.status})${detail ? `: ${detail}` : ""}`);
   }
 
   const reader = response.body.getReader();
@@ -63,9 +61,7 @@ export async function* streamReplyViaApi({
       if (chunk.type === "TEXT_MESSAGE_CONTENT" && typeof chunk.delta === "string") {
         yield chunk.delta;
       } else if (chunk.type === "RUN_ERROR") {
-        throw new Error(
-          typeof chunk.message === "string" ? chunk.message : "Chat failed.",
-        );
+        throw new Error(typeof chunk.message === "string" ? chunk.message : "Chat failed.");
       }
     }
   }

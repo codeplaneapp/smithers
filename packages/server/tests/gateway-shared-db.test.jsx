@@ -35,10 +35,7 @@ function makeDbPath(name) {
 
 /** Three workflows built from ONE createSmithers instance — they share `.db`. */
 function createSharedDbWorkflows(dbPath) {
-  const { smithers, Workflow, Task, outputs } = createSmithers(
-    { out: z.object({ value: z.number() }) },
-    { dbPath },
-  );
+  const { smithers, Workflow, Task, outputs } = createSmithers({ out: z.object({ value: z.number() }) }, { dbPath });
   const make = (name) =>
     smithers(() => (
       <Workflow name={name}>
@@ -84,10 +81,11 @@ describe("gateway — many workflows sharing one DB", () => {
     // startRun schedules the run and returns before its row is committed, so
     // poll until all three are listed (dedup means the count tops out at 3, never
     // 9 — if dedup regressed this would settle at 9 and the key assertions fail).
-    const runs = await waitFor(async () => {
-      const listed = await gateway.listRunsAcrossWorkflows(50);
-      return listed.length >= 3 ? listed : null;
-    }) ?? [];
+    const runs =
+      (await waitFor(async () => {
+        const listed = await gateway.listRunsAcrossWorkflows(50);
+        return listed.length >= 3 ? listed : null;
+      })) ?? [];
 
     // Exactly three runs — NOT 9 (3 runs × 3 shared-DB adapters).
     expect(runs.length).toBe(3);
@@ -116,9 +114,7 @@ describe("gateway — many workflows sharing one DB", () => {
       { id: "runs-offset", method: "listRuns", params: { filter: { limit: 2, offset: 1 } } },
     );
     expect(offsetResponse.ok).toBe(true);
-    expect(offsetResponse.payload.map((run) => run.runId)).toEqual(
-      newestFirst.slice(1, 3).map((run) => run.runId),
-    );
+    expect(offsetResponse.payload.map((run) => run.runId)).toEqual(newestFirst.slice(1, 3).map((run) => run.runId));
     const badOffset = await gateway.routeRequest(
       { role: "operator", scopes: ["run:read"], userId: "test" },
       { id: "runs-bad-offset", method: "listRuns", params: { filter: { limit: 2, offset: -1 } } },
@@ -279,9 +275,7 @@ describe("gateway — resolveRunWorkflowKey precedence", () => {
     ).toBe("beta");
 
     // No stored key (e.g. a CLI-started run): fall back to a registered workflowName.
-    expect(
-      gateway.resolveRunWorkflowKey({ configJson: "{}", workflowName: "beta" }, registered, "zzz"),
-    ).toBe("beta");
+    expect(gateway.resolveRunWorkflowKey({ configJson: "{}", workflowName: "beta" }, registered, "zzz")).toBe("beta");
 
     // Unknown workflowName but a registered entry-file basename: attribute by
     // path. This is the CLI-started run whose workflow crashed before it ever
@@ -316,13 +310,7 @@ describe("gateway — resolveRunWorkflowKey precedence", () => {
 
     // Without path provenance, preserve the stored workflow name rather than
     // attributing the row to an unrelated registered workflow.
-    expect(
-      gateway.resolveRunWorkflowKey(
-        { configJson: "{}", workflowName: "ghost" },
-        registered,
-        "zzz",
-      ),
-    ).toBe("ghost");
+    expect(gateway.resolveRunWorkflowKey({ configJson: "{}", workflowName: "ghost" }, registered, "zzz")).toBe("ghost");
 
     // Rows with no workflow identity at all retain the adapter-owner fallback.
     expect(gateway.resolveRunWorkflowKey({ configJson: "{}" }, registered, "zzz")).toBe("zzz");

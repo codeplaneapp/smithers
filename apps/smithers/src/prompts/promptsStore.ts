@@ -1,13 +1,7 @@
 import { create } from "zustand";
 import { useChatStore } from "../chat/chatStore";
 import { useNotificationsStore } from "../notifications/notificationsStore";
-import {
-  defaultValues,
-  discoverInputs,
-  hasInputValueChanges,
-  renderPreview,
-  type Prompt,
-} from "./promptsSource";
+import { defaultValues, discoverInputs, hasInputValueChanges, renderPreview, type Prompt } from "./promptsSource";
 
 /** The four detail tabs, in order. Source/Inputs/Preview are 1:1 with the Swift
  *  DetailTab enum; Imports is the new scope tab listing the source's imports. */

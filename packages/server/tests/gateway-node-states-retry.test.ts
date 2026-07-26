@@ -70,12 +70,20 @@ async function bootGateway() {
         React.createElement(
           api.Sequence,
           null,
-          React.createElement(api.Task, { id: "first", output: api.outputs.result }, {
-            value: Number(ctx.input.value ?? 1),
-          }),
-          React.createElement(api.Task, { id: "second", output: api.outputs.result }, {
-            value: Number(ctx.input.value ?? 1) + 1,
-          }),
+          React.createElement(
+            api.Task,
+            { id: "first", output: api.outputs.result },
+            {
+              value: Number(ctx.input.value ?? 1),
+            },
+          ),
+          React.createElement(
+            api.Task,
+            { id: "second", output: api.outputs.result },
+            {
+              value: Number(ctx.input.value ?? 1) + 1,
+            },
+          ),
         ),
       ),
     ),
@@ -138,7 +146,13 @@ test("node-states returns per-(node, iteration) rows with latest-attempt timing"
   }
 
   // Reads are run:read — the viewer token sees the same rows.
-  const reader = await apiRequest(baseUrl, "GET", `/v1/api/runs/${encodeURIComponent(runId)}/node-states`, undefined, "reader-token");
+  const reader = await apiRequest(
+    baseUrl,
+    "GET",
+    `/v1/api/runs/${encodeURIComponent(runId)}/node-states`,
+    undefined,
+    "reader-token",
+  );
   expect(reader.response.status).toBe(200);
   expect(reader.json.ok).toBe(true);
 
@@ -200,7 +214,12 @@ test("retryTask enforces run:write scope and honest error codes", async () => {
   expect(forbidden.json.ok).toBe(false);
 
   // Unknown node and unknown run both answer NOT_FOUND, not a silent reset.
-  const missingNode = await apiRequest(baseUrl, "POST", `/v1/api/runs/${encodeURIComponent(runId)}/nodes/nope/retry`, {});
+  const missingNode = await apiRequest(
+    baseUrl,
+    "POST",
+    `/v1/api/runs/${encodeURIComponent(runId)}/nodes/nope/retry`,
+    {},
+  );
   expect(missingNode.response.status).toBe(404);
   expect(missingNode.json.ok).toBe(false);
 

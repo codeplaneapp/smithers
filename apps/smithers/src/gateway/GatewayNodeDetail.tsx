@@ -4,20 +4,10 @@ import { StatusPill } from "../cards/StatusPill";
 import type { RunNode } from "../runs/Run";
 
 function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
-export function GatewayNodeDetail({
-  loadOutput,
-  runId,
-  node,
-}: {
-  loadOutput: boolean;
-  runId: string;
-  node: RunNode;
-}) {
+export function GatewayNodeDetail({ loadOutput, runId, node }: { loadOutput: boolean; runId: string; node: RunNode }) {
   const outputState = useGatewayNodeOutput({
     runId: loadOutput ? runId : undefined,
     nodeId: loadOutput ? node.id : undefined,

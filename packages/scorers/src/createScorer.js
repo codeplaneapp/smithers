@@ -19,10 +19,10 @@
  * @returns {Scorer}
  */
 export function createScorer(config) {
-    return {
-        id: config.id,
-        name: config.name,
-        description: config.description,
-        score: config.score,
-    };
+  return {
+    id: config.id,
+    name: config.name,
+    description: config.description,
+    score: config.score,
+  };
 }

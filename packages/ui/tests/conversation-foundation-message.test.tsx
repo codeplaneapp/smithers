@@ -149,9 +149,7 @@ describe("Message", () => {
         <MessageContent>dark</MessageContent>
       </Message>,
     );
-    expect(
-      document.querySelector(`style[data-smithers-ui-lane="${CONVERSATION_FOUNDATION_CSS_ID}"]`),
-    ).not.toBeNull();
+    expect(document.querySelector(`style[data-smithers-ui-lane="${CONVERSATION_FOUNDATION_CSS_ID}"]`)).not.toBeNull();
     const avatar = container!.querySelector<HTMLElement>('[data-slot="message-avatar"]')!;
     expect(getComputedStyle(avatar).backgroundColor).toBe("#1f1f24");
   });
@@ -221,16 +219,13 @@ describe("MessageBranch", () => {
         </MessageBranchSelector>
       </MessageBranch>,
     );
-    const panels = () =>
-      Array.from(container!.querySelectorAll<HTMLElement>('[data-slot="message-branch-content"]'));
+    const panels = () => Array.from(container!.querySelectorAll<HTMLElement>('[data-slot="message-branch-content"]'));
     expect(panels()).toHaveLength(2);
     expect(panels()[0]!.hidden).toBe(false);
     expect(panels()[0]!.textContent).toBe("first response");
     expect(panels()[1]!.hidden).toBe(true);
     expect(panels()[1]!.getAttribute("aria-hidden")).toBe("true");
-    await act(async () =>
-      container!.querySelector<HTMLButtonElement>('[data-slot="message-branch-next"]')!.click(),
-    );
+    await act(async () => container!.querySelector<HTMLButtonElement>('[data-slot="message-branch-next"]')!.click());
     expect(panels()[0]!.hidden).toBe(true);
     expect(panels()[1]!.hidden).toBe(false);
     await act(async () =>
@@ -260,9 +255,7 @@ describe("MessageBranch", () => {
     await act(async () => root!.render(view(1)));
     expect(page().textContent).toBe("1 of 1");
     expect(branch().getAttribute("data-branch-index")).toBe("0");
-    const panels = Array.from(
-      container!.querySelectorAll<HTMLElement>('[data-slot="message-branch-content"]'),
-    );
+    const panels = Array.from(container!.querySelectorAll<HTMLElement>('[data-slot="message-branch-content"]'));
     expect(panels[0]!.hidden).toBe(false);
     // Reconciliation is silent: a count-driven clamp is not a user navigation.
     expect(changes).toEqual([]);
@@ -299,12 +292,8 @@ describe("MessageBranch", () => {
     expect(container!.querySelector('[data-slot="message-branch-page"]')!.textContent).toBe("0 of 0");
     const panels = container!.querySelectorAll<HTMLElement>('[data-slot="message-branch-content"]');
     for (const panel of panels) expect(panel.hidden).toBe(true);
-    expect(
-      container!.querySelector<HTMLButtonElement>('[data-slot="message-branch-previous"]')!.disabled,
-    ).toBe(true);
-    expect(
-      container!.querySelector<HTMLButtonElement>('[data-slot="message-branch-next"]')!.disabled,
-    ).toBe(true);
+    expect(container!.querySelector<HTMLButtonElement>('[data-slot="message-branch-previous"]')!.disabled).toBe(true);
+    expect(container!.querySelector<HTMLButtonElement>('[data-slot="message-branch-next"]')!.disabled).toBe(true);
   });
 
   test("a transient zero count hides branches but preserves the uncontrolled index", async () => {
@@ -424,7 +413,11 @@ describe("CompactGroup", () => {
 describe("ConversationCheckpoint", () => {
   test("renders label, optional time, and actions without role=separator", () => {
     const html = renderToStaticMarkup(
-      <ConversationCheckpoint label="Checkpoint 12" timestampMs={1_700_000_000_000} actions={<button>restore</button>} />,
+      <ConversationCheckpoint
+        label="Checkpoint 12"
+        timestampMs={1_700_000_000_000}
+        actions={<button>restore</button>}
+      />,
     );
     expect(html).toContain('data-slot="conversation-checkpoint"');
     expect(html).toContain("Checkpoint 12");

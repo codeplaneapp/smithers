@@ -12,9 +12,7 @@ const migrateTestFiles = [
 ];
 
 test("test-postgres isolates every migrate-store test in its own bun process", () => {
-  const configuredChunks = Number(
-    workflow.match(/SMITHERS_MIGRATE_CHUNKS=(\d+)/)?.[1],
-  );
+  const configuredChunks = Number(workflow.match(/SMITHERS_MIGRATE_CHUNKS=(\d+)/)?.[1]);
 
   expect(configuredChunks).toBeGreaterThan(0);
   expect(workflow).toContain(`for chunk in {0..${configuredChunks - 1}}; do`);

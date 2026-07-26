@@ -29,10 +29,7 @@ function makeDbPath(name) {
 
 /** One workflow with a couple of nodes so each run writes several events. */
 function createLoadWorkflow(dbPath) {
-  const { smithers, Workflow, Task, outputs } = createSmithers(
-    { out: z.object({ value: z.number() }) },
-    { dbPath },
-  );
+  const { smithers, Workflow, Task, outputs } = createSmithers({ out: z.object({ value: z.number() }) }, { dbPath });
   const workflow = smithers(() => (
     <Workflow name="load">
       <Task id="a" output={outputs.out}>
@@ -74,9 +71,7 @@ describe("gateway — 50 concurrent runs through one owner", () => {
     const runIds = Array.from({ length: RUN_COUNT }, (_, i) => `run-${i.toString().padStart(3, "0")}`);
 
     // Launch all 50 concurrently — this is the contention the bug is about.
-    await Promise.all(
-      runIds.map((runId) => gateway.startRun("load", {}, AUTH, runId, { resume: false })),
-    );
+    await Promise.all(runIds.map((runId) => gateway.startRun("load", {}, AUTH, runId, { resume: false })));
 
     // Poll until every run reaches a terminal state. Generous budget: the
     // single-owner FIFO write lane makes 50 runs a latency story, not a

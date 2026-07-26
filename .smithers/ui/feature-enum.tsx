@@ -164,10 +164,7 @@ function App() {
   const actions = useGatewayActions();
 
   const featureRuns = useMemo(
-    () =>
-      ((runsQuery.data ?? []) as RunSummary[]).filter(
-        (r) => !r.workflowKey || r.workflowKey === WORKFLOW_KEY,
-      ),
+    () => ((runsQuery.data ?? []) as RunSummary[]).filter((r) => !r.workflowKey || r.workflowKey === WORKFLOW_KEY),
     [runsQuery.data],
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? featureRuns[0]?.runId;
@@ -199,7 +196,9 @@ function App() {
     }
     labels.push({ id: "feature-enum:result", name: "Result", sub: "Final inventory" });
 
-    const completedTasks = eventNames.filter((n) => n === "task.finished" || n === "node.completed" || n === "task.completed").length;
+    const completedTasks = eventNames.filter(
+      (n) => n === "task.finished" || n === "node.completed" || n === "task.completed",
+    ).length;
     const runStatus = activeRun?.status;
     const runDone = runStatus === "finished";
     const runActive = runStatus === "running" || runStatus === "continued";
@@ -305,11 +304,21 @@ function App() {
             Refresh
           </button>
           {running ? (
-            <button className="button danger" data-testid="feature-enum-cancel" onClick={() => void cancel()} disabled={busy}>
+            <button
+              className="button danger"
+              data-testid="feature-enum-cancel"
+              onClick={() => void cancel()}
+              disabled={busy}
+            >
               Cancel
             </button>
           ) : null}
-          <button className="button primary" data-testid="feature-enum-launch" onClick={() => void launch()} disabled={busy}>
+          <button
+            className="button primary"
+            data-testid="feature-enum-launch"
+            onClick={() => void launch()}
+            disabled={busy}
+          >
             Launch Scan
           </button>
         </div>
@@ -348,7 +357,9 @@ function App() {
                 <span className={"stage-dot " + stage.state} />
                 <span>
                   <div className="stage-name">{stage.name}</div>
-                  <div className="stage-sub">{stage.state === "running" ? "running…" : stage.state === "done" ? "done" : stage.sub}</div>
+                  <div className="stage-sub">
+                    {stage.state === "running" ? "running…" : stage.state === "done" ? "done" : stage.sub}
+                  </div>
                 </span>
               </li>
             ))}
@@ -363,8 +374,12 @@ function App() {
             <>
               <div className="inv-head">
                 <h2>Feature Inventory</h2>
-                <span className="count-badge" data-testid="feature-enum-total">{inventory.totalFeatures} features</span>
-                <span className="group-count">{inventory.groups.length} groups · {shortHash(inventory.lastCommitHash)}</span>
+                <span className="count-badge" data-testid="feature-enum-total">
+                  {inventory.totalFeatures} features
+                </span>
+                <span className="group-count">
+                  {inventory.groups.length} groups · {shortHash(inventory.lastCommitHash)}
+                </span>
               </div>
               <div data-testid="feature-enum-inventory">
                 {visibleGroups.map((group) => {
@@ -391,9 +406,7 @@ function App() {
                     </div>
                   );
                 })}
-                {visibleGroups.length === 0 ? (
-                  <div className="empty">No groups match "{query}".</div>
-                ) : null}
+                {visibleGroups.length === 0 ? <div className="empty">No groups match "{query}".</div> : null}
               </div>
             </>
           ) : (
@@ -409,7 +422,12 @@ function App() {
                 Create or refine a feature inventory. Set a refine iteration count and click Launch Scan to enumerate
                 features grouped by domain.
               </div>
-              <button className="button primary" data-testid="feature-enum-launch-empty" onClick={() => void launch()} disabled={busy}>
+              <button
+                className="button primary"
+                data-testid="feature-enum-launch-empty"
+                onClick={() => void launch()}
+                disabled={busy}
+              >
                 Launch Scan
               </button>
             </div>
@@ -426,11 +444,15 @@ function App() {
                 <pre>{inventory.markdownBody}</pre>
               </div>
             ) : (
-              <div className="empty" style={{ padding: "20px 0" }}>No scan notes yet.</div>
+              <div className="empty" style={{ padding: "20px 0" }}>
+                No scan notes yet.
+              </div>
             )}
           </div>
 
-          <div className="section-head" style={{ padding: "0 16px", marginBottom: 0 }}>Refine History</div>
+          <div className="section-head" style={{ padding: "0 16px", marginBottom: 0 }}>
+            Refine History
+          </div>
           <div data-testid="feature-enum-history">
             {featureRuns.map((r) => {
               const count = refineInputCount(r.input);

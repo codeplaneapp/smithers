@@ -62,13 +62,16 @@ function cleanupTempDirs() {
 }
 
 export function seedSqliteStore(cwd, dbPath = join(cwd, "smithers.db")) {
-  const api = createSmithers({
-    input: z.object({ prompt: z.string().nullable() }),
-    result: z.object({
-      value: z.number().int(),
-      ok: z.boolean(),
-    }),
-  }, { dbPath, backend: "sqlite" });
+  const api = createSmithers(
+    {
+      input: z.object({ prompt: z.string().nullable() }),
+      result: z.object({
+        value: z.number().int(),
+        ok: z.boolean(),
+      }),
+    },
+    { dbPath, backend: "sqlite" },
+  );
   ensureSmithersTables(api.db);
   const sqlite = api.db.$client;
   sqlite.exec(`
@@ -167,10 +170,11 @@ export async function withTempPostgresDatabase(prefix, fn) {
   } finally {
     const cleanup = new pg.Client({ connectionString: PG_URL });
     await cleanup.connect();
-    await cleanup.query(
-      "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
-      [database],
-    ).catch(() => {});
+    await cleanup
+      .query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()", [
+        database,
+      ])
+      .catch(() => {});
     await cleanup.query(`DROP DATABASE IF EXISTS ${quoteId(database)}`).catch(() => {});
     await cleanup.end().catch(() => {});
   }
@@ -207,9 +211,7 @@ export function normalizeCell(value) {
 }
 
 export function canonicalRows(rows, columns) {
-  return rows
-    .map((row) => JSON.stringify(columns.map((column) => normalizeCell(row[column]))))
-    .sort();
+  return rows.map((row) => JSON.stringify(columns.map((column) => normalizeCell(row[column])))).sort();
 }
 
 // Compare EVERY row of EVERY source table against the migrated target,
@@ -257,7 +259,10 @@ export async function seedPgliteStoreWithReceipt(cwd, { keepSqlite = false } = {
 export function sqliteRunIds(dbPath) {
   const sqlite = new Database(dbPath, { readonly: true });
   try {
-    return sqlite.query("SELECT run_id FROM _smithers_runs ORDER BY run_id").all().map((row) => row.run_id);
+    return sqlite
+      .query("SELECT run_id FROM _smithers_runs ORDER BY run_id")
+      .all()
+      .map((row) => row.run_id);
   } finally {
     sqlite.close();
   }
@@ -275,14 +280,15 @@ export function assertSqlitePrimaryKeyAndDuplicateRejection(dbPath) {
     expect(sqlite.query("PRAGMA index_list(_smithers_runs)").all().length).toBeGreaterThan(0);
     expect(() => {
       sqlite
-        .query("INSERT INTO _smithers_runs (run_id, workflow_name, workflow_path, status, created_at_ms) VALUES (?, ?, ?, ?, ?)")
+        .query(
+          "INSERT INTO _smithers_runs (run_id, workflow_name, workflow_path, status, created_at_ms) VALUES (?, ?, ?, ?, ?)",
+        )
         .run("run-migrate-1", "dup", "dup.tsx", "finished", 99);
     }).toThrow();
   } finally {
     sqlite.close();
   }
 }
-
 
 // Index-based chunking so CI can run slices of a migrate suite in separate
 // bun processes (see the header comment). Without SMITHERS_MIGRATE_CHUNKS

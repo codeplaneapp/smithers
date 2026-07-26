@@ -24,12 +24,8 @@ function effectStatus(row) {
     return "unknown";
   }
   if (row.status === "succeeded") return "succeeded";
-  if (
-    row.status === "unknown"
-    || row.status === "intended"
-    || row.status === "started"
-    || row.status === "failed"
-  ) return "unknown";
+  if (row.status === "unknown" || row.status === "intended" || row.status === "started" || row.status === "failed")
+    return "unknown";
   return null;
 }
 
@@ -38,11 +34,13 @@ function effectStatus(row) {
  * @returns {boolean}
  */
 function isLegacy(row) {
-  return row.kind == null
-    && row.sideEffect == null
-    && row.idempotent == null
-    && row.acceptsIdempotencyKey == null
-    && row.hasRevert == null;
+  return (
+    row.kind == null &&
+    row.sideEffect == null &&
+    row.idempotent == null &&
+    row.acceptsIdempotencyKey == null &&
+    row.hasRevert == null
+  );
 }
 
 /**
@@ -99,10 +97,12 @@ function crossedEffect(row, status, classification, reason) {
  */
 function isCrossed(row, params) {
   if (params.attempts) {
-    return params.attempts.some((attempt) =>
-      attempt.nodeId === row.nodeId
-      && attempt.iteration === Number(row.iteration ?? 0)
-      && attempt.attempt === Number(row.attempt ?? 0));
+    return params.attempts.some(
+      (attempt) =>
+        attempt.nodeId === row.nodeId &&
+        attempt.iteration === Number(row.iteration ?? 0) &&
+        attempt.attempt === Number(row.attempt ?? 0),
+    );
   }
   return Number(row.startedAtMs ?? -1) >= Number(params.cutoffMs ?? 0);
 }
@@ -143,24 +143,42 @@ export async function assessEffectBoundary(db, params) {
       const registryDetail = classification
         ? ` Current registry classification: sideEffect=${classification.sideEffect}, hasRevert=${classification.hasRevert}.`
         : "";
-      report.warnings.push(crossedEffect(row, status, {
-        kind: classification?.kind ?? "tool",
-        idempotent: classification?.idempotent ?? false,
-        hasRevert: classification?.hasRevert ?? false,
-      }, `Legacy effect flags are warning-only.${registryDetail}`));
+      report.warnings.push(
+        crossedEffect(
+          row,
+          status,
+          {
+            kind: classification?.kind ?? "tool",
+            idempotent: classification?.idempotent ?? false,
+            hasRevert: classification?.hasRevert ?? false,
+          },
+          `Legacy effect flags are warning-only.${registryDetail}`,
+        ),
+      );
       continue;
     }
     if (!classification) {
-      report.warnings.push(crossedEffect(row, status, {
-        kind: "tool",
-        idempotent: false,
-        hasRevert: false,
-      }, "Effect flags are unclassified."));
+      report.warnings.push(
+        crossedEffect(
+          row,
+          status,
+          {
+            kind: "tool",
+            idempotent: false,
+            hasRevert: false,
+          },
+          "Effect flags are unclassified.",
+        ),
+      );
       continue;
     }
     if (!classification.sideEffect) continue;
-    const effect = crossedEffect(row, status, classification,
-      archived ? "Previously forced effect is archived and will not block again." : undefined);
+    const effect = crossedEffect(
+      row,
+      status,
+      classification,
+      archived ? "Previously forced effect is archived and will not block again." : undefined,
+    );
     if (archived) {
       report.warnings.push(effect);
     } else if (classification.hasRevert) {

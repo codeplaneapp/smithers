@@ -18,18 +18,57 @@ describe("OmpAgent", () => {
   });
   test("constructs only OMP v17 flags and values resume over continue", () => {
     const agent = new OmpAgent({
-      mode: "json", model: "m", provider: "p", apiKey: "k", systemPrompt: "s",
-      continueSession: true, resume: "session-id", sessionDir: "/sessions",
-      tools: ["read", "edit"], extensions: ["ext.js"], skills: ["skill-a", "skill-b"],
-      thinking: "high", hideThinking: true, printThoughts: true, hooks: ["hook.js"],
-      maxTime: 30, autoApprove: true,
+      mode: "json",
+      model: "m",
+      provider: "p",
+      apiKey: "k",
+      systemPrompt: "s",
+      continueSession: true,
+      resume: "session-id",
+      sessionDir: "/sessions",
+      tools: ["read", "edit"],
+      extensions: ["ext.js"],
+      skills: ["skill-a", "skill-b"],
+      thinking: "high",
+      hideThinking: true,
+      printThoughts: true,
+      hooks: ["hook.js"],
+      maxTime: 30,
+      autoApprove: true,
     });
     const args = agent.buildArgs({ prompt: "hello", cwd: "/repo", options: {}, mode: "json" });
     expect(args).toEqual([
-      "--print", "--mode", "json", "--model", "m", "--provider", "p",
-      "--system-prompt", "s", "--cwd", "/repo", "--resume", "session-id", "--session-dir", "/sessions",
-      "--tools", "read,edit", "--extension", "ext.js", "--skills", "skill-a,skill-b", "--thinking", "high",
-      "--hide-thinking", "--print-thoughts", "--hook", "hook.js", "--max-time", "30", "--auto-approve", "hello",
+      "--print",
+      "--mode",
+      "json",
+      "--model",
+      "m",
+      "--provider",
+      "p",
+      "--system-prompt",
+      "s",
+      "--cwd",
+      "/repo",
+      "--resume",
+      "session-id",
+      "--session-dir",
+      "/sessions",
+      "--tools",
+      "read,edit",
+      "--extension",
+      "ext.js",
+      "--skills",
+      "skill-a,skill-b",
+      "--thinking",
+      "high",
+      "--hide-thinking",
+      "--print-thoughts",
+      "--hook",
+      "hook.js",
+      "--max-time",
+      "30",
+      "--auto-approve",
+      "hello",
     ]);
     expect(args).not.toContain("--session");
     expect(args).not.toContain("--skill");
@@ -37,46 +76,92 @@ describe("OmpAgent", () => {
   });
 
   test("delivers an explicit provider key through env without mutating options or argv", async () => {
-    const opts = { mode: "json", provider: "openai", model: "gpt-5.2", apiKey: "omp-secret", env: { OPENAI_API_KEY: "inherited" } };
+    const opts = {
+      mode: "json",
+      provider: "openai",
+      model: "gpt-5.2",
+      apiKey: "omp-secret",
+      env: { OPENAI_API_KEY: "inherited" },
+    };
     const agent = new OmpAgent(opts);
     const command = await agent.buildCommand({ prompt: "hello", cwd: "/repo", options: {} });
     expect(command.args).not.toContain("--api-key");
     expect(command.args.join(" ")).not.toContain("omp-secret");
     expect(command.env).toEqual({ OPENAI_API_KEY: "omp-secret" });
-    expect(opts).toEqual({ mode: "json", provider: "openai", model: "gpt-5.2", apiKey: "omp-secret", env: { OPENAI_API_KEY: "inherited" } });
+    expect(opts).toEqual({
+      mode: "json",
+      provider: "openai",
+      model: "gpt-5.2",
+      apiKey: "omp-secret",
+      env: { OPENAI_API_KEY: "inherited" },
+    });
   });
 
   test("routes an explicit provider before model-family aliases", async () => {
-    await expect(new OmpAgent({ provider: "openrouter", model: "anthropic/claude-opus-4.6", apiKey: "secret" }).buildCommand({ prompt: "", cwd: "/repo", options: {} })).resolves.toMatchObject({ env: { OPENROUTER_API_KEY: "secret" } });
-    await expect(new OmpAgent({ provider: "google", model: "gpt-5", apiKey: "secret" }).buildCommand({ prompt: "", cwd: "/repo", options: {} })).resolves.toMatchObject({ env: { GEMINI_API_KEY: "secret" } });
+    await expect(
+      new OmpAgent({ provider: "openrouter", model: "anthropic/claude-opus-4.6", apiKey: "secret" }).buildCommand({
+        prompt: "",
+        cwd: "/repo",
+        options: {},
+      }),
+    ).resolves.toMatchObject({ env: { OPENROUTER_API_KEY: "secret" } });
+    await expect(
+      new OmpAgent({ provider: "google", model: "gpt-5", apiKey: "secret" }).buildCommand({
+        prompt: "",
+        cwd: "/repo",
+        options: {},
+      }),
+    ).resolves.toMatchObject({ env: { GEMINI_API_KEY: "secret" } });
   });
 
   test("supports documented OMP provider credential environments and explicit precedence", async () => {
-    for (const [provider, envName] of [["fireworks", "FIREWORKS_API_KEY"], ["together", "TOGETHER_API_KEY"], ["huggingface", "HF_TOKEN"], ["nvidia", "NVIDIA_API_KEY"], ["litellm", "LITELLM_API_KEY"], ["qianfan", "QIANFAN_API_KEY"]]) {
-      const command = await new OmpAgent({ provider, apiKey: "explicit-key", env: { [envName]: "stored-key" } }).buildCommand({ prompt: "", cwd: "/repo", options: {} });
+    for (const [provider, envName] of [
+      ["fireworks", "FIREWORKS_API_KEY"],
+      ["together", "TOGETHER_API_KEY"],
+      ["huggingface", "HF_TOKEN"],
+      ["nvidia", "NVIDIA_API_KEY"],
+      ["litellm", "LITELLM_API_KEY"],
+      ["qianfan", "QIANFAN_API_KEY"],
+    ]) {
+      const command = await new OmpAgent({
+        provider,
+        apiKey: "explicit-key",
+        env: { [envName]: "stored-key" },
+      }).buildCommand({ prompt: "", cwd: "/repo", options: {} });
       expect(command.env?.[envName]).toBe("explicit-key");
     }
   });
 
   test("fails closed for an explicit key without a safe provider mapping", async () => {
     const agent = new OmpAgent({ provider: "unknown-provider", apiKey: "omp-secret" });
-    await expect(agent.buildCommand({ prompt: "hello", cwd: "/repo", options: {} })).rejects.toThrow("documented provider");
+    await expect(agent.buildCommand({ prompt: "hello", cwd: "/repo", options: {} })).rejects.toThrow(
+      "documented provider",
+    );
   });
 
   test("supports all documented thinking levels and never appends a CLI prompt in RPC mode", () => {
     for (const thinking of ["max", "auto"]) {
       const agent = new OmpAgent({ mode: "rpc", thinking });
-      expect(agent.buildArgs({ prompt: "rpc prompt", cwd: "/repo", options: {}, mode: "rpc" })).toEqual(["--mode", "rpc", "--cwd", "/repo", "--thinking", thinking]);
+      expect(agent.buildArgs({ prompt: "rpc prompt", cwd: "/repo", options: {}, mode: "rpc" })).toEqual([
+        "--mode",
+        "rpc",
+        "--cwd",
+        "/repo",
+        "--thinking",
+        thinking,
+      ]);
     }
   });
 
   test("exposes the RPC command spec required by Smithers preflight", async () => {
     const agent = new OmpAgent({ mode: "rpc", noSession: true, noTools: true });
-    await expect(agent.buildCommand({
-      prompt: "",
-      cwd: "/repo",
-      options: {},
-    })).resolves.toEqual({
+    await expect(
+      agent.buildCommand({
+        prompt: "",
+        cwd: "/repo",
+        options: {},
+      }),
+    ).resolves.toEqual({
       command: "omp",
       args: ["--mode", "rpc", "--cwd", "/repo", "--no-session", "--no-tools"],
       outputFormat: "rpc",
@@ -88,9 +173,13 @@ describe("OmpAgent", () => {
     const interpreter = agent.createOutputInterpreter();
     const events = [
       ...interpreter.onStdoutLine(JSON.stringify({ type: "session", id: "s1" })),
-      ...interpreter.onStdoutLine(JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "OK" } })),
+      ...interpreter.onStdoutLine(
+        JSON.stringify({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "OK" } }),
+      ),
       ...interpreter.onStdoutLine(JSON.stringify({ type: "tool_execution_start", toolName: "read", toolCallId: "t1" })),
-      ...interpreter.onStdoutLine(JSON.stringify({ type: "tool_execution_end", toolName: "read", toolCallId: "t1", result: "done" })),
+      ...interpreter.onStdoutLine(
+        JSON.stringify({ type: "tool_execution_end", toolName: "read", toolCallId: "t1", result: "done" }),
+      ),
       ...interpreter.onStdoutLine(JSON.stringify({ type: "agent_end" })),
     ];
     expect(events.map((event) => event.type)).toEqual(["started", "action", "action", "action", "completed"]);
@@ -100,17 +189,35 @@ describe("OmpAgent", () => {
   test("preserves tool call args on start and update like the pi interpreter", () => {
     const interpreter = new OmpAgent({ mode: "json" }).createOutputInterpreter();
     const args = { op: "init", list: [{ phase: "Investigate", items: ["Map files"] }] };
-    const actionsFor = (payload) => interpreter.onStdoutLine(JSON.stringify(payload)).filter((event) => event.type === "action");
-    expect(actionsFor({ type: "tool_execution_start", toolName: "todo", toolCallId: "t1", args }).at(-1)?.action).toEqual({ id: "t1", kind: "todo_list", title: "todo", detail: { args } });
-    expect(actionsFor({ type: "tool_execution_update", toolName: "todo", toolCallId: "t1", args: { op: "start", task: "Map files" } }).at(-1)?.action.detail).toEqual({ args: { op: "start", task: "Map files" } });
-    expect(actionsFor({ type: "tool_execution_end", toolName: "todo", toolCallId: "t1", result: "ok" }).at(-1)?.action.detail).toBeUndefined();
+    const actionsFor = (payload) =>
+      interpreter.onStdoutLine(JSON.stringify(payload)).filter((event) => event.type === "action");
+    expect(
+      actionsFor({ type: "tool_execution_start", toolName: "todo", toolCallId: "t1", args }).at(-1)?.action,
+    ).toEqual({ id: "t1", kind: "todo_list", title: "todo", detail: { args } });
+    expect(
+      actionsFor({
+        type: "tool_execution_update",
+        toolName: "todo",
+        toolCallId: "t1",
+        args: { op: "start", task: "Map files" },
+      }).at(-1)?.action.detail,
+    ).toEqual({ args: { op: "start", task: "Map files" } });
+    expect(
+      actionsFor({ type: "tool_execution_end", toolName: "todo", toolCallId: "t1", result: "ok" }).at(-1)?.action
+        .detail,
+    ).toBeUndefined();
   });
 
   test("emits the same tool-call args detail as the pi interpreter", () => {
     const omp = new OmpAgent({ mode: "json" }).createOutputInterpreter();
     const pi = new PiAgent({ mode: "json" }).createOutputInterpreter();
-    const argsFor = (interpreter, payload) => interpreter.onStdoutLine(JSON.stringify(payload)).findLast((event) => event.type === "action")?.action?.detail?.args;
-    for (const args of [{ op: "init", list: [{ phase: "Investigate", items: ["Map files"] }] }, { op: "start", task: "Map files" }]) {
+    const argsFor = (interpreter, payload) =>
+      interpreter.onStdoutLine(JSON.stringify(payload)).findLast((event) => event.type === "action")?.action?.detail
+        ?.args;
+    for (const args of [
+      { op: "init", list: [{ phase: "Investigate", items: ["Map files"] }] },
+      { op: "start", task: "Map files" },
+    ]) {
       for (const type of ["tool_execution_start", "tool_execution_update"]) {
         const payload = { type, toolName: "todo", toolCallId: "t1", args };
         const [ompArgs, piArgs] = [argsFor(omp, payload), argsFor(pi, payload)];
@@ -125,18 +232,30 @@ describe("OmpAgent", () => {
 
   test("uses a terminal-only assistant message as the authoritative JSON answer once", () => {
     const interpreter = new OmpAgent({ mode: "json" }).createOutputInterpreter();
-    const terminal = JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: "terminal answer", stopReason: "stop" }] });
-    expect(interpreter.onStdoutLine(terminal).at(-1)).toMatchObject({ type: "completed", ok: true, answer: "terminal answer" });
+    const terminal = JSON.stringify({
+      type: "agent_end",
+      messages: [{ role: "assistant", content: "terminal answer", stopReason: "stop" }],
+    });
+    expect(interpreter.onStdoutLine(terminal).at(-1)).toMatchObject({
+      type: "completed",
+      ok: true,
+      answer: "terminal answer",
+    });
     expect(interpreter.onStdoutLine(terminal)).toEqual([]);
   });
 
   test("selects the last assistant message from a terminal JSON event", () => {
     const interpreter = new OmpAgent({ mode: "json" }).createOutputInterpreter();
-    const event = interpreter.onStdoutLine(JSON.stringify({ type: "agent_end", messages: [
-      { role: "assistant", content: "intermediate", stopReason: "tool_use" },
-      { role: "tool", content: "result" },
-      { role: "assistant", content: "final answer", stopReason: "stop" },
-    ] }));
+    const event = interpreter.onStdoutLine(
+      JSON.stringify({
+        type: "agent_end",
+        messages: [
+          { role: "assistant", content: "intermediate", stopReason: "tool_use" },
+          { role: "tool", content: "result" },
+          { role: "assistant", content: "final answer", stopReason: "stop" },
+        ],
+      }),
+    );
     expect(event.at(-1)).toMatchObject({ type: "completed", answer: "final answer" });
   });
 
@@ -159,22 +278,47 @@ describe("OmpAgent", () => {
         const command = JSON.parse(line);
         commands.push(command);
         if (command.type === "get_state") {
-          stdout.write(JSON.stringify({ type: "response", command: "get_state", success: true, data: { sessionId: "rpc-session" } }) + "\n");
+          stdout.write(
+            JSON.stringify({
+              type: "response",
+              command: "get_state",
+              success: true,
+              data: { sessionId: "rpc-session" },
+            }) + "\n",
+          );
         }
         if (command.type === "prompt") {
-          stdout.write(JSON.stringify({ type: "response", command: "prompt", id: command.id, success: true, data: { agentInvoked: true } }) + "\n");
-          stdout.write(JSON.stringify({ type: "agent_end", messages: [
-            { role: "assistant", content: "intermediate", stopReason: "tool_use" },
-            { role: "tool", content: "done" },
-            { role: "assistant", content: "terminal rpc answer", stopReason: "stop" },
-          ] }) + "\n");
+          stdout.write(
+            JSON.stringify({
+              type: "response",
+              command: "prompt",
+              id: command.id,
+              success: true,
+              data: { agentInvoked: true },
+            }) + "\n",
+          );
+          stdout.write(
+            JSON.stringify({
+              type: "agent_end",
+              messages: [
+                { role: "assistant", content: "intermediate", stopReason: "tool_use" },
+                { role: "tool", content: "done" },
+                { role: "assistant", content: "terminal rpc answer", stopReason: "stop" },
+              ],
+            }) + "\n",
+          );
         }
       }
     });
     queueMicrotask(() => stdout.write('{"type":"ready"}\n'));
-    const result = await Effect.runPromise(runRpcCommandEffect("omp", [], {
-      cwd: process.cwd(), env: process.env, prompt: "say hello", spawnFn: () => child,
-    }));
+    const result = await Effect.runPromise(
+      runRpcCommandEffect("omp", [], {
+        cwd: process.cwd(),
+        env: process.env,
+        prompt: "say hello",
+        spawnFn: () => child,
+      }),
+    );
     expect(result.text).toBe("terminal rpc answer");
     expect(result.output).toMatchObject({ content: "terminal rpc answer" });
     expect(commands.map((command) => command.type)).toEqual(["get_state", "prompt"]);
@@ -183,12 +327,26 @@ describe("OmpAgent", () => {
   test("redacts sensitive RPC args in persisted failure details", async () => {
     const stdout = new PassThrough();
     const stderr = new PassThrough();
-    const child = Object.assign(new EventEmitter(), { stdout, stderr, stdin: new PassThrough(), pid: undefined, exitCode: null, unref() {} });
-    const pending = Effect.runPromise(runRpcCommandEffect("omp", ["--api-key", "opaque-canary", "--token=another-canary"], {
-      cwd: process.cwd(), env: process.env, prompt: "fail", spawnFn: () => child,
-    }));
+    const child = Object.assign(new EventEmitter(), {
+      stdout,
+      stderr,
+      stdin: new PassThrough(),
+      pid: undefined,
+      exitCode: null,
+      unref() {},
+    });
+    const pending = Effect.runPromise(
+      runRpcCommandEffect("omp", ["--api-key", "opaque-canary", "--token=another-canary"], {
+        cwd: process.cwd(),
+        env: process.env,
+        prompt: "fail",
+        spawnFn: () => child,
+      }),
+    );
     queueMicrotask(() => child.emit("error", new Error("spawn failed")));
-    try { await pending; } catch (error) {
+    try {
+      await pending;
+    } catch (error) {
       expect(JSON.stringify(error)).toContain("[REDACTED]");
       expect(JSON.stringify(error)).not.toContain("opaque-canary");
       expect(JSON.stringify(error)).not.toContain("another-canary");
@@ -197,9 +355,13 @@ describe("OmpAgent", () => {
 
   test("redacts real spawn error spawnargs", async () => {
     try {
-      await Effect.runPromise(runRpcCommandEffect("definitely-not-an-omp-command", ["--api-key", "opaque-spawn-canary"], {
-        cwd: process.cwd(), env: process.env, prompt: "fail",
-      }));
+      await Effect.runPromise(
+        runRpcCommandEffect("definitely-not-an-omp-command", ["--api-key", "opaque-spawn-canary"], {
+          cwd: process.cwd(),
+          env: process.env,
+          prompt: "fail",
+        }),
+      );
     } catch (error) {
       const serialized = JSON.stringify(error);
       expect(serialized).toContain("[REDACTED]");
@@ -212,16 +374,29 @@ describe("OmpAgent", () => {
     const stdout = new PassThrough();
     const stderr = new PassThrough();
     const stdin = new PassThrough();
-    const child = Object.assign(new EventEmitter(), { stdout, stderr, stdin, pid: undefined, exitCode: null, unref() {} });
+    const child = Object.assign(new EventEmitter(), {
+      stdout,
+      stderr,
+      stdin,
+      pid: undefined,
+      exitCode: null,
+      unref() {},
+    });
     const commands = [];
     stdin.on("data", (chunk) => {
       for (const line of chunk.toString().trim().split("\n")) if (line) commands.push(JSON.parse(line));
     });
     queueMicrotask(() => stdout.write('{"type":"ready"}\n'));
     const controller = new AbortController();
-    const pending = Effect.runPromise(runRpcCommandEffect("omp", [], {
-      cwd: process.cwd(), env: process.env, prompt: "wait", spawnFn: () => child, signal: controller.signal,
-    }));
+    const pending = Effect.runPromise(
+      runRpcCommandEffect("omp", [], {
+        cwd: process.cwd(),
+        env: process.env,
+        prompt: "wait",
+        spawnFn: () => child,
+        signal: controller.signal,
+      }),
+    );
     await new Promise((resolve) => setTimeout(resolve, 5));
     controller.abort();
     await expect(pending).rejects.toThrow("CLI aborted");
@@ -229,7 +404,11 @@ describe("OmpAgent", () => {
   });
 
   test("defaults a streaming run to a persistent RPC session", async () => {
-    const spec = await new OmpAgent({ model: "m" }).buildCommand({ prompt: "hi", cwd: "/repo", options: { onEvent() {} } });
+    const spec = await new OmpAgent({ model: "m" }).buildCommand({
+      prompt: "hi",
+      cwd: "/repo",
+      options: { onEvent() {} },
+    });
     expect(spec.outputFormat).toBe("rpc");
     expect(spec.args).toContain("--mode");
     expect(spec.args).toContain("rpc");
@@ -237,14 +416,22 @@ describe("OmpAgent", () => {
   });
 
   test("falls back to one-shot json when the caller passes file arguments", async () => {
-    const spec = await new OmpAgent({ model: "m" }).buildCommand({ prompt: "hi", cwd: "/repo", options: { onEvent() {}, files: ["/repo/a.txt"] } });
+    const spec = await new OmpAgent({ model: "m" }).buildCommand({
+      prompt: "hi",
+      cwd: "/repo",
+      options: { onEvent() {}, files: ["/repo/a.txt"] },
+    });
     expect(spec.outputFormat).toBe("json");
     expect(spec.args).toContain("--print");
     expect(spec.args.slice(-2)).toEqual(["@/repo/a.txt", "hi"]);
   });
 
   test("honors an explicit mode:json opt-out for cheap single-shot work", async () => {
-    const spec = await new OmpAgent({ model: "m", mode: "json" }).buildCommand({ prompt: "hi", cwd: "/repo", options: { onEvent() {} } });
+    const spec = await new OmpAgent({ model: "m", mode: "json" }).buildCommand({
+      prompt: "hi",
+      cwd: "/repo",
+      options: { onEvent() {} },
+    });
     expect(spec.outputFormat).toBe("json");
     expect(spec.args).toContain("--print");
   });
@@ -253,7 +440,13 @@ describe("OmpAgent", () => {
     const taskContext = { runId: "run-1", nodeId: "node-1", iteration: 2, attempt: 3 };
     const sealed = new OmpAgent({ model: "m", inheritEnv: false, env: { CUSTOM: "1" } }).resolveRpcEnv({ taskContext });
     // Same SMITHERS_* contract the one-shot path gets, so `smithers ask-human` still resolves its run.
-    expect(sealed).toEqual({ CUSTOM: "1", SMITHERS_RUN_ID: "run-1", SMITHERS_NODE_ID: "node-1", SMITHERS_ITERATION: "2", SMITHERS_ATTEMPT: "3" });
+    expect(sealed).toEqual({
+      CUSTOM: "1",
+      SMITHERS_RUN_ID: "run-1",
+      SMITHERS_NODE_ID: "node-1",
+      SMITHERS_ITERATION: "2",
+      SMITHERS_ATTEMPT: "3",
+    });
     const inherited = new OmpAgent({ model: "m" }).resolveRpcEnv({ taskContext });
     expect(inherited.PATH).toBe(process.env.PATH);
     expect(inherited.SMITHERS_RUN_ID).toBe("run-1");
@@ -271,7 +464,9 @@ describe("OmpAgent", () => {
   test("keeps RPC tool events, usage, and structured output at JSON-mode parity", async () => {
     const dir = await mkdtemp(join(tmpdir(), "smithers-omp-rpc-"));
     const bin = join(dir, "omp");
-    await writeFile(bin, `#!/usr/bin/env node
+    await writeFile(
+      bin,
+      `#!/usr/bin/env node
 const readline = require("node:readline");
 const rl = readline.createInterface({ input: process.stdin });
 process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
@@ -285,7 +480,9 @@ rl.on("line", (line) => {
     process.stdout.write(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: "{\\"value\\":42}", stopReason: "stop", usage: { input: 11, output: 4, cacheRead: 3, cacheWrite: 2, totalTokens: 20 } }] }) + "\\n");
   }
 });
-`, "utf8");
+`,
+      "utf8",
+    );
     await chmod(bin, 0o755);
     try {
       const events = [];
@@ -294,8 +491,16 @@ rl.on("line", (line) => {
         onEvent: (event) => events.push(event),
       });
       const rpcAction = events.find((event) => event.type === "action" && event.action.id === "tool-1");
-      const jsonAction = new OmpAgent({ mode: "json" }).createOutputInterpreter()
-        .onStdoutLine(JSON.stringify({ type: "tool_execution_start", toolName: "read", toolCallId: "tool-1", args: { path: "README.md" } }))
+      const jsonAction = new OmpAgent({ mode: "json" })
+        .createOutputInterpreter()
+        .onStdoutLine(
+          JSON.stringify({
+            type: "tool_execution_start",
+            toolName: "read",
+            toolCallId: "tool-1",
+            args: { path: "README.md" },
+          }),
+        )
         .find((event) => event.type === "action");
       expect(rpcAction).toEqual(jsonAction);
       expect(result.output).toEqual({ value: 42 });
@@ -305,8 +510,7 @@ rl.on("line", (line) => {
         outputTokens: 4,
         totalTokens: 20,
       });
-    }
-    finally {
+    } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });

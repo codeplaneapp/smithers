@@ -3,7 +3,7 @@
 // @smithers-type-exports-end
 
 import React from "react";
-import { AspectContext, createAccumulator, } from "../aspects/AspectContext.js";
+import { AspectContext, createAccumulator } from "../aspects/AspectContext.js";
 /**
  * Aspects — declarative cross-cutting concerns for workflow scopes.
  *
@@ -21,18 +21,18 @@ import { AspectContext, createAccumulator, } from "../aspects/AspectContext.js";
  * @param {AspectsProps} props
  */
 export function Aspects(props) {
-    const { tokenBudget, latencySlo, tracking, children } = props;
-    // Merge with parent context if nested
-    const parentCtx = React.useContext(AspectContext);
-    const resolvedTracking = {
-        tokens: tracking?.tokens ?? parentCtx?.tracking?.tokens ?? true,
-        latency: tracking?.latency ?? parentCtx?.tracking?.latency ?? true,
-    };
-    const value = {
-        tokenBudget: tokenBudget ?? parentCtx?.tokenBudget,
-        latencySlo: latencySlo ?? parentCtx?.latencySlo,
-        tracking: resolvedTracking,
-        accumulator: parentCtx?.accumulator ?? createAccumulator(),
-    };
-    return React.createElement(AspectContext.Provider, { value }, children);
+  const { tokenBudget, latencySlo, tracking, children } = props;
+  // Merge with parent context if nested
+  const parentCtx = React.useContext(AspectContext);
+  const resolvedTracking = {
+    tokens: tracking?.tokens ?? parentCtx?.tracking?.tokens ?? true,
+    latency: tracking?.latency ?? parentCtx?.tracking?.latency ?? true,
+  };
+  const value = {
+    tokenBudget: tokenBudget ?? parentCtx?.tokenBudget,
+    latencySlo: latencySlo ?? parentCtx?.latencySlo,
+    tracking: resolvedTracking,
+    accumulator: parentCtx?.accumulator ?? createAccumulator(),
+  };
+  return React.createElement(AspectContext.Provider, { value }, children);
 }

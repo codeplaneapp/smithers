@@ -48,12 +48,7 @@ function RowIcon({ kind }: { kind: PaletteItemKind }) {
     case "file":
       return (
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
-          <path
-            d="M6 3h8l4 4v14H6V3Z"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinejoin="round"
-          />
+          <path d="M6 3h8l4 4v14H6V3Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
           <path d="M14 3v4h4" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
         </svg>
       );
@@ -123,15 +118,7 @@ function Highlighted({ text, matches }: { text: string; matches: number[] }) {
 }
 
 /** One result row; clicking selects + executes, mirroring the keyboard path. */
-function ResultRow({
-  item,
-  index,
-  selected,
-}: {
-  item: PaletteItem;
-  index: number;
-  selected: boolean;
-}) {
+function ResultRow({ item, index, selected }: { item: PaletteItem; index: number; selected: boolean }) {
   const setSelectedIndex = usePaletteStore((state) => state.setSelectedIndex);
   const execute = usePaletteStore((state) => state.execute);
 
@@ -160,11 +147,7 @@ function ResultRow({
         </span>
         {item.subtitle ? (
           <span className="palette-row-sub">
-            {item.kind === "file" ? (
-              <Highlighted text={item.subtitle} matches={item.subtitleMatches} />
-            ) : (
-              item.subtitle
-            )}
+            {item.kind === "file" ? <Highlighted text={item.subtitle} matches={item.subtitleMatches} /> : item.subtitle}
           </span>
         ) : null}
       </span>
@@ -264,12 +247,7 @@ export function PaletteCanvas() {
             <div key={group.section}>
               <div className="palette-section-head">{group.label}</div>
               {group.items.map(({ item, index }) => (
-                <ResultRow
-                  key={item.id}
-                  item={item}
-                  index={index}
-                  selected={index === selectedIndex}
-                />
+                <ResultRow key={item.id} item={item} index={index} selected={index === selectedIndex} />
               ))}
             </div>
           ))}

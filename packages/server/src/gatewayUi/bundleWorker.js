@@ -8,14 +8,13 @@
 import { buildGatewayUiBundle } from "./bundle.js";
 
 try {
-    const { config, cwd } = JSON.parse(await Bun.stdin.text());
-    if (cwd) {
-        process.chdir(cwd);
-    }
-    const body = await buildGatewayUiBundle(config);
-    process.stdout.write(body);
-}
-catch (error) {
-    process.stderr.write(error instanceof Error ? error.message : String(error));
-    process.exit(1);
+  const { config, cwd } = JSON.parse(await Bun.stdin.text());
+  if (cwd) {
+    process.chdir(cwd);
+  }
+  const body = await buildGatewayUiBundle(config);
+  process.stdout.write(body);
+} catch (error) {
+  process.stderr.write(error instanceof Error ? error.message : String(error));
+  process.exit(1);
 }

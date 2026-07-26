@@ -4,13 +4,8 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
  * Browser coverage is deliberately opt-in outside CI: the CI image has no
  * browser binary, while local runs exercise the real Vite app and seed Gateway.
  */
-const IS_CI = Boolean(
-  process.env.CI && process.env.CI.toLowerCase() !== "false",
-);
-test.skip(
-  IS_CI,
-  "responsive browser coverage requires a locally installed browser",
-);
+const IS_CI = Boolean(process.env.CI && process.env.CI.toLowerCase() !== "false");
+test.skip(IS_CI, "responsive browser coverage requires a locally installed browser");
 
 const gatewayOrigin = `http://127.0.0.1:${process.env.SMITHERS_E2E_GATEWAY_PORT ?? "7331"}`;
 
@@ -22,22 +17,13 @@ const VIEWPORTS = {
 
 type Viewport = (typeof VIEWPORTS)[keyof typeof VIEWPORTS];
 
-async function expectNoDocumentOverflow(
-  page: Page,
-  label: string,
-): Promise<void> {
+async function expectNoDocumentOverflow(page: Page, label: string): Promise<void> {
   const dimensions = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,
-    overflowingElements: Array.from(
-      document.body.querySelectorAll<HTMLElement>("*"),
-    ).flatMap((element) => {
+    overflowingElements: Array.from(document.body.querySelectorAll<HTMLElement>("*")).flatMap((element) => {
       const rect = element.getBoundingClientRect();
-      if (
-        rect.right <= document.documentElement.clientWidth + 1 &&
-        rect.left >= -1
-      )
-        return [];
+      if (rect.right <= document.documentElement.clientWidth + 1 && rect.left >= -1) return [];
       return [
         {
           className: element.className,
@@ -54,27 +40,14 @@ async function expectNoDocumentOverflow(
   ).toBeLessThanOrEqual(dimensions.clientWidth);
 }
 
-async function expectHorizontallyUsable(
-  locator: Locator,
-  viewport: Viewport,
-  label: string,
-): Promise<void> {
-  await expect(
-    locator,
-    `${label}: control should remain visible`,
-  ).toBeVisible();
+async function expectHorizontallyUsable(locator: Locator, viewport: Viewport, label: string): Promise<void> {
+  await expect(locator, `${label}: control should remain visible`).toBeVisible();
   const box = await locator.boundingBox();
   expect(box, `${label}: control should have a layout box`).not.toBeNull();
   if (!box) return;
 
-  expect(
-    box.x,
-    `${label}: left edge should stay in the viewport`,
-  ).toBeGreaterThanOrEqual(-1);
-  expect(
-    box.x + box.width,
-    `${label}: right edge should stay in the viewport`,
-  ).toBeLessThanOrEqual(viewport.width + 1);
+  expect(box.x, `${label}: left edge should stay in the viewport`).toBeGreaterThanOrEqual(-1);
+  expect(box.x + box.width, `${label}: right edge should stay in the viewport`).toBeLessThanOrEqual(viewport.width + 1);
 }
 
 async function runIdFor(page: Page, workflowKey: string): Promise<string> {
@@ -87,16 +60,12 @@ async function runIdFor(page: Page, workflowKey: string): Promise<string> {
     error?: { message?: string };
   };
   expect(frame.ok, frame.error?.message ?? "listRuns failed").toBe(true);
-  const runId = frame.payload?.find(
-    (run) => run.workflowKey === workflowKey,
-  )?.runId;
+  const runId = frame.payload?.find((run) => run.workflowKey === workflowKey)?.runId;
   expect(runId, `seeded ${workflowKey} run`).toBeTruthy();
   return runId as string;
 }
 
-test("normal shell keeps its composer usable at desktop, tablet, and phone widths", async ({
-  page,
-}) => {
+test("normal shell keeps its composer usable at desktop, tablet, and phone widths", async ({ page }) => {
   // The test is about settled layout geometry. View transitions intentionally
   // translate their contents, which would turn a measurement taken mid-motion
   // into a false horizontal-overflow failure.
@@ -106,10 +75,7 @@ test("normal shell keeps its composer usable at desktop, tablet, and phone width
     await page.setViewportSize(viewport);
     await page.goto("/");
 
-    await expect(page.locator(".app-shell")).toHaveAttribute(
-      "data-mode",
-      "home",
-    );
+    await expect(page.locator(".app-shell")).toHaveAttribute("data-mode", "home");
     await expect(page.getByText("How can I help you?")).toBeVisible();
     await expectHorizontallyUsable(
       page.getByRole("textbox", { name: "Message Smithers" }),
@@ -125,9 +91,7 @@ test("normal shell keeps its composer usable at desktop, tablet, and phone width
   }
 });
 
-test("sidebar monitor canvas keeps its controls usable and stacks on a phone", async ({
-  page,
-}) => {
+test("sidebar monitor canvas keeps its controls usable and stacks on a phone", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.setViewportSize(VIEWPORTS.desktop);
   await page.goto("/runs");
@@ -138,11 +102,7 @@ test("sidebar monitor canvas keeps its controls usable and stacks on a phone", a
   const search = page.getByTestId("runs-search");
   await expect(shell).toHaveAttribute("data-mode", "sidebar");
   await expect(page.getByTestId("runs-canvas")).toBeVisible();
-  await expectHorizontallyUsable(
-    search,
-    VIEWPORTS.desktop,
-    "desktop monitor search",
-  );
+  await expectHorizontallyUsable(search, VIEWPORTS.desktop, "desktop monitor search");
   await expectNoDocumentOverflow(page, "desktop sidebar monitor");
 
   const desktopRail = await rail.boundingBox();
@@ -150,26 +110,16 @@ test("sidebar monitor canvas keeps its controls usable and stacks on a phone", a
   expect(desktopRail).not.toBeNull();
   expect(desktopCanvas).not.toBeNull();
   if (desktopRail && desktopCanvas) {
-    expect(desktopRail.x + desktopRail.width).toBeLessThanOrEqual(
-      desktopCanvas.x + 1,
-    );
+    expect(desktopRail.x + desktopRail.width).toBeLessThanOrEqual(desktopCanvas.x + 1);
   }
 
   await page.setViewportSize(VIEWPORTS.tablet);
-  await expectHorizontallyUsable(
-    search,
-    VIEWPORTS.tablet,
-    "tablet monitor search",
-  );
+  await expectHorizontallyUsable(search, VIEWPORTS.tablet, "tablet monitor search");
   await expectNoDocumentOverflow(page, "tablet sidebar monitor");
 
   await page.setViewportSize(VIEWPORTS.phone);
   await expect(page.locator(".rail-resizer")).toBeHidden();
-  await expectHorizontallyUsable(
-    search,
-    VIEWPORTS.phone,
-    "phone monitor search",
-  );
+  await expectHorizontallyUsable(search, VIEWPORTS.phone, "phone monitor search");
   await search.fill("e2e-monitor");
   await expect(page.getByTestId("runs-row").first()).toBeVisible();
   await expectNoDocumentOverflow(page, "phone sidebar monitor");
@@ -181,15 +131,11 @@ test("sidebar monitor canvas keeps its controls usable and stacks on a phone", a
   if (phoneRail && phoneCanvas) {
     expect(phoneRail.x).toBeLessThanOrEqual(1);
     expect(phoneCanvas.x).toBeLessThanOrEqual(1);
-    expect(phoneRail.y + phoneRail.height).toBeLessThanOrEqual(
-      phoneCanvas.y + 1,
-    );
+    expect(phoneRail.y + phoneRail.height).toBeLessThanOrEqual(phoneCanvas.y + 1);
   }
 });
 
-test("the real monitor custom-UI dialog fits at desktop and phone widths", async ({
-  page,
-}) => {
+test("the real monitor custom-UI dialog fits at desktop and phone widths", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   const runId = await runIdFor(page, "e2e-task");
 
@@ -198,21 +144,13 @@ test("the real monitor custom-UI dialog fits at desktop and phone widths", async
     phone: VIEWPORTS.phone,
   })) {
     await page.setViewportSize(viewport);
-    await page.goto(
-      `${gatewayOrigin}/monitor?runId=${encodeURIComponent(runId)}`,
-    );
+    await page.goto(`${gatewayOrigin}/monitor?runId=${encodeURIComponent(runId)}`);
     await expect(page.getByTestId("monitor-run-detail")).toBeVisible();
 
     const railBox = await page.locator(".mon-rail").boundingBox();
     const mainBox = await page.locator(".mon-main").boundingBox();
-    expect(
-      railBox,
-      `${name} monitor rail should have a layout box`,
-    ).not.toBeNull();
-    expect(
-      mainBox,
-      `${name} monitor main pane should have a layout box`,
-    ).not.toBeNull();
+    expect(railBox, `${name} monitor rail should have a layout box`).not.toBeNull();
+    expect(mainBox, `${name} monitor main pane should have a layout box`).not.toBeNull();
     if (railBox && mainBox) {
       if (name === "phone") {
         expect(railBox.y + railBox.height).toBeLessThanOrEqual(mainBox.y + 1);
@@ -222,29 +160,18 @@ test("the real monitor custom-UI dialog fits at desktop and phone widths", async
     }
 
     const open = page.getByRole("button", { name: "Open UI" });
-    await expectHorizontallyUsable(
-      open,
-      viewport,
-      `${name} monitor dialog trigger`,
-    );
+    await expectHorizontallyUsable(open, viewport, `${name} monitor dialog trigger`);
     await open.click();
 
     const dialog = page.getByRole("dialog", { name: "e2e-task custom UI" });
     await expectHorizontallyUsable(dialog, viewport, `${name} monitor dialog`);
     const box = await dialog.boundingBox();
-    expect(
-      box,
-      `${name} monitor dialog should have a layout box`,
-    ).not.toBeNull();
+    expect(box, `${name} monitor dialog should have a layout box`).not.toBeNull();
     if (box) {
-      expect(
-        box.y,
-        `${name} monitor dialog: top edge should stay in the viewport`,
-      ).toBeGreaterThanOrEqual(-1);
-      expect(
-        box.y + box.height,
-        `${name} monitor dialog: bottom edge should stay in the viewport`,
-      ).toBeLessThanOrEqual(viewport.height + 1);
+      expect(box.y, `${name} monitor dialog: top edge should stay in the viewport`).toBeGreaterThanOrEqual(-1);
+      expect(box.y + box.height, `${name} monitor dialog: bottom edge should stay in the viewport`).toBeLessThanOrEqual(
+        viewport.height + 1,
+      );
     }
     await expectNoDocumentOverflow(page, `${name} monitor dialog`);
 

@@ -18,9 +18,7 @@ type LaunchRunData = {
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 function asString(value: unknown): string {
@@ -69,18 +67,9 @@ export function GatewayWorkflowsSection() {
   const connection = useGatewayConnectionStatus();
   const workflowsState = useGatewayWorkflows({ filter: { hasUi: true } });
   const runsState = useGatewayRuns({});
-  const launch = useGatewayMutation<LaunchRunVars, LaunchRunData>(
-    "launchRun",
-    { invalidate: [gatewayKeys.runs({})] },
-  );
-  const workflows = useMemo(
-    () => parseWorkflows(workflowsState.data),
-    [workflowsState.data],
-  );
-  const runs = useMemo(
-    () => parseRuns(runsState.data),
-    [runsState.data],
-  );
+  const launch = useGatewayMutation<LaunchRunVars, LaunchRunData>("launchRun", { invalidate: [gatewayKeys.runs({})] });
+  const workflows = useMemo(() => parseWorkflows(workflowsState.data), [workflowsState.data]);
+  const runs = useMemo(() => parseRuns(runsState.data), [runsState.data]);
   const status = connection.status;
 
   if (status !== "online" && status !== "connecting" && status !== "unauthorized") {
@@ -114,21 +103,13 @@ export function GatewayWorkflowsSection() {
         </p>
       ) : (
         workflows.map((workflow) => {
-          const workflowRuns = runs.filter(
-            (run) => run.workflowKey === workflow.key,
-          );
+          const workflowRuns = runs.filter((run) => run.workflowKey === workflow.key);
           return (
-            <div
-              className="gw-wf-card"
-              key={workflow.key}
-              data-testid={`gateway-wf-${workflow.key}`}
-            >
+            <div className="gw-wf-card" key={workflow.key} data-testid={`gateway-wf-${workflow.key}`}>
               <div className="gw-wf-head">
                 <div>
                   <div className="gw-wf-name">{workflow.readableName}</div>
-                  {workflow.description ? (
-                    <p className="gw-wf-desc">{workflow.description}</p>
-                  ) : null}
+                  {workflow.description ? <p className="gw-wf-desc">{workflow.description}</p> : null}
                 </div>
                 <button
                   className="gw-btn gw-btn-primary"

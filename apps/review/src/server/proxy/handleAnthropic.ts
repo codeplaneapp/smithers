@@ -20,13 +20,7 @@ export interface HandleAnthropicDeps {
   waitUntil: (promise: Promise<unknown>) => void;
 }
 
-const FORWARDED_HEADERS = new Set([
-  "content-type",
-  "accept",
-  "accept-encoding",
-  "anthropic-version",
-  "anthropic-beta",
-]);
+const FORWARDED_HEADERS = new Set(["content-type", "accept", "accept-encoding", "anthropic-version", "anthropic-beta"]);
 
 // Clients need these to back off correctly and to reference upstream errors.
 const PASSTHROUGH_RESPONSE_HEADERS = ["retry-after", "x-request-id"];
@@ -87,9 +81,7 @@ function pickForwardHeaders(source: Headers): Headers {
   return out;
 }
 
-function teeForMetering(
-  upstream: Response,
-): { passthrough: ReadableStream; collected: Promise<string> } {
+function teeForMetering(upstream: Response): { passthrough: ReadableStream; collected: Promise<string> } {
   const [a, b] = upstream.body!.tee();
   const collected = (async () => {
     const reader = b.getReader();
@@ -143,8 +135,7 @@ export async function handleAnthropic(
     // waitUntil after their streams close, so the row read during auth can be
     // stale. A fresh read narrows (not eliminates) the over-spend window
     // without a full reservation system.
-    const fresh = await env.DB
-      .prepare("SELECT spent_usd FROM sessions WHERE hash = ?")
+    const fresh = await env.DB.prepare("SELECT spent_usd FROM sessions WHERE hash = ?")
       .bind(auth.hash)
       .first<{ spent_usd: number }>();
     spentUsd = fresh?.spent_usd ?? auth.spentUsd;
@@ -223,11 +214,12 @@ export async function handleAnthropic(
 
   let upstream: Response;
   try {
-    const result = await fetchUpstreamSameOrigin(
-      deps.fetchUpstream,
-      new URL(deps.anthropicBaseUrl).origin,
-      { url: upstreamUrl, method: request.method, headers: upstreamHeaders, body: upstreamBody },
-    );
+    const result = await fetchUpstreamSameOrigin(deps.fetchUpstream, new URL(deps.anthropicBaseUrl).origin, {
+      url: upstreamUrl,
+      method: request.method,
+      headers: upstreamHeaders,
+      body: upstreamBody,
+    });
     if (result.kind === "cross_origin_redirect") {
       // The injected key was NOT sent to (and never will be sent to) the
       // foreign origin; fail closed rather than forward credentials off-origin.
@@ -260,9 +252,7 @@ export async function handleAnthropic(
 
   const metering = (async () => {
     const body = await collected;
-    const summary = contentType.includes("text/event-stream")
-      ? parseUsageFromSse(body)
-      : parseUsageFromJson(body);
+    const summary = contentType.includes("text/event-stream") ? parseUsageFromSse(body) : parseUsageFromJson(body);
     if (!summary) {
       // A 2xx /v1/messages response that yields no usage is a metering MISS
       // (unexpected body shape), not a benign non-content frame — real spend

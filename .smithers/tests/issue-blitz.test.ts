@@ -10,8 +10,17 @@ const issueTrainSource = readFileSync(join(import.meta.dir, "../workflows/issue-
 const uiSource = readFileSync(join(import.meta.dir, "../ui/issue-blitz.tsx"), "utf8");
 const workflowPath = join(import.meta.dir, "../workflows/issue-blitz.tsx");
 const itemKeys = [
-  "ci-postgres", "e2e-orphans", "dual-react", "url-schemes", "pack-home", "pack-scan",
-  "workflow-dirs", "dead-code", "mcp-confirm", "coerce-props", "audit-atomic",
+  "ci-postgres",
+  "e2e-orphans",
+  "dual-react",
+  "url-schemes",
+  "pack-home",
+  "pack-scan",
+  "workflow-dirs",
+  "dead-code",
+  "mcp-confirm",
+  "coerce-props",
+  "audit-atomic",
 ];
 
 describe("issue-blitz event parsing", () => {
@@ -42,9 +51,9 @@ describe("issue-blitz event parsing", () => {
 
 describe("issue-blitz safety contract", () => {
   test("keeps the same-branch issue train behind deterministic gates", () => {
-    expect(issueTrainSource).toContain("const GATE_COMMAND = \"pnpm typecheck && pnpm test\"");
-    expect(issueTrainSource).toContain("git([\"merge-base\", remoteSha, headSha]");
-    expect(issueTrainSource).toContain("[\"push\", \"origin\", \"HEAD:refs/heads/main\"]");
+    expect(issueTrainSource).toContain('const GATE_COMMAND = "pnpm typecheck && pnpm test"');
+    expect(issueTrainSource).toContain('git(["merge-base", remoteSha, headSha]');
+    expect(issueTrainSource).toContain('["push", "origin", "HEAD:refs/heads/main"]');
     expect(issueTrainSource).toContain("pushed: after === headSha");
     expect(issueTrainSource).not.toContain("--force");
   });
@@ -65,7 +74,7 @@ describe("issue-blitz safety contract", () => {
   });
 
   test("composes terminal output cards with the shared gateway and UI libraries", () => {
-    expect(uiSource).toContain("terminal(\"commit-all\")");
+    expect(uiSource).toContain('terminal("commit-all")');
     expect(uiSource).toContain("buildIssueBlitzNodeState");
     expect(uiSource).toContain("NodeOutputView");
     expect(uiSource).toContain('iteration={iteration.get("commit-all") ?? 0}');
@@ -97,14 +106,23 @@ describe("issue-blitz safety contract", () => {
     const baseSha = "a".repeat(40);
     const headSha = "b".repeat(40);
     const outputs: Record<string, unknown[]> = {
-      discovery: [{ nodeId: "discover", iteration: 0, baseCommit: baseSha, summary: "ready", issues: [{ number: 1331, title: "Public title", body: "Public body", url: "https://example.invalid/1331" }] }],
+      discovery: [
+        {
+          nodeId: "discover",
+          iteration: 0,
+          baseCommit: baseSha,
+          summary: "ready",
+          issues: [{ number: 1331, title: "Public title", body: "Public body", url: "https://example.invalid/1331" }],
+        },
+      ],
     };
-    const render = () => renderWorkflow(workflow, {
-      runId: "issue-blitz-test",
-      workflowPath,
-      input: { perItemIterations: 2, planConcurrency: 3, implementConcurrency: 2 },
-      outputs,
-    });
+    const render = () =>
+      renderWorkflow(workflow, {
+        runId: "issue-blitz-test",
+        workflowPath,
+        input: { perItemIterations: 2, planConcurrency: 3, implementConcurrency: 2 },
+        outputs,
+      });
 
     let frame = await render();
     const bootstrap = frame.tasks.find((task) => task.nodeId === "ci-postgres:bootstrap");
@@ -113,53 +131,115 @@ describe("issue-blitz safety contract", () => {
     expect(bootstrap!.worktreeBaseBranch).toBe(baseSha);
 
     outputs.setup = itemKeys.map((itemKey) => ({
-      nodeId: `${itemKey}:bootstrap`, iteration: 0, itemKey,
-      cwd: `/tmp/${itemKey}`, baseSha, ready: true, summary: "ready",
+      nodeId: `${itemKey}:bootstrap`,
+      iteration: 0,
+      itemKey,
+      cwd: `/tmp/${itemKey}`,
+      baseSha,
+      ready: true,
+      summary: "ready",
     }));
     frame = await render();
     expect(frame.tasks.filter((task) => task.nodeId.endsWith(":plan"))).toHaveLength(itemKeys.length);
 
     outputs.plan = itemKeys.map((itemKey) => ({
-      nodeId: `${itemKey}:plan`, iteration: 0, itemKey,
-      summary: "plan", fixPlan: "fix", filesToTouch: [], testPlan: "test", risks: "none",
+      nodeId: `${itemKey}:plan`,
+      iteration: 0,
+      itemKey,
+      summary: "plan",
+      fixPlan: "fix",
+      filesToTouch: [],
+      testPlan: "test",
+      risks: "none",
     }));
     frame = await render();
     expect(frame.tasks.filter((task) => task.nodeId.endsWith(":implement"))).toHaveLength(itemKeys.length);
 
     outputs.readiness = itemKeys.map((itemKey) => ({
-      nodeId: `${itemKey}:ready`, iteration: 0, itemKey, ready: true, headSha, summary: "approved",
+      nodeId: `${itemKey}:ready`,
+      iteration: 0,
+      itemKey,
+      ready: true,
+      headSha,
+      summary: "approved",
     }));
     frame = await render();
     expect(frame.tasks.some((task) => task.nodeId === "integration-bootstrap")).toBe(true);
 
     outputs.setup.push({
-      nodeId: "integration-bootstrap", iteration: 0, itemKey: "__integration",
-      cwd: "/tmp/integration", baseSha, ready: true, summary: "ready",
+      nodeId: "integration-bootstrap",
+      iteration: 0,
+      itemKey: "__integration",
+      cwd: "/tmp/integration",
+      baseSha,
+      ready: true,
+      summary: "ready",
     });
     frame = await render();
     const integration = frame.tasks.find((task) => task.nodeId === "commit-all");
     expect(integration?.agent).toBeUndefined();
     expect(integration?.computeFn).toBeDefined();
 
-    outputs.commits = [{
-      nodeId: "commit-all", iteration: 0, committed: true, ready: true,
-      baseSha, headSha, changedPaths: ["safe.ts"], reviewDiff: "diff --git a/safe.ts b/safe.ts",
-      commits: [{ itemKey: "ci-postgres", subject: "fix", sha: headSha }], skipped: [], summary: "integrated",
-    }];
+    outputs.commits = [
+      {
+        nodeId: "commit-all",
+        iteration: 0,
+        committed: true,
+        ready: true,
+        baseSha,
+        headSha,
+        changedPaths: ["safe.ts"],
+        reviewDiff: "diff --git a/safe.ts b/safe.ts",
+        commits: [{ itemKey: "ci-postgres", subject: "fix", sha: headSha }],
+        skipped: [],
+        summary: "integrated",
+      },
+    ];
     frame = await render();
     expect(frame.tasks.some((task) => task.nodeId === "local-gate")).toBe(true);
 
-    outputs.gate = [{ nodeId: "local-gate", iteration: 0, headSha, passed: true, exitCode: 0, durationMs: 1, command: "pnpm typecheck && pnpm test", log: "", summary: "green" }];
+    outputs.gate = [
+      {
+        nodeId: "local-gate",
+        iteration: 0,
+        headSha,
+        passed: true,
+        exitCode: 0,
+        durationMs: 1,
+        command: "pnpm typecheck && pnpm test",
+        log: "",
+        summary: "green",
+      },
+    ];
     frame = await render();
     expect(frame.tasks.some((task) => task.nodeId === "fable-review")).toBe(true);
 
-    outputs.finalReview = [{ nodeId: "fable-review", iteration: 0, headSha, approved: true, verdict: "safe", blockers: [], summary: "approved" }];
+    outputs.finalReview = [
+      {
+        nodeId: "fable-review",
+        iteration: 0,
+        headSha,
+        approved: true,
+        verdict: "safe",
+        blockers: [],
+        summary: "approved",
+      },
+    ];
     frame = await render();
     const approval = frame.tasks.find((task) => task.nodeId === "approve-push");
     expect(approval?.needsApproval).toBe(true);
     expect(frame.tasks.some((task) => task.nodeId === "push")).toBe(false);
 
-    outputs.approval = [{ nodeId: "approve-push", iteration: 0, approved: false, note: "manual", decidedBy: "test", decidedAt: new Date().toISOString() }];
+    outputs.approval = [
+      {
+        nodeId: "approve-push",
+        iteration: 0,
+        approved: false,
+        note: "manual",
+        decidedBy: "test",
+        decidedAt: new Date().toISOString(),
+      },
+    ];
     frame = await render();
     expect(frame.tasks.some((task) => task.nodeId === "push")).toBe(true);
   }, 30_000);

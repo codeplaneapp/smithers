@@ -30,9 +30,9 @@ export class SqlitePromptCache implements PromptCache {
 
   async get(key: string): Promise<CachedPrompt | undefined> {
     const db = await this.db();
-    const row = db
-      .query(`SELECT json FROM ${quotedTable(this.table)} WHERE key = ? LIMIT 1`)
-      .get(key) as { json: string } | null;
+    const row = db.query(`SELECT json FROM ${quotedTable(this.table)} WHERE key = ? LIMIT 1`).get(key) as {
+      json: string;
+    } | null;
     if (!row) return undefined;
     return { ...(JSON.parse(row.json) as CachedPrompt), key };
   }

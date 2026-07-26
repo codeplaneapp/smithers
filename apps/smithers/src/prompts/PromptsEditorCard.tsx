@@ -41,11 +41,7 @@ export function PromptsEditorCard() {
             {prompts.length} prompt{prompts.length === 1 ? "" : "s"} · edit, preview, save
           </div>
         </div>
-        <button
-          className="card-link"
-          type="button"
-          onClick={() => openSurface({ kind: "prompts" })}
-        >
+        <button className="card-link" type="button" onClick={() => openSurface({ kind: "prompts" })}>
           Open editor ›
         </button>
       </header>
@@ -88,11 +84,7 @@ export function PromptsEditorCard() {
         >
           Preview
         </button>
-        <button
-          className="btn btn-brand"
-          type="button"
-          onClick={() => openSurface({ kind: "prompts" })}
-        >
+        <button className="btn btn-brand" type="button" onClick={() => openSurface({ kind: "prompts" })}>
           New prompt
         </button>
       </footer>

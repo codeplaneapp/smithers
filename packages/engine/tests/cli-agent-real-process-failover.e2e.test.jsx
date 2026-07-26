@@ -107,9 +107,7 @@ describe("CLI-backed agent fallback through the real process path", () => {
       expect(result.status).toBe("finished");
       expect(leadPreflightCalls).toBe(1);
       expect(leadGenerateCalls).toBe(0);
-      expect(db.select().from(tables.outputA).all()).toEqual([
-        expect.objectContaining({ nodeId: "impl", value: 42 }),
-      ]);
+      expect(db.select().from(tables.outputA).all()).toEqual([expect.objectContaining({ nodeId: "impl", value: 42 })]);
 
       const attempts = await adapter.listAttempts(result.runId, "impl", 0);
       expect(attempts).toHaveLength(1);

@@ -5,12 +5,7 @@ import {
   useGatewayRun,
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
-import {
-  ConnectionBadge,
-  RunEventLog,
-  RunTree,
-  WorkflowUiShell,
-} from "smithers-orchestrator/gateway-ui";
+import { ConnectionBadge, RunEventLog, RunTree, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
 import {
   Badge,
   Card,
@@ -64,7 +59,11 @@ function StageSummary({ runId, nodeId, title }: { runId: string; nodeId: string;
           : Array.isArray(row.targets)
             ? `${row.targets.length} target(s) planned`
             : "";
-  const issues = Array.isArray(row.issues) ? row.issues.length : Array.isArray(row.issuesFound) ? row.issuesFound.length : undefined;
+  const issues = Array.isArray(row.issues)
+    ? row.issues.length
+    : Array.isArray(row.issuesFound)
+      ? row.issuesFound.length
+      : undefined;
   if (!summary && issues === undefined) return null;
   return (
     <Card>
@@ -75,7 +74,9 @@ function StageSummary({ runId, nodeId, title }: { runId: string; nodeId: string;
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontSize: 12, maxHeight: 180, overflow: "auto" }}>{summary}</pre>
+        <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontSize: 12, maxHeight: 180, overflow: "auto" }}>
+          {summary}
+        </pre>
       </CardContent>
     </Card>
   );

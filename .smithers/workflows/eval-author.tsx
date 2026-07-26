@@ -31,9 +31,7 @@ const inputSchema = z.object({
 const evalCaseSchema = z.looseObject({
   id: z.string().describe("Stable kebab-case id for this case."),
   input: z.looseObject({}).describe("The workflow input object this case runs with."),
-  expected: z
-    .looseObject({})
-    .describe("Assertion object: status, output (exact), and/or outputContains (partial)."),
+  expected: z.looseObject({}).describe("Assertion object: status, output (exact), and/or outputContains (partial)."),
   rubric: z.string().describe("Plain-English pass/fail criteria for a human or judge reviewing this case."),
 });
 

@@ -11,9 +11,7 @@ const NODE_STATUSES: readonly NodeStatus[] = ["ok", "running", "queued", "failed
 
 /** Narrow a raw node status string to NodeStatus, defaulting to "queued". */
 function toNodeStatus(value: string | undefined): NodeStatus {
-  return value !== undefined && (NODE_STATUSES as readonly string[]).includes(value)
-    ? (value as NodeStatus)
-    : "queued";
+  return value !== undefined && (NODE_STATUSES as readonly string[]).includes(value) ? (value as NodeStatus) : "queued";
 }
 
 export type UseGatewayRunTreeResult = {
@@ -37,10 +35,7 @@ export function useGatewayRunTree(runId: string | undefined): UseGatewayRunTreeR
   const { collections } = useSmithersCollections();
   const collection = runId ? collections.nodes(runId) : undefined;
 
-  const live = useLiveQuery(
-    (q) => (collection ? q.from({ row: collection }) : undefined),
-    [collection],
-  );
+  const live = useLiveQuery((q) => (collection ? q.from({ row: collection }) : undefined), [collection]);
 
   const nodes = (live.data ?? []) as GatewayRunNode[];
   const root = useMemo(() => buildGatewayRunTree(nodes), [nodes]);

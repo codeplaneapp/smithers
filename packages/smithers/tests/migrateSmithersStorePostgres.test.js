@@ -17,7 +17,28 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
-import { chunkedTest, assertRowForRowEquality, canonicalRows, listSourceTables, normalizeCell, sourceColumns, assertSqlitePrimaryKeyAndDuplicateRejection, closeApi, makeWorkspace, PG_URL, pgUrlForDatabase, quoteId, seedOlderSqliteStore, seedPgliteStore, seedPgliteStoreWithReceipt, seedSqliteStore, sqliteRunIds, tableCount, tempPgDatabaseName, withTempPostgresDatabase } from "./migrateStoreKit.js";
+import {
+  chunkedTest,
+  assertRowForRowEquality,
+  canonicalRows,
+  listSourceTables,
+  normalizeCell,
+  sourceColumns,
+  assertSqlitePrimaryKeyAndDuplicateRejection,
+  closeApi,
+  makeWorkspace,
+  PG_URL,
+  pgUrlForDatabase,
+  quoteId,
+  seedOlderSqliteStore,
+  seedPgliteStore,
+  seedPgliteStoreWithReceipt,
+  seedSqliteStore,
+  sqliteRunIds,
+  tableCount,
+  tempPgDatabaseName,
+  withTempPostgresDatabase,
+} from "./migrateStoreKit.js";
 
 setDefaultTimeout(120_000);
 
@@ -78,7 +99,14 @@ describe("migrateSmithersStore real postgres", () => {
       const cwd = makeWorkspace("smithers-migrate-pglite-postgres");
       const sqliteSourcePath = await seedPgliteStore(cwd);
 
-      const result = await migrateSmithersStore({ cwd, from: "sqlite", to: "postgres", url, dbPath: sqliteSourcePath, env: {} });
+      const result = await migrateSmithersStore({
+        cwd,
+        from: "sqlite",
+        to: "postgres",
+        url,
+        dbPath: sqliteSourcePath,
+        env: {},
+      });
 
       expect(result.backend).toBe("postgres");
       expect(result.source.backend).toBe("sqlite");

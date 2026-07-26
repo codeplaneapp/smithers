@@ -34,10 +34,7 @@ describe("fork acts as a dependency", () => {
         { kind: "task", nodeId: "b" },
       ],
     };
-    const descs = descriptorMap(
-      makeDescriptor("a"),
-      makeDescriptor("b", { forkSource: "a" }),
-    );
+    const descs = descriptorMap(makeDescriptor("a"), makeDescriptor("b", { forkSource: "a" }));
     const states = new Map([
       [buildStateKey("a", 0), "in-progress"],
       [buildStateKey("b", 0), "pending"],
@@ -55,10 +52,7 @@ describe("fork acts as a dependency", () => {
         { kind: "task", nodeId: "b" },
       ],
     };
-    const descs = descriptorMap(
-      makeDescriptor("a"),
-      makeDescriptor("b", { forkSource: "a" }),
-    );
+    const descs = descriptorMap(makeDescriptor("a"), makeDescriptor("b", { forkSource: "a" }));
     const states = new Map([
       [buildStateKey("a", 0), "finished"],
       [buildStateKey("b", 0), "pending"],
@@ -87,9 +81,7 @@ describe("fork acts as a dependency", () => {
       [buildStateKey("right", 0), "pending"],
     ]);
     const result = scheduleTasks(plan, states, descs, new Map(), new Map(), 0);
-    expect(new Set(result.runnable.map((r) => r.nodeId))).toEqual(
-      new Set(["left", "right"]),
-    );
+    expect(new Set(result.runnable.map((r) => r.nodeId))).toEqual(new Set(["left", "right"]));
   });
 
   test("fork composes with explicit dependsOn (both must be satisfied)", () => {

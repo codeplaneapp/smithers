@@ -20,14 +20,7 @@ import {
 import dagre from "dagre";
 import type { CSSProperties } from "react";
 import type { DelegationGraph } from "smithers-orchestrator/gateway-react";
-import {
-  EstimateChip,
-  attentionCount,
-  devPreviewOf,
-  gateLabel,
-  gateTitle,
-  type DelegationNode,
-} from "./dc-shared";
+import { EstimateChip, attentionCount, devPreviewOf, gateLabel, gateTitle, type DelegationNode } from "./dc-shared";
 
 const NODE_WIDTH = 240;
 const NODE_HEIGHT = 116;

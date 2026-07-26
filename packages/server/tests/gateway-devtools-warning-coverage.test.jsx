@@ -35,19 +35,31 @@ function deepPropsXml(depth) {
     kind: "element",
     tag: "smithers:workflow",
     props: { name: "deep" },
-    children: [
-      { kind: "element", tag: "smithers:task", props: { id: "task::0", deep }, children: [] },
-    ],
+    children: [{ kind: "element", tag: "smithers:task", props: { id: "task::0", deep }, children: [] }],
   });
 }
 
 function fakeConnection() {
   const sent = [];
-  const ws = { OPEN: 1, readyState: 1, bufferedAmount: 0, send(data) { sent.push(JSON.parse(data)); } };
+  const ws = {
+    OPEN: 1,
+    readyState: 1,
+    bufferedAmount: 0,
+    send(data) {
+      sent.push(JSON.parse(data));
+    },
+  };
   return {
     connection: {
-      transport: "ws", ws, authenticated: true, scopes: ["*"], seq: 0,
-      role: "operator", userId: "user:test", tokenId: "tok", connectionId: "conn-warn",
+      transport: "ws",
+      ws,
+      authenticated: true,
+      scopes: ["*"],
+      seq: 0,
+      role: "operator",
+      userId: "user:test",
+      tokenId: "tok",
+      connectionId: "conn-warn",
     },
     sent,
   };
@@ -59,14 +71,23 @@ function reqFrame(method, params = {}) {
 
 const cleanups = [];
 afterEach(async () => {
-  for (const c of cleanups.splice(0).reverse()) { try { await c(); } catch {} }
+  for (const c of cleanups.splice(0).reverse()) {
+    try {
+      await c();
+    } catch {}
+  }
 });
 
 function makeWorkflow(dbPath) {
-  const { smithers, Workflow, Task, outputs, db } = createSmithers({ result: z.object({ value: z.number() }) }, { dbPath });
+  const { smithers, Workflow, Task, outputs, db } = createSmithers(
+    { result: z.object({ value: z.number() }) },
+    { dbPath },
+  );
   const workflow = smithers(() => (
     <Workflow name="warn-wf">
-      <Task id="task1" output={outputs.result}>{{ value: 1 }}</Task>
+      <Task id="task1" output={outputs.result}>
+        {{ value: 1 }}
+      </Task>
     </Workflow>
   ));
   return { workflow, db };
@@ -74,7 +95,13 @@ function makeWorkflow(dbPath) {
 
 function makeDbPath(name) {
   const dbPath = join(tmpdir(), `smithers-warn-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
-  cleanups.push(() => { for (const s of ["", "-shm", "-wal"]) { try { rmSync(`${dbPath}${s}`, { force: true }); } catch {} } });
+  cleanups.push(() => {
+    for (const s of ["", "-shm", "-wal"]) {
+      try {
+        rmSync(`${dbPath}${s}`, { force: true });
+      } catch {}
+    }
+  });
   return dbPath;
 }
 
@@ -112,7 +139,10 @@ describe("gateway devtools serializer warnings and audit recovery", () => {
     // streamDevTools: the initial snapshot serialization emits the same warning
     // through the stream's onWarning callback.
     const streamConn = fakeConnection();
-    const streamRes = await gateway.routeRequest(streamConn.connection, reqFrame("streamDevTools", { runId, fromSeq: 0 }));
+    const streamRes = await gateway.routeRequest(
+      streamConn.connection,
+      reqFrame("streamDevTools", { runId, fromSeq: 0 }),
+    );
     expect(streamRes.ok).toBe(true);
     await sleep(120);
     expect(streamConn.sent.some((e) => e.event === "devtools.event")).toBe(true);

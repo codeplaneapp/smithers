@@ -71,12 +71,7 @@ export function AppShell() {
                 Smithers
               </span>
               {surface === null ? (
-                <button
-                  aria-label="Exit sidebar layout"
-                  className="nav-button"
-                  type="button"
-                  onClick={toggleLayout}
-                >
+                <button aria-label="Exit sidebar layout" className="nav-button" type="button" onClick={toggleLayout}>
                   <PanelLeftIcon />
                 </button>
               ) : null}

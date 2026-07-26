@@ -93,7 +93,10 @@ beforeAll(async () => {
   write(join(tempRepo, "src/app.ts"), "export function risky(value: string | null) {\n  return value!.trim();\n}\n");
   run("git", ["add", "."], tempRepo);
   run("git", ["commit", "-m", "initial"], tempRepo);
-  write(join(tempRepo, "src/app.ts"), "export function risky(value: string | null) {\n  return value!.trim().toUpperCase();\n}\n");
+  write(
+    join(tempRepo, "src/app.ts"),
+    "export function risky(value: string | null) {\n  return value!.trim().toUpperCase();\n}\n",
+  );
   write(join(tempRepo, "src/app.test.ts"), "test('risky', () => {});\n");
 
   port = await findOpenPort();
@@ -113,46 +116,56 @@ beforeAll(async () => {
 
 afterAll(() => {
   if (!CHROMIUM) return;
-  try { proc?.kill("SIGTERM"); } catch {}
-  try { rmSync(tempRepo, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
+  try {
+    proc?.kill("SIGTERM");
+  } catch {}
+  try {
+    rmSync(tempRepo, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch {}
 });
 
-browserTest("Open Code Review UI renders a real workflow run", async () => {
-  const browser = await CHROMIUM.launch({ headless: true });
-  try {
-    const page = await browser.newPage();
-    const errors: string[] = [];
-    page.on("pageerror", (err: Error) => errors.push(err.message));
+browserTest(
+  "Open Code Review UI renders a real workflow run",
+  async () => {
+    const browser = await CHROMIUM.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (err: Error) => errors.push(err.message));
 
-    await page.goto(`${base}/workflows/open-code-review?runId=${RUN_ID}`, { waitUntil: "domcontentloaded" });
-    await page.waitForSelector('[data-testid="open-code-review-ui"]', { timeout: 20_000 });
+      await page.goto(`${base}/workflows/open-code-review?runId=${RUN_ID}`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector('[data-testid="open-code-review-ui"]', { timeout: 20_000 });
 
-    await page.waitForFunction(
-      () => {
-        const status = document.querySelector('[data-testid="ocr-workflow-status"]')?.textContent ?? "";
-        return status.includes("success") || status.includes("finished");
-      },
-      undefined,
-      { timeout: 20_000 },
-    );
-    await page.waitForFunction(
-      () => (document.querySelector('[data-testid="ocr-kpi-reviewable"]')?.textContent ?? "").includes("1"),
-      undefined,
-      { timeout: 20_000 },
-    );
-    await page.waitForFunction(
-      () => (document.querySelector('[data-testid="ocr-kpi-excluded"]')?.textContent ?? "").includes("1"),
-      undefined,
-      { timeout: 20_000 },
-    );
-    await page.waitForSelector('[data-testid="ocr-preview-panel"] >> text=src/app.ts', { timeout: 20_000 });
-    await page.waitForSelector('[data-testid="ocr-preview-panel"] >> text=src/app.test.ts', { timeout: 20_000 });
-    await page.waitForSelector('[data-testid="ocr-preview-panel"] >> text=default_path', { timeout: 20_000 });
-    await page.waitForSelector('[data-testid="ocr-comments-panel"] >> text=Guard against null before trimming.', { timeout: 20_000 });
-    expect(await page.locator('[data-testid="ocr-kpi-tokens"]').textContent()).toContain("0");
+      await page.waitForFunction(
+        () => {
+          const status = document.querySelector('[data-testid="ocr-workflow-status"]')?.textContent ?? "";
+          return status.includes("success") || status.includes("finished");
+        },
+        undefined,
+        { timeout: 20_000 },
+      );
+      await page.waitForFunction(
+        () => (document.querySelector('[data-testid="ocr-kpi-reviewable"]')?.textContent ?? "").includes("1"),
+        undefined,
+        { timeout: 20_000 },
+      );
+      await page.waitForFunction(
+        () => (document.querySelector('[data-testid="ocr-kpi-excluded"]')?.textContent ?? "").includes("1"),
+        undefined,
+        { timeout: 20_000 },
+      );
+      await page.waitForSelector('[data-testid="ocr-preview-panel"] >> text=src/app.ts', { timeout: 20_000 });
+      await page.waitForSelector('[data-testid="ocr-preview-panel"] >> text=src/app.test.ts', { timeout: 20_000 });
+      await page.waitForSelector('[data-testid="ocr-preview-panel"] >> text=default_path', { timeout: 20_000 });
+      await page.waitForSelector('[data-testid="ocr-comments-panel"] >> text=Guard against null before trimming.', {
+        timeout: 20_000,
+      });
+      expect(await page.locator('[data-testid="ocr-kpi-tokens"]').textContent()).toContain("0");
 
-    expect(errors).toEqual([]);
-  } finally {
-    await browser.close();
-  }
-}, 120_000);
+      expect(errors).toEqual([]);
+    } finally {
+      await browser.close();
+    }
+  },
+  120_000,
+);

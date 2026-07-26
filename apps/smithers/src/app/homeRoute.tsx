@@ -27,18 +27,14 @@ function LandingPage() {
           Turn ideas into <span>momentum.</span>
         </h1>
         <p className="landing-intro">
-          Smithers coordinates your agents, workflows, and approvals so you can
-          spend less time managing work and more time making progress.
+          Smithers coordinates your agents, workflows, and approvals so you can spend less time managing work and more
+          time making progress.
         </p>
         <div className="landing-actions" aria-label="Get started">
           <button className="landing-primary" type="button" onClick={() => fill("")}>
             Start building <span aria-hidden="true">→</span>
           </button>
-          <button
-            className="landing-secondary"
-            type="button"
-            onClick={() => goToView("store")}
-          >
+          <button className="landing-secondary" type="button" onClick={() => goToView("store")}>
             Explore workflows
           </button>
         </div>

@@ -11,7 +11,7 @@ const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
  * @returns {string}
  */
 export function computeHmacSha256Hex(payload, secret) {
-    return createHmac("sha256", secret).update(payload).digest("hex");
+  return createHmac("sha256", secret).update(payload).digest("hex");
 }
 
 /**
@@ -20,10 +20,10 @@ export function computeHmacSha256Hex(payload, secret) {
  * @returns {boolean}
  */
 function safeEqual(expected, candidate) {
-    if (!candidate || candidate.length !== expected.length) {
-        return false;
-    }
-    return timingSafeEqual(expected, candidate);
+  if (!candidate || candidate.length !== expected.length) {
+    return false;
+  }
+  return timingSafeEqual(expected, candidate);
 }
 
 /**
@@ -42,40 +42,38 @@ function safeEqual(expected, candidate) {
  * @returns {boolean} true only when the signature matches.
  */
 export function verifySignature(options) {
-    const { payload, secret, signature, prefix } = options;
-    if (typeof signature !== "string" || signature.length === 0 || !secret) {
-        return false;
-    }
-    let provided = signature.trim();
-    if (prefix !== undefined) {
-        if (!provided.toLowerCase().startsWith(prefix.toLowerCase())) {
-            return false;
-        }
-        provided = provided.slice(prefix.length);
-    }
-    else if (provided.toLowerCase().startsWith("sha256=")) {
-        provided = provided.slice("sha256=".length);
-    }
-    if (!provided) {
-        return false;
-    }
-    const expected = createHmac("sha256", secret).update(payload).digest();
-    // Hex digest (the common case for GitHub/Linear).
-    if (provided.length === expected.length * 2 && HEX_RE.test(provided)) {
-        if (safeEqual(expected, Buffer.from(provided, "hex"))) {
-            return true;
-        }
-    }
-    // Base64 digest fallback.
-    if (BASE64_RE.test(provided)) {
-        try {
-            if (safeEqual(expected, Buffer.from(provided, "base64"))) {
-                return true;
-            }
-        }
-        catch {
-            // fallthrough — not valid base64
-        }
-    }
+  const { payload, secret, signature, prefix } = options;
+  if (typeof signature !== "string" || signature.length === 0 || !secret) {
     return false;
+  }
+  let provided = signature.trim();
+  if (prefix !== undefined) {
+    if (!provided.toLowerCase().startsWith(prefix.toLowerCase())) {
+      return false;
+    }
+    provided = provided.slice(prefix.length);
+  } else if (provided.toLowerCase().startsWith("sha256=")) {
+    provided = provided.slice("sha256=".length);
+  }
+  if (!provided) {
+    return false;
+  }
+  const expected = createHmac("sha256", secret).update(payload).digest();
+  // Hex digest (the common case for GitHub/Linear).
+  if (provided.length === expected.length * 2 && HEX_RE.test(provided)) {
+    if (safeEqual(expected, Buffer.from(provided, "hex"))) {
+      return true;
+    }
+  }
+  // Base64 digest fallback.
+  if (BASE64_RE.test(provided)) {
+    try {
+      if (safeEqual(expected, Buffer.from(provided, "base64"))) {
+        return true;
+      }
+    } catch {
+      // fallthrough — not valid base64
+    }
+  }
+  return false;
 }

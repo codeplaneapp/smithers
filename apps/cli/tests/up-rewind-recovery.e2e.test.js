@@ -14,53 +14,52 @@ import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { writeRewindAuditRow } from "@smithers-orchestrator/time-travel/writeRewindAuditRow";
 import { listRewindAuditRows } from "@smithers-orchestrator/time-travel/listRewindAuditRows";
 import {
-    createTempRepo,
-    pinSqliteBackend,
-    runSmithers,
-    writeTestWorkflow,
+  createTempRepo,
+  pinSqliteBackend,
+  runSmithers,
+  writeTestWorkflow,
 } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 const REPO_ROOT = new URL("../../..", import.meta.url).pathname;
 const E2E_DEPS_AVAILABLE =
-    existsSync(join(REPO_ROOT, "node_modules", "zod")) &&
-    existsSync(join(REPO_ROOT, "node_modules", "react"));
+  existsSync(join(REPO_ROOT, "node_modules", "zod")) && existsSync(join(REPO_ROOT, "node_modules", "react"));
 const testIfDeps = E2E_DEPS_AVAILABLE ? test : test.skip;
 
 testIfDeps(
-    "smithers up recovers a crash-interrupted rewind audit at startup",
-    async () => {
-        const repo = createTempRepo();
-        pinSqliteBackend(repo.dir);
+  "smithers up recovers a crash-interrupted rewind audit at startup",
+  async () => {
+    const repo = createTempRepo();
+    pinSqliteBackend(repo.dir);
 
-        // Seed a prior run whose rewind crashed mid-flight: an in_progress audit row.
-        {
-            const sqlite = new Database(repo.path("smithers.db"));
-            const db = drizzle(sqlite);
-            ensureSmithersTables(db);
-            const adapter = new SmithersDb(db);
-            await adapter.insertRun({ runId: "crashed-rewind", workflowName: "wf", status: "running", createdAtMs: 1 });
-            await writeRewindAuditRow(adapter, {
-                runId: "crashed-rewind",
-                fromFrameNo: 5,
-                toFrameNo: 2,
-                caller: "user:test",
-                timestampMs: 1_000,
-                result: "in_progress",
-                durationMs: null,
-            });
-            sqlite.close();
-        }
+    // Seed a prior run whose rewind crashed mid-flight: an in_progress audit row.
+    {
+      const sqlite = new Database(repo.path("smithers.db"));
+      const db = drizzle(sqlite);
+      ensureSmithersTables(db);
+      const adapter = new SmithersDb(db);
+      await adapter.insertRun({ runId: "crashed-rewind", workflowName: "wf", status: "running", createdAtMs: 1 });
+      await writeRewindAuditRow(adapter, {
+        runId: "crashed-rewind",
+        fromFrameNo: 5,
+        toFrameNo: 2,
+        caller: "user:test",
+        timestampMs: 1_000,
+        result: "in_progress",
+        durationMs: null,
+      });
+      sqlite.close();
+    }
 
-        writeTestWorkflow(repo);
-        // Recovery runs at startup (before the run is driven), so the audit must be
-        // flipped to "partial" regardless of the run's own outcome.
-        runSmithers(["up", "workflow.tsx"], { cwd: repo.dir, format: "json", timeoutMs: 45_000 });
+    writeTestWorkflow(repo);
+    // Recovery runs at startup (before the run is driven), so the audit must be
+    // flipped to "partial" regardless of the run's own outcome.
+    runSmithers(["up", "workflow.tsx"], { cwd: repo.dir, format: "json", timeoutMs: 45_000 });
 
-        const sqlite = new Database(repo.path("smithers.db"));
-        const adapter = new SmithersDb(drizzle(sqlite));
-        const audits = await listRewindAuditRows(adapter, { runId: "crashed-rewind" });
-        sqlite.close();
-        expect(audits[0]?.result).toBe("partial");
-    },
-    60_000,
+    const sqlite = new Database(repo.path("smithers.db"));
+    const adapter = new SmithersDb(drizzle(sqlite));
+    const audits = await listRewindAuditRows(adapter, { runId: "crashed-rewind" });
+    sqlite.close();
+    expect(audits[0]?.result).toBe("partial");
+  },
+  60_000,
 );

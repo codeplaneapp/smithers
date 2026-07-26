@@ -18,21 +18,23 @@ const INPUT_RESERVED = new Set(["run_id"]);
  * @returns {void}
  */
 export function assertNoReservedColumns(schema, tableName, opts) {
-    const shape = schema?.shape;
-    if (!shape || typeof shape !== "object")
-        return;
-    const reserved = opts?.isInput ? INPUT_RESERVED : OUTPUT_RESERVED;
-    // camelToSnake handles both camelCase and already-snake keys
-    // (camelToSnake("node_id") === "node_id"), so one snake-set check catches
-    // `nodeId` AND a literal `node_id`.
-    const offenders = Object.keys(shape).filter((key) => reserved.has(camelToSnake(key)));
-    if (offenders.length === 0)
-        return;
-    const where = tableName ? ` for "${tableName}"` : "";
-    const reservedList = opts?.isInput
-        ? "run_id (camelCase runId)"
-        : "run_id, node_id and iteration (camelCase runId/nodeId/iteration)";
-    throw new SmithersError("INVALID_INPUT", `${opts?.isInput ? "Input" : "Output"} schema${where} uses reserved field name(s): ${offenders.join(", ")}. ` +
-        `smithers persists every ${opts?.isInput ? "input" : "node output"} with internal column(s) ${reservedList}. ` +
-        `Rename the conflicting field(s) - e.g. nodeId -> targetNodeId, runId -> sourceRunId, iteration -> attempt.`, { table: tableName, offenders });
+  const shape = schema?.shape;
+  if (!shape || typeof shape !== "object") return;
+  const reserved = opts?.isInput ? INPUT_RESERVED : OUTPUT_RESERVED;
+  // camelToSnake handles both camelCase and already-snake keys
+  // (camelToSnake("node_id") === "node_id"), so one snake-set check catches
+  // `nodeId` AND a literal `node_id`.
+  const offenders = Object.keys(shape).filter((key) => reserved.has(camelToSnake(key)));
+  if (offenders.length === 0) return;
+  const where = tableName ? ` for "${tableName}"` : "";
+  const reservedList = opts?.isInput
+    ? "run_id (camelCase runId)"
+    : "run_id, node_id and iteration (camelCase runId/nodeId/iteration)";
+  throw new SmithersError(
+    "INVALID_INPUT",
+    `${opts?.isInput ? "Input" : "Output"} schema${where} uses reserved field name(s): ${offenders.join(", ")}. ` +
+      `smithers persists every ${opts?.isInput ? "input" : "node output"} with internal column(s) ${reservedList}. ` +
+      `Rename the conflicting field(s) - e.g. nodeId -> targetNodeId, runId -> sourceRunId, iteration -> attempt.`,
+    { table: tableName, offenders },
+  );
 }

@@ -35,11 +35,13 @@ export async function runDurableAdd({ spec, global = false, yes = false } = {}) 
     return null;
   }
   try {
-    const result = await runtime.Effect.runPromise(runtime.runWorkflow(workflow, {
-      input: { spec, global, yes },
-      runId: crypto.randomUUID(),
-      workflowPath: entryFile,
-    }));
+    const result = await runtime.Effect.runPromise(
+      runtime.runWorkflow(workflow, {
+        input: { spec, global, yes },
+        runId: crypto.randomUUID(),
+        workflowPath: entryFile,
+      }),
+    );
     if (!result || result.status !== "finished") {
       const detail = result?.error?.message ?? result?.error ?? `run ended ${result?.status ?? "without a result"}`;
       throw new Error(`Pack installation failed: ${detail}`);

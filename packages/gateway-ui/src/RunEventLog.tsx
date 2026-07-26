@@ -1,13 +1,5 @@
 /** @jsxImportSource react */
-import {
-  useEffect,
-  useInsertionEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { useEffect, useInsertionEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useGatewayRunEvents } from "@smithers-orchestrator/gateway-react";
 import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
 import { Badge, type BadgeProps, Button, EmptyState } from "@smithers-orchestrator/ui";
@@ -73,13 +65,7 @@ function stringOf(value: unknown): string | undefined {
 // with the real name at `frame.payload.event` and the node at
 // `frame.payload.payload.nodeId`. Read both shapes so a row renders correctly
 // whichever layer produced it.
-const GENERIC_EVENT_WRAPPERS = new Set([
-  "event",
-  "run.event",
-  "node.event",
-  "task.event",
-  "agent.event",
-]);
+const GENERIC_EVENT_WRAPPERS = new Set(["event", "run.event", "node.event", "task.event", "agent.event"]);
 
 /** The lifecycle/kind name for a frame (e.g. "NodeFinished", "TaskHeartbeat"). */
 export function eventKind(frame: Pick<GatewayEventFrame, "event" | "payload">): string {
@@ -230,10 +216,7 @@ function toRow(frame: GatewayEventFrame, count: number): LogRow {
  * `TaskHeartbeat` frames for the same node collapse into a single counted row so
  * a chatty agent does not bury its real lifecycle events.
  */
-export function buildLogRows(
-  frames: ReadonlyArray<GatewayEventFrame>,
-  coalesceHeartbeats: boolean,
-): LogRow[] {
+export function buildLogRows(frames: ReadonlyArray<GatewayEventFrame>, coalesceHeartbeats: boolean): LogRow[] {
   const rows: LogRow[] = [];
   for (const frame of frames) {
     const kind = eventKind(frame);
@@ -288,43 +271,44 @@ function EventRow({
       data-heartbeat={row.tone === "heartbeat" ? "true" : undefined}
     >
       <div className="gw-event-row-head">
-        {selectable ? <button
-          type="button"
-          className="gw-event-row-main"
-          data-selectable={selectable ? "true" : "false"}
-          onClick={selectable ? () => onSelectNode!(row.nodeId!) : undefined}
-        >
-          <span className="gw-event-row-seq">{seq}</span>
-          <Badge variant={TONE_BADGE_VARIANT[row.tone]} style={{ flexShrink: 0 }}>
-            {badgeLabel}
-          </Badge>
-          {row.nodeId ? <span className="gw-event-row-chip">{row.nodeId}</span> : null}
-          {row.iteration > 0 || row.attempt > 1 ? (
-            <span className="gw-event-row-meta">
-              {row.iteration > 0 ? `iter ${row.iteration}` : ""}
-              {row.iteration > 0 && row.attempt > 1 ? " · " : ""}
-              {row.attempt > 1 ? `try ${row.attempt}` : ""}
-            </span>
-          ) : null}
-          <span className="gw-event-row-summary">{row.summary}</span>
-        </button> : <div
-          className="gw-event-row-main"
-          data-selectable="false"
-        >
-          <span className="gw-event-row-seq">{seq}</span>
-          <Badge variant={TONE_BADGE_VARIANT[row.tone]} style={{ flexShrink: 0 }}>
-            {badgeLabel}
-          </Badge>
-          {row.nodeId ? <span className="gw-event-row-chip">{row.nodeId}</span> : null}
-          {row.iteration > 0 || row.attempt > 1 ? (
-            <span className="gw-event-row-meta">
-              {row.iteration > 0 ? `iter ${row.iteration}` : ""}
-              {row.iteration > 0 && row.attempt > 1 ? " · " : ""}
-              {row.attempt > 1 ? `try ${row.attempt}` : ""}
-            </span>
-          ) : null}
-          <span className="gw-event-row-summary">{row.summary}</span>
-        </div>}
+        {selectable ? (
+          <button
+            type="button"
+            className="gw-event-row-main"
+            data-selectable={selectable ? "true" : "false"}
+            onClick={selectable ? () => onSelectNode!(row.nodeId!) : undefined}
+          >
+            <span className="gw-event-row-seq">{seq}</span>
+            <Badge variant={TONE_BADGE_VARIANT[row.tone]} style={{ flexShrink: 0 }}>
+              {badgeLabel}
+            </Badge>
+            {row.nodeId ? <span className="gw-event-row-chip">{row.nodeId}</span> : null}
+            {row.iteration > 0 || row.attempt > 1 ? (
+              <span className="gw-event-row-meta">
+                {row.iteration > 0 ? `iter ${row.iteration}` : ""}
+                {row.iteration > 0 && row.attempt > 1 ? " · " : ""}
+                {row.attempt > 1 ? `try ${row.attempt}` : ""}
+              </span>
+            ) : null}
+            <span className="gw-event-row-summary">{row.summary}</span>
+          </button>
+        ) : (
+          <div className="gw-event-row-main" data-selectable="false">
+            <span className="gw-event-row-seq">{seq}</span>
+            <Badge variant={TONE_BADGE_VARIANT[row.tone]} style={{ flexShrink: 0 }}>
+              {badgeLabel}
+            </Badge>
+            {row.nodeId ? <span className="gw-event-row-chip">{row.nodeId}</span> : null}
+            {row.iteration > 0 || row.attempt > 1 ? (
+              <span className="gw-event-row-meta">
+                {row.iteration > 0 ? `iter ${row.iteration}` : ""}
+                {row.iteration > 0 && row.attempt > 1 ? " · " : ""}
+                {row.attempt > 1 ? `try ${row.attempt}` : ""}
+              </span>
+            ) : null}
+            <span className="gw-event-row-summary">{row.summary}</span>
+          </div>
+        )}
         <button
           type="button"
           className="gw-event-row-toggle"
@@ -404,23 +388,14 @@ export function RunEventLog({
   }
 
   return (
-    <div
-      className={["gw-event-log", className].filter(Boolean).join(" ")}
-      data-slot="run-event-log"
-      style={style}
-    >
+    <div className={["gw-event-log", className].filter(Boolean).join(" ")} data-slot="run-event-log" style={style}>
       <div className="gw-event-log-toolbar">
         <span className="gw-event-log-count">
           {runId ? `${events.length} event${events.length === 1 ? "" : "s"}` : "no run"}
         </span>
         <span className="gw-event-log-toolbar-spacer" />
         {heartbeatFrames > 0 ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowAll((prev) => !prev)}
-            aria-pressed={showAll}
-          >
+          <Button variant="ghost" size="sm" onClick={() => setShowAll((prev) => !prev)} aria-pressed={showAll}>
             {showAll ? "Coalesce heartbeats" : `Show all heartbeats (${heartbeatFrames})`}
           </Button>
         ) : null}

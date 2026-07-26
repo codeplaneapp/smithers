@@ -31,10 +31,7 @@ function deferred() {
 const tick = () => new Promise((res) => setTimeout(res, 0));
 
 function raceWithTimeout(promise, ms, message) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
-  ]);
+  return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms))]);
 }
 
 const RUN = "race-run";
@@ -97,9 +94,7 @@ describe("event seq allocation under concurrency (bun:sqlite)", () => {
       payloadJson: JSON.stringify({ x: 1 }),
     };
 
-    const seqs = await Promise.all(
-      Array.from({ length: 20 }, () => adapter.insertEventWithNextSeq(row)),
-    );
+    const seqs = await Promise.all(Array.from({ length: 20 }, () => adapter.insertEventWithNextSeq(row)));
 
     expect(seqs).toEqual(Array.from({ length: 20 }, () => 0));
     const history = await adapter.listEventHistory(RUN, { limit: 50 });
@@ -157,9 +152,7 @@ describe("signal seq allocation under concurrency (bun:sqlite)", () => {
       receivedBy: undefined,
     };
 
-    const seqs = await Promise.all(
-      Array.from({ length: 20 }, () => adapter.insertSignalWithNextSeq(row)),
-    );
+    const seqs = await Promise.all(Array.from({ length: 20 }, () => adapter.insertSignalWithNextSeq(row)));
 
     expect(seqs).toEqual(Array.from({ length: 20 }, () => 0));
     const signals = await adapter.listSignals(RUN, { limit: 50 });
@@ -182,15 +175,11 @@ describe("transaction turn interruption (bun:sqlite)", () => {
 
     // Turn #1: holds the turn until the latch resolves.
     const latch = deferred();
-    const holder = Effect.runFork(
-      adapter.write("hold-turn", () => latch.promise),
-    );
+    const holder = Effect.runFork(adapter.write("hold-turn", () => latch.promise));
     await tick();
 
     // Turn #2: queues behind #1, then is interrupted while still queued.
-    const queued = Effect.runFork(
-      adapter.write("queued", () => Promise.resolve("queued")),
-    );
+    const queued = Effect.runFork(adapter.write("queued", () => Promise.resolve("queued")));
     await tick();
     const interrupted = Effect.runPromise(Fiber.interrupt(queued));
     await tick();
@@ -215,9 +204,7 @@ describe("transaction turn interruption (bun:sqlite)", () => {
 
     // A write whose operation is in flight owns the turn; interrupt it there.
     const latch = deferred();
-    const running = Effect.runFork(
-      adapter.write("running", () => latch.promise),
-    );
+    const running = Effect.runFork(adapter.write("running", () => latch.promise));
     await tick();
     await Effect.runPromise(Fiber.interrupt(running));
 

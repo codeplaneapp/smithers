@@ -17,7 +17,9 @@ import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core"
  *  - `claimExpiresAtMs` lease deadline for crash recovery.
  *  - `completedAtMs` when fan-out completed (Unix epoch ms).
  */
-export const smithersIntegrationDeliveries = sqliteTable("_smithers_integration_deliveries", {
+export const smithersIntegrationDeliveries = sqliteTable(
+  "_smithers_integration_deliveries",
+  {
     sourceId: text("source_id").notNull(),
     dedupeKey: text("dedupe_key").notNull(),
     eventName: text("event_name").notNull(),
@@ -26,6 +28,8 @@ export const smithersIntegrationDeliveries = sqliteTable("_smithers_integration_
     claimToken: text("claim_token"),
     claimExpiresAtMs: integer("claim_expires_at_ms"),
     completedAtMs: integer("completed_at_ms"),
-}, (t) => ({
+  },
+  (t) => ({
     pk: primaryKey({ columns: [t.sourceId, t.dedupeKey] }),
-}));
+  }),
+);

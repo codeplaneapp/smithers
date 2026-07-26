@@ -36,13 +36,19 @@ export type SmithersEventSource = {
 /** The slice of SmithersCtx the sources read. Kept structural so the package
  * never depends on the driver at runtime. */
 export type SmithersCtxLike = {
-  outputRows(output: unknown, options?: { nodeId?: string; scope?: string }): Array<{
+  outputRows(
+    output: unknown,
+    options?: { nodeId?: string; scope?: string },
+  ): Array<{
     payload: unknown;
     nodeId: string;
     iteration: number;
     seq: number;
   }>;
-  signalRows(signalName: string, options?: { correlationId?: string }): Array<{
+  signalRows(
+    signalName: string,
+    options?: { correlationId?: string },
+  ): Array<{
     payload: unknown;
     signalName: string;
     seq: number;

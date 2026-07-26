@@ -13,10 +13,10 @@ import { Effect } from "effect";
  * @returns {CursorStore}
  */
 export function makeDbCursorStore(adapter) {
-    return {
-        get: (sourceId) => adapter.getIntegrationCursor(sourceId),
-        set: (sourceId, cursor) => Effect.asVoid(adapter.setIntegrationCursor(sourceId, cursor)),
-    };
+  return {
+    get: (sourceId) => adapter.getIntegrationCursor(sourceId),
+    set: (sourceId, cursor) => Effect.asVoid(adapter.setIntegrationCursor(sourceId, cursor)),
+  };
 }
 
 /**
@@ -24,12 +24,13 @@ export function makeDbCursorStore(adapter) {
  * @returns {CursorStore}
  */
 export function makeInMemoryCursorStore() {
-    /** @type {Map<string, string | null>} */
-    const cursors = new Map();
-    return {
-        get: (sourceId) => Effect.sync(() => cursors.get(sourceId)),
-        set: (sourceId, cursor) => Effect.sync(() => {
-            cursors.set(sourceId, cursor);
-        }),
-    };
+  /** @type {Map<string, string | null>} */
+  const cursors = new Map();
+  return {
+    get: (sourceId) => Effect.sync(() => cursors.get(sourceId)),
+    set: (sourceId, cursor) =>
+      Effect.sync(() => {
+        cursors.set(sourceId, cursor);
+      }),
+  };
 }

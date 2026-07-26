@@ -9,29 +9,32 @@ import { MemoryService } from "./MemoryService.js";
  * @returns {Layer.Layer<MemoryService, never, never>}
  */
 export function createMemoryLayer(config) {
-    return Layer.effect(MemoryService, Effect.map(MemoryStoreService, (store) => ({
-        // Working memory
-        getFact: (ns, key) => store.getFactEffect(ns, key),
-        setFact: (ns, key, value, ttlMs, provenance) => store.setFactEffect(ns, key, value, ttlMs, provenance),
-        deleteFact: (ns, key) => store.deleteFactEffect(ns, key),
-        listFacts: (ns) => store.listFactsEffect(ns),
-        // Threads & messages
-        createThread: (ns, title) => store.createThreadEffect(ns, title),
-        getThread: (threadId) => store.getThreadEffect(threadId),
-        deleteThread: (threadId) => store.deleteThreadEffect(threadId),
-        saveMessage: (msg) => store.saveMessageEffect(msg),
-        listMessages: (threadId, limit) => store.listMessagesEffect(threadId, limit),
-        countMessages: (threadId) => store.countMessagesEffect(threadId),
-        // Notes (append-only knowledge)
-        saveNote: (input) => store.saveNoteEffect(input),
-        getNote: (id) => store.getNoteEffect(id),
-        listNotes: (ns, filter) => store.listNotesEffect(ns, filter),
-        setNoteStatus: (id, status) => store.setNoteStatusEffect(id, status),
-        enableNoteSearch: (kind) => store.enableNoteSearchEffect(kind),
-        searchNotes: (kind, query, limit, filter) => store.searchNotesEffect(kind, query, limit, filter),
-        // Maintenance
-        deleteExpiredFacts: () => store.deleteExpiredFactsEffect(),
-        // Access underlying store
-        store,
-    }))).pipe(Layer.provide(createMemoryStoreLayer(config.db)));
+  return Layer.effect(
+    MemoryService,
+    Effect.map(MemoryStoreService, (store) => ({
+      // Working memory
+      getFact: (ns, key) => store.getFactEffect(ns, key),
+      setFact: (ns, key, value, ttlMs, provenance) => store.setFactEffect(ns, key, value, ttlMs, provenance),
+      deleteFact: (ns, key) => store.deleteFactEffect(ns, key),
+      listFacts: (ns) => store.listFactsEffect(ns),
+      // Threads & messages
+      createThread: (ns, title) => store.createThreadEffect(ns, title),
+      getThread: (threadId) => store.getThreadEffect(threadId),
+      deleteThread: (threadId) => store.deleteThreadEffect(threadId),
+      saveMessage: (msg) => store.saveMessageEffect(msg),
+      listMessages: (threadId, limit) => store.listMessagesEffect(threadId, limit),
+      countMessages: (threadId) => store.countMessagesEffect(threadId),
+      // Notes (append-only knowledge)
+      saveNote: (input) => store.saveNoteEffect(input),
+      getNote: (id) => store.getNoteEffect(id),
+      listNotes: (ns, filter) => store.listNotesEffect(ns, filter),
+      setNoteStatus: (id, status) => store.setNoteStatusEffect(id, status),
+      enableNoteSearch: (kind) => store.enableNoteSearchEffect(kind),
+      searchNotes: (kind, query, limit, filter) => store.searchNotesEffect(kind, query, limit, filter),
+      // Maintenance
+      deleteExpiredFacts: () => store.deleteExpiredFactsEffect(),
+      // Access underlying store
+      store,
+    })),
+  ).pipe(Layer.provide(createMemoryStoreLayer(config.db)));
 }

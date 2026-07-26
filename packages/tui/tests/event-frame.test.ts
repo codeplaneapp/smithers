@@ -1,11 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
 import { normalizeFrame, unwrapEvent, nodeLogEvents } from "../src/modes/eventFrame.ts";
-import {
-  extractEventText,
-  extractAttemptKeys,
-  filterEventsByAttempt,
-} from "../src/modes/logUtils.ts";
+import { extractEventText, extractAttemptKeys, filterEventsByAttempt } from "../src/modes/logUtils.ts";
 import { classifyFrame, extractNodeSnapshots } from "../src/modes/timelineUtils.ts";
 import { activeNodeIdsFromEvents, hijackCandidates } from "../src/modes/hijackUtils.ts";
 
@@ -183,10 +179,7 @@ describe("hijack readers on wrapped frames", () => {
 
     expect(activeNodeIdsFromEvents(events).has("loop")).toBe(true);
     expect(
-      activeNodeIdsFromEvents([
-        ...events,
-        wrapped(4, "node.end", { nodeId: "loop", iteration: 1 }),
-      ]).has("loop"),
+      activeNodeIdsFromEvents([...events, wrapped(4, "node.end", { nodeId: "loop", iteration: 1 })]).has("loop"),
     ).toBe(false);
   });
 

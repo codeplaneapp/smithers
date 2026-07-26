@@ -30,7 +30,9 @@ function fakeConnection({ bufferedAmount = 0 } = {}) {
     OPEN: 1,
     readyState: 1,
     bufferedAmount,
-    send(data) { sent.push(JSON.parse(data)); },
+    send(data) {
+      sent.push(JSON.parse(data));
+    },
   };
   return {
     connection: {
@@ -54,7 +56,11 @@ function reqFrame(method, params = {}) {
 
 const cleanups = [];
 afterEach(async () => {
-  for (const c of cleanups.splice(0).reverse()) { try { await c(); } catch {} }
+  for (const c of cleanups.splice(0).reverse()) {
+    try {
+      await c();
+    } catch {}
+  }
 });
 
 describe("stream outbound-queue re-drain timers", () => {
@@ -67,7 +73,9 @@ describe("stream outbound-queue re-drain timers", () => {
           subscribe: (_params, ctx) => {
             // Emit a handful of events (well under the overflow limit) shortly
             // after subscription so the drain runs while the buffer is congested.
-            setTimeout(() => { for (let i = 0; i < 3; i += 1) ctx.send({ i }); }, 0);
+            setTimeout(() => {
+              for (let i = 0; i < 3; i += 1) ctx.send({ i });
+            }, 0);
             return () => {};
           },
         },
@@ -87,11 +95,22 @@ describe("stream outbound-queue re-drain timers", () => {
 
   test("devtools stream re-drains after the socket buffer clears", async () => {
     const dbPath = join(tmpdir(), `smithers-bp-devtools-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
-    cleanups.push(() => { for (const s of ["", "-shm", "-wal"]) { try { rmSync(`${dbPath}${s}`, { force: true }); } catch {} } });
-    const { smithers, Workflow, Task, outputs } = createSmithers({ result: z.object({ value: z.number() }) }, { dbPath });
+    cleanups.push(() => {
+      for (const s of ["", "-shm", "-wal"]) {
+        try {
+          rmSync(`${dbPath}${s}`, { force: true });
+        } catch {}
+      }
+    });
+    const { smithers, Workflow, Task, outputs } = createSmithers(
+      { result: z.object({ value: z.number() }) },
+      { dbPath },
+    );
     const workflow = smithers(() => (
       <Workflow name="bp-dt">
-        <Task id="task1" output={outputs.result}>{{ value: 1 }}</Task>
+        <Task id="task1" output={outputs.result}>
+          {{ value: 1 }}
+        </Task>
       </Workflow>
     ));
     const gateway = new Gateway({});
@@ -102,8 +121,15 @@ describe("stream outbound-queue re-drain timers", () => {
 
     // Launch and finish a run over a real WS client so a DevTools snapshot exists.
     const client = new WebSocket(`ws://127.0.0.1:${port}`);
-    await new Promise((resolve, reject) => { client.once("open", resolve); client.once("error", reject); });
-    cleanups.push(() => { try { client.close(); } catch {} });
+    await new Promise((resolve, reject) => {
+      client.once("open", resolve);
+      client.once("error", reject);
+    });
+    cleanups.push(() => {
+      try {
+        client.close();
+      } catch {}
+    });
     const messages = [];
     client.on("message", (raw) => messages.push(JSON.parse(String(raw))));
     const waitMsg = async (predicate) => {

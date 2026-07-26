@@ -13,21 +13,17 @@ describe("escapeSmithersDir", () => {
     // The classic genesis: a workflow file at <repo>/.smithers/workflows/x.tsx
     // whose dirname must NOT become the run root (that spawns a nested
     // .smithers/workflows/.smithers workspace).
-    expect(escapeSmithersDir(abs("repo", ".smithers", "workflows"))).toBe(
-      abs("repo"),
-    );
+    expect(escapeSmithersDir(abs("repo", ".smithers", "workflows"))).toBe(abs("repo"));
   });
 
   test("escapes from a deeper path inside .smithers", () => {
-    expect(
-      escapeSmithersDir(abs("Users", "me", "proj", ".smithers", "workflows", "sub")),
-    ).toBe(abs("Users", "me", "proj"));
+    expect(escapeSmithersDir(abs("Users", "me", "proj", ".smithers", "workflows", "sub"))).toBe(
+      abs("Users", "me", "proj"),
+    );
   });
 
   test("leaves a path with no .smithers segment unchanged", () => {
-    expect(escapeSmithersDir(abs("repo", "packages", "app"))).toBe(
-      abs("repo", "packages", "app"),
-    );
+    expect(escapeSmithersDir(abs("repo", "packages", "app"))).toBe(abs("repo", "packages", "app"));
   });
 
   test("a relative .smithers path resolves against cwd, then escapes to cwd", () => {
@@ -47,8 +43,6 @@ describe("escapeSmithersDir", () => {
   });
 
   test("only escapes past the FIRST .smithers segment", () => {
-    expect(
-      escapeSmithersDir(abs("repo", ".smithers", "workflows", ".smithers", "wt", "x")),
-    ).toBe(abs("repo"));
+    expect(escapeSmithersDir(abs("repo", ".smithers", "workflows", ".smithers", "wt", "x"))).toBe(abs("repo"));
   });
 });

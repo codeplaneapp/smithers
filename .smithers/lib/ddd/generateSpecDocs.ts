@@ -71,7 +71,10 @@ function escapeLinkDestination(value: string): string {
 function formatCommandList(value: string): string | null {
   const trailingPeriod = value.trim().endsWith(".");
   const text = value.trim().replace(/\.$/, "");
-  const items = text.split(",").map((item) => item.trim()).filter(Boolean);
+  const items = text
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
   if (items.length < 2) return null;
   const canFormat = items.every((item) => cliCommandPhrases.has(item) || /^[A-Za-z][A-Za-z0-9:-]*$/.test(item));
   if (!canFormat) return null;
@@ -139,7 +142,13 @@ function formatInline(value: string): string {
   const ranges = codeRanges(value);
   const replacements: InlineReplacement[] = [
     ...special,
-    ...ranges.map((range): InlineReplacement => ({ start: range.start, end: range.end, text: codeSpan(value.slice(range.start, range.end)) })),
+    ...ranges.map(
+      (range): InlineReplacement => ({
+        start: range.start,
+        end: range.end,
+        text: codeSpan(value.slice(range.start, range.end)),
+      }),
+    ),
   ].sort((left, right) => left.start - right.start || right.end - left.end);
   const nonOverlapping: InlineReplacement[] = [];
   for (const replacement of replacements) {
@@ -160,7 +169,10 @@ function formatInline(value: string): string {
 }
 
 function compactBlocks(blocks: string[]): string {
-  return blocks.map((block) => block.trim()).filter(Boolean).join("\n\n");
+  return blocks
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function section(title: string, items: string[] | undefined): string {
@@ -197,7 +209,9 @@ function endpointsSection(feature: Feature): string {
 function linksSection(feature: Feature): string {
   const links = feature.links ?? [];
   if (links.length === 0) return "";
-  const rows = links.map((link) => `- [${escapeLinkLabel(link.label)}](${escapeLinkDestination(link.href)})`).join("\n");
+  const rows = links
+    .map((link) => `- [${escapeLinkLabel(link.label)}](${escapeLinkDestination(link.href)})`)
+    .join("\n");
   return `## Related docs\n\n${rows}`;
 }
 

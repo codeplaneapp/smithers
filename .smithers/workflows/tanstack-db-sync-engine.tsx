@@ -191,20 +191,41 @@ const { Workflow, Task, Sequence, Parallel, Approval, Worktree, smithers, output
 const fableFallback = new ClaudeCodeAgent({ model: "claude-fable-5" });
 const sonnetFallback = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
 const planAgent = codexFirst(
-  { model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-sol",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [fableFallback],
 );
 const implAgent = codexFirst(
-  { model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-luna",
+    config: { model_reasoning_effort: "medium" },
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [sonnetFallback],
 );
 const mechAgent = codexFirst(
-  { model: "gpt-5.6-terra", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-terra",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [sonnetFallback],
 );
 const reviewAgent = planAgent;
 const secondaryReviewAgent = codexFirst(
-  { model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-sol",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [new ClaudeCodeAgent({ model: "claude-fable-5" })],
 );
 const finalAgent = planAgent;
@@ -226,7 +247,8 @@ function latest<T>(rows: T[] | undefined): T | undefined {
 }
 
 function commitWorktree(path: string, branch: string, subject: string) {
-  const git = (args: string[]) => execFileSync("git", args, { cwd: path, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const git = (args: string[]) =>
+    execFileSync("git", args, { cwd: path, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   const base = { branch, committed: false, sha: null as string | null, summary: "" };
   try {
     const dirty = git(["status", "--porcelain"]).trim();
@@ -239,17 +261,22 @@ function commitWorktree(path: string, branch: string, subject: string) {
     const sha = git(["rev-parse", "HEAD"]).trim();
     return { ...base, committed: true, sha, summary: `Committed ${branch} @ ${sha.slice(0, 10)}.` };
   } catch (err) {
-    return { ...base, summary: `Commit failed on ${branch}: ${String(err instanceof Error ? err.message : err).slice(0, 600)}` };
+    return {
+      ...base,
+      summary: `Commit failed on ${branch}: ${String(err instanceof Error ? err.message : err).slice(0, 600)}`,
+    };
   }
 }
 
 function openLandingPr(path: string, branch: string) {
-  const git = (args: string[]) => execFileSync("git", args, { cwd: path, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const git = (args: string[]) =>
+    execFileSync("git", args, { cwd: path, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   const gh = (args: string[]) => execFileSync("gh", args, { cwd: path, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   const base = { pushed: false, prNumber: null as number | null, prUrl: null as string | null, summary: "" };
   try {
     git(["push", "-u", "origin", branch, "--force-with-lease"]);
-    const title = "✨ feat(sync)!: TanStack DB collections with per-mode providers (REST+SSE local, Electric multiplayer)";
+    const title =
+      "✨ feat(sync)!: TanStack DB collections with per-mode providers (REST+SSE local, Electric multiplayer)";
     const body = [
       "Implements `.smithers/specs/tanstack-db-sync-engine.md` (design decided in",
       "`tanstack-collection-provider-split.md`): custom Smithers UIs read/write ONLY TanStack DB",
@@ -274,7 +301,19 @@ function openLandingPr(path: string, branch: string) {
     let prUrl: string;
     let prNumber: number;
     try {
-      prUrl = gh(["pr", "create", "--draft", "--head", branch, "--base", "main", "--title", title, "--body", body]).trim();
+      prUrl = gh([
+        "pr",
+        "create",
+        "--draft",
+        "--head",
+        branch,
+        "--base",
+        "main",
+        "--title",
+        title,
+        "--body",
+        body,
+      ]).trim();
       prNumber = Number(prUrl.split("/").pop());
     } catch {
       const view = gh(["pr", "view", branch, "--json", "number,url"]);
@@ -395,8 +434,7 @@ const SPEC_M1: MilestoneSpec = {
   title: "REST domain API + SSE invalidation + txid (server)",
   branch: "tsync/m1-rest-sse",
   wtName: "tsync-m1-rest-sse",
-  goal:
-    "Add the /v1/api/* REST domain surface and the GET /v1/api/stream SSE invalidation channel to the existing gateway HTTP server, delegating to the same internals as /v1/rpc, gated by the same scopes; postgres mutating routes return txid.",
+  goal: "Add the /v1/api/* REST domain surface and the GET /v1/api/stream SSE invalidation channel to the existing gateway HTTP server, delegating to the same internals as /v1/rpc, gated by the same scopes; postgres mutating routes return txid.",
   build: [
     "Routes (thin layer over the existing RPC internals — no logic forks): GET/POST /v1/api/runs; GET /v1/api/runs/:id; POST /v1/api/runs/:id/cancel|resume|rewind; GET /v1/api/runs/:id/tree (getDevToolsSnapshot); GET /v1/api/events?runId=&afterSeq=&limit=; GET /v1/api/approvals; POST /v1/api/approvals/:id (submitApproval); POST /v1/api/signals (submitSignal); GET /v1/api/{workflows,docs,prompts,scores,tickets,memory-facts,crons,accounts}; GET /v1/api/nodes/:runId/:nodeId/{output,diff}; GET /v1/api/schema-signature. Each route enforces exactly the scope its RPC twin enforces, in all three auth modes.",
     "GET /v1/api/stream (SSE): 'change' events {seq, collections: string[]}, fed by the gateway's existing event tail plus direct pulses from the /v1/api write handlers; coalesce frames within a tick; heartbeat comment every ~15s; per-connection outbound bound honored (drop-and-resync semantics documented, not unbounded buffering).",
@@ -421,8 +459,7 @@ const SPEC_M2: MilestoneSpec = {
   title: "createSmithersCollections + local QueryCollection provider (BREAKING)",
   branch: "tsync/m2-collections",
   wtName: "tsync-m2-collections",
-  goal:
-    "Ship the WorkspaceMode-keyed collection factory with the local provider on official @tanstack/query-db-collection over /v1/api + SSE invalidation, retire the bespoke WS collection stack, and preserve the workflow-UI hook surface on top of collections.",
+  goal: "Ship the WorkspaceMode-keyed collection factory with the local provider on official @tanstack/query-db-collection over /v1/api + SSE invalidation, retire the bespoke WS collection stack, and preserve the workflow-UI hook surface on top of collections.",
   build: [
     "Add deps to gateway-client/gateway-react: @tanstack/query-db-collection, @tanstack/react-query (electric-db-collection lands in M3). Keep @tanstack/db / react-db versions consistent monorepo-wide (check-single-effect-version-style gates).",
     "gateway-client: WorkspaceMode union ({kind:'local', apiBaseUrl} | {kind:'multiplayer', apiBaseUrl, electricBaseUrl, workspaceId}); a typed SmithersDataClient (one interface, local impl now, both modes share it) over /v1/api; createSmithersCollections(mode, queryClient) returning one collection per catalog entry (runs, runTree, events, approvals, workflows, docs, prompts, scores, tickets, memoryFacts, crons) with existing Gateway*Row types as row schemas and queryCollectionOptions + onInsert/onUpdate/onDelete posting to the domain API. Wrap the local pattern as a collection-options creator (smithersLocalCollectionOptions) so app code is symmetric with Electric in M3.",
@@ -444,7 +481,8 @@ const SPEC_M2: MilestoneSpec = {
     "@smithers-orchestrator/components",
     "smithers-orchestrator",
   ],
-  commitSubject: "✨ feat(sync)!: createSmithersCollections + local QueryCollection provider; retire bespoke WS collection stack",
+  commitSubject:
+    "✨ feat(sync)!: createSmithersCollections + local QueryCollection provider; retire bespoke WS collection stack",
 };
 
 const SPEC_M3: MilestoneSpec = {
@@ -453,8 +491,7 @@ const SPEC_M3: MilestoneSpec = {
   title: "Electric provider + txid matching (multiplayer)",
   branch: "tsync/m3-electric",
   wtName: "tsync-m3-electric",
-  goal:
-    "Wire the multiplayer branch of the factory to official @tanstack/electric-db-collection through the existing electric-proxy, with txid transaction matching against the M1 write path, proven by an env-gated real-Electric e2e.",
+  goal: "Wire the multiplayer branch of the factory to official @tanstack/electric-db-collection through the existing electric-proxy, with txid transaction matching against the M1 write path, proven by an env-gated real-Electric e2e.",
   build: [
     "Add @tanstack/electric-db-collection (lazily imported on the multiplayer path only — the local path must not load it). Multiplayer branch of createSmithersCollections: electricCollectionOptions with shapeOptions.url = `${electricBaseUrl}/v1/shape` + params from smithersElectricShapeCatalog; the client passes auth only — run/workspace scoping stays in the proxy. Extend the proxy shape catalog ONLY where a catalog entry for a needed collection is missing.",
     "Mutation handlers = the SAME SmithersDataClient as local, returning {txid} so the collection holds optimistic state until that txid appears in the shape stream (standard txid matching, no reapply flicker).",
@@ -468,7 +505,11 @@ const SPEC_M3: MilestoneSpec = {
     "The local (kind:'local') path never imports @tanstack/electric-db-collection or @electric-sql/client (bundle/import test).",
     "Electric suite skips loudly (named skip, exit 0) when SMITHERS_TEST_ELECTRIC is unset.",
   ],
-  packages: ["@smithers-orchestrator/gateway-client", "@smithers-orchestrator/gateway-react", "@smithers-orchestrator/electric-proxy"],
+  packages: [
+    "@smithers-orchestrator/gateway-client",
+    "@smithers-orchestrator/gateway-react",
+    "@smithers-orchestrator/electric-proxy",
+  ],
   commitSubject: "✨ feat(sync): Electric collection provider through electric-proxy with txid matching",
 };
 
@@ -497,7 +538,10 @@ function designBlock(design: Design | undefined): string {
 
 function reviewFeedbackBlock(primaryR?: Review, secondaryR?: Review): string {
   const parts: string[] = [];
-  for (const [who, r] of [["CODEX SOL A", primaryR], ["CODEX SOL B", secondaryR]] as const) {
+  for (const [who, r] of [
+    ["CODEX SOL A", primaryR],
+    ["CODEX SOL B", secondaryR],
+  ] as const) {
     if (r && !r.approved) {
       parts.push(`${who} REVIEW — CHANGES REQUIRED:\n${r.feedback}`);
       for (const i of r.issues ?? []) {
@@ -600,7 +644,9 @@ function verifyPrompt(spec: MilestoneSpec, feedback: string): string {
     "",
     ARCH,
     "",
-    feedback ? `Apply ALL of this review feedback first:\n${feedback}\n` : "No blocking review feedback; verify and harden.",
+    feedback
+      ? `Apply ALL of this review feedback first:\n${feedback}\n`
+      : "No blocking review feedback; verify and harden.",
     "",
     `Make the stack GREEN: pnpm install if needed, then for each of [${spec.packages.join(", ")}] run`,
     "pnpm --filter <pkg> typecheck and pnpm --filter <pkg> test. Run the backend-parameterized suites on",
@@ -650,7 +696,9 @@ function integratePrompt(runElectricE2e: boolean): string {
     "     gateway-client,gateway-react,server,db,electric-proxy,components,cli} and smithers-orchestrator.",
     "   - pnpm -C e2e test.",
     "   - the backend-parameterized suites on sqlite + pglite (and real Postgres if SMITHERS_TEST_PG_URL set" +
-      (runElectricE2e ? "; the real-Electric compose e2e with SMITHERS_TEST_ELECTRIC=1 if docker is available)." : ")."),
+      (runElectricE2e
+        ? "; the real-Electric compose e2e with SMITHERS_TEST_ELECTRIC=1 if docker is available)."
+        : ")."),
     "2. Docs gates: pnpm docs:llms then the check-docs/check-llms gates; pnpm generate:init-pack; confirm",
     "   openapi.yaml is regenerated/consistent. Set docsGatesGreen accordingly.",
     "3. ASSERT the cross-milestone roll-up: /v1/api parity on both backends; SSE invalidation + coalescing +",
@@ -719,21 +767,56 @@ function milestone(m: {
   return (
     <Worktree path={wt(s.wtName)} branch={s.branch} baseBranch={m.baseBranch}>
       <Sequence>
-        <Task id={`${s.key}-impl`} output={m.outImpl} agent={implAgent} retries={RETRIES} timeoutMs={IMPL_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+        <Task
+          id={`${s.key}-impl`}
+          output={m.outImpl}
+          agent={implAgent}
+          retries={RETRIES}
+          timeoutMs={IMPL_TIMEOUT_MS}
+          heartbeatTimeoutMs={HEARTBEAT_MS}
+        >
           {implPrompt(s, m.design, m.feedback)}
         </Task>
         <Parallel maxConcurrency={2}>
-          <Task id={`${s.key}-review-codex`} output={m.outReviewCodex} agent={reviewAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+          <Task
+            id={`${s.key}-review-codex`}
+            output={m.outReviewCodex}
+            agent={reviewAgent}
+            retries={RETRIES}
+            timeoutMs={REVIEW_TIMEOUT_MS}
+            heartbeatTimeoutMs={HEARTBEAT_MS}
+          >
             {reviewPrompt(s, "a")}
           </Task>
-          <Task id={`${s.key}-review-sonnet`} output={m.outReviewSonnet} agent={secondaryReviewAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+          <Task
+            id={`${s.key}-review-sonnet`}
+            output={m.outReviewSonnet}
+            agent={secondaryReviewAgent}
+            retries={RETRIES}
+            timeoutMs={REVIEW_TIMEOUT_MS}
+            heartbeatTimeoutMs={HEARTBEAT_MS}
+          >
             {reviewPrompt(s, "b")}
           </Task>
         </Parallel>
-        <Task id={`${s.key}-verify`} output={m.outVerify} agent={mechAgent} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+        <Task
+          id={`${s.key}-verify`}
+          output={m.outVerify}
+          agent={mechAgent}
+          retries={RETRIES}
+          timeoutMs={VERIFY_TIMEOUT_MS}
+          heartbeatTimeoutMs={HEARTBEAT_MS}
+        >
           {verifyPrompt(s, m.feedback)}
         </Task>
-        <Task id={`${s.key}-matrix`} output={m.outMatrix} agent={mechAgent} retries={RETRIES} timeoutMs={MATRIX_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+        <Task
+          id={`${s.key}-matrix`}
+          output={m.outMatrix}
+          agent={mechAgent}
+          retries={RETRIES}
+          timeoutMs={MATRIX_TIMEOUT_MS}
+          heartbeatTimeoutMs={HEARTBEAT_MS}
+        >
           {matrixPrompt(s)}
         </Task>
         <Task id={`${s.key}-commit`} output={m.outCommit} timeoutMs={COMMIT_TIMEOUT_MS}>
@@ -763,7 +846,14 @@ export default smithers((ctx) => {
       <UI entry="../ui/tanstack-db-sync-engine.tsx" title={"TanStack DB sync engine (per-mode collection providers)"} />
       <Sequence>
         {/* Design freeze — Fable, read-only at the repo root. */}
-        <Task id="design" output={outputs.design} agent={planAgent} retries={RETRIES} timeoutMs={DESIGN_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+        <Task
+          id="design"
+          output={outputs.design}
+          agent={planAgent}
+          retries={RETRIES}
+          timeoutMs={DESIGN_TIMEOUT_MS}
+          heartbeatTimeoutMs={HEARTBEAT_MS}
+        >
           {designPrompt()}
         </Task>
 
@@ -809,17 +899,51 @@ export default smithers((ctx) => {
         {/* Integrate: green-build the stack, then Fable final review, Codex fix, Sonnet matrix. */}
         <Worktree path={wt(INTEGRATE_WT)} branch={INTEGRATE_BRANCH} baseBranch={SPEC_M3.branch}>
           <Sequence>
-            <Task id="integrate" output={outputs.integrate} agent={implAgent} retries={RETRIES} timeoutMs={INTEGRATE_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+            <Task
+              id="integrate"
+              output={outputs.integrate}
+              agent={implAgent}
+              retries={RETRIES}
+              timeoutMs={INTEGRATE_TIMEOUT_MS}
+              heartbeatTimeoutMs={HEARTBEAT_MS}
+            >
               {integratePrompt(runElectricE2e)}
             </Task>
-            <Task id="final-review" output={outputs.finalReview} agent={finalAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+            <Task
+              id="final-review"
+              output={outputs.finalReview}
+              agent={finalAgent}
+              retries={RETRIES}
+              timeoutMs={REVIEW_TIMEOUT_MS}
+              heartbeatTimeoutMs={HEARTBEAT_MS}
+            >
               {finalReviewPrompt()}
             </Task>
-            <Task id="final-fix" output={outputs.finalFix} agent={implAgent} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+            <Task
+              id="final-fix"
+              output={outputs.finalFix}
+              agent={implAgent}
+              retries={RETRIES}
+              timeoutMs={VERIFY_TIMEOUT_MS}
+              heartbeatTimeoutMs={HEARTBEAT_MS}
+            >
               {finalFixPrompt(finalReview && !finalReview.approved ? reviewFeedbackBlock(finalReview, undefined) : "")}
             </Task>
-            <Task id="integrate-matrix" output={outputs.integrateMatrix} agent={mechAgent} retries={RETRIES} timeoutMs={MATRIX_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
-              {matrixPrompt({ ...SPEC_M3, key: "integrate", n: 4, title: "Integrated stack", packages: MILESTONES.flatMap((m) => m.packages) })}
+            <Task
+              id="integrate-matrix"
+              output={outputs.integrateMatrix}
+              agent={mechAgent}
+              retries={RETRIES}
+              timeoutMs={MATRIX_TIMEOUT_MS}
+              heartbeatTimeoutMs={HEARTBEAT_MS}
+            >
+              {matrixPrompt({
+                ...SPEC_M3,
+                key: "integrate",
+                n: 4,
+                title: "Integrated stack",
+                packages: MILESTONES.flatMap((m) => m.packages),
+              })}
             </Task>
             <Task id="integrate-commit" output={outputs.integrateCommit} timeoutMs={COMMIT_TIMEOUT_MS}>
               {() =>
@@ -844,7 +968,9 @@ export default smithers((ctx) => {
                   `Integrate: green=${integrate.green}, typecheck=${integrate.typecheck}, unit=${integrate.unitTests}, e2e=${integrate.e2e}, docsGates=${integrate.docsGatesGreen}.`,
                   `Final review approved=${finalReview?.approved ?? "n/a"}; final fix status=${finalFix?.status ?? "n/a"}.`,
                   `Matrix: sqlite=${matrix?.sqlite ?? "?"}, pglite=${matrix?.pglite ?? "?"}, postgres=${matrix?.postgres ?? "?"}, electric=${matrix?.electric ?? "?"}.`,
-                  integrate.remaining.length ? `Remaining: ${integrate.remaining.join("; ")}` : "No remaining issues reported.",
+                  integrate.remaining.length
+                    ? `Remaining: ${integrate.remaining.join("; ")}`
+                    : "No remaining issues reported.",
                   "",
                   "Approving pushes tsync/integrate and opens a DRAFT PR to main (nothing auto-merges).",
                 ].join("\n")

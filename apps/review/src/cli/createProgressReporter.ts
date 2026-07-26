@@ -54,7 +54,9 @@ export function createProgressReporter(options: {
     chain = chain.then(job).catch(() => {});
   };
 
-  const fileDetail = async (nodeId: string): Promise<{ path: string; findings: number | null; total: number | null }> => {
+  const fileDetail = async (
+    nodeId: string,
+  ): Promise<{ path: string; findings: number | null; total: number | null }> => {
     const rows = await options.loadRows();
     let path = nodeId;
     let total: number | null = null;
@@ -94,7 +96,8 @@ export function createProgressReporter(options: {
         enqueue(async () => {
           const detail = await fileDetail(nodeId);
           const counter = detail.total != null ? `[${index}/${detail.total}]` : `[${index}]`;
-          const findings = detail.findings != null ? `${detail.findings} finding${detail.findings === 1 ? "" : "s"}` : "done";
+          const findings =
+            detail.findings != null ? `${detail.findings} finding${detail.findings === 1 ? "" : "s"}` : "done";
           options.write(`${counter} ${detail.path} … ${findings}${elapsed}`);
         });
         return;

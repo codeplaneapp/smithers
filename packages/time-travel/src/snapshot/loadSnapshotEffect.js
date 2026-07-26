@@ -24,23 +24,37 @@ LEFT JOIN _smithers_snapshot_contents c
  * @returns {Effect.Effect<Snapshot | undefined, SmithersError>}
  */
 export function loadSnapshot(adapter, runId, frameNo) {
-    return Effect.tryPromise({
-        // Snapshot metadata and raw content share one statement snapshot, so a
-        // concurrent rewind cannot delete the content between two reads.
-        try: () => adapter.internalStorage.queryOne(`${SNAPSHOT_WITH_CONTENT_SQL}
+  return Effect.tryPromise({
+    // Snapshot metadata and raw content share one statement snapshot, so a
+    // concurrent rewind cannot delete the content between two reads.
+    try: () =>
+      adapter.internalStorage.queryOne(
+        `${SNAPSHOT_WITH_CONTENT_SQL}
 WHERE s.run_id = ? AND s.frame_no = ?
-LIMIT 1`, [runId, frameNo]),
-        catch: (cause) => toSmithersError(cause, "load snapshot", {
-            code: "DB_QUERY_FAILED",
-            details: { frameNo, runId },
-        }),
-    }).pipe(Effect.flatMap((row) => row ? Effect.tryPromise({
-        try: () => hydrateSnapshot(adapter, row),
-        catch: (cause) => toSmithersError(cause, "hydrate snapshot", {
-            code: "DB_QUERY_FAILED",
-            details: { frameNo, runId },
-        }),
-    }) : Effect.succeed(undefined)), Effect.annotateLogs({ runId, frameNo: String(frameNo) }), Effect.withLogSpan("time-travel:load-snapshot"));
+LIMIT 1`,
+        [runId, frameNo],
+      ),
+    catch: (cause) =>
+      toSmithersError(cause, "load snapshot", {
+        code: "DB_QUERY_FAILED",
+        details: { frameNo, runId },
+      }),
+  }).pipe(
+    Effect.flatMap((row) =>
+      row
+        ? Effect.tryPromise({
+            try: () => hydrateSnapshot(adapter, row),
+            catch: (cause) =>
+              toSmithersError(cause, "hydrate snapshot", {
+                code: "DB_QUERY_FAILED",
+                details: { frameNo, runId },
+              }),
+          })
+        : Effect.succeed(undefined),
+    ),
+    Effect.annotateLogs({ runId, frameNo: String(frameNo) }),
+    Effect.withLogSpan("time-travel:load-snapshot"),
+  );
 }
 /**
  * @param {SmithersDb} adapter
@@ -48,20 +62,34 @@ LIMIT 1`, [runId, frameNo]),
  * @returns {Effect.Effect<Snapshot | undefined, SmithersError>}
  */
 export function loadLatestSnapshot(adapter, runId) {
-    return Effect.tryPromise({
-        try: () => adapter.internalStorage.queryOne(`${SNAPSHOT_WITH_CONTENT_SQL}
+  return Effect.tryPromise({
+    try: () =>
+      adapter.internalStorage.queryOne(
+        `${SNAPSHOT_WITH_CONTENT_SQL}
 WHERE s.run_id = ?
 ORDER BY s.frame_no DESC
-LIMIT 1`, [runId]),
-        catch: (cause) => toSmithersError(cause, "load latest snapshot", {
-            code: "DB_QUERY_FAILED",
-            details: { runId },
-        }),
-    }).pipe(Effect.flatMap((row) => row ? Effect.tryPromise({
-        try: () => hydrateSnapshot(adapter, row),
-        catch: (cause) => toSmithersError(cause, "hydrate latest snapshot", {
-            code: "DB_QUERY_FAILED",
-            details: { runId },
-        }),
-    }) : Effect.succeed(undefined)), Effect.annotateLogs({ runId }), Effect.withLogSpan("time-travel:load-latest-snapshot"));
+LIMIT 1`,
+        [runId],
+      ),
+    catch: (cause) =>
+      toSmithersError(cause, "load latest snapshot", {
+        code: "DB_QUERY_FAILED",
+        details: { runId },
+      }),
+  }).pipe(
+    Effect.flatMap((row) =>
+      row
+        ? Effect.tryPromise({
+            try: () => hydrateSnapshot(adapter, row),
+            catch: (cause) =>
+              toSmithersError(cause, "hydrate latest snapshot", {
+                code: "DB_QUERY_FAILED",
+                details: { runId },
+              }),
+          })
+        : Effect.succeed(undefined),
+    ),
+    Effect.annotateLogs({ runId }),
+    Effect.withLogSpan("time-travel:load-latest-snapshot"),
+  );
 }

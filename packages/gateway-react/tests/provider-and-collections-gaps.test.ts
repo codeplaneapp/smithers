@@ -6,17 +6,17 @@
 // live Electric server is required.
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-try { GlobalRegistrator.register(); } catch { /* already registered */ }
+try {
+  GlobalRegistrator.register();
+} catch {
+  /* already registered */
+}
 
 import { describe, expect, test } from "bun:test";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createSmithersDataClient } from "@smithers-orchestrator/gateway-client";
-import {
-  SmithersCollectionsContext,
-  SmithersCollectionsProvider,
-  useSmithersCollections,
-} from "../src/index.ts";
+import { SmithersCollectionsContext, SmithersCollectionsProvider, useSmithersCollections } from "../src/index.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -111,7 +111,9 @@ describe("SmithersCollectionsProvider", () => {
     // Unmount BEFORE the promise settles: cleanup sets `cancelled = true`.
     await harness.unmount();
     // Flush the pending import resolution so the cancelled `.then` runs.
-    await act(async () => { await new Promise((r) => setTimeout(r, 200)); });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 200));
+    });
     client.close();
     expect(true).toBe(true);
   });
@@ -133,7 +135,9 @@ describe("SmithersCollectionsProvider", () => {
     // The promise-backed collections resolve on a later microtask; wait for the
     // provider to swap null → resolved and render the context.
     for (let i = 0; i < 200 && contextValue === null; i += 1) {
-      await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 10));
+      });
     }
     expect(contextValue).not.toBeNull();
     expect(contextValue.collections).toBeDefined();

@@ -149,6 +149,4 @@ function MarkdownImpl({ content }: { content: string }): ReactNode {
   return <>{blocks}</>;
 }
 
-export const Markdown = memo(MarkdownImpl) as (props: {
-  content: string;
-}) => ReactNode;
+export const Markdown = memo(MarkdownImpl) as (props: { content: string }) => ReactNode;

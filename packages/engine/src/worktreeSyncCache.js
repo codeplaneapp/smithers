@@ -22,36 +22,36 @@
  * @returns {WorktreeSyncCache}
  */
 export function createWorktreeSyncCache({ ttlMs, nowMs = () => Date.now() }) {
-    const enabled = Number.isFinite(ttlMs) && ttlMs > 0;
-    /** @type {Map<string, number>} repo root -> timestamp of last successful fetch */
-    const fetchedAtMs = new Map();
-    /** @type {Map<string, string>} worktree path -> base tip it was last rebased onto */
-    const rebasedTip = new Map();
-    return {
-        shouldFetch(repoKey) {
-            if (!enabled) {
-                return true;
-            }
-            const last = fetchedAtMs.get(repoKey);
-            return last === undefined || nowMs() - last >= ttlMs;
-        },
-        recordFetch(repoKey) {
-            if (!enabled) {
-                return;
-            }
-            fetchedAtMs.set(repoKey, nowMs());
-        },
-        shouldRebase(worktreePath, baseTipId) {
-            if (!enabled || !baseTipId) {
-                return true;
-            }
-            return rebasedTip.get(worktreePath) !== baseTipId;
-        },
-        recordRebase(worktreePath, baseTipId) {
-            if (!enabled || !baseTipId) {
-                return;
-            }
-            rebasedTip.set(worktreePath, baseTipId);
-        },
-    };
+  const enabled = Number.isFinite(ttlMs) && ttlMs > 0;
+  /** @type {Map<string, number>} repo root -> timestamp of last successful fetch */
+  const fetchedAtMs = new Map();
+  /** @type {Map<string, string>} worktree path -> base tip it was last rebased onto */
+  const rebasedTip = new Map();
+  return {
+    shouldFetch(repoKey) {
+      if (!enabled) {
+        return true;
+      }
+      const last = fetchedAtMs.get(repoKey);
+      return last === undefined || nowMs() - last >= ttlMs;
+    },
+    recordFetch(repoKey) {
+      if (!enabled) {
+        return;
+      }
+      fetchedAtMs.set(repoKey, nowMs());
+    },
+    shouldRebase(worktreePath, baseTipId) {
+      if (!enabled || !baseTipId) {
+        return true;
+      }
+      return rebasedTip.get(worktreePath) !== baseTipId;
+    },
+    recordRebase(worktreePath, baseTipId) {
+      if (!enabled || !baseTipId) {
+        return;
+      }
+      rebasedTip.set(worktreePath, baseTipId);
+    },
+  };
 }

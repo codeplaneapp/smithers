@@ -6,10 +6,7 @@
 // durable history spelling (`NodeFinished`, full engine payload) and the live
 // wire spelling (`node.finished`).
 import { describe, expect, test } from "bun:test";
-import {
-  delegationTargetKey,
-  delegationTargetsFromEvents,
-} from "../../src/delegation/delegationEventTargets.ts";
+import { delegationTargetKey, delegationTargetsFromEvents } from "../../src/delegation/delegationEventTargets.ts";
 
 function ev(event: string, payload: unknown): { event: string; payload: unknown } {
   return { event, payload };
@@ -24,12 +21,14 @@ describe("delegationTargetsFromEvents", () => {
       ev("NodeFinished", { runId: "r", nodeId: "dc:root/ui/inspector:exec", iteration: 2, attempt: 2 }),
       ev("NodeFinished", { runId: "r", nodeId: "dc:root/ui/inspector:review", iteration: 1, attempt: 1 }),
     ]);
-    expect([...targets.values()].sort((a, b) => a.nodeId.localeCompare(b.nodeId) || a.iteration - b.iteration)).toEqual([
-      { nodeId: "dc:root/ui/inspector:exec", iteration: 0 },
-      { nodeId: "dc:root/ui/inspector:exec", iteration: 1 },
-      { nodeId: "dc:root/ui/inspector:exec", iteration: 2 },
-      { nodeId: "dc:root/ui/inspector:review", iteration: 1 },
-    ]);
+    expect([...targets.values()].sort((a, b) => a.nodeId.localeCompare(b.nodeId) || a.iteration - b.iteration)).toEqual(
+      [
+        { nodeId: "dc:root/ui/inspector:exec", iteration: 0 },
+        { nodeId: "dc:root/ui/inspector:exec", iteration: 1 },
+        { nodeId: "dc:root/ui/inspector:exec", iteration: 2 },
+        { nodeId: "dc:root/ui/inspector:review", iteration: 1 },
+      ],
+    );
   });
 
   test("accepts wire-spelled live frames and dedupes against history rows", () => {
@@ -39,8 +38,14 @@ describe("delegationTargetsFromEvents", () => {
       ev("node.failed", { runId: "r", nodeId: "dc:root:core:exec", iteration: 2, state: "failed" }),
     ]);
     expect(targets.size).toBe(2);
-    expect(targets.get(delegationTargetKey("dc:root:core:exec", 1))).toEqual({ nodeId: "dc:root:core:exec", iteration: 1 });
-    expect(targets.get(delegationTargetKey("dc:root:core:exec", 2))).toEqual({ nodeId: "dc:root:core:exec", iteration: 2 });
+    expect(targets.get(delegationTargetKey("dc:root:core:exec", 1))).toEqual({
+      nodeId: "dc:root:core:exec",
+      iteration: 1,
+    });
+    expect(targets.get(delegationTargetKey("dc:root:core:exec", 2))).toEqual({
+      nodeId: "dc:root:core:exec",
+      iteration: 2,
+    });
   });
 
   test("recovers unmounted listener deliveries (dc-edit / dc-skip-preview / dc-poll)", () => {

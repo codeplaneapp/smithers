@@ -17,41 +17,43 @@ const SUBSCRIPTION_TTL_MS = 24 * 60 * 60 * 1000;
  * @returns {boolean} whether the registry was written
  */
 export function upsertClaudeMirrorSubscription(path, { runId, sessionId, nowMs }) {
-    try {
-        const existing = readEntries(path);
-        const kept = existing.filter((entry) => entry.expiresAtMs > nowMs
-            && !(entry.runId === runId && entry.sessionId === sessionId));
-        const previous = existing.find((entry) => entry.runId === runId && entry.sessionId === sessionId);
-        kept.push({
-            runId,
-            sessionId,
-            subscribedAtMs: previous?.subscribedAtMs ?? nowMs,
-            expiresAtMs: nowMs + SUBSCRIPTION_TTL_MS,
-        });
-        mkdirSync(dirname(path), { recursive: true });
-        const tmp = `${path}.${process.pid}.tmp`;
-        writeFileSync(tmp, `${JSON.stringify({ contract: 1, subscriptions: kept }, null, 2)}\n`);
-        renameSync(tmp, path);
-        return true;
-    }
-    catch {
-        return false;
-    }
+  try {
+    const existing = readEntries(path);
+    const kept = existing.filter(
+      (entry) => entry.expiresAtMs > nowMs && !(entry.runId === runId && entry.sessionId === sessionId),
+    );
+    const previous = existing.find((entry) => entry.runId === runId && entry.sessionId === sessionId);
+    kept.push({
+      runId,
+      sessionId,
+      subscribedAtMs: previous?.subscribedAtMs ?? nowMs,
+      expiresAtMs: nowMs + SUBSCRIPTION_TTL_MS,
+    });
+    mkdirSync(dirname(path), { recursive: true });
+    const tmp = `${path}.${process.pid}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify({ contract: 1, subscriptions: kept }, null, 2)}\n`);
+    renameSync(tmp, path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** @param {string} path */
 function readEntries(path) {
-    let parsed;
-    try {
-        parsed = JSON.parse(readFileSync(path, "utf8"));
-    }
-    catch {
-        return [];
-    }
-    const entries = Array.isArray(parsed?.subscriptions) ? parsed.subscriptions : [];
-    return entries.filter((entry) => entry
-        && typeof entry === "object"
-        && typeof entry.runId === "string"
-        && (entry.sessionId === null || typeof entry.sessionId === "string")
-        && typeof entry.expiresAtMs === "number");
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return [];
+  }
+  const entries = Array.isArray(parsed?.subscriptions) ? parsed.subscriptions : [];
+  return entries.filter(
+    (entry) =>
+      entry &&
+      typeof entry === "object" &&
+      typeof entry.runId === "string" &&
+      (entry.sessionId === null || typeof entry.sessionId === "string") &&
+      typeof entry.expiresAtMs === "number",
+  );
 }

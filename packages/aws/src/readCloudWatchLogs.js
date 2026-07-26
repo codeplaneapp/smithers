@@ -13,29 +13,33 @@
  * @returns {Promise<string>}
  */
 export async function readCloudWatchLogs(config) {
-	const { logs, logGroupName, logStreamName } = config;
-	if (!logs || !logGroupName || !logStreamName) return "";
-	try {
-		const res = await logs.getLogEvents(
-			{
-				logGroupName,
-				logStreamName,
-				startFromHead: true,
-			},
-			{ abortSignal: config.signal },
-		);
-		const events = /** @type {{ events?: Array<{ message?: unknown }> }} */ (res)?.events ?? [];
-		const text = events.map((event) => String(event?.message ?? "")).join("");
-		const maxBytes = config.maxOutputBytes;
-		if (Number.isFinite(maxBytes) && /** @type {number} */ (maxBytes) > 0 && text.length > /** @type {number} */ (maxBytes)) {
-			const kept = text.slice(0, /** @type {number} */ (maxBytes));
-			return `${kept}… [truncated ${text.length - /** @type {number} */ (maxBytes)} chars]`;
-		}
-		return text;
-	} catch (error) {
-		// Cancellation is control flow, not a best-effort logging failure. Let the
-		// runner turn it into its provider-specific cancellation error.
-		if (config.signal?.aborted) throw error;
-		return "";
-	}
+  const { logs, logGroupName, logStreamName } = config;
+  if (!logs || !logGroupName || !logStreamName) return "";
+  try {
+    const res = await logs.getLogEvents(
+      {
+        logGroupName,
+        logStreamName,
+        startFromHead: true,
+      },
+      { abortSignal: config.signal },
+    );
+    const events = /** @type {{ events?: Array<{ message?: unknown }> }} */ (res)?.events ?? [];
+    const text = events.map((event) => String(event?.message ?? "")).join("");
+    const maxBytes = config.maxOutputBytes;
+    if (
+      Number.isFinite(maxBytes) &&
+      /** @type {number} */ (maxBytes) > 0 &&
+      text.length > /** @type {number} */ (maxBytes)
+    ) {
+      const kept = text.slice(0, /** @type {number} */ (maxBytes));
+      return `${kept}… [truncated ${text.length - /** @type {number} */ (maxBytes)} chars]`;
+    }
+    return text;
+  } catch (error) {
+    // Cancellation is control flow, not a best-effort logging failure. Let the
+    // runner turn it into its provider-specific cancellation error.
+    if (config.signal?.aborted) throw error;
+    return "";
+  }
 }

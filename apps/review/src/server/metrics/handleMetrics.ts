@@ -46,24 +46,17 @@ export async function handleMetrics(request: Request, env: ReviewWorkerEnv): Pro
 
   const monthKey = monthKeyOf(Date.now());
 
-  const tokensRes = await env.DB
-    .prepare(
-      "SELECT repo, model, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(cache_creation_tokens) AS cache_creation_tokens, SUM(cache_read_tokens) AS cache_read_tokens FROM usage_events GROUP BY repo, model",
-    )
-    .all<TokensRow>();
-  const spendRes = await env.DB
-    .prepare("SELECT repo, model, SUM(cost_usd) AS cost_usd FROM usage_events GROUP BY repo, model")
-    .all<SpendRow>();
-  const prsRes = await env.DB
-    .prepare("SELECT repo, COUNT(*) AS c FROM reviewed_prs GROUP BY repo")
-    .all<PrCountRow>();
-  const monthPrsRes = await env.DB
-    .prepare("SELECT repo, COUNT(*) AS c FROM reviewed_prs WHERE month = ? GROUP BY repo")
+  const tokensRes = await env.DB.prepare(
+    "SELECT repo, model, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(cache_creation_tokens) AS cache_creation_tokens, SUM(cache_read_tokens) AS cache_read_tokens FROM usage_events GROUP BY repo, model",
+  ).all<TokensRow>();
+  const spendRes = await env.DB.prepare(
+    "SELECT repo, model, SUM(cost_usd) AS cost_usd FROM usage_events GROUP BY repo, model",
+  ).all<SpendRow>();
+  const prsRes = await env.DB.prepare("SELECT repo, COUNT(*) AS c FROM reviewed_prs GROUP BY repo").all<PrCountRow>();
+  const monthPrsRes = await env.DB.prepare("SELECT repo, COUNT(*) AS c FROM reviewed_prs WHERE month = ? GROUP BY repo")
     .bind(monthKey)
     .all<PrCountRow>();
-  const quotaRes = await env.DB
-    .prepare("SELECT repo, prs_per_month FROM repos")
-    .all<QuotaRow>();
+  const quotaRes = await env.DB.prepare("SELECT repo, prs_per_month FROM repos").all<QuotaRow>();
 
   const lines: string[] = [];
   lines.push("# HELP review_tokens_total Anthropic token usage by repo, model, kind");
@@ -98,7 +91,6 @@ export async function handleMetrics(request: Request, env: ReviewWorkerEnv): Pro
     const remaining = Math.max(0, row.prs_per_month - used);
     lines.push(`review_quota_remaining{repo="${escapeLabel(row.repo)}"} ${remaining}`);
   }
-
 
   return new Response(`${lines.join("\n")}\n`, {
     status: 200,

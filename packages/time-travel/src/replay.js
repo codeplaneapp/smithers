@@ -18,9 +18,9 @@ export { replayFromCheckpointEffect };
  * @returns {Promise<ReplayResult>}
  */
 export async function replayFromCheckpoint(adapter, params) {
-    const exit = await Effect.runPromiseExit(
-        replayFromCheckpointEffect(adapter, params).pipe(Effect.provide(BunContext.layer)),
-    );
-    if (Exit.isSuccess(exit)) return exit.value;
-    throw Cause.squash(exit.cause);
+  const exit = await Effect.runPromiseExit(
+    replayFromCheckpointEffect(adapter, params).pipe(Effect.provide(BunContext.layer)),
+  );
+  if (Exit.isSuccess(exit)) return exit.value;
+  throw Cause.squash(exit.cause);
 }

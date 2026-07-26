@@ -55,9 +55,7 @@ export function openDb(dbPath: string): { db: CeoIntelDb; schemaCreated: boolean
   const db = new Database(dbPath, { create: true });
   db.exec("PRAGMA journal_mode = WAL;");
   let schemaCreated = isNew;
-  const existing = db
-    .query("SELECT name FROM sqlite_master WHERE type='table' AND name='fingerprints'")
-    .get();
+  const existing = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='fingerprints'").get();
   if (!existing) schemaCreated = true;
   for (const statement of SCHEMA_STATEMENTS) db.exec(statement);
   return { db, schemaCreated };

@@ -1,16 +1,11 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import {
-  type AgentLike,
-  CodexAgent,
-} from "smithers-orchestrator";
+import { type AgentLike, CodexAgent } from "smithers-orchestrator";
 
 type CodexOptions = NonNullable<ConstructorParameters<typeof CodexAgent>[0]>;
 
-type RegisteredCodexCredential =
-  | { provider: "codex"; configDir: string }
-  | { provider: "openai-api"; apiKey: string };
+type RegisteredCodexCredential = { provider: "codex"; configDir: string } | { provider: "openai-api"; apiKey: string };
 
 type AccountsFile = {
   accounts?: Array<{
@@ -21,10 +16,7 @@ type AccountsFile = {
 };
 
 function smithersHome(env: NodeJS.ProcessEnv): string {
-  return resolve(
-    env.SMITHERS_HOME?.trim()
-      || join(env.HOME?.trim() || homedir(), ".smithers"),
-  );
+  return resolve(env.SMITHERS_HOME?.trim() || join(env.HOME?.trim() || homedir(), ".smithers"));
 }
 
 /**
@@ -32,14 +24,10 @@ function smithersHome(env: NodeJS.ProcessEnv): string {
  * Malformed or absent registries are deliberately treated as empty so a
  * workflow can still fall through to its non-Codex backup.
  */
-export function registeredCodexCredentials(
-  env: NodeJS.ProcessEnv = process.env,
-): RegisteredCodexCredential[] {
+export function registeredCodexCredentials(env: NodeJS.ProcessEnv = process.env): RegisteredCodexCredential[] {
   let parsed: AccountsFile;
   try {
-    parsed = JSON.parse(
-      readFileSync(join(smithersHome(env), "accounts.json"), "utf8"),
-    ) as AccountsFile;
+    parsed = JSON.parse(readFileSync(join(smithersHome(env), "accounts.json"), "utf8")) as AccountsFile;
   } catch {
     return [];
   }
@@ -132,11 +120,14 @@ export function codexFirst(
       }
       return credential.apiKey !== (options.apiKey || env.OPENAI_API_KEY?.trim());
     })
-    .map((credential) => new CodexAgent({
-      ...options,
-      configDir: credential.provider === "codex" ? credential.configDir : undefined,
-      apiKey: credential.provider === "openai-api" ? credential.apiKey : undefined,
-    }));
+    .map(
+      (credential) =>
+        new CodexAgent({
+          ...options,
+          configDir: credential.provider === "codex" ? credential.configDir : undefined,
+          apiKey: credential.provider === "openai-api" ? credential.apiKey : undefined,
+        }),
+    );
 
   return [new CodexAgent(options), ...registered, ...fallbacks];
 }
@@ -163,8 +154,9 @@ export function subscriptionCodexFirst(
   const configDirs = [
     options.configDir?.trim(),
     ...registeredCodexCredentials(env)
-      .filter((credential): credential is Extract<RegisteredCodexCredential, { provider: "codex" }> =>
-        credential.provider === "codex"
+      .filter(
+        (credential): credential is Extract<RegisteredCodexCredential, { provider: "codex" }> =>
+          credential.provider === "codex",
       )
       .map((credential) => credential.configDir),
   ].filter((configDir): configDir is string => Boolean(configDir));

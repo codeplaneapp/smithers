@@ -11,5 +11,5 @@ import { join } from "node:path";
  * @returns {string}
  */
 export function resolveClaudeMirrorSubscriptionsPath(workspaceRoot) {
-    return join(workspaceRoot, ".smithers", "claude-mirror-subscriptions.json");
+  return join(workspaceRoot, ".smithers", "claude-mirror-subscriptions.json");
 }

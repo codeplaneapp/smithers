@@ -17,35 +17,33 @@ import { parseXmlJson } from "./utils/xml.js";
  * @returns {ClaudeWorkflowPhasePlan}
  */
 export function deriveClaudeWorkflowPhasesFromFrame(frame, options = {}) {
-    /** @type {import("./XmlNode.ts").XmlNode | null} */
-    let xml = null;
-    if (typeof frame.xmlJson === "string" && frame.xmlJson.length > 0 && frame.xmlJson !== "null") {
-        try {
-            xml = parseXmlJson(frame.xmlJson);
-        }
-        catch {
-            xml = null;
-        }
+  /** @type {import("./XmlNode.ts").XmlNode | null} */
+  let xml = null;
+  if (typeof frame.xmlJson === "string" && frame.xmlJson.length > 0 && frame.xmlJson !== "null") {
+    try {
+      xml = parseXmlJson(frame.xmlJson);
+    } catch {
+      xml = null;
     }
-    /** @type {Array<{ nodeId: string; ordinal: number; iteration: number; kind: string }>} */
-    let index = [];
-    if (typeof frame.taskIndexJson === "string" && frame.taskIndexJson.length > 0) {
-        try {
-            const parsed = JSON.parse(frame.taskIndexJson);
-            if (Array.isArray(parsed)) {
-                index = parsed.filter((row) => row && typeof row === "object" && typeof row.nodeId === "string");
-            }
-        }
-        catch {
-            index = [];
-        }
+  }
+  /** @type {Array<{ nodeId: string; ordinal: number; iteration: number; kind: string }>} */
+  let index = [];
+  if (typeof frame.taskIndexJson === "string" && frame.taskIndexJson.length > 0) {
+    try {
+      const parsed = JSON.parse(frame.taskIndexJson);
+      if (Array.isArray(parsed)) {
+        index = parsed.filter((row) => row && typeof row === "object" && typeof row.nodeId === "string");
+      }
+    } catch {
+      index = [];
     }
-    const labels = options.labels ?? {};
-    const tasks = index.map((row) => ({
-        nodeId: row.nodeId,
-        label: labels[row.nodeId] || row.nodeId,
-        ordinal: typeof row.ordinal === "number" ? row.ordinal : 0,
-        kind: typeof row.kind === "string" && row.kind.length > 0 ? row.kind : "unknown",
-    }));
-    return buildClaudeWorkflowPhasePlan(xml, tasks, { collapsePhases: options.collapsePhases });
+  }
+  const labels = options.labels ?? {};
+  const tasks = index.map((row) => ({
+    nodeId: row.nodeId,
+    label: labels[row.nodeId] || row.nodeId,
+    ordinal: typeof row.ordinal === "number" ? row.ordinal : 0,
+    kind: typeof row.kind === "string" && row.kind.length > 0 ? row.kind : "unknown",
+  }));
+  return buildClaudeWorkflowPhasePlan(xml, tasks, { collapsePhases: options.collapsePhases });
 }

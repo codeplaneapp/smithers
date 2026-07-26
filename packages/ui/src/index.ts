@@ -104,22 +104,10 @@ export {
   type ToolCallApprovalProps,
 } from "./agentic/ToolCall";
 export { formatJsonSafe } from "./agentic/formatJsonSafe";
-export {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardAction,
-  CardContent,
-  CardFooter,
-} from "./card";
+export { Card, CardHeader, CardTitle, CardDescription, CardAction, CardContent, CardFooter } from "./card";
 export { Input, Textarea } from "./input";
 export { Label, Field } from "./label";
-export {
-  ChatMessage,
-  type ChatMessageProps,
-  type ChatMessageRole,
-} from "./chat/ChatMessage";
+export { ChatMessage, type ChatMessageProps, type ChatMessageRole } from "./chat/ChatMessage";
 export { ChatTranscript, type ChatTranscriptProps } from "./chat/ChatTranscript";
 export { ChatComposer, type ChatComposerProps } from "./chat/ChatComposer";
 export {
@@ -171,15 +159,7 @@ export {
 export { Marker, type MarkerProps } from "./chat/Marker";
 export { Shimmer, type ShimmerProps } from "./chat/Shimmer";
 export { Alert, AlertTitle, AlertDescription, alertVariants, type AlertProps } from "./alert";
-export {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-  TableCaption,
-} from "./table";
+export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell, TableCaption } from "./table";
 export { Tabs, TabsList, TabsTrigger, TabsContent, type TabsTriggerProps } from "./tabs";
 export {
   Dialog,
@@ -253,13 +233,7 @@ export { EmptyState, type EmptyStateProps } from "./empty-state";
 export { SectionHeader, Eyebrow, type SectionHeaderProps } from "./section-header";
 export { RowButton, type RowButtonProps } from "./row-button";
 export { KpiStat, type KpiStatProps } from "./kpi-stat";
-export {
-  StageStrip,
-  stageTone,
-  type StageStripProps,
-  type StageStripItem,
-  type StageTone,
-} from "./stage-strip";
+export { StageStrip, stageTone, type StageStripProps, type StageStripItem, type StageTone } from "./stage-strip";
 export { CollapsiblePanel, type CollapsiblePanelProps } from "./collapsible-panel";
 export { DiffHunks, type DiffHunksProps } from "./diff-hunks";
 export type { Diff, DiffFile, DiffFileStatus, DiffLine, DiffLineKind, Hunk } from "./diff";
@@ -284,12 +258,7 @@ export {
   PAGINATE_VISIBLE,
   type ParseUnifiedFileOverrides,
 } from "./diff-paginate";
-export {
-  FileTree,
-  type FileTreeProps,
-  type FileTreeNode,
-  type FileTreeItem,
-} from "./file-tree";
+export { FileTree, type FileTreeProps, type FileTreeNode, type FileTreeItem } from "./file-tree";
 export { Markdown, safeMarkdownHref, type MarkdownProps, type MarkdownLinkClick } from "./primitives/markdown";
 export { MessageResponse, type MessageResponseProps } from "./agentic/MessageResponse";
 export {
@@ -449,7 +418,12 @@ export {
 
 // lane:sources-citations
 export { Suggestion, SuggestionGroup, type SuggestionProps, type SuggestionGroupProps } from "./agentic/Suggestion";
-export { OpenInChat, type OpenInChatProps, type OpenInChatSubject, type OpenInChatSubjectKind } from "./agentic/OpenInChat";
+export {
+  OpenInChat,
+  type OpenInChatProps,
+  type OpenInChatSubject,
+  type OpenInChatSubjectKind,
+} from "./agentic/OpenInChat";
 
 // lane:agent-identity-context
 export {

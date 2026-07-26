@@ -40,10 +40,7 @@ describe("kanban buildFeedback", () => {
   });
 
   test("validate passed + same-iteration approval: done", () => {
-    const out = buildFeedback(
-      fakeCtx({ validate: [validateRow(0, true)], review: [reviewRow(0, true)] }),
-      slug,
-    );
+    const out = buildFeedback(fakeCtx({ validate: [validateRow(0, true)], review: [reviewRow(0, true)] }), slug);
     expect(out.done).toBe(true);
     expect(out.validationPassed).toBe(true);
   });

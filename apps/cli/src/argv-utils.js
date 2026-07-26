@@ -1,10 +1,10 @@
 const BUILTIN_FLAGS_WITH_VALUES = new Set([
-    "--format",
-    "--filter-output",
-    "--surface",
-    "--allowed-tools",
-    "--token-limit",
-    "--token-offset",
+  "--format",
+  "--filter-output",
+  "--surface",
+  "--allowed-tools",
+  "--token-limit",
+  "--token-offset",
 ]);
 
 /**
@@ -12,14 +12,14 @@ const BUILTIN_FLAGS_WITH_VALUES = new Set([
  * @returns {"semantic" | "raw" | "both"}
  */
 function normalizeMcpSurface(value) {
-    const surface = value?.trim().toLowerCase();
-    if (surface === undefined || surface.length === 0) {
-        throw new Error("Missing value for --surface. Expected semantic, raw, or both.");
-    }
-    if (surface === "semantic" || surface === "raw" || surface === "both") {
-        return surface;
-    }
-    throw new Error(`Invalid --surface value: ${value}. Expected semantic, raw, or both.`);
+  const surface = value?.trim().toLowerCase();
+  if (surface === undefined || surface.length === 0) {
+    throw new Error("Missing value for --surface. Expected semantic, raw, or both.");
+  }
+  if (surface === "semantic" || surface === "raw" || surface === "both") {
+    return surface;
+  }
+  throw new Error(`Invalid --surface value: ${value}. Expected semantic, raw, or both.`);
 }
 
 /**
@@ -27,51 +27,51 @@ function normalizeMcpSurface(value) {
  * @returns {readonly string[]}
  */
 function normalizeMcpAllowedTools(value) {
-    if (value === undefined || value.trim().length === 0 || value.trim().startsWith("-")) {
-        throw new Error("Missing value for --allowed-tools. Expected a comma-separated semantic tool allowlist.");
-    }
-    return value
-        .split(",")
-        .map((toolName) => toolName.trim())
-        .filter((toolName) => toolName.length > 0);
+  if (value === undefined || value.trim().length === 0 || value.trim().startsWith("-")) {
+    throw new Error("Missing value for --allowed-tools. Expected a comma-separated semantic tool allowlist.");
+  }
+  return value
+    .split(",")
+    .map((toolName) => toolName.trim())
+    .filter((toolName) => toolName.length > 0);
 }
 
 /**
  * @param {string[]} argv
  */
 export function parseMcpSurfaceArgv(argv) {
-    let surface = "semantic";
-    /** @type {readonly string[] | undefined} */
-    let allowedTools;
-    let readOnly = false;
-    const filtered = [];
-    for (let index = 0; index < argv.length; index++) {
-        const arg = argv[index];
-        if (arg === "--surface") {
-            surface = normalizeMcpSurface(argv[index + 1]);
-            index += 1;
-            continue;
-        }
-        if (arg.startsWith("--surface=")) {
-            surface = normalizeMcpSurface(arg.slice("--surface=".length));
-            continue;
-        }
-        if (arg === "--allowed-tools") {
-            allowedTools = normalizeMcpAllowedTools(argv[index + 1]);
-            index += 1;
-            continue;
-        }
-        if (arg.startsWith("--allowed-tools=")) {
-            allowedTools = normalizeMcpAllowedTools(arg.slice("--allowed-tools=".length));
-            continue;
-        }
-        if (arg === "--read-only") {
-            readOnly = true;
-            continue;
-        }
-        filtered.push(arg);
+  let surface = "semantic";
+  /** @type {readonly string[] | undefined} */
+  let allowedTools;
+  let readOnly = false;
+  const filtered = [];
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index];
+    if (arg === "--surface") {
+      surface = normalizeMcpSurface(argv[index + 1]);
+      index += 1;
+      continue;
     }
-    return { surface, argv: filtered, allowedTools, readOnly };
+    if (arg.startsWith("--surface=")) {
+      surface = normalizeMcpSurface(arg.slice("--surface=".length));
+      continue;
+    }
+    if (arg === "--allowed-tools") {
+      allowedTools = normalizeMcpAllowedTools(argv[index + 1]);
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--allowed-tools=")) {
+      allowedTools = normalizeMcpAllowedTools(arg.slice("--allowed-tools=".length));
+      continue;
+    }
+    if (arg === "--read-only") {
+      readOnly = true;
+      continue;
+    }
+    filtered.push(arg);
+  }
+  return { surface, argv: filtered, allowedTools, readOnly };
 }
 
 /**
@@ -80,16 +80,16 @@ export function parseMcpSurfaceArgv(argv) {
  * @returns {number}
  */
 export function findFirstPositionalIndex(argv, startIndex = 0) {
-    for (let index = startIndex; index < argv.length; index++) {
-        const arg = argv[index];
-        if (!arg.startsWith("-")) {
-            return index;
-        }
-        if (BUILTIN_FLAGS_WITH_VALUES.has(arg)) {
-            index++;
-        }
+  for (let index = startIndex; index < argv.length; index++) {
+    const arg = argv[index];
+    if (!arg.startsWith("-")) {
+      return index;
     }
-    return -1;
+    if (BUILTIN_FLAGS_WITH_VALUES.has(arg)) {
+      index++;
+    }
+  }
+  return -1;
 }
 
 /**
@@ -104,26 +104,26 @@ export function findFirstPositionalIndex(argv, startIndex = 0) {
  * @returns {{ argv: string[]; backend: string | undefined }}
  */
 export function extractBackendFlag(argv) {
-    /** @type {string | undefined} */
-    let backend;
-    const filtered = [];
-    for (let index = 0; index < argv.length; index++) {
-        const arg = argv[index];
-        if (arg === "--backend") {
-            const next = argv[index + 1];
-            if (next !== undefined && !next.startsWith("-")) {
-                backend = next;
-                index += 1;
-            }
-            continue;
-        }
-        if (arg.startsWith("--backend=")) {
-            backend = arg.slice("--backend=".length);
-            continue;
-        }
-        filtered.push(arg);
+  /** @type {string | undefined} */
+  let backend;
+  const filtered = [];
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index];
+    if (arg === "--backend") {
+      const next = argv[index + 1];
+      if (next !== undefined && !next.startsWith("-")) {
+        backend = next;
+        index += 1;
+      }
+      continue;
     }
-    return { argv: filtered, backend };
+    if (arg.startsWith("--backend=")) {
+      backend = arg.slice("--backend=".length);
+      continue;
+    }
+    filtered.push(arg);
+  }
+  return { argv: filtered, backend };
 }
 
 /**
@@ -133,7 +133,7 @@ export function extractBackendFlag(argv) {
  * @param {string[]} argv
  */
 export function rewriteBareResumeFlagArgv(argv) {
-    return argv.map((arg, index) => arg === "--resume" && (argv[index + 1] === undefined || argv[index + 1]?.startsWith("-"))
-        ? "--resume=true"
-        : arg);
+  return argv.map((arg, index) =>
+    arg === "--resume" && (argv[index + 1] === undefined || argv[index + 1]?.startsWith("-")) ? "--resume=true" : arg,
+  );
 }

@@ -40,9 +40,7 @@ describe("smithersRuntime", () => {
       sampled: true,
       context: Context.empty(),
     };
-    const result = await smithersTraceSpanStorage.run(externalSpan, () =>
-      runPromise(Effect.succeed("with-span")),
-    );
+    const result = await smithersTraceSpanStorage.run(externalSpan, () => runPromise(Effect.succeed("with-span")));
     expect(result).toBe("with-span");
   });
 });

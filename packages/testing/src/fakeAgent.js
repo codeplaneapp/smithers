@@ -5,7 +5,7 @@ import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } fr
 import { zodSchemaToJsonExample } from "@smithers-orchestrator/components/zod-to-example";
 var autoMarker = /* @__PURE__ */ Symbol.for("smithers.testing.auto");
 var auto = Object.freeze({
-  [autoMarker]: true
+  [autoMarker]: true,
 });
 function isAuto(value) {
   return Boolean(value && typeof value === "object" && value[autoMarker] === true);
@@ -17,12 +17,14 @@ function schemaExample(schema) {
 }
 function formatIssues(issues) {
   if (issues.length === 0) return "unknown validation failure";
-  return issues.map((issue) => {
-    if (issue && typeof issue === "object" && "message" in issue) {
-      return String(issue.message);
-    }
-    return JSON.stringify(issue);
-  }).join("; ");
+  return issues
+    .map((issue) => {
+      if (issue && typeof issue === "object" && "message" in issue) {
+        return String(issue.message);
+      }
+      return JSON.stringify(issue);
+    })
+    .join("; ");
 }
 function assertSchema(schema, value) {
   const result = schema.safeParse(value);
@@ -138,7 +140,7 @@ async function loadPosixFs() {
       openat: libc.func("int openat(int dirfd, const char *path, int flags, ...)"),
       mkdirat: libc.func("int mkdirat(int dirfd, const char *path, int mode)"),
       errno: koffi.errno,
-      errors: koffi.os.errno
+      errors: koffi.os.errno,
     };
   });
   return posixFsPromise;
@@ -244,7 +246,8 @@ function writeFileAt(posix, root, path, name, contents) {
       current = next;
       ownsCurrent = true;
     }
-    const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW | closeOnExecFlag();
+    const flags =
+      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW | closeOnExecFlag();
     let file;
     try {
       file = openAt(posix, current, filename, flags, 438);
@@ -312,7 +315,7 @@ function buildFakeAgent(schema, script, options = {}) {
         args,
         prompt: args.prompt,
         rootDir: typeof args.rootDir === "string" ? args.rootDir : void 0,
-        taskContext: args.taskContext
+        taskContext: args.taskContext,
       };
       calls.push(call);
       const raw = typeof script === "function" ? await script(args) : script;
@@ -328,7 +331,7 @@ function buildFakeAgent(schema, script, options = {}) {
     },
     reset() {
       calls.length = 0;
-    }
+    },
   };
   return agent;
 }
@@ -342,14 +345,10 @@ function buildSequenceAgent(schema, entries, options = {}) {
       }
       return entries[index++];
     },
-    options
+    options,
   );
 }
 var fakeAgent = Object.assign(buildFakeAgent, {
-  sequence: buildSequenceAgent
+  sequence: buildSequenceAgent,
 });
-export {
-  auto,
-  fakeAgent,
-  isAuto
-};
+export { auto, fakeAgent, isAuto };

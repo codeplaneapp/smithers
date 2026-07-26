@@ -129,9 +129,7 @@ async function executeHttpRequest(input, options, responseBodyLimit, abortSignal
       const response = await fetch(currentUrl, init);
       const location = response.headers.get("location");
       const nextUrl =
-        REDIRECT_STATUSES.has(response.status) && location !== null
-          ? resolveLocation(location, currentUrl)
-          : null;
+        REDIRECT_STATUSES.has(response.status) && location !== null ? resolveLocation(location, currentUrl) : null;
       if (!nextUrl) {
         return {
           ok: response.ok,

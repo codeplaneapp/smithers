@@ -162,9 +162,13 @@ function App() {
       <header className="topbar">
         <div className="title-group">
           <h1>Tickets Create</h1>
-          <span className="pill" data-testid="tickets-create-runid">{activeRunId ? shortRunId(activeRunId) : "No run"}</span>
+          <span className="pill" data-testid="tickets-create-runid">
+            {activeRunId ? shortRunId(activeRunId) : "No run"}
+          </span>
           {activeRun ? (
-            <span className={"badge " + statusClass(activeRun.status)} data-testid="tickets-create-status">{activeRun.status ?? "idle"}</span>
+            <span className={"badge " + statusClass(activeRun.status)} data-testid="tickets-create-status">
+              {activeRun.status ?? "idle"}
+            </span>
           ) : null}
         </div>
         <div className="toolbar">
@@ -175,11 +179,32 @@ function App() {
             onChange={(e) => setPrompt(e.currentTarget.value)}
             placeholder="What work should we break into tickets?"
           />
-          <button className="button" data-testid="tickets-create-refresh" onClick={() => void refresh()} disabled={busy}>Refresh</button>
+          <button
+            className="button"
+            data-testid="tickets-create-refresh"
+            onClick={() => void refresh()}
+            disabled={busy}
+          >
+            Refresh
+          </button>
           {running ? (
-            <button className="button danger" data-testid="tickets-create-cancel" onClick={() => void cancel()} disabled={busy}>Cancel</button>
+            <button
+              className="button danger"
+              data-testid="tickets-create-cancel"
+              onClick={() => void cancel()}
+              disabled={busy}
+            >
+              Cancel
+            </button>
           ) : null}
-          <button className="button primary" data-testid="tickets-create-launch" onClick={() => void launch()} disabled={busy}>Generate Tickets</button>
+          <button
+            className="button primary"
+            data-testid="tickets-create-launch"
+            onClick={() => void launch()}
+            disabled={busy}
+          >
+            Generate Tickets
+          </button>
         </div>
       </header>
 
@@ -189,12 +214,16 @@ function App() {
             <>
               <div className="summary-card" data-testid="tickets-create-summary-panel">
                 <h2>Breakdown summary</h2>
-                <div className="summary-text" data-testid="tickets-create-summary">{result.summary}</div>
+                <div className="summary-text" data-testid="tickets-create-summary">
+                  {result.summary}
+                </div>
               </div>
 
               <div className="section-head">
                 <h2>Tickets</h2>
-                <span className="count-chip" data-testid="tickets-create-count">{result.tickets.length}</span>
+                <span className="count-chip" data-testid="tickets-create-count">
+                  {result.tickets.length}
+                </span>
               </div>
 
               {result.tickets.length > 0 ? (
@@ -222,14 +251,23 @@ function App() {
               ) : (
                 <div className="empty" data-testid="tickets-create-tickets-empty">
                   <div>No tickets were generated for this run.</div>
-                  <div style={{ marginTop: 6, fontSize: 12 }}>The summary is shown above; try a more specific request.</div>
+                  <div style={{ marginTop: 6, fontSize: 12 }}>
+                    The summary is shown above; try a more specific request.
+                  </div>
                 </div>
               )}
             </>
           ) : (
             <div className="empty" data-testid="tickets-create-empty">
-              <div>{activeRunId ? (running ? "Generating tickets…" : "Waiting for ticket output…") : "No tickets yet."}</div>
-              <button className="button primary" data-testid="tickets-create-launch-empty" onClick={() => void launch()} disabled={busy}>
+              <div>
+                {activeRunId ? (running ? "Generating tickets…" : "Waiting for ticket output…") : "No tickets yet."}
+              </div>
+              <button
+                className="button primary"
+                data-testid="tickets-create-launch-empty"
+                onClick={() => void launch()}
+                disabled={busy}
+              >
                 Generate Tickets
               </button>
             </div>
@@ -260,7 +298,9 @@ function App() {
               <div className="events-body">
                 {events.length > 0 ? (
                   events.slice(-30).map((ev, i) => (
-                    <div className="event-line" key={i}>{asString((ev as Record<string, unknown>).type) ?? "event"}</div>
+                    <div className="event-line" key={i}>
+                      {asString((ev as Record<string, unknown>).type) ?? "event"}
+                    </div>
                   ))
                 ) : (
                   <div className="event-line">No events yet.</div>

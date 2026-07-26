@@ -38,9 +38,7 @@ describe("GatewayExtensions registry", () => {
   test("rejects duplicate namespace registration", () => {
     const registry = new GatewayExtensions();
     registry.register("dup", { resources: { a: { handler: () => 1 } } });
-    expect(() =>
-      registry.register("dup", { resources: { b: { handler: () => 2 } } }),
-    ).toThrow(/already registered/i);
+    expect(() => registry.register("dup", { resources: { b: { handler: () => 2 } } })).toThrow(/already registered/i);
   });
 
   test("rejects a key registered as both resource and action in one namespace", () => {

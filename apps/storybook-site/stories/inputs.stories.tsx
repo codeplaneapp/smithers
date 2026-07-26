@@ -41,9 +41,13 @@ export const TabsAnatomy: Story = {
   render: () => (
     <Tabs defaultValue="events" style={{ maxWidth: 480 }}>
       <TabsList>
-        <TabsTrigger value="events" count={42}>Events</TabsTrigger>
+        <TabsTrigger value="events" count={42}>
+          Events
+        </TabsTrigger>
         <TabsTrigger value="output">Output</TabsTrigger>
-        <TabsTrigger value="approvals" count={2}>Approvals</TabsTrigger>
+        <TabsTrigger value="approvals" count={2}>
+          Approvals
+        </TabsTrigger>
       </TabsList>
       <TabsContent value="events">The run event log renders here.</TabsContent>
       <TabsContent value="output">Node output rows render here.</TabsContent>
@@ -61,9 +65,7 @@ export const DialogAnatomy: Story = {
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Cancel this run?</DialogTitle>
-          <DialogDescription>
-            In-flight tasks are asked to stop; completed work is kept.
-          </DialogDescription>
+          <DialogDescription>In-flight tasks are asked to stop; completed work is kept.</DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="ghost">Keep running</Button>

@@ -136,19 +136,40 @@ const { Workflow, Task, Sequence, Parallel, Loop, Worktree, smithers, outputs } 
 // worktree, so the agent would read/write the repo root and the branch stays empty.
 // Codex is primary in every chain; Claude is retained only for failover.
 const opus = codexFirst(
-  { model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-sol",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [new ClaudeCodeAgent({ model: "claude-opus-4-8" })],
 );
 const solReviewer = codexFirst(
-  { model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-sol",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [new ClaudeCodeAgent({ model: "claude-opus-4-8" })],
 );
 const sonnet = codexFirst(
-  { model: "gpt-5.6-terra", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-terra",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [new ClaudeCodeAgent({ model: "claude-sonnet-5" })],
 );
 const codex = codexFirst(
-  { model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-luna",
+    config: { model_reasoning_effort: "medium" },
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [new ClaudeCodeAgent({ model: "claude-sonnet-5" })],
 );
 
@@ -200,7 +221,11 @@ function latestItemIteration(ctx: any, key: string): number | undefined {
   const fix = latestForItem<Fix>(ctx.outputs.fix, key);
   return fix ? iterationOf(fix) : undefined;
 }
-function latestReviewForItem<T extends { workItemId: string }>(rows: T[] | undefined, id: string, iteration: number): T | undefined {
+function latestReviewForItem<T extends { workItemId: string }>(
+  rows: T[] | undefined,
+  id: string,
+  iteration: number,
+): T | undefined {
   return latest((rows ?? []).filter((r) => r.workItemId === id && iterationOf(r) === iteration));
 }
 function slugify(s: string): string {
@@ -287,9 +312,14 @@ function fetchIssues(input: z.infer<typeof inputSchema>) {
     "number,title,body,labels,author,url",
   ];
   for (const l of input.labels ?? []) args.push("--label", l);
-  const raw = JSON.parse(
-    execFileSync("gh", args, { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }),
-  ) as Array<{ number: number; title: string; body: string | null; labels?: { name: string }[]; author?: { login: string }; url?: string }>;
+  const raw = JSON.parse(execFileSync("gh", args, { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 })) as Array<{
+    number: number;
+    title: string;
+    body: string | null;
+    labels?: { name: string }[];
+    author?: { login: string };
+    url?: string;
+  }>;
   let issues: Issue[] = raw.map((i) => ({
     number: i.number,
     title: i.title,
@@ -310,7 +340,9 @@ function fetchIssues(input: z.infer<typeof inputSchema>) {
 
 // ── Prompts ────────────────────────────────────────────────────────────────────
 function issueHeader(issue: Issue) {
-  return [`Title: ${issue.title}`, "", "--- ISSUE BODY ---", issue.body || "(no body)", "--- END ISSUE BODY ---"].join("\n");
+  return [`Title: ${issue.title}`, "", "--- ISSUE BODY ---", issue.body || "(no body)", "--- END ISSUE BODY ---"].join(
+    "\n",
+  );
 }
 
 function decomposePrompt(issue: Issue, cap: number) {
@@ -471,8 +503,9 @@ export default smithers((ctx) => {
               const done = itemDone(ctx, key);
               const feedback = itemFeedback(ctx, key);
               const fix = latestForItem<Fix>(ctx.outputs.fix, key);
-              const commitMessage =
-                ((fix?.commitMessage || `🐛 fix: ${wi.title}`).split("\n")[0] ?? `🐛 fix: ${wi.title}`).slice(0, 100);
+              const commitMessage = (
+                (fix?.commitMessage || `🐛 fix: ${wi.title}`).split("\n")[0] ?? `🐛 fix: ${wi.title}`
+              ).slice(0, 100);
               const linkage = wi.isSingleFix ? `Closes #${wi.issueNumber}` : `Relates to #${wi.issueNumber}`;
               return (
                 <Worktree key={key} path={wi.worktreePath} branch={wi.branch} baseBranch="main">

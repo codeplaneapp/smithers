@@ -128,7 +128,14 @@ describe("applyDelta — out-of-order and inconsistent ops", () => {
         baseSeq: 1,
         seq: 2,
         // @ts-expect-error malformed payload: index is not a number
-        ops: [{ op: "addNode", parentId: 2, index: "x", node: { id: 3, type: "task", name: "t3", props: {}, children: [], depth: 1 } }],
+        ops: [
+          {
+            op: "addNode",
+            parentId: 2,
+            index: "x",
+            node: { id: 3, type: "task", name: "t3", props: {}, children: [], depth: 1 },
+          },
+        ],
       }),
     ).toThrowError(InvalidDeltaError);
   });

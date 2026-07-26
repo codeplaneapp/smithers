@@ -21,13 +21,13 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
  *  - `createdAtMs` / `updatedAtMs` — Unix epoch ms.
  */
 export const smithersEvalSuites = sqliteTable("_smithers_eval_suites", {
-    suiteId: text("suite_id").primaryKey(),
-    name: text("name").notNull(),
-    workflowKey: text("workflow_key").notNull(),
-    workflowPath: text("workflow_path").notNull(),
-    workflowRoot: text("workflow_root").notNull(),
-    datasetJson: text("dataset_json").notNull(),
-    caseCount: integer("case_count").notNull(),
-    createdAtMs: integer("created_at_ms").notNull(),
-    updatedAtMs: integer("updated_at_ms").notNull(),
+  suiteId: text("suite_id").primaryKey(),
+  name: text("name").notNull(),
+  workflowKey: text("workflow_key").notNull(),
+  workflowPath: text("workflow_path").notNull(),
+  workflowRoot: text("workflow_root").notNull(),
+  datasetJson: text("dataset_json").notNull(),
+  caseCount: integer("case_count").notNull(),
+  createdAtMs: integer("created_at_ms").notNull(),
+  updatedAtMs: integer("updated_at_ms").notNull(),
 });

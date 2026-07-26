@@ -49,11 +49,7 @@ export function PaletteCard() {
               <div className="list-meta">{item.value}</div>
             </div>
             <div className="list-tags">
-              <button
-                className="palette-mention-chip"
-                type="button"
-                onClick={() => mentionFile(item.value)}
-              >
+              <button className="palette-mention-chip" type="button" onClick={() => mentionFile(item.value)}>
                 @ mention
               </button>
             </div>

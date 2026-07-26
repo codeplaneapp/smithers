@@ -16,32 +16,32 @@ export const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
  * @returns {number} number of characters to take into the current chunk
  */
 function findSplitIndex(text, limit) {
-    const window = text.slice(0, limit + 1);
-    const minIndex = Math.floor(limit / 10);
-    const paragraph = window.lastIndexOf("\n\n");
-    if (paragraph > minIndex) {
-        return paragraph;
+  const window = text.slice(0, limit + 1);
+  const minIndex = Math.floor(limit / 10);
+  const paragraph = window.lastIndexOf("\n\n");
+  if (paragraph > minIndex) {
+    return paragraph;
+  }
+  const line = window.lastIndexOf("\n");
+  if (line > minIndex) {
+    return line;
+  }
+  let sentence = -1;
+  const sentenceEnd = /[.!?]["')\]]?\s/g;
+  for (const match of window.matchAll(sentenceEnd)) {
+    const end = match.index + match[0].length;
+    if (end <= limit) {
+      sentence = end;
     }
-    const line = window.lastIndexOf("\n");
-    if (line > minIndex) {
-        return line;
-    }
-    let sentence = -1;
-    const sentenceEnd = /[.!?]["')\]]?\s/g;
-    for (const match of window.matchAll(sentenceEnd)) {
-        const end = match.index + match[0].length;
-        if (end <= limit) {
-            sentence = end;
-        }
-    }
-    if (sentence > minIndex) {
-        return sentence;
-    }
-    const space = window.lastIndexOf(" ");
-    if (space > minIndex) {
-        return space;
-    }
-    return -1;
+  }
+  if (sentence > minIndex) {
+    return sentence;
+  }
+  const space = window.lastIndexOf(" ");
+  if (space > minIndex) {
+    return space;
+  }
+  return -1;
 }
 
 /**
@@ -55,23 +55,23 @@ function findSplitIndex(text, limit) {
  * @returns {string[]}
  */
 export function chunkTelegramText(text, maxLength = TELEGRAM_MAX_MESSAGE_LENGTH) {
-    /** @type {string[]} */
-    const chunks = [];
-    if (!text) {
-        return chunks;
-    }
-    let remaining = text;
-    while (remaining.length > maxLength) {
-        const splitAt = findSplitIndex(remaining, maxLength);
-        const take = splitAt > 0 ? splitAt : maxLength;
-        const chunk = remaining.slice(0, take).replace(/\s+$/, "");
-        if (chunk) {
-            chunks.push(chunk);
-        }
-        remaining = remaining.slice(take).replace(/^\s+/, "");
-    }
-    if (remaining) {
-        chunks.push(remaining);
-    }
+  /** @type {string[]} */
+  const chunks = [];
+  if (!text) {
     return chunks;
+  }
+  let remaining = text;
+  while (remaining.length > maxLength) {
+    const splitAt = findSplitIndex(remaining, maxLength);
+    const take = splitAt > 0 ? splitAt : maxLength;
+    const chunk = remaining.slice(0, take).replace(/\s+$/, "");
+    if (chunk) {
+      chunks.push(chunk);
+    }
+    remaining = remaining.slice(take).replace(/^\s+/, "");
+  }
+  if (remaining) {
+    chunks.push(remaining);
+  }
+  return chunks;
 }

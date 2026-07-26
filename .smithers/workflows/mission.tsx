@@ -71,11 +71,15 @@ const milestoneValidationSchema = z.looseObject({
   milestoneId: z.string().default("milestone"),
   passed: z.boolean().default(true),
   summary: z.string().default("Validation completed."),
-  checks: z.array(z.object({
-    name: z.string(),
-    status: z.enum(["passed", "failed", "skipped"]),
-    details: z.string().nullable().default(null),
-  })).default([]),
+  checks: z
+    .array(
+      z.object({
+        name: z.string(),
+        status: z.enum(["passed", "failed", "skipped"]),
+        details: z.string().nullable().default(null),
+      }),
+    )
+    .default([]),
   regressions: z.array(z.string()).default([]),
   followUps: z.array(z.string()).default([]),
 });
@@ -126,15 +130,14 @@ function asStringArray(value: unknown): string[] {
 }
 
 function normalizeFeature(feature: any, index: number): any {
-  const title = typeof feature?.title === "string" && feature.title.length > 0
-    ? feature.title
-    : `Feature ${index + 1}`;
+  const title = typeof feature?.title === "string" && feature.title.length > 0 ? feature.title : `Feature ${index + 1}`;
   return {
     id: slugify(feature?.id ?? title, `feature-${index + 1}`),
     title,
-    instructions: typeof feature?.instructions === "string" && feature.instructions.length > 0
-      ? feature.instructions
-      : `Complete ${title}.`,
+    instructions:
+      typeof feature?.instructions === "string" && feature.instructions.length > 0
+        ? feature.instructions
+        : `Complete ${title}.`,
     files: asStringArray(feature?.files),
     validation: asStringArray(feature?.validation),
     workerType: ["implementation", "test", "docs", "research"].includes(feature?.workerType)
@@ -148,22 +151,21 @@ function normalizeMilestones(plan: any, maxMilestones: number, maxFeaturesPerMil
   return (Array.isArray(plan?.milestones) ? plan.milestones : [])
     .slice(0, maxMilestones)
     .map((milestone: any, index: number) => {
-      const title = typeof milestone?.title === "string" && milestone.title.length > 0
-        ? milestone.title
-        : `Milestone ${index + 1}`;
+      const title =
+        typeof milestone?.title === "string" && milestone.title.length > 0 ? milestone.title : `Milestone ${index + 1}`;
       const features = (Array.isArray(milestone?.features) ? milestone.features : [])
         .slice(0, maxFeaturesPerMilestone)
         .map((feature: any, featureIndex: number) => normalizeFeature(feature, featureIndex));
       return {
         id: slugify(milestone?.id ?? title, `milestone-${index + 1}`),
         title,
-        objective: typeof milestone?.objective === "string" && milestone.objective.length > 0
-          ? milestone.objective
-          : title,
+        objective:
+          typeof milestone?.objective === "string" && milestone.objective.length > 0 ? milestone.objective : title,
         validationPlan: asStringArray(milestone?.validationPlan),
-        features: features.length > 0
-          ? features
-          : [normalizeFeature({ title, instructions: milestone?.objective ?? title }, 0)],
+        features:
+          features.length > 0
+            ? features
+            : [normalizeFeature({ title, instructions: milestone?.objective ?? title }, 0)],
       };
     });
 }
@@ -189,7 +191,9 @@ function milestoneRevalidationId(milestoneIndex: number): string {
 }
 
 function featureNeeds(milestoneIndex: number, features: any[]): Record<string, string> {
-  return Object.fromEntries(features.map((feature, index) => [`feature${index}`, featureTaskId(milestoneIndex, feature)]));
+  return Object.fromEntries(
+    features.map((feature, index) => [`feature${index}`, featureTaskId(milestoneIndex, feature)]),
+  );
 }
 
 function featureDeps(features: any[]): Record<string, typeof missionFeatureResultSchema> {
@@ -208,7 +212,9 @@ function previousMilestoneSummary(ctx: any): string {
   return [
     ...integrations.map((entry: any) => `Integration: ${entry.summary}`),
     ...validations.map((entry: any) => `Validation: ${entry.passed ? "passed" : "failed"} - ${entry.summary}`),
-  ].slice(-8).join("\n");
+  ]
+    .slice(-8)
+    .join("\n");
 }
 
 function milestoneIsTerminal(ctx: any, milestoneIndex: number): boolean {
@@ -281,17 +287,19 @@ function renderMilestone(ctx: any, plan: any, milestone: any, milestoneIndex: nu
 
   return (
     <Sequence>
-      {waves.map((wave, index) => wave.parallel ? (
-        <Sequence key={`wave-${index}`}>
-          <Parallel maxConcurrency={Math.min(ctx.input.maxConcurrency ?? 3, wave.features.length)}>
+      {waves.map((wave, index) =>
+        wave.parallel ? (
+          <Sequence key={`wave-${index}`}>
+            <Parallel maxConcurrency={Math.min(ctx.input.maxConcurrency ?? 3, wave.features.length)}>
+              {wave.features.map((feature: any) => renderFeatureWorker(ctx, plan, milestone, milestoneIndex, feature))}
+            </Parallel>
+          </Sequence>
+        ) : (
+          <Sequence key={`wave-${index}`}>
             {wave.features.map((feature: any) => renderFeatureWorker(ctx, plan, milestone, milestoneIndex, feature))}
-          </Parallel>
-        </Sequence>
-      ) : (
-        <Sequence key={`wave-${index}`}>
-          {wave.features.map((feature: any) => renderFeatureWorker(ctx, plan, milestone, milestoneIndex, feature))}
-        </Sequence>
-      ))}
+          </Sequence>
+        ),
+      )}
       <Task
         id={integrationId}
         output={outputs.milestoneIntegration}
@@ -445,7 +453,10 @@ export default smithers((ctx) => {
           </Task>
         )}
 
-        {plan && approved && activeIndex < milestones.length && renderMilestone(ctx, plan, milestones[activeIndex], activeIndex)}
+        {plan &&
+          approved &&
+          activeIndex < milestones.length &&
+          renderMilestone(ctx, plan, milestones[activeIndex], activeIndex)}
         {plan && approved && activeIndex >= milestones.length && renderFinal(ctx, plan, milestones)}
       </Sequence>
     </Workflow>

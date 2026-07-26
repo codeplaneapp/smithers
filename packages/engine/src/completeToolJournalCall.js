@@ -59,37 +59,28 @@ export function completeToolJournalCall(params) {
   const status = params.call.phase === "finished" ? "succeeded" : "unknown";
   const livePatch = {
     ...params.provenance,
-    ...(params.call.phase === "finished"
-      ? { outputJson: JSON.stringify(params.call.output ?? null) }
-      : {}),
+    ...(params.call.phase === "finished" ? { outputJson: JSON.stringify(params.call.output ?? null) } : {}),
     finishedAtMs: params.timestampMs,
     status,
-    errorJson: params.call.phase === "failed"
-      ? JSON.stringify(errorToJson(params.call.error))
-      : null,
+    errorJson: params.call.phase === "failed" ? JSON.stringify(errorToJson(params.call.error)) : null,
   };
 
   return Effect.gen(function* () {
     const completeCall = Effect.gen(function* () {
-      const lockSuffix = params.adapter.internalStorage.dialect === "postgres"
-        ? " FOR UPDATE"
-        : "";
-      const live = yield* Effect.promise(() => params.adapter.internalStorage.queryOne(
-        `SELECT *
+      const lockSuffix = params.adapter.internalStorage.dialect === "postgres" ? " FOR UPDATE" : "";
+      const live = yield* Effect.promise(() =>
+        params.adapter.internalStorage.queryOne(
+          `SELECT *
            FROM _smithers_tool_calls
           WHERE call_token = ?
           LIMIT 1${lockSuffix}`,
-        [params.callToken],
-      ));
+          [params.callToken],
+        ),
+      );
       if (live) {
         const priorRevertStatus = rowValue(live, "revertStatus", "revert_status");
-        const revertStale = priorRevertStatus === "reverting"
-          || priorRevertStatus === "reverted";
-        const opId = [
-          "late-tool-completion",
-          params.callToken,
-          "live",
-        ].join(":");
+        const revertStale = priorRevertStatus === "reverting" || priorRevertStatus === "reverted";
+        const opId = ["late-tool-completion", params.callToken, "live"].join(":");
         const forcedPast = parseJsonArray(rowValue(live, "forcedPastJson", "forced_past_json"));
         if (revertStale && !forcedPast.some((entry) => entry.opId === opId)) {
           forcedPast.push({
@@ -102,22 +93,19 @@ export function completeToolJournalCall(params) {
             priorRevertStatus,
           });
         }
-        const updated = yield* params.adapter.updateToolCallByToken(
-          params.callToken,
-          {
-            ...livePatch,
-            ...(revertStale
-              ? {
+        const updated = yield* params.adapter.updateToolCallByToken(params.callToken, {
+          ...livePatch,
+          ...(revertStale
+            ? {
                 revertStatus: "revert-stale",
                 forcedPastJson: JSON.stringify(forcedPast),
               }
-              : {}),
-          },
-        );
+            : {}),
+        });
         if (updated === 0) {
-          return yield* Effect.fail(new Error(
-            `Live tool token disappeared before completion could be recorded: ${params.callToken}`,
-          ));
+          return yield* Effect.fail(
+            new Error(`Live tool token disappeared before completion could be recorded: ${params.callToken}`),
+          );
         }
         if (!revertStale) return;
 
@@ -176,17 +164,19 @@ export function completeToolJournalCall(params) {
         return;
       }
 
-      const archived = yield* Effect.promise(() => params.adapter.internalStorage.queryOne(
-        `SELECT *
+      const archived = yield* Effect.promise(() =>
+        params.adapter.internalStorage.queryOne(
+          `SELECT *
            FROM _smithers_tool_call_archive
           WHERE call_token = ?
           LIMIT 1`,
-        [params.callToken],
-      ));
+          [params.callToken],
+        ),
+      );
       if (!archived) {
-        return yield* Effect.fail(new Error(
-          `Tool ${params.call.phase} matched no live or archived journal token: ${params.callToken}`,
-        ));
+        return yield* Effect.fail(
+          new Error(`Tool ${params.call.phase} matched no live or archived journal token: ${params.callToken}`),
+        );
       }
 
       const archivedByOp = String(rowValue(archived, "archivedByOp", "archived_by_op") ?? "");
@@ -194,11 +184,7 @@ export function completeToolJournalCall(params) {
       const archivedIteration = Number(archived.iteration ?? params.iteration);
       const archivedAttempt = Number(archived.attempt ?? params.attempt);
       const archivedSeq = Number(archived.seq ?? seq);
-      const opId = [
-        "late-tool-completion",
-        params.callToken,
-        archivedByOp,
-      ].join(":");
+      const opId = ["late-tool-completion", params.callToken, archivedByOp].join(":");
       const marker = {
         opId,
         timestampMs: params.timestampMs,
@@ -218,16 +204,15 @@ export function completeToolJournalCall(params) {
         revertStatus: null,
         forcedPastJson: JSON.stringify(forcedPast),
       };
-      const archivedUpdated = yield* Effect.promise(() => params.adapter.internalStorage.updateWhere(
-        "_smithers_tool_call_archive",
-        archivePatch,
-        "call_token = ?",
-        [params.callToken],
-      ));
+      const archivedUpdated = yield* Effect.promise(() =>
+        params.adapter.internalStorage.updateWhere("_smithers_tool_call_archive", archivePatch, "call_token = ?", [
+          params.callToken,
+        ]),
+      );
       if (archivedUpdated === 0) {
-        return yield* Effect.fail(new Error(
-          `Archived tool token disappeared before late completion could be recorded: ${params.callToken}`,
-        ));
+        return yield* Effect.fail(
+          new Error(`Archived tool token disappeared before late completion could be recorded: ${params.callToken}`),
+        );
       }
 
       const effect = {
@@ -285,10 +270,7 @@ export function completeToolJournalCall(params) {
     if (params.inTransaction) {
       yield* completeCall;
     } else {
-      yield* params.adapter.withTransactionEffect(
-        "late-tool-completion",
-        completeCall,
-      );
+      yield* params.adapter.withTransactionEffect("late-tool-completion", completeCall);
     }
   });
 }

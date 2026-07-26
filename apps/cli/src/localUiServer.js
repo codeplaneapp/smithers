@@ -19,17 +19,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
-import {
-  basename,
-  dirname,
-  extname,
-  isAbsolute,
-  join,
-  normalize,
-  relative,
-  resolve,
-  sep,
-} from "node:path";
+import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -112,9 +102,9 @@ function safeReaddir(dir) {
 export function hasConciergeCredential(env) {
   return Boolean(
     env.CEREBRAS_API_KEY?.trim() ||
-      env.CODEX_ACCESS_TOKEN?.trim() ||
-      env.CODEX_REFRESH_TOKEN?.trim() ||
-      env.OPENAI_API_KEY?.trim(),
+    env.CODEX_ACCESS_TOKEN?.trim() ||
+    env.CODEX_REFRESH_TOKEN?.trim() ||
+    env.OPENAI_API_KEY?.trim(),
   );
 }
 
@@ -226,9 +216,7 @@ function runLocal(command, args, cwd) {
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
-    throw new Error(
-      (result.stderr || result.stdout || `${command} exited ${result.status}`).trim(),
-    );
+    throw new Error((result.stderr || result.stdout || `${command} exited ${result.status}`).trim());
   }
   return result.stdout || "";
 }
@@ -337,9 +325,7 @@ function parseJjStatus(output) {
   for (const rawLine of output.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line) continue;
-    const workingCopy = line.match(
-      /^Working copy(?:\s+\(([^)]+)\))?\s*:\s*([^\s]+)?/i,
-    );
+    const workingCopy = line.match(/^Working copy(?:\s+\(([^)]+)\))?\s*:\s*([^\s]+)?/i);
     if (workingCopy) {
       current = workingCopy[1] || workingCopy[2] || null;
       continue;
@@ -349,11 +335,7 @@ function parseJjStatus(output) {
       changes.push(compactChange);
       continue;
     }
-    if (
-      /^(Added|Modified|Deleted|Renamed|Copied|Untracked|Conflicted?|Conflict)\s+/i.test(
-        line,
-      )
-    ) {
+    if (/^(Added|Modified|Deleted|Renamed|Copied|Untracked|Conflicted?|Conflict)\s+/i.test(line)) {
       changes.push({
         status: line.split(/\s+/)[0] || "Unknown",
         category: jjCategory(line),
@@ -412,17 +394,13 @@ function readLocalVcsSnapshot(workspacePath) {
   if (!detection.repoRoot) return snapshot;
   if (detection.hasGit) {
     try {
-      const parsed = parseGitStatus(
-        runLocal("git", ["status", "--porcelain=v1", "--branch"], detection.repoRoot),
-      );
+      const parsed = parseGitStatus(runLocal("git", ["status", "--porcelain=v1", "--branch"], detection.repoRoot));
       snapshot.git = {
         kind: "git",
         available: true,
         repoRoot: detection.repoRoot,
         current: parsed.current,
-        bookmarks: parseBranches(
-          runLocal("git", ["branch", "--format=%(refname:short)"], detection.repoRoot),
-        ),
+        bookmarks: parseBranches(runLocal("git", ["branch", "--format=%(refname:short)"], detection.repoRoot)),
         changes: parsed.changes,
         clean: parsed.clean,
         error: null,
@@ -433,12 +411,8 @@ function readLocalVcsSnapshot(workspacePath) {
   }
   if (detection.hasJj) {
     try {
-      const repoRoot =
-        runLocal("jj", ["--no-pager", "root"], detection.repoRoot).trim() ||
-        detection.repoRoot;
-      const parsed = parseJjStatus(
-        runLocal("jj", ["--no-pager", "--color=never", "status"], detection.repoRoot),
-      );
+      const repoRoot = runLocal("jj", ["--no-pager", "root"], detection.repoRoot).trim() || detection.repoRoot;
+      const parsed = parseJjStatus(runLocal("jj", ["--no-pager", "--color=never", "status"], detection.repoRoot));
       snapshot.jj = {
         kind: "jj",
         available: true,
@@ -487,8 +461,7 @@ function normalizeHostname(hostname) {
 function isLoopbackHostname(hostname) {
   const normalized = normalizeHostname(hostname);
   if (normalized === "localhost" || normalized === "::1") return true;
-  if (isIP(normalized) === 4)
-    return normalized === "127.0.0.1" || normalized.startsWith("127.");
+  if (isIP(normalized) === 4) return normalized === "127.0.0.1" || normalized.startsWith("127.");
   return false;
 }
 
@@ -517,16 +490,10 @@ function originMatchesHost(originHeader, hostHeader, localPort) {
   if (!isLoopbackHostname(origin.hostname)) {
     return false;
   }
-  if (
-    normalizeHostname(origin.hostname) !==
-    normalizeHostname(requestHost.hostname)
-  ) {
+  if (normalizeHostname(origin.hostname) !== normalizeHostname(requestHost.hostname)) {
     return false;
   }
-  return (
-    Number(origin.port || (origin.protocol === "https:" ? "443" : "80")) ===
-    requestPort
-  );
+  return Number(origin.port || (origin.protocol === "https:" ? "443" : "80")) === requestPort;
 }
 
 /**
@@ -545,21 +512,10 @@ function isCrossOriginProxyRequest(req) {
 }
 
 function enforceFilesWriteSameOrigin(req, res) {
-  if (
-    originMatchesHost(
-      req.headers.origin,
-      req.headers.host,
-      req.socket.localPort,
-    )
-  ) {
+  if (originMatchesHost(req.headers.origin, req.headers.host, req.socket.localPort)) {
     return true;
   }
-  fileApiError(
-    res,
-    403,
-    "FORBIDDEN_ORIGIN",
-    "File write requests must come from the same local Smithers UI origin.",
-  );
+  fileApiError(res, 403, "FORBIDDEN_ORIGIN", "File write requests must come from the same local Smithers UI origin.");
   return false;
 }
 
@@ -594,10 +550,7 @@ function realpathOrResolve(path) {
 }
 
 function isInsideRoot(root, target) {
-  return (
-    target === root ||
-    target.startsWith(root.endsWith(sep) ? root : `${root}${sep}`)
-  );
+  return target === root || target.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
 }
 
 function toWorkspaceRelative(root, target) {
@@ -605,11 +558,7 @@ function toWorkspaceRelative(root, target) {
   return rel === "" ? "" : rel;
 }
 
-export function resolveWorkspaceFilePath(
-  workspaceRoot,
-  inputPath,
-  { mustExist = true } = {},
-) {
+export function resolveWorkspaceFilePath(workspaceRoot, inputPath, { mustExist = true } = {}) {
   if (typeof inputPath !== "string") {
     return {
       ok: false,
@@ -628,9 +577,7 @@ export function resolveWorkspaceFilePath(
   }
 
   const root = realpathOrResolve(workspaceRoot);
-  const candidate = isAbsolute(inputPath)
-    ? resolve(inputPath)
-    : resolve(root, inputPath || ".");
+  const candidate = isAbsolute(inputPath) ? resolve(inputPath) : resolve(root, inputPath || ".");
   if (!isInsideRoot(root, candidate)) {
     return {
       ok: false,
@@ -763,9 +710,7 @@ function entryForPath(root, childPath, name) {
       size: st.size,
       mtimeMs: st.mtimeMs,
       safe: true,
-      ...(!st.isDirectory() && st.isFile()
-        ? previewFlagsForFile(real, st)
-        : { previewable: false, editable: false }),
+      ...(!st.isDirectory() && st.isFile() ? previewFlagsForFile(real, st) : { previewable: false, editable: false }),
     };
   }
 
@@ -877,9 +822,7 @@ function readWorkspaceFile(workspaceRoot, inputPath) {
   }
 
   const fullRead = st.size <= FILE_EDIT_BYTES;
-  const bytes = fullRead
-    ? readFileSync(resolved.realPath)
-    : readPrefix(resolved.realPath, FILE_PREVIEW_BYTES);
+  const bytes = fullRead ? readFileSync(resolved.realPath) : readPrefix(resolved.realPath, FILE_PREVIEW_BYTES);
   const text = bytes.toString("utf8");
   return {
     ok: true,
@@ -894,9 +837,7 @@ function readWorkspaceFile(workspaceRoot, inputPath) {
       previewText: text,
       content: fullRead ? text : null,
       truncated: !fullRead,
-      reason: fullRead
-        ? null
-        : `Files larger than ${FILE_EDIT_BYTES} bytes open as read-only previews.`,
+      reason: fullRead ? null : `Files larger than ${FILE_EDIT_BYTES} bytes open as read-only previews.`,
     },
   };
 }
@@ -923,10 +864,7 @@ async function readJsonBody(req) {
  * rename stays within one filesystem — the only way it is atomic.
  */
 function writeFileAtomicSync(targetPath, content, mode) {
-  const tempPath = join(
-    dirname(targetPath),
-    `.${basename(targetPath)}.smithers-${randomUUID()}.tmp`,
-  );
+  const tempPath = join(dirname(targetPath), `.${basename(targetPath)}.smithers-${randomUUID()}.tmp`);
   try {
     writeFileSync(tempPath, content, { encoding: "utf8", mode });
     // writeFileSync's mode is masked by the process umask; set it outright.
@@ -992,8 +930,7 @@ function writeWorkspaceFile(workspaceRoot, inputPath, content, revision) {
       ok: false,
       status: 409,
       code: "STALE_REVISION",
-      message:
-        "This file changed on disk after you opened it. Reload it before saving.",
+      message: "This file changed on disk after you opened it. Reload it before saving.",
     };
   }
   try {
@@ -1011,37 +948,21 @@ function writeWorkspaceFile(workspaceRoot, inputPath, content, revision) {
 
 async function handleFilesApi(req, res, url, workspaceRoot) {
   try {
-    if (
-      req.method === "GET" &&
-      (url.pathname === "/api/files/tree" || url.pathname === "/api/files/read")
-    ) {
+    if (req.method === "GET" && (url.pathname === "/api/files/tree" || url.pathname === "/api/files/read")) {
       if (!isLocalDataRequestAllowed(req)) {
-        fileApiError(
-          res,
-          403,
-          "FORBIDDEN_ORIGIN",
-          "File requests must come from the same local Smithers UI origin.",
-        );
+        fileApiError(res, 403, "FORBIDDEN_ORIGIN", "File requests must come from the same local Smithers UI origin.");
         return true;
       }
     }
     if (url.pathname === "/api/files/tree" && req.method === "GET") {
-      const result = listWorkspaceTree(
-        workspaceRoot,
-        url.searchParams.get("path") ?? "",
-      );
-      if (!result.ok)
-        fileApiError(res, result.status, result.code, result.message);
+      const result = listWorkspaceTree(workspaceRoot, url.searchParams.get("path") ?? "");
+      if (!result.ok) fileApiError(res, result.status, result.code, result.message);
       else json(res, 200, result);
       return true;
     }
     if (url.pathname === "/api/files/read" && req.method === "GET") {
-      const result = readWorkspaceFile(
-        workspaceRoot,
-        url.searchParams.get("path") ?? "",
-      );
-      if (!result.ok)
-        fileApiError(res, result.status, result.code, result.message);
+      const result = readWorkspaceFile(workspaceRoot, url.searchParams.get("path") ?? "");
+      if (!result.ok) fileApiError(res, result.status, result.code, result.message);
       else json(res, 200, result);
       return true;
     }
@@ -1049,14 +970,8 @@ async function handleFilesApi(req, res, url, workspaceRoot) {
       if (!enforceFilesWriteSameOrigin(req, res)) return true;
       try {
         const body = await readJsonBody(req);
-        const result = writeWorkspaceFile(
-          workspaceRoot,
-          body.path,
-          body.content,
-          body.revision,
-        );
-        if (!result.ok)
-          fileApiError(res, result.status, result.code, result.message);
+        const result = writeWorkspaceFile(workspaceRoot, body.path, body.content, body.revision);
+        if (!result.ok) fileApiError(res, result.status, result.code, result.message);
         else json(res, 200, result);
       } catch (err) {
         fileApiError(res, 400, "INVALID_REQUEST", err?.message ?? String(err));
@@ -1296,10 +1211,7 @@ export function startLocalUiServer({
         );
       return;
     }
-    if (
-      url.pathname === `${LOCAL_WORKSPACE_PREFIX}/readiness` &&
-      req.method === "POST"
-    ) {
+    if (url.pathname === `${LOCAL_WORKSPACE_PREFIX}/readiness` && req.method === "POST") {
       if (!isLocalDataRequestAllowed(req)) {
         res.writeHead(403, { "content-type": "text/plain" });
         res.end("Cross-origin requests are not allowed");
@@ -1371,11 +1283,7 @@ export function startLocalUiServer({
   // the gateway, rewriting the Host/Origin lines to keep it same-origin.
   server.on("upgrade", (req, clientSocket, head) => {
     const url = new URL(req.url ?? "/", `http://${host}`);
-    if (
-      !isGatewayPath(url.pathname) ||
-      !requestHostIsLoopback(req) ||
-      isCrossOriginProxyRequest(req)
-    ) {
+    if (!isGatewayPath(url.pathname) || !requestHostIsLoopback(req) || isCrossOriginProxyRequest(req)) {
       clientSocket.destroy();
       return;
     }
@@ -1432,9 +1340,7 @@ export async function serveLocalUi({ gatewayBase, port, rebuild = false }) {
   // The concierge (chat backend) runs from source in the repo, or from the
   // bundled `concierge.js` staged next to a prebuilt bundle. Either way it uses
   // Bun.serve, so it needs `bun` on PATH.
-  const conciergeEntry = appDir
-    ? join(appDir, "concierge", "server.ts")
-    : join(distDir, "concierge.js");
+  const conciergeEntry = appDir ? join(appDir, "concierge", "server.ts") : join(distDir, "concierge.js");
   if (existsSync(conciergeEntry)) {
     // Block before we bind a port: an app whose chat can't work is worse than a
     // clear up-front error telling the user which env var to set.

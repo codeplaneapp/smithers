@@ -73,7 +73,7 @@ import { Task } from "./Task.js";
  * @returns {value is CategoryConfig}
  */
 function isConfig(value) {
-    return "agent" in value && typeof value.generate !== "function";
+  return "agent" in value && typeof value.generate !== "function";
 }
 /**
  * <ClassifyAndRoute> — Classify items then route to category-specific agents.
@@ -84,53 +84,71 @@ function isConfig(value) {
  * @param {ClassifyAndRouteProps} props
  */
 export function ClassifyAndRoute(props) {
-    if (props.skipIf)
-        return null;
-    const { id, items, categories, classifierAgent, classifierOutput, routeOutput, classificationResult, maxConcurrency, children, } = props;
-    const prefix = id ?? "classify-and-route";
-    const itemList = Array.isArray(items) ? items : [items];
-    const categoryNames = Object.keys(categories);
-    // Step 1: Classification task
-    const classifyTask = React.createElement(Task, {
-        key: `${prefix}-classify`,
-        id: `${prefix}-classify`,
-        output: classifierOutput,
-        agent: classifierAgent,
-        label: "Classify items",
-        children: children ??
-            `Classify the following items into categories: ${categoryNames.join(", ")}.\n\nItems:\n${JSON.stringify(itemList, null, 2)}`,
-    });
-    // Step 2: Route each classified item to its category agent
-    const classifications = classificationResult?.classifications ?? [];
-    const routeElements = classifications.map((c, idx) => {
-        const catKey = c.category;
-        const catEntry = categories[catKey];
-        if (!catEntry)
-            return null;
-        const agent = isConfig(catEntry) ? catEntry.agent : catEntry;
-        const output = isConfig(catEntry) ? (catEntry.output ?? routeOutput) : routeOutput;
-        const prompt = isConfig(catEntry) && catEntry.prompt
-            ? catEntry.prompt(c)
-            : `Handle item classified as "${catKey}":\n${JSON.stringify(c, null, 2)}`;
-        return React.createElement(Task, {
-            key: `${prefix}-route-${c.itemId ?? idx}`,
-            id: `${prefix}-route-${c.itemId ?? idx}`,
-            output,
-            agent,
-            continueOnFail: true,
-            label: `Route: ${catKey}${c.itemId ? ` (${c.itemId})` : ""}`,
-            children: prompt,
-        });
-    }).filter(Boolean);
-    const sequenceChildren = [classifyTask];
-    if (routeElements.length > 0) {
-        sequenceChildren.push(React.createElement(Parallel, {
-            key: `${prefix}-routes`,
-            id: `${prefix}-routes`,
-            maxConcurrency,
-        }, ...routeElements));
-    }
-    return React.createElement(Sequence, null, ...sequenceChildren);
+  if (props.skipIf) return null;
+  const {
+    id,
+    items,
+    categories,
+    classifierAgent,
+    classifierOutput,
+    routeOutput,
+    classificationResult,
+    maxConcurrency,
+    children,
+  } = props;
+  const prefix = id ?? "classify-and-route";
+  const itemList = Array.isArray(items) ? items : [items];
+  const categoryNames = Object.keys(categories);
+  // Step 1: Classification task
+  const classifyTask = React.createElement(Task, {
+    key: `${prefix}-classify`,
+    id: `${prefix}-classify`,
+    output: classifierOutput,
+    agent: classifierAgent,
+    label: "Classify items",
+    children:
+      children ??
+      `Classify the following items into categories: ${categoryNames.join(", ")}.\n\nItems:\n${JSON.stringify(itemList, null, 2)}`,
+  });
+  // Step 2: Route each classified item to its category agent
+  const classifications = classificationResult?.classifications ?? [];
+  const routeElements = classifications
+    .map((c, idx) => {
+      const catKey = c.category;
+      const catEntry = categories[catKey];
+      if (!catEntry) return null;
+      const agent = isConfig(catEntry) ? catEntry.agent : catEntry;
+      const output = isConfig(catEntry) ? (catEntry.output ?? routeOutput) : routeOutput;
+      const prompt =
+        isConfig(catEntry) && catEntry.prompt
+          ? catEntry.prompt(c)
+          : `Handle item classified as "${catKey}":\n${JSON.stringify(c, null, 2)}`;
+      return React.createElement(Task, {
+        key: `${prefix}-route-${c.itemId ?? idx}`,
+        id: `${prefix}-route-${c.itemId ?? idx}`,
+        output,
+        agent,
+        continueOnFail: true,
+        label: `Route: ${catKey}${c.itemId ? ` (${c.itemId})` : ""}`,
+        children: prompt,
+      });
+    })
+    .filter(Boolean);
+  const sequenceChildren = [classifyTask];
+  if (routeElements.length > 0) {
+    sequenceChildren.push(
+      React.createElement(
+        Parallel,
+        {
+          key: `${prefix}-routes`,
+          id: `${prefix}-routes`,
+          maxConcurrency,
+        },
+        ...routeElements,
+      ),
+    );
+  }
+  return React.createElement(Sequence, null, ...sequenceChildren);
 }
 ```
 
@@ -142,17 +160,16 @@ import React from "react";
  * @param {SequenceProps} props
  */
 export function Sequence(props) {
-    if (props.skipIf)
-        return null;
-    // Sequence carries only a display label; pass a sanitized bag (align with
-    // the sanitizing structural components) so control props don't leak through.
-    // `label` names the phase group in run views (graph, the Claude /workflows
-    // mirror) and is preserved in the persisted frame XML.
-    const next = {
-        ...(props.label === undefined ? {} : { label: props.label }),
-        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
-    };
-    return React.createElement("smithers:sequence", next, props.children);
+  if (props.skipIf) return null;
+  // Sequence carries only a display label; pass a sanitized bag (align with
+  // the sanitizing structural components) so control props don't leak through.
+  // `label` names the phase group in run views (graph, the Claude /workflows
+  // mirror) and is preserved in the persisted frame XML.
+  const next = {
+    ...(props.label === undefined ? {} : { label: props.label }),
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+  };
+  return React.createElement("smithers:sequence", next, props.children);
 }
 ```
 
@@ -164,19 +181,18 @@ import React from "react";
  * @param {ParallelProps} props
  */
 export function Parallel(props) {
-    if (props.skipIf)
-        return null;
-    // Align prop sanitization with other structural components. `label` names
-    // the phase group in run views (graph, the Claude /workflows mirror).
-    const next = {
-        maxConcurrency: props.maxConcurrency,
-        subtreeConcurrency: props.subtreeConcurrency,
-        id: props.id,
-        ...(props.label === undefined ? {} : { label: props.label }),
-        ...(props.priority === undefined ? {} : { priority: props.priority }),
-        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
-    };
-    return React.createElement("smithers:parallel", next, props.children);
+  if (props.skipIf) return null;
+  // Align prop sanitization with other structural components. `label` names
+  // the phase group in run views (graph, the Claude /workflows mirror).
+  const next = {
+    maxConcurrency: props.maxConcurrency,
+    subtreeConcurrency: props.subtreeConcurrency,
+    id: props.id,
+    ...(props.label === undefined ? {} : { label: props.label }),
+    ...(props.priority === undefined ? {} : { priority: props.priority }),
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+  };
+  return React.createElement("smithers:parallel", next, props.children);
 }
 ```
 
@@ -214,29 +230,29 @@ import type { CategoryConfig } from "./CategoryConfig.ts";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type ClassifyAndRouteProps = {
-	id?: string;
-	/** Items to classify. A single item or an array of items. */
-	items: unknown | unknown[];
-	/** Record mapping category names to agents or config objects. */
-	categories: Record<string, AgentLike | CategoryConfig>;
-	/** Agent that classifies items into categories. */
-	classifierAgent: AgentLike;
-	/** Output schema for the classification task. */
-	classifierOutput: OutputTarget;
-	/** Default output schema for routed work. Can be overridden per-category. */
-	routeOutput: OutputTarget;
-	/** Classification result used to drive routing. Typically from ctx.outputMaybe(). */
-	classificationResult?: {
-		classifications: Array<{
-			itemId?: string;
-			category: string;
-			[key: string]: unknown;
-		}>;
-	} | null;
-	/** Max parallel routes. */
-	maxConcurrency?: number;
-	skipIf?: boolean;
-	children?: React.ReactNode;
+  id?: string;
+  /** Items to classify. A single item or an array of items. */
+  items: unknown | unknown[];
+  /** Record mapping category names to agents or config objects. */
+  categories: Record<string, AgentLike | CategoryConfig>;
+  /** Agent that classifies items into categories. */
+  classifierAgent: AgentLike;
+  /** Output schema for the classification task. */
+  classifierOutput: OutputTarget;
+  /** Default output schema for routed work. Can be overridden per-category. */
+  routeOutput: OutputTarget;
+  /** Classification result used to drive routing. Typically from ctx.outputMaybe(). */
+  classificationResult?: {
+    classifications: Array<{
+      itemId?: string;
+      category: string;
+      [key: string]: unknown;
+    }>;
+  } | null;
+  /** Max parallel routes. */
+  maxConcurrency?: number;
+  skipIf?: boolean;
+  children?: React.ReactNode;
 };
 ```
 
@@ -245,11 +261,11 @@ import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type CategoryConfig = {
-	agent: AgentLike;
-	/** Output schema for this category's route handler. Overrides `routeOutput`. */
-	output?: OutputTarget;
-	/** Optional prompt for the route handler. Receives the classified item. */
-	prompt?: (item: unknown) => string;
+  agent: AgentLike;
+  /** Output schema for this category's route handler. Overrides `routeOutput`. */
+  output?: OutputTarget;
+  /** Optional prompt for the route handler. Receives the classified item. */
+  prompt?: (item: unknown) => string;
 };
 ```
 </CodeGroup>

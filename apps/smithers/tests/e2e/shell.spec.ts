@@ -22,9 +22,7 @@ test("the theme toggle flips light/dark", async ({ page }) => {
   await page.goto("/");
   const before = await page.evaluate(() => document.documentElement.dataset.theme);
   await page.getByRole("button", { name: /Switch to (light|dark) mode/ }).click();
-  await expect
-    .poll(() => page.evaluate(() => document.documentElement.dataset.theme))
-    .not.toBe(before);
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).not.toBe(before);
 });
 
 test("the layout toggle switches to the sidebar shell", async ({ page }) => {

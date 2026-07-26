@@ -5,14 +5,14 @@
 
 const PHASE_TAGS = new Set(["smithers:sequence", "smithers:parallel", "smithers:ralph"]);
 const TASK_TAGS = new Set([
-    "smithers:task",
-    "smithers:subflow",
-    "smithers:sandbox",
-    "smithers:wait-for-event",
-    "smithers:timer",
-    "smithers:approval",
-    "smithers:approval-gate",
-    "smithers:human-task",
+  "smithers:task",
+  "smithers:subflow",
+  "smithers:sandbox",
+  "smithers:wait-for-event",
+  "smithers:timer",
+  "smithers:approval",
+  "smithers:approval-gate",
+  "smithers:human-task",
 ]);
 
 /**
@@ -25,61 +25,63 @@ const TASK_TAGS = new Set([
  * @returns {ClaudeWorkflowPhasePlan}
  */
 export function buildClaudeWorkflowPhasePlan(xml, inputTasks, options = {}) {
-    const tasks = [...inputTasks].sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0));
-    const taskById = new Map(tasks.map((task) => [task.nodeId, task]));
-    const assigned = new Set();
-    /** @type {import("./ClaudeWorkflowPhase.ts").ClaudeWorkflowPhase[]} */
-    const phases = [];
-    const phaseTitleCounts = new Map();
-    /** @type {import("./ClaudeWorkflowNodePhase.ts").ClaudeWorkflowNodePhase[]} */
-    const nodes = [];
-    const fallbackBase = titleFromProps(xml?.kind === "element" ? xml.props : undefined, "Workflow");
-    const fallbackPhase = options.collapsePhases === true ? "Smithers run" : uniquePhaseTitle(fallbackBase, phaseTitleCounts);
+  const tasks = [...inputTasks].sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0));
+  const taskById = new Map(tasks.map((task) => [task.nodeId, task]));
+  const assigned = new Set();
+  /** @type {import("./ClaudeWorkflowPhase.ts").ClaudeWorkflowPhase[]} */
+  const phases = [];
+  const phaseTitleCounts = new Map();
+  /** @type {import("./ClaudeWorkflowNodePhase.ts").ClaudeWorkflowNodePhase[]} */
+  const nodes = [];
+  const fallbackBase = titleFromProps(xml?.kind === "element" ? xml.props : undefined, "Workflow");
+  const fallbackPhase =
+    options.collapsePhases === true ? "Smithers run" : uniquePhaseTitle(fallbackBase, phaseTitleCounts);
 
-    ensurePhase(fallbackPhase);
+  ensurePhase(fallbackPhase);
 
-    /** @param {string} title */
-    function ensurePhase(title) {
-        if (!phases.some((phase) => phase.title === title)) {
-            phases.push({ title });
-        }
+  /** @param {string} title */
+  function ensurePhase(title) {
+    if (!phases.some((phase) => phase.title === title)) {
+      phases.push({ title });
+    }
+  }
+
+  /** @param {XmlNode | null | undefined} node @param {string} currentPhase */
+  function walk(node, currentPhase) {
+    if (!node || node.kind !== "element") {
+      return;
     }
 
-    /** @param {XmlNode | null | undefined} node @param {string} currentPhase */
-    function walk(node, currentPhase) {
-        if (!node || node.kind !== "element") {
-            return;
-        }
-
-        let nextPhase = currentPhase;
-        if (PHASE_TAGS.has(node.tag) && options.collapsePhases !== true) {
-            const fallback = node.tag === "smithers:ralph" ? "Loop" : node.tag === "smithers:parallel" ? "Parallel" : "Sequence";
-            nextPhase = uniquePhaseTitle(titleFromProps(node.props, fallback), phaseTitleCounts);
-            ensurePhase(nextPhase);
-        }
-
-        if (TASK_TAGS.has(node.tag)) {
-            const task = findTaskForElement(node, taskById);
-            if (task && !assigned.has(task.nodeId)) {
-                assigned.add(task.nodeId);
-                nodes.push(nodePhase(task, nextPhase));
-            }
-        }
-
-        for (const child of node.children ?? []) {
-            walk(child, nextPhase);
-        }
+    let nextPhase = currentPhase;
+    if (PHASE_TAGS.has(node.tag) && options.collapsePhases !== true) {
+      const fallback =
+        node.tag === "smithers:ralph" ? "Loop" : node.tag === "smithers:parallel" ? "Parallel" : "Sequence";
+      nextPhase = uniquePhaseTitle(titleFromProps(node.props, fallback), phaseTitleCounts);
+      ensurePhase(nextPhase);
     }
 
-    walk(xml, fallbackPhase);
-
-    for (const task of tasks) {
-        if (!assigned.has(task.nodeId)) {
-            nodes.push(nodePhase(task, fallbackPhase));
-        }
+    if (TASK_TAGS.has(node.tag)) {
+      const task = findTaskForElement(node, taskById);
+      if (task && !assigned.has(task.nodeId)) {
+        assigned.add(task.nodeId);
+        nodes.push(nodePhase(task, nextPhase));
+      }
     }
 
-    return { phases, nodes };
+    for (const child of node.children ?? []) {
+      walk(child, nextPhase);
+    }
+  }
+
+  walk(xml, fallbackPhase);
+
+  for (const task of tasks) {
+    if (!assigned.has(task.nodeId)) {
+      nodes.push(nodePhase(task, fallbackPhase));
+    }
+  }
+
+  return { phases, nodes };
 }
 
 /**
@@ -88,13 +90,13 @@ export function buildClaudeWorkflowPhasePlan(xml, inputTasks, options = {}) {
  * @returns {string}
  */
 function titleFromProps(props, fallback) {
-    for (const key of ["label", "name", "id"]) {
-        const value = props?.[key];
-        if (typeof value === "string" && value.trim().length > 0) {
-            return value.trim();
-        }
+  for (const key of ["label", "name", "id"]) {
+    const value = props?.[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
     }
-    return fallback;
+  }
+  return fallback;
 }
 
 /**
@@ -103,9 +105,9 @@ function titleFromProps(props, fallback) {
  * @returns {string}
  */
 function uniquePhaseTitle(title, counts) {
-    const count = (counts.get(title) ?? 0) + 1;
-    counts.set(title, count);
-    return count === 1 ? title : `${title} ${count}`;
+  const count = (counts.get(title) ?? 0) + 1;
+  counts.set(title, count);
+  return count === 1 ? title : `${title} ${count}`;
 }
 
 /**
@@ -114,11 +116,11 @@ function uniquePhaseTitle(title, counts) {
  * @returns {PhasePlanTask | undefined}
  */
 function findTaskForElement(node, taskById) {
-    const id = node.props?.id;
-    if (typeof id !== "string" || id.length === 0) {
-        return undefined;
-    }
-    return taskById.get(id) ?? [...taskById.values()].find((task) => task.nodeId.startsWith(`${id}@@`));
+  const id = node.props?.id;
+  if (typeof id !== "string" || id.length === 0) {
+    return undefined;
+  }
+  return taskById.get(id) ?? [...taskById.values()].find((task) => task.nodeId.startsWith(`${id}@@`));
 }
 
 /**
@@ -127,10 +129,10 @@ function findTaskForElement(node, taskById) {
  * @returns {import("./ClaudeWorkflowNodePhase.ts").ClaudeWorkflowNodePhase}
  */
 function nodePhase(task, phase) {
-    return {
-        nodeId: task.nodeId,
-        label: task.label || task.nodeId,
-        phase,
-        kind: /** @type {ClaudeWorkflowNodeKind} */ (task.kind),
-    };
+  return {
+    nodeId: task.nodeId,
+    label: task.label || task.nodeId,
+    phase,
+    kind: /** @type {ClaudeWorkflowNodeKind} */ (task.kind),
+  };
 }

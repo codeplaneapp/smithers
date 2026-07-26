@@ -167,17 +167,37 @@ export function formatStatus(status: string | undefined): string {
     open: "Open",
     closed: "Closed",
   };
-  return labels[normalized] ?? normalized.split("-").map((part) => part ? `${part[0]!.toUpperCase()}${part.slice(1)}` : part).join(" ");
+  return (
+    labels[normalized] ??
+    normalized
+      .split("-")
+      .map((part) => (part ? `${part[0]!.toUpperCase()}${part.slice(1)}` : part))
+      .join(" ")
+  );
 }
 
 export function statusClass(status: string | undefined): string {
   const normalized = normalizeStatus(status);
-  if (["fixed", "ready", "done", "finished", "success", "ok", "complete", "completed", "closed"].includes(normalized)) return "ok";
+  if (["fixed", "ready", "done", "finished", "success", "ok", "complete", "completed", "closed"].includes(normalized))
+    return "ok";
   if (["broken", "blocked", "failed", "failure", "error"].includes(normalized)) return "bad";
   if (
-    ["partial", "missing-tests", "missing", "running", "pending", "queued", "waiting", "cancelled", "canceled", "todo", "open"].includes(normalized) ||
+    [
+      "partial",
+      "missing-tests",
+      "missing",
+      "running",
+      "pending",
+      "queued",
+      "waiting",
+      "cancelled",
+      "canceled",
+      "todo",
+      "open",
+    ].includes(normalized) ||
     normalized.startsWith("waiting-")
-  ) return "warn";
+  )
+    return "warn";
   return "muted";
 }
 
@@ -290,7 +310,20 @@ export function ticketRiskClass(priority: unknown, severity: unknown): "bad" | "
 
 export function isTerminalRunStatus(status: string | undefined): boolean {
   const normalized = normalizeStatus(status);
-  return ["done", "finished", "success", "ok", "complete", "completed", "failed", "failure", "error", "cancelled", "canceled", "skipped"].includes(normalized);
+  return [
+    "done",
+    "finished",
+    "success",
+    "ok",
+    "complete",
+    "completed",
+    "failed",
+    "failure",
+    "error",
+    "cancelled",
+    "canceled",
+    "skipped",
+  ].includes(normalized);
 }
 
 export function isFailedTerminalRunStatus(status: string | undefined): boolean {
@@ -301,7 +334,12 @@ export function isFailedTerminalRunStatus(status: string | undefined): boolean {
 export function fmtTime(ms: number | undefined): string {
   if (!ms || !Number.isFinite(ms)) return "";
   try {
-    return new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    return new Date(ms).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
   } catch {
     return "";
   }
@@ -319,7 +357,14 @@ export function errorMessage(error: unknown): string {
 }
 
 export function ErrorBanner({ title, errors }: { title: string; errors: unknown[] }) {
-  const messages = [...new Set(errors.map(errorMessage).map((message) => message.trim()).filter(Boolean))];
+  const messages = [
+    ...new Set(
+      errors
+        .map(errorMessage)
+        .map((message) => message.trim())
+        .filter(Boolean),
+    ),
+  ];
   if (messages.length === 0) return null;
   return (
     <section className="error-banner" role="alert" data-testid="ddd-error-banner">
@@ -436,7 +481,10 @@ export function useDialogFocusTrap({
 }
 
 export function normalizeMarkdownForDirty(markdown: string): string {
-  return markdown.replace(/\r\n?/g, "\n").replace(/[ \t]+$/gm, "").trimEnd();
+  return markdown
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+$/gm, "")
+    .trimEnd();
 }
 
 export type DraftChangedFile = { path: string; beforeMarkdown: string; afterMarkdown: string };
@@ -504,7 +552,10 @@ export function reconcileDraftsAfterRun(
     if (updated.has(path)) appliedPaths.push(path);
     const currentDraft = drafts[path];
     if (currentDraft === undefined) continue;
-    if (updated.has(path) && normalizeMarkdownForDirty(currentDraft) === normalizeMarkdownForDirty(file.afterMarkdown)) {
+    if (
+      updated.has(path) &&
+      normalizeMarkdownForDirty(currentDraft) === normalizeMarkdownForDirty(file.afterMarkdown)
+    ) {
       delete nextDrafts[path];
       clearedPaths.push(path);
     } else {
@@ -714,7 +765,8 @@ export function chatLinesFromFrame(frame: EventFrame): ChatLine[] {
     const who = asString(payload.engine) || asString(agentEvent.engine) || asString(payload.nodeId) || "agent";
     const action = isRecord(agentEvent.action) ? agentEvent.action : undefined;
     const kind = action ? asString(action.kind) : "";
-    const detailType = action && isRecord(action.detail) ? asString((action.detail as Record<string, unknown>).type) : "";
+    const detailType =
+      action && isRecord(action.detail) ? asString((action.detail as Record<string, unknown>).type) : "";
     const title = action ? asString(action.title) : "";
     const entryType = asString(agentEvent.entryType);
 
@@ -725,8 +777,7 @@ export function chatLinesFromFrame(frame: EventFrame): ChatLine[] {
     // activity stays in the Live log so the chat reads like a real conversation.
     if (type === "action") {
       const message = asString(agentEvent.message);
-      const isAssistantMessage =
-        detailType === "agent_message" || title === "assistant" || entryType === "message";
+      const isAssistantMessage = detailType === "agent_message" || title === "assistant" || entryType === "message";
       if (isAssistantMessage && message.trim()) {
         lines.push({ who, role: "assistant", text: message, kind: "message" });
       } else if (kind === "reasoning" && message.trim()) {
@@ -909,7 +960,8 @@ function summarizeStructured(value: unknown): string {
   }
 
   if (typeof row.buildPassed === "boolean") parts.push(row.buildPassed ? "build passed" : "build failed");
-  if (typeof row.docsBuildPassed === "boolean") parts.push(row.docsBuildPassed ? "docs build passed" : "docs build failed");
+  if (typeof row.docsBuildPassed === "boolean")
+    parts.push(row.docsBuildPassed ? "docs build passed" : "docs build failed");
   const duration = formatDuration(row.durationMs ?? row.elapsedMs ?? row.elapsed_ms);
   if (duration) parts.push(duration);
 
@@ -942,7 +994,9 @@ function logToneFor(event: string, status: string): "ok" | "warn" | "bad" | "" {
   return "";
 }
 
-export function logLineFromFrame(frame: EventFrame): { seq: number; event: string; node: string; detail: string; tone: "ok" | "warn" | "bad" | "" } | null {
+export function logLineFromFrame(
+  frame: EventFrame,
+): { seq: number; event: string; node: string; detail: string; tone: "ok" | "warn" | "bad" | "" } | null {
   const env = frameEnvelope(frame);
   if (!env) return null;
   const { event, payload } = env;
@@ -961,23 +1015,48 @@ export function logLineFromFrame(frame: EventFrame): { seq: number; event: strin
     const type = agentEvent ? asString(agentEvent.type) : "";
     const action = agentEvent && isRecord(agentEvent.action) ? agentEvent.action : undefined;
     const actionKind = action ? asString(action.kind) || asString(action.title) : "";
-    if (type === "completed") detail = `Completed${asString(agentEvent?.answer) ? `: ${shortText(asString(agentEvent?.answer), 160)}` : ""}`;
-    else if (type === "action") detail = [formatStatus(actionKind) || "Action", shortText(asString(agentEvent?.message), 160)].filter(Boolean).join(": ");
-    else detail = [formatStatus(type), shortText(asString(agentEvent?.message ?? agentEvent?.text ?? agentEvent?.delta), 160)].filter(Boolean).join(": ");
+    if (type === "completed")
+      detail = `Completed${asString(agentEvent?.answer) ? `: ${shortText(asString(agentEvent?.answer), 160)}` : ""}`;
+    else if (type === "action")
+      detail = [formatStatus(actionKind) || "Action", shortText(asString(agentEvent?.message), 160)]
+        .filter(Boolean)
+        .join(": ");
+    else
+      detail = [
+        formatStatus(type),
+        shortText(asString(agentEvent?.message ?? agentEvent?.text ?? agentEvent?.delta), 160),
+      ]
+        .filter(Boolean)
+        .join(": ");
   } else if (event === "agent.trace" || event === "AgentTraceEvent") {
     detail = shortText(tracePayload ? asString(tracePayload.text) : "");
   } else if (event.startsWith("node.")) {
     const verb = event.split(".").at(-1) ?? "event";
     const duration = formatDuration(payload.durationMs ?? payload.elapsedMs ?? payload.elapsed_ms);
-    detail = [formatStatus(verb), formatStatus(asString(payload.status)), duration, shortText(asString(payload.message), 120)].filter(Boolean).join(" · ");
+    detail = [
+      formatStatus(verb),
+      formatStatus(asString(payload.status)),
+      duration,
+      shortText(asString(payload.message), 120),
+    ]
+      .filter(Boolean)
+      .join(" · ");
   } else if (event.startsWith("run.")) {
     const verb = event.split(".").at(-1) ?? "event";
     const duration = formatDuration(payload.durationMs ?? payload.elapsedMs ?? payload.elapsed_ms);
-    detail = [formatStatus(asString(payload.status)) || formatStatus(verb), duration, shortText(asString(payload.message), 120)].filter(Boolean).join(" · ");
+    detail = [
+      formatStatus(asString(payload.status)) || formatStatus(verb),
+      duration,
+      shortText(asString(payload.message), 120),
+    ]
+      .filter(Boolean)
+      .join(" · ");
   } else if (payload.output !== undefined || payload.text !== undefined) {
     detail = summarizeEventValue(payload.output ?? payload.text);
   } else {
-    detail = [formatStatus(asString(payload.status)), shortText(asString(payload.message), 180)].filter(Boolean).join(" · ") || summarizeStructured(payload);
+    detail =
+      [formatStatus(asString(payload.status)), shortText(asString(payload.message), 180)].filter(Boolean).join(" · ") ||
+      summarizeStructured(payload);
   }
 
   const tone = logToneFor(event, asString(payload.status));
@@ -1119,42 +1198,44 @@ export function MarkdownEditor({
       }
     };
 
-    void import("@milkdown/crepe").then(({ Crepe }) => {
-      if (cancelled) return;
-      const editor = new Crepe({
-        root: host,
-        defaultValue: initialValue,
-        // No asset server in v1: only wire Crepe's image upload when the page was
-        // opened with ?assetBaseUrl.
-        featureConfigs: base
-          ? {
-              [Crepe.Feature.ImageBlock]: {
-                onUpload: (file) => uploadAsset(base, file),
-                blockOnUpload: (file) => uploadAsset(base, file),
-              },
-            }
-          : {},
-      });
-      crepe = editor;
-      host.addEventListener("beforeinput", markUserEdited, true);
-      host.addEventListener("input", markUserEdited, true);
-      host.addEventListener("keydown", markUserEdited, true);
-      host.addEventListener("paste", markUserEdited, true);
-      host.addEventListener("drop", markUserEdited, true);
-      editor.on((listener: { markdownUpdated: (callback: (_ctx: unknown, markdown: string) => void) => void }) => {
-        listener.markdownUpdated((_ctx, markdown) => {
-          if (!userEdited) {
-            return;
-          }
-          onChangeRef.current(markdown);
+    void import("@milkdown/crepe")
+      .then(({ Crepe }) => {
+        if (cancelled) return;
+        const editor = new Crepe({
+          root: host,
+          defaultValue: initialValue,
+          // No asset server in v1: only wire Crepe's image upload when the page was
+          // opened with ?assetBaseUrl.
+          featureConfigs: base
+            ? {
+                [Crepe.Feature.ImageBlock]: {
+                  onUpload: (file) => uploadAsset(base, file),
+                  blockOnUpload: (file) => uploadAsset(base, file),
+                },
+              }
+            : {},
         });
-      });
-      Promise.resolve(editor.create())
-        .then(() => {
-          if (!cancelled) setLoadState("ready");
-        })
-        .catch(fail);
-    }).catch(fail);
+        crepe = editor;
+        host.addEventListener("beforeinput", markUserEdited, true);
+        host.addEventListener("input", markUserEdited, true);
+        host.addEventListener("keydown", markUserEdited, true);
+        host.addEventListener("paste", markUserEdited, true);
+        host.addEventListener("drop", markUserEdited, true);
+        editor.on((listener: { markdownUpdated: (callback: (_ctx: unknown, markdown: string) => void) => void }) => {
+          listener.markdownUpdated((_ctx, markdown) => {
+            if (!userEdited) {
+              return;
+            }
+            onChangeRef.current(markdown);
+          });
+        });
+        Promise.resolve(editor.create())
+          .then(() => {
+            if (!cancelled) setLoadState("ready");
+          })
+          .catch(fail);
+      })
+      .catch(fail);
 
     // Crepe renders links as plain <a href> that, when clicked, would navigate
     // the browser to the raw relative href (e.g. features/runs.md) against the
@@ -1222,7 +1303,12 @@ export function MarkdownEditor({
             <strong>Editor failed to load</strong>
             <p>{loadError || "Milkdown Crepe did not initialize. You can keep editing in markdown below."}</p>
           </div>
-          <button type="button" className="button" data-testid="ddd-editor-retry" onClick={() => setRetryKey((key) => key + 1)}>
+          <button
+            type="button"
+            className="button"
+            data-testid="ddd-editor-retry"
+            onClick={() => setRetryKey((key) => key + 1)}
+          >
             Retry editor
           </button>
           <textarea
@@ -1394,7 +1480,14 @@ function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
     while (index < lines.length) {
       const next = lines[index] ?? "";
       if (!next.trim()) break;
-      if (/^```/.test(next) || /^#{1,6}\s+/.test(next) || /^>\s?/.test(next) || /^\s*[-*]\s+/.test(next) || /^\s*\d+\.\s+/.test(next)) break;
+      if (
+        /^```/.test(next) ||
+        /^#{1,6}\s+/.test(next) ||
+        /^>\s?/.test(next) ||
+        /^\s*[-*]\s+/.test(next) ||
+        /^\s*\d+\.\s+/.test(next)
+      )
+        break;
       paragraph.push(next.trim());
       index += 1;
     }
@@ -1435,7 +1528,9 @@ function renderInlineMarkdown(value: string, keyPrefix: string, onLinkClick?: (h
       const end = findUnescaped(value, "`", cursor + 1);
       if (end > cursor) {
         flushText(cursor);
-        nodes.push(<code key={`${keyPrefix}:code:${cursor}`}>{value.slice(cursor + 1, end).replace(/\\`/g, "`")}</code>);
+        nodes.push(
+          <code key={`${keyPrefix}:code:${cursor}`}>{value.slice(cursor + 1, end).replace(/\\`/g, "`")}</code>,
+        );
         cursor = end + 1;
         textStart = cursor;
         continue;
@@ -1473,7 +1568,12 @@ function renderInlineMarkdown(value: string, keyPrefix: string, onLinkClick?: (h
             );
           } else {
             nodes.push(
-              <button key={`${keyPrefix}:link:${cursor}`} type="button" className="doc-link" onClick={() => onLinkClick?.(href)}>
+              <button
+                key={`${keyPrefix}:link:${cursor}`}
+                type="button"
+                className="doc-link"
+                onClick={() => onLinkClick?.(href)}
+              >
                 {renderInlineMarkdown(label, `${keyPrefix}:link-label:${cursor}`, onLinkClick)}
               </button>,
             );
@@ -1547,19 +1647,23 @@ export function MarkdownPreview({ markdown, onLinkClick }: { markdown: string; o
           if (block.level === 2) return <h2 key={key}>{renderInlineMarkdown(block.text, key, onLinkClick)}</h2>;
           return <h3 key={key}>{renderInlineMarkdown(block.text, key, onLinkClick)}</h3>;
         }
-        if (block.type === "quote") return <blockquote key={key}>{renderInlineMarkdown(block.text, key, onLinkClick)}</blockquote>;
+        if (block.type === "quote")
+          return <blockquote key={key}>{renderInlineMarkdown(block.text, key, onLinkClick)}</blockquote>;
         if (block.type === "list") {
           const List = block.ordered ? "ol" : "ul";
           return (
             <List key={key}>
               {block.items.map((item, itemIndex) => (
-                <li key={`${key}:item:${itemIndex}`}>{renderInlineMarkdown(item, `${key}:item:${itemIndex}`, onLinkClick)}</li>
+                <li key={`${key}:item:${itemIndex}`}>
+                  {renderInlineMarkdown(item, `${key}:item:${itemIndex}`, onLinkClick)}
+                </li>
               ))}
             </List>
           );
         }
         if (block.type === "code") {
-          if (block.lang.toLowerCase() === "mermaid") return <MermaidPreview key={key} code={block.code} index={index} />;
+          if (block.lang.toLowerCase() === "mermaid")
+            return <MermaidPreview key={key} code={block.code} index={index} />;
           return (
             <pre key={key} className="markdown-code">
               <code>{block.code}</code>
@@ -1573,7 +1677,9 @@ export function MarkdownPreview({ markdown, onLinkClick }: { markdown: string; o
 }
 
 export function WorkflowSource({ workflowKey = "docs-driven-development" }: { workflowKey?: string }) {
-  const entry = workflowSources[workflowKey] ?? (workflowKey === "docs-driven-development" ? { path: workflowSourcePath, source: workflowSource } : undefined);
+  const entry =
+    workflowSources[workflowKey] ??
+    (workflowKey === "docs-driven-development" ? { path: workflowSourcePath, source: workflowSource } : undefined);
   if (!entry?.source) return null;
   const lineCount = entry.source.split("\n").length;
   // Collapsed by default: the full script is a tall wall that used to split the
@@ -1603,7 +1709,11 @@ export function CapabilityBlock({ capabilities }: { capabilities?: FeatureCapabi
           <div className="cap" key={`cap:${index}`}>
             <div className="cap-head">
               <span className="cap-title">{cap.title}</span>
-              {cap.status ? <span className={`badge ${statusClass(cap.status)}`}>{statusLabels[cap.status] ?? formatStatus(cap.status)}</span> : null}
+              {cap.status ? (
+                <span className={`badge ${statusClass(cap.status)}`}>
+                  {statusLabels[cap.status] ?? formatStatus(cap.status)}
+                </span>
+              ) : null}
             </div>
             <p>{cap.detail}</p>
           </div>
@@ -1613,7 +1723,13 @@ export function CapabilityBlock({ capabilities }: { capabilities?: FeatureCapabi
   );
 }
 
-export function EndpointBlock({ endpoints, onOpenDoc }: { endpoints?: FeatureEndpoint[]; onOpenDoc?: (href: string) => void }) {
+export function EndpointBlock({
+  endpoints,
+  onOpenDoc,
+}: {
+  endpoints?: FeatureEndpoint[];
+  onOpenDoc?: (href: string) => void;
+}) {
   const eps = endpoints ?? [];
   if (eps.length === 0) return null;
   return (
@@ -1622,10 +1738,14 @@ export function EndpointBlock({ endpoints, onOpenDoc }: { endpoints?: FeatureEnd
       <ul className="endpoint-list">
         {eps.map((ep, index) => (
           <li key={`ep:${index}`}>
-            <code className="endpoint">{ep.method} {ep.path}</code>
+            <code className="endpoint">
+              {ep.method} {ep.path}
+            </code>
             {ep.note ? <span className="endpoint-note">({ep.note})</span> : null}
             {ep.doc ? (
-              <button type="button" className="doc-link" onClick={() => onOpenDoc?.(ep.doc!)}>docs ↗</button>
+              <button type="button" className="doc-link" onClick={() => onOpenDoc?.(ep.doc!)}>
+                docs ↗
+              </button>
             ) : null}
           </li>
         ))}
@@ -1645,9 +1765,13 @@ export function LinkBlock({ links, onOpenDoc }: { links?: FeatureLink[]; onOpenD
         {items.map((link, index) => (
           <li key={`link:${index}`}>
             {isExternal(link.href) ? (
-              <a className="doc-link" href={link.href} target="_blank" rel="noreferrer">{link.label} ↗</a>
+              <a className="doc-link" href={link.href} target="_blank" rel="noreferrer">
+                {link.label} ↗
+              </a>
             ) : (
-              <button type="button" className="doc-link" onClick={() => onOpenDoc?.(link.href)}>{link.label} →</button>
+              <button type="button" className="doc-link" onClick={() => onOpenDoc?.(link.href)}>
+                {link.label} →
+              </button>
             )}
           </li>
         ))}
@@ -1696,7 +1820,11 @@ export function FeatureDetail({
       count: capabilities.length,
       render: () => (
         <>
-          {feature.userValue ? <p className="user-value"><strong>What you can do:</strong> {feature.userValue}</p> : null}
+          {feature.userValue ? (
+            <p className="user-value">
+              <strong>What you can do:</strong> {feature.userValue}
+            </p>
+          ) : null}
           {feature.summary ? <p>{feature.summary}</p> : null}
           <CapabilityBlock capabilities={feature.capabilities} />
         </>
@@ -1757,13 +1885,20 @@ export function FeatureDetail({
       >
         <div className="modal-head">
           <div>
-            <span className="eyebrow">{feature.id}{feature.group ? ` · ${feature.group}` : ""}</span>
+            <span className="eyebrow">
+              {feature.id}
+              {feature.group ? ` · ${feature.group}` : ""}
+            </span>
             <h2 id="ddd-feature-detail-title">{feature.title}</h2>
           </div>
-          <button ref={closeRef} className="icon-button" type="button" onClick={onClose} aria-label="Close">x</button>
+          <button ref={closeRef} className="icon-button" type="button" onClick={onClose} aria-label="Close">
+            x
+          </button>
         </div>
         <div className="meta-row">
-          <span className={`badge ${statusClass(feature.status)}`}>{statusLabels[feature.status] ?? feature.status}</span>
+          <span className={`badge ${statusClass(feature.status)}`}>
+            {statusLabels[feature.status] ?? feature.status}
+          </span>
           <span className="pill">Priority {feature.priority.toUpperCase()}</span>
           <span className="pill">Owner {feature.owner}</span>
           {tier !== "feature" ? <span className="pill">{formatFeatureTier(tier)}</span> : null}
@@ -1772,10 +1907,22 @@ export function FeatureDetail({
         {media ? <img className="feature-media" src={media} alt="" /> : null}
 
         <div className="stats detail-kpis" data-testid="ddd-feature-kpis">
-          <div className="stat"><strong>{capabilities.length}</strong><span>{brokenCaps ? `Capabilities · ${brokenCaps} at risk` : "Capabilities"}</span></div>
-          <div className="stat"><strong>{endpoints.length}</strong><span>Endpoints</span></div>
-          <div className="stat"><strong>{tests.length}</strong><span>Tests</span></div>
-          <div className={`stat${gaps.length ? " stat-warn" : ""}`}><strong>{gaps.length}</strong><span>Open gaps</span></div>
+          <div className="stat">
+            <strong>{capabilities.length}</strong>
+            <span>{brokenCaps ? `Capabilities · ${brokenCaps} at risk` : "Capabilities"}</span>
+          </div>
+          <div className="stat">
+            <strong>{endpoints.length}</strong>
+            <span>Endpoints</span>
+          </div>
+          <div className="stat">
+            <strong>{tests.length}</strong>
+            <span>Tests</span>
+          </div>
+          <div className={`stat${gaps.length ? " stat-warn" : ""}`}>
+            <strong>{gaps.length}</strong>
+            <span>Open gaps</span>
+          </div>
         </div>
 
         {sections.length > 1 ? (
@@ -1792,7 +1939,8 @@ export function FeatureDetail({
                 data-testid={`ddd-feature-section-${section.key}`}
                 onClick={() => setActiveSection(section.key)}
               >
-                {section.label}<span className="count">{section.count}</span>
+                {section.label}
+                <span className="count">{section.count}</span>
               </button>
             ))}
           </div>
@@ -1817,7 +1965,17 @@ export function FeatureDetail({
  * long prose/paths read as scannable cards. `mono` formats items as code
  * (test commands, file paths); `tone` tints the left rail (open gaps → warn).
  */
-export function DetailList({ title, items, mono = false, tone }: { title: string; items: string[]; mono?: boolean; tone?: "warn" | "bad" }) {
+export function DetailList({
+  title,
+  items,
+  mono = false,
+  tone,
+}: {
+  title: string;
+  items: string[];
+  mono?: boolean;
+  tone?: "warn" | "bad";
+}) {
   if (items.length === 0) return null;
   return (
     <div className="list-block">
@@ -1837,7 +1995,9 @@ export function DetailList({ title, items, mono = false, tone }: { title: string
 }
 
 /** Structured count/flag chips for a node-output row (changed files, fixed, etc.). */
-export function outputCardChips(row: Record<string, unknown> | null): Array<{ key: string; label: string; tone: "" | "ok" | "warn" | "bad" }> {
+export function outputCardChips(
+  row: Record<string, unknown> | null,
+): Array<{ key: string; label: string; tone: "" | "ok" | "warn" | "bad" }> {
   if (!row) return [];
   const chips: Array<{ key: string; label: string; tone: "" | "ok" | "warn" | "bad" }> = [];
   const countFields: Array<[string, string, string]> = [
@@ -1854,14 +2014,33 @@ export function outputCardChips(row: Record<string, unknown> | null): Array<{ ke
   ];
   for (const [key, singular, plural] of countFields) {
     const count = asArray(row[key]).length;
-    if (count > 0) chips.push({ key, label: formatCount(count, singular, plural), tone: key === "remaining" ? "warn" : "" });
+    if (count > 0)
+      chips.push({ key, label: formatCount(count, singular, plural), tone: key === "remaining" ? "warn" : "" });
   }
-  if (typeof row.buildPassed === "boolean") chips.push({ key: "build", label: row.buildPassed ? "build passed" : "build failed", tone: row.buildPassed ? "ok" : "bad" });
-  if (typeof row.docsBuildPassed === "boolean") chips.push({ key: "docsBuild", label: row.docsBuildPassed ? "docs build passed" : "docs build failed", tone: row.docsBuildPassed ? "ok" : "bad" });
+  if (typeof row.buildPassed === "boolean")
+    chips.push({
+      key: "build",
+      label: row.buildPassed ? "build passed" : "build failed",
+      tone: row.buildPassed ? "ok" : "bad",
+    });
+  if (typeof row.docsBuildPassed === "boolean")
+    chips.push({
+      key: "docsBuild",
+      label: row.docsBuildPassed ? "docs build passed" : "docs build failed",
+      tone: row.docsBuildPassed ? "ok" : "bad",
+    });
   return chips;
 }
 
-export function OutputCard({ label, row, pending = "waiting" }: { label: string; row: Record<string, unknown> | null; pending?: string }) {
+export function OutputCard({
+  label,
+  row,
+  pending = "waiting",
+}: {
+  label: string;
+  row: Record<string, unknown> | null;
+  pending?: string;
+}) {
   const summary = asString(row?.summary);
   const status = asString(row?.status) || (row ? "ready" : "waiting");
   const chips = outputCardChips(row);
@@ -1875,7 +2054,9 @@ export function OutputCard({ label, row, pending = "waiting" }: { label: string;
       {chips.length ? (
         <div className="meta-row">
           {chips.map((chip) => (
-            <span key={chip.key} className={chip.tone ? `badge ${chip.tone}` : "pill"}>{chip.label}</span>
+            <span key={chip.key} className={chip.tone ? `badge ${chip.tone}` : "pill"}>
+              {chip.label}
+            </span>
           ))}
         </div>
       ) : null}

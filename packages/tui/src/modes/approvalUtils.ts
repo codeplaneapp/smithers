@@ -181,10 +181,7 @@ export function approvalOptionWindow(
 }
 
 /** An approval-banner control action routed from a raw key. */
-export type ApprovalKeyAction =
-  | { kind: "approve" }
-  | { kind: "deny" }
-  | { kind: "cycle"; dir: 1 | -1 };
+export type ApprovalKeyAction = { kind: "approve" } | { kind: "deny" } | { kind: "cycle"; dir: 1 | -1 };
 
 /**
  * Route a raw key to an approval-banner action, INDEPENDENT of which pane (tree

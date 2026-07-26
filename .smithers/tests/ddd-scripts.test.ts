@@ -1,6 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,7 +37,11 @@ async function removeTempDir(dir: string) {
   let lastError: unknown;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
-      try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      } catch {
+        /* best-effort temp cleanup */
+      }
       return;
     } catch (error) {
       lastError = error;
@@ -234,7 +249,8 @@ describe("DDD scripts and build gate", () => {
         id: "escaping",
         title: "# [Escaped]_`Title`",
         owner: "docs_[owner]",
-        summary: "Run cargo test, python -m pytest tests/unit, npm test, and open .smithers/spec/features.json. Then keep src/server/index.ts and web/client.ts aligned.",
+        summary:
+          "Run cargo test, python -m pytest tests/unit, npm test, and open .smithers/spec/features.json. Then keep src/server/index.ts and web/client.ts aligned.",
         userValue: "Use `literal` and [brackets]_safely.",
         capabilities: [{ title: "# Cap_[A]", detail: "Fix src/server/index.ts.", status: "partial" }],
         endpoints: [{ method: "GET", path: "/runs", doc: "reference/api docs).md#runs", note: "call /v1/api/runs" }],
@@ -314,7 +330,9 @@ describe("DDD scripts and build gate", () => {
     expect(ticketsModule).toContain('"featureId": "fixed-with-gap"');
     expect(ticketsModule).toContain('"featureTitle": "Broken P0"');
     expect(ticketsModule).toContain("Bug (major): Regression still reproduces");
-    expect(ticketsModule).toContain("tickets/long-gap--01-add-support-very-very-very-very-very-very-very-very-very-ver-3caa6e3f.md");
+    expect(ticketsModule).toContain(
+      "tickets/long-gap--01-add-support-very-very-very-very-very-very-very-very-very-ver-3caa6e3f.md",
+    );
     expect(ticketsModule).not.toContain("ignored");
 
     const workflowModule = readFileSync(join(root, ".smithers/ui/ddd-workflowSource.generated.ts"), "utf8");
@@ -337,8 +355,12 @@ describe("DDD scripts and build gate", () => {
 
     expect(generateUiModules(root)).toEqual({ docs: 2, tickets: 2 });
     const ticketsModule = readFileSync(join(root, ".smithers/ui/ddd-ticketsBacklog.generated.ts"), "utf8");
-    expect(ticketsModule).toContain("tickets/collision-gap--01-these-two-long-gaps-share-the-exact-same-first-sixty-charact-936d5a11.md");
-    expect(ticketsModule).toContain("tickets/collision-gap--02-these-two-long-gaps-share-the-exact-same-first-sixty-charact-496512f3.md");
+    expect(ticketsModule).toContain(
+      "tickets/collision-gap--01-these-two-long-gaps-share-the-exact-same-first-sixty-charact-936d5a11.md",
+    );
+    expect(ticketsModule).toContain(
+      "tickets/collision-gap--02-these-two-long-gaps-share-the-exact-same-first-sixty-charact-496512f3.md",
+    );
     const paths = [...ticketsModule.matchAll(/"path": "([^"]+)"/g)].map((match) => match[1]);
     expect(new Set(paths).size).toBe(paths.length);
   });
@@ -386,10 +408,25 @@ describe("DDD scripts and build gate", () => {
       feature({ id: "test-gap", title: "Test Gap", status: "partial", missing: ["Add Playwright coverage proof"] }),
       feature({ id: "broken-status", title: "Broken Status", status: "broken", missing: ["Triage the failing path"] }),
       feature({ id: "bug-keyword", title: "Bug Keyword", status: "partial", missing: ["Bug causes output loss"] }),
-      feature({ id: "review-keyword", title: "Review Keyword", status: "partial", missing: ["Security audit before release"] }),
+      feature({
+        id: "review-keyword",
+        title: "Review Keyword",
+        status: "partial",
+        missing: ["Security audit before release"],
+      }),
       feature({ id: "missing-status", title: "Missing Status", status: "missing", missing: [] }),
-      feature({ id: "implement-keyword", title: "Implement Keyword", status: "partial", missing: ["Implement retry controls"] }),
-      feature({ id: "issue-default", title: "Issue Default", status: "partial", missing: ["Clarify operator behavior"] }),
+      feature({
+        id: "implement-keyword",
+        title: "Implement Keyword",
+        status: "partial",
+        missing: ["Implement retry controls"],
+      }),
+      feature({
+        id: "issue-default",
+        title: "Issue Default",
+        status: "partial",
+        missing: ["Clarify operator behavior"],
+      }),
       feature({ id: "fixed-gap", title: "Fixed Gap", status: "fixed", missing: ["Regression gap remains"] }),
     ]);
     generateSpecDocs(root);
@@ -417,14 +454,19 @@ describe("DDD scripts and build gate", () => {
     expect(ticketsModule).toContain("Regression gap remains");
 
     const workflowModule = readFileSync(join(root, ".smithers/ui/ddd-workflowSource.generated.ts"), "utf8");
-    expect(workflowModule).toContain('export const workflowSourcePath = ".smithers/workflows/docs-driven-development.tsx";');
+    expect(workflowModule).toContain(
+      'export const workflowSourcePath = ".smithers/workflows/docs-driven-development.tsx";',
+    );
     expect(workflowModule).toContain("export const workflow = true");
   });
 
   test("generateUiModules emits the single DDD workflow source and omits it entirely when missing", () => {
     const root = tempRoot();
     mkdirSync(join(root, ".smithers/workflows"), { recursive: true });
-    writeFileSync(join(root, ".smithers/workflows/docs-driven-development.tsx"), "export const primary = 'docs-driven-development';\n");
+    writeFileSync(
+      join(root, ".smithers/workflows/docs-driven-development.tsx"),
+      "export const primary = 'docs-driven-development';\n",
+    );
     writeFeatures(root, [feature({ id: "workflow-source", title: "Workflow Source", status: "fixed", missing: [] })]);
     generateSpecDocs(root);
 
@@ -433,8 +475,10 @@ describe("DDD scripts and build gate", () => {
     expect(workflowModule).toContain('"docs-driven-development"');
     expect(workflowModule).toContain('"path": ".smithers/workflows/docs-driven-development.tsx"');
     expect(workflowModule).toContain("export const primary = 'docs-driven-development';");
-    expect(workflowModule).toContain('export const workflowSourcePath = ".smithers/workflows/docs-driven-development.tsx";');
-    expect(workflowModule).toContain("export const workflowSource = \"export const primary");
+    expect(workflowModule).toContain(
+      'export const workflowSourcePath = ".smithers/workflows/docs-driven-development.tsx";',
+    );
+    expect(workflowModule).toContain('export const workflowSource = "export const primary');
 
     rmSync(join(root, ".smithers/workflows/docs-driven-development.tsx"));
     generateUiModules(root);
@@ -474,7 +518,9 @@ describe("DDD scripts and build gate", () => {
     expect(inputs).toContain(".smithers/ui/ddd-StartPane.tsx");
     expect(inputs).toContain(".smithers/spec/content/features/a.md");
     expect(inputs).toContain(".smithers/spec/content/features/z.md");
-    expect(inputs.indexOf(".smithers/spec/content/features/a.md")).toBeLessThan(inputs.indexOf(".smithers/spec/content/features/z.md"));
+    expect(inputs.indexOf(".smithers/spec/content/features/a.md")).toBeLessThan(
+      inputs.indexOf(".smithers/spec/content/features/z.md"),
+    );
     expect(inputs).toContain(".smithers/lib/ddd/small.ts");
     expect(inputs).not.toContain(".smithers/lib/ddd/large.ts");
   });
@@ -508,13 +554,22 @@ describe("DDD scripts and build gate", () => {
   });
 
   test("triageCandidates ranks by status, priority, tie-breaker, file hints, acceptance, and max", () => {
-    const candidates = triageCandidates([
-      feature({ id: "partial-a", title: "Partial A", status: "partial", priority: "p0", diffHints: ["touch crates/core/src/lib.rs, docs/a.md"] }) as any,
-      feature({ id: "broken-b", title: "Broken B", status: "broken", priority: "p0", missing: ["Fix B"] }) as any,
-      feature({ id: "alpha", title: "Alpha", status: "missing-tests", priority: "p1" }) as any,
-      feature({ id: "beta", title: "Beta", status: "missing-tests", priority: "p1" }) as any,
-      feature({ id: "fixed", title: "Fixed", status: "fixed", priority: "p0" }) as any,
-    ], 4);
+    const candidates = triageCandidates(
+      [
+        feature({
+          id: "partial-a",
+          title: "Partial A",
+          status: "partial",
+          priority: "p0",
+          diffHints: ["touch crates/core/src/lib.rs, docs/a.md"],
+        }) as any,
+        feature({ id: "broken-b", title: "Broken B", status: "broken", priority: "p0", missing: ["Fix B"] }) as any,
+        feature({ id: "alpha", title: "Alpha", status: "missing-tests", priority: "p1" }) as any,
+        feature({ id: "beta", title: "Beta", status: "missing-tests", priority: "p1" }) as any,
+        feature({ id: "fixed", title: "Fixed", status: "fixed", priority: "p0" }) as any,
+      ],
+      4,
+    );
 
     expect(candidates.map((item) => item.featureId)).toEqual(["broken-b", "partial-a", "alpha", "beta"]);
     expect(candidates[0]?.taskType).toBe("fix");
@@ -524,15 +579,18 @@ describe("DDD scripts and build gate", () => {
   });
 
   test("triageCandidates cleans path punctuation and parseMax falls back on invalid values", () => {
-    const candidates = triageCandidates([
-      feature({
-        id: "punctuation",
-        title: "Punctuation",
-        status: "broken",
-        priority: "p0",
-        diffHints: ['See "src/a.ts", (.smithers/ui/x.tsx); tests/a_test.py. not/a/path'],
-      }) as any,
-    ], 1);
+    const candidates = triageCandidates(
+      [
+        feature({
+          id: "punctuation",
+          title: "Punctuation",
+          status: "broken",
+          priority: "p0",
+          diffHints: ['See "src/a.ts", (.smithers/ui/x.tsx); tests/a_test.py. not/a/path'],
+        }) as any,
+      ],
+      1,
+    );
 
     expect(candidates[0]?.files).toEqual(["src/a.ts", ".smithers/ui/x.tsx", "tests/a_test.py"]);
     expect(parseMax([])).toBe(8);
@@ -555,8 +613,9 @@ describe("DDD scripts and build gate", () => {
     const features = validateFeatures(root);
     const featureIds = features.map((feature) => feature.id);
     const featureDocDir = join(root, ".smithers/spec/content/features");
-    const featureDocPaths = markdownPaths(root, featureDocDir)
-      .map((path) => path.replace(/^\.smithers\/spec\/content\/features\//, ""));
+    const featureDocPaths = markdownPaths(root, featureDocDir).map((path) =>
+      path.replace(/^\.smithers\/spec\/content\/features\//, ""),
+    );
 
     expect(featureDocPaths.sort()).toEqual(featureIds.map((id) => `${id}.md`).sort());
     expect(new Set(featureDocPaths).size).toBe(featureDocPaths.length);
@@ -576,7 +635,11 @@ describe("DDD scripts and build gate", () => {
       if (href === "" || /^https?:\/\//.test(href)) return true;
       return contentPathSet.has(href) || existsSync(join(root, href));
     };
-    const docsContent = generatedDocs.docsContent as Array<{ path: string; level: "product" | "technical"; content: string }>;
+    const docsContent = generatedDocs.docsContent as Array<{
+      path: string;
+      level: "product" | "technical";
+      content: string;
+    }>;
     expect(docsContent.map((doc) => doc.path).sort()).toEqual(contentPaths);
     for (const doc of docsContent) {
       expect(doc.content).toBe(readFileSync(join(contentRoot, doc.path), "utf8"));
@@ -593,7 +656,9 @@ describe("DDD scripts and build gate", () => {
       expect((feature.group ?? "").trim().length).toBeGreaterThan(0);
       expect((feature.userValue ?? "").trim().length).toBeGreaterThan(0);
       if (feature.status === "fixed") {
-        expect(feature.tests.some((testCommand) => /\b(test|e2e)\b|check-docs|check-llms/i.test(testCommand))).toBe(true);
+        expect(feature.tests.some((testCommand) => /\b(test|e2e)\b|check-docs|check-llms/i.test(testCommand))).toBe(
+          true,
+        );
         expect(feature.missing).toEqual([]);
       } else {
         expect(feature.missing.length).toBeGreaterThan(0);
@@ -607,9 +672,13 @@ describe("DDD scripts and build gate", () => {
         expect(resolvesLocalDoc(href)).toBe(true);
       }
       for (const command of feature.tests ?? []) {
-        const knownGate = /\b(bun|npm|pnpm|yarn|deno|cargo|go|pytest|python\s+-m\s+pytest|mvn|gradle|dotnet|make|just)\b/.test(command);
-        const explicitTestPaths = [...command.matchAll(/(?:^|\s)(\.smithers\/tests\/[^\s]+|tests\/[^\s]+|\.smithers\/ui\/[^\s]+|ui\/[^\s]+|\.smithers\/lib\/ddd\/[^\s]+|lib\/ddd\/[^\s]+|e2e\/[^\s]+|apps\/[^\s]+|packages\/[^\s]+|scripts\/[^\s]+)/g)]
-          .map((match) => (match[1] ?? "").replace(/[),.;]+$/, ""));
+        const knownGate =
+          /\b(bun|npm|pnpm|yarn|deno|cargo|go|pytest|python\s+-m\s+pytest|mvn|gradle|dotnet|make|just)\b/.test(command);
+        const explicitTestPaths = [
+          ...command.matchAll(
+            /(?:^|\s)(\.smithers\/tests\/[^\s]+|tests\/[^\s]+|\.smithers\/ui\/[^\s]+|ui\/[^\s]+|\.smithers\/lib\/ddd\/[^\s]+|lib\/ddd\/[^\s]+|e2e\/[^\s]+|apps\/[^\s]+|packages\/[^\s]+|scripts\/[^\s]+)/g,
+          ),
+        ].map((match) => (match[1] ?? "").replace(/[),.;]+$/, ""));
         if (explicitTestPaths.length === 0) {
           expect(knownGate).toBe(true);
         }
@@ -692,7 +761,9 @@ describe("DDD scripts and build gate", () => {
     expect(starter.stdout).toContain("empty starter spec");
     expect(existsSync(join(starterRoot, ".smithers/ui/ddd-features.generated.ts"))).toBe(true);
     expect(existsSync(join(starterRoot, ".smithers/.smithers/ui/ddd-features.generated.ts"))).toBe(false);
-    expect(readFileSync(join(starterRoot, ".smithers/ui/ddd-features.generated.ts"), "utf8")).toContain("export const featuresData = [];");
+    expect(readFileSync(join(starterRoot, ".smithers/ui/ddd-features.generated.ts"), "utf8")).toContain(
+      "export const featuresData = [];",
+    );
 
     const invalidRoot = tempRoot();
     installDddPack(invalidRoot);

@@ -25,9 +25,7 @@ export function TicketsCanvas() {
   const setNewContent = useTicketsStore((state) => state.setNewContent);
   const submitCreate = useTicketsStore((state) => state.submitCreate);
 
-  const selected = useTicketsStore(
-    (state) => state.tickets.find((t) => t.id === state.selectedId) ?? null,
-  );
+  const selected = useTicketsStore((state) => state.tickets.find((t) => t.id === state.selectedId) ?? null);
   const shown = searchTickets(tickets, query);
 
   return (
@@ -126,11 +124,7 @@ export function TicketsCanvas() {
                   </button>
                 </div>
               </div>
-              <textarea
-                className="rev-editor"
-                value={draftContent}
-                onChange={(e) => setDraft(e.target.value)}
-              />
+              <textarea className="rev-editor" value={draftContent} onChange={(e) => setDraft(e.target.value)} />
             </div>
           ) : (
             <div className="rev-detail-empty">Select a ticket to edit.</div>

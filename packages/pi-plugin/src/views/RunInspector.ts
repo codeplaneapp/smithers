@@ -117,8 +117,15 @@ export class RunInspector {
     const lines: string[] = [];
     lines.push(...this.header.render(W, theme));
     if (this.store.isStaleBannerVisible) {
-      const since = this.store.staleSince ? Math.max(0, Math.floor((Date.now() - this.store.staleSince.getTime()) / 1_000)) : 0;
-      lines.push(truncateToWidth(paint(theme, "warning", ` stale: gateway disconnected for ${since}s; showing last known tree`), W));
+      const since = this.store.staleSince
+        ? Math.max(0, Math.floor((Date.now() - this.store.staleSince.getTime()) / 1_000))
+        : 0;
+      lines.push(
+        truncateToWidth(
+          paint(theme, "warning", ` stale: gateway disconnected for ${since}s; showing last known tree`),
+          W,
+        ),
+      );
     }
     lines.push(...this.scrubber.render(W, theme));
 

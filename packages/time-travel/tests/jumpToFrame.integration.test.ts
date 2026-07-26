@@ -27,14 +27,10 @@ describe("jumpToFrame integration", () => {
           React.createElement(
             Workflow,
             { name: "jump-integration" },
-            React.createElement(
-              Task,
-              { id: "task:a", output: outputs.outputA },
-              () => {
-                callsA += 1;
-                return { value: callsA };
-              },
-            ),
+            React.createElement(Task, { id: "task:a", output: outputs.outputA }, () => {
+              callsA += 1;
+              return { value: callsA };
+            }),
             React.createElement(
               Task,
               { id: "task:b", output: outputs.outputB, dependsOn: ["task:a"] },
@@ -44,14 +40,10 @@ describe("jumpToFrame integration", () => {
                 return { value: callsB };
               },
             ),
-            React.createElement(
-              Task,
-              { id: "task:c", output: outputs.outputC, dependsOn: ["task:b"] },
-              () => {
-                callsC += 1;
-                return { value: callsC };
-              },
-            ),
+            React.createElement(Task, { id: "task:c", output: outputs.outputC, dependsOn: ["task:b"] }, () => {
+              callsC += 1;
+              return { value: callsC };
+            }),
           ),
         );
 
@@ -74,16 +66,10 @@ describe("jumpToFrame integration", () => {
         // Clear JJ pointers so the rewind path works without a real sandbox.
         // We're testing the DB/replay layer; VCS revert is exercised by unit tests.
         for (const attempt of await adapter.listAttemptsForRun(firstRun.runId)) {
-          await adapter.updateAttempt(
-            firstRun.runId,
-            attempt.nodeId,
-            attempt.iteration,
-            attempt.attempt,
-            {
-              jjPointer: null,
-              jjCwd: null,
-            },
-          );
+          await adapter.updateAttempt(firstRun.runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
+            jjPointer: null,
+            jjCwd: null,
+          });
         }
 
         const existingFrames = await adapter.listFrames(firstRun.runId, 10_000);
@@ -131,9 +117,7 @@ describe("jumpToFrame integration", () => {
         expect(["finished", "failed", "cancelled"]).toContain(runAfter?.status);
         // task:b recorded at least its first-run input.
         expect(taskBInputs.length).toBeGreaterThanOrEqual(1);
-        expect(typeof taskBInputBefore).toBe(
-          typeof taskBInputs[0],
-        );
+        expect(typeof taskBInputBefore).toBe(typeof taskBInputs[0]);
         // callsA/B/C should not have regressed.
         expect(callsA).toBeGreaterThanOrEqual(callsABefore);
         expect(callsB).toBeGreaterThanOrEqual(callsBBefore);

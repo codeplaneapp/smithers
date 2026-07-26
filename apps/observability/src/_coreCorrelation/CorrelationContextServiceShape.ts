@@ -8,7 +8,5 @@ export type CorrelationContextServiceShape = {
     patch: CorrelationPatch,
     effect: Effect.Effect<A, E, R>,
   ) => Effect.Effect<A, E, R>;
-  readonly toLogAnnotations: (
-    context?: CorrelationContext | null,
-  ) => Record<string, unknown> | undefined;
+  readonly toLogAnnotations: (context?: CorrelationContext | null) => Record<string, unknown> | undefined;
 };

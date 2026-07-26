@@ -8,12 +8,7 @@ import {
   useGatewayRun,
   useGatewayRunDiff,
 } from "smithers-orchestrator/gateway-react";
-import {
-  NodeChatStream,
-  RunEventLog,
-  WorkflowUiShell,
-  theme,
-} from "smithers-orchestrator/gateway-ui";
+import { NodeChatStream, RunEventLog, WorkflowUiShell, theme } from "smithers-orchestrator/gateway-ui";
 import {
   Button,
   Card,
@@ -59,15 +54,23 @@ function useHijackCandidates(runId: string | undefined) {
     const controller = new AbortController();
     const load = async () => {
       try {
-        const response = await fetch(`/v1/api/runs/${encodeURIComponent(runId)}/hijack-candidates`, { signal: controller.signal });
+        const response = await fetch(`/v1/api/runs/${encodeURIComponent(runId)}/hijack-candidates`, {
+          signal: controller.signal,
+        });
         if (!response.ok) return;
-        const body = await response.json() as { candidates?: HijackCandidate[]; data?: { candidates?: HijackCandidate[] } };
+        const body = (await response.json()) as {
+          candidates?: HijackCandidate[];
+          data?: { candidates?: HijackCandidate[] };
+        };
         if (!controller.signal.aborted) setCandidates(body.data?.candidates ?? body.candidates ?? []);
-      } catch { }
+      } catch {}
     };
     void load();
     const timer = window.setInterval(() => void load(), 1500);
-    return () => { controller.abort(); window.clearInterval(timer); };
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
   }, [runId]);
   return candidates;
 }
@@ -125,8 +128,28 @@ function LunaStatusCard({ runId, running, now }: { runId: string | undefined; ru
       <CardContent style={{ display: "flex", alignItems: "center", gap: 12, paddingTop: 16 }}>
         <span className="oneshot-status-dot" data-live={running} aria-hidden="true" />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", color: theme.textDim }}>{label}</div>
-          <div className="oneshot-status-text" key={status?.text ?? "empty"} style={{ fontSize: 14, color: theme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              color: theme.textDim,
+            }}
+          >
+            {label}
+          </div>
+          <div
+            className="oneshot-status-text"
+            key={status?.text ?? "empty"}
+            style={{
+              fontSize: 14,
+              color: theme.text,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
             {status?.text ?? (running ? "Listening for agent activity…" : "No status recorded")}
           </div>
         </div>
@@ -142,15 +165,19 @@ function GoalCard({ goal, chain }: { goal?: string; chain?: OneshotChainEntry[] 
     <Card>
       <CardContent style={{ display: "flex", flexDirection: "column", gap: 10, paddingTop: 16 }}>
         {goal ? (
-          <div style={{
-            fontSize: 13,
-            color: theme.text,
-            lineHeight: 1.5,
-            display: "-webkit-box",
-            WebkitBoxOrient: "vertical",
-            WebkitLineClamp: 2,
-            overflow: "hidden",
-          }}>{goal}</div>
+          <div
+            style={{
+              fontSize: 13,
+              color: theme.text,
+              lineHeight: 1.5,
+              display: "-webkit-box",
+              WebkitBoxOrient: "vertical",
+              WebkitLineClamp: 2,
+              overflow: "hidden",
+            }}
+          >
+            {goal}
+          </div>
         ) : null}
         {chain && chain.length > 0 ? (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -168,7 +195,9 @@ function GoalCard({ goal, chain }: { goal?: string; chain?: OneshotChainEntry[] 
                     background: primary ? theme.accentSoft : theme.neutralSoft,
                     color: primary ? theme.accent : theme.textDim,
                   }}
-                >{[entry.engine, entry.model].filter(Boolean).join(" · ")}</span>
+                >
+                  {[entry.engine, entry.model].filter(Boolean).join(" · ")}
+                </span>
               );
             })}
           </div>
@@ -200,13 +229,22 @@ function App() {
   const status = normalizeStatus(typeof run?.status === "string" ? run.status : "pending");
   const diff = diffState.data;
   const oversized = diff && "status" in diff && diff.status === "oversized";
-  const patch = useMemo(() => diff && "patches" in diff ? diff.patches.map((item) => item.diff).join("\n") : "", [diff]);
+  const patch = useMemo(
+    () => (diff && "patches" in diff ? diff.patches.map((item) => item.diff).join("\n") : ""),
+    [diff],
+  );
   const filesChanged = diff && "patches" in diff ? diff.patches.length : 0;
   const config = useMemo(() => {
-    try { return typeof run?.configJson === "string" ? JSON.parse(run.configJson) as Record<string, unknown> : {}; }
-    catch { return {}; }
+    try {
+      return typeof run?.configJson === "string" ? (JSON.parse(run.configJson) as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
   }, [run?.configJson]);
-  const oneshot = config.oneshot && typeof config.oneshot === "object" ? config.oneshot as { chain?: OneshotChainEntry[]; goal?: string; review?: unknown } : undefined;
+  const oneshot =
+    config.oneshot && typeof config.oneshot === "object"
+      ? (config.oneshot as { chain?: OneshotChainEntry[]; goal?: string; review?: unknown })
+      : undefined;
   const chain = Array.isArray(oneshot?.chain) ? oneshot.chain : undefined;
   const goal = typeof oneshot?.goal === "string" && oneshot.goal.trim() ? oneshot.goal : undefined;
   const primary = chain?.[0];
@@ -214,62 +252,105 @@ function App() {
   const hasReview = Boolean(oneshot?.review);
   const running = status === "running";
 
-  const controls = <>
-    <Button variant="outline" onClick={() => runId && actions.resumeRun({ runId })} disabled={!runId}>Resume</Button>
-    <Button variant="outline" onClick={() => setPauseRequested(true)} disabled={!runId || pauseRequested}>Pause</Button>
-    <Button variant="destructive" onClick={() => runId && actions.cancelRun({ runId })} disabled={!runId}>Cancel</Button>
-  </>;
+  const controls = (
+    <>
+      <Button variant="outline" onClick={() => runId && actions.resumeRun({ runId })} disabled={!runId}>
+        Resume
+      </Button>
+      <Button variant="outline" onClick={() => setPauseRequested(true)} disabled={!runId || pauseRequested}>
+        Pause
+      </Button>
+      <Button variant="destructive" onClick={() => runId && actions.cancelRun({ runId })} disabled={!runId}>
+        Cancel
+      </Button>
+    </>
+  );
 
   if (!runId) {
-    return <><SmithersUiStyles withTheme /><WorkflowUiShell title="Oneshot" actions={controls}><EmptyState title="No run selected" description="Open this UI with a oneshot run ID." /></WorkflowUiShell></>;
+    return (
+      <>
+        <SmithersUiStyles withTheme />
+        <WorkflowUiShell title="Oneshot" actions={controls}>
+          <EmptyState title="No run selected" description="Open this UI with a oneshot run ID." />
+        </WorkflowUiShell>
+      </>
+    );
   }
 
-  return <>
-    <SmithersUiStyles withTheme />
-    <style>{STATUS_STYLES}</style>
-    <WorkflowUiShell title="Oneshot" meta={<StatusPill status={status} />} actions={controls}>
-      <GoalCard goal={goal} chain={chain} />
-      <Card>
-        <CardContent style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, paddingTop: 16 }}>
-          <KpiStat label="Status" value={status} />
-          <KpiStat label="Engine / model" value={model} />
-          <KpiStat label="Elapsed" value={elapsedLabel(
-            typeof run?.startedAtMs === "number" ? run.startedAtMs : undefined,
-            typeof run?.finishedAtMs === "number" ? run.finishedAtMs : undefined,
-            now,
-          )} />
-          <KpiStat label="Files changed" value={filesChanged} />
-        </CardContent>
-      </Card>
-      <LunaStatusCard runId={runId} running={running} now={now} />
-      <Tabs defaultValue="chat">
-        <TabsList>
-          <TabsTrigger value="chat">Chat</TabsTrigger>
-          <TabsTrigger value="diff" count={filesChanged}>Diff</TabsTrigger>
-          <TabsTrigger value="events">Events</TabsTrigger>
-        </TabsList>
-        <TabsContent value="chat">
-          <NodeChatStream runId={runId} nodeId="implement" title="Implement" height={420} />
-          {hasReview ? <NodeChatStream runId={runId} nodeId="review" title="Review" height={320} /> : null}
-        </TabsContent>
-        <TabsContent value="diff">
-          {oversized
-            ? <EmptyState title="Diff is too large for the browser" description={`Run smithers diff ${runId} to inspect it in the terminal.`} />
-            : diffState.error
-              ? <EmptyState title="Diff unavailable" description={diffState.error.message} />
-              : <PierreDiffView patch={patch} emptyLabel="No finished diff is available yet." />}
-        </TabsContent>
-        <TabsContent value="events"><RunEventLog runId={runId} style={{ height: 420 }} /></TabsContent>
-      </Tabs>
-      <Card>
-        <CardContent style={{ display: "flex", alignItems: "center", gap: 12, paddingTop: 16 }}>
-          {candidates.length > 0
-            ? <Button onClick={() => navigator.clipboard.writeText(`smithers hijack ${runId}`)}>Copy hijack command</Button>
-            : <EmptyState title="Hijack not ready" description="The command appears when an agent session is recorded." />}
-        </CardContent>
-      </Card>
-    </WorkflowUiShell>
-  </>;
+  return (
+    <>
+      <SmithersUiStyles withTheme />
+      <style>{STATUS_STYLES}</style>
+      <WorkflowUiShell title="Oneshot" meta={<StatusPill status={status} />} actions={controls}>
+        <GoalCard goal={goal} chain={chain} />
+        <Card>
+          <CardContent
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+              gap: 12,
+              paddingTop: 16,
+            }}
+          >
+            <KpiStat label="Status" value={status} />
+            <KpiStat label="Engine / model" value={model} />
+            <KpiStat
+              label="Elapsed"
+              value={elapsedLabel(
+                typeof run?.startedAtMs === "number" ? run.startedAtMs : undefined,
+                typeof run?.finishedAtMs === "number" ? run.finishedAtMs : undefined,
+                now,
+              )}
+            />
+            <KpiStat label="Files changed" value={filesChanged} />
+          </CardContent>
+        </Card>
+        <LunaStatusCard runId={runId} running={running} now={now} />
+        <Tabs defaultValue="chat">
+          <TabsList>
+            <TabsTrigger value="chat">Chat</TabsTrigger>
+            <TabsTrigger value="diff" count={filesChanged}>
+              Diff
+            </TabsTrigger>
+            <TabsTrigger value="events">Events</TabsTrigger>
+          </TabsList>
+          <TabsContent value="chat">
+            <NodeChatStream runId={runId} nodeId="implement" title="Implement" height={420} />
+            {hasReview ? <NodeChatStream runId={runId} nodeId="review" title="Review" height={320} /> : null}
+          </TabsContent>
+          <TabsContent value="diff">
+            {oversized ? (
+              <EmptyState
+                title="Diff is too large for the browser"
+                description={`Run smithers diff ${runId} to inspect it in the terminal.`}
+              />
+            ) : diffState.error ? (
+              <EmptyState title="Diff unavailable" description={diffState.error.message} />
+            ) : (
+              <PierreDiffView patch={patch} emptyLabel="No finished diff is available yet." />
+            )}
+          </TabsContent>
+          <TabsContent value="events">
+            <RunEventLog runId={runId} style={{ height: 420 }} />
+          </TabsContent>
+        </Tabs>
+        <Card>
+          <CardContent style={{ display: "flex", alignItems: "center", gap: 12, paddingTop: 16 }}>
+            {candidates.length > 0 ? (
+              <Button onClick={() => navigator.clipboard.writeText(`smithers hijack ${runId}`)}>
+                Copy hijack command
+              </Button>
+            ) : (
+              <EmptyState
+                title="Hijack not ready"
+                description="The command appears when an agent session is recorded."
+              />
+            )}
+          </CardContent>
+        </Card>
+      </WorkflowUiShell>
+    </>
+  );
 }
 
 createGatewayReactRoot(<App />);

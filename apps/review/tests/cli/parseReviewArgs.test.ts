@@ -160,7 +160,7 @@ describe("parseReviewArgs", () => {
   describe("conflicting review targets", () => {
     test("--commit with --from/--to throws", () => {
       expect(() => parseReviewArgs(["--commit", "abc", "--from", "main"])).toThrow(
-        'conflicting review targets: --commit and --from/--to cannot be combined — pick one',
+        "conflicting review targets: --commit and --from/--to cannot be combined — pick one",
       );
       expect(() => parseReviewArgs(["--commit", "abc", "--to", "HEAD"])).toThrow("conflicting review targets");
     });

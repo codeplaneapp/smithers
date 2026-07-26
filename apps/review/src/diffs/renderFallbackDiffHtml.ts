@@ -76,7 +76,9 @@ export function renderFallbackDiffHtml(diffText: string): string {
       file.sawHunk = true;
       oldLine = Number(hunk[1]);
       newLine = Number(hunk[2]);
-      rows.push(`<tr class="hunk"><td class="ln"></td><td class="ln"></td><td class="sign"></td><td class="code">@@ −${hunk[1]} +${hunk[2]} @@${escapeHtml(hunk[3])}</td></tr>`);
+      rows.push(
+        `<tr class="hunk"><td class="ln"></td><td class="ln"></td><td class="sign"></td><td class="code">@@ −${hunk[1]} +${hunk[2]} @@${escapeHtml(hunk[3])}</td></tr>`,
+      );
       rendered += 1;
       continue;
     }
@@ -104,7 +106,9 @@ export function renderFallbackDiffHtml(diffText: string): string {
   }
   if (truncatedAt >= 0) {
     const remaining = lines.length - truncatedAt;
-    rows.push(`<tr class="hunk"><td class="ln"></td><td class="ln"></td><td class="sign"></td><td class="code">… diff truncated (${remaining} more line(s))</td></tr>`);
+    rows.push(
+      `<tr class="hunk"><td class="ln"></td><td class="ln"></td><td class="sign"></td><td class="code">… diff truncated (${remaining} more line(s))</td></tr>`,
+    );
   } else {
     flushFileNote();
   }

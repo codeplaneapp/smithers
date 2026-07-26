@@ -1,3 +1,3 @@
 export type GetRunPayload = {
-	runId: string;
+  runId: string;
 };

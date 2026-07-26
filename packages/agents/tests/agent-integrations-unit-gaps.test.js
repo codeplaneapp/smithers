@@ -67,10 +67,9 @@ describe("KimiAgent share-dir isolation", () => {
     try {
       expect(command.env).toEqual({ KIMI_SHARE_DIR: configDir });
       expect(command.outputFormat).toBe("stream-json");
-      expect(command.args.slice(command.args.indexOf("--output-format"), command.args.indexOf("--output-format") + 2)).toEqual([
-        "--output-format",
-        "stream-json",
-      ]);
+      expect(
+        command.args.slice(command.args.indexOf("--output-format"), command.args.indexOf("--output-format") + 2),
+      ).toEqual(["--output-format", "stream-json"]);
       expect(command.args).not.toContain("--final-message-only");
       const prompt = command.args[command.args.indexOf("--prompt") + 1];
       expect(prompt).toContain("REMINDER: Your response MUST be ONLY the required raw JSON object");
@@ -123,24 +122,28 @@ describe("ClaudeCodeAgent output interpreter", () => {
   test("summarizes bulky read results and suppresses runtime metadata tool output", () => {
     const interpreter = new ClaudeCodeAgent({ model: "claude-test" }).createOutputInterpreter();
 
-    const started = interpreter.onStdoutLine(JSON.stringify({
-      type: "assistant",
-      message: {
-        content: [
-          { type: "tool_use", id: "read-1", name: "Read", input: { file_path: "README.md" } },
-          { type: "tool_use", id: "meta-1", name: "ListMcpResources", input: {} },
-        ],
-      },
-    }));
+    const started = interpreter.onStdoutLine(
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", id: "read-1", name: "Read", input: { file_path: "README.md" } },
+            { type: "tool_use", id: "meta-1", name: "ListMcpResources", input: {} },
+          ],
+        },
+      }),
+    );
     expect(started.map((event) => event.action?.title)).toEqual(["Read", "ListMcpResources"]);
 
     const readOutput = Array.from({ length: 9 }, (_, index) => `${index + 1}\u2192 line ${index + 1}`).join("\n");
-    const readCompleted = interpreter.onStdoutLine(JSON.stringify({
-      type: "user",
-      message: {
-        content: [{ type: "tool_result", tool_use_id: "read-1", content: readOutput }],
-      },
-    }));
+    const readCompleted = interpreter.onStdoutLine(
+      JSON.stringify({
+        type: "user",
+        message: {
+          content: [{ type: "tool_result", tool_use_id: "read-1", content: readOutput }],
+        },
+      }),
+    );
     expect(readCompleted[0]).toMatchObject({
       type: "action",
       phase: "completed",
@@ -148,16 +151,20 @@ describe("ClaudeCodeAgent output interpreter", () => {
       ok: true,
     });
 
-    const metadataCompleted = interpreter.onStdoutLine(JSON.stringify({
-      type: "user",
-      message: {
-        content: [{
-          type: "tool_result",
-          tool_use_id: "meta-1",
-          content: "{\"mcp_servers\":1,\"slash_commands\":2,\"skills\":3}",
-        }],
-      },
-    }));
+    const metadataCompleted = interpreter.onStdoutLine(
+      JSON.stringify({
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "meta-1",
+              content: '{"mcp_servers":1,"slash_commands":2,"skills":3}',
+            },
+          ],
+        },
+      }),
+    );
     expect(metadataCompleted[0].message).toBe("Tool output omitted (runtime metadata).");
   });
 });

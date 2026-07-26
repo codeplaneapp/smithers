@@ -8,5 +8,5 @@ import { MemoryStoreLive } from "./MemoryStoreLive.js";
  * @returns {Layer.Layer<MemoryStoreService, never, never>}
  */
 export function createMemoryStoreLayer(db) {
-    return MemoryStoreLive.pipe(Layer.provide(Layer.succeed(MemoryStoreDb, db)));
+  return MemoryStoreLive.pipe(Layer.provide(Layer.succeed(MemoryStoreDb, db)));
 }

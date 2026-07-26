@@ -16,13 +16,12 @@ export function ModelBadge({ model, provider, icon, className, ...props }: Model
   useInjectUiCss();
   useInjectLaneCss(AGENT_IDENTITY_CONTEXT_CSS_ID, agentsCss);
   return (
-    <span
-      data-slot="model-badge"
-      data-provider={provider}
-      className={cn("sui-model-badge", className)}
-      {...props}
-    >
-      {icon ? <span className="sui-model-badge-icon" aria-hidden="true">{icon}</span> : null}
+    <span data-slot="model-badge" data-provider={provider} className={cn("sui-model-badge", className)} {...props}>
+      {icon ? (
+        <span className="sui-model-badge-icon" aria-hidden="true">
+          {icon}
+        </span>
+      ) : null}
       <span className="sui-model-badge-name">{model}</span>
       {provider ? <span className="sui-model-badge-provider">{provider}</span> : null}
     </span>
@@ -40,7 +39,11 @@ export function ProviderBadge({ provider, icon, className, ...props }: ProviderB
   useInjectLaneCss(AGENT_IDENTITY_CONTEXT_CSS_ID, agentsCss);
   return (
     <span data-slot="provider-badge" className={cn("sui-provider-badge", className)} {...props}>
-      {icon ? <span className="sui-provider-badge-icon" aria-hidden="true">{icon}</span> : null}
+      {icon ? (
+        <span className="sui-provider-badge-icon" aria-hidden="true">
+          {icon}
+        </span>
+      ) : null}
       <span className="sui-provider-badge-name">{provider}</span>
     </span>
   );

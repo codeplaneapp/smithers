@@ -62,17 +62,21 @@ export async function recordForcedEffectBoundary(db, params) {
   const timestampMs = nowMs();
   const effects = [...params.report.blocking, ...params.report.revertible];
   for (const effect of effects) {
-    await appendForcedPast(db, {
-      runId: params.runId,
-      nodeId: effect.nodeId,
-      iteration: effect.iteration,
-      attempt: effect.attempt,
-      seq: effect.seq,
-    }, {
-      opId: params.opId,
-      timestampMs,
-      operation: params.operation,
-    });
+    await appendForcedPast(
+      db,
+      {
+        runId: params.runId,
+        nodeId: effect.nodeId,
+        iteration: effect.iteration,
+        attempt: effect.attempt,
+        seq: effect.seq,
+      },
+      {
+        opId: params.opId,
+        timestampMs,
+        operation: params.operation,
+      },
+    );
   }
   const event = {
     type: "SideEffectBoundaryCrossed",
@@ -82,10 +86,12 @@ export async function recordForcedEffectBoundary(db, params) {
     report: params.report,
     timestampMs,
   };
-  await Effect.runPromise(db.insertEventWithNextSeq({
-    runId: params.runId,
-    timestampMs,
-    type: event.type,
-    payloadJson: JSON.stringify(event),
-  }));
+  await Effect.runPromise(
+    db.insertEventWithNextSeq({
+      runId: params.runId,
+      timestampMs,
+      type: event.type,
+      payloadJson: JSON.stringify(event),
+    }),
+  );
 }

@@ -50,10 +50,7 @@ type VersionedArtifactGuardOptions = {
  * finish before a registry lookup is needed. The check is cached for the
  * whole generation run, keeping both versioned files on one decision.
  */
-export function createVersionedArtifactGuard(
-  version: string,
-  options: VersionedArtifactGuardOptions = {},
-) {
+export function createVersionedArtifactGuard(version: string, options: VersionedArtifactGuardOptions = {}) {
   const checkPublication = options.checkPublication ?? checkNpmPublication;
   const warn = options.warn ?? console.warn;
   const error = options.error ?? console.error;

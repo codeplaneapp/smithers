@@ -98,11 +98,10 @@ describe("scheduleTasks <TryCatchFinally catchErrors> code matching", () => {
 
   test("only failed tasks contribute codes: a finished task's stale failure payload is ignored", () => {
     const result = sched(
-      tcf(
-        "tcf",
-        [{ kind: "parallel", children: [task("a"), task("b")] }],
-        { catchChildren: [task("c")], catchErrors: ["E_BOOM"] },
-      ),
+      tcf("tcf", [{ kind: "parallel", children: [task("a"), task("b")] }], {
+        catchChildren: [task("c")],
+        catchErrors: ["E_BOOM"],
+      }),
       { a: "failed", b: "finished", c: "pending" },
       descriptorMap(makeDescriptor("a"), makeDescriptor("b"), makeDescriptor("c")),
       // b succeeded on retry but a stale failure payload lingers; a failed with no code.
@@ -196,11 +195,10 @@ describe("scheduleTasks <TryCatchFinally catchErrors> code matching", () => {
 
   test("a try task with no registered descriptor is skipped without crashing the code scan", () => {
     const result = sched(
-      tcf(
-        "tcf",
-        [{ kind: "parallel", children: [task("ghost"), task("t")] }],
-        { catchChildren: [task("c")], catchErrors: ["E_BOOM"] },
-      ),
+      tcf("tcf", [{ kind: "parallel", children: [task("ghost"), task("t")] }], {
+        catchChildren: [task("c")],
+        catchErrors: ["E_BOOM"],
+      }),
       { t: "failed", c: "pending" },
       descriptorMap(makeDescriptor("t"), makeDescriptor("c")),
       { taskFailures: failures({ t: { code: "E_BOOM" } }) },

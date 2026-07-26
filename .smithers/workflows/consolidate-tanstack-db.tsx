@@ -30,7 +30,7 @@ const WT = join(repoRoot, ".smithers", "workflows", ".worktrees", "consolidate-0
 
 // 06-07 product branches to harvest (primary first). Union of these = the work to fold in.
 const SOURCE_BRANCHES = [
-  "smithers-ui-merge-validate-20260607",   // primary integration superset (contains -integration)
+  "smithers-ui-merge-validate-20260607", // primary integration superset (contains -integration)
   "smithers-ui-e2e-gap-audit-20260607",
   "smithers-ui-sdk-docs-skills-20260607",
   "smithers-ui-slideshow-validation-20260607",
@@ -88,9 +88,34 @@ const { Workflow, Task, Sequence, Loop, Worktree, smithers, outputs } = createSm
 
 const opusFallback = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
 const sonnetFallback = new ClaudeCodeAgent({ model: "claude-sonnet-5" });
-const solAgent = codexFirst({ model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [opusFallback]);
-const lunaAgent = codexFirst({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [sonnetFallback]);
-const terraAgent = codexFirst({ model: "gpt-5.6-terra", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }, [sonnetFallback]);
+const solAgent = codexFirst(
+  {
+    model: "gpt-5.6-sol",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
+  [opusFallback],
+);
+const lunaAgent = codexFirst(
+  {
+    model: "gpt-5.6-luna",
+    config: { model_reasoning_effort: "medium" },
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
+  [sonnetFallback],
+);
+const terraAgent = codexFirst(
+  {
+    model: "gpt-5.6-terra",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
+  [sonnetFallback],
+);
 
 const RETRIES = 2;
 const CONSOLIDATE_TIMEOUT_MS = 180 * 60_000;
@@ -103,7 +128,8 @@ function latest<T>(rows: T[] | undefined): T | undefined {
 }
 
 function commitWorktree(path: string, branch: string, subject: string) {
-  const git = (args: string[]) => execFileSync("git", args, { cwd: path, encoding: "utf8", maxBuffer: 128 * 1024 * 1024 });
+  const git = (args: string[]) =>
+    execFileSync("git", args, { cwd: path, encoding: "utf8", maxBuffer: 128 * 1024 * 1024 });
   const base = { branch, committed: false, sha: null as string | null, summary: "" };
   try {
     const tip = git(["rev-parse", "HEAD"]).trim();
@@ -131,14 +157,32 @@ function commitWorktree(path: string, branch: string, subject: string) {
     }
     if (!changed.length) return { ...base, sha: tip, summary: "No changes to commit." };
     const present = changed.filter((relativePath) => existsSync(join(path, relativePath)));
-    const removed = changed.filter((relativePath) => !existsSync(join(path, relativePath)) && !alreadyStaged.has(relativePath));
+    const removed = changed.filter(
+      (relativePath) => !existsSync(join(path, relativePath)) && !alreadyStaged.has(relativePath),
+    );
     if (present.length) git(["add", "--", ...present]);
     if (removed.length) git(["add", "-u", "--", ...removed]);
-    git(["commit", "-m", `🔧 chore(consolidation): ${subject}`, "-m", "Co-Authored-By: Codex <noreply@openai.com>", "--", ...changed]);
+    git([
+      "commit",
+      "-m",
+      `🔧 chore(consolidation): ${subject}`,
+      "-m",
+      "Co-Authored-By: Codex <noreply@openai.com>",
+      "--",
+      ...changed,
+    ]);
     const sha = git(["rev-parse", "HEAD"]).trim();
-    return { ...base, committed: true, sha, summary: `${branch} @ ${sha.slice(0, 10)} committed with explicit pathspecs.` };
+    return {
+      ...base,
+      committed: true,
+      sha,
+      summary: `${branch} @ ${sha.slice(0, 10)} committed with explicit pathspecs.`,
+    };
   } catch (err) {
-    return { ...base, summary: `Commit check failed: ${String(err instanceof Error ? err.message : err).slice(0, 400)}` };
+    return {
+      ...base,
+      summary: `Commit check failed: ${String(err instanceof Error ? err.message : err).slice(0, 400)}`,
+    };
   }
 }
 
@@ -243,31 +287,57 @@ export default smithers((ctx) => {
   const verify = latest(ctx.outputs.verify);
   const green = verify?.green === true;
   const review = latest(ctx.outputs.review);
-  const reviewReady = review?.approved === true
-    && review.migrationIntact === true
-    && (review.strayWorkRemaining ?? []).length === 0
-    && Number((review as unknown as { iteration?: unknown }).iteration ?? 0)
-      === Number((verify as unknown as { iteration?: unknown })?.iteration ?? 0);
+  const reviewReady =
+    review?.approved === true &&
+    review.migrationIntact === true &&
+    (review.strayWorkRemaining ?? []).length === 0 &&
+    Number((review as unknown as { iteration?: unknown }).iteration ?? 0) ===
+      Number((verify as unknown as { iteration?: unknown })?.iteration ?? 0);
 
   return (
     <Workflow name="consolidate-tanstack-db">
       <Sequence>
         <Worktree path={WT} branch={WORK_BRANCH} baseBranch={BASE_BRANCH}>
           <Sequence>
-            <Task id="consolidate" output={outputs.consolidate} agent={lunaAgent} retries={RETRIES} timeoutMs={CONSOLIDATE_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+            <Task
+              id="consolidate"
+              output={outputs.consolidate}
+              agent={lunaAgent}
+              retries={RETRIES}
+              timeoutMs={CONSOLIDATE_TIMEOUT_MS}
+              heartbeatTimeoutMs={HEARTBEAT_MS}
+            >
               {consolidatePrompt(prevConsolidate, verify)}
             </Task>
             <Loop id="verify-loop" until={green} maxIterations={iterations} onMaxReached="return-last">
-              <Task id="verify" output={outputs.verify} agent={terraAgent} retries={RETRIES} timeoutMs={VERIFY_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
+              <Task
+                id="verify"
+                output={outputs.verify}
+                agent={terraAgent}
+                retries={RETRIES}
+                timeoutMs={VERIFY_TIMEOUT_MS}
+                heartbeatTimeoutMs={HEARTBEAT_MS}
+              >
                 {verifyPrompt()}
               </Task>
             </Loop>
-            {green ? <Task id="review" output={outputs.review} agent={solAgent} retries={RETRIES} timeoutMs={REVIEW_TIMEOUT_MS} heartbeatTimeoutMs={HEARTBEAT_MS}>
-              {reviewPrompt()}
-            </Task> : null}
-            {green && reviewReady ? <Task id="commit" output={outputs.commit} timeoutMs={5 * 60_000}>
-              {() => commitWorktree(WT, WORK_BRANCH, "consolidate 06-07 product work onto TanStack DB")}
-            </Task> : null}
+            {green ? (
+              <Task
+                id="review"
+                output={outputs.review}
+                agent={solAgent}
+                retries={RETRIES}
+                timeoutMs={REVIEW_TIMEOUT_MS}
+                heartbeatTimeoutMs={HEARTBEAT_MS}
+              >
+                {reviewPrompt()}
+              </Task>
+            ) : null}
+            {green && reviewReady ? (
+              <Task id="commit" output={outputs.commit} timeoutMs={5 * 60_000}>
+                {() => commitWorktree(WT, WORK_BRANCH, "consolidate 06-07 product work onto TanStack DB")}
+              </Task>
+            ) : null}
           </Sequence>
         </Worktree>
       </Sequence>

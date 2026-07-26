@@ -23,9 +23,7 @@ function makeAgentDescriptor(overrides = {}) {
 
 function makeGraph(descriptor = makeAgentDescriptor()) {
   return {
-    xml: el("smithers:workflow", {}, [
-      el("smithers:task", { id: descriptor.nodeId }),
-    ]),
+    xml: el("smithers:workflow", {}, [el("smithers:task", { id: descriptor.nodeId })]),
     tasks: [descriptor],
     mountedTaskIds: new Set([`${descriptor.nodeId}::${descriptor.iteration}`]),
   };
@@ -39,15 +37,17 @@ describe("makeWorkflowSession retry classification", () => {
 
     expect(initial._tag).toBe("Execute");
 
-    const decision = Effect.runSync(session.taskFailed({
-      nodeId: descriptor.nodeId,
-      iteration: descriptor.iteration,
-      error: {
-        code: "AGENT_CLI_ERROR",
-        message: "operator action required",
-        details: { failureRetryable: false },
-      },
-    }));
+    const decision = Effect.runSync(
+      session.taskFailed({
+        nodeId: descriptor.nodeId,
+        iteration: descriptor.iteration,
+        error: {
+          code: "AGENT_CLI_ERROR",
+          message: "operator action required",
+          details: { failureRetryable: false },
+        },
+      }),
+    );
 
     expect(decision._tag).toBe("Failed");
   });
@@ -57,14 +57,16 @@ describe("makeWorkflowSession retry classification", () => {
     const descriptor = makeAgentDescriptor();
     Effect.runSync(session.submitGraph(makeGraph(descriptor)));
 
-    const decision = Effect.runSync(session.taskFailed({
-      nodeId: descriptor.nodeId,
-      iteration: descriptor.iteration,
-      error: {
-        code: "AGENT_CONFIG_INVALID",
-        message: "missing model configuration",
-      },
-    }));
+    const decision = Effect.runSync(
+      session.taskFailed({
+        nodeId: descriptor.nodeId,
+        iteration: descriptor.iteration,
+        error: {
+          code: "AGENT_CONFIG_INVALID",
+          message: "missing model configuration",
+        },
+      }),
+    );
 
     expect(decision._tag).toBe("Failed");
   });
@@ -74,14 +76,16 @@ describe("makeWorkflowSession retry classification", () => {
     const descriptor = makeAgentDescriptor();
     Effect.runSync(session.submitGraph(makeGraph(descriptor)));
 
-    const decision = Effect.runSync(session.taskFailed({
-      nodeId: descriptor.nodeId,
-      iteration: descriptor.iteration,
-      error: {
-        code: "AGENT_CLI_ERROR",
-        message: "transient failure",
-      },
-    }));
+    const decision = Effect.runSync(
+      session.taskFailed({
+        nodeId: descriptor.nodeId,
+        iteration: descriptor.iteration,
+        error: {
+          code: "AGENT_CLI_ERROR",
+          message: "transient failure",
+        },
+      }),
+    );
 
     expect(decision).toEqual({
       _tag: "Wait",
@@ -110,10 +114,7 @@ describe("makeWorkflowSession retry classification", () => {
     });
     const graph = {
       xml: el("smithers:workflow", {}, [
-        el("smithers:parallel", {}, [
-          el("smithers:task", { id: "flaky" }),
-          el("smithers:task", { id: "sibling" }),
-        ]),
+        el("smithers:parallel", {}, [el("smithers:task", { id: "flaky" }), el("smithers:task", { id: "sibling" })]),
       ]),
       tasks: [flaky, sibling],
       mountedTaskIds: new Set(["flaky::0", "sibling::0"]),
@@ -123,11 +124,13 @@ describe("makeWorkflowSession retry classification", () => {
     expect(initial._tag).toBe("Execute");
     expect(initial.tasks.map((task) => task.nodeId)).toEqual(["flaky"]);
 
-    const afterFailure = Effect.runSync(session.taskFailed({
-      nodeId: "flaky",
-      iteration: 0,
-      error: { code: "SESSION_ERROR", message: "stream disconnected" },
-    }));
+    const afterFailure = Effect.runSync(
+      session.taskFailed({
+        nodeId: "flaky",
+        iteration: 0,
+        error: { code: "SESSION_ERROR", message: "stream disconnected" },
+      }),
+    );
 
     expect(afterFailure._tag).toBe("Execute");
     expect(afterFailure.tasks.map((task) => task.nodeId)).toEqual(["sibling"]);
@@ -166,11 +169,13 @@ describe("makeWorkflowSession failure control flow", () => {
 
     expect(Effect.runSync(session.submitGraph(graph))._tag).toBe("Execute");
 
-    const afterFailure = Effect.runSync(session.taskFailed({
-      nodeId: "explode",
-      iteration: 0,
-      error: { message: "boom" },
-    }));
+    const afterFailure = Effect.runSync(
+      session.taskFailed({
+        nodeId: "explode",
+        iteration: 0,
+        error: { message: "boom" },
+      }),
+    );
 
     expect(afterFailure._tag).toBe("Execute");
     expect(afterFailure.tasks.map((task) => task.nodeId)).toEqual(["recover"]);
@@ -207,27 +212,33 @@ describe("makeWorkflowSession failure control flow", () => {
 
     expect(Effect.runSync(session.submitGraph(graph))._tag).toBe("Execute");
 
-    const afterTryFailure = Effect.runSync(session.taskFailed({
-      nodeId: "explode",
-      iteration: 0,
-      error: { message: "boom" },
-    }));
+    const afterTryFailure = Effect.runSync(
+      session.taskFailed({
+        nodeId: "explode",
+        iteration: 0,
+        error: { message: "boom" },
+      }),
+    );
     expect(afterTryFailure._tag).toBe("Execute");
     expect(afterTryFailure.tasks.map((task) => task.nodeId)).toEqual(["recover"]);
 
-    const afterCatchFailure = Effect.runSync(session.taskFailed({
-      nodeId: "recover",
-      iteration: 0,
-      error: { message: "recovery failed" },
-    }));
+    const afterCatchFailure = Effect.runSync(
+      session.taskFailed({
+        nodeId: "recover",
+        iteration: 0,
+        error: { message: "recovery failed" },
+      }),
+    );
     expect(afterCatchFailure._tag).toBe("Execute");
     expect(afterCatchFailure.tasks.map((task) => task.nodeId)).toEqual(["cleanup"]);
 
-    const afterCleanup = Effect.runSync(session.taskCompleted({
-      nodeId: "cleanup",
-      iteration: 0,
-      output: { ok: true },
-    }));
+    const afterCleanup = Effect.runSync(
+      session.taskCompleted({
+        nodeId: "cleanup",
+        iteration: 0,
+        output: { ok: true },
+      }),
+    );
     expect(afterCleanup._tag).toBe("Failed");
     expect(afterCleanup.error.message).toContain("Task failed: recover");
   });
@@ -256,9 +267,7 @@ describe("makeWorkflowSession failure control flow", () => {
             el("smithers:task", { id: "reserve" }),
             el("smithers:task", { id: "charge" }),
           ]),
-          el("smithers:saga-compensations", {}, [
-            el("smithers:task", { id: "release" }),
-          ]),
+          el("smithers:saga-compensations", {}, [el("smithers:task", { id: "release" })]),
         ]),
       ]),
       tasks: [reserve, charge, release],
@@ -266,19 +275,23 @@ describe("makeWorkflowSession failure control flow", () => {
     };
 
     expect(Effect.runSync(session.submitGraph(graph))._tag).toBe("Execute");
-    const afterReserve = Effect.runSync(session.taskCompleted({
-      nodeId: "reserve",
-      iteration: 0,
-      output: { ok: true },
-    }));
+    const afterReserve = Effect.runSync(
+      session.taskCompleted({
+        nodeId: "reserve",
+        iteration: 0,
+        output: { ok: true },
+      }),
+    );
     expect(afterReserve._tag).toBe("Execute");
     expect(afterReserve.tasks.map((task) => task.nodeId)).toEqual(["charge"]);
 
-    const afterFailure = Effect.runSync(session.taskFailed({
-      nodeId: "charge",
-      iteration: 0,
-      error: { message: "payment failed" },
-    }));
+    const afterFailure = Effect.runSync(
+      session.taskFailed({
+        nodeId: "charge",
+        iteration: 0,
+        error: { message: "payment failed" },
+      }),
+    );
 
     expect(afterFailure._tag).toBe("Execute");
     expect(afterFailure.tasks.map((task) => task.nodeId)).toEqual(["release"]);
@@ -299,10 +312,7 @@ describe("makeWorkflowSession failure control flow", () => {
       xml: el("smithers:workflow", {}, [
         el("smithers:try-catch-finally", { id: "tcf" }, [
           el("smithers:tcf-try", {}, [
-            el("smithers:parallel", {}, [
-              el("smithers:task", { id: "fail" }),
-              el("smithers:task", { id: "slow" }),
-            ]),
+            el("smithers:parallel", {}, [el("smithers:task", { id: "fail" }), el("smithers:task", { id: "slow" })]),
           ]),
           el("smithers:tcf-catch", {}, [el("smithers:task", { id: "recover" })]),
           el("smithers:tcf-finally", {}, [el("smithers:task", { id: "cleanup" })]),
@@ -338,14 +348,9 @@ describe("makeWorkflowSession failure control flow", () => {
         el("smithers:saga", { id: "saga", onFailure: "compensate" }, [
           el("smithers:saga-actions", {}, [
             el("smithers:task", { id: "setup" }),
-            el("smithers:parallel", {}, [
-              el("smithers:task", { id: "fail" }),
-              el("smithers:task", { id: "slow" }),
-            ]),
+            el("smithers:parallel", {}, [el("smithers:task", { id: "fail" }), el("smithers:task", { id: "slow" })]),
           ]),
-          el("smithers:saga-compensations", {}, [
-            el("smithers:task", { id: "undo" }),
-          ]),
+          el("smithers:saga-compensations", {}, [el("smithers:task", { id: "undo" })]),
         ]),
       ]),
       tasks: [setup, fail, slow, undo],
@@ -382,10 +387,7 @@ describe("makeWorkflowSession failure control flow", () => {
     });
     const graph = {
       xml: el("smithers:workflow", {}, [
-        el("smithers:parallel", {}, [
-          el("smithers:task", { id: "a" }),
-          el("smithers:task", { id: "b" }),
-        ]),
+        el("smithers:parallel", {}, [el("smithers:task", { id: "a" }), el("smithers:task", { id: "b" })]),
       ]),
       tasks: [a, b],
       mountedTaskIds: new Set(["a::0", "b::0"]),
@@ -395,11 +397,13 @@ describe("makeWorkflowSession failure control flow", () => {
     expect(initial._tag).toBe("Execute");
     expect(initial.tasks.map((task) => task.nodeId)).toEqual(["a"]);
 
-    const afterFailure = Effect.runSync(session.taskFailed({
-      nodeId: "a",
-      iteration: 0,
-      error: { message: "boom" },
-    }));
+    const afterFailure = Effect.runSync(
+      session.taskFailed({
+        nodeId: "a",
+        iteration: 0,
+        error: { message: "boom" },
+      }),
+    );
 
     expect(afterFailure._tag).toBe("Failed");
   });
@@ -440,19 +444,23 @@ describe("makeWorkflowSession failure control flow", () => {
     expect(initial._tag).toBe("Execute");
     expect(initial.tasks.map((task) => task.nodeId)).toEqual(["explode", "unrelated"]);
 
-    const afterBoundaryFailure = Effect.runSync(session.taskFailed({
-      nodeId: "explode",
-      iteration: 0,
-      error: { message: "handled" },
-    }));
+    const afterBoundaryFailure = Effect.runSync(
+      session.taskFailed({
+        nodeId: "explode",
+        iteration: 0,
+        error: { message: "handled" },
+      }),
+    );
     expect(afterBoundaryFailure._tag).toBe("Execute");
     expect(afterBoundaryFailure.tasks.map((task) => task.nodeId)).toEqual(["recover"]);
 
-    const afterUnrelatedFailure = Effect.runSync(session.taskFailed({
-      nodeId: "unrelated",
-      iteration: 0,
-      error: { message: "unhandled" },
-    }));
+    const afterUnrelatedFailure = Effect.runSync(
+      session.taskFailed({
+        nodeId: "unrelated",
+        iteration: 0,
+        error: { message: "unhandled" },
+      }),
+    );
     expect(afterUnrelatedFailure._tag).toBe("Failed");
   });
 
@@ -465,16 +473,12 @@ describe("makeWorkflowSession failure control flow", () => {
       retryPolicy: undefined,
     });
     const firstGraph = {
-      xml: el("smithers:workflow", {}, [
-        el("smithers:task", { id: "flaky" }),
-      ]),
+      xml: el("smithers:workflow", {}, [el("smithers:task", { id: "flaky" })]),
       tasks: [flaky],
       mountedTaskIds: new Set(["flaky::0"]),
     };
     const secondGraph = {
-      xml: el("smithers:workflow", {}, [
-        el("smithers:task", { id: "after-rerender" }),
-      ]),
+      xml: el("smithers:workflow", {}, [el("smithers:task", { id: "after-rerender" })]),
       tasks: [
         makeAgentDescriptor({
           nodeId: "after-rerender",
@@ -486,11 +490,13 @@ describe("makeWorkflowSession failure control flow", () => {
     };
 
     expect(Effect.runSync(session.submitGraph(firstGraph))._tag).toBe("Execute");
-    const afterFailure = Effect.runSync(session.taskFailed({
-      nodeId: "flaky",
-      iteration: 0,
-      error: { code: "SESSION_ERROR", message: "stream disconnected" },
-    }));
+    const afterFailure = Effect.runSync(
+      session.taskFailed({
+        nodeId: "flaky",
+        iteration: 0,
+        error: { code: "SESSION_ERROR", message: "stream disconnected" },
+      }),
+    );
     expect(afterFailure._tag).toBe("Finished");
 
     const afterRerender = Effect.runSync(session.submitGraph(secondGraph));

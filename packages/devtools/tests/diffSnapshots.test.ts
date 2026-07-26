@@ -4,12 +4,7 @@ import { diffSnapshots } from "../src/diffSnapshots.js";
 import type { DevToolsNode } from "../src/DevToolsNode.ts";
 import type { DevToolsSnapshotV1 } from "../src/DevToolsSnapshotV1.ts";
 
-
-function node(
-  id: number,
-  children: DevToolsNode[] = [],
-  props: Record<string, unknown> = {},
-): DevToolsNode {
+function node(id: number, children: DevToolsNode[] = [], props: Record<string, unknown> = {}): DevToolsNode {
   return {
     id,
     type: "task",
@@ -45,7 +40,10 @@ function snapshot(seq: number, root: DevToolsNode): DevToolsSnapshotV1 {
 }
 
 function wideTree(count: number): DevToolsNode {
-  return node(1, Array.from({ length: count }, (_, index) => node(index + 2)));
+  return node(
+    1,
+    Array.from({ length: count }, (_, index) => node(index + 2)),
+  );
 }
 
 describe("diffSnapshots + applyDelta round trip", () => {
@@ -191,7 +189,7 @@ describe("diffSnapshots + applyDelta round trip", () => {
     const delta = diffSnapshots(from, to);
     const patched = applyDelta(from, delta);
     expect(patched).toEqual(to);
-    expect((patched.root.children[0]?.props.value as string)).toBe(unicode);
+    expect(patched.root.children[0]?.props.value as string).toBe(unicode);
   });
 
   test("rejects snapshots from different runs", () => {
@@ -219,7 +217,10 @@ describe("diffSnapshots + applyDelta round trip", () => {
       [{ value: 1 }, { value: "1" }],
       [{ value: null }, { value: {} }],
       [{ value: [1] }, { value: [1, 2] }],
-      [{ equalArray: [1, 2], marker: "a" }, { equalArray: [1, 2], marker: "b" }],
+      [
+        { equalArray: [1, 2], marker: "a" },
+        { equalArray: [1, 2], marker: "b" },
+      ],
       [{ value: { left: true } }, { value: { right: true } }],
     ];
     for (const [fromProps, toProps] of cases) {
@@ -255,9 +256,7 @@ describe("diffSnapshots + applyDelta round trip", () => {
     const delta = diffSnapshots(from, to);
     // All 10 changed nodes should appear in the delta as updateProps ops
     const updatedIds = new Set(
-      delta.ops
-        .filter((op) => op.op === "updateProps")
-        .map((op) => (op as { op: "updateProps"; id: number }).id),
+      delta.ops.filter((op) => op.op === "updateProps").map((op) => (op as { op: "updateProps"; id: number }).id),
     );
     expect(updatedIds.size).toBe(10);
     for (let index = 0; index < 10; index += 1) {

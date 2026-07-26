@@ -9,16 +9,14 @@ import { resolveSmithersObservabilityOptions } from "./resolveSmithersObservabil
  * @param {SmithersObservabilityOptions} [options]
  */
 export function createSmithersOtelLayer(options = {}) {
-    const resolved = resolveSmithersObservabilityOptions(options);
-    if (!resolved.enabled) {
-        return Layer.empty;
-    }
-    return Otlp.layerJson({
-        baseUrl: resolved.endpoint,
-        ...(resolved.headers && Object.keys(resolved.headers).length > 0
-            ? { headers: resolved.headers }
-            : {}),
-        resource: { serviceName: resolved.serviceName },
-        tracerContext: (execute, span) => smithersTraceSpanStorage.run(span, execute),
-    }).pipe(Layer.provide(FetchHttpClient.layer));
+  const resolved = resolveSmithersObservabilityOptions(options);
+  if (!resolved.enabled) {
+    return Layer.empty;
+  }
+  return Otlp.layerJson({
+    baseUrl: resolved.endpoint,
+    ...(resolved.headers && Object.keys(resolved.headers).length > 0 ? { headers: resolved.headers } : {}),
+    resource: { serviceName: resolved.serviceName },
+    tracerContext: (execute, span) => smithersTraceSpanStorage.run(span, execute),
+  }).pipe(Layer.provide(FetchHttpClient.layer));
 }

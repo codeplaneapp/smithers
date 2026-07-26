@@ -1,6 +1,16 @@
 // smithers-display-name: Finish Agentic UI Library Program
 /** @jsxImportSource smithers-orchestrator */
-import { ClaudeCodeAgent, MergeQueue, OpenCodeAgent, Parallel, Sequence, Task, UI, Worktree, createSmithers } from "smithers-orchestrator";
+import {
+  ClaudeCodeAgent,
+  MergeQueue,
+  OpenCodeAgent,
+  Parallel,
+  Sequence,
+  Task,
+  UI,
+  Worktree,
+  createSmithers,
+} from "smithers-orchestrator";
 import { join } from "node:path";
 import { z } from "zod/v4";
 import { providers } from "../agents";
@@ -134,10 +144,7 @@ const { Workflow, Loop, smithers, outputs } = createSmithers({
 });
 
 // Agents: same seats as the parent program.
-const kimiImplement = [
-  new OpenCodeAgent({ model: "kimi-for-coding/k3" }),
-  providers.claudeSonnet,
-];
+const kimiImplement = [new OpenCodeAgent({ model: "kimi-for-coding/k3" }), providers.claudeSonnet];
 const kimiImplementMulti = [
   new OpenCodeAgent({ model: "kimi-for-coding/k3", cwd: MULTI_ROOT }),
   new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd: MULTI_ROOT }),
@@ -161,7 +168,13 @@ const mergeChain = [providers.claudeSonnet, providers.claude];
 
 type RawRow = Record<string, unknown>;
 function slug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "item";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 64) || "item"
+  );
 }
 function rawRows(ctx: any, channel: string): RawRow[] {
   const rows = typeof ctx.outputs === "function" ? ctx.outputs(channel) : ctx.outputs?.[channel];
@@ -176,12 +189,14 @@ function rowVersion(row: RawRow): [number, number] {
   return [iterationCount, iteration];
 }
 function latestRaw(rows: RawRow[], nodeId: string): RawRow | undefined {
-  return rows.filter((row) => baseNodeId(row) === nodeId).reduce<RawRow | undefined>((best, row) => {
-    if (!best) return row;
-    const current = rowVersion(row);
-    const previous = rowVersion(best);
-    return current[0] > previous[0] || (current[0] === previous[0] && current[1] >= previous[1]) ? row : best;
-  }, undefined);
+  return rows
+    .filter((row) => baseNodeId(row) === nodeId)
+    .reduce<RawRow | undefined>((best, row) => {
+      if (!best) return row;
+      const current = rowVersion(row);
+      const previous = rowVersion(best);
+      return current[0] > previous[0] || (current[0] === previous[0] && current[1] >= previous[1]) ? row : best;
+    }, undefined);
 }
 function sameVersion(left: RawRow | undefined, right: RawRow | undefined): boolean {
   if (!left || !right) return false;
@@ -215,7 +230,9 @@ function fixImplementPrompt(lane: FixLane, feedback: string): string {
     "You work in an isolated jj/git worktree; use jj, commit only your own files with explicit pathspecs. Do NOT edit shared integration files (packages/ui/src/index.ts, uiCss.ts, shadcn-provenance.json, package manifests, lockfiles, docs/**) — if a finding requires a provenance/docs change, note it in summary for the integration step instead.",
     feedback ? `Feedback on your previous attempt (fix ALL of it):\n${feedback}` : "",
     "Return componentsImplemented with the exported names you touched, and status=implemented only when the focused checks pass here.",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function fixValidatePrompt(lane: FixLane, branch: string, implementation: RawRow | undefined): string {
@@ -230,7 +247,12 @@ function fixValidatePrompt(lane: FixLane, branch: string, implementation: RawRow
   ].join("\n");
 }
 
-function fixReviewPrompt(lane: FixLane, seat: Seat, implementation: RawRow | undefined, validation: RawRow | undefined): string {
+function fixReviewPrompt(
+  lane: FixLane,
+  seat: Seat,
+  implementation: RawRow | undefined,
+  validation: RawRow | undefined,
+): string {
   return [
     `Independent ${seat}-seat re-review of lane ${lane.id} (its parent-run final round was rejected; this branch closes those findings on the integrated code). Do NOT edit files. Return laneId=${lane.id}, seat=${seat}, reviewer=<the model identity you actually are>.`,
     `The findings that had blocked approval:\n${lane.findings}`,
@@ -265,7 +287,9 @@ function integrationPrompt(laneResults: RawRow[], merges: RawRow[], feedback: st
     "Afterwards run and get green: pnpm -C packages/ui test; pnpm -C packages/gateway-ui test; node scripts/check-ui-architecture.mjs; node scripts/check-docs.mjs; node scripts/check-llms.mjs. Commit your files with explicit pathspecs.",
     feedback ? `Feedback on your previous attempt (fix ALL of it):\n${feedback}` : "",
     "Return status=implemented only when those checks pass; otherwise partial/blocked truthfully.",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function integrationReviewPrompt(seat: Seat, implementation: RawRow | undefined, ci: RawRow | undefined): string {
@@ -295,7 +319,9 @@ function adoptionImplementPrompt(lane: (typeof ADOPTION_LANES)[number], feedback
     "The shared library is integrated on smithers local main; the pnpm link makes it live in Multi. Definition of done: refactored surfaces render through the shared components with behavior preserved (existing tests stay green; add focused tests for the new rendering paths), pnpm check:ui-architecture + pnpm typecheck green, work committed via jj with explicit pathspecs, unrelated changes untouched.",
     feedback ? `Feedback on your previous attempt (fix ALL of it):\n${feedback}` : "",
     "Return componentsImplemented with the shared components actually adopted; status=implemented only when the focused checks pass.",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function adoptionValidatePrompt(lane: (typeof ADOPTION_LANES)[number], implementation: RawRow | undefined): string {
@@ -307,7 +333,12 @@ function adoptionValidatePrompt(lane: (typeof ADOPTION_LANES)[number], implement
   ].join("\n");
 }
 
-function adoptionReviewPrompt(lane: (typeof ADOPTION_LANES)[number], seat: Seat, implementation: RawRow | undefined, validation: RawRow | undefined): string {
+function adoptionReviewPrompt(
+  lane: (typeof ADOPTION_LANES)[number],
+  seat: Seat,
+  implementation: RawRow | undefined,
+  validation: RawRow | undefined,
+): string {
   return [
     `Independent ${seat}-seat review of Multi adoption lane ${lane.id}. Do NOT edit files. Return laneId=${lane.id}, seat=${seat}, reviewer=<your model identity>.`,
     `Lane scope:\n${lane.spec}`,
@@ -336,7 +367,11 @@ function auditPrompt(seat: Seat, ctx: any): string {
     `Standing deferrals to endorse or reject (deferralsEndorsed=true endorses ALL, including per-lane componentsDeferred):\n${EXPLICIT_DEFERRALS.join(", ")}`,
     "Build coverageMatrix rows ONLY for components whose state CHANGED in this continuation (fixed lanes → integrated; adopted components → adopted); name deferred adoption work separately in followUps.",
     `Fix/adoption lane results:\n${JSON.stringify(laneResults, null, 2)}`,
-    `CI rows:\n${JSON.stringify(ciRows.map((row) => ({ nodeId: row.nodeId, scope: row.scope, allPassed: row.allPassed, summary: row.summary })), null, 2)}`,
+    `CI rows:\n${JSON.stringify(
+      ciRows.map((row) => ({ nodeId: row.nodeId, scope: row.scope, allPassed: row.allPassed, summary: row.summary })),
+      null,
+      2,
+    )}`,
   ].join("\n\n");
 }
 
@@ -355,9 +390,14 @@ export default smithers((ctx) => {
   const fixLgtm = laneResults.filter((row) => FIX_LANES.some((lane) => lane.id === row.laneId) && row.lgtm === true);
   const mergesSettled = fixSettled && fixLgtm.every((row) => merges.some((merge) => merge.laneId === row.laneId));
 
-  const integrationImplRows = rawRows(ctx, "aguiImpl").filter((row) => baseNodeId(row) === "integration-implement" && row.laneId === "integration");
+  const integrationImplRows = rawRows(ctx, "aguiImpl").filter(
+    (row) => baseNodeId(row) === "integration-implement" && row.laneId === "integration",
+  );
   const integrationImpl = latestRaw(integrationImplRows, "integration-implement");
-  const smithersCi = latestRaw(rawRows(ctx, "aguiCi").filter((row) => row.scope === "smithers"), "integration-ci");
+  const smithersCi = latestRaw(
+    rawRows(ctx, "aguiCi").filter((row) => row.scope === "smithers"),
+    "integration-ci",
+  );
   const smithersCiCurrent = sameVersion(integrationImpl, smithersCi);
   const integrationReviews = (["fable", "sol"] as Seat[]).map((seat) => {
     const review = latestRaw(
@@ -366,29 +406,54 @@ export default smithers((ctx) => {
     );
     return { seat, review, current: smithersCiCurrent && sameVersion(smithersCi, review) };
   });
-  const integrationDone = integrationImpl?.status === "implemented"
-    && smithersCiCurrent && smithersCi?.allPassed === true
-    && integrationReviews.every((entry) => entry.current && entry.review?.approved === true);
-  const integrationSettled = integrationDone
-    || (integrationImplRows.length >= 3 && smithersCiCurrent && (smithersCi?.allPassed === false || integrationReviews.every((entry) => entry.current)));
+  const integrationDone =
+    integrationImpl?.status === "implemented" &&
+    smithersCiCurrent &&
+    smithersCi?.allPassed === true &&
+    integrationReviews.every((entry) => entry.current && entry.review?.approved === true);
+  const integrationSettled =
+    integrationDone ||
+    (integrationImplRows.length >= 3 &&
+      smithersCiCurrent &&
+      (smithersCi?.allPassed === false || integrationReviews.every((entry) => entry.current)));
   const integrationFeedback = [
-    smithersCiCurrent && smithersCi?.allPassed === false ? `SMITHERS CI GATE FAILED:\n${String(smithersCi.summary ?? "")}` : "",
-    ...integrationReviews.map((entry) => entry.current && entry.review?.approved === false ? `REVIEW (${entry.seat} seat) NOT LGTM:\n${String(entry.review.feedback ?? "")}` : ""),
-  ].filter(Boolean).join("\n\n");
+    smithersCiCurrent && smithersCi?.allPassed === false
+      ? `SMITHERS CI GATE FAILED:\n${String(smithersCi.summary ?? "")}`
+      : "",
+    ...integrationReviews.map((entry) =>
+      entry.current && entry.review?.approved === false
+        ? `REVIEW (${entry.seat} seat) NOT LGTM:\n${String(entry.review.feedback ?? "")}`
+        : "",
+    ),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   const adoptionSettled = ADOPTION_LANES.every((lane) => laneResults.some((row) => row.laneId === lane.id));
-  const multiCi = latestRaw(rawRows(ctx, "aguiCi").filter((row) => row.scope === "multi"), "multi-ci");
+  const multiCi = latestRaw(
+    rawRows(ctx, "aguiCi").filter((row) => row.scope === "multi"),
+    "multi-ci",
+  );
   const multiCiGreen = multiCi?.allPassed === true;
   const multiCiSettled = multiCiGreen || rawRows(ctx, "aguiCi").filter((row) => row.scope === "multi").length >= 3;
 
   const audits = rawRows(ctx, "aguiAudit");
-  const auditFable = latestRaw(audits.filter((row) => row.seat === "fable"), "final-audit-fable");
-  const auditSol = latestRaw(audits.filter((row) => row.seat === "sol"), "final-audit-sol");
-  const auditsComplete = auditFable?.complete === true && auditSol?.complete === true
-    && auditFable?.deferralsEndorsed === true && auditSol?.deferralsEndorsed === true;
+  const auditFable = latestRaw(
+    audits.filter((row) => row.seat === "fable"),
+    "final-audit-fable",
+  );
+  const auditSol = latestRaw(
+    audits.filter((row) => row.seat === "sol"),
+    "final-audit-sol",
+  );
+  const auditsComplete =
+    auditFable?.complete === true &&
+    auditSol?.complete === true &&
+    auditFable?.deferralsEndorsed === true &&
+    auditSol?.deferralsEndorsed === true;
 
-  const readyForAudit = fixSettled && mergesSettled && integrationSettled
-    && (integrationDone ? adoptionSettled && multiCiSettled : true);
+  const readyForAudit =
+    fixSettled && mergesSettled && integrationSettled && (integrationDone ? adoptionSettled && multiCiSettled : true);
 
   return (
     <Workflow name="finish-agentic-ui-library">
@@ -427,24 +492,64 @@ export default smithers((ctx) => {
             return (
               <Worktree key={lane.id} path={worktreePath} branch={branch} baseBranch={input.baseBranch}>
                 <Sequence>
-                  <Loop id={`fix-${lane.id}-loop`} until={state.done} maxIterations={input.perLaneIterations} onMaxReached="return-last">
+                  <Loop
+                    id={`fix-${lane.id}-loop`}
+                    until={state.done}
+                    maxIterations={input.perLaneIterations}
+                    onMaxReached="return-last"
+                  >
                     <Sequence>
-                      <Task id={`fix-${lane.id}-implement`} output={outputs.aguiImpl} agent={kimiImplement} retries={2} timeoutMs={90 * 60_000} heartbeatTimeoutMs={15 * 60_000}>
-                        {fixImplementPrompt(lane, (() => {
-                          const parts: string[] = [];
-                          if (state.implementation && state.implementation.status !== "implemented") parts.push(`IMPLEMENTATION ${String(state.implementation.status).toUpperCase()}:\n${String(state.implementation.summary ?? "")}`);
-                          if (state.validationCurrent && state.validation?.allPassed === false) parts.push(`VALIDATION FAILED:\n${String(state.validation.failingSummary ?? state.validation.summary ?? "")}`);
-                          for (const entry of state.reviews) if (entry.current && entry.review?.approved === false) parts.push(`REVIEW (${entry.seat}) NOT LGTM:\n${String(entry.review.feedback ?? "")}`);
-                          return parts.join("\n\n");
-                        })())}
+                      <Task
+                        id={`fix-${lane.id}-implement`}
+                        output={outputs.aguiImpl}
+                        agent={kimiImplement}
+                        retries={2}
+                        timeoutMs={90 * 60_000}
+                        heartbeatTimeoutMs={15 * 60_000}
+                      >
+                        {fixImplementPrompt(
+                          lane,
+                          (() => {
+                            const parts: string[] = [];
+                            if (state.implementation && state.implementation.status !== "implemented")
+                              parts.push(
+                                `IMPLEMENTATION ${String(state.implementation.status).toUpperCase()}:\n${String(state.implementation.summary ?? "")}`,
+                              );
+                            if (state.validationCurrent && state.validation?.allPassed === false)
+                              parts.push(
+                                `VALIDATION FAILED:\n${String(state.validation.failingSummary ?? state.validation.summary ?? "")}`,
+                              );
+                            for (const entry of state.reviews)
+                              if (entry.current && entry.review?.approved === false)
+                                parts.push(`REVIEW (${entry.seat}) NOT LGTM:\n${String(entry.review.feedback ?? "")}`);
+                            return parts.join("\n\n");
+                          })(),
+                        )}
                       </Task>
-                      <Task id={`fix-${lane.id}-validate`} output={outputs.aguiValidation} agent={validateChain} retries={2} timeoutMs={40 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                      <Task
+                        id={`fix-${lane.id}-validate`}
+                        output={outputs.aguiValidation}
+                        agent={validateChain}
+                        retries={2}
+                        timeoutMs={40 * 60_000}
+                        heartbeatTimeoutMs={10 * 60_000}
+                      >
                         {fixValidatePrompt(lane, branch, state.implementation)}
                       </Task>
-                      {state.validationCurrent && state.validation?.allPassed === true && state.validation?.diffNonEmpty === true ? (
+                      {state.validationCurrent &&
+                      state.validation?.allPassed === true &&
+                      state.validation?.diffNonEmpty === true ? (
                         <Parallel>
                           {lane.seats.map((seat) => (
-                            <Task key={seat} id={`fix-${lane.id}-review-${seat}`} output={outputs.aguiReview} agent={seat === "fable" ? fableChain : solChain} retries={2} timeoutMs={40 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                            <Task
+                              key={seat}
+                              id={`fix-${lane.id}-review-${seat}`}
+                              output={outputs.aguiReview}
+                              agent={seat === "fable" ? fableChain : solChain}
+                              retries={2}
+                              timeoutMs={40 * 60_000}
+                              heartbeatTimeoutMs={10 * 60_000}
+                            >
                               {fixReviewPrompt(lane, seat, state.implementation, state.validation)}
                             </Task>
                           ))}
@@ -460,10 +565,15 @@ export default smithers((ctx) => {
                       lgtm: state.done,
                       exhausted: state.exhausted,
                       attempts: state.attempts,
-                      summary: state.done ? `Fix lane ${lane.id} LGTM after ${state.attempts} attempt(s).` : `Fix lane ${lane.id} settled without LGTM after ${state.attempts} attempt(s).`,
+                      summary: state.done
+                        ? `Fix lane ${lane.id} LGTM after ${state.attempts} attempt(s).`
+                        : `Fix lane ${lane.id} settled without LGTM after ${state.attempts} attempt(s).`,
                       filesChanged: asArray(state.implementation?.filesChanged) as string[],
                       componentsImplemented: asArray(state.implementation?.componentsImplemented) as string[],
-                      componentsDeferred: asArray(state.implementation?.componentsDeferred) as { name: string; reason: string }[],
+                      componentsDeferred: asArray(state.implementation?.componentsDeferred) as {
+                        name: string;
+                        reason: string;
+                      }[],
                       seatVerdicts: state.reviews.map((entry) => ({
                         seat: entry.seat,
                         approved: entry.current && entry.review?.approved === true,
@@ -478,8 +588,21 @@ export default smithers((ctx) => {
         </Parallel>
 
         <MergeQueue id="agui-fin-merge-queue" maxConcurrency={1}>
-          {(fixSettled ? fixLgtm.filter((row) => !merges.some((merge) => merge.laneId === row.laneId && merge.mergedToMain === true)) : []).map((row) => (
-            <Task key={String(row.laneId)} id={`merge-${slug(String(row.laneId))}`} output={outputs.aguiFinMerge} agent={mergeChain} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+          {(fixSettled
+            ? fixLgtm.filter(
+                (row) => !merges.some((merge) => merge.laneId === row.laneId && merge.mergedToMain === true),
+              )
+            : []
+          ).map((row) => (
+            <Task
+              key={String(row.laneId)}
+              id={`merge-${slug(String(row.laneId))}`}
+              output={outputs.aguiFinMerge}
+              agent={mergeChain}
+              retries={2}
+              timeoutMs={45 * 60_000}
+              heartbeatTimeoutMs={10 * 60_000}
+            >
               {mergePrompt(row, input.baseBranch, repoRoot)}
             </Task>
           ))}
@@ -488,7 +611,14 @@ export default smithers((ctx) => {
         {fixSettled && mergesSettled ? (
           <Loop id="integration-loop" until={integrationDone} maxIterations={3} onMaxReached="return-last">
             <Sequence>
-              <Task id="integration-implement" output={outputs.aguiImpl} agent={kimiImplement} retries={2} timeoutMs={90 * 60_000} heartbeatTimeoutMs={15 * 60_000}>
+              <Task
+                id="integration-implement"
+                output={outputs.aguiImpl}
+                agent={kimiImplement}
+                retries={2}
+                timeoutMs={90 * 60_000}
+                heartbeatTimeoutMs={15 * 60_000}
+              >
                 {integrationPrompt(laneResults, merges, integrationFeedback)}
               </Task>
               <Task id="integration-ci" output={outputs.aguiCi} timeoutMs={150 * 60_000}>
@@ -497,7 +627,15 @@ export default smithers((ctx) => {
               {smithersCiCurrent && smithersCi?.allPassed === true ? (
                 <Parallel>
                   {(["fable", "sol"] as Seat[]).map((seat) => (
-                    <Task key={seat} id={`integration-review-${seat}`} output={outputs.aguiReview} agent={seat === "fable" ? fableChain : solChain} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                    <Task
+                      key={seat}
+                      id={`integration-review-${seat}`}
+                      output={outputs.aguiReview}
+                      agent={seat === "fable" ? fableChain : solChain}
+                      retries={2}
+                      timeoutMs={45 * 60_000}
+                      heartbeatTimeoutMs={10 * 60_000}
+                    >
                       {integrationReviewPrompt(seat, integrationImpl, smithersCi)}
                     </Task>
                   ))}
@@ -514,24 +652,64 @@ export default smithers((ctx) => {
               const state = laneState(ctx, lane, input.perLaneIterations, prefix);
               return (
                 <Sequence key={lane.id}>
-                  <Loop id={`${prefix}-loop`} until={state.done} maxIterations={input.perLaneIterations} onMaxReached="return-last">
+                  <Loop
+                    id={`${prefix}-loop`}
+                    until={state.done}
+                    maxIterations={input.perLaneIterations}
+                    onMaxReached="return-last"
+                  >
                     <Sequence>
-                      <Task id={`${prefix}-implement`} output={outputs.aguiImpl} agent={kimiImplementMulti} retries={2} timeoutMs={100 * 60_000} heartbeatTimeoutMs={15 * 60_000}>
-                        {adoptionImplementPrompt(lane, (() => {
-                          const parts: string[] = [];
-                          if (state.implementation && state.implementation.status !== "implemented") parts.push(`IMPLEMENTATION ${String(state.implementation.status).toUpperCase()}:\n${String(state.implementation.summary ?? "")}`);
-                          if (state.validationCurrent && state.validation?.allPassed === false) parts.push(`VALIDATION FAILED:\n${String(state.validation.failingSummary ?? state.validation.summary ?? "")}`);
-                          for (const entry of state.reviews) if (entry.current && entry.review?.approved === false) parts.push(`REVIEW (${entry.seat}) NOT LGTM:\n${String(entry.review.feedback ?? "")}`);
-                          return parts.join("\n\n");
-                        })())}
+                      <Task
+                        id={`${prefix}-implement`}
+                        output={outputs.aguiImpl}
+                        agent={kimiImplementMulti}
+                        retries={2}
+                        timeoutMs={100 * 60_000}
+                        heartbeatTimeoutMs={15 * 60_000}
+                      >
+                        {adoptionImplementPrompt(
+                          lane,
+                          (() => {
+                            const parts: string[] = [];
+                            if (state.implementation && state.implementation.status !== "implemented")
+                              parts.push(
+                                `IMPLEMENTATION ${String(state.implementation.status).toUpperCase()}:\n${String(state.implementation.summary ?? "")}`,
+                              );
+                            if (state.validationCurrent && state.validation?.allPassed === false)
+                              parts.push(
+                                `VALIDATION FAILED:\n${String(state.validation.failingSummary ?? state.validation.summary ?? "")}`,
+                              );
+                            for (const entry of state.reviews)
+                              if (entry.current && entry.review?.approved === false)
+                                parts.push(`REVIEW (${entry.seat}) NOT LGTM:\n${String(entry.review.feedback ?? "")}`);
+                            return parts.join("\n\n");
+                          })(),
+                        )}
                       </Task>
-                      <Task id={`${prefix}-validate`} output={outputs.aguiValidation} agent={validateChainMulti} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                      <Task
+                        id={`${prefix}-validate`}
+                        output={outputs.aguiValidation}
+                        agent={validateChainMulti}
+                        retries={2}
+                        timeoutMs={45 * 60_000}
+                        heartbeatTimeoutMs={10 * 60_000}
+                      >
                         {adoptionValidatePrompt(lane, state.implementation)}
                       </Task>
-                      {state.validationCurrent && state.validation?.allPassed === true && state.validation?.diffNonEmpty === true ? (
+                      {state.validationCurrent &&
+                      state.validation?.allPassed === true &&
+                      state.validation?.diffNonEmpty === true ? (
                         <Parallel>
                           {lane.seats.map((seat) => (
-                            <Task key={seat} id={`${prefix}-review-${seat}`} output={outputs.aguiReview} agent={seat === "fable" ? fableChainMulti : solChainMulti} retries={2} timeoutMs={40 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                            <Task
+                              key={seat}
+                              id={`${prefix}-review-${seat}`}
+                              output={outputs.aguiReview}
+                              agent={seat === "fable" ? fableChainMulti : solChainMulti}
+                              retries={2}
+                              timeoutMs={40 * 60_000}
+                              heartbeatTimeoutMs={10 * 60_000}
+                            >
                               {adoptionReviewPrompt(lane, seat, state.implementation, state.validation)}
                             </Task>
                           ))}
@@ -547,10 +725,15 @@ export default smithers((ctx) => {
                       lgtm: state.done,
                       exhausted: state.exhausted,
                       attempts: state.attempts,
-                      summary: state.done ? `Adoption lane ${lane.id} LGTM after ${state.attempts} attempt(s).` : `Adoption lane ${lane.id} settled without LGTM after ${state.attempts} attempt(s).`,
+                      summary: state.done
+                        ? `Adoption lane ${lane.id} LGTM after ${state.attempts} attempt(s).`
+                        : `Adoption lane ${lane.id} settled without LGTM after ${state.attempts} attempt(s).`,
                       filesChanged: asArray(state.implementation?.filesChanged) as string[],
                       componentsImplemented: asArray(state.implementation?.componentsImplemented) as string[],
-                      componentsDeferred: asArray(state.implementation?.componentsDeferred) as { name: string; reason: string }[],
+                      componentsDeferred: asArray(state.implementation?.componentsDeferred) as {
+                        name: string;
+                        reason: string;
+                      }[],
                       seatVerdicts: state.reviews.map((entry) => ({
                         seat: entry.seat,
                         approved: entry.current && entry.review?.approved === true,
@@ -569,7 +752,14 @@ export default smithers((ctx) => {
                     {() => runMultiCi(MULTI_ROOT)}
                   </Task>
                   {multiCi && multiCi.allPassed === false ? (
-                    <Task id="multi-ci-fix" output={outputs.aguiCiFix} agent={kimiImplementMulti} retries={2} timeoutMs={60 * 60_000} heartbeatTimeoutMs={15 * 60_000}>
+                    <Task
+                      id="multi-ci-fix"
+                      output={outputs.aguiCiFix}
+                      agent={kimiImplementMulti}
+                      retries={2}
+                      timeoutMs={60 * 60_000}
+                      heartbeatTimeoutMs={15 * 60_000}
+                    >
                       {ciFixPrompt(multiCi)}
                     </Task>
                   ) : null}
@@ -581,10 +771,24 @@ export default smithers((ctx) => {
 
         {readyForAudit ? (
           <Parallel>
-            <Task id="final-audit-fable" output={outputs.aguiAudit} agent={fableChain} retries={2} timeoutMs={60 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+            <Task
+              id="final-audit-fable"
+              output={outputs.aguiAudit}
+              agent={fableChain}
+              retries={2}
+              timeoutMs={60 * 60_000}
+              heartbeatTimeoutMs={10 * 60_000}
+            >
               {auditPrompt("fable", ctx)}
             </Task>
-            <Task id="final-audit-sol" output={outputs.aguiAudit} agent={solChain} retries={2} timeoutMs={60 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+            <Task
+              id="final-audit-sol"
+              output={outputs.aguiAudit}
+              agent={solChain}
+              retries={2}
+              timeoutMs={60 * 60_000}
+              heartbeatTimeoutMs={10 * 60_000}
+            >
               {auditPrompt("sol", ctx)}
             </Task>
           </Parallel>
@@ -597,13 +801,16 @@ export default smithers((ctx) => {
               fixLanesLgtm: fixLgtm.length,
               fixLanesTotal: FIX_LANES.length,
               integrationDone,
-              adoptionDone: adoptionSettled && ADOPTION_LANES.every((lane) => laneResults.some((row) => row.laneId === lane.id && row.lgtm === true)),
+              adoptionDone:
+                adoptionSettled &&
+                ADOPTION_LANES.every((lane) => laneResults.some((row) => row.laneId === lane.id && row.lgtm === true)),
               smithersCiGreen: smithersCi?.allPassed === true,
               multiCiGreen,
               auditsComplete,
-              summary: auditsComplete && integrationDone && multiCiGreen
-                ? `Continuation complete: ${fixLgtm.length}/${FIX_LANES.length} fix lanes LGTM, integration dual-approved with green CI, adoption landed, both audits complete.`
-                : `Continuation settled incomplete: ${fixLgtm.length}/${FIX_LANES.length} fix lanes LGTM; integrationDone=${integrationDone}; multiCiGreen=${multiCiGreen}; audits fable=${auditFable?.complete === true} sol=${auditSol?.complete === true}.`,
+              summary:
+                auditsComplete && integrationDone && multiCiGreen
+                  ? `Continuation complete: ${fixLgtm.length}/${FIX_LANES.length} fix lanes LGTM, integration dual-approved with green CI, adoption landed, both audits complete.`
+                  : `Continuation settled incomplete: ${fixLgtm.length}/${FIX_LANES.length} fix lanes LGTM; integrationDone=${integrationDone}; multiCiGreen=${multiCiGreen}; audits fable=${auditFable?.complete === true} sol=${auditSol?.complete === true}.`,
             }}
           </Task>
         ) : null}

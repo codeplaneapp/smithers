@@ -5,9 +5,9 @@ import type { Schema } from "effect";
  * durable-deferred-bridge.js. Kept in sync with the runtime schema.
  */
 export type ApprovalDeferredResolution = Schema.Schema.Type<
-	Schema.Struct<{
-		approved: typeof Schema.Boolean;
-		note: Schema.NullOr<typeof Schema.String>;
-		decidedBy: Schema.NullOr<typeof Schema.String>;
-	}>
+  Schema.Struct<{
+    approved: typeof Schema.Boolean;
+    note: Schema.NullOr<typeof Schema.String>;
+    decidedBy: Schema.NullOr<typeof Schema.String>;
+  }>
 >;

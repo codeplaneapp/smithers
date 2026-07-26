@@ -6,11 +6,7 @@
 import { createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { agents } from "../../agents";
-import {
-  ValidationLoop,
-  implementOutputSchema,
-  validateOutputSchema,
-} from "../../components/ValidationLoop";
+import { ValidationLoop, implementOutputSchema, validateOutputSchema } from "../../components/ValidationLoop";
 import { reviewOutputSchema } from "../../components/Review";
 
 const inputSchema = z.object({ prompt: z.string().default("") });
@@ -150,18 +146,14 @@ const { Workflow, smithers } = createSmithers({
 });
 
 export default smithers((ctx) => {
-  const prompt =
-    ctx.input.prompt && ctx.input.prompt.trim().length > 0
-      ? ctx.input.prompt
-      : SPEC;
+  const prompt = ctx.input.prompt && ctx.input.prompt.trim().length > 0 ? ctx.input.prompt : SPEC;
 
   const validate = ctx.outputMaybe("validate", { nodeId: "plugin:validate" });
   const reviews = ctx.outputs.review ?? [];
 
   const hasValidated = validate !== undefined;
   const validationPassed = hasValidated && validate.allPassed !== false;
-  const anyApproved =
-    reviews.length > 0 && reviews.some((r: any) => r.approved === true);
+  const anyApproved = reviews.length > 0 && reviews.some((r: any) => r.approved === true);
   const done = validationPassed && anyApproved;
 
   const feedbackParts: string[] = [];

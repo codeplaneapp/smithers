@@ -9,70 +9,67 @@ import { getCliAgentCapabilityReport } from "./getCliAgentCapabilityReport.js";
  * @returns {CliAgentCapabilityIssue[]}
  */
 function diagnoseCapabilityRegistry(registry) {
-    const issues = [];
-    if (registry.version !== 1) {
-        issues.push({
-            code: "registry-version",
-            message: `Expected capability registry version 1, received ${registry.version}.`,
-            severity: "error",
-        });
+  const issues = [];
+  if (registry.version !== 1) {
+    issues.push({
+      code: "registry-version",
+      message: `Expected capability registry version 1, received ${registry.version}.`,
+      severity: "error",
+    });
+  }
+  if (!registry.skills.supportsSkills) {
+    if (registry.skills.installMode) {
+      issues.push({
+        code: "skills-install-mode-without-support",
+        message: "Skills install mode is set even though the adapter declares no skills support.",
+        severity: "error",
+      });
     }
-    if (!registry.skills.supportsSkills) {
-        if (registry.skills.installMode) {
-            issues.push({
-                code: "skills-install-mode-without-support",
-                message: "Skills install mode is set even though the adapter declares no skills support.",
-                severity: "error",
-            });
-        }
-        if (registry.skills.smithersSkillIds.length > 0) {
-            issues.push({
-                code: "skills-listed-without-support",
-                message: "Smithers skills are listed even though the adapter declares no skills support.",
-                severity: "error",
-            });
-        }
+    if (registry.skills.smithersSkillIds.length > 0) {
+      issues.push({
+        code: "skills-listed-without-support",
+        message: "Smithers skills are listed even though the adapter declares no skills support.",
+        severity: "error",
+      });
     }
-    else if (!registry.skills.installMode) {
-        issues.push({
-            code: "missing-skills-install-mode",
-            message: "Adapters that support skills must declare an install mode.",
-            severity: "error",
-        });
+  } else if (!registry.skills.installMode) {
+    issues.push({
+      code: "missing-skills-install-mode",
+      message: "Adapters that support skills must declare an install mode.",
+      severity: "error",
+    });
+  }
+  if (!registry.humanInteraction.supportsUiRequests) {
+    if (registry.humanInteraction.methods.length > 0) {
+      issues.push({
+        code: "ui-methods-without-support",
+        message: "UI request methods are listed even though the adapter declares no UI request support.",
+        severity: "error",
+      });
     }
-    if (!registry.humanInteraction.supportsUiRequests) {
-        if (registry.humanInteraction.methods.length > 0) {
-            issues.push({
-                code: "ui-methods-without-support",
-                message: "UI request methods are listed even though the adapter declares no UI request support.",
-                severity: "error",
-            });
-        }
+  } else if (registry.humanInteraction.methods.length === 0) {
+    issues.push({
+      code: "missing-ui-methods",
+      message: "Adapters that support UI requests must declare at least one method.",
+      severity: "error",
+    });
+  }
+  if (registry.mcp.bootstrap === "unsupported") {
+    if (registry.mcp.supportsProjectScope || registry.mcp.supportsUserScope) {
+      issues.push({
+        code: "unsupported-mcp-with-scope",
+        message: "Unsupported MCP adapters cannot advertise project or user scope support.",
+        severity: "error",
+      });
     }
-    else if (registry.humanInteraction.methods.length === 0) {
-        issues.push({
-            code: "missing-ui-methods",
-            message: "Adapters that support UI requests must declare at least one method.",
-            severity: "error",
-        });
-    }
-    if (registry.mcp.bootstrap === "unsupported") {
-        if (registry.mcp.supportsProjectScope || registry.mcp.supportsUserScope) {
-            issues.push({
-                code: "unsupported-mcp-with-scope",
-                message: "Unsupported MCP adapters cannot advertise project or user scope support.",
-                severity: "error",
-            });
-        }
-    }
-    else if (!registry.mcp.supportsProjectScope && !registry.mcp.supportsUserScope) {
-        issues.push({
-            code: "mcp-bootstrap-without-scope",
-            message: "Supported MCP adapters should advertise at least one supported scope.",
-            severity: "warning",
-        });
-    }
-    return issues;
+  } else if (!registry.mcp.supportsProjectScope && !registry.mcp.supportsUserScope) {
+    issues.push({
+      code: "mcp-bootstrap-without-scope",
+      message: "Supported MCP adapters should advertise at least one supported scope.",
+      severity: "warning",
+    });
+  }
+  return issues;
 }
 
 /**
@@ -80,39 +77,39 @@ function diagnoseCapabilityRegistry(registry) {
  * @returns {CliAgentCapabilityIssue[]}
  */
 function diagnoseSurfaceContract(entry) {
-    const issues = [];
-    const emitted = new Set(entry.surface.emittedFlags);
-    for (const unsupported of entry.surface.unsupportedFlags) {
-        if (emitted.has(unsupported.flag)) {
-            issues.push({
-                code: "unsupported-flag-emitted",
-                message: `${entry.id} emits ${unsupported.flag}, but the surface manifest marks it unsupported.${unsupported.replacement ? ` Replacement: ${unsupported.replacement}.` : ""}`,
-                severity: "error",
-            });
-        }
+  const issues = [];
+  const emitted = new Set(entry.surface.emittedFlags);
+  for (const unsupported of entry.surface.unsupportedFlags) {
+    if (emitted.has(unsupported.flag)) {
+      issues.push({
+        code: "unsupported-flag-emitted",
+        message: `${entry.id} emits ${unsupported.flag}, but the surface manifest marks it unsupported.${unsupported.replacement ? ` Replacement: ${unsupported.replacement}.` : ""}`,
+        severity: "error",
+      });
     }
-    if (entry.surface.binary !== entry.binary) {
-        issues.push({
-            code: "surface-binary-mismatch",
-            message: `${entry.id} capability binary is ${entry.binary}, but the surface manifest says ${entry.surface.binary}.`,
-            severity: "error",
-        });
-    }
-    if (entry.surface.docsUrls.length === 0) {
-        issues.push({
-            code: "missing-surface-docs",
-            message: `${entry.id} has no source URL recorded for its CLI surface.`,
-            severity: "warning",
-        });
-    }
-    if (entry.surface.resume.kind !== "none" && entry.surface.resume.emitted.length === 0) {
-        issues.push({
-            code: "missing-resume-emission",
-            message: `${entry.id} declares ${entry.surface.resume.kind} resume support but no emitted resume tokens.`,
-            severity: "warning",
-        });
-    }
-    return issues;
+  }
+  if (entry.surface.binary !== entry.binary) {
+    issues.push({
+      code: "surface-binary-mismatch",
+      message: `${entry.id} capability binary is ${entry.binary}, but the surface manifest says ${entry.surface.binary}.`,
+      severity: "error",
+    });
+  }
+  if (entry.surface.docsUrls.length === 0) {
+    issues.push({
+      code: "missing-surface-docs",
+      message: `${entry.id} has no source URL recorded for its CLI surface.`,
+      severity: "warning",
+    });
+  }
+  if (entry.surface.resume.kind !== "none" && entry.surface.resume.emitted.length === 0) {
+    issues.push({
+      code: "missing-resume-emission",
+      message: `${entry.id} declares ${entry.surface.resume.kind} resume support but no emitted resume tokens.`,
+      severity: "warning",
+    });
+  }
+  return issues;
 }
 
 /**
@@ -120,21 +117,18 @@ function diagnoseSurfaceContract(entry) {
  * @returns {CliAgentCapabilityDoctorReport}
  */
 export function getCliAgentCapabilityDoctorReport(entries = getCliAgentCapabilityReport()) {
-    const agents = entries.map((entry) => {
-        const issues = [
-            ...diagnoseCapabilityRegistry(entry.capabilities),
-            ...diagnoseSurfaceContract(entry),
-        ];
-        return {
-            ...entry,
-            ok: issues.length === 0,
-            issues,
-        };
-    });
-    const issueCount = agents.reduce((count, entry) => count + entry.issues.length, 0);
+  const agents = entries.map((entry) => {
+    const issues = [...diagnoseCapabilityRegistry(entry.capabilities), ...diagnoseSurfaceContract(entry)];
     return {
-        ok: issueCount === 0,
-        issueCount,
-        agents,
+      ...entry,
+      ok: issues.length === 0,
+      issues,
     };
+  });
+  const issueCount = agents.reduce((count, entry) => count + entry.issues.length, 0);
+  return {
+    ok: issueCount === 0,
+    issueCount,
+    agents,
+  };
 }

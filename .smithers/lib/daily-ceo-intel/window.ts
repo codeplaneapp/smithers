@@ -1,7 +1,12 @@
 import type { WindowOutput } from "./schemas";
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
-const ET_DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" });
+const ET_DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/New_York",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
 
 export function issueDateForEt(windowEndIso: string): string {
   return ET_DATE_FORMATTER.format(new Date(windowEndIso));

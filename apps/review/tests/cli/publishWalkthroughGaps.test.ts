@@ -64,8 +64,7 @@ describe("publishWalkthrough config + upload", () => {
     const { htmlPath, homeDir } = tempSetup();
     process.env.SMITHERS_REVIEW_PUBLISH_URL = "https://share.test";
     process.env.SMITHERS_REVIEW_PUBLISH_TOKEN = "t";
-    globalThis.fetch = (async () =>
-      new Response("rate limited", { status: 429 })) as unknown as typeof fetch;
+    globalThis.fetch = (async () => new Response("rate limited", { status: 429 })) as unknown as typeof fetch;
     await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow("publish failed: HTTP 429 rate limited");
   });
 
@@ -86,8 +85,7 @@ describe("publishWalkthrough config + upload", () => {
     const { htmlPath, homeDir } = tempSetup();
     process.env.SMITHERS_REVIEW_PUBLISH_URL = "https://share.test";
     process.env.SMITHERS_REVIEW_PUBLISH_TOKEN = "t";
-    globalThis.fetch = (async () =>
-      new Response(JSON.stringify({}), { status: 201 })) as unknown as typeof fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({}), { status: 201 })) as unknown as typeof fetch;
     await expect(publishWalkthrough(htmlPath, { homeDir })).rejects.toThrow("response had no url");
   });
 });

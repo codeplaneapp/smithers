@@ -24,10 +24,7 @@ export type GatewayCheckpointControlsProps = {
    * Those actions render ONLY when this is provided — no fabricated
    * capabilities.
    */
-  onAction?: (
-    kind: Exclude<CheckpointActionKind, "rewind">,
-    checkpoint: CheckpointModel,
-  ) => void | Promise<void>;
+  onAction?: (kind: Exclude<CheckpointActionKind, "rewind">, checkpoint: CheckpointModel) => void | Promise<void>;
   /** Called with a normalized Error if rewindRun or onAction rejects. */
   onError?: (error: Error) => void;
   /** Called after a native rewindRun resolves. */

@@ -8,10 +8,10 @@
  * @returns {CanonicalAgentTraceEventPhase}
  */
 export function kindPhase(kind) {
-    if (kind.startsWith("session.")) return "session";
-    if (kind.startsWith("turn.")) return "turn";
-    if (kind.startsWith("message.") || kind.startsWith("assistant.")) return "message";
-    if (kind.startsWith("tool.")) return "tool";
-    if (kind.startsWith("artifact.")) return "artifact";
-    return "capture";
+  if (kind.startsWith("session.")) return "session";
+  if (kind.startsWith("turn.")) return "turn";
+  if (kind.startsWith("message.") || kind.startsWith("assistant.")) return "message";
+  if (kind.startsWith("tool.")) return "tool";
+  if (kind.startsWith("artifact.")) return "artifact";
+  return "capture";
 }

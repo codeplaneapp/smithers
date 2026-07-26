@@ -8,7 +8,9 @@ const gatewayOrigin = `http://127.0.0.1:${gatewayPort}`;
 test.skip(Boolean(process.env.CI), "browser tests are unavailable in CI");
 
 test.describe("responsive monitor overview", () => {
-  test("keeps populated, filtered, and empty overview states usable at desktop, tablet, and mobile widths", async ({ page }) => {
+  test("keeps populated, filtered, and empty overview states usable at desktop, tablet, and mobile widths", async ({
+    page,
+  }) => {
     for (const viewport of [
       { width: 1440, height: 900 },
       { width: 768, height: 1024 },
@@ -31,7 +33,8 @@ test.describe("responsive monitor overview", () => {
       expect(
         await page.evaluate(() => ({
           html: document.documentElement.scrollWidth - window.innerWidth,
-          shell: (document.querySelector<HTMLElement>(".mon-shell")?.scrollWidth ?? window.innerWidth) - window.innerWidth,
+          shell:
+            (document.querySelector<HTMLElement>(".mon-shell")?.scrollWidth ?? window.innerWidth) - window.innerWidth,
         })),
       ).toEqual({ html: 0, shell: 0 });
 

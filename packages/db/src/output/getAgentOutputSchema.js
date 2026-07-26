@@ -5,9 +5,9 @@ import { z } from "zod";
  * (which are auto-populated by smithers)
  */
 export function getAgentOutputSchema(table) {
-    const baseSchema = createInsertSchema(table);
-    // Remove the key columns that smithers populates automatically
-    const shape = baseSchema.shape;
-    const { runId: _runId, nodeId: _nodeId, iteration: _iteration, ...rest } = shape;
-    return z.object(rest);
+  const baseSchema = createInsertSchema(table);
+  // Remove the key columns that smithers populates automatically
+  const shape = baseSchema.shape;
+  const { runId: _runId, nodeId: _nodeId, iteration: _iteration, ...rest } = shape;
+  return z.object(rest);
 }

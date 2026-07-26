@@ -34,9 +34,7 @@ export type PinnedAudioTransportRequest = {
   signal?: AbortSignal;
 };
 
-export type PinnedAudioTransport = (
-  request: PinnedAudioTransportRequest,
-) => Promise<Response> | Response;
+export type PinnedAudioTransport = (request: PinnedAudioTransportRequest) => Promise<Response> | Response;
 
 export type CreateTranscriptionToolOptions = {
   provider: TranscriptionProvider;

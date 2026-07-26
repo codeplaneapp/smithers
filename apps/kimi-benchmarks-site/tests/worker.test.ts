@@ -1,14 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import {
-  createKimiBenchmarksSiteWorker,
-  type KimiBenchmarksSiteEnv,
-} from "../src/worker.ts";
+import { createKimiBenchmarksSiteWorker, type KimiBenchmarksSiteEnv } from "../src/worker.ts";
 
-const homeHtml = readFileSync(
-  new URL("../site/index.html", import.meta.url),
-  "utf8",
-);
+const homeHtml = readFileSync(new URL("../site/index.html", import.meta.url), "utf8");
 
 function makeEnv(): KimiBenchmarksSiteEnv {
   return {
@@ -52,9 +46,7 @@ describe("Kimi benchmarks site worker", () => {
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(response.headers.get("cache-control")).toBe("public, max-age=300");
     expect(response.headers.get("x-frame-options")).toBe("DENY");
-    expect(response.headers.get("content-security-policy")).toContain(
-      "frame-ancestors 'none'",
-    );
+    expect(response.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
     expect(await response.text()).toContain("Kimi K3");
   });
 

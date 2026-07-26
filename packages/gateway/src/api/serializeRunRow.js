@@ -6,7 +6,8 @@ function validStartedBy(value) {
   const source = /** @type {Record<string, unknown>} */ (value);
   const known = ["harness", "sessionId", "prompt", "detected"];
   if (Object.keys(source).some((key) => !known.includes(key))) return undefined;
-  if (["harness", "sessionId", "prompt"].some((key) => source[key] !== undefined && typeof source[key] !== "string")) return undefined;
+  if (["harness", "sessionId", "prompt"].some((key) => source[key] !== undefined && typeof source[key] !== "string"))
+    return undefined;
   if (source.detected !== undefined && source.detected !== true) return undefined;
   const harness = typeof source.harness === "string" ? source.harness : undefined;
   const sessionId = typeof source.sessionId === "string" ? source.sessionId : undefined;

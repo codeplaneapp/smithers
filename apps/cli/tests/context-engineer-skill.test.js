@@ -32,6 +32,8 @@ describe("archived context-engineer example", () => {
     expect(skillNodeIds).toContain("context-engineer:grill");
     expect(skillNodeIds).not.toContain("grill-until-clear");
     expect(workflow).toContain("Example only:");
-    expect(readFileSync(join(repoRoot, "apps/cli/src/workflow-pack.js"), "utf8")).not.toContain('id: "context-engineer"');
+    expect(readFileSync(join(repoRoot, "apps/cli/src/workflow-pack.js"), "utf8")).not.toContain(
+      'id: "context-engineer"',
+    );
   });
 });

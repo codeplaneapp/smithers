@@ -1,7 +1,13 @@
 import React from "react";
 import { z } from "zod";
 import { describe, expect, test } from "bun:test";
-import { createBrowserRuntime, createBrowserSmithers, defineBrowserWorkflow, Task, Workflow } from "smithers-orchestrator/browser";
+import {
+  createBrowserRuntime,
+  createBrowserSmithers,
+  defineBrowserWorkflow,
+  Task,
+  Workflow,
+} from "smithers-orchestrator/browser";
 import { assertRuntimeConformance } from "../src/runtimeConformance.ts";
 
 // A real Zod schema so `extractGraph` actually wires it in as `outputSchema`
@@ -10,12 +16,24 @@ import { assertRuntimeConformance } from "../src/runtimeConformance.ts";
 const OUTPUT_SCHEMA = z.object({ answer: z.literal(42) });
 
 function buildWorkflow(agent: unknown) {
-  return defineBrowserWorkflow(() => React.createElement(
-    Workflow,
-    { name: "testing-contract" },
-    React.createElement(Task, { id: "agent", output: "agent_output", outputSchema: OUTPUT_SCHEMA, agent, noRetry: true }),
-    React.createElement(Task, { id: "dependent", output: "dependent_output", deps: { agent: "agent_output" } }, (deps: { agent: { answer: number } }) => ({ answer: deps.agent.answer + 1 })),
-  ));
+  return defineBrowserWorkflow(() =>
+    React.createElement(
+      Workflow,
+      { name: "testing-contract" },
+      React.createElement(Task, {
+        id: "agent",
+        output: "agent_output",
+        outputSchema: OUTPUT_SCHEMA,
+        agent,
+        noRetry: true,
+      }),
+      React.createElement(
+        Task,
+        { id: "dependent", output: "dependent_output", deps: { agent: "agent_output" } },
+        (deps: { agent: { answer: number } }) => ({ answer: deps.agent.answer + 1 }),
+      ),
+    ),
+  );
 }
 
 // Walk `.cause` looking for a real Zod validation failure (or a typed engine
@@ -24,7 +42,12 @@ function buildWorkflow(agent: unknown) {
 function isEngineSchemaRejection(error: unknown): boolean {
   let current = error as { name?: string; code?: string; cause?: unknown } | undefined;
   for (let depth = 0; current && depth < 5; depth += 1) {
-    if (current.name === "ZodError" || current.code === "OUTPUT_SCHEMA_VALIDATION_FAILED" || current.code === "INVALID_OUTPUT") return true;
+    if (
+      current.name === "ZodError" ||
+      current.code === "OUTPUT_SCHEMA_VALIDATION_FAILED" ||
+      current.code === "INVALID_OUTPUT"
+    )
+      return true;
     current = current.cause as typeof current;
   }
   return false;
@@ -45,18 +68,31 @@ test("runtime contract runs the real portable workflow", async () => {
   const runtime = createBrowserRuntime();
   const getFinishedSaveCount = countFinishedSaves(runtime);
   const smithers = createBrowserSmithers({
-    workflow: buildWorkflow({ async generate() { calls += 1; return { answer: 42 }; } }),
+    workflow: buildWorkflow({
+      async generate() {
+        calls += 1;
+        return { answer: 42 };
+      },
+    }),
     runtime,
   });
   const result = await smithers.run();
 
   const secondResult = await createBrowserSmithers({
-    workflow: buildWorkflow({ async generate() { return { answer: 42 }; } }),
+    workflow: buildWorkflow({
+      async generate() {
+        return { answer: 42 };
+      },
+    }),
     runtime: createBrowserRuntime(),
   }).run();
 
   const invalidResult = await createBrowserSmithers({
-    workflow: buildWorkflow({ async generate() { return { answer: 41 }; } }),
+    workflow: buildWorkflow({
+      async generate() {
+        return { answer: 41 };
+      },
+    }),
     runtime: createBrowserRuntime(),
   }).run();
 
@@ -69,7 +105,8 @@ test("runtime contract runs the real portable workflow", async () => {
     runIds: [result.runId, secondResult.runId],
     schemaRejection: {
       rejected: invalidResult.status === "failed",
-      engineOwned: invalidResult.status === "failed" && isEngineSchemaRejection((invalidResult as { error?: unknown }).error),
+      engineOwned:
+        invalidResult.status === "failed" && isEngineSchemaRejection((invalidResult as { error?: unknown }).error),
     },
     capabilityProof: {
       filesystem: { runtime: "browser", capability: "filesystem", operation: "readFile" },

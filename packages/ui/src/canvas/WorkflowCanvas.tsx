@@ -28,17 +28,14 @@ function useCanvasCss(): void {
   useInjectLaneCss(WORKFLOW_CANVAS_CSS_ID, canvasCss);
 }
 
-const TOOLBAR_ITEM_SELECTOR =
-  "button, [href], input, select, textarea, [tabindex]";
+const TOOLBAR_ITEM_SELECTOR = "button, [href], input, select, textarea, [tabindex]";
 
 function isDisabledItem(el: HTMLElement): boolean {
   return el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true";
 }
 
 function toolbarItems(root: HTMLElement): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(TOOLBAR_ITEM_SELECTOR)).filter(
-    (el) => !isDisabledItem(el),
-  );
+  return Array.from(root.querySelectorAll<HTMLElement>(TOOLBAR_ITEM_SELECTOR)).filter((el) => !isDisabledItem(el));
 }
 
 const ROVING_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"]);
@@ -116,13 +113,7 @@ export type WorkflowCanvasProps = ComponentProps<"div">;
  * `role="application"`: no application-mode keyboard contract exists at this
  * layer — pan/zoom/selection keys are the renderer's model).
  */
-export function WorkflowCanvas({
-  className,
-  role,
-  "aria-label": ariaLabel,
-  children,
-  ...props
-}: WorkflowCanvasProps) {
+export function WorkflowCanvas({ className, role, "aria-label": ariaLabel, children, ...props }: WorkflowCanvasProps) {
   useCanvasCss();
   return (
     <div
@@ -166,15 +157,7 @@ export type WorkflowNodeProps = Omit<ComponentProps<"div">, "children" | "title"
  * (ReactFlow `<Handle>`s) are passed as children by the renderer.
  */
 
-export function WorkflowNode({
-  title,
-  status,
-  kind,
-  selected,
-  className,
-  children,
-  ...props
-}: WorkflowNodeProps) {
+export function WorkflowNode({ title, status, kind, selected, className, children, ...props }: WorkflowNodeProps) {
   useCanvasCss();
   const hasHeader = title != null || kind !== undefined || status !== undefined;
   return (
@@ -206,24 +189,12 @@ export function WorkflowNode({
 
 export function WorkflowNodeHeader({ className, ...props }: ComponentProps<"div">) {
   useCanvasCss();
-  return (
-    <div
-      data-slot="workflow-node-header"
-      className={cn("sui-canvas-node-header", className)}
-      {...props}
-    />
-  );
+  return <div data-slot="workflow-node-header" className={cn("sui-canvas-node-header", className)} {...props} />;
 }
 
 export function WorkflowNodeContent({ className, ...props }: ComponentProps<"div">) {
   useCanvasCss();
-  return (
-    <div
-      data-slot="workflow-node-content"
-      className={cn("sui-canvas-node-content", className)}
-      {...props}
-    />
-  );
+  return <div data-slot="workflow-node-content" className={cn("sui-canvas-node-content", className)} {...props} />;
 }
 
 export type WorkflowNodeStatusProps = Omit<ComponentProps<"span">, "children"> & {
@@ -353,32 +324,17 @@ export function WorkflowControls({
       {...props}
     >
       {onZoomIn ? (
-        <button
-          type="button"
-          aria-label="Zoom in"
-          className="sui-canvas-controls-button"
-          onClick={onZoomIn}
-        >
+        <button type="button" aria-label="Zoom in" className="sui-canvas-controls-button" onClick={onZoomIn}>
           <span aria-hidden>+</span>
         </button>
       ) : null}
       {onZoomOut ? (
-        <button
-          type="button"
-          aria-label="Zoom out"
-          className="sui-canvas-controls-button"
-          onClick={onZoomOut}
-        >
+        <button type="button" aria-label="Zoom out" className="sui-canvas-controls-button" onClick={onZoomOut}>
           <span aria-hidden>−</span>
         </button>
       ) : null}
       {onFitView ? (
-        <button
-          type="button"
-          aria-label="Fit view"
-          className="sui-canvas-controls-button"
-          onClick={onFitView}
-        >
+        <button type="button" aria-label="Fit view" className="sui-canvas-controls-button" onClick={onFitView}>
           <span aria-hidden>⤢</span>
         </button>
       ) : null}
@@ -396,16 +352,17 @@ export type WorkflowPanelProps = ComponentProps<"div"> & {
 export function WorkflowPanel({ position = "top-left", className, ...props }: WorkflowPanelProps) {
   useCanvasCss();
   return (
-    <div
-      data-slot="workflow-panel"
-      data-position={position}
-      className={cn("sui-canvas-panel", className)}
-      {...props}
-    />
+    <div data-slot="workflow-panel" data-position={position} className={cn("sui-canvas-panel", className)} {...props} />
   );
 }
 
-export function WorkflowToolbar({ className, role, "aria-label": ariaLabel, onKeyDown, ...props }: ComponentProps<"div">) {
+export function WorkflowToolbar({
+  className,
+  role,
+  "aria-label": ariaLabel,
+  onKeyDown,
+  ...props
+}: ComponentProps<"div">) {
   useCanvasCss();
   const ref = useRef<HTMLDivElement>(null);
   const rove = useRovingTabIndex(ref);

@@ -20,12 +20,7 @@ export const useWorkflowsStore = create<WorkflowsState>()(
   persist(
     (set) => ({
       installed: [],
-      install: (id) =>
-        set((state) =>
-          state.installed.includes(id)
-            ? state
-            : { installed: [...state.installed, id] },
-        ),
+      install: (id) => set((state) => (state.installed.includes(id) ? state : { installed: [...state.installed, id] })),
     }),
     { name: "smithers.workflows" },
   ),

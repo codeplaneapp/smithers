@@ -240,9 +240,7 @@ describe("WorkflowControls", () => {
   });
 
   test("roves tabindex across its buttons with arrow and Home/End keys", async () => {
-    const host = await render(
-      <WorkflowControls onZoomIn={() => {}} onZoomOut={() => {}} onFitView={() => {}} />,
-    );
+    const host = await render(<WorkflowControls onZoomIn={() => {}} onZoomOut={() => {}} onFitView={() => {}} />);
     const buttons = [...host.querySelectorAll<HTMLButtonElement>("[data-slot='workflow-controls'] button")];
     expect(buttons).toHaveLength(3);
     expect(buttons.map((button) => button.tabIndex)).toEqual([0, -1, -1]);
@@ -329,9 +327,7 @@ describe("WorkflowControls", () => {
   });
 
   test("ignores modifier-key chords so browser/OS shortcuts pass through", async () => {
-    const host = await render(
-      <WorkflowControls onZoomIn={() => {}} onZoomOut={() => {}} />,
-    );
+    const host = await render(<WorkflowControls onZoomIn={() => {}} onZoomOut={() => {}} />);
     const buttons = [...host.querySelectorAll<HTMLButtonElement>("[data-slot='workflow-controls'] button")];
     buttons[0]!.focus();
     for (const chord of [
@@ -353,7 +349,13 @@ describe("WorkflowControls", () => {
   test("still invokes a caller-supplied onKeyDown alongside roving", async () => {
     let seen = "";
     const host = await render(
-      <WorkflowControls onZoomIn={() => {}} onZoomOut={() => {}} onKeyDown={(event) => { seen = event.key; }} />,
+      <WorkflowControls
+        onZoomIn={() => {}}
+        onZoomOut={() => {}}
+        onKeyDown={(event) => {
+          seen = event.key;
+        }}
+      />,
     );
     const first = host.querySelector<HTMLButtonElement>("[data-slot='workflow-controls'] button")!;
     first.focus();

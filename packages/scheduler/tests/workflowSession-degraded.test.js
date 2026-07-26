@@ -58,9 +58,7 @@ describe("makeWorkflowSession surfaces masked child failures on a finished run",
     );
     expect(afterFailure._tag).not.toBe("Failed");
 
-    const decision = Effect.runSync(
-      session.taskCompleted({ nodeId: "good-task", iteration: 0, output: { ok: true } }),
-    );
+    const decision = Effect.runSync(session.taskCompleted({ nodeId: "good-task", iteration: 0, output: { ok: true } }));
 
     expect(decision._tag).toBe("Finished");
     expect(decision.result.status).toBe("finished");
@@ -98,9 +96,7 @@ describe("makeWorkflowSession surfaces masked child failures on a finished run",
     const descriptor = makeDescriptor("only-task");
     Effect.runSync(session.submitGraph(makeGraph([descriptor])));
 
-    const decision = Effect.runSync(
-      session.taskCompleted({ nodeId: "only-task", iteration: 0, output: { ok: true } }),
-    );
+    const decision = Effect.runSync(session.taskCompleted({ nodeId: "only-task", iteration: 0, output: { ok: true } }));
 
     expect(decision._tag).toBe("Finished");
     expect(decision.result.failedChildren).toBeUndefined();

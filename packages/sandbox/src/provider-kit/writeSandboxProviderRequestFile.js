@@ -10,15 +10,15 @@ import { redactSandboxEgressConfig } from "../egress.js";
  * @returns {Promise<Record<string, unknown>>}
  */
 export async function writeSandboxProviderRequestFile(session, requestPath, request) {
-	const payload = {
-		runId: request.runId,
-		sandboxId: request.sandboxId,
-		input: request.input,
-		config: request.config,
-		allowNetwork: request.allowNetwork,
-		maxOutputBytes: request.maxOutputBytes,
-		egress: request.egress === undefined ? undefined : redactSandboxEgressConfig(request.egress),
-	};
-	await session.writeFile(requestPath, JSON.stringify(payload));
-	return payload;
+  const payload = {
+    runId: request.runId,
+    sandboxId: request.sandboxId,
+    input: request.input,
+    config: request.config,
+    allowNetwork: request.allowNetwork,
+    maxOutputBytes: request.maxOutputBytes,
+    egress: request.egress === undefined ? undefined : redactSandboxEgressConfig(request.egress),
+  };
+  await session.writeFile(requestPath, JSON.stringify(payload));
+  return payload;
 }

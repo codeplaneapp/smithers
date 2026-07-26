@@ -41,7 +41,12 @@ describe("modeHasOptions", () => {
 
 describe("approvalOptionsOf", () => {
   it("normalizes {key,label} rows", () => {
-    expect(approvalOptionsOf([{ key: "a", label: "A" }, { key: "b", label: "B" }])).toEqual([
+    expect(
+      approvalOptionsOf([
+        { key: "a", label: "A" },
+        { key: "b", label: "B" },
+      ]),
+    ).toEqual([
       { key: "a", label: "A" },
       { key: "b", label: "B" },
     ]);

@@ -168,9 +168,7 @@ describe("replay edges: event log out-of-order commits", () => {
 
       const events = await adapter.listEventHistory("ooo-run", { limit: 50 });
       expect(events.map((e) => Number(e.seq))).toEqual([0, 1, 2, 3, 4, 5]);
-      expect(events.map((e) => JSON.parse(e.payloadJson).frameNo)).toEqual([
-        0, 1, 2, 3, 4, 5,
-      ]);
+      expect(events.map((e) => JSON.parse(e.payloadJson).frameNo)).toEqual([0, 1, 2, 3, 4, 5]);
     } finally {
       sqlite.close();
     }
@@ -254,18 +252,10 @@ describe("replay edges: referenced node has been removed", () => {
           `INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
            VALUES (?, ?, ?, ?, ?)`,
         )
-        .run(
-          "ghost-node-run",
-          0,
-          100,
-          "NodeStarted",
-          JSON.stringify({ runId: "ghost-node-run", nodeId: "ghost" }),
-        );
+        .run("ghost-node-run", 0, 100, "NodeStarted", JSON.stringify({ runId: "ghost-node-run", nodeId: "ghost" }));
 
       // Remove the node — simulate a workflow edit that dropped it.
-      sqlite
-        .query(`DELETE FROM _smithers_nodes WHERE run_id = ? AND node_id = ?`)
-        .run("ghost-node-run", "ghost");
+      sqlite.query(`DELETE FROM _smithers_nodes WHERE run_id = ? AND node_id = ?`).run("ghost-node-run", "ghost");
 
       const events = await adapter.listEventHistory("ghost-node-run", {
         nodeId: "ghost",

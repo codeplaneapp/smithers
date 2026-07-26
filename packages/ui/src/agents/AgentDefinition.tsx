@@ -84,7 +84,11 @@ export function AgentDefinition({
           {provider || model ? (
             <span className="sui-agentdef-identity">
               {provider ? <span className="sui-agentdef-provider">{provider}</span> : null}
-              {provider && model ? <span className="sui-agentdef-identity-sep" aria-hidden="true">/</span> : null}
+              {provider && model ? (
+                <span className="sui-agentdef-identity-sep" aria-hidden="true">
+                  /
+                </span>
+              ) : null}
               {model ? <span className="sui-agentdef-model">{model}</span> : null}
             </span>
           ) : null}
@@ -158,7 +162,9 @@ export function AgentInstructions({
         aria-controls={contentId}
         onClick={toggle}
       >
-        <span className="sui-agentdef-chevron" aria-hidden="true">›</span>
+        <span className="sui-agentdef-chevron" aria-hidden="true">
+          ›
+        </span>
         <span className="sui-agentdef-trigger-label">Instructions</span>
       </button>
       {isOpen ? (
@@ -219,7 +225,9 @@ export function AgentTool({
         aria-controls={contentId}
         onClick={toggle}
       >
-        <span className="sui-agentdef-chevron" aria-hidden="true">›</span>
+        <span className="sui-agentdef-chevron" aria-hidden="true">
+          ›
+        </span>
         <span className="sui-agentdef-tool-name">{tool.name}</span>
       </button>
       {isOpen ? (
@@ -238,7 +246,12 @@ export function AgentTool({
             </p>
           ) : null}
           {tool.inputSchema !== undefined ? (
-            <pre role="region" tabIndex={0} aria-label={`Input schema for ${tool.name}`} className="sui-agentdef-schema">
+            <pre
+              role="region"
+              tabIndex={0}
+              aria-label={`Input schema for ${tool.name}`}
+              className="sui-agentdef-schema"
+            >
               {formatJsonSafe(tool.inputSchema)}
             </pre>
           ) : null}
@@ -249,8 +262,7 @@ export function AgentTool({
   );
 }
 
-export type AgentOutputSchemaProps = Omit<ComponentProps<"div">, "children"> &
-  Openable & { schema: unknown };
+export type AgentOutputSchemaProps = Omit<ComponentProps<"div">, "children"> & Openable & { schema: unknown };
 
 /**
  * Collapsible view of the agent's DECLARED output schema. Named
@@ -287,7 +299,9 @@ export function AgentOutputSchema({
         aria-controls={contentId}
         onClick={toggle}
       >
-        <span className="sui-agentdef-chevron" aria-hidden="true">›</span>
+        <span className="sui-agentdef-chevron" aria-hidden="true">
+          ›
+        </span>
         <span className="sui-agentdef-trigger-label">Output schema</span>
       </button>
       {isOpen ? (

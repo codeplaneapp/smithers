@@ -11,16 +11,16 @@ import pc from "picocolors";
  * @type {Set<string>}
  */
 const OUTPUT_META_KEYS = new Set([
-    "runId",
-    "nodeId",
-    "iteration",
-    "attempt",
-    "run_id",
-    "node_id",
-    "createdAtMs",
-    "updatedAtMs",
-    "created_at_ms",
-    "updated_at_ms",
+  "runId",
+  "nodeId",
+  "iteration",
+  "attempt",
+  "run_id",
+  "node_id",
+  "createdAtMs",
+  "updatedAtMs",
+  "created_at_ms",
+  "updated_at_ms",
 ]);
 
 /** Node states that mark a finished node as failed. */
@@ -39,7 +39,7 @@ const EM_DASH = "—";
  * @returns {string} leading whitespace for `indent` nesting levels
  */
 function pad(indent) {
-    return INDENT_UNIT.repeat(Math.max(0, indent));
+  return INDENT_UNIT.repeat(Math.max(0, indent));
 }
 
 /**
@@ -64,12 +64,7 @@ function pad(indent) {
  * @returns {boolean}
  */
 function isPlainObject(value) {
-    return (
-        typeof value === "object" &&
-        value !== null &&
-        !Array.isArray(value) &&
-        !(value instanceof Date)
-    );
+  return typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date);
 }
 
 /**
@@ -80,34 +75,34 @@ function isPlainObject(value) {
  * @returns {string}
  */
 function styleScalar(value, color) {
-    if (value === null || value === undefined) {
-        return color.dim(EM_DASH);
-    }
-    const t = typeof value;
-    if (t === "string") {
-        return color.green(value);
-    }
-    if (t === "number") {
-        // NaN / Infinity stringify fine.
-        return color.yellow(String(value));
-    }
-    if (t === "bigint") {
-        return color.yellow(`${value}n`);
-    }
-    if (t === "boolean") {
-        return color.blue(value ? "true" : "false");
-    }
-    if (t === "function") {
-        return color.dim("[fn]");
-    }
-    if (t === "symbol") {
-        return color.dim("[symbol]");
-    }
-    if (value instanceof Date) {
-        return color.green(value.toISOString());
-    }
-    // Defensive fallback for any other exotic primitive.
-    return color.green(String(value));
+  if (value === null || value === undefined) {
+    return color.dim(EM_DASH);
+  }
+  const t = typeof value;
+  if (t === "string") {
+    return color.green(value);
+  }
+  if (t === "number") {
+    // NaN / Infinity stringify fine.
+    return color.yellow(String(value));
+  }
+  if (t === "bigint") {
+    return color.yellow(`${value}n`);
+  }
+  if (t === "boolean") {
+    return color.blue(value ? "true" : "false");
+  }
+  if (t === "function") {
+    return color.dim("[fn]");
+  }
+  if (t === "symbol") {
+    return color.dim("[symbol]");
+  }
+  if (value instanceof Date) {
+    return color.green(value.toISOString());
+  }
+  // Defensive fallback for any other exotic primitive.
+  return color.green(String(value));
 }
 
 /**
@@ -118,8 +113,8 @@ function styleScalar(value, color) {
  * @returns {string[]} one styled line per physical line
  */
 function styleMultilineString(value, indent, color) {
-    const prefix = pad(indent);
-    return value.split("\n").map((line) => `${prefix}${color.green(line)}`);
+  const prefix = pad(indent);
+  return value.split("\n").map((line) => `${prefix}${color.green(line)}`);
 }
 
 /**
@@ -131,52 +126,52 @@ function styleMultilineString(value, indent, color) {
  * @returns {string[]}
  */
 function renderObject(obj, indent, color, seen) {
-    const prefix = pad(indent);
-    const lines = [];
-    for (const key of Object.keys(obj)) {
-        const styledKey = color.bold(color.cyan(key));
-        const value = obj[key];
+  const prefix = pad(indent);
+  const lines = [];
+  for (const key of Object.keys(obj)) {
+    const styledKey = color.bold(color.cyan(key));
+    const value = obj[key];
 
-        if (isPlainObject(value)) {
-            if (Object.keys(value).length === 0) {
-                // Empty object inline.
-                lines.push(`${prefix}${styledKey}: ${color.dim("{}")}`);
-                continue;
-            }
-            if (seen.has(value)) {
-                lines.push(`${prefix}${styledKey}: ${color.dim("[circular]")}`);
-                continue;
-            }
-            lines.push(`${prefix}${styledKey}:`);
-            lines.push(...renderValue(value, indent + 1, color, seen));
-            continue;
-        }
-
-        if (Array.isArray(value)) {
-            if (value.length === 0) {
-                // Empty array inline.
-                lines.push(`${prefix}${styledKey}: ${color.dim("[]")}`);
-                continue;
-            }
-            if (seen.has(value)) {
-                lines.push(`${prefix}${styledKey}: ${color.dim("[circular]")}`);
-                continue;
-            }
-            lines.push(`${prefix}${styledKey}:`);
-            lines.push(...renderValue(value, indent + 1, color, seen));
-            continue;
-        }
-
-        if (typeof value === "string" && value.includes("\n")) {
-            lines.push(`${prefix}${styledKey}:`);
-            lines.push(...styleMultilineString(value, indent + 1, color));
-            continue;
-        }
-
-        // Inline primitive (incl. null/undefined -> em dash, Date -> ISO).
-        lines.push(`${prefix}${styledKey}: ${styleScalar(value, color)}`);
+    if (isPlainObject(value)) {
+      if (Object.keys(value).length === 0) {
+        // Empty object inline.
+        lines.push(`${prefix}${styledKey}: ${color.dim("{}")}`);
+        continue;
+      }
+      if (seen.has(value)) {
+        lines.push(`${prefix}${styledKey}: ${color.dim("[circular]")}`);
+        continue;
+      }
+      lines.push(`${prefix}${styledKey}:`);
+      lines.push(...renderValue(value, indent + 1, color, seen));
+      continue;
     }
-    return lines;
+
+    if (Array.isArray(value)) {
+      if (value.length === 0) {
+        // Empty array inline.
+        lines.push(`${prefix}${styledKey}: ${color.dim("[]")}`);
+        continue;
+      }
+      if (seen.has(value)) {
+        lines.push(`${prefix}${styledKey}: ${color.dim("[circular]")}`);
+        continue;
+      }
+      lines.push(`${prefix}${styledKey}:`);
+      lines.push(...renderValue(value, indent + 1, color, seen));
+      continue;
+    }
+
+    if (typeof value === "string" && value.includes("\n")) {
+      lines.push(`${prefix}${styledKey}:`);
+      lines.push(...styleMultilineString(value, indent + 1, color));
+      continue;
+    }
+
+    // Inline primitive (incl. null/undefined -> em dash, Date -> ISO).
+    lines.push(`${prefix}${styledKey}: ${styleScalar(value, color)}`);
+  }
+  return lines;
 }
 
 /**
@@ -188,45 +183,43 @@ function renderObject(obj, indent, color, seen) {
  * @returns {string[]}
  */
 function renderArray(arr, indent, color, seen) {
-    const prefix = pad(indent);
-    const lines = [];
-    for (let i = 0; i < arr.length; i++) {
-        const item = arr[i];
+  const prefix = pad(indent);
+  const lines = [];
+  for (let i = 0; i < arr.length; i++) {
+    const item = arr[i];
 
-        if (isPlainObject(item) || Array.isArray(item)) {
-            const isEmpty = isPlainObject(item)
-                ? Object.keys(item).length === 0
-                : item.length === 0;
-            if (isEmpty) {
-                // Empty object/array element collapses to an inline placeholder.
-                const placeholder = Array.isArray(item) ? "[]" : "{}";
-                lines.push(`${prefix}${color.dim(`- ${placeholder}`)}`);
-                continue;
-            }
-            if (seen.has(item)) {
-                lines.push(`${prefix}${color.dim(`[${i}]`)}`);
-                lines.push(`${pad(indent + 1)}${color.dim("[circular]")}`);
-                continue;
-            }
-            // Index header, then the nested value indented one level below.
-            lines.push(`${prefix}${color.dim(`[${i}]`)}`);
-            lines.push(...renderValue(item, indent + 1, color, seen));
-            continue;
-        }
-
-        if (typeof item === "string" && item.includes("\n")) {
-            // Multi-line string element: bullet then continuation lines.
-            const parts = item.split("\n");
-            lines.push(`${prefix}${color.dim("- ")}${color.green(parts[0])}`);
-            for (let j = 1; j < parts.length; j++) {
-                lines.push(`${pad(indent + 1)}${color.green(parts[j])}`);
-            }
-            continue;
-        }
-
-        lines.push(`${prefix}${color.dim("- ")}${styleScalar(item, color)}`);
+    if (isPlainObject(item) || Array.isArray(item)) {
+      const isEmpty = isPlainObject(item) ? Object.keys(item).length === 0 : item.length === 0;
+      if (isEmpty) {
+        // Empty object/array element collapses to an inline placeholder.
+        const placeholder = Array.isArray(item) ? "[]" : "{}";
+        lines.push(`${prefix}${color.dim(`- ${placeholder}`)}`);
+        continue;
+      }
+      if (seen.has(item)) {
+        lines.push(`${prefix}${color.dim(`[${i}]`)}`);
+        lines.push(`${pad(indent + 1)}${color.dim("[circular]")}`);
+        continue;
+      }
+      // Index header, then the nested value indented one level below.
+      lines.push(`${prefix}${color.dim(`[${i}]`)}`);
+      lines.push(...renderValue(item, indent + 1, color, seen));
+      continue;
     }
-    return lines;
+
+    if (typeof item === "string" && item.includes("\n")) {
+      // Multi-line string element: bullet then continuation lines.
+      const parts = item.split("\n");
+      lines.push(`${prefix}${color.dim("- ")}${color.green(parts[0])}`);
+      for (let j = 1; j < parts.length; j++) {
+        lines.push(`${pad(indent + 1)}${color.green(parts[j])}`);
+      }
+      continue;
+    }
+
+    lines.push(`${prefix}${color.dim("- ")}${styleScalar(item, color)}`);
+  }
+  return lines;
 }
 
 /**
@@ -240,38 +233,38 @@ function renderArray(arr, indent, color, seen) {
  * @returns {string[]}
  */
 function renderValue(value, indent, color, seen) {
-    if (isPlainObject(value)) {
-        if (Object.keys(value).length === 0) {
-            return [`${pad(indent)}${color.dim("{}")}`];
-        }
-        if (seen.has(value)) {
-            return [`${pad(indent)}${color.dim("[circular]")}`];
-        }
-        seen.add(value);
-        const lines = renderObject(/** @type {Record<string, unknown>} */ (value), indent, color, seen);
-        seen.delete(value);
-        return lines;
+  if (isPlainObject(value)) {
+    if (Object.keys(value).length === 0) {
+      return [`${pad(indent)}${color.dim("{}")}`];
     }
-
-    if (Array.isArray(value)) {
-        if (value.length === 0) {
-            return [`${pad(indent)}${color.dim("[]")}`];
-        }
-        if (seen.has(value)) {
-            return [`${pad(indent)}${color.dim("[circular]")}`];
-        }
-        seen.add(value);
-        const lines = renderArray(value, indent, color, seen);
-        seen.delete(value);
-        return lines;
+    if (seen.has(value)) {
+      return [`${pad(indent)}${color.dim("[circular]")}`];
     }
+    seen.add(value);
+    const lines = renderObject(/** @type {Record<string, unknown>} */ (value), indent, color, seen);
+    seen.delete(value);
+    return lines;
+  }
 
-    if (typeof value === "string" && value.includes("\n")) {
-        return styleMultilineString(value, indent, color);
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return [`${pad(indent)}${color.dim("[]")}`];
     }
+    if (seen.has(value)) {
+      return [`${pad(indent)}${color.dim("[circular]")}`];
+    }
+    seen.add(value);
+    const lines = renderArray(value, indent, color, seen);
+    seen.delete(value);
+    return lines;
+  }
 
-    // Standalone scalar: just the styled value on one line.
-    return [`${pad(indent)}${styleScalar(value, color)}`];
+  if (typeof value === "string" && value.includes("\n")) {
+    return styleMultilineString(value, indent, color);
+  }
+
+  // Standalone scalar: just the styled value on one line.
+  return [`${pad(indent)}${styleScalar(value, color)}`];
 }
 
 /**
@@ -289,14 +282,14 @@ function renderValue(value, indent, color, seen) {
  * @returns {string}
  */
 export function prettyValue(value, opts = {}) {
-    const indent = opts.indent ?? 0;
-    const color = opts.color ?? pc;
-    const seen = opts.seen ?? new WeakSet();
-    try {
-        return renderValue(value, indent, color, seen).join("\n");
-    } catch {
-        return `${pad(indent)}${color.dim("[unprintable]")}`;
-    }
+  const indent = opts.indent ?? 0;
+  const color = opts.color ?? pc;
+  const seen = opts.seen ?? new WeakSet();
+  try {
+    return renderValue(value, indent, color, seen).join("\n");
+  } catch {
+    return `${pad(indent)}${color.dim("[unprintable]")}`;
+  }
 }
 
 /**
@@ -306,9 +299,9 @@ export function prettyValue(value, opts = {}) {
  * @returns {string}
  */
 function lastSegment(nodeId) {
-    const id = String(nodeId ?? "·");
-    const i = id.lastIndexOf(":");
-    return i >= 0 ? id.slice(i + 1) : id;
+  const id = String(nodeId ?? "·");
+  const i = id.lastIndexOf(":");
+  return i >= 0 ? id.slice(i + 1) : id;
 }
 
 /**
@@ -318,13 +311,13 @@ function lastSegment(nodeId) {
  * @returns {Record<string, unknown>}
  */
 function stripMeta(row) {
-    if (!row || typeof row !== "object") return {};
-    const data = {};
-    for (const [k, v] of Object.entries(row)) {
-        if (OUTPUT_META_KEYS.has(k) || v == null) continue;
-        data[k] = v;
-    }
-    return data;
+  if (!row || typeof row !== "object") return {};
+  const data = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (OUTPUT_META_KEYS.has(k) || v == null) continue;
+    data[k] = v;
+  }
+  return data;
 }
 
 /**
@@ -336,13 +329,13 @@ function stripMeta(row) {
  * @returns {string}
  */
 function withStateSuffix(styledLabel, state, color) {
-    if (NODE_FAILURE_STATES.has(String(state))) {
-        return `${styledLabel} ${color.dim("(failed)")}`;
-    }
-    if (NODE_CANCEL_STATES.has(String(state))) {
-        return `${styledLabel} ${color.dim("(cancelled)")}`;
-    }
-    return styledLabel;
+  if (NODE_FAILURE_STATES.has(String(state))) {
+    return `${styledLabel} ${color.dim("(failed)")}`;
+  }
+  if (NODE_CANCEL_STATES.has(String(state))) {
+    return `${styledLabel} ${color.dim("(cancelled)")}`;
+  }
+  return styledLabel;
 }
 
 /**
@@ -379,49 +372,49 @@ function withStateSuffix(styledLabel, state, color) {
  * @returns {Promise<{ nodeCount: number }>}
  */
 export async function renderRunOutputs(adapter, runId, opts = {}) {
-    const print = opts.print ?? ((line) => process.stdout.write(`${line}\n`));
-    const color = opts.color ?? pc;
+  const print = opts.print ?? ((line) => process.stdout.write(`${line}\n`));
+  const color = opts.color ?? pc;
 
-    let nodes;
+  let nodes;
+  try {
+    nodes = await adapter.listNodes(runId);
+  } catch {
+    nodes = [];
+  }
+  if (!Array.isArray(nodes)) nodes = [];
+
+  let nodeCount = 0;
+  for (const node of nodes) {
+    const table = node?.outputTable;
+    if (typeof table !== "string" || table.length === 0) continue;
+
+    const iteration = node.iteration ?? 0;
+    let row = null;
     try {
-        nodes = await adapter.listNodes(runId);
+      row = await adapter.getRawNodeOutputForIteration(table, runId, node.nodeId, iteration);
     } catch {
-        nodes = [];
+      row = null;
     }
-    if (!Array.isArray(nodes)) nodes = [];
+    const data = stripMeta(row);
 
-    let nodeCount = 0;
-    for (const node of nodes) {
-        const table = node?.outputTable;
-        if (typeof table !== "string" || table.length === 0) continue;
+    // Blank separator between cards (not before the first).
+    if (nodeCount > 0) print("");
 
-        const iteration = node.iteration ?? 0;
-        let row = null;
-        try {
-            row = await adapter.getRawNodeOutputForIteration(table, runId, node.nodeId, iteration);
-        } catch {
-            row = null;
-        }
-        const data = stripMeta(row);
+    const label = node.label ?? lastSegment(node.nodeId);
+    print(withStateSuffix(color.bold(color.magenta(String(label))), node.state, color));
 
-        // Blank separator between cards (not before the first).
-        if (nodeCount > 0) print("");
-
-        const label = node.label ?? lastSegment(node.nodeId);
-        print(withStateSuffix(color.bold(color.magenta(String(label))), node.state, color));
-
-        if (!row || Object.keys(data).length === 0) {
-            print(`${INDENT_UNIT}${color.dim(EM_DASH)}`);
-        } else {
-            print(prettyValue(data, { indent: 1, color }));
-        }
-
-        nodeCount++;
+    if (!row || Object.keys(data).length === 0) {
+      print(`${INDENT_UNIT}${color.dim(EM_DASH)}`);
+    } else {
+      print(prettyValue(data, { indent: 1, color }));
     }
 
-    if (nodeCount === 0) {
-        print(color.dim("(no task outputs)"));
-    }
+    nodeCount++;
+  }
 
-    return { nodeCount };
+  if (nodeCount === 0) {
+    print(color.dim("(no task outputs)"));
+  }
+
+  return { nodeCount };
 }

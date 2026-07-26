@@ -90,7 +90,10 @@ export default smithers((ctx) => {
                 maxBuffer: 64 * 1024 * 1024,
                 env: process.env,
               });
-              return { code: typeof res.status === "number" ? res.status : null, out: `${res.stdout ?? ""}\n${res.stderr ?? ""}`.trim() };
+              return {
+                code: typeof res.status === "number" ? res.status : null,
+                out: `${res.stdout ?? ""}\n${res.stderr ?? ""}`.trim(),
+              };
             };
             run("git fetch -q origin main");
             const rogue = run("git ls-remote --heads origin 'burndown/*'").out.trim();

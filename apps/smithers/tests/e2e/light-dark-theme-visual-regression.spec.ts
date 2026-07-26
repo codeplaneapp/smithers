@@ -92,9 +92,7 @@ async function renderedThemeSignature(
       const shell = document.querySelector<HTMLElement>(shellSelector);
       const surface = document.querySelector<HTMLElement>(surfaceSelector);
       if (!shell || !surface) {
-        throw new Error(
-          `Missing visual surface: ${shellSelector} / ${surfaceSelector}`,
-        );
+        throw new Error(`Missing visual surface: ${shellSelector} / ${surfaceSelector}`);
       }
       const rootStyle = getComputedStyle(document.documentElement);
       const shellStyle = getComputedStyle(shell);
@@ -137,9 +135,7 @@ async function persistedTheme(page: Page): Promise<Theme | null> {
     if (!raw) return null;
     try {
       const value = JSON.parse(raw) as { state?: { theme?: unknown } };
-      return value.state?.theme === "light" || value.state?.theme === "dark"
-        ? value.state.theme
-        : null;
+      return value.state?.theme === "light" || value.state?.theme === "dark" ? value.state.theme : null;
     } catch {
       return null;
     }
@@ -162,10 +158,7 @@ async function seededMonitorRun(page: Page): Promise<RunSummary> {
     payload?: RunSummary[];
   };
   expect(frame.ok).toBe(true);
-  const run = frame.payload?.find(
-    (candidate) =>
-      (candidate.workflowKey ?? candidate.workflowName) === "e2e-monitor",
-  );
+  const run = frame.payload?.find((candidate) => (candidate.workflowKey ?? candidate.workflowName) === "e2e-monitor");
   expect(run).toBeDefined();
   return run as RunSummary;
 }
@@ -173,14 +166,9 @@ async function seededMonitorRun(page: Page): Promise<RunSummary> {
 test.describe("light and dark theme visual regression", () => {
   // CI intentionally has no browser binaries. Keep this real-browser suite
   // discoverable but harmless there (and on local machines before install).
-  test.skip(
-    !hasChromium(),
-    "Chromium is unavailable; run after `playwright install chromium`.",
-  );
+  test.skip(!hasChromium(), "Chromium is unavailable; run after `playwright install chromium`.");
 
-  test("the home shell renders both palettes and persists the selected theme", async ({
-    page,
-  }) => {
+  test("the home shell renders both palettes and persists the selected theme", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
     await page.goto("/");
@@ -189,39 +177,27 @@ test.describe("light and dark theme visual regression", () => {
     // prior local browser session, then exercise the actual visible control.
     await page.evaluate(() => window.localStorage.removeItem("smithers.prefs"));
     await page.reload();
-    await expect(
-      page.getByRole("heading", { name: /Turn ideas into momentum/i }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("textbox", { name: "Message Smithers" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Turn ideas into momentum/i })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Message Smithers" })).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await expect
-      .poll(() =>
-        renderedThemeSignature(page, ".app-shell", ".landing-features article"),
-      )
+      .poll(() => renderedThemeSignature(page, ".app-shell", ".landing-features article"))
       .toEqual(expectedSignature("light"));
 
     await page.getByRole("button", { name: "Switch to dark mode" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect.poll(() => persistedTheme(page)).toBe("dark");
     await expect
-      .poll(() =>
-        renderedThemeSignature(page, ".app-shell", ".landing-features article"),
-      )
+      .poll(() => renderedThemeSignature(page, ".app-shell", ".landing-features article"))
       .toEqual(expectedSignature("dark"));
 
     // The persisted preference is reapplied after a full app reload, including
     // its control label and the same rendered palette, not merely an attribute.
     await page.reload();
-    await expect(
-      page.getByRole("button", { name: "Switch to light mode" }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Switch to light mode" })).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect
-      .poll(() =>
-        renderedThemeSignature(page, ".app-shell", ".landing-features article"),
-      )
+      .poll(() => renderedThemeSignature(page, ".app-shell", ".landing-features article"))
       .toEqual(expectedSignature("dark"));
 
     await page.getByRole("button", { name: "Switch to light mode" }).click();
@@ -229,9 +205,7 @@ test.describe("light and dark theme visual regression", () => {
     await expect.poll(() => persistedTheme(page)).toBe("light");
   });
 
-  test("the seeded monitor overview and run detail render explicit light and dark palettes", async ({
-    page,
-  }) => {
+  test("the seeded monitor overview and run detail render explicit light and dark palettes", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     const run = await seededMonitorRun(page);
 
@@ -250,14 +224,10 @@ test.describe("light and dark theme visual regression", () => {
       await expect(page.getByTestId("monitor-runs-table")).toBeVisible();
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
       await expect
-        .poll(() =>
-          renderedThemeSignature(page, "body", ".mon-runs-table-panel"),
-        )
+        .poll(() => renderedThemeSignature(page, "body", ".mon-runs-table-panel"))
         .toEqual(expectedSignature(theme));
 
-      await page.goto(
-        `${gatewayOrigin}/monitor?theme=${theme}&runId=${encodeURIComponent(run.runId)}`,
-      );
+      await page.goto(`${gatewayOrigin}/monitor?theme=${theme}&runId=${encodeURIComponent(run.runId)}`);
       await expect(page.getByTestId("monitor-run-detail")).toBeVisible();
       await expect(page.getByTestId("monitor-tree")).toBeVisible();
       await expect(page.getByTestId("monitor-events")).toBeVisible();

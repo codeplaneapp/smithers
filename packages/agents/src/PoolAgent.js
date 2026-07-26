@@ -36,9 +36,7 @@ export function createPoolCapabilityRegistry(_opts = {}) {
       supportsUiRequests: false,
       methods: [],
     },
-    builtIns: normalizeCapabilityStringList([
-      "default",
-    ]),
+    builtIns: normalizeCapabilityStringList(["default"]),
   };
 }
 
@@ -281,11 +279,13 @@ export class PoolAgent extends BaseCliAgent {
         // If no events were emitted yet, we still need to emit started
         const started = didEmitStarted
           ? []
-          : [{
-              type: "started",
-              engine: this.cliEngine,
-              title: "Pool",
-            }];
+          : [
+              {
+                type: "started",
+                engine: this.cliEngine,
+                title: "Pool",
+              },
+            ];
 
         return [
           ...started,
@@ -294,9 +294,7 @@ export class PoolAgent extends BaseCliAgent {
             engine: this.cliEngine,
             ok,
             answer: ok ? lastThought || undefined : undefined,
-            error: ok
-              ? undefined
-              : result.stderr?.trim() || `Pool exited with code ${result.exitCode ?? -1}`,
+            error: ok ? undefined : result.stderr?.trim() || `Pool exited with code ${result.exitCode ?? -1}`,
           },
         ];
       },
@@ -310,9 +308,7 @@ export class PoolAgent extends BaseCliAgent {
    */
   async buildCommand(params) {
     const args = ["exec"];
-    const resumeSession = typeof params.options?.resumeSession === "string"
-      ? params.options.resumeSession
-      : undefined;
+    const resumeSession = typeof params.options?.resumeSession === "string" ? params.options.resumeSession : undefined;
 
     // Output format: JSON for streaming NDJSON
     args.push("-o", "json");
@@ -344,9 +340,7 @@ export class PoolAgent extends BaseCliAgent {
     }
 
     // System prompt prefix + user prompt
-    const systemPrefix = params.systemPrompt
-      ? `${params.systemPrompt}\n\n`
-      : "";
+    const systemPrefix = params.systemPrompt ? `${params.systemPrompt}\n\n` : "";
     const fullPrompt = `${systemPrefix}${params.prompt ?? ""}`;
     pushFlag(args, "-p", fullPrompt);
 

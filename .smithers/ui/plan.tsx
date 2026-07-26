@@ -135,9 +135,13 @@ function App() {
       <header className="topbar">
         <div className="title-group">
           <h1>Plan</h1>
-          <span className="pill" data-testid="plan-runid">{activeRunId ? shortRunId(activeRunId) : "No run"}</span>
+          <span className="pill" data-testid="plan-runid">
+            {activeRunId ? shortRunId(activeRunId) : "No run"}
+          </span>
           {activeRun ? (
-            <span className={"badge " + statusClass(activeRun.status)} data-testid="plan-status">{activeRun.status ?? "idle"}</span>
+            <span className={"badge " + statusClass(activeRun.status)} data-testid="plan-status">
+              {activeRun.status ?? "idle"}
+            </span>
           ) : null}
         </div>
         <div className="toolbar">
@@ -148,11 +152,17 @@ function App() {
             onChange={(e) => setPrompt(e.currentTarget.value)}
             placeholder="What should we plan?"
           />
-          <button className="button" data-testid="plan-refresh" onClick={() => void refresh()} disabled={busy}>Refresh</button>
+          <button className="button" data-testid="plan-refresh" onClick={() => void refresh()} disabled={busy}>
+            Refresh
+          </button>
           {activeRun && statusClass(activeRun.status) === "running" ? (
-            <button className="button danger" data-testid="plan-cancel" onClick={() => void cancel()} disabled={busy}>Cancel</button>
+            <button className="button danger" data-testid="plan-cancel" onClick={() => void cancel()} disabled={busy}>
+              Cancel
+            </button>
           ) : null}
-          <button className="button primary" data-testid="plan-launch" onClick={() => void launch()} disabled={busy}>Generate Plan</button>
+          <button className="button primary" data-testid="plan-launch" onClick={() => void launch()} disabled={busy}>
+            Generate Plan
+          </button>
         </div>
       </header>
 
@@ -162,7 +172,9 @@ function App() {
             <>
               <div className="summary-card">
                 <h2>Plan summary</h2>
-                <div className="summary-text" data-testid="plan-summary">{plan.summary}</div>
+                <div className="summary-text" data-testid="plan-summary">
+                  {plan.summary}
+                </div>
               </div>
               <ol className="steps" data-testid="plan-steps">
                 {plan.steps.map((step, i) => (
@@ -181,7 +193,12 @@ function App() {
           ) : (
             <div className="empty" data-testid="plan-empty">
               <div>{activeRunId ? "Waiting for the plan…" : "No plan yet."}</div>
-              <button className="button primary" data-testid="plan-launch-empty" onClick={() => void launch()} disabled={busy}>
+              <button
+                className="button primary"
+                data-testid="plan-launch-empty"
+                onClick={() => void launch()}
+                disabled={busy}
+              >
                 Generate Plan
               </button>
             </div>

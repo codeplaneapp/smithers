@@ -8,9 +8,9 @@
 // Every string this matches is a strict subset of QUOTA_PATTERNS, so reset-time
 // parsing still works at the engine boundary.
 const CLAUDE_LIMIT_BANNER_PATTERNS = [
-    /^You've hit your session limit\s+\u00b7\s+resets\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)\s+\([^)]+\)\.?$/i,
-    /^You're out of usage credits\. Run \/usage-credits to keep using .+$/i,
-    /^Claude usage limit reached\. Your limit will reset at \d{1,2}(?::\d{2})?\s*(?:am|pm)\s+\([^)]+\)\.?$/i,
+  /^You've hit your session limit\s+\u00b7\s+resets\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)\s+\([^)]+\)\.?$/i,
+  /^You're out of usage credits\. Run \/usage-credits to keep using .+$/i,
+  /^Claude usage limit reached\. Your limit will reset at \d{1,2}(?::\d{2})?\s*(?:am|pm)\s+\([^)]+\)\.?$/i,
 ];
 
 /**
@@ -18,7 +18,7 @@ const CLAUDE_LIMIT_BANNER_PATTERNS = [
  * @returns {boolean}
  */
 export function isClaudeLimitBanner(text) {
-    if (!text) return false;
-    const trimmed = text.trim();
-    return CLAUDE_LIMIT_BANNER_PATTERNS.some((re) => re.test(trimmed));
+  if (!text) return false;
+  const trimmed = text.trim();
+  return CLAUDE_LIMIT_BANNER_PATTERNS.some((re) => re.test(trimmed));
 }

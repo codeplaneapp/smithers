@@ -26,17 +26,13 @@ try {
     encoding: "utf8",
   });
   supportsKimiE2EFlags =
-    helpText.includes("--print") &&
-    helpText.includes("--work-dir") &&
-    helpText.includes("--output-format");
+    helpText.includes("--print") && helpText.includes("--work-dir") && helpText.includes("--output-format");
 } catch {
   isKimiInstalled = false;
   supportsKimiE2EFlags = false;
 }
 
-describe.skipIf(!runRealAgentE2E || !isKimiInstalled || !supportsKimiE2EFlags)(
-  "KimiAgent E2E (real CLI)",
-  () => {
+describe.skipIf(!runRealAgentE2E || !isKimiInstalled || !supportsKimiE2EFlags)("KimiAgent E2E (real CLI)", () => {
   /** @type {string} */
   let tmpDir;
 
@@ -97,13 +93,11 @@ describe.skipIf(!runRealAgentE2E || !isKimiInstalled || !supportsKimiE2EFlags)(
     const agent = new KimiAgent();
 
     const result = await agent.generate({
-      prompt:
-        "List the files in the current directory. Just output the filenames, one per line.",
+      prompt: "List the files in the current directory. Just output the filenames, one per line.",
       rootDir: tmpDir,
     });
 
     expect(result).toBeDefined();
     expect(result.text).toContain("hello.js");
   }, 120_000);
-  }
-);
+});

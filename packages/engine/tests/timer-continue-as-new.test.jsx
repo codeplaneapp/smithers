@@ -74,13 +74,9 @@ describe("timer continue-as-new handoff", () => {
     // 1) Parent run parks on the timer; capture its anchored deadline. The start
     //    anchor (createdAtMs) is what continue-as-new carries forward.
     const parentRunId = "timer-can-parent";
-    const parent = await Effect.runPromise(
-      runWorkflow(workflow, { input: {}, runId: parentRunId }),
-    );
+    const parent = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: parentRunId }));
     expect(parent.status).toBe("waiting-timer");
-    const parentAttempts = await Effect.runPromise(
-      adapter.listAttempts(parentRunId, "hold", 0),
-    );
+    const parentAttempts = await Effect.runPromise(adapter.listAttempts(parentRunId, "hold", 0));
     const parentTimer = JSON.parse(parentAttempts[0].metaJson).timer;
     const parentStart = parentTimer.createdAtMs;
     const parentFiresAtMs = parentTimer.firesAtMs;
@@ -108,9 +104,7 @@ describe("timer continue-as-new handoff", () => {
       carried,
     );
     expect(resolved).toEqual({ handled: true, state: "waiting-timer" });
-    const childAttempts = await Effect.runPromise(
-      adapter.listAttempts(childRunId, "hold", 0),
-    );
+    const childAttempts = await Effect.runPromise(adapter.listAttempts(childRunId, "hold", 0));
     const childTimer = JSON.parse(childAttempts[0].metaJson).timer;
     // (a) The carried deadline is preserved: firesAtMs equals the parent's
     //     original deadline, NOT childBoot + full duration.
@@ -136,9 +130,7 @@ describe("timer continue-as-new handoff", () => {
     );
     expect(firedResolved).toEqual({ handled: true, state: "finished" });
     expect(pastBus.events.some((event) => event.type === "TimerFired")).toBe(true);
-    const pastAttempts = await Effect.runPromise(
-      adapter.listAttempts(pastRunId, "hold", 0),
-    );
+    const pastAttempts = await Effect.runPromise(adapter.listAttempts(pastRunId, "hold", 0));
     expect(pastAttempts[0].state).toBe("finished");
 
     cleanup();

@@ -55,10 +55,18 @@ export default smithers((ctx) => {
   // Enrich implement prompt with both research and the synthesized plan
   const implementPrompt = [
     prompt,
-    research ? `RESEARCH FINDINGS:\n${research.summary}\n\nKey findings:\n${research.keyFindings.map((f: string) => `- ${f}`).join("\n")}` : null,
-    plan ? `IMPLEMENTATION PLAN:\n${plan.summary}\n\nSteps:\n${plan.steps.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}` : null,
-    tdd ? "IMPORTANT: Follow the plan's test-first approach. Write or update tests before implementing production code." : null,
-  ].filter(Boolean).join("\n\n---\n");
+    research
+      ? `RESEARCH FINDINGS:\n${research.summary}\n\nKey findings:\n${research.keyFindings.map((f: string) => `- ${f}`).join("\n")}`
+      : null,
+    plan
+      ? `IMPLEMENTATION PLAN:\n${plan.summary}\n\nSteps:\n${plan.steps.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`
+      : null,
+    tdd
+      ? "IMPORTANT: Follow the plan's test-first approach. Write or update tests before implementing production code."
+      : null,
+  ]
+    .filter(Boolean)
+    .join("\n\n---\n");
 
   // Validation loop feedback
   const validate = ctx.latest("validate", "impl:validate");

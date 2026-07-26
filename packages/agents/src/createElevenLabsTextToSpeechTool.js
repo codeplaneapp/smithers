@@ -103,9 +103,7 @@ async function synthesizeSpeech({
   fetchImpl,
   input,
 }) {
-  const args = /** @type {import("./createElevenLabsTextToSpeechTool.ts").ElevenLabsTextToSpeechInput} */ (
-    input ?? {}
-  );
+  const args = /** @type {import("./createElevenLabsTextToSpeechTool.ts").ElevenLabsTextToSpeechInput} */ (input ?? {});
   if (typeof args.text !== "string" || args.text.trim() === "") {
     throw new Error("elevenlabs_text_to_speech requires non-empty text");
   }
@@ -128,9 +126,7 @@ async function synthesizeSpeech({
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
-    throw new Error(
-      `ElevenLabs text-to-speech failed with ${response.status}${errorText ? `: ${errorText}` : ""}`,
-    );
+    throw new Error(`ElevenLabs text-to-speech failed with ${response.status}${errorText ? `: ${errorText}` : ""}`);
   }
 
   const contentType = response.headers.get("content-type") ?? "audio/mpeg";
@@ -215,9 +211,7 @@ function resolveRedirectTarget(location, baseUrl) {
     throw new Error(`ElevenLabs text-to-speech received an invalid redirect target: ${location}`);
   }
   if (nextUrl.protocol !== "https:" && nextUrl.protocol !== "http:") {
-    throw new Error(
-      `ElevenLabs text-to-speech refused a redirect to unsupported protocol ${nextUrl.protocol}`,
-    );
+    throw new Error(`ElevenLabs text-to-speech refused a redirect to unsupported protocol ${nextUrl.protocol}`);
   }
   return nextUrl;
 }

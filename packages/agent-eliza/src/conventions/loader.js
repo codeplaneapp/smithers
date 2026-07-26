@@ -129,14 +129,9 @@ function buildDefinition(filePath, baseDir, exported, source, frontmatter) {
   const raw = /** @type {Partial<WorkflowDefinition>} */ (hasWorkflowExport ? exported : {});
 
   return {
-    name:
-      raw.name ??
-      (typeof frontmatter.name === "string" ? frontmatter.name : undefined) ??
-      nameFromFile(filePath),
+    name: raw.name ?? (typeof frontmatter.name === "string" ? frontmatter.name : undefined) ?? nameFromFile(filePath),
     description:
-      raw.description ??
-      (typeof frontmatter.description === "string" ? frontmatter.description : undefined) ??
-      "",
+      raw.description ?? (typeof frontmatter.description === "string" ? frontmatter.description : undefined) ?? "",
     tags: raw.tags ?? stringArrayFromFrontmatter(frontmatter.tags),
     aliases: raw.aliases ?? stringArrayFromFrontmatter(frontmatter.aliases),
     disableModelInvocation:
@@ -144,12 +139,8 @@ function buildDefinition(filePath, baseDir, exported, source, frontmatter) {
       (typeof frontmatter["disable-model-invocation"] === "boolean"
         ? frontmatter["disable-model-invocation"]
         : undefined),
-    system:
-      raw.system ??
-      (typeof frontmatter.system === "boolean" ? frontmatter.system : undefined),
-    version:
-      raw.version ??
-      (typeof frontmatter.version === "string" ? frontmatter.version : undefined),
+    system: raw.system ?? (typeof frontmatter.system === "boolean" ? frontmatter.system : undefined),
+    version: raw.version ?? (typeof frontmatter.version === "string" ? frontmatter.version : undefined),
     filePath,
     baseDir,
     source,
@@ -245,13 +236,7 @@ export async function loadWorkflowsFromDir({ dir, source = "unknown" }) {
  * @returns {Promise<LoadWorkflowsResult>}
  */
 export async function loadWorkflows(options = {}) {
-  const {
-    cwd = process.cwd(),
-    workflowPaths = [],
-    includeDefaults = true,
-    bundledDir,
-    managedDir,
-  } = options;
+  const { cwd = process.cwd(), workflowPaths = [], includeDefaults = true, bundledDir, managedDir } = options;
 
   /** @type {Map<string, WorkflowDefinition>} */
   const byName = new Map();

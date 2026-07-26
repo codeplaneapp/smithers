@@ -1,11 +1,5 @@
 import { openSurface } from "../app/navigation";
-import {
-  metricsFromScores,
-  resolveActiveRunId,
-  runLabel,
-  scoreTone,
-  summaryStats,
-} from "./scoreReport";
+import { metricsFromScores, resolveActiveRunId, runLabel, scoreTone, summaryStats } from "./scoreReport";
 import { useScoresStore } from "./scoresStore";
 
 function ChartIcon() {
@@ -37,7 +31,8 @@ export function ScoresCard() {
   const run = activeRunId == null ? undefined : runs.find((candidate) => candidate.runId === activeRunId);
   const metrics = metricsFromScores(scoreRows, activeRunId);
   const stats = summaryStats(metrics);
-  const meanScore = metrics.scores.length > 0 ? metrics.scores.reduce((sum, row) => sum + row.score, 0) / metrics.scores.length : null;
+  const meanScore =
+    metrics.scores.length > 0 ? metrics.scores.reduce((sum, row) => sum + row.score, 0) / metrics.scores.length : null;
 
   const tiles: { name: string; value: string }[] = [
     { name: "evals", value: String(stats.evaluations) },
@@ -53,9 +48,7 @@ export function ScoresCard() {
         </span>
         <div className="card-headings">
           <div className="card-title">Scores{run ? ` · ${runLabel(run)}` : ""}</div>
-          <div className="card-sub">
-            {activeRunId == null ? "no scored runs yet" : "live scorer results"}
-          </div>
+          <div className="card-sub">{activeRunId == null ? "no scored runs yet" : "live scorer results"}</div>
         </div>
         <div className="card-head-right">
           {meanScore != null ? (
@@ -64,11 +57,7 @@ export function ScoresCard() {
               {meanScore.toFixed(2)}
             </span>
           ) : null}
-          <button
-            className="card-link"
-            type="button"
-            onClick={() => openSurface({ kind: "scores" })}
-          >
+          <button className="card-link" type="button" onClick={() => openSurface({ kind: "scores" })}>
             Open scores ›
           </button>
         </div>

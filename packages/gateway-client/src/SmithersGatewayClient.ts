@@ -107,7 +107,8 @@ function toWebSocketUrl(baseUrl: string, wsPath = "/") {
   return url.toString();
 }
 
-const unavailableFetch = (() => Promise.reject(new Error("fetch is not available in this environment."))) as unknown as typeof fetch;
+const unavailableFetch = (() =>
+  Promise.reject(new Error("fetch is not available in this environment."))) as unknown as typeof fetch;
 
 function headersFromOptions(options: Pick<SmithersGatewayClientOptions, "headers" | "token">) {
   const headers = new Headers(options.headers);
@@ -148,9 +149,7 @@ function runEventStreamError(payload: unknown) {
   return new GatewayRpcError({
     method: "streamRunEvents",
     code: typeof error?.code === "string" ? error.code : "RUN_EVENT_STREAM_ERROR",
-    message: typeof error?.message === "string"
-      ? error.message
-      : "Gateway ended the run event stream.",
+    message: typeof error?.message === "string" ? error.message : "Gateway ended the run event stream.",
   });
 }
 
@@ -238,11 +237,8 @@ export class SmithersGatewayClient {
     this.baseUrl = normalizeBaseUrl(options.baseUrl ?? defaultBaseUrl());
     this.token = options.token;
     this.headers = options.headers;
-    this.fetchImpl = options.fetch ?? (
-      typeof globalThis.fetch === "function"
-        ? globalThis.fetch.bind(globalThis)
-        : unavailableFetch
-    );
+    this.fetchImpl =
+      options.fetch ?? (typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : unavailableFetch);
     this.WebSocketImpl = options.WebSocket ?? globalThis.WebSocket;
     this.client = {
       id: options.client?.id ?? "smithers-gateway-client",
@@ -288,7 +284,9 @@ export class SmithersGatewayClient {
    */
   private link(signal: AbortSignal | undefined) {
     const controller = new RuntimeAbortController();
-    const forward = () => { controller.abort(); };
+    const forward = () => {
+      controller.abort();
+    };
     this.links.add(controller);
     if (this.isClosed || signal?.aborted) {
       controller.abort();
@@ -568,9 +566,8 @@ export class SmithersGatewayClient {
               attempt = 0;
               resetBackoff = true;
             }
-            const seq = isObject(frame.payload) && typeof frame.payload.seq === "number"
-              ? frame.payload.seq
-              : undefined;
+            const seq =
+              isObject(frame.payload) && typeof frame.payload.seq === "number" ? frame.payload.seq : undefined;
             if (typeof seq === "number") {
               lastSeq = typeof lastSeq === "number" ? Math.max(lastSeq, seq) : seq;
             }
@@ -660,12 +657,24 @@ export class SmithersGatewayClient {
     return this.rpc("submitSignal", params);
   }
 
-  createBrowserSession(params: GatewayRpcParams<"createBrowserSession">) { return this.rpc("createBrowserSession", params); }
-  browserAct(params: GatewayRpcParams<"browserAct">) { return this.rpc("browserAct", params); }
-  browserContext(params: GatewayRpcParams<"browserContext">) { return this.rpc("browserContext", params); }
-  browserPick(params: GatewayRpcParams<"browserPick">) { return this.rpc("browserPick", params); }
-  closeBrowserSession(params: GatewayRpcParams<"closeBrowserSession">) { return this.rpc("closeBrowserSession", params); }
-  listBrowserSessions(params: GatewayRpcParams<"listBrowserSessions"> = {}) { return this.rpc("listBrowserSessions", params); }
+  createBrowserSession(params: GatewayRpcParams<"createBrowserSession">) {
+    return this.rpc("createBrowserSession", params);
+  }
+  browserAct(params: GatewayRpcParams<"browserAct">) {
+    return this.rpc("browserAct", params);
+  }
+  browserContext(params: GatewayRpcParams<"browserContext">) {
+    return this.rpc("browserContext", params);
+  }
+  browserPick(params: GatewayRpcParams<"browserPick">) {
+    return this.rpc("browserPick", params);
+  }
+  closeBrowserSession(params: GatewayRpcParams<"closeBrowserSession">) {
+    return this.rpc("closeBrowserSession", params);
+  }
+  listBrowserSessions(params: GatewayRpcParams<"listBrowserSessions"> = {}) {
+    return this.rpc("listBrowserSessions", params);
+  }
 
   getRun(params: GatewayRpcParams<"getRun">) {
     return this.rpc("getRun", params);

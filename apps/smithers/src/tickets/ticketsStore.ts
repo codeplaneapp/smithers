@@ -1,12 +1,7 @@
 import { create } from "zustand";
 import { useChatStore } from "../chat/chatStore";
 import { useNotificationsStore } from "../notifications/notificationsStore";
-import {
-  createTicket,
-  deleteTicket,
-  updateTicket,
-  type Ticket,
-} from "./tickets";
+import { createTicket, deleteTicket, updateTicket, type Ticket } from "./tickets";
 
 /**
  * The tickets store: the LIVE ticket list (pushed in by `TicketsBridge` from the

@@ -23,7 +23,10 @@ function toHaveExecuted(received, ids) {
   const pass = missing.length === 0;
   return {
     pass,
-    message: () => pass ? `Expected simulation not to have executed ${formatValue(ids)}, but actual executed nodes were ${formatValue(executed)}.` : `Expected simulation to have executed ${formatValue(ids)}, but missing ids were ${formatValue(missing)}. Actual executed nodes were ${formatValue(executed)}.`
+    message: () =>
+      pass
+        ? `Expected simulation not to have executed ${formatValue(ids)}, but actual executed nodes were ${formatValue(executed)}.`
+        : `Expected simulation to have executed ${formatValue(ids)}, but missing ids were ${formatValue(missing)}. Actual executed nodes were ${formatValue(executed)}.`,
   };
 }
 function toHaveExecutedInOrder(received, ids) {
@@ -31,20 +34,21 @@ function toHaveExecutedInOrder(received, ids) {
   const pass = hasSubsequence(executed, ids);
   return {
     pass,
-    message: () => pass ? `Expected simulation not to have executed in order ${formatValue(ids)}, but actual executed order was ${formatValue(executed)}.` : `Expected simulation to have executed in order ${formatValue(ids)}, but actual executed order was ${formatValue(executed)}.`
+    message: () =>
+      pass
+        ? `Expected simulation not to have executed in order ${formatValue(ids)}, but actual executed order was ${formatValue(executed)}.`
+        : `Expected simulation to have executed in order ${formatValue(ids)}, but actual executed order was ${formatValue(executed)}.`,
   };
 }
 function toHaveFinished(received) {
   const pass = received.status === "finished";
   return {
     pass,
-    message: () => pass ? 'Expected simulation not to have finished, but status was "finished".' : `Expected simulation to have finished, but status was ${formatValue(received.status)}.`
+    message: () =>
+      pass
+        ? 'Expected simulation not to have finished, but status was "finished".'
+        : `Expected simulation to have finished, but status was ${formatValue(received.status)}.`,
   };
 }
 var simMatchers = { toHaveExecuted, toHaveExecutedInOrder, toHaveFinished };
-export {
-  simMatchers,
-  toHaveExecuted,
-  toHaveExecutedInOrder,
-  toHaveFinished
-};
+export { simMatchers, toHaveExecuted, toHaveExecutedInOrder, toHaveFinished };

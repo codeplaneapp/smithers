@@ -19,13 +19,15 @@ const usageReport = {
   provider: "codex",
   authMode: "subscription",
   source: "oauth",
-  windows: [{
-    id: "5h",
-    label: "5-hour session",
-    unit: "percent",
-    usedPercent: 42,
-    resetsAt: "2026-07-22T20:00:00.000Z",
-  }],
+  windows: [
+    {
+      id: "5h",
+      label: "5-hour session",
+      unit: "percent",
+      usedPercent: 42,
+      resetsAt: "2026-07-22T20:00:00.000Z",
+    },
+  ],
   planType: "pro",
   credits: { hasCredits: true, unlimited: false, balance: "12.50" },
   fetchedAt: "2026-07-22T15:00:00.000Z",
@@ -111,14 +113,10 @@ function createSlowWorkflow(api: Awaited<ReturnType<typeof createApi>>) {
     React.createElement(
       api.Workflow,
       { name: "domain-api-slow" },
-      React.createElement(
-        api.Task,
-        { id: "slow", output: api.outputs.result },
-        async () => {
-          await sleep(5_000);
-          return { value: 1 };
-        },
-      ),
+      React.createElement(api.Task, { id: "slow", output: api.outputs.result }, async () => {
+        await sleep(5_000);
+        return { value: 1 };
+      }),
     ),
   );
 }
@@ -268,7 +266,11 @@ async function readSseUntil(baseUrl: string, predicate: (event: { event: string;
       const parts = buffer.split("\n\n");
       buffer = parts.pop() ?? "";
       for (const part of parts) {
-        const event = part.split("\n").find((line) => line.startsWith("event: "))?.slice(7) ?? "message";
+        const event =
+          part
+            .split("\n")
+            .find((line) => line.startsWith("event: "))
+            ?.slice(7) ?? "message";
         const dataLine = part.split("\n").find((line) => line.startsWith("data: "));
         const data = dataLine ? JSON.parse(dataLine.slice(6)) : null;
         const parsed = { event, data };
@@ -280,162 +282,190 @@ async function readSseUntil(baseUrl: string, predicate: (event: { event: string;
   }
 }
 
-const backends: Array<"sqlite" | "pglite" | "postgres"> = PG_URL ? ["sqlite", "pglite", "postgres"] : ["sqlite", "pglite"];
+const backends: Array<"sqlite" | "pglite" | "postgres"> = PG_URL
+  ? ["sqlite", "pglite", "postgres"]
+  : ["sqlite", "pglite"];
 
 for (const backend of backends) {
   describe(`Gateway REST domain API (${backend})`, () => {
-    test.skipIf(backend === "pglite" && process.platform === "win32")("read routes delegate to the RPC internals", async () => {
-      const { gateway, baseUrl } = await bootGateway(backend);
-      (gateway as any).listUsageReports = async () => [usageReport];
-      const launched = await launchRun(baseUrl, "value", { value: 7 });
-      const runId = launched.data.runId;
-      await waitForRun(baseUrl, runId, "finished");
+    test.skipIf(backend === "pglite" && process.platform === "win32")(
+      "read routes delegate to the RPC internals",
+      async () => {
+        const { gateway, baseUrl } = await bootGateway(backend);
+        (gateway as any).listUsageReports = async () => [usageReport];
+        const launched = await launchRun(baseUrl, "value", { value: 7 });
+        const runId = launched.data.runId;
+        await waitForRun(baseUrl, runId, "finished");
 
-      const pairs: Array<[string, string, string, Record<string, unknown>]> = [
-        ["GET", "/v1/api/runs", "listRuns", {}],
-        ["GET", `/v1/api/runs/${runId}`, "getRun", { runId }],
-        ["GET", `/v1/api/runs/${runId}/tree`, "getDevToolsSnapshot", { runId }],
-        ["GET", `/v1/api/runs/${runId}/token-usage`, "listRunTokenUsage", { runId }],
-        ["GET", "/v1/api/workflows", "listWorkflows", {}],
-        ["GET", "/v1/api/approvals", "listApprovals", {}],
-        ["GET", "/v1/api/docs", "listDocs", {}],
-        ["GET", "/v1/api/prompts", "listPrompts", {}],
-        ["GET", "/v1/api/tickets", "listTickets", {}],
-        ["GET", "/v1/api/memory-facts", "listMemoryFacts", {}],
-        ["GET", "/v1/api/crons", "cronList", {}],
-        ["GET", "/v1/api/accounts", "listAccounts", {}],
-        ["GET", "/v1/api/usage", "listUsageReports", {}],
-        ["GET", "/v1/api/schema-signature", "getSchemaSignature", {}],
-        ["GET", `/v1/api/scores?runId=${runId}`, "listScores", { runId }],
-        ["GET", `/v1/api/nodes/${runId}/task1/output`, "getNodeOutput", { runId, nodeId: "task1", iteration: 0 }],
-      ];
+        const pairs: Array<[string, string, string, Record<string, unknown>]> = [
+          ["GET", "/v1/api/runs", "listRuns", {}],
+          ["GET", `/v1/api/runs/${runId}`, "getRun", { runId }],
+          ["GET", `/v1/api/runs/${runId}/tree`, "getDevToolsSnapshot", { runId }],
+          ["GET", `/v1/api/runs/${runId}/token-usage`, "listRunTokenUsage", { runId }],
+          ["GET", "/v1/api/workflows", "listWorkflows", {}],
+          ["GET", "/v1/api/approvals", "listApprovals", {}],
+          ["GET", "/v1/api/docs", "listDocs", {}],
+          ["GET", "/v1/api/prompts", "listPrompts", {}],
+          ["GET", "/v1/api/tickets", "listTickets", {}],
+          ["GET", "/v1/api/memory-facts", "listMemoryFacts", {}],
+          ["GET", "/v1/api/crons", "cronList", {}],
+          ["GET", "/v1/api/accounts", "listAccounts", {}],
+          ["GET", "/v1/api/usage", "listUsageReports", {}],
+          ["GET", "/v1/api/schema-signature", "getSchemaSignature", {}],
+          ["GET", `/v1/api/scores?runId=${runId}`, "listScores", { runId }],
+          ["GET", `/v1/api/nodes/${runId}/task1/output`, "getNodeOutput", { runId, nodeId: "task1", iteration: 0 }],
+        ];
 
-      for (const [httpMethod, path, rpcMethod, params] of pairs) {
-        const rest = await apiRequest(baseUrl, httpMethod, path);
-        const rpc = await rpcRequest(baseUrl, rpcMethod, params);
-        expect(rest.response.status, path).toBe(rpc.response.status);
-        expect(rest.json.ok, path).toBe(rpc.json.ok);
-        if (rest.json.ok) {
-          expect(stripVolatile(rest.json.data), path).toEqual(stripVolatile(rpc.json.payload));
-          if (path === "/v1/api/usage") {
-            expect(rest.json.data).toEqual([usageReport]);
+        for (const [httpMethod, path, rpcMethod, params] of pairs) {
+          const rest = await apiRequest(baseUrl, httpMethod, path);
+          const rpc = await rpcRequest(baseUrl, rpcMethod, params);
+          expect(rest.response.status, path).toBe(rpc.response.status);
+          expect(rest.json.ok, path).toBe(rpc.json.ok);
+          if (rest.json.ok) {
+            expect(stripVolatile(rest.json.data), path).toEqual(stripVolatile(rpc.json.payload));
+            if (path === "/v1/api/usage") {
+              expect(rest.json.data).toEqual([usageReport]);
+            }
           }
         }
-      }
 
-      const events = await apiRequest(baseUrl, "GET", `/v1/api/events?runId=${runId}&limit=20`);
-      expect(events.response.status).toBe(200);
-      expect(events.json.ok).toBe(true);
-      expect(Array.isArray(events.json.data)).toBe(true);
-    }, 60_000);
+        const events = await apiRequest(baseUrl, "GET", `/v1/api/events?runId=${runId}&limit=20`);
+        expect(events.response.status).toBe(200);
+        expect(events.json.ok).toBe(true);
+        expect(Array.isArray(events.json.data)).toBe(true);
+      },
+      60_000,
+    );
 
-    test.skipIf(backend === "pglite" && process.platform === "win32")("listRuns filters by workflow over the REST surface", async () => {
-      const { baseUrl } = await bootGateway(backend);
-      const a = await launchRun(baseUrl, "value", { value: 1 });
-      const b = await launchRun(baseUrl, "value", { value: 2 });
-      await waitForRun(baseUrl, a.data.runId, "finished");
-      await waitForRun(baseUrl, b.data.runId, "finished");
-      // A run of a different workflow that the ?workflow=value filter must drop.
-      const slow = await launchRun(baseUrl, "slow");
-      const unfilteredRows = await waitForListedRun(baseUrl, slow.data.runId);
+    test.skipIf(backend === "pglite" && process.platform === "win32")(
+      "listRuns filters by workflow over the REST surface",
+      async () => {
+        const { baseUrl } = await bootGateway(backend);
+        const a = await launchRun(baseUrl, "value", { value: 1 });
+        const b = await launchRun(baseUrl, "value", { value: 2 });
+        await waitForRun(baseUrl, a.data.runId, "finished");
+        await waitForRun(baseUrl, b.data.runId, "finished");
+        // A run of a different workflow that the ?workflow=value filter must drop.
+        const slow = await launchRun(baseUrl, "slow");
+        const unfilteredRows = await waitForListedRun(baseUrl, slow.data.runId);
 
-      const filtered = await apiRequest(baseUrl, "GET", "/v1/api/runs?workflow=value&limit=50");
-      expect(filtered.response.status).toBe(200);
-      expect(filtered.json.ok).toBe(true);
-      const rows = filtered.json.data as Array<{ runId: string; workflowKey: string }>;
-      expect(rows.length).toBeGreaterThanOrEqual(2);
-      expect(rows.every((row) => row.workflowKey === "value")).toBe(true);
-      expect(rows.some((row) => row.runId === slow.data.runId)).toBe(false);
+        const filtered = await apiRequest(baseUrl, "GET", "/v1/api/runs?workflow=value&limit=50");
+        expect(filtered.response.status).toBe(200);
+        expect(filtered.json.ok).toBe(true);
+        const rows = filtered.json.data as Array<{ runId: string; workflowKey: string }>;
+        expect(rows.length).toBeGreaterThanOrEqual(2);
+        expect(rows.every((row) => row.workflowKey === "value")).toBe(true);
+        expect(rows.some((row) => row.runId === slow.data.runId)).toBe(false);
 
-      // Without the filter the slow run is present, proving the filter (not an
-      // empty DB) is what excluded it above.
-      const allIds = unfilteredRows.map((row) => row.runId);
-      expect(allIds).toContain(slow.data.runId);
+        // Without the filter the slow run is present, proving the filter (not an
+        // empty DB) is what excluded it above.
+        const allIds = unfilteredRows.map((row) => row.runId);
+        expect(allIds).toContain(slow.data.runId);
 
-      await apiRequest(baseUrl, "POST", `/v1/api/runs/${slow.data.runId}/cancel`, {});
-    }, 60_000);
+        await apiRequest(baseUrl, "POST", `/v1/api/runs/${slow.data.runId}/cancel`, {});
+      },
+      60_000,
+    );
 
-    test.skipIf(backend === "pglite" && process.platform === "win32")("listRuns REST offset matches the RPC page", async () => {
-      const { baseUrl } = await bootGateway(backend);
-      const first = await launchRun(baseUrl, "value", { value: 1 });
-      const second = await launchRun(baseUrl, "value", { value: 2 });
-      await waitForRun(baseUrl, first.data.runId, "finished");
-      await waitForRun(baseUrl, second.data.runId, "finished");
+    test.skipIf(backend === "pglite" && process.platform === "win32")(
+      "listRuns REST offset matches the RPC page",
+      async () => {
+        const { baseUrl } = await bootGateway(backend);
+        const first = await launchRun(baseUrl, "value", { value: 1 });
+        const second = await launchRun(baseUrl, "value", { value: 2 });
+        await waitForRun(baseUrl, first.data.runId, "finished");
+        await waitForRun(baseUrl, second.data.runId, "finished");
 
-      const unpaged = await apiRequest(baseUrl, "GET", "/v1/api/runs?limit=2");
-      const rest = await apiRequest(baseUrl, "GET", "/v1/api/runs?limit=1&offset=1");
-      const rpc = await rpcRequest(baseUrl, "listRuns", { filter: { limit: 1, offset: 1 } });
-      expect(rest.response.status).toBe(200);
-      expect(rest.json.ok).toBe(true);
-      expect(rpc.response.status).toBe(200);
-      expect(rpc.json.ok).toBe(true);
-      expect((rest.json.data as Array<{ runId: string }>).map((row) => row.runId))
-        .toEqual((rpc.json.payload as Array<{ runId: string }>).map((row) => row.runId));
-      expect((rest.json.data as Array<{ runId: string }>)[0]?.runId)
-        .toBe((unpaged.json.data as Array<{ runId: string }>)[1]?.runId);
-    }, 60_000);
+        const unpaged = await apiRequest(baseUrl, "GET", "/v1/api/runs?limit=2");
+        const rest = await apiRequest(baseUrl, "GET", "/v1/api/runs?limit=1&offset=1");
+        const rpc = await rpcRequest(baseUrl, "listRuns", { filter: { limit: 1, offset: 1 } });
+        expect(rest.response.status).toBe(200);
+        expect(rest.json.ok).toBe(true);
+        expect(rpc.response.status).toBe(200);
+        expect(rpc.json.ok).toBe(true);
+        expect((rest.json.data as Array<{ runId: string }>).map((row) => row.runId)).toEqual(
+          (rpc.json.payload as Array<{ runId: string }>).map((row) => row.runId),
+        );
+        expect((rest.json.data as Array<{ runId: string }>)[0]?.runId).toBe(
+          (unpaged.json.data as Array<{ runId: string }>)[1]?.runId,
+        );
+      },
+      60_000,
+    );
 
-    test.skipIf(backend === "pglite" && process.platform === "win32")("write routes return seq locally and invalidate SSE", async () => {
-      const { baseUrl } = await bootGateway(backend);
-      const eventPromise = readSseUntil(baseUrl, (event) =>
-        event.event === "change" && Array.isArray(event.data?.collections) && event.data.collections.includes("runs"),
-      );
-      const launched = await launchRun(baseUrl, "value", { value: 3 });
-      if (backend === "postgres") {
-        expect(launched.txid).toMatch(/^\d+$/);
-      } else {
-        expect(launched.seq).toBeGreaterThan(0);
-        expect(launched.txid).toBeUndefined();
-      }
-      await expect(eventPromise).resolves.toMatchObject({ event: "change" });
+    test.skipIf(backend === "pglite" && process.platform === "win32")(
+      "write routes return seq locally and invalidate SSE",
+      async () => {
+        const { baseUrl } = await bootGateway(backend);
+        const eventPromise = readSseUntil(
+          baseUrl,
+          (event) =>
+            event.event === "change" &&
+            Array.isArray(event.data?.collections) &&
+            event.data.collections.includes("runs"),
+        );
+        const launched = await launchRun(baseUrl, "value", { value: 3 });
+        if (backend === "postgres") {
+          expect(launched.txid).toMatch(/^\d+$/);
+        } else {
+          expect(launched.seq).toBeGreaterThan(0);
+          expect(launched.txid).toBeUndefined();
+        }
+        await expect(eventPromise).resolves.toMatchObject({ event: "change" });
 
-      const runId = launched.data.runId;
-      await waitForRun(baseUrl, runId, "finished");
-      const signal = await apiRequest(baseUrl, "POST", "/v1/api/signals", {
-        runId,
-        signalName: "release",
-        payload: { ok: true },
-      });
-      expect(signal.response.status).toBe(200);
-      expect(signal.json.ok).toBe(true);
-      expect(backend === "postgres" ? signal.json.txid : signal.json.seq).toBeDefined();
-
-      const resumed = await apiRequest(baseUrl, "POST", `/v1/api/runs/${runId}/resume`, {});
-      expect(resumed.response.status).toBe(200);
-      expect(resumed.json.ok).toBe(true);
-      expect(backend === "postgres" ? resumed.json.txid : resumed.json.seq).toBeDefined();
-
-      const slow = await launchRun(baseUrl, "slow");
-      const cancelled = await apiRequest(baseUrl, "POST", `/v1/api/runs/${slow.data.runId}/cancel`, {});
-      expect(cancelled.response.status).toBe(200);
-      expect(cancelled.json.ok).toBe(true);
-      expect(backend === "postgres" ? cancelled.json.txid : cancelled.json.seq).toBeDefined();
-    }, 60_000);
-
-    test.skipIf(backend === "pglite" && process.platform === "win32")("approval writes use the REST route and return the mutation ack", async () => {
-      const { baseUrl } = await bootGateway(backend);
-      const launched = await launchRun(baseUrl, "approval");
-      const runId = launched.data.runId;
-      await waitForRun(baseUrl, runId, "waiting-approval");
-      await waitForApproval(baseUrl, runId);
-      const decided = await apiRequest(
-        baseUrl,
-        "POST",
-        `/v1/api/approvals/${encodeURIComponent(`${runId}:pick-plan:0`)}`,
-        {
+        const runId = launched.data.runId;
+        await waitForRun(baseUrl, runId, "finished");
+        const signal = await apiRequest(baseUrl, "POST", "/v1/api/signals", {
           runId,
-          nodeId: "pick-plan",
-          iteration: 0,
-          approved: true,
-          decision: { selected: "balanced", notes: null },
-        },
-        "approver-token",
-      );
-      expect(decided.response.status).toBe(200);
-      expect(decided.json.ok).toBe(true);
-      expect(backend === "postgres" ? decided.json.txid : decided.json.seq).toBeDefined();
-      await waitForRun(baseUrl, runId, "finished");
-    }, 60_000);
+          signalName: "release",
+          payload: { ok: true },
+        });
+        expect(signal.response.status).toBe(200);
+        expect(signal.json.ok).toBe(true);
+        expect(backend === "postgres" ? signal.json.txid : signal.json.seq).toBeDefined();
+
+        const resumed = await apiRequest(baseUrl, "POST", `/v1/api/runs/${runId}/resume`, {});
+        expect(resumed.response.status).toBe(200);
+        expect(resumed.json.ok).toBe(true);
+        expect(backend === "postgres" ? resumed.json.txid : resumed.json.seq).toBeDefined();
+
+        const slow = await launchRun(baseUrl, "slow");
+        const cancelled = await apiRequest(baseUrl, "POST", `/v1/api/runs/${slow.data.runId}/cancel`, {});
+        expect(cancelled.response.status).toBe(200);
+        expect(cancelled.json.ok).toBe(true);
+        expect(backend === "postgres" ? cancelled.json.txid : cancelled.json.seq).toBeDefined();
+      },
+      60_000,
+    );
+
+    test.skipIf(backend === "pglite" && process.platform === "win32")(
+      "approval writes use the REST route and return the mutation ack",
+      async () => {
+        const { baseUrl } = await bootGateway(backend);
+        const launched = await launchRun(baseUrl, "approval");
+        const runId = launched.data.runId;
+        await waitForRun(baseUrl, runId, "waiting-approval");
+        await waitForApproval(baseUrl, runId);
+        const decided = await apiRequest(
+          baseUrl,
+          "POST",
+          `/v1/api/approvals/${encodeURIComponent(`${runId}:pick-plan:0`)}`,
+          {
+            runId,
+            nodeId: "pick-plan",
+            iteration: 0,
+            approved: true,
+            decision: { selected: "balanced", notes: null },
+          },
+          "approver-token",
+        );
+        expect(decided.response.status).toBe(200);
+        expect(decided.json.ok).toBe(true);
+        expect(backend === "postgres" ? decided.json.txid : decided.json.seq).toBeDefined();
+        await waitForRun(baseUrl, runId, "finished");
+      },
+      60_000,
+    );
   });
 }
 
@@ -464,13 +494,18 @@ describe("Gateway usage reports", () => {
     const res = {
       statusCode: 0,
       setHeader() {},
-      end(value: string) { responseBody = value; },
+      end(value: string) {
+        responseBody = value;
+      },
     };
-    await gateway.handleHttpApi({
-      method: "GET",
-      url: "/v1/api/usage",
-      headers: { host: "127.0.0.1" },
-    } as any, res as any);
+    await gateway.handleHttpApi(
+      {
+        method: "GET",
+        url: "/v1/api/usage",
+        headers: { host: "127.0.0.1" },
+      } as any,
+      res as any,
+    );
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(responseBody)).toEqual({ ok: true, data: [usageReport] });
   });
@@ -496,11 +531,7 @@ describe("Gateway usage reports", () => {
     gateway.usageReportsCache!.cachedAtMs -= 60_001;
     await gateway.listUsageReports();
     await gateway.listUsageReports({ fresh: true });
-    expect(calls.map((call) => call.options)).toEqual([
-      { fresh: false },
-      { fresh: false },
-      { fresh: true },
-    ]);
+    expect(calls.map((call) => call.options)).toEqual([{ fresh: false }, { fresh: false }, { fresh: true }]);
   });
 
   test("returns a synthetic unavailable report when the account registry is corrupt", async () => {
@@ -514,17 +545,19 @@ describe("Gateway usage reports", () => {
       return [usageReport];
     };
 
-    await expect(gateway.listUsageReports()).resolves.toEqual([{
-      accountLabel: "accounts",
-      provider: "codex",
-      authMode: "subscription",
-      source: "none",
-      windows: [],
-      fetchedAt: expect.any(String),
-      stale: false,
-      estimate: false,
-      error: "ACCOUNTS_FILE_INVALID: malformed JSON",
-    }]);
+    await expect(gateway.listUsageReports()).resolves.toEqual([
+      {
+        accountLabel: "accounts",
+        provider: "codex",
+        authMode: "subscription",
+        source: "none",
+        windows: [],
+        fetchedAt: expect.any(String),
+        stale: false,
+        estimate: false,
+        error: "ACCOUNTS_FILE_INVALID: malformed JSON",
+      },
+    ]);
     expect(fetchCalls).toBe(0);
   });
 
@@ -603,13 +636,18 @@ describe("Gateway run token usage", () => {
     const res = {
       statusCode: 0,
       setHeader() {},
-      end(value: string) { responseBody = value; },
+      end(value: string) {
+        responseBody = value;
+      },
     };
-    await gateway.handleHttpApi({
-      method: "GET",
-      url: `/v1/api/runs/${encodeURIComponent(runId)}/token-usage`,
-      headers: { host: "127.0.0.1" },
-    } as any, res as any);
+    await gateway.handleHttpApi(
+      {
+        method: "GET",
+        url: `/v1/api/runs/${encodeURIComponent(runId)}/token-usage`,
+        headers: { host: "127.0.0.1" },
+      } as any,
+      res as any,
+    );
     const rest = JSON.parse(responseBody);
     expect(res.statusCode).toBe(200);
     expect(rest.data).toEqual((rpc as any).payload);
@@ -647,9 +685,12 @@ describe("Gateway run token usage", () => {
   }, 60_000);
 });
 
-test.skipIf(Boolean(PG_URL))("Gateway REST domain API postgres suite skipped because SMITHERS_TEST_PG_URL is not set", () => {
-  expect(PG_URL).toBeUndefined();
-});
+test.skipIf(Boolean(PG_URL))(
+  "Gateway REST domain API postgres suite skipped because SMITHERS_TEST_PG_URL is not set",
+  () => {
+    expect(PG_URL).toBeUndefined();
+  },
+);
 
 describe("Gateway REST domain API auth and SSE bounds", () => {
   test("auth rejects missing and insufficient scope, and trusted-proxy headers are honored", async () => {
@@ -657,7 +698,13 @@ describe("Gateway REST domain API auth and SSE bounds", () => {
     const missing = await fetch(`${baseUrl}/v1/api/runs`);
     expect(missing.status).toBe(401);
 
-    const insufficient = await apiRequest(baseUrl, "POST", "/v1/api/runs", { workflow: "value", input: {} }, "reader-token");
+    const insufficient = await apiRequest(
+      baseUrl,
+      "POST",
+      "/v1/api/runs",
+      { workflow: "value", input: {} },
+      "reader-token",
+    );
     expect(insufficient.response.status).toBe(403);
     expect(insufficient.json.error.requiredScope).toBe("run:write");
 
@@ -696,10 +743,7 @@ describe("Gateway REST domain API auth and SSE bounds", () => {
       for (;;) {
         if (lastChangeAt > 0 && Date.now() - lastChangeAt > quietMs) return frames;
         if (Date.now() - started > 2_000) throw new Error("Timed out collecting coalesced SSE frames");
-        const read = await Promise.race([
-          pendingRead,
-          sleep(25).then(() => null),
-        ]);
+        const read = await Promise.race([pendingRead, sleep(25).then(() => null)]);
         if (!read) continue;
         pendingRead = reader.read();
         if (read.done) return frames;
@@ -707,7 +751,10 @@ describe("Gateway REST domain API auth and SSE bounds", () => {
         const parts = buffer.split("\n\n");
         buffer = parts.pop() ?? "";
         for (const part of parts) {
-          const event = part.split("\n").find((line) => line.startsWith("event: "))?.slice(7);
+          const event = part
+            .split("\n")
+            .find((line) => line.startsWith("event: "))
+            ?.slice(7);
           const dataLine = part.split("\n").find((line) => line.startsWith("data: "));
           if (event === "change" && dataLine) {
             frames.push(JSON.parse(dataLine.slice(6)));

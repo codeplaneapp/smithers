@@ -347,9 +347,7 @@ export function ContextContentFooter({ className, children, ...props }: Componen
   return (
     <div data-slot="context-content-footer" className={cn("sui-ctx-footer", className)} {...props}>
       {children ??
-        (usage.costUsd !== undefined ? (
-          <span className="sui-ctx-cost">Cost {formatCost(usage.costUsd)}</span>
-        ) : null)}
+        (usage.costUsd !== undefined ? <span className="sui-ctx-cost">Cost {formatCost(usage.costUsd)}</span> : null)}
     </div>
   );
 }
@@ -374,7 +372,13 @@ export function ContextInputUsage({ className, children, ...props }: ComponentPr
   useInjectLaneCss(AGENT_IDENTITY_CONTEXT_CSS_ID, agentsCss);
   const { usage } = useContextUsage("ContextInputUsage");
   return (
-    <UsageRow data-slot="context-input-usage" label="Input" value={children ?? tokenValue(usage.inputTokens)} className={className} {...props} />
+    <UsageRow
+      data-slot="context-input-usage"
+      label="Input"
+      value={children ?? tokenValue(usage.inputTokens)}
+      className={className}
+      {...props}
+    />
   );
 }
 
@@ -383,7 +387,13 @@ export function ContextOutputUsage({ className, children, ...props }: ComponentP
   useInjectLaneCss(AGENT_IDENTITY_CONTEXT_CSS_ID, agentsCss);
   const { usage } = useContextUsage("ContextOutputUsage");
   return (
-    <UsageRow data-slot="context-output-usage" label="Output" value={children ?? tokenValue(usage.outputTokens)} className={className} {...props} />
+    <UsageRow
+      data-slot="context-output-usage"
+      label="Output"
+      value={children ?? tokenValue(usage.outputTokens)}
+      className={className}
+      {...props}
+    />
   );
 }
 
@@ -392,7 +402,13 @@ export function ContextReasoningUsage({ className, children, ...props }: Compone
   useInjectLaneCss(AGENT_IDENTITY_CONTEXT_CSS_ID, agentsCss);
   const { usage } = useContextUsage("ContextReasoningUsage");
   return (
-    <UsageRow data-slot="context-reasoning-usage" label="Reasoning" value={children ?? tokenValue(usage.reasoningTokens)} className={className} {...props} />
+    <UsageRow
+      data-slot="context-reasoning-usage"
+      label="Reasoning"
+      value={children ?? tokenValue(usage.reasoningTokens)}
+      className={className}
+      {...props}
+    />
   );
 }
 
@@ -401,6 +417,12 @@ export function ContextCacheUsage({ className, children, ...props }: ComponentPr
   useInjectLaneCss(AGENT_IDENTITY_CONTEXT_CSS_ID, agentsCss);
   const { usage } = useContextUsage("ContextCacheUsage");
   return (
-    <UsageRow data-slot="context-cache-usage" label="Cache" value={children ?? tokenValue(usage.cachedInputTokens)} className={className} {...props} />
+    <UsageRow
+      data-slot="context-cache-usage"
+      label="Cache"
+      value={children ?? tokenValue(usage.cachedInputTokens)}
+      className={className}
+      {...props}
+    />
   );
 }

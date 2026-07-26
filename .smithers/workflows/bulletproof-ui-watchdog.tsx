@@ -49,7 +49,9 @@ function healthPrompt(watchedRunId: string, previous: RawRow | undefined): strin
     `1. \`smithers status ${watchedRunId}\` and \`smithers inspect ${watchedRunId} --json\` (parse run.status; note failed/stuck nodes and retry counts).`,
     `2. \`smithers why ${watchedRunId}\` if the run is not actively progressing.`,
     "3. Stall detection: compare against the previous check (below). If the same node has been the frontier for 2+ consecutive checks with no new events, that is a stall.",
-    "4. Quota: look for waiting-quota / rate-limit banners in recent events (`smithers events " + watchedRunId + " | tail -40`).",
+    "4. Quota: look for waiting-quota / rate-limit banners in recent events (`smithers events " +
+      watchedRunId +
+      " | tail -40`).",
     "5. Host health: `df -h .` (flag >90% used), `uptime` load average (flag if load avg per core is extreme), and `ps aux | grep -c 'smithers-e2e'` style orphan buildup.",
     `Previous check:\n${JSON.stringify(previous ?? null, null, 2)}`,
     "Output: watchedStatus = the run's reported status string; watchedTerminal=true only when status is finished/failed/cancelled; healthy=false when you found a stall, failure, quota park, disk, or load problem; list each concrete finding in issues.",
@@ -72,7 +74,14 @@ export default smithers((ctx) => {
       <UI entry="../ui/bulletproof-ui-watchdog.tsx" title="Bulletproof UI Watchdog" />
       <Loop id="bpui-health-loop" until={done} maxIterations={input.maxChecks} onMaxReached="return-last">
         <Sequence>
-          <Task id="bpui-health-check" output={outputs.bpuiHealth} agent={lunaChain} retries={2} timeoutMs={20 * 60_000} heartbeatTimeoutMs={8 * 60_000}>
+          <Task
+            id="bpui-health-check"
+            output={outputs.bpuiHealth}
+            agent={lunaChain}
+            retries={2}
+            timeoutMs={20 * 60_000}
+            heartbeatTimeoutMs={8 * 60_000}
+          >
             {healthPrompt(input.watchedRunId, latest)}
           </Task>
           <Timer id="bpui-health-cooldown" duration={`${input.intervalSeconds}s`} />

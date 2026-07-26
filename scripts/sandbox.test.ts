@@ -32,12 +32,7 @@ function makeWorkDir(): { dir: string; logPath: string } {
   return { dir, logPath: join(dir, "argv.log") };
 }
 
-function runSandbox(
-  args: string[],
-  dir: string,
-  logPath: string,
-  extraEnv: Record<string, string> = {},
-) {
+function runSandbox(args: string[], dir: string, logPath: string, extraEnv: Record<string, string> = {}) {
   return spawnSync(process.execPath, [SANDBOX_SCRIPT, ...args], {
     cwd: dir,
     env: {
@@ -96,10 +91,7 @@ describe("sandbox up", () => {
 describe("sandbox down", () => {
   test("deletes the VM from a valid state file with an exact argument array", () => {
     const { dir, logPath } = makeWorkDir();
-    writeFileSync(
-      join(dir, STATE_FILE),
-      JSON.stringify({ name: "sandbox-20260712010101", zone: "us-central1-a" }),
-    );
+    writeFileSync(join(dir, STATE_FILE), JSON.stringify({ name: "sandbox-20260712010101", zone: "us-central1-a" }));
     const result = runSandbox(["down"], dir, logPath);
     expect(result.status).toBe(0);
 
@@ -111,10 +103,7 @@ describe("sandbox down", () => {
 
   test("propagates a gcloud delete failure and keeps the state file", () => {
     const { dir, logPath } = makeWorkDir();
-    writeFileSync(
-      join(dir, STATE_FILE),
-      JSON.stringify({ name: "sandbox-20260712010101", zone: "us-central1-a" }),
-    );
+    writeFileSync(join(dir, STATE_FILE), JSON.stringify({ name: "sandbox-20260712010101", zone: "us-central1-a" }));
     const result = runSandbox(["down"], dir, logPath, { SANDBOX_TEST_GCLOUD_EXIT: "7" });
     expect(result.status).toBe(7);
     expect(readInvocations(logPath)).toHaveLength(1);

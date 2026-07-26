@@ -2,12 +2,7 @@ import { Effect } from "effect";
 import { z } from "zod";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { defineTool } from "./defineTool.js";
-import {
-  captureProcess,
-  getToolRuntimeOptions,
-  resolveToolPath,
-  truncateToBytes,
-} from "./utils.js";
+import { captureProcess, getToolRuntimeOptions, resolveToolPath, truncateToBytes } from "./utils.js";
 
 const DARWIN_NETWORK_DENY_PROFILE = "(version 1) (allow default) (deny network*)";
 export const BASH_TOOL_MAX_COMMAND_LENGTH = 8_192;
@@ -73,11 +68,10 @@ function assertOptionalStringMaxLength(name, value, maxLength) {
     throw new SmithersError("INVALID_INPUT", `${name} must be a string.`);
   }
   if (value.length > maxLength) {
-    throw new SmithersError(
-      "INVALID_INPUT",
-      `${name} exceeds ${maxLength} characters.`,
-      { maxLength, length: value.length },
-    );
+    throw new SmithersError("INVALID_INPUT", `${name} exceeds ${maxLength} characters.`, {
+      maxLength,
+      length: value.length,
+    });
   }
 }
 
@@ -90,49 +84,35 @@ function validateBashInvocation(cmd, args, opts, ctx) {
     throw new SmithersError("INVALID_INPUT", "args must be an array.");
   }
   if ((args?.length ?? 0) > BASH_TOOL_MAX_ARGS) {
-    throw new SmithersError(
-      "INVALID_INPUT",
-      `args exceeds ${BASH_TOOL_MAX_ARGS} entries.`,
-      { maxLength: BASH_TOOL_MAX_ARGS, length: args.length },
-    );
+    throw new SmithersError("INVALID_INPUT", `args exceeds ${BASH_TOOL_MAX_ARGS} entries.`, {
+      maxLength: BASH_TOOL_MAX_ARGS,
+      length: args.length,
+    });
   }
   for (const [index, arg] of (args ?? []).entries()) {
-    assertOptionalStringMaxLength(
-      `args[${index}]`,
-      arg,
-      BASH_TOOL_MAX_ARG_LENGTH,
-    );
+    assertOptionalStringMaxLength(`args[${index}]`, arg, BASH_TOOL_MAX_ARG_LENGTH);
   }
   const commandLine = [cmd, ...(args ?? [])].join(" ");
-  assertOptionalStringMaxLength(
-    "command",
-    commandLine,
-    BASH_TOOL_MAX_COMMAND_LENGTH,
-  );
+  assertOptionalStringMaxLength("command", commandLine, BASH_TOOL_MAX_COMMAND_LENGTH);
   assertOptionalStringMaxLength("opts.cwd", opts?.cwd, BASH_TOOL_MAX_CWD_LENGTH);
 
   if (!Number.isFinite(ctx.maxOutputBytes) || ctx.maxOutputBytes <= 0) {
     throw new SmithersError("INVALID_INPUT", "maxOutputBytes must be positive.");
   }
   if (ctx.maxOutputBytes > BASH_TOOL_MAX_OUTPUT_BYTES) {
-    throw new SmithersError(
-      "INVALID_INPUT",
-      `maxOutputBytes exceeds ${BASH_TOOL_MAX_OUTPUT_BYTES}.`,
-      {
-        maxOutputBytes: ctx.maxOutputBytes,
-        maxAllowed: BASH_TOOL_MAX_OUTPUT_BYTES,
-      },
-    );
+    throw new SmithersError("INVALID_INPUT", `maxOutputBytes exceeds ${BASH_TOOL_MAX_OUTPUT_BYTES}.`, {
+      maxOutputBytes: ctx.maxOutputBytes,
+      maxAllowed: BASH_TOOL_MAX_OUTPUT_BYTES,
+    });
   }
   if (!Number.isFinite(ctx.timeoutMs) || ctx.timeoutMs <= 0) {
     throw new SmithersError("INVALID_INPUT", "timeoutMs must be positive.");
   }
   if (ctx.timeoutMs > BASH_TOOL_MAX_TIMEOUT_MS) {
-    throw new SmithersError(
-      "INVALID_INPUT",
-      `timeoutMs exceeds ${BASH_TOOL_MAX_TIMEOUT_MS}.`,
-      { timeoutMs: ctx.timeoutMs, maxAllowed: BASH_TOOL_MAX_TIMEOUT_MS },
-    );
+    throw new SmithersError("INVALID_INPUT", `timeoutMs exceeds ${BASH_TOOL_MAX_TIMEOUT_MS}.`, {
+      timeoutMs: ctx.timeoutMs,
+      maxAllowed: BASH_TOOL_MAX_TIMEOUT_MS,
+    });
   }
 }
 
@@ -141,14 +121,7 @@ const GIT_REMOTE_OPS = new Set(["push", "pull", "fetch", "clone", "remote"]);
 const URL_SCHEMES = ["http://", "https://"];
 // git's global options come before the subcommand, and these consume the next
 // argument, so `git -C /repo fetch` still resolves to the `fetch` subcommand.
-const GIT_VALUE_FLAGS = new Set([
-  "-C",
-  "-c",
-  "--exec-path",
-  "--git-dir",
-  "--namespace",
-  "--work-tree",
-]);
+const GIT_VALUE_FLAGS = new Set(["-C", "-c", "--exec-path", "--git-dir", "--namespace", "--work-tree"]);
 // A shell runs its `-c` payload as a script, so the payload's command positions
 // are executables that actually run and are checked too.
 const INTERPRETER_EXECUTABLES = new Set(["sh", "bash", "zsh", "dash", "ash", "ksh"]);
@@ -174,11 +147,8 @@ function commandExecutables(cmd) {
 // message, an echoed doc line) performs no network I/O.
 function isUrlArgument(arg) {
   const equals = arg.indexOf("=");
-  const values =
-    arg.startsWith("-") && equals > 0 ? [arg, arg.slice(equals + 1)] : [arg];
-  return values.some((value) =>
-    URL_SCHEMES.some((scheme) => value.startsWith(scheme)),
-  );
+  const values = arg.startsWith("-") && equals > 0 ? [arg, arg.slice(equals + 1)] : [arg];
+  return values.some((value) => URL_SCHEMES.some((scheme) => value.startsWith(scheme)));
 }
 
 function gitSubcommand(args) {
@@ -223,16 +193,10 @@ function interpreterCommands(executables, argv) {
 
 function assertLocalExecutable(executable, argv) {
   if (NETWORK_EXECUTABLES.has(executable)) {
-    throw new SmithersError(
-      "TOOL_NETWORK_DISABLED",
-      "Network access is disabled for bash tool",
-    );
+    throw new SmithersError("TOOL_NETWORK_DISABLED", "Network access is disabled for bash tool");
   }
   if (executable === "git" && GIT_REMOTE_OPS.has(gitSubcommand(argv))) {
-    throw new SmithersError(
-      "TOOL_GIT_REMOTE_DISABLED",
-      "Git remote operations are disabled for bash tool",
-    );
+    throw new SmithersError("TOOL_GIT_REMOTE_DISABLED", "Git remote operations are disabled for bash tool");
   }
 }
 
@@ -248,10 +212,7 @@ function assertNetworkAllowed(cmd, args, allowNetwork) {
   const executables = commandExecutables(cmd);
   const argv = (args ?? []).map((arg) => String(arg));
   if (argv.some(isUrlArgument)) {
-    throw new SmithersError(
-      "TOOL_NETWORK_DISABLED",
-      "Network access is disabled for bash tool",
-    );
+    throw new SmithersError("TOOL_NETWORK_DISABLED", "Network access is disabled for bash tool");
   }
   for (const executable of executables) {
     assertLocalExecutable(executable, argv);
@@ -265,9 +226,7 @@ export async function bashTool(cmd, args = [], opts = undefined) {
   const runtime = getToolRuntimeOptions();
   validateBashInvocation(cmd, args, opts, runtime);
   assertNetworkAllowed(cmd, args, runtime.allowNetwork);
-  const cwd = opts?.cwd
-    ? await resolveToolPath(runtime.rootDir, opts.cwd)
-    : runtime.rootDir;
+  const cwd = opts?.cwd ? await resolveToolPath(runtime.rootDir, opts.cwd) : runtime.rootDir;
   let command = cmd;
   let commandArgs = args;
   if (!runtime.allowNetwork) {
@@ -278,27 +237,20 @@ export async function bashTool(cmd, args = [], opts = undefined) {
       noteNetworkIsolationUnenforced();
     }
   }
-  const result = await captureProcess(
-    command,
-    commandArgs,
-    {
-      cwd,
-      env: process.env,
-      detached: true,
-      maxOutputBytes: runtime.maxOutputBytes,
-      timeoutMs: runtime.timeoutMs,
-    },
-  );
-  const output = truncateToBytes(
-    `${result.stdout}${result.stderr}`,
-    runtime.maxOutputBytes,
-  );
+  const result = await captureProcess(command, commandArgs, {
+    cwd,
+    env: process.env,
+    detached: true,
+    maxOutputBytes: runtime.maxOutputBytes,
+    timeoutMs: runtime.timeoutMs,
+  });
+  const output = truncateToBytes(`${result.stdout}${result.stderr}`, runtime.maxOutputBytes);
   if (result.exitCode !== 0) {
-    throw new SmithersError(
-      "TOOL_COMMAND_FAILED",
-      `Command failed with exit code ${result.exitCode}`,
-      { cmd, args, output },
-    );
+    throw new SmithersError("TOOL_COMMAND_FAILED", `Command failed with exit code ${result.exitCode}`, {
+      cmd,
+      args,
+      output,
+    });
   }
   return output;
 }

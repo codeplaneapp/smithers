@@ -1,11 +1,5 @@
 import { create } from "zustand";
-import {
-  fetchFile,
-  fetchFileTree,
-  saveFile,
-  type FileReadResult,
-  type FileTreeEntry,
-} from "./filesApi";
+import { fetchFile, fetchFileTree, saveFile, type FileReadResult, type FileTreeEntry } from "./filesApi";
 
 type FilesState = {
   rootName: string;
@@ -120,19 +114,10 @@ export const useFilesStore = create<FilesState>((set, get) => ({
 
   saveSelected: async () => {
     const state = get();
-    if (
-      !state.file?.editable ||
-      state.selectedPath === null ||
-      state.draft === state.saved
-    )
-      return;
+    if (!state.file?.editable || state.selectedPath === null || state.draft === state.saved) return;
     set({ saving: true, saveError: null });
     try {
-      const result = await saveFile(
-        state.selectedPath,
-        state.draft,
-        state.file.revision ?? "",
-      );
+      const result = await saveFile(state.selectedPath, state.draft, state.file.revision ?? "");
       const content = result.file.content ?? result.file.previewText ?? "";
       set({
         file: result.file,

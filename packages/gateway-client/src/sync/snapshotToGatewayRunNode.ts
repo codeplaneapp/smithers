@@ -26,7 +26,12 @@ export type DevToolsSnapshotNode = {
     /** Legacy plain-string agent prop (only ever a string in frame props). */
     agent?: string;
     /** Declared `<Task agent={...}>` summary from the frame task index. */
-    agentSummary?: { label?: string; engine?: string; model?: string; chain?: Array<{ label?: string; engine?: string; model?: string }> };
+    agentSummary?: {
+      label?: string;
+      engine?: string;
+      model?: string;
+      chain?: Array<{ label?: string; engine?: string; model?: string }>;
+    };
     /** Agent the latest attempt actually executed on (attempt metadata). */
     agentRan?: { agentId?: string; engine?: string; model?: string };
     label?: string;
@@ -82,8 +87,7 @@ function nodeName(node: DevToolsSnapshotNode): string {
  */
 function nodeKind(node: DevToolsSnapshotNode): string {
   const props = node.props ?? {};
-  const smithersKind =
-    typeof props.__smithersKind === "string" ? props.__smithersKind : undefined;
+  const smithersKind = typeof props.__smithersKind === "string" ? props.__smithersKind : undefined;
   if (smithersKind === "human") {
     return "human";
   }
@@ -249,7 +253,9 @@ function rollupStatus(own: string, children: GatewayRunNode[]): string {
   return "ok";
 }
 
-function agentRef(value: { label?: string; engine?: string; model?: string } | undefined): GatewayRunNodeAgentRef | undefined {
+function agentRef(
+  value: { label?: string; engine?: string; model?: string } | undefined,
+): GatewayRunNodeAgentRef | undefined {
   if (!value) {
     return undefined;
   }
@@ -282,15 +288,17 @@ function nodeAgent(node: DevToolsSnapshotNode): GatewayRunNode["agent"] {
   const ranEngine = typeof ranRaw?.engine === "string" && ranRaw.engine ? ranRaw.engine : undefined;
   const ranModel = typeof ranRaw?.model === "string" && ranRaw.model ? ranRaw.model : undefined;
   const ranAgentId = typeof ranRaw?.agentId === "string" && ranRaw.agentId ? ranRaw.agentId : undefined;
-  const ranOn = ranEngine || ranModel || ranAgentId
-    ? {
-        ...(ranEngine ? { engine: ranEngine } : {}),
-        ...(ranModel ? { model: ranModel } : {}),
-        ...(ranAgentId ? { agentId: ranAgentId } : {}),
-      }
-    : undefined;
+  const ranOn =
+    ranEngine || ranModel || ranAgentId
+      ? {
+          ...(ranEngine ? { engine: ranEngine } : {}),
+          ...(ranModel ? { model: ranModel } : {}),
+          ...(ranAgentId ? { agentId: ranAgentId } : {}),
+        }
+      : undefined;
   if (!declared && chain.length === 0 && !ranOn) {
-    const legacy = task?.agent ?? (typeof (node.props ?? {}).agent === "string" ? String((node.props ?? {}).agent) : undefined);
+    const legacy =
+      task?.agent ?? (typeof (node.props ?? {}).agent === "string" ? String((node.props ?? {}).agent) : undefined);
     return typeof legacy === "string" && legacy ? legacy : undefined;
   }
   const agent: GatewayRunNodeAgent = { ...(declared ?? {}) };
@@ -317,9 +325,7 @@ function mapNode(
   const attempt = node.task?.attempt;
   const maxAttempts = node.task?.maxAttempts;
   const prompt = typeof node.task?.prompt === "string" && node.task.prompt ? node.task.prompt : undefined;
-  const children = (node.children ?? []).map((child) =>
-    mapNode(child, false, runStatus, blockedNodeId),
-  );
+  const children = (node.children ?? []).map((child) => mapNode(child, false, runStatus, blockedNodeId));
   const ownStatus = nodeStatus(node, isRoot, runStatus, blockedNodeId);
   return {
     // The snapshot's structural `node.id` is assigned uniquely per position in
@@ -347,9 +353,7 @@ function mapNode(
  * Returns null for the gateway's empty-root placeholder (a run with no frames
  * yet) so consumers can show their empty state.
  */
-export function snapshotToGatewayRunNode(
-  snapshot: DevToolsSnapshot | null | undefined,
-): GatewayRunNode | null {
+export function snapshotToGatewayRunNode(snapshot: DevToolsSnapshot | null | undefined): GatewayRunNode | null {
   const root = snapshot?.root;
   if (!root) {
     return null;

@@ -90,7 +90,8 @@ export const LIVE_BEATS: LiveBeat[] = [
     caption: "Ask for it in your terminal",
     img: "shots/terminal.gif",
     alt: "Terminal: asking Claude Code for a vibeaudit-style security-review workflow; it writes the workflow and its UI",
-    fineprint: "Ask modeled on vibeaudit, a real security-review orchestrator built on Smithers: \u201cruns audit skills in parallel \u2026 deduplicated, triaged, and aggregated in a final report.\u201d",
+    fineprint:
+      "Ask modeled on vibeaudit, a real security-review orchestrator built on Smithers: \u201cruns audit skills in parallel \u2026 deduplicated, triaged, and aggregated in a final report.\u201d",
     note: "In my terminal, I ask for a security review like vibeaudit — strategies in parallel, dedupe, triage, one report. A real example, built on Smithers.",
   },
   {
@@ -182,9 +183,7 @@ export const sections: Section[] = [
   {
     id: "problem",
     steps: 1,
-    notes: [
-      "Building workflows is hard. Users trust Smithers because it's dependable.",
-    ],
+    notes: ["Building workflows is hard. Users trust Smithers because it's dependable."],
     render: () => `
       <div class="statement">
         <div class="eyebrow">Problem</div>
@@ -296,9 +295,7 @@ export const sections: Section[] = [
   {
     id: "market",
     steps: 1,
-    notes: [
-      "Workflow automation was giant before agents. After agents it gets bigger — everyone's asking to start.",
-    ],
+    notes: ["Workflow automation was giant before agents. After agents it gets bigger — everyone's asking to start."],
     render: () => `
       <div class="statement">
         <div class="eyebrow">Market</div>
@@ -309,9 +306,7 @@ export const sections: Section[] = [
   {
     id: "rails",
     steps: 1,
-    notes: [
-      "Smithers is the Ruby on Rails of workflow automation.",
-    ],
+    notes: ["Smithers is the Ruby on Rails of workflow automation."],
     render: () => `
       <div class="statement">
         <h2 class="big">Smithers is the<br /><em>Ruby on Rails</em> of<br />workflow automation.</h2>

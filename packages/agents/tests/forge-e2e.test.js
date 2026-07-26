@@ -25,17 +25,13 @@ try {
     stdio: "pipe",
     encoding: "utf8",
   });
-  supportsForgeE2EFlags =
-    helpText.includes("--prompt") &&
-    helpText.includes("-C");
+  supportsForgeE2EFlags = helpText.includes("--prompt") && helpText.includes("-C");
 } catch {
   isForgeInstalled = false;
   supportsForgeE2EFlags = false;
 }
 
-describe.skipIf(!runRealAgentE2E || !isForgeInstalled || !supportsForgeE2EFlags)(
-  "ForgeAgent E2E (real CLI)",
-  () => {
+describe.skipIf(!runRealAgentE2E || !isForgeInstalled || !supportsForgeE2EFlags)("ForgeAgent E2E (real CLI)", () => {
   /** @type {string} */
   let tmpDir;
 
@@ -95,13 +91,11 @@ describe.skipIf(!runRealAgentE2E || !isForgeInstalled || !supportsForgeE2EFlags)
     const agent = new ForgeAgent();
 
     const result = await agent.generate({
-      prompt:
-        "List the files in the current directory. Just output the filenames, one per line.",
+      prompt: "List the files in the current directory. Just output the filenames, one per line.",
       rootDir: tmpDir,
     });
 
     expect(result).toBeDefined();
     expect(result.text).toContain("hello.js");
   }, 120_000);
-  }
-);
+});

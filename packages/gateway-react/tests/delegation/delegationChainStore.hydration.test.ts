@@ -16,9 +16,7 @@ const planRow: DcPlanRow = {
   tier: "fable",
   title: "root",
   brief: "Plan for root",
-  children: [
-    { logicalId: "root/c1", tier: "sonnet", kind: "leaf", title: "c1", brief: "Build c1", estimate: est },
-  ],
+  children: [{ logicalId: "root/c1", tier: "sonnet", kind: "leaf", title: "c1", brief: "Build c1", estimate: est }],
   subtreeEstimate: est,
   risks: [],
 };

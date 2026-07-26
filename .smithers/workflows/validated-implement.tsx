@@ -6,7 +6,12 @@ import { spawnSync } from "node:child_process";
 import { z } from "zod/v4";
 import { agents } from "../agents";
 import { implementer, panelists } from "../components/roles";
-import { ValidationLoop, implementOutputSchema, validateOutputSchema, validationLoopState } from "../components/ValidationLoop";
+import {
+  ValidationLoop,
+  implementOutputSchema,
+  validateOutputSchema,
+  validationLoopState,
+} from "../components/ValidationLoop";
 import { reviewOutputSchema, reviewSynthesisSchema } from "../components/Review";
 import { PlanPanel } from "../components/PlanPanel";
 
@@ -38,17 +43,23 @@ const researchSchema = z.looseObject({
   dependencies: z.array(z.string()).default([]),
 });
 
-export const depgateSchema = z.looseObject({
-  needsValidation: z.boolean().default(false),
-  rationale: z.string().default(""),
-  assumptions: z.array(z.string()).default([]),
-  testFiles: z.array(z.string()).default([]),
-  testCommand: z.string().default(""),
-}).superRefine((value, issue) => {
-  if (value.needsValidation && !value.testCommand.trim()) {
-    issue.addIssue({ code: "custom", path: ["testCommand"], message: "testCommand is required when needsValidation is true" });
-  }
-});
+export const depgateSchema = z
+  .looseObject({
+    needsValidation: z.boolean().default(false),
+    rationale: z.string().default(""),
+    assumptions: z.array(z.string()).default([]),
+    testFiles: z.array(z.string()).default([]),
+    testCommand: z.string().default(""),
+  })
+  .superRefine((value, issue) => {
+    if (value.needsValidation && !value.testCommand.trim()) {
+      issue.addIssue({
+        code: "custom",
+        path: ["testCommand"],
+        message: "testCommand is required when needsValidation is true",
+      });
+    }
+  });
 
 const depvalidateSchema = z.object({
   ran: z.boolean().default(false),
@@ -107,13 +118,15 @@ type DepValidate = z.infer<typeof depvalidateSchema>;
 
 function rawRows(ctx: any, channel: string): Array<Record<string, unknown>> {
   const rows = typeof ctx.outputs === "function" ? ctx.outputs(channel) : ctx.outputs?.[channel];
-  return Array.isArray(rows) ? rows.filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null) : [];
+  return Array.isArray(rows)
+    ? rows.filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null)
+    : [];
 }
 
 export function runDependencyCommand(command: string): DepValidate {
   const trimmed = command.trim();
   if (!trimmed) throw new Error("dependency validation requires a non-blank test command");
-  const shell = process.platform === "win32" ? (process.env.ComSpec || "cmd.exe") : (process.env.SHELL || "/bin/sh");
+  const shell = process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : process.env.SHELL || "/bin/sh";
   const args = process.platform === "win32" ? ["/d", "/s", "/c", trimmed] : ["-lc", trimmed];
   const res = spawnSync(shell, args, {
     cwd: process.cwd(),
@@ -167,10 +180,16 @@ export default smithers((ctx) => {
   const invalidDependencyConfig = requiresValidation && !(depgate?.testCommand ?? "").trim();
 
   // ── dependency-validation loop state ──────────────────────────────────────
-  const validations = rawRows(ctx, "depvalidate").filter((row) => row.nodeId === "depvalidate:run") as Array<DepValidate & Record<string, unknown>>;
+  const validations = rawRows(ctx, "depvalidate").filter((row) => row.nodeId === "depvalidate:run") as Array<
+    DepValidate & Record<string, unknown>
+  >;
   const latestValidation = ctx.latest(outputs.depvalidate, "depvalidate:run") as DepValidate | undefined;
   const validationPassed = requiresValidation ? latestValidation?.passed === true : true;
-  const dependencyExhausted = requiresValidation && !invalidDependencyConfig && latestValidation?.passed === false && validations.length >= maxValidationAttempts;
+  const dependencyExhausted =
+    requiresValidation &&
+    !invalidDependencyConfig &&
+    latestValidation?.passed === false &&
+    validations.length >= maxValidationAttempts;
   const dependencyReady = depgate !== undefined && !invalidDependencyConfig && !dependencyExhausted && validationPassed;
   // mount the ask-a-human gate only when the most recent real run failed
   const latestRunFailed = requiresValidation && latestValidation !== undefined && latestValidation.passed !== true;
@@ -246,7 +265,9 @@ Rules:
     `You are implementing ticket "${ticketId}". Carry out the plan end-to-end against the real codebase.`,
     ticketBlock,
     researchBlock(research),
-    plan ? `IMPLEMENTATION PLAN:\n${plan.summary}\n\nSteps:\n${numbered(plan.steps)}\n\nRisks:\n${bullets(plan.risks)}` : null,
+    plan
+      ? `IMPLEMENTATION PLAN:\n${plan.summary}\n\nSteps:\n${numbered(plan.steps)}\n\nRisks:\n${bullets(plan.risks)}`
+      : null,
     requiresValidation && depgate
       ? `ASSUMPTION-VALIDATION TESTS — these prove the external dependencies and MUST STAY GREEN. Run them as part of your work and do not weaken or mock them:\nFiles: ${depgate.testFiles.join(", ") || "(see suite)"}\nCommand: ${depgate.testCommand}`
       : null,
@@ -259,11 +280,23 @@ Rules:
   return (
     <Workflow name="validated-implement">
       <Sequence>
-        <Task id="research" output={outputs.research} agent={agents.research} timeoutMs={1_800_000} heartbeatTimeoutMs={600_000}>
+        <Task
+          id="research"
+          output={outputs.research}
+          agent={agents.research}
+          timeoutMs={1_800_000}
+          heartbeatTimeoutMs={600_000}
+        >
           {researchPrompt}
         </Task>
 
-        <Task id="depgate" output={outputs.depgate} agent={agents.implement} timeoutMs={1_800_000} heartbeatTimeoutMs={600_000}>
+        <Task
+          id="depgate"
+          output={outputs.depgate}
+          agent={agents.implement}
+          timeoutMs={1_800_000}
+          heartbeatTimeoutMs={600_000}
+        >
           {depgatePrompt}
         </Task>
 
@@ -274,7 +307,12 @@ Rules:
             }}
           </Task>
         ) : requiresValidation && !dependencyExhausted ? (
-          <Loop id="depvalidate:loop" until={validationPassed} maxIterations={maxValidationAttempts} onMaxReached="return-last">
+          <Loop
+            id="depvalidate:loop"
+            until={validationPassed}
+            maxIterations={maxValidationAttempts}
+            onMaxReached="return-last"
+          >
             <Sequence>
               <Task id="depvalidate:run" output={outputs.depvalidate}>
                 {() => runDependencyCommand(depgate?.testCommand ?? "")}
@@ -286,7 +324,11 @@ Rules:
                   request={{
                     title: `Assumption validation failed for "${ticketId}" — fix the environment and retry?`,
                     summary: depHelpSummary,
-                    metadata: { ticketId, command: latestValidation?.command ?? "", exitCode: latestValidation?.exitCode ?? null },
+                    metadata: {
+                      ticketId,
+                      command: latestValidation?.command ?? "",
+                      exitCode: latestValidation?.exitCode ?? null,
+                    },
                   }}
                   onDeny="fail"
                 />
@@ -296,14 +338,21 @@ Rules:
         ) : dependencyExhausted ? (
           <Task id="depvalidate:exhausted" output={outputs.depvalidate}>
             {() => {
-              throw new Error(`dependency validation for ticket "${ticketId}" remained red after ${maxValidationAttempts} attempt(s)`);
+              throw new Error(
+                `dependency validation for ticket "${ticketId}" remained red after ${maxValidationAttempts} attempt(s)`,
+              );
             }}
           </Task>
         ) : null}
 
         {dependencyReady ? (
           <>
-            <PlanPanel idPrefix="plan" prompt={planPrompt} panelistOutput={planSchema} synthesisOutput={planSynthesisSchema} />
+            <PlanPanel
+              idPrefix="plan"
+              prompt={planPrompt}
+              panelistOutput={planSchema}
+              synthesisOutput={planSynthesisSchema}
+            />
 
             <ValidationLoop
               idPrefix="impl"

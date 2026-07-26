@@ -3,18 +3,12 @@ import type { RunNode } from "./Run";
 import { RunTreeRow } from "./RunTreeRow";
 
 /** Flatten the tree into rows, honoring the collapsed set. */
-function rows(
-  node: RunNode,
-  depth: number,
-  collapsed: Set<string>,
-): Array<{ node: RunNode; depth: number }> {
+function rows(node: RunNode, depth: number, collapsed: Set<string>): Array<{ node: RunNode; depth: number }> {
   const here = [{ node, depth }];
   if (collapsed.has(node.id)) {
     return here;
   }
-  return here.concat(
-    (node.children ?? []).flatMap((child) => rows(child, depth + 1, collapsed)),
-  );
+  return here.concat((node.children ?? []).flatMap((child) => rows(child, depth + 1, collapsed)));
 }
 
 /** The run's node tree with expand/collapse and a single selected node. The

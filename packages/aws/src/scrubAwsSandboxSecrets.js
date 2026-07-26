@@ -8,11 +8,11 @@
  * @returns {string}
  */
 export function scrubAwsSandboxSecrets(text, secrets) {
-	let out = String(text ?? "");
-	for (const secret of secrets) {
-		if (secret) {
-			out = out.split(secret).join("[redacted]");
-		}
-	}
-	return out;
+  let out = String(text ?? "");
+  for (const secret of secrets) {
+    if (secret) {
+      out = out.split(secret).join("[redacted]");
+    }
+  }
+  return out;
 }

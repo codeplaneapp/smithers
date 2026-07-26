@@ -16,9 +16,7 @@ export function bindRouteStore(router: AnyRouter): void {
     if (!location) {
       return;
     }
-    useRouteStore.setState(
-      deriveRoute(location.pathname, location.search as Record<string, unknown>),
-    );
+    useRouteStore.setState(deriveRoute(location.pathname, location.search as Record<string, unknown>));
   };
   apply();
   router.subscribe("onResolved", apply);

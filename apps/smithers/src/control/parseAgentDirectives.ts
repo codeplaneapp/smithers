@@ -24,11 +24,7 @@ export function parseAgentDirectives(text: string): {
       }
       try {
         const parsed = JSON.parse(trimmed) as unknown;
-        if (
-          parsed !== null &&
-          typeof parsed === "object" &&
-          typeof (parsed as { tool?: unknown }).tool === "string"
-        ) {
+        if (parsed !== null && typeof parsed === "object" && typeof (parsed as { tool?: unknown }).tool === "string") {
           directives.push(parsed as AgentDirective);
         }
       } catch {

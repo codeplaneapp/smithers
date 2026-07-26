@@ -84,9 +84,15 @@ const checkAnswer = (): string | null => {
 // Try fs.watchFile for efficiency, fall back to polling
 const answer = await new Promise<string>((resolveAnswer, reject) => {
   const cleanup = () => {
-    try { unwatchFile(answerFile); } catch {}
-    try { unlinkSync(questionFile); } catch {}
-    try { unlinkSync(answerFile); } catch {}
+    try {
+      unwatchFile(answerFile);
+    } catch {}
+    try {
+      unlinkSync(questionFile);
+    } catch {}
+    try {
+      unlinkSync(answerFile);
+    } catch {}
   };
 
   const timeoutTimer = setTimeout(() => {

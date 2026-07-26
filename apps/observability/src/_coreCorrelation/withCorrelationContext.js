@@ -23,13 +23,16 @@ import { mergeCorrelationContext } from "./mergeCorrelationContext.js";
  * @param {CorrelationPatch} patch
  */
 export function withCorrelationContext(effect, patch) {
-    const next = mergeCorrelationContext(correlationStorage.getStore(), patch);
-    if (!next)
-        return effect;
-    const located = effect.pipe(Effect.locally(correlationContextFiberRef, next));
-    return Effect.acquireUseRelease(Effect.sync(() => {
-        const previous = correlationStorage.getStore();
-        correlationStorage.enterWith(next);
-        return previous;
-    }), () => located, (previous) => Effect.sync(() => correlationStorage.enterWith(previous)));
+  const next = mergeCorrelationContext(correlationStorage.getStore(), patch);
+  if (!next) return effect;
+  const located = effect.pipe(Effect.locally(correlationContextFiberRef, next));
+  return Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const previous = correlationStorage.getStore();
+      correlationStorage.enterWith(next);
+      return previous;
+    }),
+    () => located,
+    (previous) => Effect.sync(() => correlationStorage.enterWith(previous)),
+  );
 }

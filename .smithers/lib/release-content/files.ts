@@ -22,12 +22,7 @@ export function safeJoin(root: string, repoRelativePath: string): string {
   return abs;
 }
 
-export function writeText(
-  root: string,
-  repoRelativePath: string,
-  text: string,
-  overwrite = true,
-): string {
+export function writeText(root: string, repoRelativePath: string, text: string, overwrite = true): string {
   const abs = safeJoin(root, repoRelativePath);
   if (!overwrite && existsSync(abs)) {
     throw new Error(`Refusing to overwrite existing file: ${repoRelativePath}`);
@@ -37,12 +32,7 @@ export function writeText(
   return repoRelativePath;
 }
 
-export function writeJson(
-  root: string,
-  repoRelativePath: string,
-  data: unknown,
-  overwrite = true,
-): string {
+export function writeJson(root: string, repoRelativePath: string, data: unknown, overwrite = true): string {
   return writeText(root, repoRelativePath, JSON.stringify(data, null, 2), overwrite);
 }
 
@@ -51,11 +41,7 @@ function artifactRunDir(input: ReleaseContentInput, probe: Probe): string {
   return join(input.output.artifactDir, probe.version, stamp);
 }
 
-function renderThreadMarkdown(
-  content: EditedContent,
-  version: string,
-  media?: MediaAssets | null,
-): string {
+function renderThreadMarkdown(content: EditedContent, version: string, media?: MediaAssets | null): string {
   const thread = content.tweetThread;
   if (!thread) return "";
   const assetByIndex = new Map((media?.assets ?? []).map((asset) => [asset.tweetIndex, asset]));
@@ -83,11 +69,7 @@ function renderThreadMarkdown(
       lines.push(`**Media:** ${tweet.mediaSuggestion}`);
     }
     lines.push("");
-    lines.push(
-      ...tweet.text
-        .split("\n")
-        .map((line) => (line.trim() ? `> ${line}` : ">")),
-    );
+    lines.push(...tweet.text.split("\n").map((line) => (line.trim() ? `> ${line}` : ">")));
     lines.push("");
     lines.push(`Claim IDs: ${tweet.claimIds.length ? tweet.claimIds.join(", ") : "none"}`);
     lines.push(`Characters: ${[...tweet.text].length}`);
@@ -105,9 +87,7 @@ function renderThreadMarkdown(
     }
     lines.push("");
     if (media.rasterizerPath) {
-      lines.push(
-        `**Rasterize to PNG for upload:** \`node ${media.rasterizerPath}\` (renders each card at 2x).`,
-      );
+      lines.push(`**Rasterize to PNG for upload:** \`node ${media.rasterizerPath}\` (renders each card at 2x).`);
       lines.push("");
     }
     if (media.captures.length > 0) {
@@ -190,7 +170,10 @@ export function writePreviewArtifacts(params: {
   files.push(writeJson(root, join(dir, "publish-plan.json"), publishPlan));
 
   if (content.changelog) files.push(writeText(root, join(dir, "changelog.preview.mdx"), content.changelog.markdown));
-  if (content.tweetThread) files.push(writeText(root, join(dir, "tweet-thread.preview.md"), renderThreadMarkdown(content, probe.version, media)));
+  if (content.tweetThread)
+    files.push(
+      writeText(root, join(dir, "tweet-thread.preview.md"), renderThreadMarkdown(content, probe.version, media)),
+    );
   if (media) files.push(writeJson(root, join(dir, "media-assets.json"), media));
   if (content.blogPost) files.push(writeText(root, join(dir, "blog-post.preview.mdx"), content.blogPost.markdown));
   files.push(writeJson(root, join(dir, "edited-content.json"), content));
@@ -336,7 +319,9 @@ export function publishFiles(params: {
     files.push(writeText(root, probe.blogPath, content.blogPost.markdown, input.output.overwrite));
   }
   if (content.tweetThread && !input.skip.publishThreadFile) {
-    files.push(writeText(root, probe.threadPath, renderThreadMarkdown(content, probe.version, media), input.output.overwrite));
+    files.push(
+      writeText(root, probe.threadPath, renderThreadMarkdown(content, probe.version, media), input.output.overwrite),
+    );
   }
   return {
     published: files.length > 0,
@@ -347,15 +332,16 @@ export function publishFiles(params: {
   };
 }
 
-export function hasApprovedMarketingContent(version: string, artifactDir: unknown = DEFAULT_ARTIFACT_DIR): {
+export function hasApprovedMarketingContent(
+  version: string,
+  artifactDir: unknown = DEFAULT_ARTIFACT_DIR,
+): {
   ok: boolean;
   markerPath: string;
   message: string;
 } {
   const root = process.cwd();
-  const baseDir = typeof artifactDir === "string" && artifactDir.trim()
-    ? artifactDir
-    : DEFAULT_ARTIFACT_DIR;
+  const baseDir = typeof artifactDir === "string" && artifactDir.trim() ? artifactDir : DEFAULT_ARTIFACT_DIR;
   // Repo-relative marker paths surface in messages and downstream tooling;
   // keep them forward-slashed on every platform (join still resolves them).
   const markerPath = join(baseDir, `approved-${version}.json`).split(sep).join("/");

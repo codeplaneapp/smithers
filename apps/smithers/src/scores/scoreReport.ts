@@ -254,8 +254,7 @@ export function summaryStats(metrics: RunMetrics): SummaryStats {
     mean: meanScore == null ? EM_DASH : meanScore.toFixed(2),
     tokens: metrics.tokens.total > 0 ? humanizeTokens(metrics.tokens.total) : EM_DASH,
     avgDuration: metrics.latency.count > 0 ? humanizeDurationMs(metrics.latency.mean) : EM_DASH,
-    cacheHitRate:
-      hasCache && cacheable > 0 ? `${((cacheRead / cacheable) * 100).toFixed(1)}%` : EM_DASH,
+    cacheHitRate: hasCache && cacheable > 0 ? `${((cacheRead / cacheable) * 100).toFixed(1)}%` : EM_DASH,
     estCost: metrics.cost.total > 0 ? formatUsd(metrics.cost.total, 4) : EM_DASH,
   };
 }

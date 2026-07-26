@@ -15,41 +15,26 @@ import React from "react";
  * with exactly two children in order [B, A] with no duplicated node.
  */
 describe("reconciler keyed move", () => {
-    test("reordering keyed children moves a node instead of duplicating it", async () => {
-        const renderer = new SmithersRenderer();
+  test("reordering keyed children moves a node instead of duplicating it", async () => {
+    const renderer = new SmithersRenderer();
 
-        const makeChild = (id) =>
-            React.createElement("smithers:task", { key: id, id, output: "out" });
+    const makeChild = (id) => React.createElement("smithers:task", { key: id, id, output: "out" });
 
-        await renderer.render(
-            React.createElement(
-                "smithers:parallel",
-                null,
-                makeChild("A"),
-                makeChild("B"),
-            ),
-        );
+    await renderer.render(React.createElement("smithers:parallel", null, makeChild("A"), makeChild("B")));
 
-        const firstRoot = renderer.getRoot();
-        expect(firstRoot.kind).toBe("element");
-        expect(firstRoot.children.map((c) => c.props.id)).toEqual(["A", "B"]);
+    const firstRoot = renderer.getRoot();
+    expect(firstRoot.kind).toBe("element");
+    expect(firstRoot.children.map((c) => c.props.id)).toEqual(["A", "B"]);
 
-        // Re-render with the order swapped. React moves an existing child.
-        await renderer.render(
-            React.createElement(
-                "smithers:parallel",
-                null,
-                makeChild("B"),
-                makeChild("A"),
-            ),
-        );
+    // Re-render with the order swapped. React moves an existing child.
+    await renderer.render(React.createElement("smithers:parallel", null, makeChild("B"), makeChild("A")));
 
-        const root = renderer.getRoot();
-        const ids = root.children.map((c) => c.props.id);
+    const root = renderer.getRoot();
+    const ids = root.children.map((c) => c.props.id);
 
-        // Exactly two children, no duplicates, in the new order.
-        expect(root.children).toHaveLength(2);
-        expect(ids).toEqual(["B", "A"]);
-        expect(new Set(ids).size).toBe(ids.length);
-    });
+    // Exactly two children, no duplicates, in the new order.
+    expect(root.children).toHaveLength(2);
+    expect(ids).toEqual(["B", "A"]);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
 });

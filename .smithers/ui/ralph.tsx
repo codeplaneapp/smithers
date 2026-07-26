@@ -46,7 +46,8 @@ function extractIterations(events: unknown[]): IterationEvent[] {
     const iterRaw = raw.iteration ?? raw.iter;
     const iteration = typeof iterRaw === "number" ? iterRaw : out.length;
     const seq = typeof raw.seq === "number" ? raw.seq : out.length;
-    const tsMs = typeof raw.tsMs === "number" ? raw.tsMs : typeof raw.timestampMs === "number" ? raw.timestampMs : undefined;
+    const tsMs =
+      typeof raw.tsMs === "number" ? raw.tsMs : typeof raw.timestampMs === "number" ? raw.timestampMs : undefined;
     out.push({ seq, iteration, label: kind, tsMs });
   }
   return out;
@@ -184,18 +185,28 @@ function App() {
         <div className="title-group">
           <h1>Ralph</h1>
           <span className="sub">Continuous maintenance loop</span>
-          <span className="pill" data-testid="ralph-runid">{activeRunId ? shortRunId(activeRunId) : "No run"}</span>
+          <span className="pill" data-testid="ralph-runid">
+            {activeRunId ? shortRunId(activeRunId) : "No run"}
+          </span>
           {activeRun ? (
-            <span className={"badge " + statusClass(activeRun.status)} data-testid="ralph-status">{activeRun.status ?? "idle"}</span>
+            <span className={"badge " + statusClass(activeRun.status)} data-testid="ralph-status">
+              {activeRun.status ?? "idle"}
+            </span>
           ) : null}
         </div>
         <div className="actions">
-          <button className="button" data-testid="ralph-refresh" onClick={() => void refresh()} disabled={busy}>Refresh</button>
+          <button className="button" data-testid="ralph-refresh" onClick={() => void refresh()} disabled={busy}>
+            Refresh
+          </button>
           {isRunning ? (
-            <button className="button danger" data-testid="ralph-cancel" onClick={() => void cancel()} disabled={busy}>Cancel loop</button>
+            <button className="button danger" data-testid="ralph-cancel" onClick={() => void cancel()} disabled={busy}>
+              Cancel loop
+            </button>
           ) : null}
           {activeRun && statusClass(activeRun.status) === "failed" ? (
-            <button className="button" data-testid="ralph-resume" onClick={() => void resume()} disabled={busy}>Resume</button>
+            <button className="button" data-testid="ralph-resume" onClick={() => void resume()} disabled={busy}>
+              Resume
+            </button>
           ) : null}
         </div>
       </header>
@@ -215,7 +226,12 @@ function App() {
                   placeholder="Continue working on the current task."
                 />
               </div>
-              <button className="button primary" data-testid="ralph-launch-button" onClick={() => void launch()} disabled={busy}>
+              <button
+                className="button primary"
+                data-testid="ralph-launch-button"
+                onClick={() => void launch()}
+                disabled={busy}
+              >
                 Start loop
               </button>
             </div>
@@ -226,7 +242,9 @@ function App() {
               </div>
               <div className="stat">
                 <span className="k">Iterations</span>
-                <span className="v" data-testid="ralph-iteration-count">{iterationCount}</span>
+                <span className="v" data-testid="ralph-iteration-count">
+                  {iterationCount}
+                </span>
               </div>
               <div className="stat">
                 <span className="k">Events</span>
@@ -243,7 +261,9 @@ function App() {
                   <span className="iter-tag">Latest iteration</span>
                   <span className="iter-ts">{fmtTime(activeRun?.createdAtMs)}</span>
                 </div>
-                <div className="iter-summary" data-testid="ralph-summary">{latestSummary}</div>
+                <div className="iter-summary" data-testid="ralph-summary">
+                  {latestSummary}
+                </div>
               </div>
             ) : null}
             {iterations
@@ -265,7 +285,12 @@ function App() {
                   Ralph runs a single task in an infinite loop, posting a fresh summary after every iteration. Enter a
                   prompt and start the loop to watch each iteration land here. Cancel whenever the work is done.
                 </p>
-                <button className="button primary" data-testid="ralph-launch-empty" onClick={() => void launch()} disabled={busy}>
+                <button
+                  className="button primary"
+                  data-testid="ralph-launch-empty"
+                  onClick={() => void launch()}
+                  disabled={busy}
+                >
                   Start loop
                 </button>
               </div>

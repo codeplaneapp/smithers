@@ -3,12 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import {
-  CodeBlockFilename,
-  CodeBlockGroup,
-  CodeBlockHeader,
-  CodeBlockTabs,
-} from "../src/primitives/CodeBlock";
+import { CodeBlockFilename, CodeBlockGroup, CodeBlockHeader, CodeBlockTabs } from "../src/primitives/CodeBlock";
 import { SMITHERS_UI_STYLE_ATTR } from "../src/index";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -93,11 +88,7 @@ describe("CodeBlockTabs", () => {
 
   test("roving tabindex keeps only the active tab in the tab order", async () => {
     await render(
-      <CodeBlockTabs
-        items={items.map(({ id, label }) => ({ id, label }))}
-        activeId="a"
-        onActiveIdChange={() => {}}
-      />,
+      <CodeBlockTabs items={items.map(({ id, label }) => ({ id, label }))} activeId="a" onActiveIdChange={() => {}} />,
     );
     const tabs = container!.querySelectorAll<HTMLButtonElement>('[role="tab"]');
     expect(tabs[0]!.tabIndex).toBe(0);
@@ -141,31 +132,24 @@ describe("CodeBlockGroup", () => {
 
   test("defaultActiveId seeds the uncontrolled selection and tab clicks swap panels", async () => {
     await render(<CodeBlockGroup items={items} defaultActiveId="b" />);
-    const visiblePanel = () =>
-      container!.querySelector('[role="tabpanel"]:not([hidden])')!;
+    const visiblePanel = () => container!.querySelector('[role="tabpanel"]:not([hidden])')!;
     expect(visiblePanel().textContent).toContain("const b = 2;");
     const tabs = container!.querySelectorAll<HTMLButtonElement>('[role="tab"]');
     expect(tabs[1]!.getAttribute("aria-selected")).toBe("true");
 
     await act(async () => tabs[0]!.click());
     expect(visiblePanel().textContent).toContain("const a = 1;");
-    expect(container!.querySelector('[role="tabpanel"][hidden]')!.textContent).toContain(
-      "const b = 2;",
-    );
+    expect(container!.querySelector('[role="tabpanel"][hidden]')!.textContent).toContain("const b = 2;");
     expect(tabs[0]!.getAttribute("aria-selected")).toBe("true");
   });
 
   test("controlled activeId requests changes without self-managing", async () => {
     const changes: string[] = [];
-    await render(
-      <CodeBlockGroup items={items} activeId="a" onActiveIdChange={(id) => changes.push(id)} />,
-    );
+    await render(<CodeBlockGroup items={items} activeId="a" onActiveIdChange={(id) => changes.push(id)} />);
     const tabs = container!.querySelectorAll<HTMLButtonElement>('[role="tab"]');
     await act(async () => tabs[1]!.click());
     expect(changes).toEqual(["b"]);
-    expect(
-      container!.querySelector('[role="tabpanel"]:not([hidden])')!.textContent,
-    ).toContain("const a = 1;");
+    expect(container!.querySelector('[role="tabpanel"]:not([hidden])')!.textContent).toContain("const a = 1;");
   });
 
   test("every tab's aria-controls resolves to a rendered tabpanel", async () => {
@@ -187,11 +171,7 @@ describe("CodeBlockGroup", () => {
 
   test("standalone CodeBlockTabs renders no dangling aria-controls", async () => {
     await render(
-      <CodeBlockTabs
-        items={items.map(({ id, label }) => ({ id, label }))}
-        activeId="a"
-        onActiveIdChange={() => {}}
-      />,
+      <CodeBlockTabs items={items.map(({ id, label }) => ({ id, label }))} activeId="a" onActiveIdChange={() => {}} />,
     );
     const tabs = container!.querySelectorAll<HTMLButtonElement>('[role="tab"]');
     for (const tab of tabs) {
@@ -219,9 +199,7 @@ describe("CodeBlockGroup", () => {
       }
     }
     for (const tab of tabs) {
-      const panel = container!.querySelector(
-        `[role="tabpanel"]#${CSS.escape(tab.getAttribute("aria-controls")!)}`,
-      );
+      const panel = container!.querySelector(`[role="tabpanel"]#${CSS.escape(tab.getAttribute("aria-controls")!)}`);
       expect(panel).not.toBeNull();
       expect(panel!.getAttribute("aria-labelledby")).toBe(tab.id);
     }

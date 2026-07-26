@@ -6,14 +6,16 @@ import { buildStateKey } from "@smithers-orchestrator/scheduler/buildStateKey";
  * @returns {value is import("@smithers-orchestrator/graph/ProofBinding").ProofBinding}
  */
 function isProofBinding(value) {
-    return Boolean(value &&
-        typeof value === "object" &&
-        !Array.isArray(value) &&
-        typeof value.table === "string" &&
-        typeof value.nodeId === "string" &&
-        typeof value.iteration === "number" &&
-        Number.isFinite(value.iteration) &&
-        typeof value.digest === "string");
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof value.table === "string" &&
+    typeof value.nodeId === "string" &&
+    typeof value.iteration === "number" &&
+    Number.isFinite(value.iteration) &&
+    typeof value.digest === "string",
+  );
 }
 
 /**
@@ -24,11 +26,7 @@ function isProofBinding(value) {
  * @param {import("@smithers-orchestrator/graph/ProofBinding").ProofBinding} binding
  */
 function bindingIdentity(binding) {
-    return JSON.stringify([
-        binding.table,
-        binding.nodeId,
-        binding.iteration,
-    ]);
+  return JSON.stringify([binding.table, binding.nodeId, binding.iteration]);
 }
 
 /**
@@ -38,33 +36,28 @@ function bindingIdentity(binding) {
  * @returns {Map<string, import("@smithers-orchestrator/graph/ProofBinding").ProofBinding[]>}
  */
 export function proofBindingsFromFrame(frame) {
-    const restored = new Map();
-    if (!frame?.taskIndexJson)
-        return restored;
-    let entries;
-    try {
-        entries = JSON.parse(frame.taskIndexJson);
-    }
-    catch {
-        return restored;
-    }
-    if (!Array.isArray(entries))
-        return restored;
-    for (const entry of entries) {
-        if (!entry || typeof entry !== "object" || Array.isArray(entry))
-            continue;
-        const nodeId = typeof entry.nodeId === "string" ? entry.nodeId : undefined;
-        const iteration = typeof entry.iteration === "number" && Number.isFinite(entry.iteration)
-            ? entry.iteration
-            : 0;
-        const bindings = Array.isArray(entry.proofBindings)
-            ? entry.proofBindings.filter(isProofBinding)
-            : undefined;
-        if (nodeId && bindings && bindings.length === entry.proofBindings.length) {
-            restored.set(buildStateKey(nodeId, iteration), bindings.map((binding) => ({ ...binding })));
-        }
-    }
+  const restored = new Map();
+  if (!frame?.taskIndexJson) return restored;
+  let entries;
+  try {
+    entries = JSON.parse(frame.taskIndexJson);
+  } catch {
     return restored;
+  }
+  if (!Array.isArray(entries)) return restored;
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const nodeId = typeof entry.nodeId === "string" ? entry.nodeId : undefined;
+    const iteration = typeof entry.iteration === "number" && Number.isFinite(entry.iteration) ? entry.iteration : 0;
+    const bindings = Array.isArray(entry.proofBindings) ? entry.proofBindings.filter(isProofBinding) : undefined;
+    if (nodeId && bindings && bindings.length === entry.proofBindings.length) {
+      restored.set(
+        buildStateKey(nodeId, iteration),
+        bindings.map((binding) => ({ ...binding })),
+      );
+    }
+  }
+  return restored;
 }
 
 /**
@@ -77,35 +70,32 @@ export function proofBindingsFromFrame(frame) {
  * @param {Map<string, import("@smithers-orchestrator/graph/ProofBinding").ProofBinding[]>} pinned
  */
 export function pinTaskProofBindings(tasks, pinned) {
-    for (const task of tasks) {
-        const key = buildStateKey(task.nodeId, task.iteration);
-        if (!task.proofBindingRequired) {
-            pinned.delete(key);
-            task.proofBindings = undefined;
-            task.proofBindingStatus = undefined;
-            continue;
-        }
-        const candidate = task.proofBindings;
-        const existing = pinned.get(key);
-        if (!candidate) {
-            if (existing) {
-                task.proofBindings = existing.map((binding) => ({ ...binding }));
-            }
-            continue;
-        }
-        const existingByIdentity = new Map((existing ?? []).map((binding) => [
-            bindingIdentity(binding),
-            binding,
-        ]));
-        // Repin independently. A later producer row may establish a new proof,
-        // while a sibling binding that still names the same durable row keeps
-        // its original digest and therefore still detects DB-level mutation.
-        const next = candidate.map((binding) => ({
-            ...(existingByIdentity.get(bindingIdentity(binding)) ?? binding),
-        }));
-        pinned.set(key, next);
-        task.proofBindings = next.map((binding) => ({ ...binding }));
+  for (const task of tasks) {
+    const key = buildStateKey(task.nodeId, task.iteration);
+    if (!task.proofBindingRequired) {
+      pinned.delete(key);
+      task.proofBindings = undefined;
+      task.proofBindingStatus = undefined;
+      continue;
     }
+    const candidate = task.proofBindings;
+    const existing = pinned.get(key);
+    if (!candidate) {
+      if (existing) {
+        task.proofBindings = existing.map((binding) => ({ ...binding }));
+      }
+      continue;
+    }
+    const existingByIdentity = new Map((existing ?? []).map((binding) => [bindingIdentity(binding), binding]));
+    // Repin independently. A later producer row may establish a new proof,
+    // while a sibling binding that still names the same durable row keeps
+    // its original digest and therefore still detects DB-level mutation.
+    const next = candidate.map((binding) => ({
+      ...(existingByIdentity.get(bindingIdentity(binding)) ?? binding),
+    }));
+    pinned.set(key, next);
+    task.proofBindings = next.map((binding) => ({ ...binding }));
+  }
 }
 
 /**
@@ -118,30 +108,34 @@ export function pinTaskProofBindings(tasks, pinned) {
  * @param {Record<string, readonly unknown[]>} outputs
  */
 export function verifyTaskProofBindings(tasks, outputs) {
-    for (const task of tasks) {
-        if (!task.proofBindingRequired) {
-            task.proofBindingStatus = undefined;
-            continue;
-        }
-        // An empty binding list proves nothing; treating it as verifiable
-        // would dispatch a proof-required task with zero authority checks.
-        if (!task.proofBindings || task.proofBindings.length === 0) {
-            task.proofBindingStatus = "missing";
-            continue;
-        }
-        let stale = false;
-        for (const binding of task.proofBindings) {
-            const rows = outputs[binding.table] ?? [];
-            const row = rows.find((candidate) => Boolean(candidate &&
-                typeof candidate === "object" &&
-                !Array.isArray(candidate) &&
-                candidate.nodeId === binding.nodeId &&
-                Number(candidate.iteration ?? 0) === binding.iteration));
-            if (!row || digestProofRow(row) !== binding.digest) {
-                stale = true;
-                break;
-            }
-        }
-        task.proofBindingStatus = stale ? "stale" : "current";
+  for (const task of tasks) {
+    if (!task.proofBindingRequired) {
+      task.proofBindingStatus = undefined;
+      continue;
     }
+    // An empty binding list proves nothing; treating it as verifiable
+    // would dispatch a proof-required task with zero authority checks.
+    if (!task.proofBindings || task.proofBindings.length === 0) {
+      task.proofBindingStatus = "missing";
+      continue;
+    }
+    let stale = false;
+    for (const binding of task.proofBindings) {
+      const rows = outputs[binding.table] ?? [];
+      const row = rows.find((candidate) =>
+        Boolean(
+          candidate &&
+          typeof candidate === "object" &&
+          !Array.isArray(candidate) &&
+          candidate.nodeId === binding.nodeId &&
+          Number(candidate.iteration ?? 0) === binding.iteration,
+        ),
+      );
+      if (!row || digestProofRow(row) !== binding.digest) {
+        stale = true;
+        break;
+      }
+    }
+    task.proofBindingStatus = stale ? "stale" : "current";
+  }
 }

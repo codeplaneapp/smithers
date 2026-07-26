@@ -1,9 +1,4 @@
-import {
-  fetchJwks,
-  importRs256Jwk,
-  type FetchJwksOptions,
-  type JsonWebKey,
-} from "./fetchJwks.ts";
+import { fetchJwks, importRs256Jwk, type FetchJwksOptions, type JsonWebKey } from "./fetchJwks.ts";
 
 const ISSUER = "https://token.actions.githubusercontent.com";
 const AUDIENCE = "smithers-review";

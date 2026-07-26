@@ -15,7 +15,9 @@ const SECTION_ORDER: Array<{ key: PublicStorySection; label: string }> = [
 
 export function IssueView(props: { issue: PublicIssue }) {
   const { issue } = props;
-  const sectionsWithStories = SECTION_ORDER.filter((section) => issue.stories.some((story) => story.sections.includes(section.key)));
+  const sectionsWithStories = SECTION_ORDER.filter((section) =>
+    issue.stories.some((story) => story.sections.includes(section.key)),
+  );
   const defaultSection = sectionsWithStories[0]?.key ?? "topStories";
 
   return (
@@ -26,7 +28,11 @@ export function IssueView(props: { issue: PublicIssue }) {
         <Tabs defaultValue={defaultSection}>
           <TabsList>
             {sectionsWithStories.map((section) => (
-              <TabsTrigger key={section.key} value={section.key} count={issue.stories.filter((story) => story.sections.includes(section.key)).length}>
+              <TabsTrigger
+                key={section.key}
+                value={section.key}
+                count={issue.stories.filter((story) => story.sections.includes(section.key)).length}
+              >
                 {section.label}
               </TabsTrigger>
             ))}

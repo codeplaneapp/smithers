@@ -25,9 +25,7 @@ describe("ClaudeCodeAgent rate_limit_event boundaries", () => {
     const interpreter = interpret();
     const past = Math.floor(Date.now() / 1000) - 3600;
     expect(
-      interpreter.onStdoutLine(
-        rateLimitLine({ status: "rejected", rateLimitType: "five_hour", resetsAt: past }),
-      ),
+      interpreter.onStdoutLine(rateLimitLine({ status: "rejected", rateLimitType: "five_hour", resetsAt: past })),
     ).toEqual([]);
 
     const [completed] = interpreter.onStdoutLine(resultLine());
@@ -59,9 +57,7 @@ describe("ClaudeCodeAgent rate_limit_event boundaries", () => {
 
   test("overageStatus rejection still trips the banner when status is absent, with the usage label default", () => {
     const interpreter = interpret();
-    interpreter.onStdoutLine(
-      rateLimitLine({ overageStatus: "rejected", overageDisabledReason: "out_of_credits" }),
-    );
+    interpreter.onStdoutLine(rateLimitLine({ overageStatus: "rejected", overageDisabledReason: "out_of_credits" }));
 
     const [completed] = interpreter.onStdoutLine(resultLine());
     expect(completed.ok).toBe(false);
@@ -102,9 +98,7 @@ describe("ClaudeCodeAgent rate_limit_event boundaries", () => {
 
   test("a non-numeric resetsAt is ignored rather than producing a NaN retry hint", () => {
     const interpreter = interpret();
-    interpreter.onStdoutLine(
-      rateLimitLine({ status: "rejected", rateLimitType: "five_hour", resetsAt: "soon" }),
-    );
+    interpreter.onStdoutLine(rateLimitLine({ status: "rejected", rateLimitType: "five_hour", resetsAt: "soon" }));
 
     const [completed] = interpreter.onStdoutLine(resultLine());
     expect(completed.ok).toBe(false);
@@ -128,9 +122,7 @@ function toolTurn(interpreter, toolName, resultBlock) {
       message: { content: [{ type: "tool_use", id: "t-1", name: toolName, input: {} }] },
     }),
   );
-  return interpreter.onStdoutLine(
-    JSON.stringify({ type: "user", message: { content: [resultBlock] } }),
-  );
+  return interpreter.onStdoutLine(JSON.stringify({ type: "user", message: { content: [resultBlock] } }));
 }
 
 describe("ClaudeCodeAgent tool-output summarization boundaries", () => {
@@ -140,9 +132,7 @@ describe("ClaudeCodeAgent tool-output summarization boundaries", () => {
       type: "tool_result",
       tool_use_id: "t-1",
       is_error: true,
-      content: [
-        { type: "text", text: "<tool_use_error>command not found: frob</tool_use_error>" },
-      ],
+      content: [{ type: "text", text: "<tool_use_error>command not found: frob</tool_use_error>" }],
     });
     expect(completed).toMatchObject({
       type: "action",

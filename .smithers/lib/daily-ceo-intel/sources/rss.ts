@@ -10,7 +10,10 @@ async function fetchOneFeed(source: RssSource, retrievedAt: string): Promise<Fet
   try {
     const { result, retried } = await withOneRetry(() =>
       guardedFetch(source.url, {
-        headers: { "user-agent": USER_AGENT, accept: "application/rss+xml, application/atom+xml, application/xml, text/xml" },
+        headers: {
+          "user-agent": USER_AGENT,
+          accept: "application/rss+xml, application/atom+xml, application/xml, text/xml",
+        },
         allowedContentType: /xml|rss|atom/i,
       }),
     );

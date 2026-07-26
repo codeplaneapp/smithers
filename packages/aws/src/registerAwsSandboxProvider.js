@@ -8,5 +8,5 @@ import { createAwsSandboxProvider } from "./createAwsSandboxProvider.js";
  * @returns {() => void} unregister function
  */
 export function registerAwsSandboxProvider(options = {}) {
-	return registerSandboxProvider(createAwsSandboxProvider(options));
+  return registerSandboxProvider(createAwsSandboxProvider(options));
 }

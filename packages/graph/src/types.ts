@@ -45,7 +45,6 @@ export type CachePolicy<Ctx = unknown> = {
   [key: string]: unknown;
 };
 
-
 export type AgentLike = {
   id?: string;
   tools?: Record<string, unknown>;
@@ -86,10 +85,7 @@ export type Scorer = {
   score: ScorerFn;
 };
 
-export type SamplingConfig =
-  | { type: "all" }
-  | { type: "ratio"; rate: number }
-  | { type: "none" };
+export type SamplingConfig = { type: "all" } | { type: "ratio"; rate: number } | { type: "none" };
 
 export type ScorerBinding = {
   scorer: Scorer;
@@ -276,7 +272,4 @@ export type ExtractOptions = {
   ) => string;
 };
 
-export type ExtractGraph = (
-  root: HostNode | null,
-  opts?: ExtractOptions,
-) => WorkflowGraph | Promise<WorkflowGraph>;
+export type ExtractGraph = (root: HostNode | null, opts?: ExtractOptions) => WorkflowGraph | Promise<WorkflowGraph>;

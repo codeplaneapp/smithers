@@ -33,15 +33,7 @@ export function isHumanTaskNode(node: GatewayRunNode | null | undefined): boolea
  * blocked pointer: a HumanTask parked while a parallel sibling still runs
  * leaves run.status "running" and derives "queued" for the human node.
  */
-const HUMAN_SETTLED_STATUSES = new Set([
-  "done",
-  "completed",
-  "ok",
-  "failed",
-  "error",
-  "cancelled",
-  "canceled",
-]);
+const HUMAN_SETTLED_STATUSES = new Set(["done", "completed", "ok", "failed", "error", "cancelled", "canceled"]);
 
 /**
  * True when a focused HumanTask node may still be waiting on a typed answer,

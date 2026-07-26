@@ -15,12 +15,12 @@ function loadPublishConfig(homeDir = homedir()): { url: string; token: string } 
   }
   if (!url) {
     throw new Error(
-      "no publish URL: set SMITHERS_REVIEW_PUBLISH_URL or write ~/.smithers-review.json with { \"publishUrl\": \"...\" }",
+      'no publish URL: set SMITHERS_REVIEW_PUBLISH_URL or write ~/.smithers-review.json with { "publishUrl": "..." }',
     );
   }
   if (!token) {
     throw new Error(
-      "no publish token: set SMITHERS_REVIEW_PUBLISH_TOKEN or write ~/.smithers-review.json with { \"publishToken\": \"...\" }",
+      'no publish token: set SMITHERS_REVIEW_PUBLISH_TOKEN or write ~/.smithers-review.json with { "publishToken": "..." }',
     );
   }
   return { url: url.replace(/\/$/, ""), token };

@@ -36,9 +36,7 @@ try {
   supportsVibeE2EFlags = false;
 }
 
-describe.skipIf(!runRealAgentE2E || !isVibeInstalled || !supportsVibeE2EFlags)(
-  "VibeAgent E2E (real CLI)",
-  () => {
+describe.skipIf(!runRealAgentE2E || !isVibeInstalled || !supportsVibeE2EFlags)("VibeAgent E2E (real CLI)", () => {
   /** @type {string} */
   let tmpDir;
 
@@ -102,8 +100,7 @@ describe.skipIf(!runRealAgentE2E || !isVibeInstalled || !supportsVibeE2EFlags)(
     });
 
     const result = await agent.generate({
-      prompt:
-        "List the files in the current directory. Just output the filenames, one per line.",
+      prompt: "List the files in the current directory. Just output the filenames, one per line.",
       rootDir: tmpDir,
     });
 
@@ -117,8 +114,7 @@ describe.skipIf(!runRealAgentE2E || !isVibeInstalled || !supportsVibeE2EFlags)(
     });
 
     const result = await agent.generate({
-      prompt:
-        "Read the file hello.js and tell me what it prints. Reply with ONLY the output string, nothing else.",
+      prompt: "Read the file hello.js and tell me what it prints. Reply with ONLY the output string, nothing else.",
       rootDir: tmpDir,
     });
 
@@ -138,8 +134,7 @@ describe.skipIf(!runRealAgentE2E || !isVibeInstalled || !supportsVibeE2EFlags)(
     });
 
     const result = await agent.generate({
-      prompt:
-        "First say 'one', then say 'two', then say 'three'. Say each on a new line.",
+      prompt: "First say 'one', then say 'two', then say 'three'. Say each on a new line.",
       rootDir: tmpDir,
       onEvent: (event) => events.push(event),
     });
@@ -150,11 +145,8 @@ describe.skipIf(!runRealAgentE2E || !isVibeInstalled || !supportsVibeE2EFlags)(
     // The interpreter emits one assistant 'turn' action per model turn.
     // With --max-turns wired through buildCommand, the cap must hold: dropping
     // the flag lets the agent run all three turns and this assertion fails.
-    const turnEvents = events.filter(
-      (e) => e.type === "action" && e.action?.kind === "turn",
-    );
+    const turnEvents = events.filter((e) => e.type === "action" && e.action?.kind === "turn");
     expect(turnEvents.length).toBeGreaterThan(0);
     expect(turnEvents.length).toBeLessThanOrEqual(maxTurns);
   }, 120_000);
-  }
-);
+});

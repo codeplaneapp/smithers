@@ -49,16 +49,14 @@ afterEach(() => {
 describe("migrateSmithersStore — reachable guard branches", () => {
   test("rejects an unknown --to backend with INVALID_INPUT", async () => {
     const cwd = makeWorkspace("migrate-bad-backend");
-    await expect(
-      migrateSmithersStore({ cwd, to: "mysql", env: {} }),
-    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(migrateSmithersStore({ cwd, to: "mysql", env: {} })).rejects.toMatchObject({ code: "INVALID_INPUT" });
   });
 
   test("rejects an unknown --from backend with INVALID_INPUT", async () => {
     const cwd = makeWorkspace("migrate-bad-from");
-    await expect(
-      migrateSmithersStore({ cwd, from: "mongodb", to: "pglite", env: {} }),
-    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(migrateSmithersStore({ cwd, from: "mongodb", to: "pglite", env: {} })).rejects.toMatchObject({
+      code: "INVALID_INPUT",
+    });
   });
 
   test("defaults the target to sqlite when --to is omitted and rejects same source/target", async () => {
@@ -66,16 +64,14 @@ describe("migrateSmithersStore — reachable guard branches", () => {
     seedSqliteStore(cwd);
     // No `to`: normalizeBackend(undefined, "sqlite") returns the "sqlite"
     // fallback, the source infers to sqlite, and the both-sqlite guard fires.
-    await expect(
-      migrateSmithersStore({ cwd, env: {} }),
-    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(migrateSmithersStore({ cwd, env: {} })).rejects.toMatchObject({ code: "INVALID_INPUT" });
   });
 
   test("rejects a forward migration when the SQLite source file is missing", async () => {
     const cwd = makeWorkspace("migrate-missing-source");
-    await expect(
-      migrateSmithersStore({ cwd, to: "pglite", env: {} }),
-    ).rejects.toMatchObject({ code: "CLI_DB_NOT_FOUND" });
+    await expect(migrateSmithersStore({ cwd, to: "pglite", env: {} })).rejects.toMatchObject({
+      code: "CLI_DB_NOT_FOUND",
+    });
   });
 
   test("reverse migration refuses to overwrite an unrelated file at the target path", async () => {
@@ -88,9 +84,9 @@ describe("migrateSmithersStore — reachable guard branches", () => {
     writeFileSync(join(cwd, "smithers.db"), "not a sqlite database", "utf8");
     rmSync(join(cwd, ".smithers", "migrated.json"), { force: true });
     rmSync(join(cwd, ".smithers", "backend.json"), { force: true });
-    await expect(
-      migrateSmithersStore({ cwd, from: "pglite", to: "sqlite", env: {} }),
-    ).rejects.toMatchObject({ code: "DB_WRITE_FAILED" });
+    await expect(migrateSmithersStore({ cwd, from: "pglite", to: "sqlite", env: {} })).rejects.toMatchObject({
+      code: "DB_WRITE_FAILED",
+    });
   });
 
   test("reverse inference ignores a malformed migrated.json receipt and falls back to run counts", async () => {
@@ -109,11 +105,7 @@ describe("migrateSmithersStore — reachable guard branches", () => {
     const cwd = makeWorkspace("migrate-empty-receipt-backend");
     seedSqliteStore(cwd);
     await migrateSmithersStore({ cwd, from: "sqlite", to: "pglite", keepSqlite: false, env: {} });
-    writeFileSync(
-      join(cwd, ".smithers", "migrated.json"),
-      JSON.stringify({ target: { backend: "" } }),
-      "utf8",
-    );
+    writeFileSync(join(cwd, ".smithers", "migrated.json"), JSON.stringify({ target: { backend: "" } }), "utf8");
     const result = await migrateSmithersStore({ cwd, to: "sqlite", env: {} });
     expect(result.source.backend).toBe("pglite");
   });
@@ -142,8 +134,8 @@ describe("migrateSmithersStore — reachable guard branches", () => {
     // to overwrite it.
     await migrateSmithersStore({ cwd, from: "sqlite", to: "pglite", keepSqlite: true, env: {} });
     writeFileSync(join(cwd, ".smithers", "migrated.json"), "@@ not json @@", "utf8");
-    await expect(
-      migrateSmithersStore({ cwd, from: "pglite", to: "sqlite", env: {} }),
-    ).rejects.toMatchObject({ code: "DB_WRITE_FAILED" });
+    await expect(migrateSmithersStore({ cwd, from: "pglite", to: "sqlite", env: {} })).rejects.toMatchObject({
+      code: "DB_WRITE_FAILED",
+    });
   });
 });

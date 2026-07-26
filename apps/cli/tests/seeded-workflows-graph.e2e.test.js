@@ -76,7 +76,12 @@ test("every seeded init-pack workflow renders its graph without a load-time erro
     const r = runSmithers(["graph", rel], { cwd: repo.dir, env, timeoutMs: 90_000 });
     const out = `${r.stdout}\n${r.stderr}`;
     if (r.exitCode !== 0 || LOAD_ERROR.test(out)) {
-      const detail = out.split("\n").find((l) => /message:|error/i.test(l))?.trim().slice(0, 120) ?? "";
+      const detail =
+        out
+          .split("\n")
+          .find((l) => /message:|error/i.test(l))
+          ?.trim()
+          .slice(0, 120) ?? "";
       failures.push(`${file} (exit ${r.exitCode}): ${detail}`);
     }
   }

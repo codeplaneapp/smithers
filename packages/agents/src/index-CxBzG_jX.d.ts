@@ -367,8 +367,8 @@ declare function runAgentPromise<A>(effect: Effect.Effect<A, SmithersError$1, ne
 declare function extractUsageFromOutput(raw: string): CliUsageInfo$1 | undefined;
 declare class BaseCliAgent {
     /**
-   * @param {BaseCliAgentOptions} opts
-   */
+     * @param {BaseCliAgentOptions} opts
+     */
     constructor(opts: BaseCliAgentOptions$1);
     version: string;
     tools: {};
@@ -385,33 +385,33 @@ declare class BaseCliAgent {
     maxOutputBytes: number | undefined;
     extraArgs: string[] | undefined;
     /**
-   * @param {AgentGenerateOptions | undefined} options
-   * @param {AgentInvocationOperation} operation
-   * @returns {Effect.Effect<GenerateTextResult<Record<string, never>, unknown>, SmithersError>}
-   */
+     * @param {AgentGenerateOptions | undefined} options
+     * @param {AgentInvocationOperation} operation
+     * @returns {Effect.Effect<GenerateTextResult<Record<string, never>, unknown>, SmithersError>}
+     */
     runGenerateEffect(options: AgentGenerateOptions$1 | undefined, operation: AgentInvocationOperation): Effect.Effect<GenerateTextResult<Record<string, never>, unknown>, SmithersError$1>;
     /**
-   * @param {AgentGenerateOptions} [options]
-   * @returns {Promise<void>}
-   */
+     * @param {AgentGenerateOptions} [options]
+     * @returns {Promise<void>}
+     */
     preflight(options?: AgentGenerateOptions$1): Promise<void>;
     /**
-   * @param {AgentGenerateOptions} [options]
-   * @returns {Promise<GenerateTextResult<Record<string, never>, unknown>>}
-   */
+     * @param {AgentGenerateOptions} [options]
+     * @returns {Promise<GenerateTextResult<Record<string, never>, unknown>>}
+     */
     generate(options?: AgentGenerateOptions$1): Promise<GenerateTextResult<Record<string, never>, unknown>>;
     /**
-   * @param {AgentGenerateOptions} [options]
-   * @returns {Promise<StreamTextResult<Record<string, never>, unknown>>}
-   */
+     * @param {AgentGenerateOptions} [options]
+     * @returns {Promise<StreamTextResult<Record<string, never>, unknown>>}
+     */
     stream(options?: AgentGenerateOptions$1): Promise<StreamTextResult<Record<string, never>, unknown>>;
     /**
-   * @returns {CliOutputInterpreter | undefined}
-   */
+     * @returns {CliOutputInterpreter | undefined}
+     */
     createOutputInterpreter(): CliOutputInterpreter$1 | undefined;
     /**
-   * @returns {{ provider?: string; model?: string } | undefined}
-   */
+     * @returns {{ provider?: string; model?: string } | undefined}
+     */
     diagnosticHints(): {
         provider?: string;
         model?: string;

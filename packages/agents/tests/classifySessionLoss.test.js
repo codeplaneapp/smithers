@@ -38,11 +38,7 @@ describe("classifySessionLoss", () => {
   });
 
   test("kimi resume banner is session loss with the id captured", () => {
-    const err = classifySessionLoss(
-      "kimi",
-      "",
-      "To resume this session: kimi -r 0a1b2c3d-4e5f-6789-abcd-ef0123456789",
-    );
+    const err = classifySessionLoss("kimi", "", "To resume this session: kimi -r 0a1b2c3d-4e5f-6789-abcd-ef0123456789");
     expect(err).not.toBeNull();
     expect(err.code).toBe("AGENT_SESSION_LOST");
     expect(err.details.kimiSessionId).toBe("0a1b2c3d-4e5f-6789-abcd-ef0123456789");

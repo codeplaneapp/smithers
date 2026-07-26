@@ -13,7 +13,7 @@ import { existsSync } from "node:fs";
  * @returns {import("./ResolvedBinary.js").ResolvedBinary}
  */
 export function resolveGitBinary() {
-	const override = process.env.SMITHERS_GIT_PATH;
-	if (override && existsSync(override)) return { path: override, source: "env" };
-	return { path: "git", source: "path" };
+  const override = process.env.SMITHERS_GIT_PATH;
+  if (override && existsSync(override)) return { path: override, source: "env" };
+  return { path: "git", source: "path" };
 }

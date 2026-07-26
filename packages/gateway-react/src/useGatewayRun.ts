@@ -12,15 +12,14 @@ import { gatewayCollectionAsyncState, type GatewayAsyncState } from "./GatewayAs
 export function useGatewayRun(runId: string | undefined): GatewayAsyncState<GatewayRpcPayload<"getRun">> {
   const { collections } = useSmithersCollections();
   const collection = runId ? collections.run(runId) : undefined;
-  const live = useLiveQuery(
-    (q) => (collection ? q.from({ row: collection }) : undefined),
-    [collection],
-  );
+  const live = useLiveQuery((q) => (collection ? q.from({ row: collection }) : undefined), [collection]);
   const refetch = useCallback(async () => {
     if (runId) await collections.invalidate(["runs"]);
   }, [collections, runId]);
 
-  const data = ((live.data ?? []) as GatewayRunRow[]).find((row) => row.runId === runId) as GatewayRpcPayload<"getRun"> | undefined;
+  const data = ((live.data ?? []) as GatewayRunRow[]).find((row) => row.runId === runId) as
+    | GatewayRpcPayload<"getRun">
+    | undefined;
   return gatewayCollectionAsyncState({
     collection: collection ?? {},
     data,

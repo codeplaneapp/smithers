@@ -25,58 +25,65 @@ import { cliWorkspace } from "./cliWorkspace.js";
  * @returns {string}
  */
 export function findSmithersDb(from) {
-    const startDir = resolve(from ?? process.cwd());
+  const startDir = resolve(from ?? process.cwd());
 
-    // Collect every smithers.db along the upward walk so we can warn about
-    // multiple candidates and enforce the anchor-preference rule.
-    /** @type {string[]} */
-    const allCandidates = [];
-    let dir = startDir;
-    while (true) {
-        const candidate = resolve(dir, "smithers.db");
-        if (existsSync(candidate)) {
-            allCandidates.push(candidate);
-        }
-        const parent = dirname(dir);
-        // Stop at the root of the drive/volume that `from` is on. Windows CI may
-        // put tmpdir() on a different drive than process.cwd(), so resolve("/")
-        // can point at the wrong root and leave this loop stuck.
-        if (parent === dir) break;
-        dir = parent;
+  // Collect every smithers.db along the upward walk so we can warn about
+  // multiple candidates and enforce the anchor-preference rule.
+  /** @type {string[]} */
+  const allCandidates = [];
+  let dir = startDir;
+  while (true) {
+    const candidate = resolve(dir, "smithers.db");
+    if (existsSync(candidate)) {
+      allCandidates.push(candidate);
     }
+    const parent = dirname(dir);
+    // Stop at the root of the drive/volume that `from` is on. Windows CI may
+    // put tmpdir() on a different drive than process.cwd(), so resolve("/")
+    // can point at the wrong root and leave this loop stuck.
+    if (parent === dir) break;
+    dir = parent;
+  }
 
-    if (allCandidates.length === 0) {
-        throw new SmithersError("CLI_DB_NOT_FOUND", "No smithers.db found. Run this command from a directory containing a smithers.db, or use 'smithers up <workflow>' to start a run first.");
-    }
+  if (allCandidates.length === 0) {
+    throw new SmithersError(
+      "CLI_DB_NOT_FOUND",
+      "No smithers.db found. Run this command from a directory containing a smithers.db, or use 'smithers up <workflow>' to start a run first.",
+    );
+  }
 
-    // Prefer the smithers.db that sits at the project anchor (nearest .smithers/).
-    const anchorDir = findSmithersAnchorDir(startDir);
-    const anchorDb = anchorDir ? resolve(anchorDir, "smithers.db") : undefined;
-    // If an anchor directory was found but its DB hasn't been created yet, do NOT
-    // fall back to a stray smithers.db from a parent or sibling directory — that
-    // would silently cross the project boundary.  Instead throw CLI_DB_NOT_FOUND so
-    // the caller (or waitForSmithersDb) can retry until the anchor DB appears.
-    if (anchorDb && !existsSync(anchorDb)) {
-        throw new SmithersError("CLI_DB_NOT_FOUND", `No smithers.db found at project anchor ${anchorDir}. Run 'smithers up <workflow>' to start a run first.`);
-    }
-    const chosen = anchorDb ?? allCandidates[0];
+  // Prefer the smithers.db that sits at the project anchor (nearest .smithers/).
+  const anchorDir = findSmithersAnchorDir(startDir);
+  const anchorDb = anchorDir ? resolve(anchorDir, "smithers.db") : undefined;
+  // If an anchor directory was found but its DB hasn't been created yet, do NOT
+  // fall back to a stray smithers.db from a parent or sibling directory — that
+  // would silently cross the project boundary.  Instead throw CLI_DB_NOT_FOUND so
+  // the caller (or waitForSmithersDb) can retry until the anchor DB appears.
+  if (anchorDb && !existsSync(anchorDb)) {
+    throw new SmithersError(
+      "CLI_DB_NOT_FOUND",
+      `No smithers.db found at project anchor ${anchorDir}. Run 'smithers up <workflow>' to start a run first.`,
+    );
+  }
+  const chosen = anchorDb ?? allCandidates[0];
 
-    if (allCandidates.length > 1) {
-        const others = allCandidates.filter((p) => p !== chosen);
-        process.stderr.write(
-            `[smithers] Warning: multiple smithers.db files found along the directory tree.\n` +
-            `  Using: ${chosen}\n` +
-            others.map((p) => `  Ignored: ${p}`).join("\n") + "\n",
-        );
-    }
+  if (allCandidates.length > 1) {
+    const others = allCandidates.filter((p) => p !== chosen);
+    process.stderr.write(
+      `[smithers] Warning: multiple smithers.db files found along the directory tree.\n` +
+        `  Using: ${chosen}\n` +
+        others.map((p) => `  Ignored: ${p}`).join("\n") +
+        "\n",
+    );
+  }
 
-    return chosen;
+  return chosen;
 }
 /**
  * @param {number} ms
  */
 function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 /**
  * @param {string} [from]
@@ -84,24 +91,23 @@ function sleep(ms) {
  * @returns {Promise<string>}
  */
 export async function waitForSmithersDb(from, opts = {}) {
-    const timeoutMs = Math.max(0, opts.timeoutMs ?? 0);
-    const intervalMs = Math.max(1, opts.intervalMs ?? 100);
-    const startedAt = Date.now();
-    while (true) {
-        try {
-            return findSmithersDb(from);
-        }
-        catch (err) {
-            if (!(err instanceof SmithersError) || err.code !== "CLI_DB_NOT_FOUND") {
-                throw err;
-            }
-            const elapsedMs = Date.now() - startedAt;
-            if (elapsedMs >= timeoutMs) {
-                throw err;
-            }
-            await sleep(Math.min(intervalMs, timeoutMs - elapsedMs));
-        }
+  const timeoutMs = Math.max(0, opts.timeoutMs ?? 0);
+  const intervalMs = Math.max(1, opts.intervalMs ?? 100);
+  const startedAt = Date.now();
+  while (true) {
+    try {
+      return findSmithersDb(from);
+    } catch (err) {
+      if (!(err instanceof SmithersError) || err.code !== "CLI_DB_NOT_FOUND") {
+        throw err;
+      }
+      const elapsedMs = Date.now() - startedAt;
+      if (elapsedMs >= timeoutMs) {
+        throw err;
+      }
+      await sleep(Math.min(intervalMs, timeoutMs - elapsedMs));
     }
+  }
 }
 /**
  * Find and open the resolved Smithers store.
@@ -111,6 +117,12 @@ export async function waitForSmithersDb(from, opts = {}) {
  * @returns {Promise<Pick<import("smithers-orchestrator/OpenSmithersStoreResult").OpenSmithersStoreResult, "adapter" | "db" | "dbPath" | "cleanup" | "choice">>}
  */
 export async function findAndOpenDb(from, opts) {
-    const opened = await openSmithersStore({ cwd: from ?? cliWorkspace.cwd(), mode: "read", wait: opts });
-    return { adapter: opened.adapter, db: opened.db, dbPath: opened.dbPath, cleanup: opened.cleanup, choice: opened.choice };
+  const opened = await openSmithersStore({ cwd: from ?? cliWorkspace.cwd(), mode: "read", wait: opts });
+  return {
+    adapter: opened.adapter,
+    db: opened.db,
+    dbPath: opened.dbPath,
+    cleanup: opened.cleanup,
+    choice: opened.choice,
+  };
 }

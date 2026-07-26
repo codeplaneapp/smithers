@@ -21,16 +21,16 @@ import { RuntimeCapabilityError } from "./RuntimeCapabilityError.js";
  * @returns {Record<string, (...args: unknown[]) => never | Promise<never>>}
  */
 export function createUnsupportedCapability(runtime, capability, operations, mode = "async") {
-    /** @type {Record<string, (...args: unknown[]) => never | Promise<never>>} */
-    const unsupported = {};
-    for (const operation of operations) {
-        unsupported[operation] = () => {
-            const error = new RuntimeCapabilityError(runtime, capability, operation);
-            if (mode === "sync") {
-                throw error;
-            }
-            return Promise.reject(error);
-        };
-    }
-    return unsupported;
+  /** @type {Record<string, (...args: unknown[]) => never | Promise<never>>} */
+  const unsupported = {};
+  for (const operation of operations) {
+    unsupported[operation] = () => {
+      const error = new RuntimeCapabilityError(runtime, capability, operation);
+      if (mode === "sync") {
+        throw error;
+      }
+      return Promise.reject(error);
+    };
+  }
+  return unsupported;
 }

@@ -40,7 +40,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  try { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
+  try {
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch {
+    /* best-effort temp cleanup */
+  }
 });
 
 describe("registerChangelogInSidebar", () => {

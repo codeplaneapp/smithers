@@ -39,194 +39,185 @@ const outputSchema = Schema.Struct({ value: Schema.Number });
  * plus a SmithersDb over it. Returns the descriptor, adapter, and teardown.
  */
 async function bootPg(handles: Array<object>) {
-  const config = PG_URL
-    ? { provider: "postgres" as const, connectionString: PG_URL }
-    : { provider: "pglite" as const };
+  const config = PG_URL ? { provider: "postgres" as const, connectionString: PG_URL } : { provider: "pglite" as const };
   const runtime = await I.createBuilderDbPostgres(config, handles);
   const adapter = new SmithersDb(runtime.db);
   return { db: runtime.db, adapter, close: runtime.close as () => Promise<void> };
 }
 
-function makeWorkflow(
-  name: string,
-  root: object,
-  db: object,
-  env: object,
-  decodedInput: unknown,
-) {
+function makeWorkflow(name: string, root: object, db: object, env: object, decodedInput: unknown) {
   return {
     db,
-    build: (ctx: unknown) =>
-      React.createElement(Workflow, { name }, I.renderNode(root, ctx, decodedInput, env)),
+    build: (ctx: unknown) => React.createElement(Workflow, { name }, I.renderNode(root, ctx, decodedInput, env)),
     opts: {},
   };
 }
 
 function uniqueRunId(prefix: string) {
-  return `${prefix}-${Date.now().toString(36)}-${process.pid}-${Math.floor(
-    Math.random() * 1e6,
-  ).toString(36)}`;
+  return `${prefix}-${Date.now().toString(36)}-${process.pid}-${Math.floor(Math.random() * 1e6).toString(36)}`;
 }
 
-describe.skipIf(process.platform === "win32" && !PG_URL)(
-  "jumpToFrame rewind (postgres)",
-  () => {
-    test("claims stale audits with portable RETURNING and a live-lease predicate", async () => {
-      const { adapter, close } = await bootPg([]);
-      const now = 500_000;
-      const runId = uniqueRunId("pg-rewind-recovery");
-      try {
-        await adapter.insertRun({
-          runId,
-          workflowName: "pg-rewind-recovery",
-          status: "running",
-          createdAtMs: 1,
-        });
-        const id = await writeRewindAuditRow(adapter, {
-          runId,
-          fromFrameNo: 5,
-          toFrameNo: 2,
-          caller: "user:pg-integration",
-          timestampMs: now - 10_000,
-          result: "in_progress",
-          durationMs: null,
-        });
-        await adapter.internalStorage.execute(
-          `INSERT INTO _smithers_rewind_leases (run_id, owner_token, expires_at_ms)
+describe.skipIf(process.platform === "win32" && !PG_URL)("jumpToFrame rewind (postgres)", () => {
+  test("claims stale audits with portable RETURNING and a live-lease predicate", async () => {
+    const { adapter, close } = await bootPg([]);
+    const now = 500_000;
+    const runId = uniqueRunId("pg-rewind-recovery");
+    try {
+      await adapter.insertRun({
+        runId,
+        workflowName: "pg-rewind-recovery",
+        status: "running",
+        createdAtMs: 1,
+      });
+      const id = await writeRewindAuditRow(adapter, {
+        runId,
+        fromFrameNo: 5,
+        toFrameNo: 2,
+        caller: "user:pg-integration",
+        timestampMs: now - 10_000,
+        result: "in_progress",
+        durationMs: null,
+      });
+      await adapter.internalStorage.execute(
+        `INSERT INTO _smithers_rewind_leases (run_id, owner_token, expires_at_ms)
            VALUES (?, ?, ?)`,
-          [runId, "pg-owner", now + 60_000],
-        );
+        [runId, "pg-owner", now + 60_000],
+      );
 
-        expect(await recoverInProgressRewindAudits(adapter, {
+      expect(
+        await recoverInProgressRewindAudits(adapter, {
           nowMs: () => now,
           staleAfterMs: 0,
-        })).toEqual({ recovered: [] });
-        expect((await listRewindAuditRows(adapter, { runId }))[0]?.result).toBe("in_progress");
+        }),
+      ).toEqual({ recovered: [] });
+      expect((await listRewindAuditRows(adapter, { runId }))[0]?.result).toBe("in_progress");
 
-        await adapter.internalStorage.execute(
-          `UPDATE _smithers_rewind_leases SET expires_at_ms = ? WHERE run_id = ?`,
-          [now, runId],
-        );
-        expect(await recoverInProgressRewindAudits(adapter, {
+      await adapter.internalStorage.execute(`UPDATE _smithers_rewind_leases SET expires_at_ms = ? WHERE run_id = ?`, [
+        now,
+        runId,
+      ]);
+      expect(
+        await recoverInProgressRewindAudits(adapter, {
           nowMs: () => now,
           staleAfterMs: 0,
-        })).toEqual({ recovered: [{ id: id as number, runId }] });
-        expect((await listRewindAuditRows(adapter, { runId }))[0]).toMatchObject({
-          result: "partial",
-          durationMs: 10_000,
-        });
-        expect((await adapter.getRun(runId))?.status).toBe("failed");
-      } finally {
-        await close();
-      }
+        }),
+      ).toEqual({ recovered: [{ id: id as number, runId }] });
+      expect((await listRewindAuditRows(adapter, { runId }))[0]).toMatchObject({
+        result: "partial",
+        durationMs: 10_000,
+      });
+      expect((await adapter.getRun(runId))?.status).toBe("failed");
+    } finally {
+      await close();
+    }
+  });
+
+  test("rewinds a finished run to the earliest frame and resume re-executes tasks", async () => {
+    let callsA = 0;
+    let callsB = 0;
+    let callsC = 0;
+
+    const G = Smithers.workflow({ name: "pg-jump", input: inputSchema });
+    const a = G.step("task:a", {
+      output: outputSchema,
+      run: () => {
+        callsA += 1;
+        return { value: callsA };
+      },
     });
+    const b = G.step("task:b", {
+      output: outputSchema,
+      run: () => {
+        callsB += 1;
+        return { value: callsB };
+      },
+    });
+    const c = G.step("task:c", {
+      output: outputSchema,
+      run: () => {
+        callsC += 1;
+        return { value: callsC };
+      },
+    });
+    const wf = G.from(G.sequence(a, b, c));
+    const handles = I.collectHandles(wf.node);
+    const { db, adapter, close } = await bootPg(handles);
 
-    test("rewinds a finished run to the earliest frame and resume re-executes tasks", async () => {
-      let callsA = 0;
-      let callsB = 0;
-      let callsC = 0;
-
-      const G = Smithers.workflow({ name: "pg-jump", input: inputSchema });
-      const a = G.step("task:a", {
-        output: outputSchema,
-        run: () => {
-          callsA += 1;
-          return { value: callsA };
-        },
-      });
-      const b = G.step("task:b", {
-        output: outputSchema,
-        run: () => {
-          callsB += 1;
-          return { value: callsB };
-        },
-      });
-      const c = G.step("task:c", {
-        output: outputSchema,
-        run: () => {
-          callsC += 1;
-          return { value: callsC };
-        },
-      });
-      const wf = G.from(G.sequence(a, b, c));
-      const handles = I.collectHandles(wf.node);
-      const { db, adapter, close } = await bootPg(handles);
-
-      try {
-        const runId = uniqueRunId("pg-jump");
-        const firstRun = await Effect.runPromise(
-          runWorkflow(
-            makeWorkflow("pg-jump", wf.node, db, Context.empty(), { variant: "A" }),
-            { input: { variant: "A" }, runId },
-          ),
-        );
-        expect(firstRun.status).toBe("finished");
-        expect(callsA).toBe(1);
-        expect(callsB).toBe(1);
-        expect(callsC).toBe(1);
-
-        // Drop jj pointers so the rewind exercises the DB/replay layer without a
-        // real sandbox (VCS revert is covered by the unit tests).
-        for (const attempt of await adapter.listAttemptsForRun(runId)) {
-          await adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
-            jjPointer: null,
-            jjCwd: null,
-          });
-        }
-
-        const framesBefore = await adapter.listFrames(runId, 10_000);
-        const earliestFrameNo = framesBefore.reduce(
-          (min, frame) => Math.min(min, Number(frame.frameNo)),
-          Number.POSITIVE_INFINITY,
-        );
-        const latestBefore = await adapter.getLastFrame(runId);
-        expect(Number.isFinite(earliestFrameNo)).toBe(true);
-        // A multi-step run must produce more than one frame, or the rewind would
-        // short-circuit and never exercise the truncation transaction.
-        expect(Number(latestBefore?.frameNo)).toBeGreaterThan(earliestFrameNo);
-
-        // Before the fix this threw `TypeError: Could not resolve Bun SQLite
-        // client from adapter.` on the Postgres adapter.
-        const rewind = await jumpToFrame({
-          adapter,
+    try {
+      const runId = uniqueRunId("pg-jump");
+      const firstRun = await Effect.runPromise(
+        runWorkflow(makeWorkflow("pg-jump", wf.node, db, Context.empty(), { variant: "A" }), {
+          input: { variant: "A" },
           runId,
-          frameNo: earliestFrameNo,
-          confirm: true,
-          caller: "user:pg-integration",
+        }),
+      );
+      expect(firstRun.status).toBe("finished");
+      expect(callsA).toBe(1);
+      expect(callsB).toBe(1);
+      expect(callsC).toBe(1);
+
+      // Drop jj pointers so the rewind exercises the DB/replay layer without a
+      // real sandbox (VCS revert is covered by the unit tests).
+      for (const attempt of await adapter.listAttemptsForRun(runId)) {
+        await adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
+          jjPointer: null,
+          jjCwd: null,
         });
-
-        expect(rewind.ok).toBe(true);
-        expect(rewind.newFrameNo).toBe(earliestFrameNo);
-        expect(rewind.deletedFrames).toBeGreaterThan(0);
-
-        // Frames past the target were truncated, the run was flipped out of its
-        // terminal status, and the TimeTravelJumped event was persisted through
-        // the portable event-insert path.
-        const latestAfter = await adapter.getLastFrame(runId);
-        expect(Number(latestAfter?.frameNo)).toBe(earliestFrameNo);
-        const runAfter = await adapter.getRun(runId);
-        expect(runAfter?.status).toBe("running");
-        const events = await adapter.internalStorage.queryAll(
-          `SELECT type FROM _smithers_events WHERE run_id = ? AND type = 'TimeTravelJumped'`,
-          [runId],
-        );
-        expect(events.length).toBeGreaterThan(0);
-
-        // Resume from the rewound frame and re-drive the workflow to completion.
-        const resumed = await Effect.runPromise(
-          runWorkflow(
-            makeWorkflow("pg-jump", wf.node, db, Context.empty(), { variant: "A" }),
-            { input: { variant: "A" }, runId, resume: true },
-          ),
-        );
-        expect(resumed.status).toBe("finished");
-        // Rewinding to the earliest frame re-executes every task at least once.
-        expect(callsA).toBeGreaterThanOrEqual(2);
-        expect(callsB).toBeGreaterThanOrEqual(2);
-        expect(callsC).toBeGreaterThanOrEqual(2);
-      } finally {
-        await close();
       }
-    });
-  },
-);
+
+      const framesBefore = await adapter.listFrames(runId, 10_000);
+      const earliestFrameNo = framesBefore.reduce(
+        (min, frame) => Math.min(min, Number(frame.frameNo)),
+        Number.POSITIVE_INFINITY,
+      );
+      const latestBefore = await adapter.getLastFrame(runId);
+      expect(Number.isFinite(earliestFrameNo)).toBe(true);
+      // A multi-step run must produce more than one frame, or the rewind would
+      // short-circuit and never exercise the truncation transaction.
+      expect(Number(latestBefore?.frameNo)).toBeGreaterThan(earliestFrameNo);
+
+      // Before the fix this threw `TypeError: Could not resolve Bun SQLite
+      // client from adapter.` on the Postgres adapter.
+      const rewind = await jumpToFrame({
+        adapter,
+        runId,
+        frameNo: earliestFrameNo,
+        confirm: true,
+        caller: "user:pg-integration",
+      });
+
+      expect(rewind.ok).toBe(true);
+      expect(rewind.newFrameNo).toBe(earliestFrameNo);
+      expect(rewind.deletedFrames).toBeGreaterThan(0);
+
+      // Frames past the target were truncated, the run was flipped out of its
+      // terminal status, and the TimeTravelJumped event was persisted through
+      // the portable event-insert path.
+      const latestAfter = await adapter.getLastFrame(runId);
+      expect(Number(latestAfter?.frameNo)).toBe(earliestFrameNo);
+      const runAfter = await adapter.getRun(runId);
+      expect(runAfter?.status).toBe("running");
+      const events = await adapter.internalStorage.queryAll(
+        `SELECT type FROM _smithers_events WHERE run_id = ? AND type = 'TimeTravelJumped'`,
+        [runId],
+      );
+      expect(events.length).toBeGreaterThan(0);
+
+      // Resume from the rewound frame and re-drive the workflow to completion.
+      const resumed = await Effect.runPromise(
+        runWorkflow(makeWorkflow("pg-jump", wf.node, db, Context.empty(), { variant: "A" }), {
+          input: { variant: "A" },
+          runId,
+          resume: true,
+        }),
+      );
+      expect(resumed.status).toBe("finished");
+      // Rewinding to the earliest frame re-executes every task at least once.
+      expect(callsA).toBeGreaterThanOrEqual(2);
+      expect(callsB).toBeGreaterThanOrEqual(2);
+      expect(callsC).toBeGreaterThanOrEqual(2);
+    } finally {
+      await close();
+    }
+  });
+});

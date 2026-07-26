@@ -96,8 +96,7 @@ export function syncSelection(state: {
 
 /** True when an RPC reject is the idempotent "already decided" case to suppress. */
 function isAlreadyDecided(error: unknown): boolean {
-  const message =
-    error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
   return /already.?decided/i.test(message);
 }
 
@@ -121,8 +120,7 @@ export const useApprovalsStore = create<ApprovalsState>((set, get) => ({
 
   select: (id) => set({ selectedId: id }),
 
-  setNote: (id, note) =>
-    set((state) => ({ noteById: { ...state.noteById, [id]: note } })),
+  setNote: (id, note) => set((state) => ({ noteById: { ...state.noteById, [id]: note } })),
 
   approve: (id) => {
     const { gates, noteById, rpc } = get();
@@ -175,10 +173,12 @@ export const useApprovalsStore = create<ApprovalsState>((set, get) => ({
         set({ gates: nextGates, decisions: nextDecisions, selectedId, actingId: null });
 
         const label = gateLabel(gate);
-        useChatStore.getState().say(
-          `Approved gate \`${label}\` on run \`${shortRunId(gate.runId)}\`. The waiting node will resume.` +
-            (note === "" ? "" : `\n\n> ${note}`),
-        );
+        useChatStore
+          .getState()
+          .say(
+            `Approved gate \`${label}\` on run \`${shortRunId(gate.runId)}\`. The waiting node will resume.` +
+              (note === "" ? "" : `\n\n> ${note}`),
+          );
         useNotificationsStore.getState().notify({
           title: "Approval granted",
           detail: `${label} · ${shortRunId(gate.runId)}`,
@@ -259,10 +259,12 @@ export const useApprovalsStore = create<ApprovalsState>((set, get) => ({
         });
 
         const label = gateLabel(gate);
-        useChatStore.getState().say(
-          `Denied gate \`${label}\` on run \`${shortRunId(gate.runId)}\`. The waiting gate was failed.` +
-            (note === "" ? "" : `\n\n> ${note}`),
-        );
+        useChatStore
+          .getState()
+          .say(
+            `Denied gate \`${label}\` on run \`${shortRunId(gate.runId)}\`. The waiting gate was failed.` +
+              (note === "" ? "" : `\n\n> ${note}`),
+          );
         useNotificationsStore.getState().notify({
           title: "Approval denied",
           detail: `${label} · ${shortRunId(gate.runId)}`,

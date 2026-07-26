@@ -8,9 +8,7 @@ import { createBrowserRuntime } from "../src/browser-runtime.js";
 
 const runtime = {
   runPromise(value) {
-    return value && typeof value.pipe === "function"
-      ? Effect.runPromise(value)
-      : Promise.resolve(value);
+    return value && typeof value.pipe === "function" ? Effect.runPromise(value) : Promise.resolve(value);
   },
 };
 
@@ -40,9 +38,7 @@ describe("SmithersCtx.resolveWorktreePath", () => {
         resolveWorktreePath: (path, opts) => resolve(opts?.baseRootDir ?? "", path),
       },
     });
-    expect(ctx.resolveWorktreePath(".smithers/wt/t1")).toBe(
-      resolve("/repo/.smithers/workflows", ".smithers/wt/t1"),
-    );
+    expect(ctx.resolveWorktreePath(".smithers/wt/t1")).toBe(resolve("/repo/.smithers/workflows", ".smithers/wt/t1"));
   });
 });
 
@@ -89,7 +85,16 @@ describe("WorkflowDriver runtimeAdapter threading", () => {
       signals: {
         load: async (runId) => {
           callCount += 1;
-          return [{ seq: callCount - 1, signalName: "REVISE", correlationId: null, payloadJson: JSON.stringify({ n: callCount }), receivedAtMs: callCount, runId }];
+          return [
+            {
+              seq: callCount - 1,
+              signalName: "REVISE",
+              correlationId: null,
+              payloadJson: JSON.stringify({ n: callCount }),
+              receivedAtMs: callCount,
+              runId,
+            },
+          ];
         },
       },
     };
@@ -139,7 +144,15 @@ describe("WorkflowDriver runtimeAdapter threading", () => {
 
     await driver.run({
       input: {},
-      signals: [{ seq: 0, signalName: "REVISE", correlationId: null, payloadJson: JSON.stringify({ feedback: "seeded" }), receivedAtMs: 1 }],
+      signals: [
+        {
+          seq: 0,
+          signalName: "REVISE",
+          correlationId: null,
+          payloadJson: JSON.stringify({ feedback: "seeded" }),
+          receivedAtMs: 1,
+        },
+      ],
     });
 
     expect(seenCtx.signalRows("REVISE")[0].payload).toEqual({ feedback: "seeded" });
@@ -190,7 +203,9 @@ describe("WorkflowDriver runtimeAdapter threading", () => {
     const savedOutputs = new Map();
     const runtimeAdapter = createBrowserRuntime();
     // Seed the browser runtime's own storage with the exact shape WorkflowDriver expects to resume from.
-    await runtimeAdapter.storage.saveOutputs("run-resume", { seed_output: [{ nodeId: "seed", iteration: 0, value: 1 }] });
+    await runtimeAdapter.storage.saveOutputs("run-resume", {
+      seed_output: [{ nodeId: "seed", iteration: 0, value: 1 }],
+    });
 
     const decisions = [
       { _tag: "Execute", tasks: [{ nodeId: "agentTask", iteration: 0 }] },
@@ -215,8 +230,7 @@ describe("WorkflowDriver runtimeAdapter threading", () => {
         taskCompleted: () => decisions.shift(),
       }),
       runtimeAdapter,
-      executeTask: (task) =>
-        task.nodeId === "agentTask" ? { summary: "agent-done" } : { derived: "compute-done" },
+      executeTask: (task) => (task.nodeId === "agentTask" ? { summary: "agent-done" } : { derived: "compute-done" }),
     });
 
     const result = await driver.run({ runId: "run-resume", input: {} });

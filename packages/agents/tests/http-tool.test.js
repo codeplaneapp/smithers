@@ -135,10 +135,7 @@ describe("createHttpTool", () => {
       );
     try {
       await expect(
-        createHttpTool({ maxResponseBytes: 10 }).execute(
-          { url: `${baseUrl}/large` },
-          callOptions,
-        ),
+        createHttpTool({ maxResponseBytes: 10 }).execute({ url: `${baseUrl}/large` }, callOptions),
       ).rejects.toThrow("exceeds the 10-byte limit");
       expect(cancelled).toBe(true);
     } finally {
@@ -163,10 +160,7 @@ describe("createHttpTool", () => {
       );
     try {
       await expect(
-        createHttpTool({ maxResponseBytes: 5 }).execute(
-          { url: `${baseUrl}/chunked` },
-          callOptions,
-        ),
+        createHttpTool({ maxResponseBytes: 5 }).execute({ url: `${baseUrl}/chunked` }, callOptions),
       ).rejects.toThrow("exceeds the 5-byte limit");
       expect(cancelled).toBe(true);
     } finally {
@@ -176,8 +170,7 @@ describe("createHttpTool", () => {
 
   test("keeps body-less responses that declare an oversized Content-Length (HEAD)", async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () =>
-      new Response(null, { headers: { "content-length": "999999999" } });
+    globalThis.fetch = async () => new Response(null, { headers: { "content-length": "999999999" } });
     try {
       const result = await createHttpTool({ maxResponseBytes: 10 }).execute(
         { method: "HEAD", url: `${baseUrl}/large` },
@@ -197,10 +190,7 @@ describe("createHttpTool", () => {
         headers: { "content-type": "application/json", "content-length": "11" },
       });
     try {
-      const result = await createHttpTool({ maxResponseBytes: 11 }).execute(
-        { url: `${baseUrl}/exact` },
-        callOptions,
-      );
+      const result = await createHttpTool({ maxResponseBytes: 11 }).execute({ url: `${baseUrl}/exact` }, callOptions);
       expect(result.body).toEqual({ ok: true });
     } finally {
       globalThis.fetch = originalFetch;

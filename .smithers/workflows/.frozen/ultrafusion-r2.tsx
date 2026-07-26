@@ -149,13 +149,9 @@ function fusionAgentFor(model: string) {
 function cfg(ctx: any) {
   const prompt = ctx.input?.prompt ?? "";
   if (prompt.trim().length < 20) {
-    throw new Error(
-      'ULTRAFUSION_NO_PROMPT: pass the task via --input \'{"prompt":"..."}\' (≥20 chars).',
-    );
+    throw new Error('ULTRAFUSION_NO_PROMPT: pass the task via --input \'{"prompt":"..."}\' (≥20 chars).');
   }
-  const slug = (ctx.input?.slug ?? "task")
-    .replace(/[^a-zA-Z0-9-]/g, "-")
-    .slice(0, 40);
+  const slug = (ctx.input?.slug ?? "task").replace(/[^a-zA-Z0-9-]/g, "-").slice(0, 40);
   const hours = Math.min(8, Math.max(1, ctx.input?.laneTimeoutHours ?? 5));
   return {
     prompt,
@@ -220,9 +216,9 @@ export default smithers((ctx) => {
   const perm = permutation(ctx.runId);
   const fusion = fusionAgentFor(c.fusionModel);
   const brief = ctx.outputMaybe(outputs.ufBrief, { nodeId: "frame" });
-  const laneRows = LETTERS.map((L) =>
-    ctx.outputMaybe(outputs.ufLane, { nodeId: `lane-${L}` }),
-  ).filter(Boolean) as any[];
+  const laneRows = LETTERS.map((L) => ctx.outputMaybe(outputs.ufLane, { nodeId: `lane-${L}` })).filter(
+    Boolean,
+  ) as any[];
   const fusionRow = ctx.outputMaybe(outputs.ufFusion, { nodeId: "fusion" });
   const roster = ctx.outputMaybe(outputs.ufRoster, { nodeId: "roster" });
 
@@ -234,12 +230,7 @@ export default smithers((ctx) => {
           {/* 1 · Frame: the fusion agent normalizes the raw prompt into one
                  identical lane brief + a findings contract that makes four
                  independent outputs comparable and adjudicable. */}
-          <Task
-            id="frame"
-            output={outputs.ufBrief}
-            agent={fusion}
-            timeoutMs={1_800_000}
-          >
+          <Task id="frame" output={outputs.ufBrief} agent={fusion} timeoutMs={1_800_000}>
             {`You are framing a blind multi-agent "Ultrafusion" round. Turn the task below into
 (1) briefMarkdown — the complete, self-contained brief every lane executes IDENTICALLY (keep every
 requirement of the task; do not narrow scope), and
@@ -295,11 +286,7 @@ where findings is the JSON array from the contract with ids prefixed "${L}-" (e.
           {/* 3 · Guard: fusion needs at least two surviving lanes. Mounted only
                  once the lanes exist in the graph. */}
           {brief ? (
-            <Task
-              id="quorum"
-              output={outputs.ufRoster}
-              dependsOn={["lane-A", "lane-B", "lane-C", "lane-D"]}
-            >
+            <Task id="quorum" output={outputs.ufRoster} dependsOn={["lane-A", "lane-B", "lane-C", "lane-D"]}>
               {() => {
                 if (laneRows.length < 2) {
                   throw new Error(
@@ -318,12 +305,7 @@ where findings is the JSON array from the contract with ids prefixed "${L}-" (e.
           {/* 4 · Blind fusion: anonymized content only. The roster is not
                  persisted yet; judge content, never authorship. */}
           {brief && ctx.outputMaybe(outputs.ufRoster, { nodeId: "quorum" }) ? (
-            <Task
-              id="fusion"
-              output={outputs.ufFusion}
-              agent={fusion}
-              timeoutMs={10_800_000}
-            >
+            <Task id="fusion" output={outputs.ufFusion} agent={fusion} timeoutMs={10_800_000}>
               {`You are the fusion judge of a blind Ultrafusion round. ${laneRows.length} anonymous lanes
 (${laneRows.map((r: any) => r.laneId).join(", ")}) independently executed the same brief. Lanes are
 anonymized by letter; do NOT attempt to identify which model produced which lane — judge content only.
@@ -333,12 +315,12 @@ ${brief?.briefMarkdown ?? ""}
 
 PER-LANE MATERIAL (summaries below; read each lane's FULL report.md and any poc/ evidence at its path):
 ${laneRows
-                  .map(
-                    (r: any) => `--- lane ${r.laneId} (full report: ${r.reportPath}) ---
+  .map(
+    (r: any) => `--- lane ${r.laneId} (full report: ${r.reportPath}) ---
 ${r.summaryMarkdown}
 findings: ${r.findings}`,
-                  )
-                  .join("\n\n")}
+  )
+  .join("\n\n")}
 
 WRITE BOTH ARTIFACTS TO DISK with your file tools. Do NOT return their contents in your JSON
 answer — they are far too large for a structured response, and an over-long answer fails the task.
@@ -384,52 +366,43 @@ Then return ONLY the two paths and a short headline verdict (a few sentences, un
           {/* 6 · Comparative scoring, derived from the blind adjudication. */}
           {fusionRow && roster
             ? LETTERS.map((L) => (
-              <Task key={L} id={`score-${L}`} output={outputs.ufScore}>
-                {() => {
-                  const map = parseJson(roster.mapping, {})[L] ?? {
-                    agentKey: "unknown",
-                    model: "unknown",
-                  };
-                  const laneRow = laneRows.find((r: any) => r.laneId === L);
-                  const adj = (
-                    readAdjudications(fusionRow.adjudicationsPath) as any[]
-                  ).filter(
-                    (a) =>
-                      typeof a?.findingId === "string" &&
-                      a.findingId.startsWith(`${L}-`),
-                  );
-                  const count = (v: string) =>
-                    adj.filter((a) => a.verdict === v).length;
-                  const u = count("unique-accepted");
-                  const s = count("shared-accepted");
-                  const w = count("rejected-weak");
-                  const x = count("rejected-wrong");
-                  const points = laneRow ? 3 * u + s - w - 3 * x : -10; // a dead lane scores below any live one
-                  return {
-                    laneId: L,
-                    agentKey: map.agentKey,
-                    model: map.model,
-                    uniqueAccepted: u,
-                    sharedAccepted: s,
-                    rejectedWeak: w,
-                    rejectedWrong: x,
-                    points,
-                    verdictNote: laneRow
-                      ? `${adj.length} findings adjudicated: ${u} unique, ${s} shared, ${w} weak, ${x} wrong`
-                      : "lane produced no output (failed or timed out)",
-                  };
-                }}
-              </Task>
-            ))
+                <Task key={L} id={`score-${L}`} output={outputs.ufScore}>
+                  {() => {
+                    const map = parseJson(roster.mapping, {})[L] ?? {
+                      agentKey: "unknown",
+                      model: "unknown",
+                    };
+                    const laneRow = laneRows.find((r: any) => r.laneId === L);
+                    const adj = (readAdjudications(fusionRow.adjudicationsPath) as any[]).filter(
+                      (a) => typeof a?.findingId === "string" && a.findingId.startsWith(`${L}-`),
+                    );
+                    const count = (v: string) => adj.filter((a) => a.verdict === v).length;
+                    const u = count("unique-accepted");
+                    const s = count("shared-accepted");
+                    const w = count("rejected-weak");
+                    const x = count("rejected-wrong");
+                    const points = laneRow ? 3 * u + s - w - 3 * x : -10; // a dead lane scores below any live one
+                    return {
+                      laneId: L,
+                      agentKey: map.agentKey,
+                      model: map.model,
+                      uniqueAccepted: u,
+                      sharedAccepted: s,
+                      rejectedWeak: w,
+                      rejectedWrong: x,
+                      points,
+                      verdictNote: laneRow
+                        ? `${adj.length} findings adjudicated: ${u} unique, ${s} shared, ${w} weak, ${x} wrong`
+                        : "lane produced no output (failed or timed out)",
+                    };
+                  }}
+                </Task>
+              ))
             : null}
 
           {/* 7 · Artifact assembly — last node, so its row is the run output. */}
           {fusionRow && roster ? (
-            <Task
-              id="artifact"
-              output={outputs.ufArtifact}
-              dependsOn={["score-A", "score-B", "score-C", "score-D"]}
-            >
+            <Task id="artifact" output={outputs.ufArtifact} dependsOn={["score-A", "score-B", "score-C", "score-D"]}>
               {() => {
                 mkdirSync(c.dir, { recursive: true });
                 if (!existsSync(fusionRow.fusedPath)) {
@@ -437,26 +410,19 @@ Then return ONLY the two paths and a short headline verdict (a few sentences, un
                     `fusion.md missing at ${fusionRow.fusedPath} — the fusion agent must write it to disk.`,
                   );
                 }
-                const scores = LETTERS.map((L) =>
-                  ctx.outputMaybe(outputs.ufScore, { nodeId: `score-${L}` }),
-                ).filter(Boolean) as any[];
+                const scores = LETTERS.map((L) => ctx.outputMaybe(outputs.ufScore, { nodeId: `score-${L}` })).filter(
+                  Boolean,
+                ) as any[];
                 const ranked = [...scores].sort((a, b) => b.points - a.points);
                 writeFileSync(
                   join(c.dir, "scores.json"),
-                  JSON.stringify(
-                    { roster: parseJson(roster.mapping, {}), scores: ranked },
-                    null,
-                    2,
-                  ),
+                  JSON.stringify({ roster: parseJson(roster.mapping, {}), scores: ranked }, null, 2),
                 );
                 return {
                   dir: c.dir,
                   fusedPath: join(c.dir, "fusion.md"),
                   ranking: ranked
-                    .map(
-                      (r, i) =>
-                        `${i + 1}. lane ${r.laneId} (${r.agentKey}) ${r.points}pts [${r.verdictNote}]`,
-                    )
+                    .map((r, i) => `${i + 1}. lane ${r.laneId} (${r.agentKey}) ${r.points}pts [${r.verdictNote}]`)
                     .join("\n"),
                 };
               }}

@@ -25,7 +25,10 @@ describe("createSmithers Sandbox default workflow", () => {
     // injects a default workflow object whose `build()` renders a Workflow named
     // `sandbox:<id>` wrapping the sandbox children. Invoking that build closure
     // exercises the arrow that only runs when the sandbox actually renders.
-    const api = createSmithers({ result: z.object({ v: z.string() }) }, { dbPath: makeDbPath("smithers-sandbox-build-") });
+    const api = createSmithers(
+      { result: z.object({ v: z.string() }) },
+      { dbPath: makeDbPath("smithers-sandbox-build-") },
+    );
     try {
       const sandbox = api.Sandbox({ id: "box", children: "sandbox-child" });
       const workflow = sandbox.props.workflow;
@@ -69,8 +72,8 @@ describe("migrateSmithersStore source-open failures", () => {
     dirs.push(ws);
     mkdirSync(join(ws, ".smithers"), { recursive: true });
     mkdirSync(join(ws, "smithers.db"), { recursive: true });
-    await expect(
-      migrateSmithersStore({ cwd: ws, from: "sqlite", to: "pglite", env: {} }),
-    ).rejects.toMatchObject({ code: "DB_QUERY_FAILED" });
+    await expect(migrateSmithersStore({ cwd: ws, from: "sqlite", to: "pglite", env: {} })).rejects.toMatchObject({
+      code: "DB_QUERY_FAILED",
+    });
   });
 });

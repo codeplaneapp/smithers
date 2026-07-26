@@ -57,7 +57,8 @@ export function SimpleWorkflowDashboard({
   const runsRaw = useGatewayRuns({ filter: { workflow, limit: runLimit } });
   const actions = useGatewayActions();
   const runs = useMemo(
-    () => ((runsRaw.data ?? []) as SimpleWorkflowRun[]).filter((run) => !run.workflowKey || run.workflowKey === workflow),
+    () =>
+      ((runsRaw.data ?? []) as SimpleWorkflowRun[]).filter((run) => !run.workflowKey || run.workflowKey === workflow),
     [runsRaw.data, workflow],
   );
   const selectedRunPresent = selectedRunId ? runs.some((run) => run.runId === selectedRunId) : false;

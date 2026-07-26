@@ -14,9 +14,10 @@ const workRow = { summary: "worked", actionsTaken: ["did a thing"], blocked: fal
 const verifyRow = (done: boolean, remaining: string[] = []) => ({ done, remaining, evidence: "checked with commands" });
 
 function loopUntil(frame: RenderedWorkflow, id: string): string | undefined {
-  const visit = (node: any): any => node?.tag === "smithers:ralph" && node.props?.id === id
-    ? node.props
-    : (node?.children ?? []).map(visit).find(Boolean);
+  const visit = (node: any): any =>
+    node?.tag === "smithers:ralph" && node.props?.id === id
+      ? node.props
+      : (node?.children ?? []).map(visit).find(Boolean);
   return visit(JSON.parse(frame.toXml()))?.until;
 }
 
@@ -96,13 +97,19 @@ describe("finish-campaigns workflow", () => {
     };
     const approved = await renderWorkflow(workflow, {
       input: {},
-      outputs: { ...doneOutputs, pushApproval: [{ nodeId: "push-approval", iteration: 0, approved: true, note: null }] },
+      outputs: {
+        ...doneOutputs,
+        pushApproval: [{ nodeId: "push-approval", iteration: 0, approved: true, note: null }],
+      },
       workflowPath,
     });
     expect(approved.tasks.map(({ nodeId }) => nodeId)).toContain("push-main");
     const denied = await renderWorkflow(workflow, {
       input: {},
-      outputs: { ...doneOutputs, pushApproval: [{ nodeId: "push-approval", iteration: 0, approved: false, note: "not yet" }] },
+      outputs: {
+        ...doneOutputs,
+        pushApproval: [{ nodeId: "push-approval", iteration: 0, approved: false, note: "not yet" }],
+      },
       workflowPath,
     });
     const deniedIds = denied.tasks.map(({ nodeId }) => nodeId);

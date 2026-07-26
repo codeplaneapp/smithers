@@ -62,8 +62,16 @@ function createBumpFixture(root) {
   writeFixture(root, "packages/widget/package.json", JSON.stringify({ name: "widget", version: "1.0.0" }));
   writeFixture(root, "apps/demo/package.json", JSON.stringify({ name: "demo", version: "1.0.0" }));
   writeFixture(root, ".smithers/lib/plue-provider.ts", 'export const DEFAULT_ORCHESTRATOR_VERSION = "1.0.0";\n');
-  writeFixture(root, "packages/gateway-client/src/SmithersGatewayClient.ts", 'const DEFAULT_CLIENT_VERSION = "1.0.0";\n');
-  writeFixture(root, "packages/react-reconciler/src/reconciler.js", 'const injectedDevToolsConfig = {\n  version: "1.0.0"\n};\n');
+  writeFixture(
+    root,
+    "packages/gateway-client/src/SmithersGatewayClient.ts",
+    'const DEFAULT_CLIENT_VERSION = "1.0.0";\n',
+  );
+  writeFixture(
+    root,
+    "packages/react-reconciler/src/reconciler.js",
+    'const injectedDevToolsConfig = {\n  version: "1.0.0"\n};\n',
+  );
   writeFixture(root, "pnpm-lock.yaml", "stale pnpm lock\n");
   writeFixture(root, "bun.lock", "stale bun lock\n");
   for (const artifact of [
@@ -75,7 +83,8 @@ function createBumpFixture(root) {
     "apps/cli/docs/llms-full.txt",
     "apps/cli/docs/SKILL.md",
     "skills/smithers/llms-full.txt",
-  ]) writeFixture(root, artifact, "artifact\n");
+  ])
+    writeFixture(root, artifact, "artifact\n");
 }
 
 function runBumpFixture(root, { bun = true } = {}) {

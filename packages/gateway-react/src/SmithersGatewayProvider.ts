@@ -17,10 +17,14 @@ function headersIdentity(headers: HeadersInit | undefined) {
   if (!headers) {
     return "";
   }
-  const entries = Symbol.iterator in Object(headers)
-    ? [...(headers as Iterable<readonly [string, string]>)]
-    : Object.entries(headers as Record<string, string>);
-  return entries.map(([name, value]) => `${name.toLowerCase()}:${value}`).sort().join("\n");
+  const entries =
+    Symbol.iterator in Object(headers)
+      ? [...(headers as Iterable<readonly [string, string]>)]
+      : Object.entries(headers as Record<string, string>);
+  return entries
+    .map(([name, value]) => `${name.toLowerCase()}:${value}`)
+    .sort()
+    .join("\n");
 }
 
 /**
@@ -73,9 +77,7 @@ export function SmithersGatewayProvider(props: {
   // Ownership rides with the instance: a client the provider constructed is
   // the provider's to close, a caller-supplied one never is.
   const rpc = useMemo(
-    () => provided
-      ? { client: provided, owned: false }
-      : { client: new SmithersGatewayClient(options), owned: true },
+    () => (provided ? { client: provided, owned: false } : { client: new SmithersGatewayClient(options), owned: true }),
     // Memoize on option *content* so an inline `options` object literal does
     // not re-create the client (and trigger a reconnect storm) every render —
     // while every behavior-affecting option still rotates it, so a new key,
@@ -97,14 +99,26 @@ export function SmithersGatewayProvider(props: {
   useOwnedClient(client, rpc.owned);
   const clientConfig = client as SmithersGatewayClient & { baseUrl?: string; token?: string };
   const apiBaseUrl = clientConfig.baseUrl ?? options?.baseUrl ?? "http://127.0.0.1:7331";
-  const mode = props.mode ?? { kind: "local" as const, apiBaseUrl, ...(clientConfig.token ? { token: clientConfig.token } : {}) };
+  const mode = props.mode ?? {
+    kind: "local" as const,
+    apiBaseUrl,
+    ...(clientConfig.token ? { token: clientConfig.token } : {}),
+  };
   // The client's custom headers (API key, proxy auth) must reach the collection
   // API and change stream too, not just RPC. They ride along with the client
   // identity, so no extra memo dep is needed.
   const customHeaders = client.headers;
   const dataClient = useMemo(
-    () => createSmithersDataClient({ mode, fetch: client.fetchImpl, ...(customHeaders ? { headers: customHeaders } : {}) }),
-    [client, mode.kind, mode.apiBaseUrl, "electricBaseUrl" in mode ? mode.electricBaseUrl : undefined, "workspaceId" in mode ? mode.workspaceId : undefined, mode.token],
+    () =>
+      createSmithersDataClient({ mode, fetch: client.fetchImpl, ...(customHeaders ? { headers: customHeaders } : {}) }),
+    [
+      client,
+      mode.kind,
+      mode.apiBaseUrl,
+      "electricBaseUrl" in mode ? mode.electricBaseUrl : undefined,
+      "workspaceId" in mode ? mode.workspaceId : undefined,
+      mode.token,
+    ],
   );
   // There is no `dataClient` prop, so this one is always provider-owned — and
   // because it is passed down, `SmithersCollectionsProvider`'s own guard treats

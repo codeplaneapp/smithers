@@ -28,7 +28,11 @@ function buildEnv(overrides: Partial<TelegramSummaryEnv> = {}): TelegramSummaryE
 
 const base = "https://telegram-summary.smithers.sh";
 const emptyTelegram = (async () =>
-  ({ ok: true, status: 200, json: async () => ({ ok: true, result: [] }) }) as unknown as Response) as unknown as typeof fetch;
+  ({
+    ok: true,
+    status: 200,
+    json: async () => ({ ok: true, result: [] }),
+  }) as unknown as Response) as unknown as typeof fetch;
 
 describe("worker routes", () => {
   test("serves the dashboard at the root", async () => {

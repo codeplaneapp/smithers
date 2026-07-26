@@ -3,12 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { act, createRef, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import {
-  ChatTranscript,
-  MessageScroller,
-  type MessageScrollerHandle,
-  SMITHERS_UI_STYLE_ATTR,
-} from "../src/index";
+import { ChatTranscript, MessageScroller, type MessageScrollerHandle, SMITHERS_UI_STYLE_ATTR } from "../src/index";
 import { installDarkThemeStyles, removeDarkThemeStyles } from "./theme-test-utils";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -153,10 +148,11 @@ async function fireResize(target = getContent()): Promise<void> {
 describe("MessageScroller", () => {
   test("keyboard: the named scroll region takes focus and cancels follow on PageUp", async () => {
     const changes: boolean[] = [];
-    await render(
-      <MessageScroller onFollowChange={(value) => changes.push(value)}>message</MessageScroller>,
-      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
-    );
+    await render(<MessageScroller onFollowChange={(value) => changes.push(value)}>message</MessageScroller>, {
+      scrollHeight: 1000,
+      clientHeight: 200,
+      scrollTop: 0,
+    });
     const viewport = getViewport();
     expect(viewport.tabIndex).toBe(0);
     expect(viewport.getAttribute("role")).toBe("region");
@@ -188,10 +184,11 @@ describe("MessageScroller", () => {
 
   test("user scroll-away disables following once and reveals the jump affordance", async () => {
     const changes: boolean[] = [];
-    await render(
-      <MessageScroller onFollowChange={(value) => changes.push(value)}>message</MessageScroller>,
-      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
-    );
+    await render(<MessageScroller onFollowChange={(value) => changes.push(value)}>message</MessageScroller>, {
+      scrollHeight: 1000,
+      clientHeight: 200,
+      scrollTop: 0,
+    });
     metrics().scrollTop = 400;
     await scroll();
     await scroll();
@@ -213,9 +210,7 @@ describe("MessageScroller", () => {
   });
 
   test("a changed firstItemKey compensates prepended height while not following", async () => {
-    const view = (firstItemKey: string) => (
-      <MessageScroller firstItemKey={firstItemKey}>message</MessageScroller>
-    );
+    const view = (firstItemKey: string) => <MessageScroller firstItemKey={firstItemKey}>message</MessageScroller>;
     await render(view("first"), { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 });
     metrics().scrollTop = 400;
     await scroll();
@@ -226,10 +221,11 @@ describe("MessageScroller", () => {
 
   test("intermediate smooth-scroll events never re-enable or disable following", async () => {
     const changes: boolean[] = [];
-    await render(
-      <MessageScroller onFollowChange={(value) => changes.push(value)}>message</MessageScroller>,
-      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
-    );
+    await render(<MessageScroller onFollowChange={(value) => changes.push(value)}>message</MessageScroller>, {
+      scrollHeight: 1000,
+      clientHeight: 200,
+      scrollTop: 0,
+    });
     const viewport = getViewport();
     metrics().scrollTop = 400;
     await scroll(viewport);
@@ -237,9 +233,7 @@ describe("MessageScroller", () => {
       configurable: true,
       value: () => {},
     });
-    await act(async () =>
-      container!.querySelector<HTMLButtonElement>('[data-slot="message-scroller-jump"]')!.click(),
-    );
+    await act(async () => container!.querySelector<HTMLButtonElement>('[data-slot="message-scroller-jump"]')!.click());
     metrics().scrollTop = 500;
     await scroll(viewport);
     expect(changes).toEqual([false]);
@@ -260,15 +254,14 @@ describe("MessageScroller", () => {
       removeListener() {},
       dispatchEvent: () => true,
     })) as typeof window.matchMedia;
-    await render(
-      <MessageScroller onFollowChange={(value) => changes.push(value)}>message</MessageScroller>,
-      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
-    );
+    await render(<MessageScroller onFollowChange={(value) => changes.push(value)}>message</MessageScroller>, {
+      scrollHeight: 1000,
+      clientHeight: 200,
+      scrollTop: 0,
+    });
     metrics().scrollTop = 400;
     await scroll();
-    await act(async () =>
-      container!.querySelector<HTMLButtonElement>('[data-slot="message-scroller-jump"]')!.click(),
-    );
+    await act(async () => container!.querySelector<HTMLButtonElement>('[data-slot="message-scroller-jump"]')!.click());
 
     expect(getViewport().scrollTop).toBe(1000);
     expect(changes).toEqual([false, true]);
@@ -295,11 +288,7 @@ describe("MessageScroller", () => {
     const changes: boolean[] = [];
     const handle = createRef<MessageScrollerHandle>();
     const view = (stickToBottom: boolean) => (
-      <MessageScroller
-        ref={handle}
-        stickToBottom={stickToBottom}
-        onFollowChange={(value) => changes.push(value)}
-      >
+      <MessageScroller ref={handle} stickToBottom={stickToBottom} onFollowChange={(value) => changes.push(value)}>
         message
       </MessageScroller>
     );
@@ -319,11 +308,7 @@ describe("MessageScroller", () => {
     const changes: boolean[] = [];
     const handle = createRef<MessageScrollerHandle>();
     const view = (stickToBottom: boolean) => (
-      <MessageScroller
-        ref={handle}
-        stickToBottom={stickToBottom}
-        onFollowChange={(value) => changes.push(value)}
-      >
+      <MessageScroller ref={handle} stickToBottom={stickToBottom} onFollowChange={(value) => changes.push(value)}>
         message
       </MessageScroller>
     );

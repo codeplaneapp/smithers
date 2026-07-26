@@ -98,9 +98,7 @@ function mapNode(
     name: nodeName(node),
     kind: nodeKind(node),
     status: nodeStatus(node, isRoot, runStatus, blockedNodeId),
-    children: (node.children ?? []).map((child) =>
-      mapNode(child, false, runStatus, blockedNodeId),
-    ),
+    children: (node.children ?? []).map((child) => mapNode(child, false, runStatus, blockedNodeId)),
   };
 }
 

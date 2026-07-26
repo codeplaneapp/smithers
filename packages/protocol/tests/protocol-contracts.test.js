@@ -131,12 +131,7 @@ function membersForDeclarationTuple(declaration) {
   let members = null;
   function visit(node) {
     if (members) return;
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === declaration &&
-      node.type
-    ) {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === declaration && node.type) {
       members = tupleLiteralMembers(node.type);
     }
     ts.forEachChild(node, visit);

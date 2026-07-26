@@ -46,9 +46,7 @@ export function ApprovalCard({ runId }: { runId: string }) {
             <WarnIcon />
           </span>
           <div className="card-headings">
-            <div className="card-title">
-              {resolved ? "Approved" : "Denied"} · deploy
-            </div>
+            <div className="card-title">{resolved ? "Approved" : "Denied"} · deploy</div>
             <div className="card-sub">gate · {approval.gate}</div>
           </div>
         </header>
@@ -76,8 +74,7 @@ export function ApprovalCard({ runId }: { runId: string }) {
 
       <div className="card-body">
         <p className="gate-summary">
-          Deploy <b>auth refactor</b> to <b>production</b>. 8 files changed, all
-          checks green.
+          Deploy <b>auth refactor</b> to <b>production</b>. 8 files changed, all checks green.
         </p>
         <input
           className="gate-note"

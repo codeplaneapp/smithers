@@ -10,9 +10,9 @@ export const EXIT_DECLINED = 3;
 export const EXIT_SIGINT = 130;
 
 export const CLI_EXIT_CODES = Object.freeze({
-    ok: EXIT_OK,
-    userError: EXIT_USER_ERROR,
-    serverError: EXIT_SERVER_ERROR,
-    declined: EXIT_DECLINED,
-    sigint: EXIT_SIGINT,
+  ok: EXIT_OK,
+  userError: EXIT_USER_ERROR,
+  serverError: EXIT_SERVER_ERROR,
+  declined: EXIT_DECLINED,
+  sigint: EXIT_SIGINT,
 });

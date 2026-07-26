@@ -28,7 +28,15 @@ async function fetchOneRepo(source: GithubReleasesSource, retrievedAt: string): 
         retrievedAt,
       }),
     );
-    return { sourceId: source.id, kind: "githubReleases", ok: true, error: null, itemCount: items.length, retried, items };
+    return {
+      sourceId: source.id,
+      kind: "githubReleases",
+      ok: true,
+      error: null,
+      itemCount: items.length,
+      retried,
+      items,
+    };
   } catch (error) {
     return {
       sourceId: source.id,

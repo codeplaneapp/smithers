@@ -34,9 +34,7 @@ describe("createNodeRuntime worktree parity", () => {
 
   test("absolute path passes through resolve() unchanged (still normalized)", () => {
     const runtime = createNodeRuntime();
-    expect(runtime.worktree.resolve("/already/absolute/lane")).toBe(
-      resolve("/already/absolute/lane"),
-    );
+    expect(runtime.worktree.resolve("/already/absolute/lane")).toBe(resolve("/already/absolute/lane"));
   });
 
   test("../lane parent-relative paths normalize against baseRootDir", () => {

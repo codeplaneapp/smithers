@@ -26,11 +26,7 @@ function humanizeTitle(entry: ManifestEntry) {
   const specName = basename(entry.spec, ".spec.ts")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/[-_]+/g, " ");
-  const title = entry.title
-    .replace(/^\//, "")
-    .replaceAll("/", " / ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const title = entry.title.replace(/^\//, "").replaceAll("/", " / ").replace(/\s+/g, " ").trim();
   const combined = `${specName}: ${title}`;
   return combined.charAt(0).toUpperCase() + combined.slice(1);
 }

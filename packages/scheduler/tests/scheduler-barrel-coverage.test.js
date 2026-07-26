@@ -50,14 +50,7 @@ describe("scheduler package barrel", () => {
   test("SchedulerLive layer provides a Scheduler that delegates to scheduleTasks", () => {
     const program = Effect.gen(function* () {
       const scheduler = yield* Scheduler;
-      return yield* scheduler.schedule(
-        null,
-        new Map(),
-        new Map(),
-        new Map(),
-        new Map(),
-        0,
-      );
+      return yield* scheduler.schedule(null, new Map(), new Map(), new Map(), new Map(), 0);
     });
     const result = Effect.runSync(Effect.provide(program, SchedulerLive));
     expect(result.runnable).toEqual([]);

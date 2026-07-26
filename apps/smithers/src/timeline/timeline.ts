@@ -32,13 +32,7 @@ export function NOTABLE_FRAME_MARKERS(frameCount: number): number[] {
   if (latest <= 0) {
     return frameCount > 0 ? [0] : [];
   }
-  const raw = [
-    0,
-    Math.floor(frameCount / 4),
-    Math.floor(frameCount / 2),
-    Math.floor((frameCount * 3) / 4),
-    latest,
-  ];
+  const raw = [0, Math.floor(frameCount / 4), Math.floor(frameCount / 2), Math.floor((frameCount * 3) / 4), latest];
   const seen = new Set<number>();
   const marks: number[] = [];
   for (const frame of raw) {

@@ -35,8 +35,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   listening: false,
   navDir: "forward",
   setOpenMenu: (openMenuId) => set({ openMenuId }),
-  toggleMenu: (id) =>
-    set((state) => ({ openMenuId: state.openMenuId === id ? null : id })),
+  toggleMenu: (id) => set((state) => ({ openMenuId: state.openMenuId === id ? null : id })),
   setNavDir: (navDir) => set({ navDir }),
   toggleDictation: () => {
     if (get().listening) {

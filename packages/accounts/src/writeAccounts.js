@@ -24,27 +24,29 @@ import { accountsFilePath } from "./accountsFilePath.js";
  * @returns {string} the file path that was written
  */
 export function writeAccounts(contents, env = process.env) {
-    const path = accountsFilePath(env);
-    mkdirSync(dirname(path), { recursive: true });
-    // pid + time + random so two same-millisecond writers never share a temp
-    // path and clobber each other's in-flight bytes.
-    const tmp = `${path}.tmp.${process.pid}.${Date.now()}.${randomBytes(6).toString("hex")}`;
-    // Built explicitly rather than spreading `contents`, which would leak an
-    // `unknownAccounts` key into accounts.json.
-    const onDisk = {
-        version: contents.version,
-        accounts: [...contents.accounts, ...(contents.unknownAccounts ?? [])],
-    };
-    const serialized = `${JSON.stringify(onDisk, null, 2)}\n`;
-    writeFileSync(tmp, serialized, { encoding: "utf8", mode: 0o600 });
-    chmodSync(tmp, 0o600);
+  const path = accountsFilePath(env);
+  mkdirSync(dirname(path), { recursive: true });
+  // pid + time + random so two same-millisecond writers never share a temp
+  // path and clobber each other's in-flight bytes.
+  const tmp = `${path}.tmp.${process.pid}.${Date.now()}.${randomBytes(6).toString("hex")}`;
+  // Built explicitly rather than spreading `contents`, which would leak an
+  // `unknownAccounts` key into accounts.json.
+  const onDisk = {
+    version: contents.version,
+    accounts: [...contents.accounts, ...(contents.unknownAccounts ?? [])],
+  };
+  const serialized = `${JSON.stringify(onDisk, null, 2)}\n`;
+  writeFileSync(tmp, serialized, { encoding: "utf8", mode: 0o600 });
+  chmodSync(tmp, 0o600);
+  try {
+    renameSync(tmp, path);
+  } catch (cause) {
+    // Don't leave a plaintext-key temp file behind on a failed rename.
     try {
-        renameSync(tmp, path);
-    } catch (cause) {
-        // Don't leave a plaintext-key temp file behind on a failed rename.
-        try { rmSync(tmp, { force: true }); } catch {}
-        throw cause;
-    }
-    chmodSync(path, 0o600);
-    return path;
+      rmSync(tmp, { force: true });
+    } catch {}
+    throw cause;
+  }
+  chmodSync(path, 0o600);
+  return path;
 }

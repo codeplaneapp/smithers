@@ -19,10 +19,7 @@ export type JumpToFrameInput = {
   rebuildReconcilerState?: (xmlJson: string) => Promise<void> | void;
   emitEvent?: (event: SmithersEvent) => Promise<void> | void;
   getCurrentPointerImpl?: (cwd?: string) => Promise<string | null>;
-  revertToPointerImpl?: (
-    pointer: string,
-    cwd?: string,
-  ) => Promise<{ success: boolean; error?: string }>;
+  revertToPointerImpl?: (pointer: string, cwd?: string) => Promise<{ success: boolean; error?: string }>;
   nowMs?: () => number;
   rateLimit?: {
     maxPerWindow?: number;
@@ -32,9 +29,5 @@ export type JumpToFrameInput = {
     beforeStep?: (step: JumpStepName) => Promise<void> | void;
     afterStep?: (step: JumpStepName) => Promise<void> | void;
   };
-  onLog?: (
-    level: "info" | "warn" | "error",
-    message: string,
-    fields?: Record<string, unknown>,
-  ) => Promise<void> | void;
+  onLog?: (level: "info" | "warn" | "error", message: string, fields?: Record<string, unknown>) => Promise<void> | void;
 };

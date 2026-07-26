@@ -55,9 +55,10 @@ export function PromptsBridge() {
       // Keep the selection across reconciles; otherwise pick the first row so the
       // editor opens on a real prompt. A vanished selection can never strand the
       // UI on a blank detail pane.
-      const selectedId = state.selectedId && rows.some((prompt) => prompt.id === state.selectedId)
-        ? state.selectedId
-        : (rows[0]?.id ?? "");
+      const selectedId =
+        state.selectedId && rows.some((prompt) => prompt.id === state.selectedId)
+          ? state.selectedId
+          : (rows[0]?.id ?? "");
       return { prompts: rows, selectedId };
     });
   }, [data, loading, connection.status]);

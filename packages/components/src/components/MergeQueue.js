@@ -6,15 +6,14 @@ import { DEFAULT_MERGE_QUEUE_CONCURRENCY, MERGE_QUEUE_PRIORITY } from "@smithers
  * @param {MergeQueueProps} props
  */
 export function MergeQueue(props) {
-    if (props.skipIf)
-        return null;
-    const next = {
-        maxConcurrency: props.maxConcurrency ?? DEFAULT_MERGE_QUEUE_CONCURRENCY,
-        // Landing work outranks starting new work by default: descendant task
-        // nodes inherit this priority (an explicit child priority still wins).
-        priority: props.priority ?? MERGE_QUEUE_PRIORITY,
-        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
-        id: props.id,
-    };
-    return React.createElement("smithers:merge-queue", next, props.children);
+  if (props.skipIf) return null;
+  const next = {
+    maxConcurrency: props.maxConcurrency ?? DEFAULT_MERGE_QUEUE_CONCURRENCY,
+    // Landing work outranks starting new work by default: descendant task
+    // nodes inherit this priority (an explicit child priority still wins).
+    priority: props.priority ?? MERGE_QUEUE_PRIORITY,
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+    id: props.id,
+  };
+  return React.createElement("smithers:merge-queue", next, props.children);
 }

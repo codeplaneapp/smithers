@@ -54,21 +54,12 @@ export function useGatewayRunEvents(
   loading: boolean;
 } {
   const { client, collections } = useSmithersCollections();
-  const connection = useSyncExternalStore(
-    client.stream.subscribeStatus,
-    client.stream.status,
-    client.stream.status,
-  );
+  const connection = useSyncExternalStore(client.stream.subscribeStatus, client.stream.status, client.stream.status);
   const afterSeq = options.afterSeq;
   const maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
   const includeHeartbeats = options.includeHeartbeats ?? false;
-  const collection = runId
-    ? collections.runEvents(runId, DEFAULT_COLLECTION_MAX_ROWS)
-    : undefined;
-  const live = useLiveQuery(
-    (q) => (collection ? q.from({ row: collection }) : undefined),
-    [collection],
-  );
+  const collection = runId ? collections.runEvents(runId, DEFAULT_COLLECTION_MAX_ROWS) : undefined;
+  const live = useLiveQuery((q) => (collection ? q.from({ row: collection }) : undefined), [collection]);
 
   const rows = useMemo(
     () => ((live.data ?? []) as GatewayRunEventRow[]).filter((row) => row.runId === runId),

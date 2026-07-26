@@ -62,16 +62,18 @@ describe("SmithersGatewayProvider", () => {
     const { client } = createSpyClient();
     let observed: SmithersGatewayClient | null = null;
 
-    renderToString(createElement(
-      SmithersGatewayProvider,
-      { client },
-      createElement(SmithersGatewayContext.Consumer, {
-        children: (value: SmithersGatewayClient | null) => {
-          observed = value;
-          return null;
-        },
-      }),
-    ));
+    renderToString(
+      createElement(
+        SmithersGatewayProvider,
+        { client },
+        createElement(SmithersGatewayContext.Consumer, {
+          children: (value: SmithersGatewayClient | null) => {
+            observed = value;
+            return null;
+          },
+        }),
+      ),
+    );
 
     expect(observed).toBe(client);
   });
@@ -89,9 +91,9 @@ describe("createGatewayReactRoot", () => {
     } as unknown as Document;
 
     try {
-      expect(() =>
-        createGatewayReactRoot(createElement("div"), { rootId: "missing-root" }),
-      ).toThrow("Gateway React root element not found: missing-root");
+      expect(() => createGatewayReactRoot(createElement("div"), { rootId: "missing-root" })).toThrow(
+        "Gateway React root element not found: missing-root",
+      );
     } finally {
       if (originalDocument) {
         global.document = originalDocument;
@@ -166,11 +168,7 @@ describe("gateway query hooks", () => {
 
     function Probe() {
       enabledState = useGatewayRpc("listRuns", { limit: 5 });
-      disabledState = useGatewayRpc(
-        "getRun",
-        { runId: "" },
-        { enabled: false, deps: ["disabled"] },
-      );
+      disabledState = useGatewayRpc("getRun", { runId: "" }, { enabled: false, deps: ["disabled"] });
       return null;
     }
 
@@ -255,8 +253,6 @@ describe("gateway query hooks", () => {
     renderToString(createElement(SmithersGatewayProvider, { client }, createElement(Probe)));
 
     await output?.refetch();
-    expect(calls).toEqual([
-      { method: "GET /v1/api/nodes/run-1/ship/output", params: { iteration: "0" } },
-    ]);
+    expect(calls).toEqual([{ method: "GET /v1/api/nodes/run-1/ship/output", params: { iteration: "0" } }]);
   });
 });

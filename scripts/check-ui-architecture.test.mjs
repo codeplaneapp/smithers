@@ -27,7 +27,8 @@ function provenanceManifest() {
     policy: {
       registries: ["https://ui.shadcn.com", "https://elements.ai-sdk.dev"],
       collections: ["chat/shadcn", "primitives/shadcn", "agentic/ai-elements"],
-      verification: "Each source file in an approved collection must name its upstream registry item URL in a lane manifest under provenance/. Entries record ported anatomy plus explicit omissions and divergences; this is provenance, not cryptographic verification.",
+      verification:
+        "Each source file in an approved collection must name its upstream registry item URL in a lane manifest under provenance/. Entries record ported anatomy plus explicit omissions and divergences; this is provenance, not cryptographic verification.",
       entryFiles: [
         "provenance/chat-foundation.json",
         "provenance/agentic-reasoning-tool.json",
@@ -119,7 +120,7 @@ test("a compliant pack UI passes", (context) => {
     ".smithers/ui/compliant.tsx",
     'import { useState } from "react"; import { Button } from "smithers-orchestrator/ui"; import { helper } from "./helper"; export function Compliant() { const [open] = useState(false); return <Button>{helper(open)}</Button>; }\n',
   );
-  write(root, ".smithers/ui/helper.ts", "export function helper(open: boolean) { return open ? \"Open\" : \"Closed\"; }\n");
+  write(root, ".smithers/ui/helper.ts", 'export function helper(open: boolean) { return open ? "Open" : "Closed"; }\n');
   snapshot(root);
   assert.equal(check(root).ok, true);
 });
@@ -158,7 +159,7 @@ test("a fresh pack UI style block fails", (context) => {
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
   snapshot(root);
-  write(root, ".smithers/ui/fresh.tsx", "export function Fresh() { return <style>{\".x{}\"}</style>; }\n");
+  write(root, ".smithers/ui/fresh.tsx", 'export function Fresh() { return <style>{".x{}"}</style>; }\n');
   const result = check(root);
   assert.equal(result.ok, false);
   assert.match(result.errors.join("\n"), /New architecture violation: pack-ui-style-tag/);
@@ -191,10 +192,10 @@ test("a baselined pack offender passes until it is edited", (context) => {
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const path = ".smithers/ui/legacy.tsx";
-  write(root, path, "export function Legacy() { return <style>{\".x{}\"}</style>; }\n");
+  write(root, path, 'export function Legacy() { return <style>{".x{}"}</style>; }\n');
   snapshot(root);
   assert.equal(check(root).ok, true);
-  write(root, path, "export function Legacy() { return <div style={{ color: \"red\" }} />; }\n");
+  write(root, path, 'export function Legacy() { return <div style={{ color: "red" }} />; }\n');
   const result = check(root);
   assert.equal(result.ok, false);
   assert.match(result.errors.join("\n"), /New architecture violation: pack-ui-style-prop/);
@@ -215,11 +216,7 @@ test("workflow-render hooks are distinct from public gateway data hooks", (conte
     "export function useSmithersMachine() { return React.useContext(SmithersContext); }\n",
   );
   const baseline = snapshot(root);
-  assert.ok(
-    !baseline.allowedLegacyViolations.some((entry) =>
-      entry.includes("packages/xstate/package.json"),
-    ),
-  );
+  assert.ok(!baseline.allowedLegacyViolations.some((entry) => entry.includes("packages/xstate/package.json")));
   assert.equal(check(root).ok, true);
 });
 
@@ -238,9 +235,8 @@ test("agentic components are an approved typed props-driven UI layer", (context)
   );
   const baseline = snapshot(root);
   assert.ok(
-    !baseline.allowedLegacyViolations.some((entry) =>
-      entry.startsWith("ui-layer-direction ::") &&
-      entry.includes("packages/ui/src/agentic/Reasoning.tsx"),
+    !baseline.allowedLegacyViolations.some(
+      (entry) => entry.startsWith("ui-layer-direction ::") && entry.includes("packages/ui/src/agentic/Reasoning.tsx"),
     ),
   );
   assert.equal(check(root).ok, true);
@@ -249,16 +245,18 @@ test("agentic components are an approved typed props-driven UI layer", (context)
 for (const [name, mutate, expected] of [
   [
     "visual imports in packages/components",
-    (root) => write(root, "packages/components/src/Visual.tsx", 'import { Button } from "radix-ui"; export { Button };\n'),
+    (root) =>
+      write(root, "packages/components/src/Visual.tsx", 'import { Button } from "radix-ui"; export { Button };\n'),
     "components-non-visual",
   ],
   [
     "CSS-in-JS visual declarations in packages/components",
-    (root) => write(
-      root,
-      "packages/components/src/Visual.tsx",
-      'import styled from "styled-components"; export const Visual = styled.section`display: grid; color: red;`;\n',
-    ),
+    (root) =>
+      write(
+        root,
+        "packages/components/src/Visual.tsx",
+        'import styled from "styled-components"; export const Visual = styled.section`display: grid; color: red;`;\n',
+      ),
     "components-non-visual",
   ],
   [
@@ -268,19 +266,36 @@ for (const [name, mutate, expected] of [
   ],
   [
     "lucide icons in packages/components",
-    (root) => write(root, "packages/components/src/Visual.tsx", 'import { CircleIcon } from "lucide-react"; export { CircleIcon };\n'),
+    (root) =>
+      write(
+        root,
+        "packages/components/src/Visual.tsx",
+        'import { CircleIcon } from "lucide-react"; export { CircleIcon };\n',
+      ),
     "components-non-visual",
   ],
   [
     "gateway hooks outside smithers/connected",
-    (root) => write(root, "packages/ui/src/chat/Chat.tsx", 'import { useGatewayRun } from "@smithers-orchestrator/gateway-react"; export function Chat() { return <div />; }\n'),
+    (root) =>
+      write(
+        root,
+        "packages/ui/src/chat/Chat.tsx",
+        'import { useGatewayRun } from "@smithers-orchestrator/gateway-react"; export function Chat() { return <div />; }\n',
+      ),
     "gateway-react-location",
   ],
   [
     "gateway hooks in any other package",
     (root) => {
-      json(root, "packages/consumer/package.json", { name: "@smithers-orchestrator/consumer", exports: { ".": "./src/index.ts" } });
-      write(root, "packages/consumer/src/index.ts", 'export { useGatewayRun } from "@smithers-orchestrator/gateway-react";\n');
+      json(root, "packages/consumer/package.json", {
+        name: "@smithers-orchestrator/consumer",
+        exports: { ".": "./src/index.ts" },
+      });
+      write(
+        root,
+        "packages/consumer/src/index.ts",
+        'export { useGatewayRun } from "@smithers-orchestrator/gateway-react";\n',
+      );
     },
     "gateway-react-location",
   ],
@@ -291,7 +306,11 @@ for (const [name, mutate, expected] of [
         name: "@smithers-orchestrator/consumer",
         exports: { ".": "./index.ts" },
       });
-      write(root, "packages/consumer/index.ts", 'export { useGatewayRun } from "@smithers-orchestrator/gateway-react";\n');
+      write(
+        root,
+        "packages/consumer/index.ts",
+        'export { useGatewayRun } from "@smithers-orchestrator/gateway-react";\n',
+      );
     },
     "gateway-react-location",
   ],
@@ -311,7 +330,12 @@ for (const [name, mutate, expected] of [
   ],
   [
     "untyped disconnected props",
-    (root) => write(root, "packages/ui/src/ai/Answer.tsx", "export function Answer(props) { return <div>{props.text}</div>; }\n"),
+    (root) =>
+      write(
+        root,
+        "packages/ui/src/ai/Answer.tsx",
+        "export function Answer(props) { return <div>{props.text}</div>; }\n",
+      ),
     "disconnected-typed-props",
   ],
   [
@@ -326,38 +350,53 @@ for (const [name, mutate, expected] of [
   ],
   [
     "untyped disconnected props exported through an export list",
-    (root) => write(root, "packages/ui/src/ai/Answer.tsx", "function Answer(props) { return <div>{props.text}</div>; } export { Answer };\n"),
+    (root) =>
+      write(
+        root,
+        "packages/ui/src/ai/Answer.tsx",
+        "function Answer(props) { return <div>{props.text}</div>; } export { Answer };\n",
+      ),
     "disconnected-typed-props",
   ],
   [
     "runtime smithers-to-adapters imports",
     (root) => {
       write(root, "packages/ui/src/adapters/types.ts", "export const adapterValue = true;\n");
-      write(root, "packages/ui/src/smithers/Card.tsx", 'import { adapterValue } from "../adapters/types"; export function Card() { return <div>{String(adapterValue)}</div>; }\n');
+      write(
+        root,
+        "packages/ui/src/smithers/Card.tsx",
+        'import { adapterValue } from "../adapters/types"; export function Card() { return <div>{String(adapterValue)}</div>; }\n',
+      );
     },
     "adapter-types-only",
   ],
   [
     "missing official shadcn provenance",
-    (root) => write(root, "packages/ui/src/primitives/shadcn/button.tsx", "export function Button() { return <button />; }\n"),
+    (root) =>
+      write(root, "packages/ui/src/primitives/shadcn/button.tsx", "export function Button() { return <button />; }\n"),
     "shadcn-provenance",
   ],
   [
     "legacy shadcn provenance schema",
-    (root) => json(root, "packages/ui/shadcn-provenance.json", {
-      version: 1,
-      policy: {
-        registry: "https://ui.shadcn.com",
-        collections: ["chat/shadcn", "primitives/shadcn"],
-      },
-      entries: [],
-    }),
+    (root) =>
+      json(root, "packages/ui/shadcn-provenance.json", {
+        version: 1,
+        policy: {
+          registry: "https://ui.shadcn.com",
+          collections: ["chat/shadcn", "primitives/shadcn"],
+        },
+        entries: [],
+      }),
     "shadcn-provenance",
   ],
   [
     "incomplete lane provenance",
     (root) => {
-      write(root, "packages/ui/src/chat/MessageScroller.tsx", "export function MessageScroller() { return <div />; }\n");
+      write(
+        root,
+        "packages/ui/src/chat/MessageScroller.tsx",
+        "export function MessageScroller() { return <div />; }\n",
+      );
       json(root, "packages/ui/provenance/chat-foundation.json", []);
     },
     "shadcn-provenance",
@@ -367,25 +406,28 @@ for (const [name, mutate, expected] of [
     (root) => {
       const path = "packages/ui/src/primitives/shadcn/button.tsx";
       write(root, path, "export function Button() { return <button />; }\n");
-      json(root, "packages/ui/provenance/chat-foundation.json", [{
-        file: "src/primitives/shadcn/button.tsx",
-        exports: ["Button"],
-        collection: "primitives/shadcn",
-        registryItem: "https://community.example/r/button.json",
-        ported: "partial-anatomy",
-        omissions: [],
-        divergences: [],
-      }]);
+      json(root, "packages/ui/provenance/chat-foundation.json", [
+        {
+          file: "src/primitives/shadcn/button.tsx",
+          exports: ["Button"],
+          collection: "primitives/shadcn",
+          registryItem: "https://community.example/r/button.json",
+          ported: "partial-anatomy",
+          omissions: [],
+          divergences: [],
+        },
+      ]);
     },
     "shadcn-provenance",
   ],
   [
     "missing agentic lane provenance",
-    (root) => write(
-      root,
-      "packages/ui/src/agentic/CodeBlock.tsx",
-      "export function CodeBlock(props: { code: string }) { return <pre>{props.code}</pre>; }\n",
-    ),
+    (root) =>
+      write(
+        root,
+        "packages/ui/src/agentic/CodeBlock.tsx",
+        "export function CodeBlock(props: { code: string }) { return <pre>{props.code}</pre>; }\n",
+      ),
     "shadcn-provenance",
   ],
   [
@@ -412,7 +454,8 @@ for (const [name, mutate, expected] of [
   ],
   [
     "non-official component registries",
-    (root) => write(root, "packages/ui/src/chat/Community.tsx", 'import { Chat } from "@ai-elements/chat"; export { Chat };\n'),
+    (root) =>
+      write(root, "packages/ui/src/chat/Community.tsx", 'import { Chat } from "@ai-elements/chat"; export { Chat };\n'),
     "official-shadcn-only",
   ],
   [
@@ -466,11 +509,7 @@ for (const [name, mutate, expected] of [
         name: "@smithers-orchestrator/data",
         main: "index.cjs",
       });
-      write(
-        root,
-        "packages/data/index.cjs",
-        "function useData() { return null; }\nmodule.exports = { useData };\n",
-      );
+      write(root, "packages/data/index.cjs", "function useData() { return null; }\nmodule.exports = { useData };\n");
     },
     "single-public-hook-package",
   ],
@@ -481,11 +520,7 @@ for (const [name, mutate, expected] of [
         name: "@smithers-orchestrator/data",
         main: "index.cjs",
       });
-      write(
-        root,
-        "packages/data/index.cjs",
-        "function useData() { return null; }\nmodule.exports = useData;\n",
-      );
+      write(root, "packages/data/index.cjs", "function useData() { return null; }\nmodule.exports = useData;\n");
     },
     "single-public-hook-package",
   ],
@@ -496,11 +531,7 @@ for (const [name, mutate, expected] of [
         name: "@smithers-orchestrator/data",
         main: "index.ts",
       });
-      write(
-        root,
-        "packages/data/index.ts",
-        "function useData() { return null; }\nexport = useData;\n",
-      );
+      write(root, "packages/data/index.ts", "function useData() { return null; }\nexport = useData;\n");
     },
     "single-public-hook-package",
   ],
@@ -578,7 +609,11 @@ for (const [name, mutate, expected] of [
         exports: { ".": "./index.tsx" },
         dependencies: { "@fluentui/react-components": "1.0.0" },
       });
-      write(root, "packages/dashboard/index.tsx", 'import { Button } from "@fluentui/react-components"; export function Dashboard() { return <Button />; }\n');
+      write(
+        root,
+        "packages/dashboard/index.tsx",
+        'import { Button } from "@fluentui/react-components"; export function Dashboard() { return <Button />; }\n',
+      );
     },
     "single-visual-package",
   ],
@@ -605,7 +640,8 @@ for (const [name, mutate, expected] of [
   ],
   [
     "gateway-react imports through the umbrella package",
-    (root) => write(root, "packages/gateway-react/src/umbrella.ts", 'export { gatewayKeys } from "smithers-orchestrator";\n'),
+    (root) =>
+      write(root, "packages/gateway-react/src/umbrella.ts", 'export { gatewayKeys } from "smithers-orchestrator";\n'),
     "gateway-react-direction",
   ],
   [
@@ -619,7 +655,12 @@ for (const [name, mutate, expected] of [
   ],
   [
     "a heavy widget outside adapters",
-    (root) => write(root, "packages/ui/src/ai/Editor.tsx", 'import Editor from "@monaco-editor/react"; export function EditorView() { return <Editor />; }\n'),
+    (root) =>
+      write(
+        root,
+        "packages/ui/src/ai/Editor.tsx",
+        'import Editor from "@monaco-editor/react"; export function EditorView() { return <Editor />; }\n',
+      ),
     "heavy-widget-location",
   ],
 ]) {
@@ -691,11 +732,7 @@ test("default re-exports do not expose unrelated named hooks", (context) => {
     exports: { ".": "./index.js" },
   });
   write(root, "packages/data/index.js", 'export { default } from "./values.js";\n');
-  write(
-    root,
-    "packages/data/values.js",
-    "export default 42;\nexport function useInternal() { return null; }\n",
-  );
+  write(root, "packages/data/values.js", "export default 42;\nexport function useInternal() { return null; }\n");
   snapshot(root);
   assert.equal(check(root).ok, true);
 });
@@ -842,7 +879,8 @@ test("the frozen version 2 provenance umbrella passes", (context) => {
         "provenance/agentic-plan-sources.json",
         "provenance/node-output-agentic.json",
       ],
-      verification: "Each source file in an approved collection must name its upstream registry item URL in a lane manifest under provenance/. Entries record ported anatomy plus explicit omissions and divergences; this is provenance, not cryptographic verification.",
+      verification:
+        "Each source file in an approved collection must name its upstream registry item URL in a lane manifest under provenance/. Entries record ported anatomy plus explicit omissions and divergences; this is provenance, not cryptographic verification.",
     },
     entries: [],
   });
@@ -858,11 +896,7 @@ test("CodeBlock can live in primitives with an agentic compatibility re-export",
     "packages/ui/src/primitives/CodeBlock.tsx",
     "export function CodeBlock(props: { code: string }) { return <pre>{props.code}</pre>; }\n",
   );
-  write(
-    root,
-    "packages/ui/src/agentic/CodeBlock.tsx",
-    'export { CodeBlock } from "../primitives/CodeBlock";\n',
-  );
+  write(root, "packages/ui/src/agentic/CodeBlock.tsx", 'export { CodeBlock } from "../primitives/CodeBlock";\n');
   write(
     root,
     "packages/ui/src/primitives/markdown.tsx",
@@ -918,15 +952,27 @@ test("type-only smithers-to-adapter imports pass", (context) => {
   context.after(() => rmSync(root, { recursive: true, force: true }));
   snapshot(root);
   write(root, "packages/ui/src/adapters/types.ts", "export interface AdapterState { ready: boolean }\n");
-  write(root, "packages/ui/src/smithers/Card.tsx", 'import type { AdapterState } from "../adapters/types"; export function Card(props: AdapterState) { return <div>{String(props.ready)}</div>; }\n');
+  write(
+    root,
+    "packages/ui/src/smithers/Card.tsx",
+    'import type { AdapterState } from "../adapters/types"; export function Card(props: AdapterState) { return <div>{String(props.ready)}</div>; }\n',
+  );
   assert.equal(check(root).ok, true);
 });
 
 test("typed disconnected props and connected gateway imports pass", (context) => {
   const root = fixture();
   context.after(() => rmSync(root, { recursive: true, force: true }));
-  write(root, "packages/ui/src/ai/Typed.tsx", "interface TypedProps { text: string } export const Typed: React.FC<TypedProps> = props => <div>{props.text}</div>;\n");
-  write(root, "packages/ui/src/smithers/connected/Live.tsx", 'import { useGatewayRun } from "@smithers-orchestrator/gateway-react"; export function Live(props: { runId: string }) { return <div>{String(useGatewayRun(props.runId))}</div>; }\n');
+  write(
+    root,
+    "packages/ui/src/ai/Typed.tsx",
+    "interface TypedProps { text: string } export const Typed: React.FC<TypedProps> = props => <div>{props.text}</div>;\n",
+  );
+  write(
+    root,
+    "packages/ui/src/smithers/connected/Live.tsx",
+    'import { useGatewayRun } from "@smithers-orchestrator/gateway-react"; export function Live(props: { runId: string }) { return <div>{String(useGatewayRun(props.runId))}</div>; }\n',
+  );
   snapshot(root);
   assert.equal(check(root).ok, true);
 });

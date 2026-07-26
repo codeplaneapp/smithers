@@ -6,9 +6,7 @@ import { expect, test } from "@playwright/test";
  * mocks. These specs need a real model credential; in CI none is set, so the
  * concierge returns 500 and we skip rather than fake a reply.
  */
-const HAS_LLM = Boolean(
-  process.env.CEREBRAS_API_KEY || process.env.OPENAI_API_KEY || process.env.CODEX_ACCESS_TOKEN,
-);
+const HAS_LLM = Boolean(process.env.CEREBRAS_API_KEY || process.env.OPENAI_API_KEY || process.env.CODEX_ACCESS_TOKEN);
 test.skip(!HAS_LLM, "no LLM credential (CEREBRAS_API_KEY / OPENAI_API_KEY / CODEX_ACCESS_TOKEN)");
 
 async function send(page: import("@playwright/test").Page, text: string) {

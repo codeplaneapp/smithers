@@ -590,12 +590,7 @@ export class DevToolsStore {
     }
 
     if (this.liveSnapshot) {
-      this.captureGhostNodesRemovedBySnapshot(
-        this.liveSnapshot.root,
-        snapshot.root,
-        snapshot.frameNo,
-        snapshot.seq,
-      );
+      this.captureGhostNodesRemovedBySnapshot(this.liveSnapshot.root, snapshot.root, snapshot.frameNo, snapshot.seq);
     }
 
     this.awaitingSnapshotAfterGapResync = false;
@@ -763,10 +758,7 @@ export class DevToolsStore {
   private recordMountedFrames(root: DevToolsNode, frameNo: number) {
     const key = ghostMapKey(root);
     if (key) {
-      this.mountedFrameByGhostKey.set(
-        key,
-        Math.min(this.mountedFrameByGhostKey.get(key) ?? frameNo, frameNo),
-      );
+      this.mountedFrameByGhostKey.set(key, Math.min(this.mountedFrameByGhostKey.get(key) ?? frameNo, frameNo));
     }
     for (const child of root.children) {
       this.recordMountedFrames(child, frameNo);
@@ -876,7 +868,10 @@ export class DevToolsStore {
     }
     const activeKeys = new Set<string>();
     collectGhostKeys(root, activeKeys);
-    this.removeGhostRecords([...this.ghostNodes.keys()].filter((key) => activeKeys.has(key)), false);
+    this.removeGhostRecords(
+      [...this.ghostNodes.keys()].filter((key) => activeKeys.has(key)),
+      false,
+    );
   }
 
   private pruneGhostNodesForRewind(targetFrameNo: number) {

@@ -15,17 +15,15 @@ import { getRequestBodyArgName } from "./getRequestBodyArgName.js";
  * @returns {{ mediaType: string; content: NonNullable<RequestBodyObject["content"]>[string] } | undefined}
  */
 export function selectRequestBodyContent(requestBody) {
-    const content = requestBody?.content;
-    if (!content)
-        return undefined;
-    if (content["application/json"]) {
-        return { mediaType: "application/json", content: content["application/json"] };
-    }
-    const firstEntry = Object.entries(content)[0];
-    if (!firstEntry)
-        return undefined;
-    const [mediaType, mediaContent] = firstEntry;
-    return { mediaType, content: mediaContent };
+  const content = requestBody?.content;
+  if (!content) return undefined;
+  if (content["application/json"]) {
+    return { mediaType: "application/json", content: content["application/json"] };
+  }
+  const firstEntry = Object.entries(content)[0];
+  if (!firstEntry) return undefined;
+  const [mediaType, mediaContent] = firstEntry;
+  return { mediaType, content: mediaContent };
 }
 
 /**
@@ -41,47 +39,44 @@ export function selectRequestBodyContent(requestBody) {
  * @returns {z.ZodType}
  */
 export function buildOperationSchema(parameters, requestBody, spec) {
-    const props = {};
-    const requiredKeys = [];
-    // Parameters (path, query, header)
-    for (const param of parameters) {
-        if (param.in === "cookie")
-            continue; // skip cookies
-        let paramSchema = jsonSchemaToZod(param.schema, spec);
-        if (param.description && !(param.schema && !isRef(param.schema) && param.schema.description)) {
-            paramSchema = paramSchema.describe(param.description);
-        }
-        if (!param.required) {
-            paramSchema = paramSchema.optional();
-        }
-        else {
-            requiredKeys.push(param.name);
-        }
-        props[param.name] = paramSchema;
+  const props = {};
+  const requiredKeys = [];
+  // Parameters (path, query, header)
+  for (const param of parameters) {
+    if (param.in === "cookie") continue; // skip cookies
+    let paramSchema = jsonSchemaToZod(param.schema, spec);
+    if (param.description && !(param.schema && !isRef(param.schema) && param.schema.description)) {
+      paramSchema = paramSchema.describe(param.description);
     }
-    // Request body
-    if (requestBody) {
-        const selectedContent = selectRequestBodyContent(requestBody);
-        if (selectedContent) {
-            const bodySchema = selectedContent.content.schema
-                ? jsonSchemaToZod(selectedContent.content.schema, spec)
-                : z.any();
-            // The request body lives under "body" unless an operation parameter
-            // already claims that name (or "requestBody"); getRequestBodyArgName
-            // resolves a non-colliding key so a param named `body` cannot replace
-            // the request body. executeRequest reads from the SAME resolved key.
-            const requestBodyArgName = getRequestBodyArgName(parameters);
-            if (requestBody.required) {
-                props[requestBodyArgName] = bodySchema;
-                requiredKeys.push(requestBodyArgName);
-            }
-            else {
-                props[requestBodyArgName] = bodySchema.optional();
-            }
-        }
+    if (!param.required) {
+      paramSchema = paramSchema.optional();
+    } else {
+      requiredKeys.push(param.name);
     }
-    if (Object.keys(props).length === 0) {
-        return z.object({});
+    props[param.name] = paramSchema;
+  }
+  // Request body
+  if (requestBody) {
+    const selectedContent = selectRequestBodyContent(requestBody);
+    if (selectedContent) {
+      const bodySchema = selectedContent.content.schema
+        ? jsonSchemaToZod(selectedContent.content.schema, spec)
+        : z.any();
+      // The request body lives under "body" unless an operation parameter
+      // already claims that name (or "requestBody"); getRequestBodyArgName
+      // resolves a non-colliding key so a param named `body` cannot replace
+      // the request body. executeRequest reads from the SAME resolved key.
+      const requestBodyArgName = getRequestBodyArgName(parameters);
+      if (requestBody.required) {
+        props[requestBodyArgName] = bodySchema;
+        requiredKeys.push(requestBodyArgName);
+      } else {
+        props[requestBodyArgName] = bodySchema.optional();
+      }
     }
-    return z.object(props);
+  }
+  if (Object.keys(props).length === 0) {
+    return z.object({});
+  }
+  return z.object(props);
 }

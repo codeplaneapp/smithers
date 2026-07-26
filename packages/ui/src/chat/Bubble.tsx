@@ -29,9 +29,8 @@ const bubbleVariantClasses = cva("sui-bubble", {
   },
 });
 
-export const bubbleVariants: (props?: {
-  variant?: "user" | "assistant" | "system";
-}) => string = (props) => bubbleVariantClasses(props);
+export const bubbleVariants: (props?: { variant?: "user" | "assistant" | "system" }) => string = (props) =>
+  bubbleVariantClasses(props);
 
 export type BubbleProps = ComponentProps<"div"> & {
   variant?: "user" | "assistant" | "system";
@@ -156,12 +155,7 @@ export function Bubble({
       style={rootStyle}
       {...props}
     >
-      <div
-        ref={contentRef}
-        data-slot="bubble-content"
-        id={bodyId}
-        className="sui-bubble-content"
-      >
+      <div ref={contentRef} data-slot="bubble-content" id={bodyId} className="sui-bubble-content">
         {children}
       </div>
       {collapsible && overflows ? (
@@ -234,9 +228,7 @@ export function BubbleReactions({ reactions, onToggle, className, ...props }: Bu
           data-slot="bubble-reaction"
           className="sui-bubble-reaction"
           aria-pressed={reaction.pressed ?? false}
-          aria-label={
-            reaction.count !== undefined ? `${reaction.label}, ${reaction.count}` : reaction.label
-          }
+          aria-label={reaction.count !== undefined ? `${reaction.label}, ${reaction.count}` : reaction.label}
           onClick={() => onToggle?.(reaction.key)}
         >
           {reaction.icon ? <span aria-hidden="true">{reaction.icon}</span> : null}

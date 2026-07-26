@@ -153,7 +153,11 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
       }
       // POST /v1/api/runs (launchRun)
       if (path === "/v1/api/runs" && request.method === "POST") {
-        const body = (await request.json().catch(() => ({}))) as { workflow?: string; input?: unknown; options?: unknown };
+        const body = (await request.json().catch(() => ({}))) as {
+          workflow?: string;
+          input?: unknown;
+          options?: unknown;
+        };
         const runId = `run-${state.runs.length + 1}`;
         state.runs = [{ runId, workflowKey: body.workflow, status: "running", createdAtMs: Date.now() }, ...state.runs];
         gateway.launches.push({ workflow: body.workflow ?? "", input: body.input, options: body.options });

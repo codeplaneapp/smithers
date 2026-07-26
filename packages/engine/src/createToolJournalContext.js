@@ -86,9 +86,11 @@ export function createToolJournalContext(params) {
     }
     const started = callTokens.get(seq);
     if (!started) {
-      return Effect.fail(new Error(
-        `Tool ${call.phase} has no started-call token: ${params.runId}/${params.nodeId}/${params.iteration}/${params.attempt}/${seq}`,
-      ));
+      return Effect.fail(
+        new Error(
+          `Tool ${call.phase} has no started-call token: ${params.runId}/${params.nodeId}/${params.iteration}/${params.attempt}/${seq}`,
+        ),
+      );
     }
     return completeToolJournalCall({
       adapter: params.adapter,
@@ -101,10 +103,14 @@ export function createToolJournalContext(params) {
       provenance,
       timestampMs,
       inTransaction: options.inTransaction,
-    }).pipe(Effect.ensuring(Effect.sync(() => {
-      callTokens.delete(seq);
-      finishToolCall(seq);
-    })));
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          callTokens.delete(seq);
+          finishToolCall(seq);
+        }),
+      ),
+    );
   };
   return {
     runId: params.runId,
@@ -114,41 +120,44 @@ export function createToolJournalContext(params) {
     rootDir: params.rootDir,
     signal: params.abortSignal,
     recordToolCallEffect,
-    failPendingToolCallsEffect: (error, timestampMs = nowMs(), options = {}) => Effect.forEach(
-      [...callTokens.entries()],
-      ([seq, started]) => {
-        const provenance = {
-          kind: started.call.kind === "task" ? "task" : "tool",
-          sideEffect: Boolean(started.call.sideEffect),
-          idempotent: Boolean(started.call.idempotent),
-          acceptsIdempotencyKey: Boolean(started.call.acceptsIdempotencyKey),
-          hasRevert: Boolean(started.call.hasRevert),
-          idempotencyKey: typeof started.call.idempotencyKey === "string"
-            ? started.call.idempotencyKey
-            : null,
-        };
-        return completeToolJournalCall({
-          adapter: params.adapter,
-          runId: params.runId,
-          nodeId: params.nodeId,
-          iteration: params.iteration,
-          attempt: params.attempt,
-          callToken: started.callToken,
-          call: {
-            ...started.call,
-            phase: "failed",
-            seq,
-            error,
-          },
-          provenance,
-          timestampMs,
-          inTransaction: options.inTransaction,
-        }).pipe(Effect.ensuring(Effect.sync(() => {
-          finishToolCall(seq);
-        })));
-      },
-      { discard: true },
-    ),
+    failPendingToolCallsEffect: (error, timestampMs = nowMs(), options = {}) =>
+      Effect.forEach(
+        [...callTokens.entries()],
+        ([seq, started]) => {
+          const provenance = {
+            kind: started.call.kind === "task" ? "task" : "tool",
+            sideEffect: Boolean(started.call.sideEffect),
+            idempotent: Boolean(started.call.idempotent),
+            acceptsIdempotencyKey: Boolean(started.call.acceptsIdempotencyKey),
+            hasRevert: Boolean(started.call.hasRevert),
+            idempotencyKey: typeof started.call.idempotencyKey === "string" ? started.call.idempotencyKey : null,
+          };
+          return completeToolJournalCall({
+            adapter: params.adapter,
+            runId: params.runId,
+            nodeId: params.nodeId,
+            iteration: params.iteration,
+            attempt: params.attempt,
+            callToken: started.callToken,
+            call: {
+              ...started.call,
+              phase: "failed",
+              seq,
+              error,
+            },
+            provenance,
+            timestampMs,
+            inTransaction: options.inTransaction,
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                finishToolCall(seq);
+              }),
+            ),
+          );
+        },
+        { discard: true },
+      ),
     waitForPendingToolCalls: async (graceMs) => {
       const pending = [...pendingToolCalls.values()].map((entry) => entry.promise);
       if (pending.length === 0) return true;

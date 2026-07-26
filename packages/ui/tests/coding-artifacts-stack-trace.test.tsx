@@ -31,12 +31,14 @@ async function render(element: ReactElement): Promise<void> {
 
 describe("parseStackTrace", () => {
   test("parses V8 frames with function names, anonymous, and eval forms", () => {
-    const frames = parseStackTrace([
-      "Error: boom",
-      "    at build (/repo/src/build.ts:12:34)",
-      "    at /repo/src/index.ts:1:1",
-      "    at eval (eval at <anonymous> (http://localhost/a.js:1:2), <anonymous>:3:4)",
-    ].join("\n"));
+    const frames = parseStackTrace(
+      [
+        "Error: boom",
+        "    at build (/repo/src/build.ts:12:34)",
+        "    at /repo/src/index.ts:1:1",
+        "    at eval (eval at <anonymous> (http://localhost/a.js:1:2), <anonymous>:3:4)",
+      ].join("\n"),
+    );
     expect(frames).toHaveLength(4);
     expect(frames[0]).toEqual({ raw: "Error: boom" });
     expect(frames[1]).toEqual({ functionName: "build", file: "/repo/src/build.ts", line: 12, column: 34 });

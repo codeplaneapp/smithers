@@ -63,7 +63,13 @@ export type StageStripProps = Omit<ComponentProps<"div">, "children"> & {
  * {@link StatusPill} uses. Store-free: no gateway hooks or node-status
  * derivation is baked in.
  */
-export function StageStrip({ stages, showSummary = false, summaryLabel = "Stages", className, ...props }: StageStripProps) {
+export function StageStrip({
+  stages,
+  showSummary = false,
+  summaryLabel = "Stages",
+  className,
+  ...props
+}: StageStripProps) {
   useInjectUiCss();
   if (stages.length === 0) return null;
   const done = stages.filter((stage) => isTerminalRunStatus(stage.status)).length;

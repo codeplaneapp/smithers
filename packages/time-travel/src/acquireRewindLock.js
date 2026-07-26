@@ -197,19 +197,22 @@ export async function acquireRewindLock(adapter, runId, options = {}) {
   };
 
   if (options.autoRenew !== false) {
-    renewalTimer = setInterval(() => {
-      if (renewing || released) {
-        return;
-      }
-      renewing = true;
-      void renew()
-        .catch((error) => {
-          tripFence(error);
-        })
-        .finally(() => {
-          renewing = false;
-        });
-    }, Math.max(1, Math.floor(leaseTtlMs / 3)));
+    renewalTimer = setInterval(
+      () => {
+        if (renewing || released) {
+          return;
+        }
+        renewing = true;
+        void renew()
+          .catch((error) => {
+            tripFence(error);
+          })
+          .finally(() => {
+            renewing = false;
+          });
+      },
+      Math.max(1, Math.floor(leaseTtlMs / 3)),
+    );
     renewalTimer.unref?.();
   }
 

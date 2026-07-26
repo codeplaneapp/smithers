@@ -161,7 +161,7 @@ function parseWhere(where) {
     }
     // The tokenizer re-encodes string literals as JSON strings; everything
     // else is a bare token.
-    return token.startsWith("\"") ? /** @type {string} */ (JSON.parse(token)) : token;
+    return token.startsWith('"') ? /** @type {string} */ (JSON.parse(token)) : token;
   };
 
   while (i < tokens.length) {
@@ -208,10 +208,11 @@ function parseWhere(where) {
  */
 function shapeForTable(catalog, table, shapeName) {
   if (shapeName) {
-    return catalog.find((shape) => shape.name === shapeName && (shape.table === table || shape.table === "*" || table === ""));
+    return catalog.find(
+      (shape) => shape.name === shapeName && (shape.table === table || shape.table === "*" || table === ""),
+    );
   }
-  return catalog.find((shape) => shape.table === table) ??
-    catalog.find((shape) => shape.tablePattern?.test(table));
+  return catalog.find((shape) => shape.table === table) ?? catalog.find((shape) => shape.tablePattern?.test(table));
 }
 
 /**
@@ -310,7 +311,12 @@ function validateWhere(shape, where, auth) {
     ensureValuesAllowed(shape.runIdColumn, parsed.values.get(shape.runIdColumn) ?? [], auth.grantedRunIds, unscoped);
   }
   if (shape.workspaceIdColumn) {
-    ensureValuesAllowed(shape.workspaceIdColumn, parsed.values.get(shape.workspaceIdColumn) ?? [], auth.grantedWorkspaceIds, unscoped);
+    ensureValuesAllowed(
+      shape.workspaceIdColumn,
+      parsed.values.get(shape.workspaceIdColumn) ?? [],
+      auth.grantedWorkspaceIds,
+      unscoped,
+    );
   }
   if (shape.userPrivateColumn) {
     const claimed = parsed.values.get(shape.userPrivateColumn) ?? [];
@@ -796,7 +802,10 @@ export function createSmithersElectricProxy(options) {
         return await handleShape(request, requestUrl);
       } catch (error) {
         metrics.incShapeOpenRejected();
-        return json(502, { error: "upstream service unavailable", message: error instanceof Error ? error.message : String(error) });
+        return json(502, {
+          error: "upstream service unavailable",
+          message: error instanceof Error ? error.message : String(error),
+        });
       }
     },
   };

@@ -53,19 +53,15 @@ function extractCollect(value: unknown): CollectOutput | null {
   const workflowTarget = asString(row.workflowTarget);
   if (workflowTarget === undefined) return null;
   const workflows = Array.isArray(row.workflows)
-    ? row.workflows
-        .filter(isRecord)
-        .map((w) => ({
-          id: asString(w.id) ?? "",
-          displayName: asString(w.displayName) ?? asString(w.id) ?? "",
-          sourceType: asString(w.sourceType) ?? "user",
-          entryFile: asString(w.entryFile) ?? "",
-        }))
+    ? row.workflows.filter(isRecord).map((w) => ({
+        id: asString(w.id) ?? "",
+        displayName: asString(w.displayName) ?? asString(w.id) ?? "",
+        sourceType: asString(w.sourceType) ?? "user",
+        entryFile: asString(w.entryFile) ?? "",
+      }))
     : [];
   const existingSkills = Array.isArray(row.existingSkills)
-    ? row.existingSkills
-        .filter(isRecord)
-        .map((s) => ({ path: asString(s.path) ?? "" }))
+    ? row.existingSkills.filter(isRecord).map((s) => ({ path: asString(s.path) ?? "" }))
     : [];
   return {
     workflowTarget,
@@ -90,14 +86,12 @@ function extractWriteResult(value: unknown): WriteResult | null {
   const summary = asString(row.summary);
   if (summary === undefined) return null;
   const written = Array.isArray(row.written)
-    ? row.written
-        .filter(isRecord)
-        .map((w) => ({
-          workflow: asString(w.workflow) ?? "",
-          path: asString(w.path) ?? "",
-          skillName: asString(w.skillName) ?? "",
-          action: asString(w.action) ?? "updated",
-        }))
+    ? row.written.filter(isRecord).map((w) => ({
+        workflow: asString(w.workflow) ?? "",
+        path: asString(w.path) ?? "",
+        skillName: asString(w.skillName) ?? "",
+        action: asString(w.action) ?? "updated",
+      }))
     : [];
   return { summary, written };
 }
@@ -171,12 +165,7 @@ function statusClass(status: string | undefined) {
   return "";
 }
 
-function nodeState(
-  finished: boolean,
-  active: boolean,
-  done: boolean,
-  failed: boolean,
-) {
+function nodeState(finished: boolean, active: boolean, done: boolean, failed: boolean) {
   if (done) return "done";
   if (failed) return "failed";
   if (active && !finished) return "running";
@@ -194,10 +183,7 @@ function App() {
   const actions = useGatewayActions();
 
   const skillRuns = useMemo(
-    () =>
-      ((runsQuery.data ?? []) as RunSummary[]).filter(
-        (r) => !r.workflowKey || r.workflowKey === WORKFLOW_KEY,
-      ),
+    () => ((runsQuery.data ?? []) as RunSummary[]).filter((r) => !r.workflowKey || r.workflowKey === WORKFLOW_KEY),
     [runsQuery.data],
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? skillRuns[0]?.runId;
@@ -221,11 +207,7 @@ function App() {
   const successCount = skillRuns.filter((r) => statusClass(r.status) === "finished").length;
 
   async function refresh() {
-    await Promise.all([
-      runsQuery.refetch(),
-      collectQuery.refetch(),
-      writeQuery.refetch(),
-    ]);
+    await Promise.all([runsQuery.refetch(), collectQuery.refetch(), writeQuery.refetch()]);
   }
   async function launch() {
     setBusy(true);
@@ -361,7 +343,9 @@ function App() {
                 </div>
                 <div className="field">
                   <span className="label">Extra prompt</span>
-                  <span className="value">{collect?.prompt && collect.prompt.length > 0 ? collect.prompt : "none"}</span>
+                  <span className="value">
+                    {collect?.prompt && collect.prompt.length > 0 ? collect.prompt : "none"}
+                  </span>
                 </div>
               </div>
 
@@ -372,9 +356,7 @@ function App() {
                     collect
                   </div>
                   <div className="tl-sub">
-                    {collect
-                      ? collect.workflows.length + " workflows discovered"
-                      : "discovering workflows"}
+                    {collect ? collect.workflows.length + " workflows discovered" : "discovering workflows"}
                   </div>
                 </div>
                 <div className="tl-conn">→</div>
@@ -468,9 +450,7 @@ function App() {
                   </div>
                 ) : (
                   <div className="empty-inline" data-testid="workflow-skill-results-pending">
-                    {collectDone
-                      ? "Generating skill documentation…"
-                      : "Results appear once write-skills completes."}
+                    {collectDone ? "Generating skill documentation…" : "Results appear once write-skills completes."}
                   </div>
                 )}
               </div>
@@ -487,8 +467,7 @@ function App() {
           ) : (
             <div className="empty" data-testid="workflow-skill-empty">
               <div>
-                Select a run from the sidebar, or launch a new one to generate skill documentation.
-                No run selected.
+                Select a run from the sidebar, or launch a new one to generate skill documentation. No run selected.
               </div>
               <button
                 className="button primary"

@@ -63,9 +63,7 @@ function spoofPostgresDialect(adapter: SmithersDb): SmithersDb {
 
 function sampleSnapshotData(overrides: Record<string, unknown> = {}) {
   return {
-    nodes: [
-      { nodeId: "analyze", iteration: 0, state: "finished", lastAttempt: 1, outputTable: "out_a", label: null },
-    ],
+    nodes: [{ nodeId: "analyze", iteration: 0, state: "finished", lastAttempt: 1, outputTable: "out_a", label: null }],
     outputs: { out_a: [{ text: "done" }] },
     ralph: [],
     input: { prompt: "hi" },
@@ -101,26 +99,62 @@ describe("barrel exports", () => {
 describe("diff formatting", () => {
   test("formatDiffForTui renders every change section", () => {
     const a = {
-      runId: "r", frameNo: 0,
+      runId: "r",
+      frameNo: 0,
       nodes: {
-        "removed::0": { nodeId: "removed", iteration: 0, state: "finished", lastAttempt: 1, outputTable: "out_r", label: null },
-        "changed::0": { nodeId: "changed", iteration: 0, state: "pending", lastAttempt: null, outputTable: "out_c", label: null },
+        "removed::0": {
+          nodeId: "removed",
+          iteration: 0,
+          state: "finished",
+          lastAttempt: 1,
+          outputTable: "out_r",
+          label: null,
+        },
+        "changed::0": {
+          nodeId: "changed",
+          iteration: 0,
+          state: "pending",
+          lastAttempt: null,
+          outputTable: "out_c",
+          label: null,
+        },
       },
       outputs: { gone: [1], mutated: [1] },
       ralph: { changedLoop: { ralphId: "changedLoop", iteration: 0, done: false } },
       input: { prompt: "a" },
-      vcsPointer: "ptr-a", workflowHash: null, contentHash: "h", createdAtMs: 1,
+      vcsPointer: "ptr-a",
+      workflowHash: null,
+      contentHash: "h",
+      createdAtMs: 1,
     };
     const b = {
-      runId: "r", frameNo: 1,
+      runId: "r",
+      frameNo: 1,
       nodes: {
-        "added::0": { nodeId: "added", iteration: 0, state: "pending", lastAttempt: null, outputTable: "out_n", label: null },
-        "changed::0": { nodeId: "changed", iteration: 0, state: "finished", lastAttempt: 2, outputTable: "out_c", label: null },
+        "added::0": {
+          nodeId: "added",
+          iteration: 0,
+          state: "pending",
+          lastAttempt: null,
+          outputTable: "out_n",
+          label: null,
+        },
+        "changed::0": {
+          nodeId: "changed",
+          iteration: 0,
+          state: "finished",
+          lastAttempt: 2,
+          outputTable: "out_c",
+          label: null,
+        },
       },
       outputs: { fresh: [2], mutated: [3] },
       ralph: { changedLoop: { ralphId: "changedLoop", iteration: 3, done: true } },
       input: { prompt: "b" },
-      vcsPointer: "ptr-b", workflowHash: null, contentHash: "h2", createdAtMs: 2,
+      vcsPointer: "ptr-b",
+      workflowHash: null,
+      contentHash: "h2",
+      createdAtMs: 2,
     };
     const diff = diffSnapshots(a as never, b as never);
     expect(diff.nodesAdded).toEqual(["added::0"]);
@@ -191,12 +225,8 @@ describe("isRunLikelyLive", () => {
     const dead = spawnSync("true", { stdio: "ignore" });
     expect(typeof dead.pid).toBe("number");
     const now = 1_000_000;
-    expect(
-      isRunLikelyLive({ runtimeOwnerId: `pid:${dead.pid}`, heartbeatAtMs: now - 60_000 }, now),
-    ).toBe(false);
-    expect(
-      isRunLikelyLive({ runtimeOwnerId: `pid:${dead.pid}`, heartbeatAtMs: now - 1_000 }, now),
-    ).toBe(true);
+    expect(isRunLikelyLive({ runtimeOwnerId: `pid:${dead.pid}`, heartbeatAtMs: now - 60_000 }, now)).toBe(false);
+    expect(isRunLikelyLive({ runtimeOwnerId: `pid:${dead.pid}`, heartbeatAtMs: now - 1_000 }, now)).toBe(true);
     expect(isRunLikelyLive({ runtimeOwnerId: null, heartbeatAtMs: null }, now)).toBe(false);
   });
 });
@@ -221,14 +251,32 @@ describe("rewind audit helpers", () => {
       await adapter.insertRun({ runId: "run-a", workflowName: "wf", status: "running", createdAtMs: 1 });
       await adapter.insertRun({ runId: "run-b", workflowName: "wf", status: "running", createdAtMs: 1 });
       await writeRewindAuditRow(adapter, {
-        runId: "run-a", fromFrameNo: 4, toFrameNo: 1, caller: "user:a", timestampMs: 10, result: "success", durationMs: 5,
+        runId: "run-a",
+        fromFrameNo: 4,
+        toFrameNo: 1,
+        caller: "user:a",
+        timestampMs: 10,
+        result: "success",
+        durationMs: 5,
       });
       await writeRewindAuditRow(adapter, {
-        runId: "run-b", fromFrameNo: 9, toFrameNo: 0, caller: "user:b", timestampMs: 20, result: "failed", durationMs: null,
+        runId: "run-b",
+        fromFrameNo: 9,
+        toFrameNo: 0,
+        caller: "user:b",
+        timestampMs: 20,
+        result: "failed",
+        durationMs: null,
       });
       const rows = await listRewindAuditRows(adapter);
       expect(rows.map((r) => r.runId)).toEqual(["run-a", "run-b"]);
-      expect(rows[1]).toMatchObject({ fromFrameNo: 9, toFrameNo: 0, caller: "user:b", result: "failed", durationMs: null });
+      expect(rows[1]).toMatchObject({
+        fromFrameNo: 9,
+        toFrameNo: 0,
+        caller: "user:b",
+        result: "failed",
+        durationMs: null,
+      });
     } finally {
       sqlite.close();
     }
@@ -240,7 +288,13 @@ describe("rewind audit helpers", () => {
       // The audit table has a FK to _smithers_runs(run_id); seed the run.
       await adapter.insertRun({ runId: "run-u", workflowName: "wf", status: "running", createdAtMs: 1 });
       const id = await writeRewindAuditRow(adapter, {
-        runId: "run-u", fromFrameNo: 7, toFrameNo: 2, caller: "user:u", timestampMs: 10, result: "in_progress", durationMs: null,
+        runId: "run-u",
+        fromFrameNo: 7,
+        toFrameNo: 2,
+        caller: "user:u",
+        timestampMs: 10,
+        result: "in_progress",
+        durationMs: null,
       });
       expect(id).not.toBeNull();
       await updateRewindAuditRow(adapter, { id: id as number, result: "success", durationMs: 42 });
@@ -258,7 +312,13 @@ describe("rewind audit helpers", () => {
       // The audit table has a FK to _smithers_runs(run_id); seed the run.
       await adapter.insertRun({ runId: "run-q", workflowName: "wf", status: "running", createdAtMs: 1 });
       await writeRewindAuditRow(adapter, {
-        runId: "run-q", fromFrameNo: 3, toFrameNo: 1, caller: "user:q", timestampMs: Date.now(), result: "success", durationMs: 1,
+        runId: "run-q",
+        fromFrameNo: 3,
+        toFrameNo: 1,
+        caller: "user:q",
+        timestampMs: Date.now(),
+        result: "success",
+        durationMs: 1,
       });
       const result = await evaluateRewindRateLimit({ adapter, runId: "run-q", caller: "user:q" });
       expect(result.max).toBe(rewindRateLimitBarrel.REWIND_RATE_LIMIT_MAX);
@@ -276,7 +336,13 @@ describe("rewind audit helpers", () => {
     try {
       await adapter.insertRun({ runId: "run-r", workflowName: "wf", status: "running", createdAtMs: 1 });
       const id = await writeRewindAuditRow(adapter, {
-        runId: "run-r", fromFrameNo: 5, toFrameNo: 2, caller: "user:r", timestampMs: Date.now() - 500, result: "in_progress", durationMs: null,
+        runId: "run-r",
+        fromFrameNo: 5,
+        toFrameNo: 2,
+        caller: "user:r",
+        timestampMs: Date.now() - 500,
+        result: "in_progress",
+        durationMs: null,
       });
       const { recovered } = await recoverInProgressRewindAudits(adapter, { staleAfterMs: 0 });
       expect(recovered).toEqual([{ id: id as number, runId: "run-r" }]);
@@ -301,8 +367,12 @@ describe("rewind audit helpers", () => {
       const errors: unknown[] = [];
       let recoveredCount = -1;
       await recoverRewindAuditsAtStartup(failingAdapter, {
-        onRecovered: (count) => { recoveredCount = count; },
-        onError: (error) => { errors.push(error); },
+        onRecovered: (count) => {
+          recoveredCount = count;
+        },
+        onError: (error) => {
+          errors.push(error);
+        },
       });
       expect(recoveredCount).toBe(-1);
       expect(errors).toHaveLength(1);
@@ -320,7 +390,9 @@ describe("DB fault paths surface SmithersError (real missing-table faults)", () 
       await expect(loadSnapshot(adapter, "run-x", 0)).rejects.toThrow(/no such table/i);
       await expect(loadLatestSnapshot(adapter, "run-x")).rejects.toThrow(/no such table/i);
       await expect(listSnapshots(adapter, "run-x")).rejects.toThrow(/no such table/i);
-      await expect(captureSnapshot(adapter, "run-x", 0, sampleSnapshotData() as never)).rejects.toThrow(/no such table/i);
+      await expect(captureSnapshot(adapter, "run-x", 0, sampleSnapshotData() as never)).rejects.toThrow(
+        /no such table/i,
+      );
     } finally {
       sqlite.close();
     }
@@ -390,7 +462,13 @@ describe("postgres dialect row mapping", () => {
     const { adapter, db, sqlite } = createTestDb();
     try {
       await db.insert(smithersVcsTags).values({
-        runId: "run-tag", frameNo: 2, vcsType: "jj", vcsPointer: "change-xyz", vcsRoot: "/repo", jjOperationId: "op-9", createdAtMs: 77,
+        runId: "run-tag",
+        frameNo: 2,
+        vcsType: "jj",
+        vcsPointer: "change-xyz",
+        vcsRoot: "/repo",
+        jjOperationId: "op-9",
+        createdAtMs: 77,
       });
       const pgAdapter = spoofPostgresDialect(adapter);
       const viaPg = await loadVcsTag(pgAdapter, "run-tag", 2);
@@ -410,9 +488,9 @@ describe("forkRun failure branches", () => {
       await captureSnapshot(adapter, "run-meta", 0, sampleSnapshotData() as never);
       const failingAdapter = Object.create(adapter);
       failingAdapter.getRun = () => Promise.reject(new Error("run row unavailable"));
-      await expect(
-        forkRun(failingAdapter, { parentRunId: "run-meta", frameNo: 0 }),
-      ).rejects.toThrow(/load parent run metadata|run row unavailable/);
+      await expect(forkRun(failingAdapter, { parentRunId: "run-meta", frameNo: 0 })).rejects.toThrow(
+        /load parent run metadata|run row unavailable/,
+      );
     } finally {
       sqlite.close();
     }
@@ -483,9 +561,9 @@ describe("forkRun failure branches", () => {
           SELECT RAISE(ABORT, 'child snapshot vetoed');
         END;
       `);
-      await expect(
-        forkRun(adapter, { parentRunId: "parent-block", frameNo: 0 }),
-      ).rejects.toThrow(/insert forked snapshot|child snapshot vetoed/);
+      await expect(forkRun(adapter, { parentRunId: "parent-block", frameNo: 0 })).rejects.toThrow(
+        /insert forked snapshot|child snapshot vetoed/,
+      );
       // The transaction rolled back: no branch row and no child run row survive.
       expect(await listBranches(adapter, "parent-block")).toEqual([]);
     } finally {
@@ -499,11 +577,19 @@ describe("retryTask branches", () => {
     const { adapter, sqlite } = createTestDb();
     try {
       await adapter.insertNode({
-        runId: "run-norun", nodeId: "task:a", iteration: 0, state: "failed", lastAttempt: 1, updatedAtMs: 5, outputTable: "", label: null,
+        runId: "run-norun",
+        nodeId: "task:a",
+        iteration: 0,
+        state: "failed",
+        lastAttempt: 1,
+        updatedAtMs: 5,
+        outputTable: "",
+        label: null,
       });
       const events: Array<{ type: string; error?: string }> = [];
       const result = await retryTask(adapter, {
-        runId: "run-norun", nodeId: "task:a",
+        runId: "run-norun",
+        nodeId: "task:a",
         onProgress: (event) => events.push(event as never),
       });
       expect(result.success).toBe(false);
@@ -519,10 +605,24 @@ describe("retryTask branches", () => {
     try {
       await adapter.insertRun({ runId: "run-solo", workflowName: "wf", status: "failed", createdAtMs: 1 });
       await adapter.insertNode({
-        runId: "run-solo", nodeId: "task:target", iteration: 0, state: "failed", lastAttempt: 1, updatedAtMs: 100, outputTable: "", label: null,
+        runId: "run-solo",
+        nodeId: "task:target",
+        iteration: 0,
+        state: "failed",
+        lastAttempt: 1,
+        updatedAtMs: 100,
+        outputTable: "",
+        label: null,
       });
       await adapter.insertNode({
-        runId: "run-solo", nodeId: "task:downstream", iteration: 0, state: "finished", lastAttempt: 1, updatedAtMs: 200, outputTable: "", label: null,
+        runId: "run-solo",
+        nodeId: "task:downstream",
+        iteration: 0,
+        state: "finished",
+        lastAttempt: 1,
+        updatedAtMs: 200,
+        outputTable: "",
+        label: null,
       });
 
       const result = await retryTask(adapter, { runId: "run-solo", nodeId: "task:target", resetDependents: false });
@@ -544,21 +644,54 @@ describe("retryTask branches", () => {
       // attemptOrder — the dependent must be reset because its attempt sequence
       // is after the target's (exercises the attempt-order comparison branch).
       await adapter.insertNode({
-        runId: "run-order", nodeId: "task:target", iteration: 0, state: "failed", lastAttempt: 1, updatedAtMs: 500, outputTable: "", label: null,
+        runId: "run-order",
+        nodeId: "task:target",
+        iteration: 0,
+        state: "failed",
+        lastAttempt: 1,
+        updatedAtMs: 500,
+        outputTable: "",
+        label: null,
       });
       await adapter.insertNode({
-        runId: "run-order", nodeId: "task:dep", iteration: 0, state: "finished", lastAttempt: 1, updatedAtMs: 10, outputTable: "", label: null,
+        runId: "run-order",
+        nodeId: "task:dep",
+        iteration: 0,
+        state: "finished",
+        lastAttempt: 1,
+        updatedAtMs: 10,
+        outputTable: "",
+        label: null,
       });
       // A node at a higher iteration is always downstream of the target.
       await adapter.insertNode({
-        runId: "run-order", nodeId: "task:next-iter", iteration: 1, state: "finished", lastAttempt: 1, updatedAtMs: 5, outputTable: "", label: null,
+        runId: "run-order",
+        nodeId: "task:next-iter",
+        iteration: 1,
+        state: "finished",
+        lastAttempt: 1,
+        updatedAtMs: 5,
+        outputTable: "",
+        label: null,
       });
       // Insertion order defines attemptOrder: target (0) then dep (1).
       await adapter.insertAttempt({
-        runId: "run-order", nodeId: "task:target", iteration: 0, attempt: 1, state: "failed", startedAtMs: 100, finishedAtMs: null,
+        runId: "run-order",
+        nodeId: "task:target",
+        iteration: 0,
+        attempt: 1,
+        state: "failed",
+        startedAtMs: 100,
+        finishedAtMs: null,
       });
       await adapter.insertAttempt({
-        runId: "run-order", nodeId: "task:dep", iteration: 0, attempt: 1, state: "failed", startedAtMs: 200, finishedAtMs: null,
+        runId: "run-order",
+        nodeId: "task:dep",
+        iteration: 0,
+        attempt: 1,
+        state: "failed",
+        startedAtMs: 200,
+        finishedAtMs: null,
       });
 
       const result = await retryTask(adapter, { runId: "run-order", nodeId: "task:target" });
@@ -576,23 +709,56 @@ describe("retryTask branches", () => {
     try {
       await adapter.insertRun({ runId: "run-retry", workflowName: "wf", status: "failed", createdAtMs: 1 });
       await adapter.insertNode({
-        runId: "run-retry", nodeId: "task:target", iteration: 0, state: "failed", lastAttempt: 1, updatedAtMs: 100, outputTable: "", label: null,
+        runId: "run-retry",
+        nodeId: "task:target",
+        iteration: 0,
+        state: "failed",
+        lastAttempt: 1,
+        updatedAtMs: 100,
+        outputTable: "",
+        label: null,
       });
       // Dependent node that never got an attempt row — resolved via updatedAtMs.
       await adapter.insertNode({
-        runId: "run-retry", nodeId: "task:later-no-attempt", iteration: 0, state: "pending", lastAttempt: null, updatedAtMs: 200, outputTable: "", label: null,
+        runId: "run-retry",
+        nodeId: "task:later-no-attempt",
+        iteration: 0,
+        state: "pending",
+        lastAttempt: null,
+        updatedAtMs: 200,
+        outputTable: "",
+        label: null,
       });
       // Earlier node without attempts — must NOT be reset.
       await adapter.insertNode({
-        runId: "run-retry", nodeId: "task:earlier", iteration: 0, state: "finished", lastAttempt: 1, updatedAtMs: 50, outputTable: "", label: null,
+        runId: "run-retry",
+        nodeId: "task:earlier",
+        iteration: 0,
+        state: "finished",
+        lastAttempt: 1,
+        updatedAtMs: 50,
+        outputTable: "",
+        label: null,
       });
       // Target has one failed attempt (finishedAtMs null → stamped at reset)
       // and one already-finished attempt that must be left untouched.
       await adapter.insertAttempt({
-        runId: "run-retry", nodeId: "task:target", iteration: 0, attempt: 1, state: "finished", startedAtMs: 90, finishedAtMs: 95,
+        runId: "run-retry",
+        nodeId: "task:target",
+        iteration: 0,
+        attempt: 1,
+        state: "finished",
+        startedAtMs: 90,
+        finishedAtMs: 95,
       });
       await adapter.insertAttempt({
-        runId: "run-retry", nodeId: "task:target", iteration: 0, attempt: 2, state: "failed", startedAtMs: 96, finishedAtMs: null,
+        runId: "run-retry",
+        nodeId: "task:target",
+        iteration: 0,
+        attempt: 2,
+        state: "failed",
+        startedAtMs: 96,
+        finishedAtMs: null,
       });
 
       const result = await retryTask(adapter, { runId: "run-retry", nodeId: "task:target" });
@@ -620,7 +786,14 @@ describe("timeTravel branches", () => {
     try {
       await adapter.insertRun({ runId: "run-tt", workflowName: "wf", status: "failed", createdAtMs: 1 });
       await adapter.insertAttempt({
-        runId: "run-tt", nodeId: "task:ghost", iteration: 0, attempt: 1, state: "failed", startedAtMs: 10, finishedAtMs: 20, jjPointer: null,
+        runId: "run-tt",
+        nodeId: "task:ghost",
+        iteration: 0,
+        attempt: 1,
+        state: "failed",
+        startedAtMs: 10,
+        finishedAtMs: 20,
+        jjPointer: null,
       });
       const result = await timeTravel(adapter, { runId: "run-tt", nodeId: "task:ghost", iteration: 0 });
       expect(result.success).toBe(false);
@@ -636,11 +809,25 @@ describe("timeTravel branches", () => {
     try {
       await adapter.insertRun({ runId: "run-tt2", workflowName: "wf", status: "failed", createdAtMs: 1 });
       await adapter.insertNode({
-        runId: "run-tt2", nodeId: "task:t", iteration: 0, state: "failed", lastAttempt: 1, updatedAtMs: 10, outputTable: "", label: null,
+        runId: "run-tt2",
+        nodeId: "task:t",
+        iteration: 0,
+        state: "failed",
+        lastAttempt: 1,
+        updatedAtMs: 10,
+        outputTable: "",
+        label: null,
       });
       // Target attempt: no jjPointer, so no VCS interaction.
       await adapter.insertAttempt({
-        runId: "run-tt2", nodeId: "task:t", iteration: 0, attempt: 1, state: "in-progress", startedAtMs: 10, finishedAtMs: null, jjPointer: null,
+        runId: "run-tt2",
+        nodeId: "task:t",
+        iteration: 0,
+        attempt: 1,
+        state: "in-progress",
+        startedAtMs: 10,
+        finishedAtMs: null,
+        jjPointer: null,
       });
       const result = await timeTravel(adapter, { runId: "run-tt2", nodeId: "task:t", iteration: 0 });
       expect(result.success).toBe(true);

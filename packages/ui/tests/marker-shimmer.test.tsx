@@ -26,9 +26,7 @@ describe("Marker", () => {
   test("adds polite live semantics only when requested", () => {
     expect(renderToStaticMarkup(<Marker live>Working</Marker>)).toContain('aria-live="polite"');
     expect(renderToStaticMarkup(<Marker>Static</Marker>)).not.toContain("aria-live");
-    expect(renderToStaticMarkup(<Marker aria-live="assertive">Static</Marker>)).not.toContain(
-      "aria-live",
-    );
+    expect(renderToStaticMarkup(<Marker aria-live="assertive">Static</Marker>)).not.toContain("aria-live");
   });
 
   test("wraps shimmering status labels", () => {

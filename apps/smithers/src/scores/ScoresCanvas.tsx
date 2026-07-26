@@ -99,9 +99,7 @@ function SummaryTab({ metrics }: { metrics: RunMetrics }) {
                   <div className="scores-cell-label">{cell.label}</div>
                   <div
                     className={
-                      cell.value == null
-                        ? "scores-cell-value tone-faint"
-                        : `scores-cell-value ${scoreTone(cell.value)}`
+                      cell.value == null ? "scores-cell-value tone-faint" : `scores-cell-value ${scoreTone(cell.value)}`
                     }
                   >
                     {formatScore(cell.value)}
@@ -136,10 +134,7 @@ function TokenPanel({ tokens }: { tokens: TokenReport }) {
             <>
               <DetailRow label="Cache read" value={humanizeTokens(tokens.cacheRead ?? 0)} />
               <DetailRow label="Cache write" value={humanizeTokens(tokens.cacheWrite ?? 0)} />
-              <DetailRow
-                label="Cache hit %"
-                value={hitPercent == null ? EM_DASH : `${hitPercent.toFixed(1)}%`}
-              />
+              <DetailRow label="Cache hit %" value={hitPercent == null ? EM_DASH : `${hitPercent.toFixed(1)}%`} />
             </>
           ) : null}
           {tokens.byPeriod.length > 0 ? (
@@ -151,9 +146,7 @@ function TokenPanel({ tokens }: { tokens: TokenReport }) {
                 <span className="scores-period-head is-num">Output</span>
                 {tokens.byPeriod.map((row) => (
                   <div className="scores-period-row" key={row.period}>
-                    <span className="scores-period-cell is-label">
-                      {truncateMiddle(row.period, 30)}
-                    </span>
+                    <span className="scores-period-cell is-label">{truncateMiddle(row.period, 30)}</span>
                     <span className="scores-period-cell is-num">{humanizeTokens(row.input)}</span>
                     <span className="scores-period-cell is-num">{humanizeTokens(row.output)}</span>
                   </div>
@@ -218,9 +211,7 @@ function CostPanel({ cost }: { cost: CostReport }) {
                 <span className="scores-period-head is-num">Runs</span>
                 {cost.byPeriod.map((row) => (
                   <div className="scores-period-row" key={row.period}>
-                    <span className="scores-period-cell is-label">
-                      {truncateMiddle(row.period, 30)}
-                    </span>
+                    <span className="scores-period-cell is-label">{truncateMiddle(row.period, 30)}</span>
                     <span className="scores-period-cell is-num">{formatUsd(row.total)}</span>
                     <span className="scores-period-cell is-num">{row.runs}</span>
                   </div>

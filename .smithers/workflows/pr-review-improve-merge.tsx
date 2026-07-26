@@ -102,7 +102,9 @@ const readOnly = `READ-ONLY TASK: you are running inside a SHARED working tree u
 
 STALE-CHECKOUT WARNING: the working tree may be checked out at an old or detached commit and is NOT trustworthy as "main". Verify every claim against \`origin/main\` after fetching: \`git show origin/main:<path>\` to read a file as it is on main, \`git log origin/main -- <path>\` for history. Never conclude "X does not exist on main" from the working tree alone.`;
 
-const reviewPrompt = (pr: number) => `You are the FIRST reviewer of GitHub PR #${pr} on smithersai/smithers. The current directory is an up-to-date checkout of the repo (main).
+const reviewPrompt = (
+  pr: number,
+) => `You are the FIRST reviewer of GitHub PR #${pr} on smithersai/smithers. The current directory is an up-to-date checkout of the repo (main).
 
 ${readOnly}
 
@@ -145,7 +147,9 @@ ${blocking.length ? blocking.map((s) => `- ${s}`).join("\n") : "- (none — firs
 Report fields: changed (true if you pushed any commits this iteration), pushedCommits (commit subjects), gates (what you ran and the results), summary.`;
 };
 
-const rereviewPrompt = (pr: number) => `You are a FRESH, independent re-reviewer of GitHub PR #${pr} on smithersai/smithers — the final quality gate before merge. A maintainer agent may have pushed improvement commits since the first review, so review the LIVE current state only.
+const rereviewPrompt = (
+  pr: number,
+) => `You are a FRESH, independent re-reviewer of GitHub PR #${pr} on smithersai/smithers — the final quality gate before merge. A maintainer agent may have pushed improvement commits since the first review, so review the LIVE current state only.
 
 ${readOnly}
 
@@ -238,13 +242,19 @@ export default smithers((ctx) => {
                   while (Date.now() < deadline) {
                     const parked = sh(
                       `gh api 'repos/smithersai/smithers/actions/runs?status=action_required&per_page=50' --jq '.workflow_runs[] | select(.head_branch == "${head}") | .id'`,
-                    ).out.split("\n").map((s) => s.trim()).filter(Boolean);
+                    )
+                      .out.split("\n")
+                      .map((s) => s.trim())
+                      .filter(Boolean);
                     for (const id of parked) {
                       sh(`gh api -X POST repos/smithersai/smithers/actions/runs/${id}/approve`);
                     }
                     const res = sh(`gh pr checks ${pr}`);
                     checksOut = res.out;
-                    if (res.code === 0) { checksState = "pass"; break; }
+                    if (res.code === 0) {
+                      checksState = "pass";
+                      break;
+                    }
                     if (res.code === 8 || /no checks reported/i.test(res.out)) {
                       checksState = "pending";
                       await sleep(60_000);
@@ -263,7 +273,9 @@ export default smithers((ctx) => {
                   }
 
                   const m = sh(`gh pr merge ${pr} --squash`, 300_000);
-                  const verify = sh(`gh pr view ${pr} --json state,mergeCommit --jq '{state: .state, sha: .mergeCommit.oid}'`);
+                  const verify = sh(
+                    `gh pr view ${pr} --json state,mergeCommit --jq '{state: .state, sha: .mergeCommit.oid}'`,
+                  );
                   let state = "";
                   let sha = "";
                   try {
@@ -277,9 +289,10 @@ export default smithers((ctx) => {
                     merged: state === "MERGED",
                     mergeSha: sha,
                     checksState,
-                    detail: state === "MERGED"
-                      ? `PR #${pr} squash-merged as ${sha}.`
-                      : `gh pr merge exited ${m.code}; PR state is "${state}".\n${m.out.slice(-3000)}`,
+                    detail:
+                      state === "MERGED"
+                        ? `PR #${pr} squash-merged as ${sha}.`
+                        : `gh pr merge exited ${m.code}; PR state is "${state}".\n${m.out.slice(-3000)}`,
                   };
                 }}
               </Task>

@@ -60,9 +60,7 @@ describe("check-fault-skips forbidden modifiers", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stderr.toString()).toBe("");
     const total = budget.reduce((sum, [, count]) => sum + count, 0);
-    expect(result.stdout.toString()).toContain(
-      `${total} tracked skipped fault assertion(s); no untracked skips`,
-    );
+    expect(result.stdout.toString()).toContain(`${total} tracked skipped fault assertion(s); no untracked skips`);
   });
 
   test("rejects only, todo, and failing modifiers for test, describe, and it", () => {
@@ -95,11 +93,7 @@ describe("check-fault-skips forbidden modifiers", () => {
     const stderr = result.stderr.toString();
 
     expect(result.exitCode).toBe(1);
-    expect(stderr).toContain(
-      `[fault-skip-audit] unexpected .only fault test modifier in ${rel}: expected 0, found 1`,
-    );
-    expect(stderr).toContain(
-      `[fault-skip-audit] tracked skip count changed in ${rel}: expected ${count}, found 0`,
-    );
+    expect(stderr).toContain(`[fault-skip-audit] unexpected .only fault test modifier in ${rel}: expected 0, found 1`);
+    expect(stderr).toContain(`[fault-skip-audit] tracked skip count changed in ${rel}: expected ${count}, found 0`);
   });
 });

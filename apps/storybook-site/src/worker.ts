@@ -26,10 +26,7 @@ const HASHED_ASSET_HEADERS = {
   "cache-control": "public, max-age=31536000, immutable",
 } as const;
 
-function withHeaders(
-  response: Response,
-  headers: Record<string, string>,
-): Response {
+function withHeaders(response: Response, headers: Record<string, string>): Response {
   const next = new Headers(response.headers);
   for (const [name, value] of Object.entries(headers)) next.set(name, value);
   return new Response(response.body, {
@@ -45,27 +42,18 @@ function headersFor(pathname: string): Record<string, string> {
   return HTML_HEADERS;
 }
 
-async function fetchAsset(
-  request: Request,
-  env: StorybookSiteEnv,
-): Promise<Response> {
+async function fetchAsset(request: Request, env: StorybookSiteEnv): Promise<Response> {
   const response = await env.ASSETS.fetch(request);
   if (response.status === 404) return response;
   const url = new URL(request.url);
   return withHeaders(response, headersFor(url.pathname));
 }
 
-async function fetchIndex(
-  request: Request,
-  env: StorybookSiteEnv,
-): Promise<Response> {
+async function fetchIndex(request: Request, env: StorybookSiteEnv): Promise<Response> {
   const url = new URL(request.url);
   url.pathname = "/index.html";
   url.search = "";
-  return withHeaders(
-    await env.ASSETS.fetch(new Request(url, request)),
-    HTML_HEADERS,
-  );
+  return withHeaders(await env.ASSETS.fetch(new Request(url, request)), HTML_HEADERS);
 }
 
 export function createStorybookSiteWorker() {

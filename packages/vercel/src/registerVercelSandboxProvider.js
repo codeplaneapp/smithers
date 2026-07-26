@@ -8,5 +8,5 @@ import { createVercelSandboxProvider } from "./createVercelSandboxProvider.js";
  * @returns {() => void} unregister function
  */
 export function registerVercelSandboxProvider(options = {}) {
-	return registerSandboxProvider(createVercelSandboxProvider(options));
+  return registerSandboxProvider(createVercelSandboxProvider(options));
 }

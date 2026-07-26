@@ -20,8 +20,8 @@ import { openaiHeaderUsage } from "./openaiHeaderUsage.js";
  * @returns {Promise<UsageReport>}
  */
 export async function getAccountUsage(account) {
-    const probe = await probeFor(account);
-    return buildUsageReport(account, probe);
+  const probe = await probeFor(account);
+  return buildUsageReport(account, probe);
 }
 
 /**
@@ -29,21 +29,21 @@ export async function getAccountUsage(account) {
  * @returns {Promise<import("./buildUsageReport.js").UsageProbe>}
  */
 async function probeFor(account) {
-    switch (account.provider) {
-        case "claude-code":
-            return claudeOauthUsage(account);
-        case "codex":
-            return codexWhamUsage(account);
-        case "anthropic-api":
-            return anthropicHeaderUsage(account);
-        case "openai-api":
-            return openaiHeaderUsage(account);
-        case "antigravity":
-        case "gemini-api":
-            return googleUsage(account);
-        case "kimi":
-            return { source: "none", error: "Kimi exposes no usage endpoint yet" };
-        default:
-            return { source: "none", error: `Usage not supported for provider "${account.provider}"` };
-    }
+  switch (account.provider) {
+    case "claude-code":
+      return claudeOauthUsage(account);
+    case "codex":
+      return codexWhamUsage(account);
+    case "anthropic-api":
+      return anthropicHeaderUsage(account);
+    case "openai-api":
+      return openaiHeaderUsage(account);
+    case "antigravity":
+    case "gemini-api":
+      return googleUsage(account);
+    case "kimi":
+      return { source: "none", error: "Kimi exposes no usage endpoint yet" };
+    default:
+      return { source: "none", error: `Usage not supported for provider "${account.provider}"` };
+  }
 }

@@ -31,9 +31,7 @@ describe("parseAgentDirectives", () => {
   });
 
   test("a half-streamed (unterminated) block is stripped and yields no directives", () => {
-    const { cleanedText, directives } = parseAgentDirectives(
-      'Working on it.\n```smithers:action\n{"tool":"setTheme"',
-    );
+    const { cleanedText, directives } = parseAgentDirectives('Working on it.\n```smithers:action\n{"tool":"setTheme"');
     expect(cleanedText.trim()).toBe("Working on it.");
     expect(directives).toHaveLength(0);
   });

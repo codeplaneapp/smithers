@@ -23,44 +23,42 @@ import { resolveDetachedRunLogFile } from "./resolveDetachedRunLogFile.js";
  * @returns {number | null}
  */
 export function resumeRunDetached(workflowPath, runId, claim) {
-    const cliPath = fileURLToPath(new URL("./index.js", import.meta.url));
-    const args = [cliPath, "up", workflowPath, "--resume", "--run-id", runId, "-d", "--force"];
-    if (claim) {
-        args.push("--resume-claim-owner", claim.claimOwnerId);
-        args.push("--resume-claim-heartbeat", String(claim.claimHeartbeatAtMs));
-        if (claim.restoreRuntimeOwnerId !== undefined && claim.restoreRuntimeOwnerId !== null) {
-            args.push("--resume-restore-owner", claim.restoreRuntimeOwnerId);
-        }
-        if (claim.restoreHeartbeatAtMs !== undefined && claim.restoreHeartbeatAtMs !== null) {
-            args.push("--resume-restore-heartbeat", String(claim.restoreHeartbeatAtMs));
-        }
+  const cliPath = fileURLToPath(new URL("./index.js", import.meta.url));
+  const args = [cliPath, "up", workflowPath, "--resume", "--run-id", runId, "-d", "--force"];
+  if (claim) {
+    args.push("--resume-claim-owner", claim.claimOwnerId);
+    args.push("--resume-claim-heartbeat", String(claim.claimHeartbeatAtMs));
+    if (claim.restoreRuntimeOwnerId !== undefined && claim.restoreRuntimeOwnerId !== null) {
+      args.push("--resume-restore-owner", claim.restoreRuntimeOwnerId);
     }
-    const cwd = dirname(resolve(workflowPath));
-    /** @type {number | null} */
-    let logFd = null;
-    try {
-        const logFile = resolveDetachedRunLogFile(runId, { cwd });
-        mkdirSync(dirname(logFile), { recursive: true });
-        logFd = openSync(logFile, "a");
+    if (claim.restoreHeartbeatAtMs !== undefined && claim.restoreHeartbeatAtMs !== null) {
+      args.push("--resume-restore-heartbeat", String(claim.restoreHeartbeatAtMs));
     }
-    catch {
-        logFd = null;
+  }
+  const cwd = dirname(resolve(workflowPath));
+  /** @type {number | null} */
+  let logFd = null;
+  try {
+    const logFile = resolveDetachedRunLogFile(runId, { cwd });
+    mkdirSync(dirname(logFile), { recursive: true });
+    logFd = openSync(logFile, "a");
+  } catch {
+    logFd = null;
+  }
+  try {
+    const child = spawn("bun", args, {
+      cwd,
+      stdio: logFd === null ? "ignore" : ["ignore", logFd, logFd],
+      env: process.env,
+      detached: true,
+    });
+    child.unref();
+    return child.pid ?? null;
+  } finally {
+    if (logFd !== null) {
+      closeSync(logFd);
     }
-    try {
-        const child = spawn("bun", args, {
-            cwd,
-            stdio: logFd === null ? "ignore" : ["ignore", logFd, logFd],
-            env: process.env,
-            detached: true,
-        });
-        child.unref();
-        return child.pid ?? null;
-    }
-    finally {
-        if (logFd !== null) {
-            closeSync(logFd);
-        }
-    }
+  }
 }
 
 /**
@@ -73,5 +71,5 @@ export function resumeRunDetached(workflowPath, runId, claim) {
  * @returns {string}
  */
 export function resumeRunDetachedLogFile(workflowPath, runId) {
-    return resolveDetachedRunLogFile(runId, { cwd: dirname(resolve(workflowPath)) });
+  return resolveDetachedRunLogFile(runId, { cwd: dirname(resolve(workflowPath)) });
 }

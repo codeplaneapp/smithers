@@ -1,12 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { defineTool } from "./defineTool.js";
-import {
-  assertReadableFileWithinLimit,
-  getToolRuntimeOptions,
-  resolveToolPath,
-  truncateToBytes,
-} from "./utils.js";
+import { assertReadableFileWithinLimit, getToolRuntimeOptions, resolveToolPath, truncateToBytes } from "./utils.js";
 
 export async function readFileTool(path) {
   const { rootDir, maxOutputBytes } = getToolRuntimeOptions();

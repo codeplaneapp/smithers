@@ -2,7 +2,8 @@ const testDirPattern = /(^|\/)(tests?|__tests__|e2e|spec)\//;
 const testNamePattern = /(\.(test|spec|e2e)\.[a-z]+|_test\.[a-z]+|_spec\.[a-z]+)$/;
 const docsDirPattern = /(^|\/)(docs?|specs)\//;
 const docsExtPattern = /\.(md|mdx|txt|rst|adoc)$/;
-const configNamePattern = /^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|bun\.lock|bun\.lockb|tsconfig[^/]*\.json|dockerfile|makefile|justfile)$/;
+const configNamePattern =
+  /^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|bun\.lock|bun\.lockb|tsconfig[^/]*\.json|dockerfile|makefile|justfile)$/;
 const configExtPattern = /\.(ya?ml|toml|ini|lock|env)$/;
 
 /** Coarse role of a changed file, used to order the deterministic fallback story. */

@@ -91,10 +91,7 @@ describe("captureProcess byte budgeting across multiple chunks", () => {
     // early-return drop branch in appendLimited.
     const result = await captureProcess(
       process.execPath,
-      [
-        "-e",
-        "process.stdout.write('a'.repeat(100)); setTimeout(() => process.stdout.write('b'.repeat(100)), 40)",
-      ],
+      ["-e", "process.stdout.write('a'.repeat(100)); setTimeout(() => process.stdout.write('b'.repeat(100)), 40)"],
       { cwd: root, maxOutputBytes: 10, timeoutMs: 5000 },
     );
 

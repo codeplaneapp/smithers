@@ -73,104 +73,113 @@ import { useOptionalSmithersContext } from "./useOptionalSmithersContext.js";
  * @param {SupervisorProps} props
  */
 export function Supervisor(props) {
-    if (props.skipIf)
-        return null;
-    const prefix = props.id ?? "supervisor";
-    const maxIterations = props.maxIterations ?? 3;
-    const maxConcurrency = props.maxConcurrency ?? 5;
-    const useWorktrees = props.useWorktrees ?? false;
-    const workerNames = Object.keys(props.workers);
-    const ctx = useOptionalSmithersContext();
-    const latestReview = ctx?.latest?.(props.reviewOutput, `${prefix}-review`);
-    const latestPlan = ctx?.latest?.(props.planOutput, `${prefix}-plan`);
-    const allDone = latestReview?.allDone === true;
-    // Build a worker Task element for each worker type.
-    // At render time the runtime resolves which tasks are active based on
-    // the plan output; here we declare one slot per worker type.
-    const workerElements = workerNames.map((workerType) => {
-        const workerId = `${prefix}-worker-${workerType}`;
-        const workerTask = React.createElement(Task, {
-            key: workerId,
-            id: workerId,
-            output: props.workerOutput,
-            agent: props.workers[workerType],
-            continueOnFail: true,
-            // `deps` resolves the plan into the worker's prompt (`needs` alone is
-            // cache-context only and injects nothing).
-            needs: { plan: `${prefix}-plan` },
-            deps: { plan: props.planOutput },
-            label: `Worker: ${workerType}`,
-            children: (d) => `Execute tasks assigned to worker type "${workerType}". Refer to the plan for your specific instructions.\n\nPlan:\n${JSON.stringify(d.plan ?? "(no plan)")}`,
-        });
-        if (useWorktrees) {
-            return React.createElement(Worktree, {
-                key: workerId,
-                path: `.worktrees/${workerId}`,
-                branch: `worker/${workerId}`,
-            }, workerTask);
-        }
-        return workerTask;
+  if (props.skipIf) return null;
+  const prefix = props.id ?? "supervisor";
+  const maxIterations = props.maxIterations ?? 3;
+  const maxConcurrency = props.maxConcurrency ?? 5;
+  const useWorktrees = props.useWorktrees ?? false;
+  const workerNames = Object.keys(props.workers);
+  const ctx = useOptionalSmithersContext();
+  const latestReview = ctx?.latest?.(props.reviewOutput, `${prefix}-review`);
+  const latestPlan = ctx?.latest?.(props.planOutput, `${prefix}-plan`);
+  const allDone = latestReview?.allDone === true;
+  // Build a worker Task element for each worker type.
+  // At render time the runtime resolves which tasks are active based on
+  // the plan output; here we declare one slot per worker type.
+  const workerElements = workerNames.map((workerType) => {
+    const workerId = `${prefix}-worker-${workerType}`;
+    const workerTask = React.createElement(Task, {
+      key: workerId,
+      id: workerId,
+      output: props.workerOutput,
+      agent: props.workers[workerType],
+      continueOnFail: true,
+      // `deps` resolves the plan into the worker's prompt (`needs` alone is
+      // cache-context only and injects nothing).
+      needs: { plan: `${prefix}-plan` },
+      deps: { plan: props.planOutput },
+      label: `Worker: ${workerType}`,
+      children: (d) =>
+        `Execute tasks assigned to worker type "${workerType}". Refer to the plan for your specific instructions.\n\nPlan:\n${JSON.stringify(d.plan ?? "(no plan)")}`,
     });
-    // Parallel worker execution
-    const parallelWorkers = React.createElement(Parallel, { maxConcurrency }, ...workerElements);
-    // Boss review Task — depends on the plan and every worker, and resolves all of
-    // them into its prompt via `deps`. `depsOptional` omits workers that failed
-    // (continueOnFail) rather than deferring the review forever.
-    const reviewNeeds = { plan: `${prefix}-plan` };
-    const reviewDeps = { plan: props.planOutput };
-    for (const workerType of workerNames) {
-        const workerId = `${prefix}-worker-${workerType}`;
-        reviewNeeds[workerId] = workerId;
-        reviewDeps[workerId] = props.workerOutput;
-    }
-    const reviewTask = React.createElement(Task, {
-        id: `${prefix}-review`,
-        output: props.reviewOutput,
-        agent: props.boss,
-        needs: reviewNeeds,
-        deps: reviewDeps,
-        depsOptional: true,
-        label: "Supervisor review",
-        children: (d) => {
-            const workerResults = workerNames
-                .map((workerType) => {
-                    const workerId = `${prefix}-worker-${workerType}`;
-                    return `### ${workerType}\n${workerId in d ? JSON.stringify(d[workerId]) : "(no result — this worker failed)"}`;
-                })
-                .join("\n\n");
-            return `Review worker results. Set allDone to true if all tasks are satisfactory. List retriable task IDs in retriable[] if any need re-doing.\n\nPlan:\n${JSON.stringify(d.plan ?? "(no plan)")}\n\nWorker results:\n${workerResults}`;
+    if (useWorktrees) {
+      return React.createElement(
+        Worktree,
+        {
+          key: workerId,
+          path: `.worktrees/${workerId}`,
+          branch: `worker/${workerId}`,
         },
-    });
-    // Loop body: parallel workers then review
-    const loopBody = React.createElement(Sequence, null, parallelWorkers, reviewTask);
-    // Loop: repeat until boss says allDone (runtime resolves `until` reactively)
-    const delegateLoop = React.createElement(Loop, {
-        id: `${prefix}-loop`,
-        until: allDone,
-        maxIterations,
-        onMaxReached: "return-last",
-    }, loopBody);
-    // Boss plan Task
-    const planTask = React.createElement(Task, {
-        id: `${prefix}-plan`,
-        output: props.planOutput,
-        agent: props.boss,
-        label: "Supervisor plan",
-        children: props.children,
-    });
-    // Final summary Task. The review lives inside the loop, so fold the plan and
-    // the most recent review into the prompt via `latest` (the reader that
-    // resolves the newest iteration's rows); Sequence ordering gates it after the
-    // loop, and `needs` alone is cache-context only and injects nothing.
-    const finalTask = React.createElement(Task, {
-        id: `${prefix}-final`,
-        output: props.finalOutput,
-        agent: props.boss,
-        needs: { review: `${prefix}-review`, plan: `${prefix}-plan` },
-        label: "Supervisor summary",
-        children: () => `Summarize the overall results from all delegation cycles.\n\nPlan:\n${JSON.stringify(latestPlan ?? "(no plan)")}\n\nFinal review:\n${JSON.stringify(latestReview ?? "(no review)")}`,
-    });
-    return React.createElement(Sequence, null, planTask, delegateLoop, finalTask);
+        workerTask,
+      );
+    }
+    return workerTask;
+  });
+  // Parallel worker execution
+  const parallelWorkers = React.createElement(Parallel, { maxConcurrency }, ...workerElements);
+  // Boss review Task — depends on the plan and every worker, and resolves all of
+  // them into its prompt via `deps`. `depsOptional` omits workers that failed
+  // (continueOnFail) rather than deferring the review forever.
+  const reviewNeeds = { plan: `${prefix}-plan` };
+  const reviewDeps = { plan: props.planOutput };
+  for (const workerType of workerNames) {
+    const workerId = `${prefix}-worker-${workerType}`;
+    reviewNeeds[workerId] = workerId;
+    reviewDeps[workerId] = props.workerOutput;
+  }
+  const reviewTask = React.createElement(Task, {
+    id: `${prefix}-review`,
+    output: props.reviewOutput,
+    agent: props.boss,
+    needs: reviewNeeds,
+    deps: reviewDeps,
+    depsOptional: true,
+    label: "Supervisor review",
+    children: (d) => {
+      const workerResults = workerNames
+        .map((workerType) => {
+          const workerId = `${prefix}-worker-${workerType}`;
+          return `### ${workerType}\n${workerId in d ? JSON.stringify(d[workerId]) : "(no result — this worker failed)"}`;
+        })
+        .join("\n\n");
+      return `Review worker results. Set allDone to true if all tasks are satisfactory. List retriable task IDs in retriable[] if any need re-doing.\n\nPlan:\n${JSON.stringify(d.plan ?? "(no plan)")}\n\nWorker results:\n${workerResults}`;
+    },
+  });
+  // Loop body: parallel workers then review
+  const loopBody = React.createElement(Sequence, null, parallelWorkers, reviewTask);
+  // Loop: repeat until boss says allDone (runtime resolves `until` reactively)
+  const delegateLoop = React.createElement(
+    Loop,
+    {
+      id: `${prefix}-loop`,
+      until: allDone,
+      maxIterations,
+      onMaxReached: "return-last",
+    },
+    loopBody,
+  );
+  // Boss plan Task
+  const planTask = React.createElement(Task, {
+    id: `${prefix}-plan`,
+    output: props.planOutput,
+    agent: props.boss,
+    label: "Supervisor plan",
+    children: props.children,
+  });
+  // Final summary Task. The review lives inside the loop, so fold the plan and
+  // the most recent review into the prompt via `latest` (the reader that
+  // resolves the newest iteration's rows); Sequence ordering gates it after the
+  // loop, and `needs` alone is cache-context only and injects nothing.
+  const finalTask = React.createElement(Task, {
+    id: `${prefix}-final`,
+    output: props.finalOutput,
+    agent: props.boss,
+    needs: { review: `${prefix}-review`, plan: `${prefix}-plan` },
+    label: "Supervisor summary",
+    children: () =>
+      `Summarize the overall results from all delegation cycles.\n\nPlan:\n${JSON.stringify(latestPlan ?? "(no plan)")}\n\nFinal review:\n${JSON.stringify(latestReview ?? "(no review)")}`,
+  });
+  return React.createElement(Sequence, null, planTask, delegateLoop, finalTask);
 }
 ```
 
@@ -182,17 +191,16 @@ import React from "react";
  * @param {SequenceProps} props
  */
 export function Sequence(props) {
-    if (props.skipIf)
-        return null;
-    // Sequence carries only a display label; pass a sanitized bag (align with
-    // the sanitizing structural components) so control props don't leak through.
-    // `label` names the phase group in run views (graph, the Claude /workflows
-    // mirror) and is preserved in the persisted frame XML.
-    const next = {
-        ...(props.label === undefined ? {} : { label: props.label }),
-        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
-    };
-    return React.createElement("smithers:sequence", next, props.children);
+  if (props.skipIf) return null;
+  // Sequence carries only a display label; pass a sanitized bag (align with
+  // the sanitizing structural components) so control props don't leak through.
+  // `label` names the phase group in run views (graph, the Claude /workflows
+  // mirror) and is preserved in the persisted frame XML.
+  const next = {
+    ...(props.label === undefined ? {} : { label: props.label }),
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+  };
+  return React.createElement("smithers:sequence", next, props.children);
 }
 ```
 
@@ -231,19 +239,18 @@ import React from "react";
  * @param {ParallelProps} props
  */
 export function Parallel(props) {
-    if (props.skipIf)
-        return null;
-    // Align prop sanitization with other structural components. `label` names
-    // the phase group in run views (graph, the Claude /workflows mirror).
-    const next = {
-        maxConcurrency: props.maxConcurrency,
-        subtreeConcurrency: props.subtreeConcurrency,
-        id: props.id,
-        ...(props.label === undefined ? {} : { label: props.label }),
-        ...(props.priority === undefined ? {} : { priority: props.priority }),
-        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
-    };
-    return React.createElement("smithers:parallel", next, props.children);
+  if (props.skipIf) return null;
+  // Align prop sanitization with other structural components. `label` names
+  // the phase group in run views (graph, the Claude /workflows mirror).
+  const next = {
+    maxConcurrency: props.maxConcurrency,
+    subtreeConcurrency: props.subtreeConcurrency,
+    id: props.id,
+    ...(props.label === undefined ? {} : { label: props.label }),
+    ...(props.priority === undefined ? {} : { priority: props.priority }),
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+  };
+  return React.createElement("smithers:parallel", next, props.children);
 }
 ```
 
@@ -259,18 +266,17 @@ import React from "react";
  * @param {LoopProps} props
  */
 export function Loop(props) {
-    if (props.skipIf)
-        return null;
-    // Sanitize to the loop's host props (align with other structural components);
-    // key/skipIf are React/control props and children are passed separately.
-    const next = {
-        id: props.id,
-        until: props.until,
-        maxIterations: props.maxIterations,
-        onMaxReached: props.onMaxReached,
-        continueAsNewEvery: props.continueAsNewEvery,
-    };
-    return React.createElement("smithers:ralph", next, props.children);
+  if (props.skipIf) return null;
+  // Sanitize to the loop's host props (align with other structural components);
+  // key/skipIf are React/control props and children are passed separately.
+  const next = {
+    id: props.id,
+    until: props.until,
+    maxIterations: props.maxIterations,
+    onMaxReached: props.onMaxReached,
+    continueAsNewEvery: props.continueAsNewEvery,
+  };
+  return React.createElement("smithers:ralph", next, props.children);
 }
 /** @deprecated Use `Loop` instead. */
 export const Ralph = Loop;
@@ -286,13 +292,12 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
  * @param {WorktreeProps} props
  */
 export function Worktree(props) {
-    if (typeof props.path !== "string" || props.path.trim() === "") {
-        throw new SmithersError("WORKTREE_EMPTY_PATH", WORKTREE_EMPTY_PATH_ERROR);
-    }
-    if (props.skipIf)
-        return null;
-    const next = { id: props.id, path: props.path, branch: props.branch, baseBranch: props.baseBranch };
-    return React.createElement("smithers:worktree", next, props.children);
+  if (typeof props.path !== "string" || props.path.trim() === "") {
+    throw new SmithersError("WORKTREE_EMPTY_PATH", WORKTREE_EMPTY_PATH_ERROR);
+  }
+  if (props.skipIf) return null;
+  const next = { id: props.id, path: props.path, branch: props.branch, baseBranch: props.baseBranch };
+  return React.createElement("smithers:worktree", next, props.children);
 }
 ```
 
@@ -307,16 +312,15 @@ import { SmithersContext } from "@smithers-orchestrator/react-reconciler/context
  * error; treating it as "no context yet" preserves the static element shape.
  */
 export function useOptionalSmithersContext() {
-    try {
-        return React.useContext(SmithersContext);
+  try {
+    return React.useContext(SmithersContext);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/Invalid hook call|dispatcher\.useContext|useContext/i.test(message)) {
+      return null;
     }
-    catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (/Invalid hook call|dispatcher\.useContext|useContext/i.test(message)) {
-            return null;
-        }
-        throw error;
-    }
+    throw error;
+  }
 }
 ```
 
@@ -326,28 +330,28 @@ import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type SupervisorProps = {
-	id?: string;
-	/** Agent that plans, delegates, and reviews worker results. */
-	boss: AgentLike;
-	/** Map of worker type names to agents (e.g., { coder, tester, docs }). */
-	workers: Record<string, AgentLike>;
-	/** Output schema for the boss's plan. Must include `tasks: Array<{ id, workerType, instructions }>`. */
-	planOutput: OutputTarget;
-	/** Output schema for individual worker results. */
-	workerOutput: OutputTarget;
-	/** Output schema for the boss's review. Must include `allDone: boolean` and `retriable: string[]`. */
-	reviewOutput: OutputTarget;
-	/** Output schema for the final summary. */
-	finalOutput: OutputTarget;
-	/** Max delegate-review cycles (default 3). */
-	maxIterations?: number;
-	/** Max parallel workers (default 5). */
-	maxConcurrency?: number;
-	/** Whether each worker gets its own git worktree (default false). */
-	useWorktrees?: boolean;
-	skipIf?: boolean;
-	/** Goal/prompt for the boss agent. */
-	children: string | React.ReactNode;
+  id?: string;
+  /** Agent that plans, delegates, and reviews worker results. */
+  boss: AgentLike;
+  /** Map of worker type names to agents (e.g., { coder, tester, docs }). */
+  workers: Record<string, AgentLike>;
+  /** Output schema for the boss's plan. Must include `tasks: Array<{ id, workerType, instructions }>`. */
+  planOutput: OutputTarget;
+  /** Output schema for individual worker results. */
+  workerOutput: OutputTarget;
+  /** Output schema for the boss's review. Must include `allDone: boolean` and `retriable: string[]`. */
+  reviewOutput: OutputTarget;
+  /** Output schema for the final summary. */
+  finalOutput: OutputTarget;
+  /** Max delegate-review cycles (default 3). */
+  maxIterations?: number;
+  /** Max parallel workers (default 5). */
+  maxConcurrency?: number;
+  /** Whether each worker gets its own git worktree (default false). */
+  useWorktrees?: boolean;
+  skipIf?: boolean;
+  /** Goal/prompt for the boss agent. */
+  children: string | React.ReactNode;
 };
 ```
 </CodeGroup>

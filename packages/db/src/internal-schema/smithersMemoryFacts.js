@@ -1,6 +1,8 @@
 import { integer, sqliteTable, text, primaryKey } from "drizzle-orm/sqlite-core";
 
-export const smithersMemoryFacts = sqliteTable("_smithers_memory_facts", {
+export const smithersMemoryFacts = sqliteTable(
+  "_smithers_memory_facts",
+  {
     namespace: text("namespace").notNull(),
     key: text("key").notNull(),
     valueJson: text("value_json").notNull(),
@@ -12,6 +14,8 @@ export const smithersMemoryFacts = sqliteTable("_smithers_memory_facts", {
     runId: text("run_id"),
     nodeId: text("node_id"),
     iteration: integer("iteration"),
-}, (t) => ({
+  },
+  (t) => ({
     pk: primaryKey({ columns: [t.namespace, t.key] }),
-}));
+  }),
+);

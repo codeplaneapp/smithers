@@ -39,26 +39,68 @@ export { OpenCodeAgent } from "./agents/opencode";
 
 export const providers = {
   claude: new SmithersClaudeCodeAgent({ model: "claude-fable-5" }),
-  codex: new SmithersCodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true }),
-//   openrouter: createOpenRouterAgent(),
-//   antigravity: new SmithersAntigravityAgent(),
-//   pi: new SmithersPiAgent({ provider: "openai", model: "gpt-5.6-luna" }),
-//   kimi: new SmithersKimiAgent({ model: "kimi-k2.7-code" }),
+  codex: new SmithersCodexAgent({
+    model: "gpt-5.6-luna",
+    config: { model_reasoning_effort: "medium" },
+    skipGitRepoCheck: true,
+  }),
+  //   openrouter: createOpenRouterAgent(),
+  //   antigravity: new SmithersAntigravityAgent(),
+  //   pi: new SmithersPiAgent({ provider: "openai", model: "gpt-5.6-luna" }),
+  //   kimi: new SmithersKimiAgent({ model: "kimi-k2.7-code" }),
   amp: new SmithersAmpAgent(),
-//   vibe: new SmithersVibeAgent({ agent: "auto-approve" }),
-//   hermes: new SmithersHermesCliAgent(),
-//   openclaw: new SmithersOpenClawAgent(),
-  codexSol: new SmithersCodexAgent({ model: "gpt-5.6-sol", config: { model_reasoning_effort: "xhigh" }, skipGitRepoCheck: true }),
-  codexTerra: new SmithersCodexAgent({ model: "gpt-5.6-terra", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true }),
-  codexLuna: new SmithersCodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true }),
+  //   vibe: new SmithersVibeAgent({ agent: "auto-approve" }),
+  //   hermes: new SmithersHermesCliAgent(),
+  //   openclaw: new SmithersOpenClawAgent(),
+  codexSol: new SmithersCodexAgent({
+    model: "gpt-5.6-sol",
+    config: { model_reasoning_effort: "xhigh" },
+    skipGitRepoCheck: true,
+  }),
+  codexTerra: new SmithersCodexAgent({
+    model: "gpt-5.6-terra",
+    config: { model_reasoning_effort: "medium" },
+    skipGitRepoCheck: true,
+  }),
+  codexLuna: new SmithersCodexAgent({
+    model: "gpt-5.6-luna",
+    config: { model_reasoning_effort: "medium" },
+    skipGitRepoCheck: true,
+  }),
   claudeOpus: new SmithersClaudeCodeAgent({ model: "claude-opus-4-8" }),
   claudeSonnet: new SmithersClaudeCodeAgent({ model: "claude-sonnet-5" }),
-  kimi1: new SmithersKimiAgent({ model: "kimi-k2.7-code", configDir: path.join(homedir(), ".smithers/accounts/kimi-1") }),
-  codex1: new SmithersCodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, configDir: path.join(homedir(), ".codex"), skipGitRepoCheck: true }),
-  codex1Sol: new SmithersCodexAgent({ model: "gpt-5.6-sol", config: { model_reasoning_effort: "xhigh" }, configDir: path.join(homedir(), ".codex"), skipGitRepoCheck: true }),
-  codex1Terra: new SmithersCodexAgent({ model: "gpt-5.6-terra", config: { model_reasoning_effort: "medium" }, configDir: path.join(homedir(), ".codex"), skipGitRepoCheck: true }),
-  codex1Luna: new SmithersCodexAgent({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, configDir: path.join(homedir(), ".codex"), skipGitRepoCheck: true }),
-  gemini1: new SmithersOpenAIAgent({ model: "gemini-3.1-pro-preview", baseURL: "https://generativelanguage.googleapis.com/v1beta/openai" }),
+  kimi1: new SmithersKimiAgent({
+    model: "kimi-k2.7-code",
+    configDir: path.join(homedir(), ".smithers/accounts/kimi-1"),
+  }),
+  codex1: new SmithersCodexAgent({
+    model: "gpt-5.6-luna",
+    config: { model_reasoning_effort: "medium" },
+    configDir: path.join(homedir(), ".codex"),
+    skipGitRepoCheck: true,
+  }),
+  codex1Sol: new SmithersCodexAgent({
+    model: "gpt-5.6-sol",
+    config: { model_reasoning_effort: "xhigh" },
+    configDir: path.join(homedir(), ".codex"),
+    skipGitRepoCheck: true,
+  }),
+  codex1Terra: new SmithersCodexAgent({
+    model: "gpt-5.6-terra",
+    config: { model_reasoning_effort: "medium" },
+    configDir: path.join(homedir(), ".codex"),
+    skipGitRepoCheck: true,
+  }),
+  codex1Luna: new SmithersCodexAgent({
+    model: "gpt-5.6-luna",
+    config: { model_reasoning_effort: "medium" },
+    configDir: path.join(homedir(), ".codex"),
+    skipGitRepoCheck: true,
+  }),
+  gemini1: new SmithersOpenAIAgent({
+    model: "gemini-3.1-pro-preview",
+    baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
+  }),
   // In-process SDK agents (no CLI, no filesystem/bash tools ever attached) for
   // workflows that hand untrusted scraped web content to a model — e.g.
   // daily-ceo-intel's classification/synthesis tasks. Never add `tools` to
@@ -76,9 +118,7 @@ export const agents = {
   codex: [
     // providers.codex1,  // codex weekly quota exhausted; restore after 2026-07-23
   ],
-  gemini: [
-    providers.gemini1,
-  ],
+  gemini: [providers.gemini1],
   // Codex runs first. Later entries are runtime fallbacks and are invoked only if every Codex attempt fails.
   cheapFast: [
     providers.claudeSonnet,

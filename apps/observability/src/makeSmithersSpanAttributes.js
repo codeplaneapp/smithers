@@ -8,13 +8,13 @@ import { smithersSpanAttributeAliases } from "./_smithersSpanAttributeAliases.js
  * @returns {Record<string, unknown>}
  */
 export function makeSmithersSpanAttributes(attributes = {}) {
-    const spanAttributes = {};
-    for (const [key, value] of Object.entries(attributes)) {
-        if (value === undefined) {
-            continue;
-        }
-        const nextKey = key.startsWith("smithers.") ? key : (smithersSpanAttributeAliases[key] ?? key);
-        spanAttributes[nextKey] = value;
+  const spanAttributes = {};
+  for (const [key, value] of Object.entries(attributes)) {
+    if (value === undefined) {
+      continue;
     }
-    return spanAttributes;
+    const nextKey = key.startsWith("smithers.") ? key : (smithersSpanAttributeAliases[key] ?? key);
+    spanAttributes[nextKey] = value;
+  }
+  return spanAttributes;
 }

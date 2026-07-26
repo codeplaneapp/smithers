@@ -76,26 +76,29 @@ async function connect(port) {
 const cleanups = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) {
-    try { await cleanup(); } catch {}
+    try {
+      await cleanup();
+    } catch {}
   }
 });
 
 function bootGateway(name) {
   const dbPath = join(tmpdir(), `smithers-gap-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
-  const { smithers, Workflow, Task, outputs } = createSmithers(
-    { result: z.object({ value: z.number() }) },
-    { dbPath },
-  );
+  const { smithers, Workflow, Task, outputs } = createSmithers({ result: z.object({ value: z.number() }) }, { dbPath });
   const workflow = smithers(() => (
     <Workflow name="gap">
-      <Task id="task1" output={outputs.result}>{{ value: 1 }}</Task>
+      <Task id="task1" output={outputs.result}>
+        {{ value: 1 }}
+      </Task>
     </Workflow>
   ));
   const gateway = new Gateway({});
   gateway.register("gap", workflow);
   cleanups.push(() => {
     for (const suffix of ["", "-shm", "-wal"]) {
-      try { rmSync(`${dbPath}${suffix}`, { force: true }); } catch {}
+      try {
+        rmSync(`${dbPath}${suffix}`, { force: true });
+      } catch {}
     }
   });
   return { gateway, workflow, dbPath };
@@ -215,9 +218,7 @@ describe("streamRunEvents gap resync", () => {
     }
 
     expect(
-      streamFrames.map((message) =>
-        message.event === "run.gap_resync" ? "gap_resync" : message.payload.seq,
-      ),
+      streamFrames.map((message) => (message.event === "run.gap_resync" ? "gap_resync" : message.payload.seq)),
     ).toEqual(["gap_resync", 5, 6, 7]);
   }, 15_000);
 

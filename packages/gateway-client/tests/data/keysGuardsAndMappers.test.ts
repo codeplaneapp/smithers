@@ -73,9 +73,18 @@ describe("smithersApiInvalidationPrefixes", () => {
       ["smithers", "runTree"],
       ["smithers", "runs"],
     ]);
-    expect(smithersApiInvalidationPrefixes("node_outputs")).toEqual([["smithers", "runTree"], ["smithers", "nodes"]]);
-    expect(smithersApiInvalidationPrefixes("nodes")).toEqual([["smithers", "runTree"], ["smithers", "nodes"]]);
-    expect(smithersApiInvalidationPrefixes("runTree")).toEqual([["smithers", "runTree"], ["smithers", "nodes"]]);
+    expect(smithersApiInvalidationPrefixes("node_outputs")).toEqual([
+      ["smithers", "runTree"],
+      ["smithers", "nodes"],
+    ]);
+    expect(smithersApiInvalidationPrefixes("nodes")).toEqual([
+      ["smithers", "runTree"],
+      ["smithers", "nodes"],
+    ]);
+    expect(smithersApiInvalidationPrefixes("runTree")).toEqual([
+      ["smithers", "runTree"],
+      ["smithers", "nodes"],
+    ]);
     expect(smithersApiInvalidationPrefixes("approvals")).toEqual([
       ["smithers", "approvals"],
       ["smithers", "runs"],
@@ -85,10 +94,16 @@ describe("smithersApiInvalidationPrefixes", () => {
     expect(smithersApiInvalidationPrefixes("docs")).toEqual([["smithers", "docs"]]);
     expect(smithersApiInvalidationPrefixes("prompts")).toEqual([["smithers", "prompts"]]);
     expect(smithersApiInvalidationPrefixes("scores")).toEqual([["smithers", "scores"]]);
-    expect(smithersApiInvalidationPrefixes("tickets")).toEqual([["smithers", "tickets"], ["smithers", "docs"]]);
+    expect(smithersApiInvalidationPrefixes("tickets")).toEqual([
+      ["smithers", "tickets"],
+      ["smithers", "docs"],
+    ]);
     expect(smithersApiInvalidationPrefixes("memoryFacts")).toEqual([["smithers", "memoryFacts"]]);
     expect(smithersApiInvalidationPrefixes("memory_facts")).toEqual([["smithers", "memoryFacts"]]);
-    expect(smithersApiInvalidationPrefixes("crons")).toEqual([["smithers", "crons"], ["smithers", "runs"]]);
+    expect(smithersApiInvalidationPrefixes("crons")).toEqual([
+      ["smithers", "crons"],
+      ["smithers", "runs"],
+    ]);
     expect(smithersApiInvalidationPrefixes("something-else")).toEqual([["smithers"]]);
   });
 });
@@ -167,21 +182,25 @@ describe("normalizeGatewayRunEventRow", () => {
 
 describe("mapSmithersElectricRow node mapping", () => {
   test("coerces bigint and numeric-string iteration values", () => {
-    expect(mapSmithersElectricRow("nodes", {
-      run_id: "run-b",
-      node_id: "task2",
-      iteration: 4n,
-      state: "running",
-      label: "Task two",
-      output_table: "task",
-    })).toMatchObject({ key: "run-b:task2:4", iteration: 4, status: "running" });
+    expect(
+      mapSmithersElectricRow("nodes", {
+        run_id: "run-b",
+        node_id: "task2",
+        iteration: 4n,
+        state: "running",
+        label: "Task two",
+        output_table: "task",
+      }),
+    ).toMatchObject({ key: "run-b:task2:4", iteration: 4, status: "running" });
 
-    expect(mapSmithersElectricRow("nodes", {
-      run_id: "run-c",
-      node_id: "task3",
-      iteration: "9",
-      state: "queued",
-    })).toMatchObject({ key: "run-c:task3:9", iteration: 9 });
+    expect(
+      mapSmithersElectricRow("nodes", {
+        run_id: "run-c",
+        node_id: "task3",
+        iteration: "9",
+        state: "queued",
+      }),
+    ).toMatchObject({ key: "run-c:task3:9", iteration: 9 });
   });
 
   test("normalizes the persisted node-state vocabulary onto NodeStatus tones", () => {
@@ -200,13 +219,15 @@ describe("mapSmithersElectricRow node mapping", () => {
       ["skipped", "queued"],
     ];
     for (const [state, status] of cases) {
-      expect(mapSmithersElectricRow("nodes", {
-        run_id: "run",
-        node_id: "task",
-        iteration: 0,
-        state,
-        output_table: "task",
-      }).status).toBe(status);
+      expect(
+        mapSmithersElectricRow("nodes", {
+          run_id: "run",
+          node_id: "task",
+          iteration: 0,
+          state,
+          output_table: "task",
+        }).status,
+      ).toBe(status);
     }
   });
 

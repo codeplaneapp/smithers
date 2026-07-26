@@ -68,13 +68,10 @@ describe("createTranscriptionTool downloaded response body size limit", () => {
 
   test("accepts and uploads an audio response exactly at the cap", async () => {
     const audioBytes = encoder.encode("audio123");
-    const streamed = makeStreamResponse(
-      [audioBytes.slice(0, 3), audioBytes.slice(3)],
-      {
-        "content-length": String(audioBytes.byteLength),
-        "content-type": "audio/mpeg",
-      },
-    );
+    const streamed = makeStreamResponse([audioBytes.slice(0, 3), audioBytes.slice(3)], {
+      "content-length": String(audioBytes.byteLength),
+      "content-type": "audio/mpeg",
+    });
     let uploadedBytes;
     const providerFetch = mock(async (_url, init) => {
       const file = init.body.get("file");
@@ -116,10 +113,7 @@ describe("createTranscriptionTool downloaded response body size limit", () => {
       maxResponseBodyBytes: 100,
     });
     const controller = new AbortController();
-    const pending = harness.tool.execute(
-      { audioUrl },
-      { ...callOptions, abortSignal: controller.signal },
-    );
+    const pending = harness.tool.execute({ audioUrl }, { ...callOptions, abortSignal: controller.signal });
 
     await blocked.readStarted;
     controller.abort(new Error("stop transcription audio read"));
@@ -166,23 +160,26 @@ function createWhisperHarness(audioResponse, overrides = {}) {
  * @param {HeadersInit} [headers]
  */
 function makeStreamResponse(chunks, headers = { "content-type": "audio/mpeg" }) {
-  const queued = chunks.map((chunk) => typeof chunk === "string" ? encoder.encode(chunk) : chunk);
+  const queued = chunks.map((chunk) => (typeof chunk === "string" ? encoder.encode(chunk) : chunk));
   let pulls = 0;
   let cancelledWith;
-  const body = new ReadableStream({
-    pull(controller) {
-      pulls += 1;
-      const chunk = queued.shift();
-      if (chunk === undefined) {
-        controller.close();
-        return;
-      }
-      controller.enqueue(chunk);
+  const body = new ReadableStream(
+    {
+      pull(controller) {
+        pulls += 1;
+        const chunk = queued.shift();
+        if (chunk === undefined) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+      cancel(reason) {
+        cancelledWith = reason;
+      },
     },
-    cancel(reason) {
-      cancelledWith = reason;
-    },
-  }, { highWaterMark: 0 });
+    { highWaterMark: 0 },
+  );
   const response = new Response(body, { headers });
   return {
     response,

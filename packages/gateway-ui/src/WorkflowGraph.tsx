@@ -38,15 +38,7 @@ export { SmithersCanvasNode, SmithersNodeHandles };
  */
 export const SmithersTaskNode = SmithersCanvasNode;
 
-export type NodeKind =
-  | "agent"
-  | "compute"
-  | "approval"
-  | "merge"
-  | "loop"
-  | "branch"
-  | "signal"
-  | "human";
+export type NodeKind = "agent" | "compute" | "approval" | "merge" | "loop" | "branch" | "signal" | "human";
 
 /**
  * @deprecated The common status subset, kept for compatibility. Node statuses
@@ -178,7 +170,14 @@ export type WorkflowGraphProps = {
   nodeTypes?: NodeTypes;
 };
 
-function WorkflowGraphImpl({ spec, className, style, readOnly = true, onConnect, nodeTypes: nodeTypesProp }: WorkflowGraphProps) {
+function WorkflowGraphImpl({
+  spec,
+  className,
+  style,
+  readOnly = true,
+  onConnect,
+  nodeTypes: nodeTypesProp,
+}: WorkflowGraphProps) {
   const initial = useMemo(() => workflowToFlow(spec, { readOnly }), [spec, readOnly]);
   // Controlled state: selection, drag, delete and connect gestures emit
   // change events that must be applied back or the graph silently ignores

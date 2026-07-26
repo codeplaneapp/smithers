@@ -4,12 +4,7 @@
  * union apps/smithers used to keep in its hand-rolled `GatewayStatus` store
  * field, now surfaced by `useGatewayConnectionStatus`.
  */
-export type GatewayConnectionStatus =
-  | "idle"
-  | "connecting"
-  | "online"
-  | "offline"
-  | "unauthorized";
+export type GatewayConnectionStatus = "idle" | "connecting" | "online" | "offline" | "unauthorized";
 
 export type GatewayConnectionState = {
   status: GatewayConnectionStatus;

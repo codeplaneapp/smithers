@@ -36,7 +36,15 @@ const files: ChangedFile[] = [
     reviewed: true,
     excludeReason: "",
   },
-  { path: "assets/logo.png", status: "binary", insertions: 0, deletions: 0, diff: "", reviewed: false, excludeReason: "binary" },
+  {
+    path: "assets/logo.png",
+    status: "binary",
+    insertions: 0,
+    deletions: 0,
+    diff: "",
+    reviewed: false,
+    excludeReason: "binary",
+  },
 ];
 
 function block(partial: Record<string, string>) {
@@ -47,13 +55,20 @@ const story = {
   headline: "Replaces removed with added <script>",
   synopsis: "A tiny arc.",
   chapters: [
-    { title: "The change & its core", blocks: [
-      block({ kind: "prose", text: "Read me first: we swap `removed` for **added**." }),
-      block({ kind: "diff", path: "src/a.ts", intro: "Swaps removed for added & adds more; check the constant values." }),
-      block({ kind: "prose", text: "Having read that, the supporting tweak follows." }),
-      block({ kind: "diff", path: "src/b.ts" }),
-      block({ kind: "diagram", title: "The flow", mermaid: "graph TD; A-->B" }),
-    ] },
+    {
+      title: "The change & its core",
+      blocks: [
+        block({ kind: "prose", text: "Read me first: we swap `removed` for **added**." }),
+        block({
+          kind: "diff",
+          path: "src/a.ts",
+          intro: "Swaps removed for added & adds more; check the constant values.",
+        }),
+        block({ kind: "prose", text: "Having read that, the supporting tweak follows." }),
+        block({ kind: "diff", path: "src/b.ts" }),
+        block({ kind: "diagram", title: "The flow", mermaid: "graph TD; A-->B" }),
+      ],
+    },
     { title: "Assets", blocks: [block({ kind: "diff", path: "assets/logo.png", intro: "binary asset" })] },
   ],
 };
@@ -161,7 +176,13 @@ describe("renderWalkthroughHtml", () => {
 
     const plain = await renderWalkthroughHtml({
       title: "Nothing",
-      story: { headline: "", synopsis: "x", chapters: [{ title: "c", blocks: [{ kind: "diff", path: "src/a.ts", intro: "", text: "", title: "", mermaid: "" }] }] },
+      story: {
+        headline: "",
+        synopsis: "x",
+        chapters: [
+          { title: "c", blocks: [{ kind: "diff", path: "src/a.ts", intro: "", text: "", title: "", mermaid: "" }] },
+        ],
+      },
       files,
       comments: [],
       repoDir: "/tmp/repo",

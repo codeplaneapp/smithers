@@ -75,7 +75,11 @@ async function fetchOneQuery(
   }
 }
 
-export async function fetchHn(sources: HnSource[], sinceIso: string, provider: NewsSearchProvider = new HnAlgoliaProvider()): Promise<FetchSourceRow[]> {
+export async function fetchHn(
+  sources: HnSource[],
+  sinceIso: string,
+  provider: NewsSearchProvider = new HnAlgoliaProvider(),
+): Promise<FetchSourceRow[]> {
   const retrievedAt = new Date().toISOString();
   return Promise.all(sources.map((source) => fetchOneQuery(provider, source, sinceIso, retrievedAt)));
 }

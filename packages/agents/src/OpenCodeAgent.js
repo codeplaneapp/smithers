@@ -246,18 +246,14 @@ export class OpenCodeAgent extends BaseCliAgent {
             id: callID,
             kind: toolKindFromName(toolName),
             title: toolName,
-            detail: state && isRecord(state.input)
-              ? { input: state.input }
-              : {},
+            detail: state && isRecord(state.input) ? { input: state.input } : {},
           },
           message: `Running ${toolName}`,
           level: "info",
         });
 
         // Emit a "completed" action for the tool
-        const output = state
-          ? asString(state.output) ?? asString(state.error)
-          : undefined;
+        const output = state ? (asString(state.output) ?? asString(state.error)) : undefined;
         events.push({
           type: "action",
           engine: this.cliEngine,
@@ -345,9 +341,7 @@ export class OpenCodeAgent extends BaseCliAgent {
         const errorObj = isRecord(payload.error) ? payload.error : null;
         const errorData = errorObj && isRecord(errorObj.data) ? errorObj.data : null;
         const errorName = errorObj ? asString(errorObj.name) : null;
-        const errorMessage = errorData
-          ? asString(errorData.message)
-          : errorName ?? "OpenCode reported an error";
+        const errorMessage = errorData ? asString(errorData.message) : (errorName ?? "OpenCode reported an error");
         terminalError = errorMessage ?? "OpenCode reported an error";
 
         if (didEmitCompleted) {
@@ -388,9 +382,7 @@ export class OpenCodeAgent extends BaseCliAgent {
             engine: this.cliEngine,
             ok: isSuccess,
             answer: isSuccess ? fullText || undefined : undefined,
-            error: isSuccess
-              ? undefined
-              : terminalError ?? `OpenCode exited with code ${result.exitCode ?? -1}`,
+            error: isSuccess ? undefined : (terminalError ?? `OpenCode exited with code ${result.exitCode ?? -1}`),
           },
         ];
       },
@@ -403,9 +395,7 @@ export class OpenCodeAgent extends BaseCliAgent {
    * @param {{ prompt: string; systemPrompt?: string; cwd: string; options: any }} params
    */
   async buildCommand(params) {
-    const resumeSession = typeof params.options?.resumeSession === "string"
-      ? params.options.resumeSession
-      : undefined;
+    const resumeSession = typeof params.options?.resumeSession === "string" ? params.options.resumeSession : undefined;
     const args = ["run"];
 
     // Model selection
@@ -452,9 +442,7 @@ export class OpenCodeAgent extends BaseCliAgent {
       args.push(...this.extraArgs);
     }
 
-    const systemPrefix = params.systemPrompt
-      ? `${params.systemPrompt}\n\n`
-      : "";
+    const systemPrefix = params.systemPrompt ? `${params.systemPrompt}\n\n` : "";
     const fullPrompt = `${systemPrefix}${params.prompt ?? ""}`;
 
     // When flags like -f (yargs [array] type) are present, subsequent
@@ -476,10 +464,7 @@ export class OpenCodeAgent extends BaseCliAgent {
         // OpenCode emits these even with --format json
         /\x1b\]0;[^\x07]*\x07/g,
       ],
-      stdoutErrorPatterns: [
-        /^error:/im,
-        /^fatal:/im,
-      ],
+      stdoutErrorPatterns: [/^error:/im, /^fatal:/im],
     };
   }
 }

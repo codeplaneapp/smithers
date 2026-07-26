@@ -88,11 +88,7 @@ describe("renderFallbackDiffHtml", () => {
   });
 
   test("mode-only patch emits a note row", () => {
-    const diff = [
-      "diff --git a/run.sh b/run.sh",
-      "old mode 100644",
-      "new mode 100755",
-    ].join("\n");
+    const diff = ["diff --git a/run.sh b/run.sh", "old mode 100644", "new mode 100755"].join("\n");
     const html = renderFallbackDiffHtml(diff);
     expect(html).toContain("Mode changed 100644 to 100755.");
     expect(rowsOf(html)).toHaveLength(1);
@@ -216,15 +212,7 @@ describe("renderFallbackDiffHtml", () => {
   });
 
   test("rows carry data-old/data-new anchors per side", () => {
-    const diff = [
-      "diff --git a/f b/f",
-      "--- a/f",
-      "+++ b/f",
-      "@@ -5,3 +7,3 @@",
-      " ctx",
-      "-gone",
-      "+here",
-    ].join("\n");
+    const diff = ["diff --git a/f b/f", "--- a/f", "+++ b/f", "@@ -5,3 +7,3 @@", " ctx", "-gone", "+here"].join("\n");
     const html = renderFallbackDiffHtml(diff);
     const rows = rowsOf(html);
     expect(rows[1]).toContain('data-old="5"');

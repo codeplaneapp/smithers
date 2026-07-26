@@ -219,13 +219,7 @@ describe("engine crash recovery: attempt-record atomicity", () => {
             state: "running",
             startedAtMs: 100,
           });
-          yield* ctx.adapter.updateAttempt(
-            "atom2-run",
-            "task:two",
-            0,
-            1,
-            { heartbeatAtMs: 110 },
-          );
+          yield* ctx.adapter.updateAttempt("atom2-run", "task:two", 0, 1, { heartbeatAtMs: 110 });
         }),
       );
       const attempts = await ctx.adapter.listAttemptsForRun("atom2-run");

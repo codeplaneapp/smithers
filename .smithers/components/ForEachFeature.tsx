@@ -52,20 +52,23 @@ export function ForEachFeature({
   mergeAgent,
   granularity = "group",
 }: ForEachFeatureProps) {
-  const featureEntries = Object.entries(features ?? {}).filter(([, groupFeatures]) => Array.isArray(groupFeatures) && groupFeatures.length > 0);
-  const workItems: FeatureWorkItem[] = granularity === "feature"
-    ? featureEntries.flatMap(([groupName, groupFeatures]) =>
-        groupFeatures.map((feature, index) => ({
-          id: `${slugifyFeatureToken(groupName)}:${slugifyFeatureToken(feature)}:${index}`,
+  const featureEntries = Object.entries(features ?? {}).filter(
+    ([, groupFeatures]) => Array.isArray(groupFeatures) && groupFeatures.length > 0,
+  );
+  const workItems: FeatureWorkItem[] =
+    granularity === "feature"
+      ? featureEntries.flatMap(([groupName, groupFeatures]) =>
+          groupFeatures.map((feature, index) => ({
+            id: `${slugifyFeatureToken(groupName)}:${slugifyFeatureToken(feature)}:${index}`,
+            groupName,
+            features: [feature],
+          })),
+        )
+      : featureEntries.map(([groupName, groupFeatures], index) => ({
+          id: `${slugifyFeatureToken(groupName)}:${index}`,
           groupName,
-          features: [feature],
-        })),
-      )
-    : featureEntries.map(([groupName, groupFeatures], index) => ({
-        id: `${slugifyFeatureToken(groupName)}:${index}`,
-        groupName,
-        features: groupFeatures,
-      }));
+          features: groupFeatures,
+        }));
 
   const mergeNeeds: Record<string, string> = Object.fromEntries(
     workItems.map((item, index) => [`item${index}`, `${idPrefix}:group:${item.id}`]),

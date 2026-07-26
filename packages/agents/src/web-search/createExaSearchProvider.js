@@ -12,28 +12,34 @@ export function createExaSearchProvider(options) {
     kind: "semantic",
     async search(input) {
       const fetchImpl = options.fetch ?? fetch;
-      const response = await fetchWithSameOriginRedirects(fetchImpl, `${options.baseUrl ?? "https://api.exa.ai"}/search`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": options.apiKey,
+      const response = await fetchWithSameOriginRedirects(
+        fetchImpl,
+        `${options.baseUrl ?? "https://api.exa.ai"}/search`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-api-key": options.apiKey,
+          },
+          body: JSON.stringify({
+            query: input.query,
+            numResults: input.maxResults,
+            useAutoprompt: true,
+            ...freshnessParams(input.freshness),
+          }),
         },
-        body: JSON.stringify({
-          query: input.query,
-          numResults: input.maxResults,
-          useAutoprompt: true,
-          ...freshnessParams(input.freshness),
-        }),
-      });
+      );
       const body = await readJson(response, "Exa");
       const results = Array.isArray(body.results) ? body.results : [];
-      return results.map((result) => ({
-        title: String(result.title ?? result.url ?? "Untitled"),
-        url: String(result.url ?? ""),
-        snippet: typeof result.text === "string" ? result.text : result.summary,
-        publishedDate: result.publishedDate,
-        score: typeof result.score === "number" ? result.score : undefined,
-      })).filter((result) => result.url);
+      return results
+        .map((result) => ({
+          title: String(result.title ?? result.url ?? "Untitled"),
+          url: String(result.url ?? ""),
+          snippet: typeof result.text === "string" ? result.text : result.summary,
+          publishedDate: result.publishedDate,
+          score: typeof result.score === "number" ? result.score : undefined,
+        }))
+        .filter((result) => result.url);
     },
   };
 }

@@ -11,10 +11,7 @@ import { agents } from "../agents";
 import AdvisePrompt from "../prompts/context-doctor-advise.mdx";
 
 const inputSchema = z.object({
-  contract: z
-    .string()
-    .default("{}")
-    .describe("JSON string of a context contract to diagnose."),
+  contract: z.string().default("{}").describe("JSON string of a context contract to diagnose."),
 });
 
 // Severity ranking used by the deterministic checks below.
@@ -138,7 +135,9 @@ function diagnose(raw: string): z.infer<typeof checkSchema> {
   if (acceptanceCriteria.length > 0) {
     issues.push(ok("hasAcceptanceCriteria", acceptanceCriteria.length + " acceptance criteria declared."));
   } else {
-    issues.push(fail("hasAcceptanceCriteria", "error", "Missing `acceptanceCriteria`; no way to know when the work is done."));
+    issues.push(
+      fail("hasAcceptanceCriteria", "error", "Missing `acceptanceCriteria`; no way to know when the work is done."),
+    );
   }
 
   // allBlockingCriteriaHaveVerification — every blocking criterion names a
@@ -183,11 +182,7 @@ function diagnose(raw: string): z.infer<typeof checkSchema> {
       issues.push(ok("allRequiredInputsHaveSource", "Every required input declares a `source`."));
     } else {
       issues.push(
-        fail(
-          "allRequiredInputsHaveSource",
-          "error",
-          sourceless.length + " required input(s) are missing a `source`.",
-        ),
+        fail("allRequiredInputsHaveSource", "error", sourceless.length + " required input(s) are missing a `source`."),
       );
     }
   }
@@ -198,9 +193,7 @@ function diagnose(raw: string): z.infer<typeof checkSchema> {
   if (sideEffects.length === 0) {
     issues.push(ok("allSideEffectsHaveApproval", "No declared side effects."));
   } else {
-    const unguarded = sideEffects.filter(
-      (s) => !isObject(s) || (s.approval !== true && !isNonEmptyString(s.approval)),
-    );
+    const unguarded = sideEffects.filter((s) => !isObject(s) || (s.approval !== true && !isNonEmptyString(s.approval)));
     if (unguarded.length === 0) {
       issues.push(ok("allSideEffectsHaveApproval", "Every side effect is gated by an approval."));
     } else {
@@ -236,7 +229,10 @@ function diagnose(raw: string): z.infer<typeof checkSchema> {
       : warnings > 0
         ? warnings + " warning(s) — contract is usable but could be tightened (score " + score + "/100)."
         : infos > 0
-          ? infos + " informational finding(s) — contract checks passed with reporting guidance noted (score " + score + "/100)."
+          ? infos +
+            " informational finding(s) — contract checks passed with reporting guidance noted (score " +
+            score +
+            "/100)."
           : "Contract passes every check (score " + score + "/100).";
 
   return { issues, summary, score };
@@ -265,13 +261,7 @@ export default smithers((ctx) => {
 
         {/* 2 — Agent advice for resolving every non-ok finding. */}
         <Task id="advise" output={outputs.advise} agent={agents.midTier} deps={{ check: outputs.check }}>
-          {(deps) => (
-            <AdvisePrompt
-              summary={deps.check.summary}
-              score={deps.check.score}
-              issues={deps.check.issues}
-            />
-          )}
+          {(deps) => <AdvisePrompt summary={deps.check.summary} score={deps.check.score} issues={deps.check.issues} />}
         </Task>
 
         {/* 3 — Terminal summary: the run's printed output. Aggregates the

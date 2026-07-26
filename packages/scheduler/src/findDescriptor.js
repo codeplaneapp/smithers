@@ -13,8 +13,6 @@
  * @returns {TaskDescriptor | undefined}
  */
 export function findDescriptor(descriptors, nodeId, iteration) {
-    const descriptor = descriptors.get(nodeId);
-    return descriptor && (iteration == null || descriptor.iteration === iteration)
-        ? descriptor
-        : undefined;
+  const descriptor = descriptors.get(nodeId);
+  return descriptor && (iteration == null || descriptor.iteration === iteration) ? descriptor : undefined;
 }

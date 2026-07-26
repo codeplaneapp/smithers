@@ -73,9 +73,7 @@ export function RunList({
       }}
     >
       {error ? (
-        <div style={{ color: theme.danger, fontSize: 13, padding: 8 }}>
-          {error.message ?? "Failed to load runs."}
-        </div>
+        <div style={{ color: theme.danger, fontSize: 13, padding: 8 }}>{error.message ?? "Failed to load runs."}</div>
       ) : null}
       {loading && runs.length === 0 ? (
         <div style={{ color: theme.textDim, fontSize: 13, padding: 8 }}>Loading runs…</div>
@@ -94,9 +92,7 @@ export function RunList({
             data-active={active}
           >
             <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-              <span style={{ fontWeight: 600, fontSize: 13 }}>
-                {String(run.workflowKey ?? "workflow")}
-              </span>
+              <span style={{ fontWeight: 600, fontSize: 13 }}>{String(run.workflowKey ?? "workflow")}</span>
               <span
                 style={{
                   fontFamily: theme.fontMono,
@@ -119,9 +115,7 @@ export function RunList({
               ) : null}
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-              <span style={{ fontSize: 11, color: theme.textDim }}>
-                {shortTime(run.createdAtMs)}
-              </span>
+              <span style={{ fontSize: 11, color: theme.textDim }}>{shortTime(run.createdAtMs)}</span>
               <StatusPill status={run.status} />
             </span>
           </button>

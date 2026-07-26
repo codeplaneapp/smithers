@@ -8,5 +8,5 @@ import { createMicrosandboxSandboxProvider } from "./createMicrosandboxSandboxPr
  * @returns {() => void}
  */
 export function registerMicrosandboxSandboxProvider(options = {}) {
-	return registerSandboxProvider(createMicrosandboxSandboxProvider(options));
+  return registerSandboxProvider(createMicrosandboxSandboxProvider(options));
 }

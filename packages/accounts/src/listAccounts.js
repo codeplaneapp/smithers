@@ -7,5 +7,5 @@ import { readAccounts } from "./readAccounts.js";
  * @returns {import("./Account.ts").Account[]}
  */
 export function listAccounts(env = process.env) {
-    return readAccounts(env).accounts;
+  return readAccounts(env).accounts;
 }

@@ -50,10 +50,7 @@ export type Scorer = {
 // ---------------------------------------------------------------------------
 
 /** Controls how often a scorer runs. */
-export type SamplingConfig =
-  | { type: "all" }
-  | { type: "ratio"; rate: number }
-  | { type: "none" };
+export type SamplingConfig = { type: "all" } | { type: "ratio"; rate: number } | { type: "none" };
 
 /** Binds a scorer to a task with optional sampling configuration. */
 export type ScorerBinding = {

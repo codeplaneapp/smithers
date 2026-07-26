@@ -50,24 +50,60 @@
 
 /** Words that can never be variable references (reserved words + literals). */
 const RESERVED = new Set([
-  "return", "if", "else", "for", "while", "do", "switch", "case", "default",
-  "break", "continue", "typeof", "void",
-  "try", "catch", "finally", "debugger", "enum",
-  "const", "let", "var", "true", "false", "null",
+  "return",
+  "if",
+  "else",
+  "for",
+  "while",
+  "do",
+  "switch",
+  "case",
+  "default",
+  "break",
+  "continue",
+  "typeof",
+  "void",
+  "try",
+  "catch",
+  "finally",
+  "debugger",
+  "enum",
+  "const",
+  "let",
+  "var",
+  "true",
+  "false",
+  "null",
 ]);
 /** Tokens whose presence makes the source unprovable regardless of context. */
 const UNPROVABLE = new Set([
-  "this", "arguments", "class", "super", "import", "export", "with", "eval", "function",
+  "this",
+  "arguments",
+  "class",
+  "super",
+  "import",
+  "export",
+  "with",
+  "eval",
+  "function",
   // Coercion- and protocol-reaching reserved words: `await` adopts thenables,
   // `new` invokes constructors, `in`/`instanceof` walk prototype protocols,
   // `delete` mutates, `throw`/`yield` hand values to serialization boundaries
   // outside the grammar. `async` is contextual but only ever introduces an
   // async binder here, so it fails closed too.
-  "await", "async", "new", "delete", "in", "instanceof", "throw", "yield",
+  "await",
+  "async",
+  "new",
+  "delete",
+  "in",
+  "instanceof",
+  "throw",
+  "yield",
 ]);
 const SIMPLE_PARAMS = /^\s*(?:[A-Za-z_$][\w$]*\s*(?:,\s*[A-Za-z_$][\w$]*\s*)*,?\s*)?$/;
 /** Numeric literals, neutralised before token analysis so `1.5`/`1e+5` are never mistaken for member access or operators. */
-const NUMERIC_LITERALS = /(?<![\w$.])(?:0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)/g;
+const NUMERIC_LITERALS =
+  /(?<![\w$.])(?:0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)/g;
 /** Single characters that are coercion-capable operators (or open one) and therefore outside the grammar. */
 const COERCION_CHARS = new Set(["+", "-", "*", "%", "~", "^", "<", ">", "[", "]"]);
 /** Keywords after which `{` opens a BLOCK, never an object literal. */
@@ -86,8 +122,18 @@ const stripLiterals = (source: string): string | null => {
       for (i++; i < source.length && source[i] !== ch; i++) if (source[i] === "\\") i++;
       continue;
     }
-    if (ch === "/" && source[i + 1] === "/") { for (; i < source.length && source[i] !== "\n"; i++); out += " "; continue; }
-    if (ch === "/" && source[i + 1] === "*") { i += 2; for (; i + 1 < source.length && !(source[i] === "*" && source[i + 1] === "/"); i++); i++; out += " "; continue; }
+    if (ch === "/" && source[i + 1] === "/") {
+      for (; i < source.length && source[i] !== "\n"; i++);
+      out += " ";
+      continue;
+    }
+    if (ch === "/" && source[i + 1] === "*") {
+      i += 2;
+      for (; i + 1 < source.length && !(source[i] === "*" && source[i + 1] === "/"); i++);
+      i++;
+      out += " ";
+      continue;
+    }
     out += ch;
   }
   return out;
@@ -101,8 +147,16 @@ const matchingParen = (text: string, openIndex: number): number => {
   }
   return -1;
 };
-const nextNonSpace = (text: string, index: number): number => { let i = index; while (i < text.length && /\s/.test(text[i]!)) i++; return i; };
-const prevNonSpace = (text: string, index: number): number => { let i = index; while (i >= 0 && /\s/.test(text[i]!)) i--; return i; };
+const nextNonSpace = (text: string, index: number): number => {
+  let i = index;
+  while (i < text.length && /\s/.test(text[i]!)) i++;
+  return i;
+};
+const prevNonSpace = (text: string, index: number): number => {
+  let i = index;
+  while (i >= 0 && /\s/.test(text[i]!)) i--;
+  return i;
+};
 const wordEndingAt = (text: string, lastIndex: number): string => {
   let start = lastIndex;
   while (start > 0 && isIdentPart(text[start - 1]!)) start--;
@@ -120,7 +174,10 @@ const parseOuterForm = (stripped: string): OuterForm | null => {
     let cursor = 8;
     cursor = nextNonSpace(text, cursor);
     if (text[cursor] === "*") cursor = nextNonSpace(text, cursor + 1);
-    if (isIdentStart(text[cursor] ?? "")) { while (cursor < text.length && isIdentPart(text[cursor]!)) cursor++; cursor = nextNonSpace(text, cursor); }
+    if (isIdentStart(text[cursor] ?? "")) {
+      while (cursor < text.length && isIdentPart(text[cursor]!)) cursor++;
+      cursor = nextNonSpace(text, cursor);
+    }
     if (text[cursor] !== "(") return null;
     const close = matchingParen(text, cursor);
     if (close < 0) return null;
@@ -214,7 +271,10 @@ export const provablyStatelessSource = (rawSource: string): boolean => {
       continue;
     }
     if (ch === "=") {
-      if (neutralized[i + 1] === ">") { i++; continue; }
+      if (neutralized[i + 1] === ">") {
+        i++;
+        continue;
+      }
       let j = i;
       while (neutralized[j + 1] === "=") j++;
       const runLength = j - i + 1;
@@ -274,7 +334,10 @@ export const provablyStatelessSource = (rawSource: string): boolean => {
         // the body block, so it is never credited: a same-named use after the
         // loop can resolve to an outer capture.
         const headDeclaration = body[prevNonSpace(body, i - 1)] === "(";
-        if (word === "var" || ((word === "const" || word === "let") && !headDeclaration && depth === (outer.blockBody ? 1 : 0))) {
+        if (
+          word === "var" ||
+          ((word === "const" || word === "let") && !headDeclaration && depth === (outer.blockBody ? 1 : 0))
+        ) {
           const nameStart = nextNonSpace(body, end);
           if (isIdentStart(body[nameStart] ?? "")) {
             let nameEnd = nameStart;

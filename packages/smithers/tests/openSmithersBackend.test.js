@@ -45,10 +45,12 @@ describe("openSmithersBackend", () => {
         documentId: "run-sqlite",
         updateMode: "replace",
       });
-      expect(await api.memoryService.recallMemory({
-        banks: ["project-default"],
-        query: "local recall",
-      })).toHaveLength(1);
+      expect(
+        await api.memoryService.recallMemory({
+          banks: ["project-default"],
+          query: "local recall",
+        }),
+      ).toHaveLength(1);
       expect(existsSync(join(cwd, "smithers.db"))).toBe(true);
       expect(existsSync(join(cwd, ".smithers", "pg"))).toBe(false);
     } finally {
@@ -58,14 +60,17 @@ describe("openSmithersBackend", () => {
 
   test("selects Hindsight memory only when HINDSIGHT_URL is configured", async () => {
     const cwd = makeWorkspace("smithers-open-hindsight");
-    const api = await openSmithersBackend({}, {
-      cwd,
-      env: {
-        HINDSIGHT_URL: "http://127.0.0.1:18888/",
-        HINDSIGHT_API_KEY: "secret",
-        HINDSIGHT_BANK_PREFIX: "dev-",
+    const api = await openSmithersBackend(
+      {},
+      {
+        cwd,
+        env: {
+          HINDSIGHT_URL: "http://127.0.0.1:18888/",
+          HINDSIGHT_API_KEY: "secret",
+          HINDSIGHT_BANK_PREFIX: "dev-",
+        },
       },
-    });
+    );
     try {
       expect(api.memoryStore.constructor.name).toBe("HindsightMemoryStore");
       expect(api.memoryService).toBe(api.memoryStore);
@@ -91,10 +96,12 @@ describe("openSmithersBackend", () => {
         documentId: "run-pglite",
         updateMode: "replace",
       });
-      expect(await api.memoryService.recallMemory({
-        banks: ["project-local"],
-        query: "local memory",
-      })).toHaveLength(1);
+      expect(
+        await api.memoryService.recallMemory({
+          banks: ["project-local"],
+          query: "local memory",
+        }),
+      ).toHaveLength(1);
       expect(existsSync(join(cwd, ".smithers", "pg"))).toBe(true);
       expect(existsSync(join(cwd, ".smithers", "smithers.db"))).toBe(true);
       const rows = await api.db.connection.query({ text: "SELECT id FROM _smithers_schema_migrations ORDER BY id" });
@@ -112,13 +119,17 @@ describe("openSmithersBackend", () => {
     const pglite = await PGlite.create(dataDir);
     await pglite.close();
 
-    await expect(openSmithersStore({ cwd, backend: "pglite", mode: "read", env: {}, wait: { timeoutMs: 0 } })).rejects.toMatchObject({
+    await expect(
+      openSmithersStore({ cwd, backend: "pglite", mode: "read", env: {}, wait: { timeoutMs: 0 } }),
+    ).rejects.toMatchObject({
       code: "CLI_DB_NOT_FOUND",
     });
 
     const check = await PGlite.create(dataDir);
     try {
-      const tables = await check.query("SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name LIKE '_smithers_%'");
+      const tables = await check.query(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name LIKE '_smithers_%'",
+      );
       expect(tables.rows).toEqual([]);
     } finally {
       await check.close();

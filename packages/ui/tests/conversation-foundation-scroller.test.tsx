@@ -51,7 +51,14 @@ class ManualResizeObserver implements ResizeObserver {
 }
 
 beforeAll(() => {
-  for (const property of ["scrollHeight", "clientHeight", "scrollTop", "offsetTop", "offsetHeight", "getBoundingClientRect"]) {
+  for (const property of [
+    "scrollHeight",
+    "clientHeight",
+    "scrollTop",
+    "offsetTop",
+    "offsetHeight",
+    "getBoundingClientRect",
+  ]) {
     originalDescriptors.set(property, Object.getOwnPropertyDescriptor(HTMLElement.prototype, property));
   }
   Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
@@ -210,9 +217,7 @@ describe("MessageScroller compound", () => {
       </MessageScrollerProvider>,
       { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
     );
-    expect(
-      container!.querySelector('[data-slot="message-scroller-content"]')!.getAttribute("role"),
-    ).toBe("list");
+    expect(container!.querySelector('[data-slot="message-scroller-content"]')!.getAttribute("role")).toBe("list");
     expect(getItem("m1").style.getPropertyValue("--sui-msg-intrinsic")).toBe("140px");
   });
 

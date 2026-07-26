@@ -5,16 +5,15 @@ import { oneshotConfigPath } from "./oneshotConfigPath.js";
 
 /** @param {NodeJS.ProcessEnv} [env] @returns {OneshotConfig} */
 export function loadOneshotConfig(env = process.env) {
-    try {
-        const parsed = JSON.parse(readFileSync(oneshotConfigPath(env), "utf8"));
-        const oneshot = parsed?.oneshot;
-        return {
-            review: oneshot?.review === "on" || oneshot?.review === "off" ? oneshot.review : null,
-            trivial: oneshot?.trivial === "direct" || oneshot?.trivial === "oneshot" ? oneshot.trivial : null,
-            announced: oneshot?.announced === true,
-        };
-    }
-    catch {
-        return { review: null, trivial: null, announced: false };
-    }
+  try {
+    const parsed = JSON.parse(readFileSync(oneshotConfigPath(env), "utf8"));
+    const oneshot = parsed?.oneshot;
+    return {
+      review: oneshot?.review === "on" || oneshot?.review === "off" ? oneshot.review : null,
+      trivial: oneshot?.trivial === "direct" || oneshot?.trivial === "oneshot" ? oneshot.trivial : null,
+      announced: oneshot?.announced === true,
+    };
+  } catch {
+    return { review: null, trivial: null, announced: false };
+  }
 }

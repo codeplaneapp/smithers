@@ -20,15 +20,8 @@ import RecordUiMediaPrompt from "../prompts/release-content/record-ui-media.mdx"
 import ScoreContentPrompt from "../prompts/release-content/score-content.mdx";
 import { collectReleaseContext, probeRelease } from "../lib/release-content/git";
 import { upsertCommitChangelog } from "../lib/release-content/commitChangelog";
-import {
-  enforceQualityGate,
-  runDeterministicChecks,
-} from "../lib/release-content/quality";
-import {
-  publishFiles,
-  recordApprovalArtifact,
-  writePreviewArtifacts,
-} from "../lib/release-content/files";
+import { enforceQualityGate, runDeterministicChecks } from "../lib/release-content/quality";
+import { publishFiles, recordApprovalArtifact, writePreviewArtifacts } from "../lib/release-content/files";
 import { renderMediaAssets } from "../lib/release-content/media";
 import { chooseTemplate } from "../lib/release-content/templates";
 import { postThread } from "../lib/release-content/x";
@@ -72,31 +65,30 @@ const commitResultSchema = z.object({
   message: z.string(),
 });
 
-const { Workflow, Task, Sequence, Parallel, Branch, Loop, Approval, smithers, outputs } =
-  createSmithers({
-    input: releaseContentInputSchema,
-    probe: probeSchema,
-    collectedContext: collectedContextSchema,
-    releaseAnalysis: releaseAnalysisSchema,
-    templateSelection: templateSelectionSchema,
-    contentBrief: contentBriefSchema,
-    changelogDraft: changelogDraftSchema,
-    threadDraft: threadDraftSchema,
-    blogOutline: blogOutlineSchema,
-    blogDraft: blogDraftSchema,
-    editedContent: editedContentSchema,
-    deterministicCheck: deterministicCheckSchema,
-    scoreReport: scoreReportSchema,
-    media: mediaAssetsSchema,
-    uiRecordings: uiRecordingsSchema,
-    commitChangelog: commitChangelogSchema,
-    artifacts: artifactWriteSchema,
-    qualityGate: qualityGateSchema,
-    approval: approvalDecisionSchema,
-    approvalRecord: approvalRecordSchema,
-    publishResult: publishResultSchema,
-    commitResult: commitResultSchema,
-  });
+const { Workflow, Task, Sequence, Parallel, Branch, Loop, Approval, smithers, outputs } = createSmithers({
+  input: releaseContentInputSchema,
+  probe: probeSchema,
+  collectedContext: collectedContextSchema,
+  releaseAnalysis: releaseAnalysisSchema,
+  templateSelection: templateSelectionSchema,
+  contentBrief: contentBriefSchema,
+  changelogDraft: changelogDraftSchema,
+  threadDraft: threadDraftSchema,
+  blogOutline: blogOutlineSchema,
+  blogDraft: blogDraftSchema,
+  editedContent: editedContentSchema,
+  deterministicCheck: deterministicCheckSchema,
+  scoreReport: scoreReportSchema,
+  media: mediaAssetsSchema,
+  uiRecordings: uiRecordingsSchema,
+  commitChangelog: commitChangelogSchema,
+  artifacts: artifactWriteSchema,
+  qualityGate: qualityGateSchema,
+  approval: approvalDecisionSchema,
+  approvalRecord: approvalRecordSchema,
+  publishResult: publishResultSchema,
+  commitResult: commitResultSchema,
+});
 
 function manualAnalysis(input: ReleaseContentInput, probe: Probe, context: CollectedContext): ReleaseAnalysis {
   const highlights = input.releaseContext.manualHighlights;
@@ -155,8 +147,7 @@ function buildContentBrief(
       "Smithers is the durable runtime layer for long-running coding agents: persisted state, retries, approvals, replay, sandboxes, evals, and observability.",
     primaryAudience: analysis.primaryAudience,
     oldWay: "Start an agent and hope the process, sandbox, approvals, and output all land cleanly.",
-    newWay:
-      "Run agent work through a durable, inspectable Smithers workflow with explicit runtime semantics.",
+    newWay: "Run agent work through a durable, inspectable Smithers workflow with explicit runtime semantics.",
     topClaims,
     proof: analysis.proofAssets.map((asset) => `${asset.ref}: ${asset.quoteOrSummary}`),
     forbiddenClaims: selected.forbiddenClaims,
@@ -171,9 +162,10 @@ export default smithers((rawCtx) => {
   if (input.version === undefined && input.bump === undefined) {
     try {
       const db = new Database("smithers.db", { readonly: true });
-      const row = db
-        .query("select version, bump from input where run_id = ?")
-        .get(rawCtx.runId) as { version?: string | null; bump?: "patch" | "minor" | "major" | null } | null;
+      const row = db.query("select version, bump from input where run_id = ?").get(rawCtx.runId) as {
+        version?: string | null;
+        bump?: "patch" | "minor" | "major" | null;
+      } | null;
       db.close();
       if (row?.version || row?.bump) {
         Object.assign(input, {
@@ -214,16 +206,14 @@ export default smithers((rawCtx) => {
     input.skip.scoring ||
     (latestScore !== undefined && latestScore.passed && latestScore.score >= input.quality.minScore);
   const qualityLoopDone = latestEdited !== undefined && latestCheck !== undefined && scorePassed;
-  const approvalRequired =
-    !input.dryRun && input.quality.requireApprovalBeforePublish && !input.skip.approval;
+  const approvalRequired = !input.dryRun && input.quality.requireApprovalBeforePublish && !input.skip.approval;
   const publishAllowedByApproval =
     !input.quality.requireApprovalBeforePublish || input.allowUnreviewedPublish || approval?.approved === true;
-  const contentApproved =
-    approvalRequired
-      ? approval?.approved === true
-      : input.quality.requireApprovalBeforePublish
-        ? input.allowUnreviewedPublish && !input.dryRun
-        : !input.dryRun;
+  const contentApproved = approvalRequired
+    ? approval?.approved === true
+    : input.quality.requireApprovalBeforePublish
+      ? input.allowUnreviewedPublish && !input.dryRun
+      : !input.dryRun;
   const shouldPublish =
     input.publish &&
     !input.dryRun &&
@@ -253,17 +243,17 @@ export default smithers((rawCtx) => {
               agent={input.skip.analyze ? undefined : agents.research}
               heartbeatTimeoutMs={900_000}
             >
-              {input.skip.analyze
-                ? () => manualAnalysis(input, probe, context)
-                : (
-                    <AnalyzeReleasePrompt
-                      probe={probe}
-                      context={context}
-                      manualContext={input.releaseContext}
-                      globalAdditional={input.additionalPrompts.global}
-                      additional={input.additionalPrompts.analyzeRelease}
-                    />
-                  )}
+              {input.skip.analyze ? (
+                () => manualAnalysis(input, probe, context)
+              ) : (
+                <AnalyzeReleasePrompt
+                  probe={probe}
+                  context={context}
+                  manualContext={input.releaseContext}
+                  globalAdditional={input.additionalPrompts.global}
+                  additional={input.additionalPrompts.analyzeRelease}
+                />
+              )}
             </Task>
 
             <Task
@@ -291,7 +281,8 @@ export default smithers((rawCtx) => {
                 context,
                 write: false,
                 artifactDir: input.output.artifactDir,
-              })}
+              })
+            }
           </Task>
         ) : null}
 
@@ -413,12 +404,7 @@ export default smithers((rawCtx) => {
             onMaxReached="return-last"
           >
             <Sequence>
-              <Task
-                id="edit-content"
-                output={outputs.editedContent}
-                agent={contentAgent}
-                heartbeatTimeoutMs={900_000}
-              >
+              <Task id="edit-content" output={outputs.editedContent} agent={contentAgent} heartbeatTimeoutMs={900_000}>
                 <EditContentPrompt
                   probe={probe}
                   analysis={analysis}
@@ -472,11 +458,7 @@ export default smithers((rawCtx) => {
           <Task
             id="render-media"
             output={outputs.media}
-            skipIf={
-              !input.channels.tweetThread ||
-              input.skip.renderMedia ||
-              !input.tweetThread.generateMedia
-            }
+            skipIf={!input.channels.tweetThread || input.skip.renderMedia || !input.tweetThread.generateMedia}
           >
             {() =>
               renderMediaAssets({
@@ -485,16 +467,13 @@ export default smithers((rawCtx) => {
                 analysis,
                 brief,
                 content: latestEdited,
-              })}
+              })
+            }
           </Task>
         ) : null}
 
         {probe && analysis && selected && latestEdited && latestCheck ? (
-          <Task
-            id="write-preview-artifacts"
-            output={outputs.artifacts}
-            skipIf={input.skip.writePreviewArtifacts}
-          >
+          <Task id="write-preview-artifacts" output={outputs.artifacts} skipIf={input.skip.writePreviewArtifacts}>
             {() =>
               writePreviewArtifacts({
                 input,
@@ -505,7 +484,8 @@ export default smithers((rawCtx) => {
                 check: latestCheck,
                 score: latestScore,
                 media,
-              })}
+              })
+            }
           </Task>
         ) : null}
 
@@ -551,7 +531,8 @@ export default smithers((rawCtx) => {
                 artifacts,
                 score: latestScore,
                 check: latestCheck,
-              })}
+              })
+            }
           </Task>
         ) : null}
 

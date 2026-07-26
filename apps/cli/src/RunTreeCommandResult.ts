@@ -1,3 +1,3 @@
 export type RunTreeCommandResult = {
-    exitCode: number;
+  exitCode: number;
 };

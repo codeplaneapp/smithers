@@ -37,7 +37,8 @@ export default smithers((ctx) => {
           <Task id={`${WORKFLOW_ID}:grill`} output={outputs.grill} agent={agents.smart}>
             <GrillAllThreePrompt docsDir={docsDir} />
             <AskUserInstructions />
-            {latest && `
+            {latest &&
+              `
 
 ## Progress so far
 Result of the previous iteration:

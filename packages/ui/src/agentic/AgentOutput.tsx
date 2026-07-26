@@ -52,14 +52,8 @@ export function AgentOutput({ model, className, ...props }: AgentOutputProps) {
       {...props}
     >
       {summary ? (
-        <Reasoning
-          streaming={model.streaming}
-          defaultOpen={model.streaming ? undefined : !model.response}
-        >
-          <ReasoningSummary
-            text={summary}
-            streaming={model.streaming && !model.response}
-          />
+        <Reasoning streaming={model.streaming} defaultOpen={model.streaming ? undefined : !model.response}>
+          <ReasoningSummary text={summary} streaming={model.streaming && !model.response} />
         </Reasoning>
       ) : null}
       {model.toolCalls.length ? (

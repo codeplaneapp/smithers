@@ -5,5 +5,9 @@ const TERMINAL_RUN_STATUSES = new Set(["finished", "failed", "cancelled", "cance
  * @returns {boolean}
  */
 export function isTerminalClaudeMirrorRunStatus(status) {
-    return TERMINAL_RUN_STATUSES.has(String(status ?? "").trim().toLowerCase());
+  return TERMINAL_RUN_STATUSES.has(
+    String(status ?? "")
+      .trim()
+      .toLowerCase(),
+  );
 }

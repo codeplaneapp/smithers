@@ -5,15 +5,7 @@ import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { useInjectUiCss } from "../styles";
 import { SOURCES_CITATIONS_CSS_ID, sourcesCitationsCss } from "./sourcesCitationsCss";
 
-export type OpenInChatSubjectKind =
-  | "file"
-  | "diff"
-  | "issue"
-  | "test"
-  | "run"
-  | "log"
-  | "error"
-  | "artifact";
+export type OpenInChatSubjectKind = "file" | "diff" | "issue" | "test" | "run" | "log" | "error" | "artifact";
 
 export type OpenInChatSubject = {
   kind: OpenInChatSubjectKind;
@@ -102,14 +94,7 @@ function KindIcon({ kind }: { kind: OpenInChatSubjectKind }) {
  * descriptor goes in, the onOpen callback comes out; the host owns routing
  * and transport.
  */
-export function OpenInChat({
-  subject,
-  onOpen,
-  label = "Ask Smithers",
-  className,
-  type,
-  ...props
-}: OpenInChatProps) {
+export function OpenInChat({ subject, onOpen, label = "Ask Smithers", className, type, ...props }: OpenInChatProps) {
   useInjectUiCss();
   useInjectLaneCss(SOURCES_CITATIONS_CSS_ID, sourcesCitationsCss);
   return (

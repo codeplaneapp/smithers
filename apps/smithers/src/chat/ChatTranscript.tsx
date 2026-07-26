@@ -36,11 +36,7 @@ export function ChatTranscript({ anonymous = false }: { anonymous?: boolean }) {
           <div className={`message ${message.role}`} key={message.id}>
             {message.text ? (
               <div className="bubble">
-                {message.role === "assistant" ? (
-                  <Markdown content={message.text} />
-                ) : (
-                  message.text
-                )}
+                {message.role === "assistant" ? <Markdown content={message.text} /> : message.text}
               </div>
             ) : null}
             {message.card ? <CardView card={message.card} /> : null}

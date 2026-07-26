@@ -4,9 +4,17 @@ import type { Env } from "./env";
 function classifyRunFailure(body: Record<string, unknown>): string | null {
   if (body.ok === true) return null;
   const text = Array.isArray(body.errors) ? body.errors.join(" ").toLowerCase() : "";
-  if (text.includes("no usable model provider") || text.includes("api key") || text.includes("quota") || text.includes("billing")) return "provider";
-  if (text.includes("verification") || text.includes("assert-verified") || text.includes("failed verification")) return "verification";
-  if (text.includes("publish") || text.includes("cloudflare") || text.includes("r2") || text.includes("kv")) return "publish";
+  if (
+    text.includes("no usable model provider") ||
+    text.includes("api key") ||
+    text.includes("quota") ||
+    text.includes("billing")
+  )
+    return "provider";
+  if (text.includes("verification") || text.includes("assert-verified") || text.includes("failed verification"))
+    return "verification";
+  if (text.includes("publish") || text.includes("cloudflare") || text.includes("r2") || text.includes("kv"))
+    return "publish";
   if (text.includes("not found") || text.includes("spawn") || text.includes("smithers up exited")) return "runner";
   return "workflow";
 }
@@ -42,7 +50,9 @@ export class Runner extends Container<Env> {
         body: JSON.stringify({ text: `[The Smithers Signal] ${message}` }),
       });
     } catch (error) {
-      console.error(`[signal-runner-do] alert webhook delivery failed: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(
+        `[signal-runner-do] alert webhook delivery failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 

@@ -1,9 +1,5 @@
 import { expect, test } from "@playwright/test";
-import {
-  expectNoPageErrors,
-  openRenderedSurface,
-  trackPageErrors,
-} from "./surfaceTestUtils";
+import { expectNoPageErrors, openRenderedSurface, trackPageErrors } from "./surfaceTestUtils";
 
 test("edits live prompts across Source, Imports, Inputs, and Preview", async ({ page }) => {
   const pageErrors = trackPageErrors(page);

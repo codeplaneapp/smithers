@@ -1,9 +1,5 @@
 import { expect, test } from "@playwright/test";
-import {
-  expectNoPageErrors,
-  openRenderedSurface,
-  trackPageErrors,
-} from "./surfaceTestUtils";
+import { expectNoPageErrors, openRenderedSurface, trackPageErrors } from "./surfaceTestUtils";
 
 test("renders every file status and exercises file and global expansion", async ({ page }) => {
   const pageErrors = trackPageErrors(page);

@@ -18,9 +18,7 @@ export function isGatewayResponseFrame(value: unknown): value is GatewayResponse
   if (value.ok === true) {
     return "payload" in value;
   }
-  return isObject(value.error) &&
-    typeof value.error.code === "string" &&
-    typeof value.error.message === "string";
+  return isObject(value.error) && typeof value.error.code === "string" && typeof value.error.message === "string";
 }
 
 /** Coerce an unknown value to a record, returning {} when it is not a plain object. */

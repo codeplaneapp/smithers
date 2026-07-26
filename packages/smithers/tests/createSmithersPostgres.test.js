@@ -47,10 +47,7 @@ describe.skipIf(process.platform === "win32")("createSmithersPostgres", () => {
   });
 
   test("close() tears down the socket server and client without error", async () => {
-    const api = await createSmithersPostgres(
-      { result: z.object({ value: z.string() }) },
-      { provider: "pglite" },
-    );
+    const api = await createSmithersPostgres({ result: z.object({ value: z.string() }) }, { provider: "pglite" });
 
     // Should resolve cleanly
     await expect(api.close()).resolves.toBeUndefined();
@@ -84,10 +81,7 @@ describe.skipIf(process.platform === "win32")("BIGINT (oid 20) type parsing", ()
     const pg = pgModule.default ?? pgModule;
     const globalBigintParser = pg.types.getTypeParser(20);
 
-    const api = await createSmithersPostgres(
-      { result: z.object({ value: z.string() }) },
-      { provider: "pglite" },
-    );
+    const api = await createSmithersPostgres({ result: z.object({ value: z.string() }) }, { provider: "pglite" });
     cleanups.push(() => api.close());
 
     // smithers' own client coerces oid 20 to a JS number
@@ -103,10 +97,7 @@ describe.skipIf(process.platform === "win32")("BIGINT (oid 20) type parsing", ()
 
 describe.skipIf(process.platform === "win32")("findFreePgPort (via createSmithersPostgres)", () => {
   test("allocates a non-zero port for the PGlite socket server", async () => {
-    const api = await createSmithersPostgres(
-      { result: z.object({ value: z.number() }) },
-      { provider: "pglite" },
-    );
+    const api = await createSmithersPostgres({ result: z.object({ value: z.number() }) }, { provider: "pglite" });
     cleanups.push(() => api.close());
 
     // The connection string embedded in the descriptor reflects the allocated port

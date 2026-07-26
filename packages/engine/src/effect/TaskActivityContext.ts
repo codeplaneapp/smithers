@@ -1,4 +1,4 @@
 export type TaskActivityContext = {
-	attempt: number;
-	idempotencyKey: string;
+  attempt: number;
+  idempotencyKey: string;
 };

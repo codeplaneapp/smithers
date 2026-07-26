@@ -26,8 +26,7 @@ export const useDockStore = create<DockState>()(
         if (get().openAppIds.includes(id)) return;
         set((state) => ({ openAppIds: [...state.openAppIds, id] }));
       },
-      closeApp: (id) =>
-        set((state) => ({ openAppIds: state.openAppIds.filter((openId) => openId !== id) })),
+      closeApp: (id) => set((state) => ({ openAppIds: state.openAppIds.filter((openId) => openId !== id) })),
     }),
     {
       name: "smithers.dock",

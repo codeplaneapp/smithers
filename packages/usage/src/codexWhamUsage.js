@@ -17,32 +17,32 @@ const PROBE_TIMEOUT_MS = 6_000;
  * @returns {Promise<UsageProbe>}
  */
 export async function codexWhamUsage(account) {
-    const creds = readCodexCredentials(account);
-    if (!creds) {
-        return { source: "none", error: "No Codex ChatGPT credentials in configDir/auth.json" };
+  const creds = readCodexCredentials(account);
+  if (!creds) {
+    return { source: "none", error: "No Codex ChatGPT credentials in configDir/auth.json" };
+  }
+  try {
+    /** @type {Record<string, string>} */
+    const headers = {
+      Authorization: `Bearer ${creds.accessToken}`,
+      "User-Agent": "codex-cli",
+      Accept: "application/json",
+    };
+    if (creds.accountId) headers["ChatGPT-Account-Id"] = creds.accountId;
+    const res = await fetch(USAGE_URL, {
+      headers,
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    if (res.status === 401) {
+      return { source: "none", error: "Codex token rejected (401); run `codex` to refresh" };
     }
-    try {
-        /** @type {Record<string, string>} */
-        const headers = {
-            Authorization: `Bearer ${creds.accessToken}`,
-            "User-Agent": "codex-cli",
-            Accept: "application/json",
-        };
-        if (creds.accountId) headers["ChatGPT-Account-Id"] = creds.accountId;
-        const res = await fetch(USAGE_URL, {
-            headers,
-            signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-        });
-        if (res.status === 401) {
-            return { source: "none", error: "Codex token rejected (401); run `codex` to refresh" };
-        }
-        if (!res.ok) {
-            return { source: "none", error: `Codex usage endpoint returned ${res.status}` };
-        }
-        const payload = await res.json();
-        const { windows, planType, credits } = parseCodexUsage(payload);
-        return { source: "oauth", windows, planType, credits };
-    } catch (err) {
-        return { source: "none", error: `Codex usage probe failed: ${err instanceof Error ? err.message : String(err)}` };
+    if (!res.ok) {
+      return { source: "none", error: `Codex usage endpoint returned ${res.status}` };
     }
+    const payload = await res.json();
+    const { windows, planType, credits } = parseCodexUsage(payload);
+    return { source: "oauth", windows, planType, credits };
+  } catch (err) {
+    return { source: "none", error: `Codex usage probe failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }

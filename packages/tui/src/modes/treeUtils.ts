@@ -41,11 +41,7 @@ export function isModifiedKeyEvent(event: unknown): boolean {
  * `[start, end)` range to render, keeping `focusIdx` centered where possible
  * and clamped flush at both list ends (no blank tail, no overshoot).
  */
-export function treeScrollWindow(
-  total: number,
-  paneRows: number,
-  focusIdx: number,
-): { start: number; end: number } {
+export function treeScrollWindow(total: number, paneRows: number, focusIdx: number): { start: number; end: number } {
   const rows = Math.max(1, paneRows);
   if (total <= rows) return { start: 0, end: total };
   const focus = Math.min(Math.max(focusIdx, 0), total - 1);
@@ -64,11 +60,7 @@ export function treeScrollWindow(
  * anchored node disappears, fall back to the last known index clamped in range
  * so navigation responds immediately.
  */
-export function resolveFocusIdx(
-  flat: ReadonlyArray<FlatNode>,
-  selectedKey: string | null,
-  lastIdx: number,
-): number {
+export function resolveFocusIdx(flat: ReadonlyArray<FlatNode>, selectedKey: string | null, lastIdx: number): number {
   if (selectedKey !== null) {
     const idx = flat.findIndex((f) => runNodeKey(f.node) === selectedKey);
     if (idx >= 0) return idx;

@@ -23,15 +23,18 @@ export const parityTicketSchema = z.object({
   testPlan: z.array(z.string()).default([]),
 });
 
-export const discoverySchema = z.object({
-  batchKey: z.string().trim().min(1),
-  complete: z.boolean().default(false),
-  rationale: z.string(),
-  tickets: z.array(parityTicketSchema).max(16).default([]),
-}).superRefine((value, issue) => {
-  const ids = value.tickets.map((ticket) => ticket.id);
-  if (new Set(ids).size !== ids.length) issue.addIssue({ code: "custom", path: ["tickets"], message: "ticket ids must be unique within a batch" });
-});
+export const discoverySchema = z
+  .object({
+    batchKey: z.string().trim().min(1),
+    complete: z.boolean().default(false),
+    rationale: z.string(),
+    tickets: z.array(parityTicketSchema).max(16).default([]),
+  })
+  .superRefine((value, issue) => {
+    const ids = value.tickets.map((ticket) => ticket.id);
+    if (new Set(ids).size !== ids.length)
+      issue.addIssue({ code: "custom", path: ["tickets"], message: "ticket ids must be unique within a batch" });
+  });
 
 const correlated = {
   ticketId: z.string().trim().min(1),
@@ -63,12 +66,16 @@ export const ticketReviewSchema = z.object({
   approved: z.boolean(),
   reviewer: z.string(),
   feedback: z.string(),
-  issues: z.array(z.object({
-    severity: z.enum(["critical", "major", "minor", "nit"]),
-    title: z.string(),
-    file: z.string().nullable().default(null),
-    description: z.string(),
-  })).default([]),
+  issues: z
+    .array(
+      z.object({
+        severity: z.enum(["critical", "major", "minor", "nit"]),
+        title: z.string(),
+        file: z.string().nullable().default(null),
+        description: z.string(),
+      }),
+    )
+    .default([]),
 });
 
 export const ticketResultSchema = z.object({
@@ -93,12 +100,16 @@ export const ciResultSchema = z.object({
   batchKey: z.string().trim().min(1),
   allPassed: z.boolean(),
   summary: z.string(),
-  commands: z.array(z.object({
-    command: z.string(),
-    exitCode: z.number().nullable(),
-    stdout: z.string(),
-    stderr: z.string(),
-  })).default([]),
+  commands: z
+    .array(
+      z.object({
+        command: z.string(),
+        exitCode: z.number().nullable(),
+        stdout: z.string(),
+        stderr: z.string(),
+      }),
+    )
+    .default([]),
 });
 
 export const finalAuditSchema = z.object({
@@ -133,7 +144,13 @@ type ParityTicket = z.infer<typeof parityTicketSchema>;
 type RawRow = Record<string, unknown>;
 
 function slug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "item";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 64) || "item"
+  );
 }
 
 export function resolveRepoRoot(): string {
@@ -157,12 +174,14 @@ function baseNodeId(row: RawRow): string {
 }
 
 function latestRaw(rows: RawRow[], nodeId: string): RawRow | undefined {
-  return rows.filter((row) => baseNodeId(row) === nodeId).reduce<RawRow | undefined>((best, row) => {
-    if (!best) return row;
-    const current = rowVersion(row);
-    const previous = rowVersion(best);
-    return current[0] > previous[0] || (current[0] === previous[0] && current[1] >= previous[1]) ? row : best;
-  }, undefined);
+  return rows
+    .filter((row) => baseNodeId(row) === nodeId)
+    .reduce<RawRow | undefined>((best, row) => {
+      if (!best) return row;
+      const current = rowVersion(row);
+      const previous = rowVersion(best);
+      return current[0] > previous[0] || (current[0] === previous[0] && current[1] >= previous[1]) ? row : best;
+    }, undefined);
 }
 
 function sameVersion(left: RawRow | undefined, right: RawRow | undefined): boolean {
@@ -176,14 +195,34 @@ function matches(row: RawRow | undefined, ticketId: string, batchKey: string, ca
   return row?.ticketId === ticketId && row.batchKey === batchKey && row.candidateId === candidateId;
 }
 
-export function ticketState(ctx: any, ticketId: string, ticketSlug: string, batchKey: string, candidateId: string, maxIterations: number) {
-  const implementationRows = rawRows(ctx, "implementation").filter((row) => baseNodeId(row) === `ticket-${ticketSlug}-implement` && matches(row, ticketId, batchKey, candidateId));
+export function ticketState(
+  ctx: any,
+  ticketId: string,
+  ticketSlug: string,
+  batchKey: string,
+  candidateId: string,
+  maxIterations: number,
+) {
+  const implementationRows = rawRows(ctx, "implementation").filter(
+    (row) => baseNodeId(row) === `ticket-${ticketSlug}-implement` && matches(row, ticketId, batchKey, candidateId),
+  );
   const implementation = latestRaw(implementationRows, `ticket-${ticketSlug}-implement`);
-  const validation = latestRaw(rawRows(ctx, "validation").filter((row) => matches(row, ticketId, batchKey, candidateId)), `ticket-${ticketSlug}-validate`);
-  const review = latestRaw(rawRows(ctx, "review").filter((row) => matches(row, ticketId, batchKey, candidateId)), `ticket-${ticketSlug}-review`);
+  const validation = latestRaw(
+    rawRows(ctx, "validation").filter((row) => matches(row, ticketId, batchKey, candidateId)),
+    `ticket-${ticketSlug}-validate`,
+  );
+  const review = latestRaw(
+    rawRows(ctx, "review").filter((row) => matches(row, ticketId, batchKey, candidateId)),
+    `ticket-${ticketSlug}-review`,
+  );
   const validationCurrent = sameVersion(implementation, validation);
   const reviewCurrent = validationCurrent && sameVersion(validation, review);
-  const done = implementation?.status === "implemented" && validationCurrent && validation?.allPassed === true && reviewCurrent && review?.approved === true;
+  const done =
+    implementation?.status === "implemented" &&
+    validationCurrent &&
+    validation?.allPassed === true &&
+    reviewCurrent &&
+    review?.approved === true;
   const finalAttemptComplete = validationCurrent && (validation?.allPassed === false || reviewCurrent);
   return {
     implementation,
@@ -199,9 +238,14 @@ export function ticketState(ctx: any, ticketId: string, ticketSlug: string, batc
 
 function ticketFeedback(state: ReturnType<typeof ticketState>): string {
   const parts: string[] = [];
-  if (state.implementation && state.implementation.status !== "implemented") parts.push(`IMPLEMENTATION ${String(state.implementation.status).toUpperCase()}:\n${String(state.implementation.summary ?? "")}`);
-  if (state.validationCurrent && state.validation?.allPassed === false) parts.push(`VALIDATION FAILED:\n${String(state.validation.failingSummary ?? state.validation.summary ?? "")}`);
-  if (state.reviewCurrent && state.review?.approved === false) parts.push(`REVIEW NOT LGTM:\n${String(state.review.feedback ?? "")}`);
+  if (state.implementation && state.implementation.status !== "implemented")
+    parts.push(
+      `IMPLEMENTATION ${String(state.implementation.status).toUpperCase()}:\n${String(state.implementation.summary ?? "")}`,
+    );
+  if (state.validationCurrent && state.validation?.allPassed === false)
+    parts.push(`VALIDATION FAILED:\n${String(state.validation.failingSummary ?? state.validation.summary ?? "")}`);
+  if (state.reviewCurrent && state.review?.approved === false)
+    parts.push(`REVIEW NOT LGTM:\n${String(state.review.feedback ?? "")}`);
   return parts.join("\n\n");
 }
 
@@ -240,10 +284,17 @@ function implementationPrompt(ticket: ParityTicket, batchKey: string, candidateI
     `Suggested tests:\n${ticket.testPlan.map((item) => `- ${item}`).join("\n") || "- Run the owning package's focused test command."}`,
     feedback ? `Current same-candidate feedback:\n${feedback}` : "",
     "Return implemented only when focused checks pass; otherwise return partial or blocked truthfully.",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
-function validationPrompt(ticket: ParityTicket, batchKey: string, candidateId: string, implementation: RawRow | undefined): string {
+function validationPrompt(
+  ticket: ParityTicket,
+  batchKey: string,
+  candidateId: string,
+  implementation: RawRow | undefined,
+): string {
   return [
     `Validate ticket ${ticket.id} against the real shipped UI code and acceptance criteria.`,
     `Return ticketId=${ticket.id}, batchKey=${batchKey}, and candidateId=${candidateId} exactly.`,
@@ -252,7 +303,13 @@ function validationPrompt(ticket: ParityTicket, batchKey: string, candidateId: s
   ].join("\n\n");
 }
 
-function reviewPrompt(ticket: ParityTicket, batchKey: string, candidateId: string, implementation: RawRow | undefined, validation: RawRow | undefined): string {
+function reviewPrompt(
+  ticket: ParityTicket,
+  batchKey: string,
+  candidateId: string,
+  implementation: RawRow | undefined,
+  validation: RawRow | undefined,
+): string {
   return [
     `Strictly review the current green candidate for ticket ${ticket.id}. Do not edit files.`,
     `Return ticketId=${ticket.id}, batchKey=${batchKey}, and candidateId=${candidateId} exactly.`,
@@ -291,7 +348,12 @@ export function runCi(batchKey: string, runFullE2E: boolean, cwd = process.cwd()
   if (runFullE2E) commands.push(["pnpm", ["-C", "e2e", "test"], 60 * 60_000]);
   const results = commands.map(([command, args, timeout]) => runCommand(cwd, command, args, timeout));
   const failed = results.filter((result) => result.exitCode !== 0);
-  return { batchKey, allPassed: failed.length === 0, summary: failed.length === 0 ? "All shipped UI checks passed." : `${failed.length} shipped UI check(s) failed.`, commands: results };
+  return {
+    batchKey,
+    allPassed: failed.length === 0,
+    summary: failed.length === 0 ? "All shipped UI checks passed." : `${failed.length} shipped UI check(s) failed.`,
+    commands: results,
+  };
 }
 
 function finalAuditPrompt(batchKey: string, ci: RawRow | undefined, merges: RawRow[], results: RawRow[]) {
@@ -316,26 +378,54 @@ export default smithers((ctx) => {
   const runSlug = slug(String((ctx as any).runId ?? "studio-parity"));
   const batchKey = `${runSlug}:${ctx.iteration}`;
   const discoveryRows = rawRows(ctx, "discovery");
-  const discovered = discoveryRows.filter((row) => row.nodeId === "discover-next-16" && row.batchKey === batchKey).at(-1);
-  const tickets = Array.isArray(discovered?.tickets) ? discovered.tickets as ParityTicket[] : [];
+  const discovered = discoveryRows
+    .filter((row) => row.nodeId === "discover-next-16" && row.batchKey === batchKey)
+    .at(-1);
+  const tickets = Array.isArray(discovered?.tickets) ? (discovered.tickets as ParityTicket[]) : [];
   const previousAudit = rawRows(ctx, "finalAudit").at(-1);
   const historicalResults = rawRows(ctx, "ticketResult");
   const currentResultsByTicket = new Map<string, RawRow>();
-  for (const row of historicalResults) if (row.batchKey === batchKey && typeof row.ticketId === "string") currentResultsByTicket.set(row.ticketId, row);
+  for (const row of historicalResults)
+    if (row.batchKey === batchKey && typeof row.ticketId === "string") currentResultsByTicket.set(row.ticketId, row);
   const currentResults = [...currentResultsByTicket.values()];
   const currentMerges = rawRows(ctx, "merge").filter((row) => row.batchKey === batchKey);
-  const currentCi = rawRows(ctx, "ci").filter((row) => row.nodeId === "studio-parity-ci" && row.batchKey === batchKey).at(-1);
-  const currentAudit = rawRows(ctx, "finalAudit").filter((row) => row.nodeId === "studio-parity-final-audit" && row.batchKey === batchKey).at(-1);
-  const allTicketsSettled = tickets.length === currentResults.length && tickets.every((ticket) => currentResultsByTicket.has(ticket.id));
-  const allTicketsLgtm = allTicketsSettled && currentResults.every((result) => result.lgtm === true && result.exhausted === false);
-  const allMerged = currentResults.filter((result) => result.lgtm === true).every((result) => currentMerges.some((merge) => merge.ticketId === result.ticketId && merge.candidateId === result.candidateId && merge.mergedToMain === true));
-  const done = discovered?.complete === true && currentAudit?.complete === true && currentCi?.allPassed === true && allTicketsLgtm && allMerged;
+  const currentCi = rawRows(ctx, "ci")
+    .filter((row) => row.nodeId === "studio-parity-ci" && row.batchKey === batchKey)
+    .at(-1);
+  const currentAudit = rawRows(ctx, "finalAudit")
+    .filter((row) => row.nodeId === "studio-parity-final-audit" && row.batchKey === batchKey)
+    .at(-1);
+  const allTicketsSettled =
+    tickets.length === currentResults.length && tickets.every((ticket) => currentResultsByTicket.has(ticket.id));
+  const allTicketsLgtm =
+    allTicketsSettled && currentResults.every((result) => result.lgtm === true && result.exhausted === false);
+  const allMerged = currentResults
+    .filter((result) => result.lgtm === true)
+    .every((result) =>
+      currentMerges.some(
+        (merge) =>
+          merge.ticketId === result.ticketId && merge.candidateId === result.candidateId && merge.mergedToMain === true,
+      ),
+    );
+  const done =
+    discovered?.complete === true &&
+    currentAudit?.complete === true &&
+    currentCi?.allPassed === true &&
+    allTicketsLgtm &&
+    allMerged;
 
   return (
     <Workflow name="studio-parity-swarm">
       <Loop id="studio-parity-batches" until={done} maxIterations={input.maxBatches} onMaxReached="return-last">
         <Sequence>
-          <Task id="discover-next-16" output={outputs.discovery} agent={agents.research} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+          <Task
+            id="discover-next-16"
+            output={outputs.discovery}
+            agent={agents.research}
+            retries={2}
+            timeoutMs={45 * 60_000}
+            heartbeatTimeoutMs={10 * 60_000}
+          >
             {discoveryPrompt(historicalResults, previousAudit, batchKey)}
           </Task>
 
@@ -345,28 +435,73 @@ export default smithers((ctx) => {
                 const ticketSlug = slug(ticket.id);
                 const candidateId = `${batchKey}:${ticketSlug}`;
                 const branch = `studio-parity/${runSlug}/${ctx.iteration}/${ticketSlug}`;
-                const worktreePath = join(repoRoot, ".smithers", "workflows", ".worktrees", runSlug, `batch-${ctx.iteration}`, ticketSlug);
+                const worktreePath = join(
+                  repoRoot,
+                  ".smithers",
+                  "workflows",
+                  ".worktrees",
+                  runSlug,
+                  `batch-${ctx.iteration}`,
+                  ticketSlug,
+                );
                 const state = ticketState(ctx, ticket.id, ticketSlug, batchKey, candidateId, input.perTicketIterations);
                 return (
                   <Worktree key={ticket.id} path={worktreePath} branch={branch} baseBranch={input.baseBranch}>
                     <Sequence>
-                      <Loop id={`ticket-${ticketSlug}-review-loop`} until={state.done} maxIterations={input.perTicketIterations} onMaxReached="return-last">
+                      <Loop
+                        id={`ticket-${ticketSlug}-review-loop`}
+                        until={state.done}
+                        maxIterations={input.perTicketIterations}
+                        onMaxReached="return-last"
+                      >
                         <Sequence>
-                          <Task id={`ticket-${ticketSlug}-implement`} output={outputs.implementation} agent={agents.implement} retries={2} timeoutMs={60 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                          <Task
+                            id={`ticket-${ticketSlug}-implement`}
+                            output={outputs.implementation}
+                            agent={agents.implement}
+                            retries={2}
+                            timeoutMs={60 * 60_000}
+                            heartbeatTimeoutMs={10 * 60_000}
+                          >
                             {implementationPrompt(ticket, batchKey, candidateId, ticketFeedback(state))}
                           </Task>
-                          <Task id={`ticket-${ticketSlug}-validate`} output={outputs.validation} agent={agents.midTier} retries={2} timeoutMs={35 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                          <Task
+                            id={`ticket-${ticketSlug}-validate`}
+                            output={outputs.validation}
+                            agent={agents.midTier}
+                            retries={2}
+                            timeoutMs={35 * 60_000}
+                            heartbeatTimeoutMs={10 * 60_000}
+                          >
                             {validationPrompt(ticket, batchKey, candidateId, state.implementation)}
                           </Task>
                           {state.validationCurrent && state.validation?.allPassed === true ? (
-                            <Task id={`ticket-${ticketSlug}-review`} output={outputs.review} agent={agents.review} retries={2} timeoutMs={35 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                            <Task
+                              id={`ticket-${ticketSlug}-review`}
+                              output={outputs.review}
+                              agent={agents.review}
+                              retries={2}
+                              timeoutMs={35 * 60_000}
+                              heartbeatTimeoutMs={10 * 60_000}
+                            >
                               {reviewPrompt(ticket, batchKey, candidateId, state.implementation, state.validation)}
                             </Task>
                           ) : null}
                         </Sequence>
                       </Loop>
                       <Task id={`ticket-${ticketSlug}-result`} output={outputs.ticketResult}>
-                        {{ ticketId: ticket.id, batchKey, candidateId, branch, worktreePath, lgtm: state.done, exhausted: state.exhausted, summary: state.done ? `Ticket ${ticket.id} is current-candidate LGTM.` : `Ticket ${ticket.id} settled without LGTM after ${state.attempts} attempt(s).` }}
+                        {{
+                          ticketId: ticket.id,
+                          batchKey,
+                          candidateId,
+                          branch,
+                          worktreePath,
+                          lgtm: state.done,
+                          exhausted: state.exhausted,
+                          summary: state.done
+                            ? `Ticket ${ticket.id} is current-candidate LGTM.`
+                            : `Ticket ${ticket.id} settled without LGTM after ${state.attempts} attempt(s).`,
+                        }}
                       </Task>
                     </Sequence>
                   </Worktree>
@@ -376,18 +511,44 @@ export default smithers((ctx) => {
           ) : null}
 
           <MergeQueue id="studio-parity-merge-queue" maxConcurrency={1}>
-            {currentResults.filter((result) => result.lgtm === true && !currentMerges.some((merge) => merge.ticketId === result.ticketId && merge.candidateId === result.candidateId && merge.mergedToMain === true)).map((result) => (
-              <Task key={String(result.ticketId)} id={`merge-${slug(String(result.ticketId))}`} output={outputs.merge} agent={agents.implement} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
-                {mergePrompt(result as z.infer<typeof ticketResultSchema>, input.baseBranch)}
-              </Task>
-            ))}
+            {currentResults
+              .filter(
+                (result) =>
+                  result.lgtm === true &&
+                  !currentMerges.some(
+                    (merge) =>
+                      merge.ticketId === result.ticketId &&
+                      merge.candidateId === result.candidateId &&
+                      merge.mergedToMain === true,
+                  ),
+              )
+              .map((result) => (
+                <Task
+                  key={String(result.ticketId)}
+                  id={`merge-${slug(String(result.ticketId))}`}
+                  output={outputs.merge}
+                  agent={agents.implement}
+                  retries={2}
+                  timeoutMs={45 * 60_000}
+                  heartbeatTimeoutMs={10 * 60_000}
+                >
+                  {mergePrompt(result as z.infer<typeof ticketResultSchema>, input.baseBranch)}
+                </Task>
+              ))}
           </MergeQueue>
 
           <Task id="studio-parity-ci" output={outputs.ci} timeoutMs={90 * 60_000}>
             {() => runCi(batchKey, input.runFullE2E, repoRoot)}
           </Task>
 
-          <Task id="studio-parity-final-audit" output={outputs.finalAudit} agent={agents.review} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+          <Task
+            id="studio-parity-final-audit"
+            output={outputs.finalAudit}
+            agent={agents.review}
+            retries={2}
+            timeoutMs={45 * 60_000}
+            heartbeatTimeoutMs={10 * 60_000}
+          >
             {finalAuditPrompt(batchKey, currentCi, currentMerges, currentResults)}
           </Task>
         </Sequence>

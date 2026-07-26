@@ -1,7 +1,4 @@
-import type {
-  DevToolsRunState,
-  DevToolsSnapshot,
-} from "@smithers-orchestrator/protocol";
+import type { DevToolsRunState, DevToolsSnapshot } from "@smithers-orchestrator/protocol";
 
 declare const snapshot: DevToolsSnapshot;
 

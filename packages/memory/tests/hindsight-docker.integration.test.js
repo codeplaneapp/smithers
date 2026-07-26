@@ -5,21 +5,17 @@ import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createHindsightMemoryStore } from "../src/HindsightMemoryStore.js";
 import { createMemoryStore } from "../src/store/createMemoryStore.js";
 
-const HINDSIGHT_IMAGE = process.env.HINDSIGHT_DOCKER_IMAGE
-    ?? "ghcr.io/vectorize-io/hindsight:0.8.4-slim";
-const EMBEDDINGS_IMAGE = process.env.HINDSIGHT_DOCKER_EMBEDDINGS_IMAGE
-    ?? "oven/bun:1.3.13";
-const POSTGRES_IMAGE = process.env.HINDSIGHT_DOCKER_POSTGRES_IMAGE
-    ?? "pgvector/pgvector:0.8.1-pg16";
+const HINDSIGHT_IMAGE = process.env.HINDSIGHT_DOCKER_IMAGE ?? "ghcr.io/vectorize-io/hindsight:0.8.4-slim";
+const EMBEDDINGS_IMAGE = process.env.HINDSIGHT_DOCKER_EMBEDDINGS_IMAGE ?? "oven/bun:1.3.13";
+const POSTGRES_IMAGE = process.env.HINDSIGHT_DOCKER_POSTGRES_IMAGE ?? "pgvector/pgvector:0.8.1-pg16";
 // Require a LINUX container daemon, not just a docker CLI: Windows CI runners
 // pass `docker info` in Windows-containers mode but cannot run these linux
 // images (network create dies with "could not find plugin bridge").
 const docker = Bun.spawnSync(["docker", "info", "--format", "{{.OSType}}"], {
-    stdout: "pipe",
-    stderr: "ignore",
+  stdout: "pipe",
+  stderr: "ignore",
 });
-const dockerAvailable = docker.exitCode === 0
-    && new TextDecoder().decode(docker.stdout).trim() === "linux";
+const dockerAvailable = docker.exitCode === 0 && new TextDecoder().decode(docker.stdout).trim() === "linux";
 const suffix = crypto.randomUUID().slice(0, 12);
 const networkName = `smithers-hindsight-test-${suffix}`;
 const embeddingsName = `smithers-hindsight-embeddings-${suffix}`;
@@ -31,40 +27,40 @@ let contractSqlite;
 let registryUnavailable = false;
 
 if (!dockerAvailable) {
-    console.warn("SKIP Hindsight Docker integration: docker is unavailable");
+  console.warn("SKIP Hindsight Docker integration: docker is unavailable");
 }
 
 /** @param {string[]} args @param {boolean} [allowFailure] */
 async function runDocker(args, allowFailure = false) {
-    const subprocess = Bun.spawn(["docker", ...args], {
-        stdout: "pipe",
-        stderr: "pipe",
-    });
-    const [stdout, stderr, exitCode] = await Promise.all([
-        new Response(subprocess.stdout).text(),
-        new Response(subprocess.stderr).text(),
-        subprocess.exited,
-    ]);
-    if (!allowFailure && exitCode !== 0) {
-        throw new Error(`docker ${args[0]} failed with exit ${exitCode}: ${stderr.trim()}`);
-    }
-    return stdout.trim();
+  const subprocess = Bun.spawn(["docker", ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(subprocess.stdout).text(),
+    new Response(subprocess.stderr).text(),
+    subprocess.exited,
+  ]);
+  if (!allowFailure && exitCode !== 0) {
+    throw new Error(`docker ${args[0]} failed with exit ${exitCode}: ${stderr.trim()}`);
+  }
+  return stdout.trim();
 }
 
 async function cleanupDockerFixture() {
-    await runDocker(["rm", "-f", hindsightName, embeddingsName, postgresName], true);
-    await runDocker(["network", "rm", networkName], true);
+  await runDocker(["rm", "-f", hindsightName, embeddingsName, postgresName], true);
+  await runDocker(["network", "rm", networkName], true);
 }
 
 function reserveLoopbackPort() {
-    const probe = Bun.serve({
-        hostname: "127.0.0.1",
-        port: 0,
-        fetch: () => new Response("reserved"),
-    });
-    const port = probe.port;
-    probe.stop(true);
-    return port;
+  const probe = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: () => new Response("reserved"),
+  });
+  const port = probe.port;
+  probe.stop(true);
+  return port;
 }
 
 const embeddingsServer = String.raw`
@@ -91,196 +87,222 @@ await new Promise(() => {});
 `;
 
 beforeAll(async () => {
-    if (!dockerAvailable) {
-        return;
+  if (!dockerAvailable) {
+    return;
+  }
+  await cleanupDockerFixture();
+  // Docker Hub auth intermittently times out on CI runners ("context
+  // deadline exceeded" during the token fetch). Pre-pull with retries and
+  // degrade to a soft skip when the registry itself is unreachable, so
+  // registry weather cannot red the suite; genuine container failures
+  // after a successful pull still throw.
+  for (const image of [EMBEDDINGS_IMAGE, POSTGRES_IMAGE, HINDSIGHT_IMAGE]) {
+    let pulled = false;
+    for (let attempt = 0; attempt < 3 && !pulled; attempt += 1) {
+      try {
+        await runDocker(["pull", image]);
+        pulled = true;
+      } catch (error) {
+        if (attempt === 2) {
+          registryUnavailable = true;
+          console.warn(`SKIP Hindsight Docker integration: cannot pull ${image}: ${error.message}`);
+          return;
+        }
+        await Bun.sleep(2_000 * (attempt + 1));
+      }
     }
+  }
+  try {
+    await runDocker(["network", "create", networkName]);
+    await runDocker([
+      "run",
+      "-d",
+      "--name",
+      embeddingsName,
+      "--network",
+      networkName,
+      "--network-alias",
+      "embeddings",
+      EMBEDDINGS_IMAGE,
+      "bun",
+      "-e",
+      embeddingsServer,
+    ]);
+    await runDocker([
+      "run",
+      "-d",
+      "--name",
+      postgresName,
+      "--network",
+      networkName,
+      "--network-alias",
+      "postgres",
+      "-e",
+      "POSTGRES_USER=hindsight",
+      "-e",
+      "POSTGRES_PASSWORD=hindsight",
+      "-e",
+      "POSTGRES_DB=hindsight",
+      POSTGRES_IMAGE,
+    ]);
+    const postgresDeadline = Date.now() + 60_000;
+    let postgresReady = false;
+    while (Date.now() < postgresDeadline) {
+      try {
+        await runDocker(["exec", postgresName, "pg_isready", "-U", "hindsight", "-d", "hindsight"]);
+        postgresReady = true;
+        break;
+      } catch {
+        // Postgres is still initializing.
+      }
+      await Bun.sleep(500);
+    }
+    if (!postgresReady) {
+      const logs = await runDocker(["logs", "--tail", "120", postgresName], true);
+      throw new Error(`Postgres did not become ready within 60 seconds.\n${logs}`);
+    }
+    const port = reserveLoopbackPort();
+    await runDocker([
+      "run",
+      "-d",
+      "--name",
+      hindsightName,
+      "--network",
+      networkName,
+      "-p",
+      `127.0.0.1:${port}:8888`,
+      "-e",
+      "HINDSIGHT_API_LOG_LEVEL=info",
+      "-e",
+      "HINDSIGHT_API_DATABASE_URL=postgresql://hindsight:hindsight@postgres:5432/hindsight",
+      "-e",
+      "HINDSIGHT_API_LLM_PROVIDER=none",
+      "-e",
+      "HINDSIGHT_API_ENABLE_AUTO_CONSOLIDATION=false",
+      "-e",
+      "HINDSIGHT_API_EMBEDDINGS_PROVIDER=openai",
+      "-e",
+      "HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY=smithers-test-key",
+      "-e",
+      "HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL=http://embeddings:8080/v1",
+      "-e",
+      "HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL=smithers-test-embedding",
+      "-e",
+      "HINDSIGHT_API_EMBEDDINGS_OPENAI_DIMENSIONS=8",
+      "-e",
+      "HINDSIGHT_API_RERANKER_PROVIDER=rrf",
+      HINDSIGHT_IMAGE,
+    ]);
+    integrationUrl = `http://127.0.0.1:${port}`;
+    const deadline = Date.now() + 360_000;
+    while (Date.now() < deadline) {
+      try {
+        const response = await fetch(`${integrationUrl}/health`);
+        if (response.ok) {
+          return;
+        }
+      } catch {
+        // The API port opens only after Hindsight migrations finish.
+      }
+      await Bun.sleep(1_000);
+    }
+    const logs = await runDocker(["logs", "--tail", "160", hindsightName], true);
+    throw new Error(`Hindsight did not become healthy within 360 seconds.\n${logs}`);
+  } catch (error) {
     await cleanupDockerFixture();
-    // Docker Hub auth intermittently times out on CI runners ("context
-    // deadline exceeded" during the token fetch). Pre-pull with retries and
-    // degrade to a soft skip when the registry itself is unreachable, so
-    // registry weather cannot red the suite; genuine container failures
-    // after a successful pull still throw.
-    for (const image of [EMBEDDINGS_IMAGE, POSTGRES_IMAGE, HINDSIGHT_IMAGE]) {
-        let pulled = false;
-        for (let attempt = 0; attempt < 3 && !pulled; attempt += 1) {
-            try {
-                await runDocker(["pull", image]);
-                pulled = true;
-            }
-            catch (error) {
-                if (attempt === 2) {
-                    registryUnavailable = true;
-                    console.warn(`SKIP Hindsight Docker integration: cannot pull ${image}: ${error.message}`);
-                    return;
-                }
-                await Bun.sleep(2_000 * (attempt + 1));
-            }
-        }
-    }
-    try {
-        await runDocker(["network", "create", networkName]);
-        await runDocker([
-            "run", "-d",
-            "--name", embeddingsName,
-            "--network", networkName,
-            "--network-alias", "embeddings",
-            EMBEDDINGS_IMAGE,
-            "bun", "-e", embeddingsServer,
-        ]);
-        await runDocker([
-            "run", "-d",
-            "--name", postgresName,
-            "--network", networkName,
-            "--network-alias", "postgres",
-            "-e", "POSTGRES_USER=hindsight",
-            "-e", "POSTGRES_PASSWORD=hindsight",
-            "-e", "POSTGRES_DB=hindsight",
-            POSTGRES_IMAGE,
-        ]);
-        const postgresDeadline = Date.now() + 60_000;
-        let postgresReady = false;
-        while (Date.now() < postgresDeadline) {
-            try {
-                await runDocker([
-                    "exec", postgresName,
-                    "pg_isready", "-U", "hindsight", "-d", "hindsight",
-                ]);
-                postgresReady = true;
-                break;
-            }
-            catch {
-                // Postgres is still initializing.
-            }
-            await Bun.sleep(500);
-        }
-        if (!postgresReady) {
-            const logs = await runDocker(["logs", "--tail", "120", postgresName], true);
-            throw new Error(`Postgres did not become ready within 60 seconds.\n${logs}`);
-        }
-        const port = reserveLoopbackPort();
-        await runDocker([
-            "run", "-d",
-            "--name", hindsightName,
-            "--network", networkName,
-            "-p", `127.0.0.1:${port}:8888`,
-            "-e", "HINDSIGHT_API_LOG_LEVEL=info",
-            "-e", "HINDSIGHT_API_DATABASE_URL=postgresql://hindsight:hindsight@postgres:5432/hindsight",
-            "-e", "HINDSIGHT_API_LLM_PROVIDER=none",
-            "-e", "HINDSIGHT_API_ENABLE_AUTO_CONSOLIDATION=false",
-            "-e", "HINDSIGHT_API_EMBEDDINGS_PROVIDER=openai",
-            "-e", "HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY=smithers-test-key",
-            "-e", "HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL=http://embeddings:8080/v1",
-            "-e", "HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL=smithers-test-embedding",
-            "-e", "HINDSIGHT_API_EMBEDDINGS_OPENAI_DIMENSIONS=8",
-            "-e", "HINDSIGHT_API_RERANKER_PROVIDER=rrf",
-            HINDSIGHT_IMAGE,
-        ]);
-        integrationUrl = `http://127.0.0.1:${port}`;
-        const deadline = Date.now() + 360_000;
-        while (Date.now() < deadline) {
-            try {
-                const response = await fetch(`${integrationUrl}/health`);
-                if (response.ok) {
-                    return;
-                }
-            }
-            catch {
-                // The API port opens only after Hindsight migrations finish.
-            }
-            await Bun.sleep(1_000);
-        }
-        const logs = await runDocker(["logs", "--tail", "160", hindsightName], true);
-        throw new Error(`Hindsight did not become healthy within 360 seconds.\n${logs}`);
-    }
-    catch (error) {
-        await cleanupDockerFixture();
-        throw error;
-    }
+    throw error;
+  }
 }, 480_000);
 
 afterAll(async () => {
-    contractSqlite?.close();
-    if (dockerAvailable) {
-        await cleanupDockerFixture();
-    }
+  contractSqlite?.close();
+  if (dockerAvailable) {
+    await cleanupDockerFixture();
+  }
 }, 60_000);
 
 describe.skipIf(!dockerAvailable)("Hindsight Docker integration", () => {
-    test("verifies append, listing, missing primers, tag validation, and scoped recall", async () => {
-        if (registryUnavailable) {
-            return;
-        }
-        const prefix = `smithers-integration-${crypto.randomUUID()}-`;
-        const bank = "project-test";
-        contractSqlite = new Database(":memory:");
-        const contractDb = drizzle(contractSqlite);
-        ensureSmithersTables(contractDb);
-        const store = createHindsightMemoryStore({
-            baseUrl: integrationUrl,
-            bankPrefix: prefix,
-            contractStore: createMemoryStore(contractDb),
-        });
+  test("verifies append, listing, missing primers, tag validation, and scoped recall", async () => {
+    if (registryUnavailable) {
+      return;
+    }
+    const prefix = `smithers-integration-${crypto.randomUUID()}-`;
+    const bank = "project-test";
+    contractSqlite = new Database(":memory:");
+    const contractDb = drizzle(contractSqlite);
+    ensureSmithersTables(contractDb);
+    const store = createHindsightMemoryStore({
+      baseUrl: integrationUrl,
+      bankPrefix: prefix,
+      contractStore: createMemoryStore(contractDb),
+    });
 
-        await store.retainMemory({
-            bank,
-            content: "The integration sentinel starts cobalt.",
-            documentId: "smithers-integration-sentinel",
-            updateMode: "replace",
-            async: false,
-            tags: ["scope:main", "branch:main"],
-            metadata: { session: "integration", run: "integration" },
-        });
-        await store.retainMemory({
-            bank,
-            content: "The integration sentinel then becomes amber.",
-            documentId: "smithers-integration-sentinel",
-            updateMode: "append",
-            async: false,
-            tags: ["scope:main", "branch:main"],
-            metadata: { session: "integration", run: "integration" },
-        });
-        await store.retainMemory({
-            bank,
-            content: "The integration sentinel on the secret branch is crimson.",
-            documentId: "smithers-integration-secret",
-            updateMode: "replace",
-            async: false,
-            tags: ["scope:branch", "branch:secret"],
-            metadata: { session: "integration-secret", run: "integration-secret" },
-        });
+    await store.retainMemory({
+      bank,
+      content: "The integration sentinel starts cobalt.",
+      documentId: "smithers-integration-sentinel",
+      updateMode: "replace",
+      async: false,
+      tags: ["scope:main", "branch:main"],
+      metadata: { session: "integration", run: "integration" },
+    });
+    await store.retainMemory({
+      bank,
+      content: "The integration sentinel then becomes amber.",
+      documentId: "smithers-integration-sentinel",
+      updateMode: "append",
+      async: false,
+      tags: ["scope:main", "branch:main"],
+      metadata: { session: "integration", run: "integration" },
+    });
+    await store.retainMemory({
+      bank,
+      content: "The integration sentinel on the secret branch is crimson.",
+      documentId: "smithers-integration-secret",
+      updateMode: "replace",
+      async: false,
+      tags: ["scope:branch", "branch:secret"],
+      metadata: { session: "integration-secret", run: "integration-secret" },
+    });
 
-        const resolvedBank = store.resolveBank(bank);
-        const documents = await store.listDocuments(resolvedBank);
-        expect(documents).toHaveLength(2);
-        const appended = documents.find((document) => document.id === "smithers-integration-sentinel");
-        expect(appended.original_text).toContain("starts cobalt");
-        expect(appended.original_text).toContain("becomes amber");
+    const resolvedBank = store.resolveBank(bank);
+    const documents = await store.listDocuments(resolvedBank);
+    expect(documents).toHaveLength(2);
+    const appended = documents.find((document) => document.id === "smithers-integration-sentinel");
+    expect(appended.original_text).toContain("starts cobalt");
+    expect(appended.original_text).toContain("becomes amber");
 
-        await expect(store.getPrimers({
-            banks: [bank],
-            primerIds: ["missing-primer"],
-        })).resolves.toEqual([]);
+    await expect(
+      store.getPrimers({
+        banks: [bank],
+        primerIds: ["missing-primer"],
+      }),
+    ).resolves.toEqual([]);
 
-        await expect(store.client.recall(resolvedBank, "integration sentinel", {
-            tags: ["scope:main"],
-            tagGroups: [{ tags: ["branch:main"], match: "all_strict" }],
-        })).rejects.toMatchObject({ statusCode: 422 });
+    await expect(
+      store.client.recall(resolvedBank, "integration sentinel", {
+        tags: ["scope:main"],
+        tagGroups: [{ tags: ["branch:main"], match: "all_strict" }],
+      }),
+    ).rejects.toMatchObject({ statusCode: 422 });
 
-        const results = await store.recallMemory({
-            banks: [bank],
-            query: "integration sentinel",
-            budget: "low",
-            maxTokens: 512,
-            tagGroupsByBank: {
-                [bank]: [{
-                    or: [
-                        { tags: ["scope:main"], match: "all_strict" },
-                        { tags: ["branch:feature"], match: "all_strict" },
-                    ],
-                }],
-            },
-        });
-        expect(results.some((result) => result.text.includes("cobalt") || result.text.includes("amber"))).toBe(true);
-        expect(results.some((result) => result.text.includes("crimson"))).toBe(false);
-    }, 60_000);
+    const results = await store.recallMemory({
+      banks: [bank],
+      query: "integration sentinel",
+      budget: "low",
+      maxTokens: 512,
+      tagGroupsByBank: {
+        [bank]: [
+          {
+            or: [
+              { tags: ["scope:main"], match: "all_strict" },
+              { tags: ["branch:feature"], match: "all_strict" },
+            ],
+          },
+        ],
+      },
+    });
+    expect(results.some((result) => result.text.includes("cobalt") || result.text.includes("amber"))).toBe(true);
+    expect(results.some((result) => result.text.includes("crimson"))).toBe(false);
+  }, 60_000);
 });

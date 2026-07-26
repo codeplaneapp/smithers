@@ -4,5 +4,5 @@
  * @returns {string}
  */
 export function buildStateKey(nodeId, iteration) {
-    return `${nodeId}::${iteration}`;
+  return `${nodeId}::${iteration}`;
 }

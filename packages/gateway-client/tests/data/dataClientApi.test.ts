@@ -89,16 +89,18 @@ describe("createSmithersDataClient api requests", () => {
   test("listScoresForRuns repeats runId values and encodes every filter, order, and page field with auth", async () => {
     const { client, calls } = capturingClient({ ok: true, data: { rows: [], total: 0 } }, "score-token");
 
-    expect(await client.api.listScoresForRuns({
-      runIds: ["run one", "run/two", "run-three"],
-      nodeId: "node/one",
-      scorerId: "score:exact",
-      scorerName: "Exact match",
-      source: "batch",
-      order: "scoredAtDesc",
-      offset: 0,
-      limit: 25,
-    })).toEqual({ rows: [], total: 0 });
+    expect(
+      await client.api.listScoresForRuns({
+        runIds: ["run one", "run/two", "run-three"],
+        nodeId: "node/one",
+        scorerId: "score:exact",
+        scorerName: "Exact match",
+        source: "batch",
+        order: "scoredAtDesc",
+        offset: 0,
+        limit: 25,
+      }),
+    ).toEqual({ rows: [], total: 0 });
 
     expect(calls).toHaveLength(1);
     const call = calls[0]!;
@@ -285,10 +287,13 @@ describe("createSmithersDataClient envelope errors", () => {
     const client = createSmithersDataClient({
       mode: { kind: "local", apiBaseUrl: "http://gateway.test/" },
       fetch: (async () =>
-        new Response(JSON.stringify({ ok: false, error: { code: "RUN_NOT_FOUND", message: "no run", requiredScope: "run:read" } }), {
-          status: 404,
-          headers: { "content-type": "application/json" },
-        })) as unknown as typeof fetch,
+        new Response(
+          JSON.stringify({ ok: false, error: { code: "RUN_NOT_FOUND", message: "no run", requiredScope: "run:read" } }),
+          {
+            status: 404,
+            headers: { "content-type": "application/json" },
+          },
+        )) as unknown as typeof fetch,
     });
     await expect(client.api.getRun({ runId: "missing" })).rejects.toBeInstanceOf(GatewayRpcError);
     await client.api.getRun({ runId: "missing" }).catch((error: GatewayRpcError) => {

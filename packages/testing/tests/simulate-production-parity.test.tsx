@@ -6,7 +6,8 @@ import { z } from "zod/v4";
 import { fakeAgent, simulate } from "smithers-orchestrator/testing";
 
 mdxPlugin();
-const { ValidationLoop, implementOutputSchema, validateOutputSchema } = await import("../../../.smithers/components/ValidationLoop");
+const { ValidationLoop, implementOutputSchema, validateOutputSchema } =
+  await import("../../../.smithers/components/ValidationLoop");
 const { reviewOutputSchema } = await import("../../../.smithers/components/Review");
 
 describe("simulate production parity", () => {

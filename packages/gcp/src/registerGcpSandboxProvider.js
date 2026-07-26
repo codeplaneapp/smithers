@@ -9,5 +9,5 @@ import { createGcpSandboxProvider } from "./createGcpSandboxProvider.js";
  * @returns {() => void}
  */
 export function registerGcpSandboxProvider(options = {}) {
-	return registerSandboxProvider(createGcpSandboxProvider(options));
+  return registerSandboxProvider(createGcpSandboxProvider(options));
 }

@@ -74,10 +74,18 @@ async function seededPglite() {
       text: `INSERT INTO _smithers_approvals
         (run_id, node_id, iteration, status, requested_at_ms, request_json, auto_approved)
         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      values: [approval.runId, approval.nodeId, 0, approval.status, now + 10 + index, JSON.stringify({
-        title: approval.nodeId,
-        mode: "manual",
-      }), 0],
+      values: [
+        approval.runId,
+        approval.nodeId,
+        0,
+        approval.status,
+        now + 10 + index,
+        JSON.stringify({
+          title: approval.nodeId,
+          mode: "manual",
+        }),
+        0,
+      ],
     });
   }
 
@@ -140,14 +148,15 @@ describe("Electric pushdown predicates match the RPC rows on a seeded dataset", 
 
     // A status-only shape sees both requested rows, including the stranded row
     // on the finished run. The DB correctly exposes only the actionable one.
-    const shapeRequested = (await shapeRows("_smithers_approvals", "status = 'requested'"))
-      .map((row) => mapSmithersElectricRow("approvals", row));
-    expect(new Set(shapeRequested.map(approvalKey))).toEqual(new Set([
+    const shapeRequested = (await shapeRows("_smithers_approvals", "status = 'requested'")).map((row) =>
+      mapSmithersElectricRow("approvals", row),
+    );
+    expect(new Set(shapeRequested.map(approvalKey))).toEqual(
+      new Set(["run-running:gate-pending:0", "run-finished:gate-other-run:0"]),
+    );
+    expect((await adapter.listPendingApprovals("run-running")).map(approvalKey)).toEqual([
       "run-running:gate-pending:0",
-      "run-finished:gate-other-run:0",
-    ]));
-    expect((await adapter.listPendingApprovals("run-running")).map(approvalKey))
-      .toEqual(["run-running:gate-pending:0"]);
+    ]);
     expect(await adapter.listPendingApprovals("run-finished")).toEqual([]);
 
     expect(approvalsShapeWhere({})).toBeUndefined();
@@ -171,10 +180,10 @@ describe("pushdown validation falls back to the RPC-backed collection", () => {
     expect(approvalsShapeWhere({ filter: { runId: "run' OR 1=1 --" } })).toBeUndefined();
     // Safe run values push down. Approval reads remain RPC-backed because run
     // liveness and waiting-node fallback cannot be expressed by their shape.
-    expect(runsShapeWhere({ filter: { status: "waiting-approval" } }))
-      .toEqual({ where: "status = 'waiting-approval'" });
-    expect(approvalsShapeWhere({ filter: { runId: "wf_18a3.run:1" } }))
-      .toBeUndefined();
+    expect(runsShapeWhere({ filter: { status: "waiting-approval" } })).toEqual({
+      where: "status = 'waiting-approval'",
+    });
+    expect(approvalsShapeWhere({ filter: { runId: "wf_18a3.run:1" } })).toBeUndefined();
   });
 });
 
@@ -222,11 +231,13 @@ async function recordingCollections(fetchImpl: typeof fetch) {
 
   const queryClient = new QueryClient();
   const client = createSmithersDataClient({ mode: multiplayerMode, fetch: fetchImpl });
-  const collections = await (createSmithersCollections as unknown as (
-    client: ReturnType<typeof createSmithersDataClient>,
-    qc: QueryClient,
-    load: () => Promise<typeof recordingElectric>,
-  ) => Promise<SmithersCollections>)(client, queryClient, async () => recordingElectric);
+  const collections = await (
+    createSmithersCollections as unknown as (
+      client: ReturnType<typeof createSmithersDataClient>,
+      qc: QueryClient,
+      load: () => Promise<typeof recordingElectric>,
+    ) => Promise<SmithersCollections>
+  )(client, queryClient, async () => recordingElectric);
   cleanups.push(() => {
     collections.close();
     client.close();
@@ -254,8 +265,10 @@ describe("multiplayer collections honor run and approval filters", () => {
 
     await approvals.preload();
     await runApprovals.preload();
-    expect(calls.filter((call) => call.path === "/v1/api/approvals").map((call) => call.search.toString()))
-      .toEqual(["", "runId=run-1"]);
+    expect(calls.filter((call) => call.path === "/v1/api/approvals").map((call) => call.search.toString())).toEqual([
+      "",
+      "runId=run-1",
+    ]);
   });
 
   test("limit, workflow, and unsafe filters use the RPC-backed collection with the filter forwarded", async () => {
@@ -295,7 +308,10 @@ describe("multiplayer collections honor run and approval filters", () => {
   test("local mode returns the same rows for a filter multiplayer cannot push down", async () => {
     const { fetchImpl, calls } = routingFetch();
     const queryClient = new QueryClient();
-    const client = createSmithersDataClient({ mode: { kind: "local", apiBaseUrl: "http://gateway.test/" }, fetch: fetchImpl });
+    const client = createSmithersDataClient({
+      mode: { kind: "local", apiBaseUrl: "http://gateway.test/" },
+      fetch: fetchImpl,
+    });
     // The client is local-mode, so the client overload's union collapses to the
     // synchronous SmithersCollections.
     const collections = createSmithersCollections(client, queryClient) as SmithersCollections;
@@ -308,6 +324,8 @@ describe("multiplayer collections honor run and approval filters", () => {
     const limited = collections.runs({ filter: { limit: 2 } });
     await limited.preload();
     expect(limited.toArray.map((row) => row.runId)).toEqual(["run-1", "run-2"]);
-    expect(calls.filter((call) => call.path === "/v1/api/runs").map((call) => call.search.toString())).toEqual(["limit=2"]);
+    expect(calls.filter((call) => call.path === "/v1/api/runs").map((call) => call.search.toString())).toEqual([
+      "limit=2",
+    ]);
   });
 });

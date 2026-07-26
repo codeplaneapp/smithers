@@ -41,12 +41,7 @@ import {
   parseDelegationNodeId,
   type DelegationFoldIssue,
 } from "./foldDelegation.ts";
-import type {
-  DelegationApprovalRecord,
-  DelegationGraph,
-  DelegationOutputRecord,
-  DelegationRecord,
-} from "./types.ts";
+import type { DelegationApprovalRecord, DelegationGraph, DelegationOutputRecord, DelegationRecord } from "./types.ts";
 
 /** Output error codes that just mean "nothing durable yet" — retry later. */
 const EXPECTED_OUTPUT_ERRORS = new Set(["NodeHasNoOutput", "NodeNotFound", "IterationNotFound", "RunNotFound"]);
@@ -271,7 +266,8 @@ export function createDelegationChainStore(options: {
           // (`dc:<goal>:approve`, `dc:<leaf>:approval-<i>`) which have no
           // output table but must still surface as awaiting-human.
           // Non-delegation node ids stay excluded.
-          if (delegationTableForNodeId(approval.nodeId) === null && parseDelegationNodeId(approval.nodeId) === null) continue;
+          if (delegationTableForNodeId(approval.nodeId) === null && parseDelegationNodeId(approval.nodeId) === null)
+            continue;
           const record: DelegationApprovalRecord = {
             table: "_approval",
             nodeId: approval.nodeId,
@@ -502,9 +498,7 @@ export function createDelegationChainStore(options: {
           Queue.unsafeOffer(queue, StoreMessage.InputsChanged({ inputs: next }));
         },
         subscribe: (listener) => {
-          const fiber = Effect.runFork(
-            Stream.runForEach(snapshot.changes, () => Effect.sync(listener)),
-          );
+          const fiber = Effect.runFork(Stream.runForEach(snapshot.changes, () => Effect.sync(listener)));
           return () => {
             Effect.runFork(Fiber.interrupt(fiber));
           };

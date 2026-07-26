@@ -122,7 +122,8 @@ function SummaryPanel({ runId }: { runId: string }) {
               const record = isRecord(entry) ? entry : {};
               return (
                 <li key={index}>
-                  <span className="mono">#{String(record.issueNumber)}</span> [{String(record.disposition)}] {String(record.title ?? "")}
+                  <span className="mono">#{String(record.issueNumber)}</span> [{String(record.disposition)}]{" "}
+                  {String(record.title ?? "")}
                   <div className="muted">{String(record.note ?? "")}</div>
                 </li>
               );
@@ -146,7 +147,11 @@ function PlanPanel({ runId }: { runId: string }) {
   );
 }
 
-function WaveBoard({ waves, issues, nodeStatus }: {
+function WaveBoard({
+  waves,
+  issues,
+  nodeStatus,
+}: {
   waves: number[][];
   issues: Map<number, IssueRow>;
   nodeStatus: Map<string, NodeStatus>;
@@ -160,7 +165,10 @@ function WaveBoard({ waves, issues, nodeStatus }: {
         return (
           <section className="panel" key={w}>
             <h2>
-              Wave {w + 1} <span className="muted">({numbers.length} issue{numbers.length === 1 ? "" : "s"})</span>
+              Wave {w + 1}{" "}
+              <span className="muted">
+                ({numbers.length} issue{numbers.length === 1 ? "" : "s"})
+              </span>
               <span className="chips">
                 <span className={dotClass(gate)} title="gate" /> gate
                 <span className={dotClass(push)} title="push" /> push
@@ -200,7 +208,12 @@ function TriageStrip({ issues, nodeStatus }: { issues: IssueRow[]; nodeStatus: M
   const done = issues.filter((issue) => nodeStatus.get("triage-" + issue.number) === "done").length;
   return (
     <section className="panel">
-      <h2>Triage <span className="muted">{done}/{issues.length}</span></h2>
+      <h2>
+        Triage{" "}
+        <span className="muted">
+          {done}/{issues.length}
+        </span>
+      </h2>
       <div className="triagestrip">
         {issues.map((issue) => (
           <span
@@ -227,23 +240,27 @@ function ApprovalsPanel({ runId }: { runId: string }) {
           <div>{String(entry.requestTitle ?? entry.nodeId)}</div>
           <button
             className="button ok"
-            onClick={() => actions.submitApproval({
-              runId,
-              nodeId: entry.nodeId,
-              iteration: entry.iteration,
-              decision: { approved: true },
-            })}
+            onClick={() =>
+              actions.submitApproval({
+                runId,
+                nodeId: entry.nodeId,
+                iteration: entry.iteration,
+                decision: { approved: true },
+              })
+            }
           >
             Approve
           </button>
           <button
             className="button danger"
-            onClick={() => actions.submitApproval({
-              runId,
-              nodeId: entry.nodeId,
-              iteration: entry.iteration,
-              decision: { approved: false },
-            })}
+            onClick={() =>
+              actions.submitApproval({
+                runId,
+                nodeId: entry.nodeId,
+                iteration: entry.iteration,
+                decision: { approved: false },
+              })
+            }
           >
             Deny
           </button>
@@ -286,7 +303,9 @@ function App() {
     return (
       <div className="shell">
         <style>{STYLES}</style>
-        <header className="topbar"><h1>Issue Train</h1></header>
+        <header className="topbar">
+          <h1>Issue Train</h1>
+        </header>
         <RunPicker />
       </div>
     );
@@ -301,8 +320,10 @@ function App() {
     for (let w = 0; w < waves.length; w++) {
       if (nodeStatus.get("w" + w + ":close-check-" + issue.number) === "done") return true;
     }
-    return nodeStatus.get("final-close-check-" + issue.number) === "done"
-      || nodeStatus.get("skip-close-check-" + issue.number) === "done";
+    return (
+      nodeStatus.get("final-close-check-" + issue.number) === "done" ||
+      nodeStatus.get("skip-close-check-" + issue.number) === "done"
+    );
   }).length;
 
   return (

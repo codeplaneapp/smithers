@@ -9,8 +9,8 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
  * @returns {string}
  */
 function logicalNodeId(nodeId) {
-    const atIdx = nodeId.indexOf("@@");
-    return atIdx === -1 ? nodeId : nodeId.slice(0, atIdx);
+  const atIdx = nodeId.indexOf("@@");
+  return atIdx === -1 ? nodeId : nodeId.slice(0, atIdx);
 }
 
 /**
@@ -19,25 +19,24 @@ function logicalNodeId(nodeId) {
  * @returns {unknown[] | null}
  */
 function conversationFromMeta(metaJson) {
-    if (typeof metaJson !== "string" || metaJson.length === 0) {
-        return null;
-    }
-    let meta;
-    try {
-        meta = JSON.parse(metaJson);
-    }
-    catch {
-        return null;
-    }
-    if (!meta || typeof meta !== "object") {
-        return null;
-    }
-    const conversation = /** @type {{ agentConversation?: unknown }} */ (meta).agentConversation;
-    if (!Array.isArray(conversation) || conversation.length === 0) {
-        return null;
-    }
-    const usable = conversation.every((entry) => entry && typeof entry === "object");
-    return usable ? conversation : null;
+  if (typeof metaJson !== "string" || metaJson.length === 0) {
+    return null;
+  }
+  let meta;
+  try {
+    meta = JSON.parse(metaJson);
+  } catch {
+    return null;
+  }
+  if (!meta || typeof meta !== "object") {
+    return null;
+  }
+  const conversation = /** @type {{ agentConversation?: unknown }} */ (meta).agentConversation;
+  if (!Array.isArray(conversation) || conversation.length === 0) {
+    return null;
+  }
+  const usable = conversation.every((entry) => entry && typeof entry === "object");
+  return usable ? conversation : null;
 }
 
 /**
@@ -47,11 +46,9 @@ function conversationFromMeta(metaJson) {
  * @returns {number}
  */
 function completionOrder(attempt) {
-    if (typeof attempt.finishedAtMs === "number")
-        return attempt.finishedAtMs;
-    if (typeof attempt.startedAtMs === "number")
-        return attempt.startedAtMs;
-    return attempt.attempt ?? 0;
+  if (typeof attempt.finishedAtMs === "number") return attempt.finishedAtMs;
+  if (typeof attempt.startedAtMs === "number") return attempt.startedAtMs;
+  return attempt.attempt ?? 0;
 }
 
 /**
@@ -68,17 +65,26 @@ function completionOrder(attempt) {
  * @returns {unknown[]} A fresh copy of the source conversation messages.
  */
 export function resolveForkSessionMessages(attempts, forkSource, nodeId) {
-    const finished = attempts.filter((attempt) => logicalNodeId(attempt.nodeId) === forkSource &&
-        attempt.state === "finished");
-    if (finished.length === 0) {
-        throw new SmithersError("TASK_FORK_SOURCE_NOT_COMPLETE", `Task "${nodeId}" forks "${forkSource}", which has not completed.`, { nodeId, forkSource });
+  const finished = attempts.filter(
+    (attempt) => logicalNodeId(attempt.nodeId) === forkSource && attempt.state === "finished",
+  );
+  if (finished.length === 0) {
+    throw new SmithersError(
+      "TASK_FORK_SOURCE_NOT_COMPLETE",
+      `Task "${nodeId}" forks "${forkSource}", which has not completed.`,
+      { nodeId, forkSource },
+    );
+  }
+  const ordered = [...finished].sort((a, b) => completionOrder(b) - completionOrder(a));
+  for (const attempt of ordered) {
+    const conversation = conversationFromMeta(attempt.metaJson);
+    if (conversation) {
+      return /** @type {unknown[]} */ (JSON.parse(JSON.stringify(conversation)));
     }
-    const ordered = [...finished].sort((a, b) => completionOrder(b) - completionOrder(a));
-    for (const attempt of ordered) {
-        const conversation = conversationFromMeta(attempt.metaJson);
-        if (conversation) {
-            return /** @type {unknown[]} */ (JSON.parse(JSON.stringify(conversation)));
-        }
-    }
-    throw new SmithersError("TASK_FORK_SESSION_UNAVAILABLE", `Task "${nodeId}" forks "${forkSource}", which completed without a usable agent session snapshot.`, { nodeId, forkSource });
+  }
+  throw new SmithersError(
+    "TASK_FORK_SESSION_UNAVAILABLE",
+    `Task "${nodeId}" forks "${forkSource}", which completed without a usable agent session snapshot.`,
+    { nodeId, forkSource },
+  );
 }

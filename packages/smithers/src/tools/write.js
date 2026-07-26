@@ -2,22 +2,16 @@ import { writeFile } from "node:fs/promises";
 import { z } from "zod";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { defineTool } from "./defineTool.js";
-import {
-  ensureParentDir,
-  getToolRuntimeOptions,
-  resolveToolPath,
-  sha256Hex,
-} from "./utils.js";
+import { ensureParentDir, getToolRuntimeOptions, resolveToolPath, sha256Hex } from "./utils.js";
 
 export async function writeFileTool(path, content) {
   const { rootDir, maxOutputBytes } = getToolRuntimeOptions();
   const contentBytes = Buffer.byteLength(content, "utf8");
   if (contentBytes > maxOutputBytes) {
-    throw new SmithersError(
-      "TOOL_CONTENT_TOO_LARGE",
-      `Content too large (${contentBytes} bytes)`,
-      { contentBytes, contentHash: sha256Hex(content) },
-    );
+    throw new SmithersError("TOOL_CONTENT_TOO_LARGE", `Content too large (${contentBytes} bytes)`, {
+      contentBytes,
+      contentHash: sha256Hex(content),
+    });
   }
   const resolved = await resolveToolPath(rootDir, path);
   await ensureParentDir(resolved);

@@ -114,7 +114,9 @@ function reviewAttemptsOf(value: unknown): Array<{ attempt: number; verdict: str
   }));
 }
 
-function invalidationOf(value: unknown): { round: number; reason: string; triggerType: string; triggerRef: string } | null {
+function invalidationOf(
+  value: unknown,
+): { round: number; reason: string; triggerType: string; triggerRef: string } | null {
   if (!isRecord(value)) return null;
   const trigger = isRecord(value.trigger) ? value.trigger : {};
   return {
@@ -130,7 +132,9 @@ function gatesRowOf(value: unknown): DelegationNode["gates"] {
   return value.gates as DelegationNode["gates"];
 }
 
-function probeReportOf(output: unknown): { question: string; answer: string; report: string; planImpact: string } | null {
+function probeReportOf(
+  output: unknown,
+): { question: string; answer: string; report: string; planImpact: string } | null {
   if (!isRecord(output)) return null;
   const report = asString(output.report);
   const answer = asString(output.answer);
@@ -156,9 +160,14 @@ function VersionDetail({ entry, node }: { entry: DcVersion; node: DelegationNode
       ) : null}
       {invalidation ? (
         <div className="dc-banner-bad" data-testid="dc-invalidated-by">
-          Invalidated{invalidation.round ? ` (replan round ${invalidation.round})` : ""}: {invalidation.reason || "no reason recorded"}
+          Invalidated{invalidation.round ? ` (replan round ${invalidation.round})` : ""}:{" "}
+          {invalidation.reason || "no reason recorded"}
           {invalidation.triggerType ? (
-            <span className="mono"> [{invalidation.triggerType}{invalidation.triggerRef ? `: ${invalidation.triggerRef}` : ""}]</span>
+            <span className="mono">
+              {" "}
+              [{invalidation.triggerType}
+              {invalidation.triggerRef ? `: ${invalidation.triggerRef}` : ""}]
+            </span>
           ) : null}
         </div>
       ) : null}
@@ -215,9 +224,7 @@ function VersionDetail({ entry, node }: { entry: DcVersion; node: DelegationNode
                 ) : null}
               </div>
               {attempt.summary ? <span>{attempt.summary}</span> : null}
-              {attempt.artifacts.length > 0 ? (
-                <span className="muted">{attempt.artifacts.join(", ")}</span>
-              ) : null}
+              {attempt.artifacts.length > 0 ? <span className="muted">{attempt.artifacts.join(", ")}</span> : null}
             </div>
           ))}
         </section>
@@ -229,7 +236,10 @@ function VersionDetail({ entry, node }: { entry: DcVersion; node: DelegationNode
             <div className="dc-attempt" key={`review-${attempt.attempt}`}>
               <div className="dc-attempt-head">
                 <span className="badge">attempt {attempt.attempt}</span>
-                <span className={"badge " + (attempt.verdict === "pass" ? "ok" : "bad")} data-testid={`dc-review-verdict-${attempt.attempt}`}>
+                <span
+                  className={"badge " + (attempt.verdict === "pass" ? "ok" : "bad")}
+                  data-testid={`dc-review-verdict-${attempt.attempt}`}
+                >
                   {attempt.verdict || "?"}
                 </span>
               </div>
@@ -250,13 +260,7 @@ function VersionDetail({ entry, node }: { entry: DcVersion; node: DelegationNode
  * dc-edit signal as a live output edit (output rides along unchanged; the
  * note carries the human intent), so the workflow answers with a replan round.
  */
-export function DevPreviewPanel({
-  node,
-  actions,
-}: {
-  node: DelegationNode;
-  actions: Pick<DcActions, "submitEdit">;
-}) {
+export function DevPreviewPanel({ node, actions }: { node: DelegationNode; actions: Pick<DcActions, "submitEdit"> }) {
   const devPreview = devPreviewOf(node);
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
@@ -350,7 +354,11 @@ export function DevPreviewPanel({
         </button>
         {confirmation === "request" ? <span className="badge ok">change request sent</span> : null}
         {confirmation === "invalidate" ? <span className="badge warn">invalidation requested</span> : null}
-        {error ? <span className="badge bad" data-testid="dc-devpreview-error">{error}</span> : null}
+        {error ? (
+          <span className="badge bad" data-testid="dc-devpreview-error">
+            {error}
+          </span>
+        ) : null}
       </div>
     </section>
   );
@@ -534,7 +542,13 @@ export function NodeInspector({
                     onChange={(event) => setNote(event.currentTarget.value)}
                   />
                   <div className="dc-editor-actions">
-                    <button type="button" className="button primary" data-testid="dc-edit-save" disabled={busy} onClick={() => void save()}>
+                    <button
+                      type="button"
+                      className="button primary"
+                      data-testid="dc-edit-save"
+                      disabled={busy}
+                      onClick={() => void save()}
+                    >
                       {busy ? "Submitting..." : "Save & replan"}
                     </button>
                     <button
@@ -549,7 +563,11 @@ export function NodeInspector({
                     >
                       Cancel
                     </button>
-                    {error ? <span className="badge bad" data-testid="dc-edit-error">{error}</span> : null}
+                    {error ? (
+                      <span className="badge bad" data-testid="dc-edit-error">
+                        {error}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               ) : probe ? null : (

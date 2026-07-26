@@ -74,16 +74,19 @@ const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({
 const ROOT = resolve(import.meta.dir, "../..");
 const MAX_OUTPUT = 20_000;
 
-const smartResearcher = codexFirst({
-  model: "gpt-5.6-luna",
-  config: { model_reasoning_effort: "medium" },
-  cwd: ROOT,
-  sandbox: "workspace-write",
-  fullAuto: true,
-  skipGitRepoCheck: true,
-  extraArgs: ["-c", "tools.web_search=true"],
-  timeoutMs: 45 * 60_000,
-}, [new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd: ROOT })]);
+const smartResearcher = codexFirst(
+  {
+    model: "gpt-5.6-luna",
+    config: { model_reasoning_effort: "medium" },
+    cwd: ROOT,
+    sandbox: "workspace-write",
+    fullAuto: true,
+    skipGitRepoCheck: true,
+    extraArgs: ["-c", "tools.web_search=true"],
+    timeoutMs: 45 * 60_000,
+  },
+  [new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd: ROOT })],
+);
 
 function truncate(text: string, max = MAX_OUTPUT): string {
   return text.length > max ? `${text.slice(0, max)}\n...[truncated ${text.length - max} chars]` : text;
@@ -104,7 +107,7 @@ function run(command: string, args: string[], env: Record<string, string> = {}):
     status: res.status ?? null,
     durationMs: Date.now() - started,
     stdout: truncate(res.stdout ?? ""),
-    stderr: truncate(res.error ? res.error.message : res.stderr ?? ""),
+    stderr: truncate(res.error ? res.error.message : (res.stderr ?? "")),
   };
 }
 
@@ -209,8 +212,8 @@ export default smithers((ctx) => {
                   commands.length === 0
                     ? "Benchmark/eval smoke skipped."
                     : failed.length === 0
-                    ? `Ran ${commands.length} benchmark/eval smoke command(s).`
-                    : `${failed.length}/${commands.length} benchmark/eval smoke command(s) failed.`,
+                      ? `Ran ${commands.length} benchmark/eval smoke command(s).`
+                      : `${failed.length}/${commands.length} benchmark/eval smoke command(s) failed.`,
               };
             }}
           </Task>
@@ -268,7 +271,9 @@ Return JSON with:
                 "",
                 "## Existing benchmark/eval smoke",
                 smoke.summary,
-                ...smoke.commands.map((cmd) => `- ${cmd.ok ? "PASS" : "FAIL"} \`${cmd.command}\` (${cmd.durationMs}ms)`),
+                ...smoke.commands.map(
+                  (cmd) => `- ${cmd.ok ? "PASS" : "FAIL"} \`${cmd.command}\` (${cmd.durationMs}ms)`,
+                ),
                 "",
                 "## Benchmark research",
                 research.summary || "(no summary)",

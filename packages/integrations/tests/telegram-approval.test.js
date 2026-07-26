@@ -33,11 +33,14 @@ const telegramConfig = { botToken: fixture.token, apiBaseUrl: fixture.apiBaseUrl
 
 function makeApi() {
   const dir = mkdtempSync(join(tmpdir(), "smithers-tg-approval-"));
-  return createSmithers({
-    ...telegramApprovalSchemas,
-    decision: telegramApprovalDecisionSchema,
-    selection: telegramApprovalSelectionSchema,
-  }, { dbPath: join(dir, "db.sqlite") });
+  return createSmithers(
+    {
+      ...telegramApprovalSchemas,
+      decision: telegramApprovalDecisionSchema,
+      selection: telegramApprovalSelectionSchema,
+    },
+    { dbPath: join(dir, "db.sqlite") },
+  );
 }
 
 /** A delivered callback_query payload as the source would fan it out. */
@@ -54,9 +57,17 @@ const TOK = "t0";
 
 describe("callback_data codec", () => {
   test("round-trips approve / reject / select with a token", () => {
-    expect(parseTelegramApprovalCallbackData(telegramApprovalCallbackData({ kind: "approve" }, TOK))).toEqual({ token: TOK, kind: "approve" });
-    expect(parseTelegramApprovalCallbackData(telegramApprovalCallbackData({ kind: "reject" }, TOK))).toEqual({ token: TOK, kind: "reject" });
-    expect(parseTelegramApprovalCallbackData(telegramApprovalCallbackData({ kind: "select", key: "opt-1" }, TOK))).toEqual({ token: TOK, kind: "select", key: "opt-1" });
+    expect(parseTelegramApprovalCallbackData(telegramApprovalCallbackData({ kind: "approve" }, TOK))).toEqual({
+      token: TOK,
+      kind: "approve",
+    });
+    expect(parseTelegramApprovalCallbackData(telegramApprovalCallbackData({ kind: "reject" }, TOK))).toEqual({
+      token: TOK,
+      kind: "reject",
+    });
+    expect(
+      parseTelegramApprovalCallbackData(telegramApprovalCallbackData({ kind: "select", key: "opt-1" }, TOK)),
+    ).toEqual({ token: TOK, kind: "select", key: "opt-1" });
   });
   test("ignores stray / malformed callback data", () => {
     expect(parseTelegramApprovalCallbackData("something:else")).toBeNull();
@@ -83,7 +94,10 @@ describe("approvalInlineKeyboard / webAppButton", () => {
     const keyboard = approvalInlineKeyboard({
       mode: "select",
       token: TOK,
-      options: [{ key: "a", label: "A" }, { key: "b", label: "B" }],
+      options: [
+        { key: "a", label: "A" },
+        { key: "b", label: "B" },
+      ],
       miniAppUrl: "https://approve.example.com",
       miniAppText: "Open",
     });
@@ -119,10 +133,18 @@ describe("telegramApprovalDecision mapping", () => {
     }
   });
   test("reject press → { approved: false }", () => {
-    expect(telegramApprovalDecision(callbackQuery(`sap:${TOK}:d`), { mode: "approve", token: TOK }).approved).toBe(false);
+    expect(telegramApprovalDecision(callbackQuery(`sap:${TOK}:d`), { mode: "approve", token: TOK }).approved).toBe(
+      false,
+    );
   });
   test("select press → { selected }", () => {
-    expect(telegramApprovalDecision(callbackQuery(`sap:${TOK}:s:b`), { mode: "select", token: TOK, options: [{ key: "b", label: "B" }] })).toEqual({ selected: "b", notes: null });
+    expect(
+      telegramApprovalDecision(callbackQuery(`sap:${TOK}:s:b`), {
+        mode: "select",
+        token: TOK,
+        options: [{ key: "b", label: "B" }],
+      }),
+    ).toEqual({ selected: "b", notes: null });
   });
   test("foreign-token approve press fails safe (never approves)", () => {
     const decision = telegramApprovalDecision(callbackQuery("sap:OTHER:a"), { mode: "approve", token: TOK });
@@ -130,7 +152,13 @@ describe("telegramApprovalDecision mapping", () => {
     expect(decision.note).toMatch(/did not match/);
   });
   test("select press with an unoffered key → empty selection", () => {
-    expect(telegramApprovalDecision(callbackQuery(`sap:${TOK}:s:zzz`), { mode: "select", token: TOK, options: [{ key: "b", label: "B" }] }).selected).toBe("");
+    expect(
+      telegramApprovalDecision(callbackQuery(`sap:${TOK}:s:zzz`), {
+        mode: "select",
+        token: TOK,
+        options: [{ key: "b", label: "B" }],
+      }).selected,
+    ).toBe("");
   });
   test("stray press in approve mode is a safe non-approval", () => {
     const decision = telegramApprovalDecision(callbackQuery("garbage"), { mode: "approve", token: TOK });
@@ -146,17 +174,21 @@ describe("TelegramApproval end-to-end through the real engine", () => {
 
   async function runApproval({ mode, outputKey, data, options }) {
     const api = makeApi();
-    const workflow = api.smithers(() => React.createElement(api.Workflow, { name: "tg-approval" },
-      React.createElement(TelegramApproval, {
-        id: "gate",
-        chatId: 777,
-        config: telegramConfig,
-        request: { title: "Deploy to prod?", summary: "Ship release 0.27" },
-        mode,
-        options,
-        output: api.outputs[outputKey],
-      }),
-    ));
+    const workflow = api.smithers(() =>
+      React.createElement(
+        api.Workflow,
+        { name: "tg-approval" },
+        React.createElement(TelegramApproval, {
+          id: "gate",
+          chatId: 777,
+          config: telegramConfig,
+          request: { title: "Deploy to prod?", summary: "Ship release 0.27" },
+          mode,
+          options,
+          output: api.outputs[outputKey],
+        }),
+      ),
+    );
     const first = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
     expect(first.status).toBe("waiting-event");
 
@@ -165,10 +197,12 @@ describe("TelegramApproval end-to-end through the real engine", () => {
     expect(send?.body.reply_markup?.inline_keyboard).toBeTruthy();
 
     const adapter = new SmithersDb(api.db);
-    await Effect.runPromise(signalRun(adapter, first.runId, TELEGRAM_CALLBACK_QUERY_EVENT, callbackQuery(data), {
-      correlationId: "chat:777",
-      receivedBy: "integration:telegram",
-    }));
+    await Effect.runPromise(
+      signalRun(adapter, first.runId, TELEGRAM_CALLBACK_QUERY_EVENT, callbackQuery(data), {
+        correlationId: "chat:777",
+        receivedBy: "integration:telegram",
+      }),
+    );
 
     const resumed = await Effect.runPromise(runWorkflow(workflow, { runId: first.runId, resume: true, input: {} }));
     expect(resumed.status).toBe("finished");
@@ -198,7 +232,10 @@ describe("TelegramApproval end-to-end through the real engine", () => {
   test("select: yields the chosen option key", async () => {
     const { api } = await runApproval({
       mode: "select",
-      options: [{ key: "a", label: "Roll forward" }, { key: "b", label: "Roll back" }],
+      options: [
+        { key: "a", label: "Roll forward" },
+        { key: "b", label: "Roll back" },
+      ],
       outputKey: "selection",
       data: gateData({ kind: "select", key: "b" }),
     });
@@ -224,12 +261,14 @@ describe("answerWebAppQuery", () => {
   test("posts a Mini App inline result and returns the SentWebAppMessage", async () => {
     const client = makeTelegramClient(telegramConfig);
     const before = fixture.calls("answerWebAppQuery").length;
-    const result = await Effect.runPromise(client.answerWebAppQuery("wq-1", {
-      type: "article",
-      id: "1",
-      title: "Approved",
-      input_message_content: { message_text: "Approved via Mini App" },
-    }));
+    const result = await Effect.runPromise(
+      client.answerWebAppQuery("wq-1", {
+        type: "article",
+        id: "1",
+        title: "Approved",
+        input_message_content: { message_text: "Approved via Mini App" },
+      }),
+    );
     const calls = fixture.calls("answerWebAppQuery").slice(before);
     expect(calls).toHaveLength(1);
     expect(calls[0].body.web_app_query_id).toBe("wq-1");

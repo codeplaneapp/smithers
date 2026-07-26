@@ -9,7 +9,7 @@ const SECRET_KEY_RE = /token|secret|key|password|credential|authorization|passwd
  * @returns {unknown}
  */
 export function redactSandboxProviderValue(value) {
-	return redact(value, new WeakSet());
+  return redact(value, new WeakSet());
 }
 
 /**
@@ -18,20 +18,20 @@ export function redactSandboxProviderValue(value) {
  * @returns {unknown}
  */
 function redact(value, seen) {
-	if (value === null || typeof value !== "object") {
-		return value;
-	}
-	if (seen.has(value)) {
-		return "[Circular]";
-	}
-	seen.add(value);
-	if (Array.isArray(value)) {
-		return value.map((entry) => redact(entry, seen));
-	}
-	/** @type {Record<string, unknown>} */
-	const out = {};
-	for (const [key, entryValue] of Object.entries(value)) {
-		out[key] = SECRET_KEY_RE.test(key) ? "[redacted]" : redact(entryValue, seen);
-	}
-	return out;
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (seen.has(value)) {
+    return "[Circular]";
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.map((entry) => redact(entry, seen));
+  }
+  /** @type {Record<string, unknown>} */
+  const out = {};
+  for (const [key, entryValue] of Object.entries(value)) {
+    out[key] = SECRET_KEY_RE.test(key) ? "[redacted]" : redact(entryValue, seen);
+  }
+  return out;
 }

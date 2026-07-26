@@ -52,9 +52,6 @@ export function resolveConciergeModelConfig(env: NodeJS.ProcessEnv): ConciergeMo
   return {
     provider: "fallback",
     model: env.CONCIERGE_MODEL ?? env.CHAT_MODEL ?? DEFAULT_CHAT_MODEL,
-    effort:
-      env.CONCIERGE_REASONING_EFFORT ??
-      env.CHAT_REASONING_EFFORT ??
-      DEFAULT_CONCIERGE_REASONING_EFFORT,
+    effort: env.CONCIERGE_REASONING_EFFORT ?? env.CHAT_REASONING_EFFORT ?? DEFAULT_CONCIERGE_REASONING_EFFORT,
   };
 }

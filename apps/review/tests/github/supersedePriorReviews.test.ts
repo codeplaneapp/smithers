@@ -49,7 +49,11 @@ describe("supersedePriorReviews", () => {
         // Bot review without the marker: untouched.
         JSON.stringify({ id: 3, body: "LGTM", login: "smithers-bot" }),
         // Already superseded: untouched.
-        JSON.stringify({ id: 4, body: `Superseded by a newer smithers review.\n\n${MARKER}\nAncient`, login: "smithers-bot" }),
+        JSON.stringify({
+          id: 4,
+          body: `Superseded by a newer smithers review.\n\n${MARKER}\nAncient`,
+          login: "smithers-bot",
+        }),
         JSON.stringify({ id: 5, body: `${MARKER}\nOld review two`, login: "smithers-bot" }),
       ].join("\n"),
       "{}",

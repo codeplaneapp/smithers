@@ -53,9 +53,7 @@ function resolveColor(name: string, tokens: Map<string, string>, stack = new Set
   const alias = value.match(/^var\((--[\w-]+)\)$/)?.[1];
   if (alias) return resolveColor(alias, tokens, stack);
 
-  const mix = value.match(
-    /^color-mix\(in srgb,\s*var\((--[\w-]+)\)\s*([\d.]+)%,\s*var\((--[\w-]+)\)\)$/,
-  );
+  const mix = value.match(/^color-mix\(in srgb,\s*var\((--[\w-]+)\)\s*([\d.]+)%,\s*var\((--[\w-]+)\)\)$/);
   if (mix) {
     const foreground = resolveColor(mix[1]!, tokens, new Set(stack));
     const background = resolveColor(mix[3]!, tokens, new Set(stack));

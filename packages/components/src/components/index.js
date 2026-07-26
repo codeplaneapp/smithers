@@ -126,7 +126,7 @@
 // @smithers-type-exports-end
 
 export { Workflow } from "./Workflow.js";
-export { Approval, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema, } from "./Approval.js";
+export { Approval, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema } from "./Approval.js";
 export { Task } from "./Task.js";
 export { Sequence } from "./Sequence.js";
 export { Parallel } from "./Parallel.js";
@@ -179,32 +179,78 @@ export { DeriskLoop } from "./delegation/DeriskLoop.js";
 export { DelegationExecution } from "./delegation/DelegationExecution.js";
 export { DelegationScoring } from "./delegation/DelegationScoring.js";
 export { DelegationEditListener } from "./delegation/DelegationEditListener.js";
-export { delegationSchemas, tierSchema, estimateSchema, gateSchema, devPreviewKindSchema, dcGoalSchema, dcQuestionSchema, dcForecastSchema, dcGoalApprovalSchema, dcPlanSchema, dcPreviewSchema, dcDevPreviewSchema, dcGatesSchema, dcProbeSchema, dcReplanSchema, dcExecSchema, dcReviewSchema, dcApprovalSchema, dcEditSchema, dcSkipSchema, dcPollSchema, dcBudgetSchema, dcScoreSchema, DEFAULT_TIER_ORDER, DC_EDIT_SIGNAL, DC_SKIP_PREVIEW_SIGNAL, } from "./delegation/delegationSchemasRuntime.js";
+export {
+  delegationSchemas,
+  tierSchema,
+  estimateSchema,
+  gateSchema,
+  devPreviewKindSchema,
+  dcGoalSchema,
+  dcQuestionSchema,
+  dcForecastSchema,
+  dcGoalApprovalSchema,
+  dcPlanSchema,
+  dcPreviewSchema,
+  dcDevPreviewSchema,
+  dcGatesSchema,
+  dcProbeSchema,
+  dcReplanSchema,
+  dcExecSchema,
+  dcReviewSchema,
+  dcApprovalSchema,
+  dcEditSchema,
+  dcSkipSchema,
+  dcPollSchema,
+  dcBudgetSchema,
+  dcScoreSchema,
+  DEFAULT_TIER_ORDER,
+  DC_EDIT_SIGNAL,
+  DC_SKIP_PREVIEW_SIGNAL,
+} from "./delegation/delegationSchemasRuntime.js";
 export * as delegationPrompts from "./delegation/delegationPrompts.js";
 export { withCommitRange, captureWorkingCopyCommit } from "./delegation/withCommitRange.js";
-export { foldPlans, nodeIndex, frontierLeaves, unplannedChunks, planningComplete, foldGates, dependentsOf, planOwnerOf, triggerTargetOf, leavesUnder, probeIdFor, probesRequested, pendingTriggers, chunkGateFailures, replanCountFor, actualTotals, physicalId, devPreviewNodeId, splitGates, leafAttemptState, leafComplete, executionComplete, synthesizeDelegationEvents, agentForTier, } from "./delegation/delegationState.js";
+export {
+  foldPlans,
+  nodeIndex,
+  frontierLeaves,
+  unplannedChunks,
+  planningComplete,
+  foldGates,
+  dependentsOf,
+  planOwnerOf,
+  triggerTargetOf,
+  leavesUnder,
+  probeIdFor,
+  probesRequested,
+  pendingTriggers,
+  chunkGateFailures,
+  replanCountFor,
+  actualTotals,
+  physicalId,
+  devPreviewNodeId,
+  splitGates,
+  leafAttemptState,
+  leafComplete,
+  executionComplete,
+  synthesizeDelegationEvents,
+  agentForTier,
+} from "./delegation/delegationState.js";
 // --- Trellis (dynamic delegation v2) ---
 export { Trellis } from "./delegation-v2/Trellis.js";
 export {
-	delegationV2Schemas,
-	DELEGATION_V2_PROTOCOL_VERSION,
-	DELEGATION_V2_PROGRAM_VERSION,
-	DELEGATION_V2_REGISTRY_VERSION,
+  delegationV2Schemas,
+  DELEGATION_V2_PROTOCOL_VERSION,
+  DELEGATION_V2_PROGRAM_VERSION,
+  DELEGATION_V2_REGISTRY_VERSION,
 } from "./delegation-v2/delegationV2SchemasRuntime.js";
 export { validateWorkflowProgram, DEFAULT_DELEGATION_V2_LIMITS } from "./delegation-v2/delegationV2Validate.js";
-export {
-	compileDelegationV2Program,
-	DELEGATION_V2_COMPILER_VERSION,
-} from "./delegation-v2/delegationV2Compiler.js";
+export { compileDelegationV2Program, DELEGATION_V2_COMPILER_VERSION } from "./delegation-v2/delegationV2Compiler.js";
 export { delegationV2ProgramDigest } from "./delegation-v2/delegationV2Validate.js";
+export { enforceDelegationV2AuthorFuel, partitionDelegationV2AuthorFuel } from "./delegation-v2/delegationV2Fuel.js";
 export {
-	enforceDelegationV2AuthorFuel,
-	partitionDelegationV2AuthorFuel,
-} from "./delegation-v2/delegationV2Fuel.js";
-export {
-	delegationV2AssignmentDigest,
-	settleDelegationV2Envelope,
-	DELEGATION_V2_RUNTIME_VERSION,
-	DELEGATION_V2_SETTLEMENT_VERSION,
+  delegationV2AssignmentDigest,
+  settleDelegationV2Envelope,
+  DELEGATION_V2_RUNTIME_VERSION,
+  DELEGATION_V2_SETTLEMENT_VERSION,
 } from "./delegation-v2/delegationV2Settlement.js";
 export * as trellisPrompts from "./delegation-v2/delegationV2Prompts.js";

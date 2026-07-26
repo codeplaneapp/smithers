@@ -33,11 +33,7 @@ export function TicketsCard() {
             {tickets.length} ticket{tickets.length === 1 ? "" : "s"}
           </div>
         </div>
-        <button
-          className="card-link"
-          type="button"
-          onClick={() => openSurface({ kind: "tickets" })}
-        >
+        <button className="card-link" type="button" onClick={() => openSurface({ kind: "tickets" })}>
           Open tickets ›
         </button>
       </header>
@@ -51,9 +47,7 @@ export function TicketsCard() {
             </div>
           </div>
         ))}
-        {tickets.length > shown.length ? (
-          <div className="rev-more">+{tickets.length - shown.length} more</div>
-        ) : null}
+        {tickets.length > shown.length ? <div className="rev-more">+{tickets.length - shown.length} more</div> : null}
       </div>
     </article>
   );

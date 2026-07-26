@@ -17,9 +17,7 @@ const ORDER: Record<View, number> = {
  */
 export function goToView(view: View): void {
   const current = useRouteStore.getState().view;
-  useUiStore
-    .getState()
-    .setNavDir(ORDER[view] >= ORDER[current] ? "forward" : "back");
+  useUiStore.getState().setNavDir(ORDER[view] >= ORDER[current] ? "forward" : "back");
   void router.navigate({ to: view === "store" ? "/store" : "/" });
 }
 
@@ -81,12 +79,7 @@ export function surfaceToRoute(surface: Surface): SurfaceRoute {
     case "timeline":
       return gatewayRunRoute(fallbackWorkflowKey(surface.runId), surface.runId, "timeline");
     case "gatewayRun":
-      return gatewayRunRoute(
-        surface.workflowKey,
-        surface.runId,
-        surface.view ?? "inspector",
-        surface.diffId,
-      );
+      return gatewayRunRoute(surface.workflowKey, surface.runId, surface.view ?? "inspector", surface.diffId);
     case "tickets":
       return { to: "/tickets" };
     case "runs":

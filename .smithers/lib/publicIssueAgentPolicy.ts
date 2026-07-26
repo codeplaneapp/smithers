@@ -60,18 +60,10 @@ export const PUBLIC_ISSUE_CODEX_EXTRA_ARGS = [
 ] as const;
 
 const CLAUDE_READ_TOOLS = ["Read", "Glob", "Grep"] as const;
-const CLAUDE_WRITE_TOOLS = [
-  ...CLAUDE_READ_TOOLS,
-  "Edit",
-  "Write",
-] as const;
+const CLAUDE_WRITE_TOOLS = [...CLAUDE_READ_TOOLS, "Edit", "Write"] as const;
 
 const CLAUDE_READ_ALLOW_RULES = ["Read(./**)", "Glob", "Grep"] as const;
-const CLAUDE_WRITE_ALLOW_RULES = [
-  ...CLAUDE_READ_ALLOW_RULES,
-  "Edit(./**)",
-  "Write(./**)",
-] as const;
+const CLAUDE_WRITE_ALLOW_RULES = [...CLAUDE_READ_ALLOW_RULES, "Edit(./**)", "Write(./**)"] as const;
 
 const CLAUDE_REMOTE_TOOL_DENIES = [
   "WebFetch",
@@ -89,13 +81,7 @@ const CLAUDE_REMOTE_TOOL_DENIES = [
   "ShareOnboardingGuide",
 ] as const;
 
-const CLAUDE_READ_ROLE_DENIES = [
-  "Bash",
-  "PowerShell",
-  "Edit",
-  "Write",
-  "NotebookEdit",
-] as const;
+const CLAUDE_READ_ROLE_DENIES = ["Bash", "PowerShell", "Edit", "Write", "NotebookEdit"] as const;
 
 const CLAUDE_DANGEROUS_BASH_DENIES = [
   "Bash(gh *)",
@@ -203,15 +189,7 @@ const CLAUDE_SANDBOX_SECRET_ENV_NAMES = [
 
 type EnvironmentSource = Readonly<Record<string, string | undefined>>;
 
-export const PUBLIC_ISSUE_TOOLCHAIN_BINARIES = [
-  "bash",
-  "git",
-  "jj",
-  "rg",
-  "node",
-  "bun",
-  "pnpm",
-] as const;
+export const PUBLIC_ISSUE_TOOLCHAIN_BINARIES = ["bash", "git", "jj", "rg", "node", "bun", "pnpm"] as const;
 
 export type PublicIssueCodexPolicy = {
   inheritEnv: false;
@@ -294,11 +272,7 @@ function homebrewPrefix(path: string): string | undefined {
 
 function safeHomebrewPathSegment(segment: string | undefined): segment is string {
   return Boolean(
-    segment
-    && segment !== "."
-    && segment !== ".."
-    && segment.trim() === segment
-    && !segment.includes("\0"),
+    segment && segment !== "." && segment !== ".." && segment.trim() === segment && !segment.includes("\0"),
   );
 }
 
@@ -318,17 +292,14 @@ function homebrewPackageRoot(path: string, prefix: string): string | undefined {
     : undefined;
 }
 
-function homebrewDynamicLibraryPaths(
-  binaryPath: string,
-  otoolOutput: string,
-): string[] {
+function homebrewDynamicLibraryPaths(binaryPath: string, otoolOutput: string): string[] {
   const prefix = homebrewPrefix(binaryPath);
   if (!prefix) return [];
-  return otoolOutput.split(/\r?\n/).slice(1)
+  return otoolOutput
+    .split(/\r?\n/)
+    .slice(1)
     .map((line) => line.trim().split(/\s+\(/, 1)[0])
-    .filter((dependency): dependency is string =>
-      Boolean(dependency && homebrewPackageRoot(dependency, prefix))
-    );
+    .filter((dependency): dependency is string => Boolean(dependency && homebrewPackageRoot(dependency, prefix)));
 }
 
 /**
@@ -341,10 +312,7 @@ function homebrewDynamicLibraryPaths(
  * Cellar roots are then reopened; other formula contents remain denied. Paths
  * outside the executable's own Homebrew prefix are deliberately ignored.
  */
-export function resolveHomebrewDynamicLibraryReadPaths(
-  binaryPath: string,
-  otoolOutput: string,
-): string[] {
+export function resolveHomebrewDynamicLibraryReadPaths(binaryPath: string, otoolOutput: string): string[] {
   const prefix = homebrewPrefix(binaryPath);
   if (!prefix) return [];
   let canonicalPrefix: string;
@@ -363,10 +331,11 @@ export function resolveHomebrewDynamicLibraryReadPaths(
       const canonicalDependency = realpathSync(dependency);
       const canonicalRoot = homebrewPackageRoot(canonicalDependency, canonicalPrefix);
       if (
-        !canonicalRoot
-        || !canonicalRoot.startsWith(`${canonicalPrefix}/Cellar/`)
-        || !canonicalDependency.startsWith(`${canonicalRoot}/`)
-      ) continue;
+        !canonicalRoot ||
+        !canonicalRoot.startsWith(`${canonicalPrefix}/Cellar/`) ||
+        !canonicalDependency.startsWith(`${canonicalRoot}/`)
+      )
+        continue;
 
       roots.add(canonicalRoot);
       if (logicalRoot.startsWith(`${prefix}/opt/`)) {
@@ -419,9 +388,9 @@ export function resolveHomebrewDynamicLibraryReadPathClosure(
         continue;
       }
       if (
-        homebrewPrefix(canonicalDependency) === prefix
-        && !visited.has(canonicalDependency)
-        && !queue.includes(canonicalDependency)
+        homebrewPrefix(canonicalDependency) === prefix &&
+        !visited.has(canonicalDependency) &&
+        !queue.includes(canonicalDependency)
       ) {
         queue.push(canonicalDependency);
       }
@@ -441,10 +410,7 @@ function inspectDarwinMachO(path: string): string | undefined {
 
 function darwinDynamicLibraryReadPaths(binaryPath: string): string[] {
   if (process.platform !== "darwin" || !homebrewPrefix(binaryPath)) return [];
-  return resolveHomebrewDynamicLibraryReadPathClosure(
-    binaryPath,
-    inspectDarwinMachO,
-  );
+  return resolveHomebrewDynamicLibraryReadPathClosure(binaryPath, inspectDarwinMachO);
 }
 
 /** Resolve only the installed runtime roots needed by repo checks. */
@@ -456,9 +422,7 @@ export function resolvePublicIssueToolchainReadPaths(
     .split(delimiter)
     .map((entry) => entry.trim())
     .filter(Boolean);
-  const extensions = process.platform === "win32"
-    ? (source.PATHEXT || ".EXE;.CMD;.BAT").split(";")
-    : [""];
+  const extensions = process.platform === "win32" ? (source.PATHEXT || ".EXE;.CMD;.BAT").split(";") : [""];
   const roots = new Set<string>();
 
   for (const binary of binaries) {
@@ -502,8 +466,8 @@ function codexFilesystemConfig(
     `${JSON.stringify(":minimal")}="read"`,
     `${JSON.stringify(":tmpdir")}="write"`,
     `${JSON.stringify(":slash_tmp")}="deny"`,
-    `${JSON.stringify(":workspace_roots")}={`
-      + [
+    `${JSON.stringify(":workspace_roots")}={` +
+      [
         `${JSON.stringify(".")}="${workspaceAccess}"`,
         `${JSON.stringify(".git")}=${JSON.stringify(vcsMetadataAccess)}`,
         `${JSON.stringify(".jj")}=${JSON.stringify(vcsMetadataAccess)}`,
@@ -515,8 +479,8 @@ function codexFilesystemConfig(
         `${JSON.stringify("**/.env.*")}="deny"`,
         `${JSON.stringify(".smithers/pg")}="deny"`,
         `${JSON.stringify(".smithers/migrated.json")}="deny"`,
-      ].join(",")
-      + "}",
+      ].join(",") +
+      "}",
     ...toolchainReadPaths.map((path) => `${JSON.stringify(path)}="read"`),
   ];
   return `{${entries.join(",")}}`;
@@ -588,11 +552,7 @@ export function buildLocalGateCodexPolicy(
   };
 }
 
-function claudeSettings(
-  role: PublicIssueAgentRole,
-  allowedTools: string[],
-  options: PublicIssueAgentPolicyOptions,
-) {
+function claudeSettings(role: PublicIssueAgentRole, allowedTools: string[], options: PublicIssueAgentPolicyOptions) {
   const deny = [
     ...CLAUDE_REMOTE_TOOL_DENIES,
     ...CLAUDE_DANGEROUS_BASH_DENIES,
@@ -664,9 +624,7 @@ export function buildPublicIssueClaudePolicy(
   source: EnvironmentSource = process.env,
   options: PublicIssueAgentPolicyOptions = {},
 ): PublicIssueClaudePolicy {
-  const tools = [
-    ...(role === "write" ? CLAUDE_WRITE_TOOLS : CLAUDE_READ_TOOLS),
-  ];
+  const tools = [...(role === "write" ? CLAUDE_WRITE_TOOLS : CLAUDE_READ_TOOLS)];
   const disallowedTools = [
     ...CLAUDE_REMOTE_TOOL_DENIES,
     ...CLAUDE_DANGEROUS_BASH_DENIES,
@@ -680,9 +638,7 @@ export function buildPublicIssueClaudePolicy(
     env: buildPublicIssueSafeEnv(source, options),
     yolo: false,
     permissionMode: "dontAsk",
-    allowedTools: [
-      ...(role === "write" ? CLAUDE_WRITE_ALLOW_RULES : CLAUDE_READ_ALLOW_RULES),
-    ],
+    allowedTools: [...(role === "write" ? CLAUDE_WRITE_ALLOW_RULES : CLAUDE_READ_ALLOW_RULES)],
     disallowedTools,
     tools,
     noChrome: true,
@@ -690,11 +646,9 @@ export function buildPublicIssueClaudePolicy(
     disableSlashCommands: true,
     strictMcpConfig: true,
     mcpConfig: [JSON.stringify({ mcpServers: {} })],
-    settings: JSON.stringify(claudeSettings(
-      role,
-      role === "write" ? [...CLAUDE_WRITE_ALLOW_RULES] : [...CLAUDE_READ_ALLOW_RULES],
-      options,
-    )),
+    settings: JSON.stringify(
+      claudeSettings(role, role === "write" ? [...CLAUDE_WRITE_ALLOW_RULES] : [...CLAUDE_READ_ALLOW_RULES], options),
+    ),
     settingSources: "",
     extraArgs: ["--safe-mode"],
   };

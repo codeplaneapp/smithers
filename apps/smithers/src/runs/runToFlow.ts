@@ -1,9 +1,5 @@
 import type { Edge } from "@xyflow/react";
-import {
-  workflowToFlow,
-  type SmithersFlowNode,
-  type WorkflowSpec,
-} from "../askme/workflowFlow";
+import { workflowToFlow, type SmithersFlowNode, type WorkflowSpec } from "../askme/workflowFlow";
 import type { Run } from "./Run";
 
 /**

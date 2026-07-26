@@ -30,9 +30,7 @@ export interface GatewayCandidate {
   token?: string | undefined;
 }
 
-export type GatewayStartupResult =
-  | (GatewayCandidate & { kind: "ready" })
-  | { kind: "error"; message: string };
+export type GatewayStartupResult = (GatewayCandidate & { kind: "ready" }) | { kind: "error"; message: string };
 
 export interface GatewayStartupDeps {
   runId: string;
@@ -56,8 +54,7 @@ export interface GatewayStartupDeps {
   log: (message: string) => void;
 }
 
-const AUTH_ERROR =
-  "gateway rejected the token (401/403). Check --token / SMITHERS_TOKEN / SMITHERS_API_KEY.";
+const AUTH_ERROR = "gateway rejected the token (401/403). Check --token / SMITHERS_TOKEN / SMITHERS_API_KEY.";
 
 /**
  * Try the workspace singleton gateway recorded in the runtime state file.
@@ -166,9 +163,7 @@ export async function resolveGatewayForRun(deps: GatewayStartupDeps): Promise<Ga
   if (!deps.autoStartAllowed) {
     return {
       kind: "error",
-      message:
-        `Gateway at ${configured.base} is unreachable.\n` +
-        `  Start it (or fix the address), then retry.`,
+      message: `Gateway at ${configured.base} is unreachable.\n` + `  Start it (or fix the address), then retry.`,
     };
   }
   const workspace = await tryWorkspaceGateway(deps);

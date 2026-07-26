@@ -29,37 +29,39 @@ let nextWorkflowNamespace = 0;
  * @returns {string}
  */
 function getWorkflowNamespace(workflow) {
-    const existing = workflowNamespaces.get(workflow);
-    if (existing) {
-        return existing;
-    }
-    const created = `workflow-${++nextWorkflowNamespace}`;
-    workflowNamespaces.set(workflow, created);
-    return created;
+  const existing = workflowNamespaces.get(workflow);
+  if (existing) {
+    return existing;
+  }
+  const created = `workflow-${++nextWorkflowNamespace}`;
+  workflowNamespaces.set(workflow, created);
+  return created;
 }
 /**
  * @param {SmithersWorkflow<unknown>} workflow
  * @param {string} runId
  */
 function makeBridgeWorkflow(workflow, runId) {
-    return Workflow.make({
-        name: `SmithersWorkflowBridge:${getWorkflowNamespace(workflow)}:${runId}`,
-        payload: {
-            executionId: Schema.String,
-        },
-        success: Schema.Unknown,
-        idempotencyKey: ({ executionId }) => executionId,
-    });
+  return Workflow.make({
+    name: `SmithersWorkflowBridge:${getWorkflowNamespace(workflow)}:${runId}`,
+    payload: {
+      executionId: Schema.String,
+    },
+    success: Schema.Unknown,
+    idempotencyKey: ({ executionId }) => executionId,
+  });
 }
 /**
  * @param {string} status
  * @returns {status is "waiting-approval" | "waiting-event" | "waiting-timer" | "waiting-quota"}
  */
 function isSuspendingStatus(status) {
-    return (status === "waiting-approval" ||
-        status === "waiting-event" ||
-        status === "waiting-timer" ||
-        status === "waiting-quota");
+  return (
+    status === "waiting-approval" ||
+    status === "waiting-event" ||
+    status === "waiting-timer" ||
+    status === "waiting-quota"
+  );
 }
 /**
  * @param {ReturnType<typeof makeBridgeWorkflow>} workflowBridge
@@ -68,7 +70,12 @@ function isSuspendingStatus(status) {
  * @param {Effect.Effect<RunResult, unknown, any>} execute
  */
 async function registerBridgeWorkflow(workflowBridge, scope, engineContext, execute) {
-    await Effect.runPromise(Layer.buildWithScope(workflowBridge.toLayer(() => execute), scope).pipe(Effect.provide(engineContext)));
+  await Effect.runPromise(
+    Layer.buildWithScope(
+      workflowBridge.toLayer(() => execute),
+      scope,
+    ).pipe(Effect.provide(engineContext)),
+  );
 }
 /**
  * @param {ReturnType<typeof makeBridgeWorkflow>} workflowBridge
@@ -78,13 +85,19 @@ async function registerBridgeWorkflow(workflowBridge, scope, engineContext, exec
  * @param {WorkflowMakeBridgeRuntime["parentInstance"]} parentInstance
  */
 async function executeRegisteredChildWorkflow(workflowBridge, runId, scope, engineContext, parentInstance) {
-    return Effect.runPromise(Effect.gen(function* () {
-        const engine = yield* WorkflowEngine.WorkflowEngine;
-        return yield* engine.execute(workflowBridge, {
-            executionId: runId,
-            payload: { executionId: runId },
-        });
-    }).pipe(Effect.provideService(WorkflowEngine.WorkflowInstance, parentInstance), Effect.provideService(Scope.Scope, scope), Effect.provide(engineContext)));
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const engine = yield* WorkflowEngine.WorkflowEngine;
+      return yield* engine.execute(workflowBridge, {
+        executionId: runId,
+        payload: { executionId: runId },
+      });
+    }).pipe(
+      Effect.provideService(WorkflowEngine.WorkflowInstance, parentInstance),
+      Effect.provideService(Scope.Scope, scope),
+      Effect.provide(engineContext),
+    ),
+  );
 }
 /**
  * @template Schema
@@ -94,49 +107,55 @@ async function executeRegisteredChildWorkflow(workflowBridge, runId, scope, engi
  * @param {{ current: string }} lastRunIdRef
  */
 function createWorkflowExecutionEffect(workflow, initialOpts, services, lastRunIdRef) {
-    return Effect.gen(function* () {
-        const instance = yield* WorkflowEngine.WorkflowInstance;
-        const runtime = createWorkflowMakeBridgeRuntime({
-            ...services,
-            parentInstance: instance,
-        });
-        let nextOpts = initialOpts;
-        while (true) {
-            lastRunIdRef.current = nextOpts.runId;
-            const result = yield* Effect.tryPromise({
-                try: () => withWorkflowMakeBridgeRuntime(runtime, () => services.executeBody(workflow, nextOpts)),
-                catch: (error) => error,
-            });
-            lastRunIdRef.current = result.runId;
-            if (isSuspendingStatus(result.status)) {
-                return yield* Workflow.suspend(instance);
-            }
-            if (result.status !== "continued" || !result.nextRunId) {
-                return result;
-            }
-            nextOpts = {
-                ...nextOpts,
-                runId: result.nextRunId,
-                resume: true,
-            };
-        }
+  return Effect.gen(function* () {
+    const instance = yield* WorkflowEngine.WorkflowInstance;
+    const runtime = createWorkflowMakeBridgeRuntime({
+      ...services,
+      parentInstance: instance,
     });
+    let nextOpts = initialOpts;
+    while (true) {
+      lastRunIdRef.current = nextOpts.runId;
+      const result = yield* Effect.tryPromise({
+        try: () => withWorkflowMakeBridgeRuntime(runtime, () => services.executeBody(workflow, nextOpts)),
+        catch: (error) => error,
+      });
+      lastRunIdRef.current = result.runId;
+      if (isSuspendingStatus(result.status)) {
+        return yield* Workflow.suspend(instance);
+      }
+      if (result.status !== "continued" || !result.nextRunId) {
+        return result;
+      }
+      nextOpts = {
+        ...nextOpts,
+        runId: result.nextRunId,
+        resume: true,
+      };
+    }
+  });
 }
 /**
  * @param {Omit<WorkflowMakeBridgeRuntime, "executeChildWorkflow">} services
  * @returns {WorkflowMakeBridgeRuntime}
  */
 function createWorkflowMakeBridgeRuntime(services) {
-    return {
-        ...services,
-        executeChildWorkflow: async (workflow, opts) => {
-            const workflowBridge = makeBridgeWorkflow(workflow, opts.runId);
-            const lastRunIdRef = { current: opts.runId };
-            const execute = createWorkflowExecutionEffect(workflow, opts, services, lastRunIdRef);
-            await registerBridgeWorkflow(workflowBridge, services.scope, services.engineContext, execute);
-            return executeRegisteredChildWorkflow(workflowBridge, opts.runId, services.scope, services.engineContext, services.parentInstance);
-        },
-    };
+  return {
+    ...services,
+    executeChildWorkflow: async (workflow, opts) => {
+      const workflowBridge = makeBridgeWorkflow(workflow, opts.runId);
+      const lastRunIdRef = { current: opts.runId };
+      const execute = createWorkflowExecutionEffect(workflow, opts, services, lastRunIdRef);
+      await registerBridgeWorkflow(workflowBridge, services.scope, services.engineContext, execute);
+      return executeRegisteredChildWorkflow(
+        workflowBridge,
+        opts.runId,
+        services.scope,
+        services.engineContext,
+        services.parentInstance,
+      );
+    },
+  };
 }
 /**
  * @template T
@@ -145,42 +164,42 @@ function createWorkflowMakeBridgeRuntime(services) {
  * @returns {T}
  */
 export function withWorkflowMakeBridgeRuntime(runtime, execute) {
-    return runtimeStorage.run(runtime, execute);
+  return runtimeStorage.run(runtime, execute);
 }
 /**
  * @returns {WorkflowMakeBridgeRuntime | undefined}
  */
 export function getWorkflowMakeBridgeRuntime() {
-    return runtimeStorage.getStore();
+  return runtimeStorage.getStore();
 }
 /**
  * @returns {SchedulerWakeQueue}
  */
 export function createSchedulerWakeQueue() {
-    let pending = 0;
-    let resolver = null;
-    return {
-        notify() {
-            if (resolver) {
-                const current = resolver;
-                resolver = null;
-                current();
-                return;
-            }
-            pending += 1;
-        },
-        wait() {
-            if (pending > 0) {
-                pending -= 1;
-                return Promise.resolve();
-            }
-            return new Promise((resolve) => {
-                resolver = () => {
-                    resolve();
-                };
-            });
-        },
-    };
+  let pending = 0;
+  let resolver = null;
+  return {
+    notify() {
+      if (resolver) {
+        const current = resolver;
+        resolver = null;
+        current();
+        return;
+      }
+      pending += 1;
+    },
+    wait() {
+      if (pending > 0) {
+        pending -= 1;
+        return Promise.resolve();
+      }
+      return new Promise((resolve) => {
+        resolver = () => {
+          resolve();
+        };
+      });
+    },
+  };
 }
 /**
  * @template Schema
@@ -190,44 +209,54 @@ export function createSchedulerWakeQueue() {
  * @returns {Promise<RunResult>}
  */
 export async function runWorkflowWithMakeBridge(workflow, opts, executeBody) {
-    const adapter = new SmithersDb(workflow.db);
-    const scope = await Effect.runPromise(Scope.make());
-    try {
-        const engineContext = await Effect.runPromise(Layer.buildWithScope(WorkflowEngine.layerMemory, scope));
-        const workflowBridge = makeBridgeWorkflow(workflow, opts.runId);
-        const instance = WorkflowEngine.WorkflowInstance.initial(workflowBridge, opts.runId);
-        const lastRunIdRef = { current: opts.runId };
-        const execute = createWorkflowExecutionEffect(workflow, opts, {
-            engineContext,
-            scope,
-            executeBody,
-        }, lastRunIdRef);
-        await registerBridgeWorkflow(workflowBridge, scope, engineContext, execute);
-        const result = await Effect.runPromise(execute.pipe(Workflow.intoResult, Effect.provideService(WorkflowEngine.WorkflowInstance, instance), Effect.provide(engineContext)));
-        if (result._tag === "Complete") {
-            if (Exit.isSuccess(result.exit)) {
-                return result.exit.value;
-            }
-            throw Cause.squash(result.exit.cause);
-        }
-        const run = await Effect.runPromise(adapter.getRun(lastRunIdRef.current));
-        const status = run && isSuspendingStatus(run.status) ? run.status : "cancelled";
-        return {
-            runId: lastRunIdRef.current,
-            status,
-        };
+  const adapter = new SmithersDb(workflow.db);
+  const scope = await Effect.runPromise(Scope.make());
+  try {
+    const engineContext = await Effect.runPromise(Layer.buildWithScope(WorkflowEngine.layerMemory, scope));
+    const workflowBridge = makeBridgeWorkflow(workflow, opts.runId);
+    const instance = WorkflowEngine.WorkflowInstance.initial(workflowBridge, opts.runId);
+    const lastRunIdRef = { current: opts.runId };
+    const execute = createWorkflowExecutionEffect(
+      workflow,
+      opts,
+      {
+        engineContext,
+        scope,
+        executeBody,
+      },
+      lastRunIdRef,
+    );
+    await registerBridgeWorkflow(workflowBridge, scope, engineContext, execute);
+    const result = await Effect.runPromise(
+      execute.pipe(
+        Workflow.intoResult,
+        Effect.provideService(WorkflowEngine.WorkflowInstance, instance),
+        Effect.provide(engineContext),
+      ),
+    );
+    if (result._tag === "Complete") {
+      if (Exit.isSuccess(result.exit)) {
+        return result.exit.value;
+      }
+      throw Cause.squash(result.exit.cause);
     }
-    finally {
-        await Effect.runPromise(Scope.close(scope, Exit.void));
-    }
+    const run = await Effect.runPromise(adapter.getRun(lastRunIdRef.current));
+    const status = run && isSuspendingStatus(run.status) ? run.status : "cancelled";
+    return {
+      runId: lastRunIdRef.current,
+      status,
+    };
+  } finally {
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  }
 }
 
 export const __workflowMakeBridgeInternals = {
-    createWorkflowExecutionEffect,
-    createWorkflowMakeBridgeRuntime,
-    executeRegisteredChildWorkflow,
-    getWorkflowNamespace,
-    isSuspendingStatus,
-    makeBridgeWorkflow,
-    registerBridgeWorkflow,
+  createWorkflowExecutionEffect,
+  createWorkflowMakeBridgeRuntime,
+  executeRegisteredChildWorkflow,
+  getWorkflowNamespace,
+  isSuspendingStatus,
+  makeBridgeWorkflow,
+  registerBridgeWorkflow,
 };

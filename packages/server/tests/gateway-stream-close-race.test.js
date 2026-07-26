@@ -14,7 +14,9 @@ function fakeConnection({ scopes = ["*"], transport = "ws" } = {}) {
   const ws = {
     OPEN: 1,
     readyState: 1,
-    send(data) { sent.push(JSON.parse(data)); },
+    send(data) {
+      sent.push(JSON.parse(data));
+    },
   };
   return {
     connection: {
@@ -41,7 +43,9 @@ describe("gateway subscribe-after-await close race (#553)", () => {
   test("streamRunEvents does not register a subscriber if the connection closed mid-resolveRun", async () => {
     const gateway = new Gateway();
     let releaseResolve;
-    const resolveBarrier = new Promise((resolve) => { releaseResolve = resolve; });
+    const resolveBarrier = new Promise((resolve) => {
+      releaseResolve = resolve;
+    });
     gateway.resolveRun = async () => {
       await resolveBarrier;
       return { workflowKey: "wf", workflow: {}, adapter: {} };
@@ -62,7 +66,9 @@ describe("gateway subscribe-after-await close race (#553)", () => {
   test("streamDevTools does not register a subscriber if the connection closed mid-resolveRun", async () => {
     const gateway = new Gateway();
     let releaseResolve;
-    const resolveBarrier = new Promise((resolve) => { releaseResolve = resolve; });
+    const resolveBarrier = new Promise((resolve) => {
+      releaseResolve = resolve;
+    });
     gateway.resolveRun = async () => {
       await resolveBarrier;
       return { workflowKey: "wf", workflow: {}, adapter: { getLastFrame: async () => null } };
@@ -83,14 +89,21 @@ describe("gateway subscribe-after-await close race (#553)", () => {
     let cleanedUp = false;
     let streamCtx;
     let releaseSubscribe;
-    const subscribeBarrier = new Promise((resolve) => { releaseSubscribe = resolve; });
+    const subscribeBarrier = new Promise((resolve) => {
+      releaseSubscribe = resolve;
+    });
     gateway.extend("logs", {
       streams: {
         tail: {
           subscribe: async (_params, ctx) => {
             streamCtx = ctx;
             await subscribeBarrier;
-            return { initial: { snapshot: [] }, cleanup: () => { cleanedUp = true; } };
+            return {
+              initial: { snapshot: [] },
+              cleanup: () => {
+                cleanedUp = true;
+              },
+            };
           },
         },
       },

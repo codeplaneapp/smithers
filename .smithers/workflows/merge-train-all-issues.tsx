@@ -190,19 +190,40 @@ const { Workflow, Task, Sequence, Parallel, Loop, Worktree, smithers, outputs } 
 // at their item's already-on-disk worktree via cwd (see makeMergeAgent below).
 // Codex is primary in every chain; Claude is retained only for failover.
 const opus = codexFirst(
-  { model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-sol",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [new ClaudeCodeAgent({ model: "claude-opus-4-8" })],
 );
 const solReviewer = codexFirst(
-  { model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-sol",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [new ClaudeCodeAgent({ model: "claude-opus-4-8" })],
 );
 const sonnet = codexFirst(
-  { model: "gpt-5.6-terra", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-terra",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [new ClaudeCodeAgent({ model: "claude-sonnet-5" })],
 );
 const codex = codexFirst(
-  { model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-luna",
+    config: { model_reasoning_effort: "medium" },
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [new ClaudeCodeAgent({ model: "claude-sonnet-5" })],
 );
 // One merge agent per item, bound to that item's worktree directory.
@@ -343,9 +364,14 @@ function fetchIssues(input: z.infer<typeof inputSchema>) {
     "number,title,body,labels,author,url",
   ];
   for (const l of input.labels ?? []) args.push("--label", l);
-  const raw = JSON.parse(
-    execFileSync("gh", args, { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }),
-  ) as Array<{ number: number; title: string; body: string | null; labels?: { name: string }[]; author?: { login: string }; url?: string }>;
+  const raw = JSON.parse(execFileSync("gh", args, { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 })) as Array<{
+    number: number;
+    title: string;
+    body: string | null;
+    labels?: { name: string }[];
+    author?: { login: string };
+    url?: string;
+  }>;
   let issues: Issue[] = raw.map((i) => ({
     number: i.number,
     title: i.title,
@@ -366,7 +392,9 @@ function fetchIssues(input: z.infer<typeof inputSchema>) {
 
 // ── Prompts ────────────────────────────────────────────────────────────────────
 function issueHeader(issue: Issue) {
-  return [`Title: ${issue.title}`, "", "--- ISSUE BODY ---", issue.body || "(no body)", "--- END ISSUE BODY ---"].join("\n");
+  return [`Title: ${issue.title}`, "", "--- ISSUE BODY ---", issue.body || "(no body)", "--- END ISSUE BODY ---"].join(
+    "\n",
+  );
 }
 
 function decomposePrompt(issue: Issue, cap: number) {
@@ -488,7 +516,9 @@ function mergePrompt(wi: WorkItem, pr: Pr | undefined, gateCommand: string) {
     "",
     "This is a SERIAL merge train: items land ONE AT A TIME, and earlier items in this run may have ALREADY merged into main since this branch was created. Your job is to rebase THIS branch onto the LATEST main, prove it still passes the FULL test gate stacked on top of everything merged so far, and only then merge. Do the steps IN ORDER and STOP at the first that says stop:",
     "",
-    "1. SANITY: `git status` and `git log origin/main..HEAD --oneline`. Confirm you are on branch " + wi.branch + " with the fix committed. If there are UNCOMMITTED changes, commit them now (`git add -A`; reuse the existing commit subject).",
+    "1. SANITY: `git status` and `git log origin/main..HEAD --oneline`. Confirm you are on branch " +
+      wi.branch +
+      " with the fix committed. If there are UNCOMMITTED changes, commit them now (`git add -A`; reuse the existing commit subject).",
     "2. FETCH: `git fetch origin main`.",
     "3. REBASE onto the latest main: `git rebase origin/main`.",
     "   - On CONFLICT: resolve each conflicted file by editing it to the correct COMBINED result, then `git add <file>` and `git rebase --continue`. You MUST remove EVERY conflict marker — search for and eliminate all lines matching `<<<<<<<`, `=======`, `>>>>>>>`, and `|||||||` (markers can be 7+ chars and diff3-style). Re-read each resolved file to be sure no marker leaked through.",
@@ -588,8 +618,9 @@ export default smithers((ctx) => {
               const done = itemDone(ctx, key);
               const feedback = itemFeedback(ctx, key);
               const fix = latestForItem<Fix>(ctx.outputs.fix, key);
-              const commitMessage =
-                ((fix?.commitMessage || `🐛 fix: ${wi.title}`).split("\n")[0] ?? `🐛 fix: ${wi.title}`).slice(0, 100);
+              const commitMessage = (
+                (fix?.commitMessage || `🐛 fix: ${wi.title}`).split("\n")[0] ?? `🐛 fix: ${wi.title}`
+              ).slice(0, 100);
               const linkage = wi.isSingleFix ? `Closes #${wi.issueNumber}` : `Relates to #${wi.issueNumber}`;
               return (
                 <Worktree key={key} path={wi.worktreePath} branch={wi.branch} baseBranch="main">

@@ -64,7 +64,12 @@ export function resolveModelProviderMode(env: EnvLike): ModelProviderMode {
 /** Pure: classifies a failed probe response from its HTTP status + body text. */
 export function classifyProbeError(status: number, bodyText: string): ProbeClassification {
   const lower = bodyText.toLowerCase();
-  if (lower.includes("credit balance") || lower.includes("insufficient_quota") || (lower.includes("billing") && !lower.includes("no billing"))) return "billing";
+  if (
+    lower.includes("credit balance") ||
+    lower.includes("insufficient_quota") ||
+    (lower.includes("billing") && !lower.includes("no billing"))
+  )
+    return "billing";
   if (status === 401 || status === 403) return "auth";
   if (status === 429) return lower.includes("quota") || lower.includes("credit") ? "billing" : "other";
   return "other";
@@ -72,7 +77,8 @@ export function classifyProbeError(status: number, bodyText: string): ProbeClass
 
 /** Pure: picks the cheapest suitable chat model from an OpenAI-shaped /v1/models id list. Returns null if nothing usable is listed. */
 export function pickCheapOpenAIModel(modelIds: string[]): string | null {
-  const chatCandidates = (prefix: RegExp) => modelIds.filter((id) => prefix.test(id) && !NON_CHAT_MODEL_PATTERN.test(id)).sort();
+  const chatCandidates = (prefix: RegExp) =>
+    modelIds.filter((id) => prefix.test(id) && !NON_CHAT_MODEL_PATTERN.test(id)).sort();
 
   const family = chatCandidates(/^gpt-5\.6/);
   const nano = family.find((id) => id.includes("nano"));
@@ -95,7 +101,12 @@ async function safeErrorBody(res: Response): Promise<string> {
   }
 }
 
-async function fetchWithTimeout(fetchImpl: FetchLike, input: string | URL | Request, deadlineAt: number, init: RequestInit = {}): Promise<Response> {
+async function fetchWithTimeout(
+  fetchImpl: FetchLike,
+  input: string | URL | Request,
+  deadlineAt: number,
+  init: RequestInit = {},
+): Promise<Response> {
   const remaining = Math.min(PROBE_TIMEOUT_MS, deadlineAt - Date.now());
   if (remaining <= 0) throw new Error("provider probe deadline exceeded");
   const controller = new AbortController();
@@ -111,7 +122,12 @@ function probeDetail(status: number, classification: ProbeClassification): strin
   return `HTTP ${status} (${classification})`;
 }
 
-async function callAnthropicPing(apiKey: string, model: string, fetchImpl: FetchLike, deadlineAt: number): Promise<Response> {
+async function callAnthropicPing(
+  apiKey: string,
+  model: string,
+  fetchImpl: FetchLike,
+  deadlineAt: number,
+): Promise<Response> {
   return fetchWithTimeout(fetchImpl, "https://api.anthropic.com/v1/messages", deadlineAt, {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
@@ -119,8 +135,19 @@ async function callAnthropicPing(apiKey: string, model: string, fetchImpl: Fetch
   });
 }
 
-async function probeAnthropic(apiKey: string | undefined, fetchImpl: FetchLike, deadlineAt: number): Promise<ProviderProbe> {
-  if (!apiKey) return { provider: "anthropic", attempted: false, ok: false, classification: "missing-key", detail: "ANTHROPIC_API_KEY not set" };
+async function probeAnthropic(
+  apiKey: string | undefined,
+  fetchImpl: FetchLike,
+  deadlineAt: number,
+): Promise<ProviderProbe> {
+  if (!apiKey)
+    return {
+      provider: "anthropic",
+      attempted: false,
+      ok: false,
+      classification: "missing-key",
+      detail: "ANTHROPIC_API_KEY not set",
+    };
   // Probe both the cheap (assess/lighter-side) and strong (compose-editorial)
   // models, not just the cheap one — a billing failure applies account-wide,
   // but an auth/model-access failure can be scoped to a single model id, and
@@ -132,18 +159,38 @@ async function probeAnthropic(apiKey: string | undefined, fetchImpl: FetchLike, 
       if (!res.ok) {
         const body = await safeErrorBody(res);
         const classification = classifyProbeError(res.status, body);
-        return { provider: "anthropic", attempted: true, ok: false, classification, detail: probeDetail(res.status, classification) };
+        return {
+          provider: "anthropic",
+          attempted: true,
+          ok: false,
+          classification,
+          detail: probeDetail(res.status, classification),
+        };
       }
     }
-    return { provider: "anthropic", attempted: true, ok: true, classification: "ok", detail: `verified models ${modelsToVerify.join(", ")}` };
+    return {
+      provider: "anthropic",
+      attempted: true,
+      ok: true,
+      classification: "ok",
+      detail: `verified models ${modelsToVerify.join(", ")}`,
+    };
   } catch (error) {
-    return { provider: "anthropic", attempted: true, ok: false, classification: "network", detail: "network or timeout" };
+    return {
+      provider: "anthropic",
+      attempted: true,
+      ok: false,
+      classification: "network",
+      detail: "network or timeout",
+    };
   }
 }
 
 async function listOpenAIModels(apiKey: string, fetchImpl: FetchLike, deadlineAt: number): Promise<string[]> {
   try {
-    const res = await fetchWithTimeout(fetchImpl, "https://api.openai.com/v1/models", deadlineAt, { headers: { authorization: `Bearer ${apiKey}` } });
+    const res = await fetchWithTimeout(fetchImpl, "https://api.openai.com/v1/models", deadlineAt, {
+      headers: { authorization: `Bearer ${apiKey}` },
+    });
     if (!res.ok) return [];
     const body = (await res.json().catch(() => null)) as { data?: Array<{ id: string }> } | null;
     return (body?.data ?? []).map((m) => m.id);
@@ -152,8 +199,22 @@ async function listOpenAIModels(apiKey: string, fetchImpl: FetchLike, deadlineAt
   }
 }
 
-async function probeOpenAI(apiKey: string | undefined, fetchImpl: FetchLike, deadlineAt: number): Promise<{ probe: ProviderProbe; cheapModel: string | null }> {
-  if (!apiKey) return { probe: { provider: "openai", attempted: false, ok: false, classification: "missing-key", detail: "OPENAI_API_KEY not set" }, cheapModel: null };
+async function probeOpenAI(
+  apiKey: string | undefined,
+  fetchImpl: FetchLike,
+  deadlineAt: number,
+): Promise<{ probe: ProviderProbe; cheapModel: string | null }> {
+  if (!apiKey)
+    return {
+      probe: {
+        provider: "openai",
+        attempted: false,
+        ok: false,
+        classification: "missing-key",
+        detail: "OPENAI_API_KEY not set",
+      },
+      cheapModel: null,
+    };
   const modelIds = await listOpenAIModels(apiKey, fetchImpl, deadlineAt);
   const cheapModel = pickCheapOpenAIModel(modelIds) ?? OPENAI_STRONG_MODEL;
   const modelsToVerify = [...new Set([cheapModel, OPENAI_STRONG_MODEL])];
@@ -169,17 +230,55 @@ async function probeOpenAI(apiKey: string | undefined, fetchImpl: FetchLike, dea
       if (!res.ok) {
         const body = await safeErrorBody(res);
         const classification = classifyProbeError(res.status, body);
-        return { probe: { provider: "openai", attempted: true, ok: false, classification, detail: probeDetail(res.status, classification) }, cheapModel };
+        return {
+          probe: {
+            provider: "openai",
+            attempted: true,
+            ok: false,
+            classification,
+            detail: probeDetail(res.status, classification),
+          },
+          cheapModel,
+        };
       }
     }
-    return { probe: { provider: "openai", attempted: true, ok: true, classification: "ok", detail: `verified models ${modelsToVerify.join(", ")}` }, cheapModel };
+    return {
+      probe: {
+        provider: "openai",
+        attempted: true,
+        ok: true,
+        classification: "ok",
+        detail: `verified models ${modelsToVerify.join(", ")}`,
+      },
+      cheapModel,
+    };
   } catch (error) {
-    return { probe: { provider: "openai", attempted: true, ok: false, classification: "network", detail: "network or timeout" }, cheapModel };
+    return {
+      probe: {
+        provider: "openai",
+        attempted: true,
+        ok: false,
+        classification: "network",
+        detail: "network or timeout",
+      },
+      cheapModel,
+    };
   }
 }
 
-async function probeGemini(apiKey: string | undefined, fetchImpl: FetchLike, deadlineAt: number): Promise<ProviderProbe> {
-  if (!apiKey) return { provider: "gemini", attempted: false, ok: false, classification: "missing-key", detail: "GEMINI_API_KEY not set" };
+async function probeGemini(
+  apiKey: string | undefined,
+  fetchImpl: FetchLike,
+  deadlineAt: number,
+): Promise<ProviderProbe> {
+  if (!apiKey)
+    return {
+      provider: "gemini",
+      attempted: false,
+      ok: false,
+      classification: "missing-key",
+      detail: "GEMINI_API_KEY not set",
+    };
   try {
     // Probe the OpenAI-compat /chat/completions endpoint the agents actually
     // serve through, not the native generateContent endpoint — probing a
@@ -190,10 +289,17 @@ async function probeGemini(apiKey: string | undefined, fetchImpl: FetchLike, dea
       headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model: GEMINI_MODEL, max_tokens: 16, messages: [{ role: "user", content: "ping" }] }),
     });
-    if (res.ok) return { provider: "gemini", attempted: true, ok: true, classification: "ok", detail: "probe call succeeded" };
+    if (res.ok)
+      return { provider: "gemini", attempted: true, ok: true, classification: "ok", detail: "probe call succeeded" };
     const body = await safeErrorBody(res);
     const classification = classifyProbeError(res.status, body);
-    return { provider: "gemini", attempted: true, ok: false, classification, detail: probeDetail(res.status, classification) };
+    return {
+      provider: "gemini",
+      attempted: true,
+      ok: false,
+      classification,
+      detail: probeDetail(res.status, classification),
+    };
   } catch (error) {
     return { provider: "gemini", attempted: true, ok: false, classification: "network", detail: "network or timeout" };
   }
@@ -207,23 +313,51 @@ async function probeGemini(apiKey: string | undefined, fetchImpl: FetchLike, dea
  * first success; if all three fail it throws so the run surfaces a clear
  * "no usable provider" error instead of silently no-op'ing downstream tasks.
  */
-export async function selectModelProvider(env: EnvLike, fetchImpl: FetchLike = fetch, now: () => string = () => new Date().toISOString()): Promise<ProviderSelection> {
+export async function selectModelProvider(
+  env: EnvLike,
+  fetchImpl: FetchLike = fetch,
+  now: () => string = () => new Date().toISOString(),
+): Promise<ProviderSelection> {
   const mode = resolveModelProviderMode(env);
   const selectedAt = now();
 
   if (mode === "anthropic") {
-    return { mode, provider: "anthropic", cheapModel: ANTHROPIC_CHEAP_MODEL, strongModel: ANTHROPIC_STRONG_MODEL, reason: "SIGNAL_MODEL_PROVIDER=anthropic forced.", probes: [], selectedAt };
+    return {
+      mode,
+      provider: "anthropic",
+      cheapModel: ANTHROPIC_CHEAP_MODEL,
+      strongModel: ANTHROPIC_STRONG_MODEL,
+      reason: "SIGNAL_MODEL_PROVIDER=anthropic forced.",
+      probes: [],
+      selectedAt,
+    };
   }
   if (mode === "gemini") {
     if (!env.GEMINI_API_KEY?.trim()) throw new Error("SIGNAL_MODEL_PROVIDER=gemini requires GEMINI_API_KEY");
-    return { mode, provider: "gemini", cheapModel: GEMINI_MODEL, strongModel: GEMINI_MODEL, reason: "SIGNAL_MODEL_PROVIDER=gemini forced.", probes: [], selectedAt };
+    return {
+      mode,
+      provider: "gemini",
+      cheapModel: GEMINI_MODEL,
+      strongModel: GEMINI_MODEL,
+      reason: "SIGNAL_MODEL_PROVIDER=gemini forced.",
+      probes: [],
+      selectedAt,
+    };
   }
   if (mode === "openai") {
     const apiKey = env.OPENAI_API_KEY?.trim();
     if (!apiKey) throw new Error("SIGNAL_MODEL_PROVIDER=openai requires OPENAI_API_KEY");
     const modelIds = await listOpenAIModels(apiKey, fetchImpl, Date.now() + PROBE_DEADLINE_MS);
     const cheapModel = pickCheapOpenAIModel(modelIds) ?? OPENAI_STRONG_MODEL;
-    return { mode, provider: "openai", cheapModel, strongModel: OPENAI_STRONG_MODEL, reason: "SIGNAL_MODEL_PROVIDER=openai forced.", probes: [], selectedAt };
+    return {
+      mode,
+      provider: "openai",
+      cheapModel,
+      strongModel: OPENAI_STRONG_MODEL,
+      reason: "SIGNAL_MODEL_PROVIDER=openai forced.",
+      probes: [],
+      selectedAt,
+    };
   }
 
   const probes: ProviderProbe[] = [];
@@ -232,10 +366,22 @@ export async function selectModelProvider(env: EnvLike, fetchImpl: FetchLike = f
   const anthropicProbe = await probeAnthropic(env.ANTHROPIC_API_KEY?.trim(), fetchImpl, deadlineAt);
   probes.push(anthropicProbe);
   if (anthropicProbe.ok) {
-    return { mode, provider: "anthropic", cheapModel: ANTHROPIC_CHEAP_MODEL, strongModel: ANTHROPIC_STRONG_MODEL, reason: "Anthropic probe succeeded (spec-preferred provider).", probes, selectedAt };
+    return {
+      mode,
+      provider: "anthropic",
+      cheapModel: ANTHROPIC_CHEAP_MODEL,
+      strongModel: ANTHROPIC_STRONG_MODEL,
+      reason: "Anthropic probe succeeded (spec-preferred provider).",
+      probes,
+      selectedAt,
+    };
   }
 
-  const { probe: openaiProbe, cheapModel: openaiCheapModel } = await probeOpenAI(env.OPENAI_API_KEY?.trim(), fetchImpl, deadlineAt);
+  const { probe: openaiProbe, cheapModel: openaiCheapModel } = await probeOpenAI(
+    env.OPENAI_API_KEY?.trim(),
+    fetchImpl,
+    deadlineAt,
+  );
   probes.push(openaiProbe);
   if (openaiProbe.ok) {
     return {
@@ -303,7 +449,23 @@ export function buildAgentPoolsForSelection(
   const geminiApiKey = env.GEMINI_API_KEY?.trim();
   if (!geminiApiKey) throw new Error("Gemini provider selected but GEMINI_API_KEY is not set");
   return {
-    cheap: [new OpenAIAgent({ model: selection.cheapModel, baseURL: GEMINI_OPENAI_COMPAT_BASE_URL, apiKey: geminiApiKey, api: "chat", maxOutputTokens: 2_000 })],
-    strong: [new OpenAIAgent({ model: selection.strongModel, baseURL: GEMINI_OPENAI_COMPAT_BASE_URL, apiKey: geminiApiKey, api: "chat", maxOutputTokens: 5_000 })],
+    cheap: [
+      new OpenAIAgent({
+        model: selection.cheapModel,
+        baseURL: GEMINI_OPENAI_COMPAT_BASE_URL,
+        apiKey: geminiApiKey,
+        api: "chat",
+        maxOutputTokens: 2_000,
+      }),
+    ],
+    strong: [
+      new OpenAIAgent({
+        model: selection.strongModel,
+        baseURL: GEMINI_OPENAI_COMPAT_BASE_URL,
+        apiKey: geminiApiKey,
+        api: "chat",
+        maxOutputTokens: 5_000,
+      }),
+    ],
   };
 }

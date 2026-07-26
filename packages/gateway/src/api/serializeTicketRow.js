@@ -7,12 +7,14 @@ import { normalizeApiRow } from "./normalizeApiRow.js";
  */
 export function serializeTicketRow(row) {
   const normalized = normalizeApiRow(row);
-  return /** @type {Row} */ (/** @type {unknown} */ ({
-    path: normalized.path,
-    kind: normalized.kind,
-    content: normalized.content,
-    contentHash: normalized.contentHash,
-    status: normalized.status ?? null,
-    updatedAtMs: normalized.updatedAtMs,
-  }));
+  return /** @type {Row} */ (
+    /** @type {unknown} */ ({
+      path: normalized.path,
+      kind: normalized.kind,
+      content: normalized.content,
+      contentHash: normalized.contentHash,
+      status: normalized.status ?? null,
+      updatedAtMs: normalized.updatedAtMs,
+    })
+  );
 }

@@ -2,5 +2,5 @@
  * @returns {number}
  */
 export function nowMs() {
-    return Date.now();
+  return Date.now();
 }

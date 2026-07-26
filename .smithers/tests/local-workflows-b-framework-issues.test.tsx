@@ -96,9 +96,7 @@ describe("issue workflow owner coverage", () => {
       const secondValidation = sim.executed.lastIndexOf(validateId);
       expect(sim.executed.findIndex((id) => id.includes(":review"))).toBeGreaterThan(secondValidation);
       for (const panelistId of panelistIds) expect(sim.executed).toContain(panelistId);
-      expect(sim.task(moderatorId).outputs).toEqual([
-        { approved: true, feedback: "current approval", issues: [] },
-      ]);
+      expect(sim.task(moderatorId).outputs).toEqual([{ approved: true, feedback: "current approval", issues: [] }]);
       expect(sim.status).toBe("finished");
       expect(sim.unusedMocks).toEqual([]);
     },
@@ -140,9 +138,7 @@ describe("issue workflow owner coverage", () => {
 
     const implementId = "issue-306-cov:implement";
     const validateId = "issue-306-cov:validate";
-    expect(sim.executed).toEqual(
-      Array.from({ length: trace }, () => [implementId, validateId]).flat(),
-    );
+    expect(sim.executed).toEqual(Array.from({ length: trace }, () => [implementId, validateId]).flat());
     expect(String(sim.task(implementId).prompts[0])).toContain("INPUT_SENTINEL_306");
     if (trace === 2) {
       expect(String(sim.task(implementId).prompts[1])).toContain("VALIDATION FAILED:\nFAILURE_0");

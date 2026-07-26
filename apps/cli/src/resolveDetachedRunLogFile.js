@@ -9,9 +9,10 @@ import { resolveLaunchRootDir } from "./resolve-root.js";
  * @returns {string}
  */
 export function resolveDetachedRunLogFile(runId, options = {}) {
-    const cwd = options.cwd ?? process.cwd();
-    const logDir = options.logDir !== undefined && options.logDir !== null
-        ? resolve(cwd, options.logDir)
-        : resolve(resolveLaunchRootDir(undefined, cwd), ".smithers", "logs");
-    return resolve(logDir, `${runId}.log`);
+  const cwd = options.cwd ?? process.cwd();
+  const logDir =
+    options.logDir !== undefined && options.logDir !== null
+      ? resolve(cwd, options.logDir)
+      : resolve(resolveLaunchRootDir(undefined, cwd), ".smithers", "logs");
+  return resolve(logDir, `${runId}.log`);
 }

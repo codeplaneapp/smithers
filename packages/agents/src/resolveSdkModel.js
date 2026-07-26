@@ -5,5 +5,5 @@
  * @returns {MODEL}
  */
 export function resolveSdkModel(value, create) {
-    return typeof value === "string" ? create(value) : value;
+  return typeof value === "string" ? create(value) : value;
 }

@@ -18,12 +18,8 @@ import { REWIND_RATE_LIMIT_WINDOW_MS } from "./REWIND_RATE_LIMIT_WINDOW_MS.js";
  */
 export async function evaluateRewindRateLimit(input) {
   const nowMs = input.nowMs ?? (() => Date.now());
-  const max = Number.isInteger(input.maxPerWindow)
-    ? Math.max(1, Number(input.maxPerWindow))
-    : REWIND_RATE_LIMIT_MAX;
-  const windowMs = Number.isInteger(input.windowMs)
-    ? Math.max(1, Number(input.windowMs))
-    : REWIND_RATE_LIMIT_WINDOW_MS;
+  const max = Number.isInteger(input.maxPerWindow) ? Math.max(1, Number(input.maxPerWindow)) : REWIND_RATE_LIMIT_MAX;
+  const windowMs = Number.isInteger(input.windowMs) ? Math.max(1, Number(input.windowMs)) : REWIND_RATE_LIMIT_WINDOW_MS;
   const windowStartedAtMs = nowMs() - windowMs;
   const used = await countRecentRewindAuditRows(input.adapter, {
     runId: input.runId,

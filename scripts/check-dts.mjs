@@ -21,15 +21,7 @@
 // Determinism note: the tsup dts build must pin `format: ["esm"]`, otherwise it
 // emits `.d.cts` and this gate reports spurious drift.
 import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
@@ -106,8 +98,7 @@ function restoreDeclarations(srcDir, committed) {
 export function checkDeclarations({
   repoRoot = defaultRepoRoot,
   packages = DEFAULT_DECLARATION_PACKAGES,
-  runBuild = (pkg, root) =>
-    execFileSync("pnpm", ["-C", pkg, "run", "build"], { cwd: root, stdio: "pipe" }),
+  runBuild = (pkg, root) => execFileSync("pnpm", ["-C", pkg, "run", "build"], { cwd: root, stdio: "pipe" }),
   write = (message) => process.stdout.write(message),
   log = (message) => console.log(message),
   error = (message) => console.error(message),
@@ -131,9 +122,7 @@ export function checkDeclarations({
         buildError = caught;
       }
       if (buildError) {
-        error(
-          `\ncheck-dts: build failed for ${pkg}\n${buildError.stdout ?? ""}${buildError.stderr ?? ""}`,
-        );
+        error(`\ncheck-dts: build failed for ${pkg}\n${buildError.stdout ?? ""}${buildError.stderr ?? ""}`);
         failed = true;
         continue; // finally restores the committed tree
       }

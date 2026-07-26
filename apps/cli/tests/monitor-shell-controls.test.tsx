@@ -29,12 +29,10 @@ type ReactElement = import("react").ReactElement;
 type Root = import("react-dom/client").Root;
 const { SMITHERS_UI_STYLE_ATTR, smithersUiCss } = await import("smithers-orchestrator/ui");
 const { workflowUiThemeCss } = await import("smithers-orchestrator/gateway-ui");
-const { Chip, MonitorToolbar, RunLifecycleActions, RunLifecycleControls, RunRailRow, RunsPagination } = await import(
-  "../src/monitor-ui/monitorShell.tsx"
-);
-const { createMonitorKeydownHandler, monitorCss, RunProgressCell, RunsRail, RunsTable, StatCard, StatusTag } = await import(
-  "../src/monitor-ui/monitor.tsx"
-);
+const { Chip, MonitorToolbar, RunLifecycleActions, RunLifecycleControls, RunRailRow, RunsPagination } =
+  await import("../src/monitor-ui/monitorShell.tsx");
+const { createMonitorKeydownHandler, monitorCss, RunProgressCell, RunsRail, RunsTable, StatCard, StatusTag } =
+  await import("../src/monitor-ui/monitor.tsx");
 const monitorSource = readFileSync(new URL("../src/monitor-ui/monitor.tsx", import.meta.url), "utf8");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -179,10 +177,20 @@ describe("monitor global keyboard selection", () => {
         selectRun: () => {},
       },
     } as any;
-    const onKeyDown = createMonitorKeydownHandler(keyState, () => {}, () => {});
+    const onKeyDown = createMonitorKeydownHandler(
+      keyState,
+      () => {},
+      () => {},
+    );
     window.addEventListener("keydown", onKeyDown);
     try {
-      keyState.current = { ...keyState.current, selectedRunId: "run-42", selectedNodeKey: "node-7", selectNode, selectRun };
+      keyState.current = {
+        ...keyState.current,
+        selectedRunId: "run-42",
+        selectedNodeKey: "node-7",
+        selectNode,
+        selectRun,
+      };
       await keydown(document.body, "Escape");
       expect(location.search).toBe("?runId=run-42");
       expect(selection).toEqual({ runId: "run-42", nodeId: "" });
@@ -236,13 +244,21 @@ describe("migrated monitor surfaces", () => {
     expect(byTestId("monitor-run-row").getAttribute("data-active")).toBe("true");
     expect(byTestId("monitor-run-row").textContent).toContain("rendered-coverage");
 
-    await rerender(<RunsRail runs={[]} loading connStatus="connecting" selectedRunId={undefined} onSelect={() => {}} />);
+    await rerender(
+      <RunsRail runs={[]} loading connStatus="connecting" selectedRunId={undefined} onSelect={() => {}} />,
+    );
     expect(byTestId("monitor-runs").textContent).toContain("Loading runs");
-    await rerender(<RunsRail runs={[]} loading={false} connStatus="online" selectedRunId={undefined} onSelect={() => {}} />);
+    await rerender(
+      <RunsRail runs={[]} loading={false} connStatus="online" selectedRunId={undefined} onSelect={() => {}} />,
+    );
     expect(byTestId("monitor-empty").textContent).toContain("No runs match");
-    await rerender(<RunsRail runs={[]} loading={false} connStatus="offline" selectedRunId={undefined} onSelect={() => {}} />);
+    await rerender(
+      <RunsRail runs={[]} loading={false} connStatus="offline" selectedRunId={undefined} onSelect={() => {}} />,
+    );
     expect(byTestId("monitor-runs-offline").textContent?.toLowerCase()).toContain("gateway");
-    await rerender(<RunsRail runs={[]} loading={false} connStatus="unauthorized" selectedRunId={undefined} onSelect={() => {}} />);
+    await rerender(
+      <RunsRail runs={[]} loading={false} connStatus="unauthorized" selectedRunId={undefined} onSelect={() => {}} />,
+    );
     expect(byTestId("monitor-runs-unauthorized").textContent?.toLowerCase()).toContain("credentials");
   });
 
@@ -510,7 +526,14 @@ describe("RunsPagination", () => {
   test("disabled: Prev is inert on the first page, Next pages forward", async () => {
     const pages: number[] = [];
     await render(
-      <RunsPagination page={1} pageCount={3} firstRow={1} lastRow={50} total={120} onPageChange={(page) => pages.push(page)} />,
+      <RunsPagination
+        page={1}
+        pageCount={3}
+        firstRow={1}
+        lastRow={50}
+        total={120}
+        onPageChange={(page) => pages.push(page)}
+      />,
     );
     expect(byTestId("monitor-runs-pagination")).toBeDefined();
 
@@ -529,7 +552,14 @@ describe("RunsPagination", () => {
   test("disabled: Next is inert on the last page", async () => {
     const pages: number[] = [];
     await render(
-      <RunsPagination page={3} pageCount={3} firstRow={101} lastRow={120} total={120} onPageChange={(page) => pages.push(page)} />,
+      <RunsPagination
+        page={3}
+        pageCount={3}
+        firstRow={101}
+        lastRow={120}
+        total={120}
+        onPageChange={(page) => pages.push(page)}
+      />,
     );
     const next = byTestId("monitor-page-next") as HTMLButtonElement;
     expect(next.disabled).toBe(true);
@@ -604,13 +634,7 @@ describe("RunLifecycleActions", () => {
   test("idle: all applicable actions render enabled with their testids", async () => {
     const actions: string[] = [];
     await render(
-      <RunLifecycleActions
-        resumable
-        pausable
-        cancellable
-        busyAction={null}
-        onAction={(kind) => actions.push(kind)}
-      />,
+      <RunLifecycleActions resumable pausable cancellable busyAction={null} onAction={(kind) => actions.push(kind)} />,
     );
     const resume = byTestId("monitor-resume-run") as HTMLButtonElement;
     const pause = byTestId("monitor-pause-run") as HTMLButtonElement;
@@ -628,13 +652,7 @@ describe("RunLifecycleActions", () => {
   test("disabled: a busy action freezes every lifecycle button", async () => {
     const actions: string[] = [];
     await render(
-      <RunLifecycleActions
-        resumable
-        pausable
-        cancellable
-        busyAction="pause"
-        onAction={(kind) => actions.push(kind)}
-      />,
+      <RunLifecycleActions resumable pausable cancellable busyAction="pause" onAction={(kind) => actions.push(kind)} />,
     );
     const pause = byTestId("monitor-pause-run") as HTMLButtonElement;
     expect(pause.textContent).toBe("Pausing…");

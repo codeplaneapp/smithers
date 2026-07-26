@@ -17,26 +17,29 @@ function eventStatus(type: string): IssueBlitzNodeStatus | undefined {
   const normalized = type.replaceAll("_", ".").toLowerCase();
   if (normalized === "nodefinished" || normalized === "node.finished") return "done";
   if (
-    normalized === "nodefailed"
-    || normalized === "node.failed"
-    || normalized === "nodecancelled"
-    || normalized === "node.cancelled"
-  ) return "failed";
+    normalized === "nodefailed" ||
+    normalized === "node.failed" ||
+    normalized === "nodecancelled" ||
+    normalized === "node.cancelled"
+  )
+    return "failed";
   if (normalized === "nodeskipped" || normalized === "node.skipped") return "skipped";
   if (
-    normalized === "nodewaitingapproval"
-    || normalized === "node.waiting.approval"
-    || normalized === "approvalrequested"
-    || normalized === "approval.requested"
-  ) return "waiting";
+    normalized === "nodewaitingapproval" ||
+    normalized === "node.waiting.approval" ||
+    normalized === "approvalrequested" ||
+    normalized === "approval.requested"
+  )
+    return "waiting";
   if (
-    normalized === "nodestarted"
-    || normalized === "node.started"
-    || normalized === "noderetrying"
-    || normalized === "node.retrying"
-    || normalized === "taskheartbeat"
-    || normalized === "task.heartbeat"
-  ) return "running";
+    normalized === "nodestarted" ||
+    normalized === "node.started" ||
+    normalized === "noderetrying" ||
+    normalized === "node.retrying" ||
+    normalized === "taskheartbeat" ||
+    normalized === "task.heartbeat"
+  )
+    return "running";
   return undefined;
 }
 
@@ -57,24 +60,22 @@ export function buildIssueBlitzNodeState(events: readonly unknown[]): NodeState 
     const nodePayload = isRecord(envelope.payload) ? envelope.payload : {};
     const legacyEvent = isRecord(frame.event) ? frame.event : {};
 
-    const nodeId = asString(nodePayload.nodeId)
-      ?? asString(envelope.nodeId)
-      ?? asString(legacyEvent.nodeId)
-      ?? asString(frame.nodeId);
-    const type = asString(envelope.event)
-      ?? asString(nodePayload.type)
-      ?? asString(legacyEvent.type)
-      ?? asString(frame.type)
-      ?? asString(frame.event);
+    const nodeId =
+      asString(nodePayload.nodeId) ??
+      asString(envelope.nodeId) ??
+      asString(legacyEvent.nodeId) ??
+      asString(frame.nodeId);
+    const type =
+      asString(envelope.event) ??
+      asString(nodePayload.type) ??
+      asString(legacyEvent.type) ??
+      asString(frame.type) ??
+      asString(frame.event);
     if (!nodeId || !type) continue;
 
-    const rawIteration = nodePayload.iteration
-      ?? envelope.iteration
-      ?? legacyEvent.iteration
-      ?? frame.iteration;
-    const nextIteration = typeof rawIteration === "number" && Number.isFinite(rawIteration)
-      ? rawIteration
-      : iteration.get(nodeId);
+    const rawIteration = nodePayload.iteration ?? envelope.iteration ?? legacyEvent.iteration ?? frame.iteration;
+    const nextIteration =
+      typeof rawIteration === "number" && Number.isFinite(rawIteration) ? rawIteration : iteration.get(nodeId);
     const priorIteration = iteration.get(nodeId);
     if (nextIteration !== undefined) {
       iteration.set(nodeId, Math.max(priorIteration ?? 0, nextIteration));
@@ -83,12 +84,11 @@ export function buildIssueBlitzNodeState(events: readonly unknown[]): NodeState 
     const nextStatus = eventStatus(type);
     if (!nextStatus) continue;
     const priorStatus = status.get(nodeId);
-    const startsNewIteration = nextStatus === "running"
-      && nextIteration !== undefined
-      && (priorIteration === undefined || nextIteration > priorIteration);
-    const priorTerminal = priorStatus === "done"
-      || priorStatus === "failed"
-      || priorStatus === "skipped";
+    const startsNewIteration =
+      nextStatus === "running" &&
+      nextIteration !== undefined &&
+      (priorIteration === undefined || nextIteration > priorIteration);
+    const priorTerminal = priorStatus === "done" || priorStatus === "failed" || priorStatus === "skipped";
     if (nextStatus !== "running" || !priorTerminal || startsNewIteration) {
       status.set(nodeId, nextStatus);
     }

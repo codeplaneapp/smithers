@@ -51,10 +51,7 @@ const inputSchema = z.object({
     .nullable()
     .default(null)
     .describe("Desired kebab-case workflow id. Null lets the clarify/design steps choose one."),
-  review: z
-    .boolean()
-    .default(true)
-    .describe("Pause for human approval of the design before any files are written."),
+  review: z.boolean().default(true).describe("Pause for human approval of the design before any files are written."),
 });
 
 // 1. The freeform ask, turned into a structured, buildable spec.
@@ -64,9 +61,7 @@ const clarifiedSpecSchema = z.looseObject({
   trigger: z
     .string()
     .describe("How it starts: manual | push | schedule | issue | landing-request | workflow-run | webhook."),
-  inputs: z
-    .array(z.object({ name: z.string(), type: z.string(), purpose: z.string() }))
-    .default([]),
+  inputs: z.array(z.object({ name: z.string(), type: z.string(), purpose: z.string() })).default([]),
   stages: z.array(z.string()).default([]).describe("Ordered high-level steps the workflow performs."),
   loops: z.array(z.string()).default([]).describe("Where it should iterate until a condition holds."),
   humanGates: z.array(z.string()).default([]).describe("Where a human approval / question belongs."),
@@ -130,7 +125,11 @@ const designSchema = z.looseObject({
       z.object({
         id: z.string(),
         purpose: z.string(),
-        agent: z.string().describe("agents.planning | agents.research | agents.implement | agents.midTier | agents.cheapFast | (none) for a function task."),
+        agent: z
+          .string()
+          .describe(
+            "agents.planning | agents.research | agents.implement | agents.midTier | agents.cheapFast | (none) for a function task.",
+          ),
         outputs: z.array(z.string()).default([]),
       }),
     )
@@ -202,9 +201,7 @@ const skillVerificationSchema = z.object({
 const outputSchema = z.object({
   workflow: z.string().describe("Workflow id that was built (or attempted)."),
   workflowFile: z.string().describe("Path to the scaffolded workflow .tsx."),
-  status: z
-    .string()
-    .describe("Terminal status: built | verify-failed | denied | designed | incomplete."),
+  status: z.string().describe("Terminal status: built | verify-failed | denied | designed | incomplete."),
   summary: z.string().describe("One-line summary of what the run produced."),
   filesWritten: z.array(z.string()).default([]).describe("Paths the scaffolder wrote."),
   fileCount: z.number().default(0).describe("How many files were written."),
@@ -256,7 +253,9 @@ export default smithers((ctx) => {
   // corrected round, not the first failed one.
   const documentRows = (ctx.outputs.document ?? []).filter((r) => String(r.nodeId).startsWith("document"));
   const documentation = documentRows.at(-1) ?? ctx.outputMaybe("document", { nodeId: "document" });
-  const skillVerification = ctx.latest(outputs.skillVerification, "skill-verification") ?? ctx.outputMaybe("skillVerification", { nodeId: "skill-verification" });
+  const skillVerification =
+    ctx.latest(outputs.skillVerification, "skill-verification") ??
+    ctx.outputMaybe("skillVerification", { nodeId: "skill-verification" });
   const skillReady = skillVerification?.exists === true && skillVerification.containsWorkflowMetadata === true;
 
   const designed = design !== undefined;
@@ -291,11 +290,7 @@ export default smithers((ctx) => {
             ? "designed"
             : "incomplete";
   const terminalSummary =
-    documentation?.summary ??
-    scaffold?.summary ??
-    design?.summary ??
-    clarify?.goal ??
-    `Workflow "${workflowName}".`;
+    documentation?.summary ?? scaffold?.summary ?? design?.summary ?? clarify?.goal ?? `Workflow "${workflowName}".`;
 
   return (
     <Workflow name="create-workflow">
@@ -312,12 +307,7 @@ export default smithers((ctx) => {
         {/* 2 — Docs & skills: decide and ACTUALLY install/gather what the new
             workflow and its worker agents need before we design anything. */}
         {clarify ? (
-          <Task
-            id="provision"
-            output={outputs.provision}
-            agent={agents.implement}
-            heartbeatTimeoutMs={600_000}
-          >
+          <Task id="provision" output={outputs.provision} agent={agents.implement} heartbeatTimeoutMs={600_000}>
             <ProvisionPrompt spec={clarify} skillsDir={SKILLS_DIR} workflowsDir={WORKFLOWS_DIR} />
           </Task>
         ) : null}
@@ -359,12 +349,7 @@ export default smithers((ctx) => {
 
         {/* 5 — Scaffold the real files (workflow .tsx + prompts). */}
         {proceed ? (
-          <Task
-            id="scaffold"
-            output={outputs.scaffold}
-            agent={agents.implement}
-            heartbeatTimeoutMs={900_000}
-          >
+          <Task id="scaffold" output={outputs.scaffold} agent={agents.implement} heartbeatTimeoutMs={900_000}>
             <ScaffoldPrompt
               design={design}
               provisioning={provision}
@@ -382,12 +367,7 @@ export default smithers((ctx) => {
               <Branch
                 if={shouldFix}
                 then={
-                  <Task
-                    id="fix"
-                    output={outputs.scaffold}
-                    agent={agents.implement}
-                    heartbeatTimeoutMs={900_000}
-                  >
+                  <Task id="fix" output={outputs.scaffold} agent={agents.implement} heartbeatTimeoutMs={900_000}>
                     <FixPrompt
                       workflowName={workflowName}
                       workflowFile={workflowFile}
@@ -462,10 +442,11 @@ export default smithers((ctx) => {
 
               <Task id="skill-verification" output={outputs.skillVerification} dependsOn={["document"]}>
                 {async () => {
-                  const latest = ctx.latest(outputs.document, "document") ?? ctx.outputMaybe("document", { nodeId: "document" });
+                  const latest =
+                    ctx.latest(outputs.document, "document") ?? ctx.outputMaybe("document", { nodeId: "document" });
                   const skillPath = latest?.skillPath ?? "";
                   const expectedPath = `${SKILLS_DIR}/${workflowName}.md`;
-                  const exists = skillPath === expectedPath && await Bun.file(expectedPath).exists();
+                  const exists = skillPath === expectedPath && (await Bun.file(expectedPath).exists());
                   const contents = exists ? await Bun.file(expectedPath).text() : "";
                   return {
                     skillPath: exists ? expectedPath : skillPath,

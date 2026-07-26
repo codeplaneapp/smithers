@@ -1,3 +1,3 @@
 export type RunDiffCommandResult = {
-    exitCode: number;
+  exitCode: number;
 };

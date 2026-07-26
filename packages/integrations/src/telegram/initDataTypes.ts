@@ -53,11 +53,10 @@ export type VerifyTelegramWebAppInitDataOptions = {
   nowMs?: number;
 };
 
-export type VerifyTelegramWebAppInitDataSignatureOptions =
-  VerifyTelegramWebAppInitDataOptions & {
-    /**
-     * Ed25519 public key (hex) to verify against. Defaults to Telegram's
-     * production key. Pass the test key for the test datacenter.
-     */
-    publicKeyHex?: string;
-  };
+export type VerifyTelegramWebAppInitDataSignatureOptions = VerifyTelegramWebAppInitDataOptions & {
+  /**
+   * Ed25519 public key (hex) to verify against. Defaults to Telegram's
+   * production key. Pass the test key for the test datacenter.
+   */
+  publicKeyHex?: string;
+};

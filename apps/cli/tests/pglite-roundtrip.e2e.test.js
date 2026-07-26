@@ -6,30 +6,33 @@ import { createTempRepo, runSmithers } from "../../../packages/smithers/tests/e2
 setDefaultTimeout(120_000);
 
 function writePgliteWorkflow(repo) {
-  repo.write(".smithers/workflows/pglite-roundtrip.tsx", [
-    "/** @jsxImportSource smithers-orchestrator */",
-    'import { openSmithersBackend, Workflow, Task } from "smithers-orchestrator";',
-    'import { z } from "zod";',
-    "",
-    "const { smithers, outputs } = await openSmithersBackend({",
-    "  result: z.object({",
-    "    summary: z.string(),",
-    "    prompt: z.string().nullable(),",
-    "  }),",
-    "});",
-    "",
-    "export default smithers((ctx) => (",
-    '  <Workflow name="pglite-roundtrip">',
-    '    <Task id="write-result" output={outputs.result}>',
-    "      {{",
-    '        summary: "fixture workflow ran",',
-    "        prompt: ctx.input.prompt ?? null,",
-    "      }}",
-    "    </Task>",
-    "  </Workflow>",
-    "));",
-    "",
-  ].join("\n"));
+  repo.write(
+    ".smithers/workflows/pglite-roundtrip.tsx",
+    [
+      "/** @jsxImportSource smithers-orchestrator */",
+      'import { openSmithersBackend, Workflow, Task } from "smithers-orchestrator";',
+      'import { z } from "zod";',
+      "",
+      "const { smithers, outputs } = await openSmithersBackend({",
+      "  result: z.object({",
+      "    summary: z.string(),",
+      "    prompt: z.string().nullable(),",
+      "  }),",
+      "});",
+      "",
+      "export default smithers((ctx) => (",
+      '  <Workflow name="pglite-roundtrip">',
+      '    <Task id="write-result" output={outputs.result}>',
+      "      {{",
+      '        summary: "fixture workflow ran",',
+      "        prompt: ctx.input.prompt ?? null,",
+      "      }}",
+      "    </Task>",
+      "  </Workflow>",
+      "));",
+      "",
+    ].join("\n"),
+  );
 }
 
 test("pglite init/run/read round-trip uses the real PGlite store", () => {
@@ -52,7 +55,12 @@ test("pglite init/run/read round-trip uses the real PGlite store", () => {
   expect(ps.stderr).not.toContain("SMITHERS_MIGRATION_REQUIRED");
   expect(JSON.stringify(ps.json)).toContain("pglite-roundtrip");
 
-  const inspect = runSmithers(["inspect", "pglite-roundtrip"], { cwd: repo.dir, env, format: "json", timeoutMs: 120_000 });
+  const inspect = runSmithers(["inspect", "pglite-roundtrip"], {
+    cwd: repo.dir,
+    env,
+    format: "json",
+    timeoutMs: 120_000,
+  });
   expect(inspect.exitCode).toBe(0);
   expect(inspect.json.run.id).toBe("pglite-roundtrip");
 

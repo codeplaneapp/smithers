@@ -29,9 +29,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * string `event` field, so a flat payload like `{ nodeId, text }` passes through
  * untouched.
  */
-export function unwrapEvent(
-  ev: GatewayEventFrame,
-): { name: string; payload: Record<string, unknown> | undefined } {
+export function unwrapEvent(ev: GatewayEventFrame): { name: string; payload: Record<string, unknown> | undefined } {
   const outer = ev.payload;
   if (ev.event === "run.event" && isRecord(outer) && typeof outer["event"] === "string") {
     return { name: outer["event"], payload: isRecord(outer["payload"]) ? outer["payload"] : undefined };

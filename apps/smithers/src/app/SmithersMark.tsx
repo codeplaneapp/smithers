@@ -11,27 +11,12 @@ import type { SVGProps } from "react";
  * and strokes resolve from the shared --logo-* tokens. Remaining SVG props
  * (className, role, aria-*, onAnimationEnd) pass straight through.
  */
-export function SmithersMark({
-  part,
-  ...svgProps
-}: { part: string } & SVGProps<SVGSVGElement>) {
+export function SmithersMark({ part, ...svgProps }: { part: string } & SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 512 512" {...svgProps}>
       <rect className={`${part}-bg`} width="512" height="512" rx="96" />
-      <circle
-        className={`${part}-ring`}
-        cx="230"
-        cy="230"
-        r="112"
-        fill="none"
-        strokeWidth="44"
-      />
-      <path
-        className={`${part}-stem`}
-        d="M310 310l84 84"
-        strokeWidth="52"
-        strokeLinecap="round"
-      />
+      <circle className={`${part}-ring`} cx="230" cy="230" r="112" fill="none" strokeWidth="44" />
+      <path className={`${part}-stem`} d="M310 310l84 84" strokeWidth="52" strokeLinecap="round" />
     </svg>
   );
 }

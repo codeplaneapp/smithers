@@ -102,9 +102,7 @@ describe("OpenInChat", () => {
     await render(<OpenInChat subject={{ kind: "file", label: "file" }} onOpen={() => {}} label="Discuss" />);
     for (const kind of kinds) {
       await act(async () =>
-        root!.render(
-          <OpenInChat subject={{ kind, label: kind }} onOpen={() => {}} label="Discuss" />,
-        ),
+        root!.render(<OpenInChat subject={{ kind, label: kind }} onOpen={() => {}} label="Discuss" />),
       );
       const button = container!.querySelector('[data-slot="open-in-chat"]') as HTMLButtonElement;
       expect(button.getAttribute("data-kind")).toBe(kind);

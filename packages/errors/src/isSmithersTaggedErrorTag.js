@@ -6,6 +6,5 @@ import { smithersTaggedErrorCodes } from "./smithersTaggedErrorCodes.js";
  * @returns {value is SmithersTaggedErrorTag}
  */
 export function isSmithersTaggedErrorTag(value) {
-    return (typeof value === "string" &&
-        Object.prototype.hasOwnProperty.call(smithersTaggedErrorCodes, value));
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(smithersTaggedErrorCodes, value);
 }

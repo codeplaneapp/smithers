@@ -55,16 +55,18 @@ function completeWorkflow(api: any) {
       React.createElement(
         api.Sequence,
         null,
-        React.createElement(
-          api.Task,
-          { id: "prepare-real", output: api.outputs.result },
-          { approved: true, note: "prepared", decidedBy: null, decidedAt: null } as any,
-        ),
-        React.createElement(
-          api.Task,
-          { id: "ship-real", output: api.outputs.result },
-          { approved: true, note: "shipped", decidedBy: null, decidedAt: null } as any,
-        ),
+        React.createElement(api.Task, { id: "prepare-real", output: api.outputs.result }, {
+          approved: true,
+          note: "prepared",
+          decidedBy: null,
+          decidedAt: null,
+        } as any),
+        React.createElement(api.Task, { id: "ship-real", output: api.outputs.result }, {
+          approved: true,
+          note: "shipped",
+          decidedBy: null,
+          decidedAt: null,
+        } as any),
       ),
     ),
   );
@@ -79,11 +81,12 @@ function approvalWorkflow(api: any) {
       React.createElement(
         api.Sequence,
         null,
-        React.createElement(
-          api.Task,
-          { id: "prepare-approval", output: api.outputs.result },
-          { approved: true, note: "prepared", decidedBy: null, decidedAt: null } as any,
-        ),
+        React.createElement(api.Task, { id: "prepare-approval", output: api.outputs.result }, {
+          approved: true,
+          note: "prepared",
+          decidedBy: null,
+          decidedAt: null,
+        } as any),
         React.createElement(api.Approval, {
           id: "pick-plan",
           mode: "select",
@@ -100,11 +103,12 @@ function approvalWorkflow(api: any) {
           allowedUsers: ["user:tui"],
         }),
         selection
-          ? React.createElement(
-              api.Task,
-              { id: "record-selection", output: api.outputs.result },
-              { approved: selection.selected === "balanced", note: selection.selected, decidedBy: null, decidedAt: null } as any,
-            )
+          ? React.createElement(api.Task, { id: "record-selection", output: api.outputs.result }, {
+              approved: selection.selected === "balanced",
+              note: selection.selected,
+              decidedBy: null,
+              decidedAt: null,
+            } as any)
           : null,
       ),
     );
@@ -179,18 +183,18 @@ async function waitForRun(
 
 async function waitForApproval(harness: RealGatewayHarness, runId: string): Promise<Record<string, unknown>> {
   for (let i = 0; i < 240; i += 1) {
-    const { response, json } = await apiRequest(
-      harness,
-      "GET",
-      `/v1/api/approvals?runId=${encodeURIComponent(runId)}`,
-    );
+    const { response, json } = await apiRequest(harness, "GET", `/v1/api/approvals?runId=${encodeURIComponent(runId)}`);
     if (response.status === 200 && json.ok && Array.isArray(json.data) && json.data.length > 0) return json.data[0];
     await delay(25);
   }
   throw new Error(`Timed out waiting for approval on ${runId}`);
 }
 
-async function nodeOutput(harness: RealGatewayHarness, runId: string, nodeId: string): Promise<Record<string, unknown>> {
+async function nodeOutput(
+  harness: RealGatewayHarness,
+  runId: string,
+  nodeId: string,
+): Promise<Record<string, unknown>> {
   const { response, json } = await apiRequest(
     harness,
     "GET",

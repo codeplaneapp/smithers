@@ -22,25 +22,27 @@ export type RunMetaProps = {
 function runStatusOf(data: unknown): string | undefined {
   if (typeof data !== "object" || data === null) return undefined;
   const record = data as Record<string, unknown>;
-  const run = typeof record.run === "object" && record.run !== null
-    ? (record.run as Record<string, unknown>)
-    : record;
+  const run = typeof record.run === "object" && record.run !== null ? (record.run as Record<string, unknown>) : record;
   return typeof run.status === "string" ? run.status : undefined;
 }
 
 function runStartedByOf(data: unknown): { harness?: string; sessionId?: string; detected?: true } | undefined {
   if (typeof data !== "object" || data === null) return undefined;
   const record = data as Record<string, unknown>;
-  const run = typeof record.run === "object" && record.run !== null
-    ? (record.run as Record<string, unknown>)
-    : record;
+  const run = typeof record.run === "object" && record.run !== null ? (record.run as Record<string, unknown>) : record;
   const value = run.startedBy;
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const startedBy = value as Record<string, unknown>;
-  const harness = typeof startedBy.harness === "string" && startedBy.harness.trim() ? startedBy.harness.trim() : undefined;
-  const sessionId = typeof startedBy.sessionId === "string" && startedBy.sessionId.trim() ? startedBy.sessionId.trim() : undefined;
+  const harness =
+    typeof startedBy.harness === "string" && startedBy.harness.trim() ? startedBy.harness.trim() : undefined;
+  const sessionId =
+    typeof startedBy.sessionId === "string" && startedBy.sessionId.trim() ? startedBy.sessionId.trim() : undefined;
   if (!harness && !sessionId) return undefined;
-  return { ...(harness ? { harness } : {}), ...(sessionId ? { sessionId } : {}), ...(startedBy.detected === true ? { detected: true } : {}) };
+  return {
+    ...(harness ? { harness } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    ...(startedBy.detected === true ? { detected: true } : {}),
+  };
 }
 
 /**
@@ -70,11 +72,7 @@ export function RunMeta({ runId, showConnection = true, className, style, useRun
         ...style,
       }}
     >
-      {runId ? (
-        <code style={{ fontFamily: theme.fontMono, fontSize: 11 }}>{runId}</code>
-      ) : (
-        <span>no run</span>
-      )}
+      {runId ? <code style={{ fontFamily: theme.fontMono, fontSize: 11 }}>{runId}</code> : <span>no run</span>}
       <StatusPill status={status ?? (runId ? "pending" : "unknown")} />
       {startedBy ? (
         <span

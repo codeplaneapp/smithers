@@ -59,7 +59,17 @@ import type {
   ListDocsRequest,
   ListDocsResponse,
   GatewayTicketRow,
-  CreateBrowserSessionRequest, BrowserActRequest, BrowserContextRequest, BrowserPickRequest, CloseBrowserSessionRequest, CreateBrowserSessionResponse, BrowserActResponse, BrowserContextResponse, BrowserPickResponse, CloseBrowserSessionResponse, ListBrowserSessionsResponse,
+  CreateBrowserSessionRequest,
+  BrowserActRequest,
+  BrowserContextRequest,
+  BrowserPickRequest,
+  CloseBrowserSessionRequest,
+  CreateBrowserSessionResponse,
+  BrowserActResponse,
+  BrowserContextResponse,
+  BrowserPickResponse,
+  CloseBrowserSessionResponse,
+  ListBrowserSessionsResponse,
 } from "@smithers-orchestrator/protocol/gateway-rpc";
 import type { GatewayCronRow } from "./sync/GatewayCronRow.ts";
 import type { UsageReport, UsageWindow } from "@smithers-orchestrator/usage";

@@ -51,12 +51,16 @@ describeHeadlessRender("ErrorBoundary crash screen", () => {
     expect(f).toContain("Error: kaboom-render");
     expect(f).toContain("[q] or Ctrl-C to quit");
 
-    act(() => { mockInput.pressKey("q"); });
+    act(() => {
+      mockInput.pressKey("q");
+    });
     await flush();
     expect(exits).toEqual([1]);
 
     // Ctrl-C also routes through onExit.
-    act(() => { mockInput.pressKey("\x03"); });
+    act(() => {
+      mockInput.pressKey("\x03");
+    });
     await flush();
     expect(exits).toEqual([1, 1]);
     renderer.destroy();
@@ -71,7 +75,9 @@ describeHeadlessRender("ErrorBoundary crash screen", () => {
       { width: 80, height: 12 },
     );
     await waitForVisualIdle();
-    act(() => { mockInput.pressKey("j"); });
+    act(() => {
+      mockInput.pressKey("j");
+    });
     await flush();
     expect(exits).toEqual([]);
     renderer.destroy();

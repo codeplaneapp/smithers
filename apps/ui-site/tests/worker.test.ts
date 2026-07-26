@@ -49,10 +49,7 @@ describe("ui site worker", () => {
   });
 
   test("serves fingerprinted assets with immutable caching", async () => {
-    const response = await createUiSiteWorker().fetch(
-      new Request("https://ui.smithers.sh/assets/app.css"),
-      makeEnv(),
-    );
+    const response = await createUiSiteWorker().fetch(new Request("https://ui.smithers.sh/assets/app.css"), makeEnv());
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");

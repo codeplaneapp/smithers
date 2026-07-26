@@ -287,19 +287,25 @@ function MilestoneDetail(props: { runId: string | undefined; index: number; mile
             {integration.mergedBranches.length > 0 ? (
               <div className="chips">
                 {integration.mergedBranches.map((b, i) => (
-                  <span className="chip" key={i}>{b}</span>
+                  <span className="chip" key={i}>
+                    {b}
+                  </span>
                 ))}
               </div>
             ) : null}
             {integration.conflictedBranches.length > 0 ? (
               <div className="chips">
                 {integration.conflictedBranches.map((b, i) => (
-                  <span className="chip" key={i} style={{ color: "var(--err)" }}>{b}</span>
+                  <span className="chip" key={i} style={{ color: "var(--err)" }}>
+                    {b}
+                  </span>
                 ))}
               </div>
             ) : null}
             {integration.filesChanged.length === 0 ? (
-              <div className="muted" style={{ marginTop: 6 }}>No files changed.</div>
+              <div className="muted" style={{ marginTop: 6 }}>
+                No files changed.
+              </div>
             ) : null}
           </div>
         ) : (
@@ -322,12 +328,17 @@ function MilestoneDetail(props: { runId: string | undefined; index: number; mile
                 {validation.checks.map((c, i) => (
                   <div className="check" key={i}>
                     <span className={"cstatus " + c.status}>{c.status}</span>
-                    <span>{c.name}{c.details ? " — " + c.details : ""}</span>
+                    <span>
+                      {c.name}
+                      {c.details ? " — " + c.details : ""}
+                    </span>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="muted" style={{ marginTop: 6 }}>No individual checks reported.</div>
+              <div className="muted" style={{ marginTop: 6 }}>
+                No individual checks reported.
+              </div>
             )}
             {validation.followUps.length > 0 ? (
               <ul className="list">
@@ -358,10 +369,7 @@ function App() {
   const actions = useGatewayActions();
 
   const missionRuns = useMemo(
-    () =>
-      ((runsQuery.data ?? []) as RunSummary[]).filter(
-        (r) => !r.workflowKey || r.workflowKey === WORKFLOW_KEY,
-      ),
+    () => ((runsQuery.data ?? []) as RunSummary[]).filter((r) => !r.workflowKey || r.workflowKey === WORKFLOW_KEY),
     [runsQuery.data],
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? missionRuns[0]?.runId;
@@ -369,9 +377,7 @@ function App() {
 
   const runDetail = useGatewayRun(activeRunId);
   const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
-  const approvalsQuery = useGatewayApprovals(
-    activeRunId ? { filter: { runId: activeRunId } } : {},
-  );
+  const approvalsQuery = useGatewayApprovals(activeRunId ? { filter: { runId: activeRunId } } : {});
 
   const planOutput = useGatewayNodeOutput({ runId: activeRunId, nodeId: "mission:plan", iteration: 0 });
   const approvalOutput = useGatewayNodeOutput({ runId: activeRunId, nodeId: "mission:approve-plan", iteration: 0 });
@@ -492,7 +498,12 @@ function App() {
             Refresh
           </button>
           {statusClass(runStatus) === "running" ? (
-            <button className="button danger" data-testid="mission-cancel" onClick={() => void cancel()} disabled={busy}>
+            <button
+              className="button danger"
+              data-testid="mission-cancel"
+              onClick={() => void cancel()}
+              disabled={busy}
+            >
               Cancel
             </button>
           ) : null}
@@ -559,27 +570,43 @@ function App() {
               <p className="section-head">Mission plan</p>
               {plan ? (
                 <div className="card">
-                  <div className="goal" data-testid="mission-goal">{plan.goal || "Mission goal"}</div>
-                  <div className="muted" data-testid="mission-summary">{plan.summary}</div>
+                  <div className="goal" data-testid="mission-goal">
+                    {plan.goal || "Mission goal"}
+                  </div>
+                  <div className="muted" data-testid="mission-summary">
+                    {plan.summary}
+                  </div>
                   {plan.assumptions.length > 0 ? (
                     <>
-                      <p className="section-head" style={{ marginTop: 12 }}>Assumptions</p>
+                      <p className="section-head" style={{ marginTop: 12 }}>
+                        Assumptions
+                      </p>
                       <ul className="list">
-                        {plan.assumptions.map((a, i) => <li key={i}>{a}</li>)}
+                        {plan.assumptions.map((a, i) => (
+                          <li key={i}>{a}</li>
+                        ))}
                       </ul>
                     </>
                   ) : null}
                   {plan.risks.length > 0 ? (
                     <>
-                      <p className="section-head" style={{ marginTop: 12 }}>Risks</p>
+                      <p className="section-head" style={{ marginTop: 12 }}>
+                        Risks
+                      </p>
                       <ul className="list">
-                        {plan.risks.map((r, i) => <li key={i}>{r}</li>)}
+                        {plan.risks.map((r, i) => (
+                          <li key={i}>{r}</li>
+                        ))}
                       </ul>
                     </>
                   ) : null}
                   {plan.outOfScope.length > 0 ? (
                     <div className="chips">
-                      {plan.outOfScope.map((o, i) => <span className="chip" key={i}>out: {o}</span>)}
+                      {plan.outOfScope.map((o, i) => (
+                        <span className="chip" key={i}>
+                          out: {o}
+                        </span>
+                      ))}
                     </div>
                   ) : null}
                 </div>
@@ -590,7 +617,9 @@ function App() {
               {pendingApproval ? (
                 <div className="card approval" data-testid="mission-approval">
                   <h3>{pendingApproval.requestTitle ?? "Approve mission plan?"}</h3>
-                  <div className="muted">{pendingApproval.requestSummary ?? "Review the scoped plan before workers begin."}</div>
+                  <div className="muted">
+                    {pendingApproval.requestSummary ?? "Review the scoped plan before workers begin."}
+                  </div>
                   <input
                     className="note-input"
                     data-testid="mission-approval-note"
@@ -599,10 +628,20 @@ function App() {
                     placeholder="Optional note"
                   />
                   <div className="approval-actions">
-                    <button className="button ok" data-testid="mission-approve" onClick={() => void decide(true)} disabled={busy}>
+                    <button
+                      className="button ok"
+                      data-testid="mission-approve"
+                      onClick={() => void decide(true)}
+                      disabled={busy}
+                    >
                       Approve
                     </button>
-                    <button className="button danger" data-testid="mission-deny" onClick={() => void decide(false)} disabled={busy}>
+                    <button
+                      className="button danger"
+                      data-testid="mission-deny"
+                      onClick={() => void decide(false)}
+                      disabled={busy}
+                    >
                       Deny
                     </button>
                   </div>
@@ -620,7 +659,9 @@ function App() {
                 </div>
               ) : null}
 
-              <p className="section-head" style={{ marginTop: 8 }}>Milestone timeline</p>
+              <p className="section-head" style={{ marginTop: 8 }}>
+                Milestone timeline
+              </p>
               {timelineMilestones.length > 0 ? (
                 <ul className="timeline" data-testid="mission-timeline">
                   {timelineMilestones.map((m, i) => {
@@ -655,11 +696,18 @@ function App() {
               <p className="section-head">Mission report</p>
               <div className="card">
                 <h3>
-                  <span className={"badge " + (final.status === "completed" ? "finished" : final.status === "cancelled" ? "failed" : "running")}>
+                  <span
+                    className={
+                      "badge " +
+                      (final.status === "completed" ? "finished" : final.status === "cancelled" ? "failed" : "running")
+                    }
+                  >
                     {final.status}
                   </span>
                 </h3>
-                <div className="muted" data-testid="mission-final-summary">{final.summary}</div>
+                <div className="muted" data-testid="mission-final-summary">
+                  {final.summary}
+                </div>
                 <div className="final-stats">
                   <span className="stat">
                     {final.completedMilestones}/{final.totalMilestones}
@@ -672,17 +720,25 @@ function App() {
                 </div>
                 {final.nextActions.length > 0 ? (
                   <>
-                    <p className="section-head" style={{ marginTop: 12 }}>Next actions</p>
+                    <p className="section-head" style={{ marginTop: 12 }}>
+                      Next actions
+                    </p>
                     <ul className="list">
-                      {final.nextActions.map((a, i) => <li key={i}>{a}</li>)}
+                      {final.nextActions.map((a, i) => (
+                        <li key={i}>{a}</li>
+                      ))}
                     </ul>
                   </>
                 ) : null}
                 {final.remainingRisks.length > 0 ? (
                   <>
-                    <p className="section-head" style={{ marginTop: 12 }}>Remaining risks</p>
+                    <p className="section-head" style={{ marginTop: 12 }}>
+                      Remaining risks
+                    </p>
                     <ul className="list">
-                      {final.remainingRisks.map((r, i) => <li key={i}>{r}</li>)}
+                      {final.remainingRisks.map((r, i) => (
+                        <li key={i}>{r}</li>
+                      ))}
                     </ul>
                   </>
                 ) : null}
@@ -701,7 +757,9 @@ function App() {
             </>
           ) : (
             <div className="empty" data-testid="mission-detail-empty">
-              {hasAnyRun ? "Milestone work and the final report will appear here." : "Launch a mission to see milestone progress."}
+              {hasAnyRun
+                ? "Milestone work and the final report will appear here."
+                : "Launch a mission to see milestone progress."}
             </div>
           )}
         </div>

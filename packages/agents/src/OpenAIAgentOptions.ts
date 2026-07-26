@@ -1,10 +1,7 @@
 import type { LanguageModel, ToolSet } from "ai";
 import type { SdkAgentOptions } from "./SdkAgentOptions";
 
-type OpenAIAgentCommonOptions<
-  CALL_OPTIONS,
-  TOOLS extends ToolSet,
-> = Omit<
+type OpenAIAgentCommonOptions<CALL_OPTIONS, TOOLS extends ToolSet> = Omit<
   SdkAgentOptions<CALL_OPTIONS, TOOLS, LanguageModel>,
   "model"
 > & {
@@ -41,8 +38,8 @@ type OpenAIAgentPrebuiltModelOptions = {
   api?: never;
 };
 
-export type OpenAIAgentOptions<
-  CALL_OPTIONS = never,
-  TOOLS extends ToolSet = {},
-> = OpenAIAgentCommonOptions<CALL_OPTIONS, TOOLS> &
+export type OpenAIAgentOptions<CALL_OPTIONS = never, TOOLS extends ToolSet = {}> = OpenAIAgentCommonOptions<
+  CALL_OPTIONS,
+  TOOLS
+> &
   (OpenAIAgentStringModelOptions | OpenAIAgentPrebuiltModelOptions);

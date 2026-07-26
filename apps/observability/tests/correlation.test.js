@@ -51,13 +51,10 @@ describe("correlation visibility to the imperative logger", () => {
     // The engine's real pattern: open a context with runWithCorrelationContext,
     // then refine it in place via updateCurrentCorrelationContext (the shim used
     // for attempt/iteration). Both have to reach the imperative-logger chain.
-    const annotations = runWithCorrelationContext(
-      { runId: "run-7", workflowName: "sync-flow" },
-      () => {
-        updateCurrentCorrelationContext({ nodeId: "node-7", attempt: 2 });
-        return correlationContextToLogAnnotations(getCurrentCorrelationContext());
-      },
-    );
+    const annotations = runWithCorrelationContext({ runId: "run-7", workflowName: "sync-flow" }, () => {
+      updateCurrentCorrelationContext({ nodeId: "node-7", attempt: 2 });
+      return correlationContextToLogAnnotations(getCurrentCorrelationContext());
+    });
     expect(annotations).toMatchObject({
       runId: "run-7",
       workflowName: "sync-flow",
@@ -67,7 +64,12 @@ describe("correlation visibility to the imperative logger", () => {
   });
 
   test("the store is restored after the scope completes (no leak across runs)", async () => {
-    await Effect.runPromise(withCorrelationContext(Effect.sync(() => undefined), { runId: "run-scoped" }));
+    await Effect.runPromise(
+      withCorrelationContext(
+        Effect.sync(() => undefined),
+        { runId: "run-scoped" },
+      ),
+    );
     expect(getCurrentCorrelationContext()).toBeUndefined();
   });
 

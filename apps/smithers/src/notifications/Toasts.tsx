@@ -21,8 +21,7 @@ function Toast({ notification }: { notification: Notification }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const running = notification.status === "running";
   const failed = notification.status === "failed";
-  const workflowRunId =
-    notification.kind === "workflow" && notification.runId ? notification.runId : undefined;
+  const workflowRunId = notification.kind === "workflow" && notification.runId ? notification.runId : undefined;
   const registerToast = (el: HTMLDivElement | null): void => {
     if (!el || !notification.morphFrom) return;
     const target = el.getBoundingClientRect();
@@ -45,9 +44,7 @@ function Toast({ notification }: { notification: Notification }) {
       close();
       return;
     }
-    const items = Array.from(
-      event.currentTarget.querySelectorAll<HTMLElement>('[role^="menuitem"]'),
-    );
+    const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role^="menuitem"]'));
     if (items.length === 0) {
       return;
     }
@@ -98,12 +95,7 @@ function Toast({ notification }: { notification: Notification }) {
           >
             <circle cx="12" cy="12" r="10" fill="currentColor" />
             {failed ? (
-              <path
-                d="m9 9 6 6m0-6-6 6"
-                stroke="var(--surface)"
-                strokeLinecap="round"
-                strokeWidth="2"
-              />
+              <path d="m9 9 6 6m0-6-6 6" stroke="var(--surface)" strokeLinecap="round" strokeWidth="2" />
             ) : (
               <path
                 d="m8 12 3 3 5-6"
@@ -123,20 +115,13 @@ function Toast({ notification }: { notification: Notification }) {
             </span>
           ) : null}
         </span>
-        <span className="toast-status">
-          {running ? "Running" : failed ? "Failed" : "Done"}
-        </span>
+        <span className="toast-status">{running ? "Running" : failed ? "Failed" : "Done"}</span>
       </button>
 
       {open ? (
         <>
           <MenuBackdrop />
-          <div
-            className="toast-menu"
-            ref={focusFirst}
-            role="menu"
-            onKeyDown={onMenuKeyDown}
-          >
+          <div className="toast-menu" ref={focusFirst} role="menu" onKeyDown={onMenuKeyDown}>
             {workflowRunId ? (
               <button
                 className="toast-action"

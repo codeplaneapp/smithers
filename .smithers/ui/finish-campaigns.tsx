@@ -1,10 +1,6 @@
 /** @jsxImportSource react */
 import { useMemo, useState } from "react";
-import {
-  createGatewayReactRoot,
-  useGatewayNodeOutput,
-  useGatewayRunTree,
-} from "smithers-orchestrator/gateway-react";
+import { createGatewayReactRoot, useGatewayNodeOutput, useGatewayRunTree } from "smithers-orchestrator/gateway-react";
 import {
   ApprovalPanel,
   ConnectionBadge,
@@ -40,7 +36,10 @@ const layout = [
   "@media (max-width: 900px) { .fc-cols { grid-template-columns:1fr; } }",
 ].join("\n");
 
-function latestIteration(nodes: ReadonlyArray<GatewayRunNode>, nodeId: string): { iteration: number; status: string | undefined } {
+function latestIteration(
+  nodes: ReadonlyArray<GatewayRunNode>,
+  nodeId: string,
+): { iteration: number; status: string | undefined } {
   const rows = nodes.filter((node) => node.id === nodeId);
   if (rows.length === 0) return { iteration: 0, status: undefined };
   const latest = rows.reduce((best, node) => ((node.iteration ?? 0) >= (best.iteration ?? 0) ? node : best));
@@ -78,7 +77,8 @@ function LaneCard(props: {
         <StatusPill status={laneStatus} label={done ? "Done" : undefined} />
       </div>
       <div className="fc-lane-agent" style={{ marginTop: 8 }}>
-        work: <StatusPill status={work.status ?? "pending"} /> · verify iter {verify.iteration}: <StatusPill status={verify.status ?? "pending"} />
+        work: <StatusPill status={work.status ?? "pending"} /> · verify iter {verify.iteration}:{" "}
+        <StatusPill status={verify.status ?? "pending"} />
       </div>
       {remaining.length > 0 ? (
         <ul className="fc-list">
@@ -135,11 +135,7 @@ function App() {
       </div>
       <ApprovalPanel filter={runId ? { runId } : undefined} />
       <div className="fc-cols">
-        <RunTree
-          runId={runId}
-          activeNodeId={activeNodeId}
-          onSelectNode={(node) => setActiveNodeId(node.id)}
-        />
+        <RunTree runId={runId} activeNodeId={activeNodeId} onSelectNode={(node) => setActiveNodeId(node.id)} />
         <RunEventLog runId={runId} />
       </div>
     </WorkflowUiShell>

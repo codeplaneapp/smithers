@@ -33,8 +33,5 @@ export type PiAgentOptions = BaseCliAgentOptions & {
   verbose?: boolean;
   onExtensionUiRequest?: (
     request: PiExtensionUiRequest,
-  ) =>
-    | Promise<PiExtensionUiResponse | null>
-    | PiExtensionUiResponse
-    | null;
+  ) => Promise<PiExtensionUiResponse | null> | PiExtensionUiResponse | null;
 };

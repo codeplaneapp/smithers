@@ -3,13 +3,13 @@ import type { ParameterObject } from "./ParameterObject.ts";
 import type { RequestBodyObject } from "./RequestBodyObject.ts";
 
 export type ParsedOperation = {
-	operationId: string;
-	method: HttpMethod;
-	path: string;
-	summary: string;
-	description: string;
-	parameters: ParameterObject[];
-	requestBody?: RequestBodyObject;
-	requestBodyMediaType?: string;
-	deprecated: boolean;
+  operationId: string;
+  method: HttpMethod;
+  path: string;
+  summary: string;
+  description: string;
+  parameters: ParameterObject[];
+  requestBody?: RequestBodyObject;
+  requestBodyMediaType?: string;
+  deprecated: boolean;
 };

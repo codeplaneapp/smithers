@@ -74,14 +74,16 @@ function tagExists(tag: string): boolean {
  * comes out blank ("claim-no-commits").
  */
 function previousReleaseTag(nextVersion: string): string | null {
-  return run("git", ["tag", "--list", "v*"])
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((tag) => ({ tag, version: tag.replace(/^v/, "") }))
-    .filter((entry) => /^\d+\.\d+\.\d+$/.test(entry.version))
-    .filter((entry) => compareVersions(entry.version, nextVersion) < 0)
-    .sort((a, b) => compareVersions(b.version, a.version))[0]?.tag ?? null;
+  return (
+    run("git", ["tag", "--list", "v*"])
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((tag) => ({ tag, version: tag.replace(/^v/, "") }))
+      .filter((entry) => /^\d+\.\d+\.\d+$/.test(entry.version))
+      .filter((entry) => compareVersions(entry.version, nextVersion) < 0)
+      .sort((a, b) => compareVersions(b.version, a.version))[0]?.tag ?? null
+  );
 }
 
 export function probeRelease(input: ReleaseContentInput): Probe {
@@ -95,16 +97,14 @@ export function probeRelease(input: ReleaseContentInput): Probe {
   // always wins over this inference.
   const alreadyBumped = !input.version && !input.bump && tagExists(`v${pkg.version}`);
   const bump = input.bump ?? (input.version || alreadyBumped ? null : "patch");
-  const nextVersion =
-    input.version ?? (alreadyBumped ? pkg.version : incrementVersion(pkg.version, bump ?? "patch"));
+  const nextVersion = input.version ?? (alreadyBumped ? pkg.version : incrementVersion(pkg.version, bump ?? "patch"));
   const tag = previousReleaseTag(nextVersion);
   const range = input.range ?? (tag ? `${tag}..HEAD` : "HEAD");
   const currentSha = run("git", ["rev-parse", "HEAD"], "unknown");
   const releaseDate = input.releaseDate ?? todayIso();
   const changelogPath = input.output.changelogPath ?? `docs/changelogs/${nextVersion}.mdx`;
   const threadPath = input.output.threadPath ?? `marketing/${nextVersion}/thread.md`;
-  const blogPath =
-    input.output.blogPath ?? `marketing/${nextVersion}/blog-smithers-${slugVersion(nextVersion)}.mdx`;
+  const blogPath = input.output.blogPath ?? `marketing/${nextVersion}/blog-smithers-${slugVersion(nextVersion)}.mdx`;
 
   return {
     currentVersion: pkg.version,

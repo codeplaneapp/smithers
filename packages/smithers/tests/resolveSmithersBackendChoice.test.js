@@ -215,7 +215,13 @@ describe("resolveSmithersBackendChoice", () => {
     // asks for; it keeps the authoritative history visible (the opposite of the
     // dangerous pin-toward-pglite direction, which still conflicts above).
     const pins = [
-      { label: "config", seed: (cwd) => writeFileSync(join(cwd, ".smithers", "smithers.config.ts"), 'export default { backend: "sqlite" };\n'), opts: (cwd) => ({ cwd, env: {} }), source: "config" },
+      {
+        label: "config",
+        seed: (cwd) =>
+          writeFileSync(join(cwd, ".smithers", "smithers.config.ts"), 'export default { backend: "sqlite" };\n'),
+        opts: (cwd) => ({ cwd, env: {} }),
+        source: "config",
+      },
       { label: "env", seed: () => {}, opts: (cwd) => ({ cwd, env: { SMITHERS_BACKEND: "sqlite" } }), source: "env" },
       { label: "option", seed: () => {}, opts: (cwd) => ({ cwd, backend: "sqlite", env: {} }), source: "options" },
     ];
@@ -256,7 +262,10 @@ describe("resolveSmithersBackendChoice", () => {
     const cwd = makeWorkspace("resolver-migrated-marker");
     seedSqliteRuns(cwd);
     await seedPgliteRuns(cwd);
-    writeFileSync(join(cwd, ".smithers", "migrated.json"), JSON.stringify({ migratedAt: 1, target: { backend: "pglite" } }));
+    writeFileSync(
+      join(cwd, ".smithers", "migrated.json"),
+      JSON.stringify({ migratedAt: 1, target: { backend: "pglite" } }),
+    );
 
     const choice = await resolveSmithersBackendChoice({ cwd, env: {} });
     expect(choice).toMatchObject({
@@ -368,7 +377,10 @@ describe("resolveSmithersBackendChoice", () => {
   test("migrated.json target fails loud when migrated target is missing but kept sqlite has runs", async () => {
     const cwd = makeWorkspace("resolver-migrated-marker-missing-target");
     seedSqliteRuns(cwd);
-    writeFileSync(join(cwd, ".smithers", "migrated.json"), JSON.stringify({ migratedAt: 1, target: { backend: "pglite" } }));
+    writeFileSync(
+      join(cwd, ".smithers", "migrated.json"),
+      JSON.stringify({ migratedAt: 1, target: { backend: "pglite" } }),
+    );
 
     await expect(resolveSmithersBackendChoice({ cwd, env: {} })).rejects.toMatchObject({
       code: "SMITHERS_MIGRATION_REQUIRED",
@@ -384,7 +396,10 @@ describe("resolveSmithersBackendChoice", () => {
   test("explicit sqlite override can recover a migrated workspace with a missing target", async () => {
     const cwd = makeWorkspace("resolver-migrated-marker-explicit-sqlite");
     seedSqliteRuns(cwd);
-    writeFileSync(join(cwd, ".smithers", "migrated.json"), JSON.stringify({ migratedAt: 1, target: { backend: "pglite" } }));
+    writeFileSync(
+      join(cwd, ".smithers", "migrated.json"),
+      JSON.stringify({ migratedAt: 1, target: { backend: "pglite" } }),
+    );
 
     await expect(resolveSmithersBackendChoice({ cwd, env: { SMITHERS_BACKEND: "sqlite" } })).resolves.toMatchObject({
       backend: "sqlite",
@@ -434,7 +449,13 @@ describe("resolveSmithersBackendChoice", () => {
     });
 
     const explicitEnv = makeWorkspace("resolver-precedence-explicit-env");
-    expect(await resolveSmithersBackendChoice({ cwd: explicitEnv, backend: "postgres", env: { SMITHERS_BACKEND: "pglite" } })).toMatchObject({
+    expect(
+      await resolveSmithersBackendChoice({
+        cwd: explicitEnv,
+        backend: "postgres",
+        env: { SMITHERS_BACKEND: "pglite" },
+      }),
+    ).toMatchObject({
       backend: "postgres",
       source: "options",
     });
@@ -463,22 +484,34 @@ describe("resolveSmithersBackendChoice", () => {
 
   test("invalid backend values are rejected except malformed backend marker falls back to default", async () => {
     const explicit = makeWorkspace("resolver-invalid-explicit");
-    await expect(resolveSmithersBackendChoice({ cwd: explicit, backend: "mysql", env: {} })).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(resolveSmithersBackendChoice({ cwd: explicit, backend: "mysql", env: {} })).rejects.toMatchObject({
+      code: "INVALID_INPUT",
+    });
 
     const env = makeWorkspace("resolver-invalid-env");
-    await expect(resolveSmithersBackendChoice({ cwd: env, env: { SMITHERS_BACKEND: "foo" } })).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(resolveSmithersBackendChoice({ cwd: env, env: { SMITHERS_BACKEND: "foo" } })).rejects.toMatchObject({
+      code: "INVALID_INPUT",
+    });
 
     const config = makeWorkspace("resolver-invalid-config");
     writeFileSync(join(config, ".smithers", "smithers.config.ts"), 'export default { backend: "foo" };\n');
-    await expect(resolveSmithersBackendChoice({ cwd: config, env: {} })).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(resolveSmithersBackendChoice({ cwd: config, env: {} })).rejects.toMatchObject({
+      code: "INVALID_INPUT",
+    });
 
     const badMarker = makeWorkspace("resolver-invalid-marker");
     writeFileSync(join(badMarker, ".smithers", "backend.json"), JSON.stringify({ backend: "foo" }));
-    expect(await resolveSmithersBackendChoice({ cwd: badMarker, env: {} })).toMatchObject({ backend: "sqlite", source: "default" });
+    expect(await resolveSmithersBackendChoice({ cwd: badMarker, env: {} })).toMatchObject({
+      backend: "sqlite",
+      source: "default",
+    });
 
     const malformedMarker = makeWorkspace("resolver-malformed-marker");
     writeFileSync(join(malformedMarker, ".smithers", "backend.json"), "{ nope");
-    expect(await resolveSmithersBackendChoice({ cwd: malformedMarker, env: {} })).toMatchObject({ backend: "sqlite", source: "default" });
+    expect(await resolveSmithersBackendChoice({ cwd: malformedMarker, env: {} })).toMatchObject({
+      backend: "sqlite",
+      source: "default",
+    });
   });
 
   test("malformed smithers.config.ts throws a friendly INVALID_INPUT error", async () => {
@@ -534,7 +567,8 @@ describe("resolveSmithersBackendChoice", () => {
         seen.push(text);
         if (text.includes("to_regclass('_smithers_runs')")) return { rows: [{ table_name: "_smithers_runs" }] };
         if (text.includes("COUNT(*)::int AS count FROM _smithers_runs")) return { rows: [{ count: 3 }] };
-        if (text.includes("to_regclass('_smithers_schema_migrations')")) return { rows: [{ table_name: "_smithers_schema_migrations" }] };
+        if (text.includes("to_regclass('_smithers_schema_migrations')"))
+          return { rows: [{ table_name: "_smithers_schema_migrations" }] };
         if (text.includes("SELECT id FROM _smithers_schema_migrations")) return { rows: [{ id: "0018_current" }] };
         return { rows: [] };
       },

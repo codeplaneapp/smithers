@@ -6,24 +6,8 @@ import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 /** @typedef {import("./OverlayOptions.ts").OverlayOptions} OverlayOptions */
 /** @typedef {import("@smithers-orchestrator/errors/SmithersError").SmithersError} SmithersError */
 
-const DEFAULT_EXCLUDE = [
-    "node_modules",
-    ".git",
-    ".jj",
-    ".smithers",
-    ".DS_Store",
-];
-const SNAPSHOT_COPY_EXTENSIONS = new Set([
-    ".cjs",
-    ".cts",
-    ".js",
-    ".json",
-    ".jsx",
-    ".mjs",
-    ".mts",
-    ".ts",
-    ".tsx",
-]);
+const DEFAULT_EXCLUDE = ["node_modules", ".git", ".jj", ".smithers", ".DS_Store"];
+const SNAPSHOT_COPY_EXTENSIONS = new Set([".cjs", ".cts", ".js", ".json", ".jsx", ".mjs", ".mts", ".ts", ".tsx"]);
 
 /**
  * @param {unknown} cause
@@ -32,10 +16,10 @@ const SNAPSHOT_COPY_EXTENSIONS = new Set([
  * @returns {SmithersError}
  */
 function hotOverlayError(cause, operation, details) {
-    return toSmithersError(cause, operation, {
-        code: "HOT_OVERLAY_FAILED",
-        details,
-    });
+  return toSmithersError(cause, operation, {
+    code: "HOT_OVERLAY_FAILED",
+    details,
+  });
 }
 /**
  * @param {string} operation
@@ -43,10 +27,10 @@ function hotOverlayError(cause, operation, details) {
  * @returns {(cause: unknown) => SmithersError}
  */
 function hotOverlayErrorMapper(operation, details) {
-    return (cause) => hotOverlayError(cause, operation, details);
+  return (cause) => hotOverlayError(cause, operation, details);
 }
 function shouldCopySnapshotFile(filePath) {
-    return SNAPSHOT_COPY_EXTENSIONS.has(extname(filePath).toLowerCase());
+  return SNAPSHOT_COPY_EXTENSIONS.has(extname(filePath).toLowerCase());
 }
 /**
  * Build a generation overlay by hardlinking (or copying) the hot root
@@ -61,25 +45,28 @@ function shouldCopySnapshotFile(filePath) {
  * @returns {Effect.Effect<string, SmithersError>}
  */
 export function buildOverlayEffect(hotRoot, outDir, generation, opts) {
-    const exclude = new Set(opts?.exclude ?? DEFAULT_EXCLUDE);
-    const genDir = join(outDir, `gen-${generation}`);
-    return Effect.gen(function* () {
-        yield* Effect.tryPromise({
-            try: () => mkdir(genDir, { recursive: true }),
-            catch: hotOverlayErrorMapper("create hot overlay generation dir", {
-                hotRoot,
-                outDir,
-                generation,
-            }),
-        });
-        yield* mirrorTreeEffect(hotRoot, genDir, exclude);
-        return genDir;
-    }).pipe(Effect.annotateLogs({
+  const exclude = new Set(opts?.exclude ?? DEFAULT_EXCLUDE);
+  const genDir = join(outDir, `gen-${generation}`);
+  return Effect.gen(function* () {
+    yield* Effect.tryPromise({
+      try: () => mkdir(genDir, { recursive: true }),
+      catch: hotOverlayErrorMapper("create hot overlay generation dir", {
         hotRoot,
         outDir,
         generation,
-        excludeCount: exclude.size,
-    }), Effect.withLogSpan("hot:build-overlay"));
+      }),
+    });
+    yield* mirrorTreeEffect(hotRoot, genDir, exclude);
+    return genDir;
+  }).pipe(
+    Effect.annotateLogs({
+      hotRoot,
+      outDir,
+      generation,
+      excludeCount: exclude.size,
+    }),
+    Effect.withLogSpan("hot:build-overlay"),
+  );
 }
 /**
  * @param {string} hotRoot
@@ -89,7 +76,7 @@ export function buildOverlayEffect(hotRoot, outDir, generation, opts) {
  * @returns {Promise<string>}
  */
 export async function buildOverlay(hotRoot, outDir, generation, opts) {
-    return Effect.runPromise(buildOverlayEffect(hotRoot, outDir, generation, opts));
+  return Effect.runPromise(buildOverlayEffect(hotRoot, outDir, generation, opts));
 }
 /**
  * Recursively mirror `src` into `dest`, using hardlinks where possible
@@ -101,65 +88,64 @@ export async function buildOverlay(hotRoot, outDir, generation, opts) {
  * @returns {Effect.Effect<void, SmithersError>}
  */
 function mirrorTreeEffect(src, dest, exclude) {
-    return Effect.gen(function* () {
-        const entries = yield* Effect.tryPromise({
-            try: () => readdir(src, { withFileTypes: true }),
-            catch: hotOverlayErrorMapper("read hot overlay source dir", {
-                src,
-                dest,
-            }),
-        });
-        for (const entry of entries) {
-            if (exclude.has(entry.name))
-                continue;
-            if (entry.name.startsWith("."))
-                continue;
-            const srcPath = join(src, entry.name);
-            const destPath = join(dest, entry.name);
-            if (entry.isDirectory()) {
-                yield* Effect.tryPromise({
-                    try: () => mkdir(destPath, { recursive: true }),
-                    catch: hotOverlayErrorMapper("create mirrored hot overlay dir", {
-                        srcPath,
-                        destPath,
-                    }),
-                });
-                yield* mirrorTreeEffect(srcPath, destPath, exclude);
-            }
-            else if (entry.isFile()) {
-                const copyFileEffect = Effect.tryPromise({
-                    try: () => copyFile(srcPath, destPath),
-                    catch: hotOverlayErrorMapper("copy overlay file", {
-                        srcPath,
-                        destPath,
-                    }),
-                });
-                // Module and JSON files need an independent inode per generation.
-                // Hardlinks can keep old generations tied to in-place source edits.
-                if (shouldCopySnapshotFile(srcPath)) {
-                    yield* copyFileEffect;
-                    continue;
-                }
-                const linked = yield* Effect.either(Effect.tryPromise({
-                    try: () => link(srcPath, destPath),
-                    catch: hotOverlayErrorMapper("hardlink overlay file", {
-                        srcPath,
-                        destPath,
-                    }),
-                }));
-                if (linked._tag === "Left") {
-                    yield* Effect.tryPromise({
-                        try: () => mkdir(dirname(destPath), { recursive: true }),
-                        catch: hotOverlayErrorMapper("create overlay file parent dir", {
-                            srcPath,
-                            destPath,
-                        }),
-                    });
-                    yield* copyFileEffect;
-                }
-            }
-        }
+  return Effect.gen(function* () {
+    const entries = yield* Effect.tryPromise({
+      try: () => readdir(src, { withFileTypes: true }),
+      catch: hotOverlayErrorMapper("read hot overlay source dir", {
+        src,
+        dest,
+      }),
     });
+    for (const entry of entries) {
+      if (exclude.has(entry.name)) continue;
+      if (entry.name.startsWith(".")) continue;
+      const srcPath = join(src, entry.name);
+      const destPath = join(dest, entry.name);
+      if (entry.isDirectory()) {
+        yield* Effect.tryPromise({
+          try: () => mkdir(destPath, { recursive: true }),
+          catch: hotOverlayErrorMapper("create mirrored hot overlay dir", {
+            srcPath,
+            destPath,
+          }),
+        });
+        yield* mirrorTreeEffect(srcPath, destPath, exclude);
+      } else if (entry.isFile()) {
+        const copyFileEffect = Effect.tryPromise({
+          try: () => copyFile(srcPath, destPath),
+          catch: hotOverlayErrorMapper("copy overlay file", {
+            srcPath,
+            destPath,
+          }),
+        });
+        // Module and JSON files need an independent inode per generation.
+        // Hardlinks can keep old generations tied to in-place source edits.
+        if (shouldCopySnapshotFile(srcPath)) {
+          yield* copyFileEffect;
+          continue;
+        }
+        const linked = yield* Effect.either(
+          Effect.tryPromise({
+            try: () => link(srcPath, destPath),
+            catch: hotOverlayErrorMapper("hardlink overlay file", {
+              srcPath,
+              destPath,
+            }),
+          }),
+        );
+        if (linked._tag === "Left") {
+          yield* Effect.tryPromise({
+            try: () => mkdir(dirname(destPath), { recursive: true }),
+            catch: hotOverlayErrorMapper("create overlay file parent dir", {
+              srcPath,
+              destPath,
+            }),
+          });
+          yield* copyFileEffect;
+        }
+      }
+    }
+  });
 }
 /**
  * Remove old generation directories, keeping only the last `keepLast`.
@@ -169,38 +155,42 @@ function mirrorTreeEffect(src, dest, exclude) {
  * @returns {Effect.Effect<void, SmithersError>}
  */
 export function cleanupGenerationsEffect(outDir, keepLast) {
-    return Effect.gen(function* () {
-        if (!existsSync(outDir))
-            return;
-        const entries = yield* Effect.tryPromise({
-            try: () => readdir(outDir, { withFileTypes: true }),
-            catch: hotOverlayErrorMapper("read hot overlay generations", {
-                outDir,
-                keepLast,
-            }),
-        });
-        const genDirs = entries
-            .filter((e) => e.isDirectory() && e.name.startsWith("gen-"))
-            .map((e) => {
-            const num = parseInt(e.name.slice(4), 10);
-            return { name: e.name, num: isNaN(num) ? -1 : num };
-        })
-            .filter((e) => e.num >= 0)
-            .sort((a, b) => a.num - b.num);
-        const toRemove = genDirs.slice(0, Math.max(0, genDirs.length - keepLast));
-        for (const dir of toRemove) {
-            yield* Effect.either(Effect.tryPromise({
-                try: () => rm(join(outDir, dir.name), { recursive: true, force: true }),
-                catch: hotOverlayErrorMapper("remove stale hot overlay generation", {
-                    outDir,
-                    generationDir: dir.name,
-                }),
-            }));
-        }
-    }).pipe(Effect.annotateLogs({
+  return Effect.gen(function* () {
+    if (!existsSync(outDir)) return;
+    const entries = yield* Effect.tryPromise({
+      try: () => readdir(outDir, { withFileTypes: true }),
+      catch: hotOverlayErrorMapper("read hot overlay generations", {
         outDir,
         keepLast,
-    }), Effect.withLogSpan("hot:cleanup-generations"));
+      }),
+    });
+    const genDirs = entries
+      .filter((e) => e.isDirectory() && e.name.startsWith("gen-"))
+      .map((e) => {
+        const num = parseInt(e.name.slice(4), 10);
+        return { name: e.name, num: isNaN(num) ? -1 : num };
+      })
+      .filter((e) => e.num >= 0)
+      .sort((a, b) => a.num - b.num);
+    const toRemove = genDirs.slice(0, Math.max(0, genDirs.length - keepLast));
+    for (const dir of toRemove) {
+      yield* Effect.either(
+        Effect.tryPromise({
+          try: () => rm(join(outDir, dir.name), { recursive: true, force: true }),
+          catch: hotOverlayErrorMapper("remove stale hot overlay generation", {
+            outDir,
+            generationDir: dir.name,
+          }),
+        }),
+      );
+    }
+  }).pipe(
+    Effect.annotateLogs({
+      outDir,
+      keepLast,
+    }),
+    Effect.withLogSpan("hot:cleanup-generations"),
+  );
 }
 /**
  * @param {string} outDir
@@ -208,7 +198,7 @@ export function cleanupGenerationsEffect(outDir, keepLast) {
  * @returns {Promise<void>}
  */
 export async function cleanupGenerations(outDir, keepLast) {
-    await Effect.runPromise(cleanupGenerationsEffect(outDir, keepLast));
+  await Effect.runPromise(cleanupGenerationsEffect(outDir, keepLast));
 }
 /**
  * Resolve the overlay entry path given the original entry path,
@@ -220,13 +210,13 @@ export async function cleanupGenerations(outDir, keepLast) {
  * @returns {string}
  */
 export function resolveOverlayEntry(entryPath, hotRoot, genDir) {
-    const rel = relative(hotRoot, entryPath);
-    return resolve(genDir, rel);
+  const rel = relative(hotRoot, entryPath);
+  return resolve(genDir, rel);
 }
 
 export const __overlayInternals = {
-    hotOverlayError,
-    hotOverlayErrorMapper,
-    mirrorTreeEffect,
-    shouldCopySnapshotFile,
+  hotOverlayError,
+  hotOverlayErrorMapper,
+  mirrorTreeEffect,
+  shouldCopySnapshotFile,
 };

@@ -70,7 +70,10 @@ function sh(cmd: string[], env?: Record<string, string>): { ok: boolean; log: st
   }
 }
 
-function reviewConfig(): { publishToken?: string; adminToken?: string; metricsToken?: string } & Record<string, unknown> {
+function reviewConfig(): { publishToken?: string; adminToken?: string; metricsToken?: string } & Record<
+  string,
+  unknown
+> {
   try {
     return JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
   } catch {
@@ -158,14 +161,17 @@ export default smithers((ctx) => {
   const approval = ctx.outputMaybe(outputs.deployApproval, { nodeId: "approve-deploy" });
   const runKey = ctx.runId.replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 80) || "run";
   const dogfoodWorktree = path.join(tmpdir(), `review-cloud-dogfood-${runKey}`);
-  const renderedDogfoodPrompt = dogfoodPrompt.replaceAll(
-    "/tmp/review-cloud-dogfood",
-    dogfoodWorktree,
-  );
+  const renderedDogfoodPrompt = dogfoodPrompt.replaceAll("/tmp/review-cloud-dogfood", dogfoodWorktree);
 
   return (
     <Workflow name="review-cloud-ship" cache>
-      <Task id="implement-worker" output={outputs.implementWorker} agent={agents.implement} timeoutMs={75 * 60 * 1000} retries={2}>
+      <Task
+        id="implement-worker"
+        output={outputs.implementWorker}
+        agent={agents.implement}
+        timeoutMs={75 * 60 * 1000}
+        retries={2}
+      >
         {workerPrompt}
       </Task>
 
@@ -185,7 +191,9 @@ export default smithers((ctx) => {
           <Task id="verify" output={outputs.verify} dependsOn={["implement-action"]}>
             {() => {
               const typecheck = sh(["pnpm", "-C", "apps/review", "typecheck"]);
-              const tests = typecheck.ok ? sh(["pnpm", "-C", "apps/review", "test"]) : { ok: false, log: "(skipped: typecheck failed)" };
+              const tests = typecheck.ok
+                ? sh(["pnpm", "-C", "apps/review", "test"])
+                : { ok: false, log: "(skipped: typecheck failed)" };
               return {
                 pass: typecheck.ok && tests.ok,
                 log: tail(`== typecheck ==\n${typecheck.log}\n== bun test ==\n${tests.log}`),
@@ -196,10 +204,7 @@ export default smithers((ctx) => {
             id="fix-round"
             output={outputs.fixRound}
             agent={agents.implement}
-            skipIf={
-              latestVerify?.pass === true ||
-              completedVerifyCount > maxFixRounds
-            }
+            skipIf={latestVerify?.pass === true || completedVerifyCount > maxFixRounds}
             timeoutMs={45 * 60 * 1000}
             retries={2}
           >
@@ -250,7 +255,9 @@ Final answer JSON: {"summary": "what you fixed"}.`}
               // for the operator.
               const fastForward = sh(["git", "merge-base", "--is-ancestor", "origin/main", "HEAD"]);
               if (!fastForward.ok) {
-                throw new Error("origin/main has new commits; rebasing under other agents' uncommitted changes is unsafe. Reconcile manually, then retry this task.");
+                throw new Error(
+                  "origin/main has new commits; rebasing under other agents' uncommitted changes is unsafe. Reconcile manually, then retry this task.",
+                );
               }
               const push = sh(["git", "push", "origin", "HEAD:main"]);
               if (!push.ok) throw new Error(`git push failed:\n${push.log}`);
@@ -317,21 +324,41 @@ Final answer JSON: {"summary": "what you fixed"}.`}
                 headers: { "content-type": "application/json" },
                 body: JSON.stringify({ oidcToken: "not-a-jwt" }),
               });
-              expect("sessions rejects garbage", badSession.status === 400 || badSession.status === 401, `status ${badSession.status}`);
+              expect(
+                "sessions rejects garbage",
+                badSession.status === 400 || badSession.status === 401,
+                `status ${badSession.status}`,
+              );
               const badProxy = await fetch(`${serviceUrl}/anthropic/v1/messages`, {
                 method: "POST",
                 headers: { "x-api-key": "srk_invalid", "content-type": "application/json" },
-                body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }),
+                body: JSON.stringify({
+                  model: "claude-sonnet-5",
+                  max_tokens: 1,
+                  messages: [{ role: "user", content: "hi" }],
+                }),
               });
               expect("proxy rejects unknown key", badProxy.status === 401, `status ${badProxy.status}`);
-              const metrics = await fetch(`${serviceUrl}/metrics`, { headers: { authorization: `Bearer ${metricsToken}` } });
+              const metrics = await fetch(`${serviceUrl}/metrics`, {
+                headers: { authorization: `Bearer ${metricsToken}` },
+              });
               const metricsBody = metrics.ok ? await metrics.text() : "";
-              expect("metrics serves exposition", metrics.ok && metricsBody.includes("review_"), `status ${metrics.status}`);
+              expect(
+                "metrics serves exposition",
+                metrics.ok && metricsBody.includes("review_"),
+                `status ${metrics.status}`,
+              );
               const metricsUnauth = await fetch(`${serviceUrl}/metrics`);
               expect("metrics requires bearer", metricsUnauth.status === 401, `status ${metricsUnauth.status}`);
-              const repos = await fetch(`${serviceUrl}/api/admin/repos`, { headers: { authorization: `Bearer ${adminToken}` } });
+              const repos = await fetch(`${serviceUrl}/api/admin/repos`, {
+                headers: { authorization: `Bearer ${adminToken}` },
+              });
               const reposBody = repos.ok ? await repos.text() : "";
-              expect("dogfood repo registered", repos.ok && reposBody.includes("smithersai/smithers"), `status ${repos.status}`);
+              expect(
+                "dogfood repo registered",
+                repos.ok && reposBody.includes("smithersai/smithers"),
+                `status ${repos.status}`,
+              );
               return { ok, detail: checks.join("\n") };
             }}
           </Task>
@@ -341,10 +368,7 @@ Final answer JSON: {"summary": "what you fixed"}.`}
             output={outputs.dogfood}
             agent={agents.implement}
             dependsOn={["smoke"]}
-            skipIf={
-              (ctx.input.dogfood ?? true) === false ||
-              ctx.latest("smoke", "smoke")?.ok !== true
-            }
+            skipIf={(ctx.input.dogfood ?? true) === false || ctx.latest("smoke", "smoke")?.ok !== true}
             timeoutMs={60 * 60 * 1000}
             retries={1}
             continueOnFail

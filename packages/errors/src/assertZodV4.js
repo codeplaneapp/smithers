@@ -21,25 +21,26 @@ import { SmithersError } from "./SmithersError.js";
  * @returns {void}
  */
 export function assertZodV4(schema, where) {
-    if (!schema || typeof schema !== "object")
-        return;
-    const internal = /** @type {{ _zod?: { version?: { major?: number } } }} */ (schema);
-    // Zod v4 fast-path: accept and return. Verified robust across object/string/
-    // array/union/enum/optional plus refine/transform/pipe/lazy/brand/coerce —
-    // every v4 schema instance carries _zod.version.major === 4.
-    if (internal._zod?.version?.major === 4)
-        return;
-    // Only error on things that are recognizably a Zod schema, so a plain config
-    // object that happens to flow through here is never rejected. NOTE: this is
-    // purely an "is this Zod-shaped at all" gate — Zod v4 schemas ALSO carry
-    // `_def`/`parse`, so this clause does NOT discriminate the version; the
-    // `_zod.version` check above is the version discriminator.
-    const candidate = /** @type {{ parse?: unknown }} */ (schema);
-    const looksLikeZod = typeof candidate.parse === "function" || "_def" in schema || "shape" in schema;
-    if (!looksLikeZod)
-        return;
-    const target = where ? ` for "${where}"` : "";
-    throw new SmithersError("INVALID_INPUT", `smithers requires Zod v4 schemas${target}, but received what looks like a Zod v3 (or pre-v4) schema. ` +
-        `Upgrade your project to "zod": "^4" and import schemas from "zod". ` +
-        `smithers reads Zod v4 internals (schema._zod) and uses z.toJSONSchema(), neither of which exists on a Zod v3 schema.`, where ? { schema: where } : undefined);
+  if (!schema || typeof schema !== "object") return;
+  const internal = /** @type {{ _zod?: { version?: { major?: number } } }} */ (schema);
+  // Zod v4 fast-path: accept and return. Verified robust across object/string/
+  // array/union/enum/optional plus refine/transform/pipe/lazy/brand/coerce —
+  // every v4 schema instance carries _zod.version.major === 4.
+  if (internal._zod?.version?.major === 4) return;
+  // Only error on things that are recognizably a Zod schema, so a plain config
+  // object that happens to flow through here is never rejected. NOTE: this is
+  // purely an "is this Zod-shaped at all" gate — Zod v4 schemas ALSO carry
+  // `_def`/`parse`, so this clause does NOT discriminate the version; the
+  // `_zod.version` check above is the version discriminator.
+  const candidate = /** @type {{ parse?: unknown }} */ (schema);
+  const looksLikeZod = typeof candidate.parse === "function" || "_def" in schema || "shape" in schema;
+  if (!looksLikeZod) return;
+  const target = where ? ` for "${where}"` : "";
+  throw new SmithersError(
+    "INVALID_INPUT",
+    `smithers requires Zod v4 schemas${target}, but received what looks like a Zod v3 (or pre-v4) schema. ` +
+      `Upgrade your project to "zod": "^4" and import schemas from "zod". ` +
+      `smithers reads Zod v4 internals (schema._zod) and uses z.toJSONSchema(), neither of which exists on a Zod v3 schema.`,
+    where ? { schema: where } : undefined,
+  );
 }

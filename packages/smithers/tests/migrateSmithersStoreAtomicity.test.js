@@ -25,8 +25,9 @@ describe("migrateSmithersStore atomic target writes", () => {
       await closeApi(target);
     }
 
-    await expect(migrateSmithersStore({ cwd, from: "sqlite", to: "pglite", env: {} }))
-      .rejects.toThrow("reject_migration_node");
+    await expect(migrateSmithersStore({ cwd, from: "sqlite", to: "pglite", env: {} })).rejects.toThrow(
+      "reject_migration_node",
+    );
 
     const rolledBack = await openPgliteTarget(cwd);
     try {

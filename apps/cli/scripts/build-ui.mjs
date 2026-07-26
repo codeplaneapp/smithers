@@ -23,9 +23,7 @@ if (!existsSync(join(appDir, "package.json"))) {
 
 const viteBin = join(appDir, "node_modules", ".bin", "vite");
 if (!existsSync(viteBin)) {
-  console.error(
-    `[build-ui] vite is not installed in ${appDir}. Run \`pnpm install\` before packing the CLI.`,
-  );
+  console.error(`[build-ui] vite is not installed in ${appDir}. Run \`pnpm install\` before packing the CLI.`);
   process.exit(1);
 }
 

@@ -19,13 +19,10 @@ import { codexFirst } from "../lib/codexAccounts";
 
 export const SOL_MODEL = process.env.SMITHERS_SOL_MODEL?.trim() || "gpt-5.6-sol";
 export const TERRA_MODEL = process.env.SMITHERS_TERRA_MODEL?.trim() || "gpt-5.6-terra";
-export const IMPLEMENTER_MODEL =
-  process.env.SMITHERS_IMPLEMENTER_MODEL?.trim() || "gpt-5.6-terra";
+export const IMPLEMENTER_MODEL = process.env.SMITHERS_IMPLEMENTER_MODEL?.trim() || "gpt-5.6-terra";
 
 const testAgentPath = process.env.SMITHERS_TEST_AGENT_PATH?.trim();
-const testAgentEnv = testAgentPath
-  ? { ...process.env, PATH: testAgentPath }
-  : undefined;
+const testAgentEnv = testAgentPath ? { ...process.env, PATH: testAgentPath } : undefined;
 
 function commandExists(command: string): boolean {
   const searchPath = testAgentPath || process.env.PATH || "";
@@ -75,9 +72,7 @@ const fable = new ClaudeCodeAgent({ model: "claude-fable-5", env: testAgentEnv }
 const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8", env: testAgentEnv });
 const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-5", env: testAgentEnv });
 
-const implementationFallbacks: AgentLike[] = [
-  ...(hasClaude ? [sonnet, fable] : []),
-];
+const implementationFallbacks: AgentLike[] = [...(hasClaude ? [sonnet, fable] : [])];
 
 /** Terra implementation chain; non-Codex agents engage only when Terra cannot. */
 export const implementer: AgentLike[] = codexFirst(implementerOptions, implementationFallbacks);
@@ -85,9 +80,7 @@ export const implementer: AgentLike[] = codexFirst(implementerOptions, implement
 /** Terra validation/mid-tier chain. */
 export const validator: AgentLike[] = codexFirst(terraOptions, implementationFallbacks);
 
-const solFallbacks: AgentLike[] = [
-  ...(hasClaude ? [fable, opus] : []),
-];
+const solFallbacks: AgentLike[] = [...(hasClaude ? [fable, opus] : [])];
 
 /** Fable-first author chain; Sol takes over only when Claude is unavailable. */
 export const fableAuthor: AgentLike[] = [

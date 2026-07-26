@@ -11,13 +11,13 @@ import { SANDBOX_EGRESS_CA_BUNDLE_RELATIVE_PATH } from "../egress.js";
  * @returns {Promise<string | null>}
  */
 export async function uploadEgressCaToSession(session, egress, workdir) {
-	const caCertPem = egress?.caCertPem;
-	if (typeof caCertPem !== "string" || caCertPem.length === 0) {
-		return null;
-	}
-	const caPath = absolutePath(workdir, SANDBOX_EGRESS_CA_BUNDLE_RELATIVE_PATH);
-	await session.writeFile(caPath, caCertPem);
-	return caPath;
+  const caCertPem = egress?.caCertPem;
+  if (typeof caCertPem !== "string" || caCertPem.length === 0) {
+    return null;
+  }
+  const caPath = absolutePath(workdir, SANDBOX_EGRESS_CA_BUNDLE_RELATIVE_PATH);
+  await session.writeFile(caPath, caCertPem);
+  return caPath;
 }
 
 /**
@@ -26,5 +26,5 @@ export async function uploadEgressCaToSession(session, egress, workdir) {
  * @returns {string}
  */
 function absolutePath(workdir, path) {
-	return path.startsWith("/") ? path : `${workdir.replace(/\/+$/g, "")}/${path.replace(/^\/+/g, "")}`;
+  return path.startsWith("/") ? path : `${workdir.replace(/\/+$/g, "")}/${path.replace(/^\/+/g, "")}`;
 }

@@ -7,9 +7,9 @@ import { countNodes } from "./countNodes.js";
  * @returns {DevToolsSnapshot}
  */
 export function buildSnapshot(root) {
-    if (!root) {
-        return { tree: null, nodeCount: 0, taskCount: 0, timestamp: Date.now() };
-    }
-    const { nodes, tasks } = countNodes(root);
-    return { tree: root, nodeCount: nodes, taskCount: tasks, timestamp: Date.now() };
+  if (!root) {
+    return { tree: null, nodeCount: 0, taskCount: 0, timestamp: Date.now() };
+  }
+  const { nodes, tasks } = countNodes(root);
+  return { tree: root, nodeCount: nodes, taskCount: tasks, timestamp: Date.now() };
 }

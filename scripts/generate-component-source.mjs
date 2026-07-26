@@ -54,9 +54,7 @@ function compositeSlugs() {
   };
   visit(json);
   if (!pages) throw new Error('Could not find the "Composite" group in docs/docs.json');
-  return pages
-    .filter((page) => typeof page === "string")
-    .map((page) => page.replace(/^components\//, ""));
+  return pages.filter((page) => typeof page === "string").map((page) => page.replace(/^components\//, ""));
 }
 
 /** Read the component name from a page's frontmatter `title: <Name>`. */

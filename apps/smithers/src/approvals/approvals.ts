@@ -73,9 +73,7 @@ export function shortRunId(runId: string): string {
 
 /** Keep only the gates still waiting on a decision (Swift filterPendingApprovals). */
 export function filterPending(gates: ApprovalGate[]): ApprovalGate[] {
-  return gates
-    .filter((gate) => gate.status === "pending")
-    .sort((a, b) => a.requestedAtMs - b.requestedAtMs);
+  return gates.filter((gate) => gate.status === "pending").sort((a, b) => a.requestedAtMs - b.requestedAtMs);
 }
 
 /** History newest-first by resolution time (most recent decision on top). */

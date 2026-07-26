@@ -66,11 +66,15 @@ const reviewSchema = z.object({
   laneId: laneIdSchema,
   approved: z.boolean(),
   feedback: z.string().min(10),
-  issues: z.array(z.object({
-    severity: z.enum(["critical", "major", "minor", "nit"]),
-    title: z.string(),
-    description: z.string(),
-  })).default([]),
+  issues: z
+    .array(
+      z.object({
+        severity: z.enum(["critical", "major", "minor", "nit"]),
+        title: z.string(),
+        description: z.string(),
+      }),
+    )
+    .default([]),
 });
 const laneResultSchema = z.object({
   laneId: laneIdSchema,
@@ -90,12 +94,16 @@ const ciSchema = z.object({
   wave: z.number().int().min(1).max(2),
   allPassed: z.boolean(),
   summary: z.string().min(5),
-  commands: z.array(z.object({
-    command: z.string(),
-    exitCode: z.number().nullable(),
-    stdout: z.string(),
-    stderr: z.string(),
-  })).default([]),
+  commands: z
+    .array(
+      z.object({
+        command: z.string(),
+        exitCode: z.number().nullable(),
+        stdout: z.string(),
+        stderr: z.string(),
+      }),
+    )
+    .default([]),
 });
 const ciFixSchema = z.object({
   wave: z.number().int().min(1).max(2),
@@ -246,7 +254,7 @@ const LANES: Lane[] = [
     title: "Standalone theme bundle for generated/served HTML",
     spec: [
       "Agent-generated and server-generated HTML currently invents its own CSS. Give it a design contract:",
-      "- In packages/ui-styleguide, export a standaloneThemeCss() (own file, named export) returning ONE self-contained CSS string: the light tokens on :root, dark overrides under BOTH @media (prefers-color-scheme: dark) with :root:not([data-theme=\"light\"]) AND :root[data-theme=\"dark\"], plus a minimal base layer (body font/bg/text, headings, links, code/inline-code, table, hr) written entirely against the tokens. Keep it under ~8KB.",
+      '- In packages/ui-styleguide, export a standaloneThemeCss() (own file, named export) returning ONE self-contained CSS string: the light tokens on :root, dark overrides under BOTH @media (prefers-color-scheme: dark) with :root:not([data-theme="light"]) AND :root[data-theme="dark"], plus a minimal base layer (body font/bg/text, headings, links, code/inline-code, table, hr) written entirely against the tokens. Keep it under ~8KB.',
       "- Rewrite .smithers/prompts/report-slideshow-render.mdx so the agent MUST embed that exact token block (include the literal CSS in the prompt via the export at pack-generation time, or instruct reading it from the package) and build all slide styling on the semantic tokens; forbid off-palette hardcoded hex.",
       "- Refactor apps/review/src/walkthrough/walkthroughCss.ts to import/compose standaloneThemeCss() for its token+base layer and keep only walkthrough-specific rules on top; delete the duplicated token definitions. apps/review/src/server/landingPage.ts likewise.",
       "- Tests: a ui-styleguide test asserting the bundle contains both dark strategies and no rule outside the token vocabulary for colors; an apps/review test asserting the rendered walkthrough HTML embeds the shared tokens.",
@@ -271,7 +279,13 @@ const LANES: Lane[] = [
 
 // ── Helpers (proven shapes from studio-parity-swarm) ────────────────────────
 function slug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "item";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 64) || "item"
+  );
 }
 
 export function resolveRepoRoot(): string {
@@ -295,12 +309,14 @@ function baseNodeId(row: RawRow): string {
 }
 
 function latestRaw(rows: RawRow[], nodeId: string): RawRow | undefined {
-  return rows.filter((row) => baseNodeId(row) === nodeId).reduce<RawRow | undefined>((best, row) => {
-    if (!best) return row;
-    const current = rowVersion(row);
-    const previous = rowVersion(best);
-    return current[0] > previous[0] || (current[0] === previous[0] && current[1] >= previous[1]) ? row : best;
-  }, undefined);
+  return rows
+    .filter((row) => baseNodeId(row) === nodeId)
+    .reduce<RawRow | undefined>((best, row) => {
+      if (!best) return row;
+      const current = rowVersion(row);
+      const previous = rowVersion(best);
+      return current[0] > previous[0] || (current[0] === previous[0] && current[1] >= previous[1]) ? row : best;
+    }, undefined);
 }
 
 function sameVersion(left: RawRow | undefined, right: RawRow | undefined): boolean {
@@ -311,15 +327,27 @@ function sameVersion(left: RawRow | undefined, right: RawRow | undefined): boole
 }
 
 export function laneState(ctx: any, lane: Lane, maxIterations: number) {
-  const implRows = rawRows(ctx, "bpuiImpl").filter((row) => baseNodeId(row) === `lane-${lane.id}-implement` && row.laneId === lane.id);
+  const implRows = rawRows(ctx, "bpuiImpl").filter(
+    (row) => baseNodeId(row) === `lane-${lane.id}-implement` && row.laneId === lane.id,
+  );
   const implementation = latestRaw(implRows, `lane-${lane.id}-implement`);
-  const validation = latestRaw(rawRows(ctx, "bpuiValidation").filter((row) => row.laneId === lane.id), `lane-${lane.id}-validate`);
-  const review = latestRaw(rawRows(ctx, "bpuiReview").filter((row) => row.laneId === lane.id), `lane-${lane.id}-review`);
+  const validation = latestRaw(
+    rawRows(ctx, "bpuiValidation").filter((row) => row.laneId === lane.id),
+    `lane-${lane.id}-validate`,
+  );
+  const review = latestRaw(
+    rawRows(ctx, "bpuiReview").filter((row) => row.laneId === lane.id),
+    `lane-${lane.id}-review`,
+  );
   const validationCurrent = sameVersion(implementation, validation);
   const reviewCurrent = validationCurrent && sameVersion(validation, review);
-  const done = implementation?.status === "implemented"
-    && validationCurrent && validation?.allPassed === true && validation?.diffNonEmpty === true
-    && reviewCurrent && review?.approved === true;
+  const done =
+    implementation?.status === "implemented" &&
+    validationCurrent &&
+    validation?.allPassed === true &&
+    validation?.diffNonEmpty === true &&
+    reviewCurrent &&
+    review?.approved === true;
   const finalAttemptComplete = validationCurrent && (validation?.allPassed === false || reviewCurrent);
   return {
     implementation,
@@ -335,10 +363,18 @@ export function laneState(ctx: any, lane: Lane, maxIterations: number) {
 
 function laneFeedback(state: ReturnType<typeof laneState>): string {
   const parts: string[] = [];
-  if (state.implementation && state.implementation.status !== "implemented") parts.push(`IMPLEMENTATION ${String(state.implementation.status).toUpperCase()}:\n${String(state.implementation.summary ?? "")}`);
-  if (state.validationCurrent && state.validation?.allPassed === false) parts.push(`VALIDATION FAILED:\n${String(state.validation.failingSummary ?? state.validation.summary ?? "")}`);
-  if (state.validationCurrent && state.validation?.diffNonEmpty === false) parts.push("VALIDATION FAILED: the worktree diff against the base branch is EMPTY. Your changes did not land in this worktree; re-apply them here.");
-  if (state.reviewCurrent && state.review?.approved === false) parts.push(`REVIEW NOT LGTM:\n${String(state.review.feedback ?? "")}`);
+  if (state.implementation && state.implementation.status !== "implemented")
+    parts.push(
+      `IMPLEMENTATION ${String(state.implementation.status).toUpperCase()}:\n${String(state.implementation.summary ?? "")}`,
+    );
+  if (state.validationCurrent && state.validation?.allPassed === false)
+    parts.push(`VALIDATION FAILED:\n${String(state.validation.failingSummary ?? state.validation.summary ?? "")}`);
+  if (state.validationCurrent && state.validation?.diffNonEmpty === false)
+    parts.push(
+      "VALIDATION FAILED: the worktree diff against the base branch is EMPTY. Your changes did not land in this worktree; re-apply them here.",
+    );
+  if (state.reviewCurrent && state.review?.approved === false)
+    parts.push(`REVIEW NOT LGTM:\n${String(state.review.feedback ?? "")}`);
   return parts.join("\n\n");
 }
 
@@ -367,7 +403,10 @@ export function runWaveCi(wave: 1 | 2, cwd: string) {
   return {
     wave,
     allPassed: failed.length === 0,
-    summary: failed.length === 0 ? `Wave ${wave} gates green.` : `Wave ${wave}: ${failed.length} gate(s) failed: ${failed.map((f) => f.command).join("; ")}`,
+    summary:
+      failed.length === 0
+        ? `Wave ${wave} gates green.`
+        : `Wave ${wave}: ${failed.length} gate(s) failed: ${failed.map((f) => f.command).join("; ")}`,
     commands: results,
   };
 }
@@ -410,12 +449,16 @@ function implementPrompt(lane: Lane, spec: RawRow | undefined, feedback: string)
     `Implement lane ${lane.id}: ${lane.title}`,
     `Return laneId=${lane.id} exactly.`,
     lane.spec,
-    lane.wave === 1 ? `Frozen API spec (build EXACTLY this surface):\n${String(spec?.componentApis ?? "")}\n\nSpec detail for your lane (search for your components):\n${String(spec?.specMarkdown ?? "")}` : "",
+    lane.wave === 1
+      ? `Frozen API spec (build EXACTLY this surface):\n${String(spec?.componentApis ?? "")}\n\nSpec detail for your lane (search for your components):\n${String(spec?.specMarkdown ?? "")}`
+      : "",
     HOUSE_RULES,
     "Definition of done: new behavior covered by tests that went red before your change and green after; the owning package's focused test command passes; your worktree diff is non-empty and scoped to your lane.",
     feedback ? `Feedback on your previous attempt (fix ALL of it):\n${feedback}` : "",
     "Return implemented only when focused checks pass in THIS worktree; otherwise return partial or blocked truthfully with the failing output in summary.",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function validatePrompt(lane: Lane, implementation: RawRow | undefined): string {
@@ -431,10 +474,17 @@ function validatePrompt(lane: Lane, implementation: RawRow | undefined): string 
   ].join("\n");
 }
 
-function reviewPrompt(lane: Lane, spec: RawRow | undefined, implementation: RawRow | undefined, validation: RawRow | undefined): string {
+function reviewPrompt(
+  lane: Lane,
+  spec: RawRow | undefined,
+  implementation: RawRow | undefined,
+  validation: RawRow | undefined,
+): string {
   return [
     `Strictly review the green candidate for lane ${lane.id}. Do not edit files. Return laneId=${lane.id} exactly.`,
-    lane.wave === 1 ? `The frozen API spec it must match:\n${String(spec?.componentApis ?? "")}` : `Lane scope:\n${lane.spec}`,
+    lane.wave === 1
+      ? `The frozen API spec it must match:\n${String(spec?.componentApis ?? "")}`
+      : `Lane scope:\n${lane.spec}`,
     `Implementation:\n${JSON.stringify(implementation ?? null, null, 2)}`,
     `Validation:\n${JSON.stringify(validation ?? null, null, 2)}`,
     "Review the DIFF in this worktree against: spec conformance (exact exported surface), the house architecture contract (tokens-only colors, CSS-as-string, data-slot anatomy, useInjectUiCss, no new deps), dark-mode correctness, test quality (red-to-green, meaningful assertions), and merge cleanliness (append-point discipline in index.ts/uiCss.ts/provenance).",
@@ -503,11 +553,17 @@ export default smithers((ctx) => {
   const ciRows = rawRows(ctx, "bpuiCi").filter((row) => baseNodeId(row).startsWith("bpui-ci-wave"));
 
   const waveLanes = (wave: 1 | 2) => LANES.filter((lane) => lane.wave === wave);
-  const waveSettled = (wave: 1 | 2) => waveLanes(wave).every((lane) => laneResults.some((row) => row.laneId === lane.id));
-  const waveMerged = (wave: 1 | 2) => waveLanes(wave)
-    .filter((lane) => laneResults.some((row) => row.laneId === lane.id && row.lgtm === true))
-    .every((lane) => merges.some((row) => row.laneId === lane.id && row.mergedToMain === true));
-  const waveCi = (wave: 1 | 2) => latestRaw(ciRows.filter((row) => row.wave === wave), `bpui-ci-wave${wave}`);
+  const waveSettled = (wave: 1 | 2) =>
+    waveLanes(wave).every((lane) => laneResults.some((row) => row.laneId === lane.id));
+  const waveMerged = (wave: 1 | 2) =>
+    waveLanes(wave)
+      .filter((lane) => laneResults.some((row) => row.laneId === lane.id && row.lgtm === true))
+      .every((lane) => merges.some((row) => row.laneId === lane.id && row.mergedToMain === true));
+  const waveCi = (wave: 1 | 2) =>
+    latestRaw(
+      ciRows.filter((row) => row.wave === wave),
+      `bpui-ci-wave${wave}`,
+    );
   const waveGreen = (wave: 1 | 2) => waveCi(wave)?.allPassed === true;
   const waveDone = (wave: 1 | 2) => waveSettled(wave) && waveMerged(wave) && waveGreen(wave);
 
@@ -522,16 +578,44 @@ export default smithers((ctx) => {
           return (
             <Worktree key={lane.id} path={worktreePath} branch={branch} baseBranch={input.baseBranch}>
               <Sequence>
-                <Loop id={`lane-${lane.id}-loop`} until={state.done} maxIterations={input.perLaneIterations} onMaxReached="return-last">
+                <Loop
+                  id={`lane-${lane.id}-loop`}
+                  until={state.done}
+                  maxIterations={input.perLaneIterations}
+                  onMaxReached="return-last"
+                >
                   <Sequence>
-                    <Task id={`lane-${lane.id}-implement`} output={outputs.bpuiImpl} agent={implementAgents} retries={2} timeoutMs={90 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                    <Task
+                      id={`lane-${lane.id}-implement`}
+                      output={outputs.bpuiImpl}
+                      agent={implementAgents}
+                      retries={2}
+                      timeoutMs={90 * 60_000}
+                      heartbeatTimeoutMs={10 * 60_000}
+                    >
                       {implementPrompt(lane, spec, laneFeedback(state))}
                     </Task>
-                    <Task id={`lane-${lane.id}-validate`} output={outputs.bpuiValidation} agent={terraChain} retries={2} timeoutMs={35 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                    <Task
+                      id={`lane-${lane.id}-validate`}
+                      output={outputs.bpuiValidation}
+                      agent={terraChain}
+                      retries={2}
+                      timeoutMs={35 * 60_000}
+                      heartbeatTimeoutMs={10 * 60_000}
+                    >
                       {validatePrompt(lane, state.implementation)}
                     </Task>
-                    {state.validationCurrent && state.validation?.allPassed === true && state.validation?.diffNonEmpty === true ? (
-                      <Task id={`lane-${lane.id}-review`} output={outputs.bpuiReview} agent={solChain} retries={2} timeoutMs={35 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                    {state.validationCurrent &&
+                    state.validation?.allPassed === true &&
+                    state.validation?.diffNonEmpty === true ? (
+                      <Task
+                        id={`lane-${lane.id}-review`}
+                        output={outputs.bpuiReview}
+                        agent={solChain}
+                        retries={2}
+                        timeoutMs={35 * 60_000}
+                        heartbeatTimeoutMs={10 * 60_000}
+                      >
                         {reviewPrompt(lane, spec, state.implementation, state.validation)}
                       </Task>
                     ) : null}
@@ -544,7 +628,9 @@ export default smithers((ctx) => {
                     worktreePath,
                     lgtm: state.done,
                     exhausted: state.exhausted,
-                    summary: state.done ? `Lane ${lane.id} LGTM after ${state.attempts} attempt(s).` : `Lane ${lane.id} settled without LGTM after ${state.attempts} attempt(s).`,
+                    summary: state.done
+                      ? `Lane ${lane.id} LGTM after ${state.attempts} attempt(s).`
+                      : `Lane ${lane.id} settled without LGTM after ${state.attempts} attempt(s).`,
                   }}
                 </Task>
               </Sequence>
@@ -555,9 +641,22 @@ export default smithers((ctx) => {
 
       <MergeQueue id={`bpui-merge-queue-wave${wave}`} maxConcurrency={1}>
         {laneResults
-          .filter((row) => waveLanes(wave).some((lane) => lane.id === row.laneId) && row.lgtm === true && !merges.some((merge) => merge.laneId === row.laneId && merge.mergedToMain === true))
+          .filter(
+            (row) =>
+              waveLanes(wave).some((lane) => lane.id === row.laneId) &&
+              row.lgtm === true &&
+              !merges.some((merge) => merge.laneId === row.laneId && merge.mergedToMain === true),
+          )
           .map((row) => (
-            <Task key={String(row.laneId)} id={`merge-${slug(String(row.laneId))}`} output={outputs.bpuiMerge} agent={terraChain} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+            <Task
+              key={String(row.laneId)}
+              id={`merge-${slug(String(row.laneId))}`}
+              output={outputs.bpuiMerge}
+              agent={terraChain}
+              retries={2}
+              timeoutMs={45 * 60_000}
+              heartbeatTimeoutMs={10 * 60_000}
+            >
               {mergePrompt(row, input.baseBranch)}
             </Task>
           ))}
@@ -570,7 +669,14 @@ export default smithers((ctx) => {
               {() => runWaveCi(wave, repoRoot)}
             </Task>
             {waveCi(wave) && waveCi(wave)?.allPassed === false ? (
-              <Task id={`bpui-ci-fix-wave${wave}`} output={outputs.bpuiCiFix} agent={solChain} retries={2} timeoutMs={60 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+              <Task
+                id={`bpui-ci-fix-wave${wave}`}
+                output={outputs.bpuiCiFix}
+                agent={solChain}
+                retries={2}
+                timeoutMs={60 * 60_000}
+                heartbeatTimeoutMs={10 * 60_000}
+              >
                 {ciFixPrompt(wave, waveCi(wave))}
               </Task>
             ) : null}
@@ -586,10 +692,27 @@ export default smithers((ctx) => {
       <Sequence>
         <Loop id="bpui-design-loop" until={specApproved} maxIterations={2} onMaxReached="return-last">
           <Sequence>
-            <Task id="design-freeze" output={outputs.bpuiSpec} agent={designAgents} retries={2} timeoutMs={60 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
-              {designPrompt() + (specReview && specReview.approved === false ? `\n\nPrevious spec review feedback (address ALL of it):\n${String(specReview.feedback ?? "")}` : "")}
+            <Task
+              id="design-freeze"
+              output={outputs.bpuiSpec}
+              agent={designAgents}
+              retries={2}
+              timeoutMs={60 * 60_000}
+              heartbeatTimeoutMs={10 * 60_000}
+            >
+              {designPrompt() +
+                (specReview && specReview.approved === false
+                  ? `\n\nPrevious spec review feedback (address ALL of it):\n${String(specReview.feedback ?? "")}`
+                  : "")}
             </Task>
-            <Task id="design-review" output={outputs.bpuiSpecReview} agent={solChain} retries={2} timeoutMs={30 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+            <Task
+              id="design-review"
+              output={outputs.bpuiSpecReview}
+              agent={solChain}
+              retries={2}
+              timeoutMs={30 * 60_000}
+              heartbeatTimeoutMs={10 * 60_000}
+            >
               {specReviewPrompt(spec)}
             </Task>
           </Sequence>
@@ -599,7 +722,14 @@ export default smithers((ctx) => {
         {specSettled && waveDone(1) ? renderWave(2) : null}
 
         {specSettled && waveDone(1) && waveDone(2) ? (
-          <Task id="final-audit" output={outputs.bpuiAudit} agent={auditAgents} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+          <Task
+            id="final-audit"
+            output={outputs.bpuiAudit}
+            agent={auditAgents}
+            retries={2}
+            timeoutMs={45 * 60_000}
+            heartbeatTimeoutMs={10 * 60_000}
+          >
             {auditPrompt(ctx)}
           </Task>
         ) : null}

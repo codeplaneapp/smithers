@@ -13,16 +13,8 @@ type EngineOutputHelpers = {
   resolveTaskOutputs: (tasks: readonly TaskDescriptor[], workflow: unknown) => void;
 };
 type TaskComputeFnHelpers = {
-  attachSubflowComputeFns: (
-    tasks: readonly TaskDescriptor[],
-    workflow: unknown,
-    opts: ComputeFnOptions,
-  ) => void;
-  attachSandboxComputeFns: (
-    tasks: readonly TaskDescriptor[],
-    workflow: unknown,
-    opts: ComputeFnOptions,
-  ) => void;
+  attachSubflowComputeFns: (tasks: readonly TaskDescriptor[], workflow: unknown, opts: ComputeFnOptions) => void;
+  attachSandboxComputeFns: (tasks: readonly TaskDescriptor[], workflow: unknown, opts: ComputeFnOptions) => void;
 };
 
 export type SimulateMockFunction = (args: {
@@ -65,9 +57,7 @@ type MutableTaskRecord = {
   prompts: unknown[];
 };
 
-type MockResolution =
-  | { matched: true; key: string; value: unknown }
-  | { matched: false };
+type MockResolution = { matched: true; key: string; value: unknown } | { matched: false };
 
 type RenderOptions = ExtractOptions & {
   trigger?: unknown;
@@ -111,9 +101,7 @@ function formatIssues(issues: readonly unknown[]): string {
   return issues
     .map((issue) => {
       if (!isObject(issue)) return JSON.stringify(issue);
-      const path = Array.isArray(issue.path) && issue.path.length > 0
-        ? `${issue.path.map(String).join(".")}: `
-        : "";
+      const path = Array.isArray(issue.path) && issue.path.length > 0 ? `${issue.path.map(String).join(".")}: ` : "";
       const message = "message" in issue ? String(issue.message) : JSON.stringify(issue);
       return `${path}${message}`;
     })
@@ -155,14 +143,10 @@ function validateTaskOutput(task: TaskDescriptor, value: unknown): unknown {
 }
 
 function isAgentTask(task: TaskDescriptor): boolean {
-  return task.kind === "agent" ||
-    (task.agent != null && task.computeFn == null && task.staticPayload === undefined);
+  return task.kind === "agent" || (task.agent != null && task.computeFn == null && task.staticPayload === undefined);
 }
 
-function getTaskRecord(
-  records: Map<string, MutableTaskRecord>,
-  nodeId: string,
-): MutableTaskRecord {
+function getTaskRecord(records: Map<string, MutableTaskRecord>, nodeId: string): MutableTaskRecord {
   let record = records.get(nodeId);
   if (!record) {
     record = { status: "pending", outputs: [], prompts: [] };
@@ -179,11 +163,7 @@ function copyTaskRecord(record: MutableTaskRecord | undefined): SimTaskRecord {
   };
 }
 
-function resolveMock(
-  mocks: Record<string, unknown>,
-  task: TaskDescriptor,
-  agentTask: boolean,
-): MockResolution {
+function resolveMock(mocks: Record<string, unknown>, task: TaskDescriptor, agentTask: boolean): MockResolution {
   if (Object.prototype.hasOwnProperty.call(mocks, task.nodeId)) {
     return { matched: true, key: task.nodeId, value: mocks[task.nodeId] };
   }
@@ -287,16 +267,16 @@ export function simulate<Schema = unknown>(
 
   const smithersRenderer = new SmithersRenderer();
   const renderer = {
-    async render(element: Parameters<SmithersRenderer["render"]>[0], extractOptions?: RenderOptions): Promise<WorkflowGraph> {
+    async render(
+      element: Parameters<SmithersRenderer["render"]>[0],
+      extractOptions?: RenderOptions,
+    ): Promise<WorkflowGraph> {
       const graph = await smithersRenderer.render(element, extractOptions);
       const rootDir = extractOptions?.baseRootDir ?? options.rootDir;
       const workflowPath = extractOptions?.workflowPath ?? options.workflowPath ?? null;
-      const engineHelpers = (await import(
-        "@smithers-orchestrator/engine/engine"
-      )) as unknown as EngineOutputHelpers;
-      const computeHelpers = (await import(
-        "@smithers-orchestrator/engine/task-compute-fns"
-      )) as unknown as TaskComputeFnHelpers;
+      const engineHelpers = (await import("@smithers-orchestrator/engine/engine")) as unknown as EngineOutputHelpers;
+      const computeHelpers =
+        (await import("@smithers-orchestrator/engine/task-compute-fns")) as unknown as TaskComputeFnHelpers;
       engineHelpers.resolveTaskOutputs(graph.tasks, workflow);
       computeHelpers.attachSubflowComputeFns(graph.tasks, workflow, {
         rootDir,
@@ -357,16 +337,14 @@ export function simulate<Schema = unknown>(
       const driver = new WorkflowDriver({
         workflow,
         runtime: {
-          runPromise: <A>(effect: unknown) =>
-            Effect.runPromise(effect as Effect.Effect<A, unknown, never>),
+          runPromise: <A>(effect: unknown) => Effect.runPromise(effect as Effect.Effect<A, unknown, never>),
         },
         renderer,
         createSession: (sessionOptions) =>
           makeWorkflowSession({
             runId: sessionOptions.runId,
             requireStableFinish: true,
-            requireRerenderOnOutputChange:
-              sessionOptions.options?.requireRerenderOnOutputChange !== false,
+            requireRerenderOnOutputChange: sessionOptions.options?.requireRerenderOnOutputChange !== false,
           }),
         executeTask,
       });
@@ -382,9 +360,7 @@ export function simulate<Schema = unknown>(
         handle.output = result.output;
       }
       if (result.failedChildren && result.failedChildren > 0) {
-        handle.warnings.push(
-          `simulate(): run finished with ${result.failedChildren} failed child task(s).`,
-        );
+        handle.warnings.push(`simulate(): run finished with ${result.failedChildren} failed child task(s).`);
       }
       if (result.status === "failed") {
         handle.error = lastExecutionError ?? result.error;

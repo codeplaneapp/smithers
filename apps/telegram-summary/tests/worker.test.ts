@@ -33,7 +33,10 @@ describe("telegram summary worker", () => {
 
   test("protects manual mutation endpoints", async () => {
     const env = buildEnv();
-    const response = await worker.fetch(new Request("https://telegram-summary.smithers.sh/api/run-digest", { method: "POST" }), env);
+    const response = await worker.fetch(
+      new Request("https://telegram-summary.smithers.sh/api/run-digest", { method: "POST" }),
+      env,
+    );
     expect(response.status).toBe(401);
   });
 

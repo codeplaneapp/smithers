@@ -8,7 +8,6 @@ import { retryScheduleDelayMs } from "./retryScheduleDelayMs.js";
  * @returns {number}
  */
 export function computeRetryDelayMs(policy, attempt) {
-    if (!policy)
-        return 0;
-    return retryScheduleDelayMs(retryPolicyToSchedule(policy), attempt);
+  if (!policy) return 0;
+  return retryScheduleDelayMs(retryPolicyToSchedule(policy), attempt);
 }

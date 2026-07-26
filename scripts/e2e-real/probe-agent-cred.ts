@@ -2,10 +2,7 @@ import { listAccounts } from "@smithers-orchestrator/accounts";
 import { resolve } from "node:path";
 
 const repoRoot = resolve(import.meta.dir, "../..");
-const model =
-  process.env.SMITHERS_E2E_LUNA_MODEL ??
-  process.env.SMITHERS_E2E_CODEX_MODEL ??
-  "gpt-5.6-luna";
+const model = process.env.SMITHERS_E2E_LUNA_MODEL ?? process.env.SMITHERS_E2E_CODEX_MODEL ?? "gpt-5.6-luna";
 const unusablePattern = /rate[_ -]?limit|session limit|api_error_status.*429/i;
 
 type ProbeResult = { ok: boolean; detail: string };
@@ -67,10 +64,7 @@ try {
 
 const failures: string[] = [];
 for (const candidate of codexCandidates) {
-  const result = await probe(
-    ["codex", "exec", "--skip-git-repo-check", "--model", model, "Say OK"],
-    candidate.env,
-  );
+  const result = await probe(["codex", "exec", "--skip-git-repo-check", "--model", model, "Say OK"], candidate.env);
   if (result.ok) {
     console.log(`Codex credential probe passed with ${candidate.label} (${model}).`);
     process.exit(0);

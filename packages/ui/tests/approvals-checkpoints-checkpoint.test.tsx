@@ -105,7 +105,11 @@ describe("CheckpointTrigger", () => {
 
 describe("CheckpointActions", () => {
   test("defaults to all five Smithers time-travel kinds", async () => {
-    await render(<Checkpoint checkpoint={model}><CheckpointActions onAction={() => {}} /></Checkpoint>);
+    await render(
+      <Checkpoint checkpoint={model}>
+        <CheckpointActions onAction={() => {}} />
+      </Checkpoint>,
+    );
     const kinds = [...container!.querySelectorAll("[data-slot='checkpoint-action']")].map((el) =>
       el.getAttribute("data-action"),
     );
@@ -115,9 +119,7 @@ describe("CheckpointActions", () => {
 
   test("fires onAction with the clicked kind", async () => {
     const fired: CheckpointActionKind[] = [];
-    await render(
-      <CheckpointActions actions={["restore", "rewind"]} onAction={(kind) => fired.push(kind)} />,
-    );
+    await render(<CheckpointActions actions={["restore", "rewind"]} onAction={(kind) => fired.push(kind)} />);
     const rewind = container!.querySelector("[data-action='rewind']")!;
     await act(async () => {
       rewind.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));

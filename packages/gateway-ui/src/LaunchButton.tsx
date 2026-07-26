@@ -41,7 +41,11 @@ export function LaunchButton({
   const launch = async () => {
     setBusy(true);
     try {
-      const result = await actions.launchRun({ workflow, ...(input ? { input } : {}), ...(startedBy ? { options: { startedBy } } : {}) });
+      const result = await actions.launchRun({
+        workflow,
+        ...(input ? { input } : {}),
+        ...(startedBy ? { options: { startedBy } } : {}),
+      });
       const runId = (result as { runId?: string } | undefined)?.runId;
       if (runId) onLaunched?.(runId);
     } catch (cause) {

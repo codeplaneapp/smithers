@@ -27,17 +27,11 @@ import crypto from "node:crypto";
  * @returns {number}
  */
 function samplingValue(binding, ctx) {
-    const seed = [
-        ctx.runId,
-        ctx.nodeId,
-        ctx.iteration,
-        ctx.attempt,
-        binding.scorer.id,
-    ].join(" "); // Preserve the historical seed format so existing runs replay deterministically.
-    const digest = crypto.createHash("sha256").update(seed).digest();
-    // Take the first 6 bytes (48 bits) as an integer and normalize to [0, 1).
-    const value = digest.readUIntBE(0, 6);
-    return value / 2 ** 48;
+  const seed = [ctx.runId, ctx.nodeId, ctx.iteration, ctx.attempt, binding.scorer.id].join(" "); // Preserve the historical seed format so existing runs replay deterministically.
+  const digest = crypto.createHash("sha256").update(seed).digest();
+  // Take the first 6 bytes (48 bits) as an integer and normalize to [0, 1).
+  const value = digest.readUIntBE(0, 6);
+  return value / 2 ** 48;
 }
 /**
  * @param {ScorerBinding} binding
@@ -45,17 +39,17 @@ function samplingValue(binding, ctx) {
  * @returns {boolean}
  */
 function shouldRun(binding, ctx) {
-    const sampling = binding.sampling ?? { type: "all" };
-    switch (sampling.type) {
-        case "all":
-            return true;
-        case "none":
-            return false;
-        case "ratio":
-            return samplingValue(binding, ctx) < sampling.rate;
-        default:
-            return true;
-    }
+  const sampling = binding.sampling ?? { type: "all" };
+  switch (sampling.type) {
+    case "all":
+      return true;
+    case "none":
+      return false;
+    case "ratio":
+      return samplingValue(binding, ctx) < sampling.rate;
+    default:
+      return true;
+  }
 }
 /**
  * Emit a scorer lifecycle event through the durable path (DB + NDJSON + live
@@ -69,9 +63,11 @@ function shouldRun(binding, ctx) {
  * @returns {Effect.Effect<void, never>}
  */
 function emitScorerEvent(bus, event) {
-    return Effect.ignore(typeof bus.emitEventWithPersist === "function"
-        ? bus.emitEventWithPersist(event)
-        : Effect.try(() => bus.emit("event", event)));
+  return Effect.ignore(
+    typeof bus.emitEventWithPersist === "function"
+      ? bus.emitEventWithPersist(event)
+      : Effect.try(() => bus.emit("event", event)),
+  );
 }
 // ---------------------------------------------------------------------------
 // Score validation
@@ -92,24 +88,27 @@ function emitScorerEvent(bus, event) {
  * @returns {ScoreResult}
  */
 function validateScoreResult(result, meta) {
-    const rawScore = result?.score;
-    if (typeof rawScore !== "number" || !Number.isFinite(rawScore)) {
-        throw toSmithersError(new Error(`Scorer returned a non-finite or missing score: ${String(rawScore)}`), `scorer:${meta.scorerId}`, {
-            code: "SCORER_FAILED",
-            details: {
-                bindingKey: meta.key,
-                scorerId: meta.scorerId,
-                scorerName: meta.scorerName,
-                source: meta.source,
-                rawScore,
-                reason: "invalid-score-result",
-            },
-        });
-    }
-    const clamped = Math.max(0, Math.min(1, rawScore));
-    if (clamped === rawScore)
-        return result;
-    return { ...result, score: clamped };
+  const rawScore = result?.score;
+  if (typeof rawScore !== "number" || !Number.isFinite(rawScore)) {
+    throw toSmithersError(
+      new Error(`Scorer returned a non-finite or missing score: ${String(rawScore)}`),
+      `scorer:${meta.scorerId}`,
+      {
+        code: "SCORER_FAILED",
+        details: {
+          bindingKey: meta.key,
+          scorerId: meta.scorerId,
+          scorerName: meta.scorerName,
+          source: meta.source,
+          rawScore,
+          reason: "invalid-score-result",
+        },
+      },
+    );
+  }
+  const clamped = Math.max(0, Math.min(1, rawScore));
+  if (clamped === rawScore) return result;
+  return { ...result, score: clamped };
 }
 // ---------------------------------------------------------------------------
 // Single scorer execution
@@ -124,116 +123,119 @@ function validateScoreResult(result, meta) {
  * @returns {Effect.Effect<ScoreResult | null, SmithersError>}
  */
 function runSingleScorerEffect(key, binding, ctx, adapter, source, eventBus) {
-    const { scorer } = binding;
-    return Effect.gen(function* () {
-        if (!shouldRun(binding, ctx)) {
-            return null;
-        }
-        yield* Metric.increment(scorersStarted);
-        if (eventBus) {
+  const { scorer } = binding;
+  return Effect.gen(function* () {
+    if (!shouldRun(binding, ctx)) {
+      return null;
+    }
+    yield* Metric.increment(scorersStarted);
+    if (eventBus) {
+      yield* emitScorerEvent(eventBus, {
+        type: "ScorerStarted",
+        runId: ctx.runId,
+        nodeId: ctx.nodeId,
+        scorerId: scorer.id,
+        scorerName: scorer.name,
+        timestampMs: nowMs(),
+      });
+    }
+    const start = performance.now();
+    const result = yield* Effect.tryPromise({
+      try: async () => {
+        const raw = await scorer.score({
+          input: ctx.input,
+          output: ctx.output,
+          groundTruth: ctx.groundTruth,
+          context: ctx.context,
+          latencyMs: ctx.latencyMs,
+          outputSchema: ctx.outputSchema,
+        });
+        return validateScoreResult(raw, {
+          key,
+          scorerId: scorer.id,
+          scorerName: scorer.name,
+          source,
+        });
+      },
+      catch: (cause) =>
+        toSmithersError(cause, `scorer:${scorer.id}`, {
+          code: "SCORER_FAILED",
+          details: {
+            bindingKey: key,
+            scorerId: scorer.id,
+            scorerName: scorer.name,
+            source,
+          },
+        }),
+    }).pipe(
+      Effect.tapError((err) =>
+        Effect.gen(function* () {
+          yield* Metric.increment(scorersFailed);
+          if (eventBus) {
             yield* emitScorerEvent(eventBus, {
-                type: "ScorerStarted",
-                runId: ctx.runId,
-                nodeId: ctx.nodeId,
-                scorerId: scorer.id,
-                scorerName: scorer.name,
-                timestampMs: nowMs(),
+              type: "ScorerFailed",
+              runId: ctx.runId,
+              nodeId: ctx.nodeId,
+              scorerId: scorer.id,
+              scorerName: scorer.name,
+              error: err instanceof Error ? err.message : String(err),
+              timestampMs: nowMs(),
             });
-        }
-        const start = performance.now();
-        const result = yield* Effect.tryPromise({
-            try: async () => {
-                const raw = await scorer.score({
-                    input: ctx.input,
-                    output: ctx.output,
-                    groundTruth: ctx.groundTruth,
-                    context: ctx.context,
-                    latencyMs: ctx.latencyMs,
-                    outputSchema: ctx.outputSchema,
-                });
-                return validateScoreResult(raw, {
-                    key,
-                    scorerId: scorer.id,
-                    scorerName: scorer.name,
-                    source,
-                });
-            },
-            catch: (cause) => toSmithersError(cause, `scorer:${scorer.id}`, {
-                code: "SCORER_FAILED",
-                details: {
-                    bindingKey: key,
-                    scorerId: scorer.id,
-                    scorerName: scorer.name,
-                    source,
-                },
-            }),
-        }).pipe(Effect.tapError((err) => Effect.gen(function* () {
-            yield* Metric.increment(scorersFailed);
-            if (eventBus) {
-                yield* emitScorerEvent(eventBus, {
-                    type: "ScorerFailed",
-                    runId: ctx.runId,
-                    nodeId: ctx.nodeId,
-                    scorerId: scorer.id,
-                    scorerName: scorer.name,
-                    error: err instanceof Error ? err.message : String(err),
-                    timestampMs: nowMs(),
-                });
-            }
-        })));
-        const durationMs = performance.now() - start;
-        yield* Metric.increment(scorersFinished);
-        yield* Metric.update(scorerDuration, durationMs);
-        if (eventBus) {
-            yield* emitScorerEvent(eventBus, {
-                type: "ScorerFinished",
-                runId: ctx.runId,
-                nodeId: ctx.nodeId,
-                scorerId: scorer.id,
-                scorerName: scorer.name,
-                score: result.score,
-                timestampMs: nowMs(),
-            });
-        }
-        if (adapter) {
-            const row = {
-                id: crypto.randomUUID(),
-                runId: ctx.runId,
-                nodeId: ctx.nodeId,
-                iteration: ctx.iteration,
-                attempt: ctx.attempt,
-                scorerId: scorer.id,
-                scorerName: scorer.name,
-                source,
-                score: result.score,
-                reason: result.reason ?? null,
-                metaJson: result.meta ? JSON.stringify(result.meta) : null,
-                inputJson: safeJsonStringify(ctx.input),
-                outputJson: safeJsonStringify(ctx.output),
-                groundTruthJson: safeJsonStringify(ctx.groundTruth),
-                contextJson: safeJsonStringify(ctx.context),
-                latencyMs: ctx.latencyMs ?? null,
-                scoredAtMs: nowMs(),
-                durationMs,
-            };
-            yield* adapter.insertScorerResult(row);
-        }
-        return result;
-    }).pipe(Effect.annotateLogs({ scorer: scorer.id, nodeId: ctx.nodeId }), Effect.withLogSpan(`scorer:${scorer.id}`));
+          }
+        }),
+      ),
+    );
+    const durationMs = performance.now() - start;
+    yield* Metric.increment(scorersFinished);
+    yield* Metric.update(scorerDuration, durationMs);
+    if (eventBus) {
+      yield* emitScorerEvent(eventBus, {
+        type: "ScorerFinished",
+        runId: ctx.runId,
+        nodeId: ctx.nodeId,
+        scorerId: scorer.id,
+        scorerName: scorer.name,
+        score: result.score,
+        timestampMs: nowMs(),
+      });
+    }
+    if (adapter) {
+      const row = {
+        id: crypto.randomUUID(),
+        runId: ctx.runId,
+        nodeId: ctx.nodeId,
+        iteration: ctx.iteration,
+        attempt: ctx.attempt,
+        scorerId: scorer.id,
+        scorerName: scorer.name,
+        source,
+        score: result.score,
+        reason: result.reason ?? null,
+        metaJson: result.meta ? JSON.stringify(result.meta) : null,
+        inputJson: safeJsonStringify(ctx.input),
+        outputJson: safeJsonStringify(ctx.output),
+        groundTruthJson: safeJsonStringify(ctx.groundTruth),
+        contextJson: safeJsonStringify(ctx.context),
+        latencyMs: ctx.latencyMs ?? null,
+        scoredAtMs: nowMs(),
+        durationMs,
+      };
+      yield* adapter.insertScorerResult(row);
+    }
+    return result;
+  }).pipe(Effect.annotateLogs({ scorer: scorer.id, nodeId: ctx.nodeId }), Effect.withLogSpan(`scorer:${scorer.id}`));
 }
 /**
  * @param {unknown} value
  * @returns {string | null}
  */
 function safeJsonStringify(value) {
-    if (value === undefined || value === null)
-        return null;
-    try {
-        return JSON.stringify(value);
-    }
-    catch {
-        return String(value);
-    }
+  if (value === undefined || value === null) return null;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 // ---------------------------------------------------------------------------
 // Public API
@@ -249,15 +251,22 @@ function safeJsonStringify(value) {
  * @returns {void}
  */
 export function runScorersAsync(scorers, ctx, adapter, eventBus) {
-    const entries = Object.entries(scorers);
-    if (entries.length === 0)
-        return;
-    const effects = entries.map(([key, binding]) => runSingleScorerEffect(key, binding, ctx, adapter, "live", eventBus).pipe(
-        Effect.catchAll((error) => Effect.logError(`Scorer ${key} failed: ${error.message}`).pipe(
-            Effect.annotateLogs({ scorer: key, error: error.message }),
-            Effect.map(() => null)))));
-    const program = Effect.all(effects, { concurrency: "unbounded", discard: true }).pipe(Effect.withLogSpan("scorers:async"));
-    Effect.runFork(program);
+  const entries = Object.entries(scorers);
+  if (entries.length === 0) return;
+  const effects = entries.map(([key, binding]) =>
+    runSingleScorerEffect(key, binding, ctx, adapter, "live", eventBus).pipe(
+      Effect.catchAll((error) =>
+        Effect.logError(`Scorer ${key} failed: ${error.message}`).pipe(
+          Effect.annotateLogs({ scorer: key, error: error.message }),
+          Effect.map(() => null),
+        ),
+      ),
+    ),
+  );
+  const program = Effect.all(effects, { concurrency: "unbounded", discard: true }).pipe(
+    Effect.withLogSpan("scorers:async"),
+  );
+  Effect.runFork(program);
 }
 /**
  * Blocking scorer execution. Runs all scorers and waits for completion.
@@ -270,14 +279,21 @@ export function runScorersAsync(scorers, ctx, adapter, eventBus) {
  * @returns {Promise<Record<string, ScoreResult | null>>}
  */
 export async function runScorersBatch(scorers, ctx, adapter, eventBus) {
-    const entries = Object.entries(scorers);
-    if (entries.length === 0)
-        return {};
-    const effects = entries.map(([key, binding]) => runSingleScorerEffect(key, binding, ctx, adapter, "batch", eventBus).pipe(
-        Effect.map((result) => [key, result]),
-        Effect.catchAll((error) => Effect.logError(`Scorer ${key} failed: ${error.message}`).pipe(
-            Effect.annotateLogs({ scorer: key, error: error.message }),
-            Effect.map(() => [key, null])))));
-    const results = await Effect.runPromise(Effect.all(effects, { concurrency: "unbounded" }).pipe(Effect.withLogSpan("scorers:batch")));
-    return Object.fromEntries(results);
+  const entries = Object.entries(scorers);
+  if (entries.length === 0) return {};
+  const effects = entries.map(([key, binding]) =>
+    runSingleScorerEffect(key, binding, ctx, adapter, "batch", eventBus).pipe(
+      Effect.map((result) => [key, result]),
+      Effect.catchAll((error) =>
+        Effect.logError(`Scorer ${key} failed: ${error.message}`).pipe(
+          Effect.annotateLogs({ scorer: key, error: error.message }),
+          Effect.map(() => [key, null]),
+        ),
+      ),
+    ),
+  );
+  const results = await Effect.runPromise(
+    Effect.all(effects, { concurrency: "unbounded" }).pipe(Effect.withLogSpan("scorers:batch")),
+  );
+  return Object.fromEntries(results);
 }

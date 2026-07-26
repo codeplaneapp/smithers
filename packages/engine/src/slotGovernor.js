@@ -29,76 +29,75 @@
  * @returns {{ onSlotWait: (activeTaskCount: number, waitingCount: number) => { warn: string | null, raiseTo: number | null }, onDeclaredWidth: (declaredWidth: number | undefined) => { raiseTo: number | null } }}
  */
 export function createSlotGovernor(maxConcurrency, options = {}) {
-    const explicit = Boolean(options.explicit);
-    const ceiling = resolveCeiling(options.ceiling);
-    let cap = maxConcurrency;
-    let warned = false;
-    return {
-        /**
-         * Call with the widest DECLARED `<Parallel>` width (`maxConcurrency` or
-         * `subtreeConcurrency`) in a freshly extracted graph (undefined when no
-         * parallel declares one).
-         * Declared widths bypass the auto-raise ceiling — the author asked for
-         * that width — so this raises the cap to the declared width whenever
-         * the run is not explicitly pinned and the width exceeds the current
-         * cap. The ceiling keeps governing demand-driven raises in
-         * `onSlotWait`, including raises past a smaller declared width.
-         *
-         * @param {number | undefined} declaredWidth
-         * @returns {{ raiseTo: number | null }} `raiseTo` is the new cap the
-         *   engine should adopt (always above the current one), else null
-         */
-        onDeclaredWidth(declaredWidth) {
-            if (explicit || cap <= 0) {
-                return { raiseTo: null };
-            }
-            if (typeof declaredWidth !== "number" ||
-                !Number.isInteger(declaredWidth) ||
-                declaredWidth <= cap) {
-                return { raiseTo: null };
-            }
-            cap = declaredWidth;
-            return { raiseTo: declaredWidth };
-        },
-        /**
-         * Call when a task is about to queue for a slot. `waitingCount` counts
-         * the queue INCLUDING the task about to wait.
-         *
-         * @param {number} activeTaskCount
-         * @param {number} waitingCount
-         * @returns {{ warn: string | null, raiseTo: number | null }} `raiseTo`
-         *   is the new cap the engine should adopt (always above the current
-         *   one), `warn` the starvation warning to log once, else nulls
-         */
-        onSlotWait(activeTaskCount, waitingCount) {
-            if (cap <= 0) {
-                return { warn: null, raiseTo: null };
-            }
-            const demand = activeTaskCount + waitingCount;
-            if (!explicit) {
-                const target = Math.min(demand, ceiling);
-                if (target > cap) {
-                    cap = target;
-                    return { warn: null, raiseTo: target };
-                }
-            }
-            if (warned || waitingCount < cap) {
-                return { warn: null, raiseTo: null };
-            }
-            warned = true;
-            const warn = `${demand} tasks want to run concurrently but maxConcurrency is ${cap}; ` +
-                `${waitingCount} are queued waiting for a free slot. ` +
-                `If the host and providers can take it, raise the cap (CLI: smithers up --max-concurrency ${demand}) ` +
-                `to run this workflow at full width.`;
-            return { warn, raiseTo: null };
-        },
-    };
+  const explicit = Boolean(options.explicit);
+  const ceiling = resolveCeiling(options.ceiling);
+  let cap = maxConcurrency;
+  let warned = false;
+  return {
+    /**
+     * Call with the widest DECLARED `<Parallel>` width (`maxConcurrency` or
+     * `subtreeConcurrency`) in a freshly extracted graph (undefined when no
+     * parallel declares one).
+     * Declared widths bypass the auto-raise ceiling — the author asked for
+     * that width — so this raises the cap to the declared width whenever
+     * the run is not explicitly pinned and the width exceeds the current
+     * cap. The ceiling keeps governing demand-driven raises in
+     * `onSlotWait`, including raises past a smaller declared width.
+     *
+     * @param {number | undefined} declaredWidth
+     * @returns {{ raiseTo: number | null }} `raiseTo` is the new cap the
+     *   engine should adopt (always above the current one), else null
+     */
+    onDeclaredWidth(declaredWidth) {
+      if (explicit || cap <= 0) {
+        return { raiseTo: null };
+      }
+      if (typeof declaredWidth !== "number" || !Number.isInteger(declaredWidth) || declaredWidth <= cap) {
+        return { raiseTo: null };
+      }
+      cap = declaredWidth;
+      return { raiseTo: declaredWidth };
+    },
+    /**
+     * Call when a task is about to queue for a slot. `waitingCount` counts
+     * the queue INCLUDING the task about to wait.
+     *
+     * @param {number} activeTaskCount
+     * @param {number} waitingCount
+     * @returns {{ warn: string | null, raiseTo: number | null }} `raiseTo`
+     *   is the new cap the engine should adopt (always above the current
+     *   one), `warn` the starvation warning to log once, else nulls
+     */
+    onSlotWait(activeTaskCount, waitingCount) {
+      if (cap <= 0) {
+        return { warn: null, raiseTo: null };
+      }
+      const demand = activeTaskCount + waitingCount;
+      if (!explicit) {
+        const target = Math.min(demand, ceiling);
+        if (target > cap) {
+          cap = target;
+          return { warn: null, raiseTo: target };
+        }
+      }
+      if (warned || waitingCount < cap) {
+        return { warn: null, raiseTo: null };
+      }
+      warned = true;
+      const warn =
+        `${demand} tasks want to run concurrently but maxConcurrency is ${cap}; ` +
+        `${waitingCount} are queued waiting for a free slot. ` +
+        `If the host and providers can take it, raise the cap (CLI: smithers up --max-concurrency ${demand}) ` +
+        `to run this workflow at full width.`;
+      return { warn, raiseTo: null };
+    },
+  };
 }
 /**
  * @param {number | undefined} ceiling
  * @returns {number}
  */
 function resolveCeiling(ceiling) {
-    const raw = ceiling ?? Number(process.env.SMITHERS_AUTO_MAX_CONCURRENCY_CEILING ?? NaN);
-    return Number.isInteger(raw) && raw > 0 ? raw : 16;
+  const raw = ceiling ?? Number(process.env.SMITHERS_AUTO_MAX_CONCURRENCY_CEILING ?? NaN);
+  return Number.isInteger(raw) && raw > 0 ? raw : 16;
 }

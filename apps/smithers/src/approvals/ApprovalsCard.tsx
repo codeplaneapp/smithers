@@ -57,9 +57,7 @@ export function ApprovalsCard() {
         ) : (
           <div className="vcs-more">No pending approvals.</div>
         )}
-        {pending.length > shown.length ? (
-          <div className="vcs-more">+{pending.length - shown.length} more</div>
-        ) : null}
+        {pending.length > shown.length ? <div className="vcs-more">+{pending.length - shown.length} more</div> : null}
       </div>
 
       <footer className="card-foot">

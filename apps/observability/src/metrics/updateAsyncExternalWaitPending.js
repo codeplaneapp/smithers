@@ -7,8 +7,8 @@ import { externalWaitAsyncPending } from "./externalWaitAsyncPending.js";
  * @returns {Effect.Effect<void>}
  */
 export function updateAsyncExternalWaitPending(kind, delta) {
-    return Effect.sync(() => {
-        asyncExternalWaitCounts[kind] = Math.max(0, asyncExternalWaitCounts[kind] + delta);
-        return asyncExternalWaitCounts[kind];
-    }).pipe(Effect.flatMap((value) => Metric.set(Metric.tagged(externalWaitAsyncPending, "kind", kind), value)));
+  return Effect.sync(() => {
+    asyncExternalWaitCounts[kind] = Math.max(0, asyncExternalWaitCounts[kind] + delta);
+    return asyncExternalWaitCounts[kind];
+  }).pipe(Effect.flatMap((value) => Metric.set(Metric.tagged(externalWaitAsyncPending, "kind", kind), value)));
 }

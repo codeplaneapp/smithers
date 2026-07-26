@@ -29,11 +29,7 @@
  * @returns {string}
  */
 export function formatWorkflowsForPrompt(workflows, options = {}) {
-  const {
-    heading = "## Available Workflows",
-    includeTags = true,
-    includeAliases = true,
-  } = options;
+  const { heading = "## Available Workflows", includeTags = true, includeAliases = true } = options;
 
   const visible = workflows.filter((w) => !w.disableModelInvocation && !w.system);
 

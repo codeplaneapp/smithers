@@ -5,7 +5,12 @@ import { UI } from "smithers-orchestrator";
 import { createSmithers, Sequence, Task } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { implementer, panelists, synthesizer, validator } from "../components/roles";
-import { ValidationLoop, implementOutputSchema, validateOutputSchema, validationLoopState } from "../components/ValidationLoop";
+import {
+  ValidationLoop,
+  implementOutputSchema,
+  validateOutputSchema,
+  validationLoopState,
+} from "../components/ValidationLoop";
 import { reviewOutputSchema, reviewSynthesisSchema } from "../components/Review";
 
 // Codex role split: Sol plans/reviews, Luna implements, Terra validates.
@@ -83,9 +88,7 @@ export default smithers((ctx) => {
 
   const state = validationLoopState(ctx, { prefix: "p491:impl" });
 
-  const implementPrompt = plan
-    ? `${spec}\n\n---\nAPPROVED PLAN:\n${plan.plan}`
-    : spec;
+  const implementPrompt = plan ? `${spec}\n\n---\nAPPROVED PLAN:\n${plan.plan}` : spec;
 
   return (
     <Workflow name="issue-491-review-cloud-hosted-walkthrough-lifecycl">

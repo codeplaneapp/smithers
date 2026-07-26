@@ -101,12 +101,8 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
               background: theme.panel,
             }}
           >
-            <div style={{ fontWeight: 600, fontSize: 14 }}>
-              {row.requestTitle ?? `Approval: ${row.nodeId}`}
-            </div>
-            {row.requestSummary ? (
-              <div style={{ fontSize: 13, color: theme.textDim }}>{row.requestSummary}</div>
-            ) : null}
+            <div style={{ fontWeight: 600, fontSize: 14 }}>{row.requestTitle ?? `Approval: ${row.nodeId}`}</div>
+            {row.requestSummary ? <div style={{ fontSize: 13, color: theme.textDim }}>{row.requestSummary}</div> : null}
             <div style={{ fontFamily: theme.fontMono, fontSize: 11, color: theme.textDim }}>
               {String(row.workflowKey ?? "")} · {row.runId} · {row.nodeId}#{row.iteration}
             </div>

@@ -62,12 +62,7 @@ function frameXml(frameNo: number): string {
   });
 }
 
-async function seedFrames(
-  adapter: SmithersDb,
-  runId: string,
-  count: number,
-  startFrameNo = 0,
-) {
+async function seedFrames(adapter: SmithersDb, runId: string, count: number, startFrameNo = 0) {
   await adapter.insertRun({
     runId,
     workflowName: "wf",
@@ -143,9 +138,7 @@ async function connectGateway(port: number, token: string) {
         ws.once("error", reject);
       });
       const client = new GatewayClient(ws);
-      await client.waitFor(
-        (message) => message.type === "event" && message.event === "connect.challenge",
-      );
+      await client.waitFor((message) => message.type === "event" && message.event === "connect.challenge");
       const hello = await client.request("connect", {
         minProtocol: 1,
         maxProtocol: 1,
@@ -173,10 +166,7 @@ describe("streamDevTools RPC", () => {
   const workflowDbs: any[] = [];
 
   beforeEach(() => {
-    dbPath = join(
-      tmpdir(),
-      `smithers-stream-devtools-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
-    );
+    dbPath = join(tmpdir(), `smithers-stream-devtools-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
     sqlite = new Database(dbPath);
     const db = drizzle(sqlite);
     ensureSmithersTables(db);
@@ -204,10 +194,7 @@ describe("streamDevTools RPC", () => {
   });
 
   async function bootGateway() {
-    const { smithers, Workflow, Task } = createSmithers(
-      { out: z.object({ value: z.number() }) },
-      { dbPath },
-    );
+    const { smithers, Workflow, Task } = createSmithers({ out: z.object({ value: z.number() }) }, { dbPath });
     const workflow = smithers(() => (
       <Workflow name="stream-devtools">
         <Task id="task-a">{{ value: 1 }}</Task>
@@ -244,9 +231,7 @@ describe("streamDevTools RPC", () => {
     const streamId = subscribed.payload.streamId;
     const event = await client.waitFor(
       (message) =>
-        message.type === "event" &&
-        message.event === "devtools.event" &&
-        message.payload.streamId === streamId,
+        message.type === "event" && message.event === "devtools.event" && message.payload.streamId === streamId,
     );
     expect(event.payload.event.kind).toBe("snapshot");
     await client.close();
@@ -382,9 +367,7 @@ describe("streamDevTools RPC", () => {
       ws.once("error", reject);
     });
     const client = new GatewayClient(ws);
-    await client.waitFor(
-      (message) => message.type === "event" && message.event === "connect.challenge",
-    );
+    await client.waitFor((message) => message.type === "event" && message.event === "connect.challenge");
     const hello = await client.request("connect", {
       minProtocol: 1,
       maxProtocol: 1,
@@ -415,9 +398,7 @@ describe("streamDevTools RPC", () => {
       ws.once("error", reject);
     });
     const client = new GatewayClient(ws);
-    await client.waitFor(
-      (message) => message.type === "event" && message.event === "connect.challenge",
-    );
+    await client.waitFor((message) => message.type === "event" && message.event === "connect.challenge");
     const res = await client.request("streamDevTools", {
       runId: "run-stream-auth",
       fromSeq: 0,
@@ -479,9 +460,7 @@ describe("streamDevTools RPC", () => {
       });
     }
 
-    const subscribers = await Promise.all(
-      Array.from({ length: 3 }, () => connectGateway(port, "op-token")),
-    );
+    const subscribers = await Promise.all(Array.from({ length: 3 }, () => connectGateway(port, "op-token")));
     const streamIds: string[] = [];
     for (const client of subscribers) {
       const subscribed = await client.request("streamDevTools", {
@@ -575,9 +554,7 @@ describe("streamDevToolsRoute concurrency + performance", () => {
     const adapter = new SmithersDb(db);
     await seedFrames(adapter, "run-concurrent", 6);
     const readers = Array.from({ length: 10 }, () =>
-      streamDevToolsRoute({ adapter, runId: "run-concurrent", fromSeq: 0 })[
-        Symbol.asyncIterator
-      ](),
+      streamDevToolsRoute({ adapter, runId: "run-concurrent", fromSeq: 0 })[Symbol.asyncIterator](),
     );
     const readFirstThree = async (iterator: AsyncIterator<any>) => {
       const out: Array<{ kind: string; seq: number }> = [];

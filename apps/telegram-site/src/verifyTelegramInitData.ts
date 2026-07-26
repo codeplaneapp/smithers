@@ -78,7 +78,13 @@ export async function verifyTelegramInitData(
     .sort()
     .join("\n");
 
-  const webAppDataKey = await crypto.subtle.importKey("raw", encoder.encode("WebAppData"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const webAppDataKey = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode("WebAppData"),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
   const secret = await crypto.subtle.sign("HMAC", webAppDataKey, encoder.encode(botToken));
   const secretKey = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const mac = await crypto.subtle.sign("HMAC", secretKey, encoder.encode(dataCheckString));

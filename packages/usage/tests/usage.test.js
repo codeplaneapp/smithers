@@ -3,336 +3,361 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-    buildUsageReport,
-    claudeOauthUsage,
-    decodeJwtClaims,
-    formatRelativeReset,
-    formatUsageReports,
-    getAccountUsage,
-    getUsageForAccounts,
-    humanizeDurationShort,
-    parseAnthropicRateLimitHeaders,
-    parseClaudeOauthUsage,
-    parseCodexUsage,
-    parseDurationSeconds,
-    parseOpenAiRateLimitHeaders,
-    publishedCapForTier,
-    readUsageCache,
+  buildUsageReport,
+  claudeOauthUsage,
+  decodeJwtClaims,
+  formatRelativeReset,
+  formatUsageReports,
+  getAccountUsage,
+  getUsageForAccounts,
+  humanizeDurationShort,
+  parseAnthropicRateLimitHeaders,
+  parseClaudeOauthUsage,
+  parseCodexUsage,
+  parseDurationSeconds,
+  parseOpenAiRateLimitHeaders,
+  publishedCapForTier,
+  readUsageCache,
 } from "../src/index.js";
 
 /** @type {string[]} */
 const tempDirs = [];
 afterEach(() => {
-    while (tempDirs.length) {
-        const dir = tempDirs.pop();
-        try { rmSync(dir, { recursive: true, force: true }); } catch {}
-    }
+  while (tempDirs.length) {
+    const dir = tempDirs.pop();
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {}
+  }
 });
 function newSmithersHome() {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-usage-"));
-    tempDirs.push(dir);
-    return { SMITHERS_HOME: dir };
+  const dir = mkdtempSync(join(tmpdir(), "smithers-usage-"));
+  tempDirs.push(dir);
+  return { SMITHERS_HOME: dir };
 }
 
 // fixed clock for deterministic relative-time assertions
 const NOW = Date.parse("2026-06-03T00:00:00.000Z");
 function isoIn(seconds) {
-    return new Date(NOW + seconds * 1000).toISOString();
+  return new Date(NOW + seconds * 1000).toISOString();
 }
 /** @param {Record<string, string>} map */
 function getter(map) {
-    return (name) => (name in map ? map[name] : null);
+  return (name) => (name in map ? map[name] : null);
 }
 
 describe("parseDurationSeconds", () => {
-    test("plain seconds and Go durations", () => {
-        expect(parseDurationSeconds("30")).toBe(30);
-        expect(parseDurationSeconds("1s")).toBe(1);
-        expect(parseDurationSeconds("6m0s")).toBe(360);
-        expect(parseDurationSeconds("1h2m3s")).toBe(3723);
-        expect(parseDurationSeconds("800ms")).toBeCloseTo(0.8, 5);
-    });
-    test("bad input returns undefined", () => {
-        expect(parseDurationSeconds(null)).toBeUndefined();
-        expect(parseDurationSeconds("")).toBeUndefined();
-        expect(parseDurationSeconds("nope")).toBeUndefined();
-        expect(parseDurationSeconds("nope1s")).toBeUndefined();
-        expect(parseDurationSeconds("1sx")).toBeUndefined();
-    });
+  test("plain seconds and Go durations", () => {
+    expect(parseDurationSeconds("30")).toBe(30);
+    expect(parseDurationSeconds("1s")).toBe(1);
+    expect(parseDurationSeconds("6m0s")).toBe(360);
+    expect(parseDurationSeconds("1h2m3s")).toBe(3723);
+    expect(parseDurationSeconds("800ms")).toBeCloseTo(0.8, 5);
+  });
+  test("bad input returns undefined", () => {
+    expect(parseDurationSeconds(null)).toBeUndefined();
+    expect(parseDurationSeconds("")).toBeUndefined();
+    expect(parseDurationSeconds("nope")).toBeUndefined();
+    expect(parseDurationSeconds("nope1s")).toBeUndefined();
+    expect(parseDurationSeconds("1sx")).toBeUndefined();
+  });
 });
 
 describe("humanizeDurationShort", () => {
-    test("scales units", () => {
-        expect(humanizeDurationShort(-5)).toBe("now");
-        expect(humanizeDurationShort(42)).toBe("42s");
-        expect(humanizeDurationShort(3 * 60 + 5)).toBe("3m 5s");
-        expect(humanizeDurationShort(2 * 3600 + 41 * 60)).toBe("2h 41m");
-        expect(humanizeDurationShort(5 * 86400 + 3 * 3600)).toBe("5d 3h");
-    });
+  test("scales units", () => {
+    expect(humanizeDurationShort(-5)).toBe("now");
+    expect(humanizeDurationShort(42)).toBe("42s");
+    expect(humanizeDurationShort(3 * 60 + 5)).toBe("3m 5s");
+    expect(humanizeDurationShort(2 * 3600 + 41 * 60)).toBe("2h 41m");
+    expect(humanizeDurationShort(5 * 86400 + 3 * 3600)).toBe("5d 3h");
+  });
 });
 
 describe("formatRelativeReset", () => {
-    test("relative to a fixed now", () => {
-        expect(formatRelativeReset(isoIn(2 * 3600), NOW)).toBe("2h 0m");
-        expect(formatRelativeReset(undefined, NOW)).toBe("");
-        expect(formatRelativeReset("garbage", NOW)).toBe("");
-        expect(formatRelativeReset(isoIn(-100), NOW)).toBe("now");
-    });
+  test("relative to a fixed now", () => {
+    expect(formatRelativeReset(isoIn(2 * 3600), NOW)).toBe("2h 0m");
+    expect(formatRelativeReset(undefined, NOW)).toBe("");
+    expect(formatRelativeReset("garbage", NOW)).toBe("");
+    expect(formatRelativeReset(isoIn(-100), NOW)).toBe("now");
+  });
 });
 
 describe("parseClaudeOauthUsage", () => {
-    test("extracts 5h, weekly, and per-model windows", () => {
-        const windows = parseClaudeOauthUsage({
-            five_hour: { utilization: 33, resets_at: isoIn(3600) },
-            seven_day: { utilization: 13, resets_at: isoIn(86400) },
-            seven_day_opus: { utilization: 5, resets_at: isoIn(86400) },
-            seven_day_sonnet: null,
-        });
-        expect(windows.map((w) => w.id)).toEqual(["5h", "weekly", "weekly-opus"]);
-        expect(windows[0]).toMatchObject({ unit: "percent", usedPercent: 33 });
+  test("extracts 5h, weekly, and per-model windows", () => {
+    const windows = parseClaudeOauthUsage({
+      five_hour: { utilization: 33, resets_at: isoIn(3600) },
+      seven_day: { utilization: 13, resets_at: isoIn(86400) },
+      seven_day_opus: { utilization: 5, resets_at: isoIn(86400) },
+      seven_day_sonnet: null,
     });
-    test("tolerates junk", () => {
-        expect(parseClaudeOauthUsage(null)).toEqual([]);
-        expect(parseClaudeOauthUsage({ five_hour: { utilization: "x" } })).toEqual([]);
-    });
+    expect(windows.map((w) => w.id)).toEqual(["5h", "weekly", "weekly-opus"]);
+    expect(windows[0]).toMatchObject({ unit: "percent", usedPercent: 33 });
+  });
+  test("tolerates junk", () => {
+    expect(parseClaudeOauthUsage(null)).toEqual([]);
+    expect(parseClaudeOauthUsage({ five_hour: { utilization: "x" } })).toEqual([]);
+  });
 });
 
 describe("claudeOauthUsage", () => {
-    test("does not send expired Claude OAuth tokens", async () => {
-        const configDir = mkdtempSync(join(tmpdir(), "smithers-claude-"));
-        tempDirs.push(configDir);
-        writeFileSync(join(configDir, ".credentials.json"), JSON.stringify({
-            claudeAiOauth: {
-                accessToken: "expired-token",
-                expiresAt: Date.now() - 1,
-            },
-        }));
-        const originalFetch = globalThis.fetch;
-        let fetchCalls = 0;
-        globalThis.fetch = /** @type {typeof fetch} */ (async () => {
-            fetchCalls += 1;
-            return new Response("{}");
-        });
-        try {
-            const result = await claudeOauthUsage({ configDir });
-            expect(fetchCalls).toBe(0);
-            expect(result).toMatchObject({
-                source: "none",
-                error: "Claude OAuth token expired; run `claude` to refresh",
-            });
-        } finally {
-            globalThis.fetch = originalFetch;
-        }
-    });
+  test("does not send expired Claude OAuth tokens", async () => {
+    const configDir = mkdtempSync(join(tmpdir(), "smithers-claude-"));
+    tempDirs.push(configDir);
+    writeFileSync(
+      join(configDir, ".credentials.json"),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: "expired-token",
+          expiresAt: Date.now() - 1,
+        },
+      }),
+    );
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = /** @type {typeof fetch} */ (
+      async () => {
+        fetchCalls += 1;
+        return new Response("{}");
+      }
+    );
+    try {
+      const result = await claudeOauthUsage({ configDir });
+      expect(fetchCalls).toBe(0);
+      expect(result).toMatchObject({
+        source: "none",
+        error: "Claude OAuth token expired; run `claude` to refresh",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe("parseCodexUsage", () => {
-    test("maps primary/secondary windows by duration", () => {
-        const { windows, planType, credits } = parseCodexUsage({
-            plan_type: "pro",
-            rate_limits: {
-                primary: { used_percent: 12.5, window_minutes: 300, reset_at: Math.floor(NOW / 1000) + 3600 },
-                secondary: { used_percent: 40, window_minutes: 10080, reset_at: Math.floor(NOW / 1000) + 86400 },
-            },
-            credits: { has_credits: true, unlimited: false, balance: "12.34" },
-        });
-        expect(planType).toBe("pro");
-        expect(windows.map((w) => w.id)).toEqual(["5h", "weekly"]);
-        expect(windows[0].usedPercent).toBe(12.5);
-        expect(windows[0].resetsAt).toBe(isoIn(3600));
-        expect(credits).toEqual({ hasCredits: true, unlimited: false, balance: "12.34" });
+  test("maps primary/secondary windows by duration", () => {
+    const { windows, planType, credits } = parseCodexUsage({
+      plan_type: "pro",
+      rate_limits: {
+        primary: { used_percent: 12.5, window_minutes: 300, reset_at: Math.floor(NOW / 1000) + 3600 },
+        secondary: { used_percent: 40, window_minutes: 10080, reset_at: Math.floor(NOW / 1000) + 86400 },
+      },
+      credits: { has_credits: true, unlimited: false, balance: "12.34" },
     });
-    test("accepts top-level rate-limit shape", () => {
-        const { windows } = parseCodexUsage({
-            primary: { used_percent: 1, window_minutes: 300 },
-        });
-        expect(windows).toHaveLength(1);
+    expect(planType).toBe("pro");
+    expect(windows.map((w) => w.id)).toEqual(["5h", "weekly"]);
+    expect(windows[0].usedPercent).toBe(12.5);
+    expect(windows[0].resetsAt).toBe(isoIn(3600));
+    expect(credits).toEqual({ hasCredits: true, unlimited: false, balance: "12.34" });
+  });
+  test("accepts top-level rate-limit shape", () => {
+    const { windows } = parseCodexUsage({
+      primary: { used_percent: 1, window_minutes: 300 },
     });
-    test("maps the HTTP wham/usage shape (rate_limit.*_window, limit_window_seconds)", () => {
-        const { windows, planType, credits } = parseCodexUsage({
-            plan_type: "pro",
-            rate_limit: {
-                allowed: true,
-                limit_reached: false,
-                primary_window: { used_percent: 12.5, limit_window_seconds: 18000, reset_at: Math.floor(NOW / 1000) + 3600 },
-                secondary_window: { used_percent: 40, limit_window_seconds: 604800, reset_at: Math.floor(NOW / 1000) + 86400 },
-            },
-            credits: { has_credits: true, unlimited: false, balance: "12.34" },
-        });
-        expect(planType).toBe("pro");
-        expect(windows.map((w) => w.id)).toEqual(["5h", "weekly"]);
-        expect(windows[0].usedPercent).toBe(12.5);
-        expect(windows[0].resetsAt).toBe(isoIn(3600));
-        expect(credits).toEqual({ hasCredits: true, unlimited: false, balance: "12.34" });
+    expect(windows).toHaveLength(1);
+  });
+  test("maps the HTTP wham/usage shape (rate_limit.*_window, limit_window_seconds)", () => {
+    const { windows, planType, credits } = parseCodexUsage({
+      plan_type: "pro",
+      rate_limit: {
+        allowed: true,
+        limit_reached: false,
+        primary_window: { used_percent: 12.5, limit_window_seconds: 18000, reset_at: Math.floor(NOW / 1000) + 3600 },
+        secondary_window: { used_percent: 40, limit_window_seconds: 604800, reset_at: Math.floor(NOW / 1000) + 86400 },
+      },
+      credits: { has_credits: true, unlimited: false, balance: "12.34" },
     });
-    test("surfaces the weekly window when the 5-hour window is removed", () => {
-        const { windows, planType, credits } = parseCodexUsage({
-            plan_type: "pro",
-            rate_limit: {
-                allowed: true,
-                limit_reached: false,
-                primary_window: { used_percent: 50, limit_window_seconds: 604800, reset_at: Math.floor(NOW / 1000) + 542850 },
-                secondary_window: null,
-            },
-            credits: { has_credits: false, unlimited: false, balance: "0" },
-        });
-        expect(planType).toBe("pro");
-        expect(windows).toHaveLength(1);
-        expect(windows[0]).toMatchObject({ id: "weekly", unit: "percent", usedPercent: 50 });
-        expect(windows[0].resetsAt).toBe(isoIn(542850));
-        expect(credits).toEqual({ hasCredits: false, unlimited: false, balance: "0" });
+    expect(planType).toBe("pro");
+    expect(windows.map((w) => w.id)).toEqual(["5h", "weekly"]);
+    expect(windows[0].usedPercent).toBe(12.5);
+    expect(windows[0].resetsAt).toBe(isoIn(3600));
+    expect(credits).toEqual({ hasCredits: true, unlimited: false, balance: "12.34" });
+  });
+  test("surfaces the weekly window when the 5-hour window is removed", () => {
+    const { windows, planType, credits } = parseCodexUsage({
+      plan_type: "pro",
+      rate_limit: {
+        allowed: true,
+        limit_reached: false,
+        primary_window: { used_percent: 50, limit_window_seconds: 604800, reset_at: Math.floor(NOW / 1000) + 542850 },
+        secondary_window: null,
+      },
+      credits: { has_credits: false, unlimited: false, balance: "0" },
     });
+    expect(planType).toBe("pro");
+    expect(windows).toHaveLength(1);
+    expect(windows[0]).toMatchObject({ id: "weekly", unit: "percent", usedPercent: 50 });
+    expect(windows[0].resetsAt).toBe(isoIn(542850));
+    expect(credits).toEqual({ hasCredits: false, unlimited: false, balance: "0" });
+  });
 });
 
 describe("rate-limit header parsers", () => {
-    test("anthropic headers -> count windows with used", () => {
-        const windows = parseAnthropicRateLimitHeaders(getter({
-            "anthropic-ratelimit-requests-limit": "1000",
-            "anthropic-ratelimit-requests-remaining": "820",
-            "anthropic-ratelimit-requests-reset": isoIn(60),
-        }));
-        expect(windows[0]).toMatchObject({ id: "requests-per-min", limit: 1000, remaining: 820, used: 180 });
-    });
-    test("openai headers -> reset computed from duration", () => {
-        const windows = parseOpenAiRateLimitHeaders(getter({
-            "x-ratelimit-limit-requests": "100",
-            "x-ratelimit-remaining-requests": "99",
-            "x-ratelimit-reset-requests": "6m0s",
-        }), NOW);
-        expect(windows[0]).toMatchObject({ id: "requests-per-min", remaining: 99, used: 1 });
-        expect(windows[0].resetsAt).toBe(isoIn(360));
-    });
-    test("count windows never report negative used values", () => {
-        const anthropicWindows = parseAnthropicRateLimitHeaders(getter({
-            "anthropic-ratelimit-requests-limit": "100",
-            "anthropic-ratelimit-requests-remaining": "120",
-        }));
-        expect(anthropicWindows[0]).toMatchObject({ limit: 100, remaining: 120, used: 0 });
+  test("anthropic headers -> count windows with used", () => {
+    const windows = parseAnthropicRateLimitHeaders(
+      getter({
+        "anthropic-ratelimit-requests-limit": "1000",
+        "anthropic-ratelimit-requests-remaining": "820",
+        "anthropic-ratelimit-requests-reset": isoIn(60),
+      }),
+    );
+    expect(windows[0]).toMatchObject({ id: "requests-per-min", limit: 1000, remaining: 820, used: 180 });
+  });
+  test("openai headers -> reset computed from duration", () => {
+    const windows = parseOpenAiRateLimitHeaders(
+      getter({
+        "x-ratelimit-limit-requests": "100",
+        "x-ratelimit-remaining-requests": "99",
+        "x-ratelimit-reset-requests": "6m0s",
+      }),
+      NOW,
+    );
+    expect(windows[0]).toMatchObject({ id: "requests-per-min", remaining: 99, used: 1 });
+    expect(windows[0].resetsAt).toBe(isoIn(360));
+  });
+  test("count windows never report negative used values", () => {
+    const anthropicWindows = parseAnthropicRateLimitHeaders(
+      getter({
+        "anthropic-ratelimit-requests-limit": "100",
+        "anthropic-ratelimit-requests-remaining": "120",
+      }),
+    );
+    expect(anthropicWindows[0]).toMatchObject({ limit: 100, remaining: 120, used: 0 });
 
-        const openAiWindows = parseOpenAiRateLimitHeaders(getter({
-            "x-ratelimit-limit-requests": "100",
-            "x-ratelimit-remaining-requests": "120",
-        }), NOW);
-        expect(openAiWindows[0]).toMatchObject({ limit: 100, remaining: 120, used: 0 });
-    });
-    test("no headers -> no windows", () => {
-        expect(parseAnthropicRateLimitHeaders(getter({}))).toEqual([]);
-        expect(parseOpenAiRateLimitHeaders(getter({}), NOW)).toEqual([]);
-    });
+    const openAiWindows = parseOpenAiRateLimitHeaders(
+      getter({
+        "x-ratelimit-limit-requests": "100",
+        "x-ratelimit-remaining-requests": "120",
+      }),
+      NOW,
+    );
+    expect(openAiWindows[0]).toMatchObject({ limit: 100, remaining: 120, used: 0 });
+  });
+  test("no headers -> no windows", () => {
+    expect(parseAnthropicRateLimitHeaders(getter({}))).toEqual([]);
+    expect(parseOpenAiRateLimitHeaders(getter({}), NOW)).toEqual([]);
+  });
 });
 
 describe("decodeJwtClaims", () => {
-    test("decodes the payload segment", () => {
-        const payload = Buffer.from(JSON.stringify({ a: 1 })).toString("base64url");
-        expect(decodeJwtClaims(`h.${payload}.sig`)).toEqual({ a: 1 });
-    });
-    test("junk -> empty", () => {
-        expect(decodeJwtClaims(null)).toEqual({});
-        expect(decodeJwtClaims("nope")).toEqual({});
-    });
+  test("decodes the payload segment", () => {
+    const payload = Buffer.from(JSON.stringify({ a: 1 })).toString("base64url");
+    expect(decodeJwtClaims(`h.${payload}.sig`)).toEqual({ a: 1 });
+  });
+  test("junk -> empty", () => {
+    expect(decodeJwtClaims(null)).toEqual({});
+    expect(decodeJwtClaims("nope")).toEqual({});
+  });
 });
 
 describe("publishedCapForTier", () => {
-    test("known and unknown tiers", () => {
-        expect(publishedCapForTier("code-assist-free")).toMatchObject({ requestsPerDay: 1000 });
-        expect(publishedCapForTier("nope")).toBeUndefined();
-        expect(publishedCapForTier(undefined)).toBeUndefined();
-    });
+  test("known and unknown tiers", () => {
+    expect(publishedCapForTier("code-assist-free")).toMatchObject({ requestsPerDay: 1000 });
+    expect(publishedCapForTier("nope")).toBeUndefined();
+    expect(publishedCapForTier(undefined)).toBeUndefined();
+  });
 });
 
 describe("buildUsageReport", () => {
-    test("api-key vs subscription authMode", () => {
-        const api = buildUsageReport(
-            { label: "o", provider: "openai-api", apiKey: "x" },
-            { source: "headers", windows: [] },
-            { nowIso: "2026-06-03T00:00:00.000Z" },
-        );
-        expect(api).toMatchObject({ authMode: "api-key", source: "headers", stale: false });
-        const sub = buildUsageReport(
-            { label: "c", provider: "claude-code", configDir: "/x" },
-            { source: "oauth", windows: [], planType: "max" },
-            { nowIso: "2026-06-03T00:00:00.000Z" },
-        );
-        expect(sub).toMatchObject({ authMode: "subscription", planType: "max" });
-    });
+  test("api-key vs subscription authMode", () => {
+    const api = buildUsageReport(
+      { label: "o", provider: "openai-api", apiKey: "x" },
+      { source: "headers", windows: [] },
+      { nowIso: "2026-06-03T00:00:00.000Z" },
+    );
+    expect(api).toMatchObject({ authMode: "api-key", source: "headers", stale: false });
+    const sub = buildUsageReport(
+      { label: "c", provider: "claude-code", configDir: "/x" },
+      { source: "oauth", windows: [], planType: "max" },
+      { nowIso: "2026-06-03T00:00:00.000Z" },
+    );
+    expect(sub).toMatchObject({ authMode: "subscription", planType: "max" });
+  });
 });
 
 describe("formatUsageReports", () => {
-    test("renders a table with percent and count rows", () => {
-        const out = formatUsageReports([
-            {
-                accountLabel: "claude-work", provider: "claude-code", authMode: "subscription",
-                source: "oauth", planType: "max", stale: false, estimate: false,
-                fetchedAt: isoIn(0),
-                windows: [{ id: "5h", label: "5-hour session", unit: "percent", usedPercent: 33, resetsAt: isoIn(2 * 3600) }],
-            },
-            {
-                accountLabel: "kimi-main", provider: "kimi", authMode: "subscription",
-                source: "none", stale: false, estimate: false, fetchedAt: isoIn(0),
-                windows: [], error: "Kimi exposes no usage endpoint yet",
-            },
-        ], NOW);
-        expect(out).toContain("ACCOUNT");
-        expect(out).toContain("claude-work");
-        expect(out).toContain("33%");
-        expect(out).toContain("2h 0m");
-        expect(out).toContain("Kimi exposes no usage endpoint yet");
-    });
-    test("empty -> hint", () => {
-        expect(formatUsageReports([], NOW)).toContain("No accounts registered");
-    });
+  test("renders a table with percent and count rows", () => {
+    const out = formatUsageReports(
+      [
+        {
+          accountLabel: "claude-work",
+          provider: "claude-code",
+          authMode: "subscription",
+          source: "oauth",
+          planType: "max",
+          stale: false,
+          estimate: false,
+          fetchedAt: isoIn(0),
+          windows: [{ id: "5h", label: "5-hour session", unit: "percent", usedPercent: 33, resetsAt: isoIn(2 * 3600) }],
+        },
+        {
+          accountLabel: "kimi-main",
+          provider: "kimi",
+          authMode: "subscription",
+          source: "none",
+          stale: false,
+          estimate: false,
+          fetchedAt: isoIn(0),
+          windows: [],
+          error: "Kimi exposes no usage endpoint yet",
+        },
+      ],
+      NOW,
+    );
+    expect(out).toContain("ACCOUNT");
+    expect(out).toContain("claude-work");
+    expect(out).toContain("33%");
+    expect(out).toContain("2h 0m");
+    expect(out).toContain("Kimi exposes no usage endpoint yet");
+  });
+  test("empty -> hint", () => {
+    expect(formatUsageReports([], NOW)).toContain("No accounts registered");
+  });
 });
 
 describe("getAccountUsage (no network for unsupported providers)", () => {
-    test("kimi degrades to none", async () => {
-        const report = await getAccountUsage({ label: "k", provider: "kimi", configDir: "/x" });
-        expect(report).toMatchObject({ source: "none", windows: [] });
-        expect(report.error).toContain("Kimi");
-    });
+  test("kimi degrades to none", async () => {
+    const report = await getAccountUsage({ label: "k", provider: "kimi", configDir: "/x" });
+    expect(report).toMatchObject({ source: "none", windows: [] });
+    expect(report.error).toContain("Kimi");
+  });
 });
 
 describe("getUsageForAccounts caching", () => {
-    test("writes on first read, serves stale within the floor", async () => {
-        const env = newSmithersHome();
-        const accounts = [{ label: "k", provider: "kimi", configDir: "/x" }];
-        const first = await getUsageForAccounts(accounts, { env, nowMs: NOW });
-        expect(first[0].stale).toBe(false);
-        const cached = readUsageCache(env);
-        expect(cached.entries.k).toBeDefined();
-        // second read at the same instant is inside the 30s floor -> stale cache hit
-        const second = await getUsageForAccounts(accounts, { env, nowMs: NOW + 1000 });
-        expect(second[0].stale).toBe(true);
+  test("writes on first read, serves stale within the floor", async () => {
+    const env = newSmithersHome();
+    const accounts = [{ label: "k", provider: "kimi", configDir: "/x" }];
+    const first = await getUsageForAccounts(accounts, { env, nowMs: NOW });
+    expect(first[0].stale).toBe(false);
+    const cached = readUsageCache(env);
+    expect(cached.entries.k).toBeDefined();
+    // second read at the same instant is inside the 30s floor -> stale cache hit
+    const second = await getUsageForAccounts(accounts, { env, nowMs: NOW + 1000 });
+    expect(second[0].stale).toBe(true);
+  });
+
+  test("does not replay a same-label report after the provider changes", async () => {
+    const env = newSmithersHome();
+    await getUsageForAccounts([{ label: "same", provider: "kimi", configDir: "/kimi" }], { env, nowMs: NOW });
+
+    const [report] = await getUsageForAccounts([{ label: "same", provider: "codex", configDir: "/missing-codex" }], {
+      env,
+      nowMs: NOW + 1000,
     });
 
-    test("does not replay a same-label report after the provider changes", async () => {
-        const env = newSmithersHome();
-        await getUsageForAccounts(
-            [{ label: "same", provider: "kimi", configDir: "/kimi" }],
-            { env, nowMs: NOW },
-        );
+    expect(report.provider).toBe("codex");
+    expect(report.stale).toBe(false);
+    expect(report.error).not.toContain("Kimi");
+  });
 
-        const [report] = await getUsageForAccounts(
-            [{ label: "same", provider: "codex", configDir: "/missing-codex" }],
-            { env, nowMs: NOW + 1000 },
-        );
+  test("misses after a same-provider config replacement, then hits for that account", async () => {
+    const env = newSmithersHome();
+    await getUsageForAccounts([{ label: "same", provider: "kimi", configDir: "/first" }], { env, nowMs: NOW });
 
-        expect(report.provider).toBe("codex");
-        expect(report.stale).toBe(false);
-        expect(report.error).not.toContain("Kimi");
-    });
+    const replacement = [{ label: "same", provider: "kimi", configDir: "/second" }];
+    const second = await getUsageForAccounts(replacement, { env, nowMs: NOW + 1000 });
+    expect(second[0].stale).toBe(false);
 
-    test("misses after a same-provider config replacement, then hits for that account", async () => {
-        const env = newSmithersHome();
-        await getUsageForAccounts(
-            [{ label: "same", provider: "kimi", configDir: "/first" }],
-            { env, nowMs: NOW },
-        );
-
-        const replacement = [{ label: "same", provider: "kimi", configDir: "/second" }];
-        const second = await getUsageForAccounts(replacement, { env, nowMs: NOW + 1000 });
-        expect(second[0].stale).toBe(false);
-
-        const third = await getUsageForAccounts(replacement, { env, nowMs: NOW + 2000 });
-        expect(third[0].stale).toBe(true);
-    });
+    const third = await getUsageForAccounts(replacement, { env, nowMs: NOW + 2000 });
+    expect(third[0].stale).toBe(true);
+  });
 });

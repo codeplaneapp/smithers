@@ -17,11 +17,11 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
  *                    filters tombstones and the watcher never materializes them.
  */
 export const smithersDocs = sqliteTable("_smithers_docs", {
-    path: text("path").primaryKey(),
-    kind: text("kind").notNull().default("ticket"),
-    content: text("content").notNull(),
-    contentHash: text("content_hash").notNull(),
-    status: text("status"),
-    updatedAtMs: integer("updated_at_ms").notNull(),
-    deletedAtMs: integer("deleted_at_ms"),
+  path: text("path").primaryKey(),
+  kind: text("kind").notNull().default("ticket"),
+  content: text("content").notNull(),
+  contentHash: text("content_hash").notNull(),
+  status: text("status"),
+  updatedAtMs: integer("updated_at_ms").notNull(),
+  deletedAtMs: integer("deleted_at_ms"),
 });

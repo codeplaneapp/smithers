@@ -30,8 +30,7 @@ function createThrowingDurableObjectStorage(shouldThrow) {
         if (shouldThrow(statement)) {
           throw new Error(`intercepted: ${statement.slice(0, 40)}`);
         }
-        const returnsRows =
-          /^\s*(select|with|pragma|values)\b/i.test(statement) || /\breturning\b/i.test(statement);
+        const returnsRows = /^\s*(select|with|pragma|values)\b/i.test(statement) || /\breturning\b/i.test(statement);
         if (!returnsRows) {
           sqlite.run(statement, ...params);
           return { toArray: () => [], raw: () => [] };
@@ -62,8 +61,7 @@ describe("createSmithersCloudflare — best-effort input-table reconciliation sw
     // swallowed by its own .catch(() => {}). Boot must still succeed.
     const storage = createThrowingDurableObjectStorage(
       (stmt) =>
-        /PRAGMA\s+table_info\("input"\)/i.test(stmt) ||
-        /ALTER\s+TABLE\s+"input"\s+ADD\s+COLUMN\s+payload/i.test(stmt),
+        /PRAGMA\s+table_info\("input"\)/i.test(stmt) || /ALTER\s+TABLE\s+"input"\s+ADD\s+COLUMN\s+payload/i.test(stmt),
     );
     const api = await createSmithersCloudflare(
       { result: z.object({ value: z.string() }) },

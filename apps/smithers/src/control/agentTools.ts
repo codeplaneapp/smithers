@@ -77,10 +77,7 @@ export const APP_ACTIONS: AppAction[] = [
     describe: (args) => `Switch to ${str(args, "theme") ?? "a"} theme`,
     run: (args) => {
       const theme = str(args, "theme");
-      if (
-        (theme === "light" || theme === "dark") &&
-        usePreferencesStore.getState().theme !== theme
-      ) {
+      if ((theme === "light" || theme === "dark") && usePreferencesStore.getState().theme !== theme) {
         usePreferencesStore.getState().toggleTheme();
       }
     },
@@ -171,7 +168,7 @@ export const APP_ACTIONS: AppAction[] = [
         workflowKey: workflowKey.trim(),
         inputs:
           typeof inputs === "object" && inputs !== null && !Array.isArray(inputs)
-            ? inputs as Record<string, unknown>
+            ? (inputs as Record<string, unknown>)
             : {},
       });
     },

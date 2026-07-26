@@ -118,19 +118,40 @@ const { Workflow, Task, Sequence, Parallel, Loop, Approval, Worktree, MergeQueue
 // ── Agents ───────────────────────────────────────────────────────────────────
 // Codex is primary in every chain; Claude is retained only for failover.
 const opus = codexFirst(
-  { model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-sol",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [new ClaudeCodeAgent({ model: "claude-opus-4-8" })],
 );
 const solReviewer = codexFirst(
-  { model: "gpt-5.6-sol", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-sol",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [new ClaudeCodeAgent({ model: "claude-opus-4-8" })],
 );
 const sonnet = codexFirst(
-  { model: "gpt-5.6-terra", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-terra",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [new ClaudeCodeAgent({ model: "claude-sonnet-5" })],
 );
 const codex = codexFirst(
-  { model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-luna",
+    config: { model_reasoning_effort: "medium" },
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [new ClaudeCodeAgent({ model: "claude-sonnet-5" })],
 );
 
@@ -208,7 +229,11 @@ function latestIssueIteration(ctx: any, n: number): number | undefined {
   const impl = latestForIssue<Implementation>(ctx.outputs.implementation, n);
   return impl ? iterationOf(impl) : undefined;
 }
-function latestReviewForIssue<T extends { issueNumber: number }>(rows: T[] | undefined, n: number, iteration: number): T | undefined {
+function latestReviewForIssue<T extends { issueNumber: number }>(
+  rows: T[] | undefined,
+  n: number,
+  iteration: number,
+): T | undefined {
   return latest(rowsForIssue(rows, n).filter((r) => iterationOf(r) === iteration));
 }
 function issueDone(ctx: any, n: number): boolean {
@@ -244,11 +269,10 @@ function issueFeedback(ctx: any, n: number): string {
 // ── Compute fns (real shell — git / gh, explicit cwd) ────────────────────────
 function fetchIssues() {
   const issues: Issue[] = ISSUE_NUMBERS.map((n) => {
-    const json = execFileSync(
-      "gh",
-      ["issue", "view", String(n), "--repo", REPO, "--json", "number,title,body,url"],
-      { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
-    );
+    const json = execFileSync("gh", ["issue", "view", String(n), "--repo", REPO, "--json", "number,title,body,url"], {
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    });
     const parsed = JSON.parse(json) as { number: number; title: string; body: string | null; url: string };
     return { number: parsed.number, title: parsed.title, body: parsed.body ?? "", url: parsed.url ?? "" };
   });
@@ -276,7 +300,13 @@ export function parsePorcelainPaths(status: string): string[] {
   return paths;
 }
 
-function openPr(issue: Issue, worktreePath: string, branch: string, done: boolean, impl: Implementation | undefined): Pr {
+function openPr(
+  issue: Issue,
+  worktreePath: string,
+  branch: string,
+  done: boolean,
+  impl: Implementation | undefined,
+): Pr {
   const base: Pr = {
     issueNumber: issue.number,
     prepared: false,
@@ -287,17 +317,23 @@ function openPr(issue: Issue, worktreePath: string, branch: string, done: boolea
     summary: "",
   };
   if (!done) {
-    return { ...base, summary: `Skipped PR: issue #${issue.number} was not implemented + dual-approved within the loop budget.` };
+    return {
+      ...base,
+      summary: `Skipped PR: issue #${issue.number} was not implemented + dual-approved within the loop budget.`,
+    };
   }
-  const git = (args: string[]) => execFileSync("git", args, { cwd: worktreePath, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  const gh = (args: string[]) => execFileSync("gh", args, { cwd: worktreePath, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const git = (args: string[]) =>
+    execFileSync("git", args, { cwd: worktreePath, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const gh = (args: string[]) =>
+    execFileSync("gh", args, { cwd: worktreePath, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   try {
     const dirty = git(["status", "--porcelain"]).trim();
     const aheadOfMain = git(["rev-list", "--count", "origin/main..HEAD"]).trim() !== "0";
     if (!dirty && !aheadOfMain) {
       return { ...base, summary: `Skipped PR: no changes detected in the worktree for issue #${issue.number}.` };
     }
-    const subject = (impl?.commitMessage ?? "").trim().split("\n")[0]?.slice(0, 100) || `🐛 fix: ${issue.title}`.slice(0, 100);
+    const subject =
+      (impl?.commitMessage ?? "").trim().split("\n")[0]?.slice(0, 100) || `🐛 fix: ${issue.title}`.slice(0, 100);
     if (dirty) {
       const paths = parsePorcelainPaths(git(["status", "--porcelain=v1", "-z"]));
       if (paths.length > 0) git(["add", "--", ...paths]);
@@ -322,7 +358,20 @@ function openPr(issue: Issue, worktreePath: string, branch: string, done: boolea
     let prUrl: string;
     let prNumber: number;
     try {
-      prUrl = gh(["pr", "create", "--repo", REPO, "--head", branch, "--base", "main", "--title", subject, "--body", bodyLines.join("\n")]).trim();
+      prUrl = gh([
+        "pr",
+        "create",
+        "--repo",
+        REPO,
+        "--head",
+        branch,
+        "--base",
+        "main",
+        "--title",
+        subject,
+        "--body",
+        bodyLines.join("\n"),
+      ]).trim();
       prNumber = Number(prUrl.split("/").pop());
     } catch {
       // PR already exists for this branch — reuse it.
@@ -339,19 +388,18 @@ function openPr(issue: Issue, worktreePath: string, branch: string, done: boolea
       summary: `Opened PR #${prNumber} (${branch}) → closes #${issue.number}.`,
     };
   } catch (err) {
-    return { ...base, summary: `PR step failed for #${issue.number}: ${String(err instanceof Error ? err.message : err).slice(0, 600)}` };
+    return {
+      ...base,
+      summary: `PR step failed for #${issue.number}: ${String(err instanceof Error ? err.message : err).slice(0, 600)}`,
+    };
   }
 }
 
 // ── Prompts ──────────────────────────────────────────────────────────────────
 function issueHeader(issue: Issue) {
-  return [
-    `Title: ${issue.title}`,
-    "",
-    "--- ISSUE BODY ---",
-    issue.body || "(no body)",
-    "--- END ISSUE BODY ---",
-  ].join("\n");
+  return [`Title: ${issue.title}`, "", "--- ISSUE BODY ---", issue.body || "(no body)", "--- END ISSUE BODY ---"].join(
+    "\n",
+  );
 }
 
 function investigatePrompt(issue: Issue) {
@@ -555,7 +603,15 @@ export default smithers((ctx) => {
                       </Sequence>
                     </Loop>
                     <Task id={`i${n}:pr`} output={outputs.pr} timeoutMs={10 * 60_000}>
-                      {() => openPr(issue, worktreePath, branch, issueDone(ctx, n), latestForIssue<Implementation>(ctx.outputs.implementation, n))}
+                      {() =>
+                        openPr(
+                          issue,
+                          worktreePath,
+                          branch,
+                          issueDone(ctx, n),
+                          latestForIssue<Implementation>(ctx.outputs.implementation, n),
+                        )
+                      }
                     </Task>
                   </Sequence>
                 </Worktree>
@@ -602,7 +658,13 @@ export default smithers((ctx) => {
 
         {denied ? (
           <Task id="landing-skipped" output={outputs.merge} timeoutMs={60_000}>
-            {{ issueNumber: 0, prNumber: null, merged: false, commented: false, summary: "Landing was denied at the approval gate; PRs remain open for manual review." }}
+            {{
+              issueNumber: 0,
+              prNumber: null,
+              merged: false,
+              commented: false,
+              summary: "Landing was denied at the approval gate; PRs remain open for manual review.",
+            }}
           </Task>
         ) : null}
       </Sequence>

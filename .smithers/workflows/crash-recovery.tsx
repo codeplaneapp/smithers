@@ -42,12 +42,11 @@ const { Workflow, smithers, outputs } = createSmithers({
 
 const COMMON = [
   "You are one lane of a crash-recovery workflow. The machine crashed at 2026-07-01 23:55 local and killed every running agent; you are finishing one interrupted piece of work.",
-  "Ground rules: never guess on ambiguous or destructive decisions — run `smithers ask-human \"<question>\"` and wait. Commit with explicit pathspecs only (never `git add -A`); the smithers repo working tree is shared. Commit messages: emoji + conventional commit + Co-Authored-By trailer.",
+  'Ground rules: never guess on ambiguous or destructive decisions — run `smithers ask-human "<question>"` and wait. Commit with explicit pathspecs only (never `git add -A`); the smithers repo working tree is shared. Commit messages: emoji + conventional commit + Co-Authored-By trailer.',
   "If a `smithers` binary is missing in a directory, use `bunx smithers-orchestrator` there instead.",
 ].join("\n");
 
-const latest = <T,>(rows: readonly T[]): T | undefined =>
-  rows.length > 0 ? rows[rows.length - 1] : undefined;
+const latest = <T,>(rows: readonly T[]): T | undefined => (rows.length > 0 ? rows[rows.length - 1] : undefined);
 
 export default smithers((ctx) => {
   const tsyncPlan = latest(ctx.outputs.tsyncPlan);

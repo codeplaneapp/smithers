@@ -5,9 +5,9 @@
  * @param {{ resume: boolean; force?: boolean; acceptWorkflowChange?: boolean }} options
  */
 export function buildDurabilityRunOptions(options) {
-    return {
-        resume: options.resume,
-        force: Boolean(options.force),
-        acceptWorkflowChange: Boolean(options.acceptWorkflowChange),
-    };
+  return {
+    resume: options.resume,
+    force: Boolean(options.force),
+    acceptWorkflowChange: Boolean(options.acceptWorkflowChange),
+  };
 }

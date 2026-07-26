@@ -49,7 +49,10 @@ describe("renderWorkflow", () => {
     const workflow = smithers(() => (
       <Workflow name="hello">
         <Task id="greet" output={outputs.greeting} agent={greeter}>
-          <>{`Hello `}<strong>Ada</strong></>
+          <>
+            {`Hello `}
+            <strong>Ada</strong>
+          </>
         </Task>
       </Workflow>
     ));

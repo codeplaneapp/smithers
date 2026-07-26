@@ -100,9 +100,4 @@ export {
   serializeTicketRow,
   serializeWorkflowRow,
 } from "./api/index.js";
-export {
-  GATEWAY_SCOPE_VALUES,
-  GATEWAY_SCOPE_DESCRIPTIONS,
-  isGatewayScope,
-  hasGatewayScope,
-} from "./auth/scopes.js";
+export { GATEWAY_SCOPE_VALUES, GATEWAY_SCOPE_DESCRIPTIONS, isGatewayScope, hasGatewayScope } from "./auth/scopes.js";

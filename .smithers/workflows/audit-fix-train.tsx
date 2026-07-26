@@ -184,33 +184,45 @@ const { Workflow, Task, Sequence, Parallel, Loop, Worktree, MergeQueue, smithers
 // Codex 5.6 role split: Sol plans/reviews; Luna implements and lands changes.
 // Worktree agents get NO cwd so <Worktree> controls their directory; the
 // merge/push agents run outside any worktree and are pinned to repo-root main.
-const planner = codexFirst({
-  model: "gpt-5.6-sol",
-  sandbox: "danger-full-access",
-  dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true,
-}, [new ClaudeCodeAgent({ model: "claude-opus-4-8" })]);
-const implementer = codexFirst({
-  model: "gpt-5.6-luna",
-  config: { model_reasoning_effort: "medium" },
-  sandbox: "danger-full-access",
-  dangerouslyBypassApprovalsAndSandbox: true,
-  skipGitRepoCheck: true,
-}, [new ClaudeCodeAgent({ model: "claude-sonnet-5" })]);
-const reviewer = codexFirst({
-  model: "gpt-5.6-sol",
-  sandbox: "read-only",
-  skipGitRepoCheck: true,
-}, [new ClaudeCodeAgent({ model: "claude-opus-4-8" })]);
-function repoAgent() {
-  return codexFirst({
+const planner = codexFirst(
+  {
+    model: "gpt-5.6-sol",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
+  [new ClaudeCodeAgent({ model: "claude-opus-4-8" })],
+);
+const implementer = codexFirst(
+  {
     model: "gpt-5.6-luna",
     config: { model_reasoning_effort: "medium" },
     sandbox: "danger-full-access",
     dangerouslyBypassApprovalsAndSandbox: true,
     skipGitRepoCheck: true,
-    cwd: repoRoot,
-  }, [new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd: repoRoot })]);
+  },
+  [new ClaudeCodeAgent({ model: "claude-sonnet-5" })],
+);
+const reviewer = codexFirst(
+  {
+    model: "gpt-5.6-sol",
+    sandbox: "read-only",
+    skipGitRepoCheck: true,
+  },
+  [new ClaudeCodeAgent({ model: "claude-opus-4-8" })],
+);
+function repoAgent() {
+  return codexFirst(
+    {
+      model: "gpt-5.6-luna",
+      config: { model_reasoning_effort: "medium" },
+      sandbox: "danger-full-access",
+      dangerouslyBypassApprovalsAndSandbox: true,
+      skipGitRepoCheck: true,
+      cwd: repoRoot,
+    },
+    [new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd: repoRoot })],
+  );
 }
 
 const AGENT_RETRIES = 2;
@@ -288,7 +300,9 @@ function parseBacklog(reportText: string): Finding[] {
 
 /** Read the report from an absolute path or one resolved against the repo root / cwd. */
 function readReport(reportPath: string): string | null {
-  const candidates = isAbsolute(reportPath) ? [reportPath] : [join(repoRoot, reportPath), resolve(process.cwd(), reportPath)];
+  const candidates = isAbsolute(reportPath)
+    ? [reportPath]
+    : [join(repoRoot, reportPath), resolve(process.cwd(), reportPath)];
   for (const p of candidates) {
     try {
       return readFileSync(p, "utf8");
@@ -341,7 +355,12 @@ function buildWorkItems(findings: Finding[], branchPrefix: string): WorkItem[] {
 function itemDone(ctx: any, key: string): boolean {
   const impl = latestForItem<Implement>(ctx.outputs.implement, key);
   const rev = latestForItem<Review>(ctx.outputs.review, key);
-  return impl?.status === "implemented" && impl.allTestsPassing === true && rev?.approved === true && (impl as any).iteration === (rev as any).iteration;
+  return (
+    impl?.status === "implemented" &&
+    impl.allTestsPassing === true &&
+    rev?.approved === true &&
+    (impl as any).iteration === (rev as any).iteration
+  );
 }
 
 function itemMerged(ctx: any, key: string): boolean {
@@ -353,10 +372,12 @@ function itemFeedback(ctx: any, key: string): string {
   const impl = latestForItem<Implement>(ctx.outputs.implement, key);
   const rev = latestForItem<Review>(ctx.outputs.review, key);
   const parts: string[] = [];
-  if (impl && impl.status !== "implemented") parts.push(`PRIOR ATTEMPT SELF-REPORTED ${impl.status.toUpperCase()}:\n${impl.summary}`);
+  if (impl && impl.status !== "implemented")
+    parts.push(`PRIOR ATTEMPT SELF-REPORTED ${impl.status.toUpperCase()}:\n${impl.summary}`);
   if (rev && !rev.approved) {
     parts.push(`REVIEWER REJECTED:\n${rev.feedback}`);
-    for (const i of rev.issues ?? []) parts.push(`- [${i.severity}] ${i.title}: ${i.description}${i.file ? ` (${i.file})` : ""}`);
+    for (const i of rev.issues ?? [])
+      parts.push(`- [${i.severity}] ${i.title}: ${i.description}${i.file ? ` (${i.file})` : ""}`);
   }
   return parts.join("\n\n");
 }
@@ -367,7 +388,7 @@ function itemFeedback(ctx: any, key: string): string {
 const JJ_VCS = [
   "VERSION CONTROL — THIS REPO USES jj (Jujutsu), colocated with git. Use `jj` for ALL version-control operations.",
   "Do NOT use `git merge`, `git rebase`, `git checkout`, `git commit`, or `git push` — use the jj equivalents.",
-  "Your checkout is a jj workspace. Core commands: `jj st`, `jj log`, `jj diff -r @`, `jj show <rev>`, `jj describe -m \"...\"`,",
+  'Your checkout is a jj workspace. Core commands: `jj st`, `jj log`, `jj diff -r @`, `jj show <rev>`, `jj describe -m "..."`,',
   "`jj bookmark set <name> -r <rev>`, `jj git fetch`, `jj rebase -b <bookmark> -d <dest>`, `jj resolve` (conflicts), `jj git push -b <bookmark>`.",
   "The local `main` bookmark runs FAR behind `main@origin`. STAY CURRENT: `jj git fetch` then rebase onto `main@origin` frequently.",
 ].join("\n");
@@ -406,7 +427,9 @@ function implementPrompt(wi: WorkItem, plan: Plan | undefined, feedback: string)
     "",
     findingHeader(wi),
     "",
-    plan ? `APPROVED PLAN:\n${plan.summary}\n\nSteps:\n${(plan.steps ?? []).map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\nTest strategy: ${plan.testStrategy}` : "(no plan output available — derive a minimal plan yourself, then implement.)",
+    plan
+      ? `APPROVED PLAN:\n${plan.summary}\n\nSteps:\n${(plan.steps ?? []).map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\nTest strategy: ${plan.testStrategy}`
+      : "(no plan output available — derive a minimal plan yourself, then implement.)",
     "",
     JJ_VCS,
     "",
@@ -437,7 +460,9 @@ function reviewPrompt(wi: WorkItem, impl: Implement | undefined): string {
     "",
     findingHeader(wi),
     "",
-    impl ? `Engineer self-report:\n${JSON.stringify({ status: impl.status, summary: impl.summary, filesChanged: impl.filesChanged, testAdded: impl.testAdded, allTestsPassing: impl.allTestsPassing }, null, 2)}` : "No engineer self-report; inspect the worktree directly.",
+    impl
+      ? `Engineer self-report:\n${JSON.stringify({ status: impl.status, summary: impl.summary, filesChanged: impl.filesChanged, testAdded: impl.testAdded, allTestsPassing: impl.allTestsPassing }, null, 2)}`
+      : "No engineer self-report; inspect the worktree directly.",
     "",
     JJ_VCS,
     "",

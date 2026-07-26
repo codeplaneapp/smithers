@@ -65,7 +65,17 @@ describe("normalizeStory", () => {
     for (const candidate of [
       null,
       "not a story",
-      { chapters: [{ title: "x", blocks: [{ kind: "prose", text: "  " }, { kind: "diagram", mermaid: "" }] }] },
+      {
+        chapters: [
+          {
+            title: "x",
+            blocks: [
+              { kind: "prose", text: "  " },
+              { kind: "diagram", mermaid: "" },
+            ],
+          },
+        ],
+      },
       { chapters: [{ title: "x", blocks: [{ kind: "diff", path: "nope.ts" }] }] },
     ]) {
       const story = normalizeStory(candidate, files);
@@ -80,7 +90,13 @@ describe("normalizeStory", () => {
         headline: " ",
         synopsis: "",
         chapters: [
-          { title: "Core", blocks: [{ kind: "mystery", text: "keep this text" }, { kind: "diff", path: "src/a.ts" }] },
+          {
+            title: "Core",
+            blocks: [
+              { kind: "mystery", text: "keep this text" },
+              { kind: "diff", path: "src/a.ts" },
+            ],
+          },
         ],
       },
       files,

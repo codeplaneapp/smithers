@@ -28,7 +28,13 @@ function isBlockedIpv6(ip: string): boolean {
   const normalized = ip.toLowerCase();
   if (normalized === "::1" || normalized === "::") return true;
   if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true; // fc00::/7 unique local
-  if (normalized.startsWith("fe8") || normalized.startsWith("fe9") || normalized.startsWith("fea") || normalized.startsWith("feb")) return true; // fe80::/10 link local
+  if (
+    normalized.startsWith("fe8") ||
+    normalized.startsWith("fe9") ||
+    normalized.startsWith("fea") ||
+    normalized.startsWith("feb")
+  )
+    return true; // fe80::/10 link local
   if (normalized.startsWith("::ffff:")) return isBlockedIpv4(normalized.slice("::ffff:".length));
   return false;
 }
@@ -46,7 +52,8 @@ async function assertPublicHostname(hostname: string): Promise<void> {
   const addresses = await lookup(hostname, { all: true });
   if (addresses.length === 0) throw new Error(`Could not resolve hostname: ${hostname}`);
   for (const { address, family } of addresses) {
-    const blocked = family === 4 || isIPv4(address) ? isBlockedIpv4(address) : isIPv6(address) ? isBlockedIpv6(address) : true;
+    const blocked =
+      family === 4 || isIPv4(address) ? isBlockedIpv4(address) : isIPv6(address) ? isBlockedIpv6(address) : true;
     if (blocked) throw new Error(`Refusing to fetch blocked/private address ${address} for hostname ${hostname}`);
   }
 }

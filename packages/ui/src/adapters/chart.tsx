@@ -60,10 +60,7 @@ export type ChartConfig = {
   [key: string]: {
     label?: ReactNode;
     icon?: ComponentType;
-  } & (
-    | { color?: string; theme?: never }
-    | { color?: never; theme: { light: string; dark: string } }
-  );
+  } & ({ color?: string; theme?: never } | { color?: never; theme: { light: string; dark: string } });
 };
 
 /**
@@ -275,7 +272,15 @@ export function ChartLegendContent({
     <div
       data-slot="chart-legend"
       className={className}
-      style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "4px 16px", paddingTop: 8, fontSize: 12, color: t.mutedForeground }}
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        justifyContent: "center",
+        gap: "4px 16px",
+        paddingTop: 8,
+        fontSize: 12,
+        color: t.mutedForeground,
+      }}
     >
       {payload.map((item, index) => {
         const key = String(item.dataKey ?? nameKey ?? item.value ?? index);

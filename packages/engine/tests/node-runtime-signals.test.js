@@ -18,22 +18,26 @@ describe("createNodeRuntime signals capability", () => {
       const adapter = new SmithersDb(db);
       const runId = "run-signals-1";
       await adapter.insertRun({ runId, workflowName: "wf", status: "running", input: {} });
-      await Effect.runPromise(adapter.insertSignalWithNextSeq({
-        runId,
-        signalName: "REVISE",
-        correlationId: null,
-        payloadJson: JSON.stringify({ feedback: "first" }),
-        receivedAtMs: 1000,
-        receivedBy: null,
-      }));
-      await Effect.runPromise(adapter.insertSignalWithNextSeq({
-        runId,
-        signalName: "REVISE",
-        correlationId: "waiter-a",
-        payloadJson: JSON.stringify({ feedback: "second" }),
-        receivedAtMs: 2000,
-        receivedBy: null,
-      }));
+      await Effect.runPromise(
+        adapter.insertSignalWithNextSeq({
+          runId,
+          signalName: "REVISE",
+          correlationId: null,
+          payloadJson: JSON.stringify({ feedback: "first" }),
+          receivedAtMs: 1000,
+          receivedBy: null,
+        }),
+      );
+      await Effect.runPromise(
+        adapter.insertSignalWithNextSeq({
+          runId,
+          signalName: "REVISE",
+          correlationId: "waiter-a",
+          payloadJson: JSON.stringify({ feedback: "second" }),
+          receivedAtMs: 2000,
+          receivedBy: null,
+        }),
+      );
 
       const runtime = createNodeRuntime({ adapter });
       expect(typeof runtime.signals?.load).toBe("function");

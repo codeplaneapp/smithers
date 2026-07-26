@@ -1,14 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import {
-  createDemodaySiteWorker,
-  type DemodaySiteEnv,
-} from "../src/worker.ts";
+import { createDemodaySiteWorker, type DemodaySiteEnv } from "../src/worker.ts";
 
-const indexHtml = readFileSync(
-  new URL("../dist/index.html", import.meta.url),
-  "utf8",
-);
+const indexHtml = readFileSync(new URL("../dist/index.html", import.meta.url), "utf8");
 
 function makeEnv(): DemodaySiteEnv {
   return {
@@ -39,12 +33,10 @@ describe("demoday site worker", () => {
   });
 
   test("narration manifest covers all 16 steps and totals 3:00", () => {
-    const manifest = JSON.parse(
-      readFileSync(
-        new URL("../dist/narration/manifest.json", import.meta.url),
-        "utf8",
-      ),
-    ) as { totalMs: number; steps: { file: string; durationMs: number }[] };
+    const manifest = JSON.parse(readFileSync(new URL("../dist/narration/manifest.json", import.meta.url), "utf8")) as {
+      totalMs: number;
+      steps: { file: string; durationMs: number }[];
+    };
     expect(manifest.steps.length).toBe(16);
     for (const step of manifest.steps) expect(step.durationMs).toBeGreaterThan(0);
     expect(manifest.totalMs).toBeGreaterThan(170_000);
@@ -52,15 +44,10 @@ describe("demoday site worker", () => {
   });
 
   test("serves the deck with cache and security headers", async () => {
-    const response = await createDemodaySiteWorker().fetch(
-      new Request("https://demoday.smithers.sh/"),
-      makeEnv(),
-    );
+    const response = await createDemodaySiteWorker().fetch(new Request("https://demoday.smithers.sh/"), makeEnv());
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-cache");
-    expect(response.headers.get("content-security-policy")).toContain(
-      "default-src 'self'",
-    );
+    expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
     expect(response.headers.get("x-frame-options")).toBe("DENY");
   });
 

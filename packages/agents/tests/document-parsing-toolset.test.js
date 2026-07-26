@@ -48,10 +48,13 @@ describe("createDocumentParsingToolset", () => {
       fetch: async (url, init) => {
         capturedUrl = String(url);
         captured = init;
-        return new Response(JSON.stringify({ data: { markdown: "## Doc", metadata: { sourceURL: "https://example.com" } } }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({ data: { markdown: "## Doc", metadata: { sourceURL: "https://example.com" } } }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
       },
     });
 
@@ -86,7 +89,12 @@ describe("createDocumentParsingToolset", () => {
     await expect(
       toolset.tools.parse_document.execute(
         {
-          source: { type: "base64", data: Buffer.from("pdf bytes").toString("base64"), mimeType: "application/pdf", filename: "report.pdf" },
+          source: {
+            type: "base64",
+            data: Buffer.from("pdf bytes").toString("base64"),
+            mimeType: "application/pdf",
+            filename: "report.pdf",
+          },
           outputFormat: "markdown",
         },
         callOptions,
@@ -94,7 +102,9 @@ describe("createDocumentParsingToolset", () => {
     ).resolves.toMatchObject({ provider: "firecrawl", markdown: "# Parsed PDF", text: "# Parsed PDF" });
     expect(capturedBody).toBeInstanceOf(FormData);
     expect(capturedBody?.get("file")).toBeInstanceOf(Blob);
-    expect(capturedBody?.get("options")).toBe(JSON.stringify({ formats: ["markdown"], parsers: [{ type: "pdf", mode: "auto" }] }));
+    expect(capturedBody?.get("options")).toBe(
+      JSON.stringify({ formats: ["markdown"], parsers: [{ type: "pdf", mode: "auto" }] }),
+    );
   });
 
   test("uploads base64 file input before starting a LlamaParse job", async () => {
@@ -109,11 +119,19 @@ describe("createDocumentParsingToolset", () => {
           return Response.json({ id: "file-123" });
         }
         if (String(url).endsWith("/api/v2/parse")) {
-          expect(JSON.parse(String(init?.body))).toMatchObject({ file_id: "file-123", tier: "agentic", version: "latest" });
+          expect(JSON.parse(String(init?.body))).toMatchObject({
+            file_id: "file-123",
+            tier: "agentic",
+            version: "latest",
+          });
           return Response.json({ id: "job-123", status: "PENDING" });
         }
         expect(String(url)).toContain("/api/v2/parse/job-123?expand=markdown_full,text_full,metadata");
-        return Response.json({ job: { id: "job-123", status: "COMPLETED" }, markdown_full: "# Parsed", text_full: "Parsed" });
+        return Response.json({
+          job: { id: "job-123", status: "COMPLETED" },
+          markdown_full: "# Parsed",
+          text_full: "Parsed",
+        });
       },
     });
 

@@ -11,7 +11,9 @@ import { createHash } from "node:crypto";
  */
 function derivePrincipalId(authorization) {
   const salt = process.env.SMITHERS_ELECTRIC_PRINCIPAL_SALT ?? "";
-  const hash = createHash("sha256").update(salt + authorization).digest("hex");
+  const hash = createHash("sha256")
+    .update(salt + authorization)
+    .digest("hex");
   return `tok_${hash.slice(0, 16)}`;
 }
 
@@ -34,7 +36,7 @@ export async function deriveGrantsFromGateway(gatewayUrl, authorization, fetchCl
   const payload = body?.payload;
   const rows = Array.isArray(payload) ? payload : [];
   const grantedRunIds = rows
-    .map((row) => (row && typeof row === "object" ? (/** @type {{ runId?: unknown }} */ (row)).runId : undefined))
+    .map((row) => (row && typeof row === "object" ? /** @type {{ runId?: unknown }} */ (row).runId : undefined))
     .filter((id) => typeof id === "string");
   return {
     principalId: derivePrincipalId(authorization),

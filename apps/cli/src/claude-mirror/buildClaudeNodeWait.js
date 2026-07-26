@@ -22,64 +22,65 @@ import { truncateClaudeMirrorText } from "./truncateClaudeMirrorText.js";
  * @param {{ runId: string; nodeId: string; iteration?: number; timeoutMs?: number; intervalMs?: number; maxOutputChars?: number }} params
  */
 export async function buildClaudeNodeWait(adapter, params) {
-    const { runId, nodeId } = params;
-    const timeoutMs = Math.max(0, Math.floor(params.timeoutMs ?? 480000));
-    const intervalMs = Math.max(100, Math.floor(params.intervalMs ?? 1000));
-    const maxOutputChars = Math.max(0, Math.floor(params.maxOutputChars ?? 2000));
-    const deadline = Date.now() + timeoutMs;
+  const { runId, nodeId } = params;
+  const timeoutMs = Math.max(0, Math.floor(params.timeoutMs ?? 480000));
+  const intervalMs = Math.max(100, Math.floor(params.intervalMs ?? 1000));
+  const maxOutputChars = Math.max(0, Math.floor(params.maxOutputChars ?? 2000));
+  const deadline = Date.now() + timeoutMs;
 
-    while (true) {
-        const run = await adapter.getRun(runId);
-        if (!run) {
-            throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`, { runId });
-        }
-        const rows = await Promise.resolve(adapter.listNodeIterationsEffect(runId, nodeId)).catch(() => []);
-        const row = pickIteration(rows, params.iteration);
-        if (row && isTerminalClaudeMirrorNodeState(row.state)) {
-            const detail = await runPromise(aggregateNodeDetailEffect(adapter, {
-                runId,
-                nodeId,
-                ...(params.iteration !== undefined ? { iteration: params.iteration } : {}),
-            })).catch(() => undefined);
-            return {
-                contract: claudeMirrorContract,
-                runId,
-                nodeId,
-                state: row.state,
-                iteration: row.iteration ?? 0,
-                timedOut: false,
-                vanished: false,
-                output: truncateClaudeMirrorText(detail ? extractClaudeMirrorOutputText(detail) : "", maxOutputChars),
-            };
-        }
-        if (!row) {
-            const inFrame = await nodeInLatestFrame(adapter, runId, nodeId);
-            if (!inFrame) {
-                // Pruned: gone from both the node table and the latest frame.
-                return vanishedResult(runId, nodeId);
-            }
-            if (isTerminalClaudeMirrorRunStatus(run.status)) {
-                return vanishedResult(runId, nodeId);
-            }
-        }
-        else if (row.state === "pending" && isTerminalClaudeMirrorRunStatus(run.status)) {
-            // The run ended without this node ever starting.
-            return vanishedResult(runId, nodeId);
-        }
-        if (Date.now() >= deadline) {
-            return {
-                contract: claudeMirrorContract,
-                runId,
-                nodeId,
-                state: row?.state ?? "unknown",
-                iteration: row?.iteration ?? 0,
-                timedOut: true,
-                vanished: false,
-                output: "",
-            };
-        }
-        await sleep(Math.min(intervalMs, Math.max(1, deadline - Date.now())));
+  while (true) {
+    const run = await adapter.getRun(runId);
+    if (!run) {
+      throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`, { runId });
     }
+    const rows = await Promise.resolve(adapter.listNodeIterationsEffect(runId, nodeId)).catch(() => []);
+    const row = pickIteration(rows, params.iteration);
+    if (row && isTerminalClaudeMirrorNodeState(row.state)) {
+      const detail = await runPromise(
+        aggregateNodeDetailEffect(adapter, {
+          runId,
+          nodeId,
+          ...(params.iteration !== undefined ? { iteration: params.iteration } : {}),
+        }),
+      ).catch(() => undefined);
+      return {
+        contract: claudeMirrorContract,
+        runId,
+        nodeId,
+        state: row.state,
+        iteration: row.iteration ?? 0,
+        timedOut: false,
+        vanished: false,
+        output: truncateClaudeMirrorText(detail ? extractClaudeMirrorOutputText(detail) : "", maxOutputChars),
+      };
+    }
+    if (!row) {
+      const inFrame = await nodeInLatestFrame(adapter, runId, nodeId);
+      if (!inFrame) {
+        // Pruned: gone from both the node table and the latest frame.
+        return vanishedResult(runId, nodeId);
+      }
+      if (isTerminalClaudeMirrorRunStatus(run.status)) {
+        return vanishedResult(runId, nodeId);
+      }
+    } else if (row.state === "pending" && isTerminalClaudeMirrorRunStatus(run.status)) {
+      // The run ended without this node ever starting.
+      return vanishedResult(runId, nodeId);
+    }
+    if (Date.now() >= deadline) {
+      return {
+        contract: claudeMirrorContract,
+        runId,
+        nodeId,
+        state: row?.state ?? "unknown",
+        iteration: row?.iteration ?? 0,
+        timedOut: true,
+        vanished: false,
+        output: "",
+      };
+    }
+    await sleep(Math.min(intervalMs, Math.max(1, deadline - Date.now())));
+  }
 }
 
 /**
@@ -87,13 +88,13 @@ export async function buildClaudeNodeWait(adapter, params) {
  * @param {number | undefined} iteration
  */
 function pickIteration(rows, iteration) {
-    if (!Array.isArray(rows) || rows.length === 0) {
-        return undefined;
-    }
-    if (iteration !== undefined) {
-        return rows.find((row) => (row.iteration ?? 0) === iteration);
-    }
-    return rows.reduce((latest, row) => ((row.iteration ?? 0) > (latest.iteration ?? 0) ? row : latest));
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return undefined;
+  }
+  if (iteration !== undefined) {
+    return rows.find((row) => (row.iteration ?? 0) === iteration);
+  }
+  return rows.reduce((latest, row) => ((row.iteration ?? 0) > (latest.iteration ?? 0) ? row : latest));
 }
 
 /**
@@ -102,16 +103,16 @@ function pickIteration(rows, iteration) {
  * @param {string} nodeId
  */
 async function nodeInLatestFrame(adapter, runId, nodeId) {
-    const frame = await Promise.resolve(adapter.getLastFrame(runId)).catch(() => undefined);
-    if (!frame) {
-        return false;
-    }
-    const plan = deriveClaudeWorkflowPhasesFromFrame({
-        xmlJson: frame.xmlJson ?? null,
-        taskIndexJson: frame.taskIndexJson ?? null,
-    });
-    const logical = String(nodeId).split("@@")[0];
-    return plan.nodes.some((node) => node.nodeId === nodeId || String(node.nodeId).split("@@")[0] === logical);
+  const frame = await Promise.resolve(adapter.getLastFrame(runId)).catch(() => undefined);
+  if (!frame) {
+    return false;
+  }
+  const plan = deriveClaudeWorkflowPhasesFromFrame({
+    xmlJson: frame.xmlJson ?? null,
+    taskIndexJson: frame.taskIndexJson ?? null,
+  });
+  const logical = String(nodeId).split("@@")[0];
+  return plan.nodes.some((node) => node.nodeId === nodeId || String(node.nodeId).split("@@")[0] === logical);
 }
 
 /**
@@ -119,19 +120,19 @@ async function nodeInLatestFrame(adapter, runId, nodeId) {
  * @param {string} nodeId
  */
 function vanishedResult(runId, nodeId) {
-    return {
-        contract: claudeMirrorContract,
-        runId,
-        nodeId,
-        state: "skipped",
-        iteration: 0,
-        timedOut: false,
-        vanished: true,
-        output: "",
-    };
+  return {
+    contract: claudeMirrorContract,
+    runId,
+    nodeId,
+    state: "skipped",
+    iteration: 0,
+    timedOut: false,
+    vanished: true,
+    output: "",
+  };
 }
 
 /** @param {number} ms */
 function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

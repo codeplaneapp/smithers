@@ -72,7 +72,9 @@ describe("assessChangeImpact", () => {
       ["terraform/vpc.tf", "terraform"],
     ])("supply chain path %s", (path, keyword) => {
       const impact = assessChangeImpact([file(path)], []);
-      expect(impact.reasons.some((reason) => reason.signal === `ci or deployment path (${keyword})` && reason.path === path)).toBe(true);
+      expect(
+        impact.reasons.some((reason) => reason.signal === `ci or deployment path (${keyword})` && reason.path === path),
+      ).toBe(true);
     });
 
     test.each([
@@ -99,7 +101,10 @@ describe("assessChangeImpact", () => {
       ["chmod", "+chmodSync(path, 0o777);"],
     ])("marker %s in added lines is a reason", (marker, addedLine) => {
       const impact = assessChangeImpact([file("src/renderGreeting.ts", { diff: `${addedLine}\n` })], []);
-      expect(impact.reasons).toContainEqual({ signal: `risky added content (${marker})`, path: "src/renderGreeting.ts" });
+      expect(impact.reasons).toContainEqual({
+        signal: `risky added content (${marker})`,
+        path: "src/renderGreeting.ts",
+      });
     });
 
     test("markers only on removed or context lines do not fire", () => {
@@ -143,7 +148,10 @@ describe("assessChangeImpact", () => {
 
   describe("finding signals", () => {
     test("critical finding of any category escalates", () => {
-      const impact = assessChangeImpact([file("src/renderGreeting.ts")], [finding({ severity: "critical", category: "correctness" })]);
+      const impact = assessChangeImpact(
+        [file("src/renderGreeting.ts")],
+        [finding({ severity: "critical", category: "correctness" })],
+      );
       expect(impact.reasons).toContainEqual({ signal: "critical finding", path: "src/app.ts" });
       expect(impact.level).toBe("moderate");
     });
@@ -173,10 +181,7 @@ describe("assessChangeImpact", () => {
 
   describe("deletion signal", () => {
     test("test file deleted while sibling source changed", () => {
-      const impact = assessChangeImpact(
-        [file("src/parse.test.ts", { status: "deleted" }), file("src/parse.ts")],
-        [],
-      );
+      const impact = assessChangeImpact([file("src/parse.test.ts", { status: "deleted" }), file("src/parse.ts")], []);
       expect(impact.reasons).toContainEqual({
         signal: "test file deleted while sibling source changed",
         path: "src/parse.test.ts",
@@ -184,10 +189,7 @@ describe("assessChangeImpact", () => {
     });
 
     test("test deletion without a changed sibling source does not fire", () => {
-      const impact = assessChangeImpact(
-        [file("src/parse.test.ts", { status: "deleted" }), file("src/render.ts")],
-        [],
-      );
+      const impact = assessChangeImpact([file("src/parse.test.ts", { status: "deleted" }), file("src/render.ts")], []);
       expect(impact.score).toBe(0);
     });
 

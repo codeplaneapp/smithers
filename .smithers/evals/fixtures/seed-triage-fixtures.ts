@@ -35,14 +35,7 @@ for (const fixture of FIXTURES) {
     console.log(`[seed] ${fixture.runId} already exists, skipping`);
     continue;
   }
-  const up = cli([
-    "up",
-    WORKFLOW,
-    "--run-id",
-    fixture.runId,
-    "--input",
-    JSON.stringify({ mode: fixture.mode }),
-  ]);
+  const up = cli(["up", WORKFLOW, "--run-id", fixture.runId, "--input", JSON.stringify({ mode: fixture.mode })]);
   const verify = cli(["inspect", fixture.runId, "--json"]);
   let state = "unknown";
   try {

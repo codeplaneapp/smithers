@@ -8,16 +8,16 @@ import { serveFixtureAnthropic } from "./helpers/serveFixtureAnthropic.ts";
 const REPO = "octo/widgets";
 
 const SSE_USAGE = [
-  'event: message_start',
+  "event: message_start",
   'data: {"type":"message_start","message":{"id":"m1","model":"claude-sonnet-4-6","usage":{"input_tokens":300,"output_tokens":1}}}',
   "",
-  'event: content_block_delta',
+  "event: content_block_delta",
   'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}',
   "",
-  'event: message_delta',
+  "event: message_delta",
   'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":300,"output_tokens":42}}',
   "",
-  'event: message_stop',
+  "event: message_stop",
   'data: {"type":"message_stop"}',
   "",
 ].join("\n");
@@ -26,29 +26,29 @@ const SINGLE_CALL_COST_USD = 0.00153;
 let usageId = 0;
 
 const SSE_USAGE_WITH_CACHE = [
-  'event: message_start',
+  "event: message_start",
   'data: {"type":"message_start","message":{"id":"m2","model":"claude-sonnet-4-6","usage":{"input_tokens":10,"output_tokens":1,"cache_creation_input_tokens":200,"cache_read_input_tokens":4000}}}',
   "",
-  'event: message_delta',
+  "event: message_delta",
   'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":10,"output_tokens":42}}',
   "",
-  'event: message_stop',
+  "event: message_stop",
   'data: {"type":"message_stop"}',
   "",
 ].join("\n");
 
 function sseUsageWithLargeBodyBeforeFinalUsage(): string {
   return [
-    'event: message_start',
+    "event: message_start",
     'data: {"type":"message_start","message":{"id":"m1","model":"claude-sonnet-4-6","usage":{"input_tokens":300,"output_tokens":1}}}',
     "",
-    'event: content_block_delta',
+    "event: content_block_delta",
     `data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"${"x".repeat((1 << 20) + 1024)}"}}`,
     "",
-    'event: message_delta',
+    "event: message_delta",
     'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":300,"output_tokens":42}}',
     "",
-    'event: message_stop',
+    "event: message_stop",
     'data: {"type":"message_stop"}',
     "",
   ].join("\n");
@@ -57,29 +57,26 @@ function sseUsageWithLargeBodyBeforeFinalUsage(): string {
 async function seedSession(env: ReviewWorkerEnv, repo: string, spendCapUsd = 1) {
   const token = "srs_testsessiontoken";
   const hash = await sha256Hex(token);
-  await env.DB
-    .prepare(
-      "INSERT INTO sessions (hash, repo, pr, expires_at, spend_cap_usd, spent_usd, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    )
+  await env.DB.prepare(
+    "INSERT INTO sessions (hash, repo, pr, expires_at, spend_cap_usd, spent_usd, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  )
     .bind(hash, repo, 99, Date.now() + 60_000, spendCapUsd, 0, Date.now())
     .run();
   return token;
 }
 
 async function registerRepo(env: ReviewWorkerEnv, repo: string, prsPerMonth = 5, spendCapUsd = 1) {
-  await env.DB
-    .prepare(
-      "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
-    )
+  await env.DB.prepare(
+    "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
+  )
     .bind(repo, "auto", prsPerMonth, spendCapUsd, Date.now())
     .run();
 }
 
 async function seedUsage(env: ReviewWorkerEnv, repo: string, costUsd: number) {
-  await env.DB
-    .prepare(
-      "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
+  await env.DB.prepare(
+    "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
     .bind(`usage-${usageId++}`, repo, 1, "claude-sonnet-4-6", 0, 0, costUsd, "messages", Date.now())
     .run();
 }
@@ -399,8 +396,7 @@ describe("anthropic proxy", () => {
     await registerRepo(env, "octo/widgets");
     const apiKey = "srk_testoperatorkey";
     const keyHash = await sha256Hex(apiKey);
-    await env.DB
-      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
       .bind(keyHash, "octo", JSON.stringify(["octo/widgets"]), Date.now())
       .run();
     const meterings: Promise<unknown>[] = [];
@@ -495,8 +491,7 @@ describe("anthropic proxy", () => {
     await registerRepo(env, "octo/widgets");
     await registerRepo(env, "octo/wrenches");
     const apiKey = "srk_multirepo";
-    await env.DB
-      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
       .bind(await sha256Hex(apiKey), "octo", JSON.stringify(["octo/widgets", "octo/wrenches"]), Date.now())
       .run();
     const meterings: Promise<unknown>[] = [];
@@ -531,8 +526,7 @@ describe("anthropic proxy", () => {
     const fixture = serveFixtureAnthropic({ contentType: "application/json", body: "{}" });
     teardowns.push(() => fixture.stop());
     const apiKey = "srk_limitedkey";
-    await env.DB
-      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
       .bind(await sha256Hex(apiKey), "octo", JSON.stringify(["octo/widgets"]), Date.now())
       .run();
     const worker = createReviewWorker({
@@ -563,8 +557,7 @@ describe("anthropic proxy", () => {
     const fixture = serveFixtureAnthropic({ contentType: "application/json", body: "{}" });
     teardowns.push(() => fixture.stop());
     const apiKey = "srk_unregistered";
-    await env.DB
-      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
       .bind(await sha256Hex(apiKey), "octo", JSON.stringify(["octo/missing"]), Date.now())
       .run();
     const worker = createReviewWorker({
@@ -594,8 +587,7 @@ describe("anthropic proxy", () => {
     await registerRepo(env, REPO, 1, 0.01);
     await seedUsage(env, REPO, 0.02);
     const apiKey = "srk_spentrepo";
-    await env.DB
-      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
       .bind(await sha256Hex(apiKey), "octo", JSON.stringify([REPO]), Date.now())
       .run();
     const worker = createReviewWorker({
@@ -625,8 +617,9 @@ describe("anthropic proxy", () => {
     await registerRepo(env, REPO, 100, 1);
     await seedUsage(env, REPO, 0.02);
     const apiKey = "srk_spentkey";
-    await env.DB
-      .prepare("INSERT INTO api_keys (hash, owner, repos_json, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)")
+    await env.DB.prepare(
+      "INSERT INTO api_keys (hash, owner, repos_json, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
       .bind(await sha256Hex(apiKey), "octo", JSON.stringify([REPO]), 0.01, Date.now())
       .run();
     const worker = createReviewWorker({
@@ -654,17 +647,15 @@ describe("anthropic proxy", () => {
     const fixture = serveFixtureAnthropic({ contentType: "text/event-stream", body: SSE_USAGE });
     teardowns.push(() => fixture.stop());
     // Plan ceiling = prs_per_month * spend_cap_usd = 1 * 0.01 = 0.01.
-    await env.DB
-      .prepare(
-        "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
-      )
+    await env.DB.prepare(
+      "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
       .bind(REPO, "auto", 1, 0.01, Date.now())
       .run();
     // Month-to-date spend already crossed the ceiling.
-    await env.DB
-      .prepare(
-        "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      )
+    await env.DB.prepare(
+      "INSERT INTO usage_events (id, repo, pr, model, input_tokens, output_tokens, cost_usd, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
       .bind("u1", REPO, 1, "claude-sonnet-4-6", 0, 0, 0.02, "messages", Date.now())
       .run();
     // A fresh session: spent_usd = 0 with a high per-session cap, i.e. a re-mint
@@ -696,10 +687,9 @@ describe("anthropic proxy", () => {
     const fixture = serveFixtureAnthropic({ contentType: "text/event-stream", body: SSE_USAGE });
     teardowns.push(() => fixture.stop());
     // Ceiling = 5 * 1 = 5; nothing spent yet.
-    await env.DB
-      .prepare(
-        "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
-      )
+    await env.DB.prepare(
+      "INSERT INTO repos (repo, mode, prs_per_month, spend_cap_usd, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
       .bind(REPO, "auto", 5, 1, Date.now())
       .run();
     const token = await seedSession(env, REPO, 1);
@@ -766,8 +756,7 @@ describe("anthropic proxy", () => {
     // `auth.repos.length > 0 && !includes(hint)`, which is vacuously false for
     // an empty list, so the hint was accepted and the key could meter spend
     // against ANY repo. Must 403 before any upstream call.
-    await env.DB
-      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
       .bind(await sha256Hex(apiKey), "octo", JSON.stringify([]), Date.now())
       .run();
     const worker = createReviewWorker({
@@ -799,8 +788,7 @@ describe("anthropic proxy", () => {
     const fixture = serveFixtureAnthropic({ contentType: "application/json", body: "{}" });
     teardowns.push(() => fixture.stop());
     const apiKey = "srk_noreposnohint";
-    await env.DB
-      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
       .bind(await sha256Hex(apiKey), "octo", JSON.stringify([]), Date.now())
       .run();
     const worker = createReviewWorker({
@@ -836,8 +824,7 @@ describe("anthropic proxy", () => {
     await registerRepo(env, REPO, 1, 0.01);
     await seedUsage(env, REPO, 0.01);
     const apiKey = "srk_boundarykey";
-    await env.DB
-      .prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
+    await env.DB.prepare("INSERT INTO api_keys (hash, owner, repos_json, created_at) VALUES (?, ?, ?, ?)")
       .bind(await sha256Hex(apiKey), "octo", JSON.stringify([REPO]), Date.now())
       .run();
     const worker = createReviewWorker({

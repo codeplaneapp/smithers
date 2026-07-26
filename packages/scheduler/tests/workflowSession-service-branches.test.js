@@ -59,15 +59,21 @@ describe("WorkflowSessionService direct methods", () => {
     });
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
 
-    expect(run(session.submitGraph(graph(
-      [eventTask, signalTask],
-      workflow([
-        el("smithers:parallel", {}, [
-          el("smithers:wait-for-event", { id: "event" }),
-          el("smithers:wait-for-event", { id: "signal" }),
-        ]),
-      ]),
-    )))._tag).toBe("Wait");
+    expect(
+      run(
+        session.submitGraph(
+          graph(
+            [eventTask, signalTask],
+            workflow([
+              el("smithers:parallel", {}, [
+                el("smithers:wait-for-event", { id: "event" }),
+                el("smithers:wait-for-event", { id: "signal" }),
+              ]),
+            ]),
+          ),
+        ),
+      )._tag,
+    ).toBe("Wait");
 
     const afterWrongCorrelation = run(session.eventReceived("ready", { ok: false }, "wrong"));
     expect(afterWrongCorrelation).toEqual({ _tag: "Wait", reason: { _tag: "Event", eventName: "ready" } });
@@ -92,9 +98,10 @@ describe("WorkflowSessionService direct methods", () => {
     ]) {
       const task = descriptor("timer", { meta: { __timer: true, __timerDuration: duration } });
       const session = makeWorkflowSession({ nowMs: () => 1_000 });
-      expect(run(session.submitGraph(graph([task], workflow([
-        el("smithers:timer", { id: "timer" }),
-      ]))))).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: expectedResumeAtMs } });
+      expect(run(session.submitGraph(graph([task], workflow([el("smithers:timer", { id: "timer" })]))))).toEqual({
+        _tag: "Wait",
+        reason: { _tag: "Timer", resumeAtMs: expectedResumeAtMs },
+      });
     }
   });
 
@@ -102,9 +109,10 @@ describe("WorkflowSessionService direct methods", () => {
     const task = descriptor("timer", { meta: { __timer: true, __timerDuration: "5s" } });
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
 
-    expect(run(session.submitGraph(graph([task], workflow([
-      el("smithers:timer", { id: "timer" }),
-    ]))))).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: 6_000 } });
+    expect(run(session.submitGraph(graph([task], workflow([el("smithers:timer", { id: "timer" })]))))).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "Timer", resumeAtMs: 6_000 },
+    });
 
     const decision = run(session.timerFired("timer", 7_000));
     expect(decision).toEqual({
@@ -122,10 +130,11 @@ describe("WorkflowSessionService direct methods", () => {
     const timer = descriptor("timer", { dependsOn: ["a"], meta: { __timer: true, __timerDuration: "5s" } });
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
 
-    const initial = run(session.submitGraph(graph([upstream, timer], workflow([
-      el("smithers:task", { id: "a" }),
-      el("smithers:timer", { id: "timer" }),
-    ]))));
+    const initial = run(
+      session.submitGraph(
+        graph([upstream, timer], workflow([el("smithers:task", { id: "a" }), el("smithers:timer", { id: "timer" })])),
+      ),
+    );
     expect(initial._tag).toBe("Execute");
     expect(initial.tasks.map((task) => task.nodeId)).toEqual(["a"]);
 
@@ -140,9 +149,9 @@ describe("WorkflowSessionService direct methods", () => {
     const task = descriptor("timer", { meta: { __timer: true, __timerDuration: "5s" } });
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
 
-    expect(run(session.submitGraph(graph([task], workflow([
-      el("smithers:timer", { id: "timer" }),
-    ]))))._tag).toBe("Wait");
+    expect(run(session.submitGraph(graph([task], workflow([el("smithers:timer", { id: "timer" })]))))._tag).toBe(
+      "Wait",
+    );
     expect(run(session.timerFired("timer", 6_000))._tag).toBe("Finished");
 
     const replay = run(session.timerFired("timer", 9_000));
@@ -156,9 +165,7 @@ describe("WorkflowSessionService direct methods", () => {
     const task = descriptor("timer", { meta: { __timer: true, __timerDuration: "soon" } });
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
 
-    const decision = run(session.submitGraph(graph([task], workflow([
-      el("smithers:timer", { id: "timer" }),
-    ]))));
+    const decision = run(session.submitGraph(graph([task], workflow([el("smithers:timer", { id: "timer" })]))));
     expect(decision._tag).toBe("Failed");
     expect(decision.error.code).toBe("INVALID_INPUT");
     expect(decision.error.details).toMatchObject({ nodeId: "timer", duration: "soon" });
@@ -168,9 +175,7 @@ describe("WorkflowSessionService direct methods", () => {
     const task = descriptor("timer", { meta: { __timer: true, __timerDuration: "2D" } });
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
 
-    expect(run(session.submitGraph(graph([task], workflow([
-      el("smithers:timer", { id: "timer" }),
-    ]))))).toEqual({
+    expect(run(session.submitGraph(graph([task], workflow([el("smithers:timer", { id: "timer" })]))))).toEqual({
       _tag: "Wait",
       reason: { _tag: "Timer", resumeAtMs: 1_000 + 2 * 86_400_000 },
     });
@@ -181,9 +186,10 @@ describe("WorkflowSessionService direct methods", () => {
     const task = descriptor("timer", { meta: { __timer: true, __timerDuration: "5s" } });
     const session = makeWorkflowSession({ nowMs: () => now });
 
-    expect(run(session.submitGraph(graph([task], workflow([
-      el("smithers:timer", { id: "timer" }),
-    ]))))).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: 6_000 } });
+    expect(run(session.submitGraph(graph([task], workflow([el("smithers:timer", { id: "timer" })]))))).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "Timer", resumeAtMs: 6_000 },
+    });
 
     // A later re-decide (a sibling completing, an unrelated event) must not push
     // the deadline out; it stays anchored at the 1_000 start + 5s = 6_000.
@@ -202,14 +208,20 @@ describe("WorkflowSessionService direct methods", () => {
         const tasks = timerFirst ? [timer, blocker] : [blocker, timer];
         const session = makeWorkflowSession({ nowMs: () => 1_000 });
         const xml = workflow([
-          el("smithers:parallel", {}, tasks.map((task) => el(
-            task.meta?.__timer
-              ? "smithers:timer"
-              : task.meta?.__waitForEvent
-                ? "smithers:wait-for-event"
-                : "smithers:task",
-            { id: task.nodeId },
-          ))),
+          el(
+            "smithers:parallel",
+            {},
+            tasks.map((task) =>
+              el(
+                task.meta?.__timer
+                  ? "smithers:timer"
+                  : task.meta?.__waitForEvent
+                    ? "smithers:wait-for-event"
+                    : "smithers:task",
+                { id: task.nodeId },
+              ),
+            ),
+          ),
         ]);
 
         expect(run(session.submitGraph(graph(tasks, xml)))).toEqual({
@@ -225,13 +237,14 @@ describe("WorkflowSessionService direct methods", () => {
           const approved = run(session.approvalResolved("approval", { approved: true, note: "approved" }));
           expect(approved._tag).toBe("Execute");
           expect(approved.tasks.map((task) => task.nodeId)).toEqual(["approval"]);
-          afterBlockerResolved = run(session.taskCompleted({
-            nodeId: "approval",
-            iteration: 0,
-            output: { approved: true },
-          }));
-        }
-        else {
+          afterBlockerResolved = run(
+            session.taskCompleted({
+              nodeId: "approval",
+              iteration: 0,
+              output: { approved: true },
+            }),
+          );
+        } else {
           afterBlockerResolved = run(session.signalReceived("ready", { ok: true }));
         }
         expect(afterBlockerResolved).toEqual({
@@ -252,10 +265,11 @@ describe("WorkflowSessionService direct methods", () => {
       const tasks = timerFirst ? [timer, bound] : [bound, timer];
       const session = makeWorkflowSession({ nowMs: () => 1_000 });
       const xml = workflow([
-        el("smithers:parallel", {}, tasks.map((task) => el(
-          task.meta?.__timer ? "smithers:timer" : "smithers:task",
-          { id: task.nodeId },
-        ))),
+        el(
+          "smithers:parallel",
+          {},
+          tasks.map((task) => el(task.meta?.__timer ? "smithers:timer" : "smithers:task", { id: task.nodeId })),
+        ),
       ]);
       const mounted = graph(tasks, xml);
 
@@ -277,7 +291,11 @@ describe("WorkflowSessionService direct methods", () => {
       const tasks = slowFirst ? [slow, fast] : [fast, slow];
       const session = makeWorkflowSession({ nowMs: () => 1_000 });
       const xml = workflow([
-        el("smithers:parallel", {}, tasks.map((task) => el("smithers:timer", { id: task.nodeId }))),
+        el(
+          "smithers:parallel",
+          {},
+          tasks.map((task) => el("smithers:timer", { id: task.nodeId })),
+        ),
       ]);
 
       expect(run(session.submitGraph(graph(tasks, xml)))).toEqual({
@@ -296,16 +314,21 @@ describe("WorkflowSessionService direct methods", () => {
     const task = descriptor("timer", { meta: { __timer: true, __timerDuration: "5s" } });
     const session = makeWorkflowSession({ nowMs: () => now });
 
-    expect(run(session.submitGraph(graph([task], workflow([
-      el("smithers:timer", { id: "timer" }),
-    ]))))).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: 6_000 } });
+    expect(run(session.submitGraph(graph([task], workflow([el("smithers:timer", { id: "timer" })]))))).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "Timer", resumeAtMs: 6_000 },
+    });
 
-    const decision = run(session.submitGraph(graph([task], workflow([
-      el("smithers:parallel", {}, [
-        el("smithers:timer", { id: "timer" }),
-        el("smithers:continue-as-new", {}),
-      ]),
-    ]))));
+    const decision = run(
+      session.submitGraph(
+        graph(
+          [task],
+          workflow([
+            el("smithers:parallel", {}, [el("smithers:timer", { id: "timer" }), el("smithers:continue-as-new", {})]),
+          ]),
+        ),
+      ),
+    );
 
     expect(decision).toMatchObject({
       _tag: "ContinueAsNew",
@@ -325,9 +348,10 @@ describe("WorkflowSessionService direct methods", () => {
       initialTimerStarts: new Map(Object.entries(decision.transition.timerStarts)),
     });
 
-    expect(run(nextSession.submitGraph(graph([task], workflow([
-      el("smithers:timer", { id: "timer" }),
-    ]))))).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: 6_000 } });
+    expect(run(nextSession.submitGraph(graph([task], workflow([el("smithers:timer", { id: "timer" })]))))).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "Timer", resumeAtMs: 6_000 },
+    });
   });
 
   test("a carried timer anchor whose key never re-mounts is dropped from the next continuation", () => {
@@ -345,16 +369,21 @@ describe("WorkflowSessionService direct methods", () => {
       initialTimerStarts: new Map([["gone::0", 500]]),
     });
 
-    expect(run(session.submitGraph(graph([task], workflow([
-      el("smithers:timer", { id: "timer" }),
-    ]))))).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: 6_000 } });
+    expect(run(session.submitGraph(graph([task], workflow([el("smithers:timer", { id: "timer" })]))))).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "Timer", resumeAtMs: 6_000 },
+    });
 
-    const decision = run(session.submitGraph(graph([task], workflow([
-      el("smithers:parallel", {}, [
-        el("smithers:timer", { id: "timer" }),
-        el("smithers:continue-as-new", {}),
-      ]),
-    ]))));
+    const decision = run(
+      session.submitGraph(
+        graph(
+          [task],
+          workflow([
+            el("smithers:parallel", {}, [el("smithers:timer", { id: "timer" }), el("smithers:continue-as-new", {})]),
+          ]),
+        ),
+      ),
+    );
 
     expect(decision).toMatchObject({
       _tag: "ContinueAsNew",
@@ -411,11 +440,16 @@ describe("WorkflowSessionService direct methods", () => {
     const afterMiss = run(session.cacheMissed("cached", 0));
     expect(afterMiss._tag).toBe("Execute");
 
-    const afterResolved = run(session.cacheResolved({
-      nodeId: "cached",
-      iteration: 0,
-      output: { from: "cache" },
-    }, true));
+    const afterResolved = run(
+      session.cacheResolved(
+        {
+          nodeId: "cached",
+          iteration: 0,
+          output: { from: "cache" },
+        },
+        true,
+      ),
+    );
     expect(afterResolved._tag).toBe("Finished");
     expect(afterResolved.result.output).toEqual({ from: "cache" });
   });
@@ -430,11 +464,13 @@ describe("WorkflowSessionService direct methods", () => {
 
     expect(run(session.submitGraph(graph([task, cachedTask])))._tag).toBe("Execute");
 
-    const completed = run(session.taskCompleted({
-      nodeId: "fast",
-      iteration: 0,
-      output: { ok: true },
-    }));
+    const completed = run(
+      session.taskCompleted({
+        nodeId: "fast",
+        iteration: 0,
+        output: { ok: true },
+      }),
+    );
     expect(completed).toMatchObject({
       _tag: "ReRender",
       context: {
@@ -443,11 +479,16 @@ describe("WorkflowSessionService direct methods", () => {
     });
 
     run(session.submitGraph(graph([cachedTask])));
-    const cached = run(session.cacheResolved({
-      nodeId: "cached",
-      iteration: 0,
-      output: { ok: "cached" },
-    }, true));
+    const cached = run(
+      session.cacheResolved(
+        {
+          nodeId: "cached",
+          iteration: 0,
+          output: { ok: "cached" },
+        },
+        true,
+      ),
+    );
     expect(cached).toMatchObject({
       _tag: "ReRender",
       context: {
@@ -463,9 +504,10 @@ describe("WorkflowSessionService direct methods", () => {
       requireRerenderOnOutputChange: true,
     });
 
-    expect(run(session.submitGraph(graph([task], workflow([
-      el("smithers:timer", { id: "timer" }),
-    ]))))).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: 6_000 } });
+    expect(run(session.submitGraph(graph([task], workflow([el("smithers:timer", { id: "timer" })]))))).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "Timer", resumeAtMs: 6_000 },
+    });
 
     const decision = run(session.timerFired("timer", 7_000));
     expect(decision).toMatchObject({
@@ -483,12 +525,18 @@ describe("WorkflowSessionService direct methods", () => {
       descriptor("b", { parallelGroupId: "g", parallelMaxConcurrency: 1 }),
     ];
 
-    expect(run(session.submitGraph(graph(tasks, workflow([
-      el("smithers:parallel", {}, [
-        el("smithers:task", { id: "a" }),
-        el("smithers:task", { id: "b" }),
-      ]),
-    ]))))).toMatchObject({ _tag: "Execute", tasks: [{ nodeId: "a" }] });
+    expect(
+      run(
+        session.submitGraph(
+          graph(
+            tasks,
+            workflow([
+              el("smithers:parallel", {}, [el("smithers:task", { id: "a" }), el("smithers:task", { id: "b" })]),
+            ]),
+          ),
+        ),
+      ),
+    ).toMatchObject({ _tag: "Execute", tasks: [{ nodeId: "a" }] });
 
     const recovered = run(session.recoverOrphanedTasks());
     expect(recovered).toMatchObject({ _tag: "Execute", tasks: [{ nodeId: "a" }] });
@@ -514,13 +562,13 @@ describe("WorkflowSessionService decide branches", () => {
   test("explicit continue-as-new nodes return a continuation transition", () => {
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
 
-    const decision = run(session.submitGraph(graph([], workflow([
-      el("smithers:continue-as-new", { stateJson: "{\"cursor\":\"abc\"}" }),
-    ]))));
+    const decision = run(
+      session.submitGraph(graph([], workflow([el("smithers:continue-as-new", { stateJson: '{"cursor":"abc"}' })]))),
+    );
 
     expect(decision).toEqual({
       _tag: "ContinueAsNew",
-      transition: { reason: "explicit", stateJson: "{\"cursor\":\"abc\"}" },
+      transition: { reason: "explicit", stateJson: '{"cursor":"abc"}' },
     });
   });
 
@@ -528,11 +576,18 @@ describe("WorkflowSessionService decide branches", () => {
     const task = descriptor("loop-task");
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
 
-    expect(run(session.submitGraph(graph([task], workflow([
-      el("smithers:ralph", { id: "loop", maxIterations: "3" }, [
-        el("smithers:task", { id: "loop-task" }),
-      ]),
-    ]))))).toMatchObject({ _tag: "Execute", tasks: [{ nodeId: "loop-task" }] });
+    expect(
+      run(
+        session.submitGraph(
+          graph(
+            [task],
+            workflow([
+              el("smithers:ralph", { id: "loop", maxIterations: "3" }, [el("smithers:task", { id: "loop-task" })]),
+            ]),
+          ),
+        ),
+      ),
+    ).toMatchObject({ _tag: "Execute", tasks: [{ nodeId: "loop-task" }] });
 
     const decision = run(session.taskCompleted({ nodeId: "loop-task", iteration: 0, output: "done" }));
     expect(decision._tag).toBe("ReRender");
@@ -543,11 +598,18 @@ describe("WorkflowSessionService decide branches", () => {
     const task = descriptor("loop-task");
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
 
-    run(session.submitGraph(graph([task], workflow([
-      el("smithers:ralph", { id: "loop", maxIterations: "3", continueAsNewEvery: "1" }, [
-        el("smithers:task", { id: "loop-task" }),
-      ]),
-    ]))));
+    run(
+      session.submitGraph(
+        graph(
+          [task],
+          workflow([
+            el("smithers:ralph", { id: "loop", maxIterations: "3", continueAsNewEvery: "1" }, [
+              el("smithers:task", { id: "loop-task" }),
+            ]),
+          ]),
+        ),
+      ),
+    );
 
     const decision = run(session.taskCompleted({ nodeId: "loop-task", iteration: 0, output: "done" }));
     expect(decision).toEqual({
@@ -564,11 +626,18 @@ describe("WorkflowSessionService decide branches", () => {
     const task = descriptor("loop-task");
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
 
-    run(session.submitGraph(graph([task], workflow([
-      el("smithers:ralph", { id: "loop", maxIterations: "1", onMaxReached: "fail" }, [
-        el("smithers:task", { id: "loop-task" }),
-      ]),
-    ]))));
+    run(
+      session.submitGraph(
+        graph(
+          [task],
+          workflow([
+            el("smithers:ralph", { id: "loop", maxIterations: "1", onMaxReached: "fail" }, [
+              el("smithers:task", { id: "loop-task" }),
+            ]),
+          ]),
+        ),
+      ),
+    );
 
     const decision = run(session.taskCompleted({ nodeId: "loop-task", iteration: 0, output: "done" }));
     expect(decision._tag).toBe("Failed");
@@ -593,16 +662,20 @@ describe("WorkflowSessionService decide branches", () => {
       onAspectBudgetWarn: (task) => warned.push(task.nodeId),
     });
 
-    const decision = run(session.submitGraph(graph(
-      [descriptor("skip"), descriptor("warn"), descriptor("fail")],
-      workflow([
-        el("smithers:parallel", {}, [
-          el("smithers:task", { id: "skip" }),
-          el("smithers:task", { id: "warn" }),
-          el("smithers:task", { id: "fail" }),
-        ]),
-      ]),
-    )));
+    const decision = run(
+      session.submitGraph(
+        graph(
+          [descriptor("skip"), descriptor("warn"), descriptor("fail")],
+          workflow([
+            el("smithers:parallel", {}, [
+              el("smithers:task", { id: "skip" }),
+              el("smithers:task", { id: "warn" }),
+              el("smithers:task", { id: "fail" }),
+            ]),
+          ]),
+        ),
+      ),
+    );
 
     expect(decision._tag).toBe("Failed");
     expect(decision.error.code).toBe("ASPECT_BUDGET_EXCEEDED");
@@ -614,17 +687,23 @@ describe("WorkflowSessionService decide branches", () => {
 
   test("dependency deadlock explains only unsatisfied dependency edges", () => {
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
-    const tasks = [
-      descriptor("done"),
-      descriptor("blocked", { dependsOn: ["done", "missing"] }),
-    ];
+    const tasks = [descriptor("done"), descriptor("blocked", { dependsOn: ["done", "missing"] })];
 
-    expect(run(session.submitGraph(graph(tasks, workflow([
-      el("smithers:sequence", {}, [
-        el("smithers:task", { id: "done" }),
-        el("smithers:task", { id: "blocked" }),
-      ]),
-    ]))))).toMatchObject({ _tag: "Execute", tasks: [{ nodeId: "done" }] });
+    expect(
+      run(
+        session.submitGraph(
+          graph(
+            tasks,
+            workflow([
+              el("smithers:sequence", {}, [
+                el("smithers:task", { id: "done" }),
+                el("smithers:task", { id: "blocked" }),
+              ]),
+            ]),
+          ),
+        ),
+      ),
+    ).toMatchObject({ _tag: "Execute", tasks: [{ nodeId: "done" }] });
 
     const decision = run(session.taskCompleted({ nodeId: "done", iteration: 0, output: "ok" }));
     expect(decision._tag).toBe("Failed");

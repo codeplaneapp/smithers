@@ -23,13 +23,12 @@ function getPort(server) {
 }
 
 function createValueWorkflow(dbPath) {
-  const { smithers, Workflow, Task, outputs } = createSmithers(
-    { result: z.object({ ok: z.boolean() }) },
-    { dbPath },
-  );
+  const { smithers, Workflow, Task, outputs } = createSmithers({ result: z.object({ ok: z.boolean() }) }, { dbPath });
   return smithers(() => (
     <Workflow name="shared-components-ui-test">
-      <Task id="task1" output={outputs.result}>{{ ok: true }}</Task>
+      <Task id="task1" output={outputs.result}>
+        {{ ok: true }}
+      </Task>
     </Workflow>
   ));
 }
@@ -165,9 +164,7 @@ describe("Gateway UI with shared components", () => {
     const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
     const port = getPort(server);
 
-    const response = await fetch(
-      `http://127.0.0.1:${port}/workflows/source-graph/__smithers_ui/client.js`,
-    );
+    const response = await fetch(`http://127.0.0.1:${port}/workflows/source-graph/__smithers_ui/client.js`);
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type") ?? "").toContain("javascript");
     expect(await response.text()).toContain("data-gateway-source-graph");

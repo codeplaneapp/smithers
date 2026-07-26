@@ -6,13 +6,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { execFileSync, spawn as spawnChild } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-  ClaudeCodeAgent,
-  CodexAgent,
-  type AgentLike,
-  createSmithers,
-  UI,
-} from "smithers-orchestrator";
+import { ClaudeCodeAgent, CodexAgent, type AgentLike, createSmithers, UI } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import ConsensusFableReviewPrompt from "../prompts/implement-testing-framework-e2e-consensus-fable-review.mdx";
 import ConsensusImprovementPrompt from "../prompts/implement-testing-framework-e2e-consensus-improvement.mdx";
@@ -104,10 +98,21 @@ const input = z.object({
   objective: z.string().trim().min(1).max(MAX_OBJECTIVE_CHARS).nullable().default(null),
   maxRounds: z.number().int().min(1).max(8).nullable().default(null),
   verificationProfile: z.enum(["focused", "ci", "full"]).nullable().default(null),
-  focusedTestCommands: z.array(
-    z.string().trim().min(1).max(MAX_FOCUSED_COMMAND_CHARS)
-      .refine((command) => !command.includes("\n") && !command.includes("\0"), "commands must be single-line and NUL-free"),
-  ).max(MAX_FOCUSED_COMMANDS).nullable().default(null),
+  focusedTestCommands: z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(1)
+        .max(MAX_FOCUSED_COMMAND_CHARS)
+        .refine(
+          (command) => !command.includes("\n") && !command.includes("\0"),
+          "commands must be single-line and NUL-free",
+        ),
+    )
+    .max(MAX_FOCUSED_COMMANDS)
+    .nullable()
+    .default(null),
   reusePlanRunId: z.string().trim().min(1).max(MAX_REUSED_RUN_ID_CHARS).nullable().default(null),
 });
 
@@ -161,13 +166,17 @@ const research = z.object({
 });
 const plan = z.object({
   summary: text,
-  slices: z.array(z.object({
-    id: z.string(),
-    goal: z.string(),
-    files: list,
-    acceptance: list,
-    proof: list,
-  })).default([]),
+  slices: z
+    .array(
+      z.object({
+        id: z.string(),
+        goal: z.string(),
+        files: list,
+        acceptance: list,
+        proof: list,
+      }),
+    )
+    .default([]),
   expectedFiles: list,
   publicApiContract: list,
   internalEffectKernel: list,
@@ -278,16 +287,7 @@ const finalResult = z.object({
   residualRisks: list,
 });
 
-const {
-  Workflow,
-  Task,
-  Sequence,
-  Branch,
-  Loop,
-  Parallel,
-  smithers,
-  outputs,
-} = createSmithers({
+const { Workflow, Task, Sequence, Branch, Loop, Parallel, smithers, outputs } = createSmithers({
   input,
   validation,
   research,
@@ -369,7 +369,12 @@ function runJj(args: string[], maxBuffer = 256 * 1024 * 1024): string {
     } catch (error) {
       lastError = error;
       const details = `${String(error)}\n${String((error as { stderr?: unknown })?.stderr ?? "")}`;
-      if (!/index\.lock|packed-refs\.lock|packed-ref file|Failed to import refs from underlying Git repo|Could not acquire lock|Failed to reset Git HEAD state/i.test(details)) throw error;
+      if (
+        !/index\.lock|packed-refs\.lock|packed-ref file|Failed to import refs from underlying Git repo|Could not acquire lock|Failed to reset Git HEAD state/i.test(
+          details,
+        )
+      )
+        throw error;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(1_000, 100 * (attempt + 1)));
     }
   }
@@ -385,28 +390,10 @@ function snapshot(baselineGitHead: string) {
   // Hash the complete target tree rather than the working-copy diff. This identity is stable if
   // the exact same files are committed while checks are running, and jj's normal working-copy
   // snapshot includes both tracked and newly-created files in the selected paths.
-  const fullContentDiff = runJj([
-    "diff",
-    "--from",
-    "root()",
-    "--to",
-    "@",
-    "--git",
-    "--color=never",
-    ...paths,
-  ]);
+  const fullContentDiff = runJj(["diff", "--from", "root()", "--to", "@", "--git", "--color=never", ...paths]);
   // Reviewer context remains relative to the HEAD captured by validation. Consequently a target
   // change committed after validation is still listed instead of disappearing from `jj diff -r @`.
-  const summary = runJj([
-    "diff",
-    "--from",
-    baselineGitHead,
-    "--to",
-    "@",
-    "--summary",
-    "--color=never",
-    ...paths,
-  ]);
+  const summary = runJj(["diff", "--from", baselineGitHead, "--to", "@", "--summary", "--color=never", ...paths]);
   const changedFiles = summary
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -456,16 +443,11 @@ function parseJsonColumn<T>(value: unknown, fallback: T): T {
 }
 
 function loadPriorFablePlan(runId: string): z.infer<typeof plan> {
-  const raw = run(process.execPath, [
-    "apps/cli/src/index.js",
-    "output",
-    runId,
-    "plan",
-    "--iteration",
-    "0",
-    "--json",
-  ]);
-  const jsonLine = raw.split(/\r?\n/).reverse().find((line) => line.trim().startsWith("{"));
+  const raw = run(process.execPath, ["apps/cli/src/index.js", "output", runId, "plan", "--iteration", "0", "--json"]);
+  const jsonLine = raw
+    .split(/\r?\n/)
+    .reverse()
+    .find((line) => line.trim().startsWith("{"));
   if (!jsonLine) throw new Error(`Prior Fable plan ${runId} did not return a JSON output row.`);
   const row = JSON.parse(jsonLine) as Record<string, unknown>;
   const strings = (key: string) => parseJsonColumn<string[]>(row[key], []);
@@ -543,10 +525,12 @@ async function runCheck(kind: CheckKind, command: string): Promise<CheckResult> 
     let code: number | null;
     let signal: NodeJS.Signals | null;
     try {
-      ({ code, signal } = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
-        child.once("error", reject);
-        child.once("close", (closedCode, closedSignal) => resolve({ code: closedCode, signal: closedSignal }));
-      }));
+      ({ code, signal } = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+        (resolve, reject) => {
+          child.once("error", reject);
+          child.once("close", (closedCode, closedSignal) => resolve({ code: closedCode, signal: closedSignal }));
+        },
+      ));
     } finally {
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
@@ -591,10 +575,7 @@ function verificationCommands(
     { kind: "typecheck", command: "pnpm -C packages/testing typecheck" },
   ];
   if (profile === "ci" || profile === "full") {
-    commands.push(
-      { kind: "typecheck", command: "pnpm typecheck" },
-      { kind: "integration", command: "pnpm test" },
-    );
+    commands.push({ kind: "typecheck", command: "pnpm typecheck" }, { kind: "integration", command: "pnpm test" });
   }
   if (profile === "full") {
     commands.push(
@@ -608,10 +589,7 @@ function verificationCommands(
   return [...new Map(commands.map((entry) => [entry.command, entry])).values()];
 }
 
-function scopeViolations(
-  current: ReturnType<typeof snapshot>,
-  beforeCheckDiffDigest: string,
-): string[] {
+function scopeViolations(current: ReturnType<typeof snapshot>, beforeCheckDiffDigest: string): string[] {
   const violations: string[] = [];
   if (beforeCheckDiffDigest !== current.diffDigest) {
     violations.push("verification commands changed target-scoped content; test evidence is not snapshot-stable");
@@ -634,7 +612,8 @@ async function captureEvidence(args: {
   const violations = scopeViolations(after, before.diffDigest);
   const baselineFiles = new Set(args.baseline.baselineChangedFiles);
   const newChangedFiles = after.changedFiles.filter((file) => !baselineFiles.has(file));
-  const allRequiredChecksPassed = checks.length > 0 && checks.every((result) => result.passed) && violations.length === 0;
+  const allRequiredChecksPassed =
+    checks.length > 0 && checks.every((result) => result.passed) && violations.length === 0;
   const iterationId = `${args.runId}:${args.phase}:${args.round}:${after.diffDigest.slice(0, 16)}`;
   return {
     phase: args.phase,
@@ -673,7 +652,9 @@ export default smithers((ctx) => {
   const verificationProfile = ctx.input.verificationProfile ?? "full";
   const focusedTestCommands = (ctx.input.focusedTestCommands ?? [])
     .map((command) => command.trim())
-    .filter((command) => command.length > 0 && command.length <= 1_000 && !command.includes("\n") && !command.includes("\0"));
+    .filter(
+      (command) => command.length > 0 && command.length <= 1_000 && !command.includes("\n") && !command.includes("\0"),
+    );
   const reusePlanRunId = ctx.input.reusePlanRunId?.trim() || null;
   // Run ids are not always run-prefixed: forks mint UUIDs and `smithers up --run-id` accepts arbitrary slugs.
   if (reusePlanRunId && !/^(?=.*\d)[A-Za-z0-9][A-Za-z0-9._-]*$/.test(reusePlanRunId)) {
@@ -698,7 +679,10 @@ export default smithers((ctx) => {
   const initialNeedsFix = Boolean(
     initialEvidence &&
     initialReview &&
-    (!initialEvidence.allRequiredChecksPassed || !initialReview.lgtm || !initialReviewCurrent || initialReviewHasBlockingIssues),
+    (!initialEvidence.allRequiredChecksPassed ||
+      !initialReview.lgtm ||
+      !initialReviewCurrent ||
+      initialReviewHasBlockingIssues),
   );
 
   const consensusEvidence = ctx.latest(outputs.evidence, "capture-consensus-iteration");
@@ -737,7 +721,9 @@ export default smithers((ctx) => {
               baselineGitHead,
               snapshotPaths: [...SNAPSHOT_PATHS],
               reusedPlanRunId: reusePlanRunId,
-              acceptanceContract: DEFAULT_OBJECTIVE.split("\n").map((line) => line.trim()).filter((line) => line.startsWith("-")),
+              acceptanceContract: DEFAULT_OBJECTIVE.split("\n")
+                .map((line) => line.trim())
+                .filter((line) => line.startsWith("-")),
               agentConfiguration: {
                 research: "Codex Luna, medium, read-only",
                 planning: reusePlanRunId
@@ -746,12 +732,20 @@ export default smithers((ctx) => {
                 implementation: "Codex Luna, medium, workspace-write",
                 review: "Codex Sol, xhigh, read-only + Claude Fable 5, plan/read-only",
               },
-              validationSummary: "Required CLIs found; baseline, scope, verification profile, and explicit no-fallback agents captured.",
+              validationSummary:
+                "Required CLIs found; baseline, scope, verification profile, and explicit no-fallback agents captured.",
             };
           }}
         </Task>
 
-        <Task id="research" output={outputs.research} agent={lunaResearch} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+        <Task
+          id="research"
+          output={outputs.research}
+          agent={lunaResearch}
+          retries={AGENT_RETRIES}
+          timeoutMs={LONG}
+          heartbeatTimeoutMs={HEARTBEAT}
+        >
           <ResearchPrompt objective={objective} contract={DEFAULT_OBJECTIVE} baseline={promptJson(baseline)} />
         </Task>
 
@@ -763,13 +757,27 @@ export default smithers((ctx) => {
             </Task>
           }
           else={
-            <Task id="plan" output={outputs.plan} agent={fable} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+            <Task
+              id="plan"
+              output={outputs.plan}
+              agent={fable}
+              retries={AGENT_RETRIES}
+              timeoutMs={LONG}
+              heartbeatTimeoutMs={HEARTBEAT}
+            >
               <PlanPrompt objective={objective} contract={DEFAULT_OBJECTIVE} research={promptJson(research)} />
             </Task>
           }
         />
 
-        <Task id="implement" output={outputs.implementation} agent={fableImplementation} retries={AGENT_RETRIES} timeoutMs={IMPL_LONG} heartbeatTimeoutMs={HEARTBEAT}>
+        <Task
+          id="implement"
+          output={outputs.implementation}
+          agent={fableImplementation}
+          retries={AGENT_RETRIES}
+          timeoutMs={IMPL_LONG}
+          heartbeatTimeoutMs={HEARTBEAT}
+        >
           <ImplementPrompt
             objective={objective}
             contract={DEFAULT_OBJECTIVE}
@@ -783,7 +791,14 @@ export default smithers((ctx) => {
           {async () => captureEvidence({ runId: ctx.runId, phase: "initial", round: 0, baseline: baseline! })}
         </Task>
 
-        <Task id="initial-sol-review" output={outputs.review} agent={sol} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+        <Task
+          id="initial-sol-review"
+          output={outputs.review}
+          agent={sol}
+          retries={AGENT_RETRIES}
+          timeoutMs={LONG}
+          heartbeatTimeoutMs={HEARTBEAT}
+        >
           <InitialSolReviewPrompt
             objective={objective}
             contract={DEFAULT_OBJECTIVE}
@@ -796,7 +811,14 @@ export default smithers((ctx) => {
           if={initialNeedsFix}
           then={
             <Sequence>
-              <Task id="initial-luna-fix" output={outputs.improvement} agent={fableImplementation} retries={AGENT_RETRIES} timeoutMs={IMPL_LONG} heartbeatTimeoutMs={HEARTBEAT}>
+              <Task
+                id="initial-luna-fix"
+                output={outputs.improvement}
+                agent={fableImplementation}
+                retries={AGENT_RETRIES}
+                timeoutMs={IMPL_LONG}
+                heartbeatTimeoutMs={HEARTBEAT}
+              >
                 <InitialFixPrompt
                   objective={objective}
                   contract={DEFAULT_OBJECTIVE}
@@ -816,10 +838,24 @@ export default smithers((ctx) => {
         <Loop id="sol-readiness" maxIterations={maxRounds + 2} until={solReady} onMaxReached="fail">
           <Sequence>
             <Task id="capture-sol-readiness" output={outputs.evidence} noRetry>
-              {async () => captureEvidence({ runId: ctx.runId, phase: "sol-readiness", round: nextReadinessRound, baseline: baseline! })}
+              {async () =>
+                captureEvidence({
+                  runId: ctx.runId,
+                  phase: "sol-readiness",
+                  round: nextReadinessRound,
+                  baseline: baseline!,
+                })
+              }
             </Task>
 
-            <Task id="sol-readiness-review" output={outputs.review} agent={sol} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+            <Task
+              id="sol-readiness-review"
+              output={outputs.review}
+              agent={sol}
+              retries={AGENT_RETRIES}
+              timeoutMs={LONG}
+              heartbeatTimeoutMs={HEARTBEAT}
+            >
               <ConsensusSolReviewPrompt
                 objective={objective}
                 contract={DEFAULT_OBJECTIVE}
@@ -870,8 +906,14 @@ export default smithers((ctx) => {
                   currentSnapshot.iterationId === currentEvidence.iterationId &&
                   currentSnapshot.actualDiffDigest === currentEvidence.diffDigest,
                 );
-                const artifactsComplete = Boolean(currentEvidence && currentSol && currentSnapshot && currentEvidence.checks.length > 0);
-                const hasBlockingIssues = Boolean(currentSol?.issues?.some((finding) => finding.severity === "critical" || finding.severity === "major"));
+                const artifactsComplete = Boolean(
+                  currentEvidence && currentSol && currentSnapshot && currentEvidence.checks.length > 0,
+                );
+                const hasBlockingIssues = Boolean(
+                  currentSol?.issues?.some(
+                    (finding) => finding.severity === "critical" || finding.severity === "major",
+                  ),
+                );
                 if (!checksPassed) reasons.push("deterministic verification checks or scope checks failed");
                 if (!solCurrent) reasons.push("Sol review does not identify the current iteration and diff digest");
                 if (!currentSol?.lgtm) reasons.push("Sol requested changes");
@@ -900,7 +942,14 @@ export default smithers((ctx) => {
             <Branch
               if={solNeedsImprovement && nextReadinessRound <= maxRounds}
               then={
-                <Task id="sol-readiness-luna-improvement" output={outputs.improvement} agent={fableImplementation} retries={AGENT_RETRIES} timeoutMs={IMPL_LONG} heartbeatTimeoutMs={HEARTBEAT}>
+                <Task
+                  id="sol-readiness-luna-improvement"
+                  output={outputs.improvement}
+                  agent={fableImplementation}
+                  retries={AGENT_RETRIES}
+                  timeoutMs={IMPL_LONG}
+                  heartbeatTimeoutMs={HEARTBEAT}
+                >
                   <ConsensusImprovementPrompt
                     objective={objective}
                     contract={DEFAULT_OBJECTIVE}
@@ -921,11 +970,25 @@ export default smithers((ctx) => {
         <Loop id="final-consensus" maxIterations={maxRounds + 2} until={consensusApproved} onMaxReached="fail">
           <Sequence>
             <Task id="capture-consensus-iteration" output={outputs.evidence} noRetry>
-              {async () => captureEvidence({ runId: ctx.runId, phase: "consensus", round: nextConsensusRound, baseline: baseline! })}
+              {async () =>
+                captureEvidence({
+                  runId: ctx.runId,
+                  phase: "consensus",
+                  round: nextConsensusRound,
+                  baseline: baseline!,
+                })
+              }
             </Task>
 
             <Parallel maxConcurrency={2}>
-              <Task id="consensus-sol-review" output={outputs.review} agent={sol} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+              <Task
+                id="consensus-sol-review"
+                output={outputs.review}
+                agent={sol}
+                retries={AGENT_RETRIES}
+                timeoutMs={LONG}
+                heartbeatTimeoutMs={HEARTBEAT}
+              >
                 <ConsensusSolReviewPrompt
                   objective={objective}
                   contract={DEFAULT_OBJECTIVE}
@@ -933,7 +996,14 @@ export default smithers((ctx) => {
                   plan={promptJson(acceptedPlan)}
                 />
               </Task>
-              <Task id="consensus-fable-review" output={outputs.review} agent={fable} retries={AGENT_RETRIES} timeoutMs={LONG} heartbeatTimeoutMs={HEARTBEAT}>
+              <Task
+                id="consensus-fable-review"
+                output={outputs.review}
+                agent={fable}
+                retries={AGENT_RETRIES}
+                timeoutMs={LONG}
+                heartbeatTimeoutMs={HEARTBEAT}
+              >
                 <ConsensusFableReviewPrompt
                   objective={objective}
                   contract={DEFAULT_OBJECTIVE}
@@ -992,9 +1062,19 @@ export default smithers((ctx) => {
                   currentSnapshot.iterationId === currentEvidence.iterationId &&
                   currentSnapshot.actualDiffDigest === currentEvidence.diffDigest,
                 );
-                const artifactsComplete = Boolean(currentEvidence && currentSol && currentFable && currentSnapshot && currentEvidence.checks.length > 0);
-                const solHasBlockingIssues = Boolean(currentSol?.issues?.some((finding) => finding.severity === "critical" || finding.severity === "major"));
-                const fableHasBlockingIssues = Boolean(currentFable?.issues?.some((finding) => finding.severity === "critical" || finding.severity === "major"));
+                const artifactsComplete = Boolean(
+                  currentEvidence && currentSol && currentFable && currentSnapshot && currentEvidence.checks.length > 0,
+                );
+                const solHasBlockingIssues = Boolean(
+                  currentSol?.issues?.some(
+                    (finding) => finding.severity === "critical" || finding.severity === "major",
+                  ),
+                );
+                const fableHasBlockingIssues = Boolean(
+                  currentFable?.issues?.some(
+                    (finding) => finding.severity === "critical" || finding.severity === "major",
+                  ),
+                );
                 if (!checksPassed) reasons.push("deterministic verification checks or scope checks failed");
                 if (!solCurrent) reasons.push("Sol review does not identify the current iteration and diff digest");
                 if (!fableCurrent) reasons.push("Fable review does not identify the current iteration and diff digest");
@@ -1028,7 +1108,14 @@ export default smithers((ctx) => {
               if={consensusNeedsImprovement && nextConsensusRound <= maxRounds}
               then={
                 <Sequence>
-                  <Task id="consensus-luna-improvement" output={outputs.improvement} agent={fableImplementation} retries={AGENT_RETRIES} timeoutMs={IMPL_LONG} heartbeatTimeoutMs={HEARTBEAT}>
+                  <Task
+                    id="consensus-luna-improvement"
+                    output={outputs.improvement}
+                    agent={fableImplementation}
+                    retries={AGENT_RETRIES}
+                    timeoutMs={IMPL_LONG}
+                    heartbeatTimeoutMs={HEARTBEAT}
+                  >
                     <ConsensusImprovementPrompt
                       objective={objective}
                       contract={DEFAULT_OBJECTIVE}
@@ -1062,11 +1149,19 @@ export default smithers((ctx) => {
             ) {
               throw new Error("Finalization attempted without deterministic dual-review consensus.");
             }
-            if (assessment.iterationId !== finalEvidence.iterationId || assessment.diffDigest !== finalEvidence.diffDigest) {
-              throw new Error("Final consensus assessment does not match the latest evidence iteration and diff digest.");
+            if (
+              assessment.iterationId !== finalEvidence.iterationId ||
+              assessment.diffDigest !== finalEvidence.diffDigest
+            ) {
+              throw new Error(
+                "Final consensus assessment does not match the latest evidence iteration and diff digest.",
+              );
             }
             const finalSnapshot = snapshot(finalEvidence.baselineGitHead);
-            if (assessment.diffDigest !== finalSnapshot.diffDigest || finalEvidence.diffDigest !== finalSnapshot.diffDigest) {
+            if (
+              assessment.diffDigest !== finalSnapshot.diffDigest ||
+              finalEvidence.diffDigest !== finalSnapshot.diffDigest
+            ) {
               throw new Error("The working-copy diff changed after consensus; final approval is stale.");
             }
             const currentGitHead = gitHead();
@@ -1075,7 +1170,8 @@ export default smithers((ctx) => {
             }
             return {
               status: "succeeded" as const,
-              summary: "Implementation passed deterministic checks and fresh same-diff review from Codex Sol and Claude Fable.",
+              summary:
+                "Implementation passed deterministic checks and fresh same-diff review from Codex Sol and Claude Fable.",
               changedFiles: finalSnapshot.changedFiles,
               checks: finalEvidence.checks,
               consensusRounds: ctx.outputs.consensus?.length ?? 0,

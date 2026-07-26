@@ -5,7 +5,11 @@
 // the gateway unauthenticated.
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-try { GlobalRegistrator.register(); } catch { /* already registered */ }
+try {
+  GlobalRegistrator.register();
+} catch {
+  /* already registered */
+}
 
 import { describe, expect, test } from "bun:test";
 import { act, createElement, type ReactElement } from "react";
@@ -74,9 +78,7 @@ describe("SmithersGatewayProvider custom headers", () => {
       return null;
     }
 
-    const unmount = await mountRoot(
-      createElement(SmithersGatewayProvider, { client }, createElement(Probe)),
-    );
+    const unmount = await mountRoot(createElement(SmithersGatewayProvider, { client }, createElement(Probe)));
     expect(dataClient).toBeDefined();
 
     await client.rpcRaw("listRuns", {});

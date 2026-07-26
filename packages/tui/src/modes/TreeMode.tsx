@@ -96,7 +96,10 @@ function ApprovalBanner({ approval }: { approval: ApprovalUiState }) {
   // (rank submits every option, so hidden entries must be announced).
   const selectedIdx =
     mode === "select" && selectedKey !== null
-      ? Math.max(0, options.findIndex((o) => o.key === selectedKey))
+      ? Math.max(
+          0,
+          options.findIndex((o) => o.key === selectedKey),
+        )
       : 0;
   const win = showOptions
     ? approvalOptionWindow(options.length, selectedIdx, MAX_OPTION_ROWS)
@@ -374,14 +377,29 @@ function NodeInspector({
   // on it so switching nodes/tabs doesn't fetch diffs nobody is looking at.
   // The error is threaded into the view — a failed getNodeDiff must not
   // masquerade as "No diff available".
-  const { data: diffData, loading: diffLoading, error: diffError } = useNodeDiff({
+  const {
+    data: diffData,
+    loading: diffLoading,
+    error: diffError,
+  } = useNodeDiff({
     runId,
     nodeId: activeTab === "diff" ? node?.id : undefined,
     iteration: node?.iteration,
   });
 
   if (!node) {
-    return <NodeInspectorView node={null} activeTab={activeTab} outputText="" nodeLogs={[]} propsText="" diff={{ kind: "empty", message: "" }} diffLoading={false} approval={null} />;
+    return (
+      <NodeInspectorView
+        node={null}
+        activeTab={activeTab}
+        outputText=""
+        nodeLogs={[]}
+        propsText=""
+        diff={{ kind: "empty", message: "" }}
+        diffLoading={false}
+        approval={null}
+      />
+    );
   }
 
   // Iteration-aware so loop/retry attempts don't show mixed logs (node output
@@ -468,8 +486,7 @@ export function TreePanel({
         const indentWidth = depth * 2;
         const reservedWidth = indentWidth + 4 + meta.length;
         const maxLabelWidth = Math.max(8, panelWidth - reservedWidth);
-        const truncLabel =
-          label.length > maxLabelWidth ? label.slice(0, maxLabelWidth - 1) + "…" : label;
+        const truncLabel = label.length > maxLabelWidth ? label.slice(0, maxLabelWidth - 1) + "…" : label;
 
         return (
           <box
@@ -493,13 +510,7 @@ export function TreePanel({
 
 // ─── Main TreeMode ────────────────────────────────────────────────────────────
 
-export function TreeMode({
-  runId,
-  initialSelectedNodeKey,
-}: {
-  runId: string;
-  initialSelectedNodeKey?: string | null;
-}) {
+export function TreeMode({ runId, initialSelectedNodeKey }: { runId: string; initialSelectedNodeKey?: string | null }) {
   const { root, nodes, isLoading, error } = useRunTree(runId);
   const { data: approvalsData, refetch: refetchApprovals } = useApprovals(runId);
   const actions = useActions();
@@ -521,10 +532,7 @@ export function TreeMode({
   const flat = useMemo(() => flattenTree(nodes, root, collapsed), [nodes, root, collapsed]);
 
   const lastFocusIdxRef = useRef(0);
-  const focusIdx = useMemo(
-    () => resolveFocusIdx(flat, selectedKey, lastFocusIdxRef.current),
-    [flat, selectedKey],
-  );
+  const focusIdx = useMemo(() => resolveFocusIdx(flat, selectedKey, lastFocusIdxRef.current), [flat, selectedKey]);
   useEffect(() => {
     lastFocusIdxRef.current = focusIdx;
   }, [focusIdx]);
@@ -590,8 +598,7 @@ export function TreeMode({
     // non-"waiting" status like "queued" — so poll for their rows whenever the
     // node isn't settled (mayAwaitHumanInput), not just on "waiting".
     const waitsOnApproval =
-      (focusedNode?.kind === "approval" && focusedNode.status === "waiting") ||
-      mayAwaitHumanInput(focusedNode);
+      (focusedNode?.kind === "approval" && focusedNode.status === "waiting") || mayAwaitHumanInput(focusedNode);
     if (!waitsOnApproval || nodeApproval) return;
     let cancelled = false;
     const refetch = () => {
@@ -603,33 +610,21 @@ export function TreeMode({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [
-    focusedNode?.id,
-    focusedNode?.iteration,
-    focusedNode?.kind,
-    focusedNode?.status,
-    nodeApproval,
-    refetchApprovals,
-  ]);
+  }, [focusedNode?.id, focusedNode?.iteration, focusedNode?.kind, focusedNode?.status, nodeApproval, refetchApprovals]);
 
   // Decode the approval's mode + options so we render mode-appropriate controls
   // and submit the right decision shape (gate vs select vs rank) — submitting a
   // bare `{ approved }` for a select/rank request would be rejected by the
   // gateway's validateApprovalDecision.
   const approvalMode = approvalModeOf(nodeApproval?.approvalMode);
-  const approvalOptions = useMemo(
-    () => approvalOptionsOf(nodeApproval?.options),
-    [nodeApproval?.options],
-  );
+  const approvalOptions = useMemo(() => approvalOptionsOf(nodeApproval?.options), [nodeApproval?.options]);
 
   // Highlighted option for a `select`. Reset to the first option whenever the
   // pending approval (node+iteration) changes so we never carry a stale pick.
   const [selectedOptionKey, setSelectedOptionKey] = useState<string | null>(null);
   const approvalKey = nodeApproval ? approvalRowKey(nodeApproval) : null;
   useEffect(() => {
-    setSelectedOptionKey(
-      approvalMode === "select" ? approvalOptions[0]?.key ?? null : null,
-    );
+    setSelectedOptionKey(approvalMode === "select" ? (approvalOptions[0]?.key ?? null) : null);
     // Re-seed on the identity of the pending request, not on every options array
     // recompute (which would fight the user's `[`/`]` navigation).
   }, [approvalKey, approvalMode]);
@@ -715,7 +710,10 @@ export function TreeMode({
     (dir: 1 | -1) => {
       if (approvalMode !== "select" || approvalOptions.length === 0) return;
       setSelectedOptionKey((cur) => {
-        const idx = Math.max(0, approvalOptions.findIndex((o) => o.key === cur));
+        const idx = Math.max(
+          0,
+          approvalOptions.findIndex((o) => o.key === cur),
+        );
         const next = (idx + dir + approvalOptions.length) % approvalOptions.length;
         return approvalOptions[next]?.key ?? cur;
       });
@@ -742,17 +740,18 @@ export function TreeMode({
   const humanRequestUi: HumanRequestUiState | null = buildHumanRequestUi(focusedNode, nodeApproval, runId);
   const isHumanRequest = humanRequestUi !== null;
 
-  const approvalUi: ApprovalUiState | null = nodeApproval && !isHumanRequest
-    ? {
-        title: nodeApproval.requestTitle ?? "Approval required",
-        summary: nodeApproval.requestSummary,
-        mode: approvalMode,
-        options: approvalOptions,
-        selectedKey: selectedOptionKey,
-        busy: approvalBusy,
-        error: approvalError,
-      }
-    : null;
+  const approvalUi: ApprovalUiState | null =
+    nodeApproval && !isHumanRequest
+      ? {
+          title: nodeApproval.requestTitle ?? "Approval required",
+          summary: nodeApproval.requestSummary,
+          mode: approvalMode,
+          options: approvalOptions,
+          selectedKey: selectedOptionKey,
+          busy: approvalBusy,
+          error: approvalError,
+        }
+      : null;
 
   useKeyboard((e) => {
     // Keys must not leak through an open help overlay, and ctrl/meta chords

@@ -9,11 +9,15 @@ import TicketsCreatePrompt from "../prompts/tickets-create.mdx";
 
 const ticketsCreateOutputSchema = z.looseObject({
   summary: z.string(),
-  tickets: z.array(z.object({
-    title: z.string(),
-    description: z.string(),
-    acceptanceCriteria: z.array(z.string()).default([]),
-  })).default([]),
+  tickets: z
+    .array(
+      z.object({
+        title: z.string(),
+        description: z.string(),
+        acceptanceCriteria: z.array(z.string()).default([]),
+      }),
+    )
+    .default([]),
 });
 
 const inputSchema = z.object({

@@ -4,9 +4,7 @@ import type { ResolvedSmithersObservabilityOptions } from "./ResolvedSmithersObs
 
 export type SmithersObservabilityService = {
   readonly options: ResolvedSmithersObservabilityOptions;
-  readonly annotate: (
-    attributes: Readonly<Record<string, unknown>>,
-  ) => Effect.Effect<void>;
+  readonly annotate: (attributes: Readonly<Record<string, unknown>>) => Effect.Effect<void>;
   readonly withSpan: <A, E, R>(
     name: string,
     effect: Effect.Effect<A, E, R>,

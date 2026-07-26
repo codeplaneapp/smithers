@@ -74,7 +74,13 @@ function builderPrompt(): string {
   ].join("\n");
 }
 
-function runCommand(cwd: string, command: string, args: string[], timeoutMs: number, extraEnv: Record<string, string> = {}) {
+function runCommand(
+  cwd: string,
+  command: string,
+  args: string[],
+  timeoutMs: number,
+  extraEnv: Record<string, string> = {},
+) {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
@@ -132,12 +138,14 @@ export function scoreCandidate(): z.infer<typeof scoreSchema> {
   });
   const typecheckGreen = typecheckResult.exitCode === 0;
   notes.push(`typecheck: ${typecheckGreen ? "green" : "RED"}`);
-  if (!typecheckGreen) notes.push(`typecheck tail: ${`${typecheckResult.stdout}\n${typecheckResult.stderr}`.slice(-2000)}`);
+  if (!typecheckGreen)
+    notes.push(`typecheck tail: ${`${typecheckResult.stdout}\n${typecheckResult.stderr}`.slice(-2000)}`);
 
   // 4. Test registered in .smithers/package.json and green.
   const pkgJsonPath = resolve(REPO_ROOT, ".smithers", "package.json");
   const pkgJson = readFileSync(pkgJsonPath, "utf8");
-  const testRegistered = existsSync(CANDIDATE_TEST_PATH) && pkgJson.includes(`.authoring-benchmark/${CANDIDATE_ID}.test.tsx`);
+  const testRegistered =
+    existsSync(CANDIDATE_TEST_PATH) && pkgJson.includes(`.authoring-benchmark/${CANDIDATE_ID}.test.tsx`);
   notes.push(`testRegistered=${testRegistered}`);
   let testGreen = false;
   if (testRegistered) {
@@ -175,7 +183,13 @@ export default smithers((ctx) => {
   return (
     <Workflow name="authoring-benchmark">
       <Sequence>
-        <Task id="build" output={outputs.build} agent={builder} timeoutMs={20 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+        <Task
+          id="build"
+          output={outputs.build}
+          agent={builder}
+          timeoutMs={20 * 60_000}
+          heartbeatTimeoutMs={10 * 60_000}
+        >
           {builderPrompt()}
         </Task>
         {build ? (

@@ -24,7 +24,11 @@ function makeAgentDescriptor(overrides = {}) {
 function makeGraph(tasks) {
   const taskArray = Array.isArray(tasks) ? tasks : [tasks];
   return {
-    xml: el("smithers:workflow", {}, taskArray.map((t) => el("smithers:task", { id: t.nodeId }))),
+    xml: el(
+      "smithers:workflow",
+      {},
+      taskArray.map((t) => el("smithers:task", { id: t.nodeId })),
+    ),
     tasks: taskArray,
     mountedTaskIds: new Set(taskArray.map((t) => `${t.nodeId}::${t.iteration}`)),
   };
@@ -43,11 +47,13 @@ describe("quota-aware pause & resume", () => {
     Effect.runSync(session.submitGraph(makeGraph(descriptor)));
 
     // First quota failure
-    const d1 = Effect.runSync(session.taskFailed({
-      nodeId: descriptor.nodeId,
-      iteration: descriptor.iteration,
-      error: quotaError,
-    }));
+    const d1 = Effect.runSync(
+      session.taskFailed({
+        nodeId: descriptor.nodeId,
+        iteration: descriptor.iteration,
+        error: quotaError,
+      }),
+    );
 
     // Should enter waiting-quota state, not exhaust retries
     expect(d1._tag).toBe("Wait");
@@ -60,11 +66,13 @@ describe("quota-aware pause & resume", () => {
     const descriptor = makeAgentDescriptor();
     Effect.runSync(session.submitGraph(makeGraph(descriptor)));
 
-    const d = Effect.runSync(session.taskFailed({
-      nodeId: descriptor.nodeId,
-      iteration: descriptor.iteration,
-      error: quotaError,
-    }));
+    const d = Effect.runSync(
+      session.taskFailed({
+        nodeId: descriptor.nodeId,
+        iteration: descriptor.iteration,
+        error: quotaError,
+      }),
+    );
 
     expect(d._tag).toBe("Wait");
     expect(d.reason._tag).toBe("Quota");
@@ -82,11 +90,13 @@ describe("quota-aware pause & resume", () => {
     const descriptor = makeAgentDescriptor();
     Effect.runSync(session.submitGraph(makeGraph(descriptor)));
 
-    const d = Effect.runSync(session.taskFailed({
-      nodeId: descriptor.nodeId,
-      iteration: descriptor.iteration,
-      error: quotaError,
-    }));
+    const d = Effect.runSync(
+      session.taskFailed({
+        nodeId: descriptor.nodeId,
+        iteration: descriptor.iteration,
+        error: quotaError,
+      }),
+    );
 
     expect(d._tag).toBe("Wait");
     expect(d.reason._tag).toBe("Quota");
@@ -98,15 +108,17 @@ describe("quota-aware pause & resume", () => {
     const descriptor = makeAgentDescriptor();
     Effect.runSync(session.submitGraph(makeGraph(descriptor)));
 
-    const d = Effect.runSync(session.taskFailed({
-      nodeId: descriptor.nodeId,
-      iteration: descriptor.iteration,
-      error: {
-        code: "AGENT_CLI_ERROR",
-        message: "rate limit exceeded",
-        details: { failureQuota: true },
-      },
-    }));
+    const d = Effect.runSync(
+      session.taskFailed({
+        nodeId: descriptor.nodeId,
+        iteration: descriptor.iteration,
+        error: {
+          code: "AGENT_CLI_ERROR",
+          message: "rate limit exceeded",
+          details: { failureQuota: true },
+        },
+      }),
+    );
 
     expect(d._tag).toBe("Wait");
     expect(d.reason._tag).toBe("Quota");
@@ -118,10 +130,7 @@ describe("quota-aware pause & resume", () => {
     const b = makeAgentDescriptor({ nodeId: "b" });
     const graph = {
       xml: el("smithers:workflow", {}, [
-        el("smithers:parallel", {}, [
-          el("smithers:task", { id: "a" }),
-          el("smithers:task", { id: "b" }),
-        ]),
+        el("smithers:parallel", {}, [el("smithers:task", { id: "a" }), el("smithers:task", { id: "b" })]),
       ]),
       tasks: [a, b],
       mountedTaskIds: new Set(["a::0", "b::0"]),
@@ -129,17 +138,21 @@ describe("quota-aware pause & resume", () => {
 
     Effect.runSync(session.submitGraph(graph));
 
-    Effect.runSync(session.taskFailed({
-      nodeId: "a",
-      iteration: 0,
-      error: quotaError,
-    }));
+    Effect.runSync(
+      session.taskFailed({
+        nodeId: "a",
+        iteration: 0,
+        error: quotaError,
+      }),
+    );
 
-    const d = Effect.runSync(session.taskFailed({
-      nodeId: "b",
-      iteration: 0,
-      error: quotaError,
-    }));
+    const d = Effect.runSync(
+      session.taskFailed({
+        nodeId: "b",
+        iteration: 0,
+        error: quotaError,
+      }),
+    );
 
     expect(d._tag).toBe("Wait");
     expect(d.reason._tag).toBe("Quota");
@@ -177,11 +190,13 @@ describe("quota-aware pause & resume", () => {
     expect(initial.tasks.map((t) => t.nodeId)).toEqual(["quota-task"]);
 
     // quota-task fails with quota; normal-task should now become runnable
-    const afterQuota = Effect.runSync(session.taskFailed({
-      nodeId: "quota-task",
-      iteration: 0,
-      error: quotaError,
-    }));
+    const afterQuota = Effect.runSync(
+      session.taskFailed({
+        nodeId: "quota-task",
+        iteration: 0,
+        error: quotaError,
+      }),
+    );
 
     expect(afterQuota._tag).toBe("Execute");
     expect(afterQuota.tasks.map((t) => t.nodeId)).toContain("normal-task");
@@ -193,20 +208,24 @@ describe("quota-aware pause & resume", () => {
     Effect.runSync(session.submitGraph(makeGraph(descriptor)));
 
     // A regular failure consumes one retry
-    const afterNormal = Effect.runSync(session.taskFailed({
-      nodeId: descriptor.nodeId,
-      iteration: descriptor.iteration,
-      error: { code: "AGENT_CLI_ERROR", message: "transient" },
-    }));
+    const afterNormal = Effect.runSync(
+      session.taskFailed({
+        nodeId: descriptor.nodeId,
+        iteration: descriptor.iteration,
+        error: { code: "AGENT_CLI_ERROR", message: "transient" },
+      }),
+    );
     // retries=1, 1 failure → still 1 retry left, goes pending (no delay without policy)
     expect(afterNormal._tag).toBe("Execute");
 
     // Second regular failure exhausts retries
-    const afterExhausted = Effect.runSync(session.taskFailed({
-      nodeId: descriptor.nodeId,
-      iteration: descriptor.iteration,
-      error: { code: "AGENT_CLI_ERROR", message: "transient" },
-    }));
+    const afterExhausted = Effect.runSync(
+      session.taskFailed({
+        nodeId: descriptor.nodeId,
+        iteration: descriptor.iteration,
+        error: { code: "AGENT_CLI_ERROR", message: "transient" },
+      }),
+    );
     expect(afterExhausted._tag).toBe("Failed");
   });
 });

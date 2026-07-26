@@ -67,13 +67,21 @@ describe("Reasoning", () => {
   test("stops reacting to streaming after a user toggle", async () => {
     const changes: boolean[] = [];
     const onOpenChange = (open: boolean) => changes.push(open);
-    await render(<Reasoning streaming onOpenChange={onOpenChange}>Thinking</Reasoning>);
+    await render(
+      <Reasoning streaming onOpenChange={onOpenChange}>
+        Thinking
+      </Reasoning>,
+    );
     const trigger = container!.querySelector<HTMLButtonElement>('[data-slot="reasoning-trigger"]')!;
     await act(async () => trigger.click());
     await act(async () => trigger.click());
     expect(container!.querySelector('[data-slot="reasoning-body"]')).not.toBeNull();
 
-    await render(<Reasoning streaming={false} onOpenChange={onOpenChange}>Thinking</Reasoning>);
+    await render(
+      <Reasoning streaming={false} onOpenChange={onOpenChange}>
+        Thinking
+      </Reasoning>,
+    );
     expect(container!.querySelector('[data-slot="reasoning-body"]')).not.toBeNull();
     expect(changes).toEqual([false, true]);
   });
@@ -81,8 +89,16 @@ describe("Reasoning", () => {
   test("controlled disclosure never self-toggles", async () => {
     const changes: boolean[] = [];
     const onOpenChange = (open: boolean) => changes.push(open);
-    await render(<Reasoning open streaming onOpenChange={onOpenChange}>Thinking</Reasoning>);
-    await render(<Reasoning open streaming={false} onOpenChange={onOpenChange}>Thinking</Reasoning>);
+    await render(
+      <Reasoning open streaming onOpenChange={onOpenChange}>
+        Thinking
+      </Reasoning>,
+    );
+    await render(
+      <Reasoning open streaming={false} onOpenChange={onOpenChange}>
+        Thinking
+      </Reasoning>,
+    );
     expect(container!.querySelector('[data-slot="reasoning"]')!.getAttribute("data-state")).toBe("open");
     expect(changes).toEqual([]);
 

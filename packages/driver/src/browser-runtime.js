@@ -14,74 +14,72 @@ import { withAbort } from "./withAbort.js";
  * @returns {RuntimeClock}
  */
 function createRealClock() {
-    return {
-        now: () => Date.now(),
-        monotonicNow: () => performance.now(),
-        /**
-         * @param {number} ms
-         * @param {AbortSignal} [signal]
-         * @returns {Promise<void>}
-         */
-        sleep(ms, signal) {
-            if (signal?.aborted) {
-                const error = new Error("Task aborted");
-                error.name = "AbortError";
-                return Promise.reject(error);
-            }
-            if (ms <= 0)
-                return Promise.resolve();
-            return new Promise((resolvePromise, rejectPromise) => {
-                const timer = setTimeout(() => {
-                    signal?.removeEventListener("abort", onAbort);
-                    resolvePromise();
-                }, ms);
-                function onAbort() {
-                    clearTimeout(timer);
-                    const error = new Error("Task aborted");
-                    error.name = "AbortError";
-                    rejectPromise(error);
-                }
-                signal?.addEventListener("abort", onAbort, { once: true });
-            });
-        },
-    };
+  return {
+    now: () => Date.now(),
+    monotonicNow: () => performance.now(),
+    /**
+     * @param {number} ms
+     * @param {AbortSignal} [signal]
+     * @returns {Promise<void>}
+     */
+    sleep(ms, signal) {
+      if (signal?.aborted) {
+        const error = new Error("Task aborted");
+        error.name = "AbortError";
+        return Promise.reject(error);
+      }
+      if (ms <= 0) return Promise.resolve();
+      return new Promise((resolvePromise, rejectPromise) => {
+        const timer = setTimeout(() => {
+          signal?.removeEventListener("abort", onAbort);
+          resolvePromise();
+        }, ms);
+        function onAbort() {
+          clearTimeout(timer);
+          const error = new Error("Task aborted");
+          error.name = "AbortError";
+          rejectPromise(error);
+        }
+        signal?.addEventListener("abort", onAbort, { once: true });
+      });
+    },
+  };
 }
 
 /**
  * @returns {RuntimeStorage}
  */
 function createMapStorage() {
-    /** @type {Map<string, import("./RuntimeAdapter.ts").StoredRunState>} */
-    const runs = new Map();
-    /** @type {Map<string, import("./OutputSnapshot.ts").OutputSnapshot>} */
-    const outputs = new Map();
-    return {
-        async loadRun(runId) {
-            return runs.get(runId);
-        },
-        async saveRun(runId, run) {
-            runs.set(runId, { ...run });
-        },
-        async loadOutputs(runId) {
-            const snapshot = outputs.get(runId);
-            if (!snapshot)
-                return undefined;
-            /** @type {import("./OutputSnapshot.ts").OutputSnapshot} */
-            const clone = {};
-            for (const [table, rows] of Object.entries(snapshot)) {
-                clone[table] = [...rows];
-            }
-            return clone;
-        },
-        async saveOutputs(runId, snapshot) {
-            /** @type {import("./OutputSnapshot.ts").OutputSnapshot} */
-            const clone = {};
-            for (const [table, rows] of Object.entries(snapshot)) {
-                clone[table] = [...rows];
-            }
-            outputs.set(runId, clone);
-        },
-    };
+  /** @type {Map<string, import("./RuntimeAdapter.ts").StoredRunState>} */
+  const runs = new Map();
+  /** @type {Map<string, import("./OutputSnapshot.ts").OutputSnapshot>} */
+  const outputs = new Map();
+  return {
+    async loadRun(runId) {
+      return runs.get(runId);
+    },
+    async saveRun(runId, run) {
+      runs.set(runId, { ...run });
+    },
+    async loadOutputs(runId) {
+      const snapshot = outputs.get(runId);
+      if (!snapshot) return undefined;
+      /** @type {import("./OutputSnapshot.ts").OutputSnapshot} */
+      const clone = {};
+      for (const [table, rows] of Object.entries(snapshot)) {
+        clone[table] = [...rows];
+      }
+      return clone;
+    },
+    async saveOutputs(runId, snapshot) {
+      /** @type {import("./OutputSnapshot.ts").OutputSnapshot} */
+      const clone = {};
+      for (const [table, rows] of Object.entries(snapshot)) {
+        clone[table] = [...rows];
+      }
+      outputs.set(runId, clone);
+    },
+  };
 }
 
 /**
@@ -94,18 +92,21 @@ function createMapStorage() {
  * @returns {unknown}
  */
 function validateAgainstOutputSchema(value, schema, nodeId) {
-    if (!schema)
-        return value;
-    if (typeof schema.parse === "function") {
-        return schema.parse(value);
-    }
-    if (typeof schema.safeParse === "function") {
-        const result = schema.safeParse(value);
-        if (result.success)
-            return result.data;
-        throw new SmithersError("OUTPUT_SCHEMA_VALIDATION_FAILED", `Task "${nodeId}" produced output that failed its outputSchema.`, { nodeId }, { cause: result.error });
-    }
-    return value;
+  if (!schema) return value;
+  if (typeof schema.parse === "function") {
+    return schema.parse(value);
+  }
+  if (typeof schema.safeParse === "function") {
+    const result = schema.safeParse(value);
+    if (result.success) return result.data;
+    throw new SmithersError(
+      "OUTPUT_SCHEMA_VALIDATION_FAILED",
+      `Task "${nodeId}" produced output that failed its outputSchema.`,
+      { nodeId },
+      { cause: result.error },
+    );
+  }
+  return value;
 }
 
 /**
@@ -118,30 +119,41 @@ function validateAgainstOutputSchema(value, schema, nodeId) {
  * @returns {Promise<unknown>}
  */
 async function defaultBrowserExecuteTask(task, context) {
-    if (typeof task.computeFn === "function") {
-        return withAbort(Promise.resolve().then(() => task.computeFn()), context.signal);
+  if (typeof task.computeFn === "function") {
+    return withAbort(
+      Promise.resolve().then(() => task.computeFn()),
+      context.signal,
+    );
+  }
+  if ("staticPayload" in task && task.staticPayload !== undefined) {
+    return task.staticPayload;
+  }
+  const agent = Array.isArray(task.agent) ? task.agent[0] : task.agent;
+  if (agent && typeof agent === "object") {
+    if (typeof agent.generate === "function") {
+      const result = await withAbort(
+        Promise.resolve().then(() =>
+          agent.generate({
+            prompt: task.prompt,
+            abortSignal: context.signal,
+            outputSchema: task.outputSchema,
+          }),
+        ),
+        context.signal,
+      );
+      return validateAgainstOutputSchema(result, task.outputSchema, task.nodeId);
     }
-    if ("staticPayload" in task && task.staticPayload !== undefined) {
-        return task.staticPayload;
+    for (const method of ["execute", "run", "call"]) {
+      const fn = agent[method];
+      if (typeof fn === "function") {
+        return withAbort(
+          Promise.resolve().then(() => fn(task, context)),
+          context.signal,
+        );
+      }
     }
-    const agent = Array.isArray(task.agent) ? task.agent[0] : task.agent;
-    if (agent && typeof agent === "object") {
-        if (typeof agent.generate === "function") {
-            const result = await withAbort(Promise.resolve().then(() => agent.generate({
-                prompt: task.prompt,
-                abortSignal: context.signal,
-                outputSchema: task.outputSchema,
-            })), context.signal);
-            return validateAgainstOutputSchema(result, task.outputSchema, task.nodeId);
-        }
-        for (const method of ["execute", "run", "call"]) {
-            const fn = agent[method];
-            if (typeof fn === "function") {
-                return withAbort(Promise.resolve().then(() => fn(task, context)), context.signal);
-            }
-        }
-    }
-    return task.prompt ?? null;
+  }
+  return task.prompt ?? null;
 }
 
 // @smithers-type-exports-begin
@@ -168,16 +180,24 @@ async function defaultBrowserExecuteTask(task, context) {
  * @returns {RuntimeAdapter}
  */
 export function createBrowserRuntime(options) {
-    const runtimeName = "browser";
-    return {
-        name: runtimeName,
-        clock: options?.clock ?? createRealClock(),
-        storage: options?.storage ?? createMapStorage(),
-        uuid: options?.uuid ?? (() => crypto.randomUUID()),
-        executeTask: options?.executeTask ?? defaultBrowserExecuteTask,
-        filesystem: /** @type {import("./RuntimeAdapter.ts").RuntimeFilesystem} */ (createUnsupportedCapability(runtimeName, "filesystem", ["readFile", "writeFile", "exists", "mkdir"], "async")),
-        subprocess: /** @type {import("./RuntimeAdapter.ts").RuntimeSubprocess} */ (createUnsupportedCapability(runtimeName, "subprocess", ["spawn"], "async")),
-        worktree: /** @type {import("./RuntimeAdapter.ts").RuntimeWorktree} */ (createUnsupportedCapability(runtimeName, "worktree", ["resolve"], "sync")),
-        sandbox: /** @type {import("./RuntimeAdapter.ts").RuntimeSandbox} */ (createUnsupportedCapability(runtimeName, "sandbox", ["run"], "async")),
-    };
+  const runtimeName = "browser";
+  return {
+    name: runtimeName,
+    clock: options?.clock ?? createRealClock(),
+    storage: options?.storage ?? createMapStorage(),
+    uuid: options?.uuid ?? (() => crypto.randomUUID()),
+    executeTask: options?.executeTask ?? defaultBrowserExecuteTask,
+    filesystem: /** @type {import("./RuntimeAdapter.ts").RuntimeFilesystem} */ (
+      createUnsupportedCapability(runtimeName, "filesystem", ["readFile", "writeFile", "exists", "mkdir"], "async")
+    ),
+    subprocess: /** @type {import("./RuntimeAdapter.ts").RuntimeSubprocess} */ (
+      createUnsupportedCapability(runtimeName, "subprocess", ["spawn"], "async")
+    ),
+    worktree: /** @type {import("./RuntimeAdapter.ts").RuntimeWorktree} */ (
+      createUnsupportedCapability(runtimeName, "worktree", ["resolve"], "sync")
+    ),
+    sandbox: /** @type {import("./RuntimeAdapter.ts").RuntimeSandbox} */ (
+      createUnsupportedCapability(runtimeName, "sandbox", ["run"], "async")
+    ),
+  };
 }

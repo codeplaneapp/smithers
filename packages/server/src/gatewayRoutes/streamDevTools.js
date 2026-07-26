@@ -2,10 +2,10 @@ import { Effect } from "effect";
 import { diffSnapshots } from "@smithers-orchestrator/devtools";
 import { runPromise } from "../smithersRuntime.js";
 import {
-    DevToolsRouteError,
-    getDevToolsSnapshotRoute,
-    validateFromSeqInput,
-    validateRunId,
+  DevToolsRouteError,
+  getDevToolsSnapshotRoute,
+  validateFromSeqInput,
+  validateRunId,
 } from "./getDevToolsSnapshot.js";
 
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
@@ -22,7 +22,7 @@ export const DEVTOOLS_POLL_INTERVAL_MS = 25;
  * @returns {Promise<void>}
  */
 function delay(timeMs) {
-    return new Promise((resolve) => setTimeout(resolve, timeMs));
+  return new Promise((resolve) => setTimeout(resolve, timeMs));
 }
 
 /**
@@ -30,7 +30,7 @@ function delay(timeMs) {
  * @returns {number}
  */
 function estimateEventSize(event) {
-    return Buffer.byteLength(JSON.stringify(event), "utf8");
+  return Buffer.byteLength(JSON.stringify(event), "utf8");
 }
 
 /**
@@ -43,9 +43,7 @@ function estimateEventSize(event) {
  * @returns {Promise<T>}
  */
 async function withSpan(spanName, attrs, run) {
-    return runPromise(
-        Effect.promise(() => run()).pipe(Effect.withSpan(spanName, { attributes: attrs })),
-    );
+  return runPromise(Effect.promise(() => run()).pipe(Effect.withSpan(spanName, { attributes: attrs })));
 }
 
 /**
@@ -58,14 +56,14 @@ async function withSpan(spanName, attrs, run) {
  * @returns {DevToolsRouteError | null}
  */
 function findDevToolsRouteError(error) {
-    let current = error;
-    for (let depth = 0; current != null && depth < 8; depth += 1) {
-        if (current instanceof DevToolsRouteError) {
-            return current;
-        }
-        current = /** @type {{ cause?: unknown }} */ (current).cause;
+  let current = error;
+  for (let depth = 0; current != null && depth < 8; depth += 1) {
+    if (current instanceof DevToolsRouteError) {
+      return current;
     }
-    return null;
+    current = /** @type {{ cause?: unknown }} */ (current).cause;
+  }
+  return null;
 }
 
 /**
@@ -74,90 +72,88 @@ function findDevToolsRouteError(error) {
  * @returns {Promise<{ frameNo: number } | null>}
  */
 async function getLastFrameSpan(adapter, runId) {
-    return withSpan(
-        "db.frames.get",
-        { runId, op: "getLastFrame" },
-        () => adapter.getLastFrame(runId),
-    );
+  return withSpan("db.frames.get", { runId, op: "getLastFrame" }, () => adapter.getLastFrame(runId));
 }
 
 class AsyncEventQueue {
-    items = [];
-    waiters = [];
-    closed = false;
-    error = null;
-    maxItems;
-    /**
+  items = [];
+  waiters = [];
+  closed = false;
+  error = null;
+  maxItems;
+  /**
    * @param {number} maxItems
    */
-    constructor(maxItems) {
-        this.maxItems = maxItems;
-    }
-    /**
+  constructor(maxItems) {
+    this.maxItems = maxItems;
+  }
+  /**
    * @param {DevToolsEvent} value
    */
-    push(value) {
-        if (this.closed || this.error) {
-            return;
-        }
-        if (this.items.length >= this.maxItems) {
-            this.fail(new DevToolsRouteError("BackpressureDisconnect", "Subscriber event queue exceeded 1000 buffered events."));
-            return;
-        }
-        if (this.waiters.length > 0) {
-            const waiter = this.waiters.shift();
-            waiter?.({ value, done: false });
-            return;
-        }
-        this.items.push(value);
+  push(value) {
+    if (this.closed || this.error) {
+      return;
     }
-    /**
+    if (this.items.length >= this.maxItems) {
+      this.fail(
+        new DevToolsRouteError("BackpressureDisconnect", "Subscriber event queue exceeded 1000 buffered events."),
+      );
+      return;
+    }
+    if (this.waiters.length > 0) {
+      const waiter = this.waiters.shift();
+      waiter?.({ value, done: false });
+      return;
+    }
+    this.items.push(value);
+  }
+  /**
    * @param {Error} error
    */
-    fail(error) {
-        if (this.closed || this.error) {
-            return;
-        }
-        this.error = error;
-        while (this.waiters.length > 0) {
-            const waiter = this.waiters.shift();
-            waiter?.(Promise.reject(error));
-        }
+  fail(error) {
+    if (this.closed || this.error) {
+      return;
     }
-    close() {
-        if (this.closed) {
-            return;
-        }
-        this.closed = true;
-        while (this.waiters.length > 0) {
-            const waiter = this.waiters.shift();
-            waiter?.({ value: undefined, done: true });
-        }
+    this.error = error;
+    while (this.waiters.length > 0) {
+      const waiter = this.waiters.shift();
+      waiter?.(Promise.reject(error));
     }
-    /**
+  }
+  close() {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    while (this.waiters.length > 0) {
+      const waiter = this.waiters.shift();
+      waiter?.({ value: undefined, done: true });
+    }
+  }
+  /**
    * @returns {Promise<IteratorResult<DevToolsEvent>>}
    */
-    async next() {
-        if (this.error) {
-            throw this.error;
-        }
-        if (this.items.length > 0) {
-            const value = this.items.shift();
-            return { value, done: false };
-        }
-        if (this.closed) {
-            return { value: undefined, done: true };
-        }
-        return new Promise((resolve, reject) => {
-            this.waiters.push((result) => {
-                if (result && typeof result === "object" && "then" in result) {
-                    result.then(resolve, reject);
-                    return;
-                }
-                resolve(/** @type {IteratorResult<DevToolsEvent>} */ (result));
-            });
-        });
+  async next() {
+    if (this.error) {
+      throw this.error;
     }
+    if (this.items.length > 0) {
+      const value = this.items.shift();
+      return { value, done: false };
+    }
+    if (this.closed) {
+      return { value: undefined, done: true };
+    }
+    return new Promise((resolve, reject) => {
+      this.waiters.push((result) => {
+        if (result && typeof result === "object" && "then" in result) {
+          result.then(resolve, reject);
+          return;
+        }
+        resolve(/** @type {IteratorResult<DevToolsEvent>} */ (result));
+      });
+    });
+  }
 }
 
 /**
@@ -165,32 +161,32 @@ class AsyncEventQueue {
  * @returns {Promise<DevToolsEvent>}
  */
 async function makeEvent(input) {
-    if (input.kind === "snapshot") {
-        return {
-            version: 1,
-            kind: "snapshot",
-            snapshot: input.snapshot,
-        };
-    }
-    const delta = await withSpan(
-        "devtools.diffSnapshots",
-        {
-            runId: input.snapshot.runId,
-            baseSeq: input.previous.seq,
-            seq: input.snapshot.seq,
-        },
-        async () => diffSnapshots(input.previous, input.snapshot),
-    );
+  if (input.kind === "snapshot") {
     return {
-        version: 1,
-        kind: "delta",
-        delta: {
-            version: 1,
-            baseSeq: delta.baseSeq,
-            seq: delta.seq,
-            ops: delta.ops,
-        },
+      version: 1,
+      kind: "snapshot",
+      snapshot: input.snapshot,
     };
+  }
+  const delta = await withSpan(
+    "devtools.diffSnapshots",
+    {
+      runId: input.snapshot.runId,
+      baseSeq: input.previous.seq,
+      seq: input.snapshot.seq,
+    },
+    async () => diffSnapshots(input.previous, input.snapshot),
+  );
+  return {
+    version: 1,
+    kind: "delta",
+    delta: {
+      version: 1,
+      baseSeq: delta.baseSeq,
+      seq: delta.seq,
+      ops: delta.ops,
+    },
+  };
 }
 
 /**
@@ -211,113 +207,109 @@ async function makeEvent(input) {
  * @returns {AsyncIterable<DevToolsEvent>}
  */
 export async function* streamDevToolsRoute(input) {
-    const runId = validateRunId(input.runId);
-    const pollIntervalMs = Number.isFinite(input.pollIntervalMs)
-        ? Math.max(1, Math.floor(input.pollIntervalMs))
-        : DEVTOOLS_POLL_INTERVAL_MS;
-    const maxBufferedEvents = Number.isFinite(input.maxBufferedEvents)
-        ? Math.max(1, Math.floor(input.maxBufferedEvents))
-        : DEVTOOLS_BACKPRESSURE_LIMIT;
-    validateFromSeqInput(input.fromSeq);
-    const startedAt = Date.now();
-    let eventsDelivered = 0;
-    let lastSnapshot = null;
-    let lastSeenSeq = 0;
-    /** Per-subscriber counter: number of delta events since the last snapshot. */
-    let eventsSinceSnapshot = 0;
-    let producerErrorCode = undefined;
-    const queue = new AsyncEventQueue(maxBufferedEvents);
-    let cancelled = false;
-    input.onLog?.("info", "devtools stream subscribed", {
-        runId,
-        fromSeq: input.fromSeq ?? null,
-        subscriberId: input.subscriberId ?? null,
-    });
-    /**
+  const runId = validateRunId(input.runId);
+  const pollIntervalMs = Number.isFinite(input.pollIntervalMs)
+    ? Math.max(1, Math.floor(input.pollIntervalMs))
+    : DEVTOOLS_POLL_INTERVAL_MS;
+  const maxBufferedEvents = Number.isFinite(input.maxBufferedEvents)
+    ? Math.max(1, Math.floor(input.maxBufferedEvents))
+    : DEVTOOLS_BACKPRESSURE_LIMIT;
+  validateFromSeqInput(input.fromSeq);
+  const startedAt = Date.now();
+  let eventsDelivered = 0;
+  let lastSnapshot = null;
+  let lastSeenSeq = 0;
+  /** Per-subscriber counter: number of delta events since the last snapshot. */
+  let eventsSinceSnapshot = 0;
+  let producerErrorCode = undefined;
+  const queue = new AsyncEventQueue(maxBufferedEvents);
+  let cancelled = false;
+  input.onLog?.("info", "devtools stream subscribed", {
+    runId,
+    fromSeq: input.fromSeq ?? null,
+    subscriberId: input.subscriberId ?? null,
+  });
+  /**
    * @param {DevToolsEvent} event
    * @param {number} started
    */
-    const publish = (event, started) => {
-        queue.push(event);
-        const durationMs = Date.now() - started;
-        if (event.kind === "snapshot") {
-            eventsSinceSnapshot = 0;
-        }
-        else {
-            eventsSinceSnapshot += 1;
-        }
-        if (!input.onEvent && !input.onLog) {
-            return;
-        }
-        let measuredBytes = 0;
-        let hasMeasuredBytes = false;
-        const bytes = () => {
-            if (!hasMeasuredBytes) {
-                measuredBytes = estimateEventSize(event);
-                hasMeasuredBytes = true;
-            }
-            return measuredBytes;
-        };
-        if (event.kind === "snapshot") {
-            input.onLog?.("debug", "devtools snapshot emitted", {
-                runId,
-                seq: event.snapshot.seq,
-                frameNo: event.snapshot.frameNo,
-                bytes: bytes(),
-                durationMs,
-            });
-            input.onEvent?.(event, {
-                bytes: bytes(),
-                durationMs,
-                frameNo: event.snapshot.frameNo,
-            });
-            return;
-        }
-        input.onLog?.("debug", "devtools delta emitted", {
-            runId,
-            seq: event.delta.seq,
-            opCount: event.delta.ops.length,
-            bytes: bytes(),
-            durationMs,
-        });
-        input.onEvent?.(event, {
-            bytes: bytes(),
-            durationMs,
-            opCount: event.delta.ops.length,
-        });
+  const publish = (event, started) => {
+    queue.push(event);
+    const durationMs = Date.now() - started;
+    if (event.kind === "snapshot") {
+      eventsSinceSnapshot = 0;
+    } else {
+      eventsSinceSnapshot += 1;
+    }
+    if (!input.onEvent && !input.onLog) {
+      return;
+    }
+    let measuredBytes = 0;
+    let hasMeasuredBytes = false;
+    const bytes = () => {
+      if (!hasMeasuredBytes) {
+        measuredBytes = estimateEventSize(event);
+        hasMeasuredBytes = true;
+      }
+      return measuredBytes;
     };
-    /**
+    if (event.kind === "snapshot") {
+      input.onLog?.("debug", "devtools snapshot emitted", {
+        runId,
+        seq: event.snapshot.seq,
+        frameNo: event.snapshot.frameNo,
+        bytes: bytes(),
+        durationMs,
+      });
+      input.onEvent?.(event, {
+        bytes: bytes(),
+        durationMs,
+        frameNo: event.snapshot.frameNo,
+      });
+      return;
+    }
+    input.onLog?.("debug", "devtools delta emitted", {
+      runId,
+      seq: event.delta.seq,
+      opCount: event.delta.ops.length,
+      bytes: bytes(),
+      durationMs,
+    });
+    input.onEvent?.(event, {
+      bytes: bytes(),
+      durationMs,
+      opCount: event.delta.ops.length,
+    });
+  };
+  /**
    * @returns {boolean}
    */
-    const shouldStop = () => cancelled || Boolean(input.signal?.aborted) || Boolean(queue.error);
-    /**
+  const shouldStop = () => cancelled || Boolean(input.signal?.aborted) || Boolean(queue.error);
+  /**
    * Capture a snapshot wrapped in an Effect.withSpan. Lets tracing backends
    * attribute snapshot work to a child span of the stream.
    *
    * @param {number} frameNo
    * @returns {Promise<DevToolsSnapshot>}
    */
-    const captureSnapshot = async (frameNo) => {
-        try {
-            return await withSpan(
-                "devtools.captureSnapshot",
-                { runId, frameNo },
-                () => getDevToolsSnapshotRoute({
-                    adapter: input.adapter,
-                    runId,
-                    frameNo,
-                    onWarning: input.onWarning,
-                }),
-            );
-        }
-        catch (error) {
-            // Unwrap the SmithersError runPromise() wraps around route errors so
-            // callers can detect FrameOutOfRange gaps via instanceof checks.
-            const routeError = findDevToolsRouteError(error);
-            throw routeError ?? error;
-        }
-    };
-    /**
+  const captureSnapshot = async (frameNo) => {
+    try {
+      return await withSpan("devtools.captureSnapshot", { runId, frameNo }, () =>
+        getDevToolsSnapshotRoute({
+          adapter: input.adapter,
+          runId,
+          frameNo,
+          onWarning: input.onWarning,
+        }),
+      );
+    } catch (error) {
+      // Unwrap the SmithersError runPromise() wraps around route errors so
+      // callers can detect FrameOutOfRange gaps via instanceof checks.
+      const routeError = findDevToolsRouteError(error);
+      throw routeError ?? error;
+    }
+  };
+  /**
    * Replay frames (lastSeenSeq, targetSeq] as delta-or-snapshot events. On a
    * FrameOutOfRange gap (the DB no longer has the requested intermediate
    * frame — possibly pruned or rewound) log `gapLogMessage`, re-baseline to
@@ -328,189 +320,192 @@ export async function* streamDevToolsRoute(input) {
    * @param {string} gapLogMessage
    * @returns {Promise<void>}
    */
-    const emitFramesThrough = async (targetSeq, gapLogMessage) => {
-        for (let seq = lastSeenSeq + 1; seq <= targetSeq; seq += 1) {
-            if (shouldStop()) {
-                break;
-            }
-            const started = Date.now();
-            let nextSnapshot = null;
+  const emitFramesThrough = async (targetSeq, gapLogMessage) => {
+    for (let seq = lastSeenSeq + 1; seq <= targetSeq; seq += 1) {
+      if (shouldStop()) {
+        break;
+      }
+      const started = Date.now();
+      let nextSnapshot = null;
+      try {
+        nextSnapshot = await captureSnapshot(seq);
+      } catch (error) {
+        if (error instanceof DevToolsRouteError && error.code === "FrameOutOfRange") {
+          input.onLog?.("warn", gapLogMessage, {
+            runId,
+            missingSeq: seq,
+            latestSeq: targetSeq,
+          });
+          const latestAvailable = await getLastFrameSpan(input.adapter, runId);
+          const rebaselineSeq = latestAvailable?.frameNo ?? lastSeenSeq;
+          const rebaseline = await captureSnapshot(rebaselineSeq);
+          publish(await makeEvent({ kind: "snapshot", snapshot: rebaseline }), started);
+          lastSnapshot = rebaseline;
+          lastSeenSeq = rebaseline.seq;
+          break;
+        }
+        throw error;
+      }
+      const deltaEvent = await makeEvent({
+        kind: "delta",
+        snapshot: nextSnapshot,
+        previous: lastSnapshot,
+      });
+      const snapshotEvent = /** @type {DevToolsEvent} */ ({
+        version: 1,
+        kind: "snapshot",
+        snapshot: nextSnapshot,
+      });
+      const invalidated = input.invalidateSnapshot?.() ?? false;
+      const shouldSnapshot =
+        invalidated ||
+        eventsSinceSnapshot + 1 >= DEVTOOLS_REBASELINE_INTERVAL ||
+        estimateEventSize(deltaEvent) >= estimateEventSize(snapshotEvent);
+      publish(shouldSnapshot ? snapshotEvent : deltaEvent, started);
+      lastSnapshot = nextSnapshot;
+      lastSeenSeq = seq;
+    }
+  };
+  const producer = withSpan(
+    "devtools.streamDevTools",
+    {
+      runId,
+      fromSeq: input.fromSeq ?? null,
+      subscriberId: input.subscriberId ?? null,
+    },
+    async () => {
+      try {
+        const latestFrame = await getLastFrameSpan(input.adapter, runId);
+        if (!latestFrame) {
+          // Zero-frame run: fromSeq > 0 is in the future relative to the
+          // current seq (which is 0). Reject before emitting anything.
+          if (typeof input.fromSeq === "number" && input.fromSeq > 0) {
+            throw new DevToolsRouteError("SeqOutOfRange", `fromSeq ${input.fromSeq} is newer than current seq 0.`);
+          }
+          const emptySnapshot = await captureSnapshot(0);
+          publish(
+            /** @type {DevToolsEvent} */ ({
+              version: 1,
+              kind: "snapshot",
+              snapshot: emptySnapshot,
+            }),
+            Date.now(),
+          );
+          lastSnapshot = emptySnapshot;
+          lastSeenSeq = emptySnapshot.seq;
+        } else {
+          const latestSeq = latestFrame.frameNo;
+          if (input.fromSeq !== undefined && input.fromSeq > latestSeq) {
+            throw new DevToolsRouteError(
+              "SeqOutOfRange",
+              `fromSeq ${input.fromSeq} is newer than current seq ${latestSeq}.`,
+            );
+          }
+          if (input.fromSeq === undefined) {
+            const snapshot = await captureSnapshot(latestSeq);
+            publish(await makeEvent({ kind: "snapshot", snapshot }), Date.now());
+            lastSnapshot = snapshot;
+            lastSeenSeq = snapshot.seq;
+          } else {
+            const fromSeq = input.fromSeq;
+            const baseSeq = Math.max(
+              0,
+              Math.floor(fromSeq / DEVTOOLS_REBASELINE_INTERVAL) * DEVTOOLS_REBASELINE_INTERVAL,
+            );
+            const initialSeq = Math.min(baseSeq, latestSeq);
+            let initialSnapshot = null;
             try {
-                nextSnapshot = await captureSnapshot(seq);
-            }
-            catch (error) {
-                if (error instanceof DevToolsRouteError && error.code === "FrameOutOfRange") {
-                    input.onLog?.("warn", gapLogMessage, {
-                        runId,
-                        missingSeq: seq,
-                        latestSeq: targetSeq,
-                    });
-                    const latestAvailable = await getLastFrameSpan(input.adapter, runId);
-                    const rebaselineSeq = latestAvailable?.frameNo ?? lastSeenSeq;
-                    const rebaseline = await captureSnapshot(rebaselineSeq);
-                    publish(await makeEvent({ kind: "snapshot", snapshot: rebaseline }), started);
-                    lastSnapshot = rebaseline;
-                    lastSeenSeq = rebaseline.seq;
-                    break;
-                }
+              initialSnapshot = await captureSnapshot(initialSeq);
+            } catch (error) {
+              if (error instanceof DevToolsRouteError && error.code === "FrameOutOfRange") {
+                input.onLog?.("warn", "devtools fromSeq gap forced re-baseline", {
+                  runId,
+                  fromSeq,
+                  requestedBaseSeq: initialSeq,
+                  latestSeq,
+                });
+                initialSnapshot = await captureSnapshot(latestSeq);
+              } else {
                 throw error;
+              }
             }
-            const deltaEvent = await makeEvent({
-                kind: "delta",
-                snapshot: nextSnapshot,
-                previous: lastSnapshot,
+            publish(await makeEvent({ kind: "snapshot", snapshot: initialSnapshot }), Date.now());
+            lastSnapshot = initialSnapshot;
+            lastSeenSeq = initialSnapshot.seq;
+            await emitFramesThrough(latestSeq, "devtools replay gap forced re-baseline");
+          }
+        }
+        while (!shouldStop()) {
+          const latest = await getLastFrameSpan(input.adapter, runId);
+          if (latest && latest.frameNo < lastSeenSeq) {
+            const started = Date.now();
+            input.onLog?.("info", "devtools rewind detected; forcing re-baseline snapshot", {
+              runId,
+              previousSeq: lastSeenSeq,
+              latestSeq: latest.frameNo,
             });
-            const snapshotEvent = /** @type {DevToolsEvent} */ ({
+            const rewindSnapshot = await captureSnapshot(latest.frameNo);
+            publish(
+              /** @type {DevToolsEvent} */ ({
                 version: 1,
                 kind: "snapshot",
-                snapshot: nextSnapshot,
-            });
-            const invalidated = input.invalidateSnapshot?.() ?? false;
-            const shouldSnapshot =
-                invalidated ||
-                eventsSinceSnapshot + 1 >= DEVTOOLS_REBASELINE_INTERVAL ||
-                estimateEventSize(deltaEvent) >= estimateEventSize(snapshotEvent);
-            publish(shouldSnapshot ? snapshotEvent : deltaEvent, started);
-            lastSnapshot = nextSnapshot;
-            lastSeenSeq = seq;
+                snapshot: rewindSnapshot,
+              }),
+              started,
+            );
+            lastSnapshot = rewindSnapshot;
+            lastSeenSeq = rewindSnapshot.seq;
+          }
+          if (latest && latest.frameNo > lastSeenSeq && lastSnapshot) {
+            await emitFramesThrough(latest.frameNo, "devtools live gap forced re-baseline");
+          }
+          if (shouldStop()) {
+            break;
+          }
+          await delay(pollIntervalMs);
         }
-    };
-    const producer = withSpan(
-        "devtools.streamDevTools",
-        {
-            runId,
-            fromSeq: input.fromSeq ?? null,
-            subscriberId: input.subscriberId ?? null,
-        },
-        async () => {
-        try {
-            const latestFrame = await getLastFrameSpan(input.adapter, runId);
-            if (!latestFrame) {
-                // Zero-frame run: fromSeq > 0 is in the future relative to the
-                // current seq (which is 0). Reject before emitting anything.
-                if (typeof input.fromSeq === "number" && input.fromSeq > 0) {
-                    throw new DevToolsRouteError("SeqOutOfRange", `fromSeq ${input.fromSeq} is newer than current seq 0.`);
-                }
-                const emptySnapshot = await captureSnapshot(0);
-                publish(/** @type {DevToolsEvent} */ ({
-                    version: 1,
-                    kind: "snapshot",
-                    snapshot: emptySnapshot,
-                }), Date.now());
-                lastSnapshot = emptySnapshot;
-                lastSeenSeq = emptySnapshot.seq;
-            }
-            else {
-                const latestSeq = latestFrame.frameNo;
-                if (input.fromSeq !== undefined && input.fromSeq > latestSeq) {
-                    throw new DevToolsRouteError("SeqOutOfRange", `fromSeq ${input.fromSeq} is newer than current seq ${latestSeq}.`);
-                }
-                if (input.fromSeq === undefined) {
-                    const snapshot = await captureSnapshot(latestSeq);
-                    publish(await makeEvent({ kind: "snapshot", snapshot }), Date.now());
-                    lastSnapshot = snapshot;
-                    lastSeenSeq = snapshot.seq;
-                }
-                else {
-                    const fromSeq = input.fromSeq;
-                    const baseSeq = Math.max(0, Math.floor(fromSeq / DEVTOOLS_REBASELINE_INTERVAL) * DEVTOOLS_REBASELINE_INTERVAL);
-                    const initialSeq = Math.min(baseSeq, latestSeq);
-                    let initialSnapshot = null;
-                    try {
-                        initialSnapshot = await captureSnapshot(initialSeq);
-                    }
-                    catch (error) {
-                        if (error instanceof DevToolsRouteError && error.code === "FrameOutOfRange") {
-                            input.onLog?.("warn", "devtools fromSeq gap forced re-baseline", {
-                                runId,
-                                fromSeq,
-                                requestedBaseSeq: initialSeq,
-                                latestSeq,
-                            });
-                            initialSnapshot = await captureSnapshot(latestSeq);
-                        }
-                        else {
-                            throw error;
-                        }
-                    }
-                    publish(await makeEvent({ kind: "snapshot", snapshot: initialSnapshot }), Date.now());
-                    lastSnapshot = initialSnapshot;
-                    lastSeenSeq = initialSnapshot.seq;
-                    await emitFramesThrough(latestSeq, "devtools replay gap forced re-baseline");
-                }
-            }
-            while (!shouldStop()) {
-                const latest = await getLastFrameSpan(input.adapter, runId);
-                if (latest && latest.frameNo < lastSeenSeq) {
-                    const started = Date.now();
-                    input.onLog?.("info", "devtools rewind detected; forcing re-baseline snapshot", {
-                        runId,
-                        previousSeq: lastSeenSeq,
-                        latestSeq: latest.frameNo,
-                    });
-                    const rewindSnapshot = await captureSnapshot(latest.frameNo);
-                    publish(/** @type {DevToolsEvent} */ ({
-                        version: 1,
-                        kind: "snapshot",
-                        snapshot: rewindSnapshot,
-                    }), started);
-                    lastSnapshot = rewindSnapshot;
-                    lastSeenSeq = rewindSnapshot.seq;
-                }
-                if (latest && latest.frameNo > lastSeenSeq && lastSnapshot) {
-                    await emitFramesThrough(latest.frameNo, "devtools live gap forced re-baseline");
-                }
-                if (shouldStop()) {
-                    break;
-                }
-                await delay(pollIntervalMs);
-            }
-        }
-        catch (error) {
-            producerErrorCode = error?.code ?? undefined;
-            queue.fail(error instanceof Error ? error : new Error(String(error)));
-        }
-        finally {
-            queue.close();
-        }
-    },
-    );
-    // Failures reach the consumer via queue.fail; this catch only prevents an
-    // unhandled-rejection crash if the producer fails before the finally block
-    // below awaits it.
-    void producer.catch(() => { });
-    try {
-        while (true) {
-            const next = await queue.next();
-            if (next.done) {
-                break;
-            }
-            eventsDelivered += 1;
-            yield next.value;
-        }
-    }
-    finally {
-        cancelled = true;
+      } catch (error) {
+        producerErrorCode = error?.code ?? undefined;
+        queue.fail(error instanceof Error ? error : new Error(String(error)));
+      } finally {
         queue.close();
-        const closeWaitMs = Math.max(25, pollIntervalMs * 4);
-        try {
-            await Promise.race([producer, delay(closeWaitMs)]);
-        }
-        catch { }
-        if (!producerErrorCode && queue.error?.code) {
-            producerErrorCode = queue.error.code;
-        }
-        const durationMs = Date.now() - startedAt;
-        input.onLog?.("info", "devtools stream unsubscribed", {
-            runId,
-            subscriberId: input.subscriberId ?? null,
-            eventsDelivered,
-            durationMs,
-        });
-        input.onClose?.({
-            eventsDelivered,
-            durationMs,
-            errorCode: producerErrorCode,
-        });
+      }
+    },
+  );
+  // Failures reach the consumer via queue.fail; this catch only prevents an
+  // unhandled-rejection crash if the producer fails before the finally block
+  // below awaits it.
+  void producer.catch(() => {});
+  try {
+    while (true) {
+      const next = await queue.next();
+      if (next.done) {
+        break;
+      }
+      eventsDelivered += 1;
+      yield next.value;
     }
+  } finally {
+    cancelled = true;
+    queue.close();
+    const closeWaitMs = Math.max(25, pollIntervalMs * 4);
+    try {
+      await Promise.race([producer, delay(closeWaitMs)]);
+    } catch {}
+    if (!producerErrorCode && queue.error?.code) {
+      producerErrorCode = queue.error.code;
+    }
+    const durationMs = Date.now() - startedAt;
+    input.onLog?.("info", "devtools stream unsubscribed", {
+      runId,
+      subscriberId: input.subscriberId ?? null,
+      eventsDelivered,
+      durationMs,
+    });
+    input.onClose?.({
+      eventsDelivered,
+      durationMs,
+      errorCode: producerErrorCode,
+    });
+  }
 }

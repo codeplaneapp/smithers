@@ -15,12 +15,7 @@ export { renderPrompt } from "./renderPrompt.ts";
 export { runTask } from "./runTask.ts";
 export type { RunTaskOptions } from "./runTask.ts";
 export { simulate } from "./simulate.ts";
-export type {
-  Sim,
-  SimTaskRecord,
-  SimulateMockFunction,
-  SimulateOptions,
-} from "./simulate.ts";
+export type { Sim, SimTaskRecord, SimulateMockFunction, SimulateOptions } from "./simulate.ts";
 export { simMatchers, toHaveExecuted, toHaveExecutedInOrder, toHaveFinished } from "./matchers.ts";
 export { scenario, step, barrier, fault, extension } from "./scenario/builder.ts";
 export type { TaskRuntime, StepRunner } from "./scenario/builder.ts";
@@ -28,7 +23,14 @@ export { compileScenario } from "./scenario/compile.ts";
 export type { CompileDiagnostic, CompileResult } from "./scenario/compile.ts";
 export { canonicalize, CanonicalizeError } from "./scenario/canonicalize.ts";
 export { replayIdentity } from "./scenario/replayIdentity.ts";
-export type { ScenarioAst, ScenarioBarrier, ScenarioExtension, ScenarioFault, ScenarioStep, ScenarioValue } from "./scenario/ast.ts";
+export type {
+  ScenarioAst,
+  ScenarioBarrier,
+  ScenarioExtension,
+  ScenarioFault,
+  ScenarioStep,
+  ScenarioValue,
+} from "./scenario/ast.ts";
 export type { ControlMessage } from "./control/ControlMessage.ts";
 export type { TraceEvent } from "./trace/TraceEvent.ts";
 export { VirtualClock } from "./kernel/VirtualClock.ts";
@@ -40,10 +42,23 @@ export type { HarnessError } from "./kernel/boundary.ts";
 export { makeHarness, unitSimHarness, integrationHarness, e2eHarness } from "./harness/Harness.ts";
 export type { AdapterFaultContext, HarnessAdapter } from "./harness/Harness.ts";
 export { e2eDescriptor } from "./harness/e2eDescriptor.ts";
-export type { E2eRealProcessHarnessConfig, Harness, HarnessConfig, HarnessKind, IntegrationRealDbHarnessConfig, UnitSimHarnessConfig } from "./harness/Harness.ts";
+export type {
+  E2eRealProcessHarnessConfig,
+  Harness,
+  HarnessConfig,
+  HarnessKind,
+  IntegrationRealDbHarnessConfig,
+  UnitSimHarnessConfig,
+} from "./harness/Harness.ts";
 export type { Capability, CapabilityDecision } from "./harness/capabilities.ts";
 export { requiredCapabilities } from "./harness/capabilities.ts";
-export { SimulationError, simulationNativeError, simulationSmithersError, serializeBoundaryError, serializeSimulationDurableError } from "./harness/errors.ts";
+export {
+  SimulationError,
+  simulationNativeError,
+  simulationSmithersError,
+  serializeBoundaryError,
+  serializeSimulationDurableError,
+} from "./harness/errors.ts";
 export type { SimulationNativeErrorSpec } from "./harness/errors.ts";
 export { runScenario } from "./runScenario.ts";
 export type { RunScenarioOptions, ScenarioResult } from "./runScenario.ts";
@@ -62,7 +77,12 @@ export { boundaryShape, compareBoundaryShape } from "./probes/compareBoundarySha
 export type { BoundaryShape } from "./probes/compareBoundaryShape.ts";
 export { CleanupScope } from "./cleanup/CleanupScope.ts";
 export { assertNoLeaks } from "./cleanup/leakAssertions.ts";
-export { expectEffect, expectTrace, expectAmbiguity, ExactlyOnceUnsupportedError } from "./assertions/effectAssertions.ts";
+export {
+  expectEffect,
+  expectTrace,
+  expectAmbiguity,
+  ExactlyOnceUnsupportedError,
+} from "./assertions/effectAssertions.ts";
 export { makeReplayBundle, serializeReplayBundle, loadReplayBundle, replayBundle } from "./replay/ReplayBundle.ts";
 export type { ReplayBundle } from "./replay/ReplayBundle.ts";
 export { firstDivergence } from "./replay/firstDivergence.ts";
@@ -70,6 +90,15 @@ export { shrink } from "./replay/shrink.ts";
 export { realDbAdapter } from "./adapters/realDbAdapter.ts";
 export type { RealDbAdapterOptions, RealDbResource } from "./adapters/realDbAdapter.ts";
 export { realDbCutPoints } from "./adapters/realDbCutPoints.ts";
-export type { ClaimAttemptCompletionInput, ClaimRunForResumeInput, HeartbeatRunInput, RealDbOperationMap } from "./adapters/realDbCutPoints.ts";
+export type {
+  ClaimAttemptCompletionInput,
+  ClaimRunForResumeInput,
+  HeartbeatRunInput,
+  RealDbOperationMap,
+} from "./adapters/realDbCutPoints.ts";
 export { realProcessAdapter } from "./adapters/realProcessAdapter.ts";
-export type { RealProcessAdapterOptions, RealProcessObservation, RealProcessResource } from "./adapters/realProcessAdapter.ts";
+export type {
+  RealProcessAdapterOptions,
+  RealProcessObservation,
+  RealProcessResource,
+} from "./adapters/realProcessAdapter.ts";

@@ -311,9 +311,7 @@ export function PromptInput({
       const next = [...attachmentsRef.current, ...accepted];
       attachmentsRef.current = next;
       setAttachmentsRef.current(next);
-      setAnnouncement(
-        `${accepted.length === 1 ? accepted[0]!.name : `${accepted.length} files`} attached`,
-      );
+      setAnnouncement(`${accepted.length === 1 ? accepted[0]!.name : `${accepted.length} files`} attached`);
     },
     [accept, maxFiles, maxFileSizeBytes, idPrefix],
   );
@@ -321,21 +319,18 @@ export function PromptInput({
   const addFilesRef = useRef(addFiles);
   addFilesRef.current = addFiles;
 
-  const removeAttachment = useCallback(
-    (id: string) => {
-      const target = attachmentsRef.current.find((item) => item.id === id);
-      const objectUrl = objectUrlsRef.current.get(id);
-      if (objectUrl && canCreateObjectUrl()) {
-        URL.revokeObjectURL(objectUrl);
-        objectUrlsRef.current.delete(id);
-      }
-      const next = attachmentsRef.current.filter((item) => item.id !== id);
-      attachmentsRef.current = next;
-      setAttachmentsRef.current(next);
-      if (target) setAnnouncement(`${target.name} removed`);
-    },
-    [],
-  );
+  const removeAttachment = useCallback((id: string) => {
+    const target = attachmentsRef.current.find((item) => item.id === id);
+    const objectUrl = objectUrlsRef.current.get(id);
+    if (objectUrl && canCreateObjectUrl()) {
+      URL.revokeObjectURL(objectUrl);
+      objectUrlsRef.current.delete(id);
+    }
+    const next = attachmentsRef.current.filter((item) => item.id !== id);
+    attachmentsRef.current = next;
+    setAttachmentsRef.current(next);
+    if (target) setAnnouncement(`${target.name} removed`);
+  }, []);
 
   const clearAttachments = useCallback(() => {
     cleanupObjectUrls();
@@ -449,10 +444,7 @@ export function PromptInput({
         {...props}
       >
         {attachments.length > 0 ? (
-          <AttachmentGroup
-            data-slot="prompt-input-attachments"
-            className="sui-prompt-attachments"
-          >
+          <AttachmentGroup data-slot="prompt-input-attachments" className="sui-prompt-attachments">
             {attachments.map((attachment) => (
               <Attachment
                 key={attachment.id}
@@ -494,17 +486,13 @@ export function PromptInput({
 export function PromptInputHeader({ className, ...props }: ComponentProps<"div">) {
   useInjectUiCss();
   useInjectLaneCss(PROMPT_ATTACHMENTS_CSS_ID, promptAttachmentsCss);
-  return (
-    <div data-slot="prompt-input-header" className={cn("sui-prompt-header", className)} {...props} />
-  );
+  return <div data-slot="prompt-input-header" className={cn("sui-prompt-header", className)} {...props} />;
 }
 
 export function PromptInputBody({ className, ...props }: ComponentProps<"div">) {
   useInjectUiCss();
   useInjectLaneCss(PROMPT_ATTACHMENTS_CSS_ID, promptAttachmentsCss);
-  return (
-    <div data-slot="prompt-input-body" className={cn("sui-prompt-body", className)} {...props} />
-  );
+  return <div data-slot="prompt-input-body" className={cn("sui-prompt-body", className)} {...props} />;
 }
 
 export type PromptInputTextareaProps = Omit<ComponentProps<"textarea">, "value" | "onChange"> & {
@@ -562,29 +550,20 @@ export function PromptInputTextarea({
 export function PromptInputFooter({ className, ...props }: ComponentProps<"div">) {
   useInjectUiCss();
   useInjectLaneCss(PROMPT_ATTACHMENTS_CSS_ID, promptAttachmentsCss);
-  return (
-    <div data-slot="prompt-input-footer" className={cn("sui-prompt-footer", className)} {...props} />
-  );
+  return <div data-slot="prompt-input-footer" className={cn("sui-prompt-footer", className)} {...props} />;
 }
 
 export function PromptInputTools({ className, ...props }: ComponentProps<"div">) {
   useInjectUiCss();
   useInjectLaneCss(PROMPT_ATTACHMENTS_CSS_ID, promptAttachmentsCss);
-  return (
-    <div data-slot="prompt-input-tools" className={cn("sui-prompt-tools", className)} {...props} />
-  );
+  return <div data-slot="prompt-input-tools" className={cn("sui-prompt-tools", className)} {...props} />;
 }
 
 export function PromptInputButton({ className, type = "button", ...props }: ComponentProps<"button">) {
   useInjectUiCss();
   useInjectLaneCss(PROMPT_ATTACHMENTS_CSS_ID, promptAttachmentsCss);
   return (
-    <button
-      type={type}
-      data-slot="prompt-input-button"
-      className={cn("sui-prompt-button", className)}
-      {...props}
-    />
+    <button type={type} data-slot="prompt-input-button" className={cn("sui-prompt-button", className)} {...props} />
   );
 }
 
@@ -605,11 +584,7 @@ export function PromptInputSubmit({ className, ...props }: ComponentProps<"butto
       disabled={!canSubmit}
       {...props}
     >
-      {status === "submitted" ? (
-        <Spinner size="sm" aria-label="Sending" />
-      ) : (
-        <span aria-hidden="true">↑</span>
-      )}
+      {status === "submitted" ? <Spinner size="sm" aria-label="Sending" /> : <span aria-hidden="true">↑</span>}
     </button>
   );
 }
@@ -763,12 +738,7 @@ function isMarkedMenuItem(child: ReactNode): boolean {
   return (child.type as { promptInputMenuItem?: boolean }).promptInputMenuItem === true;
 }
 
-export function PromptInputActionMenuContent({
-  className,
-  children,
-  onKeyDown,
-  ...props
-}: ComponentProps<"div">) {
+export function PromptInputActionMenuContent({ className, children, onKeyDown, ...props }: ComponentProps<"div">) {
   useInjectUiCss();
   useInjectLaneCss(PROMPT_ATTACHMENTS_CSS_ID, promptAttachmentsCss);
   const menu = useContext(PromptInputMenuContext);
@@ -784,9 +754,7 @@ export function PromptInputActionMenuContent({
   if (!menu.open) return null;
 
   const focusItem = (direction: 1 | -1) => {
-    const items = Array.from(
-      contentRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
-    );
+    const items = Array.from(contentRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
     if (items.length === 0) return;
     const activeIndex = items.indexOf(document.activeElement as HTMLElement);
     const nextIndex = activeIndex < 0 ? 0 : (activeIndex + direction + items.length) % items.length;
@@ -841,12 +809,7 @@ export function PromptInputActionMenuContent({
   );
 }
 
-export function PromptInputActionAddAttachments({
-  className,
-  children,
-  onClick,
-  ...props
-}: ComponentProps<"button">) {
+export function PromptInputActionAddAttachments({ className, children, onClick, ...props }: ComponentProps<"button">) {
   useInjectUiCss();
   useInjectLaneCss(PROMPT_ATTACHMENTS_CSS_ID, promptAttachmentsCss);
   const input = usePromptInputContext();

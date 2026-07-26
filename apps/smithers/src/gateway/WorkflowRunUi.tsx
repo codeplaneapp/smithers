@@ -15,11 +15,7 @@ function normalizeWorkflowUiPath(uiPath: string): string {
   }
 }
 
-export function workflowUiSrc(
-  uiPath: string,
-  runId: string,
-  gatewayBaseUrl = getGatewayBaseUrl(),
-): string {
+export function workflowUiSrc(uiPath: string, runId: string, gatewayBaseUrl = getGatewayBaseUrl()): string {
   const base = gatewayBaseUrl || "http://smithers.local";
   const url = new URL(normalizeWorkflowUiPath(uiPath), base);
   url.searchParams.set("runId", runId);
@@ -82,13 +78,7 @@ function isSameOriginUiSrc(src: string): boolean {
  * is forced there. `?runId=<id>` lets a UI scope to one run by reading
  * `location.search`.
  */
-export function WorkflowRunUi({
-  uiPath,
-  runId,
-}: {
-  uiPath: string;
-  runId: string;
-}) {
+export function WorkflowRunUi({ uiPath, runId }: { uiPath: string; runId: string }) {
   const src = workflowUiSrc(uiPath, runId);
   // A frame that resolves to the app's own origin (relative proxy path, or an
   // absolute URL whose origin equals the app's) needs sandboxing. Only a

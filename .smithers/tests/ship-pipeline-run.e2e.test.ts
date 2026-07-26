@@ -134,7 +134,10 @@ beforeAll(async () => {
   execFileSync("git", ["config", "user.name", "e2e"], { cwd: tempRepo });
   execFileSync("git", ["commit", "--allow-empty", "-m", "init"], { cwd: tempRepo });
   symlinkSync(realNodeModules, join(tempRepo, "node_modules"), "dir");
-  writeFileSync(join(tempRepo, "package.json"), JSON.stringify({ name: "ship-pipeline-run-e2e", type: "module" }) + "\n");
+  writeFileSync(
+    join(tempRepo, "package.json"),
+    JSON.stringify({ name: "ship-pipeline-run-e2e", type: "module" }) + "\n",
+  );
 
   // The repo's standard fake agent binaries: echo the JSON payload back in the
   // envelopes the workflow's Claude and Codex agents parse.
@@ -196,53 +199,65 @@ afterAll(() => {
     proc?.kill("SIGTERM");
   } catch {}
   try {
-    try { rmSync(tempRepo, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
+    try {
+      rmSync(tempRepo, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch {
+      /* best-effort temp cleanup */
+    }
   } catch {}
   try {
-    try { rmSync(binDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
+    try {
+      rmSync(binDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch {
+      /* best-effort temp cleanup */
+    }
   } catch {}
 });
 
-browserTest("the real ship-pipeline run renders end-to-end in the UI", async () => {
-  const browser = await CHROMIUM.launch({ headless: true });
-  try {
-    const page = await browser.newPage();
-    const errors: string[] = [];
-    page.on("pageerror", (err: Error) => errors.push(err.message));
+browserTest(
+  "the real ship-pipeline run renders end-to-end in the UI",
+  async () => {
+    const browser = await CHROMIUM.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (err: Error) => errors.push(err.message));
 
-    // domcontentloaded, not networkidle: the UI opens a live gateway WebSocket
-    // on mount, so networkidle never settles; the selector waits below gate
-    // real readiness.
-    await page.goto(`${base}/workflows/ship-pipeline?runId=${RUN_ID}`, { waitUntil: "domcontentloaded" });
+      // domcontentloaded, not networkidle: the UI opens a live gateway WebSocket
+      // on mount, so networkidle never settles; the selector waits below gate
+      // real readiness.
+      await page.goto(`${base}/workflows/ship-pipeline?runId=${RUN_ID}`, { waitUntil: "domcontentloaded" });
 
-    // The real bundle built + app mounted.
-    await page.waitForSelector('[data-testid="ship-pipeline-ui"]', { timeout: 20_000 });
+      // The real bundle built + app mounted.
+      await page.waitForSelector('[data-testid="ship-pipeline-ui"]', { timeout: 20_000 });
 
-    // The pipeline lists the ticket that VerifiableGoals actually wrote +
-    // ShipTickets actually discovered (slug from the written 0001-*.md file).
-    await page.waitForSelector('[data-testid="ship-pipeline"]', { timeout: 20_000 });
-    await page.waitForSelector('[data-testid="ship-ticket-0001-voice-capture"]', { timeout: 20_000 });
+      // The pipeline lists the ticket that VerifiableGoals actually wrote +
+      // ShipTickets actually discovered (slug from the written 0001-*.md file).
+      await page.waitForSelector('[data-testid="ship-pipeline"]', { timeout: 20_000 });
+      await page.waitForSelector('[data-testid="ship-ticket-0001-voice-capture"]', { timeout: 20_000 });
 
-    // Event-derived landed state: the merge task really finished → 1/1 landed.
-    await page.waitForFunction(
-      () => (document.querySelector('[data-testid="ship-progress"]')?.textContent ?? "").includes("1/1 landed"),
-      undefined,
-      { timeout: 20_000 },
-    );
-    await page.waitForSelector('[data-testid="ship-ledger"]', { timeout: 20_000 });
+      // Event-derived landed state: the merge task really finished → 1/1 landed.
+      await page.waitForFunction(
+        () => (document.querySelector('[data-testid="ship-progress"]')?.textContent ?? "").includes("1/1 landed"),
+        undefined,
+        { timeout: 20_000 },
+      );
+      await page.waitForSelector('[data-testid="ship-ledger"]', { timeout: 20_000 });
 
-    // The selected ticket's detail renders the real run's node output.
-    await page.waitForFunction(
-      () => {
-        const text = document.body.textContent ?? "";
-        return text.includes("stub agent output") && text.includes("Voice capture pipeline");
-      },
-      undefined,
-      { timeout: 20_000 },
-    );
+      // The selected ticket's detail renders the real run's node output.
+      await page.waitForFunction(
+        () => {
+          const text = document.body.textContent ?? "";
+          return text.includes("stub agent output") && text.includes("Voice capture pipeline");
+        },
+        undefined,
+        { timeout: 20_000 },
+      );
 
-    expect(errors).toEqual([]);
-  } finally {
-    await browser.close();
-  }
-}, 120_000);
+      expect(errors).toEqual([]);
+    } finally {
+      await browser.close();
+    }
+  },
+  120_000,
+);

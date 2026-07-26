@@ -27,7 +27,7 @@ function spec(serverUrl) {
     openapi: "3.0.0",
     info: { title: "URL schemes", version: "1.0.0" },
     servers: [{ url: serverUrl }],
-    paths: { "/health": { get: { operationId: "health", responses: { "200": { description: "ok" } } } } },
+    paths: { "/health": { get: { operationId: "health", responses: { 200: { description: "ok" } } } } },
   };
 }
 
@@ -57,7 +57,7 @@ describe("OpenAPI URL schemes", () => {
     requestCount = 0;
     const result = await createOpenApiToolsSync({
       ...spec(origin),
-      paths: { "/redirect-file": { get: { operationId: "redirectFile", responses: { "200": { description: "ok" } } } } },
+      paths: { "/redirect-file": { get: { operationId: "redirectFile", responses: { 200: { description: "ok" } } } } },
     }).redirectFile.execute({});
     expect(result).toMatchObject({ error: true, status: "failed" });
     expect(result.message).toContain("does not support URL protocol");

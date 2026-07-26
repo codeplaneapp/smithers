@@ -9,5 +9,5 @@ import { createMemoryStoreLayer } from "./createMemoryStoreLayer.js";
  * @returns {MemoryStore}
  */
 export function createMemoryStore(db) {
-    return Effect.runSync(MemoryStoreService.pipe(Effect.provide(createMemoryStoreLayer(db))));
+  return Effect.runSync(MemoryStoreService.pipe(Effect.provide(createMemoryStoreLayer(db))));
 }

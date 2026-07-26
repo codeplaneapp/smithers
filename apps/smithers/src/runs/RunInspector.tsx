@@ -34,13 +34,7 @@ function blockedNode(root: RunNode): RunNode | undefined {
  * above the tree (Approve/Deny → runsStore); a failed/cancelled run gets a
  * Resume button in the header cluster (→ runsStore.resume).
  */
-export function RunInspector({
-  runId,
-  theme,
-}: {
-  runId: string;
-  theme: "light" | "dark";
-}) {
+export function RunInspector({ runId, theme }: { runId: string; theme: "light" | "dark" }) {
   const runs = useRunsStore((state) => state.runs);
   const approve = useRunsStore((state) => state.approve);
   const deny = useRunsStore((state) => state.deny);
@@ -103,27 +97,15 @@ export function RunInspector({
         <span className="surface-title">{run.title}</span>
         <StatusPill status={run.status} />
         {canResume ? (
-          <button
-            type="button"
-            className="btn btn-brand run-resume"
-            onClick={onResume}
-          >
+          <button type="button" className="btn btn-brand run-resume" onClick={onResume}>
             ↻ Resume run
           </button>
         ) : null}
         <div className="seg">
-          <button
-            type="button"
-            className={view === "tree" ? "is-on" : ""}
-            onClick={() => setView("tree")}
-          >
+          <button type="button" className={view === "tree" ? "is-on" : ""} onClick={() => setView("tree")}>
             Tree
           </button>
-          <button
-            type="button"
-            className={view === "graph" ? "is-on" : ""}
-            onClick={() => setView("graph")}
-          >
+          <button type="button" className={view === "graph" ? "is-on" : ""} onClick={() => setView("graph")}>
             Graph
           </button>
         </div>
@@ -148,20 +130,14 @@ export function RunInspector({
           ) : null}
           <div className="inspector-body">
             <div className="tree-pane">
-              <RunTree
-                root={run.root}
-                selectedId={selected.id}
-                onSelect={selectNode}
-              />
+              <RunTree root={run.root} selectedId={selected.id} onSelect={selectNode} />
             </div>
             <NodeInspector run={run} node={selected} runId={runId} />
           </div>
         </>
       ) : (
         <div className="graph-pane">
-          {flow ? (
-            <WorkflowGraph nodes={flow.nodes} edges={flow.edges} theme={theme} />
-          ) : null}
+          {flow ? <WorkflowGraph nodes={flow.nodes} edges={flow.edges} theme={theme} /> : null}
         </div>
       )}
     </section>

@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  createStorybookSiteWorker,
-  type StorybookSiteEnv,
-} from "../src/worker.ts";
+import { createStorybookSiteWorker, type StorybookSiteEnv } from "../src/worker.ts";
 
 const INDEX_HTML = "<!doctype html><title>Smithers UI Storybook</title>";
 
@@ -36,10 +33,7 @@ const worker = createStorybookSiteWorker();
 
 describe("storybook-site worker", () => {
   test("serves the index with security headers and short cache", async () => {
-    const response = await worker.fetch(
-      new Request("https://storybook.smithers.sh/"),
-      makeEnv(),
-    );
+    const response = await worker.fetch(new Request("https://storybook.smithers.sh/"), makeEnv());
     expect(response.status).toBe(200);
     expect(await response.text()).toBe(INDEX_HTML);
     expect(response.headers.get("cache-control")).toBe("public, max-age=300");
@@ -49,10 +43,7 @@ describe("storybook-site worker", () => {
   });
 
   test("serves the preview iframe (frameable by self)", async () => {
-    const response = await worker.fetch(
-      new Request("https://storybook.smithers.sh/iframe.html"),
-      makeEnv(),
-    );
+    const response = await worker.fetch(new Request("https://storybook.smithers.sh/iframe.html"), makeEnv());
     expect(response.status).toBe(200);
     const csp = response.headers.get("content-security-policy") ?? "";
     expect(csp).toContain("frame-src 'self'");
@@ -65,9 +56,7 @@ describe("storybook-site worker", () => {
       makeEnv(),
     );
     expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe(
-      "public, max-age=31536000, immutable",
-    );
+    expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
   });
 
   test("unknown paths fall back to the index document", async () => {
@@ -80,18 +69,12 @@ describe("storybook-site worker", () => {
   });
 
   test("healthz reports the service name", async () => {
-    const response = await worker.fetch(
-      new Request("https://storybook.smithers.sh/healthz"),
-      makeEnv(),
-    );
+    const response = await worker.fetch(new Request("https://storybook.smithers.sh/healthz"), makeEnv());
     expect(await response.json()).toEqual({ ok: true, service: "storybook-site" });
   });
 
   test("non-GET methods are rejected", async () => {
-    const response = await worker.fetch(
-      new Request("https://storybook.smithers.sh/", { method: "POST" }),
-      makeEnv(),
-    );
+    const response = await worker.fetch(new Request("https://storybook.smithers.sh/", { method: "POST" }), makeEnv());
     expect(response.status).toBe(405);
     expect(response.headers.get("allow")).toBe("GET, HEAD");
   });

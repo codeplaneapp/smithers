@@ -140,10 +140,7 @@ const inputSchema = z.object({
     .default(SPEC_PATH)
     .describe("Path the design spec is written to (defaults to docs/specs/tui-monitor.md)."),
   pkg: z.string().default(PKG).describe("Target package directory for the TUI."),
-  review: z
-    .boolean()
-    .default(true)
-    .describe("Pause for human approval of the spec before any code is written."),
+  review: z.boolean().default(true).describe("Pause for human approval of the spec before any code is written."),
 });
 
 // 1 — The written, buildable spec for the monitor.
@@ -214,7 +211,7 @@ const MODES = [
     id: "tree",
     title: "① Tree + Node detail",
     detail:
-      "Split-pane: left collapsible node <scrollbox> tree; right NodeInspector with Output/Logs/Diff/Props tabs (NO Tools tab — no per-node tool-call stream exists; Diff renders unified-diff text via <code filetype=\"diff\">, Output/Props via <code>), auto-default tab per node kind, and the approval banner when a gate is waiting. This is the home mode.",
+      'Split-pane: left collapsible node <scrollbox> tree; right NodeInspector with Output/Logs/Diff/Props tabs (NO Tools tab — no per-node tool-call stream exists; Diff renders unified-diff text via <code filetype="diff">, Output/Props via <code>), auto-default tab per node kind, and the approval banner when a gate is waiting. This is the home mode.',
   },
   {
     id: "graph",
@@ -351,12 +348,12 @@ summary, the mode ids, and any open questions.`}
         {/* 3 — Build everything directly on main (new package, no conflicts;
             keeps agents + compute verify-oracle in the same directory). */}
         {proceed ? (
-            <Sequence>
-              {/* 3a — Foundation: deps, tsconfig, entry + provider stack, app
+          <Sequence>
+            {/* 3a — Foundation: deps, tsconfig, entry + provider stack, app
                   shell, mode router, keymap context, header, and the headless
                   gateway data-layer adapter. No mode screens yet. */}
-              <Task id="scaffold" output={outputs.scaffold} agent={agents.implement} heartbeatTimeoutMs={900_000}>
-                {`${MAIN_GUIDANCE(pkg)}
+            <Task id="scaffold" output={outputs.scaffold} agent={agents.implement} heartbeatTimeoutMs={900_000}>
+              {`${MAIN_GUIDANCE(pkg)}
 
 VERIFY the ${pkg} foundation against the spec at "${specPath}" and fill any gaps.
 The package is already scaffolded and passing typecheck — do NOT rewrite working
@@ -391,21 +388,21 @@ missing:
 
 Verify it boots and typechecks (bun run typecheck in ${pkg}); a placeholder body
 per mode is fine for now. Do NOT push. Report files written and the bin command.`}
-              </Task>
+            </Task>
 
-              {/* 3b — Each mode, sequentially, on the same branch. */}
-              {scaffold
-                ? MODES.map((m) => {
-                    const already = ctx.outputMaybe(outputs.mode, { nodeId: `mode-${m.id}` });
-                    return already ? null : (
-                      <Task
-                        key={m.id}
-                        id={`mode-${m.id}`}
-                        output={outputs.mode}
-                        agent={agents.implement}
-                        heartbeatTimeoutMs={900_000}
-                      >
-                        {`${MAIN_GUIDANCE(pkg)}
+            {/* 3b — Each mode, sequentially, on the same branch. */}
+            {scaffold
+              ? MODES.map((m) => {
+                  const already = ctx.outputMaybe(outputs.mode, { nodeId: `mode-${m.id}` });
+                  return already ? null : (
+                    <Task
+                      key={m.id}
+                      id={`mode-${m.id}`}
+                      output={outputs.mode}
+                      agent={agents.implement}
+                      heartbeatTimeoutMs={900_000}
+                    >
+                      {`${MAIN_GUIDANCE(pkg)}
 
 Implement the "${m.title}" mode of the monitor TUI in ${pkg},
 following the spec at "${specPath}" and this design contract:
@@ -430,15 +427,15 @@ Rules:
 - Stay scoped to this mode + its registration line. Do NOT push.
 
 Report { mode: "${m.id}", summary, files }.`}
-                      </Task>
-                    );
-                  })
-                : null}
+                    </Task>
+                  );
+                })
+              : null}
 
-              {/* 3c — Ship it: replace `up --interactive` with the monitor. */}
-              {allModesBuilt ? (
-                <Task id="wire-cli" output={outputs.wiring} agent={agents.implement} heartbeatTimeoutMs={600_000}>
-                  {`${MAIN_GUIDANCE(pkg)}
+            {/* 3c — Ship it: replace `up --interactive` with the monitor. */}
+            {allModesBuilt ? (
+              <Task id="wire-cli" output={outputs.wiring} agent={agents.implement} heartbeatTimeoutMs={600_000}>
+                {`${MAIN_GUIDANCE(pkg)}
 
 Wire the monitor into the CLI so it SHIPS. In apps/cli, make
 \`smithers up --interactive\` launch the new ${pkg} full-screen monitor instead of
@@ -452,30 +449,30 @@ interactive mode itself requires a TTY.
 
 Update --help text accordingly. Keep typecheck green. Do NOT push.
 Report a summary and the files changed.`}
-                </Task>
-              ) : null}
+              </Task>
+            ) : null}
 
-              {/* 3d — Verify Loop: the REAL gate is the authority. Each pass runs
+            {/* 3d — Verify Loop: the REAL gate is the authority. Each pass runs
                   the gate (compute, unfakeable); if it fails, an agent fixes,
                   and the Loop re-checks until green or the cap is hit. */}
-              {allModesBuilt && wiring ? (
-                <Loop id="verify" until={verifyPassed} maxIterations={6} onMaxReached="return-last">
-                  <Sequence>
-                    <Task id="verify-check" output={outputs.verify}>
-                      {async () => {
-                        const cmd = `cd ${pkg} && bun run typecheck && bun test`;
-                        const res = await $`cd ${pkg} && bun run typecheck && bun test`.nothrow().quiet();
-                        const out = `${res.stdout?.toString() ?? ""}\n${res.stderr?.toString() ?? ""}`;
-                        const errors = out
-                          .split("\n")
-                          .filter((l) => /error|fail|✗|✖/i.test(l))
-                          .slice(0, 40);
-                        return { passed: res.exitCode === 0, command: cmd, exitCode: res.exitCode, errors };
-                      }}
-                    </Task>
-                    {(ctx.latest("verify", "verify-check") as { passed?: boolean } | undefined)?.passed === false ? (
-                      <Task id="verify-fix" output={outputs.mode} agent={agents.implement} heartbeatTimeoutMs={900_000}>
-                        {`${MAIN_GUIDANCE(pkg)}
+            {allModesBuilt && wiring ? (
+              <Loop id="verify" until={verifyPassed} maxIterations={6} onMaxReached="return-last">
+                <Sequence>
+                  <Task id="verify-check" output={outputs.verify}>
+                    {async () => {
+                      const cmd = `cd ${pkg} && bun run typecheck && bun test`;
+                      const res = await $`cd ${pkg} && bun run typecheck && bun test`.nothrow().quiet();
+                      const out = `${res.stdout?.toString() ?? ""}\n${res.stderr?.toString() ?? ""}`;
+                      const errors = out
+                        .split("\n")
+                        .filter((l) => /error|fail|✗|✖/i.test(l))
+                        .slice(0, 40);
+                      return { passed: res.exitCode === 0, command: cmd, exitCode: res.exitCode, errors };
+                    }}
+                  </Task>
+                  {(ctx.latest("verify", "verify-check") as { passed?: boolean } | undefined)?.passed === false ? (
+                    <Task id="verify-fix" output={outputs.mode} agent={agents.implement} heartbeatTimeoutMs={900_000}>
+                      {`${MAIN_GUIDANCE(pkg)}
 
 The ${pkg} gate (\`bun run typecheck && bun test\`) is RED.
 Failing output (truncated):
@@ -486,24 +483,24 @@ Fix the root cause in ${pkg} until both typecheck and the package tests pass. Do
 not weaken or delete tests to go green, and do not stub real gateway data. Stay
 in ${pkg} (plus the apps/cli wiring if that's the failure). Do NOT push.
 Report { mode: "verify-fix", summary, files }.`}
-                      </Task>
-                    ) : null}
-                  </Sequence>
-                </Loop>
-              ) : null}
+                    </Task>
+                  ) : null}
+                </Sequence>
+              </Loop>
+            ) : null}
 
-              {/* 3e — Document for the next agent once the gate is green. */}
-              {verifyPassed ? (
-                <Task id="document" output={outputs.document} agent={agents.implement} heartbeatTimeoutMs={600_000}>
-                  {`The monitor TUI is built and the gate is green. Document it for
+            {/* 3e — Document for the next agent once the gate is green. */}
+            {verifyPassed ? (
+              <Task id="document" output={outputs.document} agent={agents.implement} heartbeatTimeoutMs={600_000}>
+                {`The monitor TUI is built and the gate is green. Document it for
 the next agent/user: a short README in ${pkg}, and update the relevant CLI docs
 to describe that \`smithers up --interactive\` now opens the full-screen monitor
 and its keybindings/modes. If you edit anything under docs/, regenerate the LLM
 bundles (\`pnpm docs:llms\`) so check-docs/check-llms stay green. Do NOT push.
 Report a summary and whether docs/ was touched.`}
-                </Task>
-              ) : null}
-            </Sequence>
+              </Task>
+            ) : null}
+          </Sequence>
         ) : null}
 
         {/* Terminal summary surfaced as the run's printed output. */}

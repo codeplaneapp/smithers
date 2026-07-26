@@ -17,17 +17,35 @@ function runRow(runId, extra = {}) {
 }
 function nodeRow(runId, nodeId, iteration = 0, extra = {}) {
   return {
-    runId, nodeId, iteration, state: "finished", lastAttempt: 1,
-    updatedAtMs: Date.now(), outputTable: "out", label: null, ...extra,
+    runId,
+    nodeId,
+    iteration,
+    state: "finished",
+    lastAttempt: 1,
+    updatedAtMs: Date.now(),
+    outputTable: "out",
+    label: null,
+    ...extra,
   };
 }
 function attemptRow(runId, nodeId, iteration, attempt, extra = {}) {
   return {
-    runId, nodeId, iteration, attempt, state: "finished",
-    startedAtMs: Date.now() - 1000, finishedAtMs: Date.now() - 500,
-    heartbeatAtMs: null, heartbeatDataJson: null, errorJson: null,
-    jjPointer: `ptr-${nodeId}-${attempt}`, responseText: null,
-    jjCwd: "/tmp/diff-branches", cached: false, metaJson: null, ...extra,
+    runId,
+    nodeId,
+    iteration,
+    attempt,
+    state: "finished",
+    startedAtMs: Date.now() - 1000,
+    finishedAtMs: Date.now() - 500,
+    heartbeatAtMs: null,
+    heartbeatDataJson: null,
+    errorJson: null,
+    jjPointer: `ptr-${nodeId}-${attempt}`,
+    responseText: null,
+    jjCwd: "/tmp/diff-branches",
+    cached: false,
+    metaJson: null,
+    ...extra,
   };
 }
 
@@ -123,11 +141,19 @@ describe("getNodeDiffRoute resolveBaseRef sort comparators", () => {
     await adapter.insertNode(nodeRow(runId, "task:A", 0, { lastAttempt: 2 }));
     await adapter.insertNode(nodeRow(runId, "task:C", 0, { lastAttempt: 1 }));
     await adapter.insertNode(nodeRow(runId, "task:B", 0, { lastAttempt: 1 }));
-    await adapter.insertAttempt(attemptRow(runId, "task:A", 0, 1, { startedAtMs: 100, finishedAtMs: 1000, jjCwd: cwd }));
-    await adapter.insertAttempt(attemptRow(runId, "task:A", 0, 2, { startedAtMs: 200, finishedAtMs: 3000, jjCwd: cwd }));
-    await adapter.insertAttempt(attemptRow(runId, "task:C", 0, 1, { startedAtMs: 300, finishedAtMs: 3000, jjCwd: cwd }));
+    await adapter.insertAttempt(
+      attemptRow(runId, "task:A", 0, 1, { startedAtMs: 100, finishedAtMs: 1000, jjCwd: cwd }),
+    );
+    await adapter.insertAttempt(
+      attemptRow(runId, "task:A", 0, 2, { startedAtMs: 200, finishedAtMs: 3000, jjCwd: cwd }),
+    );
+    await adapter.insertAttempt(
+      attemptRow(runId, "task:C", 0, 1, { startedAtMs: 300, finishedAtMs: 3000, jjCwd: cwd }),
+    );
     // Target: first attempt of task B, started after all others finished.
-    await adapter.insertAttempt(attemptRow(runId, "task:B", 0, 1, { startedAtMs: 9000, finishedAtMs: 9500, jjCwd: cwd }));
+    await adapter.insertAttempt(
+      attemptRow(runId, "task:B", 0, 1, { startedAtMs: 9000, finishedAtMs: 9500, jjCwd: cwd }),
+    );
     let seenBaseRef = null;
     const result = await getNodeDiffRoute({
       runId,

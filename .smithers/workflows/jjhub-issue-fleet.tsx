@@ -109,12 +109,19 @@ let cachedToken: string | undefined;
 
 function jjhubToken(): string {
   if (!cachedToken) {
-    cachedToken = execFileSync("gcloud", ["secrets", "versions", "access", "latest", "--secret", "multi-canary-plue-token"], { encoding: "utf8" }).trim();
+    cachedToken = execFileSync(
+      "gcloud",
+      ["secrets", "versions", "access", "latest", "--secret", "multi-canary-plue-token"],
+      { encoding: "utf8" },
+    ).trim();
   }
   return cachedToken;
 }
 
-async function jjhubApi(path: string, init?: { method?: string; body?: unknown }): Promise<{ status: number; json: any }> {
+async function jjhubApi(
+  path: string,
+  init?: { method?: string; body?: unknown },
+): Promise<{ status: number; json: any }> {
   const response = await fetch(`${JJHUB_API}${path}`, {
     method: init?.method ?? "GET",
     headers: { Authorization: `token ${jjhubToken()}`, "Content-Type": "application/json" },
@@ -122,7 +129,11 @@ async function jjhubApi(path: string, init?: { method?: string; body?: unknown }
   });
   const text = await response.text();
   let json: any = undefined;
-  try { json = text ? JSON.parse(text) : undefined; } catch { json = { raw: text.slice(0, 500) }; }
+  try {
+    json = text ? JSON.parse(text) : undefined;
+  } catch {
+    json = { raw: text.slice(0, 500) };
+  }
   return { status: response.status, json };
 }
 
@@ -132,35 +143,51 @@ function ensureCliConfig(): void {
   writeFileSync(join(dir, "config.yml"), 'api_url: "https://api.jjhub.tech"\ngit_protocol: ssh\n');
 }
 
-function run(cmd: string, args: string[], opts: { cwd?: string; timeoutMs?: number; env?: Record<string, string> } = {}): Promise<{ code: number; stdout: string; stderr: string }> {
+function run(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string; timeoutMs?: number; env?: Record<string, string> } = {},
+): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolvePromise) => {
-    execFile(cmd, args, {
-      cwd: opts.cwd,
-      timeout: opts.timeoutMs ?? 120_000,
-      maxBuffer: 32 * 1024 * 1024,
-      env: { ...process.env, ...opts.env },
-    }, (error, stdout, stderr) => {
-      const code = error ? (typeof (error as any).code === "number" ? (error as any).code : 1) : 0;
-      resolvePromise({ code, stdout: String(stdout), stderr: String(stderr) });
-    });
+    execFile(
+      cmd,
+      args,
+      {
+        cwd: opts.cwd,
+        timeout: opts.timeoutMs ?? 120_000,
+        maxBuffer: 32 * 1024 * 1024,
+        env: { ...process.env, ...opts.env },
+      },
+      (error, stdout, stderr) => {
+        const code = error ? (typeof (error as any).code === "number" ? (error as any).code : 1) : 0;
+        resolvePromise({ code, stdout: String(stdout), stderr: String(stderr) });
+      },
+    );
   });
 }
 
 /** Run a single-line command inside a jjhub workspace VM via the plue CLI. */
-async function wsExec(ctx: { plueBin: string; jjhubRepo: string }, workspaceId: string, command: string, timeoutSec: number): Promise<{ code: number; out: string }> {
+async function wsExec(
+  ctx: { plueBin: string; jjhubRepo: string },
+  workspaceId: string,
+  command: string,
+  timeoutSec: number,
+): Promise<{ code: number; out: string }> {
   ensureCliConfig();
-  const result = await run(ctx.plueBin, [
-    "workspace", "exec", workspaceId, "--repo", ctx.jjhubRepo,
-    "--command", command, "--timeout", String(timeoutSec),
-  ], {
-    timeoutMs: (timeoutSec + 90) * 1000,
-    env: { XDG_CONFIG_HOME: CLI_CONFIG_HOME, SMITHERS_TOKEN: jjhubToken() },
-  });
+  const result = await run(
+    ctx.plueBin,
+    ["workspace", "exec", workspaceId, "--repo", ctx.jjhubRepo, "--command", command, "--timeout", String(timeoutSec)],
+    {
+      timeoutMs: (timeoutSec + 90) * 1000,
+      env: { XDG_CONFIG_HOME: CLI_CONFIG_HOME, SMITHERS_TOKEN: jjhubToken() },
+    },
+  );
   return { code: result.code, out: `${result.stdout}\n${result.stderr}`.trim() };
 }
 
 /** Env prefix fixing the root-owned /workspace HOME baked into the runner image. */
-const VM_ENV = "export HOME=/home/developer XDG_CONFIG_HOME=/home/developer/.config XDG_CACHE_HOME=/home/developer/.cache XDG_DATA_HOME=/home/developer/.local/share BUN_INSTALL=/home/developer/.bun BUN_INSTALL_CACHE_DIR=/home/developer/.cache/bun BUN_TMPDIR=/tmp PATH=/home/developer/bin:$PATH";
+const VM_ENV =
+  "export HOME=/home/developer XDG_CONFIG_HOME=/home/developer/.config XDG_CACHE_HOME=/home/developer/.cache XDG_DATA_HOME=/home/developer/.local/share BUN_INSTALL=/home/developer/.bun BUN_INSTALL_CACHE_DIR=/home/developer/.cache/bun BUN_TMPDIR=/tmp PATH=/home/developer/bin:$PATH";
 const CODEX_URL = "https://github.com/openai/codex/releases/latest/download/codex-x86_64-unknown-linux-musl.tar.gz";
 
 function b64(text: string): string {
@@ -188,39 +215,97 @@ function latestRow<T extends { issue: number }>(rows: T[] | undefined, issue: nu
 async function discover(input: z.infer<typeof inputSchema>): Promise<z.infer<typeof discoverySchema>> {
   try {
     const [owner, name] = input.githubRepo.split("/");
-    const listed = await run("gh", ["issue", "list", "--repo", input.githubRepo, "--state", "open", "--limit", "200", "--json", "number,title,body,labels"], { timeoutMs: 60_000 });
-    if (listed.code !== 0) return { ok: false, error: `gh issue list failed: ${truncate(listed.stderr, 400)}`, issues: [] };
-    const all = JSON.parse(listed.stdout) as Array<{ number: number; title: string; body: string; labels: Array<{ name: string }> }>;
+    const listed = await run(
+      "gh",
+      [
+        "issue",
+        "list",
+        "--repo",
+        input.githubRepo,
+        "--state",
+        "open",
+        "--limit",
+        "200",
+        "--json",
+        "number,title,body,labels",
+      ],
+      { timeoutMs: 60_000 },
+    );
+    if (listed.code !== 0)
+      return { ok: false, error: `gh issue list failed: ${truncate(listed.stderr, 400)}`, issues: [] };
+    const all = JSON.parse(listed.stdout) as Array<{
+      number: number;
+      title: string;
+      body: string;
+      labels: Array<{ name: string }>;
+    }>;
     const wanted = input.issues.length > 0 ? all.filter((issue) => input.issues.includes(issue.number)) : all;
-    const issues = wanted.map((issue) => ({ number: issue.number, title: issue.title, body: issue.body ?? "", labels: (issue.labels ?? []).map((label) => label.name) }));
+    const issues = wanted.map((issue) => ({
+      number: issue.number,
+      title: issue.title,
+      body: issue.body ?? "",
+      labels: (issue.labels ?? []).map((label) => label.name),
+    }));
 
     const bookmarks = await jjhubApi(`/repos/${input.jjhubRepo}/bookmarks?limit=100`);
     const main = (bookmarks.json?.items ?? []).find((bookmark: any) => bookmark.name === "main");
-    if (!main?.target_change_id) return { ok: false, error: `jjhub ${input.jjhubRepo} has no main bookmark (status ${bookmarks.status})`, issues: [] };
+    if (!main?.target_change_id)
+      return {
+        ok: false,
+        error: `jjhub ${input.jjhubRepo} has no main bookmark (status ${bookmarks.status})`,
+        issues: [],
+      };
 
     // Local base clone of the GitHub repo: PR branches are built here.
     const baseRepoDir = join(FLEET_HOME, "base", `${owner}-${name}`);
     if (!existsSync(join(baseRepoDir, ".git"))) {
       mkdirSync(baseRepoDir, { recursive: true });
-      const cloned = await run("git", ["clone", "--quiet", `git@github.com:${input.githubRepo}.git`, baseRepoDir], { timeoutMs: 600_000 });
-      if (cloned.code !== 0) return { ok: false, error: `base clone failed: ${truncate(cloned.stderr, 400)}`, issues: [] };
+      const cloned = await run("git", ["clone", "--quiet", `git@github.com:${input.githubRepo}.git`, baseRepoDir], {
+        timeoutMs: 600_000,
+      });
+      if (cloned.code !== 0)
+        return { ok: false, error: `base clone failed: ${truncate(cloned.stderr, 400)}`, issues: [] };
     }
     await run("git", ["fetch", "--quiet", "origin", input.baseSha], { cwd: baseRepoDir, timeoutMs: 300_000 });
     // Prime jjhub objects (snapshot root) so per-lane fetches are deltas.
-    const primed = await run("git", ["-c", `http.extraHeader=Authorization: Bearer ${jjhubToken()}`, "fetch", "--quiet", `https://api.jjhub.tech/${input.jjhubRepo}.git`, "main"], { cwd: baseRepoDir, timeoutMs: 300_000 });
-    if (primed.code !== 0) return { ok: false, error: `jjhub prime fetch failed: ${truncate(primed.stderr, 400)}`, issues: [] };
+    const primed = await run(
+      "git",
+      [
+        "-c",
+        `http.extraHeader=Authorization: Bearer ${jjhubToken()}`,
+        "fetch",
+        "--quiet",
+        `https://api.jjhub.tech/${input.jjhubRepo}.git`,
+        "main",
+      ],
+      { cwd: baseRepoDir, timeoutMs: 300_000 },
+    );
+    if (primed.code !== 0)
+      return { ok: false, error: `jjhub prime fetch failed: ${truncate(primed.stderr, 400)}`, issues: [] };
     return { ok: true, issues, mainChangeId: main.target_change_id, baseRepoDir };
   } catch (error) {
     return { ok: false, error: truncate(String(error), 500), issues: [] };
   }
 }
 
-async function provisionSandbox(input: z.infer<typeof inputSchema>, issue: number, mainChangeId: string): Promise<z.infer<typeof sandboxSchema>> {
+async function provisionSandbox(
+  input: z.infer<typeof inputSchema>,
+  issue: number,
+  mainChangeId: string,
+): Promise<z.infer<typeof sandboxSchema>> {
   const bookmark = bookmarkFor(issue);
   try {
-    const created = await jjhubApi(`/repos/${input.jjhubRepo}/bookmarks`, { method: "POST", body: { name: bookmark, target_change_id: mainChangeId } });
+    const created = await jjhubApi(`/repos/${input.jjhubRepo}/bookmarks`, {
+      method: "POST",
+      body: { name: bookmark, target_change_id: mainChangeId },
+    });
     if (created.status >= 400 && created.status !== 409 && created.status !== 422) {
-      return { issue, ok: false, bookmark, error: `bookmark create ${created.status}: ${truncate(JSON.stringify(created.json), 300)}` };
+      return {
+        issue,
+        ok: false,
+        bookmark,
+        error: `bookmark create ${created.status}: ${truncate(JSON.stringify(created.json), 300)}`,
+      };
     }
     // The Microsandbox worker pool is small (single-digit concurrent VMs) and
     // returns 503 no_capacity under load; each provisioning attempt that ends
@@ -231,7 +316,10 @@ async function provisionSandbox(input: z.infer<typeof inputSchema>, issue: numbe
     let lastError = "";
     attempts: for (let attempt = 0; attempt < 6; attempt += 1) {
       if (attempt > 0) await new Promise((resolvePromise) => setTimeout(resolvePromise, 120_000));
-      const workspace = await jjhubApi(`/repos/${input.jjhubRepo}/workspaces`, { method: "POST", body: { name: bookmark, source_bookmark: bookmark } });
+      const workspace = await jjhubApi(`/repos/${input.jjhubRepo}/workspaces`, {
+        method: "POST",
+        body: { name: bookmark, source_bookmark: bookmark },
+      });
       workspaceId = workspace.json?.id;
       if (!workspaceId) {
         lastError = `workspace create ${workspace.status}: ${truncate(JSON.stringify(workspace.json), 300)}`;
@@ -258,7 +346,8 @@ async function provisionSandbox(input: z.infer<typeof inputSchema>, issue: numbe
       }
       break;
     }
-    if (!workspaceId) return { issue, ok: false, bookmark, error: lastError || "workspace provisioning failed after retries" };
+    if (!workspaceId)
+      return { issue, ok: false, bookmark, error: lastError || "workspace provisioning failed after retries" };
 
     const authB64 = b64(readFileSync(join(homedir(), ".codex", "auth.json"), "utf8"));
     // Everything the run needs lives under /home/developer/.fleet (overlay
@@ -310,7 +399,11 @@ function solPrompt(issue: z.infer<typeof issueRowSchema>, bookmark: string): str
   ].join("\n");
 }
 
-async function implement(input: z.infer<typeof inputSchema>, issue: z.infer<typeof issueRowSchema>, workspaceId: string): Promise<z.infer<typeof implementSchema>> {
+async function implement(
+  input: z.infer<typeof inputSchema>,
+  issue: z.infer<typeof issueRowSchema>,
+  workspaceId: string,
+): Promise<z.infer<typeof implementSchema>> {
   const bookmark = bookmarkFor(issue.number);
   try {
     const promptB64 = b64(solPrompt(issue, bookmark));
@@ -324,7 +417,12 @@ async function implement(input: z.infer<typeof inputSchema>, issue: z.infer<type
     const startCmd = `${VM_ENV} && echo ${promptB64} | base64 -d > ${F}/prompt.md && rm -f ${F}/codex-exit ${F}/last-message.md ${F}/codex-run.log && cd /home/developer/workspace && (setsid nohup sh -c 'echo $$ > ${F}/codex-pid; timeout 2700 /home/developer/bin/codex exec -m gpt-5.6-sol --dangerously-bypass-approvals-and-sandbox --output-last-message ${F}/last-message.md "$(cat ${F}/prompt.md)" > ${F}/codex-run.log 2>&1; rc=$?; printf %s $rc > ${F}/codex-exit.tmp && mv ${F}/codex-exit.tmp ${F}/codex-exit' >/dev/null 2>&1 &) && echo SOL-STARTED`;
     const started = await wsExec(input, workspaceId, startCmd, 120);
     if (!started.out.includes("SOL-STARTED")) {
-      return { issue: issue.number, ok: false, pushed: false, error: `sol start failed: ${truncate(started.out, 500)}` };
+      return {
+        issue: issue.number,
+        ok: false,
+        pushed: false,
+        error: `sol start failed: ${truncate(started.out, 500)}`,
+      };
     }
     const pollCmd = `if test -s ${F}/codex-exit; then echo SOL-DONE=$(cat ${F}/codex-exit); elif test -d /proc/$(cat ${F}/codex-pid 2>/dev/null || echo 0); then echo SOL-RUNNING; else echo SOL-CRASHED; tail -c 400 ${F}/codex-run.log 2>/dev/null; fi`;
     const solDeadline = Date.now() + 50 * 60_000;
@@ -336,20 +434,41 @@ async function implement(input: z.infer<typeof inputSchema>, issue: z.infer<type
       const polled = await wsExec(input, workspaceId, pollCmd, 90);
       lastTail = polled.out;
       const done = polled.out.match(/SOL-DONE=(\d+)/);
-      if (done) { solExit = done[1]; break; }
-      if (polled.out.includes("SOL-CRASHED")) { crashed = true; break; }
+      if (done) {
+        solExit = done[1];
+        break;
+      }
+      if (polled.out.includes("SOL-CRASHED")) {
+        crashed = true;
+        break;
+      }
       // Transient poll/SSH failures are tolerated; only the deadline ends the loop.
     }
     if (crashed || solExit === undefined) {
       const reason = crashed ? "sol process died (likely OOM)" : "sol did not finish within 50m";
-      return { issue: issue.number, ok: false, pushed: false, error: `${reason}; last poll: ${truncate(lastTail, 500)}` };
+      return {
+        issue: issue.number,
+        ok: false,
+        pushed: false,
+        error: `${reason}; last poll: ${truncate(lastTail, 500)}`,
+      };
     }
     if (solExit !== "0") {
       // Salvage a crash-after-completion: codex wrote its final message but
       // died on shutdown. Anything else fails the lane with the log tail.
-      const diagnostic = await wsExec(input, workspaceId, `${VM_ENV} && (test -s ${F}/last-message.md && echo FINISHED); tail -c 1200 ${F}/codex-run.log`, 60);
+      const diagnostic = await wsExec(
+        input,
+        workspaceId,
+        `${VM_ENV} && (test -s ${F}/last-message.md && echo FINISHED); tail -c 1200 ${F}/codex-run.log`,
+        60,
+      );
       if (!diagnostic.out.includes("FINISHED")) {
-        return { issue: issue.number, ok: false, pushed: false, error: `sol exited ${solExit}: ${truncate(diagnostic.out, 900)}` };
+        return {
+          issue: issue.number,
+          ok: false,
+          pushed: false,
+          error: `sol exited ${solExit}: ${truncate(diagnostic.out, 900)}`,
+        };
       }
     }
 
@@ -365,7 +484,12 @@ async function implement(input: z.infer<typeof inputSchema>, issue: z.infer<type
     ].join(" && ");
     const pushed = await wsExec(input, workspaceId, finalize, 300);
     if (!pushed.out.includes("PUSH-OK")) {
-      return { issue: issue.number, ok: false, pushed: false, error: `finalize/push failed: ${truncate(pushed.out, 600)}` };
+      return {
+        issue: issue.number,
+        ok: false,
+        pushed: false,
+        error: `finalize/push failed: ${truncate(pushed.out, 600)}`,
+      };
     }
     const summary = truncate(pushed.out.split("PUSH-OK").pop()?.trim() ?? "", 4000);
     const bookmarks = await jjhubApi(`/repos/${input.jjhubRepo}/bookmarks?limit=100`);
@@ -376,7 +500,12 @@ async function implement(input: z.infer<typeof inputSchema>, issue: z.infer<type
   }
 }
 
-async function openPr(input: z.infer<typeof inputSchema>, issue: z.infer<typeof issueRowSchema>, discovery: z.infer<typeof discoverySchema>, impl: z.infer<typeof implementSchema>): Promise<z.infer<typeof prSchema>> {
+async function openPr(
+  input: z.infer<typeof inputSchema>,
+  issue: z.infer<typeof issueRowSchema>,
+  discovery: z.infer<typeof discoverySchema>,
+  impl: z.infer<typeof implementSchema>,
+): Promise<z.infer<typeof prSchema>> {
   const bookmark = bookmarkFor(issue.number);
   const branch = `jjhub/${bookmark}`;
   const baseRepoDir = discovery.baseRepoDir!;
@@ -386,25 +515,55 @@ async function openPr(input: z.infer<typeof inputSchema>, issue: z.infer<typeof 
     // this repo and FETCH_HEAD is a single file — racing on it grafted one
     // lane's diff onto a sibling's PR branch in the first full-fleet run.
     const laneRef = `refs/fleet/${bookmark}`;
-    const fetched = await run("git", ["-c", `http.extraHeader=Authorization: Bearer ${jjhubToken()}`, "fetch", "--quiet", `https://api.jjhub.tech/${input.jjhubRepo}.git`, `+refs/heads/${bookmark}:${laneRef}`], { cwd: baseRepoDir, timeoutMs: 300_000 });
-    if (fetched.code !== 0) return { issue: issue.number, ok: false, branch, error: `jjhub fetch failed: ${truncate(fetched.stderr, 300)}` };
-    const diff = await run("git", ["diff", "--binary", input.jjhubBaseCommit, laneRef], { cwd: baseRepoDir, timeoutMs: 120_000 });
-    if (diff.code !== 0 || !diff.stdout.trim()) return { issue: issue.number, ok: false, branch, error: "empty diff from jjhub bookmark — nothing to PR" };
+    const fetched = await run(
+      "git",
+      [
+        "-c",
+        `http.extraHeader=Authorization: Bearer ${jjhubToken()}`,
+        "fetch",
+        "--quiet",
+        `https://api.jjhub.tech/${input.jjhubRepo}.git`,
+        `+refs/heads/${bookmark}:${laneRef}`,
+      ],
+      { cwd: baseRepoDir, timeoutMs: 300_000 },
+    );
+    if (fetched.code !== 0)
+      return { issue: issue.number, ok: false, branch, error: `jjhub fetch failed: ${truncate(fetched.stderr, 300)}` };
+    const diff = await run("git", ["diff", "--binary", input.jjhubBaseCommit, laneRef], {
+      cwd: baseRepoDir,
+      timeoutMs: 120_000,
+    });
+    if (diff.code !== 0 || !diff.stdout.trim())
+      return { issue: issue.number, ok: false, branch, error: "empty diff from jjhub bookmark — nothing to PR" };
     const patchPath = join(FLEET_HOME, "worktrees", `${bookmark}.patch`);
     mkdirSync(join(FLEET_HOME, "worktrees"), { recursive: true });
     writeFileSync(patchPath, diff.stdout);
 
     rmSync(worktreeDir, { recursive: true, force: true });
     await run("git", ["worktree", "prune"], { cwd: baseRepoDir });
-    const added = await run("git", ["worktree", "add", "--detach", worktreeDir, input.baseSha], { cwd: baseRepoDir, timeoutMs: 300_000 });
-    if (added.code !== 0) return { issue: issue.number, ok: false, branch, error: `worktree add failed: ${truncate(added.stderr, 300)}` };
+    const added = await run("git", ["worktree", "add", "--detach", worktreeDir, input.baseSha], {
+      cwd: baseRepoDir,
+      timeoutMs: 300_000,
+    });
+    if (added.code !== 0)
+      return { issue: issue.number, ok: false, branch, error: `worktree add failed: ${truncate(added.stderr, 300)}` };
     const applied = await run("git", ["apply", "--index", patchPath], { cwd: worktreeDir, timeoutMs: 120_000 });
-    if (applied.code !== 0) return { issue: issue.number, ok: false, branch, error: `patch apply failed: ${truncate(applied.stderr, 400)}` };
+    if (applied.code !== 0)
+      return { issue: issue.number, ok: false, branch, error: `patch apply failed: ${truncate(applied.stderr, 400)}` };
     const message = `fix: ${issue.title} (#${issue.number})\n\nImplemented by codex gpt-5.6-sol inside a jjhub sandbox (repo ${input.jjhubRepo}, bookmark ${bookmark}).`;
-    const committed = await run("git", ["-c", "user.name=smithers-fleet", "-c", "user.email=will@tevm.tech", "commit", "--quiet", "-m", message], { cwd: worktreeDir, timeoutMs: 60_000 });
-    if (committed.code !== 0) return { issue: issue.number, ok: false, branch, error: `commit failed: ${truncate(committed.stderr, 300)}` };
-    const pushedUp = await run("git", ["push", "--force", "--quiet", "origin", `HEAD:refs/heads/${branch}`], { cwd: worktreeDir, timeoutMs: 300_000 });
-    if (pushedUp.code !== 0) return { issue: issue.number, ok: false, branch, error: `github push failed: ${truncate(pushedUp.stderr, 300)}` };
+    const committed = await run(
+      "git",
+      ["-c", "user.name=smithers-fleet", "-c", "user.email=will@tevm.tech", "commit", "--quiet", "-m", message],
+      { cwd: worktreeDir, timeoutMs: 60_000 },
+    );
+    if (committed.code !== 0)
+      return { issue: issue.number, ok: false, branch, error: `commit failed: ${truncate(committed.stderr, 300)}` };
+    const pushedUp = await run("git", ["push", "--force", "--quiet", "origin", `HEAD:refs/heads/${branch}`], {
+      cwd: worktreeDir,
+      timeoutMs: 300_000,
+    });
+    if (pushedUp.code !== 0)
+      return { issue: issue.number, ok: false, branch, error: `github push failed: ${truncate(pushedUp.stderr, 300)}` };
 
     const body = [
       `Closes #${issue.number}.`,
@@ -417,12 +576,39 @@ async function openPr(input: z.infer<typeof inputSchema>, issue: z.infer<typeof 
       "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
     ].join("\n");
     let prUrl: string | undefined;
-    const existing = await run("gh", ["pr", "view", branch, "--repo", input.githubRepo, "--json", "url", "-q", ".url"], { timeoutMs: 60_000 });
+    const existing = await run(
+      "gh",
+      ["pr", "view", branch, "--repo", input.githubRepo, "--json", "url", "-q", ".url"],
+      { timeoutMs: 60_000 },
+    );
     if (existing.code === 0 && existing.stdout.trim().startsWith("http")) {
       prUrl = existing.stdout.trim();
     } else {
-      const created = await run("gh", ["pr", "create", "--repo", input.githubRepo, "--head", branch, "--base", "main", "--title", `fix: ${issue.title} (#${issue.number})`, "--body", body], { timeoutMs: 120_000 });
-      if (created.code !== 0) return { issue: issue.number, ok: false, branch, error: `gh pr create failed: ${truncate(created.stderr, 400)}` };
+      const created = await run(
+        "gh",
+        [
+          "pr",
+          "create",
+          "--repo",
+          input.githubRepo,
+          "--head",
+          branch,
+          "--base",
+          "main",
+          "--title",
+          `fix: ${issue.title} (#${issue.number})`,
+          "--body",
+          body,
+        ],
+        { timeoutMs: 120_000 },
+      );
+      if (created.code !== 0)
+        return {
+          issue: issue.number,
+          ok: false,
+          branch,
+          error: `gh pr create failed: ${truncate(created.stderr, 400)}`,
+        };
       prUrl = created.stdout.trim().split("\n").pop();
     }
 
@@ -430,7 +616,13 @@ async function openPr(input: z.infer<typeof inputSchema>, issue: z.infer<typeof 
     if (impl.tipChangeId) {
       const landing = await jjhubApi(`/repos/${input.jjhubRepo}/landings`, {
         method: "POST",
-        body: { title: `fix: ${issue.title} (#${issue.number})`, body: `Mirror of ${prUrl}`, target_bookmark: "main", source_bookmark: bookmark, change_ids: [impl.tipChangeId] },
+        body: {
+          title: `fix: ${issue.title} (#${issue.number})`,
+          body: `Mirror of ${prUrl}`,
+          target_bookmark: "main",
+          source_bookmark: bookmark,
+          change_ids: [impl.tipChangeId],
+        },
       });
       landingNumber = landing.json?.number;
     }
@@ -442,11 +634,19 @@ async function openPr(input: z.infer<typeof inputSchema>, issue: z.infer<typeof 
   }
 }
 
-async function cleanup(input: z.infer<typeof inputSchema>, issue: number, workspaceId: string | undefined): Promise<z.infer<typeof cleanupSchema>> {
+async function cleanup(
+  input: z.infer<typeof inputSchema>,
+  issue: number,
+  workspaceId: string | undefined,
+): Promise<z.infer<typeof cleanupSchema>> {
   if (!workspaceId || input.keepWorkspaces) return { issue, ok: true };
   try {
     const deleted = await jjhubApi(`/repos/${input.jjhubRepo}/workspaces/${workspaceId}`, { method: "DELETE" });
-    return { issue, ok: deleted.status < 400 || deleted.status === 404, error: deleted.status >= 400 && deleted.status !== 404 ? `delete ${deleted.status}` : undefined };
+    return {
+      issue,
+      ok: deleted.status < 400 || deleted.status === 404,
+      error: deleted.status >= 400 && deleted.status !== 404 ? `delete ${deleted.status}` : undefined,
+    };
   } catch (error) {
     return { issue, ok: false, error: truncate(String(error), 300) };
   }
@@ -458,7 +658,11 @@ async function cleanup(input: z.infer<typeof inputSchema>, issue: number, worksp
  * Microsandbox VM while queued behind another lane's slow stage (that idle-VM
  * pile-up is what exhausted the worker pool on the first full-fleet attempt).
  */
-async function laneWork(input: z.infer<typeof inputSchema>, issue: z.infer<typeof issueRowSchema>, mainChangeId: string): Promise<z.infer<typeof implementSchema>> {
+async function laneWork(
+  input: z.infer<typeof inputSchema>,
+  issue: z.infer<typeof issueRowSchema>,
+  mainChangeId: string,
+): Promise<z.infer<typeof implementSchema>> {
   const sandbox = await provisionSandbox(input, issue.number, mainChangeId);
   if (!sandbox.ok || !sandbox.workspaceId) {
     return { issue: issue.number, ok: false, pushed: false, error: `sandbox: ${sandbox.error ?? "unknown"}` };
@@ -470,7 +674,12 @@ async function laneWork(input: z.infer<typeof inputSchema>, issue: z.infer<typeo
     // so a second codex run resumes from the current tree state. Covers
     // OOM kills and transient crashes without burning a fresh VM slot.
     const second = await implement(input, issue, sandbox.workspaceId);
-    return second.ok ? second : { ...second, error: `attempt1: ${truncate(first.error ?? "?", 300)} | attempt2: ${truncate(second.error ?? "?", 300)}` };
+    return second.ok
+      ? second
+      : {
+          ...second,
+          error: `attempt1: ${truncate(first.error ?? "?", 300)} | attempt2: ${truncate(second.error ?? "?", 300)}`,
+        };
   } finally {
     await cleanup(input, issue.number, sandbox.workspaceId);
   }
@@ -488,11 +697,13 @@ export default smithers((ctx) => {
     pr: ctx.outputs.pr,
     cleanup: ctx.outputs.cleanup,
   };
-  const settled = issues.length > 0 && issues.every((issue) => {
-    const impl = latestRow(laneRows.implement, issue.number);
-    if (!impl) return false;
-    return impl.pushed ? latestRow(laneRows.pr, issue.number) !== undefined : true;
-  });
+  const settled =
+    issues.length > 0 &&
+    issues.every((issue) => {
+      const impl = latestRow(laneRows.implement, issue.number);
+      if (!impl) return false;
+      return impl.pushed ? latestRow(laneRows.pr, issue.number) !== undefined : true;
+    });
 
   return (
     <Workflow name="jjhub-issue-fleet">

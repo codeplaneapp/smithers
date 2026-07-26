@@ -293,28 +293,14 @@ export function TestFortressTrack({
         const againstNode = `${base}:against`;
         const judgeNode = `${base}:judge`;
 
-        const gap = ctx.latest(outputs.tfGap, gapNode) as
-          | z.infer<typeof tfGapSchema>
-          | undefined;
-        const forArg = ctx.latest(outputs.tfArg, forNode) as
-          | z.infer<typeof tfArgSchema>
-          | undefined;
-        const againstArg = ctx.latest(outputs.tfArg, againstNode) as
-          | z.infer<typeof tfArgSchema>
-          | undefined;
-        const verdict = ctx.latest(outputs.tfVerdict, judgeNode) as
-          | z.infer<typeof tfVerdictSchema>
-          | undefined;
+        const gap = ctx.latest(outputs.tfGap, gapNode) as z.infer<typeof tfGapSchema> | undefined;
+        const forArg = ctx.latest(outputs.tfArg, forNode) as z.infer<typeof tfArgSchema> | undefined;
+        const againstArg = ctx.latest(outputs.tfArg, againstNode) as z.infer<typeof tfArgSchema> | undefined;
+        const verdict = ctx.latest(outputs.tfVerdict, judgeNode) as z.infer<typeof tfVerdictSchema> | undefined;
         const trivial = verdict?.verdict === "trivial";
 
         return (
-          <Loop
-            key={base}
-            id={`${base}:loop`}
-            until={trivial}
-            maxIterations={rounds}
-            onMaxReached="return-last"
-          >
+          <Loop key={base} id={`${base}:loop`} until={trivial} maxIterations={rounds} onMaxReached="return-last">
             <Sequence>
               <Task
                 id={hardenNode}
@@ -348,7 +334,7 @@ export function TestFortressTrack({
                   output={outputs.tfArg}
                   agent={debateAgent}
                   retries={LOOP_RETRIES}
-                retryPolicy={LOOP_RETRY_POLICY}
+                  retryPolicy={LOOP_RETRY_POLICY}
                   continueOnFail
                   timeoutMs={20 * 60_000}
                   heartbeatTimeoutMs={10 * 60_000}
@@ -360,7 +346,7 @@ export function TestFortressTrack({
                   output={outputs.tfArg}
                   agent={debateAgent}
                   retries={LOOP_RETRIES}
-                retryPolicy={LOOP_RETRY_POLICY}
+                  retryPolicy={LOOP_RETRY_POLICY}
                   continueOnFail
                   timeoutMs={20 * 60_000}
                   heartbeatTimeoutMs={10 * 60_000}

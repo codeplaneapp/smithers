@@ -38,16 +38,9 @@ export function deriveAppShellDecision({
   pairKeyPresent,
 }: AppShellDecisionInput): AppShellDecision {
   const onPair = pathname.startsWith("/pair");
-  const pairFrame: PairFrameMode = onPair
-    ? pairKeyPresent
-      ? "workspace"
-      : "gate"
-    : "none";
+  const pairFrame: PairFrameMode = onPair ? (pairKeyPresent ? "workspace" : "gate") : "none";
   const effectiveLayout = surface ? "sidebar" : layout;
-const isChat =
-    messagesCount > 0 ||
-    view !== "home" ||
-    surface !== null;
+  const isChat = messagesCount > 0 || view !== "home" || surface !== null;
   const mode = onPair
     ? pairKeyPresent
       ? "sidebar"
@@ -57,8 +50,7 @@ const isChat =
       : isChat
         ? "chat"
         : "home";
-  const showTranscript =
-    !onPair && surface === null && view !== "store" && messagesCount > 0;
+  const showTranscript = !onPair && surface === null && view !== "store" && messagesCount > 0;
   const canvasKey = onPair ? "pair" : canvasKeyFor(view, surface);
 
   return {

@@ -149,7 +149,11 @@ const TICKETS_DIR = ".smithers/tickets/smithers";
 const RESOLVED_MARKERS = ["_done", "_disposition", "_correction", "_resolved", "_scope assessment", "_partial"];
 
 function slugify(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
 }
 
 /** Heuristically pull a `packages/<x>` or `apps/<x>` package dir out of item text. */
@@ -225,18 +229,23 @@ function itemPrompt(item: BatchItem): string {
     `- NEVER run \`git push\`, \`git push --force\`, \`gh pr create\`, or anything that writes to the remote/origin. Not now, not "to be safe", not at the end. The orchestrating workflow owns all interaction with origin; an agent push corrupts shared \`main\`.`,
     `- Do NOT run \`git remote\` mutations, do NOT change branches off your worktree branch, do NOT touch \`main\` directly. Work ONLY on this worktree's branch.`,
     `- Commit your work to THIS worktree branch with local commits only. That is the entire extent of your git interaction. If you think you need to push, you are wrong — stop and finish without pushing.`,
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /** Per-item done = validation passed AND a reviewer approved (mirrors ValidationLoop semantics). */
 function itemDone(ctx: any, idPrefix: string): { done: boolean; feedback: string | null } {
-  const validate = ctx.latest("validate", `${idPrefix}:validate`) ?? ctx.outputMaybe(outputs.validate, { nodeId: `${idPrefix}:validate` });
+  const validate =
+    ctx.latest("validate", `${idPrefix}:validate`) ??
+    ctx.outputMaybe(outputs.validate, { nodeId: `${idPrefix}:validate` });
   const reviews = (ctx.outputs.review ?? []) as Array<z.infer<typeof reviewOutputSchema> & { nodeId?: string }>;
   const validationIteration = (validate as { iteration?: number } | undefined)?.iteration;
-  const mine = reviews.filter((r) =>
-    typeof r.nodeId === "string" &&
-    r.nodeId.startsWith(`${idPrefix}:review:`) &&
-    (r as { iteration?: number }).iteration === validationIteration,
+  const mine = reviews.filter(
+    (r) =>
+      typeof r.nodeId === "string" &&
+      r.nodeId.startsWith(`${idPrefix}:review:`) &&
+      (r as { iteration?: number }).iteration === validationIteration,
   );
   const validationPassed = validate?.allPassed === true;
   const anyApproved = mine.length > 0 && mine.some((r) => r.approved === true);
@@ -247,7 +256,8 @@ function itemDone(ctx: any, idPrefix: string): { done: boolean; feedback: string
   for (const r of mine) {
     if (r.approved === false) {
       parts.push(`REVIEWER REJECTED:\n${r.feedback}`);
-      for (const issue of r.issues ?? []) parts.push(`  [${issue.severity}] ${issue.title}: ${issue.description}${issue.file ? ` (${issue.file})` : ""}`);
+      for (const issue of r.issues ?? [])
+        parts.push(`  [${issue.severity}] ${issue.title}: ${issue.description}${issue.file ? ` (${issue.file})` : ""}`);
     }
   }
   return { done, feedback: parts.length ? parts.join("\n\n") : null };
@@ -280,188 +290,212 @@ export default smithers((ctx) => {
   const roguePush = oracle?.roguePushDetected === true;
   // Done only when backlog empty, main green, AND no rogue push ever detected.
   const burndownDone = backlogEmpty && mainGreen && !roguePush;
-  const oracleHalt = oracle !== undefined && ((oracle.ranFullGate && oracle.mainGateGreen === false) || oracle.roguePushDetected === true);
+  const oracleHalt =
+    oracle !== undefined &&
+    ((oracle.ranFullGate && oracle.mainGateGreen === false) || oracle.roguePushDetected === true);
 
   return (
     <Workflow name="audit-burndown">
       <Sequence>
-      {/* 0. PUSH-FENCE BASELINE — capture origin/main once; the run must never move it. */}
-      <Task id="baseline" output={outputs.baseline}>
-        {async () => {
-          const { spawnSync } = await import("node:child_process");
-          const git = process.platform === "win32" ? "git.exe" : "git";
-          spawnSync(git, ["fetch", "-q", "origin", "main"], { cwd: resolve(process.cwd()), encoding: "utf8", timeout: 120_000 });
-          const res = spawnSync(git, ["rev-parse", "origin/main"], { cwd: resolve(process.cwd()), encoding: "utf8", timeout: 60_000 });
-          return { originMainSha: (res.stdout ?? "").trim(), capturedAt: new Date().toISOString() };
-        }}
-      </Task>
-      <Loop id="burndown" until={burndownDone} maxIterations={maxOuterIterations} onMaxReached="return-last">
-        <Sequence>
-          {/* 1. DISCOVER — deterministic scan for small actionable items, pick a batch. */}
-          <Task id="discover" output={outputs.batch}>
-            {() => {
-              const all = discoverActionableItems(ticketPrefixes);
-              const chosen = all.slice(0, batchSize);
-              return {
-                items: chosen,
-                openCount: all.length,
-                summary: `${all.length} actionable open items; working ${chosen.length}: ${chosen.map((c) => c.slug).join(", ") || "(none)"}`,
-              };
-            }}
-          </Task>
+        {/* 0. PUSH-FENCE BASELINE — capture origin/main once; the run must never move it. */}
+        <Task id="baseline" output={outputs.baseline}>
+          {async () => {
+            const { spawnSync } = await import("node:child_process");
+            const git = process.platform === "win32" ? "git.exe" : "git";
+            spawnSync(git, ["fetch", "-q", "origin", "main"], {
+              cwd: resolve(process.cwd()),
+              encoding: "utf8",
+              timeout: 120_000,
+            });
+            const res = spawnSync(git, ["rev-parse", "origin/main"], {
+              cwd: resolve(process.cwd()),
+              encoding: "utf8",
+              timeout: 60_000,
+            });
+            return { originMainSha: (res.stdout ?? "").trim(), capturedAt: new Date().toISOString() };
+          }}
+        </Task>
+        <Loop id="burndown" until={burndownDone} maxIterations={maxOuterIterations} onMaxReached="return-last">
+          <Sequence>
+            {/* 1. DISCOVER — deterministic scan for small actionable items, pick a batch. */}
+            <Task id="discover" output={outputs.batch}>
+              {() => {
+                const all = discoverActionableItems(ticketPrefixes);
+                const chosen = all.slice(0, batchSize);
+                return {
+                  items: chosen,
+                  openCount: all.length,
+                  summary: `${all.length} actionable open items; working ${chosen.length}: ${chosen.map((c) => c.slug).join(", ") || "(none)"}`,
+                };
+              }}
+            </Task>
 
-          {/* 2. WORK — one small item per isolated worktree, in parallel. */}
-          <Parallel maxConcurrency={maxConcurrency}>
-            {items.map((item) => {
-              const idPrefix = `bd-${item.slug}`;
-              const { done, feedback } = itemDone(ctx, idPrefix);
-              const validation = ctx.latest("validate", `${idPrefix}:validate`) ?? ctx.outputMaybe(outputs.validate, { nodeId: `${idPrefix}:validate` });
-              return (
-                  <Worktree key={item.slug} path={resolve(process.cwd(), `.worktrees/burndown-${item.slug}`)} branch={`burndown/${item.slug}`}>
-                  <Sequence>
-                    <ValidationLoop
-                      idPrefix={idPrefix}
-                      prompt={itemPrompt(item)}
-                      implementAgents={agents.implement}
-                      validateAgents={agents.midTier}
-                      reviewAgents={[agents.review]}
-                      feedback={feedback}
-                      done={done}
-                      reviewWhen={validation?.allPassed === true}
-                      maxIterations={maxItemIterations}
-                    />
-                    <Task id={`result-${item.slug}`} output={outputs.itemResult} continueOnFail>
-                      {{
-                        slug: item.slug,
-                        ticketFile: item.ticketFile,
-                        itemText: item.itemText,
-                        branch: `burndown/${item.slug}`,
-                        status: done ? "success" : "partial",
-                        summary: done ? `Completed: ${item.itemText}` : `Did not converge: ${item.itemText}`,
-                      }}
-                    </Task>
-                  </Sequence>
-                </Worktree>
-              );
-            })}
-          </Parallel>
+            {/* 2. WORK — one small item per isolated worktree, in parallel. */}
+            <Parallel maxConcurrency={maxConcurrency}>
+              {items.map((item) => {
+                const idPrefix = `bd-${item.slug}`;
+                const { done, feedback } = itemDone(ctx, idPrefix);
+                const validation =
+                  ctx.latest("validate", `${idPrefix}:validate`) ??
+                  ctx.outputMaybe(outputs.validate, { nodeId: `${idPrefix}:validate` });
+                return (
+                  <Worktree
+                    key={item.slug}
+                    path={resolve(process.cwd(), `.worktrees/burndown-${item.slug}`)}
+                    branch={`burndown/${item.slug}`}
+                  >
+                    <Sequence>
+                      <ValidationLoop
+                        idPrefix={idPrefix}
+                        prompt={itemPrompt(item)}
+                        implementAgents={agents.implement}
+                        validateAgents={agents.midTier}
+                        reviewAgents={[agents.review]}
+                        feedback={feedback}
+                        done={done}
+                        reviewWhen={validation?.allPassed === true}
+                        maxIterations={maxItemIterations}
+                      />
+                      <Task id={`result-${item.slug}`} output={outputs.itemResult} continueOnFail>
+                        {{
+                          slug: item.slug,
+                          ticketFile: item.ticketFile,
+                          itemText: item.itemText,
+                          branch: `burndown/${item.slug}`,
+                          status: done ? "success" : "partial",
+                          summary: done ? `Completed: ${item.itemText}` : `Did not converge: ${item.itemText}`,
+                        }}
+                      </Task>
+                    </Sequence>
+                  </Worktree>
+                );
+              })}
+            </Parallel>
 
-          {/* 3. MERGE — land only the green+approved branches onto LOCAL main. NEVER push. */}
-          <Task id="merge" output={outputs.merge} agent={agents.implement}>
-            {[
-              `Merge the completed burndown branches from this batch into LOCAL \`main\` only.`,
-              ``,
-              `🚫 ABSOLUTE PUSH BAN: NEVER run \`git push\`, \`git push --force\`, or anything that writes to origin/remote. Pushing to shared \`main\` is forbidden and corrupts everyone's tree. A human pushes out-of-band after reviewing; your job ends at the local merge.`,
-              ``,
-              `Batch results:`,
-              ticketResults.filter((r) => items.some((item) => item.slug === r.slug)).map((r) => `- ${r.slug} [${r.status}] branch "${r.branch}" — ${r.summary}`).join("\n") || "(none)",
-              ``,
-              `Rules:`,
-              `- Only merge branches whose status is "success". Skip "partial"/"failed" and list them in \`skipped\`.`,
-              `- Merge each onto LOCAL main with a fast-forward or a clean merge commit; resolve trivial ticket-file conflicts by unioning the checkbox/disposition edits.`,
-              `- After merging, run \`pnpm typecheck\` and \`pnpm lint\` at the repo root and fix any trivial merge fallout before finishing. STAY SCOPED — do not chase unrelated failures.`,
-              `- Report \`merged\` (slugs landed on local main), \`skipped\` (slugs left behind + why), and a short \`summary\`. Do NOT push.`,
-            ].join("\n")}
-          </Task>
+            {/* 3. MERGE — land only the green+approved branches onto LOCAL main. NEVER push. */}
+            <Task id="merge" output={outputs.merge} agent={agents.implement}>
+              {[
+                `Merge the completed burndown branches from this batch into LOCAL \`main\` only.`,
+                ``,
+                `🚫 ABSOLUTE PUSH BAN: NEVER run \`git push\`, \`git push --force\`, or anything that writes to origin/remote. Pushing to shared \`main\` is forbidden and corrupts everyone's tree. A human pushes out-of-band after reviewing; your job ends at the local merge.`,
+                ``,
+                `Batch results:`,
+                ticketResults
+                  .filter((r) => items.some((item) => item.slug === r.slug))
+                  .map((r) => `- ${r.slug} [${r.status}] branch "${r.branch}" — ${r.summary}`)
+                  .join("\n") || "(none)",
+                ``,
+                `Rules:`,
+                `- Only merge branches whose status is "success". Skip "partial"/"failed" and list them in \`skipped\`.`,
+                `- Merge each onto LOCAL main with a fast-forward or a clean merge commit; resolve trivial ticket-file conflicts by unioning the checkbox/disposition edits.`,
+                `- After merging, run \`pnpm typecheck\` and \`pnpm lint\` at the repo root and fix any trivial merge fallout before finishing. STAY SCOPED — do not chase unrelated failures.`,
+                `- Report \`merged\` (slugs landed on local main), \`skipped\` (slugs left behind + why), and a short \`summary\`. Do NOT push.`,
+              ].join("\n")}
+            </Task>
 
-          {/* 4. COMPLETENESS ORACLE — the authoritative proof. Re-count open items and
+            {/* 4. COMPLETENESS ORACLE — the authoritative proof. Re-count open items and
               run the REAL full gate on the real main checkout. This is what makes
               "done" provable and observable; agents cannot fake the exit codes. */}
-          <Task id="oracle" output={outputs.completeness}>
-            {async () => {
-              const { spawnSync } = await import("node:child_process");
-              const openBefore = batch?.openCount ?? 0;
-              const remaining = discoverActionableItems(ticketPrefixes);
-              const openAfter = remaining.length;
-              const git = process.platform === "win32" ? "git.exe" : "git";
-              const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-              const run = (command: string, args: string[]) => {
-                const res = spawnSync(command, args, {
-                  cwd: process.cwd(),
-                  encoding: "utf8",
-                  timeout: 1_800_000,
-                  maxBuffer: 64 * 1024 * 1024,
-                  env: process.env,
-                });
-                const combined = `${res.stdout ?? ""}\n${res.stderr ?? ""}`.trim();
-                return { code: typeof res.status === "number" ? res.status : null, out: combined };
-              };
-              // ── PUSH FENCE ── the workflow never pushes, so any origin movement
-              // or any burndown/* branch on origin means an agent pushed. Detect + halt.
-              run(git, ["fetch", "-q", "origin", "main"]);
-              const remoteBurndown = run(git, ["ls-remote", "--heads", "origin", "burndown/*"]).out.trim();
-              const currentOriginSha = run(git, ["rev-parse", "origin/main"]).out.trim();
-              const originMoved = baselineSha.length > 0 && currentOriginSha.length > 0 && currentOriginSha !== baselineSha;
-              const roguePushDetected = remoteBurndown.length > 0 || originMoved;
-              const roguePushDetail = roguePushDetected
-                ? [
-                    remoteBurndown.length > 0 ? `burndown/* branch(es) pushed to origin:\n${remoteBurndown}` : "",
-                    originMoved ? `origin/main moved off baseline ${baselineSha.slice(0, 10)} → ${currentOriginSha.slice(0, 10)} (the workflow never pushes — an agent or a human did)` : "",
-                  ].filter(Boolean).join("\n")
-                : "";
-              let typecheckGreen = true;
-              let testGreen = true;
-              let tail = "";
-              if (runFullGate) {
-                const tc = run(pnpm, ["typecheck"]);
-                typecheckGreen = tc.code === 0;
-                tail += `\n=== pnpm typecheck (exit ${tc.code}) ===\n${tc.out.slice(-4000)}`;
-                if (typecheckGreen) {
-                  const t = run(pnpm, ["test"]);
-                  testGreen = t.code === 0;
-                  tail += `\n=== pnpm test (exit ${t.code}) ===\n${t.out.slice(-6000)}`;
-                } else {
-                  testGreen = false;
-                  tail += `\n=== pnpm test SKIPPED (typecheck red) ===`;
+            <Task id="oracle" output={outputs.completeness}>
+              {async () => {
+                const { spawnSync } = await import("node:child_process");
+                const openBefore = batch?.openCount ?? 0;
+                const remaining = discoverActionableItems(ticketPrefixes);
+                const openAfter = remaining.length;
+                const git = process.platform === "win32" ? "git.exe" : "git";
+                const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+                const run = (command: string, args: string[]) => {
+                  const res = spawnSync(command, args, {
+                    cwd: process.cwd(),
+                    encoding: "utf8",
+                    timeout: 1_800_000,
+                    maxBuffer: 64 * 1024 * 1024,
+                    env: process.env,
+                  });
+                  const combined = `${res.stdout ?? ""}\n${res.stderr ?? ""}`.trim();
+                  return { code: typeof res.status === "number" ? res.status : null, out: combined };
+                };
+                // ── PUSH FENCE ── the workflow never pushes, so any origin movement
+                // or any burndown/* branch on origin means an agent pushed. Detect + halt.
+                run(git, ["fetch", "-q", "origin", "main"]);
+                const remoteBurndown = run(git, ["ls-remote", "--heads", "origin", "burndown/*"]).out.trim();
+                const currentOriginSha = run(git, ["rev-parse", "origin/main"]).out.trim();
+                const originMoved =
+                  baselineSha.length > 0 && currentOriginSha.length > 0 && currentOriginSha !== baselineSha;
+                const roguePushDetected = remoteBurndown.length > 0 || originMoved;
+                const roguePushDetail = roguePushDetected
+                  ? [
+                      remoteBurndown.length > 0 ? `burndown/* branch(es) pushed to origin:\n${remoteBurndown}` : "",
+                      originMoved
+                        ? `origin/main moved off baseline ${baselineSha.slice(0, 10)} → ${currentOriginSha.slice(0, 10)} (the workflow never pushes — an agent or a human did)`
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join("\n")
+                  : "";
+                let typecheckGreen = true;
+                let testGreen = true;
+                let tail = "";
+                if (runFullGate) {
+                  const tc = run(pnpm, ["typecheck"]);
+                  typecheckGreen = tc.code === 0;
+                  tail += `\n=== pnpm typecheck (exit ${tc.code}) ===\n${tc.out.slice(-4000)}`;
+                  if (typecheckGreen) {
+                    const t = run(pnpm, ["test"]);
+                    testGreen = t.code === 0;
+                    tail += `\n=== pnpm test (exit ${t.code}) ===\n${t.out.slice(-6000)}`;
+                  } else {
+                    testGreen = false;
+                    tail += `\n=== pnpm test SKIPPED (typecheck red) ===`;
+                  }
                 }
-              }
-              const mainGateGreen = runFullGate ? typecheckGreen && testGreen : true;
-              return {
-                openCountBefore: openBefore,
-                openCountAfter: openAfter,
-                closedThisBatch: Math.max(0, openBefore - openAfter),
-                mainTypecheckGreen: typecheckGreen,
-                mainTestGreen: testGreen,
-                mainGateGreen,
-                ranFullGate: runFullGate,
-                roguePushDetected,
-                roguePushDetail,
-                summary: `open ${openBefore}→${openAfter} (closed ${Math.max(0, openBefore - openAfter)}); main gate ${mainGateGreen ? "GREEN" : "RED"}${runFullGate ? "" : " (full gate skipped)"}${roguePushDetected ? "; ⚠️ ROGUE PUSH DETECTED" : ""}`,
-                output: (roguePushDetail ? `=== PUSH FENCE ===\n${roguePushDetail}\n` : "") + tail.slice(-12000),
-              };
-            }}
-          </Task>
+                const mainGateGreen = runFullGate ? typecheckGreen && testGreen : true;
+                return {
+                  openCountBefore: openBefore,
+                  openCountAfter: openAfter,
+                  closedThisBatch: Math.max(0, openBefore - openAfter),
+                  mainTypecheckGreen: typecheckGreen,
+                  mainTestGreen: testGreen,
+                  mainGateGreen,
+                  ranFullGate: runFullGate,
+                  roguePushDetected,
+                  roguePushDetail,
+                  summary: `open ${openBefore}→${openAfter} (closed ${Math.max(0, openBefore - openAfter)}); main gate ${mainGateGreen ? "GREEN" : "RED"}${runFullGate ? "" : " (full gate skipped)"}${roguePushDetected ? "; ⚠️ ROGUE PUSH DETECTED" : ""}`,
+                  output: (roguePushDetail ? `=== PUSH FENCE ===\n${roguePushDetail}\n` : "") + tail.slice(-12000),
+                };
+              }}
+            </Task>
 
-          {/* 5. SAFETY — halt for a human if the batch turned main RED *or* the push
+            {/* 5. SAFETY — halt for a human if the batch turned main RED *or* the push
               fence detected a rogue push. Never grind on a broken base; never let an
               agent push to shared origin go unnoticed. */}
-          {oracleHalt ? (
-            <Approval
-              id="oracle-fix"
-              output={outputs.approval}
-              request={{
-                title: roguePush
-                  ? `Audit burndown PUSH FENCE tripped — an agent pushed to origin`
-                  : `Audit burndown turned main RED after the last batch`,
-                summary: [
-                  roguePush
-                    ? `🚨 The push fence detected a write to origin. The workflow never pushes, so an agent (or a human) moved the remote. Investigate and reconcile origin before continuing.`
-                    : `The completeness oracle ran the full gate on main and it FAILED.`,
-                  oracle?.summary ?? "",
-                  ``,
-                  `APPROVE once you have reconciled origin / fixed main back to green to continue the burndown,`,
-                  `or DENY to stop the run for manual takeover.`,
-                  ``,
-                  `--- oracle / fence output (tail) ---`,
-                  (oracle?.output ?? "").slice(-4000),
-                ].join("\n"),
-                metadata: { openCountAfter: oracle?.openCountAfter ?? null, roguePush },
-              }}
-              onDeny="fail"
-            />
-          ) : null}
-        </Sequence>
-      </Loop>
+            {oracleHalt ? (
+              <Approval
+                id="oracle-fix"
+                output={outputs.approval}
+                request={{
+                  title: roguePush
+                    ? `Audit burndown PUSH FENCE tripped — an agent pushed to origin`
+                    : `Audit burndown turned main RED after the last batch`,
+                  summary: [
+                    roguePush
+                      ? `🚨 The push fence detected a write to origin. The workflow never pushes, so an agent (or a human) moved the remote. Investigate and reconcile origin before continuing.`
+                      : `The completeness oracle ran the full gate on main and it FAILED.`,
+                    oracle?.summary ?? "",
+                    ``,
+                    `APPROVE once you have reconciled origin / fixed main back to green to continue the burndown,`,
+                    `or DENY to stop the run for manual takeover.`,
+                    ``,
+                    `--- oracle / fence output (tail) ---`,
+                    (oracle?.output ?? "").slice(-4000),
+                  ].join("\n"),
+                  metadata: { openCountAfter: oracle?.openCountAfter ?? null, roguePush },
+                }}
+                onDeny="fail"
+              />
+            ) : null}
+          </Sequence>
+        </Loop>
       </Sequence>
     </Workflow>
   );

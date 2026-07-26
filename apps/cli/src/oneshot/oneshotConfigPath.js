@@ -3,5 +3,5 @@ import { accountsRoot } from "@smithers-orchestrator/accounts";
 
 /** @param {NodeJS.ProcessEnv} [env] */
 export function oneshotConfigPath(env = process.env) {
-    return join(accountsRoot(env), "config.json");
+  return join(accountsRoot(env), "config.json");
 }

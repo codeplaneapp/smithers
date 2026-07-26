@@ -12,7 +12,7 @@ export const SMITHERS_WORKFLOW_VIEW_KIND = Symbol.for("smithers.workflow.view.ki
  * @returns {null}
  */
 export function UI(_props) {
-    return null;
+  return null;
 }
 
 /**
@@ -24,17 +24,17 @@ export function UI(_props) {
  * @returns {null}
  */
 export function TUI(_props) {
-    return null;
+  return null;
 }
 
 Object.defineProperty(UI, SMITHERS_WORKFLOW_VIEW_KIND, {
-    value: "ui",
-    enumerable: false,
+  value: "ui",
+  enumerable: false,
 });
 
 Object.defineProperty(TUI, SMITHERS_WORKFLOW_VIEW_KIND, {
-    value: "tui",
-    enumerable: false,
+  value: "tui",
+  enumerable: false,
 });
 
 // Keep React referenced for JSX-era type inference in JS consumers that import

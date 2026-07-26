@@ -516,9 +516,7 @@ export function buildResults(parsed: ParsedQuery, inputs: ResultInputs): Palette
     .filter((workspace) => contains(workspace.name, searchText))
     .map(workspaceItem);
 
-  const commandRows = inputs.commands
-    .filter((command) => contains(command.title, searchText))
-    .map(commandItem);
+  const commandRows = inputs.commands.filter((command) => contains(command.title, searchText)).map(commandItem);
 
   return [...fileRows, ...workspaceRows, ...commandRows].slice(0, WIDE_LIMIT);
 }

@@ -6,10 +6,10 @@ import { detectAvailableAgents } from "../agent-detection.js";
 
 /** Human hint for an agent's detection status shown next to its select option. */
 const STATUS_HINTS = {
-    "likely-subscription": "subscription detected",
-    "api-key": "API key detected",
-    "binary-only": "installed, not logged in",
-    unavailable: "not detected",
+  "likely-subscription": "subscription detected",
+  "api-key": "API key detected",
+  "binary-only": "installed, not logged in",
+  unavailable: "not detected",
 };
 
 /**
@@ -20,14 +20,14 @@ const STATUS_HINTS = {
  * @returns {Array<{ value: string; label: string; hint?: string }>}
  */
 export function buildPreferredAgentOptions(detections) {
-    return detections
-        .filter((agent) => !agent.deprecated && agent.usable)
-        .sort((left, right) => right.score - left.score)
-        .map((agent) => ({
-            value: agent.id,
-            label: agent.displayName,
-            hint: STATUS_HINTS[agent.status] ?? undefined,
-        }));
+  return detections
+    .filter((agent) => !agent.deprecated && agent.usable)
+    .sort((left, right) => right.score - left.score)
+    .map((agent) => ({
+      value: agent.id,
+      label: agent.displayName,
+      hint: STATUS_HINTS[agent.status] ?? undefined,
+    }));
 }
 
 /**
@@ -45,30 +45,32 @@ export function buildPreferredAgentOptions(detections) {
  * @returns {Promise<{ detection: AgentAvailability; source: "flag" | "auto" | "selected" } | null | "cancelled">}
  */
 export async function selectPreferredAgent(opts = {}) {
-    const env = opts.env ?? process.env;
-    const detections = opts.detections ?? detectAvailableAgents(env);
-    if (opts.preselect) {
-        const detection = detections.find((agent) => agent.id === opts.preselect);
-        if (!detection) {
-            const known = detections.map((agent) => agent.id).join(", ");
-            throw new Error(`Unknown agent "${opts.preselect}". Known agents: ${known}`);
-        }
-        if (!detection.usable) {
-            log.warn(`${detection.displayName} was requested via --agent but looks unavailable (${detection.unusableReasons[0] ?? "not detected"}). Continuing anyway.`);
-        }
-        return { detection, source: "flag" };
+  const env = opts.env ?? process.env;
+  const detections = opts.detections ?? detectAvailableAgents(env);
+  if (opts.preselect) {
+    const detection = detections.find((agent) => agent.id === opts.preselect);
+    if (!detection) {
+      const known = detections.map((agent) => agent.id).join(", ");
+      throw new Error(`Unknown agent "${opts.preselect}". Known agents: ${known}`);
     }
-    const options = buildPreferredAgentOptions(detections);
-    if (options.length === 0) return null;
-    if (options.length === 1) {
-        const detection = detections.find((agent) => agent.id === options[0].value);
-        return detection ? { detection, source: "auto" } : null;
+    if (!detection.usable) {
+      log.warn(
+        `${detection.displayName} was requested via --agent but looks unavailable (${detection.unusableReasons[0] ?? "not detected"}). Continuing anyway.`,
+      );
     }
-    const picked = await select({
-        message: `Which coding agent do you want to use with Smithers? ${pc.dim("(it gets the smithers plugin/skill and hosts your tutorial)")}`,
-        options,
-    });
-    if (isCancel(picked)) return "cancelled";
-    const detection = detections.find((agent) => agent.id === picked);
-    return detection ? { detection, source: "selected" } : null;
+    return { detection, source: "flag" };
+  }
+  const options = buildPreferredAgentOptions(detections);
+  if (options.length === 0) return null;
+  if (options.length === 1) {
+    const detection = detections.find((agent) => agent.id === options[0].value);
+    return detection ? { detection, source: "auto" } : null;
+  }
+  const picked = await select({
+    message: `Which coding agent do you want to use with Smithers? ${pc.dim("(it gets the smithers plugin/skill and hosts your tutorial)")}`,
+    options,
+  });
+  if (isCancel(picked)) return "cancelled";
+  const detection = detections.find((agent) => agent.id === picked);
+  return detection ? { detection, source: "selected" } : null;
 }

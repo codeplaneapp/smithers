@@ -158,12 +158,7 @@ export function scoreTone(score: number): "score-ok" | "score-warn" | "score-dan
  * clock or Math.random. `facts` is always passed in (the live store set); there
  * is no seed default.
  */
-export function recall(
-  query: string,
-  facts: MemoryFact[],
-  namespace: string | null = null,
-  topK = 10,
-): RecallResult[] {
+export function recall(query: string, facts: MemoryFact[], namespace: string | null = null, topK = 10): RecallResult[] {
   const scoped = factsInNamespace(facts, namespace);
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   const limit = normalizedRecallTopK(topK);

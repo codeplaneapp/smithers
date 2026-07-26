@@ -10,10 +10,7 @@ import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { Gateway } from "../src/gateway.js";
 
 function makeDbPath(name: string) {
-  return join(
-    tmpdir(),
-    `smithers-jump-auth-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
-  );
+  return join(tmpdir(), `smithers-jump-auth-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
 function createConnectionContext(userId: string | null, role = "operator") {
@@ -76,11 +73,7 @@ describe("jumpToFrame auth", () => {
       React.createElement(
         api.Workflow,
         { name: "jump-auth" },
-        React.createElement(
-          api.Task,
-          { id: "task:a", output: api.outputs.output },
-          { value: 1 },
-        ),
+        React.createElement(api.Task, { id: "task:a", output: api.outputs.output }, { value: 1 }),
       ),
     );
 
@@ -115,29 +108,26 @@ describe("jumpToFrame auth", () => {
       note: "frame-0",
     });
 
-    const notOwner = await request(
-      gateway,
-      createConnectionContext("user:not-owner", "operator"),
-      "jumpToFrame",
-      { runId, frameNo: 0, confirm: true },
-    );
+    const notOwner = await request(gateway, createConnectionContext("user:not-owner", "operator"), "jumpToFrame", {
+      runId,
+      frameNo: 0,
+      confirm: true,
+    });
     expect(notOwner.ok).toBe(false);
     expect(notOwner.error.code).toBe("Unauthorized");
 
-    const owner = await request(
-      gateway,
-      createConnectionContext("user:owner", "operator"),
-      "jumpToFrame",
-      { runId, frameNo: 0, confirm: true },
-    );
+    const owner = await request(gateway, createConnectionContext("user:owner", "operator"), "jumpToFrame", {
+      runId,
+      frameNo: 0,
+      confirm: true,
+    });
     expect(owner.ok).toBe(true);
 
-    const admin = await request(
-      gateway,
-      createConnectionContext("user:admin", "admin"),
-      "jumpToFrame",
-      { runId, frameNo: 0, confirm: true },
-    );
+    const admin = await request(gateway, createConnectionContext("user:admin", "admin"), "jumpToFrame", {
+      runId,
+      frameNo: 0,
+      confirm: true,
+    });
     expect(admin.ok).toBe(true);
   });
 
@@ -156,11 +146,7 @@ describe("jumpToFrame auth", () => {
       React.createElement(
         api.Workflow,
         { name: "jump-auth-legacy" },
-        React.createElement(
-          api.Task,
-          { id: "task:a", output: api.outputs.output },
-          { value: 1 },
-        ),
+        React.createElement(api.Task, { id: "task:a", output: api.outputs.output }, { value: 1 }),
       ),
     );
 
@@ -188,21 +174,19 @@ describe("jumpToFrame auth", () => {
       note: "frame-0",
     });
 
-    const operator = await request(
-      gateway,
-      createConnectionContext("user:any", "operator"),
-      "jumpToFrame",
-      { runId, frameNo: 0, confirm: true },
-    );
+    const operator = await request(gateway, createConnectionContext("user:any", "operator"), "jumpToFrame", {
+      runId,
+      frameNo: 0,
+      confirm: true,
+    });
     expect(operator.ok).toBe(false);
     expect(operator.error.code).toBe("Unauthorized");
 
-    const admin = await request(
-      gateway,
-      createConnectionContext("user:any", "admin"),
-      "jumpToFrame",
-      { runId, frameNo: 0, confirm: true },
-    );
+    const admin = await request(gateway, createConnectionContext("user:any", "admin"), "jumpToFrame", {
+      runId,
+      frameNo: 0,
+      confirm: true,
+    });
     expect(admin.ok).toBe(true);
   });
 
@@ -210,19 +194,12 @@ describe("jumpToFrame auth", () => {
     const dbPath = makeDbPath("mid-exec");
     dbPaths.push(dbPath);
 
-    const api = createSmithers(
-      { output: z.object({ value: z.number() }) },
-      { dbPath },
-    );
+    const api = createSmithers({ output: z.object({ value: z.number() }) }, { dbPath });
     const workflow = api.smithers(() =>
       React.createElement(
         api.Workflow,
         { name: "jump-midexec" },
-        React.createElement(
-          api.Task,
-          { id: "task:a", output: api.outputs.output },
-          { value: 1 },
-        ),
+        React.createElement(api.Task, { id: "task:a", output: api.outputs.output }, { value: 1 }),
       ),
     );
     gateway = new Gateway();
@@ -263,9 +240,11 @@ describe("jumpToFrame auth", () => {
     // Simulate a zombie activeRun: the abort controller never leads to
     // activeRuns.delete. The gateway must surface this as `RewindFailed`.
     const zombieAbort = new AbortController();
-    const activeRuns = (gateway as unknown as {
-      activeRuns: Map<string, { workflowKey: string; workflow: unknown; abort: AbortController; input: unknown }>;
-    }).activeRuns;
+    const activeRuns = (
+      gateway as unknown as {
+        activeRuns: Map<string, { workflowKey: string; workflow: unknown; abort: AbortController; input: unknown }>;
+      }
+    ).activeRuns;
     activeRuns.set(runId, {
       workflowKey: "jump-midexec",
       workflow,
@@ -276,12 +255,11 @@ describe("jumpToFrame auth", () => {
     expect(activeRuns.has(runId)).toBe(true);
 
     const started = Date.now();
-    const response = await request(
-      gateway,
-      createConnectionContext("user:owner", "operator"),
-      "jumpToFrame",
-      { runId, frameNo: 0, confirm: true },
-    );
+    const response = await request(gateway, createConnectionContext("user:owner", "operator"), "jumpToFrame", {
+      runId,
+      frameNo: 0,
+      confirm: true,
+    });
     const elapsed = Date.now() - started;
     expect(response.ok).toBe(false);
     expect(response.error.code).toBe("RewindFailed");
@@ -289,8 +267,10 @@ describe("jumpToFrame auth", () => {
     expect(elapsed).toBeGreaterThanOrEqual(9_500);
 
     // Clean up so afterEach closes cleanly.
-    (gateway as unknown as {
-      activeRuns: Map<string, unknown>;
-    }).activeRuns.delete(runId);
+    (
+      gateway as unknown as {
+        activeRuns: Map<string, unknown>;
+      }
+    ).activeRuns.delete(runId);
   }, 30_000);
 });

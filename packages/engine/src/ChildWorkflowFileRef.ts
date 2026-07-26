@@ -9,14 +9,14 @@
  * component in `@smithers-orchestrator/components`.
  */
 export type ChildWorkflowFileRef = {
-	/**
-	 * Path to the workflow module. Relative paths resolve against the approved
-	 * root.
-	 */
-	path: string;
-	/**
-	 * Directory the workflow file must stay within. Defaults to the parent
-	 * run's `rootDir`.
-	 */
-	approvedRoot?: string;
+  /**
+   * Path to the workflow module. Relative paths resolve against the approved
+   * root.
+   */
+  path: string;
+  /**
+   * Directory the workflow file must stay within. Defaults to the parent
+   * run's `rootDir`.
+   */
+  approvedRoot?: string;
 };

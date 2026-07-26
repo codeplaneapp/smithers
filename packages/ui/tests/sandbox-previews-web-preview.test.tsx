@@ -57,13 +57,17 @@ describe("WebPreview", () => {
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-forms");
     expect(frame.getAttribute("title")).toBe("Web preview");
     expect(container!.querySelector('[data-slot="web-preview-toolbar"]')?.getAttribute("role")).toBe("toolbar");
-    expect(container!.querySelector<HTMLInputElement>('[data-slot="web-preview-address"] input')?.getAttribute("aria-label")).toBe("Preview address");
+    expect(
+      container!.querySelector<HTMLInputElement>('[data-slot="web-preview-address"] input')?.getAttribute("aria-label"),
+    ).toBe("Preview address");
   });
 
   test("no url renders an honest empty state, never a fabricated preview", async () => {
     await render(<WebPreview />);
     expect(container!.querySelector("iframe")).toBeNull();
-    expect(container!.querySelector('[data-slot="web-preview-content"]')?.textContent).toContain("No preview available");
+    expect(container!.querySelector('[data-slot="web-preview-content"]')?.textContent).toContain(
+      "No preview available",
+    );
   });
 
   test("address bar commits valid http(s) URLs via onUrlChange (controlled)", async () => {
@@ -165,12 +169,7 @@ describe("WebPreview", () => {
     await render(
       <WebPreview url="https://example.com">
         <WebPreviewToolbar onBack={() => {}} onForward={() => {}}>
-          <span
-            className="sui-webpreview-toolbar-button"
-            contentEditable
-            role="button"
-            suppressContentEditableWarning
-          >
+          <span className="sui-webpreview-toolbar-button" contentEditable role="button" suppressContentEditableWarning>
             Editable toolbar control
           </span>
           <WebPreviewAddress />
@@ -204,7 +203,10 @@ describe("WebPreview", () => {
     const warn = spyOn(console, "warn").mockImplementation(() => {});
     try {
       await render(
-        <WebPreviewContent src="https://example.com" sandboxAllow={["allow-scripts", "allow-same-origin", "allow-forms"]} />,
+        <WebPreviewContent
+          src="https://example.com"
+          sandboxAllow={["allow-scripts", "allow-same-origin", "allow-forms"]}
+        />,
       );
       const frame = container!.querySelector("iframe")!;
       expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-forms");
@@ -292,7 +294,10 @@ describe("WebPreview", () => {
   test("unknown tokens fail closed and are dropped with a warning", async () => {
     const warn = spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const tokens = ["allow-scripts", "allow-top-navigation-by-user-activation"] as unknown as WebPreviewSandboxToken[];
+      const tokens = [
+        "allow-scripts",
+        "allow-top-navigation-by-user-activation",
+      ] as unknown as WebPreviewSandboxToken[];
       await render(<WebPreviewContent src="https://example.com" sandboxAllow={tokens} />);
       expect(container!.querySelector("iframe")?.getAttribute("sandbox")).toBe("allow-scripts");
       expect(warn).toHaveBeenCalledTimes(1);
@@ -311,7 +316,9 @@ describe("WebPreview", () => {
     expect(src).toBe("/" + String.fromCharCode(92) + "evil.com");
     await render(<WebPreviewContent src={src} />);
     expect(container!.querySelector("iframe")).toBeNull();
-    expect(container!.querySelector('[data-slot="web-preview-content"]')?.textContent).toContain("No preview available");
+    expect(container!.querySelector('[data-slot="web-preview-content"]')?.textContent).toContain(
+      "No preview available",
+    );
   });
 
   test("refuses a double-backslash network-path src (/\\\\evil.com) as same-origin", async () => {
@@ -319,7 +326,9 @@ describe("WebPreview", () => {
     expect(src).toBe("/" + String.fromCharCode(92) + String.fromCharCode(92) + "evil.com");
     await render(<WebPreviewContent src={src} />);
     expect(container!.querySelector("iframe")).toBeNull();
-    expect(container!.querySelector('[data-slot="web-preview-content"]')?.textContent).toContain("No preview available");
+    expect(container!.querySelector('[data-slot="web-preview-content"]')?.textContent).toContain(
+      "No preview available",
+    );
   });
 
   test("refuses a protocol-relative src (//evil.com) as same-origin", async () => {
@@ -336,9 +345,7 @@ describe("WebPreview", () => {
     const smuggled = {
       sandbox: "allow-scripts allow-same-origin",
     } as unknown as Record<string, string>;
-    await render(
-      <WebPreviewContent src="https://example.com" sandboxAllow={["allow-scripts"]} {...smuggled} />,
-    );
+    await render(<WebPreviewContent src="https://example.com" sandboxAllow={["allow-scripts"]} {...smuggled} />);
     const frame = container!.querySelector("iframe")!;
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
     expect(frame.getAttribute("src")).toBe("https://example.com");

@@ -12,11 +12,11 @@ import { loadSpecSync, extractOperations } from "../spec-parser.js";
  * @returns {Array<{ operationId: string; method: string; path: string; summary: string }>}
  */
 export function listOperations(input) {
-    const spec = loadSpecSync(input);
-    return extractOperations(spec).map((op) => ({
-        operationId: op.operationId,
-        method: op.method.toUpperCase(),
-        path: op.path,
-        summary: op.summary,
-    }));
+  const spec = loadSpecSync(input);
+  return extractOperations(spec).map((op) => ({
+    operationId: op.operationId,
+    method: op.method.toUpperCase(),
+    path: op.path,
+    summary: op.summary,
+  }));
 }

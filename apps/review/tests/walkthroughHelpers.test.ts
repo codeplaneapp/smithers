@@ -23,9 +23,7 @@ describe("escapeHtml", () => {
   });
 
   test("escapes ampersands before other entities (no double-escaping)", () => {
-    expect(escapeHtml("<a href=\"x\">&'</a>")).toBe(
-      "&lt;a href=&quot;x&quot;&gt;&amp;&#39;&lt;/a&gt;",
-    );
+    expect(escapeHtml('<a href="x">&\'</a>')).toBe("&lt;a href=&quot;x&quot;&gt;&amp;&#39;&lt;/a&gt;");
   });
 
   test("leaves plain text and empty strings untouched", () => {
@@ -74,10 +72,26 @@ describe("classifyChangeRole", () => {
 describe("describeChange", () => {
   test("renders status with signed insertion/deletion counts", () => {
     expect(
-      describeChange({ path: "a.ts", status: "added", insertions: 12, deletions: 0, diff: "", reviewed: false, excludeReason: "" }),
+      describeChange({
+        path: "a.ts",
+        status: "added",
+        insertions: 12,
+        deletions: 0,
+        diff: "",
+        reviewed: false,
+        excludeReason: "",
+      }),
     ).toBe("added (+12 −0)");
     expect(
-      describeChange({ path: "b.ts", status: "modified", insertions: 3, deletions: 7, diff: "", reviewed: false, excludeReason: "" }),
+      describeChange({
+        path: "b.ts",
+        status: "modified",
+        insertions: 3,
+        deletions: 7,
+        diff: "",
+        reviewed: false,
+        excludeReason: "",
+      }),
     ).toBe("modified (+3 −7)");
   });
 });

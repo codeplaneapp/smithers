@@ -184,13 +184,17 @@ describe("resolveSmithersBackendChoice — postgres + marker edge cases", () => 
     // Receipt says the workspace migrated TO pglite, but a populated Postgres
     // store (neither the target nor sqlite) also exists — choosing pglite would
     // hide those Postgres runs, so the resolver must fail the conflict guard.
-    writeFileSync(join(cwd, ".smithers", "migrated.json"), JSON.stringify({ migratedAt: 1, target: { backend: "pglite" } }));
+    writeFileSync(
+      join(cwd, ".smithers", "migrated.json"),
+      JSON.stringify({ migratedAt: 1, target: { backend: "pglite" } }),
+    );
     const connection = {
       async query(sql) {
         const text = typeof sql === "string" ? sql : sql.text;
         if (text.includes("to_regclass('_smithers_runs')")) return { rows: [{ table_name: "_smithers_runs" }] };
         if (text.includes("COUNT(*)::int AS count FROM _smithers_runs")) return { rows: [{ count: 5 }] };
-        if (text.includes("to_regclass('_smithers_schema_migrations')")) return { rows: [{ table_name: "_smithers_schema_migrations" }] };
+        if (text.includes("to_regclass('_smithers_schema_migrations')"))
+          return { rows: [{ table_name: "_smithers_schema_migrations" }] };
         if (text.includes("SELECT id FROM _smithers_schema_migrations")) return { rows: [{ id: "0018_head" }] };
         return { rows: [] };
       },
@@ -254,9 +258,9 @@ describe("openSmithersBackend — postgres branch", () => {
 describe("openSmithersStore — read/write and postgres paths", () => {
   test("sqlite read on a missing store fails not-found (no store on disk)", async () => {
     const cwd = makeWorkspace("open-store-sqlite-missing");
-    await expect(
-      openSmithersStore({ cwd, mode: "read", env: {}, wait: { timeoutMs: 0 } }),
-    ).rejects.toMatchObject({ code: "CLI_DB_NOT_FOUND" });
+    await expect(openSmithersStore({ cwd, mode: "read", env: {}, wait: { timeoutMs: 0 } })).rejects.toMatchObject({
+      code: "CLI_DB_NOT_FOUND",
+    });
   });
 
   test("sqlite read on a corrupt store reports no run history", async () => {
@@ -264,9 +268,9 @@ describe("openSmithersStore — read/write and postgres paths", () => {
     // A file exists (so the existence gate passes) but is not a valid SQLite
     // database: the run-table probe swallows the error and reports not-found.
     writeFileSync(join(cwd, "smithers.db"), "this is not a sqlite database at all");
-    await expect(
-      openSmithersStore({ cwd, mode: "read", env: {}, wait: { timeoutMs: 0 } }),
-    ).rejects.toMatchObject({ code: "CLI_DB_NOT_FOUND" });
+    await expect(openSmithersStore({ cwd, mode: "read", env: {}, wait: { timeoutMs: 0 } })).rejects.toMatchObject({
+      code: "CLI_DB_NOT_FOUND",
+    });
   });
 
   test("a non-not-found error propagates immediately without retrying", async () => {

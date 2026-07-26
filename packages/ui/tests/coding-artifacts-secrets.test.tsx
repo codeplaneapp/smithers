@@ -76,8 +76,12 @@ describe("SecretField", () => {
 
   test("label extends the accessible names", async () => {
     await render(<SecretField value="x" label="API_KEY" onCopy={() => {}} />);
-    expect(container!.querySelector('[data-slot="secret-field-toggle"]')!.getAttribute("aria-label")).toBe("Reveal secret API_KEY");
-    expect(container!.querySelector('[data-slot="secret-field-copy"]')!.getAttribute("aria-label")).toBe("Copy secret API_KEY");
+    expect(container!.querySelector('[data-slot="secret-field-toggle"]')!.getAttribute("aria-label")).toBe(
+      "Reveal secret API_KEY",
+    );
+    expect(container!.querySelector('[data-slot="secret-field-copy"]')!.getAttribute("aria-label")).toBe(
+      "Copy secret API_KEY",
+    );
   });
 });
 

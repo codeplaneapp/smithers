@@ -22,11 +22,17 @@
  * @returns {Promise<void>}
  */
 export async function pruneWorkspaceDurability(opts) {
-    const { adapter, runId, config = {} } = opts;
-    const states = Math.max(1, config.stateRetentionPerRun ?? 50);
-    const checkpoints = Math.max(1, config.checkpointRetentionPerScope ?? 100);
-    try { await adapter.pruneWorkspaceCheckpoints(runId, checkpoints); }
-    catch { /* best-effort: prune failure never affects the run */ }
-    try { await adapter.pruneWorkspaceStates(runId, states); }
-    catch { /* best-effort */ }
+  const { adapter, runId, config = {} } = opts;
+  const states = Math.max(1, config.stateRetentionPerRun ?? 50);
+  const checkpoints = Math.max(1, config.checkpointRetentionPerScope ?? 100);
+  try {
+    await adapter.pruneWorkspaceCheckpoints(runId, checkpoints);
+  } catch {
+    /* best-effort: prune failure never affects the run */
+  }
+  try {
+    await adapter.pruneWorkspaceStates(runId, states);
+  } catch {
+    /* best-effort */
+  }
 }

@@ -29,7 +29,9 @@ const { Workflow, smithers, outputs } = createSmithers({
 });
 
 export default smithers((ctx) => {
-  const validate = ctx.latest("validate", "impl:validate") as { allPassed?: boolean; failingSummary?: string | null } | undefined;
+  const validate = ctx.latest("validate", "impl:validate") as
+    | { allPassed?: boolean; failingSummary?: string | null }
+    | undefined;
 
   // done = false until validate has actually run AND passed, AND the synthesized
   // review verdict approved.
@@ -38,8 +40,12 @@ export default smithers((ctx) => {
   const gate = reviewGate(ctx, "impl:review-moderator");
   const validateRounds = ctx.iterationCount("validate", "impl:validate");
   const reviewRounds = ctx.iterationCount("reviewSynthesis", "impl:review-moderator");
-  const latestRaw = (rows: unknown[] | undefined) => rows?.filter((row): row is Record<string, unknown> => Boolean(row)).at(-1);
-  const paired = validateRounds === reviewRounds && validateRounds > 0 && latestRaw(ctx.outputs.validate)?.iteration === latestRaw(ctx.outputs.reviewSynthesis)?.iteration;
+  const latestRaw = (rows: unknown[] | undefined) =>
+    rows?.filter((row): row is Record<string, unknown> => Boolean(row)).at(-1);
+  const paired =
+    validateRounds === reviewRounds &&
+    validateRounds > 0 &&
+    latestRaw(ctx.outputs.validate)?.iteration === latestRaw(ctx.outputs.reviewSynthesis)?.iteration;
   const done = paired && validationPassed && gate.approved;
 
   const feedbackParts: string[] = [];

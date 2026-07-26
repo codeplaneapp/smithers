@@ -5,9 +5,7 @@ import { describe, expect, test } from "bun:test";
 describe("Pi package manifest", () => {
   test("declares the published extension entry point", () => {
     const packageRoot = resolve(import.meta.dir, "..");
-    const manifest = JSON.parse(
-      readFileSync(resolve(packageRoot, "package.json"), "utf8"),
-    ) as {
+    const manifest = JSON.parse(readFileSync(resolve(packageRoot, "package.json"), "utf8")) as {
       files?: string[];
       pi?: { extensions?: string[] };
     };

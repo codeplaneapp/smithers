@@ -40,7 +40,12 @@ export const runConfigSchema = z.object({
 export type RunConfig = z.infer<typeof runConfigSchema>;
 
 const rssSourceSchema = z.object({ id: z.string(), url: z.string(), critical: z.boolean().default(false) });
-const githubReleasesSourceSchema = z.object({ id: z.string(), owner: z.string(), repo: z.string(), critical: z.boolean().default(false) });
+const githubReleasesSourceSchema = z.object({
+  id: z.string(),
+  owner: z.string(),
+  repo: z.string(),
+  critical: z.boolean().default(false),
+});
 const hnSourceSchema = z.object({ id: z.string(), query: z.string(), critical: z.boolean().default(false) });
 const lobstersSourceSchema = z.object({ id: z.string(), tag: z.string(), critical: z.boolean().default(false) });
 const redditSourceSchema = z.object({ id: z.string(), subreddit: z.string(), critical: z.boolean().default(false) });
@@ -100,7 +105,10 @@ export function allCriticalSourceIds(sources: SourcesConfig, configured: string[
 }
 
 export function resolvePoolName(name: string): boolean {
-  return Array.isArray((agents as Record<string, unknown>)[name]) && ((agents as Record<string, unknown[]>)[name]?.length ?? 0) > 0;
+  return (
+    Array.isArray((agents as Record<string, unknown>)[name]) &&
+    ((agents as Record<string, unknown[]>)[name]?.length ?? 0) > 0
+  );
 }
 
 export function detectCloudflareCreds(config: RunConfig): {
@@ -123,10 +131,17 @@ export function detectCloudflareCreds(config: RunConfig): {
   };
 }
 
-export function resolveCloudflareCreds(config: RunConfig): { accountId: string; apiToken: string; kvNamespaceId: string; r2Bucket: string } | null {
+export function resolveCloudflareCreds(
+  config: RunConfig,
+): { accountId: string; apiToken: string; kvNamespaceId: string; r2Bucket: string } | null {
   const creds = detectCloudflareCreds(config);
   if (!creds.present || !creds.accountId || !creds.apiToken || !creds.kvNamespaceId || !creds.r2Bucket) return null;
-  return { accountId: creds.accountId, apiToken: creds.apiToken, kvNamespaceId: creds.kvNamespaceId, r2Bucket: creds.r2Bucket };
+  return {
+    accountId: creds.accountId,
+    apiToken: creds.apiToken,
+    kvNamespaceId: creds.kvNamespaceId,
+    r2Bucket: creds.r2Bucket,
+  };
 }
 
 export function loadSources(configPath: string): SourcesConfig {
@@ -156,7 +171,10 @@ export type LoadedConfigState = {
   effectiveMode: "archive-only" | "publish";
 };
 
-export function loadConfigAndState(configPath: string, publishModeInput: "auto" | "archive-only" | "publish" | null): LoadedConfigState {
+export function loadConfigAndState(
+  configPath: string,
+  publishModeInput: "auto" | "archive-only" | "publish" | null,
+): LoadedConfigState {
   const config = loadRunConfig(configPath);
   const sources = loadSourcesConfig(config.sourcesPath);
   const sourceCount = countSources(sources);
@@ -164,8 +182,14 @@ export function loadConfigAndState(configPath: string, publishModeInput: "auto" 
   const criticalSourceIds = allCriticalSourceIds(sources, config.criticalSourceIds);
   const cheapPoolOk = resolvePoolName(config.cheapPoolName);
   const strongPoolOk = resolvePoolName(config.strongPoolName);
-  if (!cheapPoolOk) throw new Error(`cheapPoolName "${config.cheapPoolName}" does not resolve to a non-empty pool in .smithers/agents.ts`);
-  if (!strongPoolOk) throw new Error(`strongPoolName "${config.strongPoolName}" does not resolve to a non-empty pool in .smithers/agents.ts`);
+  if (!cheapPoolOk)
+    throw new Error(
+      `cheapPoolName "${config.cheapPoolName}" does not resolve to a non-empty pool in .smithers/agents.ts`,
+    );
+  if (!strongPoolOk)
+    throw new Error(
+      `strongPoolName "${config.strongPoolName}" does not resolve to a non-empty pool in .smithers/agents.ts`,
+    );
   const { schemaCreated } = openDb(config.dbPath);
   const creds = detectCloudflareCreds(config);
   const effectiveMode = resolveEffectiveMode(publishModeInput, creds.present);

@@ -21,7 +21,7 @@
  * @returns {number}
  */
 function num(value) {
-    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 /**
@@ -37,25 +37,25 @@ function num(value) {
  * @returns {BudgetTracker}
  */
 export function createBudgetTracker(opts) {
-    const runStartMs = num(opts?.runStartMs);
-    let tokens = 0;
-    return {
-        get tokens() {
-            return tokens;
-        },
-        /** @param {UsageLike} usage */
-        recordUsage(usage) {
-            if (!usage || typeof usage !== "object") {
-                return;
-            }
-            tokens += num(usage.inputTokens) + num(usage.outputTokens);
-        },
-        /** @param {number} nowMsValue */
-        snapshot(nowMsValue) {
-            return {
-                tokens,
-                elapsedMs: Math.max(0, num(nowMsValue) - runStartMs),
-            };
-        },
-    };
+  const runStartMs = num(opts?.runStartMs);
+  let tokens = 0;
+  return {
+    get tokens() {
+      return tokens;
+    },
+    /** @param {UsageLike} usage */
+    recordUsage(usage) {
+      if (!usage || typeof usage !== "object") {
+        return;
+      }
+      tokens += num(usage.inputTokens) + num(usage.outputTokens);
+    },
+    /** @param {number} nowMsValue */
+    snapshot(nowMsValue) {
+      return {
+        tokens,
+        elapsedMs: Math.max(0, num(nowMsValue) - runStartMs),
+      };
+    },
+  };
 }

@@ -81,19 +81,11 @@ export function NodeOutputView({ runId, nodeId, iteration, className, style }: N
   );
 }
 
-function NodeOutputViewInner({
-  runId,
-  nodeId,
-  iteration,
-  className,
-  style,
-}: NodeOutputViewProps) {
+function NodeOutputViewInner({ runId, nodeId, iteration, className, style }: NodeOutputViewProps) {
   const { data, loading, error } = useGatewayNodeOutput({ runId, nodeId, iteration });
   const { status, row } = unwrapNodeOutput(data);
   const waiting = loading && data == null;
-  const agentOutput = nodeId && !error && !waiting && status === "produced"
-    ? parseAgentOutput(row)
-    : null;
+  const agentOutput = nodeId && !error && !waiting && status === "produced" ? parseAgentOutput(row) : null;
   const fallback = !nodeId
     ? "Select a node to see its output."
     : error

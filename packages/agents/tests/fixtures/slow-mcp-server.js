@@ -20,10 +20,7 @@ export function createSlowMcpServer() {
     },
     async ({ ms }, extra) =>
       new Promise((resolve) => {
-        const timer = setTimeout(
-          () => resolve({ content: [{ type: "text", text: "slept" }] }),
-          ms,
-        );
+        const timer = setTimeout(() => resolve({ content: [{ type: "text", text: "slept" }] }), ms);
         extra.signal.addEventListener("abort", () => {
           clearTimeout(timer);
           process.stderr.write("sleep-cancelled\n");

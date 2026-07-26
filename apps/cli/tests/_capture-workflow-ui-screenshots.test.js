@@ -40,16 +40,16 @@ function resolveChromium() {
 }
 
 const CHROMIUM = resolveChromium();
-const captureTest =
-  process.env.SMITHERS_CAPTURE_WORKFLOW_UI_SCREENSHOTS === "1" && CHROMIUM
-    ? test
-    : test.skip;
+const captureTest = process.env.SMITHERS_CAPTURE_WORKFLOW_UI_SCREENSHOTS === "1" && CHROMIUM ? test : test.skip;
 
 function findOpenPort() {
   return new Promise((res, rej) => {
     const s = createServer();
     s.once("error", rej);
-    s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => res(port)); });
+    s.listen(0, "127.0.0.1", () => {
+      const { port } = s.address();
+      s.close(() => res(port));
+    });
   });
 }
 async function loadChromium() {
@@ -59,71 +59,95 @@ async function loadChromium() {
 async function waitForHealth(base, timeoutMs = 60_000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    try { if ((await fetch(`${base}/health`)).ok) return true; } catch {}
+    try {
+      if ((await fetch(`${base}/health`)).ok) return true;
+    } catch {}
     await new Promise((r) => setTimeout(r, 250));
   }
   return false;
 }
 
-captureTest("capture workflow UI screenshots", async () => {
-  mkdirSync(OUT_DIR, { recursive: true });
-  const binDir = createExecutableDir();
-  writeFakeClaudeBinary(binDir);
-  writeFakeCodexBinary(binDir);
-  writeFakeAntigravityBinary(binDir);
-  const repo = createTempRepo();
-  const env = {
-    HOME: repo.dir,
-    PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
-    ANTHROPIC_API_KEY: "", OPENAI_API_KEY: "sk-test-openai-key", GEMINI_API_KEY: "", GOOGLE_API_KEY: "",
-  };
-  repo.write(".claude/.credentials.json", "{}\n");
-  repo.write(".codex/auth.json", "{}\n");
-  repo.write(".gemini/antigravity-cli/settings.json", "{}\n");
-  if (runSmithers(["init"], { cwd: repo.dir, format: "json", env }).exitCode !== 0) throw new Error("init failed");
+captureTest(
+  "capture workflow UI screenshots",
+  async () => {
+    mkdirSync(OUT_DIR, { recursive: true });
+    const binDir = createExecutableDir();
+    writeFakeClaudeBinary(binDir);
+    writeFakeCodexBinary(binDir);
+    writeFakeAntigravityBinary(binDir);
+    const repo = createTempRepo();
+    const env = {
+      HOME: repo.dir,
+      PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
+      ANTHROPIC_API_KEY: "",
+      OPENAI_API_KEY: "sk-test-openai-key",
+      GEMINI_API_KEY: "",
+      GOOGLE_API_KEY: "",
+    };
+    repo.write(".claude/.credentials.json", "{}\n");
+    repo.write(".codex/auth.json", "{}\n");
+    repo.write(".gemini/antigravity-cli/settings.json", "{}\n");
+    if (runSmithers(["init"], { cwd: repo.dir, format: "json", env }).exitCode !== 0) throw new Error("init failed");
 
-  // Run every workflow that can complete with the stub so its UI shows real data.
-  // Best-effort: a non-completing run just yields an empty-state screenshot.
-  const runIdByKey = {};
-  for (const d of DESCRIPTORS) {
-    if (!d.verifyOutput) continue;
-    const r = runSmithers(["workflow", d.key, "--prompt", "Ship the new login flow"], { cwd: repo.dir, format: "json", env, timeoutMs: 180_000 });
-    if (r.exitCode === 0 && typeof r.json?.runId === "string") runIdByKey[d.key] = r.json.runId;
-  }
-
-  const port = await findOpenPort();
-  const base = `http://127.0.0.1:${port}`;
-  const gw = spawn(process.execPath, ["run", ".smithers/gateway.ts"], {
-    cwd: repo.dir, env: { ...process.env, ...env, PORT: String(port), HOST: "127.0.0.1" }, stdio: "ignore",
-  });
-  let browser;
-  try {
-    if (!(await waitForHealth(base))) throw new Error("gateway not healthy");
-    browser = await (await loadChromium()).launch({ headless: true });
-    const page = await browser.newPage();
-    await page.setViewportSize(VIEWPORT);
+    // Run every workflow that can complete with the stub so its UI shows real data.
+    // Best-effort: a non-completing run just yields an empty-state screenshot.
+    const runIdByKey = {};
     for (const d of DESCRIPTORS) {
-      const runId = runIdByKey[d.key];
-      const url = `${base}/workflows/${d.key}${runId ? `?runId=${runId}` : ""}`;
-      // A workflow UI holds a live Gateway WebSocket, so the network never goes
-      // idle — wait for the document, then for the UI's own ready selector.
-      await page.goto(url, { waitUntil: "domcontentloaded" });
-      try { await page.waitForSelector(`[data-testid="${d.primaryTestId}"]`, { timeout: 15_000 }); } catch {}
-      if (d.verifyOutput && d.populatedTestId) {
-        try { await page.waitForSelector(`[data-testid="${d.populatedTestId}"]`, { timeout: 10_000 }); } catch {}
-      }
-      await new Promise((r) => setTimeout(r, 400)); // settle fonts/layout
-      const file = resolve(OUT_DIR, `${d.key}.png`);
-      await page.screenshot({ path: file });
-      console.log(`  shot ${d.key}${runId ? " (run " + runId.slice(0, 8) + ")" : " (empty state)"} -> ${file}`);
+      if (!d.verifyOutput) continue;
+      const r = runSmithers(["workflow", d.key, "--prompt", "Ship the new login flow"], {
+        cwd: repo.dir,
+        format: "json",
+        env,
+        timeoutMs: 180_000,
+      });
+      if (r.exitCode === 0 && typeof r.json?.runId === "string") runIdByKey[d.key] = r.json.runId;
     }
-    // Also capture kanban (its own UI, not in descriptors).
-    await page.goto(`${base}/workflows/kanban`, { waitUntil: "domcontentloaded" });
-    await new Promise((r) => setTimeout(r, 1_000));
-    await page.screenshot({ path: resolve(OUT_DIR, "kanban.png") });
-    console.log("  shot kanban (empty state)");
-  } finally {
-    try { await browser?.close(); } catch {}
-    try { gw.kill("SIGTERM"); } catch {}
-  }
-}, 600_000);
+
+    const port = await findOpenPort();
+    const base = `http://127.0.0.1:${port}`;
+    const gw = spawn(process.execPath, ["run", ".smithers/gateway.ts"], {
+      cwd: repo.dir,
+      env: { ...process.env, ...env, PORT: String(port), HOST: "127.0.0.1" },
+      stdio: "ignore",
+    });
+    let browser;
+    try {
+      if (!(await waitForHealth(base))) throw new Error("gateway not healthy");
+      browser = await (await loadChromium()).launch({ headless: true });
+      const page = await browser.newPage();
+      await page.setViewportSize(VIEWPORT);
+      for (const d of DESCRIPTORS) {
+        const runId = runIdByKey[d.key];
+        const url = `${base}/workflows/${d.key}${runId ? `?runId=${runId}` : ""}`;
+        // A workflow UI holds a live Gateway WebSocket, so the network never goes
+        // idle — wait for the document, then for the UI's own ready selector.
+        await page.goto(url, { waitUntil: "domcontentloaded" });
+        try {
+          await page.waitForSelector(`[data-testid="${d.primaryTestId}"]`, { timeout: 15_000 });
+        } catch {}
+        if (d.verifyOutput && d.populatedTestId) {
+          try {
+            await page.waitForSelector(`[data-testid="${d.populatedTestId}"]`, { timeout: 10_000 });
+          } catch {}
+        }
+        await new Promise((r) => setTimeout(r, 400)); // settle fonts/layout
+        const file = resolve(OUT_DIR, `${d.key}.png`);
+        await page.screenshot({ path: file });
+        console.log(`  shot ${d.key}${runId ? " (run " + runId.slice(0, 8) + ")" : " (empty state)"} -> ${file}`);
+      }
+      // Also capture kanban (its own UI, not in descriptors).
+      await page.goto(`${base}/workflows/kanban`, { waitUntil: "domcontentloaded" });
+      await new Promise((r) => setTimeout(r, 1_000));
+      await page.screenshot({ path: resolve(OUT_DIR, "kanban.png") });
+      console.log("  shot kanban (empty state)");
+    } finally {
+      try {
+        await browser?.close();
+      } catch {}
+      try {
+        gw.kill("SIGTERM");
+      } catch {}
+    }
+  },
+  600_000,
+);

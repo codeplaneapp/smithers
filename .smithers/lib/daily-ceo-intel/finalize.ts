@@ -16,7 +16,8 @@ export function finalizeRun(params: {
 }): FinalizeOutput {
   const warnings: string[] = [];
   if (params.criticalFailed) warnings.push("A critical source failed during this run.");
-  if (params.invalidAssessmentCount > 0) warnings.push(`${params.invalidAssessmentCount} editorial assessment(s) cited an unknown SRC id and were dropped.`);
+  if (params.invalidAssessmentCount > 0)
+    warnings.push(`${params.invalidAssessmentCount} editorial assessment(s) cited an unknown SRC id and were dropped.`);
   if (!params.verifyPassed) warnings.push(...params.verifyErrors);
   if (!params.published && params.publishSkippedReason) warnings.push(`Publish: ${params.publishSkippedReason}`);
   if (params.commitSkippedReason) warnings.push(`Seen-state: ${params.commitSkippedReason}`);

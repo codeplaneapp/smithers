@@ -341,7 +341,8 @@ describe("the Electric proxy emits structured events + OTLP spans", () => {
         event: (event) => events.push(event),
         span: (span) => spans.push(span),
       },
-      fetchClient: async () => new Response("event: up\ndata: {}\n\n", { headers: { "content-type": "text/event-stream" } }),
+      fetchClient: async () =>
+        new Response("event: up\ndata: {}\n\n", { headers: { "content-type": "text/event-stream" } }),
     });
 
     const ok = await proxy.fetch(new Request("http://proxy.local/v1/shape?table=_smithers_runs"));

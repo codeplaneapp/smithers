@@ -304,7 +304,8 @@ export function ensureCuratedSkillsFresh(opts = {}) {
       // `appliedVersion` lets `skills list` name the release that wrote an
       // installed copy; the hash is what actually decides staleness.
       const applied = { appliedHash: sourceHash, lastScanMs: nowMs };
-      const carried = marker.appliedHash === sourceHash && typeof marker.appliedVersion === "string" ? marker.appliedVersion : null;
+      const carried =
+        marker.appliedHash === sourceHash && typeof marker.appliedVersion === "string" ? marker.appliedVersion : null;
       const version = opts.version ?? carried;
       if (version) applied.appliedVersion = version;
       writeFileSync(markerPath, `${JSON.stringify(applied, null, 2)}\n`);
@@ -327,11 +328,7 @@ export function formatRefreshNotice(result) {
   if (!result) return null;
   const lines = [];
   if (result.updated.length > 0) {
-    lines.push(
-      `↻ Smithers refreshed the \`smithers\` agent skill (${result.updated
-        .map((u) => u.agent)
-        .join(", ")}).`,
-    );
+    lines.push(`↻ Smithers refreshed the \`smithers\` agent skill (${result.updated.map((u) => u.agent).join(", ")}).`);
   }
   if (result.legacyRemoved.length > 0) {
     lines.push(

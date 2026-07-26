@@ -14,11 +14,7 @@ import {
   type FlatNode,
 } from "../src/modes/treeUtils.ts";
 import { routeApprovalKey } from "../src/modes/approvalUtils.ts";
-import {
-  deriveOutputText,
-  TUI_OUTPUT_PREVIEW_CHARS,
-  TUI_OUTPUT_TRUNCATION_MARKER,
-} from "../src/modes/TreeMode.tsx";
+import { deriveOutputText, TUI_OUTPUT_PREVIEW_CHARS, TUI_OUTPUT_TRUNCATION_MARKER } from "../src/modes/TreeMode.tsx";
 import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 
 function node(id: string, overrides: Partial<GatewayRunNode> = {}): GatewayRunNode {
@@ -393,9 +389,7 @@ describe("deriveOutputText (getNodeOutput envelope unwrap)", () => {
     const text = deriveOutputText(envelope, outNode());
 
     expect(text.length).toBeLessThanOrEqual(20_020);
-    expect(text.length).toBeLessThanOrEqual(
-      TUI_OUTPUT_PREVIEW_CHARS + TUI_OUTPUT_TRUNCATION_MARKER.length,
-    );
+    expect(text.length).toBeLessThanOrEqual(TUI_OUTPUT_PREVIEW_CHARS + TUI_OUTPUT_TRUNCATION_MARKER.length);
     expect(text.endsWith(TUI_OUTPUT_TRUNCATION_MARKER)).toBe(true);
     expect(text).not.toBe(envelope.row.output);
   });
@@ -404,14 +398,11 @@ describe("deriveOutputText (getNodeOutput envelope unwrap)", () => {
     const exactLimit = "x".repeat(TUI_OUTPUT_PREVIEW_CHARS);
     const oneOverLimit = `${exactLimit}y`;
 
-    expect(
-      deriveOutputText({ status: "produced", row: { output: exactLimit }, schema: null }, outNode()),
-    ).toBe(exactLimit);
-
-    const truncated = deriveOutputText(
-      { status: "produced", row: { output: oneOverLimit }, schema: null },
-      outNode(),
+    expect(deriveOutputText({ status: "produced", row: { output: exactLimit }, schema: null }, outNode())).toBe(
+      exactLimit,
     );
+
+    const truncated = deriveOutputText({ status: "produced", row: { output: oneOverLimit }, schema: null }, outNode());
 
     expect(truncated).toBe(`${exactLimit}${TUI_OUTPUT_TRUNCATION_MARKER}`);
   });
@@ -419,21 +410,17 @@ describe("deriveOutputText (getNodeOutput envelope unwrap)", () => {
   it("renders a structured produced row as JSON of the ROW only (no envelope)", () => {
     const envelope = { status: "produced", row: { value: 42 }, schema: null };
     const text = deriveOutputText(envelope, outNode());
-    expect(text).toContain("\"value\": 42");
+    expect(text).toContain('"value": 42');
     expect(text).not.toContain("produced");
     expect(text).not.toContain("schema");
   });
 
   it("maps a pending envelope to a readable placeholder, not raw JSON", () => {
-    expect(deriveOutputText({ status: "pending", row: null, schema: null }, outNode())).toBe(
-      "(no output yet)",
-    );
+    expect(deriveOutputText({ status: "pending", row: null, schema: null }, outNode())).toBe("(no output yet)");
   });
 
   it("maps a failed envelope to a failure note, surfacing partial output", () => {
-    expect(deriveOutputText({ status: "failed", row: null, schema: null }, outNode())).toBe(
-      "(failed, no output)",
-    );
+    expect(deriveOutputText({ status: "failed", row: null, schema: null }, outNode())).toBe("(failed, no output)");
     const withPartial = deriveOutputText(
       { status: "failed", row: null, schema: null, partial: { step: "halfway" } },
       outNode(),
@@ -454,9 +441,7 @@ describe("deriveOutputText (getNodeOutput envelope unwrap)", () => {
     );
 
     expect(text).toContain("(failed) partial output:");
-    expect(text.length).toBeLessThanOrEqual(
-      TUI_OUTPUT_PREVIEW_CHARS + TUI_OUTPUT_TRUNCATION_MARKER.length,
-    );
+    expect(text.length).toBeLessThanOrEqual(TUI_OUTPUT_PREVIEW_CHARS + TUI_OUTPUT_TRUNCATION_MARKER.length);
     expect(text.endsWith(TUI_OUTPUT_TRUNCATION_MARKER)).toBe(true);
   });
 
@@ -464,7 +449,7 @@ describe("deriveOutputText (getNodeOutput envelope unwrap)", () => {
     expect(deriveOutputText({ output: "plain" }, outNode())).toBe("plain");
     expect(deriveOutputText({ text: "txt" }, outNode())).toBe("txt");
     expect(deriveOutputText({ content: "c" }, outNode())).toBe("c");
-    expect(deriveOutputText({ other: 1 }, outNode())).toContain("\"other\": 1");
+    expect(deriveOutputText({ other: 1 }, outNode())).toContain('"other": 1');
     expect(deriveOutputText(undefined, outNode({ output: "inline" }))).toBe("inline");
     expect(deriveOutputText(undefined, outNode())).toBe("(no output)");
   });

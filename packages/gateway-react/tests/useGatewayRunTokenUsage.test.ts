@@ -1,6 +1,10 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-try { GlobalRegistrator.register(); } catch { /* already registered */ }
+try {
+  GlobalRegistrator.register();
+} catch {
+  /* already registered */
+}
 
 import { afterEach, describe, expect, test } from "bun:test";
 import React, { act, createElement } from "react";
@@ -50,11 +54,7 @@ describe("useGatewayRunTokenUsage", () => {
     const root = createRoot(container);
     roots.push({ root, container });
     await act(async () => {
-      root.render(createElement(
-        SmithersGatewayContext.Provider,
-        { value: client as never },
-        createElement(Probe),
-      ));
+      root.render(createElement(SmithersGatewayContext.Provider, { value: client as never }, createElement(Probe)));
     });
 
     await waitFor(() => state?.loading === false && calls >= 1);
@@ -82,22 +82,26 @@ describe("useGatewayRunTokenUsage", () => {
     const root = createRoot(container);
     roots.push({ root, container });
     await act(async () => {
-      root.render(createElement(
-        SmithersGatewayContext.Provider,
-        { value: client as never },
-        createElement(Probe, { refreshMs: 20 }),
-      ));
+      root.render(
+        createElement(
+          SmithersGatewayContext.Provider,
+          { value: client as never },
+          createElement(Probe, { refreshMs: 20 }),
+        ),
+      );
     });
 
     await waitFor(() => state?.loading === false && calls >= 1);
     const callsWhilePolling = calls;
 
     await act(async () => {
-      root.render(createElement(
-        SmithersGatewayContext.Provider,
-        { value: client as never },
-        createElement(Probe, { refreshMs: undefined }),
-      ));
+      root.render(
+        createElement(
+          SmithersGatewayContext.Provider,
+          { value: client as never },
+          createElement(Probe, { refreshMs: undefined }),
+        ),
+      );
     });
 
     await waitFor(() => calls > callsWhilePolling);

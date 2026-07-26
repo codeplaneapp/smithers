@@ -80,9 +80,7 @@ export default smithers((ctx) => {
             while ((match = groupRegex.exec(content)) !== null) {
               const groupName = match[1];
               const featuresStr = match[2];
-              const features = [...featuresStr.matchAll(/"([^"]+)"/g)].map(
-                (m) => m[1],
-              );
+              const features = [...featuresStr.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
               if (features.length > 0) {
                 existingFeatures[groupName] = features;
               }
@@ -95,51 +93,86 @@ export default smithers((ctx) => {
           const parts: string[] = [];
 
           // Source tree structure
-          const tree = repoPaths(cwd, filesBelow(join(cwd, "src"), (file) => file.endsWith(".ts")));
+          const tree = repoPaths(
+            cwd,
+            filesBelow(join(cwd, "src"), (file) => file.endsWith(".ts")),
+          );
           parts.push("=== SOURCE FILES (src/) ===", tree);
 
           // Components
-          const components = repoPaths(cwd, filesBelow(join(cwd, "src/components"), (file) => file.endsWith(".ts")));
+          const components = repoPaths(
+            cwd,
+            filesBelow(join(cwd, "src/components"), (file) => file.endsWith(".ts")),
+          );
           if (components) parts.push("\n=== COMPONENTS ===", components);
 
           // Agents
-          const agentFiles = repoPaths(cwd, filesBelow(join(cwd, "src/agents"), (file) => file.endsWith(".ts")));
+          const agentFiles = repoPaths(
+            cwd,
+            filesBelow(join(cwd, "src/agents"), (file) => file.endsWith(".ts")),
+          );
           if (agentFiles) parts.push("\n=== AGENTS ===", agentFiles);
 
           // CLI commands
-          const cliFiles = repoPaths(cwd, filesBelow(join(cwd, "src/cli"), (file) => file.endsWith(".ts")));
+          const cliFiles = repoPaths(
+            cwd,
+            filesBelow(join(cwd, "src/cli"), (file) => file.endsWith(".ts")),
+          );
           if (cliFiles) parts.push("\n=== CLI ===", cliFiles);
 
           // Memory
-          const memoryFiles = repoPaths(cwd, filesBelow(join(cwd, "src/memory"), (file) => file.endsWith(".ts")));
+          const memoryFiles = repoPaths(
+            cwd,
+            filesBelow(join(cwd, "src/memory"), (file) => file.endsWith(".ts")),
+          );
           if (memoryFiles) parts.push("\n=== MEMORY ===", memoryFiles);
 
           // Exports from index
           const indexPath = join(cwd, "src/index.ts");
           const indexExports = existsSync(indexPath)
-            ? readFileSync(indexPath, "utf8").split(/\r?\n/).filter((line) => line.startsWith("export")).join("\n")
+            ? readFileSync(indexPath, "utf8")
+                .split(/\r?\n/)
+                .filter((line) => line.startsWith("export"))
+                .join("\n")
             : "";
           if (indexExports) parts.push("\n=== PUBLIC API (src/index.ts) ===", indexExports);
 
           // Examples
-          const examples = repoPaths(cwd, filesBelow(join(cwd, "examples"), (file) => file.endsWith(".tsx")), 20);
+          const examples = repoPaths(
+            cwd,
+            filesBelow(join(cwd, "examples"), (file) => file.endsWith(".tsx")),
+            20,
+          );
           if (examples) parts.push("\n=== EXAMPLES ===", examples);
 
           // Workflows
-          const workflows = repoPaths(cwd, filesBelow(join(cwd, ".smithers/workflows"), (file) => file.endsWith(".tsx")));
-          if (workflows)
-            parts.push("\n=== WORKFLOW PACK (.smithers/workflows/) ===", workflows);
+          const workflows = repoPaths(
+            cwd,
+            filesBelow(join(cwd, ".smithers/workflows"), (file) => file.endsWith(".tsx")),
+          );
+          if (workflows) parts.push("\n=== WORKFLOW PACK (.smithers/workflows/) ===", workflows);
 
           // Reusable components
-          const wfComponents = repoPaths(cwd, filesBelow(join(cwd, ".smithers/components"), (file) => file.endsWith(".tsx")));
+          const wfComponents = repoPaths(
+            cwd,
+            filesBelow(join(cwd, ".smithers/components"), (file) => file.endsWith(".tsx")),
+          );
           if (wfComponents) parts.push("\n=== WORKFLOW COMPONENTS ===", wfComponents);
 
           // Docs
-          const docs = repoPaths(cwd, filesBelow(join(cwd, "docs"), (file) => file.endsWith(".mdx")), 40);
+          const docs = repoPaths(
+            cwd,
+            filesBelow(join(cwd, "docs"), (file) => file.endsWith(".mdx")),
+            40,
+          );
           if (docs) parts.push("\n=== DOCUMENTATION ===", docs);
 
           // Tests
-          const tests = repoPaths(cwd, filesBelow(join(cwd, "tests"), (file) => /\.test\.[^/\\]+$/.test(file)), 30);
+          const tests = repoPaths(
+            cwd,
+            filesBelow(join(cwd, "tests"), (file) => /\.test\.[^/\\]+$/.test(file)),
+            30,
+          );
           if (tests) parts.push("\n=== TESTS ===", tests);
 
           // package.json
@@ -176,10 +209,7 @@ export default smithers((ctx) => {
             },
           }}
         >
-          <SyncFeaturesScanPrompt
-            currentHead={bootstrap.currentHead}
-            codebaseSummary={bootstrap.codebaseSummary}
-          />
+          <SyncFeaturesScanPrompt currentHead={bootstrap.currentHead} codebaseSummary={bootstrap.codebaseSummary} />
         </Task>
       ) : null}
 
@@ -225,10 +255,7 @@ export default smithers((ctx) => {
         deps={{ scan: outputs.featureScan }}
       >
         {(deps) => (
-          <SyncFeaturesWritePrompt
-            lastCommitHash={deps.scan.lastCommitHash}
-            featureGroups={deps.scan.featureGroups}
-          />
+          <SyncFeaturesWritePrompt lastCommitHash={deps.scan.lastCommitHash} featureGroups={deps.scan.featureGroups} />
         )}
       </Task>
     </Workflow>

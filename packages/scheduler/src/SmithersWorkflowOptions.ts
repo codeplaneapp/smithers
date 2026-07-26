@@ -2,12 +2,7 @@ export type SmithersAlertSeverity = "info" | "warning" | "critical";
 
 export type SmithersAlertLabels = Record<string, string>;
 
-export type SmithersAlertReactionKind =
-  | "emit-only"
-  | "pause"
-  | "cancel"
-  | "open-approval"
-  | "deliver";
+export type SmithersAlertReactionKind = "emit-only" | "pause" | "cancel" | "open-approval" | "deliver";
 
 export type SmithersAlertReaction =
   | { kind: "emit-only" }

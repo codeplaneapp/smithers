@@ -76,11 +76,7 @@ export default smithers((ctx) => {
             }
           };
 
-          const esc = (s: string) =>
-            String(s)
-              .replace(/&/g, "&amp;")
-              .replace(/</g, "&lt;")
-              .replace(/>/g, "&gt;");
+          const esc = (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
           // 1) Find the run to watch.
           type PsRun = { id: string; workflowId?: string; status?: string; started?: string };
@@ -96,8 +92,7 @@ export default smithers((ctx) => {
             const matches = runs.filter((r) => r.workflowId === workflowId);
             // Prefer a live run over a finished/cancelled one of the same
             // workflow; ps is newest-first, so matches[0] is the fallback.
-            const match =
-              matches.find((r) => ACTIVE_STATES.has(r.status ?? "")) ?? matches[0];
+            const match = matches.find((r) => ACTIVE_STATES.has(r.status ?? "")) ?? matches[0];
             if (match) {
               runId = match.id;
               status = match.status ?? "unknown";
@@ -109,9 +104,7 @@ export default smithers((ctx) => {
           const stateById = new Map<string, string>();
 
           if (runId) {
-            const tree = runCli(["tree", runId, "--json"]) as
-              | { root?: unknown; runState?: { state?: string } }
-              | null;
+            const tree = runCli(["tree", runId, "--json"]) as { root?: unknown; runState?: { state?: string } } | null;
             if (tree?.runState?.state) status = tree.runState.state;
             const walk = (node: unknown) => {
               if (!node || typeof node !== "object") return;
@@ -127,9 +120,10 @@ export default smithers((ctx) => {
             };
             walk((tree as { root?: unknown } | null)?.root);
 
-            const inspect = runCli(["inspect", runId, "--json"]) as
-              | { run?: { status?: string }; steps?: { id: string; state: string }[] }
-              | null;
+            const inspect = runCli(["inspect", runId, "--json"]) as {
+              run?: { status?: string };
+              steps?: { id: string; state: string }[];
+            } | null;
             if (inspect?.run?.status) status = inspect.run.status;
             for (const step of inspect?.steps ?? []) {
               stateById.set(step.id, step.state);
@@ -162,11 +156,7 @@ export default smithers((ctx) => {
           const total = done.length + inFlight.length + scheduled.length;
           const pct = total > 0 ? Math.round((done.length / total) * 100) : 0;
 
-          const section = (
-            title: string,
-            color: string,
-            items: { id: string; state: string }[],
-          ) =>
+          const section = (title: string, color: string, items: { id: string; state: string }[]) =>
             `<section class="col">
       <h2 style="border-color:${color}">${title} <span class="count">${items.length}</span></h2>
       <ul>${

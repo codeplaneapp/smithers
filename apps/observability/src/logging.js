@@ -1,6 +1,10 @@
 import { Effect, Logger, LogLevel } from "effect";
 import { getCurrentSmithersTraceAnnotations } from "./getCurrentSmithersTraceAnnotations.js";
-import { correlationContextToLogAnnotations, getCurrentCorrelationContext, withCurrentCorrelationContext, } from "./correlation.js";
+import {
+  correlationContextToLogAnnotations,
+  getCurrentCorrelationContext,
+  withCurrentCorrelationContext,
+} from "./correlation.js";
 /**
  * @typedef {Record<string, unknown> | undefined} LogAnnotations
  */
@@ -23,20 +27,27 @@ const LOG_RUNNER_KEY = Symbol.for("smithers.observability.logRunner");
  * @returns {number}
  */
 export function resolveMinLevel(env = process.env.SMITHERS_LOG_LEVEL?.toLowerCase()) {
-    switch (env) {
-        case "none": return Infinity;
-        case "trace":
-        case "debug": return LOG_LEVEL_DEBUG;
-        case "warning":
-        case "warn": return LOG_LEVEL_WARNING;
-        case "error": return LOG_LEVEL_ERROR;
-        case "fatal": return Infinity;
-        case "all": return LOG_LEVEL_NONE;
-        // Default to INFO so INFO/OTLP records flow without SMITHERS_LOG_LEVEL,
-        // matching resolveSmithersObservabilityOptions' Effect-layer default.
-        case "info":
-        default: return LOG_LEVEL_INFO;
-    }
+  switch (env) {
+    case "none":
+      return Infinity;
+    case "trace":
+    case "debug":
+      return LOG_LEVEL_DEBUG;
+    case "warning":
+    case "warn":
+      return LOG_LEVEL_WARNING;
+    case "error":
+      return LOG_LEVEL_ERROR;
+    case "fatal":
+      return Infinity;
+    case "all":
+      return LOG_LEVEL_NONE;
+    // Default to INFO so INFO/OTLP records flow without SMITHERS_LOG_LEVEL,
+    // matching resolveSmithersObservabilityOptions' Effect-layer default.
+    case "info":
+    default:
+      return LOG_LEVEL_INFO;
+  }
 }
 
 const minLevel = resolveMinLevel();
@@ -50,20 +61,22 @@ const minLevel = resolveMinLevel();
 
 /** @returns {{ runner: SmithersLogRunner | null }} */
 function getRunnerState() {
-    const globalState = /** @type {typeof globalThis & { [LOG_RUNNER_KEY]?: { runner: SmithersLogRunner | null } }} */ (globalThis);
-    globalState[LOG_RUNNER_KEY] ??= { runner: null };
-    return globalState[LOG_RUNNER_KEY];
+  const globalState = /** @type {typeof globalThis & { [LOG_RUNNER_KEY]?: { runner: SmithersLogRunner | null } }} */ (
+    globalThis
+  );
+  globalState[LOG_RUNNER_KEY] ??= { runner: null };
+  return globalState[LOG_RUNNER_KEY];
 }
 
 /** @type {SmithersLogRunner} */
 const defaultRunner = {
-    runFork: (effect) => Effect.runFork(effect),
-    runPromise: (effect) => Effect.runPromise(effect),
+  runFork: (effect) => Effect.runFork(effect),
+  runPromise: (effect) => Effect.runPromise(effect),
 };
 
 /** @returns {SmithersLogRunner} */
 function getLogRunner() {
-    return getRunnerState().runner ?? defaultRunner;
+  return getRunnerState().runner ?? defaultRunner;
 }
 
 /**
@@ -74,12 +87,12 @@ function getLogRunner() {
  * @returns {() => void}
  */
 export function setSmithersLogRunner(runner) {
-    const state = getRunnerState();
-    const previous = state.runner;
-    state.runner = runner;
-    return () => {
-        state.runner = previous;
-    };
+  const state = getRunnerState();
+  const previous = state.runner;
+  state.runner = runner;
+  return () => {
+    state.runner = previous;
+  };
 }
 
 /**
@@ -91,13 +104,18 @@ export function setSmithersLogRunner(runner) {
  * @param {number} level
  */
 export function toEffectLogLevel(level) {
-    switch (level) {
-        case LOG_LEVEL_DEBUG: return LogLevel.Debug;
-        case LOG_LEVEL_INFO: return LogLevel.Info;
-        case LOG_LEVEL_WARNING: return LogLevel.Warning;
-        case LOG_LEVEL_ERROR: return LogLevel.Error;
-        default: return LogLevel.All;
-    }
+  switch (level) {
+    case LOG_LEVEL_DEBUG:
+      return LogLevel.Debug;
+    case LOG_LEVEL_INFO:
+      return LogLevel.Info;
+    case LOG_LEVEL_WARNING:
+      return LogLevel.Warning;
+    case LOG_LEVEL_ERROR:
+      return LogLevel.Error;
+    default:
+      return LogLevel.All;
+  }
 }
 
 /**
@@ -107,23 +125,24 @@ export function toEffectLogLevel(level) {
  * @returns {Effect.Effect<void, never, never>}
  */
 function buildLogProgram(effect, annotations, span) {
-    const correlationAnnotations = correlationContextToLogAnnotations(getCurrentCorrelationContext());
-    const traceAnnotations = getCurrentSmithersTraceAnnotations();
-    const mergedAnnotations = correlationAnnotations || traceAnnotations || annotations
-        ? {
-            ...correlationAnnotations,
-            ...traceAnnotations,
-            ...annotations,
+  const correlationAnnotations = correlationContextToLogAnnotations(getCurrentCorrelationContext());
+  const traceAnnotations = getCurrentSmithersTraceAnnotations();
+  const mergedAnnotations =
+    correlationAnnotations || traceAnnotations || annotations
+      ? {
+          ...correlationAnnotations,
+          ...traceAnnotations,
+          ...annotations,
         }
-        : undefined;
-    let program = effect;
-    if (mergedAnnotations) {
-        program = program.pipe(Effect.annotateLogs(mergedAnnotations));
-    }
-    if (span) {
-        program = program.pipe(Effect.withLogSpan(span));
-    }
-    return withCurrentCorrelationContext(program);
+      : undefined;
+  let program = effect;
+  if (mergedAnnotations) {
+    program = program.pipe(Effect.annotateLogs(mergedAnnotations));
+  }
+  if (span) {
+    program = program.pipe(Effect.withLogSpan(span));
+  }
+  return withCurrentCorrelationContext(program);
 }
 
 /**
@@ -133,13 +152,13 @@ function buildLogProgram(effect, annotations, span) {
  * @param {number} [level]
  */
 function emitLog(effect, annotations, span, level = LOG_LEVEL_INFO) {
-    if (level < minLevel) return;
-    const program = buildLogProgram(effect, annotations, span);
-    try {
-        void getLogRunner().runFork(program.pipe(Logger.withMinimumLogLevel(toEffectLogLevel(level))));
-    } catch {
-        // Logging must never break the caller.
-    }
+  if (level < minLevel) return;
+  const program = buildLogProgram(effect, annotations, span);
+  try {
+    void getLogRunner().runFork(program.pipe(Logger.withMinimumLogLevel(toEffectLogLevel(level))));
+  } catch {
+    // Logging must never break the caller.
+  }
 }
 
 /**
@@ -150,13 +169,13 @@ function emitLog(effect, annotations, span, level = LOG_LEVEL_INFO) {
  * @returns {Promise<void>}
  */
 async function emitLogAwait(effect, annotations, span, level = LOG_LEVEL_INFO) {
-    if (level < minLevel) return;
-    const program = buildLogProgram(effect, annotations, span);
-    try {
-        await getLogRunner().runPromise(program.pipe(Logger.withMinimumLogLevel(toEffectLogLevel(level))));
-    } catch {
-        // Logging must never break the caller.
-    }
+  if (level < minLevel) return;
+  const program = buildLogProgram(effect, annotations, span);
+  try {
+    await getLogRunner().runPromise(program.pipe(Logger.withMinimumLogLevel(toEffectLogLevel(level))));
+  } catch {
+    // Logging must never break the caller.
+  }
 }
 /**
  * @param {string} message
@@ -164,7 +183,7 @@ async function emitLogAwait(effect, annotations, span, level = LOG_LEVEL_INFO) {
  * @param {string} [span]
  */
 export function logDebug(message, annotations, span) {
-    emitLog(Effect.logDebug(message), annotations, span, LOG_LEVEL_DEBUG);
+  emitLog(Effect.logDebug(message), annotations, span, LOG_LEVEL_DEBUG);
 }
 /**
  * @param {string} message
@@ -172,7 +191,7 @@ export function logDebug(message, annotations, span) {
  * @param {string} [span]
  */
 export function logInfo(message, annotations, span) {
-    emitLog(Effect.logInfo(message), annotations, span, LOG_LEVEL_INFO);
+  emitLog(Effect.logInfo(message), annotations, span, LOG_LEVEL_INFO);
 }
 /**
  * @param {string} message
@@ -180,7 +199,7 @@ export function logInfo(message, annotations, span) {
  * @param {string} [span]
  */
 export function logWarning(message, annotations, span) {
-    emitLog(Effect.logWarning(message), annotations, span, LOG_LEVEL_WARNING);
+  emitLog(Effect.logWarning(message), annotations, span, LOG_LEVEL_WARNING);
 }
 /**
  * @param {string} message
@@ -188,7 +207,7 @@ export function logWarning(message, annotations, span) {
  * @param {string} [span]
  */
 export function logError(message, annotations, span) {
-    emitLog(Effect.logError(message), annotations, span, LOG_LEVEL_ERROR);
+  emitLog(Effect.logError(message), annotations, span, LOG_LEVEL_ERROR);
 }
 /**
  * @param {string} message
@@ -197,7 +216,7 @@ export function logError(message, annotations, span) {
  * @returns {Promise<void>}
  */
 export async function logDebugAwait(message, annotations, span) {
-    await emitLogAwait(Effect.logDebug(message), annotations, span, LOG_LEVEL_DEBUG);
+  await emitLogAwait(Effect.logDebug(message), annotations, span, LOG_LEVEL_DEBUG);
 }
 /**
  * @param {string} message
@@ -206,7 +225,7 @@ export async function logDebugAwait(message, annotations, span) {
  * @returns {Promise<void>}
  */
 export async function logInfoAwait(message, annotations, span) {
-    await emitLogAwait(Effect.logInfo(message), annotations, span, LOG_LEVEL_INFO);
+  await emitLogAwait(Effect.logInfo(message), annotations, span, LOG_LEVEL_INFO);
 }
 /**
  * @param {string} message
@@ -215,7 +234,7 @@ export async function logInfoAwait(message, annotations, span) {
  * @returns {Promise<void>}
  */
 export async function logWarningAwait(message, annotations, span) {
-    await emitLogAwait(Effect.logWarning(message), annotations, span, LOG_LEVEL_WARNING);
+  await emitLogAwait(Effect.logWarning(message), annotations, span, LOG_LEVEL_WARNING);
 }
 /**
  * @param {string} message
@@ -224,5 +243,5 @@ export async function logWarningAwait(message, annotations, span) {
  * @returns {Promise<void>}
  */
 export async function logErrorAwait(message, annotations, span) {
-    await emitLogAwait(Effect.logError(message), annotations, span, LOG_LEVEL_ERROR);
+  await emitLogAwait(Effect.logError(message), annotations, span, LOG_LEVEL_ERROR);
 }

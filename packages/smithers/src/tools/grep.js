@@ -1,11 +1,7 @@
 import { z } from "zod";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { defineTool } from "./defineTool.js";
-import {
-  captureProcess,
-  getToolRuntimeOptions,
-  resolveToolPath,
-} from "./utils.js";
+import { captureProcess, getToolRuntimeOptions, resolveToolPath } from "./utils.js";
 
 export async function grepTool(pattern, path = ".") {
   const { rootDir, maxOutputBytes, timeoutMs } = getToolRuntimeOptions();
@@ -17,10 +13,7 @@ export async function grepTool(pattern, path = ".") {
     timeoutMs,
   });
   if (result.exitCode === 2) {
-    throw new SmithersError(
-      "TOOL_GREP_FAILED",
-      result.stderr || "rg failed",
-    );
+    throw new SmithersError("TOOL_GREP_FAILED", result.stderr || "rg failed");
   }
   return result.stdout;
 }

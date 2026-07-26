@@ -24,10 +24,7 @@ const ARTIFACT_HEADERS = {
   "cache-control": "public, max-age=3600",
 } as const;
 
-function withHeaders(
-  response: Response,
-  headers: Record<string, string>,
-): Response {
+function withHeaders(response: Response, headers: Record<string, string>): Response {
   const next = new Headers(response.headers);
   for (const [name, value] of Object.entries(headers)) next.set(name, value);
   return new Response(response.body, {
@@ -37,38 +34,23 @@ function withHeaders(
   });
 }
 
-async function fetchAsset(
-  request: Request,
-  env: KimiBenchmarksSiteEnv,
-): Promise<Response> {
+async function fetchAsset(request: Request, env: KimiBenchmarksSiteEnv): Promise<Response> {
   const response = await env.ASSETS.fetch(request);
   if (response.status === 404) return response;
   const url = new URL(request.url);
-  return withHeaders(
-    response,
-    url.pathname.startsWith("/evidence/") ? ARTIFACT_HEADERS : HTML_HEADERS,
-  );
+  return withHeaders(response, url.pathname.startsWith("/evidence/") ? ARTIFACT_HEADERS : HTML_HEADERS);
 }
 
-async function fetchIndex(
-  request: Request,
-  env: KimiBenchmarksSiteEnv,
-): Promise<Response> {
+async function fetchIndex(request: Request, env: KimiBenchmarksSiteEnv): Promise<Response> {
   const url = new URL(request.url);
   url.pathname = "/index.html";
   url.search = "";
-  return withHeaders(
-    await env.ASSETS.fetch(new Request(url, request)),
-    HTML_HEADERS,
-  );
+  return withHeaders(await env.ASSETS.fetch(new Request(url, request)), HTML_HEADERS);
 }
 
 export function createKimiBenchmarksSiteWorker() {
   return {
-    async fetch(
-      request: Request,
-      env: KimiBenchmarksSiteEnv,
-    ): Promise<Response> {
+    async fetch(request: Request, env: KimiBenchmarksSiteEnv): Promise<Response> {
       const url = new URL(request.url);
 
       if (request.method !== "GET" && request.method !== "HEAD") {

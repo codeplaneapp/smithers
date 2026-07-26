@@ -32,10 +32,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import { subscriptionCodexFirst } from "../lib/codexAccounts";
-import {
-  buildPublicIssueAgentPolicy,
-  resolvePublicIssueToolchainReadPaths,
-} from "../lib/publicIssueAgentPolicy";
+import { buildPublicIssueAgentPolicy, resolvePublicIssueToolchainReadPaths } from "../lib/publicIssueAgentPolicy";
 
 export type WatchdogOptions = {
   runId: string;
@@ -134,9 +131,7 @@ export type ProgressComparison = {
 
 export type SolRepairResult = {
   outcome: "repair-requested" | "no-change" | "human-required";
-  action:
-    | { kind: "none" }
-    | { kind: "retry-task"; nodeId: string; iteration: number };
+  action: { kind: "none" } | { kind: "retry-task"; nodeId: string; iteration: number };
   summary: string;
 };
 
@@ -255,9 +250,10 @@ export function knownStateDecision(
       repairRequired: true,
       state,
       reason: `Run metadata marks the durable wait unhealthy (${kind}).`,
-      recommendedAction: kind === "timer-overdue"
-        ? "resume or supervise the overdue timer"
-        : "diagnose and repair the unhealthy durable wait",
+      recommendedAction:
+        kind === "timer-overdue"
+          ? "resume or supervise the overdue timer"
+          : "diagnose and repair the unhealthy durable wait",
     };
   }
   if (["finished", "succeeded", "complete", "completed"].includes(state)) {
@@ -272,7 +268,13 @@ export function knownStateDecision(
       };
     }
     if (workflowSummary?.successful === true) {
-      return { healthy: true, repairRequired: false, state, reason: "Run and workflow summary completed successfully.", recommendedAction: "none" };
+      return {
+        healthy: true,
+        repairRequired: false,
+        state,
+        reason: "Run and workflow summary completed successfully.",
+        recommendedAction: "none",
+      };
     }
     // This workflow can finish with tolerated child failures and ordinary
     // blocked outputs. Never call a terminal run healthy without its summary.
@@ -282,18 +284,50 @@ export function knownStateDecision(
     const resetAtMs = Number(value?.runState?.blocked?.resetAtMs ?? value?.run?.error?.resetAtMs ?? value?.resetAtMs);
     if (!Number.isFinite(resetAtMs) || resetAtMs <= 0) return null;
     if (resetAtMs <= now) {
-      return { healthy: false, repairRequired: true, state, reason: "The declared quota reset passed but the run is still parked.", recommendedAction: "resume or supervise the run" };
+      return {
+        healthy: false,
+        repairRequired: true,
+        state,
+        reason: "The declared quota reset passed but the run is still parked.",
+        recommendedAction: "resume or supervise the run",
+      };
     }
-    return { healthy: true, repairRequired: false, state, reason: "Run is durably parked until its quota reset.", recommendedAction: "wait for the declared quota reset" };
+    return {
+      healthy: true,
+      repairRequired: false,
+      state,
+      reason: "Run is durably parked until its quota reset.",
+      recommendedAction: "wait for the declared quota reset",
+    };
   }
-  if (["waiting-approval", "waiting-event", "waiting-human", "waiting-timer", "waiting-signal", "paused"].includes(state)) {
-    return { healthy: true, repairRequired: false, state, reason: `Run is durably parked in ${state}.`, recommendedAction: "wait for the declared durable condition" };
+  if (
+    ["waiting-approval", "waiting-event", "waiting-human", "waiting-timer", "waiting-signal", "paused"].includes(state)
+  ) {
+    return {
+      healthy: true,
+      repairRequired: false,
+      state,
+      reason: `Run is durably parked in ${state}.`,
+      recommendedAction: "wait for the declared durable condition",
+    };
   }
   if (["cancelled", "canceled"].includes(state)) {
-    return { healthy: false, repairRequired: false, state, reason: "Run was intentionally cancelled; watchdog will not restart it.", recommendedAction: "human decision required" };
+    return {
+      healthy: false,
+      repairRequired: false,
+      state,
+      reason: "Run was intentionally cancelled; watchdog will not restart it.",
+      recommendedAction: "human decision required",
+    };
   }
   if (["failed", "stale", "orphaned", "error"].includes(state)) {
-    return { healthy: false, repairRequired: true, state, reason: `Run state is ${state}.`, recommendedAction: "diagnose and repair with Smithers run control" };
+    return {
+      healthy: false,
+      repairRequired: true,
+      state,
+      reason: `Run state is ${state}.`,
+      recommendedAction: "diagnose and repair with Smithers run control",
+    };
   }
   return null;
 }
@@ -329,25 +363,29 @@ function inspectValue(inspect: unknown): any {
 }
 
 export function parseEventEvidence(text: string): EventEvidence[] | null {
-  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
   const events: EventEvidence[] = [];
   for (const line of lines) {
     try {
       const value = JSON.parse(line) as Partial<EventEvidence>;
       if (
-        typeof value.runId !== "string"
-        || !isSafeRunId(value.runId)
-        || typeof value.seq !== "number"
-        || !Number.isInteger(value.seq)
-        || value.seq < 0
-        || typeof value.timestampMs !== "number"
-        || !Number.isFinite(value.timestampMs)
-        || typeof value.type !== "string"
-        || value.type.length === 0
-        || value.payload === null
-        || typeof value.payload !== "object"
-        || Array.isArray(value.payload)
-      ) return null;
+        typeof value.runId !== "string" ||
+        !isSafeRunId(value.runId) ||
+        typeof value.seq !== "number" ||
+        !Number.isInteger(value.seq) ||
+        value.seq < 0 ||
+        typeof value.timestampMs !== "number" ||
+        !Number.isFinite(value.timestampMs) ||
+        typeof value.type !== "string" ||
+        value.type.length === 0 ||
+        value.payload === null ||
+        typeof value.payload !== "object" ||
+        Array.isArray(value.payload)
+      )
+        return null;
       events.push({
         runId: value.runId,
         seq: value.seq,
@@ -432,10 +470,7 @@ function isSideEffectNode(nodeId: string): boolean {
   return SIDE_EFFECT_NODE_NAMES.has(leaf);
 }
 
-export function ambiguousSideEffectNodes(
-  inspect: unknown,
-  events: readonly EventEvidence[],
-): string[] {
+export function ambiguousSideEffectNodes(inspect: unknown, events: readonly EventEvidence[]): string[] {
   const value = inspectValue(inspect);
   const ambiguous = new Set<string>();
   for (const step of Array.isArray(value?.steps) ? value.steps : []) {
@@ -469,25 +504,37 @@ export function parseSolRepairResult(text: string, currentRunId: string): SolRep
     const value = JSON.parse(text.trim()) as Partial<SolRepairResult> & { action?: Record<string, unknown> };
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     if (Object.keys(value).sort().join(",") !== "action,outcome,summary") return null;
-    if (!(value.outcome === "repair-requested" || value.outcome === "no-change" || value.outcome === "human-required")) return null;
-    if (typeof value.summary !== "string" || value.summary.trim().length === 0 || !value.action || typeof value.action !== "object") return null;
+    if (!(value.outcome === "repair-requested" || value.outcome === "no-change" || value.outcome === "human-required"))
+      return null;
+    if (
+      typeof value.summary !== "string" ||
+      value.summary.trim().length === 0 ||
+      !value.action ||
+      typeof value.action !== "object"
+    )
+      return null;
     const kind = value.action.kind;
     let action: SolRepairResult["action"];
     if (kind === "none") {
       if (Object.keys(value.action).join(",") !== "kind" || value.outcome === "repair-requested") return null;
       action = { kind: "none" };
     } else if (kind === "retry-task") {
-      if (Object.keys(value.action).sort().join(",") !== "iteration,kind,nodeId" || value.outcome !== "repair-requested") return null;
+      if (
+        Object.keys(value.action).sort().join(",") !== "iteration,kind,nodeId" ||
+        value.outcome !== "repair-requested"
+      )
+        return null;
       const nodeId = value.action.nodeId;
       const iteration = value.action.iteration;
       if (
-        typeof nodeId !== "string"
-        || !/^i\d+:[a-zA-Z0-9][a-zA-Z0-9:._-]{0,299}$/.test(nodeId)
-        || typeof iteration !== "number"
-        || !Number.isInteger(iteration)
-        || iteration < 0
-        || isSideEffectNode(nodeId)
-      ) return null;
+        typeof nodeId !== "string" ||
+        !/^i\d+:[a-zA-Z0-9][a-zA-Z0-9:._-]{0,299}$/.test(nodeId) ||
+        typeof iteration !== "number" ||
+        !Number.isInteger(iteration) ||
+        iteration < 0 ||
+        isSideEffectNode(nodeId)
+      )
+        return null;
       action = { kind: "retry-task", nodeId, iteration };
     } else {
       return null;
@@ -527,16 +574,20 @@ export function validateRetryTaskProposal(
   action: Extract<SolRepairResult["action"], { kind: "retry-task" }>,
 ): { ok: true } | { ok: false; reason: string } {
   const value = inspectValue(inspect);
-  if (value?.run?.id !== runId || !isSafeRunId(runId)) return { ok: false, reason: "Live inspect does not belong to the requested run." };
+  if (value?.run?.id !== runId || !isSafeRunId(runId))
+    return { ok: false, reason: "Live inspect does not belong to the requested run." };
   if (!/^i\d+:[a-zA-Z0-9][a-zA-Z0-9:._-]{0,299}$/.test(action.nodeId) || isSideEffectNode(action.nodeId)) {
     return { ok: false, reason: "Requested retry node is unsafe or side-effecting." };
   }
-  const matches = (Array.isArray(value.steps) ? value.steps : []).filter((step: any) =>
-    step?.id === action.nodeId && Number(step?.iteration ?? 0) === action.iteration
+  const matches = (Array.isArray(value.steps) ? value.steps : []).filter(
+    (step: any) => step?.id === action.nodeId && Number(step?.iteration ?? 0) === action.iteration,
   );
-  if (matches.length !== 1) return { ok: false, reason: "Requested retry node/iteration is missing or ambiguous in live state." };
+  if (matches.length !== 1)
+    return { ok: false, reason: "Requested retry node/iteration is missing or ambiguous in live state." };
   const state = String(matches[0]?.state ?? "").toLowerCase();
-  if (!(state === "failed" || state === "error" || state === "cancelled" || state === "canceled" || state === "stale")) {
+  if (
+    !(state === "failed" || state === "error" || state === "cancelled" || state === "canceled" || state === "stale")
+  ) {
     return { ok: false, reason: `Requested retry node is ${state || "unknown"}, not failed.` };
   }
   return { ok: true };
@@ -568,7 +619,10 @@ export function validateReplacementRun(
   const lineage = Array.isArray(replacement.continuedFrom) ? replacement.continuedFrom : [];
   const linked = replacement.parentRunId === currentRunId || lineage.includes(currentRunId);
   if (!linked) {
-    return { ok: false, reason: "Replacement run is not durably linked to the current run by parentRunId or continuedFrom." };
+    return {
+      ok: false,
+      reason: "Replacement run is not durably linked to the current run by parentRunId or continuedFrom.",
+    };
   }
   return { ok: true };
 }
@@ -583,10 +637,11 @@ export function boundedContext(value: string, maxBytes = MAX_CONTEXT_BYTES): str
 
 export function stateKeyForRunId(runId: string): string {
   const digest = createHash("sha256").update(runId, "utf8").digest("hex");
-  const prefix = runId
-    .replace(/[^a-zA-Z0-9._-]+/g, "_")
-    .replace(/^[.-]+/, "")
-    .slice(0, MAX_RUN_KEY_PREFIX) || "run";
+  const prefix =
+    runId
+      .replace(/[^a-zA-Z0-9._-]+/g, "_")
+      .replace(/^[.-]+/, "")
+      .slice(0, MAX_RUN_KEY_PREFIX) || "run";
   return `${prefix}-${digest}`;
 }
 
@@ -598,14 +653,17 @@ function readState(path: string): PersistedState {
   } catch (error) {
     throw new Error(`Watchdog state JSON is malformed: ${errorText(error)}`);
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Watchdog state JSON must be an object.");
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new Error("Watchdog state JSON must be an object.");
   const state = parsed as PersistedState;
-  if (state.activeRunId !== undefined && !isSafeRunId(state.activeRunId)) throw new Error("Watchdog state has an unsafe active run id.");
+  if (state.activeRunId !== undefined && !isSafeRunId(state.activeRunId))
+    throw new Error("Watchdog state has an unsafe active run id.");
   for (const [name, value] of [
     ["lastCheckedAt", state.lastCheckedAt],
     ["lastEscalatedAt", state.lastEscalatedAt],
   ] as const) {
-    if (value !== undefined && (!Number.isFinite(value) || value < 0)) throw new Error(`Watchdog state has an invalid ${name}.`);
+    if (value !== undefined && (!Number.isFinite(value) || value < 0))
+      throw new Error(`Watchdog state has an invalid ${name}.`);
   }
   if (state.lastSolStatus !== undefined && !["started", "succeeded", "failed"].includes(state.lastSolStatus)) {
     throw new Error("Watchdog state has an invalid Sol status.");
@@ -613,16 +671,17 @@ function readState(path: string): PersistedState {
   if (state.progress) {
     const progress = state.progress;
     if (
-      !isSafeRunId(progress.runId)
-      || !/^[a-f0-9]{64}$/.test(progress.fingerprint)
-      || !Number.isFinite(progress.observedAt)
-      || !Number.isFinite(progress.changedAt)
-      || !Number.isInteger(progress.unchangedTicks)
-      || progress.unchangedTicks < 0
-      || !progress.evidence
-      || progress.evidence.runId !== progress.runId
-      || !Array.isArray(progress.evidence.nodes)
-    ) throw new Error("Watchdog state has invalid progress evidence.");
+      !isSafeRunId(progress.runId) ||
+      !/^[a-f0-9]{64}$/.test(progress.fingerprint) ||
+      !Number.isFinite(progress.observedAt) ||
+      !Number.isFinite(progress.changedAt) ||
+      !Number.isInteger(progress.unchangedTicks) ||
+      progress.unchangedTicks < 0 ||
+      !progress.evidence ||
+      progress.evidence.runId !== progress.runId ||
+      !Array.isArray(progress.evidence.nodes)
+    )
+      throw new Error("Watchdog state has invalid progress evidence.");
   }
   return state;
 }
@@ -637,14 +696,15 @@ function readLease(path: string): WatchdogLease | null {
   try {
     const parsed = JSON.parse(readFileSync(join(path, "lease.json"), "utf8")) as Partial<WatchdogLease>;
     if (
-      typeof parsed.pid !== "number"
-      || !Number.isInteger(parsed.pid)
-      || parsed.pid <= 0
-      || typeof parsed.createdAt !== "number"
-      || !Number.isFinite(parsed.createdAt)
-      || typeof parsed.token !== "string"
-      || parsed.token.length === 0
-    ) return null;
+      typeof parsed.pid !== "number" ||
+      !Number.isInteger(parsed.pid) ||
+      parsed.pid <= 0 ||
+      typeof parsed.createdAt !== "number" ||
+      !Number.isFinite(parsed.createdAt) ||
+      typeof parsed.token !== "string" ||
+      parsed.token.length === 0
+    )
+      return null;
     return { path, pid: parsed.pid, createdAt: parsed.createdAt, token: parsed.token };
   } catch {
     return null;
@@ -718,11 +778,8 @@ export function acquireLeaseLock(
 
 export function releaseLeaseLock(lease: WatchdogLease): void {
   const current = readLease(lease.path);
-  if (
-    current?.pid === lease.pid
-    && current.createdAt === lease.createdAt
-    && current.token === lease.token
-  ) rmSync(lease.path, { recursive: true, force: true });
+  if (current?.pid === lease.pid && current.createdAt === lease.createdAt && current.token === lease.token)
+    rmSync(lease.path, { recursive: true, force: true });
 }
 
 export function runSmithersJson(
@@ -734,35 +791,51 @@ export function runSmithersJson(
   const binary = options.binary?.trim() || process.env.SMITHERS_BIN?.trim() || "smithers";
   const timeoutMs = options.timeoutMs ?? DEFAULT_SMITHERS_COMMAND_TIMEOUT_MS;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error("Smithers command timeout must be positive.");
-  if (options.eventsSinceTimestampMs !== undefined && (!Number.isFinite(options.eventsSinceTimestampMs) || options.eventsSinceTimestampMs < 0)) {
+  if (
+    options.eventsSinceTimestampMs !== undefined &&
+    (!Number.isFinite(options.eventsSinceTimestampMs) || options.eventsSinceTimestampMs < 0)
+  ) {
     throw new Error("Events cursor timestamp must be a non-negative finite number.");
   }
-  const eventSinceDurationMs = options.eventsSinceTimestampMs === undefined
-    ? null
-    : Math.max(1, Date.now() - options.eventsSinceTimestampMs + EVENT_CURSOR_OVERLAP_MS);
-  const args = command === "inspect"
-    ? ["inspect", runId, "--format", "json", "--full-output"]
-    : command === "events"
-      ? [
-          "events", runId, "--json", "--type", "node", "--limit", String(MAX_EVENT_HISTORY),
-          ...(eventSinceDurationMs === null ? [] : ["--since", String(eventSinceDurationMs)]),
-        ]
-      : command === "summary"
-        ? ["output", runId, "run-summary", "--format", "json", "--full-output"]
-        : ["why", runId, "--format", "json"];
+  const eventSinceDurationMs =
+    options.eventsSinceTimestampMs === undefined
+      ? null
+      : Math.max(1, Date.now() - options.eventsSinceTimestampMs + EVENT_CURSOR_OVERLAP_MS);
+  const args =
+    command === "inspect"
+      ? ["inspect", runId, "--format", "json", "--full-output"]
+      : command === "events"
+        ? [
+            "events",
+            runId,
+            "--json",
+            "--type",
+            "node",
+            "--limit",
+            String(MAX_EVENT_HISTORY),
+            ...(eventSinceDurationMs === null ? [] : ["--since", String(eventSinceDurationMs)]),
+          ]
+        : command === "summary"
+          ? ["output", runId, "run-summary", "--format", "json", "--full-output"]
+          : ["why", runId, "--format", "json"];
   if (process.platform === "win32") {
     try {
       return {
         ok: true,
         output: execFileSync(binary, args, {
-          cwd, encoding: "utf8", maxBuffer: 32 * 1024 * 1024,
-          timeout: timeoutMs, killSignal: "SIGKILL",
+          cwd,
+          encoding: "utf8",
+          maxBuffer: 32 * 1024 * 1024,
+          timeout: timeoutMs,
+          killSignal: "SIGKILL",
         }),
       };
     } catch (error: any) {
       return {
         ok: false,
-        output: [error?.stdout?.toString?.() ?? "", error?.stderr?.toString?.() ?? "", error?.message ?? String(error)].filter(Boolean).join("\n"),
+        output: [error?.stdout?.toString?.() ?? "", error?.stderr?.toString?.() ?? "", error?.message ?? String(error)]
+          .filter(Boolean)
+          .join("\n"),
       };
     }
   }
@@ -836,34 +909,36 @@ export function retryTaskBrokerArgs(
   action: Extract<SolRepairResult["action"], { kind: "retry-task" }>,
 ): string[] {
   if (
-    !isSafeRunId(runId)
-    || !/^i\d+:[a-zA-Z0-9][a-zA-Z0-9:._-]{0,299}$/.test(action.nodeId)
-    || isSideEffectNode(action.nodeId)
-    || !Number.isInteger(action.iteration)
-    || action.iteration < 0
-  ) throw new Error("Unsafe deterministic retry request.");
+    !isSafeRunId(runId) ||
+    !/^i\d+:[a-zA-Z0-9][a-zA-Z0-9:._-]{0,299}$/.test(action.nodeId) ||
+    isSideEffectNode(action.nodeId) ||
+    !Number.isInteger(action.iteration) ||
+    action.iteration < 0
+  )
+    throw new Error("Unsafe deterministic retry request.");
   return [
     "retry-task",
     "codex-issue-merge-queue",
-    "--run-id", runId,
-    "--node-id", action.nodeId,
-    "--iteration", String(action.iteration),
+    "--run-id",
+    runId,
+    "--node-id",
+    action.nodeId,
+    "--iteration",
+    String(action.iteration),
     "--no-deps",
-    "--format", "json",
+    "--format",
+    "json",
   ];
 }
 
-function executeRepairProposal(
-  runId: string,
-  repair: SolRepairResult,
-  rootDir: string,
-): HealthDecision | null {
+function executeRepairProposal(runId: string, repair: SolRepairResult, rootDir: string): HealthDecision | null {
   if (repair.outcome !== "repair-requested" || repair.action.kind !== "retry-task") return null;
   const liveInspectResult = runSmithersJson("inspect", runId, rootDir);
   const liveEventsResult = runSmithersJson("events", runId, rootDir);
   const liveInspect = liveInspectResult.ok ? parsedJson(liveInspectResult.output) : null;
   const liveEvents = liveEventsResult.ok ? parseEventEvidence(liveEventsResult.output) : null;
-  if (!liveInspect || !liveEvents) throw new Error("Deterministic repair broker could not refresh valid live run evidence.");
+  if (!liveInspect || !liveEvents)
+    throw new Error("Deterministic repair broker could not refresh valid live run evidence.");
   const ambiguous = ambiguousSideEffectNodes(liveInspect, liveEvents);
   if (ambiguous.length > 0) {
     throw new Error(`Deterministic repair broker found ambiguous side effects: ${ambiguous.join(", ")}.`);
@@ -883,13 +958,15 @@ function executeRepairProposal(
   const postResult = runSmithersJson("inspect", runId, rootDir);
   const postInspect = postResult.ok ? parsedJson(postResult.output) : null;
   if (!postInspect) throw new Error("Retry command returned, but post-repair inspect was invalid.");
-  return knownStateDecision(postInspect, Date.now(), null) ?? {
-    healthy: true,
-    repairRequired: false,
-    state: inspectState(postInspect),
-    reason: `Deterministic broker retried ${repair.action.nodeId} iteration ${repair.action.iteration} without resetting dependents.`,
-    recommendedAction: "continue monitoring durable progress",
-  };
+  return (
+    knownStateDecision(postInspect, Date.now(), null) ?? {
+      healthy: true,
+      repairRequired: false,
+      state: inspectState(postInspect),
+      reason: `Deterministic broker retried ${repair.action.nodeId} iteration ${repair.action.iteration} without resetting dependents.`,
+      recommendedAction: "continue monitoring durable progress",
+    }
+  );
 }
 
 function watchdogAgentRuntime(rootDir: string, repair: boolean) {
@@ -912,7 +989,16 @@ function watchdogAgentRuntime(rootDir: string, repair: boolean) {
     safeHome,
     hostHome: homedir(),
     toolchainReadPaths: [
-      ...resolvePublicIssueToolchainReadPaths(process.env, ["bash", "git", "jj", "rg", "node", "bun", "pnpm", "smithers"]),
+      ...resolvePublicIssueToolchainReadPaths(process.env, [
+        "bash",
+        "git",
+        "jj",
+        "rg",
+        "node",
+        "bun",
+        "pnpm",
+        "smithers",
+      ]),
       ...(smithersBinary ? [dirname(resolve(smithersBinary))] : []),
     ],
   });
@@ -926,34 +1012,43 @@ function watchdogAgentRuntime(rootDir: string, repair: boolean) {
 async function askTerra(runId: string, inspect: string, why: string, rootDir: string): Promise<HealthDecision | null> {
   const runtime = watchdogAgentRuntime(rootDir, false);
   try {
-    const terra = subscriptionCodexFirst({
-      ...runtime.policy.codex,
-      model: "gpt-5.6-terra",
-      config: [
-        ...runtime.policy.codex.config,
-        'model_reasoning_effort="medium"',
+    const terra = subscriptionCodexFirst(
+      {
+        ...runtime.policy.codex,
+        model: "gpt-5.6-terra",
+        config: [...runtime.policy.codex.config, 'model_reasoning_effort="medium"'],
+        skipGitRepoCheck: true,
+      },
+      [
+        new ClaudeCodeAgent({
+          ...runtime.policy.claude,
+          configDir: runtime.claudeConfigDir,
+          model: "claude-sonnet-5",
+          systemPrompt: "You are the Sonnet fallback for Terra's read-only Smithers health-check role.",
+        }),
       ],
-      skipGitRepoCheck: true,
-    }, [
-      new ClaudeCodeAgent({
-        ...runtime.policy.claude,
-        configDir: runtime.claudeConfigDir,
-        model: "claude-sonnet-5",
-        systemPrompt: "You are the Sonnet fallback for Terra's read-only Smithers health-check role.",
-      }),
-    ]);
-    const text = await generateWithAgentFallback(terra, {
-      rootDir,
-      timeout: { totalMs: 10 * 60_000, idleMs: 2 * 60_000 },
-      prompt: [
-        `You are serving the Terra read-only health-check role for Smithers run ${runId}.`,
-        "Judge whether the workflow is making healthy durable progress. Waiting for an explicit approval, signal, timer, or known quota reset is healthy. Running with no recent progress, stale/orphaned owners, dependency deadlocks, repeated gate failures, and failed nodes are unhealthy.",
-        "The inspect context includes a persisted PROGRESS COMPARISON derived only from durable event sequence and node-state transitions. Use unchangedTicks and changedAt to distinguish a quiet healthy interval from a genuinely stalled running run.",
-        "Do not edit files, mutate the run, approve anything, integrate code, or publish remote refs.",
-        "Return ONLY one JSON object: {\"healthy\":boolean,\"repairRequired\":boolean,\"state\":string,\"reason\":string,\"recommendedAction\":string}.",
-        "", "SMITHERS INSPECT:", boundedContext(inspect), "", "SMITHERS WHY:", boundedContext(why),
-      ].join("\n"),
-    }, (candidate) => parseHealthDecision(candidate) !== null);
+    );
+    const text = await generateWithAgentFallback(
+      terra,
+      {
+        rootDir,
+        timeout: { totalMs: 10 * 60_000, idleMs: 2 * 60_000 },
+        prompt: [
+          `You are serving the Terra read-only health-check role for Smithers run ${runId}.`,
+          "Judge whether the workflow is making healthy durable progress. Waiting for an explicit approval, signal, timer, or known quota reset is healthy. Running with no recent progress, stale/orphaned owners, dependency deadlocks, repeated gate failures, and failed nodes are unhealthy.",
+          "The inspect context includes a persisted PROGRESS COMPARISON derived only from durable event sequence and node-state transitions. Use unchangedTicks and changedAt to distinguish a quiet healthy interval from a genuinely stalled running run.",
+          "Do not edit files, mutate the run, approve anything, integrate code, or publish remote refs.",
+          'Return ONLY one JSON object: {"healthy":boolean,"repairRequired":boolean,"state":string,"reason":string,"recommendedAction":string}.',
+          "",
+          "SMITHERS INSPECT:",
+          boundedContext(inspect),
+          "",
+          "SMITHERS WHY:",
+          boundedContext(why),
+        ].join("\n"),
+      },
+      (candidate) => parseHealthDecision(candidate) !== null,
+    );
     return parseHealthDecision(text);
   } finally {
     runtime.cleanup();
@@ -974,7 +1069,7 @@ export async function generateWithAgentFallback(
   for (const agent of agents) {
     try {
       await agent.preflight?.(request);
-      const result = await agent.generate(request) as { text?: unknown } | null;
+      const result = (await agent.generate(request)) as { text?: unknown } | null;
       const text = typeof result?.text === "string" ? result.text : "";
       if (!usable(text)) throw new Error("Agent returned unusable output.");
       return text;
@@ -994,38 +1089,48 @@ async function askSolToRepair(
 ): Promise<string> {
   const runtime = watchdogAgentRuntime(rootDir, true);
   try {
-    const sol = subscriptionCodexFirst({
-      ...runtime.policy.codex,
-      model: "gpt-5.6-sol",
-      config: [
-        ...runtime.policy.codex.config,
-        'model_reasoning_effort="xhigh"',
+    const sol = subscriptionCodexFirst(
+      {
+        ...runtime.policy.codex,
+        model: "gpt-5.6-sol",
+        config: [...runtime.policy.codex.config, 'model_reasoning_effort="xhigh"'],
+        skipGitRepoCheck: true,
+      },
+      [
+        new ClaudeCodeAgent({
+          ...runtime.policy.claude,
+          configDir: runtime.claudeConfigDir,
+          model: "claude-fable-5",
+          systemPrompt:
+            "You are the Fable fallback for the Sol Smithers-repair role. Preserve Sol's safety constraints and return the exact requested JSON shape.",
+        }),
       ],
-      skipGitRepoCheck: true,
-    }, [
-      new ClaudeCodeAgent({
-        ...runtime.policy.claude,
-        configDir: runtime.claudeConfigDir,
-        model: "claude-fable-5",
-        systemPrompt: "You are the Fable fallback for the Sol Smithers-repair role. Preserve Sol's safety constraints and return the exact requested JSON shape.",
-      }),
-    ]);
-    return generateWithAgentFallback(sol, {
-      rootDir,
-      timeout: { totalMs: 45 * 60_000, idleMs: 10 * 60_000 },
-      prompt: [
-        `You are serving the Sol repair role for unhealthy Smithers run ${runId} in ${rootDir}.`,
-        `Terra diagnosis: ${JSON.stringify(decision)}`,
-        "You cannot mutate Smithers durable state. Diagnose only from the supplied evidence and ordinary source files, then either request one exact retry-task action or require a human.",
-        "Never auto-approve or deny a human gate. Never merge, land, or publish branches/main. Never expose credentials.",
-        "Never request retry of sync-pr, queue-rebase, queue-publish, land-rebase, land-publish, land-local-main, or publish-main. If any such node was in flight or may have completed without persisted output, require a human to reconcile VCS state.",
-        "A deterministic broker validates the current run, exact failed node, iteration, and side-effect fences before executing retry-task with --no-deps. Do not output shell commands or request resume, fork, replay, rewind, approve, deny, or force.",
-        "Editing a workflow changes its durability hash. If source code truly needs repair, make the smallest source edit if appropriate but return human-required so a person can review and start a linked replacement safely.",
-        "Preserve unrelated working-copy changes. Do not commit.",
-        "Return ONLY one JSON object: {\"outcome\":\"repair-requested\"|\"no-change\"|\"human-required\",\"action\":{\"kind\":\"none\"}|{\"kind\":\"retry-task\",\"nodeId\":string,\"iteration\":nonnegative_integer},\"summary\":string}. Use repair-requested iff action.kind=retry-task; all other outcomes require action.kind=none.",
-        "", "SMITHERS INSPECT:", boundedContext(inspect), "", "SMITHERS WHY:", boundedContext(why),
-      ].join("\n"),
-    }, (candidate) => parseSolRepairResult(candidate, runId) !== null);
+    );
+    return generateWithAgentFallback(
+      sol,
+      {
+        rootDir,
+        timeout: { totalMs: 45 * 60_000, idleMs: 10 * 60_000 },
+        prompt: [
+          `You are serving the Sol repair role for unhealthy Smithers run ${runId} in ${rootDir}.`,
+          `Terra diagnosis: ${JSON.stringify(decision)}`,
+          "You cannot mutate Smithers durable state. Diagnose only from the supplied evidence and ordinary source files, then either request one exact retry-task action or require a human.",
+          "Never auto-approve or deny a human gate. Never merge, land, or publish branches/main. Never expose credentials.",
+          "Never request retry of sync-pr, queue-rebase, queue-publish, land-rebase, land-publish, land-local-main, or publish-main. If any such node was in flight or may have completed without persisted output, require a human to reconcile VCS state.",
+          "A deterministic broker validates the current run, exact failed node, iteration, and side-effect fences before executing retry-task with --no-deps. Do not output shell commands or request resume, fork, replay, rewind, approve, deny, or force.",
+          "Editing a workflow changes its durability hash. If source code truly needs repair, make the smallest source edit if appropriate but return human-required so a person can review and start a linked replacement safely.",
+          "Preserve unrelated working-copy changes. Do not commit.",
+          'Return ONLY one JSON object: {"outcome":"repair-requested"|"no-change"|"human-required","action":{"kind":"none"}|{"kind":"retry-task","nodeId":string,"iteration":nonnegative_integer},"summary":string}. Use repair-requested iff action.kind=retry-task; all other outcomes require action.kind=none.',
+          "",
+          "SMITHERS INSPECT:",
+          boundedContext(inspect),
+          "",
+          "SMITHERS WHY:",
+          boundedContext(why),
+        ].join("\n"),
+      },
+      (candidate) => parseSolRepairResult(candidate, runId) !== null,
+    );
   } finally {
     runtime.cleanup();
   }
@@ -1078,19 +1183,18 @@ export async function watchdogTick(options: WatchdogOptions, now = Date.now()): 
     const inspectResult = runSmithersJson("inspect", activeRunId, options.rootDir);
     const whyResult = runSmithersJson("why", activeRunId, options.rootDir);
     const eventsResult = runSmithersJson("events", activeRunId, options.rootDir, {
-      eventsSinceTimestampMs: previous.progress?.runId === activeRunId
-        ? previous.progress.evidence.latestEvent?.timestampMs
-        : undefined,
+      eventsSinceTimestampMs:
+        previous.progress?.runId === activeRunId ? previous.progress.evidence.latestEvent?.timestampMs : undefined,
     });
     const inspectJson = inspectResult.ok ? parsedJson(inspectResult.output) : null;
     const whyJson = whyResult.ok ? parsedJson(whyResult.output) : null;
     const events = eventsResult.ok ? parseEventEvidence(eventsResult.output) : null;
     const inspectStructured = Boolean(
-      inspectJson
-      && typeof inspectJson === "object"
-      && (inspectJson as any)?.ok !== false
-      && inspectState(inspectJson) !== "unknown"
-      && Array.isArray(inspectValue(inspectJson)?.steps),
+      inspectJson &&
+      typeof inspectJson === "object" &&
+      (inspectJson as any)?.ok !== false &&
+      inspectState(inspectJson) !== "unknown" &&
+      Array.isArray(inspectValue(inspectJson)?.steps),
     );
     const snapshot = inspectStructured && events ? progressSnapshot(activeRunId, inspectJson, events) : null;
     const comparison = snapshot ? compareProgress(previous.progress, snapshot, now) : null;
@@ -1098,9 +1202,7 @@ export async function watchdogTick(options: WatchdogOptions, now = Date.now()): 
     const needsWorkflowSummary = inspectJson
       ? ["finished", "succeeded", "complete", "completed"].includes(inspectState(inspectJson))
       : false;
-    const summaryResult = needsWorkflowSummary
-      ? runSmithersJson("summary", activeRunId, options.rootDir)
-      : null;
+    const summaryResult = needsWorkflowSummary ? runSmithersJson("summary", activeRunId, options.rootDir) : null;
     const workflowSummary = summaryResult?.ok ? parseWorkflowRunSummary(summaryResult.output) : null;
     const diagnosticContext = [
       inspectResult.output,
@@ -1108,13 +1210,19 @@ export async function watchdogTick(options: WatchdogOptions, now = Date.now()): 
       summaryResult ? `\nWORKFLOW RUN SUMMARY:\n${summaryResult.output}` : "",
       // Keep this last: boundedContext preserves the tail, so the cross-tick
       // comparison cannot be displaced by a large inspect/event payload.
-      comparison ? `\nPROGRESS COMPARISON:\n${JSON.stringify({
-        changedSinceLastTick: comparison.changedSinceLastTick,
-        changedAt: comparison.current.changedAt,
-        observedAt: comparison.current.observedAt,
-        unchangedTicks: comparison.current.unchangedTicks,
-        evidence: comparison.current.evidence,
-      }, null, 2)}` : "",
+      comparison
+        ? `\nPROGRESS COMPARISON:\n${JSON.stringify(
+            {
+              changedSinceLastTick: comparison.changedSinceLastTick,
+              changedAt: comparison.current.changedAt,
+              observedAt: comparison.current.observedAt,
+              unchangedTicks: comparison.current.unchangedTicks,
+              evidence: comparison.current.evidence,
+            },
+            null,
+            2,
+          )}`
+        : "",
     ].join("");
 
     let decision: HealthDecision;
@@ -1134,9 +1242,7 @@ export async function watchdogTick(options: WatchdogOptions, now = Date.now()): 
 
     if (diagnosticFailures.length > 0) {
       diagnosticFailure = true;
-      const failures = [
-        ...diagnosticFailures,
-      ].join(", ");
+      const failures = [...diagnosticFailures].join(", ");
       decision = diagnosticFailureDecision(
         "diagnostic-invalid",
         `Smithers diagnostics failed or returned malformed structured data (${failures}); refusing automated repair.`,
@@ -1246,12 +1352,14 @@ export async function watchdogTick(options: WatchdogOptions, now = Date.now()): 
       diagnosticFailure,
       manualInterventionRequired,
       ambiguousSideEffectNodes: ambiguousNodes,
-      progress: comparison ? {
-        fingerprint: comparison.current.fingerprint,
-        changedSinceLastTick: comparison.changedSinceLastTick,
-        changedAt: comparison.current.changedAt,
-        unchangedTicks: comparison.current.unchangedTicks,
-      } : null,
+      progress: comparison
+        ? {
+            fingerprint: comparison.current.fingerprint,
+            changedSinceLastTick: comparison.changedSinceLastTick,
+            changedAt: comparison.current.changedAt,
+            unchangedTicks: comparison.current.unchangedTicks,
+          }
+        : null,
       escalated,
       cooldown,
       inspectOk: inspectResult.ok,
@@ -1268,14 +1376,16 @@ export async function watchdogTick(options: WatchdogOptions, now = Date.now()): 
 function usage(): string {
   return [
     "Usage: bun .smithers/scripts/codex-issue-merge-watchdog.ts RUN_ID [options]",
-    "", "Options:",
+    "",
+    "Options:",
     "  --run-id, -r <id>           Run id (alternative to positional)",
     "  --once                      Run one tick and exit (default without interval)",
     "  --interval-seconds <n>      Keep running and check every n seconds",
     "  --cooldown-minutes <n>      Minimum time between Sol escalations (default 30)",
     "  --root <path>               Workspace root (default cwd)",
     "  --state-dir <path>          Lock/cooldown state directory",
-    "", "Cron environment:",
+    "",
+    "Cron environment:",
     "  Set PATH for bun and dependencies, and SMITHERS_BIN to an absolute smithers executable path.",
   ].join("\n");
 }
@@ -1303,7 +1413,9 @@ export async function watchdogMain(): Promise<void> {
         process.exitCode = 1;
       }
     } catch (error) {
-      console.error(JSON.stringify({ runId: options.runId, error: error instanceof Error ? error.message : String(error) }));
+      console.error(
+        JSON.stringify({ runId: options.runId, error: error instanceof Error ? error.message : String(error) }),
+      );
       process.exitCode = 1;
     }
     if (!options.once) await Bun.sleep(options.intervalSeconds * 1_000);

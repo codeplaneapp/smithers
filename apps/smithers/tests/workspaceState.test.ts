@@ -7,7 +7,10 @@ import {
   type LocalWorkspaceReadiness,
 } from "../src/app/workspaceState";
 
-function readiness(workspaceRoot: string, status: LocalWorkspaceReadiness["status"] = "ready"): LocalWorkspaceReadiness {
+function readiness(
+  workspaceRoot: string,
+  status: LocalWorkspaceReadiness["status"] = "ready",
+): LocalWorkspaceReadiness {
   return {
     status,
     workspaceRoot,
@@ -23,7 +26,14 @@ function readiness(workspaceRoot: string, status: LocalWorkspaceReadiness["statu
 
 describe("workspaceState", () => {
   test("normalizes recent local workspace roots", () => {
-    const roots = normalizeRecentWorkspaces([" /a ", "/b", "/a", "", 4, ...Array.from({ length: 12 }, (_, i) => `/r${i}`)]);
+    const roots = normalizeRecentWorkspaces([
+      " /a ",
+      "/b",
+      "/a",
+      "",
+      4,
+      ...Array.from({ length: 12 }, (_, i) => `/r${i}`),
+    ]);
     expect(roots[0]).toBe("/a");
     expect(roots[1]).toBe("/b");
     expect(roots).toHaveLength(MAX_RECENT_WORKSPACES);

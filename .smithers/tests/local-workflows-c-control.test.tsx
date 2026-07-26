@@ -49,10 +49,17 @@ async function isolated<T>(prefix: string, body: (root: string) => Promise<T>): 
     return await body(root);
   } finally {
     process.chdir(cwd);
-    if (path === undefined) delete process.env.PATH; else process.env.PATH = path;
-    if (state === undefined) delete process.env.SMITHERS_TEST_PNPM_STATE; else process.env.SMITHERS_TEST_PNPM_STATE = state;
-    if (failures === undefined) delete process.env.SMITHERS_TEST_FAIL_TYPECHECKS; else process.env.SMITHERS_TEST_FAIL_TYPECHECKS = failures;
-    try { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
+    if (path === undefined) delete process.env.PATH;
+    else process.env.PATH = path;
+    if (state === undefined) delete process.env.SMITHERS_TEST_PNPM_STATE;
+    else process.env.SMITHERS_TEST_PNPM_STATE = state;
+    if (failures === undefined) delete process.env.SMITHERS_TEST_FAIL_TYPECHECKS;
+    else process.env.SMITHERS_TEST_FAIL_TYPECHECKS = failures;
+    try {
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch {
+      /* best-effort temp cleanup */
+    }
   }
 }
 
@@ -62,14 +69,14 @@ function installFakePnpm(root: string, failingTypechecks: number): void {
   mkdirSync(bin, { recursive: true });
   const source = [
     'const fs = require("node:fs");',
-    'const args = process.argv.slice(2);',
+    "const args = process.argv.slice(2);",
     'if (args.at(-1) === "typecheck") {',
-    '  let count = 0;',
+    "  let count = 0;",
     '  try { count = Number(fs.readFileSync(process.env.SMITHERS_TEST_PNPM_STATE, "utf8")); } catch {}',
-    '  fs.writeFileSync(process.env.SMITHERS_TEST_PNPM_STATE, String(count + 1));',
-    '  process.stdout.write(`typecheck ${count + 1}\\n`);',
+    "  fs.writeFileSync(process.env.SMITHERS_TEST_PNPM_STATE, String(count + 1));",
+    "  process.stdout.write(`typecheck ${count + 1}\\n`);",
     '  process.exit(count < Number(process.env.SMITHERS_TEST_FAIL_TYPECHECKS || "0") ? 1 : 0);',
-    '}',
+    "}",
     'process.stdout.write("tests green\\n");',
   ].join("\n");
   if (process.platform === "win32") {
@@ -101,66 +108,66 @@ describe("review-cloud-ship behavioral contract", () => {
     expect(schema.safeParse({ maxFixRounds: 11 }).success).toBe(false);
   });
 
-  test("simulates a real red -> fix -> green verification cycle", async () => isolated("smithers-review-cloud-green-", async (root) => {
-    installFakePnpm(root, 1);
-    const sim = simulate(await load("review-cloud-ship.tsx"), {
-      input: { maxFixRounds: 2, dogfood: false },
-      workflowPath: pathFor("review-cloud-ship.tsx"),
-      rootDir: root,
-      mocks: baseMocks,
-    });
-    await sim.run();
-    expect(sim.status).toBe("waiting-approval");
-    expect(sim.executed).toEqual([
-      "implement-worker",
-      "implement-action",
-      "verify",
-      "fix-round",
-      "verify",
-    ]);
-    expect(sim.task("verify").outputs).toHaveLength(2);
-    expect(sim.task("fix-round").outputs).toHaveLength(1);
-    expect(sim.task("fix-round").prompts[0]).toContain("typecheck 1");
-    expect(sim.unusedMocks).toEqual([]);
-  }));
+  test("simulates a real red -> fix -> green verification cycle", async () =>
+    isolated("smithers-review-cloud-green-", async (root) => {
+      installFakePnpm(root, 1);
+      const sim = simulate(await load("review-cloud-ship.tsx"), {
+        input: { maxFixRounds: 2, dogfood: false },
+        workflowPath: pathFor("review-cloud-ship.tsx"),
+        rootDir: root,
+        mocks: baseMocks,
+      });
+      await sim.run();
+      expect(sim.status).toBe("waiting-approval");
+      expect(sim.executed).toEqual(["implement-worker", "implement-action", "verify", "fix-round", "verify"]);
+      expect(sim.task("verify").outputs).toHaveLength(2);
+      expect(sim.task("fix-round").outputs).toHaveLength(1);
+      expect(sim.task("fix-round").prompts[0]).toContain("typecheck 1");
+      expect(sim.unusedMocks).toEqual([]);
+    }));
 
-  test("fails persistent red after exactly three verifies and two fixes", async () => isolated("smithers-review-cloud-red-", async (root) => {
-    installFakePnpm(root, 99);
-    const sim = simulate(await load("review-cloud-ship.tsx"), {
-      input: { maxFixRounds: 2, dogfood: false },
-      workflowPath: pathFor("review-cloud-ship.tsx"),
-      rootDir: root,
-      mocks: baseMocks,
-    });
-    await expect(sim.run()).rejects.toThrow();
-    expect(sim.status).toBe("failed");
-    expect(sim.task("verify").outputs).toHaveLength(3);
-    expect(sim.task("fix-round").outputs).toHaveLength(2);
-    expect(sim.executed).toEqual([
-      "implement-worker",
-      "implement-action",
-      "verify",
-      "fix-round",
-      "verify",
-      "fix-round",
-      "verify",
-    ]);
-    expect(sim.executed).not.toContain("approve-deploy");
-    const exhausted = await render("review-cloud-ship.tsx", { maxFixRounds: 2, dogfood: false }, {
-      implementWorker: staged("implement-worker", implemented),
-      implementAction: staged("implement-action", implemented),
-      verify: [
-        { nodeId: "verify", pass: false, log: "red 1" },
-        { nodeId: "verify", pass: false, log: "red 2" },
-        { nodeId: "verify", pass: false, log: "red 3" },
-      ],
-      fixRound: [
-        { nodeId: "fix-round", summary: "fix 1" },
-        { nodeId: "fix-round", summary: "fix 2" },
-      ],
-    });
-    expect(exhausted.tasks.some(({ nodeId }) => nodeId === "approve-deploy")).toBe(false);
-  }));
+  test("fails persistent red after exactly three verifies and two fixes", async () =>
+    isolated("smithers-review-cloud-red-", async (root) => {
+      installFakePnpm(root, 99);
+      const sim = simulate(await load("review-cloud-ship.tsx"), {
+        input: { maxFixRounds: 2, dogfood: false },
+        workflowPath: pathFor("review-cloud-ship.tsx"),
+        rootDir: root,
+        mocks: baseMocks,
+      });
+      await expect(sim.run()).rejects.toThrow();
+      expect(sim.status).toBe("failed");
+      expect(sim.task("verify").outputs).toHaveLength(3);
+      expect(sim.task("fix-round").outputs).toHaveLength(2);
+      expect(sim.executed).toEqual([
+        "implement-worker",
+        "implement-action",
+        "verify",
+        "fix-round",
+        "verify",
+        "fix-round",
+        "verify",
+      ]);
+      expect(sim.executed).not.toContain("approve-deploy");
+      const exhausted = await render(
+        "review-cloud-ship.tsx",
+        { maxFixRounds: 2, dogfood: false },
+        {
+          implementWorker: staged("implement-worker", implemented),
+          implementAction: staged("implement-action", implemented),
+          verify: [
+            { nodeId: "verify", pass: false, log: "red 1" },
+            { nodeId: "verify", pass: false, log: "red 2" },
+            { nodeId: "verify", pass: false, log: "red 3" },
+          ],
+          fixRound: [
+            { nodeId: "fix-round", summary: "fix 1" },
+            { nodeId: "fix-round", summary: "fix 2" },
+          ],
+        },
+      );
+      expect(exhausted.tasks.some(({ nodeId }) => nodeId === "approve-deploy")).toBe(false);
+    }));
 
   test("keeps every approved deployment step causally gated and reports dogfood disabled", async () => {
     const input = { maxFixRounds: 0, dogfood: false };
@@ -225,22 +232,28 @@ describe("review-cloud-ship behavioral contract", () => {
     });
     expect(task(complete, "dogfood-pr").skipIf).toBe(true);
     expect(task(complete, "report").nodeId).toBe("report");
-    await expect(runTask(task(complete, "report") as never)).resolves.toEqual(expect.objectContaining({
-      summary: expect.stringContaining("dogfood: skipped"),
-    }));
+    await expect(runTask(task(complete, "report") as never)).resolves.toEqual(
+      expect.objectContaining({
+        summary: expect.stringContaining("dogfood: skipped"),
+      }),
+    );
   });
 
   test("uses a run-unique OS temp worktree in the dogfood prompt", async () => {
-    const frame = await render("review-cloud-ship.tsx", { maxFixRounds: 0, dogfood: true }, {
-      implementWorker: staged("implement-worker", implemented),
-      implementAction: staged("implement-action", implemented),
-      verify: staged("verify", { pass: true, log: "green" }),
-      deployApproval: staged("approve-deploy", approval),
-      pushMain: staged("push-main", { ok: true, sha: "abc123", log: "pushed" }),
-      deploy: staged("deploy", { ok: true, log: "deployed" }),
-      registerDogfood: staged("register-dogfood", { ok: true, detail: "registered" }),
-      smoke: staged("smoke", { ok: true, detail: "green" }),
-    });
+    const frame = await render(
+      "review-cloud-ship.tsx",
+      { maxFixRounds: 0, dogfood: true },
+      {
+        implementWorker: staged("implement-worker", implemented),
+        implementAction: staged("implement-action", implemented),
+        verify: staged("verify", { pass: true, log: "green" }),
+        deployApproval: staged("approve-deploy", approval),
+        pushMain: staged("push-main", { ok: true, sha: "abc123", log: "pushed" }),
+        deploy: staged("deploy", { ok: true, log: "deployed" }),
+        registerDogfood: staged("register-dogfood", { ok: true, detail: "registered" }),
+        smoke: staged("smoke", { ok: true, detail: "green" }),
+      },
+    );
     const text = renderPrompt(task(frame, "dogfood-pr").prompt);
     const uniqueWorktreePrefix = join(tmpdir(), "review-cloud-dogfood-");
     expect(text).toContain(uniqueWorktreePrefix);
@@ -250,38 +263,50 @@ describe("review-cloud-ship behavioral contract", () => {
     expect(text.split(uniqueWorktreePrefix).join("")).not.toContain("/tmp/review-cloud-dogfood");
   });
 
-  test("push-main atomically commits both the review app and its specification", async () => isolated("smithers-review-cloud-git-", async (root) => {
-    const work = join(root, "work");
-    const origin = join(root, "origin.git");
-    mkdirSync(join(work, "apps", "review"), { recursive: true });
-    mkdirSync(join(work, ".smithers", "specs"), { recursive: true });
-    execFileSync("git", ["init", "--bare", origin]);
-    execFileSync("git", ["init", "-b", "main"], { cwd: work });
-    execFileSync("git", ["config", "user.email", "workflow-test@example.com"], { cwd: work });
-    execFileSync("git", ["config", "user.name", "Workflow Test"], { cwd: work });
-    writeFileSync(join(work, "apps", "review", "worker.ts"), "export const version = 1;\n");
-    writeFileSync(join(work, ".smithers", "specs", "smithers-review-cloud.md"), "# Review cloud v1\n");
-    execFileSync("git", ["add", "apps/review", ".smithers/specs/smithers-review-cloud.md"], { cwd: work });
-    execFileSync("git", ["commit", "-m", "initial"], { cwd: work });
-    execFileSync("git", ["remote", "add", "origin", origin], { cwd: work });
-    execFileSync("git", ["push", "-u", "origin", "main"], { cwd: work });
-    writeFileSync(join(work, "apps", "review", "worker.ts"), "export const version = 2;\n");
-    writeFileSync(join(work, ".smithers", "specs", "smithers-review-cloud.md"), "# Review cloud v2\n");
-    process.chdir(work);
+  test("push-main atomically commits both the review app and its specification", async () =>
+    isolated("smithers-review-cloud-git-", async (root) => {
+      const work = join(root, "work");
+      const origin = join(root, "origin.git");
+      mkdirSync(join(work, "apps", "review"), { recursive: true });
+      mkdirSync(join(work, ".smithers", "specs"), { recursive: true });
+      execFileSync("git", ["init", "--bare", origin]);
+      execFileSync("git", ["init", "-b", "main"], { cwd: work });
+      execFileSync("git", ["config", "user.email", "workflow-test@example.com"], { cwd: work });
+      execFileSync("git", ["config", "user.name", "Workflow Test"], { cwd: work });
+      writeFileSync(join(work, "apps", "review", "worker.ts"), "export const version = 1;\n");
+      writeFileSync(join(work, ".smithers", "specs", "smithers-review-cloud.md"), "# Review cloud v1\n");
+      execFileSync("git", ["add", "apps/review", ".smithers/specs/smithers-review-cloud.md"], { cwd: work });
+      execFileSync("git", ["commit", "-m", "initial"], { cwd: work });
+      execFileSync("git", ["remote", "add", "origin", origin], { cwd: work });
+      execFileSync("git", ["push", "-u", "origin", "main"], { cwd: work });
+      writeFileSync(join(work, "apps", "review", "worker.ts"), "export const version = 2;\n");
+      writeFileSync(join(work, ".smithers", "specs", "smithers-review-cloud.md"), "# Review cloud v2\n");
+      process.chdir(work);
 
-    const frame = await render("review-cloud-ship.tsx", { maxFixRounds: 0, dogfood: false }, {
-      implementWorker: staged("implement-worker", implemented),
-      implementAction: staged("implement-action", implemented),
-      verify: staged("verify", { pass: true, log: "green" }),
-      deployApproval: staged("approve-deploy", approval),
-    });
-    await expect(runTask(task(frame, "push-main") as never)).resolves.toMatchObject({ ok: true });
-    const changed = execFileSync("git", ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"], { cwd: work, encoding: "utf8" })
-      .trim().split(/\r?\n/).sort();
-    expect(changed).toEqual([".smithers/specs/smithers-review-cloud.md", "apps/review/worker.ts"]);
-    expect(execFileSync("git", ["status", "--porcelain"], { cwd: work, encoding: "utf8" })).toBe("");
-    const local = execFileSync("git", ["rev-parse", "HEAD"], { cwd: work, encoding: "utf8" }).trim();
-    const remote = execFileSync("git", ["--git-dir", origin, "rev-parse", "refs/heads/main"], { encoding: "utf8" }).trim();
-    expect(remote).toBe(local);
-  }));
+      const frame = await render(
+        "review-cloud-ship.tsx",
+        { maxFixRounds: 0, dogfood: false },
+        {
+          implementWorker: staged("implement-worker", implemented),
+          implementAction: staged("implement-action", implemented),
+          verify: staged("verify", { pass: true, log: "green" }),
+          deployApproval: staged("approve-deploy", approval),
+        },
+      );
+      await expect(runTask(task(frame, "push-main") as never)).resolves.toMatchObject({ ok: true });
+      const changed = execFileSync("git", ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"], {
+        cwd: work,
+        encoding: "utf8",
+      })
+        .trim()
+        .split(/\r?\n/)
+        .sort();
+      expect(changed).toEqual([".smithers/specs/smithers-review-cloud.md", "apps/review/worker.ts"]);
+      expect(execFileSync("git", ["status", "--porcelain"], { cwd: work, encoding: "utf8" })).toBe("");
+      const local = execFileSync("git", ["rev-parse", "HEAD"], { cwd: work, encoding: "utf8" }).trim();
+      const remote = execFileSync("git", ["--git-dir", origin, "rev-parse", "refs/heads/main"], {
+        encoding: "utf8",
+      }).trim();
+      expect(remote).toBe(local);
+    }));
 });

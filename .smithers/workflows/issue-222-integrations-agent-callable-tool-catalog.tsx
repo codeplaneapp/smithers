@@ -3,14 +3,26 @@
 /** @jsxImportSource smithers-orchestrator */
 import { ClaudeCodeAgent, createSmithers, Sequence, Task, UI, type AgentLike } from "smithers-orchestrator";
 import { z } from "zod/v4";
-import { ValidationLoop, implementOutputSchema, validateOutputSchema, validationLoopState } from "../components/ValidationLoop";
+import {
+  ValidationLoop,
+  implementOutputSchema,
+  validateOutputSchema,
+  validationLoopState,
+} from "../components/ValidationLoop";
 import { reviewOutputSchema, reviewSynthesisSchema } from "../components/Review";
 import { codexFirst } from "../lib/codexAccounts";
 
 // Codex-first role pools: Sol plans/reviews, Luna implements, Terra validates.
-const solPool: AgentLike[] = codexFirst({ model: "gpt-5.6-sol", skipGitRepoCheck: true }, [new ClaudeCodeAgent({ model: "claude-opus-4-8" })]);
-const lunaPool: AgentLike[] = codexFirst({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true }, [new ClaudeCodeAgent({ model: "claude-sonnet-5" })]);
-const terraPool: AgentLike[] = codexFirst({ model: "gpt-5.6-terra", skipGitRepoCheck: true }, [new ClaudeCodeAgent({ model: "claude-sonnet-5" })]);
+const solPool: AgentLike[] = codexFirst({ model: "gpt-5.6-sol", skipGitRepoCheck: true }, [
+  new ClaudeCodeAgent({ model: "claude-opus-4-8" }),
+]);
+const lunaPool: AgentLike[] = codexFirst(
+  { model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true },
+  [new ClaudeCodeAgent({ model: "claude-sonnet-5" })],
+);
+const terraPool: AgentLike[] = codexFirst({ model: "gpt-5.6-terra", skipGitRepoCheck: true }, [
+  new ClaudeCodeAgent({ model: "claude-sonnet-5" }),
+]);
 
 // Issue #222 is an integrations program (72 items). Its named "load-bearing
 // gap" is the delegated per-user OAuth connection plane: auth-code + PKCE,
@@ -107,9 +119,7 @@ export default smithers((ctx) => {
 
   const state = validationLoopState(ctx, { prefix: "i222:impl" });
 
-  const implementPrompt = plan
-    ? `${spec}\n\n---\nAPPROVED PLAN:\n${plan.plan}`
-    : spec;
+  const implementPrompt = plan ? `${spec}\n\n---\nAPPROVED PLAN:\n${plan.plan}` : spec;
 
   return (
     <Workflow name="issue-222-integrations-agent-callable-tool-catalog">

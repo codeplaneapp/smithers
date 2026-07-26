@@ -6,9 +6,14 @@
 // StrictMode remount (store dispose + epoch bump).
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-try { GlobalRegistrator.register(); } catch { /* already registered */ }
-(globalThis as { happyDOM?: { settings?: { fetch?: { disableSameOriginPolicy?: boolean } } } })
-  .happyDOM!.settings!.fetch!.disableSameOriginPolicy = true;
+try {
+  GlobalRegistrator.register();
+} catch {
+  /* already registered */
+}
+(
+  globalThis as { happyDOM?: { settings?: { fetch?: { disableSameOriginPolicy?: boolean } } } }
+).happyDOM!.settings!.fetch!.disableSameOriginPolicy = true;
 
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -42,7 +47,9 @@ async function waitFor(assertion: () => boolean, label = "assertion", timeoutMs 
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     if (assertion()) return;
-    await act(async () => { await sleep(25); });
+    await act(async () => {
+      await sleep(25);
+    });
   }
   throw new Error(`Timed out waiting for: ${label}`);
 }
@@ -56,37 +63,63 @@ function getPort(server: import("node:http").Server) {
 async function bootGateway() {
   const dbPath = join(mkdtempSync(join(tmpdir(), "gwreact-dc-")), "store.db");
   const api = createSmithers(
-    { result: z.object({ value: z.number() }), selection: z.object({ selected: z.string(), notes: z.string().nullable() }) },
+    {
+      result: z.object({ value: z.number() }),
+      selection: z.object({ selected: z.string(), notes: z.string().nullable() }),
+    },
     { dbPath },
   );
   cleanups.push(async () => {
-    try { api.db.$client?.run?.("PRAGMA wal_checkpoint(TRUNCATE)"); } catch {}
+    try {
+      api.db.$client?.run?.("PRAGMA wal_checkpoint(TRUNCATE)");
+    } catch {}
     await api.db.$client?.close?.();
-    try { rmSync(dirname(dbPath), { recursive: true, force: true, maxRetries: 50, retryDelay: 200 }); } catch {}
+    try {
+      rmSync(dirname(dbPath), { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+    } catch {}
   });
   const gateway = new Gateway({
     auth: { mode: "token", tokens: { "operator-token": { role: "admin", scopes: ["*"], userId: "user:operator" } } },
   });
-  gateway.register("value", api.smithers((ctx: any) =>
-    React.createElement(api.Workflow, { name: "collections-value" },
-      React.createElement(api.Task, { id: "task1", output: api.outputs.result }, { value: Number(ctx.input.value ?? 1) })),
-  ));
+  gateway.register(
+    "value",
+    api.smithers((ctx: any) =>
+      React.createElement(
+        api.Workflow,
+        { name: "collections-value" },
+        React.createElement(
+          api.Task,
+          { id: "task1", output: api.outputs.result },
+          { value: Number(ctx.input.value ?? 1) },
+        ),
+      ),
+    ),
+  );
   // A workflow whose Approval id is a delegation poll phase (`dc:<goal>:poll`),
   // so a launched run parks at a pending approval the delegation hook treats as
   // the end-of-run poll via its parse fallback — and whose run tree carries a
   // delegation-shaped node (covers both the tree-target and submitPoll paths).
-  gateway.register("poll", api.smithers(() =>
-    React.createElement(api.Workflow, { name: "delegation-poll" },
-      React.createElement(api.Approval, {
-        id: "dc:goal:poll",
-        mode: "select",
-        output: api.outputs.selection,
-        request: { title: "Rate the run", summary: "How did it go?" },
-        options: [{ key: "good", label: "Good" }, { key: "bad", label: "Bad" }],
-        allowedScopes: ["approve"],
-        allowedUsers: ["user:operator"],
-      })),
-  ));
+  gateway.register(
+    "poll",
+    api.smithers(() =>
+      React.createElement(
+        api.Workflow,
+        { name: "delegation-poll" },
+        React.createElement(api.Approval, {
+          id: "dc:goal:poll",
+          mode: "select",
+          output: api.outputs.selection,
+          request: { title: "Rate the run", summary: "How did it go?" },
+          options: [
+            { key: "good", label: "Good" },
+            { key: "bad", label: "Bad" },
+          ],
+          allowedScopes: ["approve"],
+          allowedUsers: ["user:operator"],
+        }),
+      ),
+    ),
+  );
   const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
   cleanups.push(() => gateway.close());
   return { baseUrl: `http://127.0.0.1:${getPort(server)}` };
@@ -107,10 +140,21 @@ async function mountHarness(): Promise<Harness> {
   const container = document.createElement("div");
   document.body.appendChild(container);
   let root!: Root;
-  await act(async () => { root = createRoot(container); });
+  await act(async () => {
+    root = createRoot(container);
+  });
   return {
-    render: async (e) => { await act(async () => { root.render(e); }); },
-    unmount: async () => { await act(async () => { root.unmount(); }); container.remove(); },
+    render: async (e) => {
+      await act(async () => {
+        root.render(e);
+      });
+    },
+    unmount: async () => {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    },
   };
 }
 
@@ -118,7 +162,13 @@ function client(baseUrl: string) {
   return new SmithersGatewayClient({ baseUrl, token: "operator-token", fetch: Bun.fetch });
 }
 
-const swallow = async (p: Promise<unknown>) => { try { await p; } catch { /* expected on a non-delegation run */ } };
+const swallow = async (p: Promise<unknown>) => {
+  try {
+    await p;
+  } catch {
+    /* expected on a non-delegation run */
+  }
+};
 
 describe("useDelegationChain over a real gateway", () => {
   test("assembles state for a runId and dispatches every action (edit/skip/answer/poll)", async () => {
@@ -141,16 +191,28 @@ describe("useDelegationChain over a real gateway", () => {
 
     // skipPreviews + answerHuman + submitEdit dispatch real signals/approvals
     // (they reject on this non-delegation run; the closures still run).
-    await act(async () => { await swallow(hook!.actions.skipPreviews()); });
-    await act(async () => { await swallow(hook!.actions.answerHuman("dc:root:plan", 0, { any: true })); });
-    await act(async () => { await swallow(hook!.actions.submitEdit("root", "edited output", "a note")); });
+    await act(async () => {
+      await swallow(hook!.actions.skipPreviews());
+    });
+    await act(async () => {
+      await swallow(hook!.actions.answerHuman("dc:root:plan", 0, { any: true }));
+    });
+    await act(async () => {
+      await swallow(hook!.actions.submitEdit("root", "edited output", "a note"));
+    });
     // submitEdit without a note (the note-less branch of the payload spread).
-    await act(async () => { await swallow(hook!.actions.submitEdit("root", "edited again")); });
+    await act(async () => {
+      await swallow(hook!.actions.submitEdit("root", "edited again"));
+    });
 
     // submitPoll with no pending poll approval must throw a clear error.
     let pollError: unknown;
     await act(async () => {
-      try { await hook!.actions.submitPoll([{ question: "q", rating: 5 }]); } catch (error) { pollError = error; }
+      try {
+        await hook!.actions.submitPoll([{ question: "q", rating: 5 }]);
+      } catch (error) {
+        pollError = error;
+      }
     });
     expect((pollError as Error).message).toContain("no pending poll");
 
@@ -159,7 +221,9 @@ describe("useDelegationChain over a real gateway", () => {
     const realCrypto = (globalThis as { crypto?: unknown }).crypto;
     try {
       Object.defineProperty(globalThis, "crypto", { value: undefined, configurable: true });
-      await act(async () => { await swallow(hook!.actions.submitEdit("root", "no-crypto edit")); });
+      await act(async () => {
+        await swallow(hook!.actions.submitEdit("root", "no-crypto edit"));
+      });
     } finally {
       Object.defineProperty(globalThis, "crypto", { value: realCrypto, configurable: true });
     }
@@ -189,13 +253,17 @@ describe("useDelegationChain over a real gateway", () => {
     const pollDeadline = Date.now() + 60_000;
     while (Date.now() < pollDeadline && !pastFind) {
       try {
-        await act(async () => { await hook!.actions.submitPoll([{ question: "How useful?", rating: 5 }], "great"); });
+        await act(async () => {
+          await hook!.actions.submitPoll([{ question: "How useful?", rating: 5 }], "great");
+        });
         pastFind = true;
       } catch (error) {
         if (!String((error as Error).message).includes("no pending poll")) {
           pastFind = true; // reached answerHuman (submit rejected) → find + call ran
         } else {
-          await act(async () => { await sleep(50); });
+          await act(async () => {
+            await sleep(50);
+          });
         }
       }
     }
@@ -220,20 +288,32 @@ describe("useDelegationChain over a real gateway", () => {
     // requireRunId() throws "no runId" for the signal-backed actions.
     let editError: unknown;
     await act(async () => {
-      try { await hook!.actions.submitEdit("root", "x"); } catch (error) { editError = error; }
+      try {
+        await hook!.actions.submitEdit("root", "x");
+      } catch (error) {
+        editError = error;
+      }
     });
     expect((editError as Error).message).toContain("no runId");
 
     let skipError: unknown;
     await act(async () => {
-      try { await hook!.actions.skipPreviews(); } catch (error) { skipError = error; }
+      try {
+        await hook!.actions.skipPreviews();
+      } catch (error) {
+        skipError = error;
+      }
     });
     expect((skipError as Error).message).toContain("no runId");
 
     // submitPoll finds no pending poll (empty approvals) → its own error.
     let pollError: unknown;
     await act(async () => {
-      try { await hook!.actions.submitPoll([]); } catch (error) { pollError = error; }
+      try {
+        await hook!.actions.submitPoll([]);
+      } catch (error) {
+        pollError = error;
+      }
     });
     expect((pollError as Error).message).toContain("no pending poll");
 
@@ -252,11 +332,13 @@ describe("useDelegationChain over a real gateway", () => {
     // StrictMode double-invokes effects: mount → cleanup (store.dispose) →
     // mount again against the disposed store → the epoch bump recreates it.
     const harness = await mountHarness();
-    await harness.render(createElement(
-      StrictMode,
-      null,
-      createElement(SmithersGatewayProvider, { client: client(baseUrl) }, createElement(Probe)),
-    ));
+    await harness.render(
+      createElement(
+        StrictMode,
+        null,
+        createElement(SmithersGatewayProvider, { client: client(baseUrl) }, createElement(Probe)),
+      ),
+    );
     await waitFor(() => hook !== undefined && hook.loading === false, "strict-mode delegation settles");
     expect(hook!.graph).toBeDefined();
     await harness.unmount();

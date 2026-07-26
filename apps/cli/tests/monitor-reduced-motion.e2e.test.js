@@ -50,60 +50,75 @@ async function waitForHealth(base, timeoutMs = 30_000) {
   throw new Error(`Gateway did not become healthy at ${base}`);
 }
 
-browserTest("monitor honors reduced motion while retaining normal motion", async () => {
-  const repo = createTempRepo();
-  writeTestWorkflow(repo, ".smithers/workflows/basic.tsx");
-  const port = await findOpenPort();
-  const base = `http://127.0.0.1:${port}`;
-  const gateway = spawn(process.execPath, ["run", CLI_ENTRY, "gateway", "--host", "127.0.0.1", "--port", String(port)], {
-    cwd: repo.dir,
-    env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
-    stdio: "ignore",
-  });
+browserTest(
+  "monitor honors reduced motion while retaining normal motion",
+  async () => {
+    const repo = createTempRepo();
+    writeTestWorkflow(repo, ".smithers/workflows/basic.tsx");
+    const port = await findOpenPort();
+    const base = `http://127.0.0.1:${port}`;
+    const gateway = spawn(
+      process.execPath,
+      ["run", CLI_ENTRY, "gateway", "--host", "127.0.0.1", "--port", String(port)],
+      {
+        cwd: repo.dir,
+        env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
+        stdio: "ignore",
+      },
+    );
 
-  let browser;
-  try {
-    await waitForHealth(base);
-    browser = await CHROMIUM.launch({ headless: true });
-    const normal = await browser.newPage({ reducedMotion: "no-preference" });
-    const reduced = await browser.newPage({ reducedMotion: "reduce" });
+    let browser;
+    try {
+      await waitForHealth(base);
+      browser = await CHROMIUM.launch({ headless: true });
+      const normal = await browser.newPage({ reducedMotion: "no-preference" });
+      const reduced = await browser.newPage({ reducedMotion: "reduce" });
 
-    await Promise.all([
-      normal.goto(`${base}/monitor`, { waitUntil: "domcontentloaded" }),
-      reduced.goto(`${base}/monitor`, { waitUntil: "domcontentloaded" }),
-    ]);
-    await Promise.all([
-      normal.waitForSelector(".mon-panel"),
-      reduced.waitForSelector(".mon-panel"),
-      normal.waitForSelector("button.sui-button"),
-      reduced.waitForSelector("button.sui-button"),
-    ]);
+      await Promise.all([
+        normal.goto(`${base}/monitor`, { waitUntil: "domcontentloaded" }),
+        reduced.goto(`${base}/monitor`, { waitUntil: "domcontentloaded" }),
+      ]);
+      await Promise.all([
+        normal.waitForSelector(".mon-panel"),
+        reduced.waitForSelector(".mon-panel"),
+        normal.waitForSelector("button.sui-button"),
+        reduced.waitForSelector("button.sui-button"),
+      ]);
 
-    const styles = async (page) => page.evaluate(() => {
-      const panel = document.querySelector(".mon-panel");
-      const refresh = document.querySelector("button.sui-button");
-      if (!(panel instanceof HTMLElement) || !(refresh instanceof HTMLElement)) throw new Error("Monitor controls did not mount");
-      const durationMs = (value) => value.endsWith("ms") ? Number.parseFloat(value) : Number.parseFloat(value) * 1_000;
-      return {
-        preference: matchMedia("(prefers-reduced-motion: reduce)").matches,
-        panelAnimationMs: durationMs(getComputedStyle(panel).animationDuration),
-        controlTransitionMs: durationMs(getComputedStyle(refresh).transitionDuration),
-      };
-    });
+      const styles = async (page) =>
+        page.evaluate(() => {
+          const panel = document.querySelector(".mon-panel");
+          const refresh = document.querySelector("button.sui-button");
+          if (!(panel instanceof HTMLElement) || !(refresh instanceof HTMLElement))
+            throw new Error("Monitor controls did not mount");
+          const durationMs = (value) =>
+            value.endsWith("ms") ? Number.parseFloat(value) : Number.parseFloat(value) * 1_000;
+          return {
+            preference: matchMedia("(prefers-reduced-motion: reduce)").matches,
+            panelAnimationMs: durationMs(getComputedStyle(panel).animationDuration),
+            controlTransitionMs: durationMs(getComputedStyle(refresh).transitionDuration),
+          };
+        });
 
-    const normalStyles = await styles(normal);
-    const reducedStyles = await styles(reduced);
-    expect(normalStyles.preference).toBe(false);
-    expect(normalStyles.panelAnimationMs).toBe(140);
-    // The control recipe ships pressed-state feedback as a 120ms transition;
-    // reduced motion clamps the shared control sheet's transition duration in
-    // the browser.
-    expect(normalStyles.controlTransitionMs).toBe(120);
-    expect(reducedStyles.preference).toBe(true);
-    expect(reducedStyles.panelAnimationMs).toBe(0.001);
-    expect(reducedStyles.controlTransitionMs).toBe(0.001);
-  } finally {
-    try { await browser?.close(); } catch {}
-    try { gateway.kill("SIGTERM"); } catch {}
-  }
-}, 120_000);
+      const normalStyles = await styles(normal);
+      const reducedStyles = await styles(reduced);
+      expect(normalStyles.preference).toBe(false);
+      expect(normalStyles.panelAnimationMs).toBe(140);
+      // The control recipe ships pressed-state feedback as a 120ms transition;
+      // reduced motion clamps the shared control sheet's transition duration in
+      // the browser.
+      expect(normalStyles.controlTransitionMs).toBe(120);
+      expect(reducedStyles.preference).toBe(true);
+      expect(reducedStyles.panelAnimationMs).toBe(0.001);
+      expect(reducedStyles.controlTransitionMs).toBe(0.001);
+    } finally {
+      try {
+        await browser?.close();
+      } catch {}
+      try {
+        gateway.kill("SIGTERM");
+      } catch {}
+    }
+  },
+  120_000,
+);

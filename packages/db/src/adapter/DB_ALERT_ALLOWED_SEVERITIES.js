@@ -1,5 +1,1 @@
-export const DB_ALERT_ALLOWED_SEVERITIES = [
-    "info",
-    "warning",
-    "critical",
-];
+export const DB_ALERT_ALLOWED_SEVERITIES = ["info", "warning", "critical"];

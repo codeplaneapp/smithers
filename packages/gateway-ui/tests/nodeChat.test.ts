@@ -35,9 +35,17 @@ describe("buildNodeChatTranscript", () => {
   test("merges tool started/completed phases by action id", () => {
     const transcript = buildNodeChatTranscript(
       [
-        agentAction("implement", { kind: "tool", id: "t1", title: "Bash", detail: { input: { cmd: "bun test" } } }, { phase: "started" }),
+        agentAction(
+          "implement",
+          { kind: "tool", id: "t1", title: "Bash", detail: { input: { cmd: "bun test" } } },
+          { phase: "started" },
+        ),
         output("implement", "running tests…"),
-        agentAction("implement", { kind: "tool", id: "t1", title: "Bash", detail: { output: "0 failures" } }, { phase: "completed" }),
+        agentAction(
+          "implement",
+          { kind: "tool", id: "t1", title: "Bash", detail: { output: "0 failures" } },
+          { phase: "completed" },
+        ),
       ],
       "implement",
     );
@@ -55,7 +63,10 @@ describe("buildNodeChatTranscript", () => {
       [
         agentAction("implement", { kind: "reasoning" }, { message: "I should check the tests." }),
         output("implement", "warning: deprecated", { stream: "stderr" }),
-        agentAction("implement", { kind: "file_change", detail: { changes: [{ file: "src/a.ts" }, { file: "src/b.ts" }] } }),
+        agentAction("implement", {
+          kind: "file_change",
+          detail: { changes: [{ file: "src/a.ts" }, { file: "src/b.ts" }] },
+        }),
       ],
       "implement",
     );

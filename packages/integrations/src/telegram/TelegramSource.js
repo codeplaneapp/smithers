@@ -24,7 +24,7 @@ const DEFAULT_POLL_TIMEOUT_SECONDS = 25;
  * @returns {string}
  */
 export function telegramChatCorrelationId(chatId) {
-    return `chat:${chatId}`;
+  return `chat:${chatId}`;
 }
 
 /**
@@ -34,7 +34,7 @@ export function telegramChatCorrelationId(chatId) {
  * @returns {string}
  */
 export function telegramThreadCorrelationId(chatId, threadId) {
-    return `chat:${chatId}:thread:${threadId}`;
+  return `chat:${chatId}:thread:${threadId}`;
 }
 
 /**
@@ -54,97 +54,95 @@ export function telegramThreadCorrelationId(chatId, threadId) {
  * @returns {import("../core/ExternalEventTypes.ts").ExternalEvent[]}
  */
 export function telegramUpdateToEvents(sourceId, update, receivedAtMs) {
-    const updateId = update.update_id;
-    /** @type {import("../core/ExternalEventTypes.ts").ExternalEvent[]} */
-    const events = [];
-    /**
+  const updateId = update.update_id;
+  /** @type {import("../core/ExternalEventTypes.ts").ExternalEvent[]} */
+  const events = [];
+  /**
    * @param {string} eventName
    * @param {Record<string, any>} message
    */
-    const pushMessageEvents = (eventName, message) => {
-        const chatId = message?.chat?.id;
-        if (chatId == null) {
-            return;
-        }
+  const pushMessageEvents = (eventName, message) => {
+    const chatId = message?.chat?.id;
+    if (chatId == null) {
+      return;
+    }
+    events.push({
+      source: sourceId,
+      eventName,
+      correlationId: telegramChatCorrelationId(chatId),
+      payload: message,
+      dedupeKey: `update:${updateId}`,
+      receivedAtMs,
+    });
+    // Emit a thread-scoped variant whenever the message carries a thread id
+    // (forum topic OR reply thread), matching the listener which builds a
+    // thread correlation for any threadId it is given.
+    if (message.message_thread_id != null) {
+      events.push({
+        source: sourceId,
+        eventName,
+        correlationId: telegramThreadCorrelationId(chatId, message.message_thread_id),
+        payload: message,
+        dedupeKey: `update:${updateId}:thread`,
+        receivedAtMs,
+      });
+    }
+  };
+  if (update.message) {
+    pushMessageEvents(TELEGRAM_MESSAGE_EVENT, update.message);
+    // A reply-keyboard Mini App's Telegram.WebApp.sendData arrives as a
+    // normal message carrying a web_app_data field. Emit an extra,
+    // separately-deduped event so a run can wait specifically for
+    // structured Mini App data (payload = the same Message).
+    if (update.message.web_app_data) {
+      const chatId = update.message?.chat?.id;
+      if (chatId != null) {
         events.push({
-            source: sourceId,
-            eventName,
-            correlationId: telegramChatCorrelationId(chatId),
-            payload: message,
-            dedupeKey: `update:${updateId}`,
-            receivedAtMs,
+          source: sourceId,
+          eventName: TELEGRAM_WEB_APP_DATA_EVENT,
+          correlationId: telegramChatCorrelationId(chatId),
+          payload: update.message,
+          dedupeKey: `update:${updateId}:webappdata`,
+          receivedAtMs,
         });
-        // Emit a thread-scoped variant whenever the message carries a thread id
-        // (forum topic OR reply thread), matching the listener which builds a
-        // thread correlation for any threadId it is given.
-        if (message.message_thread_id != null) {
-            events.push({
-                source: sourceId,
-                eventName,
-                correlationId: telegramThreadCorrelationId(chatId, message.message_thread_id),
-                payload: message,
-                dedupeKey: `update:${updateId}:thread`,
-                receivedAtMs,
-            });
-        }
-    };
-    if (update.message) {
-        pushMessageEvents(TELEGRAM_MESSAGE_EVENT, update.message);
-        // A reply-keyboard Mini App's Telegram.WebApp.sendData arrives as a
-        // normal message carrying a web_app_data field. Emit an extra,
-        // separately-deduped event so a run can wait specifically for
-        // structured Mini App data (payload = the same Message).
-        if (update.message.web_app_data) {
-            const chatId = update.message?.chat?.id;
-            if (chatId != null) {
-                events.push({
-                    source: sourceId,
-                    eventName: TELEGRAM_WEB_APP_DATA_EVENT,
-                    correlationId: telegramChatCorrelationId(chatId),
-                    payload: update.message,
-                    dedupeKey: `update:${updateId}:webappdata`,
-                    receivedAtMs,
-                });
-                if (update.message.message_thread_id != null) {
-                    events.push({
-                        source: sourceId,
-                        eventName: TELEGRAM_WEB_APP_DATA_EVENT,
-                        correlationId: telegramThreadCorrelationId(chatId, update.message.message_thread_id),
-                        payload: update.message,
-                        dedupeKey: `update:${updateId}:webappdata:thread`,
-                        receivedAtMs,
-                    });
-                }
-            }
-        }
-    }
-    else if (update.edited_message) {
-        pushMessageEvents(TELEGRAM_EDITED_MESSAGE_EVENT, update.edited_message);
-    }
-    else if (update.callback_query) {
-        const callbackQuery = update.callback_query;
-        const chatId = callbackQuery?.message?.chat?.id;
-        events.push({
+        if (update.message.message_thread_id != null) {
+          events.push({
             source: sourceId,
-            eventName: TELEGRAM_CALLBACK_QUERY_EVENT,
-            correlationId: chatId != null ? telegramChatCorrelationId(chatId) : null,
-            payload: callbackQuery,
-            dedupeKey: `update:${updateId}`,
+            eventName: TELEGRAM_WEB_APP_DATA_EVENT,
+            correlationId: telegramThreadCorrelationId(chatId, update.message.message_thread_id),
+            payload: update.message,
+            dedupeKey: `update:${updateId}:webappdata:thread`,
             receivedAtMs,
-        });
-        const threadId = callbackQuery?.message?.message_thread_id;
-        if (chatId != null && threadId != null) {
-            events.push({
-                source: sourceId,
-                eventName: TELEGRAM_CALLBACK_QUERY_EVENT,
-                correlationId: telegramThreadCorrelationId(chatId, threadId),
-                payload: callbackQuery,
-                dedupeKey: `update:${updateId}:thread`,
-                receivedAtMs,
-            });
+          });
         }
+      }
     }
-    return events;
+  } else if (update.edited_message) {
+    pushMessageEvents(TELEGRAM_EDITED_MESSAGE_EVENT, update.edited_message);
+  } else if (update.callback_query) {
+    const callbackQuery = update.callback_query;
+    const chatId = callbackQuery?.message?.chat?.id;
+    events.push({
+      source: sourceId,
+      eventName: TELEGRAM_CALLBACK_QUERY_EVENT,
+      correlationId: chatId != null ? telegramChatCorrelationId(chatId) : null,
+      payload: callbackQuery,
+      dedupeKey: `update:${updateId}`,
+      receivedAtMs,
+    });
+    const threadId = callbackQuery?.message?.message_thread_id;
+    if (chatId != null && threadId != null) {
+      events.push({
+        source: sourceId,
+        eventName: TELEGRAM_CALLBACK_QUERY_EVENT,
+        correlationId: telegramThreadCorrelationId(chatId, threadId),
+        payload: callbackQuery,
+        dedupeKey: `update:${updateId}:thread`,
+        receivedAtMs,
+      });
+    }
+  }
+  return events;
 }
 
 /**
@@ -153,10 +151,9 @@ export function telegramUpdateToEvents(sourceId, update, receivedAtMs) {
  * @returns {number | string | null}
  */
 function updateChatId(update) {
-    return (update.message?.chat?.id ??
-        update.edited_message?.chat?.id ??
-        update.callback_query?.message?.chat?.id ??
-        null);
+  return (
+    update.message?.chat?.id ?? update.edited_message?.chat?.id ?? update.callback_query?.message?.chat?.id ?? null
+  );
 }
 
 /**
@@ -172,50 +169,73 @@ function updateChatId(update) {
  * @returns {import("../core/EventSourceTypes.ts").EventSource}
  */
 export function makeTelegramSource(options) {
-    const { sourceId = TELEGRAM_SERVICE, cursorStore, pollTimeoutSeconds = DEFAULT_POLL_TIMEOUT_SECONDS, schedule = Schedule.spaced("250 millis"), allowedUpdates = DEFAULT_ALLOWED_UPDATES, allowedChatIds, ...clientConfig } = options;
-    const client = makeTelegramClient(clientConfig);
-    const allowedChats = allowedChatIds
-        ? new Set(allowedChatIds.map((id) => String(id)))
-        : null;
-    return makePollingSource({
-        id: sourceId,
-        cursorStore,
-        schedule,
-        poll: (cursor) => Effect.gen(function* () {
-            /** @type {Record<string, unknown>} */
-            const params = {
-                timeout: pollTimeoutSeconds,
-                allowed_updates: allowedUpdates,
-            };
-            const offset = cursor != null ? Number(cursor) : Number.NaN;
-            if (Number.isFinite(offset)) {
-                params.offset = offset;
-            }
-            const result = yield* client.call("getUpdates", params).pipe(Effect.mapError((cause) => new IntegrationError("poll-failed", `Telegram getUpdates failed for source "${sourceId}".`, { sourceId }, { cause })));
-            const updates = Array.isArray(result) ? result : [];
-            const receivedAtMs = Date.now();
-            /** @type {import("../core/ExternalEventTypes.ts").ExternalEvent[]} */
-            const events = [];
-            let maxUpdateId = null;
-            for (const update of updates) {
-                const updateId = update?.update_id;
-                if (typeof updateId !== "number") {
-                    continue;
-                }
-                maxUpdateId = maxUpdateId == null ? updateId : Math.max(maxUpdateId, updateId);
-                const chatId = updateChatId(update);
-                if (allowedChats && chatId != null && !allowedChats.has(String(chatId))) {
-                    logInfo("telegram update dropped (chat not allowed)", { sourceId, updateId, chatId: String(chatId) }, "integrations:telegram");
-                    continue;
-                }
-                events.push(...telegramUpdateToEvents(sourceId, update, receivedAtMs));
-            }
-            return {
-                events,
-                // Propose the Bot API acknowledgement offset. makePollingSource
-                // commits it only after deliverEvents finishes the whole batch.
-                ...(maxUpdateId != null ? { cursor: String(maxUpdateId + 1) } : {}),
-            };
-        }),
-    });
+  const {
+    sourceId = TELEGRAM_SERVICE,
+    cursorStore,
+    pollTimeoutSeconds = DEFAULT_POLL_TIMEOUT_SECONDS,
+    schedule = Schedule.spaced("250 millis"),
+    allowedUpdates = DEFAULT_ALLOWED_UPDATES,
+    allowedChatIds,
+    ...clientConfig
+  } = options;
+  const client = makeTelegramClient(clientConfig);
+  const allowedChats = allowedChatIds ? new Set(allowedChatIds.map((id) => String(id))) : null;
+  return makePollingSource({
+    id: sourceId,
+    cursorStore,
+    schedule,
+    poll: (cursor) =>
+      Effect.gen(function* () {
+        /** @type {Record<string, unknown>} */
+        const params = {
+          timeout: pollTimeoutSeconds,
+          allowed_updates: allowedUpdates,
+        };
+        const offset = cursor != null ? Number(cursor) : Number.NaN;
+        if (Number.isFinite(offset)) {
+          params.offset = offset;
+        }
+        const result = yield* client
+          .call("getUpdates", params)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new IntegrationError(
+                  "poll-failed",
+                  `Telegram getUpdates failed for source "${sourceId}".`,
+                  { sourceId },
+                  { cause },
+                ),
+            ),
+          );
+        const updates = Array.isArray(result) ? result : [];
+        const receivedAtMs = Date.now();
+        /** @type {import("../core/ExternalEventTypes.ts").ExternalEvent[]} */
+        const events = [];
+        let maxUpdateId = null;
+        for (const update of updates) {
+          const updateId = update?.update_id;
+          if (typeof updateId !== "number") {
+            continue;
+          }
+          maxUpdateId = maxUpdateId == null ? updateId : Math.max(maxUpdateId, updateId);
+          const chatId = updateChatId(update);
+          if (allowedChats && chatId != null && !allowedChats.has(String(chatId))) {
+            logInfo(
+              "telegram update dropped (chat not allowed)",
+              { sourceId, updateId, chatId: String(chatId) },
+              "integrations:telegram",
+            );
+            continue;
+          }
+          events.push(...telegramUpdateToEvents(sourceId, update, receivedAtMs));
+        }
+        return {
+          events,
+          // Propose the Bot API acknowledgement offset. makePollingSource
+          // commits it only after deliverEvents finishes the whole batch.
+          ...(maxUpdateId != null ? { cursor: String(maxUpdateId + 1) } : {}),
+        };
+      }),
+  });
 }

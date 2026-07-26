@@ -88,8 +88,7 @@ export function MessageFooter({ className, ...props }: ComponentProps<"div">) {
   return <div data-slot="message-footer" className={cn("sui-msg-footer", className)} {...props} />;
 }
 
-const FOCUSABLE_SELECTOR =
-  "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])";
+const FOCUSABLE_SELECTOR = "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])";
 
 export type MessageActionsProps = ComponentProps<"div">;
 
@@ -147,12 +146,5 @@ export function MessageActions({ className, onKeyDown, ...props }: MessageAction
 /** Vertical cluster of consecutive same-author messages. */
 export function MessageGroup({ className, ...props }: ComponentProps<"div">) {
   useMessageLaneCss();
-  return (
-    <div
-      data-slot="message-group"
-      role="group"
-      className={cn("sui-msg-group", className)}
-      {...props}
-    />
-  );
+  return <div data-slot="message-group" role="group" className={cn("sui-msg-group", className)} {...props} />;
 }

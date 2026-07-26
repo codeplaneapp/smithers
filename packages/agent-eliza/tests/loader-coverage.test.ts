@@ -23,11 +23,7 @@ describe("loadWorkflowsFromDir — dangling symlink", () => {
   test("skips a dangling symlink with a diagnostic instead of aborting the whole directory", async () => {
     const dir = mkdtempSync(join(tmpdir(), "smithers-loader-cov-"));
     // A valid workflow file that must still be discovered.
-    writeFileSync(
-      join(dir, "good.js"),
-      "export default { name: 'good', steps: [] };",
-      "utf8",
-    );
+    writeFileSync(join(dir, "good.js"), "export default { name: 'good', steps: [] };", "utf8");
     // A symlink pointing at a non-existent target -> statSync throws ENOENT.
     symlinkSync(join(dir, "missing-target.js"), join(dir, "broken.js"));
 
@@ -63,11 +59,7 @@ describe("workflow paths with URL-significant characters", () => {
   test("loads files containing '#' through directory and explicit-path APIs", async () => {
     const dir = mkdtempSync(join(tmpdir(), "smithers-loader-url-path-"));
     const filePath = join(dir, "workflow#query.js");
-    writeFileSync(
-      filePath,
-      `export default { workflow: {}, name: "url-safe", description: "URL-safe" };`,
-      "utf8",
-    );
+    writeFileSync(filePath, `export default { workflow: {}, name: "url-safe", description: "URL-safe" };`, "utf8");
 
     const fromDir = await loadWorkflowsFromDir({ dir, source: "test" });
     expect(fromDir.diagnostics).toHaveLength(0);
@@ -129,7 +121,7 @@ describe("loadWorkflows — includeDefaults managed + project dirs", () => {
     writeFileSync(
       join(managed, "managed-wf.js"),
       `export default { workflow: {}, name: "managed-wf", description: "Managed" };`,
-      "utf8"
+      "utf8",
     );
 
     // Project dir <cwd>/.smithers/workflows (existsSync true) — covers the
@@ -139,7 +131,7 @@ describe("loadWorkflows — includeDefaults managed + project dirs", () => {
     writeFileSync(
       join(projectDir, "project-wf.js"),
       `export default { workflow: {}, name: "project-wf", description: "Project" };`,
-      "utf8"
+      "utf8",
     );
 
     const result = await loadWorkflows({

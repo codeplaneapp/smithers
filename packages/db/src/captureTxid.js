@@ -15,7 +15,7 @@ const txidCaptureStorage = new AsyncLocalStorage();
  * @returns {value is TxidCapture}
  */
 function isTxidCapture(value) {
-    return Boolean(value && typeof value === "object" && value[TXID_CAPTURE_MARKER] === true);
+  return Boolean(value && typeof value === "object" && value[TXID_CAPTURE_MARKER] === true);
 }
 
 /**
@@ -23,7 +23,7 @@ function isTxidCapture(value) {
  * @returns {txid is string}
  */
 function isNumericTxid(txid) {
-    return typeof txid === "string" && /^\d+$/.test(txid);
+  return typeof txid === "string" && /^\d+$/.test(txid);
 }
 
 /**
@@ -31,20 +31,20 @@ function isNumericTxid(txid) {
  * @returns {Promise<boolean>}
  */
 export async function isRealPostgresAdapter(adapter) {
-    const storage = adapter?.internalStorage;
-    if (!storage || storage.dialect !== POSTGRES || typeof storage.queryOneRaw !== "function") {
-        return false;
-    }
-    const storageKey = /** @type {object} */ (storage);
-    const cached = realPostgresCache.get(storageKey);
-    if (cached !== undefined) {
-        return cached;
-    }
-    const versionRow = await storage.queryOneRaw("SELECT version() AS version");
-    const version = typeof versionRow?.version === "string" ? versionRow.version : "";
-    const realPostgres = !PGLITE_VERSION_PATTERN.test(version);
-    realPostgresCache.set(storageKey, realPostgres);
-    return realPostgres;
+  const storage = adapter?.internalStorage;
+  if (!storage || storage.dialect !== POSTGRES || typeof storage.queryOneRaw !== "function") {
+    return false;
+  }
+  const storageKey = /** @type {object} */ (storage);
+  const cached = realPostgresCache.get(storageKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const versionRow = await storage.queryOneRaw("SELECT version() AS version");
+  const version = typeof versionRow?.version === "string" ? versionRow.version : "";
+  const realPostgres = !PGLITE_VERSION_PATTERN.test(version);
+  realPostgresCache.set(storageKey, realPostgres);
+  return realPostgres;
 }
 
 /**
@@ -52,12 +52,12 @@ export async function isRealPostgresAdapter(adapter) {
  * @returns {TxidCapture}
  */
 export function createTxidCapture(adapter) {
-    return {
-        [TXID_CAPTURE_MARKER]: true,
-        adapter,
-        txid: null,
-        waiters: new Set(),
-    };
+  return {
+    [TXID_CAPTURE_MARKER]: true,
+    adapter,
+    txid: null,
+    waiters: new Set(),
+  };
 }
 
 /**
@@ -67,7 +67,7 @@ export function createTxidCapture(adapter) {
  * @returns {Promise<T>}
  */
 export function runWithTxidCapture(capture, fn) {
-    return txidCaptureStorage.run(capture, fn);
+  return txidCaptureStorage.run(capture, fn);
 }
 
 /**
@@ -75,8 +75,8 @@ export function runWithTxidCapture(capture, fn) {
  * @returns {boolean}
  */
 export function hasActiveTxidCapture(adapter) {
-    const capture = txidCaptureStorage.getStore();
-    return isTxidCapture(capture) && capture.adapter === adapter;
+  const capture = txidCaptureStorage.getStore();
+  return isTxidCapture(capture) && capture.adapter === adapter;
 }
 
 /**
@@ -84,10 +84,10 @@ export function hasActiveTxidCapture(adapter) {
  * @returns {Promise<boolean>}
  */
 export async function shouldCapturePostgresTxid(adapter) {
-    if (!hasActiveTxidCapture(/** @type {object} */ (adapter))) {
-        return false;
-    }
-    return isRealPostgresAdapter(adapter);
+  if (!hasActiveTxidCapture(/** @type {object} */ (adapter))) {
+    return false;
+  }
+  return isRealPostgresAdapter(adapter);
 }
 
 /**
@@ -99,16 +99,16 @@ export async function shouldCapturePostgresTxid(adapter) {
  * @returns {Promise<string | null>}
  */
 export async function capturePostgresTransactionTxid(adapter) {
-    const storage = adapter?.internalStorage;
-    if (!storage || storage.dialect !== POSTGRES || typeof storage.queryOneRaw !== "function") {
-        return null;
-    }
-    if (!(await isRealPostgresAdapter(adapter))) {
-        return null;
-    }
-    const row = await storage.queryOneRaw("SELECT pg_current_xact_id()::xid::text AS txid");
-    const txid = typeof row?.txid === "string" ? row.txid : null;
-    return isNumericTxid(txid) ? txid : null;
+  const storage = adapter?.internalStorage;
+  if (!storage || storage.dialect !== POSTGRES || typeof storage.queryOneRaw !== "function") {
+    return null;
+  }
+  if (!(await isRealPostgresAdapter(adapter))) {
+    return null;
+  }
+  const row = await storage.queryOneRaw("SELECT pg_current_xact_id()::xid::text AS txid");
+  const txid = typeof row?.txid === "string" ? row.txid : null;
+  return isNumericTxid(txid) ? txid : null;
 }
 
 /**
@@ -116,18 +116,18 @@ export async function capturePostgresTransactionTxid(adapter) {
  * @param {string | null} txid
  */
 export function recordCommittedTxid(adapter, txid) {
-    if (!isNumericTxid(txid)) {
-        return;
-    }
-    const capture = txidCaptureStorage.getStore();
-    if (!isTxidCapture(capture) || capture.adapter !== adapter || capture.txid !== null) {
-        return;
-    }
-    capture.txid = txid;
-    for (const resolve of capture.waiters) {
-        resolve(txid);
-    }
-    capture.waiters.clear();
+  if (!isNumericTxid(txid)) {
+    return;
+  }
+  const capture = txidCaptureStorage.getStore();
+  if (!isTxidCapture(capture) || capture.adapter !== adapter || capture.txid !== null) {
+    return;
+  }
+  capture.txid = txid;
+  for (const resolve of capture.waiters) {
+    resolve(txid);
+  }
+  capture.waiters.clear();
 }
 
 /**
@@ -139,25 +139,25 @@ export function recordCommittedTxid(adapter, txid) {
  * @returns {Promise<string | null>}
  */
 export async function captureTxid(capture, options = {}) {
-    if (!isTxidCapture(capture)) {
-        return null;
-    }
-    if (isNumericTxid(capture.txid)) {
-        return capture.txid;
-    }
-    const waitMs = options.waitMs ?? 0;
-    if (waitMs <= 0) {
-        return null;
-    }
-    return await new Promise((resolve) => {
-        const timer = setTimeout(() => {
-            capture.waiters.delete(waiter);
-            resolve(null);
-        }, waitMs);
-        const waiter = (txid) => {
-            clearTimeout(timer);
-            resolve(txid);
-        };
-        capture.waiters.add(waiter);
-    });
+  if (!isTxidCapture(capture)) {
+    return null;
+  }
+  if (isNumericTxid(capture.txid)) {
+    return capture.txid;
+  }
+  const waitMs = options.waitMs ?? 0;
+  if (waitMs <= 0) {
+    return null;
+  }
+  return await new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      capture.waiters.delete(waiter);
+      resolve(null);
+    }, waitMs);
+    const waiter = (txid) => {
+      clearTimeout(timer);
+      resolve(txid);
+    };
+    capture.waiters.add(waiter);
+  });
 }

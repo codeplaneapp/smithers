@@ -69,7 +69,9 @@ describe("Commit", () => {
     expect(container!.querySelector("time")!.getAttribute("dateTime")).toBe(new Date(1_750_000_000_000).toISOString());
     const files = container!.querySelectorAll('[data-slot="commit-file"]');
     expect(files).toHaveLength(5);
-    const glyphs = [...container!.querySelectorAll('[data-slot="commit-file-status"] [aria-hidden="true"]')].map((el) => el.textContent);
+    const glyphs = [...container!.querySelectorAll('[data-slot="commit-file-status"] [aria-hidden="true"]')].map(
+      (el) => el.textContent,
+    );
     expect(glyphs).toEqual(["A", "M", "R", "D", "C"]);
     expect(container!.textContent).toContain("src/old.ts");
     expect(container!.textContent).toContain("+10");

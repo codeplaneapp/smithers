@@ -29,10 +29,8 @@ export type ActivityItemModel = {
   actor?: string;
 };
 
-export type ActivityTimelineProps = Omit<ComponentProps<"div">, "children"> & (
-  | { items: readonly ActivityItemModel[]; children?: never }
-  | { children: ReactNode; items?: never }
-);
+export type ActivityTimelineProps = Omit<ComponentProps<"div">, "children"> &
+  ({ items: readonly ActivityItemModel[]; children?: never } | { children: ReactNode; items?: never });
 
 const ACTIVITY_GLYPHS: Record<ActivityKind, string> = {
   message: "✉",
@@ -89,19 +87,19 @@ export function ActivityItem({
       className={cn("sui-activity-item", className)}
       {...props}
     >
-      <span className="sui-activity-marker" aria-hidden="true">{ACTIVITY_GLYPHS[kind]}</span>
+      <span className="sui-activity-marker" aria-hidden="true">
+        {ACTIVITY_GLYPHS[kind]}
+      </span>
       <div className="sui-activity-body">
-        {status !== undefined ? (
-          <span className="sui-sr-only">{formatStatus(status)}: </span>
-        ) : null}
+        {status !== undefined ? <span className="sui-sr-only">{formatStatus(status)}: </span> : null}
         <span className="sui-activity-title">{title}</span>
         {actor !== undefined ? <span className="sui-activity-actor">{actor}</span> : null}
         {timestamp !== undefined ? (
-          <time className="sui-activity-time" dateTime={timestamp.dateTime}>{timestamp.text}</time>
+          <time className="sui-activity-time" dateTime={timestamp.dateTime}>
+            {timestamp.text}
+          </time>
         ) : null}
-        {children !== undefined && children !== null ? (
-          <div className="sui-activity-detail">{children}</div>
-        ) : null}
+        {children !== undefined && children !== null ? <div className="sui-activity-detail">{children}</div> : null}
       </div>
     </li>
   );
@@ -116,11 +114,7 @@ export type ActivityGroupProps = Omit<ComponentProps<"li">, "children" | "title"
 export function ActivityGroup({ label, className, children, ...props }: ActivityGroupProps) {
   useActivityCss();
   return (
-    <li
-      data-slot="activity-group"
-      className={cn("sui-activity-group", className)}
-      {...props}
-    >
+    <li data-slot="activity-group" className={cn("sui-activity-group", className)} {...props}>
       <div className="sui-activity-group-label">{label}</div>
       <ol className="sui-activity-group-items">{children}</ol>
     </li>

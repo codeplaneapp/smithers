@@ -111,10 +111,7 @@ describe("WorkflowGraph", () => {
   });
 
   test("derives ReactFlow colorMode from the shared reactive theme contract", () => {
-    const source = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), "../src/WorkflowGraph.tsx"),
-      "utf8",
-    );
+    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/WorkflowGraph.tsx"), "utf8");
     expect(source).toContain("useSyncExternalStore<ResolvedTheme>(subscribeTheme, resolveTheme");
     expect(source).toContain("colorMode={colorMode}");
     expect(source).not.toContain('colorMode="system"');

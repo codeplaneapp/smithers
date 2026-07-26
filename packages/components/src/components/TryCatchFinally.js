@@ -16,26 +16,25 @@ import { forceContinueOnFail } from "./control-flow-utils.js";
  * @param {TryCatchFinallyProps} props
  */
 export function TryCatchFinally(props) {
-    if (props.skipIf)
-        return null;
-    const { id, catch: catchHandler, catchErrors, finally: finallyHandler } = props;
-    const tryBlock = forceContinueOnFail(props.try);
-    const catchBlock = catchHandler && typeof catchHandler !== "function" ? catchHandler : null;
-    const hostProps = {
-        id,
-        // Serialized copy for the plan tree: the reconciler's XML snapshot only
-        // keeps scalar, non-dunder props, so the scheduler's catchErrors gate
-        // reads this comma-joined string rather than __tcfCatchErrors.
-        catchErrors: Array.isArray(catchErrors) && catchErrors.length > 0
-            ? catchErrors.join(",")
-            : undefined,
-        __tcfCatchErrors: catchErrors,
-        __tcfCatchHandler: catchHandler,
-        __tcfFinallyHandler: finallyHandler,
-    };
-    return React.createElement("smithers:try-catch-finally", hostProps, React.createElement("smithers:tcf-try", null, tryBlock), catchBlock
-        ? React.createElement("smithers:tcf-catch", null, catchBlock)
-        : null, finallyHandler
-        ? React.createElement("smithers:tcf-finally", null, finallyHandler)
-        : null);
+  if (props.skipIf) return null;
+  const { id, catch: catchHandler, catchErrors, finally: finallyHandler } = props;
+  const tryBlock = forceContinueOnFail(props.try);
+  const catchBlock = catchHandler && typeof catchHandler !== "function" ? catchHandler : null;
+  const hostProps = {
+    id,
+    // Serialized copy for the plan tree: the reconciler's XML snapshot only
+    // keeps scalar, non-dunder props, so the scheduler's catchErrors gate
+    // reads this comma-joined string rather than __tcfCatchErrors.
+    catchErrors: Array.isArray(catchErrors) && catchErrors.length > 0 ? catchErrors.join(",") : undefined,
+    __tcfCatchErrors: catchErrors,
+    __tcfCatchHandler: catchHandler,
+    __tcfFinallyHandler: finallyHandler,
+  };
+  return React.createElement(
+    "smithers:try-catch-finally",
+    hostProps,
+    React.createElement("smithers:tcf-try", null, tryBlock),
+    catchBlock ? React.createElement("smithers:tcf-catch", null, catchBlock) : null,
+    finallyHandler ? React.createElement("smithers:tcf-finally", null, finallyHandler) : null,
+  );
 }

@@ -1,4 +1,17 @@
-import { Card, CardContent, CardHeader, CardTitle, StatusPill, Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "smithers-orchestrator/ui";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  StatusPill,
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "smithers-orchestrator/ui";
 import type { PublicIssue } from "../types";
 
 /** Transparency footer: every source checked today, ok or not, plus totals. */
@@ -12,8 +25,9 @@ export function CoverageFooter(props: { coverage: PublicIssue["coverage"] }) {
       <CardContent>
         <Table>
           <TableCaption>
-            {coverage.totals.fetched} items fetched · {coverage.totals.inWindow} in the 24h window · {coverage.totals.afterDedupe} after dedupe ·{" "}
-            {coverage.totals.clusters} event clusters · {coverage.totals.assessed} assessed · {coverage.totals.selected} selected
+            {coverage.totals.fetched} items fetched · {coverage.totals.inWindow} in the 24h window ·{" "}
+            {coverage.totals.afterDedupe} after dedupe · {coverage.totals.clusters} event clusters ·{" "}
+            {coverage.totals.assessed} assessed · {coverage.totals.selected} selected
           </TableCaption>
           <TableHeader>
             <TableRow>

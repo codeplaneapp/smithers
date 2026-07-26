@@ -25,35 +25,35 @@ const PROBE_TIMEOUT_MS = 6_000;
  * @returns {Promise<UsageProbe>}
  */
 export async function claudeOauthUsage(account, readCreds = readClaudeCredentials) {
-    const creds = readCreds(account);
-    if (!creds) {
-        return { source: "none", error: "No Claude OAuth credentials in configDir or Keychain" };
+  const creds = readCreds(account);
+  if (!creds) {
+    return { source: "none", error: "No Claude OAuth credentials in configDir or Keychain" };
+  }
+  if (typeof creds.expiresAt === "number" && creds.expiresAt <= Date.now()) {
+    return { source: "none", error: "Claude OAuth token expired; run `claude` to refresh" };
+  }
+  try {
+    const res = await fetch(USAGE_URL, {
+      headers: {
+        Authorization: `Bearer ${creds.accessToken}`,
+        "anthropic-beta": "oauth-2025-04-20",
+        "User-Agent": USER_AGENT,
+        "Content-Type": "application/json",
+      },
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    if (res.status === 401) {
+      return { source: "none", error: "Claude OAuth token rejected (401); run `claude` to refresh" };
     }
-    if (typeof creds.expiresAt === "number" && creds.expiresAt <= Date.now()) {
-        return { source: "none", error: "Claude OAuth token expired; run `claude` to refresh" };
+    if (res.status === 429) {
+      return { source: "none", error: "Claude usage endpoint rate limited (429); try again shortly" };
     }
-    try {
-        const res = await fetch(USAGE_URL, {
-            headers: {
-                Authorization: `Bearer ${creds.accessToken}`,
-                "anthropic-beta": "oauth-2025-04-20",
-                "User-Agent": USER_AGENT,
-                "Content-Type": "application/json",
-            },
-            signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-        });
-        if (res.status === 401) {
-            return { source: "none", error: "Claude OAuth token rejected (401); run `claude` to refresh" };
-        }
-        if (res.status === 429) {
-            return { source: "none", error: "Claude usage endpoint rate limited (429); try again shortly" };
-        }
-        if (!res.ok) {
-            return { source: "none", error: `Claude usage endpoint returned ${res.status}` };
-        }
-        const payload = await res.json();
-        return { source: "oauth", windows: parseClaudeOauthUsage(payload) };
-    } catch (err) {
-        return { source: "none", error: `Claude usage probe failed: ${err instanceof Error ? err.message : String(err)}` };
+    if (!res.ok) {
+      return { source: "none", error: `Claude usage endpoint returned ${res.status}` };
     }
+    const payload = await res.json();
+    return { source: "oauth", windows: parseClaudeOauthUsage(payload) };
+  } catch (err) {
+    return { source: "none", error: `Claude usage probe failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }

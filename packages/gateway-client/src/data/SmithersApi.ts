@@ -59,12 +59,19 @@ export type SmithersApi = {
   cancelRun(params: CancelRunRequest): Promise<ApiMutationResult<CancelRunResponse>>;
   hijackRun(params: HijackRunRequest): Promise<ApiMutationResult<HijackRunResponse>>;
   rewindRun(params: RewindRunRequest): Promise<ApiMutationResult<Record<string, unknown>>>;
-  listRunEvents(params: { runId: string; nodeId?: string; afterSeq?: number; limit?: number }): Promise<GatewayRunEventRow[]>;
+  listRunEvents(params: {
+    runId: string;
+    nodeId?: string;
+    afterSeq?: number;
+    limit?: number;
+  }): Promise<GatewayRunEventRow[]>;
   getRunTree(params: { runId: string; frameNo?: number }): Promise<GatewayRunNode[]>;
   getNodeOutput(params: NodeRequest): Promise<Record<string, unknown>>;
   getNodeDiff(params: NodeRequest): Promise<Record<string, unknown>>;
   listApprovals(params?: ListApprovalsRequest): Promise<ListApprovalsResponse>;
-  submitApproval(params: SubmitApprovalRequest & { approvalId?: string }): Promise<ApiMutationResult<SubmitApprovalResponse>>;
+  submitApproval(
+    params: SubmitApprovalRequest & { approvalId?: string },
+  ): Promise<ApiMutationResult<SubmitApprovalResponse>>;
   submitSignal(params: SubmitSignalRequest): Promise<ApiMutationResult<Record<string, unknown>>>;
   listWorkflows(params?: ListWorkflowsRequest): Promise<ListWorkflowsResponse>;
   getSchemaSignature(): Promise<GetSchemaSignatureResponse>;

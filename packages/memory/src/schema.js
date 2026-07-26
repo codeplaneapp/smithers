@@ -1,7 +1,7 @@
 export {
-    smithersMemoryFacts,
-    smithersMemoryThreads,
-    smithersMemoryMessages,
-    smithersMemoryNotes,
-    smithersMemoryNoteSupersessions,
+  smithersMemoryFacts,
+  smithersMemoryThreads,
+  smithersMemoryMessages,
+  smithersMemoryNotes,
+  smithersMemoryNoteSupersessions,
 } from "@smithers-orchestrator/db/internal-schema";

@@ -11,8 +11,8 @@
 /** @typedef {import("./SmithersObservabilityOptions.ts").SmithersObservabilityOptions} SmithersObservabilityOptions */
 /** @typedef {import("./SmithersObservabilityService.ts").SmithersObservabilityService} SmithersObservabilityService */
 
-export { MetricsService, } from "./_coreMetrics.js";
-export { TracingService, TracingServiceLive, } from "./_coreTracing.js";
+export { MetricsService } from "./_coreMetrics.js";
+export { TracingService, TracingServiceLive } from "./_coreTracing.js";
 export { SmithersObservability } from "./SmithersObservability.js";
 export { prometheusContentType } from "./prometheusContentType.js";
 export { smithersSpanNames } from "./smithersSpanNames.js";
@@ -28,8 +28,109 @@ export { MetricsServiceLive } from "./MetricsServiceLive.js";
 export { createSmithersOtelLayer } from "./createSmithersOtelLayer.js";
 export { createSmithersObservabilityLayer } from "./createSmithersObservabilityLayer.js";
 export { createSmithersRuntimeLayer } from "./createSmithersRuntimeLayer.js";
-export { rewindTotal, rewindRollbackTotal, rewindDurationMs, rewindFramesDeleted, rewindSandboxesReverted, } from "./metrics/index.js";
-export { activeNodes, activeRuns, approvalPending, externalWaitAsyncPending, approvalsDenied, approvalsGranted, approvalsRequested, approvalWaitDuration, timerDelayDuration, timersCancelled, timersCreated, timersFired, timersPending, attemptDuration, cacheHits, cacheMisses, dbQueryDuration, dbRetries, dbTransactionDuration, dbTransactionRetries, dbTransactionRollbacks, errorsTotal, eventsEmittedTotal, hotReloadDuration, hotReloadFailures, hotReloads, httpRequestDuration, httpRequests, nodeDuration, nodeRetriesTotal, nodesFailed, nodesFinished, nodesStarted, processHeapUsedBytes, processMemoryRssBytes, processUptimeSeconds, promptSizeBytes, responseSizeBytes, runDuration, runsCancelledTotal, runsContinuedTotal, runsFailedTotal, runsFinishedTotal, runsResumedTotal, runsAncestryDepth, runsCarriedStateBytes, sandboxActive, sandboxBundleSizeBytes, sandboxCompletedTotal, sandboxCreatedTotal, sandboxDurationMs, sandboxPatchCount, sandboxTransportDurationMs, runsTotal, schedulerConcurrencyUtilization, schedulerQueueDepth, schedulerWaitDuration, tokensCacheReadTotal, tokensCacheWriteTotal, tokensContextWindowBucketTotal, tokensContextWindowPerCall, tokensInputPerCall, tokensInputTotal, tokensOutputPerCall, tokensOutputTotal, tokensReasoningTotal, toolCallErrorsTotal, toolCallsTotal, toolDuration, toolOutputTruncatedTotal, scorerEventsStarted, scorerEventsFinished, scorerEventsFailed, snapshotsCaptured, runForksCreated, replaysStarted, snapshotDuration, trackEvent as trackSmithersEvent, updateProcessMetrics, vcsDuration, toPrometheusMetricName, smithersMetricCatalog, metricsServiceAdapter, } from "./metrics/index.js";
-export { correlationContextFiberRef, correlationContextToLogAnnotations, CorrelationContextLive, CorrelationContextService, getCurrentCorrelationContext, getCurrentCorrelationContextEffect, mergeCorrelationContext, runWithCorrelationContext, withCorrelationContext, withCurrentCorrelationContext, } from "./correlation.js";
+export {
+  rewindTotal,
+  rewindRollbackTotal,
+  rewindDurationMs,
+  rewindFramesDeleted,
+  rewindSandboxesReverted,
+} from "./metrics/index.js";
+export {
+  activeNodes,
+  activeRuns,
+  approvalPending,
+  externalWaitAsyncPending,
+  approvalsDenied,
+  approvalsGranted,
+  approvalsRequested,
+  approvalWaitDuration,
+  timerDelayDuration,
+  timersCancelled,
+  timersCreated,
+  timersFired,
+  timersPending,
+  attemptDuration,
+  cacheHits,
+  cacheMisses,
+  dbQueryDuration,
+  dbRetries,
+  dbTransactionDuration,
+  dbTransactionRetries,
+  dbTransactionRollbacks,
+  errorsTotal,
+  eventsEmittedTotal,
+  hotReloadDuration,
+  hotReloadFailures,
+  hotReloads,
+  httpRequestDuration,
+  httpRequests,
+  nodeDuration,
+  nodeRetriesTotal,
+  nodesFailed,
+  nodesFinished,
+  nodesStarted,
+  processHeapUsedBytes,
+  processMemoryRssBytes,
+  processUptimeSeconds,
+  promptSizeBytes,
+  responseSizeBytes,
+  runDuration,
+  runsCancelledTotal,
+  runsContinuedTotal,
+  runsFailedTotal,
+  runsFinishedTotal,
+  runsResumedTotal,
+  runsAncestryDepth,
+  runsCarriedStateBytes,
+  sandboxActive,
+  sandboxBundleSizeBytes,
+  sandboxCompletedTotal,
+  sandboxCreatedTotal,
+  sandboxDurationMs,
+  sandboxPatchCount,
+  sandboxTransportDurationMs,
+  runsTotal,
+  schedulerConcurrencyUtilization,
+  schedulerQueueDepth,
+  schedulerWaitDuration,
+  tokensCacheReadTotal,
+  tokensCacheWriteTotal,
+  tokensContextWindowBucketTotal,
+  tokensContextWindowPerCall,
+  tokensInputPerCall,
+  tokensInputTotal,
+  tokensOutputPerCall,
+  tokensOutputTotal,
+  tokensReasoningTotal,
+  toolCallErrorsTotal,
+  toolCallsTotal,
+  toolDuration,
+  toolOutputTruncatedTotal,
+  scorerEventsStarted,
+  scorerEventsFinished,
+  scorerEventsFailed,
+  snapshotsCaptured,
+  runForksCreated,
+  replaysStarted,
+  snapshotDuration,
+  trackEvent as trackSmithersEvent,
+  updateProcessMetrics,
+  vcsDuration,
+  toPrometheusMetricName,
+  smithersMetricCatalog,
+  metricsServiceAdapter,
+} from "./metrics/index.js";
+export {
+  correlationContextFiberRef,
+  correlationContextToLogAnnotations,
+  CorrelationContextLive,
+  CorrelationContextService,
+  getCurrentCorrelationContext,
+  getCurrentCorrelationContextEffect,
+  mergeCorrelationContext,
+  runWithCorrelationContext,
+  withCorrelationContext,
+  withCurrentCorrelationContext,
+} from "./correlation.js";
 export { updateCurrentCorrelationContext } from "./correlation.js";
-export { logDebug, logInfo, logWarning, logError, setSmithersLogRunner, } from "./logging.js";
+export { logDebug, logInfo, logWarning, logError, setSmithersLogRunner } from "./logging.js";

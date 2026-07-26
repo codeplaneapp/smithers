@@ -1,12 +1,5 @@
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import type { CachedPrompt, PromptCache } from "./PromptCache";
@@ -54,7 +47,12 @@ export class MarkdownPromptCache implements PromptCache {
     const path = this.newPathFor(key);
     await writeFile(path, serialize({ ...value, key }), "utf8");
     const legacy = this.legacyPathFor(key);
-    if (legacy && legacy !== path && existsSync(legacy) && ownsLegacy(await readFile(legacy, "utf8"), key, legacyKeyFromFile(basename(legacy)))) {
+    if (
+      legacy &&
+      legacy !== path &&
+      existsSync(legacy) &&
+      ownsLegacy(await readFile(legacy, "utf8"), key, legacyKeyFromFile(basename(legacy)))
+    ) {
       await rm(legacy, { force: true });
     }
   }
@@ -62,7 +60,11 @@ export class MarkdownPromptCache implements PromptCache {
   async delete(key: string): Promise<void> {
     await rm(this.newPathFor(key), { force: true });
     const legacy = this.legacyPathFor(key);
-    if (legacy && existsSync(legacy) && ownsLegacy(await readFile(legacy, "utf8"), key, legacyKeyFromFile(basename(legacy)))) {
+    if (
+      legacy &&
+      existsSync(legacy) &&
+      ownsLegacy(await readFile(legacy, "utf8"), key, legacyKeyFromFile(basename(legacy)))
+    ) {
       await rm(legacy, { force: true });
     }
   }
@@ -101,7 +103,12 @@ export class MarkdownPromptCache implements PromptCache {
     const path = this.newPathFor(key);
     writeFileSync(path, serialize({ ...value, key }), "utf8");
     const legacy = this.legacyPathFor(key);
-    if (legacy && legacy !== path && existsSync(legacy) && ownsLegacy(readFileSync(legacy, "utf8"), key, legacyKeyFromFile(basename(legacy)))) {
+    if (
+      legacy &&
+      legacy !== path &&
+      existsSync(legacy) &&
+      ownsLegacy(readFileSync(legacy, "utf8"), key, legacyKeyFromFile(basename(legacy)))
+    ) {
       rmSync(legacy, { force: true });
     }
   }
@@ -110,7 +117,11 @@ export class MarkdownPromptCache implements PromptCache {
   deleteSync(key: string): void {
     rmSync(this.newPathFor(key), { force: true });
     const legacy = this.legacyPathFor(key);
-    if (legacy && existsSync(legacy) && ownsLegacy(readFileSync(legacy, "utf8"), key, legacyKeyFromFile(basename(legacy)))) {
+    if (
+      legacy &&
+      existsSync(legacy) &&
+      ownsLegacy(readFileSync(legacy, "utf8"), key, legacyKeyFromFile(basename(legacy)))
+    ) {
       rmSync(legacy, { force: true });
     }
   }
@@ -196,9 +207,8 @@ function parse(raw: string, key: string): CachedPrompt {
   if (lines[i] === BODY_FENCE) i++;
   const prompt = lines.slice(i).join("\n").replace(/\n$/, "");
 
-  const overrideReasonParsed = fm.overrideReason === undefined || fm.overrideReason === "null"
-    ? null
-    : parseString(fm.overrideReason, "");
+  const overrideReasonParsed =
+    fm.overrideReason === undefined || fm.overrideReason === "null" ? null : parseString(fm.overrideReason, "");
 
   return {
     key: parseString(fm.key, key),

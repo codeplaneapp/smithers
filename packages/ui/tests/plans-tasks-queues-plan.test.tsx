@@ -87,7 +87,9 @@ describe("Plan compound anatomy", () => {
           <PlanTitle>Plan</PlanTitle>
         </PlanHeader>
         <PlanContent>
-          <ol><PlanStep label="Only" /></ol>
+          <ol>
+            <PlanStep label="Only" />
+          </ol>
         </PlanContent>
       </Plan>,
     );
@@ -105,8 +107,16 @@ describe("Plan compound anatomy", () => {
     function Harness() {
       const [open, setOpen] = useState(false);
       return (
-        <Plan open={open} onOpenChange={(next) => { changes.push(next); setOpen(next); }}>
-          <PlanHeader><PlanTrigger>Toggle</PlanTrigger></PlanHeader>
+        <Plan
+          open={open}
+          onOpenChange={(next) => {
+            changes.push(next);
+            setOpen(next);
+          }}
+        >
+          <PlanHeader>
+            <PlanTrigger>Toggle</PlanTrigger>
+          </PlanHeader>
           <PlanContent>Body</PlanContent>
         </Plan>
       );
@@ -141,7 +151,11 @@ describe("Plan compound anatomy", () => {
   });
 
   test("PlanStep without detail renders no toggle", async () => {
-    await render(<ol><PlanStep label="Plain" /></ol>);
+    await render(
+      <ol>
+        <PlanStep label="Plain" />
+      </ol>,
+    );
     expect(container!.querySelector('[data-slot="plan-step-toggle"]')).toBeNull();
     expect(container!.querySelector('[data-status="pending"]')).not.toBeNull();
   });
@@ -155,7 +169,9 @@ describe("Plan compound anatomy", () => {
           <PlanTitle>Nightly</PlanTitle>
         </PlanHeader>
         <PlanContent>
-          <ol><PlanStep label="One" /></ol>
+          <ol>
+            <PlanStep label="One" />
+          </ol>
         </PlanContent>
       </Plan>,
     );

@@ -168,8 +168,8 @@ export function TelegramApproval(props) {
   };
   const keyboard = approvalInlineKeyboard(spec);
   const parseMode = props.parseMode ?? "markdown";
-  const outputSchema = props.outputSchema ??
-    (mode === "select" ? telegramApprovalSelectionSchema : telegramApprovalDecisionSchema);
+  const outputSchema =
+    props.outputSchema ?? (mode === "select" ? telegramApprovalSelectionSchema : telegramApprovalDecisionSchema);
   const askId = `${props.id}:ask`;
   const waitId = `${props.id}:wait`;
 
@@ -205,7 +205,15 @@ export function TelegramApproval(props) {
           dependsOn: [waitId],
           smithersContext: props.smithersContext,
           children: () =>
-            resolveApprovalDecision(props.config, props.chatId, callbackQuery, spec, props.request, parseMode, decision),
+            resolveApprovalDecision(
+              props.config,
+              props.chatId,
+              callbackQuery,
+              spec,
+              props.request,
+              parseMode,
+              decision,
+            ),
         });
       },
     }),

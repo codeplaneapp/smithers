@@ -7,9 +7,9 @@
  * }} options
  */
 export async function authorizeGatewayUiRequest(options) {
-    if (options.authMode === "none") {
-        return null;
-    }
-    const authResult = await options.authenticate(options.token);
-    return authResult.ok === false ? authResult : null;
+  if (options.authMode === "none") {
+    return null;
+  }
+  const authResult = await options.authenticate(options.token);
+  return authResult.ok === false ? authResult : null;
 }

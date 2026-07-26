@@ -111,9 +111,7 @@ function WorkflowRail({
 function SourceTab() {
   const sourceDraft = useWorkflowEditorStore((state) => state.sourceDraft);
   const setSource = useWorkflowEditorStore((state) => state.setSource);
-  const doc = useWorkflowEditorStore((state) =>
-    findWorkflowDoc(state.workflows, state.selectedId),
-  );
+  const doc = useWorkflowEditorStore((state) => findWorkflowDoc(state.workflows, state.selectedId));
   const modified = doc !== null && doc.source !== sourceDraft;
 
   return (
@@ -154,9 +152,7 @@ function ImportsTab({ doc }: { doc: WorkflowDoc }) {
   const prompts = doc.imports.filter((file) => file.kind === "prompt");
   const active = doc.imports.find((file) => file.path === selectedImportPath) ?? null;
   const activeDirty =
-    active !== null &&
-    importDrafts[active.path] !== undefined &&
-    importDrafts[active.path] !== active.source;
+    active !== null && importDrafts[active.path] !== undefined && importDrafts[active.path] !== active.source;
 
   function section(label: string, files: WorkflowImport[]) {
     if (files.length === 0) return null;
@@ -164,8 +160,7 @@ function ImportsTab({ doc }: { doc: WorkflowDoc }) {
       <div key={label}>
         <div className="wfe-import-section-head">{label}</div>
         {files.map((file) => {
-          const dirty =
-            importDrafts[file.path] !== undefined && importDrafts[file.path] !== file.source;
+          const dirty = importDrafts[file.path] !== undefined && importDrafts[file.path] !== file.source;
           return (
             <button
               key={file.path}
@@ -201,9 +196,7 @@ function ImportsTab({ doc }: { doc: WorkflowDoc }) {
             <div className="wfe-fileinfo-bar">
               <ImportGlyph kind={active.kind} />
               <span className="wfe-fileinfo-path">{active.path}</span>
-              <span className="wfe-import-kind">
-                {active.kind === "component" ? "Component" : "Prompt"}
-              </span>
+              <span className="wfe-import-kind">{active.kind === "component" ? "Component" : "Prompt"}</span>
               {activeDirty ? <span className="wfe-unsaved-dot" /> : null}
             </div>
             <textarea
@@ -287,8 +280,7 @@ function DagSection({ doc }: { doc: WorkflowDoc }) {
           {dag.mode === "inferred" ? "INFERRED" : "EXPLICIT"}
         </span>{" "}
         entry <code>{dag.entry}</code> · {dag.nodes.length} node
-        {dag.nodes.length === 1 ? "" : "s"} /{" "}
-        {dag.nodes.reduce((sum, node) => sum + node.edges.length, 0)} edge
+        {dag.nodes.length === 1 ? "" : "s"} / {dag.nodes.reduce((sum, node) => sum + node.edges.length, 0)} edge
         {dag.nodes.reduce((sum, node) => sum + node.edges.length, 0) === 1 ? "" : "s"}
       </div>
 
@@ -300,9 +292,7 @@ function DagSection({ doc }: { doc: WorkflowDoc }) {
               {node.outputTable ? <span className="mini-tag">{node.outputTable}</span> : null}
               {node.needsApproval ? <span className="mini-tag tone-waiting">approval</span> : null}
             </div>
-            {node.edges.length > 0 ? (
-              <div className="wfe-dag-edges">→ {node.edges.join(", ")}</div>
-            ) : null}
+            {node.edges.length > 0 ? <div className="wfe-dag-edges">→ {node.edges.join(", ")}</div> : null}
           </div>
         ))
       ) : pipeline.length > 0 ? (
@@ -345,8 +335,7 @@ function LaunchFieldRow({ field }: { field: LaunchField }) {
   const setInput = useWorkflowEditorStore((state) => state.setInput);
   const toggleBoolInput = useWorkflowEditorStore((state) => state.toggleBoolInput);
 
-  const jsonPlaceholder =
-    field.type === "object" ? "{}" : field.type === "array" ? "[]" : "JSON value";
+  const jsonPlaceholder = field.type === "object" ? "{}" : field.type === "array" ? "[]" : "JSON value";
 
   return (
     <div className="wfe-launch-field" data-testid="wfe-launch-field">
@@ -433,9 +422,7 @@ function LaunchInputsSection({ doc }: { doc: WorkflowDoc }) {
         </div>
       )}
 
-      {doc.lastRunStatus ? (
-        <div className="wfe-last-run">Last run: {doc.lastRunStatus}</div>
-      ) : null}
+      {doc.lastRunStatus ? <div className="wfe-last-run">Last run: {doc.lastRunStatus}</div> : null}
       {doc.runError ? <div className="wfe-run-error">Run failed: {doc.runError}</div> : null}
     </div>
   );
@@ -480,9 +467,7 @@ function RunsTab({ doc }: { doc: WorkflowDoc }) {
           >
             <span className={`rev-dot ${toneForRunStatus(run.status)}`} />
             <span className="wfe-runs-row-id">{run.id.slice(0, 12)}</span>
-            <span className={`state-badge ${toneForRunStatus(run.status)}`}>
-              {run.status.toUpperCase()}
-            </span>
+            <span className={`state-badge ${toneForRunStatus(run.status)}`}>{run.status.toUpperCase()}</span>
             <span className="wfe-run-summary">
               <span>{run.whenLabel}</span>
               <span>{run.elapsedLabel}</span>
@@ -515,8 +500,8 @@ function AppTab({ doc }: { doc: WorkflowDoc }) {
         <div className="wfe-frontend-empty">
           <div className="wfe-frontend-empty-title">No custom frontend</div>
           <div className="wfe-rail-path">
-            Add a <code>&lt;workflow&gt;.frontend/manifest.json</code> bundle next to the workflow to
-            expose an app here.
+            Add a <code>&lt;workflow&gt;.frontend/manifest.json</code> bundle next to the workflow to expose an app
+            here.
           </div>
         </div>
       </div>
@@ -593,12 +578,7 @@ function DetailPane({ doc }: { doc: WorkflowDoc }) {
       <DiscardConfirm />
       <div className="wfe-tabs" data-testid="wfe-tabs">
         {tabs.map((entry) => {
-          const count =
-            entry.id === "imports"
-              ? doc.imports.length
-              : entry.id === "runs"
-                ? doc.runs.length
-                : null;
+          const count = entry.id === "imports" ? doc.imports.length : entry.id === "runs" ? doc.runs.length : null;
           return (
             <button
               key={entry.id}
@@ -645,9 +625,7 @@ function DiscardConfirm() {
   const pendingSelectId = useWorkflowEditorStore((state) => state.pendingSelectId);
   const sourceDraft = useWorkflowEditorStore((state) => state.sourceDraft);
   const importDrafts = useWorkflowEditorStore((state) => state.importDrafts);
-  const doc = useWorkflowEditorStore((state) =>
-    findWorkflowDoc(state.workflows, state.selectedId),
-  );
+  const doc = useWorkflowEditorStore((state) => findWorkflowDoc(state.workflows, state.selectedId));
   const confirmDiscard = useWorkflowEditorStore((state) => state.confirmDiscard);
   const cancelDiscard = useWorkflowEditorStore((state) => state.cancelDiscard);
 
@@ -657,8 +635,7 @@ function DiscardConfirm() {
   return (
     <div className="wfe-confirm wfe-confirm-inset" data-testid="wfe-discard-confirm">
       <div className="wfe-confirm-msg">
-        Unsaved Changes — you have unsaved changes to {changed} file{changed === 1 ? "" : "s"}.
-        Discard them?
+        Unsaved Changes — you have unsaved changes to {changed} file{changed === 1 ? "" : "s"}. Discard them?
       </div>
       <div className="wfe-confirm-actions">
         <button className="btn btn-deny" type="button" onClick={confirmDiscard}>
@@ -689,8 +666,7 @@ export function WorkflowEditorCanvas({ id }: { id: string }) {
 
   // The route page has already reconciled `id` -> selectedId; fall back to it
   // here only when the store has not caught up (e.g. an unknown id).
-  const doc =
-    findWorkflowDoc(workflows, selectedId) ?? findWorkflowDoc(workflows, id);
+  const doc = findWorkflowDoc(workflows, selectedId) ?? findWorkflowDoc(workflows, id);
 
   return (
     <section className="surface" data-testid="workflow-editor-canvas">
@@ -702,7 +678,9 @@ export function WorkflowEditorCanvas({ id }: { id: string }) {
       <div className="rev-body">
         <WorkflowRail workflows={workflows} selectedId={selectedId} onSelect={select} />
 
-        {doc ? <DetailPane doc={doc} /> : (
+        {doc ? (
+          <DetailPane doc={doc} />
+        ) : (
           <div className="rev-detail-empty">
             <BranchIcon /> Select a workflow
           </div>

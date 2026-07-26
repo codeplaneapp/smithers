@@ -27,10 +27,7 @@ async function postTweet(text: string, replyToId?: string): Promise<TweetPostRes
   return { tweetId: data.id, posted: true };
 }
 
-export async function postThread(params: {
-  input: ReleaseContentInput;
-  content: EditedContent;
-}) {
+export async function postThread(params: { input: ReleaseContentInput; content: EditedContent }) {
   const { input, content } = params;
   const tweets = content.tweetThread?.tweets ?? [];
   if (input.dryRun) {

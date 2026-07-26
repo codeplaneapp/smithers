@@ -23,9 +23,7 @@ afterEach(() => {
 
 describe("Attachment", () => {
   test("renders file metadata and extension fallback", () => {
-    const sized = renderToStaticMarkup(
-      <Attachment name="report.pdf" sizeBytes={2048} mediaType="application/pdf" />,
-    );
+    const sized = renderToStaticMarkup(<Attachment name="report.pdf" sizeBytes={2048} mediaType="application/pdf" />);
     expect(sized).toContain("PDF");
     expect(sized).toContain("2.0 KB · application/pdf");
     const extensionless = renderToStaticMarkup(<Attachment name="README" />);
@@ -33,16 +31,12 @@ describe("Attachment", () => {
   });
 
   test("numeric progress exposes aria-valuenow while indeterminate progress omits it", () => {
-    const numeric = renderToStaticMarkup(
-      <Attachment name="photo.png" state="uploading" progress={42} />,
-    );
+    const numeric = renderToStaticMarkup(<Attachment name="photo.png" state="uploading" progress={42} />);
     expect(numeric).toContain('role="progressbar"');
     expect(numeric).toContain('aria-valuenow="42"');
     expect(numeric).toContain('aria-label="Uploading photo.png"');
 
-    const indeterminate = renderToStaticMarkup(
-      <Attachment name="photo.png" state="processing" progress={null} />,
-    );
+    const indeterminate = renderToStaticMarkup(<Attachment name="photo.png" state="processing" progress={null} />);
     expect(indeterminate).toContain('role="progressbar"');
     expect(indeterminate).not.toContain("aria-valuenow");
     expect(indeterminate).toContain("sui-attachment-progress-indeterminate");
@@ -70,9 +64,7 @@ describe("Attachment", () => {
   });
 
   test("renders thumbnail and accessible remove action", () => {
-    const html = renderToStaticMarkup(
-      <Attachment name="photo.png" thumbnailUrl="/photo.png" onRemove={() => {}} />,
-    );
+    const html = renderToStaticMarkup(<Attachment name="photo.png" thumbnailUrl="/photo.png" onRemove={() => {}} />);
     expect(html).toContain('<img src="/photo.png" alt=""');
     expect(html).toContain('aria-label="Remove photo.png"');
   });

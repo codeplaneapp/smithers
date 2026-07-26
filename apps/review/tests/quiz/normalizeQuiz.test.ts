@@ -17,7 +17,10 @@ function question(overrides: Record<string, unknown> = {}) {
 describe("normalizeQuiz", () => {
   test("valid quiz passes through", () => {
     const quiz = normalizeQuiz(
-      { impact: { level: "high", reasons: [{ signal: "critical finding", path: "src/app.ts" }] }, questions: [question()] },
+      {
+        impact: { level: "high", reasons: [{ signal: "critical finding", path: "src/app.ts" }] },
+        questions: [question()],
+      },
       changedPaths,
     );
     expect(quiz).not.toBeNull();
@@ -49,7 +52,9 @@ describe("normalizeQuiz", () => {
   });
 
   test("questions with more than 5 options are dropped", () => {
-    expect(normalizeQuiz({ questions: [question({ options: ["a", "b", "c", "d", "e", "f"] })] }, changedPaths)).toBeNull();
+    expect(
+      normalizeQuiz({ questions: [question({ options: ["a", "b", "c", "d", "e", "f"] })] }, changedPaths),
+    ).toBeNull();
   });
 
   test("out-of-range correctIndex is dropped", () => {
@@ -73,7 +78,9 @@ describe("normalizeQuiz", () => {
   });
 
   test("clamps to 6 questions", () => {
-    const questions = Array.from({ length: 9 }, (_, i) => question({ question: `Distinct question number ${i} about a different aspect?` }));
+    const questions = Array.from({ length: 9 }, (_, i) =>
+      question({ question: `Distinct question number ${i} about a different aspect?` }),
+    );
     const quiz = normalizeQuiz({ questions }, changedPaths);
     expect(quiz!.questions).toHaveLength(6);
   });

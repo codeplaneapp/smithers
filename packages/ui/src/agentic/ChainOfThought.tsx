@@ -29,10 +29,7 @@ export type ChainOfThoughtProps = Omit<ComponentProps<"div">, "children"> &
   ChainOfThoughtOpenable & {
     streaming?: boolean;
     title?: string;
-  } & (
-    | { steps: readonly ChainOfThoughtStep[]; children?: never }
-    | { children: ReactNode; steps?: never }
-  );
+  } & ({ steps: readonly ChainOfThoughtStep[]; children?: never } | { children: ReactNode; steps?: never });
 
 /** Map chain-of-thought states into the shared status vocabulary. */
 export function chainOfThoughtStepStatus(
@@ -78,9 +75,7 @@ export function ChainOfThought({
   useInjectLaneCss(REASONING_TOOLS_CSS_ID, reasoningToolsCss);
   const bodyId = `${useId()}-chain-of-thought-body`;
   const isControlled = controlledOpen !== undefined;
-  const [uncontrolledOpen, setUncontrolledOpen] = useState(
-    () => defaultOpen ?? streaming,
-  );
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(() => defaultOpen ?? streaming);
   const previousStreaming = useRef(streaming);
   const userToggled = useRef(false);
   const isOpen = isControlled ? controlledOpen : uncontrolledOpen;
@@ -145,9 +140,7 @@ export function ChainOfThought({
                       <span className="sui-cot-step-dot" aria-hidden="true" />
                       <span className="sui-sr-only">{formatStatus(mapped)}: </span>
                       <span className="sui-cot-step-label">{step.label}</span>
-                      {step.detail != null ? (
-                        <div className="sui-cot-step-detail">{step.detail}</div>
-                      ) : null}
+                      {step.detail != null ? <div className="sui-cot-step-detail">{step.detail}</div> : null}
                     </li>
                   );
                 })
@@ -197,11 +190,12 @@ export function ChainOfThoughtStep({
     onOpenChange?.(next);
   }
 
-  const iconSlot = icon != null ? (
-    <span className="sui-cot-step-icon" aria-hidden="true">
-      {icon}
-    </span>
-  ) : null;
+  const iconSlot =
+    icon != null ? (
+      <span className="sui-cot-step-icon" aria-hidden="true">
+        {icon}
+      </span>
+    ) : null;
 
   return (
     <li
@@ -232,12 +226,7 @@ export function ChainOfThoughtStep({
         </>
       )}
       {hasDetail && isOpen ? (
-        <div
-          role="region"
-          id={detailId}
-          aria-labelledby={triggerId}
-          className="sui-cot-step-detail"
-        >
+        <div role="region" id={detailId} aria-labelledby={triggerId} className="sui-cot-step-detail">
           {children}
         </div>
       ) : null}

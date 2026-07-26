@@ -16,11 +16,13 @@ export function serializeRunEventRow(row) {
       payload = payloadJson;
     }
   }
-  return /** @type {Row} */ (/** @type {unknown} */ ({
-    runId: normalized.runId,
-    seq: normalized.seq,
-    event: normalized.event ?? normalized.type,
-    payload,
-    ...(normalized.timestampMs === undefined ? {} : { timestampMs: normalized.timestampMs }),
-  }));
+  return /** @type {Row} */ (
+    /** @type {unknown} */ ({
+      runId: normalized.runId,
+      seq: normalized.seq,
+      event: normalized.event ?? normalized.type,
+      payload,
+      ...(normalized.timestampMs === undefined ? {} : { timestampMs: normalized.timestampMs }),
+    })
+  );
 }

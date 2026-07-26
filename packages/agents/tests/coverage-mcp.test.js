@@ -11,10 +11,7 @@ describe("createMcpToolset error + include curation", () => {
     try {
       // Invalid args fail the server-side zod schema, so the MCP server returns
       // an isError result that callMcpTool must fold into an error object.
-      const result = await toolset.tools.add.execute(
-        { a: /** @type {any} */ ("not-a-number"), b: 1 },
-        callOptions,
-      );
+      const result = await toolset.tools.add.execute({ a: /** @type {any} */ ("not-a-number"), b: 1 }, callOptions);
       expect(result).toMatchObject({ error: true, status: "failed" });
       expect(typeof result.message).toBe("string");
     } finally {
@@ -23,10 +20,7 @@ describe("createMcpToolset error + include curation", () => {
   });
 
   test("include filters the projected toolset", async () => {
-    const toolset = await createMcpToolset(
-      { command: "bun", args: [DEMO_SERVER] },
-      { include: ["shout"] },
-    );
+    const toolset = await createMcpToolset({ command: "bun", args: [DEMO_SERVER] }, { include: ["shout"] });
     try {
       expect(toolset.toolNames).toEqual(["shout"]);
     } finally {

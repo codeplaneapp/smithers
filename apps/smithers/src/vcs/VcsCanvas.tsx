@@ -30,9 +30,7 @@ function ChangeRow({ change }: { change: VcsChange }) {
   return (
     <div className="vcs-change-row" data-testid="vcs-change-row">
       <span className={`vcs-change-status ${changeTone(change)}`}>{change.status}</span>
-      <span className="vcs-change-path">
-        {change.oldPath ? `${change.oldPath} -> ${change.path}` : change.path}
-      </span>
+      <span className="vcs-change-path">{change.oldPath ? `${change.oldPath} -> ${change.path}` : change.path}</span>
     </div>
   );
 }
@@ -138,7 +136,11 @@ export function VcsCanvas() {
       </header>
 
       {error ? <div className="vcs-banner error">{error}</div> : null}
-      {snapshot ? <SnapshotView snapshot={snapshot} /> : <div className="surface-empty vcs-empty">Loading VCS status...</div>}
+      {snapshot ? (
+        <SnapshotView snapshot={snapshot} />
+      ) : (
+        <div className="surface-empty vcs-empty">Loading VCS status...</div>
+      )}
     </div>
   );
 }

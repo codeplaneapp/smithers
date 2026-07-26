@@ -75,9 +75,7 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => {
     },
     update: (id, patch) => {
       set((state) => ({
-        notifications: state.notifications.map((item) =>
-          item.id === id ? { ...item, ...patch } : item,
-        ),
+        notifications: state.notifications.map((item) => (item.id === id ? { ...item, ...patch } : item)),
       }));
       if (patch.status === "done" || patch.status === "failed") {
         schedule(id, DONE_LINGER_MS);

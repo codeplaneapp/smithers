@@ -5,9 +5,14 @@
 // in-memory gateway" pattern the collection hooks are meant to be tested with.
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-try { GlobalRegistrator.register(); } catch { /* already registered */ }
-(globalThis as { happyDOM?: { settings?: { fetch?: { disableSameOriginPolicy?: boolean } } } })
-  .happyDOM!.settings!.fetch!.disableSameOriginPolicy = true;
+try {
+  GlobalRegistrator.register();
+} catch {
+  /* already registered */
+}
+(
+  globalThis as { happyDOM?: { settings?: { fetch?: { disableSameOriginPolicy?: boolean } } } }
+).happyDOM!.settings!.fetch!.disableSameOriginPolicy = true;
 
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -57,7 +62,11 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitFor(assertion: () => void | boolean | Promise<void | boolean>, label = "assertion", timeoutMs = 60_000) {
+async function waitFor(
+  assertion: () => void | boolean | Promise<void | boolean>,
+  label = "assertion",
+  timeoutMs = 60_000,
+) {
   const started = Date.now();
   let lastError: unknown;
   while (Date.now() - started < timeoutMs) {
@@ -107,13 +116,20 @@ async function bootGateway() {
       tokens,
     },
   });
-  gateway.register("value", api.smithers((ctx: any) =>
-    React.createElement(
-      api.Workflow,
-      { name: "collections-value" },
-      React.createElement(api.Task, { id: "task1", output: api.outputs.result }, { value: Number(ctx.input.value ?? 1) }),
+  gateway.register(
+    "value",
+    api.smithers((ctx: any) =>
+      React.createElement(
+        api.Workflow,
+        { name: "collections-value" },
+        React.createElement(
+          api.Task,
+          { id: "task1", output: api.outputs.result },
+          { value: Number(ctx.input.value ?? 1) },
+        ),
+      ),
     ),
-  ));
+  );
   const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
   cleanups.push(() => gateway.close());
   return {
@@ -316,13 +332,27 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     // real "Node not found" error path). Once the run completes, an explicit
     // refetch resolves the produced output (the success path).
     await waitFor(() => captured.run.data?.status === "finished", "run finished");
-    await act(async () => { await captured.nodeOutput.refetch(); });
-    await waitFor(() => captured.nodeOutput.loading === false && captured.nodeOutput.data !== undefined, "node output settled");
+    await act(async () => {
+      await captured.nodeOutput.refetch();
+    });
+    await waitFor(
+      () => captured.nodeOutput.loading === false && captured.nodeOutput.data !== undefined,
+      "node output settled",
+    );
     expect(captured.nodeOutput.data).toMatchObject({ status: "produced", row: { value: 3 } });
     expect(captured.nodeOutputDisabled.loading).toBe(false);
 
     // The read-only / empty collections still expose a stable async-state shape.
-    for (const key of ["approvals", "crons", "memoryFacts", "memoryFactsNs", "prompts", "scores", "scoresNode", "tickets"]) {
+    for (const key of [
+      "approvals",
+      "crons",
+      "memoryFacts",
+      "memoryFactsNs",
+      "prompts",
+      "scores",
+      "scoresNode",
+      "tickets",
+    ]) {
       expect(Array.isArray(captured[key].data)).toBe(true);
       expect(typeof captured[key].refetch).toBe("function");
     }
@@ -357,7 +387,13 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     const actions = captured.actions;
     const launched = await actions.launchRun({ workflow: "value", input: { value: 7 } });
     expect(launched.runId).toBeDefined();
-    const swallow = async (p: Promise<unknown>) => { try { await p; } catch { /* expected */ } };
+    const swallow = async (p: Promise<unknown>) => {
+      try {
+        await p;
+      } catch {
+        /* expected */
+      }
+    };
     await swallow(actions.resumeRun({ runId }));
     await swallow(actions.cancelRun({ runId }));
     await swallow(actions.hijackRun({ runId }));
@@ -393,11 +429,9 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     }
 
     const harness = await mountHarness();
-    await harness.render(createElement(
-      SmithersGatewayProvider,
-      { client: makeClient(baseUrl, "recover-token") },
-      createElement(Probe),
-    ));
+    await harness.render(
+      createElement(SmithersGatewayProvider, { client: makeClient(baseUrl, "recover-token") }, createElement(Probe)),
+    );
 
     const keys = ["runs", "run", "approvals", "crons", "memoryFacts", "prompts", "scores", "tickets", "workflows"];
     await waitFor(
@@ -438,14 +472,17 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     }
 
     const harness = await mountHarness();
-    await harness.render(createElement(
-      SmithersGatewayProvider,
-      { client: makeClient(baseUrl, "run-events-recover-token") },
-      createElement(Probe),
-    ));
+    await harness.render(
+      createElement(
+        SmithersGatewayProvider,
+        { client: makeClient(baseUrl, "run-events-recover-token") },
+        createElement(Probe),
+      ),
+    );
 
     await waitFor(
-      () => captured.runEvents?.error instanceof Error &&
+      () =>
+        captured.runEvents?.error instanceof Error &&
         captured.runEvents.error.message !== "Run event stream failed." &&
         captured.runEvents?.streaming === false,
       "run event source fetch failure",
@@ -501,17 +538,53 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
 
     // Every remaining domain method dispatches through the switch (rejections on
     // absent targets are expected; the switch arm still executes).
-    const methods = ["resumeRun", "cancelRun", "hijackRun", "rewindRun", "submitApproval", "submitSignal", "cronCreate", "cronDelete", "cronRun", "createTicket", "updateTicket", "deleteTicket"];
+    const methods = [
+      "resumeRun",
+      "cancelRun",
+      "hijackRun",
+      "rewindRun",
+      "submitApproval",
+      "submitSignal",
+      "cronCreate",
+      "cronDelete",
+      "cronRun",
+      "createTicket",
+      "updateTicket",
+      "deleteTicket",
+    ];
     for (const method of methods) {
       await act(async () => {
-        try { await hooks[method].mutate({ runId: "missing", cronId: "x", frameNo: 1, confirm: true, workflow: "value", pattern: "* * * * *", correlationKey: "k", nodeId: "n", decision: { approved: true }, kind: "ticket", title: "t", body: "b", id: "x", patch: {} }); } catch { /* expected */ }
+        try {
+          await hooks[method].mutate({
+            runId: "missing",
+            cronId: "x",
+            frameNo: 1,
+            confirm: true,
+            workflow: "value",
+            pattern: "* * * * *",
+            correlationKey: "k",
+            nodeId: "n",
+            decision: { approved: true },
+            kind: "ticket",
+            title: "t",
+            body: "b",
+            id: "x",
+            patch: {},
+          });
+        } catch {
+          /* expected */
+        }
       });
     }
 
     // An unsupported method rejects with a clear error via mutate().
     let bogusError: unknown;
     await act(async () => {
-      try { await hooks.bogus.mutate({}); } catch (error) { bogusError = error; }
+      try {
+        await hooks.bogus.mutate({});
+      } catch (error) {
+        bogusError = error;
+      }
     });
     expect((bogusError as Error).message).toContain("Unsupported Gateway domain mutation: nopeNotAMethod");
     expect(hooks.bogus.error).toBeInstanceOf(Error);
@@ -586,7 +659,9 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
       disabled = useGatewayNodeOutput({ runId: undefined, nodeId: undefined });
       return null;
     }
-    await harness.render(createElement(SmithersGatewayProvider, { client: makeClient(baseUrl) }, createElement(DisabledProbe)));
+    await harness.render(
+      createElement(SmithersGatewayProvider, { client: makeClient(baseUrl) }, createElement(DisabledProbe)),
+    );
     await act(async () => {
       await disabled.refetch();
     });

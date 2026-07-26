@@ -43,11 +43,7 @@ describe("EventBus persistLog append", () => {
 
       const N = 25;
       for (let i = 0; i < N; i += 1) {
-        await Effect.runPromise(
-          bus.emitEventWithPersist(
-            makeEvent({ seq: i, timestampMs: 1_000 + i }),
-          ),
-        );
+        await Effect.runPromise(bus.emitEventWithPersist(makeEvent({ seq: i, timestampMs: 1_000 + i })));
       }
 
       const logFile = join(logDir, "stream.ndjson");
@@ -64,9 +60,7 @@ describe("EventBus persistLog append", () => {
       // ordered seqs, but the next assertion (no clobbering / exact count)
       // is what a clobbering rewrite would break.
       const parsed = jsonLines.map((line) => JSON.parse(line));
-      expect(parsed.map((e) => e.seq)).toEqual(
-        Array.from({ length: N }, (_, i) => i),
-      );
+      expect(parsed.map((e) => e.seq)).toEqual(Array.from({ length: N }, (_, i) => i));
       for (const event of parsed) {
         expect(event.type).toBe("RunStarted");
         expect(event.runId).toBe("run-append");
@@ -90,11 +84,7 @@ describe("EventBus persistLog append", () => {
       const N = 30;
       await Promise.all(
         Array.from({ length: N }, (_, i) =>
-          Effect.runPromise(
-            bus.emitEventWithPersist(
-              makeEvent({ seq: i, timestampMs: 1_000 + i }),
-            ),
-          ),
+          Effect.runPromise(bus.emitEventWithPersist(makeEvent({ seq: i, timestampMs: 1_000 + i }))),
         ),
       );
 
@@ -103,9 +93,7 @@ describe("EventBus persistLog append", () => {
 
       // No lines lost to clobbering: exactly N, every seq present once.
       expect(jsonLines).toHaveLength(N);
-      const seqs = jsonLines.map((line) => JSON.parse(line).seq).sort(
-        (a, b) => a - b,
-      );
+      const seqs = jsonLines.map((line) => JSON.parse(line).seq).sort((a, b) => a - b);
       expect(seqs).toEqual(Array.from({ length: N }, (_, i) => i));
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -126,11 +114,7 @@ describe("EventBus persistLog append", () => {
       let lastSize = 0;
       const seen = [];
       for (let i = 0; i < 10; i += 1) {
-        await Effect.runPromise(
-          bus.emitEventWithPersist(
-            makeEvent({ seq: i, timestampMs: 1_000 + i }),
-          ),
-        );
+        await Effect.runPromise(bus.emitEventWithPersist(makeEvent({ seq: i, timestampMs: 1_000 + i })));
         const contents = readFileSync(logFile, "utf8");
         // File must be strictly growing — never truncated/rewritten smaller.
         expect(contents.length).toBeGreaterThan(lastSize);

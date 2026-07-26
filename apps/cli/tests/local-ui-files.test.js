@@ -24,10 +24,7 @@ beforeEach(async () => {
   writeFileSync(join(tempDir, "dist", "index.html"), "<main>ui</main>");
   mkdirSync(join(tempDir, "workspace", "src"), { recursive: true });
   writeFileSync(join(tempDir, "workspace", "README.md"), "# hello\n");
-  writeFileSync(
-    join(tempDir, "workspace", "src", "index.ts"),
-    "export const value = 1;\n",
-  );
+  writeFileSync(join(tempDir, "workspace", "src", "index.ts"), "export const value = 1;\n");
   server = await startLocalUiServer({
     distDir: join(tempDir, "dist"),
     gatewayBase: "http://127.0.0.1:1",
@@ -35,8 +32,7 @@ beforeEach(async () => {
     workspaceRoot: join(tempDir, "workspace"),
   });
   const address = server.address();
-  if (!address || typeof address === "string")
-    throw new Error("server did not bind");
+  if (!address || typeof address === "string") throw new Error("server did not bind");
   baseUrl = `http://127.0.0.1:${address.port}`;
 });
 
@@ -77,9 +73,7 @@ describe("local UI files API", () => {
       ["src", "directory"],
       ["README.md", "file"],
     ]);
-    expect(
-      body.entries.find((entry) => entry.name === "README.md"),
-    ).toMatchObject({
+    expect(body.entries.find((entry) => entry.name === "README.md")).toMatchObject({
       path: "README.md",
       previewable: true,
       editable: true,
@@ -87,18 +81,12 @@ describe("local UI files API", () => {
   });
 
   test("rejects file reads with a non-loopback (DNS-rebinding) Host header", async () => {
-    const { response } = await getWithHost(
-      "/api/files/read?path=README.md",
-      "attacker.example:80",
-    );
+    const { response } = await getWithHost("/api/files/read?path=README.md", "attacker.example:80");
     expect(response.status).toBe(403);
   });
 
   test("rejects file tree with a non-loopback Host header", async () => {
-    const { response } = await getWithHost(
-      "/api/files/tree?path=",
-      "attacker.example:80",
-    );
+    const { response } = await getWithHost("/api/files/tree?path=", "attacker.example:80");
     expect(response.status).toBe(403);
   });
 
@@ -130,10 +118,7 @@ describe("local UI files API", () => {
   test("rejects symlinks that escape the workspace", async () => {
     writeFileSync(join(tempDir, "outside.txt"), "secret\n");
     try {
-      symlinkSync(
-        join(tempDir, "outside.txt"),
-        join(tempDir, "workspace", "escape.txt"),
-      );
+      symlinkSync(join(tempDir, "outside.txt"), join(tempDir, "workspace", "escape.txt"));
     } catch {
       return;
     }
@@ -173,10 +158,7 @@ describe("local UI files API", () => {
   test("rejects a stale reader's save with 409 and leaves the newer file alone", async () => {
     const read = await get("/api/files/read?path=src/index.ts");
     // Someone else (an agent, another editor) writes the file after the read.
-    writeFileSync(
-      join(tempDir, "workspace", "src", "index.ts"),
-      "export const value = 99;\n",
-    );
+    writeFileSync(join(tempDir, "workspace", "src", "index.ts"), "export const value = 99;\n");
 
     const { response, body } = await postFileWrite({
       path: "src/index.ts",
@@ -185,9 +167,7 @@ describe("local UI files API", () => {
     });
     expect(response.status).toBe(409);
     expect(body.error.code).toBe("STALE_REVISION");
-    expect(
-      readFileSync(join(tempDir, "workspace", "src", "index.ts"), "utf8"),
-    ).toBe("export const value = 99;\n");
+    expect(readFileSync(join(tempDir, "workspace", "src", "index.ts"), "utf8")).toBe("export const value = 99;\n");
   });
 
   test("leaves the original file intact when the save cannot be written", async () => {
@@ -214,9 +194,7 @@ describe("local UI files API", () => {
       });
       expect(response.status).toBe(500);
       expect(body.error.code).toBe("WRITE_FAILED");
-      expect(readFileSync(join(dir, "index.ts"), "utf8")).toBe(
-        "export const value = 1;\n",
-      );
+      expect(readFileSync(join(dir, "index.ts"), "utf8")).toBe("export const value = 1;\n");
       // No temp debris left behind.
       expect(readdirSync(dir)).toEqual(["index.ts"]);
     } finally {
@@ -246,9 +224,7 @@ describe("local UI files API", () => {
     });
     expect(response.status).toBe(400);
     expect(body.error.code).toBe("MISSING_REVISION");
-    expect(
-      readFileSync(join(tempDir, "workspace", "src", "index.ts"), "utf8"),
-    ).toBe("export const value = 1;\n");
+    expect(readFileSync(join(tempDir, "workspace", "src", "index.ts"), "utf8")).toBe("export const value = 1;\n");
   });
 
   test("rejects file writes from a cross-origin browser request", async () => {
@@ -266,10 +242,7 @@ describe("local UI files API", () => {
   });
 
   test("does not load binary files into editable content", async () => {
-    writeFileSync(
-      join(tempDir, "workspace", "blob.bin"),
-      Buffer.from([0, 1, 2, 3, 4]),
-    );
+    writeFileSync(join(tempDir, "workspace", "blob.bin"), Buffer.from([0, 1, 2, 3, 4]));
     const { response, body } = await get("/api/files/read?path=blob.bin");
     expect(response.status).toBe(200);
     expect(body.file).toMatchObject({
@@ -282,10 +255,7 @@ describe("local UI files API", () => {
   });
 
   test("opens large text files as truncated read-only previews", async () => {
-    writeFileSync(
-      join(tempDir, "workspace", "large.txt"),
-      "a".repeat(600 * 1024),
-    );
+    writeFileSync(join(tempDir, "workspace", "large.txt"), "a".repeat(600 * 1024));
     const { response, body } = await get("/api/files/read?path=large.txt");
     expect(response.status).toBe(200);
     expect(body.file.kind).toBe("text");

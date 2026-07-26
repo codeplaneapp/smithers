@@ -27,17 +27,17 @@ import { API_KEY_PROVIDERS } from "@smithers-orchestrator/accounts";
  * @returns {UsageReport}
  */
 export function buildUsageReport(account, probe, options = {}) {
-    return {
-        accountLabel: account.label,
-        provider: account.provider,
-        authMode: API_KEY_PROVIDERS.has(account.provider) ? "api-key" : "subscription",
-        source: probe.source,
-        windows: probe.windows ?? [],
-        planType: probe.planType,
-        credits: probe.credits,
-        fetchedAt: options.nowIso ?? new Date().toISOString(),
-        stale: false,
-        estimate: probe.estimate ?? false,
-        error: probe.error,
-    };
+  return {
+    accountLabel: account.label,
+    provider: account.provider,
+    authMode: API_KEY_PROVIDERS.has(account.provider) ? "api-key" : "subscription",
+    source: probe.source,
+    windows: probe.windows ?? [],
+    planType: probe.planType,
+    credits: probe.credits,
+    fetchedAt: options.nowIso ?? new Date().toISOString(),
+    stale: false,
+    estimate: probe.estimate ?? false,
+    error: probe.error,
+  };
 }

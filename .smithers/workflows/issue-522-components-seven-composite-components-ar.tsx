@@ -5,7 +5,12 @@ import { UI } from "smithers-orchestrator";
 import { createSmithers, Sequence, Task } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { implementer, panelists, synthesizer, validator } from "../components/roles";
-import { ValidationLoop, implementOutputSchema, validateOutputSchema, validationLoopState } from "../components/ValidationLoop";
+import {
+  ValidationLoop,
+  implementOutputSchema,
+  validateOutputSchema,
+  validationLoopState,
+} from "../components/ValidationLoop";
 import { reviewOutputSchema, reviewSynthesisSchema } from "../components/Review";
 
 // Issue #522 (umbrella): seven built-in composite components pass `needs`
@@ -137,9 +142,7 @@ export default smithers((ctx) => {
 
   const state = validationLoopState(ctx, { prefix: "p522:impl" });
 
-  const implementPrompt = plan
-    ? `${spec}\n\n---\nAPPROVED PLAN:\n${plan.plan}`
-    : spec;
+  const implementPrompt = plan ? `${spec}\n\n---\nAPPROVED PLAN:\n${plan.plan}` : spec;
 
   return (
     <Workflow name="issue-522-components-seven-composite-components-ar">

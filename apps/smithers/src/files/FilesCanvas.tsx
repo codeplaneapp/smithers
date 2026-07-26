@@ -14,10 +14,8 @@ function formatTime(ms: number): string {
 }
 
 function FileIcon({ entry }: { entry: FileTreeEntry }) {
-  if (entry.type === "directory")
-    return <span className="files-icon">dir</span>;
-  if (entry.type === "symlink" || !entry.safe)
-    return <span className="files-icon">ln</span>;
+  if (entry.type === "directory") return <span className="files-icon">dir</span>;
+  if (entry.type === "symlink" || !entry.safe) return <span className="files-icon">ln</span>;
   if (entry.binary) return <span className="files-icon">bin</span>;
   return <span className="files-icon">txt</span>;
 }
@@ -35,8 +33,7 @@ function TreeRows({ path, depth }: { path: string; depth: number }) {
       {entries.map((entry) => {
         const open = Boolean(expanded[entry.path]);
         const selected = selectedPath === entry.path;
-        const disabled =
-          !entry.safe || entry.type === "other" || entry.type === "symlink";
+        const disabled = !entry.safe || entry.type === "other" || entry.type === "symlink";
         return (
           <div key={entry.path || entry.name}>
             <button
@@ -45,31 +42,19 @@ function TreeRows({ path, depth }: { path: string; depth: number }) {
               style={{ paddingLeft: 10 + depth * 14 }}
               disabled={disabled}
               onClick={() => {
-                if (entry.type === "directory")
-                  void toggleDirectory(entry.path);
+                if (entry.type === "directory") void toggleDirectory(entry.path);
                 else if (entry.type === "file") void selectFile(entry.path);
               }}
-              data-testid={
-                entry.type === "directory"
-                  ? "files-tree-dir"
-                  : "files-tree-file"
-              }
+              data-testid={entry.type === "directory" ? "files-tree-dir" : "files-tree-file"}
             >
-              <span className="files-caret">
-                {entry.type === "directory" ? (open ? "v" : ">") : ""}
-              </span>
+              <span className="files-caret">{entry.type === "directory" ? (open ? "v" : ">") : ""}</span>
               <FileIcon entry={entry} />
               <span className="files-name">{entry.name}</span>
-              {entry.type === "file" ? (
-                <span className="files-size">{formatBytes(entry.size)}</span>
-              ) : null}
+              {entry.type === "file" ? <span className="files-size">{formatBytes(entry.size)}</span> : null}
             </button>
             {entry.type === "directory" && open ? (
               loadingTreePath === entry.path ? (
-                <div
-                  className="files-loading"
-                  style={{ paddingLeft: 24 + (depth + 1) * 14 }}
-                >
+                <div className="files-loading" style={{ paddingLeft: 24 + (depth + 1) * 14 }}>
                   Loading...
                 </div>
               ) : (
@@ -87,9 +72,7 @@ function EmptyEditor() {
   return (
     <div className="files-empty" data-testid="files-empty">
       <div className="files-empty-title">Select a file</div>
-      <div className="files-empty-sub">
-        Text files open in the editor. Large or binary files open safely.
-      </div>
+      <div className="files-empty-sub">Text files open in the editor. Large or binary files open safely.</div>
     </div>
   );
 }
@@ -137,9 +120,7 @@ function FileEditor() {
       {file.kind === "binary" ? (
         <div className="files-safe-preview" data-testid="files-binary-preview">
           <div className="files-safe-title">Binary file</div>
-          <div>
-            {file.reason ?? "Binary files are not opened in the editor."}
-          </div>
+          <div>{file.reason ?? "Binary files are not opened in the editor."}</div>
         </div>
       ) : file.editable ? (
         <textarea
@@ -161,9 +142,7 @@ function FileEditor() {
 
 export function FilesCanvas() {
   const rootName = useFilesStore((state) => state.rootName);
-  const treeLoaded = useFilesStore(
-    (state) => state.treeByPath[""] !== undefined,
-  );
+  const treeLoaded = useFilesStore((state) => state.treeByPath[""] !== undefined);
   const loadingTreePath = useFilesStore((state) => state.loadingTreePath);
   const treeError = useFilesStore((state) => state.treeError);
   const loadTree = useFilesStore((state) => state.loadTree);
@@ -179,11 +158,7 @@ export function FilesCanvas() {
           <div className="files-title">Files</div>
           <div className="files-sub">{rootName}</div>
         </div>
-        <button
-          className="files-refresh"
-          type="button"
-          onClick={() => void loadTree("")}
-        >
+        <button className="files-refresh" type="button" onClick={() => void loadTree("")}>
           Refresh
         </button>
       </header>

@@ -18,14 +18,9 @@ function safeDecode(segment: string): string {
  * tree: the router owns history and validation, this reads the result. Run
  * surfaces are matched before the bare inspector so the longer paths win.
  */
-export function deriveRoute(
-  pathname: string,
-  search: Record<string, unknown>,
-): RouteState {
-  const project =
-    typeof search.project === "string" ? search.project : undefined;
-  const workspaceRoot =
-    typeof search.workspace === "string" ? search.workspace : undefined;
+export function deriveRoute(pathname: string, search: Record<string, unknown>): RouteState {
+  const project = typeof search.project === "string" ? search.project : undefined;
+  const workspaceRoot = typeof search.workspace === "string" ? search.workspace : undefined;
 
   if (pathname === "/") {
     return { view: "home", surface: null, project, workspaceRoot };

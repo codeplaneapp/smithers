@@ -22,7 +22,9 @@ export async function collectChanges(input: OpenCodeReviewInput, preview: Previe
   const files = diffs
     // The app's own state dir: in not-yet-gitignored repos its db would show
     // up as a giant untracked "added" file on the very change set it reviews.
-    .filter((diff) => effectivePath(diff) !== ".smithers-review" && !effectivePath(diff).startsWith(".smithers-review/"))
+    .filter(
+      (diff) => effectivePath(diff) !== ".smithers-review" && !effectivePath(diff).startsWith(".smithers-review/"),
+    )
     .map((diff) => {
       const path = effectivePath(diff);
       const entry = previewByPath.get(path);

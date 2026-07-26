@@ -1,5 +1,15 @@
 import { toHarnessError, type HarnessError } from "../kernel/boundary.ts";
-export class SimulationError extends Error { readonly fidelity = "simulation"; constructor(message: string, readonly code: string, readonly details?: unknown) { super(message); this.name = "SimulationError"; } }
+export class SimulationError extends Error {
+  readonly fidelity = "simulation";
+  constructor(
+    message: string,
+    readonly code: string,
+    readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = "SimulationError";
+  }
+}
 export const normalizeHarnessError = (error: unknown): HarnessError => toHarnessError(error);
 
 /**
@@ -16,13 +26,18 @@ const simulationClasses = new Map<string, new (message: string) => Error>();
 const simulationClass = (className: string): new (message: string) => Error => {
   let ctor = simulationClasses.get(className);
   if (!ctor) {
-    ctor = class extends Error { };
+    ctor = class extends Error {};
     Object.defineProperty(ctor, "name", { value: className });
     // Native platform errors carry `name` on the prototype, not as an own
     // instance field; the double mirrors that so own-field serialization
     // compares faithfully. A spec.name still creates an own field, matching
     // production classes (like SmithersError) that assign name per instance.
-    Object.defineProperty(ctor.prototype, "name", { value: className, writable: true, enumerable: false, configurable: true });
+    Object.defineProperty(ctor.prototype, "name", {
+      value: className,
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
     simulationClasses.set(className, ctor);
   }
   return ctor;
@@ -56,7 +71,16 @@ export const simulationNativeError = (spec: SimulationNativeErrorSpec): Error =>
  * `message = summary + " See " + docsUrl` with own name/code/summary/docsUrl/
  * details/cause fields, mirroring packages/errors SmithersError.
  */
-export const simulationSmithersError = (code: string, summary: string, options: Readonly<{ readonly details?: unknown; readonly cause?: unknown; readonly docsUrl?: string; readonly name?: string }> = {}): Error => {
+export const simulationSmithersError = (
+  code: string,
+  summary: string,
+  options: Readonly<{
+    readonly details?: unknown;
+    readonly cause?: unknown;
+    readonly docsUrl?: string;
+    readonly name?: string;
+  }> = {},
+): Error => {
   const docsUrl = options.docsUrl ?? "https://smithers.sh/reference/errors";
   return simulationNativeError({
     className: "SmithersError",
@@ -109,29 +133,61 @@ const durableJsonSafe = (value: unknown, seen: WeakSet<object>): unknown => {
       }
       return out;
     }
-    if (Array.isArray(record)) return record.map((item) => { const safe = durableJsonSafe(item, seen); return safe === undefined ? null : safe; });
+    if (Array.isArray(record))
+      return record.map((item) => {
+        const safe = durableJsonSafe(item, seen);
+        return safe === undefined ? null : safe;
+      });
     const out: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(record)) {
       const safe = durableJsonSafe(entry, seen);
       if (safe !== undefined) out[key] = safe;
     }
     return out;
-  } finally { seen.delete(record); }
+  } finally {
+    seen.delete(record);
+  }
 };
 export const serializeSimulationDurableError = (value: unknown): unknown => {
   if (value instanceof Error && value.constructor?.name === "SmithersError") {
     const error = value as Error & { code?: unknown; summary?: unknown; docsUrl?: unknown; details?: unknown };
-    return durableJsonSafe({
-      name: error.name, code: error.code, message: error.message, stack: error.stack,
-      cause: error.cause, summary: error.summary, docsUrl: error.docsUrl, details: error.details,
-    }, new WeakSet());
+    return durableJsonSafe(
+      {
+        name: error.name,
+        code: error.code,
+        message: error.message,
+        stack: error.stack,
+        cause: error.cause,
+        summary: error.summary,
+        docsUrl: error.docsUrl,
+        details: error.details,
+      },
+      new WeakSet(),
+    );
   }
   return durableJsonSafe(value, new WeakSet());
 };
-const BOUNDARY_KNOWN_FIELDS = new Set(["name", "message", "code", "summary", "details", "docsUrl", "cause", "stack", "fidelity", "serialized"]);
+const BOUNDARY_KNOWN_FIELDS = new Set([
+  "name",
+  "message",
+  "code",
+  "summary",
+  "details",
+  "docsUrl",
+  "cause",
+  "stack",
+  "fidelity",
+  "serialized",
+]);
 export const serializeBoundaryError = (value: unknown): unknown => {
   if (!(value instanceof Error)) return value;
-  const error = value as Error & { code?: unknown; summary?: unknown; details?: unknown; docsUrl?: unknown; cause?: unknown };
+  const error = value as Error & {
+    code?: unknown;
+    summary?: unknown;
+    details?: unknown;
+    docsUrl?: unknown;
+    cause?: unknown;
+  };
   const native: Record<string, unknown> = {};
   for (const key of Object.keys(error).sort()) {
     const field = (error as unknown as Record<string, unknown>)[key];

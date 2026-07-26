@@ -8,7 +8,9 @@ function parseJson(value) {
   if (!value || typeof value !== "string") return {};
   try {
     const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? /** @type {Record<string, unknown>} */ (parsed) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? /** @type {Record<string, unknown>} */ (parsed)
+      : {};
   } catch {
     return {};
   }
@@ -34,7 +36,7 @@ function parseJson(value) {
 export function serializeApprovalRow(row) {
   const normalized = normalizeApiRow(row);
   const request = parseJson(normalized.requestJson);
-  return ({
+  return {
     runId: normalized.runId,
     ...(normalized.workflowKey === undefined ? {} : { workflowKey: normalized.workflowKey }),
     nodeId: normalized.nodeId,
@@ -47,5 +49,5 @@ export function serializeApprovalRow(row) {
     allowedScopes: normalized.allowedScopes ?? request.allowedScopes,
     allowedUsers: normalized.allowedUsers ?? request.allowedUsers,
     autoApprove: normalized.autoApprove ?? request.autoApprove,
-  });
+  };
 }

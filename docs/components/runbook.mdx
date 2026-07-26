@@ -75,90 +75,94 @@ import { Approval } from "./Approval.js";
  * @param {RunbookProps} props
  */
 export function Runbook(props) {
-    if (props.skipIf)
-        return null;
-    const ctx = React.useContext(SmithersContext);
-    const prefix = props.id ?? "runbook";
-    const onDeny = props.onDeny ?? "fail";
-    const children = [];
-    let previousStepId;
-    for (let i = 0; i < props.steps.length; i++) {
-        const step = props.steps[i];
-        const stepId = `${prefix}-${step.id}`;
-        const agent = step.agent ?? props.defaultAgent;
-        const output = step.output ?? props.stepOutput;
-        const label = step.label ?? step.id;
-        // Build needs: each step depends on the previous step's completion
-        const needs = previousStepId
-            ? { previousStep: previousStepId }
-            : undefined;
-        if (step.risk === "safe") {
-            // Safe: plain Task, auto-executes
-            children.push(React.createElement(Task, {
-                key: stepId,
-                id: stepId,
-                output,
-                agent,
-                needs,
-                label: `[safe] ${label}`,
-                children: step.command ?? `Execute step: ${label}`,
-            }));
-            previousStepId = stepId;
-        }
-        else {
-            // Risky or critical: Approval gate then Task
-            const approvalId = `${stepId}-approval`;
-            const approvalOutput = `${approvalId}-decision`;
-            const shouldGateOnDecision = onDeny === "skip" && Boolean(ctx);
-            const decision = ctx?.outputMaybe(approvalOutput, { nodeId: approvalId });
-            const deniedAndSkipping = shouldGateOnDecision &&
-                decision != null &&
-                typeof decision === "object" &&
-                /** @type {Record<string, unknown>} */ (decision).approved === false;
-            const isCritical = step.risk === "critical";
-            const approvalTitle = props.approvalRequest?.title ??
-                `Approve ${isCritical ? "CRITICAL" : "risky"} step: ${label}`;
-            const approvalSummary = props.approvalRequest?.summary ??
-                (isCritical
-                    ? `CRITICAL step requires elevated approval. Command: ${step.command ?? label}`
-                    : `Risky step requires approval before execution. Command: ${step.command ?? label}`);
-            const approvalMeta = {
-                stepId: step.id,
-                risk: step.risk,
-                ...props.approvalRequest?.metadata,
-            };
-            if (isCritical) {
-                approvalMeta.elevated = true;
-            }
-            children.push(React.createElement(Approval, {
-                key: approvalId,
-                id: approvalId,
-                output: approvalOutput,
-                request: {
-                    title: approvalTitle,
-                    summary: approvalSummary,
-                    metadata: approvalMeta,
-                },
-                onDeny,
-                needs,
-                label: `Approve: ${label}`,
-            }));
-            if (!deniedAndSkipping) {
-                children.push(React.createElement(Task, {
-                    key: stepId,
-                    id: stepId,
-                    output,
-                    agent,
-                    deps: shouldGateOnDecision ? { approval: approvalOutput } : undefined,
-                    needs: { approval: approvalId },
-                    label: `[${step.risk}] ${label}`,
-                    children: step.command ?? `Execute step: ${label}`,
-                }));
-            }
-            previousStepId = deniedAndSkipping ? approvalId : stepId;
-        }
+  if (props.skipIf) return null;
+  const ctx = React.useContext(SmithersContext);
+  const prefix = props.id ?? "runbook";
+  const onDeny = props.onDeny ?? "fail";
+  const children = [];
+  let previousStepId;
+  for (let i = 0; i < props.steps.length; i++) {
+    const step = props.steps[i];
+    const stepId = `${prefix}-${step.id}`;
+    const agent = step.agent ?? props.defaultAgent;
+    const output = step.output ?? props.stepOutput;
+    const label = step.label ?? step.id;
+    // Build needs: each step depends on the previous step's completion
+    const needs = previousStepId ? { previousStep: previousStepId } : undefined;
+    if (step.risk === "safe") {
+      // Safe: plain Task, auto-executes
+      children.push(
+        React.createElement(Task, {
+          key: stepId,
+          id: stepId,
+          output,
+          agent,
+          needs,
+          label: `[safe] ${label}`,
+          children: step.command ?? `Execute step: ${label}`,
+        }),
+      );
+      previousStepId = stepId;
+    } else {
+      // Risky or critical: Approval gate then Task
+      const approvalId = `${stepId}-approval`;
+      const approvalOutput = `${approvalId}-decision`;
+      const shouldGateOnDecision = onDeny === "skip" && Boolean(ctx);
+      const decision = ctx?.outputMaybe(approvalOutput, { nodeId: approvalId });
+      const deniedAndSkipping =
+        shouldGateOnDecision &&
+        decision != null &&
+        typeof decision === "object" &&
+        /** @type {Record<string, unknown>} */ (decision).approved === false;
+      const isCritical = step.risk === "critical";
+      const approvalTitle =
+        props.approvalRequest?.title ?? `Approve ${isCritical ? "CRITICAL" : "risky"} step: ${label}`;
+      const approvalSummary =
+        props.approvalRequest?.summary ??
+        (isCritical
+          ? `CRITICAL step requires elevated approval. Command: ${step.command ?? label}`
+          : `Risky step requires approval before execution. Command: ${step.command ?? label}`);
+      const approvalMeta = {
+        stepId: step.id,
+        risk: step.risk,
+        ...props.approvalRequest?.metadata,
+      };
+      if (isCritical) {
+        approvalMeta.elevated = true;
+      }
+      children.push(
+        React.createElement(Approval, {
+          key: approvalId,
+          id: approvalId,
+          output: approvalOutput,
+          request: {
+            title: approvalTitle,
+            summary: approvalSummary,
+            metadata: approvalMeta,
+          },
+          onDeny,
+          needs,
+          label: `Approve: ${label}`,
+        }),
+      );
+      if (!deniedAndSkipping) {
+        children.push(
+          React.createElement(Task, {
+            key: stepId,
+            id: stepId,
+            output,
+            agent,
+            deps: shouldGateOnDecision ? { approval: approvalOutput } : undefined,
+            needs: { approval: approvalId },
+            label: `[${step.risk}] ${label}`,
+            children: step.command ?? `Execute step: ${label}`,
+          }),
+        );
+      }
+      previousStepId = deniedAndSkipping ? approvalId : stepId;
     }
-    return React.createElement(Sequence, null, ...children);
+  }
+  return React.createElement(Sequence, null, ...children);
 }
 ```
 
@@ -180,20 +184,23 @@ SmithersContext.displayName = "SmithersContext";
  * @returns {{ SmithersContext: React.Context<SmithersCtx<Schema> | null>, useCtx: () => SmithersCtx<Schema> }}
  */
 export function createSmithersContext() {
-    /** @type {React.Context<SmithersCtx<Schema> | null>} */
-    const Context = React.createContext(null);
-    Context.displayName = "SmithersContext";
-    /**
+  /** @type {React.Context<SmithersCtx<Schema> | null>} */
+  const Context = React.createContext(null);
+  Context.displayName = "SmithersContext";
+  /**
    * @returns {SmithersCtx<Schema>}
    */
-    function useCtx() {
-        const ctx = React.useContext(Context);
-        if (!ctx) {
-            throw new SmithersError("CONTEXT_OUTSIDE_WORKFLOW", "useCtx() must be called inside a <Workflow> created by createSmithers()");
-        }
-        return ctx;
+  function useCtx() {
+    const ctx = React.useContext(Context);
+    if (!ctx) {
+      throw new SmithersError(
+        "CONTEXT_OUTSIDE_WORKFLOW",
+        "useCtx() must be called inside a <Workflow> created by createSmithers()",
+      );
     }
-    return { SmithersContext: Context, useCtx };
+    return ctx;
+  }
+  return { SmithersContext: Context, useCtx };
 }
 ```
 
@@ -205,17 +212,16 @@ import React from "react";
  * @param {SequenceProps} props
  */
 export function Sequence(props) {
-    if (props.skipIf)
-        return null;
-    // Sequence carries only a display label; pass a sanitized bag (align with
-    // the sanitizing structural components) so control props don't leak through.
-    // `label` names the phase group in run views (graph, the Claude /workflows
-    // mirror) and is preserved in the persisted frame XML.
-    const next = {
-        ...(props.label === undefined ? {} : { label: props.label }),
-        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
-    };
-    return React.createElement("smithers:sequence", next, props.children);
+  if (props.skipIf) return null;
+  // Sequence carries only a display label; pass a sanitized bag (align with
+  // the sanitizing structural components) so control props don't leak through.
+  // `label` names the phase group in run views (graph, the Claude /workflows
+  // mirror) and is preserved in the persisted frame XML.
+  const next = {
+    ...(props.label === undefined ? {} : { label: props.label }),
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+  };
+  return React.createElement("smithers:sequence", next, props.children);
 }
 ```
 
@@ -269,28 +275,28 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
  */
 
 export const approvalDecisionSchema = z.object({
-    approved: z.boolean(),
-    // `note` is omitted entirely when no note was provided, so the default
-    // decision schema must accept an absent key (optional) as well as the
-    // legacy null/string shapes.
-    note: z.string().nullable().optional(),
-    decidedBy: z.string().nullable(),
-    decidedAt: z.string().datetime().nullable(),
+  approved: z.boolean(),
+  // `note` is omitted entirely when no note was provided, so the default
+  // decision schema must accept an absent key (optional) as well as the
+  // legacy null/string shapes.
+  note: z.string().nullable().optional(),
+  decidedBy: z.string().nullable(),
+  decidedAt: z.string().datetime().nullable(),
 });
 export const approvalSelectionSchema = z.object({
-    selected: z.string(),
-    notes: z.string().nullable(),
+  selected: z.string(),
+  notes: z.string().nullable(),
 });
 export const approvalRankingSchema = z.object({
-    ranked: z.array(z.string()),
-    notes: z.string().nullable(),
+  ranked: z.array(z.string()),
+  notes: z.string().nullable(),
 });
 /**
  * @param {unknown} value
  * @returns {value is import("zod").ZodObject<import("zod").ZodRawShape>}
  */
 function isZodObject(value) {
-    return Boolean(value && typeof value === "object" && "shape" in value);
+  return Boolean(value && typeof value === "object" && "shape" in value);
 }
 /**
  * @template T
@@ -298,29 +304,28 @@ function isZodObject(value) {
  * @returns {T | null}
  */
 function parseJson(value) {
-    if (typeof value !== "string" || value.length === 0) {
-        return null;
-    }
-    try {
-        return JSON.parse(value);
-    }
-    catch {
-        return null;
-    }
+  if (typeof value !== "string" || value.length === 0) {
+    return null;
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 /**
  * @param {ApprovalMode} mode
  * @returns {import("zod").ZodObject<import("zod").ZodRawShape>}
  */
 function defaultSchemaForMode(mode) {
-    switch (mode) {
-        case "select":
-            return approvalSelectionSchema;
-        case "rank":
-            return approvalRankingSchema;
-        default:
-            return approvalDecisionSchema;
-    }
+  switch (mode) {
+    case "select":
+      return approvalSelectionSchema;
+    case "rank":
+      return approvalRankingSchema;
+    default:
+      return approvalDecisionSchema;
+  }
 }
 /**
  * @param {{ status?: string | null; note?: string | null; decidedBy?: string | null; decidedAtMs?: number | null } | undefined | null} approval
@@ -328,44 +333,44 @@ function defaultSchemaForMode(mode) {
  * @returns {Record<string, unknown>}
  */
 function buildDecisionPayload(approval, outputSchema) {
-    const base = {
-        approved: approval?.status === "approved",
-        decidedBy: approval?.decidedBy ?? null,
-        decidedAt: approval?.decidedAtMs != null ? new Date(approval.decidedAtMs).toISOString() : null,
-    };
-    if (typeof approval?.note === "string") {
-        return { ...base, note: approval.note };
-    }
-    if (outputSchema.safeParse(base).success) {
-        return base;
-    }
-    return { ...base, note: null };
+  const base = {
+    approved: approval?.status === "approved",
+    decidedBy: approval?.decidedBy ?? null,
+    decidedAt: approval?.decidedAtMs != null ? new Date(approval.decidedAtMs).toISOString() : null,
+  };
+  if (typeof approval?.note === "string") {
+    return { ...base, note: approval.note };
+  }
+  if (outputSchema.safeParse(base).success) {
+    return base;
+  }
+  return { ...base, note: null };
 }
 /**
  * @param {ApprovalMode | undefined} mode
  * @returns {"select" | "rank" | "decision"}
  */
 function normalizeMode(mode) {
-    switch (mode) {
-        case "select":
-            return "select";
-        case "rank":
-            return "rank";
-        default:
-            return "decision";
-    }
+  switch (mode) {
+    case "select":
+      return "select";
+    case "rank":
+      return "rank";
+    default:
+      return "decision";
+  }
 }
 /**
  * @param {ApprovalOption[] | undefined} options
  * @returns {ApprovalOption[] | undefined}
  */
 function normalizeOptions(options) {
-    return options?.map((option) => ({
-        key: option.key,
-        label: option.label,
-        ...(option.summary ? { summary: option.summary } : {}),
-        ...(option.metadata ? { metadata: option.metadata } : {}),
-    }));
+  return options?.map((option) => ({
+    key: option.key,
+    label: option.label,
+    ...(option.summary ? { summary: option.summary } : {}),
+    ...(option.metadata ? { metadata: option.metadata } : {}),
+  }));
 }
 /**
  * @param {unknown} value
@@ -374,13 +379,16 @@ function normalizeOptions(options) {
  * @returns {string[] | undefined}
  */
 function validateApprovalRestriction(value, field, id) {
-    if (value === undefined) {
-        return undefined;
-    }
-    if (!Array.isArray(value) || Array.from(value).some((entry) => typeof entry !== "string" || entry.trim().length === 0)) {
-        throw new SmithersError("INVALID_INPUT", `Approval ${id} ${field} must be an array of non-empty strings.`);
-    }
-    return value;
+  if (value === undefined) {
+    return undefined;
+  }
+  if (
+    !Array.isArray(value) ||
+    Array.from(value).some((entry) => typeof entry !== "string" || entry.trim().length === 0)
+  ) {
+    throw new SmithersError("INVALID_INPUT", `Approval ${id} ${field} must be an array of non-empty strings.`);
+  }
+  return value;
 }
 /**
  * @param {ApprovalAutoApprove[keyof ApprovalAutoApprove]} callback
@@ -388,10 +396,14 @@ function validateApprovalRestriction(value, field, id) {
  * @returns {boolean | undefined}
  */
 function evaluateBooleanCallback(callback, ctx) {
-    if (typeof callback !== "function") {
-        return undefined;
-    }
-    return Boolean(/** @type {(ctx: import("@smithers-orchestrator/driver").SmithersCtx<unknown> | null) => boolean} */ (callback)(ctx));
+  if (typeof callback !== "function") {
+    return undefined;
+  }
+  return Boolean(
+    /** @type {(ctx: import("@smithers-orchestrator/driver").SmithersCtx<unknown> | null) => boolean} */ (callback)(
+      ctx,
+    ),
+  );
 }
 /**
  * @template Row
@@ -399,102 +411,93 @@ function evaluateBooleanCallback(callback, ctx) {
  * @returns {React.ReactElement | null}
  */
 export function Approval(props) {
-    if (props.skipIf)
-        return null;
-    const smithersContext = props.smithersContext ?? SmithersContext;
-    const ctx = React.useContext(smithersContext);
-    const mode = props.mode ?? "approve";
-    const approvalMode = normalizeMode(mode);
-    const options = normalizeOptions(props.options);
-    const allowedScopes = validateApprovalRestriction(props.allowedScopes, "allowedScopes", props.id);
-    const allowedUsers = validateApprovalRestriction(props.allowedUsers, "allowedUsers", props.id);
-    const outputSchema = props.outputSchema ??
-        (isZodObject(props.output) ? props.output : defaultSchemaForMode(mode));
-    if ((mode === "select" || mode === "rank") && (!options || options.length === 0)) {
-        throw new SmithersError("APPROVAL_OPTIONS_REQUIRED", `Approval ${props.id} requires options when mode="${mode}".`);
-    }
-    const conditionMet = props.autoApprove
-        ? evaluateBooleanCallback(props.autoApprove.condition, ctx)
-        : undefined;
-    const revertOnMet = props.autoApprove
-        ? evaluateBooleanCallback(props.autoApprove.revertOn, ctx)
-        : undefined;
-    const autoApprove = props.autoApprove
-        ? {
-            ...(typeof props.autoApprove.after === "number" ? { after: props.autoApprove.after } : {}),
-            audit: props.autoApprove.audit !== false,
-            ...(conditionMet !== undefined ? { conditionMet } : {}),
-            ...(revertOnMet !== undefined ? { revertOnMet } : {}),
-        }
-        : undefined;
-    const requestMeta = {
-        requestTitle: props.request.title,
-        ...(props.request.summary ? { requestSummary: props.request.summary } : {}),
-        ...(options ? { approvalOptions: options } : {}),
-        ...(allowedScopes?.length ? { approvalAllowedScopes: allowedScopes } : {}),
-        ...(allowedUsers?.length ? { approvalAllowedUsers: allowedUsers } : {}),
-        ...(autoApprove ? { approvalAutoApprove: autoApprove } : {}),
-        ...props.request.metadata,
-        ...props.meta,
-    };
-    /**
+  if (props.skipIf) return null;
+  const smithersContext = props.smithersContext ?? SmithersContext;
+  const ctx = React.useContext(smithersContext);
+  const mode = props.mode ?? "approve";
+  const approvalMode = normalizeMode(mode);
+  const options = normalizeOptions(props.options);
+  const allowedScopes = validateApprovalRestriction(props.allowedScopes, "allowedScopes", props.id);
+  const allowedUsers = validateApprovalRestriction(props.allowedUsers, "allowedUsers", props.id);
+  const outputSchema = props.outputSchema ?? (isZodObject(props.output) ? props.output : defaultSchemaForMode(mode));
+  if ((mode === "select" || mode === "rank") && (!options || options.length === 0)) {
+    throw new SmithersError("APPROVAL_OPTIONS_REQUIRED", `Approval ${props.id} requires options when mode="${mode}".`);
+  }
+  const conditionMet = props.autoApprove ? evaluateBooleanCallback(props.autoApprove.condition, ctx) : undefined;
+  const revertOnMet = props.autoApprove ? evaluateBooleanCallback(props.autoApprove.revertOn, ctx) : undefined;
+  const autoApprove = props.autoApprove
+    ? {
+        ...(typeof props.autoApprove.after === "number" ? { after: props.autoApprove.after } : {}),
+        audit: props.autoApprove.audit !== false,
+        ...(conditionMet !== undefined ? { conditionMet } : {}),
+        ...(revertOnMet !== undefined ? { revertOnMet } : {}),
+      }
+    : undefined;
+  const requestMeta = {
+    requestTitle: props.request.title,
+    ...(props.request.summary ? { requestSummary: props.request.summary } : {}),
+    ...(options ? { approvalOptions: options } : {}),
+    ...(allowedScopes?.length ? { approvalAllowedScopes: allowedScopes } : {}),
+    ...(allowedUsers?.length ? { approvalAllowedUsers: allowedUsers } : {}),
+    ...(autoApprove ? { approvalAutoApprove: autoApprove } : {}),
+    ...props.request.metadata,
+    ...props.meta,
+  };
+  /**
    * @returns {Promise<Row>}
    */
-    const computeDecision = async () => {
-        const runtime = getTaskRuntime();
-        if (!runtime) {
-            throw new SmithersError("APPROVAL_OUTSIDE_TASK", "Approval decisions can only be resolved while a Smithers task is executing.");
-        }
-        const adapter = new SmithersDb(runtime.db);
-        const approval = await adapter.getApproval(runtime.runId, props.id, runtime.iteration);
-        const decision = parseJson(approval?.decisionJson);
-        if (approvalMode === "select") {
-            return {
-                selected: typeof decision?.selected === "string" ? decision.selected : "",
-                notes: typeof decision?.notes === "string"
-                    ? decision.notes
-                    : approval?.note ?? null,
-            };
-        }
-        if (approvalMode === "rank") {
-            return {
-                ranked: Array.isArray(decision?.ranked)
-                    ? decision.ranked.filter((value) => typeof value === "string")
-                    : [],
-                notes: typeof decision?.notes === "string"
-                    ? decision.notes
-                    : approval?.note ?? null,
-            };
-        }
-        return buildDecisionPayload(approval, outputSchema);
-    };
-    return React.createElement("smithers:task", {
-        id: props.id,
-        key: props.key,
-        output: props.output,
-        outputSchema,
-        dependsOn: props.dependsOn,
-        needs: props.needs,
-        needsApproval: true,
-        waitAsync: props.async === true,
-        approvalMode,
-        approvalOnDeny: props.onDeny,
-        approvalOptions: options,
-        approvalAllowedScopes: allowedScopes,
-        approvalAllowedUsers: allowedUsers,
-        approvalAutoApprove: autoApprove,
-        timeoutMs: props.timeoutMs,
-        heartbeatTimeoutMs: props.heartbeatTimeoutMs,
-        heartbeatTimeout: props.heartbeatTimeout,
-        retries: props.retries,
-        retryPolicy: props.retryPolicy,
-        continueOnFail: props.continueOnFail,
-        cache: props.cache,
-        label: props.label ?? props.request.title,
-        meta: Object.keys(requestMeta).length > 0 ? requestMeta : undefined,
-        __smithersKind: "compute",
-        __smithersComputeFn: computeDecision,
-    });
+  const computeDecision = async () => {
+    const runtime = getTaskRuntime();
+    if (!runtime) {
+      throw new SmithersError(
+        "APPROVAL_OUTSIDE_TASK",
+        "Approval decisions can only be resolved while a Smithers task is executing.",
+      );
+    }
+    const adapter = new SmithersDb(runtime.db);
+    const approval = await adapter.getApproval(runtime.runId, props.id, runtime.iteration);
+    const decision = parseJson(approval?.decisionJson);
+    if (approvalMode === "select") {
+      return {
+        selected: typeof decision?.selected === "string" ? decision.selected : "",
+        notes: typeof decision?.notes === "string" ? decision.notes : (approval?.note ?? null),
+      };
+    }
+    if (approvalMode === "rank") {
+      return {
+        ranked: Array.isArray(decision?.ranked) ? decision.ranked.filter((value) => typeof value === "string") : [],
+        notes: typeof decision?.notes === "string" ? decision.notes : (approval?.note ?? null),
+      };
+    }
+    return buildDecisionPayload(approval, outputSchema);
+  };
+  return React.createElement("smithers:task", {
+    id: props.id,
+    key: props.key,
+    output: props.output,
+    outputSchema,
+    dependsOn: props.dependsOn,
+    needs: props.needs,
+    needsApproval: true,
+    waitAsync: props.async === true,
+    approvalMode,
+    approvalOnDeny: props.onDeny,
+    approvalOptions: options,
+    approvalAllowedScopes: allowedScopes,
+    approvalAllowedUsers: allowedUsers,
+    approvalAutoApprove: autoApprove,
+    timeoutMs: props.timeoutMs,
+    heartbeatTimeoutMs: props.heartbeatTimeoutMs,
+    heartbeatTimeout: props.heartbeatTimeout,
+    retries: props.retries,
+    retryPolicy: props.retryPolicy,
+    continueOnFail: props.continueOnFail,
+    cache: props.cache,
+    label: props.label ?? props.request.title,
+    meta: Object.keys(requestMeta).length > 0 ? requestMeta : undefined,
+    __smithersKind: "compute",
+    __smithersComputeFn: computeDecision,
+  });
 }
 ```
 
@@ -505,18 +508,18 @@ import type { RunbookStep } from "./RunbookStep.ts";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type RunbookProps = {
-	id?: string;
-	/** Ordered steps to execute. */
-	steps: RunbookStep[];
-	/** Default agent for steps that don't specify one. */
-	defaultAgent?: AgentLike;
-	/** Default output schema for step results. */
-	stepOutput: OutputTarget;
-	/** Template for approval requests on risky/critical steps. */
-	approvalRequest?: Partial<ApprovalRequest>;
-	/** Behavior when a risky/critical step is denied: "fail" (default) or "skip". */
-	onDeny?: "fail" | "skip";
-	skipIf?: boolean;
+  id?: string;
+  /** Ordered steps to execute. */
+  steps: RunbookStep[];
+  /** Default agent for steps that don't specify one. */
+  defaultAgent?: AgentLike;
+  /** Default output schema for step results. */
+  stepOutput: OutputTarget;
+  /** Template for approval requests on risky/critical steps. */
+  approvalRequest?: Partial<ApprovalRequest>;
+  /** Behavior when a risky/critical step is denied: "fail" (default) or "skip". */
+  onDeny?: "fail" | "skip";
+  skipIf?: boolean;
 };
 ```
 
@@ -525,18 +528,18 @@ import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type RunbookStep = {
-	/** Unique step identifier. */
-	id: string;
-	/** Agent for this step (falls back to `defaultAgent`). */
-	agent?: AgentLike;
-	/** Shell command or instruction for the step. */
-	command?: string;
-	/** Risk classification: safe auto-executes, risky/critical require approval. */
-	risk: "safe" | "risky" | "critical";
-	/** Human-readable label for the step. */
-	label?: string;
-	/** Per-step output schema override. */
-	output?: OutputTarget;
+  /** Unique step identifier. */
+  id: string;
+  /** Agent for this step (falls back to `defaultAgent`). */
+  agent?: AgentLike;
+  /** Shell command or instruction for the step. */
+  command?: string;
+  /** Risk classification: safe auto-executes, risky/critical require approval. */
+  risk: "safe" | "risky" | "critical";
+  /** Human-readable label for the step. */
+  label?: string;
+  /** Per-step output schema override. */
+  output?: OutputTarget;
 };
 ```
 </CodeGroup>

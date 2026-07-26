@@ -11,15 +11,10 @@ import { storySchema } from "../walkthrough/storySchema";
 import { verifyVerdictsSchema } from "./verifyVerdictsSchema";
 import { writeOpenAiSchemaFile } from "./writeOpenAiSchemaFile";
 
-type RegisteredCodexCredential =
-  | { provider: "codex"; configDir: string }
-  | { provider: "openai-api"; apiKey: string };
+type RegisteredCodexCredential = { provider: "codex"; configDir: string } | { provider: "openai-api"; apiKey: string };
 
-export function registeredReviewCodexCredentials(
-  env: NodeJS.ProcessEnv = process.env,
-): RegisteredCodexCredential[] {
-  const root = env.SMITHERS_HOME?.trim()
-    || join(env.HOME?.trim() || homedir(), ".smithers");
+export function registeredReviewCodexCredentials(env: NodeJS.ProcessEnv = process.env): RegisteredCodexCredential[] {
+  const root = env.SMITHERS_HOME?.trim() || join(env.HOME?.trim() || homedir(), ".smithers");
   try {
     const parsed = JSON.parse(readFileSync(join(root, "accounts.json"), "utf8"));
     if (!Array.isArray(parsed?.accounts)) return [];
@@ -73,9 +68,7 @@ function hasUsableCodex(): boolean {
   }
 }
 
-export function resolveReviewEngine(
-  codexAvailable: () => boolean = hasUsableCodex,
-): "codex" | "claude" {
+export function resolveReviewEngine(codexAvailable: () => boolean = hasUsableCodex): "codex" | "claude" {
   const requested = process.env.SMITHERS_REVIEW_ENGINE?.trim().toLowerCase();
   if (requested === "codex" || requested === "claude") return requested;
   return codexAvailable() ? "codex" : "claude";
@@ -128,29 +121,26 @@ export function createReviewAgents(repoDir: string): {
     );
     const codexPool = (options: ConstructorParameters<typeof CodexAgent>[0]): AgentLike[] => [
       new CodexAgent(options),
-      ...credentials.map((credential) => new CodexAgent({
-        ...options,
-        configDir: credential.provider === "codex" ? credential.configDir : undefined,
-        apiKey: credential.provider === "openai-api" ? credential.apiKey : undefined,
-      })),
+      ...credentials.map(
+        (credential) =>
+          new CodexAgent({
+            ...options,
+            configDir: credential.provider === "codex" ? credential.configDir : undefined,
+            apiKey: credential.provider === "openai-api" ? credential.apiKey : undefined,
+          }),
+      ),
     ];
     const claudeFallbacks = createClaudePool(false);
     const review = [
       ...codexPool({ ...smart, outputSchema: writeOpenAiSchemaFile(nativeReviewAgentOutputSchema) }),
       ...claudeFallbacks,
     ];
-    const narrate = [
-      ...codexPool({ ...cheap, outputSchema: writeOpenAiSchemaFile(storySchema) }),
-      ...claudeFallbacks,
-    ];
+    const narrate = [...codexPool({ ...cheap, outputSchema: writeOpenAiSchemaFile(storySchema) }), ...claudeFallbacks];
     const verify = [
       ...codexPool({ ...smart, outputSchema: writeOpenAiSchemaFile(verifyVerdictsSchema) }),
       ...claudeFallbacks,
     ];
-    const quiz = [
-      ...codexPool({ ...cheap, outputSchema: writeOpenAiSchemaFile(quizSchema) }),
-      ...claudeFallbacks,
-    ];
+    const quiz = [...codexPool({ ...cheap, outputSchema: writeOpenAiSchemaFile(quizSchema) }), ...claudeFallbacks];
     return { review, narrate, verify, quiz };
   }
 

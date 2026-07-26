@@ -2,11 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  buildDefaultSelections,
-  buildSkillOptions,
-  selectionsToPackOptions,
-} from "../src/init/interactiveInit.js";
+import { buildDefaultSelections, buildSkillOptions, selectionsToPackOptions } from "../src/init/interactiveInit.js";
 
 describe("fixed curated init selections", () => {
   test("selection state contains only skill targets and agent docs", () => {
@@ -38,7 +34,11 @@ describe("skill and agent-doc preferences", () => {
   test("persisted agent-doc deselection is honored case-insensitively", () => {
     const packRoot = mkdtempSync(join(tmpdir(), "smithers-init-seed-"));
     try {
-      writeFileSync(join(packRoot, "pack-selections.json"), JSON.stringify({ deselectedAgentDocs: ["agents.md"] }), "utf8");
+      writeFileSync(
+        join(packRoot, "pack-selections.json"),
+        JSON.stringify({ deselectedAgentDocs: ["agents.md"] }),
+        "utf8",
+      );
       expect(buildDefaultSelections({}, packRoot).selectedAgentDocs).toEqual(["CLAUDE.md"]);
     } finally {
       rmSync(packRoot, { recursive: true, force: true });

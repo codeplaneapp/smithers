@@ -26,75 +26,79 @@ const dataDir = mkdtempSync(join(tmpdir(), "smithers-node-run-"));
 const runId = `engine-node-run-${Date.now().toString(36)}-${process.pid}`;
 
 async function main() {
-    if (typeof Bun !== "undefined") {
-        throw new Error("fixture must run under plain node, but Bun is defined");
-    }
+  if (typeof Bun !== "undefined") {
+    throw new Error("fixture must run under plain node, but Bun is defined");
+  }
 
-    const G = Smithers.workflow({
-        name: "engine-node-run",
-        input: Schema.Struct({ repo: Schema.String }),
-    });
-    const step = G.step("compute", {
-        output: Schema.Struct({ value: Schema.String }),
-        run: ({ input }) => ({ value: `node:${input.repo}` }),
-    });
-    const wf = G.from(step);
+  const G = Smithers.workflow({
+    name: "engine-node-run",
+    input: Schema.Struct({ repo: Schema.String }),
+  });
+  const step = G.step("compute", {
+    output: Schema.Struct({ value: Schema.String }),
+    run: ({ input }) => ({ value: `node:${input.repo}` }),
+  });
+  const wf = G.from(step);
 
-    const result = await Effect.runPromise(wf.execute({ repo: "smithers" }, {
-        runId,
-        effectPlatformRuntime: "node",
-        effectPlatformLayer: NodeContext.layer,
-    }).pipe(Effect.provide(Smithers.pglite({ dataDir }))));
+  const result = await Effect.runPromise(
+    wf
+      .execute(
+        { repo: "smithers" },
+        {
+          runId,
+          effectPlatformRuntime: "node",
+          effectPlatformLayer: NodeContext.layer,
+        },
+      )
+      .pipe(Effect.provide(Smithers.pglite({ dataDir }))),
+  );
 
-    // execute() returns the extracted step output only when the run finished;
-    // waiting states come back as { status, runId }.
-    if (result && typeof result === "object" && "status" in result) {
-        throw new Error(`run did not finish: ${JSON.stringify(result)}`);
-    }
-    if (result?.value !== "node:smithers") {
-        throw new Error(`unexpected extracted output: ${JSON.stringify(result)}`);
-    }
+  // execute() returns the extracted step output only when the run finished;
+  // waiting states come back as { status, runId }.
+  if (result && typeof result === "object" && "status" in result) {
+    throw new Error(`run did not finish: ${JSON.stringify(result)}`);
+  }
+  if (result?.value !== "node:smithers") {
+    throw new Error(`unexpected extracted output: ${JSON.stringify(result)}`);
+  }
 
-    // Reopen the persisted PGlite store directly and assert the durable rows,
-    // not just the in-process return value.
-    const { PGlite } = await import("@electric-sql/pglite");
-    const pglite = await PGlite.create(dataDir);
-    try {
-        const runs = await pglite.query("SELECT status FROM _smithers_runs WHERE run_id = $1", [runId]);
-        if (runs.rows.length !== 1) {
-            throw new Error(`expected 1 run row, got ${runs.rows.length}`);
-        }
-        if (runs.rows[0].status !== "finished") {
-            throw new Error(`persisted run status is ${JSON.stringify(runs.rows[0].status)}, expected "finished"`);
-        }
-        const outputs = await pglite.query(
-            "SELECT run_id, node_id, iteration, payload FROM smithers_compute WHERE run_id = $1",
-            [runId],
-        );
-        if (outputs.rows.length !== 1) {
-            throw new Error(`expected 1 output row, got ${outputs.rows.length}`);
-        }
-        const row = outputs.rows[0];
-        const payload = typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload;
-        if (row.node_id !== "compute" || Number(row.iteration) !== 0 || payload?.value !== "node:smithers") {
-            throw new Error(`unexpected output row: ${JSON.stringify(row)}`);
-        }
+  // Reopen the persisted PGlite store directly and assert the durable rows,
+  // not just the in-process return value.
+  const { PGlite } = await import("@electric-sql/pglite");
+  const pglite = await PGlite.create(dataDir);
+  try {
+    const runs = await pglite.query("SELECT status FROM _smithers_runs WHERE run_id = $1", [runId]);
+    if (runs.rows.length !== 1) {
+      throw new Error(`expected 1 run row, got ${runs.rows.length}`);
     }
-    finally {
-        await pglite.close().catch(() => {});
+    if (runs.rows[0].status !== "finished") {
+      throw new Error(`persisted run status is ${JSON.stringify(runs.rows[0].status)}, expected "finished"`);
     }
+    const outputs = await pglite.query(
+      "SELECT run_id, node_id, iteration, payload FROM smithers_compute WHERE run_id = $1",
+      [runId],
+    );
+    if (outputs.rows.length !== 1) {
+      throw new Error(`expected 1 output row, got ${outputs.rows.length}`);
+    }
+    const row = outputs.rows[0];
+    const payload = typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload;
+    if (row.node_id !== "compute" || Number(row.iteration) !== 0 || payload?.value !== "node:smithers") {
+      throw new Error(`unexpected output row: ${JSON.stringify(row)}`);
+    }
+  } finally {
+    await pglite.close().catch(() => {});
+  }
 }
 
 let exitCode = 0;
 try {
-    await main();
-    console.log(`RUN_FINISHED ${runId}`);
-}
-catch (error) {
-    console.error(`FAIL: ${error?.stack ?? error}`);
-    exitCode = 1;
-}
-finally {
-    rmSync(dataDir, { recursive: true, force: true });
+  await main();
+  console.log(`RUN_FINISHED ${runId}`);
+} catch (error) {
+  console.error(`FAIL: ${error?.stack ?? error}`);
+  exitCode = 1;
+} finally {
+  rmSync(dataDir, { recursive: true, force: true });
 }
 process.exit(exitCode);

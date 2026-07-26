@@ -36,12 +36,7 @@ export type NodeStageStripProps = Omit<StageStripProps, "stages"> & {
  *   stages={[{ nodeId: "preflight" }, { nodeId: "spec-write", label: "spec" }, { nodeId: "deploy" }]}
  * />
  */
-export function NodeStageStrip({
-  runId,
-  stages,
-  useRunTree = useGatewayRunTree,
-  ...stripProps
-}: NodeStageStripProps) {
+export function NodeStageStrip({ runId, stages, useRunTree = useGatewayRunTree, ...stripProps }: NodeStageStripProps) {
   const tree = useRunTree(runId);
   const statuses = nodeStatusIndex(tree.nodes);
   return (

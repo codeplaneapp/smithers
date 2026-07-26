@@ -12,15 +12,15 @@
  * @returns {Record<string, unknown>}
  */
 export function decodeJwtClaims(token) {
-    if (typeof token !== "string") return {};
-    const parts = token.split(".");
-    if (parts.length < 2) return {};
-    try {
-        const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-        const json = Buffer.from(payload, "base64").toString("utf8");
-        const claims = JSON.parse(json);
-        return claims && typeof claims === "object" ? claims : {};
-    } catch {
-        return {};
-    }
+  if (typeof token !== "string") return {};
+  const parts = token.split(".");
+  if (parts.length < 2) return {};
+  try {
+    const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const json = Buffer.from(payload, "base64").toString("utf8");
+    const claims = JSON.parse(json);
+    return claims && typeof claims === "object" ? claims : {};
+  } catch {
+    return {};
+  }
 }

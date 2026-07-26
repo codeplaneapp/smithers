@@ -35,40 +35,44 @@ async function withTempPostgresDatabase(fn) {
   } finally {
     const cleanup = new Client({ connectionString: PG_URL });
     await cleanup.connect();
-    await cleanup.query(
-      "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
-      [database],
-    ).catch(() => {});
+    await cleanup
+      .query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()", [
+        database,
+      ])
+      .catch(() => {});
     await cleanup.query(`DROP DATABASE IF EXISTS ${quoteId(database)}`).catch(() => {});
     await cleanup.end().catch(() => {});
   }
 }
 
 function writePostgresWorkflow(repo) {
-  repo.write(".smithers/workflows/postgres-roundtrip.tsx", [
-    "/** @jsxImportSource smithers-orchestrator */",
-    'import { openSmithersBackend, Workflow, Task } from "smithers-orchestrator";',
-    'import { z } from "zod";',
-    "",
-    "const { smithers, outputs } = await openSmithersBackend({",
-    "  result: z.object({",
-    "    summary: z.string(),",
-    "    prompt: z.string().nullable(),",
-    "  }),",
-    "});",
-    "",
-    "export default smithers((ctx) => (",
-    '  <Workflow name="postgres-roundtrip">',
-    '    <Task id="write-result" output={outputs.result}>',
-    "      {{",
-    '        summary: "fixture workflow ran in postgres",',
-    "        prompt: ctx.input.prompt ?? null,",
-    "      }}",
-    "    </Task>",
-    "  </Workflow>",
-    "));",
-    "",
-  ].join("\n"));
+  repo.write(
+    ".smithers/workflows/postgres-roundtrip.tsx",
+    [
+      "/** @jsxImportSource smithers-orchestrator */",
+      'import { openSmithersBackend, Workflow, Task } from "smithers-orchestrator";',
+      'import { z } from "zod";',
+      "",
+      "const { smithers, outputs } = await openSmithersBackend({",
+      "  result: z.object({",
+      "    summary: z.string(),",
+      "    prompt: z.string().nullable(),",
+      "  }),",
+      "});",
+      "",
+      "export default smithers((ctx) => (",
+      '  <Workflow name="postgres-roundtrip">',
+      '    <Task id="write-result" output={outputs.result}>',
+      "      {{",
+      '        summary: "fixture workflow ran in postgres",',
+      "        prompt: ctx.input.prompt ?? null,",
+      "      }}",
+      "    </Task>",
+      "  </Workflow>",
+      "));",
+      "",
+    ].join("\n"),
+  );
 }
 
 const maybeTest = PG_URL ? test : test.skip;

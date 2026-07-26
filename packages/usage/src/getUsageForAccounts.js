@@ -13,11 +13,14 @@ import { readUsageCache, writeUsageCache } from "./usageCache.js";
  * @returns {number}
  */
 function refreshIntervalMs(provider) {
-    switch (provider) {
-        case "claude-code": return 180_000;
-        case "codex": return 60_000;
-        default: return 30_000;
-    }
+  switch (provider) {
+    case "claude-code":
+      return 180_000;
+    case "codex":
+      return 60_000;
+    default:
+      return 30_000;
+  }
 }
 
 /**
@@ -28,7 +31,7 @@ function refreshIntervalMs(provider) {
  * @returns {number}
  */
 function hardFloorMs(provider) {
-    return provider === "claude-code" ? 180_000 : 0;
+  return provider === "claude-code" ? 180_000 : 0;
 }
 
 /**
@@ -42,7 +45,7 @@ function hardFloorMs(provider) {
  * @returns {boolean}
  */
 function entryFailed(entry) {
-    return entry?.report?.source === "none";
+  return entry?.report?.source === "none";
 }
 
 /**
@@ -53,13 +56,13 @@ function entryFailed(entry) {
  * @returns {{ provider: Account["provider"]; configDir?: string; model?: string; apiKeyHash?: string }}
  */
 function accountIdentity(account) {
-    const identity = { provider: account.provider };
-    if (account.configDir !== undefined) identity.configDir = account.configDir;
-    if (account.model !== undefined) identity.model = account.model;
-    if (account.apiKey !== undefined) {
-        identity.apiKeyHash = createHash("sha256").update(account.apiKey).digest("hex");
-    }
-    return identity;
+  const identity = { provider: account.provider };
+  if (account.configDir !== undefined) identity.configDir = account.configDir;
+  if (account.model !== undefined) identity.model = account.model;
+  if (account.apiKey !== undefined) {
+    identity.apiKeyHash = createHash("sha256").update(account.apiKey).digest("hex");
+  }
+  return identity;
 }
 
 /**
@@ -68,10 +71,12 @@ function accountIdentity(account) {
  * @returns {boolean}
  */
 function entryMatchesAccount(entry, identity) {
-    return entry?.identity?.provider === identity.provider
-        && entry.identity.configDir === identity.configDir
-        && entry.identity.model === identity.model
-        && entry.identity.apiKeyHash === identity.apiKeyHash;
+  return (
+    entry?.identity?.provider === identity.provider &&
+    entry.identity.configDir === identity.configDir &&
+    entry.identity.model === identity.model &&
+    entry.identity.apiKeyHash === identity.apiKeyHash
+  );
 }
 
 /**
@@ -84,36 +89,39 @@ function entryMatchesAccount(entry, identity) {
  * @returns {Promise<UsageReport[]>}
  */
 export async function getUsageForAccounts(accounts, options = {}) {
-    const { fresh = false, env = process.env, nowMs = Date.now() } = options;
-    const cache = readUsageCache(env);
-    const decisions = accounts.map((account) => {
-        const entry = cache.entries[account.label];
-        const identity = accountIdentity(account);
-        const fetchedAt = entry?.report?.fetchedAt;
-        const ageMs = typeof fetchedAt === "string" ? nowMs - Date.parse(fetchedAt) : Number.NaN;
-        const useCache = entryMatchesAccount(entry, identity) && Number.isFinite(ageMs) && (
-            (!entryFailed(entry) && ageMs < hardFloorMs(account.provider)) ||
-            (!fresh && ageMs < refreshIntervalMs(account.provider))
-        );
-        return { account, entry, identity, useCache };
-    });
-    const reports = await Promise.all(decisions.map(async (d) => {
-        if (d.useCache && d.entry) return { ...d.entry.report, stale: true };
-        return getAccountUsage(d.account);
-    }));
-    let changed = false;
-    reports.forEach((report, i) => {
-        if (!decisions[i].useCache) {
-            cache.entries[report.accountLabel] = { identity: decisions[i].identity, report };
-            changed = true;
-        }
-    });
-    if (changed) {
-        try {
-            writeUsageCache(cache, env);
-        } catch {
-            // a cache write failure must not break the command
-        }
+  const { fresh = false, env = process.env, nowMs = Date.now() } = options;
+  const cache = readUsageCache(env);
+  const decisions = accounts.map((account) => {
+    const entry = cache.entries[account.label];
+    const identity = accountIdentity(account);
+    const fetchedAt = entry?.report?.fetchedAt;
+    const ageMs = typeof fetchedAt === "string" ? nowMs - Date.parse(fetchedAt) : Number.NaN;
+    const useCache =
+      entryMatchesAccount(entry, identity) &&
+      Number.isFinite(ageMs) &&
+      ((!entryFailed(entry) && ageMs < hardFloorMs(account.provider)) ||
+        (!fresh && ageMs < refreshIntervalMs(account.provider)));
+    return { account, entry, identity, useCache };
+  });
+  const reports = await Promise.all(
+    decisions.map(async (d) => {
+      if (d.useCache && d.entry) return { ...d.entry.report, stale: true };
+      return getAccountUsage(d.account);
+    }),
+  );
+  let changed = false;
+  reports.forEach((report, i) => {
+    if (!decisions[i].useCache) {
+      cache.entries[report.accountLabel] = { identity: decisions[i].identity, report };
+      changed = true;
     }
-    return reports;
+  });
+  if (changed) {
+    try {
+      writeUsageCache(cache, env);
+    } catch {
+      // a cache write failure must not break the command
+    }
+  }
+  return reports;
 }

@@ -135,10 +135,14 @@ export function validateRegistry(registry: SotaRegistry): void {
   }
   for (const [index, situation] of registry.routing.situations.entries()) {
     if (
-      typeof situation?.start !== "string" || !situation.start.trim() ||
-      typeof situation?.when !== "string" || !situation.when.trim() ||
-      typeof situation?.escalate !== "string" || !situation.escalate.trim()
-    ) throw new Error(`routing situation ${index} must have non-empty start, when, and escalate text`);
+      typeof situation?.start !== "string" ||
+      !situation.start.trim() ||
+      typeof situation?.when !== "string" ||
+      !situation.when.trim() ||
+      typeof situation?.escalate !== "string" ||
+      !situation.escalate.trim()
+    )
+      throw new Error(`routing situation ${index} must have non-empty start, when, and escalate text`);
   }
   const ids = new Set<string>();
   const slots = new Set<string>();
@@ -339,14 +343,18 @@ function renderMdx(registry: SotaRegistry, benchmarks: Benchmark[]): string {
   lines.push(`const orchestrator = new ClaudeCodeAgent({ model: "${routingId("opus")}" });`);
   lines.push(`const planner = new ClaudeCodeAgent({ model: "${routingId("fable")}" });`);
   lines.push(`const implementer = new CodexAgent({ model: "${routingId("terra")}" });`);
-  lines.push(`const trivialFixer = new CodexAgent({ model: "${routingId("luna")}", config: { model_reasoning_effort: "medium" } });`);
+  lines.push(
+    `const trivialFixer = new CodexAgent({ model: "${routingId("luna")}", config: { model_reasoning_effort: "medium" } });`,
+  );
   lines.push(`const validator = new CodexAgent({ model: "${routingId("terra")}" });`);
   lines.push(`const reviewer = new CodexAgent({ model: "${routingId("sol")}" });`);
   lines.push(`const fableFallback = new ClaudeCodeAgent({ model: "${routingId("fable")}" });`);
   lines.push("const smartFallbackChain = [reviewer, fableFallback];");
   lines.push("```");
   lines.push("");
-  lines.push(`${registry.routing.fableGuidance} See [Anthropic's Fable 5 announcement](https://www.anthropic.com/news/claude-fable-5-mythos-5) and [July redeployment update](https://www.anthropic.com/news/redeploying-fable-5).`);
+  lines.push(
+    `${registry.routing.fableGuidance} See [Anthropic's Fable 5 announcement](https://www.anthropic.com/news/claude-fable-5-mythos-5) and [July redeployment update](https://www.anthropic.com/news/redeploying-fable-5).`,
+  );
   const providers = [...new Set(active(registry).map((m) => m.provider))];
   for (const provider of providers) {
     lines.push("");

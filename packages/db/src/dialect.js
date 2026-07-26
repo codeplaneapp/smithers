@@ -29,7 +29,7 @@ export const POSTGRES = /** @type {const} */ ("postgres");
  * @returns {string}
  */
 export function quoteIdentifier(identifier) {
-    return `"${String(identifier).replaceAll(`"`, `""`)}"`;
+  return `"${String(identifier).replaceAll(`"`, `""`)}"`;
 }
 
 /**
@@ -42,83 +42,83 @@ export function quoteIdentifier(identifier) {
  * @returns {string}
  */
 export function translatePlaceholders(dialect, sql) {
-    if (dialect !== POSTGRES) {
-        return sql;
+  if (dialect !== POSTGRES) {
+    return sql;
+  }
+  let out = "";
+  let index = 1;
+  let inSingle = false;
+  let inDouble = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    const next = sql[i + 1];
+    if (inLineComment) {
+      out += ch;
+      if (ch === "\n") inLineComment = false;
+      continue;
     }
-    let out = "";
-    let index = 1;
-    let inSingle = false;
-    let inDouble = false;
-    let inLineComment = false;
-    let inBlockComment = false;
-    for (let i = 0; i < sql.length; i++) {
-        const ch = sql[i];
-        const next = sql[i + 1];
-        if (inLineComment) {
-            out += ch;
-            if (ch === "\n") inLineComment = false;
-            continue;
-        }
-        if (inBlockComment) {
-            out += ch;
-            if (ch === "*" && next === "/") {
-                out += next;
-                i++;
-                inBlockComment = false;
-            }
-            continue;
-        }
-        if (inSingle) {
-            out += ch;
-            if (ch === "'") {
-                if (next === "'") {
-                    out += next;
-                    i++;
-                } else {
-                    inSingle = false;
-                }
-            }
-            continue;
-        }
-        if (inDouble) {
-            out += ch;
-            if (ch === `"`) {
-                if (next === `"`) {
-                    out += next;
-                    i++;
-                } else {
-                    inDouble = false;
-                }
-            }
-            continue;
-        }
-        if (ch === "'") {
-            inSingle = true;
-            out += ch;
-            continue;
-        }
-        if (ch === `"`) {
-            inDouble = true;
-            out += ch;
-            continue;
-        }
-        if (ch === "-" && next === "-") {
-            inLineComment = true;
-            out += ch;
-            continue;
-        }
-        if (ch === "/" && next === "*") {
-            inBlockComment = true;
-            out += ch;
-            continue;
-        }
-        if (ch === "?") {
-            out += `$${index++}`;
-            continue;
-        }
-        out += ch;
+    if (inBlockComment) {
+      out += ch;
+      if (ch === "*" && next === "/") {
+        out += next;
+        i++;
+        inBlockComment = false;
+      }
+      continue;
     }
-    return out;
+    if (inSingle) {
+      out += ch;
+      if (ch === "'") {
+        if (next === "'") {
+          out += next;
+          i++;
+        } else {
+          inSingle = false;
+        }
+      }
+      continue;
+    }
+    if (inDouble) {
+      out += ch;
+      if (ch === `"`) {
+        if (next === `"`) {
+          out += next;
+          i++;
+        } else {
+          inDouble = false;
+        }
+      }
+      continue;
+    }
+    if (ch === "'") {
+      inSingle = true;
+      out += ch;
+      continue;
+    }
+    if (ch === `"`) {
+      inDouble = true;
+      out += ch;
+      continue;
+    }
+    if (ch === "-" && next === "-") {
+      inLineComment = true;
+      out += ch;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      inBlockComment = true;
+      out += ch;
+      continue;
+    }
+    if (ch === "?") {
+      out += `$${index++}`;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
 }
 
 /**
@@ -131,19 +131,19 @@ export function translatePlaceholders(dialect, sql) {
  * @returns {string}
  */
 export function columnType(dialect, sqliteType) {
-    if (dialect !== POSTGRES) {
-        return sqliteType;
-    }
-    switch (sqliteType.toUpperCase()) {
-        case "INTEGER":
-            return "BIGINT";
-        case "REAL":
-            return "DOUBLE PRECISION";
-        case "BLOB":
-            return "BYTEA";
-        default:
-            return sqliteType;
-    }
+  if (dialect !== POSTGRES) {
+    return sqliteType;
+  }
+  switch (sqliteType.toUpperCase()) {
+    case "INTEGER":
+      return "BIGINT";
+    case "REAL":
+      return "DOUBLE PRECISION";
+    case "BLOB":
+      return "BYTEA";
+    default:
+      return sqliteType;
+  }
 }
 
 /**
@@ -158,15 +158,15 @@ export function columnType(dialect, sqliteType) {
  * @returns {string}
  */
 export function translateDdl(dialect, ddl) {
-    if (dialect !== POSTGRES) {
-        return ddl;
-    }
-    return ddl
-        .replace(/\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b/gi, "BIGSERIAL PRIMARY KEY")
-        .replace(/\s+AUTOINCREMENT\b/gi, "")
-        .replace(/\bBLOB\b/gi, "BYTEA")
-        .replace(/\bREAL\b/gi, "DOUBLE PRECISION")
-        .replace(/\bINTEGER\b/gi, "BIGINT");
+  if (dialect !== POSTGRES) {
+    return ddl;
+  }
+  return ddl
+    .replace(/\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b/gi, "BIGSERIAL PRIMARY KEY")
+    .replace(/\s+AUTOINCREMENT\b/gi, "")
+    .replace(/\bBLOB\b/gi, "BYTEA")
+    .replace(/\bREAL\b/gi, "DOUBLE PRECISION")
+    .replace(/\bINTEGER\b/gi, "BIGINT");
 }
 
 /**
@@ -177,7 +177,7 @@ export function translateDdl(dialect, ddl) {
  * @returns {string}
  */
 export function beginTransactionSql(dialect) {
-    return dialect === POSTGRES ? "BEGIN" : "BEGIN IMMEDIATE";
+  return dialect === POSTGRES ? "BEGIN" : "BEGIN IMMEDIATE";
 }
 
 /**
@@ -192,9 +192,9 @@ export function beginTransactionSql(dialect) {
  * @returns {string}
  */
 export function jsonExtractText(dialect, columnSql, jsonPath) {
-    if (dialect === POSTGRES) {
-        const key = jsonPath.replace(/^\$\./, "").replace(/'/g, "''");
-        return `(${columnSql}::json->>'${key}')`;
-    }
-    return `json_extract(${columnSql}, '${jsonPath.replace(/'/g, "''")}')`;
+  if (dialect === POSTGRES) {
+    const key = jsonPath.replace(/^\$\./, "").replace(/'/g, "''");
+    return `(${columnSql}::json->>'${key}')`;
+  }
+  return `json_extract(${columnSql}, '${jsonPath.replace(/'/g, "''")}')`;
 }

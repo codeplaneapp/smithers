@@ -20,10 +20,8 @@ import { Context } from "effect";
  * }} SchedulerService
  */
 
-const SchedulerBase =
-  /** @type {Context.TagClass<Scheduler, "Scheduler", SchedulerService>} */ (
-    /** @type {unknown} */ (Context.Tag("Scheduler")())
-  );
+const SchedulerBase = /** @type {Context.TagClass<Scheduler, "Scheduler", SchedulerService>} */ (
+  /** @type {unknown} */ (Context.Tag("Scheduler")())
+);
 
-export class Scheduler extends SchedulerBase {
-}
+export class Scheduler extends SchedulerBase {}

@@ -1,6 +1,14 @@
 /** @jsxImportSource react */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MarkdownEditor, MarkdownPreview, SpecFileTree, formatStatus, resolveDocLink, type DocsContentEntry, type DraftRunNotice } from "./ddd-shared";
+import {
+  MarkdownEditor,
+  MarkdownPreview,
+  SpecFileTree,
+  formatStatus,
+  resolveDocLink,
+  type DocsContentEntry,
+  type DraftRunNotice,
+} from "./ddd-shared";
 
 export type SpecsTabProps = {
   docs: DocsContentEntry[];
@@ -30,14 +38,31 @@ function docSearchBlob(doc: DocsContentEntry): string {
 }
 
 export function SpecsTab(props: SpecsTabProps) {
-  const { docs, drafts, selectedPath, assetBase, changedPaths, launchPending = false, launchedRunId, launchError, recoveredPaths = [], editorResetKey = 0, draftRunNotice } = props;
+  const {
+    docs,
+    drafts,
+    selectedPath,
+    assetBase,
+    changedPaths,
+    launchPending = false,
+    launchedRunId,
+    launchError,
+    recoveredPaths = [],
+    editorResetKey = 0,
+    draftRunNotice,
+  } = props;
   const [query, setQuery] = useState("");
   const [technicalView, setTechnicalView] = useState<"preview" | "source">("preview");
   // "Discard all" wipes every local draft, so require a second confirming click
   // (auto-disarms after 4s) instead of firing destructively on one misclick.
   const [discardAllArmed, setDiscardAllArmed] = useState(false);
   const discardArmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (discardArmTimer.current) clearTimeout(discardArmTimer.current); }, []);
+  useEffect(
+    () => () => {
+      if (discardArmTimer.current) clearTimeout(discardArmTimer.current);
+    },
+    [],
+  );
   const needle = query.trim().toLowerCase();
   const productDocsAll = docs.filter((doc) => !docIsTechnical(doc));
   const technicalDocsAll = docs.filter(docIsTechnical);
@@ -45,11 +70,11 @@ export function SpecsTab(props: SpecsTabProps) {
   const technicalDocs = technicalDocsAll.filter((doc) => !needle || docSearchBlob(doc).includes(needle));
   const visibleDocs = useMemo(() => [...productDocs, ...technicalDocs], [productDocs, technicalDocs]);
   const selectedDoc = needle
-    ? visibleDocs.find((doc) => doc.path === selectedPath) ?? visibleDocs[0]
-    : docs.find((doc) => doc.path === selectedPath) ?? productDocsAll[0] ?? docs[0];
+    ? (visibleDocs.find((doc) => doc.path === selectedPath) ?? visibleDocs[0])
+    : (docs.find((doc) => doc.path === selectedPath) ?? productDocsAll[0] ?? docs[0]);
   const renderedSelectedPath = selectedDoc?.path ?? selectedPath;
   const selectedTechnical = docIsTechnical(selectedDoc);
-  const draftValue = selectedDoc ? drafts[selectedDoc.path] ?? selectedDoc.content : "";
+  const draftValue = selectedDoc ? (drafts[selectedDoc.path] ?? selectedDoc.content) : "";
   const currentDirty = !!selectedDoc && changedPaths.includes(selectedDoc.path);
   const dispatchableChangedPaths = changedPaths.filter((path) => {
     const doc = docs.find((item) => item.path === path);
@@ -91,25 +116,47 @@ export function SpecsTab(props: SpecsTabProps) {
         </label>
         <div className="tree-section">
           <span className="tree-section-title">
-            Product docs <span className="count">{productDocs.length}{needle ? ` of ${productDocsAll.length}` : ""}</span>
+            Product docs{" "}
+            <span className="count">
+              {productDocs.length}
+              {needle ? ` of ${productDocsAll.length}` : ""}
+            </span>
           </span>
           {productDocs.length > 0 ? (
-            <SpecFileTree files={productDocs} selectedPath={renderedSelectedPath} changedPaths={changedPaths} onSelect={props.onSelectPath} />
+            <SpecFileTree
+              files={productDocs}
+              selectedPath={renderedSelectedPath}
+              changedPaths={changedPaths}
+              onSelect={props.onSelectPath}
+            />
           ) : (
             <p className="tree-empty">{needle ? "No product docs match." : "No product docs yet."}</p>
           )}
         </div>
-        <details className="tree-section technical-docs" data-testid="ddd-technical-docs" open={needle.length > 0 || selectedTechnical}>
+        <details
+          className="tree-section technical-docs"
+          data-testid="ddd-technical-docs"
+          open={needle.length > 0 || selectedTechnical}
+        >
           <summary className="tree-section-title tree-section-toggle">
-            Technical docs (for agents) <span className="count">{technicalDocs.length}{needle ? ` of ${technicalDocsAll.length}` : ""}</span>
+            Technical docs (for agents){" "}
+            <span className="count">
+              {technicalDocs.length}
+              {needle ? ` of ${technicalDocsAll.length}` : ""}
+            </span>
           </summary>
           <p className="agent-docs-callout" data-testid="ddd-agent-docs-callout">
-            Generated, low-level reference docs. We recommend asking your agent to read these instead of reading
-            them yourself, e.g. "Read .smithers/spec/content/features/cli.md and close the gap it describes."
-            Stay on the product docs; your agent works down here.
+            Generated, low-level reference docs. We recommend asking your agent to read these instead of reading them
+            yourself, e.g. "Read .smithers/spec/content/features/cli.md and close the gap it describes." Stay on the
+            product docs; your agent works down here.
           </p>
           {technicalDocs.length > 0 ? (
-            <SpecFileTree files={technicalDocs} selectedPath={renderedSelectedPath} changedPaths={changedPaths} onSelect={props.onSelectPath} />
+            <SpecFileTree
+              files={technicalDocs}
+              selectedPath={renderedSelectedPath}
+              changedPaths={changedPaths}
+              onSelect={props.onSelectPath}
+            />
           ) : (
             <p className="tree-empty">{needle ? "No technical docs match." : "No technical docs yet."}</p>
           )}
@@ -121,11 +168,11 @@ export function SpecsTab(props: SpecsTabProps) {
             <span className="path">{selectedDoc?.path ?? "No spec selected"}</span>
             {selectedDoc ? (
               selectedTechnical ? (
-                <span className="badge muted" data-testid="ddd-doc-generated-badge">Generated · read-only</span>
-              ) : (
-                <span className={`badge ${currentDirty ? "warn" : "muted"}`}>
-                  {currentDirty ? "Unsaved" : "Clean"}
+                <span className="badge muted" data-testid="ddd-doc-generated-badge">
+                  Generated · read-only
                 </span>
+              ) : (
+                <span className={`badge ${currentDirty ? "warn" : "muted"}`}>{currentDirty ? "Unsaved" : "Clean"}</span>
               )
             ) : null}
           </div>
@@ -222,13 +269,22 @@ export function SpecsTab(props: SpecsTabProps) {
             />
           )
         ) : (
-          <p className="empty">{needle ? "No docs match the current search. Clear the filter to return to the selected document." : "No narrative docs found under .smithers/spec/content."}</p>
+          <p className="empty">
+            {needle
+              ? "No docs match the current search. Clear the filter to return to the selected document."
+              : "No narrative docs found under .smithers/spec/content."}
+          </p>
         )}
 
         {launchedRunId || launchError ? (
           <div className="meta-status" data-testid="ddd-meta-ticket-status">
-            <span className={`badge ${launchError ? "bad" : "ok"}`}>{formatStatus(launchError ? "failed" : "queued")}</span>
-            <span>{launchError ?? `Run ${launchedRunId} dispatched from the docs editor. Drafts stay local until the agent applies them.`}</span>
+            <span className={`badge ${launchError ? "bad" : "ok"}`}>
+              {formatStatus(launchError ? "failed" : "queued")}
+            </span>
+            <span>
+              {launchError ??
+                `Run ${launchedRunId} dispatched from the docs editor. Drafts stay local until the agent applies them.`}
+            </span>
           </div>
         ) : null}
         {launchPending ? (
@@ -240,7 +296,9 @@ export function SpecsTab(props: SpecsTabProps) {
         {recoveredPaths.length ? (
           <div className="meta-status" data-testid="ddd-draft-recovered">
             <span className="badge warn">Recovered</span>
-            <span>{recoveredPaths.length} local draft{recoveredPaths.length === 1 ? "" : "s"} restored from this browser.</span>
+            <span>
+              {recoveredPaths.length} local draft{recoveredPaths.length === 1 ? "" : "s"} restored from this browser.
+            </span>
             <button type="button" className="button" onClick={() => props.onDiscardDrafts?.(recoveredPaths)}>
               Discard recovered
             </button>
@@ -248,7 +306,9 @@ export function SpecsTab(props: SpecsTabProps) {
         ) : null}
         {draftRunNotice ? (
           <div className="meta-status draft-run-state" data-testid="ddd-draft-run-state">
-            <span className={`badge ${draftRunNotice.state === "failed" ? "bad" : draftRunNotice.state === "not-applied" || draftRunNotice.state === "retained" ? "warn" : "ok"}`}>
+            <span
+              className={`badge ${draftRunNotice.state === "failed" ? "bad" : draftRunNotice.state === "not-applied" || draftRunNotice.state === "retained" ? "warn" : "ok"}`}
+            >
               {draftRunNotice.state === "failed"
                 ? "Run failed"
                 : draftRunNotice.state === "applied"
@@ -258,8 +318,7 @@ export function SpecsTab(props: SpecsTabProps) {
                     : "Not applied"}
             </span>
             <span>
-              <strong>Run {draftRunNotice.runId}</strong>{" "}
-              {draftRunNotice.summary}
+              <strong>Run {draftRunNotice.runId}</strong> {draftRunNotice.summary}
             </span>
             <button type="button" className="button" data-testid="ddd-draft-run-reload" onClick={props.onReload}>
               Reload docs

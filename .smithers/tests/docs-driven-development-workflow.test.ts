@@ -16,7 +16,11 @@ async function removeTempDir(dir: string) {
   let lastError: unknown;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
-      try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      } catch {
+        /* best-effort temp cleanup */
+      }
       return;
     } catch (error) {
       lastError = error;
@@ -41,16 +45,20 @@ function tempRoot(status = "partial") {
 function writeFeatures(root: string, status: string) {
   writeFileSync(
     join(root, ".smithers/spec/features.json"),
-    JSON.stringify([
-      {
-        id: "docs-driven-development",
-        title: "Docs driven development",
-        summary: "Keep the spec honest.",
-        status,
-        priority: "p0",
-        owner: "product",
-      },
-    ], null, 2),
+    JSON.stringify(
+      [
+        {
+          id: "docs-driven-development",
+          title: "Docs driven development",
+          summary: "Keep the spec honest.",
+          status,
+          priority: "p0",
+          owner: "product",
+        },
+      ],
+      null,
+      2,
+    ),
   );
 }
 
@@ -127,7 +135,12 @@ describe("docs-driven-development workflow guards", () => {
 
     // The metaTicket node derives codeDiffFiles from this seam; on failure the
     // list must be empty, never error prose split into fake file names.
-    const codeDiffFiles = failed.ok ? failed.output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) : [];
+    const codeDiffFiles = failed.ok
+      ? failed.output
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+      : [];
     expect(codeDiffFiles).toEqual([]);
   });
 
@@ -151,16 +164,18 @@ describe("docs-driven-development workflow guards", () => {
 
   test("cleanDiffForMetaTicket filters generated, workflow, UI, and DDD script paths", async () => {
     const mod = await importWorkflow(tempRoot());
-    const cleaned = mod.cleanDiffForMetaTicket([
-      "diff --git a/.smithers/spec/content/features/x.md b/.smithers/spec/content/features/x.md",
-      "+generated feature doc",
-      "diff --git a/.smithers/ui/ddd-docsContent.generated.ts b/.smithers/ui/ddd-docsContent.generated.ts",
-      "diff --git a/.smithers/workflows/docs-driven-development.tsx b/.smithers/workflows/docs-driven-development.tsx",
-      "diff --git a/.smithers/ui/docs-driven-development.tsx b/.smithers/ui/docs-driven-development.tsx",
-      "diff --git a/.smithers/lib/ddd/build.ts b/.smithers/lib/ddd/build.ts",
-      "diff --git a/.smithers/spec/content/overview.md b/.smithers/spec/content/overview.md",
-      "+real editor change",
-    ].join("\n"));
+    const cleaned = mod.cleanDiffForMetaTicket(
+      [
+        "diff --git a/.smithers/spec/content/features/x.md b/.smithers/spec/content/features/x.md",
+        "+generated feature doc",
+        "diff --git a/.smithers/ui/ddd-docsContent.generated.ts b/.smithers/ui/ddd-docsContent.generated.ts",
+        "diff --git a/.smithers/workflows/docs-driven-development.tsx b/.smithers/workflows/docs-driven-development.tsx",
+        "diff --git a/.smithers/ui/docs-driven-development.tsx b/.smithers/ui/docs-driven-development.tsx",
+        "diff --git a/.smithers/lib/ddd/build.ts b/.smithers/lib/ddd/build.ts",
+        "diff --git a/.smithers/spec/content/overview.md b/.smithers/spec/content/overview.md",
+        "+real editor change",
+      ].join("\n"),
+    );
 
     expect(cleaned).toContain(".smithers/spec/content/overview.md");
     expect(cleaned).toContain("+real editor change");
@@ -275,7 +290,12 @@ describe("docs-driven-development workflow guards", () => {
 
     const ctx = () => ({
       input: {},
-      outputMaybe: () => ({ selected: [{ slot: 1, agent: "review" }, { slot: 2, agent: "implementation" }] }),
+      outputMaybe: () => ({
+        selected: [
+          { slot: 1, agent: "review" },
+          { slot: 2, agent: "implementation" },
+        ],
+      }),
     });
     expect(Array.isArray(mod.agentForSlot(ctx(), 1))).toBe(true);
     expect(Array.isArray(mod.agentForSlot(ctx(), 2))).toBe(true);

@@ -74,10 +74,7 @@ export function splitAttemptKey(key: AttemptKey): { nodeId: string; iteration: n
 }
 
 /** Filter events to a single attempt identified by its AttemptKey. */
-export function filterEventsByAttempt(
-  events: GatewayEventFrame[],
-  key: AttemptKey,
-): GatewayEventFrame[] {
+export function filterEventsByAttempt(events: GatewayEventFrame[], key: AttemptKey): GatewayEventFrame[] {
   const { nodeId, iteration } = splitAttemptKey(key);
 
   return events.filter((e) => {

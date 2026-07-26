@@ -17,9 +17,7 @@ async function expectFocusIndicator(locator: Locator, indicator = locator): Prom
     };
   });
   expect(matchesFocusVisible).toBe(true);
-  expect(
-    (focus.outlineStyle !== "none" && focus.outlineWidth !== "0px") || focus.boxShadow !== "none",
-  ).toBe(true);
+  expect((focus.outlineStyle !== "none" && focus.outlineWidth !== "0px") || focus.boxShadow !== "none").toBe(true);
 }
 
 async function refocusThroughKeyboard(page: Page, locator: Locator): Promise<void> {

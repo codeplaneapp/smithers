@@ -20,16 +20,12 @@ type RunEventFrame = {
 
 function asRunId(payload: unknown): string {
   const record =
-    typeof payload === "object" && payload !== null && !Array.isArray(payload)
-      ? payload as LaunchRunResult
-      : {};
+    typeof payload === "object" && payload !== null && !Array.isArray(payload) ? (payload as LaunchRunResult) : {};
   return typeof record.runId === "string" ? record.runId : "";
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 function asString(value: unknown): string | undefined {
@@ -63,9 +59,7 @@ function statusFromRunEvent(frame: RunEventFrame): "running" | "done" | "failed"
   if (!event) return undefined;
   const innerPayload = asRecord(payload.payload);
   if (event === "run.completed") {
-    return notificationStatusFromRunState(
-      asString(innerPayload.state) ?? asString(innerPayload.status),
-    );
+    return notificationStatusFromRunState(asString(innerPayload.state) ?? asString(innerPayload.status));
   }
   if (event === "run.failed" || event === "run.cancelled" || event === "run.canceled") {
     return "failed";
@@ -133,10 +127,7 @@ export async function startWorkflowRun({
       throw new Error("Gateway did not return a runId.");
     }
 
-    useChatStore.getState().postCard(
-      { kind: "gatewayRun", workflowKey, runId },
-      `Started ${workflowKey}.`,
-    );
+    useChatStore.getState().postCard({ kind: "gatewayRun", workflowKey, runId }, `Started ${workflowKey}.`);
     useNotificationsStore.getState().update(toastId, {
       title,
       detail: `run ${runId}`,
@@ -150,9 +141,7 @@ export async function startWorkflowRun({
       status: "done",
       detail: `not connected: ${errorText(error)}`,
     });
-    useChatStore.getState().say(
-      `I could not start ${workflowKey}: ${errorText(error)}`,
-    );
+    useChatStore.getState().say(`I could not start ${workflowKey}: ${errorText(error)}`);
     return undefined;
   }
 }

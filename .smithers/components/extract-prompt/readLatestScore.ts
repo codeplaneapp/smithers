@@ -35,9 +35,7 @@ type Row = {
  * if no row is found, we return "pending". Callers who need true "missing"
  * detection should pass a scorerName they know is registered.
  */
-export async function readLatestScore(
-  args: ReadLatestScoreArgs,
-): Promise<ScoreStatus> {
+export async function readLatestScore(args: ReadLatestScoreArgs): Promise<ScoreStatus> {
   const dbPath = resolve(args.dbPath ?? "smithers.db");
   if (!existsSync(dbPath)) {
     return { status: "missing" };
@@ -45,11 +43,7 @@ export async function readLatestScore(
 
   const db = new Database(dbPath, { readonly: true });
   try {
-    const where = [
-      "run_id = ?",
-      "node_id = ?",
-      "scorer_name = ?",
-    ];
+    const where = ["run_id = ?", "node_id = ?", "scorer_name = ?"];
     const params: (string | number)[] = [args.runId, args.nodeId, args.scorerName];
     if (typeof args.iteration === "number") {
       where.push("iteration = ?");

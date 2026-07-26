@@ -3,29 +3,56 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { addPack, listLockedPacks, listPacks, lockPath, packDirs, parsePackSpec, removePack, scanPackImports, updatePack } from "../src/packs.js";
+import {
+  addPack,
+  listLockedPacks,
+  listPacks,
+  lockPath,
+  packDirs,
+  parsePackSpec,
+  removePack,
+  scanPackImports,
+  updatePack,
+} from "../src/packs.js";
 import { discoverWorkflows, resolveWorkflow } from "../src/workflows.js";
 
-const temp = () => { const dir = mkdtempSync(join(tmpdir(), "smithers-packs-")); onTestFinished(() => rmSync(dir, { recursive: true, force: true })); return dir; };
+const temp = () => {
+  const dir = mkdtempSync(join(tmpdir(), "smithers-packs-"));
+  onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
+};
 
 test("pack specs parse GitHub shorthand, refs/subdirs, npm forms, and file fixtures", () => {
   expect(parsePackSpec("user/repo")).toMatchObject({ kind: "github", owner: "user", repo: "repo", ref: "HEAD" });
-  expect(parsePackSpec("github:user/repo/workflows#v1")).toMatchObject({ kind: "github", subdir: "workflows", ref: "v1" });
+  expect(parsePackSpec("github:user/repo/workflows#v1")).toMatchObject({
+    kind: "github",
+    subdir: "workflows",
+    ref: "v1",
+  });
   expect(parsePackSpec("npm:pkg@1.2.0")).toMatchObject({ kind: "npm", package: "pkg", version: "1.2.0" });
   expect(parsePackSpec("pkg@1.2.0")).toMatchObject({ kind: "npm", package: "pkg", version: "1.2.0" });
   expect(parsePackSpec("npm:pkg")).toMatchObject({ kind: "npm", package: "pkg", version: "latest" });
   expect(parsePackSpec("@scope/pkg")).toMatchObject({ kind: "npm", package: "@scope/pkg", version: "latest" });
   expect(parsePackSpec("npm:@scope/pkg")).toMatchObject({ kind: "npm", package: "@scope/pkg", version: "latest" });
   expect(parsePackSpec("file:/tmp/pack")).toMatchObject({ kind: "file", path: "/tmp/pack" });
-  expect(parsePackSpec("github:user/repo/subdir#main")).toMatchObject({ kind: "github", subdir: "subdir", ref: "main" });
+  expect(parsePackSpec("github:user/repo/subdir#main")).toMatchObject({
+    kind: "github",
+    subdir: "subdir",
+    ref: "main",
+  });
   expect(parsePackSpec("npm:@scope/pkg@2.0.0")).toMatchObject({ kind: "npm", package: "@scope/pkg", version: "2.0.0" });
 });
 
 test("add validates, locks, discovers, and removes a real fixture pack", async () => {
-  const project = temp(); mkdirSync(join(project, ".smithers"), { recursive: true });
-  const fixture = temp(); mkdirSync(join(fixture, "workflows"), { recursive: true });
+  const project = temp();
+  mkdirSync(join(project, ".smithers"), { recursive: true });
+  const fixture = temp();
+  mkdirSync(join(fixture, "workflows"), { recursive: true });
   writeFileSync(join(fixture, "smithers.toon"), "name: fixture-pack\nversion: 1.2.0\ncapabilities:\n  writes: none\n");
-  writeFileSync(join(fixture, "workflows", "hello.tsx"), "// smithers-display-name: Fixture Hello\nexport default null;\n");
+  writeFileSync(
+    join(fixture, "workflows", "hello.tsx"),
+    "// smithers-display-name: Fixture Hello\nexport default null;\n",
+  );
   const installed = await addPack(`file:${fixture}`, { from: project, yes: true });
   expect(installed.name).toBe("fixture-pack");
   expect(readFileSync(lockPath(join(project, ".smithers", "packs")), "utf8")).toContain("fixture-pack");
@@ -37,13 +64,21 @@ test("add validates, locks, discovers, and removes a real fixture pack", async (
 });
 
 test("a shadowed pack workflow stays reachable via its pack-qualified id", async () => {
-  const project = temp(); mkdirSync(join(project, ".smithers", "workflows"), { recursive: true });
-  const fixture = temp(); mkdirSync(join(fixture, "workflows"), { recursive: true });
+  const project = temp();
+  mkdirSync(join(project, ".smithers", "workflows"), { recursive: true });
+  const fixture = temp();
+  mkdirSync(join(fixture, "workflows"), { recursive: true });
   writeFileSync(join(fixture, "smithers.toon"), "name: fixture-pack\nversion: 1.0.0\n");
-  writeFileSync(join(fixture, "workflows", "hello.tsx"), "// smithers-display-name: Pack Hello\nexport default null;\n");
+  writeFileSync(
+    join(fixture, "workflows", "hello.tsx"),
+    "// smithers-display-name: Pack Hello\nexport default null;\n",
+  );
   await addPack(`file:${fixture}`, { from: project, yes: true });
   // A local workflow with the same id shadows the pack's in discovery…
-  writeFileSync(join(project, ".smithers", "workflows", "hello.tsx"), "// smithers-display-name: Local Hello\nexport default null;\n");
+  writeFileSync(
+    join(project, ".smithers", "workflows", "hello.tsx"),
+    "// smithers-display-name: Local Hello\nexport default null;\n",
+  );
   const unqualified = resolveWorkflow("hello", project);
   expect(unqualified.source).toBe("local");
   expect(discoverWorkflows(project).filter((entry) => entry.id === "hello")).toHaveLength(1);
@@ -54,7 +89,8 @@ test("a shadowed pack workflow stays reachable via its pack-qualified id", async
 });
 
 test("github-style tarballs with a wrapper dir and subdir manifest install and update", async () => {
-  const project = temp(); mkdirSync(join(project, ".smithers"), { recursive: true });
+  const project = temp();
+  mkdirSync(join(project, ".smithers"), { recursive: true });
   // Mirror a codeload archive: everything under `repo-main/`, the pack under
   // `repo-main/packs/demo/`.
   const build = temp();
@@ -74,24 +110,31 @@ test("github-style tarballs with a wrapper dir and subdir manifest install and u
 });
 
 test("a pack shipping a canonical gateway-react UI passes the import scan", async () => {
-  const project = temp(); mkdirSync(join(project, ".smithers"), { recursive: true });
+  const project = temp();
+  mkdirSync(join(project, ".smithers"), { recursive: true });
   const fixture = temp();
   mkdirSync(join(fixture, "workflows"), { recursive: true });
   mkdirSync(join(fixture, "ui"), { recursive: true });
   writeFileSync(join(fixture, "smithers.toon"), "name: ui-pack\nversion: 1.0.0\n");
-  writeFileSync(join(fixture, "workflows", "board.tsx"), [
-    "/** @jsxImportSource smithers-orchestrator */",
-    'import { UI } from "smithers-orchestrator";',
-    'export default <UI entry="../ui/board.tsx" />;',
-  ].join("\n"));
+  writeFileSync(
+    join(fixture, "workflows", "board.tsx"),
+    [
+      "/** @jsxImportSource smithers-orchestrator */",
+      'import { UI } from "smithers-orchestrator";',
+      'export default <UI entry="../ui/board.tsx" />;',
+    ].join("\n"),
+  );
   // The canonical UI contract: react + smithers-orchestrator/gateway-react.
-  writeFileSync(join(fixture, "ui", "board.tsx"), [
-    '/** @jsxImportSource react */',
-    'import { useState } from "react";',
-    'import { createGatewayReactRoot, useGatewayRuns } from "smithers-orchestrator/gateway-react";',
-    "export default function App() { const [n] = useState(0); useGatewayRuns; return n; }",
-    "createGatewayReactRoot;",
-  ].join("\n"));
+  writeFileSync(
+    join(fixture, "ui", "board.tsx"),
+    [
+      "/** @jsxImportSource react */",
+      'import { useState } from "react";',
+      'import { createGatewayReactRoot, useGatewayRuns } from "smithers-orchestrator/gateway-react";',
+      "export default function App() { const [n] = useState(0); useGatewayRuns; return n; }",
+      "createGatewayReactRoot;",
+    ].join("\n"),
+  );
   const installed = await addPack(`file:${fixture}`, { from: project, yes: true });
   expect(installed.name).toBe("ui-pack");
 });
@@ -101,28 +144,34 @@ test("bare user/repo#ref shorthand keeps the ref out of the repo name", () => {
 });
 
 test("global installs land under SMITHERS_HOME/packs and non-TTY installs require --yes", async () => {
-  const project = temp(); mkdirSync(join(project, ".smithers"), { recursive: true });
+  const project = temp();
+  mkdirSync(join(project, ".smithers"), { recursive: true });
   const home = temp();
-  const fixture = temp(); mkdirSync(join(fixture, "workflows"), { recursive: true });
+  const fixture = temp();
+  mkdirSync(join(fixture, "workflows"), { recursive: true });
   writeFileSync(join(fixture, "smithers.toon"), "name: global-pack\nversion: 1.0.0\n");
   writeFileSync(join(fixture, "workflows", "g.tsx"), "export default null;\n");
   const previousHome = process.env.SMITHERS_HOME;
   process.env.SMITHERS_HOME = home;
   try {
     // bun test's stdin is not a TTY: without --yes the trust gate must refuse.
-    await expect(addPack(`file:${fixture}`, { from: project, global: true })).rejects.toThrow(/Confirmation required; pass --yes/);
+    await expect(addPack(`file:${fixture}`, { from: project, global: true })).rejects.toThrow(
+      /Confirmation required; pass --yes/,
+    );
     const installed = await addPack(`file:${fixture}`, { from: project, global: true, yes: true });
     expect(installed.scope).toBe("global");
     expect(installed.path).toBe(join(home, "packs", "global-pack"));
     expect(readFileSync(join(home, "packs.lock.toon"), "utf8")).toContain("global-pack");
     expect(listPacks(project).map((pack) => `${pack.scope}:${pack.name}`)).toContain("global:global-pack");
   } finally {
-    if (previousHome === undefined) delete process.env.SMITHERS_HOME; else process.env.SMITHERS_HOME = previousHome;
+    if (previousHome === undefined) delete process.env.SMITHERS_HOME;
+    else process.env.SMITHERS_HOME = previousHome;
   }
 });
 
 test("the lock lives beside the packs dir and drives updates even when a pack dir is damaged", async () => {
-  const project = temp(); mkdirSync(join(project, ".smithers"), { recursive: true });
+  const project = temp();
+  mkdirSync(join(project, ".smithers"), { recursive: true });
   const fixture = temp();
   mkdirSync(join(fixture, "workflows"), { recursive: true });
   writeFileSync(join(fixture, "smithers.toon"), "name: lock-pack\nversion: 1.0.0\n");
@@ -143,30 +192,37 @@ test("the lock lives beside the packs dir and drives updates even when a pack di
 
 test("import scanning ignores comments and string contents but catches import-assignment", () => {
   const fixture = temp();
-  writeFileSync(join(fixture, "ok.ts"), [
-    '// import banned from "node:fs" — just a comment',
-    '/* import "child_process" */',
-    'const example = `import fs from "node:fs"`;',
-    'const text = "require(\'node:net\')";',
-    'import { z } from "zod/v4";',
-    "export default example;",
-  ].join("\n"));
+  writeFileSync(
+    join(fixture, "ok.ts"),
+    [
+      '// import banned from "node:fs" — just a comment',
+      '/* import "child_process" */',
+      'const example = `import fs from "node:fs"`;',
+      "const text = \"require('node:net')\";",
+      'import { z } from "zod/v4";',
+      "export default example;",
+    ].join("\n"),
+  );
   expect(() => scanPackImports(fixture)).not.toThrow();
   writeFileSync(join(fixture, "bad.ts"), 'import fs = require("node:fs");\nexport default fs;\n');
   expect(() => scanPackImports(fixture)).toThrow(/bad\.ts imports node:fs/);
 });
 
 test("add rejects a disallowed bare re-export before installation", async () => {
-  const project = temp(); mkdirSync(join(project, ".smithers"), { recursive: true });
-  const fixture = temp(); mkdirSync(join(fixture, "lib"), { recursive: true });
+  const project = temp();
+  mkdirSync(join(project, ".smithers"), { recursive: true });
+  const fixture = temp();
+  mkdirSync(join(fixture, "lib"), { recursive: true });
   writeFileSync(join(fixture, "smithers.toon"), "name: reexport-pack\n");
   writeFileSync(join(fixture, "lib", "util.ts"), 'export { readFileSync } from "node:fs";\n');
   await expect(addPack(`file:${fixture}`, { from: project, yes: true })).rejects.toThrow(/util\.ts imports node:fs/);
 });
 
 test("add rejects a disallowed bare import before installation", async () => {
-  const project = temp(); mkdirSync(join(project, ".smithers"), { recursive: true });
-  const fixture = temp(); mkdirSync(join(fixture, "workflows"), { recursive: true });
+  const project = temp();
+  mkdirSync(join(project, ".smithers"), { recursive: true });
+  const fixture = temp();
+  mkdirSync(join(fixture, "workflows"), { recursive: true });
   writeFileSync(join(fixture, "smithers.toon"), "name: bad-pack\n");
   writeFileSync(join(fixture, "workflows", "bad.tsx"), 'import fs from "node:fs";\nexport default null;\n');
   await expect(addPack(`file:${fixture}`, { from: project, yes: true })).rejects.toThrow(/bad\.tsx imports node:fs/);
@@ -224,6 +280,10 @@ test("sequential installs preserve the complete pack lock inventory", async () =
   await addPack(`file:${first}`, { from: project, yes: true });
   await addPack(`file:${second}`, { from: project, yes: true });
 
-  expect(listLockedPacks(project).filter((pack) => pack.scope === "local").map((pack) => pack.name).sort())
-    .toEqual(["first-pack", "second-pack"]);
+  expect(
+    listLockedPacks(project)
+      .filter((pack) => pack.scope === "local")
+      .map((pack) => pack.name)
+      .sort(),
+  ).toEqual(["first-pack", "second-pack"]);
 });

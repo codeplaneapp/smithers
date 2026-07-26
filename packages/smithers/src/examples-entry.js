@@ -20,7 +20,20 @@
 /** @typedef {import("@smithers-orchestrator/components").WaitForEventProps} WaitForEventProps */
 // @smithers-type-exports-end
 
-export { Approval, approvalDecisionSchema, Workflow, Task, Sequence, Parallel, MergeQueue, Branch, Loop, Ralph, Worktree, Sandbox, } from "@smithers-orchestrator/components";
+export {
+  Approval,
+  approvalDecisionSchema,
+  Workflow,
+  Task,
+  Sequence,
+  Parallel,
+  MergeQueue,
+  Branch,
+  Loop,
+  Ralph,
+  Worktree,
+  Sandbox,
+} from "@smithers-orchestrator/components";
 export { Timer } from "@smithers-orchestrator/components";
 export { ClaudeCodeAgent } from "@smithers-orchestrator/agents/ClaudeCodeAgent";
 export { KimiAgent } from "@smithers-orchestrator/agents/KimiAgent";

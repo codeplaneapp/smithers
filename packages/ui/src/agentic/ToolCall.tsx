@@ -222,19 +222,14 @@ export function ToolCall(props: ToolCallProps) {
         </span>
       ) : null}
       <span className="sui-toolcall-name">{name}</span>
-      <StatusPill
-        status={toolCallStatus(state)}
-        label={TOOL_CALL_STATE_LABELS[state]}
-      />
+      <StatusPill status={toolCallStatus(state)} label={TOOL_CALL_STATE_LABELS[state]} />
       {duration}
     </>
   );
 
   if (compound) {
     return (
-      <ToolCallContext.Provider
-        value={{ name, state, open: isOpen, bodyId, durationMs, toggle }}
-      >
+      <ToolCallContext.Provider value={{ name, state, open: isOpen, bodyId, durationMs, toggle }}>
         <div
           data-slot="tool-call"
           data-state={isOpen ? "open" : "closed"}
@@ -283,12 +278,7 @@ export function ToolCall(props: ToolCallProps) {
           {hasArgs ? (
             <section data-slot="tool-call-args" className="sui-toolcall-section">
               <div className="sui-toolcall-section-title">Input</div>
-              <pre
-                className="sui-toolcall-pre"
-                role="region"
-                aria-label={`Tool input: ${name}`}
-                tabIndex={0}
-              >
+              <pre className="sui-toolcall-pre" role="region" aria-label={`Tool input: ${name}`} tabIndex={0}>
                 {argsText ?? formatJsonSafe(args)}
               </pre>
             </section>
@@ -308,12 +298,7 @@ export function ToolCall(props: ToolCallProps) {
           ) : hasResult ? (
             <section data-slot="tool-call-result" className="sui-toolcall-section">
               <div className="sui-toolcall-section-title">Output</div>
-              <pre
-                className="sui-toolcall-pre"
-                role="region"
-                aria-label={`Tool output: ${name}`}
-                tabIndex={0}
-              >
+              <pre className="sui-toolcall-pre" role="region" aria-label={`Tool output: ${name}`} tabIndex={0}>
                 {resultText ?? formatJsonSafe(result)}
               </pre>
             </section>
@@ -341,11 +326,7 @@ export function ToolCallHeader({ className, children, ...props }: ToolCallHeader
       </span>
     ) : null;
   return (
-    <div
-      data-slot="tool-call-header"
-      className={cn("sui-toolcall-header", className)}
-      {...props}
-    >
+    <div data-slot="tool-call-header" className={cn("sui-toolcall-header", className)} {...props}>
       <button
         type="button"
         data-slot="tool-call-trigger"
@@ -360,10 +341,7 @@ export function ToolCallHeader({ className, children, ...props }: ToolCallHeader
               ›
             </span>
             <span className="sui-toolcall-name">{context.name}</span>
-            <StatusPill
-              status={toolCallStatus(context.state)}
-              label={TOOL_CALL_STATE_LABELS[context.state]}
-            />
+            <StatusPill status={toolCallStatus(context.state)} label={TOOL_CALL_STATE_LABELS[context.state]} />
             {duration}
           </>
         )}
@@ -399,20 +377,13 @@ export type ToolCallInputProps = Omit<ComponentProps<"div">, "children"> & {
 };
 
 /** Tool input section; partial streams argsText verbatim, never repaired. */
-export function ToolCallInput({
-  args,
-  argsText,
-  partial = false,
-  children,
-  className,
-  ...props
-}: ToolCallInputProps) {
+export function ToolCallInput({ args, argsText, partial = false, children, className, ...props }: ToolCallInputProps) {
   useToolCallInjected();
   const context = useToolCallContext("ToolCallInput");
   let content: ReactNode = children;
   if (content === undefined) {
     const text = partial
-      ? argsText ?? ""
+      ? (argsText ?? "")
       : argsText !== undefined
         ? formatPartialJson(argsText).text
         : formatJsonSafe(args);
@@ -429,11 +400,7 @@ export function ToolCallInput({
     );
   }
   return (
-    <div
-      data-slot="tool-call-input"
-      className={cn("sui-toolcall-section", className)}
-      {...props}
-    >
+    <div data-slot="tool-call-input" className={cn("sui-toolcall-section", className)} {...props}>
       <div className="sui-toolcall-section-title" data-shimmer={partial ? "true" : "false"}>
         Input
       </div>
@@ -457,10 +424,7 @@ function ToolResultPartView({ part, name }: { part: ToolResultPart; name: string
         </pre>
       );
     case "json": {
-      const text =
-        part.value !== undefined
-          ? formatJsonSafe(part.value)
-          : formatPartialJson(part.jsonText ?? "").text;
+      const text = part.value !== undefined ? formatJsonSafe(part.value) : formatPartialJson(part.jsonText ?? "").text;
       return (
         <pre
           className="sui-toolcall-pre"
@@ -502,14 +466,7 @@ export type ToolCallOutputProps = Omit<ComponentProps<"div">, "children"> & {
 };
 
 /** Tool output section: legacy result, structured parts, or custom children. */
-export function ToolCallOutput({
-  result,
-  resultText,
-  parts,
-  children,
-  className,
-  ...props
-}: ToolCallOutputProps) {
+export function ToolCallOutput({ result, resultText, parts, children, className, ...props }: ToolCallOutputProps) {
   useToolCallInjected();
   const context = useToolCallContext("ToolCallOutput");
   const anyPartial = parts?.some((part) => "partial" in part && part.partial) ?? false;
@@ -517,29 +474,16 @@ export function ToolCallOutput({
   if (content === undefined) {
     content = parts ? (
       parts.map((part, index) => (
-        <ToolResultPartView
-          key={part.id ?? `${part.kind}:${index}`}
-          part={part}
-          name={context.name}
-        />
+        <ToolResultPartView key={part.id ?? `${part.kind}:${index}`} part={part} name={context.name} />
       ))
     ) : (
-      <pre
-        className="sui-toolcall-pre"
-        role="region"
-        aria-label={`Tool output: ${context.name}`}
-        tabIndex={0}
-      >
+      <pre className="sui-toolcall-pre" role="region" aria-label={`Tool output: ${context.name}`} tabIndex={0}>
         {resultText ?? formatJsonSafe(result)}
       </pre>
     );
   }
   return (
-    <div
-      data-slot="tool-call-output"
-      className={cn("sui-toolcall-section", className)}
-      {...props}
-    >
+    <div data-slot="tool-call-output" className={cn("sui-toolcall-section", className)} {...props}>
       <div className="sui-toolcall-section-title" data-shimmer={anyPartial ? "true" : "false"}>
         Output
       </div>
@@ -557,12 +501,7 @@ export type ToolCallErrorProps = Omit<ComponentProps<"div">, "children"> & {
 export function ToolCallError({ message, children, className, ...props }: ToolCallErrorProps) {
   useToolCallInjected();
   return (
-    <div
-      data-slot="tool-call-error"
-      role="alert"
-      className={cn("sui-toolcall-error-box", className)}
-      {...props}
-    >
+    <div data-slot="tool-call-error" role="alert" className={cn("sui-toolcall-error-box", className)} {...props}>
       {children ?? message ?? "Tool call failed"}
     </div>
   );
@@ -573,11 +512,5 @@ export type ToolCallApprovalProps = ComponentProps<"div">;
 /** Approval-request presentation container (typically hosts a Confirmation). */
 export function ToolCallApproval({ className, ...props }: ToolCallApprovalProps) {
   useToolCallInjected();
-  return (
-    <div
-      data-slot="tool-call-approval"
-      className={cn("sui-toolcall-approval", className)}
-      {...props}
-    />
-  );
+  return <div data-slot="tool-call-approval" className={cn("sui-toolcall-approval", className)} {...props} />;
 }

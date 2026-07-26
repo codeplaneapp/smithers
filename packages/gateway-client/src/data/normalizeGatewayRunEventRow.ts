@@ -33,7 +33,8 @@ export function normalizeGatewayRunEventRow(value: unknown): GatewayRunEventRow 
   const seq = readNumber(record, "seq");
   if (seq === undefined) return undefined;
   const event = readString(record, "event", "type") ?? "event";
-  const payload = record.payload !== undefined ? record.payload : parsePayload(record.payloadJson ?? record.payload_json);
+  const payload =
+    record.payload !== undefined ? record.payload : parsePayload(record.payloadJson ?? record.payload_json);
   const timestampMs = readNumber(record, "timestampMs", "timestamp_ms");
   return {
     runId,

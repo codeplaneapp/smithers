@@ -34,9 +34,11 @@ describe("buildSmithersPiSystemPrompt", () => {
 
     const prompt = buildSmithersPiSystemPrompt("Base system prompt\n", "Docs body", contract);
 
-    expect(prompt).toContain(renderSmithersAgentPromptGuidance(contract, {
-      toolNamePrefix: "smithers_",
-    }));
+    expect(prompt).toContain(
+      renderSmithersAgentPromptGuidance(contract, {
+        toolNamePrefix: "smithers_",
+      }),
+    );
     expect(prompt).toContain("`smithers_list_runs`");
     expect(prompt).toContain("`smithers_get_run`");
     expect(prompt).toContain("`smithers_resolve_approval`");

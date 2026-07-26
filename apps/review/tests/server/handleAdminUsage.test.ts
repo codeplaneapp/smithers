@@ -37,10 +37,7 @@ describe("/api/admin/usage", () => {
   test("returns 401 without a valid token", async () => {
     const env = await buildTestEnv();
     const worker = makeWorker();
-    const res = await worker.fetch(
-      new Request("https://review.test/api/admin/usage"),
-      env,
-    );
+    const res = await worker.fetch(new Request("https://review.test/api/admin/usage"), env);
     expect(res.status).toBe(401);
   });
 

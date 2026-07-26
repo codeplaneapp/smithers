@@ -70,7 +70,7 @@ function filesFromDiffHints(diffHints: string[] = []): string[] {
       diffHints
         .flatMap((hint) => hint.split(/\s+/))
         .map((part) => part.replace(/^[("'`]+/, "").replace(/[",.;:)`]+$/, ""))
-        .filter((part) => RELATIVE_FILE_PATH_RE.test(part))
+        .filter((part) => RELATIVE_FILE_PATH_RE.test(part)),
     ),
   );
 }
@@ -89,17 +89,18 @@ export function triageCandidates(features: Feature[], max = 8): TriageCandidate[
         status,
         priority,
         owner: feature.owner,
-        score: priorityWeight(priority) + (status === "fixed" ? gapWeight(gapText) : statusWeight(status) + gapWeight(gapText)),
+        score:
+          priorityWeight(priority) +
+          (status === "fixed" ? gapWeight(gapText) : statusWeight(status) + gapWeight(gapText)),
         taskType: taskTypeFor(status, gapText),
-        reason: status === "fixed"
-          ? `${priority.toUpperCase()} fixed feature has open gap(s). ${gapText}`.trim()
-          : `${priority.toUpperCase()} ${status} feature. ${feature.summary}`.trim(),
+        reason:
+          status === "fixed"
+            ? `${priority.toUpperCase()} fixed feature has open gap(s). ${gapText}`.trim()
+            : `${priority.toUpperCase()} ${status} feature. ${feature.summary}`.trim(),
         tests: feature.tests ?? [],
         files: filesFromDiffHints(feature.diffHints),
         acceptance:
-          missing.length > 0
-            ? missing
-            : [`Move ${feature.id} from ${status} only after direct proof is attached.`],
+          missing.length > 0 ? missing : [`Move ${feature.id} from ${status} only after direct proof is attached.`],
       };
     })
     .sort((a, b) => b.score - a.score || a.featureId.localeCompare(b.featureId))

@@ -76,10 +76,12 @@ const STATUS_CLASS_BY_STATUS = {
  * Token color aliases derived from the shared vocabulary. Class keys are the
  * canonical API; normalized status keys remain for gateway-ui compatibility.
  */
-export const statusColors = Object.freeze(Object.fromEntries([
-  ...Object.entries(STATUS_CLASS_COLORS),
-  ...Object.entries(STATUS_CLASS_BY_STATUS).map(([status, tone]) => [status, STATUS_CLASS_COLORS[tone]]),
-])) as Readonly<Record<string, string>> & Readonly<Record<StatusClass, string>>;
+export const statusColors = Object.freeze(
+  Object.fromEntries([
+    ...Object.entries(STATUS_CLASS_COLORS),
+    ...Object.entries(STATUS_CLASS_BY_STATUS).map(([status, tone]) => [status, STATUS_CLASS_COLORS[tone]]),
+  ]),
+) as Readonly<Record<string, string>> & Readonly<Record<StatusClass, string>>;
 
 /** Bucket a status string into the badge tints. */
 export function statusClass(status: string | undefined): StatusClass {
@@ -136,7 +138,13 @@ export function formatStatus(status: string | undefined): string {
     stale: "Stale",
     orphaned: "Orphaned",
   };
-  return labels[normalized] ?? normalized.split("-").map((part) => part ? `${part[0]!.toUpperCase()}${part.slice(1)}` : part).join(" ");
+  return (
+    labels[normalized] ??
+    normalized
+      .split("-")
+      .map((part) => (part ? `${part[0]!.toUpperCase()}${part.slice(1)}` : part))
+      .join(" ")
+  );
 }
 
 const TERMINAL_STATUSES = new Set([

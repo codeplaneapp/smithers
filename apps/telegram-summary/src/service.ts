@@ -525,13 +525,7 @@ async function createCodexFirstDigest(
   if (kimiKey) {
     const kimiModel = compact(env.KIMI_MODEL) ?? DEFAULT_KIMI_MODEL;
     return {
-      digest: await requestDigest(
-        MOONSHOT_CHAT_COMPLETIONS,
-        kimiKey,
-        kimiModel,
-        "Kimi fallback",
-        requestMessages,
-      ),
+      digest: await requestDigest(MOONSHOT_CHAT_COMPLETIONS, kimiKey, kimiModel, "Kimi fallback", requestMessages),
       model: kimiModel,
     };
   }
@@ -569,7 +563,10 @@ function renderTelegramDigest(digest: DigestJson, messages: MessageRow[], startM
     lines.push("", "Caveats");
     for (const caveat of digest.caveats) lines.push(`- ${caveat}`);
   }
-  return lines.filter((line, index, all) => line !== "" || all[index - 1] !== "").join("\n").trim();
+  return lines
+    .filter((line, index, all) => line !== "" || all[index - 1] !== "")
+    .join("\n")
+    .trim();
 }
 
 function splitTelegramText(text: string): string[] {
@@ -585,7 +582,10 @@ function splitTelegramText(text: string): string[] {
   return chunks;
 }
 
-async function postDigest(env: TelegramSummaryEnv, telegramText: string): Promise<{ posted: boolean; error: string | null }> {
+async function postDigest(
+  env: TelegramSummaryEnv,
+  telegramText: string,
+): Promise<{ posted: boolean; error: string | null }> {
   const token = compact(env.TELEGRAM_BOT_TOKEN);
   const chatId = outputChatId(env);
   if (!token || !chatId) return { posted: false, error: "Telegram token or output chat id is not configured." };
@@ -610,10 +610,7 @@ async function postDigest(env: TelegramSummaryEnv, telegramText: string): Promis
       const message = error instanceof Error ? error.message : String(error);
       return {
         posted: false,
-        error:
-          sent > 0
-            ? `Partial post: sent ${sent}/${chunks.length} chunks, then failed: ${message}`
-            : message,
+        error: sent > 0 ? `Partial post: sent ${sent}/${chunks.length} chunks, then failed: ${message}` : message,
       };
     }
   }
@@ -641,7 +638,12 @@ async function insertDigest(
     .run();
 }
 
-async function markDigestPosted(db: D1Database, id: string, postedAtMs: number | null, error: string | null): Promise<void> {
+async function markDigestPosted(
+  db: D1Database,
+  id: string,
+  postedAtMs: number | null,
+  error: string | null,
+): Promise<void> {
   await db
     .prepare("UPDATE digests SET posted_at_ms = ?, post_error = ? WHERE id = ?")
     .bind(postedAtMs, error, id)

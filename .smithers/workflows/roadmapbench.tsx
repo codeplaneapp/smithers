@@ -18,20 +18,11 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  ClaudeCodeAgent,
-  Sequence,
-  Task,
-  createScorer,
-  createSmithers,
-} from "smithers-orchestrator";
+import { ClaudeCodeAgent, Sequence, Task, createScorer, createSmithers } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { codexFirst } from "../lib/codexAccounts";
 
-const HARNESS = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "../../benchmarks/roadmapbench/harness",
-);
+const HARNESS = join(dirname(fileURLToPath(import.meta.url)), "../../benchmarks/roadmapbench/harness");
 
 const inputSchema = z.object({
   taskId: z.string(),
@@ -102,30 +93,21 @@ function roadmapScorer(input: z.infer<typeof inputSchema>) {
   return createScorer({
     id: "roadmapbench-reward",
     name: "RoadmapBench Reward",
-    description:
-      "Weighted fraction of per-target hidden tests that pass (the official RoadmapBench reward).",
+    description: "Weighted fraction of per-target hidden tests that pass (the official RoadmapBench reward).",
     score: async () => {
       const outDir = join(input.workDir, "score");
-      const reward = await new Promise<{ reward: number; raw: string }>(
-        (resolve) => {
-          execFile(
-            "bash",
-            [
-              join(HARNESS, "score.sh"),
-              input.image,
-              input.repoDir,
-              input.testsDir,
-              outDir,
-            ],
-            { timeout: 30 * 60_000, maxBuffer: 64 * 1024 * 1024 },
-            (_err, stdout) => {
-              const last = String(stdout).trim().split("\n").pop() ?? "0";
-              const n = Number.parseFloat(last);
-              resolve({ reward: Number.isFinite(n) ? n : 0, raw: String(stdout) });
-            },
-          );
-        },
-      );
+      const reward = await new Promise<{ reward: number; raw: string }>((resolve) => {
+        execFile(
+          "bash",
+          [join(HARNESS, "score.sh"), input.image, input.repoDir, input.testsDir, outDir],
+          { timeout: 30 * 60_000, maxBuffer: 64 * 1024 * 1024 },
+          (_err, stdout) => {
+            const last = String(stdout).trim().split("\n").pop() ?? "0";
+            const n = Number.parseFloat(last);
+            resolve({ reward: Number.isFinite(n) ? n : 0, raw: String(stdout) });
+          },
+        );
+      });
       let meta: Record<string, unknown> = {};
       try {
         meta = JSON.parse(readFileSync(join(outDir, "reward.json"), "utf8"));
@@ -165,20 +147,15 @@ export default smithers((ctx) => {
   const solModel = process.env.SMITHERS_ROADMAPBENCH_SOL_MODEL?.trim() || "gpt-5.6-sol";
   const lunaModel = process.env.SMITHERS_ROADMAPBENCH_LUNA_MODEL?.trim() || "gpt-5.6-luna";
   const reviewModel =
-    process.env.SMITHERS_ROADMAPBENCH_REVIEW_MODEL?.trim() ||
-    process.env.ROADMAPBENCH_REVIEW_MODEL?.trim() ||
-    solModel;
+    process.env.SMITHERS_ROADMAPBENCH_REVIEW_MODEL?.trim() || process.env.ROADMAPBENCH_REVIEW_MODEL?.trim() || solModel;
   const opusFallback = () => new ClaudeCodeAgent({ ...common, model: "claude-opus-4-8" });
   const sonnetFallback = () => new ClaudeCodeAgent({ ...common, model: "claude-sonnet-5" });
-  const solAgent = (model = solModel) => codexFirst(
-    { ...common, model, config: { model_reasoning_effort: "xhigh" } },
-    [opusFallback()],
-  );
+  const solAgent = (model = solModel) =>
+    codexFirst({ ...common, model, config: { model_reasoning_effort: "xhigh" } }, [opusFallback()]);
   const planAgent = solAgent();
-  const implementAgent = codexFirst(
-    { ...common, model: lunaModel, config: { model_reasoning_effort: "medium" } },
-    [sonnetFallback()],
-  );
+  const implementAgent = codexFirst({ ...common, model: lunaModel, config: { model_reasoning_effort: "medium" } }, [
+    sonnetFallback(),
+  ]);
   const reviewAgent = solAgent(reviewModel);
   const finalizeAgent = solAgent();
 

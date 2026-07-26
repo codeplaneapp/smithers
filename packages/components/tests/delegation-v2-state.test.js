@@ -30,9 +30,10 @@ describe("delegation v2 state helpers", () => {
     const result = collectDelegationV2Outcomes([{ nodeId: "out:a" }], ["out:a", "out:b"]);
     expect(result).toMatchObject({ settled: false, missing: ["out:b"] });
 
-    const packet = buildDelegationV2EvidencePacket([
-      { nodeId: "out:a", logicalId: "a", status: "complete", product: { summary: "x".repeat(100) } },
-    ], 32);
+    const packet = buildDelegationV2EvidencePacket(
+      [{ nodeId: "out:a", logicalId: "a", status: "complete", product: { summary: "x".repeat(100) } }],
+      32,
+    );
     expect(packet).toMatchObject({ truncated: true, originalItems: 1 });
   });
 });

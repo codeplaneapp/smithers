@@ -1,4 +1,4 @@
 export const asyncExternalWaitCounts = {
-    approval: 0,
-    event: 0,
+  approval: 0,
+  event: 0,
 };

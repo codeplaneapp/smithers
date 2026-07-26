@@ -20,8 +20,6 @@ describe("ui styleguide", () => {
   test("ships one global reduced-motion policy after primitive transitions", () => {
     expect(workflowUiThemeCss.endsWith(reducedMotionCss)).toBe(true);
     expect(workflowUiThemeCss.match(/@media \(prefers-reduced-motion: reduce\)/g)).toHaveLength(1);
-    expect(workflowUiThemeCss.indexOf(".run-row {")).toBeLessThan(
-      workflowUiThemeCss.indexOf(reducedMotionCss),
-    );
+    expect(workflowUiThemeCss.indexOf(".run-row {")).toBeLessThan(workflowUiThemeCss.indexOf(reducedMotionCss));
   });
 });

@@ -25,26 +25,30 @@ export function SmithersCollectionsProvider(props: {
   children?: ReactNode;
 }) {
   const mode = props.mode ?? props.client?.mode ?? defaultMode();
-  const queryClient = useMemo(
-    () => props.queryClient ?? new QueryClient(),
-    [props.queryClient],
-  );
+  const queryClient = useMemo(() => props.queryClient ?? new QueryClient(), [props.queryClient]);
   const client = useMemo(
     () => props.client ?? createSmithersDataClient({ mode }),
-    [props.client, mode.kind, mode.apiBaseUrl, "electricBaseUrl" in mode ? mode.electricBaseUrl : undefined, "workspaceId" in mode ? mode.workspaceId : undefined, mode.token],
+    [
+      props.client,
+      mode.kind,
+      mode.apiBaseUrl,
+      "electricBaseUrl" in mode ? mode.electricBaseUrl : undefined,
+      "workspaceId" in mode ? mode.workspaceId : undefined,
+      mode.token,
+    ],
   );
-  const collections = useMemo(
-    () => createSmithersCollections(client, queryClient),
-    [client, queryClient],
-  );
-  const [resolvedCollections, setResolvedCollections] = useState<SmithersCollections | null>(
-    () => isPromise(collections) ? null : collections,
+  const collections = useMemo(() => createSmithersCollections(client, queryClient), [client, queryClient]);
+  const [resolvedCollections, setResolvedCollections] = useState<SmithersCollections | null>(() =>
+    isPromise(collections) ? null : collections,
   );
   const [loadError, setLoadError] = useState<unknown>(null);
 
-  useEffect(() => () => {
-    if (!props.client) client.close();
-  }, [client, props.client]);
+  useEffect(
+    () => () => {
+      if (!props.client) client.close();
+    },
+    [client, props.client],
+  );
 
   useEffect(() => {
     setLoadError(null);
@@ -57,16 +61,19 @@ export function SmithersCollectionsProvider(props: {
     let cancelled = false;
     let active: SmithersCollections | null = null;
     setResolvedCollections(null);
-    void collections.then((next) => {
-      active = next;
-      if (cancelled) {
-        next.close();
-        return;
-      }
-      setResolvedCollections(next);
-    }, (error) => {
-      if (!cancelled) setLoadError(error);
-    });
+    void collections.then(
+      (next) => {
+        active = next;
+        if (cancelled) {
+          next.close();
+          return;
+        }
+        setResolvedCollections(next);
+      },
+      (error) => {
+        if (!cancelled) setLoadError(error);
+      },
+    );
     return () => {
       cancelled = true;
       active?.close();

@@ -17,76 +17,107 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
-import { chunkedTest, assertRowForRowEquality, canonicalRows, listSourceTables, normalizeCell, sourceColumns, assertSqlitePrimaryKeyAndDuplicateRejection, closeApi, makeWorkspace, PG_URL, pgUrlForDatabase, quoteId, seedOlderSqliteStore, seedPgliteStore, seedPgliteStoreWithReceipt, seedSqliteStore, sqliteRunIds, tableCount, tempPgDatabaseName, withTempPostgresDatabase } from "./migrateStoreKit.js";
+import {
+  chunkedTest,
+  assertRowForRowEquality,
+  canonicalRows,
+  listSourceTables,
+  normalizeCell,
+  sourceColumns,
+  assertSqlitePrimaryKeyAndDuplicateRejection,
+  closeApi,
+  makeWorkspace,
+  PG_URL,
+  pgUrlForDatabase,
+  quoteId,
+  seedOlderSqliteStore,
+  seedPgliteStore,
+  seedPgliteStoreWithReceipt,
+  seedSqliteStore,
+  sqliteRunIds,
+  tableCount,
+  tempPgDatabaseName,
+  withTempPostgresDatabase,
+} from "./migrateStoreKit.js";
 
 setDefaultTimeout(120_000);
 
 describe("migrateSmithersStore reverse and inference", () => {
-  chunkedTest("copies a PGlite Smithers store back to SQLite row-for-row and writes both receipts after verification", async () => {
-    const cwd = makeWorkspace("smithers-migrate-pglite-to-sqlite");
-    const originalSqlite = await seedPgliteStore(cwd);
-    rmSync(originalSqlite, { force: true });
-    expect(existsSync(originalSqlite)).toBe(false);
-    expect(existsSync(join(cwd, ".smithers", "migrated.json"))).toBe(false);
-    expect(existsSync(join(cwd, ".smithers", "backend.json"))).toBe(false);
+  chunkedTest(
+    "copies a PGlite Smithers store back to SQLite row-for-row and writes both receipts after verification",
+    async () => {
+      const cwd = makeWorkspace("smithers-migrate-pglite-to-sqlite");
+      const originalSqlite = await seedPgliteStore(cwd);
+      rmSync(originalSqlite, { force: true });
+      expect(existsSync(originalSqlite)).toBe(false);
+      expect(existsSync(join(cwd, ".smithers", "migrated.json"))).toBe(false);
+      expect(existsSync(join(cwd, ".smithers", "backend.json"))).toBe(false);
 
-    const result = await migrateSmithersStore({ cwd, from: "pglite", to: "sqlite" });
+      const result = await migrateSmithersStore({ cwd, from: "pglite", to: "sqlite" });
 
-    expect(result.backend).toBe("sqlite");
-    expect(result.source.backend).toBe("pglite");
-    expect(result.runCount).toBe(1);
-    expect(existsSync(join(cwd, "smithers.db"))).toBe(true);
-    expect(existsSync(join(cwd, ".smithers", "migrated.json"))).toBe(true);
-    expect(JSON.parse(await Bun.file(join(cwd, ".smithers", "backend.json")).text())).toMatchObject({ backend: "sqlite" });
-    expect(sqliteRunIds(join(cwd, "smithers.db"))).toEqual(["run-migrate-1"]);
-    const marker = JSON.parse(readFileSync(join(cwd, ".smithers", "migrated.json"), "utf8"));
-    expect(marker.source).toMatchObject({ backend: "pglite", dataDir: join(cwd, ".smithers", "pg") });
-    expect(marker.source.dbPath).toBeUndefined();
+      expect(result.backend).toBe("sqlite");
+      expect(result.source.backend).toBe("pglite");
+      expect(result.runCount).toBe(1);
+      expect(existsSync(join(cwd, "smithers.db"))).toBe(true);
+      expect(existsSync(join(cwd, ".smithers", "migrated.json"))).toBe(true);
+      expect(JSON.parse(await Bun.file(join(cwd, ".smithers", "backend.json")).text())).toMatchObject({
+        backend: "sqlite",
+      });
+      expect(sqliteRunIds(join(cwd, "smithers.db"))).toEqual(["run-migrate-1"]);
+      const marker = JSON.parse(readFileSync(join(cwd, ".smithers", "migrated.json"), "utf8"));
+      expect(marker.source).toMatchObject({ backend: "pglite", dataDir: join(cwd, ".smithers", "pg") });
+      expect(marker.source.dbPath).toBeUndefined();
 
-    const writableSqlite = new Database(join(cwd, "smithers.db"));
-    try {
-      const tableDdl = writableSqlite
-        .query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = '_smithers_runs'")
-        .get().sql;
-      expect(tableDdl).toContain("PRIMARY KEY");
-      const primaryKeyColumns = writableSqlite
-        .query("PRAGMA table_info(_smithers_runs)")
-        .all()
-        .filter((row) => Number(row.pk) > 0)
-        .map((row) => row.name);
-      expect(primaryKeyColumns).toEqual(["run_id"]);
-      const indexCount = writableSqlite.query("PRAGMA index_list(_smithers_runs)").all().length;
-      expect(indexCount).toBeGreaterThan(0);
-      expect(writableSqlite.query("SELECT ref_count FROM _smithers_snapshot_contents").get().ref_count).toBe(1);
-      expect(writableSqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_payload_refs").get().count).toBe(1);
-      expect(() => {
-        writableSqlite
-          .query("INSERT INTO _smithers_runs (run_id, workflow_name, workflow_path, status, created_at_ms) VALUES (?, ?, ?, ?, ?)")
-          .run("run-migrate-1", "dup", "dup.tsx", "finished", 99);
-      }).toThrow();
-    } finally {
-      writableSqlite.close();
-    }
-
-    // Open the PGlite source directly: the migrated SQLite store now sits
-    // beside it, so the resolver correctly refuses to disambiguate.
-    const sourceApi = await createSmithersPostgres({}, { provider: "pglite", dataDir: join(cwd, ".smithers", "pg") });
-    try {
-      const sqlite = new Database(join(cwd, "smithers.db"), { readonly: true });
+      const writableSqlite = new Database(join(cwd, "smithers.db"));
       try {
-        const tables = listSourceTables(sqlite);
-        for (const table of tables) {
-          const sourceCount = await tableCount(sourceApi.db.connection, table);
-          const targetCount = sqlite.query(`SELECT COUNT(*) AS count FROM ${quoteId(table)}`).get().count;
-          expect({ table, targetCount }).toEqual({ table, targetCount: sourceCount });
+        const tableDdl = writableSqlite
+          .query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = '_smithers_runs'")
+          .get().sql;
+        expect(tableDdl).toContain("PRIMARY KEY");
+        const primaryKeyColumns = writableSqlite
+          .query("PRAGMA table_info(_smithers_runs)")
+          .all()
+          .filter((row) => Number(row.pk) > 0)
+          .map((row) => row.name);
+        expect(primaryKeyColumns).toEqual(["run_id"]);
+        const indexCount = writableSqlite.query("PRAGMA index_list(_smithers_runs)").all().length;
+        expect(indexCount).toBeGreaterThan(0);
+        expect(writableSqlite.query("SELECT ref_count FROM _smithers_snapshot_contents").get().ref_count).toBe(1);
+        expect(writableSqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_payload_refs").get().count).toBe(
+          1,
+        );
+        expect(() => {
+          writableSqlite
+            .query(
+              "INSERT INTO _smithers_runs (run_id, workflow_name, workflow_path, status, created_at_ms) VALUES (?, ?, ?, ?, ?)",
+            )
+            .run("run-migrate-1", "dup", "dup.tsx", "finished", 99);
+        }).toThrow();
+      } finally {
+        writableSqlite.close();
+      }
+
+      // Open the PGlite source directly: the migrated SQLite store now sits
+      // beside it, so the resolver correctly refuses to disambiguate.
+      const sourceApi = await createSmithersPostgres({}, { provider: "pglite", dataDir: join(cwd, ".smithers", "pg") });
+      try {
+        const sqlite = new Database(join(cwd, "smithers.db"), { readonly: true });
+        try {
+          const tables = listSourceTables(sqlite);
+          for (const table of tables) {
+            const sourceCount = await tableCount(sourceApi.db.connection, table);
+            const targetCount = sqlite.query(`SELECT COUNT(*) AS count FROM ${quoteId(table)}`).get().count;
+            expect({ table, targetCount }).toEqual({ table, targetCount: sourceCount });
+          }
+        } finally {
+          sqlite.close();
         }
       } finally {
-        sqlite.close();
+        await closeApi(sourceApi);
       }
-    } finally {
-      await closeApi(sourceApi);
-    }
-  }, 300_000);
+    },
+    300_000,
+  );
 
   chunkedTest("does not provision an existing-but-uninitialized pglite store while inferring --from", async () => {
     const cwd = makeWorkspace("smithers-migrate-pglite-probe-no-provision");
@@ -124,21 +155,24 @@ describe("migrateSmithersStore reverse and inference", () => {
     expect(existsSync(join(pgliteDir, "PG_VERSION"))).toBe(false);
   });
 
-  chunkedTest("infers --from when exactly one backend store has runs and refuses ambiguous populated stores", async () => {
-    const pgliteOnly = makeWorkspace("smithers-migrate-infer-pglite");
-    const originalSqlite = await seedPgliteStore(pgliteOnly);
-    rmSync(originalSqlite, { force: true });
+  chunkedTest(
+    "infers --from when exactly one backend store has runs and refuses ambiguous populated stores",
+    async () => {
+      const pgliteOnly = makeWorkspace("smithers-migrate-infer-pglite");
+      const originalSqlite = await seedPgliteStore(pgliteOnly);
+      rmSync(originalSqlite, { force: true });
 
-    const inferred = await migrateSmithersStore({ cwd: pgliteOnly, to: "sqlite" });
-    expect(inferred.source.backend).toBe("pglite");
-    expect(sqliteRunIds(join(pgliteOnly, "smithers.db"))).toEqual(["run-migrate-1"]);
+      const inferred = await migrateSmithersStore({ cwd: pgliteOnly, to: "sqlite" });
+      expect(inferred.source.backend).toBe("pglite");
+      expect(sqliteRunIds(join(pgliteOnly, "smithers.db"))).toEqual(["run-migrate-1"]);
 
-    const ambiguous = makeWorkspace("smithers-migrate-ambiguous");
-    await seedPgliteStore(ambiguous);
-    await expect(migrateSmithersStore({ cwd: ambiguous, to: "sqlite" })).rejects.toMatchObject({
-      code: "SMITHERS_BACKEND_CONFLICT",
-    });
-  });
+      const ambiguous = makeWorkspace("smithers-migrate-ambiguous");
+      await seedPgliteStore(ambiguous);
+      await expect(migrateSmithersStore({ cwd: ambiguous, to: "sqlite" })).rejects.toMatchObject({
+        code: "SMITHERS_BACKEND_CONFLICT",
+      });
+    },
+  );
 
   // The migrated.json receipt is the AUTHORITY on the current backend after a
   // prior migration. Reverse-inference (`migrate --to sqlite` with no --from)
@@ -257,34 +291,36 @@ describe("migrateSmithersStore reverse and inference", () => {
     expect(existsSync(join(cwd, ".smithers", "backend.json"))).toBe(false);
   });
 
-  chunkedTest("forward sqlite to pglite failures include agent fallback guidance and keep receipts absent", async () => {
-    const cwd = makeWorkspace("smithers-migrate-forward-agent-guidance");
-    const targetApi = await openSmithersBackend({}, { cwd, backend: "pglite", env: {} });
-    try {
-      await targetApi.db.connection.query({
-        text: "INSERT INTO _smithers_runs (run_id, workflow_name, workflow_path, status, created_at_ms) VALUES ($1, $2, $3, $4, $5)",
-        values: ["target-run", "existing", "existing.tsx", "finished", 1],
-      });
-    } finally {
-      await closeApi(targetApi);
-    }
-    seedSqliteStore(cwd);
+  chunkedTest(
+    "forward sqlite to pglite failures include agent fallback guidance and keep receipts absent",
+    async () => {
+      const cwd = makeWorkspace("smithers-migrate-forward-agent-guidance");
+      const targetApi = await openSmithersBackend({}, { cwd, backend: "pglite", env: {} });
+      try {
+        await targetApi.db.connection.query({
+          text: "INSERT INTO _smithers_runs (run_id, workflow_name, workflow_path, status, created_at_ms) VALUES ($1, $2, $3, $4, $5)",
+          values: ["target-run", "existing", "existing.tsx", "finished", 1],
+        });
+      } finally {
+        await closeApi(targetApi);
+      }
+      seedSqliteStore(cwd);
 
-    let caught;
-    try {
-      await migrateSmithersStore({ cwd, from: "sqlite", to: "pglite" });
-    } catch (error) {
-      caught = error;
-    }
+      let caught;
+      try {
+        await migrateSmithersStore({ cwd, from: "sqlite", to: "pglite" });
+      } catch (error) {
+        caught = error;
+      }
 
-    expect(caught).toBeInstanceOf(SmithersError);
-    // DB_WRITE_FAILED (target pglite already has rows) must NOT suggest retrying
-    // the same command — the guard would fire again.
-    expect(caught.message).not.toContain("smithers migrate --from sqlite --to pglite");
-    expect(caught.message).toContain("Agent-assisted repair is tracked as a follow-up");
-    expect(caught.message).not.toContain("is not defined");
-    expect(existsSync(join(cwd, ".smithers", "migrated.json"))).toBe(false);
-    expect(existsSync(join(cwd, ".smithers", "backend.json"))).toBe(false);
-  });
-
+      expect(caught).toBeInstanceOf(SmithersError);
+      // DB_WRITE_FAILED (target pglite already has rows) must NOT suggest retrying
+      // the same command — the guard would fire again.
+      expect(caught.message).not.toContain("smithers migrate --from sqlite --to pglite");
+      expect(caught.message).toContain("Agent-assisted repair is tracked as a follow-up");
+      expect(caught.message).not.toContain("is not defined");
+      expect(existsSync(join(cwd, ".smithers", "migrated.json"))).toBe(false);
+      expect(existsSync(join(cwd, ".smithers", "backend.json"))).toBe(false);
+    },
+  );
 });

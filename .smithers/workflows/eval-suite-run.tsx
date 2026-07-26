@@ -6,11 +6,11 @@
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers, executeChildWorkflow } from "smithers-orchestrator";
 import {
-    evalAssertionScorer,
-    evalCaseRunId,
-    evaluateEvalCase,
-    readEvalSuite,
-    writeEvalCaseRow,
+  evalAssertionScorer,
+  evalCaseRunId,
+  evaluateEvalCase,
+  readEvalSuite,
+  writeEvalCaseRow,
 } from "smithers-orchestrator/evals";
 import { z } from "zod/v4";
 
@@ -50,44 +50,44 @@ const CASE_TIMEOUT_MS = 30 * 60_000;
 const DEFAULT_MAX_CONCURRENCY = 4;
 
 const evalCaseInputSchema = z.object({
-    id: z.string(),
-    name: z.string().optional(),
-    input: z.any(),
-    expected: z.any().optional(),
+  id: z.string(),
+  name: z.string().optional(),
+  input: z.any(),
+  expected: z.any().optional(),
 });
 
 const suiteSchema = z.object({
-    suiteId: z.string().trim().min(1),
-    name: z.string(),
-    workflowKey: z.string(),
-    workflowPath: z.string(),
-    workflowRoot: z.string(),
-    cases: z.array(evalCaseInputSchema),
+  suiteId: z.string().trim().min(1),
+  name: z.string(),
+  workflowKey: z.string(),
+  workflowPath: z.string(),
+  workflowRoot: z.string(),
+  cases: z.array(evalCaseInputSchema),
 });
 
 const caseResultSchema = z.object({
-    caseId: z.string(),
-    status: z.enum(["ok", "failed", "cancelled"]),
-    assertions: z.array(z.object({ description: z.string(), passed: z.boolean() })),
-    passed: z.boolean(),
-    error: z.string().nullable(),
+  caseId: z.string(),
+  status: z.enum(["ok", "failed", "cancelled"]),
+  assertions: z.array(z.object({ description: z.string(), passed: z.boolean() })),
+  passed: z.boolean(),
+  error: z.string().nullable(),
 });
 
 const verdictSchema = z.object({
-    pass: z.boolean(),
-    paragraph: z.string(),
+  pass: z.boolean(),
+  paragraph: z.string(),
 });
 
 const inputSchema = z.object({
-    suiteId: z.string().trim().min(1),
-    maxConcurrency: z.number().int().min(1).max(16).optional(),
+  suiteId: z.string().trim().min(1),
+  maxConcurrency: z.number().int().min(1).max(16).optional(),
 });
 
 const { Workflow, Sequence, Parallel, Task, smithers, outputs, db } = createSmithers({
-    input: inputSchema,
-    suite: suiteSchema,
-    caseResult: caseResultSchema,
-    verdict: verdictSchema,
+  input: inputSchema,
+  suite: suiteSchema,
+  caseResult: caseResultSchema,
+  verdict: verdictSchema,
 });
 
 /**
@@ -95,159 +95,166 @@ const { Workflow, Sequence, Parallel, Task, smithers, outputs, db } = createSmit
  * @returns {string}
  */
 function formatCaseError(error) {
-    return error instanceof Error ? error.message : String(error);
+  return error instanceof Error ? error.message : String(error);
 }
 
 export default smithers((ctx) => {
-    const maxConcurrency = ctx.input.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
-    const suite = ctx.outputMaybe(outputs.suite, { nodeId: "plan" });
-    const cases = suite?.cases ?? [];
+  const maxConcurrency = ctx.input.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
+  const suite = ctx.outputMaybe(outputs.suite, { nodeId: "plan" });
+  const cases = suite?.cases ?? [];
 
-    return (
-        <Workflow name="eval-suite-run">
-            <Sequence>
-                <Task id="plan" output={outputs.suite} timeoutMs={2 * 60_000}>
-                    {async () => {
-                        const loaded = await readEvalSuite(db, ctx.input.suiteId);
-                        if (!loaded) {
-                            throw new Error(`Unknown eval suite: ${ctx.input.suiteId}`);
-                        }
-                        // Seed one `queued` row per case up front — the results table is
-                        // live from second zero, and an unstarted case still joins in
-                        // multi's canvas instead of appearing as a silent gap.
-                        await Promise.all(loaded.cases.map((c, index) => writeEvalCaseRow(db, {
-                            id: `${ctx.runId}:${c.id}`,
-                            evalRunId: ctx.runId,
-                            suiteId: loaded.suiteId,
-                            caseId: c.id,
-                            caseIndex: index,
-                            name: c.name ?? null,
-                            status: "queued",
-                            input: c.input,
-                            expected: c.expected,
-                        })));
-                        return loaded;
-                    }}
+  return (
+    <Workflow name="eval-suite-run">
+      <Sequence>
+        <Task id="plan" output={outputs.suite} timeoutMs={2 * 60_000}>
+          {async () => {
+            const loaded = await readEvalSuite(db, ctx.input.suiteId);
+            if (!loaded) {
+              throw new Error(`Unknown eval suite: ${ctx.input.suiteId}`);
+            }
+            // Seed one `queued` row per case up front — the results table is
+            // live from second zero, and an unstarted case still joins in
+            // multi's canvas instead of appearing as a silent gap.
+            await Promise.all(
+              loaded.cases.map((c, index) =>
+                writeEvalCaseRow(db, {
+                  id: `${ctx.runId}:${c.id}`,
+                  evalRunId: ctx.runId,
+                  suiteId: loaded.suiteId,
+                  caseId: c.id,
+                  caseIndex: index,
+                  name: c.name ?? null,
+                  status: "queued",
+                  input: c.input,
+                  expected: c.expected,
+                }),
+              ),
+            );
+            return loaded;
+          }}
+        </Task>
+
+        <Parallel id="cases" maxConcurrency={maxConcurrency}>
+          {!suite
+            ? null
+            : cases.map((c, index) => (
+                <Task
+                  key={c.id}
+                  id={`case-${c.id}`}
+                  output={outputs.caseResult}
+                  groundTruth={c.expected}
+                  scorers={{ assertions: { scorer: evalAssertionScorer(), sampling: { type: "all" } } }}
+                  retries={0}
+                  timeoutMs={CASE_TIMEOUT_MS}
+                >
+                  {async () => {
+                    const rowId = `${ctx.runId}:${c.id}`;
+                    const caseRunId = evalCaseRunId(suite.suiteId, c.id, ctx.runId);
+                    const startedAtMs = Date.now();
+                    await writeEvalCaseRow(db, {
+                      id: rowId,
+                      evalRunId: ctx.runId,
+                      suiteId: suite.suiteId,
+                      caseId: c.id,
+                      caseIndex: index,
+                      name: c.name ?? null,
+                      status: "running",
+                      caseRunId,
+                      input: c.input,
+                      expected: c.expected,
+                      startedAtMs,
+                    });
+
+                    // Launch a REAL, separately-addressable child run — never
+                    // <Subflow>, which throws on a non-finished child and hides
+                    // its runId, making a failed case unrecordable and unscoreable.
+                    //
+                    // `childResult.output` is the child's DESIGNATED workflow
+                    // output (`RunResult.output` — the same mechanism `<Subflow>`
+                    // relies on): a schema key literally named "output", or an
+                    // explicit `smithers(build, {output: outputs.<key>})`. A
+                    // target workflow with neither still runs and grades on
+                    // status/assertions fine, but `actual` output-value
+                    // comparisons (expected-output mode / `outputContains`) need
+                    // the target workflow to designate its output this way.
+                    let childResult;
+                    let thrown;
+                    try {
+                      childResult = await executeChildWorkflow(undefined, {
+                        workflow: { path: suite.workflowPath, approvedRoot: suite.workflowRoot },
+                        input: c.input,
+                        runId: caseRunId,
+                        rootDir: suite.workflowRoot,
+                      });
+                    } catch (error) {
+                      thrown = error;
+                    }
+
+                    const rawStatus = childResult?.status ?? "error";
+                    const caseLevelError = thrown
+                      ? formatCaseError(thrown)
+                      : rawStatus !== "finished"
+                        ? `Child run ended with status "${rawStatus}"`
+                        : undefined;
+                    // NEVER throw past this point: a failed/errored child is a
+                    // GRADED case, not a fatal task — this is what lets the
+                    // attached scorer fire (scorers only run on FINISHED tasks).
+                    const graded = evaluateEvalCase({
+                      expected: c.expected,
+                      status: rawStatus,
+                      output: childResult?.output,
+                      error: caseLevelError,
+                    });
+                    const finishedAtMs = Date.now();
+                    const persistedStatus =
+                      rawStatus === "finished" ? "ok" : rawStatus === "cancelled" ? "cancelled" : "failed";
+
+                    await writeEvalCaseRow(db, {
+                      id: rowId,
+                      evalRunId: ctx.runId,
+                      suiteId: suite.suiteId,
+                      caseId: c.id,
+                      caseIndex: index,
+                      name: c.name ?? null,
+                      status: persistedStatus,
+                      caseRunId,
+                      input: c.input,
+                      expected: c.expected,
+                      actual: childResult?.output,
+                      assertions: graded.assertions,
+                      error: caseLevelError ?? null,
+                      startedAtMs,
+                      finishedAtMs,
+                      durationMs: finishedAtMs - startedAtMs,
+                    });
+
+                    return {
+                      caseId: c.id,
+                      status: persistedStatus,
+                      assertions: graded.assertions,
+                      passed: graded.passed,
+                      error: caseLevelError ?? null,
+                    };
+                  }}
                 </Task>
+              ))}
+        </Parallel>
 
-                <Parallel id="cases" maxConcurrency={maxConcurrency}>
-                    {!suite ? null : cases.map((c, index) => (
-                        <Task
-                            key={c.id}
-                            id={`case-${c.id}`}
-                            output={outputs.caseResult}
-                            groundTruth={c.expected}
-                            scorers={{ assertions: { scorer: evalAssertionScorer(), sampling: { type: "all" } } }}
-                            retries={0}
-                            timeoutMs={CASE_TIMEOUT_MS}
-                        >
-                            {async () => {
-                                const rowId = `${ctx.runId}:${c.id}`;
-                                const caseRunId = evalCaseRunId(suite.suiteId, c.id, ctx.runId);
-                                const startedAtMs = Date.now();
-                                await writeEvalCaseRow(db, {
-                                    id: rowId,
-                                    evalRunId: ctx.runId,
-                                    suiteId: suite.suiteId,
-                                    caseId: c.id,
-                                    caseIndex: index,
-                                    name: c.name ?? null,
-                                    status: "running",
-                                    caseRunId,
-                                    input: c.input,
-                                    expected: c.expected,
-                                    startedAtMs,
-                                });
-
-                                // Launch a REAL, separately-addressable child run — never
-                                // <Subflow>, which throws on a non-finished child and hides
-                                // its runId, making a failed case unrecordable and unscoreable.
-                                //
-                                // `childResult.output` is the child's DESIGNATED workflow
-                                // output (`RunResult.output` — the same mechanism `<Subflow>`
-                                // relies on): a schema key literally named "output", or an
-                                // explicit `smithers(build, {output: outputs.<key>})`. A
-                                // target workflow with neither still runs and grades on
-                                // status/assertions fine, but `actual` output-value
-                                // comparisons (expected-output mode / `outputContains`) need
-                                // the target workflow to designate its output this way.
-                                let childResult;
-                                let thrown;
-                                try {
-                                    childResult = await executeChildWorkflow(undefined, {
-                                        workflow: { path: suite.workflowPath, approvedRoot: suite.workflowRoot },
-                                        input: c.input,
-                                        runId: caseRunId,
-                                        rootDir: suite.workflowRoot,
-                                    });
-                                }
-                                catch (error) {
-                                    thrown = error;
-                                }
-
-                                const rawStatus = childResult?.status ?? "error";
-                                const caseLevelError = thrown
-                                    ? formatCaseError(thrown)
-                                    : rawStatus !== "finished"
-                                        ? `Child run ended with status "${rawStatus}"`
-                                        : undefined;
-                                // NEVER throw past this point: a failed/errored child is a
-                                // GRADED case, not a fatal task — this is what lets the
-                                // attached scorer fire (scorers only run on FINISHED tasks).
-                                const graded = evaluateEvalCase({
-                                    expected: c.expected,
-                                    status: rawStatus,
-                                    output: childResult?.output,
-                                    error: caseLevelError,
-                                });
-                                const finishedAtMs = Date.now();
-                                const persistedStatus = rawStatus === "finished" ? "ok" : rawStatus === "cancelled" ? "cancelled" : "failed";
-
-                                await writeEvalCaseRow(db, {
-                                    id: rowId,
-                                    evalRunId: ctx.runId,
-                                    suiteId: suite.suiteId,
-                                    caseId: c.id,
-                                    caseIndex: index,
-                                    name: c.name ?? null,
-                                    status: persistedStatus,
-                                    caseRunId,
-                                    input: c.input,
-                                    expected: c.expected,
-                                    actual: childResult?.output,
-                                    assertions: graded.assertions,
-                                    error: caseLevelError ?? null,
-                                    startedAtMs,
-                                    finishedAtMs,
-                                    durationMs: finishedAtMs - startedAtMs,
-                                });
-
-                                return {
-                                    caseId: c.id,
-                                    status: persistedStatus,
-                                    assertions: graded.assertions,
-                                    passed: graded.passed,
-                                    error: caseLevelError ?? null,
-                                };
-                            }}
-                        </Task>
-                    ))}
-                </Parallel>
-
-                <Task id="verdict" output={outputs.verdict} dependsOn={cases.map((c) => `case-${c.id}`)}>
-                    {() => {
-                        const results = cases.map((c) => ctx.outputMaybe(outputs.caseResult, { nodeId: `case-${c.id}` }));
-                        const total = results.length;
-                        const passed = results.filter((r) => r?.passed === true).length;
-                        const pass = total > 0 && passed === total;
-                        const suiteName = suite?.name ?? ctx.input.suiteId;
-                        const paragraph = total === 0
-                            ? `Suite "${suiteName}" had no cases to run.`
-                            : `Suite "${suiteName}": ${passed}/${total} case(s) passed.`;
-                        return { pass, paragraph };
-                    }}
-                </Task>
-            </Sequence>
-        </Workflow>
-    );
+        <Task id="verdict" output={outputs.verdict} dependsOn={cases.map((c) => `case-${c.id}`)}>
+          {() => {
+            const results = cases.map((c) => ctx.outputMaybe(outputs.caseResult, { nodeId: `case-${c.id}` }));
+            const total = results.length;
+            const passed = results.filter((r) => r?.passed === true).length;
+            const pass = total > 0 && passed === total;
+            const suiteName = suite?.name ?? ctx.input.suiteId;
+            const paragraph =
+              total === 0
+                ? `Suite "${suiteName}" had no cases to run.`
+                : `Suite "${suiteName}": ${passed}/${total} case(s) passed.`;
+            return { pass, paragraph };
+          }}
+        </Task>
+      </Sequence>
+    </Workflow>
+  );
 });

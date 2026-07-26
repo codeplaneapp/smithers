@@ -14,8 +14,7 @@ import ScaffoldSkillPrompt from "../prompts/extract-skill-scaffold-skill.mdx";
 
 const SKILLS_DIR = ".smithers/skills";
 
-const DEFAULT_PROMPT =
-  "Describe the pattern or run you want to harvest into a reusable skill, workflow, or memory.";
+const DEFAULT_PROMPT = "Describe the pattern or run you want to harvest into a reusable skill, workflow, or memory.";
 const kebabCaseId = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "must be kebab-case");
 
 const inputSchema = z.object({
@@ -35,9 +34,7 @@ const inputSchema = z.object({
 
 // 1. Read the run/pattern and decide what is worth keeping.
 const analyzeSchema = z.looseObject({
-  repeatedPattern: z
-    .string()
-    .describe("One paragraph: the durable, repeatable pattern observed in the run/context."),
+  repeatedPattern: z.string().describe("One paragraph: the durable, repeatable pattern observed in the run/context."),
   reusableAsSkill: z
     .boolean()
     .describe("True when the pattern is best captured as an agent skill doc the workers can reuse."),
@@ -118,12 +115,7 @@ export default smithers((ctx) => {
       <UI entry="../ui/extract-skill.tsx" title={"Extract Skill"} />
       <Sequence>
         {/* 1 — Read the run (if given) and decide what is worth harvesting. */}
-        <Task
-          id="analyze"
-          output={outputs.analyze}
-          agent={agents.research}
-          heartbeatTimeoutMs={600_000}
-        >
+        <Task id="analyze" output={outputs.analyze} agent={agents.research} heartbeatTimeoutMs={600_000}>
           <AnalyzePrompt prompt={prompt} runId={ctx.input.targetRunId} skillsDir={SKILLS_DIR} />
         </Task>
 

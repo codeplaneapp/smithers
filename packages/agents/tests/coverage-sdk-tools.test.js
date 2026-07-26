@@ -69,9 +69,9 @@ describe("createElevenLabsTextToSpeechTool guards", () => {
   });
 
   test("throws when the resolved fetch is not a function", () => {
-    expect(() =>
-      createElevenLabsTextToSpeechTool({ apiKey: "k", fetch: /** @type {any} */ (42) }),
-    ).toThrow(/requires fetch/);
+    expect(() => createElevenLabsTextToSpeechTool({ apiKey: "k", fetch: /** @type {any} */ (42) })).toThrow(
+      /requires fetch/,
+    );
   });
 
   test("rejects an empty text argument before calling fetch", async () => {
@@ -83,9 +83,9 @@ describe("createElevenLabsTextToSpeechTool guards", () => {
         return new Response(new Uint8Array([1]), { status: 200 });
       },
     });
-    await expect(
-      toolset.tools.elevenlabs_text_to_speech.execute({ text: "   " }, callOptions),
-    ).rejects.toThrow(/requires non-empty text/);
+    await expect(toolset.tools.elevenlabs_text_to_speech.execute({ text: "   " }, callOptions)).rejects.toThrow(
+      /requires non-empty text/,
+    );
     expect(called).toBe(0);
   });
 
@@ -93,12 +93,11 @@ describe("createElevenLabsTextToSpeechTool guards", () => {
     const toolset = createElevenLabsTextToSpeechTool({
       apiKey: "k",
       defaultVoiceId: "v",
-      fetch: async () =>
-        new Response("upstream boom", { status: 502, statusText: "Bad Gateway" }),
+      fetch: async () => new Response("upstream boom", { status: 502, statusText: "Bad Gateway" }),
     });
-    await expect(
-      toolset.tools.elevenlabs_text_to_speech.execute({ text: "hi" }, callOptions),
-    ).rejects.toThrow(/failed with 502: upstream boom/);
+    await expect(toolset.tools.elevenlabs_text_to_speech.execute({ text: "hi" }, callOptions)).rejects.toThrow(
+      /failed with 502: upstream boom/,
+    );
   });
 
   test("tolerates a non-ok response whose body cannot be read", async () => {
@@ -113,9 +112,9 @@ describe("createElevenLabsTextToSpeechTool guards", () => {
         },
       }),
     });
-    await expect(
-      toolset.tools.elevenlabs_text_to_speech.execute({ text: "hi" }, callOptions),
-    ).rejects.toThrow(/failed with 500$/);
+    await expect(toolset.tools.elevenlabs_text_to_speech.execute({ text: "hi" }, callOptions)).rejects.toThrow(
+      /failed with 500$/,
+    );
   });
 
   test("defaults the content-type when the response omits it", async () => {
@@ -146,16 +145,16 @@ describe("createImageGenerationTool guards", () => {
     expect(() => createImageGenerationTool(/** @type {any} */ (null))).toThrow(
       /requires a provider with generateImage/,
     );
-    expect(() => createImageGenerationTool(/** @type {any} */ ({}))).toThrow(
-      /requires a provider with generateImage/,
-    );
+    expect(() => createImageGenerationTool(/** @type {any} */ ({}))).toThrow(/requires a provider with generateImage/);
   });
 
   test("throws on an empty prompt at call time", async () => {
-    const tool = createImageGenerationTool({ async generateImage() { return { images: [] }; } });
-    await expect(tool.execute({ prompt: "  " }, callOptions)).rejects.toThrow(
-      /requires a non-empty prompt/,
-    );
+    const tool = createImageGenerationTool({
+      async generateImage() {
+        return { images: [] };
+      },
+    });
+    await expect(tool.execute({ prompt: "  " }, callOptions)).rejects.toThrow(/requires a non-empty prompt/);
   });
 });
 
@@ -170,9 +169,9 @@ describe("createTranscriptionTool error handling", () => {
       apiKey: "k",
       fetch: async () => new Response("bad request", { status: 400, statusText: "Bad Request" }),
     });
-    await expect(
-      tool.execute({ audioBase64: Buffer.from("x").toString("base64") }, callOptions),
-    ).rejects.toThrow(/Failed to transcribe audio with Whisper: 400 Bad Request - bad request/);
+    await expect(tool.execute({ audioBase64: Buffer.from("x").toString("base64") }, callOptions)).rejects.toThrow(
+      /Failed to transcribe audio with Whisper: 400 Bad Request - bad request/,
+    );
   });
 
   test("tolerates a response whose body cannot be read (text() rejects)", async () => {
@@ -188,9 +187,9 @@ describe("createTranscriptionTool error handling", () => {
         },
       }),
     });
-    await expect(
-      tool.execute({ audioUrl: "https://example.com/a.mp3" }, callOptions),
-    ).rejects.toThrow(/Failed to transcribe audio with Deepgram: 503 Service Unavailable$/);
+    await expect(tool.execute({ audioUrl: "https://example.com/a.mp3" }, callOptions)).rejects.toThrow(
+      /Failed to transcribe audio with Deepgram: 503 Service Unavailable$/,
+    );
   });
 
   test("rejects an unsupported provider", async () => {
@@ -199,15 +198,15 @@ describe("createTranscriptionTool error handling", () => {
       apiKey: "k",
       fetch: async () => new Response("{}", { status: 200 }),
     });
-    await expect(
-      tool.execute({ audioBase64: Buffer.from("x").toString("base64") }, callOptions),
-    ).rejects.toThrow(/Unsupported transcription provider: nope/);
+    await expect(tool.execute({ audioBase64: Buffer.from("x").toString("base64") }, callOptions)).rejects.toThrow(
+      /Unsupported transcription provider: nope/,
+    );
   });
 
   test("throws when the resolved fetch is not a function", () => {
-    expect(() =>
-      createTranscriptionTool({ provider: "whisper", apiKey: "k", fetch: /** @type {any} */ (5) }),
-    ).toThrow(/requires fetch to be available/);
+    expect(() => createTranscriptionTool({ provider: "whisper", apiKey: "k", fetch: /** @type {any} */ (5) })).toThrow(
+      /requires fetch to be available/,
+    );
   });
 
   function whisperTool(extra) {
@@ -220,9 +219,7 @@ describe("createTranscriptionTool error handling", () => {
   }
 
   test("requires exactly one of audioUrl or audioBase64", async () => {
-    await expect(whisperTool().execute({}, callOptions)).rejects.toThrow(
-      /requires either audioUrl or audioBase64/,
-    );
+    await expect(whisperTool().execute({}, callOptions)).rejects.toThrow(/requires either audioUrl or audioBase64/);
     await expect(
       whisperTool().execute(
         { audioUrl: "https://example.com/a.mp3", audioBase64: Buffer.from("x").toString("base64") },
@@ -232,9 +229,9 @@ describe("createTranscriptionTool error handling", () => {
   });
 
   test("rejects an unparseable audioUrl", async () => {
-    await expect(
-      whisperTool().execute({ audioUrl: "http://[not a url" }, callOptions),
-    ).rejects.toThrow(/Invalid audioUrl/);
+    await expect(whisperTool().execute({ audioUrl: "http://[not a url" }, callOptions)).rejects.toThrow(
+      /Invalid audioUrl/,
+    );
   });
 
   test("rejects a host outside allowedAudioHosts", async () => {
@@ -268,17 +265,13 @@ describe("createTranscriptionTool error handling", () => {
           return Response.json({ text: "leaked" });
         },
       });
-      await expect(tool.execute({ audioUrl }, callOptions)).rejects.toThrow(
-        /private, loopback, or link-local/i,
-      );
+      await expect(tool.execute({ audioUrl }, callOptions)).rejects.toThrow(/private, loopback, or link-local/i);
       expect(called).toBe(0);
     });
   }
 
   test("refuses a non-http(s) scheme", async () => {
-    await expect(
-      whisperTool().execute({ audioUrl: "file:///etc/passwd" }, callOptions),
-    ).rejects.toThrow(/http\(s\)/i);
+    await expect(whisperTool().execute({ audioUrl: "file:///etc/passwd" }, callOptions)).rejects.toThrow(/http\(s\)/i);
   });
 
   test("transcribes a Deepgram audioUrl and normalizes duration", async () => {
@@ -292,10 +285,7 @@ describe("createTranscriptionTool error handling", () => {
           results: { channels: [{ alternatives: [{ transcript: "dg words" }] }] },
         }),
     });
-    const result = await tool.execute(
-      { audioUrl: "https://example.com/a.mp3", language: "en" },
-      callOptions,
-    );
+    const result = await tool.execute({ audioUrl: "https://example.com/a.mp3", language: "en" }, callOptions);
     expect(result).toEqual({ text: "dg words", durationSeconds: 4.5, provider: "deepgram" });
   });
 
@@ -352,10 +342,7 @@ describe("createTranscriptionTool error handling", () => {
       },
       fetch: async () => Response.json({ text: "public ipv6 transcript", language: "en", duration: 2 }),
     });
-    const result = await tool.execute(
-      { audioUrl: "http://[2606:4700:808:808:8:808:808:808]/a.mp3" },
-      callOptions,
-    );
+    const result = await tool.execute({ audioUrl: "http://[2606:4700:808:808:8:808:808:808]/a.mp3" }, callOptions);
     expect(downloaded).toBe(true);
     expect(result.text).toBe("public ipv6 transcript");
   });

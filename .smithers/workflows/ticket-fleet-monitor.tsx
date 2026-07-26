@@ -53,42 +53,84 @@ const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({
 });
 
 function smithersCli(args: string[]): string {
-  return execFileSync(process.env.SMITHERS_CLI ?? "smithers", args, { cwd: repoRoot, encoding: "utf8", maxBuffer: 32 * 1024 * 1024, timeout: 120_000 }).trim();
+  return execFileSync(process.env.SMITHERS_CLI ?? "smithers", args, {
+    cwd: repoRoot,
+    encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024,
+    timeout: 120_000,
+  }).trim();
 }
 function scanForFleetRun(): Scan {
   let raw = "";
   try {
     raw = smithersCli(["ps", "--format", "json"]);
   } catch (error) {
-    return { found: false, watchedRunId: "", watchedStatus: "", psSnapshot: "", summary: "smithers ps failed: " + String(error).slice(0, 500) };
+    return {
+      found: false,
+      watchedRunId: "",
+      watchedStatus: "",
+      psSnapshot: "",
+      summary: "smithers ps failed: " + String(error).slice(0, 500),
+    };
   }
   // The CLI may append a CTA after the JSON; parse the first balanced value.
   const rows = parseFirstJsonValue(raw);
   if (rows === null) {
-    return { found: false, watchedRunId: "", watchedStatus: "", psSnapshot: raw.slice(0, 4_000), summary: "Could not parse smithers ps output." };
+    return {
+      found: false,
+      watchedRunId: "",
+      watchedStatus: "",
+      psSnapshot: raw.slice(0, 4_000),
+      summary: "Could not parse smithers ps output.",
+    };
   }
-  const envelope = typeof rows === "object" && rows !== null ? rows as Record<string, unknown> : {};
-  const list: any[] = Array.isArray(rows) ? rows : Array.isArray(envelope.runs) ? envelope.runs : Array.isArray(envelope.data) ? envelope.data : [];
+  const envelope = typeof rows === "object" && rows !== null ? (rows as Record<string, unknown>) : {};
+  const list: any[] = Array.isArray(rows)
+    ? rows
+    : Array.isArray(envelope.runs)
+      ? envelope.runs
+      : Array.isArray(envelope.data)
+        ? envelope.data
+        : [];
   const fleet = list.filter((row) => {
     const name = String(row?.workflowName ?? row?.workflow ?? row?.name ?? "");
     const key = String(row?.workflowKey ?? row?.key ?? "");
-    return (name.includes("ticket-fleet") || key.includes("ticket-fleet")) &&
-      !name.includes("monitor") && !key.includes("monitor");
+    return (
+      (name.includes("ticket-fleet") || key.includes("ticket-fleet")) &&
+      !name.includes("monitor") &&
+      !key.includes("monitor")
+    );
   });
   if (!fleet.length) {
-    return { found: false, watchedRunId: "", watchedStatus: "", psSnapshot: raw.slice(0, 4_000), summary: "No ticket-fleet run found; nothing to monitor." };
+    return {
+      found: false,
+      watchedRunId: "",
+      watchedStatus: "",
+      psSnapshot: raw.slice(0, 4_000),
+      summary: "No ticket-fleet run found; nothing to monitor.",
+    };
   }
-  const active = fleet.find((row) => /running|waiting|paused/i.test(String(row?.status ?? row?.runState ?? ""))) ?? fleet[0];
+  const active =
+    fleet.find((row) => /running|waiting|paused/i.test(String(row?.status ?? row?.runState ?? ""))) ?? fleet[0];
   const watchedRunId = String(active?.runId ?? active?.id ?? "");
   const watchedStatus = String(active?.status ?? active?.runState ?? "");
-  return { found: !!watchedRunId, watchedRunId, watchedStatus, psSnapshot: raw.slice(0, 4_000), summary: "Watching ticket-fleet run " + watchedRunId + " (" + watchedStatus + ")." };
+  return {
+    found: !!watchedRunId,
+    watchedRunId,
+    watchedStatus,
+    psSnapshot: raw.slice(0, 4_000),
+    summary: "Watching ticket-fleet run " + watchedRunId + " (" + watchedStatus + ").",
+  };
 }
 
 function monitorPrompt(scan: Scan): string {
   return [
     "You are the health monitor for the long-running `ticket-fleet` smithers workflow in this repo.",
     "Watched run: " + scan.watchedRunId + " (last known status: " + scan.watchedStatus + ").",
-    "`smithers ps` snapshot:", "---", scan.psSnapshot, "---",
+    "`smithers ps` snapshot:",
+    "---",
+    scan.psSnapshot,
+    "---",
     "Investigate with READ-ONLY commands (run them from the repo root):",
     "- `smithers inspect " + scan.watchedRunId + " --format json` (status is nested under run.status)",
     "- `smithers why " + scan.watchedRunId + "` if it looks blocked or paused",
@@ -101,7 +143,9 @@ function monitorPrompt(scan: Scan): string {
     "4. pendingApprovals — how many human approvals are waiting.",
     "Do NOT mutate anything: no approve/deny, no cancel, no resume, no retry-task, no git commands. Your output is a diagnosis.",
     "In `recommendation`, say exactly what a human (or the next monitor tick) should do, e.g. 'approve i123:plan-approval', 'run: smithers retry-task ticket-fleet --run-id <id> --node-id <node>', or 'no action needed'.",
-    "Write a compact markdown `report` covering status, phase progress, and anything anomalous. Set watchedRunId to exactly " + JSON.stringify(scan.watchedRunId) + ".",
+    "Write a compact markdown `report` covering status, phase progress, and anything anomalous. Set watchedRunId to exactly " +
+      JSON.stringify(scan.watchedRunId) +
+      ".",
   ].join("\n");
 }
 
@@ -115,8 +159,15 @@ export default smithers((ctx) => {
           {() => scanForFleetRun()}
         </Task>
         {scan?.found ? (
-          <Task id="diagnose" output={outputs.tfmHealth} agent={providers.claudeSonnet}
-            retries={1} timeoutMs={15 * 60_000} heartbeatTimeoutMs={5 * 60_000} continueOnFail>
+          <Task
+            id="diagnose"
+            output={outputs.tfmHealth}
+            agent={providers.claudeSonnet}
+            retries={1}
+            timeoutMs={15 * 60_000}
+            heartbeatTimeoutMs={5 * 60_000}
+            continueOnFail
+          >
             {monitorPrompt(scan)}
           </Task>
         ) : null}
@@ -126,16 +177,33 @@ export default smithers((ctx) => {
             if (!health) return { logged: false, summary: "Diagnosis did not complete." };
             mkdirSync(join(repoRoot, ".smithers", "logs"), { recursive: true });
             const stamp = new Date().toISOString();
-            appendFileSync(monitorLog, [
-              "", "## " + stamp + " — run " + health.watchedRunId,
-              "- healthy: " + health.healthy + ", progressing: " + health.progressing + ", pendingApprovals: " + health.pendingApprovals,
-              health.issuesFound ? "- issues: " + health.issuesFound : "",
-              health.recommendation ? "- recommendation: " + health.recommendation : "",
-              "", health.report, "",
-            ].filter((line) => line !== "").join("\n") + "\n", "utf8");
+            appendFileSync(
+              monitorLog,
+              [
+                "",
+                "## " + stamp + " — run " + health.watchedRunId,
+                "- healthy: " +
+                  health.healthy +
+                  ", progressing: " +
+                  health.progressing +
+                  ", pendingApprovals: " +
+                  health.pendingApprovals,
+                health.issuesFound ? "- issues: " + health.issuesFound : "",
+                health.recommendation ? "- recommendation: " + health.recommendation : "",
+                "",
+                health.report,
+                "",
+              ]
+                .filter((line) => line !== "")
+                .join("\n") + "\n",
+              "utf8",
+            );
             return {
               logged: true,
-              summary: (health.healthy && health.progressing ? "HEALTHY" : "ATTENTION NEEDED") + ": " + health.recommendation.slice(0, 300),
+              summary:
+                (health.healthy && health.progressing ? "HEALTHY" : "ATTENTION NEEDED") +
+                ": " +
+                health.recommendation.slice(0, 300),
             };
           }}
         </Task>

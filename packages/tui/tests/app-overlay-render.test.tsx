@@ -49,20 +49,26 @@ function OverlayHarness({ events }: { events: GatewayEventFrame[] }) {
 
 describeHeadlessRender("Help overlay – keeps the mode mounted and swallows its keys (CI-safe)", () => {
   it("preserves the Timeline scrub position across open/close and blocks leaked keys", async () => {
-    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await renderForTest(<OverlayHarness events={EVENTS} />, { width: 120, height: 30 });
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } = await renderForTest(
+      <OverlayHarness events={EVENTS} />,
+      { width: 120, height: 30 },
+    );
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("[live]");
 
     // Scrub off live: mode-local state the overlay used to destroy.
-    act(() => { mockInput.pressKey("k"); });
+    act(() => {
+      mockInput.pressKey("k");
+    });
     await flush();
     await waitForVisualIdle();
     expect(captureCharFrame()).toContain("[f7]");
 
     // Open help: overlay renders ON TOP — the mode is still mounted and its
     // status row (top of the body, above the centered panel) stays visible.
-    act(() => { mockInput.pressKey("?"); });
+    act(() => {
+      mockInput.pressKey("?");
+    });
     await flush();
     await waitForVisualIdle();
     const overlayFrame = captureCharFrame();
@@ -70,12 +76,16 @@ describeHeadlessRender("Help overlay – keeps the mode mounted and swallows its
     expect(overlayFrame).toContain("[f7]");
 
     // A mode key pressed while the overlay is open must NOT reach the mode.
-    act(() => { mockInput.pressKey("j"); });
+    act(() => {
+      mockInput.pressKey("j");
+    });
     await flush();
     await waitForVisualIdle();
 
     // Close help: the scrub position survived both the overlay and the leaked j.
-    act(() => { mockInput.pressKey("?"); });
+    act(() => {
+      mockInput.pressKey("?");
+    });
     await flush();
     await waitForVisualIdle();
     const closedFrame = captureCharFrame();
@@ -88,11 +98,15 @@ describeHeadlessRender("Help overlay – keeps the mode mounted and swallows its
   });
 
   it("renders the overlay panel above the mode without blanking the whole screen", async () => {
-    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } =
-      await renderForTest(<OverlayHarness events={EVENTS} />, { width: 120, height: 30 });
+    const { waitForVisualIdle, captureCharFrame, mockInput, renderer, flush } = await renderForTest(
+      <OverlayHarness events={EVENTS} />,
+      { width: 120, height: 30 },
+    );
     await waitForVisualIdle();
 
-    act(() => { mockInput.pressKey("?"); });
+    act(() => {
+      mockInput.pressKey("?");
+    });
     await flush();
     await waitForVisualIdle();
     const f = captureCharFrame();

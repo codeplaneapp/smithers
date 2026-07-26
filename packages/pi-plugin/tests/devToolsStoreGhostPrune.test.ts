@@ -36,7 +36,14 @@ describe("DevToolsStore ghost pruning when a removed node reappears", () => {
       ops: [
         {
           op: "replaceRoot",
-          node: { id: 1, type: "workflow", name: "Workflow", props: { state: "running" }, children: [task(3, "task:new", "running")], depth: 0 },
+          node: {
+            id: 1,
+            type: "workflow",
+            name: "Workflow",
+            props: { state: "running" },
+            children: [task(3, "task:new", "running")],
+            depth: 0,
+          },
         },
       ],
     } as DevToolsDelta;

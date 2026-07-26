@@ -11,7 +11,7 @@ export { withSqliteWriteRetryEffect } from "./withSqliteWriteRetryEffect.js";
  * @returns {Promise<void>}
  */
 function delay(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 /**
  * @param {number} retryAttempt
@@ -20,10 +20,10 @@ function delay(ms) {
  * @returns {number}
  */
 function computeDelayMs(retryAttempt, baseDelayMs, maxDelayMs) {
-    const boundedBaseDelayMs = Math.max(1, Math.floor(baseDelayMs));
-    const boundedMaxDelayMs = Math.max(1, Math.floor(maxDelayMs));
-    const exponentialDelayMs = boundedBaseDelayMs * 2 ** Math.max(0, retryAttempt - 1);
-    return Math.min(boundedMaxDelayMs, exponentialDelayMs);
+  const boundedBaseDelayMs = Math.max(1, Math.floor(baseDelayMs));
+  const boundedMaxDelayMs = Math.max(1, Math.floor(maxDelayMs));
+  const exponentialDelayMs = boundedBaseDelayMs * 2 ** Math.max(0, retryAttempt - 1);
+  return Math.min(boundedMaxDelayMs, exponentialDelayMs);
 }
 /**
  * @template A
@@ -32,18 +32,21 @@ function computeDelayMs(retryAttempt, baseDelayMs, maxDelayMs) {
  * @returns {Promise<A>}
  */
 export async function withSqliteWriteRetry(operation, opts = {}) {
-    const { maxAttempts = DEFAULT_MAX_ATTEMPTS, baseDelayMs = DEFAULT_BASE_DELAY_MS, maxDelayMs = DEFAULT_MAX_DELAY_MS, sleep = delay, } = opts;
-    const boundedMaxAttempts = Math.max(1, Math.floor(maxAttempts));
-    for (let attempt = 1;; attempt += 1) {
-        try {
-            return await operation();
-        }
-        catch (error) {
-            if (attempt >= boundedMaxAttempts ||
-                !isRetryableSqliteWriteError(error)) {
-                throw error;
-            }
-            await sleep(computeDelayMs(attempt, baseDelayMs, maxDelayMs));
-        }
+  const {
+    maxAttempts = DEFAULT_MAX_ATTEMPTS,
+    baseDelayMs = DEFAULT_BASE_DELAY_MS,
+    maxDelayMs = DEFAULT_MAX_DELAY_MS,
+    sleep = delay,
+  } = opts;
+  const boundedMaxAttempts = Math.max(1, Math.floor(maxAttempts));
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt >= boundedMaxAttempts || !isRetryableSqliteWriteError(error)) {
+        throw error;
+      }
+      await sleep(computeDelayMs(attempt, baseDelayMs, maxDelayMs));
     }
+  }
 }

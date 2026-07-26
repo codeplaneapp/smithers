@@ -123,20 +123,24 @@ type Review = z.infer<typeof reviewSchema>;
 
 // The merge-queue result for one item. `status: "merged"` + `verified: true` is the ONLY
 // combination that counts as landed on main; every other state leaves the item for a rerun.
-export const mergeSchema = z.object({
-  issueNumber: z.number().int(),
-  branch: z.string().default(""),
-  status: z.enum(["merged", "conflict", "tests-failed", "nothing-to-ship", "error"]).default("error"),
-  rebasedOnto: z.string().default(""), // origin/main sha the worktree was rebased onto
-  mergeSha: z.string().nullable().default(null), // the commit now on main, or null
-  gatePassed: z.boolean().default(false),
-  verified: z.boolean().default(false), // deterministically confirmed on main (NOT self-reported)
-  summary: z.string().default(""),
-}).superRefine((value, issue) => {
-  if (value.status !== "merged") return;
-  if (!value.gatePassed) issue.addIssue({ code: "custom", path: ["gatePassed"], message: "a merged result requires a passing gate" });
-  if (!value.mergeSha?.trim()) issue.addIssue({ code: "custom", path: ["mergeSha"], message: "a merged result requires mergeSha" });
-});
+export const mergeSchema = z
+  .object({
+    issueNumber: z.number().int(),
+    branch: z.string().default(""),
+    status: z.enum(["merged", "conflict", "tests-failed", "nothing-to-ship", "error"]).default("error"),
+    rebasedOnto: z.string().default(""), // origin/main sha the worktree was rebased onto
+    mergeSha: z.string().nullable().default(null), // the commit now on main, or null
+    gatePassed: z.boolean().default(false),
+    verified: z.boolean().default(false), // deterministically confirmed on main (NOT self-reported)
+    summary: z.string().default(""),
+  })
+  .superRefine((value, issue) => {
+    if (value.status !== "merged") return;
+    if (!value.gatePassed)
+      issue.addIssue({ code: "custom", path: ["gatePassed"], message: "a merged result requires a passing gate" });
+    if (!value.mergeSha?.trim())
+      issue.addIssue({ code: "custom", path: ["mergeSha"], message: "a merged result requires mergeSha" });
+  });
 type Merge = z.infer<typeof mergeSchema>;
 
 export const landingVerificationSchema = z.object({
@@ -218,7 +222,10 @@ const { Workflow, Task, Sequence, Parallel, Loop, Worktree, MergeQueue, smithers
 // and MUST be pointed at its item's already-on-disk worktree via cwd.
 const opusFallback = new ClaudeCodeAgent({ model: "claude-opus-4-8" });
 const solChain = codexFirst({ model: "gpt-5.6-sol", skipGitRepoCheck: true }, [opusFallback]);
-const lunaChain = codexFirst({ model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true }, [opusFallback]);
+const lunaChain = codexFirst(
+  { model: "gpt-5.6-luna", config: { model_reasoning_effort: "medium" }, skipGitRepoCheck: true },
+  [opusFallback],
+);
 const terraChain = codexFirst({ model: "gpt-5.6-terra", skipGitRepoCheck: true }, [opusFallback]);
 const fableChain = lunaChain;
 const opusChain = solChain;
@@ -251,12 +258,14 @@ function rowVersion(row: RawRow): [number, number] {
   return [iterationCount, iteration];
 }
 function latestRaw(ctx: any, table: string, nodeId: string): RawRow | undefined {
-  return rawRows(ctx, table).filter((row) => row.nodeId === nodeId).reduce<RawRow | undefined>((best, row) => {
-    if (!best) return row;
-    const current = rowVersion(row);
-    const previous = rowVersion(best);
-    return current[0] > previous[0] || (current[0] === previous[0] && current[1] >= previous[1]) ? row : best;
-  }, undefined);
+  return rawRows(ctx, table)
+    .filter((row) => row.nodeId === nodeId)
+    .reduce<RawRow | undefined>((best, row) => {
+      if (!best) return row;
+      const current = rowVersion(row);
+      const previous = rowVersion(best);
+      return current[0] > previous[0] || (current[0] === previous[0] && current[1] >= previous[1]) ? row : best;
+    }, undefined);
 }
 function latestForIssue<T extends { issueNumber: number }>(rows: T[] | undefined, n: number): T | undefined {
   return latest((rows ?? []).filter((r) => r.issueNumber === n));
@@ -341,15 +350,30 @@ export function verifyLandedCommit(merge: Merge | undefined, cwd = process.cwd()
   const issueNumber = merge?.issueNumber ?? 0;
   const mergeSha = merge?.mergeSha?.trim() || null;
   if (merge?.status !== "merged" || !merge.gatePassed || !mergeSha) {
-    return { issueNumber, mergeSha, remoteMainSha: null, landed: false, summary: "merge claim was not gate-passed with a commit sha" };
+    return {
+      issueNumber,
+      mergeSha,
+      remoteMainSha: null,
+      landed: false,
+      summary: "merge claim was not gate-passed with a commit sha",
+    };
   }
   const fetch = spawnSync("git", ["fetch", "origin", "main"], { cwd, encoding: "utf8" });
   if (fetch.status !== 0) {
-    return { issueNumber, mergeSha, remoteMainSha: null, landed: false, summary: `git fetch origin main failed: ${(fetch.stderr ?? fetch.error?.message ?? "").trim()}` };
+    return {
+      issueNumber,
+      mergeSha,
+      remoteMainSha: null,
+      landed: false,
+      summary: `git fetch origin main failed: ${(fetch.stderr ?? fetch.error?.message ?? "").trim()}`,
+    };
   }
   const remote = spawnSync("git", ["rev-parse", "origin/main"], { cwd, encoding: "utf8" });
   const remoteMainSha = remote.status === 0 ? remote.stdout.trim() || null : null;
-  const ancestry = spawnSync("git", ["merge-base", "--is-ancestor", mergeSha, "origin/main"], { cwd, encoding: "utf8" });
+  const ancestry = spawnSync("git", ["merge-base", "--is-ancestor", mergeSha, "origin/main"], {
+    cwd,
+    encoding: "utf8",
+  });
   const landed = remote.status === 0 && ancestry.status === 0;
   return {
     issueNumber,
@@ -378,7 +402,18 @@ function itemFeedback(ctx: any, n: number): string {
 
 // ── Compute: discover open issues (real gh) ────────────────────────────────────
 function fetchIssues(input: { labels: string[]; numbers: number[]; excludeNumbers: number[]; maxIssues: number }) {
-  const args = ["issue", "list", "--repo", REPO, "--state", "open", "--limit", "300", "--json", "number,title,body,labels,url"];
+  const args = [
+    "issue",
+    "list",
+    "--repo",
+    REPO,
+    "--state",
+    "open",
+    "--limit",
+    "300",
+    "--json",
+    "number,title,body,labels,url",
+  ];
   for (const l of input.labels) args.push("--label", l);
   const raw = JSON.parse(execFileSync("gh", args, { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 })) as Array<{
     number: number;
@@ -518,7 +553,13 @@ function reviewPrompt(item: WorkItem, tier: "Fable" | "Opus" | "Sol", fix: Fix |
     "",
     fix
       ? `Implementer self-report:\n${JSON.stringify(
-          { status: fix.status, summary: fix.summary, filesChanged: fix.filesChanged, testAdded: fix.testAdded, workflowFile: fix.workflowFile },
+          {
+            status: fix.status,
+            summary: fix.summary,
+            filesChanged: fix.filesChanged,
+            testAdded: fix.testAdded,
+            workflowFile: fix.workflowFile,
+          },
           null,
           2,
         )}`
@@ -686,7 +727,12 @@ export default smithers((ctx) => {
                         {planPrompt(item, tier)}
                       </Task>
                     ) : null}
-                    <Loop id={`i${n}:loop`} until={approved} maxIterations={input.reviewIterations} onMaxReached="return-last">
+                    <Loop
+                      id={`i${n}:loop`}
+                      until={approved}
+                      maxIterations={input.reviewIterations}
+                      onMaxReached="return-last"
+                    >
                       <Sequence>
                         <Task
                           id={`i${n}:implement`}
@@ -697,7 +743,9 @@ export default smithers((ctx) => {
                           heartbeatTimeoutMs={HEARTBEAT_MS}
                           continueOnFail
                         >
-                          {item.strategy === "self-workflow" ? selfWorkflowPrompt(item, feedback) : implementPrompt(item, plan, feedback)}
+                          {item.strategy === "self-workflow"
+                            ? selfWorkflowPrompt(item, feedback)
+                            : implementPrompt(item, plan, feedback)}
                         </Task>
                         <Task
                           id={`i${n}:review`}
@@ -742,7 +790,12 @@ export default smithers((ctx) => {
             {mergeItems.map((item) => {
               const fix = latestForIssue<Fix>(ctx.outputs.fix, item.issueNumber);
               return (
-                <Worktree key={`i${item.issueNumber}:merge-wt`} path={item.worktreePath} branch={item.branch} baseBranch="main">
+                <Worktree
+                  key={`i${item.issueNumber}:merge-wt`}
+                  path={item.worktreePath}
+                  branch={item.branch}
+                  baseBranch="main"
+                >
                   <Sequence>
                     <Task
                       id={`i${item.issueNumber}:merge`}

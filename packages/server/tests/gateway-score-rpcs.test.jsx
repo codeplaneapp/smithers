@@ -15,7 +15,9 @@ const cleanups = [];
 
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) {
-    try { await cleanup(); } catch {}
+    try {
+      await cleanup();
+    } catch {}
   }
 });
 
@@ -27,7 +29,9 @@ function createWorkflow(path, name) {
   const api = createSmithers({ result: z.object({ value: z.number() }) }, { dbPath: path });
   const workflow = api.smithers(() => (
     <api.Workflow name={name}>
-      <api.Task id="task" output={api.outputs.result}>{{ value: 1 }}</api.Task>
+      <api.Task id="task" output={api.outputs.result}>
+        {{ value: 1 }}
+      </api.Task>
     </api.Workflow>
   ));
   return { api, workflow };
@@ -55,7 +59,9 @@ async function boot() {
   const a = createWorkflow(pathA, "wf-a");
   const aShared = a.api.smithers(() => (
     <a.api.Workflow name="wf-a-shared">
-      <a.api.Task id="task" output={a.api.outputs.result}>{{ value: 1 }}</a.api.Task>
+      <a.api.Task id="task" output={a.api.outputs.result}>
+        {{ value: 1 }}
+      </a.api.Task>
     </a.api.Workflow>
   ));
   const b = createWorkflow(pathB, "wf-b");
@@ -67,25 +73,62 @@ async function boot() {
   await adapterB.insertRun({ runId: "run-b", workflowName: "wf-b", status: "finished", createdAtMs: 2 });
 
   await seedScore(adapterA, {
-    id: "score-a-early", runId: "run-a", nodeId: "alpha", scorerId: "judge", scorerName: "Quality",
-    source: "live", score: 0.91, reason: "good", scoredAtMs: 100, latencyMs: 12, durationMs: 34,
-    metaJson: '{"rubric":"quality"}', inputJson: '["prompt"]', outputJson: '"pass"', groundTruthJson: "null",
+    id: "score-a-early",
+    runId: "run-a",
+    nodeId: "alpha",
+    scorerId: "judge",
+    scorerName: "Quality",
+    source: "live",
+    score: 0.91,
+    reason: "good",
+    scoredAtMs: 100,
+    latencyMs: 12,
+    durationMs: 34,
+    metaJson: '{"rubric":"quality"}',
+    inputJson: '["prompt"]',
+    outputJson: '"pass"',
+    groundTruthJson: "null",
   });
   await seedScore(adapterA, {
-    id: "score-a-tie", runId: "run-a", nodeId: "beta", scorerId: "judge", scorerName: "Quality",
-    source: "live", score: 0.8, scoredAtMs: 200,
+    id: "score-a-tie",
+    runId: "run-a",
+    nodeId: "beta",
+    scorerId: "judge",
+    scorerName: "Quality",
+    source: "live",
+    score: 0.8,
+    scoredAtMs: 200,
   });
   await seedScore(adapterA, {
-    id: "score-malformed", runId: "run-a", nodeId: "gamma", scorerId: "judge", scorerName: "Quality",
-    source: "batch", score: 0.1, scoredAtMs: 250, metaJson: "{not-json",
+    id: "score-malformed",
+    runId: "run-a",
+    nodeId: "gamma",
+    scorerId: "judge",
+    scorerName: "Quality",
+    source: "batch",
+    score: 0.1,
+    scoredAtMs: 250,
+    metaJson: "{not-json",
   });
   await seedScore(adapterB, {
-    id: "score-b-middle", runId: "run-b", nodeId: "alpha", scorerId: "judge", scorerName: "quality",
-    source: "batch", score: 0.7, scoredAtMs: 150,
+    id: "score-b-middle",
+    runId: "run-b",
+    nodeId: "alpha",
+    scorerId: "judge",
+    scorerName: "quality",
+    source: "batch",
+    score: 0.7,
+    scoredAtMs: 150,
   });
   await seedScore(adapterB, {
-    id: "score-b-tie", runId: "run-b", nodeId: "alpha", scorerId: "judge", scorerName: "Quality",
-    source: "live", score: 0.85, scoredAtMs: 200,
+    id: "score-b-tie",
+    runId: "run-b",
+    nodeId: "alpha",
+    scorerId: "judge",
+    scorerName: "Quality",
+    source: "live",
+    score: 0.85,
+    scoredAtMs: 200,
   });
 
   const gateway = new Gateway({
@@ -187,30 +230,49 @@ describe("Gateway cross-run score RPCs", () => {
     expect(compared.status).toBe(200);
     expect(compared.json.payload.total).toBe(5);
     expect(compared.json.payload.rows.map((row) => row.scoreId)).toEqual([
-      "score-a-early", "score-b-middle", "score-a-tie", "score-b-tie", "score-malformed",
+      "score-a-early",
+      "score-b-middle",
+      "score-a-tie",
+      "score-b-tie",
+      "score-malformed",
     ]);
     expect(compared.json.payload.rows[0]).not.toHaveProperty("meta");
     expect(compared.json.payload.rows[0]).not.toHaveProperty("metaJson");
     expect(compared.json.payload.rows[0]).not.toHaveProperty("input");
 
     const page = await rpc(baseUrl, "listScoresForRuns", {
-      runIds: ["run-a", "run-b"], offset: 1, limit: 2,
+      runIds: ["run-a", "run-b"],
+      offset: 1,
+      limit: 2,
     });
     expect(page.json.payload.total).toBe(5);
     expect(page.json.payload.rows.map((row) => row.scoreId)).toEqual(["score-b-middle", "score-a-tie"]);
 
     const descending = await rpc(baseUrl, "listScoresForRuns", {
-      runIds: ["run-a", "run-b"], order: "scoredAtDesc", offset: 1, limit: 3,
+      runIds: ["run-a", "run-b"],
+      order: "scoredAtDesc",
+      offset: 1,
+      limit: 3,
     });
     // Timestamp direction flips, but ties remain ascending by runId and fields.
-    expect(descending.json.payload.rows.map((row) => row.scoreId)).toEqual(["score-a-tie", "score-b-tie", "score-b-middle"]);
+    expect(descending.json.payload.rows.map((row) => row.scoreId)).toEqual([
+      "score-a-tie",
+      "score-b-tie",
+      "score-b-middle",
+    ]);
 
     const filtered = await rpc(baseUrl, "listScoresForRuns", {
-      runIds: ["run-a", "run-b"], nodeId: "alpha", scorerId: "judge", scorerName: "Quality", source: "live",
+      runIds: ["run-a", "run-b"],
+      nodeId: "alpha",
+      scorerId: "judge",
+      scorerName: "Quality",
+      source: "live",
     });
     expect(filtered.json.payload.rows.map((row) => row.scoreId)).toEqual(["score-a-early", "score-b-tie"]);
     const caseSensitive = await rpc(baseUrl, "listScoresForRuns", {
-      runIds: ["run-a", "run-b"], scorerName: "quality", source: "batch",
+      runIds: ["run-a", "run-b"],
+      scorerName: "quality",
+      source: "batch",
     });
     expect(caseSensitive.json.payload.rows.map((row) => row.scoreId)).toEqual(["score-b-middle"]);
 
@@ -219,11 +281,22 @@ describe("Gateway cross-run score RPCs", () => {
 
     const detail = await rpc(baseUrl, "getScoreDetail", { runId: " run-a ", scoreId: " score-a-early " });
     expect(detail.json.payload).toMatchObject({
-      scoreId: "score-a-early", runId: "run-a", meta: { rubric: "quality" }, input: ["prompt"], output: "pass",
-      groundTruth: null, context: null,
+      scoreId: "score-a-early",
+      runId: "run-a",
+      meta: { rubric: "quality" },
+      input: ["prompt"],
+      output: "pass",
+      groundTruth: null,
+      context: null,
     });
     const nullDetail = await rpc(baseUrl, "getScoreDetail", { runId: "run-a", scoreId: "score-a-tie" });
-    expect(nullDetail.json.payload).toMatchObject({ meta: null, input: null, output: null, groundTruth: null, context: null });
+    expect(nullDetail.json.payload).toMatchObject({
+      meta: null,
+      input: null,
+      output: null,
+      groundTruth: null,
+      context: null,
+    });
 
     // listScores remains the legacy per-run array and does not gain identity/detail fields.
     const legacy = await rpc(baseUrl, "listScores", { runId: "run-a" });

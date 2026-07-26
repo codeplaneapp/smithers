@@ -8,10 +8,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { Effect } from "effect";
-import {
-  JumpToFrameError,
-  jumpToFrame,
-} from "../src/jumpToFrame.js";
+import { JumpToFrameError, jumpToFrame } from "../src/jumpToFrame.js";
 import { captureSnapshot } from "../src/snapshot/index.js";
 import { listRewindAuditRows } from "../src/rewindAudit.js";
 
@@ -127,8 +124,12 @@ async function seedRun(adapter: SmithersDb, runId: string) {
   });
 
   const client = (adapter as any).db.session.client;
-  client.query(`INSERT INTO out_a (run_id, node_id, iteration, value) VALUES (?, ?, ?, ?)`).run(runId, "task:one", 0, 1);
-  client.query(`INSERT INTO out_b (run_id, node_id, iteration, value) VALUES (?, ?, ?, ?)`).run(runId, "task:two", 0, 2);
+  client
+    .query(`INSERT INTO out_a (run_id, node_id, iteration, value) VALUES (?, ?, ?, ?)`)
+    .run(runId, "task:one", 0, 1);
+  client
+    .query(`INSERT INTO out_b (run_id, node_id, iteration, value) VALUES (?, ?, ?, ?)`)
+    .run(runId, "task:two", 0, 2);
 
   await adapter.upsertNodeDiffCache({
     runId,
@@ -149,30 +150,32 @@ function makeNoVcsHooks() {
 }
 
 async function insertBlockingRewindEffect(adapter: SmithersDb, runId: string) {
-  await Effect.runPromise(adapter.insertToolCall({
-    runId,
-    nodeId: "task:two",
-    iteration: 0,
-    attempt: 1,
-    seq: 1,
-    toolName: "unrevertible-rewind-effect",
-    inputJson: "{}",
-    outputJson: "{}",
-    startedAtMs: 250,
-    finishedAtMs: 260,
-    status: "succeeded",
-    errorJson: null,
-    kind: "tool",
-    sideEffect: true,
-    idempotent: false,
-    acceptsIdempotencyKey: false,
-    hasRevert: false,
-    idempotencyKey: null,
-    revertStatus: null,
-    revertedAtMs: null,
-    revertErrorJson: null,
-    forcedPastJson: null,
-  }));
+  await Effect.runPromise(
+    adapter.insertToolCall({
+      runId,
+      nodeId: "task:two",
+      iteration: 0,
+      attempt: 1,
+      seq: 1,
+      toolName: "unrevertible-rewind-effect",
+      inputJson: "{}",
+      outputJson: "{}",
+      startedAtMs: 250,
+      finishedAtMs: 260,
+      status: "succeeded",
+      errorJson: null,
+      kind: "tool",
+      sideEffect: true,
+      idempotent: false,
+      acceptsIdempotencyKey: false,
+      hasRevert: false,
+      idempotencyKey: null,
+      revertStatus: null,
+      revertedAtMs: null,
+      revertErrorJson: null,
+      forcedPastJson: null,
+    }),
+  );
 }
 
 function rewindRunState(run: Awaited<ReturnType<SmithersDb["getRun"]>>) {
@@ -222,16 +225,34 @@ describe("jumpToFrame", () => {
     try {
       await seedRun(adapter, "run-spanning");
       await captureSnapshot(adapter, "run-spanning", 1, {
-        nodes: [{ runId: "run-spanning", nodeId: "task:one", iteration: 0, state: "finished", lastAttempt: 1, updatedAtMs: 160, outputTable: "out_a", label: "one" }],
+        nodes: [
+          {
+            runId: "run-spanning",
+            nodeId: "task:one",
+            iteration: 0,
+            state: "finished",
+            lastAttempt: 1,
+            updatedAtMs: 160,
+            outputTable: "out_a",
+            label: "one",
+          },
+        ],
         outputs: { out_a: [{ nodeId: "task:one", iteration: 0, value: 1 }] },
-        ralph: [], input: {}, vcsPointer: null, workflowHash: null,
+        ralph: [],
+        input: {},
+        vcsPointer: null,
+        workflowHash: null,
       } as never);
       const client = (adapter as any).db.session.client;
-      client.query(`UPDATE _smithers_attempts SET started_at_ms = ?, finished_at_ms = ? WHERE run_id = ? AND node_id = ?`).run(150, 250, "run-spanning", "task:two");
+      client
+        .query(`UPDATE _smithers_attempts SET started_at_ms = ?, finished_at_ms = ? WHERE run_id = ? AND node_id = ?`)
+        .run(150, 250, "run-spanning", "task:two");
       await jumpToFrame({ adapter, runId: "run-spanning", frameNo: 1, confirm: true, ...makeNoVcsHooks() });
       expect(client.query(`SELECT * FROM out_b WHERE run_id = ?`).all("run-spanning")).toHaveLength(0);
       expect(await adapter.getNode("run-spanning", "task:two", 0)).toBeUndefined();
-      expect((await adapter.listAttemptsForRun("run-spanning")).some((attempt) => attempt.nodeId === "task:two")).toBe(false);
+      expect((await adapter.listAttemptsForRun("run-spanning")).some((attempt) => attempt.nodeId === "task:two")).toBe(
+        false,
+      );
     } finally {
       sqlite.close();
     }
@@ -242,9 +263,23 @@ describe("jumpToFrame", () => {
     try {
       await seedRun(adapter, "run-retry-survivor");
       await captureSnapshot(adapter, "run-retry-survivor", 1, {
-        nodes: [{ runId: "run-retry-survivor", nodeId: "task:one", iteration: 0, state: "finished", lastAttempt: 1, updatedAtMs: 160, outputTable: "out_a", label: "one" }],
+        nodes: [
+          {
+            runId: "run-retry-survivor",
+            nodeId: "task:one",
+            iteration: 0,
+            state: "finished",
+            lastAttempt: 1,
+            updatedAtMs: 160,
+            outputTable: "out_a",
+            label: "one",
+          },
+        ],
         outputs: { out_a: [{ nodeId: "task:one", iteration: 0, value: 1 }] },
-        ralph: [], input: {}, vcsPointer: null, workflowHash: null,
+        ralph: [],
+        input: {},
+        vcsPointer: null,
+        workflowHash: null,
       } as never);
       // Retry AFTER the target frame (frame 1 createdAtMs=200): attempt 2 starts
       // at 250. The legacy heuristic reset any node with a post-target attempt to
@@ -261,12 +296,16 @@ describe("jumpToFrame", () => {
         jjCwd: "/tmp/sandbox-a",
       });
       const client = (adapter as any).db.session.client;
-      client.query(`UPDATE _smithers_nodes SET last_attempt = ?, updated_at_ms = ? WHERE run_id = ? AND node_id = ?`).run(2, 270, "run-retry-survivor", "task:one");
+      client
+        .query(`UPDATE _smithers_nodes SET last_attempt = ?, updated_at_ms = ? WHERE run_id = ? AND node_id = ?`)
+        .run(2, 270, "run-retry-survivor", "task:one");
       await jumpToFrame({ adapter, runId: "run-retry-survivor", frameNo: 1, confirm: true, ...makeNoVcsHooks() });
       const node = await adapter.getNode("run-retry-survivor", "task:one", 0);
       expect(node?.state).toBe("finished");
       expect(node?.lastAttempt).toBe(1);
-      expect(client.query(`SELECT value FROM out_a WHERE run_id = ? AND node_id = ?`).all("run-retry-survivor", "task:one")).toEqual([{ value: 1 }]);
+      expect(
+        client.query(`SELECT value FROM out_a WHERE run_id = ? AND node_id = ?`).all("run-retry-survivor", "task:one"),
+      ).toEqual([{ value: 1 }]);
     } finally {
       sqlite.close();
     }
@@ -325,14 +364,30 @@ describe("jumpToFrame", () => {
     try {
       await seedRun(adapter, "run-overwrite");
       await captureSnapshot(adapter, "run-overwrite", 1, {
-        nodes: [{ runId: "run-overwrite", nodeId: "task:one", iteration: 0, state: "finished", lastAttempt: 1, updatedAtMs: 160, outputTable: "out_a", label: "one" }],
+        nodes: [
+          {
+            runId: "run-overwrite",
+            nodeId: "task:one",
+            iteration: 0,
+            state: "finished",
+            lastAttempt: 1,
+            updatedAtMs: 160,
+            outputTable: "out_a",
+            label: "one",
+          },
+        ],
         outputs: { out_a: [{ nodeId: "task:one", iteration: 0, value: 1 }] },
-        ralph: [], input: {}, vcsPointer: null, workflowHash: null,
+        ralph: [],
+        input: {},
+        vcsPointer: null,
+        workflowHash: null,
       });
       const client = adapter.db.session.client;
       client.query(`UPDATE out_a SET value = ? WHERE run_id = ? AND node_id = ?`).run(99, "run-overwrite", "task:one");
       await jumpToFrame({ adapter, runId: "run-overwrite", frameNo: 1, confirm: true, ...makeNoVcsHooks() });
-      expect(client.query(`SELECT value FROM out_a WHERE run_id = ? AND node_id = ?`).get("run-overwrite", "task:one").value).toBe(1);
+      expect(
+        client.query(`SELECT value FROM out_a WHERE run_id = ? AND node_id = ?`).get("run-overwrite", "task:one").value,
+      ).toBe(1);
       expect(await adapter.getNode("run-overwrite", "task:two", 0)).toBeUndefined();
     } finally {
       sqlite.close();
@@ -343,18 +398,52 @@ describe("jumpToFrame", () => {
     const { adapter, sqlite } = setupDb();
     try {
       await seedRun(adapter, "run-legacy-signals");
-      sqlite.query(`INSERT INTO _smithers_snapshots (run_id, frame_no, nodes_json, outputs_json, ralph_json, input_json, vcs_pointer, workflow_hash, content_hash, created_at_ms)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-        "run-legacy-signals",
-        1,
-        JSON.stringify([{ runId: "run-legacy-signals", nodeId: "task:one", iteration: 0, state: "finished", lastAttempt: 1, updatedAtMs: 160, outputTable: "out_a", label: "one" }]),
-        JSON.stringify({ out_a: [{ nodeId: "task:one", iteration: 0, value: 1 }] }),
-        "[]", "{}", null, null, "legacy-signals", 200,
-      );
-      await adapter.insertSignalWithNextSeq({ runId: "run-legacy-signals", signalName: "before", correlationId: null, payloadJson: JSON.stringify({ value: 1 }), receivedAtMs: 1, receivedBy: "test" });
-      await adapter.insertSignalWithNextSeq({ runId: "run-legacy-signals", signalName: "after", correlationId: null, payloadJson: JSON.stringify({ value: 2 }), receivedAtMs: 2, receivedBy: "test" });
+      sqlite
+        .query(`INSERT INTO _smithers_snapshots (run_id, frame_no, nodes_json, outputs_json, ralph_json, input_json, vcs_pointer, workflow_hash, content_hash, created_at_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(
+          "run-legacy-signals",
+          1,
+          JSON.stringify([
+            {
+              runId: "run-legacy-signals",
+              nodeId: "task:one",
+              iteration: 0,
+              state: "finished",
+              lastAttempt: 1,
+              updatedAtMs: 160,
+              outputTable: "out_a",
+              label: "one",
+            },
+          ]),
+          JSON.stringify({ out_a: [{ nodeId: "task:one", iteration: 0, value: 1 }] }),
+          "[]",
+          "{}",
+          null,
+          null,
+          "legacy-signals",
+          200,
+        );
+      await adapter.insertSignalWithNextSeq({
+        runId: "run-legacy-signals",
+        signalName: "before",
+        correlationId: null,
+        payloadJson: JSON.stringify({ value: 1 }),
+        receivedAtMs: 1,
+        receivedBy: "test",
+      });
+      await adapter.insertSignalWithNextSeq({
+        runId: "run-legacy-signals",
+        signalName: "after",
+        correlationId: null,
+        payloadJson: JSON.stringify({ value: 2 }),
+        receivedAtMs: 2,
+        receivedBy: "test",
+      });
       const before = await adapter.listSignals("run-legacy-signals");
-      expect(sqlite.query(`SELECT frame_no FROM _smithers_snapshots WHERE run_id = ?`).all("run-legacy-signals")).toEqual([{ frame_no: 1 }]);
+      expect(
+        sqlite.query(`SELECT frame_no FROM _smithers_snapshots WHERE run_id = ?`).all("run-legacy-signals"),
+      ).toEqual([{ frame_no: 1 }]);
 
       await jumpToFrame({ adapter, runId: "run-legacy-signals", frameNo: 1, confirm: true, ...makeNoVcsHooks() });
 
@@ -367,17 +456,17 @@ describe("jumpToFrame", () => {
   test("input boundaries: invalid runId, invalid frameNo, missing confirm", async () => {
     const { adapter, sqlite } = setupDb();
     try {
-      await expect(
-        jumpToFrame({ adapter, runId: "../etc/passwd", frameNo: 0, confirm: true }),
-      ).rejects.toMatchObject({ code: "InvalidRunId" });
+      await expect(jumpToFrame({ adapter, runId: "../etc/passwd", frameNo: 0, confirm: true })).rejects.toMatchObject({
+        code: "InvalidRunId",
+      });
 
-      await expect(
-        jumpToFrame({ adapter, runId: "run-ok", frameNo: -1, confirm: true }),
-      ).rejects.toMatchObject({ code: "InvalidFrameNo" });
+      await expect(jumpToFrame({ adapter, runId: "run-ok", frameNo: -1, confirm: true })).rejects.toMatchObject({
+        code: "InvalidFrameNo",
+      });
 
-      await expect(
-        jumpToFrame({ adapter, runId: "run-ok", frameNo: 0, confirm: false }),
-      ).rejects.toMatchObject({ code: "ConfirmationRequired" });
+      await expect(jumpToFrame({ adapter, runId: "run-ok", frameNo: 0, confirm: false })).rejects.toMatchObject({
+        code: "ConfirmationRequired",
+      });
     } finally {
       sqlite.close();
     }
@@ -505,7 +594,7 @@ describe("jumpToFrame", () => {
                timestamp_ms,
                result,
                duration_ms
-             ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+             ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
           )
           .run("run-rate", 2, 1, "user:owner", Date.now() - 1_000, "success", 10);
       }
@@ -584,13 +673,7 @@ describe("jumpToFrame", () => {
       ).resolves.toMatchObject({ ok: true });
 
       const audits = await listRewindAuditRows(adapter, { runId: "run-rate-retry" });
-      expect(audits.map((row) => row.result)).toEqual([
-        "success",
-        "success",
-        "rejected",
-        "rejected",
-        "success",
-      ]);
+      expect(audits.map((row) => row.result)).toEqual(["success", "success", "rejected", "rejected", "success"]);
     } finally {
       sqlite.close();
     }
@@ -674,9 +757,7 @@ describe("jumpToFrame", () => {
 
       expect(reverted).toBe(false);
       expect(
-        (await adapter.listFrames("run-lease-lost", 100))
-          .map((frame) => frame.frameNo)
-          .sort((a, b) => a - b),
+        (await adapter.listFrames("run-lease-lost", 100)).map((frame) => frame.frameNo).sort((a, b) => a - b),
       ).toEqual([0, 1, 2]);
     } finally {
       sqlite.close();
@@ -744,11 +825,13 @@ describe("jumpToFrame", () => {
     try {
       const runId = "run-lease-stolen-mid-rollback";
       await seedRun(adapter, runId);
-      sqlite.query(`
+      sqlite
+        .query(`
         UPDATE _smithers_attempts
            SET jj_cwd = ?
          WHERE run_id = ? AND node_id = ?
-      `).run("/tmp/sandbox-b", runId, "task:two");
+      `)
+        .run("/tmp/sandbox-b", runId, "task:two");
       await adapter.insertAttempt({
         runId,
         nodeId: "sandbox-b-base",
@@ -774,38 +857,42 @@ describe("jumpToFrame", () => {
 
       const rollbackWrites: Array<{ pointer: string; cwd?: string }> = [];
       let reconcilerRestored = false;
-      await expect(jumpToFrame({
-        adapter,
-        runId,
-        frameNo: 1,
-        confirm: true,
-        caller: "user:owner",
-        getCurrentPointerImpl: async (cwd?: string) => `pre:${cwd}`,
-        revertToPointerImpl: async (pointer: string, cwd?: string) => {
-          if (pointer.startsWith("pre:")) {
-            rollbackWrites.push({ pointer, cwd });
-            if (rollbackWrites.length === 1) {
-              sqlite.query(`
+      await expect(
+        jumpToFrame({
+          adapter,
+          runId,
+          frameNo: 1,
+          confirm: true,
+          caller: "user:owner",
+          getCurrentPointerImpl: async (cwd?: string) => `pre:${cwd}`,
+          revertToPointerImpl: async (pointer: string, cwd?: string) => {
+            if (pointer.startsWith("pre:")) {
+              rollbackWrites.push({ pointer, cwd });
+              if (rollbackWrites.length === 1) {
+                sqlite
+                  .query(`
                 UPDATE _smithers_rewind_leases
                    SET owner_token = ?, expires_at_ms = ?
                  WHERE run_id = ?
-              `).run("replacement-owner", Date.now() + 60_000, runId);
+              `)
+                  .run("replacement-owner", Date.now() + 60_000, runId);
+              }
             }
-          }
-          return { success: true };
-        },
-        captureReconcilerState: async () => ({ before: true }),
-        restoreReconcilerState: async () => {
-          reconcilerRestored = true;
-        },
-        hooks: {
-          afterStep: (step) => {
-            if (step === "revert-sandboxes") {
-              throw new Error("force rollback after both forward restores");
-            }
+            return { success: true };
           },
-        },
-      } as never)).rejects.toMatchObject({
+          captureReconcilerState: async () => ({ before: true }),
+          restoreReconcilerState: async () => {
+            reconcilerRestored = true;
+          },
+          hooks: {
+            afterStep: (step) => {
+              if (step === "revert-sandboxes") {
+                throw new Error("force rollback after both forward restores");
+              }
+            },
+          },
+        } as never),
+      ).rejects.toMatchObject({
         code: "Busy",
         details: {
           rollbackSkipped: true,
@@ -852,9 +939,9 @@ describe("jumpToFrame", () => {
   test("errors are typed JumpToFrameError", async () => {
     const { adapter, sqlite } = setupDb();
     try {
-      await expect(
-        jumpToFrame({ adapter, runId: "bad/..", frameNo: 0, confirm: true }),
-      ).rejects.toBeInstanceOf(JumpToFrameError);
+      await expect(jumpToFrame({ adapter, runId: "bad/..", frameNo: 0, confirm: true })).rejects.toBeInstanceOf(
+        JumpToFrameError,
+      );
     } finally {
       sqlite.close();
     }
@@ -921,7 +1008,10 @@ describe("jumpToFrame", () => {
         heartbeatAtMs: 1_000,
         configJson: JSON.stringify({ auth: { triggeredBy: "user:owner" } }),
       });
-      for (const [frameNo, createdAtMs, hash] of [[0, 100, "h0"], [1, 200, "h1"]] as const) {
+      for (const [frameNo, createdAtMs, hash] of [
+        [0, 100, "h0"],
+        [1, 200, "h1"],
+      ] as const) {
         await adapter.insertFrame({
           runId: "run-live",
           frameNo,
@@ -1009,12 +1099,25 @@ describe("jumpToFrame seams and rollback", () => {
       // A to-be-deleted node whose output table does not exist exercises the
       // "no such table" continue branch of the output truncation.
       await adapter.insertNode({
-        runId: "run-seams", nodeId: "task:three", iteration: 0, state: "finished",
-        lastAttempt: 1, updatedAtMs: 285, outputTable: "out_missing", label: "three",
+        runId: "run-seams",
+        nodeId: "task:three",
+        iteration: 0,
+        state: "finished",
+        lastAttempt: 1,
+        updatedAtMs: 285,
+        outputTable: "out_missing",
+        label: "three",
       });
       await adapter.insertAttempt({
-        runId: "run-seams", nodeId: "task:three", iteration: 0, attempt: 1, state: "finished",
-        startedAtMs: 280, finishedAtMs: 290, jjPointer: "ptr-three", jjCwd: null,
+        runId: "run-seams",
+        nodeId: "task:three",
+        iteration: 0,
+        attempt: 1,
+        state: "finished",
+        startedAtMs: 280,
+        finishedAtMs: 290,
+        jjPointer: "ptr-three",
+        jjCwd: null,
       });
 
       const steps: Array<{ stage: string; step: string }> = [];
@@ -1031,14 +1134,27 @@ describe("jumpToFrame seams and rollback", () => {
         caller: "user:owner",
         ...makeNoVcsHooks(),
         hooks: {
-          beforeStep: async (step: string) => { steps.push({ stage: "before", step }); },
-          afterStep: async (step: string) => { steps.push({ stage: "after", step }); },
+          beforeStep: async (step: string) => {
+            steps.push({ stage: "before", step });
+          },
+          afterStep: async (step: string) => {
+            steps.push({ stage: "after", step });
+          },
         },
-        emitEvent: (event: unknown) => { events.push(event); },
+        emitEvent: (event: unknown) => {
+          events.push(event);
+        },
         pauseRunLoop: async () => {},
-        resumeRunLoop: async () => { resumed = true; },
-        captureReconcilerState: async () => { reconcilerCaptured = true; return { snap: 1 }; },
-        rebuildReconcilerState: async (_xml: string) => { reconcilerRebuilt = true; },
+        resumeRunLoop: async () => {
+          resumed = true;
+        },
+        captureReconcilerState: async () => {
+          reconcilerCaptured = true;
+          return { snap: 1 };
+        },
+        rebuildReconcilerState: async (_xml: string) => {
+          reconcilerRebuilt = true;
+        },
       } as never);
 
       expect(result.ok).toBe(true);
@@ -1067,7 +1183,9 @@ describe("jumpToFrame seams and rollback", () => {
         caller: "user:owner",
         ...makeNoVcsHooks(),
         // Throw a non-Error so formatError must coerce it via String().
-        emitEvent: () => { throw "emit exploded"; },
+        emitEvent: () => {
+          throw "emit exploded";
+        },
         onLog: async (level: string, message: string, fields: Record<string, unknown>) => {
           logs.push({ level, message, fields });
         },
@@ -1096,8 +1214,12 @@ describe("jumpToFrame seams and rollback", () => {
         caller: "user:owner",
         ...makeNoVcsHooks(),
         pauseRunLoop: async () => {},
-        resumeRunLoop: async () => { throw new Error("resume boom"); },
-        onLog: async (level: string, message: string) => { logs.push({ level, message }); },
+        resumeRunLoop: async () => {
+          throw new Error("resume boom");
+        },
+        onLog: async (level: string, message: string) => {
+          logs.push({ level, message });
+        },
       } as never);
 
       // The durable jump committed, so a resume failure after commit is tolerated.
@@ -1131,16 +1253,22 @@ describe("jumpToFrame seams and rollback", () => {
           revertToPointerImpl: async () => ({ success: true }),
           captureReconcilerState: async () => ({ snap: 1 }),
           // Both rollback steps fail, forcing the "needs attention" partial path.
-          restoreReconcilerState: async () => { throw new Error("restore boom"); },
+          restoreReconcilerState: async () => {
+            throw new Error("restore boom");
+          },
           pauseRunLoop: async () => {},
-          resumeRunLoop: async () => { throw new Error("resume boom"); },
+          resumeRunLoop: async () => {
+            throw new Error("resume boom");
+          },
           // Fail the durable transaction before it commits.
           hooks: {
             beforeStep: async (step: string) => {
               if (step === "truncate-frames") throw new Error("hook boom");
             },
           },
-          onLog: async (level: string, message: string) => { logs.push({ level, message }); },
+          onLog: async (level: string, message: string) => {
+            logs.push({ level, message });
+          },
         } as never),
       ).rejects.toMatchObject({ code: "RewindFailed" });
 

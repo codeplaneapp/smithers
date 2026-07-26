@@ -12,7 +12,12 @@ import {
   successSchema,
   requestFrameSchema,
 } from "../scripts/generate-openapi.ts";
-import { GATEWAY_RPC_DEFINITIONS, GATEWAY_RPC_ERRORS, SMITHERS_API_VERSION, getGatewayRpcDefinition } from "../src/rpc/index.js";
+import {
+  GATEWAY_RPC_DEFINITIONS,
+  GATEWAY_RPC_ERRORS,
+  SMITHERS_API_VERSION,
+  getGatewayRpcDefinition,
+} from "../src/rpc/index.js";
 import { GATEWAY_SCOPE_VALUES } from "../src/auth/scopes.js";
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -93,8 +98,14 @@ describe("generate-openapi helpers", () => {
     }
     expect(doc.paths["/v1/api/runs"]).toBeDefined();
     const runs = (doc.paths["/v1/api/runs"] as any).get;
-    const runParameters = Object.fromEntries((runs.parameters ?? []).map((parameter: any) => [parameter.name, parameter]));
-    expect(runParameters.offset.schema).toMatchObject({ type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
+    const runParameters = Object.fromEntries(
+      (runs.parameters ?? []).map((parameter: any) => [parameter.name, parameter]),
+    );
+    expect(runParameters.offset.schema).toMatchObject({
+      type: "integer",
+      minimum: 0,
+      maximum: Number.MAX_SAFE_INTEGER,
+    });
     expect(doc.paths["/v1/api/scores/compare"]).toBeDefined();
     expect(doc.paths["/v1/api/scores/{runId}/{scoreId}"]).toBeDefined();
     expect((doc.paths["/v1/api/scores/compare"] as any).get["x-smithers-rpc-method"]).toBe("listScoresForRuns");
@@ -109,8 +120,9 @@ describe("generate-openapi helpers", () => {
     const request = post.requestBody.content["application/json"].schema;
     expect(request).toBe(getGatewayRpcDefinition("launchRun")?.requestSchema);
     expect(request.properties.options.properties.startedBy.properties.sessionId.maxLength).toBe(256);
-    expect(post.responses["200"].content["application/json"].schema.properties.data)
-      .toBe(getGatewayRpcDefinition("launchRun")?.responseSchema);
+    expect(post.responses["200"].content["application/json"].schema.properties.data).toBe(
+      getGatewayRpcDefinition("launchRun")?.responseSchema,
+    );
   });
 
   test("score REST aliases publish exact parameters and RPC response schemas", () => {
@@ -147,8 +159,9 @@ describe("generate-openapi helpers", () => {
     });
     expect(compareParameters.offset.schema).toMatchObject({ minimum: 0, maximum: 9_999, default: 0 });
     expect(compareParameters.limit.schema).toMatchObject({ minimum: 1, maximum: 500, default: 500 });
-    expect(compare.responses["200"].content["application/json"].schema.properties.data)
-      .toBe(getGatewayRpcDefinition("listScoresForRuns")?.responseSchema);
+    expect(compare.responses["200"].content["application/json"].schema.properties.data).toBe(
+      getGatewayRpcDefinition("listScoresForRuns")?.responseSchema,
+    );
 
     const detail = (doc.paths["/v1/api/scores/{runId}/{scoreId}"] as any).get;
     expect(detail.parameters).toEqual([
@@ -167,21 +180,27 @@ describe("generate-openapi helpers", () => {
         schema: getGatewayRpcDefinition("getScoreDetail")?.requestSchema.properties?.scoreId,
       },
     ]);
-    expect(detail.responses["200"].content["application/json"].schema.properties.data)
-      .toBe(getGatewayRpcDefinition("getScoreDetail")?.responseSchema);
+    expect(detail.responses["200"].content["application/json"].schema.properties.data).toBe(
+      getGatewayRpcDefinition("getScoreDetail")?.responseSchema,
+    );
   });
 
   test("getRun timestamps use OpenAPI 3.1 nullable type unions", () => {
     const doc = buildOpenApiDocument();
-    const getRunResponse = (doc.paths["/v1/rpc/getRun"] as {
-      post: {
-        responses: {
-          "200": { content: { "application/json": { schema: { properties: Record<string, unknown> } } } };
+    const getRunResponse = (
+      doc.paths["/v1/rpc/getRun"] as {
+        post: {
+          responses: {
+            "200": { content: { "application/json": { schema: { properties: Record<string, unknown> } } } };
+          };
         };
-      };
-    }).post.responses["200"].content["application/json"].schema;
+      }
+    ).post.responses["200"].content["application/json"].schema;
     const payload = getRunResponse.properties.payload as {
-      properties: Record<string, { type?: string | string[]; minimum?: number; description?: string; nullable?: boolean }>;
+      properties: Record<
+        string,
+        { type?: string | string[]; minimum?: number; description?: string; nullable?: boolean }
+      >;
     };
 
     expect(payload.properties.startedAtMs).toEqual({

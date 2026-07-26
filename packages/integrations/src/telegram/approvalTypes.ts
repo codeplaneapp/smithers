@@ -1,13 +1,7 @@
-import type {
-  TelegramInlineKeyboard,
-  TelegramInlineKeyboardButton,
-} from "./TelegramClientTypes.ts";
+import type { TelegramInlineKeyboard, TelegramInlineKeyboardButton } from "./TelegramClientTypes.ts";
 
 /** One choice an approver can make via an inline button. */
-export type TelegramApprovalChoice =
-  | { kind: "approve" }
-  | { kind: "reject" }
-  | { kind: "select"; key: string };
+export type TelegramApprovalChoice = { kind: "approve" } | { kind: "reject" } | { kind: "select"; key: string };
 
 /** An option offered in `mode: "select"`. */
 export type TelegramApprovalOption = {

@@ -1,9 +1,6 @@
 import type { ReviewWorkerEnv } from "../env.ts";
 import { jsonError } from "../jsonError.ts";
-import {
-  authenticateProxyRequest,
-  type ProxyAuth,
-} from "../proxy/authenticateProxyRequest.ts";
+import { authenticateProxyRequest, type ProxyAuth } from "../proxy/authenticateProxyRequest.ts";
 import { timingSafeStringEqual } from "../timingSafeStringEqual.ts";
 
 const MAX_WALKTHROUGH_BYTES = 25 * 1024 * 1024;
@@ -66,12 +63,7 @@ export async function handleWalkthroughs(
   return jsonError(404, "not found");
 }
 
-async function handlePublish(
-  request: Request,
-  env: ReviewWorkerEnv,
-  url: URL,
-  now: number,
-): Promise<Response> {
+async function handlePublish(request: Request, env: ReviewWorkerEnv, url: URL, now: number): Promise<Response> {
   const legacyOk = isLegacyPublishToken(request, env);
   let credential: ProxyAuth | null = null;
   if (!legacyOk) {
@@ -85,8 +77,7 @@ async function handlePublish(
 
   const attribution = publishAttribution(legacyOk ? null : credential);
   if (attribution.sessionHash) {
-    const countRow = await env.DB
-      .prepare("SELECT COUNT(*) AS count FROM walkthroughs WHERE session_hash = ?")
+    const countRow = await env.DB.prepare("SELECT COUNT(*) AS count FROM walkthroughs WHERE session_hash = ?")
       .bind(attribution.sessionHash)
       .first<CountRow>();
     const count = Number(countRow?.count ?? 0);
@@ -99,22 +90,16 @@ async function handlePublish(
   await env.WALKTHROUGHS.put(`walkthroughs/${id}.html`, html, {
     httpMetadata: { contentType: "text/html; charset=utf-8" },
   });
-  await env.DB
-    .prepare(
-      "INSERT INTO walkthroughs (id, repo, pr, bytes, session_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-    )
+  await env.DB.prepare(
+    "INSERT INTO walkthroughs (id, repo, pr, bytes, session_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+  )
     .bind(id, attribution.repo, attribution.pr, html.byteLength, attribution.sessionHash, now)
     .run();
   const base = walkthroughBase(env, url);
   return Response.json({ id, url: `${base}/w/${id}` }, { status: 201 });
 }
 
-async function handleHistory(
-  request: Request,
-  env: ReviewWorkerEnv,
-  url: URL,
-  now: number,
-): Promise<Response> {
+async function handleHistory(request: Request, env: ReviewWorkerEnv, url: URL, now: number): Promise<Response> {
   const credential = await authenticateProxyRequest(request, env, now);
   if (!credential) return jsonError(401, "unauthorized");
 
@@ -122,10 +107,9 @@ async function handleHistory(
   if (!repo) return jsonError(400, "repo query parameter is required");
   if (!canAccessRepo(credential, repo)) return jsonError(403, "forbidden");
 
-  const rows = await env.DB
-    .prepare(
-      "SELECT id, repo, pr, bytes, created_at FROM walkthroughs WHERE repo = ? ORDER BY created_at DESC LIMIT 50",
-    )
+  const rows = await env.DB.prepare(
+    "SELECT id, repo, pr, bytes, created_at FROM walkthroughs WHERE repo = ? ORDER BY created_at DESC LIMIT 50",
+  )
     .bind(repo)
     .all<WalkthroughRow>();
   const base = walkthroughBase(env, url);
@@ -141,12 +125,7 @@ async function handleHistory(
   });
 }
 
-async function handleDelete(
-  request: Request,
-  env: ReviewWorkerEnv,
-  url: URL,
-  now: number,
-): Promise<Response> {
+async function handleDelete(request: Request, env: ReviewWorkerEnv, url: URL, now: number): Promise<Response> {
   const id = url.pathname.slice("/api/walkthroughs/".length);
   if (!/^[a-z0-9]{8,32}$/.test(id)) return jsonError(400, "invalid walkthrough id");
 
@@ -157,10 +136,7 @@ async function handleDelete(
     if (!credential) return jsonError(401, "unauthorized");
   }
 
-  const row = await env.DB
-    .prepare("SELECT repo FROM walkthroughs WHERE id = ?")
-    .bind(id)
-    .first<WalkthroughRepoRow>();
+  const row = await env.DB.prepare("SELECT repo FROM walkthroughs WHERE id = ?").bind(id).first<WalkthroughRepoRow>();
   if (!row) return jsonError(404, "not found");
   if (!legacyOk && (!credential || !canAccessRepo(credential, row.repo))) {
     return jsonError(403, "forbidden");

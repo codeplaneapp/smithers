@@ -20,15 +20,15 @@ import { __engineInternals as I } from "../src/engine.js";
  * @returns {Promise<{ code: number; stdout: string; stderr: string }>}
  */
 function runGit(cwd, args) {
-    return new Promise((res) => {
-        const child = spawn("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
-        let stdout = "";
-        let stderr = "";
-        child.stdout?.on("data", (chunk) => (stdout += chunk.toString()));
-        child.stderr?.on("data", (chunk) => (stderr += chunk.toString()));
-        child.on("error", (err) => res({ code: 127, stdout: "", stderr: err.message }));
-        child.on("close", (code) => res({ code: code ?? 1, stdout, stderr }));
-    });
+  return new Promise((res) => {
+    const child = spawn("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk) => (stdout += chunk.toString()));
+    child.stderr?.on("data", (chunk) => (stderr += chunk.toString()));
+    child.on("error", (err) => res({ code: 127, stdout: "", stderr: err.message }));
+    child.on("close", (code) => res({ code: code ?? 1, stdout, stderr }));
+  });
 }
 
 /**
@@ -36,45 +36,43 @@ function runGit(cwd, args) {
  * @param {string[]} args
  */
 async function git(cwd, args) {
-    const res = await runGit(cwd, args);
-    if (res.code !== 0) {
-        throw new Error(`git ${args.join(" ")} failed in ${cwd} (exit ${res.code}): ${res.stderr}`);
-    }
-    return res;
+  const res = await runGit(cwd, args);
+  if (res.code !== 0) {
+    throw new Error(`git ${args.join(" ")} failed in ${cwd} (exit ${res.code}): ${res.stderr}`);
+  }
+  return res;
 }
 
 describe("ensureWorktree under parallel creation", () => {
-    const root = mkdtempSync(join(tmpdir(), "smithers-worktree-race-"));
+  const root = mkdtempSync(join(tmpdir(), "smithers-worktree-race-"));
 
-    afterAll(() => {
-        rmSync(root, { recursive: true, force: true });
-    });
+  afterAll(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
 
-    test("16 concurrent creations on one repo all succeed", async () => {
-        const repo = join(root, "repo");
-        await git(root, ["init", "-b", "main", "repo"]);
-        await git(repo, ["config", "user.email", "test@smithers.sh"]);
-        await git(repo, ["config", "user.name", "smithers-test"]);
-        writeFileSync(join(repo, "file.txt"), "hello\n");
-        await git(repo, ["add", "file.txt"]);
-        await git(repo, ["commit", "-m", "init"]);
+  test("16 concurrent creations on one repo all succeed", async () => {
+    const repo = join(root, "repo");
+    await git(root, ["init", "-b", "main", "repo"]);
+    await git(repo, ["config", "user.email", "test@smithers.sh"]);
+    await git(repo, ["config", "user.name", "smithers-test"]);
+    writeFileSync(join(repo, "file.txt"), "hello\n");
+    await git(repo, ["add", "file.txt"]);
+    await git(repo, ["commit", "-m", "init"]);
 
-        const lanes = Array.from({ length: 16 }, (_, index) => index);
-        const results = await Promise.allSettled(lanes.map((index) =>
-            I.ensureWorktree(
-                repo,
-                join(root, "worktrees", `lane-${index}`),
-                `smithers/test/lane-${index}`,
-                "main",
-            )));
+    const lanes = Array.from({ length: 16 }, (_, index) => index);
+    const results = await Promise.allSettled(
+      lanes.map((index) =>
+        I.ensureWorktree(repo, join(root, "worktrees", `lane-${index}`), `smithers/test/lane-${index}`, "main"),
+      ),
+    );
 
-        const failures = results
-            .map((result, index) => ({ result, index }))
-            .filter(({ result }) => result.status === "rejected")
-            .map(({ result, index }) => `lane-${index}: ${/** @type {PromiseRejectedResult} */ (result).reason}`);
-        expect(failures).toEqual([]);
-        for (const index of lanes) {
-            expect(existsSync(join(root, "worktrees", `lane-${index}`, "file.txt"))).toBe(true);
-        }
-    }, 120_000);
+    const failures = results
+      .map((result, index) => ({ result, index }))
+      .filter(({ result }) => result.status === "rejected")
+      .map(({ result, index }) => `lane-${index}: ${/** @type {PromiseRejectedResult} */ (result).reason}`);
+    expect(failures).toEqual([]);
+    for (const index of lanes) {
+      expect(existsSync(join(root, "worktrees", `lane-${index}`, "file.txt"))).toBe(true);
+    }
+  }, 120_000);
 });

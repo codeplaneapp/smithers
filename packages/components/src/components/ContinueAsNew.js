@@ -6,17 +6,16 @@ import React from "react";
  * @returns {string | undefined}
  */
 function serializeState(state) {
-    if (state === undefined)
-        return undefined;
-    return JSON.stringify(state);
+  if (state === undefined) return undefined;
+  return JSON.stringify(state);
 }
 /**
  * @param {ContinueAsNewProps} props
  */
 export function ContinueAsNew(props) {
-    return React.createElement("smithers:continue-as-new", {
-        stateJson: serializeState(props.state),
-    });
+  return React.createElement("smithers:continue-as-new", {
+    stateJson: serializeState(props.state),
+  });
 }
 /**
  * Convenience helper for conditional continuation inside workflow JSX:
@@ -25,5 +24,5 @@ export function ContinueAsNew(props) {
  * @returns {React.ReactElement}
  */
 export function continueAsNew(state) {
-    return React.createElement(ContinueAsNew, { state });
+  return React.createElement(ContinueAsNew, { state });
 }

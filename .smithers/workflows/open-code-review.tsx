@@ -89,11 +89,7 @@ export function createOpenCodeReviewWorkflow(reviewAgents: AgentLike[] = agents.
             }}
           </Task>
 
-          <Task
-            id="summary"
-            output={outputs.summary}
-            noRetry
-          >
+          <Task id="summary" output={outputs.summary} noRetry>
             {() => {
               const target = ctx.outputMaybe(outputs.target, { nodeId: "resolve-target" });
               const preview = ctx.outputMaybe(outputs.preview, { nodeId: "preview" });

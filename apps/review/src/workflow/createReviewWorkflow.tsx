@@ -241,7 +241,11 @@ export function createReviewWorkflow(opts: {
                     ...reviewOut,
                     warnings: [
                       ...reviewOut.warnings,
-                      { file: "", type: "verifier_error", message: "Finding verification produced no output; findings are unverified." },
+                      {
+                        file: "",
+                        type: "verifier_error",
+                        message: "Finding verification produced no output; findings are unverified.",
+                      },
                     ],
                   };
                 }
@@ -276,7 +280,9 @@ export function createReviewWorkflow(opts: {
                 comments: finalReview?.comments ?? [],
                 background: input.background,
                 mode: reviewInput.commit.trim() ? "commit" : reviewInput.from.trim() ? "range" : "workspace",
-                ref: reviewInput.commit.trim() || (reviewInput.from.trim() ? `${reviewInput.from}..${reviewInput.to}` : "workspace"),
+                ref:
+                  reviewInput.commit.trim() ||
+                  (reviewInput.from.trim() ? `${reviewInput.from}..${reviewInput.to}` : "workspace"),
               })}
             </Task>
           ) : null}
@@ -327,7 +333,12 @@ export function createReviewWorkflow(opts: {
               if (!reviewOut) throw new Error("review did not complete");
               const story = normalizeStory(storyOut, changesOut.files);
               const changeImpact = assessChangeImpact(changesOut.files, reviewOut.comments);
-              const quiz = quizOut ? normalizeQuiz(quizOut, changesOut.files.map((file) => file.path)) : null;
+              const quiz = quizOut
+                ? normalizeQuiz(
+                    quizOut,
+                    changesOut.files.map((file) => file.path),
+                  )
+                : null;
               // Built as a variable (not an inline literal) so the quiz/impact
               // fields pass typecheck before renderWalkthroughHtml declares
               // them; structural typing ignores extra props on non-literals.

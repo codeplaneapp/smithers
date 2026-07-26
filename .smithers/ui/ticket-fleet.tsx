@@ -15,7 +15,18 @@ import { parseTicketFleetDispositionRows } from "../lib/ticketFleetDisposition";
 const WORKFLOW_KEY = "ticket-fleet";
 
 type NodeStatus = "pending" | "running" | "done" | "failed" | "waiting" | "skipped";
-type Stage = "sync" | "triage" | "research" | "poc" | "planning" | "plan-approval" | "implementing" | "review" | "merge-approval" | "queue" | "landed";
+type Stage =
+  | "sync"
+  | "triage"
+  | "research"
+  | "poc"
+  | "planning"
+  | "plan-approval"
+  | "implementing"
+  | "review"
+  | "merge-approval"
+  | "queue"
+  | "landed";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -58,7 +69,9 @@ function asBool(value: unknown): boolean {
  * bounded event ring, which only holds the newest ~1000 events and silently
  * forgets early node completions on long runs.
  */
-function buildNodeStatus(treeNodes: ReadonlyArray<{ id?: unknown; status?: unknown; kind?: unknown }>): Map<string, NodeStatus> {
+function buildNodeStatus(
+  treeNodes: ReadonlyArray<{ id?: unknown; status?: unknown; kind?: unknown }>,
+): Map<string, NodeStatus> {
   const map = new Map<string, NodeStatus>();
   const rank: Record<NodeStatus, number> = { pending: 0, skipped: 1, waiting: 2, done: 3, failed: 4, running: 5 };
   for (const node of treeNodes) {
@@ -66,12 +79,17 @@ function buildNodeStatus(treeNodes: ReadonlyArray<{ id?: unknown; status?: unkno
     if (!id) continue;
     const tone = asString(node.status);
     const status: NodeStatus =
-      tone === "ok" ? "done"
-      : tone === "running" ? "running"
-      : tone === "failed" ? "failed"
-      : tone === "waiting" ? "waiting"
-      : tone === "cancelled" ? "skipped"
-      : "pending";
+      tone === "ok"
+        ? "done"
+        : tone === "running"
+          ? "running"
+          : tone === "failed"
+            ? "failed"
+            : tone === "waiting"
+              ? "waiting"
+              : tone === "cancelled"
+                ? "skipped"
+                : "pending";
     // Loop iterations share a logical id; keep the most "active" status.
     const existing = map.get(id);
     if (!existing || rank[status] >= rank[existing]) map.set(id, status);
@@ -97,7 +115,10 @@ const STEP_STAGE: Array<{ match: RegExp; stage: Stage; rank: number }> = [
 type IssueLane = { issueNumber: number; stage: Stage; status: NodeStatus; failedNode?: string };
 
 function buildIssueLanes(nodeStatus: Map<string, NodeStatus>): IssueLane[] {
-  const byIssue = new Map<number, { rank: number; stage: Stage; status: NodeStatus; failedNode?: string; landed: boolean }>();
+  const byIssue = new Map<
+    number,
+    { rank: number; stage: Stage; status: NodeStatus; failedNode?: string; landed: boolean }
+  >();
   for (const [nodeId, status] of nodeStatus) {
     const match = nodeId.match(/^i(\d+):(.+)$/);
     if (!match) continue;
@@ -105,7 +126,12 @@ function buildIssueLanes(nodeStatus: Map<string, NodeStatus>): IssueLane[] {
     const step = match[2];
     const spec = STEP_STAGE.find((s) => s.match.test(step));
     if (!spec) continue;
-    const entry = byIssue.get(issueNumber) ?? { rank: -1, stage: "triage" as Stage, status: "pending" as NodeStatus, landed: false };
+    const entry = byIssue.get(issueNumber) ?? {
+      rank: -1,
+      stage: "triage" as Stage,
+      status: "pending" as NodeStatus,
+      landed: false,
+    };
     if (step === "close" && status === "done") entry.landed = true;
     if (status === "failed" && /guard/.test(step)) entry.failedNode = nodeId;
     if (spec.rank >= entry.rank && status !== "skipped") {
@@ -127,7 +153,10 @@ function buildIssueLanes(nodeStatus: Map<string, NodeStatus>): IssueLane[] {
 
 function sweepStats(nodeStatus: Map<string, NodeStatus>) {
   const stat = (match: (id: string) => boolean) => {
-    let done = 0, running = 0, failed = 0, total = 0;
+    let done = 0,
+      running = 0,
+      failed = 0,
+      total = 0;
     for (const [nodeId, status] of nodeStatus) {
       if (!match(nodeId)) continue;
       total++;
@@ -141,8 +170,10 @@ function sweepStats(nodeStatus: Map<string, NodeStatus>) {
     local: stat((id) => id.startsWith("t:") && id.endsWith(":verdict")),
     gh: stat((id) => /^i\d+:gh-verdict$/.test(id)),
     triage: stat((id) => /^i\d+:triage$/.test(id)),
-    steps: (["local-scan", "gh-scan", "ci-status", "sync-apply", "triage-apply"] as const)
-      .map((id) => ({ id, status: nodeStatus.get(id) ?? "pending" })),
+    steps: (["local-scan", "gh-scan", "ci-status", "sync-apply", "triage-apply"] as const).map((id) => ({
+      id,
+      status: nodeStatus.get(id) ?? "pending",
+    })),
   };
 }
 
@@ -196,16 +227,29 @@ const styles = [
   "h2{font-size:14px;margin:20px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}",
 ].join("\n");
 
-function OutputCard({ runId, nodeId, title, remountKey, render }: {
+function OutputCard({
+  runId,
+  nodeId,
+  title,
+  remountKey,
+  render,
+}: {
   runId: string;
   nodeId: string;
   title: string;
   remountKey: string;
   render: (row: Record<string, unknown>) => React.ReactNode;
 }) {
-  return <OutputCardInner key={remountKey + ":" + nodeId} runId={runId} nodeId={nodeId} title={title} render={render} />;
+  return (
+    <OutputCardInner key={remountKey + ":" + nodeId} runId={runId} nodeId={nodeId} title={title} render={render} />
+  );
 }
-function OutputCardInner({ runId, nodeId, title, render }: {
+function OutputCardInner({
+  runId,
+  nodeId,
+  title,
+  render,
+}: {
   runId: string;
   nodeId: string;
   title: string;
@@ -238,8 +282,8 @@ function GuardDriftNoticeInner({ runId, nodeId }: { runId: string; nodeId: strin
   const paths = Array.isArray(drift) ? drift.map(String) : [];
   return (
     <div className="banner amber">
-      ROOT DRIFT WARNING — {nodeId}: {asString(row.summary) ?? paths.slice(0, 8).join(", ")}
-      {" "}(run continues; fleet lanes are unaffected)
+      ROOT DRIFT WARNING — {nodeId}: {asString(row.summary) ?? paths.slice(0, 8).join(", ")} (run continues; fleet lanes
+      are unaffected)
     </div>
   );
 }
@@ -260,10 +304,22 @@ function IssueDetail({ runId, issueNumber }: { runId: string; issueNumber: numbe
           {asBool(triageRow.needsHumanApproval) ? " · needs human approval" : ""}
           {asBool(triageRow.needsResearch) ? " · research: " + (asString(triageRow.researchKind) ?? "") : ""}
         </p>
-      ) : <p>triage pending…</p>}
+      ) : (
+        <p>triage pending…</p>
+      )}
       {triageRow ? <pre>{asString(triageRow.rationale)}</pre> : null}
-      {readyRow ? <p>readiness: {asBool(readyRow.ready) ? "ready @ " + asString(readyRow.headSha)?.slice(0, 10) : asString(readyRow.summary)}</p> : null}
-      {mergeRow ? <p>merge: {asBool(mergeRow.merged) ? "landed" : "not landed"}{asBool(mergeRow.pushed) ? " + pushed" : ""} — {asString(mergeRow.summary)}</p> : null}
+      {readyRow ? (
+        <p>
+          readiness:{" "}
+          {asBool(readyRow.ready) ? "ready @ " + asString(readyRow.headSha)?.slice(0, 10) : asString(readyRow.summary)}
+        </p>
+      ) : null}
+      {mergeRow ? (
+        <p>
+          merge: {asBool(mergeRow.merged) ? "landed" : "not landed"}
+          {asBool(mergeRow.pushed) ? " + pushed" : ""} — {asString(mergeRow.summary)}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -302,9 +358,9 @@ function Dashboard({ runId }: { runId: string }) {
     <div>
       {guardFailures.length ? (
         <div className="banner">
-          MAIN GUARD TRIPPED — {guardFailures.join(", ")}. A failed guard means the repo root is
-          checked out on a non-main branch; the run stops itself. (Root-path drift no longer fails
-          the run — it surfaces below as an amber warning.) Inspect with `smithers node` before resuming anything.
+          MAIN GUARD TRIPPED — {guardFailures.join(", ")}. A failed guard means the repo root is checked out on a
+          non-main branch; the run stops itself. (Root-path drift no longer fails the run — it surfaces below as an
+          amber warning.) Inspect with `smithers node` before resuming anything.
         </div>
       ) : null}
       {finishedGuards.map((nodeId) => (
@@ -313,7 +369,8 @@ function Dashboard({ runId }: { runId: string }) {
       {otherFailures.length ? (
         <div className="banner amber">
           {otherFailures.length} node(s) failed (retries exhausted): {otherFailures.slice(0, 6).join(", ")}
-          {otherFailures.length > 6 ? " …" : ""} — inspect with `smithers node {"<runId> <nodeId>"}`, recover with `smithers retry-task`.
+          {otherFailures.length > 6 ? " …" : ""} — inspect with `smithers node {"<runId> <nodeId>"}`, recover with
+          `smithers retry-task`.
         </div>
       ) : null}
 
@@ -326,7 +383,9 @@ function Dashboard({ runId }: { runId: string }) {
       <div className="cards">
         <div className="card">
           <h3>Sweep progress</h3>
-          <span className="big">{sweep.local.done}/{sweep.local.total} tickets · {sweep.gh.done}/{sweep.gh.total} issues</span>
+          <span className="big">
+            {sweep.local.done}/{sweep.local.total} tickets · {sweep.gh.done}/{sweep.gh.total} issues
+          </span>
           <p>
             {sweep.triage.total ? "triage " + sweep.triage.done + "/" + sweep.triage.total + " · " : ""}
             {sweep.local.running + sweep.gh.running + sweep.triage.running} agent(s) running
@@ -334,21 +393,43 @@ function Dashboard({ runId }: { runId: string }) {
             {sweep.steps.map((s) => s.id + ": " + s.status).join(" · ")}
           </p>
         </div>
-        <OutputCard runId={runId} nodeId="sync-apply" title="Two-way sync" remountKey={remountKey}
+        <OutputCard
+          runId={runId}
+          nodeId="sync-apply"
+          title="Two-way sync"
+          remountKey={remountKey}
           render={(row) => (
             <div>
-              <span className="big">{String(row.closedLocal ?? 0)}/{String(row.closedGithub ?? 0)}</span>
-              <p>closed local / GitHub · mirrored {String(row.mirroredToGithub ?? 0)}→GH, {String(row.mirroredToLocal ?? 0)}→local · {String(row.decomposed ?? 0)} decomposed{"\n"}{asString(row.summary)}</p>
+              <span className="big">
+                {String(row.closedLocal ?? 0)}/{String(row.closedGithub ?? 0)}
+              </span>
+              <p>
+                closed local / GitHub · mirrored {String(row.mirroredToGithub ?? 0)}→GH,{" "}
+                {String(row.mirroredToLocal ?? 0)}→local · {String(row.decomposed ?? 0)} decomposed{"\n"}
+                {asString(row.summary)}
+              </p>
             </div>
-          )} />
-        <OutputCard runId={runId} nodeId="ci-status" title="Remote CI (main)" remountKey={remountKey}
+          )}
+        />
+        <OutputCard
+          runId={runId}
+          nodeId="ci-status"
+          title="Remote CI (main)"
+          remountKey={remountKey}
           render={(row) => (
             <div>
-              <span className={"pill " + (asBool(row.healthy) ? "ok" : "err")}>{asBool(row.healthy) ? "green" : "red"}</span>
+              <span className={"pill " + (asBool(row.healthy) ? "ok" : "err")}>
+                {asBool(row.healthy) ? "green" : "red"}
+              </span>
               <p>{asString(row.summary)}</p>
             </div>
-          )} />
-        <OutputCard runId={runId} nodeId="triage-apply" title="Triage" remountKey={remountKey}
+          )}
+        />
+        <OutputCard
+          runId={runId}
+          nodeId="triage-apply"
+          title="Triage"
+          remountKey={remountKey}
           render={(row) => {
             const selected = parseMaybeJson(row.selectedNumbers);
             return (
@@ -357,8 +438,13 @@ function Dashboard({ runId }: { runId: string }) {
                 <p>{asString(row.summary)}</p>
               </div>
             );
-          }} />
-        <OutputCard runId={runId} nodeId="run-summary" title="Run summary" remountKey={remountKey}
+          }}
+        />
+        <OutputCard
+          runId={runId}
+          nodeId="run-summary"
+          title="Run summary"
+          remountKey={remountKey}
           render={(row) => {
             const dispositions = parseTicketFleetDispositionRows(row.dispositions);
             const nonLanded = dispositions.filter((disposition) => disposition.kind !== "landed");
@@ -366,21 +452,28 @@ function Dashboard({ runId }: { runId: string }) {
             return (
               <div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span className="big">{String(row.selected ?? 0)}/{String(row.accounted ?? 0)} accounted</span>
+                  <span className="big">
+                    {String(row.selected ?? 0)}/{String(row.accounted ?? 0)} accounted
+                  </span>
                   <span className={"pill " + (successful ? "ok" : "err")}>{successful ? "success" : "failure"}</span>
                 </div>
                 <p>
-                  {String(row.landed ?? row.merged ?? 0)} landed · {String(row.parked ?? 0)} parked · {String(row.failedReadiness ?? 0)} failed readiness · {String(row.unlanded ?? 0)} unlanded
+                  {String(row.landed ?? row.merged ?? 0)} landed · {String(row.parked ?? 0)} parked ·{" "}
+                  {String(row.failedReadiness ?? 0)} failed readiness · {String(row.unlanded ?? 0)} unlanded
                 </p>
                 {nonLanded.map((disposition, index) => (
-                  <div key={String(disposition.issueNumber) + ":" + index} style={{ color: "var(--muted)", fontSize: 11, marginTop: 4 }}>
+                  <div
+                    key={String(disposition.issueNumber) + ":" + index}
+                    style={{ color: "var(--muted)", fontSize: 11, marginTop: 4 }}
+                  >
                     #{disposition.issueNumber} · {disposition.kind} · {disposition.reason}
                   </div>
                 ))}
                 <p>{asString(row.summary)}</p>
               </div>
             );
-          }} />
+          }}
+        />
       </div>
 
       {runApprovals.length ? (
@@ -392,10 +485,29 @@ function Dashboard({ runId }: { runId: string }) {
                 <b>{approval.request?.requestTitle ?? approval.requestTitle ?? approval.nodeId}</b>
                 <div style={{ color: "var(--muted)", fontSize: 11 }}>{approval.request?.summary ?? ""}</div>
               </div>
-              <button onClick={() => actions.submitApproval({ runId, nodeId: approval.nodeId, iteration: approval.iteration, decision: { approved: true } })}>
+              <button
+                onClick={() =>
+                  actions.submitApproval({
+                    runId,
+                    nodeId: approval.nodeId,
+                    iteration: approval.iteration,
+                    decision: { approved: true },
+                  })
+                }
+              >
                 Approve
               </button>
-              <button className="deny" onClick={() => actions.submitApproval({ runId, nodeId: approval.nodeId, iteration: approval.iteration, decision: { approved: false } })}>
+              <button
+                className="deny"
+                onClick={() =>
+                  actions.submitApproval({
+                    runId,
+                    nodeId: approval.nodeId,
+                    iteration: approval.iteration,
+                    decision: { approved: false },
+                  })
+                }
+              >
                 Deny
               </button>
             </div>
@@ -403,15 +515,26 @@ function Dashboard({ runId }: { runId: string }) {
         </div>
       ) : null}
 
-      <h2>Issue pipeline · run {shortId(runId)} · <span className={"pill " + (status === "finished" ? "ok" : /fail|error/.test(status) ? "err" : "run")}>{status || "?"}</span></h2>
+      <h2>
+        Issue pipeline · run {shortId(runId)} ·{" "}
+        <span className={"pill " + (status === "finished" ? "ok" : /fail|error/.test(status) ? "err" : "run")}>
+          {status || "?"}
+        </span>
+      </h2>
       <div className="board">
         {STAGE_COLUMNS.map(({ stage, label }) => {
           const items = lanes.filter((lane) => lane.stage === stage);
           return (
             <div className="col" key={stage}>
-              <h4>{label} ({items.length})</h4>
+              <h4>
+                {label} ({items.length})
+              </h4>
               {items.map((lane) => (
-                <div className="chip" key={lane.issueNumber} onClick={() => setSelectedIssue(lane.issueNumber === selectedIssue ? null : lane.issueNumber)}>
+                <div
+                  className="chip"
+                  key={lane.issueNumber}
+                  onClick={() => setSelectedIssue(lane.issueNumber === selectedIssue ? null : lane.issueNumber)}
+                >
                   <span>#{lane.issueNumber}</span>
                   <span className={"st " + lane.status}>{lane.status}</span>
                 </div>
@@ -421,7 +544,9 @@ function Dashboard({ runId }: { runId: string }) {
         })}
       </div>
 
-      {selectedIssue !== null ? <IssueDetail key={selectedIssue + ":" + remountKey} runId={runId} issueNumber={selectedIssue} /> : null}
+      {selectedIssue !== null ? (
+        <IssueDetail key={selectedIssue + ":" + remountKey} runId={runId} issueNumber={selectedIssue} />
+      ) : null}
     </div>
   );
 }
@@ -429,8 +554,9 @@ function Dashboard({ runId }: { runId: string }) {
 function App() {
   const runs = useGatewayRuns();
   const [chosenRunId, setChosenRunId] = useState<string | undefined>(runIdFromUrl());
-  const fleetRuns = (Array.isArray(runs.data) ? runs.data : (runs.data as any)?.runs ?? [])
-    .filter((run: any) => String(run?.workflowKey ?? run?.workflowName ?? "").includes(WORKFLOW_KEY));
+  const fleetRuns = (Array.isArray(runs.data) ? runs.data : ((runs.data as any)?.runs ?? [])).filter((run: any) =>
+    String(run?.workflowKey ?? run?.workflowName ?? "").includes(WORKFLOW_KEY),
+  );
   const runId = chosenRunId ?? asString(fleetRuns[0]?.runId);
   return (
     <div className="wrap">
@@ -447,7 +573,13 @@ function App() {
           ))}
         </select>
       </div>
-      {runId ? <Dashboard runId={runId} /> : <p style={{ color: "var(--muted)" }}>No ticket-fleet runs yet. Start one with: smithers up .smithers/workflows/ticket-fleet.tsx -d</p>}
+      {runId ? (
+        <Dashboard runId={runId} />
+      ) : (
+        <p style={{ color: "var(--muted)" }}>
+          No ticket-fleet runs yet. Start one with: smithers up .smithers/workflows/ticket-fleet.tsx -d
+        </p>
+      )}
     </div>
   );
 }

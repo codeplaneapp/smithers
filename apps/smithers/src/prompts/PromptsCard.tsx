@@ -54,11 +54,7 @@ export function PromptsCard() {
         </div>
       </div>
       <footer className="card-foot">
-        <button
-          className="btn btn-brand"
-          type="button"
-          onClick={() => fill(fillTemplate(active, ""))}
-        >
+        <button className="btn btn-brand" type="button" onClick={() => fill(fillTemplate(active, ""))}>
           Use prompt
         </button>
         <span className="card-link">edit templates ›</span>

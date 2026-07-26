@@ -1,9 +1,5 @@
 /** @jsxImportSource react */
-import {
-  createGatewayReactRoot,
-  useGatewayNodeOutput,
-  useGatewayRunEvents,
-} from "smithers-orchestrator/gateway-react";
+import { createGatewayReactRoot, useGatewayNodeOutput, useGatewayRunEvents } from "smithers-orchestrator/gateway-react";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
 
 const PROBE_NODE_ID = "probe";
@@ -61,14 +57,13 @@ function App() {
       <WorkflowUiStyles mode="theme" />
       <div className="head">
         <h1>E2E Probe</h1>
-        <span className="pill" data-testid="probe-run-id">{runId ?? ""}</span>
+        <span className="pill" data-testid="probe-run-id">
+          {runId ?? ""}
+        </span>
       </div>
       <section className="panel">
         <span className="label">Status</span>
-        <strong
-          className={answer ? "ok" : "pending"}
-          data-testid="probe-status"
-        >
+        <strong className={answer ? "ok" : "pending"} data-testid="probe-status">
           {status}
         </strong>
         <span className="label">Run events</span>

@@ -119,12 +119,19 @@ function createFirecrawlProvider(options) {
   return {
     name: "firecrawl",
     async parseDocument(input, parseOptions) {
-      if (input.source.type !== "url") return parseFirecrawlFile(request, baseUrl, apiKey, input, parseOptions?.abortSignal);
-      const json = await postJson(request, `${baseUrl}/scrape`, apiKey, {
-        url: input.source.url,
-        formats: [input.outputFormat === "text" ? "markdown" : (input.outputFormat ?? "markdown")],
-        onlyMainContent: false,
-      }, parseOptions?.abortSignal);
+      if (input.source.type !== "url")
+        return parseFirecrawlFile(request, baseUrl, apiKey, input, parseOptions?.abortSignal);
+      const json = await postJson(
+        request,
+        `${baseUrl}/scrape`,
+        apiKey,
+        {
+          url: input.source.url,
+          formats: [input.outputFormat === "text" ? "markdown" : (input.outputFormat ?? "markdown")],
+          onlyMainContent: false,
+        },
+        parseOptions?.abortSignal,
+      );
       const data = pickObject(json, "data") ?? pickObject(json, "result") ?? pickObject(json, undefined);
       const markdown = pickString(data, "markdown");
       const text = pickString(data, "text") ?? pickString(data, "content") ?? markdown ?? "";
@@ -147,7 +154,13 @@ function createFirecrawlProvider(options) {
  * @param {AbortSignal | undefined} [abortSignal]
  */
 async function parseFirecrawlFile(request, baseUrl, apiKey, input, abortSignal) {
-  const json = await postMultipart(request, `${baseUrl}/parse`, apiKey, createDocumentFormData(input, createFirecrawlOptions(input)), abortSignal);
+  const json = await postMultipart(
+    request,
+    `${baseUrl}/parse`,
+    apiKey,
+    createDocumentFormData(input, createFirecrawlOptions(input)),
+    abortSignal,
+  );
   const data = pickObject(json, "data") ?? pickObject(json, "result") ?? pickObject(json, undefined);
   const markdown = pickString(data, "markdown");
   const text = pickString(data, "text") ?? pickString(data, "content") ?? markdown ?? "";
@@ -174,18 +187,28 @@ function createMistralOcrProvider(options) {
       if (input.source.type === "text") {
         return { provider: "mistral-ocr", text: input.source.text, raw: { source: "text" } };
       }
-      const document = input.source.type === "url"
-        ? { type: "document_url", document_url: input.source.url }
-        : input.source.type === "base64"
-          ? createMistralBase64Document(input.source)
-          : undefined;
-      const json = await postJson(request, `${baseUrl}/ocr`, apiKey, {
-        model: "mistral-ocr-latest",
-        document,
-        ...(input.instructions ? { prompt: input.instructions } : {}),
-      }, parseOptions?.abortSignal);
+      const document =
+        input.source.type === "url"
+          ? { type: "document_url", document_url: input.source.url }
+          : input.source.type === "base64"
+            ? createMistralBase64Document(input.source)
+            : undefined;
+      const json = await postJson(
+        request,
+        `${baseUrl}/ocr`,
+        apiKey,
+        {
+          model: "mistral-ocr-latest",
+          document,
+          ...(input.instructions ? { prompt: input.instructions } : {}),
+        },
+        parseOptions?.abortSignal,
+      );
       const pages = Array.isArray(json?.pages) ? json.pages.map(normalizePage).filter(Boolean) : undefined;
-      const markdown = pages?.map((page) => page.markdown || page.text || "").filter(Boolean).join("\n\n");
+      const markdown = pages
+        ?.map((page) => page.markdown || page.text || "")
+        .filter(Boolean)
+        .join("\n\n");
       return {
         provider: "mistral-ocr",
         text: markdown || pickString(json, "text") || "",
@@ -209,14 +232,24 @@ function createLlamaParseProvider(options) {
     name: "llamaparse",
     async parseDocument(input, parseOptions) {
       const abortSignal = parseOptions?.abortSignal;
-      const fileId = input.source.type === "url" ? undefined : await uploadLlamaParseFile(request, baseUrl, apiKey, input, abortSignal);
-      const created = await postJson(request, `${baseUrl}/api/v2/parse`, apiKey, {
-        ...(fileId ? { file_id: fileId } : { source_url: input.source.url }),
-        tier: "agentic",
-        version: "latest",
-        expand: input.outputFormat === "text" ? ["text_full", "metadata"] : ["markdown_full", "text_full", "metadata"],
-        ...(input.instructions ? { parsing_instruction: input.instructions } : {}),
-      }, abortSignal);
+      const fileId =
+        input.source.type === "url"
+          ? undefined
+          : await uploadLlamaParseFile(request, baseUrl, apiKey, input, abortSignal);
+      const created = await postJson(
+        request,
+        `${baseUrl}/api/v2/parse`,
+        apiKey,
+        {
+          ...(fileId ? { file_id: fileId } : { source_url: input.source.url }),
+          tier: "agentic",
+          version: "latest",
+          expand:
+            input.outputFormat === "text" ? ["text_full", "metadata"] : ["markdown_full", "text_full", "metadata"],
+          ...(input.instructions ? { parsing_instruction: input.instructions } : {}),
+        },
+        abortSignal,
+      );
       const jobId = pickString(pickObject(created, "job") ?? created, "id");
       if (!jobId) throw new Error("LlamaParse did not return a parse job id");
       const json = await pollLlamaParseJob(request, baseUrl, apiKey, jobId, input.outputFormat, abortSignal);
@@ -241,7 +274,13 @@ function createLlamaParseProvider(options) {
  * @param {AbortSignal | undefined} [abortSignal]
  */
 async function uploadLlamaParseFile(request, baseUrl, apiKey, input, abortSignal) {
-  const json = await postMultipart(request, `${baseUrl}/api/v1/files/`, apiKey, createDocumentFormData(input), abortSignal);
+  const json = await postMultipart(
+    request,
+    `${baseUrl}/api/v1/files/`,
+    apiKey,
+    createDocumentFormData(input),
+    abortSignal,
+  );
   const fileId = pickString(json, "id");
   if (!fileId) throw new Error("LlamaParse did not return an uploaded file id");
   return fileId;
@@ -305,7 +344,12 @@ async function postMultipart(request, url, apiKey, body, abortSignal) {
 async function pollLlamaParseJob(request, baseUrl, apiKey, jobId, outputFormat, abortSignal) {
   const expand = outputFormat === "text" ? "text_full,metadata" : "markdown_full,text_full,metadata";
   for (let attempt = 0; attempt < LLAMAPARSE_POLL_MAX_ATTEMPTS; attempt += 1) {
-    const json = await getJson(request, `${baseUrl}/api/v2/parse/${encodeURIComponent(jobId)}?expand=${expand}`, apiKey, abortSignal);
+    const json = await getJson(
+      request,
+      `${baseUrl}/api/v2/parse/${encodeURIComponent(jobId)}?expand=${expand}`,
+      apiKey,
+      abortSignal,
+    );
     const job = pickObject(json, "job") ?? json;
     const status = pickString(job, "status");
     if (status === "COMPLETED" || status === "completed") return json;
@@ -394,8 +438,11 @@ function normalizePage(value) {
  * @returns {Record<string, unknown> | undefined}
  */
 function pickObject(value, key) {
-  const target = key && value && typeof value === "object" ? /** @type {Record<string, unknown>} */ (value)[key] : value;
-  return target && typeof target === "object" && !Array.isArray(target) ? /** @type {Record<string, unknown>} */ (target) : undefined;
+  const target =
+    key && value && typeof value === "object" ? /** @type {Record<string, unknown>} */ (value)[key] : value;
+  return target && typeof target === "object" && !Array.isArray(target)
+    ? /** @type {Record<string, unknown>} */ (target)
+    : undefined;
 }
 
 /**
@@ -404,7 +451,7 @@ function pickObject(value, key) {
  * @returns {string | undefined}
  */
 function pickString(value, key) {
-  return value && typeof value === "object" && typeof /** @type {Record<string, unknown>} */ (value)[key] === "string"
+  return value && typeof value === "object" && typeof (/** @type {Record<string, unknown>} */ (value)[key]) === "string"
     ? /** @type {string} */ (/** @type {Record<string, unknown>} */ (value)[key])
     : undefined;
 }

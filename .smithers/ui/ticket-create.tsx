@@ -182,9 +182,13 @@ function App() {
       <header className="topbar">
         <div className="title-group">
           <h1>Ticket Create</h1>
-          <span className="pill" data-testid="ticket-create-runid">{activeRunId ? shortRunId(activeRunId) : "No run"}</span>
+          <span className="pill" data-testid="ticket-create-runid">
+            {activeRunId ? shortRunId(activeRunId) : "No run"}
+          </span>
           {activeRun ? (
-            <span className={"badge " + statusClass(activeRun.status)} data-testid="ticket-create-status">{activeRun.status ?? "idle"}</span>
+            <span className={"badge " + statusClass(activeRun.status)} data-testid="ticket-create-status">
+              {activeRun.status ?? "idle"}
+            </span>
           ) : null}
         </div>
         <div className="toolbar">
@@ -195,11 +199,27 @@ function App() {
             onChange={(e) => setPrompt(e.currentTarget.value)}
             placeholder="Describe the work to ticket…"
           />
-          <button className="button" data-testid="ticket-create-refresh" onClick={() => void refresh()} disabled={busy}>Refresh</button>
+          <button className="button" data-testid="ticket-create-refresh" onClick={() => void refresh()} disabled={busy}>
+            Refresh
+          </button>
           {running ? (
-            <button className="button danger" data-testid="ticket-create-cancel" onClick={() => void cancel()} disabled={busy}>Cancel</button>
+            <button
+              className="button danger"
+              data-testid="ticket-create-cancel"
+              onClick={() => void cancel()}
+              disabled={busy}
+            >
+              Cancel
+            </button>
           ) : null}
-          <button className="button primary" data-testid="ticket-create-launch" onClick={() => void launch()} disabled={busy}>Generate Ticket</button>
+          <button
+            className="button primary"
+            data-testid="ticket-create-launch"
+            onClick={() => void launch()}
+            disabled={busy}
+          >
+            Generate Ticket
+          </button>
         </div>
       </header>
 
@@ -217,20 +237,28 @@ function App() {
               {running ? <span className="badge running">Generating…</span> : null}
               {!running && ticket ? <span className="badge finished">Ready</span> : null}
               {failed ? <span className="badge failed">Failed</span> : null}
-              <span className="status-msg">{eventCount} events{ticketOutput.loading ? " · refreshing…" : ""}</span>
+              <span className="status-msg">
+                {eventCount} events{ticketOutput.loading ? " · refreshing…" : ""}
+              </span>
             </div>
 
             {ticket ? (
               <div className="ticket-card" data-testid="ticket-create-card">
                 <div className="ticket-head">
-                  <h2 className="ticket-title" data-testid="ticket-create-title">{ticket.title || "Untitled ticket"}</h2>
-                  <button className="button tiny" onClick={() => copyText(ticketMarkdown(ticket))}>Copy all</button>
+                  <h2 className="ticket-title" data-testid="ticket-create-title">
+                    {ticket.title || "Untitled ticket"}
+                  </h2>
+                  <button className="button tiny" onClick={() => copyText(ticketMarkdown(ticket))}>
+                    Copy all
+                  </button>
                 </div>
 
                 <div className="ticket-section">
                   <h3>
                     Description
-                    <button className="button tiny" onClick={() => copyText(ticket.description)}>Copy</button>
+                    <button className="button tiny" onClick={() => copyText(ticket.description)}>
+                      Copy
+                    </button>
                   </h3>
                   <div className="ticket-desc" data-testid="ticket-create-description">
                     {ticket.description || "No description provided."}
@@ -264,9 +292,17 @@ function App() {
                 </div>
 
                 <div className="ticket-section actions-footer">
-                  <button className="button" onClick={() => void launch()} disabled={busy}>Regenerate</button>
-                  <button className="button" onClick={() => copyText(ticketMarkdown(ticket))}>Copy Markdown</button>
-                  {running ? <button className="button danger" onClick={() => void cancel()} disabled={busy}>Cancel</button> : null}
+                  <button className="button" onClick={() => void launch()} disabled={busy}>
+                    Regenerate
+                  </button>
+                  <button className="button" onClick={() => copyText(ticketMarkdown(ticket))}>
+                    Copy Markdown
+                  </button>
+                  {running ? (
+                    <button className="button danger" onClick={() => void cancel()} disabled={busy}>
+                      Cancel
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ) : (
@@ -275,7 +311,14 @@ function App() {
                   <>
                     <h2>Generation failed</h2>
                     <div>Something went wrong producing this ticket.</div>
-                    <button className="button primary" style={{ marginTop: 14 }} onClick={() => void launch()} disabled={busy}>Try Again</button>
+                    <button
+                      className="button primary"
+                      style={{ marginTop: 14 }}
+                      onClick={() => void launch()}
+                      disabled={busy}
+                    >
+                      Try Again
+                    </button>
                   </>
                 ) : running || activeRunId ? (
                   <>
@@ -293,7 +336,12 @@ function App() {
                         onChange={(e) => setPrompt(e.currentTarget.value)}
                         placeholder="e.g. Add rate limiting to the login endpoint…"
                       />
-                      <button className="button primary" data-testid="ticket-create-launch-empty" onClick={() => void launch()} disabled={busy}>
+                      <button
+                        className="button primary"
+                        data-testid="ticket-create-launch-empty"
+                        onClick={() => void launch()}
+                        disabled={busy}
+                      >
                         Generate Ticket
                       </button>
                     </div>

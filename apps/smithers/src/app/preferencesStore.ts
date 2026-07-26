@@ -15,9 +15,7 @@ type PreferencesState = {
 /** The OS preference, used as the default before the user picks a theme. */
 function systemTheme(): Theme {
   if (typeof window === "undefined") return "light";
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 /**
@@ -30,8 +28,7 @@ export const usePreferencesStore = create<PreferencesState>()(
     (set) => ({
       theme: systemTheme(),
       layout: "normal",
-      toggleTheme: () =>
-        set((state) => ({ theme: state.theme === "dark" ? "light" : "dark" })),
+      toggleTheme: () => set((state) => ({ theme: state.theme === "dark" ? "light" : "dark" })),
       toggleLayout: () =>
         set((state) => ({
           layout: state.layout === "sidebar" ? "normal" : "sidebar",

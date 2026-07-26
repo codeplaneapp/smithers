@@ -33,14 +33,14 @@ const storage = new AsyncLocalStorage();
  * @returns {T}
  */
 export function runWithToolContext(ctx, fn) {
-    return storage.run(ctx, fn);
+  return storage.run(ctx, fn);
 }
 
 /**
  * @returns {ToolContext | undefined}
  */
 export function getToolContext() {
-    return storage.getStore();
+  return storage.getStore();
 }
 
 /**
@@ -48,16 +48,16 @@ export function getToolContext() {
  * @returns {string | null}
  */
 export function getToolIdempotencyKey(ctx = getToolContext()) {
-    if (!ctx) {
-        return null;
-    }
-    if (typeof ctx.idempotencyKey === "string" && ctx.idempotencyKey.length > 0) {
-        return ctx.idempotencyKey;
-    }
-    if (!ctx.runId || !ctx.nodeId) {
-        return null;
-    }
-    return `smithers:${ctx.runId}:${ctx.nodeId}:${ctx.iteration ?? 0}`;
+  if (!ctx) {
+    return null;
+  }
+  if (typeof ctx.idempotencyKey === "string" && ctx.idempotencyKey.length > 0) {
+    return ctx.idempotencyKey;
+  }
+  if (!ctx.runId || !ctx.nodeId) {
+    return null;
+  }
+  return `smithers:${ctx.runId}:${ctx.nodeId}:${ctx.iteration ?? 0}`;
 }
 
 /**
@@ -65,6 +65,6 @@ export function getToolIdempotencyKey(ctx = getToolContext()) {
  * @returns {number}
  */
 export function nextToolSeq(ctx) {
-    ctx.seq = (ctx.seq ?? 0) + 1;
-    return ctx.seq;
+  ctx.seq = (ctx.seq ?? 0) + 1;
+  return ctx.seq;
 }

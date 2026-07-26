@@ -1,5 +1,15 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { loadManifest, renderManifest } from "./manifest.js";
@@ -7,7 +17,21 @@ import { parseWorkflowFrontmatter } from "./workflows.js";
 
 const REGISTRY_REPO = "smithersai/awesome-smithers";
 const SHARE_RECEIPT_FILE = ".smithers-share-receipt.json";
-const PRIVATE_ROOT_NAMES = new Set(["runs", "logs", "node_modules", "state", "executions", "agents", "agents.ts", "CLAUDE.md", "AGENTS.md", ".claude", ".codex", ".env", SHARE_RECEIPT_FILE]);
+const PRIVATE_ROOT_NAMES = new Set([
+  "runs",
+  "logs",
+  "node_modules",
+  "state",
+  "executions",
+  "agents",
+  "agents.ts",
+  "CLAUDE.md",
+  "AGENTS.md",
+  ".claude",
+  ".codex",
+  ".env",
+  SHARE_RECEIPT_FILE,
+]);
 
 function findPackRoot(from = process.cwd()) {
   let dir = resolve(from);
@@ -24,15 +48,18 @@ function findPackRoot(from = process.cwd()) {
 export { findPackRoot };
 
 export function normalizeGithubRepo(repository) {
-  const value = String(repository ?? "").trim()
+  const value = String(repository ?? "")
+    .trim()
     .replace(/^(?:https?|git):\/\/(?:www\.)?github\.com\//i, "")
     .replace(/^ssh:\/\/git@github\.com\//i, "")
     .replace(/^git@github\.com:/i, "")
     .replace(/^www\.github\.com\//i, "")
     .replace(/^github\.com\//i, "")
-    .replace(/\.git\/?$/, "").replace(/\/$/, "");
+    .replace(/\.git\/?$/, "")
+    .replace(/\/$/, "");
   const [owner, name] = value.split("/");
-  const validOwner = owner && owner.length <= 39 && /^(?!.*--)[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(owner);
+  const validOwner =
+    owner && owner.length <= 39 && /^(?!.*--)[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(owner);
   const validName = name && name.length <= 100 && /^[A-Za-z0-9._-]+$/.test(name);
   return validOwner && validName ? `${owner}/${name}` : null;
 }
@@ -50,7 +77,10 @@ export function resolveShareRepositories({ repository, manifestRepository, regis
 /** Escape a value for a Markdown table cell: pipes break columns, newlines
  * break rows. */
 function markdownCell(value) {
-  return String(value).replace(/\|/g, "\\|").replace(/\s*\n\s*/g, " ").trim();
+  return String(value)
+    .replace(/\|/g, "\\|")
+    .replace(/\s*\n\s*/g, " ")
+    .trim();
 }
 
 function workflowDescriptions(root, manifest) {
@@ -74,7 +104,8 @@ function workflowDescriptions(root, manifest) {
       if (manifest.contents.workflows.length && !manifest.contents.workflows.includes(id)) continue;
       const source = readFileSync(file, "utf8");
       const frontmatter = parseWorkflowFrontmatter(source);
-      const description = frontmatter.description ?? source.match(/^\/\/\s*smithers-description:\s*(.+)$/m)?.[1] ?? `Workflow ${id}`;
+      const description =
+        frontmatter.description ?? source.match(/^\/\/\s*smithers-description:\s*(.+)$/m)?.[1] ?? `Workflow ${id}`;
       workflows.push({ id, description: markdownCell(description) });
     }
   }
@@ -88,14 +119,24 @@ function requireFsReaddir(path) {
 }
 
 export function buildPackEntry(root, { manifest = loadManifest(join(root, "smithers.toon")), repository } = {}) {
-  const effectiveRepository = resolveShareRepositories({ repository, manifestRepository: manifest.repository }).repository;
+  const effectiveRepository = resolveShareRepositories({
+    repository,
+    manifestRepository: manifest.repository,
+  }).repository;
   const workflows = workflowDescriptions(root, manifest);
   const workflowText = workflows.length
     ? workflows.map(({ id, description }) => `\`${id}\`: ${description}`).join("; ")
     : "No workflows listed";
   const install = `smithers add ${effectiveRepository}`;
   const entry = `| [${markdownCell(manifest.name)}](https://github.com/${effectiveRepository}) | ${markdownCell(manifest.description || "Workflow pack")} | \`${install}\` | ${workflowText} |`;
-  return { name: manifest.name, description: manifest.description, repository: effectiveRepository, install, workflows, entry };
+  return {
+    name: manifest.name,
+    description: manifest.description,
+    repository: effectiveRepository,
+    install,
+    workflows,
+    entry,
+  };
 }
 
 export function updatePacksSection(readme, entry) {
@@ -109,12 +150,13 @@ export function updatePacksSection(readme, entry) {
   const section = readme.slice(start, end);
   const lines = section.split("\n");
   const name = entry.match(/^\|\s*\[([^\]]+)\](?:\([^)]*\))?\s*\|/)?.[1];
-  const matching = name ? lines.flatMap((line, index) => /^\|\s*\[([^\]]+)\](?:\([^)]*\))?\s*\|/.exec(line)?.[1] === name ? [index] : []) : [];
+  const matching = name
+    ? lines.flatMap((line, index) => (/^\|\s*\[([^\]]+)\](?:\([^)]*\))?\s*\|/.exec(line)?.[1] === name ? [index] : []))
+    : [];
   if (matching.length) {
     lines[matching[0]] = entry;
     for (const index of matching.slice(1).reverse()) lines.splice(index, 1);
-  }
-  else {
+  } else {
     const header = lines.findIndex((line) => /^\|\s*Pack\s*\|/i.test(line));
     lines.splice(header >= 0 ? header + 2 : 0, 0, ...(header >= 0 ? [entry] : [tableHeader, entry]));
   }
@@ -168,7 +210,9 @@ function readdirSyncSafe(root) {
   return requireFsReaddir(root).map((entry) => entry.name);
 }
 
-function escapeRegExp(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 function unifiedDiff(before, after) {
   if (before === after) return "";
@@ -185,36 +229,61 @@ export function fetchRegistryReadme(registry) {
   // a README fixture and no network is touched.
   const fixture = process.env.SMITHERS_SHARE_REGISTRY_README;
   if (fixture) {
-    try { return { readme: readFileSync(fixture, "utf8"), source: `fixture ${fixture}` }; }
-    catch { return { readme: "", source: `fixture ${fixture} unreadable` }; }
+    try {
+      return { readme: readFileSync(fixture, "utf8"), source: `fixture ${fixture}` };
+    } catch {
+      return { readme: "", source: `fixture ${fixture} unreadable` };
+    }
   }
   try {
     const base64 = execFileSync("gh", ["api", `repos/${registry}/readme`, "--jq", ".content"], { encoding: "utf8" });
     return { readme: Buffer.from(base64, "base64").toString("utf8"), source: "gh api" };
-  } catch { /* fall through */ }
+  } catch {
+    /* fall through */
+  }
   try {
-    const raw = execFileSync("curl", ["-fsSL", `https://raw.githubusercontent.com/${registry}/HEAD/README.md`], { encoding: "utf8" });
+    const raw = execFileSync("curl", ["-fsSL", `https://raw.githubusercontent.com/${registry}/HEAD/README.md`], {
+      encoding: "utf8",
+    });
     return { readme: raw, source: "raw.githubusercontent.com" };
-  } catch { /* fall through */ }
+  } catch {
+    /* fall through */
+  }
   return { readme: "", source: "unavailable (offline?) — diff shown against an empty README" };
 }
 
 export function sharePack({ from = process.cwd(), repo, repository, dryRun = false, registryReadme } = {}) {
   const root = findPackRoot(from);
   const manifest = loadManifest(join(root, "smithers.toon"));
-  const { repository: effectiveRepository, registry } = resolveShareRepositories({ repository, manifestRepository: manifest.repository, registry: repo == null ? REGISTRY_REPO : repo });
+  const { repository: effectiveRepository, registry } = resolveShareRepositories({
+    repository,
+    manifestRepository: manifest.repository,
+    registry: repo == null ? REGISTRY_REPO : repo,
+  });
   const pack = buildPackEntry(root, { manifest, repository: effectiveRepository });
   if (dryRun) {
     // Diff against the ACTUAL registry README so the dry run shows whether a
     // row is added or replaced. Tests inject `registryReadme` (or the CLI's
     // SMITHERS_SHARE_REGISTRY_README) so units never touch the network.
-    const fetched = registryReadme == null ? fetchRegistryReadme(registry) : { readme: registryReadme, source: "provided" };
+    const fetched =
+      registryReadme == null ? fetchRegistryReadme(registry) : { readme: registryReadme, source: "provided" };
     const updated = updatePacksSection(fetched.readme, pack.entry);
-    return { dryRun: true, entry: pack.entry, diff: unifiedDiff(fetched.readme, updated), registrySource: fetched.source, manifest: pack, repository: pack.repository, registry };
+    return {
+      dryRun: true,
+      entry: pack.entry,
+      diff: unifiedDiff(fetched.readme, updated),
+      registrySource: fetched.source,
+      manifest: pack,
+      repository: pack.repository,
+      registry,
+    };
   }
 
-  try { execFileSync("gh", ["auth", "status"], { stdio: "ignore" }); }
-  catch { throw new Error("The `gh` CLI is required and must be authenticated (`gh auth login`) to share a pack"); }
+  try {
+    execFileSync("gh", ["auth", "status"], { stdio: "ignore" });
+  } catch {
+    throw new Error("The `gh` CLI is required and must be authenticated (`gh auth login`) to share a pack");
+  }
   const temp = mkdtempSync(join(tmpdir(), "smithers-share-registry-"));
   try {
     // STABLE branch name: a durable retry after a crash reuses the same
@@ -235,11 +304,45 @@ export function sharePack({ from = process.cwd(), repo, repository, dryRun = fal
     // Force-with-lease semantics are unnecessary: the branch is ours alone.
     execFileSync("git", ["push", "-u", "--force", "origin", "HEAD"], { cwd: checkout, stdio: "inherit" });
     // Reuse an already-open PR for this branch (durable retry safety).
-    const existing = execFileSync("gh", ["pr", "list", "--repo", registry, "--head", branch, "--state", "open", "--json", "url", "--jq", ".[0].url // empty"], { cwd: checkout, encoding: "utf8" }).trim();
+    const existing = execFileSync(
+      "gh",
+      [
+        "pr",
+        "list",
+        "--repo",
+        registry,
+        "--head",
+        branch,
+        "--state",
+        "open",
+        "--json",
+        "url",
+        "--jq",
+        ".[0].url // empty",
+      ],
+      { cwd: checkout, encoding: "utf8" },
+    ).trim();
     if (existing) return { ...pack, registry, pullRequest: existing, reused: true };
-    const pr = execFileSync("gh", ["pr", "create", "--repo", registry, "--head", branch, "--title", `docs: add ${manifest.name} pack`, "--body", `Add the ${manifest.name} workflow pack to the registry.`], { cwd: checkout, encoding: "utf8" }).trim();
+    const pr = execFileSync(
+      "gh",
+      [
+        "pr",
+        "create",
+        "--repo",
+        registry,
+        "--head",
+        branch,
+        "--title",
+        `docs: add ${manifest.name} pack`,
+        "--body",
+        `Add the ${manifest.name} workflow pack to the registry.`,
+      ],
+      { cwd: checkout, encoding: "utf8" },
+    ).trim();
     return { ...pack, registry, pullRequest: pr };
-  } finally { rmSync(temp, { recursive: true, force: true }); }
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
 }
 
 /** Build the publishable staging copy: private files excluded, manifest
@@ -247,19 +350,31 @@ export function sharePack({ from = process.cwd(), repo, repository, dryRun = fal
 export function preparePackForShare({ from = process.cwd(), repository } = {}) {
   const root = findPackRoot(from);
   const manifest = loadManifest(join(root, "smithers.toon"));
-  const effectiveRepository = resolveShareRepositories({ repository, manifestRepository: manifest.repository }).repository;
+  const effectiveRepository = resolveShareRepositories({
+    repository,
+    manifestRepository: manifest.repository,
+  }).repository;
   const { staging, excluded } = stagePackForShare(root);
   // All publication edits land in STAGING; the live pack is never written.
   writeFileSync(join(staging, "smithers.toon"), renderManifest({ ...manifest, repository: effectiveRepository }));
   const readmePath = join(staging, "README.md");
   const oldRepository = normalizeGithubRepo(manifest.repository);
   if (!existsSync(readmePath)) {
-    writeFileSync(readmePath, `# ${manifest.name}\n\n${manifest.description || "A Smithers workflow pack."}\n\nInstall with \`smithers add ${effectiveRepository}\`.\n`);
+    writeFileSync(
+      readmePath,
+      `# ${manifest.name}\n\n${manifest.description || "A Smithers workflow pack."}\n\nInstall with \`smithers add ${effectiveRepository}\`.\n`,
+    );
   } else if (oldRepository && oldRepository !== effectiveRepository) {
     const readme = readFileSync(readmePath, "utf8");
     const updated = readme
-      .replace(new RegExp(`(Install with\\s+)${escapeRegExp(oldRepository)}(?=[\\s.!?)]|$)`, "g"), `$1${effectiveRepository}`)
-      .replace(new RegExp("(smithers add\\s+)" + escapeRegExp(oldRepository) + "(?=[\\s.)\`]|$)", "g"), `$1${effectiveRepository}`);
+      .replace(
+        new RegExp(`(Install with\\s+)${escapeRegExp(oldRepository)}(?=[\\s.!?)]|$)`, "g"),
+        `$1${effectiveRepository}`,
+      )
+      .replace(
+        new RegExp("(smithers add\\s+)" + escapeRegExp(oldRepository) + "(?=[\\s.)\`]|$)", "g"),
+        `$1${effectiveRepository}`,
+      );
     if (updated !== readme) writeFileSync(readmePath, updated);
   }
   preparedStagingRoots.set(`${root}\0${effectiveRepository}`, staging);
@@ -270,14 +385,24 @@ export function preparePackForShare({ from = process.cwd(), repository } = {}) {
   };
 }
 
-function shareReceiptPath(root) { return join(root, SHARE_RECEIPT_FILE); }
+function shareReceiptPath(root) {
+  return join(root, SHARE_RECEIPT_FILE);
+}
 
 function readShareReceipt(root, repository) {
   try {
     const receipt = JSON.parse(readFileSync(shareReceiptPath(root), "utf8"));
-    if (receipt?.version !== 1 || receipt.repository !== repository || typeof receipt.pushedCommit !== "string" || !/^[0-9a-f]{40,64}$/i.test(receipt.pushedCommit)) return null;
+    if (
+      receipt?.version !== 1 ||
+      receipt.repository !== repository ||
+      typeof receipt.pushedCommit !== "string" ||
+      !/^[0-9a-f]{40,64}$/i.test(receipt.pushedCommit)
+    )
+      return null;
     return receipt;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 function writeShareReceipt(root, repository, pushedCommit) {
@@ -285,7 +410,9 @@ function writeShareReceipt(root, repository, pushedCommit) {
 }
 
 function existingRepositoryWithoutReceiptError(repository) {
-  return new Error(`GitHub repository ${repository} already exists, but no Smithers share receipt proves this flow created it. Refusing to change main. Delete it deliberately and retry if Smithers should create it, or publish to the existing repository with your normal Git workflow.`);
+  return new Error(
+    `GitHub repository ${repository} already exists, but no Smithers share receipt proves this flow created it. Refusing to change main. Delete it deliberately and retry if Smithers should create it, or publish to the existing repository with your normal Git workflow.`,
+  );
 }
 
 /**
@@ -297,9 +424,15 @@ function existingRepositoryWithoutReceiptError(repository) {
 export function publishPackRepository({ from = process.cwd(), repository, stagingRoot, exec = execFileSync } = {}) {
   const root = findPackRoot(from);
   const manifest = loadManifest(join(root, "smithers.toon"));
-  const effectiveRepository = resolveShareRepositories({ repository, manifestRepository: manifest.repository }).repository;
-  try { exec("gh", ["auth", "status"], { stdio: "ignore" }); }
-  catch { throw new Error("The `gh` CLI is required and must be authenticated (`gh auth login`) to publish a pack"); }
+  const effectiveRepository = resolveShareRepositories({
+    repository,
+    manifestRepository: manifest.repository,
+  }).repository;
+  try {
+    exec("gh", ["auth", "status"], { stdio: "ignore" });
+  } catch {
+    throw new Error("The `gh` CLI is required and must be authenticated (`gh auth login`) to publish a pack");
+  }
   // Publish the STAGED copy, never the live pack root (which contains run
   // state, credentials scaffolding, and node_modules).
   const key = `${root}\0${effectiveRepository}`;
@@ -307,20 +440,36 @@ export function publishPackRepository({ from = process.cwd(), repository, stagin
   const staged = handedOff && existsSync(handedOff) ? handedOff : preparePackForShare({ from, repository }).stagingRoot;
   try {
     let repoExists = true;
-    try { exec("gh", ["repo", "view", effectiveRepository], { stdio: "ignore" }); }
-    catch { repoExists = false; }
+    try {
+      exec("gh", ["repo", "view", effectiveRepository], { stdio: "ignore" });
+    } catch {
+      repoExists = false;
+    }
     const receipt = repoExists ? readShareReceipt(root, effectiveRepository) : null;
     if (repoExists && !receipt) throw existingRepositoryWithoutReceiptError(effectiveRepository);
 
     exec("git", ["init", "--quiet", "--initial-branch", "main"], { cwd: staged, stdio: "inherit" });
     exec("git", ["add", "-A"], { cwd: staged, stdio: "inherit" });
-    exec("git", ["commit", "--quiet", "-m", `feat: publish ${manifest.name} workflow pack`], { cwd: staged, stdio: "inherit" });
+    exec("git", ["commit", "--quiet", "-m", `feat: publish ${manifest.name} workflow pack`], {
+      cwd: staged,
+      stdio: "inherit",
+    });
     const pushedCommit = String(exec("git", ["rev-parse", "HEAD"], { cwd: staged, encoding: "utf8" })).trim();
     if (repoExists) {
-      exec("git", ["remote", "add", "origin", `https://github.com/${effectiveRepository}.git`], { cwd: staged, stdio: "inherit" });
-      exec("git", ["push", `--force-with-lease=main:${receipt.pushedCommit}`, "origin", "HEAD:main"], { cwd: staged, stdio: "inherit" });
+      exec("git", ["remote", "add", "origin", `https://github.com/${effectiveRepository}.git`], {
+        cwd: staged,
+        stdio: "inherit",
+      });
+      exec("git", ["push", `--force-with-lease=main:${receipt.pushedCommit}`, "origin", "HEAD:main"], {
+        cwd: staged,
+        stdio: "inherit",
+      });
     } else {
-      exec("gh", ["repo", "create", effectiveRepository, "--public", "--source", staged, "--remote", "origin", "--push"], { cwd: staged, stdio: "inherit" });
+      exec(
+        "gh",
+        ["repo", "create", effectiveRepository, "--public", "--source", staged, "--remote", "origin", "--push"],
+        { cwd: staged, stdio: "inherit" },
+      );
     }
     // Record only after the create or lease-protected push succeeds. A crash
     // before this write leaves the repository safe to inspect, not eligible
@@ -337,10 +486,16 @@ const preparedStagingRoots = new Map();
 
 export function cleanupPreparedPack({ from = process.cwd(), repository } = {}) {
   const root = findPackRoot(from);
-  const effectiveRepository = resolveShareRepositories({ repository, manifestRepository: loadManifest(join(root, "smithers.toon")).repository }).repository;
+  const effectiveRepository = resolveShareRepositories({
+    repository,
+    manifestRepository: loadManifest(join(root, "smithers.toon")).repository,
+  }).repository;
   const key = `${root}\0${effectiveRepository}`;
   const staged = preparedStagingRoots.get(key);
-  if (staged) { rmSync(staged, { recursive: true, force: true }); preparedStagingRoots.delete(key); }
+  if (staged) {
+    rmSync(staged, { recursive: true, force: true });
+    preparedStagingRoots.delete(key);
+  }
 }
 
 function assertNoSymlinks(root) {

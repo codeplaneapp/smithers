@@ -34,9 +34,7 @@ export function FeatureEnum({
 }: FeatureEnumProps) {
   const isFirstRun = !existingFeatures;
   const requestedIterations = refineIterations ?? (isFirstRun ? 5 : 1);
-  const totalRefineIterations = Number.isFinite(requestedIterations)
-    ? Math.max(1, Math.floor(requestedIterations))
-    : 1;
+  const totalRefineIterations = Number.isFinite(requestedIterations) ? Math.max(1, Math.floor(requestedIterations)) : 1;
   const scanTaskId = `${idPrefix}:scan`;
   const refineTaskIds = Array.from({ length: totalRefineIterations }, (_, index) => `${idPrefix}:refine:${index + 1}`);
   const finalTaskId = `${idPrefix}:result`;
@@ -60,9 +58,7 @@ export function FeatureEnum({
       )}
 
       {refineTaskIds.map((taskId, index) => {
-        const previousTaskId = index === 0
-          ? (isFirstRun ? scanTaskId : null)
-          : refineTaskIds[index - 1];
+        const previousTaskId = index === 0 ? (isFirstRun ? scanTaskId : null) : refineTaskIds[index - 1];
 
         if (previousTaskId) {
           return (

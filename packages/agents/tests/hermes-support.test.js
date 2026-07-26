@@ -47,28 +47,35 @@ describe("HermesAgent", () => {
       authorization = new Headers(init?.headers).get("authorization") ?? "";
       body = JSON.parse(String(init?.body));
 
-      return new Response(JSON.stringify({
-        id: "resp-hermes-test",
-        created_at: 1,
-        model: body.model,
-        output: [{
-          type: "message",
-          id: "msg-hermes-test",
-          role: "assistant",
-          content: [{
-            type: "output_text",
-            text: "parsed hermes text",
-            annotations: [],
-          }],
-        }],
-        usage: {
-          input_tokens: 3,
-          output_tokens: 2,
+      return new Response(
+        JSON.stringify({
+          id: "resp-hermes-test",
+          created_at: 1,
+          model: body.model,
+          output: [
+            {
+              type: "message",
+              id: "msg-hermes-test",
+              role: "assistant",
+              content: [
+                {
+                  type: "output_text",
+                  text: "parsed hermes text",
+                  annotations: [],
+                },
+              ],
+            },
+          ],
+          usage: {
+            input_tokens: 3,
+            output_tokens: 2,
+          },
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
         },
-      }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
+      );
     };
 
     const agent = new HermesAgent();

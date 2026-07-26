@@ -3,9 +3,7 @@ import type { BaseCliAgentOptions } from "./BaseCliAgent/BaseCliAgentOptions";
 export type ClaudeCodeAgentOptions = BaseCliAgentOptions & {
   addDir?: string[];
   agent?: string;
-  agents?:
-    | Record<string, { description?: string; prompt?: string }>
-    | string;
+  agents?: Record<string, { description?: string; prompt?: string }> | string;
   allowDangerouslySkipPermissions?: boolean;
   allowedTools?: string[];
   appendSystemPrompt?: string;
@@ -48,13 +46,7 @@ export type ClaudeCodeAgentOptions = BaseCliAgentOptions & {
   noChrome?: boolean;
   noSessionPersistence?: boolean;
   outputFormat?: "text" | "json" | "stream-json";
-  permissionMode?:
-    | "acceptEdits"
-    | "bypassPermissions"
-    | "default"
-    | "delegate"
-    | "dontAsk"
-    | "plan";
+  permissionMode?: "acceptEdits" | "bypassPermissions" | "default" | "delegate" | "dontAsk" | "plan";
   pluginDir?: string[];
   replayUserMessages?: boolean;
   resume?: string;

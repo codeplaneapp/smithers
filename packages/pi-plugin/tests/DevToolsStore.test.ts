@@ -53,18 +53,16 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2_000) {
 describe("DevToolsStore", () => {
   test("delta application yields a byte-identical fresh snapshot fixture", () => {
     const first = snapshot(0, [task(2, "task:a", "running")]);
-    const fresh = snapshot(1, [
-      task(2, "task:a", "finished", { output: { value: 1 } }),
-      task(3, "task:b", "running"),
-    ]);
+    const fresh = snapshot(1, [task(2, "task:a", "finished", { output: { value: 1 } }), task(3, "task:b", "running")]);
     const delta = diffSnapshots(first, fresh);
     const store = new DevToolsStore({ ghostNodeCap: 8 });
 
     store.applyEvent({ version: 1, kind: "snapshot", snapshot: first });
     store.applyEvent({ version: 1, kind: "delta", delta });
 
-    expect(stable({ version: 1, runId: "run-test", frameNo: store.latestFrameNo, seq: store.seq, root: store.tree }))
-      .toBe(stable(fresh));
+    expect(
+      stable({ version: 1, runId: "run-test", frameNo: store.latestFrameNo, seq: store.seq, root: store.tree }),
+    ).toBe(stable(fresh));
   });
 
   test("GapResync keeps the old displayed tree, discards deltas, then accepts a snapshot", () => {
@@ -158,16 +156,24 @@ describe("DevToolsClient integration", () => {
         }
         if (frame.method === "streamDevTools") {
           ws.send(JSON.stringify({ type: "res", id: frame.id, ok: true, payload: { streamId: "stream-1" } }));
-          ws.send(JSON.stringify({
-            type: "event",
-            event: "devtools.event",
-            payload: { streamId: "stream-1", runId: "run-test", event: { version: 1, kind: "snapshot", snapshot: first } },
-          }));
-          ws.send(JSON.stringify({
-            type: "event",
-            event: "devtools.event",
-            payload: { streamId: "stream-1", runId: "run-test", event: { version: 1, kind: "delta", delta } },
-          }));
+          ws.send(
+            JSON.stringify({
+              type: "event",
+              event: "devtools.event",
+              payload: {
+                streamId: "stream-1",
+                runId: "run-test",
+                event: { version: 1, kind: "snapshot", snapshot: first },
+              },
+            }),
+          );
+          ws.send(
+            JSON.stringify({
+              type: "event",
+              event: "devtools.event",
+              payload: { streamId: "stream-1", runId: "run-test", event: { version: 1, kind: "delta", delta } },
+            }),
+          );
         }
       });
     });
@@ -184,10 +190,12 @@ describe("DevToolsClient integration", () => {
     await waitFor(() => store.seq === 1);
 
     const inspector = new RunInspector(store, client, { workflowName: "fixture" });
-    const lines = inspector.render(100, 20, {
-      fg: (_color, value) => value,
-      bold: (value) => value,
-    }).join("\n");
+    const lines = inspector
+      .render(100, 20, {
+        fg: (_color, value) => value,
+        bold: (value) => value,
+      })
+      .join("\n");
 
     expect(lines).toContain("task:a");
     expect(lines).toContain("finished");

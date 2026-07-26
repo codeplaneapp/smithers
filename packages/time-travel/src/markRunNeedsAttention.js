@@ -9,30 +9,30 @@
  * @param {{ runId: string; timestampMs: number; reason: string; code: string }} opts
  */
 export async function markRunNeedsAttention(adapter, opts) {
-    const { runId, timestampMs, reason, code } = opts;
-    const payload = JSON.stringify({
-        code,
-        needsAttention: true,
-        message: reason,
-        timestampMs,
-    });
-    try {
-        await adapter.updateRun(runId, {
-            status: "needs_attention",
-            finishedAtMs: timestampMs,
-            heartbeatAtMs: null,
-            runtimeOwnerId: null,
-            errorJson: payload,
-        });
-        return;
-    } catch {
-        // Older schemas may not accept needs_attention; preserve the signal in errorJson.
-    }
+  const { runId, timestampMs, reason, code } = opts;
+  const payload = JSON.stringify({
+    code,
+    needsAttention: true,
+    message: reason,
+    timestampMs,
+  });
+  try {
     await adapter.updateRun(runId, {
-        status: "failed",
-        finishedAtMs: timestampMs,
-        heartbeatAtMs: null,
-        runtimeOwnerId: null,
-        errorJson: payload,
+      status: "needs_attention",
+      finishedAtMs: timestampMs,
+      heartbeatAtMs: null,
+      runtimeOwnerId: null,
+      errorJson: payload,
     });
+    return;
+  } catch {
+    // Older schemas may not accept needs_attention; preserve the signal in errorJson.
+  }
+  await adapter.updateRun(runId, {
+    status: "failed",
+    finishedAtMs: timestampMs,
+    heartbeatAtMs: null,
+    runtimeOwnerId: null,
+    errorJson: payload,
+  });
 }

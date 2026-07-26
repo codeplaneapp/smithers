@@ -1,13 +1,5 @@
 import { randomBytes, createHash } from "node:crypto";
-import {
-    lstatSync,
-    mkdirSync,
-    readFileSync,
-    realpathSync,
-    renameSync,
-    rmSync,
-    writeFileSync,
-} from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -60,20 +52,19 @@ const HEALTH_VERIFY_ATTEMPTS = 3;
 const HEALTH_VERIFY_BACKOFF_MS = 200;
 
 function currentUid() {
-    return typeof process.getuid === "function" ? process.getuid() : null;
+  return typeof process.getuid === "function" ? process.getuid() : null;
 }
 
 /**
  * @param {NodeJS.ProcessEnv} env
  */
 function defaultGatewayRuntimeDir(env) {
-    const uid = currentUid();
-    if (process.platform === "linux" && uid !== null) {
-        if (env.XDG_RUNTIME_DIR)
-            return join(env.XDG_RUNTIME_DIR, GATEWAY_RUNTIME_DIR_NAME);
-        return join(tmpdir(), `${GATEWAY_RUNTIME_DIR_NAME}-${uid}`);
-    }
-    return join(tmpdir(), GATEWAY_RUNTIME_DIR_NAME);
+  const uid = currentUid();
+  if (process.platform === "linux" && uid !== null) {
+    if (env.XDG_RUNTIME_DIR) return join(env.XDG_RUNTIME_DIR, GATEWAY_RUNTIME_DIR_NAME);
+    return join(tmpdir(), `${GATEWAY_RUNTIME_DIR_NAME}-${uid}`);
+  }
+  return join(tmpdir(), GATEWAY_RUNTIME_DIR_NAME);
 }
 
 /**
@@ -81,9 +72,9 @@ function defaultGatewayRuntimeDir(env) {
  * @param {string} message
  */
 function gatewayRuntimeTrustError(path, message) {
-    const error = new Error(`${message}: ${path}`);
-    /** @type {NodeJS.ErrnoException} */ (error).code = "GATEWAY_STATE_UNTRUSTED";
-    return error;
+  const error = new Error(`${message}: ${path}`);
+  /** @type {NodeJS.ErrnoException} */ (error).code = "GATEWAY_STATE_UNTRUSTED";
+  return error;
 }
 
 /**
@@ -92,26 +83,25 @@ function gatewayRuntimeTrustError(path, message) {
  * @param {string} kind
  */
 function assertOwnedRuntimePath(path, stats, kind) {
-    const uid = currentUid();
-    if (uid === null)
-        return;
-    if (stats.uid !== uid) {
-        throw gatewayRuntimeTrustError(path, `${kind} is owned by uid ${stats.uid}, not current uid ${uid}`);
-    }
-    if ((stats.mode & 0o022) !== 0) {
-        throw gatewayRuntimeTrustError(path, `${kind} is writable by group or other users`);
-    }
+  const uid = currentUid();
+  if (uid === null) return;
+  if (stats.uid !== uid) {
+    throw gatewayRuntimeTrustError(path, `${kind} is owned by uid ${stats.uid}, not current uid ${uid}`);
+  }
+  if ((stats.mode & 0o022) !== 0) {
+    throw gatewayRuntimeTrustError(path, `${kind} is writable by group or other users`);
+  }
 }
 
 /**
  * @param {string} dir
  */
 function assertGatewayRuntimeDirTrusted(dir) {
-    const stats = lstatSync(dir);
-    if (!stats.isDirectory()) {
-        throw gatewayRuntimeTrustError(dir, "Gateway runtime path is not a directory");
-    }
-    assertOwnedRuntimePath(dir, stats, "Gateway runtime directory");
+  const stats = lstatSync(dir);
+  if (!stats.isDirectory()) {
+    throw gatewayRuntimeTrustError(dir, "Gateway runtime path is not a directory");
+  }
+  assertOwnedRuntimePath(dir, stats, "Gateway runtime directory");
 }
 
 /**
@@ -120,19 +110,17 @@ function assertGatewayRuntimeDirTrusted(dir) {
  * @returns {import("node:fs").Stats | null}
  */
 function gatewayRuntimeFileStats(file, kind) {
-    try {
-        const stats = lstatSync(file);
-        if (!stats.isFile()) {
-            throw gatewayRuntimeTrustError(file, `${kind} is not a regular file`);
-        }
-        assertOwnedRuntimePath(file, stats, kind);
-        return stats;
+  try {
+    const stats = lstatSync(file);
+    if (!stats.isFile()) {
+      throw gatewayRuntimeTrustError(file, `${kind} is not a regular file`);
     }
-    catch (error) {
-        if (/** @type {NodeJS.ErrnoException} */ (error).code === "ENOENT")
-            return null;
-        throw error;
-    }
+    assertOwnedRuntimePath(file, stats, kind);
+    return stats;
+  } catch (error) {
+    if (/** @type {NodeJS.ErrnoException} */ (error).code === "ENOENT") return null;
+    throw error;
+  }
 }
 
 /**
@@ -141,15 +129,15 @@ function gatewayRuntimeFileStats(file, kind) {
  * @returns {boolean}
  */
 function assertGatewayRuntimeFileTrusted(file, kind) {
-    return gatewayRuntimeFileStats(file, kind) !== null;
+  return gatewayRuntimeFileStats(file, kind) !== null;
 }
 
 /**
  * @param {string} dir
  */
 function ensureGatewayRuntimeDir(dir) {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    assertGatewayRuntimeDirTrusted(dir);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  assertGatewayRuntimeDirTrusted(dir);
 }
 
 /**
@@ -160,12 +148,11 @@ function ensureGatewayRuntimeDir(dir) {
  * @param {string} path
  */
 export function canonicalWorkspacePath(path) {
-    try {
-        return realpathSync(resolve(path));
-    }
-    catch {
-        return resolve(path);
-    }
+  try {
+    return realpathSync(resolve(path));
+  } catch {
+    return resolve(path);
+  }
 }
 
 /**
@@ -173,35 +160,33 @@ export function canonicalWorkspacePath(path) {
  * @param {NodeJS.ProcessEnv} [env]
  */
 export function gatewayRuntimePaths(workspace, env = process.env) {
-    const root = env.SMITHERS_GATEWAY_STATE_DIR ?? defaultGatewayRuntimeDir(env);
-    const key = createHash("sha256").update(canonicalWorkspacePath(workspace)).digest("hex").slice(0, 32);
-    return {
-        dir: root,
-        stateFile: join(root, `${key}.json`),
-        logFile: join(root, `${key}.log`),
-        lockFile: join(root, `${key}.lock`),
-        daemonStartLockFile: join(root, `${key}.start.lock`),
-    };
+  const root = env.SMITHERS_GATEWAY_STATE_DIR ?? defaultGatewayRuntimeDir(env);
+  const key = createHash("sha256").update(canonicalWorkspacePath(workspace)).digest("hex").slice(0, 32);
+  return {
+    dir: root,
+    stateFile: join(root, `${key}.json`),
+    logFile: join(root, `${key}.log`),
+    lockFile: join(root, `${key}.lock`),
+    daemonStartLockFile: join(root, `${key}.start.lock`),
+  };
 }
 
 export function mintGatewayToken() {
-    return randomBytes(32).toString("hex");
+  return randomBytes(32).toString("hex");
 }
 
 /**
  * @param {number} pid
  */
 export function isGatewayPidAlive(pid) {
-    if (!Number.isInteger(pid) || pid <= 0)
-        return false;
-    try {
-        process.kill(pid, 0);
-        return true;
-    }
-    catch (error) {
-        // EPERM means the pid exists but belongs to another user.
-        return /** @type {NodeJS.ErrnoException} */ (error).code === "EPERM";
-    }
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means the pid exists but belongs to another user.
+    return /** @type {NodeJS.ErrnoException} */ (error).code === "EPERM";
+  }
 }
 
 /**
@@ -213,12 +198,11 @@ export function isGatewayPidAlive(pid) {
  * @returns {boolean}
  */
 export function assertGatewayRuntimeStateFileTrusted(workspace, env = process.env) {
-    const { dir, stateFile } = gatewayRuntimePaths(workspace, env);
-    const exists = assertGatewayRuntimeFileTrusted(stateFile, "Gateway runtime state file");
-    if (!exists)
-        return false;
-    assertGatewayRuntimeDirTrusted(dir);
-    return true;
+  const { dir, stateFile } = gatewayRuntimePaths(workspace, env);
+  const exists = assertGatewayRuntimeFileTrusted(stateFile, "Gateway runtime state file");
+  if (!exists) return false;
+  assertGatewayRuntimeDirTrusted(dir);
+  return true;
 }
 
 /**
@@ -227,29 +211,24 @@ export function assertGatewayRuntimeStateFileTrusted(workspace, env = process.en
  * @returns {GatewayRuntimeState | null}
  */
 export function readGatewayRuntimeState(workspace, env = process.env) {
-    const { stateFile } = gatewayRuntimePaths(workspace, env);
-    if (!assertGatewayRuntimeStateFileTrusted(workspace, env))
-        return null;
-    let raw;
-    try {
-        raw = readFileSync(stateFile, "utf8");
-    }
-    catch (error) {
-        if (/** @type {NodeJS.ErrnoException} */ (error).code !== "ENOENT")
-            throw error;
-        return null;
-    }
-    try {
-        const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== "object")
-            return null;
-        if (typeof parsed.pid !== "number" || typeof parsed.url !== "string" || typeof parsed.workspaceRoot !== "string")
-            return null;
-        return parsed;
-    }
-    catch {
-        return null;
-    }
+  const { stateFile } = gatewayRuntimePaths(workspace, env);
+  if (!assertGatewayRuntimeStateFileTrusted(workspace, env)) return null;
+  let raw;
+  try {
+    raw = readFileSync(stateFile, "utf8");
+  } catch (error) {
+    if (/** @type {NodeJS.ErrnoException} */ (error).code !== "ENOENT") throw error;
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    if (typeof parsed.pid !== "number" || typeof parsed.url !== "string" || typeof parsed.workspaceRoot !== "string")
+      return null;
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -262,12 +241,12 @@ export function readGatewayRuntimeState(workspace, env = process.env) {
  * @returns {string} the state file path
  */
 export function writeGatewayRuntimeState(workspace, state, env = process.env) {
-    const { dir, stateFile } = gatewayRuntimePaths(workspace, env);
-    ensureGatewayRuntimeDir(dir);
-    const tmpFile = `${stateFile}.${process.pid}.tmp`;
-    writeFileSync(tmpFile, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
-    renameSync(tmpFile, stateFile);
-    return stateFile;
+  const { dir, stateFile } = gatewayRuntimePaths(workspace, env);
+  ensureGatewayRuntimeDir(dir);
+  const tmpFile = `${stateFile}.${process.pid}.tmp`;
+  writeFileSync(tmpFile, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  renameSync(tmpFile, stateFile);
+  return stateFile;
 }
 
 /**
@@ -280,13 +259,12 @@ export function writeGatewayRuntimeState(workspace, state, env = process.env) {
  * @param {NodeJS.ProcessEnv} [env]
  */
 export function clearGatewayRuntimeState(workspace, pid, env = process.env) {
-    const { stateFile } = gatewayRuntimePaths(workspace, env);
-    if (pid !== undefined) {
-        const current = readGatewayRuntimeState(workspace, env);
-        if (current && current.pid !== pid)
-            return;
-    }
-    rmSync(stateFile, { force: true });
+  const { stateFile } = gatewayRuntimePaths(workspace, env);
+  if (pid !== undefined) {
+    const current = readGatewayRuntimeState(workspace, env);
+    if (current && current.pid !== pid) return;
+  }
+  rmSync(stateFile, { force: true });
 }
 
 /**
@@ -298,14 +276,13 @@ export function clearGatewayRuntimeState(workspace, pid, env = process.env) {
  * @param {unknown} error
  */
 function isConnectionRefused(error) {
-    let cursor = error;
-    while (cursor && typeof cursor === "object") {
-        const code = /** @type {{ code?: unknown }} */ (cursor).code;
-        if (code === "ECONNREFUSED" || code === "ConnectionRefused")
-            return true;
-        cursor = /** @type {{ cause?: unknown }} */ (cursor).cause;
-    }
-    return false;
+  let cursor = error;
+  while (cursor && typeof cursor === "object") {
+    const code = /** @type {{ code?: unknown }} */ (cursor).code;
+    if (code === "ECONNREFUSED" || code === "ConnectionRefused") return true;
+    cursor = /** @type {{ cause?: unknown }} */ (cursor).cause;
+  }
+  return false;
 }
 
 /**
@@ -320,31 +297,28 @@ function isConnectionRefused(error) {
  * @returns {Promise<{ ok: boolean; health?: any }>}
  */
 async function fetchGatewayHealth(url, timeoutMs) {
-    const controller = new AbortController();
-    /** @type {ReturnType<typeof setTimeout> | undefined} */
-    let deadline;
-    const request = (async () => {
-        const response = await fetch(url, { signal: controller.signal });
-        if (!response.ok)
-            return { ok: false };
-        return { ok: true, health: await response.json() };
-    })();
-    const timedOut = new Promise((_, reject) => {
-        deadline = setTimeout(() => {
-            controller.abort();
-            const error = new Error(`Gateway health probe timed out after ${timeoutMs}ms`);
-            error.name = "TimeoutError";
-            reject(error);
-        }, timeoutMs);
-    });
-    try {
-        return await Promise.race([request, timedOut]);
-    }
-    finally {
-        if (deadline !== undefined)
-            clearTimeout(deadline);
-        controller.abort();
-    }
+  const controller = new AbortController();
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let deadline;
+  const request = (async () => {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) return { ok: false };
+    return { ok: true, health: await response.json() };
+  })();
+  const timedOut = new Promise((_, reject) => {
+    deadline = setTimeout(() => {
+      controller.abort();
+      const error = new Error(`Gateway health probe timed out after ${timeoutMs}ms`);
+      error.name = "TimeoutError";
+      reject(error);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([request, timedOut]);
+  } finally {
+    if (deadline !== undefined) clearTimeout(deadline);
+    controller.abort();
+  }
 }
 
 /**
@@ -367,23 +341,20 @@ async function fetchGatewayHealth(url, timeoutMs) {
  * @returns {Promise<{ ok: true; identity: { workspaceRoot: string; backend: string | null; version: string | null; pid: number; startedAtMs: number } } | { ok: false; reason: "mismatch" | "refused" | "transient" }>}
  */
 export async function probeGatewayHealthIdentity(url, workspace, opts = {}) {
-    const timeoutMs = opts.timeoutMs ?? HEALTH_TIMEOUT_MS;
-    let health;
-    try {
-        const response = await fetchGatewayHealth(`${url.replace(/\/+$/, "")}/health`, timeoutMs);
-        if (!response.ok)
-            return { ok: false, reason: "transient" };
-        health = response.health;
-    }
-    catch (error) {
-        return { ok: false, reason: isConnectionRefused(error) ? "refused" : "transient" };
-    }
-    const identity = health?.identity;
-    if (!identity || typeof identity.workspaceRoot !== "string")
-        return { ok: false, reason: "mismatch" };
-    if (canonicalWorkspacePath(identity.workspaceRoot) !== canonicalWorkspacePath(workspace))
-        return { ok: false, reason: "mismatch" };
-    return { ok: true, identity };
+  const timeoutMs = opts.timeoutMs ?? HEALTH_TIMEOUT_MS;
+  let health;
+  try {
+    const response = await fetchGatewayHealth(`${url.replace(/\/+$/, "")}/health`, timeoutMs);
+    if (!response.ok) return { ok: false, reason: "transient" };
+    health = response.health;
+  } catch (error) {
+    return { ok: false, reason: isConnectionRefused(error) ? "refused" : "transient" };
+  }
+  const identity = health?.identity;
+  if (!identity || typeof identity.workspaceRoot !== "string") return { ok: false, reason: "mismatch" };
+  if (canonicalWorkspacePath(identity.workspaceRoot) !== canonicalWorkspacePath(workspace))
+    return { ok: false, reason: "mismatch" };
+  return { ok: true, identity };
 }
 
 /**
@@ -397,8 +368,8 @@ export async function probeGatewayHealthIdentity(url, workspace, opts = {}) {
  * @returns {Promise<{ workspaceRoot: string; backend: string | null; version: string | null; pid: number; startedAtMs: number } | null>}
  */
 export async function verifyGatewayHealthIdentity(url, workspace) {
-    const outcome = await probeGatewayHealthIdentity(url, workspace);
-    return outcome.ok ? outcome.identity : null;
+  const outcome = await probeGatewayHealthIdentity(url, workspace);
+  return outcome.ok ? outcome.identity : null;
 }
 
 /**
@@ -417,36 +388,32 @@ export async function verifyGatewayHealthIdentity(url, workspace) {
  * @returns {Promise<{ state: GatewayRuntimeState; identity: { workspaceRoot: string; pid: number } } | null>}
  */
 export async function discoverWorkspaceGateway(workspace, env = process.env, opts = {}) {
-    const state = readGatewayRuntimeState(workspace, env);
-    if (!state)
-        return null;
-    if (!isGatewayPidAlive(state.pid)) {
-        clearGatewayRuntimeState(workspace, state.pid, env);
-        return null;
-    }
-    const attempts = Math.max(1, opts.attempts ?? HEALTH_VERIFY_ATTEMPTS);
-    const backoffMs = opts.backoffMs ?? HEALTH_VERIFY_BACKOFF_MS;
-    /** @type {{ ok: false; reason: "mismatch" | "refused" | "transient" }} */
-    let failure = { ok: false, reason: "transient" };
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-        if (attempt > 0)
-            await new Promise((resolve) => setTimeout(resolve, backoffMs));
-        const outcome = await probeGatewayHealthIdentity(state.url, workspace, { timeoutMs: opts.healthTimeoutMs });
-        if (outcome.ok)
-            return { state, identity: outcome.identity };
-        failure = outcome;
-        // A mismatch is definitive: an answering server that is not this
-        // workspace's gateway will not become it on the next attempt.
-        if (outcome.reason === "mismatch")
-            break;
-    }
-    // The pid is ALIVE here, so only the definitive outcomes may delete the
-    // write-once state file. A timeout/transient error keeps it: the gateway
-    // may just be busy, and deleting would orphan it for its whole lifetime.
-    if (failure.reason !== "transient") {
-        clearGatewayRuntimeState(workspace, state.pid, env);
-    }
+  const state = readGatewayRuntimeState(workspace, env);
+  if (!state) return null;
+  if (!isGatewayPidAlive(state.pid)) {
+    clearGatewayRuntimeState(workspace, state.pid, env);
     return null;
+  }
+  const attempts = Math.max(1, opts.attempts ?? HEALTH_VERIFY_ATTEMPTS);
+  const backoffMs = opts.backoffMs ?? HEALTH_VERIFY_BACKOFF_MS;
+  /** @type {{ ok: false; reason: "mismatch" | "refused" | "transient" }} */
+  let failure = { ok: false, reason: "transient" };
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    const outcome = await probeGatewayHealthIdentity(state.url, workspace, { timeoutMs: opts.healthTimeoutMs });
+    if (outcome.ok) return { state, identity: outcome.identity };
+    failure = outcome;
+    // A mismatch is definitive: an answering server that is not this
+    // workspace's gateway will not become it on the next attempt.
+    if (outcome.reason === "mismatch") break;
+  }
+  // The pid is ALIVE here, so only the definitive outcomes may delete the
+  // write-once state file. A timeout/transient error keeps it: the gateway
+  // may just be busy, and deleting would orphan it for its whole lifetime.
+  if (failure.reason !== "transient") {
+    clearGatewayRuntimeState(workspace, state.pid, env);
+  }
+  return null;
 }
 
 /**
@@ -458,8 +425,8 @@ export async function discoverWorkspaceGateway(workspace, env = process.env, opt
  * @param {string} claimId
  */
 function writeGatewayLockClaim(lockFile, claimId) {
-    const payload = `${JSON.stringify({ pid: process.pid, atMs: Date.now(), claimId })}\n`;
-    writeFileSync(lockFile, payload, { flag: "wx", mode: 0o600 });
+  const payload = `${JSON.stringify({ pid: process.pid, atMs: Date.now(), claimId })}\n`;
+  writeFileSync(lockFile, payload, { flag: "wx", mode: 0o600 });
 }
 
 /**
@@ -467,16 +434,14 @@ function writeGatewayLockClaim(lockFile, claimId) {
  * @returns {{ claim: { pid?: number; atMs?: number; claimId?: string } | null; stats: import("node:fs").Stats } | null}
  */
 function readGatewayLockRecord(lockFile) {
-    const stats = gatewayRuntimeFileStats(lockFile, "Gateway runtime lock file");
-    if (!stats)
-        return null;
-    try {
-        const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
-        return { claim: parsed && typeof parsed === "object" ? parsed : null, stats };
-    }
-    catch {
-        return { claim: null, stats };
-    }
+  const stats = gatewayRuntimeFileStats(lockFile, "Gateway runtime lock file");
+  if (!stats) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(lockFile, "utf8"));
+    return { claim: parsed && typeof parsed === "object" ? parsed : null, stats };
+  } catch {
+    return { claim: null, stats };
+  }
 }
 
 /**
@@ -484,22 +449,21 @@ function readGatewayLockRecord(lockFile) {
  * @param {string} claimId
  */
 function gatewayLockMatches(lockFile, claimId) {
-    const holder = readGatewayLockRecord(lockFile)?.claim;
-    return holder?.pid === process.pid && holder?.claimId === claimId;
+  const holder = readGatewayLockRecord(lockFile)?.claim;
+  return holder?.pid === process.pid && holder?.claimId === claimId;
 }
 
 /**
  * @param {string} lockFile
  */
 function moveStaleGatewayLockAside(lockFile) {
-    const staleFile = `${lockFile}.${process.pid}.${Date.now()}.${randomBytes(6).toString("hex")}.stale`;
-    try {
-        renameSync(lockFile, staleFile);
-        return staleFile;
-    }
-    catch {
-        return null;
-    }
+  const staleFile = `${lockFile}.${process.pid}.${Date.now()}.${randomBytes(6).toString("hex")}.stale`;
+  try {
+    renameSync(lockFile, staleFile);
+    return staleFile;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -507,7 +471,7 @@ function moveStaleGatewayLockAside(lockFile) {
  * @param {import("node:fs").Stats} b
  */
 function sameRuntimeFile(a, b) {
-    return a.dev === b.dev && a.ino === b.ino;
+  return a.dev === b.dev && a.ino === b.ino;
 }
 
 /**
@@ -515,12 +479,11 @@ function sameRuntimeFile(a, b) {
  * @param {string} lockFile
  */
 function restoreMovedFreshLock(staleFile, lockFile) {
-    try {
-        renameSync(staleFile, lockFile);
-    }
-    catch {
-        rmSync(staleFile, { force: true });
-    }
+  try {
+    renameSync(staleFile, lockFile);
+  } catch {
+    rmSync(staleFile, { force: true });
+  }
 }
 
 /**
@@ -532,54 +495,47 @@ function restoreMovedFreshLock(staleFile, lockFile) {
  * @returns {GatewayRuntimeLock | null}
  */
 function claimGatewayRuntimeLock(workspace, env, lockFile, staleMs, opts = {}) {
-    const { dir } = gatewayRuntimePaths(workspace, env);
-    ensureGatewayRuntimeDir(dir);
-    const claimId = randomBytes(16).toString("hex");
-    const tryClaim = () => {
-        try {
-            writeGatewayLockClaim(lockFile, claimId);
-            return gatewayLockMatches(lockFile, claimId);
-        }
-        catch {
-            return false;
-        }
-    };
-    if (!tryClaim()) {
-        const holderRecord = readGatewayLockRecord(lockFile);
-        const holder = holderRecord?.claim;
-        const holderAlive = holder && isGatewayPidAlive(holder.pid);
-        const holderFresh = holder && Date.now() - (holder.atMs ?? 0) < staleMs;
-        if (holderAlive && holderFresh)
-            return null;
-        opts.beforeStaleRename?.();
-        const staleFile = moveStaleGatewayLockAside(lockFile);
-        if (!staleFile)
-            return null;
-        const movedStats = gatewayRuntimeFileStats(staleFile, "Moved gateway runtime lock file");
-        if (holderRecord && movedStats && !sameRuntimeFile(holderRecord.stats, movedStats)) {
-            restoreMovedFreshLock(staleFile, lockFile);
-            return null;
-        }
-        try {
-            if (!tryClaim())
-                return null;
-        }
-        finally {
-            rmSync(staleFile, { force: true });
-        }
+  const { dir } = gatewayRuntimePaths(workspace, env);
+  ensureGatewayRuntimeDir(dir);
+  const claimId = randomBytes(16).toString("hex");
+  const tryClaim = () => {
+    try {
+      writeGatewayLockClaim(lockFile, claimId);
+      return gatewayLockMatches(lockFile, claimId);
+    } catch {
+      return false;
     }
-    return {
-        release: () => {
-            try {
-                if (!gatewayLockMatches(lockFile, claimId))
-                    return;
-            }
-            catch {
-                // Fall through and remove: an unreadable lock helps nobody.
-            }
-            rmSync(lockFile, { force: true });
-        },
-    };
+  };
+  if (!tryClaim()) {
+    const holderRecord = readGatewayLockRecord(lockFile);
+    const holder = holderRecord?.claim;
+    const holderAlive = holder && isGatewayPidAlive(holder.pid);
+    const holderFresh = holder && Date.now() - (holder.atMs ?? 0) < staleMs;
+    if (holderAlive && holderFresh) return null;
+    opts.beforeStaleRename?.();
+    const staleFile = moveStaleGatewayLockAside(lockFile);
+    if (!staleFile) return null;
+    const movedStats = gatewayRuntimeFileStats(staleFile, "Moved gateway runtime lock file");
+    if (holderRecord && movedStats && !sameRuntimeFile(holderRecord.stats, movedStats)) {
+      restoreMovedFreshLock(staleFile, lockFile);
+      return null;
+    }
+    try {
+      if (!tryClaim()) return null;
+    } finally {
+      rmSync(staleFile, { force: true });
+    }
+  }
+  return {
+    release: () => {
+      try {
+        if (!gatewayLockMatches(lockFile, claimId)) return;
+      } catch {
+        // Fall through and remove: an unreadable lock helps nobody.
+      }
+      rmSync(lockFile, { force: true });
+    },
+  };
 }
 
 /**
@@ -594,12 +550,12 @@ function claimGatewayRuntimeLock(workspace, env, lockFile, staleMs, opts = {}) {
  * @returns {GatewayRuntimeLock | null}
  */
 export function claimGatewayAutostartLock(workspace, env = process.env, opts = {}) {
-    const { lockFile } = gatewayRuntimePaths(workspace, env);
-    // The steal window must never be shorter than the wait window, or a second
-    // client would steal the lock and spawn a SECOND daemon while the first is
-    // still booting a large pack.
-    const staleMs = Math.max(AUTOSTART_LOCK_STALE_MS, gatewayAutostartWaitMs(opts.workflowCount));
-    return claimGatewayRuntimeLock(workspace, env, lockFile, staleMs, opts);
+  const { lockFile } = gatewayRuntimePaths(workspace, env);
+  // The steal window must never be shorter than the wait window, or a second
+  // client would steal the lock and spawn a SECOND daemon while the first is
+  // still booting a large pack.
+  const staleMs = Math.max(AUTOSTART_LOCK_STALE_MS, gatewayAutostartWaitMs(opts.workflowCount));
+  return claimGatewayRuntimeLock(workspace, env, lockFile, staleMs, opts);
 }
 
 /**
@@ -612,8 +568,8 @@ export function claimGatewayAutostartLock(workspace, env = process.env, opts = {
  * @returns {GatewayRuntimeLock | null}
  */
 export function claimGatewayDaemonStartLock(workspace, env = process.env) {
-    const { daemonStartLockFile } = gatewayRuntimePaths(workspace, env);
-    return claimGatewayRuntimeLock(workspace, env, daemonStartLockFile, DAEMON_START_LOCK_STALE_MS);
+  const { daemonStartLockFile } = gatewayRuntimePaths(workspace, env);
+  return claimGatewayRuntimeLock(workspace, env, daemonStartLockFile, DAEMON_START_LOCK_STALE_MS);
 }
 
 /**
@@ -626,12 +582,11 @@ export function claimGatewayDaemonStartLock(workspace, env = process.env) {
  * @returns {string | null}
  */
 export function resolveGatewayBearer(workspace, url, env = process.env) {
-    if (workspace) {
-        const state = readGatewayRuntimeState(workspace, env);
-        if (state?.token && state.url.replace(/\/+$/, "") === url.replace(/\/+$/, ""))
-            return state.token;
-    }
-    return env.SMITHERS_TOKEN || env.SMITHERS_API_KEY || null;
+  if (workspace) {
+    const state = readGatewayRuntimeState(workspace, env);
+    if (state?.token && state.url.replace(/\/+$/, "") === url.replace(/\/+$/, "")) return state.token;
+  }
+  return env.SMITHERS_TOKEN || env.SMITHERS_API_KEY || null;
 }
 
 /**
@@ -645,8 +600,8 @@ export function resolveGatewayBearer(workspace, url, env = process.env) {
  * @returns {number}
  */
 export function gatewayAutostartWaitMs(workflowCount = 0) {
-    const count = Number.isFinite(workflowCount) ? Math.max(0, Math.floor(Number(workflowCount))) : 0;
-    return Math.min(AUTOSTART_WAIT_MAX_MS, AUTOSTART_WAIT_BASE_MS + count * AUTOSTART_WAIT_PER_WORKFLOW_MS);
+  const count = Number.isFinite(workflowCount) ? Math.max(0, Math.floor(Number(workflowCount))) : 0;
+  return Math.min(AUTOSTART_WAIT_MAX_MS, AUTOSTART_WAIT_BASE_MS + count * AUTOSTART_WAIT_PER_WORKFLOW_MS);
 }
 
 /**
@@ -661,72 +616,67 @@ export function gatewayAutostartWaitMs(workflowCount = 0) {
  * @returns {{ pid: number | null; bootAgeMs: number | null; url: string | null; workflowsLoaded: number | null; workflowsTotal: number | null; logFile: string }}
  */
 export function readGatewayStartProgress(workspace, env = process.env) {
-    const { daemonStartLockFile, logFile } = gatewayRuntimePaths(workspace, env);
-    /** @type {number | null} */
-    let pid = null;
-    /** @type {number | null} */
-    let startedAtMs = null;
-    try {
-        const holder = readGatewayLockRecord(daemonStartLockFile)?.claim;
-        if (holder) {
-            pid = Number.isInteger(holder.pid) ? Number(holder.pid) : null;
-            startedAtMs = Number.isFinite(holder.atMs) ? Number(holder.atMs) : null;
-        }
+  const { daemonStartLockFile, logFile } = gatewayRuntimePaths(workspace, env);
+  /** @type {number | null} */
+  let pid = null;
+  /** @type {number | null} */
+  let startedAtMs = null;
+  try {
+    const holder = readGatewayLockRecord(daemonStartLockFile)?.claim;
+    if (holder) {
+      pid = Number.isInteger(holder.pid) ? Number(holder.pid) : null;
+      startedAtMs = Number.isFinite(holder.atMs) ? Number(holder.atMs) : null;
     }
-    catch {
-        // An unreadable or untrusted lock still leaves the log to report from.
+  } catch {
+    // An unreadable or untrusted lock still leaves the log to report from.
+  }
+  /** @type {string | null} */
+  let url = null;
+  try {
+    // A state file that exists but did not verify still tells us where the
+    // boot bound — much more useful than "nothing became discoverable".
+    const state = readGatewayRuntimeState(workspace, env);
+    if (state) {
+      url = state.url;
+      pid ??= state.pid;
+      startedAtMs ??= Number.isFinite(state.startedAtMs) ? state.startedAtMs : null;
     }
-    /** @type {string | null} */
-    let url = null;
-    try {
-        // A state file that exists but did not verify still tells us where the
-        // boot bound — much more useful than "nothing became discoverable".
-        const state = readGatewayRuntimeState(workspace, env);
-        if (state) {
-            url = state.url;
-            pid ??= state.pid;
-            startedAtMs ??= Number.isFinite(state.startedAtMs) ? state.startedAtMs : null;
-        }
+  } catch {
+    // Same: a missing/untrusted state file is not fatal to a diagnostic.
+  }
+  /** @type {number | null} */
+  let workflowsLoaded = null;
+  /** @type {number | null} */
+  let workflowsTotal = null;
+  try {
+    const log = readFileSync(logFile, "utf8");
+    const listening = [...log.matchAll(/Gateway listening on (\S+)/g)].pop();
+    if (!url && listening) url = listening[1];
+    const loading = [...log.matchAll(/Workflow loading: (\d+)\/(\d+)/g)].pop();
+    if (loading) {
+      workflowsLoaded = Number(loading[1]);
+      workflowsTotal = Number(loading[2]);
     }
-    catch {
-        // Same: a missing/untrusted state file is not fatal to a diagnostic.
-    }
-    /** @type {number | null} */
-    let workflowsLoaded = null;
-    /** @type {number | null} */
-    let workflowsTotal = null;
-    try {
-        const log = readFileSync(logFile, "utf8");
-        const listening = [...log.matchAll(/Gateway listening on (\S+)/g)].pop();
-        if (!url && listening)
-            url = listening[1];
-        const loading = [...log.matchAll(/Workflow loading: (\d+)\/(\d+)/g)].pop();
-        if (loading) {
-            workflowsLoaded = Number(loading[1]);
-            workflowsTotal = Number(loading[2]);
-        }
-    }
-    catch {
-        // The autostart log only exists for autostarted daemons.
-    }
-    return {
-        pid,
-        bootAgeMs: startedAtMs === null ? null : Math.max(0, Date.now() - startedAtMs),
-        url,
-        workflowsLoaded,
-        workflowsTotal,
-        logFile,
-    };
+  } catch {
+    // The autostart log only exists for autostarted daemons.
+  }
+  return {
+    pid,
+    bootAgeMs: startedAtMs === null ? null : Math.max(0, Date.now() - startedAtMs),
+    url,
+    workflowsLoaded,
+    workflowsTotal,
+    logFile,
+  };
 }
 
 /**
  * @param {number} ms
  */
 function formatGatewayDuration(ms) {
-    const seconds = Math.max(0, Math.round(ms / 1000));
-    if (seconds < 60)
-        return `${seconds}s`;
-    return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
 /**
@@ -740,31 +690,38 @@ function formatGatewayDuration(ms) {
  * @returns {{ message: string; details: Record<string, unknown> }}
  */
 export function describeGatewayStartInProgress(workspace, opts = {}) {
-    const progress = readGatewayStartProgress(workspace, opts.env);
-    const holder = [
-        progress.pid ? `pid ${progress.pid}` : null,
-        progress.bootAgeMs === null ? null : `booting for ${formatGatewayDuration(progress.bootAgeMs)}`,
-    ].filter(Boolean).join(", ");
-    const loadProgress = progress.workflowsTotal !== null
-        ? ` It has loaded ${progress.workflowsLoaded}/${progress.workflowsTotal} workflows so far.`
-        : "";
-    const bound = progress.url ? ` It is already listening on ${progress.url}, but /health has not verified it yet.` : "";
-    const waited = opts.waitedMs === undefined ? "" : ` This command watched for ${formatGatewayDuration(opts.waitedMs)} and gave the boot precedence.`;
-    return {
-        message: `Another gateway start for ${workspace} is still in progress${holder ? ` (${holder})` : ""}.${bound}`
-            + ` A gateway binds its port and writes its runtime state file before workflow modules finish loading, so a large pack keeps booting after that point.${loadProgress}${waited}`
-            + ` Wait for it to finish (\`smithers gateway status\` reports it once /health verifies, and its log is ${progress.logFile}), or point client commands at it with \`--gateway <url>\` instead of starting a second one.`,
-        details: {
-            workspace,
-            startPid: progress.pid,
-            bootAgeMs: progress.bootAgeMs,
-            url: progress.url,
-            workflowsLoaded: progress.workflowsLoaded,
-            workflowsTotal: progress.workflowsTotal,
-            logFile: progress.logFile,
-            ...(opts.waitedMs === undefined ? {} : { waitedMs: opts.waitedMs }),
-        },
-    };
+  const progress = readGatewayStartProgress(workspace, opts.env);
+  const holder = [
+    progress.pid ? `pid ${progress.pid}` : null,
+    progress.bootAgeMs === null ? null : `booting for ${formatGatewayDuration(progress.bootAgeMs)}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const loadProgress =
+    progress.workflowsTotal !== null
+      ? ` It has loaded ${progress.workflowsLoaded}/${progress.workflowsTotal} workflows so far.`
+      : "";
+  const bound = progress.url ? ` It is already listening on ${progress.url}, but /health has not verified it yet.` : "";
+  const waited =
+    opts.waitedMs === undefined
+      ? ""
+      : ` This command watched for ${formatGatewayDuration(opts.waitedMs)} and gave the boot precedence.`;
+  return {
+    message:
+      `Another gateway start for ${workspace} is still in progress${holder ? ` (${holder})` : ""}.${bound}` +
+      ` A gateway binds its port and writes its runtime state file before workflow modules finish loading, so a large pack keeps booting after that point.${loadProgress}${waited}` +
+      ` Wait for it to finish (\`smithers gateway status\` reports it once /health verifies, and its log is ${progress.logFile}), or point client commands at it with \`--gateway <url>\` instead of starting a second one.`,
+    details: {
+      workspace,
+      startPid: progress.pid,
+      bootAgeMs: progress.bootAgeMs,
+      url: progress.url,
+      workflowsLoaded: progress.workflowsLoaded,
+      workflowsTotal: progress.workflowsTotal,
+      logFile: progress.logFile,
+      ...(opts.waitedMs === undefined ? {} : { waitedMs: opts.waitedMs }),
+    },
+  };
 }
 
 /**
@@ -775,14 +732,13 @@ export function describeGatewayStartInProgress(workspace, opts = {}) {
  * @param {{ timeoutMs?: number; intervalMs?: number; workflowCount?: number; env?: NodeJS.ProcessEnv }} [opts]
  */
 export async function waitForWorkspaceGateway(workspace, opts = {}) {
-    const timeoutMs = opts.timeoutMs ?? gatewayAutostartWaitMs(opts.workflowCount);
-    const intervalMs = opts.intervalMs ?? 500;
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-        const discovered = await discoverWorkspaceGateway(workspace, opts.env);
-        if (discovered)
-            return discovered;
-        await new Promise((r) => setTimeout(r, intervalMs));
-    }
-    return null;
+  const timeoutMs = opts.timeoutMs ?? gatewayAutostartWaitMs(opts.workflowCount);
+  const intervalMs = opts.intervalMs ?? 500;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const discovered = await discoverWorkspaceGateway(workspace, opts.env);
+    if (discovered) return discovered;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return null;
 }

@@ -20,9 +20,7 @@ test.describe.serial("approval matrix", () => {
     await expect(detail).toContainText("Run ID");
     await expect(detail).toContainText("Node ID");
     await expect(detail).toContainText("PENDING");
-    await expect(page.getByTestId("approvals-payload")).toContainText(
-      "Approving this gate lets the gated task run.",
-    );
+    await expect(page.getByTestId("approvals-payload")).toContainText("Approving this gate lets the gated task run.");
     await page.getByTestId("approvals-note").fill("Approved by rendered coverage");
     await page.getByTestId("approvals-approve").click();
     await expect(rows).toHaveCount(before - 1, { timeout: 15_000 });

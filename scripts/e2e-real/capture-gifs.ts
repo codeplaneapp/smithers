@@ -1,12 +1,5 @@
 import { spawnSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 
 type JsonReport = {
@@ -90,9 +83,7 @@ export function gifSlugForCapture(capture: Pick<PassedCapture, "spec" | "title">
   return slugify(`${specBase}--${capture.title}`);
 }
 
-export function assertUniqueGifSlugs(
-  captures: readonly Pick<PassedCapture, "spec" | "title">[],
-) {
+export function assertUniqueGifSlugs(captures: readonly Pick<PassedCapture, "spec" | "title">[]) {
   const firstCaptureBySlug = new Map<string, Pick<PassedCapture, "spec" | "title">>();
   const collisions = new Map<string, string[]>();
 
@@ -104,9 +95,7 @@ export function assertUniqueGifSlugs(
       continue;
     }
 
-    const entries = collisions.get(slug) ?? [
-      `${firstCapture.spec} :: ${firstCapture.title}`,
-    ];
+    const entries = collisions.get(slug) ?? [`${firstCapture.spec} :: ${firstCapture.title}`];
     entries.push(`${capture.spec} :: ${capture.title}`);
     collisions.set(slug, entries);
   }
@@ -114,14 +103,9 @@ export function assertUniqueGifSlugs(
   if (collisions.size === 0) return;
 
   const details = [...collisions.entries()]
-    .map(
-      ([slug, entries]) =>
-        `  ${slug || "<empty>"}:\n${entries.map((entry) => `    ${entry}`).join("\n")}`,
-    )
+    .map(([slug, entries]) => `  ${slug || "<empty>"}:\n${entries.map((entry) => `    ${entry}`).join("\n")}`)
     .join("\n");
-  throw new Error(
-    `GIF slug collision(s) detected; refusing to overwrite output files:\n${details}`,
-  );
+  throw new Error(`GIF slug collision(s) detected; refusing to overwrite output files:\n${details}`);
 }
 
 function collectPassedCaptures(report: JsonReport) {
@@ -175,9 +159,7 @@ function collectPassedCaptures(report: JsonReport) {
   }
 
   if (missingVideos.length > 0) {
-    throw new Error(
-      `Passed non-@nogif tests without video attachments:\n${missingVideos.join("\n")}`,
-    );
+    throw new Error(`Passed non-@nogif tests without video attachments:\n${missingVideos.join("\n")}`);
   }
 
   return captures;
@@ -193,19 +175,9 @@ function convertToGif(capture: PassedCapture): ManifestEntry {
   const palettePath = join(gifsDir, `${slug}.palette.png`);
   const vf = "fps=10,scale=960:-1:flags=lanczos";
 
-  console.log(
-    `[capture-gifs] converting ${capture.spec} :: ${capture.title} -> ${relative(repoRoot, gifPath)}`,
-  );
+  console.log(`[capture-gifs] converting ${capture.spec} :: ${capture.title} -> ${relative(repoRoot, gifPath)}`);
 
-  const palette = run("ffmpeg", [
-    "-y",
-    ...ffmpegArgs,
-    "-i",
-    capture.video,
-    "-vf",
-    `${vf},palettegen`,
-    palettePath,
-  ]);
+  const palette = run("ffmpeg", ["-y", ...ffmpegArgs, "-i", capture.video, "-vf", `${vf},palettegen`, palettePath]);
   if (palette.status !== 0) {
     throw new Error(`ffmpeg palette generation failed for ${capture.video}`);
   }

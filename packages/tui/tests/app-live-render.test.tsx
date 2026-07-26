@@ -82,7 +82,9 @@ async function delay(ms: number) {
   });
 }
 async function press(r: Awaited<ReturnType<typeof renderApp>>, key: string, mods?: { shift?: boolean }) {
-  act(() => { r.mockInput.pressKey(key as never, mods); });
+  act(() => {
+    r.mockInput.pressKey(key as never, mods);
+  });
   await r.flush();
   await r.waitForVisualIdle();
 }
@@ -121,7 +123,9 @@ describeHeadlessRender("App – live gateway integration", () => {
 
     // Enter on a focused graph node routes back to Tree with that node selected
     // (App.handleSelectNodeKey).
-    act(() => { r.mockInput.pressEnter(); });
+    act(() => {
+      r.mockInput.pressEnter();
+    });
     await r.flush();
     await r.waitForVisualIdle();
     expect(r.captureCharFrame()).toContain("fetch-data");
@@ -142,7 +146,9 @@ describeHeadlessRender("App – live gateway integration", () => {
     expect(f).toContain("HIJACK");
 
     // Escape cancels the hijack picker → App.onBack returns to Tree.
-    act(() => { r.mockInput.pressEscape(); });
+    act(() => {
+      r.mockInput.pressEscape();
+    });
     await delay(120);
     await r.flush();
     await waitForFrame(r, "fetch-data");
@@ -176,18 +182,28 @@ describeHeadlessRender("App – live gateway integration", () => {
     await press(r, "1");
 
     // Enter focuses the inspector pane; left/right cycle its tabs; Tab toggles.
-    act(() => { r.mockInput.pressEnter(); });
+    act(() => {
+      r.mockInput.pressEnter();
+    });
     await r.flush();
     await r.waitForVisualIdle();
-    act(() => { r.mockInput.pressArrow("right"); });
+    act(() => {
+      r.mockInput.pressArrow("right");
+    });
     await r.flush();
-    act(() => { r.mockInput.pressArrow("left"); });
+    act(() => {
+      r.mockInput.pressArrow("left");
+    });
     await r.flush();
-    act(() => { r.mockInput.pressTab(); });
+    act(() => {
+      r.mockInput.pressTab();
+    });
     await r.flush();
     await r.waitForVisualIdle();
     // Escape returns focus to the tree pane.
-    act(() => { r.mockInput.pressEscape(); });
+    act(() => {
+      r.mockInput.pressEscape();
+    });
     await delay(120);
     await r.flush();
     r.renderer.destroy();
@@ -312,7 +328,10 @@ describeHeadlessRender("App – live gateway integration", () => {
   });
 
   it("surfaces a submit error when the gateway rejects the approval", async () => {
-    const r = await renderApp({ ...defaultSeed(RUN_ID, { blockedNodeId: "approve", runState: "waiting-approval" }), failApproval: true });
+    const r = await renderApp({
+      ...defaultSeed(RUN_ID, { blockedNodeId: "approve", runState: "waiting-approval" }),
+      failApproval: true,
+    });
     await waitForFrame(r, "fetch-data");
     await press(r, "j");
     await press(r, "j");
@@ -347,7 +366,9 @@ describeHeadlessRender("App – live gateway integration", () => {
     await press(r, "?");
     expect(r.captureCharFrame()).toContain("Keybindings");
     // Escape closes the help overlay (close-help action).
-    act(() => { r.mockInput.pressEscape(); });
+    act(() => {
+      r.mockInput.pressEscape();
+    });
     await delay(120);
     await r.flush();
     await r.waitForVisualIdle();

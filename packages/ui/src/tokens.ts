@@ -124,8 +124,7 @@ export const tokens = {
    */
   fontSans:
     "var(--font-sans, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif)",
-  fontMono:
-    "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)",
+  fontMono: "var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)",
 } as const;
 
 export type SmithersUiTokens = typeof tokens;

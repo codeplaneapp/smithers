@@ -19,12 +19,12 @@ const LABEL_PATTERN = /^[A-Za-z0-9._-]+$/;
  * @returns {string}
  */
 export function defaultConfigDir(label, env = process.env) {
-    if (typeof label !== "string" || !LABEL_PATTERN.test(label) || label === "." || label === "..") {
-        throw new SmithersError(
-            "ACCOUNT_INVALID",
-            `Invalid account label ${JSON.stringify(label)}: use only letters, digits, '.', '_' or '-' (no path separators or '..').`,
-        );
-    }
-    const root = accountsRoot(env);
-    return join(root, "accounts", label);
+  if (typeof label !== "string" || !LABEL_PATTERN.test(label) || label === "." || label === "..") {
+    throw new SmithersError(
+      "ACCOUNT_INVALID",
+      `Invalid account label ${JSON.stringify(label)}: use only letters, digits, '.', '_' or '-' (no path separators or '..').`,
+    );
+  }
+  const root = accountsRoot(env);
+  return join(root, "accounts", label);
 }

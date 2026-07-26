@@ -165,11 +165,19 @@ export default smithers((ctx) => {
                 // Recovery hatches when the codex-first failover ladder is
                 // saturated (quota): pin review to a fresh single-agent chain so
                 // a retry can't land on a dead rung.
-                reviewAgents={process.env.PACKS_REVIEW_FORCE_SOL === "1"
-                  ? [new CodexAgent({ model: "gpt-5.6-sol", config: { model_reasoning_effort: "xhigh" }, skipGitRepoCheck: true })]
-                  : process.env.PACKS_REVIEW_FORCE_FABLE === "1"
-                    ? [new ClaudeCodeAgent({ model: "claude-fable-5" })]
-                    : [panelists[0]!]}
+                reviewAgents={
+                  process.env.PACKS_REVIEW_FORCE_SOL === "1"
+                    ? [
+                        new CodexAgent({
+                          model: "gpt-5.6-sol",
+                          config: { model_reasoning_effort: "xhigh" },
+                          skipGitRepoCheck: true,
+                        }),
+                      ]
+                    : process.env.PACKS_REVIEW_FORCE_FABLE === "1"
+                      ? [new ClaudeCodeAgent({ model: "claude-fable-5" })]
+                      : [panelists[0]!]
+                }
                 reviewWhen={phase.state.validationPassed && !phase.state.reviewApproved}
                 feedback={phase.state.feedback}
                 done={phase.state.done}
@@ -182,7 +190,9 @@ export default smithers((ctx) => {
               ) : null}
               {phase.state.exhausted ? (
                 <Task id={`${phase.key}:exhausted`} output={outputs.failure} retries={0}>
-                  {() => { throw new Error(`Implement Packs exhausted ${phase.title} after ${maxIterations} attempts`); }}
+                  {() => {
+                    throw new Error(`Implement Packs exhausted ${phase.title} after ${maxIterations} attempts`);
+                  }}
                 </Task>
               ) : null}
             </Sequence>
@@ -190,7 +200,13 @@ export default smithers((ctx) => {
         })}
 
         {allDone ? (
-          <Task id="packs:polish" output={outputs.polish} agent={polishReviewer} timeoutMs={1_800_000} heartbeatTimeoutMs={600_000}>
+          <Task
+            id="packs:polish"
+            output={outputs.polish}
+            agent={polishReviewer}
+            timeoutMs={1_800_000}
+            heartbeatTimeoutMs={600_000}
+          >
             {`Every phase of the packs feature ("Share workflows like skills") is implemented, validated, and review-approved. You are the FINAL whole-feature polish reviewer.
 
 Spec: ${planDoc}. Review everything that changed for this feature end to end (recent commits on main). Look for: cross-phase inconsistencies (naming, flag conventions, error-message voice), dead code, doc drift against the shipped CLI surface, missing edge-case tests, and small correctness hazards. Apply small safe polish edits directly with pathspec commits; re-run the affected package tests plus 'node scripts/check-docs.mjs' and 'node scripts/check-llms.mjs' after any edit. Do NOT restructure or expand scope, and NEVER push.

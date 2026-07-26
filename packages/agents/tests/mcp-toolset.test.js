@@ -55,32 +55,28 @@ describe("createMcpToolset (real MCP server over stdio)", () => {
     }
   });
 
-  test(
-    "drains a chatty server's stderr so a >pipe-buffer flood never deadlocks",
-    async () => {
-      let received = 0;
-      const toolset = await createMcpToolset(
-        { command: "bun", args: [FLOOD_SERVER] },
-        {
-          onStderr: (chunk) => {
-            received += chunk.length;
-          },
+  test("drains a chatty server's stderr so a >pipe-buffer flood never deadlocks", async () => {
+    let received = 0;
+    const toolset = await createMcpToolset(
+      { command: "bun", args: [FLOOD_SERVER] },
+      {
+        onStderr: (chunk) => {
+          received += chunk.length;
         },
-      );
-      try {
-        const flood = 4 * 1024 * 1024;
-        const result = await toolset.tools.flood.execute({ bytes: flood }, callOptions);
-        expect(result).toContain("flooded");
-        // The reply can land before the last stderr chunks are read, so wait for
-        // the sink to catch up. Without draining, received stays 0 and this times out.
-        await waitUntil(() => received >= flood, 10000);
-        expect(received).toBe(flood);
-      } finally {
-        await toolset.close();
-      }
-    },
-    20000,
-  );
+      },
+    );
+    try {
+      const flood = 4 * 1024 * 1024;
+      const result = await toolset.tools.flood.execute({ bytes: flood }, callOptions);
+      expect(result).toContain("flooded");
+      // The reply can land before the last stderr chunks are read, so wait for
+      // the sink to catch up. Without draining, received stays 0 and this times out.
+      await waitUntil(() => received >= flood, 10000);
+      expect(received).toBe(flood);
+    } finally {
+      await toolset.close();
+    }
+  }, 20000);
 });
 
 /**

@@ -9,5 +9,5 @@ import { ERROR_REFERENCE_URL } from "./ERROR_REFERENCE_URL.js";
 // reference page; the parameter keeps the signature stable for future
 // per-code anchors.
 export function getSmithersErrorDocsUrl(_code) {
-    return ERROR_REFERENCE_URL;
+  return ERROR_REFERENCE_URL;
 }

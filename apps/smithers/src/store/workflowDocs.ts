@@ -232,10 +232,7 @@ export function validateLaunchField(field: LaunchField, raw: string): string | n
  * Validate every launch field against the current raw input buffer, returning a
  * `{ key -> error }` map of only the failing fields. Empty map = ready to run.
  */
-export function validateLaunch(
-  fields: LaunchField[],
-  inputs: Record<string, string>,
-): Record<string, string> {
+export function validateLaunch(fields: LaunchField[], inputs: Record<string, string>): Record<string, string> {
   const errors: Record<string, string> = {};
   for (const field of fields) {
     const error = validateLaunchField(field, inputs[field.key] ?? "");
@@ -335,11 +332,7 @@ export function inputPipeline(doc: WorkflowDoc): string[] {
 }
 
 /** Count of files dirty against their originals (source + each import). */
-export function changedFileCount(
-  doc: WorkflowDoc,
-  sourceDraft: string,
-  importDrafts: Record<string, string>,
-): number {
+export function changedFileCount(doc: WorkflowDoc, sourceDraft: string, importDrafts: Record<string, string>): number {
   let count = doc.source !== sourceDraft ? 1 : 0;
   for (const file of doc.imports) {
     const draft = importDrafts[file.path];
@@ -504,9 +497,7 @@ export const WORKFLOW_DOCS: WorkflowDoc[] = [
         source: IMPLEMENT_PROMPT_SOURCE,
       },
     ],
-    launchFields: [
-      { key: "task", type: "string", required: true, defaultValue: "" },
-    ],
+    launchFields: [{ key: "task", type: "string", required: true, defaultValue: "" }],
     dag: {
       mode: "explicit",
       entry: "implement",

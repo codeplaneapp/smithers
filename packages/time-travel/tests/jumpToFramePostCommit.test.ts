@@ -108,12 +108,8 @@ describe("jumpToFrame post-commit failure", () => {
       // The post-commit failure is logged as a warning; because no resumeRunLoop
       // was provided the best-effort recovery is a clean no-op (no second warn).
       const warnings = logs.filter((entry) => entry.level === "warn");
-      expect(
-        warnings.some((entry) => entry.message === "jumpToFrame post-commit step failed"),
-      ).toBe(true);
-      expect(
-        warnings.some((entry) => entry.message === "jumpToFrame resume after commit failed"),
-      ).toBe(false);
+      expect(warnings.some((entry) => entry.message === "jumpToFrame post-commit step failed")).toBe(true);
+      expect(warnings.some((entry) => entry.message === "jumpToFrame resume after commit failed")).toBe(false);
     } finally {
       sqlite.close();
     }

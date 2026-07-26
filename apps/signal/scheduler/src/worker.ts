@@ -72,7 +72,9 @@ async function alert(env: Env, message: string): Promise<void> {
       body: JSON.stringify({ text: `[The Smithers Signal] ${message}` }),
     });
   } catch (error) {
-    console.error(`[signal-scheduler] alert webhook delivery failed: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(
+      `[signal-scheduler] alert webhook delivery failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
@@ -89,7 +91,11 @@ async function handlePrimaryCron(env: Env, ctx: ExecutionContext, at: Date): Pro
   console.log(`[signal-scheduler] 7am ET primary trigger firing for ${dateEt}`);
   ctx.waitUntil(
     triggerRunner(env, dateEt).then(async (result) => {
-      if (!result.ok) await alert(env, `Primary 7am ET run for ${dateEt} failed: HTTP ${result.status} ${JSON.stringify(result.body)}`);
+      if (!result.ok)
+        await alert(
+          env,
+          `Primary 7am ET run for ${dateEt} failed: HTTP ${result.status} ${JSON.stringify(result.body)}`,
+        );
     }),
   );
 }
@@ -110,14 +116,23 @@ async function handleWatchdogCron(env: Env, ctx: ExecutionContext, at: Date): Pr
       const watchdogKey = `watchdog:${dateEt}`;
       const alreadyRetried = (await env.SIGNAL_REPORTS.get(watchdogKey)) !== null;
       if (alreadyRetried) {
-        await alert(env, `8:15am ET watchdog: report:${dateEt} is STILL missing after the one automatic retry. Needs a human.`);
+        await alert(
+          env,
+          `8:15am ET watchdog: report:${dateEt} is STILL missing after the one automatic retry. Needs a human.`,
+        );
         return;
       }
 
-      await env.SIGNAL_REPORTS.put(watchdogKey, JSON.stringify({ retriedAt: new Date().toISOString() }), { expirationTtl: WATCHDOG_MARKER_TTL_SECONDS });
+      await env.SIGNAL_REPORTS.put(watchdogKey, JSON.stringify({ retriedAt: new Date().toISOString() }), {
+        expirationTtl: WATCHDOG_MARKER_TTL_SECONDS,
+      });
       await alert(env, `8:15am ET watchdog: report:${dateEt} is missing. Re-triggering the runner once.`);
       const result = await triggerRunner(env, dateEt);
-      if (!result.ok) await alert(env, `Watchdog re-trigger for ${dateEt} also failed: HTTP ${result.status} ${JSON.stringify(result.body)}`);
+      if (!result.ok)
+        await alert(
+          env,
+          `Watchdog re-trigger for ${dateEt} also failed: HTTP ${result.status} ${JSON.stringify(result.body)}`,
+        );
     })(),
   );
 }

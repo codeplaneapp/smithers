@@ -1,8 +1,4 @@
-import type {
-  AgentSessionTranscriptEvent,
-  AgentTraceSummary,
-  CanonicalAgentTraceEvent,
-} from "./agentTrace";
+import type { AgentSessionTranscriptEvent, AgentTraceSummary, CanonicalAgentTraceEvent } from "./agentTrace";
 
 type RunStatus =
   | "running"
@@ -629,7 +625,7 @@ export type SmithersEvent =
       restoreVcs: boolean;
       timestampMs: number;
     }
-| {
+  | {
       type: "MemoryFactSet";
       runId: string;
       namespace: string;

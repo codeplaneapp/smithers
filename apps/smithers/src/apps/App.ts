@@ -21,9 +21,7 @@ export type AppId =
 
 /** Where opening an app navigates: most apps open a canvas surface; a few are
  *  top-level views (the workflow store). */
-export type AppTarget =
-  | { kind: "surface"; surface: Surface }
-  | { kind: "view"; view: View };
+export type AppTarget = { kind: "surface"; surface: Surface } | { kind: "view"; view: View };
 
 export type App = {
   id: AppId;

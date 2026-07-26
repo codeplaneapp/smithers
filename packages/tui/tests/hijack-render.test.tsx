@@ -60,10 +60,14 @@ describeHeadlessRender("HijackMode phase components", () => {
     const f = captureCharFrame();
     expect(f).toContain("HIJACK");
     expect(f).toContain("fetch-data");
-    act(() => { mockInput.pressEscape(); });
+    act(() => {
+      mockInput.pressEscape();
+    });
     // A lone ESC is ambiguous with an escape SEQUENCE, so the parser holds it
     // until its inter-byte timeout elapses; wait it out with a real delay.
-    await act(async () => { await new Promise((res) => setTimeout(res, 120)); });
+    await act(async () => {
+      await new Promise((res) => setTimeout(res, 120));
+    });
     await flush();
     expect(cancelled).toBe(1);
     renderer.destroy();
@@ -83,15 +87,21 @@ describeHeadlessRender("HijackMode phase components", () => {
     const r = await renderForTest(<Harness />, { width: 120, height: 20 });
     await r.waitForVisualIdle();
     // Operator arrows down onto "beta" and pauses before confirming.
-    act(() => { r.mockInput.pressArrow("down"); });
+    act(() => {
+      r.mockInput.pressArrow("down");
+    });
     await r.flush();
     // Meanwhile "alpha" completes and leaves hijackCandidates — the picker must
     // NOT slide the rows up under the highlight.
-    await act(async () => { setNodes([beta, gamma]); });
+    await act(async () => {
+      setNodes([beta, gamma]);
+    });
     await r.flush();
     await r.waitForVisualIdle();
 
-    act(() => { r.mockInput.pressEnter(); });
+    act(() => {
+      r.mockInput.pressEnter();
+    });
     await r.flush();
     expect(picked).toEqual(["beta"]);
     // The finished node stays visible as a pinned row, marked as no longer live.
@@ -114,7 +124,9 @@ describeHeadlessRender("HijackMode phase components", () => {
     await waitForVisualIdle();
     // Wait for the real child to exit and fire close→onDone.
     for (let i = 0; i < 150 && codes.length === 0; i++) {
-      await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
     }
     expect(codes).toEqual([0]);
     renderer.destroy();
@@ -130,7 +142,9 @@ describeHeadlessRender("HijackMode phase components", () => {
     );
     await waitForVisualIdle();
     for (let i = 0; i < 20 && codes.length === 0; i++) {
-      await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 10));
+      });
     }
     expect(codes).toEqual([null]);
     renderer.destroy();
@@ -147,7 +161,9 @@ describeHeadlessRender("HijackMode phase components", () => {
     expect(f).toContain("from hijack: fetch-data");
     expect(f).toContain("Smithers automation resumed");
     expect(f).toContain("[d] dismiss");
-    act(() => { mockInput.pressKey("d"); });
+    act(() => {
+      mockInput.pressKey("d");
+    });
     await flush();
     expect(dismissed).toBe(1);
     renderer.destroy();
@@ -196,7 +212,9 @@ describeHeadlessRender("HijackMode – full state machine over a live gateway", 
       let frame = "";
       for (let i = 0; i < 40; i++) {
         await r.waitForVisualIdle();
-        await act(async () => { await new Promise((res) => setTimeout(res, 20)); });
+        await act(async () => {
+          await new Promise((res) => setTimeout(res, 20));
+        });
         frame = r.captureCharFrame();
         if (frame.includes("no running nodes")) break;
       }
@@ -223,7 +241,9 @@ describeHeadlessRender("HijackMode – full state machine over a live gateway", 
       let frame = "";
       for (let i = 0; i < 40; i++) {
         await r.waitForVisualIdle();
-        await act(async () => { await new Promise((res) => setTimeout(res, 20)); });
+        await act(async () => {
+          await new Promise((res) => setTimeout(res, 20));
+        });
         frame = r.captureCharFrame();
         if (frame.includes("select a running node")) break;
       }
@@ -236,18 +256,24 @@ describeHeadlessRender("HijackMode – full state machine over a live gateway", 
       // rather than assuming, and assert the hand-off targets exactly that node.
       const highlighted = frame.match(/▶ (\S+)/)?.[1];
       expect(highlighted).toBeTruthy();
-      act(() => { r.mockInput.pressEnter(); });
+      act(() => {
+        r.mockInput.pressEnter();
+      });
       await r.flush();
       // Wait for the child to exit → phase "returned".
       for (let i = 0; i < 100; i++) {
         await r.waitForVisualIdle();
-        await act(async () => { await new Promise((res) => setTimeout(res, 20)); });
+        await act(async () => {
+          await new Promise((res) => setTimeout(res, 20));
+        });
         if (r.captureCharFrame().includes(`from hijack: ${highlighted}`)) break;
       }
       expect(r.captureCharFrame()).toContain(`from hijack: ${highlighted}`);
 
       // [d] dismisses back to the selecting phase.
-      act(() => { r.mockInput.pressKey("d"); });
+      act(() => {
+        r.mockInput.pressKey("d");
+      });
       await r.flush();
       await r.waitForVisualIdle();
       r.renderer.destroy();

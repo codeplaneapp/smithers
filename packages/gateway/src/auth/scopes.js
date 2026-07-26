@@ -81,9 +81,26 @@ function gatewayScopeImplies(granted, required) {
 function legacyAccessImplies(scope, required) {
   switch (scope) {
     case "read":
-      return required === "run:read" || required === "cron:read" || required === "account:read" || required === "memory:read" || required === "prompt:read" || required === "score:read" || required === "ticket:read" || required === "observability:read";
+      return (
+        required === "run:read" ||
+        required === "cron:read" ||
+        required === "account:read" ||
+        required === "memory:read" ||
+        required === "prompt:read" ||
+        required === "score:read" ||
+        required === "ticket:read" ||
+        required === "observability:read"
+      );
     case "execute":
-      return required === "run:read" || required === "run:write" || required === "signal:submit" || required === "cron:read" || required === "cron:write" || required === "ticket:read" || required === "ticket:write";
+      return (
+        required === "run:read" ||
+        required === "run:write" ||
+        required === "signal:submit" ||
+        required === "cron:read" ||
+        required === "cron:write" ||
+        required === "ticket:read" ||
+        required === "ticket:write"
+      );
     case "approve":
       return required === "approval:submit" || legacyAccessImplies("execute", required);
     case "admin":

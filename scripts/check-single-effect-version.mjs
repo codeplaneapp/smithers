@@ -47,10 +47,7 @@ function collectBunLockVersions() {
 }
 
 function collectInstalledVersions() {
-  readPackageVersion(
-    join(root, "node_modules", "effect", "package.json"),
-    "node_modules/effect",
-  );
+  readPackageVersion(join(root, "node_modules", "effect", "package.json"), "node_modules/effect");
 
   const pnpmStore = join(root, "node_modules", ".pnpm");
   if (existsSync(pnpmStore)) {
@@ -65,10 +62,7 @@ function collectInstalledVersions() {
 
   try {
     const cliRequire = createRequire(join(root, "apps", "cli", "src", "index.js"));
-    readPackageVersion(
-      cliRequire.resolve("effect/package.json"),
-      "apps/cli import resolution",
-    );
+    readPackageVersion(cliRequire.resolve("effect/package.json"), "apps/cli import resolution");
   } catch {
     // Missing installs are handled by the lockfile check.
   }

@@ -49,9 +49,7 @@ export function expandArtifactPatterns(rootDir, patterns) {
     const segments = pattern.split("/");
     const basename = segments.pop() ?? "";
     if (!basename.includes("*") || segments.some((segment) => segment.includes("*"))) {
-      throw new Error(
-        `unsupported artifact pattern "${pattern}" — a * is only supported in the final path segment`,
-      );
+      throw new Error(`unsupported artifact pattern "${pattern}" — a * is only supported in the final path segment`);
     }
     const dir = join(rootDir, ...segments);
     const matcher = new RegExp(`^${basename.split("*").map(escapeRegExp).join(".*")}$`);
@@ -117,10 +115,7 @@ export function bump({ rootDir = root, env = process.env } = {}) {
   // its test asserts the pin matches the root version, so sync it here.
   const providerPath = join(rootDir, ".smithers", "lib", "plue-provider.ts");
   const provider = readFileSync(providerPath, "utf8");
-  const syncedProvider = provider.replace(
-    /(export const DEFAULT_ORCHESTRATOR_VERSION = ")[^"]+(")/,
-    `$1${version}$2`,
-  );
+  const syncedProvider = provider.replace(/(export const DEFAULT_ORCHESTRATOR_VERSION = ")[^"]+(")/, `$1${version}$2`);
   if (!syncedProvider.includes(`DEFAULT_ORCHESTRATOR_VERSION = "${version}"`)) {
     throw new Error(
       `bump.mjs could not sync DEFAULT_ORCHESTRATOR_VERSION in ${providerPath} — the pin pattern no longer matches; update the regex in scripts/bump.mjs`,
@@ -137,10 +132,7 @@ export function bump({ rootDir = root, env = process.env } = {}) {
   // here too or a release bump would leave every default client stale.
   const clientPath = join(rootDir, "packages", "gateway-client", "src", "SmithersGatewayClient.ts");
   const clientSource = readFileSync(clientPath, "utf8");
-  const syncedClient = clientSource.replace(
-    /(const DEFAULT_CLIENT_VERSION = ")[^"]+(")/,
-    `$1${version}$2`,
-  );
+  const syncedClient = clientSource.replace(/(const DEFAULT_CLIENT_VERSION = ")[^"]+(")/, `$1${version}$2`);
   if (!syncedClient.includes(`DEFAULT_CLIENT_VERSION = "${version}"`)) {
     throw new Error(
       `bump.mjs could not sync DEFAULT_CLIENT_VERSION in ${clientPath} — the pin pattern no longer matches; update the regex in scripts/bump.mjs`,
@@ -188,12 +180,16 @@ export function bump({ rootDir = root, env = process.env } = {}) {
     env,
   });
 
-  stageReleasePaths(rootDir, [
-    ...changed,
-    join(rootDir, "pnpm-lock.yaml"),
-    join(rootDir, "bun.lock"),
-    ...expandArtifactPatterns(rootDir, llmsArtifactPatterns),
-  ], env);
+  stageReleasePaths(
+    rootDir,
+    [
+      ...changed,
+      join(rootDir, "pnpm-lock.yaml"),
+      join(rootDir, "bun.lock"),
+      ...expandArtifactPatterns(rootDir, llmsArtifactPatterns),
+    ],
+    env,
+  );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -57,7 +57,13 @@ export const DEFAULT_MS_BUCKETS: ReadonlyArray<number> = [
 
 /** Default histogram buckets in bytes — covers tiny RPC frames to large payloads. */
 export const DEFAULT_BYTE_BUCKETS: ReadonlyArray<number> = [
-  256, 1024, 4 * 1024, 16 * 1024, 64 * 1024, 256 * 1024, 1024 * 1024,
+  256,
+  1024,
+  4 * 1024,
+  16 * 1024,
+  64 * 1024,
+  256 * 1024,
+  1024 * 1024,
   4 * 1024 * 1024,
 ];
 
@@ -75,9 +81,7 @@ function seriesKey(labels: LabelSet): string {
  * `undefined` → no filtering. `[]` → enforce empty (drop everything). Otherwise
  * → enforce membership.
  */
-function asAllowSet(
-  allowed: ReadonlyArray<string> | undefined,
-): Set<string> | null {
+function asAllowSet(allowed: ReadonlyArray<string> | undefined): Set<string> | null {
   return allowed ? new Set(allowed) : null;
 }
 
@@ -313,9 +317,7 @@ export class MetricsRegistry {
     const existing = this.metrics.get(config.name);
     if (existing instanceof Counter) return existing;
     if (existing) {
-      throw new Error(
-        `Metric ${config.name} already registered as a different kind`,
-      );
+      throw new Error(`Metric ${config.name} already registered as a different kind`);
     }
     const counter = new Counter(config);
     this.metrics.set(config.name, counter);
@@ -326,9 +328,7 @@ export class MetricsRegistry {
     const existing = this.metrics.get(config.name);
     if (existing instanceof Gauge) return existing;
     if (existing) {
-      throw new Error(
-        `Metric ${config.name} already registered as a different kind`,
-      );
+      throw new Error(`Metric ${config.name} already registered as a different kind`);
     }
     const gauge = new Gauge(config);
     this.metrics.set(config.name, gauge);
@@ -339,9 +339,7 @@ export class MetricsRegistry {
     const existing = this.metrics.get(config.name);
     if (existing instanceof Histogram) return existing;
     if (existing) {
-      throw new Error(
-        `Metric ${config.name} already registered as a different kind`,
-      );
+      throw new Error(`Metric ${config.name} already registered as a different kind`);
     }
     const histogram = new Histogram(config);
     this.metrics.set(config.name, histogram);

@@ -84,7 +84,9 @@ const provider = (prefix) => createExaSearchProvider({ apiKey: API_KEY, baseUrl:
 describe("createExaSearchProvider redirect hardening", () => {
   test("follows a same-origin redirect and keeps the API key and POST body", async () => {
     const results = await provider("/same").search({ query: "hello", maxResults: 3 });
-    expect(results).toEqual([{ title: "E", url: "https://e.example", snippet: "body", publishedDate: undefined, score: 0.9 }]);
+    expect(results).toEqual([
+      { title: "E", url: "https://e.example", snippet: "body", publishedDate: undefined, score: 0.9 },
+    ]);
     expect(exaRequests.map((r) => r.pathname)).toEqual(["/same/search", "/same/search-v2"]);
     for (const request of exaRequests) {
       expect(request.apiKey).toBe(API_KEY);

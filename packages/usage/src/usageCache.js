@@ -15,7 +15,7 @@ import { accountsRoot } from "@smithers-orchestrator/accounts";
  * @returns {string}
  */
 export function usageCachePath(env = process.env) {
-    return join(accountsRoot(env), "usage-cache.json");
+  return join(accountsRoot(env), "usage-cache.json");
 }
 
 /**
@@ -26,18 +26,24 @@ export function usageCachePath(env = process.env) {
  * @returns {UsageCacheFile}
  */
 export function readUsageCache(env = process.env) {
-    const path = usageCachePath(env);
-    if (!existsSync(path)) return { version: 1, entries: {} };
-    try {
-        const parsed = JSON.parse(readFileSync(path, "utf8"));
-        if (parsed && typeof parsed === "object" && parsed.version === 1
-            && parsed.entries && typeof parsed.entries === "object" && !Array.isArray(parsed.entries)) {
-            return { version: 1, entries: parsed.entries };
-        }
-    } catch {
-        // fall through to empty cache
+  const path = usageCachePath(env);
+  if (!existsSync(path)) return { version: 1, entries: {} };
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      parsed.version === 1 &&
+      parsed.entries &&
+      typeof parsed.entries === "object" &&
+      !Array.isArray(parsed.entries)
+    ) {
+      return { version: 1, entries: parsed.entries };
     }
-    return { version: 1, entries: {} };
+  } catch {
+    // fall through to empty cache
+  }
+  return { version: 1, entries: {} };
 }
 
 /**
@@ -48,11 +54,11 @@ export function readUsageCache(env = process.env) {
  * @returns {string} the path written
  */
 export function writeUsageCache(contents, env = process.env) {
-    const path = usageCachePath(env);
-    mkdirSync(accountsRoot(env), { recursive: true });
-    const tmp = `${path}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(contents, null, 2), { mode: 0o600 });
-    // rename is atomic on the same filesystem
-    renameSync(tmp, path);
-    return path;
+  const path = usageCachePath(env);
+  mkdirSync(accountsRoot(env), { recursive: true });
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(contents, null, 2), { mode: 0o600 });
+  // rename is atomic on the same filesystem
+  renameSync(tmp, path);
+  return path;
 }

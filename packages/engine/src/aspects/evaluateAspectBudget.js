@@ -26,29 +26,25 @@
  * @returns {AspectBudgetBreach | null}
  */
 export function evaluateAspectBudget(aspects, usage) {
-    if (!aspects || !usage) {
-        return null;
-    }
-    const { tokenBudget, latencySlo } = aspects;
-    if (tokenBudget &&
-        typeof tokenBudget.max === "number" &&
-        usage.tokens >= tokenBudget.max) {
-        return {
-            kind: "tokens",
-            limit: tokenBudget.max,
-            current: usage.tokens,
-            onExceeded: tokenBudget.onExceeded ?? "fail",
-        };
-    }
-    if (latencySlo &&
-        typeof latencySlo.maxMs === "number" &&
-        usage.elapsedMs >= latencySlo.maxMs) {
-        return {
-            kind: "latency",
-            limit: latencySlo.maxMs,
-            current: usage.elapsedMs,
-            onExceeded: latencySlo.onExceeded ?? "fail",
-        };
-    }
+  if (!aspects || !usage) {
     return null;
+  }
+  const { tokenBudget, latencySlo } = aspects;
+  if (tokenBudget && typeof tokenBudget.max === "number" && usage.tokens >= tokenBudget.max) {
+    return {
+      kind: "tokens",
+      limit: tokenBudget.max,
+      current: usage.tokens,
+      onExceeded: tokenBudget.onExceeded ?? "fail",
+    };
+  }
+  if (latencySlo && typeof latencySlo.maxMs === "number" && usage.elapsedMs >= latencySlo.maxMs) {
+    return {
+      kind: "latency",
+      limit: latencySlo.maxMs,
+      current: usage.elapsedMs,
+      onExceeded: latencySlo.onExceeded ?? "fail",
+    };
+  }
+  return null;
 }

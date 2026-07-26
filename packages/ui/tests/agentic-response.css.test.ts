@@ -22,8 +22,7 @@ describe("agentic response CSS", () => {
   });
 
   test("resolves response and code colors through the dark theme token surface", () => {
-    const darkBlock =
-      workflowUiThemeCss.match(/:root\[data-theme='dark'\] \{ ([^}]*) \}/)?.[1] ?? "";
+    const darkBlock = workflowUiThemeCss.match(/:root\[data-theme='dark'\] \{ ([^}]*) \}/)?.[1] ?? "";
     expect(darkBlock).toContain("--text-muted:#a1a1aa");
     expect(darkBlock).toContain("--code-bg:#0c0c0e");
     expect(darkBlock).toContain("--code-text:#e4e4e7");

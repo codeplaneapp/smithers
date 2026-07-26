@@ -119,7 +119,10 @@ async function probeGateway(candidate: GatewayCandidate, timeoutMs = PROBE_REQUE
   return fetch(`${candidate.base}/health`, {
     headers: candidate.token ? { authorization: `Bearer ${candidate.token}` } : undefined,
     signal: AbortSignal.timeout(timeoutMs),
-  }).then((r) => r.ok, () => false);
+  }).then(
+    (r) => r.ok,
+    () => false,
+  );
 }
 
 // Resolve the REAL CLI entry to autostart the gateway through. Never fall back
@@ -218,7 +221,9 @@ async function gatewayServesRun(candidate: GatewayCandidate, id: string): Promis
     const key = `${candidate.base}\n${reason}`;
     if (!loggedServesRunErrors.has(key)) {
       loggedServesRunErrors.add(key);
-      process.stderr.write(`[smithers-mon] gateway ${candidate.base} getRun probe failed (${reason}); treating as not-serving.\n`);
+      process.stderr.write(
+        `[smithers-mon] gateway ${candidate.base} getRun probe failed (${reason}); treating as not-serving.\n`,
+      );
     }
     return "no";
   }

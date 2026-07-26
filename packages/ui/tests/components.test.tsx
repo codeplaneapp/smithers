@@ -86,7 +86,11 @@ describe("Button", () => {
   });
 
   test("keeps consumer className and explicit submit type", () => {
-    const html = renderToStaticMarkup(<Button type="submit" className="my-extra">x</Button>);
+    const html = renderToStaticMarkup(
+      <Button type="submit" className="my-extra">
+        x
+      </Button>,
+    );
     expect(html).toContain('type="submit"');
     expect(html).toContain("my-extra");
   });
@@ -202,13 +206,7 @@ describe("chat", () => {
 
   test("renders the controlled glass composer with accessible submit state", () => {
     const ready = renderToStaticMarkup(
-      <ChatComposer
-        value="Ship it"
-        onValueChange={() => {}}
-        onSubmit={() => {}}
-        status="Connected"
-        docked
-      />,
+      <ChatComposer value="Ship it" onValueChange={() => {}} onSubmit={() => {}} status="Connected" docked />,
     );
     expect(ready).toContain("sui-chat-composer");
     expect(ready).toContain('data-docked="true"');
@@ -216,9 +214,7 @@ describe("chat", () => {
     expect(ready).toContain('aria-label="Send message"');
     expect(ready).not.toContain('disabled=""');
 
-    const disabled = renderToStaticMarkup(
-      <ChatComposer value="" onValueChange={() => {}} onSubmit={() => {}} />,
-    );
+    const disabled = renderToStaticMarkup(<ChatComposer value="" onValueChange={() => {}} onSubmit={() => {}} />);
     expect(disabled).toContain('disabled=""');
   });
 });
@@ -393,12 +389,20 @@ describe("CollapsiblePanel", () => {
   });
 
   test("status prop maps buckets onto the StatusPill tint", () => {
-    expect(renderToStaticMarkup(<CollapsiblePanel title="Run" status="running">x</CollapsiblePanel>)).toContain(
-      "sui-badge-default",
-    );
-    expect(renderToStaticMarkup(<CollapsiblePanel title="Run" status="failed">x</CollapsiblePanel>)).toContain(
-      "sui-badge-destructive",
-    );
+    expect(
+      renderToStaticMarkup(
+        <CollapsiblePanel title="Run" status="running">
+          x
+        </CollapsiblePanel>,
+      ),
+    ).toContain("sui-badge-default");
+    expect(
+      renderToStaticMarkup(
+        <CollapsiblePanel title="Run" status="failed">
+          x
+        </CollapsiblePanel>,
+      ),
+    ).toContain("sui-badge-destructive");
     // No status prop -> no pill.
     expect(renderToStaticMarkup(<CollapsiblePanel title="Run">x</CollapsiblePanel>)).not.toContain("sui-status-dot");
   });

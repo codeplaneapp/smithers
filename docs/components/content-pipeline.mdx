@@ -67,30 +67,34 @@ import { Task } from "./Task.js";
  * @param {ContentPipelineProps} props
  */
 export function ContentPipeline(props) {
-    if (props.skipIf)
-        return null;
-    const { stages, children } = props;
-    const taskElements = stages.map((stage, index) => {
-        const taskProps = {
-            id: stage.id,
-            output: stage.output,
-            agent: stage.agent,
-            label: stage.label,
-        };
-        if (index === 0) {
-            // First stage receives the initial prompt.
-            return React.createElement(Task, taskProps, children);
-        }
-        // Subsequent stages depend on the previous stage. `deps` resolves the
-        // previous stage's output into this stage's prompt (`needs` alone is
-        // cache-context only and injects nothing), so the waterfall actually
-        // passes output forward.
-        const prevStage = stages[index - 1];
-        taskProps.needs = { previous: prevStage.id };
-        taskProps.deps = { previous: prevStage.output };
-        return React.createElement(Task, taskProps, (d) => `Continue from the previous stage's output. Perform: ${stage.label ?? stage.id}\n\nPrevious stage output:\n${JSON.stringify(d.previous ?? "(no output)")}`);
-    });
-    return React.createElement(Sequence, null, ...taskElements);
+  if (props.skipIf) return null;
+  const { stages, children } = props;
+  const taskElements = stages.map((stage, index) => {
+    const taskProps = {
+      id: stage.id,
+      output: stage.output,
+      agent: stage.agent,
+      label: stage.label,
+    };
+    if (index === 0) {
+      // First stage receives the initial prompt.
+      return React.createElement(Task, taskProps, children);
+    }
+    // Subsequent stages depend on the previous stage. `deps` resolves the
+    // previous stage's output into this stage's prompt (`needs` alone is
+    // cache-context only and injects nothing), so the waterfall actually
+    // passes output forward.
+    const prevStage = stages[index - 1];
+    taskProps.needs = { previous: prevStage.id };
+    taskProps.deps = { previous: prevStage.output };
+    return React.createElement(
+      Task,
+      taskProps,
+      (d) =>
+        `Continue from the previous stage's output. Perform: ${stage.label ?? stage.id}\n\nPrevious stage output:\n${JSON.stringify(d.previous ?? "(no output)")}`,
+    );
+  });
+  return React.createElement(Sequence, null, ...taskElements);
 }
 ```
 
@@ -102,17 +106,16 @@ import React from "react";
  * @param {SequenceProps} props
  */
 export function Sequence(props) {
-    if (props.skipIf)
-        return null;
-    // Sequence carries only a display label; pass a sanitized bag (align with
-    // the sanitizing structural components) so control props don't leak through.
-    // `label` names the phase group in run views (graph, the Claude /workflows
-    // mirror) and is preserved in the persisted frame XML.
-    const next = {
-        ...(props.label === undefined ? {} : { label: props.label }),
-        ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
-    };
-    return React.createElement("smithers:sequence", next, props.children);
+  if (props.skipIf) return null;
+  // Sequence carries only a display label; pass a sanitized bag (align with
+  // the sanitizing structural components) so control props don't leak through.
+  // `label` names the phase group in run views (graph, the Claude /workflows
+  // mirror) and is preserved in the persisted frame XML.
+  const next = {
+    ...(props.label === undefined ? {} : { label: props.label }),
+    ...(props.failurePolicy === undefined ? {} : { failurePolicy: props.failurePolicy }),
+  };
+  return React.createElement("smithers:sequence", next, props.children);
 }
 ```
 
@@ -148,13 +151,13 @@ import type React from "react";
 import type { ContentPipelineStage } from "./ContentPipelineStage.ts";
 
 export type ContentPipelineProps = {
-	id?: string;
-	/** Pipeline stages executed in order. Each stage receives the previous stage's output. */
-	stages: ContentPipelineStage[];
-	/** Skip the entire pipeline. */
-	skipIf?: boolean;
-	/** Initial prompt/content for the first stage (string or ReactNode). */
-	children: string | React.ReactNode;
+  id?: string;
+  /** Pipeline stages executed in order. Each stage receives the previous stage's output. */
+  stages: ContentPipelineStage[];
+  /** Skip the entire pipeline. */
+  skipIf?: boolean;
+  /** Initial prompt/content for the first stage (string or ReactNode). */
+  children: string | React.ReactNode;
 };
 ```
 
@@ -163,14 +166,14 @@ import type { AgentLike } from "@smithers-orchestrator/agents/AgentLike";
 import type { OutputTarget } from "./OutputTarget.ts";
 
 export type ContentPipelineStage = {
-	/** Unique identifier for this stage. */
-	id: string;
-	/** Agent that performs this stage's work. */
-	agent: AgentLike;
-	/** Output schema for this stage. */
-	output: OutputTarget;
-	/** Human-readable label for the stage (used as task label). */
-	label?: string;
+  /** Unique identifier for this stage. */
+  id: string;
+  /** Agent that performs this stage's work. */
+  agent: AgentLike;
+  /** Output schema for this stage. */
+  output: OutputTarget;
+  /** Human-readable label for the stage (used as task label). */
+  label?: string;
 };
 ```
 </CodeGroup>

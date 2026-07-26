@@ -9,10 +9,7 @@ export function memoryBucket(): WalkthroughBucket & { _store: Map<string, Uint8A
   return {
     _store: store,
     async put(key, value) {
-      const bytes =
-        typeof value === "string"
-          ? new TextEncoder().encode(value)
-          : new Uint8Array(value as ArrayBuffer);
+      const bytes = typeof value === "string" ? new TextEncoder().encode(value) : new Uint8Array(value as ArrayBuffer);
       store.set(key, bytes);
     },
     async get(key) {

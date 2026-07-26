@@ -42,18 +42,44 @@ const RUN_ID = "ship-pipeline-e2e-run";
 // The two tickets the fixture run "ships". Titles + per-stage summary tokens are
 // deliberately unique so the assertions prove the UI rendered THIS run's output.
 const TICKETS = [
-  { slug: "0001-voice-capture", title: "Voice capture pipeline", id: ".smithers/tickets/ship-pipeline/0001-voice-capture.md" },
-  { slug: "0002-question-pool", title: "Rolling question pool", id: ".smithers/tickets/ship-pipeline/0002-question-pool.md" },
+  {
+    slug: "0001-voice-capture",
+    title: "Voice capture pipeline",
+    id: ".smithers/tickets/ship-pipeline/0001-voice-capture.md",
+  },
+  {
+    slug: "0002-question-pool",
+    title: "Rolling question pool",
+    id: ".smithers/tickets/ship-pipeline/0002-question-pool.md",
+  },
 ];
 
 // EXACT schemas the ship-pipeline UI extractors read (mirrors the real workflow +
 // ValidationLoop/Review component outputs).
 const researchSchema = z.object({ summary: z.string(), keyFindings: z.array(z.string()).default([]) });
 const planSchema = z.object({ summary: z.string(), steps: z.array(z.string()).default([]) });
-const implementSchema = z.object({ summary: z.string(), filesChanged: z.array(z.string()).default([]), allTestsPassing: z.boolean().default(true) });
-const validateSchema = z.object({ summary: z.string(), allPassed: z.boolean().default(true), failingSummary: z.string().nullable().default(null) });
-const reviewSchema = z.object({ reviewer: z.string(), approved: z.boolean(), feedback: z.string(), issues: z.array(z.any()).default([]) });
-const shipResultSchema = z.object({ ticketId: z.string(), branch: z.string(), status: z.enum(["merged", "skipped", "failed"]), summary: z.string() });
+const implementSchema = z.object({
+  summary: z.string(),
+  filesChanged: z.array(z.string()).default([]),
+  allTestsPassing: z.boolean().default(true),
+});
+const validateSchema = z.object({
+  summary: z.string(),
+  allPassed: z.boolean().default(true),
+  failingSummary: z.string().nullable().default(null),
+});
+const reviewSchema = z.object({
+  reviewer: z.string(),
+  approved: z.boolean(),
+  feedback: z.string(),
+  issues: z.array(z.any()).default([]),
+});
+const shipResultSchema = z.object({
+  ticketId: z.string(),
+  branch: z.string(),
+  status: z.enum(["merged", "skipped", "failed"]),
+  summary: z.string(),
+});
 const manifestSchema = z.object({
   ticketsDir: z.string(),
   tickets: z.array(z.object({ slug: z.string(), title: z.string(), id: z.string() })).default([]),
@@ -79,7 +105,10 @@ function ticketNodes(t: (typeof TICKETS)[number]) {
   return (
     <Sequence key={t.slug}>
       <Task id={`${t.slug}:research`} output={outputs.research}>
-        {{ summary: `RESEARCH-${t.slug}: grounded in the gateway + dev-server seams.`, keyFindings: [`finding-a-${t.slug}`, `finding-b-${t.slug}`] }}
+        {{
+          summary: `RESEARCH-${t.slug}: grounded in the gateway + dev-server seams.`,
+          keyFindings: [`finding-a-${t.slug}`, `finding-b-${t.slug}`],
+        }}
       </Task>
       <Task id={`${t.slug}:plan`} output={outputs.plan}>
         {{ summary: `PLAN-${t.slug}`, steps: [`step-one-${t.slug}`, `step-two-${t.slug}`] }}
@@ -194,80 +223,88 @@ afterAll(async () => {
   try {
     await gateway.close();
   } catch {}
-  try { rmSync(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { /* best-effort temp cleanup */ }
+  try {
+    rmSync(tmpDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch {
+    /* best-effort temp cleanup */
+  }
 });
 
-browserTest("ship-pipeline UI renders a real completed run end-to-end", async () => {
-  expect(await waitForHealth()).toBe(true);
+browserTest(
+  "ship-pipeline UI renders a real completed run end-to-end",
+  async () => {
+    expect(await waitForHealth()).toBe(true);
 
-  const browser = await CHROMIUM.launch({ headless: true });
-  try {
-    const page = await browser.newPage();
-    const errors: string[] = [];
-    page.on("pageerror", (err: Error) => errors.push(err.message));
+    const browser = await CHROMIUM.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (err: Error) => errors.push(err.message));
 
-    // domcontentloaded, not networkidle: the UI opens a live gateway WebSocket
-    // on mount, so networkidle never settles; the selector waits below gate
-    // real readiness.
-    await page.goto(`${base}/workflows/ship-pipeline?runId=${RUN_ID}`, { waitUntil: "domcontentloaded" });
+      // domcontentloaded, not networkidle: the UI opens a live gateway WebSocket
+      // on mount, so networkidle never settles; the selector waits below gate
+      // real readiness.
+      await page.goto(`${base}/workflows/ship-pipeline?runId=${RUN_ID}`, { waitUntil: "domcontentloaded" });
 
-    // 1) The real bundle built + the app mounted to its root.
-    await page.waitForSelector('[data-testid="ship-pipeline-ui"]', { timeout: 20_000 });
+      // 1) The real bundle built + the app mounted to its root.
+      await page.waitForSelector('[data-testid="ship-pipeline-ui"]', { timeout: 20_000 });
 
-    // 2) The pipeline lists both tickets from the manifest node output.
-    await page.waitForSelector('[data-testid="ship-pipeline"]', { timeout: 20_000 });
-    await page.waitForSelector('[data-testid="ship-ticket-0001-voice-capture"]', { timeout: 20_000 });
-    await page.waitForSelector('[data-testid="ship-ticket-0002-question-pool"]', { timeout: 20_000 });
+      // 2) The pipeline lists both tickets from the manifest node output.
+      await page.waitForSelector('[data-testid="ship-pipeline"]', { timeout: 20_000 });
+      await page.waitForSelector('[data-testid="ship-ticket-0001-voice-capture"]', { timeout: 20_000 });
+      await page.waitForSelector('[data-testid="ship-ticket-0002-question-pool"]', { timeout: 20_000 });
 
-    // 3) EVENT-derived state: both tickets land (progress pill + ledger). This is
-    //    the assertion that fails unless nodeId is read from frame.payload.
-    await page.waitForFunction(
-      () => (document.querySelector('[data-testid="ship-progress"]')?.textContent ?? "").includes("2/2 landed"),
-      undefined,
-      { timeout: 20_000 },
-    );
-    await page.waitForSelector('[data-testid="ship-ledger"]', { timeout: 20_000 });
+      // 3) EVENT-derived state: both tickets land (progress pill + ledger). This is
+      //    the assertion that fails unless nodeId is read from frame.payload.
+      await page.waitForFunction(
+        () => (document.querySelector('[data-testid="ship-progress"]')?.textContent ?? "").includes("2/2 landed"),
+        undefined,
+        { timeout: 20_000 },
+      );
+      await page.waitForSelector('[data-testid="ship-ledger"]', { timeout: 20_000 });
 
-    // 4) The default-selected ticket's detail renders THIS run's real node output
-    //    across every stage (research → merge), read over the live node-output RPC.
-    await page.waitForFunction(
-      (expected: string[]) => {
-        const text = document.body.textContent ?? "";
-        return expected.every((t) => text.includes(t));
-      },
-      [
-        "RESEARCH-0001-voice-capture",
-        "finding-a-0001-voice-capture",
-        "PLAN-0001-voice-capture",
-        "step-one-0001-voice-capture",
-        "IMPLEMENT-0001-voice-capture",
-        "src/0001-voice-capture.ts",
-        "VALIDATE-0001-voice-capture",
-        "reviewer-0001-voice-capture",
-        "MERGED-0001-voice-capture onto main",
-      ],
-      { timeout: 20_000 },
-    );
+      // 4) The default-selected ticket's detail renders THIS run's real node output
+      //    across every stage (research → merge), read over the live node-output RPC.
+      await page.waitForFunction(
+        (expected: string[]) => {
+          const text = document.body.textContent ?? "";
+          return expected.every((t) => text.includes(t));
+        },
+        [
+          "RESEARCH-0001-voice-capture",
+          "finding-a-0001-voice-capture",
+          "PLAN-0001-voice-capture",
+          "step-one-0001-voice-capture",
+          "IMPLEMENT-0001-voice-capture",
+          "src/0001-voice-capture.ts",
+          "VALIDATE-0001-voice-capture",
+          "reviewer-0001-voice-capture",
+          "MERGED-0001-voice-capture onto main",
+        ],
+        { timeout: 20_000 },
+      );
 
-    // 5) The per-ticket live-activity feed (also event-derived) shows node frames.
-    await page.waitForSelector('[data-testid="ticket-activity"]', { timeout: 20_000 });
+      // 5) The per-ticket live-activity feed (also event-derived) shows node frames.
+      await page.waitForSelector('[data-testid="ticket-activity"]', { timeout: 20_000 });
 
-    // 6) Selecting the second ticket swaps the detail to ITS output.
-    await page.click('[data-testid="ship-ticket-0002-question-pool"]');
-    await page.waitForFunction(
-      () => (document.body.textContent ?? "").includes("MERGED-0002-question-pool onto main"),
-      undefined,
-      { timeout: 20_000 },
-    );
+      // 6) Selecting the second ticket swaps the detail to ITS output.
+      await page.click('[data-testid="ship-ticket-0002-question-pool"]');
+      await page.waitForFunction(
+        () => (document.body.textContent ?? "").includes("MERGED-0002-question-pool onto main"),
+        undefined,
+        { timeout: 20_000 },
+      );
 
-    expect(errors).toEqual([]);
+      expect(errors).toEqual([]);
 
-    const ledgerText = await page.evaluate(
-      () => document.querySelector('[data-testid="ship-ledger"]')?.textContent ?? "",
-    );
-    expect(ledgerText).toContain("Voice capture pipeline");
-    expect(ledgerText).toContain("Rolling question pool");
-  } finally {
-    await browser.close();
-  }
-}, 120_000);
+      const ledgerText = await page.evaluate(
+        () => document.querySelector('[data-testid="ship-ledger"]')?.textContent ?? "",
+      );
+      expect(ledgerText).toContain("Voice capture pipeline");
+      expect(ledgerText).toContain("Rolling question pool");
+    } finally {
+      await browser.close();
+    }
+  },
+  120_000,
+);

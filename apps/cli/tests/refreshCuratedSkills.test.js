@@ -3,11 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import {
-  ensureCuratedSkillsFresh,
-  isRetiredCuratedSkill,
-  refreshCuratedSkills,
-} from "../src/refreshCuratedSkills.js";
+import { ensureCuratedSkillsFresh, isRetiredCuratedSkill, refreshCuratedSkills } from "../src/refreshCuratedSkills.js";
 import { saveSkillDeselections } from "../src/installCuratedSkill.js";
 
 const CURRENT_SKILL = "---\nname: smithers\n---\n# Smithers\nDo it — don't describe it.\n";
@@ -39,8 +35,7 @@ function writeSkillDir(dir, skillMd, bundle = "old bundle\n") {
   writeFileSync(join(dir, "llms-full.txt"), bundle);
 }
 
-const refresh = (f) =>
-  refreshCuratedSkills({ homeDir: f.homeDir, sourceDir: f.sourceDir, env: {}, detections: [] });
+const refresh = (f) => refreshCuratedSkills({ homeDir: f.homeDir, sourceDir: f.sourceDir, env: {}, detections: [] });
 
 test("isRetiredCuratedSkill flags the orchestrator skill, not the current one", () => {
   expect(isRetiredCuratedSkill(RETIRED_SKILL)).toBe(true);
@@ -133,7 +128,13 @@ test("ensureCuratedSkillsFresh scans once then short-circuits until the source c
   writeSkillDir(f.claudeSkill("smithers"), "---\nname: smithers\n---\nOLD\n");
 
   // First call: forced scan repairs the stale skill and writes the marker.
-  const first = ensureCuratedSkillsFresh({ homeDir: f.homeDir, sourceDir: f.sourceDir, env: {}, force: true, now: 1000 });
+  const first = ensureCuratedSkillsFresh({
+    homeDir: f.homeDir,
+    sourceDir: f.sourceDir,
+    env: {},
+    force: true,
+    now: 1000,
+  });
   expect(first?.changed).toBe(true);
   expect(existsSync(join(f.homeDir, ".smithers", "skill-refresh.json"))).toBe(true);
 
@@ -172,7 +173,9 @@ test("a day later, ensureCuratedSkillsFresh scans again to catch new stale copie
   writeSkillDir(pluginSkill, RETIRED_SKILL);
 
   // Within the throttle window: still short-circuits.
-  expect(ensureCuratedSkillsFresh({ homeDir: f.homeDir, sourceDir: f.sourceDir, env: {}, now: 1000 + 1000 })).toBeNull();
+  expect(
+    ensureCuratedSkillsFresh({ homeDir: f.homeDir, sourceDir: f.sourceDir, env: {}, now: 1000 + 1000 }),
+  ).toBeNull();
 
   // More than a day later: scans and reports the new plugin copy.
   const later = ensureCuratedSkillsFresh({

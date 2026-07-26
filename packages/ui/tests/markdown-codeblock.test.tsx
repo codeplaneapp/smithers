@@ -17,9 +17,7 @@ describe("Markdown fenced CodeBlock routing", () => {
 
   test("an unterminated fence has exactly the terminated block structure", () => {
     const partial = renderToStaticMarkup(<Markdown content={["```ts", "const x = 1;"].join("\n")} />);
-    const complete = renderToStaticMarkup(
-      <Markdown content={["```ts", "const x = 1;", "```"].join("\n")} />,
-    );
+    const complete = renderToStaticMarkup(<Markdown content={["```ts", "const x = 1;", "```"].join("\n")} />);
     expect(partial).toBe(complete);
   });
 

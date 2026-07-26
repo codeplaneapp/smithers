@@ -13,19 +13,13 @@ const WORKFLOW_ID = "workflow-skill";
 const DEFAULT_SKILL_DIR = ".smithers/skills";
 
 const inputSchema = z.object({
-  workflow: z
-    .string()
-    .default("all")
-    .describe('Workflow ID to document, or "all" for every local workflow.'),
+  workflow: z.string().default("all").describe('Workflow ID to document, or "all" for every local workflow.'),
   output: z
     .string()
     .nullable()
     .default(null)
     .describe("Optional file path for one workflow, or directory path when workflow is all."),
-  prompt: z
-    .string()
-    .default("")
-    .describe("Optional extra instructions for the skill-writing agent."),
+  prompt: z.string().default("").describe("Optional extra instructions for the skill-writing agent."),
 });
 
 const workflowSourceSchema = z.object({
@@ -141,21 +135,15 @@ export default smithers((ctx) => {
           // so coalesce before calling string methods or the collect step throws.
           const workflowTarget = (ctx.input.workflow ?? "all").trim() || "all";
           const output = ctx.input.output?.trim() || null;
-          const allWorkflows = discoverWorkflowSources(root).filter(
-            (workflow) => workflow.id !== WORKFLOW_ID,
-          );
+          const allWorkflows = discoverWorkflowSources(root).filter((workflow) => workflow.id !== WORKFLOW_ID);
           const workflows =
-            workflowTarget === "all"
-              ? allWorkflows
-              : allWorkflows.filter((workflow) => workflow.id === workflowTarget);
+            workflowTarget === "all" ? allWorkflows : allWorkflows.filter((workflow) => workflow.id === workflowTarget);
 
           if (workflows.length === 0) {
             throw new Error(`Workflow not found: ${workflowTarget}`);
           }
           if (workflowTarget === "all" && output?.endsWith(".md")) {
-            throw new Error(
-              "When workflow is all, output must be a directory path, not a .md file.",
-            );
+            throw new Error("When workflow is all, output must be a directory path, not a .md file.");
           }
 
           return {

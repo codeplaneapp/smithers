@@ -8,47 +8,43 @@ const SLOW_SERVER = resolve(import.meta.dir, "fixtures", "slow-mcp-server.js");
 const baseCallOptions = { toolCallId: "test-call", messages: [] };
 
 describe("createMcpToolset cancellation (real MCP server over stdio)", () => {
-  test(
-    "aborting the AI SDK call rejects promptly and cancels the MCP request server-side",
-    async () => {
-      let stderrText = "";
-      const toolset = await createMcpToolset(
-        { command: "bun", args: [SLOW_SERVER] },
-        {
-          onStderr: (chunk) => {
-            stderrText += chunk;
-          },
+  test("aborting the AI SDK call rejects promptly and cancels the MCP request server-side", async () => {
+    let stderrText = "";
+    const toolset = await createMcpToolset(
+      { command: "bun", args: [SLOW_SERVER] },
+      {
+        onStderr: (chunk) => {
+          stderrText += chunk;
         },
+      },
+    );
+    try {
+      const controller = new AbortController();
+      const started = Date.now();
+      const pending = toolset.tools.sleep.execute(
+        // Longer than the SDK's 60s default request timeout: without signal
+        // forwarding this call would hang until that timeout, not reject.
+        { ms: 120000 },
+        { ...baseCallOptions, abortSignal: controller.signal },
       );
-      try {
-        const controller = new AbortController();
-        const started = Date.now();
-        const pending = toolset.tools.sleep.execute(
-          // Longer than the SDK's 60s default request timeout: without signal
-          // forwarding this call would hang until that timeout, not reject.
-          { ms: 120000 },
-          { ...baseCallOptions, abortSignal: controller.signal },
-        );
-        setTimeout(() => controller.abort(), 100);
-        const error = await pending.then(
-          () => null,
-          (cause) => cause,
-        );
-        // The call rejected with the abort, promptly — not after the sleep or
-        // the 60s MCP request timeout.
-        expect(error).not.toBeNull();
-        expect(String(error)).toMatch(/abort/i);
-        expect(Date.now() - started).toBeLessThan(10000);
-        // The server observed `notifications/cancelled`: its handler's signal
-        // aborted and it reported so on stderr. Without forwarding, the sleep
-        // keeps running server-side and this times out.
-        await waitUntil(() => stderrText.includes("sleep-cancelled"), 5000);
-      } finally {
-        await toolset.close();
-      }
-    },
-    20000,
-  );
+      setTimeout(() => controller.abort(), 100);
+      const error = await pending.then(
+        () => null,
+        (cause) => cause,
+      );
+      // The call rejected with the abort, promptly — not after the sleep or
+      // the 60s MCP request timeout.
+      expect(error).not.toBeNull();
+      expect(String(error)).toMatch(/abort/i);
+      expect(Date.now() - started).toBeLessThan(10000);
+      // The server observed `notifications/cancelled`: its handler's signal
+      // aborted and it reported so on stderr. Without forwarding, the sleep
+      // keeps running server-side and this times out.
+      await waitUntil(() => stderrText.includes("sleep-cancelled"), 5000);
+    } finally {
+      await toolset.close();
+    }
+  }, 20000);
 
   test("a call carrying an un-aborted signal still completes normally", async () => {
     const toolset = await createMcpToolset({ command: "bun", args: [SLOW_SERVER] });

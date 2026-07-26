@@ -199,30 +199,28 @@ describe("defineWorkflow", () => {
   test("throws when name is missing", () => {
     expect(() =>
       // @ts-expect-error intentionally missing name
-      defineWorkflow({ description: "no name", workflow: fakeWorkflow })
+      defineWorkflow({ description: "no name", workflow: fakeWorkflow }),
     ).toThrow(/name is required/);
   });
 
   test("throws when description is missing", () => {
     expect(() =>
       // @ts-expect-error intentionally missing description
-      defineWorkflow({ name: "x", workflow: fakeWorkflow })
+      defineWorkflow({ name: "x", workflow: fakeWorkflow }),
     ).toThrow(/description is required/);
   });
 
   test("throws when workflow is missing", () => {
     expect(() =>
       // @ts-expect-error intentionally missing workflow
-      defineWorkflow({ name: "x", description: "no wf" })
+      defineWorkflow({ name: "x", description: "no wf" }),
     ).toThrow(/workflow.*required/);
   });
 });
 
 describe("defineWorkflowPlugin", () => {
   test("returns a WorkflowPlugin with the provided fields", () => {
-    const workflows: WorkflowDefinition[] = [
-      defineWorkflow({ name: "a", description: "A", workflow: fakeWorkflow }),
-    ];
+    const workflows: WorkflowDefinition[] = [defineWorkflow({ name: "a", description: "A", workflow: fakeWorkflow })];
     const plugin = defineWorkflowPlugin({
       name: "my-plugin",
       description: "A plugin",
@@ -235,14 +233,14 @@ describe("defineWorkflowPlugin", () => {
   test("throws when name is missing", () => {
     expect(() =>
       // @ts-expect-error intentionally missing name
-      defineWorkflowPlugin({ description: "x", workflows: [] })
+      defineWorkflowPlugin({ description: "x", workflows: [] }),
     ).toThrow(/name is required/);
   });
 
   test("throws when workflows is not an array", () => {
     expect(() =>
       // @ts-expect-error intentionally wrong type
-      defineWorkflowPlugin({ name: "x", description: "y", workflows: null })
+      defineWorkflowPlugin({ name: "x", description: "y", workflows: null }),
     ).toThrow(/workflows.*must be an array/);
   });
 });
@@ -446,17 +444,17 @@ describe("loadWorkflowsFromDir", () => {
     writeFileSync(
       join(dir, "temp-workflow.js"),
       `export default { workflow: { build: () => null, opts: {} }, name: "temp-workflow", description: "A temporary test workflow" };`,
-      "utf8"
+      "utf8",
     );
     // Companion .md with --- YAML frontmatter
     writeFileSync(
       join(dir, "temp-workflow.md"),
       `---\nname: temp-workflow\ndescription: A temporary test workflow\ntags:\n  - test\n---\n`,
-      "utf8"
+      "utf8",
     );
 
     const result = await loadWorkflowsFromDir({ dir, source: "test" });
-    const errors = result.diagnostics.filter(d => d.type === "error");
+    const errors = result.diagnostics.filter((d) => d.type === "error");
     expect(errors).toHaveLength(0);
     expect(result.workflows).toHaveLength(1);
     expect(result.workflows[0]!.name).toBe("temp-workflow");
@@ -482,7 +480,7 @@ export default { build: () => null, opts: {} };`;
     writeFileSync(
       join(dir, "cleanup.workflow.md"),
       "# Cleanup workflow\n\nHuman-facing operating notes without frontmatter.\n",
-      "utf8"
+      "utf8",
     );
 
     const result = await loadWorkflowsFromDir({ dir, source: "test" });
@@ -508,12 +506,12 @@ export default { build: () => null, opts: {} };`;
     writeFileSync(
       join(dir, "malformed-metadata.js"),
       `export default { workflow: {}, name: "malformed-metadata", description: "d" };`,
-      "utf8"
+      "utf8",
     );
     writeFileSync(
       join(dir, "malformed-metadata.md"),
       `---\ntags: not-an-array\naliases:\n  - valid\n  - 42\n---\n`,
-      "utf8"
+      "utf8",
     );
 
     const result = await loadWorkflowsFromDir({ dir, source: "test" });
@@ -529,7 +527,7 @@ export default { build: () => null, opts: {} };`;
 
     const result = await loadWorkflowsFromDir({ dir, source: "test" });
     expect(result.workflows).toHaveLength(0);
-    const errors = result.diagnostics.filter(d => d.type === "error");
+    const errors = result.diagnostics.filter((d) => d.type === "error");
     expect(errors.length).toBeGreaterThan(0);
   });
 
@@ -538,33 +536,25 @@ export default { build: () => null, opts: {} };`;
     writeFileSync(
       join(dir, "alpha.js"),
       `export default { workflow: {}, name: "alpha", description: "Alpha wf" };`,
-      "utf8"
+      "utf8",
     );
     // companion .md with --- frontmatter for alpha
-    writeFileSync(
-      join(dir, "alpha.md"),
-      `---\nname: alpha\ndescription: Alpha wf\n---\n`,
-      "utf8"
-    );
+    writeFileSync(join(dir, "alpha.md"), `---\nname: alpha\ndescription: Alpha wf\n---\n`, "utf8");
     writeFileSync(
       join(dir, "beta.js"),
       `export default { workflow: {}, name: "beta", description: "Beta wf" };`,
-      "utf8"
+      "utf8",
     );
 
     const result = await loadWorkflowsFromDir({ dir, source: "test" });
     expect(result.workflows).toHaveLength(2);
-    const names = result.workflows.map(w => w.name).sort();
+    const names = result.workflows.map((w) => w.name).sort();
     expect(names).toEqual(["alpha", "beta"]);
   });
 
   test("derives name from filename when no frontmatter name field", async () => {
     const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
-    writeFileSync(
-      join(dir, "my-cool-flow.js"),
-      "export default { workflow: {}, description: 'Cool flow' };",
-      "utf8"
-    );
+    writeFileSync(join(dir, "my-cool-flow.js"), "export default { workflow: {}, description: 'Cool flow' };", "utf8");
 
     const result = await loadWorkflowsFromDir({ dir, source: "test" });
     expect(result.workflows[0]!.name).toBe("my-cool-flow");
@@ -573,11 +563,7 @@ export default { build: () => null, opts: {} };`;
   test("skips non-JS/TS files", async () => {
     const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
     writeFileSync(join(dir, "readme.md"), "# hello", "utf8");
-    writeFileSync(
-      join(dir, "valid.js"),
-      "export default { workflow: {}, name: 'v', description: 'd' };",
-      "utf8"
-    );
+    writeFileSync(join(dir, "valid.js"), "export default { workflow: {}, name: 'v', description: 'd' };", "utf8");
 
     const result = await loadWorkflowsFromDir({ dir, source: "test" });
     expect(result.workflows).toHaveLength(1);
@@ -588,13 +574,9 @@ export default { build: () => null, opts: {} };`;
     writeFileSync(
       join(dir, "versioned.js"),
       `export default { workflow: {}, name: "versioned", description: "v" };`,
-      "utf8"
+      "utf8",
     );
-    writeFileSync(
-      join(dir, "versioned.md"),
-      `---\nname: versioned\ndescription: v\nversion: 1.2.3\n---\n`,
-      "utf8"
-    );
+    writeFileSync(join(dir, "versioned.md"), `---\nname: versioned\ndescription: v\nversion: 1.2.3\n---\n`, "utf8");
 
     const result = await loadWorkflowsFromDir({ dir, source: "test" });
     expect(result.workflows[0]!.version).toBe("1.2.3");
@@ -605,7 +587,7 @@ export default { build: () => null, opts: {} };`;
     writeFileSync(
       join(dir, "bc-versioned.js"),
       `/* ---\nname: bc-versioned\nversion: 2.0.0\n--- */\nexport default { workflow: {}, name: "bc-versioned", description: "d" };`,
-      "utf8"
+      "utf8",
     );
 
     const result = await loadWorkflowsFromDir({ dir, source: "test" });
@@ -616,11 +598,7 @@ export default { build: () => null, opts: {} };`;
     const dir = mkdtempSync(join(tmpdir(), "smithers-conventions-test-"));
     const execText = `export default { workflow: {}, name: "srccheck", description: "d" };`;
     writeFileSync(join(dir, "srccheck.js"), execText, "utf8");
-    writeFileSync(
-      join(dir, "srccheck.md"),
-      `---\nname: srccheck\ndescription: d\n---\n`,
-      "utf8"
-    );
+    writeFileSync(join(dir, "srccheck.md"), `---\nname: srccheck\ndescription: d\n---\n`, "utf8");
 
     const result = await loadWorkflowsFromDir({ dir, source: "test" });
     expect(result.workflows[0]!.source).toBe(execText);
@@ -639,14 +617,14 @@ describe("loadWorkflows", () => {
     writeFileSync(
       join(bundled, "shared.js"),
       `export default { workflow: {}, name: "shared", description: "Bundled version" };`,
-      "utf8"
+      "utf8",
     );
 
     const managed = mkdtempSync(join(tmpdir(), "smithers-managed-"));
     writeFileSync(
       join(managed, "shared.js"),
       `export default { workflow: {}, name: "shared", description: "Managed version" };`,
-      "utf8"
+      "utf8",
     );
 
     const result = await loadWorkflows({
@@ -659,7 +637,7 @@ describe("loadWorkflows", () => {
     expect(result.workflows).toHaveLength(1);
     expect(result.workflows[0]!.description).toBe("Managed version");
 
-    const collision = result.diagnostics.find(d => d.type === "collision");
+    const collision = result.diagnostics.find((d) => d.type === "collision");
     expect(collision).toBeDefined();
     expect(collision!.collision?.existing.description).toBe("Bundled version");
     expect(collision!.collision?.incoming.description).toBe("Managed version");
@@ -670,14 +648,14 @@ describe("loadWorkflows", () => {
     writeFileSync(
       join(bundled, "my-wf.js"),
       `export default { workflow: {}, name: "my-wf", description: "Bundled" };`,
-      "utf8"
+      "utf8",
     );
 
     const managed = mkdtempSync(join(tmpdir(), "smithers-managed-"));
     writeFileSync(
       join(managed, "my-wf.js"),
       `export default { workflow: {}, name: "my-wf", description: "Managed" };`,
-      "utf8"
+      "utf8",
     );
 
     const result = await loadWorkflows({
@@ -686,17 +664,13 @@ describe("loadWorkflows", () => {
       managedDir: managed,
     });
 
-    expect(result.workflows.find(w => w.name === "my-wf")?.description).toBe("Managed");
+    expect(result.workflows.find((w) => w.name === "my-wf")?.description).toBe("Managed");
   });
 
   test("loads workflows from explicit workflowPaths", async () => {
     const dir = mkdtempSync(join(tmpdir(), "smithers-explicit-"));
     const filePath = join(dir, "explicit.js");
-    writeFileSync(
-      filePath,
-      `export default { workflow: {}, name: "explicit", description: "Explicit path" };`,
-      "utf8"
-    );
+    writeFileSync(filePath, `export default { workflow: {}, name: "explicit", description: "Explicit path" };`, "utf8");
 
     const result = await loadWorkflows({
       cwd: dir,

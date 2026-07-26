@@ -65,7 +65,11 @@ describe("Mistral OCR abort propagation", () => {
         { source: { type: "base64", data: Buffer.from("img").toString("base64"), mimeType: "image/png" } },
         { ...callOptions, abortSignal: controller.signal },
       ),
-    ).resolves.toMatchObject({ provider: "mistral-ocr", markdown: "# Page", pages: [{ index: 0, markdown: "# Page" }] });
+    ).resolves.toMatchObject({
+      provider: "mistral-ocr",
+      markdown: "# Page",
+      pages: [{ index: 0, markdown: "# Page" }],
+    });
     expect(capturedSignal).toBe(controller.signal);
     expect(capturedBody.document.type).toBe("image_url");
   });

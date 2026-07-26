@@ -46,9 +46,7 @@ async function readJson<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     const message =
-      typeof body?.error?.message === "string"
-        ? body.error.message
-        : `Request failed (${response.status})`;
+      typeof body?.error?.message === "string" ? body.error.message : `Request failed (${response.status})`;
     throw new Error(message);
   }
   return body as T;
@@ -66,11 +64,7 @@ export async function fetchFile(path: string): Promise<FileReadResponse> {
   return readJson<FileReadResponse>(response);
 }
 
-export async function saveFile(
-  path: string,
-  content: string,
-  revision: string,
-): Promise<FileReadResponse> {
+export async function saveFile(path: string, content: string, revision: string): Promise<FileReadResponse> {
   const response = await fetch("/api/files/write", {
     method: "POST",
     headers: { "content-type": "application/json" },

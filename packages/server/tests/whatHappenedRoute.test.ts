@@ -49,18 +49,30 @@ function makeParams(overrides: Record<string, unknown> = {}) {
 describe("whatHappenedRoute validation", () => {
   test("rejects a malformed runId", async () => {
     await expect(whatHappenedRoute(makeParams({ runId: "NOT VALID!" }))).rejects.toBeInstanceOf(WhatHappenedRouteError);
-    await expect(whatHappenedRoute(makeParams({ runId: "NOT VALID!" }))).rejects.toMatchObject({ code: "InvalidRunId" });
+    await expect(whatHappenedRoute(makeParams({ runId: "NOT VALID!" }))).rejects.toMatchObject({
+      code: "InvalidRunId",
+    });
   });
 
   test("rejects a malformed nodeId and iteration", async () => {
-    await expect(whatHappenedRoute(makeParams({ nodeId: "bad node!" }))).rejects.toMatchObject({ code: "InvalidNodeId" });
-    await expect(whatHappenedRoute(makeParams({ nodeId: "task", iteration: -1 }))).rejects.toMatchObject({ code: "InvalidIteration" });
+    await expect(whatHappenedRoute(makeParams({ nodeId: "bad node!" }))).rejects.toMatchObject({
+      code: "InvalidNodeId",
+    });
+    await expect(whatHappenedRoute(makeParams({ nodeId: "task", iteration: -1 }))).rejects.toMatchObject({
+      code: "InvalidIteration",
+    });
   });
 
   test("maps a missing run and node to RunNotFound / NodeNotFound", async () => {
-    await expect(whatHappenedRoute(makeParams({ resolveRun: async () => null }))).rejects.toMatchObject({ code: "RunNotFound" });
-    await expect(whatHappenedRoute(makeParams({ adapter: makeAdapter({ nodes: [] }), nodeId: "task" }))).rejects.toMatchObject({ code: "NodeNotFound" });
-    await expect(whatHappenedRoute(makeParams({ nodeId: "task", iteration: 7 }))).rejects.toMatchObject({ code: "IterationNotFound" });
+    await expect(whatHappenedRoute(makeParams({ resolveRun: async () => null }))).rejects.toMatchObject({
+      code: "RunNotFound",
+    });
+    await expect(
+      whatHappenedRoute(makeParams({ adapter: makeAdapter({ nodes: [] }), nodeId: "task" })),
+    ).rejects.toMatchObject({ code: "NodeNotFound" });
+    await expect(whatHappenedRoute(makeParams({ nodeId: "task", iteration: 7 }))).rejects.toMatchObject({
+      code: "IterationNotFound",
+    });
   });
 });
 
@@ -84,7 +96,13 @@ describe("whatHappenedRoute fact fallback", () => {
         { runId: "run-1", nodeId: "task", iteration: 2, state: "failed", lastAttempt: 3, updatedAtMs: NOW },
       ],
       attempts: [
-        { attempt: 1, state: "failed", startedAtMs: NOW - 5_000, finishedAtMs: NOW - 4_000, errorJson: JSON.stringify({ message: "boom" }) },
+        {
+          attempt: 1,
+          state: "failed",
+          startedAtMs: NOW - 5_000,
+          finishedAtMs: NOW - 4_000,
+          errorJson: JSON.stringify({ message: "boom" }),
+        },
       ],
     });
     const payload = await whatHappenedRoute(makeParams({ adapter, nodeId: "task" }));
@@ -97,16 +115,24 @@ describe("whatHappenedRoute fact fallback", () => {
 
 describe("whatHappenedRoute narrator seam", () => {
   test("prefers the injected narrator and reports its agent", async () => {
-    const payload = await whatHappenedRoute(makeParams({
-      summarize: async () => ({ summary: "Everything shipped cleanly.", agentId: "luna", source: "agent" }),
-    }));
+    const payload = await whatHappenedRoute(
+      makeParams({
+        summarize: async () => ({ summary: "Everything shipped cleanly.", agentId: "luna", source: "agent" }),
+      }),
+    );
     expect(payload.source).toBe("agent");
     expect(payload.agentId).toBe("luna");
     expect(payload.summary).toBe("Everything shipped cleanly.");
   });
 
   test("a throwing or empty narrator degrades to the fact recap", async () => {
-    const throwing = await whatHappenedRoute(makeParams({ summarize: async () => { throw new Error("agent died"); } }));
+    const throwing = await whatHappenedRoute(
+      makeParams({
+        summarize: async () => {
+          throw new Error("agent died");
+        },
+      }),
+    );
     expect(throwing.source).toBe("facts");
     expect(throwing.summary).toContain("Run run-1");
     const empty = await whatHappenedRoute(makeParams({ summarize: async () => ({ summary: "  " }) }));
@@ -118,13 +144,14 @@ describe("whatHappenedRoute cache", () => {
   test("caches terminal targets per state fingerprint and skips the narrator on a hit", async () => {
     const cache = new Map();
     let calls = 0;
-    const params = () => makeParams({
-      cache,
-      summarize: async () => {
-        calls += 1;
-        return { summary: "Shipped.", agentId: "luna" };
-      },
-    });
+    const params = () =>
+      makeParams({
+        cache,
+        summarize: async () => {
+          calls += 1;
+          return { summary: "Shipped.", agentId: "luna" };
+        },
+      });
     const first = await whatHappenedRoute(params());
     expect(first.cached).toBe(false);
     const second = await whatHappenedRoute(params());
@@ -137,14 +164,15 @@ describe("whatHappenedRoute cache", () => {
     const cache = new Map();
     let calls = 0;
     const adapter = makeAdapter({ run: runRow({ status: "running", finishedAtMs: null }) });
-    const params = () => makeParams({
-      adapter,
-      cache,
-      summarize: async () => {
-        calls += 1;
-        return { summary: "Still going.", agentId: "luna" };
-      },
-    });
+    const params = () =>
+      makeParams({
+        adapter,
+        cache,
+        summarize: async () => {
+          calls += 1;
+          return { summary: "Still going.", agentId: "luna" };
+        },
+      });
     await whatHappenedRoute(params());
     const second = await whatHappenedRoute(params());
     expect(second.cached).toBe(false);

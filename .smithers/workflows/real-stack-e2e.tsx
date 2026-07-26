@@ -44,13 +44,7 @@
  *      (artifacts/feature-gifs/index.html), push any remainder, then write an
  *      evidence report.
  */
-import {
-  ClaudeCodeAgent,
-  createSmithers,
-  HumanTask,
-  Loop,
-  Sequence,
-} from "smithers-orchestrator";
+import { ClaudeCodeAgent, createSmithers, HumanTask, Loop, Sequence } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -110,10 +104,7 @@ async function sh(
       proc.kill("SIGKILL");
     } catch {}
   }, opts.timeoutMs);
-  const [out, err] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
+  const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
   const exitCode = await proc.exited;
   clearTimeout(killer);
   const combined =
@@ -168,10 +159,7 @@ function verifyEnv(): Record<string, string> {
 const fable = new ClaudeCodeAgent({ model: "claude-fable-5", cwd: REPO });
 const sonnet = new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd: REPO });
 const opus = new ClaudeCodeAgent({ model: "claude-opus-4-8", cwd: REPO });
-const planners = codexFirst(
-  { model: SOL_MODEL, cwd: REPO, skipGitRepoCheck: true },
-  [fable, sonnet],
-);
+const planners = codexFirst({ model: SOL_MODEL, cwd: REPO, skipGitRepoCheck: true }, [fable, sonnet]);
 const implementers = codexFirst(
   { model: LUNA_MODEL, config: { model_reasoning_effort: "medium" }, cwd: REPO, skipGitRepoCheck: true },
   [opus, sonnet],
@@ -511,8 +499,7 @@ async function runPreflight() {
         ? `chat upstream probe failed for ${chatProvider} — fix the key/model or supply a different one (cerebrasApiKey or geminiApiKey)`
         : "no chat upstream key: supply geminiApiKey (aistudio.google.com, powers Gemini Flash) or cerebrasApiKey (cloud.cerebras.ai) for real /api/chat completions",
     );
-  if (!ffmpegOk)
-    missing.push("ffmpeg not on PATH (gif conversion in t9 needs it) — brew install ffmpeg");
+  if (!ffmpegOk) missing.push("ffmpeg not on PATH (gif conversion in t9 needs it) — brew install ffmpeg");
   // Codex unavailability is not itself blocking: only then may the explicit
   // Claude fallback satisfy the agent prerequisite.
 
@@ -557,7 +544,10 @@ function applyHumanEnv(fix: Record<string, unknown> | undefined) {
   const gi = resolve(REPO, "apps/smithers/.gitignore");
   const giBody = existsSync(gi) ? readFileSync(gi, "utf8") : "";
   if (!giBody.includes(".env.e2e.local")) {
-    writeFileSync(gi, giBody.replace(/\n*$/, "\n") + "\n# Real-stack e2e secrets (real-stack-e2e workflow)\n.env.e2e.local\n");
+    writeFileSync(
+      gi,
+      giBody.replace(/\n*$/, "\n") + "\n# Real-stack e2e secrets (real-stack-e2e workflow)\n.env.e2e.local\n",
+    );
   }
 
   return {
@@ -610,19 +600,22 @@ const FORBIDDEN_PATTERNS = [
   "plueFixture",
   "authFixture",
 ];
-const AUDIT_PATHS = [
-  "apps/smithers/tests/e2e-real",
-  "apps/smithers/playwright.real.config.ts",
-  "scripts/e2e-real",
+const AUDIT_PATHS = ["apps/smithers/tests/e2e-real", "apps/smithers/playwright.real.config.ts", "scripts/e2e-real"];
+const PROTECTED_FILES = [
+  "apps/smithers/playwright.config.ts",
+  "apps/smithers/tests/e2e/",
+  "apps/smithers/tests/fixtures/",
 ];
-const PROTECTED_FILES = ["apps/smithers/playwright.config.ts", "apps/smithers/tests/e2e/", "apps/smithers/tests/fixtures/"];
 
 async function runAudit() {
   const violations: string[] = [];
 
   const present = AUDIT_PATHS.filter((p) => existsSync(resolve(REPO, p)));
   if (present.length === 0) {
-    return { clean: false, violations: "no e2e-real artifacts exist yet (expected at least one of: " + AUDIT_PATHS.join(", ") + ")" };
+    return {
+      clean: false,
+      violations: "no e2e-real artifacts exist yet (expected at least one of: " + AUDIT_PATHS.join(", ") + ")",
+    };
   }
 
   const patternArgs = FORBIDDEN_PATTERNS.map((p) => `-e ${JSON.stringify(p)}`).join(" ");
@@ -644,7 +637,8 @@ async function runAudit() {
     `git diff origin/main -- ${present.map((p) => JSON.stringify(p)).join(" ")} | rg -iF -e "csk-" -e "sk-ant-" -e "AIza" || true`,
     { timeoutMs: 30_000 },
   );
-  if (secretLeak.tail.trim() !== "" && secretLeak.exitCode === 0) violations.push("possible secret committed in diff (csk-/sk-ant-/AIza prefix found)");
+  if (secretLeak.tail.trim() !== "" && secretLeak.exitCode === 0)
+    violations.push("possible secret committed in diff (csk-/sk-ant-/AIza prefix found)");
 
   return { clean: violations.length === 0, violations: violations.join("\n\n") || "none" };
 }
@@ -652,10 +646,9 @@ async function runAudit() {
 async function pushMain() {
   const first = await sh("git push origin main", { timeoutMs: 120_000 });
   if (first.exitCode === 0) return { pushed: true, detail: tailOf(first.tail, 1000) };
-  const second = await sh(
-    "git -c rebase.autoStash=true pull --rebase origin main && git push origin main",
-    { timeoutMs: 180_000 },
-  );
+  const second = await sh("git -c rebase.autoStash=true pull --rebase origin main && git push origin main", {
+    timeoutMs: 180_000,
+  });
   return { pushed: second.exitCode === 0, detail: tailOf(first.tail + "\n---\n" + second.tail, 2000) };
 }
 
@@ -836,9 +829,7 @@ export default smithers((ctx) => {
     const verify = ctx.latest("verify", `${t.id}:verify`) as
       | { passed?: boolean | number; outputTail?: string; exitCode?: number }
       | undefined;
-    const audit = ctx.latest("audit", `${t.id}:audit`) as
-      | { clean?: boolean | number; violations?: string }
-      | undefined;
+    const audit = ctx.latest("audit", `${t.id}:audit`) as { clean?: boolean | number; violations?: string } | undefined;
     const review = ctx.latest("review", `${t.id}:review`) as
       | { approved?: boolean | number; feedback?: string }
       | undefined;
@@ -913,12 +904,7 @@ export default smithers((ctx) => {
                 prompt={`The real-stack-e2e run is blocked on missing prerequisites:\n\n  ${pf?.missing}\n\n(${pf?.detail})\n\nPlease answer with JSON: {"cerebrasApiKey": string|null, "geminiApiKey": string|null, "claudeOauthToken": string|null, "anthropicApiKey": string|null, "skipCodex": boolean|null, "note": string|null}.\n- geminiApiKey: from https://aistudio.google.com — powers real /api/chat via Gemini Flash until Cerebras is set up.\n- cerebrasApiKey: from https://cloud.cerebras.ai — takes precedence over Gemini once supplied.\n- First repair Codex out-of-band (for example, run \`codex login\` or register another Codex/OpenAI account); all Codex credentials are tried before any backup.\n- claudeOauthToken: ONLY when every Codex credential is unavailable and the Claude fallback probe also failed — run \`claude setup-token\` and paste, or fix out-of-band with \`claude /login\` and answer null.\n- skipCodex: true = explicitly skip Codex probing and permit the Claude fallback for this run.\n- Provide null for anything you fixed out-of-band and say so in note.\nValues are written only to ${ENV_FILE} (gitignored, chmod 600).`}
               />
               {humanEnv ? (
-                <Task
-                  id="preflight:apply"
-                  output={outputs.envApply}
-                  noRetry
-                  dependsOn={["preflight:fix"]}
-                >
+                <Task id="preflight:apply" output={outputs.envApply} noRetry dependsOn={["preflight:fix"]}>
                   {() => applyHumanEnv(humanEnv)}
                 </Task>
               ) : null}
@@ -988,12 +974,7 @@ export default smithers((ctx) => {
 
       {/* Phase 4: ralph quality loop — Sol plans/reviews, Luna implements, full
           gate verifies, and every approved iteration pushes. */}
-      <Loop
-        id="ralph:loop"
-        until={ralphDone}
-        maxIterations={RALPH_MAX_ITERATIONS}
-        onMaxReached="return-last"
-      >
+      <Loop id="ralph:loop" until={ralphDone} maxIterations={RALPH_MAX_ITERATIONS} onMaxReached="return-last">
         <Sequence>
           <Task
             id="ralph:plan"

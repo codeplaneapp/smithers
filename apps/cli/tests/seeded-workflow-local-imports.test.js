@@ -40,9 +40,7 @@ test("seeded workflows' local imports all resolve to installed files", () => {
 
   const resolvesTo = (fromFile, spec) => {
     const base = join(dirname(fromFile), spec);
-    return [base, `${base}.ts`, `${base}.tsx`, `${base}.mdx`, `${base}/index.ts`, `${base}/index.tsx`].some(
-      existsSync,
-    );
+    return [base, `${base}.ts`, `${base}.tsx`, `${base}.mdx`, `${base}/index.ts`, `${base}/index.tsx`].some(existsSync);
   };
 
   const importRe = /from\s+["'](\.\.\/(?:lib|prompts|components)\/[^"']+)["']/g;
@@ -51,9 +49,7 @@ test("seeded workflows' local imports all resolve to installed files", () => {
     const source = readFileSync(abs, "utf8");
     let m;
     while ((m = importRe.exec(source)) !== null) {
-      expect(resolvesTo(abs, m[1]), `seeded workflow ${wf} imports ${m[1]} but init installed no such file`).toBe(
-        true,
-      );
+      expect(resolvesTo(abs, m[1]), `seeded workflow ${wf} imports ${m[1]} but init installed no such file`).toBe(true);
     }
   }
 }, 30_000);

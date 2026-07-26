@@ -26,18 +26,17 @@ export const CLAUDE_PLUGIN_SPEC = "smithers@smithersai";
  * @type {CommandRunner}
  */
 function runCommandSync(command, args) {
-    try {
-        const result = spawnSync(command, args, {
-            encoding: "utf8",
-            timeout: 120_000,
-            stdio: ["ignore", "pipe", "pipe"],
-        });
-        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
-        return { ok: result.status === 0, output };
-    }
-    catch (err) {
-        return { ok: false, output: err?.message ?? String(err) };
-    }
+  try {
+    const result = spawnSync(command, args, {
+      encoding: "utf8",
+      timeout: 120_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+    return { ok: result.status === 0, output };
+  } catch (err) {
+    return { ok: false, output: err?.message ?? String(err) };
+  }
 }
 
 /**
@@ -57,61 +56,58 @@ function runCommandSync(command, args) {
  * @returns {AgentIntegrationResult}
  */
 export function installAgentIntegration(opts) {
-    const env = opts.env ?? process.env;
-    const homeDir = opts.homeDir ?? env.HOME ?? homedir();
-    const runCommand = opts.runCommand ?? runCommandSync;
-    const agentId = opts.agentId;
-    const detections = opts.detections;
+  const env = opts.env ?? process.env;
+  const homeDir = opts.homeDir ?? env.HOME ?? homedir();
+  const runCommand = opts.runCommand ?? runCommandSync;
+  const agentId = opts.agentId;
+  const detections = opts.detections;
 
-    if (agentId === "claude") {
-        const marketplace = runCommand("claude", ["plugin", "marketplace", "add", CLAUDE_PLUGIN_MARKETPLACE]);
-        // An already-added marketplace makes `add` exit non-zero on some CLI
-        // versions; the install step is the real gate, so always attempt it.
-        const install = runCommand("claude", ["plugin", "install", CLAUDE_PLUGIN_SPEC]);
-        if (install.ok) {
-            return { agent: agentId, kind: "plugin", ok: true, detail: `Claude Code plugin ${CLAUDE_PLUGIN_SPEC}` };
-        }
-        const skill = installSkillFor(agentId, env, homeDir, detections);
-        return {
-            agent: agentId,
-            kind: skill.ok ? "skill" : "none",
-            ok: skill.ok,
-            fallback: true,
-            detail: skill.ok
-                ? `plugin install failed (${firstLine(install.output || marketplace.output) || "unknown error"}); installed the smithers skill instead`
-                : `plugin install failed and skill fallback failed: ${skill.detail}`,
-        };
+  if (agentId === "claude") {
+    const marketplace = runCommand("claude", ["plugin", "marketplace", "add", CLAUDE_PLUGIN_MARKETPLACE]);
+    // An already-added marketplace makes `add` exit non-zero on some CLI
+    // versions; the install step is the real gate, so always attempt it.
+    const install = runCommand("claude", ["plugin", "install", CLAUDE_PLUGIN_SPEC]);
+    if (install.ok) {
+      return { agent: agentId, kind: "plugin", ok: true, detail: `Claude Code plugin ${CLAUDE_PLUGIN_SPEC}` };
     }
-
-    if (agentId === "hermes" || agentId === "openclaw") {
-        try {
-            const results = wireExtraAgents({ kind: "mcp", agents: [agentId], homeDir });
-            const failed = results.find((entry) => entry.reason);
-            return {
-                agent: agentId,
-                kind: "plugin",
-                ok: !failed,
-                detail: failed
-                    ? `native plugin install incomplete: ${failed.reason}`
-                    : `native ${agentId} plugin + MCP config`,
-            };
-        }
-        catch (err) {
-            return { agent: agentId, kind: "none", ok: false, detail: err?.message ?? String(err) };
-        }
-    }
-
-    if (skillTargets(homeDir).some((target) => target.id === agentId)) {
-        const skill = installSkillFor(agentId, env, homeDir, detections);
-        return { agent: agentId, kind: skill.ok ? "skill" : "none", ok: skill.ok, detail: skill.detail };
-    }
-
+    const skill = installSkillFor(agentId, env, homeDir, detections);
     return {
-        agent: agentId,
-        kind: "none",
-        ok: true,
-        detail: "no plugin or skills directory known for this agent",
+      agent: agentId,
+      kind: skill.ok ? "skill" : "none",
+      ok: skill.ok,
+      fallback: true,
+      detail: skill.ok
+        ? `plugin install failed (${firstLine(install.output || marketplace.output) || "unknown error"}); installed the smithers skill instead`
+        : `plugin install failed and skill fallback failed: ${skill.detail}`,
     };
+  }
+
+  if (agentId === "hermes" || agentId === "openclaw") {
+    try {
+      const results = wireExtraAgents({ kind: "mcp", agents: [agentId], homeDir });
+      const failed = results.find((entry) => entry.reason);
+      return {
+        agent: agentId,
+        kind: "plugin",
+        ok: !failed,
+        detail: failed ? `native plugin install incomplete: ${failed.reason}` : `native ${agentId} plugin + MCP config`,
+      };
+    } catch (err) {
+      return { agent: agentId, kind: "none", ok: false, detail: err?.message ?? String(err) };
+    }
+  }
+
+  if (skillTargets(homeDir).some((target) => target.id === agentId)) {
+    const skill = installSkillFor(agentId, env, homeDir, detections);
+    return { agent: agentId, kind: skill.ok ? "skill" : "none", ok: skill.ok, detail: skill.detail };
+  }
+
+  return {
+    agent: agentId,
+    kind: "none",
+    ok: true,
+    detail: "no plugin or skills directory known for this agent",
+  };
 }
 
 /**
@@ -122,14 +118,14 @@ export function installAgentIntegration(opts) {
  * @returns {{ ok: boolean; detail: string }}
  */
 function installSkillFor(agentId, env, homeDir, detections) {
-    const result = installCuratedSkill({ env, homeDir, detections, targets: [agentId] });
-    const installed = result.installed[0];
-    if (installed) return { ok: true, detail: `smithers skill → ${installed.path}` };
-    const skipped = result.skipped[0];
-    return { ok: false, detail: skipped ? `${skipped.agent}: ${skipped.reason}` : "skill install skipped" };
+  const result = installCuratedSkill({ env, homeDir, detections, targets: [agentId] });
+  const installed = result.installed[0];
+  if (installed) return { ok: true, detail: `smithers skill → ${installed.path}` };
+  const skipped = result.skipped[0];
+  return { ok: false, detail: skipped ? `${skipped.agent}: ${skipped.reason}` : "skill install skipped" };
 }
 
 /** @param {string} text */
 function firstLine(text) {
-    return (text ?? "").split("\n")[0]?.trim() ?? "";
+  return (text ?? "").split("\n")[0]?.trim() ?? "";
 }

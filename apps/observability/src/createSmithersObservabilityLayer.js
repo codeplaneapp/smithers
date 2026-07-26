@@ -17,39 +17,46 @@ import { withSmithersSpan } from "./withSmithersSpan.js";
  * @param {SmithersLogFormat} format
  */
 function resolveLogger(format) {
-    switch (format) {
-        case "json":
-            return Logger.withLeveledConsole(Logger.jsonLogger);
-        case "pretty":
-            return Logger.prettyLogger();
-        case "string":
-            return Logger.withLeveledConsole(Logger.stringLogger);
-        case "logfmt":
-        default:
-            return Logger.withLeveledConsole(Logger.logfmtLogger);
-    }
+  switch (format) {
+    case "json":
+      return Logger.withLeveledConsole(Logger.jsonLogger);
+    case "pretty":
+      return Logger.prettyLogger();
+    case "string":
+      return Logger.withLeveledConsole(Logger.stringLogger);
+    case "logfmt":
+    default:
+      return Logger.withLeveledConsole(Logger.logfmtLogger);
+  }
 }
 /**
  * @param {ResolvedSmithersObservabilityOptions} options
  * @returns {SmithersObservabilityService}
  */
 function makeService(options) {
-    return {
-        options,
-        annotate: (attributes) => annotateSmithersTrace(attributes),
-        withSpan: (name, effect, attributes) => withSmithersSpan(name, effect, attributes),
-    };
+  return {
+    options,
+    annotate: (attributes) => annotateSmithersTrace(attributes),
+    withSpan: (name, effect, attributes) => withSmithersSpan(name, effect, attributes),
+  };
 }
 /**
  * @param {SmithersObservabilityOptions} [options]
  */
 export function createSmithersObservabilityLayer(options = {}) {
-    const resolved = resolveSmithersObservabilityOptions(options);
-    const loggerLayers = resolved.installLogger
-        ? [
-            Logger.replace(Logger.defaultLogger, resolveLogger(resolved.logFormat)),
-            Logger.minimumLogLevel(resolved.logLevel),
-        ]
-        : [];
-    return Layer.mergeAll(BunContext.layer, ...loggerLayers, createSmithersOtelLayer(resolved), MetricsServiceLive, TracingServiceLive, Layer.succeed(SmithersObservability, makeService(resolved)));
+  const resolved = resolveSmithersObservabilityOptions(options);
+  const loggerLayers = resolved.installLogger
+    ? [
+        Logger.replace(Logger.defaultLogger, resolveLogger(resolved.logFormat)),
+        Logger.minimumLogLevel(resolved.logLevel),
+      ]
+    : [];
+  return Layer.mergeAll(
+    BunContext.layer,
+    ...loggerLayers,
+    createSmithersOtelLayer(resolved),
+    MetricsServiceLive,
+    TracingServiceLive,
+    Layer.succeed(SmithersObservability, makeService(resolved)),
+  );
 }

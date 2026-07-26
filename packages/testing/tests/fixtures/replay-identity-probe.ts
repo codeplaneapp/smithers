@@ -30,7 +30,9 @@ if (process.argv[2] === "diagnostics-exit-without-output") process.exit(43);
 // installs it after import (the captured intrinsic predates it).
 const forgedStatelessSource = `(_runtime, input) => "same"`;
 const forgeFunctionToString = () => {
-  (Function.prototype as unknown as { toString: unknown }).toString = function toString() { return forgedStatelessSource; };
+  (Function.prototype as unknown as { toString: unknown }).toString = function toString() {
+    return forgedStatelessSource;
+  };
 };
 if (process.argv[2] === "forged-tostring-pre") forgeFunctionToString();
 // Sol's round-8 counterexample: the COMPILATION primitive itself is mutable
@@ -67,37 +69,88 @@ if (process.argv[2]?.startsWith("forged-function-pre")) forgeFunctionConstructor
 const proveForgeryLive = (): boolean | null => {
   if (forgedProcessValue === undefined) return null;
   const before = forgedConstructorCalls;
-  const viaGlobal = (new (globalThis as unknown as { Function: new (source: string) => () => () => string }).Function("return 0"))()();
-  const viaLiteral = (new ((function () {}).constructor as unknown as new (source: string) => () => () => string)("return 0"))()();
-  const viaPrototype = (new (Function.prototype.constructor as unknown as new (source: string) => () => () => string)("return 0"))()();
-  return viaGlobal === forgedProcessValue && viaLiteral === forgedProcessValue && viaPrototype === forgedProcessValue && forgedConstructorCalls === before + 3;
+  const viaGlobal = new (globalThis as unknown as { Function: new (source: string) => () => () => string }).Function(
+    "return 0",
+  )()();
+  const viaLiteral = new (function () {}.constructor as unknown as new (source: string) => () => () => string)(
+    "return 0",
+  )()();
+  const viaPrototype = new (Function.prototype.constructor as unknown as new (source: string) => () => () => string)(
+    "return 0",
+  )()();
+  return (
+    viaGlobal === forgedProcessValue &&
+    viaLiteral === forgedProcessValue &&
+    viaPrototype === forgedProcessValue &&
+    forgedConstructorCalls === before + 3
+  );
 };
-const { runScenario, scenario, step } = (await import(new URL(entry, import.meta.url).href)) as typeof import("../../src/index.ts");
+const { runScenario, scenario, step } = (await import(
+  new URL(entry, import.meta.url).href
+)) as typeof import("../../src/index.ts");
 
 // Incremented by the empty-binding adversary callbacks so the parent can
 // assert a rejected executable NEVER ran — a zero count plus a rejection code
 // is the proof that no identity was minted around live behavior.
 let executedCallbackRuns = 0;
-type Probe = Readonly<{ run?: StepRunner; runnerBinding?: string; input?: ScenarioValue; handcraftedBinding?: string; stepRunners?: Record<string, StepRunner> }>;
+type Probe = Readonly<{
+  run?: StepRunner;
+  runnerBinding?: string;
+  input?: ScenarioValue;
+  handcraftedBinding?: string;
+  stepRunners?: Record<string, StepRunner>;
+}>;
 const factories: Record<string, (value: string) => Probe> = {
   // Sol's fresh-process counterexample: ordinary-function closure with
   // byte-identical source across processes but different captured values.
-  "regular-function": (value) => ({ run: function () { return value; } }),
-  "function-expression-named": (value) => { const captured = value; return { run: function inner() { return captured; } }; },
+  "regular-function": (value) => ({
+    run: function () {
+      return value;
+    },
+  }),
+  "function-expression-named": (value) => {
+    const captured = value;
+    return {
+      run: function inner() {
+        return captured;
+      },
+    };
+  },
   "arrow-shorthand": (value) => ({ run: () => ({ value }) }),
-  "nested-block-shadow": (value) => ({ run: () => { { const value = "shadow"; void value; } return value; } }),
+  "nested-block-shadow": (value) => ({
+    run: () => {
+      {
+        const value = "shadow";
+        void value;
+      }
+      return value;
+    },
+  }),
   "spread-capture": (value) => ({ run: () => [...value] }),
   "nested-param-binder": (value) => ({ run: () => [value, ((x: string) => x)("x")] }),
-  "mutable-counter": (value) => { let n = value.length; return { run: () => ++n }; },
+  "mutable-counter": (value) => {
+    let n = value.length;
+    return { run: () => ++n };
+  },
   "shadowed-undefined": (value) => ((undefined) => ({ run: () => undefined as unknown }))(value),
   // Sol's nested-scope counterexample: the `var` inside the nested arrow is
   // scoped to THAT arrow, so the outer `return value` still reads the capture
   // while a scope-blind scan credits `value` as a local.
-  "nested-arrow-var-shadow": (value) => ({ run: () => { (() => { var value = "nested"; void value; })(); return value; } }),
+  "nested-arrow-var-shadow": (value) => ({
+    run: () => {
+      (() => {
+        var value = "nested";
+        void value;
+      })();
+      return value;
+    },
+  }),
   // Sol's Unicode counterexample: a dynamically constructed closure whose
   // identifiers are outside ASCII, invisible to an ASCII-only tokenizer.
   "unicode-identifier": (value) => {
-    const make = new Function("значение", "return () => { var результат = значение; return результат; }") as (v: string) => () => string;
+    const make = new Function("значение", "return () => { var результат = значение; return результат; }") as (
+      v: string,
+    ) => () => string;
     return { run: make(value) };
   },
   // Sol's meta-property counterexample: `new.target` is LEXICALLY captured by
@@ -105,7 +158,9 @@ const factories: Record<string, (value: string) => Probe> = {
   // the ENCLOSING factory was invoked — value "A" obtains the runner from
   // `make()` ("called"), value "B" from `new make()` ("constructed").
   "new-target-meta": (value) => {
-    function make() { return () => (new.target ? "constructed" : "called"); }
+    function make() {
+      return () => (new.target ? "constructed" : "called");
+    }
     const construct = make as unknown as new () => StepRunner;
     return { run: value === "B" ? new construct() : (make() as StepRunner) };
   },
@@ -116,20 +171,35 @@ const factories: Record<string, (value: string) => Probe> = {
   // identical anonymous identities with divergent traces.
   "computed-constructor": (value) => {
     process.env.SMITHERS_REPLAY_PROBE_VALUE = value;
-    return { run: () => (({}) as unknown as Record<string, Record<string, (source: string) => () => string>>)["constructor"]!["constructor"]!("return process.env.SMITHERS_REPLAY_PROBE_VALUE")() };
+    return {
+      run: () =>
+        (({}) as unknown as Record<string, Record<string, (source: string) => () => string>>)["constructor"]![
+          "constructor"
+        ]!("return process.env.SMITHERS_REPLAY_PROBE_VALUE")(),
+    };
   },
   // The dot-access twin of the computed form: same capability chain with no
   // computed access at all.
   "dot-constructor": (value) => {
     process.env.SMITHERS_REPLAY_PROBE_VALUE = value;
-    return { run: () => (({}).constructor.constructor as (source: string) => () => string)("return process.env.SMITHERS_REPLAY_PROBE_VALUE")() };
+    return {
+      run: () =>
+        (({}).constructor.constructor as (source: string) => () => string)(
+          "return process.env.SMITHERS_REPLAY_PROBE_VALUE",
+        )(),
+    };
   },
   // The parameter-chain twin: the only base object is the runner's own
   // parameter, so "references nothing but its parameters" is still not
   // statelessness once member access is allowed.
   "param-constructor": (value) => {
     process.env.SMITHERS_REPLAY_PROBE_VALUE = value;
-    return { run: (runtime) => ((runtime as unknown as { constructor: { constructor: (source: string) => () => string } }).constructor.constructor("return process.env.SMITHERS_REPLAY_PROBE_VALUE")()) };
+    return {
+      run: (runtime) =>
+        (
+          runtime as unknown as { constructor: { constructor: (source: string) => () => string } }
+        ).constructor.constructor("return process.env.SMITHERS_REPLAY_PROBE_VALUE")(),
+    };
   },
   // Sol's regular-expression counterexample: a scanner that does not lex
   // regex literals credits the regex TEXT `var value` as a local declaration,
@@ -146,21 +216,27 @@ const factories: Record<string, (value: string) => Probe> = {
   // probe did. Admission produced one anonymous identity with outputs "AA"
   // versus "BB"; every coercion-capable operator is now outside the grammar.
   "array-coercion-prototype": (value) => {
-    (Array.prototype as unknown as { toString: () => string }).toString = function () { return value; };
+    (Array.prototype as unknown as { toString: () => string }).toString = function () {
+      return value;
+    };
     return { run: () => ([] as unknown as string) + ([] as unknown as string) };
   },
   // The serialization twin: a pure array ALLOCATION with no operator at all
   // still reaches the mutable `Array.prototype.toJSON` when the result is
   // serialized, so allocation itself is outside the grammar.
   "array-tojson-prototype": (value) => {
-    (Array.prototype as unknown as { toJSON: () => string }).toJSON = function () { return value; };
+    (Array.prototype as unknown as { toJSON: () => string }).toJSON = function () {
+      return value;
+    };
     return { run: () => [0] };
   },
   // The async twin: awaiting (or resolving with) an object performs thenable
   // adoption — a mutable `Object.prototype.then` lookup — so `async`/`await`
   // are outside the grammar even when every identifier is a parameter.
   "await-thenable-prototype": (value) => {
-    (Object.prototype as unknown as { then: (resolve: (v: string) => void) => void }).then = function (resolve) { resolve(value); };
+    (Object.prototype as unknown as { then: (resolve: (v: string) => void) => void }).then = function (resolve) {
+      resolve(value);
+    };
     return { run: async (_runtime, input) => await input, input: { fixed: true } };
   },
   // Capture-free async arrow: rejected wholesale, not just when awaiting.
@@ -179,7 +255,9 @@ const factories: Record<string, (value: string) => Probe> = {
   // primitive-result guard cannot catch it (the result is a boolean), so
   // rejection at step() is the only sound outcome.
   "loose-inequality-toprimitive": (value) => {
-    (Object.prototype as unknown as Record<symbol, unknown>)[Symbol.toPrimitive] = function () { return value; };
+    (Object.prototype as unknown as Record<symbol, unknown>)[Symbol.toPrimitive] = function () {
+      return value;
+    };
     return { run: (_runtime, input) => (input as string) != "A", input: { fixed: true } };
   },
   // Pure object allocation: `toJSON`/`toString`/`valueOf` on the allocated
@@ -191,16 +269,29 @@ const factories: Record<string, (value: string) => Probe> = {
   // rejected — the forgery cannot mint an anonymous identity.
   "forged-tostring-post": (value) => {
     forgeFunctionToString();
-    return { run: function () { return value; } };
+    return {
+      run: function () {
+        return value;
+      },
+    };
   },
   // The PRE-import twin: the forgery IS the captured intrinsic, so the forged
   // source is admitted — but the executable is RECOMPILED from that same
   // digested source, so both processes run the forged source and equal replay
   // identities produce byte-identical outputs and traces, never a divergence.
-  "forged-tostring-pre": (value) => ({ run: function () { return value; } }),
+  "forged-tostring-pre": (value) => ({
+    run: function () {
+      return value;
+    },
+  }),
   // A caller-forged `anonymous:` binding would collide with framework-issued
   // content-addressed identities while naming a different executable.
-  "forged-anonymous-binding": (value) => ({ run: function () { return value; }, runnerBinding: "anonymous:forged" }),
+  "forged-anonymous-binding": (value) => ({
+    run: function () {
+      return value;
+    },
+    runnerBinding: "anonymous:forged",
+  }),
   // ADMITTED passthrough whose object result must be stopped by the kernel's
   // primitive-result guard BEFORE `Promise.resolve` can perform thenable
   // adoption on it. No prototype mutation here: a process-global
@@ -218,7 +309,12 @@ const factories: Record<string, (value: string) => Probe> = {
   // caller-bound ORIGINAL callback runs, the forged constructor is never
   // invoked, and equal identities yield byte-identical outputs and traces.
   "forged-function-pre-anonymous": () => ({ run: () => "same" }),
-  "forged-function-pre-bound": () => ({ run: function () { return "same"; }, runnerBinding: "fixture:forged-function:v1" }),
+  "forged-function-pre-bound": () => ({
+    run: function () {
+      return "same";
+    },
+    runnerBinding: "fixture:forged-function:v1",
+  }),
   // Sol's round-9 counterexample: `runnerBinding: ""` counted as explicit
   // (bypassing RUNNER_BINDING_REQUIRED), truthiness spreads dropped it from
   // the canonical AST, and the builder registry still held the executable —
@@ -226,21 +322,49 @@ const factories: Record<string, (value: string) => Probe> = {
   // identity, and divergent process-captured traces. The builder must reject
   // the empty (and whitespace-only) binding outright: no identity minted, no
   // registration, the callback never runs.
-  "empty-binding": (value) => ({ run: function () { executedCallbackRuns++; return value; }, runnerBinding: "" }),
-  "whitespace-binding": (value) => ({ run: function () { executedCallbackRuns++; return value; }, runnerBinding: "   " }),
+  "empty-binding": (value) => ({
+    run: function () {
+      executedCallbackRuns++;
+      return value;
+    },
+    runnerBinding: "",
+  }),
+  "whitespace-binding": (value) => ({
+    run: function () {
+      executedCallbackRuns++;
+      return value;
+    },
+    runnerBinding: "   ",
+  }),
   // The hand-crafted twins: an AST is plain data, so a step carrying the
   // invalid empty binding can bypass the builder entirely. Admission must
   // refuse it — with an out-of-band runner attached (the runner requires a
   // VALID canonical binding) and equally when inert (malformed identity is
   // rejected even with no executable in sight).
-  "handcrafted-empty-binding": (value) => ({ handcraftedBinding: "", stepRunners: { probe: function () { executedCallbackRuns++; return value; } } }),
+  "handcrafted-empty-binding": (value) => ({
+    handcraftedBinding: "",
+    stepRunners: {
+      probe: function () {
+        executedCallbackRuns++;
+        return value;
+      },
+    },
+  }),
   "handcrafted-empty-binding-inert": () => ({ handcraftedBinding: "" }),
-  "explicit-binding-distinct": (value) => ({ run: function () { return value; }, runnerBinding: `fixture:value:${value}` }),
+  "explicit-binding-distinct": (value) => ({
+    run: function () {
+      return value;
+    },
+    runnerBinding: `fixture:value:${value}`,
+  }),
   "stateless-arrow": () => ({ run: () => "same" }),
   "stateless-passthrough": () => ({ run: (_runtime, input) => input ?? "fallback" }),
   // The taskRuntime authoring pattern is member access and therefore requires
   // an explicit binding; bound, it must replay byte-identically.
-  "bound-runtime-effect": () => ({ run: (runtime) => runtime.effect("write", () => "ok"), runnerBinding: "fixture:runtime-effect:v1" }),
+  "bound-runtime-effect": () => ({
+    run: (runtime) => runtime.effect("write", () => "ok"),
+    runnerBinding: "fixture:runtime-effect:v1",
+  }),
 };
 
 const [form, value] = process.argv.slice(2);
@@ -254,25 +378,46 @@ try {
   // The binding spread is on `undefined`, NEVER truthiness: an empty-string
   // binding must reach step() as supplied so the builder's own rejection is
   // what this probe observes, not a fixture-side laundering of the input.
-  const probeStep = probe.handcraftedBinding !== undefined
-    ? (Object.freeze({ kind: "step", id: "probe", input: probe.input ?? "seed-input", dependsOn: [], capabilities: [], runnerBinding: probe.handcraftedBinding }) as unknown as ScenarioStep)
-    : step("probe", { input: probe.input ?? "seed-input", ...(probe.run ? { run: probe.run } : {}), ...(probe.runnerBinding !== undefined ? { runnerBinding: probe.runnerBinding } : {}) });
+  const probeStep =
+    probe.handcraftedBinding !== undefined
+      ? (Object.freeze({
+          kind: "step",
+          id: "probe",
+          input: probe.input ?? "seed-input",
+          dependsOn: [],
+          capabilities: [],
+          runnerBinding: probe.handcraftedBinding,
+        }) as unknown as ScenarioStep)
+      : step("probe", {
+          input: probe.input ?? "seed-input",
+          ...(probe.run ? { run: probe.run } : {}),
+          ...(probe.runnerBinding !== undefined ? { runnerBinding: probe.runnerBinding } : {}),
+        });
   const ast = scenario("fresh-process-identity", { seed: 7, steps: [probeStep] });
   const result = await runScenario(ast, { seed: 7, ...(probe.stepRunners ? { stepRunners: probe.stepRunners } : {}) });
   const projection = JSON.parse(JSON.stringify({ outputs: result.outputs, trace: result.trace }));
   const frameworkConstructorCalls = forgedConstructorCalls;
-  console.log(JSON.stringify({
-    identity: result.replayIdentity,
-    binding: ast.steps[0]?.runnerBinding ?? null,
-    status: result.status,
-    errorCode: result.error?.code ?? null,
-    outputs: projection.outputs,
-    traceDigest: createHash("sha256").update(JSON.stringify(projection)).digest("hex"),
-    forgedConstructorCalls: frameworkConstructorCalls,
-    forgeryLive: proveForgeryLive(),
-    executedCallbackRuns,
-  }));
+  console.log(
+    JSON.stringify({
+      identity: result.replayIdentity,
+      binding: ast.steps[0]?.runnerBinding ?? null,
+      status: result.status,
+      errorCode: result.error?.code ?? null,
+      outputs: projection.outputs,
+      traceDigest: createHash("sha256").update(JSON.stringify(projection)).digest("hex"),
+      forgedConstructorCalls: frameworkConstructorCalls,
+      forgeryLive: proveForgeryLive(),
+      executedCallbackRuns,
+    }),
+  );
 } catch (error) {
   const frameworkConstructorCalls = forgedConstructorCalls;
-  console.log(JSON.stringify({ threw: (error as { code?: string }).code ?? String(error), forgedConstructorCalls: frameworkConstructorCalls, forgeryLive: proveForgeryLive(), executedCallbackRuns }));
+  console.log(
+    JSON.stringify({
+      threw: (error as { code?: string }).code ?? String(error),
+      forgedConstructorCalls: frameworkConstructorCalls,
+      forgeryLive: proveForgeryLive(),
+      executedCallbackRuns,
+    }),
+  );
 }

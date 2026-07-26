@@ -7,8 +7,8 @@ import type { AspectAccumulator } from "./AspectAccumulator.ts";
  * The value provided by AspectContext to descendant components.
  */
 export type AspectContextValue = {
-	tokenBudget?: TokenBudgetConfig;
-	latencySlo?: LatencySloConfig;
-	tracking: TrackingConfig;
-	accumulator: AspectAccumulator;
+  tokenBudget?: TokenBudgetConfig;
+  latencySlo?: LatencySloConfig;
+  tracking: TrackingConfig;
+  accumulator: AspectAccumulator;
 };

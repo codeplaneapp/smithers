@@ -50,7 +50,9 @@ async function withTempPostgresDatabase(fn) {
     const cleanup = new pg.Client({ connectionString: PG_URL });
     await cleanup.connect();
     await cleanup
-      .query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()", [database])
+      .query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()", [
+        database,
+      ])
       .catch(() => {});
     await cleanup.query(`DROP DATABASE IF EXISTS ${quoteId(database)}`).catch(() => {});
     await cleanup.end().catch(() => {});
@@ -84,7 +86,9 @@ pgTest("many workflow registrations against one URL stay inside one bounded pool
 
     const backends = [];
     for (let i = 0; i < 6; i += 1) {
-      backends.push(await createSmithersPostgres(schemas, { provider: "postgres", connectionString, postgresPoolMax: 4 }));
+      backends.push(
+        await createSmithersPostgres(schemas, { provider: "postgres", connectionString, postgresPoolMax: 4 }),
+      );
     }
     cleanups.push(async () => {
       for (const backend of backends) await backend.close().catch(() => {});

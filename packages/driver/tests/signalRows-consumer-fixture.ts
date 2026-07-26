@@ -11,4 +11,10 @@ row.correlationId satisfies string | null;
 row.payload.anything satisfies string;
 
 const scoped = ctx.signalRows("REVISE", { correlationId: "rev-1" });
-scoped satisfies Array<{ payload: unknown; signalName: string; correlationId: string | null; seq: number; receivedAtMs: number }>;
+scoped satisfies Array<{
+  payload: unknown;
+  signalName: string;
+  correlationId: string | null;
+  seq: number;
+  receivedAtMs: number;
+}>;

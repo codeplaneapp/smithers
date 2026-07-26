@@ -294,7 +294,8 @@ describe("Gateway SSE subscriber caps", () => {
     gateway.broadcastEvent("run.started", { runId: "run-sse-multi" });
     for (const stream of streams) {
       await stream.waitForEvent(
-        (event) => event.event === "change" && Array.isArray(event.data?.collections) && event.data.collections.includes("runs"),
+        (event) =>
+          event.event === "change" && Array.isArray(event.data?.collections) && event.data.collections.includes("runs"),
         "coalesced change frame",
       );
     }
@@ -382,9 +383,6 @@ describe("Gateway SSE subscriber caps", () => {
     slow.resume();
     await waitFor(() => received.slice(drainedFrom).includes("event: reset"), "reset after drain");
     const recoverySeq = (await gateway.queueApiInvalidation(["runs"])) as number;
-    await waitFor(
-      () => received.includes(`id: ${recoverySeq}`),
-      "live frame after recovery",
-    );
+    await waitFor(() => received.includes(`id: ${recoverySeq}`), "live frame after recovery");
   });
 });

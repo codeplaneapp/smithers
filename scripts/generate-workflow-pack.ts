@@ -148,9 +148,7 @@ function uiRelativeImportsOf(source: string, fromUiPath: string): string[] {
 
 /** Resolve a ui import specifier to an on-disk file under `.smithers/ui/`. */
 function resolveUiFile(specifier: string): { relPath: string; absPath: string } {
-  const candidates = /\.(tsx?|ts|js|json)$/.test(specifier)
-    ? [specifier]
-    : [`${specifier}.tsx`, `${specifier}.ts`];
+  const candidates = /\.(tsx?|ts|js|json)$/.test(specifier) ? [specifier] : [`${specifier}.tsx`, `${specifier}.ts`];
   for (const candidate of candidates) {
     const absPath = resolve(SMITHERS_DIR, "ui", candidate);
     if (existsSync(absPath)) return { relPath: candidate, absPath };
@@ -185,9 +183,11 @@ function readOrThrow(absPath: string, label: string): string {
 
 function dddStarterUiContents(relPath: string, canonical: string): string {
   if (relPath === "ddd-features.generated.ts") return "export const featuresData = [];\n";
-  if (relPath === "ddd-docsContent.generated.ts") return 'export const docsContent: { path: string; title: string; level: "product" | "technical"; content: string }[] = [];\nexport type DocsContentEntry = (typeof docsContent)[number];\n';
+  if (relPath === "ddd-docsContent.generated.ts")
+    return 'export const docsContent: { path: string; title: string; level: "product" | "technical"; content: string }[] = [];\nexport type DocsContentEntry = (typeof docsContent)[number];\n';
   if (relPath === "ddd-ticketsBacklog.generated.ts") return "export const ticketsBacklog = [];\n";
-  if (relPath === "ddd-workflowSource.generated.ts") return 'export const workflowSourcePath = ".smithers/workflows/docs-driven-development.tsx";\nexport const workflowSource = "";\nexport const workflowSources = {};\n';
+  if (relPath === "ddd-workflowSource.generated.ts")
+    return 'export const workflowSourcePath = ".smithers/workflows/docs-driven-development.tsx";\nexport const workflowSource = "";\nexport const workflowSources = {};\n';
   return canonical;
 }
 
@@ -244,7 +244,10 @@ function build(): TemplateFile[] {
     if (id === "docs-driven-development") {
       for (const helper of DDD_HELPER_FILES) libQueue.push(resolveLibFile(`ddd/${helper}`));
       push(".smithers/spec/features.json", "[]\n");
-      push(".smithers/spec/content/overview.md", "# Product specification\n\nThis starter spec is intentionally empty. Run docs-driven-development to describe the target repository.\n");
+      push(
+        ".smithers/spec/content/overview.md",
+        "# Product specification\n\nThis starter spec is intentionally empty. Run docs-driven-development to describe the target repository.\n",
+      );
     }
     const visitedLibs = new Set<string>();
     while (libQueue.length > 0) {

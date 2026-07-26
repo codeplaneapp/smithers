@@ -8,7 +8,6 @@ import { isKnownSmithersErrorCode } from "./isKnownSmithersErrorCode.js";
  * @returns {SmithersErrorDefinition | undefined}
  */
 export function getSmithersErrorDefinition(code) {
-    if (!isKnownSmithersErrorCode(code))
-        return undefined;
-    return smithersErrorDefinitions[code];
+  if (!isKnownSmithersErrorCode(code)) return undefined;
+  return smithersErrorDefinitions[code];
 }

@@ -5,9 +5,7 @@ export type ChatBody = {
   system?: string;
 };
 
-export type ValidationResult =
-  | { ok: true; body: ChatBody }
-  | { ok: false; status: number; message: string };
+export type ValidationResult = { ok: true; body: ChatBody } | { ok: false; status: number; message: string };
 
 const MAX_MESSAGES = 100;
 const MAX_CONTENT_BYTES = 100 * 1024;
@@ -18,10 +16,7 @@ const encoder = new TextEncoder();
 function isChatMessage(value: unknown): value is ChatMessage {
   if (value === null || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
-  return (
-    (candidate.role === "user" || candidate.role === "assistant") &&
-    typeof candidate.content === "string"
-  );
+  return (candidate.role === "user" || candidate.role === "assistant") && typeof candidate.content === "string";
 }
 
 /**

@@ -14,13 +14,13 @@ import type { z } from "zod";
  * fields instead of an untyped `Record<string, unknown>`.
  */
 export type ResolveOutputRow<Schema, T> = T extends keyof Schema
-	? Schema[T] extends z.ZodTypeAny
-		? z.infer<Schema[T]>
-		: Schema[T] extends { $inferSelect: infer R }
-			? R
-			: Record<string, unknown>
-	: T extends z.ZodTypeAny
-		? z.infer<T>
-		: T extends { $inferSelect: infer R }
-			? R
-			: Record<string, unknown>;
+  ? Schema[T] extends z.ZodTypeAny
+    ? z.infer<Schema[T]>
+    : Schema[T] extends { $inferSelect: infer R }
+      ? R
+      : Record<string, unknown>
+  : T extends z.ZodTypeAny
+    ? z.infer<T>
+    : T extends { $inferSelect: infer R }
+      ? R
+      : Record<string, unknown>;

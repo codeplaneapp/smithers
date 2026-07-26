@@ -3,10 +3,7 @@ import { normalizeCapabilityRegistry } from "../src/capability-registry/normaliz
 import { hashCapabilityRegistry } from "../src/capability-registry/hashCapabilityRegistry.js";
 import { formatCliAgentCapabilityDoctorReport } from "../src/cli-capabilities/formatCliAgentCapabilityDoctorReport.js";
 import { getCliAgentCapabilityReport } from "../src/cli-capabilities/getCliAgentCapabilityReport.js";
-import {
-  getCliAgentSurfaceManifestEntry,
-  listCliAgentSurfaceManifests,
-} from "../src/cli-surface/index.js";
+import { getCliAgentSurfaceManifestEntry, listCliAgentSurfaceManifests } from "../src/cli-surface/index.js";
 import { createSmithersAgentContract } from "../src/agent-contract/index.js";
 
 /**
@@ -170,7 +167,15 @@ describe("createSmithersAgentContract categorization", () => {
       ],
     });
     const byName = Object.fromEntries(contract.tools.map((t) => [t.name, t]));
-    for (const name of ["fork_run", "replay_run", "rewind_run", "restore_checkpoint", "list_snapshots", "get_timeline", "time_travel"]) {
+    for (const name of [
+      "fork_run",
+      "replay_run",
+      "rewind_run",
+      "restore_checkpoint",
+      "list_snapshots",
+      "get_timeline",
+      "time_travel",
+    ]) {
       expect(byName[name].category).toBe("debug");
       expect(contract.promptGuidance).toContain(name);
     }

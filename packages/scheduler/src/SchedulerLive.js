@@ -4,5 +4,6 @@ import { scheduleTasks } from "./scheduleTasks.js";
 
 /** @type {Layer.Layer<Scheduler, never, never>} */
 export const SchedulerLive = Layer.succeed(Scheduler, {
-    schedule: (plan, states, descriptors, ralphState, retryWait, nowMs, taskFailures) => Effect.sync(() => scheduleTasks(plan, states, descriptors, ralphState, retryWait, nowMs, taskFailures)),
+  schedule: (plan, states, descriptors, ralphState, retryWait, nowMs, taskFailures) =>
+    Effect.sync(() => scheduleTasks(plan, states, descriptors, ralphState, retryWait, nowMs, taskFailures)),
 });

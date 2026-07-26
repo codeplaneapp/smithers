@@ -5,12 +5,11 @@ import { Effect } from "effect";
  * @returns {Effect.Effect<void>}
  */
 export function ignoreSyncError(_label, fn) {
-    return Effect.sync(() => {
-        try {
-            fn();
-        }
-        catch {
-            // Best-effort cleanup intentionally swallows failures.
-        }
-    });
+  return Effect.sync(() => {
+    try {
+      fn();
+    } catch {
+      // Best-effort cleanup intentionally swallows failures.
+    }
+  });
 }

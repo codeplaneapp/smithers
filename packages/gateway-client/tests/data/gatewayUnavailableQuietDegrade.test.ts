@@ -54,11 +54,13 @@ describe("HTML-fallback responses classify as GATEWAY_UNAVAILABLE", () => {
   });
 
   test("a 2xx JSON body that is not an envelope also classifies unavailable", async () => {
-    const client = clientWith((async () =>
-      new Response(JSON.stringify({ hello: "world" }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      })) as unknown as typeof fetch);
+    const client = clientWith(
+      (async () =>
+        new Response(JSON.stringify({ hello: "world" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })) as unknown as typeof fetch,
+    );
     const error = await client.api.listWorkflows().then(
       () => undefined,
       (cause: unknown) => cause,
@@ -93,11 +95,13 @@ describe("HTML-fallback responses classify as GATEWAY_UNAVAILABLE", () => {
   });
 
   test("a real gateway error envelope is not misclassified", async () => {
-    const client = clientWith((async () =>
-      new Response(JSON.stringify({ ok: false, error: { code: "RUN_NOT_FOUND", message: "no such run" } }), {
-        status: 404,
-        headers: { "content-type": "application/json" },
-      })) as unknown as typeof fetch);
+    const client = clientWith(
+      (async () =>
+        new Response(JSON.stringify({ ok: false, error: { code: "RUN_NOT_FOUND", message: "no such run" } }), {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        })) as unknown as typeof fetch,
+    );
     const error = await client.api.getRun({ runId: "r1" }).then(
       () => undefined,
       (cause: unknown) => cause,
@@ -256,7 +260,10 @@ describe("unavailable-gateway notice and recovery", () => {
         });
       }
       return new Response(
-        JSON.stringify({ ok: true, data: [{ cronId: "cron-1", workflow: "value", pattern: "* * * * *", enabled: true }] }),
+        JSON.stringify({
+          ok: true,
+          data: [{ cronId: "cron-1", workflow: "value", pattern: "* * * * *", enabled: true }],
+        }),
         { status: 200, headers: { "content-type": "application/json" } },
       );
     }) as unknown as typeof fetch);

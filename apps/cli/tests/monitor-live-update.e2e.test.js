@@ -104,70 +104,78 @@ async function stopGateway(process) {
   }
 }
 
-browserTest("monitor renders an out-of-band approval run without a reload", async () => {
-  const binDir = createExecutableDir();
-  writeFakeClaudeBinary(binDir);
-  writeFakeCodexBinary(binDir);
-  writeFakeAntigravityBinary(binDir);
-  const repo = createTempRepo();
-  pinSqliteBackend(repo.dir);
-  const env = {
-    HOME: repo.dir,
-    PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
-    ANTHROPIC_API_KEY: "",
-    OPENAI_API_KEY: "sk-test-openai-key",
-    GEMINI_API_KEY: "",
-    GOOGLE_API_KEY: "",
-  };
-  repo.write(".claude/.credentials.json", "{}\n");
-  repo.write(".codex/auth.json", "{}\n");
-  repo.write(".gemini/antigravity-cli/settings.json", "{}\n");
+browserTest(
+  "monitor renders an out-of-band approval run without a reload",
+  async () => {
+    const binDir = createExecutableDir();
+    writeFakeClaudeBinary(binDir);
+    writeFakeCodexBinary(binDir);
+    writeFakeAntigravityBinary(binDir);
+    const repo = createTempRepo();
+    pinSqliteBackend(repo.dir);
+    const env = {
+      HOME: repo.dir,
+      PATH: [binDir, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(delimiter),
+      ANTHROPIC_API_KEY: "",
+      OPENAI_API_KEY: "sk-test-openai-key",
+      GEMINI_API_KEY: "",
+      GOOGLE_API_KEY: "",
+    };
+    repo.write(".claude/.credentials.json", "{}\n");
+    repo.write(".codex/auth.json", "{}\n");
+    repo.write(".gemini/antigravity-cli/settings.json", "{}\n");
 
-  expect(runSmithers(["init"], { cwd: repo.dir, format: "json", env }).exitCode).toBe(0);
-  repo.write(".smithers/workflows/monitor-live-update-probe.tsx", APPROVAL_WORKFLOW);
+    expect(runSmithers(["init"], { cwd: repo.dir, format: "json", env }).exitCode).toBe(0);
+    repo.write(".smithers/workflows/monitor-live-update-probe.tsx", APPROVAL_WORKFLOW);
 
-  const port = await findOpenPort();
-  const base = `http://127.0.0.1:${port}`;
-  // Use the real CLI gateway rather than the init-pack gateway entry: it owns
-  // the Monitor mount at /monitor.
-  const gatewayProc = spawn(process.execPath, ["run", CLI_ENTRY, "gateway", "--port", String(port)], {
-    cwd: repo.dir,
-    env: { ...process.env, ...env, PORT: String(port), HOST: "127.0.0.1" },
-    stdio: "ignore",
-  });
-  let browser;
-  try {
-    expect(await waitForHealth(base)).toBe(true);
-    browser = await CHROMIUM.launch({ headless: true });
-    const page = await browser.newPage();
-    await page.goto(`${base}/monitor`, { waitUntil: "domcontentloaded" });
-    await page.waitForSelector('[data-testid="monitor-root"]', { timeout: 20_000 }).catch(async (error) => {
-      throw new Error(`${error.message}\nMonitor body: ${(await page.locator("body").textContent())?.slice(0, 2000)}`);
+    const port = await findOpenPort();
+    const base = `http://127.0.0.1:${port}`;
+    // Use the real CLI gateway rather than the init-pack gateway entry: it owns
+    // the Monitor mount at /monitor.
+    const gatewayProc = spawn(process.execPath, ["run", CLI_ENTRY, "gateway", "--port", String(port)], {
+      cwd: repo.dir,
+      env: { ...process.env, ...env, PORT: String(port), HOST: "127.0.0.1" },
+      stdio: "ignore",
     });
+    let browser;
+    try {
+      expect(await waitForHealth(base)).toBe(true);
+      browser = await CHROMIUM.launch({ headless: true });
+      const page = await browser.newPage();
+      await page.goto(`${base}/monitor`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector('[data-testid="monitor-root"]', { timeout: 20_000 }).catch(async (error) => {
+        throw new Error(
+          `${error.message}\nMonitor body: ${(await page.locator("body").textContent())?.slice(0, 2000)}`,
+        );
+      });
 
-    const runId = "monitor-live-update-run";
-    const navigationCount = await page.evaluate(() => performance.getEntriesByType("navigation").length);
-    expect((await page.locator("body").textContent()) ?? "").not.toContain(runId);
-    const launched = await rpc(base, "launchRun", {
-      workflow: "monitor-live-update-probe",
-      input: {},
-      runId,
-    });
-    expect(launched.runId).toBe(runId);
+      const runId = "monitor-live-update-run";
+      const navigationCount = await page.evaluate(() => performance.getEntriesByType("navigation").length);
+      expect((await page.locator("body").textContent()) ?? "").not.toContain(runId);
+      const launched = await rpc(base, "launchRun", {
+        workflow: "monitor-live-update-probe",
+        input: {},
+        runId,
+      });
+      expect(launched.runId).toBe(runId);
 
-    // The gateway's real collection stream invalidates the already-mounted
-    // monitor; this waits for the new DOM state and deliberately never reloads.
-    await page.waitForFunction(
-      () => (document.body.textContent ?? "").includes("monitor-live-update-probe"),
-      { timeout: 30_000 },
-    );
-    await page.waitForFunction(
-      () => (document.body.textContent ?? "").includes("Live monitor approval"),
-      { timeout: 30_000 },
-    );
-    expect(await page.evaluate(() => performance.getEntriesByType("navigation").length)).toBe(navigationCount);
-  } finally {
-    try { await browser?.close(); } catch {}
-    try { await stopGateway(gatewayProc); } catch {}
-  }
-}, 180_000);
+      // The gateway's real collection stream invalidates the already-mounted
+      // monitor; this waits for the new DOM state and deliberately never reloads.
+      await page.waitForFunction(() => (document.body.textContent ?? "").includes("monitor-live-update-probe"), {
+        timeout: 30_000,
+      });
+      await page.waitForFunction(() => (document.body.textContent ?? "").includes("Live monitor approval"), {
+        timeout: 30_000,
+      });
+      expect(await page.evaluate(() => performance.getEntriesByType("navigation").length)).toBe(navigationCount);
+    } finally {
+      try {
+        await browser?.close();
+      } catch {}
+      try {
+        await stopGateway(gatewayProc);
+      } catch {}
+    }
+  },
+  180_000,
+);

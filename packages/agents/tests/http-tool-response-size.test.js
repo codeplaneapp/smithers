@@ -41,10 +41,7 @@ describe("createHttpTool response body size limit", () => {
     globalThis.fetch = mock(async () => streamed.response);
 
     const error = await captureRejection(
-      createHttpTool({ maxResponseBodyBytes: 8 }).execute(
-        { url: "https://api.example.com/payload" },
-        callOptions,
-      ),
+      createHttpTool({ maxResponseBodyBytes: 8 }).execute({ url: "https://api.example.com/payload" }, callOptions),
     );
 
     expect(String(error)).toMatch(/maxResponseBodyBytes.*8/);
@@ -56,13 +53,10 @@ describe("createHttpTool response body size limit", () => {
   test("accepts and parses a response exactly at the cap", async () => {
     const body = JSON.stringify({ ok: true });
     const bodyBytes = encoder.encode(body);
-    const streamed = makeStreamResponse(
-      [bodyBytes.slice(0, 3), bodyBytes.slice(3)],
-      {
-        "content-length": String(bodyBytes.byteLength),
-        "content-type": "application/json",
-      },
-    );
+    const streamed = makeStreamResponse([bodyBytes.slice(0, 3), bodyBytes.slice(3)], {
+      "content-length": String(bodyBytes.byteLength),
+      "content-type": "application/json",
+    });
     globalThis.fetch = mock(async () => streamed.response);
 
     const result = await createHttpTool({
@@ -79,10 +73,7 @@ describe("createHttpTool response body size limit", () => {
     globalThis.fetch = mock(async () => responseWithReader(reader));
 
     const error = await captureRejection(
-      createHttpTool({ maxResponseBodyBytes: 4 }).execute(
-        { url: "https://api.example.com/payload" },
-        callOptions,
-      ),
+      createHttpTool({ maxResponseBodyBytes: 4 }).execute({ url: "https://api.example.com/payload" }, callOptions),
     );
 
     expect(String(error)).toMatch(/maxResponseBodyBytes.*4/);
@@ -124,23 +115,26 @@ describe("createHttpTool response body size limit", () => {
  * @param {HeadersInit} [headers]
  */
 function makeStreamResponse(chunks, headers = { "content-type": "text/plain" }) {
-  const queued = chunks.map((chunk) => typeof chunk === "string" ? encoder.encode(chunk) : chunk);
+  const queued = chunks.map((chunk) => (typeof chunk === "string" ? encoder.encode(chunk) : chunk));
   let pulls = 0;
   let cancelledWith;
-  const body = new ReadableStream({
-    pull(controller) {
-      pulls += 1;
-      const chunk = queued.shift();
-      if (chunk === undefined) {
-        controller.close();
-        return;
-      }
-      controller.enqueue(chunk);
+  const body = new ReadableStream(
+    {
+      pull(controller) {
+        pulls += 1;
+        const chunk = queued.shift();
+        if (chunk === undefined) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunk);
+      },
+      cancel(reason) {
+        cancelledWith = reason;
+      },
     },
-    cancel(reason) {
-      cancelledWith = reason;
-    },
-  }, { highWaterMark: 0 });
+    { highWaterMark: 0 },
+  );
   const response = new Response(body, { headers });
   return {
     response,

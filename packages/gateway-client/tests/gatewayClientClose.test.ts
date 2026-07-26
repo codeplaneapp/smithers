@@ -50,7 +50,13 @@ function hangingFetch(seen: AbortSignal[]): typeof fetch {
     const signal = init?.signal ?? undefined;
     if (signal) seen.push(signal);
     return new Promise<Response>((_resolve, reject) => {
-      signal?.addEventListener("abort", () => { reject(new Error("aborted")); }, { once: true });
+      signal?.addEventListener(
+        "abort",
+        () => {
+          reject(new Error("aborted"));
+        },
+        { once: true },
+      );
     });
   }) as unknown as typeof fetch;
 }
@@ -147,7 +153,9 @@ describe("SmithersGatewayClient.close", () => {
     })();
 
     await Promise.resolve();
-    await new Promise((resolve) => { setTimeout(resolve, 20); });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
     expect(ended).toBe(false);
 
     client.close();
@@ -158,7 +166,9 @@ describe("SmithersGatewayClient.close", () => {
   test("does not send a handshake when close races the socket open event", async () => {
     FakeWebSocket.instances = [];
     let client!: SmithersGatewayClient;
-    FakeWebSocket.afterOpen = () => { client.close(); };
+    FakeWebSocket.afterOpen = () => {
+      client.close();
+    };
     client = new SmithersGatewayClient({
       baseUrl: "http://gateway.test",
       WebSocket: FakeWebSocket as unknown as typeof WebSocket,
@@ -174,7 +184,9 @@ describe("SmithersGatewayClient.close", () => {
     FakeWebSocket.instances = [];
     FakeWebSocket.afterOpen = undefined;
     let client!: SmithersGatewayClient;
-    FakeWebSocket.onSend = () => { client.close(); };
+    FakeWebSocket.onSend = () => {
+      client.close();
+    };
     client = new SmithersGatewayClient({
       baseUrl: "http://gateway.test",
       WebSocket: FakeWebSocket as unknown as typeof WebSocket,

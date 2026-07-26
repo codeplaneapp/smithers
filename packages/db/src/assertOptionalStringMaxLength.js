@@ -5,7 +5,6 @@ import { assertMaxStringLength } from "./assertMaxStringLength.js";
  * @param {number} maxLength
  */
 export function assertOptionalStringMaxLength(field, value, maxLength) {
-    if (value === undefined || value === null)
-        return;
-    assertMaxStringLength(field, value, maxLength);
+  if (value === undefined || value === null) return;
+  assertMaxStringLength(field, value, maxLength);
 }

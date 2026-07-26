@@ -15,11 +15,16 @@ describe("ControlPlaneStore", () => {
     try {
       const org = store.createOrg({ orgId: "org_x", slug: "x", name: "X", createdAtMs: 1 });
       const team = store.createTeam({ orgId: org.orgId, teamId: "team_a", slug: "a", name: "A", createdAtMs: 2 });
-      const project = store.createProject({ orgId: org.orgId, projectId: "project_b", slug: "b", name: "B", createdAtMs: 3 });
+      const project = store.createProject({
+        orgId: org.orgId,
+        projectId: "project_b",
+        slug: "b",
+        name: "B",
+        createdAtMs: 3,
+      });
       expect(team.slug).toBe("a");
       expect(project.slug).toBe("b");
-    }
-    finally {
+    } finally {
       sqlite.close();
     }
   });
@@ -29,36 +34,39 @@ describe("ControlPlaneStore", () => {
     try {
       store.createOrg({ orgId: "org_acme", slug: "acme", name: "Acme", createdAtMs: 1 });
 
-      expect(() =>
-        store.createOrg({ orgId: "org_other", slug: "acme", name: "Other", createdAtMs: 2 }),
-      ).toThrow(SmithersError);
-      expect(() =>
-        store.createOrg({ orgId: "org_other", slug: "acme", name: "Other", createdAtMs: 2 }),
-      ).toThrow(expect.objectContaining({
-        code: "DUPLICATE_ID",
-        summary: "Duplicate control-plane org slug: acme",
-        details: { kind: "control-plane.org", id: "acme", slug: "acme" },
-      }));
+      expect(() => store.createOrg({ orgId: "org_other", slug: "acme", name: "Other", createdAtMs: 2 })).toThrow(
+        SmithersError,
+      );
+      expect(() => store.createOrg({ orgId: "org_other", slug: "acme", name: "Other", createdAtMs: 2 })).toThrow(
+        expect.objectContaining({
+          code: "DUPLICATE_ID",
+          summary: "Duplicate control-plane org slug: acme",
+          details: { kind: "control-plane.org", id: "acme", slug: "acme" },
+        }),
+      );
 
       store.createTeam({ orgId: "org_acme", teamId: "team_ops", slug: "ops", name: "Ops", createdAtMs: 3 });
       expect(() =>
         store.createTeam({ orgId: "org_acme", teamId: "team_support", slug: "ops", name: "Support", createdAtMs: 4 }),
-      ).toThrow(expect.objectContaining({
-        code: "DUPLICATE_ID",
-        summary: "Duplicate control-plane team slug: ops",
-        details: { kind: "control-plane.team", id: "ops", slug: "ops", orgId: "org_acme" },
-      }));
+      ).toThrow(
+        expect.objectContaining({
+          code: "DUPLICATE_ID",
+          summary: "Duplicate control-plane team slug: ops",
+          details: { kind: "control-plane.team", id: "ops", slug: "ops", orgId: "org_acme" },
+        }),
+      );
 
       store.createProject({ orgId: "org_acme", projectId: "project_api", slug: "api", name: "API", createdAtMs: 5 });
       expect(() =>
         store.createProject({ orgId: "org_acme", projectId: "project_web", slug: "api", name: "Web", createdAtMs: 6 }),
-      ).toThrow(expect.objectContaining({
-        code: "DUPLICATE_ID",
-        summary: "Duplicate control-plane project slug: api",
-        details: { kind: "control-plane.project", id: "api", slug: "api", orgId: "org_acme" },
-      }));
-    }
-    finally {
+      ).toThrow(
+        expect.objectContaining({
+          code: "DUPLICATE_ID",
+          summary: "Duplicate control-plane project slug: api",
+          details: { kind: "control-plane.project", id: "api", slug: "api", orgId: "org_acme" },
+        }),
+      );
+    } finally {
       sqlite.close();
     }
   });
@@ -67,7 +75,13 @@ describe("ControlPlaneStore", () => {
     const { sqlite, store } = makeStore();
     try {
       const org = store.createOrg({ orgId: "org_acme", slug: "acme", name: "Acme", createdAtMs: 10 });
-      const team = store.createTeam({ orgId: org.orgId, teamId: "team_ops", slug: "ops", name: "Operators", createdAtMs: 20 });
+      const team = store.createTeam({
+        orgId: org.orgId,
+        teamId: "team_ops",
+        slug: "ops",
+        name: "Operators",
+        createdAtMs: 20,
+      });
       store.addTeamMember({ orgId: org.orgId, teamId: team.teamId, userId: "user_1", role: "admin", createdAtMs: 30 });
       const project = store.createProject({
         orgId: org.orgId,
@@ -77,7 +91,13 @@ describe("ControlPlaneStore", () => {
         metadata: { environment: "prod" },
         createdAtMs: 40,
       });
-      store.addProjectTeam({ orgId: org.orgId, projectId: project.projectId, teamId: team.teamId, role: "operator", createdAtMs: 50 });
+      store.addProjectTeam({
+        orgId: org.orgId,
+        projectId: project.projectId,
+        teamId: team.teamId,
+        role: "operator",
+        createdAtMs: 50,
+      });
       const billing = store.upsertBillingAccount({
         orgId: org.orgId,
         plan: "business",
@@ -140,14 +160,16 @@ describe("ControlPlaneStore", () => {
         metric: "agent_runtime_ms",
         limitQuantity: 250,
       });
-      expect(store.checkUsageLimit({
-        orgId: org.orgId,
-        projectId: project.projectId,
-        metric: "agent_runtime_ms",
-        unit: "ms",
-        period: "monthly",
-        untilMs: 80,
-      })).toMatchObject({
+      expect(
+        store.checkUsageLimit({
+          orgId: org.orgId,
+          projectId: project.projectId,
+          metric: "agent_runtime_ms",
+          unit: "ms",
+          period: "monthly",
+          untilMs: 80,
+        }),
+      ).toMatchObject({
         limitQuantity: 250,
         usedQuantity: 200,
         remainingQuantity: 50,
@@ -170,9 +192,7 @@ describe("ControlPlaneStore", () => {
       expect(exported.teams).toEqual([team]);
       expect(exported.billing).toEqual(billing);
       expect(exported.identityProviders).toEqual([idp]);
-      expect(exported.usage).toEqual([
-        { orgId: "org_acme", metric: "agent_runtime_ms", unit: "ms", quantity: 200 },
-      ]);
+      expect(exported.usage).toEqual([{ orgId: "org_acme", metric: "agent_runtime_ms", unit: "ms", quantity: 200 }]);
       expect(exported.usageLimits).toEqual([usageLimit]);
       expect(exported.auditEvents.map((event) => event.action)).toEqual([
         "org.create",
@@ -184,8 +204,7 @@ describe("ControlPlaneStore", () => {
         "identity_provider.upsert",
         "usage_limit.upsert",
       ]);
-    }
-    finally {
+    } finally {
       sqlite.close();
     }
   });
@@ -233,8 +252,7 @@ describe("ControlPlaneStore", () => {
         }));
       expect(JSON.stringify(storedRows)).not.toContain(plaintextSecret);
       expect(store.listSecretRefs({ orgId: "org_secure", projectId: "project_api" })).toEqual([rotated]);
-    }
-    finally {
+    } finally {
       sqlite.close();
     }
   });
@@ -242,7 +260,12 @@ describe("ControlPlaneStore", () => {
   test("audit export defaults malformed stored metadata to empty objects", () => {
     const { sqlite, store } = makeStore();
     try {
-      store.createOrg({ orgId: "org_corrupt_metadata", slug: "corrupt-metadata", name: "Corrupt Metadata", createdAtMs: 1 });
+      store.createOrg({
+        orgId: "org_corrupt_metadata",
+        slug: "corrupt-metadata",
+        name: "Corrupt Metadata",
+        createdAtMs: 1,
+      });
       store.createProject({
         orgId: "org_corrupt_metadata",
         projectId: "project_corrupt",
@@ -269,17 +292,22 @@ describe("ControlPlaneStore", () => {
         metadata: { ok: true },
       });
 
-      sqlite.query("UPDATE _smithers_cp_projects SET metadata_json = ? WHERE project_id = ?").run("{bad", "project_corrupt");
-      sqlite.query("UPDATE _smithers_cp_identity_providers SET metadata_json = ? WHERE provider_id = ?").run("{bad", "idp_corrupt");
-      sqlite.query("UPDATE _smithers_cp_audit_events SET metadata_json = ? WHERE action = ?").run("{bad", "metadata.corrupt");
+      sqlite
+        .query("UPDATE _smithers_cp_projects SET metadata_json = ? WHERE project_id = ?")
+        .run("{bad", "project_corrupt");
+      sqlite
+        .query("UPDATE _smithers_cp_identity_providers SET metadata_json = ? WHERE provider_id = ?")
+        .run("{bad", "idp_corrupt");
+      sqlite
+        .query("UPDATE _smithers_cp_audit_events SET metadata_json = ? WHERE action = ?")
+        .run("{bad", "metadata.corrupt");
 
       const exported = store.exportOrgAudit({ orgId: "org_corrupt_metadata", exportedAtMs: 5 });
 
       expect(exported.projects[0].metadata).toEqual({});
       expect(exported.identityProviders[0].metadata).toEqual({});
       expect(exported.auditEvents.find((event) => event.action === "metadata.corrupt")?.metadata).toEqual({});
-    }
-    finally {
+    } finally {
       sqlite.close();
     }
   });
@@ -304,7 +332,9 @@ describe("ControlPlaneStore", () => {
       });
 
       expect(store.listSecretRefs({ orgId: "org_secret_org", projectId: null })).toEqual([rotated]);
-      const rawRows = sqlite.query("SELECT project_key AS projectKey, project_id AS projectId, name, ref FROM _smithers_cp_secret_refs").all();
+      const rawRows = sqlite
+        .query("SELECT project_key AS projectKey, project_id AS projectId, name, ref FROM _smithers_cp_secret_refs")
+        .all();
       expect(rawRows).toEqual([
         {
           projectKey: "__org__",
@@ -314,13 +344,14 @@ describe("ControlPlaneStore", () => {
         },
       ]);
       expect(() =>
-        sqlite.query(`
+        sqlite
+          .query(`
 INSERT INTO _smithers_cp_secret_refs (org_id, project_key, project_id, name, provider, ref, created_at_ms)
 VALUES (?, ?, ?, ?, ?, ?, ?)
-`).run("org_secret_org", "__org__", null, "billing-token", "vault", "vault://billing-token-v3", 4),
+`)
+          .run("org_secret_org", "__org__", null, "billing-token", "vault", "vault://billing-token-v3", 4),
       ).toThrow();
-    }
-    finally {
+    } finally {
       sqlite.close();
     }
   });
@@ -331,17 +362,57 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
       store.createOrg({ orgId: "org_limits", slug: "limits", name: "Limits", createdAtMs: 1 });
       store.createProject({ orgId: "org_limits", projectId: "project_one", slug: "one", name: "One", createdAtMs: 2 });
       store.createProject({ orgId: "org_limits", projectId: "project_two", slug: "two", name: "Two", createdAtMs: 3 });
-      store.setUsageLimit({ orgId: "org_limits", metric: "runs", unit: "count", period: "daily", limitQuantity: 3, updatedAtMs: 4 });
-      store.setUsageLimit({ orgId: "org_limits", projectId: "project_one", metric: "runs", unit: "count", period: "daily", limitQuantity: 1, updatedAtMs: 5 });
-      store.recordUsage({ orgId: "org_limits", projectId: "project_one", metric: "runs", quantity: 2, unit: "count", observedAtMs: 6 });
-      store.recordUsage({ orgId: "org_limits", projectId: "project_two", metric: "runs", quantity: 1, unit: "count", observedAtMs: 7 });
+      store.setUsageLimit({
+        orgId: "org_limits",
+        metric: "runs",
+        unit: "count",
+        period: "daily",
+        limitQuantity: 3,
+        updatedAtMs: 4,
+      });
+      store.setUsageLimit({
+        orgId: "org_limits",
+        projectId: "project_one",
+        metric: "runs",
+        unit: "count",
+        period: "daily",
+        limitQuantity: 1,
+        updatedAtMs: 5,
+      });
+      store.recordUsage({
+        orgId: "org_limits",
+        projectId: "project_one",
+        metric: "runs",
+        quantity: 2,
+        unit: "count",
+        observedAtMs: 6,
+      });
+      store.recordUsage({
+        orgId: "org_limits",
+        projectId: "project_two",
+        metric: "runs",
+        quantity: 1,
+        unit: "count",
+        observedAtMs: 7,
+      });
 
-      expect(store.checkUsageLimit({ orgId: "org_limits", metric: "runs", unit: "count", period: "daily", untilMs: 7 })).toMatchObject({
+      expect(
+        store.checkUsageLimit({ orgId: "org_limits", metric: "runs", unit: "count", period: "daily", untilMs: 7 }),
+      ).toMatchObject({
         usedQuantity: 3,
         remainingQuantity: 0,
         exceeded: false,
       });
-      expect(store.checkUsageLimit({ orgId: "org_limits", projectId: "project_one", metric: "runs", unit: "count", period: "daily", untilMs: 7 })).toMatchObject({
+      expect(
+        store.checkUsageLimit({
+          orgId: "org_limits",
+          projectId: "project_one",
+          metric: "runs",
+          unit: "count",
+          period: "daily",
+          untilMs: 7,
+        }),
+      ).toMatchObject({
         usedQuantity: 2,
         remainingQuantity: 0,
         exceeded: true,
@@ -349,8 +420,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
       expect(() =>
         store.setUsageLimit({ orgId: "org_limits", projectId: "project_missing", metric: "runs", limitQuantity: 1 }),
       ).toThrow("Control-plane project not found");
-    }
-    finally {
+    } finally {
       sqlite.close();
     }
   });
@@ -359,19 +429,36 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
     const { sqlite, store } = makeStore();
     try {
       store.createOrg({ orgId: "org_limit_delete", slug: "limit-delete", name: "Limit Delete", createdAtMs: 1 });
-      store.createProject({ orgId: "org_limit_delete", projectId: "project_delete", slug: "delete", name: "Delete", createdAtMs: 2 });
+      store.createProject({
+        orgId: "org_limit_delete",
+        projectId: "project_delete",
+        slug: "delete",
+        name: "Delete",
+        createdAtMs: 2,
+      });
       store.setUsageLimit({ orgId: "org_limit_delete", metric: "runs", limitQuantity: 10, updatedAtMs: 3 });
-      store.setUsageLimit({ orgId: "org_limit_delete", projectId: "project_delete", metric: "runs", limitQuantity: 5, updatedAtMs: 4 });
+      store.setUsageLimit({
+        orgId: "org_limit_delete",
+        projectId: "project_delete",
+        metric: "runs",
+        limitQuantity: 5,
+        updatedAtMs: 4,
+      });
 
-      sqlite.query("DELETE FROM _smithers_cp_projects WHERE org_id = ? AND project_id = ?").run("org_limit_delete", "project_delete");
+      sqlite
+        .query("DELETE FROM _smithers_cp_projects WHERE org_id = ? AND project_id = ?")
+        .run("org_limit_delete", "project_delete");
 
-      expect(sqlite.query(`
+      expect(
+        sqlite
+          .query(`
 SELECT project_id AS projectId, limit_quantity AS limitQuantity
 FROM _smithers_cp_usage_limits
 WHERE org_id = ?
-`).all("org_limit_delete")).toEqual([{ projectId: null, limitQuantity: 10 }]);
-    }
-    finally {
+`)
+          .all("org_limit_delete"),
+      ).toEqual([{ projectId: null, limitQuantity: 10 }]);
+    } finally {
       sqlite.close();
     }
   });
@@ -379,7 +466,12 @@ WHERE org_id = ?
   test("usage and audit events reject missing projects with typed errors", () => {
     const { sqlite, store } = makeStore();
     try {
-      store.createOrg({ orgId: "org_missing_project", slug: "missing-project", name: "Missing Project", createdAtMs: 1 });
+      store.createOrg({
+        orgId: "org_missing_project",
+        slug: "missing-project",
+        name: "Missing Project",
+        createdAtMs: 1,
+      });
 
       expect(() =>
         store.recordUsage({
@@ -400,8 +492,7 @@ WHERE org_id = ?
           occurredAtMs: 3,
         }),
       ).toThrow("Control-plane project not found");
-    }
-    finally {
+    } finally {
       sqlite.close();
     }
   });
@@ -411,52 +502,76 @@ WHERE org_id = ?
     try {
       store.createOrg({ orgId: "org_periods", slug: "periods", name: "Periods", createdAtMs: 1 });
       expect(() =>
-        store.setUsageLimit({ orgId: "org_periods", metric: "runs", period: "forever", limitQuantity: 10, updatedAtMs: 2 }),
+        store.setUsageLimit({
+          orgId: "org_periods",
+          metric: "runs",
+          period: "forever",
+          limitQuantity: 10,
+          updatedAtMs: 2,
+        }),
       ).toThrow("period must be one of");
 
-      store.setUsageLimit({ orgId: "org_periods", metric: "runs", period: "monthly", limitQuantity: 10, updatedAtMs: 3 });
+      store.setUsageLimit({
+        orgId: "org_periods",
+        metric: "runs",
+        period: "monthly",
+        limitQuantity: 10,
+        updatedAtMs: 3,
+      });
       store.recordUsage({ orgId: "org_periods", metric: "runs", quantity: 8, observedAtMs: 1_000 });
       store.recordUsage({ orgId: "org_periods", metric: "runs", quantity: 3, observedAtMs: 2_678_400_000 });
 
-      expect(store.checkUsageLimit({ orgId: "org_periods", metric: "runs", period: "monthly", untilMs: 2_678_400_000 })).toMatchObject({
+      expect(
+        store.checkUsageLimit({ orgId: "org_periods", metric: "runs", period: "monthly", untilMs: 2_678_400_000 }),
+      ).toMatchObject({
         usedQuantity: 3,
         remainingQuantity: 7,
         exceeded: false,
       });
-      expect(() =>
-        store.checkUsageLimit({ orgId: "org_periods", metric: "runs", period: "forever" }),
-      ).toThrow("period must be one of");
-    }
-    finally {
+      expect(() => store.checkUsageLimit({ orgId: "org_periods", metric: "runs", period: "forever" })).toThrow(
+        "period must be one of",
+      );
+    } finally {
       sqlite.close();
     }
   });
 
   test("foreign keys prevent orphan projects and cascade org deletion", () => {
-  const { sqlite, store } = makeStore();
-  try {
-    expect(() =>
+    const { sqlite, store } = makeStore();
+    try {
+      expect(() =>
+        store.createProject({
+          orgId: "missing",
+          projectId: "project_missing",
+          slug: "missing",
+          name: "Missing",
+        }),
+      ).toThrow();
+
+      store.createOrg({ orgId: "org_delete", slug: "delete", name: "Delete", createdAtMs: 1 });
       store.createProject({
-        orgId: "missing",
-        projectId: "project_missing",
-        slug: "missing",
-        name: "Missing",
-      }),
-    ).toThrow();
+        orgId: "org_delete",
+        projectId: "project_delete",
+        slug: "project",
+        name: "Project",
+        createdAtMs: 2,
+      });
+      store.recordUsage({
+        orgId: "org_delete",
+        projectId: "project_delete",
+        metric: "runs",
+        quantity: 1,
+        observedAtMs: 3,
+      });
 
-    store.createOrg({ orgId: "org_delete", slug: "delete", name: "Delete", createdAtMs: 1 });
-    store.createProject({ orgId: "org_delete", projectId: "project_delete", slug: "project", name: "Project", createdAtMs: 2 });
-    store.recordUsage({ orgId: "org_delete", projectId: "project_delete", metric: "runs", quantity: 1, observedAtMs: 3 });
-
-    sqlite.query("DELETE FROM _smithers_cp_orgs WHERE org_id = ?").run("org_delete");
-    expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_cp_projects").get().count).toBe(0);
-    expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_cp_usage_events").get().count).toBe(0);
-    expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_cp_audit_events").get().count).toBe(0);
-  }
-  finally {
-    sqlite.close();
-  }
-});
+      sqlite.query("DELETE FROM _smithers_cp_orgs WHERE org_id = ?").run("org_delete");
+      expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_cp_projects").get().count).toBe(0);
+      expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_cp_usage_events").get().count).toBe(0);
+      expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_cp_audit_events").get().count).toBe(0);
+    } finally {
+      sqlite.close();
+    }
+  });
 
   test("unique constraints reject duplicate org and project identities", () => {
     const { sqlite, store } = makeStore();
@@ -471,13 +586,24 @@ WHERE org_id = ?
 
       store.createProject({ orgId: "org_unique", projectId: "project_one", slug: "one", name: "One", createdAtMs: 4 });
       expect(() =>
-        store.createProject({ orgId: "org_unique", projectId: "project_one", slug: "duplicate-id", name: "Duplicate ID", createdAtMs: 5 }),
+        store.createProject({
+          orgId: "org_unique",
+          projectId: "project_one",
+          slug: "duplicate-id",
+          name: "Duplicate ID",
+          createdAtMs: 5,
+        }),
       ).toThrow("UNIQUE constraint failed");
       expect(() =>
-        store.createProject({ orgId: "org_unique", projectId: "project_two", slug: "one", name: "Duplicate slug", createdAtMs: 6 }),
+        store.createProject({
+          orgId: "org_unique",
+          projectId: "project_two",
+          slug: "one",
+          name: "Duplicate slug",
+          createdAtMs: 6,
+        }),
       ).toThrow("Duplicate control-plane project slug");
-    }
-    finally {
+    } finally {
       sqlite.close();
     }
   });
@@ -487,19 +613,22 @@ WHERE org_id = ?
     try {
       store.createOrg({ orgId: "org_constraints", slug: "constraints", name: "Constraints", createdAtMs: 1 });
       expect(() =>
-        sqlite.query(`
+        sqlite
+          .query(`
 INSERT INTO _smithers_cp_projects (org_id, project_id, slug, name, metadata_json, created_at_ms)
 VALUES (?, ?, ?, ?, ?, ?)
-`).run("org_constraints", "project_null_name", "null-name", null, "{}", 2),
+`)
+          .run("org_constraints", "project_null_name", "null-name", null, "{}", 2),
       ).toThrow("NOT NULL constraint failed");
       expect(() =>
-        sqlite.query(`
+        sqlite
+          .query(`
 INSERT INTO _smithers_cp_team_members (org_id, team_id, user_id, role, created_at_ms)
 VALUES (?, ?, ?, ?, ?)
-`).run("org_constraints", "team_missing", "user_one", "member", 3),
+`)
+          .run("org_constraints", "team_missing", "user_one", "member", 3),
       ).toThrow("FOREIGN KEY constraint failed");
-    }
-    finally {
+    } finally {
       sqlite.close();
     }
   });
@@ -515,8 +644,7 @@ VALUES (?, ?, ?, ?, ?)
         .map((row) => row.name);
       expect(tables).toContain("_smithers_cp_orgs");
       expect(tables).toContain("_smithers_cp_audit_events");
-    }
-    finally {
+    } finally {
       sqlite.close();
     }
   });
@@ -550,7 +678,10 @@ INSERT INTO _smithers_cp_secret_refs (org_id, project_id, name, provider, ref, c
 VALUES ('org_legacy', NULL, 'token', 'vault', 'vault://new', 3);
 `);
       ensureControlPlaneTables(sqlite);
-      const columns = sqlite.query("PRAGMA table_info(_smithers_cp_secret_refs)").all().map((column) => column.name);
+      const columns = sqlite
+        .query("PRAGMA table_info(_smithers_cp_secret_refs)")
+        .all()
+        .map((column) => column.name);
       expect(columns).toContain("project_key");
       const store = new ControlPlaneStore(sqlite);
       expect(store.listSecretRefs({ orgId: "org_legacy", projectId: null })).toEqual([
@@ -560,8 +691,7 @@ VALUES ('org_legacy', NULL, 'token', 'vault', 'vault://new', 3);
           projectId: null,
         }),
       ]);
-    }
-    finally {
+    } finally {
       sqlite.close();
     }
   });
@@ -570,8 +700,7 @@ VALUES ('org_legacy', NULL, 'token', 'vault', 'vault://new', 3);
     const { sqlite, store } = makeStore();
     try {
       expect(() => store.exportOrgAudit({ orgId: "org_missing" })).toThrow("Control-plane org not found");
-    }
-    finally {
+    } finally {
       sqlite.close();
     }
   });
@@ -584,12 +713,13 @@ VALUES ('org_legacy', NULL, 'token', 'vault', 'vault://new', 3);
       // rows. A real project with that id would share the (org_id, project_key, …)
       // primary key with org-wide secrets/usage-limits, silently overwriting and
       // cross-leaking them. It must be rejected.
-      expect(() => store.createProject({ orgId: org.orgId, projectId: "__org__", slug: "p", name: "P", createdAtMs: 2 }))
-        .toThrow(SmithersError);
-      expect(() => store.createProject({ orgId: org.orgId, projectId: "__org__", slug: "p", name: "P", createdAtMs: 2 }))
-        .toThrow("reserved");
-    }
-    finally {
+      expect(() =>
+        store.createProject({ orgId: org.orgId, projectId: "__org__", slug: "p", name: "P", createdAtMs: 2 }),
+      ).toThrow(SmithersError);
+      expect(() =>
+        store.createProject({ orgId: org.orgId, projectId: "__org__", slug: "p", name: "P", createdAtMs: 2 }),
+      ).toThrow("reserved");
+    } finally {
       sqlite.close();
     }
   });
@@ -599,12 +729,18 @@ VALUES ('org_legacy', NULL, 'token', 'vault', 'vault://new', 3);
     try {
       const org = store.createOrg({ orgId: "org_s", slug: "s", name: "S", createdAtMs: 1 });
       store.putSecretRef({ orgId: org.orgId, name: "tok", provider: "openai", ref: "vault://v1", createdAtMs: 2 });
-      store.putSecretRef({ orgId: org.orgId, name: "tok", provider: "openai", ref: "vault://v2", createdAtMs: 3, rotatedAtMs: 3 });
+      store.putSecretRef({
+        orgId: org.orgId,
+        name: "tok",
+        provider: "openai",
+        ref: "vault://v2",
+        createdAtMs: 3,
+        rotatedAtMs: 3,
+      });
       const refs = store.listSecretRefs({ orgId: org.orgId, projectId: null });
       expect(refs).toHaveLength(1);
       expect(refs[0].ref).toBe("vault://v2");
-    }
-    finally {
+    } finally {
       sqlite.close();
     }
   });
@@ -614,13 +750,61 @@ VALUES ('org_legacy', NULL, 'token', 'vault', 'vault://new', 3);
     try {
       store.createOrg({ orgId: "org_atomic", slug: "atomic", name: "Atomic", createdAtMs: 1 });
       store.createTeam({ orgId: "org_atomic", teamId: "team_atomic", slug: "atomic", name: "Atomic", createdAtMs: 2 });
-      store.addTeamMember({ orgId: "org_atomic", teamId: "team_atomic", userId: "user_atomic", role: "member", createdAtMs: 3 });
-      store.createProject({ orgId: "org_atomic", projectId: "project_atomic", slug: "atomic", name: "Atomic", createdAtMs: 4 });
-      store.addProjectTeam({ orgId: "org_atomic", projectId: "project_atomic", teamId: "team_atomic", role: "viewer", createdAtMs: 5 });
-      store.upsertBillingAccount({ orgId: "org_atomic", plan: "starter", billingCustomerId: "cus_atomic", status: "active", updatedAtMs: 6 });
-      store.upsertIdentityProvider({ orgId: "org_atomic", providerId: "idp_atomic", type: "oidc", issuer: "https://before.test", metadata: { version: 1 }, createdAtMs: 7, updatedAtMs: 7 });
-      store.setUsageLimit({ orgId: "org_atomic", projectId: "project_atomic", metric: "requests", unit: "count", period: "daily", limitQuantity: 10, updatedAtMs: 8 });
-      store.putSecretRef({ orgId: "org_atomic", projectId: "project_atomic", name: "token", provider: "vault", ref: "vault://before", createdBy: "user_atomic", createdAtMs: 9 });
+      store.addTeamMember({
+        orgId: "org_atomic",
+        teamId: "team_atomic",
+        userId: "user_atomic",
+        role: "member",
+        createdAtMs: 3,
+      });
+      store.createProject({
+        orgId: "org_atomic",
+        projectId: "project_atomic",
+        slug: "atomic",
+        name: "Atomic",
+        createdAtMs: 4,
+      });
+      store.addProjectTeam({
+        orgId: "org_atomic",
+        projectId: "project_atomic",
+        teamId: "team_atomic",
+        role: "viewer",
+        createdAtMs: 5,
+      });
+      store.upsertBillingAccount({
+        orgId: "org_atomic",
+        plan: "starter",
+        billingCustomerId: "cus_atomic",
+        status: "active",
+        updatedAtMs: 6,
+      });
+      store.upsertIdentityProvider({
+        orgId: "org_atomic",
+        providerId: "idp_atomic",
+        type: "oidc",
+        issuer: "https://before.test",
+        metadata: { version: 1 },
+        createdAtMs: 7,
+        updatedAtMs: 7,
+      });
+      store.setUsageLimit({
+        orgId: "org_atomic",
+        projectId: "project_atomic",
+        metric: "requests",
+        unit: "count",
+        period: "daily",
+        limitQuantity: 10,
+        updatedAtMs: 8,
+      });
+      store.putSecretRef({
+        orgId: "org_atomic",
+        projectId: "project_atomic",
+        name: "token",
+        provider: "vault",
+        ref: "vault://before",
+        createdBy: "user_atomic",
+        createdAtMs: 9,
+      });
 
       const before = {
         member: sqlite.query("SELECT * FROM _smithers_cp_team_members").all(),
@@ -641,14 +825,78 @@ VALUES ('org_legacy', NULL, 'token', 'vault', 'vault://new', 3);
 
       const expectAuditFailure = (operation) => expect(operation).toThrow("forced audit failure");
       expectAuditFailure(() => store.createOrg({ orgId: "org_new", slug: "new", name: "New", createdAtMs: 10 }));
-      expectAuditFailure(() => store.createTeam({ orgId: "org_atomic", teamId: "team_new", slug: "new", name: "New", createdAtMs: 11 }));
-      expectAuditFailure(() => store.addTeamMember({ orgId: "org_atomic", teamId: "team_atomic", userId: "user_atomic", role: "admin", createdAtMs: 12 }));
-      expectAuditFailure(() => store.createProject({ orgId: "org_atomic", projectId: "project_new", slug: "new", name: "New", createdAtMs: 13 }));
-      expectAuditFailure(() => store.addProjectTeam({ orgId: "org_atomic", projectId: "project_atomic", teamId: "team_atomic", role: "admin", createdAtMs: 14 }));
-      expectAuditFailure(() => store.upsertBillingAccount({ orgId: "org_atomic", plan: "business", billingCustomerId: "cus_new", status: "trialing", updatedAtMs: 15 }));
-      expectAuditFailure(() => store.upsertIdentityProvider({ orgId: "org_atomic", providerId: "idp_atomic", type: "saml", issuer: "https://after.test", metadata: { version: 2 }, createdAtMs: 16, updatedAtMs: 16 }));
-      expectAuditFailure(() => store.setUsageLimit({ orgId: "org_atomic", projectId: "project_atomic", metric: "requests", unit: "count", period: "daily", limitQuantity: 99, updatedAtMs: 17 }));
-      expectAuditFailure(() => store.putSecretRef({ orgId: "org_atomic", projectId: "project_atomic", name: "token", provider: "other", ref: "vault://after", createdBy: "user_atomic", createdAtMs: 18 }));
+      expectAuditFailure(() =>
+        store.createTeam({ orgId: "org_atomic", teamId: "team_new", slug: "new", name: "New", createdAtMs: 11 }),
+      );
+      expectAuditFailure(() =>
+        store.addTeamMember({
+          orgId: "org_atomic",
+          teamId: "team_atomic",
+          userId: "user_atomic",
+          role: "admin",
+          createdAtMs: 12,
+        }),
+      );
+      expectAuditFailure(() =>
+        store.createProject({
+          orgId: "org_atomic",
+          projectId: "project_new",
+          slug: "new",
+          name: "New",
+          createdAtMs: 13,
+        }),
+      );
+      expectAuditFailure(() =>
+        store.addProjectTeam({
+          orgId: "org_atomic",
+          projectId: "project_atomic",
+          teamId: "team_atomic",
+          role: "admin",
+          createdAtMs: 14,
+        }),
+      );
+      expectAuditFailure(() =>
+        store.upsertBillingAccount({
+          orgId: "org_atomic",
+          plan: "business",
+          billingCustomerId: "cus_new",
+          status: "trialing",
+          updatedAtMs: 15,
+        }),
+      );
+      expectAuditFailure(() =>
+        store.upsertIdentityProvider({
+          orgId: "org_atomic",
+          providerId: "idp_atomic",
+          type: "saml",
+          issuer: "https://after.test",
+          metadata: { version: 2 },
+          createdAtMs: 16,
+          updatedAtMs: 16,
+        }),
+      );
+      expectAuditFailure(() =>
+        store.setUsageLimit({
+          orgId: "org_atomic",
+          projectId: "project_atomic",
+          metric: "requests",
+          unit: "count",
+          period: "daily",
+          limitQuantity: 99,
+          updatedAtMs: 17,
+        }),
+      );
+      expectAuditFailure(() =>
+        store.putSecretRef({
+          orgId: "org_atomic",
+          projectId: "project_atomic",
+          name: "token",
+          provider: "other",
+          ref: "vault://after",
+          createdBy: "user_atomic",
+          createdAtMs: 18,
+        }),
+      );
 
       expect(sqlite.query("SELECT * FROM _smithers_cp_orgs WHERE org_id = 'org_new'").all()).toEqual([]);
       expect(sqlite.query("SELECT * FROM _smithers_cp_teams WHERE team_id = 'team_new'").all()).toEqual([]);
@@ -660,8 +908,7 @@ VALUES ('org_legacy', NULL, 'token', 'vault', 'vault://new', 3);
       expect(sqlite.query("SELECT * FROM _smithers_cp_usage_limits").all()).toEqual(before.limit);
       expect(sqlite.query("SELECT * FROM _smithers_cp_secret_refs").all()).toEqual(before.secret);
       expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_cp_audit_events").get().count).toBe(auditCount);
-    }
-    finally {
+    } finally {
       sqlite.close();
     }
   });
@@ -692,10 +939,11 @@ VALUES ('org_legacy', NULL, 'token', 'vault', 'vault://new', 3);
       const refs = store.listSecretRefs({ orgId: "org_legacy", projectId: null });
       expect(refs.map((r) => r.ref)).toContain("vault://critical-prod-secret");
       // The legacy table is dropped once recovered.
-      const legacy = sqlite.query("SELECT name FROM sqlite_master WHERE name = '_smithers_cp_secret_refs_legacy'").get();
+      const legacy = sqlite
+        .query("SELECT name FROM sqlite_master WHERE name = '_smithers_cp_secret_refs_legacy'")
+        .get();
       expect(legacy).toBeNull();
-    }
-    finally {
+    } finally {
       sqlite.close();
     }
   });

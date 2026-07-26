@@ -45,7 +45,8 @@ type EventSourceLike = {
 };
 type StreamHttpError = Error & { status: number };
 
-const unavailableFetch = (() => Promise.reject(new Error("fetch is not available in this environment."))) as unknown as typeof fetch;
+const unavailableFetch = (() =>
+  Promise.reject(new Error("fetch is not available in this environment."))) as unknown as typeof fetch;
 
 // Capture the runtime constructor while this module is initialized. DOM test
 // environments can replace the global AbortController later; passing one of
@@ -230,9 +231,11 @@ function fetchEventSource(
         signal: abort.signal,
       });
       if (!response.ok || !response.body) {
-        fail(Object.assign(new Error(`Smithers stream request failed with HTTP ${response.status}.`), {
-          status: response.status,
-        }) as StreamHttpError);
+        fail(
+          Object.assign(new Error(`Smithers stream request failed with HTTP ${response.status}.`), {
+            status: response.status,
+          }) as StreamHttpError,
+        );
         return;
       }
       // An OK response that is not an SSE stream cannot be the gateway's
@@ -243,9 +246,16 @@ function fetchEventSource(
       // also rejects non-`text/event-stream` responses.
       const streamMediaType = (response.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
       if (streamMediaType !== "text/event-stream") {
-        fail(Object.assign(new Error(`Smithers stream endpoint answered with ${streamMediaType || "no content-type"} instead of text/event-stream; no gateway behind this URL.`), {
-          status: response.status,
-        }) as StreamHttpError);
+        fail(
+          Object.assign(
+            new Error(
+              `Smithers stream endpoint answered with ${streamMediaType || "no content-type"} instead of text/event-stream; no gateway behind this URL.`,
+            ),
+            {
+              status: response.status,
+            },
+          ) as StreamHttpError,
+        );
         return;
       }
       source.onopen?.(new Event("open"));
@@ -289,7 +299,8 @@ function fetchEventSource(
 export function createSmithersDataClient(options: CreateSmithersDataClientOptions): SmithersDataClient {
   const mode = options.mode;
   const apiBaseUrl = normalizeBaseUrl(mode.apiBaseUrl);
-  const fetchImpl = options.fetch ?? (typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : unavailableFetch);
+  const fetchImpl =
+    options.fetch ?? (typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : unavailableFetch);
   // Every `/v1/api/*` request and the change stream carry the caller's custom
   // headers alongside the workspace token, so an API-key/proxy header applied to
   // RPC authorizes the collection API and SSE identically.
@@ -352,8 +363,17 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
     // carry a cause instead of a bare Event.
     let streamCause: unknown;
     source = EventSourceImpl
-      ? new EventSourceImpl(url.toString(), { withCredentials: true, headers: Object.fromEntries(requestHeaders()) } as EventSourceInit) as EventSourceLike
-      : fetchEventSource(url.toString(), { fetchImpl, headers: requestHeaders(), onError: (cause) => { streamCause = cause; } });
+      ? (new EventSourceImpl(url.toString(), {
+          withCredentials: true,
+          headers: Object.fromEntries(requestHeaders()),
+        } as EventSourceInit) as EventSourceLike)
+      : fetchEventSource(url.toString(), {
+          fetchImpl,
+          headers: requestHeaders(),
+          onError: (cause) => {
+            streamCause = cause;
+          },
+        });
     const wasReconnect = reconnectAttempt > 0;
     source.onopen = () => {
       setStatus({ status: "online" });
@@ -376,7 +396,8 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
       }
       const reconnectingSince = state.reconnectingSince ?? Date.now();
       setStatus({ status: "offline", reconnectingSince });
-      const backoff = Math.min(STREAM_RECONNECT_MAX_MS, STREAM_RECONNECT_BASE_MS * 2 ** reconnectAttempt) +
+      const backoff =
+        Math.min(STREAM_RECONNECT_MAX_MS, STREAM_RECONNECT_BASE_MS * 2 ** reconnectAttempt) +
         Math.floor(Math.random() * STREAM_RECONNECT_JITTER_MS);
       // Surface every drop so a broken stream is observable rather than
       // reconnecting silently. reconnectAttempt is the attempt about to run.
@@ -415,8 +436,7 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
   // (isGatewayUnavailableError) instead of reporting "Gateway HTTP 200".
   const readEnvelope = async <T>(path: string, response: Response): Promise<ApiEnvelope<T>> => {
     const raw: unknown = await response.json().catch(() => undefined);
-    const envelopeShaped =
-      typeof raw === "object" && raw !== null && typeof (raw as { ok?: unknown }).ok === "boolean";
+    const envelopeShaped = typeof raw === "object" && raw !== null && typeof (raw as { ok?: unknown }).ok === "boolean";
     const json = envelopeShaped ? (raw as ApiEnvelope<T>) : undefined;
     if (!json?.ok) {
       if (isUnauthorizedStatus(response.status)) setStatus({ status: "unauthorized" });
@@ -493,10 +513,14 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
       getRun: (params) => request("GET", `/v1/api/runs/${encodeURIComponent(params.runId)}`),
       listRunTokenUsage: (params) => request("GET", `/v1/api/runs/${encodeURIComponent(params.runId)}/token-usage`),
       launchRun: (params) => mutate<LaunchRunResponse>("POST", "/v1/api/runs", params),
-      resumeRun: (params) => mutate<ResumeRunResponse>("POST", `/v1/api/runs/${encodeURIComponent(params.runId)}/resume`, params),
-      cancelRun: (params) => mutate<CancelRunResponse>("POST", `/v1/api/runs/${encodeURIComponent(params.runId)}/cancel`, params),
-      hijackRun: (params) => mutate<HijackRunResponse>("POST", `/v1/api/runs/${encodeURIComponent(params.runId)}/hijack`, params),
-      rewindRun: (params) => mutate<Record<string, unknown>>("POST", `/v1/api/runs/${encodeURIComponent(params.runId)}/rewind`, params),
+      resumeRun: (params) =>
+        mutate<ResumeRunResponse>("POST", `/v1/api/runs/${encodeURIComponent(params.runId)}/resume`, params),
+      cancelRun: (params) =>
+        mutate<CancelRunResponse>("POST", `/v1/api/runs/${encodeURIComponent(params.runId)}/cancel`, params),
+      hijackRun: (params) =>
+        mutate<HijackRunResponse>("POST", `/v1/api/runs/${encodeURIComponent(params.runId)}/hijack`, params),
+      rewindRun: (params) =>
+        mutate<Record<string, unknown>>("POST", `/v1/api/runs/${encodeURIComponent(params.runId)}/rewind`, params),
       listRunEvents: async (params) => {
         const search = new URLSearchParams();
         append(search, "runId", params.runId);
@@ -509,27 +533,49 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
       getRunTree: async (params) => {
         const search = new URLSearchParams();
         append(search, "frameNo", params.frameNo);
-        const snapshot = await request<DevToolsSnapshot>("GET", withSearch(`/v1/api/runs/${encodeURIComponent(params.runId)}/tree`, search));
-        return flattenGatewayRunNode(snapshotToGatewayRunNode(snapshot)).map((row) => ({ ...row, key: runNodeKey(row) }));
+        const snapshot = await request<DevToolsSnapshot>(
+          "GET",
+          withSearch(`/v1/api/runs/${encodeURIComponent(params.runId)}/tree`, search),
+        );
+        return flattenGatewayRunNode(snapshotToGatewayRunNode(snapshot)).map((row) => ({
+          ...row,
+          key: runNodeKey(row),
+        }));
       },
       getNodeOutput: (params) => {
         const search = new URLSearchParams();
         append(search, "iteration", params.iteration ?? 0);
-        return request("GET", withSearch(`/v1/api/nodes/${encodeURIComponent(params.runId)}/${encodeURIComponent(params.nodeId)}/output`, search));
+        return request(
+          "GET",
+          withSearch(
+            `/v1/api/nodes/${encodeURIComponent(params.runId)}/${encodeURIComponent(params.nodeId)}/output`,
+            search,
+          ),
+        );
       },
       getNodeDiff: (params) => {
         const search = new URLSearchParams();
         append(search, "iteration", params.iteration ?? 0);
-        return request("GET", withSearch(`/v1/api/nodes/${encodeURIComponent(params.runId)}/${encodeURIComponent(params.nodeId)}/diff`, search));
+        return request(
+          "GET",
+          withSearch(
+            `/v1/api/nodes/${encodeURIComponent(params.runId)}/${encodeURIComponent(params.nodeId)}/diff`,
+            search,
+          ),
+        );
       },
-      listApprovals: (params = {}) => request<ListApprovalsResponse>("GET", withSearch("/v1/api/approvals", listApprovalsSearch(params))),
-      submitApproval: (params) => mutate<SubmitApprovalResponse>("POST", `/v1/api/approvals/${encodeURIComponent(approvalId(params))}`, params),
+      listApprovals: (params = {}) =>
+        request<ListApprovalsResponse>("GET", withSearch("/v1/api/approvals", listApprovalsSearch(params))),
+      submitApproval: (params) =>
+        mutate<SubmitApprovalResponse>("POST", `/v1/api/approvals/${encodeURIComponent(approvalId(params))}`, params),
       submitSignal: (params) => mutate<Record<string, unknown>>("POST", "/v1/api/signals", params),
-      listWorkflows: (params = {}) => request<ListWorkflowsResponse>("GET", withSearch("/v1/api/workflows", listWorkflowsSearch(params))),
+      listWorkflows: (params = {}) =>
+        request<ListWorkflowsResponse>("GET", withSearch("/v1/api/workflows", listWorkflowsSearch(params))),
       getSchemaSignature: () => request<GetSchemaSignatureResponse>("GET", "/v1/api/schema-signature"),
       cronList: (params = {}) => request("GET", withSearch("/v1/api/crons", cronListSearch(params))),
       cronCreate: (params: CronCreateRequest) => mutate("POST", "/v1/api/crons", params),
-      cronDelete: (params: CronDeleteRequest) => mutate("DELETE", `/v1/api/crons/${encodeURIComponent(params.cronId)}`, params),
+      cronDelete: (params: CronDeleteRequest) =>
+        mutate("DELETE", `/v1/api/crons/${encodeURIComponent(params.cronId)}`, params),
       cronRun: (params: CronRunRequest) => mutate<LaunchRunResponse>("POST", "/v1/api/crons/run", params),
       listUsageReports: (params = {}) => request("GET", withSearch("/v1/api/usage", listUsageReportsSearch(params))),
       listDocs: (params = {}) => request<ListDocsResponse>("GET", withSearch("/v1/api/docs", listDocsSearch(params))),
@@ -539,19 +585,24 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
         append(search, "namespace", params.namespace);
         return request("GET", withSearch("/v1/api/memory-facts", search));
       },
-      listScores: (params = { runId: "" }) => params.runId ? request("GET", withSearch("/v1/api/scores", listScoresSearch(params))) : Promise.resolve([]),
-      listScoresForRuns: (params: ListScoresForRunsRequest) => request<ListScoresForRunsResponse>(
-        "GET",
-        withSearch("/v1/api/scores/compare", listScoresForRunsSearch(params)),
-      ),
-      getScoreDetail: (params: GetScoreDetailRequest) => request<GetScoreDetailResponse>(
-        "GET",
-        `/v1/api/scores/${encodeURIComponent(params.runId)}/${encodeURIComponent(params.scoreId)}`,
-      ),
+      listScores: (params = { runId: "" }) =>
+        params.runId ? request("GET", withSearch("/v1/api/scores", listScoresSearch(params))) : Promise.resolve([]),
+      listScoresForRuns: (params: ListScoresForRunsRequest) =>
+        request<ListScoresForRunsResponse>(
+          "GET",
+          withSearch("/v1/api/scores/compare", listScoresForRunsSearch(params)),
+        ),
+      getScoreDetail: (params: GetScoreDetailRequest) =>
+        request<GetScoreDetailResponse>(
+          "GET",
+          `/v1/api/scores/${encodeURIComponent(params.runId)}/${encodeURIComponent(params.scoreId)}`,
+        ),
       listTickets: (params = {}) => request("GET", withSearch("/v1/api/tickets", listTicketsSearch(params))),
       createTicket: (params: CreateTicketRequest) => mutate("POST", "/v1/api/tickets", params),
-      updateTicket: (params: UpdateTicketRequest) => mutate("PATCH", `/v1/api/tickets/${encodeURIComponent(params.path)}`, params),
-      deleteTicket: (params: DeleteTicketRequest) => mutate("DELETE", `/v1/api/tickets/${encodeURIComponent(params.path)}`, params),
+      updateTicket: (params: UpdateTicketRequest) =>
+        mutate("PATCH", `/v1/api/tickets/${encodeURIComponent(params.path)}`, params),
+      deleteTicket: (params: DeleteTicketRequest) =>
+        mutate("DELETE", `/v1/api/tickets/${encodeURIComponent(params.path)}`, params),
     },
     stream: {
       subscribe(handler) {

@@ -171,10 +171,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
     if (!forkedId) return;
     useChatStore
       .getState()
-      .postCard(
-        { kind: "run", runId: forkedId },
-        `Forked a new run from frame ${frame} (${frameLabel(frame)}).`,
-      );
+      .postCard({ kind: "run", runId: forkedId }, `Forked a new run from frame ${frame} (${frameLabel(frame)}).`);
     useNotificationsStore.getState().notify({
       title: "Run forked",
       detail: `from frame ${frame}`,
@@ -186,9 +183,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   replay: (runId) => {
     const run = selectRun(useRunsStore.getState().runs, runId);
     if (!run) return;
-    useChatStore
-      .getState()
-      .say(`Replaying run ${run.runId} from frame ${run.frame} (${frameLabel(run.frame)})…`);
+    useChatStore.getState().say(`Replaying run ${run.runId} from frame ${run.frame} (${frameLabel(run.frame)})…`);
   },
 
   setError: (error) => set({ error }),

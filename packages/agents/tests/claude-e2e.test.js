@@ -37,70 +37,69 @@ try {
 describe.skipIf(!runRealAgentE2E || !isClaudeInstalled || !supportsClaudeE2EFlags)(
   "ClaudeCodeAgent E2E (real CLI)",
   () => {
-  /** @type {string} */
-  let tmpDir;
+    /** @type {string} */
+    let tmpDir;
 
-  beforeAll(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "smithers-claude-e2e-"));
-    await writeFile(join(tmpDir, "hello.js"), 'console.log("hello world");\n');
-  });
-
-  afterAll(async () => {
-    if (tmpDir) {
-      await rm(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it("sends a simple prompt and gets a text response", async () => {
-    const agent = new ClaudeCodeAgent({ yolo: true });
-
-    const result = await agent.generate({
-      prompt: "What is 2+2? Reply with ONLY the number, nothing else.",
-      rootDir: tmpDir,
+    beforeAll(async () => {
+      tmpDir = await mkdtemp(join(tmpdir(), "smithers-claude-e2e-"));
+      await writeFile(join(tmpDir, "hello.js"), 'console.log("hello world");\n');
     });
 
-    expect(result).toBeDefined();
-    expect(result.text).toBeDefined();
-    expect(result.text.length).toBeGreaterThan(0);
-    expect(result.text).toContain("4");
-  }, 120_000);
-
-  it("emits events with correct structure", async () => {
-    /** @type {import("../src/BaseCliAgent/index.ts").AgentCliEvent[]} */
-    const events = [];
-
-    const agent = new ClaudeCodeAgent({ yolo: true });
-
-    const result = await agent.generate({
-      prompt: "Say 'hello' and nothing else.",
-      rootDir: tmpDir,
-      onEvent: (event) => events.push(event),
+    afterAll(async () => {
+      if (tmpDir) {
+        await rm(tmpDir, { recursive: true, force: true });
+      }
     });
 
-    expect(result).toBeDefined();
-    expect(result.text.toLowerCase()).toContain("hello");
+    it("sends a simple prompt and gets a text response", async () => {
+      const agent = new ClaudeCodeAgent({ yolo: true });
 
-    const started = events.find((e) => e.type === "started");
-    expect(started).toBeDefined();
-    expect(started.engine).toBe("claude-code");
+      const result = await agent.generate({
+        prompt: "What is 2+2? Reply with ONLY the number, nothing else.",
+        rootDir: tmpDir,
+      });
 
-    const completed = events.find((e) => e.type === "completed");
-    expect(completed).toBeDefined();
-    expect(completed.engine).toBe("claude-code");
-    expect(completed.ok).toBe(true);
-  }, 120_000);
+      expect(result).toBeDefined();
+      expect(result.text).toBeDefined();
+      expect(result.text.length).toBeGreaterThan(0);
+      expect(result.text).toContain("4");
+    }, 120_000);
 
-  it("executes tools with dangerously-skip-permissions (yolo mode)", async () => {
-    const agent = new ClaudeCodeAgent({ yolo: true });
+    it("emits events with correct structure", async () => {
+      /** @type {import("../src/BaseCliAgent/index.ts").AgentCliEvent[]} */
+      const events = [];
 
-    const result = await agent.generate({
-      prompt:
-        "Read the file hello.js and tell me what it prints. Reply with ONLY the output string, nothing else.",
-      rootDir: tmpDir,
-    });
+      const agent = new ClaudeCodeAgent({ yolo: true });
 
-    expect(result).toBeDefined();
-    expect(result.text).toContain("hello world");
-  }, 120_000);
-  }
+      const result = await agent.generate({
+        prompt: "Say 'hello' and nothing else.",
+        rootDir: tmpDir,
+        onEvent: (event) => events.push(event),
+      });
+
+      expect(result).toBeDefined();
+      expect(result.text.toLowerCase()).toContain("hello");
+
+      const started = events.find((e) => e.type === "started");
+      expect(started).toBeDefined();
+      expect(started.engine).toBe("claude-code");
+
+      const completed = events.find((e) => e.type === "completed");
+      expect(completed).toBeDefined();
+      expect(completed.engine).toBe("claude-code");
+      expect(completed.ok).toBe(true);
+    }, 120_000);
+
+    it("executes tools with dangerously-skip-permissions (yolo mode)", async () => {
+      const agent = new ClaudeCodeAgent({ yolo: true });
+
+      const result = await agent.generate({
+        prompt: "Read the file hello.js and tell me what it prints. Reply with ONLY the output string, nothing else.",
+        rootDir: tmpDir,
+      });
+
+      expect(result).toBeDefined();
+      expect(result.text).toContain("hello world");
+    }, 120_000);
+  },
 );

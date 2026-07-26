@@ -23,44 +23,44 @@ const oxlintBin = join(dirname(require.resolve("oxlint/package.json")), "bin", "
 const packagesDir = join(root, "packages");
 const targets = [];
 for (const name of readdirSync(packagesDir).sort()) {
-	for (const sub of ["src", "tests"]) {
-		if (existsSync(join(packagesDir, name, sub))) {
-			// Forward-slash relative paths: oxlint accepts them on every OS and
-			// they match how --ignore-path/.gitignore patterns are anchored.
-			targets.push(`packages/${name}/${sub}`);
-		}
-	}
+  for (const sub of ["src", "tests"]) {
+    if (existsSync(join(packagesDir, name, sub))) {
+      // Forward-slash relative paths: oxlint accepts them on every OS and
+      // they match how --ignore-path/.gitignore patterns are anchored.
+      targets.push(`packages/${name}/${sub}`);
+    }
+  }
 }
 
 if (targets.length === 0) {
-	console.error("lint: found no packages/*/{src,tests} directories to lint");
-	process.exit(1);
+  console.error("lint: found no packages/*/{src,tests} directories to lint");
+  process.exit(1);
 }
 
 const baseArgs = [
-	"--react-plugin",
-	"--node-plugin",
-	"--import-plugin",
-	"--ignore-path",
-	".gitignore",
-	"-A",
-	"react/no-children-prop",
-	"-A",
-	"unicorn/no-thenable",
-	"--ignore-pattern",
-	"packages/*/src/**/*.d.ts",
+  "--react-plugin",
+  "--node-plugin",
+  "--import-plugin",
+  "--ignore-path",
+  ".gitignore",
+  "-A",
+  "react/no-children-prop",
+  "-A",
+  "unicorn/no-thenable",
+  "--ignore-pattern",
+  "packages/*/src/**/*.d.ts",
 ];
 
 // Extra flags from the npm script (e.g. `--fix --fix-suggestions`).
 const passthrough = process.argv.slice(2);
 
 const result = spawnSync(process.execPath, [oxlintBin, ...baseArgs, ...passthrough, ...targets], {
-	cwd: root,
-	stdio: "inherit",
+  cwd: root,
+  stdio: "inherit",
 });
 
 if (result.error) {
-	console.error(result.error);
-	process.exit(1);
+  console.error(result.error);
+  process.exit(1);
 }
 process.exit(result.status ?? 1);

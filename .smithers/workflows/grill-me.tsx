@@ -22,7 +22,15 @@ export default smithers((ctx) => {
   return (
     <Workflow name={WORKFLOW_ID}>
       <UI entry="../ui/grill-me.tsx" title={"Grill Me"} />
-      <GrillMe idPrefix={WORKFLOW_ID} context={ctx.input.prompt} currentDraft={latest ?? null} agent={agents.smart} output={outputs.grill} maxIterations={ctx.input.maxIterations} until={latest?.resolved === true} />
+      <GrillMe
+        idPrefix={WORKFLOW_ID}
+        context={ctx.input.prompt}
+        currentDraft={latest ?? null}
+        agent={agents.smart}
+        output={outputs.grill}
+        maxIterations={ctx.input.maxIterations}
+        until={latest?.resolved === true}
+      />
     </Workflow>
   );
 });

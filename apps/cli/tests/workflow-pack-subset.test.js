@@ -40,9 +40,11 @@ function freshPack(extra = {}) {
 test("fresh init installs exactly the curated public and hidden system workflows", () => {
   const { pack, result } = freshPack();
   expect(result.writtenFiles.length).toBeGreaterThan(0);
-  expect(readdirSync(join(pack, "workflows")).filter((file) => file.endsWith(".tsx")).sort()).toEqual(
-    [...CURATED_PUBLIC_WORKFLOW_IDS, ...CURATED_SYSTEM_WORKFLOW_IDS].map((id) => `${id}.tsx`).sort(),
-  );
+  expect(
+    readdirSync(join(pack, "workflows"))
+      .filter((file) => file.endsWith(".tsx"))
+      .sort(),
+  ).toEqual([...CURATED_PUBLIC_WORKFLOW_IDS, ...CURATED_SYSTEM_WORKFLOW_IDS].map((id) => `${id}.tsx`).sort());
   const gateway = readFileSync(join(pack, "gateway.ts"), "utf8");
   const mounted = [...gateway.matchAll(/await mountWorkflow\("([^"]+)"/g)].map((match) => match[1]);
   // Hidden system workflows may still own UIs that are directly addressable.
@@ -53,7 +55,9 @@ test("fresh init installs exactly the curated public and hidden system workflows
 
 test("the curated contract cannot be narrowed by a removed selectedWorkflows option", () => {
   const { pack } = freshPack({ selectedWorkflows: ["hello"] });
-  const workflows = readdirSync(join(pack, "workflows")).filter((file) => file.endsWith(".tsx")).sort();
+  const workflows = readdirSync(join(pack, "workflows"))
+    .filter((file) => file.endsWith(".tsx"))
+    .sort();
   expect(workflows).toEqual(
     [...CURATED_PUBLIC_WORKFLOW_IDS, ...CURATED_SYSTEM_WORKFLOW_IDS].map((id) => `${id}.tsx`).sort(),
   );

@@ -145,12 +145,7 @@ describe("deriveRoute", () => {
   });
 
   test("stripped cloud surfaces fall through to notFound", () => {
-    for (const path of [
-      "/terminal",
-      "/issues",
-      "/landings",
-      "/askme",
-    ]) {
+    for (const path of ["/terminal", "/issues", "/landings", "/askme"]) {
       expect(deriveRoute(path, {})).toMatchObject({
         view: "notFound",
         surface: null,
@@ -160,8 +155,6 @@ describe("deriveRoute", () => {
 
   test("root search params are retained", () => {
     expect(deriveRoute("/runs", { project: "acme" }).project).toBe("acme");
-    expect(
-      deriveRoute("/runs", { workspace: "/tmp/local-app" }).workspaceRoot,
-    ).toBe("/tmp/local-app");
+    expect(deriveRoute("/runs", { workspace: "/tmp/local-app" }).workspaceRoot).toBe("/tmp/local-app");
   });
 });

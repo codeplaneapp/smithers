@@ -23,8 +23,7 @@ export function rctfCompletenessScorer(opts: RctfCompletenessScorerOptions): Sco
     id: opts.id ?? "rctf-completeness",
     name: opts.name ?? "R-C-T-F Completeness",
     description:
-      opts.description ??
-      "Rates an extracted prompt by how completely it fills Role, Context, Task, Format.",
+      opts.description ?? "Rates an extracted prompt by how completely it fills Role, Context, Task, Format.",
     judge: opts.judge as never,
     instructions:
       "You are a strict evaluator of extracted LLM prompts. " +
@@ -34,8 +33,7 @@ export function rctfCompletenessScorer(opts: RctfCompletenessScorerOptions): Sco
       "score = 0.0 means no slots are filled. " +
       "Average across the four slots; ignore other fields.",
     promptTemplate: ({ output }) => {
-      const text =
-        typeof output === "string" ? output : JSON.stringify(output, null, 2);
+      const text = typeof output === "string" ? output : JSON.stringify(output, null, 2);
       return [
         "Evaluate this extracted prompt against the R-C-T-F backbone.",
         "",

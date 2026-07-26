@@ -38,9 +38,10 @@ const solChainMulti = codexFirst(
 const PRIOR_RUN = "run-1784673778698";
 
 function crossSeatPrompt(target: "adopt-gateway" | "adopt-product", seat: "fable" | "sol"): string {
-  const scope = target === "adopt-gateway"
-    ? "Multi's gateway/run structured-output adoption (GatewayNodeDetail/GatewayRunInspector/NodeInspector/RunInspector rendering through shared AgentOutput/ActivityTimeline/Plan/Queue/Artifact/TestResults/StackTrace/CodeBlock/SchemaDisplay/Confirmation/Checkpoint/ContextUsage, raw fallbacks retained)"
-    : "Multi's product-surface adoption (AgentCard/ModelSelector/ProviderBadge in the agent registry, Confirmation/ApprovalCard in approvals, Checkpoint actions in timeline, Commit/ChangeSummary/Artifact/OpenInChat in VCS/files, TestResults in evals, EnvironmentVariables/SecretField in BYOK, Sandbox anatomy, canvas anatomy in the flow editor)";
+  const scope =
+    target === "adopt-gateway"
+      ? "Multi's gateway/run structured-output adoption (GatewayNodeDetail/GatewayRunInspector/NodeInspector/RunInspector rendering through shared AgentOutput/ActivityTimeline/Plan/Queue/Artifact/TestResults/StackTrace/CodeBlock/SchemaDisplay/Confirmation/Checkpoint/ContextUsage, raw fallbacks retained)"
+      : "Multi's product-surface adoption (AgentCard/ModelSelector/ProviderBadge in the agent registry, Confirmation/ApprovalCard in approvals, Checkpoint actions in timeline, Commit/ChangeSummary/Artifact/OpenInChat in VCS/files, TestResults in evals, EnvironmentVariables/SecretField in BYOK, Sandbox anatomy, canvas anatomy in the flow editor)";
   return [
     `Missing cross-seat verdict: independent ${seat}-seat review of the ALREADY-LANDED ${target} lane in ${MULTI_ROOT}. Do NOT edit files. Return laneId=${target}, seat=${seat}, reviewer=<the model identity you actually are>.`,
     `Scope reviewed: ${scope}. The lane was implemented and approved by the other seat in run ${PRIOR_RUN}; find its commits via \`jj log\` in the Multi repo (adoption commits from 2026-07-22, e.g. \`git log --grep="${target}"\`).`,
@@ -49,7 +50,7 @@ function crossSeatPrompt(target: "adopt-gateway" | "adopt-product", seat: "fable
 }
 
 export default smithers((ctx) => {
-  const reviews = Array.isArray(ctx.outputs?.aguiReview) ? ctx.outputs.aguiReview as Record<string, unknown>[] : [];
+  const reviews = Array.isArray(ctx.outputs?.aguiReview) ? (ctx.outputs.aguiReview as Record<string, unknown>[]) : [];
   const gatewayFable = reviews.filter((row) => row.laneId === "adopt-gateway" && row.seat === "fable").at(-1);
   const productSol = reviews.filter((row) => row.laneId === "adopt-product" && row.seat === "sol").at(-1);
 
@@ -58,10 +59,24 @@ export default smithers((ctx) => {
       <UI entry="../ui/agui-cross-verdicts.tsx" title="Agentic UI Cross-Seat Verdicts" />
       <Sequence>
         <Parallel>
-          <Task id="cross-adopt-gateway-fable" output={outputs.aguiReview} agent={fableChainMulti} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+          <Task
+            id="cross-adopt-gateway-fable"
+            output={outputs.aguiReview}
+            agent={fableChainMulti}
+            retries={2}
+            timeoutMs={45 * 60_000}
+            heartbeatTimeoutMs={10 * 60_000}
+          >
             {crossSeatPrompt("adopt-gateway", "fable")}
           </Task>
-          <Task id="cross-adopt-product-sol" output={outputs.aguiReview} agent={solChainMulti} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+          <Task
+            id="cross-adopt-product-sol"
+            output={outputs.aguiReview}
+            agent={solChainMulti}
+            retries={2}
+            timeoutMs={45 * 60_000}
+            heartbeatTimeoutMs={10 * 60_000}
+          >
             {crossSeatPrompt("adopt-product", "sol")}
           </Task>
         </Parallel>
@@ -71,9 +86,10 @@ export default smithers((ctx) => {
               success: gatewayFable.approved === true && productSol.approved === true,
               gatewayFableApproved: gatewayFable.approved === true,
               productSolApproved: productSol.approved === true,
-              summary: gatewayFable.approved === true && productSol.approved === true
-                ? "Cross-seat verdicts complete: adopt-gateway approved by Fable, adopt-product approved by Sol. Every program lane now carries its full required review coverage."
-                : `Cross-seat verdicts settled: adopt-gateway fable=${gatewayFable.approved === true}, adopt-product sol=${productSol.approved === true}. See review feedback for blocking issues.`,
+              summary:
+                gatewayFable.approved === true && productSol.approved === true
+                  ? "Cross-seat verdicts complete: adopt-gateway approved by Fable, adopt-product approved by Sol. Every program lane now carries its full required review coverage."
+                  : `Cross-seat verdicts settled: adopt-gateway fable=${gatewayFable.approved === true}, adopt-product sol=${productSol.approved === true}. See review feedback for blocking issues.`,
             }}
           </Task>
         ) : null}

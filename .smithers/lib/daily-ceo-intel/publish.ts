@@ -22,7 +22,15 @@ export async function publishIssue(
         : !verifyPassed
           ? "The composed issue failed verification."
           : "A critical source failed today.";
-    return { attempted: false, published: false, idempotentSkip: false, skippedReason, kvKeys: [], deliveryId: null, summary: `Publish skipped: ${skippedReason}` };
+    return {
+      attempted: false,
+      published: false,
+      idempotentSkip: false,
+      skippedReason,
+      kvKeys: [],
+      deliveryId: null,
+      summary: `Publish skipped: ${skippedReason}`,
+    };
   }
 
   const existing = getDelivery(db, issueDateEt);

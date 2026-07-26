@@ -103,7 +103,14 @@ const PIPELINE_STAGES: Array<{ id: string; label: string }> = [
   { id: "assert-verified", label: "Assert verified" },
 ];
 
-type CoverageRow = { sourceId: string; kind: string; ok: boolean; error: string | null; itemCount: number; retried: boolean };
+type CoverageRow = {
+  sourceId: string;
+  kind: string;
+  ok: boolean;
+  error: string | null;
+  itemCount: number;
+  retried: boolean;
+};
 
 function coverageRowsOf(value: unknown): CoverageRow[] {
   return asArray(value)
@@ -213,7 +220,14 @@ function Dashboard({ runId }: { runId: string }) {
         title="Pipeline funnel"
         actions={
           <>
-            {status ? <StatusPill status={status === "published" || status === "archived" ? "ok" : status === "empty-day" ? "waiting" : "warn"} label={status} /> : null}
+            {status ? (
+              <StatusPill
+                status={
+                  status === "published" || status === "archived" ? "ok" : status === "empty-day" ? "waiting" : "warn"
+                }
+                label={status}
+              />
+            ) : null}
             {degraded ? <Badge variant="warning">degraded</Badge> : null}
             {criticalFailed ? <Badge variant="destructive">critical source failed</Badge> : null}
           </>
@@ -245,7 +259,9 @@ function Dashboard({ runId }: { runId: string }) {
         </div>
       ) : null}
       {verify ? (
-        <p className="dci-muted">Editorial repair loop: attempt {verifyAttempt || 1}, {verifyPassed ? "verified" : "not yet verified"}.</p>
+        <p className="dci-muted">
+          Editorial repair loop: attempt {verifyAttempt || 1}, {verifyPassed ? "verified" : "not yet verified"}.
+        </p>
       ) : null}
 
       <SectionHeader
@@ -267,8 +283,12 @@ function Dashboard({ runId }: { runId: string }) {
             <Tabs defaultValue="brief">
               <TabsList>
                 <TabsTrigger value="brief">Brief</TabsTrigger>
-                <TabsTrigger value="top" count={asArray(issue.topStories).length}>Top Stories</TabsTrigger>
-                <TabsTrigger value="lighter" count={asArray(issue.lighterSide).length}>Lighter Side</TabsTrigger>
+                <TabsTrigger value="top" count={asArray(issue.topStories).length}>
+                  Top Stories
+                </TabsTrigger>
+                <TabsTrigger value="lighter" count={asArray(issue.lighterSide).length}>
+                  Lighter Side
+                </TabsTrigger>
                 <TabsTrigger value="raw">Raw</TabsTrigger>
               </TabsList>
               <TabsContent value="brief">
@@ -276,21 +296,27 @@ function Dashboard({ runId }: { runId: string }) {
                 <p className="dci-muted">{asString(issue.coverageStatement) ?? ""}</p>
               </TabsContent>
               <TabsContent value="top">
-                {asArray(issue.topStories).filter(isRecord).map((story, index) => (
-                  <div className="dci-story" key={String(story.srcId ?? index)}>
-                    <strong>{asString(story.headline) ?? "(untitled)"}</strong>
-                    <span className="dci-muted"> — {asString(story.srcId)}</span>
-                    <p>{asString(story.body) ?? ""}</p>
-                  </div>
-                ))}
-                {asArray(issue.topStories).length === 0 ? <EmptyState title="No top stories" description="Quiet day, or not composed yet." /> : null}
+                {asArray(issue.topStories)
+                  .filter(isRecord)
+                  .map((story, index) => (
+                    <div className="dci-story" key={String(story.srcId ?? index)}>
+                      <strong>{asString(story.headline) ?? "(untitled)"}</strong>
+                      <span className="dci-muted"> — {asString(story.srcId)}</span>
+                      <p>{asString(story.body) ?? ""}</p>
+                    </div>
+                  ))}
+                {asArray(issue.topStories).length === 0 ? (
+                  <EmptyState title="No top stories" description="Quiet day, or not composed yet." />
+                ) : null}
               </TabsContent>
               <TabsContent value="lighter">
-                {asArray(issue.lighterSide).filter(isRecord).map((item, index) => (
-                  <div className="dci-story" key={String(item.srcId ?? index)}>
-                    {asString(item.text) ?? ""} <span className="dci-muted">({asString(item.srcId)})</span>
-                  </div>
-                ))}
+                {asArray(issue.lighterSide)
+                  .filter(isRecord)
+                  .map((item, index) => (
+                    <div className="dci-story" key={String(item.srcId ?? index)}>
+                      {asString(item.text) ?? ""} <span className="dci-muted">({asString(item.srcId)})</span>
+                    </div>
+                  ))}
                 {asArray(issue.lighterSide).length === 0 ? <EmptyState title="No Lighter Side picks yet" /> : null}
               </TabsContent>
               <TabsContent value="raw">
@@ -300,7 +326,10 @@ function Dashboard({ runId }: { runId: string }) {
           </CardContent>
         </Card>
       ) : (
-        <EmptyState title="No issue composed yet" description="The editorial repair loop hasn't produced a draft yet." />
+        <EmptyState
+          title="No issue composed yet"
+          description="The editorial repair loop hasn't produced a draft yet."
+        />
       )}
 
       <SectionHeader title="Coverage & failures" />

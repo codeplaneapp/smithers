@@ -1,4 +1,4 @@
 export type WatchRenderContext = {
-    tickCount: number;
-    initial: boolean;
+  tickCount: number;
+  initial: boolean;
 };

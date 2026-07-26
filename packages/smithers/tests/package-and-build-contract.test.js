@@ -28,8 +28,9 @@ function packageDirs(parent) {
 }
 
 function workspaceDirs() {
-  return [...packageDirs("packages"), ...packageDirs("apps"), "e2e", ".smithers"]
-    .filter((dir) => exists(join(dir, "package.json")));
+  return [...packageDirs("packages"), ...packageDirs("apps"), "e2e", ".smithers"].filter((dir) =>
+    exists(join(dir, "package.json")),
+  );
 }
 
 function manifests() {
@@ -66,11 +67,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "spawn(process.execPath",
       'await import("@smithers-orchestrator/cli")',
     ]);
-    expectText("packages/agents/src/index.d.ts", [
-      "PoolAgent",
-      "PoolAgentOptions",
-      "createPoolCapabilityRegistry",
-    ]);
+    expectText("packages/agents/src/index.d.ts", ["PoolAgent", "PoolAgentOptions", "createPoolCapabilityRegistry"]);
     expectText("packages/smithers/src/index.d.ts", ["PoolAgent", "PoolAgentOptions"]);
 
     const explicit = [
@@ -117,12 +114,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
   });
 
   test("pnpm workspace graph includes direct workspaces and resolves workspace protocol dependencies", () => {
-    expectText("pnpm-workspace.yaml", [
-      '  - "packages/*"',
-      '  - "apps/*"',
-      '  - "e2e"',
-      '  - ".smithers"',
-    ]);
+    expectText("pnpm-workspace.yaml", ['  - "packages/*"', '  - "apps/*"', '  - "e2e"', '  - ".smithers"']);
 
     const localNames = new Map();
     for (const { dir, manifest } of manifests()) {
@@ -173,15 +165,9 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     ]);
     expect(paths["@smithers-orchestrator/server"]).toEqual(["./packages/server/src/index.js"]);
     expect(paths["@smithers-orchestrator/observability"]).toEqual(["./apps/observability/src/index.js"]);
-    expect(tsconfig.compilerOptions.typeRoots).toEqual([
-      "./packages/smithers/src/types",
-      "./node_modules/@types",
-    ]);
+    expect(tsconfig.compilerOptions.typeRoots).toEqual(["./packages/smithers/src/types", "./node_modules/@types"]);
     expectText("bunfig.toml", ['preload = ["./preload.js"]', "[test]", 'root = "."']);
-    expectText("preload.js", [
-      'import { mdxPlugin } from "./packages/smithers/src/mdx-plugin.js";',
-      "mdxPlugin();",
-    ]);
+    expectText("preload.js", ['import { mdxPlugin } from "./packages/smithers/src/mdx-plugin.js";', "mdxPlugin();"]);
   });
 
   test("npm scripts wire build, docs, release, coverage, observability, and app e2e commands", () => {
@@ -206,20 +192,22 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     expect(scripts["check:dts"]).toBe("node scripts/check-dts.mjs");
     expect(scripts["fetch:jj"]).toBe("node scripts/fetch-jj-binaries.mjs");
     expect(scripts.observability).toBeUndefined();
-    expect(scripts.test).toBe([
-      "node scripts/check-single-effect-version.mjs",
-      "node scripts/check-dependency-boundaries.mjs",
-      "node scripts/check-ui-architecture.mjs",
-      "node --test scripts/check-ui-architecture.test.mjs",
-      "node scripts/check-no-direct-db-access.mjs",
-      "node scripts/check-docs.mjs",
-      "node scripts/check-llms.mjs",
-      "node scripts/check-sota.mjs",
-      "node scripts/check-dts.mjs",
-      "node scripts/check-smithers-test-script.mjs",
-      "bun test scripts/publish-next.test.mjs scripts/release-next-gate.test.mjs scripts/bump.test.mjs scripts/run-workspace-tests-timeout.test.mjs",
-      "pnpm -r --no-bail test",
-    ].join(" && "));
+    expect(scripts.test).toBe(
+      [
+        "node scripts/check-single-effect-version.mjs",
+        "node scripts/check-dependency-boundaries.mjs",
+        "node scripts/check-ui-architecture.mjs",
+        "node --test scripts/check-ui-architecture.test.mjs",
+        "node scripts/check-no-direct-db-access.mjs",
+        "node scripts/check-docs.mjs",
+        "node scripts/check-llms.mjs",
+        "node scripts/check-sota.mjs",
+        "node scripts/check-dts.mjs",
+        "node scripts/check-smithers-test-script.mjs",
+        "bun test scripts/publish-next.test.mjs scripts/release-next-gate.test.mjs scripts/bump.test.mjs scripts/run-workspace-tests-timeout.test.mjs",
+        "pnpm -r --no-bail test",
+      ].join(" && "),
+    );
 
     for (const path of [
       "scripts/publish.mjs",
@@ -231,7 +219,8 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "scripts/check-no-direct-db-access.mjs",
       "scripts/check-smithers-test-script.mjs",
       "scripts/verify-observability.sh",
-    ]) expectFile(path);
+    ])
+      expectFile(path);
 
     const observability = json("apps/observability/package.json");
     expect(observability.scripts.test).toBe("bun test tests");
@@ -340,7 +329,11 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "scripts/sota.test.ts",
     ]);
     expectText("scripts/generate-sota.ts", ["SOTA_REGISTRY_VERSION", "SOTA_ROLE_MODELS", "SOTA_DEPRECATED_MODELS"]);
-    expectText("scripts/sota-research.ts", ["scripts/generate-sota.ts", 'pnpm", ["docs:llms"]', 'pnpm", ["generate:init-pack"]']);
+    expectText("scripts/sota-research.ts", [
+      "scripts/generate-sota.ts",
+      'pnpm", ["docs:llms"]',
+      'pnpm", ["generate:init-pack"]',
+    ]);
     expectText("scripts/check-dts.mjs", [
       '"packages/agents"',
       '"packages/cloudflare"',
@@ -351,14 +344,56 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       'pnpm", ["-C", pkg, "run", "build"]',
     ]);
     expectText("scripts/check-fault-skips.mjs", ["allowedSkips", "skipPattern", "no untracked skips"]);
-    expectText("scripts/normalize-bunx.ts", ["bunx smithers-orchestrator", "normalizeCommands", "normalizeInline", "README.md"]);
-    expectText("scripts/normalize-placeholders.ts", ["<run-id>", "RUN_ID", "NODE_ID", "WORKFLOW_ID", "isPathOrUrlContext"]);
-    expectText("scripts/generate-component-source.mjs", ["Composite", "GENERATED:COMPONENT-SOURCE START", "GENERATED:COMPONENT-SOURCE END", "--check"]);
-    expectText("scripts/generate-workflow-pack.ts", ["SEEDED_WORKFLOW_IDS", "// smithers-source: seeded", "GENERATED_SEEDED_FILES"]);
-    expectText("scripts/generate-ui-themes.ts", ["crepeTheme.generated.ts", "xyflowTheme.generated.ts", "@xyflow/react/dist/style.css"]);
-    expectText("scripts/publish.mjs", ["pnpm check:llms", "pnpm -r build", "pnpm test", "pnpm fetch:jj", "--skip-gh-release"]);
-    expectText("scripts/fetch-jj-binaries.mjs", ["jj-vcs/jj", "JJ_VERSION", "--force", "jj-darwin-arm64", "jj-win32-x64", "commit nothing"]);
-    expectText("scripts/coverage.mjs", ["thresholdProfiles", "packageProfiles", "coverageUnsupported", "SMITHERS_COVERAGE_PACKAGES"]);
+    expectText("scripts/normalize-bunx.ts", [
+      "bunx smithers-orchestrator",
+      "normalizeCommands",
+      "normalizeInline",
+      "README.md",
+    ]);
+    expectText("scripts/normalize-placeholders.ts", [
+      "<run-id>",
+      "RUN_ID",
+      "NODE_ID",
+      "WORKFLOW_ID",
+      "isPathOrUrlContext",
+    ]);
+    expectText("scripts/generate-component-source.mjs", [
+      "Composite",
+      "GENERATED:COMPONENT-SOURCE START",
+      "GENERATED:COMPONENT-SOURCE END",
+      "--check",
+    ]);
+    expectText("scripts/generate-workflow-pack.ts", [
+      "SEEDED_WORKFLOW_IDS",
+      "// smithers-source: seeded",
+      "GENERATED_SEEDED_FILES",
+    ]);
+    expectText("scripts/generate-ui-themes.ts", [
+      "crepeTheme.generated.ts",
+      "xyflowTheme.generated.ts",
+      "@xyflow/react/dist/style.css",
+    ]);
+    expectText("scripts/publish.mjs", [
+      "pnpm check:llms",
+      "pnpm -r build",
+      "pnpm test",
+      "pnpm fetch:jj",
+      "--skip-gh-release",
+    ]);
+    expectText("scripts/fetch-jj-binaries.mjs", [
+      "jj-vcs/jj",
+      "JJ_VERSION",
+      "--force",
+      "jj-darwin-arm64",
+      "jj-win32-x64",
+      "commit nothing",
+    ]);
+    expectText("scripts/coverage.mjs", [
+      "thresholdProfiles",
+      "packageProfiles",
+      "coverageUnsupported",
+      "SMITHERS_COVERAGE_PACKAGES",
+    ]);
     expectText("scripts/verify-observability.sh", [
       "scripts/obs-reset.sh",
       "observability/docker-compose.otel.yml",

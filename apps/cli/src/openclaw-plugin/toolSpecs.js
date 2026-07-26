@@ -23,7 +23,11 @@ export const toolSpecs = [
         input: { type: "object", description: "Structured JSON input passed as --input." },
         detach: { type: "boolean", description: "Run in the background. Defaults to true." },
         started_by_session: { type: "string", description: "Optional OpenClaw session attribution, stored durably." },
-        started_by_prompt: { type: "string", description: "Optional explicit launch-context attribution, stored durably; never inferred from workflow prompt." },
+        started_by_prompt: {
+          type: "string",
+          description:
+            "Optional explicit launch-context attribution, stored durably; never inferred from workflow prompt.",
+        },
       },
       required: ["workflow"],
     },
@@ -66,7 +70,8 @@ export const toolSpecs = [
       properties: {
         prompt: {
           type: "string",
-          description: "Description of the workflow to author, including inputs, done condition, and verification expectations.",
+          description:
+            "Description of the workflow to author, including inputs, done condition, and verification expectations.",
         },
         detach: { type: "boolean", description: "Run the create-workflow flow in the background. Defaults to true." },
       },
@@ -207,8 +212,7 @@ export const toolSpecs = [
   },
   {
     name: "smithers_optimize",
-    description:
-      "Run GEPA prompt optimization for a Smithers workflow eval suite and write an optimization artifact.",
+    description: "Run GEPA prompt optimization for a Smithers workflow eval suite and write an optimization artifact.",
     timeoutMs: 45 * 60_000,
     parameters: {
       type: "object",
@@ -217,7 +221,10 @@ export const toolSpecs = [
         workflow: { type: "string", description: "Path to the workflow .tsx file." },
         cases: { type: "string", description: "JSON or JSONL eval case file." },
         suite: { type: "string", description: "Stable suite id." },
-        provider: { type: "string", description: "Optimizer provider, e.g. claude-code, codex, openai-api, heuristic." },
+        provider: {
+          type: "string",
+          description: "Optimizer provider, e.g. claude-code, codex, openai-api, heuristic.",
+        },
         model: { type: "string", description: "Optimizer model." },
         artifact: { type: "string", description: "Path for the optimized prompt artifact." },
         report_dir: { type: "string", description: "Directory for baseline and optimized eval reports." },

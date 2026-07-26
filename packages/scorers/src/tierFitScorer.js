@@ -7,9 +7,11 @@ import { llmJudge } from "./llmJudge.js";
  * @returns {candidate is { tier: string }}
  */
 function hasTier(candidate) {
-    return (typeof candidate === "object" &&
-        candidate !== null &&
-        typeof (/** @type {{ tier?: unknown }} */ (candidate).tier) === "string");
+  return (
+    typeof candidate === "object" &&
+    candidate !== null &&
+    typeof (/** @type {{ tier?: unknown }} */ (candidate).tier) === "string"
+  );
 }
 
 /**
@@ -27,12 +29,13 @@ function hasTier(candidate) {
  * @returns {Scorer}
  */
 export function tierFitScorer(judge) {
-    return llmJudge({
-        id: "tier-fit",
-        name: "Tier Fit",
-        description: "Judges whether a delegation node's intelligence tier matched its work (over-tiered wastes cost, under-tiered risks quality)",
-        judge,
-        instructions: `You evaluate tier fit in a delegation-chain workflow, where strong models recursively decompose work for weaker models. Tiers from strongest/most expensive to weakest/cheapest: fable, opus, sonnet, haiku.
+  return llmJudge({
+    id: "tier-fit",
+    name: "Tier Fit",
+    description:
+      "Judges whether a delegation node's intelligence tier matched its work (over-tiered wastes cost, under-tiered risks quality)",
+    judge,
+    instructions: `You evaluate tier fit in a delegation-chain workflow, where strong models recursively decompose work for weaker models. Tiers from strongest/most expensive to weakest/cheapest: fable, opus, sonnet, haiku.
 
 Key Principles:
 1. Judge whether the assigned tier matched the difficulty of the brief and the quality of the output
@@ -40,16 +43,12 @@ Key Principles:
 3. Under-tiered: the brief demanded more judgment or breadth than the tier delivered — quality risk
 4. A perfect fit scores 1.0; penalize proportionally to how far off the tier was and how much it cost or risked
 5. Use cost/context stats when provided; do not invent numbers`,
-        promptTemplate: ({ input, output, context }) => {
-            const node = hasTier(input)
-                ? input
-                : hasTier(context)
-                    ? context
-                    : undefined;
-            const tier = node ? node.tier : "unknown";
-            const brief = node && "brief" in node ? node.brief : undefined;
-            const stats = node && "stats" in node ? node.stats : undefined;
-            return `Evaluate whether this delegation node's intelligence tier was the right choice.
+    promptTemplate: ({ input, output, context }) => {
+      const node = hasTier(input) ? input : hasTier(context) ? context : undefined;
+      const tier = node ? node.tier : "unknown";
+      const brief = node && "brief" in node ? node.brief : undefined;
+      const stats = node && "stats" in node ? node.stats : undefined;
+      return `Evaluate whether this delegation node's intelligence tier was the right choice.
 
 Tier: ${JSON.stringify(tier)}
 
@@ -62,6 +61,6 @@ Output: ${JSON.stringify(output)}
 Respond with a JSON object: { "score": <number 0-1>, "reason": "<brief explanation>" }
 
 Where 1.0 means the tier fit the work perfectly and 0.0 means it was badly over- or under-tiered.`;
-        },
-    });
+    },
+  });
 }

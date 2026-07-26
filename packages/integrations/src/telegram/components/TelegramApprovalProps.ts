@@ -1,10 +1,7 @@
 import type React from "react";
 import type { z } from "zod";
 import type { TelegramClientConfig, SendMessageSmartOptions } from "../TelegramClientTypes.ts";
-import type {
-  TelegramApprovalMode,
-  TelegramApprovalOption,
-} from "../approvalTypes.ts";
+import type { TelegramApprovalMode, TelegramApprovalOption } from "../approvalTypes.ts";
 
 /** The request rendered into the approval prompt. */
 export type TelegramApprovalRequest = {

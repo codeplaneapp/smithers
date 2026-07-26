@@ -12,16 +12,14 @@ import { GeminiAgent, GEMINI_SUNSET_MESSAGE } from "../src/GeminiAgent.js";
 describe("GeminiAgent (sunset)", () => {
   it("throws sunset error on generate()", async () => {
     const agent = new GeminiAgent();
-    await expect(
-      agent.generate({ prompt: "What is 2+2?", rootDir: "/tmp" }),
-    ).rejects.toThrow(GEMINI_SUNSET_MESSAGE);
+    await expect(agent.generate({ prompt: "What is 2+2?", rootDir: "/tmp" })).rejects.toThrow(GEMINI_SUNSET_MESSAGE);
   });
 
   it("throws sunset error on buildCommand()", async () => {
     const agent = new GeminiAgent();
-    await expect(
-      agent.buildCommand({ prompt: "What is 2+2?", cwd: "/tmp", options: {} }),
-    ).rejects.toThrow(GEMINI_SUNSET_MESSAGE);
+    await expect(agent.buildCommand({ prompt: "What is 2+2?", cwd: "/tmp", options: {} })).rejects.toThrow(
+      GEMINI_SUNSET_MESSAGE,
+    );
   });
 
   it("createOutputInterpreter always emits a failed completed event", () => {

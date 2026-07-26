@@ -10,42 +10,41 @@ import { createSmithers } from "../src/index.js";
  * @param {string} ddl
  */
 export function createTestDb(schema, ddl) {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-"));
-    const path = join(dir, "db.sqlite");
-    const sqlite = new Database(path);
-    sqlite.exec(ddl);
-    const db = drizzle(sqlite, { schema: schema });
-    return {
-        db,
-        sqlite,
-        path,
-        cleanup: () => sqlite.close(),
-    };
+  const dir = mkdtempSync(join(tmpdir(), "smithers-"));
+  const path = join(dir, "db.sqlite");
+  const sqlite = new Database(path);
+  sqlite.exec(ddl);
+  const db = drizzle(sqlite, { schema: schema });
+  return {
+    db,
+    sqlite,
+    path,
+    cleanup: () => sqlite.close(),
+  };
 }
 /**
  * @template S
  * @param {S} schemas
  */
 export function createTestSmithers(schemas) {
-    const dir = mkdtempSync(join(tmpdir(), "smithers-"));
-    const dbPath = join(dir, "db.sqlite");
-    const api = createSmithers(schemas, { dbPath });
-    return {
-        ...api,
-        dbPath,
-        cleanup: () => {
-            try {
-                api.db.$client?.close?.();
-            }
-            catch { }
-        },
-    };
+  const dir = mkdtempSync(join(tmpdir(), "smithers-"));
+  const dbPath = join(dir, "db.sqlite");
+  const api = createSmithers(schemas, { dbPath });
+  return {
+    ...api,
+    dbPath,
+    cleanup: () => {
+      try {
+        api.db.$client?.close?.();
+      } catch {}
+    },
+  };
 }
 /**
  * @param {number} ms
  */
 export function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 /**
  * @param {string} tag
@@ -54,5 +53,5 @@ export function sleep(ms) {
  * @returns {XmlElement}
  */
 export function el(tag, props = {}, children = []) {
-    return { kind: "element", tag, props, children };
+  return { kind: "element", tag, props, children };
 }

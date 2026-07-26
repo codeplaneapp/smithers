@@ -26,7 +26,7 @@ export function mcpAddFallbackMessage(opts = {}) {
     `This often means a runner word-split the launch command and the helper rejected the bare "--mcp" flag.`,
     "",
     "Register it directly with your agent's CLI instead. The `--` separator is required so",
-    'the agent treats everything after it as the launch command, not its own flags:',
+    "the agent treats everything after it as the launch command, not its own flags:",
     "",
     ...directCommands,
     "",

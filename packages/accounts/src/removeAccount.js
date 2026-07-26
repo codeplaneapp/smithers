@@ -14,21 +14,20 @@ import { withAccountsLock } from "./withAccountsLock.js";
  * @returns {boolean} true if an entry was removed
  */
 export function removeAccount(label, options = {}) {
-    const env = options.env ?? process.env;
-    // Serialized read-modify-write so a concurrent addAccount cannot have its
-    // entry dropped by this remove's whole-file rewrite (lost update).
-    return withAccountsLock(env, () => {
-        const existing = readAccounts(env);
-        const preserved = existing.unknownAccounts ?? [];
-        const nextAccounts = existing.accounts.filter((entry) => entry.label !== label);
-        const nextUnknown = preserved.filter((entry) => entry.label !== label);
-        const removed = nextAccounts.length !== existing.accounts.length
-            || nextUnknown.length !== preserved.length;
-        if (!removed) {
-            if (options.silent) return false;
-            throw new SmithersError("ACCOUNT_NOT_FOUND", `No account with label "${label}" is registered.`);
-        }
-        writeAccounts({ version: 1, accounts: nextAccounts, unknownAccounts: nextUnknown }, env);
-        return true;
-    });
+  const env = options.env ?? process.env;
+  // Serialized read-modify-write so a concurrent addAccount cannot have its
+  // entry dropped by this remove's whole-file rewrite (lost update).
+  return withAccountsLock(env, () => {
+    const existing = readAccounts(env);
+    const preserved = existing.unknownAccounts ?? [];
+    const nextAccounts = existing.accounts.filter((entry) => entry.label !== label);
+    const nextUnknown = preserved.filter((entry) => entry.label !== label);
+    const removed = nextAccounts.length !== existing.accounts.length || nextUnknown.length !== preserved.length;
+    if (!removed) {
+      if (options.silent) return false;
+      throw new SmithersError("ACCOUNT_NOT_FOUND", `No account with label "${label}" is registered.`);
+    }
+    writeAccounts({ version: 1, accounts: nextAccounts, unknownAccounts: nextUnknown }, env);
+    return true;
+  });
 }

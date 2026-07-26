@@ -19,8 +19,8 @@ export const GITHUB_SOURCE_ID = "github";
  * @returns {string | undefined}
  */
 function header(request, name) {
-    const value = request.headers[name];
-    return Array.isArray(value) ? value[0] : value;
+  const value = request.headers[name];
+  return Array.isArray(value) ? value[0] : value;
 }
 
 /**
@@ -30,17 +30,13 @@ function header(request, name) {
  * @returns {number | null}
  */
 function extractNumber(payload) {
-    const candidates = [
-        payload?.pull_request?.number,
-        payload?.issue?.number,
-        payload?.number,
-    ];
-    for (const candidate of candidates) {
-        if (typeof candidate === "number" && Number.isInteger(candidate)) {
-            return candidate;
-        }
+  const candidates = [payload?.pull_request?.number, payload?.issue?.number, payload?.number];
+  for (const candidate of candidates) {
+    if (typeof candidate === "number" && Number.isInteger(candidate)) {
+      return candidate;
     }
-    return null;
+  }
+  return null;
 }
 
 /**
@@ -64,52 +60,55 @@ function extractNumber(payload) {
  * @returns {ExternalEvent[]}
  */
 export function decodeGitHubWebhook(request, receivedAtMs = Date.now()) {
-    const event = header(request, "x-github-event");
-    if (!event) {
-        throw new IntegrationError("decode-failed", "GitHub webhook is missing the X-GitHub-Event header.", { sourceId: GITHUB_SOURCE_ID });
+  const event = header(request, "x-github-event");
+  if (!event) {
+    throw new IntegrationError("decode-failed", "GitHub webhook is missing the X-GitHub-Event header.", {
+      sourceId: GITHUB_SOURCE_ID,
+    });
+  }
+  const deliveryId = header(request, "x-github-delivery");
+  if (!deliveryId) {
+    throw new IntegrationError("decode-failed", "GitHub webhook is missing the X-GitHub-Delivery header.", {
+      sourceId: GITHUB_SOURCE_ID,
+      event,
+    });
+  }
+  /** @type {any} */
+  const payload = JSON.parse(request.rawBody);
+  const action = typeof payload?.action === "string" && payload.action.length > 0 ? payload.action : null;
+  const repo =
+    typeof payload?.repository?.full_name === "string" && payload.repository.full_name.includes("/")
+      ? payload.repository.full_name
+      : null;
+  const number = extractNumber(payload);
+  const names = [integrationEventName("github", event)];
+  if (action) {
+    names.push(integrationEventName("github", `${event}.${action}`));
+  }
+  /** @type {(string | null)[]} */
+  const correlations = [];
+  if (repo && number !== null) {
+    correlations.push(`${repo}#${number}`);
+  }
+  if (repo) {
+    correlations.push(repo);
+  }
+  correlations.push(null);
+  /** @type {ExternalEvent[]} */
+  const events = [];
+  for (const eventName of names) {
+    for (const correlationId of correlations) {
+      events.push({
+        source: GITHUB_SOURCE_ID,
+        eventName,
+        correlationId,
+        payload,
+        dedupeKey: `${deliveryId}:${eventName}:${correlationId ?? "*"}`,
+        receivedAtMs,
+      });
     }
-    const deliveryId = header(request, "x-github-delivery");
-    if (!deliveryId) {
-        throw new IntegrationError("decode-failed", "GitHub webhook is missing the X-GitHub-Delivery header.", { sourceId: GITHUB_SOURCE_ID, event });
-    }
-    /** @type {any} */
-    const payload = JSON.parse(request.rawBody);
-    const action = typeof payload?.action === "string" && payload.action.length > 0
-        ? payload.action
-        : null;
-    const repo = typeof payload?.repository?.full_name === "string" &&
-        payload.repository.full_name.includes("/")
-        ? payload.repository.full_name
-        : null;
-    const number = extractNumber(payload);
-    const names = [integrationEventName("github", event)];
-    if (action) {
-        names.push(integrationEventName("github", `${event}.${action}`));
-    }
-    /** @type {(string | null)[]} */
-    const correlations = [];
-    if (repo && number !== null) {
-        correlations.push(`${repo}#${number}`);
-    }
-    if (repo) {
-        correlations.push(repo);
-    }
-    correlations.push(null);
-    /** @type {ExternalEvent[]} */
-    const events = [];
-    for (const eventName of names) {
-        for (const correlationId of correlations) {
-            events.push({
-                source: GITHUB_SOURCE_ID,
-                eventName,
-                correlationId,
-                payload,
-                dedupeKey: `${deliveryId}:${eventName}:${correlationId ?? "*"}`,
-                receivedAtMs,
-            });
-        }
-    }
-    return events;
+  }
+  return events;
 }
 
 /**
@@ -123,7 +122,7 @@ export function decodeGitHubWebhook(request, receivedAtMs = Date.now()) {
  * @returns {import("effect").Effect.Effect<import("../core/EventSourceTypes.ts").WebhookSource, never>}
  */
 export function makeGitHubWebhookSource(options = {}) {
-    return makeWebhookSource(githubWebhookSourceConfig(options));
+  return makeWebhookSource(githubWebhookSourceConfig(options));
 }
 
 /**
@@ -135,21 +134,26 @@ export function makeGitHubWebhookSource(options = {}) {
  * @returns {import("../core/EventSourceTypes.ts").MakeWebhookSourceOptions}
  */
 export function githubWebhookSourceConfig(options = {}) {
-    const { id = GITHUB_SOURCE_ID, capacity, ...config } = options;
-    const resolved = resolveGitHubConfig(config);
-    if (!resolved.webhookSecret) {
-        throw new IntegrationError("invalid-signature", "GitHub webhook source requires a webhookSecret (option, configureGitHub, or SMITHERS_GITHUB_WEBHOOK_SECRET).", { sourceId: id });
-    }
-    const secret = resolved.webhookSecret;
-    return {
-        id,
-        capacity,
-        verify: (request) => verifySignature({
-            payload: request.rawBody,
-            secret,
-            signature: header(request, "x-hub-signature-256"),
-            prefix: "sha256=",
-        }),
-        decode: (request) => decodeGitHubWebhook(request),
-    };
+  const { id = GITHUB_SOURCE_ID, capacity, ...config } = options;
+  const resolved = resolveGitHubConfig(config);
+  if (!resolved.webhookSecret) {
+    throw new IntegrationError(
+      "invalid-signature",
+      "GitHub webhook source requires a webhookSecret (option, configureGitHub, or SMITHERS_GITHUB_WEBHOOK_SECRET).",
+      { sourceId: id },
+    );
+  }
+  const secret = resolved.webhookSecret;
+  return {
+    id,
+    capacity,
+    verify: (request) =>
+      verifySignature({
+        payload: request.rawBody,
+        secret,
+        signature: header(request, "x-hub-signature-256"),
+        prefix: "sha256=",
+      }),
+    decode: (request) => decodeGitHubWebhook(request),
+  };
 }

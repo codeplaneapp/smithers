@@ -69,10 +69,7 @@ describe("cyclic dependsOn", () => {
         { kind: "task", nodeId: "b" },
       ],
     };
-    const descs = descriptorMap(
-      makeDescriptor("a", { dependsOn: ["b"] }),
-      makeDescriptor("b", { dependsOn: ["a"] }),
-    );
+    const descs = descriptorMap(makeDescriptor("a", { dependsOn: ["b"] }), makeDescriptor("b", { dependsOn: ["a"] }));
     const result = scheduleTasks(plan, new Map(), descs, new Map(), new Map(), 0);
     expect(result.runnable).toEqual([]);
     expect(result.pendingExists).toBe(true);
@@ -97,18 +94,8 @@ describe("waitAsync traversal escape for waiting-event", () => {
         { kind: "task", nodeId: "next" },
       ],
     };
-    const descs = descriptorMap(
-      makeDescriptor("waiter", { waitAsync: true }),
-      makeDescriptor("next"),
-    );
-    const result = scheduleTasks(
-      plan,
-      new Map([["waiter::0", "waiting-event"]]),
-      descs,
-      new Map(),
-      new Map(),
-      0,
-    );
+    const descs = descriptorMap(makeDescriptor("waiter", { waitAsync: true }), makeDescriptor("next"));
+    const result = scheduleTasks(plan, new Map([["waiter::0", "waiting-event"]]), descs, new Map(), new Map(), 0);
     expect(result.runnable.map((task) => task.nodeId)).toEqual(["next"]);
     expect(result.waitingEventExists).toBe(true);
   });
@@ -121,18 +108,8 @@ describe("waitAsync traversal escape for waiting-event", () => {
         { kind: "task", nodeId: "next" },
       ],
     };
-    const descs = descriptorMap(
-      makeDescriptor("waiter"),
-      makeDescriptor("next"),
-    );
-    const result = scheduleTasks(
-      plan,
-      new Map([["waiter::0", "waiting-event"]]),
-      descs,
-      new Map(),
-      new Map(),
-      0,
-    );
+    const descs = descriptorMap(makeDescriptor("waiter"), makeDescriptor("next"));
+    const result = scheduleTasks(plan, new Map([["waiter::0", "waiting-event"]]), descs, new Map(), new Map(), 0);
     expect(result.runnable).toEqual([]);
     expect(result.waitingEventExists).toBe(true);
   });

@@ -4,7 +4,12 @@
 import { createSmithers, Sequence, Task } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { implementer, panelists, synthesizer, validator } from "../components/roles";
-import { ValidationLoop, implementOutputSchema, validateOutputSchema, validationLoopState } from "../components/ValidationLoop";
+import {
+  ValidationLoop,
+  implementOutputSchema,
+  validateOutputSchema,
+  validationLoopState,
+} from "../components/ValidationLoop";
 import { reviewOutputSchema, reviewSynthesisSchema } from "../components/Review";
 
 export const inputSchema = z.object({
@@ -49,7 +54,9 @@ export default smithers((ctx) => {
         />
         {state.exhausted ? (
           <Task id="impl:exhausted" output={outputs.failure} retries={0}>
-            {() => { throw new Error(`Implement Stable exhausted after ${maxIterations} attempts`); }}
+            {() => {
+              throw new Error(`Implement Stable exhausted after ${maxIterations} attempts`);
+            }}
           </Task>
         ) : null}
       </Sequence>

@@ -26,15 +26,33 @@ export default smithers((ctx) => {
   };
   const newest = <T,>(rows: T[] | undefined) => {
     if (!rows?.length) return undefined;
-    return rows.reduce((selected, row) => iterationOf(row) >= iterationOf(selected) ? row : selected);
+    return rows.reduce((selected, row) => (iterationOf(row) >= iterationOf(selected) ? row : selected));
   };
-  const validateRows = (ctx.outputs.validate ?? []) as Array<{ nodeId?: string; iteration?: number; allPassed?: boolean; failingSummary?: string | null }>;
-  const reviewRows = (ctx.outputs.reviewSynthesis ?? []) as Array<{ nodeId?: string; iteration?: number; approved?: boolean; feedback?: string | null }>;
+  const validateRows = (ctx.outputs.validate ?? []) as Array<{
+    nodeId?: string;
+    iteration?: number;
+    allPassed?: boolean;
+    failingSummary?: string | null;
+  }>;
+  const reviewRows = (ctx.outputs.reviewSynthesis ?? []) as Array<{
+    nodeId?: string;
+    iteration?: number;
+    approved?: boolean;
+    feedback?: string | null;
+  }>;
   const currentValidation = newest(validateRows.filter((row) => row.nodeId === "impl:validate"));
   const currentIteration = currentValidation ? iterationOf(currentValidation) : undefined;
-  const currentReview = currentIteration === undefined ? undefined : newest(reviewRows.filter((row) => row.nodeId === "impl:review-moderator" && iterationOf(row) === currentIteration));
+  const currentReview =
+    currentIteration === undefined
+      ? undefined
+      : newest(
+          reviewRows.filter((row) => row.nodeId === "impl:review-moderator" && iterationOf(row) === currentIteration),
+        );
   const validate = currentValidation;
-  const gate = { approved: currentReview?.approved === true, feedback: currentReview?.approved === false ? currentReview.feedback ?? null : null };
+  const gate = {
+    approved: currentReview?.approved === true,
+    feedback: currentReview?.approved === false ? (currentReview.feedback ?? null) : null,
+  };
   const validationPassed = currentValidation?.allPassed === true;
   const paired = currentValidation !== undefined && currentReview !== undefined;
   const done = paired && validationPassed && gate.approved;

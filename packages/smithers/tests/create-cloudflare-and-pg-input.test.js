@@ -28,8 +28,7 @@ function createFakeDurableObjectStorage() {
   return {
     sql: {
       exec(statement, ...params) {
-        const returnsRows =
-          /^\s*(select|with|pragma|values)\b/i.test(statement) || /\breturning\b/i.test(statement);
+        const returnsRows = /^\s*(select|with|pragma|values)\b/i.test(statement) || /\breturning\b/i.test(statement);
         if (!returnsRows) {
           sqlite.run(statement, ...params);
           return { toArray: () => [], raw: () => [] };
@@ -72,7 +71,12 @@ describe("createSmithersCloudflare", () => {
     let closed = false;
     const api = await createSmithersCloudflare(
       { result: z.object({ value: z.string() }), review: z.object({ score: z.number() }) },
-      { db: descriptor, close: () => { closed = true; } },
+      {
+        db: descriptor,
+        close: () => {
+          closed = true;
+        },
+      },
     );
 
     expect(Object.keys(api.tables).sort()).toEqual(["result", "review"]);
@@ -106,7 +110,10 @@ describe("createSmithersCloudflare", () => {
       { db: createCloudflareDurableObjectSqliteDescriptor(storage) },
     );
 
-    const inputCols = storage.sql.exec('PRAGMA table_info("input")').toArray().map((c) => c.name);
+    const inputCols = storage.sql
+      .exec('PRAGMA table_info("input")')
+      .toArray()
+      .map((c) => c.name);
     expect(inputCols).toContain("prompt");
     expect(inputCols).toContain("retries");
     // No close callback supplied => close is undefined.
@@ -125,7 +132,10 @@ describe("createSmithersCloudflare", () => {
       { db: createCloudflareDurableObjectSqliteDescriptor(storage) },
     );
 
-    const inputCols = storage.sql.exec('PRAGMA table_info("input")').toArray().map((c) => c.name);
+    const inputCols = storage.sql
+      .exec('PRAGMA table_info("input")')
+      .toArray()
+      .map((c) => c.name);
     expect(inputCols).toContain("payload");
     expect(typeof api.tables).toBe("object");
   });
@@ -173,7 +183,10 @@ describe("createSmithersPostgres input table reconciliation", () => {
     await seed.exec('CREATE TABLE "input" (run_id TEXT PRIMARY KEY)');
     await seed.close();
 
-    const api = await createSmithersPostgres({ result: z.object({ ok: z.boolean() }) }, { provider: "pglite", dataDir });
+    const api = await createSmithersPostgres(
+      { result: z.object({ ok: z.boolean() }) },
+      { provider: "pglite", dataDir },
+    );
     try {
       const cols = await api.db.connection.query({
         text: "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'input'",
@@ -201,7 +214,10 @@ describe("createSmithersPostgres input table reconciliation", () => {
     await seed.close();
 
     await expect(
-      createSmithersPostgres({ result: z.object({ value: z.string(), extra: z.number() }) }, { provider: "pglite", dataDir }),
+      createSmithersPostgres(
+        { result: z.object({ value: z.string(), extra: z.number() }) },
+        { provider: "pglite", dataDir },
+      ),
     ).rejects.toThrow(/ADD COLUMN|result/);
 
     // The port was released by the teardown drain, so a fresh PGlite can reopen

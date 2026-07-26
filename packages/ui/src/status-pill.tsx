@@ -28,12 +28,7 @@ export type StatusPillProps = Omit<ComponentProps<"span">, "children"> & {
  */
 export function StatusPill({ status, label, withDot = true, className, ...props }: StatusPillProps) {
   return (
-    <Badge
-      variant={STATUS_VARIANT[statusClass(status)]}
-      data-status={status}
-      className={className}
-      {...props}
-    >
+    <Badge variant={STATUS_VARIANT[statusClass(status)]} data-status={status} className={className} {...props}>
       {withDot ? <span aria-hidden className="sui-status-dot" /> : null}
       {label ?? formatStatus(status)}
     </Badge>

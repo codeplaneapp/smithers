@@ -51,7 +51,7 @@ describe("runAction (subprocess)", () => {
   });
 
   test("exits 0 with a notice when GITHUB_EVENT_PATH is unset", () => {
-    const env: Record<string, string> = { ...process.env as Record<string, string> };
+    const env: Record<string, string> = { ...(process.env as Record<string, string>) };
     delete env.GITHUB_EVENT_PATH;
     const result = Bun.spawnSync(["bun", RUN_ACTION], {
       cwd: PKG_ROOT,
@@ -143,10 +143,7 @@ describe("runAction (subprocess)", () => {
   test("exits 0 with a skip notice when a comment-triggered PR is a fork", async () => {
     const eventPath = join(tmp, "event.json");
     await writeFile(eventPath, JSON.stringify(commentPayload));
-    const result = spawnCommentAction(
-      { SMITHERS_FAKE_GH_STDOUT: '{"isCrossRepository":true}' },
-      eventPath,
-    );
+    const result = spawnCommentAction({ SMITHERS_FAKE_GH_STDOUT: '{"isCrossRepository":true}' }, eventPath);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("::notice::");
     expect(result.stdout).toContain("fork pull requests are not reviewed");
@@ -155,10 +152,7 @@ describe("runAction (subprocess)", () => {
   test("continues past the fork check for a same-repo comment-triggered PR", async () => {
     const eventPath = join(tmp, "event.json");
     await writeFile(eventPath, JSON.stringify(commentPayload));
-    const result = spawnCommentAction(
-      { SMITHERS_FAKE_GH_STDOUT: '{"isCrossRepository":false}' },
-      eventPath,
-    );
+    const result = spawnCommentAction({ SMITHERS_FAKE_GH_STDOUT: '{"isCrossRepository":false}' }, eventPath);
     // Fork check passed → the next step (fetchOidcToken) fails without OIDC vars.
     expect(result.exitCode).not.toBe(0);
     expect(result.stdout).not.toContain("fork pull requests are not reviewed");
@@ -188,7 +182,7 @@ describe("runAction (subprocess)", () => {
     const eventPath = join(tmp, "event.json");
     await writeFile(eventPath, JSON.stringify(payload));
 
-    const env: Record<string, string> = { ...process.env as Record<string, string> };
+    const env: Record<string, string> = { ...(process.env as Record<string, string>) };
     delete env.ACTIONS_ID_TOKEN_REQUEST_URL;
     delete env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
     env.GITHUB_EVENT_NAME = "pull_request";

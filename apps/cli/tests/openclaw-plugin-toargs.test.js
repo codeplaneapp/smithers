@@ -47,15 +47,26 @@ describe("openclaw plugin toArgs — CLI contract", () => {
   });
 
   test("smithers_run keeps attribution prompt separate from workflow prompt", () => {
-    expect(toArgs("smithers_run", {
-      workflow: "implement",
-      prompt: "workflow prompt",
-      started_by_session: "session-1",
-      started_by_prompt: "launch context",
-    })).toEqual([
-      "workflow", "run", "implement", "--prompt", "workflow prompt", "--detach",
-      "--started-by-harness", "openclaw", "--started-by-session", "session-1",
-      "--started-by-prompt", "launch context",
+    expect(
+      toArgs("smithers_run", {
+        workflow: "implement",
+        prompt: "workflow prompt",
+        started_by_session: "session-1",
+        started_by_prompt: "launch context",
+      }),
+    ).toEqual([
+      "workflow",
+      "run",
+      "implement",
+      "--prompt",
+      "workflow prompt",
+      "--detach",
+      "--started-by-harness",
+      "openclaw",
+      "--started-by-session",
+      "session-1",
+      "--started-by-prompt",
+      "launch context",
     ]);
   });
 

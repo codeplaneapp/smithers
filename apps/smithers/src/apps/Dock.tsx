@@ -24,9 +24,7 @@ export function Dock() {
   const active = activeAppId({ view, surface });
   // Skip ids that no longer resolve, so a catalog change can't strand a
   // persisted dock entry.
-  const apps = openAppIds
-    .map(getApp)
-    .filter((app): app is App => app !== undefined);
+  const apps = openAppIds.map(getApp).filter((app): app is App => app !== undefined);
 
   if (apps.length === 0) {
     return null;

@@ -90,24 +90,96 @@ export type BrowserRedaction = { redacted: true; length: number };
 export type BrowserOutcome =
   | { ok: true; redirectedTo?: string; redacted?: boolean; length?: number }
   | { ok: false; code: string; message: string };
-export type BrowserJournalEntry = { actionId: string; actor: Exclude<BrowserActor, "page">; revision: number; action: BrowserAction; result: BrowserOutcome };
-export type BrowserContextSlice = "visible-text" | "accessibility" | "interactive-elements" | "screenshot" | "selections" | "recent-actions" | "console-summary" | "network-summary";
+export type BrowserJournalEntry = {
+  actionId: string;
+  actor: Exclude<BrowserActor, "page">;
+  revision: number;
+  action: BrowserAction;
+  result: BrowserOutcome;
+};
+export type BrowserContextSlice =
+  | "visible-text"
+  | "accessibility"
+  | "interactive-elements"
+  | "screenshot"
+  | "selections"
+  | "recent-actions"
+  | "console-summary"
+  | "network-summary";
 export type BrowserSummary = { message?: string; count?: number; truncated?: boolean } & Record<string, unknown>;
 export type BrowserSource = { kind: "url"; url: string } | { kind: "dev-server"; port: number; path?: string };
-export type BrowserSnapshot = { sessionId: string; source: BrowserSource; status: "starting" | "ready" | "loading" | "suspended" | "closed" | "failed"; revision: number; page: { url: string; title: string; canGoBack: boolean; canGoForward: boolean } | null; viewport: BrowserViewport; control: { owner: "user" | "agent" | null } };
+export type BrowserSnapshot = {
+  sessionId: string;
+  source: BrowserSource;
+  status: "starting" | "ready" | "loading" | "suspended" | "closed" | "failed";
+  revision: number;
+  page: { url: string; title: string; canGoBack: boolean; canGoForward: boolean } | null;
+  viewport: BrowserViewport;
+  control: { owner: "user" | "agent" | null };
+};
 export type BrowserLocator = { testId: string } | { role: string; name?: string } | { css: string };
-export type BrowserClickAction = { kind: "click"; locator: BrowserLocator; point?: never; button?: "left" | "right" | "middle"; modifiers?: BrowserModifier[] } | { kind: "click"; point: BrowserPoint; locator?: never; button?: "left" | "right" | "middle"; modifiers?: BrowserModifier[] };
-export type BrowserAction = { kind: "navigate"; url: string } | { kind: "back" | "forward" | "reload" | "stop" } | BrowserClickAction | { kind: "type"; locator: BrowserLocator; text: string; replace?: boolean } | { kind: "press"; key: string; modifiers?: BrowserModifier[] } | { kind: "scroll"; deltaX: number; deltaY: number } | { kind: "dialog"; decision: "accept" | "dismiss"; promptText?: string };
+export type BrowserClickAction =
+  | {
+      kind: "click";
+      locator: BrowserLocator;
+      point?: never;
+      button?: "left" | "right" | "middle";
+      modifiers?: BrowserModifier[];
+    }
+  | {
+      kind: "click";
+      point: BrowserPoint;
+      locator?: never;
+      button?: "left" | "right" | "middle";
+      modifiers?: BrowserModifier[];
+    };
+export type BrowserAction =
+  | { kind: "navigate"; url: string }
+  | { kind: "back" | "forward" | "reload" | "stop" }
+  | BrowserClickAction
+  | { kind: "type"; locator: BrowserLocator; text: string; replace?: boolean }
+  | { kind: "press"; key: string; modifiers?: BrowserModifier[] }
+  | { kind: "scroll"; deltaX: number; deltaY: number }
+  | { kind: "dialog"; decision: "accept" | "dismiss"; promptText?: string };
 export type CreateBrowserSessionRequest = { source: BrowserSource; viewport?: { width: number; height: number } };
-export type BrowserActRequest = { sessionId: string; actionId: string; expectedRevision?: number; action: BrowserAction };
+export type BrowserActRequest = {
+  sessionId: string;
+  actionId: string;
+  expectedRevision?: number;
+  action: BrowserAction;
+};
 export type BrowserContextRequest = { sessionId: string; sinceRevision?: number; include?: string[] };
 export type BrowserPickRequest = { sessionId: string; point: { x: number; y: number } };
 export type CloseBrowserSessionRequest = { sessionId: string };
 export type CreateBrowserSessionResponse = BrowserSnapshot;
 export type BrowserActResponse = { revision: number; page: BrowserSnapshot["page"]; outcome: BrowserOutcome };
 export type BrowserScreenshot = { data: string; mediaType: "image/jpeg" };
-export type BrowserSelection = { locator: BrowserLocator; role: string; name: string; text: string; fingerprint: string; rect: BrowserRectangle; viewport: BrowserViewport };
-export type BrowserContextResponse = { fresh: boolean; reason?: string; snapshot: BrowserSnapshot; revision: number; include: string[]; visibleText?: string; visibleTextTruncated?: boolean; interactiveElements?: unknown[]; interactiveElementsTruncated?: boolean; accessibility?: string | null; recentActions?: unknown[]; selections?: BrowserSelection[]; consoleSummary?: unknown[]; networkSummary?: unknown[]; screenshot?: BrowserScreenshot | null };
+export type BrowserSelection = {
+  locator: BrowserLocator;
+  role: string;
+  name: string;
+  text: string;
+  fingerprint: string;
+  rect: BrowserRectangle;
+  viewport: BrowserViewport;
+};
+export type BrowserContextResponse = {
+  fresh: boolean;
+  reason?: string;
+  snapshot: BrowserSnapshot;
+  revision: number;
+  include: string[];
+  visibleText?: string;
+  visibleTextTruncated?: boolean;
+  interactiveElements?: unknown[];
+  interactiveElementsTruncated?: boolean;
+  accessibility?: string | null;
+  recentActions?: unknown[];
+  selections?: BrowserSelection[];
+  consoleSummary?: unknown[];
+  networkSummary?: unknown[];
+  screenshot?: BrowserScreenshot | null;
+};
 export type BrowserPickResponse = BrowserSelection & { screenshot: BrowserScreenshot | null };
 export type CloseBrowserSessionResponse = { closed: boolean; sessionId?: string };
 export type ListBrowserSessionsResponse = BrowserSnapshot[];
@@ -674,8 +746,20 @@ export type GatewayEventFrame<Payload = unknown> = {
   stateVersion: number;
   apiVersion?: SmithersApiVersion;
 };
-export type BrowserFrameEvent = { sessionId: string; seq: number; jpegBase64: string; viewport: { width: number; height: number } };
-export type BrowserActivityEvent = { sessionId: string; actionId: string; actor: Exclude<BrowserActor, "page">; revision: number; action: BrowserAction; result: BrowserOutcome };
+export type BrowserFrameEvent = {
+  sessionId: string;
+  seq: number;
+  jpegBase64: string;
+  viewport: { width: number; height: number };
+};
+export type BrowserActivityEvent = {
+  sessionId: string;
+  actionId: string;
+  actor: Exclude<BrowserActor, "page">;
+  revision: number;
+  action: BrowserAction;
+  result: BrowserOutcome;
+};
 
 export type GatewayRpcErrorDetails = Record<string, unknown> & {
   report?: EffectBoundaryReport;

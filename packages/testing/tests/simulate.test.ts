@@ -32,11 +32,9 @@ function buildWorkflow() {
         { id: "greet", output: outputs.greeting, agent: realAgent, noRetry: true },
         `Greet ${ctx.input.name}`,
       ),
-      React.createElement(
-        Task,
-        { id: "reply", output: outputs.reply, dependsOn: ["greet"] },
-        () => ({ text: `done ${ctx.input.name}` }),
-      ),
+      React.createElement(Task, { id: "reply", output: outputs.reply, dependsOn: ["greet"] }, () => ({
+        text: `done ${ctx.input.name}`,
+      })),
     ),
   );
 }

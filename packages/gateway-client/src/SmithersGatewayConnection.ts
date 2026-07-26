@@ -43,9 +43,8 @@ function serializedBytes(value: string) {
 
 function randomId(method: string) {
   const cryptoApi = globalThis.crypto;
-  const suffix = typeof cryptoApi?.randomUUID === "function"
-    ? cryptoApi.randomUUID()
-    : Math.random().toString(36).slice(2);
+  const suffix =
+    typeof cryptoApi?.randomUUID === "function" ? cryptoApi.randomUUID() : Math.random().toString(36).slice(2);
   return `${method}-${suffix}`;
 }
 
@@ -70,11 +69,13 @@ function invalidFrameError(details?: unknown) {
 }
 
 function isGatewayEventFrame(value: unknown): value is GatewayEventFrame {
-  return isObject(value) &&
+  return (
+    isObject(value) &&
     value.type === "event" &&
     typeof value.event === "string" &&
     typeof value.seq === "number" &&
-    typeof value.stateVersion === "number";
+    typeof value.stateVersion === "number"
+  );
 }
 
 export class SmithersGatewayConnection {
@@ -90,11 +91,7 @@ export class SmithersGatewayConnection {
 
   constructor(ws: WebSocket, options: SmithersGatewayConnectionOptions = {}) {
     this.ws = ws;
-    this.maxQueuedEvents = positiveLimit(
-      options.maxQueuedEvents,
-      DEFAULT_MAX_QUEUED_EVENTS,
-      "maxQueuedEvents",
-    );
+    this.maxQueuedEvents = positiveLimit(options.maxQueuedEvents, DEFAULT_MAX_QUEUED_EVENTS, "maxQueuedEvents");
     this.maxQueuedEventBytes = positiveLimit(
       options.maxQueuedEventBytes,
       DEFAULT_MAX_QUEUED_EVENT_BYTES,

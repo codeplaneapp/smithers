@@ -18,7 +18,7 @@ let registeredConfig = null;
  * @param {GitHubConfig | null | undefined} config Pass `null` to clear.
  */
 export function configureGitHub(config) {
-    registeredConfig = config ? { ...config } : null;
+  registeredConfig = config ? { ...config } : null;
 }
 
 /**
@@ -26,12 +26,12 @@ export function configureGitHub(config) {
  * @returns {string | undefined}
  */
 function firstNonEmpty(candidates) {
-    for (const candidate of candidates) {
-        if (typeof candidate === "string" && candidate.trim().length > 0) {
-            return candidate.trim();
-        }
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
     }
-    return undefined;
+  }
+  return undefined;
 }
 
 /**
@@ -44,26 +44,17 @@ function firstNonEmpty(candidates) {
  * @returns {ResolvedGitHubConfig}
  */
 export function resolveGitHubConfig(explicit) {
-    const env = typeof process !== "undefined" ? process.env : {};
-    return {
-        token: firstNonEmpty([
-            explicit?.token,
-            registeredConfig?.token,
-            env.SMITHERS_GITHUB_TOKEN,
-            env.GITHUB_TOKEN,
-        ]),
-        apiBaseUrl: firstNonEmpty([
-            explicit?.apiBaseUrl,
-            registeredConfig?.apiBaseUrl,
-            env.SMITHERS_GITHUB_API_BASE_URL,
-        ]) ?? DEFAULT_GITHUB_API_BASE_URL,
-        webhookSecret: firstNonEmpty([
-            explicit?.webhookSecret,
-            registeredConfig?.webhookSecret,
-            env.SMITHERS_GITHUB_WEBHOOK_SECRET,
-        ]),
-        maxRetries: explicit?.maxRetries ??
-            registeredConfig?.maxRetries ??
-            DEFAULT_MAX_RETRIES,
-    };
+  const env = typeof process !== "undefined" ? process.env : {};
+  return {
+    token: firstNonEmpty([explicit?.token, registeredConfig?.token, env.SMITHERS_GITHUB_TOKEN, env.GITHUB_TOKEN]),
+    apiBaseUrl:
+      firstNonEmpty([explicit?.apiBaseUrl, registeredConfig?.apiBaseUrl, env.SMITHERS_GITHUB_API_BASE_URL]) ??
+      DEFAULT_GITHUB_API_BASE_URL,
+    webhookSecret: firstNonEmpty([
+      explicit?.webhookSecret,
+      registeredConfig?.webhookSecret,
+      env.SMITHERS_GITHUB_WEBHOOK_SECRET,
+    ]),
+    maxRetries: explicit?.maxRetries ?? registeredConfig?.maxRetries ?? DEFAULT_MAX_RETRIES,
+  };
 }

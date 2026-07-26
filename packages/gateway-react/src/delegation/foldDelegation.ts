@@ -145,17 +145,21 @@ function intrinsicSeq(table: string, row: unknown): number {
   if (typeof row !== "object" || row === null) return 0;
   const record = row as Record<string, unknown>;
   const pick =
-    table === "dcQuestion" ? record.seq :
-    table === "dcReplan" ? record.round :
-    table === "dcExec" || table === "dcReview" ? record.attempt :
-    0;
+    table === "dcQuestion"
+      ? record.seq
+      : table === "dcReplan"
+        ? record.round
+        : table === "dcExec" || table === "dcReview"
+          ? record.attempt
+          : 0;
   return typeof pick === "number" && Number.isFinite(pick) ? pick : 0;
 }
 
 function compareRecords(left: DelegationRecord, right: DelegationRecord): number {
   const table = (TABLE_PRIORITY[left.table] ?? 99) - (TABLE_PRIORITY[right.table] ?? 99);
   if (table !== 0) return table;
-  const iteration = ((left as { iteration?: number }).iteration ?? 0) - ((right as { iteration?: number }).iteration ?? 0);
+  const iteration =
+    ((left as { iteration?: number }).iteration ?? 0) - ((right as { iteration?: number }).iteration ?? 0);
   if (iteration !== 0) return iteration;
   const leftRow = (left as { row?: unknown }).row;
   const rightRow = (right as { row?: unknown }).row;
@@ -165,7 +169,9 @@ function compareRecords(left: DelegationRecord, right: DelegationRecord): number
   if (seq !== 0) return seq;
   const node = left.nodeId.localeCompare(right.nodeId);
   if (node !== 0) return node;
-  const pending = Number((left as { pending?: boolean }).pending ?? false) - Number((right as { pending?: boolean }).pending ?? false);
+  const pending =
+    Number((left as { pending?: boolean }).pending ?? false) -
+    Number((right as { pending?: boolean }).pending ?? false);
   if (pending !== 0) return pending;
   return stableStringify(leftRow).localeCompare(stableStringify(rightRow));
 }
@@ -437,8 +443,7 @@ function cascadeStage(state: FoldState): FoldState {
     for (const dep of gates?.depsLogical ?? []) addDependent(dep, node.logicalId);
   }
   const cascadeResolved = (node: InternalNode, round: number): boolean =>
-    node.reaffirms.some((row) => row.round >= round) ||
-    node.invalidations.some((row) => row.round >= round);
+    node.reaffirms.some((row) => row.round >= round) || node.invalidations.some((row) => row.round >= round);
   /** A replanned parent's current plan re-declaring a child reaffirms it. */
   const redeclaredByReplannedParent = (parent: InternalNode, childId: string): boolean =>
     parent.invalidations.length > 0 &&
@@ -451,9 +456,9 @@ function cascadeStage(state: FoldState): FoldState {
         reaffirm: new Set([source.logicalId]),
       };
       const cascadeTargets = new Set<string>();
-      const queue: Array<{ id: string; via: string; rule: CascadeRule }> = [...(dependents.get(source.logicalId) ?? [])].map(
-        (id) => ({ id, via: source.logicalId, rule: "cascade" }),
-      );
+      const queue: Array<{ id: string; via: string; rule: CascadeRule }> = [
+        ...(dependents.get(source.logicalId) ?? []),
+      ].map((id) => ({ id, via: source.logicalId, rule: "cascade" }));
       while (queue.length) {
         const { id, via, rule: incomingRule } = queue.shift()!;
         const target = nodes.get(id);
@@ -577,9 +582,7 @@ function materializeStage(state: FoldState): FoldState {
     const latestEdit = lastOf(node.edits);
     const editConsumed =
       latestEdit !== undefined &&
-      node.invalidations.some(
-        (inv) => inv.trigger.type === "user-edit" && inv.trigger.ref === latestEdit.editId,
-      ) &&
+      node.invalidations.some((inv) => inv.trigger.type === "user-edit" && inv.trigger.ref === latestEdit.editId) &&
       (node.planRows.length === 0 || current.plan !== undefined);
     const output =
       lastExec ??
@@ -600,7 +603,7 @@ function materializeStage(state: FoldState): FoldState {
       brief:
         lastOf(node.planRows)?.brief ??
         node.declared?.brief ??
-        (node.probeRow ? node.probeRow.question : node.goalRow?.refinedPrompt ?? ""),
+        (node.probeRow ? node.probeRow.question : (node.goalRow?.refinedPrompt ?? "")),
       status: status ?? "planned",
       version: versionCount,
       versions,
@@ -648,7 +651,9 @@ function structuralRollupStage(state: FoldState): FoldState {
     const childStates = childIds.map((childId) => states[childId]!.status);
     if (childStates.length > 0 && childStates.every((childStatus) => childStatus === "done")) {
       nodeState.status = "done";
-    } else if (childStates.some((childStatus) => childStatus === "running" || childStatus === "done" || childStatus === "failed")) {
+    } else if (
+      childStates.some((childStatus) => childStatus === "running" || childStatus === "done" || childStatus === "failed")
+    ) {
       nodeState.status = "running";
     } else if (internal.gatesRows.length > 0) {
       nodeState.status = "ready";
@@ -689,9 +694,16 @@ function attentionRollupStage(state: FoldState): FoldState {
 function rootAndEdgeStage(state: FoldState): FoldState {
   const { nodes, states } = state;
   const rootCandidates = Object.values(states)
-    .filter((nodeState) => nodeState.parentId === null && nodeState.kind !== "goal" && nodeState.kind !== "poc" && nodeState.kind !== "research")
+    .filter(
+      (nodeState) =>
+        nodeState.parentId === null &&
+        nodeState.kind !== "goal" &&
+        nodeState.kind !== "poc" &&
+        nodeState.kind !== "research",
+    )
     .sort((a, b) => {
-      const planned = (nodes.get(b.logicalId)!.planRows.length ? 1 : 0) - (nodes.get(a.logicalId)!.planRows.length ? 1 : 0);
+      const planned =
+        (nodes.get(b.logicalId)!.planRows.length ? 1 : 0) - (nodes.get(a.logicalId)!.planRows.length ? 1 : 0);
       if (planned !== 0) return planned;
       return a.logicalId.localeCompare(b.logicalId);
     });
@@ -790,7 +802,7 @@ function budgetStage(state: FoldState): FoldState {
   let budgetActual: Partial<Estimate> = {};
   for (const node of nodes.values()) budgetActual = addPartial(budgetActual, ownActual(node));
   state.budgetActual = budgetActual;
-  state.budgetPredicted = state.rootId ? predicted(state.rootId, new Set()) ?? null : null;
+  state.budgetPredicted = state.rootId ? (predicted(state.rootId, new Set()) ?? null) : null;
   return state;
 }
 
@@ -809,7 +821,11 @@ function assembleGraphStage(state: FoldState): DelegationGraph {
     preview: state.previewsSkipped || [...nodes.values()].some((node) => node.previewRow !== undefined),
     gates: [...nodes.values()].some((node) => node.gatesRows.length > 0),
     derisk: [...nodes.values()].some(
-      (node) => node.probeRow !== undefined || node.invalidations.length > 0 || node.reaffirms.length > 0 || node.edits.length > 0,
+      (node) =>
+        node.probeRow !== undefined ||
+        node.invalidations.length > 0 ||
+        node.reaffirms.length > 0 ||
+        node.edits.length > 0,
     ),
     execution: [...nodes.values()].some(
       (node) => node.execRows.length > 0 || node.reviewRows.length > 0 || node.devPreviews.length > 0,

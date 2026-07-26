@@ -3,10 +3,7 @@ import { createHash } from "node:crypto";
 import { dirname } from "node:path";
 import { mkdir, realpath, stat } from "node:fs/promises";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
-import {
-  assertPathWithinRoot,
-  resolveSandboxPath,
-} from "@smithers-orchestrator/sandbox/sandboxPath";
+import { assertPathWithinRoot, resolveSandboxPath } from "@smithers-orchestrator/sandbox/sandboxPath";
 import { getToolContext } from "./context.js";
 
 export const DEFAULT_MAX_OUTPUT_BYTES = 200_000;
@@ -61,10 +58,7 @@ export async function ensureParentDir(path) {
 export async function assertReadableFileWithinLimit(path, maxBytes) {
   const fileStat = await stat(path);
   if (Number(fileStat.size) > maxBytes) {
-    throw new SmithersError(
-      "TOOL_FILE_TOO_LARGE",
-      `File too large (${fileStat.size} bytes)`,
-    );
+    throw new SmithersError("TOOL_FILE_TOO_LARGE", `File too large (${fileStat.size} bytes)`);
   }
 }
 
@@ -159,11 +153,12 @@ export function captureProcess(
         kill();
         finish(() =>
           reject(
-            new SmithersError(
-              "PROCESS_TIMEOUT",
-              `Command timed out after ${timeoutMs}ms`,
-              { command, args, cwd, timeoutMs },
-            ),
+            new SmithersError("PROCESS_TIMEOUT", `Command timed out after ${timeoutMs}ms`, {
+              command,
+              args,
+              cwd,
+              timeoutMs,
+            }),
           ),
         );
       }, timeoutMs);
@@ -178,17 +173,29 @@ export function captureProcess(
     child.on("error", (error) => {
       finish(() =>
         reject(
-          new SmithersError("PROCESS_FAILED", `Failed to spawn ${command}`, {
-            command,
-            args,
-            cwd,
-          }, { cause: error }),
+          new SmithersError(
+            "PROCESS_FAILED",
+            `Failed to spawn ${command}`,
+            {
+              command,
+              args,
+              cwd,
+            },
+            { cause: error },
+          ),
         ),
       );
     });
     child.on("close", (exitCode, signal) => {
       finish(() => {
-        resolve({ exitCode: exitCode ?? (signal ? 1 : 0), signal, stdout: Buffer.concat(stdoutChunks).toString("utf8"), stderr: Buffer.concat(stderrChunks).toString("utf8"), truncated: stdoutState.truncated || stderrState.truncated, totalBytes: stdoutState.totalBytes + stderrState.totalBytes });
+        resolve({
+          exitCode: exitCode ?? (signal ? 1 : 0),
+          signal,
+          stdout: Buffer.concat(stdoutChunks).toString("utf8"),
+          stderr: Buffer.concat(stderrChunks).toString("utf8"),
+          truncated: stdoutState.truncated || stderrState.truncated,
+          totalBytes: stdoutState.totalBytes + stderrState.totalBytes,
+        });
       });
     });
   });

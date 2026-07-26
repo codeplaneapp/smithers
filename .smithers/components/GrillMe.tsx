@@ -41,7 +41,8 @@ export function GrillMe({
           <GrillMeSkill />
           <AskUserInstructions />
           {context}
-          {currentDraft && `
+          {currentDraft &&
+            `
 
 ## Current Progress
 Here is the result of the previous iteration:

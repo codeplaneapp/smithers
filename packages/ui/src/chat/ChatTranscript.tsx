@@ -5,11 +5,7 @@ import { useInjectUiCss } from "../styles";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { CONVERSATION_FOUNDATION_CSS_ID, conversationFoundationCss } from "./conversationFoundationCss";
 import { ChatMessage } from "./ChatMessage";
-import {
-  MessageScroller,
-  type MessageScrollerHandle,
-  type MessageScrollerProps,
-} from "./MessageScroller";
+import { MessageScroller, type MessageScrollerHandle, type MessageScrollerProps } from "./MessageScroller";
 
 export type ChatTranscriptProps = ComponentProps<"div"> & {
   /** Whether a reply is currently being generated or streamed. */

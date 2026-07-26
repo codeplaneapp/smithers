@@ -112,7 +112,11 @@ describe("LlamaParse abort propagation", () => {
         capturedSignals.push(init?.signal);
         if (String(url).endsWith("/api/v1/files/")) return Response.json({ id: "file-123" });
         if (String(url).endsWith("/api/v2/parse")) return Response.json({ id: "job-123" });
-        return Response.json({ job: { id: "job-123", status: "COMPLETED" }, markdown_full: "# Parsed", text_full: "Parsed" });
+        return Response.json({
+          job: { id: "job-123", status: "COMPLETED" },
+          markdown_full: "# Parsed",
+          text_full: "Parsed",
+        });
       },
     });
     await expect(

@@ -42,23 +42,35 @@ describe("published artifact parity", () => {
     // Regression for the stale bundle that dropped native own-fields: the
     // shipped serializer must surface errno/byteOffset/syscall, not just
     // {name,message,code}.
-    const record = shippedSerialized as { native?: Record<string, unknown>; cause?: { native?: Record<string, unknown> } };
+    const record = shippedSerialized as {
+      native?: Record<string, unknown>;
+      cause?: { native?: Record<string, unknown> };
+    };
     expect(record.native).toEqual({ syscall: "write" });
     expect(record.cause?.native).toEqual({ byteOffset: -1, errno: 5 });
   });
 
   test("shipped realDbAdapter advertises exactly the cut points the source adapter can execute", () => {
-    const open = async () => { throw new Error("never admitted"); };
+    const open = async () => {
+      throw new Error("never admitted");
+    };
     const shippedAdapter = shipped.realDbAdapter({ open });
     const sourceAdapter = source.realDbAdapter({ open });
-    expect([...(shippedAdapter.supportedCutPoints ?? [])].sort()).toEqual([...(sourceAdapter.supportedCutPoints ?? [])].sort());
+    expect([...(shippedAdapter.supportedCutPoints ?? [])].sort()).toEqual(
+      [...(sourceAdapter.supportedCutPoints ?? [])].sort(),
+    );
     expect(shippedAdapter.identity).toBe(sourceAdapter.identity);
   });
 
   const ackScenario = (M: typeof source) =>
     M.runScenario(
       M.scenario("shipped-parity-ack", {
-        steps: [M.step("work", { runnerBinding: "parity:ack:work:v1", run: (runtime) => runtime.effect("write", () => "ok") })],
+        steps: [
+          M.step("work", {
+            runnerBinding: "parity:ack:work:v1",
+            run: (runtime) => runtime.effect("write", () => "ok"),
+          }),
+        ],
         faults: [M.fault("probe", "after-journal-before-ack", "completion-cas")],
       }),
       { waitBudget: 5_000 },
@@ -66,20 +78,30 @@ describe("published artifact parity", () => {
   const leaseScenario = (M: typeof source) =>
     M.runScenario(
       M.scenario("shipped-parity-lease", {
-        steps: [M.step("work", { runnerBinding: "test:shipped-parity:slow:v1", run: async () => { await new Promise((resolve) => setTimeout(resolve, 10)); return "ok"; } })],
+        steps: [
+          M.step("work", {
+            runnerBinding: "test:shipped-parity:slow:v1",
+            run: async () => {
+              await new Promise((resolve) => setTimeout(resolve, 10));
+              return "ok";
+            },
+          }),
+        ],
         faults: [M.fault("probe", "during-task", "heartbeat")],
       }),
       { waitBudget: 5_000 },
     );
   const projection = (result: Awaited<ReturnType<typeof source.runScenario>>) =>
-    JSON.parse(JSON.stringify({
-      status: result.status,
-      code: result.error?.code ?? null,
-      replayIdentity: result.replayIdentity,
-      ambiguity: result.ambiguity,
-      trace: result.trace,
-      controlLog: result.controlLog,
-    }));
+    JSON.parse(
+      JSON.stringify({
+        status: result.status,
+        code: result.error?.code ?? null,
+        replayIdentity: result.replayIdentity,
+        ambiguity: result.ambiguity,
+        trace: result.trace,
+        controlLog: result.controlLog,
+      }),
+    );
 
   test("shipped runScenario emits identical ack cut-point receipts and ambiguity to source", async () => {
     const fromShipped = await ackScenario(shipped);

@@ -3,11 +3,7 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import {
-  acquireRewindLock,
-  hasRewindLock,
-  resetRewindLocksForTests,
-} from "../src/rewindLock.js";
+import { acquireRewindLock, hasRewindLock, resetRewindLocksForTests } from "../src/rewindLock.js";
 
 function setupDb() {
   const sqlite = new Database(":memory:");

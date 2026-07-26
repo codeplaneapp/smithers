@@ -116,9 +116,7 @@ const bookmarkSchema = z.object({
 const verifySchema = z.object({
   allPassed: z.boolean(),
   summary: z.string().min(1),
-  commands: z
-    .array(z.object({ command: z.string(), exitCode: z.number().nullable(), tail: z.string() }))
-    .default([]),
+  commands: z.array(z.object({ command: z.string(), exitCode: z.number().nullable(), tail: z.string() })).default([]),
 });
 
 const humanTestSchema = z.object({
@@ -181,7 +179,9 @@ function baseNodeId(row: RawRow): string {
 
 function rowVersion(row: RawRow): [number, number] {
   const iteration = Number.isFinite(Number(row.iteration)) ? Number(row.iteration) : 0;
-  const iterationCount = Number.isFinite(Number(field(row, "iterationCount"))) ? Number(field(row, "iterationCount")) : iteration;
+  const iterationCount = Number.isFinite(Number(field(row, "iterationCount")))
+    ? Number(field(row, "iterationCount"))
+    : iteration;
   return [iterationCount, iteration];
 }
 
@@ -209,7 +209,13 @@ export function resolveRepoRoot(): string {
 }
 
 function slug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "run";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "run"
+  );
 }
 
 function jj(cwd: string, args: string[]): { code: number | null; out: string } {
@@ -504,7 +510,9 @@ status=implemented only when your focused checks pass; otherwise report
 partial or blocked truthfully with what remains.`,
     `THE REVIEWED PLAN:\n${improvedPlan}`,
     feedback ? `REVIEWER FEEDBACK ON YOUR PREVIOUS ATTEMPT (address all of it):\n${feedback}` : "",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function reviewPrompt(lane: Lane, impl: RawRow | undefined): string {
@@ -528,9 +536,11 @@ function laneFinalPrompt(lane: Lane, impl: RawRow | undefined, review: RawRow | 
   return [
     SHARED_CONTEXT,
     `LANE ${lane.id} — ${lane.title}.`,
-    `You are FABLE, the lane's final reviewer. ${exhausted
-      ? "The implement/review loop hit its iteration cap WITHOUT sol approval — decide: either fix the remaining issues yourself now and approve, or reject the lane (approved=false) with clear notes; a rejected lane is skipped at merge."
-      : "Sol approved; do the final pass."} Review the full lane diff (jj diff),
+    `You are FABLE, the lane's final reviewer. ${
+      exhausted
+        ? "The implement/review loop hit its iteration cap WITHOUT sol approval — decide: either fix the remaining issues yourself now and approve, or reject the lane (approved=false) with clear notes; a rejected lane is skipped at merge."
+        : "Sol approved; do the final pass."
+    } Review the full lane diff (jj diff),
 run the focused tests, and polish anything that keeps this from being
 mergeable as-is (you may edit). Hold the bar: behavior-asserting tests, no
 scope creep, no files outside the lane. Return laneId=${lane.id} exactly.`,
@@ -594,7 +604,9 @@ assertions to get green; fix the code. Return laneId=verify-fix exactly.`,
 // Lane state derived from typed outputs.
 // ---------------------------------------------------------------------------
 function laneState(ctx: any, laneId: string, maxIterations: number) {
-  const implRows = rawRows(ctx, "monrdImpl").filter((row) => baseNodeId(row) === `${laneId}-implement` && field(row, "laneId") === laneId);
+  const implRows = rawRows(ctx, "monrdImpl").filter(
+    (row) => baseNodeId(row) === `${laneId}-implement` && field(row, "laneId") === laneId,
+  );
   const impl = latestRaw(implRows, `${laneId}-implement`);
   const review = latestRaw(
     rawRows(ctx, "monrdReview").filter((row) => field(row, "laneId") === laneId),
@@ -607,8 +619,14 @@ function laneState(ctx: any, laneId: string, maxIterations: number) {
     `${laneId}-final-review`,
   );
   return {
-    plan: latestRaw(rawRows(ctx, "monrdPlan").filter((row) => field(row, "laneId") === laneId), `${laneId}-plan`),
-    planReview: latestRaw(rawRows(ctx, "monrdPlanReview").filter((row) => field(row, "laneId") === laneId), `${laneId}-plan-review`),
+    plan: latestRaw(
+      rawRows(ctx, "monrdPlan").filter((row) => field(row, "laneId") === laneId),
+      `${laneId}-plan`,
+    ),
+    planReview: latestRaw(
+      rawRows(ctx, "monrdPlanReview").filter((row) => field(row, "laneId") === laneId),
+      `${laneId}-plan-review`,
+    ),
     impl,
     review,
     reviewCurrent,
@@ -623,8 +641,10 @@ function laneState(ctx: any, laneId: string, maxIterations: number) {
 function laneFeedback(state: ReturnType<typeof laneState>): string {
   const parts: string[] = [];
   const status = field(state.impl, "status");
-  if (state.impl && status !== "implemented") parts.push(`PREVIOUS ATTEMPT ${String(status).toUpperCase()}:\n${String(field(state.impl, "summary") ?? "")}`);
-  if (state.reviewCurrent && state.review && !isTrue(field(state.review, "approved"))) parts.push(`SOL'S REVIEW (not approved):\n${String(field(state.review, "feedback") ?? "")}`);
+  if (state.impl && status !== "implemented")
+    parts.push(`PREVIOUS ATTEMPT ${String(status).toUpperCase()}:\n${String(field(state.impl, "summary") ?? "")}`);
+  if (state.reviewCurrent && state.review && !isTrue(field(state.review, "approved")))
+    parts.push(`SOL'S REVIEW (not approved):\n${String(field(state.review, "feedback") ?? "")}`);
   return parts.join("\n\n");
 }
 
@@ -637,26 +657,61 @@ function lanePipeline(ctx: any, lane: Lane, perLaneIterations: number) {
   const improvedPlan = String(field(state.planReview, "improvedPlan") ?? "");
   return (
     <Sequence>
-      <Task id={`${lane.id}-plan`} output={outputs.monrdPlan} agent={sol} retries={2} timeoutMs={40 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+      <Task
+        id={`${lane.id}-plan`}
+        output={outputs.monrdPlan}
+        agent={sol}
+        retries={2}
+        timeoutMs={40 * 60_000}
+        heartbeatTimeoutMs={10 * 60_000}
+      >
         {planPrompt(lane)}
       </Task>
-      <Task id={`${lane.id}-plan-review`} output={outputs.monrdPlanReview} agent={fable} retries={2} timeoutMs={30 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+      <Task
+        id={`${lane.id}-plan-review`}
+        output={outputs.monrdPlanReview}
+        agent={fable}
+        retries={2}
+        timeoutMs={30 * 60_000}
+        heartbeatTimeoutMs={10 * 60_000}
+      >
         {planReviewPrompt(lane, state.plan)}
       </Task>
       {improvedPlan ? (
         <Loop id={`${lane.id}-build`} until={state.done} maxIterations={perLaneIterations} onMaxReached="return-last">
           <Sequence>
-            <Task id={`${lane.id}-implement`} output={outputs.monrdImpl} agent={terra} retries={2} timeoutMs={90 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+            <Task
+              id={`${lane.id}-implement`}
+              output={outputs.monrdImpl}
+              agent={terra}
+              retries={2}
+              timeoutMs={90 * 60_000}
+              heartbeatTimeoutMs={10 * 60_000}
+            >
               {implementPrompt(lane, improvedPlan, laneFeedback(state))}
             </Task>
-            <Task id={`${lane.id}-review`} output={outputs.monrdReview} agent={sol} retries={2} timeoutMs={45 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+            <Task
+              id={`${lane.id}-review`}
+              output={outputs.monrdReview}
+              agent={sol}
+              retries={2}
+              timeoutMs={45 * 60_000}
+              heartbeatTimeoutMs={10 * 60_000}
+            >
               {reviewPrompt(lane, state.impl)}
             </Task>
           </Sequence>
         </Loop>
       ) : null}
       {state.done || state.exhausted ? (
-        <Task id={`${lane.id}-final-review`} output={outputs.monrdLaneFinal} agent={fable} retries={2} timeoutMs={60 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+        <Task
+          id={`${lane.id}-final-review`}
+          output={outputs.monrdLaneFinal}
+          agent={fable}
+          retries={2}
+          timeoutMs={60 * 60_000}
+          heartbeatTimeoutMs={10 * 60_000}
+        >
           {laneFinalPrompt(lane, state.impl, state.review, state.exhausted)}
         </Task>
       ) : null}
@@ -683,11 +738,15 @@ export default smithers((ctx) => {
   const bookmarkOk = (step: string) => bookmarks.some((row) => row.step === step && isTrue(row.ok));
 
   const shell = laneState(ctx, SHELL_LANE.id, input.perLaneIterations);
-  const featureStates = FEATURE_LANES.map((lane) => ({ lane, state: laneState(ctx, lane.id, input.perLaneIterations) }));
+  const featureStates = FEATURE_LANES.map((lane) => ({
+    lane,
+    state: laneState(ctx, lane.id, input.perLaneIterations),
+  }));
   const laneResults = rawRows(ctx, "monrdLaneResult");
   const resultFor = (laneId: string) => laneResults.filter((row) => field(row, "laneId") === laneId).at(-1);
   const mergeChecks = rawRows(ctx, "monrdMergeCheck");
-  const mergeVerified = (laneId: string) => mergeChecks.some((row) => field(row, "laneId") === laneId && isTrue(field(row, "verified")));
+  const mergeVerified = (laneId: string) =>
+    mergeChecks.some((row) => field(row, "laneId") === laneId && isTrue(field(row, "verified")));
 
   const allFeatureLanesSettled = featureStates.every(({ lane }) => resultFor(lane.id) !== undefined);
   const readyLanes = FEATURE_LANES.filter((lane) => isTrue(field(resultFor(lane.id), "ready")));
@@ -695,7 +754,10 @@ export default smithers((ctx) => {
   const mergesDone = allFeatureLanesSettled && allReadyMerged;
 
   const integrate = laneState(ctx, INTEGRATE_LANE.id, input.perLaneIterations);
-  const globalFinal = latestRaw(rawRows(ctx, "monrdLaneFinal").filter((row) => field(row, "laneId") === "global"), "global-final-review");
+  const globalFinal = latestRaw(
+    rawRows(ctx, "monrdLaneFinal").filter((row) => field(row, "laneId") === "global"),
+    "global-final-review",
+  );
   const verifyRows = rawRows(ctx, "monrdVerify");
   const latestVerify = verifyRows.at(-1);
   const verifyPassed = isTrue(field(latestVerify, "allPassed"));
@@ -755,29 +817,56 @@ export default smithers((ctx) => {
 
           {/* Serialized merges of approved lanes back into the redesign branch. */}
           <MergeQueue id="redesign-merge-queue" maxConcurrency={1}>
-            {FEATURE_LANES.filter((lane) => isTrue(field(resultFor(lane.id), "ready")) && !mergeVerified(lane.id)).map((lane) => {
-              const laneBranch = `${rootBranch}/${lane.id}`;
-              const lanePath = join(wtRoot, lane.id);
-              return (
-                <Sequence key={lane.id}>
-                  <Task id={`merge-${lane.id}`} output={outputs.monrdMerge} agent={mergeAgent} retries={2} timeoutMs={40 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
-                    {mergePrompt(lane, laneBranch, lanePath, rootBranch, rootWt)}
-                  </Task>
-                  <Task id={`merge-check-${lane.id}`} output={outputs.monrdMergeCheck} timeoutMs={5 * 60_000}>
-                    {() => {
-                      const contained = jj(rootWt, ["log", "--no-graph", "-r", `${laneBranch} & ::${rootBranch}`, "-T", "change_id.short()"]);
-                      const conflicts = jj(rootWt, ["log", "--no-graph", "-r", `conflicts() & ::${rootBranch}`, "-T", "change_id.short()"]);
-                      const verified = contained.code === 0 && contained.out.trim().length > 0 && conflicts.code === 0 && conflicts.out.trim().length === 0;
-                      return {
-                        laneId: lane.id,
-                        verified,
-                        detail: `contained=[${contained.out.slice(0, 200)}] conflicts=[${conflicts.out.slice(0, 200)}]`,
-                      };
-                    }}
-                  </Task>
-                </Sequence>
-              );
-            })}
+            {FEATURE_LANES.filter((lane) => isTrue(field(resultFor(lane.id), "ready")) && !mergeVerified(lane.id)).map(
+              (lane) => {
+                const laneBranch = `${rootBranch}/${lane.id}`;
+                const lanePath = join(wtRoot, lane.id);
+                return (
+                  <Sequence key={lane.id}>
+                    <Task
+                      id={`merge-${lane.id}`}
+                      output={outputs.monrdMerge}
+                      agent={mergeAgent}
+                      retries={2}
+                      timeoutMs={40 * 60_000}
+                      heartbeatTimeoutMs={10 * 60_000}
+                    >
+                      {mergePrompt(lane, laneBranch, lanePath, rootBranch, rootWt)}
+                    </Task>
+                    <Task id={`merge-check-${lane.id}`} output={outputs.monrdMergeCheck} timeoutMs={5 * 60_000}>
+                      {() => {
+                        const contained = jj(rootWt, [
+                          "log",
+                          "--no-graph",
+                          "-r",
+                          `${laneBranch} & ::${rootBranch}`,
+                          "-T",
+                          "change_id.short()",
+                        ]);
+                        const conflicts = jj(rootWt, [
+                          "log",
+                          "--no-graph",
+                          "-r",
+                          `conflicts() & ::${rootBranch}`,
+                          "-T",
+                          "change_id.short()",
+                        ]);
+                        const verified =
+                          contained.code === 0 &&
+                          contained.out.trim().length > 0 &&
+                          conflicts.code === 0 &&
+                          conflicts.out.trim().length === 0;
+                        return {
+                          laneId: lane.id,
+                          verified,
+                          detail: `contained=[${contained.out.slice(0, 200)}] conflicts=[${conflicts.out.slice(0, 200)}]`,
+                        };
+                      }}
+                    </Task>
+                  </Sequence>
+                );
+              },
+            )}
           </MergeQueue>
 
           {/* Wave C: integration on the merged branch, back in the root worktree. */}
@@ -787,12 +876,18 @@ export default smithers((ctx) => {
                 const fresh = jj(rootWt, ["new", rootBranch]);
                 const install = runCommand(rootWt, "pnpm", ["install", "--frozen-lockfile"], 20 * 60_000);
                 const ok = fresh.code === 0 && install.exitCode === 0;
-                return { step: "prep-integrate", ok, detail: `${fresh.out.slice(0, 500)} | install exit ${install.exitCode}` };
+                return {
+                  step: "prep-integrate",
+                  ok,
+                  detail: `${fresh.out.slice(0, 500)} | install exit ${install.exitCode}`,
+                };
               }}
             </Task>
           ) : null}
 
-          {mergesDone && bookmarkOk("prep-integrate") ? lanePipeline(ctx, INTEGRATE_LANE, input.perLaneIterations) : null}
+          {mergesDone && bookmarkOk("prep-integrate")
+            ? lanePipeline(ctx, INTEGRATE_LANE, input.perLaneIterations)
+            : null}
 
           {integrate.finalApproved ? (
             <Task id="advance-after-integrate" output={outputs.monrdBookmark} timeoutMs={5 * 60_000}>
@@ -802,7 +897,14 @@ export default smithers((ctx) => {
 
           {/* Global fable review + polish of the entire branch. */}
           {bookmarkOk("after-integrate") ? (
-            <Task id="global-final-review" output={outputs.monrdLaneFinal} agent={fable} retries={2} timeoutMs={120 * 60_000} heartbeatTimeoutMs={15 * 60_000}>
+            <Task
+              id="global-final-review"
+              output={outputs.monrdLaneFinal}
+              agent={fable}
+              retries={2}
+              timeoutMs={120 * 60_000}
+              heartbeatTimeoutMs={15 * 60_000}
+            >
               {globalFinalPrompt(rootBranch, input.baseBranch, laneResults)}
             </Task>
           ) : null}
@@ -818,7 +920,14 @@ export default smithers((ctx) => {
             <Loop id="verify-loop" until={verifyPassed} maxIterations={3} onMaxReached="return-last">
               <Sequence>
                 {latestVerify && !verifyPassed ? (
-                  <Task id="verify-fix" output={outputs.monrdLaneFinal} agent={fable} retries={1} timeoutMs={90 * 60_000} heartbeatTimeoutMs={10 * 60_000}>
+                  <Task
+                    id="verify-fix"
+                    output={outputs.monrdLaneFinal}
+                    agent={fable}
+                    retries={1}
+                    timeoutMs={90 * 60_000}
+                    heartbeatTimeoutMs={10 * 60_000}
+                  >
                     {verifyFixPrompt(latestVerify, rootBranch)}
                   </Task>
                 ) : null}
@@ -832,7 +941,10 @@ export default smithers((ctx) => {
                     const failed = commands.filter((entry) => entry.exitCode !== 0);
                     return {
                       allPassed: failed.length === 0,
-                      summary: failed.length === 0 ? "monitor tests, gateway tests, and check-docs all green." : `${failed.length} verify command(s) failed.`,
+                      summary:
+                        failed.length === 0
+                          ? "monitor tests, gateway tests, and check-docs all green."
+                          : `${failed.length} verify command(s) failed.`,
                       commands,
                     };
                   }}

@@ -35,46 +35,42 @@ import { buildGenerateResult, extractPrompt, truncate } from "@smithers-orchestr
  *   dynamic import of the bundled dependency.
  * @returns {Promise<ElizaRuntime>}
  */
-export async function defaultRuntimeFactory(
-    opts,
-    { loadCore = () => import("@elizaos/core") } = {}
-) {
-    /** @type {any} */
-    let core;
-    try {
-        core = await loadCore();
-    } catch (err) {
-        throw new Error(
-            "ElizaAgent: failed to load @elizaos/core (install it with `npm install @elizaos/core` if missing)",
-            { cause: err }
-        );
-    }
+export async function defaultRuntimeFactory(opts, { loadCore = () => import("@elizaos/core") } = {}) {
+  /** @type {any} */
+  let core;
+  try {
+    core = await loadCore();
+  } catch (err) {
+    throw new Error(
+      "ElizaAgent: failed to load @elizaos/core (install it with `npm install @elizaos/core` if missing)",
+      { cause: err },
+    );
+  }
 
-    const AgentRuntime = core.AgentRuntime ?? core.default?.AgentRuntime;
-    if (!AgentRuntime) {
-        throw new Error(
-            "@elizaos/core loaded but AgentRuntime was not found. " +
-            "Ensure @elizaos/core@~1.7.2 is installed."
-        );
-    }
+  const AgentRuntime = core.AgentRuntime ?? core.default?.AgentRuntime;
+  if (!AgentRuntime) {
+    throw new Error(
+      "@elizaos/core loaded but AgentRuntime was not found. " + "Ensure @elizaos/core@~1.7.2 is installed.",
+    );
+  }
 
-    const mergedSettings = {
-        ...(opts.character.settings ?? {}),
-        ...(opts.settings ?? {}),
-        ...(opts.env ?? {}),
-    };
+  const mergedSettings = {
+    ...(opts.character.settings ?? {}),
+    ...(opts.settings ?? {}),
+    ...(opts.env ?? {}),
+  };
 
-    const runtime = new AgentRuntime({
-        character: {
-            ...opts.character,
-            settings: mergedSettings,
-        },
-        plugins: opts.plugins ?? [],
-        // elizaOS 1.7.2 also reads settings at the top-level runtime option.
-        settings: mergedSettings,
-    });
+  const runtime = new AgentRuntime({
+    character: {
+      ...opts.character,
+      settings: mergedSettings,
+    },
+    plugins: opts.plugins ?? [],
+    // elizaOS 1.7.2 also reads settings at the top-level runtime option.
+    settings: mergedSettings,
+  });
 
-    return runtime;
+  return runtime;
 }
 
 /**
@@ -86,9 +82,9 @@ export async function defaultRuntimeFactory(
  * @returns {Error}
  */
 function makeAbortError() {
-    const error = new Error("ElizaAgent: generation aborted");
-    error.name = "AbortError";
-    return error;
+  const error = new Error("ElizaAgent: generation aborted");
+  error.name = "AbortError";
+  return error;
 }
 
 /**
@@ -101,17 +97,17 @@ function makeAbortError() {
  * @returns {Promise<T>}
  */
 function raceAbort(promise, abortSignal) {
-    if (!abortSignal) return promise;
-    if (abortSignal.aborted) {
-        return Promise.reject(makeAbortError());
-    }
-    return new Promise((resolve, reject) => {
-        const onAbort = () => reject(makeAbortError());
-        abortSignal.addEventListener("abort", onAbort, { once: true });
-        promise.then(resolve, reject).finally(() => {
-            abortSignal.removeEventListener("abort", onAbort);
-        });
+  if (!abortSignal) return promise;
+  if (abortSignal.aborted) {
+    return Promise.reject(makeAbortError());
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(makeAbortError());
+    abortSignal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => {
+      abortSignal.removeEventListener("abort", onAbort);
     });
+  });
 }
 
 /**
@@ -128,192 +124,187 @@ function raceAbort(promise, abortSignal) {
  * consumers of `@smithers-orchestrator/agent-eliza` get it transitively.
  */
 export class ElizaAgent {
-    /** @type {string | undefined} */
-    id;
-    /** @type {boolean} */
-    supportsNativeStructuredOutput = false;
+  /** @type {string | undefined} */
+  id;
+  /** @type {boolean} */
+  supportsNativeStructuredOutput = false;
 
-    /** @type {ElizaAgentOptions} */
-    #opts;
+  /** @type {ElizaAgentOptions} */
+  #opts;
+  /** @type {string} */
+  #modelId;
+  /** @type {ElizaRuntime | null} */
+  #runtime = null;
+  /** @type {Promise<ElizaRuntime> | null} */
+  #initPromise = null;
+  /** @type {boolean} Set to true by stop() to prevent re-initialization. */
+  #stopped = false;
+  /** @type {ElizaRuntimeFactory} */
+  #runtimeFactory;
+
+  /**
+   * @param {ElizaAgentOptions} opts
+   * @param {{ runtimeFactory?: ElizaRuntimeFactory }} [_internal]
+   *   Internal seam for tests — pass a fake runtime factory to avoid
+   *   requiring @elizaos/core during tests.
+   */
+  constructor(opts, _internal = {}) {
+    this.#opts = opts;
+    this.#modelId = opts.model ?? opts.modelId ?? "eliza";
+    this.id = opts.id;
+    this.#runtimeFactory = _internal.runtimeFactory ?? defaultRuntimeFactory;
+  }
+
+  /**
+   * Deterministically verify that @elizaos/core can be resolved and that
+   * the configured character is minimally coherent. A rejected promise
+   * fails the task without retry — that is the intended behavior.
+   *
+   * @param {AgentGenerateOptions} [_args]
+   * @returns {Promise<void>}
+   */
+  async preflight(_args) {
+    if (!this.#opts.character?.name) {
+      throw new Error(
+        "ElizaAgent: character.name is required. " + "Provide a valid elizaOS Character with at least a name.",
+      );
+    }
+    // Attempt to construct the runtime (resolves @elizaos/core) so we
+    // surface missing-dep errors at preflight time rather than at generate.
+    await this.#ensureRuntime();
+  }
+
+  /**
+   * Lazily construct + initialize the AgentRuntime exactly once.
+   * Guards against concurrent initialization and against use after stop().
+   *
+   * @returns {Promise<ElizaRuntime>}
+   */
+  async #ensureRuntime() {
+    if (this.#stopped) throw new Error("ElizaAgent: agent has been stopped");
+    if (this.#runtime) return this.#runtime;
+    if (this.#initPromise) return this.#initPromise;
+
+    const initPromise = this.#runtimeFactory(this.#opts).then(async (rt) => {
+      await rt.initialize();
+      if (this.#stopped) {
+        // stop() was called while we were initializing — clean up
+        // and reject so the caller knows init was cancelled.
+        if (rt.stop) await rt.stop().catch(() => {});
+        throw new Error("ElizaAgent: agent was stopped during initialization");
+      }
+      this.#runtime = rt;
+      return rt;
+    });
+    // A rejected init must not poison the agent forever. Clear the memo on
+    // failure so a later call retries. Guard the identity check so we never
+    // clobber a newer attempt (e.g. one already started after stop()/reset).
+    initPromise.catch(() => {
+      if (this.#initPromise === initPromise) this.#initPromise = null;
+    });
+    this.#initPromise = initPromise;
+
+    return initPromise;
+  }
+
+  /**
+   * Generate a response from the elizaOS runtime.
+   *
+   * @param {AgentGenerateOptions} [args]
+   * @returns {Promise<GenerateTextResult<Record<string, never>, unknown>>}
+   */
+  async generate(args = {}) {
+    const { abortSignal, outputSchema, onStdout } = args;
+
+    // Route through the shared extractor so `messages` (AI-SDK chat history)
+    // and array/object prompts are flattened to text instead of being
+    // dropped or stringified to "[object Object]". System messages are
+    // prepended so the runtime still sees them.
+    const { prompt: extractedPrompt, systemFromMessages } = extractPrompt(args);
+    const promptText = systemFromMessages ? `${systemFromMessages}\n\n${extractedPrompt}` : extractedPrompt;
+
+    if (abortSignal?.aborted) {
+      throw makeAbortError();
+    }
+
+    const runtime = await raceAbort(this.#ensureRuntime(), abortSignal);
+
+    /** @param {string} modelType */
+    const callModel = (modelType) =>
+      raceAbort(
+        runtime.useModel(modelType, {
+          prompt: promptText,
+          stopSequences: [],
+          abortSignal,
+        }),
+        abortSignal,
+      );
+
     /** @type {string} */
-    #modelId;
-    /** @type {ElizaRuntime | null} */
-    #runtime = null;
-    /** @type {Promise<ElizaRuntime> | null} */
-    #initPromise = null;
-    /** @type {boolean} Set to true by stop() to prevent re-initialization. */
-    #stopped = false;
-    /** @type {ElizaRuntimeFactory} */
-    #runtimeFactory;
-
-    /**
-     * @param {ElizaAgentOptions} opts
-     * @param {{ runtimeFactory?: ElizaRuntimeFactory }} [_internal]
-     *   Internal seam for tests — pass a fake runtime factory to avoid
-     *   requiring @elizaos/core during tests.
-     */
-    constructor(opts, _internal = {}) {
-        this.#opts = opts;
-        this.#modelId = opts.model ?? opts.modelId ?? "eliza";
-        this.id = opts.id;
-        this.#runtimeFactory = _internal.runtimeFactory ?? defaultRuntimeFactory;
+    let text;
+    try {
+      text = await callModel("TEXT_LARGE");
+    } catch (err) {
+      // Only fall back on unrecognised model-type errors, not transient
+      // failures (network, rate-limit, auth) which should surface directly.
+      const msg = err instanceof Error ? err.message.toLowerCase() : "";
+      const unsupportedModelType =
+        msg.includes("unsupported model") ||
+        msg.includes("unknown model") ||
+        msg.includes("not supported") ||
+        msg.includes("invalid model type") ||
+        msg.includes("model type not found");
+      if (unsupportedModelType) {
+        text = await callModel("TEXT_SMALL");
+      } else {
+        throw err;
+      }
     }
 
-    /**
-     * Deterministically verify that @elizaos/core can be resolved and that
-     * the configured character is minimally coherent. A rejected promise
-     * fails the task without retry — that is the intended behavior.
-     *
-     * @param {AgentGenerateOptions} [_args]
-     * @returns {Promise<void>}
-     */
-    async preflight(_args) {
-        if (!this.#opts.character?.name) {
-            throw new Error(
-                "ElizaAgent: character.name is required. " +
-                "Provide a valid elizaOS Character with at least a name."
-            );
-        }
-        // Attempt to construct the runtime (resolves @elizaos/core) so we
-        // surface missing-dep errors at preflight time rather than at generate.
-        await this.#ensureRuntime();
+    if (onStdout) {
+      onStdout(text);
     }
 
-    /**
-     * Lazily construct + initialize the AgentRuntime exactly once.
-     * Guards against concurrent initialization and against use after stop().
-     *
-     * @returns {Promise<ElizaRuntime>}
-     */
-    async #ensureRuntime() {
-        if (this.#stopped) throw new Error("ElizaAgent: agent has been stopped");
-        if (this.#runtime) return this.#runtime;
-        if (this.#initPromise) return this.#initPromise;
-
-        const initPromise = this.#runtimeFactory(this.#opts).then(
-            async (rt) => {
-                await rt.initialize();
-                if (this.#stopped) {
-                    // stop() was called while we were initializing — clean up
-                    // and reject so the caller knows init was cancelled.
-                    if (rt.stop) await rt.stop().catch(() => {});
-                    throw new Error("ElizaAgent: agent was stopped during initialization");
-                }
-                this.#runtime = rt;
-                return rt;
-            }
+    /** @type {unknown} */
+    let output = undefined;
+    if (outputSchema) {
+      /** @type {unknown} */
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch (err) {
+        throw new Error(
+          `ElizaAgent: expected JSON output for outputSchema but the model returned non-JSON text: ${truncate(text, 200)}`,
+          { cause: err },
         );
-        // A rejected init must not poison the agent forever. Clear the memo on
-        // failure so a later call retries. Guard the identity check so we never
-        // clobber a newer attempt (e.g. one already started after stop()/reset).
-        initPromise.catch(() => {
-            if (this.#initPromise === initPromise) this.#initPromise = null;
-        });
-        this.#initPromise = initPromise;
-
-        return initPromise;
+      }
+      output = outputSchema.parse(parsed);
     }
 
-    /**
-     * Generate a response from the elizaOS runtime.
-     *
-     * @param {AgentGenerateOptions} [args]
-     * @returns {Promise<GenerateTextResult<Record<string, never>, unknown>>}
-     */
-    async generate(args = {}) {
-        const { abortSignal, outputSchema, onStdout } = args;
+    return buildGenerateResult(text, output, this.#modelId, undefined);
+  }
 
-        // Route through the shared extractor so `messages` (AI-SDK chat history)
-        // and array/object prompts are flattened to text instead of being
-        // dropped or stringified to "[object Object]". System messages are
-        // prepended so the runtime still sees them.
-        const { prompt: extractedPrompt, systemFromMessages } = extractPrompt(args);
-        const promptText = systemFromMessages
-            ? `${systemFromMessages}\n\n${extractedPrompt}`
-            : extractedPrompt;
+  /**
+   * Gracefully stop the runtime and release any held resources.
+   * Safe to call before init or while init is in progress.
+   *
+   * @returns {Promise<void>}
+   */
+  async stop() {
+    this.#stopped = true;
+    const rt = this.#runtime;
+    const pending = this.#initPromise;
+    this.#runtime = null;
+    this.#initPromise = null;
 
-        if (abortSignal?.aborted) {
-            throw makeAbortError();
-        }
-
-        const runtime = await raceAbort(this.#ensureRuntime(), abortSignal);
-
-        /** @param {string} modelType */
-        const callModel = (modelType) =>
-            raceAbort(
-                runtime.useModel(modelType, {
-                    prompt: promptText,
-                    stopSequences: [],
-                    abortSignal,
-                }),
-                abortSignal
-            );
-
-        /** @type {string} */
-        let text;
-        try {
-            text = await callModel("TEXT_LARGE");
-        } catch (err) {
-            // Only fall back on unrecognised model-type errors, not transient
-            // failures (network, rate-limit, auth) which should surface directly.
-            const msg = err instanceof Error ? err.message.toLowerCase() : "";
-            const unsupportedModelType =
-                msg.includes("unsupported model") ||
-                msg.includes("unknown model") ||
-                msg.includes("not supported") ||
-                msg.includes("invalid model type") ||
-                msg.includes("model type not found");
-            if (unsupportedModelType) {
-                text = await callModel("TEXT_SMALL");
-            } else {
-                throw err;
-            }
-        }
-
-        if (onStdout) {
-            onStdout(text);
-        }
-
-        /** @type {unknown} */
-        let output = undefined;
-        if (outputSchema) {
-            /** @type {unknown} */
-            let parsed;
-            try {
-                parsed = JSON.parse(text);
-            } catch (err) {
-                throw new Error(
-                    `ElizaAgent: expected JSON output for outputSchema but the model returned non-JSON text: ${truncate(text, 200)}`,
-                    { cause: err }
-                );
-            }
-            output = outputSchema.parse(parsed);
-        }
-
-        return buildGenerateResult(text, output, this.#modelId, undefined);
+    if (rt) {
+      // Runtime already fully initialized — stop it directly.
+      if (rt.stop) await rt.stop();
+    } else if (pending) {
+      // Init is still in progress. Wait for it: the .then() block above
+      // will see #stopped=true, call rt.stop(), and then throw — which
+      // we swallow here since stopping is the intended outcome.
+      await pending.catch(() => {});
     }
-
-    /**
-     * Gracefully stop the runtime and release any held resources.
-     * Safe to call before init or while init is in progress.
-     *
-     * @returns {Promise<void>}
-     */
-    async stop() {
-        this.#stopped = true;
-        const rt = this.#runtime;
-        const pending = this.#initPromise;
-        this.#runtime = null;
-        this.#initPromise = null;
-
-        if (rt) {
-            // Runtime already fully initialized — stop it directly.
-            if (rt.stop) await rt.stop();
-        } else if (pending) {
-            // Init is still in progress. Wait for it: the .then() block above
-            // will see #stopped=true, call rt.stop(), and then throw — which
-            // we swallow here since stopping is the intended outcome.
-            await pending.catch(() => {});
-        }
-    }
+  }
 }
