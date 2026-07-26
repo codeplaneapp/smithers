@@ -1652,6 +1652,14 @@ declare class OmpAgent extends BaseCliAgent {
             phase: string;
             entryType: string;
             action: {
+                detail: {
+                    args: any;
+                };
+                id: string;
+                kind: AgentCliActionKind;
+                title: string;
+            } | {
+                detail?: undefined;
                 id: string;
                 kind: AgentCliActionKind;
                 title: string;
