@@ -1,4 +1,8 @@
 # EditorConfig https://editorconfig.org
+#
+# These values mirror .oxfmtrc.json, which is what actually enforces
+# formatting (`pnpm format`). oxfmt reads .editorconfig too, so keep the two
+# in sync; where they overlap, the .oxfmtrc.json options win.
 root = true
 
 [*]
@@ -7,10 +11,11 @@ insert_final_newline = true
 charset = utf-8
 trim_trailing_whitespace = true
 indent_style = space
-indent_size = 4
-
-[*.{js,jsx,ts,tsx,json,yml,yaml,html,css,scss}]
 indent_size = 2
+
+[*.{js,jsx,mjs,cjs,ts,tsx,mts,cts,json,jsonc,mdx,yml,yaml,html,css,scss}]
+indent_size = 2
+max_line_length = 120
 
 [*.md]
 trim_trailing_whitespace = false
