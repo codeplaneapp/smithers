@@ -71,6 +71,11 @@ jobs:
 
       - run: pnpm check:deps
 
+      # Run oxfmt as its own step so a formatting failure is reported as
+      # "format:check" rather than hiding inside the lint step (`pnpm lint`
+      # chains it too, so a local `pnpm lint` catches it before pushing).
+      - run: pnpm format:check
+
       - run: pnpm lint
 
       - run: pnpm -r typecheck
