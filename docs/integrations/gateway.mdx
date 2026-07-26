@@ -671,7 +671,7 @@ A Gateway process that registers several workflows against one normalized Postgr
 
 Each backend opening holds one reference. Closing a workflow backend releases its reference, and the final release closes the shared pool. Transactions pin one pool client from `BEGIN` through `COMMIT` or `ROLLBACK`; ordinary queries return to the bounded pool. SQLite, PGlite, and custom caller-provided PostgreSQL connections retain their existing connection behavior. Smithers scopes BIGINT parsing to its own pool/client configuration and does not mutate node-postgres' process-global type parsers.
 
-An acquire waits a bounded 10 seconds for a free connection; set `SMITHERS_POSTGRES_ACQUIRE_TIMEOUT_MS` to change it. Waiting past that bound means every pooled connection stayed busy, so Smithers raises `PG_POOL_SATURATED` instead of queueing forever. The error names the pool (with the password redacted), the cap and whether it is the default 16, the live open/idle/waiting counts, and the exact knob and value that raise the cap.
+An acquire waits a bounded 10 seconds for a free connection; set `SMITHERS_POSTGRES_ACQUIRE_TIMEOUT_MS` to change it. Waiting past that bound means every pooled connection stayed busy, so Smithers raises `PG_POOL_SATURATED` instead of queueing forever. The error names the pool (with URL credentials redacted), the cap and whether it is the default 16, the live open/idle/waiting counts, and the exact knob and value that raise the cap.
 
 ## Notes
 

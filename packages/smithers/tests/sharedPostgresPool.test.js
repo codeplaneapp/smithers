@@ -115,7 +115,7 @@ const pg = {
   types: { getTypeParser: () => (value) => value },
 };
 
-const url = "postgresql://USER:secret@EXAMPLE.test:5432/smithers?application_name=gateway&sslmode=require";
+const url = "postgresql://USER:secret@EXAMPLE.test:5432/smithers?application_name=gateway&password=query-secret&sslmode=require";
 
 afterEach(async () => {
   // Every test must release its own leases; this guard catches a regression in
@@ -127,9 +127,9 @@ afterEach(async () => {
 describe("shared PostgreSQL pools", () => {
   test("normalizes equivalent URLs and shares one configured bounded pool", async () => {
     const first = await acquireSharedPostgresPool({ pg, connectionString: url, max: 3 });
-    const second = await acquireSharedPostgresPool({ pg, connectionString: "postgres://USER:secret@example.test/smithers?sslmode=require&application_name=gateway", max: 3 });
+    const second = await acquireSharedPostgresPool({ pg, connectionString: "postgres://USER:secret@example.test/smithers?sslmode=require&password=query-secret&application_name=gateway", max: 3 });
 
-    expect(normalizePostgresConnectionIdentity(url)).toBe(normalizePostgresConnectionIdentity("postgres://USER:secret@example.test/smithers?sslmode=require&application_name=gateway"));
+    expect(normalizePostgresConnectionIdentity(url)).toBe(normalizePostgresConnectionIdentity("postgres://USER:secret@example.test/smithers?sslmode=require&password=query-secret&application_name=gateway"));
     expect(pools).toHaveLength(1);
     expect(pools[0].options.max).toBe(3);
     expect(sharedPostgresPoolCount()).toBe(1);
@@ -164,15 +164,17 @@ describe("shared PostgreSQL pools", () => {
     expect(resolvePostgresAcquireTimeoutMs(undefined, undefined)).toBe(10_000);
     expect(resolvePostgresAcquireTimeoutMs(undefined, "250")).toBe(250);
     expect(() => resolvePostgresAcquireTimeoutMs(undefined, "0")).toThrow(RangeError);
-    expect(redactPostgresIdentity(normalizePostgresConnectionIdentity(url))).toBe(
-      "postgres://USER:***@example.test/smithers?application_name=gateway&sslmode=require",
-    );
+    const redacted = redactPostgresIdentity(normalizePostgresConnectionIdentity(url));
+    expect(redacted).toBe("postgres://example.test/smithers?application_name=gateway&password=***&sslmode=require");
+    expect(redacted).not.toContain("USER");
+    expect(redacted).not.toContain("query-secret");
 
     const first = await acquireSharedPostgresPool({ pg, connectionString: url, max: 4 });
     expect(pools[0].options.connectionTimeoutMillis).toBe(10_000);
     const rejected = await acquireSharedPostgresPool({ pg, connectionString: url, max: 9 }).catch((error) => error);
     expect(rejected.message).not.toContain("secret");
-    expect(rejected.message).toContain("USER:***@example.test");
+    expect(rejected.message).not.toContain("USER");
+    expect(rejected.message).toContain("postgres://example.test");
     await first.close();
   });
 
@@ -192,8 +194,9 @@ describe("shared PostgreSQL pools", () => {
     expect(error.message).toContain("SMITHERS_POSTGRES_POOL_MAX=4");
     expect(error.message).toContain("postgresPoolMax: 4");
     expect(error.message).toContain("2 open, 0 idle");
-    // The identity is present but the password never is.
-    expect(error.message).toContain("USER:***@example.test");
+    // The identity is present but its URL credentials never are.
+    expect(error.message).toContain("postgres://example.test");
+    expect(error.message).not.toContain("USER");
     expect(error.message).not.toContain("secret");
     expect(error.details).toMatchObject({ max: 2, configKnob: "SMITHERS_POSTGRES_POOL_MAX" });
 

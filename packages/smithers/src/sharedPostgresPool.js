@@ -42,9 +42,8 @@ export function normalizePostgresConnectionIdentity(connectionString) {
 }
 
 /**
- * Strip the password out of a pool identity so it can appear in errors, logs,
- * and diagnostics. The identity is only ever built from a connection URL the
- * caller supplied, and the password is the one part of it that must never
+ * Strip credentials out of a pool identity so it can appear in errors, logs,
+ * and diagnostics. Userinfo and credential-bearing query parameters must never
  * reach an error message.
  *
  * @param {string} identity Normalized pool identity.
@@ -53,8 +52,12 @@ export function normalizePostgresConnectionIdentity(connectionString) {
 export function redactPostgresIdentity(identity) {
     try {
         const url = new URL(identity);
-        if (url.password) {
-            url.password = "***";
+        url.username = "";
+        url.password = "";
+        for (const key of url.searchParams.keys()) {
+            if (/(?:password|passfile|secret|token|credential|api[_-]?key|sslkey)/i.test(key)) {
+                url.searchParams.set(key, "***");
+            }
         }
         return url.toString();
     }
