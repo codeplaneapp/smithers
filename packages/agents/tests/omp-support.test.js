@@ -244,4 +244,14 @@ describe("OmpAgent", () => {
     expect(spec.outputFormat).toBe("json");
     expect(spec.args).toContain("--print");
   });
+
+  test("forwards task context and honors inheritEnv in the default RPC session", () => {
+    const taskContext = { runId: "run-1", nodeId: "node-1", iteration: 2, attempt: 3 };
+    const sealed = new OmpAgent({ model: "m", inheritEnv: false, env: { CUSTOM: "1" } }).resolveRpcEnv({ taskContext });
+    // Same SMITHERS_* contract the one-shot path gets, so `smithers ask-human` still resolves its run.
+    expect(sealed).toEqual({ CUSTOM: "1", SMITHERS_RUN_ID: "run-1", SMITHERS_NODE_ID: "node-1", SMITHERS_ITERATION: "2", SMITHERS_ATTEMPT: "3" });
+    const inherited = new OmpAgent({ model: "m" }).resolveRpcEnv({ taskContext });
+    expect(inherited.PATH).toBe(process.env.PATH);
+    expect(inherited.SMITHERS_RUN_ID).toBe("run-1");
+  });
 });

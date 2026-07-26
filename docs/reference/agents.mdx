@@ -318,6 +318,11 @@ Wraps the Pi CLI and adds extension UI hook support. Key additions: `provider`,
 ### OmpAgent
 
 Wraps the Oh My Pi (OMP) harness in headless text, JSON print, or RPC mode.
+With `mode` omitted, streaming runs default to `rpc` (a persistent session, so the
+multi-turn tool loop runs) and everything else defaults to `text`; set
+`mode: "json"` for a one-shot execution, which streaming runs also fall back to
+when file arguments are passed. See
+[CLI agents → Mode defaults](/integrations/cli-agents#mode-defaults).
 Adds `provider`, `mode` (`"text" | "json" | "rpc"`), `thinking` (`"off"` through
 `"max"`, or `"auto"`), `skills` (plural, comma-separated), `hooks`, `maxTime`,
 `autoApprove`, `approvalMode`, and session controls (`resume`, `continueSession`,

@@ -1617,9 +1617,10 @@ declare class OmpAgent extends BaseCliAgent {
     /** @type {AgentCapabilityRegistry} */ capabilities: AgentCapabilityRegistry$1;
     cliEngine: string;
     issuedSessionId: any;
-    /** @param {{ onEvent?: unknown } | undefined} options @returns {"text" | "json" | "rpc"} */
+    /** @param {{ onEvent?: unknown, files?: unknown[] } | undefined} options @returns {"text" | "json" | "rpc"} */
     resolveMode(options: {
         onEvent?: unknown;
+        files?: unknown[];
     } | undefined): "text" | "json" | "rpc";
     resolveCredentialEnv(): {
         [x: string]: string;
@@ -1701,6 +1702,16 @@ declare class OmpAgent extends BaseCliAgent {
         env?: Record<string, string>;
         outputFormat: "text" | "json" | "rpc";
     }>;
+    /**
+     * Environment for a persistent RPC session. Mirrors the env BaseCliAgent builds for
+     * the one-shot path: `inheritEnv: false` is honored, and the task's `SMITHERS_*`
+     * identifiers are forwarded. Streaming defaults to RPC, so an RPC session that
+     * dropped those would silently break `smithers ask-human` from inside an omp agent.
+     * @param {{ taskContext?: unknown } | undefined} options @returns {Record<string, string>}
+     */
+    resolveRpcEnv(options: {
+        taskContext?: unknown;
+    } | undefined): Record<string, string>;
     generate(options?: {}): Promise<any>;
     diagnosticHints(): {
         provider: string | undefined;

@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { BaseCliAgent, asString, extractPrompt, extractTextFromJsonValue, pushFlag, resolveTimeouts, runAgentPromise, runRpcCommandEffect, buildGenerateResult, toolKindFromName } from "./BaseCliAgent/index.js";
+import { taskContextEnv } from "./BaseCliAgent/taskContextEnv.js";
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
 import { resolveOmpProviderEnv } from "./ompProviderEnv.js";
 
@@ -113,12 +114,22 @@ export class OmpAgent extends BaseCliAgent {
     const env = this.resolveCredentialEnv();
     return { command: "omp", args: this.buildArgs({ prompt, cwd, options, mode }), ...(env ? { env } : {}), outputFormat: mode };
   }
+  /**
+   * Environment for a persistent RPC session. Mirrors the env BaseCliAgent builds for
+   * the one-shot path: `inheritEnv: false` is honored, and the task's `SMITHERS_*`
+   * identifiers are forwarded. Streaming defaults to RPC, so an RPC session that
+   * dropped those would silently break `smithers ask-human` from inside an omp agent.
+   * @param {{ taskContext?: unknown } | undefined} options @returns {Record<string, string>}
+   */
+  resolveRpcEnv(options) {
+    return { ...(this.inheritEnv ? process.env : {}), ...this.env, ...taskContextEnv(options?.taskContext), ...this.resolveCredentialEnv() };
+  }
   async generate(options = {}) {
     if (this.resolveMode(options) !== "rpc") return super.generate(options);
     if (options.files?.length) throw new Error("OMP RPC mode does not support file arguments");
     const { prompt } = extractPrompt(options);
     const cwd = this.cwd ?? options.rootDir ?? process.cwd();
-    const env = { ...process.env, ...this.env, ...this.resolveCredentialEnv() };
+    const env = this.resolveRpcEnv(options);
     const timeouts = resolveTimeouts(options.timeout, { totalMs: this.timeoutMs, idleMs: this.idleTimeoutMs });
     const interpreter = this.createOutputInterpreter();
     const program = Effect.gen(this, function* () {
