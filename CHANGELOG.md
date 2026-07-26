@@ -4,6 +4,65 @@ This is the complete, commit-level changelog. For the guided tour of each
 release (what changed and why it matters, with screenshots and examples), see
 the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
 
+## 0.31.0 (2026-07-26)
+
+43 commits since [v0.30.0](https://github.com/smithersai/smithers/compare/v0.30.0...v0.31.0): 446 files changed, +22934 / -899 lines. Release notes: [smithers.sh/changelogs/0.31.0](https://smithers.sh/changelogs/0.31.0).
+
+### Features (25)
+
+- feat(docs): Product API / Technical API split with capabilities catalog and human setup pages ([509323cbd7](https://github.com/smithersai/smithers/commit/509323cbd7))
+- feat(pack): opus5-bug-sweep workflow + live UI ([9669d1ae70](https://github.com/smithersai/smithers/commit/9669d1ae70))
+- feat(cli): Opus-first implement/smart pools and oneshot chain ([7bd50e03b4](https://github.com/smithersai/smithers/commit/7bd50e03b4))
+- feat(sota): registry v7 — Claude Opus 5 becomes the default implementer ([401a55e509](https://github.com/smithersai/smithers/commit/401a55e509))
+- feat(scorers): price claude-opus-5 ($5/$25, same as Opus 4.8) ([f7e7b9ec71](https://github.com/smithersai/smithers/commit/f7e7b9ec71))
+- feat(sota): registry v6 — Claude Opus 5 replaces Opus 4.8 as SOTA orchestrator ([35af96aa51](https://github.com/smithersai/smithers/commit/35af96aa51))
+- feat(evals): authoring-side-effects suite (70 fixtures + handwritten cases + harness) ([84d035e4e2](https://github.com/smithersai/smithers/commit/84d035e4e2))
+- feat(observability): side-effect journal events in SmithersEvent union ([e7057f783b](https://github.com/smithersai/smithers/commit/e7057f783b))
+- feat(cli): effect-boundary guard + report in rewind/timetravel, why/status/MCP surfacing ([0a5fc5e8fd](https://github.com/smithersai/smithers/commit/0a5fc5e8fd))
+- feat(smithers): export side-effect + effect-boundary surface from the facade ([1fd6381783](https://github.com/smithersai/smithers/commit/1fd6381783))
+- feat(scorers): side-effect compliance scorer + static workflow analysis ([3d5569a3ac](https://github.com/smithersai/smithers/commit/3d5569a3ac))
+- feat(components): sideEffect + revert props on Task ([e57d176b25](https://github.com/smithersai/smithers/commit/e57d176b25))
+- feat(gateway): effect-boundary params + report on rewind/jumpToFrame RPC surface ([3fcb8359e4](https://github.com/smithersai/smithers/commit/3fcb8359e4))
+- feat(time-travel): effect-boundary guard, forced crossings, compensating reverts ([4283cbb610](https://github.com/smithersai/smithers/commit/4283cbb610))
+- feat(engine): tool-call effect journal with intended/succeeded/unknown lifecycle ([5906ea78ac](https://github.com/smithersai/smithers/commit/5906ea78ac))
+- feat(db): side-effect journal schema + tool-call token migrations (0031, 0032) ([a9d1f0a0ed](https://github.com/smithersai/smithers/commit/a9d1f0a0ed))
+- feat(errors): TIME_TRAVEL_SIDE_EFFECT_BLOCKED error code ([26c487af5a](https://github.com/smithersai/smithers/commit/26c487af5a))
+- feat(tool-context): sideEffect/idempotent metadata + revert handlers on defineTool ([e3e688be4b](https://github.com/smithersai/smithers/commit/e3e688be4b))
+- feat(graph): sideEffect + revert authoring surface on Task descriptors ([545d93ca28](https://github.com/smithersai/smithers/commit/545d93ca28))
+- feat(demoday-site): poster Aomi shot, Will's opening voice, rails after market ([545e6174f9](https://github.com/smithersai/smithers/commit/545e6174f9))
+- feat(demoday-site): vibe-audit demo arc, data-flow + custom-fit slides, 17-step 3:00 deck ([02b0b6575f](https://github.com/smithersai/smithers/commit/02b0b6575f))
+- feat(demoday-site): sales-pipeline story, real-app gifs, rails slide, 15-step 3:00 script ([bd98739f46](https://github.com/smithersai/smithers/commit/bd98739f46))
+- feat(demoday-site): traction slide leads with community, numbers off page 1 ([45c5179879](https://github.com/smithersai/smithers/commit/45c5179879))
+- feat(demoday-site): ship the demo-day pitch deck at demoday.smithers.sh ([dd92921f85](https://github.com/smithersai/smithers/commit/dd92921f85))
+- feat(storybook-site): ship the UI component Storybook at storybook.smithers.sh ([7be658c8de](https://github.com/smithersai/smithers/commit/7be658c8de))
+
+### Bug fixes (2)
+
+- fix(claude-plugin): guard bare `process` in smithers-run.mjs for the Workflow-tool sandbox ([a19cbe963f](https://github.com/smithersai/smithers/commit/a19cbe963f))
+- fix(demoday-site): start rehearsal audio inside the key-press gesture ([f4a5bcb86d](https://github.com/smithersai/smithers/commit/f4a5bcb86d))
+
+### Documentation (9)
+
+- docs: purge em-dashes from registry v7 prose (check-docs gate) ([e46b172143](https://github.com/smithersai/smithers/commit/e46b172143))
+- docs: llms bundle regen for registry v7 Opus-implements routing ([c6fbffd400](https://github.com/smithersai/smithers/commit/c6fbffd400))
+- docs: routing pages for the Claude-builds / Codex-checks split ([34bed733c8](https://github.com/smithersai/smithers/commit/34bed733c8))
+- docs: llms bundle regen for Opus 5 SOTA registry v6 ([3eb3a441a0](https://github.com/smithersai/smithers/commit/3eb3a441a0))
+- docs: Opus 5 takes the orchestrator seat across routing docs and examples ([5d11fe9100](https://github.com/smithersai/smithers/commit/5d11fe9100))
+- docs: side-effect-safe time travel across runtime/CLI/RPC pages + llms regen ([1e26983ee4](https://github.com/smithersai/smithers/commit/1e26983ee4))
+- docs(specs): side-effect-safe time travel design ([8f0a595ee4](https://github.com/smithersai/smithers/commit/8f0a595ee4))
+- docs: catalog demoday-site in the package table + llms bundles ([a4804a5f93](https://github.com/smithersai/smithers/commit/a4804a5f93))
+- fix(demoday-site): accurate Aomi and Burns descriptions ([ee33c56e05](https://github.com/smithersai/smithers/commit/ee33c56e05))
+
+### Chores and maintenance (7)
+
+- chore(deps): time-travel gains driver+react-reconciler; scorers ships typescript for fixture analysis ([193275da1d](https://github.com/smithersai/smithers/commit/193275da1d))
+- feat(demoday-site): single-file build (scripts/build-single.ts) ([0f7f5c700c](https://github.com/smithersai/smithers/commit/0f7f5c700c))
+- chore(dts): sync checked-in index.d.ts with landed startedBy, usage-report, and registry APIs ([47a8ed82bd](https://github.com/smithersai/smithers/commit/47a8ed82bd))
+- feat(demoday-site): portable dist (relative asset paths) ([7f1904fedb](https://github.com/smithersai/smithers/commit/7f1904fedb))
+- fix(demoday-site): real parked-on-quota badge in the recover gif, no-cache HTML ([6d65ea693e](https://github.com/smithersai/smithers/commit/6d65ea693e))
+- fix(demoday-site): drop the downloads chip from the title slide ([89903b11be](https://github.com/smithersai/smithers/commit/89903b11be))
+- fix(ui): version-gate the terminal theme-toggle test to bun 1.4+ ([10b9e361a1](https://github.com/smithersai/smithers/commit/10b9e361a1))
+
 ## 0.30.0 (2026-07-22)
 
 233 commits since [v0.29.0](https://github.com/smithersai/smithers/compare/v0.29.0...v0.30.0): 844 files changed, +91249 / -21316 lines. Release notes: [smithers.sh/changelogs/0.30.0](https://smithers.sh/changelogs/0.30.0).
