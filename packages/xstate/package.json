@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/xstate",
-  "version": "0.30.0",
+  "version": "0.31.0",
   "description": "XState v5 machines as durable derived control state for Smithers workflows: pure folds over output and signal rows",
   "type": "module",
   "sideEffects": false,

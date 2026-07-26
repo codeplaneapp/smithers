@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/driver",
-  "version": "0.30.0",
+  "version": "0.31.0",
   "description": "Workflow execution driver — runs tasks, acts on EngineDecisions, reports results",
   "type": "module",
   "sideEffects": false,

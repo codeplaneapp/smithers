@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/gcp",
-  "version": "0.30.0",
+  "version": "0.31.0",
   "description": "Google Cloud sandbox provider for Smithers: Cloud Run Jobs execution with Cloud Storage bundle transport",
   "type": "module",
   "sideEffects": false,

@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/aws",
-  "version": "0.30.0",
+  "version": "0.31.0",
   "description": "AWS Fargate (ECS) and CodeBuild sandbox provider for Smithers, using S3 as the bundle transport",
   "type": "module",
   "sideEffects": false,
