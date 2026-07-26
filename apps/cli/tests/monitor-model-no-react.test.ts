@@ -14,7 +14,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -46,4 +46,16 @@ test("importing monitorModel loads no React, radix, or react-remove-scroll modul
   const result = spawnSync(process.execPath, ["-e", probe], { cwd: CLI_ROOT, encoding: "utf8" });
   expect(result.status).toBe(0);
   expect(JSON.parse(result.stdout.trim())).toEqual([]);
+});
+
+test("only the shared CLI shard preloads the remaining mixed React module graph", () => {
+  const packageJson = JSON.parse(readFileSync(resolve(CLI_ROOT, "package.json"), "utf8")) as {
+    scripts: { test: string };
+  };
+  const [isolated, shared] = packageJson.scripts.test.split(" && ");
+  expect(isolated).toContain("tests/monitor-shell-controls.test.tsx");
+  expect(isolated).not.toContain("--preload");
+  expect(shared).toContain("--preload ./tests/preload-ui-chain.ts");
+  expect(shared).toContain('--path-ignore-patterns="**/monitor-shell-controls.test.tsx"');
+  expect(existsSync(resolve(CLI_ROOT, "bunfig.toml"))).toBe(false);
 });

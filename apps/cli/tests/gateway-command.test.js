@@ -226,55 +226,63 @@ test("gateway help distinguishes the multi-run Gateway from up --serve", () => {
 
 // Under bun's coverage instrumentation this spawn intermittently fails with
 // EBADF before the gateway boots; the plain test jobs cover the real boot.
-test.skipIf(process.env.SMITHERS_COVERAGE === "1")("gateway starts for an initialized workspace with no existing DB and listRuns is empty", async () => {
-  const repo = createTempRepo();
-  writeTestWorkflow(repo, ".smithers/workflows/basic.tsx");
-  const dbPath = repo.path("smithers.db");
-  expect(existsSync(dbPath)).toBe(false);
+test.skipIf(process.env.SMITHERS_COVERAGE === "1")(
+  "gateway starts for an initialized workspace with no existing DB and listRuns is empty",
+  async () => {
+    const repo = createTempRepo();
+    writeTestWorkflow(repo, ".smithers/workflows/basic.tsx");
+    const dbPath = repo.path("smithers.db");
+    expect(existsSync(dbPath)).toBe(false);
 
-  const port = await findOpenPort();
-  const child = spawn(process.execPath, ["run", CLI_ENTRY, "gateway", "--host", "127.0.0.1", "--port", String(port)], {
-    cwd: repo.dir,
-    env: {
-      ...process.env,
-      NO_COLOR: "1",
-      FORCE_COLOR: "0",
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let stdout = "";
-  let stderr = "";
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
-    stdout += chunk;
-  });
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk;
-  });
-  const closePromise = new Promise((resolvePromise) => child.once("close", resolvePromise));
-  try {
-    await waitFor(() => stderr.includes("Registered workflows:"));
-    expect(stderr).toContain(`Workspace: ${repo.dir}`);
-    expect(stderr).toContain(`Database: ${dbPath}`);
-    expect(stderr).toContain("Registered workflows: basic");
-    expect(existsSync(dbPath)).toBe(true);
-
-    const response = await fetch(`http://127.0.0.1:${port}/v1/rpc/listRuns`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({}),
-      signal: AbortSignal.timeout(3_000),
+    const port = await findOpenPort();
+    const child = spawn(
+      process.execPath,
+      ["run", CLI_ENTRY, "gateway", "--host", "127.0.0.1", "--port", String(port)],
+      {
+        cwd: repo.dir,
+        env: {
+          ...process.env,
+          NO_COLOR: "1",
+          FORCE_COLOR: "0",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
     });
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.ok).toBe(true);
-    expect(body.payload).toEqual([]);
-  } finally {
-    await stopProcess(child, closePromise);
-  }
-  expect(stdout).toBe("");
-}, 15_000);
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    const closePromise = new Promise((resolvePromise) => child.once("close", resolvePromise));
+    try {
+      await waitFor(() => stderr.includes("Registered workflows:"));
+      expect(stderr).toContain(`Workspace: ${repo.dir}`);
+      expect(stderr).toContain(`Database: ${dbPath}`);
+      expect(stderr).toContain("Registered workflows: basic");
+      expect(existsSync(dbPath)).toBe(true);
+
+      const response = await fetch(`http://127.0.0.1:${port}/v1/rpc/listRuns`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+        signal: AbortSignal.timeout(3_000),
+      });
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.ok).toBe(true);
+      expect(body.payload).toEqual([]);
+    } finally {
+      await stopProcess(child, closePromise);
+    }
+    expect(stdout).toBe("");
+  },
+  15_000,
+);
 
 test("gateway is live while a workflow import is blocked and waits for an early launch", async () => {
   const repo = createTempRepo();
