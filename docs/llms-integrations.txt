@@ -1,6 +1,6 @@
 # Smithers Integrations
 
-> Smithers integrations: agent runtimes (Claude Code, Codex, Gemini, Pi), tool surfaces, ecosystem partners.
+> Smithers integrations: agent runtimes (Claude Code, Codex, Cursor, Gemini, Pi), tool surfaces, ecosystem partners.
 
 ---
 
@@ -121,9 +121,10 @@ export default smithers((ctx) => (
 ## Available agents
 
 ```toon
-agents[14]{class,cli,modelDefault,hijack,notes}:
+agents[15]{class,cli,modelDefault,hijack,notes}:
   CodexAgent,codex,CLI default,native thread id,OpenAI Codex CLI (codex exec via stdin + JSON stream)
   ClaudeCodeAgent,claude,CLI default,native session id,Anthropic Claude Code CLI
+  CursorAgent,cursor-agent,CLI default,not yet,Cursor CLI (cursor-agent --print stream-json)
   AntigravityAgent,agy,CLI default,native session id,Google Antigravity CLI
   GeminiAgent,gemini,CLI default,legacy session id,Deprecated legacy Gemini CLI wrapper
   PiAgent,pi,CLI default,native session id,Pi CLI (text/json/rpc modes + extension UI hooks)
@@ -138,7 +139,7 @@ agents[14]{class,cli,modelDefault,hijack,notes}:
   PoolAgent,pool,CLI default,not yet,Poolside Pool CLI (ACP + NDJSON stream)
 ```
 
-CLI binaries must be on `PATH`: `codex`, `claude`, `agy`, `gemini`, `pi`, `omp`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`, `pool`.
+CLI binaries must be on `PATH`: `codex`, `cursor-agent`, `claude`, `agy`, `gemini`, `pi`, `omp`, `kimi`, `forge`, `hermes`, `amp`, `vibe`, `opencode`, `openclaw`, `pool`.
 
 `HermesCliAgent` drives the Hermes *agent* CLI. It is distinct from `HermesAgent`,
 which talks to the Hermes *model* over an OpenAI-compatible HTTP API. Use
@@ -507,6 +508,26 @@ new CodexAgent({
   configDir?: string; apiKey?: string;
 });
 ```
+
+`CursorAgent` wraps Cursor's `cursor-agent` CLI in headless print mode. Key additions: `apiKey`, `mode`, `force`, `sandbox`, `workspace`, `pluginDir`, `resume`, `continueSession`, and `worktree`.
+
+```ts
+import { CursorAgent } from "smithers-orchestrator";
+new CursorAgent({
+  apiKey?: string; header?: string[];
+  model?: string; mode?: "plan" | "ask"; plan?: boolean;
+  force?: boolean; autoReview?: boolean; sandbox?: "enabled" | "disabled";
+  approveMcps?: boolean; trust?: boolean; workspace?: string;
+  pluginDir?: string[]; resume?: string | boolean; continueSession?: boolean;
+  worktree?: string | boolean; worktreeBase?: string; skipWorktreeSetup?: boolean;
+  streamPartialOutput?: boolean;
+});
+```
+
+`CursorAgent` defaults to `--print --output-format stream-json
+--stream-partial-output --trust --workspace <task cwd>`. Passing `apiKey` sets
+`CURSOR_API_KEY` for the spawned process; otherwise Cursor uses its normal local
+login state.
 
 `AntigravityAgent` wraps the Google `agy` CLI. Key additions: `allowedMcpServerNames`, `geminiDir`, `conversation`, `continue`, and `resume`.
 

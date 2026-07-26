@@ -73,9 +73,9 @@ const DETECTORS = [
     id: "cursor",
     displayName: "Cursor",
     binary: "cursor-agent",
-    authSignals: () => [],
+    authSignals: (homeDir, env) => [cursorAuthFile(homeDir, env)],
     apiKeys: ["CURSOR_API_KEY"],
-    availabilityProbe: (_homeDir, env) => {
+    availabilityProbe: (homeDir, env) => {
       if (env.CURSOR_API_KEY) {
         return passProbe("$CURSOR_API_KEY is set");
       }
@@ -87,7 +87,13 @@ const DETECTORS = [
       if (parsed && parsed.isAuthenticated === false) {
         return failProbe("cursor-agent status reports not authenticated");
       }
-      return failProbe(status.output || "Cursor login not verified");
+      // `status --format json` only exists on newer cursor-agent builds; fall
+      // back to the stored login the same way the claude/codex probes do.
+      const auth = readCursorAuth(homeDir, env);
+      if (auth.valid) {
+        return passProbe("Cursor auth.json contains usable credentials");
+      }
+      return failProbe(status.output || auth.reason || "Cursor login not verified");
     },
     setupHint: "Install Cursor Agent and run `cursor-agent login`, or set `CURSOR_API_KEY`.",
   },
@@ -390,12 +396,12 @@ const LOCAL_SCAFFOLDED_PROVIDER_FILES = {
 const TIER_PREFERENCES = {
   cheapFast: {
     codexVariant: "codexLuna",
-    order: ["codexLuna", "claudeSonnet", "kimi", "vibe", "antigravity", "openclaw", "pi"],
+    order: ["codexLuna", "claudeSonnet", "kimi", "vibe", "antigravity", "openclaw", "pi", "cursor"],
     maxSize: 3,
   },
   research: {
     codexVariant: "codexLuna",
-    order: ["codexLuna", "kimi", "antigravity", "opencode", "claudeSonnet", "openclaw", DEFAULT_PROVIDER_ID],
+    order: ["codexLuna", "kimi", "antigravity", "opencode", "claudeSonnet", "openclaw", "cursor", DEFAULT_PROVIDER_ID],
     maxSize: 3,
   },
   implement: {
@@ -410,22 +416,54 @@ const TIER_PREFERENCES = {
       "opencode",
       "openclaw",
       DEFAULT_PROVIDER_ID,
+      ,
+      "cursor",
     ],
     maxSize: 3,
   },
   midTier: {
     codexVariant: "codexTerra",
-    order: ["codexTerra", "claudeSonnet", "kimi", "antigravity", "opencode", "claude", "openclaw", DEFAULT_PROVIDER_ID],
+    order: [
+      "codexTerra",
+      "claudeSonnet",
+      "kimi",
+      "antigravity",
+      "opencode",
+      "claude",
+      "openclaw",
+      "cursor",
+      DEFAULT_PROVIDER_ID,
+    ],
     maxSize: 3,
   },
   smartTool: {
     codexVariant: "codexTerra",
-    order: ["codexTerra", "claudeSonnet", "kimi", "antigravity", "opencode", "claude", "openclaw", DEFAULT_PROVIDER_ID],
+    order: [
+      "codexTerra",
+      "claudeSonnet",
+      "kimi",
+      "antigravity",
+      "opencode",
+      "claude",
+      "openclaw",
+      "cursor",
+      DEFAULT_PROVIDER_ID,
+    ],
     maxSize: 3,
   },
   validate: {
     codexVariant: "codexTerra",
-    order: ["codexTerra", "claudeSonnet", "kimi", "antigravity", "opencode", "claude", "openclaw", DEFAULT_PROVIDER_ID],
+    order: [
+      "codexTerra",
+      "claudeSonnet",
+      "kimi",
+      "antigravity",
+      "opencode",
+      "claude",
+      "openclaw",
+      "cursor",
+      DEFAULT_PROVIDER_ID,
+    ],
     maxSize: 3,
   },
   smart: {
@@ -440,6 +478,8 @@ const TIER_PREFERENCES = {
       "antigravity",
       "amp",
       "kimi",
+      ,
+      "cursor",
     ],
     maxSize: 3,
   },
@@ -455,17 +495,29 @@ const TIER_PREFERENCES = {
       "opencode",
       "openclaw",
       DEFAULT_PROVIDER_ID,
+      ,
+      "cursor",
     ],
     maxSize: 3,
   },
   planning: {
     codexVariant: "codexSol",
-    order: ["claude", "claudeOpus", "codexSol", "claudeSonnet", "kimi", "opencode", "openclaw", DEFAULT_PROVIDER_ID],
+    order: [
+      "claude",
+      "claudeOpus",
+      "codexSol",
+      "claudeSonnet",
+      "kimi",
+      "opencode",
+      "openclaw",
+      "cursor",
+      DEFAULT_PROVIDER_ID,
+    ],
     maxSize: 3,
   },
   orchestrator: {
     codexVariant: "codexSol",
-    order: ["claudeOpus", "claude", "kimi", "codexSol", "opencode", "openclaw", DEFAULT_PROVIDER_ID],
+    order: ["claudeOpus", "claude", "kimi", "codexSol", "opencode", "openclaw", "cursor", DEFAULT_PROVIDER_ID],
     maxSize: 3,
   },
 };
@@ -745,6 +797,38 @@ function hasNonEmptyStringDeep(value) {
 function jsonFileHasContent(path) {
   const parsed = readJsonObject(path);
   return parsed ? Object.keys(parsed).length > 0 : false;
+}
+
+/**
+ * Where `cursor-agent` stores its login tokens: `~/.cursor/auth.json` on macOS,
+ * `$XDG_CONFIG_HOME/cursor/auth.json` elsewhere, `%APPDATA%/Cursor/auth.json`
+ * on Windows.
+ *
+ * @param {string} homeDir
+ * @param {Record<string, string | undefined>} env
+ */
+function cursorAuthFile(homeDir, env) {
+  if (process.platform === "win32") {
+    return join(env.APPDATA ? resolve(env.APPDATA) : join(homeDir, "AppData", "Roaming"), "Cursor", "auth.json");
+  }
+  if (process.platform === "darwin") {
+    return join(homeDir, ".cursor", "auth.json");
+  }
+  return join(env.XDG_CONFIG_HOME ? resolve(env.XDG_CONFIG_HOME) : join(homeDir, ".config"), "cursor", "auth.json");
+}
+
+/**
+ * @param {string} homeDir
+ * @param {Record<string, string | undefined>} env
+ */
+function readCursorAuth(homeDir, env) {
+  const parsed = readJsonObject(cursorAuthFile(homeDir, env));
+  if (!parsed) {
+    return { valid: false, reason: "Cursor auth.json is missing or unreadable" };
+  }
+  return hasNonEmptyStringDeep(parsed)
+    ? { valid: true }
+    : { valid: false, reason: "Cursor auth.json does not contain credentials" };
 }
 
 /**

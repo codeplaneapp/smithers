@@ -92,9 +92,8 @@ process.stdout.write(JSON.stringify({ type: "thinking", subtype: "delta", text: 
 process.stdout.write(JSON.stringify({
   type: "tool_call",
   subtype: "started",
-  tool_call_id: "tool-1",
-  name: "readToolCall",
-  args: { path: "README.md" }
+  call_id: "tool-1",
+  tool_call: { tool: { case: "readToolCall", value: { args: { path: "README.md" } } } }
 }) + "\\n");
 process.stdout.write(JSON.stringify({
   type: "assistant",
@@ -121,18 +120,18 @@ process.stdout.write(JSON.stringify({ type: "result", subtype: "success", result
       });
 
       expect(result.text).toBe("Hello world");
-      expect(events.map((event) => event.type)).toEqual([
-        "started",
-        "action",
-        "action",
-        "action",
-        "completed",
-      ]);
+      expect(events.map((event) => event.type)).toEqual(["started", "action", "action", "action", "completed"]);
       expect(events[0]).toMatchObject({
         type: "started",
         engine: "cursor",
         title: "Cursor",
         resume: "cursor-session",
+      });
+      expect(events[2]).toMatchObject({
+        type: "action",
+        engine: "cursor",
+        phase: "started",
+        action: { id: "tool-1", title: "read", detail: { arguments: { path: "README.md" } } },
       });
       expect(events[3]).toMatchObject({
         type: "action",
@@ -195,16 +194,24 @@ process.stdout.write(JSON.stringify({ type: "result", subtype: "success", result
     const agent = new CursorAgent();
     const interpreter = agent.createOutputInterpreter();
 
-    expect(interpreter.onStdoutLine?.(JSON.stringify({
-      type: "assistant",
-      message: { content: [{ type: "text", text: "Hello " }] },
-      timestamp_ms: 1,
-    }))).toHaveLength(2);
-    expect(interpreter.onStdoutLine?.(JSON.stringify({
-      type: "assistant",
-      message: { content: [{ type: "text", text: "world" }] },
-      timestamp_ms: 2,
-    }))).toHaveLength(1);
+    expect(
+      interpreter.onStdoutLine?.(
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "Hello " }] },
+          timestamp_ms: 1,
+        }),
+      ),
+    ).toHaveLength(2);
+    expect(
+      interpreter.onStdoutLine?.(
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "world" }] },
+          timestamp_ms: 2,
+        }),
+      ),
+    ).toHaveLength(1);
 
     expect(interpreter.onExit?.({ exitCode: 0 })).toEqual([
       {
@@ -218,16 +225,77 @@ process.stdout.write(JSON.stringify({ type: "result", subtype: "success", result
     ]);
   });
 
+  test("keeps one action row across a Cursor tool call's started and completed events", () => {
+    const agent = new CursorAgent();
+    const interpreter = agent.createOutputInterpreter();
+
+    const [, started] =
+      interpreter.onStdoutLine?.(
+        JSON.stringify({
+          type: "tool_call",
+          subtype: "started",
+          call_id: "call-7",
+          tool_call: { tool: { case: "shellToolCall", value: { args: { command: "ls" } } } },
+        }),
+      ) ?? [];
+    const [completed] =
+      interpreter.onStdoutLine?.(
+        JSON.stringify({
+          type: "tool_call",
+          subtype: "completed",
+          call_id: "call-7",
+          tool_call: {
+            tool: { case: "shellToolCall", value: { args: { command: "ls" }, result: { case: "success", value: {} } } },
+          },
+        }),
+      ) ?? [];
+
+    // Same action id on both halves, so the run UI updates one row instead of
+    // appending a second orphaned entry.
+    expect(started).toMatchObject({
+      phase: "started",
+      action: { id: "call-7", title: "shell", detail: { arguments: { command: "ls" } } },
+    });
+    expect(completed).toMatchObject({ phase: "completed", ok: true, action: { id: "call-7", title: "shell" } });
+    expect(completed?.action?.detail).toBeUndefined();
+  });
+
+  test("marks a Cursor tool call failed when its result oneof is not success", () => {
+    const agent = new CursorAgent();
+    const interpreter = agent.createOutputInterpreter();
+
+    const [, completed] =
+      interpreter.onStdoutLine?.(
+        JSON.stringify({
+          type: "tool_call",
+          subtype: "completed",
+          call_id: "call-8",
+          tool_call: {
+            tool: {
+              case: "shellToolCall",
+              value: { result: { case: "failure", value: { error: "exit 1" } } },
+            },
+          },
+        }),
+      ) ?? [];
+
+    expect(completed).toMatchObject({ phase: "completed", ok: false, level: "warning" });
+  });
+
   test("uses Cursor result text as the error message for error result events", () => {
     const agent = new CursorAgent();
     const interpreter = agent.createOutputInterpreter();
 
-    expect(interpreter.onStdoutLine?.(JSON.stringify({
-      type: "result",
-      subtype: "error",
-      result: "model unavailable",
-      session_id: "cursor-session",
-    }))).toEqual([
+    expect(
+      interpreter.onStdoutLine?.(
+        JSON.stringify({
+          type: "result",
+          subtype: "error",
+          result: "model unavailable",
+          session_id: "cursor-session",
+        }),
+      ),
+    ).toEqual([
       {
         type: "started",
         engine: "cursor",

@@ -119,7 +119,7 @@ the exact supported setup.
 |---|---|---|---|
 | [Codex](/agents/codex) | Use `docs-full` / `ask`; no automatic skill install | `mcp add` / `config.toml` (TOML) | `AGENTS.md` for standing instructions |
 | [Claude Code](/agents/claude-code) | `skills add` | `mcp add` → `~/.claude.json` | Also a Claude Code **plugin** (skill + MCP bundled) |
-| [Cursor](/agents/cursor) | Optional `skills add` → `~/.agents/skills` if bridged | `mcp add` / `.cursor/mcp.json` | Rules in `.cursor/rules/*.mdc`; `cursor-agent` CLI |
+| [Cursor](/agents/cursor) | Optional `skills add` → `~/.agents/skills` if bridged | `mcp add` / `.cursor/mcp.json` | Rules in `.cursor/rules/*.mdc`; also a worker via `CursorAgent` |
 | [GitHub Copilot](/agents/copilot) | Custom instructions / prompt files | `.vscode/mcp.json` (editor) / repo settings (cloud agent) | Two distinct MCP schemas |
 | [Pi](/agents/pi) | `skills add` → `~/.pi/agent/skills` | no native MCP | First-party `pi-plugin` with a live run inspector; see [Pi integration](/integrations/pi-integration) |
 | [Hermes](/agents/hermes) | `skills add` | `mcp add` → `~/.hermes/config.yaml` (YAML) | Reads `AGENTS.md` |

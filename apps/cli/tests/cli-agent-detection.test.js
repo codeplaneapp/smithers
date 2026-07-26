@@ -108,7 +108,8 @@ describe("detectAvailableAgents", () => {
     expect(ids).toContain("openclaw");
     expect(ids).toContain("pool");
     expect(ids).toContain("omp");
-    expect(results.length).toBe(13);
+    expect(ids).toContain("cursor");
+    expect(results.length).toBe(14);
 
     const availabilitySource = readFileSync(new URL("../src/AgentAvailability.ts", import.meta.url), "utf8");
     const availabilityUnion = availabilitySource.match(/id:\s*([^;]+);/);

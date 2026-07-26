@@ -4,7 +4,9 @@ export type AgentCapabilityRegistry = {
   version: 1;
   engine:
     | "claude-code"
-    | "codex" | "cursor" | "antigravity"
+    | "codex"
+    | "cursor"
+    | "antigravity"
     | "gemini"
     | "kimi"
     | "pi"

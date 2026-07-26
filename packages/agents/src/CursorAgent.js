@@ -56,6 +56,28 @@ export function createCursorCapabilityRegistry(opts = {}) {
 }
 
 /**
+ * `cursor-agent` serializes its protobuf `agent.v1.ToolCall` oneof as
+ * `{ tool: { case: "shellToolCall", value: { args, result } } }`, so the tool
+ * name, arguments, and failure state all live under `tool_call`, never at the
+ * top level of the stream event. The per-tool `result` is itself a oneof whose
+ * case is `success` or one of several failure cases (`failure`, `error`,
+ * `timeout`, `rejected`, `file_not_found`, …); an unset case means the call is
+ * still in flight, which is not a failure.
+ *
+ * @param {unknown} toolCall
+ * @returns {{ name: string; args?: unknown; failed: boolean }}
+ */
+function readCursorToolCall(toolCall) {
+  const tool = isRecord(toolCall) && isRecord(toolCall.tool) ? toolCall.tool : undefined;
+  const rawName = asString(tool?.case) ?? "tool";
+  const name = rawName.endsWith("ToolCall") ? rawName.slice(0, -"ToolCall".length) : rawName;
+  const value = isRecord(tool?.value) ? tool.value : undefined;
+  const result = isRecord(value?.result) ? value.result : undefined;
+  const resultCase = asString(result?.case);
+  return { name, args: value?.args, failed: resultCase !== undefined && resultCase !== "success" };
+}
+
+/**
  * @param {unknown} value
  * @returns {string | undefined}
  */
@@ -123,13 +145,15 @@ export class CursorAgent extends BaseCliAgent {
     const startIfNeeded = () => {
       if (didEmitStarted) return [];
       didEmitStarted = true;
-      return [{
-        type: "started",
-        engine: this.cliEngine,
-        title: "Cursor",
-        resume: sessionId,
-        detail: sessionId ? { sessionId } : undefined,
-      }];
+      return [
+        {
+          type: "started",
+          engine: this.cliEngine,
+          title: "Cursor",
+          resume: sessionId,
+          detail: sessionId ? { sessionId } : undefined,
+        },
+      ];
     };
 
     /**
@@ -145,9 +169,7 @@ export class CursorAgent extends BaseCliAgent {
       try {
         payload = JSON.parse(trimmed);
       } catch {
-        return shouldSurfaceUnparsedStdout(trimmed)
-          ? [action("stdout", truncate(trimmed, 220), "warning")]
-          : [];
+        return shouldSurfaceUnparsedStdout(trimmed) ? [action("stdout", truncate(trimmed, 220), "warning")] : [];
       }
 
       if (!isRecord(payload)) return [];
@@ -211,26 +233,28 @@ export class CursorAgent extends BaseCliAgent {
 
       if (payloadType === "tool_call") {
         const subtype = asString(payload.subtype);
-        const rawName = asString(payload.name) ?? asString(payload.tool) ?? "tool";
-        const name = rawName.endsWith("ToolCall")
-          ? rawName.slice(0, -"ToolCall".length)
-          : rawName;
+        const completed = subtype === "completed";
+        const { name, args, failed } = readCursorToolCall(payload.tool_call);
+        // `call_id` is stable across started/completed, so both events land on the
+        // same action row. Falling back to a synthetic id would split them in two.
+        const id = asString(payload.call_id) ?? nextSyntheticId("cursor-tool");
         return [
           ...startIfNeeded(),
           {
             type: "action",
             engine: this.cliEngine,
-            phase: subtype === "completed" ? "completed" : "started",
+            phase: completed ? "completed" : "started",
             entryType: "thought",
             action: {
-              id: asString(payload.tool_call_id) ?? asString(payload.id) ?? nextSyntheticId("cursor-tool"),
+              id,
               kind: toolKindFromName(name),
               title: name,
-              detail: { arguments: payload.args ?? payload.arguments },
+              // Args belong on start/update; the completed event carries the result.
+              ...(completed || args === undefined ? {} : { detail: { arguments: args } }),
             },
-            message: subtype === "completed" ? undefined : `Running ${name}`,
-            ok: subtype === "completed" ? asString(payload.status) !== "failed" : undefined,
-            level: subtype === "completed" && asString(payload.status) === "failed" ? "warning" : "info",
+            message: completed ? undefined : `Running ${name}`,
+            ok: completed ? !failed : undefined,
+            level: completed && failed ? "warning" : "info",
           },
         ];
       }
@@ -250,7 +274,7 @@ export class CursorAgent extends BaseCliAgent {
             engine: this.cliEngine,
             ok,
             answer: ok ? resultText || finalAnswer || undefined : undefined,
-            error: ok ? undefined : errorText ?? resultText ?? "Cursor run failed",
+            error: ok ? undefined : (errorText ?? resultText ?? "Cursor run failed"),
             resume: sessionId,
             usage: isRecord(payload.usage) ? payload.usage : undefined,
           },
@@ -293,9 +317,7 @@ export class CursorAgent extends BaseCliAgent {
             engine: this.cliEngine,
             ok,
             answer: ok ? finalAnswer || undefined : undefined,
-            error: ok
-              ? undefined
-              : result.stderr?.trim() || `Cursor exited with code ${result.exitCode ?? -1}`,
+            error: ok ? undefined : result.stderr?.trim() || `Cursor exited with code ${result.exitCode ?? -1}`,
             resume: sessionId,
           },
         ];
@@ -323,9 +345,7 @@ export class CursorAgent extends BaseCliAgent {
     pushFlag(args, "--workspace", this.opts.workspace ?? params.cwd);
     pushList(args, "--plugin-dir", this.opts.pluginDir);
 
-    const resumeSession = typeof params.options?.resumeSession === "string"
-      ? params.options.resumeSession
-      : undefined;
+    const resumeSession = typeof params.options?.resumeSession === "string" ? params.options.resumeSession : undefined;
     const resume = resumeSession ?? this.opts.resume;
     if (resume === true) {
       args.push("--resume");
@@ -346,9 +366,7 @@ export class CursorAgent extends BaseCliAgent {
     pushList(args, "--header", this.opts.header);
     if (this.extraArgs?.length) args.push(...this.extraArgs);
 
-    const systemPrefix = params.systemPrompt
-      ? `${params.systemPrompt}\n\n`
-      : "";
+    const systemPrefix = params.systemPrompt ? `${params.systemPrompt}\n\n` : "";
     args.push("--");
     args.push(`${systemPrefix}${params.prompt ?? ""}`);
 
