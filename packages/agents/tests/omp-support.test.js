@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { Effect } from "effect";
 import { OmpAgent } from "../src/OmpAgent.js";
+import { PiAgent } from "../src/PiAgent.js";
 import { runRpcCommandEffect } from "../src/BaseCliAgent/runRpcCommandEffect.js";
 import { sanitizeCliArgs } from "../src/BaseCliAgent/sanitizeCliArgs.js";
 
@@ -100,6 +101,23 @@ describe("OmpAgent", () => {
     expect(actionsFor({ type: "tool_execution_start", toolName: "todo", toolCallId: "t1", args }).at(-1)?.action).toEqual({ id: "t1", kind: "todo_list", title: "todo", detail: { args } });
     expect(actionsFor({ type: "tool_execution_update", toolName: "todo", toolCallId: "t1", args: { op: "start", task: "Map files" } }).at(-1)?.action.detail).toEqual({ args: { op: "start", task: "Map files" } });
     expect(actionsFor({ type: "tool_execution_end", toolName: "todo", toolCallId: "t1", result: "ok" }).at(-1)?.action.detail).toBeUndefined();
+  });
+
+  test("emits the same tool-call args detail as the pi interpreter", () => {
+    const omp = new OmpAgent({ mode: "json" }).createOutputInterpreter();
+    const pi = new PiAgent({ mode: "json" }).createOutputInterpreter();
+    const argsFor = (interpreter, payload) => interpreter.onStdoutLine(JSON.stringify(payload)).findLast((event) => event.type === "action")?.action?.detail?.args;
+    for (const args of [{ op: "init", list: [{ phase: "Investigate", items: ["Map files"] }] }, { op: "start", task: "Map files" }]) {
+      for (const type of ["tool_execution_start", "tool_execution_update"]) {
+        const payload = { type, toolName: "todo", toolCallId: "t1", args };
+        const [ompArgs, piArgs] = [argsFor(omp, payload), argsFor(pi, payload)];
+        expect(ompArgs).toEqual(args);
+        expect(ompArgs).toEqual(piArgs);
+      }
+    }
+    const end = { type: "tool_execution_end", toolName: "todo", toolCallId: "t1", result: "ok" };
+    expect(argsFor(omp, end)).toBeUndefined();
+    expect(argsFor(pi, end)).toBeUndefined();
   });
 
   test("uses a terminal-only assistant message as the authoritative JSON answer once", () => {
