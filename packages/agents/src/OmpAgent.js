@@ -1,5 +1,6 @@
 import { Effect } from "effect";
-import { BaseCliAgent, asString, extractPrompt, extractTextFromJsonValue, pushFlag, resolveTimeouts, runAgentPromise, runRpcCommandEffect, buildGenerateResult, toolKindFromName } from "./BaseCliAgent/index.js";
+import { BaseCliAgent, asString, extractPrompt, extractTextFromJsonValue, pushFlag, resolveTimeouts, runAgentPromise, runRpcCommandEffect, buildGenerateResult, toolKindFromName, tryParseJson } from "./BaseCliAgent/index.js";
+import { taskContextEnv } from "./BaseCliAgent/taskContextEnv.js";
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
 import { resolveOmpProviderEnv } from "./ompProviderEnv.js";
 
@@ -30,8 +31,12 @@ export class OmpAgent extends BaseCliAgent {
     this.opts = opts;
     this.capabilities = createOmpCapabilityRegistry(opts);
   }
-  /** @param {{ onEvent?: unknown } | undefined} options @returns {"text" | "json" | "rpc"} */
-  resolveMode(options) { return this.opts.mode ?? (options?.onEvent ? "json" : "text"); }
+  /** @param {{ onEvent?: unknown, files?: unknown[] } | undefined} options @returns {"text" | "json" | "rpc"} */
+  resolveMode(options) {
+    if (this.opts.mode) return this.opts.mode;           // explicit opt-out/opt-in wins
+    if (!options?.onEvent) return "text";                // non-streaming unchanged
+    return options?.files?.length ? "json" : "rpc";      // stream: RPC unless file args
+  }
   resolveCredentialEnv() {
     if (!this.opts.apiKey) return undefined;
     const envName = resolveOmpProviderEnv(this.opts.provider, this.opts.model ?? this.model);
@@ -109,18 +114,30 @@ export class OmpAgent extends BaseCliAgent {
     const env = this.resolveCredentialEnv();
     return { command: "omp", args: this.buildArgs({ prompt, cwd, options, mode }), ...(env ? { env } : {}), outputFormat: mode };
   }
+  /**
+   * Environment for a persistent RPC session. Mirrors the env BaseCliAgent builds for
+   * the one-shot path: `inheritEnv: false` is honored, and the task's `SMITHERS_*`
+   * identifiers are forwarded. Streaming defaults to RPC, so an RPC session that
+   * dropped those would silently break `smithers ask-human` from inside an omp agent.
+   * @param {{ taskContext?: unknown } | undefined} options @returns {Record<string, string>}
+   */
+  resolveRpcEnv(options) {
+    return { ...(this.inheritEnv ? process.env : {}), ...this.env, ...taskContextEnv(options?.taskContext), ...this.resolveCredentialEnv() };
+  }
   async generate(options = {}) {
     if (this.resolveMode(options) !== "rpc") return super.generate(options);
     if (options.files?.length) throw new Error("OMP RPC mode does not support file arguments");
     const { prompt } = extractPrompt(options);
     const cwd = this.cwd ?? options.rootDir ?? process.cwd();
-    const env = { ...process.env, ...this.env, ...this.resolveCredentialEnv() };
+    const env = this.resolveRpcEnv(options);
     const timeouts = resolveTimeouts(options.timeout, { totalMs: this.timeoutMs, idleMs: this.idleTimeoutMs });
     const interpreter = this.createOutputInterpreter();
     const program = Effect.gen(this, function* () {
       const result = yield* runRpcCommandEffect("omp", this.buildArgs({ prompt, cwd, options, mode: "rpc" }), { cwd, env, prompt, timeoutMs: timeouts.totalMs, idleTimeoutMs: timeouts.idleMs, signal: options.abortSignal, maxOutputBytes: this.maxOutputBytes ?? options.maxOutputBytes, onStdout: options.onStdout, onStderr: options.onStderr, onProcess: options.onProcess, onJsonEvent: (event) => { for (const value of interpreter.onStdoutLine?.(JSON.stringify(event)) ?? []) void Promise.resolve(options.onEvent?.(value)).catch(() => undefined); } });
       for (const value of interpreter.onExit?.({ stdout: result.text, stderr: result.stderr, exitCode: result.exitCode }) ?? []) void Promise.resolve(options.onEvent?.(value)).catch(() => undefined);
-      return buildGenerateResult(result.text, result.output, this.opts.model ?? "omp", result.usage);
+      // Match the one-shot path: expose parsed JSON as structured output and
+      // leave non-JSON answers unset so the engine can recover fenced JSON from text.
+      return buildGenerateResult(result.text, tryParseJson(result.text), this.opts.model ?? "omp", result.usage);
     }.bind(this));
     return runAgentPromise(program);
   }

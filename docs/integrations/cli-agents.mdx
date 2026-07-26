@@ -101,11 +101,30 @@ import { OmpAgent } from "smithers-orchestrator";
 const omp = new OmpAgent({
   provider: "openai",
   model: "gpt-5.6-terra",
-  mode: "json",
   cwd: process.cwd(),
   autoApprove: true,
 });
 ```
+
+### Mode defaults
+
+When `mode` is omitted, Smithers picks it from the call. A streaming run (any
+[`<Task>`](/components/task), or a `generate()` that passes `onEvent`) defaults to
+`rpc`: a persistent session, the same protocol the interactive OMP TUI speaks, so
+the agent runs its full multi-turn tool loop instead of answering once and exiting.
+Everything else defaults to `text`.
+
+Set `mode: "json"` to opt back into a one-shot `--print --mode json` execution. That
+is the cheaper choice for genuinely single-turn work such as classification or
+extraction, where a persistent session only costs extra tokens and latency. A
+streaming run that passes file arguments falls back to one-shot `json`
+automatically, because RPC mode rejects files.
+
+| `mode` | Streaming run | Non-streaming run |
+| --- | --- | --- |
+| omitted (default) | `rpc`, or `json` when file arguments are passed | `text` |
+| `"json"` | one-shot `--print --mode json` | one-shot `--print --mode json` |
+| `"rpc"` | persistent session; file arguments are rejected | persistent session |
 
 Smithers emits only flags verified by `omp --help`: `--print`, `--mode`, model/provider and system-prompt options, `--cwd`, session controls, tools, extensions, plural comma-separated `--skills`, thinking (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `auto`), hooks, `--max-time`, and approval controls. Credentials are delivered through the provider's documented environment variable (for example `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`), never as `--api-key`; an explicit key fails closed when no safe provider/model mapping is known. A valued `--resume` takes precedence over `continueSession`; `--continue` selects OMP's recent session. In RPC mode, prompts are sent over stdin and file arguments are rejected.
 
