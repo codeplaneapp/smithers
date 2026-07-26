@@ -1,0 +1,32 @@
+## Port one vertical slice to Rust
+
+You are porting slice {props.sliceId} (kind: {props.kind}) of React's runtime to Rust,
+inside THIS worktree — your current working directory is the lane, and it is yours alone.
+
+Modules in this slice: {props.modules}
+
+Gating suites that must be green before you report: {props.gate}
+
+The pinned upstream React checkout, for reference only, is at {props.reactRepo}. Never edit it.
+`BRIDGE.md`, `ABI.md`, and `PORTING.md` in this repository are normative; read them first.
+
+## Rules the deterministic verifier enforces after you
+
+Violating any of these wastes the round — the verifier is a program, not a reviewer, and
+it does not negotiate.
+
+- Rust owns structure and decisions; JavaScript owns identity, values, and the DOM.
+- Nothing in the engine may recurse on tree, element, or child depth. Use explicit heap
+  frame stacks: the oracle runs on default ~1MB stacks with no flag escape.
+- No stubs. No `todo!()`, no `unimplemented!()`, no commented-out semantics, and no
+  paragraph comment standing in for behavior you did not implement.
+- Warning and error strings must be byte-identical to upstream React's.
+- Commit your work to this lane's bookmark. jj snapshots the working copy continuously,
+  so do not rely on dirty-state detection to prove you did something.
+- Before reporting: `cargo check` must be green, and the slice suite must pass. Run it with
+  `bash scripts/ferric/slice-suite.sh` followed by the slice id.
+
+{props.feedback}
+
+REQUIRED OUTPUT:
+{props.schema}

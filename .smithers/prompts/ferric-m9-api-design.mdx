@@ -1,0 +1,30 @@
+## M9: design-freeze the Rust-native authoring API
+
+Produce the design-freeze proposal for the Rust-native API — writing React components in Rust
+rather than driving Ferric from TypeScript — for the campaign repository at {props.repo}.
+
+The round-2 API report is normative. Cover:
+
+- The component macro, typed hooks, and the markup macro.
+- Mixed trees: Rust components inside TypeScript trees and the reverse, and exactly what the
+  boundary between them costs.
+- Pure-Rust server rendering, without a JavaScript host in the request path.
+- The D1–D15 API decisions, and the distribution modes.
+
+## What must be planned, not just proposed
+
+- The twin matrix: roughly 300 named cases, each authored twice — once in TypeScript, once in
+  Rust — that must produce byte-identical DOM, identical server-rendered bytes, identical
+  command buffers, identical scheduler yield logs, and identical warning text, on both the
+  WASM and native targets.
+- The three-leg fuzz plan across upstream JavaScript, TypeScript-authored Ferric, and
+  Rust-authored Ferric.
+- The fault-injection plan proving the documented panic policy in every phase.
+- The de-scope fallback: if twin conformance stays below 90% after two complete fix cycles,
+  mixed browser mode is disabled and only the narrowed server-rendering mode continues. Plan
+  that path now, while it is still cheap to accept.
+
+The four build-mode oracle runs must stay green throughout. M9 may not regress M8.
+
+REQUIRED OUTPUT:
+{props.schema}

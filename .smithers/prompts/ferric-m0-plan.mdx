@@ -1,0 +1,45 @@
+## Plan milestone M0
+
+You are the planning end of the sandwich for Operation Ferric — rewriting React's runtime in
+Rust, judged by React's own unmodified test suite. Plan milestone M0 (campaign spec §4, M0 row).
+
+M0 writes no Rust at all. It builds the judge, and freezes it, before any code exists to judge.
+
+The pinned React checkout is at {props.reactRepo}. The campaign repository is {props.repo};
+scaffold the crate and harness layout there if it does not exist yet.
+
+## Work items to plan, with the validation for each
+
+1. **The build-mode oracle runner.** React's own build-test configuration, wired so that
+   `yarn test --build -r=stable` and `yarn test --build -r=experimental` each run in DEV and
+   production against build artifacts, plus the Rust-aware source leg for the 43 internal test
+   files that build mode excludes, and the backend assertion harness. Checksum the jest configs.
+
+2. **The deterministic script layer this workflow shells out to.** You MUST plan concrete,
+   executable versions of every script listed here: {props.scripts}
+
+   Their output contracts are fixed, because compute tasks parse them: the oracle prints a line
+   of the form PASSING=n/m and optionally XFAIL_C=k; the slice suite prints PASSING=n/m; the
+   benchmark prints RATIO_X1000=n; the fuzzer prints CASES=n DIVERGENCES=m. Nothing lands until
+   these exist and behave.
+
+3. **The signed baseline manifest**: file hashes, test identities and their statuses, config
+   hashes, and flag values, so the denominator can never quietly shrink.
+
+4. **Harness canaries**: WebAssembly under jsdom, the real per-reset instance cost measured on
+   an actual Fizz suite, the cross-realm module cache, and an RSS trend over a full run.
+
+5. **The bridge contracts.** Promote the S1–S26 crossing contracts and E1–E12 reentrancy
+   contracts verbatim into `BRIDGE.md`, `ABI.md`, `PORTING.md`, and `HANDLES.tsv`, extending
+   only additively, plus the D1–D7 bridge decisions and the M9-enabling constraints.
+
+6. **The preregistered benchmark contract**, frozen before any Ferric measurement exists.
+
+7. **The boundary proof-of-concept**, whose kill-gate line is at most 1.5x upstream after at
+   most two protocol revisions.
+
+Plan the validation for each item, not just the work. An item whose "done" is not machine
+checkable is not planned.
+
+REQUIRED OUTPUT:
+{props.schema}

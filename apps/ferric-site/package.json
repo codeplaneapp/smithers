@@ -1,0 +1,21 @@
+{
+  "name": "@smithers-orchestrator/ferric-site",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Cloudflare Worker deployment for ferric.smithers.sh — Operation Ferric, React's runtime rewritten in Rust",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-site.mjs && node scripts/build-source.mjs",
+    "test": "bun test tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "deploy": "wrangler deploy",
+    "deploy:dry-run": "wrangler deploy --dry-run",
+    "destroy": "wrangler delete ferric-site"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.0",
+    "bun-types": "^1.3.14",
+    "typescript": "~6.0.3",
+    "wrangler": "^4.106.0"
+  }
+}

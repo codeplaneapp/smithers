@@ -1,0 +1,23 @@
+## GA soak: {props.app}
+
+Soak the application {props.app} against the packed Ferric release, in the campaign
+repository at {props.repo}.
+
+## Order matters
+
+Establish the stock-React green baseline FIRST, at the same commit of the application, and
+record it. A Ferric suite that passes 94% means nothing until you know whether stock React
+passes 94% or 100% on the same application. Baselining afterwards is how a port launders its
+own failures.
+
+Then run the identical suite against the packed Ferric tarball — installed the way a user
+would install it, through an owned CI fixture, including the strict CSP and MIME cells.
+
+Report green ONLY if Ferric matches the stock baseline with no denominator reduction: same
+tests, same count, no skips introduced, no test edited to accommodate a difference.
+
+Where they differ, the notes must say precisely how — the DOM difference, the warning text, the
+timing — because that difference is the finding, not an inconvenience.
+
+REQUIRED OUTPUT:
+{props.schema}

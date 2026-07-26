@@ -1,0 +1,28 @@
+## Boundary proof-of-concept
+
+Build the boundary proof-of-concept in the campaign repository at {props.repo}. This is
+protocol revision {props.revision} of at most 2 — the M3 kill gate is at most 1.5x upstream
+after at most two revisions, and that budget is not extendable.
+
+Build a minimal Rust/WASM fiber-diff kernel driving a JavaScript glue layer across the S1-style
+boundary, and measure it on a krausest-style partial-update benchmark against upstream React
+from {props.reactRepo}.
+
+## What this is really measuring
+
+The question is not whether Rust is fast. It is whether the boundary tax — one crossing per
+component render, per hook dispatch, per effect, plus whatever the protocol adds — is small
+enough that a Rust engine beats the JavaScript one it replaces. A realistic update touches
+thousands of fibers.
+
+So measure the crossing rate, not just the wall time. Report how many boundary crossings a
+single partial update costs, and what each one costs. If the protocol needs a revision, spend
+it on the crossing rate.
+
+Also decide the ABI toolchain — wasm-bindgen versus hand-rolled — BY MEASUREMENT, on matched
+records: latency, call counts, emitted bytes, and developer ergonomics.
+
+Report the ratio as an integer scaled by 1000, so 1.5x is 1500.
+
+REQUIRED OUTPUT:
+{props.schema}
