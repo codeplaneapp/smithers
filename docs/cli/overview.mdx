@@ -189,13 +189,13 @@ See [Time-travel API](/reference/time-travel) and [Revert](/runtime/revert) for 
 Commands listed by dotted name. `human` and `alerts` use an action positional instead of nested subcommands.
 
 ```toon
-commands[102]:
+commands[110]:
   - name: add
     purpose: Install a workflow pack from GitHub, npm, or a local file
     args[1]{name,type,required,desc}:
       spec,string,true,GitHub npm or file pack spec
     flags[2]{name,short,type,default,desc}:
-      global,,boolean,false,Install in ~/.smithers/packs instead of the local project
+      global,g,boolean,false,Install in ~/.smithers/packs instead of the local project
       yes,,boolean,false,Skip trust confirmation
   - name: init
     purpose: Install the local Smithers workflow pack into .smithers/. In an interactive terminal init asks one question (your preferred coding agent), installs the pack with defaults plus that agent's plugin (or skill if no plugin), then opens a hijacked tutorial session hosted by that agent; piped/agent/CI runs (or --yes) install defaults. Pass an optional prompt to also launch the create-workflow builder after init.
@@ -313,6 +313,7 @@ commands[102]:
       started-by-harness,,string,,Durable self-reported launch harness; environment may fill when omitted
       started-by-session,,string,,Durable self-reported harness session; environment may fill when omitted
       started-by-prompt,,string,,Explicit durable launch context; never inferred from workflow input
+      herdr,,boolean|string,,Mirror this run into a herdr terminal workspace (one pane per agent node); optionally =SESSION for a named session
   - name: migrate
     purpose: Copy the legacy bun:sqlite smithers.db into PGlite or Postgres and write the migrated.json marker
     flags[3]{name,short,type,default,desc}:
@@ -371,6 +372,16 @@ commands[102]:
       interval,i,string,10s,Poll interval
       stale-threshold,t,string,30s,Heartbeat staleness threshold before resume
       max-concurrent,c,number,3,Max runs resumed per poll
+  - name: supervisor
+    purpose: Workflow supervisor live outline of phases and agents; sources through the workspace gateway by default (start-or-attach with a silent fallback to direct smithers.db reads) and doubles as the herdr cockpit right pane. j/k select, Enter opens a detail tab in herdr, [ ] switch runs, f follow live, q quit
+    flags[5]{name,short,type,default,desc}:
+      db,,string,,Path to smithers.db (default: discover from cwd)
+      cwd,,string,,Project directory for DB discovery (default: process.cwd())
+      interval,i,number,0.5,Poll interval in seconds
+      gateway,g,string,,Source through a workspace gateway over RPC: a base URL to attach (hard-fails if unreachable) or auto to start-or-attach; default with no flag is auto with a silent fallback to direct-db
+      direct,,boolean,false,Force direct smithers.db reads and bypass the gateway (escape hatch for a broken gateway)
+  - name: top
+    purpose: Alias for smithers supervisor (workflow supervisor)
   - name: gateway
     purpose: Serve the multi-run Gateway RPC/WS control plane for workspace run state (one singleton per workspace; a second start refuses); unlike up --serve, this is not tied to one run
     args[1]{name,type,required,desc}:
@@ -436,7 +447,7 @@ commands[102]:
     args[1]{name,type,required,desc}:
       runId,string,true,Run ID
     flags[5]{name,short,type,default,desc}:
-      follow,f,boolean,true,Poll for new events while run is active
+      follow,f,boolean,,Follow a live run to completion; default follows only when stdout is a TTY (pipes/redirects snapshot and exit); -f forces follow and --no-follow forces snapshot
       from-seq,,number,,Start from event sequence number (exclusive)
       since,,number,,Deprecated alias of --from-seq (an event sequence number, not a duration)
       tail,n,number,50,Last N events
@@ -455,6 +466,16 @@ commands[102]:
       watch,w,boolean,false,Append new events as they arrive from the live cursor
       interval,i,number,2,Watch poll seconds
       history,,boolean,false,Replay existing history before tailing in watch mode
+  - name: tail
+    purpose: "Tail a run's output: verbatim node output with --node, or a concise run-level event overview"
+    args[1]{name,type,required,desc}:
+      runId,string,true,Run ID
+    flags[5]{name,short,type,default,desc}:
+      node,n,string,,Filter to a single node and print its output verbatim
+      follow,f,boolean,true,Poll for new events until the run reaches a terminal state
+      format,,enum,pretty,pretty|jsonl
+      linger,,boolean,false,After the run is terminal stay open until q/Enter or Ctrl-C (herdr panes pass this)
+      overview,,boolean,false,Run-level supervision board (per-node state + attempt, approve/steer CTAs, queue summary) above the event scroll
   - name: chat
     purpose: Show agent chat output for the latest run or a specific run
     args[1]{name,type,required,desc}:
@@ -500,6 +521,17 @@ commands[102]:
       target,,string,,"Expected engine such as claude-code or codex"
       timeout-ms,,number,30000,Wait time for live handoff
       launch,,boolean,true,Open session immediately
+  - name: steer
+    purpose: "Steer a running workflow in one step: with a message, queue a durable steer for the target node's next agent step (the run never stops); with --takeover, hand off the live agent session (a run-wide hijack that warns before aborting in-flight siblings); bare steer auto-picks the single active run"
+    args[2]{name,type,required,desc}:
+      runId,string,false,Run ID; auto-picks the single active run (or prompts) if omitted
+      message,string,false,Steer message to queue for the target node's next agent step (prompts if omitted and not --takeover)
+    flags[5]{name,short,type,default,desc}:
+      node,n,string,,Node id to steer (default: the run's current in-flight agent node)
+      takeover,t,boolean,false,Hijack the live agent session instead of queuing a steer (run-wide; warns before aborting in-flight siblings)
+      yes,y,boolean,false,Skip the takeover confirmation prompt (answer yes)
+      timeout-ms,,number,30000,Wait time for live handoff (takeover)
+      session,,string,,herdr session hosting the mirror (auto-detected from the pane env by default)
   - name: inspect
     purpose: Output detailed state of a run: steps, agents, approvals, timers, loops, outputs
     args[1]{name,type,required,desc}:
@@ -569,11 +601,12 @@ commands[102]:
     purpose: Approve a paused approval gate; auto-detects the node if only one is pending
     args[1]{name,type,required,desc}:
       runId,string,true,Run ID
-    flags[4]{name,short,type,default,desc}:
+    flags[5]{name,short,type,default,desc}:
       node,n,string,,Node ID required if multiple approvals are pending
       iteration,,number,0,Loop iteration
       note,,string,,Approval note
       by,,string,,Approver identifier
+      watch,,boolean,false,Interactively answer each approval gate and human request by keystroke as it appears then linger until the run ends (herdr gate panes)
   - name: deny
     purpose: Deny a paused approval gate
     args[1]{name,type,required,desc}:
@@ -920,6 +953,7 @@ commands[102]:
       started-by-harness,,string,,Durable self-reported launch harness; environment may fill when omitted
       started-by-session,,string,,Durable self-reported harness session; environment may fill when omitted
       started-by-prompt,,string,,Explicit durable launch context; never inferred from workflow input
+      herdr,,boolean|string,,Mirror this run into a herdr terminal workspace (one pane per agent node); optionally =SESSION for a named session
   - name: workflow.path
     purpose: Resolve a workflow ID to its entry file path
     args[1]{name,type,required,desc}:
@@ -1074,6 +1108,27 @@ commands[102]:
       no-global,,boolean,false,Install to project instead of globally
   - name: skills.list
     purpose: List available skills
+  - name: herdr.status
+    purpose: Ping the herdr server and report its version, protocol, and client compatibility
+    flags[1]{name,short,type,default,desc}:
+      session,,string,,Target a named herdr session's socket
+  - name: herdr.attach
+    purpose: Mirror an existing run into a herdr workspace and follow its status until the run ends or Ctrl-C
+    args[1]{name,type,required,desc}:
+      runId,string,true,Run ID to mirror into herdr
+    flags[1]{name,short,type,default,desc}:
+      session,,string,,Target a named herdr session's socket
+  - name: herdr.open
+    purpose: "Open (or re-open) an on-demand herdr pane for a run: a node's lingering output tail, or the run-level overview when no node is given; adopts an existing pane instead of duplicating it"
+    args[2]{name,type,required,desc}:
+      runId,string,true,Run ID whose workspace to open a pane in
+      nodeId,string,false,Node ID to open a tail pane for (omit for the run-level overview pane)
+    flags[1]{name,short,type,default,desc}:
+      session,,string,,Target a named herdr session's socket
+  - name: herdr.clean
+    purpose: Close herdr workspaces that mirror a smithers run whose run is terminal in the DB; never touches workspaces that do not map to a known run, and leaves active runs open
+    flags[1]{name,short,type,default,desc}:
+      session,,string,,Target a named herdr session's socket
 ```
 
 ## Operational notes

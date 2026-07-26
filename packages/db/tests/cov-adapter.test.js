@@ -294,6 +294,53 @@ describe("adapter: approvals history", () => {
     expect(history.length).toBe(1);
     expect(history[0].runId).toBe("r1");
   });
+
+  test("listResumableDecidedApprovals includes denied(failed) gates and excludes consumed(finished) ones", async () => {
+    const { adapter } = createDb();
+    await adapter.insertRun(runRow("r1", "running"));
+    // Approved gate re-armed to run: node "pending".
+    await adapter.insertNode(nodeRow("r1", "approved-gate", "pending"));
+    await adapter.insertOrUpdateApproval({
+      runId: "r1",
+      nodeId: "approved-gate",
+      iteration: 0,
+      status: "approved",
+      requestedAtMs: now,
+      decidedAtMs: now + 1,
+      decidedBy: "will",
+    });
+    // Denied gate (default onDeny:'fail'): node "failed" — the state a real
+    // denyNode produces, which the pending-only listDecidedApprovals drops.
+    await adapter.insertNode(nodeRow("r1", "denied-gate", "failed"));
+    await adapter.insertOrUpdateApproval({
+      runId: "r1",
+      nodeId: "denied-gate",
+      iteration: 0,
+      status: "denied",
+      requestedAtMs: now,
+      decidedAtMs: now + 2,
+      decidedBy: "will",
+    });
+    // Already-consumed approved gate: node "finished" — must NOT re-resume.
+    await adapter.insertNode(nodeRow("r1", "consumed-gate", "finished"));
+    await adapter.insertOrUpdateApproval({
+      runId: "r1",
+      nodeId: "consumed-gate",
+      iteration: 0,
+      status: "approved",
+      requestedAtMs: now,
+      decidedAtMs: now + 3,
+      decidedBy: "will",
+    });
+
+    const pendingOnly = await adapter.listDecidedApprovals("r1");
+    expect(pendingOnly.map((a) => a.nodeId).sort()).toEqual(["approved-gate"]);
+    const resumable = await adapter.listResumableDecidedApprovals("r1");
+    expect(resumable.map((a) => a.nodeId).sort()).toEqual(["approved-gate", "denied-gate"]);
+    const all = await adapter.listAllDecidedApprovals("r1");
+    expect(all.map((a) => a.nodeId).sort()).toEqual(["approved-gate", "consumed-gate", "denied-gate"]);
+    expect(Array.isArray(await adapter.listResumableDecidedApprovalsEffect("r1"))).toBe(true);
+  });
 });
 
 describe("adapter: cache / cron / scorer / memory / scorer effects", () => {

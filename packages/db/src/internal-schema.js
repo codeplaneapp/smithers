@@ -59,6 +59,7 @@ export const smithersAttempts = sqliteTable(
     metaJson: text("meta_json"),
     responseText: text("response_text"),
     jjCwd: text("jj_cwd"),
+    effort: text("effort"),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.runId, t.nodeId, t.iteration, t.attempt] }),
@@ -298,6 +299,7 @@ export const smithersRalph = sqliteTable(
     pk: primaryKey({ columns: [t.runId, t.ralphId] }),
   }),
 );
+export { smithersSteers } from "./internal-schema/smithersSteers.js";
 export { smithersScorers } from "./internal-schema/smithersScorers.js";
 export { smithersMemoryFacts } from "./internal-schema/smithersMemoryFacts.js";
 export { smithersMemoryThreads } from "./internal-schema/smithersMemoryThreads.js";

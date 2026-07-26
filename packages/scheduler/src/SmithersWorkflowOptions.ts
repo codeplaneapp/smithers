@@ -50,6 +50,15 @@ export type SmithersWorkflowOptions = {
   alertPolicy?: SmithersAlertPolicy;
   cache?: boolean;
   /**
+   * Per-workflow opt-out for the default-on post-failure autopsy. When `false`,
+   * a failure of this workflow never auto-launches the `post-failure` autopsy —
+   * use it for workflows that fail deliberately (e.g. fault-injection e2e
+   * suites) so they don't burn agent tokens autopsying an expected failure.
+   * Defaults to on. The CLI's `--no-post-failure` flag and `SMITHERS_POST_FAILURE=0`
+   * env var remain independent, broader opt-outs.
+   */
+  postFailureAutopsy?: boolean;
+  /**
    * Explicit workflow-level output schema/table used to populate
    * `RunResult.output` (and therefore a parent `Subflow`'s child result). Pass
    * a `createSmithers(...).outputs.<key>` schema, a Drizzle table, or a string

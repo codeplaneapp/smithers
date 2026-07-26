@@ -153,6 +153,13 @@
         "./packages/graph/src/*.js",
         "./packages/graph/src/*/index.js"
       ],
+      "@smithers-orchestrator/herdr": [
+        "./packages/herdr/src/index.js"
+      ],
+      "@smithers-orchestrator/herdr/*": [
+        "./packages/herdr/src/*.js",
+        "./packages/herdr/src/*/index.js"
+      ],
       "@smthrs/memory": [
         "./packages/memory/src/index.js"
       ],

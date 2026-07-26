@@ -25,6 +25,7 @@ export * from "./human-requests.js";
 export * from "./runtime-owner.js";
 export * from "./scheduler.js";
 export * from "./signals.js";
+export * from "./steers.js";
 export * from "./startDocFileSync.js";
 export * from "./syncDocsFromDisk.js";
 

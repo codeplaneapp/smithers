@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "id": "branch-then",
+  "engineHint": "any",
+  "turns": [
+    {
+      "result": {
+        "kind": "ok",
+        "output": { "summary": "took then branch", "ok": true, "path": "then" }
+      }
+    }
+  ]
+}

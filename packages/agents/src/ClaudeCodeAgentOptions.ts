@@ -49,6 +49,10 @@ export type ClaudeCodeAgentOptions = BaseCliAgentOptions & {
   noChrome?: boolean;
   noSessionPersistence?: boolean;
   outputFormat?: "text" | "json" | "stream-json";
+  // `effort` is inherited from BaseCliAgentOptions (the shared first-class
+  // reasoning-effort surface). Claude Code translates it in buildCommand by
+  // merging `{ effortLevel }` into a single `--settings` flag — user-supplied
+  // `--settings` (extraArgs or opts.settings) keys win on conflict.
   permissionMode?: "acceptEdits" | "bypassPermissions" | "default" | "delegate" | "dontAsk" | "plan";
   pluginDir?: string[];
   replayUserMessages?: boolean;

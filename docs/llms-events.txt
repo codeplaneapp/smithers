@@ -270,6 +270,9 @@ millis from the stored row) and surface `stateVersion: 0`.
 | `ApprovalGranted` | `runId`, `nodeId`, `iteration`, `timestampMs` |
 | `ApprovalAutoApproved` | `runId`, `nodeId`, `iteration`, `timestampMs` |
 | `ApprovalDenied` | `runId`, `nodeId`, `iteration`, `timestampMs` |
+| `SteerQueued` | `runId`, `nodeId`, `steerId`, `message`, `author?`, `timestampMs` |
+| `SteerConsumed` | `runId`, `nodeId`, `iteration`, `attempt`, `steerId`, `timestampMs` |
+| `SteerExpired` | `runId`, `nodeId`, `steerId`, `timestampMs` |
 | `ToolCallStarted` | `runId`, `nodeId`, `iteration`, `attempt`, `toolCallId`, `toolName`, `seq`, `timestampMs` |
 | `ToolCallFinished` | `runId`, `nodeId`, `iteration`, `attempt`, `toolCallId`, `toolName`, `seq`, `status`, `timestampMs` |
 | `NodeOutput` | `runId`, `nodeId`, `iteration`, `attempt`, `text`, `stream`, `timestampMs` |

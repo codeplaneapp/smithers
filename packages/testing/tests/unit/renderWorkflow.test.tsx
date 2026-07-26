@@ -2,7 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { createSmithers } from "smthrs";
-import { fakeAgent, renderPrompt, renderWorkflow, runTask } from "../src/index.ts";
+import { fakeAgent, renderPrompt, renderWorkflow, runTask } from "../../src/index.ts";
 
 const schemas = {
   input: z.object({

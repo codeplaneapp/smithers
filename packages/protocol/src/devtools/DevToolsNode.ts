@@ -12,6 +12,12 @@ export type DevToolsAgentRef = {
   engine?: string;
   /** Declared model id, when the adapter carries one. */
   model?: string;
+  /**
+   * First-class reasoning effort actually recorded for this agent (the attempt's
+   * `effort` column / `meta_json` effort). Carried so the gateway observation
+   * path renders the "model xhigh" suffix at parity with the direct-db path.
+   */
+  effort?: string;
 };
 
 /**
@@ -55,10 +61,10 @@ export type DevToolsNode = {
     /**
      * The agent that actually executed the node's LATEST attempt, read from
      * the attempt's persisted metadata (`agentEngine` / `agentModel` /
-     * `agentId`). Absent for queued nodes and attempts that predate agent
-     * metadata.
+     * `agentId` / `effort`). Absent for queued nodes and attempts that predate
+     * agent metadata.
      */
-    agentRan?: { agentId?: string; engine?: string; model?: string };
+    agentRan?: { agentId?: string; engine?: string; model?: string; effort?: string };
     /**
      * The task's initial prompt, read from the latest attempt's persisted
      * metadata (bounded to a few thousand chars — the full text stays in

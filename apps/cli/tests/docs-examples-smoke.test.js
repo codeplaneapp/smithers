@@ -54,6 +54,7 @@ const NON_STANDALONE_WORKFLOW_SNIPPETS = [
   "docs/components/tui.mdx#1",
   "docs/examples/run-on-plue.mdx#5",
   "docs/examples/worktree-feature-workflow.mdx#2",
+  "docs/guide/post-failure.mdx#4",
   "docs/guides/alerting.mdx#2",
   // Imports the pack-local `../agents` module, so it cannot render standalone.
   "docs/guides/monitor-workflows.mdx#4",

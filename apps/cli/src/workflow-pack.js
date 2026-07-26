@@ -268,6 +268,10 @@ const UI_WORKFLOWS = [
   { key: "create-workflow", title: "Create Workflow" },
   { key: "create-skill", title: "Create Skill" },
   { key: "docs-driven-development", title: "Docs Driven Development" },
+  // System workflow that ships its own gateway-react UI (SEEDED_UI_IDS) and
+  // declares <UI entry="../ui/share-pack.tsx" /> in its source. It must be
+  // mounted so the shipped UI is reachable; the manifest, e2e descriptor, and
+  // ui-drift guard all treat it as a first-class UI workflow.
   { key: "share-pack", title: "Share Pack" },
   { key: "smithers-repo-federation", title: "Smithers Repo Federation" },
   { key: "whole-foods-meal-planner", title: "Whole Foods Meal Planner" },

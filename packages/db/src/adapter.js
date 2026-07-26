@@ -6,6 +6,7 @@
 /** @typedef {import("./adapter/EvalSuiteRow.ts").EvalSuiteRow} EvalSuiteRow */
 /** @typedef {import("./adapter/IntegrationDeliveryClaim.ts").IntegrationDeliveryClaim} IntegrationDeliveryClaim */
 /** @typedef {import("./adapter/NodeRow.ts").NodeRow} NodeRow */
+/** @typedef {import("./adapter/SteerRow.ts").SteerRow} SteerRow */
 /** @typedef {import("./adapter/PendingHumanRequestRow.ts").PendingHumanRequestRow} PendingHumanRequestRow */
 /** @typedef {import("./adapter/RunAncestryRow.ts").RunAncestryRow} RunAncestryRow */
 /** @typedef {import("./adapter/RunRow.ts").RunRow} RunRow */
@@ -2017,11 +2018,22 @@ export class SmithersDb {
    * @returns {RunnableEffect<NodeRow[], SmithersError>}
    */
   listNodes(runId) {
+    // First-seen order for outline/phase grouping (without ORDER BY, SQLite
+    // returns node_id index order — alphabetical — which wrecks Sequence
+    // outlines). SQLite `rowid` is EXACT and stable across the ON CONFLICT DO
+    // UPDATE upserts (rowid is preserved on update). Postgres has no rowid;
+    // `ctid` is BEST-EFFORT — it approximates insertion order but a row's ctid
+    // changes when the node's state is updated (new tuple version) and after
+    // VACUUM FULL/CLUSTER, so the outline can drift on Postgres. Display-only
+    // (decision-path callers key by node, not order); a created-order column is a
+    // fast-follow if exact Postgres outline order is needed.
+    const orderBy = this.internalStorage.dialect === POSTGRES ? "ctid ASC" : "rowid ASC";
     return this.read(`list nodes ${runId}`, () =>
       this.internalStorage.queryAll(
         `SELECT *
          FROM _smithers_nodes
-         WHERE run_id = ?`,
+         WHERE run_id = ?
+         ORDER BY ${orderBy}`,
         [runId],
       ),
     );
@@ -3837,6 +3849,112 @@ export class SmithersDb {
     });
   }
   /**
+   * Insert a queued steer. Idempotent on the (unique) steer id so a
+   * retried enqueue does not create a duplicate row.
+   * @param {{ steerId: string; runId: string; nodeId: string; message: string; author?: string | null; createdAtMs: number; status?: string; }} row
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+  enqueueSteer(row) {
+    return this.write(`enqueue steer ${row.steerId}`, () =>
+      this.internalStorage.insertIgnore("_smithers_steers", {
+        steerId: row.steerId,
+        runId: row.runId,
+        nodeId: row.nodeId,
+        message: row.message,
+        status: row.status ?? "queued",
+        author: row.author ?? null,
+        createdAtMs: row.createdAtMs,
+      }),
+    );
+  }
+  /**
+   * List the queued (not-yet-consumed, not-expired) steers targeting one node,
+   * oldest first. This is the single hot-path read at agent-generate assembly;
+   * it is served by `_smithers_steers_queued_idx (run_id, node_id, status,
+   * created_at_ms)`.
+   * @param {string} runId
+   * @param {string} nodeId
+   * @returns {RunnableEffect<SteerRow[], SmithersError>}
+   */
+  listQueuedSteers(runId, nodeId) {
+    return this.read(`list queued steers ${nodeId}`, () =>
+      this.internalStorage.queryAll(
+        `SELECT *
+         FROM _smithers_steers
+         WHERE run_id = ? AND node_id = ? AND status = 'queued'
+         ORDER BY created_at_ms ASC, steer_id ASC`,
+        [runId, nodeId],
+      ),
+    );
+  }
+  /**
+   * List every steer for a run (any status), oldest first, for CLI/inspect.
+   * @param {string} runId
+   * @param {{ nodeId?: string }} [query]
+   * @returns {RunnableEffect<SteerRow[], SmithersError>}
+   */
+  listSteers(runId, query = {}) {
+    return this.read(`list steers ${runId}`, () => {
+      const clauses = ["run_id = ?"];
+      const params = [runId];
+      if (query.nodeId) {
+        clauses.push("node_id = ?");
+        params.push(query.nodeId);
+      }
+      return this.internalStorage.queryAll(
+        `SELECT *
+         FROM _smithers_steers
+         WHERE ${clauses.join(" AND ")}
+         ORDER BY created_at_ms ASC, steer_id ASC`,
+        params,
+      );
+    });
+  }
+  /**
+   * Mark a queued steer consumed by a specific attempt/iteration. The
+   * `status = 'queued'` guard makes consumption idempotent: a re-run cannot
+   * re-consume an already-consumed (or expired) steer.
+   * @param {string} steerId
+   * @param {{ consumedAtMs: number; consumedByAttempt: number; consumedByIteration: number; }} decision
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+  markSteerConsumed(steerId, decision) {
+    return this.write(`consume steer ${steerId}`, () =>
+      this.internalStorage.updateWhere(
+        "_smithers_steers",
+        {
+          status: "consumed",
+          consumedAtMs: decision.consumedAtMs,
+          consumedByAttempt: decision.consumedByAttempt,
+          consumedByIteration: decision.consumedByIteration,
+        },
+        "steer_id = ? AND status = ?",
+        [steerId, "queued"],
+      ),
+    );
+  }
+  /**
+   * Mark a queued steer expired (its target reached a terminal state with no
+   * further generate call). Guarded on `status = 'queued'` so an already
+   * consumed steer is never overwritten.
+   * @param {string} steerId
+   * @param {number} expiredAtMs
+   * @returns {RunnableEffect<void, SmithersError>}
+   */
+  markSteerExpired(steerId, expiredAtMs) {
+    return this.write(`expire steer ${steerId}`, () =>
+      this.internalStorage.updateWhere(
+        "_smithers_steers",
+        {
+          status: "expired",
+          expiredAtMs,
+        },
+        "steer_id = ? AND status = ?",
+        [steerId, "queued"],
+      ),
+    );
+  }
+  /**
    * @param {Record<string, unknown>} row
    * @returns {RunnableEffect<void, SmithersError>}
    */
@@ -4678,6 +4796,40 @@ export class SmithersDb {
          WHERE a.run_id = ?
            AND a.status IN ('approved', 'denied')
            AND n.state = 'pending'`,
+        [runId],
+        { booleanColumns: ["autoApproved"] },
+      ),
+    );
+  }
+  /**
+   * Decided approvals whose gate node is still *actionable* — the node is either
+   * `pending` (approved, re-armed to run) or `failed` (denied via the default
+   * onDeny:'fail', not yet consumed). This is the set the supervisor must resume
+   * a detached run for: an approved gate needs its task executed, and a denied
+   * gate needs the engine booted so the denial actually propagates.
+   *
+   * Unlike {@link listDecidedApprovals} (node = 'pending' only) it also catches
+   * a denied gate, whose node the engine moves to `failed` — the exact state a
+   * real `denyNode` produces, which the pending-only filter silently drops so a
+   * denied detached run would otherwise never resume. Unlike
+   * {@link listAllDecidedApprovals} it excludes finished/skipped gates (already
+   * consumed), so a run whose only decided approval was long since executed is
+   * not perpetually re-resumed every time it parks and goes stale.
+   * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+   */
+  listResumableDecidedApprovals(runId) {
+    return this.read(`list resumable decided approvals ${runId}`, () =>
+      this.internalStorage.queryAll(
+        `SELECT a.*
+         FROM _smithers_approvals a
+         JOIN _smithers_nodes n
+           ON a.run_id = n.run_id
+          AND a.node_id = n.node_id
+          AND a.iteration = n.iteration
+         WHERE a.run_id = ?
+           AND a.status IN ('approved', 'denied')
+           AND n.state IN ('pending', 'failed')`,
         [runId],
         { booleanColumns: ["autoApproved"] },
       ),
@@ -5978,6 +6130,13 @@ export class SmithersDb {
    */
   listDecidedApprovalsEffect(runId) {
     return this.listDecidedApprovals(runId);
+  }
+  /**
+   * @param {string} runId
+   * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
+   */
+  listResumableDecidedApprovalsEffect(runId) {
+    return this.listResumableDecidedApprovals(runId);
   }
   /**
    * @param {string} runId

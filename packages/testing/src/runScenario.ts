@@ -14,6 +14,11 @@ import { assertNoLeaks } from "./cleanup/leakAssertions.ts";
 import { JournalModel } from "./durability/journalModel.ts";
 import { ambiguity, type AmbiguityResult } from "./durability/ambiguity.ts";
 import { canonicalize } from "./scenario/canonicalize.ts";
+import {
+  runWorkflowScenario,
+  type RunWorkflowScenarioOptions,
+  type WorkflowScenarioResult,
+} from "./runWorkflowScenario.ts";
 
 export type DeterminismReport = Readonly<{ readonly deterministic: boolean; readonly residues: readonly string[] }>;
 export type ScenarioStatus = "finished" | "failed" | "capability-failure" | "capability-skip";
@@ -151,7 +156,11 @@ const settleKernel = async <T>(
   return value;
 };
 
-export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions = {}): Promise<ScenarioResult> => {
+/** Durability-kernel scenario runner (ScenarioAst). */
+export const runKernelScenario = async (
+  ast: ScenarioAst,
+  options: RunScenarioOptions = {},
+): Promise<ScenarioResult> => {
   const seed = options.seed ?? ast.seed ?? 0;
   const harness = options.harness ?? unitSimHarness();
   const kernel = makeKernel(seed, options.controlLog ?? []);
@@ -1514,3 +1523,28 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
     ? { ...finalBase, status: "finished", outputs: result.value, trace: kernel.trace.snapshot() }
     : { ...finalBase, status: "failed", outputs, trace: kernel.trace.snapshot(), error: result.error };
 };
+
+/**
+ * Dual entry:
+ * - `runScenario(ast, options)` → durability kernel (ScenarioAst)
+ * - `runScenario({ workflow, … })` → real engine workflow runner
+ */
+// Overloads keep the two entries statically distinct: kernel callers passing a
+// ScenarioAst get the full ScenarioResult (main's original contract — .trace /
+// .controlLog / .replayIdentity / .determinismReport), while `{ workflow, … }`
+// callers get WorkflowScenarioResult. Without these, both narrow to the union and
+// strict-TS kernel consumers break on ScenarioResult-only fields.
+export async function runScenario(ast: ScenarioAst, options?: RunScenarioOptions): Promise<ScenarioResult>;
+export async function runScenario(options: RunWorkflowScenarioOptions): Promise<WorkflowScenarioResult>;
+export async function runScenario(
+  arg: ScenarioAst | RunWorkflowScenarioOptions,
+  options?: RunScenarioOptions,
+): Promise<ScenarioResult | WorkflowScenarioResult> {
+  if (arg && typeof arg === "object" && "workflow" in arg) {
+    return runWorkflowScenario(arg as RunWorkflowScenarioOptions);
+  }
+  return runKernelScenario(arg as ScenarioAst, options ?? {});
+}
+
+export type { RunWorkflowScenarioOptions, WorkflowScenarioResult, ScenarioWorkflow } from "./runWorkflowScenario.ts";
+export { runWorkflowScenario } from "./runWorkflowScenario.ts";

@@ -1,8 +1,10 @@
-/** One display-safe agent reference: label/engine/model strings only. */
+/** One display-safe agent reference: label/engine/model/effort strings only. */
 export type GatewayRunNodeAgentRef = {
   name?: string;
   engine?: string;
   model?: string;
+  /** First-class reasoning effort (e.g. "xhigh"); rendered as a model suffix. */
+  effort?: string;
 };
 
 /**
@@ -15,7 +17,7 @@ export type GatewayRunNodeAgentRef = {
  */
 export type GatewayRunNodeAgent = GatewayRunNodeAgentRef & {
   chain?: ReadonlyArray<GatewayRunNodeAgentRef>;
-  ranOn?: { engine?: string; model?: string; agentId?: string };
+  ranOn?: { engine?: string; model?: string; agentId?: string; effort?: string };
 };
 
 export type GatewayRunNode = {

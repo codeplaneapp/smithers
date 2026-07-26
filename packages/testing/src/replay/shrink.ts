@@ -1,7 +1,7 @@
 import { compileScenario } from "../scenario/compile.ts";
 import type { ScenarioAst } from "../scenario/ast.ts";
 import type { ControlMessage } from "../control/ControlMessage.ts";
-import { runScenario, type ScenarioResult, type RunScenarioOptions } from "../runScenario.ts";
+import { runKernelScenario, type ScenarioResult, type RunScenarioOptions } from "../runScenario.ts";
 const controlsValid = (ast: ScenarioAst, controls: readonly ControlMessage[]): boolean => {
   const steps = new Set(ast.steps.map((step) => step.id));
   const faults = new Set(ast.faults.map((fault) => fault.id));
@@ -64,7 +64,7 @@ export const shrink = async (
       );
       if (!compileScenario(candidate).ok || !controlsValid(candidate, candidateControls)) continue;
       tried++;
-      const result = await runScenario(candidate, {
+      const result = await runKernelScenario(candidate, {
         ...options,
         controlLog: candidateControls,
         seed: options.seed ?? candidate.seed,
@@ -81,7 +81,7 @@ export const shrink = async (
     const candidateControls = currentControls.filter((_, index) => index !== i);
     if (candidateControls.length === currentControls.length || !controlsValid(current, candidateControls)) continue;
     tried++;
-    const result = await runScenario(current, {
+    const result = await runKernelScenario(current, {
       ...options,
       controlLog: candidateControls,
       seed: options.seed ?? current.seed,

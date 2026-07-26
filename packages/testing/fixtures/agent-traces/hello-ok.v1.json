@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "id": "hello-ok",
+  "engineHint": "any",
+  "turns": [
+    {
+      "stream": [{ "t": "text", "text": "hello from scripted agent\n" }],
+      "result": {
+        "kind": "ok",
+        "output": { "summary": "hello world", "ok": true }
+      }
+    }
+  ]
+}

@@ -35,6 +35,7 @@
     "@smthrs/driver": "workspace:*",
     "@smthrs/engine": "workspace:*",
     "@smthrs/graph": "workspace:*",
+    "@smthrs/herdr": "workspace:*",
     "@smthrs/react-reconciler": "workspace:*",
     "@smthrs/scheduler": "workspace:*",
     "effect": "4.0.0-beta.105",

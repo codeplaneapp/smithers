@@ -14,6 +14,8 @@ import {
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
 import { isClaudeLimitBanner } from "./BaseCliAgent/isClaudeLimitBanner.js";
 import { logWarning } from "@smthrs/observability/logging";
+import { readFile } from "node:fs/promises";
+import { isAbsolute, resolve as resolvePath } from "node:path";
 /** @typedef {import("./BaseCliAgent/BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./ClaudeCodeAgentOptions.ts").ClaudeCodeAgentOptions} ClaudeCodeAgentOptions */
@@ -70,6 +72,55 @@ export function createClaudeCodeCapabilityRegistry(opts = {}) {
 }
 const TOOL_OUTPUT_MAX_CHARS = 500;
 let didWarnAnthropicApiKeyUnset = false;
+/**
+ * Deep-merge two plain settings objects. `base` holds Smithers-computed keys
+ * (effortLevel, durability hooks, opts.settings); `overlay` holds the USER's
+ * inline `--settings` JSON, which wins on scalar conflict. Nested plain objects
+ * merge recursively (so a user `hooks` object refines rather than replaces
+ * ours); arrays are concatenated base-then-overlay so an additive durability
+ * `PostToolUse` hook survives alongside a user-declared one.
+ * @param {Record<string, unknown>} base
+ * @param {Record<string, unknown>} overlay
+ * @returns {Record<string, unknown>}
+ */
+function deepMergeSettings(base, overlay) {
+  /** @type {Record<string, unknown>} */
+  const out = { ...base };
+  for (const [key, overlayValue] of Object.entries(overlay)) {
+    const baseValue = out[key];
+    if (Array.isArray(baseValue) && Array.isArray(overlayValue)) {
+      out[key] = [...baseValue, ...overlayValue];
+    } else if (isRecord(baseValue) && isRecord(overlayValue)) {
+      out[key] = deepMergeSettings(baseValue, overlayValue);
+    } else {
+      out[key] = overlayValue;
+    }
+  }
+  return out;
+}
+/**
+ * Read a `--settings` FILE path and parse it as a settings JSON object so its
+ * keys can be folded into the single emitted `--settings` flag. Returns null
+ * when the path is unreadable or not a JSON object — the caller then preserves
+ * the verbatim path as the sole `--settings`, never clobbering the user's file.
+ * Relative paths resolve against the agent cwd (the process cwd Claude would use).
+ * @param {string} pathValue
+ * @param {string | undefined} cwd
+ * @returns {Promise<Record<string, unknown> | null>}
+ */
+async function readSettingsFileJson(pathValue, cwd) {
+  try {
+    const base = typeof cwd === "string" && cwd !== "" ? cwd : process.cwd();
+    const abs = isAbsolute(pathValue) ? pathValue : resolvePath(base, pathValue);
+    const parsed = JSON.parse(await readFile(abs, "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return /** @type {Record<string, unknown>} */ (parsed);
+    }
+  } catch {
+    // Unreadable / non-JSON — caller preserves the verbatim path.
+  }
+  return null;
+}
 /**
  * @param {string} toolName
  * @param {string | undefined} rawOutput
@@ -505,7 +556,6 @@ export class ClaudeCodeAgent extends BaseCliAgent {
     pushFlag(args, "--resume", resumeSession ?? this.opts.resume);
     pushFlag(args, "--session-id", this.opts.sessionId);
     pushFlag(args, "--setting-sources", this.opts.settingSources);
-    pushFlag(args, "--settings", this.opts.settings);
     if (this.opts.strictMcpConfig) args.push("--strict-mcp-config");
     if (params.systemPrompt) {
       pushFlag(args, "--system-prompt", params.systemPrompt);
@@ -520,26 +570,163 @@ export class ClaudeCodeAgent extends BaseCliAgent {
       }
     }
     if (this.opts.verbose || requiresVerbose) args.push("--verbose");
-    if (this.extraArgs?.length) args.push(...this.extraArgs);
+    // Merge effort + durability hooks + opts.settings into a single --settings
+    // JSON object. Any user extraArgs `--settings` is folded into this one
+    // flag too (see the emit block below) — Claude Code's --settings is
+    // single-valued, so a second flag would silently clobber the first.
+    /** @type {Record<string, unknown>} */
+    let settingsObj = {};
+    if (typeof this.opts.settings === "string" && this.opts.settings !== "") {
+      /** @type {unknown} */
+      let parsed;
+      let parsedOk = false;
+      try {
+        parsed = JSON.parse(this.opts.settings);
+        parsedOk = true;
+      } catch {
+        parsedOk = false;
+      }
+      if (parsedOk && parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        settingsObj = { .../** @type {Record<string, unknown>} */ (parsed) };
+      } else {
+        // Either it did not parse as JSON, OR it parsed to a scalar/array
+        // (e.g. a settings file literally named `42` / `true`). Treat it as a
+        // file PATH and pass it through as-is later — never silently drop it.
+        settingsObj = { __rawSettingsPath: this.opts.settings };
+      }
+    } else if (this.opts.settings && typeof this.opts.settings === "object") {
+      settingsObj = { .../** @type {Record<string, unknown>} */ (this.opts.settings) };
+    }
+    const effort =
+      (typeof this.opts.effort === "string" && this.opts.effort) ||
+      (typeof this.effort === "string" && this.effort) ||
+      null;
+    if (effort && settingsObj.effortLevel == null) {
+      settingsObj.effortLevel = effort;
+    }
     // Durability: inject a PostToolUse hook that calls back into smithers for a
     // strict Tier 1 snapshot at each file-edit / Bash boundary. Only when the
-    // engine passes a socket path (durability enabled); additive --settings.
+    // engine passes a socket path (durability enabled); folded into the single
+    // --settings below (merged into a settings file's own hooks when present).
     const durabilitySocket =
       typeof params.options?.durabilitySocket === "string" ? params.options.durabilitySocket : undefined;
     if (durabilitySocket) {
-      args.push(
-        "--settings",
-        JSON.stringify({
-          hooks: {
-            PostToolUse: [
-              {
-                matcher: "Write|Edit|MultiEdit|NotebookEdit|Bash",
-                hooks: [{ type: "command", command: "smithers snapshot-hook" }],
-              },
-            ],
-          },
-        }),
-      );
+      const hooks =
+        settingsObj.hooks && typeof settingsObj.hooks === "object"
+          ? /** @type {Record<string, unknown>} */ (settingsObj.hooks)
+          : {};
+      const post = Array.isArray(hooks.PostToolUse) ? [...hooks.PostToolUse] : [];
+      post.push({
+        matcher: "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        hooks: [{ type: "command", command: "smithers snapshot-hook" }],
+      });
+      settingsObj.hooks = { ...hooks, PostToolUse: post };
+    }
+    // Emit EXACTLY ONE `--settings` flag. Claude Code's `--settings
+    // <file-or-json>` is single-valued: the CLI arg parser keeps only the LAST
+    // occurrence and silently discards earlier ones (it is NOT variadic like
+    // `--betas <betas...>`). So two `--settings` flags would clobber whichever
+    // came first — including a user's settings FILE. We therefore fold every
+    // settings source into one value.
+    //
+    // Precedence (low→high, later wins on scalar conflict):
+    //   ourSettings (effortLevel + durability hooks + opts.settings inline
+    //   JSON) < opts.settings settings-FILE content < user extraArgs
+    //   `--settings`. JSON sources — and settings FILES we can read+parse —
+    //   deep-merge into a single object (arrays concatenate, so durability
+    //   hooks survive alongside a file's own hooks). A genuinely
+    //   unreadable/non-JSON file path can't be inlined, so the
+    //   highest-precedence such path is emitted verbatim as the sole
+    //   `--settings` (mergeable extras dropped) — never clobbering the file.
+    const rawSettingsPath = typeof settingsObj.__rawSettingsPath === "string" ? settingsObj.__rawSettingsPath : null;
+    /** @type {Record<string, unknown>} */
+    const ourSettings = { ...settingsObj };
+    delete ourSettings.__rawSettingsPath;
+    const extra = Array.isArray(this.extraArgs) ? [...this.extraArgs] : [];
+    // Extract and REMOVE every user `--settings` token (`--settings X` or
+    // `--settings=X`) from extraArgs, low→high, so none rides through as a
+    // duplicate flag; we re-emit exactly one merged flag ourselves.
+    /** @type {string[]} */
+    const userSettingsRawList = [];
+    for (let i = 0; i < extra.length;) {
+      const a = extra[i];
+      if (a === "--settings") {
+        userSettingsRawList.push(typeof extra[i + 1] === "string" ? /** @type {string} */ (extra[i + 1]) : "");
+        extra.splice(i, extra[i + 1] !== undefined ? 2 : 1);
+        continue;
+      }
+      if (typeof a === "string" && a.startsWith("--settings=")) {
+        userSettingsRawList.push(a.slice("--settings=".length));
+        extra.splice(i, 1);
+        continue;
+      }
+      i++;
+    }
+    args.push(...extra);
+    // Fold sources into one value. `mergedSettings` accumulates mergeable JSON
+    // (higher wins); `opaqueSettingsPath` holds the highest-precedence file
+    // path we could NOT read+parse. A higher mergeable source shadows a lower
+    // opaque one (clears it) and vice-versa.
+    /** @type {Record<string, unknown>} */
+    let mergedSettings = { ...ourSettings };
+    /** @type {string | null} */
+    let opaqueSettingsPath = null;
+    /**
+     * @param {string} raw
+     * @param {boolean} allowInlineJson opts.settings inline JSON was already
+     *   folded into ourSettings, so only user extraArgs values may be inline.
+     */
+    const foldSettingsSource = async (raw, allowInlineJson) => {
+      if (allowInlineJson) {
+        try {
+          const candidate = JSON.parse(raw);
+          if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+            mergedSettings = deepMergeSettings(mergedSettings, /** @type {Record<string, unknown>} */ (candidate));
+            opaqueSettingsPath = null;
+            return;
+          }
+        } catch {
+          // Not inline JSON — treat as a file path below.
+        }
+      }
+      const parsed = await readSettingsFileJson(raw, params.cwd);
+      if (parsed) {
+        mergedSettings = deepMergeSettings(mergedSettings, parsed);
+        opaqueSettingsPath = null;
+      } else {
+        opaqueSettingsPath = raw;
+      }
+    };
+    if (rawSettingsPath) {
+      await foldSettingsSource(rawSettingsPath, false);
+    }
+    for (const raw of userSettingsRawList) {
+      if (raw !== "") {
+        await foldSettingsSource(raw, true);
+      }
+    }
+    if (opaqueSettingsPath) {
+      // DELIBERATE tradeoff: Claude Code's `--settings` is single-valued, so an
+      // unreadable/non-JSON settings FILE cannot be folded with our computed
+      // keys — emitting a second flag would silently clobber the user's file. We
+      // preserve the file and drop our keys, but that DISABLES crash-recovery
+      // durability snapshots (and effort) for this agent, so warn loudly.
+      if (Object.keys(mergedSettings).length > 0) {
+        const losesDurability = !!(mergedSettings.hooks && durabilitySocket);
+        logWarning(
+          "ClaudeCodeAgent: could not read settings file " +
+            `'${opaqueSettingsPath}' as JSON — passing it through as the sole ` +
+            "--settings and dropping Smithers-computed keys (effort/durability). " +
+            (losesDurability ? "CRASH-RECOVERY DURABILITY SNAPSHOTS ARE DISABLED for this agent. " : "") +
+            "Supply effort/durability via a readable JSON settings file or inline " +
+            "--settings JSON to combine them.",
+          {},
+          "agent.settings",
+        );
+      }
+      pushFlag(args, "--settings", opaqueSettingsPath);
+    } else if (Object.keys(mergedSettings).length > 0) {
+      pushFlag(args, "--settings", JSON.stringify(mergedSettings));
     }
     if (params.prompt) args.push(params.prompt);
     const accountEnv = {};
