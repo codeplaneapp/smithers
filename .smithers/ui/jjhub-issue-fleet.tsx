@@ -54,7 +54,7 @@ function collectLanes(events: unknown[]): Map<number, LaneRow> {
     for (const row of rows) {
       if (!row || typeof row !== "object") continue;
       if (typeof row.issue === "number") {
-        const lane = lanes.get(row.issue) ?? { issue: row.issue };
+        const lane: LaneRow = lanes.get(row.issue) ?? { issue: row.issue };
         if (typeof row.prUrl === "string") lane.prUrl = row.prUrl;
         if (typeof row.error === "string") lane.error = row.error;
         lanes.set(row.issue, lane);
@@ -62,7 +62,7 @@ function collectLanes(events: unknown[]): Map<number, LaneRow> {
       if (Array.isArray(row.issues)) {
         for (const issue of row.issues) {
           if (issue && typeof issue.number === "number") {
-            const lane = lanes.get(issue.number) ?? { issue: issue.number };
+            const lane: LaneRow = lanes.get(issue.number) ?? { issue: issue.number };
             if (typeof issue.title === "string") lane.title = issue.title;
             lanes.set(issue.number, lane);
           }
