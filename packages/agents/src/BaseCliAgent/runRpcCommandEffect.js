@@ -7,6 +7,7 @@ import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { logDebug, logWarning } from "@smithers-orchestrator/observability/logging";
 import { toolOutputTruncatedTotal } from "@smithers-orchestrator/observability/metrics";
 import { extractTextFromJsonValue } from "./extractTextFromJsonValue.js";
+import { normalizeTokenUsage } from "./normalizeTokenUsage.js";
 import { truncateToBytes } from "./truncateToBytes.js";
 import { sanitizeCliArgs, sanitizeCliErrorCause } from "./sanitizeCliArgs.js";
 /** @typedef {import("./PiExtensionUiResponse.ts").PiExtensionUiResponse} PiExtensionUiResponse */
@@ -55,6 +56,30 @@ function createInactivityTimer(timeoutMs, onTimeout) {
     return { reset, clear };
 }
 /**
+ * Normalize CLI usage into the AI SDK shape consumed by Smithers telemetry.
+ * @param {unknown} value
+ * @returns {import("ai").LanguageModelUsage | undefined}
+ */
+function toLanguageModelUsage(value) {
+    const usage = normalizeTokenUsage(value);
+    if (!usage)
+        return undefined;
+    return {
+        inputTokens: usage.inputTokens,
+        inputTokenDetails: {
+            noCacheTokens: undefined,
+            cacheReadTokens: usage.cacheReadTokens,
+            cacheWriteTokens: usage.cacheWriteTokens,
+        },
+        outputTokens: usage.outputTokens,
+        outputTokenDetails: {
+            textTokens: undefined,
+            reasoningTokens: usage.reasoningTokens,
+        },
+        totalTokens: usage.totalTokens ?? ((usage.inputTokens ?? 0) + (usage.outputTokens ?? 0) || undefined),
+    };
+}
+/**
  * @param {string} command
  * @param {string[]} args
  * @param {RunRpcCommandOptions} options
@@ -82,6 +107,7 @@ export function runRpcCommandEffect(command, args, options) {
         let promptResponseError = null;
         let extractedUsage = undefined;
         let stderrTruncated = false;
+        let terminationStarted = false;
         logDebug("starting agent RPC command", logAnnotations, span);
         const child = spawnFn(command, args, {
             cwd,
@@ -125,6 +151,9 @@ export function runRpcCommandEffect(command, args, options) {
             if (signal) {
                 signal.removeEventListener("abort", onAbort);
             }
+            if (!processExited) {
+                terminateChild();
+            }
             notifyProcessExited();
             logWarning(message, {
                 ...logAnnotations,
@@ -164,7 +193,7 @@ export function runRpcCommandEffect(command, args, options) {
             catch {
                 // ignore
             }
-            resume(Effect.succeed({ text, output, stderr, exitCode: child.exitCode, usage: extractedUsage }));
+            resume(Effect.succeed({ text, output, stderr, exitCode: child.exitCode, usage: toLanguageModelUsage(extractedUsage) }));
         };
         /**
     * @param {NodeJS.Signals} signal
@@ -172,16 +201,27 @@ export function runRpcCommandEffect(command, args, options) {
         const killProcessGroup = (signal) => {
             if (!child.pid)
                 return;
+            if (process.platform !== "win32") {
+                try {
+                    process.kill(-child.pid, signal);
+                    return;
+                }
+                catch {
+                    // Fall through to the direct child when the detached group
+                    // is not observable yet.
+                }
+            }
             try {
-                process.kill(-child.pid, signal);
+                child.kill(signal);
             }
             catch {
-                // process group already exited
+                // process already exited
             }
         };
         const terminateChild = () => {
-            if (!child.pid)
+            if (!child.pid || terminationStarted)
                 return;
+            terminationStarted = true;
             killProcessGroup("SIGTERM");
             const killTimer = setTimeout(() => {
                 killProcessGroup("SIGKILL");

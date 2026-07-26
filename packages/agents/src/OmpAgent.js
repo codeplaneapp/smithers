@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { BaseCliAgent, asString, extractPrompt, extractTextFromJsonValue, pushFlag, resolveTimeouts, runAgentPromise, runRpcCommandEffect, buildGenerateResult, toolKindFromName } from "./BaseCliAgent/index.js";
+import { BaseCliAgent, asString, extractPrompt, extractTextFromJsonValue, pushFlag, resolveTimeouts, runAgentPromise, runRpcCommandEffect, buildGenerateResult, toolKindFromName, tryParseJson } from "./BaseCliAgent/index.js";
 import { taskContextEnv } from "./BaseCliAgent/taskContextEnv.js";
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
 import { resolveOmpProviderEnv } from "./ompProviderEnv.js";
@@ -135,7 +135,9 @@ export class OmpAgent extends BaseCliAgent {
     const program = Effect.gen(this, function* () {
       const result = yield* runRpcCommandEffect("omp", this.buildArgs({ prompt, cwd, options, mode: "rpc" }), { cwd, env, prompt, timeoutMs: timeouts.totalMs, idleTimeoutMs: timeouts.idleMs, signal: options.abortSignal, maxOutputBytes: this.maxOutputBytes ?? options.maxOutputBytes, onStdout: options.onStdout, onStderr: options.onStderr, onProcess: options.onProcess, onJsonEvent: (event) => { for (const value of interpreter.onStdoutLine?.(JSON.stringify(event)) ?? []) void Promise.resolve(options.onEvent?.(value)).catch(() => undefined); } });
       for (const value of interpreter.onExit?.({ stdout: result.text, stderr: result.stderr, exitCode: result.exitCode }) ?? []) void Promise.resolve(options.onEvent?.(value)).catch(() => undefined);
-      return buildGenerateResult(result.text, result.output, this.opts.model ?? "omp", result.usage);
+      // Match the one-shot path: expose parsed JSON as structured output and
+      // leave non-JSON answers unset so the engine can recover fenced JSON from text.
+      return buildGenerateResult(result.text, tryParseJson(result.text), this.opts.model ?? "omp", result.usage);
     }.bind(this));
     return runAgentPromise(program);
   }

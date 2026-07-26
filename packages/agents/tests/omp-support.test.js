@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { Effect } from "effect";
 import { OmpAgent } from "../src/OmpAgent.js";
@@ -253,5 +256,43 @@ describe("OmpAgent", () => {
     const inherited = new OmpAgent({ model: "m" }).resolveRpcEnv({ taskContext });
     expect(inherited.PATH).toBe(process.env.PATH);
     expect(inherited.SMITHERS_RUN_ID).toBe("run-1");
+  });
+
+  test("keeps RPC tool events, usage, and structured output at JSON-mode parity", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "smithers-omp-rpc-"));
+    const bin = join(dir, "omp");
+    await writeFile(bin, `#!/usr/bin/env node
+const readline = require("node:readline");
+const rl = readline.createInterface({ input: process.stdin });
+process.stdout.write(JSON.stringify({ type: "ready" }) + "\\n");
+rl.on("line", (line) => {
+  const command = JSON.parse(line);
+  if (command.type === "get_state") {
+    process.stdout.write(JSON.stringify({ type: "response", command: "get_state", success: true, data: { sessionId: "rpc-1" } }) + "\\n");
+  }
+  if (command.type === "prompt") {
+    process.stdout.write(JSON.stringify({ type: "tool_execution_start", toolName: "read", toolCallId: "tool-1", args: { path: "README.md" } }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: "{\\"value\\":42}", stopReason: "stop", usage: { input_tokens: 11, output_tokens: 4, total_tokens: 15 } }] }) + "\\n");
+  }
+});
+`, "utf8");
+    await chmod(bin, 0o755);
+    try {
+      const events = [];
+      const result = await new OmpAgent({ model: "m", env: { PATH: `${dir}:${process.env.PATH ?? ""}` } }).generate({
+        prompt: "return json",
+        onEvent: (event) => events.push(event),
+      });
+      const rpcAction = events.find((event) => event.type === "action" && event.action.id === "tool-1");
+      const jsonAction = new OmpAgent({ mode: "json" }).createOutputInterpreter()
+        .onStdoutLine(JSON.stringify({ type: "tool_execution_start", toolName: "read", toolCallId: "tool-1", args: { path: "README.md" } }))
+        .find((event) => event.type === "action");
+      expect(rpcAction).toEqual(jsonAction);
+      expect(result.output).toEqual({ value: 42 });
+      expect(result.usage).toMatchObject({ inputTokens: 11, outputTokens: 4, totalTokens: 15 });
+    }
+    finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

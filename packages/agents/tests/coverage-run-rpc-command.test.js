@@ -26,10 +26,16 @@ const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 describe("runRpcCommandEffect branches", () => {
   /** @type {(...args: any[]) => any} */
   let realKill;
+  /** @type {Array<[number, NodeJS.Signals]>} */
+  let killCalls;
   beforeEach(() => {
     // Never let a fake pid signal a real process group.
     realKill = process.kill;
-    process.kill = /** @type {any} */ (() => true);
+    killCalls = [];
+    process.kill = /** @type {any} */ ((pid, signal) => {
+      killCalls.push([pid, signal]);
+      return true;
+    });
   });
   afterEach(() => {
     process.kill = realKill;
@@ -52,6 +58,8 @@ describe("runRpcCommandEffect branches", () => {
 
   test("finalizes a successful turn, tracking usage and terminating the group", async () => {
     const child = makeFakeChild({ pid: 4242 });
+    const childKillSignals = [];
+    child.kill = (signal) => { childKillSignals.push(signal); return true; };
     const controller = new AbortController();
     /** @type {string[]} */
     const streamed = [];
@@ -86,8 +94,10 @@ describe("runRpcCommandEffect branches", () => {
     child.emit("close", 0);
     const result = await promise;
     expect(result.text).toBe("final answer");
-    expect(result.usage).toEqual({ output_tokens: 7 });
+    expect(result.usage).toMatchObject({ outputTokens: 7, totalTokens: 7 });
     expect(streamed.join("")).toBe("final answer");
+    if (process.platform === "win32") expect(childKillSignals).toContain("SIGTERM");
+    else expect(killCalls).toContainEqual([-4242, "SIGTERM"]);
     expect(lifecycle).toHaveLength(2);
     expect(lifecycle[0]).toMatchObject({ phase: "started", pid: 4242 });
     expect(lifecycle[1]).toMatchObject({ phase: "exited", pid: 4242 });
@@ -135,7 +145,9 @@ describe("runRpcCommandEffect branches", () => {
   });
 
   test("surfaces an assistant error stop reason from turn_end", async () => {
-    const child = makeFakeChild();
+    const child = makeFakeChild({ pid: 4343 });
+    const childKillSignals = [];
+    child.kill = (signal) => { childKillSignals.push(signal); return true; };
     const promise = start(child);
     await tick();
     child.stdout.write(
@@ -151,6 +163,8 @@ describe("runRpcCommandEffect branches", () => {
       }) + "\n",
     );
     await expect(promise).rejects.toThrow(/turn boom/);
+    if (process.platform === "win32") expect(childKillSignals).toContain("SIGTERM");
+    else expect(killCalls).toContainEqual([-4343, "SIGTERM"]);
   });
 
   test("truncates over-long stderr and finalizes via a clean close", async () => {
@@ -315,10 +329,16 @@ describe("runRpcCommandEffect branches", () => {
 
   test("fires the delayed SIGKILL when no close clears the terminate timer", async () => {
     const child = makeFakeChild({ pid: 7777 });
+    const childKillSignals = [];
+    child.kill = (signal) => { childKillSignals.push(signal); return true; };
     const promise = start(child, { idleTimeoutMs: 30 });
     await expect(promise).rejects.toThrow(/idle timed out/);
+    if (process.platform === "win32") expect(childKillSignals).toContain("SIGTERM");
+    else expect(killCalls).toContainEqual([-7777, "SIGTERM"]);
     // The idle kill scheduled a 250ms SIGKILL fallback; with no close event it
     // fires here (process.kill is stubbed for the whole describe block).
     await tick(300);
+    if (process.platform === "win32") expect(childKillSignals).toContain("SIGKILL");
+    else expect(killCalls).toContainEqual([-7777, "SIGKILL"]);
   });
 });
