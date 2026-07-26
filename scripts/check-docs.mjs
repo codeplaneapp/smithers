@@ -18,6 +18,30 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+// The source-text assertions in this gate pin the shape of a public API, not
+// the indentation it happens to be printed with, and `pnpm format` (oxfmt)
+// reflows the very sources it reads. Normalize away the three things a line
+// wrap changes but an API does not: the whitespace left next to punctuation,
+// the trailing comma a multi-line print adds before a closer, and the leading
+// `|` a wrapped union gets. Token order survives, so these stay real checks.
+const normalizeSourceText = (text) =>
+  text
+    .replace(/\s+/g, " ")
+    .replace(/\s*([[\](){}<>,;:|])\s*/g, "$1")
+    .replace(/([:=|(,[])\|/g, "$1")
+    .replace(/,(?=[\]})])/g, "")
+    .replace(/^\|/, "")
+    .replace(/,$/, "")
+    .trim();
+const contains = (haystack, needle) => {
+  // A truncated `[file]` pair used to pass by accident: String.includes(undefined)
+  // searches for the literal "undefined", which most docs pages happen to contain.
+  // Fail loudly instead so a dropped needle can never masquerade as a green check.
+  if (typeof needle !== "string") throw new TypeError(`check-docs: assertion is missing its needle (${needle})`);
+  return typeof haystack === "string" && normalizeSourceText(haystack).includes(normalizeSourceText(needle));
+};
+
 const DOCS = join(root, "docs");
 const RPC_DOCS = join(DOCS, "rpc");
 const HOW_IT_WORKS = join(DOCS, "how-it-works.mdx");
@@ -230,7 +254,9 @@ if (offenders.length) {
 
 function readErrorDefinitionCodes() {
   const source = readFileSync(ERROR_DEFINITIONS, "utf8");
-  return [...source.matchAll(/^\s{4}([A-Z0-9_]+):\s*\{/gm)].map((match) => match[1]);
+  // Indent-agnostic: only the top-level codes are UPPER_SNAKE keys opening a
+  // block, so matching any leading whitespace survives a reindent.
+  return [...source.matchAll(/^\s+([A-Z0-9_]+):\s*\{/gm)].map((match) => match[1]);
 }
 
 function checkErrorReferenceCodes(codes) {
@@ -292,7 +318,7 @@ function checkErrorDeclarationCodes(codes) {
 }
 
 function requireContains(label, source, needles) {
-  const missing = needles.filter((needle) => !source.includes(needle));
+  const missing = needles.filter((needle) => !contains(source, needle));
   if (missing.length) {
     failed = true;
     console.error(`\n✗ ${label} is missing expected public API text:`);
@@ -650,8 +676,8 @@ function checkTimerDocsMatchWakeRuntime() {
     [TIMER_COMPONENT_DOC, "host-restart wake guarantees require a build from `main`"],
     [TIMER_COMPONENT_DOC, "release newer than `0.23.0`"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ Timer docs must describe current durable wake behavior:");
@@ -692,8 +718,8 @@ function checkIronProxySpecMatchesSandboxSeam() {
     'provider: "iron-proxy"',
     'provider="iron-proxy"',
   ];
-  const missing = required.filter((needle) => !source.includes(needle));
-  const stale = forbidden.filter((needle) => source.includes(needle));
+  const missing = required.filter((needle) => !contains(source, needle));
+  const stale = forbidden.filter((needle) => contains(source, needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ .smithers/specs/iron-proxy-egress-seam.html does not match the sandbox-owned egress implementation:");
@@ -755,32 +781,29 @@ function readDocsTypeBlock(source, typeName) {
   return null;
 }
 
+// Both registry readers normalize first and then match, rather than scanning
+// line by line: the entries are ordinary object literals, so the formatter is
+// free to keep one on a single line and wrap the next across several.
 function readGatewayRpcDefinitionsFromSource() {
-  const source = readFileSync(GATEWAY_RPC_INDEX, "utf8");
+  const source = normalizeSourceText(readFileSync(GATEWAY_RPC_INDEX, "utf8"));
   const entries = [];
-  let current;
-  for (const line of source.split(/\r?\n/)) {
-    const method = line.match(/method: "([^"]+)"/);
-    if (method) current = { method: method[1] };
-    if (!current) continue;
-
-    const scope = line.match(/requiredScope: "([^"]+)"/);
-    if (scope) current.scope = scope[1];
-
-    const errors = line.match(/errors: \[([^\]]+)\]/);
-    if (errors) current.errors = [...errors[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
-
-    if (current.method && current.scope && current.errors) {
-      entries.push(current);
-      current = undefined;
-    }
+  for (const chunk of source.split(/(?=method:")/).slice(1)) {
+    const method = chunk.match(/^method:"([^"]+)"/);
+    const scope = chunk.match(/requiredScope:"([^"]+)"/);
+    const errors = chunk.match(/errors:\[([^\]]+)\]/);
+    if (!method || !scope || !errors) continue;
+    entries.push({
+      method: method[1],
+      scope: scope[1],
+      errors: [...errors[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]),
+    });
   }
   return entries;
 }
 
 function readGatewayRpcErrorDefinitionsFromSource() {
-  const source = readFileSync(GATEWAY_RPC_INDEX, "utf8");
-  return [...source.matchAll(/^\s+([A-Za-z_]+): \{ version: SMITHERS_API_VERSION, code: "([^"]+)", httpStatus: (\d+),/gm)]
+  const source = normalizeSourceText(readFileSync(GATEWAY_RPC_INDEX, "utf8"));
+  return [...source.matchAll(/([A-Za-z_]+):\{version:SMITHERS_API_VERSION,code:"([^"]+)",httpStatus:(\d+)/g)]
     .map((match) => ({
       key: match[1],
       code: match[2],
@@ -825,7 +848,7 @@ function checkSandboxProviderDocsMatchPackages() {
     // Provider ids must never become SandboxRuntime enum values.
     required.push([overview, provider.id]);
   }
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
   if (missing.length) {
     failed = true;
     console.error("\n✗ Sandbox provider docs do not match the shipped provider packages:");
@@ -881,8 +904,8 @@ function checkRunStateDocsMatchCurrentEmission() {
     [EXAMPLES_TSCONFIG, "runState-types.ts"],
     [SMITHERS_TSCONFIG, "runState-types.ts"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ RunState docs overstate current RunStateChanged emission:");
@@ -941,8 +964,8 @@ function checkRunStateDocsMatchDerivationContract() {
     [runStateDoc, 'view.unhealthy;   // present iff state is "stale" | "orphaned" | "recovering"'],
     [runStateDoc, "view.unhealthy;   // present for stale/orphaned heartbeat expiry\n```"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ RunState docs must describe optional reason payloads:");
@@ -987,7 +1010,7 @@ function checkGatewayRpcReferenceDocsMatchRegistry() {
       expectedErrorSentence,
     ];
     for (const needle of required) {
-      if (!source.includes(needle)) {
+      if (!contains(source, needle)) {
         problems.push(`${displayPath(docPath)} missing ${needle}`);
       }
     }
@@ -1020,7 +1043,7 @@ function checkGatewayRpcErrorTableMatchesRegistry() {
     ...definitions.map((definition) => `${definition.code},${definition.httpStatus}`),
   ];
   for (const needle of required) {
-    if (!source.includes(needle)) {
+    if (!contains(source, needle)) {
       problems.push(`${displayPath(GATEWAY_INTEGRATION)} missing ${needle}`);
     }
   }
@@ -1066,8 +1089,8 @@ function checkGatewayLegacyErrorAliasDocsMatchStatusMap() {
   const forbidden = [
     [GATEWAY_INTEGRATION, "Some legacy DevTools aliases still surface older validation names"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ Gateway legacy error alias docs must match server status mappings:");
@@ -1136,7 +1159,7 @@ function checkGatewayAuthDocsMatchRuntimeDefaults() {
     [TYPES_REFERENCE, "allowedOrigins?: string[];     // default [] (no Origin allowlist)"],
     [TYPES_REFERENCE, 'defaultScopes?: string[];      // trusted-proxy: used when the scopes header is absent, else the request is rejected'],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
   if (missing.length) {
     failed = true;
     console.error("\n✗ Gateway auth docs must match runtime default claim, header, role, scope, and skew behavior:");
@@ -1172,8 +1195,8 @@ function checkGatewayGetRunDocsMatchResponseShape() {
     [join(root, "docs/guides/custom-workflow-ui.mdx"), "{ data: RunStateView, loading, error, refetch }"],
     [join(root, "docs/examples/workflow-ui-react.mdx"), "const runState = run.data as RunStateView | undefined;"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ Gateway getRun docs must describe the run record payload, not a bare RunStateView:");
@@ -1204,7 +1227,10 @@ function checkGatewayStreamDevToolsDocsMatchRuntimeShape() {
     [GATEWAY_RPC_TYPES, "export type StreamDevToolsRequest = {\n  runId: string;\n  afterSeq?: number;\n  fromSeq?: number;\n};"],
     [GATEWAY_RPC_INDEX, "requestSchema: objectSchema({ runId, afterSeq, fromSeq }, [\"runId\"]),"],
     [GATEWAY_RPC_INDEX, "exampleResponse: { streamId: \"stream_01\", runId: \"run_01\", fromSeq: 10, afterSeq: 10 },"],
-    [join(root, "packages/server/src/gateway.js"), "fromSeq: typeof fromSeq === \"number\" ? fromSeq : null,\n                        afterSeq: typeof fromSeq === \"number\" ? fromSeq : null,"],
+    // Both wire fields mirror `fromSeq`. Asserted as two single-line needles
+    // rather than one indentation-baked block so reformatting cannot break it.
+    [join(root, "packages/server/src/gateway.js"), "fromSeq: typeof fromSeq === \"number\" ? fromSeq : null,"],
+    [join(root, "packages/server/src/gateway.js"), "afterSeq: typeof fromSeq === \"number\" ? fromSeq : null,"],
     [join(root, "docs/rpc/stream-dev-tools.mdx"), "- Request: `{ runId, afterSeq?, fromSeq? }`"],
     [join(root, "docs/rpc/stream-dev-tools.mdx"), "- Response: `{ streamId, runId, fromSeq, afterSeq }`"],
     [join(root, "docs/rpc/stream-dev-tools.mdx"), "If both are provided, they must match."],
@@ -1215,8 +1241,8 @@ function checkGatewayStreamDevToolsDocsMatchRuntimeShape() {
     [join(root, "docs/rpc/stream-dev-tools.mdx"), "- Response: `{ streamId, runId, afterSeq }`"],
     [GATEWAY_INTEGRATION, "streamDevTools,runId/afterSeq?,{streamId/runId/afterSeq} + devtools.event frames,observability:read,websocket"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ streamDevTools docs must match the runtime fromSeq/afterSeq wire shape:");
@@ -1258,8 +1284,8 @@ function checkGatewayCancelRunDocsMatchRuntimeErrors() {
     [GATEWAY_RPC_INDEX, 'errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "Busy", "Internal"],'],
     [cancelRunDoc, "`RunNotFound`, `Busy`"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ cancelRun docs must match runtime RUN_NOT_ACTIVE behavior:");
@@ -1295,8 +1321,8 @@ function checkGatewaySubmitApprovalDocsMatchRuntimeErrors() {
     [GATEWAY_RPC_INDEX, 'errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "NodeNotFound", "AlreadyDecided", "Internal"],'],
     [submitApprovalDoc, "`NodeNotFound`, `AlreadyDecided`"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ submitApproval docs must match runtime approval validation errors:");
@@ -1342,8 +1368,8 @@ function checkHotReloadDocsMatchRuntimeDefaults() {
     [TYPES_REFERENCE, ".smithers/hmr/<runId>"],
     [HOT_RELOAD_GUIDE, "`outDir` (default `.smithers/hmr`)"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ hot reload docs must match runtime default output directory:");
@@ -1587,8 +1613,8 @@ function checkCreateSmithersPostgresDocsMatchFactory() {
       'Point it at managed Postgres with `{ provider: "postgres", connectionString }`, or at an in-process PGlite',
     ],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ createSmithersPostgres docs must match the factory and declaration:");
@@ -1644,7 +1670,7 @@ function checkCreateSmithersApiDocsMatchSourceType() {
     [TYPES_REFERENCE, "tables: Record<string, any>;"],
     [TYPES_REFERENCE, "outputs: Record<string, any>;"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
   const stale = forbidden.filter(([, needle]) => docsBlock.includes(needle));
   if (missing.length || stale.length) {
     failed = true;
@@ -1694,7 +1720,7 @@ function checkCreateExternalSmithersDocsMatchSourceTypes() {
     [TYPES_REFERENCE, "declare function createExternalSmithers"],
     [TYPES_REFERENCE, "): SmithersWorkflow<S> & { tables: Record<string, any>; cleanup: () => void };"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
   if (missing.length) {
     failed = true;
     console.error("\n✗ createExternalSmithers docs must match source types:");
@@ -1745,8 +1771,8 @@ function checkAgentAndCacheDocsMatchSourceTypes() {
     [TYPES_REFERENCE, "capabilities?: any;"],
     [TYPES_REFERENCE, "generate: (args: any) => Promise<any>;"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ AgentLike and CachePolicy docs must match source types:");
@@ -1799,8 +1825,8 @@ function checkAlertingDocsMatchRuntimeSurface() {
     [ALERTING_GUIDE, "In 0.16"],
     [ALERTING_GUIDE, "core engine does not run built-in alert evaluators"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ Alerting docs must match current alert policy types, runtime, and CLI surface:");
@@ -1914,11 +1940,11 @@ function checkReferenceDeploymentDocsMatchFiles() {
   const forbidden = [
     [REFERENCE_DEPLOYMENT_GUIDE, "the Gateway creates an empty store on startup"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
   for (const envName of missingEnvRows) {
     missing.push([REFERENCE_DEPLOYMENT_GUIDE, `Gateway Environment row for ${envName}`]);
   }
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ Reference deployment docs must match deploy/reference files:");
@@ -1965,8 +1991,8 @@ function checkSandboxDocsMatchProviderTypes() {
     [join(root, "docs/reference/types.mdx"), "executeChildWorkflow: (args: unknown) => Promise<unknown>;"],
     [join(root, "docs/reference/types.mdx"), "diffBundle?: unknown;"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ Sandbox docs must distinguish JSX provider typing from executeSandbox provider typing:");
@@ -2024,8 +2050,8 @@ function checkSandboxEgressDocsMatchRuntime() {
     [SANDBOX_COMPONENT_DOC, "Use a build from `main` or a release newer than `0.23.0`"],
     [TYPES_REFERENCE, "Added after 0.23.0"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ Sandbox egress docs must match the current runtime contract:");
@@ -2071,8 +2097,8 @@ function checkServeDocsMatchServerTypes() {
     [join(root, "docs/reference/types.mdx"), "adapter: any;"],
     [join(root, "docs/integrations/serve.mdx"), 'typically drizzle("./smithers.db")'],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ ServeOptions docs and facade declarations must match server types:");
@@ -2141,8 +2167,8 @@ function checkHttpServerDocsMatchRuntimeSurface() {
     [SERVER_INTEGRATION, 'createSmithers, bash } from "smithers-orchestrator"'],
     [SERVER_INTEGRATION, "await bash(`echo ${ctx.input.msg}`)"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ HTTP server docs must match runtime routes and error codes:");
@@ -2198,8 +2224,8 @@ function checkComponentPropsDocsMatchSourceTypes() {
     [join(root, "docs/components/approval.mdx"), "smithersContext"],
     [join(root, "docs/components/drift-detector.mdx"), "poll?: { intervalMs: number; maxPolls?: number };"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ Component prop docs must match source prop declarations:");
@@ -2250,8 +2276,8 @@ function checkSubflowDocsMatchChildRunOutputContract() {
     // The bare pre-contract comment must not come back.
     [subflowPropsSource, "/** Where to store the subflow's result. */"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ Subflow docs must state the childRun last-task output contract:");
@@ -2493,8 +2519,8 @@ function checkPiPluginDocsMatchPackageRuntime() {
   const forbidden = [
     [PI_INTEGRATION, "any Node process"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ PI plugin docs must match the TypeScript-source package runtime:");
@@ -2605,8 +2631,8 @@ function checkVcsHelperDocsMatchCurrentExports() {
     [VCS_INDEX_SOURCE, 'export * from "./WorkspaceSnapshot.js";'],
     [VCS_DECLARATIONS, "export { type VcsToolingStatus, findVcsRoot, getJjPointer"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (
     runtimeImport.status !== 0 ||
     missing.length ||
@@ -2695,8 +2721,8 @@ function checkTimeTravelDocsMatchCurrentExports() {
   const forbidden = [
     [RECIPES_DOC, "jj change ID (or git SHA)"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (runtimeImport.status !== 0 || missingRuntimeExports.length || missing.length || stale.length) {
     failed = true;
     console.error("\n✗ Revert/time-travel docs and declarations must match public exports:");
@@ -2788,8 +2814,8 @@ function checkWatchAndSteerDocsMatchCurrentUiSurface() {
     [WATCH_AND_STEER_GUIDE, "/images/studio-2/"],
     [WATCH_AND_STEER_GUIDE, "/images/0.23.0/smithers-pwa.png"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ watch-and-steer docs must match the current workflow UI surface:");
@@ -3146,8 +3172,8 @@ function checkMemoryDocsMatchSourceTypes() {
     [TYPES_REFERENCE, "type MemoryLayerConfig = { db: unknown };"],
     [MEMORY_CONCEPTS, 'createMemoryStore(new Database("smithers.db"))'],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ Memory docs must match exported memory package types:");
@@ -3218,8 +3244,8 @@ function checkScorerDocsMatchSourceTypes() {
     [RECIPES_DOC, "prompt: \"Rate the analysis quality 0-1\""],
     [RECIPES_DOC, 'sampling: { kind: "ratio", ratio: 0.1 },'],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ Scorer docs must match current scorer package types:");
@@ -3292,8 +3318,8 @@ function checkOpenApiDocsMatchCurrentPackage() {
     [OPENAPI_LOAD_SPEC_SYNC_SOURCE, 'startsWith("https://")'],
     [TYPES_REFERENCE, "type OpenApiSpec = Record<string, unknown>;"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ OpenAPI docs must match current package behavior and declarations:");
@@ -3337,8 +3363,8 @@ function checkMcpIntegrationDocsMatchAgentOptions() {
     [MCP_INTEGRATION_EXAMPLE_README, "they take an `.mcp.json` config file via\nflags like `--mcp-config`"],
     [CODEX_AGENT_OPTIONS_SOURCE, "mcpConfig"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ MCP integration docs must match current CLI-agent MCP option surfaces:");
@@ -3446,8 +3472,8 @@ function checkMcpToolsetDocsMatchPackageSurface() {
     [MCP_TOOLSET_INTEGRATION, "does not need `close()`"],
     [MCP_TOOLSET_INTEGRATION, "CLI agents consume MCP through `createMcpToolset`"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   const problems = [];
 
   try {
@@ -3519,7 +3545,7 @@ function checkMcpSemanticDocsMatchSchemas() {
   }
   const missingFromSource = required.filter(([file, needle]) => {
     const source = file === MCP_SEMANTIC_TOOLS_SOURCE ? semanticTools : nodeDetailSource;
-    return !source.includes(needle);
+    return !contains(source, needle);
   });
   if (missingFromSource.length || stale.length || problems.length) {
     failed = true;
@@ -3597,8 +3623,8 @@ function checkSdkAgentDocsMatchSourceTypes() {
     [SDK_AGENTS_INTEGRATION, "in that form, `apiKey: \"none\"` belongs in the `createOpenAI` config"],
     [RECIPES_DOC, "new AnthropicAgent({ model, system:"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ SDK agent docs must match current public option types and constructor behavior:");
@@ -3661,8 +3687,8 @@ function checkCliAgentDocsMatchCurrentModelDefaults() {
     [CLI_AGENTS_INTEGRATION, "VibeAgent,vibe,mistral-large-latest,"],
     [CLI_AGENTS_INTEGRATION, "OpenCodeAgent,opencode,provider/model string,"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ CLI agent docs must not claim Smithers-owned model defaults:");
@@ -3706,8 +3732,8 @@ function checkCliAgentHijackDocsMatchLauncher() {
     [CLI_AGENTS_INTEGRATION, "| `VibeAgent` | `vibe --resume` |"],
     [CLI_AGENTS_INTEGRATION, "| `OpenCodeAgent` | `opencode --session` |"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ CLI agent hijack docs must match the native launcher:");
@@ -3786,8 +3812,8 @@ function checkCliAgentOptionDocsMatchSourceTypes() {
     [TYPES_REFERENCE, "type VibeAgentOptions = Record<string, unknown>;"],
     [TYPES_REFERENCE, "type OpenCodeAgentOptions = Record<string, unknown>;"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ CLI agent option docs must match source option types:");
@@ -3958,25 +3984,7 @@ function checkGatewaySdkDocsMatchExports() {
     [CUSTOM_WORKFLOW_UI_GUIDE, "re-subscribe with the last `afterSeq`."],
     [
       CUSTOM_WORKFLOW_UI_GUIDE,
-    ],
-    [
-      CUSTOM_WORKFLOW_UI_GUIDE,
-    ],
-    [
-      CUSTOM_WORKFLOW_UI_GUIDE,
       'In `mode: "token"` or `mode: "jwt"`, the Gateway reads the bearer credential and ignores trusted-proxy identity headers',
-    ],
-    [
-      CUSTOM_WORKFLOW_UI_GUIDE,
-    ],
-    [
-      CUSTOM_WORKFLOW_UI_GUIDE,
-    ],
-    [
-      CUSTOM_WORKFLOW_UI_GUIDE,
-    ],
-    [
-      CUSTOM_WORKFLOW_UI_GUIDE,
     ],
   ];
   const forbidden = [
@@ -4025,8 +4033,8 @@ function checkGatewaySdkDocsMatchExports() {
     [CUSTOM_UI_INTEGRATION, 'useGatewayRuns({ status: "running" })'],
     [CUSTOM_WORKFLOW_UI_GUIDE, "refetches as the seq advances"],
   ];
-  const missing = required.filter(([file, needle]) => !files.get(file)?.includes(needle));
-  const stale = forbidden.filter(([file, needle]) => files.get(file)?.includes(needle));
+  const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
+  const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (missing.length || stale.length) {
     failed = true;
     console.error("\n✗ Gateway SDK docs must cover current gateway-client and gateway-react exports:");
