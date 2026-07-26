@@ -72,7 +72,7 @@ export function FoundationAndBudget({ ctx, c }: { ctx: any; c: FerricConfig }) {
           synchronous and cannot probe the network, so selection reads this
           task's file; without it the fleet ordering is whatever was true when
           the snapshot was last written. */}
-      <RefreshAccountUsage />
+      <RefreshAccountUsage output={outputs.frcAccounts} />
       <Task id="foundation" output={outputs.frcFoundation} retries={0}>
         {async () => {
           const problems: string[] = [];

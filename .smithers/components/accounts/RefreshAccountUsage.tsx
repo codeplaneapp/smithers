@@ -23,9 +23,20 @@ export const accountUsageSchema = z.object({
   summary: z.string().min(2),
 });
 
-export function RefreshAccountUsage({ id = "accounts:refresh" }: { id?: string }) {
+/**
+ * `output` is a prop because output schemas must be registered with the host
+ * workflow's `createSmithers()` call — a component cannot invent its own table.
+ * Register `accountUsageSchema` under any key and pass `outputs.<key>` here.
+ */
+export function RefreshAccountUsage({
+  id = "accounts:refresh",
+  output,
+}: {
+  id?: string;
+  output: unknown;
+}) {
   return (
-    <Task id={id} output={accountUsageSchema} retries={1}>
+    <Task id={id} output={output as any} retries={1}>
       {async () => {
         const { listAccounts } = await import("@smithers-orchestrator/accounts");
         const { getAccountUsage } = await import("@smithers-orchestrator/usage");
