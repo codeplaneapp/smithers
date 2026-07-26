@@ -45,8 +45,7 @@ export function Slice(props: { ctx: any; c: FerricConfig; slice: SliceDef }) {
   const codexReviewer = codexReviewerSeatsFor(sid, escalated);
   const claudeReviewer = opusSeatsFor(sid);
 
-  const converged =
-    verify?.ok === true && revClaude?.approved === true && revCodex?.approved === true;
+  const converged = verify?.ok === true && revClaude?.approved === true && revCodex?.approved === true;
 
   const lanePath = `${LANE_ROOT}/${sid}`;
   const diffCommand = `jj diff --from "fork_point(main | ferric/${sid})" --to ferric/${sid}`;
@@ -63,12 +62,7 @@ export function Slice(props: { ctx: any; c: FerricConfig; slice: SliceDef }) {
       <Worktree id={`${sid}:wt`} path={lanePath} branch={`ferric/${sid}`} baseBranch="main">
         <Loop id={`${sid}:loop`} until={converged} maxIterations={4} onMaxReached="return-last">
           <Sequence>
-            <Task
-              id={`${sid}:implement`}
-              output={outputs.frcSlice}
-              agent={implementAgent}
-              timeoutMs={7_200_000}
-            >
+            <Task id={`${sid}:implement`} output={outputs.frcSlice} agent={implementAgent} timeoutMs={7_200_000}>
               <SliceImplementPrompt
                 sliceId={sid}
                 kind={slice.kind}
@@ -119,10 +113,7 @@ export function Slice(props: { ctx: any; c: FerricConfig; slice: SliceDef }) {
                 const reasons: string[] = [];
                 const diffRange = `fork_point(main | ferric/${sid})`;
 
-                const diff = await sh(
-                  ["jj", "diff", "--from", diffRange, "--to", `ferric/${sid}`, "--stat"],
-                  lane,
-                );
+                const diff = await sh(["jj", "diff", "--from", diffRange, "--to", `ferric/${sid}`, "--stat"], lane);
                 if (!diff.ok || diff.out.trim().length === 0) {
                   reasons.push("lane has no committed diff vs its fork point");
                 }
@@ -135,14 +126,22 @@ export function Slice(props: { ctx: any; c: FerricConfig; slice: SliceDef }) {
                 );
 
                 const stubs = await sh(
-                  ["bash", "-lc", `jj diff --from "${diffRange}" --to ferric/${sid} | grep -nE "todo!\\(|unimplemented!\\(" | head -20 || true`],
+                  [
+                    "bash",
+                    "-lc",
+                    `jj diff --from "${diffRange}" --to ferric/${sid} | grep -nE "todo!\\(|unimplemented!\\(" | head -20 || true`,
+                  ],
                   lane,
                 );
                 if (stubs.out.trim()) reasons.push(`stub markers in diff:\n${stubs.out}`);
 
                 // unsafe is permitted only inside the ABI crate (ownership mandate §1).
                 const unsafeGrep = await sh(
-                  ["bash", "-lc", `jj diff --from "${diffRange}" --to ferric/${sid} -- 'glob:**/*.rs' 'glob:!crates/ferric-abi/**' | grep -nE "^\\+.*\\bunsafe\\b" | head -20 || true`],
+                  [
+                    "bash",
+                    "-lc",
+                    `jj diff --from "${diffRange}" --to ferric/${sid} -- 'glob:**/*.rs' 'glob:!crates/ferric-abi/**' | grep -nE "^\\+.*\\bunsafe\\b" | head -20 || true`,
+                  ],
                   lane,
                 );
                 if (unsafeGrep.out.trim()) {
@@ -167,7 +166,13 @@ export function Slice(props: { ctx: any; c: FerricConfig; slice: SliceDef }) {
                 // D3, mechanically: no engine function recurses on tree/element/child
                 // depth. Engine crates only — diff-ffi test tooling is exempt by path.
                 const recursion = await sh(
-                  ["bash", "scripts/ferric/tree-recursion-lint.sh", "crates/ferric-engine", "crates/ferric-lane", "crates/ferric-fiber"],
+                  [
+                    "bash",
+                    "scripts/ferric/tree-recursion-lint.sh",
+                    "crates/ferric-engine",
+                    "crates/ferric-lane",
+                    "crates/ferric-fiber",
+                  ],
                   lane,
                 );
                 assertNotInfra(recursion, "tree-recursion-lint");
@@ -178,7 +183,11 @@ export function Slice(props: { ctx: any; c: FerricConfig; slice: SliceDef }) {
                 // FFI differential tier (test-only feature; slices that declare a
                 // differential target must be byte-identical to the pinned JS reference).
                 const hasDiffTarget = await sh(
-                  ["bash", "-lc", `jj diff --from "${diffRange}" --to ferric/${sid} --name-only | grep -q "diff-ffi" && echo yes || true`],
+                  [
+                    "bash",
+                    "-lc",
+                    `jj diff --from "${diffRange}" --to ferric/${sid} --name-only | grep -q "diff-ffi" && echo yes || true`,
+                  ],
                   lane,
                 );
                 if (hasDiffTarget.out.trim() === "yes") {
@@ -192,14 +201,15 @@ export function Slice(props: { ctx: any; c: FerricConfig; slice: SliceDef }) {
 
                 // Per-slice DEV-warning parity (only for slices touching warnings.rs).
                 const touchesWarnings = await sh(
-                  ["bash", "-lc", `jj diff --from "${diffRange}" --to ferric/${sid} --name-only | grep -q "warnings.rs" && echo yes || true`],
+                  [
+                    "bash",
+                    "-lc",
+                    `jj diff --from "${diffRange}" --to ferric/${sid} --name-only | grep -q "warnings.rs" && echo yes || true`,
+                  ],
                   lane,
                 );
                 if (touchesWarnings.out.trim() === "yes") {
-                  const parity = await sh(
-                    ["bash", "scripts/ferric/warnings-parity.sh", sid],
-                    lane,
-                  );
+                  const parity = await sh(["bash", "scripts/ferric/warnings-parity.sh", sid], lane);
                   assertNotInfra(parity, "warnings-parity");
                   if (!parity.ok) reasons.push(`warning parity check failed:\n${parity.err.slice(-2000)}`);
                 }

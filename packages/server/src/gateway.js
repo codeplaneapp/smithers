@@ -8515,10 +8515,7 @@ a { color: var(--brand); }</style>
         if (typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < 0) {
           return responseError(frame.id, "INVALID_REQUEST", "offset must be a non-negative integer");
         }
-        return responseOk(
-          frame.id,
-          await this.listRunsAcrossWorkflows(limit, status, workflow, offset, includeSystem),
-        );
+        return responseOk(frame.id, await this.listRunsAcrossWorkflows(limit, status, workflow, offset, includeSystem));
       }
       case "getSchemaSignature": {
         const firstEntry = this.workflows.values().next().value;

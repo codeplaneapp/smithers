@@ -25,10 +25,7 @@ export type ShellResult = {
 
 export async function sh(cmd: string[], cwd?: string): Promise<ShellResult> {
   const proc = Bun.spawn(cmd, { cwd, stdout: "pipe", stderr: "pipe" });
-  const [out, err] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
+  const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
   const code = await proc.exited;
   return { code, ok: code === 0, out: out.slice(-8000), err: err.slice(-8000) };
 }
@@ -40,15 +37,9 @@ export async function sh(cmd: string[], cwd?: string): Promise<ShellResult> {
  */
 export function assertNotInfra(r: ShellResult, what: string): void {
   const text = `${r.out}\n${r.err}`;
-  if (
-    [124, 137, 143].includes(r.code) ||
-    /out of memory|OOM|Killed: 9|ETIMEDOUT/i.test(text)
-  ) {
-    throw new Error(
-      `INFRA_RETRY(${what}): exit ${r.code} — retrying with headroom, not a red`,
-    );
+  if ([124, 137, 143].includes(r.code) || /out of memory|OOM|Killed: 9|ETIMEDOUT/i.test(text)) {
+    throw new Error(`INFRA_RETRY(${what}): exit ${r.code} — retrying with headroom, not a red`);
   }
 }
 
-export const sha256 = (text: string) =>
-  new Bun.CryptoHasher("sha256").update(text).digest("hex");
+export const sha256 = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex");

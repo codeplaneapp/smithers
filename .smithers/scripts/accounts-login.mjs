@@ -49,8 +49,7 @@ const ACCOUNTS_ROOT = join(homedir(), ".smithers", "accounts");
  */
 const noApiKey = { ANTHROPIC_API_KEY: "" };
 
-const run = (cmd, cmdArgs, env) =>
-  spawnSync(cmd, cmdArgs, { encoding: "utf8", env: { ...process.env, ...env } });
+const run = (cmd, cmdArgs, env) => spawnSync(cmd, cmdArgs, { encoding: "utf8", env: { ...process.env, ...env } });
 
 const PROVIDERS = {
   "claude-code": {
@@ -121,14 +120,11 @@ function report() {
   console.log(`\nAccount fleet — ${CLAUDE_N} claude + ${CODEX_N} codex\n`);
   for (const p of plan) {
     const who = p.identity ? `${p.identity}${p.detail ? ` (${p.detail})` : ""}` : "—";
-    console.log(
-      `  ${mark(p.loggedIn)} login  ${mark(p.registered)} registered  ${p.label.padEnd(14)} ${who}`,
-    );
+    console.log(`  ${mark(p.loggedIn)} login  ${mark(p.registered)} registered  ${p.label.padEnd(14)} ${who}`);
   }
   const inCount = plan.filter((p) => p.loggedIn).length;
   console.log(
-    `\n${inCount}/${plan.length} logged in, ` +
-      `${plan.filter((p) => p.registered).length}/${plan.length} registered.`,
+    `\n${inCount}/${plan.length} logged in, ` + `${plan.filter((p) => p.registered).length}/${plan.length} registered.`,
   );
 
   // A fleet of eight seats all pointing at one subscription has one quota and
@@ -177,9 +173,7 @@ for (const p of missing) {
   }
   const after = p.spec.status(p.dir);
   Object.assign(p, after);
-  console.log(
-    p.loggedIn ? `   ✓ signed in as ${p.identity ?? "(unknown)"}` : "   · still not signed in",
-  );
+  console.log(p.loggedIn ? `   ✓ signed in as ${p.identity ?? "(unknown)"}` : "   · still not signed in");
 }
 
 for (const p of plan) {

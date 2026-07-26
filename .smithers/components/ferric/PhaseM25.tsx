@@ -20,8 +20,7 @@ const M25_SLICES: SliceDef[] = [
       "spike/commit",
       "FerricSpikeHostConfig",
     ],
-    gate:
-      "scripts/ferric/oracle.sh --leg m25-vertical-spike; exact PASSING=4/4, TEST_FILES=1/1, REACT_RUST_ASSERT_BACKEND=1",
+    gate: "scripts/ferric/oracle.sh --leg m25-vertical-spike; exact PASSING=4/4, TEST_FILES=1/1, REACT_RUST_ASSERT_BACKEND=1",
   },
 ];
 
@@ -36,10 +35,7 @@ export function PhaseM25({ ctx, c }: { ctx: any; c: FerricConfig }) {
   });
   const decision = gateRow(ctx, "gate-m25-exit");
   const exactGreen =
-    suite?.green === true &&
-    suite.passingCount === 4 &&
-    suite.totalCount === 4 &&
-    suite.xfailBucketC === 0;
+    suite?.green === true && suite.passingCount === 4 && suite.totalCount === 4 && suite.xfailBucketC === 0;
 
   return (
     <Sequence label="M2.5 — first element-to-DOM Rust vertical">
@@ -80,11 +76,7 @@ export function PhaseM25({ ctx, c }: { ctx: any; c: FerricConfig }) {
           }}
         />
       ) : decision?.approved === false ? (
-        <Closeout
-          ctx={ctx}
-          c={c}
-          reason="M2.5 exit denied after the first end-to-end Rust DOM vertical passed."
-        />
+        <Closeout ctx={ctx} c={c} reason="M2.5 exit denied after the first end-to-end Rust DOM vertical passed." />
       ) : null}
     </Sequence>
   );

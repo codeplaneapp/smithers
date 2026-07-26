@@ -828,7 +828,9 @@ describe("Gateway RPC contract", () => {
       {
         method: "listRuns",
         request: { filter: { status: "finished", limit: 10, includeSystem: true } } satisfies ListRunsRequest,
-        response: [{ runId: "r1", workflowKey: "deploy", status: "finished", system: false }] satisfies ListRunsResponse,
+        response: [
+          { runId: "r1", workflowKey: "deploy", status: "finished", system: false },
+        ] satisfies ListRunsResponse,
       },
       {
         method: "getSchemaSignature",
@@ -838,7 +840,9 @@ describe("Gateway RPC contract", () => {
       {
         method: "listWorkflows",
         request: { filter: { hasUi: true } } satisfies ListWorkflowsRequest,
-        response: [{ key: "deploy", hasUi: true, uiPath: "/workflows/deploy", system: false }] satisfies ListWorkflowsResponse,
+        response: [
+          { key: "deploy", hasUi: true, uiPath: "/workflows/deploy", system: false },
+        ] satisfies ListWorkflowsResponse,
       },
       {
         method: "listApprovals",

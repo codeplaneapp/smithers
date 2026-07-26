@@ -22,12 +22,88 @@ import type { FerricConfig, SliceDef } from "./ferricConfig";
  * regenerated queue rewrite the contract without a code review.
  */
 const COHORTS: Array<[string, string[]]> = [
-  ["00", ["ReactFiberCacheComponent", "ReactFiberTreeContext", "ReactFiberStack", "ReactFiberLegacyContext", "ReactEventPriorities", "getComponentNameFromFiber", "ReactFiberComponentStack", "ReactCurrentFiber", "ReactCapturedValue", "ReactFiberActivityComponent"]],
-  ["01", ["ReactStrictModeWarnings", "ReactFiberErrorLogger", "ReactFiberHydrationDiffs", "ReactFiberDuplicateViewTransitions", "ReactFiberAct", "ReactFiberDevToolsHook", "ReactFiberLane", "ReactFiberSuspenseComponent", "ReactFiberOffscreenComponent", "ReactFiberTreeReflection"]],
-  ["02", ["ReactFiberTransitionTypes", "ReactFiberPerformanceTrack", "ReactFiberScope", "ReactProfilerTimer", "ReactFiberAsyncAction", "ReactFiberTracingMarkerComponent", "ReactFiberThenable", "ReactInternalTypes", "ReactFiberViewTransitionComponent", "ReactFiberRootScheduler"]],
-  ["03", ["ReactFiberHostContext", "ReactFiberNewContext", "ReactFiberAsyncDispatcher", "ReactFiber", "ReactFiberHydrationContext", "ReactFiberRoot", "ReactFiberShellHydration", "ReactFiberSuspenseContext", "ReactFiberHiddenContext", "ReactFiberGestureScheduler"]],
-  ["04", ["ReactFiberTransition", "ReactFiberUnwindWork", "ReactChildFiber", "ReactFiberCommitViewTransitions", "ReactFiberCompleteWork"]],
-  ["05", ["ReactFiberCommitHostEffects", "ReactFiberClassUpdateQueue", "ReactFiberClassComponent", "ReactFiberConcurrentUpdates", "ReactFiberHotReloading", "ReactFiberCallUserSpace", "ReactFiberThrow"]],
+  [
+    "00",
+    [
+      "ReactFiberCacheComponent",
+      "ReactFiberTreeContext",
+      "ReactFiberStack",
+      "ReactFiberLegacyContext",
+      "ReactEventPriorities",
+      "getComponentNameFromFiber",
+      "ReactFiberComponentStack",
+      "ReactCurrentFiber",
+      "ReactCapturedValue",
+      "ReactFiberActivityComponent",
+    ],
+  ],
+  [
+    "01",
+    [
+      "ReactStrictModeWarnings",
+      "ReactFiberErrorLogger",
+      "ReactFiberHydrationDiffs",
+      "ReactFiberDuplicateViewTransitions",
+      "ReactFiberAct",
+      "ReactFiberDevToolsHook",
+      "ReactFiberLane",
+      "ReactFiberSuspenseComponent",
+      "ReactFiberOffscreenComponent",
+      "ReactFiberTreeReflection",
+    ],
+  ],
+  [
+    "02",
+    [
+      "ReactFiberTransitionTypes",
+      "ReactFiberPerformanceTrack",
+      "ReactFiberScope",
+      "ReactProfilerTimer",
+      "ReactFiberAsyncAction",
+      "ReactFiberTracingMarkerComponent",
+      "ReactFiberThenable",
+      "ReactInternalTypes",
+      "ReactFiberViewTransitionComponent",
+      "ReactFiberRootScheduler",
+    ],
+  ],
+  [
+    "03",
+    [
+      "ReactFiberHostContext",
+      "ReactFiberNewContext",
+      "ReactFiberAsyncDispatcher",
+      "ReactFiber",
+      "ReactFiberHydrationContext",
+      "ReactFiberRoot",
+      "ReactFiberShellHydration",
+      "ReactFiberSuspenseContext",
+      "ReactFiberHiddenContext",
+      "ReactFiberGestureScheduler",
+    ],
+  ],
+  [
+    "04",
+    [
+      "ReactFiberTransition",
+      "ReactFiberUnwindWork",
+      "ReactChildFiber",
+      "ReactFiberCommitViewTransitions",
+      "ReactFiberCompleteWork",
+    ],
+  ],
+  [
+    "05",
+    [
+      "ReactFiberCommitHostEffects",
+      "ReactFiberClassUpdateQueue",
+      "ReactFiberClassComponent",
+      "ReactFiberConcurrentUpdates",
+      "ReactFiberHotReloading",
+      "ReactFiberCallUserSpace",
+      "ReactFiberThrow",
+    ],
+  ],
   ["06", ["ReactFiberHooks", "ReactFiberReconciler"]],
   ["07", ["ReactFiberBeginWork", "ReactFiberCommitEffects"]],
   ["08", ["ReactFiberCommitWork"]],
@@ -47,8 +123,7 @@ const MAX_COHORT_MODULES = 10;
 /** The gate the old component stamped on every cohort. Never acceptable. */
 const BLANKET_GATE = "noop-host reconciler suites (76 files / 1,039 cases)";
 
-const TEST_DIR = (reactRepo: string) =>
-  join(reactRepo, "packages", "react-reconciler", "src", "__tests__");
+const TEST_DIR = (reactRepo: string) => join(reactRepo, "packages", "react-reconciler", "src", "__tests__");
 
 /** Parse the gating_tests column: `File-test.js(N),...` -> [{file, cases}]. */
 const parseGating = (raw: string): Array<{ file: string; cases: number }> =>
@@ -117,8 +192,7 @@ export function QueueParse({ c }: { c: FerricConfig }) {
 
         // Intra-SCC reverse adjacency, for gate inheritance.
         const dependents = new Map(sccRows.map((r) => [r.module, [] as string[]]));
-        for (const r of sccRows)
-          for (const d of r.deps) if (sccSet.has(d)) dependents.get(d)!.push(r.module);
+        for (const r of sccRows) for (const d of r.deps) if (sccSet.has(d)) dependents.get(d)!.push(r.module);
 
         /**
          * A module's gate tests: its own gating_tests, else the top-4 (by
@@ -154,7 +228,9 @@ export function QueueParse({ c }: { c: FerricConfig }) {
         const cohorts: SliceDef[] = COHORTS.map(([suffix, mods]) => {
           if (mods.length === 0) fail(`cohort m4-cohort-${suffix} is empty`);
           if (mods.length > MAX_COHORT_MODULES) {
-            fail(`cohort m4-cohort-${suffix} has ${mods.length} modules, over MAX_COHORT_MODULES=${MAX_COHORT_MODULES}`);
+            fail(
+              `cohort m4-cohort-${suffix} has ${mods.length} modules, over MAX_COHORT_MODULES=${MAX_COHORT_MODULES}`,
+            );
           }
           let loc = 0;
           const gatePool = new Map<string, number>();
@@ -163,8 +239,7 @@ export function QueueParse({ c }: { c: FerricConfig }) {
             if (!row) fail(`cohort m4-cohort-${suffix} names "${m}", which is not an SCC row in the queue`);
             assignedCount.set(m, (assignedCount.get(m) ?? 0) + 1);
             loc += row.loc;
-            for (const t of effectiveTests(m))
-              gatePool.set(t.file, Math.max(gatePool.get(t.file) ?? 0, t.cases));
+            for (const t of effectiveTests(m)) gatePool.set(t.file, Math.max(gatePool.get(t.file) ?? 0, t.cases));
           }
           if (loc > MAX_COHORT_LOC) {
             fail(`cohort m4-cohort-${suffix} is ${loc} LOC, over MAX_COHORT_LOC=${MAX_COHORT_LOC}`);
@@ -181,7 +256,9 @@ export function QueueParse({ c }: { c: FerricConfig }) {
           }
           for (const file of gatePool.keys()) {
             if (!existsSync(join(testDir, file))) {
-              fail(`cohort m4-cohort-${suffix} gate lists ${file}, missing from ${testDir} in the pinned react checkout`);
+              fail(
+                `cohort m4-cohort-${suffix} gate lists ${file}, missing from ${testDir} in the pinned react checkout`,
+              );
             }
           }
           return { id: `m4-cohort-${suffix}`, kind: "cohort" as const, modules: mods, gate };

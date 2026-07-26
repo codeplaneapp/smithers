@@ -63,7 +63,11 @@ export function PhaseM8({ ctx, c }: { ctx: any; c: FerricConfig }) {
               />
             </Sequence>
           ) : rc?.approved === false ? (
-            <Closeout ctx={ctx} c={c} reason="RC gate denied: the release-candidate evidence did not satisfy the operator." />
+            <Closeout
+              ctx={ctx}
+              c={c}
+              reason="RC gate denied: the release-candidate evidence did not satisfy the operator."
+            />
           ) : null}
         </Sequence>
       ) : null}

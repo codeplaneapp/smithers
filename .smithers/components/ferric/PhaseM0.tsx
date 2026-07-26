@@ -28,9 +28,7 @@ export function PhaseM0({ ctx, c }: { ctx: any; c: FerricConfig }) {
   const oracle = ctx.latest(outputs.frcOracle, "m0:oracle-verify");
   const oracleRounds = ctx.iterationCount(outputs.frcOracle, "m0:oracle-verify");
   const docsOk = DOCS.every((d) =>
-    ctx.outputs.frcDocReview.some(
-      (r: any) => r.doc === d && (r.approved === true || r.approved === 1),
-    ),
+    ctx.outputs.frcDocReview.some((r: any) => r.doc === d && (r.approved === true || r.approved === 1)),
   );
   const docRounds = ctx.iterationCount(outputs.frcDocReview, "m0:docreview-BRIDGE.md");
   const poc = ctx.latest(outputs.frcPoc, "m0:poc");
@@ -62,12 +60,7 @@ export function PhaseM0({ ctx, c }: { ctx: any; c: FerricConfig }) {
 
       <Loop id="m0:oracle-loop" until={oracle?.ok === true} maxIterations={3} onMaxReached="return-last">
         <Sequence>
-          <Task
-            id="m0:oracle-build"
-            output={outputs.frcSlice}
-            agent={[terra, sol]}
-            timeoutMs={10_800_000}
-          >
+          <Task id="m0:oracle-build" output={outputs.frcSlice} agent={[terra, sol]} timeoutMs={10_800_000}>
             <M0OracleBuildPrompt
               repo={c.repo}
               reactRepo={c.reactRepo}
@@ -170,11 +163,13 @@ export function PhaseM0({ ctx, c }: { ctx: any; c: FerricConfig }) {
             summary={`Oracle: ${oracle.passingCount}/${oracle.totalCount} on unmodified React (manifest ${String(oracle.manifestSha256).slice(0, 12)}…). POC ratio ${(poc.ratioX1000 / 1000).toFixed(2)}x after ${poc.protocolRevisions} revision(s); ABI: ${poc.abiChoice}; withinKillGate=${poc.withinKillGate}. Bridge docs adversarially approved; bench contract frozen; canaries in frcCanary rows. M0 measurements replace every spec estimate marked "measured at M0".`}
           />
           {gateRow(ctx, "gate-m0-exit")?.approved ? (
-            <ContinueAsNew
-              state={{ milestone: "M1", spentCents: c.spentCents, lineage: [...c.lineage, ctx.runId] }}
-            />
+            <ContinueAsNew state={{ milestone: "M1", spentCents: c.spentCents, lineage: [...c.lineage, ctx.runId] }} />
           ) : gateRow(ctx, "gate-m0-exit")?.approved === false ? (
-            <Closeout ctx={ctx} c={c} reason="M0 exit gate denied: the operator declined to proceed past the boundary-POC decision." />
+            <Closeout
+              ctx={ctx}
+              c={c}
+              reason="M0 exit gate denied: the operator declined to proceed past the boundary-POC decision."
+            />
           ) : null}
         </Sequence>
       ) : blocked ? (

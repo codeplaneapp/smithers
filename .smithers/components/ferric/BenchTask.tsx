@@ -9,12 +9,7 @@ import { assertNotInfra, sh } from "./ferricShell";
  * workload (client update ops cap at 1.10x; SSR has a 0.95x floor). A missing
  * ratio is -1, which fails every predicate rather than defaulting to success.
  */
-export function BenchTask(props: {
-  id: string;
-  bench: string;
-  pass: (ratioX1000: number) => boolean;
-  repo: string;
-}) {
+export function BenchTask(props: { id: string; bench: string; pass: (ratioX1000: number) => boolean; repo: string }) {
   return (
     <Task id={props.id} output={outputs.frcBench} retries={2}>
       {async () => {

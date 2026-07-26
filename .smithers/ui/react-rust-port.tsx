@@ -40,11 +40,7 @@ function MilestoneRail({ runId }: { runId?: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
       {MILESTONES.map((mName, idx) => (
-        <StatusPill
-          key={mName}
-          status={idx < cur ? "finished" : idx === cur ? "running" : "pending"}
-          label={mName}
-        />
+        <StatusPill key={mName} status={idx < cur ? "finished" : idx === cur ? "running" : "pending"} label={mName} />
       ))}
       <span style={{ flex: 1 }} />
       <StatusPill status={status} label={`run ${status}`} />
@@ -62,7 +58,11 @@ function CampaignKpis({ runId }: { runId?: string }) {
     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
       <KpiStat label="Milestone" value={String(input.milestone ?? cont.milestone ?? "M0")} />
       <KpiStat label="Lineage runs" value={String(lineage.length + 1)} hint="ContinueAsNew chain" />
-      <KpiStat label="Attested spend" value={`$${(spentCents / 100).toFixed(0)}`} hint="operator-attested; caps $200k pre-M8 / $250k" />
+      <KpiStat
+        label="Attested spend"
+        value={`$${(spentCents / 100).toFixed(0)}`}
+        hint="operator-attested; caps $200k pre-M8 / $250k"
+      />
     </div>
   );
 }
@@ -99,11 +99,7 @@ function App() {
               setNodeId(undefined);
             }}
           />
-          <RunTree
-            runId={runId}
-            activeNodeId={nodeId}
-            onSelectNode={(node: { id: string }) => setNodeId(node.id)}
-          />
+          <RunTree runId={runId} activeNodeId={nodeId} onSelectNode={(node: { id: string }) => setNodeId(node.id)} />
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {nodeId ? (
               <NodeOutputView runId={runId} nodeId={nodeId} />
@@ -113,12 +109,7 @@ function App() {
                 description="Pick a node in the tree or event log to see its output and live agent chat."
               />
             )}
-            <RunEventLog
-              runId={runId}
-              style={{ height: 260 }}
-              selectedNodeId={nodeId}
-              onSelectNode={setNodeId}
-            />
+            <RunEventLog runId={runId} style={{ height: 260 }} selectedNodeId={nodeId} onSelectNode={setNodeId} />
             {/* Live-feedback rule: every surfaced agent node gets a live chat. */}
             {nodeId ? <NodeChatStream runId={runId} nodeId={nodeId} /> : null}
           </div>

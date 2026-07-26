@@ -278,9 +278,9 @@ describe("SmithersDb adapter", () => {
       }),
     );
 
-    expect((await adapter.listRuns(1, undefined, undefined, { includeSystem: false })).map((run) => run.runId)).toEqual([
-      "public",
-    ]);
+    expect((await adapter.listRuns(1, undefined, undefined, { includeSystem: false })).map((run) => run.runId)).toEqual(
+      ["public"],
+    );
     expect((await adapter.listRuns(5, undefined, undefined, { includeSystem: true })).map((run) => run.runId)).toEqual([
       "malformed",
       "nested-impostor",

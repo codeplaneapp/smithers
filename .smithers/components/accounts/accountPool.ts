@@ -63,8 +63,7 @@ export function readSnapshot(path = SNAPSHOT_PATH): UsageSnapshot | null {
   }
 }
 
-const pct = (u: AccountUsage, id: string): number | undefined =>
-  u.windows.find((w) => w.id === id)?.usedPercent;
+const pct = (u: AccountUsage, id: string): number | undefined => u.windows.find((w) => w.id === id)?.usedPercent;
 
 /** Percent used in a window whose id contains `needle`, if one is published. */
 const pctLike = (u: AccountUsage, needle: string): number | undefined =>
@@ -82,11 +81,9 @@ export const sessionUsed = (u: AccountUsage): number => pct(u, "5h") ?? 0;
  * figure, which is the conservative proxy: it is the pool Fable draws from
  * either way.
  */
-export const fableHeadroom = (u: AccountUsage): number =>
-  100 - (pctLike(u, "fable") ?? pct(u, "weekly") ?? 0);
+export const fableHeadroom = (u: AccountUsage): number => 100 - (pctLike(u, "fable") ?? pct(u, "weekly") ?? 0);
 
-export const opusHeadroom = (u: AccountUsage): number =>
-  100 - (pctLike(u, "opus") ?? pct(u, "weekly") ?? 0);
+export const opusHeadroom = (u: AccountUsage): number => 100 - (pctLike(u, "opus") ?? pct(u, "weekly") ?? 0);
 
 /** An account with no session capacity cannot take work at all right now. */
 const EXHAUSTED_SESSION = 98;
@@ -105,10 +102,7 @@ export type ClaudeRole = "fable" | "opus" | "other";
  */
 export const CONSERVE_FABLE = true;
 
-export function orderClaudeAccounts(
-  accounts: AccountUsage[],
-  role: ClaudeRole,
-): AccountUsage[] {
+export function orderClaudeAccounts(accounts: AccountUsage[], role: ClaudeRole): AccountUsage[] {
   const claude = accounts.filter((a) => a.provider === "claude-code");
   const usable = claude.filter((a) => sessionUsed(a) < EXHAUSTED_SESSION);
   const spent = claude.filter((a) => sessionUsed(a) >= EXHAUSTED_SESSION);

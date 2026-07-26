@@ -4,9 +4,7 @@ import { join } from "node:path";
 /** Captured at module load, before anything can chdir. */
 export const LAUNCH_ROOT = process.cwd();
 
-export const MILESTONES = [
-  "M0", "M1", "M2", "M25", "M3", "M4", "M5M6", "M7", "M8", "GA", "M9", "DONE",
-] as const;
+export const MILESTONES = ["M0", "M1", "M2", "M25", "M3", "M4", "M5M6", "M7", "M8", "GA", "M9", "DONE"] as const;
 export type Milestone = (typeof MILESTONES)[number];
 
 export const NEXT: Partial<Record<Milestone, Milestone>> = {
@@ -14,8 +12,17 @@ export const NEXT: Partial<Record<Milestone, Milestone>> = {
   // element → fiber → render → commit → DOM through Rust before the boundary
   // spike and long before the 59-module cycle. Integration reality surfaces
   // here, cheaply, instead of inside the largest milestone.
-  M0: "M1", M1: "M2", M2: "M25", M25: "M3", M3: "M4", M4: "M5M6", M5M6: "M7",
-  M7: "M8", M8: "GA", GA: "M9", M9: "DONE",
+  M0: "M1",
+  M1: "M2",
+  M2: "M25",
+  M25: "M3",
+  M3: "M4",
+  M4: "M5M6",
+  M5M6: "M7",
+  M7: "M8",
+  M8: "GA",
+  GA: "M9",
+  M9: "DONE",
 };
 
 /** Budget envelopes (spec §7) plus the round-3 graduation thresholds. */
@@ -56,17 +63,14 @@ export function cfg(ctx: any): FerricConfig {
   // input.milestone === "M0" again, and the campaign loops M0 forever.
   const rawMilestone = cont.milestone ?? ctx.input?.milestone ?? "M0";
   if (!MILESTONES.includes(rawMilestone)) {
-    throw new Error(
-      `Unknown milestone "${rawMilestone}". Valid: ${MILESTONES.join(", ")}`,
-    );
+    throw new Error(`Unknown milestone "${rawMilestone}". Valid: ${MILESTONES.join(", ")}`);
   }
   return {
     milestone: rawMilestone as Milestone,
     repo: ctx.input?.campaignRepoPath ?? LAUNCH_ROOT,
     reactRepo: ctx.input?.reactRepoPath ?? "/Users/williamcory/react",
     queuePath:
-      ctx.input?.moduleQueuePath ??
-      "/Users/williamcory/smithers/.smithers/specs/react-rust-port/MODULE_QUEUE.tsv",
+      ctx.input?.moduleQueuePath ?? "/Users/williamcory/smithers/.smithers/specs/react-rust-port/MODULE_QUEUE.tsv",
     maxLanes: Math.min(6, Math.max(4, ctx.input?.maxLanes ?? 4)),
     spentCents: Math.max(ctx.input?.modelSpentCents ?? 0, cont.spentCents ?? 0),
     lineage: (cont.lineage ?? []) as string[],

@@ -12,7 +12,12 @@ import { frontier } from "./ferricLedger";
 import M9ApiDesignPrompt from "../../prompts/ferric-m9-api-design.mdx";
 
 const M9_SLICES: SliceDef[] = [
-  { id: "m9-macro-hooks", kind: "phase", modules: ["#[component]", "typed hooks", "rsx!"], gate: "compile ledger + macro proptests" },
+  {
+    id: "m9-macro-hooks",
+    kind: "phase",
+    modules: ["#[component]", "typed hooks", "rsx!"],
+    gate: "compile ledger + macro proptests",
+  },
   { id: "m9-mixed-trees", kind: "phase", modules: ["mixed TS/Rust trees"], gate: "twin matrix cohort" },
   { id: "m9-axum-ssr", kind: "phase", modules: ["pure-Rust axum SSR"], gate: "SSR twin matrix + perf" },
 ];

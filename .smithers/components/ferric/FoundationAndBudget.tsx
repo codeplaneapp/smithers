@@ -5,12 +5,7 @@ import { Sequence } from "smithers-orchestrator";
 import { Task, outputs } from "./ferricSmithers";
 import { CampaignGate, gateRow } from "./CampaignGate";
 import { Closeout } from "./Closeout";
-import {
-  LAUNCH_ROOT,
-  MODEL_CAP_CENTS,
-  PRE_M8_STOP_CENTS,
-  type FerricConfig,
-} from "./ferricConfig";
+import { LAUNCH_ROOT, MODEL_CAP_CENTS, PRE_M8_STOP_CENTS, type FerricConfig } from "./ferricConfig";
 import { SCRIPTS } from "./ferricShell";
 import { RefreshAccountUsage } from "../accounts/RefreshAccountUsage";
 
@@ -89,9 +84,7 @@ export function FoundationAndBudget({ ctx, c }: { ctx: any; c: FerricConfig }) {
 
           const scriptsOk = SCRIPTS.every((s) => existsSync(join(c.repo, s)));
           if (c.milestone !== "M0" && !scriptsOk) {
-            problems.push(
-              `missing deterministic scripts (${SCRIPTS.join(", ")}) — M0 authors them; do not skip M0`,
-            );
+            problems.push(`missing deterministic scripts (${SCRIPTS.join(", ")}) — M0 authors them; do not skip M0`);
           }
 
           const queueOk = existsSync(c.queuePath);
@@ -135,10 +128,7 @@ export function FoundationAndBudget({ ctx, c }: { ctx: any; c: FerricConfig }) {
           // is mechanical is the consequence.
           const cap = MODEL_CAP_CENTS;
           const level = Math.floor((c.spentCents / cap) * 10000);
-          const admitNewWork =
-            level < 10000 &&
-            (level < 9000 || expansionApproved) &&
-            c.spentCents < PRE_M8_STOP_CENTS;
+          const admitNewWork = level < 10000 && (level < 9000 || expansionApproved) && c.spentCents < PRE_M8_STOP_CENTS;
           const note =
             level >= 10000
               ? "HARD CAP: no new work admitted"

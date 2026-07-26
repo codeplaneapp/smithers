@@ -8,8 +8,18 @@ import type { FerricConfig, SliceDef } from "./ferricConfig";
 import { frontier } from "./ferricLedger";
 
 const M7_SLICES: SliceDef[] = [
-  { id: "m7-flight-server", kind: "phase", modules: ["react-server Flight", "react-client"], gate: "Flight server/client suites" },
-  { id: "m7-flight-webpack", kind: "phase", modules: ["react-server-dom-webpack"], gate: "webpack adapter full suite (14k test LOC)" },
+  {
+    id: "m7-flight-server",
+    kind: "phase",
+    modules: ["react-server Flight", "react-client"],
+    gate: "Flight server/client suites",
+  },
+  {
+    id: "m7-flight-webpack",
+    kind: "phase",
+    modules: ["react-server-dom-webpack"],
+    gate: "webpack adapter full suite (14k test LOC)",
+  },
 ];
 
 /** M7 — the React Server Components wire protocol, webpack adapter only. */

@@ -34,20 +34,12 @@ export function PublishPipeline(props: {
 
   return (
     <Sequence label={`publish ${props.artifact}`}>
-      <Task
-        id={`${props.idPrefix}:decide`}
-        output={outputs.frcPublishDecision}
-        agent={planner}
-        timeoutMs={3_600_000}
-      >
+      <Task id={`${props.idPrefix}:decide`} output={outputs.frcPublishDecision} agent={planner} timeoutMs={3_600_000}>
         <PublishDecisionPrompt artifact={props.artifact} instructions={props.instructions} />
       </Task>
 
       {decision?.shouldPublish ? (
-        <CampaignGate
-          id={props.gateId}
-          summary={`${decision.reason}\n\nIdempotency key: ${decision.idempotencyKey}`}
-        />
+        <CampaignGate id={props.gateId} summary={`${decision.reason}\n\nIdempotency key: ${decision.idempotencyKey}`} />
       ) : null}
 
       {decision?.shouldPublish && approved ? (
@@ -62,10 +54,7 @@ export function PublishPipeline(props: {
                 receipt: `idempotent-skip:${decision.idempotencyKey}`,
               };
             }
-            const r = await sh(
-              ["bash", "scripts/ferric/publish.sh", props.artifact, decision.idempotencyKey],
-              c.repo,
-            );
+            const r = await sh(["bash", "scripts/ferric/publish.sh", props.artifact, decision.idempotencyKey], c.repo);
             if (!r.ok) throw new Error(`publish act failed:\n${(r.err || r.out).slice(-2000)}`);
             mkdirSync(dir, { recursive: true });
             writeFileSync(marker, r.out.slice(-2000));

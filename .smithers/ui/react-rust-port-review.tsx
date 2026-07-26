@@ -90,7 +90,10 @@ function SliceReview({ runId, sliceId }: { runId?: string; sliceId: string }) {
         />
       )}
 
-      <RowCard title="Implementer report" ok={impl.row ? truthy(impl.row.cargoCheckOk) && truthy(impl.row.testsOk) : null}>
+      <RowCard
+        title="Implementer report"
+        ok={impl.row ? truthy(impl.row.cargoCheckOk) && truthy(impl.row.testsOk) : null}
+      >
         <p style={{ margin: 0, fontSize: 13 }}>{String(impl.row?.summary ?? "not yet reported")}</p>
       </RowCard>
       <RowCard title="Adversarial review — claude-opus" ok={revA.row ? truthy(revA.row.approved) : null}>
@@ -104,7 +107,12 @@ function SliceReview({ runId, sliceId }: { runId?: string; sliceId: string }) {
       </RowCard>
 
       {/* Live agent feedback for the seat under review. */}
-      <NodeChatStream runId={runId} nodeId={`${sliceId}:implement`} title={`${sliceId} — implementer, live`} height={320} />
+      <NodeChatStream
+        runId={runId}
+        nodeId={`${sliceId}:implement`}
+        title={`${sliceId} — implementer, live`}
+        height={320}
+      />
     </div>
   );
 }
@@ -125,7 +133,14 @@ function App() {
       }
     >
       <div style={{ display: "grid", gridTemplateColumns: "240px 300px 1fr", gap: 12, padding: 16 }}>
-        <RunList filter={{ workflow: WORKFLOW, limit: 20 }} activeRunId={runId} onSelect={(id: string) => { setRunId(id); setSliceId(undefined); }} />
+        <RunList
+          filter={{ workflow: WORKFLOW, limit: 20 }}
+          activeRunId={runId}
+          onSelect={(id: string) => {
+            setRunId(id);
+            setSliceId(undefined);
+          }}
+        />
         <RunTree
           runId={runId}
           onSelectNode={(node: { id: string }) => {
@@ -139,7 +154,10 @@ function App() {
           {sliceId ? (
             <SliceReview runId={runId} sliceId={sliceId} />
           ) : (
-            <EmptyState title="Pick a slice" description="Select any slice node (implement / review / verify / land) in the run tree to open its full review story." />
+            <EmptyState
+              title="Pick a slice"
+              description="Select any slice node (implement / review / verify / land) in the run tree to open its full review story."
+            />
           )}
         </div>
       </div>

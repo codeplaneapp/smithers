@@ -56,6 +56,4 @@ export const implementerSeatsFor = (laneKey: string, escalated: boolean) =>
 
 /** The Codex reviewer tier, opposite whichever tier implemented this round. */
 export const codexReviewerSeatsFor = (laneKey: string, escalated: boolean) =>
-  escalated
-    ? codexSeats("gpt-5.6-terra", laneKey, "high")
-    : codexSeats("gpt-5.6-sol", laneKey);
+  escalated ? codexSeats("gpt-5.6-terra", laneKey, "high") : codexSeats("gpt-5.6-sol", laneKey);

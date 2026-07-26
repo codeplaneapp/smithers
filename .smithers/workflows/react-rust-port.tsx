@@ -43,8 +43,18 @@ const M1_SLICES: SliceDef[] = [
   { id: "m1-shared", kind: "phase", modules: ["shared"], gate: "shared jest suite, 100%" },
 ];
 const M2_SLICES: SliceDef[] = [
-  { id: "m2-scheduler", kind: "phase", modules: ["scheduler"], gate: "Scheduler suite 100% incl. unstable_mock exports" },
-  { id: "m2-noop-skeleton", kind: "phase", modules: ["react-noop-renderer skeleton"], gate: "noop host mounts/schedules/commits through Ferric" },
+  {
+    id: "m2-scheduler",
+    kind: "phase",
+    modules: ["scheduler"],
+    gate: "Scheduler suite 100% incl. unstable_mock exports",
+  },
+  {
+    id: "m2-noop-skeleton",
+    kind: "phase",
+    modules: ["react-noop-renderer skeleton"],
+    gate: "noop host mounts/schedules/commits through Ferric",
+  },
 ];
 
 export default smithers((ctx) => {
@@ -128,11 +138,7 @@ export default smithers((ctx) => {
         <FoundationAndBudget ctx={ctx} c={c} />
         <TryCatchFinally
           id={`ferric-${m}`}
-          try={
-            <Aspects tokenBudget={{ max: MILESTONE_TOKEN_BUDGET, onExceeded: "fail" }}>
-              {phase}
-            </Aspects>
-          }
+          try={<Aspects tokenBudget={{ max: MILESTONE_TOKEN_BUDGET, onExceeded: "fail" }}>{phase}</Aspects>}
           // Scoped to exactly ONE code: token-budget exhaustion rolls this
           // milestone into a fresh run (a durable /clear — the engine carries
           // completed output rows across, so nothing re-runs). Every other
@@ -141,9 +147,7 @@ export default smithers((ctx) => {
           // infinite, self-funding loop.
           catchErrors={["ASPECT_BUDGET_EXCEEDED"]}
           catch={
-            <ContinueAsNew
-              state={{ milestone: m, spentCents: c.spentCents, lineage: [...c.lineage, ctx.runId] }}
-            />
+            <ContinueAsNew state={{ milestone: m, spentCents: c.spentCents, lineage: [...c.lineage, ctx.runId] }} />
           }
         />
       </Sequence>

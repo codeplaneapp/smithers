@@ -91,28 +91,41 @@ function collect() {
   return files.map((path) => ({
     path,
     abs: join(repo, path),
-    blurb:
-      BLURBS[path] ??
-      (path.includes("/prompts/") ? DEFAULT_BLURBS.prompt : DEFAULT_BLURBS.component),
+    blurb: BLURBS[path] ?? (path.includes("/prompts/") ? DEFAULT_BLURBS.prompt : DEFAULT_BLURBS.component),
   }));
 }
 
 const FILES = collect();
 
-const esc = (s) =>
-  s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+const esc = (s) => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
 const KEYWORDS = new Set(
-  ("const let var function return if else for while do switch case break continue new typeof instanceof " +
+  (
+    "const let var function return if else for while do switch case break continue new typeof instanceof " +
     "in of class extends implements interface type enum import from export default async await try catch " +
     "finally throw yield delete void this super static readonly public private protected as satisfies " +
-    "keyof infer declare namespace abstract")
-    .split(" "),
+    "keyof infer declare namespace abstract"
+  ).split(" "),
 );
 const LITERALS = new Set(["null", "undefined", "true", "false"]);
 const TYPES = new Set([
-  "string", "number", "boolean", "object", "symbol", "bigint", "any", "unknown", "never", "void",
-  "Record", "Array", "Promise", "Set", "Map", "ReturnType", "Partial",
+  "string",
+  "number",
+  "boolean",
+  "object",
+  "symbol",
+  "bigint",
+  "any",
+  "unknown",
+  "never",
+  "void",
+  "Record",
+  "Array",
+  "Promise",
+  "Set",
+  "Map",
+  "ReturnType",
+  "Partial",
 ]);
 
 /**
@@ -130,8 +143,7 @@ function tokenize(src) {
   let prev = ""; // previous significant token text
   const templateStack = []; // brace depth per open template literal
 
-  const regexAllowed = () =>
-    !/^[)\]}]$/.test(prev) && !/^[A-Za-z0-9_$]+$/.test(prev) || KEYWORDS.has(prev);
+  const regexAllowed = () => (!/^[)\]}]$/.test(prev) && !/^[A-Za-z0-9_$]+$/.test(prev)) || KEYWORDS.has(prev);
 
   while (i < src.length) {
     const c = src[i];
@@ -163,8 +175,14 @@ function tokenize(src) {
       templateStack.push(0);
       let j = i + 1;
       while (j < src.length) {
-        if (src[j] === "\\") { j += 2; continue; }
-        if (src[j] === "`") { j += 1; break; }
+        if (src[j] === "\\") {
+          j += 2;
+          continue;
+        }
+        if (src[j] === "`") {
+          j += 1;
+          break;
+        }
         if (src[j] === "$" && src[j + 1] === "{") break;
         j += 1;
       }
@@ -185,15 +203,23 @@ function tokenize(src) {
       i += 1;
       let j = i;
       while (j < src.length) {
-        if (src[j] === "\\") { j += 2; continue; }
-        if (src[j] === "`") { j += 1; break; }
+        if (src[j] === "\\") {
+          j += 2;
+          continue;
+        }
+        if (src[j] === "`") {
+          j += 1;
+          break;
+        }
         if (src[j] === "$" && src[j + 1] === "{") break;
         j += 1;
       }
       push("s", src.slice(i, j));
       i = j;
-      if (src[i] === "$" && src[i + 1] === "{") { push("si", "${"); i += 2; }
-      else templateStack.pop();
+      if (src[i] === "$" && src[i + 1] === "{") {
+        push("si", "${");
+        i += 2;
+      } else templateStack.pop();
       prev = "str";
       continue;
     }
@@ -207,11 +233,16 @@ function tokenize(src) {
       let cls = false;
       while (j < src.length) {
         const d = src[j];
-        if (d === "\\") { j += 2; continue; }
+        if (d === "\\") {
+          j += 2;
+          continue;
+        }
         if (d === "[") cls = true;
         else if (d === "]") cls = false;
-        else if (d === "/" && !cls) { ok = true; break; }
-        else if (d === "\n") break;
+        else if (d === "/" && !cls) {
+          ok = true;
+          break;
+        } else if (d === "\n") break;
         j += 1;
       }
       if (ok) {
@@ -234,7 +265,8 @@ function tokenize(src) {
       if (KEYWORDS.has(word)) cls = "k";
       else if (LITERALS.has(word)) cls = "l";
       else if (TYPES.has(word)) cls = "ty";
-      else if (/^[A-Z]/.test(word)) cls = "ty"; // components & types
+      else if (/^[A-Z]/.test(word))
+        cls = "ty"; // components & types
       else if (next === "(") cls = "fn";
       else if (next === ":") cls = "pr";
       push(cls, word);
@@ -330,7 +362,7 @@ const tree = dirs
 const panes = loaded
   .map(
     (f) => `
-  <section class="pane" id="pane-${f.slug}" data-pane="${f.slug}"${f === loaded[0] ? "" : ' hidden'}>
+  <section class="pane" id="pane-${f.slug}" data-pane="${f.slug}"${f === loaded[0] ? "" : " hidden"}>
     <header class="pane-head">
       <div>
         <h2 class="pane-title">${esc(f.name)}</h2>

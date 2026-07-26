@@ -85,7 +85,10 @@ function App() {
             {fused ? (
               <NodeOutputView runId={runId} nodeId="artifact" />
             ) : (
-              <EmptyState title="No fused verdict yet" description="The blind fusion runs after at least two lanes deliver. Watch a lane's live chat by selecting its node." />
+              <EmptyState
+                title="No fused verdict yet"
+                description="The blind fusion runs after at least two lanes deliver. Watch a lane's live chat by selecting its node."
+              />
             )}
             {nodeId ? <NodeChatStream runId={runId} nodeId={nodeId} /> : null}
             <NodeOutputView runId={runId} nodeId="fusion" />

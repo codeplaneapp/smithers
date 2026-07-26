@@ -8,10 +8,20 @@ import type { FerricConfig, SliceDef } from "./ferricConfig";
 import { frontier } from "./ferricLedger";
 
 const M5M6_SLICES: SliceDef[] = [
-  { id: "m5-dom-client", kind: "phase", modules: ["react-dom-bindings", "react-dom client"], gate: "react-dom client suites" },
+  {
+    id: "m5-dom-client",
+    kind: "phase",
+    modules: ["react-dom-bindings", "react-dom client"],
+    gate: "react-dom client suites",
+  },
   { id: "m5-hydration", kind: "phase", modules: ["hydration + event replay"], gate: "hydration suites" },
   { id: "m6-fizz-core", kind: "phase", modules: ["react-server Fizz"], gate: "Fizz suites + chunk ordering" },
-  { id: "m6-fizz-hosts", kind: "phase", modules: ["Fizz Node/Bun/edge entries + napi Host"], gate: "dual-target byte-equal HTML" },
+  {
+    id: "m6-fizz-hosts",
+    kind: "phase",
+    modules: ["Fizz Node/Bun/edge entries + napi Host"],
+    gate: "dual-target byte-equal HTML",
+  },
 ];
 
 /** M5 and M6 run in parallel: the DOM client and streaming SSR. */

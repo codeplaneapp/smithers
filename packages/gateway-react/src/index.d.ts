@@ -55,6 +55,7 @@ declare function useGatewayActions(): {
     }) => Promise<{
         runId: string;
         workflow: string;
+        system: boolean;
     } & {
         seq?: number;
         txid?: string;
@@ -154,6 +155,7 @@ declare function useGatewayActions(): {
     }) => Promise<{
         runId: string;
         workflow: string;
+        system: boolean;
     } & {
         seq?: number;
         txid?: string;

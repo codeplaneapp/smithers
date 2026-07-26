@@ -12,9 +12,7 @@ const SOAK_APPS = ["excalidraw", "cal.com", "mattermost", "grafana", "backstage"
 
 /** GA posture — real applications, run against a stock-React baseline first. */
 export function PhaseGA({ ctx, c }: { ctx: any; c: FerricConfig }) {
-  const soaksDone = SOAK_APPS.every((a) =>
-    ctx.outputs.frcSoak.some((s: any) => s.app === a),
-  );
+  const soaksDone = SOAK_APPS.every((a) => ctx.outputs.frcSoak.some((s: any) => s.app === a));
   const ga = gateRow(ctx, "gate-ga");
 
   return (
@@ -55,7 +53,11 @@ export function PhaseGA({ ctx, c }: { ctx: any; c: FerricConfig }) {
               />
             </Sequence>
           ) : ga?.approved === false ? (
-            <Closeout ctx={ctx} c={c} reason="GA gate denied: the operator judged the production posture insufficient; ship the RC claim instead." />
+            <Closeout
+              ctx={ctx}
+              c={c}
+              reason="GA gate denied: the operator judged the production posture insufficient; ship the RC claim instead."
+            />
           ) : null}
         </Sequence>
       ) : null}

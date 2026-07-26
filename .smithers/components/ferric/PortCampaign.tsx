@@ -14,12 +14,7 @@ import { readLedger, writeLedger } from "./ferricLedger";
  * lanes over the reconciler's 59-module import cycle — and it is enforced by the
  * shape of this graph rather than by asking an agent to be careful.
  */
-export function PortCampaign(props: {
-  ctx: any;
-  c: FerricConfig;
-  phase: string;
-  slices: SliceDef[];
-}) {
+export function PortCampaign(props: { ctx: any; c: FerricConfig; phase: string; slices: SliceDef[] }) {
   const { ctx, c, phase, slices } = props;
   const ledger = readLedger(c.repo);
   const budget = ctx.outputMaybe(outputs.frcBudget, { nodeId: "budget" });
@@ -28,9 +23,7 @@ export function PortCampaign(props: {
   const remaining = slices.filter((s) => !ledger.landed.includes(s.id));
   const leafs = remaining.filter((s) => s.kind !== "cohort");
   const cohorts = remaining.filter((s) => s.kind === "cohort");
-  const cohortsReady = slices
-    .filter((s) => s.kind !== "cohort")
-    .every((s) => ledger.landed.includes(s.id));
+  const cohortsReady = slices.filter((s) => s.kind !== "cohort").every((s) => ledger.landed.includes(s.id));
 
   return (
     <Sequence label={`${phase} port campaign`}>
@@ -67,9 +60,7 @@ export function PortCampaign(props: {
               <Slice key={s.id} ctx={ctx} c={c} slice={s} />
             ))}
           </Parallel>
-          {cohortsReady
-            ? cohorts.slice(0, 1).map((s) => <Slice key={s.id} ctx={ctx} c={c} slice={s} />)
-            : null}
+          {cohortsReady ? cohorts.slice(0, 1).map((s) => <Slice key={s.id} ctx={ctx} c={c} slice={s} />) : null}
         </Sequence>
       ) : null}
     </Sequence>

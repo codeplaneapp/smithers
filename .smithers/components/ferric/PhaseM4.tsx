@@ -33,18 +33,10 @@ export function PhaseM4({ ctx, c }: { ctx: any; c: FerricConfig }) {
   return (
     <Sequence label="M4 — reconciler via noop oracle">
       <QueueParse c={c} />
-      {slices.length > 0 ? (
-        <PortCampaign ctx={ctx} c={c} phase="M4" slices={slices} />
-      ) : null}
+      {slices.length > 0 ? <PortCampaign ctx={ctx} c={c} phase="M4" slices={slices} /> : null}
 
       {offTrack ? (
-        <Task
-          id="m4:drift-alert"
-          output={outputs.frcDriftAlert}
-          agent={planner}
-          continueOnFail
-          timeoutMs={1_800_000}
-        >
+        <Task id="m4:drift-alert" output={outputs.frcDriftAlert} agent={planner} continueOnFail timeoutMs={1_800_000}>
           <M4DriftAlertPrompt
             landed={f.landed.length}
             total={f.total}

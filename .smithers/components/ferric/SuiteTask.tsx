@@ -9,12 +9,7 @@ import { assertNotInfra, sh } from "./ferricShell";
  * never a pass. An audited implementation treated a regex miss plus exit 0 as
  * green, which let a suite that ran nothing certify a slice.
  */
-export function SuiteTask(props: {
-  id: string;
-  leg: string;
-  args: string[];
-  repo: string;
-}) {
+export function SuiteTask(props: { id: string; leg: string; args: string[]; repo: string }) {
   return (
     <Task id={props.id} output={outputs.frcSuite} retries={2}>
       {async () => {

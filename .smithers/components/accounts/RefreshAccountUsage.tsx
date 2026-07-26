@@ -28,13 +28,7 @@ export const accountUsageSchema = z.object({
  * workflow's `createSmithers()` call — a component cannot invent its own table.
  * Register `accountUsageSchema` under any key and pass `outputs.<key>` here.
  */
-export function RefreshAccountUsage({
-  id = "accounts:refresh",
-  output,
-}: {
-  id?: string;
-  output: unknown;
-}) {
+export function RefreshAccountUsage({ id = "accounts:refresh", output }: { id?: string; output: unknown }) {
   return (
     <Task id={id} output={output as any} retries={1}>
       {async () => {

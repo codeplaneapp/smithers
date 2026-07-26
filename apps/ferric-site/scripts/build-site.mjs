@@ -103,22 +103,18 @@ html = html.replace(
     const at = findLine(key, needle);
     const start = Math.max(1, at - Number(before));
     const end = Math.min(sources[key].lines.length, at + Number(after));
-    const hl = hlNeedle
-      ? hlNeedle.split("||").map((n) => findLine(key, n))
-      : [at];
+    const hl = hlNeedle ? hlNeedle.split("||").map((n) => findLine(key, n)) : [at];
     return render(key, start, end, caption, hl);
   },
 );
 
 // Absolute line ranges (only where the range is structural, e.g. a whole file).
-html = html.replace(
-  /<!--CODE (\w+) (\d+) (\d+) "([^"]*)"(?: hl=([\d,]+))?-->/g,
-  (_, key, s, e, caption, hl) =>
-    render(key, Number(s), Number(e), caption, hl ? hl.split(",").map(Number) : []),
+html = html.replace(/<!--CODE (\w+) (\d+) (\d+) "([^"]*)"(?: hl=([\d,]+))?-->/g, (_, key, s, e, caption, hl) =>
+  render(key, Number(s), Number(e), caption, hl ? hl.split(",").map(Number) : []),
 );
 
-const promptCount = readdirSync(join(smithersRoot, ".smithers/prompts")).filter((f) =>
-  f.startsWith("ferric-") && f.endsWith(".mdx"),
+const promptCount = readdirSync(join(smithersRoot, ".smithers/prompts")).filter(
+  (f) => f.startsWith("ferric-") && f.endsWith(".mdx"),
 ).length;
 const componentCount = readdirSync(join(smithersRoot, ".smithers/components/ferric")).length;
 
@@ -126,9 +122,7 @@ const STATS = {
   workflowLines: String(sources.workflow.lines.length),
   promptCount: String(promptCount),
   componentCount: String(componentCount),
-  gateCount: String(
-    (sources.gates.lines.join("\n").match(/^\s{2}"gate-[a-z0-9-]+":/gm) || []).length,
-  ),
+  gateCount: String((sources.gates.lines.join("\n").match(/^\s{2}"gate-[a-z0-9-]+":/gm) || []).length),
 };
 
 html = html.replace(/<!--STAT (\w+)-->/g, (_, key) => {
