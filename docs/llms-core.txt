@@ -10720,6 +10720,7 @@ Most applications should import from `smithers-orchestrator`. The workspace pack
 | `@smithers-orchestrator/electric-proxy` | ElectricSQL shape proxy for cloud sync, scoped shape access, rate limits, stripped auth forwarding, and shape metrics | [Production Hardening](/deployment/production-hardening), [Gateway](/integrations/gateway) |
 | `@smithers-orchestrator/engine` | Workflow rendering/execution API: `runWorkflow`, `renderFrame`, `workflow`, `Smithers`, `fragment`, signals, and Effect versioning | [Render Frame](/runtime/render-frame), [Run Workflow](/runtime/run-workflow) |
 | `@smithers-orchestrator/errors` | Error definitions, known codes, JSON serialization, docs URLs, and type guards | [Errors](/reference/errors) |
+| `@smithers-orchestrator/ferric-site` | Private Cloudflare Worker deployment for the Operation Ferric site at `ferric.smithers.sh` (React's runtime rewritten in Rust) | [Ecosystem](/integrations/ecosystem) |
 | `@smithers-orchestrator/gateway` | Stable Gateway RPC contracts, auth scopes, deployment metadata, and generated OpenAPI schema | [Gateway](/integrations/gateway), [RPC](/rpc/launch-run) |
 | `@smithers-orchestrator/gateway-client` | Browser/client SDK for Gateway RPC requests and event streams | [Gateway](/integrations/gateway) |
 | `@smithers-orchestrator/gateway-react` | React hooks and root helpers for Gateway-backed UIs | [Gateway](/integrations/gateway) |
