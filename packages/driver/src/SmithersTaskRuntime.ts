@@ -18,6 +18,8 @@ export type SmithersTaskRuntime = {
   /** Absolute working directory for this task, including any Worktree lane. */
   rootDir: string;
   signal: AbortSignal;
+  /** Graceful-pause signal for nested work; unlike signal, it does not abort the task. */
+  pauseSignal?: AbortSignal;
   db: SmithersDb;
   heartbeat: (data?: unknown) => void;
   lastHeartbeat: unknown | null;

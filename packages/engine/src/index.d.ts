@@ -272,6 +272,7 @@ type ChildWorkflowExecuteOptions$1 = {
     toolTimeoutMs?: number;
     workflowPath?: string;
     signal?: AbortSignal;
+    pauseSignal?: AbortSignal;
 };
 
 /**
@@ -1551,8 +1552,8 @@ type WorkerExecutionResult = {
 };
 type WorkerTask = WorkerTask$2;
 
-declare function executeTaskBridge(adapter: SmithersDb, db: _BunSQLiteDatabase$1, runId: string, desc: _TaskDescriptor$3, descriptorMap: Map<string, _TaskDescriptor$3>, inputTable: SQLiteTable, eventBus: EventBus, toolConfig: TaskBridgeToolConfig, workflowName: string, cacheEnabled: boolean, signal?: AbortSignal, disabledAgents?: Set<string>, runAbortController?: AbortController, hijackState?: HijackState, legacyExecuteTaskFn?: LegacyExecuteTaskFn): Promise<void>;
-declare function executeTaskBridgeEffect(adapter: SmithersDb, db: _BunSQLiteDatabase$1, runId: string, desc: _TaskDescriptor$3, descriptorMap: Map<string, _TaskDescriptor$3>, inputTable: SQLiteTable, eventBus: EventBus, toolConfig: TaskBridgeToolConfig, workflowName: string, cacheEnabled: boolean, signal?: AbortSignal, disabledAgents?: Set<string>, runAbortController?: AbortController, hijackState?: HijackState, legacyExecuteTaskFn?: LegacyExecuteTaskFn): Effect.Effect<void, _smithers_orchestrator_errors_SmithersError.SmithersError, never>;
+declare function executeTaskBridge(adapter: SmithersDb, db: _BunSQLiteDatabase$1, runId: string, desc: _TaskDescriptor$3, descriptorMap: Map<string, _TaskDescriptor$3>, inputTable: SQLiteTable, eventBus: EventBus, toolConfig: TaskBridgeToolConfig, workflowName: string, cacheEnabled: boolean, signal?: AbortSignal, disabledAgents?: Set<string>, runAbortController?: AbortController, hijackState?: HijackState, legacyExecuteTaskFn?: LegacyExecuteTaskFn, pauseSignal?: AbortSignal): Promise<void>;
+declare function executeTaskBridgeEffect(adapter: SmithersDb, db: _BunSQLiteDatabase$1, runId: string, desc: _TaskDescriptor$3, descriptorMap: Map<string, _TaskDescriptor$3>, inputTable: SQLiteTable, eventBus: EventBus, toolConfig: TaskBridgeToolConfig, workflowName: string, cacheEnabled: boolean, signal?: AbortSignal, disabledAgents?: Set<string>, runAbortController?: AbortController, hijackState?: HijackState, legacyExecuteTaskFn?: LegacyExecuteTaskFn, pauseSignal?: AbortSignal): Effect.Effect<void, _smithers_orchestrator_errors_SmithersError.SmithersError, never>;
 declare namespace __workflowBridgeInternals {
     export { classifyTaskAttempt };
     export { getNextTaskActivityAttempt };
@@ -2619,7 +2620,7 @@ declare function sanitizeIdentifier(value: string): string;
 declare function stripPersistedKeys(row: Record<string, unknown>): {} | null;
 
 declare function canExecuteBridgeManagedComputeTask(desc: _TaskDescriptor$1, cacheEnabled: boolean): boolean;
-declare function executeComputeTaskBridge(adapter: _SmithersDb$1, db: _BunSQLiteDatabase, runId: string, desc: _TaskDescriptor$1, eventBus: EventBus, toolConfig: ComputeTaskBridgeToolConfig, workflowName: string, signal?: AbortSignal): Promise<void>;
+declare function executeComputeTaskBridge(adapter: _SmithersDb$1, db: _BunSQLiteDatabase, runId: string, desc: _TaskDescriptor$1, eventBus: EventBus, toolConfig: ComputeTaskBridgeToolConfig, workflowName: string, signal?: AbortSignal, pauseSignal?: AbortSignal): Promise<void>;
 declare namespace __computeTaskBridgeInternals {
     export { TASK_HEARTBEAT_MAX_PAYLOAD_BYTES };
     export { TASK_HEARTBEAT_THROTTLE_MS };

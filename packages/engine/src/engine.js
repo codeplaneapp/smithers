@@ -4073,6 +4073,7 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
  * @param {Set<any>} [disabledAgents]
  * @param {AbortController} [runAbortController]
  * @param {HijackState} [hijackState]
+ * @param {AbortSignal} [pauseSignal]
  */
 async function legacyExecuteTask(
   adapter,
@@ -4089,6 +4090,7 @@ async function legacyExecuteTask(
   disabledAgents,
   runAbortController,
   hijackState,
+  pauseSignal,
 ) {
   const taskStartMs = performance.now();
   const attempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
@@ -6223,6 +6225,7 @@ async function legacyExecuteTask(
               iteration: desc.iteration,
               rootDir: taskRoot,
               signal: taskSignal,
+              pauseSignal,
               db,
               heartbeat: (data) => {
                 queueHeartbeat(data);
@@ -7400,6 +7403,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
     completion: null,
   };
   const detachAbort = wireAbortSignal(runAbortController, opts.signal);
+  const detachPause = wireAbortSignal(pauseAbortController, opts.pauseSignal);
   let stopSupervisor = async () => {};
   const runMetadata = await getRunDurabilityMetadata(resolvedWorkflowPath, rootDir);
   const lastSeq = await Effect.runPromise(adapter.getLastEventSeq(runId));
@@ -8211,6 +8215,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
                 runAbortController,
                 hijackState,
                 legacyExecuteTask,
+                pauseAbortController.signal,
               ),
               {
                 runId,
@@ -9366,6 +9371,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
     alertRuntime?.stop();
     await stopSupervisor();
     detachAbort();
+    detachPause();
     wakeLock.release();
   }
 }

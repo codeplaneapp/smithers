@@ -457,6 +457,7 @@ async function guardReplayUnsafeCompute(adapter, eventBus, runId, desc, attemptN
  * @param {ComputeTaskBridgeToolConfig} toolConfig
  * @param {string} workflowName
  * @param {AbortSignal} [signal]
+ * @param {AbortSignal} [pauseSignal]
  * @returns {Promise<void>}
  */
 export const executeComputeTaskBridge = async (
@@ -468,6 +469,7 @@ export const executeComputeTaskBridge = async (
   toolConfig,
   workflowName,
   signal,
+  pauseSignal,
 ) => {
   const taskStartMs = performance.now();
   const attempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
@@ -800,6 +802,7 @@ export const executeComputeTaskBridge = async (
                 iteration: desc.iteration,
                 rootDir: toolConfig.rootDir,
                 signal: computeAbortController.signal,
+                pauseSignal,
                 db,
                 heartbeat: (data) => {
                   queueHeartbeat(data);

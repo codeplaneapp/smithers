@@ -250,6 +250,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
   ensureSmithersTables(/** @type {any} */ (childWorkflow.db));
   const adapter = new SmithersDb(childWorkflow.db);
   const signal = options.signal ?? runtime.signal;
+  const pauseSignal = options.pauseSignal ?? runtime.pauseSignal;
   const existingChildRun = await adapter.getRun(childRunId);
   if (existingChildRun?.status === "finished") {
     // The child already completed (e.g. the parent crashed after the child
@@ -282,6 +283,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
       maxOutputBytes: options.maxOutputBytes,
       toolTimeoutMs: options.toolTimeoutMs,
       signal,
+      pauseSignal,
     });
     return {
       ...result,
@@ -301,6 +303,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
       maxOutputBytes: options.maxOutputBytes,
       toolTimeoutMs: options.toolTimeoutMs,
       signal,
+      pauseSignal,
     }),
   );
   return {

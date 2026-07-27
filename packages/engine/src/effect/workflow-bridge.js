@@ -220,6 +220,7 @@ function taskBridgeResultForError(error) {
  * @param {AbortController} [runAbortController]
  * @param {HijackState} [hijackState]
  * @param {LegacyExecuteTaskFn} [legacyExecuteTaskFn]
+ * @param {AbortSignal} [pauseSignal]
  */
 const executeBridgeAttempt = async (
   adapter,
@@ -239,11 +240,12 @@ const executeBridgeAttempt = async (
   runAbortController,
   hijackState,
   legacyExecuteTaskFn,
+  pauseSignal,
 ) => {
   if (bridgeManagedExecution === "static") {
     await executeStaticTaskBridge(adapter, runId, desc, eventBus, toolConfig, workflowName, signal);
   } else if (bridgeManagedExecution === "compute") {
-    await executeComputeTaskBridge(adapter, db, runId, desc, eventBus, toolConfig, workflowName, signal);
+    await executeComputeTaskBridge(adapter, db, runId, desc, eventBus, toolConfig, workflowName, signal, pauseSignal);
   } else {
     await legacyExecuteTaskFn(
       adapter,
@@ -260,6 +262,7 @@ const executeBridgeAttempt = async (
       disabledAgents,
       runAbortController,
       hijackState,
+      pauseSignal,
     );
   }
   return classifyTaskAttempt(adapter, runId, desc, context);
@@ -282,6 +285,7 @@ const executeBridgeAttempt = async (
  * @param {AbortController} [runAbortController]
  * @param {HijackState} [hijackState]
  * @param {LegacyExecuteTaskFn} [legacyExecuteTaskFn]
+ * @param {AbortSignal} [pauseSignal]
  */
 const runTaskBridgeExecution = async (
   adapter,
@@ -301,6 +305,7 @@ const runTaskBridgeExecution = async (
   runAbortController,
   hijackState,
   legacyExecuteTaskFn,
+  pauseSignal,
 ) => {
   const initialAttempt = await getNextTaskActivityAttempt(adapter, runId, desc);
   return dispatchWorkerTask(makeWorkerTask(bridgeKey, workflowName, runId, desc, bridgeManagedExecution), async () => {
@@ -329,6 +334,7 @@ const runTaskBridgeExecution = async (
             runAbortController,
             hijackState,
             legacyExecuteTaskFn,
+            pauseSignal,
           ),
         {
           initialAttempt,
@@ -357,6 +363,7 @@ const runTaskBridgeExecution = async (
  * @param {AbortController} [runAbortController]
  * @param {HijackState} [hijackState]
  * @param {LegacyExecuteTaskFn} [legacyExecuteTaskFn]
+ * @param {AbortSignal} [pauseSignal]
  * @returns {Promise<void>}
  */
 export const executeTaskBridge = (
@@ -375,6 +382,7 @@ export const executeTaskBridge = (
   runAbortController,
   hijackState,
   legacyExecuteTaskFn,
+  pauseSignal,
 ) => {
   const bridgeManagedExecution = canExecuteBridgeManagedComputeTask(desc, cacheEnabled)
     ? "compute"
@@ -411,6 +419,7 @@ export const executeTaskBridge = (
     runAbortController,
     hijackState,
     legacyExecuteTaskFn,
+    pauseSignal,
   )
     .then((result) => {
       if (!result.terminal) {
@@ -448,6 +457,7 @@ export const executeTaskBridge = (
  * @param {AbortController} [runAbortController]
  * @param {HijackState} [hijackState]
  * @param {LegacyExecuteTaskFn} [legacyExecuteTaskFn]
+ * @param {AbortSignal} [pauseSignal]
  * @returns {Effect.Effect<void, import("@smithers-orchestrator/errors/SmithersError").SmithersError, never>}
  */
 export const executeTaskBridgeEffect = (
@@ -466,6 +476,7 @@ export const executeTaskBridgeEffect = (
   runAbortController,
   hijackState,
   legacyExecuteTaskFn,
+  pauseSignal,
 ) =>
   Effect.tryPromise({
     try: () =>
@@ -485,6 +496,7 @@ export const executeTaskBridgeEffect = (
         runAbortController,
         hijackState,
         legacyExecuteTaskFn,
+        pauseSignal,
       ),
     catch: (cause) => toSmithersError(cause, "execute task bridge"),
   });

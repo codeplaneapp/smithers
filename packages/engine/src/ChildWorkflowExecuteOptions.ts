@@ -11,4 +11,5 @@ export type ChildWorkflowExecuteOptions = {
   toolTimeoutMs?: number;
   workflowPath?: string;
   signal?: AbortSignal;
+  pauseSignal?: AbortSignal;
 };
