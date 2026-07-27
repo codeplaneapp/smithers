@@ -1,16 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { renderPrometheusMetrics } from "@smithers-orchestrator/observability";
+import { randomBytes } from "node:crypto";
+import { connect as connectTcp } from "node:net";
 import { Gateway } from "../src/gateway.js";
 
-// broadcastEvent used to hand the generic copy of every run event straight to
-// ws.send while only the dedicated run-event stream frames went through a
-// bounded queue, so a slow socket still accumulated unbounded buffering via
-// the generic copy. These tests drive the REAL broadcastEvent path against a
-// fake connection whose bufferedAmount we control and prove that every
-// run-event write now flows through the single per-connection byte-bounded
-// writer: nothing bypasses backpressure onto a congested socket, buffered
-// bytes stay under the observable cap, and overflowing the byte budget
-// disconnects the connection (close 1013 Try Again Later).
+// Responses, generic events, and dedicated stream frames must all use one
+// byte-bounded writer. Most tests use a controllable fake socket for exact
+// ordering assertions; the final test pauses a real TCP-backed WebSocket to
+// prove the slow-consumer behavior against actual transport buffering.
 
 // Mirror the CONNECTION_EVENT_* constants in src/gateway.js.
 const QUEUE_MAX_BYTES = 32 * 1024 * 1024;
@@ -53,7 +50,7 @@ function makeFakeConnection({ bufferedAmount = 0 } = {}) {
   };
 }
 
-describe("gateway connection event writer (bounded broadcast delivery)", () => {
+describe("gateway connection writer", () => {
   /** @type {Gateway | undefined} */
   let gateway;
   /** @type {ReturnType<typeof makeFakeConnection> | undefined} */
@@ -170,6 +167,87 @@ describe("gateway connection event writer (bounded broadcast delivery)", () => {
     expect(stream.outboundQueue).toHaveLength(0);
   });
 
+  test("responses and events share one ordered queue while the socket is congested", async () => {
+    gateway = new Gateway({});
+    connection = makeFakeConnection({ bufferedAmount: 16 * 1024 * 1024 });
+
+    gateway.sendResponse(connection, { type: "res", id: "first", ok: true, payload: { value: 1 } });
+    gateway.sendEvent(connection, "run.heartbeat", { streamId: "stream-1" });
+    gateway.sendResponse(connection, {
+      type: "res",
+      id: "second",
+      ok: false,
+      error: { code: "Internal", message: "failed" },
+    });
+
+    expect(connection.sent).toHaveLength(0);
+    expect(connection.eventWriter.queue.map((entry) => JSON.parse(entry.data).type)).toEqual(["res", "event", "res"]);
+    expect(connection.eventWriter.queuedBytes).toBeGreaterThan(0);
+
+    connection.ws.bufferedAmount = 0;
+    await sleep(60);
+
+    expect(connection.sent.map((frame) => (frame.type === "res" ? frame.id : frame.event))).toEqual([
+      "first",
+      "run.heartbeat",
+      "second",
+    ]);
+    expect(connection.eventWriter.queue).toHaveLength(0);
+    expect(connection.eventWriter.queuedBytes).toBe(0);
+  });
+
+  test("keeps one drain retry pending while more frames arrive on a congested connection", () => {
+    gateway = new Gateway({});
+    connection = makeFakeConnection({ bufferedAmount: 16 * 1024 * 1024 });
+
+    const nativeSetTimeout = globalThis.setTimeout;
+    const drainRetries = [];
+    globalThis.setTimeout = (callback, delay, ...args) => {
+      if (delay === 10) {
+        drainRetries.push(() => callback(...args));
+        return /** @type {ReturnType<typeof setTimeout>} */ ({});
+      }
+      return nativeSetTimeout(callback, delay, ...args);
+    };
+
+    try {
+      for (let index = 0; index < 20; index += 1) {
+        gateway.sendEvent(connection, "node.started", { index });
+      }
+
+      expect(connection.eventWriter.queue).toHaveLength(20);
+      expect(connection.eventWriter.flushPending).toBe(true);
+      expect(drainRetries).toHaveLength(1);
+
+      connection.ws.bufferedAmount = 0;
+      drainRetries[0]();
+
+      expect(connection.sent).toHaveLength(20);
+      expect(connection.eventWriter.queue).toHaveLength(0);
+      expect(connection.eventWriter.flushPending).toBe(false);
+      expect(drainRetries).toHaveLength(1);
+    } finally {
+      globalThis.setTimeout = nativeSetTimeout;
+    }
+  });
+
+  test("rejects one serialized response larger than the byte budget before ws.send", () => {
+    gateway = new Gateway({});
+    connection = makeFakeConnection();
+
+    gateway.sendResponse(connection, {
+      type: "res",
+      id: "oversized",
+      ok: true,
+      payload: { chunk: "x".repeat(QUEUE_MAX_BYTES + 1) },
+    });
+
+    expect(connection.sent).toHaveLength(0);
+    expect(connection.eventWriter.disconnected).toBe(true);
+    expect(connection.eventWriter.queuedBytes).toBe(0);
+    expect(connection.closes).toEqual([{ code: BACKPRESSURE_CLOSE_CODE, reason: "event backpressure" }]);
+  });
+
   test("overflowing the byte-bounded writer disconnects the connection (close 1013)", async () => {
     gateway = new Gateway({});
     // Permanently congested socket: drains never make progress.
@@ -223,3 +301,101 @@ describe("gateway connection event writer (bounded broadcast delivery)", () => {
     expect(metrics).toContain("smithers_gateway_run_event_backpressure_disconnect_total");
   });
 });
+
+function getPort(server) {
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Gateway did not expose a port");
+  }
+  return address.port;
+}
+
+async function waitUntil(predicate, label, timeoutMs = 10_000) {
+  const started = Date.now();
+  while (Date.now() - started <= timeoutMs) {
+    if (predicate()) {
+      return;
+    }
+    await sleep(10);
+  }
+  throw new Error(`Timed out waiting for ${label}`);
+}
+
+test("a paused real WebSocket stays byte-bounded and is disconnected as a slow consumer", async () => {
+  const gateway = new Gateway({ heartbeatMs: 60_000 });
+  const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+  const socket = connectTcp({ host: "127.0.0.1", port: getPort(server) });
+  socket.on("error", () => {});
+
+  try {
+    await new Promise((resolve, reject) => {
+      socket.once("connect", resolve);
+      socket.once("error", reject);
+    });
+    const handshake = new Promise((resolve, reject) => {
+      let response = "";
+      const onData = (chunk) => {
+        response += chunk.toString("latin1");
+        if (!response.includes("\r\n\r\n")) {
+          return;
+        }
+        socket.off("data", onData);
+        if (!response.startsWith("HTTP/1.1 101")) {
+          reject(new Error(`WebSocket upgrade failed: ${response.slice(0, 80)}`));
+          return;
+        }
+        resolve();
+      };
+      socket.on("data", onData);
+      socket.once("error", reject);
+    });
+    socket.write(
+      [
+        "GET / HTTP/1.1",
+        `Host: 127.0.0.1:${getPort(server)}`,
+        "Connection: Upgrade",
+        "Upgrade: websocket",
+        "Sec-WebSocket-Version: 13",
+        `Sec-WebSocket-Key: ${randomBytes(16).toString("base64")}`,
+        "",
+        "",
+      ].join("\r\n"),
+    );
+    await handshake;
+    await waitUntil(() => gateway.connections.size === 1, "server WebSocket connection");
+
+    const connection = [...gateway.connections][0];
+    expect(connection).toBeTruthy();
+    socket.pause();
+
+    const chunk = "x".repeat(1024 * 1024);
+    const queuedKinds = new Set();
+    let maxBufferedBytes = 0;
+    for (let i = 0; i < 60 && !connection.eventWriter?.disconnected; i += 1) {
+      if (i % 2 === 0) {
+        gateway.sendResponse(connection, {
+          type: "res",
+          id: `slow-${i}`,
+          ok: true,
+          payload: { chunk },
+        });
+      } else {
+        gateway.sendEvent(connection, "run.event", { runId: "slow-run", seq: i, chunk });
+      }
+      for (const entry of connection.eventWriter?.queue ?? []) {
+        queuedKinds.add(JSON.parse(entry.data).type);
+      }
+      maxBufferedBytes = Math.max(maxBufferedBytes, gateway.getConnectionBufferedEventBytes(connection));
+    }
+
+    expect(connection.eventWriter.disconnected).toBe(true);
+    expect(queuedKinds).toEqual(new Set(["res", "event"]));
+    expect(maxBufferedBytes).toBeLessThan(43 * 1024 * 1024);
+    expect(connection.eventWriter.queue).toHaveLength(0);
+    expect(connection.eventWriter.queuedBytes).toBe(0);
+    expect(connection.ws.readyState).not.toBe(connection.ws.OPEN);
+  } finally {
+    socket.destroy();
+    await gateway.close();
+  }
+}, 20_000);

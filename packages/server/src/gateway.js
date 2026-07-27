@@ -270,19 +270,21 @@ const RUN_EVENT_STREAM_MAX_SUBSCRIBERS = 256;
 const RUN_EVENT_STREAM_MAX_SUBSCRIBERS_PER_USER = 32;
 const RUN_EVENT_STREAM_MAX_SUBSCRIBERS_PER_CONNECTION = 8;
 const RUN_EVENT_STREAM_MAX_SUBSCRIBERS_PER_RUN = 64;
-// One byte-bounded writer per connection for EVERY gateway event frame.
+// One byte-bounded writer per connection for EVERY gateway output frame.
 // broadcastEvent used to hand the generic copy of each run event straight to
 // ws.send while only the dedicated run-event stream frames went through a
-// bounded queue, so a slow socket could still accumulate unbounded ws
-// buffering via the generic copy. Every event frame now flows through
-// sendEvent -> writeConnectionEventFrame, which drains against the socket's
-// observable bufferedAmount and tracks its own queued bytes. Overflowing the
-// per-connection byte budget closes the connection (the per-connection
-// failure behavior); the per-stream frame-count overflow (run.error:
-// BackpressureDisconnect) still tears down individual slow streams first.
+// bounded queue, while RPC responses also called ws.send directly. A slow
+// socket could therefore accumulate unbounded ws buffering through either
+// path. Responses and events now share one serialized-byte-bounded queue that
+// drains against the socket's observable bufferedAmount. Overflowing the
+// per-connection byte budget closes the connection; the per-stream
+// frame-count overflow (run.error: BackpressureDisconnect) still tears down
+// individual slow streams first.
 const CONNECTION_EVENT_WS_BUFFERED_HIGH_WATER_BYTES = 8 * 1024 * 1024;
 const CONNECTION_EVENT_QUEUE_MAX_BYTES = 32 * 1024 * 1024;
 const CONNECTION_EVENT_DRAIN_RETRY_MS = 10;
+const CONNECTION_RESPONSE_OK = "\0response:ok";
+const CONNECTION_RESPONSE_ERROR = "\0response:error";
 // RFC 6455 1013 "Try Again Later": the peer may reconnect once it can keep up.
 const CONNECTION_EVENT_BACKPRESSURE_CLOSE_CODE = 1013;
 // Same slow-consumer guard for streamDevTools subscriptions; mirrors the
@@ -7265,10 +7267,16 @@ a { color: var(--brand); }</style>
     if (connection.ws.readyState !== connection.ws.OPEN) {
       return;
     }
-    connection.ws.send(JSON.stringify(frame));
-    this.recordMessageSent("ws", "response", {
-      outcome: frame.ok ? "ok" : "error",
-    });
+    const writer = this.getConnectionEventWriter(connection);
+    if (writer.disconnected) {
+      return;
+    }
+    this.writeConnectionEventFrame(
+      connection,
+      writer,
+      JSON.stringify(frame),
+      frame.ok ? CONNECTION_RESPONSE_OK : CONNECTION_RESPONSE_ERROR,
+    );
   }
   /**
    * @param {ConnectionState} connection
@@ -7331,16 +7339,22 @@ a { color: var(--brand); }</style>
    */
   writeConnectionEventFrame(connection, writer, data, event) {
     const ws = connection.ws;
+    const bytes = Buffer.byteLength(data, "utf8");
+    if (writer.queuedBytes + bytes > CONNECTION_EVENT_QUEUE_MAX_BYTES) {
+      this.disconnectConnectionForEventBackpressure(connection, writer, event);
+      return;
+    }
     const socketCongested =
       typeof ws.bufferedAmount === "number" && ws.bufferedAmount > CONNECTION_EVENT_WS_BUFFERED_HIGH_WATER_BYTES;
     if (writer.queue.length === 0 && !socketCongested) {
       ws.send(data);
-      this.recordMessageSent("ws", "event", { event });
-      return;
-    }
-    const bytes = Buffer.byteLength(data, "utf8");
-    if (writer.queuedBytes + bytes > CONNECTION_EVENT_QUEUE_MAX_BYTES) {
-      this.disconnectConnectionForEventBackpressure(connection, writer, event);
+      if (event === CONNECTION_RESPONSE_OK || event === CONNECTION_RESPONSE_ERROR) {
+        this.recordMessageSent("ws", "response", {
+          outcome: event === CONNECTION_RESPONSE_OK ? "ok" : "error",
+        });
+      } else {
+        this.recordMessageSent("ws", "event", { event });
+      }
       return;
     }
     writer.queue.push({ data, bytes, event });
@@ -7360,6 +7374,7 @@ a { color: var(--brand); }</style>
       return;
     }
     writer.flushPending = true;
+    let retryScheduled = false;
     try {
       while (writer.queue.length > 0 && !writer.disconnected && connection.ws.readyState === connection.ws.OPEN) {
         const ws = connection.ws;
@@ -7367,6 +7382,7 @@ a { color: var(--brand); }</style>
           typeof ws.bufferedAmount === "number" &&
           ws.bufferedAmount > CONNECTION_EVENT_WS_BUFFERED_HIGH_WATER_BYTES
         ) {
+          retryScheduled = true;
           setTimeout(() => {
             writer.flushPending = false;
             this.drainConnectionEventWriter(connection, writer);
@@ -7379,10 +7395,18 @@ a { color: var(--brand); }</style>
         }
         writer.queuedBytes -= entry.bytes;
         ws.send(entry.data);
-        this.recordMessageSent("ws", "event", { event: entry.event });
+        if (entry.event === CONNECTION_RESPONSE_OK || entry.event === CONNECTION_RESPONSE_ERROR) {
+          this.recordMessageSent("ws", "response", {
+            outcome: entry.event === CONNECTION_RESPONSE_OK ? "ok" : "error",
+          });
+        } else {
+          this.recordMessageSent("ws", "event", { event: entry.event });
+        }
       }
     } finally {
-      writer.flushPending = false;
+      if (!retryScheduled) {
+        writer.flushPending = false;
+      }
     }
   }
   /**
@@ -7407,7 +7431,7 @@ a { color: var(--brand); }</style>
       "Gateway connection disconnected for event backpressure",
       {
         ...gatewayContextAnnotations(connection),
-        event,
+        event: event === CONNECTION_RESPONSE_OK || event === CONNECTION_RESPONSE_ERROR ? null : event,
         wsBufferedAmount: typeof connection.ws?.bufferedAmount === "number" ? connection.ws.bufferedAmount : null,
         queueMaxBytes: CONNECTION_EVENT_QUEUE_MAX_BYTES,
         wsBufferedHighWaterBytes: CONNECTION_EVENT_WS_BUFFERED_HIGH_WATER_BYTES,
