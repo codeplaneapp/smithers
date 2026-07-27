@@ -39,7 +39,9 @@ async function runWrite(adapter, label, operation) {
  * @param {string} runId
  * @returns {Promise<string>}
  */
-async function resolveLeaseRunId(adapter, runId) {
+export async function resolveRewindLeaseRunId(adapter, runId) {
+  if (typeof adapter?.getRun !== "function") return runId;
+  if (!String(runId).includes(":child:")) return runId;
   let leaseRunId = runId;
   const seen = new Set();
   while (!seen.has(leaseRunId)) {
@@ -68,23 +70,36 @@ async function resolveLeaseRunId(adapter, runId) {
  * @returns {Promise<RewindLockHandle | null>}
  */
 export async function acquireRewindLock(adapter, runId, options = {}) {
-  runId = await resolveLeaseRunId(adapter, runId);
+  const requestedRunId = runId;
   const nowMs = options.nowMs ?? (() => Date.now());
   const leaseTtlMs = options.leaseTtlMs ?? REWIND_LEASE_TTL_MS;
   if (!Number.isFinite(leaseTtlMs) || leaseTtlMs <= 0) {
     throw new TypeError("leaseTtlMs must be a positive finite number.");
   }
   const storage = resolveStorage(adapter);
+  runId = await resolveRewindLeaseRunId(adapter, runId);
 
   // This advisory guard avoids needless DB work for callers in the same
   // process. The durable row below remains the source of truth.
   if (rewindLockStore.has(runId)) {
+    const existingOwnerToken = rewindLockStore.get(runId);
+    if (requestedRunId !== runId && existingOwnerToken) {
+      rewindLockStore.set(requestedRunId, existingOwnerToken);
+    }
     return null;
   }
 
   const ownerToken = randomUUID();
   rewindLockStore.set(runId, ownerToken);
+  rewindLockStore.set(requestedRunId, ownerToken);
   let expiresAtMs = nowMs() + leaseTtlMs;
+  const loseLocalOwnership = () => {
+    for (const [lockedRunId, token] of rewindLockStore) {
+      if (token === ownerToken) {
+        rewindLockStore.delete(lockedRunId);
+      }
+    }
+  };
 
   try {
     const rows = await runWrite(adapter, `acquire rewind lease ${runId}`, () =>
@@ -101,15 +116,11 @@ export async function acquireRewindLock(adapter, runId, options = {}) {
     );
     const acquiredToken = rows[0]?.owner_token ?? rows[0]?.ownerToken;
     if (acquiredToken !== ownerToken) {
-      if (rewindLockStore.get(runId) === ownerToken) {
-        rewindLockStore.delete(runId);
-      }
+      loseLocalOwnership();
       return null;
     }
   } catch (error) {
-    if (rewindLockStore.get(runId) === ownerToken) {
-      rewindLockStore.delete(runId);
-    }
+    loseLocalOwnership();
     throw error;
   }
 
@@ -119,12 +130,6 @@ export async function acquireRewindLock(adapter, runId, options = {}) {
   let fencingError = null;
   /** @type {ReturnType<typeof setInterval> | null} */
   let renewalTimer = null;
-
-  const loseLocalOwnership = () => {
-    if (rewindLockStore.get(runId) === ownerToken) {
-      rewindLockStore.delete(runId);
-    }
-  };
 
   /**
    * @param {unknown} cause

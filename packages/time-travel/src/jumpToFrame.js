@@ -14,7 +14,7 @@ import { JumpToFrameError } from "./JumpToFrameError.js";
 import { isRunLikelyLive } from "./isRunLikelyLive.js";
 import { validateJumpRunId } from "./validateJumpRunId.js";
 import { validateJumpFrameNo } from "./validateJumpFrameNo.js";
-import { acquireRewindLock } from "./acquireRewindLock.js";
+import { acquireRewindLock, resolveRewindLeaseRunId } from "./acquireRewindLock.js";
 import { evaluateRewindRateLimit } from "./evaluateRewindRateLimit.js";
 import { writeRewindAuditRow } from "./writeRewindAuditRow.js";
 import { updateRewindAuditRow } from "./updateRewindAuditRow.js";
@@ -728,7 +728,9 @@ export async function jumpToFrame(input) {
         lock = await withSpan("timetravel.lock.acquire", { runId }, async () => {
           const handle = await acquireRewindLock(input.adapter, runId);
           if (!handle) {
-            throw new JumpToFrameError("Busy", `Another jumpToFrame is already running for ${runId}.`);
+            const leaseRunId = await resolveRewindLeaseRunId(input.adapter, runId);
+            const lockScope = leaseRunId === runId ? runId : `${runId} (lease run ${leaseRunId})`;
+            throw new JumpToFrameError("Busy", `Another jumpToFrame is already running for ${lockScope}.`);
           }
           return handle;
         });

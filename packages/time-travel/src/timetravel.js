@@ -3,7 +3,7 @@ import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { revertToJjPointer } from "@smithers-orchestrator/vcs/jj";
 import { markResetCancelledMeta } from "./resetCancelMarker.js";
 import * as BunContext from "@effect/platform-bun/BunContext";
-import { acquireRewindLock } from "./acquireRewindLock.js";
+import { acquireRewindLock, resolveRewindLeaseRunId } from "./acquireRewindLock.js";
 import { writeRewindAuditRow } from "./writeRewindAuditRow.js";
 import { updateRewindAuditRow } from "./updateRewindAuditRow.js";
 import { guardEffectBoundary } from "./guardEffectBoundary.js";
@@ -183,11 +183,13 @@ export async function timeTravel(adapter, opts) {
   const startedAtMs = nowMs();
   const lock = await acquireRewindLock(adapter, runId);
   if (!lock) {
+    const leaseRunId = await resolveRewindLeaseRunId(adapter, runId);
+    const lockScope = leaseRunId === runId ? runId : `${runId} (lease run ${leaseRunId})`;
     return {
       success: false,
       vcsRestored: false,
       resetNodes: [],
-      error: `Another time-travel operation is already running for ${runId}.`,
+      error: `Another time-travel operation is already running for ${lockScope}.`,
       effectBoundary: cleanReport,
     };
   }

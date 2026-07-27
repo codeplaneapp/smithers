@@ -81,6 +81,78 @@ describe("rewindLock", () => {
     }
   });
 
+  test("child aliases report the resolved parent lease while held", async () => {
+    const { sqlite, adapter } = setupDb();
+    try {
+      const parentRunId = "parent-run";
+      const childRunId = `${parentRunId}:child:review:0`;
+      await adapter.insertRun({
+        runId: parentRunId,
+        workflowName: "parent",
+        status: "finished",
+        createdAtMs: Date.now(),
+      });
+      await adapter.insertRun({
+        runId: childRunId,
+        parentRunId,
+        workflowName: "child",
+        status: "finished",
+        createdAtMs: Date.now(),
+      });
+
+      const lease = await acquireRewindLock(adapter, childRunId, { autoRenew: false });
+      expect(lease?.runId).toBe(parentRunId);
+      expect(hasRewindLock(childRunId)).toBe(true);
+      expect(hasRewindLock(parentRunId)).toBe(true);
+
+      expect(await lease?.release()).toBe(true);
+      expect(hasRewindLock(childRunId)).toBe(false);
+      expect(hasRewindLock(parentRunId)).toBe(false);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("validates lock options and storage before probing child lineage", async () => {
+    const { sqlite, adapter } = setupDb();
+    const originalGetRun = adapter.getRun.bind(adapter);
+    try {
+      adapter.getRun = (() => {
+        throw new Error("lineage probe should not run");
+      }) as typeof adapter.getRun;
+      await expect(
+        acquireRewindLock(adapter, "parent:child:review:0", {
+          leaseTtlMs: 0,
+          autoRenew: false,
+        }),
+      ).rejects.toThrow("leaseTtlMs must be a positive finite number");
+      await expect(
+        acquireRewindLock({ getRun: adapter.getRun } as SmithersDb, "parent:child:review:0", {
+          autoRenew: false,
+        }),
+      ).rejects.toThrow("Rewind locking requires a SmithersDb backed by internalStorage");
+    } finally {
+      adapter.getRun = originalGetRun;
+      sqlite.close();
+    }
+  });
+
+  test("does not probe run lineage for ordinary root run ids", async () => {
+    const { sqlite, adapter } = setupDb();
+    const originalGetRun = adapter.getRun.bind(adapter);
+    try {
+      adapter.getRun = (() => {
+        throw new Error("ordinary run should not be loaded");
+      }) as typeof adapter.getRun;
+      const lease = await acquireRewindLock(adapter, "ordinary-run", { autoRenew: false });
+      expect(lease).not.toBeNull();
+      expect(await lease?.release()).toBe(true);
+    } finally {
+      adapter.getRun = originalGetRun;
+      sqlite.close();
+    }
+  });
+
   test("expired owner is replaced and cannot release the new lease", async () => {
     const { sqlite, adapter } = setupDb();
     let now = 1_000;

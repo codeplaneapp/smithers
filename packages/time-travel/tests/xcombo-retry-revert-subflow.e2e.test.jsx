@@ -22,7 +22,7 @@ import { z } from "zod";
 import { Effect } from "effect";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { Sequence, Subflow } from "../../components/src/components/index.js";
+import { Parallel, Sequence, Subflow } from "../../components/src/components/index.js";
 import { __setRuntimeModuleLoader, extractFromHost } from "../../graph/src/dom/extract.js";
 import { runWorkflow } from "../../engine/src/engine.js";
 import { retryTask } from "../src/retry-task.js";
@@ -258,6 +258,88 @@ describe("xcombo retry-task on a FAILED <Subflow> child run", () => {
           tailCalls: 1,
           expensiveOutput: outputBefore,
         });
+      } finally {
+        cleanup();
+      }
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "resets every failed parallel branch before resuming the child",
+    async () => {
+      const { smithers, Workflow, Task, outputs, db, cleanup } = buildSmithers();
+      const adapter = new SmithersDb(db);
+      try {
+        let leftCalls = 0;
+        let rightCalls = 0;
+        let tailCalls = 0;
+        let firstWaveStarted = 0;
+        let releaseFirstWave = () => {};
+        const firstWaveReady = new Promise((resolve) => {
+          releaseFirstWave = resolve;
+        });
+        /** @param {string} side */
+        const failTogetherOnce = async (side) => {
+          firstWaveStarted += 1;
+          if (firstWaveStarted === 2) releaseFirstWave();
+          await firstWaveReady;
+          throw new Error(`${side} retry me`);
+        };
+        const child = smithers(
+          () => (
+            <Workflow name="xcombo-parallel-failure-child">
+              <Sequence>
+                <Parallel>
+                  <Task id="left" output={outputs.expensiveOut} retries={0}>
+                    {async () => {
+                      leftCalls += 1;
+                      if (leftCalls === 1) await failTogetherOnce("left");
+                      return { value: 20 };
+                    }}
+                  </Task>
+                  <Task id="right" output={outputs.flakyOut} retries={0}>
+                    {async () => {
+                      rightCalls += 1;
+                      if (rightCalls === 1) await failTogetherOnce("right");
+                      return { value: 22 };
+                    }}
+                  </Task>
+                </Parallel>
+                <Task id="tail" output={outputs.childOut} retries={0}>
+                  {() => {
+                    tailCalls += 1;
+                    return { value: 42 };
+                  }}
+                </Task>
+              </Sequence>
+            </Workflow>
+          ),
+          { output: outputs.childOut },
+        );
+        const parent = smithers(() => (
+          <Workflow name="xcombo-parallel-failure-parent">
+            <Subflow id="review" mode="childRun" output={outputs.subflowOut} workflow={child} retries={1} />
+          </Workflow>
+        ));
+        const runId = "xcombo-parallel-failure-reset";
+        const result = await Effect.runPromise(runWorkflow(parent, { input: {}, runId }));
+        const childRunId = `${runId}:child:review:0`;
+        const diagnostics = JSON.stringify({
+          status: result.status,
+          leftCalls,
+          rightCalls,
+          tailCalls,
+          child: await dumpRun(adapter, childRunId),
+        });
+        expect(result.status, diagnostics).toBe("finished");
+        expect(leftCalls, diagnostics).toBe(2);
+        expect(rightCalls, diagnostics).toBe(2);
+        expect(tailCalls, diagnostics).toBe(1);
+        expect(
+          (await adapter.listNodes(childRunId)).filter((node) => node.state === "failed"),
+          diagnostics,
+        ).toEqual([]);
       } finally {
         cleanup();
       }
@@ -569,6 +651,7 @@ describe("xcombo rewind lease scoping across a parent/child pair", () => {
       // in-flight time travel is restoring: it must be refused, not raced.
       expect(result.success, diagnostics).toBe(false);
       expect(result.error ?? "", diagnostics).toMatch(/already running|another time-travel/i);
+      expect(result.error ?? "", diagnostics).toContain(`lease run ${parentRunId}`);
     } finally {
       await lock?.release?.().catch?.(() => undefined);
       cleanup();
