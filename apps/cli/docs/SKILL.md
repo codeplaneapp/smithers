@@ -668,6 +668,38 @@ Use the lightest route that preserves the needed durability.
 - Use a full workflow when order, retries, approvals, loops, multiple agents, or
   reuse matter.
 
+Structure is a cost, not a virtue. The shipped OrchBench benchmark
+(benchmarks/orchbench/RESULTS.md) measured a solo frontier agent at reward
+0.901 / $10.49 / 19 min while a three-model review panel scored LOWER (0.734)
+at 2.1x the wall clock, and review stages consumed more minutes than
+implementation. Add a node, gate, or reviewer for a named risk (landing on
+main, destructive actions, release gates), never as ceremony.
+
+## Repair-loop discipline
+
+When you drive fix/verify rounds through Smithers, these rules stop the
+100-run death spiral:
+
+- **Same-signature budget.** If 3 consecutive rounds fail with the same
+  failure signature, stop authoring round N+1. Change strategy (gather
+  evidence, widen scope) or escalate via `smithers ask-human`.
+- **Green ratchet.** A previously-passing check that goes red after a
+  harness/infra-only change is a harness regression: revert or fix the
+  harness; do not touch the product.
+- **Never widen a red gate.** Acceptance criteria grow only while the gate is
+  green. A red gate narrows to the last-green slice first.
+- **Classify red before repairing.** A check that could not RUN (service
+  unreachable, network denied, missing credentials, broken harness) is an
+  environment fault, not product evidence. `smithers eval` exits 5 and marks
+  such cases INCONCLUSIVE; reviewers return `blocked` instead of
+  `approved: false`. On those signals repair the harness, never the product.
+- **Iterate inside one workflow.** Use `<Loop>`, `retries`, and
+  `smithers retry-task` so context and verdict history persist; authoring a
+  near-duplicate workflow file per attempt throws away the run's memory and
+  re-bills the same context every round.
+- **Keep local diagnostics readable.** Privacy redaction belongs on shipped
+  artifacts, not on your own debugging loop.
+
 ## Simple tasks: smithers oneshot
 
 `smithers oneshot` is a built-in minimal workflow for one agent and one goal. It

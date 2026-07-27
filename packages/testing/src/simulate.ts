@@ -4,12 +4,7 @@ import { makeWorkflowSession } from "@smithers-orchestrator/scheduler";
 import { Effect } from "effect";
 import type { WorkflowDefinition } from "@smithers-orchestrator/driver/WorkflowDefinition";
 import type { ExtractOptions, TaskDescriptor, WorkflowGraph } from "@smithers-orchestrator/graph";
-import type {
-  EngineDecision,
-  RunResult,
-  WaitReason,
-  WorkflowSessionService,
-} from "@smithers-orchestrator/scheduler";
+import type { EngineDecision, RunResult, WaitReason, WorkflowSessionService } from "@smithers-orchestrator/scheduler";
 import type { FakeAgent } from "./fakeAgent.ts";
 import { isAuto } from "./fakeAgent.ts";
 import { schemaMock } from "./schemaMock.ts";

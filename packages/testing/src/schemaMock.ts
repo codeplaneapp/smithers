@@ -81,7 +81,7 @@ function jsonSchemaExample(schema: JsonSchema, depth = 0): unknown {
     return values[0];
   }
   const type = Array.isArray(schema.type)
-    ? schema.type.find((candidate) => candidate !== "null") ?? schema.type[0]
+    ? (schema.type.find((candidate) => candidate !== "null") ?? schema.type[0])
     : schema.type;
   switch (type) {
     case "null":
@@ -130,9 +130,7 @@ function formatIssues(issues: readonly unknown[]): string {
 }
 
 export function schemaMock<T>(schema: SafeSchema<T>): T {
-  const first = JSON.parse(
-    zodSchemaToJsonExample(schema as Parameters<typeof zodSchemaToJsonExample>[0]),
-  );
+  const first = JSON.parse(zodSchemaToJsonExample(schema as Parameters<typeof zodSchemaToJsonExample>[0]));
   const firstResult = schema.safeParse(first);
   if (firstResult.success) return firstResult.data;
 

@@ -44,6 +44,10 @@ test("covers the workflow", async () => {
 
 By default, `coverWorkflow` calls `expectFullCoverage(result)` before returning. The assertion requires every pass to finish, every rendered task to execute, every `expectedNodes` entry to render, and every structured output to pass its schema. Set `assert: false` to inspect a failing result, or call `expectFullCoverage` later.
 
+<Warning>
+`coverWorkflow` checks workflow STRUCTURE, not behavior: agents, sandboxes, subflows, compute, and side effects are stubbed, so a red here is a graph or schema defect, never proof about your product. Keep the two loops separate. Behavior against real services belongs to `bunx smithers-orchestrator eval` with real runs, and when an eval case dies on a harness or environment fault (connection refused, TLS, network denied) it grades INCONCLUSIVE and the command exits `5`: repair the harness, do not iterate on the workflow. Do not respond to environment faults by building an ever-more-hermetic simulation of production inside your test harness; that trades observed behavior for reproducibility of a world that is not yours.
+</Warning>
+
 The result includes:
 
 | Field | Meaning |

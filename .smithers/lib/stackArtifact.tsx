@@ -59,7 +59,10 @@ export function normalizeStory(raw: unknown, availablePaths: string[]): StackSto
   // Persisted rows JSON-stringify nested arrays; coerce before validating.
   if (typeof value === "object" && value !== null && typeof (value as Record<string, unknown>).chapters === "string") {
     try {
-      value = { ...(value as Record<string, unknown>), chapters: JSON.parse((value as Record<string, unknown>).chapters as string) };
+      value = {
+        ...(value as Record<string, unknown>),
+        chapters: JSON.parse((value as Record<string, unknown>).chapters as string),
+      };
     } catch {
       return null;
     }
@@ -256,7 +259,9 @@ export async function renderPrArtifactHtml(options: PrArtifactOptions): Promise<
         <KpiStat
           label="Hygiene"
           value={options.hygiene.ok ? "clean" : "failing"}
-          hint={options.hygiene.ok ? "one change, in scope, checks green" : options.hygiene.reasons.length + " issue(s)"}
+          hint={
+            options.hygiene.ok ? "one change, in scope, checks green" : options.hygiene.reasons.length + " issue(s)"
+          }
         />
         <KpiStat label="Generated" value={options.generatedAt} />
       </div>
@@ -320,11 +325,7 @@ export async function renderPrArtifactHtml(options: PrArtifactOptions): Promise<
     </div>,
   );
 
-  return documentShell(
-    options.slug + " r" + options.revision + " · " + options.missionTitle,
-    body,
-    hoistedStyles,
-  );
+  return documentShell(options.slug + " r" + options.revision + " · " + options.missionTitle, body, hoistedStyles);
 }
 
 async function renderOneFile(
@@ -393,9 +394,7 @@ export function renderStackIndexHtml(options: {
                     <StatusPill status={row.phase} label={row.phase} />
                   </td>
                   <td>
-                    <a href={artifactFileName(row.slug, row.revision)}>
-                      {artifactFileName(row.slug, row.revision)}
-                    </a>
+                    <a href={artifactFileName(row.slug, row.revision)}>{artifactFileName(row.slug, row.revision)}</a>
                   </td>
                 </tr>
               ))}

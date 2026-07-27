@@ -181,7 +181,9 @@ describe("hygieneVerdict", () => {
     expect(hygieneVerdict({ ...CLEAN, changedPaths: ["packages/db/src/x.js"] }).reasons[0]).toContain(
       "paths outside the lane scopes",
     );
-    expect(hygieneVerdict({ ...CLEAN, conflictedCount: 2 }).reasons[0]).toContain("2 descendant change(s) are conflicted");
+    expect(hygieneVerdict({ ...CLEAN, conflictedCount: 2 }).reasons[0]).toContain(
+      "2 descendant change(s) are conflicted",
+    );
     const failing = hygieneVerdict({ ...CLEAN, checks: [{ command: "bun test", exitCode: 1, tail: "boom" }] });
     expect(failing.reasons[0]).toContain("check failed (exit 1)");
     expect(failing.reasons[0]).toContain("boom");
@@ -288,7 +290,9 @@ describe("jj output parsing", () => {
   });
 
   test("parseSummaryPaths handles statuses, renames, and dedupes", () => {
-    const out = parseSummaryPaths(["M apps/studio/a.ts", "A apps/studio/b.ts", "D old.txt", "R from.ts -> to.ts", "", "junk line"].join("\n"));
+    const out = parseSummaryPaths(
+      ["M apps/studio/a.ts", "A apps/studio/b.ts", "D old.txt", "R from.ts -> to.ts", "", "junk line"].join("\n"),
+    );
     expect(out).toEqual(["apps/studio/a.ts", "apps/studio/b.ts", "old.txt", "from.ts", "to.ts"]);
     expect(parseSummaryPaths("M same.ts\nA same.ts")).toEqual(["same.ts"]);
     expect(parseSummaryPaths("")).toEqual([]);
@@ -374,7 +378,9 @@ describe("splitUnifiedDiff", () => {
   });
 
   test("falls back to --- a/ then the diff header for deletions", () => {
-    const deletion = ["diff --git a/gone.ts b/gone.ts", "--- a/gone.ts", "+++ /dev/null", "@@ -1,1 +0,0 @@", "-x"].join("\n");
+    const deletion = ["diff --git a/gone.ts b/gone.ts", "--- a/gone.ts", "+++ /dev/null", "@@ -1,1 +0,0 @@", "-x"].join(
+      "\n",
+    );
     expect(splitUnifiedDiff(deletion)[0].path).toBe("gone.ts");
     const headerOnly = "diff --git a/only.ts b/only.ts";
     expect(splitUnifiedDiff(headerOnly)[0].path).toBe("only.ts");

@@ -1,7 +1,16 @@
 // smithers-source: authored
 // smithers-display-name: Stacked Ship
 /** @jsxImportSource smithers-orchestrator */
-import { Approval, ClaudeCodeAgent, Loop, Parallel, Sequence, UI, approvalDecisionSchema, createSmithers } from "smithers-orchestrator";
+import {
+  Approval,
+  ClaudeCodeAgent,
+  Loop,
+  Parallel,
+  Sequence,
+  UI,
+  approvalDecisionSchema,
+  createSmithers,
+} from "smithers-orchestrator";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -142,7 +151,9 @@ const storySchema = z.object({
   headline: z.string().min(8),
   synopsis: z.string().min(20),
   chapters: z
-    .array(z.object({ title: z.string().min(3), prose: z.string().min(10), diffPaths: z.array(z.string()).default([]) }))
+    .array(
+      z.object({ title: z.string().min(3), prose: z.string().min(10), diffPaths: z.array(z.string()).default([]) }),
+    )
     .min(1),
 });
 type Story = z.infer<typeof storySchema>;
@@ -236,7 +247,10 @@ function fableChain(cwd: string) {
 }
 
 function storyChain(cwd: string) {
-  return [new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd }), new ClaudeCodeAgent({ model: "claude-haiku-4-5", cwd })];
+  return [
+    new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd }),
+    new ClaudeCodeAgent({ model: "claude-haiku-4-5", cwd }),
+  ];
 }
 
 const AGENT_RETRIES = 2;
@@ -355,7 +369,13 @@ export async function setupStack(key: string): Promise<Setup> {
       summary: "stack clone ready at " + stackRoot + " (base " + baseSha.slice(0, 12) + ")",
     };
   } catch (error) {
-    return { ready: false, stackRoot, baseSha: "", originUrl, summary: "setup failed: " + String(error).slice(0, 2_000) };
+    return {
+      ready: false,
+      stackRoot,
+      baseSha: "",
+      originUrl,
+      summary: "setup failed: " + String(error).slice(0, 2_000),
+    };
   }
 }
 
@@ -384,8 +404,15 @@ export async function createLane(key: string, entry: PrPlanEntry, parentRev: str
       }
     }
     const install = await runProcess("pnpm", ["install", "--no-frozen-lockfile"], workspaceDir, 45 * 60_000);
-    const installNote = install.exitCode === 0 ? "install ok" : "install exit " + install.exitCode + " (agent may need to install)";
-    return { laneSlug: entry.slug, ready: true, workspaceDir, bookmark, summary: "workspace ready (" + installNote + ")" };
+    const installNote =
+      install.exitCode === 0 ? "install ok" : "install exit " + install.exitCode + " (agent may need to install)";
+    return {
+      laneSlug: entry.slug,
+      ready: true,
+      workspaceDir,
+      bookmark,
+      summary: "workspace ready (" + installNote + ")",
+    };
   } catch (error) {
     return {
       laneSlug: entry.slug,
@@ -492,7 +519,11 @@ export async function buildLaneArtifact(options: {
     const story =
       normalizeStory(
         options.storyRow
-          ? { headline: options.storyRow.headline, synopsis: options.storyRow.synopsis, chapters: options.storyRow.chapters }
+          ? {
+              headline: options.storyRow.headline,
+              synopsis: options.storyRow.synopsis,
+              chapters: options.storyRow.chapters,
+            }
           : null,
         availablePaths,
       ) ?? fallbackStory({ slug: options.entry.slug, title: options.entry.title, changedPaths: availablePaths });
@@ -567,7 +598,10 @@ export async function runAssemble(options: { key: string; plan: StackPlan }): Pr
   const reasons: string[] = [];
   try {
     const changeCount = countLogLines(
-      jj(["log", "-r", baseBookmarkFor(options.key) + ".." + topBookmark, "--no-graph", "-T", 'change_id ++ "\\n"'], stackRoot),
+      jj(
+        ["log", "-r", baseBookmarkFor(options.key) + ".." + topBookmark, "--no-graph", "-T", 'change_id ++ "\\n"'],
+        stackRoot,
+      ),
     );
     if (changeCount !== entries.length) {
       reasons.push("stack is not linear: expected " + entries.length + " changes base..top, found " + changeCount);
@@ -613,10 +647,20 @@ export async function runPush(options: {
   const stackRoot = stackRootFor(options.key);
   const entries = options.plan.entries;
   if (!options.wantPush) {
-    return { pushed: false, branchesJson: "[]", prUrlsJson: "[]", summary: "push disabled by input; bookmarks stay local." };
+    return {
+      pushed: false,
+      branchesJson: "[]",
+      prUrlsJson: "[]",
+      summary: "push disabled by input; bookmarks stay local.",
+    };
   }
   if (!options.assembleOk) {
-    return { pushed: false, branchesJson: "[]", prUrlsJson: "[]", summary: "assemble gate not green; refusing to push." };
+    return {
+      pushed: false,
+      branchesJson: "[]",
+      prUrlsJson: "[]",
+      summary: "assemble gate not green; refusing to push.",
+    };
   }
   const unapproved = entries.filter((entry) => !options.approvedSlugs.includes(entry.slug));
   if (unapproved.length > 0) {
@@ -658,8 +702,16 @@ export async function runPush(options: {
               "--title",
               entry.title,
               "--body",
-              "Stacked PR " + (index + 1) + "/" + entries.length + " from stacked-ship run " + options.key +
-                ". Review artifact: .smithers/reports/stacked-ship/" + options.key + "/" + artifactFileName(entry.slug, 1) +
+              "Stacked PR " +
+                (index + 1) +
+                "/" +
+                entries.length +
+                " from stacked-ship run " +
+                options.key +
+                ". Review artifact: .smithers/reports/stacked-ship/" +
+                options.key +
+                "/" +
+                artifactFileName(entry.slug, 1) +
                 "\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
             ],
             stackRoot,
@@ -674,7 +726,12 @@ export async function runPush(options: {
       pushed: true,
       branchesJson: JSON.stringify(branches),
       prUrlsJson: JSON.stringify(prUrls),
-      summary: "pushed " + branches.length + " stack branch(es)" + (prUrls.length ? "; " + prUrls.length + " PR(s)" : "") + ".",
+      summary:
+        "pushed " +
+        branches.length +
+        " stack branch(es)" +
+        (prUrls.length ? "; " + prUrls.length + " PR(s)" : "") +
+        ".",
     };
   } catch (error) {
     return {
@@ -691,12 +748,17 @@ export async function runPush(options: {
 export function parseInput(raw: unknown): Input {
   const record = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
   const asBool = (value: unknown, fallback: boolean) =>
-    typeof value === "boolean" ? value : typeof value === "string" ? !["0", "false", "off", "no", ""].includes(value.toLowerCase()) : fallback;
+    typeof value === "boolean"
+      ? value
+      : typeof value === "string"
+        ? !["0", "false", "off", "no", ""].includes(value.toLowerCase())
+        : fallback;
   const asNum = (value: unknown, fallback: number, min: number, max: number) => {
     const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
     return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
   };
-  const asStr = (value: unknown, fallback: string) => (typeof value === "string" && value.trim() ? value.trim() : fallback);
+  const asStr = (value: unknown, fallback: string) =>
+    typeof value === "string" && value.trim() ? value.trim() : fallback;
   return {
     specPath: asStr(record.specPath, ".smithers/specs/smithers-studio-local-app.md"),
     planJson: typeof record.planJson === "string" ? record.planJson : "",
@@ -765,11 +827,17 @@ export function implementPrompt(options: {
     "5. Only touch paths under: " + entry.scopes.join(", ") + ".",
     "6. Install dependencies fresh in THIS workspace if needed (pnpm install); never symlink from elsewhere.",
     "",
-    options.reviewFeedback ? "SELF-REVIEW FEEDBACK ON YOUR PREVIOUS REVISION (address every point):\n" + options.reviewFeedback + "\n" : "",
-    options.hygieneFeedback ? "MECHANICAL GATE FAILURES ON YOUR PREVIOUS REVISION (fix all):\n" + options.hygieneFeedback + "\n" : "",
+    options.reviewFeedback
+      ? "SELF-REVIEW FEEDBACK ON YOUR PREVIOUS REVISION (address every point):\n" + options.reviewFeedback + "\n"
+      : "",
+    options.hygieneFeedback
+      ? "MECHANICAL GATE FAILURES ON YOUR PREVIOUS REVISION (fix all):\n" + options.hygieneFeedback + "\n"
+      : "",
     "QUALITY BAR:",
     "- Real, working code with tests; the gate commands below must pass in this workspace before you finish:",
-    entry.checks.length ? entry.checks.map((command) => "  $ " + command).join("\n") : "  (no scoped checks declared; run the tests you add)",
+    entry.checks.length
+      ? entry.checks.map((command) => "  $ " + command).join("\n")
+      : "  (no scoped checks declared; run the tests you add)",
     "- Match the surrounding code style; docs-driven where the spec demands it; no drive-by refactors.",
     "Report status implemented/partial/blocked, a summary of what you built and why, and files changed.",
   ].join("\n");
@@ -784,8 +852,12 @@ export function selfReviewPrompt(options: {
 }): string {
   return [
     "You are the independent REVIEWER for PR '" + options.entry.slug + "' in this jj workspace.",
-    "Implementer's report: " + (options.implement ? options.implement.status + " - " + options.implement.summary : "none") + ".",
-    "Mechanical gate: " + (options.gate ? (options.gate.ok ? "GREEN" : "RED:\n" + options.gate.feedback.slice(0, 2_000)) : "not yet run") + ".",
+    "Implementer's report: " +
+      (options.implement ? options.implement.status + " - " + options.implement.summary : "none") +
+      ".",
+    "Mechanical gate: " +
+      (options.gate ? (options.gate.ok ? "GREEN" : "RED:\n" + options.gate.feedback.slice(0, 2_000)) : "not yet run") +
+      ".",
     "",
     "REVIEW CONTRACT:",
     "1. Judge the DIFF, not the report: jj diff --from " + options.parentRev + " --to " + options.bookmark + " --git",
@@ -833,11 +905,21 @@ export function reworkPrompt(options: {
   ].join("\n");
 }
 
-export function finalReviewPrompt(options: { plan: StackPlan; assembleGate: Gate | undefined; specPath: string }): string {
+export function finalReviewPrompt(options: {
+  plan: StackPlan;
+  assembleGate: Gate | undefined;
+  specPath: string;
+}): string {
   return [
     "You are the FINAL REVIEWER for the whole '" + options.plan.missionTitle + "' stack, working in the TOP lane's",
     "jj workspace (the full stack is visible here).",
-    "Assemble gate: " + (options.assembleGate ? (options.assembleGate.ok ? "GREEN" : "RED:\n" + options.assembleGate.feedback.slice(0, 2_000)) : "not run") + ".",
+    "Assemble gate: " +
+      (options.assembleGate
+        ? options.assembleGate.ok
+          ? "GREEN"
+          : "RED:\n" + options.assembleGate.feedback.slice(0, 2_000)
+        : "not run") +
+      ".",
     "",
     "DO, in order:",
     "1. If the gate is red, fix the failures first.",
@@ -898,8 +980,7 @@ export default smithers((ctx) => {
   const buildDone = (slug: string) => rowOk(buildGate(slug)) && selfReview(slug)?.verdict === "approve";
   const buildSettled = (slug: string) => buildDone(slug) || buildIterations(slug) >= input.buildIterations;
   const greenEver = (slug: string) => rowOk(buildGate(slug)) || rowOk(reworkGate(slug));
-  const reviewSettled = (slug: string) =>
-    decision(slug) === "approved" || reviewIterations(slug) >= input.reviewRounds;
+  const reviewSettled = (slug: string) => decision(slug) === "approved" || reviewIterations(slug) >= input.reviewRounds;
 
   const entries = plan?.entries ?? [];
   const reachable = (index: number): boolean => index === 0 || greenEver(entries[index - 1].slug);
@@ -996,11 +1077,17 @@ export default smithers((ctx) => {
                                 specPath: input.specPath,
                                 parentRev,
                                 bookmark,
-                                reviewFeedback: selfReview(slug)?.verdict === "reject" ? selfReview(slug)?.feedback ?? "" : "",
-                                hygieneFeedback: rowOk(buildGate(slug)) ? "" : buildGate(slug)?.feedback ?? "",
+                                reviewFeedback:
+                                  selfReview(slug)?.verdict === "reject" ? (selfReview(slug)?.feedback ?? "") : "",
+                                hygieneFeedback: rowOk(buildGate(slug)) ? "" : (buildGate(slug)?.feedback ?? ""),
                               })}
                             </Task>
-                            <Task id={slug + ":hygiene"} output={outputs.stshipGate} timeoutMs={HYGIENE_TIMEOUT_MS} continueOnFail>
+                            <Task
+                              id={slug + ":hygiene"}
+                              output={outputs.stshipGate}
+                              timeoutMs={HYGIENE_TIMEOUT_MS}
+                              continueOnFail
+                            >
                               {() => runHygiene({ key, entry, parentRev, gateKey: slug + ":build" })}
                             </Task>
                             <Task
@@ -1012,7 +1099,13 @@ export default smithers((ctx) => {
                               heartbeatTimeoutMs={HEARTBEAT_MS}
                               continueOnFail
                             >
-                              {selfReviewPrompt({ entry, parentRev, bookmark, implement: implementRow(slug), gate: buildGate(slug) })}
+                              {selfReviewPrompt({
+                                entry,
+                                parentRev,
+                                bookmark,
+                                implement: implementRow(slug),
+                                gate: buildGate(slug),
+                              })}
                             </Task>
                           </Sequence>
                         </Loop>
@@ -1039,7 +1132,7 @@ export default smithers((ctx) => {
                                     parentRev,
                                     bookmark,
                                     note: decisionNote(decisionRow(slug)),
-                                    hygieneFeedback: rowOk(reworkGate(slug)) ? "" : reworkGate(slug)?.feedback ?? "",
+                                    hygieneFeedback: rowOk(reworkGate(slug)) ? "" : (reworkGate(slug)?.feedback ?? ""),
                                   })}
                                 </Task>
                               ) : null}
@@ -1064,7 +1157,12 @@ export default smithers((ctx) => {
                               >
                                 {storyPrompt({ entry, parentRev, bookmark })}
                               </Task>
-                              <Task id={slug + ":artifact"} output={outputs.stshipArtifact} timeoutMs={ARTIFACT_TIMEOUT_MS} continueOnFail>
+                              <Task
+                                id={slug + ":artifact"}
+                                output={outputs.stshipArtifact}
+                                timeoutMs={ARTIFACT_TIMEOUT_MS}
+                                continueOnFail
+                              >
                                 {() =>
                                   buildLaneArtifact({
                                     key,
@@ -1086,12 +1184,22 @@ export default smithers((ctx) => {
                                 onDeny="continue"
                                 request={{
                                   title:
-                                    "PR " + (index + 1) + "/" + entries.length + " · " + slug + " · r" + (reviewIterations(slug) + 1),
+                                    "PR " +
+                                    (index + 1) +
+                                    "/" +
+                                    entries.length +
+                                    " · " +
+                                    slug +
+                                    " · r" +
+                                    (reviewIterations(slug) + 1),
                                   summary:
                                     (artifactRow(slug)?.headline ? artifactRow(slug)?.headline + "\n" : "") +
                                     "Artifact: " +
                                     (artifactRow(slug)?.artifactPath ??
-                                      join(reportsDirFor(repoRoot, key), artifactFileName(slug, reviewIterations(slug) + 1))) +
+                                      join(
+                                        reportsDirFor(repoRoot, key),
+                                        artifactFileName(slug, reviewIterations(slug) + 1),
+                                      )) +
                                     "\nHygiene: " +
                                     (greenEver(slug) ? "green" : "FAILING") +
                                     " · Self-review: " +
@@ -1140,7 +1248,9 @@ export default smithers((ctx) => {
                     wantPush: input.push,
                     createPrs: input.createPrs,
                     assembleOk: rowOk(assembleGate),
-                    approvedSlugs: entries.filter((entry) => decision(entry.slug) === "approved").map((entry) => entry.slug),
+                    approvedSlugs: entries
+                      .filter((entry) => decision(entry.slug) === "approved")
+                      .map((entry) => entry.slug),
                   })
                 }
               </Task>
@@ -1167,10 +1277,18 @@ export default smithers((ctx) => {
                     pushed: pushRow?.pushed === true,
                     detailsJson: JSON.stringify(details),
                     summary:
-                      green + "/" + entries.length + " lanes green, " + approved + " approved; assemble " +
-                      (rowOk(assembleGate) ? "GREEN" : "red/skipped") + "; " +
+                      green +
+                      "/" +
+                      entries.length +
+                      " lanes green, " +
+                      approved +
+                      " approved; assemble " +
+                      (rowOk(assembleGate) ? "GREEN" : "red/skipped") +
+                      "; " +
                       (pushRow?.pushed === true ? "pushed." : "not pushed.") +
-                      " Artifacts: " + reportsDirFor(repoRoot, key) + "/index.html",
+                      " Artifacts: " +
+                      reportsDirFor(repoRoot, key) +
+                      "/index.html",
                   };
                 }}
               </Task>

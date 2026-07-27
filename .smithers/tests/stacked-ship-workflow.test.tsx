@@ -19,13 +19,20 @@ function expectOrdered(executed: string[], ids: string[]) {
   let cursor = -1;
   for (const nodeId of ids) {
     const next = executed.indexOf(nodeId, cursor + 1);
-    expect(next, "expected " + nodeId + " after index " + cursor + " in " + JSON.stringify(executed)).toBeGreaterThan(cursor);
+    expect(next, "expected " + nodeId + " after index " + cursor + " in " + JSON.stringify(executed)).toBeGreaterThan(
+      cursor,
+    );
     cursor = next;
   }
 }
 
 type AnyRow = Record<string, unknown>;
-const row = (nodeId: string, value: AnyRow, iteration = 0) => ({ nodeId, iteration, iterationCount: iteration, ...value });
+const row = (nodeId: string, value: AnyRow, iteration = 0) => ({
+  nodeId,
+  iteration,
+  iterationCount: iteration,
+  ...value,
+});
 
 const render = (input: unknown = {}, outputs: Record<string, unknown[]> = {}) =>
   renderWorkflow(workflow, { input, outputs, workflowPath: WORKFLOW_PATH });
@@ -70,7 +77,13 @@ const SINGLE_PLAN_JSON = JSON.stringify({
   entries: [ENTRY_ONE],
 });
 
-const SETUP_ROW = { ready: true, stackRoot: "/tmp/stack", baseSha: "abcdef1234567890", originUrl: "", summary: "clone ready" };
+const SETUP_ROW = {
+  ready: true,
+  stackRoot: "/tmp/stack",
+  baseSha: "abcdef1234567890",
+  originUrl: "",
+  summary: "clone ready",
+};
 const laneRow = (slug: string) => ({
   laneSlug: slug,
   ready: true,
@@ -103,7 +116,11 @@ const redGate = (gateKey: string) => ({
   changedPathsJson: "[]",
   summary: "failing",
 });
-const approveReview = (slug: string) => ({ laneSlug: slug, verdict: "approve", feedback: "Ship it, scoped and tested." });
+const approveReview = (slug: string) => ({
+  laneSlug: slug,
+  verdict: "approve",
+  feedback: "Ship it, scoped and tested.",
+});
 const rejectReview = (slug: string) => ({
   laneSlug: slug,
   verdict: "reject",
@@ -476,13 +493,22 @@ describe("simulation (coverWorkflow drives async approvals in-band)", () => {
       },
       approvals: {
         "one:approval": ({ iteration }: { iteration: number }) =>
-          iteration === 0 ? { approved: false, note: "REWORK_NOTE_SENTINEL tighten the tests", decidedBy: "will" } : "approve",
+          iteration === 0
+            ? { approved: false, note: "REWORK_NOTE_SENTINEL tighten the tests", decidedBy: "will" }
+            : "approve",
       },
     });
     expect(result.status).toBe("finished");
     expect(result.executed.filter((nodeId: string) => nodeId === "one:rework")).toHaveLength(1);
     expect(result.executed.filter((nodeId: string) => nodeId === "one:artifact")).toHaveLength(2);
-    expectOrdered(result.executed, ["one:approval", "one:rework", "one:rework-hygiene", "one:story", "one:artifact", "one:approval"]);
+    expectOrdered(result.executed, [
+      "one:approval",
+      "one:rework",
+      "one:rework-hygiene",
+      "one:story",
+      "one:artifact",
+      "one:approval",
+    ]);
     expect(reworkPrompts).toHaveLength(1);
     expect(reworkPrompts[0]).toContain("REWORK_NOTE_SENTINEL");
     expect(result.approvals.map((decision) => decision.approved)).toEqual([false, true]);
@@ -576,7 +602,12 @@ describe("ui helpers", () => {
       artifact: { artifactPath: "/a.html", headline: "H" },
       decision: { approved: true },
     };
-    expect(laneView(base)).toMatchObject({ phase: "approved", hygiene: "green", artifactPath: "/a.html", headline: "H" });
+    expect(laneView(base)).toMatchObject({
+      phase: "approved",
+      hygiene: "green",
+      artifactPath: "/a.html",
+      headline: "H",
+    });
     expect(laneView({ ...base, workspace: {} }).phase).toBe("pending");
     expect(laneView({ ...base, decision: {} }).phase).toBe("reviewing");
     expect(laneView({ ...base, decision: { approved: false } }).phase).toBe("reworking");

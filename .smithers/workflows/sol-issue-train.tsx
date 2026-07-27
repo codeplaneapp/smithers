@@ -881,7 +881,8 @@ function fileOpsTodo(issueNumber: number, title: string, reason: string, stage: 
       filed: true,
       alreadyFiled: false,
       commented,
-      summary: "Filed ops TODO for " + marker + " (" + stage + ")" + (commented ? " and commented." : "; comment failed."),
+      summary:
+        "Filed ops TODO for " + marker + " (" + stage + ")" + (commented ? " and commented." : "; comment failed."),
     };
   } catch (error) {
     return {

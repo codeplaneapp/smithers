@@ -11,9 +11,7 @@ import { z } from "zod/v4";
 // ── Plan ─────────────────────────────────────────────────────────────────────
 
 export const prPlanEntrySchema = z.object({
-  slug: z
-    .string()
-    .regex(/^[a-z0-9][a-z0-9-]{1,47}$/, "slug must be kebab-case, 2-48 chars"),
+  slug: z.string().regex(/^[a-z0-9][a-z0-9-]{1,47}$/, "slug must be kebab-case, 2-48 chars"),
   title: z.string().min(8),
   goal: z.string().min(20),
   scopes: z.array(z.string().min(1)).min(1),
@@ -59,7 +57,8 @@ export function parseStackPlan(raw: unknown, maxPrs: number): StackPlan {
 export function planFromRow(row: unknown, maxPrs: number): StackPlan | null {
   if (typeof row !== "object" || row === null) return null;
   const record = row as Record<string, unknown>;
-  const inner = typeof record.row === "object" && record.row !== null ? (record.row as Record<string, unknown>) : record;
+  const inner =
+    typeof record.row === "object" && record.row !== null ? (record.row as Record<string, unknown>) : record;
   const coerce = (value: unknown): unknown => {
     if (typeof value !== "string") return value;
     try {
@@ -132,7 +131,7 @@ export function commitMessageCheck(description: string): { ok: boolean; reason: 
     };
   }
   if (/^[a-zA-Z0-9]+$/.test(match[1])) {
-    return { ok: false, reason: "description must start with an emoji, got \"" + match[1] + '"' };
+    return { ok: false, reason: 'description must start with an emoji, got "' + match[1] + '"' };
   }
   return { ok: true, reason: "" };
 }
@@ -145,7 +144,11 @@ export function commitMessageCheck(description: string): { ok: boolean; reason: 
 export function pathAllowed(path: string, scopes: string[]): boolean {
   const clean = path.replace(/\\/g, "/").replace(/^\.\//, "");
   for (const rawScope of scopes) {
-    const scope = rawScope.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/\*\*$/, "").replace(/\/$/, "");
+    const scope = rawScope
+      .replace(/\\/g, "/")
+      .replace(/^\.\//, "")
+      .replace(/\/\*\*$/, "")
+      .replace(/\/$/, "");
     if (rawScope === "**" || scope === "**" || scope === "") return true;
     if (clean === scope) return true;
     if (clean.startsWith(scope + "/")) return true;
@@ -267,9 +270,7 @@ export function lanePhase(state: {
 export type CommandStep = { argv: string[]; cwd: "root" | "workspace" };
 
 export function cloneCommands(options: { sourceRoot: string; originUrl: string; destDir: string }): string[][] {
-  const commands: string[][] = [
-    ["git", "clone", "--no-hardlinks", options.sourceRoot, options.destDir],
-  ];
+  const commands: string[][] = [["git", "clone", "--no-hardlinks", options.sourceRoot, options.destDir]];
   if (options.originUrl) {
     commands.push(["git", "-C", options.destDir, "remote", "set-url", "origin", options.originUrl]);
   }

@@ -29,19 +29,13 @@ export type WorkflowCoverageApproval = {
   readonly output?: unknown;
 };
 
-export type WorkflowCoverageApprovalValue =
-  | boolean
-  | "approve"
-  | "deny"
-  | WorkflowCoverageApproval;
+export type WorkflowCoverageApprovalValue = boolean | "approve" | "deny" | WorkflowCoverageApproval;
 
 export type WorkflowCoverageApprovalResolver = (
   context: WorkflowCoverageTaskContext,
 ) => WorkflowCoverageApprovalValue | Promise<WorkflowCoverageApprovalValue>;
 
-export type WorkflowCoverageEventResolver = (
-  context: WorkflowCoverageEventContext,
-) => unknown | Promise<unknown>;
+export type WorkflowCoverageEventResolver = (context: WorkflowCoverageEventContext) => unknown | Promise<unknown>;
 
 export type WorkflowCoverageTaskContext = {
   readonly nodeId: string;
@@ -293,11 +287,7 @@ function taskContext(task: TaskDescriptor, input: unknown, passIndex: number): W
   };
 }
 
-function lookupByTask<T>(
-  values: Readonly<Record<string, T>>,
-  task: TaskDescriptor,
-  extraKey?: string,
-): T | undefined {
+function lookupByTask<T>(values: Readonly<Record<string, T>>, task: TaskDescriptor, extraKey?: string): T | undefined {
   if (Object.prototype.hasOwnProperty.call(values, task.nodeId)) return values[task.nodeId];
   if (task.label && Object.prototype.hasOwnProperty.call(values, task.label)) return values[task.label];
   if (extraKey && Object.prototype.hasOwnProperty.call(values, extraKey)) return values[extraKey];
@@ -358,8 +348,7 @@ async function eventPayloadFor(
   const signalValue = options.signals ? lookupByTask(options.signals, task, eventName) : undefined;
   const configured = eventValue ?? signalValue;
   if (typeof configured !== "function") return configured === undefined ? schemaExample(task) : configured;
-  const correlationId =
-    typeof task.meta?.__correlationId === "string" ? task.meta.__correlationId : undefined;
+  const correlationId = typeof task.meta?.__correlationId === "string" ? task.meta.__correlationId : undefined;
   return configured({
     ...taskContext(task, input, passIndex),
     eventName,
@@ -482,9 +471,7 @@ async function runCoveragePass<Schema>(
           };
         }
         if (isIsolatedSideEffect(task)) {
-          return options.executeSideEffects
-            ? { handled: false }
-            : { handled: true, value: schemaExample(task) };
+          return options.executeSideEffects ? { handled: false } : { handled: true, value: schemaExample(task) };
         }
         if (!options.executeCompute && task.computeFn) {
           return { handled: true, value: schemaExample(task) };
@@ -535,8 +522,7 @@ async function runCoveragePass<Schema>(
           state.executionOrder.push(task.nodeId);
           appendOutput(state.externalTaskOutputs, task.nodeId, payload);
           if (task.outputTableName) appendOutput(state.externalTableOutputs, task.outputTableName, payload);
-          const correlationId =
-            typeof task.meta?.__correlationId === "string" ? task.meta.__correlationId : null;
+          const correlationId = typeof task.meta?.__correlationId === "string" ? task.meta.__correlationId : null;
           return runEffect(session.eventReceived(reason.eventName, payload, correlationId));
         }
         if (reason._tag === "Timer") {
@@ -585,11 +571,7 @@ async function runCoveragePass<Schema>(
     (item) => item.nodeId !== undefined && sim.task(item.nodeId).status === "failed",
   );
   const errors =
-    finalTaskFailures.length > 0
-      ? finalTaskFailures
-      : runError !== undefined
-        ? [failure(passIndex, runError)]
-        : [];
+    finalTaskFailures.length > 0 ? finalTaskFailures : runError !== undefined ? [failure(passIndex, runError)] : [];
   const executedSet = new Set(state.executionOrder);
   const definedNodes = [...state.defined];
   return {
@@ -641,9 +623,7 @@ export async function coverWorkflow<Schema = unknown>(
   const passes: WorkflowCoveragePass[] = [];
   try {
     for (let passIndex = 0; passIndex < inputs.length; passIndex += 1) {
-      passes.push(
-        await runCoveragePass(workflow, options, inputs[passIndex], passIndex, rootDir, maxLoopIterations),
-      );
+      passes.push(await runCoveragePass(workflow, options, inputs[passIndex], passIndex, rootDir, maxLoopIterations));
     }
   } finally {
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
@@ -706,9 +686,7 @@ export function expectFullCoverage(result: WorkflowCoverageResult): WorkflowCove
   }
   if (result.errors.length > 0) {
     failures.push(
-      `errors: ${result.errors
-        .map((item) => `${item.nodeId ? `${item.nodeId}: ` : ""}${item.message}`)
-        .join("; ")}`,
+      `errors: ${result.errors.map((item) => `${item.nodeId ? `${item.nodeId}: ` : ""}${item.message}`).join("; ")}`,
     );
   }
   if (failures.length > 0) {

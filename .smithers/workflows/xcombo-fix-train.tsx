@@ -275,10 +275,7 @@ function solChain(cwd: string) {
 }
 
 function opusChain(cwd: string) {
-  return [
-    new ClaudeCodeAgent({ model: "claude-opus-5", cwd }),
-    new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd }),
-  ];
+  return [new ClaudeCodeAgent({ model: "claude-opus-5", cwd }), new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd })];
 }
 
 function fableChain(cwd: string) {
@@ -380,7 +377,13 @@ async function setupTrain(key: string, baseRef: string): Promise<Setup> {
       try {
         git(["worktree", "add", path, branch], repoRoot);
       } catch (inner) {
-        return { ready: false, trainPath: path, branch, baseSha, summary: "worktree add failed: " + String(inner).slice(0, 2_000) };
+        return {
+          ready: false,
+          trainPath: path,
+          branch,
+          baseSha,
+          summary: "worktree add failed: " + String(inner).slice(0, 2_000),
+        };
       }
     }
   }
@@ -389,14 +392,32 @@ async function setupTrain(key: string, baseRef: string): Promise<Setup> {
     try {
       git(["cherry-pick", AUDIT_TESTS_COMMIT], path);
     } catch (error) {
-      return { ready: false, trainPath: path, branch, baseSha, summary: "cherry-pick of audit tests failed: " + String(error).slice(0, 2_000) };
+      return {
+        ready: false,
+        trainPath: path,
+        branch,
+        baseSha,
+        summary: "cherry-pick of audit tests failed: " + String(error).slice(0, 2_000),
+      };
     }
   }
   const install = await runProcess("pnpm", ["install", "--frozen-lockfile"], path, 45 * 60_000);
   if (install.exitCode !== 0) {
-    return { ready: false, trainPath: path, branch, baseSha, summary: "pnpm install failed: " + (install.stderr || install.stdout).slice(-4_000) };
+    return {
+      ready: false,
+      trainPath: path,
+      branch,
+      baseSha,
+      summary: "pnpm install failed: " + (install.stderr || install.stdout).slice(-4_000),
+    };
   }
-  return { ready: true, trainPath: path, branch, baseSha, summary: "Train worktree ready at " + path + " (base " + baseSha.slice(0, 12) + ", audit tests cherry-picked)." };
+  return {
+    ready: true,
+    trainPath: path,
+    branch,
+    baseSha,
+    summary: "Train worktree ready at " + path + " (base " + baseSha.slice(0, 12) + ", audit tests cherry-picked).",
+  };
 }
 
 /** Run one xcombo test file from its owning package dir; deterministic gate. */
@@ -410,7 +431,8 @@ async function runTestFiles(trainPath: string, gateKey: string, testFiles: strin
     const result = await runProcess("bun", ["test", rel], join(trainPath, pkgDir), timeoutMs);
     if (result.exitCode !== 0) {
       worstExit = result.exitCode;
-      failTail += "\n== " + file + " (exit " + result.exitCode + ") ==\n" + (result.stderr + "\n" + result.stdout).slice(-3_000);
+      failTail +=
+        "\n== " + file + " (exit " + result.exitCode + ") ==\n" + (result.stderr + "\n" + result.stdout).slice(-3_000);
     }
   }
   return {
@@ -428,11 +450,24 @@ async function runFullGate(trainPath: string, gateKey: string): Promise<Gate> {
   const xcombo = await runTestFiles(trainPath, gateKey + ":xcombo", allXcombo, GATE_TIMEOUT_MS);
   let failTail = xcombo.passed ? "" : xcombo.failTail;
   let worstExit = xcombo.exitCode;
-  for (const pkg of ["packages/graph", "packages/components", "packages/engine", "packages/time-travel", "packages/db", "packages/server"]) {
+  for (const pkg of [
+    "packages/graph",
+    "packages/components",
+    "packages/engine",
+    "packages/time-travel",
+    "packages/db",
+    "packages/server",
+  ]) {
     const result = await runProcess("pnpm", ["test"], join(trainPath, pkg), GATE_TIMEOUT_MS);
     if (result.exitCode !== 0) {
       worstExit = result.exitCode;
-      failTail += "\n== " + pkg + " suite (exit " + result.exitCode + ") ==\n" + (result.stderr + "\n" + result.stdout).slice(-3_000);
+      failTail +=
+        "\n== " +
+        pkg +
+        " suite (exit " +
+        result.exitCode +
+        ") ==\n" +
+        (result.stderr + "\n" + result.stdout).slice(-3_000);
     }
   }
   return {
@@ -445,7 +480,8 @@ async function runFullGate(trainPath: string, gateKey: string): Promise<Gate> {
 }
 
 async function pushTrain(trainPath: string, wantPush: boolean, gatePassed: boolean): Promise<Push> {
-  if (!wantPush) return { pushed: false, headSha: "", summary: "push disabled by input; train branch left for manual landing." };
+  if (!wantPush)
+    return { pushed: false, headSha: "", summary: "push disabled by input; train branch left for manual landing." };
   if (!gatePassed) return { pushed: false, headSha: "", summary: "final gate red; refusing to push." };
   try {
     git(["fetch", "origin", "main"], trainPath);
@@ -455,20 +491,32 @@ async function pushTrain(trainPath: string, wantPush: boolean, gatePassed: boole
       try {
         git(["rebase", "--abort"], trainPath);
       } catch {}
-      return { pushed: false, headSha: "", summary: "rebase onto origin/main conflicted; land manually. " + String(error).slice(0, 1_000) };
+      return {
+        pushed: false,
+        headSha: "",
+        summary: "rebase onto origin/main conflicted; land manually. " + String(error).slice(0, 1_000),
+      };
     }
     const head = git(["rev-parse", "HEAD"], trainPath);
     git(["push", "origin", "HEAD:refs/heads/main"], trainPath);
     return { pushed: true, headSha: head, summary: "pushed " + head.slice(0, 12) + " to origin/main." };
   } catch (error) {
-    return { pushed: false, headSha: "", summary: "push failed (non-fast-forward or auth): " + String(error).slice(0, 1_000) };
+    return {
+      pushed: false,
+      headSha: "",
+      summary: "push failed (non-fast-forward or auth): " + String(error).slice(0, 1_000),
+    };
   }
 }
 
 function parseInput(raw: unknown): Input {
   const record = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
   const asBool = (value: unknown, fallback: boolean) =>
-    typeof value === "boolean" ? value : typeof value === "string" ? !["0", "false", "off", "no", ""].includes(value.toLowerCase()) : fallback;
+    typeof value === "boolean"
+      ? value
+      : typeof value === "string"
+        ? !["0", "false", "off", "no", ""].includes(value.toLowerCase())
+        : fallback;
   const asNum = (value: unknown, fallback: number) => {
     const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
     return Number.isFinite(parsed) ? parsed : fallback;
@@ -528,7 +576,9 @@ function reviewPrompt(group: GroupSpec, fix: Fix | undefined, gate: Gate | undef
     issueList,
     "",
     "Fixer's report: " + (fix ? fix.status + " - " + fix.summary : "none produced") + ".",
-    "Deterministic gate result for the pinned file(s): " + (gate ? (gate.passed ? "GREEN" : "RED, tail:\n" + gate.failTail.slice(-2_500)) : "not yet run") + ".",
+    "Deterministic gate result for the pinned file(s): " +
+      (gate ? (gate.passed ? "GREEN" : "RED, tail:\n" + gate.failTail.slice(-2_500)) : "not yet run") +
+      ".",
     "",
     "REVIEW CONTRACT:",
     "1. Inspect the actual commits: git log --oneline -15 and git diff for the recent group commits. Judge the",
@@ -552,7 +602,13 @@ function polishPrompt(seat: string, fullGate: Gate | undefined): string {
     "You are the " + seat + " seat doing the FINAL review-and-polish pass over the whole xcombo fix train in this",
     "worktree. Every group has been fixed and reviewed individually; your job is the cross-cutting pass.",
     "",
-    "Full deterministic gate: " + (fullGate ? (fullGate.passed ? "GREEN (all xcombo files + 6 package suites)" : "RED, tail:\n" + fullGate.failTail.slice(-3_000)) : "not yet run") + ".",
+    "Full deterministic gate: " +
+      (fullGate
+        ? fullGate.passed
+          ? "GREEN (all xcombo files + 6 package suites)"
+          : "RED, tail:\n" + fullGate.failTail.slice(-3_000)
+        : "not yet run") +
+      ".",
     "",
     "DO, in order:",
     "1. If the gate is red, fix the remaining failures first (product source over test edits; never weaken pinned",
@@ -591,7 +647,9 @@ export default smithers((ctx) => {
     const review = groupReview(groupKey);
     return review && review.verdict === "reject" ? review.feedback : "";
   };
-  const allGroupsSettled = GROUPS.every((group) => groupReview(group.key) !== undefined || groupFix(group.key) !== undefined);
+  const allGroupsSettled = GROUPS.every(
+    (group) => groupReview(group.key) !== undefined || groupFix(group.key) !== undefined,
+  );
   const fullGate = latest<Gate>(ctx, outputs.xfixGate, "full-gate");
   const solPolish = latest<Polish>(ctx, outputs.xfixPolish, "polish-sol");
   const fablePolish = latest<Polish>(ctx, outputs.xfixPolish, "polish-fable");
@@ -697,11 +755,22 @@ export default smithers((ctx) => {
                   pushed: pushRow?.pushed === true,
                   detailsJson: JSON.stringify(details),
                   summary:
-                    green + "/" + GROUPS.length + " groups green+approved; final gate " +
-                    (finalGate?.passed === true ? "GREEN" : "red/pending") + "; " +
-                    (pushRow?.pushed === true ? "pushed to main." : "not pushed (train branch " + (setup?.branch ?? "") + " ready). ") +
-                    "Sol polish: " + (solPolish?.status ?? "none") + "; Fable polish: " + (fablePolish?.status ?? "none") +
-                    ". Umbrella #" + UMBRELLA_ISSUE + ".",
+                    green +
+                    "/" +
+                    GROUPS.length +
+                    " groups green+approved; final gate " +
+                    (finalGate?.passed === true ? "GREEN" : "red/pending") +
+                    "; " +
+                    (pushRow?.pushed === true
+                      ? "pushed to main."
+                      : "not pushed (train branch " + (setup?.branch ?? "") + " ready). ") +
+                    "Sol polish: " +
+                    (solPolish?.status ?? "none") +
+                    "; Fable polish: " +
+                    (fablePolish?.status ?? "none") +
+                    ". Umbrella #" +
+                    UMBRELLA_ISSUE +
+                    ".",
                 };
               }}
             </Task>

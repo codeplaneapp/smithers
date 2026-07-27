@@ -273,25 +273,33 @@ Returns combined stdout and stderr; working directory defaults to `rootDir`. Tim
 
 Controlled by `allowNetwork` in `RunOptions`, `--allow-network` on CLI, or server config. Default: blocked.
 
+Blocked means no *egress*, not no sockets. Loopback stays reachable
+(`localhost`, `127.0.0.0/8`, `::1`, `0.0.0.0`, `*.localhost`, unix sockets),
+so local test compositions (a dev server, a local postgres, a socket
+simulator) run under the default.
+
 When blocked, Smithers matches the invoked executable, arguments that are
-themselves URLs, and git's resolved subcommand. Argument *text* is never
+themselves remote URLs, and git's resolved subcommand. Argument *text* is never
 scanned, so local commands that merely mention a network tool or a URL still
 run: `git commit -m "fetch upstream"`, `echo "run npm install"`.
 
 | Category | Match |
 |---|---|
-| HTTP clients | executable basename `curl` or `wget` |
-| URL arguments | an argument that *is* a `http://` or `https://` URL (the whole argument, or the value in `--flag=<url>`) |
-| Package managers | executable basename `npm`, `bun`, or `pip` |
+| HTTP clients | executable basename `curl` or `wget`, unless every URL it carries is loopback |
+| URL arguments | an argument that *is* a `http://` or `https://` URL (the whole argument, or the value in `--flag=<url>`) with a non-loopback host |
+| Package managers | executable basename `npm`, `bun`, or `pip` (they reach registries regardless of argv) |
 | Git remote ops | `git` whose subcommand is `push`, `pull`, `fetch`, `clone`, or `remote` |
 | Shell payloads | a command position inside `sh -c` / `bash -lc "..."` matching any row above |
 
-Local git commands (`git status`, `git diff`, `git log`) are allowed.
+Local git commands (`git status`, `git diff`, `git log`) are allowed. Denials
+throw `TOOL_NETWORK_DISABLED` / `TOOL_GIT_REMOTE_DISABLED` with a message
+naming the `allowNetwork` escape hatch.
 
 <Warning>
 **Enforcement vs. bypassable denylist.** True OS-level network isolation runs
 **only on macOS**: a blocked `bash` executes under `sandbox-exec` with a
-network-deny profile (when available). On Linux and every other platform,
+deny-egress profile that still permits loopback and unix sockets (when
+available). On Linux and every other platform,
 including Smithers' CI, cloud, and production environments, `allowNetwork:false`
 cannot enforce a kernel sandbox and falls back to the
 executable/URL denylist above: best-effort defense-in-depth, not a security

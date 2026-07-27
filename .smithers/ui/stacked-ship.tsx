@@ -105,7 +105,8 @@ export function laneView(rows: {
   const artifact = unwrap(rows.artifact);
   const hasWorkspace = workspace.ready === true || workspace.ready === 1;
   const hygieneRow = unwrap(rows.hygiene);
-  const hygiene: LaneView["hygiene"] = hygieneRow.gateKey === undefined ? "none" : rowIsOk(rows.hygiene) ? "green" : "red";
+  const hygiene: LaneView["hygiene"] =
+    hygieneRow.gateKey === undefined ? "none" : rowIsOk(rows.hygiene) ? "green" : "red";
   const decision = decisionLabel(rows.decision);
   const selfReview = typeof review.verdict === "string" ? review.verdict : "none";
   const phase = !hasWorkspace
@@ -149,7 +150,17 @@ function runIdFromUrl(): string | undefined {
 
 // ── Lane card ────────────────────────────────────────────────────────────────
 
-function LaneCard({ runId, slug, title, index }: { runId: string | undefined; slug: string; title: string; index: number }) {
+function LaneCard({
+  runId,
+  slug,
+  title,
+  index,
+}: {
+  runId: string | undefined;
+  slug: string;
+  title: string;
+  index: number;
+}) {
   const workspace = useGatewayNodeOutput({ runId, nodeId: slug + ":workspace", iteration: 0 });
   const hygiene = useGatewayNodeOutput({ runId, nodeId: slug + ":hygiene" });
   const review = useGatewayNodeOutput({ runId, nodeId: slug + ":self-review" });
@@ -194,12 +205,14 @@ function StackedShipApp() {
   const actions = useGatewayActions();
 
   const shipRuns = useMemo(
-    () => ((runsQuery.data ?? []) as RunSummary[]).filter((run) => !run.workflowKey || run.workflowKey === WORKFLOW_KEY),
+    () =>
+      ((runsQuery.data ?? []) as RunSummary[]).filter((run) => !run.workflowKey || run.workflowKey === WORKFLOW_KEY),
     [runsQuery.data],
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? shipRuns[0]?.runId;
   const activeRunDetail = useGatewayRun(activeRunId);
-  const activeRun = (activeRunDetail.data as RunSummary | undefined) ?? shipRuns.find((run) => run.runId === activeRunId);
+  const activeRun =
+    (activeRunDetail.data as RunSummary | undefined) ?? shipRuns.find((run) => run.runId === activeRunId);
   const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
   const finished = finishedNodeCount((stream.events ?? []) as unknown[]);
 
@@ -211,7 +224,13 @@ function StackedShipApp() {
   const summaryRow = unwrap(summaryQuery.data);
 
   async function refresh() {
-    await Promise.all([runsQuery.refetch(), activeRunDetail.refetch(), planQuery.refetch(), setupQuery.refetch(), summaryQuery.refetch()]);
+    await Promise.all([
+      runsQuery.refetch(),
+      activeRunDetail.refetch(),
+      planQuery.refetch(),
+      setupQuery.refetch(),
+      summaryQuery.refetch(),
+    ]);
   }
   async function launch() {
     setBusy(true);
@@ -289,7 +308,11 @@ function StackedShipApp() {
           {shipRuns.length === 0 ? <EmptyState title="No runs yet." /> : null}
         </TabsContent>
         <TabsContent value="tree">
-          <RunTree runId={activeRunId} activeNodeId={selectedNodeId} onSelectNode={(node) => setSelectedNodeId(node.id)} />
+          <RunTree
+            runId={activeRunId}
+            activeNodeId={selectedNodeId}
+            onSelectNode={(node) => setSelectedNodeId(node.id)}
+          />
           <NodeOutputView runId={activeRunId} nodeId={selectedNodeId} />
         </TabsContent>
         <TabsContent value="events">

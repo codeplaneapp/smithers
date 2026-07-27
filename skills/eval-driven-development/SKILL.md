@@ -86,7 +86,8 @@ Case shape:
    ```
 
 5. Read the report at `.smithers/evals/<suite>.json`; fix the workflow, not
-   the test — unless the case encodes the criterion wrong.
+   the test — unless the case encodes the criterion wrong, or the failure is
+   environmental (see the classify rule below).
 6. For graded, non-binary quality, attach scorers (`faithfulness`,
    `relevancy`, `schemaAdherence`, `llmJudge`) to the load-bearing `<Task>`
    and read them with `smithers scores <run-id>`. Assertions are the hard
@@ -96,6 +97,23 @@ Case shape:
 
 ## Discipline rules
 
+- **Classify red before acting.** Every failed case is one of three things:
+  a product bug (fix the workflow), a wrong case (fix the case, with spec-
+  change scrutiny), or a harness/environment fault (fix the harness). The
+  report marks known environment faults INCONCLUSIVE and `smithers eval`
+  exits `5` (not `1`) when they are the only reds: on that signal repair the
+  harness and never touch the workflow. A red that could not have observed
+  the workflow (connection refused, TLS failure, network denied, missing
+  binary, OOM, rate limit) is not evidence against it.
+- **Green ratchet.** If a case that passed in round N fails in round N+1 and
+  the only intervening change was to the harness or environment, that is a
+  harness regression: revert the harness change. Never widen a suite's
+  acceptance criteria while it is red; get back to the last green slice
+  first.
+- **Circuit breaker.** After 3 consecutive rounds with zero net new green
+  cases, stop iterating. Change strategy (gather evidence, widen scope) or
+  escalate to a human via `smithers ask-human` with what you know. More
+  rounds against the same failure signature is an incident, not progress.
 - **Never tune against holdout.** No prompt edits, model picks, or
   optimization acceptance based on holdout results. Green holdout = ship;
   red holdout = your dev split stopped representing the criteria — fix the

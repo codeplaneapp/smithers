@@ -3672,6 +3672,10 @@ test("covers the workflow", async () => {
 
 By default, `coverWorkflow` calls `expectFullCoverage(result)` before returning. The assertion requires every pass to finish, every rendered task to execute, every `expectedNodes` entry to render, and every structured output to pass its schema. Set `assert: false` to inspect a failing result, or call `expectFullCoverage` later.
 
+<Warning>
+`coverWorkflow` checks workflow STRUCTURE, not behavior: agents, sandboxes, subflows, compute, and side effects are stubbed, so a red here is a graph or schema defect, never proof about your product. Keep the two loops separate. Behavior against real services belongs to `bunx smithers-orchestrator eval` with real runs, and when an eval case dies on a harness or environment fault (connection refused, TLS, network denied) it grades INCONCLUSIVE and the command exits `5`: repair the harness, do not iterate on the workflow. Do not respond to environment faults by building an ever-more-hermetic simulation of production inside your test harness; that trades observed behavior for reproducibility of a world that is not yours.
+</Warning>
+
 The result includes:
 
 | Field | Meaning |
@@ -8477,7 +8481,7 @@ type RunOptions = {
   rootDir?: string;
   keepWorktrees?: boolean;          // default false; keep this run's <Worktree> dirs instead of reaping on success (SMITHERS_KEEP_WORKTREES=1 process-wide)
   logDir?: string | null;
-  allowNetwork?: boolean;           // default false; bash tool network access
+  allowNetwork?: boolean;           // default false; bash tool egress (loopback always allowed)
   maxOutputBytes?: number;          // default 200000
   toolTimeoutMs?: number;           // default 60000
   hot?: boolean | HotReloadOptions;
@@ -10484,8 +10488,8 @@ try {
 | `TOOL_CONTENT_TOO_LARGE` | A write operation exceeds the configured content size limit. | -- |
 | `TOOL_PATCH_TOO_LARGE` | An edit patch exceeds the configured patch size limit. | -- |
 | `TOOL_PATCH_FAILED` | A unified diff patch cannot be applied to the target file. | -- |
-| `TOOL_NETWORK_DISABLED` | The bash tool tries to access the network while network access is disabled. | -- |
-| `TOOL_GIT_REMOTE_DISABLED` | The bash tool attempts a remote git operation while network access is disabled. | -- |
+| `TOOL_NETWORK_DISABLED` | The bash tool tries to reach a non-loopback endpoint while network access is disabled. Loopback (localhost, `127.0.0.1`, `*.localhost`, unix sockets) is always allowed. | Pass `--allow-network` (CLI) or `allowNetwork: true` (run options) when the command genuinely needs egress. |
+| `TOOL_GIT_REMOTE_DISABLED` | The bash tool attempts a remote git operation while network access is disabled. | Pass `--allow-network` (CLI) or `allowNetwork: true` (run options), or perform the remote operation outside the sandboxed tool. |
 | `TOOL_COMMAND_FAILED` | A bash tool command exits with a non-zero status. | -- |
 | `TOOL_GREP_FAILED` | The grep tool fails with an rg execution error. | -- |
 

@@ -2,12 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { createSmithers, HumanTask, Signal } from "smithers-orchestrator";
-import {
-  coverWorkflow,
-  expectFullCoverage,
-  fakeAgent,
-  WorkflowCoverageError,
-} from "../src/index.ts";
+import { coverWorkflow, expectFullCoverage, fakeAgent, WorkflowCoverageError } from "../src/index.ts";
 
 const valueSchema = z.object({ value: z.string() });
 
@@ -84,9 +79,7 @@ describe("coverWorkflow", () => {
 
     const result = await coverWorkflow(workflow, { expectedNodes: ["gate", "approved-work"] });
 
-    expect(result.approvals).toEqual([
-      expect.objectContaining({ nodeId: "gate", approved: true }),
-    ]);
+    expect(result.approvals).toEqual([expect.objectContaining({ nodeId: "gate", approved: true })]);
     expect(result.executed).toEqual(["gate", "approved-work"]);
     expect(result.taskOutputs.gate[0]).toMatchObject({ approved: true });
   });
@@ -161,9 +154,9 @@ describe("coverWorkflow", () => {
   });
 
   test("reports unreached nodes clearly and honors an allowlist", async () => {
-    await expect(
-      coverWorkflow(agentWorkflow(), { expectedNodes: ["work", "missing-branch"] }),
-    ).rejects.toThrow('unreached expected nodes: ["missing-branch"]');
+    await expect(coverWorkflow(agentWorkflow(), { expectedNodes: ["work", "missing-branch"] })).rejects.toThrow(
+      'unreached expected nodes: ["missing-branch"]',
+    );
 
     const allowed = await coverWorkflow(agentWorkflow(), {
       expectedNodes: ["work"],
@@ -196,9 +189,9 @@ describe("coverWorkflow", () => {
       </Workflow>
     ));
 
-    await expect(
-      coverWorkflow(workflow, { signals: { signal: { ok: "no" } } }),
-    ).rejects.toThrow("invalid structured outputs: signal");
+    await expect(coverWorkflow(workflow, { signals: { signal: { ok: "no" } } })).rejects.toThrow(
+      "invalid structured outputs: signal",
+    );
   });
 
   test("advances retry backoff without retaining a recovered error", async () => {
@@ -226,11 +219,7 @@ describe("coverWorkflow", () => {
     const { Workflow, Task, smithers, outputs } = createSmithers(schemas, { dbPath: ":memory:" });
     const workflow = smithers((ctx) => (
       <Workflow name="passes">
-        <Task
-          id={ctx.input.side}
-          output={outputs.value}
-          agent={fakeAgent(valueSchema, { value: "unused" })}
-        >
+        <Task id={ctx.input.side} output={outputs.value} agent={fakeAgent(valueSchema, { value: "unused" })}>
           Side
         </Task>
       </Workflow>
@@ -252,11 +241,7 @@ describe("coverWorkflow", () => {
     const { Workflow, Task, smithers, outputs } = createSmithers(schemas, { dbPath: ":memory:" });
     const workflow = smithers(() => (
       <Workflow name="side-effects">
-        <Task
-          id="write"
-          output={outputs.value}
-          sideEffect={{ idempotent: false }}
-        >
+        <Task id="write" output={outputs.value} sideEffect={{ idempotent: false }}>
           {() => {
             calls += 1;
             return { value: "wrote" };
@@ -279,14 +264,8 @@ describe("coverWorkflow", () => {
   });
 
   test("validates option errors", async () => {
-    await expect(
-      coverWorkflow(agentWorkflow(), { input: {}, inputs: [{}] }),
-    ).rejects.toThrow("either input or inputs");
-    await expect(
-      coverWorkflow(agentWorkflow(), { inputs: [] }),
-    ).rejects.toThrow("at least one");
-    await expect(
-      coverWorkflow(agentWorkflow(), { maxLoopIterations: 0 }),
-    ).rejects.toThrow("positive integer");
+    await expect(coverWorkflow(agentWorkflow(), { input: {}, inputs: [{}] })).rejects.toThrow("either input or inputs");
+    await expect(coverWorkflow(agentWorkflow(), { inputs: [] })).rejects.toThrow("at least one");
+    await expect(coverWorkflow(agentWorkflow(), { maxLoopIterations: 0 })).rejects.toThrow("positive integer");
   });
 });
