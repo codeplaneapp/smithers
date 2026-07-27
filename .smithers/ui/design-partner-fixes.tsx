@@ -335,8 +335,7 @@ function App() {
 
   return (
     <main className="shell" data-testid="design-partner-fixes-ui">
-      <style>{styles}</style>
-      <WorkflowUiStyles mode="theme" />
+      <WorkflowUiStyles mode="theme" extra={styles} />
       <header className="topbar">
         <h1>Design Partner Fixes · elizaOS + aomi</h1>
         <span className="pill">
