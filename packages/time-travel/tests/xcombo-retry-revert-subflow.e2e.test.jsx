@@ -234,9 +234,11 @@ describe("xcombo retry-task on a FAILED <Subflow> child run", () => {
         expect((await Effect.runPromise(runWorkflow(parent, { input: {}, runId }))).status).toBe("failed");
         const childRunId = `${runId}:child:review:0`;
         const outputBefore = await db.select().from(tables.expensiveOut);
-        expect((await adapter.listNodes(childRunId)).map(({ nodeId, state }) => `${nodeId}=${state}`).sort()).toEqual(
-          ["expensive=finished", "flaky=failed", "tail=pending"],
-        );
+        expect((await adapter.listNodes(childRunId)).map(({ nodeId, state }) => `${nodeId}=${state}`).sort()).toEqual([
+          "expensive=finished",
+          "flaky=failed",
+          "tail=pending",
+        ]);
 
         expect((await retryTask(adapter, { runId, nodeId: "review" })).success).toBe(true);
         expect((await adapter.getNode(childRunId, "expensive", 0))?.state).toBe("finished");
@@ -421,15 +423,22 @@ describe("xcombo attempt budgets across the parent/child boundary", () => {
         const runId = "xcombo-subflow-attempt-budget-run";
         const result = await Effect.runPromise(runWorkflow(parent, { input: {}, runId }));
         const childRunId = `${runId}:child:review:0`;
+        const childRuns = (await adapter.listRuns(100)).filter((run) => run.parentRunId === runId);
         const diagnostics = JSON.stringify({
           status: result.status,
           childCalls,
           parent: await dumpRun(adapter, runId),
           child: await dumpRun(adapter, childRunId),
+          childRunIds: childRuns.map((run) => run.runId),
         });
         // 3 parent attempts must mean 3 child executions of the failing task.
         expect(childCalls, `parent retries never reached the child: ${diagnostics}`).toBe(3);
         expect(result.status, diagnostics).toBe("finished");
+        expect(
+          childRuns.map((run) => run.runId),
+          diagnostics,
+        ).toEqual([childRunId]);
+        expect((await adapter.getRun(childRunId))?.status, diagnostics).toBe("finished");
       } finally {
         cleanup();
       }

@@ -4,6 +4,7 @@ import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { loadRunOutputRowsEffect } from "@smithers-orchestrator/db/snapshot";
 import { requireTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
+import { retryTask } from "@smithers-orchestrator/time-travel/retry-task";
 import { makeAbortError } from "./effect/bridge-utils.js";
 import { isPidAlive, parseRuntimeOwnerPid } from "./runtime-owner.js";
 import { getWorkflowMakeBridgeRuntime } from "./effect/workflow-make-bridge.js";
@@ -94,6 +95,41 @@ function normalizeChildOutput(runResult) {
  */
 function buildChildWorkflowRunId(parentRunId, stepId, iteration) {
   return [parentRunId, "child", stepId, String(iteration)].join(":");
+}
+/**
+ * Give an automatically retried Subflow a fresh budget for its failed child
+ * work while preserving completed nodes and the deterministic child run id.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} childRunId
+ * @returns {Promise<boolean>}
+ */
+async function resetFailedChildRun(adapter, childRunId) {
+  const nodes = await adapter.listNodes(childRunId);
+  const failedNodes = new Map(
+    nodes.filter((node) => node.state === "failed").map((node) => [`${node.nodeId}::${node.iteration ?? 0}`, node]),
+  );
+  if (failedNodes.size === 0) return false;
+  const attempts = await adapter.listAttemptsForRun(childRunId);
+  const target =
+    attempts
+      .filter((attempt) => attempt.state === "failed")
+      .map((attempt) => failedNodes.get(`${attempt.nodeId}::${attempt.iteration ?? 0}`))
+      .find(Boolean) ?? failedNodes.values().next().value;
+  const reset = await retryTask(adapter, {
+    runId: childRunId,
+    nodeId: target.nodeId,
+    iteration: target.iteration ?? 0,
+    resetDependents: true,
+    force: true,
+  });
+  if (!reset.success) {
+    throw new SmithersError(
+      "INTERNAL_ERROR",
+      `Failed to reset child run ${childRunId} for Subflow retry: ${reset.error ?? "unknown error"}`,
+    );
+  }
+  return true;
 }
 /**
  * A child run is "live elsewhere" when another engine process is actively
@@ -257,31 +293,22 @@ export async function executeChildWorkflow(parentWorkflow, options) {
   const childWorkflow = resolveChildWorkflow(definition, parentWorkflow);
   const input = normalizeChildInput(options.input);
   const parentRunId = options.parentRunId ?? runtime.runId;
-  const baseChildRunId =
-    options.runId ?? buildChildWorkflowRunId(parentRunId, runtime.stepId, runtime.iteration);
+  const childRunId = options.runId ?? buildChildWorkflowRunId(parentRunId, runtime.stepId, runtime.iteration);
   // The child may bring its own db (e.g. a runtime-generated workflow with
   // its own dbPath) that has never seen a run: create the system tables
   // before probing for an existing child run. No-op when the parent already
   // initialized the shared db, and for Postgres (ensured by its entry point).
   ensureSmithersTables(/** @type {any} */ (childWorkflow.db));
   const adapter = new SmithersDb(childWorkflow.db);
-  const baseChildRun = await adapter.getRun(baseChildRunId);
-  // Automatic retries of the owning Subflow need a fresh child attempt
-  // budget. Keep the deterministic base identity for crash/resume and
-  // explicit retry-task resets, but fan out a new child after a terminal
-  // failure so Effect Workflow cannot replay its completed execution.
-  const childRunId =
-    options.runId === undefined &&
-    runtime.attempt > 1 &&
-    (baseChildRun?.status === "failed" ||
-      baseChildRun?.status === "cancelled" ||
-      baseChildRun?.status === "canceled")
-      ? `${baseChildRunId}:attempt:${runtime.attempt}`
-      : baseChildRunId;
+  let existingChildRun = await adapter.getRun(childRunId);
+  const automaticFailedRetry =
+    options.runId === undefined && runtime.attempt > 1 && existingChildRun?.status === "failed";
+  if (automaticFailedRetry && (await resetFailedChildRun(adapter, childRunId))) {
+    existingChildRun = await adapter.getRun(childRunId);
+  }
   const signal = options.signal ?? runtime.signal;
   const pauseSignal = options.pauseSignal ?? runtime.pauseSignal;
   const startedBy = await loadParentStartedBy(parentWorkflow?.db ?? runtime.db, parentRunId);
-  const existingChildRun = childRunId === baseChildRunId ? baseChildRun : await adapter.getRun(childRunId);
   if (existingChildRun?.status === "finished") {
     // The child already completed (e.g. the parent crashed after the child
     // finished): preserve its recorded output instead of re-executing it.
@@ -302,20 +329,27 @@ export async function executeChildWorkflow(parentWorkflow, options) {
   const resume = Boolean(existingChildRun);
   const bridgeRuntime = getWorkflowMakeBridgeRuntime();
   if (bridgeRuntime) {
-    const result = await bridgeRuntime.executeChildWorkflow(childWorkflow, {
-      input,
-      runId: childRunId,
-      resume,
-      parentRunId,
-      ...(startedBy ? { startedBy } : {}),
-      rootDir: options.rootDir,
-      workflowPath,
-      allowNetwork: options.allowNetwork,
-      maxOutputBytes: options.maxOutputBytes,
-      toolTimeoutMs: options.toolTimeoutMs,
-      signal,
-      pauseSignal,
-    });
+    const result = await bridgeRuntime.executeChildWorkflow(
+      childWorkflow,
+      /** @type {any} */ ({
+        input,
+        runId: childRunId,
+        // Effect Workflow memoizes completed executions process-locally by
+        // execution id. The durable run id remains stable; only the internal
+        // bridge execution gets a retry-specific key after an in-place reset.
+        ...(automaticFailedRetry ? { bridgeExecutionId: `${childRunId}:retry:${runtime.attempt}` } : {}),
+        resume,
+        parentRunId,
+        ...(startedBy ? { startedBy } : {}),
+        rootDir: options.rootDir,
+        workflowPath,
+        allowNetwork: options.allowNetwork,
+        maxOutputBytes: options.maxOutputBytes,
+        toolTimeoutMs: options.toolTimeoutMs,
+        signal,
+        pauseSignal,
+      }),
+    );
     return {
       ...result,
       output: normalizeChildOutput(result),

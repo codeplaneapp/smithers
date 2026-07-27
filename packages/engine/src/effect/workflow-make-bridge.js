@@ -145,13 +145,14 @@ function createWorkflowMakeBridgeRuntime(services) {
   return {
     ...services,
     executeChildWorkflow: async (workflow, opts) => {
+      const bridgeExecutionId = /** @type {any} */ (opts).bridgeExecutionId ?? opts.runId;
       const workflowBridge = makeBridgeWorkflow(workflow, opts.runId);
       const lastRunIdRef = { current: opts.runId };
       const execute = createWorkflowExecutionEffect(workflow, opts, services, lastRunIdRef);
       await registerBridgeWorkflow(workflowBridge, services.scope, services.engineContext, execute);
       const result = await executeRegisteredChildWorkflow(
         workflowBridge,
-        opts.runId,
+        bridgeExecutionId,
         services.scope,
         services.engineContext,
         services.parentInstance,
