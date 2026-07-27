@@ -971,18 +971,31 @@ async function resolveWaitForEventTimeoutBridge(adapter, runId, desc, attemptNo,
  * @param {string} runId
  * @param {_TaskDescriptor} desc
  * @param {WaitForEventSnapshot} snapshot
- * @param {number} [startedAtMs]
  */
-async function syncWaitForEventDurableDeferredFromDb(adapter, runId, desc, snapshot, startedAtMs) {
+async function syncWaitForEventDurableDeferredFromDb(adapter, runId, desc, snapshot) {
+  const expectedSignalSeq = snapshot.resolvedSignalSeq;
+  let afterSeq = typeof expectedSignalSeq === "number" ? expectedSignalSeq - 1 : -1;
+  if (expectedSignalSeq === undefined) {
+    const attempts = await Effect.runPromise(adapter.listAttemptsForRun(runId));
+    for (const attempt of attempts) {
+      if (attempt.nodeId !== desc.nodeId || attempt.iteration >= desc.iteration) continue;
+      const previous = parseWaitForEventSnapshot(attempt.metaJson);
+      if (!previous || previous.signalName !== snapshot.signalName) continue;
+      if ((previous.correlationId ?? null) !== (snapshot.correlationId ?? null)) continue;
+      if (typeof previous.resolvedSignalSeq === "number") {
+        afterSeq = Math.max(afterSeq, previous.resolvedSignalSeq);
+      }
+    }
+  }
   const [signal] = await Effect.runPromise(
     adapter.listSignals(runId, {
       signalName: snapshot.signalName,
       correlationId: snapshot.correlationId ?? null,
-      receivedAfterMs: typeof startedAtMs === "number" ? startedAtMs : undefined,
+      afterSeq,
       limit: 1,
     }),
   );
-  if (!signal) {
+  if (!signal || (expectedSignalSeq !== undefined && signal.seq !== expectedSignalSeq)) {
     return;
   }
   await bridgeWaitForEventResolve(adapter, runId, desc.nodeId, desc.iteration, {
@@ -1102,7 +1115,7 @@ async function resolveWaitForEventTaskStateBridge(adapter, db, runId, desc, _eve
   }
   if (latest.state === "waiting-event") {
     const snapshot = latestSnapshot ?? buildWaitForEventSnapshot(desc, latest.startedAtMs ?? now);
-    await syncWaitForEventDurableDeferredFromDb(adapter, runId, desc, snapshot, latest.startedAtMs);
+    await syncWaitForEventDurableDeferredFromDb(adapter, runId, desc, snapshot);
     const awaited = await awaitWaitForEventDurableDeferred(adapter, runId, desc.nodeId, desc.iteration);
     if (awaited._tag === "Complete" && Exit.isSuccess(awaited.exit)) {
       const signal = awaited.exit.value;

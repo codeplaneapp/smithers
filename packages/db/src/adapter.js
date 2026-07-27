@@ -3087,6 +3087,10 @@ export class SmithersDb {
           params.push(query.correlationId);
         }
       }
+      if (typeof query.afterSeq === "number") {
+        clauses.push("seq > ?");
+        params.push(query.afterSeq);
+      }
       if (typeof query.receivedAfterMs === "number") {
         clauses.push("received_at_ms >= ?");
         params.push(query.receivedAfterMs);

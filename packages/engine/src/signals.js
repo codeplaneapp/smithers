@@ -68,15 +68,39 @@ export function signalRun(adapter, runId, signalName, payload, options = {}) {
       correlationId: normalizedCorrelationId,
       receivedAtMs,
     };
-    yield* Effect.promise(() =>
-      bridgeSignalResolve(adapter, runId, {
-        signalName: delivered.signalName,
-        correlationId: normalizedCorrelationId,
-        payloadJson,
-        seq: delivered.seq,
-        receivedAtMs: delivered.receivedAtMs,
-      }),
-    );
+    const descendants =
+      typeof adapter.listRunDescendants === "function"
+        ? yield* adapter.listRunDescendants(runId)
+        : [{ runId, parentRunId: run.parentRunId ?? null, depth: 0 }];
+    for (const target of descendants) {
+      const targetRunId = target.runId;
+      if (targetRunId !== runId) {
+        const targetRun = yield* adapter.getRun(targetRunId);
+        if (!targetRun || ["finished", "continued", "failed", "cancelled"].includes(targetRun.status)) {
+          continue;
+        }
+      }
+      const targetSeq =
+        targetRunId === runId
+          ? delivered.seq
+          : yield* adapter.insertSignalWithNextSeq({
+              runId: targetRunId,
+              signalName: normalizedSignalName,
+              correlationId: normalizedCorrelationId,
+              payloadJson,
+              receivedAtMs,
+              receivedBy: options.receivedBy ?? null,
+            });
+      yield* Effect.promise(() =>
+        bridgeSignalResolve(adapter, targetRunId, {
+          signalName: delivered.signalName,
+          correlationId: normalizedCorrelationId,
+          payloadJson,
+          seq: targetSeq,
+          receivedAtMs: delivered.receivedAtMs,
+        }),
+      );
+    }
     return delivered;
   }).pipe(
     Effect.annotateLogs({
