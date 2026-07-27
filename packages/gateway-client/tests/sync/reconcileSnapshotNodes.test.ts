@@ -42,4 +42,20 @@ describe("reconcileSnapshotNodes", () => {
 
     expect(reconcileSnapshotNodes([current], [next])).toEqual([]);
   });
+
+  test("updates the live row when retry-attempt metadata advances", () => {
+    const current: GatewayRunNode = {
+      key: "task-row",
+      id: "task",
+      iteration: 0,
+      attempt: 1,
+      name: "Task",
+      kind: "agent",
+      status: "running",
+      childIds: [],
+    };
+    const next: GatewayRunNode = { ...current, attempt: 2 };
+
+    expect(reconcileSnapshotNodes([current], [next])).toEqual([{ type: "update", value: next }]);
+  });
 });

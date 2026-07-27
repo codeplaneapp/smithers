@@ -50,6 +50,7 @@ describe("buildGatewayRunTree", () => {
         key: "plan#0",
         id: "plan",
         iteration: 0,
+        attempt: 1,
         name: "Plan",
         kind: "agent",
         status: "ok",
@@ -60,6 +61,7 @@ describe("buildGatewayRunTree", () => {
         key: "plan#1",
         id: "plan",
         iteration: 1,
+        attempt: 2,
         name: "Plan",
         kind: "agent",
         status: "running",
@@ -71,6 +73,7 @@ describe("buildGatewayRunTree", () => {
     const children = buildGatewayRunTree(rows)?.children ?? [];
     expect(children.map((child) => child.key)).toEqual(["plan#0", "plan#1"]);
     expect(children.map((child) => child.iteration)).toEqual([0, 1]);
+    expect(children.map((child) => child.attempt)).toEqual([1, 2]);
   });
 
   test("preserves link-less sibling rows beneath a synthetic run root", () => {
@@ -78,8 +81,24 @@ describe("buildGatewayRunTree", () => {
     // every row is a root. All of them must survive, not just the first —
     // using the state vocabulary the engine actually persists.
     const rows = [
-      { run_id: "run", node_id: "a", label: "A", output_table: "agent", state: "finished", iteration: 0 },
-      { run_id: "run", node_id: "b", label: "B", output_table: "agent", state: "in-progress", iteration: 0 },
+      {
+        run_id: "run",
+        node_id: "a",
+        label: "A",
+        output_table: "agent",
+        state: "finished",
+        iteration: 0,
+        last_attempt: 1,
+      },
+      {
+        run_id: "run",
+        node_id: "b",
+        label: "B",
+        output_table: "agent",
+        state: "in-progress",
+        iteration: 0,
+        last_attempt: 2,
+      },
       { run_id: "run", node_id: "c", label: "C", output_table: "agent", state: "pending", iteration: 0 },
     ].map((row) => mapSmithersElectricRow("nodes", row));
 
@@ -89,6 +108,7 @@ describe("buildGatewayRunTree", () => {
     expect(root?.status).toBe("running");
     expect(root?.children?.map((child) => child.key)).toEqual(["run:a:0", "run:b:0", "run:c:0"]);
     expect(root?.children?.map((child) => child.status)).toEqual(["ok", "running", "queued"]);
+    expect(root?.children?.map((child) => child.attempt)).toEqual([1, 2, undefined]);
   });
 
   test("synthetic root reads active over failed with persisted states", () => {

@@ -19,6 +19,15 @@ export type NodeRowProps = {
  */
 export function NodeRow({ node, depth, activeNodeId, onSelectNode }: NodeRowProps) {
   const active = node.id === activeNodeId;
+  const executionMeta = [
+    node.kind,
+    typeof node.iteration === "number" ? `iteration ${node.iteration}` : undefined,
+    typeof node.attempt === "number" && node.attempt > 0
+      ? `attempt ${node.attempt}${typeof node.maxAttempts === "number" ? ` of ${node.maxAttempts}` : ""}`
+      : undefined,
+  ]
+    .filter((value): value is string => value !== undefined)
+    .join(" · ");
   return (
     <>
       <button
@@ -33,7 +42,7 @@ export function NodeRow({ node, depth, activeNodeId, onSelectNode }: NodeRowProp
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {node.cardLabel ?? node.name}
           </span>
-          <span style={{ fontSize: 11, color: "var(--text-muted, #52525b)" }}>{node.kind}</span>
+          <span style={{ fontSize: 11, color: "var(--text-muted, #52525b)" }}>{executionMeta}</span>
         </span>
         <StatusPill status={node.status} />
       </button>

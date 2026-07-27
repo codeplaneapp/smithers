@@ -35,8 +35,26 @@ describe("flattenGatewayRunNode", () => {
       kind: "loop",
       status: "running",
       children: [
-        { key: "plan#0", id: "plan", iteration: 0, name: "Plan", kind: "agent", status: "ok", children: [] },
-        { key: "plan#1", id: "plan", iteration: 1, name: "Plan", kind: "agent", status: "running", children: [] },
+        {
+          key: "plan#0",
+          id: "plan",
+          iteration: 0,
+          attempt: 1,
+          name: "Plan",
+          kind: "agent",
+          status: "ok",
+          children: [],
+        },
+        {
+          key: "plan#1",
+          id: "plan",
+          iteration: 1,
+          attempt: 2,
+          name: "Plan",
+          kind: "agent",
+          status: "running",
+          children: [],
+        },
       ],
     };
 
@@ -46,6 +64,7 @@ describe("flattenGatewayRunNode", () => {
     const attempts = rows.filter((row) => row.id === "plan");
     expect(attempts).toHaveLength(2);
     expect(attempts.map((row) => row.iteration)).toEqual([0, 1]);
+    expect(attempts.map((row) => row.attempt)).toEqual([1, 2]);
     // The loop links to both attempts by their unique keys, not the shared id.
     expect(rows[0]?.childIds).toEqual(["plan#0", "plan#1"]);
     expect(attempts.map((row) => row.parentId)).toEqual(["loop", "loop"]);

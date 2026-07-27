@@ -203,6 +203,26 @@ describe("mapSmithersElectricRow node mapping", () => {
     ).toMatchObject({ key: "run-c:task3:9", iteration: 9 });
   });
 
+  test("maps snake-case and camel-case latest-attempt values", () => {
+    expect(
+      mapSmithersElectricRow("nodes", {
+        run_id: "run",
+        node_id: "snake",
+        iteration: 0,
+        last_attempt: "2",
+      }),
+    ).toMatchObject({ attempt: 2 });
+
+    expect(
+      mapSmithersElectricRow("nodes", {
+        runId: "run",
+        nodeId: "camel",
+        iteration: 0,
+        lastAttempt: 3n,
+      }),
+    ).toMatchObject({ attempt: 3 });
+  });
+
   test("normalizes the persisted node-state vocabulary onto NodeStatus tones", () => {
     // `_smithers_nodes.state` stores the engine lifecycle words, not the UI's
     // NodeStatus values; `useGatewayRunTree` narrows anything unknown to

@@ -183,6 +183,7 @@ describe("createSmithersCollections multiplayer shape mapping", () => {
   test("every Electric-backed factory routes its rows through the shape mapper", async () => {
     const queryClient = new QueryClient();
     const shapes: string[] = [];
+    let mapLiveNode: ((row: Record<string, unknown>) => Record<string, unknown>) | undefined;
     // A stand-in electricCollectionOptions that invokes each collection's mapRow
     // and getKey exactly as the real Electric transformer would on an incoming
     // shape row, then returns a real (query-backed) collection config so the
@@ -193,6 +194,7 @@ describe("createSmithersCollections multiplayer shape mapping", () => {
         const getKey = config.getKey as (row: Record<string, unknown>) => unknown;
         const mapped = mapRow({});
         getKey(mapped);
+        if (config.shape === "nodes") mapLiveNode = mapRow;
         shapes.push(config.shape as string);
         return smithersLocalCollectionOptions({
           id: config.id as string,
@@ -230,6 +232,15 @@ describe("createSmithersCollections multiplayer shape mapping", () => {
     expect([...shapes].sort()).toEqual(
       ["crons", "docs", "docs", "events", "memory_facts", "nodes", "runs", "runs", "scores"].sort(),
     );
+    // Electric calls this transformer for initial rows and subsequent updates.
+    // Both Postgres snake case and already-normalized camel case must retain the
+    // latest attempt in the live run-tree collection.
+    expect(
+      mapLiveNode?.({ run_id: "run-1", node_id: "task", iteration: 0, last_attempt: "2" }),
+    ).toMatchObject({ attempt: 2 });
+    expect(
+      mapLiveNode?.({ runId: "run-1", nodeId: "task", iteration: 0, lastAttempt: 3n }),
+    ).toMatchObject({ attempt: 3 });
     collections.close();
     queryClient.clear();
   });

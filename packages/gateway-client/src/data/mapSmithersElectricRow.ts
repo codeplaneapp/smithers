@@ -78,6 +78,7 @@ export function mapSmithersElectricRow(collection: string, row: Record<string, u
       const runId = stringAt(row, "runId", "run_id") ?? "";
       const nodeId = stringAt(row, "nodeId", "node_id") ?? "";
       const iteration = numberAt(row, "iteration", "iteration") ?? 0;
+      const attempt = numberAt(row, "lastAttempt", "last_attempt");
       const state = stringAt(row, "state", "state") ?? "queued";
       const label = stringAt(row, "label", "label") ?? nodeId;
       const outputTable = stringAt(row, "outputTable", "output_table") ?? "task";
@@ -89,6 +90,7 @@ export function mapSmithersElectricRow(collection: string, row: Record<string, u
         kind: outputTable,
         status: toRunStatus(state),
         iteration,
+        ...(attempt !== undefined ? { attempt } : {}),
         childIds: [],
       } satisfies GatewayRunNode;
     }
