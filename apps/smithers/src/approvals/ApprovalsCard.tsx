@@ -19,6 +19,8 @@ function ShieldIcon() {
 export function ApprovalsCard() {
   const gates = useApprovalsStore((state) => state.gates);
   const nowMs = useApprovalsStore((state) => state.nowMs);
+  const loading = useApprovalsStore((state) => state.loading);
+  const error = useApprovalsStore((state) => state.error);
 
   const pending = filterPending(gates);
   const shown = pending.slice(0, 4);
@@ -39,7 +41,11 @@ export function ApprovalsCard() {
       </header>
 
       <div className="card-body card-body-flush">
-        {shown.length > 0 ? (
+        {error ? (
+          <div className="vcs-more">Approvals unavailable. Check the gateway connection.</div>
+        ) : loading && shown.length === 0 ? (
+          <div className="vcs-more">Loading approvals…</div>
+        ) : shown.length > 0 ? (
           shown.map((gate) => (
             <div className="list-row" key={gate.id}>
               <span className="appr-ring is-pending" aria-hidden="true" />

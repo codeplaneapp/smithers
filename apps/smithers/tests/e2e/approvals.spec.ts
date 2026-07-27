@@ -17,10 +17,17 @@ test.describe.serial("approval matrix", () => {
 
     const detail = page.getByTestId("approvals-detail");
     await expect(detail).toContainText("Approve the deploy");
-    await expect(detail).toContainText("Run ID");
-    await expect(detail).toContainText("Node ID");
+    await expect(page.getByTestId("approvals-workflow")).toHaveText("e2e-approval");
+    await expect(page.getByTestId("approvals-run-id")).not.toBeEmpty();
+    await expect(page.getByTestId("approvals-node-id")).toHaveText("gate");
+    await expect(page.getByTestId("approvals-iteration")).toHaveText("0");
+    await expect(page.getByTestId("approvals-requested-at")).toHaveText(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
     await expect(detail).toContainText("PENDING");
     await expect(page.getByTestId("approvals-payload")).toContainText("Approving this gate lets the gated task run.");
+    const wait = page.getByTestId("approvals-wait-time").first();
+    await expect(wait).toHaveAttribute("data-wait-state", "fresh");
+    const initialWait = await wait.textContent();
+    await expect.poll(async () => wait.textContent(), { timeout: 3_000 }).not.toBe(initialWait);
     await page.getByTestId("approvals-note").fill("Approved by rendered coverage");
     await page.getByTestId("approvals-approve").click();
     await expect(rows).toHaveCount(before - 1, { timeout: 15_000 });

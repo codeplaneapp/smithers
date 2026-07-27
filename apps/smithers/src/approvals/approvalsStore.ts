@@ -59,6 +59,10 @@ type ApprovalsState = {
   /** Per-gate draft decision note, mirroring ApprovalCard's noteByRun. */
   noteById: Record<string, string>;
   nowMs: number;
+  /** Initial collection synchronization is still in progress. */
+  loading: boolean;
+  /** The live collection could not be read; null after a successful read. */
+  error: string | null;
   /** The live gateway RPC seam, installed by `ApprovalsBridge` (null pre-mount). */
   rpc: ApprovalRpc | null;
   setTab: (tab: ApprovalsTab) => void;
@@ -109,6 +113,8 @@ export const useApprovalsStore = create<ApprovalsState>((set, get) => ({
   actingId: null,
   noteById: {},
   nowMs: Date.now(),
+  loading: true,
+  error: null,
   rpc: null,
 
   setTab: (tab) =>

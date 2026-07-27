@@ -7,6 +7,7 @@ import {
   prettyJson,
   shortRunId,
   waitTime,
+  waitTimeState,
   waitTimeTone,
   type ApprovalDecision,
   type ApprovalGate,
@@ -40,6 +41,8 @@ function PendingRow({ gate }: { gate: ApprovalGate }) {
 
   const busy = actingId === gate.id;
   const tone = waitTimeTone(gate.requestedAtMs, nowMs);
+  const waitState = waitTimeState(gate.requestedAtMs, nowMs);
+  const elapsed = waitTime(gate.requestedAtMs, nowMs);
 
   return (
     <button
@@ -54,7 +57,14 @@ function PendingRow({ gate }: { gate: ApprovalGate }) {
         <div className="appr-runid">Run: {shortRunId(gate.runId)}</div>
       </div>
       {gate.source === "synthetic" ? <span className="appr-synthetic">SYNTHETIC</span> : null}
-      <span className={`appr-wait ${tone}`}>{waitTime(gate.requestedAtMs, nowMs)}</span>
+      <span
+        className={`appr-wait ${tone}`}
+        data-testid="approvals-wait-time"
+        data-wait-state={waitState}
+        aria-label={`Wait time: ${elapsed} (${waitState})`}
+      >
+        {elapsed}
+      </span>
     </button>
   );
 }
@@ -88,12 +98,14 @@ function HistoryRow({ decision }: { decision: ApprovalDecision }) {
 }
 
 /** A single labeled metadata fact row, rendered only when its value exists. */
-function MetaRow({ label, value }: { label: string; value: string | null | undefined }) {
+function MetaRow({ label, value, testId }: { label: string; value: string | null | undefined; testId?: string }) {
   if (value === null || value === undefined || value === "") return null;
   return (
     <>
       <div className="appr-meta-label">{label}</div>
-      <div className="appr-meta-value">{value}</div>
+      <div className="appr-meta-value" data-testid={testId}>
+        {value}
+      </div>
     </>
   );
 }
@@ -114,6 +126,8 @@ function PendingDetail({ gate }: { gate: ApprovalGate }) {
   const payload = prettyJson(gate.payload);
   const confirming = pendingDenyId === gate.id;
   const busy = actingId === gate.id;
+  const elapsed = waitTime(gate.requestedAtMs, nowMs);
+  const waitState = waitTimeState(gate.requestedAtMs, nowMs);
 
   return (
     <div className="appr-detail-scroll" data-testid="approvals-detail">
@@ -123,13 +137,17 @@ function PendingDetail({ gate }: { gate: ApprovalGate }) {
       </div>
 
       <div className="appr-meta">
-        <MetaRow label="Run ID" value={gate.runId} />
-        <MetaRow label="Node ID" value={gate.nodeId} />
-        <MetaRow label="Iteration" value={gate.iteration !== undefined ? String(gate.iteration) : undefined} />
-        <MetaRow label="Workflow" value={gate.workflowPath} />
-        <MetaRow label="Requested" value={formatTimestamp(gate.requestedAtMs)} />
+        <MetaRow label="Run ID" value={gate.runId} testId="approvals-run-id" />
+        <MetaRow label="Node ID" value={gate.nodeId} testId="approvals-node-id" />
+        <MetaRow
+          label="Iteration"
+          value={gate.iteration !== undefined ? String(gate.iteration) : "Unavailable"}
+          testId="approvals-iteration"
+        />
+        <MetaRow label="Workflow" value={gate.workflowPath ?? "Unavailable"} testId="approvals-workflow" />
+        <MetaRow label="Requested" value={formatTimestamp(gate.requestedAtMs)} testId="approvals-requested-at" />
         <MetaRow label="Status" value="PENDING" />
-        <MetaRow label="Wait Time" value={waitTime(gate.requestedAtMs, nowMs)} />
+        <MetaRow label="Wait Time" value={`${elapsed} · ${waitState}`} testId="approvals-detail-wait-time" />
         <MetaRow label="Source" value={gate.source ? gate.source.toUpperCase() : undefined} />
       </div>
 
@@ -146,7 +164,14 @@ function PendingDetail({ gate }: { gate: ApprovalGate }) {
             {payload}
           </pre>
         </>
-      ) : null}
+      ) : (
+        <>
+          <div className="appr-eyebrow">Context / Payload</div>
+          <div className="appr-context-empty" data-testid="approvals-context-unavailable">
+            No summary or payload was provided for this approval.
+          </div>
+        </>
+      )}
 
       <input
         className="field-input appr-note"
@@ -205,7 +230,6 @@ function PendingDetail({ gate }: { gate: ApprovalGate }) {
 
 /** The resolved-decision detail: metadata + payload, no actions. */
 function HistoryDetail({ decision }: { decision: ApprovalDecision }) {
-  const nowMs = useApprovalsStore((state) => state.nowMs);
   const label = gateLabel(decision);
   const payload = prettyJson(decision.payload);
   const approved = decision.action === "approved";
@@ -258,6 +282,8 @@ export function ApprovalsCanvas() {
   const gates = useApprovalsStore((state) => state.gates);
   const decisions = useApprovalsStore((state) => state.decisions);
   const selectedId = useApprovalsStore((state) => state.selectedId);
+  const loading = useApprovalsStore((state) => state.loading);
+  const error = useApprovalsStore((state) => state.error);
   const setTab = useApprovalsStore((state) => state.setTab);
 
   const pending = filterPending(gates);
@@ -289,40 +315,57 @@ export function ApprovalsCanvas() {
       </header>
 
       <div className="appr-body">
-        <div className="appr-list">
-          {tab === "pending" ? (
-            pending.length > 0 ? (
-              pending.map((gate) => <PendingRow key={gate.id} gate={gate} />)
-            ) : (
-              <div className="appr-empty" data-testid="approvals-empty">
-                <ShieldIcon />
-                No pending approvals
-              </div>
-            )
-          ) : history.length > 0 ? (
-            history.map((decision) => <HistoryRow key={decision.id} decision={decision} />)
-          ) : (
-            <div className="appr-empty" data-testid="approvals-empty">
-              <ShieldIcon />
-              No recent decisions
+        {error ? (
+          <div className="appr-status" data-testid="approvals-unavailable">
+            <ShieldIcon />
+            <strong>Approvals unavailable</strong>
+            <span>{error}</span>
+            <span>Check the gateway connection. Pending gates will reappear when it recovers.</span>
+          </div>
+        ) : loading && gates.length === 0 ? (
+          <div className="appr-status" data-testid="approvals-loading">
+            <ShieldIcon />
+            <strong>Loading approvals</strong>
+            <span>Synchronizing pending gates from the gateway…</span>
+          </div>
+        ) : (
+          <>
+            <div className="appr-list">
+              {tab === "pending" ? (
+                pending.length > 0 ? (
+                  pending.map((gate) => <PendingRow key={gate.id} gate={gate} />)
+                ) : (
+                  <div className="appr-empty" data-testid="approvals-empty">
+                    <ShieldIcon />
+                    No pending approvals
+                  </div>
+                )
+              ) : history.length > 0 ? (
+                history.map((decision) => <HistoryRow key={decision.id} decision={decision} />)
+              ) : (
+                <div className="appr-empty" data-testid="approvals-empty">
+                  <ShieldIcon />
+                  No recent decisions
+                </div>
+              )}
             </div>
-          )}
-        </div>
 
-        <div className="appr-detail">
-          {selectedGate ? (
-            <PendingDetail gate={selectedGate} />
-          ) : selectedDecision ? (
-            <HistoryDetail decision={selectedDecision} />
-          ) : listEmpty ? (
-            <div className="appr-detail-empty">Nothing to review.</div>
-          ) : (
-            <div className="appr-placeholder" data-testid="approvals-placeholder">
-              <ShieldIcon />
-              Select an approval
+            <div className="appr-detail">
+              {selectedGate ? (
+                <PendingDetail gate={selectedGate} />
+              ) : selectedDecision ? (
+                <HistoryDetail decision={selectedDecision} />
+              ) : listEmpty ? (
+                <div className="appr-detail-empty">Nothing to review.</div>
+              ) : (
+                <div className="appr-placeholder" data-testid="approvals-placeholder">
+                  <ShieldIcon />
+                  Select an approval
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
     </section>
   );

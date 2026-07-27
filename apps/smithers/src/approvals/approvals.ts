@@ -101,15 +101,23 @@ export function waitTime(requestedAtMs: number, nowMs: number): string {
   return `${hours}h ${minutes}m`;
 }
 
+/** Human-readable age band for an approval's live wait time. */
+export function waitTimeState(requestedAtMs: number, nowMs: number): "fresh" | "warning" | "stale" {
+  const minutes = Math.max(0, (nowMs - requestedAtMs) / 60000);
+  if (minutes < 5) return "fresh";
+  if (minutes <= 30) return "warning";
+  return "stale";
+}
+
 /**
  * Escalate the wait-time badge tone by age, porting Swift waitTimeColor():
  * under 5 min -> 'is-fresh' (muted), 5–30 min -> 'is-warn', over 30 min ->
  * 'is-stale' (danger). The boundaries are inclusive of the lower band.
  */
 export function waitTimeTone(requestedAtMs: number, nowMs: number): "is-fresh" | "is-warn" | "is-stale" {
-  const minutes = Math.max(0, (nowMs - requestedAtMs) / 60000);
-  if (minutes < 5) return "is-fresh";
-  if (minutes <= 30) return "is-warn";
+  const state = waitTimeState(requestedAtMs, nowMs);
+  if (state === "fresh") return "is-fresh";
+  if (state === "warning") return "is-warn";
   return "is-stale";
 }
 

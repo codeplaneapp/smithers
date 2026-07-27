@@ -100,7 +100,7 @@ export function toApprovalGate(row: GatewayApprovalRow, nowMs: number): Approval
 }
 
 export function ApprovalsBridge() {
-  const { data, refetch } = useGatewayApprovals(APPROVALS_PARAMS);
+  const { data, loading, error, refetch } = useGatewayApprovals(APPROVALS_PARAMS);
   const submitApproval = useGatewayMutation<SubmitApprovalVars, unknown>("submitApproval", {
     invalidate: [gatewayKeys.approvals(APPROVALS_PARAMS), gatewayKeys.runs({})],
   });
@@ -124,8 +124,25 @@ export function ApprovalsBridge() {
   // and this poll is removed there (see useLocalModeRefetch / LOCAL_LIST_POLL_MS).
   useLocalModeRefetch(refetch);
 
+  // The collection only changes when gates arrive or resolve. Advance the
+  // presentation clock independently so elapsed waits and their age bands stay
+  // live while the pending rows themselves remain unchanged.
+  useEffect(() => {
+    const tick = () => useApprovalsStore.setState({ nowMs: Date.now() });
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   useEffect(() => {
     useApprovalsStore.setState((state) => {
+      if (error) {
+        return { loading: false, error: error.message || "The approvals service could not be reached." };
+      }
+      if (loading && (!data || data.length === 0)) {
+        return { loading: true, error: null };
+      }
+
       const nowMs = Date.now();
       const gates = data ? data.map((row) => toApprovalGate(row, nowMs)) : [];
       // Drop first-seen anchors for gates that are no longer pending so the
@@ -137,9 +154,9 @@ export function ApprovalsBridge() {
         decisions: state.decisions,
         selectedId: state.selectedId,
       });
-      return { gates, selectedId, nowMs };
+      return { gates, selectedId, nowMs, loading: false, error: null };
     });
-  }, [data]);
+  }, [data, error, loading]);
 
   return null;
 }
