@@ -3253,7 +3253,7 @@ commands[102]:
       force,,boolean,false,Cross unresolved effects and mark the run needs-attention
       revert,,boolean,true,Run compensation handlers; use --no-revert to skip
   - name: snapshots
-    purpose: List durability snapshots (workspace checkpoints) for a run
+    purpose: List durability snapshots (workspace checkpoints) for a run and its descendant child runs
     args[1]{name,type,required,desc}:
       runId,string,true,Run ID to list snapshots for
     flags[1]{name,short,type,default,desc}:
@@ -17605,11 +17605,11 @@ Restore the worktree to a durability checkpoint for a node (latest matching one 
 
 ### list_snapshots
 
-List durability workspace checkpoints for a run with matching VCS operation IDs when available.
+List durability workspace checkpoints for a run and its descendant child runs, with the owning run ID and matching VCS operation IDs when available.
 
 **Input:** `{ runId: string }`
 
-**Output:** `{ snapshots: Array<{ seq, nodeId, iteration, attempt, tier, source, label, commitId, operationId, cwd, createdAtMs }> }`
+**Output:** `{ snapshots: Array<{ runId, seq, nodeId, iteration, attempt, tier, source, label, commitId, operationId, cwd, createdAtMs }> }`
 
 ---
 

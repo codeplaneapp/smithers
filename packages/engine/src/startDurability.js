@@ -32,6 +32,33 @@ function hookLabel(p) {
  */
 const runVcs = (effect) => Effect.runPromise(effect.pipe(Effect.provide(getPlatformLayer())));
 
+/** @type {Map<string, Promise<void>>} */
+const workspaceAttemptTails = new Map();
+
+/**
+ * Durability checkpoints represent one task's writes, so two attempts may not
+ * mutate the same worktree while either watcher is active.
+ * @param {string} cwd
+ * @returns {Promise<() => void>}
+ */
+async function acquireWorkspaceAttempt(cwd) {
+  const previous = workspaceAttemptTails.get(cwd) ?? Promise.resolve();
+  /** @type {() => void} */
+  let resolveCurrent = () => {};
+  const current = new Promise((resolve) => {
+    resolveCurrent = resolve;
+  });
+  workspaceAttemptTails.set(cwd, current);
+  await previous;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    if (workspaceAttemptTails.get(cwd) === current) workspaceAttemptTails.delete(cwd);
+    resolveCurrent();
+  };
+}
+
 const NOOP_HANDLE = {
   active: false,
   socketPath: null,
@@ -91,6 +118,7 @@ export async function startDurability(opts) {
     isJj = false;
   }
   if (!isJj) return NOOP_HANDLE;
+  const releaseWorkspaceAttempt = await acquireWorkspaceAttempt(cwd);
 
   // Default gaps to a durable spool (outside the worktree) so they survive an
   // engine crash even though the engine passes no onGap. An explicit onGap wins.
@@ -112,12 +140,18 @@ export async function startDurability(opts) {
   /** @param {Record<string, unknown>} req */
   const watchSnapshot = (req) =>
     service.snapshot({ ...base, source: "watch", tier: 2, label: null, toolUseId: null, ...req });
-  const watcher = createWatcher({
-    cwd,
-    onSettle: () => {
-      void watchSnapshot({});
-    },
-  });
+  let watcher;
+  try {
+    watcher = createWatcher({
+      cwd,
+      onSettle: () => {
+        void watchSnapshot({});
+      },
+    });
+  } catch (error) {
+    releaseWorkspaceAttempt();
+    throw error;
+  }
 
   // Optional Unix-socket server so a CLI agent's PostToolUse hook can request a
   // strict Tier 1 snapshot. Created only when the engine asks (withSocket), so
@@ -154,14 +188,18 @@ export async function startDurability(opts) {
     snapshot: (req = {}) =>
       service.snapshot({ ...base, source: "watch", tier: 2, label: null, toolUseId: null, ...req }),
     async stop() {
-      watcher.close();
-      socketServer?.close();
-      // Final flush so the last settled write is captured even if the
-      // trailing-idle debounce never fired before the attempt ended.
-      await watchSnapshot({});
-      // Bound table growth: keep the latest checkpoints/states per scope.
-      // Run-scoped + best-effort, so it never affects the run.
-      await pruneWorkspaceDurability({ adapter, runId });
+      try {
+        watcher.close();
+        socketServer?.close();
+        // Final flush so the last settled write is captured even if the
+        // trailing-idle debounce never fired before the attempt ended.
+        await watchSnapshot({});
+        // Bound table growth: keep the latest checkpoints/states per scope.
+        // Run-scoped + best-effort, so it never affects the run.
+        await pruneWorkspaceDurability({ adapter, runId });
+      } finally {
+        releaseWorkspaceAttempt();
+      }
     },
   };
 }

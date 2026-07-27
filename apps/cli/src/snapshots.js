@@ -2,6 +2,8 @@
 // checkpoints) for a run, joined with their states for the jj operation id.
 // Rows come back camelCase (the storage layer applies snake->camel).
 
+import { listScopedWorkspaceSnapshots } from "./snapshot-scope.js";
+
 /** @param {unknown} id */
 function short(id) {
   return id ? String(id).slice(0, 12) : "";
@@ -19,7 +21,7 @@ function formatAge(ms) {
 
 /**
  * @param {{
- *   adapter: { listWorkspaceCheckpoints: (runId: string) => Promise<Array<Record<string, any>>>, listWorkspaceStates: (runId: string) => Promise<Array<Record<string, any>>> },
+ *   adapter: { listRunDescendants?: (runId: string) => Promise<Array<Record<string, any>>>, listWorkspaceCheckpoints: (runId: string) => Promise<Array<Record<string, any>>>, listWorkspaceStates: (runId: string) => Promise<Array<Record<string, any>>> },
  *   runId: string,
  *   json?: boolean,
  *   nowMs?: () => number,
@@ -29,13 +31,13 @@ function formatAge(ms) {
  */
 export async function runSnapshotsOnce(opts) {
   const { adapter, runId, json = false, nowMs = () => Date.now(), stdout } = opts;
-  const checkpoints = await adapter.listWorkspaceCheckpoints(runId);
-  const states = await adapter.listWorkspaceStates(runId);
+  const { checkpoints, states } = await listScopedWorkspaceSnapshots(adapter, runId);
   const opByCommit = new Map();
-  for (const s of states) opByCommit.set(`${s.jjCwd}\u0000${s.jjCommitId}`, s.jjOperationId);
+  for (const s of states) opByCommit.set(`${s.runId}\u0000${s.jjCwd}\u0000${s.jjCommitId}`, s.jjOperationId);
 
   if (json) {
     const rows = checkpoints.map((c) => ({
+      runId: c.runId,
       seq: c.seq,
       nodeId: c.nodeId,
       iteration: c.iteration,
@@ -44,7 +46,7 @@ export async function runSnapshotsOnce(opts) {
       source: c.source,
       label: c.label ?? null,
       commitId: c.jjCommitId,
-      operationId: opByCommit.get(`${c.jjCwd}\u0000${c.jjCommitId}`) ?? null,
+      operationId: opByCommit.get(`${c.runId}\u0000${c.jjCwd}\u0000${c.jjCommitId}`) ?? null,
       cwd: c.jjCwd,
       createdAtMs: c.createdAtMs,
     }));
@@ -57,9 +59,9 @@ export async function runSnapshotsOnce(opts) {
   }
   const now = nowMs();
   for (const c of checkpoints) {
-    const op = opByCommit.get(`${c.jjCwd}\u0000${c.jjCommitId}`);
+    const op = opByCommit.get(`${c.runId}\u0000${c.jjCwd}\u0000${c.jjCommitId}`);
     stdout.write(
-      `#${c.seq}  ${c.nodeId} iter=${c.iteration} attempt=${c.attempt}  tier${c.tier}/${c.source}  ${short(c.jjCommitId)}  op:${short(op)}  ${formatAge(now - Number(c.createdAtMs))}  ${c.label ?? ""}\n`,
+      `#${c.seq}  ${c.nodeId} iter=${c.iteration} attempt=${c.attempt}  tier${c.tier}/${c.source}  run:${c.runId}  ${short(c.jjCommitId)}  op:${short(op)}  ${formatAge(now - Number(c.createdAtMs))}  ${c.label ?? ""}\n`,
     );
   }
   return { exitCode: 0 };

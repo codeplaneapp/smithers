@@ -1513,6 +1513,7 @@ describe("semantic tool definitions", () => {
     expect(snapshots.structuredContent.ok).toBe(true);
     expect(snapshots.structuredContent.data.snapshots).toEqual([
       {
+        runId: "run-1",
         seq: 0,
         nodeId: "artifact-node",
         iteration: 0,

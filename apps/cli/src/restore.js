@@ -4,6 +4,8 @@
 
 import { spawn } from "node:child_process";
 import { resolveJjBinary } from "@smithers-orchestrator/vcs/resolveJjBinary";
+import { retryTask } from "@smithers-orchestrator/time-travel/retry-task";
+import { listScopedWorkspaceSnapshots } from "./snapshot-scope.js";
 
 /**
  * Upper bound on a single `jj restore`. Restore is a recovery path, so a stuck
@@ -124,6 +126,9 @@ export function defaultRevert(commitId, cwd, options = {}) {
  *   jjCommitId: string,
  *   jjCwd: string,
  *   createdAtMs?: number,
+ *   runId?: string,
+ *   ownerNodeId?: string,
+ *   ownerIteration?: number,
  * }} Checkpoint
  */
 
@@ -136,8 +141,13 @@ export function defaultRevert(commitId, cwd, options = {}) {
  * @returns {Checkpoint | null}
  */
 export function pickTargetCheckpoint(checkpoints, sel) {
-  let cands = checkpoints.filter((c) => c.nodeId === sel.nodeId);
-  if (sel.iteration !== undefined) cands = cands.filter((c) => Number(c.iteration) === Number(sel.iteration));
+  let cands = checkpoints.filter((c) => c.nodeId === sel.nodeId || c.ownerNodeId === sel.nodeId);
+  if (sel.iteration !== undefined)
+    cands = cands.filter((c) =>
+      c.ownerNodeId === sel.nodeId
+        ? Number(c.ownerIteration) === Number(sel.iteration)
+        : Number(c.iteration) === Number(sel.iteration),
+    );
   if (sel.seq !== undefined) cands = cands.filter((c) => Number(c.seq) === Number(sel.seq));
   if (cands.length === 0) return null;
   cands.sort(
@@ -150,8 +160,66 @@ export function pickTargetCheckpoint(checkpoints, sel) {
 }
 
 /**
+ * A restore behind child-run checkpoints invalidates the owning Subflow nodes
+ * through the normal retry reset path. That keeps the child run, node, output,
+ * and attempt rows coherent and makes a parent resume recreate the discarded
+ * workspace changes.
+ *
+ * @param {any} adapter
+ * @param {string} runId
+ * @param {Checkpoint} target
+ * @returns {Promise<{ success: boolean, error?: string }>}
+ */
+async function invalidateNewerChildWork(adapter, runId, target) {
+  if (
+    typeof adapter?.listRunDescendants !== "function" ||
+    typeof adapter?.listWorkspaceStates !== "function" ||
+    typeof adapter?.getNode !== "function"
+  ) {
+    return { success: true };
+  }
+  const { checkpoints } = await listScopedWorkspaceSnapshots(adapter, runId);
+  const owners = new Map();
+  for (const checkpoint of checkpoints) {
+    if (
+      checkpoint.ownerNodeId &&
+      checkpoint.runId !== runId &&
+      checkpoint.jjCwd === target.jjCwd &&
+      Number(checkpoint.createdAtMs) > Number(target.createdAtMs ?? 0)
+    ) {
+      const key = `${checkpoint.ownerNodeId}\u0000${checkpoint.ownerIteration ?? 0}`;
+      const previous = owners.get(key);
+      if (!previous || Number(checkpoint.createdAtMs) < previous.createdAtMs) {
+        owners.set(key, {
+          nodeId: checkpoint.ownerNodeId,
+          iteration: checkpoint.ownerIteration ?? 0,
+          createdAtMs: Number(checkpoint.createdAtMs),
+        });
+      }
+    }
+  }
+  const ordered = [...owners.values()].sort((a, b) => a.createdAtMs - b.createdAtMs);
+  for (const owner of ordered) {
+    const result = await retryTask(adapter, {
+      runId,
+      nodeId: owner.nodeId,
+      iteration: owner.iteration,
+      resetDependents: true,
+      force: true,
+    });
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.error ?? `could not invalidate child work owned by ${owner.nodeId}`,
+      };
+    }
+  }
+  return { success: true };
+}
+
+/**
  * @param {{
- *   adapter?: { listWorkspaceCheckpoints: (runId: string) => Promise<Array<Checkpoint>> },
+ *   adapter?: { listRunDescendants?: Function, listWorkspaceCheckpoints: (runId: string) => Promise<Array<Checkpoint>>, listWorkspaceStates?: Function },
  *   runId: string,
  *   nodeId: string,
  *   iteration?: number,
@@ -191,7 +259,11 @@ export async function runRestoreOnce(opts) {
       return { exitCode: 1 };
     }
   } else if (adapter) {
-    target = pickTargetCheckpoint(await adapter.listWorkspaceCheckpoints(runId), selection);
+    const scoped =
+      typeof adapter.listWorkspaceStates === "function"
+        ? await listScopedWorkspaceSnapshots(adapter, runId)
+        : { checkpoints: await adapter.listWorkspaceCheckpoints(runId) };
+    target = pickTargetCheckpoint(scoped.checkpoints, selection);
   }
   if (!target) {
     stderr.write(
@@ -201,6 +273,11 @@ export async function runRestoreOnce(opts) {
   }
   const result = await revert(target.jjCommitId, target.jjCwd, { timeoutMs: opts.timeoutMs, signal: opts.signal });
   if (result?.success) {
+    const invalidation = await invalidateNewerChildWork(adapter, runId, target);
+    if (!invalidation.success) {
+      stderr.write(`Restore invalidation failed: ${invalidation.error ?? "unknown error"}\n`);
+      return { exitCode: 1 };
+    }
     stdout.write(`Restored ${target.jjCwd} to checkpoint #${target.seq} (${short(target.jjCommitId)})\n`);
     return { exitCode: 0 };
   }

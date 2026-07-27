@@ -68,8 +68,55 @@ describe("smithers snapshots", () => {
     await runSnapshotsOnce({ adapter: snapAdapter, runId: "r1", json: true, stdout: out });
     const parsed = JSON.parse(out.get());
     expect(parsed.snapshots).toHaveLength(2);
+    expect(parsed.snapshots[1].runId).toBe("r1");
     expect(parsed.snapshots[1].operationId).toBe("op111111yyy");
     expect(parsed.snapshots[1].label).toBe("Edit a.ts");
+  });
+
+  test("a parent lists descendant checkpoints with their owning run id", async () => {
+    const out = capture();
+    await runSnapshotsOnce({
+      adapter: {
+        async listRunDescendants() {
+          return [
+            { runId: "parent", parentRunId: null, depth: 0 },
+            { runId: "parent:child:sub:0", parentRunId: "parent", depth: 1 },
+          ];
+        },
+        async listWorkspaceCheckpoints(runId) {
+          return runId === "parent"
+            ? []
+            : [
+                {
+                  seq: 0,
+                  nodeId: "child-task",
+                  iteration: 0,
+                  attempt: 1,
+                  tier: 2,
+                  source: "watch",
+                  jjCwd: "/wt",
+                  jjCommitId: "child-commit",
+                  createdAtMs: 10,
+                },
+              ];
+        },
+        async listWorkspaceStates(runId) {
+          return runId === "parent"
+            ? []
+            : [{ jjCwd: "/wt", jjCommitId: "child-commit", jjOperationId: "child-op" }];
+        },
+      },
+      runId: "parent",
+      json: true,
+      stdout: out,
+    });
+    expect(JSON.parse(out.get()).snapshots).toEqual([
+      expect.objectContaining({
+        runId: "parent:child:sub:0",
+        nodeId: "child-task",
+        operationId: "child-op",
+      }),
+    ]);
   });
 
   test("empty run is reported, not an error", async () => {
@@ -102,6 +149,22 @@ describe("smithers restore", () => {
     expect(pickTargetCheckpoint(cps, { nodeId: "n1" })?.jjCommitId).toBe("c1");
     expect(pickTargetCheckpoint(cps, { nodeId: "n1", seq: 0 })?.jjCommitId).toBe("c0");
     expect(pickTargetCheckpoint(cps, { nodeId: "none" })).toBeNull();
+  });
+
+  test("pickTargetCheckpoint resolves a parent subflow node to its child checkpoint", () => {
+    expect(
+      pickTargetCheckpoint(
+        [
+          {
+            ...cps[2],
+            runId: "parent:child:sub:0",
+            ownerNodeId: "sub",
+            ownerIteration: 0,
+          },
+        ],
+        { nodeId: "sub" },
+      )?.jjCommitId,
+    ).toBe("d0");
   });
 
   test("reverts to the target and reports success", async () => {

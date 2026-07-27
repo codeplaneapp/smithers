@@ -24,6 +24,7 @@ import { buildTimelineEffect, buildTimelineTreeEffect } from "@smithers-orchestr
 import { jumpToFrameRoute } from "@smithers-orchestrator/server/gatewayRoutes/jumpToFrame";
 import { runPromise } from "../smithersRuntime.js";
 import { pickTargetCheckpoint, runRestoreOnce } from "../restore.js";
+import { listScopedWorkspaceSnapshots } from "../snapshot-scope.js";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { subscribeClaudeSessionRun } from "../claude-mirror/subscribeClaudeSessionRun.js";
@@ -528,6 +529,7 @@ const listSnapshotsInputSchema = z.object({
 const listSnapshotsDataSchema = z.object({
   snapshots: z.array(
     z.object({
+      runId: z.string(),
       seq: z.number().int(),
       nodeId: z.string(),
       iteration: z.number().int(),
@@ -1710,7 +1712,7 @@ export function createSemanticToolDefinitions(options = {}) {
                 },
               );
             }
-            const checkpoints = await adapter.listWorkspaceCheckpoints(input.runId);
+            const { checkpoints } = await listScopedWorkspaceSnapshots(adapter, input.runId);
             const target = pickTargetCheckpoint(checkpoints, {
               nodeId: input.nodeId,
               iteration: input.iteration,
@@ -1770,16 +1772,14 @@ export function createSemanticToolDefinitions(options = {}) {
       handler: (input) =>
         executeSemanticTool("list_snapshots", async () =>
           withDb(context, async (adapter) => {
-            const [checkpoints, states] = await Promise.all([
-              adapter.listWorkspaceCheckpoints(input.runId),
-              adapter.listWorkspaceStates(input.runId),
-            ]);
+            const { checkpoints, states } = await listScopedWorkspaceSnapshots(adapter, input.runId);
             const opByCommit = new Map();
             for (const state of states) {
-              opByCommit.set(`${state.jjCwd}\0${state.jjCommitId}`, state.jjOperationId);
+              opByCommit.set(`${state.runId}\0${state.jjCwd}\0${state.jjCommitId}`, state.jjOperationId);
             }
             return {
               snapshots: checkpoints.map((checkpoint) => ({
+                runId: checkpoint.runId,
                 seq: checkpoint.seq,
                 nodeId: checkpoint.nodeId,
                 iteration: checkpoint.iteration,
@@ -1788,7 +1788,8 @@ export function createSemanticToolDefinitions(options = {}) {
                 source: checkpoint.source,
                 label: checkpoint.label ?? null,
                 commitId: checkpoint.jjCommitId,
-                operationId: opByCommit.get(`${checkpoint.jjCwd}\0${checkpoint.jjCommitId}`) ?? null,
+                operationId:
+                  opByCommit.get(`${checkpoint.runId}\0${checkpoint.jjCwd}\0${checkpoint.jjCommitId}`) ?? null,
                 cwd: checkpoint.jjCwd,
                 createdAtMs: checkpoint.createdAtMs,
               })),

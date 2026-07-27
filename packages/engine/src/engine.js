@@ -7556,8 +7556,21 @@ async function runWorkflowBodyDriver(workflow, opts) {
   const waitForAbortedTasksToSettle = async () => {
     const deadlineAt = nowMs() + RUN_ABORT_SETTLE_TIMEOUT_MS;
     while (true) {
-      const inProgress = await Effect.runPromise(adapter.listInProgressAttempts(runId));
-      if (activeDriverTaskKeys.size === 0 && inProgress.length === 0) {
+      const descendants =
+        typeof adapter.listRunDescendants === "function"
+          ? await Effect.runPromise(adapter.listRunDescendants(runId))
+          : [{ runId, depth: 0 }];
+      const inProgressByRun = await Promise.all(
+        descendants.map((descendant) => Effect.runPromise(adapter.listInProgressAttempts(descendant.runId))),
+      );
+      const descendantRuns = await Promise.all(
+        descendants
+          .filter((descendant) => descendant.depth > 0)
+          .map((descendant) => Effect.runPromise(adapter.getRun(descendant.runId))),
+      );
+      const inProgress = inProgressByRun.flat();
+      const runningDescendants = descendantRuns.filter((run) => run?.status === "running");
+      if (activeDriverTaskKeys.size === 0 && inProgress.length === 0 && runningDescendants.length === 0) {
         return;
       }
       if (nowMs() >= deadlineAt) {
@@ -7567,6 +7580,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             runId,
             activeTaskCount: activeDriverTaskKeys.size,
             inProgressAttemptCount: inProgress.length,
+            runningDescendantCount: runningDescendants.length,
           },
           "engine:run",
         );

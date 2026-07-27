@@ -1629,11 +1629,11 @@ Restore the worktree to a durability checkpoint for a node (latest matching one 
 
 ### list_snapshots
 
-List durability workspace checkpoints for a run with matching VCS operation IDs when available.
+List durability workspace checkpoints for a run and its descendant child runs, with the owning run ID and matching VCS operation IDs when available.
 
 **Input:** `{ runId: string }`
 
-**Output:** `{ snapshots: Array<{ seq, nodeId, iteration, attempt, tier, source, label, commitId, operationId, cwd, createdAtMs }> }`
+**Output:** `{ snapshots: Array<{ runId, seq, nodeId, iteration, attempt, tier, source, label, commitId, operationId, cwd, createdAtMs }> }`
 
 ---
 
