@@ -7414,6 +7414,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
   const wakeLock = acquireCaffeinate();
   let alertRuntime = null;
   let runOwnedByCurrentProcess = false;
+  /** @type {RunRow | null} */
+  let runBeforeResume = null;
+  let workflowNameMismatchDetected = false;
   let driverTaskError = null;
   const activeDriverTaskKeys = new Set();
   /**
@@ -8492,6 +8495,31 @@ async function runWorkflowBodyDriver(workflow, opts) {
     }
     return frameNodeRows;
   };
+  const restoreRunBeforeWorkflowNameMismatch = async () => {
+    if (!runBeforeResume) return;
+    await Effect.runPromise(
+      adapter.updateRun(runId, {
+        workflowName: runBeforeResume.workflowName,
+        workflowPath: runBeforeResume.workflowPath,
+        workflowHash: runBeforeResume.workflowHash,
+        status: runBeforeResume.status,
+        startedAtMs: runBeforeResume.startedAtMs,
+        finishedAtMs: runBeforeResume.finishedAtMs,
+        heartbeatAtMs: runBeforeResume.heartbeatAtMs,
+        runtimeOwnerId: runBeforeResume.runtimeOwnerId,
+        cancelRequestedAtMs: runBeforeResume.cancelRequestedAtMs,
+        pauseRequestedAtMs: runBeforeResume.pauseRequestedAtMs ?? null,
+        hijackRequestedAtMs: runBeforeResume.hijackRequestedAtMs,
+        hijackTarget: runBeforeResume.hijackTarget,
+        vcsType: runBeforeResume.vcsType,
+        vcsRoot: runBeforeResume.vcsRoot,
+        vcsRevision: runBeforeResume.vcsRevision,
+        errorJson: runBeforeResume.errorJson,
+        configJson: runBeforeResume.configJson,
+      }),
+    );
+    runOwnedByCurrentProcess = false;
+  };
   /**
    * @param {RunResult} result
    * @param {number} runStartPerformanceMs
@@ -8561,6 +8589,11 @@ async function runWorkflowBodyDriver(workflow, opts) {
     if (result.status === "failed") {
       const rawError = result.error ?? driverTaskError;
       const errorInfo = errorToJson(rawError);
+      if (workflowNameMismatchDetected) {
+        await restoreRunBeforeWorkflowNameMismatch();
+        await annotateRunSpan({ status: "failed" });
+        return { runId, status: "failed", error: errorInfo };
+      }
       if (runOwnedByCurrentProcess) {
         await cancelPendingTimersBridge(adapter, runId, eventBus, "run-failed");
         const failed = await Effect.runPromise(
@@ -8645,6 +8678,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
   };
   try {
     const existingRun = await Effect.runPromise(adapter.getRun(runId));
+    runBeforeResume = opts.resume ? existingRun : null;
     updateCurrentCorrelationContext({
       parentRunId: opts.parentRunId ?? existingRun?.parentRunId ?? undefined,
       workflowName: existingRun?.workflowName ?? "workflow",
@@ -9049,17 +9083,22 @@ async function runWorkflowBodyDriver(workflow, opts) {
         workflowName = getWorkflowNameFromXml(graph.xml);
         if (
           opts.resume &&
+          opts.acceptWorkflowChange !== true &&
           existingRun?.workflowName &&
-          existingRun.workflowName !== "workflow" &&
           existingRun.workflowName !== workflowName
         ) {
+          workflowNameMismatchDetected = true;
           throw new SmithersError(
             "RESUME_METADATA_MISMATCH",
             `Cannot resume run ${runId} with workflow ${workflowName}; it belongs to workflow ${existingRun.workflowName}.`,
             {
-              runId,
-              existingWorkflowName: existingRun.workflowName,
-              currentWorkflowName: workflowName,
+              mismatches: ["workflow name changed"],
+              existing: {
+                workflowName: existingRun.workflowName,
+              },
+              current: {
+                workflowName,
+              },
             },
           );
         }
@@ -9236,6 +9275,12 @@ async function runWorkflowBodyDriver(workflow, opts) {
     });
     return finalizeDriverResult(result, runStartPerformanceMs);
   } catch (err) {
+    if (workflowNameMismatchDetected) {
+      const errorInfo = errorToJson(err);
+      await restoreRunBeforeWorkflowNameMismatch();
+      await annotateRunSpan({ status: "failed" });
+      return { runId, status: "failed", error: errorInfo };
+    }
     if (runAbortController.signal.aborted || isAbortError(err)) {
       logInfo(
         "workflow run cancelled while handling error",

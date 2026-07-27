@@ -9,6 +9,7 @@ import { Timer } from "../../components/src/components/Timer.js";
 import { Workflow } from "../../components/src/components/Workflow.js";
 import { runWorkflow } from "../src/engine.js";
 import { readWorkflowEntryHash, readWorkflowGraphHash } from "../src/workflow-hash.js";
+import { retryTask } from "../../time-travel/src/retry-task.js";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
@@ -272,6 +273,94 @@ describe("Durability", () => {
       expect(durability?.entryWorkflowHash).toBe(currentEntryHash);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+      cleanup();
+    }
+  });
+  test("acceptWorkflowChange permits a workflow name edit", async () => {
+    const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+    const adapter = new SmithersDb(db);
+    const runId = "accept-workflow-name-change";
+    let calls = 0;
+    const task = () => {
+      calls += 1;
+      if (calls === 1) throw new Error("first attempt fails");
+      return { value: 1 };
+    };
+    const original = smithers(() => (
+      <Workflow name="workflow-name-before">
+        <Task id="task" output={outputs.outputA} retries={0}>
+          {task}
+        </Task>
+      </Workflow>
+    ));
+    const renamed = smithers(() => (
+      <Workflow name="workflow-name-after">
+        <Task id="task" output={outputs.outputA} retries={0}>
+          {task}
+        </Task>
+      </Workflow>
+    ));
+    try {
+      expect((await Effect.runPromise(runWorkflow(original, { input: {}, runId }))).status).toBe("failed");
+      expect((await retryTask(adapter, { runId, nodeId: "task" })).success).toBe(true);
+      const resumed = await Effect.runPromise(
+        runWorkflow(renamed, {
+          input: {},
+          runId,
+          resume: true,
+          acceptWorkflowChange: true,
+        }),
+      );
+      expect(resumed.status).toBe("finished");
+      expect(calls).toBe(2);
+      expect((await adapter.getRun(runId))?.workflowName).toBe("workflow-name-after");
+    } finally {
+      cleanup();
+    }
+  });
+  test("workflow-name mismatch rejects a foreign graph without erasing the original failure", async () => {
+    const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+    const adapter = new SmithersDb(db);
+    const runId = "resume-legitimate-workflow-name";
+    let foreignCalls = 0;
+    const original = smithers(() => (
+      <Workflow name="workflow">
+        <Task id="original" output={outputs.outputA} retries={0}>
+          {() => {
+            throw new Error("original failure must survive");
+          }}
+        </Task>
+      </Workflow>
+    ));
+    const foreign = smithers(() => (
+      <Workflow name="foreign-workflow">
+        <Task id="foreign" output={outputs.outputA} retries={0}>
+          {() => {
+            foreignCalls += 1;
+            return { value: 1 };
+          }}
+        </Task>
+      </Workflow>
+    ));
+    try {
+      expect((await Effect.runPromise(runWorkflow(original, { input: {}, runId }))).status).toBe("failed");
+      const before = await adapter.getRun(runId);
+      const resumed = await Effect.runPromise(runWorkflow(foreign, { input: {}, runId, resume: true }));
+      const after = await adapter.getRun(runId);
+
+      expect(resumed.status).toBe("failed");
+      expect(resumed.error?.code).toBe("RESUME_METADATA_MISMATCH");
+      expect(resumed.error?.details).toMatchObject({
+        mismatches: ["workflow name changed"],
+        existing: { workflowName: "workflow" },
+        current: { workflowName: "foreign-workflow" },
+      });
+      expect(foreignCalls).toBe(0);
+      expect(after?.workflowName).toBe("workflow");
+      expect(after?.status).toBe("failed");
+      expect(after?.errorJson).toBe(before?.errorJson);
+      expect(after?.errorJson).toContain("original failure must survive");
+    } finally {
       cleanup();
     }
   });
