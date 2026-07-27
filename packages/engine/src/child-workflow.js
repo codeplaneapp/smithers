@@ -46,16 +46,25 @@ function normalizeChildInput(input) {
 /**
  * @param {unknown} db
  * @param {string} parentRunId
- * @returns {Promise<Record<string, unknown> | undefined>}
+ * @returns {Promise<{ startedBy?: Record<string, unknown>; config?: Record<string, unknown> }>}
  */
-async function loadParentStartedBy(db, parentRunId) {
+async function loadParentRunContext(db, parentRunId) {
   try {
     const parentRun = await new SmithersDb(/** @type {any} */ (db)).getRun(parentRunId);
     const config = JSON.parse(parentRun?.configJson ?? "{}");
     const startedBy = config?.startedBy;
-    return startedBy && typeof startedBy === "object" && !Array.isArray(startedBy) ? startedBy : undefined;
+    const gatewayConfig = {
+      ...(typeof config?.gatewaySystem === "boolean" ? { gatewaySystem: config.gatewaySystem } : {}),
+      ...(typeof config?.gatewayWorkflowKey === "string" && config.gatewayWorkflowKey.length > 0
+        ? { gatewayWorkflowKey: config.gatewayWorkflowKey }
+        : {}),
+    };
+    return {
+      ...(startedBy && typeof startedBy === "object" && !Array.isArray(startedBy) ? { startedBy } : {}),
+      ...(Object.keys(gatewayConfig).length > 0 ? { config: gatewayConfig } : {}),
+    };
   } catch {
-    return undefined;
+    return {};
   }
 }
 /**
@@ -311,7 +320,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
   }
   const signal = options.signal ?? runtime.signal;
   const pauseSignal = options.pauseSignal ?? runtime.pauseSignal;
-  const startedBy = await loadParentStartedBy(parentWorkflow?.db ?? runtime.db, parentRunId);
+  const parentContext = await loadParentRunContext(parentWorkflow?.db ?? runtime.db, parentRunId);
   if (existingChildRun?.status === "finished") {
     // The child already completed (e.g. the parent crashed after the child
     // finished): preserve its recorded output instead of re-executing it.
@@ -341,7 +350,8 @@ export async function executeChildWorkflow(parentWorkflow, options) {
       ...(automaticFailedRetry ? { bridgeExecutionId: `${childRunId}:retry:${runtime.attempt}` } : {}),
       resume,
       parentRunId,
-      ...(startedBy ? { startedBy } : {}),
+      ...(parentContext.startedBy ? { startedBy: parentContext.startedBy } : {}),
+      ...(parentContext.config ? { config: parentContext.config } : {}),
       rootDir: options.rootDir,
       workflowPath,
       allowNetwork: options.allowNetwork,
@@ -362,7 +372,8 @@ export async function executeChildWorkflow(parentWorkflow, options) {
       runId: childRunId,
       resume,
       parentRunId,
-      ...(startedBy ? { startedBy } : {}),
+      ...(parentContext.startedBy ? { startedBy: parentContext.startedBy } : {}),
+      ...(parentContext.config ? { config: parentContext.config } : {}),
       rootDir: options.rootDir,
       workflowPath,
       allowNetwork: options.allowNetwork,

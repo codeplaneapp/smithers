@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
@@ -93,6 +94,17 @@ describe("child workflow helpers", () => {
     try {
       const childWorkflow = smithers(() => null);
       ensureSmithersTables(childWorkflow.db);
+      await new SmithersDb(childWorkflow.db).insertRun({
+        runId: "parent-run",
+        workflowName: "parent",
+        status: "running",
+        createdAtMs: Date.now(),
+        configJson: JSON.stringify({
+          gatewayWorkflowKey: "main",
+          gatewaySystem: true,
+          startedBy: { kind: "user", id: "tester" },
+        }),
+      });
       const runtime = makeRuntime({ db: childWorkflow.db });
       let capturedOptions;
       const bridgeRuntime = {
@@ -128,6 +140,8 @@ describe("child workflow helpers", () => {
         runId: "parent-run:child:step:2",
         resume: false,
         parentRunId: "parent-run",
+        config: { gatewayWorkflowKey: "main", gatewaySystem: true },
+        startedBy: { kind: "user", id: "tester" },
         allowNetwork: true,
         maxOutputBytes: 1024,
         toolTimeoutMs: 250,

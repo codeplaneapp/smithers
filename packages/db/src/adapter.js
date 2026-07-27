@@ -384,20 +384,35 @@ function gatewayWorkflowKeyNeedle(workflow) {
 }
 
 /**
- * Only an explicit top-level false stamp is public. Parsing in the listing
- * layer keeps malformed, missing, string-valued, and nested historical fields
- * fail-closed without relying on dialect-specific JSON SQL.
+ * Resolve a run's gateway visibility from its own explicit top-level stamp or
+ * the nearest stamped ancestor. Unparented malformed and unstamped historical
+ * rows remain fail-closed.
  * @param {RunRow} row
- * @returns {boolean}
+ * @param {(runId: string) => Promise<RunRow | undefined>} loadRun
+ * @returns {Promise<boolean>}
  */
-function isPublicGatewayRun(row) {
-  if (typeof row.configJson !== "string") return false;
-  try {
-    const config = JSON.parse(row.configJson);
-    return Boolean(config && typeof config === "object" && !Array.isArray(config) && config.gatewaySystem === false);
-  } catch {
-    return false;
+async function isPublicGatewayRun(row, loadRun) {
+  const seen = new Set();
+  let current = row;
+  while (current) {
+    if (typeof current.runId === "string") {
+      if (seen.has(current.runId)) return false;
+      seen.add(current.runId);
+    }
+    if (typeof current.configJson === "string") {
+      try {
+        const config = JSON.parse(current.configJson);
+        if (config && typeof config === "object" && !Array.isArray(config) && typeof config.gatewaySystem === "boolean") {
+          return config.gatewaySystem === false;
+        }
+      } catch {}
+    }
+    if (typeof current.parentRunId !== "string" || current.parentRunId.length === 0) {
+      return false;
+    }
+    current = await loadRun(current.parentRunId);
   }
+  return false;
 }
 
 /**
@@ -1570,6 +1585,13 @@ export class SmithersDb {
         if (normalizedLimit === 0) return [];
         const batchSize = Math.max(50, normalizedLimit);
         const publicRows = [];
+        const runCache = new Map();
+        const loadRun = async (runId) => {
+          if (runCache.has(runId)) return runCache.get(runId);
+          const run = await this.internalStorage.queryOne("SELECT * FROM _smithers_runs WHERE run_id = ?", [runId]);
+          runCache.set(runId, run);
+          return run;
+        };
         let offset = 0;
         for (;;) {
           const batch = await this.internalStorage.queryAll(
@@ -1581,7 +1603,10 @@ export class SmithersDb {
             [...params, batchSize, offset],
           );
           for (const row of batch) {
-            if (isPublicGatewayRun(row)) publicRows.push(row);
+            runCache.set(row.runId, row);
+          }
+          for (const row of batch) {
+            if (await isPublicGatewayRun(row, loadRun)) publicRows.push(row);
             if (publicRows.length >= normalizedLimit) return publicRows.slice(0, normalizedLimit);
           }
           if (batch.length < batchSize) return publicRows;
