@@ -92,7 +92,7 @@ export default smithers((ctx) => {
     const clarifications = ctx.outputs.clarification ?? [];
     const latestClarification = clarifications[clarifications.length - 1];
     const allRequiredCollected = latestClarification?.allRequiredCollected ?? false;
-    const noMissingRequired = (extraction?.missingFields ?? []).filter((f) => f.required).length === 0;
+    const noMissingRequired = extraction != null && extraction.missingFields.filter((f) => f.required).length === 0;
     const doneCollecting = allRequiredCollected || noMissingRequired;
     const validation = ctx.outputMaybe("validation", { nodeId: "validate" });
     return (<Workflow name="form-filler-assistant">

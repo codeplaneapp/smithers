@@ -74,7 +74,7 @@ export default smithers((ctx) => {
     const safeSteps = classification?.steps.filter((s) => s.risk === "safe") ?? [];
     const riskySteps = classification?.steps.filter((s) => s.risk === "risky") ?? [];
     const safeIndex = executions.filter((e) => safeSteps.some((s) => s.name === e.stepName)).length;
-    const allSafeDone = safeIndex >= safeSteps.length;
+    const allSafeDone = classification != null && safeIndex >= safeSteps.length;
     const riskyIndex = executions.filter((e) => riskySteps.some((s) => s.name === e.stepName)).length;
     const allRiskyDone = riskyIndex >= riskySteps.length;
     const currentSafe = safeSteps[safeIndex];
@@ -88,7 +88,7 @@ export default smithers((ctx) => {
 
         {/* Step 2: Execute safe steps automatically in a loop */}
         <Loop until={allSafeDone} maxIterations={safeSteps.length || 1} onMaxReached="return-last">
-          <Task id="execute" output={outputs.execute} agent={executor}>
+          <Task id="execute-safe" output={outputs.execute} agent={executor}>
             <ExecutePrompt step={currentSafe} index={safeIndex + 1} total={safeSteps.length} mode="auto" environment={ctx.input.environment ?? "production"} previousResults={executions}/>
           </Task>
         </Loop>
@@ -101,7 +101,7 @@ export default smithers((ctx) => {
 
         {/* Step 4: Execute approved risky steps in a loop */}
         <Loop until={allRiskyDone} maxIterations={riskySteps.length || 1} onMaxReached="return-last" skipIf={!approval?.approved || riskySteps.length === 0}>
-          <Task id="execute" output={outputs.execute} agent={executor}>
+          <Task id="execute-risky" output={outputs.execute} agent={executor}>
             <ExecutePrompt step={currentRisky} index={riskyIndex + 1} total={riskySteps.length} mode="approved" environment={ctx.input.environment ?? "production"} previousResults={executions} approvalNote={approval?.note}/>
           </Task>
         </Loop>
