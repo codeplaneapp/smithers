@@ -261,6 +261,8 @@ export type SmithersEvent =
       nodeId: string;
       iteration: number;
       attempt: number;
+      /** Deterministic child run launched by a childRun subflow node. */
+      childRunId?: string;
       timestampMs: number;
     }
   | {

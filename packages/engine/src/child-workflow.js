@@ -43,6 +43,21 @@ function normalizeChildInput(input) {
   return { value: input };
 }
 /**
+ * @param {unknown} db
+ * @param {string} parentRunId
+ * @returns {Promise<Record<string, unknown> | undefined>}
+ */
+async function loadParentStartedBy(db, parentRunId) {
+  try {
+    const parentRun = await new SmithersDb(/** @type {any} */ (db)).getRun(parentRunId);
+    const config = JSON.parse(parentRun?.configJson ?? "{}");
+    const startedBy = config?.startedBy;
+    return startedBy && typeof startedBy === "object" && !Array.isArray(startedBy) ? startedBy : undefined;
+  } catch {
+    return undefined;
+  }
+}
+/**
  * @param {unknown} value
  * @returns {unknown}
  */
@@ -241,8 +256,9 @@ export async function executeChildWorkflow(parentWorkflow, options) {
   }
   const childWorkflow = resolveChildWorkflow(definition, parentWorkflow);
   const input = normalizeChildInput(options.input);
+  const parentRunId = options.parentRunId ?? runtime.runId;
   const childRunId =
-    options.runId ?? buildChildWorkflowRunId(options.parentRunId ?? runtime.runId, runtime.stepId, runtime.iteration);
+    options.runId ?? buildChildWorkflowRunId(parentRunId, runtime.stepId, runtime.iteration);
   // The child may bring its own db (e.g. a runtime-generated workflow with
   // its own dbPath) that has never seen a run: create the system tables
   // before probing for an existing child run. No-op when the parent already
@@ -251,6 +267,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
   const adapter = new SmithersDb(childWorkflow.db);
   const signal = options.signal ?? runtime.signal;
   const pauseSignal = options.pauseSignal ?? runtime.pauseSignal;
+  const startedBy = await loadParentStartedBy(parentWorkflow?.db ?? runtime.db, parentRunId);
   const existingChildRun = await adapter.getRun(childRunId);
   if (existingChildRun?.status === "finished") {
     // The child already completed (e.g. the parent crashed after the child
@@ -276,7 +293,8 @@ export async function executeChildWorkflow(parentWorkflow, options) {
       input,
       runId: childRunId,
       resume,
-      parentRunId: options.parentRunId ?? runtime.runId,
+      parentRunId,
+      ...(startedBy ? { startedBy } : {}),
       rootDir: options.rootDir,
       workflowPath,
       allowNetwork: options.allowNetwork,
@@ -296,7 +314,8 @@ export async function executeChildWorkflow(parentWorkflow, options) {
       input,
       runId: childRunId,
       resume,
-      parentRunId: options.parentRunId ?? runtime.runId,
+      parentRunId,
+      ...(startedBy ? { startedBy } : {}),
       rootDir: options.rootDir,
       workflowPath,
       allowNetwork: options.allowNetwork,

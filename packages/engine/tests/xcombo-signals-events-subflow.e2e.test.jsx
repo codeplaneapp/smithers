@@ -325,13 +325,14 @@ describe("child run parked on <WaitForEvent> through the real engine", () => {
         expect(await db.select().from(tables.childOut)).toEqual([
           expect.objectContaining({ runId: childRunId, nodeId: "await-ops", ok: true }),
         ]);
-        // ...and it does not help the parent: the parent's subflow result is
-        // permanently lost even though the child produced it.
+        // The parent can now resume the parked subflow and preserve the
+        // completed child's result instead of treating the suspension as a
+        // terminal failure.
         const parentAfter = await Effect.runPromise(runWorkflow(parent, { input: {}, runId, resume: true })).catch(
           () => ({ status: "failed" }),
         );
-        expect(parentAfter.status).toBe("failed");
-        expect(await db.select().from(tables.subOut)).toHaveLength(0);
+        expect(parentAfter.status).toBe("finished");
+        expect(await db.select().from(tables.subOut)).toHaveLength(1);
       } finally {
         cleanup();
       }

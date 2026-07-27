@@ -14,6 +14,16 @@ const SANDBOX_DEFAULT_MAX_OUTPUT_BYTES = 200_000;
 const SANDBOX_DEFAULT_TOOL_TIMEOUT_MS = 60_000;
 
 /**
+ * @param {TaskDescriptor} task
+ * @param {string} parentRunId
+ * @returns {string | undefined}
+ */
+export function getSubflowChildRunId(task, parentRunId) {
+  if (!task.meta?.__subflow) return undefined;
+  return [parentRunId, "child", task.nodeId, String(task.iteration)].join(":");
+}
+
+/**
  * @param {TaskDescriptor[]} tasks
  * @param {SmithersWorkflow<any>} workflow
  * @param {{

@@ -101,7 +101,7 @@ import {
 import { acquireSingleRunnerRunLease } from "./effect/single-runner.js";
 import { parseWaitForEventAttemptSnapshot } from "@smithers-orchestrator/db/waitForEventAttempt";
 import { AlertRuntime } from "./alert-runtime.js";
-import { attachSandboxComputeFns, attachSubflowComputeFns } from "./task-compute-fns.js";
+import { attachSandboxComputeFns, attachSubflowComputeFns, getSubflowChildRunId } from "./task-compute-fns.js";
 import { buildCacheScopeIdentity, isFreshCacheRow, normalizeCacheScope } from "./cache-policy.js";
 import { runWorkflowWithMakeBridge } from "./effect/workflow-make-bridge.js";
 import {
@@ -4418,6 +4418,7 @@ async function legacyExecuteTask(
       nodeId: desc.nodeId,
       iteration: desc.iteration,
       attempt: attemptNo,
+      ...(getSubflowChildRunId(desc, runId) ? { childRunId: getSubflowChildRunId(desc, runId) } : {}),
       timestampMs: nowMs(),
     }),
   );

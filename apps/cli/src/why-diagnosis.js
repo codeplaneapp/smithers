@@ -1066,15 +1066,19 @@ function buildDiagnosis(params) {
 export function diagnoseRunEffect(adapter, runId, nowMs = Date.now()) {
   return Effect.withLogSpan("why:diagnose")(
     Effect.gen(function* () {
-      const [run, nodes, pendingApprovals, decidedApprovals, attempts, lastSeq, lastFrame] = yield* Effect.all([
-        adapter.getRunEffect(runId),
-        adapter.listNodesEffect(runId),
-        adapter.listPendingApprovalsEffect(runId),
-        adapter.listAllDecidedApprovalsEffect(runId),
-        adapter.listAttemptsForRunEffect(runId),
-        adapter.getLastEventSeqEffect(runId),
-        adapter.getLastFrameEffect(runId),
-      ]);
+      const [run, nodes, pendingApprovals, decidedApprovals, attempts, lastSeq, lastFrame, descendants] =
+        yield* Effect.all([
+          adapter.getRunEffect(runId),
+          adapter.listNodesEffect(runId),
+          adapter.listPendingApprovalsEffect(runId),
+          adapter.listAllDecidedApprovalsEffect(runId),
+          adapter.listAttemptsForRunEffect(runId),
+          adapter.getLastEventSeqEffect(runId),
+          adapter.getLastFrameEffect(runId),
+          typeof adapter.listRunDescendants === "function"
+            ? adapter.listRunDescendants(runId)
+            : Effect.succeed([]),
+        ]);
       const approvals = [...(pendingApprovals ?? []), ...(decidedApprovals ?? [])];
       if (!run) {
         return yield* Effect.fail(new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`));
@@ -1104,6 +1108,19 @@ export function diagnoseRunEffect(adapter, runId, nowMs = Date.now()) {
         lastFrame: lastFrame,
         nowMs,
       });
+      const childDiagnoses = yield* Effect.all(
+        (descendants ?? [])
+          .filter((descendant) => descendant.depth === 1)
+          .map((descendant) => diagnoseRunEffect(adapter, descendant.runId, nowMs)),
+      );
+      for (const child of childDiagnoses) {
+        for (const blocker of child.blockers) {
+          diagnosis.blockers.push({
+            ...blocker,
+            context: [`Child run: ${child.runId}`, blocker.context].filter(Boolean).join("\n"),
+          });
+        }
+      }
       return yield* Effect.succeed(diagnosis).pipe(
         Effect.annotateLogs({
           status: diagnosis.status,

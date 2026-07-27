@@ -4,6 +4,7 @@ import { TaskHeartbeatTimeout } from "@smithers-orchestrator/errors/TaskHeartbea
 import { TaskTimeout } from "@smithers-orchestrator/errors/TaskTimeout";
 import { makeAbortError, wireAbortSignal } from "./bridge-utils.js";
 import { withTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
+import { getSubflowChildRunId } from "../task-compute-fns.js";
 import { logDebug, logError, logInfo, logWarning } from "@smithers-orchestrator/observability/logging";
 import { attemptDuration, nodeDuration } from "@smithers-orchestrator/observability/metrics";
 import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
@@ -752,6 +753,7 @@ export const executeComputeTaskBridge = async (
       nodeId: desc.nodeId,
       iteration: desc.iteration,
       attempt: attemptNo,
+      ...(getSubflowChildRunId(desc, runId) ? { childRunId: getSubflowChildRunId(desc, runId) } : {}),
       timestampMs: nowMs(),
     }),
   );
