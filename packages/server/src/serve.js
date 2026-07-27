@@ -9,6 +9,7 @@ import { logWarning } from "@smithers-orchestrator/observability/logging";
 import { recoverRewindAuditsAtStartup } from "@smithers-orchestrator/time-travel/recoverRewindAuditsAtStartup";
 import { runPromise } from "./smithersRuntime.js";
 import { httpRequests, httpRequestDuration, trackEvent } from "@smithers-orchestrator/observability/metrics";
+import { approvalDecision } from "./approvalDecision.js";
 /** @typedef {import("./ServeOptions.js").ServeOptions} ServeOptions */
 
 // Event-poll cadence for the SSE stream.
@@ -299,14 +300,39 @@ export function createServeApp(opts) {
   app.post("/approve/:nodeId", async (c) => {
     const nodeId = c.req.param("nodeId");
     const body = await c.req.json().catch(() => ({}));
-    await Effect.runPromise(approveNode(adapter, runId, nodeId, body.iteration ?? 0, body.note, body.decidedBy));
+    const iteration = body.iteration ?? 0;
+    const approval = await adapter.getApproval(runId, nodeId, iteration);
+    let requestJson = null;
+    try {
+      requestJson = approval?.requestJson ? JSON.parse(approval.requestJson) : null;
+    } catch {}
+    const decision = approvalDecision.unwrapDecision(body.decision);
+    const request = approvalDecision.parseApprovalRequest(requestJson, nodeId);
+    if (request.restrictionError) {
+      throw new HttpError(400, "INVALID_REQUEST", `Malformed approval request: ${request.restrictionError}`);
+    }
+    const validation = approvalDecision.validateApprovalDecision(request, decision);
+    if (!validation.ok) {
+      throw new HttpError(400, validation.code, validation.message);
+    }
+    await Effect.runPromise(approveNode(adapter, runId, nodeId, iteration, body.note, body.decidedBy, decision));
     return c.json({ runId });
   });
   // POST /deny/:nodeId
   app.post("/deny/:nodeId", async (c) => {
     const nodeId = c.req.param("nodeId");
     const body = await c.req.json().catch(() => ({}));
-    await Effect.runPromise(denyNode(adapter, runId, nodeId, body.iteration ?? 0, body.note, body.decidedBy));
+    await Effect.runPromise(
+      denyNode(
+        adapter,
+        runId,
+        nodeId,
+        body.iteration ?? 0,
+        body.note,
+        body.decidedBy,
+        approvalDecision.unwrapDecision(body.decision),
+      ),
+    );
     return c.json({ runId });
   });
   // POST /cancel

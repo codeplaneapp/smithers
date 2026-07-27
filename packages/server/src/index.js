@@ -26,6 +26,7 @@ import { errorToJson } from "@smithers-orchestrator/errors/errorToJson";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { assertMaxBytes, assertMaxJsonDepth } from "@smithers-orchestrator/db/input-bounds";
 import { prometheusContentType, renderPrometheusMetrics } from "@smithers-orchestrator/observability";
+import { approvalDecision } from "./approvalDecision.js";
 /** @typedef {import("node:http").ServerResponse} ServerResponse */
 /** @typedef {import("./ServerOptions.js").ServerOptions} ServerOptions */
 
@@ -1349,7 +1350,22 @@ function startServerInternal(opts = {}) {
           return sendJson(res, 404, {
             error: { code: "NOT_FOUND", message: "Run not found" },
           });
-        await Effect.runPromise(approveNode(adapter, runId, nodeId, body.iteration ?? 0, body.note, body.decidedBy));
+        const iteration = body.iteration ?? 0;
+        let requestJson = null;
+        const approval = await adapter.getApproval(runId, nodeId, iteration);
+        try {
+          requestJson = approval?.requestJson ? JSON.parse(approval.requestJson) : null;
+        } catch {}
+        const decision = approvalDecision.unwrapDecision(body.decision);
+        const request = approvalDecision.parseApprovalRequest(requestJson, nodeId);
+        if (request.restrictionError) {
+          throw new HttpError(400, "INVALID_REQUEST", `Malformed approval request: ${request.restrictionError}`);
+        }
+        const validation = approvalDecision.validateApprovalDecision(request, decision);
+        if (!validation.ok) {
+          throw new HttpError(400, validation.code, validation.message);
+        }
+        await Effect.runPromise(approveNode(adapter, runId, nodeId, iteration, body.note, body.decidedBy, decision));
         return sendJson(res, 200, { runId });
       }
       const denyMatch = url.pathname.match(/^\/v1\/runs\/([^/]+)\/nodes\/([^/]+)\/deny$/);
@@ -1367,7 +1383,17 @@ function startServerInternal(opts = {}) {
           return sendJson(res, 404, {
             error: { code: "NOT_FOUND", message: "Run not found" },
           });
-        await Effect.runPromise(denyNode(adapter, runId, nodeId, body.iteration ?? 0, body.note, body.decidedBy));
+        await Effect.runPromise(
+          denyNode(
+            adapter,
+            runId,
+            nodeId,
+            body.iteration ?? 0,
+            body.note,
+            body.decidedBy,
+            approvalDecision.unwrapDecision(body.decision),
+          ),
+        );
         return sendJson(res, 200, { runId });
       }
       const signalMatch =

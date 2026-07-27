@@ -218,6 +218,37 @@ const fakeAgent = {
     );
     return workflowPath;
   }
+  function writeSelectApprovalWorkflow(name, dbPath) {
+    const workflowPath = resolve(testDir, `${name}.tsx`);
+    writeFileSync(
+      workflowPath,
+      `/** @jsxImportSource smithers-orchestrator */
+import { createSmithers } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { smithers, Workflow, Approval, outputs } = createSmithers(
+  { selection: z.object({ selected: z.string(), notes: z.string().nullable() }) },
+  { dbPath: ${JSON.stringify(dbPath)} },
+);
+
+export default smithers(() => (
+  <Workflow name="${name}">
+    <Approval
+      id="task1"
+      mode="select"
+      output={outputs.selection}
+      request={{ title: "Pick a plan" }}
+      options={[
+        { key: "balanced", label: "Balanced" },
+        { key: "light", label: "Light" },
+      ]}
+    />
+  </Workflow>
+));
+`,
+    );
+    return workflowPath;
+  }
   describe("host/origin defense", () => {
     test("rejects a non-loopback Host without authToken", async () => {
       startTestServer();
@@ -653,6 +684,55 @@ const fakeAgent = {
       });
       expect(status).toBe(200);
       expect(data.runId).toBe(startData.runId);
+    });
+    test("persists and validates a select decision", async () => {
+      const dbPath = resolve(testDir, "approval-select.db");
+      const workflowPath = writeSelectApprovalWorkflow("approval-select", dbPath);
+      startTestServer();
+      const { data: startData } = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath },
+      });
+      await waitForRunStatus(startData.runId, ["waiting-approval"]);
+      const adapterDb = new Database(dbPath, { readonly: true });
+      const adapter = new SmithersDb(adapterDb);
+      try {
+        const accepted = await request(`/v1/runs/${startData.runId}/nodes/task1/approve`, {
+          method: "POST",
+          body: { decision: { selected: "balanced", notes: "best fit" } },
+        });
+        expect(accepted.status).toBe(200);
+        expect(JSON.parse((await adapter.getApproval(startData.runId, "task1", 0))?.decisionJson ?? "null")).toEqual({
+          selected: "balanced",
+          notes: "best fit",
+        });
+      } finally {
+        adapterDb.close();
+      }
+    });
+    test("rejects a select approval without a usable decision", async () => {
+      const dbPath = resolve(testDir, "approval-select-invalid.db");
+      const workflowPath = writeSelectApprovalWorkflow("approval-select-invalid", dbPath);
+      startTestServer();
+      const { data: startData } = await request("/v1/runs", {
+        method: "POST",
+        body: { workflowPath },
+      });
+      await waitForRunStatus(startData.runId, ["waiting-approval"]);
+      const adapterDb = new Database(dbPath, { readonly: true });
+      const adapter = new SmithersDb(adapterDb);
+      try {
+        const rejected = await request(`/v1/runs/${startData.runId}/nodes/task1/approve`, {
+          method: "POST",
+          body: { decision: { selected: "unknown" } },
+        });
+        expect(rejected.status).toBe(400);
+        expect(rejected.data.error.code).toBe("INVALID_REQUEST");
+        expect(rejected.data.error.message).toContain("unknown");
+        expect((await adapter.getApproval(startData.runId, "task1", 0))?.status).toBe("requested");
+      } finally {
+        adapterDb.close();
+      }
     });
     test("returns 404 for non-existent run", async () => {
       startTestServer();

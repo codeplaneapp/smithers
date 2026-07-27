@@ -16282,6 +16282,8 @@ routes[15]{method,path,purpose,auth}:
   POST,/signal/:runId/:signalName,Legacy alias for signals,bearer
 ```
 
+Approval requests may include `iteration`, `note`, `decidedBy`, and `decision`. For `select` and `rank` approvals, `decision` must contain a valid selection or ranking. A stable decision envelope with `value` is also accepted.
+
 JSON requests/responses use `Content-Type: application/json`, `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff`. SSE events are named `smithers` and carry `SmithersEvent` JSON; the stream sends a keep-alive comment every 10 s and closes on terminal state.
 
 Errors use the envelope `{ "error": { "code", "message", "details" } }`. Common codes: `INVALID_REQUEST`, `INVALID_JSON`, `PAYLOAD_TOO_LARGE`, `RUN_ID_REQUIRED`, `RUN_NOT_FOUND`, `RUN_ALREADY_EXISTS`, `RUN_NOT_ACTIVE`, `NOT_FOUND`, `UNAUTHORIZED`, `WORKFLOW_PATH_OUTSIDE_ROOT`, `DB_NOT_CONFIGURED`, `SERVER_ERROR`.
@@ -16473,9 +16475,12 @@ Approve a pending approval gate. All fields optional. Returns `{ "runId": "run-1
 {
   "iteration": 0,
   "note": "Looks good",
-  "decidedBy": "alice"
+  "decidedBy": "alice",
+  "decision": { "selected": "balanced", "notes": "best fit" }
 }
 ```
+
+For `select` and `rank` approvals, `decision` must contain a valid selection or ranking. A stable decision envelope with `value` is also accepted.
 
 ### POST /deny/:nodeId
 
