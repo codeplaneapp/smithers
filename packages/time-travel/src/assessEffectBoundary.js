@@ -137,10 +137,6 @@ export async function assessEffectBoundary(db, params) {
         crossedChildRunIds.add(String(descendant.runId));
       }
     }
-  } else {
-    for (const runId of runIds) {
-      if (runId !== params.runId) crossedChildRunIds.add(runId);
-    }
   }
   const placeholders = runIds.map(() => "?").join(", ");
   const [liveRows, archivedRows] = await Promise.all([

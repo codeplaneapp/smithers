@@ -586,6 +586,7 @@ function isMissingOutputTableError(error) {
   const text = collectErrorText(error);
   return /no such table/i.test(text) || /does not exist/i.test(text);
 }
+const CONTINUE_AS_NEW_BRANCH_LABEL = "continue-as-new";
 /**
  * Recover an output-row read. A missing table yields null (the not-found
  * contract callers depend on); any other error is logged (structured) and
@@ -1452,20 +1453,32 @@ export class SmithersDb {
    * @returns {RunnableEffect<RunRow | undefined, SmithersError>}
    */
   getLatestChildRun(parentRunId) {
-    return this.read(`get latest child run ${parentRunId}`, () =>
-      this.internalStorage.queryOne(
-        `SELECT *
-         FROM _smithers_runs AS child
-         WHERE parent_run_id = ?
-           AND NOT EXISTS (
-             SELECT 1 FROM _smithers_branches AS branch
-             WHERE branch.run_id = child.run_id
-           )
-         ORDER BY created_at_ms DESC
-         LIMIT 1`,
-        [parentRunId],
-      ),
-    );
+    return this.read(`get latest child run ${parentRunId}`, async () => {
+      const query = (excludeForks) =>
+        this.internalStorage.queryOne(
+          `SELECT *
+           FROM _smithers_runs AS child
+           WHERE parent_run_id = ?
+             ${
+               excludeForks
+                 ? `AND NOT EXISTS (
+               SELECT 1 FROM _smithers_branches AS branch
+               WHERE branch.run_id = child.run_id
+                 AND (branch.branch_label IS NULL OR branch.branch_label <> ?)
+             )`
+                 : ""
+             }
+           ORDER BY created_at_ms DESC
+           LIMIT 1`,
+          excludeForks ? [parentRunId, CONTINUE_AS_NEW_BRANCH_LABEL] : [parentRunId],
+        );
+      try {
+        return await query(true);
+      } catch (error) {
+        if (!isMissingOutputTableError(error)) throw error;
+        return query(false);
+      }
+    });
   }
   /**
    * Walk parent_run_id DOWN from a run: the run itself at depth 0 followed by
@@ -1481,35 +1494,49 @@ export class SmithersDb {
       this.internalStorage.dialect === POSTGRES
         ? "POSITION(',' || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ',' IN descendants.path) = 0"
         : "instr(descendants.path, ',' || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ',') = 0";
-    return this.read(`list run descendants ${runId}`, () =>
-      this.internalStorage.queryAll(
-        `WITH RECURSIVE descendants(run_id, parent_run_id, depth, path) AS (
-           SELECT run_id, parent_run_id, 0
-                , ',' || CAST(length(run_id) AS TEXT) || ':' || run_id || ','
-           FROM _smithers_runs
-           WHERE run_id = ? AND ? > 0
-           UNION ALL
-           SELECT child.run_id, child.parent_run_id, descendants.depth + 1
-                , descendants.path || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ','
-           FROM _smithers_runs child
-           JOIN descendants ON child.parent_run_id = descendants.run_id
-           WHERE descendants.depth + 1 < ?
-             AND ${visitedCheck}
-             AND NOT EXISTS (
-               SELECT 1 FROM _smithers_branches branch
-               WHERE branch.run_id = child.run_id
-             )
-         )
-         SELECT
-           run_id,
-           parent_run_id,
-           depth
-         FROM descendants
-         ORDER BY depth ASC
-         LIMIT ?`,
-        [runId, normalizedLimit, normalizedLimit, normalizedLimit],
-      ),
-    );
+    return this.read(`list run descendants ${runId}`, async () => {
+      const query = (excludeForks) =>
+        this.internalStorage.queryAll(
+          `WITH RECURSIVE descendants(run_id, parent_run_id, depth, path) AS (
+             SELECT run_id, parent_run_id, 0
+                  , ',' || CAST(length(run_id) AS TEXT) || ':' || run_id || ','
+             FROM _smithers_runs
+             WHERE run_id = ? AND ? > 0
+             UNION ALL
+             SELECT child.run_id, child.parent_run_id, descendants.depth + 1
+                  , descendants.path || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ','
+             FROM _smithers_runs child
+             JOIN descendants ON child.parent_run_id = descendants.run_id
+             WHERE descendants.depth + 1 < ?
+               AND ${visitedCheck}
+               ${
+                 excludeForks
+                   ? `AND NOT EXISTS (
+                 SELECT 1 FROM _smithers_branches branch
+                 WHERE branch.run_id = child.run_id
+                   AND (branch.branch_label IS NULL OR branch.branch_label <> ?)
+               )`
+                   : ""
+               }
+           )
+           SELECT
+             run_id,
+             parent_run_id,
+             depth
+           FROM descendants
+           ORDER BY depth ASC
+           LIMIT ?`,
+          excludeForks
+            ? [runId, normalizedLimit, normalizedLimit, CONTINUE_AS_NEW_BRANCH_LABEL, normalizedLimit]
+            : [runId, normalizedLimit, normalizedLimit, normalizedLimit],
+        );
+      try {
+        return await query(true);
+      } catch (error) {
+        if (!isMissingOutputTableError(error)) throw error;
+        return query(false);
+      }
+    });
   }
   /**
    * @param {string} [status]
