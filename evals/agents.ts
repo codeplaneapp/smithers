@@ -12,9 +12,9 @@ import { homedir } from "node:os";
 import path from "node:path";
 import {
   type AgentLike,
+  AntigravityAgent,
   ClaudeCodeAgent,
   CodexAgent,
-  GeminiAgent,
   KimiAgent,
 } from "smithers-orchestrator";
 
@@ -26,9 +26,11 @@ export const models = {
   // ── weak tier ──────────────────────────────────────────────────────────
   haiku: new ClaudeCodeAgent({ model: "claude-haiku-4-5-20251001", cwd }),
   sonnet: new ClaudeCodeAgent({ model: "claude-sonnet-5", cwd }),
-  gemini: new GeminiAgent({
+  // Gemini CLI support was sunset in Smithers; the seat keeps its cases.jsonl
+  // key ("gemini") but now runs through Google's `agy` CLI via AntigravityAgent.
+  // Machines without `agy` installed should re-seat or skip these cases.
+  gemini: new AntigravityAgent({
     model: "gemini-3.5-flash",
-    configDir: path.join(homedir(), ".gemini"),
     cwd,
   }),
   kimi: new KimiAgent({

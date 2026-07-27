@@ -1,6 +1,6 @@
 ---
 name: smithers
-description: "Drive Smithers, a durable control plane for long-running coding agents, from Claude Code. Use when the user wants multi-step, long-running, crash-safe, or human-in-the-loop agent work ('orchestrate agents', 'run a workflow', 'implement this and review it', 'keep iterating until tests pass', 'plan then build') or anything needing retries, approvals, replay, or evals across multiple AI steps. YOU (Claude) run Smithers on the user's behalf; it is not a GUI the human clicks. HARD RULE 1, right-size the route FIRST, handle a most-trivial edit directly, run a clear well-scoped single-agent task through `smithers oneshot`, and reserve a full workflow for work that genuinely needs ordered stages, durability, approvals, loops, or reuse; never author a multi-node workflow for a task one strong agent finishes in one context window. HARD RULE 2, run long-running / multi-step / background work through a durable Smithers workflow, NOT through Task/Agent subagents, /loop, or hand-written native Workflow scripts; the native Workflow tool has exactly ONE sanctioned use, launching the plugin's smithers-run.mjs mirror so the run shows live in /workflows. HARD RULE 3, when creating or editing workflow code, ALWAYS use https://smithers.sh/llms-full.txt as the API reference (fetch it first). A workflow that runs long, fans out, or pauses on approvals should get a live custom UI at .smithers/ui/<key>.tsx (composed from the smithers-orchestrator/gateway-ui + smithers-orchestrator/ui component libraries over the gateway-react hooks, never hand-rolled markup), launched with `smithers ui` so the human can watch; short linear runs are fine on `smithers monitor`."
+description: "Drive Smithers, a durable control plane for long-running coding agents, from Claude Code. Use when the user wants multi-step, long-running, crash-safe, or human-in-the-loop agent work ('orchestrate agents', 'run a workflow', 'implement this and review it', 'keep iterating until tests pass', 'plan then build') or anything needing retries, approvals, replay, or evals across multiple AI steps. YOU (Claude) run Smithers on the user's behalf; it is not a GUI the human clicks. HARD RULE 1, right-size the route FIRST, handle a most-trivial edit directly, run ANY clear single-goal ask through `smithers oneshot`, even a large repo-wide one (one strong agent one-shots up to roughly 300k tokens in a single run), and reserve a full workflow for work that genuinely needs ordered stages, durability, approvals, loops, or reuse; never author a multi-node workflow for a single-goal task, and neither task size nor context-window worries ever justify one. HARD RULE 2, run long-running / multi-step / background work through a durable Smithers workflow, NOT through Task/Agent subagents, /loop, or hand-written native Workflow scripts; the native Workflow tool has exactly ONE sanctioned use, launching the plugin's smithers-run.mjs mirror so the run shows live in /workflows. HARD RULE 3, when creating or editing workflow code, ALWAYS use https://smithers.sh/llms-full.txt as the API reference (fetch it first). A workflow that runs long, fans out, or pauses on approvals should get a live custom UI at .smithers/ui/<key>.tsx (composed from the smithers-orchestrator/gateway-ui + smithers-orchestrator/ui component libraries over the gateway-react hooks, never hand-rolled markup), launched with `smithers ui` so the human can watch; short linear runs are fine on `smithers monitor`."
 ---
 
 # Smithers (from Claude Code)
@@ -14,15 +14,50 @@ Retries, approvals, replay, and evals live in one place.
 
 Use the lightest route that preserves the durability the task needs:
 
-- **Most-trivial one-off edit** (a rename, a config line, a quick answer):
-  just do it directly. No Smithers.
-- **Clear, well-scoped task one strong agent can finish in one context
-  window** (write/refactor one thing, produce one document, fix one bug):
-  `smithers oneshot "<goal>"`. It runs one strong agent in the background
-  with durable state and an optional reviewer — no workflow file to author.
-- **Genuinely multi-stage work** (ordered phases, human approvals, loops with
-  verified exits, several agents with different tools, schedules, reuse):
-  a full workflow.
+1. **Ambiguous goal or acceptance criteria**: ask the user clarifying
+   questions (what outcome, what counts as done) and stop until they answer.
+   "Make the settings page better" gets a reply that is ONLY clarifying
+   questions, covering both the target and what "better"/"done" means — never
+   a plan whose first step is to find out, and never a provisional plan under
+   an assumed answer.
+2. **Most-trivial one-off edit** (a rename, a config line, a quick answer):
+   just do it directly. No Smithers. If the stored trivial preference is
+   `oneshot`, launch with `--model opus` or `--model terra` — the ONLY two
+   slots allowed for trivial oneshot, never sol, luna, kimi, or any other
+   tier. Trivial means ONE tiny change in one
+   place; an ask bundling multiple coordinated edits (code plus help text
+   plus a test) is oneshot work, not trivial.
+3. **Clear single-goal ask, at ANY size**: `smithers oneshot "<goal>"`. It
+   runs one strong agent in the background with durable state, an optional
+   reviewer, and a live chat/diff UI — no workflow file to author. One strong
+   agent routinely finishes repo-wide, hours-long goals of up to roughly 300k
+   tokens in a single run; the worker manages its own context, so "it will
+   not fit in one context window" is never a reason to author a workflow.
+   Prefer codex sol, then kimi, then claude fable or opus.
+4. **Genuinely multi-goal work** (ordered phases, human approvals, loops with
+   verified exits, several agents with different tools, schedules, reuse):
+   a full workflow.
+
+**Size does not pick the route; shape does.** Real asks that belong in a
+single `smithers oneshot`, each historically one-shotted by one strong agent
+in under 300k tokens:
+
+- "Go through the entire codebase and make sure every feature is documented."
+- "Run `pnpm up --latest` on every package and make sure all builds still pass."
+- "Make CI green on this branch: rebase on main, fix failures, push until green."
+- "Replace every use of library X with library Y and get all tests passing."
+- "Read review.md, address every review comment, delete the artifacts when done."
+
+Authoring a workflow (or running `create-workflow`) for asks like these is
+overengineering. Escalate to a workflow only when you can name the
+workflow-only feature the task requires; neither "it feels big" nor a seeded
+workflow with a matching name (`audit`, `review`, `upgrade`) qualifies. Pick
+exactly ONE route and commit to it — never a menu of routes or a hybrid.
+Explicit user overrides win: "oneshot" forces oneshot, "oneshot with review"
+adds `--review on`, "oneshot without review" adds `--review off`. Check
+`smithers oneshot --status` before first use; if no usable agent is reported,
+fall back to the direct or workflow route (oneshot being unavailable never
+means YOU are; "no routing path exists" is never the answer).
 
 Structure is a cost. The shipped OrchBench benchmark measured a solo frontier
 agent at reward 0.901 / $10.49 / 19 min while a three-model review panel
@@ -105,6 +140,8 @@ Workflow scripts or reimplement the mirror inline.
 
 The mapping:
 
+- "one clear goal, however big" → `smithers oneshot` (no workflow file, see
+  "Right-size the route first" above).
 - "fan out N workers" → one Smithers workflow with N nodes (or an array agent).
 - "loop until tests pass" → a Smithers loop/retry node, not `/loop`.
 - "do this in the background and check on it later" → `run_workflow` (detached) +

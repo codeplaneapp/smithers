@@ -20,14 +20,52 @@ Route work in three tiers:
 
 1. **Trivial asks** (a typo, a rename, an edit under about 10 agent turns): do
    them directly. If the stored trivial preference is `oneshot`, launch oneshot
-   with `--model opus` or `--model terra`.
-2. **Clear single-agent asks** that fit one context window: `smithers oneshot`.
-3. **Multi-stage, approval-gated, long-horizon, or reusable work**: build and
-   run a real [workflow](/cli/quickstart).
+   with `--model opus` or `--model terra`: those are the only two slots allowed
+   for trivial oneshot (never sol, luna, kimi, or any other tier), and no other
+   model belongs in a trivial routing explanation. Trivial means one tiny
+   change in one place: an ask that bundles multiple coordinated edits (a flag
+   plus its help text plus a test, code plus docs) is tier 2 oneshot work, not
+   trivial, no matter how fast it would be.
+2. **Clear single-goal asks**, small or repo-wide: `smithers oneshot`. One
+   strong agent routinely finishes hours-long goals in a single oneshot run of
+   up to roughly 300k tokens, so a large goal is not a reason to leave this
+   tier. The worker manages its own context across the run, so "it will not
+   fit in one context window" is not a reason either. When explaining a
+   routing decision, name the seat order (codex sol, then kimi, then claude
+   fable or opus) and which seat you picked.
+3. **Genuinely multi-goal work** (human approval gates, staged phases that
+   need different agents or models, parallel fan-out, durable loops, or a
+   reusable procedure): build and run a real [workflow](/cli/quickstart).
+
+Size does not pick the route; shape does. A task with one finish line belongs
+in oneshot no matter how much work it implies. Real asks that fit a single
+oneshot run, each historically completed by one strong agent in under 300k
+tokens:
+
+- "Go through the entire codebase and make sure every feature is documented."
+- "Run `pnpm up --latest` on every package and make sure all builds still pass."
+- "Make CI green on this branch: rebase on main, fix failures, push until green."
+- "Replace every use of library X with library Y and get all tests passing."
+- "Read review.md, address every review comment, delete the artifacts when done."
+
+Authoring a workflow for asks like these is overengineering: it pays authoring
+latency and review overhead for durability the task does not need. Escalate to
+tier 3 only when the task requires a workflow-only feature (an approval gate,
+phases needing different models, parallel lanes, reuse). Neither "it feels
+big" nor the existence of a seeded workflow with a matching name (`audit`,
+`review`, `upgrade`) qualifies: shape decides, not the catalog. Pick exactly
+one route and commit to it; never answer with a menu of alternative routes or
+a hybrid of oneshot plus a workflow.
 
 Explicit overrides win over inference: "oneshot" forces oneshot, "oneshot with
 review" adds `--review on`, "oneshot without review" adds `--review off`.
-Ambiguous goals deserve a clarifying question before anything launches.
+Ambiguous goals deserve clarifying questions to the user before anything
+launches; wait for the answers rather than substituting assumptions or an
+exploratory plan for them. "Make the settings page better" gets a reply that
+is ONLY clarifying questions, covering both the target (which settings page?)
+and the goal (what is wrong today? what does better mean? what counts as
+done?). The entire reply is the questions: never a plan whose first step is to
+find out, and never a provisional plan under an assumed answer.
 
 ## Agents and models
 
@@ -43,7 +81,10 @@ high reasoning effort.
 Run `bunx smithers-orchestrator oneshot --status` before first use. It prints
 the usable agents, the resolved model chain, and the stored preferences as
 JSON; when no usable agent is detected, oneshot is unavailable and work should
-go through the direct or workflow route instead.
+go through the direct or workflow route instead. Oneshot being unavailable
+never means the orchestrating agent is unavailable: a simple task still gets
+done directly, a multi-goal one still gets a workflow, and "no routing path
+exists" is never the answer.
 
 ## Review and trivial preferences
 

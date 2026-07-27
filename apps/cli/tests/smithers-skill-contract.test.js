@@ -59,6 +59,28 @@ test("skill contains the execute-don't-describe imperative", () => {
   expect(skill).toContain("smithers graph .smithers/workflows/");
 });
 
+// Agents were overengineering large single-goal asks (make CI green, repo-wide
+// docs audits, dependency upgrades) into full workflows. The skill must keep
+// routing those to `smithers oneshot`: the scale claim (one strong agent
+// one-shots up to ~300k tokens, proven by real /goal prompts) and the
+// shape-not-size rule. The oneshot-routing eval suite pins the behavior
+// end-to-end; this pins the wording that makes it pass.
+test("skill routes large single-goal asks to oneshot, not workflows", () => {
+  const skill = readRepoFile("skills/smithers/SKILL.md");
+
+  expect(skill).toContain("Size does not pick the route; shape does.");
+  expect(skill).toMatch(/roughly 300k\s+tokens/);
+  // The old caps that pushed anything big into workflow authoring. (The skill
+  // may still MENTION context windows to refute them as a routing reason.)
+  expect(skill).not.toContain("fits in roughly 100k tokens");
+  expect(skill).not.toMatch(/finish\s+in one context window/);
+  // The plugin skill must carry the same routing doctrine (it had none).
+  const plugin = readRepoFile("claude-plugin/skills/smithers/SKILL.md");
+  expect(plugin).toContain("smithers oneshot");
+  expect(plugin).toContain("Size does not pick the route; shape does.");
+  expect(plugin).toMatch(/roughly 300k\s+tokens/);
+});
+
 test("smithers skill documents current agents command and LoopUntilScored source", () => {
   const skill = readRepoFile("skills/smithers/SKILL.md");
 

@@ -88,13 +88,18 @@ Three routing tiers, inferred from the prompt:
   itself. No oneshot, no workflow, no delegation overhead. This default is a
   stored preference (`trivial`); if the user prefers `oneshot` for these, launch
   oneshot with a weaker model (opus or terra), never sol.
-- Simple (one agent could finish it in under ~100k tokens of context with a
-  single goal, but more than a most-trivial edit): route to `smithers oneshot`,
-  not a workflow. Model preference: codex sol if usable, else kimi, else claude
-  fable or opus. For the easy end of this band a weaker model (opus or terra)
-  is fine.
-- Complex (multi-stage, approval-gated, long-horizon, reusable): a real Smithers
-  workflow, exactly as today. Oneshot is for the simple end only.
+- Single-goal (one clear finish line, more than a most-trivial edit, at any
+  size up to roughly ~300k tokens of agent work; the worker manages its own
+  context across the run): route to `smithers oneshot`, not a workflow. Model
+  preference: codex sol if usable, else kimi, else claude fable or opus. For
+  the easy end of this band a weaker model (opus or terra) is fine. Size never
+  picks the route; shape does. Repo-wide goals (make CI green, upgrade every
+  dependency, document every feature) are still single oneshot runs; real
+  /goal prompts of this shape were historically one-shotted in under 300k
+  tokens.
+- Multi-goal (approval-gated, staged phases needing different models, parallel
+  fan-out, durable loops, reusable): a real Smithers workflow, exactly as
+  today.
 
 Rules on top of the tiers:
 

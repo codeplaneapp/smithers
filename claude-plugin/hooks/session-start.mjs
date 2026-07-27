@@ -88,7 +88,7 @@ try {
   );
   lines.push(
     "You operate Smithers via the `smithers` MCP tools (list_workflows, run_workflow, watch_run, resolve_approval, ...) and the `smithers` CLI. You are the orchestrator: run multi-step / long-running / background work THROUGH a Smithers workflow, NOT through your own ad-hoc orchestration (Task/Agent fan-outs, `/loop`, hand-written Workflow scripts).",
-    "Route clear simple single-agent asks through `smithers oneshot`; reserve full workflows for multi-step, durable, approval-gated, or reusable work.",
+    "Route ANY clear single-goal ask through `smithers oneshot`, even large repo-wide goals (make CI green, upgrade every dependency and fix builds, audit and update all docs): one strong agent one-shots up to roughly 300k tokens in a single run. Reserve full workflows for genuinely multi-stage, approval-gated, parallel, or reusable work; authoring a workflow for a single-goal ask is overengineering, and 'it feels big' never justifies one.",
   );
   lines.push(
     `LIVE VIEW RULE: every Smithers run you start or attach to gets a live /workflows mirror. Launch runs with the native Workflow tool pointed at the plugin's generic mirror script: Workflow({ scriptPath: ${JSON.stringify(mirrorScript)}, args: { workflow: "<id>", input: { ... } } }) — it starts the detached run itself and mirrors it node-by-node. Attach to an existing run with args: { runId: "<run-id>" }. This is the ONLY sanctioned use of the native Workflow tool; the durable work always lives in the Smithers engine (stopping the mirror never stops the run).`,
