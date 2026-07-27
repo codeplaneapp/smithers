@@ -43,7 +43,7 @@ export function attachSubflowComputeFns(tasks, workflow, opts = {}) {
       const result = await runChildWorkflow(workflow, {
         workflow: subflowWorkflow,
         input: subflowInput,
-        rootDir: opts.rootDir,
+        rootDir: task.worktreePath ?? opts.rootDir,
         workflowPath: opts.workflowPath ?? undefined,
       });
       if (result.status !== "finished") {

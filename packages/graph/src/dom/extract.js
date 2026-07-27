@@ -484,7 +484,7 @@ export function extractFromHost(root, opts) {
             const result = await executeChildWorkflow(undefined, {
               workflow: raw.__smithersSubflowWorkflow,
               input: raw.__smithersSubflowInput,
-              rootDir: opts?.baseRootDir,
+              rootDir: descriptor.worktreePath ?? opts?.baseRootDir,
               workflowPath: opts?.workflowPath ?? undefined,
             });
             if (result.status !== "finished") {
