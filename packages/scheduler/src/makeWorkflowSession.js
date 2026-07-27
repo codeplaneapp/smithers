@@ -656,6 +656,24 @@ export function makeWorkflowSession(options = {}) {
    */
   function applyFailure(descriptor, error) {
     const key = stateKeyFor(descriptor);
+    const suspensionStatus =
+      error &&
+      typeof error === "object" &&
+      error.details &&
+      typeof error.details === "object" &&
+      typeof error.details.suspensionStatus === "string"
+        ? error.details.suspensionStatus
+        : null;
+    if (
+      suspensionStatus === "waiting-approval" ||
+      suspensionStatus === "waiting-event" ||
+      suspensionStatus === "waiting-timer" ||
+      suspensionStatus === "waiting-quota"
+    ) {
+      state.states.set(key, suspensionStatus);
+      state.retryWait.delete(key);
+      return decide();
+    }
     if (error && typeof error === "object" && error.code === "BOUND_STALE") {
       // The engine revalidates immediately before each physical dispatch.
       // A row can change during an attempt or retry backoff after the

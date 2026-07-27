@@ -147,7 +147,7 @@ async function waitForChildRunToSettle(adapter, childRunId, signal, pollInterval
  * @param {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>} childWorkflow
  * @param {string} childRunId
  * @param {RunResult["status"]} status
- * @returns {Promise<{ runId: string; status: RunResult["status"]; output: unknown; }>}
+ * @returns {Promise<RunResult & { output: unknown }>}
  */
 async function loadPreservedChildResult(childWorkflow, childRunId, status) {
   let output;
@@ -161,10 +161,20 @@ async function loadPreservedChildResult(childWorkflow, childRunId, status) {
       );
     }
   }
+  const run = await new SmithersDb(childWorkflow.db).getRun(childRunId);
+  let error;
+  if (run?.errorJson) {
+    try {
+      error = JSON.parse(run.errorJson);
+    } catch {
+      error = run.errorJson;
+    }
+  }
   return {
     runId: childRunId,
     status,
     output: normalizeChildOutput({ runId: childRunId, status, output }),
+    ...(error === undefined ? {} : { error }),
   };
 }
 /**
@@ -212,7 +222,7 @@ function resolveChildWorkflow(definition, parentWorkflow) {
  * other existing child is resumed in place under a durable claim.
  * @param {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any> | undefined} parentWorkflow
  * @param {ChildWorkflowExecuteOptions} options
- * @returns {Promise<{ runId: string; status: RunResult["status"]; output: unknown; }>}
+ * @returns {Promise<RunResult & { output: unknown }>}
  */
 export async function executeChildWorkflow(parentWorkflow, options) {
   const runtime = requireTaskRuntime();
@@ -274,8 +284,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
       signal,
     });
     return {
-      runId: result.runId,
-      status: result.status,
+      ...result,
       output: normalizeChildOutput(result),
     };
   }
@@ -295,8 +304,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
     }),
   );
   return {
-    runId: result.runId,
-    status: result.status,
+    ...result,
     output: normalizeChildOutput(result),
   };
 }

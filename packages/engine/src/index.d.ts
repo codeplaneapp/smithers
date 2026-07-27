@@ -286,11 +286,9 @@ type ChildWorkflowExecuteOptions$1 = {
  * other existing child is resumed in place under a durable claim.
  * @param {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any> | undefined} parentWorkflow
  * @param {ChildWorkflowExecuteOptions} options
- * @returns {Promise<{ runId: string; status: RunResult["status"]; output: unknown; }>}
+ * @returns {Promise<RunResult & { output: unknown }>}
  */
-declare function executeChildWorkflow(parentWorkflow: _smithers_orchestrator_components_SmithersWorkflow.SmithersWorkflow<any> | undefined, options: ChildWorkflowExecuteOptions): Promise<{
-    runId: string;
-    status: RunResult$2["status"];
+declare function executeChildWorkflow(parentWorkflow: _smithers_orchestrator_components_SmithersWorkflow.SmithersWorkflow<any> | undefined, options: ChildWorkflowExecuteOptions): Promise<RunResult$2 & {
     output: unknown;
 }>;
 declare namespace __childWorkflowInternals {
@@ -333,11 +331,9 @@ declare function isChildRunLiveElsewhere(run: Pick<RunRow, "status" | "heartbeat
  * @param {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow<any>} childWorkflow
  * @param {string} childRunId
  * @param {RunResult["status"]} status
- * @returns {Promise<{ runId: string; status: RunResult["status"]; output: unknown; }>}
+ * @returns {Promise<RunResult & { output: unknown }>}
  */
-declare function loadPreservedChildResult(childWorkflow: _smithers_orchestrator_components_SmithersWorkflow.SmithersWorkflow<any>, childRunId: string, status: RunResult$2["status"]): Promise<{
-    runId: string;
-    status: RunResult$2["status"];
+declare function loadPreservedChildResult(childWorkflow: _smithers_orchestrator_components_SmithersWorkflow.SmithersWorkflow<any>, childRunId: string, status: RunResult$2["status"]): Promise<RunResult$2 & {
     output: unknown;
 }>;
 /**

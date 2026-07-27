@@ -775,6 +775,14 @@ export class WorkflowDriver {
     if (settled.kind === "cancelled") {
       return this.cancelRun();
     }
+    if (
+      settled.kind === "failed" &&
+      settled.error &&
+      typeof settled.error === "object" &&
+      settled.error.details?.suspensionStatus === "paused"
+    ) {
+      return { runId: this.activeRunId, status: "paused" };
+    }
     if (settled.kind === "completed") {
       // Persist this task's output row as it lands — not just a
       // save-at-the-end wrapper — so `storage.loadOutputs(runId)`

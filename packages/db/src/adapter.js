@@ -3668,9 +3668,26 @@ export class SmithersDb {
    * @returns {RunnableEffect<ApprovalRow[], SmithersError>}
    */
   listPendingApprovals(runId) {
+    const visitedCheck =
+      this.internalStorage.dialect === POSTGRES
+        ? "POSITION(',' || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ',' IN descendants.path) = 0"
+        : "instr(descendants.path, ',' || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ',') = 0";
     return this.read(`list pending approvals ${runId}`, () =>
       this.internalStorage.queryAll(
-        `SELECT *
+        `WITH RECURSIVE descendants(run_id, depth, path) AS (
+           SELECT run_id, 0
+                , ',' || CAST(length(run_id) AS TEXT) || ':' || run_id || ','
+           FROM _smithers_runs
+           WHERE run_id = ?
+           UNION ALL
+           SELECT child.run_id, descendants.depth + 1
+                , descendants.path || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ','
+           FROM _smithers_runs child
+           JOIN descendants ON child.parent_run_id = descendants.run_id
+           WHERE descendants.depth + 1 < 1000
+             AND ${visitedCheck}
+         )
+         SELECT *
          FROM (
            SELECT
              a.run_id,
@@ -3687,7 +3704,7 @@ export class SmithersDb {
            FROM _smithers_approvals a
            INNER JOIN _smithers_runs r
              ON a.run_id = r.run_id
-           WHERE a.run_id = ? AND a.status = ?
+           WHERE a.run_id IN (SELECT run_id FROM descendants) AND a.status = ?
              AND r.status NOT IN ('finished', 'failed', 'cancelled', 'canceled', 'continued')
            UNION ALL
            SELECT
@@ -3709,13 +3726,23 @@ export class SmithersDb {
              ON a.run_id = n.run_id
             AND a.node_id = n.node_id
             AND a.iteration = n.iteration
-           WHERE n.run_id = ?
+           WHERE n.run_id IN (SELECT run_id FROM descendants)
              AND n.state = ?
              AND r.status = ?
              AND a.run_id IS NULL
+             AND NOT EXISTS (
+               SELECT 1
+               FROM _smithers_attempts attempt
+               WHERE attempt.run_id = n.run_id
+                 AND attempt.node_id = n.node_id
+                 AND attempt.iteration = n.iteration
+                 AND attempt.state = 'waiting-approval'
+                 AND attempt.error_json LIKE '%"suspensionStatus":"waiting-approval"%'
+                 AND attempt.error_json LIKE '%"childRunId"%'
+             )
          ) pending
          ORDER BY COALESCE(requested_at_ms, 0) ASC, run_id, node_id, iteration`,
-        [runId, "requested", runId, "waiting-approval", "waiting-approval"],
+        [runId, "requested", "waiting-approval", "waiting-approval"],
         { booleanColumns: ["autoApproved"] },
       ),
     );

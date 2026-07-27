@@ -54,7 +54,7 @@ describe("task compute function attachment behavior", () => {
 
   test("subflow compute functions throw when the child workflow does not finish", async () => {
     childWorkflowCalls.length = 0;
-    nextChildWorkflowResult = { status: "failed", output: null };
+    nextChildWorkflowResult = { runId: "failed-child", status: "failed", output: null };
 
     const tasks = [
       {
@@ -69,8 +69,40 @@ describe("task compute function attachment behavior", () => {
 
     attachSubflowComputeFns(tasks, { name: "parent" }, testDeps);
 
-    await expect(tasks[0].computeFn()).rejects.toThrow("Subflow bad-subflow failed with status failed.");
+    await expect(tasks[0].computeFn()).rejects.toThrow(
+      "Subflow bad-subflow failed because child run failed-child ended with status failed.",
+    );
     expect(childWorkflowCalls).toHaveLength(1);
+  });
+
+  test("subflow compute functions classify a parked child as a non-retryable suspension", async () => {
+    childWorkflowCalls.length = 0;
+    nextChildWorkflowResult = {
+      runId: "parked-child",
+      status: "waiting-approval",
+      output: null,
+    };
+    const tasks = [
+      {
+        nodeId: "parked-subflow",
+        meta: {
+          __subflow: true,
+          __subflowWorkflow: { name: "child" },
+        },
+      },
+    ];
+
+    attachSubflowComputeFns(tasks, { name: "parent" }, testDeps);
+
+    await expect(tasks[0].computeFn()).rejects.toMatchObject({
+      code: "WORKFLOW_EXECUTION_FAILED",
+      details: {
+        childRunId: "parked-child",
+        status: "waiting-approval",
+        suspensionStatus: "waiting-approval",
+        failureRetryable: false,
+      },
+    });
   });
 
   test("sandbox compute functions execute sandbox workflows with coerced flags, defaults, and task worktree root", async () => {

@@ -93,6 +93,7 @@ async function executeRegisteredChildWorkflow(workflowBridge, runId, scope, engi
         payload: { executionId: runId },
       });
     }).pipe(
+      Workflow.intoResult,
       Effect.provideService(WorkflowEngine.WorkflowInstance, parentInstance),
       Effect.provideService(Scope.Scope, scope),
       Effect.provide(engineContext),
@@ -147,13 +148,25 @@ function createWorkflowMakeBridgeRuntime(services) {
       const lastRunIdRef = { current: opts.runId };
       const execute = createWorkflowExecutionEffect(workflow, opts, services, lastRunIdRef);
       await registerBridgeWorkflow(workflowBridge, services.scope, services.engineContext, execute);
-      return executeRegisteredChildWorkflow(
+      const result = await executeRegisteredChildWorkflow(
         workflowBridge,
         opts.runId,
         services.scope,
         services.engineContext,
         services.parentInstance,
       );
+      if (result._tag === "Complete") {
+        if (Exit.isSuccess(result.exit)) {
+          return result.exit.value;
+        }
+        throw Cause.squash(result.exit.cause);
+      }
+      const adapter = new SmithersDb(workflow.db);
+      const run = await Effect.runPromise(adapter.getRun(lastRunIdRef.current));
+      return {
+        runId: lastRunIdRef.current,
+        status: run?.status ?? "cancelled",
+      };
     },
   };
 }

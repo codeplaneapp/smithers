@@ -25,9 +25,6 @@ import { Effect } from "effect";
  */
 
 const END_TO_END_TIMEOUT_MS = 60_000;
-// How long a default-retry parent is allowed to spin before the test aborts it.
-// The parent never parks on its own, so an abort is the only way to bound these.
-const PARENT_OBSERVATION_MS = 8_000;
 
 /**
  * @param {any} workflow
@@ -69,9 +66,15 @@ function buildChildWithGate(harness, gateOpts = {}) {
             id="child-gate"
             output={outputs.approval}
             request={{ title: "Ship the child?" }}
+            onDeny="fail"
             timeoutMs={gateOpts.timeoutMs}
           />
-          <Task id="child-final" output={outputs.childResult} deps={{ gate: outputs.approval }}>
+          <Task
+            id="child-final"
+            output={outputs.childResult}
+            deps={{ gate: outputs.approval }}
+            needs={{ gate: "child-gate" }}
+          >
             {(/** @type {any} */ deps) => ({ shipped: Boolean(deps.gate.approved) })}
           </Task>
         </Sequence>
@@ -200,21 +203,14 @@ describe("<Subflow childRun> + a human decision gate inside the child", () => {
         // Default retry budget: exactly what a user writes.
         const parentWorkflow = buildParent(harness, childWorkflow);
         const adapter = new SmithersDb(db);
-        const controller = new AbortController();
-        const parentPromise = runInTestRoot(parentWorkflow, dbPath, {
-          input: {},
-          signal: controller.signal,
-        }).catch((error) => ({
-          status: `(threw) ${error instanceof Error ? error.message : String(error)}`,
-          runId: null,
-        }));
+        const first = await runInTestRoot(parentWorkflow, dbPath, { input: {} });
         const childRunId = await waitForChildGate(adapter);
         await Effect.runPromise(approveNode(adapter, childRunId, "child-gate", 0, "ship it", "will"));
-        // Give the parent several retry windows to pick the answer up, then
-        // stop it: it will not park itself.
-        await sleep(PARENT_OBSERVATION_MS);
-        controller.abort();
-        await parentPromise;
+        await runInTestRoot(parentWorkflow, dbPath, {
+          input: {},
+          runId: first.runId,
+          resume: true,
+        });
         const parentRunId = childRunId.split(":child:")[0];
         const childNodes = await adapter.listNodes(childRunId);
         const subflowAttempts = await adapter.listAttempts(parentRunId, "review", 0);
@@ -249,19 +245,14 @@ describe("<Subflow childRun> + a human decision gate inside the child", () => {
         const childWorkflow = buildChildWithGate(harness);
         const parentWorkflow = buildParent(harness, childWorkflow);
         const adapter = new SmithersDb(db);
-        const controller = new AbortController();
-        const parentPromise = runInTestRoot(parentWorkflow, dbPath, {
-          input: {},
-          signal: controller.signal,
-        }).catch((error) => ({
-          status: `(threw) ${error instanceof Error ? error.message : String(error)}`,
-          runId: null,
-        }));
+        const first = await runInTestRoot(parentWorkflow, dbPath, { input: {} });
         const childRunId = await waitForChildGate(adapter);
         await Effect.runPromise(denyNode(adapter, childRunId, "child-gate", 0, "not this quarter", "will"));
-        await sleep(PARENT_OBSERVATION_MS);
-        controller.abort();
-        const parent = await parentPromise;
+        const parent = await runInTestRoot(parentWorkflow, dbPath, {
+          input: {},
+          runId: first.runId,
+          resume: true,
+        });
         const parentRunId = childRunId.split(":child:")[0];
         const parentRun = await adapter.getRun(parentRunId);
         const attempts = await adapter.listAttempts(parentRunId, "review", 0);

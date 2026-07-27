@@ -164,11 +164,11 @@ describe("<Subflow> computeFn delegates to executeChildWorkflow", () => {
   test("throws when the child workflow does not finish", async () => {
     await withLoader(
       async () => ({
-        executeChildWorkflow: async () => ({ status: "failed" }),
+        executeChildWorkflow: async () => ({ runId: "failed-child", status: "failed" }),
       }),
       async () => {
         const descriptor = subflowDescriptor();
-        await expect(descriptor.computeFn()).rejects.toThrow(/failed with status failed/);
+        await expect(descriptor.computeFn()).rejects.toThrow(/failed-child ended with status failed/);
       },
     );
   });

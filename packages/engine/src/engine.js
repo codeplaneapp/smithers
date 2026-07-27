@@ -8183,7 +8183,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
             );
           }
         }
-        await Effect.runPromise(
+        await runPromisePreservingFailure(
           withCorrelationContext(
             withSmithersSpan(
               smithersSpanNames.task,

@@ -996,6 +996,57 @@ export const executeComputeTaskBridge = async (
     if (effectiveError?.details?.failureRetryable === false || effectiveError?.code === "AGENT_CONFIG_INVALID") {
       attemptMeta.failureRetryable = false;
     }
+    const suspensionStatus =
+      effectiveError?.details && typeof effectiveError.details.suspensionStatus === "string"
+        ? effectiveError.details.suspensionStatus
+        : null;
+    if (
+      suspensionStatus === "waiting-approval" ||
+      suspensionStatus === "waiting-event" ||
+      suspensionStatus === "waiting-timer" ||
+      suspensionStatus === "waiting-quota" ||
+      suspensionStatus === "paused"
+    ) {
+      await waitForHeartbeatWriteDrain();
+      await flushHeartbeat(true);
+      taskCompleted = true;
+      const taskState = suspensionStatus === "paused" ? "waiting-event" : suspensionStatus;
+      const suspendedAtMs = nowMs();
+      await adapter.withTransaction(
+        "task-suspend",
+        Effect.gen(function* () {
+          yield* adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
+            state: taskState,
+            errorJson: JSON.stringify(errorToJson(effectiveError)),
+            metaJson: JSON.stringify(attemptMeta),
+            responseText: null,
+          });
+          yield* adapter.insertNode({
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            state: taskState,
+            lastAttempt: attemptNo,
+            updatedAtMs: suspendedAtMs,
+            outputTable: desc.outputTableName,
+            label: desc.label ?? null,
+          });
+        }),
+      );
+      if (taskState === "waiting-approval") {
+        await Effect.runPromise(
+          eventBus.emitEventWithPersist({
+            type: "NodeWaitingApproval",
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            attempt: attemptNo,
+            timestampMs: suspendedAtMs,
+          }),
+        );
+      }
+      throw effectiveError;
+    }
     if (aborted) {
       const currentAttempt = await Effect.runPromise(adapter.getAttempt(runId, desc.nodeId, desc.iteration, attemptNo));
       if (currentAttempt?.state === "cancelled") return;
