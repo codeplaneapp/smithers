@@ -110,6 +110,33 @@ function buildPendingNode(existingNode) {
   };
 }
 /**
+ * Resolve completed child workflows owned by reset parent nodes. Plans are
+ * deepest-first so nested children are reset before their owning run.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {any[]} resetNodes
+ * @param {Set<string>} [seen]
+ * @returns {Promise<Array<{ runId: string; nodes: any[]; attemptsByNode?: Map<string, any[]> }>>}
+ */
+async function resolveCompletedChildResetPlans(adapter, runId, resetNodes, seen = new Set()) {
+  if (typeof adapter.getRun !== "function") return [];
+  const plans = [];
+  for (const resetNode of resetNodes) {
+    const childRunId = `${runId}:child:${resetNode.nodeId}:${resetNode.iteration ?? 0}`;
+    if (seen.has(childRunId)) continue;
+    const childRun = await adapter.getRun(childRunId);
+    if (childRun?.parentRunId !== runId || childRun.status !== "finished") continue;
+    seen.add(childRunId);
+    const childNodes = await adapter.listNodes(childRunId);
+    plans.push(...(await resolveCompletedChildResetPlans(adapter, childRunId, childNodes, seen)), {
+      runId: childRunId,
+      nodes: childNodes,
+    });
+  }
+  return plans;
+}
+/**
  * @param {SmithersDb} adapter
  * @param {TimeTravelOptions} opts
  * @returns {Promise<TimeTravelResult>}
@@ -257,6 +284,17 @@ export async function timeTravel(adapter, opts) {
         ),
       );
     }
+    const childResetPlans = await resolveCompletedChildResetPlans(adapter, runId, resetNodes);
+    for (const plan of childResetPlans) {
+      plan.attemptsByNode = new Map();
+      for (const childNode of plan.nodes) {
+        const childIteration = childNode.iteration ?? 0;
+        plan.attemptsByNode.set(
+          nodeKey(childNode.nodeId, childIteration),
+          await adapter.listAttempts(plan.runId, childNode.nodeId, childIteration),
+        );
+      }
+    }
     if (!(await lock.renew())) {
       throw new Error(`Time-travel lease ownership was lost for ${runId}.`);
     }
@@ -291,6 +329,53 @@ export async function timeTravel(adapter, opts) {
               cutoffMs: cutoff,
             }),
           );
+          const childResetAtMs = nowMs();
+          for (const plan of childResetPlans) {
+            yield* adapter.deleteFramesAfter(plan.runId, -1);
+            yield* adapter.deleteSnapshotsAfter(plan.runId, -1);
+            yield* adapter.deleteVcsTagsAfter(plan.runId, -1);
+            yield* Effect.promise(() =>
+              archiveDiscardedEffects(adapter, {
+                runId: plan.runId,
+                opId: boundary.opId,
+                archivedAtMs: childResetAtMs,
+                archiveReason: `parent timetravel to ${nodeId}/${iteration}/${targetAttemptNo}`,
+                cutoffMs: 0,
+              }),
+            );
+            for (const childNode of plan.nodes) {
+              const childIteration = childNode.iteration ?? 0;
+              const childAttempts = plan.attemptsByNode?.get(nodeKey(childNode.nodeId, childIteration)) ?? [];
+              for (const attempt of childAttempts) {
+                if (attempt.state === "cancelled") continue;
+                const patch = {
+                  state: "cancelled",
+                  metaJson: markResetCancelledMeta(attempt.metaJson),
+                };
+                if (attempt.finishedAtMs == null) patch.finishedAtMs = childResetAtMs;
+                yield* adapter.updateAttempt(plan.runId, childNode.nodeId, childIteration, attempt.attempt, patch);
+              }
+              if (childNode.outputTable) {
+                yield* adapter.deleteOutputRow(childNode.outputTable, {
+                  runId: plan.runId,
+                  nodeId: childNode.nodeId,
+                  iteration: childIteration,
+                });
+              }
+              yield* adapter.insertNode(buildPendingNode(childNode));
+            }
+            yield* adapter.updateRun(plan.runId, {
+              status: "running",
+              startedAtMs: childResetAtMs,
+              finishedAtMs: null,
+              heartbeatAtMs: null,
+              runtimeOwnerId: null,
+              cancelRequestedAtMs: null,
+              hijackRequestedAtMs: null,
+              hijackTarget: null,
+              errorJson: null,
+            });
+          }
           for (const resetNode of resetNodes) {
             const attemptsForNode = attemptsByNode.get(nodeKey(resetNode.nodeId, resetNode.iteration ?? 0)) ?? [];
             for (const attempt of attemptsForNode) {
