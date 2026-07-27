@@ -9047,6 +9047,22 @@ async function runWorkflowBodyDriver(workflow, opts) {
           }
         }
         workflowName = getWorkflowNameFromXml(graph.xml);
+        if (
+          opts.resume &&
+          existingRun?.workflowName &&
+          existingRun.workflowName !== "workflow" &&
+          existingRun.workflowName !== workflowName
+        ) {
+          throw new SmithersError(
+            "RESUME_METADATA_MISMATCH",
+            `Cannot resume run ${runId} with workflow ${workflowName}; it belongs to workflow ${existingRun.workflowName}.`,
+            {
+              runId,
+              existingWorkflowName: existingRun.workflowName,
+              currentWorkflowName: workflowName,
+            },
+          );
+        }
         updateCurrentCorrelationContext({ workflowName });
         cacheEnabled =
           workflowRef.opts.cache ??
