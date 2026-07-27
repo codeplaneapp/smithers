@@ -62,7 +62,7 @@ describe("migrateSmithersStore real postgres", () => {
       expect(result.source.backend).toBe("sqlite");
       expect(result.target).toMatchObject({ backend: "postgres", url: "set" });
       expect(result.runCount).toBe(1);
-      expect(result.schemaVersion).toBe("0032");
+      expect(result.schemaVersion).toBe("0033");
       expect(existsSync(result.markerPath)).toBe(true);
 
       const api = await openSmithersBackend({}, { cwd, backend: "postgres", connectionString: url, env: {} });

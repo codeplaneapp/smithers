@@ -264,6 +264,7 @@
       "apps/smithers/src/memory/MemoryFactsBridge.tsx -> @smithers-orchestrator/gateway-react",
       "apps/smithers/src/prompts/PromptsBridge.tsx -> @smithers-orchestrator/gateway-react",
       "apps/smithers/src/runs/RunsListBridge.tsx -> @smithers-orchestrator/gateway-react",
+      "apps/smithers/src/runs/runsList.ts -> @smithers-orchestrator/ui/status",
       "apps/smithers/src/scores/ScoresBridge.tsx -> @smithers-orchestrator/gateway-react",
       "apps/smithers/src/store/WorkflowStore.tsx -> @smithers-orchestrator/gateway-react",
       "apps/smithers/src/sync/useGatewayConnectionStatus.ts -> @smithers-orchestrator/gateway-react",
