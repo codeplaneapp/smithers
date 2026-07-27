@@ -102,6 +102,7 @@ import { acquireSingleRunnerRunLease } from "./effect/single-runner.js";
 import { parseWaitForEventAttemptSnapshot } from "@smithers-orchestrator/db/waitForEventAttempt";
 import { AlertRuntime } from "./alert-runtime.js";
 import { attachSandboxComputeFns, attachSubflowComputeFns, getSubflowChildRunId } from "./task-compute-fns.js";
+import { SUBFLOW_RUN_LINEAGE_MAX_ROWS, subflowRunLineage } from "@smithers-orchestrator/graph/subflow-run-lineage";
 import { buildCacheScopeIdentity, isFreshCacheRow, normalizeCacheScope } from "./cache-policy.js";
 import { runWorkflowWithMakeBridge } from "./effect/workflow-make-bridge.js";
 import {
@@ -1507,29 +1508,6 @@ const TASK_HEARTBEAT_TIMEOUT_CHECK_MS = 250;
 // Poll for hijack-handoff readiness between agent events; keeps handoff latency low without hot-spinning.
 const HIJACK_COMPLETION_POLL_MS = 100;
 const MAX_CONTINUATION_STATE_BYTES = 10 * 1024 * 1024;
-
-/**
- * `parent_run_id` also links time-travel forks and continue-as-new segments.
- * Keep only deterministic child-workflow edges and prune every other subtree.
- *
- * @param {{ runId: string; parentRunId?: string | null; depth: number }[]} rows
- * @param {string} rootRunId
- */
-function subflowRunLineage(rows, rootRunId) {
-  const includedRunIds = new Set([rootRunId]);
-  return rows.filter((row) => {
-    if (row.runId === rootRunId && Number(row.depth) === 0) return true;
-    if (!row.parentRunId || !includedRunIds.has(row.parentRunId)) return false;
-    const prefix = `${row.parentRunId}:child:`;
-    if (!String(row.runId).startsWith(prefix)) return false;
-    const suffix = String(row.runId).slice(prefix.length);
-    const splitAt = suffix.lastIndexOf(":");
-    const iteration = Number(suffix.slice(splitAt + 1));
-    if (splitAt <= 0 || !Number.isInteger(iteration) || iteration < 0) return false;
-    includedRunIds.add(row.runId);
-    return true;
-  });
-}
 
 /**
  * @param {Pick<TaskDescriptor, "nodeId" | "iteration">} task
@@ -7586,7 +7564,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
     while (true) {
       const discoveredDescendants =
         typeof adapter.listRunDescendants === "function"
-          ? await Effect.runPromise(adapter.listRunDescendants(runId))
+          ? await Effect.runPromise(adapter.listRunDescendants(runId, SUBFLOW_RUN_LINEAGE_MAX_ROWS + 1))
           : [{ runId, depth: 0 }];
       const descendants = subflowRunLineage(discoveredDescendants, runId);
       const inProgressByRun = await Promise.all(

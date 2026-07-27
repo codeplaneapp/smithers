@@ -189,36 +189,64 @@ describe("startDurability", () => {
     await h.stop();
   });
 
-  test("a queued worktree lock wait logs, aborts, and preserves serialization", async () => {
+  test("same-run attempts overlap while their JJ captures stay serialized", async () => {
     const cwd = `/wt-lock-${process.pid}-${Date.now()}`;
-    const first = await startDurability(baseOpts({ cwd }));
-    const controller = new AbortController();
+    const adapter = fakeAdapter();
+    let activeCaptures = 0;
+    let maxActiveCaptures = 0;
+    let captureCalls = 0;
+    let releaseFirstCapture = () => {};
+    const firstCaptureGate = new Promise((resolve) => {
+      releaseFirstCapture = resolve;
+    });
+    const captureSnapshot = async () => {
+      captureCalls += 1;
+      const call = captureCalls;
+      activeCaptures += 1;
+      maxActiveCaptures = Math.max(maxActiveCaptures, activeCaptures);
+      if (call === 1) await firstCaptureGate;
+      activeCaptures -= 1;
+      return { commitId: `c${call}`, changeId: "ch", operationId: `op${call}` };
+    };
+    const first = await startDurability(baseOpts({ cwd, adapter, captureSnapshot }));
+    const second = await startDurability(baseOpts({ cwd, adapter, nodeId: "n2", captureSnapshot }));
+    expect(first.active).toBe(true);
+    expect(second.active).toBe(true);
+
+    const firstSnapshot = first.snapshot();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const secondSnapshot = second.snapshot();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(captureCalls).toBe(1);
+    releaseFirstCapture();
+    await Promise.all([firstSnapshot, secondSnapshot]);
+    expect(maxActiveCaptures).toBe(1);
+    await Promise.all([first.stop(), second.stop()]);
+  });
+
+  test("a cross-run worktree lock timeout degrades to a no-op durability handle", async () => {
+    const cwd = `/wt-cross-run-lock-${process.pid}-${Date.now()}`;
+    const first = await startDurability(baseOpts({ cwd, runId: "parent" }));
+    const gaps = [];
     let waits = 0;
-    const second = startDurability(
+    const second = await startDurability(
       baseOpts({
         cwd,
-        signal: controller.signal,
+        runId: "parent:child:sub:0",
+        lockTimeoutMs: 5,
         lockLogAfterMs: 0,
         onLockWait: () => {
           waits += 1;
         },
+        onGap: (gap) => gaps.push(gap),
       }),
     );
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    controller.abort(new Error("stop waiting"));
-    await expect(second).rejects.toThrow("stop waiting");
+    expect(second.active).toBe(false);
     expect(waits).toBe(1);
-
-    let thirdStarted = false;
-    const thirdPromise = startDurability(baseOpts({ cwd })).then((handle) => {
-      thirdStarted = true;
-      return handle;
-    });
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    expect(thirdStarted).toBe(false);
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0].needsAttention).toBe(true);
+    expect(gaps[0].reason).toContain("Timed out waiting");
     await first.stop();
-    const third = await thirdPromise;
-    expect(thirdStarted).toBe(true);
-    await third.stop();
+    await second.stop();
   });
 });

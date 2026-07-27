@@ -239,6 +239,52 @@ describe("smithers restore", () => {
     expect(reverted).toEqual([["MINE", "/mine"]]);
   });
 
+  test("restore refuses to invalidate child work while the parent is running", async () => {
+    const reverted = [];
+    const err = capture();
+    const target = { ...cps[0], runId: "parent", createdAtMs: 10 };
+    const child = {
+      ...cps[1],
+      runId: "parent:child:sub:0",
+      nodeId: "child-task",
+      createdAtMs: 20,
+    };
+    const result = await runRestoreOnce({
+      adapter: {
+        async listRunDescendants() {
+          return [
+            { runId: "parent", parentRunId: null, depth: 0 },
+            { runId: "parent:child:sub:0", parentRunId: "parent", depth: 1 },
+          ];
+        },
+        async listWorkspaceCheckpoints(runId) {
+          return runId === "parent" ? [target] : [child];
+        },
+        async listWorkspaceStates() {
+          return [];
+        },
+        async getNode() {
+          return { runId: "parent", nodeId: "sub", iteration: 0 };
+        },
+        async getRun() {
+          return { runId: "parent", status: "running" };
+        },
+      },
+      runId: "parent",
+      nodeId: "n1",
+      stdout: capture(),
+      stderr: err,
+      revert: async (commitId, cwd) => {
+        reverted.push([commitId, cwd]);
+        return { success: true };
+      },
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(reverted).toEqual([["c0", "/wt"]]);
+    expect(err.get()).toContain("Run is still running: parent");
+  });
+
   test("reverts to the target and reports success", async () => {
     const reverted = [];
     const out = capture();

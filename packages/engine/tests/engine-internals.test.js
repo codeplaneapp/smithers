@@ -641,6 +641,20 @@ describe("engine internals: durability, options and graph helpers", () => {
     ).toEqual(["root", "root:child:sub:0", "root:child:sub:0:child:nested:0"]);
   });
 
+  test("subflowRunLineage is row-order independent and rejects truncated trees", () => {
+    const unordered = [
+      { runId: "root:child:sub:0:child:nested:0", parentRunId: "root:child:sub:0", depth: 2 },
+      { runId: "root", parentRunId: null, depth: 0 },
+      { runId: "root:child:sub:0", parentRunId: "root", depth: 1 },
+    ];
+    expect(I.subflowRunLineage(unordered, "root").map((row) => row.runId)).toEqual([
+      "root:child:sub:0:child:nested:0",
+      "root",
+      "root:child:sub:0",
+    ]);
+    expect(() => I.subflowRunLineage(unordered, "root", 2)).toThrow("exceeds 2 rows");
+  });
+
   test("runsDueForQuotaResume returns only quota parks whose reset has elapsed", async () => {
     const { sqlite, adapter } = makeContinueDb();
     try {

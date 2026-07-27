@@ -1714,6 +1714,7 @@ export function createSemanticToolDefinitions(options = {}) {
             }
             const { checkpoints } = await listScopedWorkspaceSnapshots(adapter, input.runId);
             const target = pickTargetCheckpoint(checkpoints, {
+              runId: input.runId,
               nodeId: input.nodeId,
               iteration: input.iteration,
               seq: input.seq,

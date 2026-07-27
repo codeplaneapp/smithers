@@ -462,14 +462,20 @@ function makeSemanticAdapter(overrides = {}) {
         },
       ];
     },
-    listWorkspaceStates: async () => [
-      {
-        jjCwd: "/tmp/work",
-        jjCommitId: "commit-1",
-        jjOperationId: "op-1",
-      },
-    ],
+    listWorkspaceStates: async (runId) =>
+      typeof state.listWorkspaceStates === "function"
+        ? state.listWorkspaceStates(runId)
+        : [
+            {
+              jjCwd: "/tmp/work",
+              jjCommitId: "commit-1",
+              jjOperationId: "op-1",
+            },
+          ],
   };
+  if (typeof state.listRunDescendants === "function") {
+    adapter.listRunDescendants = state.listRunDescendants;
+  }
   return { adapter, state };
 }
 
@@ -1580,6 +1586,37 @@ describe("semantic tool definitions", () => {
       commitId: "commit-1",
       cwd: "/tmp/work",
     });
+  });
+
+  test("restore_checkpoint prefers the requested run when a child reuses its node id", async () => {
+    const harness = makeHarness({
+      listRunDescendants: async () => [
+        { runId: "run-1", parentRunId: null, depth: 0 },
+        { runId: "run-1:child:sub:0", parentRunId: "run-1", depth: 1 },
+      ],
+      listWorkspaceCheckpoints: async (runId) => [
+        {
+          seq: 0,
+          nodeId: "artifact-node",
+          iteration: 0,
+          attempt: 1,
+          tier: 1,
+          source: "hook",
+          jjCwd: "/tmp/work",
+          jjCommitId: runId === "run-1" ? "parent-commit" : "newer-child-commit",
+          createdAtMs: runId === "run-1" ? NOW - 2_000 : NOW - 1_000,
+        },
+      ],
+      listWorkspaceStates: async () => [],
+    });
+
+    const restore = await harness.call("restore_checkpoint", {
+      runId: "run-1",
+      nodeId: "artifact-node",
+      confirm: true,
+    });
+
+    expect(restore.structuredContent.data.commitId).toBe("parent-commit");
   });
 
   test("restore_checkpoint requires confirmation before reading checkpoints", async () => {

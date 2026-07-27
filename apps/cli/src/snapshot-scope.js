@@ -1,10 +1,16 @@
+import {
+  SUBFLOW_RUN_LINEAGE_MAX_ROWS,
+  parseSubflowChildRunId,
+  subflowRunLineage,
+} from "@smithers-orchestrator/graph/subflow-run-lineage";
+
 /**
  * Resolve every run whose workspace checkpoints belong to a parent-facing
  * snapshot request. Older/custom adapters without ancestry support retain the
  * original single-run behavior.
  *
  * @param {{
- *   listRunDescendants?: (runId: string) => Promise<Array<Record<string, any>>>,
+ *   listRunDescendants?: (runId: string, limit?: number) => Promise<Array<Record<string, any>>>,
  *   listWorkspaceCheckpoints: (runId: string) => Promise<Array<Record<string, any>>>,
  *   listWorkspaceStates: (runId: string) => Promise<Array<Record<string, any>>>,
  * }} adapter
@@ -13,22 +19,10 @@
 export async function listScopedWorkspaceSnapshots(adapter, runId) {
   const discoveredScopes =
     typeof adapter.listRunDescendants === "function"
-      ? await adapter.listRunDescendants(runId)
+      ? await adapter.listRunDescendants(runId, SUBFLOW_RUN_LINEAGE_MAX_ROWS + 1)
       : [{ runId, parentRunId: null, depth: 0 }];
   const scopes = discoveredScopes.length > 0 ? discoveredScopes : [{ runId, parentRunId: null, depth: 0 }];
-  const includedRunIds = new Set([runId]);
-  const normalizedScopes = scopes.filter((scope) => {
-    if (scope.runId === runId && Number(scope.depth) === 0) return true;
-    if (!scope.parentRunId || !includedRunIds.has(scope.parentRunId)) return false;
-    const prefix = `${scope.parentRunId}:child:`;
-    if (!String(scope.runId).startsWith(prefix)) return false;
-    const suffix = String(scope.runId).slice(prefix.length);
-    const splitAt = suffix.lastIndexOf(":");
-    const iteration = Number(suffix.slice(splitAt + 1));
-    if (splitAt <= 0 || !Number.isInteger(iteration) || iteration < 0) return false;
-    includedRunIds.add(scope.runId);
-    return true;
-  });
+  const normalizedScopes = subflowRunLineage(scopes, runId);
   const scopeByRunId = new Map(normalizedScopes.map((scope) => [scope.runId, scope]));
 
   /**
@@ -44,16 +38,11 @@ export async function listScopedWorkspaceSnapshots(adapter, runId) {
       direct = parent;
     }
     if (direct.depth !== 1) return {};
-    const prefix = `${runId}:child:`;
-    if (!String(direct.runId).startsWith(prefix)) return {};
-    const suffix = String(direct.runId).slice(prefix.length);
-    const splitAt = suffix.lastIndexOf(":");
-    if (splitAt <= 0) return {};
-    const iteration = Number(suffix.slice(splitAt + 1));
-    if (!Number.isInteger(iteration) || iteration < 0) return {};
+    const child = parseSubflowChildRunId(direct.runId, runId);
+    if (!child) return {};
     return {
-      ownerNodeId: suffix.slice(0, splitAt),
-      ownerIteration: iteration,
+      ownerNodeId: child.nodeId,
+      ownerIteration: child.iteration,
     };
   };
 

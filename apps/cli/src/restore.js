@@ -207,7 +207,6 @@ async function invalidateNewerChildWork(adapter, runId, target) {
       nodeId: owner.nodeId,
       iteration: owner.iteration,
       resetDependents: true,
-      force: true,
     });
     if (!result.success) {
       return {
