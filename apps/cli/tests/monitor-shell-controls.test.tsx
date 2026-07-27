@@ -251,7 +251,7 @@ describe("migrated monitor surfaces", () => {
     await rerender(
       <RunsRail runs={[]} loading={false} connStatus="online" selectedRunId={undefined} onSelect={() => {}} />,
     );
-    expect(byTestId("monitor-empty").textContent).toContain("No runs match");
+    expect(byTestId("monitor-empty").textContent).toContain("No runs yet");
     await rerender(
       <RunsRail runs={[]} loading={false} connStatus="offline" selectedRunId={undefined} onSelect={() => {}} />,
     );
@@ -262,12 +262,46 @@ describe("migrated monitor surfaces", () => {
     expect(byTestId("monitor-runs-unauthorized").textContent?.toLowerCase()).toContain("credentials");
   });
 
-  test("renders loading and empty table heroes plus a populated shared table panel", async () => {
+  test("renders loading, error, no-runs, and filtered-out table states", async () => {
+    let resets = 0;
     await render(<RunsTable runs={[]} loading page={1} onPageChange={() => {}} onSelect={() => {}} />);
     expect(byTestId("monitor-empty-detail").textContent).toContain("Loading runs");
+    expect(byTestId("monitor-empty-detail").getAttribute("data-state")).toBe("loading");
+    await rerender(
+      <RunsTable
+        runs={[]}
+        loading={false}
+        queryError={new Error("query failed")}
+        page={1}
+        onPageChange={() => {}}
+        onSelect={() => {}}
+      />,
+    );
+    expect(byTestId("monitor-empty-detail").textContent).toContain("Couldn't load runs");
+    expect(byTestId("monitor-empty-detail").textContent).toContain("query failed");
+    expect(byTestId("monitor-empty-detail").getAttribute("data-state")).toBe("error");
     await rerender(<RunsTable runs={[]} loading={false} page={1} onPageChange={() => {}} onSelect={() => {}} />);
-    expect(byTestId("monitor-empty-detail").textContent).toContain("No runs match");
-    await rerender(<RunsTable runs={[run]} loading={false} page={1} onPageChange={() => {}} onSelect={() => {}} />);
+    expect(byTestId("monitor-empty-detail").textContent).toContain("No runs yet");
+    expect(byTestId("monitor-empty-detail").textContent).toContain("smithers up");
+    await rerender(
+      <RunsTable
+        runs={[]}
+        loading={false}
+        totalCount={1}
+        onResetFilters={() => resets++}
+        page={1}
+        onPageChange={() => {}}
+        onSelect={() => {}}
+      />,
+    );
+    expect(byTestId("monitor-empty-detail").textContent).toContain("No runs match your filters");
+    expect(byTestId("monitor-empty-detail").getAttribute("data-state")).toBe("filtered");
+    await click(byTestId("monitor-empty-detail-reset"));
+    expect(resets).toBe(1);
+  });
+
+  test("renders a populated shared table panel", async () => {
+    await render(<RunsTable runs={[run]} loading={false} page={1} onPageChange={() => {}} onSelect={() => {}} />);
     expect(byTestId("monitor-runs-table")).toBeDefined();
     expect(document.querySelector(".mon-panel.mon-runs-table-panel")).not.toBeNull();
     expect(byTestId("monitor-run-progress").textContent).toContain("1 failed");

@@ -65,6 +65,7 @@ import {
   rowOf,
   runErrorOf,
   runProgress,
+  runsViewState,
   RUNS_PAGE_SIZE,
   shortRunId,
   selectionSinkFor,
@@ -374,6 +375,16 @@ describe("filtering", () => {
   test("option lists are sorted and deduped", () => {
     expect(workflowOptions(runs)).toEqual(["deploy", "review", "unknown"]);
     expect(statusOptions(runs)).toEqual(["failed", "finished", "running"]);
+  });
+
+  test("distinguishes initial loading, query errors, no runs, and filtered-out runs", () => {
+    const base = { visibleCount: 0, totalCount: 0, loading: false, queryError: false };
+    expect(runsViewState({ ...base, loading: true })).toBe("loading");
+    expect(runsViewState({ ...base, queryError: true })).toBe("error");
+    expect(runsViewState(base)).toBe("empty");
+    expect(runsViewState({ ...base, totalCount: 3 })).toBe("filtered");
+    expect(runsViewState({ ...base, totalCount: 3, queryError: true })).toBe("error");
+    expect(runsViewState({ ...base, visibleCount: 1, totalCount: 3 })).toBe("ready");
   });
 });
 

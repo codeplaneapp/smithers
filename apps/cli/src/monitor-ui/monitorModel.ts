@@ -686,6 +686,22 @@ export function filterRuns(runs: readonly RunRow[], filter: RunFilter): RunRow[]
   });
 }
 
+export type RunsViewState = "ready" | "loading" | "error" | "empty" | "filtered";
+
+/** Classify the runs surface without treating pending or failed queries as empty. */
+export function runsViewState(options: {
+  visibleCount: number;
+  totalCount: number;
+  loading: boolean;
+  queryError: boolean;
+}): RunsViewState {
+  if (options.visibleCount > 0) return "ready";
+  if (options.loading) return "loading";
+  if (options.queryError) return "error";
+  if (options.totalCount > 0) return "filtered";
+  return "empty";
+}
+
 export function workflowOptions(runs: readonly RunRow[]): string[] {
   return Array.from(new Set(runs.map((run) => run.workflowKey ?? "unknown"))).sort();
 }

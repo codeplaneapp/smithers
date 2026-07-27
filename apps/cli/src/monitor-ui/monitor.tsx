@@ -104,6 +104,7 @@ import {
   runErrorOf,
   runProgress,
   runUsageChipOf,
+  runsViewState,
   RUNS_PAGE_SIZE,
   scoreRowsOf,
   scoresForNode,
@@ -604,15 +605,81 @@ function RunListRow({ run, active, onSelect }: { run: RunRow; active: boolean; o
   );
 }
 
+function RunsZeroState({
+  state,
+  testId,
+  hero = false,
+  totalCount,
+  queryError,
+  onResetFilters,
+}: {
+  state: Exclude<ReturnType<typeof runsViewState>, "ready">;
+  testId: string;
+  hero?: boolean;
+  totalCount: number;
+  queryError?: Error;
+  onResetFilters?: () => void;
+}) {
+  return (
+    <div
+      className={`mon-empty${hero ? " mon-empty-hero" : ""}`}
+      data-testid={testId}
+      data-state={state}
+      role={state === "error" ? "alert" : undefined}
+    >
+      {state === "loading" ? (
+        <>
+          <div>Loading runs…</div>
+          {hero ? (
+            <div className="mon-dim">
+              Live status, execution tree, node outputs, events, and approvals — for every run this gateway owns.
+            </div>
+          ) : null}
+        </>
+      ) : state === "error" ? (
+        <>
+          <div>Couldn&apos;t load runs.</div>
+          <div className="mon-dim">{queryError?.message || "Refresh to try the query again."}</div>
+        </>
+      ) : state === "filtered" ? (
+        <>
+          <div>No runs match your filters.</div>
+          <div className="mon-dim">
+            Clear filters to show all {totalCount} {totalCount === 1 ? "run" : "runs"}.
+          </div>
+          {onResetFilters ? (
+            <Button variant="outline" data-testid={`${testId}-reset`} onClick={onResetFilters}>
+              Clear filters
+            </Button>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <div>No runs yet.</div>
+          <div className="mon-dim">
+            Launch one with <code>smithers up &lt;workflow&gt;</code> or <code>smithers workflow run &lt;id&gt;</code>.
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function RunsRail({
   runs,
   loading,
+  totalCount = runs.length,
+  queryError,
+  onResetFilters,
   connStatus,
   selectedRunId,
   onSelect,
 }: {
   runs: RunRow[];
   loading: boolean;
+  totalCount?: number;
+  queryError?: Error;
+  onResetFilters?: () => void;
   connStatus: string;
   selectedRunId: string | undefined;
   onSelect: (runId: string) => void;
@@ -621,6 +688,12 @@ export function RunsRail({
   // Offline and unauthorized carry state-specific banners (an auth failure
   // must never read like a network outage); connecting states just load.
   const banner = connectionViewFor(connStatus).banner;
+  const zeroState = runsViewState({
+    visibleCount: runs.length,
+    totalCount,
+    loading,
+    queryError: queryError !== undefined,
+  });
   return (
     <nav className="mon-rail-runs" data-testid="monitor-runs">
       {banner && runs.length === 0 ? (
@@ -629,14 +702,14 @@ export function RunsRail({
           <div className="mon-dim">{banner.detail}</div>
         </div>
       ) : null}
-      {!banner && loading && runs.length === 0 ? <div className="mon-empty">Loading runs…</div> : null}
-      {!banner && !loading && runs.length === 0 ? (
-        <div className="mon-empty" data-testid="monitor-empty">
-          <div>No runs match.</div>
-          <div className="mon-dim">
-            Launch one with <code>smithers up &lt;workflow&gt;</code> or <code>smithers workflow run &lt;id&gt;</code>.
-          </div>
-        </div>
+      {!banner && zeroState !== "ready" ? (
+        <RunsZeroState
+          state={zeroState}
+          testId="monitor-empty"
+          totalCount={totalCount}
+          queryError={queryError}
+          onResetFilters={onResetFilters}
+        />
       ) : null}
       {groups.map((group) => (
         <section key={group.group} className="mon-run-group">
@@ -1335,6 +1408,9 @@ export function RunProgressCell({ run }: { run: RunRow }) {
 export function RunsTable({
   runs,
   loading,
+  totalCount = runs.length,
+  queryError,
+  onResetFilters,
   page,
   onPageChange,
   onSelect,
@@ -1344,6 +1420,9 @@ export function RunsTable({
 }: {
   runs: RunRow[];
   loading: boolean;
+  totalCount?: number;
+  queryError?: Error;
+  onResetFilters?: () => void;
   page: number;
   onPageChange: (page: number) => void;
   onSelect: (runId: string) => void;
@@ -1360,21 +1439,22 @@ export function RunsTable({
   const setSort = onSortChange ?? setInternalSort;
   const sorted = useMemo(() => sortRunsForTable(runs, sort), [runs, sort]);
   const { pageRows, page: shownPage, pageCount, total } = paginateRuns(sorted, page, RUNS_PAGE_SIZE);
-  if (total === 0) {
+  const zeroState = runsViewState({
+    visibleCount: total,
+    totalCount,
+    loading,
+    queryError: queryError !== undefined,
+  });
+  if (zeroState !== "ready") {
     return (
-      <div className="mon-empty mon-empty-hero" data-testid="monitor-empty-detail">
-        <div>{loading ? "Loading runs…" : "No runs match."}</div>
-        <div className="mon-dim">
-          {loading ? (
-            "Live status, execution tree, node outputs, events, and approvals — for every run this gateway owns."
-          ) : (
-            <>
-              Launch one with <code>smithers up &lt;workflow&gt;</code> or <code>smithers workflow run &lt;id&gt;</code>
-              .
-            </>
-          )}
-        </div>
-      </div>
+      <RunsZeroState
+        state={zeroState}
+        testId="monitor-empty-detail"
+        hero
+        totalCount={totalCount}
+        queryError={queryError}
+        onResetFilters={onResetFilters}
+      />
     );
   }
   const firstRow = (shownPage - 1) * RUNS_PAGE_SIZE + 1;
@@ -4333,6 +4413,11 @@ function App() {
     () => filterRuns(allRuns, { text: filterText, status: statusFilter, workflow: workflowFilter }),
     [allRuns, filterText, statusFilter, workflowFilter],
   );
+  const resetFilters = () => {
+    setFilterText("");
+    setStatusFilter("all");
+    setWorkflowFilter("all");
+  };
   // A changed filter means a new result set: land back on its first page.
   useEffect(() => {
     setRunsPage(1);
@@ -4420,6 +4505,9 @@ function App() {
             <RunsRail
               runs={visibleRuns}
               loading={runsQuery.loading ?? false}
+              totalCount={allRuns.length}
+              queryError={runsQuery.error}
+              onResetFilters={resetFilters}
               connStatus={connStatus}
               selectedRunId={selectedRunId}
               onSelect={selectRun}
@@ -4454,6 +4542,9 @@ function App() {
               <RunsTable
                 runs={visibleRuns}
                 loading={runsQuery.loading ?? false}
+                totalCount={allRuns.length}
+                queryError={runsQuery.error}
+                onResetFilters={resetFilters}
                 page={runsPage}
                 onPageChange={setRunsPage}
                 onSelect={selectRun}
