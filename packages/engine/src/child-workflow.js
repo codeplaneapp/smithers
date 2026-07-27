@@ -257,7 +257,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
   const childWorkflow = resolveChildWorkflow(definition, parentWorkflow);
   const input = normalizeChildInput(options.input);
   const parentRunId = options.parentRunId ?? runtime.runId;
-  const childRunId =
+  const baseChildRunId =
     options.runId ?? buildChildWorkflowRunId(parentRunId, runtime.stepId, runtime.iteration);
   // The child may bring its own db (e.g. a runtime-generated workflow with
   // its own dbPath) that has never seen a run: create the system tables
@@ -265,10 +265,23 @@ export async function executeChildWorkflow(parentWorkflow, options) {
   // initialized the shared db, and for Postgres (ensured by its entry point).
   ensureSmithersTables(/** @type {any} */ (childWorkflow.db));
   const adapter = new SmithersDb(childWorkflow.db);
+  const baseChildRun = await adapter.getRun(baseChildRunId);
+  // Automatic retries of the owning Subflow need a fresh child attempt
+  // budget. Keep the deterministic base identity for crash/resume and
+  // explicit retry-task resets, but fan out a new child after a terminal
+  // failure so Effect Workflow cannot replay its completed execution.
+  const childRunId =
+    options.runId === undefined &&
+    runtime.attempt > 1 &&
+    (baseChildRun?.status === "failed" ||
+      baseChildRun?.status === "cancelled" ||
+      baseChildRun?.status === "canceled")
+      ? `${baseChildRunId}:attempt:${runtime.attempt}`
+      : baseChildRunId;
   const signal = options.signal ?? runtime.signal;
   const pauseSignal = options.pauseSignal ?? runtime.pauseSignal;
   const startedBy = await loadParentStartedBy(parentWorkflow?.db ?? runtime.db, parentRunId);
-  const existingChildRun = await adapter.getRun(childRunId);
+  const existingChildRun = childRunId === baseChildRunId ? baseChildRun : await adapter.getRun(childRunId);
   if (existingChildRun?.status === "finished") {
     // The child already completed (e.g. the parent crashed after the child
     // finished): preserve its recorded output instead of re-executing it.
