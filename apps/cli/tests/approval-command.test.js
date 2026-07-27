@@ -19,7 +19,7 @@ function openRepoDb(repo) {
   };
 }
 
-async function insertApprovalRun(adapter, runId, status = "waiting-approval") {
+async function insertApprovalRun(adapter, runId, status = "waiting-approval", overrides = {}) {
   const now = Date.now();
   await adapter.insertRun({
     runId,
@@ -30,6 +30,7 @@ async function insertApprovalRun(adapter, runId, status = "waiting-approval") {
     startedAtMs: now - 9_000,
     finishedAtMs: status === "cancelled" ? now - 1_000 : null,
     heartbeatAtMs: status === "running" ? now : null,
+    ...overrides,
   });
   await adapter.insertNode({
     runId,
@@ -84,6 +85,41 @@ describe("smithers approval commands", () => {
       });
       expect(node?.state).toBe("pending");
       expect(run?.status).toBe("waiting-event");
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("approve resolves a descendant gate when invoked with the parent run id", async () => {
+    const repo = createTempRepo();
+    const { sqlite, adapter } = openRepoDb(repo);
+    try {
+      const now = Date.now();
+      await adapter.insertRun({
+        runId: "approval-parent",
+        workflowName: "approval-command",
+        workflowPath: "workflow.tsx",
+        status: "waiting-approval",
+        createdAtMs: now - 10_000,
+        startedAtMs: now - 9_000,
+      });
+      await insertApprovalRun(adapter, "approval-child", "waiting-approval", {
+        parentRunId: "approval-parent",
+      });
+      await insertApprovalRow(adapter, "approval-child");
+
+      const result = runSmithers(["approve", "approval-parent", "--by", "tester"], {
+        cwd: repo.dir,
+        format: "json",
+      });
+
+      expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(await adapter.getApproval("approval-parent", "gate", 0)).toBeUndefined();
+      expect(await adapter.getApproval("approval-child", "gate", 0)).toMatchObject({
+        status: "approved",
+        decidedBy: "tester",
+      });
+      expect((await adapter.getNode("approval-child", "gate", 0))?.state).toBe("pending");
     } finally {
       sqlite.close();
     }

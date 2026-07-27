@@ -76,4 +76,38 @@ describe("approval internals", () => {
     expect(rows.runPatch).toEqual({ status: "waiting-event" });
     expect(rows.event).toEqual(expect.objectContaining({ type: "ApprovalDenied" }));
   });
+
+  test("keeps an ancestor waiting while a descendant approval remains pending", async () => {
+    const rows = { runStatus: "waiting-approval" };
+    const adapter = {
+      getApproval: () =>
+        Effect.succeed({
+          status: "requested",
+          requestJson: null,
+          requestedAtMs: Date.now() - 10,
+        }),
+      getNode: () =>
+        Effect.succeed({
+          state: "waiting-approval",
+          lastAttempt: 1,
+          outputTable: "decision",
+          label: "Parent gate",
+        }),
+      withTransactionEffect: (_label, effect) => effect,
+      insertOrUpdateApproval: () => Effect.void,
+      insertNode: () => Effect.void,
+      getRun: () => Effect.succeed({ status: rows.runStatus }),
+      listPendingApprovals: () =>
+        Effect.succeed([{ runId: "child", nodeId: "child-gate", iteration: 0, status: "requested" }]),
+      updateRun: (_runId, patch) =>
+        Effect.sync(() => {
+          rows.runStatus = patch.status;
+        }),
+      insertEventWithNextSeq: () => Effect.void,
+      db: { $client: { filename: ":memory:" } },
+    };
+
+    await Effect.runPromise(denyNode(adapter, "parent", "parent-gate", 0, "not parent", "reviewer"));
+    expect(rows.runStatus).toBe("waiting-approval");
+  });
 });

@@ -3826,7 +3826,9 @@ async function cancelPendingExternalWaits(
       );
     }
   }
-  const approvals = await Effect.runPromise(adapter.listPendingApprovals(runId));
+  const approvals = (await Effect.runPromise(adapter.listPendingApprovals(runId))).filter(
+    (approval) => approval.runId === runId,
+  );
   // The public pending read intentionally hides requested rows on terminal
   // runs. Cancellation still has to settle those legacy rows after the
   // status claim, so read the explicit rows inside this transaction as well.

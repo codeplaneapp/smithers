@@ -142,6 +142,53 @@ describe("engine internals: errors, heartbeat and continuation helpers", () => {
     }
   });
 
+  test("cancelling a parent does not deny or clone a parked child's approval", async () => {
+    const { adapter, sqlite } = makeContinueDb();
+    try {
+      await insertRun(adapter, "cancel-parent", { status: "waiting-approval" });
+      await insertRun(adapter, "parked-child", {
+        parentRunId: "cancel-parent",
+        status: "waiting-approval",
+      });
+      await Effect.runPromise(
+        adapter.insertNode({
+          runId: "parked-child",
+          nodeId: "child-gate",
+          iteration: 0,
+          state: "waiting-approval",
+          updatedAtMs: 1,
+          outputTable: "task_output",
+          label: "Child gate",
+        }),
+      );
+      await Effect.runPromise(
+        adapter.insertOrUpdateApproval({
+          runId: "parked-child",
+          nodeId: "child-gate",
+          iteration: 0,
+          status: "requested",
+          requestedAtMs: 1,
+          decidedAtMs: null,
+          note: null,
+          decidedBy: null,
+          requestJson: '{"title":"Child gate"}',
+          decisionJson: null,
+          autoApproved: false,
+        }),
+      );
+
+      await I.cancelPendingExternalWaits(adapter, "cancel-parent");
+
+      expect(await adapter.getApproval("cancel-parent", "child-gate", 0)).toBeUndefined();
+      expect(await adapter.getApproval("parked-child", "child-gate", 0)).toMatchObject({
+        status: "requested",
+      });
+      expect(await adapter.listEventsByType("cancel-parent", "ApprovalDenied")).toEqual([]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("classifies abort-like errors and preserves Effect failures", async () => {
     expect(I.isAbortError(null)).toBe(false);
     expect(I.isAbortError({ name: "AbortError" })).toBe(true);

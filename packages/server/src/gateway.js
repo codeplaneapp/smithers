@@ -8006,15 +8006,26 @@ a { color: var(--brand); }</style>
       }
       seenAdapters.add(adapter);
       const runs = await adapter.listRuns(1_000);
+      const runById = new Map(runs.map((run) => [run.runId, run]));
+      const nodeMapsByRunId = new Map();
+      const seenApprovalKeys = new Set();
       for (const run of runs) {
-        const workflowKey = this.resolveRunWorkflowKey(run, registeredKeys, entry.key);
         const pending = await adapter.listPendingApprovals(run.runId);
-        const nodes = await adapter.listNodes(run.runId);
-        const nodeByKey = new Map();
-        for (const node of nodes) {
-          nodeByKey.set(`${node.nodeId}::${node.iteration ?? 0}`, node);
-        }
         for (const approval of pending) {
+          const approvalKey = `${approval.runId}::${approval.nodeId}::${approval.iteration ?? 0}`;
+          if (seenApprovalKeys.has(approvalKey)) continue;
+          seenApprovalKeys.add(approvalKey);
+          const approvalRun = runById.get(approval.runId) ?? (await adapter.getRun(approval.runId)) ?? run;
+          const workflowKey = this.resolveRunWorkflowKey(approvalRun, registeredKeys, entry.key);
+          let nodeByKey = nodeMapsByRunId.get(approval.runId);
+          if (!nodeByKey) {
+            const nodes = await adapter.listNodes(approval.runId);
+            nodeByKey = new Map();
+            for (const node of nodes) {
+              nodeByKey.set(`${node.nodeId}::${node.iteration ?? 0}`, node);
+            }
+            nodeMapsByRunId.set(approval.runId, nodeByKey);
+          }
           const node = nodeByKey.get(`${approval.nodeId}::${approval.iteration ?? 0}`);
           const request = parseApprovalRequest(parseJson(approval.requestJson), node?.label ?? approval.nodeId);
           approvals.push({

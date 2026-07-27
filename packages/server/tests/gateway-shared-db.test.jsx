@@ -152,6 +152,55 @@ describe("gateway — many workflows sharing one DB", () => {
     expect(resolved?.workflowKey).toBe("beta");
   });
 
+  test("pending approvals dedupe descendants and use the child workflow and label", async () => {
+    dbPath = makeDbPath("approvals");
+    const wf = createSharedDbWorkflows(dbPath);
+    gateway = new Gateway({ heartbeatMs: 1000 });
+    gateway.register("alpha", wf.alpha);
+    gateway.register("beta", wf.beta);
+    const adapter = gateway.adapterForWorkflow(wf.alpha);
+    const now = Date.now();
+    await adapter.insertRun({
+      runId: "approval-parent",
+      workflowName: "alpha",
+      status: "waiting-approval",
+      createdAtMs: now - 2,
+    });
+    await adapter.insertRun({
+      runId: "approval-child",
+      parentRunId: "approval-parent",
+      workflowName: "beta",
+      status: "waiting-approval",
+      createdAtMs: now - 1,
+    });
+    await adapter.insertNode({
+      runId: "approval-child",
+      nodeId: "child-gate",
+      iteration: 0,
+      state: "waiting-approval",
+      updatedAtMs: now,
+      outputTable: "",
+      label: "Child approval label",
+    });
+    await adapter.insertOrUpdateApproval({
+      runId: "approval-child",
+      nodeId: "child-gate",
+      iteration: 0,
+      status: "requested",
+      requestedAtMs: now,
+      requestJson: JSON.stringify({}),
+    });
+
+    expect(await gateway.listPendingApprovals()).toEqual([
+      expect.objectContaining({
+        runId: "approval-child",
+        workflowKey: "beta",
+        nodeId: "child-gate",
+        requestTitle: "Child approval label",
+      }),
+    ]);
+  });
+
   test("pauseRun writes a durable pause request for a running run", async () => {
     dbPath = makeDbPath("pause");
     const wf = createSharedDbWorkflows(dbPath);

@@ -1402,7 +1402,7 @@ function formatApprovalTargetList(targets) {
  * @param {string} runId
  * @param {{ node?: string; iteration?: number }} options
  * @returns {Promise<
- *   | { ok: true; nodeId: string; iteration: number }
+ *   | { ok: true; runId: string; nodeId: string; iteration: number }
  *   | { ok: false; code: string; message: string; exitCode: number }
  * >}
  */
@@ -1437,6 +1437,7 @@ async function resolveApprovalCommandTarget(adapter, runId, options) {
     const target = pending[0];
     return {
       ok: true,
+      runId: target.runId,
       nodeId: target.nodeId,
       iteration: target.iteration ?? 0,
     };
@@ -1470,6 +1471,7 @@ async function resolveApprovalCommandTarget(adapter, runId, options) {
     const target = waitingNodes[0];
     return {
       ok: true,
+      runId,
       nodeId: target.nodeId,
       iteration: target.iteration ?? 0,
     };
@@ -8266,8 +8268,8 @@ const cli = Cli.create({
           if (!target.ok) {
             return fail(target);
           }
-          const { nodeId, iteration } = target;
-          await Effect.runPromise(approveNode(adapter, c.args.runId, nodeId, iteration, c.options.note, c.options.by));
+          const { runId: targetRunId, nodeId, iteration } = target;
+          await Effect.runPromise(approveNode(adapter, targetRunId, nodeId, iteration, c.options.note, c.options.by));
           const runAfterApproval = await adapter.getRun(c.args.runId);
           const isDetached =
             !runAfterApproval ||
@@ -8395,8 +8397,8 @@ const cli = Cli.create({
           if (!target.ok) {
             return fail(target);
           }
-          const { nodeId, iteration } = target;
-          await Effect.runPromise(denyNode(adapter, c.args.runId, nodeId, iteration, c.options.note, c.options.by));
+          const { runId: targetRunId, nodeId, iteration } = target;
+          await Effect.runPromise(denyNode(adapter, targetRunId, nodeId, iteration, c.options.note, c.options.by));
           return c.ok(
             { runId: c.args.runId, nodeId, status: "denied" },
             {
