@@ -196,6 +196,27 @@ describe("runScorersBatch", () => {
     expect(insertedRow.reason).toBe("Decent");
     expect(insertedRow.source).toBe("batch");
   });
+  it("derives persisted ids from the durable scorer identity", async () => {
+    const adapter = createMockAdapter();
+    const scorers = {
+      stable: {
+        scorer: createScorer({
+          id: "stable",
+          name: "Stable",
+          description: "d",
+          score: async () => ({ score: 0.5 }),
+        }),
+      },
+    };
+    const ctx = makeContext();
+
+    await runScorersBatch(scorers, ctx, adapter);
+    await runScorersBatch(scorers, { ...ctx, output: "replayed output" }, adapter);
+    await runScorersBatch(scorers, { ...ctx, attempt: ctx.attempt + 1 }, adapter);
+
+    expect(adapter.rows[0].id).toBe(adapter.rows[1].id);
+    expect(adapter.rows[2].id).not.toBe(adapter.rows[0].id);
+  });
   it("emits scorer lifecycle events and persists circular values as strings", async () => {
     const adapter = createMockAdapter();
     const events = [];

@@ -196,9 +196,11 @@ describe("DB migration edges", () => {
       );
       expect(
         reopened
-          .query(`SELECT status, claim_token, claim_expires_at_ms
+          .query(
+            `SELECT status, claim_token, claim_expires_at_ms
         FROM _smithers_integration_deliveries
-        WHERE source_id = 'github' AND dedupe_key = 'legacy-guid'`)
+        WHERE source_id = 'github' AND dedupe_key = 'legacy-guid'`,
+          )
           .get(),
       ).toEqual({
         status: "completed",
@@ -455,6 +457,61 @@ describe("DB migration edges", () => {
       .get("score-legacy");
     expect(JSON.parse(row.ground_truth_json)).toEqual({ expected: "answer" });
     expect(JSON.parse(row.context_json)).toEqual({ docs: ["source"] });
+    sqlite.close();
+  });
+
+  test("forward migration deduplicates scorer identities before adding uniqueness", () => {
+    const sqlite = new Database(":memory:");
+    sqlite.exec(`
+      CREATE TABLE _smithers_scorers (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        iteration INTEGER NOT NULL DEFAULT 0,
+        attempt INTEGER NOT NULL DEFAULT 0,
+        scorer_id TEXT NOT NULL,
+        scorer_name TEXT NOT NULL,
+        source TEXT NOT NULL,
+        score REAL NOT NULL,
+        reason TEXT,
+        meta_json TEXT,
+        input_json TEXT,
+        output_json TEXT,
+        ground_truth_json TEXT,
+        context_json TEXT,
+        latency_ms REAL,
+        scored_at_ms INTEGER NOT NULL,
+        duration_ms REAL
+      );
+      INSERT INTO _smithers_scorers
+        (id, run_id, node_id, iteration, attempt, scorer_id, scorer_name, source, score, scored_at_ms)
+      VALUES
+        ('old', 'run-1', 'node-1', 0, 0, 'quality', 'Quality', 'live', 0.2, 1000),
+        ('new', 'run-1', 'node-1', 0, 0, 'quality', 'Quality', 'live', 0.8, 2000),
+        ('batch', 'run-1', 'node-1', 0, 0, 'quality', 'Quality', 'batch', 0.6, 1500);
+    `);
+
+    ensureSmithersTables(drizzle(sqlite));
+
+    expect(
+      sqlite
+        .query("SELECT id FROM _smithers_scorers ORDER BY id")
+        .all()
+        .map((row) => row.id),
+    ).toEqual(["batch", "new"]);
+    expect(
+      sqlite
+        .query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = '_smithers_scorers_identity_uidx'")
+        .get(),
+    ).toBeDefined();
+    expect(() =>
+      sqlite.run(`
+        INSERT INTO _smithers_scorers
+          (id, run_id, node_id, iteration, attempt, scorer_id, scorer_name, source, score, scored_at_ms)
+        VALUES ('duplicate', 'run-1', 'node-1', 0, 0, 'quality', 'Quality', 'live', 0.9, 3000)
+      `),
+    ).toThrow();
+    expect(migrationRows(sqlite).map((row) => row.id)).toContain("0033_scorer_identity");
     sqlite.close();
   });
 

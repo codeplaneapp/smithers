@@ -10,6 +10,22 @@ const MIGRATION_TABLE_SQL = `CREATE TABLE IF NOT EXISTS _smithers_schema_migrati
     details_json TEXT
   )`;
 
+const DELETE_DUPLICATE_SCORER_ROWS_SQL = `DELETE FROM _smithers_scorers
+  WHERE id IN (
+    SELECT id
+    FROM (
+      SELECT id,
+             ROW_NUMBER() OVER (
+               PARTITION BY run_id, node_id, iteration, attempt, scorer_id, source
+               ORDER BY scored_at_ms DESC, id DESC
+             ) AS duplicate_rank
+      FROM _smithers_scorers
+    ) ranked
+    WHERE duplicate_rank > 1
+  )`;
+const CREATE_SCORER_IDENTITY_INDEX_SQL = `CREATE UNIQUE INDEX IF NOT EXISTS _smithers_scorers_identity_uidx
+  ON _smithers_scorers (run_id, node_id, iteration, attempt, scorer_id, source)`;
+
 const RUN_OWNED_FOREIGN_KEY_TABLES = [
   {
     table: "_smithers_frames",
@@ -1692,6 +1708,38 @@ function buildMigrations(context) {
         };
       },
     },
+    {
+      id: "0033_scorer_identity",
+      name: "Deduplicate scorer results and enforce durable scorer identity",
+      checksum: "packages/db/migrations/0033_scorer_identity.sql",
+      destructive: true,
+      isApplied: (sqlite) => indexExists(sqlite, "_smithers_scorers_identity_uidx"),
+      isAppliedPostgres: (pgConn) => indexExistsPostgres(pgConn, "_smithers_scorers_identity_uidx"),
+      up: (sqlite) => {
+        let created = false;
+        if (!tableExists(sqlite, "_smithers_scorers")) {
+          sqlite.run(createTableStatementFor("_smithers_scorers", context.createTableStatements));
+          created = true;
+        }
+        const before = Number(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_scorers").get()?.count ?? 0);
+        sqlite.run(DELETE_DUPLICATE_SCORER_ROWS_SQL);
+        sqlite.run(CREATE_SCORER_IDENTITY_INDEX_SQL);
+        const after = Number(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_scorers").get()?.count ?? 0);
+        return { table: "_smithers_scorers", created, deletedDuplicates: before - after };
+      },
+      upPostgres: async (pgConn) => {
+        let created = false;
+        if (!(await tableExistsPostgres(pgConn, "_smithers_scorers"))) {
+          await pgConn.query({
+            text: translateDdl(POSTGRES, createTableStatementFor("_smithers_scorers", context.createTableStatements)),
+          });
+          created = true;
+        }
+        const deleted = await pgConn.query({ text: DELETE_DUPLICATE_SCORER_ROWS_SQL });
+        await pgConn.query({ text: CREATE_SCORER_IDENTITY_INDEX_SQL });
+        return { table: "_smithers_scorers", created, deletedDuplicates: Number(deleted.rowCount ?? 0) };
+      },
+    },
   ];
 }
 
@@ -1751,6 +1799,10 @@ export async function runSmithersSchemaInitSqliteAsync(storage, context) {
   for (const statement of context.createTableStatements) {
     await storage.execute(statement);
   }
+  // External SQLite backends do not run the versioned migration ledger. Apply
+  // the scorer identity repair explicitly so existing stores converge too.
+  await storage.execute(DELETE_DUPLICATE_SCORER_ROWS_SQL);
+  await storage.execute(CREATE_SCORER_IDENTITY_INDEX_SQL);
   // External SQLite stores use this async bootstrap path and may already
   // contain user output tables. Run the data portion of 0030 explicitly;
   // CREATE TABLE IF NOT EXISTS above must not make it look applied.

@@ -8,11 +8,13 @@ import crypto from "node:crypto";
 describe("aggregateScores", () => {
   let db;
   let adapter;
+  let nextAttempt;
   beforeEach(() => {
     const sqlite = new Database(":memory:");
     db = drizzle(sqlite);
     ensureSmithersTables(db);
     adapter = new SmithersDb(db);
+    nextAttempt = 1;
   });
   /**
    * @param {Partial<{ id: string; runId: string; nodeId: string; iteration: number; attempt: number; scorerId: string; scorerName: string; source: string; score: number; reason: string | null; metaJson: string | null; inputJson: string | null; outputJson: string | null; latencyMs: number | null; scoredAtMs: number; durationMs: number | null; }>} [overrides]
@@ -23,7 +25,7 @@ describe("aggregateScores", () => {
       runId: overrides.runId ?? "run-1",
       nodeId: overrides.nodeId ?? "task-1",
       iteration: overrides.iteration ?? 0,
-      attempt: overrides.attempt ?? 1,
+      attempt: overrides.attempt ?? nextAttempt++,
       scorerId: overrides.scorerId ?? "test-scorer",
       scorerName: overrides.scorerName ?? "Test Scorer",
       source: overrides.source ?? "batch",

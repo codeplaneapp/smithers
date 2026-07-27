@@ -74,6 +74,38 @@ describe("scorers e2e", () => {
     expect(scorerIds).toContain("latency");
     expect(scorerIds).toContain("word-count");
   });
+  it("does not double-count a scorer when the same execution is replayed", async () => {
+    let score = 0.25;
+    const scorers = {
+      quality: {
+        scorer: createScorer({
+          id: "replay-quality",
+          name: "Replay Quality",
+          description: "d",
+          score: async () => ({ score }),
+        }),
+      },
+    };
+    const ctx = {
+      runId: "replay-run",
+      nodeId: "task",
+      iteration: 0,
+      attempt: 0,
+      input: "test",
+      output: "first",
+    };
+
+    await runScorersBatch(scorers, ctx, adapter);
+    score = 0.75;
+    await runScorersBatch(scorers, { ...ctx, output: "replayed" }, adapter);
+
+    const stored = await adapter.listScorerResults("replay-run");
+    expect(stored).toHaveLength(1);
+    expect(stored[0].id).toMatch(/^scorer_[0-9a-f]{64}$/);
+    expect(stored[0].score).toBe(0.25);
+    const aggregated = await aggregateScores(adapter, { runId: "replay-run" });
+    expect(aggregated).toMatchObject([{ scorerId: "replay-quality", count: 1, mean: 0.25 }]);
+  });
   it("handles schema validation failure correctly", async () => {
     const outputSchema = z.object({
       name: z.string(),

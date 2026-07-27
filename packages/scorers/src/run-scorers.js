@@ -52,6 +52,20 @@ function shouldRun(binding, ctx) {
   }
 }
 /**
+ * Builds the stable primary key for one logical scorer execution. Rewinds can
+ * execute the same attempt again, so a random id would make insertIgnore append
+ * a duplicate and corrupt aggregates.
+ *
+ * @param {ScorerContext} ctx
+ * @param {string} scorerId
+ * @param {"live" | "batch"} source
+ * @returns {string}
+ */
+function scorerResultId(ctx, scorerId, source) {
+  const identity = JSON.stringify([ctx.runId, ctx.nodeId, ctx.iteration, ctx.attempt, scorerId, source]);
+  return `scorer_${crypto.createHash("sha256").update(identity).digest("hex")}`;
+}
+/**
  * Emit a scorer lifecycle event through the durable path (DB + NDJSON + live
  * listeners + metrics) so scorer events appear in the event/NDJSON stream, not
  * only in _smithers_scorers. Falls back to a bare emit for a third-party bus
@@ -201,7 +215,7 @@ function runSingleScorerEffect(key, binding, ctx, adapter, source, eventBus) {
     }
     if (adapter) {
       const row = {
-        id: crypto.randomUUID(),
+        id: scorerResultId(ctx, scorer.id, source),
         runId: ctx.runId,
         nodeId: ctx.nodeId,
         iteration: ctx.iteration,
