@@ -17,7 +17,6 @@ const allowedSkips = new Map([
   ["e2e/faults/case19-auth-persistence-suspend-resume.test.ts", 1],
   ["e2e/faults/case20-browser-automation-reference-runtime.test.ts", 1],
   ["e2e/faults/case21-file-vcs-pointer-integrity.test.ts", 0],
-  ["e2e/faults/case24-replay-unsafe-approval.test.ts", 1],
   ["e2e/faults/case25-approval-scope-denial.test.ts", 1],
   ["e2e/faults/case27-scorer-failure-blocks-downstream.test.ts", 1],
   ["e2e/faults/case28-soak-live-stream-rss.test.ts", 1],
