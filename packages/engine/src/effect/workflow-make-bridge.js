@@ -65,43 +65,6 @@ function isSuspendingStatus(status) {
   );
 }
 /**
- * Recover the durable child suspension when @effect/workflow cannot carry it
- * across the Promise boundary used by the nested bridge.
- * @param {SmithersWorkflow<unknown>} workflow
- * @param {string} runId
- * @param {string} status
- * @returns {Promise<RunResult>}
- */
-async function loadSuspendedChildResult(workflow, runId, status) {
-  const adapter = new SmithersDb(workflow.db);
-  const nodes = await Effect.runPromise(adapter.listNodes(runId));
-  const pendingNode = nodes.find((node) => {
-    if (status === "paused") {
-      return (
-        node.state === "waiting-approval" ||
-        node.state === "waiting-event" ||
-        node.state === "waiting-timer" ||
-        node.state === "waiting-quota"
-      );
-    }
-    return node.state === status;
-  });
-  const pendingNodeId = pendingNode?.nodeId;
-  return {
-    runId,
-    status: /** @type {RunResult["status"]} */ (status),
-    error: {
-      name: "ChildWorkflowSuspended",
-      message:
-        `Child run ${runId} is suspended with status ${status}` +
-        (pendingNodeId ? ` at node ${pendingNodeId}.` : "."),
-      childRunId: runId,
-      status,
-      ...(pendingNodeId ? { pendingNodeId } : {}),
-    },
-  };
-}
-/**
  * @param {ReturnType<typeof makeBridgeWorkflow>} workflowBridge
  * @param {Scope.CloseableScope} scope
  * @param {WorkflowEngineContext} engineContext
@@ -186,23 +149,13 @@ function createWorkflowMakeBridgeRuntime(services) {
       const lastRunIdRef = { current: opts.runId };
       const execute = createWorkflowExecutionEffect(workflow, opts, services, lastRunIdRef);
       await registerBridgeWorkflow(workflowBridge, services.scope, services.engineContext, execute);
-      let result;
-      try {
-        result = await executeRegisteredChildWorkflow(
-          workflowBridge,
-          opts.runId,
-          services.scope,
-          services.engineContext,
-          services.parentInstance,
-        );
-      } catch (error) {
-        const adapter = new SmithersDb(workflow.db);
-        const run = await Effect.runPromise(adapter.getRun(lastRunIdRef.current));
-        if (run && isSuspendingStatus(run.status)) {
-          return loadSuspendedChildResult(workflow, lastRunIdRef.current, run.status);
-        }
-        throw error;
-      }
+      const result = await executeRegisteredChildWorkflow(
+        workflowBridge,
+        opts.runId,
+        services.scope,
+        services.engineContext,
+        services.parentInstance,
+      );
       if (result._tag === "Complete") {
         if (Exit.isSuccess(result.exit)) {
           return result.exit.value;

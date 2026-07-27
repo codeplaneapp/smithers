@@ -23,15 +23,6 @@ function findApprovalDenial(error) {
   }
   return null;
 }
-/**
- * @param {unknown} error
- * @returns {string | null}
- */
-function findPendingNodeId(error) {
-  if (!error || typeof error !== "object") return null;
-  const pendingNodeId = /** @type {Record<string, unknown>} */ (error).pendingNodeId;
-  return typeof pendingNodeId === "string" && pendingNodeId.length > 0 ? pendingNodeId : null;
-}
 
 /**
  * @param {string} nodeId
@@ -41,10 +32,8 @@ function findPendingNodeId(error) {
 export function createSubflowResultError(nodeId, result) {
   const suspending = CHILD_WORKFLOW_SUSPENDING_STATUSES.has(result.status);
   const denial = findApprovalDenial(result.error);
-  const pendingNodeId = findPendingNodeId(result.error);
   const summary = suspending
-    ? `Subflow ${nodeId} is waiting on child run ${result.runId} with status ${result.status}` +
-      (pendingNodeId ? ` at node ${pendingNodeId}.` : ".")
+    ? `Subflow ${nodeId} is waiting on child run ${result.runId} with status ${result.status}.`
     : denial
       ? `Subflow ${nodeId} failed because child run ${result.runId} denied an approval.`
       : `Subflow ${nodeId} failed because child run ${result.runId} ended with status ${result.status}.`;
@@ -53,7 +42,6 @@ export function createSubflowResultError(nodeId, result) {
     status: result.status,
     childRunId: result.runId,
     ...(result.error === undefined ? {} : { childError: result.error }),
-    ...(pendingNodeId ? { pendingNodeId } : {}),
     ...(suspending ? { suspensionStatus: result.status } : {}),
     ...(suspending || denial || result.status === "cancelled" ? { failureRetryable: false } : {}),
   });
