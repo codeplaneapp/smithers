@@ -111,7 +111,7 @@ function click(el: Element | null) {
 // React's delegation (start watching), set the value via the native prototype
 // setter (bypasses the tracker so React sees a real change), then a `keyup`
 // which makes React re-check and fire onChange.
-function setInputValue(el: HTMLInputElement, value: string) {
+function setInputValue(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
   el.dispatchEvent(new Event("focusin", { bubbles: true }));
   const nativeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el) as object, "value")?.set;
   nativeSetter?.call(el, value);
@@ -719,20 +719,61 @@ describe("ApprovalPanel", () => {
     click(approveButtons[0]);
     await harness.flush(60);
     expect(gw.approvalsSubmitted.length).toBeGreaterThanOrEqual(1);
+    await waitFor(harness, () => !harness.container.textContent!.includes("Ship it?"), "resolved approval removed");
   });
 
-  test("denies an approval", async () => {
+  test("confirms denial with gate and run context while preserving the optional note", async () => {
     const gw = boot({
       approvals: [{ runId: "run-c", nodeId: "gate", iteration: 0 }],
     });
     const harness = await mount(gw, createElement(ApprovalPanel, { pollMs: 0 }));
     await harness.flush(50);
+    const note = harness.container.querySelector<HTMLTextAreaElement>("textarea")!;
+    setInputValue(note, "not safe yet");
     const denyButtons = [...harness.container.querySelectorAll("button")].filter((b) => b.textContent === "Deny");
     click(denyButtons[0]);
+    await harness.flush();
+    const confirmation = harness.container.querySelector("[role='alertdialog']");
+    expect(confirmation?.textContent).toContain("gate");
+    expect(confirmation?.textContent).toContain("run-c");
+    expect(gw.approvalsSubmitted).toHaveLength(0);
+
+    click([...harness.container.querySelectorAll("button")].find((button) => button.textContent === "Cancel")!);
+    await harness.flush();
+    expect(harness.container.querySelector("[role='alertdialog']")).toBeNull();
+    expect(note.value).toBe("not safe yet");
+    expect(gw.approvalsSubmitted).toHaveLength(0);
+
+    click([...harness.container.querySelectorAll("button")].find((button) => button.textContent === "Deny")!);
+    await harness.flush();
+    click([...harness.container.querySelectorAll("button")].find((button) => button.textContent === "Confirm deny")!);
     await harness.flush(60);
-    expect(gw.approvalsSubmitted.some((row) => (row.decision as { approved?: boolean })?.approved === false)).toBe(
-      true,
-    );
+    expect(gw.approvalsSubmitted[0]).toMatchObject({
+      decision: { approved: false, note: "not safe yet" },
+      note: "not safe yet",
+    });
+  });
+
+  test("disables a pending row and ignores duplicate decision clicks", async () => {
+    const gw = boot({
+      approvals: [{ runId: "run-c", nodeId: "gate", iteration: 0 }],
+      deferApprovalSubmit: true,
+    });
+    const harness = await mount(gw, createElement(ApprovalPanel, { pollMs: 0 }));
+    await harness.flush(50);
+    const approve = [...harness.container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Approve",
+    )!;
+    click(approve);
+    click(approve);
+    await harness.flush();
+    expect(approve.disabled).toBe(true);
+    expect(harness.container.querySelector<HTMLTextAreaElement>("textarea")!.disabled).toBe(true);
+
+    gw.releaseApprovalSubmits();
+    await waitFor(harness, () => gw.approvalsSubmitted.length === 1, "single approval submitted");
+    await harness.flush(50);
+    expect(gw.approvalsSubmitted).toHaveLength(1);
   });
 
   test("shows the empty state", async () => {

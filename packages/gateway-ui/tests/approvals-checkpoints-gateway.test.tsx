@@ -158,12 +158,60 @@ describe("GatewayApprovalList", () => {
       textarea.dispatchEvent(new Event("keyup", { bubbles: true }));
     });
     await act(async () => click(harness.container.querySelector("[data-decision='deny']")));
+    const confirmation = harness.container.querySelector("[data-slot='deny-confirmation']");
+    expect(confirmation?.getAttribute("role")).toBe("alertdialog");
+    expect(confirmation?.textContent).toContain("Deploy to production?");
+    expect(confirmation?.textContent).toContain("run-1");
+    expect(gateway.approvalsSubmitted).toHaveLength(0);
+    await act(async () =>
+      click(harness.container.querySelector("[data-slot='deny-confirmation'] [data-decision='deny']")),
+    );
     await waitFor(harness, () => gateway!.approvalsSubmitted.length === 1, "deny submitted");
     expect(gateway.approvalsSubmitted[0]).toMatchObject({
       approved: false,
       decision: { approved: false, note: "lgtm" },
       note: "lgtm",
     });
+  });
+
+  test("cancels denial without losing the decision note", async () => {
+    gateway = startInMemoryGateway({ approvals: [approvalRow] });
+    const harness = await mount(gateway, createElement(GatewayApprovalList, { note: true }));
+    await waitFor(harness, () => harness.container.querySelector("textarea") !== null, "note editor renders");
+    const textarea = harness.container.querySelector<HTMLTextAreaElement>("textarea")!;
+    await act(async () => {
+      textarea.dispatchEvent(new Event("focusin", { bubbles: true }));
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(textarea) as object, "value")?.set;
+      setter?.call(textarea, "keep this note");
+      textarea.dispatchEvent(new Event("keyup", { bubbles: true }));
+    });
+    await act(async () => click(harness.container.querySelector("[data-decision='deny']")));
+    await act(async () =>
+      click([...harness.container.querySelectorAll("button")].find((button) => button.textContent === "Cancel")!),
+    );
+
+    expect(harness.container.querySelector("[data-slot='deny-confirmation']")).toBeNull();
+    expect(gateway.approvalsSubmitted).toHaveLength(0);
+    expect(harness.container.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe("keep this note");
+  });
+
+  test("ignores duplicate approval clicks while the first submission is pending", async () => {
+    gateway = startInMemoryGateway({ approvals: [approvalRow], deferApprovalSubmit: true });
+    const harness = await mount(gateway, createElement(GatewayApprovalList, { note: true }));
+    await waitFor(harness, () => harness.container.querySelector("[data-decision='approve']") !== null, "row renders");
+    const approve = harness.container.querySelector("[data-decision='approve']");
+    await act(async () => {
+      click(approve);
+      click(approve);
+    });
+    expect(harness.container.querySelector<HTMLTextAreaElement>("textarea")!.readOnly).toBe(true);
+    const buttons = harness.container.querySelectorAll<HTMLButtonElement>("[data-slot='confirmation-action']");
+    expect(buttons).toHaveLength(2);
+    buttons.forEach((button) => expect(button.disabled).toBe(true));
+    gateway.releaseApprovalSubmits();
+    await waitFor(harness, () => gateway!.approvalsSubmitted.length === 1, "single approval submitted");
+    await harness.flush(50);
+    expect(gateway.approvalsSubmitted).toHaveLength(1);
   });
 
   test("renders the empty slot when nothing is pending", async () => {
@@ -258,6 +306,10 @@ describe("GatewayApprovalConfirmation", () => {
     const harness = await mount(gateway, createElement(GatewayApprovalConfirmation, { approval: approvalRow }));
     await waitFor(harness, () => harness.container.textContent!.includes("Deploy to production?"), "row renders");
     await act(async () => click(harness.container.querySelector("[data-decision='deny']")));
+    expect(gateway.approvalsSubmitted).toHaveLength(0);
+    await act(async () =>
+      click(harness.container.querySelector("[data-slot='deny-confirmation'] [data-decision='deny']")),
+    );
     await waitFor(harness, () => harness.container.textContent!.includes("Denied"), "denied state");
     expect(gateway.approvalsSubmitted[0]).toMatchObject({ approved: false, decision: { approved: false } });
   });

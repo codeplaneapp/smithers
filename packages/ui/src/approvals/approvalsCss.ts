@@ -24,6 +24,7 @@ export const approvalsCss = `
 .sui-confirm-note { min-width:0; color:${t.mutedForeground}; font-size:12px; }
 .sui-confirm-failure { color:${t.destructive}; }
 .sui-confirm-actions { display:flex; align-items:center; gap:8px; min-width:0; }
+.sui-confirm-deny { display:grid; gap:8px; min-width:0; padding:10px; border:1px solid ${t.destructiveBorder}; border-radius:${t.radiusControl}; background:${t.destructiveSoft}; color:${t.foreground}; font-weight:650; }
 .sui-confirm-action:focus-visible { ${focusRing} }
 
 .sui-approval-card { min-width:0; display:grid; align-content:start; gap:10px; padding:14px; border:1px solid ${t.border}; border-radius:${t.radius}; background:${t.card}; color:${t.cardForeground}; font-size:13px; }

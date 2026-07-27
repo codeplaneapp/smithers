@@ -65,6 +65,7 @@ export const gatewayUiCss = `
 .gw-approval-button:active:not(:disabled) { background:color-mix(in srgb, var(--gw-tone) 18%, ${theme.panel}); }
 .gw-approval-button-success { --gw-tone:${theme.success}; --gw-tone-soft:${theme.successSoft}; --gw-tone-border:${theme.successBorder}; }
 .gw-approval-button-danger { --gw-tone:${theme.danger}; --gw-tone-soft:${theme.dangerSoft}; --gw-tone-border:${theme.dangerBorder}; }
+.gw-approval-button-neutral { --gw-tone:${theme.textDim}; --gw-tone-soft:${theme.panelAlt}; --gw-tone-border:${theme.border}; }
 .gw-approval-button:disabled { cursor:not-allowed; opacity:.6; }
 .gw-node-row:focus-visible,.gw-run-row:focus-visible,.gw-approval-button:focus-visible { outline:none; border-color:${theme.ringBorder}; box-shadow:0 0 0 3px ${theme.ring}; }
 .gw-status-pill { --gw-tone:${theme.textDim}; --gw-tone-soft:${theme.neutralSoft}; --gw-tone-border:${theme.neutralBorder}; display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius:999px; border:1px solid var(--gw-tone-border); background:var(--gw-tone-soft); color:var(--gw-tone); font-size:12px; font-weight:650; }

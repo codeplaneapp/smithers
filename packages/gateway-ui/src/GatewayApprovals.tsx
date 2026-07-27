@@ -4,6 +4,7 @@ import type { GatewayApprovalRow } from "@smithers-orchestrator/gateway-client";
 import type { ListApprovalsRequest } from "@smithers-orchestrator/gateway-client/rpc";
 import { useGatewayActions, useGatewayApprovals } from "@smithers-orchestrator/gateway-react";
 import {
+  Button,
   Confirmation,
   ConfirmationAccepted,
   ConfirmationAction,
@@ -50,6 +51,7 @@ export function GatewayApprovalConfirmation({
   const { data, loading, error } = useGatewayApprovals({ filter: { runId: approval.runId } });
   const [state, setState] = useState<ApprovalState>("requested");
   const [noteValue, setNoteValue] = useState("");
+  const [confirmingDeny, setConfirmingDeny] = useState(false);
   const inFlight = useRef(false);
   const key = gatewayApprovalKey(approval);
 
@@ -64,6 +66,7 @@ export function GatewayApprovalConfirmation({
     inFlight.current = false;
     setState("requested");
     setNoteValue("");
+    setConfirmingDeny(false);
   }, [key]);
 
   // The row leaving the collection before we resolved it means someone else
@@ -90,6 +93,7 @@ export function GatewayApprovalConfirmation({
   async function decide(approved: boolean) {
     if (inFlight.current) return;
     inFlight.current = true;
+    setConfirmingDeny(false);
     const submittedKey = key;
     setState(approved ? "approving" : "denying");
     const trimmed = noteValue.trim();
@@ -130,12 +134,39 @@ export function GatewayApprovalConfirmation({
           {approval.workflowKey ? `${approval.workflowKey} · ` : ""}
           {approval.runId} · {approval.nodeId}#{approval.iteration}
         </div>
-        {note ? <ApprovalNote value={noteValue} onValueChange={setNoteValue} /> : null}
+        {note ? (
+          <ApprovalNote
+            value={noteValue}
+            onValueChange={setNoteValue}
+            readOnly={state === "approving" || state === "denying"}
+          />
+        ) : null}
       </ConfirmationRequest>
-      <ConfirmationActions>
-        <ConfirmationAction decision="approve" onDecide={(decision) => void decide(decision === "approve")} />
-        <ConfirmationAction decision="deny" onDecide={(decision) => void decide(decision === "approve")} />
-      </ConfirmationActions>
+      {confirmingDeny ? (
+        <div
+          data-slot="deny-confirmation"
+          role="alertdialog"
+          aria-label={`Confirm denial of ${approval.requestTitle ?? approval.nodeId} for run ${approval.runId}`}
+          className="sui-confirm-deny"
+        >
+          <div>
+            Deny gate {approval.requestTitle ?? approval.nodeId} for run {approval.runId}?
+          </div>
+          <ConfirmationActions>
+            <ConfirmationAction decision="deny" autoFocus onDecide={() => void decide(false)}>
+              Confirm deny
+            </ConfirmationAction>
+            <Button variant="outline" onClick={() => setConfirmingDeny(false)}>
+              Cancel
+            </Button>
+          </ConfirmationActions>
+        </div>
+      ) : (
+        <ConfirmationActions>
+          <ConfirmationAction decision="approve" onDecide={() => void decide(true)} />
+          <ConfirmationAction decision="deny" onDecide={() => setConfirmingDeny(true)} />
+        </ConfirmationActions>
+      )}
       <ConfirmationAccepted />
       <ConfirmationRejected />
     </Confirmation>
