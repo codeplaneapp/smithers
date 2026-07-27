@@ -470,9 +470,9 @@ exit 1
   });
 });
 describe("getJjPointer", () => {
-  test("returns trimmed change_id string", async () => {
+  test("returns trimmed commit_id string", async () => {
     const script = `
-if [[ "$1" = "log" && "$2" = "-r" && "$3" = "@" && "$4" = "--no-graph" && "$5" = "--template" && "$6" = "change_id" ]]; then
+if [[ "$1" = "log" && "$2" = "-r" && "$3" = "@" && "$4" = "--no-graph" && "$5" = "--template" && "$6" = "commit_id" ]]; then
   echo "abc123"
   exit 0
 fi
@@ -518,7 +518,7 @@ exit 0
     const tmpCwd = await fs.mkdtemp(path.join(os.tmpdir(), "jj-ptr-"));
     await fs.writeFile(path.join(tmpCwd, ".sentinel"), "x");
     const script = `
-if [[ "$1" = "log" && "$2" = "-r" && "$3" = "@" && "$4" = "--no-graph" && "$5" = "--template" && "$6" = "change_id" ]]; then
+if [[ "$1" = "log" && "$2" = "-r" && "$3" = "@" && "$4" = "--no-graph" && "$5" = "--template" && "$6" = "commit_id" ]]; then
   if [[ -f ./.sentinel ]]; then
     echo ptr
     exit 0

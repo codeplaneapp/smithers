@@ -481,3 +481,56 @@ describeIfJj("captureWorkspaceSnapshot -> revertToJjPointer round-trip (real com
     }
   }, 30_000);
 });
+
+// Regression for the attempt-aliasing bug: the engine keeps `@` on one change
+// across attempts, so a pointer recorded as change_id resolved to the change's
+// CURRENT commit and `jj restore --from` no-op'd ("Nothing changed.") while
+// reporting success — DB rewound, filesystem untouched. getJjPointer must
+// return the immutable commit_id so the getJjPointer -> revertToJjPointer
+// round-trip restores real bytes.
+describeIfJj("getJjPointer -> revertToJjPointer round-trip on the SAME change (aliasing)", () => {
+  test("pointer captured on @ restores pre-edit bytes after further edits to the same change", async () => {
+    const repo = await makeRepo();
+    try {
+      await fs.writeFile(path.join(repo.dir, "f.txt"), "state A\n");
+      const pointer = await vcs.getJjPointer(repo.dir);
+      expect(pointer).not.toBeNull();
+      // The pointer is a hex commit id, not a k-z change id.
+      expect(pointer).toMatch(/^[0-9a-f]{8,}$/);
+
+      // Mutate the working copy WITHOUT jj new: same change, new snapshot.
+      await fs.writeFile(path.join(repo.dir, "f.txt"), "state B\n");
+
+      const result = await vcs.revertToJjPointer(/** @type {string} */ (pointer), repo.dir);
+      expect(result.success).toBe(true);
+      // The filesystem actually moved back — this is the assertion the old
+      // change_id pointer silently failed.
+      expect(await fs.readFile(path.join(repo.dir, "f.txt"), "utf8")).toBe("state A\n");
+    } finally {
+      await repo.cleanup();
+    }
+  }, 30_000);
+
+  test("legacy change_id pointer logs the silent-no-op warning and leaves edits in place", async () => {
+    const repo = await makeRepo();
+    try {
+      await fs.writeFile(path.join(repo.dir, "f.txt"), "state A\n");
+      const legacyPointer = await repo.currentChangeId();
+      await fs.writeFile(path.join(repo.dir, "f.txt"), "state B\n");
+
+      const { value: result, records } = await runVcsCapturingLogs(
+        vcsEffects.revertToJjPointer(legacyPointer, repo.dir),
+      );
+      // jj accepts the change_id but resolves it to the change's current
+      // commit: exit 0, "Nothing changed.", bytes untouched.
+      expect(result.success).toBe(true);
+      expect(await fs.readFile(path.join(repo.dir, "f.txt"), "utf8")).toBe("state B\n");
+      const warned = records.some(
+        (record) => record.level === "WARN" && record.message.includes("legacy change_id pointer"),
+      );
+      expect(warned).toBe(true);
+    } finally {
+      await repo.cleanup();
+    }
+  }, 30_000);
+});

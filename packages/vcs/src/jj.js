@@ -88,14 +88,22 @@ function jjError(res) {
   return res.stderr.trim() || `jj exited with code ${res.code}`;
 }
 /**
- * Returns the current workspace change id (jj `change_id`) or null on failure.
- * Accepts optional `cwd` to run inside a target repository.
+ * Returns an immutable pointer to the current working-copy state (jj
+ * `commit_id`, forcing one snapshot) or null on failure. Accepts optional
+ * `cwd` to run inside a target repository.
+ *
+ * This MUST be the commit id, never the change id: the engine keeps `@` on
+ * one change across task attempts, so a recorded change_id aliases to the
+ * change's CURRENT commit at restore time and `jj restore --from <change_id>`
+ * silently no-ops ("Nothing changed.") while reporting success. commit_id
+ * pins the exact snapshot, which is also what makes it usable as a
+ * state-discriminating cache-key component.
  *
  * @param {string} [cwd]
  * @returns {Effect.Effect<string | null, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
  */
 export function getJjPointer(cwd) {
-  return withJjTimeout(runJj(["log", "-r", "@", "--no-graph", "--template", "change_id"], { cwd }), "jj pointer").pipe(
+  return withJjTimeout(runJj(["log", "-r", "@", "--no-graph", "--template", "commit_id"], { cwd }), "jj pointer").pipe(
     Effect.map((res) => {
       if (res.code !== 0) return null;
       const out = res.stdout.trim();
@@ -202,15 +210,39 @@ function snapshotGap(step, code, reason) {
   );
 }
 /**
- * Restore the working copy to a previously recorded jujutsu `change_id`.
- * Used by the engine to revert attempts within the correct repo/worktree (via `cwd`).
+ * jj change ids render in the reverse-hex alphabet (k-z only), commit ids in
+ * plain hex, so a stored pointer's kind is recoverable after the fact.
+ *
+ * @param {string} pointer
+ * @returns {boolean}
+ */
+function isJjChangeIdPointer(pointer) {
+  return /^[k-z]+$/.test(pointer);
+}
+/**
+ * Restore the working copy to a previously recorded jj pointer (a `commit_id`
+ * from {@link getJjPointer} or {@link captureWorkspaceSnapshot}). Used by the
+ * engine to revert attempts within the correct repo/worktree (via `cwd`).
+ *
+ * Legacy rows recorded before the commit_id fix hold change_ids. jj still
+ * accepts them, but `--from <change_id>` resolves to that change's CURRENT
+ * commit, so when `@` never left the change the restore is a silent
+ * filesystem no-op. That aliasing cannot be repaired from the pointer alone
+ * (the historical commit is unrecoverable without the evolog position), so it
+ * is logged loudly instead of silently succeeding.
  *
  * @param {string} pointer
  * @param {string} [cwd]
  * @returns {Effect.Effect<JjRevertResult, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
  */
 export function revertToJjPointer(pointer, cwd) {
-  return runJj(["restore", "--from", pointer], { cwd }).pipe(
+  const legacyWarning = isJjChangeIdPointer(pointer)
+    ? Effect.logWarning(
+        "revertToJjPointer received a legacy change_id pointer; jj resolves it to the change's current commit, so the filesystem restore may be a silent no-op",
+      )
+    : Effect.void;
+  return legacyWarning.pipe(
+    Effect.andThen(runJj(["restore", "--from", pointer], { cwd })),
     Effect.map((res) => (res.code === 0 ? { success: true } : { success: false, error: jjError(res) })),
     Effect.annotateLogs({ cwd: cwd ?? "", pointer }),
     Effect.withLogSpan("vcs:jj-revert"),

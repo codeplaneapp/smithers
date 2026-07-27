@@ -208,8 +208,13 @@ describe("CLI side-effect boundaries", () => {
       const repo = createTempRepo();
       pinSqliteBackend(repo.dir);
       const workflow = repo.write("workflow.tsx", effectWorkflowSource());
+      // Real deployments gitignore the control-plane DB (root .gitignore pins
+      // smithers.db*), so jj never tracks it and a commit_id restore cannot
+      // delete it out from under a live engine. Without this line the fixture
+      // only passed because the old change_id pointer made restore a no-op.
+      repo.write(".gitignore", "smithers.db*\n");
       execFileSync("jj", ["git", "init", "--colocate"], { cwd: repo.dir, stdio: "ignore" });
-      const jjPointer = execFileSync("jj", ["log", "-r", "@", "--no-graph", "-T", "change_id"], {
+      const jjPointer = execFileSync("jj", ["log", "-r", "@", "--no-graph", "-T", "commit_id"], {
         cwd: repo.dir,
         encoding: "utf8",
       }).trim();
