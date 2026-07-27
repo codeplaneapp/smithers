@@ -5,6 +5,10 @@ import { findSmithersAnchorDir } from "smithers-orchestrator/findSmithersAnchorD
 import { openSmithersStore } from "smithers-orchestrator/openSmithersStore";
 import { cliWorkspace } from "./cliWorkspace.js";
 /** @typedef {import("./FindDbWaitOptions.ts").FindDbWaitOptions} FindDbWaitOptions */
+/** @typedef {import("./DbMarkerChecks.ts").DbMarkerChecks} DbMarkerChecks */
+
+/** @type {DbMarkerChecks} */
+const realDbMarkerChecks = { fileExists: existsSync };
 
 /**
  * Walk from `from` (default: cwd) upward looking for smithers.db.
@@ -22,9 +26,12 @@ import { cliWorkspace } from "./cliWorkspace.js";
  * Returns the absolute path to the database file.
  *
  * @param {string} [from]
+ * @param {DbMarkerChecks} [markerChecks] Defaults to the real filesystem; tests
+ *   inject probes bounded to their own sandbox so the walk cannot escape into
+ *   the shared OS tmp root, which may hold a stray `smithers.db`.
  * @returns {string}
  */
-export function findSmithersDb(from) {
+export function findSmithersDb(from, markerChecks = realDbMarkerChecks) {
   const startDir = resolve(from ?? process.cwd());
 
   // Collect every smithers.db along the upward walk so we can warn about
@@ -34,7 +41,7 @@ export function findSmithersDb(from) {
   let dir = startDir;
   while (true) {
     const candidate = resolve(dir, "smithers.db");
-    if (existsSync(candidate)) {
+    if (markerChecks.fileExists(candidate)) {
       allCandidates.push(candidate);
     }
     const parent = dirname(dir);
@@ -59,7 +66,7 @@ export function findSmithersDb(from) {
   // fall back to a stray smithers.db from a parent or sibling directory — that
   // would silently cross the project boundary.  Instead throw CLI_DB_NOT_FOUND so
   // the caller (or waitForSmithersDb) can retry until the anchor DB appears.
-  if (anchorDb && !existsSync(anchorDb)) {
+  if (anchorDb && !markerChecks.fileExists(anchorDb)) {
     throw new SmithersError(
       "CLI_DB_NOT_FOUND",
       `No smithers.db found at project anchor ${anchorDir}. Run 'smithers up <workflow>' to start a run first.`,
@@ -88,15 +95,16 @@ function sleep(ms) {
 /**
  * @param {string} [from]
  * @param {FindDbWaitOptions} [opts]
+ * @param {DbMarkerChecks} [markerChecks]
  * @returns {Promise<string>}
  */
-export async function waitForSmithersDb(from, opts = {}) {
+export async function waitForSmithersDb(from, opts = {}, markerChecks = realDbMarkerChecks) {
   const timeoutMs = Math.max(0, opts.timeoutMs ?? 0);
   const intervalMs = Math.max(1, opts.intervalMs ?? 100);
   const startedAt = Date.now();
   while (true) {
     try {
-      return findSmithersDb(from);
+      return findSmithersDb(from, markerChecks);
     } catch (err) {
       if (!(err instanceof SmithersError) || err.code !== "CLI_DB_NOT_FOUND") {
         throw err;

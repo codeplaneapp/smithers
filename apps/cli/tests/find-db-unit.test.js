@@ -9,6 +9,16 @@ function tempDir(name) {
   return mkdtempSync(join(tmpdir(), `${name}-`));
 }
 
+// Bounds the upward walk to `root`: the real OS tmp root is shared across
+// concurrent processes and worktrees, so a stray `<tmp>/smithers.db` left by
+// another run makes an unbounded real-fs walk find a database the test never
+// created.
+function sandboxedMarkerChecks(root) {
+  return {
+    fileExists: (path) => (path.startsWith(`${root}/`) ? existsSync(path) : false),
+  };
+}
+
 function withHome(home, fn) {
   const previous = process.env.HOME;
   process.env.HOME = home;
@@ -97,7 +107,7 @@ describe("find db helpers", () => {
     const nested = join(root, "a", "b");
     mkdirSync(nested, { recursive: true });
     try {
-      expect(() => findSmithersDb(nested)).toThrow(/No smithers\.db found/);
+      expect(() => findSmithersDb(nested, sandboxedMarkerChecks(root))).toThrow(/No smithers\.db found/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -105,16 +115,21 @@ describe("find db helpers", () => {
 
   test("waits for a database file and times out cleanly", async () => {
     const root = tempDir("wait-db");
+    const checks = sandboxedMarkerChecks(root);
     try {
-      await expect(waitForSmithersDb(root, { timeoutMs: 1, intervalMs: 1 })).rejects.toMatchObject({
+      await expect(waitForSmithersDb(root, { timeoutMs: 1, intervalMs: 1 }, checks)).rejects.toMatchObject({
         code: "CLI_DB_NOT_FOUND",
       });
-      await expect(waitForSmithersDb(Symbol("bad"), { timeoutMs: 1, intervalMs: 1 })).rejects.toBeInstanceOf(TypeError);
+      await expect(
+        waitForSmithersDb(Symbol("bad"), { timeoutMs: 1, intervalMs: 1 }, checks),
+      ).rejects.toBeInstanceOf(TypeError);
 
       setTimeout(() => {
         writeFileSync(join(root, "smithers.db"), "");
       }, 5);
-      expect(await waitForSmithersDb(root, { timeoutMs: 100, intervalMs: 1 })).toBe(join(root, "smithers.db"));
+      expect(await waitForSmithersDb(root, { timeoutMs: 100, intervalMs: 1 }, checks)).toBe(
+        join(root, "smithers.db"),
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
