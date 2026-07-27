@@ -364,6 +364,37 @@ describe("Durability", () => {
       cleanup();
     }
   });
+  test("resume stamps a placeholder workflow name when graph extraction previously failed", async () => {
+    const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
+    const adapter = new SmithersDb(db);
+    const runId = "resume-unstamped-workflow-name";
+    let graphAvailable = false;
+    const workflow = smithers(() => {
+      if (!graphAvailable) throw new Error("graph extraction failed before workflow name stamping");
+      return (
+        <Workflow name="actual-workflow-name">
+          <Task id="task" output={outputs.outputA}>
+            {() => ({ value: 1 })}
+          </Task>
+        </Workflow>
+      );
+    });
+    try {
+      expect((await Effect.runPromise(runWorkflow(workflow, { input: {}, runId }))).status).toBe("failed");
+      expect((await adapter.getRun(runId))?.workflowName).toBe("workflow");
+      expect(await adapter.listNodes(runId)).toEqual([]);
+
+      graphAvailable = true;
+      const resumed = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId, resume: true }));
+      const resumedRun = await adapter.getRun(runId);
+
+      expect(resumed.status, JSON.stringify({ resumed, resumedRun })).toBe("finished");
+      expect(resumedRun?.workflowName).toBe("actual-workflow-name");
+      expect((await adapter.getNode(runId, "task", 0))?.state).toBe("finished");
+    } finally {
+      cleanup();
+    }
+  });
   test("supervised timer resume mismatch fails the parked run", async () => {
     const dir = mkdtempSync(join(tmpdir(), "smithers-timer-resume-metadata-"));
     const workflowPath = join(dir, "workflow.tsx");

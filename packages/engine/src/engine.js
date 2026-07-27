@@ -7416,6 +7416,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
   let runOwnedByCurrentProcess = false;
   /** @type {RunRow | null} */
   let runBeforeResume = null;
+  let runHadNodesBeforeResume = true;
   let workflowNameMismatchDetected = false;
   let driverTaskError = null;
   const activeDriverTaskKeys = new Set();
@@ -8679,6 +8680,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
   try {
     const existingRun = await Effect.runPromise(adapter.getRun(runId));
     runBeforeResume = opts.resume ? existingRun : null;
+    if (opts.resume && existingRun?.workflowName === "workflow") {
+      runHadNodesBeforeResume = (await adapter.listNodes(runId)).length > 0;
+    }
     updateCurrentCorrelationContext({
       parentRunId: opts.parentRunId ?? existingRun?.parentRunId ?? undefined,
       workflowName: existingRun?.workflowName ?? "workflow",
@@ -9081,10 +9085,16 @@ async function runWorkflowBodyDriver(workflow, opts) {
           }
         }
         workflowName = getWorkflowNameFromXml(graph.xml);
+        const storedWorkflowNameIsUnstamped =
+          opts.resume &&
+          existingRun?.workflowName === "workflow" &&
+          existingRun.workflowName !== workflowName &&
+          !runHadNodesBeforeResume;
         if (
           opts.resume &&
           opts.acceptWorkflowChange !== true &&
           existingRun?.workflowName &&
+          !storedWorkflowNameIsUnstamped &&
           existingRun.workflowName !== workflowName
         ) {
           workflowNameMismatchDetected = true;
