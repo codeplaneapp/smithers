@@ -10,6 +10,7 @@ const workspaceRoots = ["packages", "apps"];
 const directWorkspaceDirs = ["e2e", ".smithers"];
 const sourceExtensions = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]);
 const ignoredDirs = new Set([
+  ".alchemy",
   ".git",
   ".jj",
   ".claude",
