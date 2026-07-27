@@ -4644,13 +4644,17 @@ const claudeMonitorOptions = z.object({
     .int()
     .min(0)
     .default(3)
-    .describe("Active-attempt number that flags a node as retry-churning, re-firing on each later attempt (0 disables)"),
+    .describe(
+      "Active-attempt number that flags a node as retry-churning, re-firing on each later attempt (0 disables)",
+    ),
   progressEveryMs: z
     .number()
     .int()
     .min(0)
     .default(1800000)
-    .describe("Emit a run-progress still-running digest when a followed run has produced no notification for this long (0 disables)"),
+    .describe(
+      "Emit a run-progress still-running digest when a followed run has produced no notification for this long (0 disables)",
+    ),
   ticks: z.number().int().min(1).optional().describe("Stop after N polls (default: run until killed)"),
   transitions: z
     .enum(["actionable", "all"])
@@ -6581,6 +6585,7 @@ const cli = Cli.create({
                 expectedStatus: testCase.expected.status,
                 status: result.status,
                 passed: evaluation.passed,
+                inconclusive: evaluation.inconclusive,
                 assertions: evaluation.assertions,
                 durationMs,
                 input: testCase.input,
@@ -6604,6 +6609,7 @@ const cli = Cli.create({
                 expectedStatus: testCase.expected.status,
                 status: "error",
                 passed: evaluation.passed,
+                inconclusive: evaluation.inconclusive,
                 assertions: evaluation.assertions,
                 durationMs,
                 input: testCase.input,
@@ -6625,7 +6631,12 @@ const cli = Cli.create({
           force: c.options.force,
         });
         report = { ...report, reportPath };
-        process.exitCode = report.summary.failed > 0 ? 1 : 0;
+        // Exit 1 only on genuine case failures. When every red is a harness/
+        // environment fault (inconclusive), exit 5 so a driving loop knows the
+        // suite never observed the workflow and must repair the harness (or
+        // stop), not iterate on the product.
+        const genuineFailures = report.summary.failed - report.summary.inconclusive;
+        process.exitCode = genuineFailures > 0 ? 1 : report.summary.inconclusive > 0 ? 5 : 0;
         // Only a human on a TTY gets the formatted `renderEvalReport` text.
         // A piped/agent consumer (non-TTY, default TOON) must get a single
         // coherent TOON envelope, NOT the human report followed by a stray

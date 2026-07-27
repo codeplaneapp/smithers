@@ -81,7 +81,9 @@ bunx smithers-orchestrator eval workflow.tsx --cases evals/smoke.jsonl --suite s
 
 By default the report is written to `.smithers/evals/smoke.json`; use `--report path/to/report.json` for a different location.
 
-The command exits `0` when all cases pass, `1` when any fail, and `4` for invalid case files.
+The command exits `0` when all cases pass, `1` when any genuinely fail, `4` for invalid case files, and `5` when the only reds are INCONCLUSIVE: cases that died on a harness or environment fault (connection refused, TLS failure, network denied, missing binary, out of memory, rate limit) before the workflow's behavior could be observed. Exit `5` means fix the harness, not the workflow; a loop that treats it like `1` will iterate on product code the suite never actually tested.
+
+> **Warning:** Bash-tool network access is off by default for every eval run. Loopback stays reachable (localhost, `127.0.0.1`, `*.localhost`, unix sockets), so local compositions work, but a suite whose workflow reaches any real external service needs `--allow-network` or every case dies with `TOOL_NETWORK_DISABLED` and grades INCONCLUSIVE.
 
 > **Tip:** Pass a workflow ID (`implement`) instead of a file path for workflows discovered from `.smithers/workflows` to run the same suite on every checkout without hard-coded entry paths.
 

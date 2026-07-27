@@ -70,11 +70,16 @@ const caseResultSchema = z.object({
   status: z.enum(["ok", "failed", "cancelled"]),
   assertions: z.array(z.object({ description: z.string(), passed: z.boolean() })),
   passed: z.boolean(),
+  // True when the child died on a harness/environment signature before the
+  // workflow's behavior could be observed (isEvalInfraFailure). Still counts
+  // as not-passed, but must not be read as a product defect.
+  inconclusive: z.boolean(),
   error: z.string().nullable(),
 });
 
 const verdictSchema = z.object({
   pass: z.boolean(),
+  inconclusive: z.number().int(),
   paragraph: z.string(),
 });
 
@@ -233,6 +238,7 @@ export default smithers((ctx) => {
                       status: persistedStatus,
                       assertions: graded.assertions,
                       passed: graded.passed,
+                      inconclusive: graded.inconclusive,
                       error: caseLevelError ?? null,
                     };
                   }}
@@ -245,13 +251,20 @@ export default smithers((ctx) => {
             const results = cases.map((c) => ctx.outputMaybe(outputs.caseResult, { nodeId: `case-${c.id}` }));
             const total = results.length;
             const passed = results.filter((r) => r?.passed === true).length;
+            const inconclusive = results.filter((r) => Boolean(r?.inconclusive)).length;
             const pass = total > 0 && passed === total;
             const suiteName = suite?.name ?? ctx.input.suiteId;
+            // Inconclusive cases are harness/environment faults: name them so
+            // a driving loop repairs the harness instead of the workflow.
             const paragraph =
               total === 0
                 ? `Suite "${suiteName}" had no cases to run.`
-                : `Suite "${suiteName}": ${passed}/${total} case(s) passed.`;
-            return { pass, paragraph };
+                : `Suite "${suiteName}": ${passed}/${total} case(s) passed.${
+                    inconclusive > 0
+                      ? ` ${inconclusive} case(s) were INCONCLUSIVE (harness/environment fault, not workflow evidence): fix the harness before iterating on the workflow.`
+                      : ""
+                  }`;
+            return { pass, inconclusive, paragraph };
           }}
         </Task>
       </Sequence>

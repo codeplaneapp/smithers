@@ -73,6 +73,7 @@ export {
   parseEvalDataset,
   slugifyEvalToken,
 } from "./evalCases.js";
+export { isEvalInfraFailure } from "./isEvalInfraFailure.js";
 // Execution
 export { runScorersAsync, runScorersBatch } from "./run-scorers.js";
 // Aggregation

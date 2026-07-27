@@ -12,6 +12,7 @@ import {
   normalizeEvalJudge,
   slugifyEvalToken,
 } from "@smithers-orchestrator/scorers/evalCases";
+import { isEvalInfraFailure } from "@smithers-orchestrator/scorers/isEvalInfraFailure";
 import { listNarratorCandidates } from "./narrator-agents.js";
 
 export { EVAL_CASE_STATUSES };
@@ -311,7 +312,7 @@ export async function assertEvalRunIdsAvailable(adapter, cases) {
 }
 
 /**
- * @param {Array<{ passed: boolean; status?: string; durationMs?: number }>} results
+ * @param {Array<{ passed: boolean; inconclusive?: boolean; status?: string; durationMs?: number }>} results
  */
 export function summarizeEvalResults(results) {
   const byStatus = {};
@@ -321,10 +322,15 @@ export function summarizeEvalResults(results) {
   }
   const passed = results.filter((result) => result.passed).length;
   const failed = results.length - passed;
+  // Inconclusive cases are counted inside `failed` (fail-closed) but reported
+  // separately: they are harness/environment faults, not workflow evidence,
+  // and the CLI exits 5 instead of 1 when they are the only reds.
+  const inconclusive = results.filter((result) => result.inconclusive === true).length;
   return {
     total: results.length,
     passed,
     failed,
+    inconclusive,
     byStatus,
     durationMs: results.reduce((sum, result) => sum + (result.durationMs ?? 0), 0),
   };
@@ -368,9 +374,18 @@ export function evaluateEvalCaseResult(testCase, result) {
       actual: actualError,
     });
   }
+  const passed = assertions.every((assertion) => assertion.passed);
   return {
-    passed: assertions.every((assertion) => assertion.passed),
+    passed,
     assertions,
+    // A case that expected to finish but died on a known harness/environment
+    // signature never observed the workflow: report it inconclusive so the
+    // loop repairs the harness instead of the product. `passed` stays false.
+    inconclusive:
+      !passed &&
+      testCase.expected.status === "finished" &&
+      actualStatus !== "finished" &&
+      isEvalInfraFailure(formatEvalError(result.error)),
   };
 }
 
@@ -402,6 +417,7 @@ export async function evaluateEvalCaseResultAsync(testCase, result, options = {}
   return {
     assertions,
     passed: assertions.every((assertion) => assertion.passed),
+    inconclusive: deterministic.inconclusive,
   };
 }
 
@@ -598,7 +614,11 @@ export function renderEvalReport(report) {
     `Eval suite: ${report.suiteId}`,
     ...(report.runLabel ? [`Run label: ${report.runLabel}`] : []),
     `Workflow: ${report.workflowPath}`,
-    `Result: ${report.summary.passed}/${report.summary.total} passed`,
+    `Result: ${report.summary.passed}/${report.summary.total} passed${
+      report.summary.inconclusive > 0
+        ? `, ${report.summary.inconclusive} inconclusive (harness/environment fault, not workflow evidence)`
+        : ""
+    }`,
     `Duration: ${report.durationMs}ms`,
   ];
   if (report.reportPath) {
@@ -607,7 +627,7 @@ export function renderEvalReport(report) {
   lines.push("");
   lines.push("Cases:");
   for (const result of report.results) {
-    const mark = result.passed ? "PASS" : "FAIL";
+    const mark = result.passed ? "PASS" : result.inconclusive ? "INCONCLUSIVE" : "FAIL";
     lines.push(
       `- ${mark} ${result.caseId} -> ${result.runId} (${result.status ?? "error"}, ${result.durationMs ?? 0}ms)`,
     );

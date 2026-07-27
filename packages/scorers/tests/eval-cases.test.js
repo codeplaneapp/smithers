@@ -189,6 +189,58 @@ describe("evaluateEvalCase — expected OUTPUT value mode", () => {
   });
 });
 
+describe("evaluateEvalCase — inconclusive stamping (harness vs product failures)", () => {
+  test("a case that died on a known infra signature is failed AND inconclusive", () => {
+    for (const error of [
+      "SmithersError TOOL_NETWORK_DISABLED: Network access is disabled for the bash tool.",
+      "connect ECONNREFUSED 127.0.0.1:5432",
+      "getaddrinfo ENOTFOUND db.localhost",
+      "error:0A000410:SSL routines::sslv3 alert handshake failure",
+      "spawn wallet-simulator ENOENT",
+      "JavaScript heap out of memory",
+      "429 rate limit exceeded, retry later",
+    ]) {
+      const result = evaluateEvalCase({ status: "error", error });
+      expect(result.passed).toBe(false);
+      expect(result.inconclusive).toBe(true);
+    }
+  });
+
+  test("an unrecognized error stays a genuine failure (fail-closed)", () => {
+    const result = evaluateEvalCase({ status: "failed", error: "assertion failed: expected 4, got 5" });
+    expect(result.passed).toBe(false);
+    expect(result.inconclusive).toBe(false);
+  });
+
+  test("a case that expected a non-finished status is never inconclusive", () => {
+    // The dataset asked for an error: reaching one is on-contract, and a
+    // status mismatch is a real grading result, not a harness fault.
+    const result = evaluateEvalCase({
+      expected: { status: "failed", errorContains: "boom" },
+      status: "finished",
+      output: null,
+    });
+    expect(result.inconclusive).toBe(false);
+  });
+
+  test("a passing case is never inconclusive", () => {
+    const result = evaluateEvalCase({ status: "finished", output: null });
+    expect(result.passed).toBe(true);
+    expect(result.inconclusive).toBe(false);
+  });
+
+  test("a finished run with a wrong output is a genuine failure, not inconclusive", () => {
+    const result = evaluateEvalCase({
+      expected: "4",
+      status: "finished",
+      output: "5",
+      error: "connect ECONNREFUSED 127.0.0.1:1 (stale log line in output)",
+    });
+    expect(result.passed).toBe(false);
+    expect(result.inconclusive).toBe(false);
+  });
+});
+
 describe("evaluateEvalCase — assertion-spec mode ({status, output, outputContains, errorContains})", () => {
   test("defaults status to finished when expected is undefined", () => {
     const result = evaluateEvalCase({ status: "finished", output: null });

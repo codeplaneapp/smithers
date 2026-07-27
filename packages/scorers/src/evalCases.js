@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { createScorer } from "./createScorer.js";
+import { isEvalInfraFailure } from "./isEvalInfraFailure.js";
 /** @typedef {import("./types.js").Scorer} Scorer */
 /** @typedef {import("./EvalCaseInput.ts").EvalCaseInput} EvalCaseInput */
 /** @typedef {import("./EvalDatasetParseResult.ts").EvalDatasetParseResult} EvalDatasetParseResult */
@@ -369,8 +370,15 @@ export function parseEvalDataset(text) {
  * Never throws: an unparsable assertion spec degrades to a single failed
  * assertion carrying the validation message, so a malformed dataset case
  * fails honestly instead of crashing the parent run.
+ *
+ * A failed case is additionally stamped `inconclusive: true` when the case
+ * expected to finish, did not, and its error matches a known harness/
+ * environment signature (`isEvalInfraFailure`): the workflow's behavior was
+ * never observed, so the red must not be read as a product defect.
+ * `passed` stays false either way — callers that ignore the stamp keep the
+ * fail-closed behavior.
  * @param {{ expected?: unknown; status?: string; output?: unknown; error?: unknown }} args
- * @returns {{ assertions: EvalAssertion[]; passed: boolean }}
+ * @returns {{ assertions: EvalAssertion[]; passed: boolean; inconclusive: boolean }}
  */
 export function evaluateEvalCase({ expected, status, output, error }) {
   const actualStatus = status ?? "error";
@@ -380,6 +388,7 @@ export function evaluateEvalCase({ expected, status, output, error }) {
     (isPlainObject(expected) && Object.keys(expected).every((key) => EVAL_EXPECTED_KEYS.has(key)));
   /** @type {EvalAssertion[]} */
   const assertions = [];
+  let expectedStatus = "finished";
   if (isAssertionSpec) {
     let normalized;
     try {
@@ -388,8 +397,10 @@ export function evaluateEvalCase({ expected, status, output, error }) {
       return {
         assertions: [{ description: err instanceof Error ? err.message : String(err), passed: false }],
         passed: false,
+        inconclusive: false,
       };
     }
+    expectedStatus = normalized.status;
     assertions.push({
       description: `case run status is "${normalized.status}"`,
       passed: actualStatus === normalized.status,
@@ -424,9 +435,15 @@ export function evaluateEvalCase({ expected, status, output, error }) {
       passed: isSubsetMatch ? jsonContains(output, expected) : jsonEquals(output, expected),
     });
   }
+  const passed = assertions.every((assertion) => assertion.passed);
   return {
     assertions,
-    passed: assertions.every((assertion) => assertion.passed),
+    passed,
+    inconclusive:
+      !passed &&
+      expectedStatus === "finished" &&
+      actualStatus !== "finished" &&
+      isEvalInfraFailure(formatEvalError(error)),
   };
 }
 
@@ -439,7 +456,7 @@ export function evaluateEvalCase({ expected, status, output, error }) {
  * malformed response fails the affected case without aborting the suite.
  * @param {{ expected?: unknown; judge?: EvalJudge; input?: unknown; status?: string; output?: unknown; error?: unknown }} args
  * @param {EvalJudgeRunner} [runJudge]
- * @returns {Promise<{ assertions: EvalAssertion[]; passed: boolean }>}
+ * @returns {Promise<{ assertions: EvalAssertion[]; passed: boolean; inconclusive: boolean }>}
  */
 export async function evaluateEvalCaseAsync({ expected, judge, input, status, output, error }, runJudge) {
   const deterministic = evaluateEvalCase({ expected, status, output, error });
@@ -457,7 +474,11 @@ export async function evaluateEvalCaseAsync({ expected, judge, input, status, ou
       score: 0,
       reason: "Invalid judge assertion.",
     };
-    return { assertions: [...deterministic.assertions, assertion], passed: false };
+    return {
+      assertions: [...deterministic.assertions, assertion],
+      passed: false,
+      inconclusive: deterministic.inconclusive,
+    };
   }
   if (!normalizedJudge) {
     return deterministic;
@@ -505,7 +526,11 @@ export async function evaluateEvalCaseAsync({ expected, judge, input, status, ou
     }
   }
   const assertions = [...deterministic.assertions, assertion];
-  return { assertions, passed: assertions.every((entry) => entry.passed) };
+  return {
+    assertions,
+    passed: assertions.every((entry) => entry.passed),
+    inconclusive: deterministic.inconclusive,
+  };
 }
 
 /**

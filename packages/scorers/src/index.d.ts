@@ -658,6 +658,20 @@ declare function gradeSideEffectCompliance(source: string, expectation?: {
 };
 
 /**
+ * True when an eval case's error text indicates the harness or environment
+ * failed before the workflow's own behavior could be observed. Callers use
+ * this to grade the case `inconclusive` instead of `failed` so eval-driven
+ * loops repair the harness (or stop) rather than iterate on the product.
+ *
+ * The pattern list is deliberately conservative: an unrecognized error stays
+ * a genuine failure. Fail-closed is correct here because an inconclusive
+ * verdict suppresses the strongest signal an eval suite produces.
+ * @param {string} errorText
+ * @returns {boolean}
+ */
+declare function isEvalInfraFailure(errorText: string): boolean;
+
+/**
  * Look up the per-million-token price for a model id. Matches the base id plus
  * any `-`/`_` date-stamp suffix or a bracketed context-window alias like
  * `claude-opus-4-8[1m]`, so a real model is never metered as free. Unknown ids
@@ -858,8 +872,15 @@ declare function parseEvalDataset(text: string): EvalDatasetParseResult$1;
  * Never throws: an unparsable assertion spec degrades to a single failed
  * assertion carrying the validation message, so a malformed dataset case
  * fails honestly instead of crashing the parent run.
+ *
+ * A failed case is additionally stamped `inconclusive: true` when the case
+ * expected to finish, did not, and its error matches a known harness/
+ * environment signature (`isEvalInfraFailure`): the workflow's behavior was
+ * never observed, so the red must not be read as a product defect.
+ * `passed` stays false either way — callers that ignore the stamp keep the
+ * fail-closed behavior.
  * @param {{ expected?: unknown; status?: string; output?: unknown; error?: unknown }} args
- * @returns {{ assertions: EvalAssertion[]; passed: boolean }}
+ * @returns {{ assertions: EvalAssertion[]; passed: boolean; inconclusive: boolean }}
  */
 declare function evaluateEvalCase({ expected, status, output, error }: {
     expected?: unknown;
@@ -869,6 +890,7 @@ declare function evaluateEvalCase({ expected, status, output, error }: {
 }): {
     assertions: EvalAssertion$1[];
     passed: boolean;
+    inconclusive: boolean;
 };
 /**
  * Compose deterministic case grading with an optional asynchronous LLM-judge
@@ -879,7 +901,7 @@ declare function evaluateEvalCase({ expected, status, output, error }: {
  * malformed response fails the affected case without aborting the suite.
  * @param {{ expected?: unknown; judge?: EvalJudge; input?: unknown; status?: string; output?: unknown; error?: unknown }} args
  * @param {EvalJudgeRunner} [runJudge]
- * @returns {Promise<{ assertions: EvalAssertion[]; passed: boolean }>}
+ * @returns {Promise<{ assertions: EvalAssertion[]; passed: boolean; inconclusive: boolean }>}
  */
 declare function evaluateEvalCaseAsync({ expected, judge, input, status, output, error }: {
     expected?: unknown;
@@ -891,6 +913,7 @@ declare function evaluateEvalCaseAsync({ expected, judge, input, status, output,
 }, runJudge?: EvalJudgeRunner$1): Promise<{
     assertions: EvalAssertion$1[];
     passed: boolean;
+    inconclusive: boolean;
 }>;
 /**
  * Readable, collision-free run id for ONE case's child workflow run.
@@ -1047,4 +1070,4 @@ type ScorerInput = ScorerInput$2;
 type ScoreRow = ScoreRow$1;
 type ScorersMap = ScorersMap$2;
 
-export { type AggregateOptions, type AggregateScore, type CreateScorerConfig, type DelegationEstimate, type DelegationEstimatePayload, type DelegationEvent, type DelegationEventsPayload, type DelegationExecRowLike, type DelegationPlanRowLike, type DelegationRunComponent, type DelegationRunResults, type DelegationRunScoreOptions, EVAL_CASE_STATUSES, EVAL_PASS_THRESHOLD, type EvalAssertion, type EvalCaseInput, type EvalDatasetParseResult, type EvalJudge, type EvalJudgeRunner, type LlmJudgeConfig, type ModelPrice, type PlanSolidityOptions, type PocJudgmentClassification, type PocJudgmentOptions, type SamplingConfig, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, type WorkflowUiComplianceOptions, type WorkflowUiComplianceReport, type WorkflowUiViolation, aggregateScores, createScorer, delegationRunScore, estimateAccuracyScorer, estimateCostUsd, evalAssertionScorer, evalCaseRunId, evaluateEvalCase, evaluateEvalCaseAsync, extractDelegationEvents, faithfulnessScorer, formatEvalError, gradeSideEffectCompliance, gradeWorkflowUiSource, humanPollScorer, isPlainObject, jsonContains, jsonEquals, latencyScorer, llmJudge, modelTokenPrices, normalizeEvalJudge, normalizeExpected, parseEvalDataset, planSolidityScorer, pocJudgmentScorer, relevancyScorer, resolvePlanningNodes, runScorersAsync, runScorersBatch, schemaAdherenceScorer, sideEffectAnalysis, slugifyEvalToken, tierFitScorer, toxicityScorer, weightedScore, workflowHasAgentTasks, workflowUiComplianceScorer };
+export { type AggregateOptions, type AggregateScore, type CreateScorerConfig, type DelegationEstimate, type DelegationEstimatePayload, type DelegationEvent, type DelegationEventsPayload, type DelegationExecRowLike, type DelegationPlanRowLike, type DelegationRunComponent, type DelegationRunResults, type DelegationRunScoreOptions, EVAL_CASE_STATUSES, EVAL_PASS_THRESHOLD, type EvalAssertion, type EvalCaseInput, type EvalDatasetParseResult, type EvalJudge, type EvalJudgeRunner, type LlmJudgeConfig, type ModelPrice, type PlanSolidityOptions, type PocJudgmentClassification, type PocJudgmentOptions, type SamplingConfig, type ScoreResult, type ScoreRow, type Scorer, type ScorerBinding, type ScorerContext, type ScorerFn, type ScorerInput, type ScorersMap, type WorkflowUiComplianceOptions, type WorkflowUiComplianceReport, type WorkflowUiViolation, aggregateScores, createScorer, delegationRunScore, estimateAccuracyScorer, estimateCostUsd, evalAssertionScorer, evalCaseRunId, evaluateEvalCase, evaluateEvalCaseAsync, extractDelegationEvents, faithfulnessScorer, formatEvalError, gradeSideEffectCompliance, gradeWorkflowUiSource, humanPollScorer, isEvalInfraFailure, isPlainObject, jsonContains, jsonEquals, latencyScorer, llmJudge, modelTokenPrices, normalizeEvalJudge, normalizeExpected, parseEvalDataset, planSolidityScorer, pocJudgmentScorer, relevancyScorer, resolvePlanningNodes, runScorersAsync, runScorersBatch, schemaAdherenceScorer, sideEffectAnalysis, slugifyEvalToken, tierFitScorer, toxicityScorer, weightedScore, workflowHasAgentTasks, workflowUiComplianceScorer };

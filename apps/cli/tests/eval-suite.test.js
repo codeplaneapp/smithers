@@ -2,12 +2,15 @@ import { describe, expect, test } from "bun:test";
 import {
   assertEvalRunIdsAvailable,
   buildEvalPlan,
+  buildEvalReport,
   createEvalJudgeRunner,
   evaluateEvalCaseResult,
   evaluateEvalCaseResultAsync,
   evalRunId,
   loadEvalCases,
   renderEvalPlan,
+  renderEvalReport,
+  summarizeEvalResults,
 } from "../src/eval-suite.js";
 import {
   createExecutableDir,
@@ -141,6 +144,60 @@ describe("eval suite helpers", () => {
 
     expect(result.passed).toBe(true);
     expect(result.assertions.map((assertion) => assertion.name)).toEqual(["status", "errorContains"]);
+  });
+
+  test("stamps infra-signature deaths inconclusive; genuine reds stay conclusive", () => {
+    const testCase = {
+      id: "infra",
+      name: "infra",
+      input: {},
+      annotations: {},
+      expected: { status: "finished" },
+      metadata: {},
+    };
+    const infra = evaluateEvalCaseResult(testCase, {
+      status: "error",
+      error: { message: "connect ECONNREFUSED 127.0.0.1:5432", code: "DB_QUERY_FAILED" },
+    });
+    expect(infra.passed).toBe(false);
+    expect(infra.inconclusive).toBe(true);
+
+    const genuine = evaluateEvalCaseResult(testCase, {
+      status: "failed",
+      error: { message: "assertion failed in workflow output" },
+    });
+    expect(genuine.passed).toBe(false);
+    expect(genuine.inconclusive).toBe(false);
+
+    const green = evaluateEvalCaseResult(testCase, { status: "finished", output: null });
+    expect(green.passed).toBe(true);
+    expect(green.inconclusive).toBe(false);
+  });
+
+  test("summarizes inconclusive separately and renders it in the report", () => {
+    const results = [
+      { caseId: "a", runId: "r-a", passed: true, status: "finished", durationMs: 5 },
+      { caseId: "b", runId: "r-b", passed: false, inconclusive: true, status: "error", durationMs: 5 },
+      { caseId: "c", runId: "r-c", passed: false, status: "failed", durationMs: 5 },
+    ];
+    const summary = summarizeEvalResults(results);
+    expect(summary).toMatchObject({ total: 3, passed: 1, failed: 2, inconclusive: 1 });
+
+    const report = buildEvalReport({
+      plan: {
+        suiteId: "s",
+        runLabel: undefined,
+        workflowPath: "wf.tsx",
+        casesPath: "cases.jsonl",
+      },
+      results,
+      startedAtMs: 0,
+      finishedAtMs: 15,
+    });
+    const rendered = renderEvalReport(report);
+    expect(rendered).toContain("1/3 passed, 1 inconclusive");
+    expect(rendered).toContain("INCONCLUSIVE b");
+    expect(rendered).toContain("FAIL c");
   });
 
   test("detects existing run IDs before execution", async () => {

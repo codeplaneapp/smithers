@@ -188,8 +188,13 @@ export function scoreOptimizationReport(report) {
 export function buildHeuristicGepaPatches(promptTasks, cases, baselineReport) {
   /** @type {Record<string, { prompt: string; rationale: string; source: string }>} */
   const patches = {};
+  // Inconclusive cases died on a harness/environment fault: their red says
+  // nothing about the prompt, so seeding GEPA from them would rewrite prompts
+  // to chase failures no prompt change can fix.
   const failedCaseIds = new Set(
-    (baselineReport.results ?? []).filter((result) => !result.passed).map((result) => result.caseId),
+    (baselineReport.results ?? [])
+      .filter((result) => !result.passed && result.inconclusive !== true)
+      .map((result) => result.caseId),
   );
   for (const task of promptTasks) {
     const explicitPatch = cases
