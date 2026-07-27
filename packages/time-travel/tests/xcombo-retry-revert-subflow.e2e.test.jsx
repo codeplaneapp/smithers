@@ -22,7 +22,7 @@ import { z } from "zod";
 import { Effect } from "effect";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
-import { Subflow } from "../../components/src/components/index.js";
+import { Sequence, Subflow } from "../../components/src/components/index.js";
 import { __setRuntimeModuleLoader, extractFromHost } from "../../graph/src/dom/extract.js";
 import { runWorkflow } from "../../engine/src/engine.js";
 import { retryTask } from "../src/retry-task.js";
@@ -35,6 +35,7 @@ const TIMEOUT_MS = 60_000;
 
 function buildSmithers() {
   return createTestSmithers({
+    expensiveOut: z.object({ value: z.number() }),
     childOut: z.object({ value: z.number() }),
     subflowOut: z.object({ value: z.number() }),
     afterOut: z.object({ value: z.number() }),
@@ -177,6 +178,127 @@ describe("xcombo retry-task on a FINISHED <Subflow> child run", () => {
         expect(resumed.status, diagnostics).toBe("finished");
         expect(childCalls, diagnostics).toBe(2);
         expect(afterSecond[0]?.value, diagnostics).toBe(20);
+      } finally {
+        cleanup();
+      }
+    },
+    TIMEOUT_MS,
+  );
+});
+
+describe("xcombo retry-task on a FAILED <Subflow> child run", () => {
+  test(
+    "preserves completed child work and its output while retrying only failed work",
+    async () => {
+      const { smithers, Workflow, Task, outputs, tables, db, cleanup } = buildSmithers();
+      const adapter = new SmithersDb(db);
+      try {
+        let expensiveCalls = 0;
+        let flakyCalls = 0;
+        const child = smithers(
+          () => (
+            <Workflow name="xcombo-surgical-child">
+              <Sequence>
+                <Task id="expensive" output={outputs.expensiveOut} retries={0}>
+                  {() => {
+                    expensiveCalls += 1;
+                    return { value: 40 };
+                  }}
+                </Task>
+                <Task id="flaky" output={outputs.childOut} retries={0}>
+                  {() => {
+                    flakyCalls += 1;
+                    if (flakyCalls === 1) throw new Error("retry me");
+                    return { value: 42 };
+                  }}
+                </Task>
+              </Sequence>
+            </Workflow>
+          ),
+          { output: outputs.childOut },
+        );
+        const parent = smithers(() => (
+          <Workflow name="xcombo-surgical-parent">
+            <Subflow id="review" mode="childRun" output={outputs.subflowOut} workflow={child} retries={0} />
+          </Workflow>
+        ));
+        const runId = "xcombo-surgical-child-reset";
+        expect((await Effect.runPromise(runWorkflow(parent, { input: {}, runId }))).status).toBe("failed");
+        const childRunId = `${runId}:child:review:0`;
+        const outputBefore = await db.select().from(tables.expensiveOut);
+
+        expect((await retryTask(adapter, { runId, nodeId: "review" })).success).toBe(true);
+        expect((await adapter.getNode(childRunId, "expensive", 0))?.state).toBe("finished");
+        expect(await db.select().from(tables.expensiveOut)).toEqual(outputBefore);
+
+        const resumed = await Effect.runPromise(runWorkflow(parent, { input: {}, runId, resume: true }));
+        expect({
+          status: resumed.status,
+          expensiveCalls,
+          flakyCalls,
+          expensiveOutput: await db.select().from(tables.expensiveOut),
+        }).toEqual({
+          status: "finished",
+          expensiveCalls: 1,
+          flakyCalls: 2,
+          expensiveOutput: outputBefore,
+        });
+      } finally {
+        cleanup();
+      }
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "cascades the surgical reset through nested child runs",
+    async () => {
+      const { smithers, Workflow, Task, outputs, db, cleanup } = buildSmithers();
+      const adapter = new SmithersDb(db);
+      try {
+        let grandchildCalls = 0;
+        const grandchild = smithers(
+          () => (
+            <Workflow name="xcombo-retry-grandchild">
+              <Task id="flaky" output={outputs.childOut} retries={0}>
+                {() => {
+                  grandchildCalls += 1;
+                  if (grandchildCalls === 1) throw new Error("nested retry me");
+                  return { value: 42 };
+                }}
+              </Task>
+            </Workflow>
+          ),
+          { output: outputs.childOut },
+        );
+        const child = smithers(
+          () => (
+            <Workflow name="xcombo-retry-middle-child">
+              <Subflow id="nested" mode="childRun" output={outputs.subflowOut} workflow={grandchild} retries={0} />
+            </Workflow>
+          ),
+          { output: outputs.subflowOut },
+        );
+        const parent = smithers(() => (
+          <Workflow name="xcombo-retry-nested-parent">
+            <Subflow id="review" mode="childRun" output={outputs.subflowOut} workflow={child} retries={0} />
+          </Workflow>
+        ));
+        const runId = "xcombo-recursive-child-reset";
+        expect((await Effect.runPromise(runWorkflow(parent, { input: {}, runId }))).status).toBe("failed");
+
+        expect((await retryTask(adapter, { runId, nodeId: "review" })).success).toBe(true);
+        const resumed = await Effect.runPromise(runWorkflow(parent, { input: {}, runId, resume: true }));
+        const grandchildRunId = `${runId}:child:review:0:child:nested:0`;
+        expect({
+          status: resumed.status,
+          grandchildCalls,
+          grandchildStatus: (await adapter.getRun(grandchildRunId))?.status,
+        }).toEqual({
+          status: "finished",
+          grandchildCalls: 2,
+          grandchildStatus: "finished",
+        });
       } finally {
         cleanup();
       }

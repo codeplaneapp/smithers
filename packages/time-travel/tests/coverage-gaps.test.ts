@@ -636,6 +636,59 @@ describe("retryTask branches", () => {
     }
   });
 
+  test("resetDependents:false is preserved when cascading into a failed child run", async () => {
+    const { adapter, sqlite } = createTestDb();
+    try {
+      const runId = "run-parent-solo";
+      const childRunId = `${runId}:child:review:0`;
+      await adapter.insertRun({ runId, workflowName: "parent", status: "failed", createdAtMs: 1 });
+      await adapter.insertNode({
+        runId,
+        nodeId: "review",
+        iteration: 0,
+        state: "failed",
+        lastAttempt: 1,
+        updatedAtMs: 100,
+        outputTable: "",
+        label: null,
+      });
+      await adapter.insertRun({
+        runId: childRunId,
+        parentRunId: runId,
+        workflowName: "child",
+        status: "failed",
+        createdAtMs: 2,
+      });
+      await adapter.insertNode({
+        runId: childRunId,
+        nodeId: "failed-child-task",
+        iteration: 0,
+        state: "failed",
+        lastAttempt: 1,
+        updatedAtMs: 100,
+        outputTable: "",
+        label: null,
+      });
+      await adapter.insertNode({
+        runId: childRunId,
+        nodeId: "later-finished-child-task",
+        iteration: 0,
+        state: "finished",
+        lastAttempt: 1,
+        updatedAtMs: 200,
+        outputTable: "",
+        label: null,
+      });
+
+      const result = await retryTask(adapter, { runId, nodeId: "review", resetDependents: false });
+      expect(result.success).toBe(true);
+      expect((await adapter.getNode(childRunId, "failed-child-task", 0))?.state).toBe("pending");
+      expect((await adapter.getNode(childRunId, "later-finished-child-task", 0))?.state).toBe("finished");
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("dependents are ordered by attempt sequence and higher iterations are always reset", async () => {
     const { adapter, sqlite } = createTestDb();
     try {

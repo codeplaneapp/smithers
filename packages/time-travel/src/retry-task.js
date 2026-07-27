@@ -35,6 +35,18 @@ function isActiveRunStatus(status) {
   );
 }
 const RESETTABLE_CHILD_RUN_STATUSES = new Set(["failed", "finished", "cancelled", "canceled"]);
+const CHILD_RESET_TARGET_STATES = new Set([
+  "pending",
+  "waiting-approval",
+  "waiting-event",
+  "waiting-timer",
+  "waiting-quota",
+  "waiting-bound",
+  "bound-stale",
+  "in-progress",
+  "failed",
+  "cancelled",
+]);
 /**
  * @param {SmithersDb} adapter
  * @param {Required<Pick<RetryTaskOptions, "runId" | "resetDependents">> & { targetNode: any; }} opts
@@ -74,22 +86,54 @@ async function resolveResetNodes(adapter, opts) {
  * @param {SmithersDb} adapter
  * @param {string} runId
  * @param {any[]} resetNodes
+ * @param {boolean} resetDependents
+ * @param {Set<string>} [seenRunIds]
  */
-async function resolveChildResetPlans(adapter, runId, resetNodes) {
+async function resolveChildResetPlans(adapter, runId, resetNodes, resetDependents, seenRunIds = new Set()) {
   const plans = [];
   for (const resetNode of resetNodes) {
     const iteration = resetNode.iteration ?? 0;
     const childRunId = `${runId}:child:${resetNode.nodeId}:${iteration}`;
+    if (seenRunIds.has(childRunId)) continue;
     const childRun = await adapter.getRun(childRunId);
-    if (
-      childRun?.parentRunId !== runId ||
-      !RESETTABLE_CHILD_RUN_STATUSES.has(childRun.status)
-    ) {
+    if (childRun?.parentRunId !== runId || !RESETTABLE_CHILD_RUN_STATUSES.has(childRun.status)) {
       continue;
     }
+    seenRunIds.add(childRunId);
     const childNodes = await adapter.listNodes(childRunId);
-    if (childNodes.length > 0) {
-      plans.push({ runId: childRunId, nodes: childNodes });
+    const childResetNodes = [];
+    const childResetKeys = new Set();
+    const addChildResetNodes = (nodes) => {
+      for (const node of nodes) {
+        const key = buildNodeKey(node.nodeId, node.iteration ?? 0);
+        if (childResetKeys.has(key)) continue;
+        childResetKeys.add(key);
+        childResetNodes.push(node);
+      }
+    };
+    if (childRun.status === "finished") {
+      // Explicitly retrying a successfully completed Subflow means re-running
+      // that work, so the whole finished child must be reset.
+      addChildResetNodes(childNodes);
+    } else {
+      // A failed child may contain expensive completed work before the failed
+      // task. Preserve those outputs and reset only failed/non-terminal work,
+      // plus later dependents when requested.
+      for (const targetNode of childNodes.filter((node) => CHILD_RESET_TARGET_STATES.has(node.state))) {
+        addChildResetNodes(
+          await resolveResetNodes(adapter, {
+            runId: childRunId,
+            targetNode,
+            resetDependents,
+          }),
+        );
+      }
+    }
+    if (childResetNodes.length > 0) {
+      plans.push(...(await resolveChildResetPlans(adapter, childRunId, childResetNodes, resetDependents, seenRunIds)), {
+        runId: childRunId,
+        nodes: childResetNodes,
+      });
     }
   }
   return plans;
@@ -166,7 +210,7 @@ export async function retryTask(adapter, opts) {
     })),
   );
   const resetPlans = [
-    ...(await resolveChildResetPlans(adapter, runId, resetNodes)),
+    ...(await resolveChildResetPlans(adapter, runId, resetNodes, resetDependents)),
     { runId, nodes: resetNodes },
   ];
   for (const plan of resetPlans) {
@@ -213,13 +257,7 @@ export async function retryTask(adapter, opts) {
             if (attempt.finishedAtMs == null) {
               patch.finishedAtMs = resetTimestampMs;
             }
-            yield* adapter.updateAttemptEffect(
-              plan.runId,
-              resetNode.nodeId,
-              resetIteration,
-              attempt.attempt,
-              patch,
-            );
+            yield* adapter.updateAttemptEffect(plan.runId, resetNode.nodeId, resetIteration, attempt.attempt, patch);
           }
           if (resetNode.outputTable) {
             yield* adapter.deleteOutputRowEffect(resetNode.outputTable, {
