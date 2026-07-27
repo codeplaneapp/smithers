@@ -644,12 +644,13 @@ commands[102]:
     purpose: Retry a specific task within a run, then resume the workflow
     args[1]{name,type,required,desc}:
       workflow,string,true,Workflow file path
-    flags[5]{name,short,type,default,desc}:
+    flags[6]{name,short,type,default,desc}:
       run-id,r,string,,Run ID
       node-id,n,string,,Task/node ID to retry
       iteration,,number,0,Loop iteration
       no-deps,,boolean,false,Only reset this node; skip dependents
       force,,boolean,false,Allow retry even if run is still running
+      accept-workflow-change,,boolean,false,Resume this run after its workflow source changed, re-blessing durability metadata in place; you own replay determinism
   - name: timetravel
     purpose: Time-travel to a task state; revert filesystem, reset DB, optionally resume
     args[1]{name,type,required,desc}:

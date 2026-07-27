@@ -9061,6 +9061,12 @@ const cli = Cli.create({
       iteration: z.number().int().default(0).describe("Loop iteration"),
       deps: z.boolean().default(true).describe("Also reset dependents. Use --no-deps to reset only this node."),
       force: z.boolean().default(false).describe("Allow retry even if run is still running"),
+      acceptWorkflowChange: z
+        .boolean()
+        .default(false)
+        .describe(
+          "Resume this run after its workflow source changed, re-blessing durability metadata in place; you own replay determinism",
+        ),
     }),
     alias: { runId: "r", nodeId: "n" },
     async run(c) {
@@ -9090,6 +9096,7 @@ const cli = Cli.create({
               workflowPath: c.args.workflow,
               resume: true,
               force: c.options.force,
+              acceptWorkflowChange: c.options.acceptWorkflowChange,
               onProgress,
               signal: abort.signal,
             }),
