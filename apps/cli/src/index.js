@@ -19,6 +19,7 @@ import { closeSync, readFileSync, existsSync, mkdirSync, openSync, statSync, wri
 import { Effect, Fiber } from "effect";
 import { Cli, SyncSkills, z } from "incur";
 import { isRunHeartbeatFresh, runWorkflow, renderFrame, resolveSchema } from "@smithers-orchestrator/engine";
+import { __engineInternals } from "@smithers-orchestrator/engine/engine";
 import { readWorkflowEntryHash, readWorkflowGraphHash } from "@smithers-orchestrator/engine/workflow-hash";
 import { mdxPlugin } from "./mdx-plugin.js";
 import { approveNode, denyNode } from "@smithers-orchestrator/engine/approvals";
@@ -292,13 +293,128 @@ async function loadWorkflow(path) {
 }
 /**
  * @param {string} workflowPath
- * @returns {Promise<{ adapter: SmithersDb; cleanup?: () => void }>}
+ * @returns {Promise<{ adapter: SmithersDb; workflow: SmithersWorkflow<any>; cleanup?: () => void }>}
  */
 async function loadWorkflowDb(workflowPath) {
   const workflow = await loadWorkflow(workflowPath);
   ensureSmithersTables(workflow.db);
   setupSqliteCleanup(workflow);
-  return { adapter: new SmithersDb(workflow.db) };
+  return { adapter: new SmithersDb(workflow.db), workflow };
+}
+
+/**
+ * Run the engine's resume metadata guard before retryTask mutates node state.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {string} workflowPath
+ */
+async function preflightRetryResume(adapter, runId, workflowPath) {
+  const run = await adapter.getRun(runId);
+  if (!run) return;
+  const resolvedWorkflowPath = resolve(cliWorkspace.cwd(), workflowPath);
+  const vcs = findVcsRoot(dirname(resolvedWorkflowPath));
+  __engineInternals.assertResumeDurabilityMetadata(
+    run,
+    __engineInternals.parseRunConfigJson(run.configJson),
+    {
+      workflowHash: await readWorkflowGraphHash(resolvedWorkflowPath),
+      entryWorkflowHash: await readWorkflowEntryHash(resolvedWorkflowPath),
+      vcsType: vcs?.type ?? null,
+      vcsRoot: vcs?.root ?? null,
+      vcsRevision: null,
+    },
+    resolvedWorkflowPath,
+  );
+}
+/**
+ * Capture the rows retry-task can mutate so a failed pre-ownership resume can
+ * restore them exactly.
+ *
+ * @param {SmithersDb} adapter
+ * @param {SmithersWorkflow<any>} workflow
+ * @param {string} runId
+ */
+async function captureRetryTaskState(adapter, workflow, runId) {
+  const schema = resolveSchema(workflow.db);
+  const outputSnapshot = await loadOutputs(workflow.db, schema, runId);
+  return {
+    run: await adapter.getRun(runId),
+    nodes: await adapter.listNodes(runId),
+    attempts: await adapter.listAttemptsForRun(runId),
+    outputs: Object.entries(schema)
+      .filter(([key]) => key !== "input")
+      .map(([key, table]) => ({
+        table,
+        rows: outputSnapshot[key] ?? [],
+      })),
+  };
+}
+/**
+ * @param {SmithersDb} adapter
+ * @param {Awaited<ReturnType<typeof captureRetryTaskState>>} snapshot
+ * @param {{ claimOwnerId: string; claimHeartbeatAtMs: number }} resumeClaim
+ * @returns {Promise<boolean>}
+ */
+async function restoreRetryTaskState(adapter, snapshot, resumeClaim) {
+  if (!snapshot.run) return false;
+  return await adapter.withTransaction(
+    "retry-task-rollback",
+    Effect.gen(function* () {
+      const claimHeld = yield* adapter.updateClaimedRun({
+        runId: snapshot.run.runId,
+        expectedRuntimeOwnerId: resumeClaim.claimOwnerId,
+        expectedHeartbeatAtMs: resumeClaim.claimHeartbeatAtMs,
+        patch: {
+          runtimeOwnerId: resumeClaim.claimOwnerId,
+          heartbeatAtMs: resumeClaim.claimHeartbeatAtMs,
+        },
+      });
+      if (!claimHeld) return false;
+      for (const node of snapshot.nodes) {
+        yield* adapter.insertNodeEffect(node);
+      }
+      for (const attempt of snapshot.attempts) {
+        yield* adapter.insertAttemptEffect(attempt);
+      }
+      for (const output of snapshot.outputs) {
+        for (const rawRow of output.rows) {
+          const row = /** @type {Record<string, unknown>} */ (rawRow);
+          const { runId, nodeId, iteration, __smithersProvenanceSeq: _provenanceSeq, ...payload } = row;
+          if (typeof runId !== "string" || typeof nodeId !== "string") continue;
+          yield* adapter.upsertOutputRowEffect(
+            /** @type {any} */ (output.table),
+            {
+              runId,
+              nodeId,
+              iteration: typeof iteration === "number" ? iteration : 0,
+            },
+            payload,
+          );
+        }
+      }
+      const { runId: _runId, ...runPatch } = snapshot.run;
+      yield* adapter.updateRunEffect(snapshot.run.runId, runPatch);
+      return true;
+    }),
+  );
+}
+/**
+ * @param {SmithersDb} adapter
+ * @param {Awaited<ReturnType<typeof captureRetryTaskState>>} snapshot
+ * @param {{ claimOwnerId: string; claimHeartbeatAtMs: number }} resumeClaim
+ * @param {unknown} resumeError
+ */
+async function rollbackFailedRetryResume(adapter, snapshot, resumeClaim, resumeError) {
+  try {
+    await restoreRetryTaskState(adapter, snapshot, resumeClaim);
+  } catch (rollbackError) {
+    throw new AggregateError(
+      [resumeError, rollbackError],
+      "Retry-task resume failed before engine ownership and its database rollback also failed.",
+    );
+  }
+  throw resumeError;
 }
 /**
  * @returns {string}
@@ -9147,9 +9263,24 @@ const cli = Cli.create({
     async run(c) {
       const fail = makeFail(c);
       try {
-        const { adapter, cleanup } = await loadWorkflowDb(c.args.workflow);
+        const { adapter, workflow, cleanup } = await loadWorkflowDb(c.args.workflow);
         try {
-          const onProgress = buildProgressReporter();
+          const reportProgress = buildProgressReporter();
+          let engineAttached = false;
+          let retryState;
+          const onProgress = (event) => {
+            if (event.type === "RunStarted") {
+              engineAttached = true;
+              retryState = undefined;
+            }
+            reportProgress(event);
+          };
+          await preflightRetryResume(adapter, c.options.runId, c.args.workflow);
+          retryState = await captureRetryTaskState(adapter, workflow, c.options.runId);
+          const retryResumeClaim = {
+            claimOwnerId: `supervisor:retry-task:${process.pid}:${crypto.randomUUID()}`,
+            claimHeartbeatAtMs: Math.max(1, Date.now()),
+          };
           const resetResult = await retryTask(adapter, {
             runId: c.options.runId,
             nodeId: c.options.nodeId,
@@ -9157,25 +9288,56 @@ const cli = Cli.create({
             resetDependents: c.options.deps,
             force: c.options.force,
             onProgress,
+            resumeClaim: retryResumeClaim,
           });
           if (!resetResult.success) {
             process.exitCode = 1;
             return c.ok(resetResult);
           }
-          const workflow = await loadWorkflow(c.args.workflow);
           const abort = setupAbortSignal();
-          const runResult = await Effect.runPromise(
-            runWorkflow(workflow, {
-              input: {},
-              runId: c.options.runId,
-              workflowPath: c.args.workflow,
-              resume: true,
-              force: c.options.force,
-              acceptWorkflowChange: c.options.acceptWorkflowChange,
-              onProgress,
-              signal: abort.signal,
-            }),
-          );
+          let runResult;
+          try {
+            runResult = await Effect.runPromise(
+              runWorkflow(workflow, {
+                input: {},
+                runId: c.options.runId,
+                workflowPath: c.args.workflow,
+                resume: true,
+                force: c.options.force,
+                acceptWorkflowChange: c.options.acceptWorkflowChange,
+                resumeClaim: retryResumeClaim,
+                onProgress,
+                signal: abort.signal,
+              }),
+            );
+          } catch (error) {
+            if (!engineAttached && retryState) {
+              await rollbackFailedRetryResume(adapter, retryState, retryResumeClaim, error);
+            }
+            throw error;
+          }
+          if (!engineAttached) {
+            if (!retryState) {
+              throw new SmithersError(
+                "RETRY_TASK_RESUME_FAILED",
+                `Retry-task engine ownership was not confirmed for run ${c.options.runId}.`,
+                { runId: c.options.runId },
+              );
+            }
+            await rollbackFailedRetryResume(
+              adapter,
+              retryState,
+              retryResumeClaim,
+              new SmithersError(
+                "RETRY_TASK_RESUME_FAILED",
+                `Retry-task engine failed before reporting ownership for run ${c.options.runId}.`,
+                {
+                  runId: c.options.runId,
+                  resumeError: runResult.error ?? null,
+                },
+              ),
+            );
+          }
           process.exitCode = formatStatusExitCode(runResult.status);
           return c.ok({
             ...resetResult,

@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { markResetCancelledMeta } from "./resetCancelMarker.js";
+import { validateWorkflowIdentity } from "./validateWorkflowIdentity.js";
 /** @typedef {import("./RetryTaskOptions.ts").RetryTaskOptions} RetryTaskOptions */
 /** @typedef {import("./RetryTaskResult.ts").RetryTaskResult} RetryTaskResult */
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
@@ -163,6 +164,9 @@ export async function retryTask(adapter, opts) {
   const iteration = opts.iteration ?? 0;
   const resetDependents = opts.resetDependents ?? true;
   const force = opts.force ?? false;
+  const resumeClaim = /** @type {{ claimOwnerId: string; claimHeartbeatAtMs: number } | undefined} */ (
+    /** @type {any} */ (opts).resumeClaim
+  );
   const node = await adapter.getNode(runId, nodeId, iteration);
   if (!node) {
     const error = `Node not found: ${runId}/${nodeId}/${iteration}`;
@@ -191,6 +195,18 @@ export async function retryTask(adapter, opts) {
   }
   if (!force && isActiveRunStatus(run.status)) {
     const error = `Run is still running: ${runId}`;
+    emitRetryFinished(opts, {
+      runId,
+      nodeId,
+      iteration,
+      resetNodes: [],
+      success: false,
+      error,
+    });
+    return { success: false, resetNodes: [], error };
+  }
+  if ((run.workflowPath || run.workflowHash) && !(await validateWorkflowIdentity(run))) {
+    const error = `Cannot retry run because its durable workflow metadata no longer matches: ${runId}`;
     emitRetryFinished(opts, {
       runId,
       nodeId,
@@ -236,9 +252,22 @@ export async function retryTask(adapter, opts) {
     timestampMs: nowMs(),
   });
   const resetTimestampMs = nowMs();
-  await adapter.withTransaction(
+  const resetCommitted = await adapter.withTransaction(
     "retry-task-reset",
     Effect.gen(function* () {
+      if (resumeClaim) {
+        const claimed = yield* adapter.claimRunForResume({
+          runId,
+          expectedStatus: run.status,
+          expectedRuntimeOwnerId: run.runtimeOwnerId ?? null,
+          expectedHeartbeatAtMs: run.heartbeatAtMs ?? null,
+          staleBeforeMs: resumeClaim.claimHeartbeatAtMs,
+          claimOwnerId: resumeClaim.claimOwnerId,
+          claimHeartbeatAtMs: resumeClaim.claimHeartbeatAtMs,
+          requireStale: false,
+        });
+        if (!claimed) return false;
+      }
       for (const plan of resetPlans) {
         for (const resetNode of plan.nodes) {
           const resetIteration = resetNode.iteration ?? 0;
@@ -280,19 +309,33 @@ export async function retryTask(adapter, opts) {
             label: resetNode.label ?? null,
           });
         }
+        const claimsPlanRun = plan.runId === runId ? resumeClaim : null;
         yield* adapter.updateRunEffect(plan.runId, {
           status: "running",
           finishedAtMs: null,
-          heartbeatAtMs: null,
-          runtimeOwnerId: null,
+          heartbeatAtMs: claimsPlanRun?.claimHeartbeatAtMs ?? null,
+          runtimeOwnerId: claimsPlanRun?.claimOwnerId ?? null,
           cancelRequestedAtMs: null,
           hijackRequestedAtMs: null,
           hijackTarget: null,
           errorJson: null,
         });
       }
+      return true;
     }),
   );
+  if (!resetCommitted) {
+    const error = `Run changed before retry-task could claim it: ${runId}`;
+    emitRetryFinished(opts, {
+      runId,
+      nodeId,
+      iteration,
+      resetNodes: [],
+      success: false,
+      error,
+    });
+    return { success: false, resetNodes: [], error };
+  }
   emitRetryFinished(opts, {
     runId,
     nodeId,
