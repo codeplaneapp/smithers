@@ -36,7 +36,6 @@ function isActiveRunStatus(status) {
 }
 const RESETTABLE_CHILD_RUN_STATUSES = new Set(["failed", "finished", "cancelled", "canceled"]);
 const CHILD_RESET_TARGET_STATES = new Set([
-  "pending",
   "waiting-approval",
   "waiting-event",
   "waiting-timer",

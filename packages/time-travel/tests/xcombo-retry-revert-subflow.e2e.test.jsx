@@ -36,6 +36,7 @@ const TIMEOUT_MS = 60_000;
 function buildSmithers() {
   return createTestSmithers({
     expensiveOut: z.object({ value: z.number() }),
+    flakyOut: z.object({ value: z.number() }),
     childOut: z.object({ value: z.number() }),
     subflowOut: z.object({ value: z.number() }),
     afterOut: z.object({ value: z.number() }),
@@ -195,6 +196,7 @@ describe("xcombo retry-task on a FAILED <Subflow> child run", () => {
       try {
         let expensiveCalls = 0;
         let flakyCalls = 0;
+        let tailCalls = 0;
         const child = smithers(
           () => (
             <Workflow name="xcombo-surgical-child">
@@ -205,11 +207,17 @@ describe("xcombo retry-task on a FAILED <Subflow> child run", () => {
                     return { value: 40 };
                   }}
                 </Task>
-                <Task id="flaky" output={outputs.childOut} retries={0}>
+                <Task id="flaky" output={outputs.flakyOut} retries={0}>
                   {() => {
                     flakyCalls += 1;
                     if (flakyCalls === 1) throw new Error("retry me");
                     return { value: 42 };
+                  }}
+                </Task>
+                <Task id="tail" output={outputs.childOut} retries={0}>
+                  {() => {
+                    tailCalls += 1;
+                    return { value: 43 };
                   }}
                 </Task>
               </Sequence>
@@ -226,6 +234,9 @@ describe("xcombo retry-task on a FAILED <Subflow> child run", () => {
         expect((await Effect.runPromise(runWorkflow(parent, { input: {}, runId }))).status).toBe("failed");
         const childRunId = `${runId}:child:review:0`;
         const outputBefore = await db.select().from(tables.expensiveOut);
+        expect((await adapter.listNodes(childRunId)).map(({ nodeId, state }) => `${nodeId}=${state}`).sort()).toEqual(
+          ["expensive=finished", "flaky=failed", "tail=pending"],
+        );
 
         expect((await retryTask(adapter, { runId, nodeId: "review" })).success).toBe(true);
         expect((await adapter.getNode(childRunId, "expensive", 0))?.state).toBe("finished");
@@ -236,11 +247,13 @@ describe("xcombo retry-task on a FAILED <Subflow> child run", () => {
           status: resumed.status,
           expensiveCalls,
           flakyCalls,
+          tailCalls,
           expensiveOutput: await db.select().from(tables.expensiveOut),
         }).toEqual({
           status: "finished",
           expensiveCalls: 1,
           flakyCalls: 2,
+          tailCalls: 1,
           expensiveOutput: outputBefore,
         });
       } finally {
