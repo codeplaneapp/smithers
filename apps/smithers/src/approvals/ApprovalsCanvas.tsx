@@ -294,8 +294,8 @@ export function ApprovalsCanvas() {
   const listEmpty = tab === "pending" ? pending.length === 0 : history.length === 0;
 
   return (
-    <section className="surface" data-testid="approvals-canvas">
-      <header className="surface-head">
+    <section className="surface appr-canvas" data-testid="approvals-canvas">
+      <header className="surface-head appr-head">
         <span className="surface-title">Approvals</span>
         <span className="surface-sub">
           {pending.length} pending · {decisions.length} decided

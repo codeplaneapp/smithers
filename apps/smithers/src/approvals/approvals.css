@@ -5,19 +5,30 @@
    so light and dark both resolve. */
 
 /* Two-pane body: pending/history list rail on the left, detail on the right. */
+.appr-canvas {
+  container: approvals / inline-size;
+  min-width: 0;
+}
+.appr-head {
+  flex-wrap: wrap;
+}
 .appr-body {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: 340px 1fr;
+  grid-template-columns: 340px minmax(0, 1fr);
 }
 .appr-list {
+  min-width: 0;
+  min-height: 0;
   border-right: 1px solid var(--border);
   overflow: auto;
   padding: 8px;
   background: var(--surface);
 }
 .appr-detail {
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -25,6 +36,7 @@
 }
 .appr-status {
   grid-column: 1 / -1;
+  min-width: 0;
   display: grid;
   place-items: center;
   align-content: center;
@@ -33,6 +45,7 @@
   color: var(--text-muted);
   text-align: center;
   font-size: 13px;
+  overflow-wrap: anywhere;
 }
 .appr-status strong {
   color: var(--text);
@@ -49,6 +62,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   width: 100%;
   padding: 10px 11px;
   border: 0;
@@ -142,6 +156,7 @@
 /* Detail pane. */
 .appr-detail-scroll {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   padding: 16px 20px;
   overflow: auto;
@@ -160,7 +175,7 @@
 /* Metadata block: label/value fact rows. */
 .appr-meta {
   display: grid;
-  grid-template-columns: 110px 1fr;
+  grid-template-columns: minmax(80px, 110px) minmax(0, 1fr);
   gap: 6px 14px;
   align-items: baseline;
 }
@@ -171,9 +186,10 @@
   color: var(--text-faint);
 }
 .appr-meta-value {
+  min-width: 0;
   font: 500 12.5px/1.5 ui-monospace, Menlo, monospace;
   color: var(--text);
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 /* Eyebrow label above the payload block. */
@@ -186,6 +202,8 @@
 
 /* Pretty-printed JSON payload block. */
 .appr-payload {
+  min-width: 0;
+  max-width: 100%;
   margin: 0;
   padding: 12px 14px;
   border: 1px solid var(--border);
@@ -194,6 +212,7 @@
   color: var(--code-text);
   font: 500 12px/1.6 ui-monospace, Menlo, monospace;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   overflow-x: auto;
   user-select: text;
 }
@@ -214,7 +233,7 @@
 
 /* Optional note input + decision actions. */
 .appr-note { width: 100%; }
-.appr-actions { display: flex; align-items: center; gap: 8px; }
+.appr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
 /* Two-step deny confirm strip. */
 .appr-confirm {
@@ -226,7 +245,7 @@
   border-radius: 10px;
   background: color-mix(in srgb, var(--st-failed) 7%, var(--surface));
 }
-.appr-confirm-msg { font-size: 13px; line-height: 1.5; color: var(--text); }
+.appr-confirm-msg { font-size: 13px; line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
 .appr-confirm-msg b { font-weight: 650; }
 
 .appr-empty {
@@ -253,3 +272,29 @@
 
 /* The in-flight badge dim on a row being resolved. */
 .appr-busy { opacity: 0.7; pointer-events: none; }
+
+/* Stack the queue above its detail whenever the approvals canvas itself is
+   narrow, including when the chat rail leaves little room at tablet widths. */
+@container approvals (max-width: 700px) {
+  .appr-head .seg {
+    margin-left: 0;
+  }
+  .appr-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(112px, 36%) minmax(0, 1fr);
+  }
+  .appr-list {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .appr-status {
+    grid-row: 1 / -1;
+  }
+  .appr-detail-scroll {
+    padding: 14px 12px;
+  }
+  .appr-detail-scroll .rev-detail-title {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
