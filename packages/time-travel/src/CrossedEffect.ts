@@ -1,4 +1,5 @@
 export type CrossedEffect = {
+  runId: string;
   kind: "tool" | "task";
   toolName: string;
   nodeId: string;

@@ -140,12 +140,13 @@ export async function executeEffectReverts(db, params) {
     (left, right) => right.startedAtMs - left.startedAtMs || right.attempt - left.attempt || right.seq - left.seq,
   );
   for (const effect of effects) {
+    const effectRunId = effect.runId || params.runId;
     if (params.checkStillHeld && !(await params.checkStillHeld())) {
       throw new Error(
         `Time-travel lease ownership was lost for ${params.runId} before compensating ${effect.kind} ${effect.kind === "tool" ? effect.toolName : effect.nodeId}.`,
       );
     }
-    const row = await loadLiveRow(db, params.runId, effect);
+    const row = await loadLiveRow(db, effectRunId, effect);
     if (!row || row.revertStatus === "reverted") continue;
     const toolHandler = effect.kind === "tool" ? params.registry.tools.get(effect.toolName) : undefined;
     const taskHandler = effect.kind === "task" ? params.registry.tasks.get(effect.nodeId) : undefined;
@@ -172,7 +173,7 @@ export async function executeEffectReverts(db, params) {
       );
     }
     const started = nowMs();
-    await updateRow(db, params.runId, effect, {
+    await updateRow(db, effectRunId, effect, {
       revertStatus: "reverting",
       revertedAtMs: null,
       revertErrorJson: null,
@@ -181,7 +182,7 @@ export async function executeEffectReverts(db, params) {
       db,
       {
         type: "EffectRevertStarted",
-        runId: params.runId,
+        runId: effectRunId,
         operation: params.operation,
         kind: effect.kind,
         toolName: effect.toolName,
@@ -199,7 +200,7 @@ export async function executeEffectReverts(db, params) {
         await handler({
           outputRow: parseJson(/** @type {string | null | undefined} */ (row.outputJson)),
           effectStatus: effect.effectStatus,
-          runId: params.runId,
+          runId: effectRunId,
           nodeId: effect.nodeId,
           iteration: effect.iteration,
           attempt: effect.attempt,
@@ -209,7 +210,7 @@ export async function executeEffectReverts(db, params) {
           output: parseJson(/** @type {string | null | undefined} */ (row.outputJson)),
           effectStatus: effect.effectStatus,
           idempotencyKey: row.idempotencyKey ?? null,
-          runId: params.runId,
+          runId: effectRunId,
           nodeId: effect.nodeId,
           iteration: effect.iteration,
           attempt: effect.attempt,
@@ -219,20 +220,20 @@ export async function executeEffectReverts(db, params) {
     } catch (error) {
       const failedAt = nowMs();
       const message = error instanceof Error ? error.message : String(error);
-      const updated = await finishRevertingRow(db, params.runId, effect, {
+      const updated = await finishRevertingRow(db, effectRunId, effect, {
         revertStatus: "revert-failed",
         revertedAtMs: null,
         revertErrorJson: JSON.stringify({ message }),
       });
       if (updated === 0) {
-        const current = await loadLiveRow(db, params.runId, effect);
+        const current = await loadLiveRow(db, effectRunId, effect);
         throw changedRevertStateError(params, effect, current, error);
       }
       await emitEvent(
         db,
         {
           type: "EffectRevertFailed",
-          runId: params.runId,
+          runId: effectRunId,
           operation: params.operation,
           kind: effect.kind,
           toolName: effect.toolName,
@@ -265,20 +266,20 @@ export async function executeEffectReverts(db, params) {
       );
     }
     const finished = nowMs();
-    const updated = await finishRevertingRow(db, params.runId, effect, {
+    const updated = await finishRevertingRow(db, effectRunId, effect, {
       revertStatus: "reverted",
       revertedAtMs: finished,
       revertErrorJson: null,
     });
     if (updated === 0) {
-      const current = await loadLiveRow(db, params.runId, effect);
+      const current = await loadLiveRow(db, effectRunId, effect);
       throw changedRevertStateError(params, effect, current);
     }
     await emitEvent(
       db,
       {
         type: "EffectRevertFinished",
-        runId: params.runId,
+        runId: effectRunId,
         operation: params.operation,
         kind: effect.kind,
         toolName: effect.toolName,

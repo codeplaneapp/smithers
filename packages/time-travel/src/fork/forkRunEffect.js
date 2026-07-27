@@ -26,7 +26,7 @@ const DURABILITY_METADATA_VERSION = 2;
  * @returns {string}
  */
 function effectKey(effect) {
-  return [effect.kind, effect.nodeId, effect.iteration, effect.attempt, effect.seq].join(":");
+  return [effect.runId, effect.kind, effect.nodeId, effect.iteration, effect.attempt, effect.seq].join(":");
 }
 
 /**

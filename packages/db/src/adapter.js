@@ -1455,8 +1455,12 @@ export class SmithersDb {
     return this.read(`get latest child run ${parentRunId}`, () =>
       this.internalStorage.queryOne(
         `SELECT *
-         FROM _smithers_runs
+         FROM _smithers_runs AS child
          WHERE parent_run_id = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM _smithers_branches AS branch
+             WHERE branch.run_id = child.run_id
+           )
          ORDER BY created_at_ms DESC
          LIMIT 1`,
         [parentRunId],
@@ -1491,6 +1495,10 @@ export class SmithersDb {
            JOIN descendants ON child.parent_run_id = descendants.run_id
            WHERE descendants.depth + 1 < ?
              AND ${visitedCheck}
+             AND NOT EXISTS (
+               SELECT 1 FROM _smithers_branches branch
+               WHERE branch.run_id = child.run_id
+             )
          )
          SELECT
            run_id,

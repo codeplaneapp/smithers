@@ -65,7 +65,7 @@ export async function recordForcedEffectBoundary(db, params) {
     await appendForcedPast(
       db,
       {
-        runId: params.runId,
+        runId: effect.runId || params.runId,
         nodeId: effect.nodeId,
         iteration: effect.iteration,
         attempt: effect.attempt,

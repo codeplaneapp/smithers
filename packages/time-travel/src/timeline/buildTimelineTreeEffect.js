@@ -42,11 +42,18 @@ function buildTimelineTreeInternal(adapter, runId, path) {
       );
     }
     const timeline = yield* buildTimeline(adapter, runId);
-    // Collect all child runs that branch from this run
-    const childRunIds = [];
+    // Include both branches and child workflows, while keeping those two
+    // relationships distinct in persistence.
+    const childRunIds = new Set();
     for (const frame of timeline.frames) {
       for (const fork of frame.forkPoints) {
-        childRunIds.push(fork.runId);
+        childRunIds.add(fork.runId);
+      }
+    }
+    if (typeof adapter.listRunDescendants === "function") {
+      const descendants = yield* adapter.listRunDescendants(runId);
+      for (const child of descendants) {
+        if (child.depth === 1) childRunIds.add(child.runId);
       }
     }
     // Recursively build subtrees

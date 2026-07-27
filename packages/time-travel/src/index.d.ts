@@ -6,6 +6,7 @@ export { replaysStarted, runForksCreated, snapshotDuration, snapshotsCaptured } 
 import * as drizzle_orm_sqlite_core from 'drizzle-orm/sqlite-core';
 
 type CrossedEffect$1 = {
+    runId: string;
     kind: "tool" | "task";
     toolName: string;
     nodeId: string;

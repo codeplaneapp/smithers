@@ -76,6 +76,7 @@ function classify(row, metadata) {
  */
 function crossedEffect(row, status, classification, reason) {
   return {
+    runId: String(row.runId ?? ""),
     kind: classification.kind,
     toolName: String(row.toolName ?? ""),
     nodeId: String(row.nodeId ?? ""),
@@ -93,10 +94,12 @@ function crossedEffect(row, status, classification, reason) {
 /**
  * @param {Record<string, unknown>} row
  * @param {EffectBoundaryParams} params
+ * @param {Set<string>} crossedChildRunIds
  * @returns {boolean}
  */
-function isCrossed(row, params) {
+function isCrossed(row, params, crossedChildRunIds) {
   if (params.attempts) {
+    if (row.runId !== params.runId) return crossedChildRunIds.has(String(row.runId));
     return params.attempts.some(
       (attempt) =>
         attempt.nodeId === row.nodeId &&
@@ -117,15 +120,38 @@ function isCrossed(row, params) {
  * @returns {Promise<EffectBoundaryReport>}
  */
 export async function assessEffectBoundary(db, params) {
+  const descendants =
+    typeof db.listRunDescendants === "function"
+      ? await db.listRunDescendants(params.runId)
+      : [{ runId: params.runId, parentRunId: null, depth: 0 }];
+  const runIds = descendants.length > 0 ? descendants.map((row) => String(row.runId)) : [params.runId];
+  const crossedChildRunIds = new Set();
+  if (params.attempts) {
+    const selected = new Set(
+      params.attempts.map((attempt) => `${params.runId}:child:${attempt.nodeId}:${Number(attempt.iteration ?? 0)}`),
+    );
+    for (const descendant of descendants) {
+      if (descendant.depth === 0) continue;
+      if (selected.has(String(descendant.runId)) || selected.has(String(descendant.parentRunId))) {
+        selected.add(String(descendant.runId));
+        crossedChildRunIds.add(String(descendant.runId));
+      }
+    }
+  } else {
+    for (const runId of runIds) {
+      if (runId !== params.runId) crossedChildRunIds.add(runId);
+    }
+  }
+  const placeholders = runIds.map(() => "?").join(", ");
   const [liveRows, archivedRows] = await Promise.all([
     db.internalStorage.queryAll(
-      `SELECT * FROM _smithers_tool_calls WHERE run_id = ? ORDER BY started_at_ms DESC, seq DESC`,
-      [params.runId],
+      `SELECT * FROM _smithers_tool_calls WHERE run_id IN (${placeholders}) ORDER BY started_at_ms DESC, seq DESC`,
+      runIds,
       { booleanColumns: ["sideEffect", "idempotent", "acceptsIdempotencyKey", "hasRevert"] },
     ),
     db.internalStorage.queryAll(
-      `SELECT * FROM _smithers_tool_call_archive WHERE run_id = ? ORDER BY started_at_ms DESC, seq DESC`,
-      [params.runId],
+      `SELECT * FROM _smithers_tool_call_archive WHERE run_id IN (${placeholders}) ORDER BY started_at_ms DESC, seq DESC`,
+      runIds,
       { booleanColumns: ["sideEffect", "idempotent", "acceptsIdempotencyKey", "hasRevert"] },
     ),
   ]);
@@ -133,7 +159,7 @@ export async function assessEffectBoundary(db, params) {
   const report = { blocking: [], revertible: [], warnings: [] };
 
   for (const row of [...liveRows, ...archivedRows]) {
-    if (!isCrossed(row, params)) continue;
+    if (!isCrossed(row, params, crossedChildRunIds)) continue;
     const status = effectStatus(row);
     if (!status) continue;
     const legacy = isLegacy(row);
