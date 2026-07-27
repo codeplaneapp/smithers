@@ -148,8 +148,11 @@ export const agents = {
     providers.claudeSonnet,
     // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
     providers.claude,
-    // providers.codexLuna,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.codex1Luna,  // codex weekly quota exhausted; restore after 2026-07-23
+    // 2026-07-27: codex restored as the fallback tail. The weekly window reset
+    // (codex-1 at 24% used, `smithers usage`), and a Claude-only pool parks the
+    // whole run for hours whenever the Claude session limit trips mid-phase.
+    providers.codex1Sol,
+    providers.codex1Luna,
     // providers.kimi,
     // providers.antigravity,
     // providers.openclaw,
@@ -210,8 +213,8 @@ export const agents = {
     providers.claudeOpus,
     providers.claudeSonnet,
     // providers.kimi1,  // kimi-cli 1.48.0 "LLM not set" breakage; restore when fixed (task: kimi LLM-not-set)
-    // providers.codexSol,  // codex weekly quota exhausted; restore after 2026-07-23
-    // providers.codex1Sol,  // codex weekly quota exhausted; restore after 2026-07-23
+    // 2026-07-27: codex restored as the fallback tail; see the note on implement.
+    providers.codex1Sol,
     // providers.kimi,
     // providers.openclaw,
     // providers.openrouter,
