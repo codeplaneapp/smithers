@@ -18,7 +18,7 @@ import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 /** @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow} SmithersWorkflow */
 /** @typedef {import("effect").Context.Context<WorkflowEngine.WorkflowEngine>} WorkflowEngineContext */
 /**
- * @typedef {{ readonly engineContext: WorkflowEngineContext; readonly scope: Scope.CloseableScope; readonly parentInstance: WorkflowEngine.WorkflowInstance["Type"]; readonly executeBody: RunBodyExecutor; executeChildWorkflow: <Schema>(workflow: SmithersWorkflow<Schema>, opts: RunOptions & { runId: string; }) => Promise<RunResult>; }} WorkflowMakeBridgeRuntime
+ * @typedef {{ readonly engineContext: WorkflowEngineContext; readonly scope: Scope.CloseableScope; readonly parentInstance: WorkflowEngine.WorkflowInstance["Type"]; readonly executeBody: RunBodyExecutor; executeChildWorkflow: <Schema>(workflow: SmithersWorkflow<Schema>, opts: RunOptions & { runId: string; bridgeExecutionId?: string; }) => Promise<RunResult>; }} WorkflowMakeBridgeRuntime
  */
 
 const runtimeStorage = new AsyncLocalStorage();
@@ -145,7 +145,7 @@ function createWorkflowMakeBridgeRuntime(services) {
   return {
     ...services,
     executeChildWorkflow: async (workflow, opts) => {
-      const bridgeExecutionId = /** @type {any} */ (opts).bridgeExecutionId ?? opts.runId;
+      const bridgeExecutionId = opts.bridgeExecutionId ?? opts.runId;
       const workflowBridge = makeBridgeWorkflow(workflow, opts.runId);
       const lastRunIdRef = { current: opts.runId };
       const execute = createWorkflowExecutionEffect(workflow, opts, services, lastRunIdRef);

@@ -106,27 +106,30 @@ function buildChildWorkflowRunId(parentRunId, stepId, iteration) {
  */
 async function resetFailedChildRun(adapter, childRunId) {
   const nodes = await adapter.listNodes(childRunId);
-  const failedNodes = new Map(
-    nodes.filter((node) => node.state === "failed").map((node) => [`${node.nodeId}::${node.iteration ?? 0}`, node]),
-  );
-  if (failedNodes.size === 0) return false;
-  const attempts = await adapter.listAttemptsForRun(childRunId);
-  const target =
-    attempts
-      .filter((attempt) => attempt.state === "failed")
-      .map((attempt) => failedNodes.get(`${attempt.nodeId}::${attempt.iteration ?? 0}`))
-      .find(Boolean) ?? failedNodes.values().next().value;
-  const reset = await retryTask(adapter, {
-    runId: childRunId,
-    nodeId: target.nodeId,
-    iteration: target.iteration ?? 0,
-    resetDependents: true,
-    force: true,
-  });
-  if (!reset.success) {
+  const failedNodes = nodes.filter((node) => node.state === "failed");
+  if (failedNodes.length === 0) return false;
+  for (const failedNode of failedNodes) {
+    const reset = await retryTask(adapter, {
+      runId: childRunId,
+      nodeId: failedNode.nodeId,
+      iteration: failedNode.iteration ?? 0,
+      resetDependents: false,
+      force: true,
+    });
+    if (!reset.success) {
+      throw new SmithersError(
+        "INTERNAL_ERROR",
+        `Failed to reset child run ${childRunId} for Subflow retry: ${reset.error ?? "unknown error"}`,
+      );
+    }
+  }
+  const remainingFailed = (await adapter.listNodes(childRunId)).filter((node) => node.state === "failed");
+  if (remainingFailed.length > 0) {
     throw new SmithersError(
       "INTERNAL_ERROR",
-      `Failed to reset child run ${childRunId} for Subflow retry: ${reset.error ?? "unknown error"}`,
+      `Failed to reset all failed nodes in child run ${childRunId}: ${remainingFailed
+        .map((node) => `${node.nodeId}/${node.iteration ?? 0}`)
+        .join(", ")}`,
     );
   }
   return true;
@@ -329,27 +332,24 @@ export async function executeChildWorkflow(parentWorkflow, options) {
   const resume = Boolean(existingChildRun);
   const bridgeRuntime = getWorkflowMakeBridgeRuntime();
   if (bridgeRuntime) {
-    const result = await bridgeRuntime.executeChildWorkflow(
-      childWorkflow,
-      /** @type {any} */ ({
-        input,
-        runId: childRunId,
-        // Effect Workflow memoizes completed executions process-locally by
-        // execution id. The durable run id remains stable; only the internal
-        // bridge execution gets a retry-specific key after an in-place reset.
-        ...(automaticFailedRetry ? { bridgeExecutionId: `${childRunId}:retry:${runtime.attempt}` } : {}),
-        resume,
-        parentRunId,
-        ...(startedBy ? { startedBy } : {}),
-        rootDir: options.rootDir,
-        workflowPath,
-        allowNetwork: options.allowNetwork,
-        maxOutputBytes: options.maxOutputBytes,
-        toolTimeoutMs: options.toolTimeoutMs,
-        signal,
-        pauseSignal,
-      }),
-    );
+    const result = await bridgeRuntime.executeChildWorkflow(childWorkflow, {
+      input,
+      runId: childRunId,
+      // Effect Workflow memoizes completed executions process-locally by
+      // execution id. The durable run id remains stable; only the internal
+      // bridge execution gets a retry-specific key after an in-place reset.
+      ...(automaticFailedRetry ? { bridgeExecutionId: `${childRunId}:retry:${runtime.attempt}` } : {}),
+      resume,
+      parentRunId,
+      ...(startedBy ? { startedBy } : {}),
+      rootDir: options.rootDir,
+      workflowPath,
+      allowNetwork: options.allowNetwork,
+      maxOutputBytes: options.maxOutputBytes,
+      toolTimeoutMs: options.toolTimeoutMs,
+      signal,
+      pauseSignal,
+    });
     return {
       ...result,
       output: normalizeChildOutput(result),
