@@ -5,7 +5,7 @@ icon: "clock-rotate-left"
 ---
 
 Every successful task attempt records the workspace's [JJ](https://jj-vcs.github.io/jj/)
-change ID into `_smithers_attempts.jj_pointer`. The time-travel API replays a run
+commit ID into `_smithers_attempts.jj_pointer`. The time-travel API replays a run
 to one of those points, restoring the filesystem from the captured pointer and
 discarding graph snapshots recorded after the attempt began, rolling the run's
 timeline back to it.
@@ -89,7 +89,7 @@ function timeTravel(adapter: SmithersDb, opts: TimeTravelOptions): Promise<TimeT
       found, or the VCS restore failed.
     </ResponseField>
     <ResponseField name="jjPointer" type="string">
-      The JJ change ID restored from, when one was recorded for the attempt.
+      The JJ commit ID restored from, when one was recorded for the attempt.
     </ResponseField>
     <ResponseField name="vcsRestored" type="boolean">
       Whether the working copy was restored. `false` when `restoreVcs` was off
@@ -174,7 +174,7 @@ function revertToAttempt(adapter: SmithersDb, opts: RevertOptions): Promise<Reve
       found, had no recorded pointer, or the JJ restore failed.
     </ResponseField>
     <ResponseField name="jjPointer" type="string">
-      The JJ change ID restored from. Present on success and on a failed restore
+      The JJ commit ID restored from. Present on success and on a failed restore
       where a pointer existed.
     </ResponseField>
     <ResponseField name="error" type="string">

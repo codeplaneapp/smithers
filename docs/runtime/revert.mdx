@@ -3,7 +3,7 @@ title: Revert to Attempt
 description: Restore the workspace to a previous task attempt's filesystem state via JJ.
 ---
 
-Each successful task attempt captures the current [JJ](https://jj-vcs.github.io/jj/) change ID into `_smithers_attempts.jj_pointer`. `revert` restores the workspace to that state and discards any graph snapshots recorded after the attempt began, rolling the run's timeline back to that point in time.
+Each successful task attempt captures the current [JJ](https://jj-vcs.github.io/jj/) commit ID into `_smithers_attempts.jj_pointer`. The commit ID pins the exact workspace state even when later attempts amend the same JJ change. `revert` restores the workspace to that state and discards any graph snapshots recorded after the attempt began, rolling the run's timeline back to that point in time.
 
 <Note>API reference: [Time Travel](/reference/time-travel) lists every revert and time-travel export, its options, and links to source and tests.</Note>
 

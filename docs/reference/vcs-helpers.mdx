@@ -82,7 +82,7 @@ Notes:
 
 ## `getJjPointer(cwd?)`
 
-Returns the current workspace `change_id` for `@` (`null` if JJ is unavailable or the directory isn't a JJ repo).
+Returns the current workspace `commit_id` for `@` (`null` if JJ is unavailable or the directory isn't a JJ repo). The immutable commit ID pins the exact working-copy snapshot even as later writes amend the same JJ change.
 
 ```ts
 const pointer = await runVcs(getJjPointer("/path/to/repo"));
@@ -96,10 +96,12 @@ Smithers uses the same pointer model for revert support and cache invalidation.
 
 ## `revertToJjPointer(pointer, cwd?)`
 
-Restore the working copy from a recorded JJ pointer (a `change_id` string, as returned by `getJjPointer`).
+Restore the working copy from a recorded JJ pointer (a `commit_id` string, as returned by `getJjPointer`).
 
 ```ts
-const result = await runVcs(revertToJjPointer("zqkopwvn", "/path/to/repo"));
+const result = await runVcs(
+  revertToJjPointer("0123456789abcdef0123456789abcdef01234567", "/path/to/repo"),
+);
 ```
 
 ```ts

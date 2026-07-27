@@ -2794,7 +2794,7 @@ function checkTimeTravelDocsMatchCurrentExports() {
       RUNTIME_REVERT_REFERENCE,
       "function timeTravel(adapter: SmithersDb, opts: TimeTravelOptions): Promise<TimeTravelResult>;",
     ],
-    [RECIPES_DOC, "Smithers records the current JJ change ID in `_smithers_attempts.jj_pointer` per attempt."],
+    [RECIPES_DOC, "Smithers records the current JJ commit ID in `_smithers_attempts.jj_pointer` per attempt."],
     [SMITHERS_FACADE_SOURCE, 'export { revertToAttempt } from "@smithers-orchestrator/time-travel/revert";'],
     [SMITHERS_FACADE_SOURCE, 'export { timeTravel } from "@smithers-orchestrator/time-travel/timetravel";'],
     [SMITHERS_FACADE_DECLARATIONS, "export { revertToAttempt } from '@smithers-orchestrator/time-travel/revert';"],
@@ -2814,7 +2814,10 @@ function checkTimeTravelDocsMatchCurrentExports() {
     [OBSERVABILITY_DECLARATIONS, "replaysStarted"],
     [OBSERVABILITY_DECLARATIONS, "snapshotDuration"],
   ];
-  const forbidden = [[RECIPES_DOC, "jj change ID (or git SHA)"]];
+  const forbidden = [
+    [RECIPES_DOC, "jj change ID (or git SHA)"],
+    [RECIPES_DOC, "Smithers records the current JJ change ID in `_smithers_attempts.jj_pointer` per attempt."],
+  ];
   const missing = required.filter(([file, needle]) => !contains(files.get(file), needle));
   const stale = forbidden.filter(([file, needle]) => contains(files.get(file), needle));
   if (runtimeImport.status !== 0 || missingRuntimeExports.length || missing.length || stale.length) {

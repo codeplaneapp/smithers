@@ -7748,7 +7748,7 @@ Workflow logic factors out into hooks the same way React UI logic does.
 
 ## VCS revert & per-attempt snapshots
 
-Smithers records the current JJ change ID in `_smithers_attempts.jj_pointer` per attempt. Revert any attempt with a recorded JJ pointer to its exact workspace state:
+Smithers records the current JJ commit ID in `_smithers_attempts.jj_pointer` per attempt. Revert any attempt with a recorded JJ pointer to its exact workspace state:
 
 ```bash
 bunx smithers-orchestrator revert workflow.tsx --run-id RUN_ID --node-id implement --attempt 1
@@ -11013,7 +11013,7 @@ Notes:
 
 ## `getJjPointer(cwd?)`
 
-Returns the current workspace `change_id` for `@` (`null` if JJ is unavailable or the directory isn't a JJ repo).
+Returns the current workspace `commit_id` for `@` (`null` if JJ is unavailable or the directory isn't a JJ repo). The immutable commit ID pins the exact working-copy snapshot even as later writes amend the same JJ change.
 
 ```ts
 const pointer = await runVcs(getJjPointer("/path/to/repo"));
@@ -11027,10 +11027,12 @@ Smithers uses the same pointer model for revert support and cache invalidation.
 
 ## `revertToJjPointer(pointer, cwd?)`
 
-Restore the working copy from a recorded JJ pointer (a `change_id` string, as returned by `getJjPointer`).
+Restore the working copy from a recorded JJ pointer (a `commit_id` string, as returned by `getJjPointer`).
 
 ```ts
-const result = await runVcs(revertToJjPointer("zqkopwvn", "/path/to/repo"));
+const result = await runVcs(
+  revertToJjPointer("0123456789abcdef0123456789abcdef01234567", "/path/to/repo"),
+);
 ```
 
 ```ts
@@ -13123,7 +13125,7 @@ bunx smithers-orchestrator graph workflow.tsx --input '{"task":"preview"}'
 
 > Restore the workspace to a previous task attempt's filesystem state via JJ.
 
-Each successful task attempt captures the current [JJ](https://jj-vcs.github.io/jj/) change ID into `_smithers_attempts.jj_pointer`. `revert` restores the workspace to that state and discards any graph snapshots recorded after the attempt began, rolling the run's timeline back to that point in time.
+Each successful task attempt captures the current [JJ](https://jj-vcs.github.io/jj/) commit ID into `_smithers_attempts.jj_pointer`. The commit ID pins the exact workspace state even when later attempts amend the same JJ change. `revert` restores the workspace to that state and discards any graph snapshots recorded after the attempt began, rolling the run's timeline back to that point in time.
 
 <Note>API reference: [Time Travel](/reference/time-travel) lists every revert and time-travel export, its options, and links to source and tests.</Note>
 
