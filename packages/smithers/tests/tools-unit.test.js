@@ -501,6 +501,57 @@ describe("process helpers and bash tool", () => {
     });
   });
 
+  test("network guard exempts loopback: local compositions run under allowNetwork:false", async () => {
+    const root = await makeRoot();
+    await withToolCtx(root, { allowNetwork: false }, async () => {
+      // Loopback URL arguments are not egress; only remote URLs are rejected.
+      expect((await bashTool("/bin/echo", ["--url=http://localhost:3000"])).trim()).toBe("--url=http://localhost:3000");
+      expect((await bashTool("/bin/echo", ["http://127.0.0.1:8787/health"])).trim()).toBe(
+        "http://127.0.0.1:8787/health",
+      );
+      expect((await bashTool("/bin/echo", ["https://db.localhost:5432/app"])).trim()).toBe(
+        "https://db.localhost:5432/app",
+      );
+      await expectSmithersCode(bashTool("/bin/echo", ["--url=https://example.com"]), "TOOL_NETWORK_DISABLED");
+      // A loopback-looking hostname on a remote URL is still remote.
+      await expectSmithersCode(bashTool("/bin/echo", ["http://localhost.evil.com/x"]), "TOOL_NETWORK_DISABLED");
+    });
+  });
+
+  test("network guard allows curl/wget against loopback only", async () => {
+    const root = await makeRoot();
+    const curl = globalThis.Bun?.which?.("curl") ?? null;
+    await withToolCtx(root, { allowNetwork: false, timeoutMs: 10_000, maxOutputBytes: 65_536 }, async () => {
+      // Remote or target-less fetches stay blocked, and the error says how to
+      // lift the restriction instead of dead-ending the caller.
+      const error = await expectSmithersCode(bashTool("curl", ["https://example.com"]), "TOOL_NETWORK_DISABLED");
+      expect(error.message).toContain("allowNetwork");
+      await expectSmithersCode(bashTool("curl", ["example.com"]), "TOOL_NETWORK_DISABLED");
+      await expectSmithersCode(bashTool("wget", ["-qO-", "https://example.com"]), "TOOL_NETWORK_DISABLED");
+      await expectSmithersCode(
+        bashTool("/bin/sh", ["-c", "curl http://localhost:1 && curl https://example.com"]),
+        "TOOL_NETWORK_DISABLED",
+      );
+      if (curl) {
+        // A loopback fetch passes the guard and actually executes: a live
+        // local server answers through the enforced darwin sandbox too.
+        const server = Bun.serve({
+          hostname: "127.0.0.1",
+          port: 0,
+          fetch: () => new Response("loopback-ok"),
+        });
+        try {
+          const viaArgs = await bashTool(curl, ["-s", `http://127.0.0.1:${server.port}/`]);
+          expect(viaArgs).toContain("loopback-ok");
+          const viaShell = await bashTool("/bin/sh", ["-c", `curl -s http://127.0.0.1:${server.port}/`]);
+          expect(viaShell).toContain("loopback-ok");
+        } finally {
+          server.stop(true);
+        }
+      }
+    });
+  });
+
   test("reports whether OS-level network isolation is actually enforced", async () => {
     // macOS with sandbox-exec is the only real kernel sandbox: enforced.
     await withPlatform("darwin", () =>

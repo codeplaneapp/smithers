@@ -156,8 +156,8 @@ try {
 | `TOOL_CONTENT_TOO_LARGE` | A write operation exceeds the configured content size limit. | -- |
 | `TOOL_PATCH_TOO_LARGE` | An edit patch exceeds the configured patch size limit. | -- |
 | `TOOL_PATCH_FAILED` | A unified diff patch cannot be applied to the target file. | -- |
-| `TOOL_NETWORK_DISABLED` | The bash tool tries to access the network while network access is disabled. | -- |
-| `TOOL_GIT_REMOTE_DISABLED` | The bash tool attempts a remote git operation while network access is disabled. | -- |
+| `TOOL_NETWORK_DISABLED` | The bash tool tries to reach a non-loopback endpoint while network access is disabled. Loopback (localhost, `127.0.0.1`, `*.localhost`, unix sockets) is always allowed. | Pass `--allow-network` (CLI) or `allowNetwork: true` (run options) when the command genuinely needs egress. |
+| `TOOL_GIT_REMOTE_DISABLED` | The bash tool attempts a remote git operation while network access is disabled. | Pass `--allow-network` (CLI) or `allowNetwork: true` (run options), or perform the remote operation outside the sandboxed tool. |
 | `TOOL_COMMAND_FAILED` | A bash tool command exits with a non-zero status. | -- |
 | `TOOL_GREP_FAILED` | The grep tool fails with an rg execution error. | -- |
 

@@ -234,7 +234,7 @@ type RunOptions = {
   rootDir?: string;
   keepWorktrees?: boolean;          // default false; keep this run's <Worktree> dirs instead of reaping on success (SMITHERS_KEEP_WORKTREES=1 process-wide)
   logDir?: string | null;
-  allowNetwork?: boolean;           // default false; bash tool network access
+  allowNetwork?: boolean;           // default false; bash tool egress (loopback always allowed)
   maxOutputBytes?: number;          // default 200000
   toolTimeoutMs?: number;           // default 60000
   hot?: boolean | HotReloadOptions;

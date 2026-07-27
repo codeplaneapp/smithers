@@ -4,7 +4,21 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { defineTool } from "./defineTool.js";
 import { captureProcess, getToolRuntimeOptions, resolveToolPath, truncateToBytes } from "./utils.js";
 
-const DARWIN_NETWORK_DENY_PROFILE = "(version 1) (allow default) (deny network*)";
+// Deny egress, keep the machine: loopback TCP and unix-domain sockets are the
+// substrate of local test compositions (dev servers, local postgres, socket
+// simulators) and move no bytes off the host, so `allowNetwork: false` leaves
+// them reachable. Only remote endpoints are denied. Rules are direction-scoped
+// because a broad `(allow network* (local ip "localhost:*"))` also matches the
+// local endpoint of an OUTBOUND socket and silently re-opens egress (verified
+// empirically with sandbox-exec + curl).
+const DARWIN_NETWORK_DENY_PROFILE = [
+  "(version 1) (allow default) (deny network*)",
+  '(allow network-outbound (remote ip "localhost:*"))',
+  "(allow network-outbound (remote unix-socket))",
+  '(allow network-inbound (local ip "localhost:*"))',
+  '(allow network-bind (local ip "localhost:*"))',
+  "(allow network-bind (local unix-socket))",
+].join(" ");
 export const BASH_TOOL_MAX_COMMAND_LENGTH = 8_192;
 export const BASH_TOOL_MAX_ARGS = 128;
 export const BASH_TOOL_MAX_ARG_LENGTH = 8_192;
@@ -116,9 +130,15 @@ function validateBashInvocation(cmd, args, opts, ctx) {
   }
 }
 
-const NETWORK_EXECUTABLES = new Set(["curl", "wget", "npm", "bun", "pip"]);
+// curl/wget are allowed when every URL they carry is loopback: fetching a
+// local dev server is exactly what a local test harness does. Package managers
+// stay blocked outright because they reach registries regardless of argv.
+const FETCH_EXECUTABLES = new Set(["curl", "wget"]);
+const PACKAGE_EXECUTABLES = new Set(["npm", "bun", "pip"]);
 const GIT_REMOTE_OPS = new Set(["push", "pull", "fetch", "clone", "remote"]);
 const URL_SCHEMES = ["http://", "https://"];
+const NETWORK_DISABLED_HINT =
+  "Loopback stays reachable (localhost, 127.0.0.1, *.localhost, unix sockets); for real egress set allowNetwork: true (--allow-network on up/eval/oneshot).";
 // git's global options come before the subcommand, and these consume the next
 // argument, so `git -C /repo fetch` still resolves to the `fetch` subcommand.
 const GIT_VALUE_FLAGS = new Set(["-C", "-c", "--exec-path", "--git-dir", "--namespace", "--work-tree"]);
@@ -145,10 +165,35 @@ function commandExecutables(cmd) {
 // A genuine URL argument is one whose value *is* a URL: the whole argument, or
 // the value half of `--flag=<url>`. Prose that merely mentions a URL (a commit
 // message, an echoed doc line) performs no network I/O.
-function isUrlArgument(arg) {
+function urlValues(arg) {
   const equals = arg.indexOf("=");
   const values = arg.startsWith("-") && equals > 0 ? [arg, arg.slice(equals + 1)] : [arg];
-  return values.some((value) => URL_SCHEMES.some((scheme) => value.startsWith(scheme)));
+  return values.filter((value) => URL_SCHEMES.some((scheme) => value.startsWith(scheme)));
+}
+
+function isLoopbackHost(hostname) {
+  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  return (
+    host === "localhost" ||
+    host === "::1" ||
+    host === "0.0.0.0" ||
+    host.endsWith(".localhost") ||
+    /^127(\.\d{1,3}){3}$/.test(host)
+  );
+}
+
+function isLoopbackUrl(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return isLoopbackHost(url.hostname);
+}
+
+function isRemoteUrlArgument(arg) {
+  return urlValues(arg).some((value) => !isLoopbackUrl(value));
 }
 
 function gitSubcommand(args) {
@@ -191,12 +236,32 @@ function interpreterCommands(executables, argv) {
   return commands;
 }
 
+function throwNetworkDisabled(executable) {
+  throw new SmithersError(
+    "TOOL_NETWORK_DISABLED",
+    `Network access is disabled for the bash tool. ${NETWORK_DISABLED_HINT}`,
+    executable ? { executable } : undefined,
+  );
+}
+
 function assertLocalExecutable(executable, argv) {
-  if (NETWORK_EXECUTABLES.has(executable)) {
-    throw new SmithersError("TOOL_NETWORK_DISABLED", "Network access is disabled for bash tool");
+  if (FETCH_EXECUTABLES.has(executable)) {
+    // curl/wget must name a loopback URL to run; a bare hostname or a remote
+    // URL is (potential) egress. Every URL argument has to be loopback.
+    const urls = argv.flatMap(urlValues);
+    if (urls.length === 0 || !urls.every(isLoopbackUrl)) {
+      throwNetworkDisabled(executable);
+    }
+    return;
+  }
+  if (PACKAGE_EXECUTABLES.has(executable)) {
+    throwNetworkDisabled(executable);
   }
   if (executable === "git" && GIT_REMOTE_OPS.has(gitSubcommand(argv))) {
-    throw new SmithersError("TOOL_GIT_REMOTE_DISABLED", "Git remote operations are disabled for bash tool");
+    throw new SmithersError(
+      "TOOL_GIT_REMOTE_DISABLED",
+      `Git remote operations are disabled for the bash tool. ${NETWORK_DISABLED_HINT}`,
+    );
   }
 }
 
@@ -209,10 +274,12 @@ function assertNetworkAllowed(cmd, args, allowNetwork) {
   // or a URL opens no socket. This denylist is bypassable defense-in-depth
   // (see resolveNetworkIsolatedCommand), so scanning every whitespace-delimited
   // token bought no isolation and only rejected benign local commands.
+  // Loopback URLs are exempt everywhere: they are what a local test harness is
+  // made of, and the darwin kernel profile permits them too.
   const executables = commandExecutables(cmd);
   const argv = (args ?? []).map((arg) => String(arg));
-  if (argv.some(isUrlArgument)) {
-    throw new SmithersError("TOOL_NETWORK_DISABLED", "Network access is disabled for bash tool");
+  if (argv.some(isRemoteUrlArgument)) {
+    throwNetworkDisabled();
   }
   for (const executable of executables) {
     assertLocalExecutable(executable, argv);
