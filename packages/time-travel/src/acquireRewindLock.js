@@ -31,9 +31,30 @@ async function runWrite(adapter, label, operation) {
 }
 
 /**
- * Acquire a durable single-flight lease for one run. The database compare-and-set
- * makes the exclusion visible to CLI, MCP, and server processes that share the
- * Smithers store. An expired lease can be replaced atomically.
+ * Parent and child runs may mutate the same checkout, so their destructive
+ * time-travel operations share the top-level run's lease.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @returns {Promise<string>}
+ */
+async function resolveLeaseRunId(adapter, runId) {
+  let leaseRunId = runId;
+  const seen = new Set();
+  while (!seen.has(leaseRunId)) {
+    seen.add(leaseRunId);
+    const run = await adapter.getRun(leaseRunId);
+    if (!run?.parentRunId) break;
+    leaseRunId = run.parentRunId;
+  }
+  return leaseRunId;
+}
+
+/**
+ * Acquire a durable single-flight lease for one run lineage. The database
+ * compare-and-set makes the exclusion visible to CLI, MCP, and server
+ * processes that share the Smithers store. An expired lease can be replaced
+ * atomically.
  *
  * @param {SmithersDb} adapter
  * @param {string} runId
@@ -45,6 +66,7 @@ async function runWrite(adapter, label, operation) {
  * @returns {Promise<RewindLockHandle | null>}
  */
 export async function acquireRewindLock(adapter, runId, options = {}) {
+  runId = await resolveLeaseRunId(adapter, runId);
   const nowMs = options.nowMs ?? (() => Date.now());
   const leaseTtlMs = options.leaseTtlMs ?? REWIND_LEASE_TTL_MS;
   if (!Number.isFinite(leaseTtlMs) || leaseTtlMs <= 0) {
