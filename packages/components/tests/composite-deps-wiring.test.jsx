@@ -5,7 +5,10 @@ import {
   ContentPipeline,
   Debate,
   GatherAndSynthesize,
+  Loop,
   Optimizer,
+  Panel,
+  Parallel,
   ReviewLoop,
   ScanFixVerify,
   Supervisor,
@@ -59,6 +62,57 @@ function outputRow(nodeId, payload, iteration = 0) {
 }
 
 describe("composite component deps wiring", () => {
+  test("Panel moderators use current panelist outputs when concurrent loops advance", async () => {
+    const { graph } = await render(
+      <Parallel>
+        <Loop id="review-a" until={false} maxIterations={4}>
+          <Panel
+            id="panel-a"
+            panelists={[{ agent, role: "security" }]}
+            moderator={judgeAgent}
+            panelistOutput="panel_out"
+            moderatorOutput="moderator_out"
+          >
+            Review A.
+          </Panel>
+        </Loop>
+        <Loop id="review-b" until={false} maxIterations={4}>
+          <Panel
+            id="panel-b"
+            panelists={[{ agent: otherAgent, role: "security" }]}
+            moderator={judgeAgent}
+            panelistOutput="panel_out"
+            moderatorOutput="moderator_out"
+          >
+            Review B.
+          </Panel>
+        </Loop>
+      </Parallel>,
+      {
+        panel_out: [
+          outputRow("panel-a-security", { verdict: "STALE_A" }, 0),
+          outputRow("panel-a-security", { verdict: "CURRENT_A" }, 2),
+          outputRow("panel-b-security", { verdict: "STALE_B" }, 0),
+          outputRow("panel-b-security", { verdict: "CURRENT_B" }, 1),
+        ],
+      },
+      {
+        // Multiple live loops leave the context's implicit iteration at 0.
+        iteration: 0,
+        iterations: { "review-a": 2, "review-b": 1 },
+      },
+    );
+
+    const moderatorA = graph.tasks.find((task) => task.nodeId.startsWith("panel-a-moderator"));
+    const moderatorB = graph.tasks.find((task) => task.nodeId.startsWith("panel-b-moderator"));
+    expect(moderatorA?.prompt).toContain("CURRENT_A");
+    expect(moderatorA?.prompt).not.toContain("STALE_A");
+    expect(moderatorA?.prompt).not.toContain("CURRENT_B");
+    expect(moderatorB?.prompt).toContain("CURRENT_B");
+    expect(moderatorB?.prompt).not.toContain("STALE_B");
+    expect(moderatorB?.prompt).not.toContain("CURRENT_A");
+  });
+
   test("ReviewLoop reviewer prompt includes the produced output", async () => {
     const { graph } = await render(
       <ReviewLoop id="rl" producer={agent} reviewer={otherAgent} produceOutput="produce_out" reviewOutput="review_out">

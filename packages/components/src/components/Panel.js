@@ -6,6 +6,7 @@ import React from "react";
 import { Sequence } from "./Sequence.js";
 import { Parallel } from "./Parallel.js";
 import { Task } from "./Task.js";
+import { useOptionalSmithersContext } from "./useOptionalSmithersContext.js";
 /** @typedef {import("@smithers-orchestrator/agents/AgentLike").AgentLike} AgentLike */
 /** @typedef {import("./PanelistConfig.ts").PanelistConfig} PanelistConfig */
 
@@ -50,6 +51,7 @@ export function Panel(props) {
   if (!Array.isArray(panelists) || panelists.length === 0) {
     throw new Error("Panel panelists must include at least one panelist.");
   }
+  const ctx = useOptionalSmithersContext();
   const prefix = id ?? "panel";
   const normalized = panelists.map(normalizePanelist);
   // Single source of the panelist task ids: the tasks, needs, and deps maps
@@ -90,13 +92,15 @@ export function Panel(props) {
   taskIds.forEach((taskId) => {
     needs[taskId] = taskId;
   });
-  // Build deps map (same keys as needs) so the moderator's prompt can be
-  // built from each panelist's resolved output. `depsOptional` means a
-  // panelist that failed (continueOnFail, no output row) is simply omitted
-  // from the prompt rather than deferring the moderator forever.
-  const deps = {};
+  // Resolve each panelist from its latest persisted iteration. Generic Task
+  // deps use ctx.outputMaybe(), whose implicit iteration is 0 when concurrent
+  // loops coexist, so using deps here can feed a resumed moderator stale
+  // iteration-0 reviews. latest() still honors the current loop scope while
+  // selecting the newest row within it.
+  const panelistOutputs = {};
   taskIds.forEach((taskId) => {
-    deps[taskId] = panelistOutput;
+    const output = ctx?.latest(panelistOutput, taskId);
+    if (output !== undefined) panelistOutputs[taskId] = output;
   });
   // Moderator prompt includes strategy metadata
   const strategyPrompt =
@@ -106,8 +110,7 @@ export function Panel(props) {
         ? `\n\nStrategy: CONSENSUS. All panelists must converge. ${minAgree ? `Minimum agreement required: ${minAgree}.` : ""}`
         : `\n\nStrategy: SYNTHESIZE. Combine all panelist outputs into a single coherent result. Preserve each panelist's concrete, grounded findings verbatim (specific file paths, line numbers, identifiers, prior-PR references, and what already exists); reconcile disagreements with evidence. Do not over-generalize, drop specifics, or change the scope the panelists analyzed.`;
   const moderatorChildren = (panelistOutputs) => {
-    const panelistIds = Object.keys(deps);
-    const outputsText = panelistIds
+    const outputsText = taskIds
       .map((taskId) => {
         if (!(taskId in panelistOutputs)) return `### ${taskId}\n(no output — this panelist failed)`;
         return `### ${taskId}\n${JSON.stringify(panelistOutputs[taskId])}`;
@@ -120,10 +123,9 @@ export function Panel(props) {
     output: moderatorOutput,
     agent: moderator,
     needs,
-    deps,
-    depsOptional: true,
     ...moderatorTaskProps,
-    children: moderatorChildren,
+    dependsOn: [...new Set([...taskIds, ...(moderatorTaskProps?.dependsOn ?? [])])],
+    children: moderatorChildren(panelistOutputs),
   });
   return React.createElement(Sequence, null, parallelEl, moderatorTask);
 }
