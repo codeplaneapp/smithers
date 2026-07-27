@@ -3259,7 +3259,7 @@ commands[102]:
     flags[1]{name,short,type,default,desc}:
       json,j,boolean,false,Emit rows as JSON
   - name: restore
-    purpose: Restore a worktree to a durability checkpoint (latest for the node, or --seq)
+    purpose: Restore a worktree to a durability checkpoint and invalidate child work newer than it
     args[2]{name,type,required,desc}:
       runId,string,true,Run ID containing the checkpoint
       nodeId,string,true,Node ID whose worktree to restore
@@ -7853,6 +7853,13 @@ Workflow logic factors out into hooks the same way React UI logic does.
 ## VCS revert & per-attempt snapshots
 
 Smithers records the current JJ commit ID in `_smithers_attempts.jj_pointer` per attempt. Revert any attempt with a recorded JJ pointer to its exact workspace state:
+
+With `SMITHERS_DURABILITY_SNAPSHOTS=1`, attempts that share one JJ worktree are
+serialized for the full watcher lifetime. This prevents overlapping tasks from
+mixing each other's writes into checkpoints, but it means same-`rootDir` tasks
+inside `<Parallel>` wait for that worktree lock. A waiter still occupies a
+scheduler slot, so a saturated concurrency limit can delay otherwise unrelated
+worktrees. Lock waits are logged, abort-aware, and time-bounded.
 
 ```bash
 bunx smithers-orchestrator revert workflow.tsx --run-id RUN_ID --node-id implement --attempt 1
@@ -17587,7 +17594,7 @@ Rewind a run to a previous frame, deleting later frames and invalidating derived
 
 ### restore_checkpoint
 
-Restore the worktree to a durability checkpoint for a node (latest matching one if `seq` is omitted). This destructive operation requires `confirm: true`.
+Restore the worktree to a durability checkpoint for a node (latest matching one if `seq` is omitted). Child subflow nodes with newer discarded checkpoints, plus their dependents, are reset so a resumed parent re-executes that work instead of preserving stale child results. This destructive operation requires `confirm: true`.
 
 **Input:**
 

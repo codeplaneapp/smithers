@@ -579,7 +579,7 @@ Rewind a run to a previous frame, deleting later frames and invalidating derived
 
 ### restore_checkpoint
 
-Restore the worktree to a durability checkpoint for a node (latest matching one if `seq` is omitted). This destructive operation requires `confirm: true`.
+Restore the worktree to a durability checkpoint for a node (latest matching one if `seq` is omitted). Child subflow nodes with newer discarded checkpoints, plus their dependents, are reset so a resumed parent re-executes that work instead of preserving stale child results. This destructive operation requires `confirm: true`.
 
 **Input:**
 

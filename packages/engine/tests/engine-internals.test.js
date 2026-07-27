@@ -625,6 +625,22 @@ describe("engine internals: scheduler summaries and row shaping", () => {
 });
 
 describe("engine internals: durability, options and graph helpers", () => {
+  test("subflowRunLineage prunes forks and continue-as-new descendants", () => {
+    expect(
+      I.subflowRunLineage(
+        [
+          { runId: "root", parentRunId: null, depth: 0 },
+          { runId: "root:child:sub:0", parentRunId: "root", depth: 1 },
+          { runId: "root:child:sub:0:child:nested:0", parentRunId: "root:child:sub:0", depth: 2 },
+          { runId: "fork", parentRunId: "root", depth: 1 },
+          { runId: "fork:child:nested:0", parentRunId: "fork", depth: 2 },
+          { runId: "continued", parentRunId: "root", depth: 1 },
+        ],
+        "root",
+      ).map((row) => row.runId),
+    ).toEqual(["root", "root:child:sub:0", "root:child:sub:0:child:nested:0"]);
+  });
+
   test("runsDueForQuotaResume returns only quota parks whose reset has elapsed", async () => {
     const { sqlite, adapter } = makeContinueDb();
     try {

@@ -137,7 +137,7 @@ export function defaultRevert(commitId, cwd, options = {}) {
  * iteration/seq), then the chronologically latest (ties broken by attempt then
  * seq, since seq resets per attempt).
  * @param {Array<Checkpoint>} checkpoints
- * @param {{ nodeId: string, iteration?: number, seq?: number }} sel
+ * @param {{ runId?: string, nodeId: string, iteration?: number, seq?: number }} sel
  * @returns {Checkpoint | null}
  */
 export function pickTargetCheckpoint(checkpoints, sel) {
@@ -149,6 +149,8 @@ export function pickTargetCheckpoint(checkpoints, sel) {
         : Number(c.iteration) === Number(sel.iteration),
     );
   if (sel.seq !== undefined) cands = cands.filter((c) => Number(c.seq) === Number(sel.seq));
+  const requestedRunMatches = cands.filter((c) => c.runId === sel.runId && c.nodeId === sel.nodeId);
+  if (requestedRunMatches.length > 0) cands = requestedRunMatches;
   if (cands.length === 0) return null;
   cands.sort(
     (a, b) =>
@@ -244,7 +246,7 @@ export async function runRestoreOnce(opts) {
   // rejected rather than silently reverting the wrong checkpoint. Validation
   // runs the preselected row through the same predicate as the listing path
   // (`pickTargetCheckpoint`) so the two can never diverge.
-  const selection = { nodeId, iteration, seq };
+  const selection = { runId, nodeId, iteration, seq };
   let target = null;
   if (opts.target) {
     target = pickTargetCheckpoint([opts.target], selection);

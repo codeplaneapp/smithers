@@ -101,9 +101,7 @@ describe("smithers snapshots", () => {
               ];
         },
         async listWorkspaceStates(runId) {
-          return runId === "parent"
-            ? []
-            : [{ jjCwd: "/wt", jjCommitId: "child-commit", jjOperationId: "child-op" }];
+          return runId === "parent" ? [] : [{ jjCwd: "/wt", jjCommitId: "child-commit", jjOperationId: "child-op" }];
         },
       },
       runId: "parent",
@@ -117,6 +115,34 @@ describe("smithers snapshots", () => {
         operationId: "child-op",
       }),
     ]);
+  });
+
+  test("a parent excludes fork and continuation snapshot subtrees", async () => {
+    const out = capture();
+    const rows = [
+      { runId: "parent", parentRunId: null, depth: 0 },
+      { runId: "parent:child:sub:0", parentRunId: "parent", depth: 1 },
+      { runId: "fork", parentRunId: "parent", depth: 1 },
+      { runId: "fork:child:nested:0", parentRunId: "fork", depth: 2 },
+      { runId: "continuation", parentRunId: "parent", depth: 1 },
+    ];
+    await runSnapshotsOnce({
+      adapter: {
+        async listRunDescendants() {
+          return rows;
+        },
+        async listWorkspaceCheckpoints(runId) {
+          return [{ ...(await snapAdapter.listWorkspaceCheckpoints())[0], nodeId: runId, createdAtMs: 10 }];
+        },
+        async listWorkspaceStates() {
+          return [];
+        },
+      },
+      runId: "parent",
+      json: true,
+      stdout: out,
+    });
+    expect(JSON.parse(out.get()).snapshots.map((snapshot) => snapshot.runId)).toEqual(["parent", "parent:child:sub:0"]);
   });
 
   test("empty run is reported, not an error", async () => {
@@ -165,6 +191,52 @@ describe("smithers restore", () => {
         { nodeId: "sub" },
       )?.jjCommitId,
     ).toBe("d0");
+  });
+
+  test("pickTargetCheckpoint prefers the requested run when a child reuses its node id", () => {
+    expect(
+      pickTargetCheckpoint(
+        [
+          { ...cps[0], runId: "parent" },
+          { ...cps[1], runId: "parent:child:sub:0", createdAtMs: 100 },
+        ],
+        { runId: "parent", nodeId: "n1" },
+      )?.jjCommitId,
+    ).toBe("c0");
+  });
+
+  test("restore never selects a newer checkpoint from a fork", async () => {
+    const reverted = [];
+    const checkpoints = {
+      parent: [{ ...cps[0], runId: "parent", jjCommitId: "MINE", jjCwd: "/mine", createdAtMs: 100 }],
+      fork: [{ ...cps[0], runId: "fork", jjCommitId: "FORK", jjCwd: "/fork", createdAtMs: 200 }],
+    };
+    const result = await runRestoreOnce({
+      adapter: {
+        async listRunDescendants() {
+          return [
+            { runId: "parent", parentRunId: null, depth: 0 },
+            { runId: "fork", parentRunId: "parent", depth: 1 },
+          ];
+        },
+        async listWorkspaceCheckpoints(runId) {
+          return checkpoints[runId] ?? [];
+        },
+        async listWorkspaceStates() {
+          return [];
+        },
+      },
+      runId: "parent",
+      nodeId: "n1",
+      stdout: capture(),
+      stderr: capture(),
+      revert: async (commitId, cwd) => {
+        reverted.push([commitId, cwd]);
+        return { success: true };
+      },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(reverted).toEqual([["MINE", "/mine"]]);
   });
 
   test("reverts to the target and reports success", async () => {

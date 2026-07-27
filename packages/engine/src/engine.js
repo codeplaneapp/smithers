@@ -1507,6 +1507,30 @@ const TASK_HEARTBEAT_TIMEOUT_CHECK_MS = 250;
 // Poll for hijack-handoff readiness between agent events; keeps handoff latency low without hot-spinning.
 const HIJACK_COMPLETION_POLL_MS = 100;
 const MAX_CONTINUATION_STATE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * `parent_run_id` also links time-travel forks and continue-as-new segments.
+ * Keep only deterministic child-workflow edges and prune every other subtree.
+ *
+ * @param {{ runId: string; parentRunId?: string | null; depth: number }[]} rows
+ * @param {string} rootRunId
+ */
+function subflowRunLineage(rows, rootRunId) {
+  const includedRunIds = new Set([rootRunId]);
+  return rows.filter((row) => {
+    if (row.runId === rootRunId && Number(row.depth) === 0) return true;
+    if (!row.parentRunId || !includedRunIds.has(row.parentRunId)) return false;
+    const prefix = `${row.parentRunId}:child:`;
+    if (!String(row.runId).startsWith(prefix)) return false;
+    const suffix = String(row.runId).slice(prefix.length);
+    const splitAt = suffix.lastIndexOf(":");
+    const iteration = Number(suffix.slice(splitAt + 1));
+    if (splitAt <= 0 || !Number.isInteger(iteration) || iteration < 0) return false;
+    includedRunIds.add(row.runId);
+    return true;
+  });
+}
+
 /**
  * @param {Pick<TaskDescriptor, "nodeId" | "iteration">} task
  * @returns {string}
@@ -5631,38 +5655,40 @@ async function legacyExecuteTask(
           attempt: attemptNo,
           cwd: taskRoot,
           withSocket: true,
+          signal: taskSignal,
         });
-        const docFileSync = await startDocFileSync({
-          enabled: process.env.SMITHERS_DOCS_FILE_SYNC === "1",
-          adapter,
-          cwd: taskRoot,
-        });
-        // Tier 1 for in-process SDK agents: give their tools an ambient
-        // context (run/node/cwd + a Tier 1 snapshot hook) so defineTool
-        // snapshots after each side-effect tool. Only when durability is
-        // active; null leaves the generate call exactly as before.
-        const agentToolJournalContext = createToolJournalContext({
-          adapter,
-          eventBus,
-          runId,
-          nodeId: desc.nodeId,
-          iteration: desc.iteration,
-          attempt: attemptNo,
-          rootDir: taskRoot,
-          abortSignal: taskSignal,
-        });
-        activeToolJournalContexts.push(agentToolJournalContext);
-        const toolCtx = {
-          ...agentToolJournalContext,
-          ...(durability.active
-            ? {
-                durabilitySnapshot: (label, toolUseId) =>
-                  durability.snapshot({ source: "wrap", tier: 1, label, toolUseId }),
-              }
-            : {}),
-        };
+        let docFileSync = { async stop() {} };
         let result;
         try {
+          docFileSync = await startDocFileSync({
+            enabled: process.env.SMITHERS_DOCS_FILE_SYNC === "1",
+            adapter,
+            cwd: taskRoot,
+          });
+          // Tier 1 for in-process SDK agents: give their tools an ambient
+          // context (run/node/cwd + a Tier 1 snapshot hook) so defineTool
+          // snapshots after each side-effect tool. Only when durability is
+          // active; null leaves the generate call exactly as before.
+          const agentToolJournalContext = createToolJournalContext({
+            adapter,
+            eventBus,
+            runId,
+            nodeId: desc.nodeId,
+            iteration: desc.iteration,
+            attempt: attemptNo,
+            rootDir: taskRoot,
+            abortSignal: taskSignal,
+          });
+          activeToolJournalContexts.push(agentToolJournalContext);
+          const toolCtx = {
+            ...agentToolJournalContext,
+            ...(durability.active
+              ? {
+                  durabilitySnapshot: (label, toolUseId) =>
+                    durability.snapshot({ source: "wrap", tier: 1, label, toolUseId }),
+                }
+              : {}),
+          };
           try {
             result = await Promise.race([
               runPromisePreservingFailure(
@@ -5739,13 +5765,6 @@ async function legacyExecuteTask(
             if (hijackPollingInterval) {
               clearInterval(hijackPollingInterval);
             }
-            // Close the watcher and flush a final snapshot of the
-            // attempt's last settled write. No-op when disabled.
-            try {
-              await durability.stop();
-            } finally {
-              await docFileSync.stop();
-            }
           }
         } catch (error) {
           const errorDetails = {
@@ -5798,6 +5817,15 @@ async function legacyExecuteTask(
             }
           }
           throw effectiveError;
+        } finally {
+          // Close the watcher and flush a final snapshot of the attempt's
+          // last settled write. This also releases the per-worktree attempt
+          // lock when setup fails before the agent call starts.
+          try {
+            await durability.stop();
+          } finally {
+            await docFileSync.stop();
+          }
         }
         await Promise.all([...pendingOwnershipChecks]);
         if (traceCollector) {
@@ -7556,10 +7584,11 @@ async function runWorkflowBodyDriver(workflow, opts) {
   const waitForAbortedTasksToSettle = async () => {
     const deadlineAt = nowMs() + RUN_ABORT_SETTLE_TIMEOUT_MS;
     while (true) {
-      const descendants =
+      const discoveredDescendants =
         typeof adapter.listRunDescendants === "function"
           ? await Effect.runPromise(adapter.listRunDescendants(runId))
           : [{ runId, depth: 0 }];
+      const descendants = subflowRunLineage(discoveredDescendants, runId);
       const inProgressByRun = await Promise.all(
         descendants.map((descendant) => Effect.runPromise(adapter.listInProgressAttempts(descendant.runId))),
       );
@@ -9430,6 +9459,7 @@ export const __engineInternals = {
   sha256Hex,
   isBlockingAgentActionKind,
   makeAbortError,
+  subflowRunLineage,
   isAbortError,
   collectErrorMessages,
   isStructuredOutputParseFailure,

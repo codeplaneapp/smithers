@@ -188,4 +188,37 @@ describe("startDurability", () => {
     expect(adapter.checkpoints).toHaveLength(0);
     await h.stop();
   });
+
+  test("a queued worktree lock wait logs, aborts, and preserves serialization", async () => {
+    const cwd = `/wt-lock-${process.pid}-${Date.now()}`;
+    const first = await startDurability(baseOpts({ cwd }));
+    const controller = new AbortController();
+    let waits = 0;
+    const second = startDurability(
+      baseOpts({
+        cwd,
+        signal: controller.signal,
+        lockLogAfterMs: 0,
+        onLockWait: () => {
+          waits += 1;
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    controller.abort(new Error("stop waiting"));
+    await expect(second).rejects.toThrow("stop waiting");
+    expect(waits).toBe(1);
+
+    let thirdStarted = false;
+    const thirdPromise = startDurability(baseOpts({ cwd })).then((handle) => {
+      thirdStarted = true;
+      return handle;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(thirdStarted).toBe(false);
+    await first.stop();
+    const third = await thirdPromise;
+    expect(thirdStarted).toBe(true);
+    await third.stop();
+  });
 });

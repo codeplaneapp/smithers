@@ -11,11 +11,24 @@
  * @param {string} runId
  */
 export async function listScopedWorkspaceSnapshots(adapter, runId) {
-  const scopes =
+  const discoveredScopes =
     typeof adapter.listRunDescendants === "function"
       ? await adapter.listRunDescendants(runId)
       : [{ runId, parentRunId: null, depth: 0 }];
-  const normalizedScopes = scopes.length > 0 ? scopes : [{ runId, parentRunId: null, depth: 0 }];
+  const scopes = discoveredScopes.length > 0 ? discoveredScopes : [{ runId, parentRunId: null, depth: 0 }];
+  const includedRunIds = new Set([runId]);
+  const normalizedScopes = scopes.filter((scope) => {
+    if (scope.runId === runId && Number(scope.depth) === 0) return true;
+    if (!scope.parentRunId || !includedRunIds.has(scope.parentRunId)) return false;
+    const prefix = `${scope.parentRunId}:child:`;
+    if (!String(scope.runId).startsWith(prefix)) return false;
+    const suffix = String(scope.runId).slice(prefix.length);
+    const splitAt = suffix.lastIndexOf(":");
+    const iteration = Number(suffix.slice(splitAt + 1));
+    if (splitAt <= 0 || !Number.isInteger(iteration) || iteration < 0) return false;
+    includedRunIds.add(scope.runId);
+    return true;
+  });
   const scopeByRunId = new Map(normalizedScopes.map((scope) => [scope.runId, scope]));
 
   /**

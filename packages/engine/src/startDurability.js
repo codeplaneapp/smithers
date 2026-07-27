@@ -14,6 +14,7 @@ import { createWorkspaceWatcher } from "./workspaceWatcher.js";
 import { pruneWorkspaceDurability } from "./pruneWorkspaceDurability.js";
 import { appendGap, defaultGapSpoolPath } from "./durabilityGapSpool.js";
 import { createSnapshotServer, nextSnapshotSocketPath } from "./snapshotServer.js";
+import { logInfo } from "@smithers-orchestrator/observability/logging";
 
 /**
  * Build a human label from a CLI hook payload (Claude PostToolUse JSON or our own).
@@ -34,14 +35,20 @@ const runVcs = (effect) => Effect.runPromise(effect.pipe(Effect.provide(getPlatf
 
 /** @type {Map<string, Promise<void>>} */
 const workspaceAttemptTails = new Map();
+const WORKSPACE_ATTEMPT_LOCK_TIMEOUT_MS = 5 * 60_000;
+const WORKSPACE_ATTEMPT_LOCK_LOG_AFTER_MS = 1_000;
 
 /**
  * Durability checkpoints represent one task's writes, so two attempts may not
  * mutate the same worktree while either watcher is active.
  * @param {string} cwd
+ * @param {{ signal?: AbortSignal; timeoutMs?: number; logAfterMs?: number; onWait?: () => void }} [options]
  * @returns {Promise<() => void>}
  */
-async function acquireWorkspaceAttempt(cwd) {
+async function acquireWorkspaceAttempt(cwd, options = {}) {
+  const { signal, timeoutMs = WORKSPACE_ATTEMPT_LOCK_TIMEOUT_MS, logAfterMs = WORKSPACE_ATTEMPT_LOCK_LOG_AFTER_MS } =
+    options;
+  if (signal?.aborted) throw signal.reason ?? new Error("Durability worktree lock wait aborted");
   const previous = workspaceAttemptTails.get(cwd) ?? Promise.resolve();
   /** @type {() => void} */
   let resolveCurrent = () => {};
@@ -49,7 +56,42 @@ async function acquireWorkspaceAttempt(cwd) {
     resolveCurrent = resolve;
   });
   workspaceAttemptTails.set(cwd, current);
-  await previous;
+  let timeout;
+  let waitLog;
+  /** @type {(() => void) | undefined} */
+  let removeAbort;
+  try {
+    const waiters = [
+      previous,
+      new Promise((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`Timed out waiting ${timeoutMs}ms for durability worktree lock: ${cwd}`)),
+          timeoutMs,
+        );
+      }),
+    ];
+    if (signal) {
+      waiters.push(
+        new Promise((_, reject) => {
+          const onAbort = () => reject(signal.reason ?? new Error("Durability worktree lock wait aborted"));
+          signal.addEventListener("abort", onAbort, { once: true });
+          removeAbort = () => signal.removeEventListener("abort", onAbort);
+        }),
+      );
+    }
+    waitLog = setTimeout(() => options.onWait?.(), logAfterMs);
+    await Promise.race(waiters);
+  } catch (error) {
+    void previous.finally(() => {
+      if (workspaceAttemptTails.get(cwd) === current) workspaceAttemptTails.delete(cwd);
+      resolveCurrent();
+    });
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    clearTimeout(waitLog);
+    removeAbort?.();
+  }
   let released = false;
   return () => {
     if (released) return;
@@ -85,6 +127,10 @@ const NOOP_HANDLE = {
  * @property {(deps: { cwd: string, onSettle: () => void }) => { close: () => void, watching?: boolean }} [createWatcher]
  * @property {boolean} [withSocket] When true, open a snapshot socket server so a CLI agent's hook can request strict Tier 1 snapshots.
  * @property {(deps: { runId: string, nodeId: string, snapshot: Function }) => Promise<{ socketPath: string, close: () => void }>} [createSocketServer]
+ * @property {AbortSignal} [signal] Cancels a queued wait for another attempt using the same worktree.
+ * @property {number} [lockTimeoutMs]
+ * @property {number} [lockLogAfterMs]
+ * @property {() => void} [onLockWait]
  */
 
 /**
@@ -107,6 +153,15 @@ export async function startDurability(opts) {
     createWatcher = createWorkspaceWatcher,
     withSocket = false,
     createSocketServer = createSnapshotServer,
+    signal,
+    lockTimeoutMs,
+    lockLogAfterMs,
+    onLockWait = () =>
+      logInfo(
+        "durability attempt waiting for shared worktree",
+        { runId, nodeId, iteration, attempt, cwd },
+        "engine:durability",
+      ),
   } = opts;
 
   if (!enabled || !cwd) return NOOP_HANDLE;
@@ -118,7 +173,6 @@ export async function startDurability(opts) {
     isJj = false;
   }
   if (!isJj) return NOOP_HANDLE;
-  const releaseWorkspaceAttempt = await acquireWorkspaceAttempt(cwd);
 
   // Default gaps to a durable spool (outside the worktree) so they survive an
   // engine crash even though the engine passes no onGap. An explicit onGap wins.
@@ -140,6 +194,12 @@ export async function startDurability(opts) {
   /** @param {Record<string, unknown>} req */
   const watchSnapshot = (req) =>
     service.snapshot({ ...base, source: "watch", tier: 2, label: null, toolUseId: null, ...req });
+  const releaseWorkspaceAttempt = await acquireWorkspaceAttempt(cwd, {
+    signal,
+    timeoutMs: lockTimeoutMs,
+    logAfterMs: lockLogAfterMs,
+    onWait: onLockWait,
+  });
   let watcher;
   try {
     watcher = createWatcher({

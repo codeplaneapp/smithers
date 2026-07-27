@@ -763,7 +763,7 @@ commands[102]:
     flags[1]{name,short,type,default,desc}:
       json,j,boolean,false,Emit rows as JSON
   - name: restore
-    purpose: Restore a worktree to a durability checkpoint (latest for the node, or --seq)
+    purpose: Restore a worktree to a durability checkpoint and invalidate child work newer than it
     args[2]{name,type,required,desc}:
       runId,string,true,Run ID containing the checkpoint
       nodeId,string,true,Node ID whose worktree to restore
