@@ -293,9 +293,20 @@ function makeSemanticAdapter(overrides = {}) {
     cleanupCalls: 0,
     ...overrides,
   };
+  const queryOne = state.internalStorage.queryOne.bind(state.internalStorage);
+  state.internalStorage.queryOne = async (sql, params) => {
+    if (sql.includes("FROM _smithers_nodes")) {
+      const [runId, nodeId, iteration] = params;
+      return state.nodes.find(
+        (node) => node.runId === runId && node.nodeId === nodeId && (node.iteration ?? 0) === iteration,
+      );
+    }
+    return queryOne(sql, params);
+  };
   const adapter = {
     internalStorage: state.internalStorage,
     db: state.db,
+    read: (_label, operation) => runnableEffect(Effect.promise(operation)),
     write: async (_label, operation) => await operation(),
     listRuns: async (limit, status) => state.runs.filter((run) => !status || run.status === status).slice(0, limit),
     getRun: (runId) =>
