@@ -1127,7 +1127,7 @@ type HijackState$1 = {
     completion: HijackCompletion | null;
 };
 
-type LegacyExecuteTaskFn$1 = (adapter: SmithersDb$1, db: BunSQLiteDatabase$2<Record<string, unknown>>, runId: string, desc: TaskDescriptor, descriptorMap: Map<string, TaskDescriptor>, inputTable: SQLiteTable$1, eventBus: EventBus$1, toolConfig: TaskBridgeToolConfig$1, workflowName: string, cacheEnabled: boolean, signal?: AbortSignal, disabledAgents?: Set<string>, runAbortController?: AbortController, hijackState?: HijackState$1) => Promise<void>;
+type LegacyExecuteTaskFn$1 = (adapter: SmithersDb$1, db: BunSQLiteDatabase$2<Record<string, unknown>>, runId: string, desc: TaskDescriptor, descriptorMap: Map<string, TaskDescriptor>, inputTable: SQLiteTable$1, eventBus: EventBus$1, toolConfig: TaskBridgeToolConfig$1, workflowName: string, cacheEnabled: boolean, signal?: AbortSignal, disabledAgents?: Set<string>, runAbortController?: AbortController, hijackState?: HijackState$1, pauseSignal?: AbortSignal) => Promise<void>;
 
 declare function makeDurableDeferredBridgeExecutionId(adapter: _SmithersDb$4, runId: string, nodeId: string, iteration: number): string;
 declare function makeApprovalDurableDeferred(nodeId: string): DurableDeferred.DurableDeferred<Schema.Struct<{

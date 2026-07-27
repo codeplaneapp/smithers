@@ -21,4 +21,5 @@ export type LegacyExecuteTaskFn = (
   disabledAgents?: Set<string>,
   runAbortController?: AbortController,
   hijackState?: HijackState,
+  pauseSignal?: AbortSignal,
 ) => Promise<void>;

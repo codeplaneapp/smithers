@@ -12,7 +12,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { Effect } from "effect";
-import { Sequence, Subflow, Task, Workflow } from "smithers-orchestrator";
+import { Parallel, Sequence, Subflow, Task, Workflow } from "smithers-orchestrator";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 // Relative import so these runs exercise THIS checkout's engine.
 import { runWorkflow } from "../src/engine.js";
@@ -111,6 +111,65 @@ describe("lifecycle controls x child workflows", () => {
         const resumed = await Effect.runPromise(runWorkflow(parent, { input: {}, runId, resume: true }));
         expect(resumed.status).toBe("finished");
         expect((await adapter.getRun(childRunId))?.status).toBe("finished");
+        expect(journal.filter((entry) => entry === "c1")).toHaveLength(1);
+        expect(journal.filter((entry) => entry === "c2")).toHaveLength(1);
+      } finally {
+        cleanup();
+      }
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "pausing a child drains an in-flight sibling before parking and does not replay it on resume",
+    async () => {
+      const { smithers, outputs, db, cleanup } = buildSmithers();
+      try {
+        const adapter = new SmithersDb(db);
+        const journal = [];
+        const childWorkflow = twoStepChild({
+          smithers,
+          outputs,
+          journal,
+          name: "xc-pausechild-parallel-child",
+          c1Ms: 600,
+        });
+        let siblingExecutions = 0;
+        const parent = smithers(() => (
+          <Workflow name="xc-pausechild-parallel-parent">
+            <Parallel>
+              <Subflow id="sub" output={outputs.subflowOut} workflow={childWorkflow} retries={0} />
+              <Task id="sibling" output={outputs.childAux} noRetry>
+                {async () => {
+                  siblingExecutions += 1;
+                  journal.push("sibling-start");
+                  await sleep(1_400);
+                  journal.push("sibling-end");
+                  return { topic: "sibling" };
+                }}
+              </Task>
+            </Parallel>
+          </Workflow>
+        ));
+        const runId = "xc-pausechild-parallel-parent-run";
+        const childRunId = `${runId}:child:sub:0`;
+        const runPromise = Effect.runPromise(runWorkflow(parent, { input: {}, runId }));
+        expect(await waitFor(() => journal.includes("c1") && journal.includes("sibling-start"))).toBe(true);
+        expect(await waitFor(async () => Boolean((await adapter.getRun(childRunId))?.heartbeatAtMs))).toBe(true);
+
+        await adapter.requestRunPause(childRunId, Date.now());
+        const first = await runPromise;
+
+        expect(first.status).toBe("paused");
+        expect(journal).toContain("sibling-end");
+        expect(await adapter.listInProgressAttempts(runId)).toEqual([]);
+        expect((await adapter.getRun(runId))?.status).toBe("paused");
+
+        const resumed = await Effect.runPromise(runWorkflow(parent, { input: {}, runId, resume: true }));
+        expect(resumed.status).toBe("finished");
+        expect(siblingExecutions).toBe(1);
+        expect(journal.filter((entry) => entry === "sibling-start")).toHaveLength(1);
+        expect(journal.filter((entry) => entry === "sibling-end")).toHaveLength(1);
         expect(journal.filter((entry) => entry === "c1")).toHaveLength(1);
         expect(journal.filter((entry) => entry === "c2")).toHaveLength(1);
       } finally {

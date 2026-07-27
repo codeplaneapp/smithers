@@ -332,6 +332,8 @@ export class WorkflowDriver {
   inflightTaskDescriptors = new Map();
   /** @type {Array<{ key: string; task: TaskDescriptor; kind: "completed" | "failed" | "cancelled"; output?: unknown; error?: unknown }>} */
   settledTasks = [];
+  /** A paused child task parks the run through the same graceful drain path as a direct pause signal. */
+  pausedByChildSuspension = false;
   /** @type {import("./RuntimeAdapter.ts").RuntimeAdapter | undefined} */
   runtimeAdapter;
   /** @type {OutputSnapshot} Output rows persisted to runtimeAdapter.storage this run, kept in sync so each save is a full, monotonically-growing snapshot. */
@@ -416,6 +418,7 @@ export class WorkflowDriver {
     const runId = options.runId ?? this.configuredRunId ?? createRunId(this.runtimeAdapter);
     this.activeRunId = runId;
     this.activeOptions = options;
+    this.pausedByChildSuspension = false;
     this.baseOutputs = normalizeOutputSnapshot(options.initialOutputs ?? options.outputs);
     this.baseSignals = Array.isArray(options.signals) ? options.signals : [];
     if (this.runtimeAdapter?.storage) {
@@ -478,7 +481,7 @@ export class WorkflowDriver {
       // settle (drainInflight never aborts them), then park the run resumably.
       // The pause signal is separate from the abort signal so in-flight work
       // completes instead of being killed.
-      if (this.activeOptions?.pauseSignal?.aborted) {
+      if (this.activeOptions?.pauseSignal?.aborted || this.pausedByChildSuspension) {
         await this.drainInflight();
         // A cancel can land during the drain window: the engine's
         // pause-watcher keeps polling and aborts the run signal when
@@ -781,7 +784,14 @@ export class WorkflowDriver {
       typeof settled.error === "object" &&
       settled.error.details?.suspensionStatus === "paused"
     ) {
-      return { runId: this.activeRunId, status: "paused" };
+      this.pausedByChildSuspension = true;
+      if (typeof this.session.getNextDecision === "function") {
+        return this.runEffect(this.session.getNextDecision());
+      }
+      if (this.lastGraph) {
+        return this.runEffect(this.session.submitGraph(this.lastGraph));
+      }
+      throw new Error("WorkflowSession did not provide the next EngineDecision.");
     }
     if (settled.kind === "completed") {
       // Persist this task's output row as it lands — not just a
