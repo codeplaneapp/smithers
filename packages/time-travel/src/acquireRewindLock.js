@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { parseSubflowChildRunId } from "@smithers-orchestrator/graph/subflow-run-lineage";
 import { rewindLockStore } from "./rewindLockStore.js";
 
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
@@ -45,6 +46,7 @@ async function resolveLeaseRunId(adapter, runId) {
     seen.add(leaseRunId);
     const run = await adapter.getRun(leaseRunId);
     if (!run?.parentRunId) break;
+    if (!parseSubflowChildRunId(leaseRunId, run.parentRunId)) break;
     leaseRunId = run.parentRunId;
   }
   return leaseRunId;

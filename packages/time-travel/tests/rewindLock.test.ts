@@ -52,6 +52,35 @@ describe("rewindLock", () => {
     }
   });
 
+  test("fork lineage does not share the source run's lease", async () => {
+    const { sqlite, adapter } = setupDb();
+    try {
+      await adapter.insertRun({
+        runId: "source-run",
+        workflowName: "source",
+        status: "finished",
+        createdAtMs: Date.now(),
+      });
+      await adapter.insertRun({
+        runId: "fork-run",
+        parentRunId: "source-run",
+        workflowName: "fork",
+        status: "finished",
+        createdAtMs: Date.now(),
+      });
+
+      const sourceLease = await acquireRewindLock(adapter, "source-run", { autoRenew: false });
+      const forkLease = await acquireRewindLock(adapter, "fork-run", { autoRenew: false });
+      expect(sourceLease).not.toBeNull();
+      expect(forkLease).not.toBeNull();
+
+      expect(await forkLease?.release()).toBe(true);
+      expect(await sourceLease?.release()).toBe(true);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("expired owner is replaced and cannot release the new lease", async () => {
     const { sqlite, adapter } = setupDb();
     let now = 1_000;

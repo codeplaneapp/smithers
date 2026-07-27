@@ -1172,6 +1172,7 @@
         "@smithers-orchestrator/db": "workspace:*",
         "@smithers-orchestrator/driver": "workspace:*",
         "@smithers-orchestrator/errors": "workspace:*",
+        "@smithers-orchestrator/graph": "workspace:*",
         "@smithers-orchestrator/observability": "workspace:*",
         "@smithers-orchestrator/react-reconciler": "workspace:*",
         "@smithers-orchestrator/scheduler": "workspace:*",

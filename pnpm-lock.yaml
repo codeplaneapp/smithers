@@ -2357,6 +2357,9 @@ importers:
       '@smithers-orchestrator/errors':
         specifier: workspace:*
         version: link:../errors
+      '@smithers-orchestrator/graph':
+        specifier: workspace:*
+        version: link:../graph
       '@smithers-orchestrator/observability':
         specifier: workspace:*
         version: link:../../apps/observability
