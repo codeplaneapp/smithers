@@ -4,6 +4,7 @@ import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { loadRunOutputRowsEffect } from "@smithers-orchestrator/db/snapshot";
 import { requireTaskRuntime } from "@smithers-orchestrator/driver/task-runtime";
+import { buildSubflowChildRunId } from "@smithers-orchestrator/graph/subflow-run-lineage";
 import { retryTask } from "@smithers-orchestrator/time-travel/retry-task";
 import { makeAbortError } from "./effect/bridge-utils.js";
 import { isPidAlive, parseRuntimeOwnerPid } from "./runtime-owner.js";
@@ -95,15 +96,6 @@ function normalizeChildOutput(runResult) {
   if (rows.length === 0) return null;
   if (rows.length === 1) return rows[0];
   return rows;
-}
-/**
- * @param {string} parentRunId
- * @param {string} stepId
- * @param {number} iteration
- * @returns {string}
- */
-function buildChildWorkflowRunId(parentRunId, stepId, iteration) {
-  return [parentRunId, "child", stepId, String(iteration)].join(":");
 }
 /**
  * Give an automatically retried Subflow a fresh budget for its failed child
@@ -305,7 +297,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
   const childWorkflow = resolveChildWorkflow(definition, parentWorkflow);
   const input = normalizeChildInput(options.input);
   const parentRunId = options.parentRunId ?? runtime.runId;
-  const childRunId = options.runId ?? buildChildWorkflowRunId(parentRunId, runtime.stepId, runtime.iteration);
+  const childRunId = options.runId ?? buildSubflowChildRunId(parentRunId, runtime.stepId, runtime.iteration);
   // The child may bring its own db (e.g. a runtime-generated workflow with
   // its own dbPath) that has never seen a run: create the system tables
   // before probing for an existing child run. No-op when the parent already
@@ -389,7 +381,7 @@ export async function executeChildWorkflow(parentWorkflow, options) {
   };
 }
 export const __childWorkflowInternals = {
-  buildChildWorkflowRunId,
+  buildChildWorkflowRunId: buildSubflowChildRunId,
   isChildRunLiveElsewhere,
   loadPreservedChildResult,
   normalizeChildInput,

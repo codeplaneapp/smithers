@@ -1,4 +1,15 @@
 /**
+ * Build the deterministic child-workflow run id for a Subflow node:
+ * `<parentRunId>:child:<nodeId>:<iteration>`. The single source of the
+ * format `parseSubflowChildRunId` decodes.
+ *
+ * @param {string} parentRunId
+ * @param {string} nodeId
+ * @param {number} iteration
+ * @returns {string}
+ */
+declare function buildSubflowChildRunId(parentRunId: string, nodeId: string, iteration: number): string;
+/**
  * Parse a deterministic child-workflow run id:
  * `<parentRunId>:child:<nodeId>:<iteration>`.
  *
@@ -29,4 +40,4 @@ declare function subflowRunLineage<T extends {
 }>(rows: T[], rootRunId: string, maxRows?: number): T[];
 declare const SUBFLOW_RUN_LINEAGE_MAX_ROWS: 100000;
 
-export { SUBFLOW_RUN_LINEAGE_MAX_ROWS, parseSubflowChildRunId, subflowRunLineage };
+export { SUBFLOW_RUN_LINEAGE_MAX_ROWS, buildSubflowChildRunId, parseSubflowChildRunId, subflowRunLineage };
