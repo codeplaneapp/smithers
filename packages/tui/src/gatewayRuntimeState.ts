@@ -97,9 +97,21 @@ function defaultGatewayRuntimeDir(env: Record<string, string | undefined>): stri
  * resolved the workspace) short-circuits the walk; direct `smithers-mon`
  * invocations rely on the walk-up.
  */
+export interface WorkspaceMarkerChecks {
+  isDirectory: (path: string) => boolean;
+  isRegularFile: (path: string) => boolean;
+}
+
+const realWorkspaceMarkerChecks: WorkspaceMarkerChecks = { isDirectory, isRegularFile };
+
 export function resolveMonitorWorkspaceRoot(
   cwd: string,
   env: Record<string, string | undefined> = process.env,
+  // Defaults to the real filesystem; tests inject fakes bounded to their own
+  // sandbox so the walk-up cannot escape into ancestors outside their control
+  // (the real OS tmp root is shared across concurrent processes/worktrees and
+  // is NOT guaranteed free of stray `.smithers`/`smithers.db` markers).
+  markerChecks: WorkspaceMarkerChecks = realWorkspaceMarkerChecks,
 ): string {
   const pinned = env.SMITHERS_WORKSPACE_ROOT;
   if (typeof pinned === "string" && pinned.length > 0) return resolve(pinned);
@@ -107,14 +119,14 @@ export function resolveMonitorWorkspaceRoot(
   // Pass 1: nearest ancestor with a `.smithers/` pack — its directory is the
   // workspace root (the CLI keys off `dirname(localPackDir)`).
   for (let dir = start; ;) {
-    if (isDirectory(join(dir, ".smithers"))) return dir;
+    if (markerChecks.isDirectory(join(dir, ".smithers"))) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
   // Pass 2: nearest ancestor holding a `smithers.db` (projects with no pack).
   for (let dir = start; ;) {
-    if (isRegularFile(join(dir, "smithers.db"))) return dir;
+    if (markerChecks.isRegularFile(join(dir, "smithers.db"))) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;

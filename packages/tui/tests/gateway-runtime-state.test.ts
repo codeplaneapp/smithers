@@ -1,12 +1,32 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import {
   readWorkspaceGatewayState,
   resolveMonitorWorkspaceRoot,
   workspaceGatewayStatePath,
+  type WorkspaceMarkerChecks,
 } from "../src/gatewayRuntimeState.ts";
+
+// Bounds the walk-up to `root`: the real OS tmp root is shared across
+// concurrent processes/worktrees and is not guaranteed free of stray
+// `.smithers`/`smithers.db` markers, so an unbounded real-fs walk is flaky.
+function sandboxedMarkerChecks(root: string): WorkspaceMarkerChecks {
+  const inSandbox = (path: string) => path === root || path.startsWith(root + sep);
+  const check = (path: string, kind: "isDirectory" | "isFile") => {
+    if (!inSandbox(path)) return false;
+    try {
+      return statSync(path)[kind]();
+    } catch {
+      return false;
+    }
+  };
+  return {
+    isDirectory: (path) => check(path, "isDirectory"),
+    isRegularFile: (path) => check(path, "isFile"),
+  };
+}
 // Relative import (not a bare specifier) so check-dependency-boundaries permits
 // a test reaching across to the CLI writer it must stay in lockstep with. Loaded
 // dynamically through a non-literal specifier + cast because the CLI is plain JS
@@ -180,7 +200,7 @@ describe("resolveMonitorWorkspaceRoot", () => {
     mkdirSync(join(ws, ".smithers"));
     const sub = join(ws, "a", "b");
     mkdirSync(sub, { recursive: true });
-    expect(resolveMonitorWorkspaceRoot(sub, {})).toBe(ws);
+    expect(resolveMonitorWorkspaceRoot(sub, {}, sandboxedMarkerChecks(ws))).toBe(ws);
   });
 
   test("walks up to a smithers.db when no pack exists", () => {
@@ -188,7 +208,7 @@ describe("resolveMonitorWorkspaceRoot", () => {
     writeFileSync(join(ws, "smithers.db"), "");
     const sub = join(ws, "nested");
     mkdirSync(sub, { recursive: true });
-    expect(resolveMonitorWorkspaceRoot(sub, {})).toBe(ws);
+    expect(resolveMonitorWorkspaceRoot(sub, {}, sandboxedMarkerChecks(ws))).toBe(ws);
   });
 });
 

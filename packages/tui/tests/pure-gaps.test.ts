@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, statSync } from "node:fs";
 import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 import { spawn as nodeSpawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { resolveCliEntry } from "../src/cliEntry.ts";
 import { DEFAULT_GATEWAY_PORT, resolveGatewayConfig } from "../src/gatewayConfig.ts";
-import { resolveMonitorWorkspaceRoot, workspaceGatewayStatePath } from "../src/gatewayRuntimeState.ts";
+import {
+  resolveMonitorWorkspaceRoot,
+  workspaceGatewayStatePath,
+  type WorkspaceMarkerChecks,
+} from "../src/gatewayRuntimeState.ts";
 import {
   resolveGatewayForRun,
   type GatewayCandidate,
@@ -18,6 +22,25 @@ import { Keybindings } from "../src/Keybindings.tsx";
 import { deriveOutputText } from "../src/modes/TreeMode.tsx";
 import { readWorkspaceGatewayState } from "../src/gatewayRuntimeState.ts";
 import { chmodSync, writeFileSync } from "node:fs";
+
+// Bounds the walk-up to `root`: the real OS tmp root is shared across
+// concurrent processes/worktrees and is not guaranteed free of stray
+// `.smithers`/`smithers.db` markers, so an unbounded real-fs walk is flaky.
+function sandboxedMarkerChecks(root: string): WorkspaceMarkerChecks {
+  const inSandbox = (path: string) => path === root || path.startsWith(root + sep);
+  const check = (path: string, kind: "isDirectory" | "isFile") => {
+    if (!inSandbox(path)) return false;
+    try {
+      return statSync(path)[kind]();
+    } catch {
+      return false;
+    }
+  };
+  return {
+    isDirectory: (path) => check(path, "isDirectory"),
+    isRegularFile: (path) => check(path, "isFile"),
+  };
+}
 
 // ─── cliEntry.resolveCliEntry ─────────────────────────────────────────────────
 
@@ -95,7 +118,7 @@ describe("gatewayRuntimeState edge branches", () => {
     const dir = tempDir("smx-nomarker-");
     const nested = join(dir, "a", "b", "c");
     mkdirSync(nested, { recursive: true });
-    expect(resolveMonitorWorkspaceRoot(nested, {})).toBe(resolve(nested));
+    expect(resolveMonitorWorkspaceRoot(nested, {}, sandboxedMarkerChecks(dir))).toBe(resolve(nested));
   });
 
   // The Linux branch additionally requires process.getuid, which does not
