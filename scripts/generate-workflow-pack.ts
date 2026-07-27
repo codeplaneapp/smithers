@@ -23,6 +23,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkUiArchitecture } from "./check-ui-architecture.mjs";
+import { generateInitTemplates } from "./generate-init-templates.ts";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SMITHERS_DIR = resolve(REPO_ROOT, ".smithers");
@@ -320,6 +321,11 @@ function main() {
       `to ${OUTPUT_FILE.replace(REPO_ROOT + "/", "")}\n`,
   );
   for (const f of files) process.stdout.write(`  + ${f.path}\n`);
+  const initTemplates = generateInitTemplates();
+  process.stdout.write(
+    `[generate-init-templates] wrote ${initTemplates.files.length} template(s) ` +
+      `to ${initTemplates.outputFile.replace(REPO_ROOT + "/", "")}\n`,
+  );
 }
 
 main();

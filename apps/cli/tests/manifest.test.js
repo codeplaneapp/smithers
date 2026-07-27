@@ -60,6 +60,11 @@ test("malformed TOON and missing names fail clearly", () => {
   expect(() => parseManifest("version: 1.0.0")).toThrow(/Invalid smithers\.toon: missing required name/);
 });
 
+test("loading a missing manifest reports the path", () => {
+  const path = join(tempProject(), "missing-smithers.toon");
+  expect(() => loadManifest(path)).toThrow(/Invalid smithers\.toon: cannot read .*missing-smithers\.toon/);
+});
+
 test("present non-object contents and capabilities fail clearly", () => {
   expect(() => parseManifest("name: broken\ncontents: nope")).toThrow(
     /Invalid smithers\.toon: contents must be an object/,

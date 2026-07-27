@@ -78,6 +78,7 @@ function buildFakeInstallTree() {
   cpSync(join(CLI_SRC, "manifest.js"), join(cliDir, "src/manifest.js"));
   cpSync(join(CLI_SRC, "agent-detection.js"), join(cliDir, "src/agent-detection.js"));
   cpSync(join(CLI_SRC, "sota-models.generated.js"), join(cliDir, "src/sota-models.generated.js"));
+  cpSync(join(CLI_SRC, "init-templates.generated.js"), join(cliDir, "src/init-templates.generated.js"));
   cpSync(join(CLI_SRC, "installCuratedSkill.js"), join(cliDir, "src/installCuratedSkill.js"));
   cpSync(
     join(CLI_SRC, "noteWorkflowPreferenceInAgentDocs.js"),
@@ -179,11 +180,15 @@ function buildFakeInstallTree() {
     ].join("\n"),
   );
   chmodSync(join(binDir, "claude"), 0o755);
+  writeFile(join(binDir, "bun"), "#!/bin/sh\nexit 0\n");
+  chmodSync(join(binDir, "bun"), 0o755);
   writeFile(join(root, "home", ".claude", ".credentials.json"), "{}\n");
 
   return {
     cwd,
     cliWorkflowPack: join(cliDir, "src/workflow-pack.js"),
+    cliPackage: join(cliDir, "package.json"),
+    nodeModules: nm,
     home: join(root, "home"),
     path: `${binDir}:/usr/bin:/bin`,
   };
@@ -283,4 +288,45 @@ test("initWorkflowPack succeeds when run from a published install layout", () =>
   expect(claudeMd).toContain("Smithers workflows");
   expect(claudeMd).toContain("smithers.sh");
   expect(readFileSync(join(tree.cwd, "AGENTS.md"), "utf8")).toContain("Smithers workflows");
+});
+
+test("published init falls back when its own or dependency versions are unavailable", () => {
+  const tree = buildFakeInstallTree();
+  const child = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+        import { rmSync, writeFileSync } from "node:fs";
+        import { initWorkflowPack } from ${JSON.stringify(tree.cliWorkflowPack)};
+        rmSync(${JSON.stringify(tree.cliPackage)});
+        writeFileSync(${JSON.stringify(join(tree.nodeModules, "@types/node/package.json"))}, "{invalid json");
+        rmSync(${JSON.stringify(join(tree.nodeModules, "@types/dagre/package.json"))});
+        const result = initWorkflowPack({
+          installSkill: false,
+          skipInstall: true,
+          env: { HOME: ${JSON.stringify(tree.home)}, PATH: ${JSON.stringify(tree.path)} },
+        });
+        process.stdout.write(JSON.stringify({ rootDir: result.rootDir }));
+      `,
+    ],
+    {
+      cwd: tree.cwd,
+      env: {
+        HOME: tree.home,
+        PATH: tree.path,
+      },
+      encoding: "utf8",
+    },
+  );
+  if (child.status !== 0) {
+    throw new Error(`child failed (code=${child.status}):\nstdout: ${child.stdout}\nstderr: ${child.stderr}`);
+  }
+
+  const generated = JSON.parse(readFileSync(join(JSON.parse(child.stdout).rootDir, "package.json"), "utf8"));
+  expect(generated.dependencies["smithers-orchestrator"]).toBe("latest");
+  expect(generated.dependencies["@smithers-orchestrator/cli"]).toBe("latest");
+  expect(generated.devDependencies["@types/node"]).toBe("25.6.0");
+  expect(generated.devDependencies["@types/dagre"]).toBe("0.7.54");
 });

@@ -14,6 +14,9 @@ import {
 } from "./installCuratedSkill.js";
 import { noteWorkflowPreferenceInAgentDocs } from "./noteWorkflowPreferenceInAgentDocs.js";
 import { buildDefaultManifest, renderManifest } from "./manifest.js";
+// Static init scaffolds are authored under apps/cli/templates/init-pack/ and
+// embedded for npm packaging by scripts/generate-init-templates.ts.
+import { GENERATED_INIT_TEMPLATES } from "./init-templates.generated.js";
 // Seeded workflows authored as canonical files in .smithers/ and emitted by
 // scripts/generate-workflow-pack.ts (single source of truth — no hand-embedding).
 import { GENERATED_SEEDED_FILES } from "./seeded-workflow-pack.generated.js";
@@ -201,37 +204,6 @@ function renderPackageJson(versions) {
     ) + "\n"
   );
 }
-function renderTsconfig() {
-  return (
-    JSON.stringify(
-      {
-        compilerOptions: {
-          lib: ["ESNext", "DOM", "DOM.Iterable"],
-          target: "ESNext",
-          module: "ESNext",
-          moduleDetection: "force",
-          jsx: "react-jsx",
-          jsxImportSource: "smithers-orchestrator",
-          moduleResolution: "bundler",
-          allowImportingTsExtensions: true,
-          verbatimModuleSyntax: true,
-          noEmit: true,
-          strict: true,
-          skipLibCheck: true,
-          // No baseUrl: TS 6 deprecates it (TS5101) and `paths` resolves
-          // relative to this tsconfig without it.
-          paths: {
-            "~/*": ["./*"],
-          },
-        },
-        include: ["./**/*"],
-        exclude: ["./executions/**/*"],
-      },
-      null,
-      2,
-    ) + "\n"
-  );
-}
 export const CURATED_PUBLIC_WORKFLOW_IDS = ["create-workflow", "create-skill", "docs-driven-development"];
 export const CURATED_SYSTEM_WORKFLOW_IDS = [
   "add",
@@ -242,166 +214,44 @@ export const CURATED_SYSTEM_WORKFLOW_IDS = [
   "share-pack",
   "upgrade",
 ];
+
+const INIT_TEMPLATE_BY_PATH = new Map(GENERATED_INIT_TEMPLATES.map((file) => [file.path, file]));
+
+/** @param {string} path */
+function initTemplate(path) {
+  const file = INIT_TEMPLATE_BY_PATH.get(path);
+  if (!file) throw new Error(`Missing generated init template: ${path}`);
+  return file;
+}
+
 /**
  * @param {{ scaffoldCustomAgent?: boolean }} [options]
  * @returns {TemplateFile[]}
  */
 function renderAgentScaffoldFiles(options = {}) {
   const files = [
-    {
-      path: ".smithers/agents/claude-code.ts",
-      preserveExisting: true,
-      contents: [
-        'import { ClaudeCodeAgent as SmithersClaudeCodeAgent } from "smithers-orchestrator";',
-        "",
-        '// Built-in Claude Code CLI agent (cliEngine: "claude-code").',
-        "// Tweak `model` or uncomment extra options below to match your setup.",
-        "export const ClaudeCodeAgent = new SmithersClaudeCodeAgent({",
-        '  model: "claude-fable-5",',
-        '  // systemPrompt: "Add shared instructions for every Claude run.",',
-        "  // timeoutMs: 10 * 60 * 1000,",
-        "  // dangerouslySkipPermissions: true,",
-        "});",
-        "",
-      ].join("\n"),
-    },
-    {
-      path: ".smithers/agents/codex.ts",
-      preserveExisting: true,
-      contents: [
-        'import { CodexAgent as SmithersCodexAgent } from "smithers-orchestrator";',
-        "",
-        '// Built-in Codex CLI agent (cliEngine: "codex").',
-        "// Tweak `model` or uncomment extra options below to match your setup.",
-        "export const CodexAgent = new SmithersCodexAgent({",
-        '  model: "gpt-5.6-luna",',
-        '  config: { model_reasoning_effort: "medium" },',
-        "  skipGitRepoCheck: true,",
-        '  // systemPrompt: "Add shared instructions for every Codex run.",',
-        '  // sandbox: "workspace-write",',
-        "  // fullAuto: true,",
-        "});",
-        "",
-      ].join("\n"),
-    },
-    {
-      path: ".smithers/agents/cursor.ts",
-      preserveExisting: true,
-      contents: [
-        'import { CursorAgent as SmithersCursorAgent } from "smithers-orchestrator";',
-        "",
-        '// Built-in Cursor CLI agent (cliEngine: "cursor").',
-        "// Tweak `model`, `cwd`, or uncomment extra options below to match your setup.",
-        "export const CursorAgent = new SmithersCursorAgent({",
-        "  cwd: process.cwd(),",
-        '  // systemPrompt: "Add shared instructions for every Cursor run.",',
-        '  // mode: "plan",',
-        "  // force: true,",
-        "});",
-        "",
-      ].join("\n"),
-    },
-    {
-      path: ".smithers/agents/opencode.ts",
-      preserveExisting: true,
-      contents: [
-        'import { OpenCodeAgent as SmithersOpenCodeAgent } from "smithers-orchestrator";',
-        "",
-        '// Built-in OpenCode CLI agent (cliEngine: "opencode").',
-        "// Tweak `model` or uncomment extra options below to match your setup.",
-        "export const OpenCodeAgent = new SmithersOpenCodeAgent({",
-        '  model: "anthropic/claude-fable-5",',
-        '  // agentName: "build",',
-        '  // systemPrompt: "Add shared instructions for every OpenCode run.",',
-        "  // yolo: true,",
-        "});",
-        "",
-      ].join("\n"),
-    },
-    {
-      path: ".smithers/agents/antigravity.ts",
-      preserveExisting: true,
-      contents: [
-        'import { AntigravityAgent as SmithersAntigravityAgent } from "smithers-orchestrator";',
-        "",
-        '// Built-in Antigravity CLI agent (cliEngine: "antigravity").',
-        "// Tweak `model` or uncomment extra options below to match your setup.",
-        "export const AntigravityAgent = new SmithersAntigravityAgent({",
-        '  // model: "Gemini 3.1 Pro (high)",',
-        '  // systemPrompt: "Add shared instructions for every Antigravity run.",',
-        "  // dangerouslySkipPermissions: true,",
-        '  // allowedTools: ["read_file", "write_file"],',
-        "});",
-        "",
-      ].join("\n"),
-    },
-    {
-      path: ".smithers/agents/index.ts",
-      preserveExisting: true,
-      contents: [
-        'export { ClaudeCodeAgent } from "./claude-code";',
-        'export { CodexAgent } from "./codex";',
-        'export { CursorAgent } from "./cursor";',
-        'export { OpenCodeAgent } from "./opencode";',
-        'export { AntigravityAgent } from "./antigravity";',
-        ...(options.scaffoldCustomAgent ? ['export { CustomAgent } from "./custom";'] : []),
-        "",
-      ].join("\n"),
-    },
-    {
-      path: ".smithers/agents/README.md",
-      preserveExisting: true,
-      contents: [
-        "# Agent Config",
-        "",
-        "These files export the configured agent instances used by your Smithers workflows.",
-        "",
-        "- `claude-code.ts`, `codex.ts`, `cursor.ts`, `opencode.ts`, and `antigravity.ts` are user-owned config.",
-        "- Edit them to pin models, set `cwd`, add a shared `systemPrompt`, or enable engine-specific flags.",
-        "- `index.ts` re-exports all five so root-level files can import from `./agents`.",
-        "",
-        "Examples:",
-        "",
-        "```ts",
-        'import { ClaudeCodeAgent } from "./agents";',
-        'import { CodexAgent } from "./agents/codex";',
-        'import { CursorAgent } from "./agents/cursor";',
-        'import { OpenCodeAgent } from "./agents/opencode";',
-        'import { AntigravityAgent } from "./agents/antigravity";',
-        "```",
-        "",
-        "Inside `.smithers/workflows/*`, use `../agents` or `../agents/<name>` instead.",
-        "",
-        "`smithers init` and `smithers init --agents-only` only create missing files in this directory.",
-        "Existing files here are left alone so your custom agent config is preserved.",
-        "",
-      ].join("\n"),
-    },
+    initTemplate(".smithers/agents/claude-code.ts"),
+    initTemplate(".smithers/agents/codex.ts"),
+    initTemplate(".smithers/agents/cursor.ts"),
+    initTemplate(".smithers/agents/opencode.ts"),
+    initTemplate(".smithers/agents/antigravity.ts"),
+    initTemplate(".smithers/agents/index.ts"),
+    initTemplate(".smithers/agents/README.md"),
   ];
   if (options.scaffoldCustomAgent) {
-    files.splice(5, 0, {
-      path: ".smithers/agents/custom.ts",
-      preserveExisting: true,
-      contents: [
-        'import { type AgentLike } from "smithers-orchestrator";',
-        "",
-        "// Custom AgentLike adapter scaffold.",
-        "// Implement generate(args) to run your provider/tool and return the assistant text.",
-        "export const CustomAgent: AgentLike = {",
-        "  async generate(args = {}) {",
-        '    const prompt = typeof args === "object" && args && "prompt" in args',
-        '      ? String((args as { prompt?: unknown }).prompt ?? "")',
-        '      : String(args ?? "");',
-        "    throw new Error(",
-        '      "CustomAgent is scaffolded but not implemented. Replace generate(args) with your adapter; it must return the assistant text for: " + prompt,',
-        "    );",
-        "  },",
-        "};",
-        "",
-      ].join("\n"),
-    });
+    files.splice(5, 0, initTemplate(".smithers/agents/custom.ts"));
   }
-  return files;
+  return files.map((file) =>
+    file.path === ".smithers/agents/index.ts"
+      ? {
+          ...file,
+          contents: file.contents.replace(
+            "/* {{CUSTOM_AGENT_EXPORT}} */\n",
+            options.scaffoldCustomAgent ? 'export { CustomAgent } from "./custom";\n' : "",
+          ),
+        }
+      : file,
+  );
 }
 const UI_WORKFLOWS = [
   { key: "create-workflow", title: "Create Workflow" },
@@ -412,82 +262,28 @@ const UI_WORKFLOWS = [
 export const UI_WORKFLOW_IDS = UI_WORKFLOWS.map((workflow) => workflow.key);
 function renderGatewayFile() {
   const mounts = UI_WORKFLOWS.map((w) => `await mountWorkflow(${JSON.stringify(w.key)}, ${JSON.stringify(w.title)});`);
+  const file = initTemplate(".smithers/gateway.ts");
   return {
-    path: ".smithers/gateway.ts",
-    contents: [
-      'import { Gateway, mdxPlugin } from "smithers-orchestrator";',
-      'import { dirname, resolve } from "node:path";',
-      'import { fileURLToPath } from "node:url";',
-      "",
-      "mdxPlugin();",
-      "",
-      "const here = dirname(fileURLToPath(import.meta.url));",
-      'const projectRoot = resolve(here, "..");',
-      "process.chdir(projectRoot);",
-      "",
-      'const parsedPort = Number(process.env.PORT ?? "7331");',
-      "const port = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 7331;",
-      'const host = process.env.HOST ?? "127.0.0.1";',
-      "",
-      "const gateway = new Gateway({ heartbeatMs: 15_000 });",
-      "",
-      "// Mount each workflow independently. Browser UIs are declared by each workflow",
-      '// with <UI entry="../ui/<key>.tsx" /> and discovered by Gateway.register().',
-      "// A workflow that fails to import (e.g. a broken prompt/MDX) disables only itself — the rest of",
-      "// the gateway and the other workflow UIs still come up.",
-      "async function mountWorkflow(key: string, title: string) {",
-      "  try {",
-      '    const workflowEntry = resolve(here, "workflows", key + ".tsx");',
-      '    const mod = await import("./workflows/" + key + ".tsx");',
-      "    gateway.register(key, mod.default, { entryFile: workflowEntry });",
-      "    const mounted = (gateway as any).workflows?.get?.(key)?.ui;",
-      "    if (mounted) {",
-      '      console.log("  " + title + " UI -> http://" + host + ":" + port + "/workflows/" + key);',
-      "    } else {",
-      '      console.log("  " + title + " (no UI)");',
-      "    }",
-      "  } catch (err) {",
-      "    const message = err instanceof Error ? err.message : String(err);",
-      '    console.warn("[gateway] skipped " + key + ": " + message);',
-      "  }",
-      "}",
-      "",
-      'console.log("Workflow UIs:");',
-      ...mounts,
-      "",
-      "await gateway.listen({ host, port });",
-      'console.log("Smithers Gateway listening on http://" + host + ":" + port);',
-      "",
-    ].join("\n"),
+    ...file,
+    contents: file.contents.replace("/* {{MOUNTS}} */", mounts.join("\n")),
   };
 }
 function renderTemplateFiles(versions, env, projectRoot, options = {}) {
   const files = [
-    {
-      path: ".smithers/.gitignore",
-      contents: "node_modules/\nexecutions/\nruns/\nreports/\nsandboxes/\nlogs/\nstate\ntmp\n*.db\n*.sqlite\npg/\n",
-    },
-    { path: ".smithers/workflows/.gitignore", contents: "*.log\nrun-*.log\n" },
+    initTemplate(".smithers/.gitignore"),
+    initTemplate(".smithers/workflows/.gitignore"),
     { path: ".smithers/package.json", contents: renderPackageJson(versions) },
-    { path: ".smithers/tsconfig.json", contents: renderTsconfig() },
-    {
-      path: ".smithers/types/assets.d.ts",
-      contents:
-        'declare module "*.md" { const Component: any; export default Component; }\ndeclare module "*.mdx" { const Component: any; export default Component; }\n',
-    },
-    { path: ".smithers/bunfig.toml", contents: 'preload = ["./preload.ts"]\n' },
-    { path: ".smithers/preload.ts", contents: 'import { mdxPlugin } from "smithers-orchestrator";\nmdxPlugin();\n' },
+    initTemplate(".smithers/tsconfig.json"),
+    initTemplate(".smithers/types/assets.d.ts"),
+    initTemplate(".smithers/bunfig.toml"),
+    initTemplate(".smithers/preload.ts"),
     renderGatewayFile(),
     ...renderAgentScaffoldFiles({ scaffoldCustomAgent: options.scaffoldCustomAgent }),
     { path: ".smithers/agents.ts", contents: generateAgentsTs(env, { cwd: projectRoot }) },
-    {
-      path: ".smithers/smithers.config.ts",
-      contents:
-        "export const repoCommands = { lint: null, test: null, coverage: null } as const;\nexport default { repoCommands };\n",
-    },
+    initTemplate(".smithers/smithers.config.ts"),
     ...GENERATED_SEEDED_FILES,
-    { path: ".smithers/skills/.gitkeep", contents: "" },
-    { path: ".smithers/tickets/.gitkeep", contents: "" },
+    initTemplate(".smithers/skills/.gitkeep"),
+    initTemplate(".smithers/tickets/.gitkeep"),
   ];
   files.push({
     path: ".smithers/smithers.toon",

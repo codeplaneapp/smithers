@@ -1,0 +1,11 @@
+node_modules/
+executions/
+runs/
+reports/
+sandboxes/
+logs/
+state
+tmp
+*.db
+*.sqlite
+pg/
