@@ -23,9 +23,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { z } from "zod";
 import { Gateway, type GatewayTokenGrant } from "@smithers-orchestrator/server";
 import { SmithersDb } from "@smithers-orchestrator/db";
-import { SmithersGatewayClient } from "@smithers-orchestrator/gateway-client";
+import { SmithersGatewayClient, type SmithersDataClient } from "@smithers-orchestrator/gateway-client";
 import { createSmithers } from "smithers-orchestrator";
 import {
+  SmithersCollectionsProvider,
   SmithersGatewayProvider,
   useGatewayActions,
   useGatewayApprovals,
@@ -184,6 +185,93 @@ async function mountHarness(): Promise<Harness> {
 }
 
 describe("collection-backed gateway hooks over a real in-memory gateway", () => {
+  test("useGatewayNodeOutput refetches when matching work finishes", async () => {
+    const runId = "event-invalidated-output";
+    const nodeId = "task1";
+    let produced = false;
+    let eventRows: Array<{ runId: string; seq: number; event: string; payload: unknown }> = [];
+    let eventCalls = 0;
+    const outputCalls: Array<{ runId: string; nodeId: string; iteration?: number }> = [];
+    const streamListeners = new Set<(event: { type: "change"; seq: number; collections: string[] }) => void>();
+    const streamStatus = { status: "online" as const };
+    const client = {
+      mode: { kind: "local", apiBaseUrl: "http://gateway.test" },
+      api: {
+        getNodeOutput: async (params: { runId: string; nodeId: string; iteration?: number }) => {
+          outputCalls.push(params);
+          return produced ? { status: "produced", row: { value: 42 } } : { status: "pending" };
+        },
+        listRunEvents: async ({ afterSeq }: { afterSeq?: number }) => {
+          eventCalls += 1;
+          return eventRows.filter((row) => afterSeq === undefined || row.seq > afterSeq);
+        },
+      },
+      stream: {
+        subscribe(listener: (event: { type: "change"; seq: number; collections: string[] }) => void) {
+          streamListeners.add(listener);
+          return () => streamListeners.delete(listener);
+        },
+        subscribeStatus() {
+          return () => {};
+        },
+        status: () => streamStatus,
+        waitForSeq: async () => {},
+      },
+      close() {},
+    } as unknown as SmithersDataClient;
+    let snapshot: ReturnType<typeof useGatewayNodeOutput> | undefined;
+
+    function Probe() {
+      snapshot = useGatewayNodeOutput({ runId, nodeId, iteration: 0 });
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(createElement(SmithersCollectionsProvider, { client }, createElement(Probe)));
+    await waitFor(() => snapshot?.data?.status === "pending", "initial pending node output");
+    expect(outputCalls).toEqual([{ runId, nodeId, iteration: 0 }]);
+
+    eventRows = [
+      {
+        runId,
+        seq: 1,
+        event: "NodeFinished",
+        payload: { runId, nodeId: "other-task", iteration: 0 },
+      },
+    ];
+    await act(async () => {
+      for (const listener of streamListeners) {
+        listener({ type: "change", seq: 1, collections: ["run_events", "node_outputs"] });
+      }
+    });
+    await waitFor(() => eventCalls >= 2, "non-matching event cursor");
+    expect(outputCalls).toHaveLength(1);
+
+    produced = true;
+    eventRows = [
+      ...eventRows,
+      {
+        runId,
+        seq: 2,
+        event: "NodeFinished",
+        payload: { runId, nodeId, iteration: 0 },
+      },
+    ];
+    await act(async () => {
+      for (const listener of streamListeners) {
+        listener({ type: "change", seq: 2, collections: ["run_events", "node_outputs"] });
+      }
+    });
+
+    await waitFor(() => snapshot?.data?.status === "produced", "event-invalidated node output");
+    expect(snapshot?.data).toEqual({ status: "produced", row: { value: 42 } });
+    expect(outputCalls).toEqual([
+      { runId, nodeId, iteration: 0 },
+      { runId, nodeId, iteration: 0 },
+    ]);
+    await harness.unmount();
+  });
+
   test("keeps run event results stable across renders without new collection data", async () => {
     const { baseUrl } = await bootGateway();
     const runId = await launchRun(baseUrl, 3);
@@ -329,12 +417,9 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     expect(captured.runTreeDisabled.root).toBeNull();
 
     // Node output: the hook fetched once on mount (before task1 existed → the
-    // real "Node not found" error path). Once the run completes, an explicit
-    // refetch resolves the produced output (the success path).
+    // real "Node not found" error path). The matching completion event
+    // automatically refetches the produced output.
     await waitFor(() => captured.run.data?.status === "finished", "run finished");
-    await act(async () => {
-      await captured.nodeOutput.refetch();
-    });
     await waitFor(
       () => captured.nodeOutput.loading === false && captured.nodeOutput.data !== undefined,
       "node output settled",
