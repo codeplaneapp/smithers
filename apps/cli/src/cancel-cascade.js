@@ -328,6 +328,8 @@ export async function cascadeCancelRun(adapter, rootRunId, options = {}) {
       return;
     }
     const wasFresh = run.status === "running" && heartbeatFresh(run);
+    const ownerPid = parseRuntimeOwnerPid(run.runtimeOwnerId);
+    const ownerIsKnownDead = ownerPid !== null && !isPidAlive(ownerPid);
     // Preserve the discovery probe used by launch-race tests and give a
     // live owner one last chance to publish an attempt before the durable
     // cancellation claim fences it out.
@@ -336,7 +338,7 @@ export async function cascadeCancelRun(adapter, rootRunId, options = {}) {
     const activeCount = activeAttempts.filter((attempt) =>
       ["in-progress", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota"].includes(attempt.state),
     ).length;
-    if (wasFresh) {
+    if (wasFresh && !ownerIsKnownDead) {
       const requested = await adapter.requestRunCancel(runId, now());
       if (requested) {
         outcome.action = "cancel-requested";

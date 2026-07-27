@@ -74,6 +74,52 @@ describe("runClaudeMonitor stall notification", () => {
     expect(stalls[0].action).not.toContain("smithers explain");
   });
 
+  test("a pending durable cancellation suppresses run-stalled", async () => {
+    const nowMs = 1_700_000_000_000;
+    const stalledAfterMs = 120_000;
+    const adapter = makeStalledRunAdapter(nowMs, stalledAfterMs);
+    adapter.getRun = async () => ({
+      runId: RUN_ID,
+      status: "running",
+      heartbeatAtMs: nowMs - stalledAfterMs - 1000,
+      cancelRequestedAtMs: nowMs - 1000,
+    });
+    const lines = [];
+
+    await runClaudeMonitor(adapter, {
+      ticks: 2,
+      intervalMs: 250,
+      stalledAfterMs,
+      now: () => nowMs,
+      write: (line) => lines.push(JSON.parse(line)),
+    });
+
+    expect(lines.filter((line) => line.kind === "run-stalled")).toHaveLength(0);
+  });
+
+  test("RunCancelled observed while the row is still running suppresses current and later stalls", async () => {
+    const nowMs = 1_700_000_000_000;
+    const stalledAfterMs = 120_000;
+    const adapter = makeStalledRunAdapter(nowMs, stalledAfterMs);
+    adapter.listEventHistory = async (_runId, { afterSeq }) =>
+      [{ seq: 1, type: "RunCancelled", timestampMs: nowMs - stalledAfterMs - 1000, payloadJson: "{}" }].filter(
+        (row) => row.seq > afterSeq,
+      );
+    const lines = [];
+
+    await runClaudeMonitor(adapter, {
+      ticks: 3,
+      intervalMs: 250,
+      stalledAfterMs,
+      transitions: "all",
+      now: () => nowMs,
+      write: (line) => lines.push(JSON.parse(line)),
+    });
+
+    expect(lines.filter((line) => line.kind === "run-cancelled")).toHaveLength(1);
+    expect(lines.filter((line) => line.kind === "run-stalled")).toHaveLength(0);
+  });
+
   // Issue #1054: a saturated engine keeps persisting events while its
   // heartbeat timers are starved. Recent persisted event activity must count
   // as liveness — a late heartbeat alone must not flag a busy run as stalled.

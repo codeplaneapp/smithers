@@ -85,6 +85,8 @@ export async function runClaudeMonitor(adapter, options = {}) {
   const emitted = new Set();
   /** @type {Set<string>} runs currently flagged stalled */
   const stalledRuns = new Set();
+  /** @type {Set<string>} runs for which cancellation was durably observed */
+  const cancellationObserved = new Set();
   /** @type {Map<string, number>} last time NEW persisted events were observed per run */
   const eventActivityAt = new Map();
   /** @type {Map<string, number>} newest persisted active-task heartbeat observed per run */
@@ -205,6 +207,9 @@ export async function runClaudeMonitor(adapter, options = {}) {
             continue;
           }
           sawTerminalEvent = true;
+          if (kind === "run-cancelled") {
+            cancellationObserved.add(runId);
+          }
           if (!allTransitions && FYI_KINDS.has(kind)) {
             continue;
           }
@@ -242,6 +247,20 @@ export async function runClaudeMonitor(adapter, options = {}) {
       // the cancellation/status-write race and must never become an
       // approval-pending notification for a run that can no longer resume.
       if (!finalScan) {
+        // The run scan, event scan, and durable cancel marker are separate
+        // reads. A RunCancelled event can arrive before the status flip, and
+        // the cancel marker can arrive after listRuns. Re-read before any
+        // actionable signal so neither race becomes a false stall.
+        const currentRun = await Promise.resolve(adapter.getRun?.(runId)).catch(() => undefined);
+        if (
+          cancellationObserved.has(runId) ||
+          run.cancelRequestedAtMs != null ||
+          currentRun?.cancelRequestedAtMs != null ||
+          (currentRun && isTerminalClaudeMirrorRunStatus(currentRun.status))
+        ) {
+          stalledRuns.delete(runId);
+          continue;
+        }
         await emitPendingGates(adapter, runId, emitOnce);
         const attemptsRead = await readActiveAttempts(adapter, runId);
         const activeAttempts = attemptsRead.ok ? (attemptsRead.attempts ?? []) : [];
@@ -257,8 +276,16 @@ export async function runClaudeMonitor(adapter, options = {}) {
           }
         }
         if (eventReadFailed || !attemptsRead.ok) continue;
+        const beforeStall = await Promise.resolve(adapter.getRun?.(runId)).catch(() => undefined);
+        if (
+          beforeStall &&
+          (beforeStall.cancelRequestedAtMs != null || isTerminalClaudeMirrorRunStatus(beforeStall.status))
+        ) {
+          stalledRuns.delete(runId);
+          continue;
+        }
         trackStall(
-          run,
+          beforeStall ?? currentRun ?? run,
           stalledAfterMs,
           stalledRuns,
           emit,

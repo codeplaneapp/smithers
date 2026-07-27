@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
@@ -269,6 +269,25 @@ describe("cascadeCancelRun (real sqlite store)", () => {
       const child = await adapter.getRun("live-child");
       expect(child.status).toBe("running");
       expect(child.cancelRequestedAtMs ?? 0).toBeGreaterThan(0);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("a fresh heartbeat with a dead recorded owner is finalized immediately", async () => {
+    const { sqlite, adapter } = createMemoryDb();
+    try {
+      const deadPid = spawnSync(process.execPath, ["-e", ""], { stdio: "ignore" }).pid;
+      await insertRun(adapter, "dead-owner", {
+        heartbeatAtMs: fresh(),
+        runtimeOwnerId: `pid:${deadPid}:dead-owner`,
+      });
+
+      const summary = await cascadeCancelRun(adapter, "dead-owner");
+
+      expect(summary.root).toMatchObject({ runId: "dead-owner", action: "cancelled" });
+      const run = await adapter.getRun("dead-owner");
+      expect(run.status).toBe("cancelled");
     } finally {
       sqlite.close();
     }

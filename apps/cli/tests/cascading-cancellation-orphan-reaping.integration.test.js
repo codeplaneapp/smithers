@@ -1,13 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "../../../packages/db/src/adapter.js";
 import { ensureSmithersTables } from "../../../packages/db/src/ensure.js";
 import { createTempRepo, pinSqliteBackend, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
+import { runClaudeMonitor } from "../src/claude-mirror/runClaudeMonitor.js";
 
 const TIMEOUT_MS = 120_000;
+const ENGINE_RUNNER = fileURLToPath(new URL("../../../e2e/harness/engineChildRunner.ts", import.meta.url));
 const processes = new Set();
 
 function alive(pid) {
@@ -81,6 +84,70 @@ async function insertRun(adapter, runId, overrides = {}) {
 }
 
 describe.skipIf(process.platform === "win32")("cascading cancellation and orphan reaping integration", () => {
+  test(
+    "cancel finalizes a freshly heartbeating run after its engine dies and no stall follows",
+    async () => {
+      const repo = createTempRepo();
+      pinSqliteBackend(repo.dir);
+      const sqlite = new Database(repo.path("smithers.db"));
+      const db = drizzle(sqlite);
+      ensureSmithersTables(db);
+      const adapter = new SmithersDb(db);
+      try {
+        const runId = "dead-engine-run";
+        const engine = spawn(
+          process.execPath,
+          [
+            ENGINE_RUNNER,
+            repo.path("smithers.db"),
+            runId,
+            "initial",
+            repo.dir,
+            repo.path("engine-executions.log"),
+            "60000",
+            crypto.randomUUID(),
+          ],
+          { stdio: "ignore" },
+        );
+        expect(typeof engine.pid).toBe("number");
+        processes.add(engine.pid);
+        expect(
+          await waitUntil(() => repo.exists("B.started") || engine.exitCode !== null || engine.signalCode !== null, 60_000),
+        ).toBe(true);
+        expect(engine.exitCode).toBeNull();
+        expect(engine.signalCode).toBeNull();
+        const liveRun = await adapter.getRun(runId);
+        expect(liveRun.runtimeOwnerId).toContain(`pid:${engine.pid}:`);
+        expect(Date.now() - liveRun.heartbeatAtMs).toBeLessThan(30_000);
+
+        engine.kill("SIGKILL");
+        expect(await waitUntil(() => !alive(engine.pid))).toBe(true);
+
+        const result = runSmithers(["cancel", runId], {
+          cwd: repo.dir,
+          format: "json",
+          timeoutMs: TIMEOUT_MS,
+        });
+
+        expect(result.exitCode).toBe(2);
+        expect((await adapter.getRun(runId)).status).toBe("cancelled");
+
+        const lines = [];
+        await runClaudeMonitor(adapter, {
+          ticks: 2,
+          intervalMs: 250,
+          stalledAfterMs: 5_000,
+          now: () => Date.now() + 10_000,
+          write: (line) => lines.push(JSON.parse(line)),
+        });
+        expect(lines.filter((line) => line.kind === "run-stalled")).toHaveLength(0);
+      } finally {
+        sqlite.close();
+      }
+    },
+    TIMEOUT_MS,
+  );
+
   test(
     "public cancel converges a nested mixed-state lineage and reaps every detached process tree",
     async () => {

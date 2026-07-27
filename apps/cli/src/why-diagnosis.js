@@ -616,6 +616,17 @@ function buildDiagnosis(params) {
       currentNodeId: firstCurrentNode(nodes),
     };
   }
+  if (status === "running" && typeof run.cancelRequestedAtMs === "number") {
+    return {
+      runId,
+      status,
+      summary: `Cancellation was requested at ${new Date(run.cancelRequestedAtMs).toISOString()} but has not yet been applied. Do not resume this run.`,
+      generatedAtMs: nowMs,
+      blockers: [],
+      information,
+      currentNodeId: firstCurrentNode(nodes),
+    };
+  }
   const descriptorMetadata = parseFrameDescriptorMetadata(lastFrame?.xmlJson);
   const parsedEvents = events.map((row) => ({
     row,

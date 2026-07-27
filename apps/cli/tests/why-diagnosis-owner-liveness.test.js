@@ -115,6 +115,26 @@ describe("why diagnosis — owner liveness before orphaned", () => {
     expect(diagnosis.blockers[0]?.context).toBeUndefined();
   });
 
+  test("pending cancellation is reported without resume guidance", async () => {
+    const cancelRequestedAtMs = NOW - 10_000;
+    const diagnosis = await diagnose(
+      runRow({
+        heartbeatAtMs: LAGGING_HEARTBEAT,
+        runtimeOwnerId: `pid:${deadPid()}:cli-session`,
+        cancelRequestedAtMs,
+      }),
+    );
+
+    expect(diagnosis.blockers).toHaveLength(0);
+    expect(diagnosis.summary).toBe(
+      `Cancellation was requested at ${new Date(cancelRequestedAtMs).toISOString()} but has not yet been applied. Do not resume this run.`,
+    );
+    expect(renderWhyDiagnosisHuman(diagnosis)).not.toContain("smithers up");
+    expect(diagnosisCtaCommands(diagnosis).map((entry) => entry.command)).not.toContainEqual(
+      expect.stringContaining("resume"),
+    );
+  });
+
   test("heartbeat within the fresh window → no run-level blocker at all", async () => {
     const diagnosis = await diagnose(
       runRow({
