@@ -4,9 +4,9 @@ import { randomBytes } from "node:crypto";
 import { connect as connectTcp } from "node:net";
 import { Gateway } from "../src/gateway.js";
 
-// Responses, generic events, and dedicated stream frames must all use one
-// byte-bounded writer. A controllable fake socket gives exact ordering and
-// backpressure assertions without allocating tens of megabytes per test.
+// Responses and events must all use one byte-bounded writer. A controllable
+// fake socket gives exact ordering and backpressure assertions without
+// allocating tens of megabytes per test.
 
 // Mirror the CONNECTION_EVENT_* constants in src/gateway.js.
 const QUEUE_MAX_BYTES = 32 * 1024 * 1024;
@@ -110,7 +110,7 @@ describe("gateway connection writer", () => {
     expect(writer.queuedBytes).toBe(0);
   });
 
-  test("generic copies and run-event stream frames share the one bounded writer", async () => {
+  test("a matching run-event stream receives each logical event exactly once", async () => {
     gateway = new Gateway({});
     connection = makeFakeConnection({ bufferedAmount: 0 });
     gateway.connections.add(connection);
@@ -127,11 +127,14 @@ describe("gateway connection writer", () => {
     }
     await sleep(20);
 
-    expect(connection.sent.filter((frame) => frame.event === "node.started")).toHaveLength(healthy);
+    expect(connection.sent.filter((frame) => frame.event === "node.started")).toHaveLength(0);
     expect(connection.sent.filter((frame) => frame.event === "run.event")).toHaveLength(healthy);
+    expect(connection.sent.map((frame) => frame.payload.payload.nodeId)).toEqual(
+      Array.from({ length: healthy }, (_value, index) => `n${index + 1}`),
+    );
 
-    // Congest the socket: BOTH copies must stop hitting ws.send and buffer
-    // only in bounded structures.
+    // Congest the socket: the single dedicated copy stops hitting ws.send and
+    // buffers in the stream's bounded queue.
     const alreadySent = connection.sent.length;
     connection.ws.bufferedAmount = 16 * 1024 * 1024;
     const congested = 15;
@@ -144,18 +147,16 @@ describe("gateway connection writer", () => {
       });
     }
     expect(connection.sent).toHaveLength(alreadySent);
-    expect(connection.eventWriter.queue).toHaveLength(congested);
+    expect(connection.eventWriter.queue).toHaveLength(0);
     const stream = connection.runEventStreams.get("stream-shared");
     expect(stream.outboundQueue).toHaveLength(congested);
 
-    // Recovery flushes both copies through the same writer: connection seq is
-    // contiguous across the full delivery order, so no frame took a side
-    // channel around the writer.
+    // Recovery flushes the single copy through the connection writer.
     connection.ws.bufferedAmount = 0;
     await sleep(80);
     expect(
       connection.sent.filter((frame) => frame.event === "node.started" && frame.payload.nodeId.startsWith("c")),
-    ).toHaveLength(congested);
+    ).toHaveLength(0);
     expect(
       connection.sent.filter((frame) => frame.event === "run.event" && frame.payload.payload.nodeId.startsWith("c")),
     ).toHaveLength(congested);
@@ -163,6 +164,66 @@ describe("gateway connection writer", () => {
     expect([...seqs].sort((a, b) => a - b)).toEqual(seqs);
     expect(connection.eventWriter.queue).toHaveLength(0);
     expect(connection.eventWriter.queuedBytes).toBe(0);
+    expect(stream.outboundQueue).toHaveLength(0);
+  });
+
+  test("run filtering still applies before choosing the dedicated delivery path", () => {
+    gateway = new Gateway({});
+    connection = makeFakeConnection();
+    connection.subscribedRuns = new Set(["run-allowed"]);
+    gateway.connections.add(connection);
+    gateway.registerRunEventSubscriber(connection, "stream-blocked", "run-blocked");
+
+    gateway.broadcastEvent("node.started", {
+      runId: "run-blocked",
+      nodeId: "blocked",
+      state: "started",
+      iteration: 0,
+    });
+    gateway.broadcastEvent("node.started", {
+      runId: "run-allowed",
+      nodeId: "allowed",
+      state: "started",
+      iteration: 0,
+    });
+
+    expect(connection.sent).toHaveLength(1);
+    expect(connection.sent[0].event).toBe("node.started");
+    expect(connection.sent[0].payload.nodeId).toBe("allowed");
+    expect(connection.runEventStreams.get("stream-blocked").outboundQueue).toHaveLength(0);
+  });
+
+  test("live events remain queued behind replay without a generic duplicate", () => {
+    gateway = new Gateway({});
+    gateway.broadcastEvent("node.started", {
+      runId: "run-replay",
+      nodeId: "replayed",
+      state: "started",
+      iteration: 0,
+    });
+    connection = makeFakeConnection();
+    gateway.connections.add(connection);
+    gateway.registerRunEventSubscriber(connection, "stream-replay", "run-replay", true);
+
+    gateway.broadcastEvent("node.started", {
+      runId: "run-replay",
+      nodeId: "live",
+      state: "started",
+      iteration: 0,
+    });
+
+    const stream = connection.runEventStreams.get("stream-replay");
+    expect(connection.sent).toHaveLength(0);
+    expect(stream.outboundQueue).toHaveLength(1);
+
+    const replayFrame = gateway.runEventWindows.get("run-replay").window[0];
+    gateway.sendRunEventStreamFrame(connection, "stream-replay", replayFrame, true);
+    stream.replayPending = false;
+    gateway.drainRunEventStream(connection, stream);
+
+    expect(connection.sent.map((frame) => frame.event)).toEqual(["run.event", "run.event"]);
+    expect(connection.sent.map((frame) => frame.payload.payload.nodeId)).toEqual(["replayed", "live"]);
+    expect(connection.sent.map((frame) => frame.payload.seq)).toEqual([1, 2]);
     expect(stream.outboundQueue).toHaveLength(0);
   });
 

@@ -271,12 +271,8 @@ const RUN_EVENT_STREAM_MAX_SUBSCRIBERS_PER_USER = 32;
 const RUN_EVENT_STREAM_MAX_SUBSCRIBERS_PER_CONNECTION = 8;
 const RUN_EVENT_STREAM_MAX_SUBSCRIBERS_PER_RUN = 64;
 // One byte-bounded writer per connection for EVERY gateway output frame.
-// broadcastEvent used to hand the generic copy of each run event straight to
-// ws.send while only the dedicated run-event stream frames went through a
-// bounded queue, while RPC responses also called ws.send directly. A slow
-// socket could therefore accumulate unbounded ws buffering through either
-// path. Responses and events now share one serialized-byte-bounded queue that
-// drains against the socket's observable bufferedAmount. Overflowing the
+// Responses and events share one serialized-byte-bounded queue that drains
+// against the socket's observable bufferedAmount. Overflowing the
 // per-connection byte budget closes the connection; the per-stream
 // frame-count overflow (run.error: BackpressureDisconnect) still tears down
 // individual slow streams first.
@@ -7326,12 +7322,10 @@ a { color: var(--brand); }</style>
   }
   /**
    * The single byte-bounded writer every event frame for a connection goes
-   * through — the generic broadcast copy AND the dedicated run-event stream
-   * frames (whose per-stream queues drain into sendEvent) both land here, so
-   * neither can bypass backpressure. On a healthy socket frames are written
-   * straight through; once the socket's observable bufferedAmount crosses the
-   * high-water mark frames queue here — bounded by bytes — and drain when the
-   * socket recovers. Overflow disconnects the connection.
+   * through. On a healthy socket frames are written straight through; once
+   * the socket's observable bufferedAmount crosses the high-water mark frames
+   * queue here — bounded by bytes — and drain when the socket recovers.
+   * Overflow disconnects the connection.
    * @param {ConnectionState} connection
    * @param {ConnectionEventWriterState} writer
    * @param {string} data
@@ -7469,13 +7463,17 @@ a { color: var(--brand); }</style>
         continue;
       }
       recipientCount += 1;
-      this.sendEvent(connection, event, payload, this.stateVersion);
+      let deliveredToRunStream = false;
       if (runFrame && connection.runEventStreams) {
         for (const [streamId, stream] of connection.runEventStreams.entries()) {
           if (stream.runId === runId) {
+            deliveredToRunStream = true;
             this.sendRunEventStreamFrame(connection, streamId, runFrame);
           }
         }
+      }
+      if (!deliveredToRunStream) {
+        this.sendEvent(connection, event, payload, this.stateVersion);
       }
     }
     if (event === "run.completed" && runId) {
