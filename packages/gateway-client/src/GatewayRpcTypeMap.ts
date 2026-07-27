@@ -26,6 +26,8 @@ import type {
   GetScoreDetailResponse,
   ListRunsRequest,
   ListRunsResponse,
+  ListRunDescendantsRequest,
+  ListRunDescendantsResponse,
   ListScoresRequest,
   ListScoresResponse,
   ListTicketsRequest,
@@ -92,6 +94,7 @@ export type GatewayRpcRequestMap = {
   getRun: GetRunRequest;
   listRunTokenUsage: ListRunTokenUsageRequest;
   listRuns: ListRunsRequest;
+  listRunDescendants: ListRunDescendantsRequest;
   listWorkflows: ListWorkflowsRequest;
   listApprovals: ListApprovalsRequest;
   streamRunEvents: StreamRunEventsRequest;
@@ -138,6 +141,7 @@ export type GatewayRpcResponseMap = {
   getRun: Record<string, unknown>;
   listRunTokenUsage: ListRunTokenUsageResponse;
   listRuns: ListRunsResponse;
+  listRunDescendants: ListRunDescendantsResponse;
   listWorkflows: ListWorkflowsResponse;
   listApprovals: ListApprovalsResponse;
   streamRunEvents: StreamRunEventsResponse;

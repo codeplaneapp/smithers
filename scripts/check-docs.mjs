@@ -1010,8 +1010,8 @@ function checkGatewayRpcReferenceDocsMatchRegistry() {
   const extraDocs = actualDocs.filter((name) => !expectedDocs.includes(name));
   const problems = [];
 
-  if (definitions.length !== 43) {
-    problems.push(`expected 43 Gateway RPC definitions, found ${definitions.length}`);
+  if (definitions.length !== 44) {
+    problems.push(`expected 44 Gateway RPC definitions, found ${definitions.length}`);
   }
   for (const name of missingDocs) problems.push(`missing docs/rpc/${name}`);
   for (const name of extraDocs) problems.push(`unexpected docs/rpc/${name}`);
@@ -3969,6 +3969,8 @@ function checkGatewaySdkDocsMatchExports() {
     [GATEWAY_CLIENT_INDEX, 'export type { WorkspaceMode } from "./data/WorkspaceMode.ts";'],
     [GATEWAY_CLIENT_INDEX, "GatewayExtensionStreamFrame"],
     [GATEWAY_CLIENT_RPC_TYPE_MAP, "listRuns: ListRunsResponse;"],
+    [GATEWAY_CLIENT_RPC_TYPE_MAP, "listRunDescendants: ListRunDescendantsRequest;"],
+    [GATEWAY_CLIENT_RPC_TYPE_MAP, "listRunDescendants: ListRunDescendantsResponse;"],
     [GATEWAY_CLIENT_RPC_TYPE_MAP, "listWorkflows: ListWorkflowsResponse;"],
     [GATEWAY_CLIENT_RPC_TYPE_MAP, "listApprovals: ListApprovalsResponse;"],
     [GATEWAY_CLIENT_RPC_TYPE_MAP, "getNodeOutput: Record<string, unknown>;"],
@@ -3981,6 +3983,7 @@ function checkGatewaySdkDocsMatchExports() {
     [GATEWAY_CLIENT_SOURCE, "this.boot = globalThis.__SMITHERS_GATEWAY_UI__;"],
     [GATEWAY_CLIENT_SOURCE, "options: { signal?: AbortSignal } = {},"],
     [GATEWAY_CLIENT_SOURCE, 'listRuns(params: GatewayRpcParams<"listRuns"> = {}) {'],
+    [GATEWAY_CLIENT_SOURCE, 'listRunDescendants(params: GatewayRpcParams<"listRunDescendants">) {'],
     [GATEWAY_CLIENT_SOURCE, 'headers.set("authorization", `Bearer ${options.token}`);'],
     [GATEWAY_CLIENT_SOURCE, "...(this.token ? { auth: { token: this.token } } : {}),"],
     [

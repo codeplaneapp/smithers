@@ -36,6 +36,9 @@
 /** @typedef {import("./gatewayRpcTypes.ts").ListRunsRequest} ListRunsRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayRunSummary} GatewayRunSummary */
 /** @typedef {import("./gatewayRpcTypes.ts").ListRunsResponse} ListRunsResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").ListRunDescendantsRequest} ListRunDescendantsRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").GatewayRunDescendant} GatewayRunDescendant */
+/** @typedef {import("./gatewayRpcTypes.ts").ListRunDescendantsResponse} ListRunDescendantsResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").GetSchemaSignatureRequest} GetSchemaSignatureRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GetSchemaSignatureResponse} GetSchemaSignatureResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayWorkflowSummary} GatewayWorkflowSummary */

@@ -245,6 +245,20 @@ describe("SmithersDb adapter", () => {
     const runs = await adapter.listRuns(3);
     expect(runs.length).toBe(3);
   });
+  test("listRuns filters direct children by parent run id", async () => {
+    const { adapter } = createTestDb();
+    const configJson = JSON.stringify({ gatewayWorkflowKey: "deploy", gatewaySystem: false });
+    await adapter.insertRun(runRow("root", "finished", { configJson }));
+    await adapter.insertRun(runRow("child-a", "finished", { parentRunId: "root", configJson }));
+    await adapter.insertRun(runRow("child-b", "failed", { parentRunId: "root", configJson }));
+    await adapter.insertRun(runRow("grandchild", "finished", { parentRunId: "child-a", configJson }));
+
+    const children = await adapter.listRuns(50, undefined, undefined, {
+      includeSystem: false,
+      parentRunId: "root",
+    });
+    expect(children.map((run) => run.runId).sort()).toEqual(["child-a", "child-b"]);
+  });
   test("listRuns excludes system and unstamped historical rows before applying limit", async () => {
     const { adapter } = createTestDb();
     await adapter.insertRun(

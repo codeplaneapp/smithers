@@ -144,6 +144,8 @@ const runDetailSchema = runSummarySchema.extend({
   approvals: z.array(pendingApprovalSchema),
   loops: z.array(runLoopSchema),
   continuedFromRunIds: z.array(z.string()),
+  childRunIds: z.array(z.string()),
+  descendantRunIds: z.array(z.string()),
   activeDescendantRunId: z.string().nullable(),
   config: z.unknown().nullable(),
   error: z.unknown().nullable(),
@@ -788,12 +790,15 @@ async function buildRunSummary(adapter, run) {
  */
 async function buildRunDetail(adapter, runId, dbPath) {
   const run = await requireRun(adapter, runId, dbPath);
-  const [summary, nodes, approvals, loops, ancestry] = await Promise.all([
+  const [summary, nodes, approvals, loops, ancestry, descendants] = await Promise.all([
     buildRunSummary(adapter, run),
     adapter.listNodes(runId),
     adapter.listPendingApprovals(runId),
     adapter.listRalph(runId),
     adapter.listRunAncestry(runId, 1_000),
+    typeof adapter.listRunDescendants === "function"
+      ? adapter.listRunDescendants(runId, 1_000)
+      : [{ runId, parentRunId: run.parentRunId ?? null, depth: 0 }],
   ]);
   let activeDescendantRunId = null;
   const seen = new Set([runId]);
@@ -842,6 +847,8 @@ async function buildRunDetail(adapter, runId, dbPath) {
       maxIterations: loop.maxIterations ?? null,
     })),
     continuedFromRunIds: ancestry.slice(1).map((row) => row.runId),
+    childRunIds: descendants.filter((row) => row.depth === 1).map((row) => row.runId),
+    descendantRunIds: descendants.slice(1).map((row) => row.runId),
     activeDescendantRunId,
     config: parseJsonValue(run.configJson),
     error: parseJsonValue(run.errorJson),

@@ -4232,6 +4232,7 @@ a { color: var(--brand); }</style>
             offset: queryNonNegativeInt(url.searchParams, "offset"),
             status: queryString(url.searchParams, "status"),
             workflow: queryString(url.searchParams, "workflow"),
+            parentRunId: queryString(url.searchParams, "parentRunId"),
             includeSystem:
               queryString(url.searchParams, "includeSystem") === undefined
                 ? undefined
@@ -4294,6 +4295,16 @@ a { color: var(--brand); }</style>
       return {
         method: "listRunTokenUsage",
         params: { runId: decodeURIComponent(runTokenUsage[1]) },
+      };
+    }
+    const runDescendants = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/descendants$/);
+    if (httpMethod === "GET" && runDescendants) {
+      return {
+        method: "listRunDescendants",
+        params: {
+          runId: decodeURIComponent(runDescendants[1]),
+          limit: queryPositiveInt(url.searchParams, "limit"),
+        },
       };
     }
     const runTree = pathname.match(/^\/v1\/api\/runs\/([^/]+)\/(?:tree|devtools)$/);
@@ -7448,8 +7459,9 @@ a { color: var(--brand); }</style>
    * @param {string} [workflow]
    * @param {number} [offset] Rows to skip after the newest-first sort (server-side pagination).
    * @param {boolean} [includeSystem] Include internal and historical unstamped runs.
+   * @param {string} [parentRunId] Return only direct children of this run.
    */
-  async listRunsAcrossWorkflows(limit = 50, status, workflow, offset = 0, includeSystem = false) {
+  async listRunsAcrossWorkflows(limit = 50, status, workflow, offset = 0, includeSystem = false, parentRunId) {
     const registeredKeys = new Set(this.workflows.keys());
     const seenAdapters = new Set();
     const byRunId = new Map();
@@ -7463,7 +7475,7 @@ a { color: var(--brand); }</style>
       seenAdapters.add(adapter);
       // Each adapter's query is newest-first LIMIT; overfetch by the offset
       // so the merged window still contains the page being asked for.
-      const rows = await adapter.listRuns(limit + offset, status, workflow, { includeSystem });
+      const rows = await adapter.listRuns(limit + offset, status, workflow, { includeSystem, parentRunId });
       for (const row of rows) {
         if (byRunId.has(row.runId)) {
           continue;
@@ -8518,6 +8530,7 @@ a { color: var(--brand); }</style>
         const limit = asOptionalPositiveInt(filter.limit, "limit") ?? 50;
         const status = asString(filter.status);
         const workflow = asString(filter.workflow);
+        const parentRunId = asString(filter.parentRunId);
         const includeSystem = asBoolean(filter.includeSystem) ?? false;
         // offset pages the newest-first result server-side; 0 is valid
         // (asOptionalPositiveInt rejects it), so parse non-negative here.
@@ -8526,7 +8539,23 @@ a { color: var(--brand); }</style>
         if (typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < 0) {
           return responseError(frame.id, "INVALID_REQUEST", "offset must be a non-negative integer");
         }
-        return responseOk(frame.id, await this.listRunsAcrossWorkflows(limit, status, workflow, offset, includeSystem));
+        return responseOk(
+          frame.id,
+          await this.listRunsAcrossWorkflows(limit, status, workflow, offset, includeSystem, parentRunId),
+        );
+      }
+      case "runs.descendants":
+      case "listRunDescendants": {
+        const runId = asString(params.runId);
+        if (!runId) {
+          return responseError(frame.id, "INVALID_REQUEST", "runId is required");
+        }
+        const resolved = await this.resolveRun(runId);
+        if (!resolved) {
+          return responseError(frame.id, "NOT_FOUND", `Run not found: ${runId}`);
+        }
+        const limit = asOptionalPositiveInt(params.limit, "limit") ?? 1_000;
+        return responseOk(frame.id, await resolved.adapter.listRunDescendants(runId, limit));
       }
       case "getSchemaSignature": {
         const firstEntry = this.workflows.values().next().value;

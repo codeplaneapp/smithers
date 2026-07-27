@@ -325,6 +325,13 @@ function makeSemanticAdapter(overrides = {}) {
       state.attempts.filter((attempt) => attempt.nodeId === nodeId && (attempt.iteration ?? 0) === iteration),
     listRalph: async () => [{ ralphId: "loop-a", iteration: 2, maxIterations: 5 }],
     listRunAncestry: async () => [baseRun, runRow({ runId: "parent-run", workflowName: "parent" })],
+    listRunDescendants: (runId) =>
+      runnableEffect(
+        Effect.succeed([
+          { runId, parentRunId: null, depth: 0 },
+          { runId: "child-run", parentRunId: runId, depth: 1 },
+        ]),
+      ),
     getLatestChildRun: async (runId) => state.latestChildByRunId.get(runId),
     listAllPendingApprovals: async () => state.approvals.filter((approval) => approval.status === "requested"),
     getApproval: (runId, nodeId, iteration) =>
@@ -742,6 +749,17 @@ function expectWorkflowSummaryMatchesSchema(workflow) {
 }
 
 describe("semantic tool definitions", () => {
+  test("get_run exposes every direct and transitive child run id", async () => {
+    const harness = makeHarness();
+    const result = await harness.call("get_run", { runId: "run-1" });
+
+    expect(result.structuredContent.data.run).toMatchObject({
+      childRunIds: ["child-run"],
+      descendantRunIds: ["child-run"],
+      activeDescendantRunId: "child-run",
+    });
+  });
+
   test("registers only annotated tools and applies read-only scoping before serving", () => {
     const registered = [];
     const server = {
@@ -1017,6 +1035,8 @@ describe("semantic tool definitions", () => {
     expect(run.structuredContent.data.run).toMatchObject({
       runId: "run-1",
       activeDescendantRunId: "child-run",
+      childRunIds: ["child-run"],
+      descendantRunIds: ["child-run"],
       continuedFromRunIds: ["parent-run"],
       config: { mode: "test" },
       error: "raw failure",

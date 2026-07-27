@@ -1857,8 +1857,9 @@ declare class Gateway {
      * @param {string} [workflow]
      * @param {number} [offset] Rows to skip after the newest-first sort (server-side pagination).
      * @param {boolean} [includeSystem] Include internal and historical unstamped runs.
+     * @param {string} [parentRunId] Return only direct children of this run.
      */
-    listRunsAcrossWorkflows(limit?: number, status?: string, workflow?: string, offset?: number, includeSystem?: boolean): Promise<any[]>;
+    listRunsAcrossWorkflows(limit?: number, status?: string, workflow?: string, offset?: number, includeSystem?: boolean, parentRunId?: string): Promise<any[]>;
     /**
      * Cross-run memory facts for the `listMemoryFacts` RPC. Memory is global (keyed
      * by namespace+key, not per-run), so iterate each DISTINCT workflow DB exactly

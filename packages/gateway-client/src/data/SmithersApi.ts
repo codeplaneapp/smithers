@@ -21,6 +21,8 @@ import type {
   ListMemoryFactsRequest,
   ListPromptsResponse,
   ListRunsRequest,
+  ListRunDescendantsRequest,
+  ListRunDescendantsResponse,
   ListScoresRequest,
   ListTicketsRequest,
   ListWorkflowsRequest,
@@ -52,6 +54,7 @@ import type { UsageReport } from "@smithers-orchestrator/usage";
 
 export type SmithersApi = {
   listRuns(params?: ListRunsRequest): Promise<GatewayRunSummaryRow[]>;
+  listRunDescendants(params: ListRunDescendantsRequest): Promise<ListRunDescendantsResponse>;
   getRun(params: GetRunRequest): Promise<GatewayRunRow>;
   listRunTokenUsage(params: { runId: string }): Promise<ListRunTokenUsageResponse>;
   launchRun(params: LaunchRunRequest): Promise<ApiMutationResult<LaunchRunResponse>>;

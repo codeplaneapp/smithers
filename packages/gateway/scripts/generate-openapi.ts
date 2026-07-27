@@ -93,6 +93,7 @@ const listScoresForRunsRpc = requireRpcDefinition("listScoresForRuns");
 const getScoreDetailRpc = requireRpcDefinition("getScoreDetail");
 const listUsageReportsRpc = requireRpcDefinition("listUsageReports");
 const listRunTokenUsageRpc = requireRpcDefinition("listRunTokenUsage");
+const listRunDescendantsRpc = requireRpcDefinition("listRunDescendants");
 const launchRunRpc = requireRpcDefinition("launchRun");
 
 const gatewayApiRoutes: readonly GatewayApiRouteDefinition[] = [
@@ -107,6 +108,7 @@ const gatewayApiRoutes: readonly GatewayApiRouteDefinition[] = [
     parameters: [
       { name: "status", in: "query", description: "Optional run status filter.", schema: requireRequestFilterProperty(requireRpcDefinition("listRuns"), "status") },
       { name: "workflow", in: "query", description: "Optional workflow key filter.", schema: requireRequestFilterProperty(requireRpcDefinition("listRuns"), "workflow") },
+      { name: "parentRunId", in: "query", description: "Optional direct parent run id filter.", schema: requireRequestFilterProperty(requireRpcDefinition("listRuns"), "parentRunId") },
       { name: "limit", in: "query", description: "Maximum number of runs.", schema: requireRequestFilterProperty(requireRpcDefinition("listRuns"), "limit") },
       { name: "offset", in: "query", description: "Rows to skip after the newest-first sort; a safe non-negative integer.", schema: requireRequestFilterProperty(requireRpcDefinition("listRuns"), "offset") },
     ],
@@ -123,6 +125,30 @@ const gatewayApiRoutes: readonly GatewayApiRouteDefinition[] = [
     responseSchema: listRunTokenUsageRpc.responseSchema,
     parameters: [
       { name: "runId", in: "path", description: "Owning run id.", required: true, schema: requireRequestProperty(listRunTokenUsageRpc, "runId") },
+    ],
+  },
+  {
+    method: "get",
+    path: "/v1/api/runs/{runId}/descendants",
+    operationId: "apiListRunDescendants",
+    summary: "List a run and all transitive child runs.",
+    rpcMethod: "listRunDescendants",
+    requiredScope: scopeForRpc("listRunDescendants"),
+    responseSchema: listRunDescendantsRpc.responseSchema,
+    parameters: [
+      {
+        name: "runId",
+        in: "path",
+        description: "Root run id.",
+        required: true,
+        schema: requireRequestProperty(listRunDescendantsRpc, "runId"),
+      },
+      {
+        name: "limit",
+        in: "query",
+        description: "Maximum lineage rows.",
+        schema: requireRequestProperty(listRunDescendantsRpc, "limit"),
+      },
     ],
   },
   { method: "post", path: "/v1/api/runs/{runId}/cancel", operationId: "apiCancelRun", summary: "Cancel a run.", rpcMethod: "cancelRun", requiredScope: scopeForRpc("cancelRun"), requestSchema: objectSchema, responseSchema: objectSchema, mutation: true },

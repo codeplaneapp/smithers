@@ -4935,6 +4935,9 @@ paths:
                         workflow:
                           type: string
                           description: "Optional workflow key filter."
+                        parentRunId:
+                          type: string
+                          description: "Return only direct children of this run."
                         includeSystem:
                           type: boolean
                           description: "Include internal system runs; they are excluded by default."
@@ -5000,6 +5003,11 @@ paths:
                           type: integer
                           minimum: 0
                           description: "Unix epoch milliseconds."
+                        parentRunId:
+                          type:
+                            - string
+                            - "null"
+                          description: "Immediate parent run id, if this is a child run."
                         system:
                           type: boolean
                           description: "Whether this run belongs to an internal system workflow."
@@ -5238,6 +5246,429 @@ paths:
                           - InvalidRequest
                           - Unauthorized
                           - Forbidden
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+  /v1/rpc/listRunDescendants:
+    post:
+      operationId: listRunDescendants
+      summary: "List Run Descendants"
+      description: "List a run and every transitive child with breadth-first depth metadata."
+      tags:
+        - "Gateway RPC"
+      security:
+        -
+          bearerAuth:
+            - run:read
+      x-smithers-api-version: v1
+      x-smithers-maturity: stable
+      x-smithers-transport: "http+websocket"
+      x-smithers-required-scope: run:read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - method
+                - params
+              additionalProperties: false
+              properties:
+                id:
+                  type: string
+                  description: "Optional caller request id."
+                method:
+                  const: listRunDescendants
+                params:
+                  type: object
+                  properties:
+                    runId:
+                      type: string
+                      description: "Stable run identifier."
+                    limit:
+                      type: integer
+                      minimum: 1
+                      description: "Maximum lineage rows, including the requested root run."
+                  required:
+                    - runId
+                  additionalProperties: false
+            example:
+              id: listRunDescendants-1
+              method: listRunDescendants
+              params:
+                runId: run_01
+                limit: 1000
+      responses:
+        200:
+          description: "List Run Descendants response."
+          headers:
+            X-Smithers-API-Version:
+              schema:
+                type: string
+                enum:
+                  - v1
+              description: "Stable Smithers Gateway API version."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - payload
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: true
+                  apiVersion:
+                    const: v1
+                  payload:
+                    type: array
+                    description: "The root run followed by its descendants."
+                    items:
+                      type: object
+                      description: "One run in a descendant tree."
+                      properties:
+                        runId:
+                          type: string
+                          description: "Stable run identifier."
+                        parentRunId:
+                          type:
+                            - string
+                            - "null"
+                          description: "Immediate parent run id."
+                        depth:
+                          type: integer
+                          minimum: 0
+                          description: "Distance from the requested root run."
+                      required:
+                        - runId
+                        - parentRunId
+                        - depth
+                      additionalProperties: false
+              example:
+                type: res
+                id: listRunDescendants-1
+                ok: true
+                apiVersion: v1
+                payload:
+                  -
+                    runId: run_01
+                    parentRunId: null
+                    depth: 0
+                  -
+                    runId: run_01:child:review:0
+                    parentRunId: run_01
+                    depth: 1
+        400:
+          description: "The request shape is invalid."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        401:
+          description: "Authentication failed or the token expired."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        403:
+          description: "The token is missing the required scope."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        404:
+          description: "The run does not exist."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
+                          - Internal
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+                      refresh:
+                        type: string
+        500:
+          description: "The Gateway encountered an internal error."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - type
+                  - id
+                  - ok
+                  - apiVersion
+                  - error
+                additionalProperties: false
+                properties:
+                  type:
+                    const: res
+                  id:
+                    type: string
+                  ok:
+                    const: false
+                  apiVersion:
+                    const: v1
+                  error:
+                    type: object
+                    required:
+                      - version
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      version:
+                        const: v1
+                      code:
+                        type: string
+                        enum:
+                          - InvalidRequest
+                          - Unauthorized
+                          - Forbidden
+                          - RunNotFound
                           - Internal
                       message:
                         type: string
@@ -20026,6 +20457,14 @@ paths:
             type: string
             description: "Optional workflow key filter."
         -
+          name: parentRunId
+          in: query
+          description: "Optional direct parent run id filter."
+          required: false
+          schema:
+            type: string
+            description: "Return only direct children of this run."
+        -
           name: limit
           in: query
           description: "Maximum number of runs."
@@ -20973,6 +21412,294 @@ paths:
                       - runId
                       - events
                     additionalProperties: false
+                  txid:
+                    type: string
+                    pattern: "^\\d+$"
+                  seq:
+                    type: integer
+                    minimum: 0
+        400:
+          description: "Invalid request."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        401:
+          description: "Authentication failed."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        403:
+          description: "Missing required scope."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        404:
+          description: "Route or resource not found."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+        500:
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - error
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: false
+                  error:
+                    type: object
+                    required:
+                      - code
+                      - message
+                    additionalProperties: true
+                    properties:
+                      code:
+                        type: string
+                      message:
+                        type: string
+                      requiredScope:
+                        type: string
+                        enum:
+                          - run:read
+                          - run:write
+                          - run:admin
+                          - approval:submit
+                          - signal:submit
+                          - cron:read
+                          - cron:write
+                          - account:read
+                          - memory:read
+                          - prompt:read
+                          - score:read
+                          - ticket:read
+                          - ticket:write
+                          - observability:read
+  /v1/api/runs/{runId}/descendants:
+    get:
+      operationId: apiListRunDescendants
+      summary: "List a run and all transitive child runs."
+      description: "REST domain API wrapper over the listRunDescendants Gateway RPC internals."
+      tags:
+        - "Gateway REST"
+      security:
+        -
+          bearerAuth:
+            - run:read
+      x-smithers-api-version: v1
+      x-smithers-required-scope: run:read
+      x-smithers-rpc-method: listRunDescendants
+      parameters:
+        -
+          name: runId
+          in: path
+          description: "Root run id."
+          required: true
+          schema:
+            type: string
+            description: "Stable run identifier."
+        -
+          name: limit
+          in: query
+          description: "Maximum lineage rows."
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            description: "Maximum lineage rows, including the requested root run."
+      responses:
+        200:
+          description: "Gateway REST response."
+          headers:
+            X-Smithers-API-Version:
+              schema:
+                type: string
+                enum:
+                  - v1
+              description: "Stable Smithers Gateway API version."
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - data
+                additionalProperties: false
+                properties:
+                  ok:
+                    const: true
+                  data:
+                    type: array
+                    description: "The root run followed by its descendants."
+                    items:
+                      type: object
+                      description: "One run in a descendant tree."
+                      properties:
+                        runId:
+                          type: string
+                          description: "Stable run identifier."
+                        parentRunId:
+                          type:
+                            - string
+                            - "null"
+                          description: "Immediate parent run id."
+                        depth:
+                          type: integer
+                          minimum: 0
+                          description: "Distance from the requested root run."
+                      required:
+                        - runId
+                        - parentRunId
+                        - depth
+                      additionalProperties: false
                   txid:
                     type: string
                     pattern: "^\\d+$"

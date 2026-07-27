@@ -40,6 +40,9 @@
 /** @typedef {import("./gatewayRpcTypes.ts").ListRunsRequest} ListRunsRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayRunSummary} GatewayRunSummary */
 /** @typedef {import("./gatewayRpcTypes.ts").ListRunsResponse} ListRunsResponse */
+/** @typedef {import("./gatewayRpcTypes.ts").ListRunDescendantsRequest} ListRunDescendantsRequest */
+/** @typedef {import("./gatewayRpcTypes.ts").GatewayRunDescendant} GatewayRunDescendant */
+/** @typedef {import("./gatewayRpcTypes.ts").ListRunDescendantsResponse} ListRunDescendantsResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").GetSchemaSignatureRequest} GetSchemaSignatureRequest */
 /** @typedef {import("./gatewayRpcTypes.ts").GetSchemaSignatureResponse} GetSchemaSignatureResponse */
 /** @typedef {import("./gatewayRpcTypes.ts").GatewayWorkflowSummary} GatewayWorkflowSummary */
@@ -222,11 +225,21 @@ const runSummary = objectSchema(
     workflowKey: workflow,
     status: stringSchema("Current run status."),
     createdAtMs: integerSchema("Unix epoch milliseconds.", 0),
+    parentRunId: { type: ["string", "null"], description: "Immediate parent run id, if this is a child run." },
     system: booleanSchema("Whether this run belongs to an internal system workflow."),
   },
   ["runId", "status", "system"],
   "Run summary view.",
   true,
+);
+const runDescendant = objectSchema(
+  {
+    runId,
+    parentRunId: { type: ["string", "null"], description: "Immediate parent run id." },
+    depth: integerSchema("Distance from the requested root run.", 0),
+  },
+  ["runId", "parentRunId", "depth"],
+  "One run in a descendant tree.",
 );
 const runStateView = objectSchema(
   {
@@ -737,6 +750,7 @@ export const GATEWAY_RPC_LEGACY_METHOD_ALIASES = {
   "runs.create": "launchRun",
   "runs.get": "getRun",
   "runs.list": "listRuns",
+  "runs.descendants": "listRunDescendants",
   "runs.cancel": "cancelRun",
   "runs.pause": "pauseRun",
   "approvals.decide": "submitApproval",
@@ -1150,6 +1164,7 @@ export const GATEWAY_RPC_DEFINITIONS = [
             "Rows to skip after the newest-first sort (server-side pagination); a safe non-negative integer.",
         },
         workflow: stringSchema("Optional workflow key filter."),
+        parentRunId: stringSchema("Return only direct children of this run."),
         includeSystem: booleanSchema("Include internal system runs; they are excluded by default."),
       }),
     }),
@@ -1158,6 +1173,29 @@ export const GATEWAY_RPC_DEFINITIONS = [
     exampleRequest: { filter: { status: "finished", limit: 20, workflow: "deploy" } },
     exampleResponse: [
       { runId: "run_01", workflowKey: "deploy", status: "finished", createdAtMs: 1710000000000, system: false },
+    ],
+  },
+  {
+    version: SMITHERS_API_VERSION,
+    method: "listRunDescendants",
+    title: "List Run Descendants",
+    description: "List a run and every transitive child with breadth-first depth metadata.",
+    maturity: "stable",
+    transport: "http+websocket",
+    requiredScope: "run:read",
+    requestSchema: objectSchema(
+      {
+        runId,
+        limit: integerSchema("Maximum lineage rows, including the requested root run.", 1),
+      },
+      ["runId"],
+    ),
+    responseSchema: arraySchema(runDescendant, "The root run followed by its descendants."),
+    errors: ["InvalidRequest", "Unauthorized", "Forbidden", "RunNotFound", "Internal"],
+    exampleRequest: { runId: "run_01", limit: 1000 },
+    exampleResponse: [
+      { runId: "run_01", parentRunId: null, depth: 0 },
+      { runId: "run_01:child:review:0", parentRunId: "run_01", depth: 1 },
     ],
   },
   {

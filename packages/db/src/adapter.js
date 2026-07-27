@@ -1556,7 +1556,7 @@ export class SmithersDb {
   /**
    * @param {string} [status]
    * @param {string} [workflow]
-   * @param {{ includeSystem?: boolean }} [options]
+   * @param {{ includeSystem?: boolean; parentRunId?: string }} [options]
    * @returns {RunnableEffect<RunRow[], SmithersError>}
    */
   listRuns(limit = 50, status, workflow, options = {}) {
@@ -1575,6 +1575,10 @@ export class SmithersDb {
           this.internalStorage.dialect === POSTGRES ? "POSITION(? IN config_json) > 0" : "instr(config_json, ?) > 0";
         clauses.push(`(workflow_name = ? OR ${configContainsGatewayKey})`);
         params.push(workflow, gatewayWorkflowKeyNeedle(workflow));
+      }
+      if (options.parentRunId) {
+        clauses.push("parent_run_id = ?");
+        params.push(options.parentRunId);
       }
       const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
       if (options.includeSystem === false) {

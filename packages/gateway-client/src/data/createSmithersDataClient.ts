@@ -18,6 +18,7 @@ import type {
   ListDocsRequest,
   ListDocsResponse,
   ListRunsRequest,
+  ListRunDescendantsResponse,
   ListWorkflowsResponse,
   ResumeRunResponse,
   ListScoresRequest,
@@ -106,6 +107,7 @@ function listRunsSearch(params: ListRunsRequest = {}) {
   const search = new URLSearchParams();
   append(search, "status", params.filter?.status);
   append(search, "workflow", params.filter?.workflow);
+  append(search, "parentRunId", params.filter?.parentRunId);
   append(search, "limit", params.filter?.limit);
   append(search, "offset", params.filter?.offset);
   append(search, "includeSystem", params.filter?.includeSystem);
@@ -511,6 +513,14 @@ export function createSmithersDataClient(options: CreateSmithersDataClientOption
     mode,
     api: {
       listRuns: (params = {}) => request("GET", withSearch("/v1/api/runs", listRunsSearch(params))),
+      listRunDescendants: (params) =>
+        request<ListRunDescendantsResponse>(
+          "GET",
+          withSearch(
+            `/v1/api/runs/${encodeURIComponent(params.runId)}/descendants`,
+            new URLSearchParams(params.limit === undefined ? {} : { limit: String(params.limit) }),
+          ),
+        ),
       getRun: (params) => request("GET", `/v1/api/runs/${encodeURIComponent(params.runId)}`),
       listRunTokenUsage: (params) => request("GET", `/v1/api/runs/${encodeURIComponent(params.runId)}/token-usage`),
       launchRun: (params) => mutate<LaunchRunResponse>("POST", "/v1/api/runs", params),

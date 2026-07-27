@@ -35,6 +35,8 @@ import {
   type GetRunDiffResponse,
   type ListRunsRequest,
   type ListRunsResponse,
+  type ListRunDescendantsRequest,
+  type ListRunDescendantsResponse,
   type GetSchemaSignatureRequest,
   type GetSchemaSignatureResponse,
   type ListWorkflowsRequest,
@@ -263,6 +265,7 @@ describe("Gateway RPC contract", () => {
       "getRun",
       "listRunTokenUsage",
       "listRuns",
+      "listRunDescendants",
       "getSchemaSignature",
       "listWorkflows",
       "listApprovals",
@@ -313,6 +316,7 @@ describe("Gateway RPC contract", () => {
 
   test("maps legacy methods to stable definitions without duplicating the contract", () => {
     expect(canonicalGatewayRpcMethod("runs.create")).toBe("launchRun");
+    expect(canonicalGatewayRpcMethod("runs.descendants")).toBe("listRunDescendants");
     expect(canonicalGatewayRpcMethod("approvals.decide")).toBe("submitApproval");
     expect(canonicalGatewayRpcMethod("cron.trigger")).toBe("cronRun");
     expect(getGatewayRpcDefinition("runs.create")?.method).toBe("launchRun");
@@ -389,6 +393,7 @@ describe("Gateway RPC contract", () => {
       listRunTokenUsage: "run:read",
       getSchemaSignature: "run:read",
       listRuns: "run:read",
+      listRunDescendants: "run:read",
       listWorkflows: "run:read",
       listApprovals: "run:read",
       listDocs: "run:read",
@@ -831,6 +836,14 @@ describe("Gateway RPC contract", () => {
         response: [
           { runId: "r1", workflowKey: "deploy", status: "finished", system: false },
         ] satisfies ListRunsResponse,
+      },
+      {
+        method: "listRunDescendants",
+        request: { runId: "r1", limit: 100 } satisfies ListRunDescendantsRequest,
+        response: [
+          { runId: "r1", parentRunId: null, depth: 0 },
+          { runId: "r1:child:n1:0", parentRunId: "r1", depth: 1 },
+        ] satisfies ListRunDescendantsResponse,
       },
       {
         method: "getSchemaSignature",

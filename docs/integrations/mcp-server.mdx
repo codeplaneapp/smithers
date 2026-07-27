@@ -266,6 +266,8 @@ Get the full detail record for a specific run, including steps, approvals, timer
     approvals: PendingApproval[];
     loops: Array<{ loopId, iteration, maxIterations }>;
     continuedFromRunIds: string[];
+    childRunIds: string[];
+    descendantRunIds: string[];
     activeDescendantRunId: string | null;
     config: unknown | null;
     error: unknown | null;

@@ -138,6 +138,47 @@ describe("gateway — many workflows sharing one DB", () => {
     }
   });
 
+  test("lists a run's direct children and full descendant tree over the public API", async () => {
+    dbPath = makeDbPath("descendants");
+    const wf = createSharedDbWorkflows(dbPath);
+    gateway = new Gateway({ heartbeatMs: 1000 });
+    gateway.register("alpha", wf.alpha);
+    const adapter = gateway.adapterForWorkflow(wf.alpha);
+    const configJson = JSON.stringify({ gatewayWorkflowKey: "alpha", gatewaySystem: false });
+    const insert = (runId, parentRunId, createdAtMs) =>
+      adapter.insertRun({
+        runId,
+        parentRunId,
+        workflowName: "alpha",
+        status: "finished",
+        createdAtMs,
+        configJson,
+      });
+    await insert("root", null, 1);
+    await insert("child-a", "root", 2);
+    await insert("child-b", "root", 3);
+    await insert("grandchild", "child-a", 4);
+
+    const children = await gateway.routeRequest(
+      { role: "operator", scopes: ["run:read"], userId: "test" },
+      { id: "children", method: "listRuns", params: { filter: { parentRunId: "root" } } },
+    );
+    expect(children.ok).toBe(true);
+    expect(children.payload.map((run) => run.runId).sort()).toEqual(["child-a", "child-b"]);
+
+    const descendants = await gateway.routeRequest(
+      { role: "operator", scopes: ["run:read"], userId: "test" },
+      { id: "descendants", method: "listRunDescendants", params: { runId: "root" } },
+    );
+    expect(descendants.ok).toBe(true);
+    expect(descendants.payload.map((row) => [row.runId, row.parentRunId, row.depth])).toEqual([
+      ["root", null, 0],
+      ["child-a", "root", 1],
+      ["child-b", "root", 1],
+      ["grandchild", "child-a", 2],
+    ]);
+  });
+
   test("resolveRun attributes a run to its true workflow, not the first adapter", async () => {
     dbPath = makeDbPath("resolve");
     const wf = createSharedDbWorkflows(dbPath);

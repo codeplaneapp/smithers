@@ -78,6 +78,9 @@ export type {
   ListRunTokenUsageRequest,
   ListRunTokenUsageResponse,
   RunTokenUsageEvent,
+  ListRunDescendantsRequest,
+  ListRunDescendantsResponse,
+  GatewayRunDescendant,
 } from "./rpc.ts";
 export { createSmithersCollections } from "./data/createSmithersCollections.ts";
 export { createSmithersDataClient } from "./data/createSmithersDataClient.ts";

@@ -39,7 +39,9 @@ describe("createSmithersDataClient api requests", () => {
   test("GET builders assemble the query string from filters", async () => {
     const { client, calls } = capturingClient({ ok: true, data: [] }, "tok");
 
-    await client.api.listRuns({ filter: { status: "finished", workflow: "deploy", limit: 5 } });
+    await client.api.listRuns({
+      filter: { status: "finished", workflow: "deploy", parentRunId: "parent", limit: 5 },
+    });
     await client.api.listWorkflows({ filter: { hasUi: true } });
     await client.api.listApprovals({ filter: { runId: "r1", workflow: "deploy", limit: 3 } });
     await client.api.listDocs({ filter: { kind: "doc", includeDeleted: true, updatedAfterMs: 100, limit: 2 } });
@@ -49,6 +51,7 @@ describe("createSmithersDataClient api requests", () => {
     await client.api.listMemoryFacts({ namespace: "workspace" });
     await client.api.getRun({ runId: "r 1" });
     await client.api.listRunTokenUsage({ runId: "r 1" });
+    await client.api.listRunDescendants({ runId: "r 1", limit: 25 });
     await client.api.listUsageReports({ fresh: true });
     await client.api.getNodeOutput({ runId: "r1", nodeId: "n1" });
     await client.api.getNodeDiff({ runId: "r1", nodeId: "n1", iteration: 2 });
@@ -58,6 +61,7 @@ describe("createSmithersDataClient api requests", () => {
     const byPath = (path: string) => calls.find((call) => urlOf(call).pathname === path)!;
     expect(urlOf(byPath("/v1/api/runs")).searchParams.get("status")).toBe("finished");
     expect(urlOf(byPath("/v1/api/runs")).searchParams.get("workflow")).toBe("deploy");
+    expect(urlOf(byPath("/v1/api/runs")).searchParams.get("parentRunId")).toBe("parent");
     expect(urlOf(byPath("/v1/api/runs")).searchParams.get("limit")).toBe("5");
     expect(urlOf(byPath("/v1/api/workflows")).searchParams.get("hasUi")).toBe("true");
     expect(urlOf(byPath("/v1/api/approvals")).searchParams.get("runId")).toBe("r1");
@@ -70,6 +74,8 @@ describe("createSmithersDataClient api requests", () => {
     // runId is URL-encoded into the path.
     expect(calls.some((call) => urlOf(call).pathname === "/v1/api/runs/r%201")).toBe(true);
     expect(calls.some((call) => urlOf(call).pathname === "/v1/api/runs/r%201/token-usage")).toBe(true);
+    const descendants = byPath("/v1/api/runs/r%201/descendants");
+    expect(urlOf(descendants).searchParams.get("limit")).toBe("25");
     expect(urlOf(byPath("/v1/api/usage")).searchParams.get("fresh")).toBe("true");
     expect(calls.some((call) => urlOf(call).pathname === "/v1/api/nodes/r1/n1/output")).toBe(true);
     expect(urlOf(byPath("/v1/api/nodes/r1/n1/diff")).searchParams.get("iteration")).toBe("2");

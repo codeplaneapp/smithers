@@ -684,6 +684,10 @@ export class SmithersGatewayClient {
     return this.rpc("listRuns", params);
   }
 
+  listRunDescendants(params: GatewayRpcParams<"listRunDescendants">) {
+    return this.rpc("listRunDescendants", params);
+  }
+
   listWorkflows(params: GatewayRpcParams<"listWorkflows"> = {}) {
     return this.rpc("listWorkflows", params);
   }

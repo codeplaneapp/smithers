@@ -495,6 +495,7 @@
               "rpc/get-run",
               "rpc/list-run-token-usage",
               "rpc/list-runs",
+              "rpc/list-run-descendants",
               "rpc/get-schema-signature",
               "rpc/list-workflows",
               "rpc/list-approvals",

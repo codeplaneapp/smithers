@@ -48,6 +48,7 @@ export type GatewayRpcMethod =
   | "getRun"
   | "listRunTokenUsage"
   | "listRuns"
+  | "listRunDescendants"
   | "getSchemaSignature"
   | "listWorkflows"
   | "listApprovals"
@@ -432,6 +433,8 @@ export type ListRunsRequest = {
     /** Rows to skip after the newest-first sort — server-side pagination with `limit`. */
     offset?: number;
     workflow?: string;
+    /** Return only direct children of this run. */
+    parentRunId?: string;
     /** System runs are excluded unless an explicit debug surface opts in. */
     includeSystem?: boolean;
   };
@@ -442,12 +445,28 @@ export type GatewayRunSummary = Record<string, unknown> & {
   workflowKey?: string;
   status?: string;
   createdAtMs?: number;
+  parentRunId?: string | null;
   /** Missing historical metadata is projected as `true` (fail closed). */
   system: boolean;
   startedBy?: RunStartedBy;
 };
 
 export type ListRunsResponse = GatewayRunSummary[];
+
+export type ListRunDescendantsRequest = {
+  runId: string;
+  /** Maximum lineage rows, including the requested root run. */
+  limit?: number;
+};
+
+export type GatewayRunDescendant = {
+  runId: string;
+  parentRunId: string | null;
+  /** Zero for the requested run, one for direct children, and so on. */
+  depth: number;
+};
+
+export type ListRunDescendantsResponse = GatewayRunDescendant[];
 
 export type GetSchemaSignatureRequest = Record<string, never>;
 

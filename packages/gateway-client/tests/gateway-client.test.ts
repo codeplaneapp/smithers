@@ -149,6 +149,7 @@ const typedRpcRequestMethods = {
   getRun: "getRun",
   listRunTokenUsage: "listRunTokenUsage",
   listRuns: "listRuns",
+  listRunDescendants: "listRunDescendants",
   getSchemaSignature: "getSchemaSignature",
   listWorkflows: "listWorkflows",
   listApprovals: "listApprovals",
@@ -330,6 +331,7 @@ describe("SmithersGatewayClient HTTP RPC", () => {
     await client.submitApproval({ runId: "run-1", nodeId: "gate", decision: "approved" });
     await client.submitSignal({ runId: "run-1", signal: "continue", payload: {} });
     await client.listRuns();
+    await client.listRunDescendants({ runId: "run-1" });
     await client.listApprovals();
     await client.getDevToolsSnapshot({ runId: "run-1", frameNo: 2 });
     await client.getNodeOutput({ runId: "run-1", nodeId: "task" });
@@ -348,6 +350,7 @@ describe("SmithersGatewayClient HTTP RPC", () => {
       "submitApproval",
       "submitSignal",
       "listRuns",
+      "listRunDescendants",
       "listApprovals",
       "getDevToolsSnapshot",
       "getNodeOutput",
