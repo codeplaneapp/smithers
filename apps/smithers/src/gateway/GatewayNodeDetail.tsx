@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useGatewayNodeOutput } from "@smithers-orchestrator/gateway-react";
+import { EmptyState, Skeleton } from "@smithers-orchestrator/ui";
 import { StatusPill } from "../cards/StatusPill";
 import type { RunNode } from "../runs/Run";
 
@@ -29,13 +30,16 @@ export function GatewayNodeDetail({ loadOutput, runId, node }: { loadOutput: boo
       <div className="gw-node-section">
         <span className="gw-node-label">Output</span>
         {!requested ? (
-          <p className="gw-node-muted">Select this node to load its output.</p>
-        ) : outputState.loading ? (
-          <p className="gw-node-muted">Loading output…</p>
-        ) : outputState.error ? (
-          <p className="gw-node-muted">Output unavailable.</p>
+          <EmptyState className="gw-node-muted" description="Select this node to load its output." />
+        ) : outputState.loading && output === undefined ? (
+          <div role="status">
+            <Skeleton style={{ height: 56 }} />
+            <span className="sui-sr-only">Loading output…</span>
+          </div>
+        ) : outputState.error && output === undefined ? (
+          <EmptyState className="gw-node-muted" title="Output unavailable." role="alert" />
         ) : output === null || output === undefined ? (
-          <p className="gw-node-muted">No output for this node.</p>
+          <EmptyState className="gw-node-muted" title="No output for this node." />
         ) : (
           <pre className="gw-node-output" data-testid="gateway-node-output">
             {JSON.stringify(output, null, 2)}

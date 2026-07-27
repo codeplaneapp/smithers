@@ -37,6 +37,10 @@ type CronRpc = {
 
 type CronsState = {
   crons: Cron[];
+  /** Initial collection synchronization is still in progress. */
+  loading: boolean;
+  /** The live collection could not be read; null after a successful read. */
+  error: string | null;
   selectedId: string | null;
   creating: boolean;
   draftPattern: string;
@@ -63,6 +67,8 @@ type CronsState = {
 
 export const useCronsStore = create<CronsState>((set, get) => ({
   crons: [],
+  loading: true,
+  error: null,
   selectedId: null,
   creating: false,
   draftPattern: "",

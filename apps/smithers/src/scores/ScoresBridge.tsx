@@ -74,7 +74,7 @@ export function toScoresRun(row: Record<string, unknown>): ScoresRun {
  * real `runId` and a run switch re-subscribes cleanly.
  */
 function ActiveRunScores({ runId, refetchRuns }: { runId: string; refetchRuns: () => Promise<void> | void }) {
-  const { data: scoreRows, refetch: refetchScores } = useGatewayScores(runId);
+  const { data: scoreRows, loading, error, refetch: refetchScores } = useGatewayScores(runId);
 
   // The Refresh button re-pulls both the roster and this run's scores.
   useEffect(() => {
@@ -92,8 +92,33 @@ function ActiveRunScores({ runId, refetchRuns }: { runId: string; refetchRuns: (
   useLocalModeRefetch(refetchScores);
 
   useEffect(() => {
-    useScoresStore.setState({ scoreRows: (scoreRows ?? []) as GatewayScoreRow[] });
-  }, [scoreRows]);
+    useScoresStore.setState((state) => {
+      const rows = scoreRows ?? [];
+      const changingRun = state.scoreRunId !== runId;
+      if (error) {
+        return {
+          scoreRows: changingRun ? [] : state.scoreRows,
+          scoreRunId: runId,
+          scoresLoading: false,
+          scoresError: error.message || "The scores service could not be reached.",
+        };
+      }
+      if (loading && rows.length === 0 && (changingRun || state.scoreRows.length === 0)) {
+        return {
+          scoreRows: changingRun ? [] : state.scoreRows,
+          scoreRunId: runId,
+          scoresLoading: true,
+          scoresError: null,
+        };
+      }
+      return {
+        scoreRows: rows as GatewayScoreRow[],
+        scoreRunId: runId,
+        scoresLoading: false,
+        scoresError: null,
+      };
+    });
+  }, [error, loading, scoreRows]);
 
   return null;
 }
@@ -104,9 +129,20 @@ export function ScoresBridge() {
   const refetchRuns = runsState.refetch;
 
   useEffect(() => {
-    const runs = (runRows ?? []).map(toScoresRun).filter((run) => run.runId.trim() !== "");
-    useScoresStore.setState({ runs });
-  }, [runRows]);
+    useScoresStore.setState((state) => {
+      if (runsState.error) {
+        return {
+          runsLoading: false,
+          runsError: runsState.error.message || "The runs service could not be reached.",
+        };
+      }
+      if (runsState.loading && (runRows?.length ?? 0) === 0 && state.runs.length === 0) {
+        return { runsLoading: true, runsError: null };
+      }
+      const runs = (runRows ?? []).map(toScoresRun).filter((run) => run.runId.trim() !== "");
+      return { runs, runsLoading: false, runsError: null };
+    });
+  }, [runRows, runsState.error, runsState.loading]);
 
   // LOCAL-MODE freshness for the roster (mirrors the runs-list bridge).
   useLocalModeRefetch(refetchRuns);
@@ -121,7 +157,12 @@ export function ScoresBridge() {
   // pull. Do NOT fetch `listScores` with an empty runId (the RPC requires one).
   useEffect(() => {
     if (activeRunId == null) {
-      useScoresStore.setState({ scoreRows: [] });
+      useScoresStore.setState({
+        scoreRows: [],
+        scoreRunId: null,
+        scoresLoading: false,
+        scoresError: null,
+      });
       bindScoresActions({ refetch: () => void refetchRuns() });
     }
   }, [activeRunId, refetchRuns]);

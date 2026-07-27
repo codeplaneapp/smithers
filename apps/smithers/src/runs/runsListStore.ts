@@ -22,6 +22,10 @@ export type StreamMode = "live" | "polling";
 
 type RunsListState = {
   runs: RunSummary[];
+  /** Initial collection synchronization is still in progress. */
+  loading: boolean;
+  /** The live collection could not be read; null after a successful read. */
+  error: string | null;
   statusFilter: RunStatusFilter;
   workflowFilter: string | "all";
   ageFilter: AgeFilter;
@@ -56,6 +60,8 @@ export const useRunsListStore = create<RunsListState>((set, get) => ({
   // Sourced live from the gateway `runs` collection via `RunsListBridge`; starts
   // empty until the first collection push.
   runs: [],
+  loading: true,
+  error: null,
   statusFilter: DEFAULT_FILTERS.status,
   workflowFilter: DEFAULT_FILTERS.workflow,
   ageFilter: DEFAULT_FILTERS.age,

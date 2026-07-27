@@ -56,7 +56,7 @@ export function toRunSummary(row: Record<string, unknown>): RunSummary {
 }
 
 export function RunsListBridge() {
-  const { data, refetch } = useGatewayRuns({ filter: { limit: 100 } });
+  const { data, loading, error, refetch } = useGatewayRuns({ filter: { limit: 100 } });
 
   // LOCAL-MODE freshness: the `runs` collection is pull-only (no stream), so a
   // run launched/advanced after the initial pull is never pushed here. Poll the
@@ -67,8 +67,16 @@ export function RunsListBridge() {
   useLocalModeRefetch(refetch);
 
   useEffect(() => {
-    useRunsListStore.setState({ runs: data ? data.map(toRunSummary) : [] });
-  }, [data]);
+    useRunsListStore.setState((state) => {
+      if (error) {
+        return { loading: false, error: error.message || "The runs service could not be reached." };
+      }
+      if (loading && (data?.length ?? 0) === 0 && state.runs.length === 0) {
+        return { loading: true, error: null };
+      }
+      return { runs: (data ?? []).map(toRunSummary), loading: false, error: null };
+    });
+  }, [data, error, loading]);
 
   return null;
 }

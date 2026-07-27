@@ -1,3 +1,4 @@
+import { EmptyState, Skeleton } from "@smithers-orchestrator/ui";
 import { openSurface } from "../app/navigation";
 import { StatusPill } from "../cards/StatusPill";
 import { RunTree } from "../runs/RunTree";
@@ -23,8 +24,11 @@ export function GatewayRunCard({ workflowKey, runId }: { workflowKey: string; ru
       </header>
 
       <div className="card-body">
-        {runTree.isLoading ? (
-          <div className="surface-empty">Loading run...</div>
+        {runTree.isLoading && !runTree.root ? (
+          <div className="surface-empty" role="status">
+            <Skeleton style={{ width: "80%", height: 48 }} />
+            <span className="sui-sr-only">Loading run...</span>
+          </div>
         ) : runTree.root ? (
           steps.length > 0 ? (
             <ul className="step-list">
@@ -40,7 +44,12 @@ export function GatewayRunCard({ workflowKey, runId }: { workflowKey: string; ru
             <RunTree root={runTree.root} selectedId={runTree.root.id} onSelect={() => {}} />
           )
         ) : (
-          <div className="surface-empty">{runTree.error ? runTree.error.message : "No execution tree yet."}</div>
+          <EmptyState
+            className="surface-empty"
+            title={runTree.error ? "Run unavailable" : undefined}
+            description={runTree.error ? runTree.error.message : "No execution tree yet."}
+            role={runTree.error ? "alert" : undefined}
+          />
         )}
       </div>
 

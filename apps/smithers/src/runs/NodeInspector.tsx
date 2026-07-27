@@ -1,4 +1,5 @@
 import "./inspector.css";
+import { EmptyState } from "@smithers-orchestrator/ui";
 import { openSurface } from "../app/navigation";
 import { useCardUiStore, type InspectorTab } from "../cards/cardUiStore";
 import { useChatStore } from "../chat/chatStore";
@@ -148,7 +149,7 @@ export function NodeInspector({ run, node, runId }: { run: Run; node: RunNode; r
             {node.output ? (
               <p className="node-output-text">{node.output}</p>
             ) : (
-              <p className="node-empty">No output yet.</p>
+              <EmptyState className="node-empty" title="No output yet." />
             )}
             {node.status === "failed" || node.status === "running" ? (
               <button className="btn" type="button" onClick={() => say(`Retrying ${node.name}…`)}>
@@ -166,7 +167,7 @@ export function NodeInspector({ run, node, runId }: { run: Run; node: RunNode; r
               ))}
             </div>
           ) : (
-            <p className="node-empty">No tool calls in this node.</p>
+            <EmptyState className="node-empty" title="No tool calls in this node." />
           )
         ) : null}
 
@@ -185,14 +186,34 @@ export function NodeInspector({ run, node, runId }: { run: Run; node: RunNode; r
 
         {tab === "Diff" ? (
           <>
-            <p className="node-output-text">
-              {node.toolCalls?.length
-                ? `${node.toolCalls.length} file change${node.toolCalls.length > 1 ? "s" : ""} in this node.`
-                : "No file changes in this node."}
-            </p>
-            <button className="btn" type="button" onClick={() => openSurface({ kind: "diff", runId, diffId: "auth" })}>
-              Review in canvas →
-            </button>
+            {node.toolCalls?.length ? (
+              <>
+                <p className="node-output-text">
+                  {node.toolCalls.length} file change{node.toolCalls.length > 1 ? "s" : ""} in this node.
+                </p>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => openSurface({ kind: "diff", runId, diffId: "auth" })}
+                >
+                  Review in canvas →
+                </button>
+              </>
+            ) : (
+              <EmptyState
+                className="node-empty"
+                title="No file changes in this node."
+                action={
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => openSurface({ kind: "diff", runId, diffId: "auth" })}
+                  >
+                    Review in canvas →
+                  </button>
+                }
+              />
+            )}
           </>
         ) : null}
 

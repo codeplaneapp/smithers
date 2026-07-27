@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { useGatewayApprovals, useGatewayMutation, useGatewayWorkflows } from "@smithers-orchestrator/gateway-react";
 import { gatewayKeys } from "@smithers-orchestrator/gateway-client";
+import { EmptyState, Skeleton } from "@smithers-orchestrator/ui";
 import { openSurface } from "../app/navigation";
 import { StatusPill } from "../cards/StatusPill";
 import { findNode } from "../runs/Run";
@@ -132,17 +133,30 @@ export function GatewayRunInspector({ workflowKey, runId }: { workflowKey: strin
 
       {effectiveView === "flow" && uiPath ? (
         <WorkflowRunUi uiPath={uiPath} runId={runId} />
-      ) : runTree.isLoading ? (
-        <div className="surface-empty">Loading run…</div>
+      ) : runTree.isLoading && !tree ? (
+        <div className="surface-empty" role="status">
+          <Skeleton style={{ width: "min(480px, 80%)", height: 64 }} />
+          <span className="sui-sr-only">Loading run…</span>
+        </div>
       ) : !tree ? (
-        <div className="surface-empty">No execution tree yet.</div>
+        <EmptyState
+          className="surface-empty"
+          title={runTree.error ? "Run unavailable" : undefined}
+          description={runTree.error ? runTree.error.message : "No execution tree yet."}
+          role={runTree.error ? "alert" : undefined}
+        />
       ) : (
         <div className="inspector-body">
           <div className="tree-pane">
             <RunTree root={tree} selectedId={activeNodeId ?? ""} onSelect={onSelect} />
           </div>
           {selected ? (
-            <GatewayNodeDetail loadOutput={selectedNodeId !== undefined} runId={runId} node={selected} />
+            <GatewayNodeDetail
+              key={`${runId}:${selected.id}`}
+              loadOutput={selectedNodeId !== undefined}
+              runId={runId}
+              node={selected}
+            />
           ) : null}
         </div>
       )}

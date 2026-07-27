@@ -1,3 +1,4 @@
+import { EmptyState, Skeleton } from "@smithers-orchestrator/ui";
 import { openSurface } from "../app/navigation";
 import { StatusPill } from "../cards/StatusPill";
 import { runDisplayName, runLifecycleStatus, runStatusLabel, runStatusToNode, summarizeRuns } from "./runsList";
@@ -15,6 +16,8 @@ function BoltIcon() {
  *  list surface. Follows VcsCard / IssuesCard exactly. */
 export function RunsCard() {
   const runs = useRunsListStore((state) => state.runs);
+  const loading = useRunsListStore((state) => state.loading);
+  const error = useRunsListStore((state) => state.error);
   const summary = summarizeRuns(runs);
   const active = runs.filter((run) => run.status === "running" || run.status === "waiting");
   const shown = active.slice(0, 4);
@@ -38,21 +41,34 @@ export function RunsCard() {
       </header>
 
       <div className="card-body card-body-flush">
-        {shown.map((run) => (
-          <div className="list-row" key={run.runId}>
-            <StatusPill
-              status={runStatusToNode(runLifecycleStatus(run))}
-              label={runStatusLabel(runLifecycleStatus(run))}
-            />
-            <div className="list-text">
-              <div className="list-name">{runDisplayName(run)}</div>
-            </div>
-            <div className="list-tags">
-              <span className="runs-row-elapsed">{run.elapsedLabel}</span>
-            </div>
+        {loading && runs.length === 0 ? (
+          <div role="status">
+            <Skeleton style={{ height: 44, margin: 12 }} />
+            <span className="sui-sr-only">Loading runs…</span>
           </div>
-        ))}
-        {more > 0 ? <div className="vcs-more">+{more} more</div> : null}
+        ) : error && runs.length === 0 ? (
+          <EmptyState title="Runs unavailable" description={error} role="alert" />
+        ) : shown.length === 0 ? (
+          <EmptyState title="No active runs." />
+        ) : (
+          <>
+            {shown.map((run) => (
+              <div className="list-row" key={run.runId}>
+                <StatusPill
+                  status={runStatusToNode(runLifecycleStatus(run))}
+                  label={runStatusLabel(runLifecycleStatus(run))}
+                />
+                <div className="list-text">
+                  <div className="list-name">{runDisplayName(run)}</div>
+                </div>
+                <div className="list-tags">
+                  <span className="runs-row-elapsed">{run.elapsedLabel}</span>
+                </div>
+              </div>
+            ))}
+            {more > 0 ? <div className="vcs-more">+{more} more</div> : null}
+          </>
+        )}
       </div>
     </article>
   );

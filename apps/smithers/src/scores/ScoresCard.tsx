@@ -1,3 +1,4 @@
+import { EmptyState, Skeleton } from "@smithers-orchestrator/ui";
 import { openSurface } from "../app/navigation";
 import { metricsFromScores, resolveActiveRunId, runLabel, scoreTone, summaryStats } from "./scoreReport";
 import { useScoresStore } from "./scoresStore";
@@ -25,11 +26,18 @@ function ChartIcon() {
 export function ScoresCard() {
   const runs = useScoresStore((state) => state.runs);
   const scoreRows = useScoresStore((state) => state.scoreRows);
+  const runsLoading = useScoresStore((state) => state.runsLoading);
+  const runsError = useScoresStore((state) => state.runsError);
+  const scoreRunId = useScoresStore((state) => state.scoreRunId);
+  const scoresLoading = useScoresStore((state) => state.scoresLoading);
+  const scoresError = useScoresStore((state) => state.scoresError);
   const selectedRunId = useScoresStore((state) => state.selectedRunId);
 
   const activeRunId = resolveActiveRunId(runs, selectedRunId);
   const run = activeRunId == null ? undefined : runs.find((candidate) => candidate.runId === activeRunId);
-  const metrics = metricsFromScores(scoreRows, activeRunId);
+  const activeScoreRows = scoreRunId === activeRunId ? scoreRows : [];
+  const scoresPending = activeRunId != null && scoreRunId !== activeRunId;
+  const metrics = metricsFromScores(activeScoreRows, activeRunId);
   const stats = summaryStats(metrics);
   const meanScore =
     metrics.scores.length > 0 ? metrics.scores.reduce((sum, row) => sum + row.score, 0) / metrics.scores.length : null;
@@ -63,14 +71,27 @@ export function ScoresCard() {
         </div>
       </header>
       <div className="card-body">
-        <div className="score-tiles">
-          {tiles.map((tile) => (
-            <div className="score-tile" key={tile.name}>
-              <div className="tile-name">{tile.name}</div>
-              <div className="tile-value">{tile.value}</div>
-            </div>
-          ))}
-        </div>
+        {(runsLoading && runs.length === 0) || ((scoresPending || scoresLoading) && activeScoreRows.length === 0) ? (
+          <div role="status">
+            <Skeleton style={{ height: 54 }} />
+            <span className="sui-sr-only">Loading scores…</span>
+          </div>
+        ) : runsError && runs.length === 0 ? (
+          <EmptyState title="Scores unavailable" description={runsError} role="alert" />
+        ) : scoresError && activeScoreRows.length === 0 ? (
+          <EmptyState title="Scores unavailable" description={scoresError} role="alert" />
+        ) : activeRunId == null ? (
+          <EmptyState title="No scored runs yet" />
+        ) : (
+          <div className="score-tiles">
+            {tiles.map((tile) => (
+              <div className="score-tile" key={tile.name}>
+                <div className="tile-name">{tile.name}</div>
+                <div className="tile-value">{tile.value}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </article>
   );

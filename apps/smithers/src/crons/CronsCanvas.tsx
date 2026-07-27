@@ -1,4 +1,5 @@
 import { useGatewayWorkflows } from "@smithers-orchestrator/gateway-react";
+import { EmptyState, Skeleton } from "@smithers-orchestrator/ui";
 import "./crons.css";
 import { describeCron, sortCrons, summarizeCrons, toneForCronEnabled, validateCreate } from "./crons";
 import { useCronsStore } from "./cronsStore";
@@ -125,6 +126,8 @@ function DetailActions({ id }: { id: string }) {
 /** The full triggers surface: a trigger list on the left, trigger detail on the right. */
 export function CronsCanvas() {
   const crons = useCronsStore((state) => state.crons);
+  const loading = useCronsStore((state) => state.loading);
+  const error = useCronsStore((state) => state.error);
   const creating = useCronsStore((state) => state.creating);
   const actionError = useCronsStore((state) => state.actionError);
   const openCreate = useCronsStore((state) => state.openCreate);
@@ -171,7 +174,14 @@ export function CronsCanvas() {
       <div className="rev-body">
         <div className="rev-list">
           {creating ? <CreateForm /> : null}
-          {ordered.length > 0 ? (
+          {loading && crons.length === 0 ? (
+            <div role="status" data-testid="crons-loading">
+              <Skeleton style={{ height: 54, margin: 12 }} />
+              <span className="sui-sr-only">Loading cron triggers…</span>
+            </div>
+          ) : error && crons.length === 0 ? (
+            <EmptyState title="Cron triggers unavailable" description={error} role="alert" />
+          ) : ordered.length > 0 ? (
             ordered.map((cron) => (
               <button
                 key={cron.id}
@@ -194,10 +204,12 @@ export function CronsCanvas() {
               </button>
             ))
           ) : (
-            <div className="rev-empty" data-testid="crons-empty">
-              <div>No cron triggers found</div>
-              <div>Create one to schedule workflows.</div>
-            </div>
+            <EmptyState
+              className="rev-empty"
+              data-testid="crons-empty"
+              title="No cron triggers found"
+              description="Create one to schedule workflows."
+            />
           )}
         </div>
 
@@ -226,7 +238,7 @@ export function CronsCanvas() {
               <DetailActions id={selected.id} />
             </div>
           ) : (
-            <div className="rev-detail-empty">Select a trigger.</div>
+            <EmptyState className="rev-detail-empty" title="Select a trigger." />
           )}
         </div>
       </div>

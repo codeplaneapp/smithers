@@ -1,5 +1,6 @@
 import { createRoute } from "@tanstack/react-router";
 import { useGatewayRun, useGatewayRunEvents, useGatewayRpc } from "@smithers-orchestrator/gateway-react";
+import { EmptyState, Skeleton } from "@smithers-orchestrator/ui";
 import { rootRoute } from "../app/rootRoute";
 import { TimelineCanvas } from "../timeline/TimelineCanvas";
 import { TicketsCanvas } from "../tickets/TicketsCanvas";
@@ -52,12 +53,15 @@ function GatewayRunLogsCanvas({ workflowKey, runId }: { workflowKey: string; run
           {stream.streaming ? "streaming" : stream.error ? "stream interrupted" : "event replay"}
         </span>
       </header>
-      {stream.error ? (
-        <div className="surface-empty" role="alert">
-          {stream.error.message}
+      {stream.loading && stream.events.length === 0 ? (
+        <div className="surface-empty" role="status">
+          <Skeleton style={{ width: "min(640px, 80%)", height: 64 }} />
+          <span className="sui-sr-only">Loading run events…</span>
         </div>
+      ) : stream.error && stream.events.length === 0 ? (
+        <EmptyState className="surface-empty" description={stream.error.message} role="alert" />
       ) : stream.events.length === 0 ? (
-        <div className="surface-empty">No run events received yet.</div>
+        <EmptyState className="surface-empty" title="No run events received yet." />
       ) : (
         <div className="logs-stream">
           {stream.events.map((event) => (
@@ -101,12 +105,13 @@ function GatewayRunDiffPage() {
           {workflowKey} · {runId} · {nodeId}:{iteration}
         </span>
       </header>
-      {diff.loading ? (
-        <div className="surface-empty">Loading diff from gateway...</div>
-      ) : diff.error ? (
-        <div className="surface-empty" role="alert">
-          {diff.error.message}
+      {diff.loading && diff.data === undefined ? (
+        <div className="surface-empty" role="status">
+          <Skeleton style={{ width: "min(640px, 80%)", height: 96 }} />
+          <span className="sui-sr-only">Loading diff from gateway...</span>
         </div>
+      ) : diff.error && diff.data === undefined ? (
+        <EmptyState className="surface-empty" description={diff.error.message} role="alert" />
       ) : (
         <pre className="gw-node-output" data-testid="gateway-node-diff">
           {formatEventPayload(diff.data)}

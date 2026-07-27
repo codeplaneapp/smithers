@@ -1,3 +1,4 @@
+import { EmptyState, Skeleton } from "@smithers-orchestrator/ui";
 import { openSurface } from "../app/navigation";
 import { sortCrons, summarizeCrons } from "./crons";
 import { useCronsStore } from "./cronsStore";
@@ -14,6 +15,8 @@ function ClockIcon() {
 /** The inline triggers card: enabled count and the first few triggers. */
 export function CronsCard() {
   const crons = useCronsStore((state) => state.crons);
+  const loading = useCronsStore((state) => state.loading);
+  const error = useCronsStore((state) => state.error);
   const openCreate = useCronsStore((state) => state.openCreate);
   const summary = summarizeCrons(crons);
   const shown = sortCrons(crons).slice(0, 4);
@@ -36,20 +39,33 @@ export function CronsCard() {
       </header>
 
       <div className="card-body card-body-flush">
-        {shown.map((cron) => (
-          <div className="list-row" key={cron.id}>
-            <div className="list-text">
-              <div className="list-name">{cron.name}</div>
-              <div className="list-meta">
-                <code className="cron-pattern">{cron.pattern}</code> · {cron.workflowPath}
-              </div>
-            </div>
-            <div className="list-tags">
-              <span className={`ready-dot${cron.enabled ? " is-on" : ""}`} />
-            </div>
+        {loading && crons.length === 0 ? (
+          <div role="status">
+            <Skeleton style={{ height: 44, margin: 12 }} />
+            <span className="sui-sr-only">Loading cron triggers…</span>
           </div>
-        ))}
-        {summary.total > shown.length ? <div className="rev-more">+{summary.total - shown.length} more</div> : null}
+        ) : error && crons.length === 0 ? (
+          <EmptyState title="Cron triggers unavailable" description={error} role="alert" />
+        ) : shown.length === 0 ? (
+          <EmptyState title="No cron triggers found" description="Create one to schedule workflows." />
+        ) : (
+          <>
+            {shown.map((cron) => (
+              <div className="list-row" key={cron.id}>
+                <div className="list-text">
+                  <div className="list-name">{cron.name}</div>
+                  <div className="list-meta">
+                    <code className="cron-pattern">{cron.pattern}</code> · {cron.workflowPath}
+                  </div>
+                </div>
+                <div className="list-tags">
+                  <span className={`ready-dot${cron.enabled ? " is-on" : ""}`} />
+                </div>
+              </div>
+            ))}
+            {summary.total > shown.length ? <div className="rev-more">+{summary.total - shown.length} more</div> : null}
+          </>
+        )}
       </div>
 
       <footer className="card-foot">

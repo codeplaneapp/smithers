@@ -1,4 +1,5 @@
 import "./scores.css";
+import { EmptyState, Skeleton } from "@smithers-orchestrator/ui";
 import {
   cacheHitPercent,
   costPerRun,
@@ -110,7 +111,7 @@ function SummaryTab({ metrics }: { metrics: RunMetrics }) {
           </div>
         ))
       ) : (
-        <div className="scores-panel-empty">No scorer data</div>
+        <EmptyState className="scores-panel-empty" title="No scorer data" />
       )}
     </div>
   );
@@ -156,7 +157,7 @@ function TokenPanel({ tokens }: { tokens: TokenReport }) {
           ) : null}
         </>
       ) : (
-        <div className="scores-panel-empty">No token data available.</div>
+        <EmptyState className="scores-panel-empty" title="No token data available." />
       )}
     </div>
   );
@@ -177,7 +178,7 @@ function LatencyPanel({ latency }: { latency: LatencyReport }) {
           <DetailRow label="Max" value={humanizeDurationMs(latency.max)} />
         </>
       ) : (
-        <div className="scores-panel-empty">No latency data available.</div>
+        <EmptyState className="scores-panel-empty" title="No latency data available." />
       )}
     </div>
   );
@@ -221,7 +222,7 @@ function CostPanel({ cost }: { cost: CostReport }) {
           ) : null}
         </>
       ) : (
-        <div className="scores-panel-empty">No cost data available.</div>
+        <EmptyState className="scores-panel-empty" title="No cost data available." />
       )}
     </div>
   );
@@ -264,10 +265,10 @@ function SummariesPanel({ cost }: { cost: CostReport }) {
       ) : cost.total > 0 ? (
         <>
           <DetailRow label="Aggregate total" value={`${formatUsd(cost.total)} USD`} />
-          <div className="scores-panel-empty">Per-period breakdown not available.</div>
+          <EmptyState className="scores-panel-empty" title="Per-period breakdown not available." />
         </>
       ) : (
-        <div className="scores-panel-empty">No summary data available.</div>
+        <EmptyState className="scores-panel-empty" title="No summary data available." />
       )}
     </div>
   );
@@ -307,7 +308,7 @@ function RecentTab({ scores }: { scores: ScoreRow[] }) {
           );
         })
       ) : (
-        <div className="scores-panel-empty">No recent evaluations</div>
+        <EmptyState className="scores-panel-empty" title="No recent evaluations" />
       )}
     </div>
   );
@@ -317,6 +318,11 @@ function RecentTab({ scores }: { scores: ScoreRow[] }) {
 export function ScoresCanvas() {
   const runs = useScoresStore((state) => state.runs);
   const scoreRows = useScoresStore((state) => state.scoreRows);
+  const runsLoading = useScoresStore((state) => state.runsLoading);
+  const runsError = useScoresStore((state) => state.runsError);
+  const scoreRunId = useScoresStore((state) => state.scoreRunId);
+  const scoresLoading = useScoresStore((state) => state.scoresLoading);
+  const scoresError = useScoresStore((state) => state.scoresError);
   const selectedRunId = useScoresStore((state) => state.selectedRunId);
   const tab = useScoresStore((state) => state.tab);
   const setTab = useScoresStore((state) => state.setTab);
@@ -331,14 +337,29 @@ export function ScoresCanvas() {
         <header className="surface-head">
           <span className="surface-title">Scores</span>
         </header>
-        <div className="surface-empty" data-testid="scores-empty">
-          No runs available
-        </div>
+        {runsLoading ? (
+          <div className="surface-empty" role="status" data-testid="scores-loading">
+            <Skeleton style={{ width: "min(480px, 80%)", height: 48 }} />
+            <span className="sui-sr-only">Loading scored runs…</span>
+          </div>
+        ) : runsError ? (
+          <EmptyState
+            className="surface-empty"
+            data-testid="scores-empty"
+            title="Scores unavailable"
+            description={runsError}
+            role="alert"
+          />
+        ) : (
+          <EmptyState className="surface-empty" data-testid="scores-empty" title="No runs available" />
+        )}
       </section>
     );
   }
 
-  const metrics = metricsFromScores(scoreRows, activeRunId);
+  const activeScoreRows = scoreRunId === activeRunId ? scoreRows : [];
+  const scoresPending = scoreRunId !== activeRunId;
+  const metrics = metricsFromScores(activeScoreRows, activeRunId);
 
   return (
     <section className="surface scores-canvas" data-testid="scores-canvas">
@@ -384,9 +405,20 @@ export function ScoresCanvas() {
       </div>
 
       <div className="scores-scroll">
-        {tab === "summary" ? <SummaryTab metrics={metrics} /> : null}
-        {tab === "metrics" ? <MetricsTab metrics={metrics} /> : null}
-        {tab === "recent" ? <RecentTab scores={metrics.scores} /> : null}
+        {(scoresPending || scoresLoading) && activeScoreRows.length === 0 ? (
+          <div role="status" data-testid="scores-loading">
+            <Skeleton style={{ height: 96 }} />
+            <span className="sui-sr-only">Loading scores…</span>
+          </div>
+        ) : scoresError && activeScoreRows.length === 0 ? (
+          <EmptyState title="Scores unavailable" description={scoresError} role="alert" />
+        ) : (
+          <>
+            {tab === "summary" ? <SummaryTab metrics={metrics} /> : null}
+            {tab === "metrics" ? <MetricsTab metrics={metrics} /> : null}
+            {tab === "recent" ? <RecentTab scores={metrics.scores} /> : null}
+          </>
+        )}
       </div>
     </section>
   );

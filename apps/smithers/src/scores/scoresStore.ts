@@ -40,6 +40,16 @@ export function bindScoresActions(actions: ScoresActions): void {
 type ScoresState = {
   runs: ScoresRun[];
   scoreRows: ScoreSample[];
+  /** Run id that owns scoreRows, preventing stale rows across selection changes. */
+  scoreRunId: string | null;
+  /** Initial run-roster synchronization is still in progress. */
+  runsLoading: boolean;
+  /** The live run roster could not be read. */
+  runsError: string | null;
+  /** The selected run's scorer rows are still loading. */
+  scoresLoading: boolean;
+  /** The selected run's scorer rows could not be read. */
+  scoresError: string | null;
   selectedRunId: string | null;
   tab: ScoreTab;
   setTab: (tab: ScoreTab) => void;
@@ -50,6 +60,11 @@ type ScoresState = {
 export const useScoresStore = create<ScoresState>((set, get) => ({
   runs: [],
   scoreRows: [],
+  scoreRunId: null,
+  runsLoading: true,
+  runsError: null,
+  scoresLoading: false,
+  scoresError: null,
   selectedRunId: null,
   tab: "summary",
 

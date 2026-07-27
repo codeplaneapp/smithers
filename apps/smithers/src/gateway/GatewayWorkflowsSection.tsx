@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useGatewayMutation, useGatewayRuns, useGatewayWorkflows } from "@smithers-orchestrator/gateway-react";
 import { gatewayKeys } from "@smithers-orchestrator/gateway-client";
+import { EmptyState, Skeleton } from "@smithers-orchestrator/ui";
 import { openSurface } from "../app/navigation";
 import { StatusPill } from "../cards/StatusPill";
 import { useGatewayConnectionStatus } from "../sync/useGatewayConnectionStatus";
@@ -93,14 +94,28 @@ export function GatewayWorkflowsSection() {
         <span className="gw-live-status">{status}</span>
       </div>
 
-      {workflows.length === 0 ? (
-        <p className="gw-live-empty">
-          {status === "connecting"
-            ? "Connecting to gateway..."
-            : status === "unauthorized"
-              ? "Sign in or provide a gateway token to access live workflows."
-              : "No workflows with a custom UI on the gateway."}
-        </p>
+      {status === "unauthorized" && workflows.length === 0 ? (
+        <EmptyState
+          className="gw-live-empty"
+          description="Sign in or provide a gateway token to access live workflows."
+        />
+      ) : workflowsState.error && workflows.length === 0 ? (
+        <EmptyState
+          className="gw-live-empty"
+          title="Live workflows unavailable"
+          description={workflowsState.error.message}
+          role="alert"
+        />
+      ) : (status === "connecting" || workflowsState.loading) && workflows.length === 0 ? (
+        <div className="gw-live-empty" role="status">
+          <Skeleton style={{ height: 48 }} />
+          <span className="sui-sr-only">Connecting to gateway...</span>
+        </div>
+      ) : workflows.length === 0 ? (
+        <EmptyState
+          className="gw-live-empty"
+          description="No workflows with a custom UI on the gateway."
+        />
       ) : (
         workflows.map((workflow) => {
           const workflowRuns = runs.filter((run) => run.workflowKey === workflow.key);

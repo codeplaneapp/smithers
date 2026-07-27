@@ -1,3 +1,4 @@
+import { EmptyState } from "@smithers-orchestrator/ui";
 import { WorkflowGraph } from "../askme/WorkflowGraph";
 import { useCardUiStore } from "../cards/cardUiStore";
 import { StatusPill } from "../cards/StatusPill";
@@ -48,7 +49,7 @@ export function RunInspector({ runId, theme }: { runId: string; theme: "light" |
   const run = selectRun(runs, runId);
 
   if (!run) {
-    return <div className="surface-empty">Run not found.</div>;
+    return <EmptyState className="surface-empty" title="Run not found." />;
   }
 
   const selected = findNode(run.root, selectedId) ?? run.root;

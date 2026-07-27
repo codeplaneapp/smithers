@@ -1,4 +1,5 @@
 import "./runsList.css";
+import { EmptyState, Skeleton } from "@smithers-orchestrator/ui";
 import { openSurface } from "../app/navigation";
 import { useUiStore } from "../app/uiStore";
 import { StatusPill } from "../cards/StatusPill";
@@ -230,6 +231,8 @@ function RunRow({ run }: { run: RunSummary }) {
 /** The full runs LIST surface: filters + grouped, searchable run roster. */
 export function RunsCanvas() {
   const runs = useRunsListStore((state) => state.runs);
+  const loading = useRunsListStore((state) => state.loading);
+  const error = useRunsListStore((state) => state.error);
   const statusFilter = useRunsListStore((state) => state.statusFilter);
   const workflowFilter = useRunsListStore((state) => state.workflowFilter);
   const ageFilter = useRunsListStore((state) => state.ageFilter);
@@ -306,7 +309,14 @@ export function RunsCanvas() {
       </header>
 
       <div className="runs-scroll">
-        {groups.length > 0 ? (
+        {loading && runs.length === 0 ? (
+          <div className="surface-empty" role="status" data-testid="runs-loading">
+            <Skeleton style={{ width: "min(480px, 80%)", height: 48 }} />
+            <span className="sui-sr-only">Loading runs…</span>
+          </div>
+        ) : error && runs.length === 0 ? (
+          <EmptyState className="surface-empty" title="Runs unavailable" description={error} role="alert" />
+        ) : groups.length > 0 ? (
           groups.map((group) => (
             <div className="runs-group" key={group.key} data-testid="runs-group">
               <div className="runs-group-head">
@@ -318,7 +328,7 @@ export function RunsCanvas() {
             </div>
           ))
         ) : (
-          <div className="surface-empty">No runs found.</div>
+          <EmptyState className="surface-empty" title="No runs found." />
         )}
       </div>
     </section>

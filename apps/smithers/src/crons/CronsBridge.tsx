@@ -47,7 +47,7 @@ export function toCron(row: GatewayCronRow): Cron {
 }
 
 export function CronsBridge() {
-  const { data, refetch } = useGatewayCrons(CRONS_PARAMS);
+  const { data, loading, error, refetch } = useGatewayCrons(CRONS_PARAMS);
   const cronCreate = useGatewayMutation<CronCreateVars, unknown>("cronCreate", {
     invalidate: [gatewayKeys.cronList(CRONS_PARAMS)],
   });
@@ -74,7 +74,14 @@ export function CronsBridge() {
 
   useEffect(() => {
     useCronsStore.setState((state) => {
-      const crons = data ? data.map(toCron) : [];
+      if (error) {
+        return { loading: false, error: error.message || "The triggers service could not be reached." };
+      }
+      if (loading && (data?.length ?? 0) === 0 && state.crons.length === 0) {
+        return { loading: true, error: null };
+      }
+
+      const crons = (data ?? []).map(toCron);
       // Keep the selection across reconciles. A toggle is delete+recreate, which
       // mints a NEW cronId for the same workflow+pattern, so when the exact id is
       // gone we re-bind to the cron with the same workflow+pattern rather than
@@ -87,9 +94,9 @@ export function CronsBridge() {
         const reborn = crons.find((cron) => cron.workflowPath === prior.workflowPath && cron.pattern === prior.pattern);
         selectedId = reborn?.id ?? null;
       }
-      return { crons, selectedId };
+      return { crons, selectedId, loading: false, error: null };
     });
-  }, [data]);
+  }, [data, error, loading]);
 
   return null;
 }
