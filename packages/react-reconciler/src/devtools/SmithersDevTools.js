@@ -246,15 +246,25 @@ export class SmithersDevTools {
     if (!hook) return this;
     const self = this;
     const verbose = this.options.verbose ?? false;
+    // React reports every deleted fiber before reporting the completed root.
+    // Defer the public event so it can use that root's current snapshot.
+    const pendingUnmountRendererIDs = new Set();
     const subscriber = {
       /**
-       * @param {number} _rendererID
+       * @param {number} rendererID
        * @param {FiberRoot} root
        * @returns {void}
        */
-      onCommitFiberRoot(_rendererID, root) {
+      onCommitFiberRoot(rendererID, root) {
+        const hasUnmount = pendingUnmountRendererIDs.delete(rendererID);
         const smithersRoot = findSmithersRoot(root);
-        if (!smithersRoot) return;
+        if (!smithersRoot) {
+          if (hasUnmount) {
+            const snapshot = self.core.captureSnapshot(null);
+            self.core.emitUnmount(snapshot);
+          }
+          return;
+        }
         const tree = fiberToNode(smithersRoot, 0);
         const snapshot = self.core.captureSnapshot(tree);
         if (verbose) {
@@ -265,13 +275,16 @@ export class SmithersDevTools {
           );
         }
         self.core.emitCommit(snapshot);
+        if (hasUnmount) {
+          self.core.emitUnmount(snapshot);
+        }
       },
       /**
-       * @param {number} _rendererID
+       * @param {number} rendererID
        * @param {Fiber} fiber
        * @returns {void}
        */
-      onCommitFiberUnmount(_rendererID, fiber) {
+      onCommitFiberUnmount(rendererID, fiber) {
         // The global hook is shared with every other renderer on the page,
         // so this fires for composite fibers, plain host fibers (`div`),
         // and fibers we don't own. Only Smithers host fibers are ours.
@@ -281,7 +294,7 @@ export class SmithersDevTools {
           const name = getDisplayName(fiber) ?? fiber.type;
           console.log(`🗑️  [smithers-devtools] Unmounted: ${nodeType} (${name})`);
         }
-        self.core.emitUnmount();
+        pendingUnmountRendererIDs.add(rendererID);
       },
     };
     let registration = activeHookRegistrations.get(hook);

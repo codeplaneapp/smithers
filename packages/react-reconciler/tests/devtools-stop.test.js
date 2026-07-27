@@ -67,8 +67,8 @@ function verifyTeardownOrder(teardownOrder) {
   const hook = /** @type {any} */ (globalThis[HOOK_KEY]);
   const root = { current: workflowFiber() };
   const emitCommitAndUnmount = () => {
-    hook.onCommitFiberRoot(1, root);
     hook.onCommitFiberUnmount(1, root.current);
+    hook.onCommitFiberRoot(1, root);
   };
 
   emitCommitAndUnmount();

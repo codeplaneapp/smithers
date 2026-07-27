@@ -73,6 +73,7 @@ describe("SmithersDevTools onCommitFiberUnmount gating", () => {
     try {
       const hook = /** @type {any} */ (globalThis[HOOK_KEY]);
       hook.onCommitFiberUnmount(1, unmounted);
+      hook.onCommitFiberRoot(1, { current: fiber(HOST_COMPONENT_TAG, "div") });
     } finally {
       devtools.stop();
     }
@@ -110,6 +111,7 @@ describe("SmithersDevTools onCommitFiberUnmount gating", () => {
       hook.onCommitFiberUnmount(1, fiber(HOST_COMPONENT_TAG, "div"));
       hook.onCommitFiberUnmount(1, fiber(HOST_COMPONENT_TAG, "smithers:task"));
       hook.onCommitFiberUnmount(1, fiber(HOST_COMPONENT_TAG, "span"));
+      hook.onCommitFiberRoot(1, { current: fiber(HOST_COMPONENT_TAG, "div") });
     } finally {
       devtools.stop();
     }

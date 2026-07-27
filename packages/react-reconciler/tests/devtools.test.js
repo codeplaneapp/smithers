@@ -295,6 +295,40 @@ describe("devtools: bippy + custom reconciler", () => {
     expect(snap.nodeCount).toBeGreaterThanOrEqual(5);
   });
   // ---------------------------------------------------------------------------
+  // REGRESSION: Unmount events use the post-removal commit
+  // ---------------------------------------------------------------------------
+  test("coalesces subtree unmounts with the current snapshot", async () => {
+    const renderer = new SmithersRenderer();
+    await renderer.render(
+      h(
+        Workflow,
+        { name: "unmount-test" },
+        h(
+          Sequence,
+          { key: "removed-subtree" },
+          h(Task, { id: "removed-a", output: outputSchemas.outputA }, { value: 1 }),
+          h(Task, { id: "removed-b", output: outputSchemas.outputB }, { value: 2 }),
+        ),
+        h(Task, { key: "remaining", id: "remaining", output: outputSchemas.outputC }, { value: 3 }),
+      ),
+    );
+    const eventsBeforeRemoval = commits.length;
+
+    await renderer.render(
+      h(
+        Workflow,
+        { name: "unmount-test" },
+        h(Task, { key: "remaining", id: "remaining", output: outputSchemas.outputC }, { value: 3 }),
+      ),
+    );
+
+    const removalEvents = commits.slice(eventsBeforeRemoval);
+    expect(removalEvents.map(({ event }) => event)).toEqual(["commit", "unmount"]);
+    expect(removalEvents[1].snapshot).toBe(removalEvents[0].snapshot);
+    expect(removalEvents[1].snapshot.taskCount).toBe(1);
+    expect(removalEvents[1].snapshot.tree.children[0].task.nodeId).toBe("remaining");
+  });
+  // ---------------------------------------------------------------------------
   // CHALLENGE 8: Smithers event bus integration — task execution tracking
   // ---------------------------------------------------------------------------
   test("challenge 8: tracks task execution state via EventBus", async () => {
