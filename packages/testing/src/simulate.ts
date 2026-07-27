@@ -1,12 +1,18 @@
-import { zodSchemaToJsonExample } from "@smithers-orchestrator/components/zod-to-example";
 import { WorkflowDriver } from "@smithers-orchestrator/driver";
 import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
 import { makeWorkflowSession } from "@smithers-orchestrator/scheduler";
 import { Effect } from "effect";
 import type { WorkflowDefinition } from "@smithers-orchestrator/driver/WorkflowDefinition";
 import type { ExtractOptions, TaskDescriptor, WorkflowGraph } from "@smithers-orchestrator/graph";
+import type {
+  EngineDecision,
+  RunResult,
+  WaitReason,
+  WorkflowSessionService,
+} from "@smithers-orchestrator/scheduler";
 import type { FakeAgent } from "./fakeAgent.ts";
 import { isAuto } from "./fakeAgent.ts";
+import { schemaMock } from "./schemaMock.ts";
 
 type ComputeFnOptions = { rootDir?: string; workflowPath?: string | null };
 type EngineOutputHelpers = {
@@ -49,6 +55,24 @@ export type Sim<Schema = unknown> = {
   unusedMocks: string[];
   warnings: string[];
   error?: unknown;
+};
+
+export type SimulationControls = {
+  nowMs?: () => number;
+  transformGraph?: (graph: WorkflowGraph) => WorkflowGraph;
+  onGraph?: (graph: WorkflowGraph) => void;
+  executeUnmocked?: (
+    task: TaskDescriptor,
+    context: SimTaskExecutorContext,
+  ) => Promise<{ handled: true; value: unknown } | { handled: false }>;
+  resolveWait?: (
+    reason: WaitReason,
+    session: WorkflowSessionService,
+  ) => Promise<EngineDecision | RunResult> | EngineDecision | RunResult;
+  continueAsNew?: (transition: unknown) => Promise<RunResult> | RunResult;
+  onTaskStarted?: (task: TaskDescriptor) => void;
+  onTaskValidated?: (task: TaskDescriptor, value: unknown) => void;
+  onTaskError?: (task: TaskDescriptor, error: unknown) => void;
 };
 
 type MutableTaskRecord = {
@@ -129,7 +153,7 @@ function schemaExample(task: TaskDescriptor): unknown {
       "AGENT_CONFIG_INVALID",
     );
   }
-  return JSON.parse(zodSchemaToJsonExample(task.outputSchema));
+  return schemaMock(task.outputSchema);
 }
 
 function validateTaskOutput(task: TaskDescriptor, value: unknown): unknown {
@@ -167,9 +191,12 @@ function resolveMock(mocks: Record<string, unknown>, task: TaskDescriptor, agent
   if (Object.prototype.hasOwnProperty.call(mocks, task.nodeId)) {
     return { matched: true, key: task.nodeId, value: mocks[task.nodeId] };
   }
+  if (task.label && Object.prototype.hasOwnProperty.call(mocks, task.label)) {
+    return { matched: true, key: task.label, value: mocks[task.label] };
+  }
   for (const key of Object.keys(mocks)) {
     if (key === "*" || !key.includes("*")) continue;
-    if (globMatches(key, task.nodeId)) {
+    if (globMatches(key, task.nodeId) || (task.label !== undefined && globMatches(key, task.label))) {
       return { matched: true, key, value: mocks[key] };
     }
   }
@@ -237,6 +264,14 @@ export function simulate<Schema = unknown>(
   workflow: WorkflowDefinition<Schema>,
   options: SimulateOptions = {},
 ): Sim<Schema> {
+  return __simulateWithControls(workflow, options);
+}
+
+export function __simulateWithControls<Schema = unknown>(
+  workflow: WorkflowDefinition<Schema>,
+  options: SimulateOptions = {},
+  controls?: SimulationControls,
+): Sim<Schema> {
   const runId = createRunId();
   const mocks = options.mocks ?? {};
   const consumedMocks = new Set<string>();
@@ -286,18 +321,21 @@ export function simulate<Schema = unknown>(
         rootDir,
         workflowPath,
       });
+      const controlledGraph = controls?.transformGraph?.(graph) ?? graph;
       latestTasks.clear();
-      for (const task of graph.tasks) {
+      for (const task of controlledGraph.tasks) {
         latestTasks.set(task.nodeId, task);
       }
-      latestAgentTaskIds = graph.tasks.filter(isAgentTask).map((task) => task.nodeId);
-      return graph;
+      latestAgentTaskIds = controlledGraph.tasks.filter(isAgentTask).map((task) => task.nodeId);
+      controls?.onGraph?.(controlledGraph);
+      return controlledGraph;
     },
   };
 
   const executeTask = async (task: TaskDescriptor, context: SimTaskExecutorContext): Promise<unknown> => {
     const record = getTaskRecord(taskRecords, task.nodeId);
     handle.executed.push(task.nodeId);
+    controls?.onTaskStarted?.(task);
     record.prompts.push(task.prompt);
     const agentTask = isAgentTask(task);
     try {
@@ -307,6 +345,20 @@ export function simulate<Schema = unknown>(
         consumedMocks.add(mock.key);
         updateUnusedMocks(handle, mocks, consumedMocks);
         value = await materializeMock(mock.value, task, context, options.rootDir, runId);
+      } else if (controls?.executeUnmocked) {
+        const controlled = await controls.executeUnmocked(task, context);
+        if (controlled.handled) {
+          value = controlled.value;
+        } else if (agentTask) {
+          throw simulatorError(
+            `simulate(): agent task "${task.nodeId}" has no mock. Provide mocks[${JSON.stringify(task.nodeId)}], a glob, "*": auto, or a per-node value. Agent tasks in this run: ${formatAgentTaskIds(latestAgentTaskIds)}`,
+            "AGENT_CONFIG_INVALID",
+          );
+        } else if (task.computeFn) {
+          value = await task.computeFn();
+        } else {
+          value = task.staticPayload ?? null;
+        }
       } else if (agentTask) {
         throw simulatorError(
           `simulate(): agent task "${task.nodeId}" has no mock. Provide mocks[${JSON.stringify(task.nodeId)}], a glob, "*": auto, or a per-node value. Agent tasks in this run: ${formatAgentTaskIds(latestAgentTaskIds)}`,
@@ -318,6 +370,7 @@ export function simulate<Schema = unknown>(
         value = task.staticPayload ?? null;
       }
       const parsed = validateTaskOutput(task, value);
+      controls?.onTaskValidated?.(task, parsed);
       const channel = task.outputTableName;
       (handle.outputs[channel] ??= []).push(parsed);
       record.outputs.push(parsed);
@@ -327,6 +380,7 @@ export function simulate<Schema = unknown>(
     } catch (error) {
       record.status = "failed";
       lastExecutionError = error;
+      controls?.onTaskError?.(task, error);
       throw error;
     }
   };
@@ -334,19 +388,36 @@ export function simulate<Schema = unknown>(
   async function runSimulation(): Promise<Sim<Schema>> {
     handle.status = "running";
     try {
+      let session: WorkflowSessionService | undefined;
       const driver = new WorkflowDriver({
         workflow,
         runtime: {
           runPromise: <A>(effect: unknown) => Effect.runPromise(effect as Effect.Effect<A, unknown, never>),
         },
         renderer,
-        createSession: (sessionOptions) =>
-          makeWorkflowSession({
+        createSession: (sessionOptions) => {
+          session = makeWorkflowSession({
             runId: sessionOptions.runId,
+            ...(controls?.nowMs ? { nowMs: controls.nowMs } : {}),
             requireStableFinish: true,
             requireRerenderOnOutputChange: sessionOptions.options?.requireRerenderOnOutputChange !== false,
-          }),
+          });
+          return session;
+        },
         executeTask,
+        ...(controls?.resolveWait
+          ? {
+              onWait: (reason: WaitReason) => {
+                if (!session) throw new Error("simulate(): workflow session was not initialized");
+                return controls.resolveWait!(reason, session);
+              },
+            }
+          : {}),
+        ...(controls?.continueAsNew
+          ? {
+              continueAsNew: (transition: unknown) => controls.continueAsNew!(transition),
+            }
+          : {}),
       });
       const result = await driver.run({
         runId,

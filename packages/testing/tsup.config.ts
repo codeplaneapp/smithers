@@ -12,6 +12,7 @@ export default defineConfig({
     renderPrompt: "src/renderPrompt.ts",
     runTask: "src/runTask.ts",
     simulate: "src/simulate.ts",
+    coverWorkflow: "src/coverWorkflow.ts",
     matchers: "src/matchers.ts",
     browser: "src/browser.ts",
     runtimeConformance: "src/runtimeConformance.ts",

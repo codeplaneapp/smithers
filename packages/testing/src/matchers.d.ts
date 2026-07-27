@@ -2,6 +2,7 @@
 import { Sim } from './simulate.js';
 import '@smithers-orchestrator/driver/WorkflowDefinition';
 import '@smithers-orchestrator/graph';
+import '@smithers-orchestrator/scheduler';
 
 type MatcherContext = {
     isNot?: boolean;

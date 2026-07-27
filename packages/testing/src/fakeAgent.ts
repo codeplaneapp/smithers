@@ -1,7 +1,7 @@
 import { closeSync, constants as fsConstants, writeFileSync } from "node:fs";
 import { lstat, mkdir, open, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
-import { zodSchemaToJsonExample } from "@smithers-orchestrator/components/zod-to-example";
+import { schemaMock } from "./schemaMock.ts";
 
 type SafeParseSuccess<T> = { success: true; data: T };
 type SafeParseFailure = { success: false; error: { issues: unknown[] } };
@@ -65,9 +65,7 @@ export function isAuto(value: unknown): value is AutoMock {
 }
 
 function schemaExample<T>(schema: SafeSchema<T>): T {
-  const raw = zodSchemaToJsonExample(schema as Parameters<typeof zodSchemaToJsonExample>[0]);
-  const parsed = JSON.parse(raw);
-  return assertSchema(schema, parsed);
+  return schemaMock(schema);
 }
 
 function formatIssues(issues: unknown[]): string {

@@ -8,7 +8,9 @@ description: "Simulate workflows, script agents, and assert task behavior with B
 ```ts
 import {
   auto,
+  coverWorkflow,
   dryRun,
+  expectFullCoverage,
   fakeAgent,
   renderPrompt,
   renderWorkflow,
@@ -25,9 +27,60 @@ import {
 Examples below use the `createSmithers` workflow API and `bun:test`; the testing helpers don't replace workflow authoring components.
 </Note>
 
+## Cover a workflow in one call
+
+`coverWorkflow(workflowModule, options?)` is the shortest conformance test for a complete workflow. It renders every frame, supplies validated schema-aware outputs for every agent, resolves approvals and human tasks, delivers waited events and signals, bounds loops, and runs each pass to completion. It uses an isolated temporary root and does not open the workflow's configured database or call real agents, sandboxes, subflows, or compute functions.
+
+```ts
+import { expect, test } from "bun:test";
+import WorkflowModule from "../simple-workflow.jsx";
+import { coverWorkflow } from "smithers-orchestrator/testing";
+
+test("covers the workflow", async () => {
+  const result = await coverWorkflow(WorkflowModule, { input: { topic: "Smithers" } });
+  expect(result.coveredNodes).toContain("write");
+});
+```
+
+By default, `coverWorkflow` calls `expectFullCoverage(result)` before returning. The assertion requires every pass to finish, every rendered task to execute, every `expectedNodes` entry to render, and every structured output to pass its schema. Set `assert: false` to inspect a failing result, or call `expectFullCoverage` later.
+
+The result includes:
+
+| Field | Meaning |
+| --- | --- |
+| `passes` | One detailed result per input. |
+| `executed` | Task IDs in execution order across all passes. |
+| `taskOutputs` | Validated outputs grouped by task ID. |
+| `outputs` | Validated outputs grouped by output-table name. |
+| `finalOutputs` | Final output from each pass. |
+| `definedNodes`, `coveredNodes` | Rendered and executed node IDs. |
+| `unexecuted`, `unreached` | Rendered nodes that did not execute and expected nodes that never rendered. |
+| `validations`, `approvals`, `errors` | Structured-output checks, gate decisions, and failures. |
+
+Use `mocks` for exact task IDs, task labels, or globs. Values accept the same raw output, callback, `auto`, or `fakeAgent` forms as `simulate`. Approvals default to approve and can be configured globally or per gate. `signals` and `events` provide payloads by node ID, label, event name, or `"*"`.
+
+```ts
+const result = await coverWorkflow(WorkflowModule, {
+  inputs: [{ mode: "fast" }, { mode: "safe" }],
+  mocks: { classify: fakeAgent(classificationSchema, { route: "safe" }) },
+  approvals: { publish: "deny" },
+  signals: { ready: { accepted: true } },
+  maxLoopIterations: 2,
+  expectedNodes: ["classify", "publish"],
+  allowUnreached: ["error-*"],
+  assert: false,
+});
+```
+
+Conditional branches that never render cannot be inferred from React at runtime. List them in `expectedNodes` when they must be covered across `inputs`; list intentional error-only or mutually exclusive paths in `allowUnreached`. Allowlist entries accept `*` globs.
+
+The harness replaces compute functions and known side-effect descriptors by default. Set `executeCompute: true` to run compute functions, or `executeSideEffects: true` to run marked side effects, sandboxes, and subflows. These opt-ins execute user code, so use them only when the test environment is already isolated.
+
+Use `coverWorkflow` for broad path and schema conformance. Use `simulate` directly when the test needs exact scheduling assertions, prompt inspection, compute behavior, or deliberately partial execution.
+
 ## Unit-test a workflow
 
-`simulate(workflow, options?)` renders and runs a workflow in memory: pass input via `input`, task responses via `mocks`. Mock keys are exact task IDs or globs (`"*"` is the agent-task fallback); values can be a function, raw output, `auto`, or a `FakeAgent`. Unmocked agent tasks fail loudly, so a test can't accidentally call a real agent.
+`simulate(workflow, options?)` renders and runs a workflow in memory: pass input via `input`, task responses via `mocks`. Mock keys are exact task IDs, task labels, or globs (`"*"` is the agent-task fallback); values can be a function, raw output, `auto`, or a `FakeAgent`. Unmocked agent tasks fail loudly, so a test can't accidentally call a real agent.
 
 The returned `Sim` is lazy: `await sim.run()` executes it and populates the fields below.
 

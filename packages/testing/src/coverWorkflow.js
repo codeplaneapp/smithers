@@ -1,8 +1,8 @@
-// src/simulate.ts
-import { WorkflowDriver } from "@smithers-orchestrator/driver";
-import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
-import { makeWorkflowSession } from "@smithers-orchestrator/scheduler";
-import { Effect } from "effect";
+// src/coverWorkflow.ts
+import { mkdtemp, rm } from "fs/promises";
+import { tmpdir } from "os";
+import { join as join2 } from "path";
+import { Effect as Effect2 } from "effect";
 
 // src/fakeAgent.ts
 import { closeSync, constants as fsConstants, writeFileSync } from "fs";
@@ -465,6 +465,10 @@ var fakeAgent = Object.assign(buildFakeAgent, {
 });
 
 // src/simulate.ts
+import { WorkflowDriver } from "@smithers-orchestrator/driver";
+import { SmithersRenderer } from "@smithers-orchestrator/react-reconciler";
+import { makeWorkflowSession } from "@smithers-orchestrator/scheduler";
+import { Effect } from "effect";
 function createRunId() {
   return `sim_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -594,9 +598,6 @@ async function materializeMock(mock, task, context, rootDir, runId) {
     return normalizeFunctionMockResult(task, result);
   }
   return mock;
-}
-function simulate(workflow, options = {}) {
-  return __simulateWithControls(workflow, options);
 }
 function __simulateWithControls(workflow, options = {}, controls) {
   const runId = createRunId();
@@ -763,7 +764,487 @@ function __simulateWithControls(workflow, options = {}, controls) {
   }
   return handle;
 }
+
+// src/coverWorkflow.ts
+var WorkflowCoverageError = class extends Error {
+  result;
+  constructor(message, result) {
+    super(message);
+    this.name = "WorkflowCoverageError";
+    this.result = result;
+  }
+};
+function isRecord(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+function workflowFromModule(candidate) {
+  const workflow = isRecord(candidate) && "default" in candidate ? candidate.default : candidate;
+  if (!workflow || typeof workflow !== "object" || typeof workflow.build !== "function") {
+    throw new TypeError("coverWorkflow(): expected a workflow definition or a module with a default workflow export");
+  }
+  return workflow;
+}
+function schemaExample3(task) {
+  if (!task.outputSchema) return null;
+  return schemaMock(task.outputSchema);
+}
+function stateKey(task) {
+  return `${task.nodeId}::${task.iteration}`;
+}
+function cloneWithLoopCap(node, maxLoopIterations) {
+  if (!node || node.kind === "text") return node;
+  const children = node.children.map((child) => cloneWithLoopCap(child, maxLoopIterations));
+  if (node.tag !== "smithers:ralph") return { ...node, children };
+  const { continueAsNewEvery: _continueAsNewEvery, ...props } = node.props;
+  return {
+    ...node,
+    props: {
+      ...props,
+      maxIterations: String(maxLoopIterations),
+      onMaxReached: "return-last"
+    },
+    children
+  };
+}
+function capLoops(graph, maxLoopIterations) {
+  return {
+    ...graph,
+    xml: cloneWithLoopCap(graph.xml, maxLoopIterations)
+  };
+}
+function globMatches2(pattern, value) {
+  const escaped = pattern.replace(/[|\\{}()[\]^$+?.]/g, "\\$&").replace(/\*/g, ".*");
+  return new RegExp(`^${escaped}$`).test(value);
+}
+function isAllowed(nodeId, allowlist) {
+  return allowlist.some((entry) => globMatches2(entry, nodeId));
+}
+function errorCode(error) {
+  return isRecord(error) && typeof error.code === "string" ? error.code : void 0;
+}
+function errorMessage(error) {
+  if (error instanceof Error) return error.message;
+  if (isRecord(error) && typeof error.message === "string") return error.message;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+function failure(passIndex, cause, nodeId) {
+  return {
+    passIndex,
+    ...nodeId ? { nodeId } : {},
+    ...errorCode(cause) ? { code: errorCode(cause) } : {},
+    message: errorMessage(cause),
+    cause
+  };
+}
+function invalidOutputError(task, message) {
+  return Object.assign(new Error(`coverWorkflow(): task "${task.nodeId}" output failed validation: ${message}`), {
+    name: "SimulationError",
+    code: "INVALID_OUTPUT",
+    details: { failureRetryable: false }
+  });
+}
+function validateExternalOutput(task, value, passIndex, validations) {
+  if (!task.outputSchema) return value;
+  const parsed = task.outputSchema.safeParse(value);
+  if (parsed.success) {
+    validations.push({
+      passIndex,
+      nodeId: task.nodeId,
+      iteration: task.iteration,
+      valid: true
+    });
+    return parsed.data;
+  }
+  const message = parsed.error.issues.map((issue) => issue.message).join("; ");
+  validations.push({
+    passIndex,
+    nodeId: task.nodeId,
+    iteration: task.iteration,
+    valid: false,
+    message
+  });
+  throw invalidOutputError(task, message);
+}
+function normalizeApproval(value) {
+  if (value === true || value === "approve") return { approved: true };
+  if (value === false || value === "deny") return { approved: false };
+  return value;
+}
+function looksLikeApprovalValue(value) {
+  return isRecord(value) && typeof value.approved === "boolean";
+}
+function taskContext(task, input, passIndex) {
+  return {
+    nodeId: task.nodeId,
+    ...task.label ? { label: task.label } : {},
+    iteration: task.iteration,
+    input,
+    passIndex
+  };
+}
+function lookupByTask(values, task, extraKey) {
+  if (Object.prototype.hasOwnProperty.call(values, task.nodeId)) return values[task.nodeId];
+  if (task.label && Object.prototype.hasOwnProperty.call(values, task.label)) return values[task.label];
+  if (extraKey && Object.prototype.hasOwnProperty.call(values, extraKey)) return values[extraKey];
+  return values["*"];
+}
+async function approvalFor(options, task, input, passIndex) {
+  const configured = options.approvals;
+  let value;
+  if (configured === void 0 || typeof configured === "boolean" || typeof configured === "string" || typeof configured === "function" || looksLikeApprovalValue(configured)) {
+    value = configured;
+  } else {
+    value = lookupByTask(configured, task);
+  }
+  const resolved = typeof value === "function" ? await value(taskContext(task, input, passIndex)) : value;
+  return normalizeApproval(resolved ?? true);
+}
+function approvalTaskOutput(task, decision) {
+  if (decision.output !== void 0) return decision.output;
+  const generated = schemaExample3(task);
+  if (!isRecord(generated)) return generated;
+  const output = { ...generated };
+  if ("approved" in output) output.approved = decision.approved;
+  if (decision.note !== void 0 && "note" in output) output.note = decision.note;
+  if (decision.decidedBy !== void 0) {
+    if ("decidedBy" in output) output.decidedBy = decision.decidedBy;
+    if ("reviewer" in output) output.reviewer = decision.decidedBy;
+  }
+  if (task.approvalMode === "select" && "selected" in output) {
+    output.selected = decision.optionKey ?? task.approvalOptions?.[0]?.key ?? "";
+  }
+  if (task.approvalMode === "rank" && "ranked" in output) {
+    output.ranked = task.approvalOptions?.map((option) => option.key) ?? [];
+  }
+  return output;
+}
+async function eventPayloadFor(options, task, eventName, input, passIndex) {
+  const eventValue = options.events ? lookupByTask(options.events, task, eventName) : void 0;
+  const signalValue = options.signals ? lookupByTask(options.signals, task, eventName) : void 0;
+  const configured = eventValue ?? signalValue;
+  if (typeof configured !== "function") return configured === void 0 ? schemaExample3(task) : configured;
+  const correlationId = typeof task.meta?.__correlationId === "string" ? task.meta.__correlationId : void 0;
+  return configured({
+    ...taskContext(task, input, passIndex),
+    eventName,
+    ...correlationId ? { correlationId } : {}
+  });
+}
+function isIsolatedSideEffect(task) {
+  return Boolean(task.sideEffect || task.meta?.__sandbox || task.meta?.__subflow);
+}
+async function runEffect(effect) {
+  return Effect2.runPromise(effect);
+}
+async function decideAgain(session) {
+  const graph = await runEffect(session.getCurrentGraph());
+  if (!graph) throw new Error("coverWorkflow(): workflow session has no current graph");
+  return runEffect(session.submitGraph(graph));
+}
+function waitingTask(state, states, expectedState, predicate) {
+  return [...state.descriptors.values()].reverse().find((task) => states.get(stateKey(task)) === expectedState && (!predicate || predicate(task)));
+}
+function appendOutput(record, key, value) {
+  (record[key] ??= []).push(value);
+}
+function mergeOutputs(target, source) {
+  for (const [key, values] of Object.entries(source)) {
+    (target[key] ??= []).push(...values);
+  }
+}
+async function runCoveragePass(workflow, options, input, passIndex, rootDir, maxLoopIterations) {
+  const state = {
+    defined: /* @__PURE__ */ new Set(),
+    descriptors: /* @__PURE__ */ new Map(),
+    executionOrder: [],
+    suppressTaskStart: /* @__PURE__ */ new Set(),
+    externalTaskOutputs: {},
+    externalTableOutputs: {},
+    validations: [],
+    approvals: [],
+    taskFailures: [],
+    approvalOutputs: /* @__PURE__ */ new Map(),
+    nowMs: Date.now()
+  };
+  const mocks = { "*": auto, ...options.mocks ?? {} };
+  const sim = __simulateWithControls(
+    workflow,
+    {
+      input,
+      mocks,
+      rootDir,
+      workflowPath: options.workflowPath
+    },
+    {
+      nowMs: () => state.nowMs,
+      transformGraph: (graph) => capLoops(graph, maxLoopIterations),
+      onGraph: (graph) => {
+        state.latestGraph = graph;
+        for (const task of graph.tasks) {
+          state.defined.add(task.nodeId);
+          state.descriptors.set(stateKey(task), task);
+        }
+      },
+      onTaskStarted: (task) => {
+        const key = stateKey(task);
+        if (state.suppressTaskStart.delete(key)) return;
+        state.executionOrder.push(task.nodeId);
+      },
+      onTaskValidated: (task) => {
+        if (!task.outputSchema) return;
+        state.validations.push({
+          passIndex,
+          nodeId: task.nodeId,
+          iteration: task.iteration,
+          valid: true
+        });
+      },
+      onTaskError: (task, error) => {
+        state.taskFailures.push(failure(passIndex, error, task.nodeId));
+        if (task.outputSchema && (errorCode(error) === "INVALID_OUTPUT" || /validation/i.test(errorMessage(error)))) {
+          state.validations.push({
+            passIndex,
+            nodeId: task.nodeId,
+            iteration: task.iteration,
+            valid: false,
+            message: errorMessage(error)
+          });
+        }
+      },
+      executeUnmocked: async (task) => {
+        if (task.kind === "human") {
+          return {
+            handled: true,
+            value: state.approvalOutputs.get(stateKey(task)) ?? schemaExample3(task)
+          };
+        }
+        if (task.needsApproval && (task.meta?.requestTitle || task.approvalMode !== "gate")) {
+          return {
+            handled: true,
+            value: state.approvalOutputs.get(stateKey(task)) ?? schemaExample3(task)
+          };
+        }
+        if (isIsolatedSideEffect(task)) {
+          return options.executeSideEffects ? { handled: false } : { handled: true, value: schemaExample3(task) };
+        }
+        if (!options.executeCompute && task.computeFn) {
+          return { handled: true, value: schemaExample3(task) };
+        }
+        return { handled: false };
+      },
+      resolveWait: async (reason, session) => {
+        if (reason._tag === "Approval") {
+          const states = await runEffect(session.getTaskStates());
+          const task = waitingTask(state, states, "waiting-approval", (candidate) => candidate.nodeId === reason.nodeId) ?? [...state.descriptors.values()].reverse().find((candidate) => candidate.nodeId === reason.nodeId);
+          if (!task) throw new Error(`coverWorkflow(): approval task "${reason.nodeId}" was not rendered`);
+          const decision = await approvalFor(options, task, input, passIndex);
+          const output = approvalTaskOutput(task, decision);
+          state.approvalOutputs.set(stateKey(task), output);
+          state.approvals.push({
+            passIndex,
+            nodeId: task.nodeId,
+            iteration: task.iteration,
+            approved: decision.approved,
+            ...decision.note ? { note: decision.note } : {},
+            ...decision.decidedBy ? { decidedBy: decision.decidedBy } : {}
+          });
+          state.executionOrder.push(task.nodeId);
+          state.suppressTaskStart.add(stateKey(task));
+          return runEffect(
+            session.approvalResolved(task.nodeId, {
+              approved: decision.approved,
+              ...decision.note !== void 0 ? { note: decision.note } : {},
+              ...decision.decidedBy !== void 0 ? { decidedBy: decision.decidedBy } : {},
+              ...decision.optionKey !== void 0 ? { optionKey: decision.optionKey } : {},
+              ...decision.output !== void 0 ? { payload: decision.output } : {}
+            })
+          );
+        }
+        if (reason._tag === "Event") {
+          const states = await runEffect(session.getTaskStates());
+          const task = waitingTask(
+            state,
+            states,
+            "waiting-event",
+            (candidate) => candidate.meta?.__eventName === reason.eventName
+          );
+          if (!task) throw new Error(`coverWorkflow(): waiting event "${reason.eventName}" has no rendered task`);
+          const rawPayload = await eventPayloadFor(options, task, reason.eventName, input, passIndex);
+          const payload = validateExternalOutput(task, rawPayload, passIndex, state.validations);
+          state.executionOrder.push(task.nodeId);
+          appendOutput(state.externalTaskOutputs, task.nodeId, payload);
+          if (task.outputTableName) appendOutput(state.externalTableOutputs, task.outputTableName, payload);
+          const correlationId = typeof task.meta?.__correlationId === "string" ? task.meta.__correlationId : null;
+          return runEffect(session.eventReceived(reason.eventName, payload, correlationId));
+        }
+        if (reason._tag === "Timer") {
+          const states = await runEffect(session.getTaskStates());
+          const task = waitingTask(state, states, "waiting-timer");
+          if (!task) throw new Error("coverWorkflow(): waiting timer has no rendered task");
+          state.nowMs = Math.max(state.nowMs, reason.resumeAtMs);
+          state.executionOrder.push(task.nodeId);
+          appendOutput(state.externalTaskOutputs, task.nodeId, { firedAtMs: state.nowMs });
+          return runEffect(session.timerFired(task.nodeId, state.nowMs));
+        }
+        if (reason._tag === "RetryBackoff") {
+          state.nowMs += Math.max(0, reason.waitMs);
+          return decideAgain(session);
+        }
+        if (reason._tag === "HotReload" && state.latestGraph) {
+          return runEffect(session.hotReloaded(state.latestGraph));
+        }
+        if (reason._tag === "OrphanRecovery") {
+          return runEffect(session.recoverOrphanedTasks());
+        }
+        return {
+          runId: "coverage",
+          status: reason._tag === "Quota" ? "waiting-quota" : "waiting-event",
+          error: new Error(`coverWorkflow(): cannot auto-resolve ${reason._tag} wait`)
+        };
+      }
+    }
+  );
+  let runError;
+  try {
+    await sim.run();
+  } catch (error) {
+    runError = error;
+  }
+  const taskOutputs = {};
+  for (const nodeId of new Set(sim.executed)) {
+    taskOutputs[nodeId] = sim.task(nodeId).outputs;
+  }
+  mergeOutputs(taskOutputs, state.externalTaskOutputs);
+  const outputs = {};
+  mergeOutputs(outputs, sim.outputs);
+  mergeOutputs(outputs, state.externalTableOutputs);
+  const finalTaskFailures = state.taskFailures.filter(
+    (item) => item.nodeId !== void 0 && sim.task(item.nodeId).status === "failed"
+  );
+  const errors = finalTaskFailures.length > 0 ? finalTaskFailures : runError !== void 0 ? [failure(passIndex, runError)] : [];
+  const executedSet = new Set(state.executionOrder);
+  const definedNodes = [...state.defined];
+  return {
+    passIndex,
+    input,
+    status: sim.status,
+    executed: state.executionOrder,
+    outputs,
+    taskOutputs,
+    finalOutput: sim.output,
+    definedNodes,
+    unexecuted: definedNodes.filter((nodeId) => !executedSet.has(nodeId)),
+    validations: state.validations,
+    approvals: state.approvals,
+    errors,
+    unusedMocks: sim.unusedMocks,
+    warnings: sim.warnings
+  };
+}
+function normalizeInputs(options) {
+  if (options.input !== void 0 && options.inputs !== void 0) {
+    throw new TypeError("coverWorkflow(): use either input or inputs, not both");
+  }
+  if (options.inputs !== void 0) {
+    if (options.inputs.length === 0) throw new TypeError("coverWorkflow(): inputs must contain at least one value");
+    return options.inputs;
+  }
+  return [options.input ?? {}];
+}
+function normalizeLoopCap(value) {
+  const cap = value ?? 3;
+  if (!Number.isInteger(cap) || cap < 1) {
+    throw new TypeError("coverWorkflow(): maxLoopIterations must be a positive integer");
+  }
+  return cap;
+}
+async function coverWorkflow(workflowModule, options = {}) {
+  const workflow = workflowFromModule(workflowModule);
+  const inputs = normalizeInputs(options);
+  const maxLoopIterations = normalizeLoopCap(options.maxLoopIterations);
+  const temporaryRoot = options.rootDir ? void 0 : await mkdtemp(join2(tmpdir(), "smithers-coverage-"));
+  const rootDir = options.rootDir ?? temporaryRoot;
+  const passes = [];
+  try {
+    for (let passIndex = 0; passIndex < inputs.length; passIndex += 1) {
+      passes.push(
+        await runCoveragePass(workflow, options, inputs[passIndex], passIndex, rootDir, maxLoopIterations)
+      );
+    }
+  } finally {
+    if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
+  }
+  const outputs = {};
+  const taskOutputs = {};
+  for (const pass of passes) {
+    mergeOutputs(outputs, pass.outputs);
+    mergeOutputs(taskOutputs, pass.taskOutputs);
+  }
+  const executed = passes.flatMap((pass) => pass.executed);
+  const definedNodes = [...new Set(passes.flatMap((pass) => pass.definedNodes))];
+  const coveredNodes = [...new Set(executed)];
+  const coveredSet = new Set(coveredNodes);
+  const definedSet = new Set(definedNodes);
+  const allowUnreached = [...options.allowUnreached ?? []];
+  const expectedNodes = [.../* @__PURE__ */ new Set([...options.expectedNodes ?? [], ...allowUnreached])];
+  const result = {
+    status: passes.every((pass) => pass.status === "finished") ? "finished" : "failed",
+    passes,
+    executed,
+    outputs,
+    taskOutputs,
+    finalOutputs: passes.map((pass) => pass.finalOutput),
+    definedNodes,
+    coveredNodes,
+    unexecuted: definedNodes.filter((nodeId) => !coveredSet.has(nodeId)),
+    unreached: expectedNodes.filter((nodeId) => !definedSet.has(nodeId)),
+    validations: passes.flatMap((pass) => pass.validations),
+    approvals: passes.flatMap((pass) => pass.approvals),
+    errors: passes.flatMap((pass) => pass.errors),
+    allowUnreached
+  };
+  if (options.assert !== false) expectFullCoverage(result);
+  return result;
+}
+function expectFullCoverage(result) {
+  const failures = [];
+  const unfinished = result.passes.filter((pass) => pass.status !== "finished");
+  if (unfinished.length > 0) {
+    failures.push(
+      `unfinished passes: ${unfinished.map((pass) => `${pass.passIndex} (${JSON.stringify(pass.status)})`).join(", ")}`
+    );
+  }
+  const unexpectedUnexecuted = result.unexecuted.filter((nodeId) => !isAllowed(nodeId, result.allowUnreached));
+  if (unexpectedUnexecuted.length > 0) {
+    failures.push(`unexecuted nodes: ${JSON.stringify(unexpectedUnexecuted)}`);
+  }
+  const unexpectedUnreached = result.unreached.filter((nodeId) => !isAllowed(nodeId, result.allowUnreached));
+  if (unexpectedUnreached.length > 0) {
+    failures.push(`unreached expected nodes: ${JSON.stringify(unexpectedUnreached)}`);
+  }
+  const invalid = result.validations.filter((validation) => !validation.valid);
+  if (invalid.length > 0) {
+    failures.push(
+      `invalid structured outputs: ${invalid.map((item) => `${item.nodeId} (${item.message ?? "invalid"})`).join(", ")}`
+    );
+  }
+  if (result.errors.length > 0) {
+    failures.push(
+      `errors: ${result.errors.map((item) => `${item.nodeId ? `${item.nodeId}: ` : ""}${item.message}`).join("; ")}`
+    );
+  }
+  if (failures.length > 0) {
+    throw new WorkflowCoverageError(`Workflow coverage failed:
+- ${failures.join("\n- ")}`, result);
+  }
+  return result;
+}
 export {
-  __simulateWithControls,
-  simulate
+  WorkflowCoverageError,
+  coverWorkflow,
+  expectFullCoverage
 };

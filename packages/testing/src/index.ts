@@ -16,6 +16,22 @@ export { runTask } from "./runTask.ts";
 export type { RunTaskOptions } from "./runTask.ts";
 export { simulate } from "./simulate.ts";
 export type { Sim, SimTaskRecord, SimulateMockFunction, SimulateOptions } from "./simulate.ts";
+export { coverWorkflow, expectFullCoverage, WorkflowCoverageError } from "./coverWorkflow.ts";
+export type {
+  CoverableWorkflow,
+  WorkflowCoverageApproval,
+  WorkflowCoverageApprovalResolver,
+  WorkflowCoverageApprovalValue,
+  WorkflowCoverageDecision,
+  WorkflowCoverageEventContext,
+  WorkflowCoverageEventResolver,
+  WorkflowCoverageFailure,
+  WorkflowCoverageOptions,
+  WorkflowCoveragePass,
+  WorkflowCoverageResult,
+  WorkflowCoverageTaskContext,
+  WorkflowCoverageValidation,
+} from "./coverWorkflow.ts";
 export { simMatchers, toHaveExecuted, toHaveExecutedInOrder, toHaveFinished } from "./matchers.ts";
 export { scenario, step, barrier, fault, extension } from "./scenario/builder.ts";
 export type { TaskRuntime, StepRunner } from "./scenario/builder.ts";

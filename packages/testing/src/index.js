@@ -836,7 +836,7 @@ var init_Harness = __esm({
 });
 
 // src/kernel/boundary.ts
-import { Cause, Effect as Effect2, Exit, Fiber, Option } from "effect";
+import { Cause, Effect as Effect3, Exit, Fiber, Option } from "effect";
 var toHarnessError, runAtBoundaryFork;
 var init_boundary = __esm({
   "src/kernel/boundary.ts"() {
@@ -860,8 +860,8 @@ var init_boundary = __esm({
       return { name: "Error", code: "HARNESS_ERROR", message: String(error) };
     };
     runAtBoundaryFork = (program) => {
-      const fiber = Effect2.runFork(Effect2.exit(program));
-      const promise = Effect2.runPromise(Fiber.join(fiber)).then((exit) => {
+      const fiber = Effect3.runFork(Effect3.exit(program));
+      const promise = Effect3.runPromise(Fiber.join(fiber)).then((exit) => {
         if (Exit.isSuccess(exit)) return { ok: true, value: exit.value };
         const cause = Option.getOrElse(
           Cause.failureOption(exit.cause),
@@ -869,13 +869,13 @@ var init_boundary = __esm({
         );
         return { ok: false, error: toHarnessError(cause) };
       });
-      return { promise, interrupt: () => Effect2.runPromise(Fiber.interrupt(fiber)) };
+      return { promise, interrupt: () => Effect3.runPromise(Fiber.interrupt(fiber)) };
     };
   }
 });
 
 // src/kernel/KernelRuntime.ts
-import { Context, Effect as Effect3, Either, Fiber as Fiber2, Layer } from "effect";
+import { Context, Effect as Effect4, Either, Fiber as Fiber2, Layer } from "effect";
 var KernelRuntimeService, kernelLayer, makeKernel;
 var init_KernelRuntime = __esm({
   "src/kernel/KernelRuntime.ts"() {
@@ -896,23 +896,23 @@ var init_KernelRuntime = __esm({
         // This is the kernel's scheduling boundary. Ready tasks are Effect values,
         // forked and raced by the Effect runtime; the public runner never owns the
         // task fibers or implements a Promise race itself.
-        runReadySet: (tasks) => Effect3.gen(function* () {
+        runReadySet: (tasks) => Effect4.gen(function* () {
           const fresh = tasks.filter(({ stepId }) => !active.has(stepId));
-          for (const { stepId, effect } of fresh) active.set(stepId, yield* Effect3.fork(effect));
+          for (const { stepId, effect } of fresh) active.set(stepId, yield* Effect4.fork(effect));
           if (!active.size) throw new Error("KERNEL_NO_ACTIVE_FIBERS");
-          const winner = yield* Effect3.raceAll(
+          const winner = yield* Effect4.raceAll(
             [...active.entries()].map(
               ([stepId, fiber]) => Fiber2.join(fiber).pipe(
-                Effect3.either,
-                Effect3.map((exit) => ({ stepId, exit }))
+                Effect4.either,
+                Effect4.map((exit) => ({ stepId, exit }))
               )
             )
           );
           active.delete(winner.stepId);
           if (Either.isLeft(winner.exit)) {
-            yield* Effect3.all([...active.values()].map((fiber) => Fiber2.interrupt(fiber)));
+            yield* Effect4.all([...active.values()].map((fiber) => Fiber2.interrupt(fiber)));
             active.clear();
-            return yield* Effect3.fail(winner.exit.left);
+            return yield* Effect4.fail(winner.exit.left);
           }
           return { stepId: winner.stepId, value: winner.exit.right };
         })
@@ -1145,7 +1145,7 @@ var runScenario_exports = {};
 __export(runScenario_exports, {
   runScenario: () => runScenario
 });
-import { Effect as Effect4, Fiber as Fiber3, Option as Option2 } from "effect";
+import { Effect as Effect5, Fiber as Fiber3, Option as Option2 } from "effect";
 var faultFor, dbOperationKind, processOperationKind, faultError, adapterFailure, settleKernel, runScenario;
 var init_runScenario = __esm({
   "src/runScenario.ts"() {
@@ -1390,10 +1390,10 @@ var init_runScenario = __esm({
           data: { outcome: item.outcome, details: item.details }
         });
       };
-      const program = Effect4.gen(function* () {
+      const program = Effect5.gen(function* () {
         if (harness.adapter) {
           cleanup.register("harness", harness.name, harness.adapter.cleanup ?? (() => void 0));
-          yield* Effect4.tryPromise({
+          yield* Effect5.tryPromise({
             try: () => Promise.resolve(harness.adapter.admissionProbe()),
             catch: (cause) => Object.assign(new Error(`ADMISSION_FAILED: ${harness.name} did not admit its production system`), {
               code: "ADMISSION_FAILED",
@@ -1408,7 +1408,7 @@ var init_runScenario = __esm({
                 code: "UNREGISTERED_EXTENSION",
                 details: { extension: extension2.name }
               });
-            yield* Effect4.tryPromise({
+            yield* Effect5.tryPromise({
               try: () => Promise.resolve(executor(extension2.name, extension2.value)),
               catch: (cause) => adapterFailure(harness.adapter, cause)
             });
@@ -1614,7 +1614,7 @@ var init_runScenario = __esm({
           }
           const executableOrdered = ordered;
           const tasks = executableOrdered.map(
-            (selected) => Effect4.gen(function* () {
+            (selected) => Effect5.gen(function* () {
               const id = ids.next(selected.id);
               kernel.trace.emit({ type: "task", id, data: { state: "started", step: selected.id } });
               const owner = `sim:${seed}`;
@@ -1830,7 +1830,7 @@ var init_runScenario = __esm({
                   details: { step: selected.id, extension: selected.extension }
                 });
               if (selected.extension && extensionExecutor)
-                yield* Effect4.tryPromise({
+                yield* Effect5.tryPromise({
                   try: () => Promise.resolve(extensionExecutor(selected.id, selected.input)),
                   catch: (e) => adapterFailure(harness.adapter, e)
                 });
@@ -1867,7 +1867,7 @@ var init_runScenario = __esm({
                     });
                   }
                 }
-                yield* Effect4.tryPromise({ try: () => gate.promise, catch: (cause) => cause });
+                yield* Effect5.tryPromise({ try: () => gate.promise, catch: (cause) => cause });
               }
               const injectFault = harness.adapter?.injectFault;
               const duringFault = ast.faults.find(
@@ -1877,9 +1877,9 @@ var init_runScenario = __esm({
                 const productionOperation = harness.kind === "e2e-real-process" ? "runWorkflow" : selected.id;
                 const canonicalOperation = productionOperation.replace(/#\d+$/, "");
                 const mappedOperation = harness.kind === "integration-real-db" ? dbOperationKind(productionOperation) : harness.kind === "e2e-real-process" ? processOperationKind(productionOperation) : void 0;
-                const fireAtTransition = (candidate, invoked, observedResult) => Effect4.gen(function* () {
+                const fireAtTransition = (candidate, invoked, observedResult) => Effect5.gen(function* () {
                   if (controlledFault?.id === candidate.id) controlledFaultObserved = true;
-                  const observation = injectFault ? yield* Effect4.tryPromise({
+                  const observation = injectFault ? yield* Effect5.tryPromise({
                     try: () => Promise.resolve(
                       injectFault(candidate, {
                         operation: mappedOperation,
@@ -1916,7 +1916,7 @@ var init_runScenario = __esm({
                   yield* fireAtTransition(beforeTransition, false, void 0);
                   throw faultError(beforeTransition);
                 }
-                productionValue = yield* Effect4.tryPromise({
+                productionValue = yield* Effect5.tryPromise({
                   try: () => Promise.resolve(harness.adapter.runStep(productionOperation, selected.input)),
                   catch: (e) => adapterFailure(harness.adapter, e)
                 });
@@ -2066,9 +2066,9 @@ var init_runScenario = __esm({
                 return pending;
               };
               if (runner && duringFault && harness.kind === "unit-sim") {
-                const child = yield* Effect4.fork(Effect4.tryPromise({ try: () => runTask2(), catch: (e) => e }));
-                yield* Effect4.yieldNow();
-                yield* Effect4.tryPromise({ try: () => Promise.resolve(), catch: (cause) => cause });
+                const child = yield* Effect5.fork(Effect5.tryPromise({ try: () => runTask2(), catch: (e) => e }));
+                yield* Effect5.yieldNow();
+                yield* Effect5.tryPromise({ try: () => Promise.resolve(), catch: (cause) => cause });
                 const completedExit = yield* Fiber3.poll(child);
                 if (Option2.isSome(completedExit)) {
                   value = yield* Fiber3.join(child);
@@ -2084,7 +2084,7 @@ var init_runScenario = __esm({
                       }),
                       id
                     );
-                    value = yield* Effect4.tryPromise({ try: () => runTask2(), catch: (e) => e });
+                    value = yield* Effect5.tryPromise({ try: () => runTask2(), catch: (e) => e });
                   } else {
                     if (duringFault.operation === "lease" || duringFault.operation === "heartbeat" || duringFault.operation === "cancellation")
                       journal.loseLease(selected.id);
@@ -2116,7 +2116,7 @@ var init_runScenario = __esm({
                   }
                 }
               }
-              if (runner && !duringFault) value = yield* Effect4.tryPromise({ try: () => runTask2(), catch: (e) => e });
+              if (runner && !duringFault) value = yield* Effect5.tryPromise({ try: () => runTask2(), catch: (e) => e });
               if (runtimeKernel.controls.peek()?.type === "cancel") {
                 const cancel = runtimeKernel.controls.takeNext("cancel");
                 recordAmbiguity(
@@ -2143,7 +2143,7 @@ var init_runScenario = __esm({
                   }),
                   id
                 );
-                if (runner) value = yield* Effect4.tryPromise({ try: () => runTask2(), catch: (e) => e });
+                if (runner) value = yield* Effect5.tryPromise({ try: () => runTask2(), catch: (e) => e });
               }
               const after = faultFor(ast.faults, "task", "after-task");
               if (harness.kind === "unit-sim" && runner) simulatedCompletionTransition(selected.id, id);
@@ -2229,7 +2229,7 @@ var init_runScenario = __esm({
           });
         return outputs;
       });
-      const execution = runAtBoundaryFork(program.pipe(Effect4.provide(kernelLayer(kernel))));
+      const execution = runAtBoundaryFork(program.pipe(Effect5.provide(kernelLayer(kernel))));
       let result;
       try {
         if (harness.kind === "unit-sim")
@@ -2332,7 +2332,116 @@ var init_runScenario = __esm({
 import { closeSync, constants as fsConstants, writeFileSync } from "fs";
 import { lstat, mkdir, open, realpath } from "fs/promises";
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "path";
+
+// src/schemaMock.ts
+import { toJSONSchema } from "zod";
 import { zodSchemaToJsonExample } from "@smithers-orchestrator/components/zod-to-example";
+function stringForFormat(format) {
+  switch (format) {
+    case "email":
+      return "test@example.com";
+    case "uri":
+    case "url":
+      return "https://example.com";
+    case "uuid":
+      return "00000000-0000-4000-8000-000000000000";
+    case "date-time":
+      return "2020-01-01T00:00:00.000Z";
+    case "date":
+      return "2020-01-01";
+    case "time":
+      return "00:00:00Z";
+    case "ipv4":
+      return "127.0.0.1";
+    case "ipv6":
+      return "::1";
+    case "hostname":
+      return "example.com";
+    default:
+      return "string";
+  }
+}
+function numberFromSchema(schema) {
+  let value = schema.minimum ?? 0;
+  if (schema.exclusiveMinimum !== void 0 && value <= schema.exclusiveMinimum) {
+    value = schema.exclusiveMinimum + 1;
+  }
+  if (schema.maximum !== void 0 && value > schema.maximum) value = schema.maximum;
+  if (schema.exclusiveMaximum !== void 0 && value >= schema.exclusiveMaximum) {
+    value = schema.exclusiveMaximum - 1;
+  }
+  return value;
+}
+function jsonSchemaExample(schema, depth = 0) {
+  if (depth > 12) return null;
+  if ("const" in schema) return schema.const;
+  if ("default" in schema) return schema.default;
+  if (schema.examples?.length) return schema.examples[0];
+  if (schema.enum?.length) return schema.enum[0];
+  const alternatives = schema.anyOf ?? schema.oneOf;
+  if (alternatives?.length) return jsonSchemaExample(alternatives[0], depth + 1);
+  if (schema.allOf?.length) {
+    const values = schema.allOf.map((entry) => jsonSchemaExample(entry, depth + 1));
+    if (values.every((value) => value && typeof value === "object" && !Array.isArray(value))) {
+      return Object.assign({}, ...values);
+    }
+    return values[0];
+  }
+  const type = Array.isArray(schema.type) ? schema.type.find((candidate) => candidate !== "null") ?? schema.type[0] : schema.type;
+  switch (type) {
+    case "null":
+      return null;
+    case "boolean":
+      return false;
+    case "integer":
+      return Math.trunc(numberFromSchema(schema));
+    case "number":
+      return numberFromSchema(schema);
+    case "array": {
+      if (schema.prefixItems?.length) {
+        return schema.prefixItems.map((item) => jsonSchemaExample(item, depth + 1));
+      }
+      const length = schema.maxItems === 0 ? 0 : Math.max(1, schema.minItems ?? 0);
+      return Array.from({ length }, () => jsonSchemaExample(schema.items ?? {}, depth + 1));
+    }
+    case "object": {
+      const output = {};
+      for (const key of schema.required ?? []) {
+        output[key] = jsonSchemaExample(schema.properties?.[key] ?? {}, depth + 1);
+      }
+      return output;
+    }
+    case "string":
+    default: {
+      let value = stringForFormat(schema.format);
+      const minimum = schema.minLength ?? 0;
+      if (value.length < minimum) value += "a".repeat(minimum - value.length);
+      if (schema.maxLength !== void 0 && value.length > schema.maxLength) {
+        value = value.slice(0, schema.maxLength);
+      }
+      return value;
+    }
+  }
+}
+function formatIssues(issues) {
+  return issues.map(
+    (issue) => issue && typeof issue === "object" && "message" in issue ? String(issue.message) : JSON.stringify(issue)
+  ).join("; ");
+}
+function schemaMock(schema) {
+  const first = JSON.parse(
+    zodSchemaToJsonExample(schema)
+  );
+  const firstResult = schema.safeParse(first);
+  if (firstResult.success) return firstResult.data;
+  const jsonSchema = toJSONSchema(schema);
+  const candidate = jsonSchemaExample(jsonSchema);
+  const result = schema.safeParse(candidate);
+  if (result.success) return result.data;
+  throw new TypeError(`Could not generate a valid schema-aware mock: ${formatIssues(result.error.issues)}`);
+}
+
+// src/fakeAgent.ts
 var autoMarker = /* @__PURE__ */ Symbol.for("smithers.testing.auto");
 var auto = Object.freeze({
   [autoMarker]: true
@@ -2343,11 +2452,9 @@ function isAuto(value) {
   );
 }
 function schemaExample(schema) {
-  const raw = zodSchemaToJsonExample(schema);
-  const parsed = JSON.parse(raw);
-  return assertSchema(schema, parsed);
+  return schemaMock(schema);
 }
-function formatIssues(issues) {
+function formatIssues2(issues) {
   if (issues.length === 0) return "unknown validation failure";
   return issues.map((issue) => {
     if (issue && typeof issue === "object" && "message" in issue) {
@@ -2359,7 +2466,7 @@ function formatIssues(issues) {
 function assertSchema(schema, value) {
   const result = schema.safeParse(value);
   if (result.success) return result.data;
-  throw new TypeError(`Fake agent output failed validation: ${formatIssues(result.error.issues)}`);
+  throw new TypeError(`Fake agent output failed validation: ${formatIssues2(result.error.issues)}`);
 }
 function hasResponseKeys(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -2785,7 +2892,6 @@ function validateOutput(task, value) {
 }
 
 // src/simulate.ts
-import { zodSchemaToJsonExample as zodSchemaToJsonExample2 } from "@smithers-orchestrator/components/zod-to-example";
 import { WorkflowDriver } from "@smithers-orchestrator/driver";
 import { SmithersRenderer as SmithersRenderer2 } from "@smithers-orchestrator/react-reconciler";
 import { makeWorkflowSession } from "@smithers-orchestrator/scheduler";
@@ -2809,7 +2915,7 @@ function globMatches(pattern, value) {
 function formatAgentTaskIds(agentTaskIds) {
   return JSON.stringify([...new Set(agentTaskIds)].sort());
 }
-function formatIssues2(issues) {
+function formatIssues3(issues) {
   if (issues.length === 0) return "unknown validation failure";
   return issues.map((issue) => {
     if (!isObject(issue)) return JSON.stringify(issue);
@@ -2832,14 +2938,14 @@ function schemaExample2(task) {
       "AGENT_CONFIG_INVALID"
     );
   }
-  return JSON.parse(zodSchemaToJsonExample2(task.outputSchema));
+  return schemaMock(task.outputSchema);
 }
 function validateTaskOutput(task, value) {
   if (!task.outputSchema) return value;
   const parsed = task.outputSchema.safeParse(value);
   if (parsed.success) return parsed.data;
   throw simulatorError(
-    `simulate(): task "${task.nodeId}" output failed validation: ${formatIssues2(parsed.error.issues)}`,
+    `simulate(): task "${task.nodeId}" output failed validation: ${formatIssues3(parsed.error.issues)}`,
     "INVALID_OUTPUT"
   );
 }
@@ -2865,9 +2971,12 @@ function resolveMock(mocks, task, agentTask) {
   if (Object.prototype.hasOwnProperty.call(mocks, task.nodeId)) {
     return { matched: true, key: task.nodeId, value: mocks[task.nodeId] };
   }
+  if (task.label && Object.prototype.hasOwnProperty.call(mocks, task.label)) {
+    return { matched: true, key: task.label, value: mocks[task.label] };
+  }
   for (const key of Object.keys(mocks)) {
     if (key === "*" || !key.includes("*")) continue;
-    if (globMatches(key, task.nodeId)) {
+    if (globMatches(key, task.nodeId) || task.label !== void 0 && globMatches(key, task.label)) {
       return { matched: true, key, value: mocks[key] };
     }
   }
@@ -2918,6 +3027,9 @@ async function materializeMock(mock, task, context, rootDir, runId) {
   return mock;
 }
 function simulate(workflow, options = {}) {
+  return __simulateWithControls(workflow, options);
+}
+function __simulateWithControls(workflow, options = {}, controls) {
   const runId = createRunId();
   const mocks = options.mocks ?? {};
   const consumedMocks = /* @__PURE__ */ new Set();
@@ -2961,17 +3073,20 @@ function simulate(workflow, options = {}) {
         rootDir,
         workflowPath
       });
+      const controlledGraph = controls?.transformGraph?.(graph) ?? graph;
       latestTasks.clear();
-      for (const task of graph.tasks) {
+      for (const task of controlledGraph.tasks) {
         latestTasks.set(task.nodeId, task);
       }
-      latestAgentTaskIds = graph.tasks.filter(isAgentTask).map((task) => task.nodeId);
-      return graph;
+      latestAgentTaskIds = controlledGraph.tasks.filter(isAgentTask).map((task) => task.nodeId);
+      controls?.onGraph?.(controlledGraph);
+      return controlledGraph;
     }
   };
   const executeTask = async (task, context) => {
     const record = getTaskRecord(taskRecords, task.nodeId);
     handle.executed.push(task.nodeId);
+    controls?.onTaskStarted?.(task);
     record.prompts.push(task.prompt);
     const agentTask = isAgentTask(task);
     try {
@@ -2981,6 +3096,20 @@ function simulate(workflow, options = {}) {
         consumedMocks.add(mock.key);
         updateUnusedMocks(handle, mocks, consumedMocks);
         value = await materializeMock(mock.value, task, context, options.rootDir, runId);
+      } else if (controls?.executeUnmocked) {
+        const controlled = await controls.executeUnmocked(task, context);
+        if (controlled.handled) {
+          value = controlled.value;
+        } else if (agentTask) {
+          throw simulatorError(
+            `simulate(): agent task "${task.nodeId}" has no mock. Provide mocks[${JSON.stringify(task.nodeId)}], a glob, "*": auto, or a per-node value. Agent tasks in this run: ${formatAgentTaskIds(latestAgentTaskIds)}`,
+            "AGENT_CONFIG_INVALID"
+          );
+        } else if (task.computeFn) {
+          value = await task.computeFn();
+        } else {
+          value = task.staticPayload ?? null;
+        }
       } else if (agentTask) {
         throw simulatorError(
           `simulate(): agent task "${task.nodeId}" has no mock. Provide mocks[${JSON.stringify(task.nodeId)}], a glob, "*": auto, or a per-node value. Agent tasks in this run: ${formatAgentTaskIds(latestAgentTaskIds)}`,
@@ -2992,6 +3121,7 @@ function simulate(workflow, options = {}) {
         value = task.staticPayload ?? null;
       }
       const parsed = validateTaskOutput(task, value);
+      controls?.onTaskValidated?.(task, parsed);
       const channel = task.outputTableName;
       (handle.outputs[channel] ??= []).push(parsed);
       record.outputs.push(parsed);
@@ -3001,24 +3131,39 @@ function simulate(workflow, options = {}) {
     } catch (error) {
       record.status = "failed";
       lastExecutionError = error;
+      controls?.onTaskError?.(task, error);
       throw error;
     }
   };
   async function runSimulation() {
     handle.status = "running";
     try {
+      let session;
       const driver = new WorkflowDriver({
         workflow,
         runtime: {
           runPromise: (effect) => Effect.runPromise(effect)
         },
         renderer,
-        createSession: (sessionOptions) => makeWorkflowSession({
-          runId: sessionOptions.runId,
-          requireStableFinish: true,
-          requireRerenderOnOutputChange: sessionOptions.options?.requireRerenderOnOutputChange !== false
-        }),
-        executeTask
+        createSession: (sessionOptions) => {
+          session = makeWorkflowSession({
+            runId: sessionOptions.runId,
+            ...controls?.nowMs ? { nowMs: controls.nowMs } : {},
+            requireStableFinish: true,
+            requireRerenderOnOutputChange: sessionOptions.options?.requireRerenderOnOutputChange !== false
+          });
+          return session;
+        },
+        executeTask,
+        ...controls?.resolveWait ? {
+          onWait: (reason) => {
+            if (!session) throw new Error("simulate(): workflow session was not initialized");
+            return controls.resolveWait(reason, session);
+          }
+        } : {},
+        ...controls?.continueAsNew ? {
+          continueAsNew: (transition) => controls.continueAsNew(transition)
+        } : {}
       });
       const result = await driver.run({
         runId,
@@ -3048,6 +3193,489 @@ function simulate(workflow, options = {}) {
     }
   }
   return handle;
+}
+
+// src/coverWorkflow.ts
+import { mkdtemp, rm } from "fs/promises";
+import { tmpdir } from "os";
+import { join as join2 } from "path";
+import { Effect as Effect2 } from "effect";
+var WorkflowCoverageError = class extends Error {
+  result;
+  constructor(message, result) {
+    super(message);
+    this.name = "WorkflowCoverageError";
+    this.result = result;
+  }
+};
+function isRecord(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+function workflowFromModule(candidate) {
+  const workflow = isRecord(candidate) && "default" in candidate ? candidate.default : candidate;
+  if (!workflow || typeof workflow !== "object" || typeof workflow.build !== "function") {
+    throw new TypeError("coverWorkflow(): expected a workflow definition or a module with a default workflow export");
+  }
+  return workflow;
+}
+function schemaExample3(task) {
+  if (!task.outputSchema) return null;
+  return schemaMock(task.outputSchema);
+}
+function stateKey(task) {
+  return `${task.nodeId}::${task.iteration}`;
+}
+function cloneWithLoopCap(node, maxLoopIterations) {
+  if (!node || node.kind === "text") return node;
+  const children = node.children.map((child) => cloneWithLoopCap(child, maxLoopIterations));
+  if (node.tag !== "smithers:ralph") return { ...node, children };
+  const { continueAsNewEvery: _continueAsNewEvery, ...props } = node.props;
+  return {
+    ...node,
+    props: {
+      ...props,
+      maxIterations: String(maxLoopIterations),
+      onMaxReached: "return-last"
+    },
+    children
+  };
+}
+function capLoops(graph, maxLoopIterations) {
+  return {
+    ...graph,
+    xml: cloneWithLoopCap(graph.xml, maxLoopIterations)
+  };
+}
+function globMatches2(pattern, value) {
+  const escaped = pattern.replace(/[|\\{}()[\]^$+?.]/g, "\\$&").replace(/\*/g, ".*");
+  return new RegExp(`^${escaped}$`).test(value);
+}
+function isAllowed(nodeId, allowlist) {
+  return allowlist.some((entry) => globMatches2(entry, nodeId));
+}
+function errorCode(error) {
+  return isRecord(error) && typeof error.code === "string" ? error.code : void 0;
+}
+function errorMessage(error) {
+  if (error instanceof Error) return error.message;
+  if (isRecord(error) && typeof error.message === "string") return error.message;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+function failure(passIndex, cause, nodeId) {
+  return {
+    passIndex,
+    ...nodeId ? { nodeId } : {},
+    ...errorCode(cause) ? { code: errorCode(cause) } : {},
+    message: errorMessage(cause),
+    cause
+  };
+}
+function invalidOutputError(task, message) {
+  return Object.assign(new Error(`coverWorkflow(): task "${task.nodeId}" output failed validation: ${message}`), {
+    name: "SimulationError",
+    code: "INVALID_OUTPUT",
+    details: { failureRetryable: false }
+  });
+}
+function validateExternalOutput(task, value, passIndex, validations) {
+  if (!task.outputSchema) return value;
+  const parsed = task.outputSchema.safeParse(value);
+  if (parsed.success) {
+    validations.push({
+      passIndex,
+      nodeId: task.nodeId,
+      iteration: task.iteration,
+      valid: true
+    });
+    return parsed.data;
+  }
+  const message = parsed.error.issues.map((issue) => issue.message).join("; ");
+  validations.push({
+    passIndex,
+    nodeId: task.nodeId,
+    iteration: task.iteration,
+    valid: false,
+    message
+  });
+  throw invalidOutputError(task, message);
+}
+function normalizeApproval(value) {
+  if (value === true || value === "approve") return { approved: true };
+  if (value === false || value === "deny") return { approved: false };
+  return value;
+}
+function looksLikeApprovalValue(value) {
+  return isRecord(value) && typeof value.approved === "boolean";
+}
+function taskContext(task, input, passIndex) {
+  return {
+    nodeId: task.nodeId,
+    ...task.label ? { label: task.label } : {},
+    iteration: task.iteration,
+    input,
+    passIndex
+  };
+}
+function lookupByTask(values, task, extraKey) {
+  if (Object.prototype.hasOwnProperty.call(values, task.nodeId)) return values[task.nodeId];
+  if (task.label && Object.prototype.hasOwnProperty.call(values, task.label)) return values[task.label];
+  if (extraKey && Object.prototype.hasOwnProperty.call(values, extraKey)) return values[extraKey];
+  return values["*"];
+}
+async function approvalFor(options, task, input, passIndex) {
+  const configured = options.approvals;
+  let value;
+  if (configured === void 0 || typeof configured === "boolean" || typeof configured === "string" || typeof configured === "function" || looksLikeApprovalValue(configured)) {
+    value = configured;
+  } else {
+    value = lookupByTask(configured, task);
+  }
+  const resolved = typeof value === "function" ? await value(taskContext(task, input, passIndex)) : value;
+  return normalizeApproval(resolved ?? true);
+}
+function approvalTaskOutput(task, decision) {
+  if (decision.output !== void 0) return decision.output;
+  const generated = schemaExample3(task);
+  if (!isRecord(generated)) return generated;
+  const output = { ...generated };
+  if ("approved" in output) output.approved = decision.approved;
+  if (decision.note !== void 0 && "note" in output) output.note = decision.note;
+  if (decision.decidedBy !== void 0) {
+    if ("decidedBy" in output) output.decidedBy = decision.decidedBy;
+    if ("reviewer" in output) output.reviewer = decision.decidedBy;
+  }
+  if (task.approvalMode === "select" && "selected" in output) {
+    output.selected = decision.optionKey ?? task.approvalOptions?.[0]?.key ?? "";
+  }
+  if (task.approvalMode === "rank" && "ranked" in output) {
+    output.ranked = task.approvalOptions?.map((option) => option.key) ?? [];
+  }
+  return output;
+}
+async function eventPayloadFor(options, task, eventName, input, passIndex) {
+  const eventValue = options.events ? lookupByTask(options.events, task, eventName) : void 0;
+  const signalValue = options.signals ? lookupByTask(options.signals, task, eventName) : void 0;
+  const configured = eventValue ?? signalValue;
+  if (typeof configured !== "function") return configured === void 0 ? schemaExample3(task) : configured;
+  const correlationId = typeof task.meta?.__correlationId === "string" ? task.meta.__correlationId : void 0;
+  return configured({
+    ...taskContext(task, input, passIndex),
+    eventName,
+    ...correlationId ? { correlationId } : {}
+  });
+}
+function isIsolatedSideEffect(task) {
+  return Boolean(task.sideEffect || task.meta?.__sandbox || task.meta?.__subflow);
+}
+async function runEffect(effect) {
+  return Effect2.runPromise(effect);
+}
+async function decideAgain(session) {
+  const graph = await runEffect(session.getCurrentGraph());
+  if (!graph) throw new Error("coverWorkflow(): workflow session has no current graph");
+  return runEffect(session.submitGraph(graph));
+}
+function waitingTask(state, states, expectedState, predicate) {
+  return [...state.descriptors.values()].reverse().find((task) => states.get(stateKey(task)) === expectedState && (!predicate || predicate(task)));
+}
+function appendOutput(record, key, value) {
+  (record[key] ??= []).push(value);
+}
+function mergeOutputs(target, source) {
+  for (const [key, values] of Object.entries(source)) {
+    (target[key] ??= []).push(...values);
+  }
+}
+async function runCoveragePass(workflow, options, input, passIndex, rootDir, maxLoopIterations) {
+  const state = {
+    defined: /* @__PURE__ */ new Set(),
+    descriptors: /* @__PURE__ */ new Map(),
+    executionOrder: [],
+    suppressTaskStart: /* @__PURE__ */ new Set(),
+    externalTaskOutputs: {},
+    externalTableOutputs: {},
+    validations: [],
+    approvals: [],
+    taskFailures: [],
+    approvalOutputs: /* @__PURE__ */ new Map(),
+    nowMs: Date.now()
+  };
+  const mocks = { "*": auto, ...options.mocks ?? {} };
+  const sim = __simulateWithControls(
+    workflow,
+    {
+      input,
+      mocks,
+      rootDir,
+      workflowPath: options.workflowPath
+    },
+    {
+      nowMs: () => state.nowMs,
+      transformGraph: (graph) => capLoops(graph, maxLoopIterations),
+      onGraph: (graph) => {
+        state.latestGraph = graph;
+        for (const task of graph.tasks) {
+          state.defined.add(task.nodeId);
+          state.descriptors.set(stateKey(task), task);
+        }
+      },
+      onTaskStarted: (task) => {
+        const key = stateKey(task);
+        if (state.suppressTaskStart.delete(key)) return;
+        state.executionOrder.push(task.nodeId);
+      },
+      onTaskValidated: (task) => {
+        if (!task.outputSchema) return;
+        state.validations.push({
+          passIndex,
+          nodeId: task.nodeId,
+          iteration: task.iteration,
+          valid: true
+        });
+      },
+      onTaskError: (task, error) => {
+        state.taskFailures.push(failure(passIndex, error, task.nodeId));
+        if (task.outputSchema && (errorCode(error) === "INVALID_OUTPUT" || /validation/i.test(errorMessage(error)))) {
+          state.validations.push({
+            passIndex,
+            nodeId: task.nodeId,
+            iteration: task.iteration,
+            valid: false,
+            message: errorMessage(error)
+          });
+        }
+      },
+      executeUnmocked: async (task) => {
+        if (task.kind === "human") {
+          return {
+            handled: true,
+            value: state.approvalOutputs.get(stateKey(task)) ?? schemaExample3(task)
+          };
+        }
+        if (task.needsApproval && (task.meta?.requestTitle || task.approvalMode !== "gate")) {
+          return {
+            handled: true,
+            value: state.approvalOutputs.get(stateKey(task)) ?? schemaExample3(task)
+          };
+        }
+        if (isIsolatedSideEffect(task)) {
+          return options.executeSideEffects ? { handled: false } : { handled: true, value: schemaExample3(task) };
+        }
+        if (!options.executeCompute && task.computeFn) {
+          return { handled: true, value: schemaExample3(task) };
+        }
+        return { handled: false };
+      },
+      resolveWait: async (reason, session) => {
+        if (reason._tag === "Approval") {
+          const states = await runEffect(session.getTaskStates());
+          const task = waitingTask(state, states, "waiting-approval", (candidate) => candidate.nodeId === reason.nodeId) ?? [...state.descriptors.values()].reverse().find((candidate) => candidate.nodeId === reason.nodeId);
+          if (!task) throw new Error(`coverWorkflow(): approval task "${reason.nodeId}" was not rendered`);
+          const decision = await approvalFor(options, task, input, passIndex);
+          const output = approvalTaskOutput(task, decision);
+          state.approvalOutputs.set(stateKey(task), output);
+          state.approvals.push({
+            passIndex,
+            nodeId: task.nodeId,
+            iteration: task.iteration,
+            approved: decision.approved,
+            ...decision.note ? { note: decision.note } : {},
+            ...decision.decidedBy ? { decidedBy: decision.decidedBy } : {}
+          });
+          state.executionOrder.push(task.nodeId);
+          state.suppressTaskStart.add(stateKey(task));
+          return runEffect(
+            session.approvalResolved(task.nodeId, {
+              approved: decision.approved,
+              ...decision.note !== void 0 ? { note: decision.note } : {},
+              ...decision.decidedBy !== void 0 ? { decidedBy: decision.decidedBy } : {},
+              ...decision.optionKey !== void 0 ? { optionKey: decision.optionKey } : {},
+              ...decision.output !== void 0 ? { payload: decision.output } : {}
+            })
+          );
+        }
+        if (reason._tag === "Event") {
+          const states = await runEffect(session.getTaskStates());
+          const task = waitingTask(
+            state,
+            states,
+            "waiting-event",
+            (candidate) => candidate.meta?.__eventName === reason.eventName
+          );
+          if (!task) throw new Error(`coverWorkflow(): waiting event "${reason.eventName}" has no rendered task`);
+          const rawPayload = await eventPayloadFor(options, task, reason.eventName, input, passIndex);
+          const payload = validateExternalOutput(task, rawPayload, passIndex, state.validations);
+          state.executionOrder.push(task.nodeId);
+          appendOutput(state.externalTaskOutputs, task.nodeId, payload);
+          if (task.outputTableName) appendOutput(state.externalTableOutputs, task.outputTableName, payload);
+          const correlationId = typeof task.meta?.__correlationId === "string" ? task.meta.__correlationId : null;
+          return runEffect(session.eventReceived(reason.eventName, payload, correlationId));
+        }
+        if (reason._tag === "Timer") {
+          const states = await runEffect(session.getTaskStates());
+          const task = waitingTask(state, states, "waiting-timer");
+          if (!task) throw new Error("coverWorkflow(): waiting timer has no rendered task");
+          state.nowMs = Math.max(state.nowMs, reason.resumeAtMs);
+          state.executionOrder.push(task.nodeId);
+          appendOutput(state.externalTaskOutputs, task.nodeId, { firedAtMs: state.nowMs });
+          return runEffect(session.timerFired(task.nodeId, state.nowMs));
+        }
+        if (reason._tag === "RetryBackoff") {
+          state.nowMs += Math.max(0, reason.waitMs);
+          return decideAgain(session);
+        }
+        if (reason._tag === "HotReload" && state.latestGraph) {
+          return runEffect(session.hotReloaded(state.latestGraph));
+        }
+        if (reason._tag === "OrphanRecovery") {
+          return runEffect(session.recoverOrphanedTasks());
+        }
+        return {
+          runId: "coverage",
+          status: reason._tag === "Quota" ? "waiting-quota" : "waiting-event",
+          error: new Error(`coverWorkflow(): cannot auto-resolve ${reason._tag} wait`)
+        };
+      }
+    }
+  );
+  let runError;
+  try {
+    await sim.run();
+  } catch (error) {
+    runError = error;
+  }
+  const taskOutputs = {};
+  for (const nodeId of new Set(sim.executed)) {
+    taskOutputs[nodeId] = sim.task(nodeId).outputs;
+  }
+  mergeOutputs(taskOutputs, state.externalTaskOutputs);
+  const outputs = {};
+  mergeOutputs(outputs, sim.outputs);
+  mergeOutputs(outputs, state.externalTableOutputs);
+  const finalTaskFailures = state.taskFailures.filter(
+    (item) => item.nodeId !== void 0 && sim.task(item.nodeId).status === "failed"
+  );
+  const errors = finalTaskFailures.length > 0 ? finalTaskFailures : runError !== void 0 ? [failure(passIndex, runError)] : [];
+  const executedSet = new Set(state.executionOrder);
+  const definedNodes = [...state.defined];
+  return {
+    passIndex,
+    input,
+    status: sim.status,
+    executed: state.executionOrder,
+    outputs,
+    taskOutputs,
+    finalOutput: sim.output,
+    definedNodes,
+    unexecuted: definedNodes.filter((nodeId) => !executedSet.has(nodeId)),
+    validations: state.validations,
+    approvals: state.approvals,
+    errors,
+    unusedMocks: sim.unusedMocks,
+    warnings: sim.warnings
+  };
+}
+function normalizeInputs(options) {
+  if (options.input !== void 0 && options.inputs !== void 0) {
+    throw new TypeError("coverWorkflow(): use either input or inputs, not both");
+  }
+  if (options.inputs !== void 0) {
+    if (options.inputs.length === 0) throw new TypeError("coverWorkflow(): inputs must contain at least one value");
+    return options.inputs;
+  }
+  return [options.input ?? {}];
+}
+function normalizeLoopCap(value) {
+  const cap = value ?? 3;
+  if (!Number.isInteger(cap) || cap < 1) {
+    throw new TypeError("coverWorkflow(): maxLoopIterations must be a positive integer");
+  }
+  return cap;
+}
+async function coverWorkflow(workflowModule, options = {}) {
+  const workflow = workflowFromModule(workflowModule);
+  const inputs = normalizeInputs(options);
+  const maxLoopIterations = normalizeLoopCap(options.maxLoopIterations);
+  const temporaryRoot = options.rootDir ? void 0 : await mkdtemp(join2(tmpdir(), "smithers-coverage-"));
+  const rootDir = options.rootDir ?? temporaryRoot;
+  const passes = [];
+  try {
+    for (let passIndex = 0; passIndex < inputs.length; passIndex += 1) {
+      passes.push(
+        await runCoveragePass(workflow, options, inputs[passIndex], passIndex, rootDir, maxLoopIterations)
+      );
+    }
+  } finally {
+    if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
+  }
+  const outputs = {};
+  const taskOutputs = {};
+  for (const pass of passes) {
+    mergeOutputs(outputs, pass.outputs);
+    mergeOutputs(taskOutputs, pass.taskOutputs);
+  }
+  const executed = passes.flatMap((pass) => pass.executed);
+  const definedNodes = [...new Set(passes.flatMap((pass) => pass.definedNodes))];
+  const coveredNodes = [...new Set(executed)];
+  const coveredSet = new Set(coveredNodes);
+  const definedSet = new Set(definedNodes);
+  const allowUnreached = [...options.allowUnreached ?? []];
+  const expectedNodes = [.../* @__PURE__ */ new Set([...options.expectedNodes ?? [], ...allowUnreached])];
+  const result = {
+    status: passes.every((pass) => pass.status === "finished") ? "finished" : "failed",
+    passes,
+    executed,
+    outputs,
+    taskOutputs,
+    finalOutputs: passes.map((pass) => pass.finalOutput),
+    definedNodes,
+    coveredNodes,
+    unexecuted: definedNodes.filter((nodeId) => !coveredSet.has(nodeId)),
+    unreached: expectedNodes.filter((nodeId) => !definedSet.has(nodeId)),
+    validations: passes.flatMap((pass) => pass.validations),
+    approvals: passes.flatMap((pass) => pass.approvals),
+    errors: passes.flatMap((pass) => pass.errors),
+    allowUnreached
+  };
+  if (options.assert !== false) expectFullCoverage(result);
+  return result;
+}
+function expectFullCoverage(result) {
+  const failures = [];
+  const unfinished = result.passes.filter((pass) => pass.status !== "finished");
+  if (unfinished.length > 0) {
+    failures.push(
+      `unfinished passes: ${unfinished.map((pass) => `${pass.passIndex} (${JSON.stringify(pass.status)})`).join(", ")}`
+    );
+  }
+  const unexpectedUnexecuted = result.unexecuted.filter((nodeId) => !isAllowed(nodeId, result.allowUnreached));
+  if (unexpectedUnexecuted.length > 0) {
+    failures.push(`unexecuted nodes: ${JSON.stringify(unexpectedUnexecuted)}`);
+  }
+  const unexpectedUnreached = result.unreached.filter((nodeId) => !isAllowed(nodeId, result.allowUnreached));
+  if (unexpectedUnreached.length > 0) {
+    failures.push(`unreached expected nodes: ${JSON.stringify(unexpectedUnreached)}`);
+  }
+  const invalid = result.validations.filter((validation) => !validation.valid);
+  if (invalid.length > 0) {
+    failures.push(
+      `invalid structured outputs: ${invalid.map((item) => `${item.nodeId} (${item.message ?? "invalid"})`).join(", ")}`
+    );
+  }
+  if (result.errors.length > 0) {
+    failures.push(
+      `errors: ${result.errors.map((item) => `${item.nodeId ? `${item.nodeId}: ` : ""}${item.message}`).join("; ")}`
+    );
+  }
+  if (failures.length > 0) {
+    throw new WorkflowCoverageError(`Workflow coverage failed:
+- ${failures.join("\n- ")}`, result);
+  }
+  return result;
 }
 
 // src/matchers.ts
@@ -3695,7 +4323,7 @@ var removeStep = (ast, id) => {
     return ast;
   return { ...ast, steps: ast.steps.filter((step2) => step2.id !== id) };
 };
-var shrink = async (ast, controls, failure, options = {}) => {
+var shrink = async (ast, controls, failure2, options = {}) => {
   const max = Math.max(0, options.maxCandidates ?? 100);
   let tried = 0;
   let current = ast;
@@ -3717,7 +4345,7 @@ var shrink = async (ast, controls, failure, options = {}) => {
         controlLog: candidateControls,
         seed: options.seed ?? candidate.seed
       });
-      if (await failure(candidate, candidateControls, result)) {
+      if (await failure2(candidate, candidateControls, result)) {
         current = candidate;
         currentControls = candidateControls;
         changed = true;
@@ -3734,7 +4362,7 @@ var shrink = async (ast, controls, failure, options = {}) => {
       controlLog: candidateControls,
       seed: options.seed ?? current.seed
     });
-    if (await failure(current, candidateControls, result)) {
+    if (await failure2(current, candidateControls, result)) {
       currentControls = candidateControls;
       i = -1;
     }
@@ -4298,6 +4926,7 @@ export {
   SimulationError,
   TraceCollector,
   VirtualClock,
+  WorkflowCoverageError,
   ambiguity,
   assertNoLeaks,
   auto,
@@ -4308,12 +4937,14 @@ export {
   compareBoundaryShape,
   compileScenario,
   contractProbe,
+  coverWorkflow,
   cutPoint,
   dryRun,
   e2eDescriptor,
   e2eHarness,
   expectAmbiguity,
   expectEffect,
+  expectFullCoverage,
   expectTrace,
   extension,
   fakeAgent,

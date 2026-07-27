@@ -4,12 +4,14 @@ export { RenderWorkflowOptions, RenderedWorkflow, renderWorkflow } from './rende
 export { renderPromptToText as renderPrompt } from '@smithers-orchestrator/components/components/Task';
 export { RunTaskOptions, runTask } from './runTask.js';
 export { Sim, SimTaskRecord, SimulateMockFunction, SimulateOptions, simulate } from './simulate.js';
+export { CoverableWorkflow, WorkflowCoverageApproval, WorkflowCoverageApprovalResolver, WorkflowCoverageApprovalValue, WorkflowCoverageDecision, WorkflowCoverageError, WorkflowCoverageEventContext, WorkflowCoverageEventResolver, WorkflowCoverageFailure, WorkflowCoverageOptions, WorkflowCoveragePass, WorkflowCoverageResult, WorkflowCoverageTaskContext, WorkflowCoverageValidation, coverWorkflow, expectFullCoverage } from './coverWorkflow.js';
 export { simMatchers, toHaveExecuted, toHaveExecutedInOrder, toHaveFinished } from './matchers.js';
 import { ChildProcess } from 'node:child_process';
 import '@smithers-orchestrator/driver/SmithersCtx';
 import '@smithers-orchestrator/react-reconciler';
 import '@smithers-orchestrator/driver/WorkflowDefinition';
 import '@smithers-orchestrator/graph';
+import '@smithers-orchestrator/scheduler';
 
 type ScenarioValue = null | boolean | number | string | readonly ScenarioValue[] | {
     readonly [key: string]: ScenarioValue;
