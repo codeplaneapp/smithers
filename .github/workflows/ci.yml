@@ -222,6 +222,13 @@ jobs:
         if: (runner.os == 'Linux' && matrix.shard == 0) || (runner.os == 'Windows' && matrix.shard == 1)
         run: bun test examples/bun-port-smithers/components/porting-rules.test.ts examples/context-handoff/workflow.test.ts
 
+      # The workflow coverage suite (examples/tests) runs every examples/*.jsx
+      # workflow through coverWorkflow with mocked agents. Linux-only until the
+      # fakeAgent POSIX file simulation is proven on Windows runners.
+      - name: Run example workflow coverage suite
+        if: runner.os == 'Linux' && matrix.shard == 0
+        run: bun test examples/tests --timeout 120000
+
       # Real-PTY TUI e2e (picker / input / approval) driven through zmux. These
       # probes need no agent CLI, so they are safe on the clean CI box. The
       # daemon binary is downloaded from the zmux release; tests skip cleanly
