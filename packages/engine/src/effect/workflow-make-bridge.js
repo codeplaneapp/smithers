@@ -164,9 +164,10 @@ function createWorkflowMakeBridgeRuntime(services) {
       }
       const adapter = new SmithersDb(workflow.db);
       const run = await Effect.runPromise(adapter.getRun(lastRunIdRef.current));
+      const status = run && isSuspendingStatus(run.status) ? run.status : "cancelled";
       return {
         runId: lastRunIdRef.current,
-        status: run?.status ?? "cancelled",
+        status,
       };
     },
   };
