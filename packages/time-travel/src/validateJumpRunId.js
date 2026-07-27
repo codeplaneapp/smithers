@@ -8,8 +8,11 @@ import { JumpToFrameError } from "./JumpToFrameError.js";
  * @returns {string}
  */
 export function validateJumpRunId(runId) {
-  if (typeof runId !== "string" || !JUMP_RUN_ID_PATTERN.test(runId)) {
-    throw new JumpToFrameError("InvalidRunId", "runId must match /^[a-z0-9_-][a-z0-9_.-]{0,63}$/.");
+  if (typeof runId !== "string" || runId.length > 256 || !JUMP_RUN_ID_PATTERN.test(runId)) {
+    throw new JumpToFrameError(
+      "InvalidRunId",
+      "runId must be a 1-64 character lowercase slug or an engine child-run id of at most 256 characters.",
+    );
   }
   return runId;
 }
