@@ -2333,9 +2333,12 @@ find out, and never a provisional plan under an assumed answer.
 
 ## Agents and models
 
-Oneshot picks the first usable agent from its chain: Claude Opus 5 first
-(the registry v7 default implementer), then Codex Sol, then Kimi K3, then
-Fable, unless `--agent` pins one. The claude seats fall back to opencode
+With no `--model`, oneshot's auto chain follows the registry: Claude Opus 5
+first (the registry v7 default implementer), then Codex Sol, then Kimi K3,
+then Fable, unless `--agent` pins one. That is the fallback default, not the
+routing doctrine: when you route tier-2 work yourself, explicitly prefer
+codex sol (`--model sol`) when it is usable, then kimi, then claude fable or
+opus, exactly as the tiers above say. The claude seats fall back to opencode
 when the Claude CLI is unavailable, and the kimi seat runs Kimi K3
 (`kimi-code/k3`, 1M-token context). `--model` accepts a slot (`sol`,
 `terra`, `luna`, `kimi`, `fable`, `opus`, `sonnet`) or a canonical model id;
