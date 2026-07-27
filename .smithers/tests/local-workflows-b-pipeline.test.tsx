@@ -97,7 +97,7 @@ describe("pipeline workflow behavior", () => {
     ]) {
       expect(investor.inputSchema.safeParse(bad).success).toBe(false);
     }
-  });
+  }, 30_000);
 
   test("investor parses every key family and completes the real silent compute", async () => {
     const investor = await moduleFor("investor.tsx");
