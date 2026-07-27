@@ -2,7 +2,7 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { retryTask } from "../src/retry-task.js";
-import { runWorkflow } from "../../engine/src/engine.js";
+import { runWorkflow as runEngineWorkflow } from "../../engine/src/engine.js";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
 import { Effect } from "effect";
@@ -13,6 +13,14 @@ import { join } from "node:path";
 import { createTempRepo, pinSqliteBackend, runSmithers } from "../../smithers/tests/e2e-helpers.js";
 
 setDefaultTimeout(120_000);
+
+function runWorkflow(workflow, options) {
+  // These cases exercise retry persistence, not VCS capture. Keeping their
+  // launch root outside the enclosing jj workspace avoids serializing every
+  // task on the shared working-copy lock during the repository-wide gate.
+  return runEngineWorkflow(workflow, { ...options, rootDir: tmpdir() });
+}
+
 /**
  * @param {string} nodeId
  * @param {Record<string, number>} callCounts
