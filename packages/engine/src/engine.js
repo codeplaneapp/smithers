@@ -2602,9 +2602,11 @@ function assertResumeDurabilityMetadata(existingRun, existingConfig, current, wo
     );
     const hint = isWorkflowEdit
       ? "The workflow source changed since this run started, so it can no longer be resumed safely. " +
-        "To carry the edit forward, fork from a checkpoint: `smithers fork <workflow> --run-id <id> --frame <n>` " +
-        "(run `smithers fork --help` for the exact flags), or start a fresh run with `smithers up <workflow>`. " +
-        "To resume THIS run, revert the workflow file to its original contents. " +
+        "To re-bless the durability metadata and resume THIS run in place, pass `--accept-workflow-change` " +
+        "(you own replay determinism from that point); that is the usual choice for a formatting-only or " +
+        "additive edit. To branch instead, fork from a checkpoint: `smithers fork <workflow> --run-id <id> " +
+        "--frame <n>` (run `smithers fork --help` for the exact flags), or start a fresh run with " +
+        "`smithers up <workflow>`. To resume unchanged, revert the workflow file to its original contents. " +
         "(Note: resume hashes the workflow file content, not git — no commit is required.)"
       : "Run metadata (workflow path or VCS root) no longer matches. Resume from the original location, " +
         "or start a fresh run with `smithers up <workflow>`.";
