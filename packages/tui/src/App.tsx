@@ -8,8 +8,9 @@ import { GraphMode } from "./modes/GraphMode.tsx";
 import { LogMode } from "./modes/LogMode.tsx";
 import { TimelineMode } from "./modes/TimelineMode.tsx";
 import { HijackMode } from "./modes/HijackMode.tsx";
+import { RunsListMode } from "./modes/RunsListMode.tsx";
 
-export type Mode = 1 | 2 | 3 | 4 | 5;
+export type Mode = 1 | 2 | 3 | 4 | 5 | 6;
 
 const COMPACT_WIDTH = 100;
 
@@ -18,12 +19,14 @@ function ModeBody({
   mode,
   treeSelectedNodeKey,
   onSelectNodeKey,
+  onSelectRun,
   onBack,
 }: {
   runId: string;
   mode: Mode;
   treeSelectedNodeKey: string | null;
   onSelectNodeKey: (nodeKey: string) => void;
+  onSelectRun: (runId: string) => void;
   onBack: () => void;
 }) {
   switch (mode) {
@@ -37,6 +40,8 @@ function ModeBody({
       return <TimelineMode runId={runId} />;
     case 5:
       return <HijackMode runId={runId} onBack={onBack} />;
+    case 6:
+      return <RunsListMode onSelectRun={onSelectRun} />;
   }
 }
 
@@ -49,6 +54,7 @@ const TREE_KEYBAR_ENTRIES: { key: string; description: string }[] = [
   { key: "l", description: "Logs" },
   { key: "t", description: "Timeline" },
   { key: "h", description: "Hijack" },
+  { key: "r", description: "Runs" },
   { key: "q", description: "Quit" },
   { key: "?", description: "Help" },
 ];
@@ -157,8 +163,8 @@ export type AppKeyAction =
  * - While the help overlay is open only Esc (close) and the overlay's own
  *   advertised `q Quit` do anything; modes gate their keys on
  *   OverlayOpenContext.
- * - Tree mode owns 1-4 for its inspector tabs, so 1-5 switch modes only
- *   OUTSIDE Tree; the letter aliases (g/l/t/h) always work.
+ * - Tree mode owns 1-4 for its inspector tabs, so 1-6 switch modes only
+ *   OUTSIDE Tree; the letter aliases (g/l/t/h/r) always work.
  * - Shift+L is Timeline's "back to live" (it arrives as name "l" + shift, the
  *   parser lowercases shifted letters), so only the bare `l` is the Logs
  *   alias. `q` matches Shift+Q too (name stays "q") — a literal "Q" never
@@ -183,17 +189,23 @@ export function routeAppKey(
     if (name === "3") return { kind: "set-mode", mode: 3 };
     if (name === "4") return { kind: "set-mode", mode: 4 };
     if (name === "5") return { kind: "set-mode", mode: 5 };
+    if (name === "6") return { kind: "set-mode", mode: 6 };
   }
   if (name === "g") return { kind: "toggle-graph" };
   if (name === "l" && !shift) return { kind: "set-mode", mode: 3 };
   if (name === "t") return { kind: "set-mode", mode: 4 };
   if (name === "h") return { kind: "set-mode", mode: 5 };
+  if (name === "r") return { kind: "set-mode", mode: 6 };
   if (name === "q") return { kind: "exit" };
   return null;
 }
 
 export function App({ runId, onExit }: { runId: string; onExit: (code: number) => void }) {
   const [mode, setMode] = useState<Mode>(1);
+  // The run the modes inspect. Starts at the CLI-provided runId (unchanged
+  // `smithers-mon <runId>` behavior); Runs mode (6) lets the operator switch
+  // to a different run on the same gateway without restarting the process.
+  const [activeRunId, setActiveRunId] = useState(runId);
   const [treeSelectedNodeKey, setTreeSelectedNodeKey] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const { width } = useTerminalDimensions();
@@ -221,15 +233,22 @@ export function App({ runId, onExit }: { runId: string; onExit: (code: number) =
     setMode(1);
   }
 
+  function handleSelectRun(nextRunId: string) {
+    setActiveRunId(nextRunId);
+    setTreeSelectedNodeKey(null);
+    setMode(1);
+  }
+
   return (
     <box width="100%" height="100%" flexDirection="column">
-      <Header runId={runId} compact={compact} />
+      <Header runId={activeRunId} compact={compact} />
       <AppBody helpMode={showHelp ? mode : null}>
         <ModeBody
-          runId={runId}
+          runId={activeRunId}
           mode={mode}
           treeSelectedNodeKey={treeSelectedNodeKey}
           onSelectNodeKey={handleSelectNodeKey}
+          onSelectRun={handleSelectRun}
           onBack={() => setMode(1)}
         />
       </AppBody>

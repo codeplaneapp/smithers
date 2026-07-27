@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { useRunEvents, TUI_EVENT_CAP } from "../data.ts";
+import { useRunInspectorVm } from "@smithers-orchestrator/ui-core";
+import { TUI_EVENT_CAP } from "../data.ts";
 import type { GatewayEventFrame } from "../data.ts";
 import {
   extractEventText,
@@ -16,13 +17,16 @@ import { useOverlayOpen } from "../OverlayContext.tsx";
 const COMPACT_WIDTH = 100;
 
 /**
- * Thin wrapper: reads the gateway event stream and hands the data to the pure
- * presentational `LogView`. Keeping the only gateway hook here means render
- * tests can exercise the REAL view with injected events (no gateway/provider),
- * so the tests can't pass against a divergent clone of this UI.
+ * Thin wrapper: reads the run's event stream via ui-core's
+ * `useRunInspectorVm` (research/tui-parity/03-tui-screens.md groups Logs
+ * under the "Run inspector" surface it drives) and hands the data to the pure
+ * presentational `LogView`. Keeping the only gateway-backed hook here means
+ * render tests can exercise the REAL view with injected events (no
+ * gateway/provider), so the tests can't pass against a divergent clone of
+ * this UI.
  */
 export function LogMode({ runId }: { runId: string }) {
-  const { events, streaming } = useRunEvents(runId, { maxEvents: TUI_EVENT_CAP });
+  const { events, streaming } = useRunInspectorVm(runId, { maxEvents: TUI_EVENT_CAP });
   return <LogView events={events} streaming={streaming} />;
 }
 

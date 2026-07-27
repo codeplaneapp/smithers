@@ -10,9 +10,9 @@ import { GraphView } from "../src/modes/GraphMode.tsx";
  * browser.
  *
  * These render the REAL presentational `GraphView` (the same component
- * production mounts via `GraphMode`, a thin `useRunTree` wrapper) with injected
- * tree data, so the DAG layout + Enter→onSelectNodeKey wiring can't drift from
- * what these exercise.
+ * production mounts via `GraphMode`, a thin `useRunInspectorVm` wrapper) with
+ * injected tree data, so the DAG layout + Enter→onSelectNodeKey wiring can't
+ * drift from what these exercise.
  */
 
 const ROOT: GatewayRunNode = {

@@ -12,8 +12,8 @@ import { TimelineView } from "../src/modes/TimelineMode.tsx";
  *
  * These render the REAL presentational `TimelineView` (the same component
  * production mounts via `TimelineMode`) with injected event data and a stub
- * rewind callback — `TimelineMode` is a thin wrapper that only reads
- * `useRunEvents`/`useActions` and forwards them. So the view can't drift from
+ * rewind callback — `TimelineMode` is a thin wrapper that only reads ui-core's
+ * `useRunInspectorVm` and forwards its events. So the view can't drift from
  * what these tests exercise.
  */
 

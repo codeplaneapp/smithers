@@ -1,20 +1,21 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { SyntaxStyle } from "@opentui/core";
-import { useRunTree, useApprovals, useRunEvents, useNodeDiff, useNodeOutput, useActions } from "../data.ts";
+import { useApprovals, useActions, TUI_EVENT_CAP } from "../data.ts";
 import type { GatewayEventFrame } from "../data.ts";
 import { runNodeKey, type GatewayRunNode } from "@smithers-orchestrator/gateway-client";
-import { normalizeFrame, nodeLogEvents } from "./eventFrame.ts";
 import {
-  flattenTree,
-  nodeGlyph,
-  nodeGlyphColor,
-  nodeChevron,
-  defaultTab,
+  useRunInspectorVm,
+  deriveOutputText,
+  normalizeFrame,
+  TUI_OUTPUT_PREVIEW_CHARS,
+  TUI_OUTPUT_TRUNCATION_MARKER,
+} from "@smithers-orchestrator/ui-core";
+import { RunTree, RunEventLog, type RunTreeRow, type RunEventLogRow } from "@smithers-orchestrator/tui-ui";
+import {
   eventKeyName,
   isModifiedKeyEvent,
   treeScrollWindow,
-  resolveFocusIdx,
   ALL_TABS,
   type FlatNode,
   type TabId,
@@ -70,17 +71,12 @@ function getPlainStyle(): SyntaxStyle {
 
 const COMPACT_WIDTH = 100;
 
-// Cap the inspector Logs tab to the newest rows so a chatty node can't make the
-// pane render thousands of lines per frame.
-const NODE_LOG_TAIL = 500;
-
-export const TUI_OUTPUT_PREVIEW_CHARS = 20_000;
-export const TUI_OUTPUT_TRUNCATION_MARKER = "\n... [truncated]";
-
-function outputPreview(text: string): string {
-  if (text.length <= TUI_OUTPUT_PREVIEW_CHARS) return text;
-  return `${text.slice(0, TUI_OUTPUT_PREVIEW_CHARS)}${TUI_OUTPUT_TRUNCATION_MARKER}`;
-}
+// Re-exported so existing test imports (`deriveOutputText`,
+// `TUI_OUTPUT_PREVIEW_CHARS`, `TUI_OUTPUT_TRUNCATION_MARKER` from this module)
+// keep working; the implementation lives in ui-core's useRunInspectorVm now
+// (research/tui-parity/01-packages.md phase 2: "smithers-mon modes consume
+// useRunInspectorVm").
+export { deriveOutputText, TUI_OUTPUT_PREVIEW_CHARS, TUI_OUTPUT_TRUNCATION_MARKER };
 
 // ─── Approval Banner ─────────────────────────────────────────────────────────
 
@@ -210,50 +206,12 @@ function TabBar({ activeTab }: { activeTab: TabId }) {
 
 // ─── Node Inspector (presentational) ──────────────────────────────────────────
 
-/** Pull the human-readable output string out of an output-row object. */
-function rowOutputText(row: Record<string, unknown>): string | undefined {
-  if (typeof row["output"] === "string") return row["output"];
-  if (typeof row["text"] === "string") return row["text"];
-  if (typeof row["content"] === "string") return row["content"];
-  return undefined;
-}
-
-/**
- * Derive the Output tab's text from the raw `getNodeOutput` RPC payload, which
- * is ALWAYS the envelope `{ status: produced|pending|failed, row, schema,
- * partial? }` (see the server's getNodeOutput route) — the node's actual output
- * lives at `row.output`, so the envelope must be unwrapped or the tab shows the
- * whole thing (schema descriptor included) as JSON with the real output buried
- * inside as one escaped string. Non-envelope objects keep the plain
- * string-field fallbacks for older/looser payloads. Exported for tests.
- */
-export function deriveOutputText(outputData: unknown, node: GatewayRunNode): string {
-  const preview = outputPreview;
-  if (outputData && typeof outputData === "object") {
-    const d = outputData as Record<string, unknown>;
-    const status = d["status"];
-    if ("row" in d && (status === "produced" || status === "pending" || status === "failed")) {
-      const row = d["row"];
-      if (row && typeof row === "object") {
-        const text = rowOutputText(row as Record<string, unknown>);
-        return preview(text ?? JSON.stringify(row, null, 2));
-      }
-      if (status === "pending") return "(no output yet)";
-      if (status === "failed") {
-        const partial = d["partial"];
-        return partial === undefined || partial === null
-          ? "(failed, no output)"
-          : preview(`(failed) partial output:\n${JSON.stringify(partial, null, 2)}`);
-      }
-      return "(no output)";
-    }
-    // Defensive fallback for non-envelope payloads.
-    const text = rowOutputText(d);
-    if (text !== undefined) return preview(text);
-    return preview(JSON.stringify(d, null, 2));
-  }
-  if (node.output) return preview(String(node.output));
-  return "(no output)";
+/** Convert raw gateway frames into the tui-ui RunEventLog's row shape. */
+function toRunEventLogRows(nodeLogs: readonly GatewayEventFrame[]): RunEventLogRow[] {
+  return nodeLogs.map((e) => {
+    const { event, payload } = normalizeFrame(e);
+    return { seq: e.seq, event, payload: typeof payload === "string" ? payload : JSON.stringify(payload) };
+  });
 }
 
 /**
@@ -307,20 +265,7 @@ export function NodeInspectorView({
           </scrollbox>
         )}
         {activeTab === "logs" && (
-          <scrollbox width="100%" height="100%" stickyScroll stickyStart="bottom" scrollY>
-            {nodeLogs.length === 0 ? (
-              <text fg="#444444">{"  (no log events for this node)"}</text>
-            ) : (
-              nodeLogs.map((e, i) => {
-                const { event, payload } = normalizeFrame(e);
-                return (
-                  <text key={i} fg="#888888" wrapMode="char">
-                    {`  [${e.seq}] ${event}  ${typeof payload === "string" ? payload : JSON.stringify(payload)}`}
-                  </text>
-                );
-              })
-            )}
-          </scrollbox>
+          <RunEventLog rows={toRunEventLogRows(nodeLogs)} emptyLabel="no log events for this node" />
         )}
         {activeTab === "diff" && (
           <scrollbox width="100%" height="100%" scrollY>
@@ -356,91 +301,6 @@ export function NodeInspectorView({
   );
 }
 
-// ─── Node Inspector (gateway-connected wrapper) ───────────────────────────────
-
-function NodeInspector({
-  runId,
-  node,
-  approval,
-  humanRequest,
-  activeTab,
-}: {
-  runId: string;
-  node: GatewayRunNode | null;
-  approval: ApprovalUiState | null;
-  humanRequest: HumanRequestUiState | null;
-  activeTab: TabId;
-}) {
-  const { events } = useRunEvents(runId);
-  const { data: outputData } = useNodeOutput({ runId, nodeId: node?.id, iteration: node?.iteration });
-  // Only the Diff tab needs the (potentially expensive) node diff; gate the RPC
-  // on it so switching nodes/tabs doesn't fetch diffs nobody is looking at.
-  // The error is threaded into the view — a failed getNodeDiff must not
-  // masquerade as "No diff available".
-  const {
-    data: diffData,
-    loading: diffLoading,
-    error: diffError,
-  } = useNodeDiff({
-    runId,
-    nodeId: activeTab === "diff" ? node?.id : undefined,
-    iteration: node?.iteration,
-  });
-
-  if (!node) {
-    return (
-      <NodeInspectorView
-        node={null}
-        activeTab={activeTab}
-        outputText=""
-        nodeLogs={[]}
-        propsText=""
-        diff={{ kind: "empty", message: "" }}
-        diffLoading={false}
-        approval={null}
-      />
-    );
-  }
-
-  // Iteration-aware so loop/retry attempts don't show mixed logs (node output
-  // and approvals are already iteration-scoped); see nodeLogEvents.
-  const nodeLogs = nodeLogEvents(events, node.id, node.iteration).slice(-NODE_LOG_TAIL);
-  const outputText = deriveOutputText(outputData, node);
-  const propsText = JSON.stringify(
-    {
-      id: node.id,
-      // `key` + `iteration` distinguish repeated logical nodes (loop/retry
-      // attempts share `id` but get unique rows); essential when inspecting a
-      // specific attempt.
-      key: runNodeKey(node),
-      iteration: node.iteration,
-      name: node.name,
-      kind: node.kind,
-      status: node.status,
-      agent: node.agent,
-      meta: node.meta,
-      cardLabel: node.cardLabel,
-      parentId: node.parentId,
-      childIds: node.childIds,
-    },
-    null,
-    2,
-  );
-  return (
-    <NodeInspectorView
-      node={node}
-      activeTab={activeTab}
-      outputText={outputText}
-      nodeLogs={nodeLogs}
-      propsText={propsText}
-      diff={toNodeDiffView(diffData, diffError)}
-      diffLoading={activeTab === "diff" && diffLoading}
-      approval={approval}
-      humanRequest={humanRequest}
-    />
-  );
-}
-
 // ─── Tree Panel ───────────────────────────────────────────────────────────────
 
 /**
@@ -450,7 +310,8 @@ function NodeInspector({
  * the highlight off-screen with no way to bring it back into view. `paneRows`
  * is the pane's height in rows; the window keeps the focused row visible with
  * context on both sides. Exported so render tests can drive the REAL pane with
- * an overflowing list.
+ * an overflowing list. Delegates the actual row rendering to the tui-ui
+ * `RunTree` leaf (research/tui-parity/01-packages.md "packages/tui-ui" phase 2).
  */
 export function TreePanel({
   flat,
@@ -463,106 +324,38 @@ export function TreePanel({
   panelWidth: number;
   paneRows: number;
 }) {
-  if (flat.length === 0) {
-    return (
-      <box width="100%" height="100%">
-        <text fg="#444444">{"  (no nodes)"}</text>
-      </box>
-    );
-  }
-
   const { start, end } = treeScrollWindow(flat.length, paneRows, focusIdx);
+  const focused = flat[focusIdx];
+  const rows: RunTreeRow[] = flat.slice(start, end).map(({ node, depth, hasChildren, isCollapsed }) => ({
+    key: runNodeKey(node),
+    depth,
+    hasChildren,
+    isCollapsed,
+    status: node.status ?? "",
+    label: node.cardLabel ?? node.name ?? node.id,
+    meta: node.meta,
+  }));
 
-  return (
-    <box width="100%" height="100%" flexDirection="column">
-      {flat.slice(start, end).map(({ node, depth, hasChildren, isCollapsed }, i) => {
-        const absIdx = start + i;
-        const isFocused = absIdx === focusIdx;
-        const chevron = nodeChevron(hasChildren, isCollapsed);
-        const glyph = nodeGlyph(node.status ?? "");
-        const glyphColor = nodeGlyphColor(node.status ?? "");
-        const label = node.cardLabel ?? node.name ?? node.id;
-        const meta = node.meta ? ` ${node.meta}` : "";
-        const indentWidth = depth * 2;
-        const reservedWidth = indentWidth + 4 + meta.length;
-        const maxLabelWidth = Math.max(8, panelWidth - reservedWidth);
-        const truncLabel = label.length > maxLabelWidth ? label.slice(0, maxLabelWidth - 1) + "…" : label;
-
-        return (
-          <box
-            key={runNodeKey(node)}
-            width="100%"
-            height={1}
-            flexDirection="row"
-            backgroundColor={isFocused ? "#1a1a2e" : undefined}
-          >
-            <text fg="#333333">{" ".repeat(indentWidth)}</text>
-            <text fg="#555555">{chevron}</text>
-            <text fg={glyphColor}>{` ${glyph} `}</text>
-            <text fg={isFocused ? "#ffffff" : "#cccccc"}>{truncLabel}</text>
-            {meta ? <text fg="#555555">{meta}</text> : null}
-          </box>
-        );
-      })}
-    </box>
-  );
+  return <RunTree rows={rows} focusedKey={focused ? runNodeKey(focused.node) : null} panelWidth={panelWidth} />;
 }
 
 // ─── Main TreeMode ────────────────────────────────────────────────────────────
 
 export function TreeMode({ runId, initialSelectedNodeKey }: { runId: string; initialSelectedNodeKey?: string | null }) {
-  const { root, nodes, isLoading, error } = useRunTree(runId);
+  // Tree flatten/collapse/focus, tab selection, and the focused node's
+  // Output/Logs/Diff derivation are all owned by ui-core's shared view model
+  // (research/tui-parity/01-packages.md phase 2: "smithers-mon modes consume
+  // useRunInspectorVm"). Approval-banner state stays TreeMode-local for this
+  // phase — see useRunInspectorVm's doc comment.
+  const vm = useRunInspectorVm(runId, { initialSelectedNodeKey, maxEvents: TUI_EVENT_CAP });
+  const { isLoading, error, flat, focusIdx, focusRow, toggleCollapsed, focusedNode, activeTab, setActiveTab } = vm;
   const { data: approvalsData, refetch: refetchApprovals } = useApprovals(runId);
   const actions = useActions();
   const { width, height } = useTerminalDimensions();
   const compact = width < COMPACT_WIDTH;
   const overlayOpen = useOverlayOpen();
 
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  // Selection is anchored by node KEY, not by index: the flat list is rebuilt
-  // live (loop/retry attempts insert rows, rewind/reconnect delete them), so a
-  // bare index silently drifts onto a different node as rows shift. The row
-  // index is DERIVED each render (resolveFocusIdx); when the anchored node
-  // disappears, the last known index — clamped in range — takes over so `k`
-  // responds immediately after a shrink.
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [focusPane, setFocusPane] = useState<"tree" | "inspector">("tree");
-  const [activeTab, setActiveTab] = useState<TabId>("props");
-
-  const flat = useMemo(() => flattenTree(nodes, root, collapsed), [nodes, root, collapsed]);
-
-  const lastFocusIdxRef = useRef(0);
-  const focusIdx = useMemo(() => resolveFocusIdx(flat, selectedKey, lastFocusIdxRef.current), [flat, selectedKey]);
-  useEffect(() => {
-    lastFocusIdxRef.current = focusIdx;
-  }, [focusIdx]);
-
-  /** Anchor the selection to a concrete row (no-op for out-of-range indices). */
-  const focusRow = useCallback(
-    (idx: number) => {
-      const row = flat[idx];
-      if (row) setSelectedKey(runNodeKey(row.node));
-    },
-    [flat],
-  );
-
-  // When switching from Graph mode with a selected node, focus it — but only
-  // once per selection. Reruns when `flat` changes so it still focuses if the
-  // tree data arrives AFTER the mode switch, while a ref guard keeps later live
-  // updates from yanking focus back off the user's manual j/k navigation.
-  const focusedSelectionRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!initialSelectedNodeKey) return;
-    if (focusedSelectionRef.current === initialSelectedNodeKey) return;
-    // Graph mode hands us a row `key` (unique per attempt), so match on `key`.
-    const idx = flat.findIndex((f) => runNodeKey(f.node) === initialSelectedNodeKey);
-    if (idx >= 0) {
-      setSelectedKey(initialSelectedNodeKey);
-      focusedSelectionRef.current = initialSelectedNodeKey;
-    }
-  }, [initialSelectedNodeKey, flat]);
-
-  const focusedNode = flat[focusIdx]?.node ?? null;
 
   // Guards setState in async approval continuations that can resolve after a
   // mode switch unmounts this component.
@@ -573,10 +366,6 @@ export function TreeMode({ runId, initialSelectedNodeKey }: { runId: string; ini
       mountedRef.current = false;
     };
   }, []);
-
-  useEffect(() => {
-    if (focusedNode) setActiveTab(defaultTab(focusedNode));
-  }, [focusedNode ? runNodeKey(focusedNode) : undefined]);
 
   const approvals = approvalsData ?? [];
 
@@ -794,15 +583,11 @@ export function TreeMode({ runId, initialSelectedNodeKey }: { runId: string; ini
 
     if (focusPane === "inspector") {
       if (key === "left") {
-        setActiveTab((prev) => {
-          const idx = ALL_TABS.indexOf(prev);
-          return ALL_TABS[Math.max(0, idx - 1)] ?? prev;
-        });
+        const idx = ALL_TABS.indexOf(activeTab);
+        setActiveTab(ALL_TABS[Math.max(0, idx - 1)] ?? activeTab);
       } else if (key === "right") {
-        setActiveTab((prev) => {
-          const idx = ALL_TABS.indexOf(prev);
-          return ALL_TABS[Math.min(ALL_TABS.length - 1, idx + 1)] ?? prev;
-        });
+        const idx = ALL_TABS.indexOf(activeTab);
+        setActiveTab(ALL_TABS[Math.min(ALL_TABS.length - 1, idx + 1)] ?? activeTab);
       }
       return;
     }
@@ -817,13 +602,7 @@ export function TreeMode({ runId, initialSelectedNodeKey }: { runId: string; ini
         if (item?.hasChildren) {
           // Collapse state is keyed by the unique row `key` (matches flattenTree),
           // so two attempts of the same logical node fold independently.
-          const key = runNodeKey(item.node);
-          setCollapsed((prev) => {
-            const next = new Set(prev);
-            if (next.has(key)) next.delete(key);
-            else next.add(key);
-            return next;
-          });
+          toggleCollapsed(runNodeKey(item.node));
         }
       } else if (key === "return") {
         if (flat.length > 0) setFocusPane("inspector");
@@ -856,6 +635,43 @@ export function TreeMode({ runId, initialSelectedNodeKey }: { runId: string; ini
   const bodyRows = Math.max(3, height - 2);
   const paneRows = compact ? Math.max(3, Math.floor(bodyRows / 2)) : bodyRows;
 
+  const propsText = focusedNode
+    ? JSON.stringify(
+        {
+          id: focusedNode.id,
+          // `key` + `iteration` distinguish repeated logical nodes (loop/retry
+          // attempts share `id` but get unique rows); essential when inspecting a
+          // specific attempt.
+          key: runNodeKey(focusedNode),
+          iteration: focusedNode.iteration,
+          name: focusedNode.name,
+          kind: focusedNode.kind,
+          status: focusedNode.status,
+          agent: focusedNode.agent,
+          meta: focusedNode.meta,
+          cardLabel: focusedNode.cardLabel,
+          parentId: focusedNode.parentId,
+          childIds: focusedNode.childIds,
+        },
+        null,
+        2,
+      )
+    : "";
+
+  const inspector = (
+    <NodeInspectorView
+      node={focusedNode}
+      activeTab={activeTab}
+      outputText={vm.outputText}
+      nodeLogs={vm.nodeLogs}
+      propsText={propsText}
+      diff={vm.diff}
+      diffLoading={vm.diffLoading}
+      approval={approvalUi}
+      humanRequest={humanRequestUi}
+    />
+  );
+
   if (compact) {
     return (
       <box width="100%" height="100%" flexDirection="column">
@@ -863,13 +679,7 @@ export function TreeMode({ runId, initialSelectedNodeKey }: { runId: string; ini
           <TreePanel flat={flat} focusIdx={focusIdx} panelWidth={Math.floor(width * 0.5)} paneRows={paneRows} />
         </box>
         <box width="100%" flexGrow={1}>
-          <NodeInspector
-            runId={runId}
-            node={focusedNode}
-            approval={approvalUi}
-            humanRequest={humanRequestUi}
-            activeTab={activeTab}
-          />
+          {inspector}
         </box>
       </box>
     );
@@ -881,13 +691,7 @@ export function TreeMode({ runId, initialSelectedNodeKey }: { runId: string; ini
         <TreePanel flat={flat} focusIdx={focusIdx} panelWidth={treePanelWidth} paneRows={paneRows} />
       </box>
       <box width="62%" height="100%">
-        <NodeInspector
-          runId={runId}
-          node={focusedNode}
-          approval={approvalUi}
-          humanRequest={humanRequestUi}
-          activeTab={activeTab}
-        />
+        {inspector}
       </box>
     </box>
   );

@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { useRunEvents, TUI_EVENT_CAP } from "../data.ts";
+import { useRunInspectorVm } from "@smithers-orchestrator/ui-core";
+import { TUI_EVENT_CAP } from "../data.ts";
 import type { GatewayEventFrame } from "../data.ts";
 import {
   classifyFrame,
@@ -107,13 +108,15 @@ function SnapshotPanel({ events, upToSeq }: { events: GatewayEventFrame[]; upToS
 // ─── Main TimelineMode ────────────────────────────────────────────────────────
 
 /**
- * Thin wrapper: reads the gateway event stream and hands it to the pure
- * presentational `TimelineView`. Keeping the gateway hook here lets render tests
- * mount the REAL view with injected events (no gateway/provider), so the tests
- * can't drift from production.
+ * Thin wrapper: reads the run's event stream via ui-core's
+ * `useRunInspectorVm` (research/tui-parity/03-tui-screens.md groups Timeline
+ * under the "Run inspector" surface it drives) and hands it to the pure
+ * presentational `TimelineView`. Keeping the only gateway-backed hook here
+ * lets render tests mount the REAL view with injected events (no
+ * gateway/provider), so the tests can't drift from production.
  */
 export function TimelineMode({ runId }: { runId: string }) {
-  const { events, streaming } = useRunEvents(runId, { maxEvents: TUI_EVENT_CAP });
+  const { events, streaming } = useRunInspectorVm(runId, { maxEvents: TUI_EVENT_CAP });
   return <TimelineView events={events} streaming={streaming} />;
 }
 

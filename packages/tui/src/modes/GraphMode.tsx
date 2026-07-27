@@ -1,6 +1,7 @@
 import { useState, useMemo, type ReactNode } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { useRunTree } from "../data.ts";
+import { useRunInspectorVm } from "@smithers-orchestrator/ui-core";
+import { TUI_EVENT_CAP } from "../data.ts";
 import { useOverlayOpen } from "../OverlayContext.tsx";
 import { nodeGlyph, nodeGlyphColor, isModifiedKeyEvent } from "./treeUtils.ts";
 import { computeGraphLayout, connectorArrow, edgesForConnector, hasIncomingEdge } from "./graphUtils.ts";
@@ -83,15 +84,17 @@ function ConnectorColumn({
 // ─── GraphMode ────────────────────────────────────────────────────────────────
 
 export function GraphMode({ runId, onSelectNodeKey }: { runId: string; onSelectNodeKey?: (nodeKey: string) => void }) {
-  const { nodes, root, isLoading, error } = useRunTree(runId);
+  const { nodes, root, isLoading, error } = useRunInspectorVm(runId, { maxEvents: TUI_EVENT_CAP });
   return <GraphView nodes={nodes} root={root} isLoading={isLoading} error={error} onSelectNodeKey={onSelectNodeKey} />;
 }
 
 /**
  * Presentational graph view: the DAG layout + keyboard navigation over injected
- * tree data. `GraphMode` is a thin wrapper that only reads `useRunTree` and
- * forwards it here, so render tests can exercise the real view (cards, connector
- * arrows, Enter→onSelectNodeKey) without a live gateway.
+ * tree data. `GraphMode` is a thin wrapper that only reads ui-core's
+ * `useRunInspectorVm` (research/tui-parity/03-tui-screens.md groups Graph
+ * under the "Run inspector" surface it drives) and forwards it here, so
+ * render tests can exercise the real view (cards, connector arrows,
+ * Enter→onSelectNodeKey) without a live gateway.
  */
 export function GraphView({
   nodes,
@@ -99,7 +102,7 @@ export function GraphView({
   isLoading,
   error,
   onSelectNodeKey,
-}: Pick<ReturnType<typeof useRunTree>, "nodes" | "root" | "isLoading" | "error"> & {
+}: Pick<ReturnType<typeof useRunInspectorVm>, "nodes" | "root" | "isLoading" | "error"> & {
   onSelectNodeKey?: (nodeKey: string) => void;
 }) {
   const { width } = useTerminalDimensions();

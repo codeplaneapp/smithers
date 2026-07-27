@@ -19,6 +19,8 @@
     "@opentui/react": "^0.4.2",
     "@smithers-orchestrator/gateway-client": "workspace:*",
     "@smithers-orchestrator/gateway-react": "workspace:*",
+    "@smithers-orchestrator/tui-ui": "workspace:*",
+    "@smithers-orchestrator/ui-core": "workspace:*",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },

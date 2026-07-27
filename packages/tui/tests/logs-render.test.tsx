@@ -13,8 +13,8 @@ import { LogView } from "../src/modes/LogMode.tsx";
  *
  * These render the REAL presentational `LogView` (the same component production
  * mounts via `LogMode`) with injected event data — `LogMode` is a thin wrapper
- * that only reads `useRunEvents` and forwards it to `LogView`. So the view can't
- * drift from what these tests exercise.
+ * that only reads ui-core's `useRunInspectorVm` and forwards its events to
+ * `LogView`. So the view can't drift from what these tests exercise.
  */
 
 function frame(seq: number, event: string, payload?: unknown): GatewayEventFrame {

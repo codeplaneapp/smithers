@@ -35,6 +35,18 @@ export type GatewaySeed = {
   approvals: ApprovalRow[];
   nodeOutput: Record<string, unknown>;
   nodeDiff: unknown;
+  /**
+   * Rows the `listRuns` RPC answers with (drives `useGatewayRuns`/Runs mode).
+   * Defaults to empty — most seeds only exercise a single run's inspector and
+   * never mount Runs mode, so an empty roster keeps their behavior unchanged.
+   */
+  runsList?: Array<Record<string, unknown>>;
+  /**
+   * Per-runId tree overrides, keyed by runId. Falls back to `snapshot` for any
+   * runId not listed — lets a multi-run test (Runs mode -> open a specific
+   * run) assert it landed on THAT run's distinct tree, not just "a" tree.
+   */
+  runSnapshots?: Record<string, GatewaySeed["snapshot"]>;
   /** Force the tree endpoint to 500 so useRunTree surfaces its error state. */
   failTree?: boolean;
   /** Force submitApproval to error so the submit onError path runs. */
@@ -99,8 +111,14 @@ export function startSeededGateway(seed: GatewaySeed): SeededGateway {
       if (path === "/v1/rpc/getRun" || path === "/v1/rpc/runs.get") return rpcOk(seed.run);
       if (path.startsWith("/v1/rpc/")) return rpcOk(null);
 
+      // Runs roster (used by useGatewayRuns's local-mode data client, which
+      // hits the REST collection endpoint — NOT /v1/rpc/listRuns — see
+      // createSmithersDataClient.ts's `listRuns: (params) => request("GET",
+      // withSearch("/v1/api/runs", ...))`). Drives RunsListBridge/Runs mode.
+      if (path === "/v1/api/runs" && req.method === "GET") return apiOk(seed.runsList ?? []);
+
       // Tree snapshot.
-      const treeMatch = path.match(/^\/v1\/api\/runs\/[^/]+\/tree$/);
+      const treeMatch = path.match(/^\/v1\/api\/runs\/([^/]+)\/tree$/);
       if (treeMatch) {
         if (seed.failTree) {
           return new Response(JSON.stringify({ ok: false, error: { message: "tree exploded" } }), {
@@ -108,7 +126,8 @@ export function startSeededGateway(seed: GatewaySeed): SeededGateway {
             headers: { "content-type": "application/json" },
           });
         }
-        return apiOk(seed.snapshot);
+        const runId = decodeURIComponent(treeMatch[1]!);
+        return apiOk(seed.runSnapshots?.[runId] ?? seed.snapshot);
       }
 
       // Single run row.

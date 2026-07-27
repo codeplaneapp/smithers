@@ -20,6 +20,7 @@ const defaultKeymap: Keymap = {
     { key: "3", description: "Logs" },
     { key: "4", description: "Timeline" },
     { key: "5", description: "Hijack" },
+    { key: "6", description: "Runs" },
     { key: "q", description: "Quit" },
     { key: "?", description: "Help" },
   ],
