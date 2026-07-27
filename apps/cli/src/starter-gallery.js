@@ -40,6 +40,7 @@ export const STARTER_GOALS = ["plan", "research", "build", "debug", "review", "q
  *   setup: string[];
  *   prompt: string;
  *   input?: Record<string, unknown>;
+ *   oneshotFlags?: string;
  *   followUps: string[];
  *   goodFor: string[];
  *   avoidWhen: string;
@@ -55,7 +56,7 @@ export const STARTER_RECIPES = [
     title: "Break a project into implementation tickets",
     audience: ["founder", "product", "operations", "engineering"],
     goals: ["plan", "coordinate"],
-    workflow: "create-workflow",
+    workflow: "oneshot",
     outcome: "A batch of scoped tickets that can be assigned, reviewed, and tracked.",
     setup: [
       "Start from a PRD, customer request, incident summary, or internal project note.",
@@ -78,7 +79,7 @@ export const STARTER_RECIPES = [
     title: "Prepare a launch checklist",
     audience: ["founder", "product", "marketing", "operations"],
     goals: ["plan", "coordinate"],
-    workflow: "create-workflow",
+    workflow: "oneshot",
     outcome: "A launch plan with phases, owners, validation gates, communications, and rollback checks.",
     setup: [
       "Provide the launch date, intended audience, channels, and known risk areas.",
@@ -99,7 +100,7 @@ export const STARTER_RECIPES = [
     title: "Turn a customer report into a fix path",
     audience: ["support", "operations", "engineering"],
     goals: ["debug", "coordinate"],
-    workflow: "create-workflow",
+    workflow: "oneshot",
     outcome: "A reproduction plan, suspected root cause, fix, validation notes, and customer-safe summary.",
     setup: [
       "Paste the customer report, timestamps, account details that are safe to share, and expected behavior.",
@@ -107,6 +108,7 @@ export const STARTER_RECIPES = [
     ],
     prompt:
       "A customer says exports fail after selecting more than 500 rows. Reproduce the issue, fix it, and summarize customer impact.",
+    oneshotFlags: "--review on",
     followUps: [
       workflowPromptCommand("review", "Review the incident fix and customer summary"),
       workflowInputCommand("audit", {
@@ -125,7 +127,7 @@ export const STARTER_RECIPES = [
     title: "Create a research brief before committing work",
     audience: ["founder", "product", "marketing", "operations"],
     goals: ["research", "plan"],
-    workflow: "create-workflow",
+    workflow: "oneshot",
     outcome: "A grounded brief with findings, assumptions, tradeoffs, and recommended next steps.",
     setup: [
       "Ask a specific question and list any sources, competitors, docs, or constraints to consider.",
@@ -215,13 +217,14 @@ export const STARTER_RECIPES = [
     title: "Ship a focused change",
     audience: ["founder", "product", "engineering"],
     goals: ["build"],
-    workflow: "create-workflow",
+    workflow: "oneshot",
     outcome: "Research, an implementation plan, code changes, validation, and review loops in one run.",
     setup: [
       "Give the exact user outcome and any files, APIs, screenshots, or acceptance criteria.",
       "Keep the first request narrow enough to review in one pull request.",
     ],
     prompt: "Add a first-run checklist that helps a new workspace owner invite teammates and finish setup.",
+    oneshotFlags: "--review on",
     followUps: [
       workflowPromptCommand("review", "Review the completed change before opening a PR"),
       workflowPromptCommand("debug", "Fix the most important failure found during validation"),
@@ -271,12 +274,15 @@ function shellQuote(value) {
  * @param {StarterRecipe} recipe
  */
 export function starterCommand(recipe) {
-  // Templates are requests for the portable create-workflow builder; they
-  // never imply that a former example workflow is installed by init.
-  return workflowPromptCommand(
-    "create-workflow",
-    recipe.input ? `${recipe.prompt} Structured guidance: ${JSON.stringify(recipe.input)}` : recipe.prompt,
-  );
+  const prompt = recipe.input ? `${recipe.prompt} Structured guidance: ${JSON.stringify(recipe.input)}` : recipe.prompt;
+  // Single-deliverable starters route to `smithers oneshot`: one strong agent,
+  // durable background run, no workflow file to author. Multi-stage starters
+  // are requests for the portable create-workflow builder; they never imply
+  // that a former example workflow is installed by init.
+  if (recipe.workflow === "oneshot") {
+    return cliCommand(`oneshot ${shellQuote(prompt)}${recipe.oneshotFlags ? ` ${recipe.oneshotFlags}` : ""}`);
+  }
+  return workflowPromptCommand("create-workflow", prompt);
 }
 
 /**
@@ -288,7 +294,7 @@ function starterSummary(recipe) {
     title: recipe.title,
     audience: recipe.audience,
     goals: recipe.goals,
-    workflow: "create-workflow",
+    workflow: recipe.workflow,
     outcome: recipe.outcome,
     command: starterCommand(recipe),
     tags: recipe.tags,
@@ -342,7 +348,6 @@ export function buildStarterGallery(input = {}) {
     selected: selected
       ? {
           ...selected,
-          workflow: "create-workflow",
           command: starterCommand(selected),
         }
       : null,

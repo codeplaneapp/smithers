@@ -461,6 +461,7 @@
     "pack-ui-style-tag :: .smithers/ui/daily-ceo-intel.tsx renders <style>",
     "pack-ui-style-tag :: .smithers/ui/debug.tsx renders <style>",
     "pack-ui-style-tag :: .smithers/ui/delegation-chain.tsx renders <style>",
+    "pack-ui-style-tag :: .smithers/ui/design-partner-fixes.tsx renders <style>",
     "pack-ui-style-tag :: .smithers/ui/docs-driven-development.tsx renders <style>",
     "pack-ui-style-tag :: .smithers/ui/e2e-approval-probe.tsx renders <style>",
     "pack-ui-style-tag :: .smithers/ui/e2e-probe.tsx renders <style>",

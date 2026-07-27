@@ -193,7 +193,17 @@ function statusClass(status: string | undefined) {
   return "";
 }
 
-function IssueCard({ runId, issue, nodeStatus, doneCount }: { runId: string | undefined; issue: Issue; nodeStatus: Map<string, NodeStatus>; doneCount: number }) {
+function IssueCard({
+  runId,
+  issue,
+  nodeStatus,
+  doneCount,
+}: {
+  runId: string | undefined;
+  issue: Issue;
+  nodeStatus: Map<string, NodeStatus>;
+  doneCount: number;
+}) {
   const n = issue.number;
   const partner = PARTNER[n] ?? "";
   // Keyed remount via doneCount happens at the call site; this hook stays fixed
@@ -244,7 +254,9 @@ function App() {
   const runs = useMemo(
     () =>
       ((runsQuery.data ?? []) as RunSummary[]).filter(
-        (r) => String(r.workflowKey ?? r.workflowName ?? "") === "" || String(r.workflowKey ?? r.workflowName ?? "") === WORKFLOW_KEY,
+        (r) =>
+          String(r.workflowKey ?? r.workflowName ?? "") === "" ||
+          String(r.workflowKey ?? r.workflowName ?? "") === WORKFLOW_KEY,
       ),
     [runsQuery.data],
   );
@@ -266,7 +278,10 @@ function App() {
     return list.find((a) => a.runId === activeRunId && a.nodeId === "approve-landing");
   }, [approvalsQuery.data, activeRunId]);
 
-  const merged = useMemo(() => issues.filter((i) => nodeStatus.get(`merge-${i.number}`) === "done").length, [issues, nodeStatus]);
+  const merged = useMemo(
+    () => issues.filter((i) => nodeStatus.get(`merge-${i.number}`) === "done").length,
+    [issues, nodeStatus],
+  );
   const doneCount = useMemo(() => {
     let count = 0;
     for (const st of nodeStatus.values()) if (st === "done") count += 1;
@@ -276,7 +291,9 @@ function App() {
 
   async function refresh() {
     await Promise.all(
-      [runsQuery.refetch(), runDetail.refetch(), approvalsQuery.refetch(), discoverOut.refetch()].filter(Boolean) as Promise<unknown>[],
+      [runsQuery.refetch(), runDetail.refetch(), approvalsQuery.refetch(), discoverOut.refetch()].filter(
+        Boolean,
+      ) as Promise<unknown>[],
     );
   }
   async function launch() {
@@ -354,9 +371,10 @@ function App() {
         {!activeRunId ? (
           <div className="empty" data-testid="no-run">
             <p>
-              No run yet. This workflow fixes the 2026-07-27 design-partner issue batch (#1416 #1417 #1420-#1427 from the elizaOS and
-              aomi deep-dives): Fable investigates each issue in its own worktree, Codex Luna implements, then Fable AND Codex Sol both
-              review in a loop until both approve. PRs land through a merge queue after you approve.
+              No run yet. This workflow fixes the 2026-07-27 design-partner issue batch (#1416 #1417 #1420-#1427 from
+              the elizaOS and aomi deep-dives): Fable investigates each issue in its own worktree, Codex Luna
+              implements, then Fable AND Codex Sol both review in a loop until both approve. PRs land through a merge
+              queue after you approve.
             </p>
             <button className="button primary" onClick={() => void launch()} disabled={busy}>
               Run it
@@ -377,10 +395,23 @@ function App() {
             {pendingApproval ? (
               <div className="gate" data-testid="approval-gate">
                 <h2>⏸ Approval required — land these fixes to main?</h2>
-                <pre>{pendingApproval.request?.summary ?? "Review the prepared PRs, then approve to start the merge queue."}</pre>
+                <pre>
+                  {pendingApproval.request?.summary ??
+                    "Review the prepared PRs, then approve to start the merge queue."}
+                </pre>
                 <div className="gate-actions">
-                  <input className="note" placeholder="optional note" value={note} onChange={(e) => setNote(e.currentTarget.value)} />
-                  <button className="button danger" data-testid="deny" onClick={() => void decide(false)} disabled={busy}>
+                  <input
+                    className="note"
+                    placeholder="optional note"
+                    value={note}
+                    onChange={(e) => setNote(e.currentTarget.value)}
+                  />
+                  <button
+                    className="button danger"
+                    data-testid="deny"
+                    onClick={() => void decide(false)}
+                    disabled={busy}
+                  >
                     Deny
                   </button>
                   <button className="button ok" data-testid="approve" onClick={() => void decide(true)} disabled={busy}>
@@ -392,7 +423,13 @@ function App() {
 
             <div className="grid" data-testid="issue-grid">
               {issues.map((issue) => (
-                <IssueCard key={issue.number + ":" + doneCount} runId={activeRunId} issue={issue} nodeStatus={nodeStatus} doneCount={doneCount} />
+                <IssueCard
+                  key={issue.number + ":" + doneCount}
+                  runId={activeRunId}
+                  issue={issue}
+                  nodeStatus={nodeStatus}
+                  doneCount={doneCount}
+                />
               ))}
             </div>
 

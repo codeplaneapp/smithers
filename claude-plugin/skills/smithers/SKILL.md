@@ -1,6 +1,6 @@
 ---
 name: smithers
-description: "Drive Smithers, a durable control plane for long-running coding agents, from Claude Code. Use when the user wants multi-step, long-running, crash-safe, or human-in-the-loop agent work ('orchestrate agents', 'run a workflow', 'implement this and review it', 'keep iterating until tests pass', 'plan then build') or anything needing retries, approvals, replay, or evals across multiple AI steps. YOU (Claude) run Smithers on the user's behalf; it is not a GUI the human clicks. HARD RULE 1, run long-running / multi-step / background work through a durable Smithers workflow, NOT through Task/Agent subagents, /loop, or hand-written native Workflow scripts; the native Workflow tool has exactly ONE sanctioned use, launching the plugin's smithers-run.mjs mirror so the run shows live in /workflows. HARD RULE 2, every workflow you create or run MUST get a live custom UI at .smithers/ui/<key>.tsx (composed from the smithers-orchestrator/gateway-ui + smithers-orchestrator/ui component libraries over the gateway-react hooks, never hand-rolled markup) and you MUST launch it with `smithers ui` so the human can watch. HARD RULE 3, when creating or editing workflow code, ALWAYS use https://smithers.sh/llms-full.txt as the API reference (fetch it first)."
+description: "Drive Smithers, a durable control plane for long-running coding agents, from Claude Code. Use when the user wants multi-step, long-running, crash-safe, or human-in-the-loop agent work ('orchestrate agents', 'run a workflow', 'implement this and review it', 'keep iterating until tests pass', 'plan then build') or anything needing retries, approvals, replay, or evals across multiple AI steps. YOU (Claude) run Smithers on the user's behalf; it is not a GUI the human clicks. HARD RULE 1, right-size the route FIRST, handle a most-trivial edit directly, run a clear well-scoped single-agent task through `smithers oneshot`, and reserve a full workflow for work that genuinely needs ordered stages, durability, approvals, loops, or reuse; never author a multi-node workflow for a task one strong agent finishes in one context window. HARD RULE 2, run long-running / multi-step / background work through a durable Smithers workflow, NOT through Task/Agent subagents, /loop, or hand-written native Workflow scripts; the native Workflow tool has exactly ONE sanctioned use, launching the plugin's smithers-run.mjs mirror so the run shows live in /workflows. HARD RULE 3, when creating or editing workflow code, ALWAYS use https://smithers.sh/llms-full.txt as the API reference (fetch it first). A workflow that runs long, fans out, or pauses on approvals should get a live custom UI at .smithers/ui/<key>.tsx (composed from the smithers-orchestrator/gateway-ui + smithers-orchestrator/ui component libraries over the gateway-react hooks, never hand-rolled markup), launched with `smithers ui` so the human can watch; short linear runs are fine on `smithers monitor`."
 ---
 
 # Smithers (from Claude Code)
@@ -9,6 +9,61 @@ Smithers is a durable control plane for long-running coding agents: workflows
 are TypeScript/JSX, run for minutes or days, and survive crashes (every
 finished step persists, so a restart resumes from the last completed node).
 Retries, approvals, replay, and evals live in one place.
+
+## Right-size the route first
+
+Use the lightest route that preserves the durability the task needs:
+
+- **Most-trivial one-off edit** (a rename, a config line, a quick answer):
+  just do it directly. No Smithers.
+- **Clear, well-scoped task one strong agent can finish in one context
+  window** (write/refactor one thing, produce one document, fix one bug):
+  `smithers oneshot "<goal>"`. It runs one strong agent in the background
+  with durable state and an optional reviewer — no workflow file to author.
+- **Genuinely multi-stage work** (ordered phases, human approvals, loops with
+  verified exits, several agents with different tools, schedules, reuse):
+  a full workflow.
+
+Structure is a cost. The shipped OrchBench benchmark measured a solo frontier
+agent at reward 0.901 / $10.49 / 19 min while a three-model review panel
+scored LOWER (0.734) at 2.1x the wall clock, and review stages consumed more
+time than implementation. Add nodes for named risks, not for ceremony.
+
+## Repair-loop discipline (non-negotiable)
+
+When you drive fix/verify rounds through Smithers (or hand-author repair
+workflows), these rules stop the 100-run death spiral:
+
+- **Same-signature budget.** If 3 consecutive rounds fail with the same
+  failure signature, STOP authoring round N+1. Change strategy (gather
+  evidence, widen scope) or escalate to the human via `smithers ask-human`
+  with what you know. Thirteen hypotheses against one 500 is an incident,
+  not progress.
+- **Green ratchet.** Never let a previously-passing check go red after a
+  harness/infra-only change without flagging it: that is a harness
+  regression — revert or fix the harness, do not touch the product.
+- **Never widen a red gate.** Acceptance criteria only grow while the gate is
+  green. If the gate is red, narrow scope to the last-green slice and get
+  back to green first.
+- **Classify red before repairing.** A check that could not RUN (service
+  unreachable, network denied, missing credentials, broken harness) is an
+  environment fault, not product evidence. `smithers eval` exits 5 and marks
+  such cases INCONCLUSIVE — repair the harness, never the product, on that
+  signal.
+- **Harness-vs-product ratio.** If several consecutive rounds only add
+  test-infrastructure seams (env vars, simulators, local TLS), say so out
+  loud and re-examine the approach with the human before adding another.
+- **If the root cause looks fenced out** (read-only repo, forbidden path),
+  propose widening the fence to the human instead of a deeper in-scope fix.
+- **Use the engine's loops, not new files.** Iterate with `<Loop>` /
+  `retries` / `smithers retry-task` inside ONE workflow so context and
+  verdict history persist across rounds. Authoring a near-duplicate .tsx per
+  attempt (with `noSessionPersistence` and a hand-maintained forensic prompt)
+  throws away the run's memory each round and re-bills the same context.
+- **Don't redact your own diagnostics blind.** Privacy rules belong on
+  shipped artifacts and anything leaving the machine, not on a local debug
+  loop; if rounds are being decided by response-body byte lengths, relax
+  local redaction before the next round.
 
 ## Launch attribution
 
@@ -171,12 +226,15 @@ docs-full` prints the same bundle; `bunx smithers-orchestrator ask
 
 ---
 
-# MANDATORY: every workflow gets a live custom UI
+# Custom live UIs (for workflows that earn one)
 
-**This is a hard rule: a workflow without a UI is incomplete.** Whenever you
-create a workflow, or run one with no UI yet (`hasUi: false` from
-`list_workflows`), author a custom UI and launch it so the human can *watch
-the run live in their browser* instead of reading text summaries.
+A workflow that runs long, fans out, or pauses on approvals should get a
+custom UI so the human can *watch the run live in their browser* instead of
+reading text summaries. When you create such a workflow, or run one with no
+UI yet (`hasUi: false` from `list_workflows`), author the UI and launch it.
+A short linear pipeline does not need a bespoke UI — `smithers monitor`
+already shows every run live; skip the UI rather than scaffold one out of
+ceremony.
 
 ## The authoring contract (follow exactly — do not invent API)
 

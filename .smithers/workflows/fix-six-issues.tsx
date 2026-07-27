@@ -57,7 +57,7 @@ type Implementation = z.infer<typeof implementationSchema>;
 
 const reviewFields = {
   issueNumber: z.number().int(),
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   feedback: z.string().default(""),
   issues: z
     .array(
@@ -482,7 +482,7 @@ function reviewPrompt(issue: Issue, impl: Implementation | undefined, reviewer: 
     "- Hunt for real bugs in the new code: edge cases, error paths, resource leaks, broken imports, type errors.",
     "",
     `Return JSON: issueNumber (exactly ${issue.number}), approved (boolean), feedback (concise, actionable — what to change and where), issues[] (severity critical|major|minor|nit, title, file, description).`,
-    "Set approved=true ONLY when the fix is complete, correct, and safe to land on main. Do not approve out of politeness; do not reject for taste-only nits.",
+    "Set approved=true ONLY when the fix is complete, correct, and safe to land on main. Do not approve out of politeness; do not reject for taste-only nits. A red check that never actually RAN (service unreachable, network denied, missing credentials, broken harness) is an environmental fault, not evidence against the fix: say so explicitly in your feedback and do not convert it into approved=false.",
   ].join("\n");
 }
 

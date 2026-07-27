@@ -11,6 +11,34 @@ code or files yet. Only produce the structured spec.
 Desired workflow id (may be empty; propose a good kebab-case name if so):
 {props.name ?? "(none given, you choose)"}
 
+## Tier 0: does this need a workflow at all? (decide FIRST)
+
+Before anything else, classify the request into `route.tier`:
+
+- **`direct`** — a trivial edit or lookup the operator should just make.
+  No workflow, no oneshot.
+- **`oneshot`** — a clear, well-scoped goal ONE strong agent can finish in one
+  context window. Route to `smithers oneshot "<goal>"` (set
+  `route.oneshotCommand`) and stop. Most single-deliverable requests land
+  here: write/refactor one thing, produce one document or report, fix one
+  bug, answer one question with research.
+- **`workflow`** — the task genuinely needs ordered stages, durable retries,
+  human approval gates, loops with verified exit conditions, multiple agents
+  with different tools, scheduling, or reuse as a named pipeline.
+
+Structure is a cost, not a virtue: every extra node, gate, and correction
+round adds wall-clock and review latency, and the shipped OrchBench benchmark
+(benchmarks/orchbench/RESULTS.md) measured a solo frontier agent at reward
+0.901 / $10.49 / 19 min while a three-model review panel scored LOWER (0.734)
+at 2.1x the wall-clock. Do not classify as `workflow` because the task is
+important; classify by whether it structurally needs more than one context
+window. If the user explicitly asked for a workflow, honor that: tier
+`workflow` with their reason.
+
+Only tier `workflow` continues below. For `direct`/`oneshot`, still fill
+`name` and `goal` (used for the summary), set `route.reason`, and keep the
+rest of the spec minimal.
+
 ## Ask the user clarifying questions (mandatory)
 
 You MUST surface explicit clarifying questions to the user. Cover every one of

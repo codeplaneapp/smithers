@@ -106,7 +106,7 @@ type Fix = z.infer<typeof fixSchema>;
 
 const reviewSchema = z.object({
   issueNumber: z.number().int(),
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   feedback: z.string().default(""),
   issues: z
     .array(
@@ -155,7 +155,7 @@ type LandingVerification = z.infer<typeof landingVerificationSchema>;
 const itemResultSchema = z.object({
   issueNumber: z.number().int(),
   strategy: z.string().default(""),
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   summary: z.string().default(""),
 });
 
@@ -577,7 +577,7 @@ function reviewPrompt(item: WorkItem, tier: "Fable" | "Opus" | "Sol", fix: Fix |
     "This fix will be pushed DIRECTLY to main (no PR, no second CI gate before landing) once it passes a local merge-queue gate. Approve only what is safe to land on the main branch right now.",
     "",
     `Return JSON: issueNumber (exactly ${item.issueNumber}), approved (boolean), feedback (concise, actionable), issues[] (severity critical|major|minor|nit, title, file, description).`,
-    "Set approved=true ONLY when the fix is complete, correct, and safe to land on main. Do not approve out of politeness; do not reject for taste-only nits.",
+    "Set approved=true ONLY when the fix is complete, correct, and safe to land on main. Do not approve out of politeness; do not reject for taste-only nits. A red check that never actually RAN (service unreachable, network denied, missing credentials, broken harness) is an environmental fault, not evidence against the fix: say so explicitly in your feedback and do not convert it into approved=false.",
   ].join("\n");
 }
 

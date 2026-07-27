@@ -7,11 +7,15 @@ description: >-
   "implement this and review it", "keep iterating until tests pass", "plan then
   build") or anything needing retries, approvals, replay, or evals across
   multiple AI steps. YOU (Codex) run Smithers on the user's behalf; it is not a
-  GUI the human clicks. HARD RULE: every workflow you create or run MUST get a
-  live custom UI at .smithers/ui/<key>.tsx (composed from the
-  smithers-orchestrator/gateway-ui + smithers-orchestrator/ui component
-  libraries over the gateway-react hooks, never hand-rolled markup) and you
-  MUST launch it (smithers ui) so the human can watch.
+  GUI the human clicks. HARD RULE: right-size the route FIRST, handle a
+  most-trivial edit directly, run a clear well-scoped single-agent task through
+  `smithers oneshot`, and reserve a full workflow for work that genuinely needs
+  ordered stages, durability, approvals, loops, or reuse. A workflow that runs
+  long, fans out, or pauses on approvals should get a live custom UI at
+  .smithers/ui/<key>.tsx (composed from the smithers-orchestrator/gateway-ui +
+  smithers-orchestrator/ui component libraries over the gateway-react hooks,
+  never hand-rolled markup), launched with `smithers ui` so the human can
+  watch; short linear runs are fine on `smithers monitor`.
 ---
 
 # Smithers (from Codex)
@@ -20,6 +24,33 @@ Smithers is a durable control plane for long-running coding agents. Workflows ar
 TypeScript/JSX, run for minutes or days, and survive crashes: every finished step
 is persisted, so a restart resumes from the last completed node. Retries, human
 approvals, replay, and evals all live in one place.
+
+## Right-size the route first
+
+Use the lightest route that preserves the durability the task needs: handle a
+most-trivial one-off edit directly; run a clear, well-scoped goal one strong
+agent can finish in one context window through `smithers oneshot "<goal>"`
+(durable background run, optional reviewer, no workflow file to author); and
+reserve a full workflow for work that genuinely needs ordered stages, human
+approvals, loops with verified exits, several agents with different tools,
+schedules, or reuse. Structure is a cost: the shipped OrchBench benchmark
+measured a solo frontier agent OUTSCORING a three-model review panel at half
+the wall clock, so add nodes for named risks, not ceremony.
+
+## Repair-loop discipline (non-negotiable)
+
+When you drive fix/verify rounds through Smithers: stop after 3 consecutive
+rounds fail with the same failure signature and escalate via
+`smithers ask-human` instead of authoring round N+1. Never widen a red
+acceptance gate (criteria grow only while green); never let a previously-green
+check go red after a harness-only change without treating it as a harness
+regression to revert. Classify every red before repairing: a check that could
+not RUN (service unreachable, network denied, missing credentials, broken
+harness) is an environment fault, not product evidence — `smithers eval`
+exits 5 and marks such cases INCONCLUSIVE. Iterate with `<Loop>`/`retries`/
+`smithers retry-task` inside ONE workflow instead of authoring a near-duplicate
+.tsx per attempt, and keep local diagnostics readable: privacy redaction
+belongs on shipped artifacts, not on your own debugging loop.
 
 You reach Smithers two ways, both already wired by this plugin:
 
@@ -130,12 +161,14 @@ Disable refuses to clobber edits made after setup and validates rollback. Use
 
 ---
 
-# MANDATORY: every workflow gets a live custom UI
+# Custom live UIs (for workflows that earn one)
 
-**This is a hard rule for this plugin. A workflow without a UI is incomplete.**
-Whenever you create a workflow, or run one that has no UI yet (`hasUi: false` from
-`list_workflows`), you MUST author a custom UI and launch it so the human can
-*watch the run live in their browser* instead of reading your text summaries.
+A workflow that runs long, fans out, or pauses on approvals should get a custom
+UI so the human can *watch the run live in their browser* instead of reading
+your text summaries. When you create such a workflow, or run one that has no UI
+yet (`hasUi: false` from `list_workflows`), author the UI and launch it. A
+short linear pipeline does not need a bespoke UI — `smithers monitor` already
+shows every run live; skip the UI rather than scaffold one out of ceremony.
 
 ## The authoring contract (follow exactly — do not invent API)
 

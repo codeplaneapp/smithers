@@ -56,6 +56,19 @@ const inputSchema = z.object({
 
 // 1. The freeform ask, turned into a structured, buildable spec.
 const clarifiedSpecSchema = z.looseObject({
+  route: z
+    .object({
+      tier: z.enum(["direct", "oneshot", "workflow"]),
+      reason: z.string().describe("One sentence: why this tier fits."),
+      oneshotCommand: z
+        .string()
+        .nullable()
+        .default(null)
+        .describe('For tier "oneshot": the exact smithers oneshot command to run instead of building a workflow.'),
+    })
+    .describe(
+      "Right-size the request BEFORE building anything. direct = a trivial edit the operator should just make; oneshot = one strong agent finishes it in one context window (route to `smithers oneshot`); workflow = the task genuinely needs ordered stages, durability, approvals, loops, or reuse. Only tier `workflow` proceeds to design.",
+    ),
   name: z.string().describe("Proposed kebab-case workflow id."),
   goal: z.string().describe("One sentence: what the finished workflow accomplishes."),
   trigger: z
@@ -201,7 +214,9 @@ const skillVerificationSchema = z.object({
 const outputSchema = z.object({
   workflow: z.string().describe("Workflow id that was built (or attempted)."),
   workflowFile: z.string().describe("Path to the scaffolded workflow .tsx."),
-  status: z.string().describe("Terminal status: built | verify-failed | denied | designed | incomplete."),
+  status: z
+    .string()
+    .describe("Terminal status: built | verify-failed | denied | designed | routed-simple | incomplete."),
   summary: z.string().describe("One-line summary of what the run produced."),
   filesWritten: z.array(z.string()).default([]).describe("Paths the scaffolder wrote."),
   fileCount: z.number().default(0).describe("How many files were written."),
@@ -258,6 +273,18 @@ export default smithers((ctx) => {
     ctx.outputMaybe("skillVerification", { nodeId: "skill-verification" });
   const skillReady = skillVerification?.exists === true && skillVerification.containsWorkflowMetadata === true;
 
+  // Tier-0 routing: a request one strong agent can finish in one context
+  // window is a `smithers oneshot`, not a workflow — stop before provisioning
+  // instead of scaffolding gates, loops, and a UI around a simple task.
+  // Output rows store nested objects as JSON strings; unwrap defensively.
+  const rawRoute = clarify?.route;
+  const route =
+    typeof rawRoute === "string"
+      ? (JSON.parse(rawRoute) as { tier?: string; reason?: string; oneshotCommand?: string | null })
+      : rawRoute;
+  const routeTier = route?.tier === "oneshot" || route?.tier === "direct" ? route.tier : "workflow";
+  const routedSimple = clarify !== undefined && routeTier !== "workflow";
+
   const designed = design !== undefined;
   const approved = !review || approval?.approved === true;
   const proceed = designed && approved;
@@ -279,8 +306,9 @@ export default smithers((ctx) => {
   // Terminal summary surfaced as the run's printed output. Pulled straight from
   // the steps above — never invented.
   const filesWritten = [...new Set(scaffoldRows.flatMap((row) => (row.filesWritten ?? []).map((file) => file.path)))];
-  const terminalStatus =
-    documentation && verifyPassed && skillVerification?.exists && skillVerification.containsWorkflowMetadata
+  const terminalStatus = routedSimple
+    ? "routed-simple"
+    : documentation && verifyPassed
       ? "built"
       : scaffold && verifyFailed
         ? "verify-failed"
@@ -289,8 +317,13 @@ export default smithers((ctx) => {
           : design
             ? "designed"
             : "incomplete";
-  const terminalSummary =
-    documentation?.summary ?? scaffold?.summary ?? design?.summary ?? clarify?.goal ?? `Workflow "${workflowName}".`;
+  const terminalSummary = routedSimple
+    ? `No workflow needed (${routeTier}): ${route?.reason ?? clarify?.goal ?? "the request fits a single agent."}`
+    : (documentation?.summary ??
+      scaffold?.summary ??
+      design?.summary ??
+      clarify?.goal ??
+      `Workflow "${workflowName}".`);
 
   return (
     <Workflow name="create-workflow">
@@ -305,8 +338,9 @@ export default smithers((ctx) => {
         </Task>
 
         {/* 2 — Docs & skills: decide and ACTUALLY install/gather what the new
-            workflow and its worker agents need before we design anything. */}
-        {clarify ? (
+            workflow and its worker agents need before we design anything.
+            Skipped entirely when clarify routed the request to a simpler tier. */}
+        {clarify && !routedSimple ? (
           <Task id="provision" output={outputs.provision} agent={agents.implement} heartbeatTimeoutMs={600_000}>
             <ProvisionPrompt spec={clarify} skillsDir={SKILLS_DIR} workflowsDir={WORKFLOWS_DIR} />
           </Task>
@@ -425,10 +459,11 @@ export default smithers((ctx) => {
         ) : null}
 
         {/* 7 — Document the new workflow so future agents know how to run it.
-            This is a bounded retry loop: a missing or malformed companion skill
-            keeps the workflow from reaching its terminal success summary. */}
+            Bounded retry, best-effort: a workflow that builds and verifies is
+            BUILT; a malformed companion skill downgrades skillPath to null
+            instead of failing the whole run. */}
         {proceed && verifyPassed ? (
-          <Loop id="skill:loop" until={skillReady} maxIterations={3} onMaxReached="fail">
+          <Loop id="skill:loop" until={skillReady} maxIterations={3} onMaxReached="return-last">
             <Sequence>
               <Task id="document" output={outputs.document} agent={agents.cheapFast}>
                 <DocumentPrompt
@@ -466,17 +501,25 @@ export default smithers((ctx) => {
             {() => {
               const uiWritten = filesWritten.includes(uiFile);
               const nextSteps =
-                terminalStatus === "built"
+                terminalStatus === "routed-simple"
                   ? [
-                      `smithers workflow run ${workflowName} --prompt "<your input>"  # or: smithers up ${workflowFile}`,
-                      `bunx smithers-orchestrator graph ${workflowFile}  # print the graph; add --interactive for the TUI`,
-                      ...(uiWritten ? [`smithers ui <runId>  # open the custom UI in ${uiFile} for a run`] : []),
-                      `smithers workflow run create-workflow --prompt "iterate on ${workflowName}: <what to change>"  # iterate`,
+                      routeTier === "oneshot"
+                        ? (route?.oneshotCommand ??
+                          `smithers oneshot "${clarify?.goal ?? "the task"}"  # one strong agent, no workflow file`)
+                        : `# ${route?.reason ?? "Trivial edit: just do it directly."}`,
+                      `smithers workflow run create-workflow --prompt "build it as a workflow anyway: ${clarify?.goal ?? ""}"  # override the routing`,
                     ]
-                  : [
-                      `smithers inspect <runId>  # review why the run stopped at status "${terminalStatus}"`,
-                      `smithers workflow run create-workflow --prompt "retry building ${workflowName}"`,
-                    ];
+                  : terminalStatus === "built"
+                    ? [
+                        `smithers workflow run ${workflowName} --prompt "<your input>"  # or: smithers up ${workflowFile}`,
+                        `bunx smithers-orchestrator graph ${workflowFile}  # print the graph; add --interactive for the TUI`,
+                        ...(uiWritten ? [`smithers ui <runId>  # open the custom UI in ${uiFile} for a run`] : []),
+                        `smithers workflow run create-workflow --prompt "iterate on ${workflowName}: <what to change>"  # iterate`,
+                      ]
+                    : [
+                        `smithers inspect <runId>  # review why the run stopped at status "${terminalStatus}"`,
+                        `smithers workflow run create-workflow --prompt "retry building ${workflowName}"`,
+                      ];
               return {
                 workflow: workflowName,
                 workflowFile,

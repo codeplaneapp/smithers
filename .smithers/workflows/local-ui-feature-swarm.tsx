@@ -36,7 +36,7 @@ const planSchema = z.object({
 
 const planSynthesisSchema = z.object({
   featureId: z.string(),
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   summary: z.string(),
   selectedApproach: z.array(z.string()).default([]),
   rejectedIdeas: z.array(z.string()).default([]),
@@ -63,7 +63,7 @@ const reviewIssueSchema = z.object({
 const reviewSchema = z.object({
   featureId: z.string(),
   reviewer: z.string(),
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   feedback: z.string(),
   issues: z.array(reviewIssueSchema).default([]),
 });

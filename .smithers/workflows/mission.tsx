@@ -42,7 +42,7 @@ const missionPlanSchema = z.looseObject({
 });
 
 const missionApprovalSchema = z.looseObject({
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   note: z.string().nullable().default(null),
   decidedBy: z.string().nullable().default(null),
   decidedAt: z.string().nullable().default(null),

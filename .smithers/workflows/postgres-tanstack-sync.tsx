@@ -91,7 +91,7 @@ const workResultSchema = z.object({
 
 // Independent reviewer result (Opus + Codex, one each per milestone).
 const reviewSchema = z.object({
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   feedback: z.string().default(""),
   issues: z
     .array(

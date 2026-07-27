@@ -24,6 +24,12 @@ const reviewIssueSchema = z.object({
 export const reviewOutputSchema = z.object({
   reviewer: z.string(),
   approved: z.boolean(),
+  blocked: z
+    .boolean()
+    .default(false)
+    .describe(
+      "true when the verification you needed could not RUN for an environmental reason (harness, network, credentials, missing service) — a blocked review is not a rejection of the work",
+    ),
   feedback: z.string(),
   issues: z.array(reviewIssueSchema).default([]),
 });
@@ -33,6 +39,12 @@ export const reviewOutputSchema = z.object({
 // it resolves to its own output channel (channels are keyed by schema identity).
 export const reviewSynthesisSchema = z.object({
   approved: z.boolean().describe("true ONLY if there are no remaining critical or major issues across all reviewers"),
+  blocked: z
+    .boolean()
+    .default(false)
+    .describe(
+      "true when required verification could not run for an environmental reason across the panel; downstream loops must repair the environment, not iterate on the product",
+    ),
   feedback: z.string().describe("consolidated, actionable feedback merged from every reviewer"),
   issues: z.array(reviewIssueSchema).default([]),
 });
@@ -106,6 +118,13 @@ export type ReviewGate = {
   hasVerdict: boolean;
   /** Whether the synthesized verdict approved the change. */
   approved: boolean;
+  /**
+   * Whether verification could not run for an environmental reason. A blocked
+   * verdict is NOT evidence against the change: loops reading it should repair
+   * the environment (or escalate to a human) instead of iterating on the
+   * product with the same red.
+   */
+  blocked: boolean;
   /** Consolidated rejection feedback (null when approved or no verdict yet). */
   feedback: string | null;
 };
@@ -125,6 +144,7 @@ export type ReviewGate = {
 export function reviewGate(ctx: { latest: (channel: string, nodeId: string) => unknown }, nodeId: string): ReviewGate {
   const verdict = ctx.latest("reviewSynthesis", nodeId) as z.infer<typeof reviewSynthesisSchema> | undefined;
   const approved = verdict?.approved === true;
+  const blocked = verdict?.blocked === true;
   let feedback: string | null = null;
   if (verdict && !approved) {
     const parts: string[] = [];
@@ -134,5 +154,5 @@ export function reviewGate(ctx: { latest: (channel: string, nodeId: string) => u
     }
     feedback = parts.length > 0 ? parts.join("\n") : null;
   }
-  return { hasVerdict: verdict !== undefined, approved, feedback };
+  return { hasVerdict: verdict !== undefined, approved, blocked, feedback };
 }

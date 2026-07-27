@@ -69,8 +69,10 @@ const FYI_KINDS = new Set(["run-finished", "run-cancelled", "run-continued"]);
 export async function runClaudeMonitor(adapter, options = {}) {
   const intervalMs = Math.max(250, Math.floor(options.intervalMs ?? 2000));
   const stalledAfterMs = Math.max(5000, Math.floor(options.stalledAfterMs ?? 120000));
-  const retryAlertAttempt = options.retryAlertAttempt === 0 ? 0 : Math.max(2, Math.floor(options.retryAlertAttempt ?? 3));
-  const progressEveryMs = options.progressEveryMs === 0 ? 0 : Math.max(60000, Math.floor(options.progressEveryMs ?? 1800000));
+  const retryAlertAttempt =
+    options.retryAlertAttempt === 0 ? 0 : Math.max(2, Math.floor(options.retryAlertAttempt ?? 3));
+  const progressEveryMs =
+    options.progressEveryMs === 0 ? 0 : Math.max(60000, Math.floor(options.progressEveryMs ?? 1800000));
   const allTransitions = options.transitions === "all";
   const subscriptionsPath = options.subscriptionsPath;
   const sessionId = options.sessionId;
@@ -345,7 +347,8 @@ function emitRetryChurn(runId, attemptRow, retryAlertAttempt, emitOnce) {
 function buildProgressEntry(run, activeAttempts, nowMs) {
   const runId = run.runId;
   const startedAtMs = Number(run.startedAtMs ?? run.createdAtMs);
-  const elapsed = Number.isFinite(startedAtMs) && nowMs > startedAtMs ? ` after ${formatElapsed(nowMs - startedAtMs)}` : "";
+  const elapsed =
+    Number.isFinite(startedAtMs) && nowMs > startedAtMs ? ` after ${formatElapsed(nowMs - startedAtMs)}` : "";
   const active = activeAttempts
     .filter((attemptRow) => typeof attemptRow?.nodeId === "string" && attemptRow.nodeId.length > 0)
     .sort((a, b) => Number(b?.attempt ?? 0) - Number(a?.attempt ?? 0))

@@ -55,7 +55,7 @@ const improveSchema = z.object({
 });
 
 const rereviewSchema = z.object({
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   blocking: z.array(z.string()).default([]),
   summary: z.string().default(""),
 });

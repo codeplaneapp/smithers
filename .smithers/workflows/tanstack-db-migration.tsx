@@ -65,7 +65,7 @@ const workResultSchema = z.object({
 type WorkResult = z.infer<typeof workResultSchema>;
 
 const reviewSchema = z.object({
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   feedback: z.string().default(""),
   issues: z
     .array(

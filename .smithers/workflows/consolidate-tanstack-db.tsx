@@ -63,7 +63,7 @@ const verifySchema = z.object({
 type VerifyResult = z.infer<typeof verifySchema>;
 
 const reviewSchema = z.object({
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   feedback: z.string().default(""),
   migrationIntact: z.boolean().default(false),
   strayWorkRemaining: z.array(z.string()).default([]),

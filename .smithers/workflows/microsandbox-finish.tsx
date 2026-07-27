@@ -91,7 +91,7 @@ type FableReview = z.infer<typeof fableReviewSchema>;
 
 // Mirrors the Approval default decision schema (approved/note/decidedBy/decidedAt).
 const approvalSchema = z.object({
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   note: z.string().nullable().optional(),
   decidedBy: z.string().nullable().default(null),
   decidedAt: z.string().nullable().default(null),

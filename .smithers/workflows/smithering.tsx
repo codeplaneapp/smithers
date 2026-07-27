@@ -500,7 +500,7 @@ const prdSchema = z.looseObject({
 
 // One shared decision table for every human gate; rows are keyed by node id.
 const gateSchema = z.looseObject({
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   note: z.string().nullable().default(null),
   decidedBy: z.string().nullable().default(null),
   decidedAt: z.string().nullable().default(null),
@@ -508,7 +508,7 @@ const gateSchema = z.looseObject({
 
 // Shared doc-review table (every review seat is Codex Sol).
 const docReviewSchema = z.looseObject({
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   feedback: z.string().default(""),
   issues: z
     .array(
@@ -672,7 +672,7 @@ const verifySchema = z.looseObject({
 });
 
 const wfReviewSchema = z.looseObject({
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   blockingIssues: z.array(z.looseObject({ title: z.string().default(""), detail: z.string().default("") })).default([]),
   advisories: z.array(z.string()).default([]),
 });
@@ -712,7 +712,7 @@ const monitorTriageSchema = z.looseObject({
 
 const reviewFindingSchema = z.looseObject({
   reviewer: z.string().default(""),
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   summary: z.string().default(""),
   issues: z
     .array(
@@ -727,7 +727,7 @@ const reviewFindingSchema = z.looseObject({
 });
 
 const reviewSynthesisSchema = z.looseObject({
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   summary: z.string().default(""),
   mustFix: z
     .array(

@@ -6,6 +6,13 @@ Review the following request and respond with a concise JSON object.
 Be a very thorough reviewer who only accepts production ready tested
 code.
 
+Classify what you saw before you reject. If the verification you needed
+could not RUN for an environmental reason (a service unreachable, network
+denied, missing credentials or binaries, a broken test harness), set
+`blocked: true` and name the environmental cause in `feedback`. Do not
+return a plain `approved: false` for a check that never executed: a
+rejection is evidence against the work, and a harness fault is not.
+
 REQUEST:
 {props.prompt}
 

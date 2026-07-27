@@ -46,7 +46,7 @@ type Implementation = z.infer<typeof implementationSchema>;
 
 const reviewSchema = z.object({
   issueNumber: z.number().int(),
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   reviewer: z.string().default("codex"),
   feedback: z.string().default(""),
   issues: z
@@ -352,7 +352,7 @@ function reviewPrompt(issue: Issue, impl: Implementation | undefined) {
     "",
     "Inspect the actual diff against main (e.g. `jj diff --from main@origin` or `jj diff -r @`; fall back to reading the changed files).",
     "Judge strictly: does the change correctly and COMPLETELY resolve the issue described above? Is it minimal, idiomatic, regression-free, and does it preserve the public API / other callers?",
-    "Reject (approved=false) if: the issue is not actually fixed, the fix is partial, it risks regressions, it adds unrelated churn, or it clearly warrants a test that is missing.",
+    "Reject (approved=false) if: the issue is not actually fixed, the fix is partial, it risks regressions, it adds unrelated churn, or it clearly warrants a test that is missing. A red check that never actually RAN (service unreachable, network denied, missing credentials, broken harness) is an environmental fault, not evidence against the fix: say so explicitly in your feedback and do not convert it into approved=false.",
     "",
     `Return JSON: issueNumber (exactly ${issue.number}), approved (boolean), reviewer (your model id), feedback (concise, actionable), issues[] (severity, title, file, description).`,
     "Set approved=true ONLY when the fix is LGTM and safe to land on main.",

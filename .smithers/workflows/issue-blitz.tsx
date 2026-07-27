@@ -221,7 +221,7 @@ type Candidate = z.infer<typeof candidateSchema>;
 const reviewSchema = z.object({
   itemKey: z.string(),
   headSha: z.string(),
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   feedback: z.string().default(""),
   issues: z
     .array(
@@ -274,7 +274,7 @@ const gateSchema = z.object({
 type Gate = z.infer<typeof gateSchema>;
 const finalReviewSchema = z.object({
   headSha: z.string(),
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   verdict: z.string().default(""),
   blockers: z
     .array(

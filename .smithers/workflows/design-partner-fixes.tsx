@@ -137,10 +137,22 @@ const { Workflow, Task, Sequence, Parallel, Loop, Approval, Worktree, MergeQueue
 // implements; Codex Sol holds the second, independent review seat; Terra lands.
 const fableInvestigator = [
   new ClaudeCodeAgent({ model: "claude-fable-5" }),
-  ...codexFirst({ model: "gpt-5.6-sol", config: { model_reasoning_effort: "high" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true }),
+  ...codexFirst({
+    model: "gpt-5.6-sol",
+    config: { model_reasoning_effort: "high" },
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  }),
 ];
 const lunaImplementer = codexFirst(
-  { model: "gpt-5.6-luna", config: { model_reasoning_effort: "high" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-luna",
+    config: { model_reasoning_effort: "high" },
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [new ClaudeCodeAgent({ model: "claude-sonnet-5" })],
 );
 const fableReviewer = [
@@ -148,11 +160,22 @@ const fableReviewer = [
   new ClaudeCodeAgent({ model: "claude-opus-4-8" }),
 ];
 const solReviewer = codexFirst(
-  { model: "gpt-5.6-sol", config: { model_reasoning_effort: "xhigh" }, sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-sol",
+    config: { model_reasoning_effort: "xhigh" },
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [new ClaudeCodeAgent({ model: "claude-fable-5" })],
 );
 const terraLander = codexFirst(
-  { model: "gpt-5.6-terra", sandbox: "danger-full-access", dangerouslyBypassApprovalsAndSandbox: true, skipGitRepoCheck: true },
+  {
+    model: "gpt-5.6-terra",
+    sandbox: "danger-full-access",
+    dangerouslyBypassApprovalsAndSandbox: true,
+    skipGitRepoCheck: true,
+  },
   [new ClaudeCodeAgent({ model: "claude-sonnet-5" })],
 );
 
@@ -253,7 +276,11 @@ function latestIssueIteration(ctx: any, n: number): number | undefined {
   const impl = latestForIssue<Implementation>(ctx.outputs.dpfImplementation, n);
   return impl ? iterationOf(impl) : undefined;
 }
-function latestReviewForIssue<T extends { issueNumber: number }>(rows: T[] | undefined, n: number, iteration: number): T | undefined {
+function latestReviewForIssue<T extends { issueNumber: number }>(
+  rows: T[] | undefined,
+  n: number,
+  iteration: number,
+): T | undefined {
   return latest(rowsForIssue(rows, n).filter((r) => iterationOf(r) === iteration));
 }
 function issueDone(ctx: any, n: number): boolean {
@@ -308,11 +335,10 @@ function parseIssues(discovery: unknown): Issue[] {
 // ── Compute fns (real shell — git / gh, explicit cwd) ────────────────────────
 function fetchIssues() {
   const issues: Issue[] = ISSUE_NUMBERS.map((n) => {
-    const json = execFileSync(
-      "gh",
-      ["issue", "view", String(n), "--repo", REPO, "--json", "number,title,body,url"],
-      { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
-    );
+    const json = execFileSync("gh", ["issue", "view", String(n), "--repo", REPO, "--json", "number,title,body,url"], {
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    });
     const parsed = JSON.parse(json) as { number: number; title: string; body: string | null; url: string };
     return { number: parsed.number, title: parsed.title, body: parsed.body ?? "", url: parsed.url ?? "" };
   });
@@ -340,7 +366,13 @@ export function parsePorcelainPaths(status: string): string[] {
 }
 
 /** Commit the worktree changes, push the branch, open (or reuse) a PR that closes the issue. */
-function openPr(issue: Issue, worktreePath: string, branch: string, done: boolean, impl: Implementation | undefined): Pr {
+function openPr(
+  issue: Issue,
+  worktreePath: string,
+  branch: string,
+  done: boolean,
+  impl: Implementation | undefined,
+): Pr {
   const base: Pr = {
     issueNumber: issue.number,
     prepared: false,
@@ -351,17 +383,23 @@ function openPr(issue: Issue, worktreePath: string, branch: string, done: boolea
     summary: "",
   };
   if (!done) {
-    return { ...base, summary: `Skipped PR: issue #${issue.number} was not implemented + dual-approved within the loop budget.` };
+    return {
+      ...base,
+      summary: `Skipped PR: issue #${issue.number} was not implemented + dual-approved within the loop budget.`,
+    };
   }
-  const git = (args: string[]) => execFileSync("git", args, { cwd: worktreePath, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  const gh = (args: string[]) => execFileSync("gh", args, { cwd: worktreePath, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const git = (args: string[]) =>
+    execFileSync("git", args, { cwd: worktreePath, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const gh = (args: string[]) =>
+    execFileSync("gh", args, { cwd: worktreePath, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   try {
     const dirty = git(["status", "--porcelain"]).trim();
     const aheadOfMain = git(["rev-list", "--count", "origin/main..HEAD"]).trim() !== "0";
     if (!dirty && !aheadOfMain) {
       return { ...base, summary: `Skipped PR: no changes detected in the worktree for issue #${issue.number}.` };
     }
-    const subject = (impl?.commitMessage ?? "").trim().split("\n")[0]?.slice(0, 100) || `🐛 fix: ${issue.title}`.slice(0, 100);
+    const subject =
+      (impl?.commitMessage ?? "").trim().split("\n")[0]?.slice(0, 100) || `🐛 fix: ${issue.title}`.slice(0, 100);
     if (dirty) {
       const paths = parsePorcelainPaths(git(["status", "--porcelain=v1", "-z"]));
       if (paths.length > 0) git(["add", "--", ...paths]);
@@ -387,7 +425,20 @@ function openPr(issue: Issue, worktreePath: string, branch: string, done: boolea
     let prUrl: string;
     let prNumber: number;
     try {
-      prUrl = gh(["pr", "create", "--repo", REPO, "--head", branch, "--base", "main", "--title", subject, "--body", bodyLines.join("\n")]).trim();
+      prUrl = gh([
+        "pr",
+        "create",
+        "--repo",
+        REPO,
+        "--head",
+        branch,
+        "--base",
+        "main",
+        "--title",
+        subject,
+        "--body",
+        bodyLines.join("\n"),
+      ]).trim();
       prNumber = Number(prUrl.split("/").pop());
     } catch {
       // PR already exists for this branch — reuse it.
@@ -404,7 +455,10 @@ function openPr(issue: Issue, worktreePath: string, branch: string, done: boolea
       summary: `Opened PR #${prNumber} (${branch}) → closes #${issue.number}.`,
     };
   } catch (err) {
-    return { ...base, summary: `PR step failed for #${issue.number}: ${String(err instanceof Error ? err.message : err).slice(0, 600)}` };
+    return {
+      ...base,
+      summary: `PR step failed for #${issue.number}: ${String(err instanceof Error ? err.message : err).slice(0, 600)}`,
+    };
   }
 }
 
@@ -478,9 +532,10 @@ function implementPrompt(issue: Issue, inv: Investigation | undefined, feedback:
 }
 
 function reviewPrompt(issue: Issue, impl: Implementation | undefined, seat: "fable" | "sol") {
-  const identity = seat === "fable"
-    ? "You are FABLE (Claude Fable 5), one of two independent reviewers. The other seat is Codex Sol; you never see its verdict and must judge alone."
-    : "You are CODEX SOL, one of two independent reviewers. The other seat is Claude Fable; you never see its verdict and must judge alone.";
+  const identity =
+    seat === "fable"
+      ? "You are FABLE (Claude Fable 5), one of two independent reviewers. The other seat is Codex Sol; you never see its verdict and must judge alone."
+      : "You are CODEX SOL, one of two independent reviewers. The other seat is Claude Fable; you never see its verdict and must judge alone.";
   return [
     `${identity} You are a STRICT reviewer of the candidate fix for GitHub issue #${issue.number} in smithersai/smithers.`,
     "Your current working directory IS the worktree containing the candidate fix. Do NOT edit any files — review only.",
@@ -503,7 +558,7 @@ function reviewPrompt(issue: Issue, impl: Implementation | undefined, seat: "fab
     "- Hunt for real bugs in the new code: edge cases, error paths, resource leaks, broken imports, type errors.",
     "",
     `In your structured output set issueNumber to exactly ${issue.number}; approved is your verdict; feedback is concise and actionable (what to change and where); issues[] itemizes findings with severity critical|major|minor|nit.`,
-    "Approve ONLY when the fix is complete, correct, and safe to land on main. Do not approve out of politeness; do not reject for taste-only nits.",
+    "Approve ONLY when the fix is complete, correct, and safe to land on main. Do not approve out of politeness; do not reject for taste-only nits. A red check that never actually RAN (service unreachable, network denied, missing credentials, broken harness) is an environmental fault, not evidence against the fix: say so explicitly in your feedback and do not convert it into approved=false.",
   ].join("\n");
 }
 
@@ -623,7 +678,15 @@ export default smithers((ctx) => {
                       </Sequence>
                     </Loop>
                     <Task id={`i${n}:pr`} output={outputs.dpfPr} timeoutMs={10 * 60_000}>
-                      {() => openPr(issue, worktreePath, branch, issueDone(ctx, n), latestForIssue<Implementation>(ctx.outputs.dpfImplementation, n))}
+                      {() =>
+                        openPr(
+                          issue,
+                          worktreePath,
+                          branch,
+                          issueDone(ctx, n),
+                          latestForIssue<Implementation>(ctx.outputs.dpfImplementation, n),
+                        )
+                      }
                     </Task>
                   </Sequence>
                 </Worktree>
@@ -670,7 +733,13 @@ export default smithers((ctx) => {
 
         {denied ? (
           <Task id="landing-skipped" output={outputs.dpfMerge} timeoutMs={60_000}>
-            {{ issueNumber: 0, prNumber: null, merged: false, commented: false, summary: "Landing was denied at the approval gate; PRs remain open for manual review." }}
+            {{
+              issueNumber: 0,
+              prNumber: null,
+              merged: false,
+              commented: false,
+              summary: "Landing was denied at the approval gate; PRs remain open for manual review.",
+            }}
           </Task>
         ) : null}
       </Sequence>

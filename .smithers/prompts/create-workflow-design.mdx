@@ -20,6 +20,16 @@ Custom UIs go in: {props.uiDir}
 
 ## Design rules
 
+- **Complexity budget: every node must pay rent.** Start from the smallest
+  graph that satisfies the spec — often 2-4 tasks — and add a node, gate, loop,
+  or reviewer only when the spec names the failure it prevents. The shipped
+  OrchBench benchmark (benchmarks/orchbench/RESULTS.md) measured review stages
+  costing MORE wall-clock than implementation (24 min of a 46 min run) and a
+  three-model review panel scoring below a solo frontier agent, so a review
+  loop or panel is justified by risk (landing on main, destructive actions,
+  release gates), never by default. When the spec's stages compress into one
+  strong agent's context window, say so in `rationale` and design the smaller
+  graph.
 - **Compose, don't hand-roll.** If the provisioning step found a component
   (`<ReviewLoop>`, `<ScanFixVerify>`, `<ValidationLoop>`, ...) that fits, use it
   instead of re-implementing the loop.
@@ -51,9 +61,10 @@ Custom UIs go in: {props.uiDir}
 - **No mocks.** Function tasks and verification steps must run real commands
   against real files; never design a step whose output is fabricated data.
 
-## Design the custom UI (required)
+## Design the custom UI (when it earns its keep)
 
-Every new workflow gets a matching custom run UI at
+A workflow that runs long, fans out, or pauses on approvals gets a matching
+custom run UI at
 `{props.uiDir}/<workflowName>.tsx` (rendered by `smithers ui <runId>` after the
 workflow declares `<UI entry="../ui/<workflowName>.tsx" />`). Design it as a
 composition of the shipped component libraries, not hand-rolled markup:
@@ -72,7 +83,10 @@ shape. Fill the design's `ui` field:
 - `panels`: each panel/section and the node output table(s) it reads (use the
   task ids and output schemas you designed above, honoring the spec's `ui` wish).
 
-Set `ui` to null only if the spec says the user explicitly declined a UI.
+Set `ui` to null when the user declined one, or when the workflow is short
+and linear enough that `smithers monitor` (which every run already gets) tells
+the whole story — a 2-3 node pipeline with no approvals rarely needs a bespoke
+UI, and skipping it removes a whole scaffold-and-verify surface.
 
 ## Produce
 

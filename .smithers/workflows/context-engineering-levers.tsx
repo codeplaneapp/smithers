@@ -66,7 +66,7 @@ const planSynthesisSchema = z.object({
 
 // Mirrors the Approval default decision schema (approved/note/decidedBy/decidedAt).
 const approvalSchema = z.object({
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   note: z.string().nullable().optional(),
   decidedBy: z.string().nullable().default(null),
   decidedAt: z.string().nullable().default(null),
@@ -89,7 +89,7 @@ const validationSchema = z.object({
 
 const reviewSchema = z.object({
   deliverable: z.enum(["docs", "sidecar", "speed"]),
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   feedback: z.string().default(""),
   blockingIssues: z.array(z.string()).default([]),
 });

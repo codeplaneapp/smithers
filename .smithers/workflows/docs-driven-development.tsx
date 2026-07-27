@@ -149,7 +149,7 @@ const workSchema = z.object({
 });
 
 const reviewSchema = z.object({
-  approved: z.boolean().default(false),
+  approved: z.boolean(),
   blockingFindings: z.array(z.string()).default([]),
   inefficiencies: z.array(z.string()).default([]),
   summary: z.string().default(""),
