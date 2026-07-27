@@ -34,10 +34,20 @@ const FYI_KINDS = new Set(["run-finished", "run-cancelled", "run-continued"]);
  * NDJSON follower behind the Claude Code plugin's background monitor: one line
  * per notable transition, each with the resolving command. By default only
  * actionable transitions stream (approval pending, human request, run failed,
- * stalled heartbeat); pass `transitions: "all"` to also stream the FYI ones
- * (finished, cancelled, continued). History before the monitor started is not
- * replayed; already-pending approvals and human requests are surfaced once at
- * startup.
+ * stalled heartbeat, retry churn, progress digest); pass `transitions: "all"`
+ * to also stream the FYI ones (finished, cancelled, continued). History before
+ * the monitor started is not replayed; already-pending approvals and human
+ * requests are surfaced once at startup.
+ *
+ * Silence is itself a failure mode (issue #1413): a detached run can stay
+ * alive for hours while nodes grind through retries, crossing no failed or
+ * stalled transition, so a host agent driven by this stream had nothing to
+ * relay and the user could not tell churn from health. Two signals make that
+ * impossible: `node-retrying` fires when an active attempt reaches
+ * `retryAlertAttempt` (re-firing on each later attempt), and `run-progress`
+ * fires whenever a followed non-terminal run has produced no monitor line for
+ * `progressEveryMs`, so no followed run is ever silent longer than one digest
+ * window.
  *
  * With `subscriptionsPath` set the monitor follows ONLY subscribed runs (the
  * ones this session started or attached a mirror to, recorded by `claude
@@ -54,11 +64,13 @@ const FYI_KINDS = new Set(["run-finished", "run-cancelled", "run-continued"]);
  * starved by a long-running child process.
  *
  * @param {any} adapter
- * @param {{ intervalMs?: number; stalledAfterMs?: number; ticks?: number; transitions?: "actionable" | "all"; subscriptionsPath?: string; sessionId?: string; write?: (line: string) => void; now?: () => number }} [options]
+ * @param {{ intervalMs?: number; stalledAfterMs?: number; retryAlertAttempt?: number; progressEveryMs?: number; ticks?: number; transitions?: "actionable" | "all"; subscriptionsPath?: string; sessionId?: string; write?: (line: string) => void; now?: () => number }} [options]
  */
 export async function runClaudeMonitor(adapter, options = {}) {
   const intervalMs = Math.max(250, Math.floor(options.intervalMs ?? 2000));
   const stalledAfterMs = Math.max(5000, Math.floor(options.stalledAfterMs ?? 120000));
+  const retryAlertAttempt = options.retryAlertAttempt === 0 ? 0 : Math.max(2, Math.floor(options.retryAlertAttempt ?? 3));
+  const progressEveryMs = options.progressEveryMs === 0 ? 0 : Math.max(60000, Math.floor(options.progressEveryMs ?? 1800000));
   const allTransitions = options.transitions === "all";
   const subscriptionsPath = options.subscriptionsPath;
   const sessionId = options.sessionId;
@@ -77,9 +89,14 @@ export async function runClaudeMonitor(adapter, options = {}) {
   const taskHeartbeatActivityAt = new Map();
   /** @type {Set<string>} terminal runs that already got their final scan */
   const finalScanned = new Set();
+  /** @type {Map<string, number>} last time ANY line was written per run — the run-progress silence clock */
+  const lastLineAt = new Map();
 
   /** @param {Record<string, unknown>} entry */
   const emit = (entry) => {
+    if (typeof entry.runId === "string") {
+      lastLineAt.set(entry.runId, now());
+    }
     write(JSON.stringify({ contract: claudeMirrorContract, ts: now(), ...entry }));
   };
 
@@ -113,6 +130,9 @@ export async function runClaudeMonitor(adapter, options = {}) {
             removeClaudeMirrorSubscription(subscriptionsPath, { runId, nowMs: now() });
           }
         } else {
+          // The silence clock starts at first sight, not at run creation, so
+          // a monitor attaching to an old run does not fire an instant digest.
+          lastLineAt.set(runId, now());
           await emitPendingGates(adapter, runId, emitOnce);
         }
         continue;
@@ -221,11 +241,20 @@ export async function runClaudeMonitor(adapter, options = {}) {
       // approval-pending notification for a run that can no longer resume.
       if (!finalScan) {
         await emitPendingGates(adapter, runId, emitOnce);
-        const taskHeartbeat = await readFreshTaskHeartbeat(adapter, runId);
-        if (taskHeartbeat.ok && taskHeartbeat.atMs !== undefined) {
-          taskHeartbeatActivityAt.set(runId, Math.max(taskHeartbeatActivityAt.get(runId) ?? 0, taskHeartbeat.atMs));
+        const attemptsRead = await readActiveAttempts(adapter, runId);
+        const activeAttempts = attemptsRead.ok ? (attemptsRead.attempts ?? []) : [];
+        for (const attemptRow of activeAttempts) {
+          const heartbeatAtMs = Number(attemptRow?.heartbeatAtMs);
+          if (Number.isFinite(heartbeatAtMs)) {
+            taskHeartbeatActivityAt.set(runId, Math.max(taskHeartbeatActivityAt.get(runId) ?? 0, heartbeatAtMs));
+          }
         }
-        if (eventReadFailed || !taskHeartbeat.ok) continue;
+        if (attemptsRead.ok && retryAlertAttempt > 0) {
+          for (const attemptRow of activeAttempts) {
+            emitRetryChurn(runId, attemptRow, retryAlertAttempt, emitOnce);
+          }
+        }
+        if (eventReadFailed || !attemptsRead.ok) continue;
         trackStall(
           run,
           stalledAfterMs,
@@ -234,6 +263,12 @@ export async function runClaudeMonitor(adapter, options = {}) {
           now,
           Math.max(eventActivityAt.get(runId) ?? 0, taskHeartbeatActivityAt.get(runId) ?? 0) || undefined,
         );
+        if (progressEveryMs > 0) {
+          const lastLine = lastLineAt.get(runId);
+          if (lastLine !== undefined && now() - lastLine >= progressEveryMs) {
+            emit(buildProgressEntry(run, activeAttempts, now()));
+          }
+        }
       }
     }
     if (options.ticks !== undefined && tick >= options.ticks) {
@@ -243,29 +278,93 @@ export async function runClaudeMonitor(adapter, options = {}) {
   }
 }
 
+const ACTIVE_ATTEMPT_STATES = new Set(["in-progress", "waiting-approval", "waiting-event", "waiting-timer"]);
+
 /**
+ * Active attempt rows are durable evidence from the fenced task owner; they
+ * feed the stall check (heartbeats), the retry-churn signal (attempt
+ * numbers), and the progress digest (what is running right now). A failed
+ * read is inconclusive, never evidence of a stall.
+ *
  * @param {any} adapter
  * @param {string} runId
- * @returns {Promise<{ ok: true; atMs?: number } | { ok: false }>}
+ * @returns {Promise<{ ok: true; attempts: any[] | undefined } | { ok: false }>}
  */
-async function readFreshTaskHeartbeat(adapter, runId) {
-  if (typeof adapter.listAttemptsForRun !== "function") return { ok: true };
+async function readActiveAttempts(adapter, runId) {
+  if (typeof adapter.listAttemptsForRun !== "function") return { ok: true, attempts: undefined };
   let attempts;
   try {
     attempts = await Promise.resolve(adapter.listAttemptsForRun(runId));
   } catch {
     return { ok: false };
   }
-  const activeStates = new Set(["in-progress", "waiting-approval", "waiting-event", "waiting-timer"]);
-  let newest;
-  for (const attempt of attempts) {
-    if (!activeStates.has(attempt?.state)) continue;
-    const heartbeatAtMs = Number(attempt?.heartbeatAtMs);
-    if (Number.isFinite(heartbeatAtMs) && (newest === undefined || heartbeatAtMs > newest)) {
-      newest = heartbeatAtMs;
-    }
+  const rows = Array.isArray(attempts) ? attempts : [];
+  return { ok: true, attempts: rows.filter((attemptRow) => ACTIVE_ATTEMPT_STATES.has(attemptRow?.state)) };
+}
+
+/**
+ * A node grinding through retries crosses no failed or stalled transition, so
+ * without this signal the monitor stays silent through exactly the churn a
+ * supervising agent must report (issue #1413). Attempts are 1-based; fires
+ * once per attempt number, so each escalation (attempt 3, then 4, then 5) is
+ * announced exactly once.
+ *
+ * @param {string} runId
+ * @param {any} attemptRow
+ * @param {number} retryAlertAttempt
+ * @param {(key: string, entry: Record<string, unknown>) => void} emitOnce
+ */
+function emitRetryChurn(runId, attemptRow, retryAlertAttempt, emitOnce) {
+  const attempt = Number(attemptRow?.attempt);
+  const nodeId = typeof attemptRow?.nodeId === "string" ? attemptRow.nodeId : "";
+  if (!Number.isFinite(attempt) || attempt < retryAlertAttempt || nodeId.length === 0) {
+    return;
   }
-  return { ok: true, atMs: newest };
+  const iteration = typeof attemptRow?.iteration === "number" ? attemptRow.iteration : 0;
+  emitOnce(`retry:${runId}:${nodeId}:${iteration}:${attempt}`, {
+    kind: "node-retrying",
+    runId,
+    nodeId,
+    iteration,
+    attempt,
+    summary: `Run ${runId} node ${nodeId} is on attempt ${attempt}; earlier attempts failed or were interrupted.`,
+    action: `Tell the user, then diagnose with: smithers node ${nodeId} -r ${runId} (pause with: smithers pause ${runId})`,
+  });
+}
+
+/**
+ * Periodic still-running digest: fires only when a followed run has produced
+ * no monitor line for a full `progressEveryMs` window (every written line
+ * resets the run's silence clock), so a healthy-but-quiet detached run still
+ * hands the host agent a current status to relay (issue #1413).
+ *
+ * @param {any} run
+ * @param {any[]} activeAttempts
+ * @param {number} nowMs
+ */
+function buildProgressEntry(run, activeAttempts, nowMs) {
+  const runId = run.runId;
+  const startedAtMs = Number(run.startedAtMs ?? run.createdAtMs);
+  const elapsed = Number.isFinite(startedAtMs) && nowMs > startedAtMs ? ` after ${formatElapsed(nowMs - startedAtMs)}` : "";
+  const active = activeAttempts
+    .filter((attemptRow) => typeof attemptRow?.nodeId === "string" && attemptRow.nodeId.length > 0)
+    .sort((a, b) => Number(b?.attempt ?? 0) - Number(a?.attempt ?? 0))
+    .slice(0, 3)
+    .map((attemptRow) => `${attemptRow.nodeId} (attempt ${Number(attemptRow.attempt) || 1})`);
+  const activeText = active.length > 0 ? `; active: ${active.join(", ")}` : "";
+  return {
+    kind: "run-progress",
+    runId,
+    summary: `Run ${runId} is still ${run.status}${elapsed} with no notable transitions in the last window${activeText}.`,
+    action: `Give the user a brief status update, then check with: smithers status ${runId} (cancel with: smithers cancel ${runId})`,
+  };
+}
+
+/** @param {number} ms */
+function formatElapsed(ms) {
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 60) return `${Math.max(1, minutes)}m`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
 /**

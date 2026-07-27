@@ -4639,6 +4639,18 @@ const claudeMonitorOptions = z.object({
     .min(5000)
     .default(120000)
     .describe("Heartbeat age that flags a running run as stalled"),
+  retryAlertAttempt: z
+    .number()
+    .int()
+    .min(0)
+    .default(3)
+    .describe("Active-attempt number that flags a node as retry-churning, re-firing on each later attempt (0 disables)"),
+  progressEveryMs: z
+    .number()
+    .int()
+    .min(0)
+    .default(1800000)
+    .describe("Emit a run-progress still-running digest when a followed run has produced no notification for this long (0 disables)"),
   ticks: z.number().int().min(1).optional().describe("Stop after N polls (default: run until killed)"),
   transitions: z
     .enum(["actionable", "all"])
@@ -4773,11 +4785,13 @@ const claudeCli = Cli.create({
   })
   .command("monitor", {
     description:
-      "Follow the runs this session subscribed to (claude tick / claude subscribe) and print one NDJSON line per actionable transition (approval pending, human request, failed, stalled); --transitions all adds finished/cancelled/continued, --all-runs follows every run in the workspace. Backs the plugin's background monitor.",
+      "Follow the runs this session subscribed to (claude tick / claude subscribe) and print one NDJSON line per actionable transition (approval pending, human request, failed, stalled, node retry churn), plus a periodic run-progress digest whenever a followed run has been silent for a full window — so a detached run can never run unmonitored for hours; --transitions all adds finished/cancelled/continued, --all-runs follows every run in the workspace. Backs the plugin's background monitor.",
     options: claudeMonitorOptions,
     alias: {
       intervalMs: "interval-ms",
       stalledAfterMs: "stalled-after-ms",
+      retryAlertAttempt: "retry-alert-attempt",
+      progressEveryMs: "progress-every-ms",
       allRuns: "all-runs",
     },
     async run(c) {
@@ -4793,6 +4807,8 @@ const claudeCli = Cli.create({
         await runClaudeMonitor(opened.adapter, {
           intervalMs: c.options.intervalMs,
           stalledAfterMs: c.options.stalledAfterMs,
+          retryAlertAttempt: c.options.retryAlertAttempt,
+          progressEveryMs: c.options.progressEveryMs,
           ticks: c.options.ticks,
           transitions: c.options.transitions,
           // The workspace store is shared across sessions; only runs this

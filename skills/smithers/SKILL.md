@@ -338,6 +338,19 @@ of leaving the user blind, and offer the other visualizations too (`smithers
 graph`, `smithers tree <run-id>`, the `--interactive` TUI); see
 [How to guide the user](#how-to-guide-the-user-after-every-command).
 
+**Starting a detached run makes you its supervisor until it ends.** A detached
+run staying alive is not the same as it making progress: a run can grind
+through node retries for hours without ever failing outright. The background
+monitor turns that silence into notifications: `node-retrying` (a node's
+active attempt reached the churn threshold, default 3) and `run-progress` (a
+followed run produced no notification for a full window, default 30 minutes)
+lines arrive alongside approval, failure, and stall alerts. When one lands,
+relay a one-or-two-sentence status to the user right away, then decide: keep
+watching, `smithers pause <run-id>` / `smithers cancel <run-id>`, or narrow
+the work. Never let a detached run go hours without the user hearing its
+state; if the monitor is unavailable, check `smithers status <run-id>`
+yourself on the same cadence and report what you find.
+
 Two verbs start a run, split by what you hand them. `smithers up <file>.tsx`
 runs a workflow **file by path** (use this to start a run from a `.tsx` file).
 `smithers workflow run <id>` (step 3 above) runs a **discovered/seeded**

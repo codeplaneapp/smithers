@@ -3413,10 +3413,12 @@ commands[102]:
       interval-ms,,number,1000,Poll interval in ms
       max-output-chars,,number,2000,Truncate the node output to this many chars
   - name: claude.monitor
-    purpose: Follow the runs this session subscribed to (claude tick / claude subscribe) and print one NDJSON line per actionable transition (approval pending, human request, failed, stalled); --transitions all adds finished/cancelled/continued, --all-runs follows every run in the workspace; backs the plugin's background monitor
-    flags[5]{name,short,type,default,desc}:
+    purpose: Follow the runs this session subscribed to (claude tick / claude subscribe) and print one NDJSON line per actionable transition (approval pending, human request, failed, stalled, node retry churn), plus a periodic run-progress digest whenever a followed run has been silent for a full window; --transitions all adds finished/cancelled/continued, --all-runs follows every run in the workspace; backs the plugin's background monitor
+    flags[7]{name,short,type,default,desc}:
       interval-ms,,number,2000,Poll interval in ms
       stalled-after-ms,,number,120000,Heartbeat age that flags a running run as stalled
+      retry-alert-attempt,,number,3,Active-attempt number that flags a node as retry-churning (0 disables)
+      progress-every-ms,,number,1800000,Emit a run-progress digest after this long without any notification for a followed run (0 disables)
       ticks,,number,,Stop after N polls (default run until killed)
       transitions,,string,actionable,Which transitions stream: actionable or all
       all-runs,,boolean,false,Follow every run in the workspace instead of only this session's subscriptions

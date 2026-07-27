@@ -9,7 +9,11 @@ Claude Code plugin consumes:
 - `waitForClaudeMirrorChange.js` — block until a mirror-relevant event lands.
 - `runClaudeMonitor.js` — NDJSON follower of notable transitions across the
   runs the session subscribed to (all runs only with `subscriptionsPath`
-  unset / `--all-runs`).
+  unset / `--all-runs`). Also breaks silence on its own: `node-retrying`
+  fires when an active attempt reaches the churn threshold, and
+  `run-progress` fires whenever a followed non-terminal run has written no
+  line for a full window, so an alive-but-churning detached run can never
+  go unreported (#1413).
 
 Subscriptions: the workspace store is shared by every session, so the monitor
 follows only the runs its session subscribed to. The registry lives at

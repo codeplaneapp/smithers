@@ -177,8 +177,12 @@ this is how a watcher survives the 10-minute Bash cap on multi-hour nodes).
 
 Long-running NDJSON follower for the plugin monitor component. Emits one line
 per notable transition across local runs: `approval-pending`, `human-request`,
-`run-failed`, `run-finished`, `run-stalled` (heartbeat gone stale), each with
-`runId` and a one-line summary plus the resolving command. Silent (and exits 0)
+`run-failed`, `run-finished`, `run-stalled` (heartbeat gone stale),
+`node-retrying` (an active attempt reached the churn threshold), each with
+`runId` and a one-line summary plus the resolving command. It also emits a
+periodic `run-progress` digest whenever a followed non-terminal run has
+written no line for a full window, so an alive-but-churning detached run can
+never go unreported for hours (issue #1413). Silent (and exits 0)
 when no `.smithers` store exists, so the monitor is inert outside smithers
 projects.
 
