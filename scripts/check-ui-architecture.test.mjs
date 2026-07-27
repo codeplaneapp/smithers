@@ -663,6 +663,54 @@ for (const [name, mutate, expected] of [
       ),
     "heavy-widget-location",
   ],
+  [
+    "ui-core importing opentui",
+    (root) => {
+      json(root, "packages/ui-core/package.json", { name: "@smithers-orchestrator/ui-core", exports: { ".": "./src/index.ts" } });
+      write(root, "packages/ui-core/src/index.ts", 'export { useKeyboard } from "@opentui/react";\n');
+    },
+    "ui-core-boundary",
+  ],
+  [
+    "ui-core importing the web ui barrel",
+    (root) => {
+      json(root, "packages/ui-core/package.json", { name: "@smithers-orchestrator/ui-core", exports: { ".": "./src/index.ts" } });
+      write(root, "packages/ui-core/src/index.ts", 'export { Button } from "@smithers-orchestrator/ui";\n');
+    },
+    "ui-core-boundary",
+  ],
+  [
+    "ui-core referencing a DOM global outside the web platform adapter",
+    (root) => {
+      json(root, "packages/ui-core/package.json", { name: "@smithers-orchestrator/ui-core", exports: { ".": "./src/index.ts" } });
+      write(root, "packages/ui-core/src/index.ts", "export const width = window.innerWidth;\n");
+    },
+    "ui-core-boundary",
+  ],
+  [
+    "tui-ui importing gateway-react",
+    (root) => {
+      json(root, "packages/tui-ui/package.json", { name: "@smithers-orchestrator/tui-ui", exports: { ".": "./src/index.ts" } });
+      write(
+        root,
+        "packages/tui-ui/src/index.ts",
+        'export { useGatewayRun } from "@smithers-orchestrator/gateway-react";\n',
+      );
+    },
+    "tui-ui-boundary",
+  ],
+  [
+    "tui-ui importing zustand",
+    (root) => {
+      json(root, "packages/tui-ui/package.json", { name: "@smithers-orchestrator/tui-ui", exports: { ".": "./src/index.ts" } });
+      write(
+        root,
+        "packages/tui-ui/src/index.ts",
+        'import { create } from "zustand"; export const useStore = create(() => ({}));\n',
+      );
+    },
+    "tui-ui-boundary",
+  ],
 ]) {
   test(`representative violation fails: ${name}`, (context) => {
     const root = fixture();
@@ -974,6 +1022,39 @@ test("typed disconnected props and connected gateway imports pass", (context) =>
     'import { useGatewayRun } from "@smithers-orchestrator/gateway-react"; export function Live(props: { runId: string }) { return <div>{String(useGatewayRun(props.runId))}</div>; }\n',
   );
   snapshot(root);
+  assert.equal(check(root).ok, true);
+});
+
+test("compliant ui-core and tui-ui modules pass", (context) => {
+  const root = fixture();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  json(root, "packages/ui-core/package.json", {
+    name: "@smithers-orchestrator/ui-core",
+    exports: { ".": "./src/index.ts", "./*": "./src/*.ts" },
+  });
+  write(root, "packages/ui-core/src/index.ts", 'export { statusTone } from "./runs/statusMeta.ts";\n');
+  write(
+    root,
+    "packages/ui-core/src/runs/statusMeta.ts",
+    'export function statusTone(status: string) { return status; }\n',
+  );
+  json(root, "packages/tui-ui/package.json", {
+    name: "@smithers-orchestrator/tui-ui",
+    exports: { ".": "./src/index.ts" },
+    dependencies: { "@opentui/core": "^0.4.2", "@opentui/react": "^0.4.2" },
+  });
+  write(root, "packages/tui-ui/src/index.ts", 'export { StatusPill } from "./StatusPill.tsx";\n');
+  write(
+    root,
+    "packages/tui-ui/src/StatusPill.tsx",
+    '/** @jsxImportSource @opentui/react */\nexport function StatusPill(props: { label: string }) { return <text>{props.label}</text>; }\n',
+  );
+  const baseline = snapshot(root);
+  assert.ok(
+    baseline.allowedLegacyViolations.some(
+      (entry) => entry === "single-visual-package :: packages/tui-ui/package.json dependencies contains @opentui/core",
+    ),
+  );
   assert.equal(check(root).ok, true);
 });
 

@@ -1,0 +1,31 @@
+{
+  "name": "@smithers-orchestrator/tui-ui",
+  "version": "0.31.0",
+  "description": "opentui leaf component library for the Smithers terminal UI: props-in/callbacks-out visual components mirroring the @smithers-orchestrator/ui and gateway-ui vocabulary",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "test": "bun test tests"
+  },
+  "dependencies": {
+    "@opentui/core": "^0.4.2",
+    "@opentui/react": "^0.4.2",
+    "react": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19.2.17",
+    "typescript": "~6.0.3"
+  }
+}

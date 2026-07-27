@@ -75,6 +75,37 @@ const HEAVY_DEPENDENCY_PREFIXES = [
   "monaco-editor",
   "shiki",
 ];
+// ui-core (packages/ui-core/src/) is the isomorphic headless product layer:
+// zero DOM, zero opentui, zero react-dom, and it must not reach into the
+// platform-visual web packages. `react-dom`/`@opentui` are checked by prefix
+// (subpaths like `react-dom/client` still count); the smithers-orchestrator
+// UI packages are checked by exact base package.
+const UI_CORE_FORBIDDEN_PREFIXES = ["@opentui", "react-dom"];
+const UI_CORE_FORBIDDEN_PACKAGES = new Set([
+  "@smithers-orchestrator/gateway-ui",
+  "@smithers-orchestrator/ui",
+  "smithers-orchestrator/gateway-ui",
+  "smithers-orchestrator/ui",
+]);
+// DOM globals are checked lexically (not just via import specifiers) since a
+// global like `window` needs no import statement. `src/platform/web*` is the
+// carve-out for the (future) web Platform adapter implementations, which are
+// necessarily DOM-coupled; everything else in ui-core stays platform-neutral.
+const UI_CORE_DOM_GLOBALS = new Set(["document", "localStorage", "navigator", "window"]);
+const UI_CORE_WEB_ADAPTER_PREFIX = "packages/ui-core/src/platform/web";
+
+// tui-ui (packages/tui-ui/src/) is the opentui leaf component library:
+// props-in/callbacks-out, no business logic, no gateway data access, and no
+// zustand stores of its own.
+const TUI_UI_FORBIDDEN_PACKAGES = new Set([
+  "@smithers-orchestrator/gateway-client",
+  "@smithers-orchestrator/gateway-react",
+  "@smithers-orchestrator/ui-core",
+  "smithers-orchestrator/gateway-client",
+  "smithers-orchestrator/gateway-react",
+  "smithers-orchestrator/ui-core",
+  "zustand",
+]);
 const DUPLICATE_WRAPPER_NAMES = new Set([
   "alert",
   "avatar",
@@ -1481,6 +1512,20 @@ export function collectUiArchitectureState(root, kind = "smithers") {
           violations.push(formatViolation("gateway-react-direction", `${path} imports ${specifier}`));
         }
       }
+      if (
+        kind === "smithers" &&
+        path.startsWith("packages/ui-core/src/") &&
+        (matchesPrefix(specifier, UI_CORE_FORBIDDEN_PREFIXES) || UI_CORE_FORBIDDEN_PACKAGES.has(basePackage(specifier)))
+      ) {
+        violations.push(formatViolation("ui-core-boundary", `${path} imports ${specifier}`));
+      }
+      if (
+        kind === "smithers" &&
+        path.startsWith("packages/tui-ui/src/") &&
+        TUI_UI_FORBIDDEN_PACKAGES.has(basePackage(specifier))
+      ) {
+        violations.push(formatViolation("tui-ui-boundary", `${path} imports ${specifier}`));
+      }
     }
 
     if (kind === "smithers") {
@@ -1548,6 +1593,13 @@ export function collectUiArchitectureState(root, kind = "smithers") {
         hasCodeIdentifier(sources.get(path), new Set(["document", "window", "HTMLElement", "SVGElement"]))
       ) {
         violations.push(formatViolation("components-non-visual", `${path} references a browser DOM global`));
+      }
+      if (
+        path.startsWith("packages/ui-core/src/") &&
+        !path.startsWith(UI_CORE_WEB_ADAPTER_PREFIX) &&
+        hasCodeIdentifier(sources.get(path), UI_CORE_DOM_GLOBALS)
+      ) {
+        violations.push(formatViolation("ui-core-boundary", `${path} references a browser DOM global`));
       }
       if (path.startsWith("packages/components/src/")) {
         for (const tag of intrinsicVisualTags(sources.get(path), path)) {

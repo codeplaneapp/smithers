@@ -93,6 +93,10 @@ export function startSeededGateway(seed: GatewaySeed): SeededGateway {
 
       // getNodeDiff RPC (used by the Diff tab via useGatewayRpc → client.rpc).
       if (path === "/v1/rpc/getNodeDiff") return rpcOk(seed.nodeDiff);
+      // getRun/runs.get RPC: the CLI startup path (packages/tui/src/index.tsx's
+      // gatewayServesRun) POSTs this before rendering anything, and requires a
+      // truthy payload to confirm this gateway actually serves the run.
+      if (path === "/v1/rpc/getRun" || path === "/v1/rpc/runs.get") return rpcOk(seed.run);
       if (path.startsWith("/v1/rpc/")) return rpcOk(null);
 
       // Tree snapshot.
