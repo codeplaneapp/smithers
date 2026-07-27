@@ -1,4 +1,5 @@
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { createSubflowResultError } from "@smithers-orchestrator/graph/subflow-result-error";
 import { executeSandbox } from "@smithers-orchestrator/sandbox/execute";
 import { executeChildWorkflow } from "./child-workflow.js";
 import { applyDiffBundle } from "./effect/diff-bundle.js";
@@ -11,35 +12,6 @@ import { applyDiffBundle } from "./effect/diff-bundle.js";
 const SANDBOX_DEFAULT_MAX_OUTPUT_BYTES = 200_000;
 // Default per-tool timeout for a <Sandbox> child workflow.
 const SANDBOX_DEFAULT_TOOL_TIMEOUT_MS = 60_000;
-const CHILD_SUSPENDING_STATUSES = new Set([
-  "waiting-approval",
-  "waiting-event",
-  "waiting-timer",
-  "waiting-quota",
-  "paused",
-]);
-
-/**
- * @param {TaskDescriptor} task
- * @param {import("@smithers-orchestrator/driver/RunResult").RunResult} result
- */
-function childWorkflowError(task, result) {
-  const suspending = CHILD_SUSPENDING_STATUSES.has(result.status);
-  const denied = result.error && JSON.stringify(result.error).includes('"approved":false');
-  const summary = suspending
-    ? `Subflow ${task.nodeId} is waiting on child run ${result.runId} with status ${result.status}.`
-    : denied
-      ? `Subflow ${task.nodeId} failed because child run ${result.runId} denied an approval.`
-      : `Subflow ${task.nodeId} failed because child run ${result.runId} ended with status ${result.status}.`;
-  return new SmithersError("WORKFLOW_EXECUTION_FAILED", summary, {
-    nodeId: task.nodeId,
-    status: result.status,
-    childRunId: result.runId,
-    ...(result.error === undefined ? {} : { childError: result.error }),
-    ...(suspending ? { suspensionStatus: result.status } : {}),
-    ...(suspending || denied || result.status === "cancelled" ? { failureRetryable: false } : {}),
-  });
-}
 
 /**
  * @param {TaskDescriptor[]} tasks
@@ -65,7 +37,7 @@ export function attachSubflowComputeFns(tasks, workflow, opts = {}) {
         workflowPath: opts.workflowPath ?? undefined,
       });
       if (result.status !== "finished") {
-        throw childWorkflowError(task, result);
+        throw createSubflowResultError(task.nodeId, result);
       }
       return result.output;
     };

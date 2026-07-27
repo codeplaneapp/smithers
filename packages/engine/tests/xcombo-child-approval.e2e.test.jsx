@@ -66,7 +66,6 @@ function buildChildWithGate(harness, gateOpts = {}) {
             id="child-gate"
             output={outputs.approval}
             request={{ title: "Ship the child?" }}
-            onDeny="fail"
             timeoutMs={gateOpts.timeoutMs}
           />
           <Task

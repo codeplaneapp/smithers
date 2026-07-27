@@ -3737,8 +3737,6 @@ export class SmithersDb {
                  AND attempt.node_id = n.node_id
                  AND attempt.iteration = n.iteration
                  AND attempt.state = 'waiting-approval'
-                 AND attempt.error_json LIKE '%"suspensionStatus":"waiting-approval"%'
-                 AND attempt.error_json LIKE '%"childRunId"%'
              )
          ) pending
          ORDER BY COALESCE(requested_at_ms, 0) ASC, run_id, node_id, iteration`,

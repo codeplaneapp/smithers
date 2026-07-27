@@ -90,6 +90,7 @@ describe("<Approval>", () => {
     );
     expect(snapshot.tasks).toHaveLength(1);
     expect(snapshot.tasks[0]?.approvalMode).toBe("select");
+    expect(snapshot.tasks[0]?.approvalOnDeny).toBe("fail");
     expect(snapshot.tasks[0]?.meta).toMatchObject({
       requestSummary: "Choose the best fit for this week.",
       approvalOptions: [

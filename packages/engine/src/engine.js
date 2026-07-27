@@ -7868,7 +7868,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
      * @param {{ status?: string | null }} approval
      */
     const shouldExecuteDeniedApprovalTask = (approval) =>
-      approval.status === "denied" && task.approvalMode !== "gate" && task.approvalOnDeny !== "fail";
+      approval.status === "denied" &&
+      task.approvalMode !== "gate" &&
+      (task.approvalOnDeny === "continue" || task.approvalOnDeny === "skip");
     const resolved = await resolveDeferredTaskStateBridge(adapter, db, runId, task, eventBus);
     if (resolved.handled) {
       if (resolved.state === "finished" || resolved.state === "skipped") {

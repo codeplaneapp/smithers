@@ -1344,7 +1344,10 @@ async function resolveApprovalTaskStateBridge(adapter, db, runId, desc, eventBus
   }
   approval = (await Effect.runPromise(adapter.getApproval(runId, desc.nodeId, desc.iteration))) ?? approval;
   if (approval?.status === "denied") {
-    if (desc.approvalMode !== "gate" && desc.approvalOnDeny !== "fail") {
+    if (
+      desc.approvalMode !== "gate" &&
+      (desc.approvalOnDeny === "continue" || desc.approvalOnDeny === "skip")
+    ) {
       const outputRow = await selectOutputRow(db, desc.outputTable, {
         runId,
         nodeId: desc.nodeId,

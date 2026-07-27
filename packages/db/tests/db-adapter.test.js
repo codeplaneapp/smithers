@@ -670,6 +670,21 @@ describe("SmithersDb adapter", () => {
     expect(await adapter.listPendingApprovals("r1")).toHaveLength(0);
     expect(await adapter.listAllPendingApprovals()).toHaveLength(0);
   });
+  test("a suspended subflow attempt is not synthesized as its own pending approval", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertRun(runRow("r1", "waiting-approval", { workflowName: "workflow-a" }));
+    await adapter.insertNode(nodeRow("r1", "review", "waiting-approval"));
+    await adapter.insertAttempt({
+      runId: "r1",
+      nodeId: "review",
+      iteration: 0,
+      attempt: 1,
+      state: "waiting-approval",
+      startedAtMs: now - 100,
+    });
+
+    expect(await adapter.listPendingApprovals("r1")).toEqual([]);
+  });
   test("pending lists mix real requested rows and fallback rows without duplicating", async () => {
     const { adapter } = createTestDb();
     await adapter.insertRun(runRow("r1", "waiting-approval", { workflowName: "workflow-a" }));

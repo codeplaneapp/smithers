@@ -105,6 +105,41 @@ describe("task compute function attachment behavior", () => {
     });
   });
 
+  test("subflow compute functions classify a structured approval denial as non-retryable", async () => {
+    childWorkflowCalls.length = 0;
+    nextChildWorkflowResult = {
+      runId: "denied-child",
+      status: "failed",
+      output: null,
+      error: {
+        code: "SESSION_ERROR",
+        cause: { approved: false, note: "not this quarter" },
+      },
+    };
+    const tasks = [
+      {
+        nodeId: "denied-subflow",
+        meta: {
+          __subflow: true,
+          __subflowWorkflow: { name: "child" },
+        },
+      },
+    ];
+
+    attachSubflowComputeFns(tasks, { name: "parent" }, testDeps);
+
+    await expect(tasks[0].computeFn()).rejects.toMatchObject({
+      summary: "Subflow denied-subflow failed because child run denied-child denied an approval.",
+      details: {
+        childRunId: "denied-child",
+        childError: {
+          cause: { approved: false, note: "not this quarter" },
+        },
+        failureRetryable: false,
+      },
+    });
+  });
+
   test("sandbox compute functions execute sandbox workflows with coerced flags, defaults, and task worktree root", async () => {
     sandboxCalls.length = 0;
     nextSandboxResult = { status: "finished", output: { sandbox: "ok" } };

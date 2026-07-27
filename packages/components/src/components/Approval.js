@@ -226,7 +226,7 @@ export function Approval(props) {
     needsApproval: true,
     waitAsync: props.async === true,
     approvalMode,
-    approvalOnDeny: props.onDeny,
+    approvalOnDeny: props.onDeny ?? "fail",
     approvalOptions: options,
     approvalAllowedScopes: allowedScopes,
     approvalAllowedUsers: allowedUsers,

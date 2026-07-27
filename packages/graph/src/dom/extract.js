@@ -10,6 +10,7 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { resolveWorktreePath } from "../worktree-path.js";
 import { coerceFiniteNumber } from "../utils/numeric-props.js";
 import { normalizeTaskSideEffect } from "../normalizeTaskSideEffect.js";
+import { createSubflowResultError } from "../subflow-result-error.js";
 
 /** @typedef {import("../ExtractOptions.ts").ExtractOptions} ExtractOptions */
 /** @typedef {import("../ExtractResult.ts").ExtractResult} ExtractResult */
@@ -487,30 +488,7 @@ export function extractFromHost(root, opts) {
               workflowPath: opts?.workflowPath ?? undefined,
             });
             if (result.status !== "finished") {
-              const suspending = [
-                "waiting-approval",
-                "waiting-event",
-                "waiting-timer",
-                "waiting-quota",
-                "paused",
-              ].includes(result.status);
-              const denied = result.error && JSON.stringify(result.error).includes('"approved":false');
-              throw new SmithersError(
-                "WORKFLOW_EXECUTION_FAILED",
-                suspending
-                  ? `Subflow ${nodeId} is waiting on child run ${result.runId} with status ${result.status}.`
-                  : denied
-                    ? `Subflow ${nodeId} failed because child run ${result.runId} denied an approval.`
-                    : `Subflow ${nodeId} failed because child run ${result.runId} ended with status ${result.status}.`,
-                {
-                  nodeId,
-                  status: result.status,
-                  childRunId: result.runId,
-                  ...(result.error === undefined ? {} : { childError: result.error }),
-                  ...(suspending ? { suspensionStatus: result.status } : {}),
-                  ...(suspending || denied || result.status === "cancelled" ? { failureRetryable: false } : {}),
-                },
-              );
+              throw createSubflowResultError(nodeId, result);
             }
             return result.output;
           },
