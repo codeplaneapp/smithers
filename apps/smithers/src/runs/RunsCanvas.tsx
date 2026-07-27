@@ -13,6 +13,8 @@ import {
   hasActiveFilters,
   isTerminal,
   runDisplayName,
+  runLifecycleStatus,
+  runStatusLabel,
   runStatusToNode,
   shortRunId,
   shouldShowProgress,
@@ -148,7 +150,7 @@ function RunRow({ run }: { run: RunSummary }) {
         openRunInspector(run);
       }}
     >
-      <StatusPill status={runStatusToNode(run.status)} label={run.status} />
+      <StatusPill status={runStatusToNode(runLifecycleStatus(run))} label={runStatusLabel(runLifecycleStatus(run))} />
 
       <div className="runs-row-text">
         <div className="runs-row-name">{runDisplayName(run)}</div>

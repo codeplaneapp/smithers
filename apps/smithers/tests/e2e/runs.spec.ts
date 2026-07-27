@@ -63,9 +63,9 @@ test("renders grouped sections for active and completed runs", async ({ page }) 
   await expect(active.getByTestId("runs-row").first()).toBeVisible();
   await expect(completed.getByTestId("runs-row").first()).toBeVisible();
 
-  // Status renders as a per-row pill: waiting in ACTIVE, finished in COMPLETED.
-  await expect(active.locator(".status-pill").filter({ hasText: "waiting" }).first()).toBeVisible();
-  await expect(completed.locator(".status-pill").filter({ hasText: "finished" }).first()).toBeVisible();
+  // Status renders as a normalized per-row pill with both a dot and visible label.
+  await expect(active.locator(".status-pill").filter({ hasText: "Waiting for approval" }).first()).toBeVisible();
+  await expect(completed.locator(".status-pill").filter({ hasText: "Finished" }).first()).toBeVisible();
 
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
 });

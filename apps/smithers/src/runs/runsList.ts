@@ -8,6 +8,7 @@
  * holds only the pure types + filter/group/summarize reducers, unit-tested
  * without a DOM against inline fixtures (see runsListDomain.test.ts).
  */
+import { formatStatus, normalizeStatus, statusClass } from "@smithers-orchestrator/ui/status";
 import type { NodeStatus } from "./Run";
 import type { StatusTone } from "./statusMeta";
 
@@ -42,6 +43,8 @@ export type RunSummary = {
   workflowKey?: string;
   model: string;
   status: RunListStatus;
+  /** Normalized gateway lifecycle state shown in status pills. */
+  lifecycleStatus?: string;
   totalNodes: number;
   doneNodes: number;
   failedNodes: number;
@@ -71,52 +74,85 @@ export function shortRunId(runId: string): string {
   return runId.slice(0, 8);
 }
 
-/** Map a list status to a NodeStatus the shared StatusPill understands. */
-export function runStatusToNode(status: RunListStatus): NodeStatus {
-  switch (status) {
-    case "running":
-      return "running";
-    case "waiting":
-      return "waiting";
+/** Normalize spelling drift while retaining new states for visible fallback UI. */
+export function normalizeRunStatus(status: string | undefined): string {
+  const normalized = normalizeStatus(status);
+  if (normalized === "") return "unknown";
+  return normalized === "canceled" ? "cancelled" : normalized;
+}
+
+/** Collapse lifecycle states only for filtering, grouping, and run actions. */
+export function runStatusCategory(status: string | undefined): RunListStatus {
+  switch (normalizeRunStatus(status)) {
+    case "succeeded":
     case "finished":
-      return "ok";
+    case "completed":
+    case "ok":
+    case "continued":
+      return "finished";
     case "failed":
+    case "errored":
+    case "stale":
+    case "orphaned":
       return "failed";
     case "cancelled":
-      return "queued";
+      return "cancelled";
+    case "waiting-approval":
+    case "waiting-event":
+    case "waiting-timer":
+    case "waiting-quota":
+    case "waiting":
+    case "blocked":
+    case "paused":
+      return "waiting";
+    default:
+      return "running";
   }
 }
 
-/** The tone a run row colors with — color is state, never decoration. */
-export function runStatusTone(status: RunListStatus): StatusTone {
-  switch (status) {
-    case "running":
+/** The tone a run row colors with. Unknown states stay neutral, never hidden. */
+export function runStatusTone(status: string | undefined): StatusTone {
+  const normalized = normalizeRunStatus(status);
+  if (normalized === "resumed") return "running";
+  if (normalized === "errored") return "failed";
+  switch (statusClass(normalized)) {
+    case "run":
       return "running";
-    case "waiting":
-      return "waiting";
-    case "finished":
+    case "ok":
       return "ok";
-    case "failed":
+    case "warn":
+      return "waiting";
+    case "bad":
       return "failed";
-    case "cancelled":
+    case "muted":
       return "idle";
   }
 }
 
-/** Human label for a run status, used on the pill (RunsView statusLabel). */
-export function runStatusLabel(status: RunListStatus): string {
-  switch (status) {
+/** Map a lifecycle status to the shared StatusPill palette. */
+export function runStatusToNode(status: string | undefined): NodeStatus {
+  switch (runStatusTone(status)) {
     case "running":
       return "running";
+    case "ok":
+      return "ok";
     case "waiting":
       return "waiting";
-    case "finished":
-      return "finished";
     case "failed":
       return "failed";
-    case "cancelled":
-      return "cancelled";
+    case "idle":
+      return "queued";
   }
+}
+
+/** Human label for a normalized run status. */
+export function runStatusLabel(status: string | undefined): string {
+  return formatStatus(normalizeRunStatus(status));
+}
+
+/** Status presented by both the runs card and overview. */
+export function runLifecycleStatus(run: RunSummary): string {
+  return run.lifecycleStatus ?? run.status;
 }
 
 /**

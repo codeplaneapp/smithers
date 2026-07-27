@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useGatewayRuns } from "@smithers-orchestrator/gateway-react";
 import { useLocalModeRefetch } from "../sync/useLocalModeRefetch";
-import type { RunListStatus, RunSummary } from "./runsList";
+import { normalizeRunStatus, runStatusCategory, type RunSummary } from "./runsList";
 import { useRunsListStore } from "./runsListStore";
 
 function asString(value: unknown): string | undefined {
@@ -20,43 +20,6 @@ function asString(value: unknown): string | undefined {
  */
 
 /**
- * Collapse the gateway's richer lifecycle vocabulary onto the five
- * `RunListStatus` tones the list surface renders. Mirrors `toNodeStatus` but
- * preserves the list's `cancelled`/`finished`/`waiting` distinctions (the
- * inspector's `toNodeStatus` collapses cancelled into `failed`; the LIST keeps
- * them apart for its grouped sections). Unknown → `running` so an in-flight row
- * still surfaces in the ACTIVE group rather than vanishing.
- */
-function toRunListStatus(status: string | undefined): RunListStatus {
-  switch (status) {
-    case "running":
-    case "resumed":
-    case "queued":
-    case "pending":
-      return "running";
-    case "succeeded":
-    case "finished":
-    case "completed":
-    case "ok":
-      return "finished";
-    case "failed":
-    case "errored":
-      return "failed";
-    case "cancelled":
-    case "canceled":
-      return "cancelled";
-    case "waiting-approval":
-    case "waiting-event":
-    case "waiting-timer":
-    case "waiting":
-    case "blocked":
-      return "waiting";
-    default:
-      return "running";
-  }
-}
-
-/**
  * Map a live `GatewayRunSummaryRow` onto the list's `RunSummary`. The hook types
  * the row as a loose `Record<string, unknown>` (the `listRuns` payload), so we
  * narrow `runId`/`workflowKey`/`status` defensively. The summary row carries
@@ -68,6 +31,7 @@ function toRunListStatus(status: string | undefined): RunListStatus {
 export function toRunSummary(row: Record<string, unknown>): RunSummary {
   const runId = asString(row.runId) ?? "";
   const workflowKey = asString(row.workflowKey);
+  const lifecycleStatus = normalizeRunStatus(asString(row.status));
   const hasKey = workflowKey !== undefined && workflowKey.trim() !== "";
   const workflowName = hasKey ? workflowKey : runId;
   return {
@@ -80,7 +44,8 @@ export function toRunSummary(row: Record<string, unknown>): RunSummary {
     // route still resolves to a working gateway inspector for the real run.
     workflowKey: hasKey ? workflowKey : undefined,
     model: "",
-    status: toRunListStatus(asString(row.status)),
+    status: runStatusCategory(lifecycleStatus),
+    lifecycleStatus,
     totalNodes: 0,
     doneNodes: 0,
     failedNodes: 0,

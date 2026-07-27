@@ -1,6 +1,6 @@
 import { openSurface } from "../app/navigation";
 import { StatusPill } from "../cards/StatusPill";
-import { runDisplayName, runStatusToNode, summarizeRuns } from "./runsList";
+import { runDisplayName, runLifecycleStatus, runStatusLabel, runStatusToNode, summarizeRuns } from "./runsList";
 import { useRunsListStore } from "./runsListStore";
 
 function BoltIcon() {
@@ -40,7 +40,10 @@ export function RunsCard() {
       <div className="card-body card-body-flush">
         {shown.map((run) => (
           <div className="list-row" key={run.runId}>
-            <StatusPill status={runStatusToNode(run.status)} label={run.status} />
+            <StatusPill
+              status={runStatusToNode(runLifecycleStatus(run))}
+              label={runStatusLabel(runLifecycleStatus(run))}
+            />
             <div className="list-text">
               <div className="list-name">{runDisplayName(run)}</div>
             </div>

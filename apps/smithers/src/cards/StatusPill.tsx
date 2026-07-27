@@ -5,7 +5,7 @@ import { statusLabel, statusTone } from "../runs/statusMeta";
 export function StatusPill({ status, label }: { status: NodeStatus; label?: string }) {
   return (
     <span className={`status-pill tone-${statusTone(status)}`}>
-      <span className="status-dot" />
+      <span className="status-dot" aria-hidden="true" />
       {label ?? statusLabel(status)}
     </span>
   );

@@ -95,7 +95,9 @@ export const useRunsListStore = create<RunsListState>((set, get) => ({
     const run = get().runs.find((r) => r.runId === runId);
     if (!run || run.status !== "waiting") return;
     set((state) => ({
-      runs: state.runs.map((r) => (r.runId === runId ? { ...r, status: "running", blockedNodeLabel: undefined } : r)),
+      runs: state.runs.map((r) =>
+        r.runId === runId ? { ...r, status: "running", lifecycleStatus: "running", blockedNodeLabel: undefined } : r,
+      ),
     }));
     const id = shortRunId(run.runId);
     echo(
@@ -114,6 +116,7 @@ export const useRunsListStore = create<RunsListState>((set, get) => ({
           ? {
               ...r,
               status: "failed",
+              lifecycleStatus: "failed",
               blockedNodeLabel: undefined,
               errorText: `Denied at \`${run.blockedNodeLabel ?? "gate"}\`.`,
             }
@@ -132,7 +135,9 @@ export const useRunsListStore = create<RunsListState>((set, get) => ({
     const run = get().runs.find((r) => r.runId === runId);
     if (!run || (run.status !== "failed" && run.status !== "cancelled")) return;
     set((state) => ({
-      runs: state.runs.map((r) => (r.runId === runId ? { ...r, status: "running", errorText: undefined } : r)),
+      runs: state.runs.map((r) =>
+        r.runId === runId ? { ...r, status: "running", lifecycleStatus: "running", errorText: undefined } : r,
+      ),
     }));
     const id = shortRunId(run.runId);
     echo(`Resumed ${run.workflowName} (${id}).`, "Run resumed", id);
