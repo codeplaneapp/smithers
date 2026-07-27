@@ -180,6 +180,7 @@ export function EscalationChain(props) {
       id: humanId,
       output: escalationOutput,
       request,
+      onDeny: "continue",
       continueOnFail: true,
       label: request.title,
     });
@@ -538,7 +539,7 @@ export function Approval(props) {
     needsApproval: true,
     waitAsync: props.async === true,
     approvalMode,
-    approvalOnDeny: props.onDeny,
+    approvalOnDeny: props.onDeny ?? "fail",
     approvalOptions: options,
     approvalAllowedScopes: allowedScopes,
     approvalAllowedUsers: allowedUsers,

@@ -938,6 +938,7 @@ describe("semantic MCP surface", () => {
       );
       expect(snapshots.snapshots).toEqual([
         {
+          runId: "semantic-run",
           seq: 0,
           nodeId: "artifact-node",
           iteration: 0,

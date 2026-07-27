@@ -31,7 +31,11 @@ function uniqueNodeIds(nodes) {
  */
 function isActiveRunStatus(status) {
   return (
-    status === "running" || status === "waiting-approval" || status === "waiting-event" || status === "waiting-timer"
+    status === "running" ||
+    status === "waiting-approval" ||
+    status === "waiting-event" ||
+    status === "waiting-timer" ||
+    status === "waiting-quota"
   );
 }
 const RESETTABLE_CHILD_RUN_STATUSES = new Set(["failed", "finished", "cancelled", "canceled"]);

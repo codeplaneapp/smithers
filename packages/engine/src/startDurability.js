@@ -330,12 +330,21 @@ export async function startDurability(opts) {
     return NOOP_HANDLE;
   }
   const captureSnapshotSerialized = async (captureCwd) => {
-    const release = await acquireWorkspaceSnapshot(captureCwd, {
-      timeoutMs: lockTimeoutMs,
-      logAfterMs: lockLogAfterMs,
-      onWait: onLockWait,
-    });
+    if (signal?.aborted) return { skipped: true };
+    let release;
     try {
+      release = await acquireWorkspaceSnapshot(captureCwd, {
+        signal,
+        timeoutMs: lockTimeoutMs,
+        logAfterMs: lockLogAfterMs,
+        onWait: onLockWait,
+      });
+    } catch (error) {
+      if (signal?.aborted) return { skipped: true };
+      throw error;
+    }
+    try {
+      if (signal?.aborted) return { skipped: true };
       return await captureSnapshot(captureCwd);
     } finally {
       release();

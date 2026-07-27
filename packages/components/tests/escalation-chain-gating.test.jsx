@@ -114,6 +114,7 @@ describe("EscalationChain gates levels on the real escalation decision", () => {
     });
     const fallback = result.tasks.find((task) => task.nodeId === "incident-human-fallback");
     expect(fallback.needsApproval).toBe(true);
+    expect(fallback.approvalOnDeny).toBe("continue");
   });
 
   test("default failure predicate gates on the prior result when no escalateIf is provided", async () => {

@@ -182,9 +182,7 @@ describe("child run parked on <WaitForEvent> through the real engine", () => {
         // Before the parent launches the child there is nothing to arm at all:
         // signalRun rejects the derived child run id outright, so an agent
         // cannot pre-deliver the event.
-        const preArm = await Effect.runPromise(
-          signalRun(adapter, childRunId, "ops.ready", { ok: true }),
-        ).then(
+        const preArm = await Effect.runPromise(signalRun(adapter, childRunId, "ops.ready", { ok: true })).then(
           () => null,
           (error) => String(error?.message ?? error),
         );

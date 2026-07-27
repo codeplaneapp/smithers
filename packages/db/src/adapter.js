@@ -402,7 +402,12 @@ async function isPublicGatewayRun(row, loadRun) {
     if (typeof current.configJson === "string") {
       try {
         const config = JSON.parse(current.configJson);
-        if (config && typeof config === "object" && !Array.isArray(config) && typeof config.gatewaySystem === "boolean") {
+        if (
+          config &&
+          typeof config === "object" &&
+          !Array.isArray(config) &&
+          typeof config.gatewaySystem === "boolean"
+        ) {
           return config.gatewaySystem === false;
         }
       } catch {}

@@ -185,9 +185,7 @@ describe("time travel x <Subflow> child runs", () => {
           runId: first.runId,
           cutoffMs: subflowAttempt.startedAtMs,
         });
-        const crossed = [...report.blocking, ...report.revertible, ...report.warnings].map(
-          (effect) => effect.toolName,
-        );
+        const crossed = [...report.blocking, ...report.revertible, ...report.warnings].map((effect) => effect.toolName);
         expect(crossed).toContain("deploy-production");
         expect(report.blocking.map((effect) => effect.toolName)).toContain("deploy-production");
       } finally {

@@ -258,7 +258,7 @@ describe("retry-task e2e", () => {
       cleanup();
     }
   });
-  test("retry-task errors on running workflow unless force", async () => {
+  test("retry-task errors on active workflow unless force", async () => {
     const { smithers, Workflow, Task, outputs, db, cleanup } = createTestSmithers(outputSchemas);
     const adapter = new SmithersDb(db);
     try {
@@ -272,16 +272,15 @@ describe("retry-task e2e", () => {
       const runId = "retry-running-run-id";
       const finished = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId }));
       expect(finished.status).toBe("finished");
-      await adapter.updateRun(runId, {
-        status: "running",
-        finishedAtMs: null,
-      });
-      const blocked = await retryTask(adapter, {
-        runId,
-        nodeId: "existing",
-      });
-      expect(blocked.success).toBe(false);
-      expect(blocked.error).toContain("running");
+      for (const status of ["running", "waiting-approval", "waiting-event", "waiting-timer", "waiting-quota"]) {
+        await adapter.updateRun(runId, { status, finishedAtMs: null });
+        const blocked = await retryTask(adapter, {
+          runId,
+          nodeId: "existing",
+        });
+        expect(blocked.success).toBe(false);
+        expect(blocked.error).toContain("running");
+      }
       const forced = await retryTask(adapter, {
         runId,
         nodeId: "existing",

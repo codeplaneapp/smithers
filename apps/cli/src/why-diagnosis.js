@@ -1075,9 +1075,7 @@ export function diagnoseRunEffect(adapter, runId, nowMs = Date.now()) {
           adapter.listAttemptsForRunEffect(runId),
           adapter.getLastEventSeqEffect(runId),
           adapter.getLastFrameEffect(runId),
-          typeof adapter.listRunDescendants === "function"
-            ? adapter.listRunDescendants(runId)
-            : Effect.succeed([]),
+          typeof adapter.listRunDescendants === "function" ? adapter.listRunDescendants(runId) : Effect.succeed([]),
         ]);
       const approvals = [...(pendingApprovals ?? []), ...(decidedApprovals ?? [])];
       if (!run) {

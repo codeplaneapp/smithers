@@ -276,9 +276,7 @@ describe("xcombo restart-failed: <Subflow> whose child run failed", () => {
           frameNo: snapshots[snapshots.length - 1].frameNo,
           resetNodes: ["review"],
         });
-        const resumed = await Effect.runPromise(
-          runWorkflow(parent, { input: {}, runId: replay.runId, resume: true }),
-        );
+        const resumed = await Effect.runPromise(runWorkflow(parent, { input: {}, runId: replay.runId, resume: true }));
         const diagnostics = JSON.stringify({
           forkedRunId: replay.runId,
           resumed: resumed.status,
@@ -326,9 +324,7 @@ describe("xcombo restart-failed: child parked on a human decision", () => {
           </Workflow>
         ));
         const runId = "xcombo-restart-approval-run";
-        const first = await Effect.runPromise(
-          runWorkflow(parent, { input: {}, runId, rootDir: dirname(dbPath) }),
-        );
+        const first = await Effect.runPromise(runWorkflow(parent, { input: {}, runId, rootDir: dirname(dbPath) }));
         const childRunId = `${runId}:child:review:0`;
         const diagnostics = JSON.stringify({
           parent: await dumpRun(adapter, runId),
@@ -372,9 +368,7 @@ describe("xcombo restart-failed: child parked on a human decision", () => {
           </Workflow>
         ));
         const runId = "xcombo-restart-approval-resolve-run";
-        const first = await Effect.runPromise(
-          runWorkflow(parent, { input: {}, runId, rootDir: dirname(dbPath) }),
-        );
+        const first = await Effect.runPromise(runWorkflow(parent, { input: {}, runId, rootDir: dirname(dbPath) }));
         const childRunId = `${runId}:child:review:0`;
         const beforeApproval = JSON.stringify({
           first: first.status,

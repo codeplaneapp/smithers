@@ -25,9 +25,11 @@ export function parseSubflowChildRunId(runId, parentRunId) {
  * database row order, and an explicitly truncated query fails rather than
  * silently omitting a child subtree.
  *
- * @param {{ runId: string; parentRunId?: string | null; depth: number }[]} rows
+ * @template {{ runId: string; parentRunId?: string | null; depth: number }} T
+ * @param {T[]} rows
  * @param {string} rootRunId
  * @param {number} [maxRows]
+ * @returns {T[]}
  */
 export function subflowRunLineage(rows, rootRunId, maxRows = SUBFLOW_RUN_LINEAGE_MAX_ROWS) {
   if (rows.length > maxRows) {

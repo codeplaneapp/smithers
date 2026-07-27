@@ -196,7 +196,9 @@ describeIfJj("durability snapshots x child workflows (subflow)", () => {
           expect(childCheckpoints.every((c) => c.nodeId === "child-write")).toBe(true);
           const childStates = await adapter.listWorkspaceStates(childRunId);
           expect(childStates.length).toBeGreaterThanOrEqual(1);
-          expect(childStates.every((s) => typeof s.jjOperationId === "string" && s.jjOperationId.length > 0)).toBe(true);
+          expect(childStates.every((s) => typeof s.jjOperationId === "string" && s.jjOperationId.length > 0)).toBe(
+            true,
+          );
 
           // The parent's own agent task is checkpointed under the parent id.
           const parentCheckpoints = await adapter.listWorkspaceCheckpoints(runId);
@@ -348,7 +350,9 @@ describeIfJj("durability snapshots x child workflows (subflow)", () => {
             stderr,
           });
           expect(restore.exitCode).toBe(0);
-          const second = await Effect.runPromise(runWorkflow(parent, { input: {}, runId, resume: true, rootDir: jjDir }));
+          const second = await Effect.runPromise(
+            runWorkflow(parent, { input: {}, runId, resume: true, rootDir: jjDir }),
+          );
           expect(second.status).toBe("finished");
 
           // The parent reports the subflow finished, so the files it produced
@@ -483,7 +487,9 @@ describeIfJj("durability snapshots x child workflows (subflow)", () => {
           }
           expect(childStatus).toBe("cancelled");
 
-          const second = await Effect.runPromise(runWorkflow(parent, { input: {}, runId, resume: true, rootDir: jjDir }));
+          const second = await Effect.runPromise(
+            runWorkflow(parent, { input: {}, runId, resume: true, rootDir: jjDir }),
+          );
           expect(second.status).toBe("finished");
           // Same child run id, resumed rather than duplicated, and durability
           // stayed live across the interruption (no spooled gaps).

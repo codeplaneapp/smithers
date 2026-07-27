@@ -224,6 +224,43 @@ describe("startDurability", () => {
     await Promise.all([first.stop(), second.stop()]);
   });
 
+  test("aborting a queued capture skips it without recording a durability gap", async () => {
+    const cwd = `/wt-abort-lock-${process.pid}-${Date.now()}`;
+    const adapter = fakeAdapter();
+    const controller = new AbortController();
+    const gaps = [];
+    let releaseCapture = () => {};
+    const captureGate = new Promise((resolve) => {
+      releaseCapture = resolve;
+    });
+    let captures = 0;
+    const captureSnapshot = async () => {
+      captures += 1;
+      if (captures === 1) await captureGate;
+      return { commitId: `c${captures}`, changeId: "ch", operationId: `op${captures}` };
+    };
+    const first = await startDurability(baseOpts({ cwd, adapter, captureSnapshot }));
+    const second = await startDurability(
+      baseOpts({
+        cwd,
+        adapter,
+        nodeId: "n2",
+        signal: controller.signal,
+        captureSnapshot,
+        onGap: (gap) => gaps.push(gap),
+      }),
+    );
+    const firstSnapshot = first.snapshot();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const secondSnapshot = second.snapshot();
+    controller.abort();
+    expect(await secondSnapshot).toEqual({ skipped: true });
+    expect(gaps).toEqual([]);
+    releaseCapture();
+    await firstSnapshot;
+    await Promise.all([first.stop(), second.stop()]);
+  });
+
   test("a cross-run worktree lock timeout degrades to a no-op durability handle", async () => {
     const cwd = `/wt-cross-run-lock-${process.pid}-${Date.now()}`;
     const first = await startDurability(baseOpts({ cwd, runId: "parent" }));

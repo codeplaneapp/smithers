@@ -170,15 +170,15 @@ export function pickTargetCheckpoint(checkpoints, sel) {
  * @param {any} adapter
  * @param {string} runId
  * @param {Checkpoint} target
- * @returns {Promise<{ success: boolean, error?: string }>}
+ * @returns {Promise<{ success: boolean, owners: Array<{ nodeId: string, iteration: number, createdAtMs: number }>, error?: string }>}
  */
-async function invalidateNewerChildWork(adapter, runId, target) {
+async function prepareNewerChildWorkInvalidation(adapter, runId, target) {
   if (
     typeof adapter?.listRunDescendants !== "function" ||
     typeof adapter?.listWorkspaceStates !== "function" ||
     typeof adapter?.getNode !== "function"
   ) {
-    return { success: true };
+    return { success: true, owners: [] };
   }
   const { checkpoints } = await listScopedWorkspaceSnapshots(adapter, runId);
   const owners = new Map();
@@ -201,7 +201,31 @@ async function invalidateNewerChildWork(adapter, runId, target) {
     }
   }
   const ordered = [...owners.values()].sort((a, b) => a.createdAtMs - b.createdAtMs);
-  for (const owner of ordered) {
+  if (ordered.length === 0) return { success: true, owners: ordered };
+  if (typeof adapter?.getRun === "function") {
+    const run = await adapter.getRun(runId);
+    if (!run) return { success: false, owners: ordered, error: `Run not found: ${runId}` };
+    if (
+      run.status === "running" ||
+      run.status === "waiting-approval" ||
+      run.status === "waiting-event" ||
+      run.status === "waiting-timer" ||
+      run.status === "waiting-quota"
+    ) {
+      return { success: false, owners: ordered, error: `Run is still running: ${runId}` };
+    }
+  }
+  return { success: true, owners: ordered };
+}
+
+/**
+ * @param {any} adapter
+ * @param {string} runId
+ * @param {Array<{ nodeId: string, iteration: number }>} owners
+ * @returns {Promise<{ success: boolean, error?: string }>}
+ */
+async function invalidateNewerChildWork(adapter, runId, owners) {
+  for (const owner of owners) {
     const result = await retryTask(adapter, {
       runId,
       nodeId: owner.nodeId,
@@ -220,7 +244,7 @@ async function invalidateNewerChildWork(adapter, runId, target) {
 
 /**
  * @param {{
- *   adapter?: { listRunDescendants?: Function, listWorkspaceCheckpoints: (runId: string) => Promise<Array<Checkpoint>>, listWorkspaceStates?: Function },
+ *   adapter?: { getRun?: Function, listRunDescendants?: Function, listWorkspaceCheckpoints: (runId: string) => Promise<Array<Checkpoint>>, listWorkspaceStates?: Function },
  *   runId: string,
  *   nodeId: string,
  *   iteration?: number,
@@ -251,9 +275,8 @@ export async function runRestoreOnce(opts) {
     target = pickTargetCheckpoint([opts.target], selection);
     if (!target) {
       // Include the target's own iteration/seq so an iteration-only
-      // mismatch is legible. Checkpoint rows carry no runId, so the
-      // predicate matches on node/iteration/seq only — `run ${runId}` is
-      // context, not something validated here.
+      // mismatch is legible. `run ${runId}` remains useful request context
+      // even though the target row is validated directly.
       stderr.write(
         `Preselected checkpoint (node ${opts.target.nodeId} iteration ${opts.target.iteration ?? 0} seq ${opts.target.seq}) does not match requested node ${nodeId}${iteration !== undefined ? ` iteration ${iteration}` : ""}${seq !== undefined ? ` seq ${seq}` : ""} for run ${runId}\n`,
       );
@@ -272,9 +295,14 @@ export async function runRestoreOnce(opts) {
     );
     return { exitCode: 1 };
   }
+  const invalidationPlan = await prepareNewerChildWorkInvalidation(adapter, runId, target);
+  if (!invalidationPlan.success) {
+    stderr.write(`Restore invalidation failed: ${invalidationPlan.error ?? "unknown error"}\n`);
+    return { exitCode: 1 };
+  }
   const result = await revert(target.jjCommitId, target.jjCwd, { timeoutMs: opts.timeoutMs, signal: opts.signal });
   if (result?.success) {
-    const invalidation = await invalidateNewerChildWork(adapter, runId, target);
+    const invalidation = await invalidateNewerChildWork(adapter, runId, invalidationPlan.owners);
     if (!invalidation.success) {
       stderr.write(`Restore invalidation failed: ${invalidation.error ?? "unknown error"}\n`);
       return { exitCode: 1 };

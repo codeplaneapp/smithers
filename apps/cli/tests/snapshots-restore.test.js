@@ -239,7 +239,7 @@ describe("smithers restore", () => {
     expect(reverted).toEqual([["MINE", "/mine"]]);
   });
 
-  test("restore refuses to invalidate child work while the parent is running", async () => {
+  test("restore refuses to invalidate child work while the parent is active", async () => {
     const reverted = [];
     const err = capture();
     const target = { ...cps[0], runId: "parent", createdAtMs: 10 };
@@ -267,7 +267,7 @@ describe("smithers restore", () => {
           return { runId: "parent", nodeId: "sub", iteration: 0 };
         },
         async getRun() {
-          return { runId: "parent", status: "running" };
+          return { runId: "parent", status: "waiting-quota" };
         },
       },
       runId: "parent",
@@ -281,7 +281,7 @@ describe("smithers restore", () => {
     });
 
     expect(result.exitCode).toBe(1);
-    expect(reverted).toEqual([["c0", "/wt"]]);
+    expect(reverted).toEqual([]);
     expect(err.get()).toContain("Run is still running: parent");
   });
 

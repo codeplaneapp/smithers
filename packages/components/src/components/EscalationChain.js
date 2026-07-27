@@ -124,6 +124,7 @@ export function EscalationChain(props) {
       id: humanId,
       output: escalationOutput,
       request,
+      onDeny: "continue",
       continueOnFail: true,
       label: request.title,
     });
