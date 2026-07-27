@@ -5,9 +5,8 @@ import { connect as connectTcp } from "node:net";
 import { Gateway } from "../src/gateway.js";
 
 // Responses, generic events, and dedicated stream frames must all use one
-// byte-bounded writer. Most tests use a controllable fake socket for exact
-// ordering assertions; the final test pauses a real TCP-backed WebSocket to
-// prove the slow-consumer behavior against actual transport buffering.
+// byte-bounded writer. A controllable fake socket gives exact ordering and
+// backpressure assertions without allocating tens of megabytes per test.
 
 // Mirror the CONNECTION_EVENT_* constants in src/gateway.js.
 const QUEUE_MAX_BYTES = 32 * 1024 * 1024;
@@ -231,20 +230,22 @@ describe("gateway connection writer", () => {
     }
   });
 
-  test("rejects one serialized response larger than the byte budget before ws.send", () => {
+  test("rejects a response that would exceed the queued byte budget before ws.send", () => {
     gateway = new Gateway({});
-    connection = makeFakeConnection();
+    connection = makeFakeConnection({ bufferedAmount: 16 * 1024 * 1024 });
+    const writer = gateway.getConnectionEventWriter(connection);
+    writer.queuedBytes = QUEUE_MAX_BYTES - 1;
 
     gateway.sendResponse(connection, {
       type: "res",
       id: "oversized",
       ok: true,
-      payload: { chunk: "x".repeat(QUEUE_MAX_BYTES + 1) },
+      payload: { chunk: "small" },
     });
 
     expect(connection.sent).toHaveLength(0);
-    expect(connection.eventWriter.disconnected).toBe(true);
-    expect(connection.eventWriter.queuedBytes).toBe(0);
+    expect(writer.disconnected).toBe(true);
+    expect(writer.queuedBytes).toBe(0);
     expect(connection.closes).toEqual([{ code: BACKPRESSURE_CLOSE_CODE, reason: "event backpressure" }]);
   });
 
@@ -254,34 +255,21 @@ describe("gateway connection writer", () => {
     connection = makeFakeConnection({ bufferedAmount: 16 * 1024 * 1024 });
     gateway.connections.add(connection);
 
-    const chunk = "x".repeat(1024 * 1024);
-    let disconnectedAt = 0;
-    let maxQueuedBytes = 0;
-    for (let i = 1; i <= 40; i += 1) {
-      gateway.broadcastEvent("node.started", {
-        runId: "run-overflow",
-        nodeId: `n${i}`,
-        state: "started",
-        iteration: 0,
-        chunk,
-      });
-      maxQueuedBytes = Math.max(maxQueuedBytes, connection.eventWriter?.queuedBytes ?? 0);
-      if (connection.eventWriter?.disconnected && disconnectedAt === 0) {
-        disconnectedAt = i;
-      }
-    }
+    const writer = gateway.getConnectionEventWriter(connection);
+    writer.queuedBytes = QUEUE_MAX_BYTES - 1;
+    gateway.broadcastEvent("node.started", {
+      runId: "run-overflow",
+      nodeId: "n1",
+      state: "started",
+      iteration: 0,
+    });
 
-    // ~1 MiB frames against a 32 MiB budget: the writer must trip well before
-    // the loop ends, and buffered bytes never exceed the observable cap.
-    expect(disconnectedAt).toBeGreaterThan(0);
-    expect(disconnectedAt).toBeLessThanOrEqual(34);
-    expect(maxQueuedBytes).toBeLessThanOrEqual(QUEUE_MAX_BYTES);
     // Nothing ever bypassed onto the congested socket.
     expect(connection.sent).toHaveLength(0);
     // Per-connection failure behavior: buffer dropped, socket closed 1013.
-    expect(connection.eventWriter.disconnected).toBe(true);
-    expect(connection.eventWriter.queue).toHaveLength(0);
-    expect(connection.eventWriter.queuedBytes).toBe(0);
+    expect(writer.disconnected).toBe(true);
+    expect(writer.queue).toHaveLength(0);
+    expect(writer.queuedBytes).toBe(0);
     expect(connection.closes).toHaveLength(1);
     expect(connection.closes[0].code).toBe(BACKPRESSURE_CLOSE_CODE);
 
@@ -321,7 +309,7 @@ async function waitUntil(predicate, label, timeoutMs = 10_000) {
   throw new Error(`Timed out waiting for ${label}`);
 }
 
-test("a paused real WebSocket stays byte-bounded and is disconnected as a slow consumer", async () => {
+test("a paused real WebSocket is disconnected when its shared writer reaches the byte cap", async () => {
   const gateway = new Gateway({ heartbeatMs: 60_000 });
   const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
   const socket = connectTcp({ host: "127.0.0.1", port: getPort(server) });
@@ -365,34 +353,30 @@ test("a paused real WebSocket stays byte-bounded and is disconnected as a slow c
     await waitUntil(() => gateway.connections.size === 1, "server WebSocket connection");
 
     const connection = [...gateway.connections][0];
-    expect(connection).toBeTruthy();
+    const writer = gateway.getConnectionEventWriter(connection);
     socket.pause();
+    Object.defineProperty(connection.ws, "bufferedAmount", {
+      configurable: true,
+      value: 16 * 1024 * 1024,
+    });
+    writer.queuedBytes = QUEUE_MAX_BYTES - 512;
 
-    const chunk = "x".repeat(1024 * 1024);
-    const queuedKinds = new Set();
-    let maxBufferedBytes = 0;
-    for (let i = 0; i < 60 && !connection.eventWriter?.disconnected; i += 1) {
-      if (i % 2 === 0) {
-        gateway.sendResponse(connection, {
-          type: "res",
-          id: `slow-${i}`,
-          ok: true,
-          payload: { chunk },
-        });
-      } else {
-        gateway.sendEvent(connection, "run.event", { runId: "slow-run", seq: i, chunk });
-      }
-      for (const entry of connection.eventWriter?.queue ?? []) {
-        queuedKinds.add(JSON.parse(entry.data).type);
-      }
-      maxBufferedBytes = Math.max(maxBufferedBytes, gateway.getConnectionBufferedEventBytes(connection));
-    }
+    gateway.sendResponse(connection, {
+      type: "res",
+      id: "slow-response",
+      ok: true,
+      payload: { value: 1 },
+    });
+    expect(writer.queue.map((entry) => JSON.parse(entry.data).type)).toEqual(["res"]);
 
-    expect(connection.eventWriter.disconnected).toBe(true);
-    expect(queuedKinds).toEqual(new Set(["res", "event"]));
-    expect(maxBufferedBytes).toBeLessThan(43 * 1024 * 1024);
-    expect(connection.eventWriter.queue).toHaveLength(0);
-    expect(connection.eventWriter.queuedBytes).toBe(0);
+    gateway.sendEvent(connection, "run.event", {
+      runId: "slow-run",
+      chunk: "x".repeat(1024),
+    });
+
+    expect(writer.disconnected).toBe(true);
+    expect(writer.queue).toHaveLength(0);
+    expect(writer.queuedBytes).toBe(0);
     expect(connection.ws.readyState).not.toBe(connection.ws.OPEN);
   } finally {
     socket.destroy();

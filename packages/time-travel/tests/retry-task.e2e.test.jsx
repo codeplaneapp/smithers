@@ -62,7 +62,13 @@ describe("retry-task e2e", () => {
       };
       const workflow = smithers(() => (
         <Workflow name="retry-attempt-one-rung-zero">
-          <Task id="target" output={outputs.outputA} agent={[primary, fallback]} retries={2}>
+          <Task
+            id="target"
+            output={outputs.outputA}
+            agent={[primary, fallback]}
+            retries={2}
+            retryPolicy={{ backoff: "fixed", initialDelayMs: 0 }}
+          >
             execute on the recovered primary
           </Task>
         </Workflow>
