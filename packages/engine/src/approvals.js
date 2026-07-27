@@ -104,6 +104,31 @@ function validateNodeWaitingForApproval(runId, nodeId, iteration, state) {
   );
 }
 /**
+ * Lock the target node while resolving an approval. SQLite transactions take
+ * the write lock eagerly; PostgreSQL needs an explicit row lock so concurrent
+ * decisions cannot both validate the same stale node state.
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {string} nodeId
+ * @param {number} iteration
+ */
+function getApprovalNodeForUpdate(adapter, runId, nodeId, iteration) {
+  if (adapter.internalStorage?.dialect !== "postgres") {
+    return adapter.getNode(runId, nodeId, iteration);
+  }
+  return adapter.read(`lock approval node ${nodeId}`, () =>
+    adapter.internalStorage.queryOne(
+      `SELECT *
+       FROM _smithers_nodes
+       WHERE run_id = ? AND node_id = ? AND iteration = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [runId, nodeId, iteration],
+    ),
+  );
+}
+/**
  * Shared core of approveNode/denyNode: persist the decision, move the node,
  * emit the event, and signal the in-process deferred.
  *
@@ -120,38 +145,31 @@ function validateNodeWaitingForApproval(runId, nodeId, iteration, state) {
 function resolveApprovalNode(adapter, runId, nodeId, iteration, note, decidedBy, decision, { approved, autoApproved }) {
   const ts = nowMs();
   return Effect.gen(function* () {
-    let approvalNodeId = nodeId;
-    let approvalIteration = iteration;
-    let existing = yield* adapter.getApproval(runId, approvalNodeId, approvalIteration);
-    if (existing?.status !== "requested") {
-      const pendingApprovals = yield* adapter.listPendingApprovals(runId);
-      const pendingReplayApproval = pendingApprovals.find((approval) => {
-        const request = parseReplayUnsafeApprovalRequest(approval.requestJson);
-        return request?.runId === runId && request.nodeId === nodeId && request.iteration === iteration;
-      });
-      if (pendingReplayApproval) {
-        approvalNodeId = pendingReplayApproval.nodeId;
-        approvalIteration = pendingReplayApproval.iteration;
-        existing = pendingReplayApproval;
-      }
-    }
-    const replayRequest = parseReplayUnsafeApprovalRequest(existing?.requestJson);
-    const targetNodeId = replayRequest?.nodeId ?? nodeId;
-    const targetIteration = replayRequest?.iteration ?? iteration;
-    const currentNode = yield* adapter.getNode(runId, targetNodeId, targetIteration);
-    yield* validateNodeWaitingForApproval(runId, targetNodeId, targetIteration, currentNode?.state);
-    const decisionJson =
-      serializeApprovalDecision(existing?.requestJson, decision, approved) ?? existing?.decisionJson ?? null;
-    const event = {
-      type: approved ? (autoApproved ? "ApprovalAutoApproved" : "ApprovalGranted") : "ApprovalDenied",
-      runId,
-      nodeId: approvalNodeId,
-      iteration: approvalIteration,
-      timestampMs: ts,
-    };
-    yield* adapter.withTransactionEffect(
+    const resolution = yield* adapter.withTransactionEffect(
       "approval",
       Effect.gen(function* () {
+        let approvalNodeId = nodeId;
+        let approvalIteration = iteration;
+        let existing = yield* adapter.getApproval(runId, approvalNodeId, approvalIteration);
+        if (existing?.status !== "requested") {
+          const pendingApprovals = yield* adapter.listPendingApprovals(runId);
+          const pendingReplayApproval = pendingApprovals.find((approval) => {
+            const request = parseReplayUnsafeApprovalRequest(approval.requestJson);
+            return request?.runId === runId && request.nodeId === nodeId && request.iteration === iteration;
+          });
+          if (pendingReplayApproval) {
+            approvalNodeId = pendingReplayApproval.nodeId;
+            approvalIteration = pendingReplayApproval.iteration;
+            existing = pendingReplayApproval;
+          }
+        }
+        const replayRequest = parseReplayUnsafeApprovalRequest(existing?.requestJson);
+        const targetNodeId = replayRequest?.nodeId ?? nodeId;
+        const targetIteration = replayRequest?.iteration ?? iteration;
+        const currentNode = yield* getApprovalNodeForUpdate(adapter, runId, targetNodeId, targetIteration);
+        yield* validateNodeWaitingForApproval(runId, targetNodeId, targetIteration, currentNode?.state);
+        const decisionJson =
+          serializeApprovalDecision(existing?.requestJson, decision, approved) ?? existing?.decisionJson ?? null;
         yield* adapter.insertOrUpdateApproval({
           runId,
           nodeId: approvalNodeId,
@@ -184,8 +202,17 @@ function resolveApprovalNode(adapter, runId, nodeId, iteration, note, decidedBy,
             yield* adapter.updateRun(runId, { status: nextStatus });
           }
         }
+        return { approvalNodeId, approvalIteration, decisionJson, existing, targetNodeId, targetIteration };
       }),
     );
+    const { approvalNodeId, approvalIteration, decisionJson, existing, targetNodeId, targetIteration } = resolution;
+    const event = {
+      type: approved ? (autoApproved ? "ApprovalAutoApproved" : "ApprovalGranted") : "ApprovalDenied",
+      runId,
+      nodeId: approvalNodeId,
+      iteration: approvalIteration,
+      timestampMs: ts,
+    };
     if (existing?.requestedAtMs) {
       yield* Metric.update(approvalWaitDuration, ts - existing.requestedAtMs);
     }

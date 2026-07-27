@@ -110,4 +110,94 @@ describe("approval internals", () => {
     await Effect.runPromise(denyNode(adapter, "parent", "parent-gate", 0, "not parent", "reviewer"));
     expect(rows.runStatus).toBe("waiting-approval");
   });
+  test("validates the current node state inside the approval transaction", async () => {
+    const writes = [];
+    let inTransaction = false;
+    const adapter = {
+      getApproval: () => Effect.succeed({ status: "requested" }),
+      getNode: () =>
+        Effect.succeed({
+          state: inTransaction ? "completed" : "waiting-approval",
+          lastAttempt: 1,
+          outputTable: "",
+          label: null,
+        }),
+      withTransactionEffect: (_label, effect) =>
+        Effect.suspend(() => {
+          inTransaction = true;
+          return effect.pipe(Effect.ensuring(Effect.sync(() => (inTransaction = false))));
+        }),
+      insertOrUpdateApproval: () =>
+        Effect.sync(() => {
+          writes.push("approval");
+        }),
+      insertNode: () =>
+        Effect.sync(() => {
+          writes.push("node");
+        }),
+      getRun: () => Effect.succeed({ status: "waiting-approval" }),
+      listPendingApprovals: () => Effect.succeed([]),
+      updateRun: () => Effect.void,
+      insertEventWithNextSeq: () =>
+        Effect.sync(() => {
+          writes.push("event");
+        }),
+    };
+
+    const exit = await Effect.runPromiseExit(denyNode(adapter, "run", "gate", 0));
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(writes).toEqual([]);
+  });
+
+  test("locks the postgres node row before validating its state", async () => {
+    const writes = [];
+    let inTransaction = false;
+    let lockQuery;
+    const adapter = {
+      internalStorage: {
+        dialect: "postgres",
+        queryOne: async (sql, params) => {
+          lockQuery = { sql, params, inTransaction };
+          return {
+            state: "completed",
+            lastAttempt: 1,
+            outputTable: "",
+            label: null,
+          };
+        },
+      },
+      read: (_label, operation) => Effect.promise(operation),
+      getApproval: () => Effect.succeed({ status: "requested" }),
+      getNode: () => Effect.die("postgres approval resolution must use a locking read"),
+      withTransactionEffect: (_label, effect) =>
+        Effect.suspend(() => {
+          inTransaction = true;
+          return effect.pipe(Effect.ensuring(Effect.sync(() => (inTransaction = false))));
+        }),
+      insertOrUpdateApproval: () =>
+        Effect.sync(() => {
+          writes.push("approval");
+        }),
+      insertNode: () =>
+        Effect.sync(() => {
+          writes.push("node");
+        }),
+      getRun: () => Effect.succeed({ status: "waiting-approval" }),
+      listPendingApprovals: () => Effect.succeed([]),
+      updateRun: () => Effect.void,
+      insertEventWithNextSeq: () =>
+        Effect.sync(() => {
+          writes.push("event");
+        }),
+    };
+
+    const exit = await Effect.runPromiseExit(denyNode(adapter, "run", "gate", 0));
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(lockQuery).toEqual({
+      sql: expect.stringContaining("FOR UPDATE"),
+      params: ["run", "gate", 0],
+      inTransaction: true,
+    });
+    expect(writes).toEqual([]);
+  });
 });
