@@ -31,7 +31,11 @@ import {
   dbTransactionDuration,
   dbTransactionRollbacks,
 } from "@smithers-orchestrator/observability/metrics";
-import { assertOptionalStringMaxLength, assertPositiveFiniteNumber } from "./input-bounds.js";
+import {
+  assertOptionalStringMaxLength,
+  assertPositiveFiniteInteger,
+  assertPositiveFiniteNumber,
+} from "./input-bounds.js";
 import {
   FRAME_KEYFRAME_INTERVAL,
   applyFrameDeltaJson,
@@ -78,6 +82,7 @@ import { normalizeWaitForEventCorrelationId, parseWaitForEventAttemptSnapshot } 
  */
 
 export const DB_ALERT_ID_MAX_LENGTH = 256;
+const DB_RUN_CANCEL_ATTRIBUTION_MAX_LENGTH = 1024;
 export const DB_ALERT_POLICY_NAME_MAX_LENGTH = 256;
 export const DB_ALERT_MESSAGE_MAX_LENGTH = 4096;
 export const DB_ALERT_ALLOWED_SEVERITIES = ["info", "warning", "critical"];
@@ -332,6 +337,40 @@ function validateOptionalPositiveTimestamp(row, field) {
   assertPositiveFiniteNumber(field, Number(value));
 }
 /**
+ * @param {Record<string, unknown>} row
+ */
+function validateRunCancellationAttribution(row) {
+  assertOptionalStringMaxLength("cancelRequestId", row.cancelRequestId, DB_RUN_CANCEL_ATTRIBUTION_MAX_LENGTH);
+  assertOptionalStringMaxLength("cancelRequestSource", row.cancelRequestSource, DB_RUN_CANCEL_ATTRIBUTION_MAX_LENGTH);
+  assertOptionalStringMaxLength(
+    "cancelRequestClientIdentity",
+    row.cancelRequestClientIdentity,
+    DB_RUN_CANCEL_ATTRIBUTION_MAX_LENGTH,
+  );
+  if (row.cancelRequestClientPid !== undefined && row.cancelRequestClientPid !== null) {
+    assertPositiveFiniteInteger("cancelRequestClientPid", row.cancelRequestClientPid);
+  }
+}
+/**
+ * @param {{
+ *   requestId?: string | null;
+ *   source?: string | null;
+ *   transport?: string | null;
+ *   clientIdentity?: string | null;
+ *   clientPid?: number | null;
+ * }} attribution
+ */
+function runCancellationAttributionPatch(attribution) {
+  const patch = {
+    cancelRequestId: attribution.requestId ?? null,
+    cancelRequestSource: attribution.source ?? attribution.transport ?? null,
+    cancelRequestClientIdentity: attribution.clientIdentity ?? null,
+    cancelRequestClientPid: attribution.clientPid ?? null,
+  };
+  validateRunCancellationAttribution(patch);
+  return patch;
+}
+/**
  * @param {unknown} row
  * @returns {void}
  */
@@ -351,6 +390,7 @@ function validateRunRow(row) {
   validateOptionalPositiveTimestamp(r, "finishedAtMs");
   validateOptionalPositiveTimestamp(r, "heartbeatAtMs");
   validateOptionalPositiveTimestamp(r, "cancelRequestedAtMs");
+  validateRunCancellationAttribution(r);
   validateOptionalPositiveTimestamp(r, "pauseRequestedAtMs");
   validateOptionalPositiveTimestamp(r, "hijackRequestedAtMs");
 }
@@ -371,6 +411,7 @@ function validateRunPatch(patch) {
   validateOptionalPositiveTimestamp(p, "finishedAtMs");
   validateOptionalPositiveTimestamp(p, "heartbeatAtMs");
   validateOptionalPositiveTimestamp(p, "cancelRequestedAtMs");
+  validateRunCancellationAttribution(p);
   validateOptionalPositiveTimestamp(p, "pauseRequestedAtMs");
   validateOptionalPositiveTimestamp(p, "hijackRequestedAtMs");
 }
@@ -1305,17 +1346,27 @@ export class SmithersDb {
   /**
    * @param {string} runId
    * @param {number} cancelRequestedAtMs
-   * @returns {RunnableEffect<void, SmithersError>}
+   * @param {{
+   *   requestId?: string | null;
+   *   source?: string | null;
+   *   transport?: string | null;
+   *   clientIdentity?: string | null;
+   *   clientPid?: number | null;
+   * }} [attribution]
+   * @returns {RunnableEffect<boolean, SmithersError>}
    */
-  requestRunCancel(runId, cancelRequestedAtMs) {
+  requestRunCancel(runId, cancelRequestedAtMs, attribution = {}) {
+    const patch = {
+      cancelRequestedAtMs,
+      ...runCancellationAttributionPatch(attribution),
+    };
+    validateRunPatch(patch);
     return this.write(`cancel run ${runId}`, () =>
       this.internalStorage
-        .updateWhere(
-          "_smithers_runs",
-          { cancelRequestedAtMs },
-          "run_id = ? AND status = ? AND cancel_requested_at_ms IS NULL",
-          [runId, "running"],
-        )
+        .updateWhere("_smithers_runs", patch, "run_id = ? AND status = ? AND cancel_requested_at_ms IS NULL", [
+          runId,
+          "running",
+        ])
         .then((count) => count > 0),
     );
   }
@@ -1325,9 +1376,17 @@ export class SmithersDb {
    * @param {string} runId
    * @param {number} cancelledAtMs
    * @param {string | null} [errorJson]
+   * @param {{
+   *   requestId?: string | null;
+   *   source?: string | null;
+   *   transport?: string | null;
+   *   clientIdentity?: string | null;
+   *   clientPid?: number | null;
+   * } | null} [attribution]
    * @returns {RunnableEffect<boolean, SmithersError>}
    */
-  claimRunCancellation(runId, cancelledAtMs, errorJson = null) {
+  claimRunCancellation(runId, cancelledAtMs, errorJson = null, attribution = null) {
+    const attributionPatch = attribution ? runCancellationAttributionPatch(attribution) : {};
     return this.write(`claim cancellation ${runId}`, () =>
       this.internalStorage
         .updateWhere(
@@ -1341,6 +1400,7 @@ export class SmithersDb {
             // process. It is cleared only by a later lifecycle transition,
             // never as part of the terminal claim itself.
             cancelRequestedAtMs: cancelledAtMs,
+            ...attributionPatch,
             errorJson,
           },
           `run_id = ? AND status NOT IN (?, ?, ?, ?, ?)`,

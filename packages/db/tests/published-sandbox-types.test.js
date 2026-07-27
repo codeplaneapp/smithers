@@ -25,3 +25,30 @@ describe("published SmithersDb sandbox declarations", () => {
     expect(missingMethods).toEqual([]);
   });
 });
+
+describe("published cancellation attribution declarations", () => {
+  test("include run fields, adapter parameters, and schema columns", () => {
+    const declarations = readFileSync(declarationPath, "utf8");
+
+    for (const field of [
+      "cancelRequestId: string | null;",
+      "cancelRequestSource: string | null;",
+      "cancelRequestClientIdentity: string | null;",
+      "cancelRequestClientPid: number | null;",
+    ]) {
+      expect(declarations).toContain(field);
+    }
+
+    expect(declarations).toMatch(/requestRunCancel\([^;]+attribution\?: \{/s);
+    expect(declarations).toMatch(/claimRunCancellation\([^;]+attribution\?: \{/s);
+
+    for (const column of [
+      'name: "cancel_request_id";',
+      'name: "cancel_request_source";',
+      'name: "cancel_request_client_identity";',
+      'name: "cancel_request_client_pid";',
+    ]) {
+      expect(declarations).toContain(column);
+    }
+  });
+});

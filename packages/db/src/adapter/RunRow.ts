@@ -11,6 +11,10 @@ export type RunRow = {
   heartbeatAtMs: number | null;
   runtimeOwnerId: string | null;
   cancelRequestedAtMs: number | null;
+  cancelRequestId: string | null;
+  cancelRequestSource: string | null;
+  cancelRequestClientIdentity: string | null;
+  cancelRequestClientPid: number | null;
   pauseRequestedAtMs?: number | null;
   hijackRequestedAtMs: number | null;
   hijackTarget: string | null;

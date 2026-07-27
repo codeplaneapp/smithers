@@ -827,6 +827,47 @@ describe("DB migration edges", () => {
     }
   });
 
+  test("forward migration adds nullable cancellation attribution to legacy runs", async () => {
+    const sqlite = new Database(":memory:");
+    try {
+      sqlite.exec(`CREATE TABLE _smithers_runs (
+        run_id TEXT PRIMARY KEY,
+        workflow_name TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL,
+        cancel_requested_at_ms INTEGER
+      );
+      INSERT INTO _smithers_runs
+        (run_id, workflow_name, status, created_at_ms, cancel_requested_at_ms)
+      VALUES ('legacy-cancel', 'wf', 'cancelled', 1, 2)`);
+      const db = drizzle(sqlite);
+      ensureSmithersTables(db);
+
+      const columns = sqlite
+        .query('PRAGMA table_info("_smithers_runs")')
+        .all()
+        .map((column) => column.name);
+      expect(columns).toEqual(
+        expect.arrayContaining([
+          "cancel_request_id",
+          "cancel_request_source",
+          "cancel_request_client_identity",
+          "cancel_request_client_pid",
+        ]),
+      );
+      expect(await new SmithersDb(db).getRun("legacy-cancel")).toMatchObject({
+        cancelRequestedAtMs: 2,
+        cancelRequestId: null,
+        cancelRequestSource: null,
+        cancelRequestClientIdentity: null,
+        cancelRequestClientPid: null,
+      });
+      expect(migrationRows(sqlite).map((row) => row.id)).toContain("0034_run_cancellation_attribution");
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("v0.19-shaped DB upgrades through FK rebuild once and records dropped row counts", () => {
     const sqlite = new Database(":memory:");
     const db = drizzle(sqlite);

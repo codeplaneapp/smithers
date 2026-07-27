@@ -1018,12 +1018,81 @@ describe("SmithersDb adapter", () => {
     expect(run?.runtimeOwnerId).toBe("pid:123:owner");
     expect(run?.heartbeatAtMs).toBe(now - 5000);
   });
-  test("requestRunCancel sets cancelRequestedAtMs", async () => {
+  test("requestRunCancel persists cancellation attribution", async () => {
     const { adapter } = createTestDb();
     await adapter.insertRun(runRow("r1"));
-    await adapter.requestRunCancel("r1", now + 500);
+    await adapter.requestRunCancel("r1", now + 500, {
+      requestId: "request-123",
+      transport: "http",
+      clientIdentity: "user:operator",
+      clientPid: 4321,
+    });
     const run = await adapter.getRun("r1");
     expect(run.cancelRequestedAtMs).toBe(now + 500);
+    expect(run.cancelRequestId).toBe("request-123");
+    expect(run.cancelRequestSource).toBe("http");
+    expect(run.cancelRequestClientIdentity).toBe("user:operator");
+    expect(run.cancelRequestClientPid).toBe(4321);
+  });
+  test("requestRunCancel preserves the first cancellation attribution", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertRun(runRow("r1"));
+    expect(
+      await adapter.requestRunCancel("r1", now + 500, {
+        requestId: "request-first",
+        source: "websocket",
+      }),
+    ).toBe(true);
+    expect(
+      await adapter.requestRunCancel("r1", now + 600, {
+        requestId: "request-late",
+        source: "http",
+      }),
+    ).toBe(false);
+    const run = await adapter.getRun("r1");
+    expect(run.cancelRequestedAtMs).toBe(now + 500);
+    expect(run.cancelRequestId).toBe("request-first");
+    expect(run.cancelRequestSource).toBe("websocket");
+    expect(run.cancelRequestClientIdentity).toBeNull();
+    expect(run.cancelRequestClientPid).toBeNull();
+  });
+  test("claimRunCancellation persists direct attribution and preserves requested attribution", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertRun(runRow("direct"));
+    expect(
+      await adapter.claimRunCancellation("direct", now + 500, null, {
+        requestId: "request-direct",
+        source: "cli",
+        clientIdentity: "local-user",
+        clientPid: 1234,
+      }),
+    ).toBe(true);
+    expect(await adapter.getRun("direct")).toMatchObject({
+      status: "cancelled",
+      cancelRequestId: "request-direct",
+      cancelRequestSource: "cli",
+      cancelRequestClientIdentity: "local-user",
+      cancelRequestClientPid: 1234,
+    });
+
+    await adapter.insertRun(runRow("requested"));
+    await adapter.requestRunCancel("requested", now + 600, {
+      requestId: "request-first",
+      source: "http",
+    });
+    expect(await adapter.claimRunCancellation("requested", now + 700)).toBe(true);
+    expect(await adapter.getRun("requested")).toMatchObject({
+      status: "cancelled",
+      cancelRequestId: "request-first",
+      cancelRequestSource: "http",
+      cancelRequestClientIdentity: null,
+      cancelRequestClientPid: null,
+    });
+  });
+  test("requestRunCancel validates cancellation attribution", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertRun(runRow("r1"));
+    expect(() => adapter.requestRunCancel("r1", now + 500, { clientPid: 1.5 })).toThrow(/cancelRequestClientPid/);
   });
   test("requestRunPause sets pauseRequestedAtMs without touching cancel", async () => {
     const { adapter } = createTestDb();

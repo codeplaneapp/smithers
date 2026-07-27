@@ -26,6 +26,13 @@ const DELETE_DUPLICATE_SCORER_ROWS_SQL = `DELETE FROM _smithers_scorers
 const CREATE_SCORER_IDENTITY_INDEX_SQL = `CREATE UNIQUE INDEX IF NOT EXISTS _smithers_scorers_identity_uidx
   ON _smithers_scorers (run_id, node_id, iteration, attempt, scorer_id, source)`;
 
+const RUN_CANCELLATION_ATTRIBUTION_COLUMNS = [
+  ["cancel_request_id", "cancel_request_id TEXT"],
+  ["cancel_request_source", "cancel_request_source TEXT"],
+  ["cancel_request_client_identity", "cancel_request_client_identity TEXT"],
+  ["cancel_request_client_pid", "cancel_request_client_pid INTEGER"],
+];
+
 const RUN_OWNED_FOREIGN_KEY_TABLES = [
   {
     table: "_smithers_frames",
@@ -1740,6 +1747,47 @@ function buildMigrations(context) {
         return { table: "_smithers_scorers", created, deletedDuplicates: Number(deleted.rowCount ?? 0) };
       },
     },
+    {
+      id: "0034_run_cancellation_attribution",
+      name: "Add cancellation attribution columns to runs",
+      checksum: checksumForStatements(
+        RUN_CANCELLATION_ATTRIBUTION_COLUMNS.map(
+          ([, definition]) => `ALTER TABLE _smithers_runs ADD COLUMN ${definition}`,
+        ),
+      ),
+      isApplied: (sqlite) => {
+        const columns = tableColumnNames(sqlite, "_smithers_runs");
+        return RUN_CANCELLATION_ATTRIBUTION_COLUMNS.every(([column]) => columns.has(column));
+      },
+      isAppliedPostgres: async (pgConn) => {
+        const columns = await tableColumnNamesPostgres(pgConn, "_smithers_runs");
+        return RUN_CANCELLATION_ATTRIBUTION_COLUMNS.every(([column]) => columns.has(column));
+      },
+      up: (sqlite) => {
+        if (!tableExists(sqlite, "_smithers_runs")) {
+          return { table: "_smithers_runs", addedColumns: [], skipped: "missing_table" };
+        }
+        const addedColumns = [];
+        for (const [column, definition] of RUN_CANCELLATION_ATTRIBUTION_COLUMNS) {
+          if (addColumnIfMissing(sqlite, "_smithers_runs", column, definition)) {
+            addedColumns.push(column);
+          }
+        }
+        return { table: "_smithers_runs", addedColumns };
+      },
+      upPostgres: async (pgConn) => {
+        if (!(await tableExistsPostgres(pgConn, "_smithers_runs"))) {
+          return { table: "_smithers_runs", addedColumns: [], skipped: "missing_table" };
+        }
+        const addedColumns = [];
+        for (const [column, definition] of RUN_CANCELLATION_ATTRIBUTION_COLUMNS) {
+          if (await addColumnIfMissingPostgres(pgConn, "_smithers_runs", column, definition)) {
+            addedColumns.push(column);
+          }
+        }
+        return { table: "_smithers_runs", addedColumns };
+      },
+    },
   ];
 }
 
@@ -1798,6 +1846,16 @@ export async function runSmithersSchemaInitSqliteAsync(storage, context) {
   await storage.execute(MIGRATION_TABLE_SQL);
   for (const statement of context.createTableStatements) {
     await storage.execute(statement);
+  }
+  const runColumns = new Set(
+    (await storage.queryAllRaw('PRAGMA table_info("_smithers_runs")'))
+      .map((row) => row.name)
+      .filter((name) => typeof name === "string"),
+  );
+  for (const [column, definition] of RUN_CANCELLATION_ATTRIBUTION_COLUMNS) {
+    if (!runColumns.has(column)) {
+      await storage.execute(`ALTER TABLE _smithers_runs ADD COLUMN ${definition}`);
+    }
   }
   // External SQLite backends do not run the versioned migration ledger. Apply
   // the scorer identity repair explicitly so existing stores converge too.
