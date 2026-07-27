@@ -13,6 +13,7 @@ const slash = (value: string) => value.split(sep).join("/");
 const sorted = (values: Iterable<string>) => [...values].sort((a, b) => a.localeCompare(b));
 
 const workflowOwners = {
+  "./tests/stacked-ship-workflow.test.tsx": ["stacked-ship.tsx"],
   "./tests/daily-ceo-intel-pipeline.test.ts": ["daily-ceo-intel.tsx"],
   "./tests/issue-blitz.test.ts": ["issue-blitz.tsx", "issue-train.tsx"],
   "./tests/curated-authoring-workflows.test.tsx": ["create-skill.tsx", "create-workflow.tsx"],
