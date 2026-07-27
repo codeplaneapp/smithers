@@ -8,6 +8,6 @@
 // that downstream code joins into workspace paths; `/` and `\` stay excluded
 // for the same reason.
 //
-// Quoted verbatim in every route's InvalidRunId message and mirrored by
-// time-travel's JUMP_RUN_ID_PATTERN — keep them in sync.
+// Quoted verbatim in every route's InvalidRunId message. Time travel
+// deliberately uses a wider pattern so it can address engine-minted child ids.
 export const RUN_ID_PATTERN = /^[a-z0-9_-][a-z0-9_.-]{0,63}$/;
