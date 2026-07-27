@@ -109,8 +109,9 @@ function buildPendingNode(existingNode) {
     updatedAtMs: nowMs(),
   };
 }
+const TERMINAL_CHILD_RUN_STATUSES = new Set(["finished", "failed", "cancelled"]);
 /**
- * Resolve completed child workflows owned by reset parent nodes. Plans are
+ * Resolve terminal child workflows owned by reset parent nodes. Plans are
  * deepest-first so nested children are reset before their owning run.
  *
  * @param {SmithersDb} adapter
@@ -126,7 +127,7 @@ async function resolveCompletedChildResetPlans(adapter, runId, resetNodes, seen 
     const childRunId = `${runId}:child:${resetNode.nodeId}:${resetNode.iteration ?? 0}`;
     if (seen.has(childRunId)) continue;
     const childRun = await adapter.getRun(childRunId);
-    if (childRun?.parentRunId !== runId || childRun.status !== "finished") continue;
+    if (childRun?.parentRunId !== runId || !TERMINAL_CHILD_RUN_STATUSES.has(childRun.status)) continue;
     seen.add(childRunId);
     const childNodes = await adapter.listNodes(childRunId);
     plans.push(...(await resolveCompletedChildResetPlans(adapter, childRunId, childNodes, seen)), {
