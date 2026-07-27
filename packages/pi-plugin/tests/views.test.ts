@@ -4,6 +4,7 @@ import { FrameScrubber } from "../src/views/FrameScrubber.js";
 import { Header } from "../src/views/Header.js";
 import { NodeInspector } from "../src/views/NodeInspector.js";
 import { RunTree } from "../src/views/RunTree.js";
+import type { DevToolsClient } from "../src/runtime/DevToolsClient.js";
 import type { DevToolsNode, DevToolsSnapshot } from "@smithers-orchestrator/protocol";
 
 const theme = {
@@ -177,5 +178,86 @@ describe("FrameScrubber", () => {
     expect(calls.at(-1)).toBe(0);
     expect(scrubber.handleInput("\x1b[F")).toBe(true);
     expect(store.mode).toEqual({ kind: "live" });
+  });
+
+  test("rebinds historical inspection across previous/next frames and restores the live selection", async () => {
+    const historical = new Map([
+      [
+        3,
+        snapshot(
+          [
+            task(30, "task:chosen", "running"),
+            task(31, "task:historical", "running", { output: "historical three" }),
+          ],
+          { frameNo: 3, seq: 3 },
+        ),
+      ],
+      [
+        4,
+        snapshot(
+          [
+            task(40, "task:chosen", "finished"),
+            task(41, "task:historical", "finished", { output: "historical four" }),
+          ],
+          { frameNo: 4, seq: 4 },
+        ),
+      ],
+    ]);
+    const store = new DevToolsStore({
+      client: {
+        getDevToolsSnapshot: async (_runId: string, frameNo?: number) => {
+          const frame = historical.get(frameNo ?? -1);
+          if (!frame) {
+            throw new Error(`missing frame ${frameNo}`);
+          }
+          return frame;
+        },
+        streamDevTools: async function* () {},
+      } as DevToolsClient,
+    });
+    const scrubber = new FrameScrubber(store);
+    const inspector = new NodeInspector(store);
+
+    store.connect("run-views");
+    store.applyEvent({
+      version: 1,
+      kind: "snapshot",
+      snapshot: snapshot([task(20, "task:chosen", "running", { output: "live five" })], {
+        frameNo: 5,
+        seq: 5,
+      }),
+    });
+    store.selectNode(20);
+
+    expect(scrubber.handleInput("\x1b[D")).toBe(true);
+    expect(inspector.render(100, 10, plainTheme).join("\n")).toContain("loading historical frame 4");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.selectedNodeId).toBe(40);
+    store.selectNode(41);
+    expect(inspector.render(100, 10, plainTheme).join("\n")).toContain("historical four");
+
+    expect(scrubber.handleInput("\x1b[D")).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.selectedNodeId).toBe(31);
+    expect(inspector.render(100, 10, plainTheme).join("\n")).toContain("historical three");
+
+    expect(scrubber.handleInput("\x1b[C")).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.selectedNodeId).toBe(41);
+    expect(inspector.render(100, 10, plainTheme).join("\n")).toContain("historical four");
+
+    store.applyEvent({
+      version: 1,
+      kind: "snapshot",
+      snapshot: snapshot([task(60, "task:chosen", "running", { output: "live six" })], {
+        frameNo: 6,
+        seq: 6,
+      }),
+    });
+    expect(scrubber.handleInput("\x1b[F")).toBe(true);
+    expect(store.mode).toEqual({ kind: "live" });
+    expect(store.selectedNodeId).toBe(60);
+    expect(inspector.render(100, 10, plainTheme).join("\n")).toContain("live six");
+    store.disconnect();
   });
 });

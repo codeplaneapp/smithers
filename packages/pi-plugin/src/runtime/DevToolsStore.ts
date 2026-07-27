@@ -46,6 +46,11 @@ type LiveRunDevToolsMode = { kind: "live" } | { kind: "historical"; frameNo: num
 
 type StoreListener = (store: DevToolsStore) => void;
 
+type StoredSelection = {
+  nodeId: number;
+  key: string;
+};
+
 // Bounds memory held for unmounted (ghost) subtrees; oldest unmount is evicted
 // first. Overridable via SMITHERS_DEVTOOLS_GHOST_CAP.
 const DEFAULT_GHOST_NODE_CAP = 256;
@@ -208,6 +213,8 @@ export class DevToolsStore {
   private shouldReconnect = false;
   private stateRunId: string | undefined;
   private selectedNodeGhostKey: string | undefined;
+  private liveSelectionBeforeScrub: StoredSelection | null | undefined;
+  private historicalSelectionKey: string | undefined;
   private readonly lastSeqSeenByRunId = new Map<string, number>();
   private readonly mountedFrameByGhostKey = new Map<string, number>();
   private readonly ghostEvictionOrder: string[] = [];
@@ -280,6 +287,8 @@ export class DevToolsStore {
     this.backoff.reset();
     this.mode = { kind: "live" };
     this.scrubError = undefined;
+    this.liveSelectionBeforeScrub = undefined;
+    this.historicalSelectionKey = undefined;
     this.rewindError = undefined;
     this.rewindInFlight = false;
     this.bufferedLiveEvents = 0;
@@ -385,8 +394,19 @@ export class DevToolsStore {
       return;
     }
 
+    if (this.mode.kind === "live") {
+      this.liveSelectionBeforeScrub = this.captureSelection() ?? null;
+      this.historicalSelectionKey = this.liveSelectionBeforeScrub?.key;
+    }
+
     const requestId = ++this.scrubRequestId;
     this.mode = { kind: "historical", frameNo: targetFrame };
+    this.scrubError = undefined;
+    this.clearDisplayedSelection();
+    this.tree = undefined;
+    this.seq = 0;
+    this.refreshRunningState();
+    this.emit();
     try {
       const snapshot = await this.client.getDevToolsSnapshot(this.runId, targetFrame);
       if (requestId !== this.scrubRequestId) {
@@ -396,6 +416,7 @@ export class DevToolsStore {
       this.seq = snapshot.seq;
       this.mode = { kind: "historical", frameNo: snapshot.frameNo };
       this.scrubError = undefined;
+      this.rebindHistoricalSelection();
       this.refreshRunningState();
       this.updateGhostState();
     } catch (error) {
@@ -416,7 +437,7 @@ export class DevToolsStore {
     this.scrubError = undefined;
     this.bufferedLiveEvents = 0;
     this.syncDisplayedTreeWithLive();
-    this.updateGhostState();
+    this.restoreLiveSelection();
     if (this.runId && this.shouldReconnect) {
       this.requestResync(this.runId);
     }
@@ -457,7 +478,7 @@ export class DevToolsStore {
       this.scrubError = undefined;
       this.rewindError = undefined;
       this.syncDisplayedTreeWithLive();
-      this.updateGhostState();
+      this.restoreLiveSelection();
       this.lastAuditRowId = typeof result.auditRowId === "string" ? result.auditRowId : undefined;
       this.lastToastMessage = this.lastAuditRowId
         ? `Rewound to frame ${frameNo}. Audit: ${this.lastAuditRowId}`
@@ -488,6 +509,9 @@ export class DevToolsStore {
       const node = findNode(this.tree, nodeId);
       if (node) {
         this.selectedNodeGhostKey = selectionKey(node);
+        if (this.mode.kind === "historical") {
+          this.historicalSelectionKey = this.selectedNodeGhostKey;
+        }
       }
     }
     this.updateGhostState();
@@ -495,9 +519,10 @@ export class DevToolsStore {
   }
 
   clearSelection() {
-    this.selectedNodeId = undefined;
-    this.selectedNodeGhostKey = undefined;
-    this.isGhost = false;
+    this.clearDisplayedSelection();
+    if (this.mode.kind === "historical") {
+      this.historicalSelectionKey = undefined;
+    }
     this.emit();
   }
 
@@ -686,6 +711,8 @@ export class DevToolsStore {
     this.runningNodeIds.clear();
     this.selectedNodeId = undefined;
     this.selectedNodeGhostKey = undefined;
+    this.liveSelectionBeforeScrub = undefined;
+    this.historicalSelectionKey = undefined;
     this.ghostNodes.clear();
     this.ghostEvictionOrder.length = 0;
     this.mountedFrameByGhostKey.clear();
@@ -741,8 +768,14 @@ export class DevToolsStore {
       return;
     }
     const activeNode = findNode(this.tree, this.selectedNodeId);
-    if (activeNode) {
+    if (activeNode && (!this.selectedNodeGhostKey || selectionKey(activeNode) === this.selectedNodeGhostKey)) {
       this.selectedNodeGhostKey = selectionKey(activeNode);
+      this.isGhost = false;
+      return;
+    }
+    const reboundNode = this.findNodeBySelectionKey(this.tree, this.selectedNodeGhostKey);
+    if (reboundNode) {
+      this.selectedNodeId = reboundNode.id;
       this.isGhost = false;
       return;
     }
@@ -753,6 +786,65 @@ export class DevToolsStore {
     this.selectedNodeId = undefined;
     this.selectedNodeGhostKey = undefined;
     this.isGhost = false;
+  }
+
+  private captureSelection(): StoredSelection | undefined {
+    if (this.selectedNodeId === undefined) {
+      return undefined;
+    }
+    const node = findNode(this.tree, this.selectedNodeId);
+    const key = node ? selectionKey(node) : this.selectedNodeGhostKey;
+    return key ? { nodeId: this.selectedNodeId, key } : undefined;
+  }
+
+  private clearDisplayedSelection() {
+    this.selectedNodeId = undefined;
+    this.selectedNodeGhostKey = undefined;
+    this.isGhost = false;
+  }
+
+  private rebindHistoricalSelection() {
+    const node = this.findNodeBySelectionKey(this.tree, this.historicalSelectionKey);
+    if (!node) {
+      this.clearDisplayedSelection();
+      return;
+    }
+    this.selectedNodeId = node.id;
+    this.selectedNodeGhostKey = selectionKey(node);
+    this.isGhost = false;
+  }
+
+  private restoreLiveSelection() {
+    const selection = this.liveSelectionBeforeScrub;
+    this.liveSelectionBeforeScrub = undefined;
+    this.historicalSelectionKey = undefined;
+    this.clearDisplayedSelection();
+    if (!selection) {
+      return;
+    }
+
+    const node = this.findNodeBySelectionKey(this.tree, selection.key);
+    this.selectedNodeId = node?.id ?? selection.nodeId;
+    this.selectedNodeGhostKey = selection.key;
+    this.updateGhostState();
+  }
+
+  private findNodeBySelectionKey(root: DevToolsNode | undefined, key: string | undefined) {
+    if (!root || !key) {
+      return undefined;
+    }
+    const stack = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) {
+        continue;
+      }
+      if (selectionKey(node) === key) {
+        return node;
+      }
+      stack.push(...node.children);
+    }
+    return undefined;
   }
 
   private recordMountedFrames(root: DevToolsNode, frameNo: number) {

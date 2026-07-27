@@ -113,6 +113,9 @@ export class NodeInspector {
   render(width: number, height: number, theme: Theme) {
     const W = Math.max(28, width);
     const H = Math.max(4, height);
+    if (this.store.mode.kind === "historical" && !this.store.tree && !this.store.scrubError) {
+      return this.pad([paint(theme, "muted", ` loading historical frame ${this.store.displayedFrameNo}...`)], H);
+    }
     const node = this.store.selectedNode;
     if (!node) {
       return this.pad([paint(theme, "muted", " select a node to inspect")], H);
