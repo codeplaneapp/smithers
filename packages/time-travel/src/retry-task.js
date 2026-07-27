@@ -34,6 +34,7 @@ function isActiveRunStatus(status) {
     status === "running" || status === "waiting-approval" || status === "waiting-event" || status === "waiting-timer"
   );
 }
+const RESETTABLE_CHILD_RUN_STATUSES = new Set(["failed", "finished", "cancelled", "canceled"]);
 /**
  * @param {SmithersDb} adapter
  * @param {Required<Pick<RetryTaskOptions, "runId" | "resetDependents">> & { targetNode: any; }} opts
@@ -65,6 +66,33 @@ async function resolveResetNodes(adapter, opts) {
     }
     return (node.updatedAtMs ?? 0) > targetUpdatedAtMs;
   });
+}
+/**
+ * A child-run subflow uses a deterministic run id. Resetting the owning
+ * parent node must reset that child too; otherwise prefer-resume immediately
+ * replays the child's stale terminal result.
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ * @param {any[]} resetNodes
+ */
+async function resolveChildResetPlans(adapter, runId, resetNodes) {
+  const plans = [];
+  for (const resetNode of resetNodes) {
+    const iteration = resetNode.iteration ?? 0;
+    const childRunId = `${runId}:child:${resetNode.nodeId}:${iteration}`;
+    const childRun = await adapter.getRun(childRunId);
+    if (
+      childRun?.parentRunId !== runId ||
+      !RESETTABLE_CHILD_RUN_STATUSES.has(childRun.status)
+    ) {
+      continue;
+    }
+    const childNodes = await adapter.listNodes(childRunId);
+    if (childNodes.length > 0) {
+      plans.push({ runId: childRunId, nodes: childNodes });
+    }
+  }
+  return plans;
 }
 /**
  * @param {RetryTaskOptions} opts
@@ -137,13 +165,19 @@ export async function retryTask(adapter, opts) {
       iteration: candidate.iteration ?? 0,
     })),
   );
-  const attemptsByNode = new Map();
-  for (const resetNode of resetNodes) {
-    const resetIteration = resetNode.iteration ?? 0;
-    attemptsByNode.set(
-      buildNodeKey(resetNode.nodeId, resetIteration),
-      await adapter.listAttempts(runId, resetNode.nodeId, resetIteration),
-    );
+  const resetPlans = [
+    ...(await resolveChildResetPlans(adapter, runId, resetNodes)),
+    { runId, nodes: resetNodes },
+  ];
+  for (const plan of resetPlans) {
+    plan.attemptsByNode = new Map();
+    for (const resetNode of plan.nodes) {
+      const resetIteration = resetNode.iteration ?? 0;
+      plan.attemptsByNode.set(
+        buildNodeKey(resetNode.nodeId, resetIteration),
+        await adapter.listAttempts(plan.runId, resetNode.nodeId, resetIteration),
+      );
+    }
   }
   opts.onProgress?.({
     type: "RetryTaskStarted",
@@ -158,56 +192,64 @@ export async function retryTask(adapter, opts) {
   await adapter.withTransaction(
     "retry-task-reset",
     Effect.gen(function* () {
-      for (const resetNode of resetNodes) {
-        const resetIteration = resetNode.iteration ?? 0;
-        const attempts = attemptsByNode.get(buildNodeKey(resetNode.nodeId, resetIteration)) ?? [];
-        for (const attempt of attempts) {
-          if (
-            attempt.state !== "failed" &&
-            attempt.state !== "in-progress" &&
-            attempt.state !== "waiting-approval" &&
-            attempt.state !== "waiting-event" &&
-            attempt.state !== "waiting-timer"
-          ) {
-            continue;
+      for (const plan of resetPlans) {
+        for (const resetNode of plan.nodes) {
+          const resetIteration = resetNode.iteration ?? 0;
+          const attempts = plan.attemptsByNode.get(buildNodeKey(resetNode.nodeId, resetIteration)) ?? [];
+          for (const attempt of attempts) {
+            if (
+              attempt.state !== "failed" &&
+              attempt.state !== "in-progress" &&
+              attempt.state !== "waiting-approval" &&
+              attempt.state !== "waiting-event" &&
+              attempt.state !== "waiting-timer"
+            ) {
+              continue;
+            }
+            const patch = {
+              state: "cancelled",
+              metaJson: markResetCancelledMeta(attempt.metaJson),
+            };
+            if (attempt.finishedAtMs == null) {
+              patch.finishedAtMs = resetTimestampMs;
+            }
+            yield* adapter.updateAttemptEffect(
+              plan.runId,
+              resetNode.nodeId,
+              resetIteration,
+              attempt.attempt,
+              patch,
+            );
           }
-          const patch = {
-            state: "cancelled",
-            metaJson: markResetCancelledMeta(attempt.metaJson),
-          };
-          if (attempt.finishedAtMs == null) {
-            patch.finishedAtMs = resetTimestampMs;
+          if (resetNode.outputTable) {
+            yield* adapter.deleteOutputRowEffect(resetNode.outputTable, {
+              runId: plan.runId,
+              nodeId: resetNode.nodeId,
+              iteration: resetIteration,
+            });
           }
-          yield* adapter.updateAttemptEffect(runId, resetNode.nodeId, resetIteration, attempt.attempt, patch);
-        }
-        if (resetNode.outputTable) {
-          yield* adapter.deleteOutputRowEffect(resetNode.outputTable, {
-            runId,
+          yield* adapter.insertNodeEffect({
+            runId: plan.runId,
             nodeId: resetNode.nodeId,
             iteration: resetIteration,
+            state: "pending",
+            lastAttempt: resetNode.lastAttempt ?? null,
+            updatedAtMs: resetTimestampMs,
+            outputTable: resetNode.outputTable ?? "",
+            label: resetNode.label ?? null,
           });
         }
-        yield* adapter.insertNodeEffect({
-          runId,
-          nodeId: resetNode.nodeId,
-          iteration: resetIteration,
-          state: "pending",
-          lastAttempt: resetNode.lastAttempt ?? null,
-          updatedAtMs: resetTimestampMs,
-          outputTable: resetNode.outputTable ?? "",
-          label: resetNode.label ?? null,
+        yield* adapter.updateRunEffect(plan.runId, {
+          status: "running",
+          finishedAtMs: null,
+          heartbeatAtMs: null,
+          runtimeOwnerId: null,
+          cancelRequestedAtMs: null,
+          hijackRequestedAtMs: null,
+          hijackTarget: null,
+          errorJson: null,
         });
       }
-      yield* adapter.updateRunEffect(runId, {
-        status: "running",
-        finishedAtMs: null,
-        heartbeatAtMs: null,
-        runtimeOwnerId: null,
-        cancelRequestedAtMs: null,
-        hijackRequestedAtMs: null,
-        hijackTarget: null,
-        errorJson: null,
-      });
     }),
   );
   emitRetryFinished(opts, {
