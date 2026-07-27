@@ -24,6 +24,11 @@
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
     "test": "bun test tests"
   },
+  "dependencies": {
+    "@smithers-orchestrator/gateway-client": "workspace:*",
+    "@smithers-orchestrator/gateway-react": "workspace:*",
+    "zustand": "^5.0.13"
+  },
   "peerDependencies": {
     "react": "^19.0.0"
   },

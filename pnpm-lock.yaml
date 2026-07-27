@@ -2428,6 +2428,12 @@ importers:
       '@smithers-orchestrator/gateway-react':
         specifier: workspace:*
         version: link:../gateway-react
+      '@smithers-orchestrator/tui-ui':
+        specifier: workspace:*
+        version: link:../tui-ui
+      '@smithers-orchestrator/ui-core':
+        specifier: workspace:*
+        version: link:../ui-core
       react:
         specifier: ^19.2.7
         version: 19.2.7
@@ -2529,6 +2535,16 @@ importers:
         version: 6.0.3
 
   packages/ui-core:
+    dependencies:
+      '@smithers-orchestrator/gateway-client':
+        specifier: workspace:*
+        version: link:../gateway-client
+      '@smithers-orchestrator/gateway-react':
+        specifier: workspace:*
+        version: link:../gateway-react
+      zustand:
+        specifier: ^5.0.13
+        version: 5.0.14(@types/react@19.2.17)(immer@11.1.15)(react@19.2.7)(use-sync-external-store@1.6.0(react@19.2.7))
     devDependencies:
       '@types/bun':
         specifier: latest
