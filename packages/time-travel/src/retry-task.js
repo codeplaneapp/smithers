@@ -217,6 +217,18 @@ export async function retryTask(adapter, opts) {
     });
     return { success: false, resetNodes: [], error };
   }
+  if ((run.workflowPath || run.workflowHash) && !(await validateWorkflowIdentity(run))) {
+    const error = `Cannot retry run because its durable workflow metadata no longer matches: ${runId}`;
+    emitRetryFinished(opts, {
+      runId,
+      nodeId,
+      iteration,
+      resetNodes: [],
+      success: false,
+      error,
+    });
+    return { success: false, resetNodes: [], error };
+  }
   const resetNodes = await resolveResetNodes(adapter, {
     runId,
     targetNode: node,
