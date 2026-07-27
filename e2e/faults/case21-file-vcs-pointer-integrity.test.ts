@@ -4,12 +4,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as BunContext from "@effect/platform-bun/BunContext";
-import {
-  captureWorkspaceSnapshot,
-  getJjPointer,
-  revertToJjPointer,
-  runJj,
-} from "@smithers-orchestrator/vcs";
+import { captureWorkspaceSnapshot, getJjPointer, revertToJjPointer, runJj } from "@smithers-orchestrator/vcs";
 import { Effect } from "effect";
 
 const jjAvailable = spawnSync("jj", ["--version"], { stdio: "ignore" }).status === 0;
@@ -20,15 +15,26 @@ function runVcs<A>(effect: Effect.Effect<A, unknown, unknown>): Promise<A> {
 }
 
 async function exists(path: string): Promise<boolean> {
-  return stat(path).then(() => true, () => false);
+  return stat(path).then(
+    () => true,
+    () => false,
+  );
 }
 
 async function expectTreeMatches(pointer: string, workspace: string): Promise<void> {
-  const diff = await runVcs(
-    runJj(["diff", "--from", pointer, "--to", "@", "--summary"], { cwd: workspace }),
-  );
+  const diff = await runVcs(runJj(["diff", "--from", pointer, "--to", "@", "--summary"], { cwd: workspace }));
   expect(diff.code, diff.stderr).toBe(0);
   expect(diff.stdout.trim()).toBe("");
+}
+
+async function expectCurrentPointer(changeId: string, workspace: string): Promise<void> {
+  const pointer = await runVcs(getJjPointer(workspace));
+  expect(pointer).toMatch(/^[0-9a-f]{40}$/);
+
+  const snapshot = await runVcs(captureWorkspaceSnapshot(workspace));
+  expect(snapshot).not.toBeNull();
+  expect(snapshot?.commitId).toBe(pointer);
+  expect(snapshot?.changeId).toBe(changeId);
 }
 
 describeIfJj("case 21: File + VCS pointer integrity across repeated runs", () => {
@@ -59,9 +65,10 @@ describeIfJj("case 21: File + VCS pointer integrity across repeated runs", () =>
         expect(snapshot).not.toBeNull();
         if (!snapshot) throw new Error(`run ${run} did not produce a workspace snapshot`);
 
-        // vcs.pointer and the persisted snapshot must identify the same jj change.
+        // vcs.pointer and the persisted snapshot must identify the same exact state.
         const pointer = await runVcs(getJjPointer(workspace));
-        expect(pointer).toBe(snapshot.changeId);
+        expect(pointer).toBe(snapshot.commitId);
+        expect(pointer).toMatch(/^[0-9a-f]{40}$/);
         expect(snapshot.commitId).not.toBe(checkpoints.at(-1)?.commitId);
         checkpoints.push({
           commitId: snapshot.commitId,
@@ -78,7 +85,7 @@ describeIfJj("case 21: File + VCS pointer integrity across repeated runs", () =>
         expect(restored).toEqual({ success: true });
         expect(await readFile(durableFile, "utf8")).toBe(contents);
         expect(await exists(transientFile)).toBe(false);
-        expect(await runVcs(getJjPointer(workspace))).toBe(snapshot.changeId);
+        await expectCurrentPointer(snapshot.changeId, workspace);
 
         // A real jj tree diff proves restore reproduced the exact persisted file state.
         await expectTreeMatches(snapshot.commitId, workspace);
@@ -90,7 +97,7 @@ describeIfJj("case 21: File + VCS pointer integrity across repeated runs", () =>
         const restored = await runVcs(revertToJjPointer(checkpoint.commitId, workspace));
         expect(restored.success).toBe(true);
         expect(await readFile(durableFile, "utf8")).toBe(checkpoint.contents);
-        expect(await runVcs(getJjPointer(workspace))).toBe(checkpoint.changeId);
+        await expectCurrentPointer(checkpoint.changeId, workspace);
         await expectTreeMatches(checkpoint.commitId, workspace);
       }
     } finally {

@@ -18,7 +18,7 @@ mock.module("@smithers-orchestrator/vcs/jj", () => ({
   },
   getJjPointer: (cwd) => {
     restoreCalls.push({ fn: "getJjPointer", cwd });
-    return Effect.succeed("change-live");
+    return Effect.succeed("commit-live");
   },
   isJjRepo: (cwd) => {
     restoreCalls.push({ fn: "isJjRepo", cwd });
@@ -26,7 +26,7 @@ mock.module("@smithers-orchestrator/vcs/jj", () => ({
   },
   revertToJjPointer: (pointer, cwd) => {
     restoreCalls.push({ pointer, cwd });
-    if (pointer === "change-fail") {
+    if (pointer === "commit-fail") {
       return Effect.succeed({ success: false, error: "restore failed" });
     }
     return Effect.succeed({ success: true });
@@ -66,7 +66,7 @@ function buildDb() {
 }
 
 async function seedRun(adapter, runId, opts = {}) {
-  const targetPointer = opts.targetPointer ?? "change-target";
+  const targetPointer = opts.targetPointer ?? "commit-target";
   const targetStartedAtMs = opts.targetStartedAtMs ?? 200;
   const frameCreatedAtMs = opts.frameCreatedAtMs ?? [100, 200, 300];
   await adapter.insertRun({
@@ -116,7 +116,7 @@ async function seedRun(adapter, runId, opts = {}) {
     state: "finished",
     startedAtMs: 300,
     finishedAtMs: 320,
-    jjPointer: "change-later",
+    jjPointer: "commit-later",
     jjCwd: "/repo",
   });
   await adapter.insertFrame({
@@ -161,10 +161,10 @@ describe("VCS restore success paths", () => {
 
       expect(result).toEqual({
         success: true,
-        jjPointer: "change-target",
+        jjPointer: "commit-target",
         effectBoundary: { blocking: [], revertible: [], warnings: [] },
       });
-      expect(restoreCalls).toEqual([{ pointer: "change-target", cwd: "/repo" }]);
+      expect(restoreCalls).toEqual([{ pointer: "commit-target", cwd: "/repo" }]);
       expect(events.map((event) => event.type)).toEqual(["RevertStarted", "RevertFinished"]);
       expect(events.at(-1)).toMatchObject({ success: true, error: undefined });
       const frames = await adapter.listFrames("run-revert-success", 10);
@@ -194,7 +194,7 @@ describe("VCS restore success paths", () => {
 
       expect(result).toEqual({
         success: true,
-        jjPointer: "change-target",
+        jjPointer: "commit-target",
         effectBoundary: { blocking: [], revertible: [], warnings: [] },
       });
       expect(await adapter.listFrames(runId, 10)).toEqual([]);
@@ -224,14 +224,14 @@ describe("VCS restore success paths", () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.jjPointer).toBe("change-target");
+      expect(result.jjPointer).toBe("commit-target");
       expect(result.error).toContain("DB frame cleanup failed");
       expect(result.error).toContain("delete frames failed");
-      expect(restoreCalls).toEqual([{ pointer: "change-target", cwd: "/repo" }]);
+      expect(restoreCalls).toEqual([{ pointer: "commit-target", cwd: "/repo" }]);
       expect(events.map((event) => event.type)).toEqual(["RevertStarted", "RevertFinished"]);
       expect(events.at(-1)).toMatchObject({
         success: false,
-        jjPointer: "change-target",
+        jjPointer: "commit-target",
       });
 
       const afterFrames = await adapter.listFrames(runId, 10);
@@ -252,7 +252,7 @@ describe("VCS restore success paths", () => {
     const { adapter, sqlite } = buildDb();
     try {
       const runId = "run-revert-vcs-fails";
-      await seedRun(adapter, runId, { targetPointer: "change-fail" });
+      await seedRun(adapter, runId, { targetPointer: "commit-fail" });
       const beforeFrames = await adapter.listFrames(runId, 10);
       const { revertToAttempt } = await import("../src/revert.js");
       const events = [];
@@ -268,12 +268,12 @@ describe("VCS restore success paths", () => {
       expect(result).toEqual({
         success: false,
         error: "restore failed",
-        jjPointer: "change-fail",
+        jjPointer: "commit-fail",
         effectBoundary: { blocking: [], revertible: [], warnings: [] },
       });
-      expect(restoreCalls).toEqual([{ pointer: "change-fail", cwd: "/repo" }]);
+      expect(restoreCalls).toEqual([{ pointer: "commit-fail", cwd: "/repo" }]);
       expect(events.map((event) => event.type)).toEqual(["RevertStarted", "RevertFinished"]);
-      expect(events.at(-1)).toMatchObject({ success: false, error: "restore failed", jjPointer: "change-fail" });
+      expect(events.at(-1)).toMatchObject({ success: false, error: "restore failed", jjPointer: "commit-fail" });
       // A failed restore leaves the frames untouched (no DB cleanup runs).
       expect(await adapter.listFrames(runId, 10)).toEqual(beforeFrames);
     } finally {
@@ -303,7 +303,7 @@ describe("VCS restore success paths", () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.jjPointer).toBe("change-target");
+      expect(result.jjPointer).toBe("commit-target");
       expect(result.error).toContain("DB frame cleanup failed");
       expect(result.error).toContain("frame cleanup exploded");
       expect(events.at(-1)).toMatchObject({ type: "RevertFinished", success: false });
@@ -356,7 +356,7 @@ describe("VCS restore success paths", () => {
       expect(result.newFrameNo).toBe(1);
       // The default getJjPointer + revertToJjPointer seams were exercised.
       expect(restoreCalls.some((call) => call.fn === "getJjPointer")).toBe(true);
-      expect(restoreCalls.some((call) => call.pointer === "change-target")).toBe(true);
+      expect(restoreCalls.some((call) => call.pointer === "commit-target")).toBe(true);
     } finally {
       sqlite.close();
     }
@@ -379,11 +379,11 @@ describe("VCS restore success paths", () => {
 
       expect(result).toMatchObject({
         success: true,
-        jjPointer: "change-target",
+        jjPointer: "commit-target",
         vcsRestored: true,
       });
       expect(result.resetNodes.toSorted()).toEqual(["later", "target"]);
-      expect(restoreCalls).toEqual([{ pointer: "change-target", cwd: "/repo" }]);
+      expect(restoreCalls).toEqual([{ pointer: "commit-target", cwd: "/repo" }]);
       expect(events.at(-1)).toMatchObject({
         type: "TimeTravelFinished",
         success: true,
@@ -422,7 +422,7 @@ describe("VCS restore success paths", () => {
         }),
       ).rejects.toThrow("delete frames failed");
 
-      expect(restoreCalls).toEqual([{ pointer: "change-target", cwd: "/repo" }]);
+      expect(restoreCalls).toEqual([{ pointer: "commit-target", cwd: "/repo" }]);
       expect(await adapter.listFrames(runId, 10)).toEqual(beforeFrames);
       expect(events.map((event) => event.type)).toEqual(["TimeTravelStarted", "TimeTravelFinished"]);
       expect(events.at(-1)).toMatchObject({ success: false, vcsRestored: true });
@@ -471,7 +471,7 @@ describe("VCS restore success paths", () => {
     const { adapter, sqlite } = buildDb();
     try {
       const runId = "run-time-travel-vcs-failure";
-      await seedRun(adapter, runId, { targetPointer: "change-fail" });
+      await seedRun(adapter, runId, { targetPointer: "commit-fail" });
       const { timeTravel } = await import("../src/timetravel.js");
       const events = [];
 
@@ -491,13 +491,13 @@ describe("VCS restore success paths", () => {
 
       expect(result).toEqual({
         success: false,
-        jjPointer: "change-fail",
+        jjPointer: "commit-fail",
         vcsRestored: false,
         resetNodes: [],
         error: "restore failed",
         effectBoundary: { blocking: [], revertible: [], warnings: [] },
       });
-      expect(restoreCalls).toEqual([{ pointer: "change-fail", cwd: "/repo" }]);
+      expect(restoreCalls).toEqual([{ pointer: "commit-fail", cwd: "/repo" }]);
       expect(events.map((event) => event.type)).toEqual(["TimeTravelStarted", "TimeTravelFinished"]);
       expect(events.at(-1)).toMatchObject({
         success: false,

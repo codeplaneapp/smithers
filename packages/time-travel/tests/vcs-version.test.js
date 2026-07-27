@@ -11,7 +11,7 @@ const jjCalls = [];
 mock.module("@smithers-orchestrator/vcs/jj", () => ({
   getJjPointer: (cwd) => {
     jjCalls.push({ fn: "getJjPointer", cwd });
-    return Effect.succeed("change-live");
+    return Effect.succeed("commit-live");
   },
   captureWorkspaceSnapshot: (cwd) => {
     jjCalls.push({ fn: "captureWorkspaceSnapshot", cwd });
@@ -27,7 +27,7 @@ mock.module("@smithers-orchestrator/vcs/jj", () => ({
   },
   revertToJjPointer: (pointer, cwd) => {
     jjCalls.push({ fn: "revertToJjPointer", pointer, cwd });
-    if (pointer === "change-revert-fail") {
+    if (pointer === "commit-revert-fail") {
       return Effect.succeed({ success: false, error: "jj restore failed" });
     }
     return Effect.succeed({ success: true });
@@ -42,7 +42,7 @@ mock.module("@smithers-orchestrator/vcs/jj", () => ({
   },
   workspaceAdd: (workspaceName, workspacePath, opts = {}) => {
     jjCalls.push({ fn: "workspaceAdd", workspaceName, workspacePath, opts });
-    if (opts.atRev === "change-ws-fail") {
+    if (opts.atRev === "commit-ws-fail") {
       return Effect.succeed({ success: false, error: "jj workspace add failed" });
     }
     return Effect.succeed({ success: true, workspacePath });
@@ -76,7 +76,7 @@ describe("loadVcsTag", () => {
       runId: "run-1",
       frameNo: 3,
       vcsType: "jj",
-      vcsPointer: "change-abc",
+      vcsPointer: "commit-abc",
       vcsRoot: "/repo",
       jjOperationId: "op-123",
       createdAtMs: 1234,
@@ -87,7 +87,7 @@ describe("loadVcsTag", () => {
       runId: "run-1",
       frameNo: 3,
       vcsType: "jj",
-      vcsPointer: "change-abc",
+      vcsPointer: "commit-abc",
       vcsRoot: "/repo",
       jjOperationId: "op-123",
       createdAtMs: 1234,
@@ -106,7 +106,7 @@ describe("tagSnapshotVcs", () => {
       runId: "run-1",
       frameNo: 0,
       vcsType: "jj",
-      vcsPointer: "change-live",
+      vcsPointer: "commit-live",
       vcsRoot: "/repo",
       jjOperationId: "op-live",
     });
@@ -151,15 +151,15 @@ describe("rerunAtRevision", () => {
       runId: "run-1",
       frameNo: 4,
       vcsType: "jj",
-      vcsPointer: "change-stored",
+      vcsPointer: "commit-stored",
       vcsRoot: "/repo",
       jjOperationId: null,
       createdAtMs: 1234,
     });
     const { rerunAtRevision } = await import("../src/vcs-version/index.js");
     const result = await rerunAtRevision(adapter, "run-1", 4);
-    expect(result).toEqual({ restored: true, vcsPointer: "change-stored" });
-    expect(jjCalls).toEqual([{ fn: "revertToJjPointer", pointer: "change-stored", cwd: "/repo" }]);
+    expect(result).toEqual({ restored: true, vcsPointer: "commit-stored" });
+    expect(jjCalls).toEqual([{ fn: "revertToJjPointer", pointer: "commit-stored", cwd: "/repo" }]);
   });
   test("reports restored:false with the error when the jj restore fails", async () => {
     jjCalls.length = 0;
@@ -168,7 +168,7 @@ describe("rerunAtRevision", () => {
       runId: "run-1",
       frameNo: 5,
       vcsType: "jj",
-      vcsPointer: "change-revert-fail",
+      vcsPointer: "commit-revert-fail",
       vcsRoot: "/repo",
       jjOperationId: null,
       createdAtMs: 1234,
@@ -177,10 +177,10 @@ describe("rerunAtRevision", () => {
     const result = await rerunAtRevision(adapter, "run-1", 5);
     expect(result).toEqual({
       restored: false,
-      vcsPointer: "change-revert-fail",
+      vcsPointer: "commit-revert-fail",
       error: "jj restore failed",
     });
-    expect(jjCalls).toEqual([{ fn: "revertToJjPointer", pointer: "change-revert-fail", cwd: "/repo" }]);
+    expect(jjCalls).toEqual([{ fn: "revertToJjPointer", pointer: "commit-revert-fail", cwd: "/repo" }]);
   });
 });
 describe("resolveWorkflowAtRevision", () => {
@@ -198,7 +198,7 @@ describe("resolveWorkflowAtRevision", () => {
       runId: "run-abcdef123456",
       frameNo: 7,
       vcsType: "jj",
-      vcsPointer: "change-workflow",
+      vcsPointer: "commit-workflow",
       vcsRoot: "/repo",
       jjOperationId: "op-123",
       createdAtMs: 1234,
@@ -209,14 +209,14 @@ describe("resolveWorkflowAtRevision", () => {
 
     expect(result).toEqual({
       workspacePath: "/tmp/workspace",
-      vcsPointer: "change-workflow",
+      vcsPointer: "commit-workflow",
     });
     expect(jjCalls).toEqual([
       {
         fn: "workspaceAdd",
         workspaceName: "smithers-replay-run-abcd-f7",
         workspacePath: "/tmp/workspace",
-        opts: { cwd: "/repo", atRev: "change-workflow" },
+        opts: { cwd: "/repo", atRev: "commit-workflow" },
       },
     ]);
   });
@@ -228,21 +228,21 @@ describe("resolveWorkflowAtRevision", () => {
       runId: "run-wsfail01234",
       frameNo: 2,
       vcsType: "jj",
-      vcsPointer: "change-ws-fail",
+      vcsPointer: "commit-ws-fail",
       vcsRoot: "/repo",
       jjOperationId: null,
       createdAtMs: 1234,
     });
     const { resolveWorkflowAtRevision } = await import("../src/vcs-version/index.js");
     await expect(resolveWorkflowAtRevision(adapter, "run-wsfail01234", 2, "/tmp/workspace")).rejects.toThrow(
-      /Failed to create workspace at change-ws-fail/,
+      /Failed to create workspace at commit-ws-fail/,
     );
     expect(jjCalls).toEqual([
       {
         fn: "workspaceAdd",
         workspaceName: "smithers-replay-run-wsfa-f2",
         workspacePath: "/tmp/workspace",
-        opts: { cwd: "/repo", atRev: "change-ws-fail" },
+        opts: { cwd: "/repo", atRev: "commit-ws-fail" },
       },
     ]);
   });

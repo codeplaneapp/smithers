@@ -465,7 +465,7 @@ describe("postgres dialect row mapping", () => {
         runId: "run-tag",
         frameNo: 2,
         vcsType: "jj",
-        vcsPointer: "change-xyz",
+        vcsPointer: "commit-xyz",
         vcsRoot: "/repo",
         jjOperationId: "op-9",
         createdAtMs: 77,
@@ -473,7 +473,7 @@ describe("postgres dialect row mapping", () => {
       const pgAdapter = spoofPostgresDialect(adapter);
       const viaPg = await loadVcsTag(pgAdapter, "run-tag", 2);
       expect(viaPg).toEqual(await loadVcsTag(adapter, "run-tag", 2));
-      expect(viaPg?.vcsPointer).toBe("change-xyz");
+      expect(viaPg?.vcsPointer).toBe("commit-xyz");
       expect(await loadVcsTag(pgAdapter, "run-tag", 3)).toBeUndefined();
     } finally {
       sqlite.close();

@@ -2461,8 +2461,9 @@ async function getRunDurabilityMetadata(workflowPath, rootDir) {
       vcsRevision: null,
     };
   }
-  // JJ change_ids are mutable across working-copy snapshots. Persist the
-  // immutable commit_id so a completion-time diff has a trustworthy base.
+  // JJ change_ids resolve to the change's mutable current commit across
+  // working-copy snapshots. Persist the immutable commit_id so a
+  // completion-time diff has a trustworthy base.
   const vcsRevision = vcs.type === "jj" ? await getJjCommitId(rootDir) : await getGitPointer(rootDir);
   return {
     workflowHash,

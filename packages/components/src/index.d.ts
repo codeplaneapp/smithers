@@ -3798,8 +3798,8 @@ type SagaProps$1 = SagaProps$2;
 
 /**
  * Best-effort working-copy commit probe. Tries jj first (this is how a
- * colocated repo stays truthful — same probe shape as packages/vcs
- * `getJjPointer`, but on `commit_id` so `from..to` ranges work for both jj
+ * colocated repo stays truthful — the same `commit_id` probe as packages/vcs
+ * `getJjPointer`, so `from..to` ranges work for both jj
  * and git tooling), then falls back to `git rev-parse HEAD`. Returns null
  * when neither VCS answers — callers must treat that as "omit the field".
  * @param {string} cwd
