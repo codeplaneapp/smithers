@@ -11,7 +11,7 @@ export const approvalSchema = z.object({
  * @param {Schemas} schemas
  */
 export function createExampleSmithers(schemas) {
-    return createSmithers(schemas, { dbPath: "smithers.db" });
+    return createSmithers(schemas, { dbPath: process.env.SMITHERS_EXAMPLE_DB_PATH ?? "smithers.db" });
 }
 /**
  * @template T

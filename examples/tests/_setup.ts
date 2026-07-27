@@ -1,0 +1,25 @@
+import { mock } from "bun:test";
+import type { WorkflowCoverageOptions } from "smithers-orchestrator/testing";
+import { coverWorkflow } from "smithers-orchestrator/testing";
+
+const ai = await import("../../packages/smithers/node_modules/ai");
+process.env.SMITHERS_EXAMPLE_DB_PATH = ":memory:";
+
+class InertToolLoopAgent {
+  readonly id = "example-test-agent";
+  readonly tools = {};
+
+  constructor(_options: unknown) {}
+
+  async generate(): Promise<never> {
+    throw new Error("Example coverage must not call a real AI SDK agent");
+  }
+}
+
+mock.module("ai", () => ({ ...ai, ToolLoopAgent: InertToolLoopAgent }));
+mock.module("@ai-sdk/anthropic", () => ({ anthropic: () => ({ provider: "inert" }) }));
+
+export async function coverExample(path: string, options?: WorkflowCoverageOptions) {
+  const workflowModule = await import(path);
+  return coverWorkflow(workflowModule, options);
+}

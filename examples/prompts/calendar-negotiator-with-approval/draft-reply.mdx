@@ -1,8 +1,9 @@
 export default function Prompt(props) {
+  const { children: _children, components: _components, ...input } = props ?? {};
   return (
     <>
       {"Draft a scheduling reply that proposes slots without creating calendar state. Require approval before writes.\n\nINPUT:\n"}
-      {JSON.stringify(props ?? {}, null, 2)}
+      {JSON.stringify(input, null, 2)}
       {"\n\nReturn only structured data matching the task output schema."}
     </>
   );
