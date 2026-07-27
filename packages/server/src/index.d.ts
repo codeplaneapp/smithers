@@ -1371,6 +1371,8 @@ declare class Gateway {
      * @param {string} runId
      */
     buildRunSnapshot(runId: string): Promise<{
+        failedChildren?: number;
+        failedChildKeys?: string[];
         runState?: _smithers_orchestrator_db_runState.RunStateView | undefined;
         workflowKey: string;
         summary: {};

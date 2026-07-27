@@ -27,7 +27,6 @@ import { loadInput, loadOutputs } from "@smithers-orchestrator/db/snapshot";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
-import { buildStateKey } from "@smithers-orchestrator/scheduler/buildStateKey";
 import { parseStateKey } from "@smithers-orchestrator/scheduler/parseStateKey";
 import { normalizeRunStartedBy, SmithersCtx } from "@smithers-orchestrator/driver";
 import { resolveCliStartedBy } from "./runStartedBy.js";
@@ -551,7 +550,13 @@ function buildProgressReporter() {
         process.stderr.write(`[${ts}] 🔔 Timer fired: ${event.timerId} (delay ${event.delayMs}ms)\n`);
         break;
       case "RunFinished":
-        process.stderr.write(`[${ts}] ✓ Run finished\n`);
+        process.stderr.write(
+          `[${ts}] ✓ Run finished${
+            event.failedChildren > 0
+              ? ` (${event.failedChildren} failed ${event.failedChildren === 1 ? "child" : "children"})`
+              : ""
+          }\n`,
+        );
         break;
       case "RunFailed":
         process.stderr.write(
@@ -1552,6 +1557,15 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
   }
   const r = run;
   const nodes = await adapter.listNodes(runId);
+  const finishedEvents = r.status === "finished" ? await adapter.listEventsByType(runId, "RunFinished") : [];
+  const finishedPayload = parseEventPayload(finishedEvents.at(-1)?.payloadJson ?? "");
+  const failedChildren =
+    typeof finishedPayload.failedChildren === "number" && finishedPayload.failedChildren > 0
+      ? finishedPayload.failedChildren
+      : 0;
+  const failedChildKeys = Array.isArray(finishedPayload.failedChildKeys)
+    ? finishedPayload.failedChildKeys.filter((key) => typeof key === "string")
+    : [];
   const approvals = await adapter.listPendingApprovals(runId);
   const waitingTimers = await listWaitingTimers(adapter, runId);
   const loops = await adapter.listRalph(runId);
@@ -1585,17 +1599,6 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
     attempt: n.lastAttempt ?? 0,
     label: n.label ?? n.nodeId,
   }));
-  // On a finished/continued (succeeded) run, any task still in `failed` state is
-  // a "masked" child — a continueOnFail task or transient agent failure that was
-  // tolerated, so the binary run status reads as a clean success. Surface the
-  // count so callers don't have to eyeball every node row. A genuinely `failed`
-  // run already reports its error, so don't double-count there. Keys are the
-  // canonical state keys (`nodeId::iteration`) so a node failing across loop
-  // iterations stays distinct. (#295)
-  const isSuccessTerminal = r.status === "finished" || r.status === "continued";
-  const failedChildKeys = isSuccessTerminal
-    ? nodes.filter((n) => n.state === "failed").map((n) => buildStateKey(n.nodeId, n.iteration))
-    : [];
   const pendingApprovals = approvals.map((a) => ({
     nodeId: a.nodeId,
     status: a.status,
@@ -1642,7 +1645,7 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
         : {}),
     },
     ...(runState ? { runState } : {}),
-    ...(failedChildKeys.length > 0 ? { failedChildren: failedChildKeys.length, failedChildKeys } : {}),
+    ...(failedChildren > 0 ? { failedChildren, failedChildKeys } : {}),
     steps,
     nodes: canonicalNodes,
   };
@@ -1696,11 +1699,11 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
   if (waitingTimers.length > 0) {
     ctaCommands.push({ command: `why ${runId}`, description: "Explain timer wait" });
   }
-  if (failedChildKeys.length > 0) {
+  if (failedChildren > 0 && failedChildKeys.length > 0) {
     const first = parseStateKey(failedChildKeys[0]);
     ctaCommands.push({
       command: `node ${first.nodeId} -r ${runId}${first.iteration > 0 ? ` -i ${first.iteration}` : ""}`,
-      description: `Run finished with ${failedChildKeys.length} failed ${failedChildKeys.length === 1 ? "child" : "children"}; inspect`,
+      description: `Run finished with ${failedChildren} failed ${failedChildren === 1 ? "child" : "children"}; inspect`,
     });
   }
   const nextSteps = withAgentNextSteps(

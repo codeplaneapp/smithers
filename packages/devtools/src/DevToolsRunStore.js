@@ -181,6 +181,10 @@ export class DevToolsRunStore {
         if (isTerminalRun(run)) break;
         run.status = "finished";
         run.finishedAt = event.timestampMs;
+        if (typeof event.failedChildren === "number" && event.failedChildren > 0) {
+          run.failedChildren = event.failedChildren;
+          run.failedChildKeys = Array.isArray(event.failedChildKeys) ? [...event.failedChildKeys] : [];
+        }
         break;
       case "RunFailed":
         if (isTerminalRun(run)) break;

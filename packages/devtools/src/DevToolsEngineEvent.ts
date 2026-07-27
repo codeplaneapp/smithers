@@ -35,7 +35,11 @@ type NodeEventBase = RunEventBase & {
 };
 
 export type RunStartedEvent = RunEventBase & { type: "RunStarted" };
-export type RunFinishedEvent = RunEventBase & { type: "RunFinished" };
+export type RunFinishedEvent = RunEventBase & {
+  type: "RunFinished";
+  failedChildren?: number;
+  failedChildKeys?: readonly string[];
+};
 export type RunFailedEvent = RunEventBase & { type: "RunFailed"; error?: unknown };
 export type RunCancelledEvent = RunEventBase & { type: "RunCancelled" };
 

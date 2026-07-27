@@ -9,4 +9,6 @@ export type RunExecutionState = {
   events: Array<{ type: string; timestampMs: number; [key: string]: unknown }>;
   startedAt?: number;
   finishedAt?: number;
+  failedChildren?: number;
+  failedChildKeys?: readonly string[];
 };

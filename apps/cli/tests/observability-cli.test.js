@@ -132,4 +132,48 @@ describe("CLI observability", () => {
     },
     TIMEOUT_MS,
   );
+
+  test(
+    "inspect reads the degraded outcome from RunFinished instead of node rows",
+    async () => {
+      const repo = createTempRepo();
+      const { sqlite, adapter } = openRepoDb(repo);
+      try {
+        await insertFinishedRun(adapter, "inspect-degraded-run");
+        await adapter.insertNode({
+          runId: "inspect-degraded-run",
+          nodeId: "currently-clean",
+          iteration: 0,
+          state: "finished",
+          lastAttempt: 1,
+          updatedAtMs: Date.now(),
+          outputTable: "",
+          label: "Currently clean",
+        });
+        await adapter.insertEventWithNextSeq({
+          runId: "inspect-degraded-run",
+          timestampMs: Date.now() - 1_000,
+          type: "RunFinished",
+          payloadJson: JSON.stringify({
+            type: "RunFinished",
+            runId: "inspect-degraded-run",
+            failedChildren: 2,
+            failedChildKeys: ["fanout::1", "fanout::4"],
+          }),
+        });
+
+        const result = runSmithers(["inspect", "inspect-degraded-run"], {
+          cwd: repo.dir,
+          format: "json",
+          timeoutMs: TIMEOUT_MS,
+        });
+        expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(0);
+        expect(result.json.failedChildren).toBe(2);
+        expect(result.json.failedChildKeys).toEqual(["fanout::1", "fanout::4"]);
+      } finally {
+        sqlite.close();
+      }
+    },
+    TIMEOUT_MS,
+  );
 });

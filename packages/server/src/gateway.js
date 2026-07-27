@@ -2465,6 +2465,45 @@ function decrementSubscriberCount(counts, key) {
     counts.delete(key);
   }
 }
+/**
+ * Read the persisted terminal outcome instead of reconstructing it from nodes.
+ *
+ * @param {Pick<SmithersDb, "listEventsByType">} adapter
+ * @param {string} runId
+ * @param {string} status
+ * @returns {Promise<{ failedChildren?: number, failedChildKeys?: string[] }>}
+ */
+async function readPersistedDegradedOutcome(adapter, runId, status) {
+  if (status !== "finished") {
+    return {};
+  }
+  const events = await adapter.listEventsByType(runId, "RunFinished");
+  const payloadJson = events.at(-1)?.payloadJson;
+  if (typeof payloadJson !== "string") {
+    return {};
+  }
+  let payload;
+  try {
+    payload = JSON.parse(payloadJson);
+  } catch {
+    return {};
+  }
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    typeof payload.failedChildren !== "number" ||
+    !Number.isFinite(payload.failedChildren) ||
+    payload.failedChildren <= 0
+  ) {
+    return {};
+  }
+  return {
+    failedChildren: payload.failedChildren,
+    failedChildKeys: Array.isArray(payload.failedChildKeys)
+      ? payload.failedChildKeys.filter((key) => typeof key === "string")
+      : [],
+  };
+}
 export class Gateway {
   protocol;
   features;
@@ -3660,8 +3699,11 @@ a { color: var(--brand); }</style>
     if (!run) {
       return null;
     }
-    const summary = await resolved.adapter.countNodesByState(runId);
-    const runState = await computeRunStateFromRow(resolved.adapter, run).catch(() => undefined);
+    const [summary, runState, degradedOutcome] = await Promise.all([
+      resolved.adapter.countNodesByState(runId),
+      computeRunStateFromRow(resolved.adapter, run).catch(() => undefined),
+      readPersistedDegradedOutcome(resolved.adapter, runId, run.status),
+    ]);
     return {
       ...run,
       workflowKey: resolved.workflowKey,
@@ -3670,6 +3712,7 @@ a { color: var(--brand); }</style>
         return acc;
       }, {}),
       ...(runState ? { runState } : {}),
+      ...degradedOutcome,
     };
   }
   /**
@@ -6230,6 +6273,12 @@ a { color: var(--brand); }</style>
             runId,
             status: result.status,
             error: result.error,
+            ...(result.failedChildren > 0
+              ? {
+                  failedChildren: result.failedChildren,
+                  failedChildKeys: Array.isArray(result.failedChildKeys) ? result.failedChildKeys : [],
+                }
+              : {}),
           });
         }
       });
@@ -8520,6 +8569,12 @@ a { color: var(--brand); }</style>
           payload: {
             runId: event.runId,
             status: "finished",
+            ...(event.failedChildren > 0
+              ? {
+                  failedChildren: event.failedChildren,
+                  failedChildKeys: Array.isArray(event.failedChildKeys) ? event.failedChildKeys : [],
+                }
+              : {}),
           },
         };
       case "RunFailed":
@@ -8843,8 +8898,11 @@ a { color: var(--brand); }</style>
         if (!run) {
           return responseError(frame.id, "NOT_FOUND", `Run not found: ${runId}`);
         }
-        const summary = await resolved.adapter.countNodesByState(runId);
-        const runState = await computeRunStateFromRow(resolved.adapter, run).catch(() => undefined);
+        const [summary, runState, degradedOutcome] = await Promise.all([
+          resolved.adapter.countNodesByState(runId),
+          computeRunStateFromRow(resolved.adapter, run).catch(() => undefined),
+          readPersistedDegradedOutcome(resolved.adapter, runId, run.status),
+        ]);
         const startedBy = runStartedByFromRow(run);
         return responseOk(frame.id, {
           ...run,
@@ -8856,6 +8914,7 @@ a { color: var(--brand); }</style>
           }, {}),
           ...(runState ? { runState } : {}),
           ...(startedBy ? { startedBy } : {}),
+          ...degradedOutcome,
         });
       }
       case "frames.list": {

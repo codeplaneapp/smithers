@@ -80,6 +80,36 @@ describe("DevToolsRunStore event processing", () => {
     expect(store.getRun("r3")?.finishedAt).toBe(4);
   });
 
+  test("RunFinished exposes the persisted degraded outcome without reducing task rows", () => {
+    const store = new DevToolsRunStore();
+    store.processEngineEvent({
+      type: "RunFinished",
+      runId: "degraded",
+      timestampMs: 2,
+      failedChildren: 2,
+      failedChildKeys: ["fanout::1", "fanout::4"],
+    });
+
+    expect(store.getRun("degraded")).toMatchObject({
+      status: "finished",
+      failedChildren: 2,
+      failedChildKeys: ["fanout::1", "fanout::4"],
+    });
+    expect(store.getRun("degraded")?.tasks.size).toBe(0);
+  });
+
+  test("clean RunFinished omits degraded outcome fields", () => {
+    const store = new DevToolsRunStore();
+    store.processEngineEvent({
+      type: "RunFinished",
+      runId: "clean",
+      timestampMs: 2,
+    });
+
+    expect(store.getRun("clean")).not.toHaveProperty("failedChildren");
+    expect(store.getRun("clean")).not.toHaveProperty("failedChildKeys");
+  });
+
   test("FrameCommitted updates frameNo on the run", () => {
     const store = new DevToolsRunStore();
     store.processEngineEvent({

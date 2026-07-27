@@ -106,6 +106,8 @@ type RunStartedEvent = RunEventBase & {
 };
 type RunFinishedEvent = RunEventBase & {
     type: "RunFinished";
+    failedChildren?: number;
+    failedChildKeys?: readonly string[];
 };
 type RunFailedEvent = RunEventBase & {
     type: "RunFailed";
@@ -289,6 +291,8 @@ type RunExecutionState$3 = {
     }>;
     startedAt?: number;
     finishedAt?: number;
+    failedChildren?: number;
+    failedChildKeys?: readonly string[];
 };
 
 type DevToolsRunStoreOptions$2 = Pick<SmithersDevToolsOptions$2, "onEngineEvent" | "verbose" | "maxRunsRetained" | "maxEventsPerRun" | "maxTasksPerRun" | "maxToolCallsPerTask">;

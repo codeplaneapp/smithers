@@ -140,6 +140,13 @@ describe("formatEventLine", () => {
     const line = formatEventLine({ timestampMs: 2000, type: "RunFinished", payloadJson: "{}" }, base);
     expect(line).toContain("✓ Run finished");
   });
+  test("formats a degraded RunFinished from its persisted outcome", () => {
+    const line = formatEventLine(
+      { timestampMs: 2000, type: "RunFinished", payloadJson: JSON.stringify({ failedChildren: 2 }) },
+      base,
+    );
+    expect(line).toContain("✓ Run finished (2 failed children)");
+  });
   test("formats RunFailed", () => {
     const line = formatEventLine(
       { timestampMs: 2000, type: "RunFailed", payloadJson: JSON.stringify({ error: "boom" }) },

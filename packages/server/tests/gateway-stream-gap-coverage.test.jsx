@@ -133,7 +133,7 @@ describe("streamRunEvents gap resync", () => {
   }
 
   test("rebuilds a run snapshot and emits run.gap_resync", async () => {
-    const { gateway } = bootGateway("ok");
+    const { gateway, workflow } = bootGateway("ok");
     const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
     cleanups.push(() => gateway.close());
     const port = getPort(server);
@@ -143,6 +143,22 @@ describe("streamRunEvents gap resync", () => {
     // A real finished run so buildRunSnapshot resolves and its node-state summary
     // reduce runs over the persisted task node.
     const runId = await launchAndFinish(client);
+    const cleanSnapshot = await gateway.buildRunSnapshot(runId);
+    expect(cleanSnapshot).not.toHaveProperty("failedChildren");
+    expect(cleanSnapshot).not.toHaveProperty("failedChildKeys");
+
+    const adapter = new SmithersDb(workflow.db);
+    await adapter.insertEventWithNextSeq({
+      runId,
+      timestampMs: Date.now(),
+      type: "RunFinished",
+      payloadJson: JSON.stringify({
+        type: "RunFinished",
+        runId,
+        failedChildren: 2,
+        failedChildKeys: ["fanout::1", "fanout::4"],
+      }),
+    });
     seedWindowGap(gateway, runId);
 
     const res = await client.request("streamRunEvents", { runId, afterSeq: 0 });
@@ -152,6 +168,10 @@ describe("streamRunEvents gap resync", () => {
     // The rebuilt snapshot carries the node-state summary produced by the reduce.
     expect(gap.payload.snapshot).toBeTruthy();
     expect(gap.payload.snapshot.summary).toBeDefined();
+    expect(gap.payload.snapshot).toMatchObject({
+      failedChildren: 2,
+      failedChildKeys: ["fanout::1", "fanout::4"],
+    });
   });
 
   test("buffers live frames until gap replay drains", async () => {
@@ -246,7 +266,7 @@ describe("streamRunEvents gap resync", () => {
   });
 
   test("emits run.error when the replay snapshot rebuild throws", async () => {
-    const { gateway, workflow } = bootGateway("throw");
+    const { gateway } = bootGateway("throw");
     const server = await gateway.listen({ port: 0, host: "127.0.0.1" });
     cleanups.push(() => gateway.close());
     const port = getPort(server);
@@ -256,9 +276,9 @@ describe("streamRunEvents gap resync", () => {
     const runId = await launchAndFinish(client);
     seedWindowGap(gateway, runId);
 
-    // Close the workflow DB so the gap-resync's buildRunSnapshot read throws,
-    // driving the replay `.catch` that emits run.error.
-    workflow.db.$client.close();
+    gateway.buildRunSnapshot = async () => {
+      throw new Error("deliberate snapshot failure");
+    };
 
     const res = await client.request("streamRunEvents", { runId, afterSeq: 0 });
     expect(res.ok).toBe(true);

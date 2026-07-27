@@ -88,6 +88,29 @@ function createValueWorkflow(dbPath) {
 /**
  * @param {string} dbPath
  */
+function createDegradedWorkflow(dbPath) {
+  const { smithers, Workflow, Task, outputs } = createSmithers(
+    {
+      outputA: z.object({ value: z.number() }),
+    },
+    { dbPath },
+  );
+  return smithers(() => (
+    <Workflow name="gateway-degraded">
+      <Task id="bad" output={outputs.outputA} continueOnFail noRetry>
+        {() => {
+          throw new Error("deliberate tolerated failure");
+        }}
+      </Task>
+      <Task id="good" output={outputs.outputA}>
+        {{ value: 1 }}
+      </Task>
+    </Workflow>
+  ));
+}
+/**
+ * @param {string} dbPath
+ */
 function createSchemaInputValueWorkflow(dbPath) {
   const { smithers, Workflow, Task, outputs } = createSmithers(
     {
@@ -1123,6 +1146,12 @@ describe("Gateway", () => {
     expect(run.ok).toBe(true);
     expect(run.payload.runId).toBe(runId);
     expect(run.payload.status).toBe("finished");
+    expect(run.payload).not.toHaveProperty("failedChildren");
+    expect(run.payload).not.toHaveProperty("failedChildKeys");
+    const cleanLegacyRun = await client.request("getRun", { runId });
+    expect(cleanLegacyRun.ok).toBe(true);
+    expect(cleanLegacyRun.payload).not.toHaveProperty("failedChildren");
+    expect(cleanLegacyRun.payload).not.toHaveProperty("failedChildKeys");
     const runs = await client.request("runs.list", { limit: 10 });
     expect(runs.ok).toBe(true);
     expect(runs.payload.some((entry) => entry.runId === runId)).toBe(true);
@@ -1157,6 +1186,57 @@ describe("Gateway", () => {
     });
     expect(diff.ok).toBe(true);
     expect(diff.payload.outputsChanged.length).toBeGreaterThan(0);
+    await client.close();
+  });
+  test("streams the persisted degraded outcome on every run.completed event", async () => {
+    const dbPath = makeDbPath("degraded");
+    dbPaths.push(dbPath);
+    gateway = new Gateway({
+      protocol: 1,
+      features: ["streaming", "runs"],
+      heartbeatMs: 100,
+      auth: {
+        mode: "token",
+        tokens: {
+          "op-token": {
+            role: "operator",
+            scopes: ["*"],
+            userId: "user:will",
+          },
+        },
+      },
+    });
+    gateway.register("degraded", createDegradedWorkflow(dbPath));
+    server = await gateway.listen({ port: 0, host: "127.0.0.1" });
+    const { client } = await connectGateway(getPort(server), "op-token");
+    const created = await client.request("runs.create", {
+      workflow: "degraded",
+      input: {},
+    });
+    expect(created.ok).toBe(true);
+
+    for (let i = 0; i < 2; i += 1) {
+      const completed = await client.waitFor(
+        (message) =>
+          message.type === "event" &&
+          message.event === "run.completed" &&
+          message.payload.runId === created.payload.runId,
+      );
+      expect(completed.payload).toMatchObject({
+        status: "finished",
+        failedChildren: 1,
+        failedChildKeys: ["bad::0"],
+      });
+    }
+    for (const method of ["runs.get", "getRun"]) {
+      const run = await client.request(method, { runId: created.payload.runId });
+      expect(run.ok).toBe(true);
+      expect(run.payload).toMatchObject({
+        status: "finished",
+        failedChildren: 1,
+        failedChildKeys: ["bad::0"],
+      });
+    }
     await client.close();
   });
   test("reruns with the original schema-backed input row", async () => {

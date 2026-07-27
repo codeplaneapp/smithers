@@ -406,7 +406,26 @@ describe("Gateway.mapEvent — SmithersEvent→wire mapping", () => {
     });
   });
 
-  test("RunFinished → run.completed status=finished", () => {
+  test("RunFinished → run.completed carries the persisted degraded outcome", () => {
+    const result = gateway.mapEvent({
+      type: "RunFinished",
+      runId: "run-1",
+      timestampMs: 1000,
+      failedChildren: 2,
+      failedChildKeys: ["fanout::1", "fanout::4"],
+    });
+    expect(result).toEqual({
+      event: "run.completed",
+      payload: {
+        runId: "run-1",
+        status: "finished",
+        failedChildren: 2,
+        failedChildKeys: ["fanout::1", "fanout::4"],
+      },
+    });
+  });
+
+  test("clean RunFinished omits degraded outcome fields", () => {
     const result = gateway.mapEvent({
       type: "RunFinished",
       runId: "run-1",
