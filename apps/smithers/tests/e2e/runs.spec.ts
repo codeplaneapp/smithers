@@ -77,7 +77,7 @@ test("a no-match search shows the empty state and Clear restores the roster", as
 
   await page.getByTestId("runs-search").fill("no-such-run-zzzz");
   await expect(page.getByTestId("runs-row")).toHaveCount(0);
-  await expect(page.getByText("No runs found.")).toBeVisible();
+  await expect(page.getByText("No runs match your filters.")).toBeVisible();
 
   await page.getByTestId("runs-clear").click();
   await expect(page.getByTestId("runs-row").first()).toBeVisible();
@@ -96,7 +96,7 @@ test("a status filter with no matching runs shows the empty state", async ({ pag
   await page.getByRole("button", { name: /^Status:/ }).click();
   await page.getByRole("menuitemradio", { name: "Cancelled" }).click();
   await expect(page.getByTestId("runs-row")).toHaveCount(0);
-  await expect(page.getByText("No runs found.")).toBeVisible();
+  await expect(page.getByText("No runs match your filters.")).toBeVisible();
 
   await page.getByTestId("runs-clear").click();
   await expect(page.getByTestId("runs-row").first()).toBeVisible();

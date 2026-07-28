@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useGatewayRuns } from "@smithers-orchestrator/gateway-react";
+import { useGatewayConnectionStatus, useGatewayRuns } from "@smithers-orchestrator/gateway-react";
 import { useLocalModeRefetch } from "../sync/useLocalModeRefetch";
 import { normalizeRunStatus, runStatusCategory, type RunSummary } from "./runsList";
 import { useRunsListStore } from "./runsListStore";
@@ -57,6 +57,7 @@ export function toRunSummary(row: Record<string, unknown>): RunSummary {
 
 export function RunsListBridge() {
   const { data, loading, error, refetch } = useGatewayRuns({ filter: { limit: 100 } });
+  const connection = useGatewayConnectionStatus();
 
   // LOCAL-MODE freshness: the `runs` collection is pull-only (no stream), so a
   // run launched/advanced after the initial pull is never pushed here. Poll the
@@ -68,15 +69,33 @@ export function RunsListBridge() {
 
   useEffect(() => {
     useRunsListStore.setState((state) => {
+      // A transport failure must never replace the last successful roster
+      // with the live query's temporary empty value.
+      if (connection.status === "offline" || connection.status === "unauthorized") {
+        return {
+          loading: false,
+          error: error ? error.message || "The runs service could not be reached." : state.error,
+          connectionStatus: connection.status,
+        };
+      }
       if (error) {
-        return { loading: false, error: error.message || "The runs service could not be reached." };
+        return {
+          loading: false,
+          error: error.message || "The runs service could not be reached.",
+          connectionStatus: connection.status,
+        };
       }
       if (loading && (data?.length ?? 0) === 0 && state.runs.length === 0) {
-        return { loading: true, error: null };
+        return { loading: true, error: null, connectionStatus: connection.status };
       }
-      return { runs: (data ?? []).map(toRunSummary), loading: false, error: null };
+      return {
+        runs: (data ?? []).map(toRunSummary),
+        loading: false,
+        error: null,
+        connectionStatus: connection.status,
+      };
     });
-  }, [data, error, loading]);
+  }, [connection.status, data, error, loading]);
 
   return null;
 }

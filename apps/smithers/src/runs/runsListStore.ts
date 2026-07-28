@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { GatewayConnectionStatus } from "@smithers-orchestrator/gateway-react";
 import { useChatStore } from "../chat/chatStore";
 import { useNotificationsStore } from "../notifications/notificationsStore";
 import { DEFAULT_FILTERS, shortRunId, type AgeFilter, type RunStatusFilter, type RunSummary } from "./runsList";
@@ -26,6 +27,8 @@ type RunsListState = {
   loading: boolean;
   /** The live collection could not be read; null after a successful read. */
   error: string | null;
+  /** Real gateway transport state, mirrored by RunsListBridge. */
+  connectionStatus: GatewayConnectionStatus;
   statusFilter: RunStatusFilter;
   workflowFilter: string | "all";
   ageFilter: AgeFilter;
@@ -62,6 +65,7 @@ export const useRunsListStore = create<RunsListState>((set, get) => ({
   runs: [],
   loading: true,
   error: null,
+  connectionStatus: "idle",
   statusFilter: DEFAULT_FILTERS.status,
   workflowFilter: DEFAULT_FILTERS.workflow,
   ageFilter: DEFAULT_FILTERS.age,

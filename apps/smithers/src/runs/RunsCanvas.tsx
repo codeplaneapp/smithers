@@ -233,6 +233,7 @@ export function RunsCanvas() {
   const runs = useRunsListStore((state) => state.runs);
   const loading = useRunsListStore((state) => state.loading);
   const error = useRunsListStore((state) => state.error);
+  const connectionStatus = useRunsListStore((state) => state.connectionStatus);
   const statusFilter = useRunsListStore((state) => state.statusFilter);
   const workflowFilter = useRunsListStore((state) => state.workflowFilter);
   const ageFilter = useRunsListStore((state) => state.ageFilter);
@@ -254,7 +255,31 @@ export function RunsCanvas() {
     ...workflows.map((name) => ({ id: name, label: name })),
   ];
   const showClear = hasActiveFilters(filters);
-  const live = streamMode === "live";
+  const lastKnown =
+    runs.length > 0 && (connectionStatus === "offline" || connectionStatus === "unauthorized" || Boolean(error));
+  const live = connectionStatus === "online" && streamMode === "live" && !error;
+  const streamLabel = lastKnown
+    ? "Last-known"
+    : connectionStatus === "unauthorized"
+      ? "Unauthorized"
+      : connectionStatus === "offline"
+        ? "Offline"
+        : error
+          ? "Unavailable"
+          : connectionStatus === "idle" || connectionStatus === "connecting"
+            ? "Connecting"
+            : live
+              ? "Live"
+              : "Polling";
+  const freshnessMessage = !lastKnown
+    ? null
+    : connectionStatus === "unauthorized"
+      ? "Authorization failed. Every run shown below is last-known data and may be out of date."
+      : connectionStatus === "offline"
+        ? "Gateway offline. Every run shown below is last-known data and may be out of date."
+        : error
+          ? `Refresh failed. Every run shown below is last-known data and may be out of date. ${error}`
+          : null;
 
   return (
     <section className="surface" data-testid="runs-canvas">
@@ -266,7 +291,7 @@ export function RunsCanvas() {
           onClick={() => setStreamMode(live ? "polling" : "live")}
           data-testid="runs-stream-badge"
         >
-          {live ? "Live" : "Polling"}
+          {streamLabel}
         </button>
         <span className="surface-sub">
           {shown.length} run{shown.length === 1 ? "" : "s"}
@@ -309,13 +334,52 @@ export function RunsCanvas() {
       </header>
 
       <div className="runs-scroll">
-        {loading && runs.length === 0 ? (
+        {freshnessMessage ? (
+          <div
+            className="runs-freshness"
+            data-testid="runs-last-known"
+            role={connectionStatus === "unauthorized" ? "alert" : "status"}
+          >
+            {freshnessMessage}
+          </div>
+        ) : null}
+
+        {connectionStatus === "unauthorized" && runs.length === 0 ? (
+          <EmptyState
+            className="surface-empty"
+            data-testid="runs-landing-state"
+            data-state="unauthorized"
+            title="Authorization required"
+            description="The gateway rejected these credentials. Sign in again or check workspace permissions."
+            role="alert"
+          />
+        ) : connectionStatus === "offline" && runs.length === 0 ? (
+          <EmptyState
+            className="surface-empty"
+            data-testid="runs-landing-state"
+            data-state="offline-without-cache"
+            title="Gateway offline"
+            description="No last-known run data is available. Reconnecting automatically."
+            role="alert"
+          />
+        ) : loading && runs.length === 0 ? (
           <div className="surface-empty" role="status" data-testid="runs-loading">
             <Skeleton style={{ width: "min(480px, 80%)", height: 48 }} />
-            <span className="sui-sr-only">Loading runs…</span>
+            <span className="runs-loading-message">
+              {connectionStatus === "idle" || connectionStatus === "connecting"
+                ? "Connecting to the gateway…"
+                : "Loading runs…"}
+            </span>
           </div>
         ) : error && runs.length === 0 ? (
-          <EmptyState className="surface-empty" title="Runs unavailable" description={error} role="alert" />
+          <EmptyState
+            className="surface-empty"
+            data-testid="runs-landing-state"
+            data-state="error"
+            title="Runs unavailable"
+            description={error}
+            role="alert"
+          />
         ) : groups.length > 0 ? (
           groups.map((group) => (
             <div className="runs-group" key={group.key} data-testid="runs-group">
@@ -328,7 +392,12 @@ export function RunsCanvas() {
             </div>
           ))
         ) : (
-          <EmptyState className="surface-empty" title="No runs found." />
+          <EmptyState
+            className="surface-empty"
+            data-testid="runs-landing-state"
+            data-state={showClear ? "filtered" : "empty"}
+            title={showClear ? "No runs match your filters." : "No runs yet."}
+          />
         )}
       </div>
     </section>

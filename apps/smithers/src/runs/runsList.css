@@ -198,6 +198,19 @@
   overflow: auto;
   padding: 10px 14px 16px;
 }
+.runs-freshness {
+  margin-bottom: 10px;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--st-waiting) 35%, var(--border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--st-waiting) 8%, var(--surface));
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.runs-loading-message {
+  font-size: 12px;
+}
 .runs-group {
   display: flex;
   flex-direction: column;
