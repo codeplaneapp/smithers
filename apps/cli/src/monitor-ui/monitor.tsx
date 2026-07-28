@@ -1981,13 +1981,14 @@ function TreeRow({
   );
 }
 
-function ExecutionTree({
+export function ExecutionTree({
   runId,
   treeQuery,
   selectedNodeKey,
   onSelectNode,
   autoSelectNodeId,
   onAutoSelected,
+  onRetry,
   frameOverride,
   asXml,
   durations,
@@ -2000,13 +2001,21 @@ function ExecutionTree({
   onSelectNode: (node: TreeNode) => void;
   autoSelectNodeId?: string;
   onAutoSelected?: () => void;
+  /** Retry the live tree query after an initial failure. */
+  onRetry?: () => void;
   /**
    * Frame-scrubber override: when set, render this static tree instead of the
-   * live one and disable node selection. `root: null` means the frame maps to
-   * an empty tree; `loading` keeps the empty state honest while a frame fetch
-   * is in flight. Absent = live mode, unchanged.
+   * live one and disable node selection. `root: null` means a successfully
+   * loaded frame maps to an empty tree. While loading or unavailable, a
+   * non-null root is the previous valid frame and remains visible.
    */
-  frameOverride?: { root: TreeNode | null; loading: boolean };
+  frameOverride?: {
+    root: TreeNode | null;
+    loading: boolean;
+    error?: Error;
+    onRetry?: () => void;
+    onReturnToLive?: () => void;
+  };
   /** Render the tree as engine-style XML instead of expandable rows. */
   asXml?: boolean;
   /** nodeId#iteration → duration, right-aligned on settled rows. */
@@ -2017,6 +2026,8 @@ function ExecutionTree({
   const { root: liveRoot, nodes, isLoading, error } = treeQuery;
   const isStatic = frameOverride !== undefined;
   const root = isStatic ? frameOverride.root : (liveRoot as TreeNode | null);
+  const frameLoading = frameOverride?.loading ?? false;
+  const frameError = frameLoading ? undefined : frameOverride?.error;
   // ?nodeId= deep link: select the node once it exists in the live tree.
   useEffect(() => {
     if (isStatic || !autoSelectNodeId || nodes.length === 0) return;
@@ -2038,49 +2049,114 @@ function ExecutionTree({
   const defaults = useMemo(() => autoExpandKeys(root as TreeNodeLike | null), [root]);
   if (!isStatic && error) {
     return (
-      <div className="mon-empty">
-        Failed to load the execution tree. <span className="mon-dim">{error.message}</span>
+      <div className="mon-empty" data-testid="monitor-tree-error" role="alert">
+        <div>Failed to load the execution tree.</div>
+        <span className="mon-dim">{error.message}</span>
+        {onRetry ? (
+          <div className="mon-empty-actions">
+            <Chip data-testid="monitor-tree-retry" onClick={onRetry}>
+              Retry
+            </Chip>
+          </div>
+        ) : null}
       </div>
     );
   }
-  if (!isStatic && isLoading) return <div className="mon-empty">Loading execution tree…</div>;
-  if (!root) {
+  if (!isStatic && isLoading) {
     return (
-      <div className="mon-empty">
-        {isStatic ? (frameOverride.loading ? "Loading frame…" : "No nodes in this frame.") : "No nodes recorded yet."}
+      <div className="mon-empty" data-testid="monitor-tree-loading" role="status">
+        Loading execution tree…
       </div>
     );
   }
-  if (asXml) {
+  if (!root) {
+    if (frameLoading) {
+      return (
+        <div className="mon-empty" data-testid="monitor-frame-loading" role="status">
+          Loading frame…
+        </div>
+      );
+    }
+    if (frameError) {
+      return (
+        <div className="mon-empty" data-testid="monitor-frame-unavailable" role="alert">
+          <div>Frame unavailable.</div>
+          <span className="mon-dim">{frameError.message}</span>
+          <div className="mon-empty-actions">
+            {frameOverride?.onRetry ? (
+              <Chip data-testid="monitor-frame-retry" onClick={frameOverride.onRetry}>
+                Retry
+              </Chip>
+            ) : null}
+            {frameOverride?.onReturnToLive ? (
+              <Chip data-testid="monitor-frame-live" onClick={frameOverride.onReturnToLive}>
+                Return to live
+              </Chip>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
     return (
       <div
-        role="region"
-        aria-label="Execution tree XML"
-        tabIndex={0}
-        className={`mon-tree mon-tree-xml${isStatic ? " is-static" : ""}`}
-        data-testid="monitor-tree-xml"
+        className="mon-empty"
+        data-testid={isStatic ? "monitor-frame-empty" : "monitor-tree-empty"}
+        data-state="empty"
       >
-        <XmlRow
-          node={root}
-          depth={0}
-          expandedOverrides={overrides}
-          defaults={defaults}
-          selectedNodeKey={selectedNodeKey}
-          onToggle={(key) =>
-            setOverrides((prev) => {
-              const next = new Map(prev);
-              const current = next.get(key) ?? defaults.has(key);
-              next.set(key, !current);
-              return next;
-            })
-          }
-          onSelect={onSelectNode}
-          selectDisabled={isStatic}
-        />
+        {isStatic ? "No nodes in this frame." : "No nodes recorded yet."}
       </div>
     );
   }
-  return (
+  const notice = frameLoading ? (
+    <div className="mon-tree-state" data-testid="monitor-frame-loading" role="status">
+      Loading frame… Showing the previous frame until it arrives.
+    </div>
+  ) : frameError ? (
+    <div className="mon-tree-state mon-tree-state-error" data-testid="monitor-frame-unavailable" role="alert">
+      <span>
+        Frame unavailable. <span className="mon-dim">Showing the previous frame. {frameError.message}</span>
+      </span>
+      <span className="mon-tree-state-actions">
+        {frameOverride?.onRetry ? (
+          <Chip data-testid="monitor-frame-retry" onClick={frameOverride.onRetry}>
+            Retry
+          </Chip>
+        ) : null}
+        {frameOverride?.onReturnToLive ? (
+          <Chip data-testid="monitor-frame-live" onClick={frameOverride.onReturnToLive}>
+            Return to live
+          </Chip>
+        ) : null}
+      </span>
+    </div>
+  ) : null;
+  const tree = asXml ? (
+    <div
+      role="region"
+      aria-label="Execution tree XML"
+      tabIndex={0}
+      className={`mon-tree mon-tree-xml${isStatic ? " is-static" : ""}`}
+      data-testid="monitor-tree-xml"
+    >
+      <XmlRow
+        node={root}
+        depth={0}
+        expandedOverrides={overrides}
+        defaults={defaults}
+        selectedNodeKey={selectedNodeKey}
+        onToggle={(key) =>
+          setOverrides((prev) => {
+            const next = new Map(prev);
+            const current = next.get(key) ?? defaults.has(key);
+            next.set(key, !current);
+            return next;
+          })
+        }
+        onSelect={onSelectNode}
+        selectDisabled={isStatic}
+      />
+    </div>
+  ) : (
     <div
       role="region"
       aria-label="Execution tree"
@@ -2108,6 +2184,12 @@ function ExecutionTree({
         selectDisabled={isStatic}
       />
     </div>
+  );
+  return (
+    <>
+      {notice}
+      {tree}
+    </>
   );
 }
 
@@ -2352,6 +2434,7 @@ function ExecutionPanel({
   }, [frameEnabled, frameQuery.data]);
   const scrubLoading = scrubbing && (latestQuery.loading || frameQuery.loading || debouncedFrame !== shownFrame);
   const scrubError = scrubbing ? (latestQuery.error ?? frameQuery.error) : undefined;
+  const retryScrub = latestQuery.error ? latestQuery.refetch : frameQuery.refetch;
   const goLive = () => {
     setScrubbing(false);
     setFrame(null);
@@ -2538,7 +2621,18 @@ function ExecutionPanel({
           onSelectNode={onSelectNode}
           autoSelectNodeId={autoSelectNodeId}
           onAutoSelected={onAutoSelected}
-          frameOverride={scrubbing ? { root: scrubTree, loading: scrubLoading } : undefined}
+          onRetry={() => location.reload()}
+          frameOverride={
+            scrubbing
+              ? {
+                  root: scrubTree,
+                  loading: scrubLoading,
+                  error: scrubError,
+                  onRetry: () => void retryScrub(),
+                  onReturnToLive: goLive,
+                }
+              : undefined
+          }
           asXml={asXml}
           durations={durations}
           tokensById={tokensById}
@@ -5014,6 +5108,9 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-tree-duration ~ .mon-pill { margin-left: var(--sp-2); }
 .mon-tree.is-static .mon-tree-main { cursor: default; }
 .mon-tree.is-static { opacity: 0.92; }
+.mon-tree-state { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex-wrap: wrap; margin-bottom: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-2); color: var(--muted); background: var(--panel); font-size: var(--fs-1); }
+.mon-tree-state-error { color: var(--err); border-color: var(--danger-border); background: var(--danger-soft); }
+.mon-tree-state-actions { display: flex; align-items: center; gap: var(--sp-2); }
 
 /* Measured vs estimated: estimates are always dim + italic + tilde-marked,
    measured numbers stay solid — the one rule across every usage surface. */

@@ -33,6 +33,7 @@ const { Chip, MonitorToolbar, RunLifecycleActions, RunLifecycleControls, RunRail
   await import("../src/monitor-ui/monitorShell.tsx");
 const {
   createMonitorKeydownHandler,
+  ExecutionTree,
   monitorCss,
   RunProgressCell,
   RunSelectionState,
@@ -130,6 +131,24 @@ function toolbarHarness(overrides: Partial<Parameters<typeof MonitorToolbar>[0]>
     />
   );
   return { element, calls };
+}
+
+function executionTree(overrides: Record<string, unknown> = {}): ReactElement {
+  return (
+    <ExecutionTree
+      runId="run-tree-states"
+      treeQuery={{
+        root: null,
+        nodes: [],
+        status: "queued",
+        isLoading: false,
+        error: undefined,
+        ...overrides,
+      }}
+      selectedNodeKey={undefined}
+      onSelectNode={() => {}}
+    />
+  );
 }
 
 describe("shared control styling contract", () => {
@@ -479,6 +498,121 @@ describe("migrated monitor surfaces", () => {
     // The j/k cursor row carries its marker class for the highlight styles.
     expect(document.querySelector('[data-run-id="run-b"]')!.className).toContain("is-kbcursor");
     expect(document.querySelector('[data-run-id="run-a"]')!.className).not.toContain("is-kbcursor");
+  });
+});
+
+describe("execution tree unavailable states", () => {
+  const historicalRoot = {
+    key: "workflow#0",
+    id: "workflow",
+    name: "Previous valid frame",
+    kind: "workflow",
+    status: "running",
+    children: [],
+  };
+
+  test("distinguishes live loading, successful empty, and failed query states", async () => {
+    let retries = 0;
+    await render(executionTree({ isLoading: true }));
+    expect(byTestId("monitor-tree-loading").textContent).toContain("Loading execution tree");
+
+    await rerender(executionTree());
+    expect(byTestId("monitor-tree-empty").textContent).toContain("No nodes recorded yet");
+
+    await rerender(
+      <ExecutionTree
+        runId="run-tree-states"
+        treeQuery={{
+          root: null,
+          nodes: [],
+          status: "queued",
+          isLoading: false,
+          error: new Error("live query failed"),
+        }}
+        selectedNodeKey={undefined}
+        onSelectNode={() => {}}
+        onRetry={() => retries++}
+      />,
+    );
+    expect(byTestId("monitor-tree-error").textContent).toContain("live query failed");
+    await click(byTestId("monitor-tree-retry"));
+    expect(retries).toBe(1);
+  });
+
+  test("distinguishes empty and unavailable historical frames with recovery actions", async () => {
+    let retries = 0;
+    let returnsToLive = 0;
+    const treeQuery = {
+      root: null,
+      nodes: [],
+      status: "queued" as const,
+      isLoading: false,
+      error: undefined,
+    };
+    await render(
+      <ExecutionTree
+        runId="run-tree-states"
+        treeQuery={treeQuery}
+        selectedNodeKey={undefined}
+        onSelectNode={() => {}}
+        frameOverride={{ root: null, loading: false }}
+      />,
+    );
+    expect(byTestId("monitor-frame-empty").textContent).toContain("No nodes in this frame");
+
+    await rerender(
+      <ExecutionTree
+        runId="run-tree-states"
+        treeQuery={treeQuery}
+        selectedNodeKey={undefined}
+        onSelectNode={() => {}}
+        frameOverride={{
+          root: null,
+          loading: false,
+          error: new Error("snapshot fetch failed"),
+          onRetry: () => retries++,
+          onReturnToLive: () => returnsToLive++,
+        }}
+      />,
+    );
+    expect(byTestId("monitor-frame-unavailable").textContent).toContain("snapshot fetch failed");
+    await click(byTestId("monitor-frame-retry"));
+    await click(byTestId("monitor-frame-live"));
+    expect(retries).toBe(1);
+    expect(returnsToLive).toBe(1);
+  });
+
+  test("keeps the previous valid frame visible while loading and after a failed scrub", async () => {
+    const treeQuery = {
+      root: null,
+      nodes: [],
+      status: "queued" as const,
+      isLoading: false,
+      error: undefined,
+    };
+    await render(
+      <ExecutionTree
+        runId="run-tree-states"
+        treeQuery={treeQuery}
+        selectedNodeKey={undefined}
+        onSelectNode={() => {}}
+        frameOverride={{ root: historicalRoot, loading: true }}
+      />,
+    );
+    expect(byTestId("monitor-frame-loading").textContent).toContain("previous frame");
+    expect(byTestId("monitor-tree").textContent).toContain("Previous valid frame");
+
+    await rerender(
+      <ExecutionTree
+        runId="run-tree-states"
+        treeQuery={treeQuery}
+        selectedNodeKey={undefined}
+        onSelectNode={() => {}}
+        frameOverride={{ root: historicalRoot, loading: false, error: new Error("frame 3 failed") }}
+      />,
+    );
+    expect(byTestId("monitor-frame-unavailable").textContent).toContain("Showing the previous frame");
+    expect(byTestId("monitor-tree").textContent).toContain("Previous valid frame");
   });
 });
 
