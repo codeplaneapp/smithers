@@ -722,7 +722,8 @@ export function RunsRail({
   const groups = groupRuns(runs);
   // Offline and unauthorized carry state-specific banners (an auth failure
   // must never read like a network outage); connecting states just load.
-  const banner = connectionViewFor(connStatus).banner;
+  const connection = connectionViewFor(connStatus);
+  const banner = connection.banner;
   const lastKnown = connStatus === "offline" && runs.length > 0;
   const blocked = connStatus === "unauthorized";
   const zeroState = runsViewState({
@@ -736,7 +737,9 @@ export function RunsRail({
       {banner ? (
         <div className="mon-banner tone-failed" data-testid={`monitor-runs-${connStatus}`}>
           <div>{banner.title}</div>
-          <div className="mon-dim">{banner.detail}</div>
+          {/* With cached rows below, the banner must say they are last-known
+              rather than reuse the no-data copy — the rows are still on screen. */}
+          <div className="mon-dim">{lastKnown && connection.hint ? connection.hint : banner.detail}</div>
         </div>
       ) : null}
       {!banner && zeroState !== "ready" ? (

@@ -2214,3 +2214,63 @@ export function ptyHijackUrl(
   url.searchParams.set("rows", String(Math.max(2, Math.floor(size.rows) || 24)));
   return url.toString();
 }
+
+/**
+ * Transport states the monitor's gateway connection reports. Mirrors
+ * `GatewayConnectionStatus` from gateway-react so the monitor can consume that
+ * hook's value directly.
+ */
+export type MonitorConnectionStatus = "idle" | "connecting" | "online" | "offline" | "unauthorized";
+
+/**
+ * What the runs list should render instead of (or alongside) rows, so an empty
+ * table never lies about WHY it is empty. "No runs yet" is only honest once the
+ * gateway is actually reachable; while connecting, offline, or unauthorized the
+ * list must say so instead.
+ *
+ * `offline-with-cache` still renders rows — flagged as last-known — whereas
+ * `unauthorized` withholds them, because stale rows behind an auth failure are
+ * not data this viewer is entitled to.
+ */
+export type RunsLandingState =
+  | RunsViewState
+  | "connecting"
+  | "offline-with-cache"
+  | "offline-without-cache"
+  | "unauthorized";
+
+/**
+ * Resolve the runs list's landing state: the transport-aware layer over
+ * {@link runsViewState}.
+ *
+ * Precedence is deliberate. An auth failure outranks everything, because rows
+ * cached before the credentials lapsed are not data this viewer is still
+ * entitled to see. A socket that has not opened yet outranks emptiness, because
+ * nothing has arrived — "no runs yet" would be a claim the client cannot back.
+ * Offline splits on whether there is anything cached to show at all. Only once
+ * the transport is actually healthy does the ordinary
+ * loading/error/filtered/empty classification apply.
+ */
+export function runsLandingState(input: {
+  visibleCount: number;
+  totalCount?: number;
+  loading?: boolean;
+  queryError?: boolean;
+  connectionStatus?: MonitorConnectionStatus;
+  hasCachedData?: boolean;
+}): RunsLandingState {
+  const { visibleCount, totalCount, connectionStatus, hasCachedData } = input;
+  if (connectionStatus === "unauthorized") return "unauthorized";
+  // "idle" is a socket that has not opened yet, so it reads like "connecting".
+  if (connectionStatus === "connecting" || connectionStatus === "idle") return "connecting";
+  if (connectionStatus === "offline") {
+    const cached = hasCachedData === true || (totalCount ?? 0) > 0 || visibleCount > 0;
+    return cached ? "offline-with-cache" : "offline-without-cache";
+  }
+  return runsViewState({
+    visibleCount,
+    totalCount: totalCount ?? 0,
+    loading: input.loading === true,
+    queryError: input.queryError === true,
+  });
+}
