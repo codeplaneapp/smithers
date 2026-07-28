@@ -1,5 +1,16 @@
 // @smithers-type-exports-begin
 /** @typedef {import("@smthrs/agents/capability-registry").AgentCapabilityRegistry} AgentCapabilityRegistry */
+/** @typedef {import("@smthrs/agents").AgentCheckpoint} AgentCheckpoint */
+/** @typedef {import("@smthrs/agents").AgentCheckpointCapability} AgentCheckpointCapability */
+/** @typedef {import("@smthrs/agents").AgentCheckpointContinuationOptions} AgentCheckpointContinuationOptions */
+/** @typedef {import("@smthrs/agents").AgentCheckpointFormat} AgentCheckpointFormat */
+/** @typedef {import("@smthrs/agents").AgentCheckpointJsonArray} AgentCheckpointJsonArray */
+/** @typedef {import("@smthrs/agents").AgentCheckpointJsonObject} AgentCheckpointJsonObject */
+/** @typedef {import("@smthrs/agents").AgentCheckpointJsonPrimitive} AgentCheckpointJsonPrimitive */
+/** @typedef {import("@smthrs/agents").AgentCheckpointJsonValue} AgentCheckpointJsonValue */
+/** @typedef {import("@smthrs/agents").AgentCheckpointMode} AgentCheckpointMode */
+/** @typedef {import("@smthrs/agents").AgentCheckpointPublisher} AgentCheckpointPublisher */
+/** @typedef {import("@smthrs/agents").AgentCheckpointResult} AgentCheckpointResult */
 /** @typedef {import("@smthrs/agents").AgentFileChange} AgentFileChange */
 /** @typedef {import("@smthrs/agents").AgentFileChangeKind} AgentFileChangeKind */
 /** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
@@ -343,6 +354,11 @@ export {
   PoolAgent,
   fallbackAgents,
   createHttpTool,
+  agentProducesCheckpoint,
+  agentSupportsCheckpoint,
+  cloneAgentCheckpoint,
+  DEFAULT_AGENT_CHECKPOINT_MAX_BYTES,
+  hashAgentCheckpointCapabilities,
 } from "@smthrs/agents";
 // VCS
 export {

@@ -46,7 +46,17 @@ agent.
     </ResponseField>
     <ResponseField name="generate" type="(args?: AgentGenerateOptions) => Promise<unknown>" required>
       Runs one generation. `args` carries `prompt`, `outputSchema`, `abortSignal`,
-      `timeout`, and `onStdout` / `onStderr` streaming callbacks.
+      `timeout`, streaming callbacks, checkpoint continuation state, the
+      effective `maxAgentCheckpointBytes` ceiling, and the awaited
+      `onCheckpoint` durability fence.
+    </ResponseField>
+    <ResponseField name="checkpointFormats" type="readonly AgentCheckpointFormat[]">
+      Native checkpoint codecs and exact versions the agent may return or
+      publish. This production declaration is independent of consumption.
+    </ResponseField>
+    <ResponseField name="checkpointCapabilities" type="readonly AgentCheckpointCapability[]">
+      Native checkpoint codecs, exact versions, and resume/fork modes the agent
+      can consume. Fork support must be declared explicitly.
     </ResponseField>
     <ResponseField name="tools" type="Record<string, unknown>">
       Tools the agent may call during generation.
@@ -65,6 +75,54 @@ agent.
     </ResponseField>
   </Expandable>
 </ResponseField>
+
+## Durable agent checkpoints
+
+Checkpoint-aware agents declare what they produce with `checkpointFormats` and
+what they consume with `checkpointCapabilities`. They can return
+`{ checkpoint: { codec, version, payload } }` from `generate()` or publish
+progress through `await args.onCheckpoint(checkpoint)`. The promise is a
+durability fence: resolution means Smithers stored the checkpoint while it
+still owned the invocation; rejection means publication failed or ownership
+was lost. Agents must await it before treating state as durable.
+
+Smithers requires the exact `{ codec, version, payload }` envelope: `codec` is a
+non-empty string, `version` is a positive safe integer, and `payload` is strict,
+lossless JSON (finite numbers, strings, booleans, null, arrays, and plain
+string-keyed objects only). Accessors, sparse arrays, `undefined`, bigint,
+symbols, functions, cycles, non-finite numbers, and custom prototypes are
+rejected. The encoded limit defaults to 16 MiB and can be lowered with
+`maxAgentCheckpointBytes` on the workflow run; values above the 16 MiB system
+ceiling are rejected because durability snapshots enforce the same ceiling.
+Smithers passes the effective ceiling to agent preflight and every generation,
+including correction turns, so an agent can enforce it before publishing state.
+An agent with a smaller local or protocol limit must enforce the lower value.
+
+A later call receives compatible state as the discriminated pair
+`{ resumeCheckpoint, checkpointMode: "resume" | "fork" }`; it never receives a
+checkpoint together with `resumeSession`. Compatibility requires an exact
+codec, version, and mode match in `checkpointCapabilities`. An omitted result
+checkpoint preserves the last published state. Agents without compatible
+native state continue through existing CLI sessions, recorded messages, or
+fresh stateless generation as applicable.
+
+Checkpoint bytes are opaque to Smithers: it validates, hashes, stores, and
+returns them but never interprets `payload`. Time-travel snapshots privately
+embed the snapshot-visible attempt/checkpoint provenance so later GC or attempt
+reuse cannot change an older frame; this metadata is removed from parsed user
+outputs. Snapshot capture caps each checkpoint at 16 MiB, total encoded
+checkpoint provenance at 64 MiB, and visible attempts and references at 100,000
+each; capture fails if a bound is exceeded.
+
+Checkpoint production and consumption declarations are part of task cache
+identity. The semantic codec/version/mode sets are hashed, so changing support
+invalidates prior cache entries while declaration order and duplicates do not.
+
+Use `cloneAgentCheckpoint(checkpoint, maxBytes?)` to validate and detach data at
+adapter boundaries. `agentProducesCheckpoint` checks the production declaration;
+`agentSupportsCheckpoint` checks consumption; and
+`hashAgentCheckpointCapabilities` computes the cache-identity hash.
+`DEFAULT_AGENT_CHECKPOINT_MAX_BYTES` exposes the 16 MiB default.
 
 **Source** [`AgentLike.ts`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/AgentLike.ts) · **Tests** [`agent-contract.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/agent-contract.test.js) · **See also** [Agents overview](/agents/overview), [`SmithersCtx`](/reference/types)
 

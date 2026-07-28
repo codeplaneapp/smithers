@@ -81,6 +81,8 @@ describe("database persistence boundary coverage", () => {
           "_smithers_runs",
           "_smithers_nodes",
           "_smithers_attempts",
+          "_smithers_agent_checkpoint_contents",
+          "_smithers_agent_checkpoints",
           "_smithers_frames",
           "_smithers_approvals",
           "_smithers_human_requests",

@@ -1,4 +1,6 @@
 // @smithers-type-exports-begin
+/** @typedef {import("./adapter/AgentCheckpointRow.ts").AgentCheckpointContentRow} AgentCheckpointContentRow */
+/** @typedef {import("./adapter/AgentCheckpointRow.ts").AgentCheckpointRefRow} AgentCheckpointRefRow */
 /** @typedef {import("./SchemaRegistryEntry.ts").SchemaRegistryEntry} SchemaRegistryEntry */
 // @smithers-type-exports-end
 

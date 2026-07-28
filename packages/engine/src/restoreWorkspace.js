@@ -19,6 +19,18 @@ const defaultRevert = (commitId, cwd) =>
   Effect.runPromise(revertToJjPointer(commitId, cwd).pipe(Effect.provide(getPlatformLayer())));
 
 /**
+ * Native sessions and same-task generic checkpoints both continue an existing
+ * agent execution and therefore require the matching durable workspace.
+ * Checkpoint forks are isolated seeds and must not restore the source task's
+ * workspace into the target task.
+ *
+ * @param {{ resumeSession?: string | null; resumeCheckpoint?: unknown; checkpointMode?: "resume" | "fork" }} state
+ */
+export function shouldRestoreWorkspaceForResume(state) {
+  return Boolean(state.resumeSession || (state.resumeCheckpoint && state.checkpointMode === "resume"));
+}
+
+/**
  * Pick the chronologically latest checkpoint, breaking ties by attempt then seq.
  * (seq resets per attempt, so it can't order across attempts on its own.)
  *

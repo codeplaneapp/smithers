@@ -11,7 +11,11 @@ import { SmithersDb } from "@smthrs/db/adapter";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { captureWorkspaceSnapshot } from "@smthrs/vcs/jj";
 import { createSnapshotService } from "../src/snapshotService.js";
-import { failedRestoreToSurface, restoreWorkspaceToLatestCheckpoint } from "../src/restoreWorkspace.js";
+import {
+  failedRestoreToSurface,
+  restoreWorkspaceToLatestCheckpoint,
+  shouldRestoreWorkspaceForResume,
+} from "../src/restoreWorkspace.js";
 import { appendGap, defaultGapSpoolPath, drainGaps } from "../src/durabilityGapSpool.js";
 
 function fakeAdapter(checkpoints) {
@@ -23,6 +27,22 @@ function fakeAdapter(checkpoints) {
 }
 
 describe("restoreWorkspaceToLatestCheckpoint logic (fakes)", () => {
+  test("restores native and same-task generic resumes but keeps checkpoint forks isolated", () => {
+    expect(shouldRestoreWorkspaceForResume({ resumeSession: "session-1" })).toBe(true);
+    expect(
+      shouldRestoreWorkspaceForResume({
+        resumeCheckpoint: { codec: "test", version: 1, payload: {} },
+        checkpointMode: "resume",
+      }),
+    ).toBe(true);
+    expect(
+      shouldRestoreWorkspaceForResume({
+        resumeCheckpoint: { codec: "test", version: 1, payload: {} },
+        checkpointMode: "fork",
+      }),
+    ).toBe(false);
+  });
+
   test("reports no-checkpoint when the node has none", async () => {
     const res = await restoreWorkspaceToLatestCheckpoint({
       adapter: fakeAdapter([
@@ -144,7 +164,7 @@ const jjAvailable = (() => {
 const describeIfJj = jjAvailable ? describe : describe.skip;
 
 describeIfJj("restoreWorkspaceToLatestCheckpoint against real jj + db", () => {
-  test("reverts a dirtied worktree back to its last checkpoint", async () => {
+  test("same-task generic checkpoint resume restores a worktree dirtied by a crash", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "restore-ws-"));
     try {
       expect(spawnSync("jj", ["git", "init"], { cwd: dir, encoding: "utf8" }).status).toBe(0);
@@ -166,6 +186,11 @@ describeIfJj("restoreWorkspaceToLatestCheckpoint against real jj + db", () => {
       // The process "crashes" mid-next-edit: dirty the tree without snapshotting.
       await fs.writeFile(path.join(dir, "work.txt"), "v2-uncommitted\n");
 
+      const genericResume = {
+        resumeCheckpoint: { codec: "test", version: 1, payload: { cursor: "durable" } },
+        checkpointMode: "resume",
+      };
+      expect(shouldRestoreWorkspaceForResume(genericResume)).toBe(true);
       const res = await restoreWorkspaceToLatestCheckpoint({ adapter, runId: "r1", nodeId: "n1", iteration: 0 });
       expect(res.restored).toBe(true);
       const after = await fs.readFile(path.join(dir, "work.txt"), "utf8");

@@ -26,6 +26,40 @@ const DELETE_DUPLICATE_SCORER_ROWS_SQL = `DELETE FROM _smithers_scorers
 const CREATE_SCORER_IDENTITY_INDEX_SQL = `CREATE UNIQUE INDEX IF NOT EXISTS _smithers_scorers_identity_uidx
   ON _smithers_scorers (run_id, node_id, iteration, attempt, scorer_id, source)`;
 
+const AGENT_CHECKPOINT_ATTEMPT_DELETE_TRIGGER_SQL = `CREATE TRIGGER IF NOT EXISTS _smithers_agent_checkpoints_attempt_delete
+  AFTER DELETE ON _smithers_attempts
+  BEGIN
+    DELETE FROM _smithers_agent_checkpoints
+    WHERE run_id = OLD.run_id
+      AND node_id = OLD.node_id
+      AND iteration = OLD.iteration
+      AND attempt = OLD.attempt;
+  END`;
+
+const AGENT_CHECKPOINT_REF_DELETE_TRIGGER_SQL = `CREATE TRIGGER IF NOT EXISTS _smithers_agent_checkpoint_refs_delete
+  AFTER DELETE ON _smithers_agent_checkpoints
+  BEGIN
+    DELETE FROM _smithers_agent_checkpoint_contents
+    WHERE content_hash = OLD.content_hash
+      AND NOT EXISTS (
+        SELECT 1 FROM _smithers_agent_checkpoints refs
+        WHERE refs.content_hash = OLD.content_hash
+      );
+  END`;
+
+const AGENT_CHECKPOINT_POSTGRES_REF_DELETE_TRIGGER_SQL = `CREATE OR REPLACE FUNCTION _smithers_delete_orphan_agent_checkpoint_content()
+  RETURNS TRIGGER LANGUAGE plpgsql AS $$
+  BEGIN
+    DELETE FROM _smithers_agent_checkpoint_contents contents
+    WHERE contents.content_hash = OLD.content_hash
+      AND NOT EXISTS (
+        SELECT 1 FROM _smithers_agent_checkpoints refs
+        WHERE refs.content_hash = OLD.content_hash
+      );
+    RETURN OLD;
+  END
+  $$`;
+
 const RUN_CANCELLATION_ATTRIBUTION_COLUMNS = [
   ["cancel_request_id", "cancel_request_id TEXT"],
   ["cancel_request_source", "cancel_request_source TEXT"],
@@ -289,6 +323,128 @@ function indexExists(sqlite, index) {
   return Boolean(sqlite.query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?").get(index));
 }
 
+const AGENT_CHECKPOINT_TABLE_SHAPES = {
+  _smithers_agent_checkpoint_contents: {
+    columns: {
+      // SQLite's canonical `TEXT PRIMARY KEY` reports notnull=0 even though
+      // the primary key itself rejects NULL identity values.
+      content_hash: { type: "TEXT", nullable: true },
+      checkpoint_json: { type: "TEXT", nullable: false },
+      size_bytes: { type: "INTEGER", nullable: false },
+      created_at_ms: { type: "INTEGER", nullable: false },
+    },
+    primaryKey: ["content_hash"],
+  },
+  _smithers_agent_checkpoints: {
+    columns: {
+      run_id: { type: "TEXT", nullable: false },
+      node_id: { type: "TEXT", nullable: false },
+      iteration: { type: "INTEGER", nullable: false },
+      attempt: { type: "INTEGER", nullable: false },
+      sequence: { type: "INTEGER", nullable: false },
+      content_hash: { type: "TEXT", nullable: false },
+      codec: { type: "TEXT", nullable: false },
+      version: { type: "INTEGER", nullable: false },
+      agent_id: { type: "TEXT", nullable: true },
+      purpose: { type: "TEXT", nullable: false },
+      created_at_ms: { type: "INTEGER", nullable: false },
+    },
+    primaryKey: ["run_id", "node_id", "iteration", "attempt", "sequence"],
+  },
+};
+
+function agentCheckpointSqliteColumnsMatch(columns, shape) {
+  return (
+    JSON.stringify(columns.map((row) => row.name)) === JSON.stringify(Object.keys(shape.columns)) &&
+    columns.every((column) => {
+      const expected = shape.columns[column.name];
+      return (
+        expected !== undefined &&
+        String(column.type).toUpperCase() === expected.type &&
+        (Number(column.notnull) === 0) === expected.nullable
+      );
+    })
+  );
+}
+
+function agentCheckpointSqliteForeignKeysMatch(fks) {
+  const groups = new Map();
+  for (const row of fks) {
+    const id = Number(row.id);
+    groups.set(id, [...(groups.get(id) ?? []), row]);
+  }
+  const attemptFk = [...groups.values()].find((rows) => rows.every((row) => row.table === "_smithers_attempts"));
+  const contentFk = [...groups.values()].find((rows) =>
+    rows.every((row) => row.table === "_smithers_agent_checkpoint_contents"),
+  );
+  const attemptRows = [...(attemptFk ?? [])];
+  const attemptColumns = attemptRows.sort((a, b) => Number(a.seq) - Number(b.seq)).map((row) => [row.from, row.to]);
+  return (
+    JSON.stringify(attemptColumns) ===
+      JSON.stringify([
+        ["run_id", "run_id"],
+        ["node_id", "node_id"],
+        ["iteration", "iteration"],
+        ["attempt", "attempt"],
+      ]) &&
+    attemptRows.every((row) => String(row.on_delete).toUpperCase() === "CASCADE") &&
+    contentFk?.length === 1 &&
+    contentFk[0].from === "content_hash" &&
+    contentFk[0].to === "content_hash"
+  );
+}
+
+function assertAgentCheckpointSqliteSchema(sqlite) {
+  for (const [table, shape] of Object.entries(AGENT_CHECKPOINT_TABLE_SHAPES)) {
+    if (!tableExists(sqlite, table)) throw new Error(`0037 agent checkpoint schema is missing table ${table}`);
+    const columns = sqlite.query(`PRAGMA table_info(${quoteIdentifier(table)})`).all();
+    const primaryKey = columns
+      .filter((row) => Number(row.pk) > 0)
+      .sort((a, b) => a.pk - b.pk)
+      .map((row) => row.name);
+    if (
+      !agentCheckpointSqliteColumnsMatch(columns, shape) ||
+      JSON.stringify(primaryKey) !== JSON.stringify(shape.primaryKey)
+    ) {
+      throw new Error(
+        `0037 agent checkpoint schema mismatch for ${table}: expected canonical columns and primary key ${shape.primaryKey.join(",")}`,
+      );
+    }
+  }
+  const fks = sqlite.query('PRAGMA foreign_key_list("_smithers_agent_checkpoints")').all();
+  if (!agentCheckpointSqliteForeignKeysMatch(fks)) {
+    throw new Error("0037 agent checkpoint schema mismatch: required foreign keys are missing or invalid");
+  }
+  const index = sqlite.query('PRAGMA index_info("_smithers_agent_checkpoints_content_hash_idx")').all();
+  if (index.length !== 1 || index[0].name !== "content_hash") {
+    throw new Error("0037 agent checkpoint schema mismatch: content hash index is missing or invalid");
+  }
+  return true;
+}
+
+async function assertAgentCheckpointExternalSqliteSchema(storage) {
+  // Keep the async path explicit because edge descriptors do not expose the
+  // synchronous bun:sqlite query API used by the migration runner.
+  for (const [table, shape] of Object.entries(AGENT_CHECKPOINT_TABLE_SHAPES)) {
+    const columns = await storage.queryAllRaw(`PRAGMA table_info(${quoteIdentifier(table)})`);
+    const primaryKey = columns
+      .filter((row) => Number(row.pk) > 0)
+      .sort((a, b) => a.pk - b.pk)
+      .map((row) => row.name);
+    if (
+      !agentCheckpointSqliteColumnsMatch(columns, shape) ||
+      JSON.stringify(primaryKey) !== JSON.stringify(shape.primaryKey)
+    ) {
+      throw new Error(`0037 agent checkpoint schema mismatch for ${table}`);
+    }
+  }
+  const fks = await storage.queryAllRaw('PRAGMA foreign_key_list("_smithers_agent_checkpoints")');
+  const index = await storage.queryAllRaw('PRAGMA index_info("_smithers_agent_checkpoints_content_hash_idx")');
+  if (!agentCheckpointSqliteForeignKeysMatch(fks) || index.length !== 1 || index[0].name !== "content_hash") {
+    throw new Error("0037 agent checkpoint schema mismatch: required foreign key or index is invalid");
+  }
+}
+
 const SNAPSHOT_SQLITE_TRIGGERS = [
   `CREATE TRIGGER IF NOT EXISTS _smithers_snapshot_payload_refs_insert
      AFTER INSERT ON _smithers_snapshot_payload_refs
@@ -490,6 +646,76 @@ async function indexExistsPostgres(pgConn, index) {
     values: [index],
   });
   return Boolean(result.rows?.[0]);
+}
+
+async function assertAgentCheckpointPostgresSchema(pgConn) {
+  for (const [table, shape] of Object.entries(AGENT_CHECKPOINT_TABLE_SHAPES)) {
+    const columnsResult = await pgConn.query({
+      text: `SELECT column_name AS name, data_type, is_nullable
+             FROM information_schema.columns
+             WHERE table_schema = current_schema() AND table_name = $1
+             ORDER BY ordinal_position`,
+      values: [table],
+    });
+    const columns = columnsResult.rows ?? [];
+    if (JSON.stringify(columns.map((row) => row.name)) !== JSON.stringify(Object.keys(shape.columns))) {
+      throw new Error(`0037 agent checkpoint schema mismatch for ${table}`);
+    }
+    for (const column of columns) {
+      const numeric = ["iteration", "attempt", "sequence", "version", "size_bytes", "created_at_ms"].includes(
+        column.name,
+      );
+      if (
+        (numeric ? column.data_type !== "bigint" : column.data_type !== "text") ||
+        (column.name !== "agent_id" && column.is_nullable !== "NO")
+      ) {
+        throw new Error(`0037 agent checkpoint schema mismatch for ${table}.${column.name}`);
+      }
+    }
+    const pkResult = await pgConn.query({
+      text: `SELECT a.attname AS name
+             FROM pg_index i
+             JOIN pg_class t ON t.oid = i.indrelid
+             JOIN pg_namespace n ON n.oid = t.relnamespace
+             JOIN unnest(i.indkey) WITH ORDINALITY keys(attnum, ord) ON true
+             JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = keys.attnum
+             WHERE n.nspname = current_schema() AND t.relname = $1 AND i.indisprimary
+             ORDER BY keys.ord`,
+      values: [table],
+    });
+    if (JSON.stringify((pkResult.rows ?? []).map((row) => row.name)) !== JSON.stringify(shape.primaryKey)) {
+      throw new Error(`0037 agent checkpoint schema mismatch for ${table} primary key`);
+    }
+  }
+  const indexResult = await pgConn.query({
+    text: `SELECT indexdef FROM pg_indexes
+           WHERE schemaname = current_schema() AND indexname = '_smithers_agent_checkpoints_content_hash_idx'`,
+  });
+  if (!/\(content_hash\)\s*$/i.test(String(indexResult.rows?.[0]?.indexdef ?? ""))) {
+    throw new Error("0037 agent checkpoint schema mismatch: content hash index is missing or invalid");
+  }
+  const fkResult = await pgConn.query({
+    text: `SELECT pg_get_constraintdef(c.oid) AS definition
+           FROM pg_constraint c
+           JOIN pg_class t ON t.oid = c.conrelid
+           JOIN pg_namespace n ON n.oid = t.relnamespace
+           WHERE n.nspname = current_schema() AND t.relname = '_smithers_agent_checkpoints' AND c.contype = 'f'`,
+  });
+  const definitions = (fkResult.rows ?? []).map((row) => String(row.definition));
+  if (
+    !definitions.some(
+      (value) => value.includes("FOREIGN KEY (content_hash)") && value.includes("_smithers_agent_checkpoint_contents"),
+    ) ||
+    !definitions.some(
+      (value) =>
+        value.includes("FOREIGN KEY (run_id, node_id, iteration, attempt)") &&
+        value.includes("_smithers_attempts") &&
+        value.includes("ON DELETE CASCADE"),
+    )
+  ) {
+    throw new Error("0037 agent checkpoint schema mismatch: required foreign keys are missing or invalid");
+  }
+  return true;
 }
 
 /**
@@ -1839,6 +2065,67 @@ function buildMigrations(context) {
         return { table: "_smithers_agent_processes", created: true };
       },
     },
+    {
+      id: "0037_agent_checkpoints",
+      name: "Add content-addressed generic agent checkpoints",
+      checksum: "packages/db/migrations/0037_agent_checkpoints.sql",
+      isApplied: (sqlite) => {
+        if (
+          !tableExists(sqlite, "_smithers_agent_checkpoint_contents") ||
+          !tableExists(sqlite, "_smithers_agent_checkpoints") ||
+          !indexExists(sqlite, "_smithers_agent_checkpoints_content_hash_idx")
+        )
+          return false;
+        return assertAgentCheckpointSqliteSchema(sqlite);
+      },
+      isAppliedPostgres: async (pgConn) => {
+        if (
+          !(await tableExistsPostgres(pgConn, "_smithers_agent_checkpoint_contents")) ||
+          !(await tableExistsPostgres(pgConn, "_smithers_agent_checkpoints")) ||
+          !(await indexExistsPostgres(pgConn, "_smithers_agent_checkpoints_content_hash_idx"))
+        )
+          return false;
+        return assertAgentCheckpointPostgresSchema(pgConn);
+      },
+      up: (sqlite) => {
+        sqlite.run(createTableStatementFor("_smithers_agent_checkpoint_contents", context.createTableStatements));
+        sqlite.run(createTableStatementFor("_smithers_agent_checkpoints", context.createTableStatements));
+        sqlite.run(`CREATE INDEX IF NOT EXISTS _smithers_agent_checkpoints_content_hash_idx
+    ON _smithers_agent_checkpoints (content_hash)`);
+        if (tableExists(sqlite, "_smithers_attempts")) sqlite.run(AGENT_CHECKPOINT_ATTEMPT_DELETE_TRIGGER_SQL);
+        sqlite.run(AGENT_CHECKPOINT_REF_DELETE_TRIGGER_SQL);
+        assertAgentCheckpointSqliteSchema(sqlite);
+        return { tables: ["_smithers_agent_checkpoint_contents", "_smithers_agent_checkpoints"] };
+      },
+      upPostgres: async (pgConn) => {
+        await pgConn.query({
+          text: translateDdl(
+            POSTGRES,
+            createTableStatementFor("_smithers_agent_checkpoint_contents", context.createTableStatements),
+          ),
+        });
+        await pgConn.query({
+          text: translateDdl(
+            POSTGRES,
+            createTableStatementFor("_smithers_agent_checkpoints", context.createTableStatements),
+          ),
+        });
+        await pgConn.query({
+          text: "CREATE INDEX IF NOT EXISTS _smithers_agent_checkpoints_content_hash_idx ON _smithers_agent_checkpoints (content_hash)",
+        });
+        await pgConn.query({ text: AGENT_CHECKPOINT_POSTGRES_REF_DELETE_TRIGGER_SQL });
+        await pgConn.query({
+          text: "DROP TRIGGER IF EXISTS _smithers_agent_checkpoint_refs_delete ON _smithers_agent_checkpoints",
+        });
+        await pgConn.query({
+          text: `CREATE TRIGGER _smithers_agent_checkpoint_refs_delete
+                 AFTER DELETE ON _smithers_agent_checkpoints
+                 FOR EACH ROW EXECUTE FUNCTION _smithers_delete_orphan_agent_checkpoint_content()`,
+        });
+        await assertAgentCheckpointPostgresSchema(pgConn);
+        return { tables: ["_smithers_agent_checkpoint_contents", "_smithers_agent_checkpoints"] };
+      },
+    },
   ];
 }
 
@@ -1872,6 +2159,11 @@ export function runSmithersSchemaMigrations(sqlite, context) {
   // CREATE TRIGGER IF NOT EXISTS is metadata-only and repairs a manually
   // dropped lifecycle trigger without rerunning any recorded migration.
   for (const trigger of SNAPSHOT_SQLITE_TRIGGERS) sqlite.run(trigger);
+  if (tableExists(sqlite, "_smithers_attempts") && tableExists(sqlite, "_smithers_agent_checkpoints")) {
+    sqlite.run(AGENT_CHECKPOINT_ATTEMPT_DELETE_TRIGGER_SQL);
+    sqlite.run(AGENT_CHECKPOINT_REF_DELETE_TRIGGER_SQL);
+  }
+  assertAgentCheckpointSqliteSchema(sqlite);
 }
 
 /**
@@ -1962,9 +2254,12 @@ export async function runSmithersSchemaInitSqliteAsync(storage, context) {
     }
   }
   for (const statement of SNAPSHOT_SQLITE_TRIGGERS) await storage.execute(statement);
+  await storage.execute(AGENT_CHECKPOINT_ATTEMPT_DELETE_TRIGGER_SQL);
+  await storage.execute(AGENT_CHECKPOINT_REF_DELETE_TRIGGER_SQL);
   for (const statement of [...context.createIndexStatements, ...EXTRA_INDEX_STATEMENTS]) {
     await storage.execute(statement);
   }
+  await assertAgentCheckpointExternalSqliteSchema(storage);
 }
 
 /**
@@ -2056,6 +2351,16 @@ export async function runSmithersSchemaMigrationsPostgres(pgConn, context) {
     logDestructiveMigration(migration, details);
     applied.add(migration.id);
   }
+  await pgConn.query({ text: AGENT_CHECKPOINT_POSTGRES_REF_DELETE_TRIGGER_SQL });
+  await pgConn.query({
+    text: "DROP TRIGGER IF EXISTS _smithers_agent_checkpoint_refs_delete ON _smithers_agent_checkpoints",
+  });
+  await pgConn.query({
+    text: `CREATE TRIGGER _smithers_agent_checkpoint_refs_delete
+           AFTER DELETE ON _smithers_agent_checkpoints
+           FOR EACH ROW EXECUTE FUNCTION _smithers_delete_orphan_agent_checkpoint_content()`,
+  });
+  await assertAgentCheckpointPostgresSchema(pgConn);
 }
 
 /**

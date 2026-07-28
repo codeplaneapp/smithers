@@ -6,6 +6,7 @@ import { snapshotsCaptured } from "../snapshotsCaptured.js";
 import { snapshotDuration } from "../snapshotDuration.js";
 /** @typedef {import("@smthrs/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("@smthrs/errors/SmithersError").SmithersError} SmithersError */
+import { captureAgentCheckpointProvenance } from "./agentCheckpointProvenance.js";
 /** @typedef {import("./Snapshot.ts").Snapshot} Snapshot */
 /** @typedef {import("./SnapshotData.ts").SnapshotData} SnapshotData */
 
@@ -227,7 +228,16 @@ export function captureSnapshot(adapter, runId, frameNo, data, options = {}) {
         ),
       catch: (cause) => cause,
     });
-    const snapshotOutputs = { ...data.outputs, __smithersSignalProvenanceHorizon: signalHorizon };
+    const agentCheckpointCapture = yield* Effect.tryPromise({
+      try: () => captureAgentCheckpointProvenance(adapter, runId, data.nodes),
+      catch: (cause) => cause,
+    });
+    const snapshotOutputs = {
+      ...data.outputs,
+      __smithersSignalProvenanceHorizon: signalHorizon,
+      __smithersAgentCheckpointHorizons: agentCheckpointCapture.horizons,
+      __smithersAgentCheckpointProvenance: agentCheckpointCapture.provenance,
+    };
     const outputsJson = JSON.stringify(snapshotOutputs);
     const ralphJson = JSON.stringify(data.ralph);
     const inputJson = JSON.stringify(data.input);

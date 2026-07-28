@@ -8,8 +8,13 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { SmithersDb } from "@smthrs/db/adapter";
 import { Effect } from "effect";
+import { createHash } from "node:crypto";
 import { JumpToFrameError, jumpToFrame } from "../src/jumpToFrame.js";
 import { captureSnapshot } from "../src/snapshot/index.js";
+import {
+  captureAgentCheckpointHorizons,
+  parseAgentCheckpointHorizons,
+} from "../src/snapshot/agentCheckpointHorizons.js";
 import { listRewindAuditRows } from "../src/rewindAudit.js";
 
 function setupDb() {
@@ -220,6 +225,206 @@ async function rewindTransition(status: "running" | "finished", forced: boolean)
 }
 
 describe("jumpToFrame", () => {
+  test("chunks checkpoint horizon capture below conservative SQLite bind limits", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      const nodes = Array.from({ length: 501 }, (_, index) => ({
+        nodeId: `task:${index}`,
+        iteration: 0,
+        lastAttempt: 1,
+      }));
+      const horizons = await captureAgentCheckpointHorizons(adapter, "large-horizon-run", nodes);
+      expect(horizons.attempts).toHaveLength(nodes.length);
+      expect(horizons.attempts.every((tuple) => tuple[3] === -1)).toBe(true);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("malformed checkpoint horizons fall back to legacy timestamp filtering", () => {
+    expect(
+      parseAgentCheckpointHorizons({
+        __smithersAgentCheckpointHorizons: {
+          version: 1,
+          attempts: [["valid", 0, 1, 2], ["malformed"]],
+        },
+      }),
+    ).toBeNull();
+  });
+
+  test("removes a later checkpoint from an attempt retained by the target snapshot", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      const runId = "run-checkpoint-horizon";
+      await seedRun(adapter, runId);
+      const insertCheckpoint = async (sequence: number, cursor: string, createdAtMs: number) => {
+        const checkpointJson = JSON.stringify({ codec: "test.rewind", version: 1, payload: { cursor } });
+        const contentHash = createHash("sha256").update(checkpointJson).digest("hex");
+        await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoint_contents", {
+          contentHash,
+          checkpointJson,
+          sizeBytes: Buffer.byteLength(checkpointJson, "utf8"),
+          createdAtMs,
+        });
+        await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoints", {
+          runId,
+          nodeId: "task:one",
+          iteration: 0,
+          attempt: 1,
+          sequence,
+          contentHash,
+          codec: "test.rewind",
+          version: 1,
+          agentId: "test",
+          purpose: "turn",
+          createdAtMs,
+        });
+        return contentHash;
+      };
+      const retainedHash = await insertCheckpoint(0, "at-target", 150);
+      const snapshot = await captureSnapshot(adapter, runId, 1, {
+        nodes: [
+          {
+            nodeId: "task:one",
+            iteration: 0,
+            state: "finished",
+            lastAttempt: 1,
+            outputTable: "out_a",
+            label: "one",
+          },
+        ],
+        outputs: { out_a: [{ nodeId: "task:one", iteration: 0, value: 1 }] },
+        ralph: [],
+        input: {},
+      } as never);
+      // Matching timestamps prove rewind uses the captured sequence horizon,
+      // not an ambiguous millisecond cutoff.
+      const futureHash = await insertCheckpoint(1, "after-target", snapshot.createdAtMs);
+
+      let pruneCalls = 0;
+      const prune = adapter.pruneOrphanedAgentCheckpointContents.bind(adapter);
+      adapter.pruneOrphanedAgentCheckpointContents = () => {
+        pruneCalls += 1;
+        return prune();
+      };
+
+      await jumpToFrame({
+        adapter,
+        runId,
+        frameNo: 1,
+        confirm: true,
+        ...makeNoVcsHooks(),
+        hooks: {
+          beforeStep: (step) => {
+            if (step === "truncate-attempts") expect(pruneCalls).toBe(1);
+          },
+        },
+      });
+
+      expect(pruneCalls).toBe(2);
+      expect(
+        (await adapter.listAgentCheckpointRefs(runId)).map((ref) => [Number(ref.sequence), ref.contentHash]),
+      ).toEqual([[0, retainedHash]]);
+      expect(await adapter.getAgentCheckpoint(retainedHash)).not.toBeNull();
+      expect(await adapter.getAgentCheckpoint(futureHash)).toBeNull();
+      expect((await adapter.listAttempts(runId, "task:one", 0)).map((attempt) => attempt.attempt)).toEqual([1]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("rehydrates exact attempt and checkpoint provenance after reset reuse and GC", async () => {
+    const { adapter, sqlite } = setupDb();
+    try {
+      const runId = "run-checkpoint-rehydrate";
+      await seedRun(adapter, runId);
+      const checkpointJson = JSON.stringify({ codec: "test.rewind", version: 1, payload: { cursor: "target" } });
+      const contentHash = createHash("sha256").update(checkpointJson).digest("hex");
+      await adapter.updateAttempt(runId, "task:one", 0, 1, {
+        metaJson: JSON.stringify({ generation: "target" }),
+        responseText: "target response",
+      });
+      await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoint_contents", {
+        contentHash,
+        checkpointJson,
+        sizeBytes: Buffer.byteLength(checkpointJson, "utf8"),
+        createdAtMs: 175,
+      });
+      await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoints", {
+        runId,
+        nodeId: "task:one",
+        iteration: 0,
+        attempt: 1,
+        sequence: 0,
+        contentHash,
+        codec: "test.rewind",
+        version: 1,
+        agentId: "test",
+        purpose: "turn",
+        createdAtMs: 175,
+      });
+      await captureSnapshot(adapter, runId, 1, {
+        nodes: [
+          {
+            nodeId: "task:one",
+            iteration: 0,
+            state: "finished",
+            lastAttempt: 1,
+            outputTable: "out_a",
+            label: "one",
+          },
+        ],
+        outputs: { out_a: [{ nodeId: "task:one", iteration: 0, value: 1 }] },
+        ralph: [],
+        input: {},
+      } as never);
+
+      await adapter.internalStorage.deleteWhere(
+        "_smithers_attempts",
+        "run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?",
+        [runId, "task:one", 0, 1],
+      );
+      await Effect.runPromise(adapter.pruneOrphanedAgentCheckpointContents());
+      expect(await adapter.getAgentCheckpoint(contentHash)).toBeNull();
+      await adapter.insertAttempt({
+        runId,
+        nodeId: "task:one",
+        iteration: 0,
+        attempt: 1,
+        state: "failed",
+        startedAtMs: 400,
+        finishedAtMs: 450,
+        cached: false,
+        metaJson: JSON.stringify({ generation: "reset" }),
+        responseText: "reset response",
+      });
+      // Keep this fixture focused on DB provenance rather than sandbox
+      // compensation for the unrelated later task.
+      await adapter.updateAttempt(runId, "task:two", 0, 1, { jjPointer: null, jjCwd: null });
+
+      await jumpToFrame({
+        adapter,
+        runId,
+        frameNo: 1,
+        confirm: true,
+        ...makeNoVcsHooks(),
+      });
+
+      expect(await adapter.getAgentCheckpoint(contentHash)).toMatchObject({ checkpointJson });
+      expect((await adapter.listAgentCheckpointRefs(runId)).map((ref) => ref.contentHash)).toEqual([contentHash]);
+      const [attempt] = await adapter.listAttempts(runId, "task:one", 0);
+      expect(attempt).toMatchObject({
+        state: "finished",
+        startedAtMs: 150,
+        finishedAtMs: 170,
+        responseText: "target response",
+      });
+      expect(JSON.parse(attempt.metaJson)).toEqual({ generation: "target" });
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("removes output from a parallel attempt spanning the target frame", async () => {
     const { adapter, sqlite } = setupDb();
     try {

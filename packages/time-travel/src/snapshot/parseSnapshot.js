@@ -79,11 +79,15 @@ export function parseSnapshot(snapshot) {
     }
     ralph[r.ralphId] = r;
   }
+  const outputs = parseSnapshotRecord(snapshot.outputsJson, "outputsJson", ctx);
+  delete outputs.__smithersAgentCheckpointProvenance;
+  delete outputs.__smithersAgentCheckpointHorizons;
+  delete outputs.__smithersSignalProvenanceHorizon;
   return {
     runId: snapshot.runId,
     frameNo: snapshot.frameNo,
     nodes,
-    outputs: parseSnapshotRecord(snapshot.outputsJson, "outputsJson", ctx),
+    outputs,
     ralph,
     input: parseSnapshotRecord(snapshot.inputJson, "inputJson", ctx),
     vcsPointer: snapshot.vcsPointer,

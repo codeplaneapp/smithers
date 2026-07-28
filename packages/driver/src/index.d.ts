@@ -141,6 +141,8 @@ type RunOptions$2 = {
     logDir?: string | null;
     allowNetwork?: boolean;
     maxOutputBytes?: number;
+    /** Maximum UTF-8 JSON bytes accepted for one durable agent checkpoint (default: 16 MiB). */
+    maxAgentCheckpointBytes?: number;
     toolTimeoutMs?: number;
     hot?: boolean | HotReloadOptions$1;
     annotations?: Record<string, string | number | boolean>;

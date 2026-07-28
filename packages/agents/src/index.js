@@ -2,6 +2,17 @@
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./BaseCliAgent/AgentGenerateOptions.ts").AgentGenerateOptions} AgentGenerateOptions */
 /** @typedef {import("./AgentLike.ts").AgentLike} AgentLike */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpoint} AgentCheckpoint */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointCapability} AgentCheckpointCapability */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointFormat} AgentCheckpointFormat */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointJsonArray} AgentCheckpointJsonArray */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointJsonObject} AgentCheckpointJsonObject */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointJsonPrimitive} AgentCheckpointJsonPrimitive */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointJsonValue} AgentCheckpointJsonValue */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointMode} AgentCheckpointMode */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointPublisher} AgentCheckpointPublisher */
+/** @typedef {import("./AgentCheckpoint.ts").AgentCheckpointResult} AgentCheckpointResult */
+/** @typedef {import("./BaseCliAgent/AgentGenerateOptions.ts").AgentCheckpointContinuationOptions} AgentCheckpointContinuationOptions */
 /** @typedef {import("./capability-registry/AgentToolDescriptor.ts").AgentToolDescriptor} AgentToolDescriptor */
 /**
  * @template [CALL_OPTIONS=never]
@@ -64,6 +75,13 @@
 // @smithers-type-exports-end
 
 export { BaseCliAgent } from "./BaseCliAgent/index.js";
+export {
+  DEFAULT_AGENT_CHECKPOINT_MAX_BYTES,
+  agentProducesCheckpoint,
+  agentSupportsCheckpoint,
+  cloneAgentCheckpoint,
+  hashAgentCheckpointCapabilities,
+} from "./agent-checkpoint.js";
 export { hashCapabilityRegistry } from "./capability-registry/index.js";
 export { AnthropicAgent } from "./AnthropicAgent.js";
 export { OpenAIAgent } from "./OpenAIAgent.js";

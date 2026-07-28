@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { Effect } from "effect";
 import { SqlMessageStorage } from "../src/sql-message-storage.js";
 import { SmithersDb } from "../src/adapter.js";
 
@@ -11,7 +12,12 @@ import { SmithersDb } from "../src/adapter.js";
  * runs against genuine SQLite behaviour.
  * @param {{ withExecute?: boolean; withQueryValues?: boolean; withTransaction?: boolean }} [opts]
  */
-function makeExternalDb({ withExecute = true, withQueryValues = true, withTransaction = true } = {}) {
+function makeExternalDb({
+  withExecute = true,
+  withQueryValues = true,
+  withTransaction = true,
+  rejectForeignKeysPragma = false,
+} = {}) {
   const raw = new Database(":memory:");
   /** @type {any} */
   const descriptor = {
@@ -37,6 +43,7 @@ function makeExternalDb({ withExecute = true, withQueryValues = true, withTransa
   }
   if (withExecute) {
     descriptor.execute = async (sql, params = []) => {
+      if (rejectForeignKeysPragma && /^PRAGMA foreign_keys/i.test(sql)) throw new Error("PRAGMA rejected");
       raw.query(sql).run(...(params ?? []));
     };
   }
@@ -163,9 +170,122 @@ describe("SqlMessageStorage external-sqlite connection", () => {
     expect(raw.query("SELECT name FROM sqlite_master WHERE name = 'should_not_exist'").get()).toBeNull();
     raw.close();
   });
+
+  test.each([
+    ["canonical column types", "sequence TEXT NOT NULL", "sequence INTEGER NOT NULL"],
+    ["canonical nullability", "purpose TEXT", "purpose TEXT NOT NULL"],
+    [
+      "the complete cascading attempt foreign key",
+      "FOREIGN KEY (run_id, node_id, iteration, attempt) REFERENCES _smithers_attempts(run_id, node_id, iteration, attempt)",
+      "FOREIGN KEY (run_id, node_id, iteration, attempt) REFERENCES _smithers_attempts(run_id, node_id, iteration, attempt) ON DELETE CASCADE",
+    ],
+  ])("0037 rejects external SQLite schemas without %s", async (_label, malformed, canonical) => {
+    const { raw, descriptor } = makeExternalDb();
+    const storage = new SqlMessageStorage(descriptor);
+    await storage.ensureSchema();
+    raw.run("PRAGMA foreign_keys = OFF");
+    raw.run("DROP TRIGGER _smithers_agent_checkpoints_attempt_delete");
+    raw.run("DROP TRIGGER _smithers_agent_checkpoint_refs_delete");
+    const createSql = raw
+      .query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = '_smithers_agent_checkpoints'")
+      .get().sql;
+    raw.run("DROP TABLE _smithers_agent_checkpoints");
+    raw.run(createSql.replace(canonical, malformed));
+    raw.run("CREATE INDEX _smithers_agent_checkpoints_content_hash_idx ON _smithers_agent_checkpoints (content_hash)");
+    await expect(storage.ensureSchema()).rejects.toThrow(/Failed to initialize SQLite schema/);
+    raw.close();
+  });
 });
 
 describe("SmithersDb over an external-sqlite descriptor", () => {
+  test("checkpoint refs follow attempt deletion when foreign-key PRAGMA is rejected", async () => {
+    const { raw, descriptor } = makeExternalDb({ rejectForeignKeysPragma: true });
+    const storage = new SqlMessageStorage(descriptor);
+    await storage.ensureSchema();
+    await storage.execute(
+      "INSERT INTO _smithers_runs (run_id, workflow_name, status, created_at_ms) VALUES ('trigger-ext', 'wf', 'running', 1)",
+    );
+    await storage.execute(
+      "INSERT INTO _smithers_attempts (run_id, node_id, iteration, attempt, state, started_at_ms) VALUES ('trigger-ext', 'agent', 0, 1, 'in-progress', 1)",
+    );
+    await storage.execute(
+      "INSERT INTO _smithers_agent_checkpoint_contents (content_hash, checkpoint_json, size_bytes, created_at_ms) VALUES ('hash', '{}', 2, 1)",
+    );
+    await storage.execute(
+      "INSERT INTO _smithers_agent_checkpoints (run_id, node_id, iteration, attempt, sequence, content_hash, codec, version, purpose, created_at_ms) VALUES ('trigger-ext', 'agent', 0, 1, 0, 'hash', 'json', 1, 'resume', 1)",
+    );
+    await storage.execute("DELETE FROM _smithers_attempts WHERE run_id = 'trigger-ext'");
+    expect(raw.query("SELECT COUNT(*) AS count FROM _smithers_agent_checkpoints").get().count).toBe(0);
+    raw.close();
+  });
+
+  test("agent checkpoints honor ownership fences and atomic descriptor transactions", async () => {
+    const { raw, descriptor } = makeExternalDb();
+    const storage = new SqlMessageStorage(descriptor);
+    await storage.ensureSchema();
+    const adapter = new SmithersDb(descriptor);
+    await adapter.insertRun({
+      runId: "checkpoint-ext",
+      workflowName: "wf",
+      status: "running",
+      createdAtMs: 1,
+      runtimeOwnerId: "owner-ext",
+    });
+    await adapter.insertAttempt({
+      runId: "checkpoint-ext",
+      nodeId: "agent",
+      iteration: 0,
+      attempt: 1,
+      state: "in-progress",
+      startedAtMs: 1,
+    });
+    const row = {
+      runId: "checkpoint-ext",
+      nodeId: "agent",
+      iteration: 0,
+      attempt: 1,
+      sequence: 0,
+      checkpointJson: '{"cursor":"ext"}',
+      codec: "json",
+      version: 1,
+      purpose: "resume",
+      createdAtMs: 2,
+      runtimeOwnerId: "owner-ext",
+    };
+    expect(await adapter.putAgentCheckpoint({ ...row, runtimeOwnerId: "stale" })).toBeNull();
+    expect(await adapter.putAgentCheckpoint(row)).toMatchObject({ sequence: 0 });
+    expect(await adapter.getNextAgentCheckpointSequence("checkpoint-ext", "agent", 0, 1)).toBe(1);
+    expect(await adapter.listLatestAgentCheckpointRefs("checkpoint-ext", "agent", 0)).toHaveLength(1);
+    expect(raw.query("SELECT COUNT(*) AS count FROM _smithers_agent_checkpoint_contents").get().count).toBe(1);
+    raw.close();
+  });
+
+  test("agent checkpoint write fails before content insertion without external transactions", async () => {
+    const { raw, descriptor } = makeExternalDb({ withTransaction: false });
+    const storage = new SqlMessageStorage(descriptor);
+    await storage.ensureSchema();
+    const adapter = new SmithersDb(descriptor);
+    await expect(
+      Effect.runPromise(
+        adapter.putAgentCheckpoint({
+          runId: "missing",
+          nodeId: "agent",
+          iteration: 0,
+          attempt: 1,
+          sequence: 0,
+          checkpointJson: "{}",
+          codec: "json",
+          version: 1,
+          purpose: "resume",
+          createdAtMs: 1,
+          runtimeOwnerId: null,
+        }),
+      ),
+    ).rejects.toThrow(/must provide an atomic transaction\(\) callback/);
+    expect(raw.query("SELECT COUNT(*) AS count FROM _smithers_agent_checkpoint_contents").get().count).toBe(0);
+    raw.close();
+  });
+
   test("claimRunForResume updates the runtime owner and heartbeat", async () => {
     const { descriptor } = makeExternalDb();
     const storage = new SqlMessageStorage(descriptor);

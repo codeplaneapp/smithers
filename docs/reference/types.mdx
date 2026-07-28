@@ -269,6 +269,7 @@ type RunOptions = {
   logDir?: string | null;
   allowNetwork?: boolean;           // default false; bash tool egress (loopback always allowed)
   maxOutputBytes?: number;          // default 200000
+  maxAgentCheckpointBytes?: number; // default and hard ceiling 16777216; may only be lowered
   toolTimeoutMs?: number;           // default 60000
   hot?: boolean | HotReloadOptions;
   annotations?: Record<string, string | number | boolean>;
@@ -480,13 +481,47 @@ type AgentFileChange = {
   source: "reported" | "reconstructed"; // did the harness report the diff, or did we build it from tool input?
 };
 
+type AgentCheckpointJsonPrimitive = null | boolean | number | string;
+type AgentCheckpointJsonArray = AgentCheckpointJsonValue[];
+type AgentCheckpointJsonObject = { [key: string]: AgentCheckpointJsonValue };
+type AgentCheckpointJsonValue =
+  | AgentCheckpointJsonPrimitive
+  | AgentCheckpointJsonArray
+  | AgentCheckpointJsonObject;
+
+type AgentCheckpoint = {
+  codec: string;
+  version: number;
+  payload: AgentCheckpointJsonValue;
+};
+
+type AgentCheckpointMode = "resume" | "fork";
+
+type AgentCheckpointCapability = {
+  codec: string;
+  versions: readonly number[];
+  modes: readonly AgentCheckpointMode[];
+};
+
+type AgentCheckpointFormat = {
+  codec: string;
+  versions: readonly number[];
+};
+
+type AgentCheckpointPublisher = (checkpoint: AgentCheckpoint) => Promise<void>;
+
+type AgentCheckpointResult = {
+  checkpoint?: AgentCheckpoint;
+};
+
 type AgentGenerateOptions = {
   prompt?: unknown;
   messages?: unknown;
   timeout?: unknown;
   abortSignal?: AbortSignal;
   rootDir?: string;
-  resumeSession?: string;
+  onCheckpoint?: AgentCheckpointPublisher;
+  maxAgentCheckpointBytes?: number; // effective per-run ceiling, at most 16777216
   maxOutputBytes?: number;
   onStdout?: (text: string) => void;
   onStderr?: (text: string) => void;
@@ -502,13 +537,28 @@ type AgentGenerateOptions = {
     attempt?: number;
   };
   [key: string]: unknown;
-};
+} & AgentCheckpointContinuationOptions;
+
+type AgentCheckpointContinuationOptions =
+  | {
+      resumeCheckpoint: AgentCheckpoint;
+      checkpointMode: AgentCheckpointMode;
+      resumeSession?: never;
+    }
+  | {
+      resumeCheckpoint?: never;
+      checkpointMode?: never;
+      resumeSession?: string;
+    };
 
 type AgentLike = {
   id?: string;
   tools?: Record<string, unknown>;
   supportsNativeStructuredOutput?: boolean;
   capabilities?: AgentCapabilityRegistry;
+  checkpointCapabilities?: readonly AgentCheckpointCapability[];
+  checkpointFormats?: readonly AgentCheckpointFormat[];
+  preflight?: (args?: AgentGenerateOptions) => Promise<void>;
   generate: (args?: AgentGenerateOptions) => Promise<unknown>;
 };
 
@@ -1642,10 +1692,14 @@ declare class SmithersError extends Error {
 type SmithersErrorCode = KnownSmithersErrorCode | (string & {});
 type KnownSmithersErrorCode =
   | "INVALID_INPUT" | "MISSING_INPUT" | "MISSING_INPUT_TABLE" | "RESUME_METADATA_MISMATCH"
-  | "UNKNOWN_OUTPUT_SCHEMA" | "INVALID_OUTPUT" | "WORKTREE_CREATE_FAILED" | "VCS_NOT_FOUND"
+  | "UNKNOWN_OUTPUT_SCHEMA" | "INVALID_OUTPUT" | "AGENT_CHECKPOINT_INVALID"
+  | "AGENT_CHECKPOINT_CAPABILITY_UNDECLARED" | "AGENT_CHECKPOINT_HISTORY_EXHAUSTED"
+  | "AGENT_CHECKPOINT_MISSING" | "AGENT_CHECKPOINT_CORRUPT"
+  | "WORKTREE_CREATE_FAILED" | "VCS_NOT_FOUND"
   | "SNAPSHOT_NOT_FOUND" | "VCS_WORKSPACE_CREATE_FAILED" | "TASK_TIMEOUT"
   | "TASK_HIJACK_UNSUPPORTED" | "TASK_FORK_SOURCE_NOT_FOUND" | "TASK_FORK_SOURCE_NOT_COMPLETE"
-  | "TASK_FORK_SESSION_UNAVAILABLE" | "TASK_FORK_CYCLE" | "RUN_NOT_FOUND" | "NODE_NOT_FOUND" | "INVALID_EVENTS_OPTIONS"
+  | "TASK_FORK_SESSION_UNAVAILABLE" | "TASK_FORK_CHECKPOINT_INCOMPATIBLE" | "TASK_FORK_CYCLE"
+  | "RUN_NOT_FOUND" | "NODE_NOT_FOUND" | "INVALID_EVENTS_OPTIONS"
   | "SANDBOX_BUNDLE_INVALID" | "SANDBOX_BUNDLE_TOO_LARGE" | "WORKFLOW_EXECUTION_FAILED"
   | "SANDBOX_EXECUTION_FAILED" | "TASK_HEARTBEAT_TIMEOUT" | "HEARTBEAT_PAYLOAD_TOO_LARGE"
   | "HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE" | "TASK_ABORTED" | "RUN_CANCELLED" | "RUN_NOT_RESUMABLE"
