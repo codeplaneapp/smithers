@@ -88,6 +88,9 @@ test("component reference docs cover exported components", () => {
   const exportedComponents = componentExportBlock
     .split(",")
     .map((name) => name.trim())
+    // Components are PascalCase (including all-caps `TUI`/`UI`); the same
+    // export block also re-exports SCREAMING_SNAKE constants (MONITOR_*),
+    // which are values, not components, and have no reference page.
     .filter((name) => /^[A-Z]/.test(name) && !name.includes("_"));
   exportedComponents.push("Trellis");
 
