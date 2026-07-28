@@ -175,6 +175,7 @@ jobs:
           failed=()
           gate() { echo "::group::$*"; if "$@"; then echo "::endgroup::"; else echo "::endgroup::"; echo "::error title=Gate failed::$*"; failed+=("$*"); fi; }
           gate node scripts/check-single-effect-version.mjs
+          gate node scripts/check-npm-dedupe.mjs
           gate node scripts/check-dependency-boundaries.mjs
           gate node scripts/check-ui-architecture.mjs
           gate node --test scripts/check-ui-architecture.test.mjs

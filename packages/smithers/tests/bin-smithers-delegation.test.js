@@ -7,6 +7,7 @@ import {
   looksLikeWorkflowPath,
   getExplicitWorkflowPath,
   resolveLocalSmithersBinJs,
+  resolveSourceCheckoutCli,
   findNearestWorkflowLocalCli,
   findNearestLocalSmithersCli,
 } from "../src/bin/smithers-delegation.js";
@@ -176,6 +177,50 @@ function scaffoldPackInstall(root) {
   return scaffoldLocalInstall(packDir);
 }
 
+/**
+ * Scaffold a Smithers source checkout under `root`: the CLI entry plus a root
+ * manifest named `smithers-monorepo`.
+ *
+ * @param {string} root
+ * @param {string} [manifestName]
+ * @returns {string} absolute path to the CLI entry
+ */
+function scaffoldSourceCheckout(root, manifestName = "smithers-monorepo") {
+  const entryDir = join(root, "apps", "cli", "src");
+  mkdirSync(entryDir, { recursive: true });
+  const entry = join(entryDir, "index.js");
+  writeFileSync(entry, "#!/usr/bin/env bun\nconsole.log('source smithers');");
+  writeFileSync(join(root, "package.json"), JSON.stringify({ name: manifestName }));
+  return entry;
+}
+
+describe("resolveSourceCheckoutCli", () => {
+  test("resolves the CLI entry of a source checkout", () => {
+    const tmp = makeTmp();
+    const entry = scaffoldSourceCheckout(tmp);
+    expect(resolveSourceCheckoutCli(tmp)).toBe(entry);
+  });
+
+  test("returns null when the CLI entry is absent", () => {
+    const tmp = makeTmp();
+    writeFileSync(join(tmp, "package.json"), JSON.stringify({ name: "smithers-monorepo" }));
+    expect(resolveSourceCheckoutCli(tmp)).toBeNull();
+  });
+
+  test("returns null for an unrelated project that happens to have apps/cli", () => {
+    const tmp = makeTmp();
+    scaffoldSourceCheckout(tmp, "some-other-monorepo");
+    expect(resolveSourceCheckoutCli(tmp)).toBeNull();
+  });
+
+  test("returns null when the root manifest is missing or malformed", () => {
+    const tmp = makeTmp();
+    scaffoldSourceCheckout(tmp);
+    writeFileSync(join(tmp, "package.json"), "{not json");
+    expect(resolveSourceCheckoutCli(tmp)).toBeNull();
+  });
+});
+
 describe("findNearestLocalSmithersCli", () => {
   test("returns null when nothing is installed in any ancestor", () => {
     const tmp = makeTmp();
@@ -234,6 +279,31 @@ describe("findNearestLocalSmithersCli", () => {
     mkdirSync(deep, { recursive: true });
     const binFile = scaffoldPackInstall(tmp);
     expect(findNearestLocalSmithersCli(deep)).toBe(binFile);
+  });
+
+  test("a source checkout wins over both installs at the same level", () => {
+    const tmp = makeTmp();
+    scaffoldLocalInstall(tmp);
+    scaffoldPackInstall(tmp);
+    const entry = scaffoldSourceCheckout(tmp);
+    expect(findNearestLocalSmithersCli(tmp)).toBe(entry);
+  });
+
+  test("finds a source checkout from a subdirectory with no install of its own", () => {
+    const tmp = makeTmp();
+    const deep = join(tmp, "packages", "engine", "src");
+    mkdirSync(deep, { recursive: true });
+    const entry = scaffoldSourceCheckout(tmp);
+    expect(findNearestLocalSmithersCli(deep)).toBe(entry);
+  });
+
+  test("a nearer install still wins over a farther source checkout", () => {
+    const tmp = makeTmp();
+    const inner = join(tmp, "fixtures", "consumer");
+    mkdirSync(inner, { recursive: true });
+    scaffoldSourceCheckout(tmp);
+    const innerBin = scaffoldLocalInstall(inner);
+    expect(findNearestLocalSmithersCli(inner)).toBe(innerBin);
   });
 });
 

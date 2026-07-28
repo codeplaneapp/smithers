@@ -29,7 +29,38 @@ pnpm -C packages/<package> test
 pnpm test
 pnpm -C e2e test
 pnpm docs:llms                  # after docs changes
+
+bun apps/cli/src/index.js <cmd>   # run smithers from this working tree
 ```
+
+## Running smithers here
+
+Internal scripts run the **working tree**, never an installed copy. `bunx
+smithers-orchestrator` downloads the published npm build; inside a checkout it
+usually re-execs back into source via the published bin's `node_modules`
+delegation, but a fresh worktree or slimmed checkout has no such install and
+silently runs last release's build instead of the code under edit.
+
+- Shell/npm scripts: `bun apps/cli/src/index.js <cmd>` (paths are repo-root relative).
+- Plugin code: `resolveSmithersCli()` from `<plugin>/lib/resolve-smithers-cli.mjs`
+  (copied verbatim into each plugin because Codex sparse-checkouts a plugin
+  directory alone; `check:local-smithers` enforces the copies stay identical).
+- Bare `smithers` is fine: `resolveSourceCheckoutCli` makes the bin delegate to
+  this tree's `apps/cli/src/index.js` from anywhere inside the checkout.
+- `pnpm check:local-smithers` (part of `pnpm test`) fails the build on a
+  published-CLI invocation in an execution position. Prose mentions of `bunx
+  smithers-orchestrator` — agent prompts, docs assertions, marketing copy — are
+  correct and are not flagged.
+
+Running from source needs `pnpm install` and nothing else — every package
+resolves through `src/`. Build steps only matter for these:
+
+| Surface | Build first |
+| --- | --- |
+| `smithers ui --app` (bundled local UI) | none; the CLI vite-builds `apps/smithers` on demand and rebuilds when stale. `apps/cli/ui-dist` is a pack-time artifact and is only used when the source app cannot be built. |
+| Types / `pnpm typecheck` / editor | `pnpm -r build` (`tsup --dts-only`) or `pnpm check:dts` |
+| Vendored `jj` binaries | `pnpm fetch:jj` |
+| Shipped init pack assets | `pnpm generate:init-pack` |
 
 ## Replies
 
@@ -43,3 +74,4 @@ pnpm docs:llms                  # after docs changes
 - Dependency and package-manifest changes must refresh both `pnpm-lock.yaml` and `bun.lock` in the same commit.
 - Product code and E2E tests use real backends/data, not mocked behavior.
 - Keep public exports/types and generated docs bundles synchronized; root checks enforce both.
+- Internal scripts execute this working tree's smithers, never an installed one (see above).

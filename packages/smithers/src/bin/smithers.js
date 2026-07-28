@@ -4,6 +4,7 @@ import { realpathSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  describeProtocolCommandSkew,
   getExplicitWorkflowPath,
   findNearestLocalSmithersCli,
   findNearestWorkflowLocalCli,
@@ -32,6 +33,13 @@ function delegateToLocalCliIfPresent() {
   const selfPath = realpathSync(fileURLToPath(import.meta.url));
   const localTarget = realpathSync(localBin);
   if (localTarget === selfPath) return false;
+  // A plugin protocol command handed to a pin that predates it dies as
+  // `Unknown command`, which names neither the pin nor the fix. Say both.
+  const skew = describeProtocolCommandSkew({ args: process.argv.slice(2), binPath: localTarget });
+  if (skew) {
+    console.error(skew);
+    process.exit(4);
+  }
   const proc = spawn(process.execPath, [localTarget, ...process.argv.slice(2)], {
     stdio: "inherit",
     cwd,

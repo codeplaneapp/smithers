@@ -79,6 +79,10 @@ directory containing `.claude-plugin/`), which is the repo root.
     ├── .claude-plugin/
     │   └── plugin.json     # manifest (the only file that lives here)
     ├── .mcp.json           # registers the smithers MCP server (auto-discovered)
+    ├── bin/
+    │   └── smithers.mjs     # launcher named by .mcp.json and monitors.json
+    ├── lib/
+    │   └── resolve-smithers-cli.mjs  # source checkout > published package
     ├── hooks/
     │   ├── hooks.json       # SessionStart + PreToolUse hooks (auto-discovered)
     │   ├── session-start.mjs
@@ -98,8 +102,25 @@ directory containing `.claude-plugin/`), which is the repo root.
 > and is auto-discovered. Hook commands reference bundled scripts via
 > `${CLAUDE_PLUGIN_ROOT}`.
 
+## Which Smithers the plugin runs
+
+Every command the plugin issues — the MCP server, the run monitor, the
+SessionStart run count, the `/workflows` mirror — goes through
+`lib/resolve-smithers-cli.mjs`:
+
+1. If the project sits inside a **Smithers source checkout** (a tree whose root
+   `package.json` is named `smithers-monorepo` and that has
+   `apps/cli/src/index.js`), it runs that working tree. Contributors get the code
+   they are editing, not the last published release.
+2. Otherwise it runs `bunx smithers-orchestrator` — the published package.
+
+`bin/smithers.mjs` applies that choice for config files that can only name a
+static command, forwarding argv and stdio unchanged. In a checkout the
+SessionStart hook also passes the resolved command to the mirror as `args.cli`.
+
 ## Requirements
 
 - `claude` (Claude Code) with the `claude plugin` / `/plugin` interface.
-- `bunx` on PATH (the MCP server launches via `bunx smithers-orchestrator --mcp`).
-- `node` on PATH (the hooks are dependency-free Node ESM scripts).
+- `bunx` on PATH (the MCP server launches via `bunx smithers-orchestrator --mcp`
+  unless a source checkout is detected, in which case it runs `bun` on that tree).
+- `node` on PATH (the hooks and the launcher are dependency-free Node ESM scripts).

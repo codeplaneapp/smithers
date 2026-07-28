@@ -26,6 +26,12 @@ export const meta = {
 //                                        launch a detached run, then mirror it
 //                                        (workflow = discovered ID or a .tsx/.mdx path)
 //   { mirrorAllNodes?, maxLiveWatchers?, agentBudget?, collapseAt? }
+//   { cli? }                             command that runs the Smithers CLI
+//                                        (default `bunx smithers-orchestrator`).
+//                                        Inside a Smithers source checkout the
+//                                        SessionStart hook passes the working
+//                                        tree's entry so the mirror never drives
+//                                        the published build.
 // ---------------------------------------------------------------------------
 
 const CONTRACT = 1
@@ -63,9 +69,12 @@ function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\\''")}'`
 }
 
-const CLI = workflowArgs.cwd
-  ? `cd ${shellQuote(workflowArgs.cwd)} && bunx smithers-orchestrator`
+const CLI_COMMAND = typeof workflowArgs.cli === 'string' && workflowArgs.cli.trim()
+  ? workflowArgs.cli.trim()
   : 'bunx smithers-orchestrator'
+const CLI = workflowArgs.cwd
+  ? `cd ${shellQuote(workflowArgs.cwd)} && ${CLI_COMMAND}`
+  : CLI_COMMAND
 // The Workflow script sandbox has no Node globals — `process` may not exist.
 const sessionId = globalThis.process?.env?.CLAUDE_CODE_SESSION_ID
 const startedBySession = typeof sessionId === 'string' && sessionId.trim()

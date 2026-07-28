@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { describeProtocolCommandSkew } from "../../../packages/smithers/src/bin/smithers-delegation.js";
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../../..");
 const SMITHERS_BIN = resolve(REPO_ROOT, "packages/smithers/src/bin/smithers.js");
@@ -60,14 +61,15 @@ const POSIX_BIN_SHIM = [
  *
  * @param {string} root
  * @param {string} label
+ * @param {string} [version]
  */
-function installFakeSmithersPackage(root, label) {
+function installFakeSmithersPackage(root, label, version = "0.0.0-test") {
   const pkgDir = join(root, "node_modules/smithers-orchestrator");
   writeFile(
     join(pkgDir, "package.json"),
     JSON.stringify({
       name: "smithers-orchestrator",
-      version: "0.0.0-test",
+      version,
       bin: { smithers: "./src/bin/smithers.js" },
     }) + "\n",
   );
@@ -153,6 +155,70 @@ test("bin shim delegates to a project's own node_modules dependency", () => {
 
   expect(delegated.label).toBe("project-dep");
   expect(delegated.args).toEqual(["ps"]);
+});
+
+test("describeProtocolCommandSkew names the pin and the fix when the local copy predates the command", () => {
+  const dir = mkdtempSync(join(tmpdir(), "smithers-bin-skew-"));
+  onTestFinished(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+  installFakeSmithersPackage(join(dir, ".smithers"), "stale", "0.25.0");
+  const binPath = join(dir, ".smithers/node_modules/smithers-orchestrator/src/bin/smithers.js");
+
+  const message = describeProtocolCommandSkew({ args: ["claude", "monitor"], binPath });
+
+  expect(message).toContain("smithers claude");
+  expect(message).toContain(">=0.27.0");
+  expect(message).toContain("0.25.0");
+  expect(message).toContain(join(dir, ".smithers/package.json"));
+  expect(message).toContain("bun add smithers-orchestrator@latest");
+});
+
+test("describeProtocolCommandSkew stays quiet for a new-enough pin or a non-protocol command", () => {
+  const dir = mkdtempSync(join(tmpdir(), "smithers-bin-skew-ok-"));
+  onTestFinished(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+  installFakeSmithersPackage(join(dir, ".smithers"), "current", "0.31.0");
+  const binPath = join(dir, ".smithers/node_modules/smithers-orchestrator/src/bin/smithers.js");
+
+  expect(describeProtocolCommandSkew({ args: ["claude", "monitor"], binPath })).toBeNull();
+  expect(describeProtocolCommandSkew({ args: ["ps"], binPath })).toBeNull();
+  expect(describeProtocolCommandSkew({ args: [], binPath })).toBeNull();
+});
+
+test("describeProtocolCommandSkew treats a prerelease of the introducing version as new enough", () => {
+  const dir = mkdtempSync(join(tmpdir(), "smithers-bin-skew-pre-"));
+  onTestFinished(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+  installFakeSmithersPackage(join(dir, ".smithers"), "pre", "0.27.0-next.4");
+  const binPath = join(dir, ".smithers/node_modules/smithers-orchestrator/src/bin/smithers.js");
+
+  expect(describeProtocolCommandSkew({ args: ["claude", "tick"], binPath })).toBeNull();
+});
+
+test("bin shim refuses to hand `claude` to a stale pin instead of delegating (regression)", () => {
+  // The trap: a project pinning a pre-0.27 smithers made the Claude Code
+  // plugin's background monitor die with a bare `Unknown command: claude`,
+  // which names neither the pin nor the fix, so a session silently lost every
+  // run notification.
+  const dir = mkdtempSync(join(tmpdir(), "smithers-bin-skew-e2e-"));
+  onTestFinished(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+  installFakeSmithersPackage(join(dir, ".smithers"), "stale", "0.25.0");
+
+  const result = spawnSync(process.execPath, [SMITHERS_BIN, "claude", "monitor"], {
+    cwd: dir,
+    encoding: "utf8",
+  });
+
+  expect(result.status).toBe(4);
+  expect(result.stderr).toContain(">=0.27.0");
+  expect(result.stderr).toContain("bun add smithers-orchestrator@latest");
+  // The stale copy must never have been spawned.
+  expect(result.stdout).not.toContain("stale");
 });
 
 test("bin shim ignores a bare .bin/smithers shell shim with no local package (regression)", () => {

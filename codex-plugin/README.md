@@ -58,6 +58,8 @@ repo root.
     ├── .codex-plugin/
     │   └── plugin.json    # manifest (the only file that lives here)
     ├── .mcp.json          # registers the smithers MCP server (key: mcpServers)
+    ├── lib/
+    │   └── resolve-smithers-cli.mjs  # source checkout > published package
     ├── hooks/
     │   ├── hooks.json      # SessionStart hook (auto-discovered; NOT a manifest field)
     │   └── session-start.mjs
@@ -87,5 +89,10 @@ routing section in the skill for setup commands.
 - `bunx` on PATH (the MCP server launches via `bunx smithers-orchestrator --mcp`,
   and the skill launches the live UI via `bunx smithers-orchestrator ui <runId>`,
   so no separate global `smithers` install is required — if `smithers` *is* on
-  PATH the skill uses it directly).
+  PATH the skill uses it directly). Inside a **Smithers source checkout** both
+  paths end up on that working tree instead of the published build: the
+  SessionStart hook resolves it through `lib/resolve-smithers-cli.mjs`, and the
+  published bin's own delegation re-execs into `apps/cli/src/index.js`. Codex
+  does not substitute `${PLUGIN_ROOT}` in `.mcp.json`, so the MCP entry itself
+  stays on `bunx` and relies on that delegation.
 - `node` on PATH (the SessionStart hook is a dependency-free Node ESM script).

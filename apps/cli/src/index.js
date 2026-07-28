@@ -10,7 +10,6 @@ import {
 import { syncSkillsAfterUpgrade } from "./syncSkillsAfterUpgrade.js";
 import { extractBackendFlag, findFirstPositionalIndex, rewriteBareResumeFlagArgv } from "./argv-utils.js";
 import { CHAT_CREATE_PROMPT, INLINE_CHAT_ENGINES, buildInlineChatWorkflow } from "./buildInlineChatWorkflow.js";
-import { readBackendMarkerForCwd } from "./readBackendMarkerForCwd.js";
 import { parseJsonArgument, tryParseJsonInput } from "./json-args.js";
 import { wrapCliCommandHandlersWithInputBounds } from "./cli-command-bounds.js";
 import { resolve, dirname, basename, relative, join } from "node:path";
@@ -160,6 +159,7 @@ import {
 import { addPack, removePack, listPacks, listLockedPacks, updatePack, ejectPack } from "./packs.js";
 import { sharePack } from "./share.js";
 import { createEvalsExtension } from "./evals-extension.js";
+import { registerPackExtensions } from "./pack-extensions.js";
 import {
   assertEvalRunIdsAvailable,
   assertEvalReportWritable,
@@ -3036,13 +3036,21 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
     // the sqlite-only path ("never silently degrade"; the `--backend pglite`
     // path rejects it for the same reason). The fix is to re-author the
     // workflow with the async `openSmithersBackend` factory.
-    if (!options.backend && !process.env.SMITHERS_BACKEND) {
-      const markerBackend = readBackendMarkerForCwd(process.cwd());
+    {
+      // Ask the shared resolver rather than the marker file, so an operator
+      // pin through ANY mechanism (--backend, SMITHERS_BACKEND, or a `backend`
+      // field in smithers.config.ts) wins. Reading the marker directly meant a
+      // config-file pin was silently ignored here.
+      const { resolveSmithersBackendPreference } = await import("smithers-orchestrator/resolveSmithersBackendChoice");
+      const { backend: selectedBackend } = await resolveSmithersBackendPreference({
+        cwd: process.cwd(),
+        backend: options.backend,
+      });
       // A createSmithers (sqlite) workflow exposes its bun:sqlite handle as
       // `db.$client`; an `openSmithersBackend` (pglite/postgres) workflow
       // does not, and manages its own backend, so leave those untouched.
       const isSqliteWorkflow = Boolean(workflow.db?.$client);
-      if (markerBackend === "pglite" && isSqliteWorkflow) {
+      if (selectedBackend === "pglite" && isSqliteWorkflow) {
         // Open the authoritative pglite store first so a broken store is
         // reported as such (rather than masking it behind the mismatch).
         let probe;
@@ -4165,7 +4173,11 @@ async function runGatewayCommand(options) {
       import("@smithers-orchestrator/server/gateway"),
       import("smithers-orchestrator"),
     ]);
-    identityBackend = options.backend ?? process.env.SMITHERS_BACKEND ?? readBackendMarkerForCwd(workspace) ?? "sqlite";
+    // Same shared precedence as every other boot path (explicit → env → config
+    // → marker → sqlite); hand-rolling it here used to skip the config pin, so
+    // the Gateway advertised a different backend than the engine wrote to.
+    const { resolveSmithersBackendPreference } = await import("smithers-orchestrator/resolveSmithersBackendChoice");
+    identityBackend = (await resolveSmithersBackendPreference({ cwd: workspace, backend: options.backend })).backend;
     // Idle spin-down (spec decision 14): autostarted daemons pass --idle-timeout
     // (see ensureWorkspaceGateway) so they exit once idle; an explicit
     // `smithers gateway` leaves it 0 and stays up. SMITHERS_GATEWAY_IDLE_MS overrides.
@@ -4359,6 +4371,13 @@ async function runGatewayCommand(options) {
         workspace,
       }),
     );
+    // Workspace-declared extensions (.smithers/gateway-extensions.ts), so a
+    // workflow-owned custom UI can serve its own domain data. Failure is
+    // isolated per namespace; a broken pack never blocks `listen`.
+    await registerPackExtensions(gateway, workspace, {
+      warn: (message) => console.warn(message),
+      info: (message) => console.log(message),
+    });
     try {
       server = await gateway.listen({ host: options.host, port: options.port });
     } catch (error) {
@@ -6972,7 +6991,6 @@ const cli = Cli.create({
                 expectedStatus: testCase.expected.status,
                 status: result.status,
                 passed: evaluation.passed,
-                inconclusive: evaluation.inconclusive,
                 assertions: evaluation.assertions,
                 durationMs,
                 input: testCase.input,
@@ -6996,7 +7014,6 @@ const cli = Cli.create({
                 expectedStatus: testCase.expected.status,
                 status: "error",
                 passed: evaluation.passed,
-                inconclusive: evaluation.inconclusive,
                 assertions: evaluation.assertions,
                 durationMs,
                 input: testCase.input,
@@ -7018,12 +7035,7 @@ const cli = Cli.create({
           force: c.options.force,
         });
         report = { ...report, reportPath };
-        // Exit 1 only on genuine case failures. When every red is a harness/
-        // environment fault (inconclusive), exit 5 so a driving loop knows the
-        // suite never observed the workflow and must repair the harness (or
-        // stop), not iterate on the product.
-        const genuineFailures = report.summary.failed - report.summary.inconclusive;
-        process.exitCode = genuineFailures > 0 ? 1 : report.summary.inconclusive > 0 ? 5 : 0;
+        process.exitCode = report.summary.failed > 0 ? 1 : 0;
         // Only a human on a TTY gets the formatted `renderEvalReport` text.
         // A piped/agent consumer (non-TTY, default TOON) must get a single
         // coherent TOON envelope, NOT the human report followed by a stray

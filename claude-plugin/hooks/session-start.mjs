@@ -11,6 +11,7 @@ import { readdirSync, existsSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveSmithersCli, resolveSmithersShellCommand } from "../lib/resolve-smithers-cli.mjs";
 
 function listKeys(dir) {
   try {
@@ -40,7 +41,8 @@ function pluginRoot() {
 // mirrors. Hard 2s cap: a slow or missing CLI must not stall session start.
 function countActiveRuns() {
   try {
-    const result = spawnSync("bunx", ["smithers-orchestrator", "ps", "--format", "json"], {
+    const cli = resolveSmithersCli(process.cwd());
+    const result = spawnSync(cli.command, [...cli.args, "ps", "--format", "json"], {
       encoding: "utf8",
       timeout: 2000,
     });
@@ -81,6 +83,12 @@ try {
   const uis = new Set(listKeys(join(smithersDir, "ui")));
   const mirrorScript = join(pluginRoot(), "workflows", "smithers-run.mjs");
   const activeRuns = countActiveRuns();
+  // Inside a Smithers source checkout every command must execute the working
+  // tree, so the mirror gets an explicit `cli` and the prose names the same
+  // command. Elsewhere both fall back to `bunx smithers-orchestrator`.
+  const cli = resolveSmithersCli(cwd);
+  const cliCommand = resolveSmithersShellCommand(cwd);
+  const mirrorCliArg = cli.source === "workspace" ? `cli: ${JSON.stringify(cliCommand)}, ` : "";
 
   const lines = [];
   lines.push(
@@ -91,8 +99,13 @@ try {
     "Route ANY clear single-goal ask through `smithers oneshot`, even large repo-wide goals (make CI green, upgrade every dependency and fix builds, audit and update all docs): one strong agent one-shots up to roughly 300k tokens in a single run. Reserve full workflows for genuinely multi-stage, approval-gated, parallel, or reusable work; authoring a workflow for a single-goal ask is overengineering, and 'it feels big' never justifies one.",
   );
   lines.push(
-    `LIVE VIEW RULE: every Smithers run you start or attach to gets a live /workflows mirror. Launch runs with the native Workflow tool pointed at the plugin's generic mirror script: Workflow({ scriptPath: ${JSON.stringify(mirrorScript)}, args: { workflow: "<id>", input: { ... } } }) — it starts the detached run itself and mirrors it node-by-node. Attach to an existing run with args: { runId: "<run-id>" }. This is the ONLY sanctioned use of the native Workflow tool; the durable work always lives in the Smithers engine (stopping the mirror never stops the run).`,
+    `LIVE VIEW RULE: every Smithers run you start or attach to gets a live /workflows mirror. Launch runs with the native Workflow tool pointed at the plugin's generic mirror script: Workflow({ scriptPath: ${JSON.stringify(mirrorScript)}, args: { ${mirrorCliArg}workflow: "<id>", input: { ... } } }) — it starts the detached run itself and mirrors it node-by-node. Attach to an existing run with args: { ${mirrorCliArg}runId: "<run-id>" }. This is the ONLY sanctioned use of the native Workflow tool; the durable work always lives in the Smithers engine (stopping the mirror never stops the run).`,
   );
+  if (cli.source === "workspace") {
+    lines.push(
+      `SOURCE-CHECKOUT RULE: this project IS the Smithers source tree (${cli.root}). Every smithers command you run must execute the working tree, so invoke it as \`${cliCommand}\` (or plain \`smithers\`, which delegates to the same entry) — never \`bunx smithers-orchestrator\`, which runs the published npm build instead of the code under edit. Surfaces built at pack time need a build first: \`smithers ui --app\` needs \`node apps/cli/scripts/build-ui.mjs\`, and type-level checks need \`pnpm check:dts\`.`,
+    );
+  }
   if (typeof activeRuns === "number" && activeRuns > 0) {
     lines.push(
       `There ${activeRuns === 1 ? "is 1 non-terminal Smithers run" : `are ${activeRuns} non-terminal Smithers runs`} in this project (see \`smithers ps\`). Offer to re-attach a /workflows mirror with args: { runId }.`,
@@ -110,7 +123,7 @@ try {
     "MANDATORY UI RULE: every workflow you create or run MUST have a custom live UI at .smithers/ui/<key>.tsx composed from the shipped component libraries: `smithers-orchestrator/gateway-ui` (SimpleWorkflowDashboard, WorkflowUiShell, RunTree, RunEventLog, ApprovalPanel, ...) and `smithers-orchestrator/ui` (Button, Card, Tabs, StatusPill, EmptyState, ...) over the `smithers-orchestrator/gateway-react` hooks. Import ONLY from `react` + those three subpaths; never hand-roll markup or CSS a shipped component covers. You MUST launch the UI (`smithers ui <runId>`) so the human can watch the run. Any workflow marked 'NO UI yet' above needs one. See the `smithers` skill for the exact authoring contract.",
   );
   lines.push(
-    "WORKFLOW AUTHORING RULE: ALWAYS use https://smithers.sh/llms-full.txt as the API reference when creating or editing Smithers workflows — fetch it (WebFetch) before writing workflow code. Offline fallback: `bunx smithers-orchestrator docs-full`.",
+    `WORKFLOW AUTHORING RULE: ALWAYS use https://smithers.sh/llms-full.txt as the API reference when creating or editing Smithers workflows — fetch it (WebFetch) before writing workflow code. Offline fallback: \`${cliCommand} docs-full\`.`,
   );
 
   emit(lines.join("\n"));

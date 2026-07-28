@@ -15,28 +15,28 @@ Retries, approvals, replay, and evals live in one place.
 Use the lightest route that preserves the durability the task needs:
 
 1. **Ambiguous goal or acceptance criteria**: ask the user clarifying
-   questions (what outcome, what counts as done) and stop until they answer.
-   "Make the settings page better" gets a reply that is ONLY clarifying
-   questions, covering both the target and what "better"/"done" means — never
-   a plan whose first step is to find out, and never a provisional plan under
-   an assumed answer.
+  questions (what outcome, what counts as done) and stop until they answer.
+  "Make the settings page better" gets a reply that is ONLY clarifying
+  questions, covering both the target and what "better"/"done" means — never
+  a plan whose first step is to find out, and never a provisional plan under
+  an assumed answer.
 2. **Most-trivial one-off edit** (a rename, a config line, a quick answer):
-   just do it directly. No Smithers. If the stored trivial preference is
-   `oneshot`, launch with `--model opus` or `--model terra` — the ONLY two
-   slots allowed for trivial oneshot, never sol, luna, kimi, or any other
-   tier. Trivial means ONE tiny change in one
-   place; an ask bundling multiple coordinated edits (code plus help text
-   plus a test) is oneshot work, not trivial.
+  just do it directly. No Smithers. If the stored trivial preference is
+  `oneshot`, launch with `--model opus` or `--model terra` — the ONLY two
+  slots allowed for trivial oneshot, never sol, luna, kimi, or any other
+  tier. Trivial means ONE tiny change in one
+  place; an ask bundling multiple coordinated edits (code plus help text
+  plus a test) is oneshot work, not trivial.
 3. **Clear single-goal ask, at ANY size**: `smithers oneshot "<goal>"`. It
-   runs one strong agent in the background with durable state, an optional
-   reviewer, and a live chat/diff UI — no workflow file to author. One strong
-   agent routinely finishes repo-wide, hours-long goals of up to roughly 300k
-   tokens in a single run; the worker manages its own context, so "it will
-   not fit in one context window" is never a reason to author a workflow.
-   Prefer codex sol, then kimi, then claude fable or opus.
+  runs one strong agent in the background with durable state, an optional
+  reviewer, and a live chat/diff UI — no workflow file to author. One strong
+  agent routinely finishes repo-wide, hours-long goals of up to roughly 300k
+  tokens in a single run; the worker manages its own context, so "it will
+  not fit in one context window" is never a reason to author a workflow.
+  Prefer codex sol, then kimi, then claude fable or opus.
 4. **Genuinely multi-goal work** (ordered phases, human approvals, loops with
-   verified exits, several agents with different tools, schedules, reuse):
-   a full workflow.
+  verified exits, several agents with different tools, schedules, reuse):
+  a full workflow.
 
 **Size does not pick the route; shape does.** Real asks that belong in a
 single `smithers oneshot`, each historically one-shotted by one strong agent
@@ -70,35 +70,35 @@ When you drive fix/verify rounds through Smithers (or hand-author repair
 workflows), these rules stop the 100-run death spiral:
 
 - **Same-signature budget.** If 3 consecutive rounds fail with the same
-  failure signature, STOP authoring round N+1. Change strategy (gather
-  evidence, widen scope) or escalate to the human via `smithers ask-human`
-  with what you know. Thirteen hypotheses against one 500 is an incident,
-  not progress.
+ failure signature, STOP authoring round N+1. Change strategy (gather
+ evidence, widen scope) or escalate to the human via `smithers ask-human`
+ with what you know. Thirteen hypotheses against one 500 is an incident,
+ not progress.
 - **Green ratchet.** Never let a previously-passing check go red after a
-  harness/infra-only change without flagging it: that is a harness
-  regression — revert or fix the harness, do not touch the product.
+ harness/infra-only change without flagging it: that is a harness
+ regression — revert or fix the harness, do not touch the product.
 - **Never widen a red gate.** Acceptance criteria only grow while the gate is
-  green. If the gate is red, narrow scope to the last-green slice and get
-  back to green first.
+ green. If the gate is red, narrow scope to the last-green slice and get
+ back to green first.
 - **Classify red before repairing.** A check that could not RUN (service
-  unreachable, network denied, missing credentials, broken harness) is an
-  environment fault, not product evidence. `smithers eval` exits 5 and marks
-  such cases INCONCLUSIVE — repair the harness, never the product, on that
-  signal.
+ unreachable, network denied, missing credentials, broken harness) is an
+ environment fault, not product evidence. `smithers eval` exits 5 and marks
+ such cases INCONCLUSIVE — repair the harness, never the product, on that
+ signal.
 - **Harness-vs-product ratio.** If several consecutive rounds only add
-  test-infrastructure seams (env vars, simulators, local TLS), say so out
-  loud and re-examine the approach with the human before adding another.
+ test-infrastructure seams (env vars, simulators, local TLS), say so out
+ loud and re-examine the approach with the human before adding another.
 - **If the root cause looks fenced out** (read-only repo, forbidden path),
-  propose widening the fence to the human instead of a deeper in-scope fix.
+ propose widening the fence to the human instead of a deeper in-scope fix.
 - **Use the engine's loops, not new files.** Iterate with `<Loop>` /
-  `retries` / `smithers retry-task` inside ONE workflow so context and
-  verdict history persist across rounds. Authoring a near-duplicate .tsx per
-  attempt (with `noSessionPersistence` and a hand-maintained forensic prompt)
-  throws away the run's memory each round and re-bills the same context.
+ `retries` / `smithers retry-task` inside ONE workflow so context and
+ verdict history persist across rounds. Authoring a near-duplicate .tsx per
+ attempt (with `noSessionPersistence` and a hand-maintained forensic prompt)
+ throws away the run's memory each round and re-bills the same context.
 - **Don't redact your own diagnostics blind.** Privacy rules belong on
-  shipped artifacts and anything leaving the machine, not on a local debug
-  loop; if rounds are being decided by response-body byte lengths, relax
-  local redaction before the next round.
+ shipped artifacts and anything leaving the machine, not on a local debug
+ loop; if rounds are being decided by response-body byte lengths, relax
+ local redaction before the next round.
 
 ## Launch attribution
 

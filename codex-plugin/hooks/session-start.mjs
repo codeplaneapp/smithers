@@ -7,6 +7,7 @@
 
 import { readdirSync, existsSync, statSync } from "node:fs";
 import { join, dirname, parse as parsePath } from "node:path";
+import { resolveSmithersCli, resolveSmithersShellCommand } from "../lib/resolve-smithers-cli.mjs";
 
 const MAX_LISTED = 12; // cap the inline list; Codex can call list_workflows for the rest
 
@@ -100,9 +101,16 @@ try {
   lines.push(
     "This project uses Smithers (durable control plane for long-running coding agents).",
   );
+  const cli = resolveSmithersCli(root);
+  const cliCommand = resolveSmithersShellCommand(root);
   lines.push(
-    "You operate Smithers via the `smithers` MCP tools (list_workflows, run_workflow, watch_run, resolve_approval, ...) and the `smithers` CLI (or `bunx smithers-orchestrator <cmd>` if `smithers` is not on PATH). You are the orchestrator: run multi-step / long-running / background work THROUGH Smithers, not through your own ad-hoc subagents.",
+    `You operate Smithers via the \`smithers\` MCP tools (list_workflows, run_workflow, watch_run, resolve_approval, ...) and the \`smithers\` CLI (or \`${cliCommand} <cmd>\` if \`smithers\` is not on PATH). You are the orchestrator: run multi-step / long-running / background work THROUGH Smithers, not through your own ad-hoc subagents.`,
   );
+  if (cli.source === "workspace") {
+    lines.push(
+      `SOURCE-CHECKOUT RULE: this project IS the Smithers source tree (${cli.root}). Every smithers command you run must execute the working tree, so invoke it as \`${cliCommand}\` (or plain \`smithers\`, which delegates to the same entry) — never \`bunx smithers-orchestrator\`, which runs the published npm build instead of the code under edit. Surfaces built at pack time need a build first: \`smithers ui --app\` needs \`node apps/cli/scripts/build-ui.mjs\`, and type-level checks need \`pnpm check:dts\`.`,
+    );
+  }
 
   if (workflows.length) {
     const shown = workflows.slice(0, MAX_LISTED).join(", ");
