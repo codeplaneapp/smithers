@@ -178,6 +178,7 @@
           "guides/testing-workflows",
           "guides/workflow-optimization",
           "guides/monitor",
+          "guides/monitor-workflows",
           "guides/tui",
           "guides/custom-workflow-ui",
           "guides/workflow-owned-ui-migration",
@@ -254,6 +255,7 @@
               "components/drift-detector",
               "components/scan-fix-verify",
               "components/poller",
+          "components/monitor",
               "components/supervisor",
               "components/runbook"
             ]

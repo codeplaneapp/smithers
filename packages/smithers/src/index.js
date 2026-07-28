@@ -104,6 +104,8 @@
 /** @typedef {import("@smithers-orchestrator/agents").OpenCodeAgentOptions} OpenCodeAgentOptions */
 /** @typedef {import("@smithers-orchestrator/agents").PoolAgentOptions} PoolAgentOptions */
 /** @typedef {import("@smithers-orchestrator/agents").VibeAgentOptions} VibeAgentOptions */
+/** @typedef {import("@smithers-orchestrator/components").MonitorCondition} MonitorCondition */
+/** @typedef {import("@smithers-orchestrator/components").MonitorProps} MonitorProps */
 /** @typedef {import("@smithers-orchestrator/components").PollerProps} PollerProps */
 /** @typedef {import("@smithers-orchestrator/graph/ProofBinding").ProofBinding} ProofBinding */
 /** @typedef {import("@smithers-orchestrator/server/gateway").RequestFrame} RequestFrame */
@@ -214,6 +216,7 @@ export {
   Loop,
   Memory,
   MergeQueue,
+  Monitor,
   Optimizer,
   Panel,
   Parallel,
@@ -239,11 +242,19 @@ export {
   WaitForEvent,
   Workflow,
   Worktree,
+  MONITOR_CONDITIONS,
+  MONITOR_DEFAULT_AUTO_HEAL,
+  MONITOR_TERMINAL_STATUSES,
   approvalDecisionSchema,
   approvalRankingSchema,
   approvalSelectionSchema,
   computeSidecarDelta,
   continueAsNew,
+  monitorAuthorityRules,
+  monitorEvidenceRules,
+  monitorHealthSignals,
+  monitorPrompt,
+  monitorReadPathRules,
 } from "@smithers-orchestrator/components";
 // Delegation chain
 export {

@@ -611,6 +611,12 @@ and components**) from runtime state, which is gitignored.
 │                        #   (ValidationLoop, Review, LoopUntilScored,
 │                        #   ForEachFeature, …). Imported by workflows like any
 │                        #   React-style component.
+├── monitor/             # WHERE MONITORS GO. One .tsx per watched workflow, named
+│                        #   `<workflowId>.tsx`. Smithers auto-launches it as a
+│                        #   sibling run whenever that workflow starts, linked by
+│                        #   parent_run_id, and tears it down when the run ends.
+│                        #   Compose the shipped <Monitor> component. Optional:
+│                        #   no file means no monitor and no behavior change.
 ├── ui/                  # workflow UI sources for the `smithers ui` command
 ├── specs/  tickets/     # feature specs and tickets some workflows read/write
 │
@@ -626,7 +632,37 @@ The mental shortcut: **agents** say *who* does the work (`agents.ts`),
 **prompts** say *what to tell the agent* (`prompts/*.mdx`), and **components**
 are the reusable building blocks workflows compose from (`components/*.tsx`). A
 typical workflow file imports from all three: `../agents`, `../prompts/foo.mdx`,
-and `../components/Bar`.
+and `../components/Bar`. **Monitors** (`monitor/*.tsx`) are the odd one out:
+they are workflows that watch *another* run rather than doing work themselves.
+
+### Monitor workflows
+
+Any workflow that runs long, unattended, or in a loop can silently wedge with
+nobody watching. Give it a monitor: a workflow at
+`.smithers/monitor/<workflowId>.tsx` that Smithers launches automatically, as a
+sibling run, whenever `<workflowId>` starts.
+
+```bash
+bunx smithers-orchestrator up .smithers/workflows/nightly.tsx    # auto-discovers .smithers/monitor/nightly.tsx
+bunx smithers-orchestrator up nightly.tsx --monitor ops/watch.tsx  # pick one explicitly
+bunx smithers-orchestrator up nightly.tsx --no-monitor             # opt out
+```
+
+The monitor is a child run (`parent_run_id` = the watched run), so `ps`,
+`inspect`, and the Gateway show the pairing, `cancel` cascades to it, and it is
+torn down when the watched run finishes. A monitor never gets a monitor of its
+own. With no monitor file, nothing changes.
+
+Compose the shipped `<Monitor>` component instead of hand-rolling a poll loop:
+it is a heartbeat that samples the watched run, classifies it into one closed
+condition (`healthy`, `stalled`, `wedged-node`, `runaway-loop`,
+`awaiting-human`, `failing`, `unknown`), and routes that condition to a handler
+through `<DecisionTable>`. Only `stalled` and `wedged-node` heal without a
+human, because resuming a run and retrying a node are idempotent and
+reversible; everything else escalates through a durable human request. The
+monitor reads run state through `smithers-orchestrator/gateway-client` or the
+public CLI, never the store. See
+[Monitor workflows](https://smithers.sh/guides/monitor-workflows).
 
 ## Operating runs
 

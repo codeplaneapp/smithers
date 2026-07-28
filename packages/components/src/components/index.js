@@ -75,6 +75,8 @@
 /** @typedef {import("./LoopProps.ts").LoopProps} LoopProps */
 /** @typedef {import("./MergeQueueProps.ts").MergeQueueProps} MergeQueueProps */
 /** @typedef {import("./MemoryProps.ts").MemoryProps} MemoryProps */
+/** @typedef {import("./MonitorCondition.ts").MonitorCondition} MonitorCondition */
+/** @typedef {import("./MonitorProps.ts").MonitorProps} MonitorProps */
 /** @typedef {import("./OptimizerProps.ts").OptimizerProps} OptimizerProps */
 /** @typedef {import("./OutputTarget.ts").OutputTarget} OutputTarget */
 /** @typedef {import("./PanelistConfig.ts").PanelistConfig} PanelistConfig */
@@ -152,6 +154,17 @@ export { DecisionTable } from "./DecisionTable.js";
 export { DriftDetector } from "./DriftDetector.js";
 export { ScanFixVerify } from "./ScanFixVerify.js";
 export { Poller } from "./Poller.js";
+export { Monitor } from "./Monitor.js";
+export {
+  MONITOR_CONDITIONS,
+  MONITOR_DEFAULT_AUTO_HEAL,
+  MONITOR_TERMINAL_STATUSES,
+  monitorAuthorityRules,
+  monitorEvidenceRules,
+  monitorHealthSignals,
+  monitorPrompt,
+  monitorReadPathRules,
+} from "./monitorPrompt.js";
 export { Supervisor } from "./Supervisor.js";
 export { Runbook } from "./Runbook.js";
 export { Sidecar } from "./Sidecar.js";

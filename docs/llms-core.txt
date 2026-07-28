@@ -2703,7 +2703,7 @@ commands[102]:
     purpose: Build a new Smithers workflow from a plain-English description. Dispatches to the create-workflow builder.
     args[1]{name,type,required,desc}:
       task,string,false,Plain-English description of the workflow to build (forwarded as the builder prompt)
-    flags[37]{name,short,type,default,desc}:
+    flags[38]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -2737,6 +2737,7 @@ commands[102]:
       metrics,,boolean,true,Expose /metrics endpoint when --serve
       backend,,enum,,Bootstrap storage selection for a workflow owner or workspace Gateway; not a run-discovery/control flag (sqlite|pglite|postgres)
       post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
+      monitor,,boolean|string,true,Monitor workflow that watches this run as a sibling; auto-discovers .smithers/monitor/<workflowId>.tsx (no-op when absent). Pass a path to pick one; --no-monitor opts out
       verbose,,boolean,false,Show engine info logs (run lifecycle, agent sessions) on interactive runs
       report,,boolean,true,Narrate the result with a cheap agent and open an HTML summary on interactive runs (disable with --no-report or SMITHERS_NO_REPORT=1)
       prompt,p,string,,Prompt text mapped to input.prompt when --input is omitted
@@ -2756,7 +2757,7 @@ commands[102]:
     purpose: Start or resume a workflow execution from a discovered workflow ID or a .tsx workflow file path
     args[1]{name,type,required,desc}:
       workflow,string,false,Workflow ID or file path (omit with --interactive to pick one)
-    flags[39]{name,short,type,default,desc}:
+    flags[40]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -2791,6 +2792,7 @@ commands[102]:
       interactive,,boolean,false,Pick a workflow and inputs interactively then open the full-screen run monitor (no silent fallback: fails with TUI_MONITOR_UNAVAILABLE if the tui package is missing, leaving the detached run running)
       backend,,enum,,Bootstrap storage selection for a workflow owner or workspace Gateway; not a run-discovery/control flag (sqlite|pglite|postgres)
       post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
+      monitor,,boolean|string,true,Monitor workflow that watches this run as a sibling; auto-discovers .smithers/monitor/<workflowId>.tsx (no-op when absent). Pass a path to pick one; --no-monitor opts out
       verbose,,boolean,false,Show engine info logs (run lifecycle, agent sessions) on interactive runs
       report,,boolean,true,Narrate the result with a cheap agent and open an HTML summary on interactive runs (disable with --no-report or SMITHERS_NO_REPORT=1)
       started-by-harness,,string,,Durable self-reported launch harness; environment may fill when omitted
@@ -3356,7 +3358,7 @@ commands[102]:
     purpose: Run a discovered workflow by ID
     args[1]{name,type,required,desc}:
       name,string,false,Workflow ID (omit with --interactive to pick one)
-    flags[40]{name,short,type,default,desc}:
+    flags[41]{name,short,type,default,desc}:
       detach,d,boolean,false,Background mode; preflight the graph, then print runId/pid/logFile once the run is admitted
       run-id,r,string,,Explicit run ID
       max-concurrency,c,number,4,Maximum parallel tasks
@@ -3390,6 +3392,7 @@ commands[102]:
       metrics,,boolean,true,Expose /metrics Prometheus endpoint when --serve
       backend,,enum,,Bootstrap storage selection for a workflow owner or workspace Gateway; not a run-discovery/control flag (sqlite|pglite|postgres)
       post-failure,,boolean,true,Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)
+      monitor,,boolean|string,true,Monitor workflow that watches this run as a sibling; auto-discovers .smithers/monitor/<workflowId>.tsx (no-op when absent). Pass a path to pick one; --no-monitor opts out
       verbose,,boolean,false,Show engine info logs on interactive runs; the default keeps progress + warnings only (non-TTY/structured output always gets full logs)
       report,,boolean,true,Narrate an interactive run's result with a cheap/fast agent and open an HTML summary in the browser (disable with --no-report or SMITHERS_NO_REPORT=1)
       prompt,p,string,,Shorthand for input.prompt when --input is omitted

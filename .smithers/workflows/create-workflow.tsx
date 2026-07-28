@@ -21,6 +21,7 @@ const WORKFLOWS_DIR = ".smithers/workflows";
 const PROMPTS_DIR = ".smithers/prompts";
 const SKILLS_DIR = ".smithers/skills";
 const UI_DIR = ".smithers/ui";
+const MONITOR_DIR = ".smithers/monitor";
 
 // Requires REAL YAML frontmatter (parsed, not line-matched) with `name` and
 // `workflow` fields that exactly equal the workflow id — a hand-rolled
@@ -390,6 +391,7 @@ export default smithers((ctx) => {
               workflowsDir={WORKFLOWS_DIR}
               promptsDir={PROMPTS_DIR}
               uiDir={UI_DIR}
+              monitorDir={MONITOR_DIR}
             />
           </Task>
         ) : null}
@@ -410,6 +412,7 @@ export default smithers((ctx) => {
                       workflowsDir={WORKFLOWS_DIR}
                       promptsDir={PROMPTS_DIR}
                       uiDir={UI_DIR}
+                      monitorDir={MONITOR_DIR}
                       uiFile={uiFile}
                     />
                   </Task>

@@ -935,6 +935,66 @@ type OptimizerProps$2 = {
     children: string | React__default.ReactNode;
 };
 
+/**
+ * The closed set of conditions a `<Monitor>` heartbeat may classify a watched
+ * run into. Deliberately small: a monitor that can name a hundred states is a
+ * monitor nobody can route deterministically. Every sample resolves to exactly
+ * one of these, and each one maps to exactly one handler.
+ *
+ * - `healthy`        — the run is progressing (or has finished cleanly). Do nothing.
+ * - `stalled`        — no event for longer than the stall budget, nothing waiting on a human.
+ * - `wedged-node`    — one node is burning attempts/retries without changing its error.
+ * - `runaway-loop`   — a loop or token burn is growing without approaching its exit condition.
+ * - `awaiting-human` — the run is parked on an approval gate or human request.
+ * - `failing`        — the run (or a non-continueOnFail node) has failed terminally.
+ * - `unknown`        — evidence was unreadable or contradictory. Never guess from here.
+ */
+type MonitorCondition$2 = "healthy" | "stalled" | "wedged-node" | "runaway-loop" | "awaiting-human" | "failing" | "unknown";
+
+type MonitorProps$2 = {
+    /** ID prefix for generated task/component ids. Default `"monitor"`. */
+    id?: string;
+    /** Run id this monitor watches. Usually `ctx.input.watchRunId`. */
+    watchRunId: string;
+    /** Agent that samples the watched run and classifies its health. */
+    agent: AgentLike$2 | AgentLike$2[];
+    /**
+     * Output target for the heartbeat classification. The schema must carry at
+     * least `condition` (a {@link MonitorCondition}) and `runStatus`;
+     * `targetNodeId`, `evidence`, and `summary` are read when present. `nodeId`,
+     * `runId`, and `iteration` are reserved output columns — hence `targetNodeId`.
+     */
+    healthOutput: OutputTarget$1;
+    /** Output target handler tasks write to. Defaults to `healthOutput`. */
+    actionOutput?: OutputTarget$1;
+    /** Agent the healing/reporting handlers run on. Defaults to `agent`. */
+    healAgent?: AgentLike$2 | AgentLike$2[];
+    /** Wall-clock delay between heartbeats, enforced by a durable `<Timer>`. Default 60000. */
+    intervalMs?: number;
+    /** Maximum heartbeats before the monitor stops watching. Default 120. */
+    maxChecks?: number;
+    /** Heartbeats with no progress before `stalled` is the expected verdict. Default 3. */
+    stallBeats?: number;
+    /**
+     * Conditions the monitor may heal WITHOUT asking a human. Anything not listed
+     * escalates instead. Default `["stalled", "wedged-node"]` — the two repairs
+     * that are idempotent and reversible.
+     */
+    autoHeal?: MonitorCondition$2[];
+    /**
+     * Override the element rendered for a condition. `null` means "do nothing and
+     * keep watching" for that condition; omit a key to keep the shipped default.
+     */
+    handlers?: Partial<Record<MonitorCondition$2, React__default.ReactElement | null>>;
+    /** Extra repo-specific doctrine appended to the shipped monitoring prompt. */
+    guidance?: string;
+    /** Replace the shipped monitoring prompt entirely. Prefer `guidance` first. */
+    prompt?: string | React__default.ReactNode;
+    skipIf?: boolean;
+    /** Alias for `prompt`. */
+    children?: string | React__default.ReactNode;
+};
+
 type MemoryProps$2 = {
     /** One memory bank. Mutually exclusive with `banks`. */
     bank?: string;
@@ -2202,6 +2262,36 @@ type ScanFixVerifyProps$1 = ScanFixVerifyProps$2;
  */
 declare function Poller(props: PollerProps$1): React__default.FunctionComponentElement<LoopProps$2> | null;
 type PollerProps$1 = PollerProps$2;
+
+/**
+ * <Monitor> — a heartbeat health check that watches ONE other run and keeps it
+ * healthy.
+ *
+ * Shape, per beat: `<Timer>` paces the loop, one agent `<Task>` samples the
+ * watched run and classifies it into exactly one {@link MonitorCondition}, and
+ * a `<DecisionTable>` routes that condition to its handler.
+ *
+ * `<DecisionTable>` is the router rather than `<ClassifyAndRoute>` because the
+ * two solve different problems: `<ClassifyAndRoute>` classifies MANY items and
+ * fans every category out in `<Parallel>`, while a monitor has exactly one
+ * subject (the watched run) and needs first-match, one-handler-wins semantics —
+ * which is precisely `<DecisionTable strategy="first-match">`. Routing here is
+ * deterministic: the agent names a condition, the table picks the handler.
+ *
+ * The healing half is deliberately timid. Only `stalled` and `wedged-node` heal
+ * without a human by default, because resuming a run and retrying a node are
+ * the two repairs that are both idempotent and reversible. Everything else
+ * escalates through a durable `<HumanTask>`. Put a condition in `autoHeal` to
+ * grant broader authority; pass `handlers` to replace any element outright, or
+ * map one to `null` to make it a no-op.
+ *
+ * The monitor never reads the store: its prompt binds it to the Gateway client
+ * and the public CLI surface.
+ *
+ * @param {MonitorProps} props
+ */
+declare function Monitor(props: MonitorProps$1): React__default.FunctionComponentElement<LoopProps$2> | null;
+type MonitorProps$1 = MonitorProps$2;
 
 /**
  * <Supervisor> — Boss plans, delegates to parallel workers, reviews, re-delegates failures.
@@ -3501,7 +3591,7 @@ declare function settleDelegationV2Envelope({ envelope, assignment, identity, ta
         work: "synthesize" | "plan" | "review" | "preview" | "poc" | "research" | "refine_goal" | "execute";
     } | undefined;
     runtimeFailure?: {
-        code: "crash" | "timeout" | "invalid_return" | "cancelled" | "budget_exhausted" | "invalid_subworkflow";
+        code: "cancelled" | "crash" | "timeout" | "invalid_return" | "budget_exhausted" | "invalid_subworkflow";
         message: string;
     } | undefined;
 };
@@ -3759,6 +3849,86 @@ declare function UI(_props: UIProps$1): null;
  */
 declare function TUI(_props: TUIProps$1): null;
 declare const SMITHERS_WORKFLOW_VIEW_KIND: unique symbol;
+
+/**
+ * How to read run state. This is an architectural rule, not a preference: the
+ * store is private to the engine, and a monitor that opens it races the very
+ * run it is watching.
+ * @returns {string[]}
+ */
+declare function monitorReadPathRules(): string[];
+/**
+ * What healthy and unhealthy actually look like, stated concretely enough that
+ * two different agents sampling the same run reach the same verdict.
+ * @param {{ stallBeats?: number; intervalMs?: number }} [params]
+ * @returns {string[]}
+ */
+declare function monitorHealthSignals(params?: {
+    stallBeats?: number;
+    intervalMs?: number;
+}): string[];
+/**
+ * The evidence contract: what must be in hand BEFORE a condition is named or an
+ * action is taken. A monitor that acts on one reading is a monitor that flaps.
+ * @returns {string[]}
+ */
+declare function monitorEvidenceRules(): string[];
+/**
+ * What the monitor may do by itself, and where the line is. Biased hard toward
+ * observing and reporting: the monitor's job is to keep the run alive, not to
+ * take over from it.
+ * @param {{ autoHeal?: readonly MonitorCondition[]; watchRunId?: string }} [params]
+ * @returns {string[]}
+ */
+declare function monitorAuthorityRules(params?: {
+    autoHeal?: readonly MonitorCondition$1[];
+    watchRunId?: string;
+}): string[];
+/**
+ * Assemble the full monitoring prompt.
+ *
+ * @param {{
+ *   watchRunId?: string;
+ *   intervalMs?: number;
+ *   stallBeats?: number;
+ *   autoHeal?: readonly MonitorCondition[];
+ *   guidance?: string;
+ * }} [params]
+ * @returns {string}
+ */
+declare function monitorPrompt(params?: {
+    watchRunId?: string;
+    intervalMs?: number;
+    stallBeats?: number;
+    autoHeal?: readonly MonitorCondition$1[];
+    guidance?: string;
+}): string;
+/** @typedef {import("./MonitorCondition.ts").MonitorCondition} MonitorCondition */
+/**
+ * The monitoring doctrine `<Monitor>` ships with.
+ *
+ * Prompt text lives IN this package (a seeded workflow pack cannot import
+ * `.smithers/prompts`), the same way `delegation/delegationPrompts.js` does.
+ * `MonitorPrompt.mdx` renders these exact sections as an MDX prompt component
+ * so a monitor file can import and extend it with JSX; keeping the strings here
+ * means the `.mdx` and the component default can never drift apart.
+ */
+/**
+ * The closed condition set, as a runtime value. Kept in the same order the
+ * router evaluates it so the prompt and the switch always agree.
+ * @type {readonly MonitorCondition[]}
+ */
+declare const MONITOR_CONDITIONS: readonly MonitorCondition$1[];
+/** Run statuses that mean the watched run is over and the monitor should stop. */
+declare const MONITOR_TERMINAL_STATUSES: readonly ["finished", "failed", "cancelled", "continued"];
+/**
+ * The conditions a monitor may repair on its own by default: the only two whose
+ * repair is both idempotent (running it twice equals running it once) and
+ * reversible (the run's durable state is unchanged if it was the wrong call).
+ * @type {readonly MonitorCondition[]}
+ */
+declare const MONITOR_DEFAULT_AUTO_HEAL: readonly MonitorCondition$1[];
+type MonitorCondition$1 = MonitorCondition$2;
 
 /** @typedef {import("./SagaStepProps.ts").SagaStepProps} SagaStepProps */
 /**
@@ -5275,10 +5445,10 @@ declare const dv2OutcomeSchema: z.ZodObject<{
     }, z.core.$strict>>;
     runtimeFailure: z.ZodOptional<z.ZodObject<{
         code: z.ZodEnum<{
+            cancelled: "cancelled";
             crash: "crash";
             timeout: "timeout";
             invalid_return: "invalid_return";
-            cancelled: "cancelled";
             budget_exhausted: "budget_exhausted";
             invalid_subworkflow: "invalid_subworkflow";
         }>;
@@ -5747,10 +5917,10 @@ declare const dv2FinalSchema: z.ZodObject<{
         }, z.core.$strict>>;
         runtimeFailure: z.ZodOptional<z.ZodObject<{
             code: z.ZodEnum<{
+                cancelled: "cancelled";
                 crash: "crash";
                 timeout: "timeout";
                 invalid_return: "invalid_return";
-                cancelled: "cancelled";
                 budget_exhausted: "budget_exhausted";
                 invalid_subworkflow: "invalid_subworkflow";
             }>;
@@ -6019,6 +6189,8 @@ type KanbanProps = KanbanProps$2;
 type LoopProps = LoopProps$2;
 type MergeQueueProps = MergeQueueProps$2;
 type MemoryProps = MemoryProps$2;
+type MonitorCondition = MonitorCondition$2;
+type MonitorProps = MonitorProps$2;
 type OptimizerProps = OptimizerProps$2;
 type OutputTarget = OutputTarget$1;
 type PanelistConfig = PanelistConfig$1;
@@ -6124,4 +6296,4 @@ type XmlElement = _smithers_orchestrator_graph.XmlElement;
 type XmlNode = _smithers_orchestrator_graph.XmlNode;
 type XmlText = _smithers_orchestrator_graph.XmlText;
 
-export { Approval, type ApprovalAutoApprove, type ApprovalDecision, ApprovalGate, type ApprovalGateProps, type ApprovalMode, type ApprovalOption, type ApprovalProps, type ApprovalRanking, type ApprovalRequest, type ApprovalSelection, Aspects, type AspectsProps, BackpressurePlanning, type BackpressurePlanningProps, Branch, type BranchProps, type CachePolicy, type CategoryConfig, type CheckConfig, CheckSuite, type CheckSuiteProps, ClassifyAndRoute, type ClassifyAndRouteProps, type ColumnDef, ContentPipeline, type ContentPipelineProps, type ContentPipelineStage, ContinueAsNew, type ContinueAsNewProps, DC_EDIT_SIGNAL, DC_SKIP_PREVIEW_SIGNAL, DEFAULT_DELEGATION_V2_LIMITS, DEFAULT_TIER_ORDER, DELEGATION_V2_COMPILER_VERSION, DELEGATION_V2_PROGRAM_VERSION, DELEGATION_V2_PROTOCOL_VERSION, DELEGATION_V2_REGISTRY_VERSION, DELEGATION_V2_RUNTIME_VERSION, DELEGATION_V2_SETTLEMENT_VERSION, type DcApprovalRow, type DcBudgetRow, type DcDevPreviewRow, type DcEditRow, type DcExecRow, type DcForecastRow, type DcGatesRow, type DcGoalApprovalRow, type DcGoalRow, type DcPlanRow, type DcPollRow, type DcPreviewRow, type DcProbeRow, type DcQuestionRow, type DcReplanRow, type DcReviewRow, type DcScoreRow, type DcSkipRow, Debate, type DebateProps, type DecisionRule, DecisionTable, type DecisionTableProps, type DelegationAgents, type DelegationBudget, DelegationChain, type DelegationChainProps, DelegationEditListener, type DelegationEditListenerProps, DelegationExecution, type DelegationExecutionProps, type DelegationOutputs, DelegationPlanning, type DelegationPlanningProps, DelegationPreview, type DelegationPreviewProps, type DelegationScorers, DelegationScoring, type DelegationScoringProps, type DelegationSharedProps, type DepsSpec, DeriskLoop, type DeriskLoopProps, type DevPreviewKind, DriftDetector, type DriftDetectorProps, type EngineDecision, EscalationChain, type EscalationChainProps, type EscalationLevel, type Estimate, type ExtractOptions, type Gate, GatherAndSynthesize, type GatherAndSynthesizeProps, GoalRefinement, type GoalRefinementProps, type HostElement, type HostNode, type HostText, HumanTask, type HumanTaskProps, type InferDeps, type InferOutputEntry, type InferRow, Kanban, type KanbanProps, Loop, type LoopProps, Memory, type MemoryProps, MergeQueue, type MergeQueueProps, Optimizer, type OptimizerProps, type OutputAccessor, type OutputKey, type OutputTarget, Panel, type PanelProps, type PanelistConfig, Parallel, type ParallelProps, Poller, type PollerProps, Ralph, type RalphProps, type RenderContext, type RetryPolicy, ReviewLoop, type ReviewLoopProps, type RunAuthContext, type RunOptions, type RunResult, Runbook, type RunbookProps, type RunbookStep, SMITHERS_WORKFLOW_VIEW_KIND, Saga, type SagaProps, SagaStep, type SagaStepDef, type SagaStepProps, Sandbox, type SandboxEgressConfig, type SandboxProps, type SandboxRuntime, type SandboxVolumeMount, type SandboxWorkspaceSpec, ScanFixVerify, type ScanFixVerifyProps, type SchemaRegistryEntry, type ScorersMap, Sequence, type SequenceProps, Sidecar, type SidecarDelta, type SidecarProps, Signal, type SignalProps, type SmithersAlertLabels, type SmithersAlertPolicy, type SmithersAlertPolicyDefaults, type SmithersAlertPolicyRule, type SmithersAlertReaction, type SmithersAlertReactionKind, type SmithersAlertReactionRef, type SmithersAlertSeverity, type SmithersCtx, type SmithersErrorCode, type SmithersWorkflow, type SmithersWorkflowDriverOptions, type SmithersWorkflowOptions, type SourceDef, Subflow, type SubflowProps, SuperSmithers, type SuperSmithersProps, Supervisor, type SupervisorProps, TUI, type TUIProps, Task, type TaskDescriptor, type TaskProps$1 as TaskProps, type Tier, Timer, type TimerProps, Trellis, type TrellisProps, TryCatchFinally, type TryCatchFinallyProps, UI, type UIProps, WaitForEvent, type WaitForEventProps, type WaitReason, Workflow, type WorkflowFileRef, type WorkflowGraph, type WorkflowProps, type WorkflowRuntime, type WorkflowSession, type WorkflowViewBootProps, type WorkflowViewProps, Worktree, type WorktreeProps, type XmlElement, type XmlNode, type XmlText, actualTotals, agentForTier, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema, captureWorkingCopyCommit, chunkGateFailures, compileDelegationV2Program, computeSidecarDelta, continueAsNew, dcApprovalSchema, dcBudgetSchema, dcDevPreviewSchema, dcEditSchema, dcExecSchema, dcForecastSchema, dcGatesSchema, dcGoalApprovalSchema, dcGoalSchema, dcPlanSchema, dcPollSchema, dcPreviewSchema, dcProbeSchema, dcQuestionSchema, dcReplanSchema, dcReviewSchema, dcScoreSchema, dcSkipSchema, delegationPrompts, delegationSchemas, delegationV2AssignmentDigest, delegationV2ProgramDigest, delegationV2Schemas, dependentsOf, devPreviewKindSchema, devPreviewNodeId, enforceDelegationV2AuthorFuel, estimateSchema, executionComplete, foldGates, foldPlans, frontierLeaves, gateSchema, leafAttemptState, leafComplete, leavesUnder, markdownComponents, nodeIndex, partitionDelegationV2AuthorFuel, pendingTriggers, physicalId, planOwnerOf, planningComplete, probeIdFor, probesRequested, renderMdx, renderPromptToText, replanCountFor, settleDelegationV2Envelope, splitGates, synthesizeDelegationEvents, tierSchema, delegationV2Prompts as trellisPrompts, triggerTargetOf, unplannedChunks, validateWorkflowProgram, withCommitRange, zodSchemaToJsonExample };
+export { Approval, type ApprovalAutoApprove, type ApprovalDecision, ApprovalGate, type ApprovalGateProps, type ApprovalMode, type ApprovalOption, type ApprovalProps, type ApprovalRanking, type ApprovalRequest, type ApprovalSelection, Aspects, type AspectsProps, BackpressurePlanning, type BackpressurePlanningProps, Branch, type BranchProps, type CachePolicy, type CategoryConfig, type CheckConfig, CheckSuite, type CheckSuiteProps, ClassifyAndRoute, type ClassifyAndRouteProps, type ColumnDef, ContentPipeline, type ContentPipelineProps, type ContentPipelineStage, ContinueAsNew, type ContinueAsNewProps, DC_EDIT_SIGNAL, DC_SKIP_PREVIEW_SIGNAL, DEFAULT_DELEGATION_V2_LIMITS, DEFAULT_TIER_ORDER, DELEGATION_V2_COMPILER_VERSION, DELEGATION_V2_PROGRAM_VERSION, DELEGATION_V2_PROTOCOL_VERSION, DELEGATION_V2_REGISTRY_VERSION, DELEGATION_V2_RUNTIME_VERSION, DELEGATION_V2_SETTLEMENT_VERSION, type DcApprovalRow, type DcBudgetRow, type DcDevPreviewRow, type DcEditRow, type DcExecRow, type DcForecastRow, type DcGatesRow, type DcGoalApprovalRow, type DcGoalRow, type DcPlanRow, type DcPollRow, type DcPreviewRow, type DcProbeRow, type DcQuestionRow, type DcReplanRow, type DcReviewRow, type DcScoreRow, type DcSkipRow, Debate, type DebateProps, type DecisionRule, DecisionTable, type DecisionTableProps, type DelegationAgents, type DelegationBudget, DelegationChain, type DelegationChainProps, DelegationEditListener, type DelegationEditListenerProps, DelegationExecution, type DelegationExecutionProps, type DelegationOutputs, DelegationPlanning, type DelegationPlanningProps, DelegationPreview, type DelegationPreviewProps, type DelegationScorers, DelegationScoring, type DelegationScoringProps, type DelegationSharedProps, type DepsSpec, DeriskLoop, type DeriskLoopProps, type DevPreviewKind, DriftDetector, type DriftDetectorProps, type EngineDecision, EscalationChain, type EscalationChainProps, type EscalationLevel, type Estimate, type ExtractOptions, type Gate, GatherAndSynthesize, type GatherAndSynthesizeProps, GoalRefinement, type GoalRefinementProps, type HostElement, type HostNode, type HostText, HumanTask, type HumanTaskProps, type InferDeps, type InferOutputEntry, type InferRow, Kanban, type KanbanProps, Loop, type LoopProps, MONITOR_CONDITIONS, MONITOR_DEFAULT_AUTO_HEAL, MONITOR_TERMINAL_STATUSES, Memory, type MemoryProps, MergeQueue, type MergeQueueProps, Monitor, type MonitorCondition, type MonitorProps, Optimizer, type OptimizerProps, type OutputAccessor, type OutputKey, type OutputTarget, Panel, type PanelProps, type PanelistConfig, Parallel, type ParallelProps, Poller, type PollerProps, Ralph, type RalphProps, type RenderContext, type RetryPolicy, ReviewLoop, type ReviewLoopProps, type RunAuthContext, type RunOptions, type RunResult, Runbook, type RunbookProps, type RunbookStep, SMITHERS_WORKFLOW_VIEW_KIND, Saga, type SagaProps, SagaStep, type SagaStepDef, type SagaStepProps, Sandbox, type SandboxEgressConfig, type SandboxProps, type SandboxRuntime, type SandboxVolumeMount, type SandboxWorkspaceSpec, ScanFixVerify, type ScanFixVerifyProps, type SchemaRegistryEntry, type ScorersMap, Sequence, type SequenceProps, Sidecar, type SidecarDelta, type SidecarProps, Signal, type SignalProps, type SmithersAlertLabels, type SmithersAlertPolicy, type SmithersAlertPolicyDefaults, type SmithersAlertPolicyRule, type SmithersAlertReaction, type SmithersAlertReactionKind, type SmithersAlertReactionRef, type SmithersAlertSeverity, type SmithersCtx, type SmithersErrorCode, type SmithersWorkflow, type SmithersWorkflowDriverOptions, type SmithersWorkflowOptions, type SourceDef, Subflow, type SubflowProps, SuperSmithers, type SuperSmithersProps, Supervisor, type SupervisorProps, TUI, type TUIProps, Task, type TaskDescriptor, type TaskProps$1 as TaskProps, type Tier, Timer, type TimerProps, Trellis, type TrellisProps, TryCatchFinally, type TryCatchFinallyProps, UI, type UIProps, WaitForEvent, type WaitForEventProps, type WaitReason, Workflow, type WorkflowFileRef, type WorkflowGraph, type WorkflowProps, type WorkflowRuntime, type WorkflowSession, type WorkflowViewBootProps, type WorkflowViewProps, Worktree, type WorktreeProps, type XmlElement, type XmlNode, type XmlText, actualTotals, agentForTier, approvalDecisionSchema, approvalRankingSchema, approvalSelectionSchema, captureWorkingCopyCommit, chunkGateFailures, compileDelegationV2Program, computeSidecarDelta, continueAsNew, dcApprovalSchema, dcBudgetSchema, dcDevPreviewSchema, dcEditSchema, dcExecSchema, dcForecastSchema, dcGatesSchema, dcGoalApprovalSchema, dcGoalSchema, dcPlanSchema, dcPollSchema, dcPreviewSchema, dcProbeSchema, dcQuestionSchema, dcReplanSchema, dcReviewSchema, dcScoreSchema, dcSkipSchema, delegationPrompts, delegationSchemas, delegationV2AssignmentDigest, delegationV2ProgramDigest, delegationV2Schemas, dependentsOf, devPreviewKindSchema, devPreviewNodeId, enforceDelegationV2AuthorFuel, estimateSchema, executionComplete, foldGates, foldPlans, frontierLeaves, gateSchema, leafAttemptState, leafComplete, leavesUnder, markdownComponents, monitorAuthorityRules, monitorEvidenceRules, monitorHealthSignals, monitorPrompt, monitorReadPathRules, nodeIndex, partitionDelegationV2AuthorFuel, pendingTriggers, physicalId, planOwnerOf, planningComplete, probeIdFor, probesRequested, renderMdx, renderPromptToText, replanCountFor, settleDelegationV2Envelope, splitGates, synthesizeDelegationEvents, tierSchema, delegationV2Prompts as trellisPrompts, triggerTargetOf, unplannedChunks, validateWorkflowProgram, withCommitRange, zodSchemaToJsonExample };

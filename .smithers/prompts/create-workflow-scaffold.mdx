@@ -101,10 +101,67 @@ plan (skip only if the design's `ui` is null because the user declined one):
 8. Verify it transpiles before you finish:
    `bun build --no-bundle {props.uiDir}/<workflowName>.tsx > /dev/null`.
 
+## Scaffold the monitor workflow
+
+A **monitor** is a workflow that watches this one while it runs. Smithers
+launches `{props.monitorDir}/<workflowName>.tsx` automatically, as a sibling run
+linked to the watched run, whenever `<workflowName>` starts. Zero monitor files
+means zero behavior change, so this is opt-in per workflow.
+
+Write `{props.monitorDir}/<workflowName>.tsx` when the workflow runs long,
+unattended, in the background, or loops - the cases where it can silently wedge
+and nobody notices. Skip it for short interactive workflows, and never write a
+monitor for a monitor.
+
+Compose the shipped `Monitor` component rather than hand-rolling a poll loop:
+
+```tsx
+/** @jsxImportSource smithers-orchestrator */
+import { Monitor, createSmithers } from "smithers-orchestrator";
+import { z } from "zod/v4";
+import { agents } from "../agents";
+
+const { Workflow, smithers, outputs } = createSmithers({
+  health: z.object({
+    condition: z.enum([
+      "healthy", "stalled", "wedged-node", "runaway-loop", "awaiting-human", "failing", "unknown",
+    ]),
+    runStatus: z.string(),
+    targetNodeId: z.string().nullable().default(null),
+    evidence: z.string(),
+    summary: z.string(),
+  }),
+  action: z.object({ action: z.string(), changed: z.boolean().default(false), summary: z.string() }),
+});
+
+export default smithers((ctx) => (
+  <Workflow name="<workflowName>-monitor">
+    <Monitor
+      watchRunId={ctx.input.watchRunId}
+      agent={agents.cheapFast}
+      healthOutput={outputs.health}
+      actionOutput={outputs.action}
+      intervalMs={60_000}
+    />
+  </Workflow>
+));
+```
+
+Rules: `nodeId`/`runId`/`iteration` are reserved output columns, so the
+implicated node field must be `targetNodeId`. The monitor receives
+`watchRunId`, `watchWorkflowId`, and `watchWorkflowPath` as input. It reads run
+state through `smithers-orchestrator/gateway-client` or the public CLI, never
+the store. Leave `autoHeal` at its default (`stalled`, `wedged-node`) unless the
+design says otherwise: those two repairs are idempotent and reversible, and
+everything else escalates to a human.
+
 ## Acceptance criteria
 
 - `bunx smithers-orchestrator graph {props.workflowsDir}/<workflowName>.tsx`
   exits 0 (run it yourself before finishing).
+- If you wrote a monitor,
+  `bunx smithers-orchestrator graph {props.monitorDir}/<workflowName>.tsx`
+  exits 0 too.
 - The UI file (when required) transpiles with `bun build --no-bundle`.
 - The workflow declares the UI with `<UI entry="../ui/<workflowName>.tsx" />`;
   no `gateway.register(..., { ui })` snippet is added.

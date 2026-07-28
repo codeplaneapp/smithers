@@ -126,6 +126,13 @@ import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
 import { agentAddWizard } from "./agent-commands/agentAddWizard.js";
 import { getWorkflowFollowUpCtas } from "./workflow-pack.js";
 import { buildMonitoringGuidance, hasCustomUi, workflowIdFromPath } from "./monitoring-suggestion.js";
+import {
+  buildMonitorLaunchArgs,
+  buildMonitorLaunchEnv,
+  buildMonitorRunId,
+  normalizeMonitorOption,
+  resolveMonitorLaunch,
+} from "./monitor-workflows.js";
 import { buildAgentNextSteps } from "./agentNextSteps.js";
 import { generateRunReport } from "./runReport.js";
 import { whatHappened } from "./what-happened.js";
@@ -187,6 +194,7 @@ import {
 import { findAndOpenSupervisorDb, parseDurationMs, supervisorLoopEffect, supervisorPollEffect } from "./supervisor.js";
 import { DEFAULT_LIFECYCLE_EVENT_TYPES, renderAttemptPool, tallyAttemptPool } from "./observability-helpers.js";
 import { buildDurabilityRunOptions } from "./up-engine-options.js";
+import { BUILTIN_RESUME_CONFIG_KEY, buildBuiltinResumeConfig } from "./resume-target.js";
 import { WATCH_MIN_INTERVAL_MS, runWatchLoop, watchIntervalSecondsToMs } from "./watch.js";
 import { runMcpModeIfRequested } from "./mcp/mcp-mode.js";
 import {
@@ -632,22 +640,43 @@ async function listWaitingTimers(adapter, runId) {
   waits.sort((left, right) => left.firesAtMs - right.firesAtMs);
   return waits;
 }
+/**
+ * Signals that terminate an engine and CAN be observed. SIGHUP matters most for
+ * a detached run: Node's default action for it is silent immediate death, so an
+ * engine that was hung up left a log whose last lines were ordinary agent
+ * activity and no error at all — indistinguishable from a hang. Trapping it
+ * turns "vanished" into a dated, greppable line.
+ *
+ * SIGKILL is deliberately absent: it cannot be caught. A run log that ends with
+ * agent activity and NO `[smithers] received …` line was SIGKILLed (an OOM
+ * kill, `kill -9`, or the OS reclaiming memory), which is itself the diagnosis.
+ */
+const ENGINE_TERMINATION_SIGNALS = /** @type {NodeJS.Signals[]} */ (["SIGINT", "SIGTERM", "SIGHUP"]);
+/** Conventional 128 + signo exit codes. */
+const SIGNAL_EXIT_CODES = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
 function setupAbortSignal() {
   const abort = new AbortController();
+  const startedAtMs = Date.now();
   let signalCount = 0;
   /**
    * @param {string} signal
    */
   const handleSignal = (signal) => {
-    const exitCode = signal === "SIGINT" ? 130 : 143;
+    const exitCode = SIGNAL_EXIT_CODES[/** @type {keyof typeof SIGNAL_EXIT_CODES} */ (signal)] ?? 143;
     signalCount += 1;
+    // One unambiguous, greppable terminal diagnostic. It names the signal, the
+    // pid, and how long the engine had been up, so an operator reading a
+    // detached run log can tell "killed" from "hung" without guessing.
+    process.stderr.write(
+      `\n[smithers] received ${signal} after ${Math.round((Date.now() - startedAtMs) / 1000)}s (pid ${process.pid}, run terminating; this was a signal, not a hang)\n`,
+    );
     if (signalCount >= 2) {
       // Second signal: graceful cancellation is taking too long — exit now.
-      process.stderr.write(`\n[smithers] received ${signal} again, exiting immediately.\n`);
+      process.stderr.write(`[smithers] received ${signal} again, exiting immediately.\n`);
       process.exit(exitCode);
       return;
     }
-    process.stderr.write(`\n[smithers] received ${signal}, cancelling run... (press again to force-exit)\n`);
+    process.stderr.write(`[smithers] cancelling run... (signal again to force-exit)\n`);
     abort.abort();
     // Backstop: if graceful cancellation hangs, force-exit after 5s so a hard
     // `kill -9` is never required. unref() so this timer never keeps the loop
@@ -659,8 +688,9 @@ function setupAbortSignal() {
     if (typeof deadline.unref === "function") deadline.unref();
   };
   // process.on (not once) so a second signal still reaches handleSignal.
-  process.on("SIGINT", () => handleSignal("SIGINT"));
-  process.on("SIGTERM", () => handleSignal("SIGTERM"));
+  for (const signal of ENGINE_TERMINATION_SIGNALS) {
+    process.on(signal, () => handleSignal(signal));
+  }
   return abort;
 }
 /**
@@ -1780,6 +1810,12 @@ const upOptions = z.object({
     .describe(
       "Auto-launch the post-failure autopsy workflow when this run fails (disable with --no-post-failure or SMITHERS_POST_FAILURE=0)",
     ),
+  monitor: z
+    .union([z.boolean(), z.string()])
+    .default(true)
+    .describe(
+      "Monitor workflow that watches this run as a sibling. Default: auto-discover `.smithers/monitor/<workflowId>.tsx` (a no-op when absent). Pass a path to select one explicitly, or --no-monitor to opt out",
+    ),
   verbose: z
     .boolean()
     .default(false)
@@ -1828,6 +1864,13 @@ const oneshotOptions = z
     setTrivial: z.enum(["direct", "oneshot"]).optional().describe("Persist trivial-task routing"),
     status: z.boolean().default(false).describe("Print usable agents, model chain, and preferences as JSON"),
     cwd: z.string().default(".").describe("Working directory for the task"),
+    runId: z.string().optional().describe("Run ID to create or resume (used by `smithers supervise` to recover a run)"),
+    resume: z.boolean().default(false).describe("Resume the existing run named by --run-id instead of starting a new one"),
+    force: z.boolean().default(false).describe("With --resume, resume even when the run still looks active"),
+    resumeClaimOwner: z.string().optional().describe("Internal durable resume claim owner"),
+    resumeClaimHeartbeat: z.number().int().min(1).optional().describe("Internal durable resume claim heartbeat"),
+    resumeRestoreOwner: z.string().optional().describe("Internal durable resume restore owner"),
+    resumeRestoreHeartbeat: z.number().int().min(1).optional().describe("Internal durable resume restore heartbeat"),
     detach: z.boolean().default(true).describe("Run in the background; pass false for foreground"),
     open: z.boolean().default(true).describe("Open the run UI after launch"),
     startedByHarness: z
@@ -2574,6 +2617,13 @@ function normalizeEventsQuery(options) {
   };
 }
 /**
+ * How long a monitor launch waits for the watched run's row to appear before
+ * giving up, and how often it re-checks. The engine writes the row in the first
+ * moments of a run; this budget only has to cover a cold store open.
+ */
+const MONITOR_PARENT_WAIT_MS = 30_000;
+const MONITOR_PARENT_POLL_MS = 100;
+/**
  * @param {{ ok: (...args: any[]) => any }} c
  * @param {string} workflowPath
  * @param {UpCommandOptions} options
@@ -2629,6 +2679,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
     const resolvedWorkflowPath = resolve(process.cwd(), workflowPath);
     const { resume, resumeRunId } = normalizeResumeOption(options.resume);
     const runId = options.runId ?? resumeRunId;
+    const detachedMonitor = normalizeMonitorOption(options.monitor);
     // Detached mode: spawn ourselves as a background process
     if (options.detach) {
       // Validate the declared parent BEFORE spawning: the detached child
@@ -2709,6 +2760,10 @@ async function executeUpCommand(c, workflowPath, options, fail) {
       if (options.serve && !options.metrics) childArgs.push("--metrics", "false");
       if (options.backend) childArgs.push("--backend", options.backend);
       if (options.postFailure === false) childArgs.push("--no-post-failure");
+      // Monitor resolution happens in the child (which owns the real run id and
+      // its lifecycle), so the flag is only forwarded here.
+      if (detachedMonitor.noMonitor) childArgs.push("--no-monitor");
+      else if (detachedMonitor.monitorPath) childArgs.push("--monitor", detachedMonitor.monitorPath);
       await reapDetachedRunLogs({ cwd: cliWorkspace.cwd() });
       const logFile = resolveDetachedRunLogFile(effectiveRunId, {
         logDir: options.logDir,
@@ -2969,11 +3024,100 @@ async function executeUpCommand(c, workflowPath, options, fail) {
             restoreHeartbeatAtMs: options.resumeRestoreHeartbeat ?? null,
           }
         : undefined;
+    // --- Monitor workflow -------------------------------------------------
+    // A monitor is a sibling run that watches this one. `--detach` resolved
+    // nothing above and merely forwarded the flag: the detached child re-enters
+    // here as a normal run, so this is the single place a monitor is launched
+    // and torn down, and it owns the real run id either way.
+    /** @type {import("./MonitorLaunchPlan.ts").MonitorLaunchPlan} */
+    let monitorPlan;
+    try {
+      monitorPlan = resolveMonitorLaunch({
+        workflowPath: resolvedWorkflowPath,
+        monitor: detachedMonitor.monitorPath,
+        noMonitor: detachedMonitor.noMonitor,
+        cwd: process.cwd(),
+      });
+    } catch (error) {
+      if (error instanceof SmithersError) {
+        return fail({ code: error.code, message: error.message, exitCode: 4 });
+      }
+      throw error;
+    }
+    // A monitor is a CHILD run, so the run it watches must have a known id
+    // before one can be launched. Only forced when a monitor will actually
+    // start — with no monitor file the run id resolves exactly as it did.
+    const monitoredRunId = monitorPlan.action === "launch" ? (runId ?? `run-${Date.now()}`) : runId;
+    /** @type {{ runId: string; pid: number | undefined } | null} */
+    let monitorRun = null;
+    const startMonitor = async () => {
+      if (monitorPlan.action !== "launch" || !monitoredRunId) return;
+      // The watched run's row must exist before the child validates
+      // --parent-run-id, or the monitor dies in the background with nothing on
+      // the operator's terminal. The engine writes it early; wait briefly.
+      const deadline = Date.now() + MONITOR_PARENT_WAIT_MS;
+      let parentExists = false;
+      while (Date.now() < deadline && !abort.signal.aborted) {
+        if (await adapter.getRun(monitoredRunId)) {
+          parentExists = true;
+          break;
+        }
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, MONITOR_PARENT_POLL_MS));
+      }
+      if (!parentExists) {
+        process.stderr.write(`⚠ Monitor not started: run ${monitoredRunId} did not register in time.\n`);
+        return;
+      }
+      const monitorRunId = buildMonitorRunId(monitoredRunId);
+      const child = spawn(
+        "bun",
+        [
+          fileURLToPath(import.meta.url),
+          ...buildMonitorLaunchArgs({
+            monitorEntryFile: monitorPlan.monitor.entryFile,
+            watchRunId: monitoredRunId,
+            watchWorkflowId: workflowIdFromPath(workflowPath),
+            watchWorkflowPath: resolvedWorkflowPath,
+            monitorRunId,
+            root: options.root,
+            logDir: options.logDir,
+            backend: options.backend,
+          }),
+        ],
+        { detached: true, stdio: "ignore", env: buildMonitorLaunchEnv() },
+      );
+      child.unref();
+      monitorRun = { runId: monitorRunId, pid: child.pid ?? undefined };
+      process.stderr.write(
+        `[smithers] monitor ${monitorRunId} watching ${monitoredRunId} (${relative(process.cwd(), monitorPlan.monitor.entryFile)})\n`,
+      );
+    };
+    // Fire-and-forget: the monitor runs ALONGSIDE the workflow, so this must
+    // not gate the run starting. Failures are reported, never fatal — a broken
+    // monitor must not take down the run it was meant to protect.
+    const monitorStarting = startMonitor().catch((error) => {
+      process.stderr.write(`⚠ Monitor launch failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    });
+    // A monitor must never outlive the run it watches. Cancelling the watched
+    // run already cascades to it (`parent_run_id`); this closes the other door,
+    // where the watched run simply finishes.
+    const stopMonitor = async () => {
+      await monitorStarting;
+      if (!monitorRun) return;
+      try {
+        await cascadeCancelRun(adapter, monitorRun.runId);
+      } catch (error) {
+        process.stderr.write(
+          `⚠ Could not stop monitor ${monitorRun.runId}: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      }
+    };
     // Shared run-completion response for both the plain and --serve paths:
     // set the exit code, launch the post-failure autopsy on failure, narrate
     // the run for a human (a cheap agent writes + opens an HTML summary), and
     // attach the next-steps CTA (concise for humans, agent script otherwise).
     const finishRun = async (result) => {
+      await stopMonitor();
       process.exitCode = formatStatusExitCode(result.status);
       if (result.status === "failed") {
         launchPostFailureAutopsy({
@@ -3056,7 +3200,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
         });
       }
       const { createServeApp } = await import("@smithers-orchestrator/server/serve");
-      const effectiveRunId = runId ?? `run-${Date.now()}`;
+      const effectiveRunId = monitoredRunId ?? `run-${Date.now()}`;
       const serveApp = createServeApp({
         workflow: workflow,
         adapter: adapter,
@@ -3148,7 +3292,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
     const result = await Effect.runPromise(
       runWorkflow(workflow, {
         input,
-        runId,
+        runId: monitoredRunId,
         parentRunId: options.parentRunId,
         ...(detachedLogFile ? { config: { logFile: detachedLogFile } } : {}),
         ...buildDurabilityRunOptions({
@@ -5947,7 +6091,9 @@ const cli = Cli.create({
       const overrideEntry = localPack ? join(localPack.packDir, "workflows", "oneshot.tsx") : undefined;
       const hasOverride = Boolean(overrideEntry && existsSync(overrideEntry));
       const effectiveRunId =
-        process.env.SMITHERS_ONESHOT_RUN_ID ?? `oneshot-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+        c.options.runId ??
+        process.env.SMITHERS_ONESHOT_RUN_ID ??
+        `oneshot-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
       if (c.options.interactive) {
         if (!Boolean(process.stdin.isTTY && process.stdout.isTTY)) {
           return fail({
@@ -6091,6 +6237,38 @@ const cli = Cli.create({
           prompt: c.options.startedByPrompt,
         });
         const statusUpdater = startOneshotStatusUpdater({ db: workflow.db, runId: effectiveRunId, goal, cwd: taskCwd });
+        // Oneshot builds its workflow in-process from the selected agent chain,
+        // so there is no `.tsx` for `supervise` to re-run. Record the argv that
+        // reconstructs it instead; without this a detached oneshot that loses
+        // its engine can never be auto-resumed (it was skipped forever with
+        // "workflow file not found at (missing path)").
+        const builtinResume = buildBuiltinResumeConfig({
+          command: "oneshot",
+          args: [
+            ...(c.options.goalFile ? ["--goal-file", resolve(process.cwd(), c.options.goalFile)] : [goal]),
+            "--cwd",
+            taskCwd,
+            "--detach",
+            "false",
+            // A resume re-enters an existing run: never re-open the UI.
+            "--open",
+            "false",
+            "--review",
+            review ? "on" : "off",
+            ...(c.options.model ? ["--model", c.options.model] : []),
+            ...(c.options.agent ? ["--agent", c.options.agent] : []),
+          ],
+          cwd: taskCwd,
+        });
+        const resumeClaim =
+          c.options.resumeClaimOwner && c.options.resumeClaimHeartbeat
+            ? {
+                claimOwnerId: c.options.resumeClaimOwner,
+                claimHeartbeatAtMs: c.options.resumeClaimHeartbeat,
+                restoreRuntimeOwnerId: c.options.resumeRestoreOwner ?? null,
+                restoreHeartbeatAtMs: c.options.resumeRestoreHeartbeat ?? null,
+              }
+            : undefined;
         try {
           const result = await Effect.runPromise(
             runWorkflow(workflow, {
@@ -6100,7 +6278,10 @@ const cli = Cli.create({
               config: {
                 ...(detachedLogFile ? { logFile: detachedLogFile } : {}),
                 oneshot: { chain: selected.chain, review, goal: goal.length > 500 ? `${goal.slice(0, 500)}…` : goal },
+                [BUILTIN_RESUME_CONFIG_KEY]: builtinResume,
               },
+              ...buildDurabilityRunOptions({ resume: c.options.resume, force: c.options.force }),
+              resumeClaim,
               startedBy,
               onProgress: buildProgressReporter(),
               signal: setupAbortSignal().signal,
