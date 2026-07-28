@@ -34,7 +34,6 @@
     ".smithers/workflows/orchbench.tsx",
     ".smithers/workflows/build-tui-monitor.tsx",
     ".smithers/workflows/daily-canary.tsx",
-    ".smithers/workflows/repo-prospector.tsx",
     ".smithers/workflows/daily-ceo-intel.tsx",
     ".smithers/workflows/docs-concise.tsx",
     ".smithers/workflows/release-content.tsx",
