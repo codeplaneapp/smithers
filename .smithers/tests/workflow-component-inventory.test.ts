@@ -143,6 +143,12 @@ const workflowOwners = {
     "vcs.tsx",
     "verify-push-safety.tsx",
   ],
+  "./tests/local-workflows-d-campaigns.test.tsx": [
+    "design-partner-fixes.tsx",
+    "sol-issue-train.tsx",
+    "tui-parity.tsx",
+    "xcombo-fix-train.tsx",
+  ],
   "./tests/local-workflows-c-orchestration.test.tsx": [
     "monitor-redesign.tsx",
     "orchbench.tsx",
