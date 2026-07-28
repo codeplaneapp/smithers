@@ -8529,7 +8529,40 @@ type RunAuthContext = {
   role: string;
   createdAt: string;
 };
+```
 
+## Status contracts
+
+`RunStatus` is the persisted run lifecycle and the type of
+`RunResult.status`. Its categories are:
+
+| Category | Values | Meaning |
+|---|---|---|
+| Active | `running` | Work can be executing or scheduled. |
+| Suspended | `waiting-approval`, `waiting-event`, `waiting-timer`, `waiting-quota`, `paused` | The run is nonterminal and can resume. |
+| Terminal | `finished`, `continued`, `failed`, `cancelled` | This run will not schedule more work. A `continued` run points to its successor through `nextRunId`. |
+
+`TaskState` is the persisted, detailed lifecycle for an individual task.
+Import it from `@smithers-orchestrator/scheduler/TaskState`. `NodeStatus` is a
+separate six-value display palette exported by
+`@smithers-orchestrator/gateway-react`; `useGatewayRunTree` collapses detailed
+task and run states into that palette. In particular, every `waiting-*` value
+maps to `waiting`. Do not use the display palette as a persisted lifecycle
+contract.
+
+| Task category | Values |
+|---|---|
+| Queued | `pending` |
+| Active | `in-progress` |
+| Suspended | `waiting-approval`, `waiting-event`, `waiting-timer`, `waiting-quota`, `waiting-bound`, `bound-stale` |
+| Terminal | `finished`, `failed`, `cancelled`, `skipped` |
+
+Status unions can gain values. Add a visible unknown fallback when consuming
+Gateway or event data, preserve the original value for diagnostics, and treat
+an unknown `waiting-*` value as suspended and nonterminal. See the
+compatibility and changelog policy.
+
+```ts
 // =============================================================================
 // Run
 // =============================================================================
@@ -8623,9 +8656,36 @@ type RunStatus =
   | "waiting-event"
   | "waiting-timer"
   | "waiting-quota"
+  | "paused"
   | "finished"
   | "continued"
   | "failed"
+  | "cancelled";
+
+// Persisted per-task lifecycle. Import from
+// @smithers-orchestrator/scheduler/TaskState.
+type TaskState =
+  | "pending"
+  | "waiting-approval"
+  | "waiting-event"
+  | "waiting-timer"
+  | "waiting-quota"
+  | "waiting-bound"
+  | "bound-stale"
+  | "in-progress"
+  | "finished"
+  | "failed"
+  | "cancelled"
+  | "skipped";
+
+// Display palette returned by useGatewayRunTree. Import from
+// @smithers-orchestrator/gateway-react.
+type NodeStatus =
+  | "ok"
+  | "running"
+  | "queued"
+  | "failed"
+  | "waiting"
   | "cancelled";
 
 type RetryTaskOptions = {
@@ -21676,6 +21736,11 @@ For subscription examples, CLI usage, and built-in metrics, see Events.
 
 ## Status Types
 
+`RunStatus` is the persisted lifecycle value carried by
+`RunStatusChanged`, run records, and `RunResult.status`. The `waiting-*` and
+`paused` values are suspended, nonterminal states. `finished`, `continued`,
+`failed`, and `cancelled` are terminal.
+
 ```ts
 type RunStatus =
   | "running"
@@ -21703,7 +21768,44 @@ type RunState =
   | "cancelled"
   | "succeeded"
   | "unknown";
+
+type TaskState =
+  | "pending"
+  | "waiting-approval"
+  | "waiting-event"
+  | "waiting-timer"
+  | "waiting-quota"
+  | "waiting-bound"
+  | "bound-stale"
+  | "in-progress"
+  | "finished"
+  | "failed"
+  | "cancelled"
+  | "skipped";
 ```
+
+`RunState` is a derived health view, not another spelling of the persisted
+`RunStatus`. For example, a persisted `running` run can derive as `stale` or
+`orphaned`.
+
+Node lifecycle events do not carry a separate `NodeStatus` or `TaskState`
+field. Their names report transitions: `NodePending`, `NodeStarted`,
+`NodeRetrying`, the `NodeWaiting*` variants, and the terminal
+`NodeFinished`/`NodeFailed`/`NodeCancelled`/`NodeSkipped` variants. Read node
+records or a DevTools snapshot when you need the current persisted
+`TaskState`; some states, including bound waits, have no dedicated event.
+Browser run trees intentionally collapse the detailed states to the
+display-only `NodeStatus` palette documented in
+Types.
+
+<Warning>
+Status strings are an evolving wire contract. Smithers lists every addition
+in the release upgrade notes under the
+compatibility and changelog policy.
+Consumers should still retain an unknown fallback. Do not convert an unknown
+value to `failed` or `running`; preserve it for diagnostics and treat an
+unknown `waiting-*` value as suspended and nonterminal.
+</Warning>
 
 ## Event Variants
 

@@ -123,6 +123,11 @@ For subscription examples, CLI usage, and built-in metrics, see [Events](/runtim
 
 ## Status Types
 
+`RunStatus` is the persisted lifecycle value carried by
+`RunStatusChanged`, run records, and `RunResult.status`. The `waiting-*` and
+`paused` values are suspended, nonterminal states. `finished`, `continued`,
+`failed`, and `cancelled` are terminal.
+
 ```ts
 type RunStatus =
   | "running"
@@ -150,7 +155,44 @@ type RunState =
   | "cancelled"
   | "succeeded"
   | "unknown";
+
+type TaskState =
+  | "pending"
+  | "waiting-approval"
+  | "waiting-event"
+  | "waiting-timer"
+  | "waiting-quota"
+  | "waiting-bound"
+  | "bound-stale"
+  | "in-progress"
+  | "finished"
+  | "failed"
+  | "cancelled"
+  | "skipped";
 ```
+
+`RunState` is a derived health view, not another spelling of the persisted
+`RunStatus`. For example, a persisted `running` run can derive as `stale` or
+`orphaned`.
+
+Node lifecycle events do not carry a separate `NodeStatus` or `TaskState`
+field. Their names report transitions: `NodePending`, `NodeStarted`,
+`NodeRetrying`, the `NodeWaiting*` variants, and the terminal
+`NodeFinished`/`NodeFailed`/`NodeCancelled`/`NodeSkipped` variants. Read node
+records or a DevTools snapshot when you need the current persisted
+`TaskState`; some states, including bound waits, have no dedicated event.
+Browser run trees intentionally collapse the detailed states to the
+display-only `NodeStatus` palette documented in
+[Types](/reference/types#status-contracts).
+
+<Warning>
+Status strings are an evolving wire contract. Smithers lists every addition
+in the release upgrade notes under the
+[compatibility and changelog policy](/changelogs/compatibility-policy).
+Consumers should still retain an unknown fallback. Do not convert an unknown
+value to `failed` or `running`; preserve it for diagnostics and treat an
+unknown `waiting-*` value as suspended and nonterminal.
+</Warning>
 
 ## Event Variants
 
