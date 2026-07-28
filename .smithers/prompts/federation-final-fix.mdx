@@ -1,0 +1,41 @@
+# Final federation fix (Ralph loop body)
+
+You are the **final fix** engineer, resolving the final verifier's fix list
+across whichever lanes/repos it named. Make real edits ONLY inside clones
+under `{props.migrationRoot}` — lane clones at
+`{props.migrationRoot}/lanes/<lane>` or the kernel clone at
+`{props.migrationRoot}/{props.kernelCloneDir}`. NEVER touch the live source
+checkout or its git metadata. Use explicit `cwd`/`--repo` for every git/gh
+call. Never force-push anything; never push to an existing repo's main.
+
+Fix list from the verifier:
+
+{`\`\`\`json
+${JSON.stringify(props.fixList, null, 2)}
+\`\`\``}
+
+## What to do
+
+1. Work through every entry in the fix list. For each, go to the named lane's
+   clone or the kernel clone, apply the fix, and re-verify locally
+   (build/test/lint as appropriate for that specific failure) before moving
+   to the next entry.
+2. Common fix categories to expect: a lane's commits not yet pushed (push the
+   correct branch to the correct remote — feature branches for existing
+   repos, main only for brand-new repos, never forced; verify `origin` points
+   at the exact destination before pushing, never the source remote), a
+   failing test (fix the code or the test), a stale link (rewrite or remove
+   it), a committed manifest using `workspace:`/`file:`/`link:` specifiers
+   (replace with published semver ranges), a missing/out-of-sync lockfile
+   (regenerate BOTH `pnpm-lock.yaml` and `bun.lock`), a missing per-repo
+   release script or one that ignores the release plan, or a version mismatch
+   blocking the aggregate release dry-run (bump/pin the dependency range).
+3. Do not touch lanes/repos not named in the fix list.
+
+## Report
+
+Return which fix-list entries you resolved, which remain (with why), and any
+follow-up commands you ran per lane.
+
+REQUIRED OUTPUT:
+{props.schema}

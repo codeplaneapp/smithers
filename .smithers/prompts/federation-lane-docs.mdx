@@ -1,0 +1,44 @@
+# Docs + metadata for lane `{props.lane}`
+
+You are the **docs** engineer for `{props.lane}`. Work ONLY inside the fresh
+clone at `{props.migrationRoot}/lanes/{props.lane}` — never in the live source
+checkout.
+
+Decouple step result:
+
+{`\`\`\`json
+${JSON.stringify(props.decoupleResult, null, 2)}
+\`\`\``}
+
+## What to do
+
+1. Write a real, standalone `README.md`: what the package/repo is, install
+   instructions, a minimal usage example lifted from the actual public API,
+   and a link back to the `smithersai/smithers` monorepo for the broader
+   project.
+2. Update or regenerate any docs bundles (`llms.txt`/`llms-full.txt` style
+   files) that referenced the monorepo's internal layout — regenerate them
+   scoped to this lane if the lane has its own doc-generation script, or write
+   a minimal equivalent.
+3. Update every manifest/metadata file (`package.json` `repository`/
+   `homepage`/`bugs` fields, any `CHANGELOG.md`) to point at the correct
+   standalone repo, not the monorepo.
+4. Fix every stale link: internal doc links that pointed at a
+   monorepo-relative path (`../other-package`, `../../docs/...`), links in
+   skills and plugin copies that reference moved paths, and **historical live
+   links** (published URLs, badge URLs, deep links into the old monorepo
+   layout) — rewrite each to the new repo/package or drop it if the target
+   isn't part of this lane. Grep for markdown links and relative import-style
+   references in comments/docs. For `multi`/`plue`, links into the moved
+   browser-UI / control-plane paths should point at the paths as merged into
+   this repo. For `awesome-smithers`, make sure the new federated-repo
+   listing links resolve.
+5. Do not commit — a later step commits the lane.
+
+## Report
+
+Return which docs/metadata files you wrote or updated, and any stale links
+you found and fixed (or flagged as unfixable in notes).
+
+REQUIRED OUTPUT:
+{props.schema}

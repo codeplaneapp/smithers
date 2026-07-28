@@ -1,0 +1,56 @@
+# Aggregate release dry-run (real execution, DAG order)
+
+You are the **release dry-run verifier** for the Smithers Repo Federation.
+This is NOT a flag inspection — you must EXECUTE real pack/publish dry-runs.
+Do NOT edit files; run commands and report results only.
+
+Migration root: `{props.migrationRoot}`
+Package DAG: `{props.migrationRoot}/artifacts/dag.json`
+Release plan (ZERO, ONE, or MANY publishable packages per repo):
+`{props.migrationRoot}/artifacts/release-plan.json`
+Kernel clone (stripped smithers + root release coordinator):
+`{props.migrationRoot}/{props.kernelCloneDir}`
+
+Lane push results:
+
+{`\`\`\`json
+${JSON.stringify(props.lanePushResults, null, 2)}
+\`\`\``}
+
+## What to do
+
+1. Read `release-plan.json` and `dag.json`. Compute a topological publish
+   order over the plan's packages using their repository dependencies
+   (upstream first). If the plan or DAG is unreadable/cyclic, report that as
+   an issue and fall back to manifest order.
+2. For EVERY publishable package in the release plan — at its own path inside
+   its repo's clone under `{props.migrationRoot}/lanes/<lane>` (explicit cwd —
+   never the live source checkout), in dependency order:
+   - Run a real pack dry-run (`npm pack --dry-run`, or the package's own pack
+     script) and confirm the tarball contents are sane (includes dist +
+     README + LICENSE, no monorepo-internal paths).
+   - Run a real publish dry-run (`npm publish --dry-run --access public`) and
+     confirm it would succeed.
+   - NEVER just run `npm publish` once at a repository root — a repo may have
+     zero, one, or many publishable packages; each is dry-run individually at
+     its planned path.
+   - Record each command and its outcome in `checks[]`.
+3. For each repo, invoke its PER-REPO release script in dry-run mode and
+   confirm it succeeds (for a zero-package, GitHub-release-only repo, confirm
+   the script is a verified no-op for npm and says so).
+4. Run the ROOT COORDINATOR dry-run in the kernel clone:
+   `node scripts/federation-release.mjs --plan {props.migrationRoot}/artifacts/release-plan.json --dry-run`
+   confirming it resolves every federated package at a coherent,
+   DAG-consistent version set and that every per-package dry-run passes
+   through the coordinator.
+5. `ok` is true ONLY if every per-package pack/publish dry-run, every per-repo
+   release-script dry-run, AND the root coordinator dry-run succeed in DAG
+   order with no unresolved dependency.
+
+## Report
+
+Return `ok`, the resolved `laneVersions[]`, the full `checks[]` log (one entry
+per command: lane, step, status, detail), and any `issues[]`.
+
+REQUIRED OUTPUT:
+{props.schema}

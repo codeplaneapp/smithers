@@ -1,0 +1,80 @@
+# Review the federation manifest + DAG
+
+You are the **architecture reviewer** for the Smithers Repo Federation
+migration manifest. Do NOT edit any files — investigate and judge only.
+
+Migration coordinates:
+
+{`\`\`\`json
+${JSON.stringify(
+  {
+    migrationRoot: props.migrationRoot,
+    sourceClone: props.sourceClone,
+  },
+  null,
+  2,
+)}
+\`\`\``}
+
+## Evidence boundary
+
+- Inspect source, imports, manifests, and tracked paths ONLY inside the
+  `sourceClone` path in the migration coordinates above.
+- NEVER use the live workflow checkout as source evidence. It is dirty and
+  concurrently changing.
+- Before judging coverage, verify the source clone is clean and that its HEAD
+  equals `origin/main`. Compare `manifest.json` only with `git ls-files` from
+  that source clone.
+- Paths present only in the live checkout are out of scope. Do not report them
+  as missing, phantom, conflicted, or uncovered.
+
+## Inputs
+
+The inventory step produced three artifacts under
+`<migrationRoot>/artifacts/` — read `manifest.json`, `dag.json`, and
+`release-plan.json` in full.
+
+Inventory summary from that step:
+
+{`\`\`\`json
+${JSON.stringify(props.inventory, null, 2)}
+\`\`\``}
+
+The three artifact files are authoritative. The inventory summary may predate
+later clean-clone architecture hardening, so recompute counts, versions, edges,
+and risks from the artifacts. Do not reject a corrected artifact merely because
+the embedded summary is stale.
+
+## Judge
+
+1. **Boundary correctness** — does every path's destination lane make sense
+   given its actual imports and callers? Flag any path that looks misassigned.
+2. **Ambiguous shared utilities** — code imported by 2+ destination lanes that
+   isn't cleanly ownable by one lane. Each needs a call: duplicate it, promote
+   it to `stays-in-smithers` as a published dependency, or pick one owning
+   lane and have the others depend on it post-publish.
+3. **Publish ordering** — does the DAG's edge set correctly force upstream
+   lanes to publish before downstream lanes decouple against them? Flag any
+   missing edge or cycle.
+4. **License coverage** — does every extracted lane's manifest entries carry
+   forward a LICENSE, and is the license consistent with the monorepo's?
+5. **Release plan soundness** — does `release-plan.json` model every one of
+   the 10 new repos with ZERO, ONE, or MANY publishable packages (correct
+   paths/names/versions), are the per-package repository dependencies real and
+   consistent with `dag.json`, and are GitHub-release-only repos (e.g.
+   examples/apps) marked as such rather than force-fit into an npm publish?
+6. **History-merge lanes** — are the source-owned browser-UI paths (multi)
+   and hosted control-plane / electric-proxy paths (plue) completely and
+   correctly identified in the manifest, and is awesome-smithers docs-only?
+7. **Risks** — anything else that would break a lane's standalone build,
+   cause a stale doc link, or block a clean history-preserving extraction.
+
+## Report
+
+Return your findings as a structured risk-annotated review: list boundary
+issues, ambiguous utilities (with your recommended resolution), publish
+ordering notes, license gaps, and any other risks. Be concrete — name files
+and lanes, not generic advice.
+
+REQUIRED OUTPUT:
+{props.schema}

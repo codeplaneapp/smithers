@@ -1,0 +1,63 @@
+# Final federation verification (Ralph loop)
+
+You are the **final verifier** for the whole Smithers Repo Federation
+migration — a Ralph loop that runs until everything is genuinely releasable,
+BEFORE any publication or merge happens. Do NOT edit files — verify and
+review only; emit a fix list for the fix step. Work only inside clones under
+`{props.migrationRoot}` (lane clones + `{props.migrationRoot}/{props.kernelCloneDir}`);
+never mutate the live source checkout. Use explicit `--repo`/`cwd` for every
+gh/git call.
+
+State so far:
+
+{`\`\`\`json
+${JSON.stringify({ lanePushResults: props.lanePushResults, updateSmithersResult: props.updateSmithersResult, releaseDryRun: props.releaseDryRun }, null, 2)}
+\`\`\``}
+
+{props.priorFix ? `Previous fix-loop iteration result:\n\n\`\`\`json\n${JSON.stringify(props.priorFix, null, 2)}\n\`\`\`` : ""}
+
+## Verify, for EVERY one of the 13 destinations (10 new PUBLIC repos + multi +
+plue + awesome-smithers) plus the stripped `smithers` kernel clone
+
+1. **Remote/default branch** — each new repo exists at its expected remote
+   (`gh repo view <org>/<lane>`) with PUBLIC visibility, `main` initialized as
+   the default branch, and the migration's work landed on it; each existing
+   repo (multi/plue/awesome-smithers) has its work on a `federation/<lane>`
+   feature branch with a draft PR — NOT on main and never force-pushed.
+2. **Isolated tests pass** — each repo's own test suite + build is green as of
+   its latest migration commit (run them in the clones).
+3. **Aggregate tests pass** — the stripped smithers kernel's core E2E and the
+   aggregate integration gate pass against the published/resolved versions of
+   the split-out packages.
+4. **Zero stale links** — no doc/README/skills/plugin copy/package.json field
+   or historical live link still references the old monorepo-relative path
+   structure.
+5. **Both lockfiles present and in sync** — `pnpm-lock.yaml` and `bun.lock`
+   both exist and match each repo's `package.json`.
+6. **Aggregate release dry-run succeeded** — the `releaseDryRun` report shows
+   real per-PACKAGE pack/publish dry-runs (every publishable package in the
+   release plan, zero/one/many per repo — not one `npm publish` per repo
+   root) AND the root coordinator dry-run passing in package-DAG order
+   (`ok: true`), not just flag checks.
+7. **Release plan coverage** — `release-plan.json` models all 10 new repos
+   with correct package paths/names/versions and repository dependencies;
+   per-repo release scripts exist and the root coordinator consumes the plan.
+8. **History-merge lanes landed real content** — multi's feature branch
+   contains the source-owned browser-UI paths and plue's contains the hosted
+   control-plane / electric-proxy paths, each with PRESERVED source history
+   (imported source commits visible in `git log` via a merge/subtree of a
+   filtered source clone — not a one-commit file drop, and target main never
+   rewritten); awesome-smithers is docs-only (listing PR).
+9. **Committed manifests use published semver** — no committed `package.json`
+   anywhere uses `workspace:`, `file:`, or `link:` specifiers for cross-repo
+   dependencies.
+
+## Report
+
+Return whether the whole federation is approvable. If not, emit a concrete
+`fixList[]`: one entry per problem, each naming the exact lane/repo, the file
+or check that's failing, and what needs to change — precise enough for the
+fix step to act on without re-investigating from scratch.
+
+REQUIRED OUTPUT:
+{props.schema}

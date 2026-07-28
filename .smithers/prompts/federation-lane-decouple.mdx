@@ -1,0 +1,90 @@
+# Decouple lane `{props.lane}` into a standalone package
+
+You are the **decoupling** engineer for `{props.lane}`. Work ONLY inside the
+fresh clone at `{props.migrationRoot}/lanes/{props.lane}` — never in the live
+source checkout, never in the clean source clone.
+
+Release plan (every publishable package in every new repo, with repository
+dependencies): `{props.migrationRoot}/artifacts/release-plan.json`
+
+Extraction result from the previous step:
+
+{`\`\`\`json
+${JSON.stringify(props.extractResult, null, 2)}
+\`\`\``}
+
+{props.laneKind === "history-merge" ? `## Existing-repo history-merge lane (\`{props.lane}\`)
+
+The extraction step already merged the source-owned {props.lane === "multi" ? "browser-UI" : "hosted control-plane / electric-proxy"}
+paths (with preserved source history) into your feature branch. Now ADAPT them:
+
+1. Wire the merged source-owned paths into this repo's build/test tooling
+   (workspace globs, tsconfig references, CI) so they build as part of THIS
+   repo.
+2. Update this repo's cross-repo dependency references to depend on the new
+   standalone packages by published name with published semver ranges (use the
+   versions in \`release-plan.json\`; note any still-unpublished placeholder in
+   your report).
+3. **Local validation vs committed manifests**: while the new packages are not
+   yet published, you MAY validate locally using packed artifacts
+   (\`npm pack\` tarballs from the lane clones under \`{props.migrationRoot}/lanes/\`)
+   or temporary workspace/file links — but anything you leave COMMITTED in a
+   manifest must use the published package name with a real semver range. No
+   \`workspace:\`, \`file:\`, or \`link:\` specifiers may remain in committed
+   package.json files.
+4. Get the repo building and testing with those changes applied (install
+   fresh, run build/typecheck).
+5. Whenever a package manifest changes, regenerate BOTH lockfiles:
+   \`pnpm-lock.yaml\` and \`bun.lock\`, in sync with the manifest.
+6. Do not commit — a later step commits and opens the draft PR.` : props.laneKind === "docs-only" ? `## Docs-only existing-repo lane (\`{props.lane}\`)
+
+1. Add or update the awesome-list entry/section covering the 10 new federated
+   repos (names, one-line descriptions, links) and the updated smithers kernel
+   description. Docs/listing changes ONLY — no dependency surgery, no code
+   moves.
+2. Fix any links in this repo that point at monorepo paths that no longer
+   exist post-federation.
+3. Do not commit — a later step commits and opens the draft PR.` : `## New standalone repo lane
+
+1. Consult \`release-plan.json\` for this repo: it may contain ZERO, ONE, or
+   MANY publishable npm packages. Give each publishable package a standalone
+   \`package.json\` at its planned path: correct \`name\` from the plan, planned
+   version, a real \`main\`/\`module\`/\`types\`/\`exports\` map, and a
+   standalone build script (do not assume a pnpm workspace root exists). If the
+   plan says this repo has zero publishable packages (examples/apps that only
+   need a GitHub release), still give the repo a coherent root layout but mark
+   packages private as the plan dictates.
+2. Give the lane its own \`tsconfig.json\` (no \`extends\` into the monorepo's
+   root config unless you inline the compilerOptions it needs) and its own CI
+   workflow file (\`.github/workflows/ci.yml\`) that installs, builds, and
+   tests this repo alone.
+3. Keep/port the lane's tests so the suite runs standalone.
+4. Rewrite every cross-lane dependency the extracted code still imports as a
+   workspace path (e.g. \`../gateway-client\`) into a real npm dependency on
+   the published package, pinned to the semver range from \`release-plan.json\`.
+   Committed manifests must use published semver — never \`workspace:\`,
+   \`file:\`, or \`link:\` specifiers.
+5. Author a PER-REPO RELEASE SCRIPT (e.g. \`scripts/release.mjs\` plus a
+   \`release\` package script) that reads the release plan and publishes each
+   of this repo's publishable packages in dependency order (it must support a
+   \`--dry-run\` mode). The smithers root coordinator will invoke this script.
+   A repo with zero publishable packages gets a script that is a verified
+   no-op for npm and reports that it is GitHub-release-only.
+6. Generate BOTH lockfiles — \`pnpm-lock.yaml\` AND \`bun.lock\` — in sync with
+   the new manifest.
+7. Add a local aggregate-development story: document (or script) how this repo
+   links against the other federated repos for local lockstep development.
+8. Get the lane building standalone: install dependencies fresh in this clone
+   and run its build/typecheck. Fix any error caused by the decoupling
+   (missing dep, dangling relative import into a path this lane no longer
+   owns, etc).
+9. Do not commit — a later step commits the lane.`}
+
+## Report
+
+Return the standalone package name(s), the cross-dependency edges you rewrote
+to semver ranges, whether BOTH lockfiles exist, and whether the standalone
+build passed.
+
+REQUIRED OUTPUT:
+{props.schema}

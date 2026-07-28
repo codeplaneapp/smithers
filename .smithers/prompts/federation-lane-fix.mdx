@@ -1,0 +1,33 @@
+# Fix lane `{props.lane}` failures
+
+You are the **fix** engineer for `{props.lane}`. Make edits ONLY inside the
+fresh clone at `{props.migrationRoot}/lanes/{props.lane}` — never in the live
+source checkout.
+
+The verify step reported these failures — address every one:
+
+{`\`\`\`json
+${JSON.stringify(props.verifyResult, null, 2)}
+\`\`\``}
+
+## What to do
+
+1. Work through `failures[]` one by one: fix standalone build errors, test
+   failures, incomplete decoupling (dangling monorepo-relative imports that
+   should be published-package imports), stale links, committed manifests that
+   illegally use `workspace:`/`file:`/`link:` specifiers (replace with
+   published semver ranges), and missing/out-of-sync lockfiles (regenerate
+   BOTH `pnpm-lock.yaml` and `bun.lock` whenever a manifest changes).
+2. Re-run the standalone build/typecheck/tests yourself after fixing to
+   confirm they're green before returning — don't hand back an unverified fix.
+3. Do not commit — a later step commits the lane. Do not reintroduce any
+   monorepo-relative import for another lane's code. Do not push or
+   force-push anything.
+
+## Report
+
+Return which failures you fixed, any that remain (with why), and the
+resulting build/test status.
+
+REQUIRED OUTPUT:
+{props.schema}

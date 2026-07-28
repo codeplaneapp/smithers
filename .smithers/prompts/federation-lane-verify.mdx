@@ -1,0 +1,49 @@
+# Verify lane `{props.lane}`
+
+You are the **verification** reviewer for `{props.lane}`. Work ONLY inside the
+fresh clone at `{props.migrationRoot}/lanes/{props.lane}` — never in the live
+source checkout. Do NOT edit files — verify and review only; report failures
+for the fix step to address.
+
+Docs step result:
+
+{`\`\`\`json
+${JSON.stringify(props.docsResult, null, 2)}
+\`\`\``}
+
+{props.priorFix ? `Previous fix-iteration result:\n\n\`\`\`json\n${JSON.stringify(props.priorFix, null, 2)}\n\`\`\`` : ""}
+
+## Verify
+
+1. Run the lane's isolated test suite in this standalone clone (install fresh
+   if needed) and its typecheck/build. Both must be green.
+2. Stale-link check: grep every markdown/doc file, skills/plugin copies, and
+   `package.json` link fields for any reference that still points into the
+   monorepo's internal path structure (`packages/`, `apps/`, `../` beyond this
+   lane's root, historical live links into the old layout).
+3. Decoupling check: confirm no source file still imports a monorepo-relative
+   path for another lane's code — every cross-lane import must go through the
+   published package name with a semver range.
+4. Committed-manifest check: no committed `package.json` may use `workspace:`,
+   `file:`, or `link:` specifiers for cross-repo dependencies — published
+   semver ranges only. (Local validation with packed tarballs/workspace links
+   is fine as an uncommitted workflow, but it must not be committed.)
+5. Lockfile check: if the repo has a `package.json`, BOTH `pnpm-lock.yaml`
+   and `bun.lock` must exist and be in sync with the manifest.
+6. Standalone-completeness check: LICENSE present, CI workflow present,
+   README present, tests present and runnable.
+{props.laneKind === "history-merge" ? `7. History-merge check: the feature branch's \`git log\` shows BOTH the target repo's history AND the imported source commits for the {props.lane === "multi" ? "browser-UI" : "hosted control-plane / electric-proxy"} paths (a merge/subtree of filtered source history — not a fresh copy with one squashed commit); the work is on the feature branch (not main); nothing was force-pushed; target main is untouched.` : props.laneKind === "docs-only" ? "7. Docs-only check: changes are limited to the awesome-list listing/docs and link fixes — no code moves, no dependency surgery; the work is on the feature branch (not main), nothing force-pushed." : "7. New-repo check: extracted git history is intact (commit count > 0), the tree contains only this lane's paths, and the per-repo release script exists and supports `--dry-run`."}
+
+This is a **review-before-pass gate**: only report `passed: true` when tests
+pass, the build is green, both lockfiles are in sync, committed manifests use
+published semver, and there are zero stale links / dangling
+monorepo-relative imports.
+
+## Report
+
+Return whether the lane passed, the test/build status, and — if not passed —
+a concrete `failures[]` list (one entry per problem, naming the file and the
+exact issue) that the fix step can act on directly.
+
+REQUIRED OUTPUT:
+{props.schema}

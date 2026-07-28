@@ -1,0 +1,89 @@
+# Inventory the smithers monorepo for federation
+
+You are the **inventory** step of the Smithers Repo Federation migration. The
+goal is to split the `smithersai/smithers` monorepo into exactly 10 new
+standalone **PUBLIC** repos, while `smithers` itself is stripped down to the
+core runtime + CLI + low-level gateway clients + core E2E + canonical docs +
+the release coordinator. Three existing repos are PR-only lanes (no
+extraction into new repos): `multi` (receives the source-owned browser UI with
+preserved history), `plue` (receives the source-owned hosted control-plane /
+electric-proxy with preserved history), and `awesome-smithers` (docs-only
+listing PR).
+
+Migration root: `{props.migrationRoot}`
+GitHub org for the new repos: `{props.githubOrg}`
+Clean source clone (origin/main, READ-ONLY for you): `{props.sourceClone}`
+
+## Hard safety rules
+
+- Inventory ONLY the clean source clone at `{props.sourceClone}` (a pristine
+  `origin/main` clone created by the prepare step). NEVER read, walk, or
+  inventory the live/dirty developer checkout, and never mutate
+  `{props.sourceClone}` or its git metadata. Write ONLY under
+  `{props.migrationRoot}/artifacts/`.
+
+## What to do
+
+You have shell + file tools. Actually walk the source clone — do not guess.
+
+1. Enumerate every path under the monorepo: `packages/*`, `apps/*`, examples,
+   generated bundles (e.g. `docs/llms*.txt`), documentation (`docs/`), skills
+   (`skills/`), plugin copies, CI workflow files (`.github/workflows/*`),
+   scripts, licenses, repo metadata, historical live links, and cross-package
+   dependency edges (read every `package.json` `dependencies` /
+   `devDependencies` / `peerDependencies` that point at
+   `@smithers-orchestrator/*` workspace packages).
+2. Assign every path/package to exactly one destination lane. The 10 new
+   standalone repos are EXACTLY:
+   `smithers-examples`, `smithers-agents`, `smithers-sandboxes`,
+   `smithers-integrations`, `smithers-plugins`, `smithers-packs`,
+   `smithers-observability`, `smithers-review`, `smithers-evals`,
+   `smithers-signal`.
+   - `multi` — PR lane; the source-owned browser-UI paths move here (with
+     preserved source history via a filtered source clone merged into a
+     feature branch). Identify exactly which source paths those are, and the
+     cross-repo dependency updates `multi` needs once the new repos publish.
+   - `plue` — PR lane; the source-owned hosted control-plane / electric-proxy
+     paths move here the same way. Identify the exact source paths and the
+     cross-repo updates needed.
+   - `awesome-smithers` — docs-only PR lane; note the listing entry to
+     add/update. No source paths move here.
+   - `stays-in-smithers` — the core runtime, CLI, low-level gateway clients,
+     core E2E, canonical docs, and the release coordinator that remain in this
+     repo.
+3. Build the package dependency DAG among the destination lanes (which lane
+   depends on which, so downstream lanes publish after upstream lanes and can
+   pin real semver versions).
+4. Model **every repository as containing ZERO, ONE, or MANY publishable npm
+   packages**. For each of the 10 new repos, enumerate every publishable
+   package it will contain (a repo with a single `package.json` at its root
+   has one; a repo with nested publishable packages has many; a repo of
+   examples/apps may have ZERO npm packages and need only a GitHub release).
+   For each package record its path within the repo, intended npm `name`,
+   starting `version`, whether it is private / not published to npm, its
+   `publishTo` (`"npm"` or `"github-release-only"` or `"none"`), and its
+   **repository dependencies** (which other packages — in which repos — it
+   depends on, from the actual manifests).
+5. Write three machine-readable JSON artifacts under
+   `{props.migrationRoot}/artifacts/`:
+   - `manifest.json` — array of `{ path, kind, destination, notes }` covering
+     every path/package/generated bundle/doc/link/license/skill/CI
+     file/script/metadata entry you inventoried.
+   - `dag.json` — `{ nodes: string[] (lane names), edges: [{ from, to }] }`
+     describing the publish-ordering dependencies between lanes.
+   - `release-plan.json` — `{ packages: [{ repo, path, name, version,
+     private, publishTo, dependsOn: string[] (package names) }], repos:
+     [{ lane, packages: string[] (paths), version, githubRelease: boolean }] }`
+     covering all 10 new repos. Per-repo release scripts and the smithers
+     root release coordinator will consume this plan, so it must be complete
+     and consistent with `dag.json`.
+
+## Report
+
+Return a summary of the manifest, DAG, and release plan you wrote (set
+`releasePlanPath` to the absolute path of `release-plan.json`), the
+destination lane counts, and any risks you noticed (ambiguous ownership,
+circular deps, missing licenses, repos with zero publishable packages).
+
+REQUIRED OUTPUT:
+{props.schema}

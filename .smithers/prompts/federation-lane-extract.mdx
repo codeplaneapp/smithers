@@ -1,0 +1,85 @@
+# Extract lane `{props.lane}` into a fresh clone under the migration root
+
+You are the **extraction** engineer for the `{props.lane}` destination.
+Migration root: `{props.migrationRoot}`
+Manifest: `{props.migrationRoot}/artifacts/manifest.json`
+Clean source clone (origin/main): `{props.sourceClone}`
+
+## Hard safety rules
+
+- NEVER read from, clone from, or mutate the live/dirty developer checkout.
+  All source material comes from the clean clone at `{props.sourceClone}`.
+  Never run any git/gh command with cwd inside `{props.sourceClone}` either —
+  clone FROM it, then work inside your own clones.
+- Use explicit `cwd` (or `git -C`) for every git command, and explicit
+  `--repo` for every gh command. Never rely on ambient cwd or remotes.
+- Do not push anywhere in this step — local extraction only.
+
+{props.laneKind === "new" ? `## This is a NEW standalone repo lane — history-preserving extraction
+
+1. Fresh-clone the CLEAN source clone into the lane directory:
+   \`git clone {props.sourceClone} {props.migrationRoot}/lanes/{props.lane}\`
+   (never clone from the live checkout).
+2. Read \`manifest.json\` and filter to every entry whose \`destination\` is
+   \`{props.lane}\`. Those are the exact paths this lane owns.
+3. Inside the CLONE only, run \`git filter-repo\` (history-preserving,
+   path-based) to keep exactly those paths — every commit that touched any of
+   the lane's paths must survive, with paths rewritten to the lane's own root
+   layout (drop the \`packages/<name>/\` or \`apps/<name>/\` prefix so the
+   standalone repo's top level matches a normal package repo).
+4. Carry the monorepo's \`LICENSE\` file into the extracted history (copy it
+   in if \`git filter-repo\` didn't already preserve a copy at the lane root).
+5. Verify the extraction:
+   \`git -C {props.migrationRoot}/lanes/{props.lane} log --oneline | wc -l\`
+   should be > 0, and the working tree should contain exactly the manifest's
+   paths for this lane (rewritten), nothing else.` : props.laneKind === "history-merge" ? `## This is an EXISTING-repo PR lane (\`{props.existingRepo}\`) that RECEIVES source-owned paths with preserved history
+
+A plain dependency-bump PR is NOT acceptable: \`{props.lane}\` must actually
+receive its source-owned paths ({props.lane === "multi" ? "the browser UI" : "the hosted control-plane / electric-proxy"})
+from the smithers monorepo WITH their source history, without rewriting the
+target repo's main.
+
+1. Fresh-clone the existing repo into \`{props.migrationRoot}/lanes/{props.lane}\`:
+   \`git clone git@github.com:{props.existingRepo}.git {props.migrationRoot}/lanes/{props.lane}\`
+2. Inside that clone, create the feature branch \`{props.branch}\`
+   (\`git -C {props.migrationRoot}/lanes/{props.lane} checkout -b {props.branch}\`).
+   Never branch from or touch any other local checkout of this repo. Never
+   rebase, reset, or otherwise rewrite the target repo's main history.
+3. Create a TEMPORARY filtered source-history clone:
+   \`git clone {props.sourceClone} {props.migrationRoot}/lanes/{props.lane}-srchist\`
+   then, inside that temp clone only, run \`git filter-repo\` (history-preserving,
+   path-based) to keep exactly the manifest paths whose \`destination\` is
+   \`{props.lane}\` — the source-owned {props.lane === "multi" ? "browser-UI" : "hosted control-plane / electric-proxy"} paths.
+4. Merge that filtered history into the target feature branch:
+   \`git -C {props.migrationRoot}/lanes/{props.lane} remote add srchist {props.migrationRoot}/lanes/{props.lane}-srchist\`
+   \`git -C {props.migrationRoot}/lanes/{props.lane} fetch srchist\`
+   \`git -C {props.migrationRoot}/lanes/{props.lane} merge --allow-unrelated-histories --no-ff srchist/main -m "chore(federation): merge {props.lane}-owned smithers source history"\`
+   (If the paths belong under a subdirectory of the target repo, use a subtree
+   merge/\`git subtree add\` into that subdirectory instead — either way the
+   source commits MUST appear in the feature branch's \`git log\`.)
+5. Lay the merged paths out where the target repo expects them (plain commits
+   on the feature branch). Carry the monorepo LICENSE along with the moved
+   paths if the target repo doesn't already have a compatible one.
+6. Verify: \`git -C {props.migrationRoot}/lanes/{props.lane} log --oneline\` on
+   the feature branch shows BOTH the target repo's history AND the imported
+   source commits; remote \`origin\` still points at \`{props.existingRepo}\`;
+   target main is untouched.` : `## This is the DOCS-ONLY existing-repo PR lane (\`{props.existingRepo}\`) — no source paths move
+
+1. Fresh-clone the existing repo into \`{props.migrationRoot}/lanes/{props.lane}\`:
+   \`git clone git@github.com:{props.existingRepo}.git {props.migrationRoot}/lanes/{props.lane}\`
+2. Inside that clone, create the feature branch \`{props.branch}\`
+   (\`git -C {props.migrationRoot}/lanes/{props.lane} checkout -b {props.branch}\`).
+   Never branch from or touch any other local checkout of this repo.
+3. Verify the clone is intact: remote \`origin\` points at
+   \`{props.existingRepo}\`, default branch history is present, LICENSE exists.
+   The listing edit itself happens in the later decouple/docs steps.`}
+
+## Report
+
+Return what you extracted/cloned: number of paths, number of commits preserved
+(for history-merge lanes: number of imported source commits), the exact
+command(s) you ran, and any manifest entries you had to skip or adjust (with
+reason).
+
+REQUIRED OUTPUT:
+{props.schema}

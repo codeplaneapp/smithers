@@ -1,0 +1,90 @@
+# Strip smithers to its post-federation kernel
+
+You are the **kernel** engineer finishing the Smithers Repo Federation. The 10
+lanes have been extracted into standalone repos; this step turns the monorepo
+into what remains: the core runtime + CLI + low-level gateway clients + core
+E2E + canonical docs + the release coordinator.
+
+## Hard safety rules
+
+- NEVER read from or mutate the live/dirty developer checkout. Work ONLY in a
+  FRESH CLONE of the clean source clone:
+  `git clone {props.sourceClone} {props.migrationRoot}/{props.kernelCloneDir}`
+  then `git -C {props.migrationRoot}/{props.kernelCloneDir} checkout -b {props.branch}`.
+  Immediately point the clone's origin at the real GitHub repo so nothing can
+  ever push into the local source clone:
+  `git -C {props.migrationRoot}/{props.kernelCloneDir} remote set-url origin git@github.com:{props.sourceRepo}.git`
+- Use explicit `cwd`/`git -C` for every git command. Do not push in this step
+  (a later step pushes the branch and opens the draft PR).
+
+Manifest (destinations for every path, including `stays-in-smithers`):
+`{props.migrationRoot}/artifacts/manifest.json`
+
+Release plan (every publishable package in every new repo, with repository
+dependencies): `{props.migrationRoot}/artifacts/release-plan.json`
+
+Lane push results (what got published, in case you need to pin real versions):
+
+{`\`\`\`json
+${JSON.stringify(props.lanePushResults, null, 2)}
+\`\`\``}
+
+## What to do (all inside the fresh clone)
+
+1. From the manifest, every path whose `destination` is NOT
+   `stays-in-smithers` should now be removed from this repo (it lives in its
+   own standalone repo, or moved to `multi`/`plue`). Remove those
+   directories/files.
+2. Wire the removed packages back in as real dependencies: wherever
+   `stays-in-smithers` code imported one of the extracted packages via a
+   workspace-relative path, replace it with a published npm dependency on the
+   new standalone package (semver range from `props.lanePushResults` /
+   `release-plan.json`). **Committed manifests must use published semver
+   ranges** — never `workspace:`, `file:`, or `link:` specifiers. (Local
+   validation with packed tarballs is fine, but uncommitted.)
+3. Add a **local aggregate workspace** so `smithers` can still develop against
+   the split repos in lockstep during the transition: a top-level
+   `federation.workspace.json` (or equivalent) listing each new repo's clone
+   URL and pinned ref, plus a helper script under `scripts/` that clones/links
+   them for local development.
+4. Author the **root release coordinator** at `scripts/federation-release.mjs`.
+   It MUST consume `{props.migrationRoot}/artifacts/release-plan.json` (take
+   the path via `--plan <path>`) and support two modes:
+   - `--dry-run`: resolve every repo's publishable packages, topologically
+     order them by the plan's repository dependencies, and run a real
+     pack/publish dry-run for EVERY publishable package (zero, one, or many
+     per repo — never one blind `npm publish` at a repo root), plus invoke
+     each repo's own release script in dry-run mode; exit non-zero on any
+     failure.
+   - `--execute`: actually publish every publishable package in DAG order by
+     invoking each repo's per-repo release script, failing fast and reporting
+     exactly which package/repo failed.
+5. Update `README.md`, the Mintlify docs source under `docs/`, generated
+   `llms.txt`/`llms-full.txt` bundles, installed skills, plugin copies, root
+   scripts, repo metadata, and historical live links so nothing references a
+   path that no longer exists in this repo — point instead at the new
+   standalone repos (or at `multi`/`plue` for what moved there).
+6. Whenever a package manifest changes, regenerate BOTH lockfiles:
+   `pnpm-lock.yaml` and `bun.lock`.
+7. Update CI (`.github/workflows/*`) and root workspace files
+   (`package.json` scripts, `turbo.json`/`pnpm-workspace.yaml`) to drop the
+   removed packages and add:
+   - a **stale-link gate**: a CI check that fails if any doc/README references
+     a path this repo no longer contains.
+   - an **aggregate integration gate**: a CI check that runs the core E2E
+     suite against the published versions of the split-out packages (not
+     local workspace links), so a broken cross-repo contract is caught before
+     merge.
+8. Commit your changes on `{props.branch}` inside the clone (plain commit
+   message, no AI/model attribution trailers) and set `committed: true`.
+
+## Report
+
+Return which packages you removed, which became published dependencies, the
+files you touched for docs/skills/CI/scripts/metadata, and confirmation the
+stale-link and aggregate-integration gates are wired in (name the CI job(s))
+and that `scripts/federation-release.mjs` exists with working `--dry-run` /
+`--execute` modes.
+
+REQUIRED OUTPUT:
+{props.schema}
