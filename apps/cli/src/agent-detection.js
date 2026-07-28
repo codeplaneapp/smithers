@@ -302,12 +302,12 @@ const DETECTORS = [
   },
 ];
 const ROLE_PREFERENCES = {
-  spec: ["claude", "codex", "opencode", "pool", "openclaw", "cursor"],
-  research: ["codex", "kimi", "antigravity", "opencode", "pool", "claude", "openclaw", "cursor"],
-  plan: ["claude", "codex", "opencode", "pool", "antigravity", "kimi", "openclaw", "cursor"],
-  implement: ["codex", "opencode", "amp", "pool", "antigravity", "openclaw", "claude", "kimi", "cursor"],
-  validate: ["codex", "opencode", "amp", "pool", "antigravity", "openclaw", "claude", "kimi", "cursor"],
-  review: ["codex", "claude", "amp", "opencode", "pool", "openclaw", "kimi", "cursor"],
+  spec: ["claude", "codex", "opencode", "openclaw", "openrouter", "antigravity", "amp", "kimi", "cursor"],
+  research: ["codex", "kimi", "antigravity", "opencode", "claude", "openclaw", "cursor", "openrouter"],
+  plan: ["claude", "codex", "kimi", "opencode", "openclaw", "cursor", "openrouter"],
+  implement: ["claude", "codex", "kimi", "antigravity", "opencode", "openclaw", "openrouter", "cursor"],
+  validate: ["codex", "claude", "kimi", "antigravity", "opencode", "openclaw", "cursor", "openrouter"],
+  review: ["codex", "claude", "kimi", "amp", "opencode", "openclaw", "openrouter", "cursor"],
 };
 const AGENT_VARIANTS = [
   {

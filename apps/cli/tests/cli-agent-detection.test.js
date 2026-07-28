@@ -70,6 +70,24 @@ describe("detectAvailableAgents", () => {
     orchestrator: "claudeOpus",
   };
 
+  test("role preference leaders match routing policy v7", () => {
+    const source = readFileSync(new URL("../src/agent-detection.js", import.meta.url), "utf8");
+    const expectedLeaders = {
+      spec: "claude",
+      research: "codex",
+      plan: "claude",
+      implement: "claude",
+      validate: "codex",
+      review: "codex",
+    };
+
+    for (const [role, leader] of Object.entries(expectedLeaders)) {
+      expect(source.match(new RegExp(`^  ${role}: \\["([^"]+)"`, "m"))?.[1], `${role} preference leader`).toBe(
+        leader,
+      );
+    }
+  });
+
   function activePoolProviders(source, pool) {
     const match = uncommented(source).match(new RegExp(`(?:^|\\n)  ${pool}: \\[([\\s\\S]*?)\\n  \\],`));
     expect(match, `missing generated ${pool} pool`).toBeTruthy();
