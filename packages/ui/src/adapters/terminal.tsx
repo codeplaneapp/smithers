@@ -78,12 +78,19 @@ const STYLE_ATTR = "data-smithers-ui-terminal";
  * The surface chrome (padding, hairline border, radius) themes through the ui
  * tokens, so the frame around the terminal follows light/dark with the rest of
  * the UI. The terminal's own colors come from the resolved palette below.
+ *
+ * The vendored xterm sheet hardcodes `#000`/`#FFF` for the scroll viewport and
+ * the IME composition view; the two overrides below retie them to the active
+ * house palette (the viewport goes transparent so the themed xterm canvas and
+ * surface background show through). Cursor and selection colors are already
+ * theme-derived through `ITheme` (LIGHT_THEME/DARK_THEME above).
  */
 const surfaceCss = `
 .sui-terminal { position:relative; box-sizing:border-box; display:flex; flex-direction:column; min-height:0; width:100%; height:100%; padding:12px; border:1px solid ${t.border}; border-radius:${t.radius}; overflow:hidden; font-family:${t.fontMono}; }
 .sui-terminal-screen { flex:1 1 auto; min-height:0; width:100%; }
 .sui-terminal-screen .xterm { height:100%; }
-.sui-terminal-screen .xterm-viewport { overflow-y:auto; }
+.sui-terminal-screen .xterm-viewport { overflow-y:auto; background-color:transparent; }
+.sui-terminal-screen .composition-view { background:${t.codeBg}; color:${t.codeText}; border:1px solid ${t.border}; border-radius:${t.radiusControl}; }
 `;
 
 export type TerminalProps = Omit<ComponentProps<"div">, "onResize"> & {

@@ -645,7 +645,7 @@ describe("monitor theme contract", () => {
       [".mon-progress-fill", "var(--brand)"],
       [".mon-modal { width: min(1280px, 96vw)", "var(--surface)"],
       [".mon-empty", "var(--muted)"],
-      [".mon-hijack-terminal", "var(--sp-2)"],
+      [".mon-hijack-surface", "var(--sp-2)"],
     ];
     for (const [selector, declaration] of rules) {
       const start = monitorCss.indexOf(selector);
@@ -670,6 +670,13 @@ describe("monitor theme contract", () => {
     }
     expect(monitorCss).toContain("box-shadow: 0 0 0 3px var(--ring)");
   });
+});
+
+test("monitor delegates hijack UI to the shared maximizable oneshot surface", () => {
+  expect(monitorSource).toContain("<OneshotSurface");
+  expect(monitorSource).toContain('variant="overlay"');
+  expect(monitorSource).toContain('initialTab="terminal"');
+  expect(monitorSource).not.toContain("function HijackTerminal(");
 });
 
 describe("MonitorToolbar", () => {

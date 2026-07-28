@@ -419,7 +419,14 @@ test("a discovered oneshot workflow overrides the built-in fallback", async () =
     });
     const body = await response.json();
     const oneshot = body.payload.find((workflow) => workflow.key === "oneshot");
+    const chat = body.payload.find((workflow) => workflow.key === "chat");
     expect(oneshot).toBeDefined();
+    expect(chat).toMatchObject({
+      hasUi: true,
+      uiPath: "/workflows/chat",
+    });
+    const chatUi = await fetch(`http://127.0.0.1:${port}/workflows/chat?runId=chat-run`);
+    expect(chatUi.status).toBe(200);
     const health = await fetch(`http://127.0.0.1:${port}/health`).then((result) => result.json());
     expect(health.workflowsLoaded).toBe(health.workflowsTotal);
   } finally {

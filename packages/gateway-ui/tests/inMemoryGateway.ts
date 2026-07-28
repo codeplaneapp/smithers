@@ -19,6 +19,7 @@ export type SeedState = {
   events?: Record<string, Array<Record<string, unknown>>>;
   trees?: Record<string, unknown>;
   outputs?: Record<string, unknown>;
+  hijackCandidates?: Record<string, Array<Record<string, unknown>>>;
   /** Optional response delay by `runId:nodeId`, used to exercise loading transitions. */
   outputDelayMs?: Record<string, number>;
   /**
@@ -51,6 +52,8 @@ export type InMemoryGateway = {
   approvalsSubmitted: Array<Record<string, unknown>>;
   /** Every rewindRun body the UI POSTed, in order. */
   rewinds: Array<Record<string, unknown>>;
+  /** HTTP requests observed by the real in-memory server. */
+  requests: Array<{ method: string; path: string; authorization: string | null }>;
   /** Append rows to a run's event log after mount and notify SSE subscribers. */
   pushEvents(runId: string, rows: Array<Record<string, unknown>>): void;
   /** Resolve every held submitApproval and stop deferring new ones. */
@@ -74,6 +77,7 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
     events: seed.events ?? {},
     trees: seed.trees ?? {},
     outputs: seed.outputs ?? {},
+    hijackCandidates: seed.hijackCandidates ?? {},
     outputDelayMs: seed.outputDelayMs ?? {},
     runsDelayMs: seed.runsDelayMs ?? 0,
     failPaths: seed.failPaths ?? new Set<string>(),
@@ -107,6 +111,11 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
     async fetch(request) {
       const url = new URL(request.url);
       const path = url.pathname;
+      gateway.requests.push({
+        method: request.method,
+        path,
+        authorization: request.headers.get("authorization"),
+      });
 
       if (path === "/v1/api/stream") {
         if (state.streamStatus !== 200) {
@@ -153,6 +162,20 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
         const runId = decodeURIComponent(runMatch[1]!);
         const run = state.runs.find((row) => row.runId === runId);
         return run ? ok(run) : fail(404, "NOT_FOUND", `No run ${runId}`);
+      }
+      // GET /v1/api/runs/:id/hijack-candidates
+      const hijackCandidatesMatch = path.match(/^\/v1\/api\/runs\/([^/]+)\/hijack-candidates$/);
+      if (hijackCandidatesMatch && request.method === "GET") {
+        const runId = decodeURIComponent(hijackCandidatesMatch[1]!);
+        return ok({ candidates: state.hijackCandidates[runId] ?? [] });
+      }
+      // POST /v1/api/runs/:id/oneshot-monitor/:action (attach | steer | restart)
+      const oneshotControlMatch = path.match(/^\/v1\/api\/runs\/([^/]+)\/oneshot-monitor\/([a-z]+)$/);
+      if (oneshotControlMatch && request.method === "POST") {
+        const action = oneshotControlMatch[2]!;
+        if (action === "attach") return ok({ narrator: true });
+        if (action === "steer") return ok({ status: "queued", messageId: "steer-1" });
+        return ok({ restartedAsRunId: "run-restarted" });
       }
       // POST /v1/api/runs (launchRun)
       if (path === "/v1/api/runs" && request.method === "POST") {
@@ -244,6 +267,7 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
     launches: [],
     approvalsSubmitted: [],
     rewinds: [],
+    requests: [],
     pushEvents(runId, rows) {
       state.events[runId] = [...(state.events[runId] ?? []), ...rows];
       broadcast(["events"]);

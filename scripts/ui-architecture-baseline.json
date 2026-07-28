@@ -177,7 +177,6 @@
       "packages/xstate/package.json#name=\"@smithers-orchestrator/xstate\""
     ],
     "styleEntryPoints": [
-      "apps/cli/src/monitor-ui/monitor.tsx -> @xterm/xterm/css/xterm.css",
       "apps/demoday-site/src/main.ts -> ./style.css",
       "apps/demoday-site/src/style.css",
       "apps/signal/site/src/main.tsx -> ./signal.css",
@@ -240,7 +239,6 @@
       "apps/cli/src/oneshot/oneshot-ui.tsx -> smithers-orchestrator/gateway-react",
       "apps/cli/src/oneshot/oneshot-ui.tsx -> smithers-orchestrator/gateway-ui",
       "apps/cli/src/oneshot/oneshot-ui.tsx -> smithers-orchestrator/ui",
-      "apps/cli/src/oneshot/oneshot-ui.tsx -> smithers-orchestrator/ui/adapters/pierre-diff-view",
       "apps/review/src/server/landingPage.ts -> @smithers-orchestrator/ui-styleguide",
       "apps/review/src/walkthrough/walkthroughCss.ts -> @smithers-orchestrator/ui-styleguide",
       "apps/signal/site/src/App.tsx -> smithers-orchestrator/ui",
@@ -297,6 +295,8 @@
       "packages/gateway-ui/src/NodeOutputView.tsx -> @smithers-orchestrator/ui",
       "packages/gateway-ui/src/NodeStageStrip.tsx -> @smithers-orchestrator/gateway-react",
       "packages/gateway-ui/src/NodeStageStrip.tsx -> @smithers-orchestrator/ui",
+      "packages/gateway-ui/src/OneshotSurface.tsx -> @smithers-orchestrator/ui/adapters/pierre-diff-view",
+      "packages/gateway-ui/src/OneshotSurface.tsx -> @smithers-orchestrator/ui/adapters/terminal",
       "packages/gateway-ui/src/RunEventLog.tsx -> @smithers-orchestrator/gateway-react",
       "packages/gateway-ui/src/RunEventLog.tsx -> @smithers-orchestrator/ui",
       "packages/gateway-ui/src/RunList.tsx -> @smithers-orchestrator/gateway-react",

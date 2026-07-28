@@ -117,3 +117,21 @@ export {
 } from "./GatewayApprovals";
 export { GatewayCheckpointControls, type GatewayCheckpointControlsProps } from "./GatewayCheckpointControls";
 export { SmithersCanvasNode, SmithersNodeHandles } from "./SmithersCanvasNode";
+export {
+  HijackCandidateButton,
+  OneshotSurface,
+  HijackTerminal,
+  type HijackCandidateButtonProps,
+  type OneshotSurfaceProps,
+  type OneshotSurfaceTab,
+  type HijackTerminalProps,
+} from "./OneshotSurface";
+export {
+  hijackActionFor,
+  hijackCandidateForNode,
+  hijackCandidatesOf,
+  ptyHijackUrl,
+  type HijackAction,
+  type HijackCandidate,
+  type HijackStatus,
+} from "./hijack";

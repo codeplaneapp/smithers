@@ -46,9 +46,6 @@ import {
   groupForStatus,
   groupRuns,
   hasFailedDescendant,
-  hijackActionFor,
-  hijackCandidateForNode,
-  hijackCandidatesOf,
   isCancellable,
   isHeartbeatEvent,
   isNotableEvent,
@@ -61,7 +58,6 @@ import {
   nodeSummaryEligible,
   paginateRuns,
   pick,
-  ptyHijackUrl,
   rowOf,
   runErrorOf,
   runProgress,
@@ -82,6 +78,12 @@ import {
   waitTone,
   workflowOptions,
 } from "../src/monitor-ui/monitorModel.ts";
+import {
+  hijackActionFor,
+  hijackCandidateForNode,
+  hijackCandidatesOf,
+  ptyHijackUrl,
+} from "smithers-orchestrator/gateway-ui";
 import { predictRunUsage } from "../src/monitor-ui/usagePrediction.ts";
 
 describe("embedded monitor bootstrap", () => {

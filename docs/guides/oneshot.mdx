@@ -139,6 +139,12 @@ cancel controls, plus:
   pay narration cost. Lines are persisted as run events and reappear after a
   monitor reattaches.
 
+The oneshot UI, the `chat-create` run UI, and the Monitor's node-row hijack
+view are all the same shared `OneshotSurface` component from
+`smithers-orchestrator/gateway-ui`: goal and status cards, chat, diff, events,
+and an embedded PTY terminal for hijack and reopen. The Monitor hosts it in a
+dialog that can maximize to the viewport and restore.
+
 Steering and restart requests and outcomes are durable run events shown by
 `bunx smithers-orchestrator status RUN_ID`, `events RUN_ID`, and
 `timeline RUN_ID`. Narrator lines are durable `NodeOutput` events shown by

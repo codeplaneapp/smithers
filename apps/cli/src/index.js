@@ -4290,6 +4290,16 @@ async function runGatewayCommand(options) {
       });
       workflows.push("oneshot");
     }
+    // `chat-create` persists one-task auto-hijacked runs directly instead of
+    // discovering a workflow module. Register a DB-backed shell under its
+    // persisted workflow name so `smithers ui <chatRunId>` resolves to the
+    // same shared oneshot/hijack surface.
+    if (!gateway.workflows.has("chat") && !discoveredWorkflows.some((discovered) => discovered.id === "chat")) {
+      gateway.register("chat", workspaceWorkflow, {
+        ui: { entry: ONESHOT_UI_ENTRY, title: "Chat" },
+      });
+      workflows.push("chat");
+    }
     // The `evals` gateway extension (issue #77): every CLI-booted gateway
     // serves it, backed by the workspace's own DB and its real discovered-
     // workflow index (so `ext.evals.saveSuite` can validate a target
@@ -7753,7 +7763,7 @@ const cli = Cli.create({
           },
           {
             cta: withAgentNextSteps(
-              { runId: result.runId, workflowId: "chat" },
+              { runId: result.runId, workflowId: "chat", hasUi: true },
               [
                 { command: `hijack ${result.runId}`, description: "Open the chat session" },
                 { command: `inspect ${result.runId}`, description: "Inspect run state" },

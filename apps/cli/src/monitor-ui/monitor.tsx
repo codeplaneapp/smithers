@@ -24,7 +24,7 @@ import {
   type UseGatewayRunTreeResult,
 } from "smithers-orchestrator/gateway-react";
 import { snapshotToGatewayRunNode, type DevToolsSnapshot } from "smithers-orchestrator/gateway-client";
-import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+import { HijackCandidateButton, OneshotSurface, WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
 import {
   Button,
   observeReducedMotion,
@@ -40,10 +40,6 @@ import {
 import { Chip, MonitorToolbar, RunLifecycleControls, RunRailRow, RunsPagination, ToneDot } from "./monitorShell.tsx";
 import { processPatch, type CodeViewItem } from "@pierre/diffs";
 import { CodeView } from "@pierre/diffs/react";
-import type { Terminal as XTerminal, IDisposable } from "@xterm/xterm";
-// Inlined at bundle time (Bun.build) — the gateway serves one self-contained
-// client.js, so the stylesheet ships as a string appended to monitorCss.
-import xtermCss from "@xterm/xterm/css/xterm.css" with { type: "text" };
 import {
   accountRowsOf,
   asArray,
@@ -75,9 +71,6 @@ import {
   groupRuns,
   hasFailedDescendant,
   histogramStats,
-  hijackActionFor,
-  hijackCandidateForNode,
-  hijackCandidatesOf,
   isCancellable,
   isPausable,
   isRecord,
@@ -98,7 +91,6 @@ import {
   paginateRuns,
   parsePrometheusText,
   pick,
-  ptyHijackUrl,
   quotaInfoOf,
   rowOf,
   runErrorOf,
@@ -128,7 +120,6 @@ import {
   waitTone,
   workflowOptions,
   type CronRow,
-  type HijackCandidate,
   type NodeStateRow,
   type PromScrape,
   type RunRow,
@@ -3599,244 +3590,11 @@ function NodeWhatHappened({
   );
 }
 
-// ---------------------------------------------------------------------------
-// PTY hijack terminal. An embedded xterm.js terminal (the same stack the
-// smithers cloud UI uses for its workspace terminals — ghostty stays a native
-// app; the web falls back to xterm) attached to the gateway's /v1/pty/hijack
-// websocket, which runs `smithers hijack <runId> --target <nodeId>` in a real
-// PTY. Transport mirrors the cloud terminal client: binary frames are raw PTY
-// bytes both ways; text frames are JSON control messages (`resize` up,
-// `exit`/`error` down).
-// ---------------------------------------------------------------------------
-
-type HijackStatus = "connecting" | "connected" | "exited" | "closed" | "error";
-
 function isDarkTheme(): boolean {
   const attr = document.documentElement.dataset.theme;
   if (attr === "dark") return true;
   if (attr === "light") return false;
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
-}
-
-/** Poll the gateway's per-node hijack candidates for a run (5s while live). */
-function useHijackCandidates(runId: string, live: boolean): HijackCandidate[] {
-  const [candidates, setCandidates] = useState<HijackCandidate[]>([]);
-  useEffect(() => {
-    setCandidates([]);
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const response = await fetch(`/v1/api/runs/${encodeURIComponent(runId)}/hijack-candidates`);
-        if (!response.ok) return;
-        const body: unknown = await response.json();
-        if (!cancelled) setCandidates(hijackCandidatesOf(body));
-      } catch {
-        // Transient fetch failures just keep the previous candidate view.
-      }
-    };
-    void load();
-    const timer = live ? setInterval(() => void load(), 5_000) : null;
-    return () => {
-      cancelled = true;
-      if (timer) clearInterval(timer);
-    };
-  }, [runId, live]);
-  return candidates;
-}
-
-function HijackTerminal({
-  runId,
-  nodeId,
-  dark,
-  onStatus,
-}: {
-  runId: string;
-  nodeId: string;
-  dark: boolean;
-  onStatus: (status: HijackStatus) => void;
-}) {
-  const mountRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const host = mountRef.current;
-    if (!host) return;
-    const ac = new AbortController();
-    // Every resource is hoisted to effect scope and assigned as created, so
-    // the cleanup always disposes whatever exists — including a teardown while
-    // connect() is still awaiting the dynamic import (mirrors the cloud UI's
-    // TerminalSession discipline).
-    let term: XTerminal | null = null;
-    let resizeObserver: ResizeObserver | null = null;
-    let dataDisposable: IDisposable | null = null;
-    let ws: WebSocket | null = null;
-    let stopObservingMotion: (() => void) | undefined;
-    const encoder = new TextEncoder();
-
-    async function connect() {
-      onStatus("connecting");
-      const [{ Terminal }, { FitAddon }] = await Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]);
-      if (ac.signal.aborted || !host) return;
-      // The mount div persists across effect re-runs — never stack a second
-      // terminal into it.
-      host.replaceChildren();
-      const terminalStyle = getComputedStyle(host);
-      term = new Terminal({
-        theme: {
-          background: terminalStyle.backgroundColor,
-          foreground: terminalStyle.color,
-          cursor: terminalStyle.borderTopColor,
-          selectionBackground: terminalStyle.outlineColor,
-        },
-        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-        fontSize: 13,
-        cursorBlink: !prefersReducedMotion(),
-      });
-      const fitAddon = new FitAddon();
-      term.loadAddon(fitAddon);
-      term.open(host);
-      fitAddon.fit();
-      const boundTerm = term;
-      stopObservingMotion = observeReducedMotion((reduced) => {
-        boundTerm.options.cursorBlink = !reduced;
-      });
-      const socket = new WebSocket(
-        ptyHijackUrl(location.origin, runId, nodeId, { cols: boundTerm.cols, rows: boundTerm.rows }),
-      );
-      ws = socket;
-      socket.binaryType = "arraybuffer";
-      const sendResize = () => {
-        if (socket.readyState !== WebSocket.OPEN) return;
-        socket.send(JSON.stringify({ type: "resize", cols: boundTerm.cols, rows: boundTerm.rows }));
-      };
-      socket.onopen = () => {
-        onStatus("connected");
-        sendResize();
-      };
-      socket.onmessage = (event) => {
-        if (typeof event.data === "string") {
-          // JSON control frames; unknown types are ignored for forward compat.
-          try {
-            const message = JSON.parse(event.data) as { type?: unknown; code?: unknown; message?: unknown };
-            if (message.type === "exit") {
-              onStatus("exited");
-              boundTerm.writeln(
-                `\r\n\x1b[2m[session ended${typeof message.code === "number" ? ` · exit ${message.code}` : ""}]\x1b[0m`,
-              );
-            } else if (message.type === "error") {
-              onStatus("error");
-              boundTerm.writeln(`\r\n\x1b[1;31m${String(message.message ?? "PTY error")}\x1b[0m`);
-            }
-          } catch {
-            // Not JSON: drop, PTY bytes only travel on binary frames.
-          }
-          return;
-        }
-        boundTerm.write(new Uint8Array(event.data as ArrayBuffer));
-      };
-      socket.onerror = () => {
-        onStatus("error");
-        boundTerm.writeln("\r\n\x1b[1;31mTerminal socket error — the connection to the gateway failed.\x1b[0m");
-      };
-      socket.onclose = (event) => {
-        if (event.code !== 1000) onStatus("closed");
-      };
-      dataDisposable = boundTerm.onData((data) => {
-        if (socket.readyState !== WebSocket.OPEN) return;
-        const bytes = encoder.encode(data);
-        socket.send(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-      });
-      resizeObserver =
-        typeof ResizeObserver !== "undefined"
-          ? new ResizeObserver(() => {
-              fitAddon.fit();
-              sendResize();
-            })
-          : null;
-      resizeObserver?.observe(host);
-      boundTerm.focus();
-    }
-
-    void connect().catch(() => {
-      if (!ac.signal.aborted) onStatus("error");
-    });
-
-    return () => {
-      ac.abort();
-      stopObservingMotion?.();
-      resizeObserver?.disconnect();
-      dataDisposable?.dispose();
-      try {
-        ws?.close(1000, "terminal closed");
-      } catch {
-        // Closing a CONNECTING socket can throw in some environments.
-      }
-      term?.dispose();
-    };
-  }, [runId, nodeId, dark]);
-  return <div className="mon-hijack-terminal" ref={mountRef} data-testid="monitor-hijack-terminal" />;
-}
-
-const HIJACK_STATUS_TONES: Record<HijackStatus, Tone> = {
-  connecting: "waiting",
-  connected: "ok",
-  exited: "idle",
-  closed: "idle",
-  error: "failed",
-};
-
-function HijackModal({
-  runId,
-  nodeId,
-  label,
-  engine,
-  onClose,
-}: {
-  runId: string;
-  nodeId: string;
-  label: string;
-  engine: string;
-  onClose: () => void;
-}) {
-  const [status, setStatus] = useState<HijackStatus>("connecting");
-  const dark = isDarkTheme();
-  const dialogRef = useRef<HTMLDivElement | null>(null);
-  const returnFocusRef = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    returnFocusRef.current = document.activeElement as HTMLElement | null;
-    dialogRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      queueMicrotask(() => returnFocusRef.current?.focus());
-    };
-  }, [onClose]);
-  return (
-    <div className="mon-modal-backdrop" onClick={onClose} data-testid="monitor-hijack-modal">
-      <div
-        className="mon-modal mon-hijack-modal"
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${label} terminal for ${nodeId}`}
-        tabIndex={-1}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="mon-modal-head">
-          <span className="mon-kicker">
-            {label}: <span className="mon-mono">{nodeId}</span> <span className="mon-dim">· {engine}</span>
-          </span>
-          <span className={`mon-conn tone-${HIJACK_STATUS_TONES[status]}`} data-status={status}>
-            <ToneDot tone={HIJACK_STATUS_TONES[status]} pulse={status === "connected"} />
-            {status}
-          </span>
-          <Chip onClick={onClose}>Close</Chip>
-        </header>
-        <HijackTerminal runId={runId} nodeId={nodeId} dark={dark} onStatus={setStatus} />
-      </div>
-    </div>
-  );
 }
 
 function NodeInspector({
@@ -3901,10 +3659,10 @@ function NodeInspector({
   // reopen the session post-mortem). Compute nodes never show one.
   const runQuery = useGatewayRun(runId);
   const runStatus = isRecord(runQuery.data) ? asString(runQuery.data.status) : undefined;
-  const candidates = useHijackCandidates(runId, isLive);
-  const candidate = hijackCandidateForNode(candidates, nodeId);
-  const hijackAction = hijackActionFor(runStatus, isLive, candidate !== null);
-  const [showHijack, setShowHijack] = useState(false);
+  const [hijackSession, setHijackSession] = useState<{
+    engine: string;
+    action: { kind: "hijack" | "reopen"; label: string };
+  } | null>(null);
   // Containers (parallel, sequence, loop, worktree, merge-queue, …) group
   // other nodes and never own a transcript or structured output — showing
   // those panels there is pure noise. Leaf kinds keep the full inspector.
@@ -3973,21 +3731,13 @@ function NodeInspector({
             {retryBusy ? "Retrying…" : retryArmed ? "Confirm retry?" : "Retry task"}
           </Button>
         ) : null}
-        {hijackAction && candidate ? (
-          <Button
-            variant="outline"
-            data-testid="monitor-hijack-button"
-            data-hijack-kind={hijackAction.kind}
-            title={
-              hijackAction.kind === "hijack"
-                ? `Take over this node's live ${candidate.engine} session in an embedded terminal`
-                : `Reopen this node's recorded ${candidate.engine} session in an embedded terminal`
-            }
-            onClick={() => setShowHijack(true)}
-          >
-            {hijackAction.label}
-          </Button>
-        ) : null}
+        <HijackCandidateButton
+          runId={runId}
+          nodeId={nodeId}
+          runStatus={runStatus}
+          nodeLive={isLive}
+          onOpen={(candidate, action) => setHijackSession({ engine: candidate.engine, action })}
+        />
         <StatusTag status={node.status} />
         <Chip
           onClick={onClose}
@@ -3998,13 +3748,20 @@ function NodeInspector({
           ✕
         </Chip>
       </header>
-      {showHijack && hijackAction && candidate ? (
-        <HijackModal
+      {hijackSession ? (
+        // The hand-off surface is the shared oneshot UI (goal, KPIs, chat,
+        // diff, events, and the PTY terminal), opened on its terminal tab and
+        // maximizable to fill the viewport — the monitor owns no hijack markup
+        // of its own.
+        <OneshotSurface
           runId={runId}
-          nodeId={nodeId}
-          label={hijackAction.label}
-          engine={candidate.engine}
-          onClose={() => setShowHijack(false)}
+          variant="overlay"
+          initialTab="terminal"
+          hijackNodeId={nodeId}
+          title={`${hijackSession.action.label}: ${nodeId} · ${hijackSession.engine}`}
+          onClose={() => setHijackSession(null)}
+          className="mon-hijack-surface"
+          data-testid="monitor-hijack-modal"
         />
       ) : null}
       <div className="mon-inspector-title">{node.cardLabel ?? node.name ?? nodeId}</div>
@@ -4159,22 +3916,14 @@ function NodeInspector({
             title={isLive ? "Live output" : "Transcript"}
             testId="monitor-node-transcript"
             actions={
-              hijackAction && candidate ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="mon-hijack-inline"
-                  data-testid="monitor-hijack-inline"
-                  title={
-                    hijackAction.kind === "hijack"
-                      ? `Take over this node's live ${candidate.engine} session in an embedded terminal`
-                      : `Reopen this node's recorded ${candidate.engine} session in an embedded terminal`
-                  }
-                  onClick={() => setShowHijack(true)}
-                >
-                  ⌁ {hijackAction.kind === "hijack" ? "Hijack terminal" : "Reopen terminal"}
-                </Button>
-              ) : undefined
+              <HijackCandidateButton
+                runId={runId}
+                nodeId={nodeId}
+                runStatus={runStatus}
+                nodeLive={isLive}
+                compact
+                onOpen={(candidate, action) => setHijackSession({ engine: candidate.engine, action })}
+              />
             }
           >
             <NodeLiveOutput runId={runId} nodeId={nodeId} live={isLive} />
@@ -4765,7 +4514,7 @@ function App() {
   return (
     <main className={`mon-shell${monitorMode.embed ? " mon-embed" : ""}`} data-testid="monitor-root">
       <WorkflowUiStyles mode="theme" />
-      <SmithersUiStyles extra={`${monitorCss}\n${xtermCss}`} />
+      <SmithersUiStyles extra={monitorCss} />
       {!monitorMode.embed ? (
         <header className="mon-topbar">
           <div className="mon-brand">
@@ -5246,11 +4995,9 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-modal-head .mon-kicker { flex: 1; }
 .mon-modal-frame { flex: 1; border: 0; width: 100%; background: var(--bg); }
 
-/* PTY hijack terminal: the modal hosts one xterm.js instance; the mount fills
-   the modal body and the terminal's own theme paints the surface. */
-.mon-hijack-modal { width: min(1080px, 96vw); height: min(720px, 88vh); }
-.mon-hijack-terminal { flex: 1; min-height: 0; padding: var(--sp-2) var(--sp-3); background: var(--code-bg); color: var(--code-text); border: 0 solid var(--brand); outline-color: var(--ring-border); }
-.mon-hijack-terminal .xterm { height: 100%; }
+/* PTY hand-off: the shared <OneshotSurface> owns the terminal and its chrome;
+   the monitor only sizes and themes the panel it renders into. */
+.mon-hijack-surface { padding: var(--sp-2) var(--sp-3); background: var(--surface); color: var(--text); outline-color: var(--ring-border); }
 
 .mon-empty { color: var(--muted); text-align: center; padding: var(--sp-6) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-1); }
 .mon-empty-actions { display: flex; justify-content: center; gap: var(--sp-2); margin-top: var(--sp-3); }
