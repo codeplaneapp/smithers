@@ -105,9 +105,7 @@ function formatIssues(issues) {
   ).join("; ");
 }
 function schemaMock(schema) {
-  const first = JSON.parse(
-    zodSchemaToJsonExample(schema)
-  );
+  const first = JSON.parse(zodSchemaToJsonExample(schema));
   const firstResult = schema.safeParse(first);
   if (firstResult.success) return firstResult.data;
   const jsonSchema = toJSONSchema(schema);

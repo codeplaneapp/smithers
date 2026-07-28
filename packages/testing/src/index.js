@@ -2429,9 +2429,7 @@ function formatIssues(issues) {
   ).join("; ");
 }
 function schemaMock(schema) {
-  const first = JSON.parse(
-    zodSchemaToJsonExample(schema)
-  );
+  const first = JSON.parse(zodSchemaToJsonExample(schema));
   const firstResult = schema.safeParse(first);
   if (firstResult.success) return firstResult.data;
   const jsonSchema = toJSONSchema(schema);
@@ -3230,11 +3228,13 @@ function cloneWithLoopCap(node, maxLoopIterations) {
   const children = node.children.map((child) => cloneWithLoopCap(child, maxLoopIterations));
   if (node.tag !== "smithers:ralph") return { ...node, children };
   const { continueAsNewEvery: _continueAsNewEvery, ...props } = node.props;
+  const declared = Number(props.maxIterations);
+  const bound = Number.isInteger(declared) && declared > 0 ? Math.min(declared, maxLoopIterations) : maxLoopIterations;
   return {
     ...node,
     props: {
       ...props,
-      maxIterations: String(maxLoopIterations),
+      maxIterations: String(bound),
       onMaxReached: "return-last"
     },
     children
@@ -3404,7 +3404,9 @@ async function runCoveragePass(workflow, options, input, passIndex, rootDir, max
     approvalOutputs: /* @__PURE__ */ new Map(),
     nowMs: Date.now()
   };
-  const mocks = { "*": auto, ...options.mocks ?? {} };
+  const callerMocks = options.mocks ?? {};
+  const injectedCatchAll = !Object.prototype.hasOwnProperty.call(callerMocks, "*");
+  const mocks = { "*": auto, ...callerMocks };
   const sim = __simulateWithControls(
     workflow,
     {
@@ -3575,7 +3577,10 @@ async function runCoveragePass(workflow, options, input, passIndex, rootDir, max
     validations: state.validations,
     approvals: state.approvals,
     errors,
-    unusedMocks: sim.unusedMocks,
+    // `unusedMocks` reports the CALLER's dead mocks. coverWorkflow injects its
+    // own "*": auto catch-all, and a fully mocked run never consumes it, so
+    // reporting it would make the list permanently non-empty and useless.
+    unusedMocks: injectedCatchAll ? sim.unusedMocks.filter((key) => key !== "*") : sim.unusedMocks,
     warnings: sim.warnings
   };
 }
@@ -3605,9 +3610,7 @@ async function coverWorkflow(workflowModule, options = {}) {
   const passes = [];
   try {
     for (let passIndex = 0; passIndex < inputs.length; passIndex += 1) {
-      passes.push(
-        await runCoveragePass(workflow, options, inputs[passIndex], passIndex, rootDir, maxLoopIterations)
-      );
+      passes.push(await runCoveragePass(workflow, options, inputs[passIndex], passIndex, rootDir, maxLoopIterations));
     }
   } finally {
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });

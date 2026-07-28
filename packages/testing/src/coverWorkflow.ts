@@ -180,11 +180,16 @@ function cloneWithLoopCap(node: XmlNode | null, maxLoopIterations: number): XmlN
   const children = node.children.map((child) => cloneWithLoopCap(child, maxLoopIterations) as XmlNode);
   if (node.tag !== "smithers:ralph") return { ...node, children };
   const { continueAsNewEvery: _continueAsNewEvery, ...props } = node.props;
+  // A cap only ever LOWERS the bound. A loop the workflow declared as
+  // maxIterations={2} must still run at most twice under coverage, or the
+  // harness reports iteration counts the real run can never produce.
+  const declared = Number(props.maxIterations);
+  const bound = Number.isInteger(declared) && declared > 0 ? Math.min(declared, maxLoopIterations) : maxLoopIterations;
   return {
     ...node,
     props: {
       ...props,
-      maxIterations: String(maxLoopIterations),
+      maxIterations: String(bound),
       onMaxReached: "return-last",
     },
     children,
@@ -412,7 +417,9 @@ async function runCoveragePass<Schema>(
     approvalOutputs: new Map(),
     nowMs: Date.now(),
   };
-  const mocks = { "*": auto, ...(options.mocks ?? {}) };
+  const callerMocks = options.mocks ?? {};
+  const injectedCatchAll = !Object.prototype.hasOwnProperty.call(callerMocks, "*");
+  const mocks = { "*": auto, ...callerMocks };
   const sim = __simulateWithControls(
     workflow,
     {
@@ -587,7 +594,10 @@ async function runCoveragePass<Schema>(
     validations: state.validations,
     approvals: state.approvals,
     errors,
-    unusedMocks: sim.unusedMocks,
+    // `unusedMocks` reports the CALLER's dead mocks. coverWorkflow injects its
+    // own "*": auto catch-all, and a fully mocked run never consumes it, so
+    // reporting it would make the list permanently non-empty and useless.
+    unusedMocks: injectedCatchAll ? sim.unusedMocks.filter((key) => key !== "*") : sim.unusedMocks,
     warnings: sim.warnings,
   };
 }
