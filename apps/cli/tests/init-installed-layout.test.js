@@ -129,6 +129,11 @@ function buildFakeInstallTree() {
       'import { homedir } from "node:os";',
       'import { join } from "node:path";',
       "export function listAccounts() { return []; }",
+      // Agent detection probes each registered account inside its own configDir,
+      // so the stub must expose the same account -> provider-env mapping the real
+      // package does. `listAccounts()` returns nothing here, so a minimal
+      // implementation is faithful enough.
+      "export function accountToProviderEnv() { return {}; }",
       "export function accountsRoot(env = process.env) {",
       "  if (env.SMITHERS_HOME) return env.SMITHERS_HOME;",
       '  return join(env.HOME ?? homedir(), ".smithers");',

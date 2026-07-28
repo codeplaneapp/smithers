@@ -3,7 +3,7 @@ import { constants, accessSync, existsSync, readdirSync, readFileSync, statSync 
 import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
-import { listAccounts } from "@smithers-orchestrator/accounts";
+import { accountToProviderEnv, listAccounts } from "@smithers-orchestrator/accounts";
 import { SOTA_DEPRECATED_MODELS, SOTA_SLOTS } from "./sota-models.generated.js";
 /** @typedef {import("./AgentAvailability.ts").AgentAvailability} AgentAvailability */
 /** @typedef {import("./AgentAvailabilityStatus.ts").AgentAvailabilityStatus} AgentAvailabilityStatus */
@@ -301,6 +301,17 @@ const DETECTORS = [
     setupHint: "Install the Pool CLI and run `pool login` to authenticate.",
   },
 ];
+
+// Keep account-backed detection on the same account -> CLI-environment mapping
+// that generated agents.ts uses. A subscription can be logged in solely inside
+// its registered configDir, so probing only the ambient home directory is not
+// sufficient.
+const ACCOUNT_PROVIDERS_BY_DETECTOR = {
+  claude: new Set(["claude-code", "anthropic-api"]),
+  codex: new Set(["codex", "openai-api"]),
+  antigravity: new Set(["antigravity"]),
+  kimi: new Set(["kimi"]),
+};
 const ROLE_PREFERENCES = {
   spec: ["claude", "codex", "opencode", "openclaw", "openrouter", "antigravity", "amp", "kimi", "cursor"],
   research: ["codex", "kimi", "antigravity", "opencode", "claude", "openclaw", "cursor", "openrouter"],
@@ -895,6 +906,12 @@ function hasPositiveOpenCodeAuthList(output) {
  * @param {string} shareDir
  */
 function readKimiCredentials(shareDir) {
+  // kimi-cli 1.48 moved its active account state into `config.toml` and
+  // `kimi.json`; older releases use credentials/*.json. Both layouts are
+  // accepted by KimiAgent when KIMI_SHARE_DIR points at the account config.
+  if (existsSync(join(shareDir, "config.toml")) && existsSync(join(shareDir, "kimi.json"))) {
+    return { valid: true };
+  }
   const credentialsDir = join(shareDir, "credentials");
   let entries;
   try {
@@ -979,11 +996,8 @@ function formatUnusableReasons(agent) {
  * @param {AgentAvailability} agent
  */
 export function describeUnavailableAgent(agent) {
-  return `${agent.displayName} is unavailable: ${formatUnusableReasons(agent)}. ${
-    agent.displayName === "Codex"
-      ? "Recommended setup: install the Codex CLI, run `codex login`, then rerun `smithers init`."
-      : "Smithers will use another available agent for this role."
-  }`;
+  const setupHint = detectorForId(agent.id)?.setupHint ?? "Register an account with `smithers agents add`.";
+  return `${agent.displayName} is unavailable: ${formatUnusableReasons(agent)}. Recommended setup: ${setupHint}`;
 }
 
 /**
@@ -1012,6 +1026,13 @@ export function formatNoUsableAgentsMessage(detections) {
 export function detectAvailableAgents(env = process.env, options = {}) {
   const homeDir = env.HOME ?? homedir();
   const cwd = options.cwd ?? process.cwd();
+  let registeredAccounts = [];
+  try {
+    registeredAccounts = listAccounts(env);
+  } catch {
+    // Keep detection usable when an unrelated malformed registry is being
+    // repaired; the account-management command reports that parse error.
+  }
   return DETECTORS.map((detector) => {
     const authSignals = detector.authSignals(homeDir, env);
     const requiresBinary = detector.requiresBinary !== false;
@@ -1022,28 +1043,65 @@ export function detectAvailableAgents(env = process.env, options = {}) {
     }));
     const hasAuthSignal = authSignalChecks.some((check) => check.exists);
     const hasApiKeySignal = detector.apiKeys.some((name) => Boolean(env[name]));
+    const accountProviders = ACCOUNT_PROVIDERS_BY_DETECTOR[detector.id];
+    const matchingAccounts = accountProviders
+      ? registeredAccounts.filter((account) => accountProviders.has(account.provider))
+      : [];
+    const accountChecks = matchingAccounts.map((account) => {
+      let accountEnv;
+      try {
+        accountEnv = { ...env, ...accountToProviderEnv(account) };
+      } catch (error) {
+        return { account, usable: false, reason: error instanceof Error ? error.message : String(error) };
+      }
+      if (!hasBinary && requiresBinary)
+        return { account, usable: false, reason: `missing \`${detector.binary}\` on PATH` };
+      if (account.apiKey) return { account, usable: true, reason: "registered API key is present" };
+      const probe = detector.availabilityProbe?.(homeDir, accountEnv, cwd);
+      return {
+        account,
+        usable: probe?.verified === true,
+        reason: probe?.reason ?? "registered account credentials not verified",
+      };
+    });
+    const usableAccountLabels = accountChecks.filter((check) => check.usable).map((check) => check.account.label);
     const projectTrust = detector.projectTrust?.(homeDir, env, cwd) ?? { trusted: true, checks: [] };
     const hasProjectTrustSignal = projectTrust.trusted;
     const availabilityProbe =
       hasBinary || !requiresBinary ? detector.availabilityProbe?.(homeDir, env, cwd) : undefined;
-    const hasAvailabilityProbeSignal = availabilityProbe ? availabilityProbe.verified : true;
+    const hasAvailabilityProbeSignal = availabilityProbe
+      ? availabilityProbe.verified || usableAccountLabels.length > 0
+      : true;
     const hasProbeCredentialSignal = availabilityProbe?.verified === true;
-    const status = computeStatus(hasBinary, hasAuthSignal || hasProbeCredentialSignal, hasApiKeySignal);
-    const hasCredentialSignal = hasAuthSignal || hasApiKeySignal || hasProbeCredentialSignal;
+    const hasRegisteredCredentialSignal = usableAccountLabels.length > 0;
+    const effectiveAuthSignal = hasAuthSignal || hasProbeCredentialSignal || hasRegisteredCredentialSignal;
+    const status = computeStatus(hasBinary, effectiveAuthSignal, hasApiKeySignal);
+    const hasCredentialSignal = effectiveAuthSignal || hasApiKeySignal;
     const unusableReasons = [];
     if (requiresBinary && !hasBinary) {
       unusableReasons.push(`missing \`${detector.binary}\` on PATH`);
     }
     if (!hasCredentialSignal) {
-      unusableReasons.push(`missing credentials (${credentialRequirementLabel(detector, homeDir, env)})`);
+      if (matchingAccounts.length === 0 && accountProviders) {
+        unusableReasons.push(
+          `no registered ${detector.displayName} account and not authenticated (${credentialRequirementLabel(detector, homeDir, env)})`,
+        );
+      } else if (matchingAccounts.length > 0) {
+        unusableReasons.push(
+          `registered account${matchingAccounts.length === 1 ? "" : "s"} ${matchingAccounts.map((account) => `\"${account.label}\"`).join(", ")} not authenticated`,
+        );
+      } else {
+        unusableReasons.push(`missing credentials (${credentialRequirementLabel(detector, homeDir, env)})`);
+      }
     }
     if (!hasProjectTrustSignal) {
       unusableReasons.push("current project is not trusted by Gemini");
     }
     if (!hasAvailabilityProbeSignal) {
+      const accountFailure = accountChecks.find((check) => check.reason)?.reason;
       unusableReasons.push(
-        availabilityProbe?.reason
-          ? `availability check failed (${availabilityProbe.reason})`
+        accountFailure || availabilityProbe?.reason
+          ? `not authenticated (${accountFailure ?? availabilityProbe?.reason})`
           : "availability check failed",
       );
     }
@@ -1054,9 +1112,10 @@ export function detectAvailableAgents(env = process.env, options = {}) {
       deprecated: detector.deprecated === true ? true : undefined,
       deprecationReason: detector.deprecationReason,
       hasBinary,
-      hasAuthSignal,
+      hasAuthSignal: effectiveAuthSignal,
       hasApiKeySignal,
       hasProjectTrustSignal,
+      ...(usableAccountLabels.length > 0 ? { registeredAccountLabels: usableAccountLabels } : {}),
       status,
       score: scoreStatus(status),
       usable: unusableReasons.length === 0,
@@ -1068,6 +1127,9 @@ export function detectAvailableAgents(env = process.env, options = {}) {
         ...(availabilityProbe
           ? [`probe:${detector.id}:${availabilityProbe.verified ? "yes" : "no"}:${availabilityProbe.reason}`]
           : []),
+        ...accountChecks.map(
+          (check) => `account:${check.account.label}:${check.usable ? "usable" : "unusable"}:${check.reason}`,
+        ),
       ],
       unusableReasons,
     };

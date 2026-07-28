@@ -88,10 +88,11 @@ test("component reference docs cover exported components", () => {
   const exportedComponents = componentExportBlock
     .split(",")
     .map((name) => name.trim())
-    // Components are PascalCase (including all-caps `TUI`/`UI`); the same
-    // export block also re-exports SCREAMING_SNAKE constants (MONITOR_*),
-    // which are values, not components, and have no reference page.
-    .filter((name) => /^[A-Z]/.test(name) && !name.includes("_"));
+    // PascalCase only. The components barrel also re-exports SCREAMING_SNAKE
+    // constants (MONITOR_CONDITIONS, …), which are values a component's props
+    // are typed against, not components — they belong in that component's page,
+    // not a page of their own.
+    .filter((name) => /^[A-Z]/.test(name) && !/^[A-Z0-9_]+$/.test(name));
   exportedComponents.push("Trellis");
 
   const sagaDoc = readRepoFile("docs/components/saga.mdx");

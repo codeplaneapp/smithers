@@ -3,14 +3,14 @@
 // agentless compute child; only `judge` verification spends a model.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import ts from "typescript";
 import { build } from "esbuild";
 import { gradeSideEffectCompliance } from "@smithers/scorers";
 import { repoRoot } from "./paths.js";
 import type { CandidateReport, EvalVerdict } from "./report-schema.js";
 
-export type VerifyKind = "contains" | "equals" | "graph" | "sql" | "query" | "build" | "ui-functional" | "side-effect-marking" | "judge";
+export type VerifyKind = "contains" | "equals" | "graph" | "workflow-files" | "sql" | "query" | "build" | "ui-functional" | "side-effect-marking" | "judge";
 
 export type VerifySpec = {
   kind: VerifyKind;
@@ -199,6 +199,277 @@ function graphVerify(artifact: string, v: VerifySpec): EvalVerdict {
       ? "workflow renders and uses the required components"
       : `failed: ${checks.filter((c) => !c.passed).map((c) => c.name).join(", ")}`,
     method: "graph",
+    checks,
+  };
+}
+
+function nodeHasProperty(node: ts.Node, property: string): boolean {
+  let found = false;
+  const visit = (child: ts.Node) => {
+    if (ts.isPropertyAccessExpression(child) && child.name.text === property) {
+      found = true;
+      return;
+    }
+    if (!found) ts.forEachChild(child, visit);
+  };
+  visit(node);
+  return found;
+}
+
+function nodeHasIdentifier(node: ts.Node, identifier: string): boolean {
+  let found = false;
+  const visit = (child: ts.Node) => {
+    if (ts.isIdentifier(child) && child.text === identifier) {
+      found = true;
+      return;
+    }
+    if (!found) ts.forEachChild(child, visit);
+  };
+  visit(node);
+  return found;
+}
+
+function analyzeWorkflowTest(testSource: string, workflowName: string) {
+  const source = ts.createSourceFile("workflow.test.tsx", testSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let renderWorkflowLocal = "";
+  let workflowLocal = "";
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    const module = statement.moduleSpecifier.text;
+    if (module === "smithers-orchestrator/testing") {
+      const bindings = statement.importClause?.namedBindings;
+      if (bindings && ts.isNamedImports(bindings)) {
+        for (const element of bindings.elements) {
+          if ((element.propertyName ?? element.name).text === "renderWorkflow") {
+            renderWorkflowLocal = element.name.text;
+          }
+        }
+      }
+    }
+    if (module === `../workflows/${workflowName}.tsx` && statement.importClause?.name) {
+      workflowLocal = statement.importClause.name.text;
+    }
+  }
+
+  let rendersImportedWorkflow = false;
+  let graphAssertions = false;
+  let validSchemaAssertion = false;
+  let invalidSchemaAssertion = false;
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node)) {
+      if (
+        renderWorkflowLocal &&
+        workflowLocal &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === renderWorkflowLocal &&
+        ts.isIdentifier(node.arguments[0]) &&
+        node.arguments[0].text === workflowLocal
+      ) {
+        rendersImportedWorkflow = true;
+      }
+      if (
+        ts.isPropertyAccessExpression(node.expression) &&
+        ["toEqual", "toContain", "toHaveLength"].includes(node.expression.name.text) &&
+        ts.isCallExpression(node.expression.expression) &&
+        ts.isIdentifier(node.expression.expression.expression) &&
+        node.expression.expression.expression.text === "expect"
+      ) {
+        const actual = node.expression.expression.arguments[0];
+        if (actual && nodeHasProperty(actual, "tasks") && nodeHasIdentifier(actual, "nodeId")) {
+          graphAssertions = true;
+        }
+      }
+      if (
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "toBe" &&
+        ts.isCallExpression(node.expression.expression) &&
+        ts.isIdentifier(node.expression.expression.expression) &&
+        node.expression.expression.expression.text === "expect"
+      ) {
+        const actual = node.expression.expression.arguments[0];
+        const expected = node.arguments[0];
+        if (
+          actual &&
+          nodeHasProperty(actual, "outputSchema") &&
+          nodeHasProperty(actual, "safeParse") &&
+          nodeHasProperty(actual, "success")
+        ) {
+          if (expected?.kind === ts.SyntaxKind.TrueKeyword) validSchemaAssertion = true;
+          if (expected?.kind === ts.SyntaxKind.FalseKeyword) invalidSchemaAssertion = true;
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return {
+    testingImport: renderWorkflowLocal.length > 0,
+    workflowImport: workflowLocal.length > 0,
+    rendersImportedWorkflow,
+    graphAssertions,
+    schemaAssertions: validSchemaAssertion && invalidSchemaAssertion,
+  };
+}
+
+/** Verify a workflow-authoring change set, not merely a workflow snippet.
+ * The candidate returns a JSON path->contents bundle so this deterministic
+ * scorer can inspect registration, render the real workflow, and run the real
+ * renderWorkflow-based test without granting the candidate write access. */
+function workflowFilesVerify(artifact: string, v: VerifySpec): EvalVerdict {
+  const checks: EvalVerdict["checks"] = [];
+  let files: Record<string, string> = {};
+  try {
+    const parsed = JSON.parse(artifact) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("expected a JSON object");
+    files = Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).map(([path, contents]) => {
+        if (typeof contents !== "string") throw new Error(`${path} contents must be a string`);
+        if (!path.startsWith(".smithers/") || path.includes("..")) {
+          throw new Error(`unsafe or out-of-scope path: ${path}`);
+        }
+        return [path, contents];
+      }),
+    );
+    checks.push({ name: "file-bundle-json", passed: true, detail: `${Object.keys(files).length} files` });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      passed: false,
+      score: 0,
+      reason: `invalid workflow file bundle: ${detail}`,
+      method: "workflow-files",
+      checks: [{ name: "file-bundle-json", passed: false, detail }],
+    };
+  }
+
+  const workflowPaths = Object.keys(files).filter((path) => /^\.smithers\/workflows\/[^/]+\.tsx$/.test(path));
+  const workflowPath = workflowPaths[0] ?? "";
+  const workflowName = workflowPath.split("/").at(-1)?.replace(/\.tsx$/, "") ?? "";
+  const testPath = `.smithers/tests/${workflowName}.test.tsx`;
+  const packagePath = ".smithers/package.json";
+  const workflowSource = files[workflowPath] ?? "";
+  const testSource = files[testPath] ?? "";
+  const packageSource = files[packagePath] ?? "";
+
+  checks.push({
+    name: "workflow-file",
+    passed: workflowPaths.length === 1,
+    detail: workflowPaths.length === 1 ? workflowPath : `expected one workflow, got ${workflowPaths.length}`,
+  });
+  checks.push({ name: "test-file", passed: testSource.length > 0, detail: testPath });
+  checks.push({ name: "package-json", passed: packageSource.length > 0, detail: packagePath });
+
+  const testAnalysis = analyzeWorkflowTest(testSource, workflowName);
+  checks.push({
+    name: "testing-library-import",
+    passed: testAnalysis.testingImport,
+    detail: 'renderWorkflow from "smithers-orchestrator/testing"',
+  });
+
+  checks.push({
+    name: "real-workflow-import",
+    passed: testAnalysis.workflowImport,
+    detail: `../workflows/${workflowName}.tsx`,
+  });
+  checks.push({
+    name: "renders-real-workflow",
+    passed: testAnalysis.rendersImportedWorkflow,
+    detail: testAnalysis.workflowImport ? "renderWorkflow(importedWorkflow, …)" : "missing workflow import",
+  });
+
+  checks.push({
+    name: "graph-behavior-assertions",
+    passed: testAnalysis.graphAssertions,
+    detail: "assert task ids/order with an exact matcher",
+  });
+  checks.push({
+    name: "schema-assertions",
+    passed: testAnalysis.schemaAssertions,
+    detail: "accept a representative value and reject a malformed value through task.outputSchema",
+  });
+  if (/<(?:[A-Za-z_$][\w$]*\.)?(?:Branch|Loop|Ralph)\b/.test(workflowSource)) {
+    const stagedConditions = /\boutputs\s*:/.test(testSource) && /\brenderWorkflow\s*\(/.test(testSource);
+    checks.push({
+      name: "branch-loop-assertions",
+      passed: stagedConditions,
+      detail: "rerender control flow with staged outputs",
+    });
+  }
+
+  let registered = false;
+  try {
+    const pkg = JSON.parse(packageSource) as { scripts?: { test?: unknown } };
+    const testScript = typeof pkg.scripts?.test === "string" ? pkg.scripts.test : "";
+    registered = testScript.split(/\s+/).includes(`./tests/${workflowName}.test.tsx`);
+  } catch {
+    registered = false;
+  }
+  checks.push({
+    name: "test-registered",
+    passed: registered,
+    detail: `./tests/${workflowName}.test.tsx in scripts.test`,
+  });
+
+  const root = repoRoot();
+  const tmpBase = join(root, ".smithers", "state");
+  let dir: string | null = null;
+  let graphDetail = "not run";
+  let testDetail = "not run";
+  let graphPassed = false;
+  let testPassed = false;
+  try {
+    mkdirSync(tmpBase, { recursive: true });
+    dir = mkdtempSync(join(tmpBase, "eval-workflow-files-"));
+    for (const [path, contents] of Object.entries(files)) {
+      const absolute = join(dir, path);
+      mkdirSync(dirname(absolute), { recursive: true });
+      writeFileSync(absolute, contents, "utf8");
+    }
+    if (workflowPath) {
+      const cliEntry = join(root, "apps/cli/src/index.js");
+      const graph = spawnSync("bun", [cliEntry, "graph", join(dir, workflowPath)], {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 120_000,
+      });
+      graphPassed = graph.status === 0;
+      graphDetail = graphPassed
+        ? "rendered"
+        : `exit ${graph.status}: ${`${graph.stdout ?? ""}\n${graph.stderr ?? ""}`.trim().slice(0, 300)}`;
+    }
+    if (testSource) {
+      const test = spawnSync("bun", ["test", join(dir, testPath)], {
+        cwd: root,
+        encoding: "utf8",
+        timeout: 120_000,
+      });
+      testPassed = test.status === 0;
+      testDetail = testPassed
+        ? "passed"
+        : `exit ${test.status}: ${`${test.stdout ?? ""}\n${test.stderr ?? ""}`.trim().slice(0, 1200)}`;
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    graphDetail = graphDetail === "not run" ? detail : graphDetail;
+    testDetail = testDetail === "not run" ? detail : testDetail;
+  } finally {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  }
+  checks.push({ name: "graph-renders", passed: graphPassed, detail: graphDetail });
+  checks.push({ name: "test-passes", passed: testPassed, detail: testDetail });
+  checks.push(
+    ...v.must.map((m) => ({ name: `must:${m}`, passed: matchesToken(workflowSource, m), detail: m })),
+    ...v.mustNot.map((m) => ({ name: `mustNot:${m}`, passed: !matchesToken(workflowSource, m), detail: m })),
+  );
+
+  const passed = checks.every((check) => check.passed);
+  return {
+    passed,
+    score: scoreFromChecks(checks),
+    reason: passed
+      ? "workflow, registered testing-library test, graph assertions, and execution all passed"
+      : `failed: ${checks.filter((check) => !check.passed).map((check) => check.name).join(", ")}`,
+    method: "workflow-files",
     checks,
   };
 }
@@ -539,6 +810,8 @@ export async function computeVerdict(
       return equalsVerify(artifact, verify);
     case "graph":
       return graphVerify(artifact, verify);
+    case "workflow-files":
+      return workflowFilesVerify(artifact, verify);
     case "sql":
       return await sqlVerify(verify);
     case "query":

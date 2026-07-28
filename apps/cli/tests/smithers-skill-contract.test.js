@@ -59,6 +59,21 @@ test("skill contains the execute-don't-describe imperative", () => {
   expect(skill).toContain("smithers graph .smithers/workflows/");
 });
 
+test("skill makes workflow tests an indivisible registered authoring rule", () => {
+  const skill = readRepoFile("skills/smithers/SKILL.md");
+
+  expect(skill).toContain("A workflow and its tests are one indivisible change");
+  expect(skill).toContain("renderWorkflow` from `smithers-orchestrator/testing");
+  expect(skill).toContain(".smithers/tests/hello.test.tsx");
+  expect(skill).toContain("./tests/hello.test.tsx");
+  expect(skill).toContain("expected node ids");
+  expect(skill).toContain("expected order");
+  expect(skill).toContain("outputSchema");
+  expect(skill).toContain("branches and loops");
+  expect(skill).toContain("floor");
+  expect(skill).toContain("never substitutes for the registered test");
+});
+
 // Agents were overengineering large single-goal asks (make CI green, repo-wide
 // docs audits, dependency upgrades) into full workflows. The skill must keep
 // routing those to `smithers oneshot`: the scale claim (one strong agent

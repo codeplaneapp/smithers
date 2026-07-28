@@ -24,6 +24,8 @@ export type AgentAvailability = {
   hasAuthSignal: boolean;
   hasApiKeySignal: boolean;
   hasProjectTrustSignal: boolean;
+  /** Registered account labels whose configured credentials passed detection. */
+  registeredAccountLabels?: string[];
   status: AgentAvailabilityStatus;
   score: number;
   usable: boolean;

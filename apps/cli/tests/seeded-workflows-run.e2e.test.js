@@ -226,6 +226,10 @@ function writeFakeAgentBinaries(binDir) {
     'const scaffoldStage = invocation.includes("# scaffold the workflow files\\n\\nyou are the scaffolder.");',
     'const documentStage = invocation.includes("# document the new workflow\\n\\nthe new workflow verifies cleanly.");',
     'const completeManifestStage = invocation.includes("the pack manifest .smithers/smithers.toon in this repository is incomplete:");',
+    // create-workflow's clarify step right-sizes the ask first: its `route` is
+    // an object, while `smithering` uses a plain string of the same name. One
+    // shared fixture payload cannot satisfy both, so specialize it per stage.
+    'const workflowClarifyStage = invocation.includes("# clarify the workflow request\\n\\nyou are the intake step");',
     "function writeFixtureFiles() {",
     "  const root = process.cwd();",
     '  const workflowDir = path.join(root, ".smithers", "workflows");',
@@ -245,6 +249,35 @@ function writeFakeAgentBinaries(binDir) {
     '    "));",',
     '    "",',
     '  ].join("\\n"), "utf8");',
+    // A workflow and its registered test are one indivisible change: verify
+    // fails the run outright when the test is missing or unregistered, so the
+    // scaffolder fixture must produce both, exactly like a real one.
+    '  const testsDir = path.join(root, ".smithers", "tests");',
+    "  fs.mkdirSync(testsDir, { recursive: true });",
+    '  fs.writeFileSync(path.join(testsDir, "mock-workflow.test.tsx"), [',
+    '    "import { expect, test } from \\"bun:test\\";",',
+    '    "import { join } from \\"node:path\\";",',
+    '    "import { renderWorkflow } from \\"smithers-orchestrator/testing\\";",',
+    '    "import workflow from \\"../workflows/mock-workflow.tsx\\";",',
+    '    "test(\\"renders the real mock workflow graph\\", async () => {",',
+    '    "  const graph = await renderWorkflow(workflow, { workflowPath: join(import.meta.dir, \\"..\\", \\"workflows\\", \\"mock-workflow.tsx\\"), input: {}, outputs: {} });",',
+    '    "  expect(graph.tasks.map((task) => task.nodeId)).toEqual([\\"output\\"]);",',
+    '    "  const output = graph.tasks.find((task) => task.nodeId === \\"output\\");",',
+    '    "  expect(output?.outputSchema.safeParse({ summary: \\"ok\\" }).success).toBe(true);",',
+    '    "  expect(output?.outputSchema.safeParse({ summary: 1 }).success).toBe(false);",',
+    '    "});",',
+    '    "",',
+    '  ].join("\\n"), "utf8");',
+    '  const packageJsonPath = path.join(root, ".smithers", "package.json");',
+    "  const packageJson = fs.existsSync(packageJsonPath)",
+    '    ? JSON.parse(fs.readFileSync(packageJsonPath, "utf8"))',
+    '    : { name: "smithers-pack", private: true, scripts: {} };',
+    "  packageJson.scripts = packageJson.scripts || {};",
+    '  const existingTestScript = packageJson.scripts.test || "bun test --preload ./preload.ts";',
+    '  if (!existingTestScript.includes("./tests/mock-workflow.test.tsx")) {',
+    '    packageJson.scripts.test = existingTestScript + " ./tests/mock-workflow.test.tsx";',
+    "  }",
+    '  fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + "\\n", "utf8");',
     '  const countPath = path.join(root, ".smithers", "test-scaffold-count");',
     '  const count = Number(fs.existsSync(countPath) ? fs.readFileSync(countPath, "utf8") : "0") + 1;',
     '  fs.writeFileSync(countPath, String(count), "utf8");',
@@ -286,6 +319,7 @@ function writeFakeAgentBinaries(binDir) {
       "}",
       `let payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? ${responseLiteral};`,
       'if (documentStage && process.env.SMITHERS_TEST_SKILL_MODE === "wrong-path") { const parsed = JSON.parse(payload); parsed.skillPath = ".smithers/skills/wrong.md"; payload = JSON.stringify(parsed); }',
+      'if (workflowClarifyStage) { const parsed = JSON.parse(payload); parsed.route = { tier: "workflow", reason: "Fixture builds a workflow.", oneshotCommand: null }; payload = JSON.stringify(parsed); }',
       'process.stdout.write(JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "```json\\n" + payload + "\\n```\\n" }] } }) + "\\n");',
       "",
     ].join("\n"),
@@ -298,6 +332,7 @@ function writeFakeAgentBinaries(binDir) {
       fixtureScript,
       `let payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? ${responseLiteral};`,
       'if (documentStage && process.env.SMITHERS_TEST_SKILL_MODE === "wrong-path") { const parsed = JSON.parse(payload); parsed.skillPath = ".smithers/skills/wrong.md"; payload = JSON.stringify(parsed); }',
+      'if (workflowClarifyStage) { const parsed = JSON.parse(payload); parsed.route = { tier: "workflow", reason: "Fixture builds a workflow.", oneshotCommand: null }; payload = JSON.stringify(parsed); }',
       "const args = process.argv.slice(2);",
       'const outputIndex = args.indexOf("--output-last-message");',
       "if (outputIndex >= 0 && args[outputIndex + 1]) {",
@@ -315,6 +350,7 @@ function writeFakeAgentBinaries(binDir) {
       fixtureScript,
       `let payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? ${responseLiteral};`,
       'if (documentStage && process.env.SMITHERS_TEST_SKILL_MODE === "wrong-path") { const parsed = JSON.parse(payload); parsed.skillPath = ".smithers/skills/wrong.md"; payload = JSON.stringify(parsed); }',
+      'if (workflowClarifyStage) { const parsed = JSON.parse(payload); parsed.route = { tier: "workflow", reason: "Fixture builds a workflow.", oneshotCommand: null }; payload = JSON.stringify(parsed); }',
       'process.stdout.write(payload + "\\n");',
       "",
     ].join("\n"),
@@ -608,12 +644,14 @@ test(
 
 for (const mode of ["missing", "malformed", "mismatched", "wrong-path"]) {
   test(
-    `create-workflow downgrades skillPath to null after bounded retries for a ${mode} companion skill`,
+    `create-workflow finishes with a null skillPath after bounded retries for a ${mode} companion skill`,
     () => {
-      const { repo, result, verification, runId, env } = runCreateWorkflowSkillCase(mode);
-      // The companion-skill loop is best-effort by design: a workflow that
-      // builds and verifies is BUILT, so an unusable skill doc downgrades the
-      // terminal skillPath to null instead of failing the whole run.
+      const { repo, result, runId, env, verification } = runCreateWorkflowSkillCase(mode);
+      // A companion skill is best-effort: the workflow itself builds and
+      // verifies, so the run FINISHES and downgrades skillPath to null rather
+      // than throwing away a working workflow over its doc (the skill loop is
+      // `onMaxReached: "return-last"`). The signal is the null terminal
+      // skillPath plus the exhausted retry budget below, not a failed run.
       expect(result.exitCode).toBe(0);
       expect(result.json?.status).toBe("finished");
       const terminal = runSmithers(["output", runId, "output"], {

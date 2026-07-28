@@ -81,6 +81,10 @@ loop's own scoped node id and iteration:
 
 ## 4. Workflow tests must render the real graph via `renderWorkflow`, not a hand-built one
 
+Authoring a workflow and writing its testing-library test are one indivisible
+change. A workflow delivered without that test is unfinished work, not a
+follow-up opportunity.
+
 Import the actual workflow module and drive it through
 [`renderWorkflow`](/reference/package-configuration#subpath-exports)
 (`smithers-orchestrator/testing`):
@@ -98,6 +102,11 @@ typo, a `NESTED_LOOP`, or a reserved-column collision: it validates a stand-in
 that merely resembles the workflow. `renderWorkflow` exercises the same
 extraction path `bunx smithers-orchestrator graph`/`bunx smithers-orchestrator up` do, so a
 graph-level defect fails the test the same way it fails a real run.
+
+Assert real graph behavior: exact node ids and dependency order, representative
+valid and malformed values through each task's `outputSchema`, and branch or
+loop behavior under the outputs that drive it. A truthiness smoke test such as
+`expect(graph).toBeTruthy()` does not meet this rule.
 
 ## 5. New `.smithers` test files must be registered in `.smithers/package.json`
 

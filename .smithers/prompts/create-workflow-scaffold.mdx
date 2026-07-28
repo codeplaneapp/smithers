@@ -155,10 +155,61 @@ the store. Leave `autoHeal` at its default (`stalled`, `wedged-node`) unless the
 design says otherwise: those two repairs are idempotent and reversible, and
 everything else escalates to a human.
 
+## Scaffold the workflow's test (required, not optional)
+
+A workflow and its tests are **one indivisible change**. A workflow without a
+registered test is unfinished work, and verification will fail on it — so write
+the test in the same pass, never as a follow-up.
+
+1. Write `{props.testsDir}/<workflowName>.test.tsx`. Import the **real**
+   workflow module and drive it through `renderWorkflow` from
+   `smithers-orchestrator/testing`. A hand-built plan/graph object validates a
+   stand-in that merely resembles the workflow and passes while the real file is
+   broken.
+2. **Register it**: append `./tests/<workflowName>.test.tsx` to the
+   space-separated `test` script in `{props.packageJson}`. That list is not a
+   glob — preserve every existing path and add yours at the end. An unregistered
+   test is silently never run.
+3. Assert real graph behavior. The floor is four assertions:
+   - the expected node ids are present;
+   - their expected order / `dependsOn` edges hold;
+   - each task's `outputSchema` accepts a representative value and rejects a
+     malformed one (`schema.safeParse(value).success`);
+   - branches and loops render the right nodes for the inputs that drive them.
+
+   `expect(graph).toBeTruthy()` is not a test; it will be treated as a missing
+   one.
+
+```tsx
+import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
+import { renderWorkflow } from "smithers-orchestrator/testing";
+import workflow from "../workflows/<workflowName>.tsx";
+
+const workflowPath = join(import.meta.dir, "..", "workflows", "<workflowName>.tsx");
+
+describe("<workflowName>", () => {
+  test("renders the expected graph", async () => {
+    const graph = await renderWorkflow(workflow, { workflowPath, input: { /* … */ }, outputs: {} });
+    expect(graph.tasks.map((task) => task.nodeId)).toEqual(["first", "second"]);
+    expect(graph.tasks.find((task) => task.nodeId === "second")?.dependsOn).toContain("first");
+    const first = graph.tasks.find((task) => task.nodeId === "first");
+    expect(first?.outputSchema.safeParse({ /* representative valid value */ }).success).toBe(true);
+    expect(first?.outputSchema.safeParse({ /* representative malformed value */ }).success).toBe(false);
+  });
+});
+```
+
+Run it before you finish (the `./` prefixes matter: bun treats a bare argument
+as a name filter and would silently match no files):
+`bun test --preload ./{props.preload} --max-concurrency=1 ./{props.testsDir}/<workflowName>.test.tsx`
+
 ## Acceptance criteria
 
 - `bunx smithers-orchestrator graph {props.workflowsDir}/<workflowName>.tsx`
   exits 0 (run it yourself before finishing).
+- `{props.testsDir}/<workflowName>.test.tsx` exists, is registered in
+  `{props.packageJson}`, and passes.
 - If you wrote a monitor,
   `bunx smithers-orchestrator graph {props.monitorDir}/<workflowName>.tsx`
   exits 0 too.
@@ -171,7 +222,8 @@ everything else escalates to a human.
 ## Output
 
 Return a `workflowName` and the full list of `filesWritten` (path + kind; use
-kind `ui` for the custom UI file).
+kind `ui` for the custom UI file, kind `test` for the test file, and kind
+`other` for `{props.packageJson}`).
 
 REQUIRED OUTPUT:
 {props.schema}

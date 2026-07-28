@@ -1031,6 +1031,38 @@ bindings, the `renderWorkflow`-based test contract, and
 `.smithers/package.json` test registration. Every one of these is a "passes
 `smithers graph`, fails at runtime hours later" trap if skipped.
 
+### ⚠️ A workflow and its tests are one indivisible change
+
+**Authoring a Smithers script and writing its tests with the Smithers workflow
+testing library is a single act, not two.** A workflow `.tsx` delivered without
+its test is unfinished work — do not report it as done, and do not offer the
+test as an optional follow-up.
+
+The rule, concretely, for a workflow at `.smithers/workflows/hello.tsx`:
+
+1. Write the test at `.smithers/tests/hello.test.tsx` using
+   `renderWorkflow` from `smithers-orchestrator/testing`. It must load and
+   render the **real** workflow module — a hand-built plan/graph object
+   validates a stand-in that merely resembles the workflow and passes while
+   the real file is broken.
+2. Register it by appending `./tests/hello.test.tsx` to the space-separated
+   `test` script in `.smithers/package.json`. That list is not a glob: an
+   unregistered test is silently never run and contributes zero coverage.
+3. Assert something real about the graph. The floor is four assertions:
+   - the **expected node ids** are present;
+   - their **expected order** (dependency edges) holds;
+   - each task's **outputSchema** is the one you intended;
+   - **branches and loops** render the right nodes for the inputs driving them.
+
+   A truthiness smoke test (`expect(graph).toBeTruthy()`) does not meet the
+   floor and is treated as a missing test.
+4. Run it and see it pass before you finish.
+
+`smithers graph` is a cheap structural pre-flight, and it
+**never substitutes for the registered test**: it renders one frame with no
+assertions, so it cannot catch a wrong schema, a wrong dependency edge, or a
+branch that renders the wrong node.
+
 ## Custom workflow UIs
 
 A workflow can ship a **first-class browser UI** that the Gateway bundles, serves at `/workflows/<key>`, and the Smithers PWA / Studio / `smithers ui` embeds same-origin. Reach for this when a workflow has long-running interaction the CLI can't show well: a composer for an open-ended chat, a question pool, a live spec, a custom diff view. Per [How to guide the user](#how-to-guide-the-user-after-every-command), **offer to build a UI for every workflow that lacks one**: author `.smithers/ui/<workflowId>.tsx` from the shipped component libraries (below), then open it with `smithers ui <runId>` (and `smithers ui --app` for the full control-plane UI).

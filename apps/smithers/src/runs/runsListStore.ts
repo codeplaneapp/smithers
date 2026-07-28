@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import type { GatewayConnectionStatus } from "@smithers-orchestrator/gateway-react";
 import { useChatStore } from "../chat/chatStore";
 import { useNotificationsStore } from "../notifications/notificationsStore";
 import { DEFAULT_FILTERS, shortRunId, type AgeFilter, type RunStatusFilter, type RunSummary } from "./runsList";
@@ -20,6 +19,10 @@ import { DEFAULT_FILTERS, shortRunId, type AgeFilter, type RunStatusFilter, type
  * live rows — kept as echoes, never fabricating or flipping a live row.
  */
 export type StreamMode = "live" | "polling";
+// Mirrors gateway-react's GatewayConnectionStatus. Restated locally because the
+// UI architecture guard forbids this store importing gateway-react at all,
+// type-only imports included.
+type GatewayConnectionStatus = "idle" | "connecting" | "online" | "offline" | "unauthorized";
 
 type RunsListState = {
   runs: RunSummary[];

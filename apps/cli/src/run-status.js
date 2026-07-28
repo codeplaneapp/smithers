@@ -6,9 +6,11 @@
 // `renderRunStatusHuman` the compact (~5-8 line) human formatter.
 
 import { SmithersError } from "@smithers-orchestrator/errors";
+import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
 import { formatElapsedCompact } from "./format.js";
 
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
+/** @typedef {import("@smithers-orchestrator/db/runState").RunStateView} RunStateView */
 
 /** Window used to answer "is it moving?" — nodes finished in the last N ms. */
 export const RUN_STATUS_RECENT_WINDOW_MS = 10 * 60 * 1000;
@@ -202,8 +204,9 @@ export function parseFrameDependsOn(xmlJson) {
  * @property {string} runId
  * @property {string} workflow
  * @property {string} status raw run row status
- * @property {"done"|"running-healthy"|"progressing"|"stalled"|"blocked"|"waiting-quota"|"paused"|"cancelled"|"failed"} verdict
+ * @property {"done"|"running-healthy"|"progressing"|"stalled"|"orphaned"|"blocked"|"waiting-quota"|"paused"|"cancelled"|"failed"} verdict
  * @property {string} reason
+ * @property {{ state: string; unhealthy?: { kind: string; lastHeartbeatAt?: string } } | undefined} [liveness] derived process liveness; absent when it was not computed
  * @property {{ finished: number; inProgress: number; pending: number; failed: number; waitingApproval: number; waitingEvent: number; waitingTimer: number; skipped: number; other: number; total: number }} counts
  * @property {Array<{ engine: string; model: string; attempts: number; quotaParked: boolean }>} modelMix
  * @property {{ recentFinished: number; windowMs: number; totalFinished: number; lastFinishedAtMs: number | null }} throughput
@@ -229,6 +232,7 @@ export function parseFrameDependsOn(xmlJson) {
  *   nowMs?: number;
  *   recentWindowMs?: number;
  *   deps?: Map<string, { dependsOn: string[]; continueOnFail: boolean }> | null;
+ *   liveness?: RunStateView | null;
  * }} params
  * @returns {RunStatusSummary}
  */
@@ -240,6 +244,7 @@ export function summarizeRunStatus(params) {
     nowMs = Date.now(),
     recentWindowMs = RUN_STATUS_RECENT_WINDOW_MS,
     deps = null,
+    liveness = null,
   } = params;
 
   // A continued run whose segment has not finished is still logically running
@@ -466,6 +471,27 @@ export function summarizeRunStatus(params) {
     reason = "no runnable work recorded; the run may be finalizing or orphaned (see `smithers why`)";
   }
 
+  // Liveness overrides the row-derived verdict. Everything above reads
+  // `run.status`, which is whatever the engine last WROTE — a run whose engine
+  // was killed stays `running` in the DB forever, so node counts alone happily
+  // report "progressing" for a corpse. `ps` already classifies this correctly;
+  // `status` is the command an operator actually reaches for, so it must agree.
+  if (liveness?.state === "orphaned" || liveness?.state === "stale") {
+    const orphaned = liveness.state === "orphaned";
+    verdict = orphaned ? "orphaned" : "stalled";
+    const since =
+      liveness.unhealthy?.kind === "engine-heartbeat-stale" && liveness.unhealthy.lastHeartbeatAt
+        ? ` (last heartbeat ${liveness.unhealthy.lastHeartbeatAt})`
+        : "";
+    reason = orphaned
+      ? `engine heartbeat is stale and its process is gone${since}; the run is orphaned — resume it with \`smithers supervise -r ${run.runId}\``
+      : `engine heartbeat is stale${since}, but its process may still be alive; re-check before resuming (see \`smithers why\`)`;
+  } else if (liveness?.unhealthy) {
+    // Still live, but degraded (an unreachable sandbox, an overdue timer). Keep
+    // the verdict — the run is genuinely in that state — and name the symptom.
+    reason = `${reason}; unhealthy: ${liveness.unhealthy.kind}`;
+  }
+
   // Bottleneck: the few nodes gating progress right now.
   /** @type {RunStatusBottleneckEntry[]} */
   let gating = [];
@@ -535,6 +561,9 @@ export function summarizeRunStatus(params) {
           }
         : null,
     ...(startedBy ? { startedBy } : {}),
+    ...(liveness
+      ? { liveness: { state: liveness.state, ...(liveness.unhealthy ? { unhealthy: liveness.unhealthy } : {}) } }
+      : {}),
     startedAtMs: parseNumber(run.startedAtMs),
     finishedAtMs: parseNumber(run.finishedAtMs),
     generatedAtMs: nowMs,
@@ -659,11 +688,15 @@ export async function buildRunStatusSummary(adapter, runId, options = {}) {
   if (!run) {
     throw new SmithersError("RUN_NOT_FOUND", `Run not found: ${runId}`);
   }
-  const [nodes, attempts, lastFrame, forcedBoundaryEvents, ...oneshotControlEventGroups] = await Promise.all([
+  const [nodes, attempts, lastFrame, forcedBoundaryEvents, liveness, ...oneshotControlEventGroups] = await Promise.all([
     adapter.listNodes(runId),
     adapter.listAttemptsForRun(runId),
     adapter.getLastFrame(runId),
     adapter.listEventsByType(runId, "SideEffectBoundaryCrossed"),
+    // Same derivation `ps` uses, so the two commands can never disagree about
+    // whether a run is alive. A liveness probe that throws must not sink the
+    // whole summary — the row-derived half is still worth printing.
+    computeRunStateFromRow(adapter, run, options.nowMs != null ? { now: options.nowMs } : {}).catch(() => null),
     ...ONESHOT_CONTROL_EVENT_TYPES.map((type) => adapter.listEventsByType(runId, type)),
   ]);
   const summary = summarizeRunStatus({
@@ -671,6 +704,7 @@ export async function buildRunStatusSummary(adapter, runId, options = {}) {
     nodes: nodes ?? [],
     attempts: attempts ?? [],
     deps: parseFrameDependsOn(lastFrame?.xmlJson),
+    liveness,
     ...(options.nowMs != null ? { nowMs: options.nowMs } : {}),
     ...(options.recentWindowMs != null ? { recentWindowMs: options.recentWindowMs } : {}),
   });
@@ -703,6 +737,15 @@ export function renderRunStatusHuman(summary) {
   lines.push(
     `${label("Run")}${summary.runId} · ${summary.workflow} · ${summary.status}${elapsed ? ` · ${elapsed}` : ""}`,
   );
+  // Only worth a line when it disagrees with the row status; a healthy run
+  // printing "Health running" is noise.
+  if (summary.liveness && (summary.liveness.state !== summary.status || summary.liveness.unhealthy)) {
+    const kind = summary.liveness.unhealthy ? ` · ${summary.liveness.unhealthy.kind}` : "";
+    const since = summary.liveness.unhealthy?.lastHeartbeatAt
+      ? ` · last heartbeat ${summary.liveness.unhealthy.lastHeartbeatAt}`
+      : "";
+    lines.push(`${label("Health")}${summary.liveness.state}${kind}${since}`);
+  }
   if (summary.startedBy?.harness || summary.startedBy?.sessionId) {
     lines.push(
       `${label("Started")}${summary.startedBy.harness ?? "unknown"}${summary.startedBy.sessionId ? ` · ${summary.startedBy.sessionId}` : ""}`,
@@ -772,9 +815,13 @@ export function runStatusCtaCommands(summary) {
     summary.attention ||
     summary.verdict === "blocked" ||
     summary.verdict === "stalled" ||
+    summary.verdict === "orphaned" ||
     summary.verdict === "failed"
   ) {
     commands.push({ command: `why ${summary.runId}`, description: "Explain blockers in depth" });
+  }
+  if (summary.verdict === "orphaned") {
+    commands.push({ command: `supervise -r ${summary.runId}`, description: "Auto-resume the orphaned run" });
   }
   if (summary.verdict === "waiting-quota") {
     commands.push({ command: "usage", description: "Check account quota usage" });

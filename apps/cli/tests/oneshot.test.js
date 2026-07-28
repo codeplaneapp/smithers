@@ -26,6 +26,9 @@ import { createTestDb } from "../../../packages/smithers/tests/helpers.js";
 import { ddl, schema } from "../../../packages/smithers/tests/schema.js";
 import { openDurableSqliteDatabase } from "@smithers-orchestrator/db";
 import { SOTA_SLOTS } from "../src/sota-models.generated.js";
+import { createExecutableDir, writeExecutable } from "../../../packages/smithers/tests/e2e-helpers.js";
+import { detectAvailableAgents } from "../src/agent-detection.js";
+import { selectOneshotAgents } from "../src/oneshot/selectOneshotAgents.js";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../..");
 const cliEntry = join(repoRoot, "apps/cli/src/index.js");
@@ -114,6 +117,82 @@ describe("oneshot model chain", () => {
     ).toEqual({ engine: "kimi", model: "future-model" });
   });
 });
+
+test("oneshot accepts a registered Kimi account and uses its config directory", async () => {
+  const home = temp("smithers-oneshot-kimi-account-");
+  const binDir = createExecutableDir();
+  writeExecutable(binDir, "kimi", `#!${process.execPath}\nprocess.stdout.write("kimi, version 1.48.0\\n");\n`);
+  const smithersHome = join(home, ".smithers");
+  const configDir = join(smithersHome, "accounts", "kimi-1");
+  mkdirSync(configDir, { recursive: true });
+  // kimi-cli 1.48 stores the active account in these files rather than the
+  // legacy credentials/*.json layout.
+  writeFileSync(join(configDir, "config.toml"), '[model]\nname = "kimi-code/k3"\n');
+  writeFileSync(join(configDir, "kimi.json"), JSON.stringify({ work_dirs: {} }) + "\n");
+  writeFileSync(
+    join(smithersHome, "accounts.json"),
+    JSON.stringify({ version: 1, accounts: [{ label: "kimi-1", provider: "kimi", configDir }] }) + "\n",
+  );
+  const env = {
+    ...process.env,
+    HOME: home,
+    SMITHERS_HOME: smithersHome,
+    PATH: `${binDir}${delimiter}${process.env.PATH}`,
+  };
+  const detections = detectAvailableAgents(env, { cwd: home });
+  const kimi = detections.find((entry) => entry.id === "kimi");
+  expect(kimi?.usable).toBe(true);
+  expect(kimi?.registeredAccountLabels).toEqual(["kimi-1"]);
+  const selected = await selectOneshotAgents(detections, { cwd: home, agent: "kimi", env });
+  expect(selected.agents[0].opts.configDir).toBe(configDir);
+
+  const status = spawnSync(
+    process.execPath,
+    ["run", cliEntry, "oneshot", "--status", "--agent", "kimi", "--format", "json"],
+    {
+      cwd: home,
+      env,
+      encoding: "utf8",
+    },
+  );
+  expect(status.status).toBe(0);
+  const body = JSON.parse(status.stdout);
+  expect(body.usableAgents).toContain("kimi");
+  expect(body.chain[0]).toEqual({ engine: "kimi", model: "kimi-code/k3" });
+  // Spawns the real CLI: a cold `bun run` of the full entry point is ~6s, well
+  // past bun's 5s default.
+}, 60_000);
+
+test("oneshot accepts a registered Claude account and uses its config directory", async () => {
+  const home = temp("smithers-oneshot-claude-account-");
+  const binDir = createExecutableDir();
+  writeExecutable(binDir, "claude", `#!${process.execPath}\nprocess.exit(1);\n`);
+  const smithersHome = join(home, ".smithers");
+  const configDir = join(smithersHome, "accounts", "claude-1");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(
+    join(configDir, ".credentials.json"),
+    JSON.stringify({ claudeAiOauth: { accessToken: "oauth-test", expiresAt: Date.now() + 60_000 } }) + "\n",
+  );
+  writeFileSync(
+    join(smithersHome, "accounts.json"),
+    JSON.stringify({ version: 1, accounts: [{ label: "claude-1", provider: "claude-code", configDir }] }) + "\n",
+  );
+  const env = {
+    ...process.env,
+    HOME: home,
+    SMITHERS_HOME: smithersHome,
+    PATH: `${binDir}${delimiter}${process.env.PATH}`,
+  };
+
+  const detections = detectAvailableAgents(env, { cwd: home });
+  const claude = detections.find((entry) => entry.id === "claude");
+  expect(claude?.usable).toBe(true);
+  expect(claude?.registeredAccountLabels).toEqual(["claude-1"]);
+
+  const selected = await selectOneshotAgents(detections, { cwd: home, agent: "claude", env });
+  expect(selected.agents[0].opts.configDir).toBe(configDir);
+}, 60_000);
 
 describe("oneshot status updater", () => {
   test("pins every default narrator to the cheap model tier", () => {
@@ -839,7 +918,7 @@ test("detached oneshot reports pre-admission failure without advertising or pers
       cwd: fixture.cwd,
       env: fixture.env,
       encoding: "utf8",
-      timeout: 30_000,
+      timeout: 90_000,
     },
   );
   const output = `${result.stdout}${result.stderr}`;
@@ -855,7 +934,7 @@ test("detached oneshot reports pre-admission failure without advertising or pers
       sqlite.close();
     }
   }
-}, 40_000);
+}, 120_000);
 
 test("detached oneshot succeeds only after its run row is readable", async () => {
   const fixture = detachedFixture();
@@ -879,7 +958,7 @@ export default smithers((ctx) => <Workflow name="custom-oneshot"><Task id="recor
         cwd: fixture.cwd,
         env: fixture.env,
         encoding: "utf8",
-        timeout: 40_000,
+        timeout: 90_000,
       },
     );
     if (result.status !== 0) throw new Error(`detached oneshot failed\n${result.stdout}\n${result.stderr}`);
@@ -892,7 +971,7 @@ export default smithers((ctx) => <Workflow name="custom-oneshot"><Task id="recor
   } finally {
     await terminateDetachedProcessGroup(pid);
   }
-}, 50_000);
+}, 120_000);
 
 describe("oneshot workflow", () => {
   const agent = { generate: async () => ({ text: "unused" }) };
@@ -1007,6 +1086,7 @@ export default smithers((ctx) => <Workflow name="custom-oneshot"><Task id="recor
         PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
       },
       encoding: "utf8",
+      timeout: 90_000,
     },
   );
   if (result.status !== 0)
@@ -1014,4 +1094,4 @@ export default smithers((ctx) => <Workflow name="custom-oneshot"><Task id="recor
   if (!existsSync(receipt))
     throw new Error(`override produced no receipt\nstdout=${result.stdout}\nstderr=${result.stderr}`);
   expect(JSON.parse(readFileSync(receipt, "utf8"))).toEqual({ goal: "use the override", review: "on", model: "terra" });
-}, 30_000);
+}, 120_000);

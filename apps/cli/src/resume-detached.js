@@ -2,12 +2,45 @@ import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildBuiltinRelaunch } from "./resume-target.js";
 import { resolveDetachedRunLogFile } from "./resolveDetachedRunLogFile.js";
 
 /** @typedef {import("./SupervisorOptions.ts").SupervisorSpawnClaim} SupervisorSpawnClaim */
+/** @typedef {import("./ResumeTarget.ts").ResumeTarget} ResumeTarget */
 
 /**
- * Resume an existing run by launching `smithers up ... --resume` as a detached process.
+ * Normalize the legacy `(workflowPath, ...)` call shape into a ResumeTarget.
+ *
+ * @param {string | ResumeTarget} target
+ * @returns {ResumeTarget}
+ */
+function normalizeResumeTarget(target) {
+  if (typeof target !== "string") return target;
+  return { kind: "workflow-file", workflowPath: target, cwd: dirname(resolve(target)) };
+}
+
+/**
+ * Argv (after the CLI entry path) that resumes `runId` for a given target.
+ *
+ * A workflow-file run resumes through `up <file> --resume`. A built-in run has
+ * no file, so it re-runs its own recorded subcommand with the run-identity
+ * flags appended — `smithers oneshot <goal…> --run-id <id> --resume --force`.
+ * Both end up in the same engine resume path; only the way the workflow object
+ * is reconstructed differs.
+ *
+ * @param {ResumeTarget} target
+ * @param {string} runId
+ * @returns {string[]}
+ */
+export function buildResumeArgs(target, runId) {
+  if (target.kind === "builtin") {
+    return buildBuiltinRelaunch(target, { runId, resume: true }).args;
+  }
+  return ["up", target.workflowPath, "--resume", "--run-id", runId, "-d", "--force"];
+}
+
+/**
+ * Resume an existing run by launching it as a detached process.
  * Returns the spawned PID when available.
  *
  * The child's stdout/stderr append to the run's managed detached log
@@ -17,14 +50,15 @@ import { resolveDetachedRunLogFile } from "./resolveDetachedRunLogFile.js";
  * leaves it in place. If the log file cannot be opened the spawn still
  * proceeds with discarded output, since resuming beats diagnosability.
  *
- * @param {string} workflowPath
+ * @param {string | ResumeTarget} targetOrWorkflowPath
  * @param {string} runId
  * @param {SupervisorSpawnClaim} [claim]
  * @returns {number | null}
  */
-export function resumeRunDetached(workflowPath, runId, claim) {
+export function resumeRunDetached(targetOrWorkflowPath, runId, claim) {
+  const target = normalizeResumeTarget(targetOrWorkflowPath);
   const cliPath = fileURLToPath(new URL("./index.js", import.meta.url));
-  const args = [cliPath, "up", workflowPath, "--resume", "--run-id", runId, "-d", "--force"];
+  const args = [cliPath, ...buildResumeArgs(target, runId)];
   if (claim) {
     args.push("--resume-claim-owner", claim.claimOwnerId);
     args.push("--resume-claim-heartbeat", String(claim.claimHeartbeatAtMs));
@@ -35,7 +69,7 @@ export function resumeRunDetached(workflowPath, runId, claim) {
       args.push("--resume-restore-heartbeat", String(claim.restoreHeartbeatAtMs));
     }
   }
-  const cwd = dirname(resolve(workflowPath));
+  const cwd = target.cwd;
   /** @type {number | null} */
   let logFd = null;
   try {
@@ -66,10 +100,10 @@ export function resumeRunDetached(workflowPath, runId, claim) {
  * Mirrors the resolution inside {@link resumeRunDetached} so callers (the
  * supervisor's give-up path) can point operators at the right file.
  *
- * @param {string} workflowPath
+ * @param {string | ResumeTarget} targetOrWorkflowPath
  * @param {string} runId
  * @returns {string}
  */
-export function resumeRunDetachedLogFile(workflowPath, runId) {
-  return resolveDetachedRunLogFile(runId, { cwd: dirname(resolve(workflowPath)) });
+export function resumeRunDetachedLogFile(targetOrWorkflowPath, runId) {
+  return resolveDetachedRunLogFile(runId, { cwd: normalizeResumeTarget(targetOrWorkflowPath).cwd });
 }

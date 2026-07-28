@@ -135,7 +135,7 @@ async function waitForRunStatus(dbPath, runId, status, timeoutMs = 10_000) {
 }
 
 /**
- * @param {"SIGINT" | "SIGTERM"} sig
+ * @param {"SIGINT" | "SIGTERM" | "SIGHUP"} sig
  */
 async function runSignalScenario(sig) {
   const repo = createTempRepo();
@@ -194,6 +194,7 @@ async function runSignalScenario(sig) {
     } finally {
       db.close();
     }
+    return await stderrPromise;
   } finally {
     try {
       proc.kill("SIGKILL");
@@ -213,6 +214,24 @@ testIfDeps(
   "SIGTERM mid-run closes sqlite cleanly and leaves the db readable",
   async () => {
     await runSignalScenario("SIGTERM");
+  },
+  60_000,
+);
+
+// Regression: four detached oneshot engines died ~10 minutes in leaving
+// `engine-heartbeat-stale` and NO error in the run log — the last lines were
+// ordinary agent activity, so an operator could not tell "killed" from "hung".
+// SIGHUP was the unhandled case: Node's default action for it is silent
+// immediate death. It must now be trapped, logged, and shut down gracefully
+// like every other catchable termination signal.
+testIfDeps(
+  "SIGHUP mid-run is trapped, logged, and shuts down gracefully",
+  async () => {
+    const stderr = await runSignalScenario("SIGHUP");
+    // The diagnostic must name the signal, so a detached run log distinguishes
+    // a kill from a hang.
+    expect(stderr).toContain("received SIGHUP");
+    expect(stderr).toContain("this was a signal, not a hang");
   },
   60_000,
 );

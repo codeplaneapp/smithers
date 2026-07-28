@@ -74,7 +74,7 @@ function aggregatePanel(votes: ReadonlyArray<{ id: string; vote: EvalVerdict }>)
 }
 
 const verifyShape = z.object({
-  kind: z.enum(["contains", "equals", "graph", "sql", "query", "build", "ui-functional", "side-effect-marking", "judge"]).default("contains"),
+  kind: z.enum(["contains", "equals", "graph", "workflow-files", "sql", "query", "build", "ui-functional", "side-effect-marking", "judge"]).default("contains"),
   must: z.array(z.string()).default([]),
   mustNot: z.array(z.string()).default([]),
   answer: z.string().nullable().default(null),
@@ -116,6 +116,14 @@ const DOCS_PREAMBLE =
   "Produce your ENTIRE answer only in the structured `artifact` field. Reading docs/source is fine.";
 
 function artifactContract(kind: VerifyKind): string {
+  if (kind === "workflow-files") {
+    return [
+      "Deliverable: put the COMPLETE change set in `artifact` as one valid JSON object (artifactKind: file-bundle-json).",
+      "Each key must be a repository-relative file path and each value that file's complete contents.",
+      "The workflow must be self-contained: construct any agent inline and do not import project-relative agents or prompts.",
+      "Do not wrap the JSON in a code fence or add prose inside `artifact`.",
+    ].join("\n");
+  }
   if (kind === "graph") {
     return [
       "Deliverable: put a COMPLETE, self-contained Smithers workflow file in `artifact` (artifactKind: workflow-tsx).",

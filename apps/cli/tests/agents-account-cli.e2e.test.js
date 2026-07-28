@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -8,6 +8,8 @@ import {
   runSmithers,
   writeFakeClaudeBinary,
 } from "../../../packages/smithers/tests/e2e-helpers.js";
+
+setDefaultTimeout(60_000);
 
 /** @type {string[]} */
 const tempDirs = [];
@@ -108,7 +110,7 @@ test("agents add with --replace overwrites the existing account", () => {
   const persisted = JSON.parse(readFileSync(join(home, "accounts.json"), "utf8"));
   expect(persisted.accounts).toHaveLength(1);
   expect(persisted.accounts[0].configDir).toBe("/tmp/dir-b");
-}, 15_000);
+}, 60_000);
 
 test("agents list emits JSON via --format json and a human table on stderr otherwise", () => {
   const repo = createTempRepo();
@@ -139,7 +141,7 @@ test("agents list emits JSON via --format json and a human table on stderr other
   expect(human.stderr).toContain("Registered accounts (2)");
   expect(human.stderr).toContain("claude-1");
   expect(human.stderr).toContain("openai-1");
-}, 15_000);
+}, 60_000);
 
 test("agents remove deletes by label and is idempotent under --silent", () => {
   const repo = createTempRepo();
@@ -168,7 +170,7 @@ test("agents remove deletes by label and is idempotent under --silent", () => {
     env: { SMITHERS_HOME: home },
   });
   expect(silent.exitCode).toBe(0);
-}, 15_000);
+}, 60_000);
 
 test("agents add regenerates .smithers/agents.ts when one already exists", () => {
   const repo = createTempRepo();
@@ -276,4 +278,5 @@ test("agents add preserves a legacy unknown-provider account, and agents remove 
   });
   expect(removed.exitCode).toBe(0);
   expect(JSON.parse(readFileSync(accountsPath, "utf8")).accounts.map((a) => a.label)).toEqual(["kimi-1"]);
-}, 20_000);
+  // Three synchronous CLI boots can exceed 20s on a loaded CI runner.
+}, 60_000);

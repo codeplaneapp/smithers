@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
 import { Effect } from "effect";
 import { toSmithersError } from "@smithers-orchestrator/errors/toSmithersError";
 import { trackEvent } from "@smithers-orchestrator/observability/metrics";
@@ -10,7 +9,9 @@ import { SmithersError } from "@smithers-orchestrator/errors";
 import { isTerminalClaudeMirrorRunStatus } from "./claude-mirror/isTerminalClaudeMirrorRunStatus.js";
 import { findAndOpenDb } from "./find-db.js";
 import { resumeRunDetached, resumeRunDetachedLogFile } from "./resume-detached.js";
+import { describeResumeTarget, resolveResumeTarget } from "./resume-target.js";
 /** @typedef {import("./RunAutoResumeSkipReason.ts").RunAutoResumeSkipReason} RunAutoResumeSkipReason */
+/** @typedef {import("./ResumeTarget.ts").ResumeTarget} ResumeTarget */
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./SupervisorOptions.ts").SupervisorOptions} SupervisorOptions */
 /** @typedef {import("./SupervisorPollSummary.ts").SupervisorPollSummary} SupervisorPollSummary */
@@ -158,12 +159,33 @@ function normalizeSupervisorOptions(options) {
   };
 }
 /**
- * @param {string | null} workflowPath
- * @returns {string | null}
+ * Resolve how to relaunch a run, falling back to its built-in resume
+ * descriptor when no workflow file was recorded.
+ *
+ * The stale-run query returns only a few columns, and the timer/approval/quota
+ * queries each return a different row shape, so `config_json` may not be on the
+ * record in hand. Rather than widen four SQL projections, fetch the run row
+ * lazily — and only on the path that would otherwise skip, so a normal
+ * file-backed resume costs no extra read.
+ *
+ * @param {NormalizedSupervisorOptions} options
+ * @param {{ runId: string; workflowPath?: string | null; configJson?: unknown }} run
+ * @returns {Effect.Effect<ResumeTarget | null, never>}
  */
-function resolveWorkflowPath(workflowPath) {
-  if (!workflowPath) return null;
-  return isAbsolute(workflowPath) ? workflowPath : resolve(process.cwd(), workflowPath);
+function resolveResumeTargetEffect(options, run) {
+  return Effect.gen(function* () {
+    const direct = resolveResumeTarget(run, { workflowExists: options.deps.workflowExists });
+    if (direct) return direct;
+    if (run.configJson !== undefined) return null;
+    const full = yield* Effect.promise(() => Promise.resolve(options.adapter.getRun(run.runId))).pipe(
+      Effect.catchAllDefect(() => Effect.succeed(null)),
+    );
+    if (!full) return null;
+    return resolveResumeTarget(
+      { runId: run.runId, workflowPath: run.workflowPath ?? full.workflowPath, configJson: full.configJson },
+      { workflowExists: options.deps.workflowExists },
+    );
+  });
 }
 /**
  * @param {string | null} [metaJson]
@@ -296,11 +318,11 @@ function emitSkipEventEffect(options, runId, reason) {
  * @param {{ runId: string; runtimeOwnerId?: string | null; heartbeatAtMs?: number | null }} run
  * @param {number} staleBeforeMs
  * @param {number} priorAttempts
- * @param {string} workflowPath
+ * @param {ResumeTarget} target
  * @param {{ expectedStatus?: string; requireStale: boolean }} claimOptions
  * @returns {Effect.Effect<"skipped", never>}
  */
-function giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorAttempts, workflowPath, claimOptions) {
+function giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorAttempts, target, claimOptions) {
   return Effect.gen(function* () {
     const claimOwnerId = buildSupervisorClaimOwnerId(options.supervisorId, priorAttempts + 1);
     const claimHeartbeatAtMs = options.deps.now();
@@ -325,7 +347,11 @@ function giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorAttempts,
     if (!claimed) {
       return "skipped";
     }
-    const logFile = resumeRunDetachedLogFile(workflowPath, run.runId);
+    const logFile = resumeRunDetachedLogFile(target, run.runId);
+    const manualResumeCommand =
+      target.kind === "workflow-file"
+        ? `smithers up ${target.workflowPath} --resume --run-id ${run.runId} --force`
+        : `smithers ${target.command} ${target.args.join(" ")} --run-id ${run.runId} --resume --force`;
     const logTail = options.deps.readDetachedLogTail(logFile);
     const errorInfo = {
       name: "SmithersError",
@@ -333,7 +359,7 @@ function giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorAttempts,
       message:
         `Auto-resume failed ${priorAttempts} consecutive times: each detached resume died before the engine activated. ` +
         `Check the resume log at ${logFile}, fix the startup failure, then resume manually: ` +
-        `smithers up ${workflowPath} --resume --run-id ${run.runId} --force`,
+        manualResumeCommand,
       details: {
         attempts: priorAttempts,
         lastClaimOwnerId: run.runtimeOwnerId ?? null,
@@ -384,7 +410,6 @@ function giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorAttempts,
  * @returns {Effect.Effect<"resumed" | "would-resume" | "skipped", never>}
  */
 function processCandidateEffect(options, staleRun, staleBeforeMs) {
-  const workflowPath = resolveWorkflowPath(staleRun.workflowPath);
   const now = options.deps.now();
   const staleDurationMs =
     typeof staleRun.heartbeatAtMs === "number" ? Math.max(0, now - staleRun.heartbeatAtMs) : options.staleThresholdMs;
@@ -395,9 +420,10 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
   };
   return Effect.withLogSpan("supervisor:resume")(
     Effect.gen(function* () {
-      if (!workflowPath || !options.deps.workflowExists(workflowPath)) {
+      const target = yield* resolveResumeTargetEffect(options, staleRun);
+      if (!target) {
         yield* Effect.logWarning(
-          `Skipping run ${staleRun.runId}: workflow file not found at ${workflowPath ?? "(missing path)"}`,
+          `Skipping run ${staleRun.runId}: no way to relaunch it (no workflow file at ${staleRun.workflowPath ?? "(missing path)"} and no built-in resume descriptor recorded)`,
         );
         yield* emitSkipEventEffect(options, staleRun.runId, "missing-workflow");
         return "skipped";
@@ -439,7 +465,7 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
           );
           return "skipped";
         }
-        return yield* giveUpOnFailedResumesEffect(options, staleRun, staleBeforeMs, priorResumeAttempts, workflowPath, {
+        return yield* giveUpOnFailedResumesEffect(options, staleRun, staleBeforeMs, priorResumeAttempts, target, {
           requireStale: true,
         });
       }
@@ -474,7 +500,7 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
       }
       const spawnResult = yield* Effect.try({
         try: () =>
-          options.deps.spawnResumeDetached(workflowPath, staleRun.runId, {
+          options.deps.spawnResumeDetached(target, staleRun.runId, {
             claimOwnerId,
             claimHeartbeatAtMs,
             restoreRuntimeOwnerId: staleRun.runtimeOwnerId ?? null,
@@ -483,7 +509,7 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
         catch: (cause) =>
           toSmithersError(cause, `resume stale run ${staleRun.runId}`, {
             code: "PROCESS_SPAWN_FAILED",
-            details: { runId: staleRun.runId, workflowPath },
+            details: { runId: staleRun.runId, resumeTarget: describeResumeTarget(target) },
           }),
       }).pipe(Effect.either);
       if (spawnResult._tag === "Left") {
@@ -533,7 +559,6 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
  * @returns {Effect.Effect<"resumed" | "would-resume" | "skipped", never>}
  */
 function processTimerCandidateEffect(options, run, staleBeforeMs) {
-  const workflowPath = resolveWorkflowPath(run.workflowPath ?? null);
   const runAnnotations = {
     runId: run.runId,
     status: run.status ?? null,
@@ -541,9 +566,10 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
   };
   return Effect.withLogSpan("supervisor:timer-resume")(
     Effect.gen(function* () {
-      if (!workflowPath || !options.deps.workflowExists(workflowPath)) {
+      const target = yield* resolveResumeTargetEffect(options, run);
+      if (!target) {
         yield* Effect.logWarning(
-          `Skipping timer run ${run.runId}: workflow file not found at ${workflowPath ?? "(missing path)"}`,
+          `Skipping timer run ${run.runId}: no way to relaunch it (no workflow file at ${run.workflowPath ?? "(missing path)"} and no built-in resume descriptor recorded)`,
         );
         yield* emitSkipEventEffect(options, run.runId, "missing-workflow");
         return "skipped";
@@ -562,7 +588,7 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
           );
           return "skipped";
         }
-        return yield* giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorResumeAttempts, workflowPath, {
+        return yield* giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorResumeAttempts, target, {
           expectedStatus: "waiting-timer",
           requireStale: true,
         });
@@ -598,7 +624,7 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
       }
       const spawnResult = yield* Effect.try({
         try: () =>
-          options.deps.spawnResumeDetached(workflowPath, run.runId, {
+          options.deps.spawnResumeDetached(target, run.runId, {
             claimOwnerId,
             claimHeartbeatAtMs,
             restoreRuntimeOwnerId: run.runtimeOwnerId ?? null,
@@ -607,7 +633,7 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
         catch: (cause) =>
           toSmithersError(cause, `resume timer run ${run.runId}`, {
             code: "PROCESS_SPAWN_FAILED",
-            details: { runId: run.runId, workflowPath },
+            details: { runId: run.runId, resumeTarget: describeResumeTarget(target) },
           }),
       }).pipe(Effect.either);
       if (spawnResult._tag === "Left") {
@@ -662,7 +688,6 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
  * @returns {Effect.Effect<"resumed" | "would-resume" | "skipped", never>}
  */
 function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
-  const workflowPath = resolveWorkflowPath(run.workflowPath ?? null);
   const runAnnotations = {
     runId: run.runId,
     status: run.status ?? null,
@@ -670,9 +695,10 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
   };
   return Effect.withLogSpan("supervisor:approval-decided-resume")(
     Effect.gen(function* () {
-      if (!workflowPath || !options.deps.workflowExists(workflowPath)) {
+      const target = yield* resolveResumeTargetEffect(options, run);
+      if (!target) {
         yield* Effect.logWarning(
-          `Skipping approval-decided run ${run.runId}: workflow file not found at ${workflowPath ?? "(missing path)"}`,
+          `Skipping approval-decided run ${run.runId}: no way to relaunch it (no workflow file at ${run.workflowPath ?? "(missing path)"} and no built-in resume descriptor recorded)`,
         );
         yield* emitSkipEventEffect(options, run.runId, "missing-workflow");
         return "skipped";
@@ -693,7 +719,7 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
           );
           return "skipped";
         }
-        return yield* giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorResumeAttempts, workflowPath, {
+        return yield* giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorResumeAttempts, target, {
           expectedStatus: "waiting-event",
           requireStale: true,
         });
@@ -729,7 +755,7 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
       }
       const spawnResult = yield* Effect.try({
         try: () =>
-          options.deps.spawnResumeDetached(workflowPath, run.runId, {
+          options.deps.spawnResumeDetached(target, run.runId, {
             claimOwnerId,
             claimHeartbeatAtMs,
             restoreRuntimeOwnerId: run.runtimeOwnerId ?? null,
@@ -738,7 +764,7 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
         catch: (cause) =>
           toSmithersError(cause, `resume approval-decided run ${run.runId}`, {
             code: "PROCESS_SPAWN_FAILED",
-            details: { runId: run.runId, workflowPath },
+            details: { runId: run.runId, resumeTarget: describeResumeTarget(target) },
           }),
       }).pipe(Effect.either);
       if (spawnResult._tag === "Left") {
@@ -791,10 +817,10 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
  * @returns {Effect.Effect<"resumed" | "would-resume" | "skipped", never>}
  */
 function processQuotaCandidateEffect(options, run, staleBeforeMs) {
-  const workflowPath = resolveWorkflowPath(run.workflowPath ?? null);
   return Effect.withLogSpan("supervisor:quota-resume")(
     Effect.gen(function* () {
-      if (!workflowPath || !options.deps.workflowExists(workflowPath)) {
+      const target = yield* resolveResumeTargetEffect(options, run);
+      if (!target) {
         yield* emitSkipEventEffect(options, run.runId, "missing-workflow");
         return "skipped";
       }
@@ -811,7 +837,7 @@ function processQuotaCandidateEffect(options, run, staleBeforeMs) {
           );
           return "skipped";
         }
-        return yield* giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorResumeAttempts, workflowPath, {
+        return yield* giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorResumeAttempts, target, {
           expectedStatus: "waiting-quota",
           requireStale: false,
         });
@@ -846,7 +872,7 @@ function processQuotaCandidateEffect(options, run, staleBeforeMs) {
       }
       const spawnResult = yield* Effect.try({
         try: () =>
-          options.deps.spawnResumeDetached(workflowPath, run.runId, {
+          options.deps.spawnResumeDetached(target, run.runId, {
             claimOwnerId,
             claimHeartbeatAtMs,
             restoreRuntimeOwnerId: run.runtimeOwnerId ?? null,
@@ -855,7 +881,7 @@ function processQuotaCandidateEffect(options, run, staleBeforeMs) {
         catch: (cause) =>
           toSmithersError(cause, `resume quota run ${run.runId}`, {
             code: "PROCESS_SPAWN_FAILED",
-            details: { runId: run.runId, workflowPath },
+            details: { runId: run.runId, resumeTarget: describeResumeTarget(target) },
           }),
       }).pipe(Effect.either);
       if (spawnResult._tag === "Left") {

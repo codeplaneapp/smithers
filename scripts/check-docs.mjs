@@ -674,7 +674,9 @@ function checkTimerDocsMatchWakeRuntime() {
     [CLI_SUPERVISOR_SOURCE, '.listRunsEffect(500, "waiting-timer")'],
     [CLI_SUPERVISOR_SOURCE, "runHasDueTimerEffect(options, run.runId, pollStartedAtMs)"],
     [CLI_SUPERVISOR_SOURCE, 'expectedStatus: "waiting-timer"'],
-    [CLI_SUPERVISOR_SOURCE, "spawnResumeDetached(workflowPath, run.runId"],
+    // Resume now goes through a resolved ResumeTarget, so built-in workflow
+    // runs (oneshot) — which record no workflow file — can be resumed too.
+    [CLI_SUPERVISOR_SOURCE, "spawnResumeDetached(target, run.runId"],
   ];
   const forbidden = [
     [TIMER_COMPONENT_DOC, "Automatic Gateway wake sweeps for due timers landed after"],

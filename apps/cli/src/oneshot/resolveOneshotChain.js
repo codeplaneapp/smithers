@@ -1,4 +1,5 @@
 import { SmithersError } from "@smithers-orchestrator/errors";
+import { describeUnavailableAgent } from "../agent-detection.js";
 import { SOTA_SLOTS } from "../sota-models.generated.js";
 import { oneshotCodexPaused } from "./oneshotCodexPaused.js";
 
@@ -57,11 +58,15 @@ export function resolveOneshotChain(detections, options = {}) {
         `Cannot infer an agent engine for model "${requestedModel}". Pass --agent with this canonical model id.`,
       );
   }
-  if (requestedEngine && !usable.has(requestedEngine))
+  if (requestedEngine && !usable.has(requestedEngine)) {
+    const detection = detections.find((item) => item.id === requestedEngine);
     throw new SmithersError(
       "NO_USABLE_AGENTS",
-      `Requested oneshot agent "${options.agent ?? requestedEngine}" is unavailable.`,
+      `Requested oneshot agent "${options.agent ?? requestedEngine}" is unavailable. ${
+        detection ? describeUnavailableAgent(detection) : "Run `smithers agents add` to register it."
+      }`,
     );
+  }
   const claudeEngine = usable.has("claude") ? "claude" : usable.has("opencode") ? "opencode" : null;
   // Opus leads: Claude Opus 5 is the default implementer (registry v7), with
   // Codex Sol, Kimi K3, and Fable as availability fallbacks in that order.

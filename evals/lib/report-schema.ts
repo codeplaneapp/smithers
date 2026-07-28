@@ -38,6 +38,7 @@ export const candidateReport = z.object({
   artifactKind: z
     .enum([
       "workflow-tsx",
+      "file-bundle-json",
       "jsonl-cases",
       "scorer-ts",
       "agents-ts",
@@ -82,7 +83,7 @@ export const evalVerdict = z.object({
   score: z.number().min(0).max(1).describe("Graded correctness 0-1 (1 = fully correct)."),
   reason: z.string().describe("Why it passed or failed."),
   method: z
-    .enum(["contains", "equals", "graph", "sql", "query", "build", "ui-functional", "side-effect-marking", "judge", "judge-panel"])
+    .enum(["contains", "equals", "graph", "workflow-files", "sql", "query", "build", "ui-functional", "side-effect-marking", "judge", "judge-panel"])
     .describe('How verification was performed. "judge-panel" is the majority-of-3 aggregate; "judge" is a single panelist vote.'),
   checks: z.array(verdictCheck).default([]).describe("Per-check breakdown."),
   // ui-functional only: what actually rendered when the candidate UI was booted

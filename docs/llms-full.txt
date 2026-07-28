@@ -8126,6 +8126,10 @@ loop's own scoped node id and iteration:
 
 ## 4. Workflow tests must render the real graph via `renderWorkflow`, not a hand-built one
 
+Authoring a workflow and writing its testing-library test are one indivisible
+change. A workflow delivered without that test is unfinished work, not a
+follow-up opportunity.
+
 Import the actual workflow module and drive it through
 `renderWorkflow`
 (`smithers-orchestrator/testing`):
@@ -8143,6 +8147,11 @@ typo, a `NESTED_LOOP`, or a reserved-column collision: it validates a stand-in
 that merely resembles the workflow. `renderWorkflow` exercises the same
 extraction path `bunx smithers-orchestrator graph`/`bunx smithers-orchestrator up` do, so a
 graph-level defect fails the test the same way it fails a real run.
+
+Assert real graph behavior: exact node ids and dependency order, representative
+valid and malformed values through each task's `outputSchema`, and branch or
+loop behavior under the outputs that drive it. A truthiness smoke test such as
+`expect(graph).toBeTruthy()` does not meet this rule.
 
 ## 5. New `.smithers` test files must be registered in `.smithers/package.json`
 
@@ -9223,6 +9232,28 @@ type TimerProps = {
   label?: string;
   meta?: Record<string, unknown>;
   key?: string;
+};
+
+type MonitorCondition =
+  | "healthy" | "stalled" | "wedged-node" | "runaway-loop"
+  | "awaiting-human" | "failing" | "unknown";
+
+type MonitorProps = {
+  id?: string;                      // id prefix for generated nodes; default "monitor"
+  watchRunId: string;               // the run this monitor watches
+  agent: AgentLike | AgentLike[];   // samples the watched run and classifies its health
+  healthOutput: OutputTarget;       // schema must carry `condition` + `runStatus`
+  actionOutput?: OutputTarget;      // handler tasks write here; defaults to healthOutput
+  healAgent?: AgentLike | AgentLike[];
+  intervalMs?: number;              // heartbeat spacing; default 60000
+  maxChecks?: number;               // heartbeats before the monitor stops; default 120
+  stallBeats?: number;              // beats without progress before `stalled`; default 3
+  autoHeal?: MonitorCondition[];    // healed without a human; default ["stalled", "wedged-node"]
+  handlers?: Partial<Record<MonitorCondition, React.ReactElement | null>>;
+  guidance?: string;                // extra doctrine appended to the shipped prompt
+  prompt?: string | React.ReactNode;
+  skipIf?: boolean;
+  children?: string | React.ReactNode;
 };
 
 type SagaStepDef    = { id: string; action: React.ReactElement; compensation: React.ReactElement; label?: string };

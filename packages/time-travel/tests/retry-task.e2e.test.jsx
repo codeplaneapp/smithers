@@ -1,5 +1,5 @@
 /** @jsxImportSource smithers-orchestrator */
-import { describe, expect, setDefaultTimeout, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { retryTask } from "../src/retry-task.js";
 import { runWorkflow as runEngineWorkflow } from "../../engine/src/engine.js";
@@ -14,11 +14,22 @@ import { createTempRepo, pinSqliteBackend, runSmithers } from "../../smithers/te
 
 setDefaultTimeout(120_000);
 
+let engineRootDir;
+beforeAll(async () => {
+  engineRootDir = await mkdtemp(join(tmpdir(), "smithers-retry-task-engine-"));
+});
+afterAll(async () => {
+  if (engineRootDir) {
+    await rm(engineRootDir, { recursive: true, force: true });
+  }
+});
+
 function runWorkflow(workflow, options) {
   // These cases exercise retry persistence, not VCS capture. Keeping their
   // launch root outside the enclosing jj workspace avoids serializing every
   // task on the shared working-copy lock during the repository-wide gate.
-  return runEngineWorkflow(workflow, { ...options, rootDir: tmpdir() });
+  if (!engineRootDir) throw new Error("retry-task engine root was not initialized");
+  return runEngineWorkflow(workflow, { ...options, rootDir: engineRootDir });
 }
 
 /**

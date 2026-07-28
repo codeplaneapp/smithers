@@ -134,6 +134,7 @@ describe("smithers starters command", () => {
     expect(result.exitCode).toBe(0);
     expect(result.json.selected.id).toBe("idea-to-tickets");
     expect(result.json.selected.workflow).toBe("oneshot");
+    expect(result.json.selected.command).toStartWith("bunx smithers-orchestrator oneshot ");
     expect(result.json.starters).toHaveLength(1);
   });
 

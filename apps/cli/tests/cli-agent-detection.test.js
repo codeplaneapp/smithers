@@ -169,7 +169,13 @@ describe("detectAvailableAgents", () => {
     const claude = results.find((r) => r.id === "claude");
     expect(claude.hasApiKeySignal).toBe(false);
     expect(claude.usable).toBe(false);
-    expect(claude.unusableReasons.join(" ")).toContain("missing credentials");
+    // The reason has to be actionable: it must separate "no binary" from "no
+    // credentials", and name what a credential would look like. A bare
+    // "missing credentials" left operators guessing which of the two to fix.
+    const reasons = claude.unusableReasons.join(" ");
+    expect(reasons).toContain("missing `claude` on PATH");
+    expect(reasons).toContain("no registered Claude Code account and not authenticated");
+    expect(reasons).toContain(".credentials.json");
   });
   test("openai api key detected for codex", () => {
     const emptyPathDir = tempHome();
@@ -408,7 +414,11 @@ describe("detectAvailableAgents", () => {
     expect(codex.hasBinary).toBe(true);
     expect(codex.hasApiKeySignal).toBe(false);
     expect(codex.usable).toBe(false);
-    expect(codex.unusableReasons.join(" ")).toContain("missing credentials");
+    // Binary present, credentials absent: say exactly that, and never blame the
+    // binary that is demonstrably installed.
+    const codexReasons = codex.unusableReasons.join(" ");
+    expect(codexReasons).toContain("no registered Codex account and not authenticated");
+    expect(codexReasons).not.toContain("on PATH");
   });
   test("smithers ask does not list Gemini CLI even if old gemini files exist", async () => {
     const home = tempHome();

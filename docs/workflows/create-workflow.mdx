@@ -36,9 +36,14 @@ workflow anyway, say so in the prompt.
 2. **provision**: pull the relevant `llms-*.txt` docs, find the closest `examples/` template, pick components, and **install the worker skills** the new workflow needs (`bunx smithers-orchestrator skills add`).
 3. **design**: produce the concrete graph blueprint (schemas, tasks, JSX shape, prompts to author).
 4. **approve-design**: durable human approval gate (skippable via `review: false`).
-5. **scaffold**: write the workflow `.tsx` and its `.mdx` prompts to `.smithers/`.
-6. **verify**: `bunx smithers-orchestrator graph` the new workflow (load + render without executing); a fix agent edits and retries until it renders cleanly.
+5. **scaffold**: write the workflow `.tsx`, its `.mdx` prompts, and a registered `.smithers/tests/<workflow>.test.tsx` that renders the real workflow through `smithers-orchestrator/testing`.
+6. **verify**: render the workflow with `bunx smithers-orchestrator graph`, run its registered test, and transpile any custom UI; a fix agent edits and retries until every check passes.
 7. **document**: write a skill doc so agents know how to run the new workflow.
+
+The workflow and its test are one indivisible change. The test must assert real
+graph behavior: expected node ids and dependency order, output schemas, and
+branch or loop behavior where present. A truthiness smoke test is rejected, and
+an unregistered test is treated as missing.
 
 ## Inputs
 

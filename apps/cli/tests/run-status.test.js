@@ -591,3 +591,79 @@ describe("quota + frame helpers", () => {
     expect(parseFrameDependsOn("not json").size).toBe(0);
   });
 });
+
+describe("status surfaces liveness, not just the row status", () => {
+  // Regression: `smithers ps` correctly flagged a run `orphaned` with
+  // `unhealthy: { kind: "engine-heartbeat-stale" }`, while `smithers status <id>`
+  // printed "Verdict progressing / running · 14m" for the same run — it read
+  // `dbStatus` and never consulted liveness. The command an operator naturally
+  // reaches for to check run health must agree with `ps`.
+  test("an orphaned run reports verdict `orphaned`, not `progressing`", async () => {
+    const { sqlite, adapter } = createMemoryDb();
+    try {
+      await seedRun(adapter, "orphan", {
+        // Row still says running: the engine died without writing a terminal status.
+        status: "running",
+        heartbeatAtMs: NOW - 14 * MIN,
+        // A dead pid is what makes this "orphaned" rather than merely "stale".
+        runtimeOwnerId: "pid:999999:owner",
+      });
+      await seedNode(adapter, "orphan", "plan", "finished", NOW - 20 * MIN);
+      await seedNode(adapter, "orphan", "implement", "in-progress", NOW - 14 * MIN);
+      await seedAttempt(adapter, "orphan", "implement", {
+        state: "in-progress",
+        startedAtMs: NOW - 14 * MIN,
+        finishedAtMs: null,
+      });
+
+      const summary = await buildRunStatusSummary(adapter, "orphan", { nowMs: NOW });
+
+      expect(summary.verdict).toBe("orphaned");
+      expect(summary.liveness).toMatchObject({ state: "orphaned" });
+      expect(summary.liveness?.unhealthy?.kind).toBe("engine-heartbeat-stale");
+      expect(summary.reason).toContain("orphaned");
+      // The human render must show it, and the CTA must offer the recovery path.
+      expect(renderRunStatusHuman(summary)).toContain("engine-heartbeat-stale");
+      expect(runStatusCtaCommands(summary).map((entry) => entry.command)).toContain("supervise -r orphan");
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("a stale-but-live engine is `stalled`, never `orphaned`", async () => {
+    const { sqlite, adapter } = createMemoryDb();
+    try {
+      await seedRun(adapter, "stale", {
+        status: "running",
+        heartbeatAtMs: NOW - 14 * MIN,
+        // This process is alive: a lagging heartbeat is not proof of death, and
+        // resuming it would race a second engine against a live merge queue.
+        runtimeOwnerId: `pid:${process.pid}:owner`,
+      });
+      await seedNode(adapter, "stale", "implement", "in-progress", NOW - 14 * MIN);
+
+      const summary = await buildRunStatusSummary(adapter, "stale", { nowMs: NOW });
+
+      expect(summary.verdict).toBe("stalled");
+      expect(summary.liveness).toMatchObject({ state: "stale" });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("a healthy running run is unchanged and prints no Health line", async () => {
+    const { sqlite, adapter } = createMemoryDb();
+    try {
+      await seedRun(adapter, "healthy", { heartbeatAtMs: NOW - 1_000, runtimeOwnerId: `pid:${process.pid}:owner` });
+      await seedNode(adapter, "healthy", "impl", "finished", NOW - 2 * MIN);
+      await seedNode(adapter, "healthy", "review", "in-progress", NOW - 1 * MIN);
+
+      const summary = await buildRunStatusSummary(adapter, "healthy", { nowMs: NOW });
+
+      expect(summary.verdict).toBe("running-healthy");
+      expect(renderRunStatusHuman(summary)).not.toContain("Health");
+    } finally {
+      sqlite.close();
+    }
+  });
+});

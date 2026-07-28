@@ -200,7 +200,10 @@ export function buildMonitorRunId(watchRunId) {
 
 /**
  * Argv for the detached `up` that starts a monitor. The monitor is a normal run
- * launched through the normal path: it is a child of the watched run
+ * launched through the normal path. The caller already creates a detached OS
+ * process, so argv must NOT request a second CLI-level detach (that would lose
+ * the actual engine pid and race teardown against its late registration). It
+ * is a child of the watched run
  * (`--parent-run-id`), it is told what to watch through `--input`, and it is
  * launched with `--no-monitor` so it can never spawn one of its own.
  *
@@ -221,7 +224,6 @@ export function buildMonitorLaunchArgs(params) {
   const args = [
     "up",
     params.monitorEntryFile,
-    "--detach",
     "--run-id",
     monitorRunId,
     "--parent-run-id",

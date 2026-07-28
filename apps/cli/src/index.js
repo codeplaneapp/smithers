@@ -56,6 +56,7 @@ import {
   finalizeCancelledOwnedRun,
   isCancellableRunStatus,
   listCascadeLineage,
+  terminateRunOwner,
 } from "./cancel-cascade.js";
 import { isDaemonDisabled } from "./isDaemonDisabled.js";
 import {
@@ -3253,7 +3254,19 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
       await monitorStarting;
       if (!monitorRun) return;
       try {
-        await cascadeCancelRun(adapter, monitorRun.runId);
+        // This child exists solely for the watched run's lifetime, so teardown
+        // is authoritative: finalize it immediately instead of leaving a
+        // durable cancel request for a fresh engine whose current compute task
+        // may not observe AbortSignal. Then terminate the recorded owner (or
+        // the just-spawned pid if registration raced teardown) so the monitor
+        // cannot remain alive after its parent finishes.
+        const cancelled = await cascadeCancelRun(adapter, monitorRun.runId, {
+          heartbeatFresh: () => false,
+        });
+        const ownerWasTerminated = cancelled.terminatedOwners.some(({ pid }) => pid === monitorRun.pid);
+        if (monitorRun.pid && !ownerWasTerminated) {
+          await terminateRunOwner(monitorRun.pid);
+        }
       } catch (error) {
         process.stderr.write(
           `⚠ Could not stop monitor ${monitorRun.runId}: ${error instanceof Error ? error.message : String(error)}\n`,

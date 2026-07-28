@@ -1,4 +1,5 @@
 import type { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import type { ResumeTarget } from "./ResumeTarget.ts";
 
 export type SupervisorSpawnClaim = {
   claimOwnerId: string;
@@ -12,7 +13,8 @@ export type SupervisorDeps = {
   workflowExists: (workflowPath: string) => boolean;
   parseRuntimeOwnerPid: (runtimeOwnerId: string | null | undefined) => number | null;
   isPidAlive: (pid: number) => boolean;
-  spawnResumeDetached: (workflowPath: string, runId: string, claim?: SupervisorSpawnClaim) => number | null;
+  /** Relaunch a run from its resolved {@link ResumeTarget}; returns the child pid. */
+  spawnResumeDetached: (target: ResumeTarget, runId: string, claim?: SupervisorSpawnClaim) => number | null;
   runsDueForQuotaResume: (adapter: SmithersDb, nowMs: number) => Promise<any[]>;
   /** Best-effort tail of a detached resume log, for give-up diagnostics. */
   readDetachedLogTail: (logFile: string) => string | null;

@@ -512,6 +512,34 @@ bunx smithers-orchestrator scores RUN_ID
 
 **Source** [`run-scorers.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/run-scorers.js) · [`aggregate.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/aggregate.js) · **Tests** [`run-scorers.test.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/tests/run-scorers.test.js) · [`aggregate.test.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/tests/aggregate.test.js) · **See also** [`ScorerContext`, `AggregateScore`](/reference/types#scorercontext)
 
+### isEvalInfraFailure
+
+Classify an eval case's error text as an environment fault rather than a product
+failure. A case that never ran (the harness could not reach a service, resolve a
+host, complete a TLS handshake, spawn a binary, or survive the process) is not
+evidence against the workflow. Grade those `inconclusive` so eval-driven repair
+loops fix the harness instead of iterating on code that was never exercised.
+
+```ts
+function isEvalInfraFailure(errorText: string): boolean;
+```
+
+<ParamField path="errorText" type="string" required>
+  Formatted error text from the eval case.
+</ParamField>
+
+The pattern list is deliberately conservative: an unrecognized error stays a
+genuine failure. Fail-closed is correct here, because an inconclusive verdict
+suppresses the strongest signal an eval suite produces.
+
+```ts
+import { isEvalInfraFailure } from "@smithers/scorers";
+
+const status = isEvalInfraFailure(caseError) ? "inconclusive" : "failed";
+```
+
+**Source** [`isEvalInfraFailure.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/isEvalInfraFailure.js)
+
 ---
 
 To wire scorers into a workflow and read them back, see the

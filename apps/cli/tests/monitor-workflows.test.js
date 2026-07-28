@@ -184,9 +184,11 @@ describe("monitor launch argv", () => {
     watchWorkflowPath: "/repo/.smithers/workflows/nightly.tsx",
   });
 
-  test("starts a detached child run linked to the watched run", () => {
+  test("starts one caller-detached child run linked to the watched run", () => {
     expect(args.slice(0, 2)).toEqual(["up", "/repo/.smithers/monitor/nightly.tsx"]);
-    expect(args).toContain("--detach");
+    // The caller's spawn is already `detached: true`. Asking `up` to detach
+    // again would create an untracked grandchild and make teardown race it.
+    expect(args).not.toContain("--detach");
     // parent_run_id is what makes ps/inspect/the Gateway show the pairing, and
     // what makes `smithers cancel` cascade to the monitor.
     expect(args[args.indexOf("--parent-run-id") + 1]).toBe("run-42");

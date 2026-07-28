@@ -1,23 +1,28 @@
 # Fix the workflow until it verifies
 
-The new workflow failed verification. Verification runs two real checks:
+The new workflow failed verification. Verification runs three real checks:
 `smithers graph` loads the workflow module (catching TypeScript / import / JSX
 errors) and renders one frame without executing it (catching structural errors),
+the registered `renderWorkflow` test runs against the real workflow,
 and, when a custom UI file exists, `bun build --no-bundle` transpiles it and
 the workflow must declare it with `<UI entry="../ui/<workflow>.tsx" />`. Read the
-errors, fix the files, and make both pass. You have file + shell tools.
+errors, fix the files, and make all checks pass. You have file + shell tools.
 
 ## Workflow
 
 - Name: {props.workflowName}
 - Entry file: {props.workflowFile}
+- Test file: {props.testFile}
+- Test registration: {props.packageJson}
 - Custom UI file (checked only if it exists): {props.uiFile}
 
 ## Verify command that failed
 
-`bunx smithers-orchestrator graph {props.workflowFile}` plus, if the UI file
-exists, `bun build --no-bundle {props.uiFile}`. Errors below are prefixed
-`[graph]` or `[ui]` so you know which check failed.
+`bunx smithers-orchestrator graph {props.workflowFile}`, the focused test at
+`{props.testFile}` after confirming it is registered in `{props.packageJson}`,
+plus, if the UI file exists, `bun build --no-bundle {props.uiFile}`. Errors
+below are prefixed `[graph]`, `[test-registration]`, `[test]`, or `[ui]` so you
+know which check failed.
 
 ## Errors
 
@@ -29,9 +34,10 @@ exists, `bun build --no-bundle {props.uiFile}`. Errors below are prefixed
 
 ## How to fix
 
-1. Read the entry file, any prompt/component files it imports, and (for `[ui]`
-   errors) the UI file. If the UI file exists, confirm the workflow imports
-   `UI` and declares it inside the root `<Workflow>`.
+1. Read the entry file, its test, any prompt/component files it imports,
+   `{props.packageJson}`, and (for `[ui]` errors) the UI file. If the UI file
+   exists, confirm the workflow imports `UI` and declares it inside the root
+   `<Workflow>`.
 2. Map the error to a cause. Common ones:
    - **Import / module not found**: a prompt or component path is wrong, or a
      named export doesn't exist. Check `{props.promptsDir}` and `../components`.
@@ -50,12 +56,17 @@ exists, `bun build --no-bundle {props.uiFile}`. Errors below are prefixed
      Compare against `{props.uiDir}/vcs.tsx`.
    - **UI not advertised**: the browser file exists but the workflow lacks
      `<UI entry="../ui/<workflow>.tsx" />`, so `smithers ui` cannot find it.
+   - **Test missing/unregistered**: write `{props.testFile}` using
+     `renderWorkflow` from `smithers-orchestrator/testing`, assert node order,
+     explicit dependencies, schemas, and branch/loop behavior, then preserve and
+     append its `./tests/<workflow>.test.tsx` path in `{props.packageJson}`.
 3. Make the smallest change that fixes the error without abandoning the design.
    If the docs would help, run `bunx smithers-orchestrator docs` or
    `bunx smithers-orchestrator ask "<question>"`.
 4. Re-run the failing command(s) yourself and confirm exit 0 before you finish:
-   `bunx smithers-orchestrator graph {props.workflowFile}` and, if the UI file
-   exists, `bun build --no-bundle {props.uiFile} > /dev/null`.
+   `bunx smithers-orchestrator graph {props.workflowFile}`, the focused test at
+   `{props.testFile}`, and, if the UI file exists,
+   `bun build --no-bundle {props.uiFile} > /dev/null`.
 
 Do not delete the workflow or the UI, and do not stub either out to "pass".
 Fix the real problem.

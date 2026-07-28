@@ -21,6 +21,26 @@ const WORKFLOWS_DIR = ".smithers/workflows";
 const PROMPTS_DIR = ".smithers/prompts";
 const SKILLS_DIR = ".smithers/skills";
 const UI_DIR = ".smithers/ui";
+const TESTS_DIR = ".smithers/tests";
+const PACK_PRELOAD = ".smithers/preload.ts";
+const PACK_PACKAGE_JSON = ".smithers/package.json";
+
+/**
+ * Is the new workflow's test registered in the pack's `test` script? That
+ * script is an explicit space-separated list, not a glob, so an unregistered
+ * test file is silently never run — green-looking in the repo while
+ * contributing zero coverage.
+ */
+async function packTestScriptIncludes(workflowName: string): Promise<boolean> {
+  try {
+    const raw = await Bun.file(PACK_PACKAGE_JSON).text();
+    const script = String(JSON.parse(raw)?.scripts?.test ?? "");
+    return script.split(/\s+/).includes(`./tests/${workflowName}.test.tsx`);
+  } catch {
+    // No pack package.json (or unreadable) means nothing registers the test.
+    return false;
+  }
+}
 const MONITOR_DIR = ".smithers/monitor";
 
 // Requires REAL YAML frontmatter (parsed, not line-matched) with `name` and
@@ -183,7 +203,10 @@ const scaffoldSchema = z.looseObject({
     .array(
       z.object({
         path: z.string(),
-        kind: z.enum(["workflow", "prompt", "component", "agents", "skill", "ui", "other"]).default("other"),
+        // "test" is first-class: a workflow and its registered testing-library
+        // test are one indivisible change, so the scaffold must be able to
+        // declare the test file it wrote rather than bury it under "other".
+        kind: z.enum(["workflow", "test", "prompt", "component", "agents", "skill", "ui", "other"]).default("other"),
       }),
     )
     .default([]),
@@ -295,6 +318,7 @@ export default smithers((ctx) => {
     scaffold?.workflowName ?? design?.workflowName ?? clarify?.name ?? ctx.input.name ?? "new-workflow";
   const workflowFile = `${WORKFLOWS_DIR}/${workflowName}.tsx`;
   const uiFile = `${UI_DIR}/${workflowName}.tsx`;
+  const testFile = `${TESTS_DIR}/${workflowName}.test.tsx`;
 
   // Verify-loop bookkeeping: re-render `until` against the latest verify output.
   const verifyOutputs = ctx.outputs.verify ?? [];
@@ -392,6 +416,9 @@ export default smithers((ctx) => {
               promptsDir={PROMPTS_DIR}
               uiDir={UI_DIR}
               monitorDir={MONITOR_DIR}
+              testsDir={TESTS_DIR}
+              packageJson={PACK_PACKAGE_JSON}
+              preload={PACK_PRELOAD}
             />
           </Task>
         ) : null}
@@ -414,6 +441,8 @@ export default smithers((ctx) => {
                       uiDir={UI_DIR}
                       monitorDir={MONITOR_DIR}
                       uiFile={uiFile}
+                      testFile={testFile}
+                      packageJson={PACK_PACKAGE_JSON}
                     />
                   </Task>
                 }
@@ -428,6 +457,8 @@ export default smithers((ctx) => {
                   const bunx = process.env.SMITHERS_BUNX ?? "bunx";
                   const bun = process.env.SMITHERS_BUN ?? "bun";
 
+                  const activeTestFile = `${TESTS_DIR}/${activeWorkflowName}.test.tsx`;
+
                   const errors: string[] = [];
                   const graphCmd = `${bunx} smithers-orchestrator graph ${activeWorkflowFile}`;
                   const res = await $`${bunx} smithers-orchestrator graph ${activeWorkflowFile}`.nothrow().quiet();
@@ -435,24 +466,57 @@ export default smithers((ctx) => {
                     const errText = `${res.stderr?.toString() ?? ""}\n${res.stdout?.toString() ?? ""}`.trim();
                     errors.push(`[graph] ${errText.slice(0, 6000)}`);
                   }
+                  // A workflow and its test are one indivisible change, so the
+                  // verification loop treats a missing or unregistered test as a
+                  // verification FAILURE — the fix agent is then told to write
+                  // it. `graph` renders one frame with no assertions, so it can
+                  // never stand in for the real renderWorkflow-based test.
+                  const parts = [graphCmd];
+                  const testExists = await Bun.file(activeTestFile).exists();
+                  if (!testExists) {
+                    errors.push(
+                      `[test-registration] missing ${activeTestFile}: every workflow ships a renderWorkflow-based test alongside it.`,
+                    );
+                  } else {
+                    const registered = await packTestScriptIncludes(activeWorkflowName);
+                    if (!registered) {
+                      errors.push(
+                        `[test-registration] ${PACK_PACKAGE_JSON} does not list ./tests/${activeWorkflowName}.test.tsx in its "test" script, so the test would never run.`,
+                      );
+                    }
+                    // `./`-prefixed: bun treats a bare argument as a name FILTER
+                    // and silently matches nothing, so the test would appear to
+                    // pass without ever running.
+                    const preloadArg = `./${PACK_PRELOAD}`;
+                    const testArg = `./${activeTestFile}`;
+                    const testCmd = `${bun} test --preload ${preloadArg} --max-concurrency=1 ${testArg}`;
+                    parts.push(testCmd);
+                    const testRes = await $`${bun} test --preload ${preloadArg} --max-concurrency=1 ${testArg}`
+                      .nothrow()
+                      .quiet();
+                    if (testRes.exitCode !== 0) {
+                      const testErr = `${testRes.stderr?.toString() ?? ""}\n${testRes.stdout?.toString() ?? ""}`.trim();
+                      errors.push(`[test] ${activeTestFile}: ${testErr.slice(0, 6000)}`);
+                    }
+                  }
                   // If a custom UI was scaffolded, it must at least transpile.
                   const uiExists = await Bun.file(activeUiFile).exists();
-                  let command = graphCmd;
                   if (uiExists) {
-                    command = `${graphCmd} && ${bun} build --no-bundle ${activeUiFile}`;
+                    parts.push(`${bun} build --no-bundle ${activeUiFile}`);
                     const uiRes = await $`${bun} build --no-bundle ${activeUiFile}`.nothrow().quiet();
                     if (uiRes.exitCode !== 0) {
                       const uiErr = `${uiRes.stderr?.toString() ?? ""}\n${uiRes.stdout?.toString() ?? ""}`.trim();
                       errors.push(`[ui] ${activeUiFile}: ${uiErr.slice(0, 6000)}`);
                     }
                   }
+                  const command = parts.join(" && ");
                   const passed = errors.length === 0;
                   return {
                     passed,
                     command,
                     errors,
                     notes: passed
-                      ? `${activeWorkflowName} loads, its graph renders without executing${uiExists ? `, and ${activeUiFile} transpiles` : ""}.`
+                      ? `${activeWorkflowName} loads, its graph renders, its registered test passes${uiExists ? `, and ${activeUiFile} transpiles` : ""}.`
                       : `verification failed for ${activeWorkflowName}; see errors.`,
                   };
                 }}
@@ -515,6 +579,7 @@ export default smithers((ctx) => {
                   : terminalStatus === "built"
                     ? [
                         `smithers workflow run ${workflowName} --prompt "<your input>"  # or: smithers up ${workflowFile}`,
+                        `pnpm -C .smithers test  # run the registered workflow tests`,
                         `bunx smithers-orchestrator graph ${workflowFile}  # print the graph; add --interactive for the TUI`,
                         ...(uiWritten ? [`smithers ui <runId>  # open the custom UI in ${uiFile} for a run`] : []),
                         `smithers workflow run create-workflow --prompt "iterate on ${workflowName}: <what to change>"  # iterate`,

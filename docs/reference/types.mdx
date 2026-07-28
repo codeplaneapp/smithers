@@ -882,6 +882,28 @@ type TimerProps = {
   key?: string;
 };
 
+type MonitorCondition =
+  | "healthy" | "stalled" | "wedged-node" | "runaway-loop"
+  | "awaiting-human" | "failing" | "unknown";
+
+type MonitorProps = {
+  id?: string;                      // id prefix for generated nodes; default "monitor"
+  watchRunId: string;               // the run this monitor watches
+  agent: AgentLike | AgentLike[];   // samples the watched run and classifies its health
+  healthOutput: OutputTarget;       // schema must carry `condition` + `runStatus`
+  actionOutput?: OutputTarget;      // handler tasks write here; defaults to healthOutput
+  healAgent?: AgentLike | AgentLike[];
+  intervalMs?: number;              // heartbeat spacing; default 60000
+  maxChecks?: number;               // heartbeats before the monitor stops; default 120
+  stallBeats?: number;              // beats without progress before `stalled`; default 3
+  autoHeal?: MonitorCondition[];    // healed without a human; default ["stalled", "wedged-node"]
+  handlers?: Partial<Record<MonitorCondition, React.ReactElement | null>>;
+  guidance?: string;                // extra doctrine appended to the shipped prompt
+  prompt?: string | React.ReactNode;
+  skipIf?: boolean;
+  children?: string | React.ReactNode;
+};
+
 type SagaStepDef    = { id: string; action: React.ReactElement; compensation: React.ReactElement; label?: string };
 type SagaProps      = { id?: string; steps?: SagaStepDef[]; onFailure?: "compensate" | "compensate-and-fail" | "fail"; skipIf?: boolean; children?: React.ReactNode };
 type SagaStepProps  = { id: string; compensation: React.ReactElement; children: React.ReactElement };

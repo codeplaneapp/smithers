@@ -194,6 +194,7 @@ describe.serial("curated authoring workflows", () => {
       const bin = join(root, "bin");
       await mkdir(bin, { recursive: true });
       const graphSentinel = join(root, "graph-sentinel");
+      const testSentinel = join(root, "test-sentinel");
       const buildSentinel = join(root, "build-sentinel");
       const launcher = (name: string, posix: string, windows: string) =>
         writeFile(
@@ -207,8 +208,8 @@ describe.serial("curated authoring workflows", () => {
       );
       await launcher(
         "bun",
-        `#!/bin/sh\nif [ "$1" = "build" ]; then echo BUILD_SENTINEL; echo BUILD_SENTINEL > ${JSON.stringify(buildSentinel)}; exit 0; fi\nexit 1\n`,
-        `@echo off\r\nif "%1"=="build" (echo BUILD_SENTINEL & echo BUILD_SENTINEL> "%~dp0..\\build-sentinel" & exit /b 0)\r\nexit /b 1\r\n`,
+        `#!/bin/sh\nif [ "$1" = "test" ]; then echo TEST_SENTINEL; echo TEST_SENTINEL > ${JSON.stringify(testSentinel)}; exit 0; fi\nif [ "$1" = "build" ]; then echo BUILD_SENTINEL; echo BUILD_SENTINEL > ${JSON.stringify(buildSentinel)}; exit 0; fi\nexit 1\n`,
+        `@echo off\r\nif "%1"=="test" (echo TEST_SENTINEL & echo TEST_SENTINEL> "%~dp0..\\test-sentinel" & exit /b 0)\r\nif "%1"=="build" (echo BUILD_SENTINEL & echo BUILD_SENTINEL> "%~dp0..\\build-sentinel" & exit /b 0)\r\nexit /b 1\r\n`,
       );
       if (process.platform !== "win32") {
         await chmod(join(bin, "bunx"), 0o755);
@@ -229,16 +230,40 @@ describe.serial("curated authoring workflows", () => {
           scaffold: async () => {
             const file = join(root, ".smithers/workflows/report-workflow-scaffold.tsx");
             await mkdir(join(root, ".smithers/workflows"), { recursive: true });
+            await mkdir(join(root, ".smithers/tests"), { recursive: true });
             await writeFile(file, "INVALID_SCAFFOLD\n");
+            await writeFile(join(root, ".smithers/tests/report-workflow-scaffold.test.tsx"), "TEST_SCAFFOLD\n");
+            await writeFile(join(root, ".smithers/preload.ts"), "");
+            await writeFile(
+              join(root, ".smithers/package.json"),
+              JSON.stringify({
+                scripts: {
+                  test: "bun test --preload ./preload.ts ./tests/report-workflow-scaffold.test.tsx",
+                },
+              }),
+            );
             return {
               summary: "SCAFFOLD_SUMMARY",
               workflowName: "report-workflow-scaffold",
-              filesWritten: [{ path: ".smithers/workflows/report-workflow-scaffold.tsx", kind: "workflow" }],
+              filesWritten: [
+                { path: ".smithers/workflows/report-workflow-scaffold.tsx", kind: "workflow" },
+                { path: ".smithers/tests/report-workflow-scaffold.test.tsx", kind: "test" },
+                { path: ".smithers/package.json", kind: "other" },
+              ],
             };
           },
           fix: async () => {
             const file = join(root, ".smithers/workflows/report-workflow.tsx");
             await writeFile(file, "export default 'FIXED_WORKFLOW';\n");
+            await writeFile(join(root, ".smithers/tests/report-workflow.test.tsx"), "TEST_FIXED\n");
+            await writeFile(
+              join(root, ".smithers/package.json"),
+              JSON.stringify({
+                scripts: {
+                  test: "bun test --preload ./preload.ts ./tests/report-workflow.test.tsx",
+                },
+              }),
+            );
             await mkdir(join(root, ".smithers/ui"), { recursive: true });
             await writeFile(join(root, ".smithers/ui/report-workflow.tsx"), "export default 'FIXED_UI';\n");
             return {
@@ -246,6 +271,8 @@ describe.serial("curated authoring workflows", () => {
               workflowName: "report-workflow",
               filesWritten: [
                 { path: ".smithers/workflows/report-workflow.tsx", kind: "workflow" },
+                { path: ".smithers/tests/report-workflow.test.tsx", kind: "test" },
+                { path: ".smithers/package.json", kind: "other" },
                 { path: ".smithers/ui/report-workflow.tsx", kind: "ui" },
                 { path: ".smithers/workflows/report-workflow-scaffold.tsx", kind: "workflow" },
               ],
@@ -282,22 +309,23 @@ describe.serial("curated authoring workflows", () => {
       expect(sim.task("verify").outputs).toEqual([
         {
           passed: false,
-          command: `${process.env.SMITHERS_BUNX} smithers-orchestrator graph .smithers/workflows/report-workflow-scaffold.tsx`,
+          command: `${process.env.SMITHERS_BUNX} smithers-orchestrator graph .smithers/workflows/report-workflow-scaffold.tsx && ${process.env.SMITHERS_BUN} test --preload ./.smithers/preload.ts --max-concurrency=1 ./.smithers/tests/report-workflow-scaffold.test.tsx`,
           errors: ["[graph] GRAPH_SENTINEL"],
           notes: "verification failed for report-workflow-scaffold; see errors.",
         },
         {
           passed: true,
-          command: `${process.env.SMITHERS_BUNX} smithers-orchestrator graph .smithers/workflows/report-workflow.tsx && ${process.env.SMITHERS_BUN} build --no-bundle .smithers/ui/report-workflow.tsx`,
+          command: `${process.env.SMITHERS_BUNX} smithers-orchestrator graph .smithers/workflows/report-workflow.tsx && ${process.env.SMITHERS_BUN} test --preload ./.smithers/preload.ts --max-concurrency=1 ./.smithers/tests/report-workflow.test.tsx && ${process.env.SMITHERS_BUN} build --no-bundle .smithers/ui/report-workflow.tsx`,
           errors: [],
           notes:
-            "report-workflow loads, its graph renders without executing, and .smithers/ui/report-workflow.tsx transpiles.",
+            "report-workflow loads, its graph renders, its registered test passes, and .smithers/ui/report-workflow.tsx transpiles.",
         },
       ]);
       expect(sim.task("fix").prompts[0]).toEqual(expect.stringContaining("GRAPH_SENTINEL"));
       // cmd echo redirects append platform whitespace; the contract is that
       // each sentinel was written exactly once, not its trailing bytes.
       expect((await readFile(graphSentinel, "utf8")).trim()).toBe("GRAPH_SENTINEL");
+      expect((await readFile(testSentinel, "utf8")).trim()).toBe("TEST_SENTINEL");
       expect((await readFile(buildSentinel, "utf8")).trim()).toBe("BUILD_SENTINEL");
       expect(sim.task("document").outputs.map((value) => (value as { summary: string }).summary)).toEqual([
         "DOC_BAD",
@@ -321,15 +349,19 @@ describe.serial("curated authoring workflows", () => {
         summary: "DOC_GOOD",
         filesWritten: [
           ".smithers/workflows/report-workflow-scaffold.tsx",
+          ".smithers/tests/report-workflow-scaffold.test.tsx",
+          ".smithers/package.json",
           ".smithers/workflows/report-workflow.tsx",
+          ".smithers/tests/report-workflow.test.tsx",
           ".smithers/ui/report-workflow.tsx",
         ],
-        fileCount: 3,
+        fileCount: 6,
         verified: true,
         skillPath: ".smithers/skills/report-workflow.md",
         uiFile: ".smithers/ui/report-workflow.tsx",
         nextSteps: [
           'smithers workflow run report-workflow --prompt "<your input>"  # or: smithers up .smithers/workflows/report-workflow.tsx',
+          "pnpm -C .smithers test  # run the registered workflow tests",
           "bunx smithers-orchestrator graph .smithers/workflows/report-workflow.tsx  # print the graph; add --interactive for the TUI",
           "smithers ui <runId>  # open the custom UI in .smithers/ui/report-workflow.tsx for a run",
           'smithers workflow run create-workflow --prompt "iterate on report-workflow: <what to change>"  # iterate',
@@ -341,6 +373,7 @@ describe.serial("curated authoring workflows", () => {
       expect(await readFile(join(root, ".smithers/workflows/report-workflow.tsx"), "utf8")).toBe(
         "export default 'FIXED_WORKFLOW';\n",
       );
+      expect(await readFile(join(root, ".smithers/tests/report-workflow.test.tsx"), "utf8")).toBe("TEST_FIXED\n");
       expect(await readFile(join(root, ".smithers/ui/report-workflow.tsx"), "utf8")).toBe(
         "export default 'FIXED_UI';\n",
       );

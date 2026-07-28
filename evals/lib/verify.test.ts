@@ -104,6 +104,85 @@ describe("must/mustNot JSX-tag tokens tolerate the createSmithers factory namesp
   });
 });
 
+describe("workflow-files verifier", () => {
+  const workflow = `/** @jsxImportSource smithers-orchestrator */
+import { createSmithers } from "smithers-orchestrator";
+import { z } from "zod/v4";
+const result = z.object({ message: z.string() });
+const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({ result });
+export default smithers(() => (
+  <Workflow name="hello">
+    <Sequence>
+      <Task id="draft" output={outputs.result}>{() => ({ message: "draft" })}</Task>
+      <Task id="publish" output={outputs.result}>{() => ({ message: "done" })}</Task>
+    </Sequence>
+  </Workflow>
+));`;
+  const testSource = `import { expect, test } from "bun:test";
+import { renderWorkflow } from "smithers-orchestrator/testing";
+import workflow from "../workflows/hello.tsx";
+test("graph", async () => {
+  const frame = await renderWorkflow(workflow);
+  expect(frame.tasks.map(({ nodeId }) => nodeId)).toEqual(["draft", "publish"]);
+  expect(frame.tasks[0].outputSchema?.safeParse({ message: "ok" }).success).toBe(true);
+  expect(frame.tasks[0].outputSchema?.safeParse({ message: 1 }).success).toBe(false);
+});`;
+  const packageJson = JSON.stringify({
+    scripts: { test: "bun test --preload ./preload.ts ./tests/hello.test.tsx" },
+  });
+  const workflowFilesSpec = spec({ kind: "workflow-files" });
+  const bundle = (over: Record<string, string> = {}) =>
+    JSON.stringify({
+      ".smithers/workflows/hello.tsx": workflow,
+      ".smithers/tests/hello.test.tsx": testSource,
+      ".smithers/package.json": packageJson,
+      ...over,
+    });
+
+  test("passes only a real workflow, substantive renderWorkflow test, and explicit registration", async () => {
+    const verdict = await computeVerdict(workflowFilesSpec, report(bundle()));
+    expect(verdict.passed, JSON.stringify(verdict, null, 2)).toBe(true);
+    expect(verdict.method).toBe("workflow-files");
+  }, 30_000);
+
+  test("fails when the testing-library import or registration is missing", async () => {
+    const withoutLibrary = testSource.replace(
+      'import { renderWorkflow } from "smithers-orchestrator/testing";',
+      "const renderWorkflow = async () => ({ tasks: [] });",
+    );
+    const verdict = await computeVerdict(
+      workflowFilesSpec,
+      report(
+        bundle({
+          ".smithers/tests/hello.test.tsx": withoutLibrary,
+          ".smithers/package.json": JSON.stringify({ scripts: { test: "bun test" } }),
+        }),
+      ),
+    );
+    expect(verdict.passed).toBe(false);
+    expect(verdict.checks.find((check) => check.name === "testing-library-import")?.passed).toBe(false);
+    expect(verdict.checks.find((check) => check.name === "test-registered")?.passed).toBe(false);
+  }, 30_000);
+
+  test("rejects a hollow truthiness smoke test", async () => {
+    const hollow = `import { expect, test } from "bun:test";
+import { renderWorkflow } from "smithers-orchestrator/testing";
+import workflow from "../workflows/hello.tsx";
+// Fake source text must not satisfy the machine check:
+// expect(frame.tasks.map(({ nodeId }) => nodeId)).toEqual(["draft", "publish"]);
+// expect(frame.tasks[0].outputSchema.safeParse({ message: "ok" }).success).toBe(true);
+// expect(frame.tasks[0].outputSchema.safeParse({ message: 1 }).success).toBe(false);
+test("graph", async () => expect(await renderWorkflow(workflow)).toBeTruthy());`;
+    const verdict = await computeVerdict(
+      workflowFilesSpec,
+      report(bundle({ ".smithers/tests/hello.test.tsx": hollow })),
+    );
+    expect(verdict.passed).toBe(false);
+    expect(verdict.checks.find((check) => check.name === "graph-behavior-assertions")?.passed).toBe(false);
+    expect(verdict.checks.find((check) => check.name === "schema-assertions")?.passed).toBe(false);
+  }, 30_000);
+});
+
 describe("side-effect-marking verifier", () => {
   const sideEffectSpec = (over: Partial<VerifySpec> = {}): VerifySpec => ({
     kind: "side-effect-marking",
@@ -184,7 +263,9 @@ describe("build verifier resolves and structurally uses UI requirements", () => 
     for (const [artifact, must, mustNot] of cases) {
       expect((await computeVerdict(buildSpec({ must: [...must], mustNot: [...mustNot] }), reportUi(artifact))).passed).toBe(false);
     }
-  });
+    // Real esbuild + TS module resolution: the first case in this block pays a
+    // cold start that overruns bun's 5s default.
+  }, 60_000);
 
   test("accepts real named, aliased, namespace imports, calls, JSX, modules, and member access", async () => {
     const artifact = `
@@ -195,13 +276,13 @@ describe("build verifier resolves and structurally uses UI requirements", () => 
     `;
     const verdict = await computeVerdict(buildSpec({ must: ["smithers-orchestrator/gateway-react", "createGatewayReactRoot", "useGatewayRun", "RunTree", ".row"] }), reportUi(artifact));
     expect(verdict.passed).toBe(true);
-  });
+  }, 60_000);
 
   test("requires module-path requirements to be imports and validates real exports", async () => {
     const artifact = `import { MarkdownEditor } from "@smithers-orchestrator/ui/adapters/markdown-editor"; export default () => <MarkdownEditor value="" />;`;
     expect((await computeVerdict(buildSpec({ must: ["adapters/markdown-editor"] }), reportUi(artifact))).passed).toBe(true);
     expect((await computeVerdict(buildSpec({ must: ["adapters/not-real"] }), reportUi(artifact))).passed).toBe(false);
-  });
+  }, 60_000);
 
   test("rejects type-only imports and nonexistent namespace exports", async () => {
     const typeOnly = `import type { RunTree } from "smithers-orchestrator/gateway-ui"; export default () => <RunTree />;`;
@@ -210,7 +291,7 @@ describe("build verifier resolves and structurally uses UI requirements", () => 
     expect((await computeVerdict(buildSpec({ must: ["RunTree"] }), reportUi(typeOnly))).passed).toBe(false);
     expect((await computeVerdict(buildSpec({ must: ["RunTree"] }), reportUi(unresolvedTypeOnly))).passed).toBe(false);
     expect((await computeVerdict(buildSpec({ must: ["NotARealComponent"] }), reportUi(nonexistentNamespace))).passed).toBe(false);
-  });
+  }, 60_000);
 
   test("structurally recognizes the real location.search requirement", async () => {
     const artifact = `
@@ -221,5 +302,5 @@ describe("build verifier resolves and structurally uses UI requirements", () => 
     `;
     const verdict = await computeVerdict(buildSpec({ must: ["createGatewayReactRoot", "useGatewayRun", "location.search", ".row"] }), reportUi(artifact));
     expect(verdict.passed).toBe(true);
-  });
+  }, 60_000);
 });
