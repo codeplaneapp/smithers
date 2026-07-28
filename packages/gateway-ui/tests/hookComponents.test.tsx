@@ -748,13 +748,16 @@ describe("ApprovalPanel", () => {
     const confirmation = harness.container.querySelector("[role='alertdialog']");
     expect(confirmation?.textContent).toContain("gate");
     expect(confirmation?.textContent).toContain("run-c");
+    expect((document.activeElement as HTMLElement | null)?.textContent).toBe("Confirm deny");
     expect(gw.approvalsSubmitted).toHaveLength(0);
 
-    click([...harness.container.querySelectorAll("button")].find((button) => button.textContent === "Cancel")!);
-    await harness.flush();
+    await act(async () => {
+      confirmation!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
     expect(harness.container.querySelector("[role='alertdialog']")).toBeNull();
     expect(note.value).toBe("not safe yet");
     expect(gw.approvalsSubmitted).toHaveLength(0);
+    expect((document.activeElement as HTMLElement | null)?.textContent).toBe("Deny");
 
     click([...harness.container.querySelectorAll("button")].find((button) => button.textContent === "Deny")!);
     await harness.flush();
@@ -819,6 +822,7 @@ describe("ApprovalPanel", () => {
     expect(harness.container.textContent).toContain("Approval: gate");
     const stillApprove = [...harness.container.querySelectorAll("button")].filter((b) => b.textContent === "Approve");
     expect((stillApprove[0] as HTMLButtonElement).disabled).toBe(false);
+    expect(document.activeElement).toBe(stillApprove[0]);
 
     gw.state.failApprovalSubmit = false;
     click(stillApprove[0]);

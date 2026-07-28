@@ -161,6 +161,21 @@ describe("Confirmation", () => {
     buttons.forEach((button) => expect(button.disabled).toBe(false));
   });
 
+  test("restores keyboard focus after a failed decision and focuses the result after success", async () => {
+    await render(fullConfirmation("requested"));
+    const approve = container!.querySelector<HTMLButtonElement>("[data-decision='approve']")!;
+    approve.focus();
+    expect(document.activeElement).toBe(approve);
+
+    await render(fullConfirmation("approving"));
+    await render(fullConfirmation("failed-submission"));
+    expect(document.activeElement).toBe(container!.querySelector("[data-decision='approve']"));
+
+    await render(fullConfirmation("denying"));
+    await render(fullConfirmation("denied"));
+    expect(document.activeElement).toBe(container!.querySelector("[data-slot='confirmation']"));
+  });
+
   test("failed-submission shows visible failure feedback, not color only", async () => {
     await render(fullConfirmation("failed-submission"));
     const note = container!.querySelector("[data-slot='confirmation-note']");
@@ -233,6 +248,17 @@ describe("Confirmation", () => {
       deny.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     });
     expect(decisions).toEqual(["approve", "deny"]);
+  });
+
+  test("decision controls are native buttons in logical DOM order", async () => {
+    await render(fullConfirmation("requested"));
+    const controls = [...container!.querySelectorAll<HTMLButtonElement>("[data-slot='confirmation-action']")];
+    expect(controls.map((control) => control.dataset.decision)).toEqual(["approve", "deny"]);
+    for (const control of controls) {
+      expect(control.tagName).toBe("BUTTON");
+      expect(control.type).toBe("button");
+      expect(control.tabIndex).toBe(0);
+    }
   });
 
   test("renders under data-theme=dark with lane css self-injected", async () => {

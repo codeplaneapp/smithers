@@ -44,6 +44,8 @@ describe("approvals-checkpoints css contract", () => {
 
   test("uses the frozen lane prefixes", () => {
     expect(approvalsCss).toContain(".sui-confirm {");
+    expect(approvalsCss).toContain(".sui-confirm:focus-visible");
+    expect(approvalsCss).toContain(".sui-confirm-action:focus-visible");
     expect(approvalsCss).toContain(".sui-approval-card {");
     expect(approvalsCss).toContain(".sui-checkpoint {");
   });

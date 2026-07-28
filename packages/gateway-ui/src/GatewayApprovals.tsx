@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FocusEvent, type ReactNode } from "react";
 import type { GatewayApprovalRow } from "@smithers-orchestrator/gateway-client";
 import type { ListApprovalsRequest } from "@smithers-orchestrator/gateway-client/rpc";
 import { useGatewayActions, useGatewayApprovals } from "@smithers-orchestrator/gateway-react";
@@ -53,7 +53,20 @@ export function GatewayApprovalConfirmation({
   const [noteValue, setNoteValue] = useState("");
   const [confirmingDeny, setConfirmingDeny] = useState(false);
   const inFlight = useRef(false);
+  const denyButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreDenyFocus = useRef(false);
   const key = gatewayApprovalKey(approval);
+
+  useEffect(() => {
+    if (confirmingDeny || !restoreDenyFocus.current) return;
+    restoreDenyFocus.current = false;
+    denyButtonRef.current?.focus();
+  }, [confirmingDeny]);
+
+  function cancelDeny() {
+    restoreDenyFocus.current = true;
+    setConfirmingDeny(false);
+  }
 
   // Identity transition: a host may swap the approval prop without remounting
   // (the list keys rows, a direct caller may not). A stale approved/denied or
@@ -126,7 +139,7 @@ export function GatewayApprovalConfirmation({
   }
 
   return (
-    <Confirmation state={state} className={className}>
+    <Confirmation state={state} className={className} data-approval-key={key}>
       <ConfirmationTitle>{approval.requestTitle ?? `Approval: ${approval.nodeId}`}</ConfirmationTitle>
       <ConfirmationRequest>
         {approval.requestSummary ? <div>{approval.requestSummary}</div> : null}
@@ -148,6 +161,12 @@ export function GatewayApprovalConfirmation({
           role="alertdialog"
           aria-label={`Confirm denial of ${approval.requestTitle ?? approval.nodeId} for run ${approval.runId}`}
           className="sui-confirm-deny"
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopPropagation();
+            cancelDeny();
+          }}
         >
           <div>
             Deny gate {approval.requestTitle ?? approval.nodeId} for run {approval.runId}?
@@ -156,7 +175,7 @@ export function GatewayApprovalConfirmation({
             <ConfirmationAction decision="deny" autoFocus onDecide={() => void decide(false)}>
               Confirm deny
             </ConfirmationAction>
-            <Button variant="outline" onClick={() => setConfirmingDeny(false)}>
+            <Button variant="outline" onClick={cancelDeny}>
               Cancel
             </Button>
           </ConfirmationActions>
@@ -164,7 +183,7 @@ export function GatewayApprovalConfirmation({
       ) : (
         <ConfirmationActions>
           <ConfirmationAction decision="approve" onDecide={() => void decide(true)} />
-          <ConfirmationAction decision="deny" onDecide={() => setConfirmingDeny(true)} />
+          <ConfirmationAction ref={denyButtonRef} decision="deny" onDecide={() => setConfirmingDeny(true)} />
         </ConfirmationActions>
       )}
       <ConfirmationAccepted />
@@ -193,10 +212,45 @@ export type GatewayApprovalListProps = {
 export function GatewayApprovalList({ filter, note, empty, onResolved, className }: GatewayApprovalListProps) {
   const { data, loading, error } = useGatewayApprovals(filter ? { filter } : {});
   const rows = data ?? [];
+  const listRef = useRef<HTMLDivElement>(null);
+  const focusedApproval = useRef<string | null>(null);
+  const previousKeys = useRef<string[]>([]);
+
+  useEffect(() => {
+    const keys = rows.map(gatewayApprovalKey);
+    const previous = previousKeys.current;
+    previousKeys.current = keys;
+    const focusedKey = focusedApproval.current;
+    if (!focusedKey || keys.includes(focusedKey)) return;
+
+    const previousIndex = previous.indexOf(focusedKey);
+    const actions = listRef.current?.querySelectorAll<HTMLButtonElement>("[data-decision='approve']");
+    const nextAction = actions?.[Math.min(Math.max(previousIndex, 0), Math.max(actions.length - 1, 0))];
+    focusedApproval.current = null;
+    if (nextAction) nextAction.focus();
+    else listRef.current?.focus();
+  }, [rows]);
+
+  const listProps = {
+    ref: listRef,
+    className,
+    tabIndex: -1,
+    role: "group" as const,
+    "aria-label": "Pending approvals",
+    onFocusCapture: (event: FocusEvent<HTMLDivElement>) => {
+      const card = (event.target as Element).closest<HTMLElement>("[data-approval-key]");
+      if (card) focusedApproval.current = card.dataset.approvalKey ?? null;
+    },
+    onBlurCapture: (event: FocusEvent<HTMLDivElement>) => {
+      if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) {
+        focusedApproval.current = null;
+      }
+    },
+  };
 
   if (error) {
     return (
-      <div className={className}>
+      <div {...listProps}>
         <Confirmation state="unavailable">
           <ConfirmationTitle>Approvals unavailable</ConfirmationTitle>
         </Confirmation>
@@ -206,7 +260,7 @@ export function GatewayApprovalList({ filter, note, empty, onResolved, className
 
   if (loading && rows.length === 0) {
     return (
-      <div className={className}>
+      <div {...listProps}>
         <Confirmation state="synchronizing">
           <ConfirmationTitle>Synchronizing approvals…</ConfirmationTitle>
           <ConfirmationRequest />
@@ -216,11 +270,11 @@ export function GatewayApprovalList({ filter, note, empty, onResolved, className
   }
 
   if (rows.length === 0) {
-    return <div className={className}>{empty ?? null}</div>;
+    return <div {...listProps}>{empty ?? null}</div>;
   }
 
   return (
-    <div className={className}>
+    <div {...listProps}>
       {rows.map((row) => (
         <GatewayApprovalConfirmation key={gatewayApprovalKey(row)} approval={row} note={note} onResolved={onResolved} />
       ))}

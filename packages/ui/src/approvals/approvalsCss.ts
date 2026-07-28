@@ -17,6 +17,7 @@ export const approvalsCss = `
 .sui-confirm[data-state='approved'] { border-color:${t.successBorder}; background:${t.successSoft}; }
 .sui-confirm[data-state='denied'] { border-color:${t.destructiveBorder}; background:${t.destructiveSoft}; }
 .sui-confirm[data-state='expired'], .sui-confirm[data-state='unavailable'] { color:${t.mutedForeground}; }
+.sui-confirm:focus-visible { ${focusRing} }
 .sui-confirm-title { min-width:0; font-size:13px; font-weight:650; }
 .sui-confirm-request { min-width:0; display:grid; align-content:start; gap:6px; }
 .sui-confirm-accepted { min-width:0; display:flex; align-items:center; gap:6px; color:${t.success}; font-weight:650; }

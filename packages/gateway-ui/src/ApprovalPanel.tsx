@@ -23,6 +23,8 @@ type ApprovalRow = {
   requestSummary?: string;
 };
 
+type ApprovalFocusTarget = { key: string; decision: "approve" | "deny" } | { key: null; decision: "status" };
+
 // decide() and the render loop must derive the SAME key or the busy state never matches.
 function approvalKey(row: ApprovalRow): string {
   return `${row.runId}:${row.nodeId}:${row.iteration}`;
@@ -55,14 +57,49 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
     runId: string;
   } | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [focusTarget, setFocusTarget] = useState<ApprovalFocusTarget | null>(null);
   const [, setRefreshResultVersion] = useState(0);
   const inFlight = useRef(new Set<string>());
+  const actionRefs = useRef(new Map<string, Partial<Record<"approve" | "deny", HTMLButtonElement>>>());
+  const statusRef = useRef<HTMLDivElement>(null);
   const reportedCollectionError = useRef<Error | null>(null);
   const pendingApprovals = (data ?? []) as ApprovalRow[];
   // Once the gateway accepts a decision, immediately remove that request from
   // the actionable queue. A failed refresh must not expose a stale retry that
   // would submit the same decision twice.
   const approvals = pendingApprovals.filter((row) => !resolved.has(approvalKey(row)));
+
+  useEffect(() => {
+    if (!focusTarget) return;
+    if (focusTarget.key === null) {
+      statusRef.current?.focus();
+      setFocusTarget(null);
+      return;
+    }
+    if (busy.has(focusTarget.key)) return;
+    const action = actionRefs.current.get(focusTarget.key)?.[focusTarget.decision];
+    if (action) action.focus();
+    else statusRef.current?.focus();
+    setFocusTarget(null);
+  }, [focusTarget, busy]);
+
+  const setActionRef = (key: string, decision: "approve" | "deny", node: HTMLButtonElement | null) => {
+    if (node) {
+      const refs = actionRefs.current.get(key) ?? {};
+      refs[decision] = node;
+      actionRefs.current.set(key, refs);
+      return;
+    }
+    const refs = actionRefs.current.get(key);
+    if (!refs) return;
+    delete refs[decision];
+    if (!refs.approve && !refs.deny) actionRefs.current.delete(key);
+  };
+
+  const cancelDeny = (key: string) => {
+    setConfirmingDeny(null);
+    setFocusTarget({ key, decision: "deny" });
+  };
 
   const notifyError = (cause: unknown): Error => {
     const err = cause instanceof Error ? cause : new Error(String(cause));
@@ -124,6 +161,10 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
       });
       setResolved((current) => new Set(current).add(key));
       setDecisionFeedback({ approved, target, runId: row.runId });
+      const rowIndex = approvals.findIndex((candidate) => approvalKey(candidate) === key);
+      const remaining = approvals.filter((candidate) => approvalKey(candidate) !== key);
+      const next = remaining[Math.min(Math.max(rowIndex, 0), Math.max(remaining.length - 1, 0))];
+      setFocusTarget(next ? { key: approvalKey(next), decision: "approve" } : { key: null, decision: "status" });
       void refetch()
         .catch((cause) => {
           const err = notifyError(cause);
@@ -135,6 +176,7 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
     } catch (cause) {
       const err = notifyError(cause);
       setSubmitError({ key, approved, target, runId: row.runId, message: err.message });
+      setFocusTarget({ key, decision: approved ? "approve" : "deny" });
     } finally {
       inFlight.current.delete(key);
       setBusy((current) => {
@@ -158,7 +200,13 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
       }}
     >
       {decisionFeedback ? (
-        <div role="status" aria-live="polite" style={{ color: theme.success, fontSize: 13 }}>
+        <div
+          ref={statusRef}
+          role="status"
+          aria-live="polite"
+          tabIndex={-1}
+          style={{ color: theme.success, fontSize: 13 }}
+        >
           {decisionFeedback.approved ? "Approved" : "Denied"} gate {decisionFeedback.target} for run{" "}
           {decisionFeedback.runId}. {approvals.length}{" "}
           {approvals.length === 1 ? "approval remains" : "approvals remain"} pending.
@@ -228,6 +276,12 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
                 role="alertdialog"
                 aria-labelledby={denyConfirmationId}
                 data-approval-deny-confirmation={key}
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  cancelDeny(key);
+                }}
                 style={{
                   display: "grid",
                   gap: 8,
@@ -253,7 +307,7 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
                   <button
                     type="button"
                     disabled={isBusy}
-                    onClick={() => setConfirmingDeny(null)}
+                    onClick={() => cancelDeny(key)}
                     className="gw-approval-button gw-approval-button-neutral"
                   >
                     Cancel
@@ -263,6 +317,7 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
             ) : (
               <div style={{ display: "flex", gap: 8 }}>
                 <button
+                  ref={(node) => setActionRef(key, "approve", node)}
                   type="button"
                   disabled={isBusy}
                   aria-label={`Approve gate ${row.requestTitle ?? row.nodeId} for run ${row.runId}`}
@@ -272,6 +327,7 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
                   {isBusy ? "Submitting…" : "Approve"}
                 </button>
                 <button
+                  ref={(node) => setActionRef(key, "deny", node)}
                   type="button"
                   disabled={isBusy}
                   aria-label={`Deny gate ${row.requestTitle ?? row.nodeId} for run ${row.runId}`}

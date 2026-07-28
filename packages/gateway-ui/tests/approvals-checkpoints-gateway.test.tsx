@@ -186,13 +186,16 @@ describe("GatewayApprovalList", () => {
       textarea.dispatchEvent(new Event("keyup", { bubbles: true }));
     });
     await act(async () => click(harness.container.querySelector("[data-decision='deny']")));
+    expect((document.activeElement as HTMLElement | null)?.textContent).toBe("Confirm deny");
+    const confirmation = harness.container.querySelector("[data-slot='deny-confirmation']")!;
     await act(async () =>
-      click([...harness.container.querySelectorAll("button")].find((button) => button.textContent === "Cancel")!),
+      confirmation.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })),
     );
 
     expect(harness.container.querySelector("[data-slot='deny-confirmation']")).toBeNull();
     expect(gateway.approvalsSubmitted).toHaveLength(0);
     expect(harness.container.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe("keep this note");
+    expect(document.activeElement).toBe(harness.container.querySelector("[data-decision='deny']"));
   });
 
   test("ignores duplicate approval clicks while the first submission is pending", async () => {
@@ -236,10 +239,40 @@ describe("GatewayApprovalList", () => {
     );
     const button = harness.container.querySelector<HTMLButtonElement>("[data-decision='approve']")!;
     expect(button.disabled).toBe(false);
+    expect(document.activeElement).toBe(button);
     // Sighted users get a visible failure note, not only a color shift.
     const note = harness.container.querySelector("[data-slot='confirmation-note']");
     expect(note).not.toBeNull();
     expect(note!.textContent).toContain("Submission failed");
+  });
+
+  test("moves focus to the next approval after a successful keyboard-ready action", async () => {
+    const secondRow = {
+      ...approvalRow,
+      runId: "run-2",
+      nodeId: "gate-2",
+      iteration: 1,
+      requestTitle: "Second gate?",
+    };
+    gateway = startInMemoryGateway({ approvals: [approvalRow, secondRow] });
+    const harness = await mount(gateway, createElement(GatewayApprovalList, {}));
+    await waitFor(
+      harness,
+      () => harness.container.querySelectorAll("[data-decision='approve']").length === 2,
+      "both approvals render",
+    );
+    const first = harness.container.querySelector<HTMLButtonElement>("[data-decision='approve']")!;
+    first.focus();
+    await act(async () => first.click());
+    await waitFor(
+      harness,
+      () => harness.container.querySelector("[data-approval-key='run-1:gate:0']") === null,
+      "first approval leaves",
+    );
+    expect(document.activeElement).toBe(harness.container.querySelector("[data-decision='approve']"));
+    expect(
+      (document.activeElement as HTMLElement).closest("[data-approval-key]")?.getAttribute("data-approval-key"),
+    ).toBe("run-2:gate-2:1");
   });
 
   test("marks the confirmation expired when the row disappears unresolved", async () => {

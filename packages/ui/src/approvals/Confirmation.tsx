@@ -1,5 +1,14 @@
 /** @jsxImportSource react */
-import { createContext, useContext, type ComponentProps, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  type ComponentProps,
+  type ReactNode,
+  type Ref,
+} from "react";
 import { cn } from "../cn";
 import { useInjectUiCss } from "../styles";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
@@ -86,6 +95,14 @@ export type ConfirmationProps = Omit<ComponentProps<"div">, "children"> & {
   children: ReactNode;
 };
 
+function updateRef<T>(ref: Ref<T> | undefined, value: T | null): void {
+  if (typeof ref === "function") {
+    ref(value);
+  } else if (ref) {
+    ref.current = value;
+  }
+}
+
 /**
  * Human-in-the-loop approval gate anatomy (AI Elements Confirmation). The
  * root carries the state; parts self-show/hide from it:
@@ -97,16 +114,41 @@ export type ConfirmationProps = Omit<ComponentProps<"div">, "children"> & {
  * AI SDK mapping: approval-requested→requested, approval-responded→approved|denied,
  * output-denied→denied.
  */
-export function Confirmation({ state, children, className, ...props }: ConfirmationProps) {
+export function Confirmation({ state, children, className, ref, tabIndex, ...props }: ConfirmationProps) {
   useInjectUiCss();
   useInjectLaneCss(APPROVALS_CHECKPOINTS_CSS_ID, approvalsCss);
   const status = approvalStateToStatus(state);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const previousState = useRef(state);
+  const setRootRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      rootRef.current = node;
+      updateRef(ref, node);
+    },
+    [ref],
+  );
+
+  useEffect(() => {
+    const previous = previousState.current;
+    previousState.current = state;
+    if (previous !== "approving" && previous !== "denying") return;
+    if (state === "failed-submission") {
+      rootRef.current
+        ?.querySelector<HTMLButtonElement>(`[data-decision='${previous === "approving" ? "approve" : "deny"}']`)
+        ?.focus();
+    } else if (state === "approved" || state === "denied") {
+      rootRef.current?.focus();
+    }
+  }, [state]);
+
   return (
     <ConfirmationContext.Provider value={{ state }}>
       <div
+        ref={setRootRef}
         data-slot="confirmation"
         data-state={state}
         data-status={status}
+        tabIndex={tabIndex ?? -1}
         className={cn("sui-confirm", className)}
         {...props}
       >
