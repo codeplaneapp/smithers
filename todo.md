@@ -1,3 +1,48 @@
+# Smithers repository federation
+
+_Goal: split Smithers into focused public repositories while preserving a
+root-controlled `.repos` aggregate workspace and coordinated multi-repo release
+flow. Durable hardening run: `cbbe03b4-8cf6-4e30-b457-6ce7e79a5fa4`._
+
+## Completed planning and verification
+
+- [x] Define the 10 new repositories: `smithers-examples`, `smithers-agents`,
+      `smithers-sandboxes`, `smithers-integrations`, `smithers-plugins`,
+      `smithers-packs`, `smithers-observability`, `smithers-review`,
+      `smithers-evals`, and `smithers-signal`; coordinate moves into `multi`,
+      `plue`, and `awesome-smithers`.
+- [x] Build an exact manifest for all 8,835 tracked paths from clean source
+      commit `505717d175d5ef51b3b164aba5cbe969f805e2fe`.
+- [x] Build acyclic release plans with 7 initial and 14 future dependency
+      edges; audit 193 static import occurrences and 224 dynamic reads with zero
+      unresolved entries.
+- [x] Inventory 174 split-created files, including 90 init-pack support files,
+      29 UI files, and 31 preload importers.
+- [x] Obtain a clean independent Luna xhigh audit and confirm none of the 10
+      target GitHub repository names exists.
+- [x] Prepare the gated federation workflow with fresh architecture-review,
+      publish, merge, and final-verification gates.
+
+## Remaining execution
+
+- [ ] Finish and verify the paused Kimi/K3 artifact hardening for standalone
+      `workspace:*` rewrites, Telegram workspace setup, OpenClaw transitional
+      copies, drift guards, symlink gates, and awesome-smithers launch checks.
+- [ ] Repeat fresh Luna xhigh and Kimi/K3 reviews until both return
+      `approvable: true`; do not open the mutation gate before then.
+- [ ] Create the 10 public repositories and extract each lane with history.
+- [ ] Decouple, install, typecheck, test, document, and push every repository.
+- [ ] Update Smithers, `multi`, `plue`, generated docs/link bundles, and the
+      docs-only `awesome-smithers` listing PR.
+- [ ] Validate the root `.repos` aggregate workspace and coordinated
+      cross-repository release/publish dry run.
+- [ ] Run Sol xhigh final review, fix every finding, and repeat until approved.
+- [ ] Approve release/merge gates, land all PRs/releases, and verify the final
+      GitHub and npm state.
+
+No GitHub repositories, migration PRs, or releases had been created when this
+campaign was paused.
+
 # Testing-framework campaign — remaining work
 
 _Context: crash-recovery lineage ending (currently) at run `tf-final-replay-identity-20260718`
