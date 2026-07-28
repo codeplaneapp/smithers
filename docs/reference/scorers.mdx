@@ -361,6 +361,27 @@ workflow behavior.
 
 **Source** [`evalCases.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/evalCases.js) · **Tests** [`eval-cases.test.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/tests/eval-cases.test.js) · **See also** [Evals quickstart](/guides/evals-quickstart), [Score comparison RPC](/rpc/list-scores-for-runs)
 
+### isEvalInfraFailure
+
+`isEvalInfraFailure(errorText)` returns `true` when a red case's error text
+shows the harness or environment failed before the workflow's own behavior
+could be observed: a Smithers tooling denial (`TOOL_NETWORK_DISABLED`,
+`TOOL_GIT_REMOTE_DISABLED`, `AGENT_CONFIG_INVALID`), a socket, DNS, or TLS
+fault, a missing binary or fatal signal, out of memory, or a provider rate
+limit. `bunx smithers-orchestrator eval` uses it to grade such cases INCONCLUSIVE and exit `5`
+instead of `1`, so repair loops fix the harness rather than iterate on product
+code the suite never exercised. The pattern list is deliberately conservative:
+an unrecognized error stays a genuine failure.
+
+```ts
+import { isEvalInfraFailure } from "smithers-orchestrator/scorers";
+
+isEvalInfraFailure("connect ECONNREFUSED 127.0.0.1:5432"); // true
+isEvalInfraFailure("expected 3 rows, received 2"); // false
+```
+
+**Source** [`isEvalInfraFailure.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/isEvalInfraFailure.js) · **See also** [Evals quickstart](/guides/evals-quickstart)
+
 ## Running scorers
 
 Bound scorers run automatically when a task completes, so you rarely call these

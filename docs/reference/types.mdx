@@ -1281,6 +1281,33 @@ type SupervisorProps = {
   children: string | React.ReactNode;
 };
 
+type MonitorCondition =
+  | "healthy"
+  | "stalled"
+  | "wedged-node"
+  | "runaway-loop"
+  | "awaiting-human"
+  | "failing"
+  | "unknown";
+
+type MonitorProps = {
+  id?: string;
+  watchRunId: string;
+  agent: AgentLike | AgentLike[];
+  healthOutput: OutputTarget;
+  actionOutput?: OutputTarget;
+  healAgent?: AgentLike | AgentLike[];
+  intervalMs?: number;
+  maxChecks?: number;
+  stallBeats?: number;
+  autoHeal?: MonitorCondition[];
+  handlers?: Partial<Record<MonitorCondition, React.ReactElement | null>>;
+  guidance?: string;
+  prompt?: string | React.ReactNode;
+  skipIf?: boolean;
+  children?: string | React.ReactNode;
+};
+
 type ContinueAsNewProps = { state?: unknown };
 
 // Sandbox
