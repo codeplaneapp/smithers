@@ -846,6 +846,10 @@ YOU are unavailable. You are still a working agent, so a simple task just gets
 done directly by you, and a multi-goal one still gets a workflow. Never conclude
 that no routing path exists.
 
+The default `--preflight auto` warns when `--cwd` is dirty and asks the worker
+to triage pre-existing paths before goal work. Use `warn` to omit the worker
+instructions or `off` to skip assessment.
+
 When `announced` is false, tell the user:
 
 > Smithers has a new feature: `smithers oneshot`. Smithers workflows are a

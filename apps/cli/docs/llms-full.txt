@@ -2382,6 +2382,13 @@ Two stored preferences shape routing, kept in the global Smithers config:
 
 `--review on|off` overrides the stored review preference for one run.
 
+## Dirty working copies
+
+Oneshot runs directly in `--cwd`, so a stale detached lineage, foreign WIP, or
+`.jjconflict*` tree can be swept into a goal commit and make landing unsafe.
+The default `--preflight auto` warns and prepends agent-judged triage
+instructions; use `warn` to warn without injection or `off` to skip assessment.
+
 ## The live dashboard
 
 The oneshot UI shows the run as it happens:
@@ -2974,7 +2981,7 @@ commands[102]:
     purpose: Run one well-scoped goal with a strong agent in the background, with optional review and a live UI
     args[1]{name,type,required,desc}:
       goal,string,false,Goal to complete; required unless using --status or a preference setter
-    flags[14]{name,short,type,default,desc}:
+    flags[15]{name,short,type,default,desc}:
       goal-file,,string,,Read a long goal from a file
       model,,string,auto,Model slot or canonical model id
       agent,,enum,,codex|kimi|claude-code|opencode
@@ -2983,6 +2990,7 @@ commands[102]:
       set-trivial,,enum,,Persist trivial-task routing (direct|oneshot)
       status,,boolean,false,Print usable agents model chain and stored preferences as JSON
       cwd,,string,.,Working directory for the task
+      preflight,,enum,auto,Dirty-working-copy preflight (auto|warn|off)
       detach,d,boolean,true,Run in the background; --detach false runs in the foreground
       interactive,,boolean,false,Open the full-screen TUI monitor
       open,,boolean,true,Open the run UI after launch

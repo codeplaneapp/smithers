@@ -100,6 +100,13 @@ Two stored preferences shape routing, kept in the global Smithers config:
 
 `--review on|off` overrides the stored review preference for one run.
 
+## Dirty working copies
+
+Oneshot runs directly in `--cwd`, so a stale detached lineage, foreign WIP, or
+`.jjconflict*` tree can be swept into a goal commit and make landing unsafe.
+The default `--preflight auto` warns and prepends agent-judged triage
+instructions; use `warn` to warn without injection or `off` to skip assessment.
+
 ## The live dashboard
 
 The oneshot UI shows the run as it happens:

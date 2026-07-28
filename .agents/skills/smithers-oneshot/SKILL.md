@@ -27,6 +27,7 @@ Run one well-scoped goal with a strong agent in the background, with optional re
 | `--set-trivial` | `enum` |  | Persist trivial-task routing (`direct\|oneshot`) |
 | `--status` | `boolean` | `false` | Print usable agents, model chain, and stored preferences as JSON |
 | `--cwd` | `string` | `.` | Working directory for the task |
+| `--preflight` | `enum` | `auto` | Dirty-working-copy preflight (`auto\|warn\|off`) |
 | `--detach` | `boolean` | `true` | Run in the background; `--detach false` runs in the foreground |
 | `--interactive` | `boolean` | `false` | Open the full-screen TUI monitor |
 
@@ -36,4 +37,5 @@ Run one well-scoped goal with a strong agent in the background, with optional re
 - Run `--status` before first use; when no usable agent is detected, use the direct or workflow route instead.
 - Overrides: "oneshot" forces oneshot, "oneshot with review" adds `--review on`, "oneshot without review" adds `--review off`.
 - A workspace can override the built-in workflow with `.smithers/workflows/oneshot.tsx` and its dashboard with `.smithers/ui/oneshot.tsx`.
+- The default `--preflight auto` warns on a dirty `--cwd` and asks the agent to triage it before goal work; `warn` omits agent instructions and `off` skips assessment.
 - See the [oneshot guide](https://smithers.sh/guides/oneshot) for routing tiers and the live status narrator.

@@ -120,6 +120,12 @@ import { resolveOneshotChain } from "./oneshot/resolveOneshotChain.js";
 import { rewriteOneshotBooleanValues } from "./oneshot/rewriteOneshotBooleanValues.js";
 import { selectOneshotAgents } from "./oneshot/selectOneshotAgents.js";
 import { startOneshotStatusUpdater } from "./oneshot/startOneshotStatusUpdater.js";
+import {
+  assessWorkingCopy,
+  buildPreflightNotice,
+  needsPreflightNotice,
+  preflightConfigEntry,
+} from "./oneshot-preflight.js";
 import { listAccounts, removeAccount } from "@smithers-orchestrator/accounts";
 import { getUsageForAccounts, formatUsageReports } from "@smithers-orchestrator/usage";
 import { runAgentAdd, pingAccount } from "./agent-commands/runAgentAdd.js";
@@ -1864,6 +1870,12 @@ const oneshotOptions = z
     setTrivial: z.enum(["direct", "oneshot"]).optional().describe("Persist trivial-task routing"),
     status: z.boolean().default(false).describe("Print usable agents, model chain, and preferences as JSON"),
     cwd: z.string().default(".").describe("Working directory for the task"),
+    preflight: z
+      .enum(["auto", "warn", "off"])
+      .default("auto")
+      .describe(
+        "Dirty-working-copy preflight: auto warns and has the agent triage the tree first, warn only warns, off skips it",
+      ),
     runId: z.string().optional().describe("Run ID to create or resume (used by `smithers supervise` to recover a run)"),
     resume: z
       .boolean()
@@ -2631,10 +2643,15 @@ const MONITOR_PARENT_POLL_MS = 100;
  * @param {string} workflowPath
  * @param {UpCommandOptions} options
  * @param {FailFn} fail
+ * @param {Record<string, unknown>} [launchConfig]
  */
-async function executeUpCommand(c, workflowPath, options, fail) {
+async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {}) {
   const detachedLogFile = process.env[DETACHED_RUN_LOG_FILE_ENV];
   delete process.env[DETACHED_RUN_LOG_FILE_ENV];
+  const runConfig = {
+    ...launchConfig,
+    ...(detachedLogFile ? { logFile: detachedLogFile } : {}),
+  };
   try {
     let input;
     let annotations;
@@ -3245,7 +3262,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
           input,
           runId: effectiveRunId,
           parentRunId: options.parentRunId,
-          ...(detachedLogFile ? { config: { logFile: detachedLogFile } } : {}),
+          ...(Object.keys(runConfig).length > 0 ? { config: runConfig } : {}),
           ...buildDurabilityRunOptions({
             resume,
             force: options.force,
@@ -3297,7 +3314,7 @@ async function executeUpCommand(c, workflowPath, options, fail) {
         input,
         runId: monitoredRunId,
         parentRunId: options.parentRunId,
-        ...(detachedLogFile ? { config: { logFile: detachedLogFile } } : {}),
+        ...(Object.keys(runConfig).length > 0 ? { config: runConfig } : {}),
         ...buildDurabilityRunOptions({
           resume,
           force: options.force,
@@ -6097,6 +6114,34 @@ const cli = Cli.create({
         c.options.runId ??
         process.env.SMITHERS_ONESHOT_RUN_ID ??
         `oneshot-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+      // Dirty-working-copy preflight. The agent runs directly in `--cwd`, so a
+      // tree that already carries foreign work will have it swept into the
+      // agent's commits. Warn the operator, and in `auto` mode make triaging
+      // that work the agent's first job.
+      const preflightMode = c.options.preflight;
+      const preflightSummary = preflightMode === "off" ? null : assessWorkingCopy(taskCwd);
+      const preflightNotice =
+        preflightSummary && needsPreflightNotice(preflightSummary)
+          ? buildPreflightNotice(preflightSummary, effectiveRunId)
+          : null;
+      if (preflightNotice) {
+        runSync(
+          Effect.logWarning(preflightNotice.warning).pipe(
+            Effect.annotateLogs({
+              runId: effectiveRunId,
+              cwd: taskCwd,
+              ...preflightSummary.dirty,
+              detachedHead: preflightSummary.detachedHead,
+            }),
+          ),
+        );
+        process.stderr.write(`${preflightNotice.warning}\n`);
+      }
+      // Only the branches that actually build the workflow prepend the
+      // preamble: a detached launch re-runs this command in the child, which
+      // assesses the same tree itself.
+      const goalForWorkflow =
+        preflightNotice && preflightMode === "auto" ? `${preflightNotice.preamble}\n\n${goal}` : goal;
       if (c.options.interactive) {
         if (!Boolean(process.stdin.isTTY && process.stdout.isTTY)) {
           return fail({
@@ -6136,6 +6181,7 @@ const cli = Cli.create({
                 review: review ? "on" : "off",
                 model: c.options.model,
                 agent: c.options.agent,
+                preflight: preflightMode,
                 open: false,
                 startedByHarness: c.options.startedByHarness,
                 startedBySession: c.options.startedBySession,
@@ -6157,6 +6203,7 @@ const cli = Cli.create({
           review: review ? "on" : "off",
           model: c.options.model,
           agent: c.options.agent,
+          preflight: preflightMode,
           open: c.options.open,
           startedByHarness: c.options.startedByHarness,
           startedBySession: c.options.startedBySession,
@@ -6208,13 +6255,24 @@ const cli = Cli.create({
           {
             ...upOptions.parse({}),
             runId: effectiveRunId,
-            input: JSON.stringify({ goal, review: review ? "on" : "off", model: c.options.model ?? "auto" }),
+            input: JSON.stringify({
+              goal: goalForWorkflow,
+              review: review ? "on" : "off",
+              model: c.options.model ?? "auto",
+            }),
             root: taskCwd,
             startedByHarness: c.options.startedByHarness,
             startedBySession: c.options.startedBySession,
             startedByPrompt: c.options.startedByPrompt,
           },
           fail,
+          {
+            oneshot: {
+              review,
+              goal: goal.length > 500 ? `${goal.slice(0, 500)}…` : goal,
+              preflight: preflightConfigEntry(preflightMode, preflightSummary),
+            },
+          },
         );
       }
       try {
@@ -6225,7 +6283,7 @@ const cli = Cli.create({
         });
         const workflow = await buildOneshotWorkflow({
           cwd: taskCwd,
-          goal,
+          goal: goalForWorkflow,
           agents: selected.agents,
           reviewAgents: selected.reviewAgents,
           review,
@@ -6258,6 +6316,8 @@ const cli = Cli.create({
             "false",
             "--review",
             review ? "on" : "off",
+            "--preflight",
+            preflightMode,
             ...(c.options.model ? ["--model", c.options.model] : []),
             ...(c.options.agent ? ["--agent", c.options.agent] : []),
           ],
@@ -6280,7 +6340,12 @@ const cli = Cli.create({
               rootDir: taskCwd,
               config: {
                 ...(detachedLogFile ? { logFile: detachedLogFile } : {}),
-                oneshot: { chain: selected.chain, review, goal: goal.length > 500 ? `${goal.slice(0, 500)}…` : goal },
+                oneshot: {
+                  chain: selected.chain,
+                  review,
+                  goal: goal.length > 500 ? `${goal.slice(0, 500)}…` : goal,
+                  preflight: preflightConfigEntry(preflightMode, preflightSummary),
+                },
                 [BUILTIN_RESUME_CONFIG_KEY]: builtinResume,
               },
               ...buildDurabilityRunOptions({ resume: c.options.resume, force: c.options.force }),

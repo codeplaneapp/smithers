@@ -7,6 +7,7 @@
  *   review: "on" | "off";
  *   model?: string;
  *   agent?: string;
+ *   preflight?: "auto" | "warn" | "off";
  *   open: boolean;
  *   startedByHarness?: string;
  *   startedBySession?: string;
@@ -20,6 +21,7 @@ export function buildOneshotChildArgs(options) {
   args.push("--cwd", options.cwd, "--detach", "false", "--open", String(options.open), "--review", options.review);
   if (options.model) args.push("--model", options.model);
   if (options.agent) args.push("--agent", options.agent);
+  if (options.preflight) args.push("--preflight", options.preflight);
   if (options.startedByHarness) args.push("--started-by-harness", options.startedByHarness);
   if (options.startedBySession) args.push("--started-by-session", options.startedBySession);
   if (options.startedByPrompt !== undefined) args.push("--started-by-prompt", options.startedByPrompt);
