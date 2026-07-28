@@ -112,10 +112,7 @@ export function GatewayWorkflowsSection() {
           <span className="sui-sr-only">Connecting to gateway...</span>
         </div>
       ) : workflows.length === 0 ? (
-        <EmptyState
-          className="gw-live-empty"
-          description="No workflows with a custom UI on the gateway."
-        />
+        <EmptyState className="gw-live-empty" description="No workflows with a custom UI on the gateway." />
       ) : (
         workflows.map((workflow) => {
           const workflowRuns = runs.filter((run) => run.workflowKey === workflow.key);

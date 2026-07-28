@@ -112,7 +112,10 @@ describe.skipIf(process.platform === "win32")("cascading cancellation and orphan
         expect(typeof engine.pid).toBe("number");
         processes.add(engine.pid);
         expect(
-          await waitUntil(() => repo.exists("B.started") || engine.exitCode !== null || engine.signalCode !== null, 60_000),
+          await waitUntil(
+            () => repo.exists("B.started") || engine.exitCode !== null || engine.signalCode !== null,
+            60_000,
+          ),
         ).toBe(true);
         expect(engine.exitCode).toBeNull();
         expect(engine.signalCode).toBeNull();

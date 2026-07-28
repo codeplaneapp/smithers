@@ -82,9 +82,7 @@ describe("detectAvailableAgents", () => {
     };
 
     for (const [role, leader] of Object.entries(expectedLeaders)) {
-      expect(source.match(new RegExp(`^  ${role}: \\["([^"]+)"`, "m"))?.[1], `${role} preference leader`).toBe(
-        leader,
-      );
+      expect(source.match(new RegExp(`^  ${role}: \\["([^"]+)"`, "m"))?.[1], `${role} preference leader`).toBe(leader);
     }
   });
 

@@ -235,12 +235,12 @@ describe("createSmithersCollections multiplayer shape mapping", () => {
     // Electric calls this transformer for initial rows and subsequent updates.
     // Both Postgres snake case and already-normalized camel case must retain the
     // latest attempt in the live run-tree collection.
-    expect(
-      mapLiveNode?.({ run_id: "run-1", node_id: "task", iteration: 0, last_attempt: "2" }),
-    ).toMatchObject({ attempt: 2 });
-    expect(
-      mapLiveNode?.({ runId: "run-1", nodeId: "task", iteration: 0, lastAttempt: 3n }),
-    ).toMatchObject({ attempt: 3 });
+    expect(mapLiveNode?.({ run_id: "run-1", node_id: "task", iteration: 0, last_attempt: "2" })).toMatchObject({
+      attempt: 2,
+    });
+    expect(mapLiveNode?.({ runId: "run-1", nodeId: "task", iteration: 0, lastAttempt: 3n })).toMatchObject({
+      attempt: 3,
+    });
     collections.close();
     queryClient.clear();
   });

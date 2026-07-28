@@ -1964,9 +1964,7 @@ describe("Gateway", () => {
     });
     const event = await client.waitFor(
       (message) =>
-        message.type === "event" &&
-        message.event === "run.event" &&
-        message.payload.event === "node.started",
+        message.type === "event" && message.event === "run.event" && message.payload.event === "node.started",
     );
     expect(event.payload.runId).toBe("detached-run");
     expect(event.payload.payload.nodeId).toBe("task1");

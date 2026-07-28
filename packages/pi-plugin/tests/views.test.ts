@@ -185,20 +185,14 @@ describe("FrameScrubber", () => {
       [
         3,
         snapshot(
-          [
-            task(30, "task:chosen", "running"),
-            task(31, "task:historical", "running", { output: "historical three" }),
-          ],
+          [task(30, "task:chosen", "running"), task(31, "task:historical", "running", { output: "historical three" })],
           { frameNo: 3, seq: 3 },
         ),
       ],
       [
         4,
         snapshot(
-          [
-            task(40, "task:chosen", "finished"),
-            task(41, "task:historical", "finished", { output: "historical four" }),
-          ],
+          [task(40, "task:chosen", "finished"), task(41, "task:historical", "finished", { output: "historical four" })],
           { frameNo: 4, seq: 4 },
         ),
       ],
