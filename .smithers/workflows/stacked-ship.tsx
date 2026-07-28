@@ -1013,7 +1013,12 @@ export default smithers((ctx) => {
   });
 
   const pushGateReady = !input.push || (allReviewSettled && finalRow !== undefined);
-  const summaryReady = !input.push ? finalRow !== undefined || !allGreen : pushRow !== undefined;
+  // The summary is the TERMINAL roll-up: it reports per-lane decisions and the
+  // approved count, so it must wait for every reachable lane's review to settle
+  // (approved, or out of rounds). The push path gets that for free because push
+  // itself is gated on allReviewSettled; the no-push path has to ask directly,
+  // otherwise the run ends with a roll-up that reports 0 approved lanes.
+  const summaryReady = !input.push ? allReviewSettled && (finalRow !== undefined || !allGreen) : pushRow !== undefined;
 
   return (
     <Workflow name="stacked-ship">

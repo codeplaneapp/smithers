@@ -392,8 +392,18 @@ describe("graph gating", () => {
     expect(taskIds(late)).not.toContain("push");
     expect(taskIds(late)).not.toContain("summary");
 
+    // The terminal roll-up reports per-lane decisions, so a final-review row is
+    // not enough on its own: every reachable lane's review has to settle first.
     const finished = mergeOutputs(assembled, { stshipFinal: [row("final-review", FINAL_ROW)] });
-    const end = await render({}, finished);
+    const pending = await render({}, finished);
+    expect(taskIds(pending)).not.toContain("summary");
+
+    const end = await render(
+      {},
+      mergeOutputs(finished, {
+        stshipDecision: [row("one:approval", APPROVED), row("two:approval", APPROVED)],
+      }),
+    );
     expect(taskIds(end)).toContain("summary");
     expect(taskIds(end)).not.toContain("push");
   });
@@ -445,6 +455,7 @@ describe("simulation (coverWorkflow drives async approvals in-band)", () => {
       input: { laneConcurrency: 1 },
       workflowPath: WORKFLOW_PATH,
       assert: false,
+      executeCompute: true,
       mocks: {
         setup: SETUP_ROW,
         plan: PLAN_OUT,
@@ -484,6 +495,7 @@ describe("simulation (coverWorkflow drives async approvals in-band)", () => {
       input: { planJson: SINGLE_PLAN_JSON, laneConcurrency: 1, reviewRounds: 3 },
       workflowPath: WORKFLOW_PATH,
       assert: false,
+      executeCompute: true,
       mocks: {
         setup: SETUP_ROW,
         ...laneMocks("one"),
@@ -526,6 +538,7 @@ describe("simulation (coverWorkflow drives async approvals in-band)", () => {
       input: { planJson: SINGLE_PLAN_JSON, laneConcurrency: 1, reviewRounds: 2 },
       workflowPath: WORKFLOW_PATH,
       assert: false,
+      executeCompute: true,
       mocks: {
         setup: SETUP_ROW,
         ...laneMocks("one"),
@@ -550,6 +563,7 @@ describe("simulation (coverWorkflow drives async approvals in-band)", () => {
       input: { planJson: SINGLE_PLAN_JSON, laneConcurrency: 1, buildIterations: 3 },
       workflowPath: WORKFLOW_PATH,
       assert: false,
+      executeCompute: true,
       mocks: {
         setup: SETUP_ROW,
         ...laneMocks("one"),
