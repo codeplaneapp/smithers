@@ -1,0 +1,108 @@
+---
+title: "Retries and Recovery"
+description: "What happens when a step fails: retry policies and backoff, per-attempt history and filesystem state, agent failover chains, quota parking, stale-run supervision, and the post-failure autopsy."
+icon: "clock-rotate-left"
+---
+
+An agent step fails differently than an HTTP call fails. An HTTP call fails loudly and cheaply: a 503, a timeout, a connection reset. Retry it with backoff and jitter and you are mostly done. An LLM step can fail *silently* — a schema violation, a confidently wrong answer, a truncated response at the context-window edge — and it can fail *expensively*: the failed attempt already spent twenty minutes and half a million tokens, and it may already have edited files, pushed a commit, or sent a webhook. Retrying it blindly re-runs those side effects; not retrying it strands a six-hour run at step four of nine.
+
+So classical retry theory is necessary but not sufficient here. You still need bounded attempts, exponential backoff, and error classification — providers do rate-limit and 5xx like everyone else. But you also need things an HTTP retry loop has no concept of: per-attempt *filesystem* state (attempt 2 must not inherit attempt 1's half-finished edits), escalation to a different or stronger model rather than the same one that just failed, a distinction between "the agent failed" and "the provider's quota is exhausted" (the second says nothing about the agent), and explicit side-effect containment for actions that cannot be un-sent.
+
+This page covers the whole failure path in Smithers: what a retry policy looks like on a `<Task>`, how attempts are recorded, how a multi-agent failover chain escalates, what happens on quota exhaustion, and the operator surface — `retry-task`, `revert`, `supervise`, `cancel`, `bug`, and the automatic post-failure autopsy.
+
+## How the industry handles failure
+
+Every serious execution system converges on the same handful of mechanisms:
+
+| System | Mechanism | Tradeoff |
+| --- | --- | --- |
+| [Temporal](https://docs.temporal.io/encyclopedia/retry-policies) | Per-activity `RetryPolicy`: `initialInterval` (1s), `backoffCoefficient` (2), `maximumAttempts`, `nonRetryableErrorTypes`; `heartbeatTimeout` detects hung workers | Powerful but every knob is your problem; retries assume idempotent activities |
+| [AWS Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html) | `Retry`/`Catch` arrays matched by `ErrorEquals`, with `IntervalSeconds`, `BackoffRate`, `MaxAttempts`, and a `JitterStrategy` | Declarative and auditable; error taxonomy is string-matching |
+| [AWS Architecture Blog](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/) (Brooker) | Full jitter: `sleep = random(0, min(cap, base·2^n))` — kills synchronized retry storms | Randomness makes individual latency less predictable |
+| [Hystrix / resilience4j](https://resilience4j.readme.io/docs/circuitbreaker) | Circuit breaker: CLOSED → OPEN at a `failureRateThreshold`, probe via HALF_OPEN | Fails fast during outages; a mis-tuned breaker rejects healthy traffic |
+| [SQS dead-letter queues](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html) | After `maxReceiveCount` failed receives, the poison message moves to a DLQ for inspection | Isolates poison work; someone must actually look at the DLQ |
+| [Saga pattern](https://microservices.io/patterns/data/saga.html) | Compensating transactions semantically undo committed steps that can't be rolled back | Compensations must themselves be idempotent and retriable |
+| [Kubernetes](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/) | `restartPolicy` + CrashLoopBackOff: restart delay doubles from 10s, capped at 5m | Simple and universal; knows nothing about *why* the process died |
+
+What none of these cover are the agent-specific failure modes: nondeterministic output (the retry may succeed for no reason, or fail differently), schema-invalid output that is not an "error" at the transport level, context-window exhaustion, and the silent wrong answer that no retry policy can detect — only a scorer or reviewer can. Smithers borrows the classical mechanisms (backoff, heartbeats, compensation, a breaker for dead agents) and adds the agent-shaped ones on top.
+
+## Retry policy on a Task
+
+The retry surface lives directly on `<Task>` (verified in `packages/components/src/components/TaskProps.ts`):
+
+```tsx
+<Task
+  id="implement"
+  agent={[codex, opus]}            // failover chain: tries in order across retries
+  retries={3}                       // attempt budget; default is Infinity
+  retryPolicy={{ backoff: "exponential", initialDelayMs: 2000 }}
+  timeoutMs={10 * 60_000}
+  heartbeatTimeoutMs={120_000}      // no output/heartbeat for 2m ⇒ attempt fails
+  output={outputs.z.object({ summary: z.string() })}
+>
+  Implement the feature described in the spec.
+</Task>
+```
+
+The pieces, as implemented:
+
+- **`retries`** — additional attempts after the first. The default is **infinite retries** with exponential backoff starting at 1s (`resolveRetryConfig` in `packages/graph/src/extract.js` returns `retries: Infinity` and `{ backoff: "exponential", initialDelayMs: 1000 }` when nothing is set). Bound it with `retries={N}` or disable with `noRetry`. `continueOnFail` tasks default to 0 retries — except agent tasks, which get one free retry for transient CLI flakes.
+- **`retryPolicy`** — `{ backoff: "fixed" | "linear" | "exponential", initialDelayMs }`. Delays are computed as an Effect `Schedule` and capped at **5 minutes** (`packages/scheduler/src/retryPolicyToSchedule.js`). There is no jitter today; with typical fan-outs of tens of lanes against one provider, that is a real (if modest) gap versus [full jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/).
+- **`maxSchemaRetries`** — separate from failure retries: up to 3 (default) cheap correction calls when output doesn't parse against the Zod schema, before the attempt is considered failed at all.
+- **`timeoutMs` / `heartbeatTimeoutMs`** — a hard wall-clock limit and a Temporal-style liveness check: an agent that stops producing output past the heartbeat window fails the attempt instead of hanging the run.
+- **`continueOnFail` / `failurePolicy`** — whether a terminal failure halts the run, or quarantines the branch and lets independent work proceed.
+
+### Escalation: the failover chain
+
+`agent={[cheap, strong]}` (or `fallbackAgent={strong}`) is a failover chain. Attempt N runs on rung N−1: the retry doesn't just re-roll the same model, it escalates to the next agent. Two refinements in `packages/engine/src/engine.js` matter:
+
+- **Quota failures don't advance the rung.** A provider quota wall says nothing about the agent's health, so quota-failed attempts are discounted when picking the rung — otherwise one Codex quota blip would silently demote every task onto its fallback for the rest of the run.
+- **A run-wide breaker for dead agents.** An agent that fails preflight (e.g. a 401 from a bad API key) is disabled run-wide and selection skips it — a per-agent circuit breaker in the [Hystrix](https://resilience4j.readme.io/docs/circuitbreaker) sense, so a documented fallback actually engages instead of every task dying on the broken rung first.
+
+### Quota exhaustion: park, don't burn
+
+When an agent CLI hits a usage limit, `BaseCliAgent` classifies it (pattern-matching the provider's limit banner, extracting `quotaResetAtMs` when the message names a reset time) and the engine treats it as a **non-attempt**: the failure does not consume retry budget, and the run parks in `waiting-quota` instead of grinding its retries to zero against a wall that won't move. The gateway's sweep (or `smithers supervise`) resumes the run once the reset time elapses. This is the DLQ insight applied to quotas: don't redeliver into a known-dead consumer.
+
+## Attempt history and per-attempt filesystem state
+
+Every attempt is a row in `_smithers_attempts` (`packages/db/src/internal-schema/smithersAttempts.js`), keyed by `(run_id, node_id, iteration, attempt)`, with `state`, timing, `heartbeat_at_ms`, `error_json`, `response_text` — and `jj_pointer`: a version-control pointer to the working-tree state for that attempt. That last column is the agent-specific part. Attempt 1 may have left the repo half-edited; the attempt record knows exactly what the tree looked like, so you can inspect it (`smithers node`) or roll the workspace back to it:
+
+```bash
+bunx smithers-orchestrator node -r RUN_ID -n implement          # attempts, errors, tool calls
+bunx smithers-orchestrator revert workflow.tsx -r RUN_ID -n implement --attempt 1
+bunx smithers-orchestrator retry-task workflow.tsx -r RUN_ID -n implement   # reset + resume
+```
+
+`retry-task` resets the node (and by default its dependents; `--no-deps` to scope it) and resumes the workflow — the manual override when the automatic budget is spent or you've fixed the environment. `timetravel` combines both: revert filesystem, reset DB state, optionally `--resume`.
+
+### Side effects: the saga-shaped part
+
+Retrying a task that already sent the email is not recovery, it's a duplicate send. Mark it:
+
+```tsx
+<Task id="notify" sideEffect={{ idempotent: false, revert: async (ctx) => {/* compensate */} }} ...>
+```
+
+On retry after a non-idempotent side-effect executed, Smithers injects an explicit warning into the next attempt's prompt ("previous attempts already ran non-idempotent side effects") and reuses the same `ctx.idempotencyKey`; `revert`/`timetravel` run registered compensation handlers ([saga-style](https://microservices.io/patterns/data/saga.html)) unless you pass `--no-revert`, and replay across unresolved non-idempotent effects is refused without `--force`. See [Recipes → retry policy](/recipes#retry-policy--timeouts).
+
+## When the run itself dies
+
+- **Stale runs** — `smithers supervise -r RUN_ID` (or `--all` for a workspace sweep) polls every 10s and auto-resumes runs whose heartbeat is stale past 30s (`--interval`, `--stale-threshold`, `--max-concurrent 3`, `--dry-run`). Kubernetes-style restart supervision, but resuming from the durable DB position rather than from zero.
+- **Cancellation** — `smithers cancel <runId>` safely halts agents and terminates one run; `smithers pause <runId>` lets in-flight tasks finish and parks resumably; `smithers down` sweeps all active runs (stale-only unless `--force`).
+- **The autopsy** — when `up`/`workflow run` reports a failed run, the `post-failure` system workflow launches automatically: it gathers `inspect`/`events`/source, investigates with read-only tools, classifies the failure (`workflow-bug` / `environment` / `agent-flake` / `smithers-bug` / `unknown`), and emits one suggestion with exact commands — behind an approval gate before any bug is reported. Full details: [Post-Failure Autopsies](/guide/post-failure). Opt out with `--no-post-failure` or `SMITHERS_POST_FAILURE=0`.
+- **Reporting** — `smithers bug --run RUN_ID` files a report to bug.smithers.sh with the run's workflow name, status, error, and last ~50 events, secrets scrubbed.
+
+## Guarantees and limits
+
+- Attempt history is durable and complete: every attempt, its error, and its filesystem pointer survive process death.
+- Retries are **infinite by default**. That is the right default for overnight runs and the wrong one for side-effectful tasks — bound those explicitly.
+- Backoff is capped at 5 minutes and **has no jitter**; large synchronized fan-outs can still thundering-herd a provider on recovery.
+- There are no Temporal-style `nonRetryableErrorTypes` on tasks: error classification is built in (quota, preflight/auth, heartbeat, timeout), not user-extensible per error type.
+- Retries cannot detect a *plausible wrong answer*. That is what `scorers`, review tasks, and approval gates are for — a retry policy is not a quality gate.
+
+## See also
+
+- [Post-Failure Autopsies](/guide/post-failure) — the automatic failure investigation.
+- [Recipes → retry policy & timeouts](/recipes#retry-policy--timeouts) — the compact reference this page expands.
+- [Durability](/capabilities/durability) — what survives a crash and the resume contract.
+- [Human-in-the-Loop](/capabilities/human-in-the-loop) — approval gates, the recovery path retries can't provide.

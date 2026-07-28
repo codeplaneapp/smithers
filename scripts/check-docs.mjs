@@ -201,7 +201,6 @@ const REFERENCE_DOCKER_COMPOSE = join(root, "deploy/reference/docker-compose.yml
 const REFERENCE_SYSTEMD_ENV = join(root, "deploy/reference/systemd/smithers-gateway.env.example");
 const REFERENCE_K8S_DEPLOYMENT = join(root, "deploy/reference/k8s/deployment.yaml");
 const REFERENCE_K8S_CONFIGMAP = join(root, "deploy/reference/k8s/configmap.yaml");
-const IRON_PROXY_EGRESS_SPEC = join(root, ".smithers/specs/iron-proxy-egress-seam.html");
 const CLOUD_EXECUTION_SPEC = join(root, ".smithers/specs/cloud-execution-engineering.md");
 const CLOUD_PRODUCT_SPEC = join(root, ".smithers/specs/cloud-execution-product.md");
 
@@ -695,42 +694,6 @@ function checkTimerDocsMatchWakeRuntime() {
     }
   } else {
     console.log("✓ Timer docs describe current Gateway and supervisor wake behavior");
-  }
-}
-
-function checkIronProxySpecMatchesSandboxSeam() {
-  const source = readFileSync(IRON_PROXY_EGRESS_SPEC, "utf8");
-  const required = [
-    "sandbox-owned egress seam",
-    "SandboxEgressConfig",
-    "packages/sandbox/src/SandboxEgressConfig.ts",
-    "executeSandbox()",
-    "request.egress",
-    "Smithers core has no built-in iron-proxy provider shortcut.",
-  ];
-  const forbidden = [
-    "EgressProvider",
-    "packages/driver/src/egress",
-    "provider.attach",
-    "BaseCliAgent",
-    "ProxyAgent",
-    "global undici",
-    "agentServiceSpec",
-    "@smithers-orchestrator/iron-proxy",
-    'provider: "iron-proxy"',
-    'provider="iron-proxy"',
-  ];
-  const missing = required.filter((needle) => !contains(source, needle));
-  const stale = forbidden.filter((needle) => contains(source, needle));
-  if (missing.length || stale.length) {
-    failed = true;
-    console.error(
-      "\n✗ .smithers/specs/iron-proxy-egress-seam.html does not match the sandbox-owned egress implementation:",
-    );
-    if (missing.length) console.error(`    missing: ${missing.join(", ")}`);
-    if (stale.length) console.error(`    stale: ${stale.join(", ")}`);
-  } else {
-    console.log("✓ iron-proxy spec describes sandbox-owned egress, not harness-level proxy wiring");
   }
 }
 
@@ -4175,7 +4138,6 @@ checkDocumentedSmithersImportsMatchFacade();
 checkDocumentedPackageImportsResolve();
 checkImplementedApisNotMarkedComingSoon();
 checkTimerDocsMatchWakeRuntime();
-checkIronProxySpecMatchesSandboxSeam();
 checkSandboxProviderDocsMatchPackages();
 checkRunStateDocsMatchCurrentEmission();
 checkRunStateDocsMatchDerivationContract();

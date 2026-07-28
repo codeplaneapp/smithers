@@ -155,6 +155,23 @@
         ]
       },
       {
+        "group": "Capabilities",
+        "pages": [
+          "capabilities/durability",
+          "capabilities/declarative-workflows",
+          "capabilities/retries-and-recovery",
+          "capabilities/time-travel",
+          "capabilities/human-in-the-loop",
+          "capabilities/parallelism-and-isolation",
+          "capabilities/agent-agnosticism",
+          "capabilities/structured-output",
+          "capabilities/memory-and-context",
+          "capabilities/observability",
+          "capabilities/live-uis",
+          "capabilities/evals-and-optimization"
+        ]
+      },
+      {
         "group": "Build Workflows",
         "pages": [
           "guides/mdx-authoring",

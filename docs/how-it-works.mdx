@@ -324,7 +324,7 @@ import { schemaAdherenceScorer, latencyScorer } from "smithers-orchestrator/scor
   agent={analyst}
   scorers={{
     schema: { scorer: schemaAdherenceScorer() },
-    latency: { scorer: latencyScorer({ targetMs: 5000 }) },
+    latency: { scorer: latencyScorer({ targetMs: 5000, maxMs: 30000 }) },
   }}
 >
   Analyze...

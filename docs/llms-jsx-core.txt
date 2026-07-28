@@ -1,0 +1,202 @@
+# Smithers JSX API
+
+> Smithers JSX/React authoring API: build workflows as React elements rendered into a durable task graph.
+
+---
+
+## JSX API
+
+> Build Smithers workflows as React elements rendered into a durable task graph.
+
+The JSX API is the default authoring surface. A workflow is a React function
+component: it reads persisted state through `ctx` and returns the task graph
+for the next frame. It shares one runtime with the Effect API (SQLite
+persistence, no rerun of completed work on resume, schema-validated outputs,
+dependency-driven scheduling), differing only in authoring style: every task,
+approval, sequence, parallel block, branch, loop, worktree, and reusable
+fragment is an ordinary React element you can extract into a component, return
+from a function, or compose with others.
+
+Use JSX for most workflows; reach for the Effect API only inside an Effect
+service or for a React-free API over generated workflow definitions.
+
+## Minimal workflow
+
+```tsx
+/** @jsxImportSource smithers-orchestrator */
+import { createSmithers } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { Workflow, Task, Sequence, smithers, outputs } = createSmithers({
+  input: z.object({ repo: z.string(), sha: z.string() }),
+  analysis: z.object({
+    summary: z.string(),
+    risk: z.enum(["low", "medium", "high"]),
+  }),
+  report: z.object({ markdown: z.string() }),
+});
+
+export default smithers((ctx) => {
+  const analysis = ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" });
+
+  return (
+    <Workflow name="repo-review">
+      <Sequence>
+        <Task id="analyze" output={outputs.analysis} timeoutMs={120_000} retries={2}>
+          {() => ({ summary: "Found one risky migration.", risk: "medium" as const })}
+        </Task>
+        {analysis ? (
+          <Task id="report" output={outputs.report}>
+            {() => ({ markdown: `# Review\n\n${analysis.summary}\n\nRisk: ${analysis.risk}` })}
+          </Task>
+        ) : null}
+      </Sequence>
+    </Workflow>
+  );
+}, { output: outputs.report });
+```
+
+`createSmithers(schemas)` registers Zod schemas as durable output relations and
+returns the typed components (`Workflow`, `Task`, `Sequence`, ...), the
+`smithers(...)` wrapper, and `outputs`, the typed reference for each schema
+(`outputs.analsis` is a compile-time error). The `input` key is special: it
+types `ctx.input` and is parsed on fresh runs; every other key is an output
+table.
+
+The workflow module's default export is the workflow. `smithers(build, opts)`
+takes workflow-level options as its second argument; `opts.output` selects
+which output table is the run's final result (defaulting to a schema key
+literally named `output`).
+
+## Tasks and dependencies
+
+A `<Task>` has three modes, chosen by its children:
+
+```tsx
+<Task id="analyze" output={outputs.analysis} agent={analyst}>{`Review ${ctx.input.repo}`}</Task>
+<Task id="count" output={outputs.count}>{() => readdirSync(dir).length}</Task>
+<Task id="config" output={outputs.config}>{{ region: "us-east-1", retries: 3 }}</Task>
+```
+
+An agent task's children are the prompt and the response is validated against
+the schema. A compute task's children are a function run at execution time
+(it may return a plain value or a `Promise`). A static task's children are a
+plain value persisted directly.
+
+Dependencies are ordinary JSX conditionals over persisted state:
+`ctx.outputMaybe(outputs.analysis, { nodeId: "analyze" })` returns `undefined`
+while `analyze` is incomplete, so the dependent Task simply does not mount;
+once the output exists on a later render frame, it mounts and runs. For one
+task consuming exactly one upstream output, `<Task deps={{ analyze:
+outputs.analysis }}>` with a `(deps) => ...` children callback is the more
+ergonomic form of the same check (agent tasks only).
+
+Task IDs are durable: changing one creates a new task and leaves the old
+persisted output behind. Tasks also accept `retries`, `retryPolicy`,
+`timeoutMs`, `skipIf`, and `cache`.
+
+Data flow is unidirectional: the render function is a pure function of `ctx`,
+tasks emit outputs, the runtime persists them, and the next render reads them.
+Use `useState`/`useMemo` only for ephemeral render-time state; anything the
+workflow must remember across crashes goes through `ctx` and a Task output.
+
+## Control flow
+
+Four primitives, composed freely:
+
+```tsx
+<Sequence>                                   // children execute top-to-bottom (default for <Workflow>)
+<Parallel maxConcurrency={3}>                // children execute concurrently
+<Branch if={cond} then={<A />} else={<B />} />
+<Loop id="fix" until={done} maxIterations={5} onMaxReached="return-last">
+```
+
+An explicit `<Sequence>` is only needed when nesting a sequential group inside
+`<Parallel>` or another primitive. Use `.map()` and ternaries when the *number*
+or *presence* of tasks depends on state; use `<Parallel>` and `<Branch>` for
+fixed task sets whose execution shape depends on state. `<Branch>` takes
+`then`/`else` as props, not children.
+
+`<Loop>` re-renders the same body repeatedly until `until` holds or
+`maxIterations` is reached. `onMaxReached` (`'fail'` or `'return-last'`)
+governs overflow; the default returns the last iteration's outputs rather than
+failing. A `<Loop>` may not be the literal immediate child of another `<Loop>`.
+Inside a loop, read the current iteration's outputs with `ctx.latest(...)`.
+
+```tsx
+<Parallel maxConcurrency={3}>
+  {items.map((item) => (
+    <Loop key={item} id={`fix-${item}`} until={!!done(item)} maxIterations={3} onMaxReached="return-last">
+      <Task id={`fix-${item}`} output={outputs.fix}>{() => attempt(item)}</Task>
+    </Loop>
+  ))}
+</Parallel>
+```
+
+## Worktrees
+
+`<Worktree path branch baseBranch skipIf>` runs its children inside a git (or
+jj) worktree, created beforehand and torn down after. Relative paths resolve
+against the launch root; leave the agent `cwd` unset so the worktree supplies
+the isolated working directory.
+
+```tsx
+<Worktree path="scratch/review" baseBranch="main">
+  <Task id="implement" output={outputs.build} agent={agent}>Implement the feature.</Task>
+</Worktree>
+```
+
+## Reuse
+
+Static reuse is an ordinary React element or component:
+
+```tsx
+const reviewShard = (
+  <Sequence>
+    <Task id="read" output={outputs.diff}>{() => readDiff()}</Task>
+    <Task id="summarize" output={outputs.summary}>{() => summarize()}</Task>
+  </Sequence>
+);
+```
+
+Parameterized reuse is a component (or a function returning elements) taking
+props. Because task IDs are the durable identity, a fragment mounted more than
+once must derive its IDs from a per-instance prefix, or the two mounts collide:
+
+```tsx
+function ReviewShard({ scope, path }: { scope: string; path: string }) {
+  return (
+    <Sequence>
+      <Task id={`${scope}.read`} output={outputs.diff}>{() => readDiff(path)}</Task>
+      <Task id={`${scope}.summarize`} output={outputs.summary}>{() => summarize(path)}</Task>
+    </Sequence>
+  );
+}
+
+<Parallel>
+  <ReviewShard scope="api" path="packages/api" />
+  <ReviewShard scope="web" path="apps/web" />
+</Parallel>;
+```
+
+Reading a scoped fragment's output uses the same scoped node id:
+`ctx.outputMaybe(outputs.summary, { nodeId: "api.summarize" })`.
+
+Smithers JSX is real React: components, props, children, composition, context,
+and hooks all work, so a fragment can be published as a component and imported
+across workflows. The importing workflow supplies the schemas through its own
+`createSmithers` call.
+
+## Operational notes
+
+- Reserved output-column names `runId`, `nodeId`, and `iteration` are managed
+  by the runtime; never declare them in an output schema.
+- Keep task IDs stable across releases; use new IDs for materially different
+  work. Sibling IDs must be unique within a run.
+- A task that does not render is simply not in the plan; there is no "skipped"
+  placeholder unless you use `<Branch>` or `skipIf`.
+- Prefer idempotent compute bodies; for external side effects, key on the run
+  and node identity available through `ctx`.
+- `smithers(build, { output: outputs.<key> })` designates the run's result
+  table; each finished task writes one row into its own output table.
+- Schemas are Zod v4 (`import { z } from "zod"`), objects at the top level.
