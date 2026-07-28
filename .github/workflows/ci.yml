@@ -155,11 +155,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # packages/server's browser-session tests drive a real headless Chromium;
-      # the runner image's browser cache rarely matches the pinned playwright
-      # version, so install it explicitly.
+      # packages/server and the ship-pipeline UI suites drive real headless
+      # Chromium. Install the pinned browser on every Linux shard, including
+      # shard 0 where the ship-pipeline suites run, so they cannot skip-green.
       - name: Install Playwright Chromium (Linux)
-        if: runner.os == 'Linux' && matrix.shard != 0
+        if: runner.os == 'Linux'
         run: pnpm -C packages/server exec playwright install chromium
 
       - name: Check Bun lockfile
@@ -200,6 +200,11 @@ jobs:
         if: runner.os == 'Linux' && matrix.shard == 0
         timeout-minutes: 20
         run: pnpm -C .smithers test:ddd
+
+      - name: Run ship-pipeline browser suite
+        if: runner.os == 'Linux' && matrix.shard == 0
+        timeout-minutes: 10
+        run: pnpm -C .smithers test:ddd:browser
 
       - name: Run workspace package tests (Windows shard)
         if: runner.os == 'Windows'

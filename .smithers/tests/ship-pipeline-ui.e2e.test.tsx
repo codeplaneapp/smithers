@@ -25,17 +25,16 @@ import { z } from "zod/v4";
  * seeded-deterministic part and EVERYTHING the UI touches (gateway, RPC, schema-
  * bound node-output tables, the event window) is real.
  *
- * This is the check that caught the event-frame bug: the gateway emits frames
- * shaped `{ event, payload: { nodeId, state }, seq }`, so the UI's pipeline /
- * ledger (which derive per-ticket state from the event stream) only light up
- * when nodeId is read from `payload` — a "serves 200" smoke can never catch that.
+ * This is the check that catches event-frame drift: durable event rows are flat,
+ * use PascalCase lifecycle names, and carry nodeId in `payload`; live WebSocket
+ * frames wrap dotted lifecycle names under `payload.event` and nodeId under
+ * `payload.payload`. The pipeline / ledger must understand both contracts.
  *
  * Runs under bun (the orchestrator's SQLite layer uses bun:sqlite); Chromium is
  * resolved from the studio-2 Playwright install.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(here, "../..");
 const uiEntry = resolve(here, "../ui/ship-pipeline.tsx");
 const RUN_ID = "ship-pipeline-e2e-run";
 
@@ -217,7 +216,7 @@ beforeAll(async () => {
   port = await findOpenPort();
   base = `http://127.0.0.1:${port}`;
   await gateway.listen({ port, host: "127.0.0.1" });
-});
+}, 120_000);
 
 afterAll(async () => {
   try {
@@ -254,8 +253,8 @@ browserTest(
       await page.waitForSelector('[data-testid="ship-ticket-0001-voice-capture"]', { timeout: 20_000 });
       await page.waitForSelector('[data-testid="ship-ticket-0002-question-pool"]', { timeout: 20_000 });
 
-      // 3) EVENT-derived state: both tickets land (progress pill + ledger). This is
-      //    the assertion that fails unless nodeId is read from frame.payload.
+      // 3) EVENT-derived state: both tickets land (progress pill + ledger). This
+      //    catches both payload-shape and lifecycle-event casing drift.
       await page.waitForFunction(
         () => (document.querySelector('[data-testid="ship-progress"]')?.textContent ?? "").includes("2/2 landed"),
         undefined,

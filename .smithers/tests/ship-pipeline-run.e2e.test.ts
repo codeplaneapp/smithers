@@ -236,7 +236,8 @@ browserTest(
       await page.waitForSelector('[data-testid="ship-pipeline"]', { timeout: 20_000 });
       await page.waitForSelector('[data-testid="ship-ticket-0001-voice-capture"]', { timeout: 20_000 });
 
-      // Event-derived landed state: the merge task really finished → 1/1 landed.
+      // Event-derived landed state: the durable NodeFinished merge event must
+      // survive replay and be normalized by the UI → 1/1 landed.
       await page.waitForFunction(
         () => (document.querySelector('[data-testid="ship-progress"]')?.textContent ?? "").includes("1/1 landed"),
         undefined,

@@ -139,18 +139,21 @@ const STAGES: Array<{ key: string; label: string; abbr: string; node: (slug: str
 ];
 
 function classifyType(type: string): StageState | "" {
-  if (type.includes("fail") || type.includes("error") || type.includes("cancel")) return "failed";
-  if (type.includes("complete") || type.includes("finish")) return "done";
-  if (type.includes("start")) return "active";
+  const normalized = type.toLowerCase();
+  if (normalized.includes("fail") || normalized.includes("error") || normalized.includes("cancel")) return "failed";
+  if (normalized.includes("complete") || normalized.includes("finish")) return "done";
+  if (normalized.includes("start")) return "active";
   return "";
 }
 
-// The run-event stream wraps each node lifecycle event two levels deep:
+// Durable event rows are flat and use PascalCase event names:
+//   { event: "NodeFinished", payload: { nodeId, state }, seq }
+// Live run-event frames wrap each lifecycle event two levels deep:
 //   { event: "run.event",
 //     payload: { streamId, event: "node.finished", payload: { nodeId, state }, seq } }
 // so the classifiable label is `payload.event` (node.started/finished/failed) and
-// the nodeId is `payload.payload.nodeId`. We also accept shallower shapes so the
-// UI degrades gracefully if the frame envelope ever changes.
+// the nodeId is `payload.payload.nodeId`. Accept both contracts because the
+// collection-backed hook can surface either replayed durable rows or live frames.
 type EventInfo = { nodeId: string; type: string; seq: number };
 function eventInfo(ev: unknown): EventInfo {
   const frame = isRecord(ev) ? ev : {};
