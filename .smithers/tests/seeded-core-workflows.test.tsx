@@ -103,13 +103,8 @@ describe.serial("seeded core workflow causal behavior", () => {
     expect(String(review.task("review-moderator").prompts[0])).toContain("MAJOR_REVIEW_DESCRIPTION");
     expect(review.output).toEqual({
       approved: false,
-<<<<<<< HEAD
       // Not classified as an environment fault, so the schema default holds.
       blocked: false,
-||||||| parent of 466f418917 (🚨 fix: repair wave 2 gate failures)
-=======
-      blocked: false,
->>>>>>> 466f418917 (🚨 fix: repair wave 2 gate failures)
       feedback: "MAJOR_REVIEW_FEEDBACK",
       issues: [
         { severity: "major", title: "MAJOR_REVIEW_ISSUE", file: "src/a.ts", description: "MAJOR_REVIEW_DESCRIPTION" },
