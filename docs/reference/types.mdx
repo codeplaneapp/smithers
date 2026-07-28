@@ -192,7 +192,40 @@ type RunAuthContext = {
   role: string;
   createdAt: string;
 };
+```
 
+## Status contracts
+
+`RunStatus` is the persisted run lifecycle and the type of
+`RunResult.status`. Its categories are:
+
+| Category | Values | Meaning |
+|---|---|---|
+| Active | `running` | Work can be executing or scheduled. |
+| Suspended | `waiting-approval`, `waiting-event`, `waiting-timer`, `waiting-quota`, `paused` | The run is nonterminal and can resume. |
+| Terminal | `finished`, `continued`, `failed`, `cancelled` | This run will not schedule more work. A `continued` run points to its successor through `nextRunId`. |
+
+`TaskState` is the persisted, detailed lifecycle for an individual task.
+Import it from `@smithers-orchestrator/scheduler/TaskState`. `NodeStatus` is a
+separate six-value display palette exported by
+`@smithers-orchestrator/gateway-react`; `useGatewayRunTree` collapses detailed
+task and run states into that palette. In particular, every `waiting-*` value
+maps to `waiting`. Do not use the display palette as a persisted lifecycle
+contract.
+
+| Task category | Values |
+|---|---|
+| Queued | `pending` |
+| Active | `in-progress` |
+| Suspended | `waiting-approval`, `waiting-event`, `waiting-timer`, `waiting-quota`, `waiting-bound`, `bound-stale` |
+| Terminal | `finished`, `failed`, `cancelled`, `skipped` |
+
+Status unions can gain values. Add a visible unknown fallback when consuming
+Gateway or event data, preserve the original value for diagnostics, and treat
+an unknown `waiting-*` value as suspended and nonterminal. See the
+[compatibility and changelog policy](/changelogs/compatibility-policy).
+
+```ts
 // =============================================================================
 // Run
 // =============================================================================
@@ -286,9 +319,36 @@ type RunStatus =
   | "waiting-event"
   | "waiting-timer"
   | "waiting-quota"
+  | "paused"
   | "finished"
   | "continued"
   | "failed"
+  | "cancelled";
+
+// Persisted per-task lifecycle. Import from
+// @smithers-orchestrator/scheduler/TaskState.
+type TaskState =
+  | "pending"
+  | "waiting-approval"
+  | "waiting-event"
+  | "waiting-timer"
+  | "waiting-quota"
+  | "waiting-bound"
+  | "bound-stale"
+  | "in-progress"
+  | "finished"
+  | "failed"
+  | "cancelled"
+  | "skipped";
+
+// Display palette returned by useGatewayRunTree. Import from
+// @smithers-orchestrator/gateway-react.
+type NodeStatus =
+  | "ok"
+  | "running"
+  | "queued"
+  | "failed"
+  | "waiting"
   | "cancelled";
 
 type RetryTaskOptions = {

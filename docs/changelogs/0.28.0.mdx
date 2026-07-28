@@ -264,6 +264,12 @@ Two pieces of that work are directly usable:
 
 ## Upgrade notes
 
+- **`waiting-quota` is a suspended, nonterminal run status.** This persisted
+  `RunStatus` value can appear in `RunResult.status`, run records, Gateway run
+  payloads, and `RunStatusChanged` events when every eligible agent is quota
+  blocked. It was omitted from these upgrade notes originally. Consumers with
+  an exhaustive status switch or lookup table must handle it like the other
+  `waiting-*` values, not as `running` or `failed`.
 - **Completed-run worktrees are now reaped by default.** Set
   `RunOptions.keepWorktrees` or `SMITHERS_KEEP_WORKTREES=1` to opt out. Dirty
   or unpushed worktrees are always preserved.
