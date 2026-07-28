@@ -1,4 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
+import { execFileSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const failureWorkflowPath = resolve(here, "workflows", "e2e-monitor-failure.tsx");
 
 /**
  * The gateway run inspector, reached from the runs list and by deep link.
@@ -45,6 +51,42 @@ async function findFinishedTaskRun(page: Page): Promise<RunRow> {
     )
     .toBe(true);
   return found as RunRow;
+}
+
+async function launchFailedRun(page: Page): Promise<string> {
+  const launched = await rpc<RunRow>(page, "launchRun", { workflow: "e2e-monitor-failure" });
+  await expect
+    .poll(
+      async () => {
+        const runs = await rpc<RunRow[]>(page, "listRuns");
+        return runs.find((run) => run.runId === launched.runId)?.status;
+      },
+      { timeout: 20_000 },
+    )
+    .toBe("failed");
+  return launched.runId;
+}
+
+/** Seed stored attempt metadata in the workflow's real DB, then read it through the real getNodeOutput RPC. */
+function seedFailureDetails(runId: string, errorJson: string, partial: Record<string, unknown> | null): void {
+  execFileSync("bun", [
+    "-e",
+    `
+      const [workflowPath, runId, errorJson, heartbeatDataJson] = process.argv.slice(1);
+      const workflow = (await import(workflowPath)).default;
+      const db = workflow.db.$client;
+      const result = db.run(
+        "UPDATE _smithers_attempts SET error_json = ?, heartbeat_data_json = ? WHERE run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?",
+        [errorJson, heartbeatDataJson, runId, "deterministic-failure", 0, 1],
+      );
+      db.close();
+      if (result.changes !== 1) throw new Error(\`Expected one failure attempt, updated \${result.changes}\`);
+    `,
+    failureWorkflowPath,
+    runId,
+    errorJson,
+    partial === null ? "" : JSON.stringify(partial),
+  ]);
 }
 
 /**
@@ -130,6 +172,48 @@ test("selecting a tree node loads its real output", async ({ page }) => {
   await expect(page.getByTestId("gateway-node-detail")).toContainText("compute");
   await expect(page.getByTestId("gateway-node-output")).toBeVisible();
   await expect(page.getByTestId("gateway-node-output")).toContainText('"value": 42');
+  await expect(page.getByTestId("gateway-node-partial")).toHaveCount(0);
+  await expect(page.getByTestId("gateway-node-error")).toHaveCount(0);
+
+  expect(pageErrors, pageErrors.join("\n")).toEqual([]);
+});
+
+test("a failed node shows partial output and structured attempt details", async ({ page }) => {
+  const pageErrors = trackPageErrors(page);
+  const runId = await launchFailedRun(page);
+  seedFailureDetails(
+    runId,
+    JSON.stringify({
+      name: "FixtureFailure",
+      code: "E2E_PARTIAL_FAILURE",
+      message: "failed after the saved checkpoint",
+    }),
+    { progress: 50, checkpoint: "halfway" },
+  );
+
+  await page.goto(`/gw/e2e-monitor-failure/${runId}`);
+  await page.getByTestId("tree-row-deterministic-failure").click();
+
+  await expect(page.getByTestId("gateway-node-partial")).toContainText('"progress": 50');
+  await expect(page.getByTestId("gateway-node-partial")).toContainText('"checkpoint": "halfway"');
+  await expect(page.getByTestId("gateway-node-error")).toContainText("Name: FixtureFailure");
+  await expect(page.getByTestId("gateway-node-error")).toContainText("Code: E2E_PARTIAL_FAILURE");
+  await expect(page.getByTestId("gateway-node-error")).toContainText("Message: failed after the saved checkpoint");
+  await expect(page.getByTestId("gateway-node-error")).toContainText("Attempt: 1");
+
+  expect(pageErrors, pageErrors.join("\n")).toEqual([]);
+});
+
+test("a failed node shows a useful raw stored error", async ({ page }) => {
+  const pageErrors = trackPageErrors(page);
+  const runId = await launchFailedRun(page);
+  seedFailureDetails(runId, "raw non-json failure detail", null);
+
+  await page.goto(`/gw/e2e-monitor-failure/${runId}`);
+  await page.getByTestId("tree-row-deterministic-failure").click();
+
+  await expect(page.getByTestId("gateway-node-error")).toContainText("Message: raw non-json failure detail");
+  await expect(page.getByTestId("gateway-node-error")).toContainText("Attempt: 1");
 
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
 });
