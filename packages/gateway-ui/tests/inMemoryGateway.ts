@@ -16,6 +16,7 @@ export type SeedState = {
   runs?: Array<Record<string, unknown>>;
   approvals?: Array<Record<string, unknown>>;
   workflows?: Array<Record<string, unknown>>;
+  crons?: Array<Record<string, unknown>>;
   events?: Record<string, Array<Record<string, unknown>>>;
   trees?: Record<string, unknown>;
   outputs?: Record<string, unknown>;
@@ -52,6 +53,8 @@ export type InMemoryGateway = {
   approvalsSubmitted: Array<Record<string, unknown>>;
   /** Every rewindRun body the UI POSTed, in order. */
   rewinds: Array<Record<string, unknown>>;
+  /** Every cronCreate body the UI POSTed, in order. */
+  cronsCreated: Array<Record<string, unknown>>;
   /** HTTP requests observed by the real in-memory server. */
   requests: Array<{ method: string; path: string; authorization: string | null }>;
   /** Append rows to a run's event log after mount and notify SSE subscribers. */
@@ -74,6 +77,7 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
     runs: seed.runs ?? [],
     approvals: seed.approvals ?? [],
     workflows: seed.workflows ?? [],
+    crons: seed.crons ?? [],
     events: seed.events ?? {},
     trees: seed.trees ?? {},
     outputs: seed.outputs ?? {},
@@ -253,6 +257,30 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
       if (path === "/v1/api/workflows" && request.method === "GET") {
         return ok(state.workflows);
       }
+      // GET /v1/api/crons (cronList)
+      if (path === "/v1/api/crons" && request.method === "GET") {
+        return ok(state.crons);
+      }
+      // POST /v1/api/crons (cronCreate)
+      if (path === "/v1/api/crons" && request.method === "POST") {
+        const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+        const cronId = typeof body.cronId === "string" && body.cronId ? body.cronId : `cron-${state.crons.length + 1}`;
+        const row = {
+          cronId,
+          pattern: body.pattern ?? "* * * * *",
+          workflowPath: `.smithers/workflows/${String(body.workflow ?? "workflow")}.tsx`,
+          workflow: body.workflow ?? "workflow",
+          enabled: body.enabled ?? true,
+          createdAtMs: Date.now(),
+          lastRunAtMs: null,
+          nextRunAtMs: null,
+          errorJson: null,
+        };
+        state.crons = [...state.crons.filter((existing) => existing.cronId !== cronId), row];
+        gateway.cronsCreated.push(body);
+        const emitted = broadcast(["crons"]);
+        return ok(row, { seq: emitted });
+      }
 
       return fail(404, "NOT_FOUND", `No route for ${request.method} ${path}`);
     },
@@ -267,6 +295,7 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
     launches: [],
     approvalsSubmitted: [],
     rewinds: [],
+    cronsCreated: [],
     requests: [],
     pushEvents(runId, rows) {
       state.events[runId] = [...(state.events[runId] ?? []), ...rows];

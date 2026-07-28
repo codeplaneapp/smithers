@@ -1,9 +1,18 @@
 /** @jsxImportSource react */
-import type { CSSProperties, ReactNode } from "react";
+import { useInsertionEffect, type CSSProperties, type ReactNode } from "react";
 import { useGatewayRunTree } from "@smithers-orchestrator/gateway-react";
-import { StatusPill, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@smithers-orchestrator/ui";
+import {
+  EmptyState,
+  StatusPill,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@smithers-orchestrator/ui";
 import { nodeStatusIndex, rollupNodeStatus } from "./runNodeStatus";
-import { theme } from "./theme";
+import { ensureGatewayUiStyles, theme } from "./theme";
 
 export type FleetTableItem = {
   /** Stable row key, usually the fleet item id. */
@@ -80,26 +89,43 @@ export function FleetTable({
   style,
   useRunTree = useGatewayRunTree,
 }: FleetTableProps) {
+  useInsertionEffect(ensureGatewayUiStyles, []);
   const tree = useRunTree(runId);
   const statuses = nodeStatusIndex(tree.nodes);
+  // While the run tree is still loading, rolled-up statuses would all read
+  // "queued" — a lie. Gate the pills on the tree's readiness instead.
+  const treeLoading = Boolean(runId) && tree.isLoading;
   return (
-    <Table className={className} style={style}>
+    <Table className={className} style={style} role="grid">
       <TableHeader>
-        <TableRow>
-          <TableHead>{titleColumn}</TableHead>
+        <TableRow role="row">
+          <TableHead role="columnheader">{titleColumn}</TableHead>
           {columns.map((column, index) => (
-            <TableHead key={index}>{column}</TableHead>
+            <TableHead key={index} role="columnheader">
+              {column}
+            </TableHead>
           ))}
-          <TableHead>{statusColumn}</TableHead>
+          <TableHead role="columnheader">{statusColumn}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
+        {items.length === 0 ? (
+          <TableRow role="row">
+            <TableCell role="gridcell" colSpan={columns.length + 2}>
+              <EmptyState description="No items." />
+            </TableCell>
+          </TableRow>
+        ) : null}
         {items.map((item) => {
-          const status = item.status ?? (item.nodeIds ? rollupNodeStatus(statuses, item.nodeIds) : "pending");
+          const status =
+            item.status ??
+            (treeLoading ? undefined : item.nodeIds ? rollupNodeStatus(statuses, item.nodeIds) : "pending");
           const selected = selectedKey === item.key;
           return (
             <TableRow
               key={item.key}
+              role="row"
+              className="gw-fleet-row"
               aria-selected={onSelect ? selected : undefined}
               tabIndex={onSelect ? 0 : undefined}
               onClick={onSelect ? () => onSelect(item.key) : undefined}
@@ -119,14 +145,18 @@ export function FleetTable({
                 boxShadow: selected ? `inset 2px 0 0 ${theme.accent}` : undefined,
               }}
             >
-              <TableCell>{item.title}</TableCell>
+              <TableCell role="gridcell">{item.title}</TableCell>
               {columns.map((_, index) => (
-                <TableCell key={index} style={{ color: theme.textDim }}>
+                <TableCell key={index} role="gridcell" style={{ color: theme.textDim }}>
                   {item.meta?.[index] ?? null}
                 </TableCell>
               ))}
-              <TableCell>
-                <StatusPill status={status} />
+              <TableCell role="gridcell">
+                {status === undefined ? (
+                  <span style={{ color: theme.textDim, fontSize: 12 }}>Loading…</span>
+                ) : (
+                  <StatusPill status={status} />
+                )}
               </TableCell>
             </TableRow>
           );

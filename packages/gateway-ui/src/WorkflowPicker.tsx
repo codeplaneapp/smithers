@@ -21,12 +21,13 @@ type WorkflowRow = { key: string; readableName?: string };
  * {@link useGatewayWorkflows}. Pair with {@link LaunchButton} to build a launcher.
  */
 export function WorkflowPicker({ value, onChange, hasUiOnly = false, className, style }: WorkflowPickerProps) {
-  const { data } = useGatewayWorkflows(hasUiOnly ? { filter: { hasUi: true } } : undefined);
+  const { data, loading } = useGatewayWorkflows(hasUiOnly ? { filter: { hasUi: true } } : undefined);
   const workflows = (data ?? []) as WorkflowRow[];
 
   return (
     <select
       className={className}
+      aria-label="Workflow"
       value={value ?? ""}
       onChange={(e) => onChange?.(e.target.value)}
       style={{
@@ -41,7 +42,7 @@ export function WorkflowPicker({ value, onChange, hasUiOnly = false, className, 
       }}
     >
       <option value="" disabled>
-        Select a workflow…
+        {loading && workflows.length === 0 ? "Loading workflows…" : "Select a workflow…"}
       </option>
       {workflows.map((wf) => (
         <option key={wf.key} value={wf.key}>

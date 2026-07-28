@@ -352,11 +352,37 @@ export function RunEventLog({
   const { events, error, streaming } = useGatewayRunEvents(runId, { maxEvents, includeHeartbeats: true });
   const [showAll, setShowAll] = useState(showAllHeartbeats);
   const endRef = useRef<HTMLDivElement | null>(null);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  // At-bottom gating (the MessageScroller pattern): auto-scroll only while the
+  // reader is at the tail; a scrolled-up reader gets a jump button instead of
+  // being yanked to the newest event. Starts true so the initial tail-follow
+  // and zero-height (unmeasurable) viewports behave as before.
+  const atBottomRef = useRef(true);
+  const [jumpVisible, setJumpVisible] = useState(false);
   const latestSeq = events[events.length - 1]?.seq;
 
+  const handleScroll = () => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 24;
+    atBottomRef.current = atBottom;
+    if (atBottom) setJumpVisible(false);
+  };
+
   useEffect(() => {
-    if (follow) endRef.current?.scrollIntoView({ block: "end" });
+    if (!follow) return;
+    if (atBottomRef.current) {
+      endRef.current?.scrollIntoView({ block: "end" });
+    } else if (latestSeq !== undefined) {
+      setJumpVisible(true);
+    }
   }, [latestSeq, follow]);
+
+  const jumpToLatest = () => {
+    atBottomRef.current = true;
+    setJumpVisible(false);
+    endRef.current?.scrollIntoView({ block: "end" });
+  };
 
   const rows = useMemo(() => buildLogRows(events, !showAll), [events, showAll]);
   const heartbeatFrames = useMemo(
@@ -373,16 +399,23 @@ export function RunEventLog({
     body = <EmptyState description={streaming ? "Waiting for events…" : "No events."} />;
   } else {
     body = (
-      <div className="gw-event-rows">
-        {rows.map((row) => (
-          <EventRow
-            key={row.key}
-            row={row}
-            selected={Boolean(row.nodeId) && row.nodeId === selectedNodeId}
-            onSelectNode={onSelectNode}
-          />
-        ))}
-        <div ref={endRef} />
+      <div className="gw-event-log-body">
+        <div className="gw-event-rows" ref={scrollerRef} onScroll={handleScroll}>
+          {rows.map((row) => (
+            <EventRow
+              key={row.key}
+              row={row}
+              selected={Boolean(row.nodeId) && row.nodeId === selectedNodeId}
+              onSelectNode={onSelectNode}
+            />
+          ))}
+          <div ref={endRef} />
+        </div>
+        {jumpVisible ? (
+          <button type="button" className="gw-event-jump" onClick={jumpToLatest}>
+            <span aria-hidden="true">↓</span> Jump to latest
+          </button>
+        ) : null}
       </div>
     );
   }

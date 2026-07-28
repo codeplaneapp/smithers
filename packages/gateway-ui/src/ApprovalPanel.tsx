@@ -1,6 +1,7 @@
 /** @jsxImportSource react */
 import { useEffect, useInsertionEffect, useRef, useState, type CSSProperties } from "react";
 import { useGatewayActions, useGatewayApprovals } from "@smithers-orchestrator/gateway-react";
+import { Skeleton } from "@smithers-orchestrator/ui";
 import { ensureGatewayUiStyles, theme } from "./theme";
 
 export type ApprovalPanelProps = {
@@ -199,29 +200,36 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
         ...style,
       }}
     >
-      {decisionFeedback ? (
-        <div
-          ref={statusRef}
-          role="status"
-          aria-live="polite"
-          tabIndex={-1}
-          style={{ color: theme.success, fontSize: 13 }}
-        >
-          {decisionFeedback.approved ? "Approved" : "Denied"} gate {decisionFeedback.target} for run{" "}
-          {decisionFeedback.runId}. {approvals.length}{" "}
-          {approvals.length === 1 ? "approval remains" : "approvals remain"} pending.
-        </div>
-      ) : null}
-      {refreshError ? (
-        <div role="alert" style={{ color: theme.danger, fontSize: 13 }}>
-          {refreshError}
-        </div>
-      ) : null}
-      {error && !refreshError ? (
-        <div role="alert" style={{ color: theme.danger, fontSize: 13 }}>
-          {decisionFeedback
-            ? `${decisionFeedback.approved ? "Approved" : "Denied"} gate ${decisionFeedback.target} for run ${decisionFeedback.runId}, but pending approvals could not be refreshed: ${error.message}`
-            : `Approval refresh failed: ${error.message}`}
+     {decisionFeedback ? (
+       <div
+         ref={statusRef}
+         role="status"
+         aria-live="polite"
+         tabIndex={-1}
+         style={{ color: theme.success, fontSize: 13 }}
+       >
+         {decisionFeedback.approved ? "Approved" : "Denied"} gate {decisionFeedback.target} for run{" "}
+         {decisionFeedback.runId}. {approvals.length}{" "}
+         {approvals.length === 1 ? "approval remains" : "approvals remain"} pending.
+       </div>
+     ) : null}
+     {refreshError ? (
+       <div role="alert" style={{ color: theme.danger, fontSize: 13 }}>
+         {refreshError}
+       </div>
+     ) : null}
+     {error && !refreshError ? (
+       <div role="alert" style={{ color: theme.danger, fontSize: 13 }}>
+         {decisionFeedback
+           ? `${decisionFeedback.approved ? "Approved" : "Denied"} gate ${decisionFeedback.target} for run ${decisionFeedback.runId}, but pending approvals could not be refreshed: ${error.message}`
+           : `Approval refresh failed: ${error.message}`}
+       </div>
+     ) : null}
+      {loading && approvals.length === 0 && !error ? (
+        <div role="status" aria-label="Loading approvals" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {[0, 1].map((index) => (
+            <Skeleton key={index} style={{ height: 96, borderRadius: theme.radius }} />
+          ))}
         </div>
       ) : null}
       {!loading && approvals.length === 0 && !error ? (
@@ -229,8 +237,9 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
       ) : null}
       {approvals.map((row) => {
         const key = approvalKey(row);
-        const isBusy = busy.has(key);
-        const denyConfirmationId = `gw-deny-${key}`;
+       const isBusy = busy.has(key);
+       const denyConfirmationId = `gw-deny-${key}`;
+        const meta = `${row.workflowKey ?? ""} · ${row.runId} · ${row.nodeId}#${row.iteration}`;
         return (
           <div
             key={key}
@@ -246,8 +255,18 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
           >
             <div style={{ fontWeight: 600, fontSize: 14 }}>{row.requestTitle ?? `Approval: ${row.nodeId}`}</div>
             {row.requestSummary ? <div style={{ fontSize: 13, color: theme.textDim }}>{row.requestSummary}</div> : null}
-            <div style={{ fontFamily: theme.fontMono, fontSize: 11, color: theme.textDim }}>
-              {String(row.workflowKey ?? "")} · {row.runId} · {row.nodeId}#{row.iteration}
+            <div
+              title={meta}
+              style={{
+                fontFamily: theme.fontMono,
+                fontSize: 11,
+                color: theme.textDim,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {meta}
             </div>
             <label htmlFor={`gw-note-${key}`} style={{ display: "grid", gap: 4, fontSize: 12, color: theme.textDim }}>
               Decision note (optional)
@@ -339,10 +358,10 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
               </div>
             )}
             {submitError?.key === key ? (
-              <div role="alert" style={{ color: theme.danger, fontSize: 13 }}>
-                {submitError.approved ? "Approve" : "Deny"} failed for gate {submitError.target} on run{" "}
-                {submitError.runId}: {submitError.message}. Try again.
-              </div>
+             <div role="alert" style={{ color: theme.danger, fontSize: 13 }}>
+               {submitError.approved ? "Approve" : "Deny"} failed for gate {submitError.target} on run{" "}
+               {submitError.runId}: {submitError.message}. Try again.
+             </div>
             ) : null}
           </div>
         );

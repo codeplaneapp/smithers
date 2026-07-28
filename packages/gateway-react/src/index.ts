@@ -7,6 +7,16 @@ export { SmithersCollectionsProvider } from "./SmithersCollectionsProvider.ts";
 export { useGatewayActions } from "./useGatewayActions.ts";
 export { useGatewayApprovals } from "./useGatewayApprovals.ts";
 export { useGatewayCrons } from "./useGatewayCrons.ts";
+export { useCronSchedule, type UseCronScheduleOptions } from "./useCronSchedule.ts";
+export {
+  cronStatus,
+  cronToCalendarEvents,
+  expandCron,
+  parseCronPattern,
+  DEFAULT_PER_CRON_LIMIT,
+  type CronScheduleEvent,
+  type ParsedCronPattern,
+} from "./cronSchedule.ts";
 export { useGatewayMemoryFacts } from "./useGatewayMemoryFacts.ts";
 export { useGatewayMutation } from "./useGatewayMutation.ts";
 export { useGatewayPrompts } from "./useGatewayPrompts.ts";
@@ -34,6 +44,30 @@ export {
   type UseGatewayConnectionStatusResult,
 } from "./sync/useGatewayConnectionStatus.ts";
 export { useSmithersCollections } from "./useSmithersCollections.ts";
+export {
+  asArray,
+  asBool,
+  asNumber,
+  asString,
+  camelKey,
+  isRecord,
+  normalizeRow,
+  parseMaybeJson,
+  rowOf,
+  strings,
+  unwrapRow,
+} from "./rows.ts";
+export { paramFromUrl, runIdFromUrl, workflowUiHref } from "./url.ts";
+export { useRow } from "./useRow.ts";
+export {
+  buildChatLines,
+  chatLineFromFrame,
+  chatLinesFromFrame,
+  logLineFromFrame,
+  type ChatLine,
+  type LogLine,
+  type RunEventFrame,
+} from "./events.ts";
 export {
   foldDelegation,
   parseDelegationNodeId,

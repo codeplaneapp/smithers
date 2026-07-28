@@ -1,9 +1,10 @@
 /** @jsxImportSource react */
-import { useEffect, useInsertionEffect, type CSSProperties } from "react";
+import { useEffect, useInsertionEffect, useRef, useState, type CSSProperties } from "react";
 import { useGatewayRuns } from "@smithers-orchestrator/gateway-react";
 import type { GatewayRunSummaryRow } from "@smithers-orchestrator/gateway-client";
+import { RelativeTime, Skeleton } from "@smithers-orchestrator/ui";
 import { StatusPill } from "./StatusPill";
-import { ensureGatewayUiStyles, theme } from "./theme";
+import { ensureGatewayUiStyles, theme, visuallyHidden } from "./theme";
 
 export type RunListProps = {
   /** Filter passed straight to `useGatewayRuns({ filter })`. */
@@ -35,6 +36,11 @@ export function shortTime(ms: number | undefined): string {
   }
 }
 
+/** Full local date+time for hover titles. */
+function fullTime(ms: number): string {
+  return new Date(ms).toLocaleString();
+}
+
 /**
  * A live list of runs from the gateway. Reads {@link useGatewayRuns} and renders
  * one selectable row per run with a {@link StatusPill}. Pass `onSelect` to drive
@@ -52,6 +58,25 @@ export function RunList({
   useInsertionEffect(ensureGatewayUiStyles, []);
   const { data, loading, error, refetch } = useRuns(filter ? { filter } : undefined);
   const runs = (data ?? []) as GatewayRunSummaryRow[];
+
+  // Announce status transitions to assistive technology. The first populated
+  // snapshot only seeds the baseline — everything arrives "new" on mount.
+  const previousStatuses = useRef<Map<string, string> | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const statusSignature = runs.map((run) => `${run.runId}:${String(run.status ?? "")}`).join("|");
+  useEffect(() => {
+    const next = new Map(runs.map((run) => [run.runId, String(run.status ?? "")]));
+    const previous = previousStatuses.current;
+    previousStatuses.current = next;
+    if (previous === null) return;
+    const changes: string[] = [];
+    for (const [runId, status] of next) {
+      const before = previous.get(runId);
+      if (before !== undefined && before !== status) changes.push(`Run ${runId} is now ${status || "unknown"}`);
+    }
+    if (changes.length > 0) setAnnouncement(changes.join(". "));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusSignature]);
 
   // listRuns is pull-only on the local gateway path, so poll to stay live.
   useEffect(() => {
@@ -72,11 +97,18 @@ export function RunList({
         ...style,
       }}
     >
+      <div role="status" aria-live="polite" style={visuallyHidden}>
+        {announcement}
+      </div>
       {error ? (
         <div style={{ color: theme.danger, fontSize: 13, padding: 8 }}>{error.message ?? "Failed to load runs."}</div>
       ) : null}
       {loading && runs.length === 0 ? (
-        <div style={{ color: theme.textDim, fontSize: 13, padding: 8 }}>Loading runs…</div>
+        <div role="status" aria-label="Loading runs" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {[0, 1, 2].map((index) => (
+            <Skeleton key={index} style={{ height: 56, borderRadius: theme.radius }} />
+          ))}
+        </div>
       ) : null}
       {!loading && runs.length === 0 && !error ? (
         <div style={{ color: theme.textDim, fontSize: 13, padding: 8 }}>No runs yet.</div>
@@ -115,7 +147,13 @@ export function RunList({
               ) : null}
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-              <span style={{ fontSize: 11, color: theme.textDim }}>{shortTime(run.createdAtMs)}</span>
+              {run.createdAtMs ? (
+                <RelativeTime
+                  ts={run.createdAtMs}
+                  title={fullTime(run.createdAtMs)}
+                  style={{ fontSize: 11, color: theme.textDim }}
+                />
+              ) : null}
               <StatusPill status={run.status} />
             </span>
           </button>

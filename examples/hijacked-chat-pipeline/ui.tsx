@@ -328,7 +328,7 @@ function SessionChat({
         disabled={!connected}
         docked
         placeholder={`Message the ${stageLabel.toLowerCase()} agent…`}
-        status={`${sessionStatusLabel(status)} · ${candidate.mode}`}
+        statusText={`${sessionStatusLabel(status)} · ${candidate.mode}`}
         actions={
           <Button
             size="sm"
@@ -420,7 +420,7 @@ function LaunchChat({ onLaunched }: { onLaunched: (runId: string) => void }) {
         disabled={busy}
         docked
         placeholder="What should the pipeline work on?"
-        status={busy ? "Launching pipeline…" : "Three interactive stages"}
+        statusText={busy ? "Launching pipeline…" : "Three interactive stages"}
         submitLabel="Launch pipeline"
       />
     </main>

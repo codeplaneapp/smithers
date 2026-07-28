@@ -39,11 +39,24 @@ export function SmithersNodeHandles({ isConnectable = true }: { isConnectable?: 
  * StatusPill status vocabulary, content line) composed inside
  * {@link SmithersNodeHandles} so edges stay attached. This is the visual
  * language WorkflowGraph paints by default — there is no competing graph
- * model; `nodeTypes` overrides replace it per graph.
+ * model; `nodeTypes` overrides replace it per graph. The `gw-canvas-node`
+ * class adds the kind-colored left rail from gatewayUiCss.
  */
 export function SmithersCanvasNode({ data, selected, isConnectable }: NodeProps<SmithersFlowNode>) {
   return (
-    <WorkflowNode title={data.label} kind={data.kind} status={data.status} selected={selected}>
+    <WorkflowNode
+      title={data.label}
+      kind={data.kind}
+      status={data.status}
+      selected={selected}
+      className="gw-canvas-node"
+      // The graph canvas is a labelled region, not a listbox: suppress the
+      // option role WorkflowNode would otherwise emit for a selectable card,
+      // or every node is an orphaned option in the accessibility tree.
+      // Selection stays visible via data-selected and the wrapper focus ring.
+      role={undefined}
+      aria-selected={undefined}
+    >
       <SmithersNodeHandles isConnectable={isConnectable} />
       {data.output ? <WorkflowNodeContent>{data.output}</WorkflowNodeContent> : null}
     </WorkflowNode>

@@ -1,8 +1,8 @@
 /** @jsxImportSource react */
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useInsertionEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { useGatewayActions } from "@smithers-orchestrator/gateway-react";
 import type { RunStartedBy } from "@smithers-orchestrator/gateway-client";
-import { theme } from "./theme";
+import { ensureGatewayUiStyles, theme } from "./theme";
 
 export type LaunchButtonProps = {
   /** The workflow key to launch (must be registered on the gateway). */
@@ -37,6 +37,7 @@ export function LaunchButton({
 }: LaunchButtonProps) {
   const actions = useGatewayActions();
   const [busy, setBusy] = useState(false);
+  useInsertionEffect(ensureGatewayUiStyles, []);
 
   const launch = async () => {
     setBusy(true);
@@ -58,8 +59,9 @@ export function LaunchButton({
   return (
     <button
       type="button"
-      className={className}
+      className={["gw-launch-button", className].filter(Boolean).join(" ")}
       disabled={busy}
+      aria-busy={busy}
       onClick={launch}
       style={{
         padding: "8px 16px",
@@ -70,8 +72,6 @@ export function LaunchButton({
         fontFamily: theme.fontSans,
         fontWeight: 600,
         fontSize: 13,
-        cursor: busy ? "default" : "pointer",
-        opacity: busy ? 0.6 : 1,
         ...style,
       }}
     >

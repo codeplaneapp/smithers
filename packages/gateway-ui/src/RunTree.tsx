@@ -28,6 +28,8 @@ export function RunTree({ runId, onSelectNode, activeNodeId, className, style }:
   return (
     <div
       className={className}
+      role="tree"
+      aria-label="Run nodes"
       style={{
         display: "flex",
         flexDirection: "column",

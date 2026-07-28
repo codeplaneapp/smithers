@@ -34,6 +34,8 @@ export function NodeRow({ node, depth, activeNodeId, onSelectNode }: NodeRowProp
         type="button"
         onClick={() => onSelectNode?.(node)}
         className="gw-node-row"
+        role="treeitem"
+        aria-level={depth + 1}
         data-active={active}
         data-interactive={Boolean(onSelectNode)}
         style={{ "--gw-node-depth": depth } as CSSProperties}

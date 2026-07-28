@@ -107,8 +107,9 @@ describe("SmithersCanvasNode", () => {
     expect(html).toContain('data-kind="compute"');
     expect(html).toContain('data-status="running"');
     expect(html).toContain('data-selected="true"');
-    expect(html).toContain('role="option"');
-    expect(html).toContain('aria-selected="true"');
+    // The canvas is a labelled region, not a listbox: no option semantics.
+    expect(html).not.toContain('role="option"');
+    expect(html).not.toContain('aria-selected');
     expect(html).toContain('data-slot="workflow-node-header"');
     expect(html).toContain('data-slot="workflow-node-status"');
     expect(html).toContain("Running");
@@ -128,8 +129,8 @@ describe("SmithersCanvasNode", () => {
     const html = renderInProvider(node);
     expect(html).toContain('data-slot="workflow-node"');
     expect(html).toContain('data-selected="false"');
-    expect(html).toContain('role="option"');
-    expect(html).toContain('aria-selected="false"');
+    expect(html).not.toContain('role="option"');
+    expect(html).not.toContain('aria-selected');
     expect(html).not.toContain('data-slot="workflow-node-content"');
     expect(html).not.toContain('data-slot="workflow-node-status"');
     expect(html).toContain("Ship it");
@@ -255,27 +256,24 @@ describe("WorkflowGraph mounted accessible tree", () => {
     expect(GESTURE_POLL_MS).toBeLessThan(TEST_BUDGET_MS);
   });
 
-  test("the canvas is a listbox that owns every node option card", async () => {
+  test("the canvas is a labelled region with no orphaned option cards", async () => {
     const { container, unmount } = await mount({ spec: SPEC });
-    // Exactly one listbox: the WorkflowCanvas region itself.
-    const listboxes = container.querySelectorAll("[role='listbox']");
-    expect(listboxes.length).toBe(1);
-    const listbox = listboxes[0]!;
-    expect(listbox.getAttribute("data-slot")).toBe("workflow-canvas");
-    expect(listbox.getAttribute("aria-label")).toBe("Workflow graph");
-    expect(listbox.getAttribute("aria-multiselectable")).toBe("true");
-    // Every node card renders as an option OWNED by the listbox — an
-    // orphaned role="option" (the previous structure) is invalid ARIA.
-    const options = listbox.querySelectorAll("[role='option']");
-    expect(options.length).toBe(2);
-    for (const option of options) {
-      expect(option.getAttribute("data-slot")).toBe("workflow-node");
-      expect(option.getAttribute("aria-selected")).toBe("false");
+    // No listbox anywhere: the canvas is a region, nodes are not options.
+    expect(container.querySelectorAll("[role='listbox']").length).toBe(0);
+    const regions = container.querySelectorAll("[role='region']");
+    expect(regions.length).toBe(1);
+    const region = regions[0]!;
+    expect(region.getAttribute("data-slot")).toBe("workflow-canvas");
+    expect(region.getAttribute("aria-label")).toBe("Workflow graph");
+    // No node card renders as an orphaned role="option" (invalid ARIA).
+    expect(container.querySelectorAll("[role='option']").length).toBe(0);
+    const cards = container.querySelectorAll("[data-slot='workflow-node']");
+    expect(cards.length).toBe(2);
+    for (const card of cards) {
+      expect(card.getAttribute("aria-selected")).toBeNull();
+      expect(card.getAttribute("data-selected")).toBe("false");
     }
-    // No option escapes the listbox context.
-    expect(container.querySelectorAll("[role='option']").length).toBe(2);
-    // ReactFlow's focusable node wrappers sit between the two as groups —
-    // a legal context for option children.
+    // ReactFlow's focusable node wrappers stay groups.
     const wrappers = container.querySelectorAll(".react-flow__node");
     expect(wrappers.length).toBe(2);
     for (const wrapper of wrappers) {
@@ -293,16 +291,16 @@ describe("WorkflowGraph mounted accessible tree", () => {
       wrapperA.click();
     });
     expect(wrapperA.classList.contains("selected")).toBe(true);
-    expect(cardOf(wrapperA).getAttribute("aria-selected")).toBe("true");
-    expect(cardOf(wrapperB).getAttribute("aria-selected")).toBe("false");
+    expect(cardOf(wrapperA).getAttribute("data-selected")).toBe("true");
+    expect(cardOf(wrapperB).getAttribute("data-selected")).toBe("false");
     // Selecting another node moves the selection rather than sticking.
     await act(async () => {
       wrapperB.click();
     });
     expect(wrapperA.classList.contains("selected")).toBe(false);
-    expect(cardOf(wrapperA).getAttribute("aria-selected")).toBe("false");
+    expect(cardOf(wrapperA).getAttribute("data-selected")).toBe("false");
     expect(wrapperB.classList.contains("selected")).toBe(true);
-    expect(cardOf(wrapperB).getAttribute("aria-selected")).toBe("true");
+    expect(cardOf(wrapperB).getAttribute("data-selected")).toBe("true");
     await unmount();
   });
 

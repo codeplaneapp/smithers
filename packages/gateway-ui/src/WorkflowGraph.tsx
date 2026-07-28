@@ -8,7 +8,15 @@
 // WorkflowCanvas region rather than inventing its own frame, and the required
 // react-flow base stylesheet ships inline via `workflowGraphCss` because the
 // gateway bundles UI with Bun.build and drops `.css` imports.
-import { memo, useCallback, useEffect, useMemo, useSyncExternalStore, type CSSProperties } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useInsertionEffect,
+  useMemo,
+  useSyncExternalStore,
+  type CSSProperties,
+} from "react";
 import {
   addEdge,
   Background,
@@ -22,8 +30,15 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import dagre from "dagre";
-import { WorkflowCanvas } from "@smithers-orchestrator/ui";
-import { resolveTheme, subscribeTheme, theme, type ResolvedTheme } from "./theme";
+import { EmptyState, WorkflowCanvas } from "@smithers-orchestrator/ui";
+import {
+  ensureGatewayUiStyles,
+  resolveTheme,
+  subscribeTheme,
+  theme,
+  visuallyHidden,
+  type ResolvedTheme,
+} from "./theme";
 import { workflowGraphChromeCss, workflowGraphCss } from "./workflowGraphCss";
 import { SmithersCanvasNode, SmithersNodeHandles } from "./SmithersCanvasNode";
 
@@ -202,17 +217,35 @@ function WorkflowGraphImpl({
     [nodeTypesProp],
   );
   const colorMode = useSyncExternalStore<ResolvedTheme>(subscribeTheme, resolveTheme, () => "light");
+  useInsertionEffect(ensureGatewayUiStyles, []);
   return (
     <WorkflowCanvas
       className={className ?? "smithers-graph"}
       data-theme-mode={colorMode}
-      role="listbox"
-      aria-multiselectable="true"
+      role="region"
       aria-label="Workflow graph"
-      style={{ height: "100%", minHeight: 320, ...style }}
+      style={{ position: "relative", height: "100%", minHeight: 320, ...style }}
     >
       {/* react-flow's base stylesheet plus Smithers chrome, shipped inline so it survives Bun.build. */}
       <style>{workflowGraphCss + workflowGraphChromeCss}</style>
+      <p style={visuallyHidden}>
+        Workflow graph. Tab moves keyboard focus between nodes; use the canvas controls to zoom.
+      </p>
+      {spec.length === 0 ? (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 5,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "none",
+          }}
+        >
+          <EmptyState description="This workflow has no nodes yet." />
+        </div>
+      ) : null}
       <ReactFlow
         nodes={nodes}
         edges={edges}

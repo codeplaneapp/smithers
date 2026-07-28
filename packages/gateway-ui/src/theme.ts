@@ -14,6 +14,9 @@
  * alpha suffix onto them — derive tints with
  * `color-mix(in srgb, ${token} N%, transparent)` instead.
  */
+import type { CSSProperties } from "react";
+import { reducedMotionCss } from "@smithers-orchestrator/ui-styleguide";
+
 export const theme = {
   bg: "var(--bg, #fafafa)",
   panel: "var(--surface, #ffffff)",
@@ -51,8 +54,27 @@ export const theme = {
 
 export const GATEWAY_UI_STYLE_ATTR = "data-smithers-gateway-ui";
 
+/** Screen-reader-only inline styles, mirroring the styleguide `.sui-sr-only` rule. */
+export const visuallyHidden: CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clip: "rect(0 0 0 0)",
+  whiteSpace: "nowrap",
+  border: 0,
+};
+
 /** Class rules for states inline styles cannot express (focus/hover/tone). */
 export const gatewayUiCss = `
+.gw-launch-button { cursor:pointer; transition:background-color .12s ease, border-color .12s ease, color .12s ease; }
+.gw-launch-button:hover:not(:disabled) { background:color-mix(in srgb, ${theme.accent} 85%, ${theme.text}); }
+.gw-launch-button:active:not(:disabled) { background:color-mix(in srgb, ${theme.accent} 72%, ${theme.text}); }
+.gw-launch-button:disabled { cursor:wait; opacity:.6; }
+.gw-launch-button:focus-visible { outline:none; box-shadow:0 0 0 3px ${theme.ring}; }
+.gw-fleet-row:focus-visible { outline:none; box-shadow:inset 2px 0 0 ${theme.accent}, inset 0 0 0 3px ${theme.ring}; }
 .gw-node-row { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; padding:6px 8px 6px calc(8px + var(--gw-node-depth, 0) * 16px); border:1px solid transparent; border-left-width:2px; background:transparent; color:${theme.text}; cursor:pointer; text-align:left; font-family:${theme.fontSans}; font-size:13px; transition:background-color .12s ease, border-color .12s ease, color .12s ease; }
 .gw-node-row[data-interactive='false'] { cursor:default; }
 .gw-node-row:hover { background:${theme.panelAlt}; }
@@ -62,6 +84,7 @@ export const gatewayUiCss = `
 .gw-run-row:active,.gw-node-row:active { background:color-mix(in srgb, ${theme.text} 6%, ${theme.panelAlt}); }
 .gw-run-row[data-active='true'] { border-color:${theme.accentBorder}; background:${theme.accentSoft}; }
 .gw-approval-button { padding:6px 14px; border-radius:6px; border:1px solid var(--gw-tone-border); background:var(--gw-tone-soft); color:var(--gw-tone); font:inherit; font-size:13px; font-weight:650; cursor:pointer; transition:background-color .12s ease, border-color .12s ease, color .12s ease; }
+.gw-approval-button:hover:not(:disabled) { background:color-mix(in srgb, var(--gw-tone) 16%, ${theme.panel}); }
 .gw-approval-button:active:not(:disabled) { background:color-mix(in srgb, var(--gw-tone) 18%, ${theme.panel}); }
 .gw-approval-button-success { --gw-tone:${theme.success}; --gw-tone-soft:${theme.successSoft}; --gw-tone-border:${theme.successBorder}; }
 .gw-approval-button-danger { --gw-tone:${theme.danger}; --gw-tone-soft:${theme.dangerSoft}; --gw-tone-border:${theme.dangerBorder}; }
@@ -97,11 +120,25 @@ export const gatewayUiCss = `
 .gw-event-row-count { font-family:${theme.fontMono}; font-size:11px; color:${theme.textDim}; flex-shrink:0; }
 .gw-event-row-summary { color:${theme.textDim}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; flex:1; }
 .gw-event-row[data-tone='failed'] .gw-event-row-summary { color:${theme.danger}; font-weight:600; }
-.gw-event-row-toggle { flex-shrink:0; margin-right:6px; padding:2px 7px; background:transparent; border:1px solid ${theme.border}; border-radius:5px; color:${theme.textDim}; font-family:${theme.fontMono}; font-size:11px; cursor:pointer; }
+.gw-event-row-toggle { flex-shrink:0; margin-right:6px; padding:4px 8px; background:transparent; border:1px solid ${theme.border}; border-radius:5px; color:${theme.textDim}; font-family:${theme.fontMono}; font-size:11px; cursor:pointer; }
 .gw-event-row-toggle:hover { background:${theme.panelAlt}; }
 .gw-event-row-json { margin:0 8px 8px 8px; padding:8px; background:${theme.panel}; border:1px solid ${theme.border}; border-radius:6px; font-family:${theme.fontMono}; font-size:11px; line-height:1.5; white-space:pre-wrap; word-break:break-word; overflow:auto; max-height:280px; color:${theme.text}; }
 .gw-event-row-main:focus-visible,.gw-event-row-toggle:focus-visible { outline:none; border-color:${theme.ringBorder}; box-shadow:0 0 0 3px ${theme.ring}; }
+.gw-event-log-body { position:relative; display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }
+.gw-event-jump { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:5; display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border:1px solid ${theme.border}; border-radius:999px; background:${theme.panel}; color:${theme.text}; font-family:${theme.fontSans}; font-size:12px; cursor:pointer; box-shadow:0 1px 2px rgb(var(--shadow-rgb, 24 24 27) / 0.06), 0 8px 24px rgb(var(--shadow-rgb, 24 24 27) / 0.10); transition:background-color .12s ease, border-color .12s ease, color .12s ease; }
+.gw-event-jump:hover { background:${theme.panelAlt}; }
+.gw-event-jump:focus-visible { outline:none; border-color:${theme.ringBorder}; box-shadow:0 0 0 3px ${theme.ring}; }
+.gw-canvas-node { border-left:3px solid var(--gw-kind, transparent); }
+.gw-canvas-node[data-kind='agent'] { --gw-kind:${theme.accent}; }
+.gw-canvas-node[data-kind='compute'] { --gw-kind:${theme.info}; }
+.gw-canvas-node[data-kind='approval'] { --gw-kind:${theme.warning}; }
+.gw-canvas-node[data-kind='merge'] { --gw-kind:${theme.success}; }
+.gw-canvas-node[data-kind='loop'] { --gw-kind:${theme.info}; }
+.gw-canvas-node[data-kind='branch'] { --gw-kind:${theme.warning}; }
+.gw-canvas-node[data-kind='signal'] { --gw-kind:${theme.accent}; }
+.gw-canvas-node[data-kind='human'] { --gw-kind:${theme.danger}; }
 .gw-monitor-button { display:inline-flex; align-items:center; gap:6px; text-decoration:none; }
+${reducedMotionCss}
 `;
 
 export function ensureGatewayUiStyles(): void {

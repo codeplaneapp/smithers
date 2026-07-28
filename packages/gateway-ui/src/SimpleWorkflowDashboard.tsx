@@ -1,6 +1,7 @@
 /** @jsxImportSource react */
 import { useEffect, useMemo, useState } from "react";
 import { useGatewayActions, useGatewayRuns } from "@smithers-orchestrator/gateway-react";
+import { RelativeTime } from "@smithers-orchestrator/ui";
 import { formatStatus, statusClass } from "./theme";
 import { ConnectionBadge } from "./ConnectionBadge";
 import { MonitorButton } from "./MonitorButton";
@@ -140,7 +141,13 @@ export function SimpleWorkflowDashboard({
               >
                 <span className="workflow-run-main">
                   <span className="workflow-run-id">{shortRunId(run.runId)}</span>
-                  <span className="workflow-run-meta">{formatTime(run.createdAtMs) || workflow}</span>
+                  <span className="workflow-run-meta">
+                    {run.createdAtMs ? (
+                      <RelativeTime ts={run.createdAtMs} title={new Date(run.createdAtMs).toLocaleString()} />
+                    ) : (
+                      workflow
+                    )}
+                  </span>
                 </span>
                 <span className={`badge ${statusClass(run.status)}`}>{formatStatus(run.status ?? "running")}</span>
               </button>

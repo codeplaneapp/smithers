@@ -75,6 +75,7 @@ export {
 } from "./MonitorButton";
 export { ApprovalPanel, type ApprovalPanelProps } from "./ApprovalPanel";
 export { LaunchButton, type LaunchButtonProps } from "./LaunchButton";
+export { CronCalendar, type CronCalendarProps } from "./CronCalendar";
 export { WorkflowPicker, type WorkflowPickerProps } from "./WorkflowPicker";
 export {
   NodeOutputView,
