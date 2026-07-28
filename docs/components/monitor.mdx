@@ -622,12 +622,7 @@ export const MONITOR_CONDITIONS = /** @type {const} */ ([
 ]);
 
 /** Run statuses that mean the watched run is over and the monitor should stop. */
-export const MONITOR_TERMINAL_STATUSES = /** @type {const} */ ([
-  "finished",
-  "failed",
-  "cancelled",
-  "continued",
-]);
+export const MONITOR_TERMINAL_STATUSES = /** @type {const} */ (["finished", "failed", "cancelled", "continued"]);
 
 /**
  * The conditions a monitor may repair on its own by default: the only two whose

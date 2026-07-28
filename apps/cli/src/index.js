@@ -1865,7 +1865,10 @@ const oneshotOptions = z
     status: z.boolean().default(false).describe("Print usable agents, model chain, and preferences as JSON"),
     cwd: z.string().default(".").describe("Working directory for the task"),
     runId: z.string().optional().describe("Run ID to create or resume (used by `smithers supervise` to recover a run)"),
-    resume: z.boolean().default(false).describe("Resume the existing run named by --run-id instead of starting a new one"),
+    resume: z
+      .boolean()
+      .default(false)
+      .describe("Resume the existing run named by --run-id instead of starting a new one"),
     force: z.boolean().default(false).describe("With --resume, resume even when the run still looks active"),
     resumeClaimOwner: z.string().optional().describe("Internal durable resume claim owner"),
     resumeClaimHeartbeat: z.number().int().min(1).optional().describe("Internal durable resume claim heartbeat"),
