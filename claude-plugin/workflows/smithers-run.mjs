@@ -14,7 +14,14 @@ export const meta = {
 // and relays its JSON or text. Stopping this workflow never stops the run.
 //
 // args (object, or a JSON string of one):
-//   { runId }                            attach to an existing run
+//   { runId, cwd? }                      attach to an existing run. Pass `cwd`
+//                                        whenever the run's workspace is not the
+//                                        session's directory (a git worktree, a
+//                                        sibling checkout): run state lives in
+//                                        that workspace's .smithers, so without
+//                                        it every tick is RUN_NOT_FOUND and the
+//                                        mirror ends `mirrored: 0, status: unknown`
+//                                        instead of failing loudly.
 //   { workflow, input?, cwd?, startedByPrompt? }
 //                                        launch a detached run, then mirror it
 //                                        (workflow = discovered ID or a .tsx/.mdx path)
