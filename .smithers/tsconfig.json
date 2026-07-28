@@ -141,6 +141,8 @@
     "./sandboxes/**/*",
     "./state/**/*",
     "./tmp/**/*",
-    "./workflows/.worktrees/**/*"
+    "./workflows/.worktrees/**/*",
+    "./workflows/.api-ab-benchmark/**/*",
+    "./lib/apiAbBench/solutions/**/*"
   ]
 }

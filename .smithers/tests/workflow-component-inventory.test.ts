@@ -3,6 +3,7 @@ import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { discoverWorkflows } from "@smithers-orchestrator/cli/workflows";
+import "./whole-foods-meal-planner.test";
 
 const packRoot = join(import.meta.dir, "..");
 const repoRoot = join(packRoot, "..");
@@ -110,7 +111,6 @@ const workflowOwners = {
     "implement-packs.tsx",
     "implement-plue-runner.tsx",
     "implement-stable.tsx",
-    "investor.tsx",
   ],
   "./tests/implement-testing-framework-e2e-workflow.test.ts": ["implement-testing-framework-e2e.tsx"],
   "./tests/local-workflows-b-real-release.test.tsx": ["real-stack-e2e.tsx", "release-content.tsx"],
@@ -119,7 +119,6 @@ const workflowOwners = {
     "openclaw-integration-hardening.tsx",
     "plue-demo-child.tsx",
     "postgres-tanstack-sync.tsx",
-    "repo-prospector.tsx",
     "restore-claude-implement.tsx",
   ],
   "./tests/local-workflows-c-control.test.tsx": ["review-cloud-ship.tsx"],
@@ -163,6 +162,7 @@ const workflowOwners = {
   "./tests/jjhub-issue-fleet-workflow.test.tsx": ["jjhub-issue-fleet.tsx"],
   "./tests/ferric-campaign-workflows.test.tsx": ["react-rust-port.tsx", "ultrafusion.tsx"],
   "./tests/authoring-benchmark-workflow.test.ts": ["authoring-benchmark.tsx"],
+  "./tests/api-ab-benchmark.test.tsx": ["api-ab-benchmark.tsx"],
   "./tests/finish-campaigns.test.tsx": ["finish-campaigns.tsx"],
   "./tests/build-agentic-ui-library.test.tsx": ["build-agentic-ui-library.tsx"],
   "./tests/converge-agentic-ui-library.test.tsx": ["converge-agentic-ui-library.tsx"],
@@ -175,7 +175,7 @@ const workflowOwners = {
   "./tests/shared-ui-library.test.tsx": ["shared-ui-library.tsx"],
   "./tests/xstate-release-train.test.tsx": ["xstate-release-train.tsx"],
   "./tests/memory-recall-demo.test.tsx": ["memory-recall-demo.tsx"],
-  "./tests/vibe-audit.test.tsx": ["vibe-audit.tsx"],
+  "./tests/workflow-component-inventory.test.ts": ["whole-foods-meal-planner.tsx"],
 } as const;
 
 const componentOwners = {

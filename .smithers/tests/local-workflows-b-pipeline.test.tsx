@@ -65,18 +65,9 @@ describe("pipeline workflow behavior", () => {
     const packs = (await moduleFor("implement-packs.tsx")).inputSchema;
     const stable = (await moduleFor("implement-stable.tsx")).inputSchema;
     const plue = (await moduleFor("implement-plue-runner.tsx")).inputSchema;
-    const investor = await moduleFor("investor.tsx");
     expect(packs.parse({})).toEqual({ planDoc: "research/packs-share-workflows-like-skills.md", maxIterations: 3 });
     expect(stable.parse({})).toEqual({ prompt: "Implement the requested change.", maxIterations: 3 });
     expect(plue.parse({})).toEqual({ plueCliBin: "plue", maxIterations: 3 });
-    expect(investor.normalizeInvestorInput({})).toEqual({
-      silent: false,
-      voice: "Ava (Premium)",
-      rate: 190,
-      startAt: 0,
-      auto: false,
-      autoMs: 9000,
-    });
     for (const [schema, blank, valid] of [
       [packs, { planDoc: " " }, { planDoc: "spec.md" }],
       [stable, { prompt: " " }, { prompt: "ship" }],
@@ -98,50 +89,6 @@ describe("pipeline workflow behavior", () => {
       expect(investor.inputSchema.safeParse(bad).success).toBe(false);
     }
   }, 30_000);
-
-  test("investor parses every key family and completes the real silent compute", async () => {
-    const investor = await moduleFor("investor.tsx");
-    for (const [key, expected] of [
-      ["\x1b[C", "next"],
-      ["\x1b[B", "next"],
-      [" ", "next"],
-      ["\r", "next"],
-      ["j", "next"],
-      ["L", "next"],
-      ["\x1b[D", "prev"],
-      ["\x1b[A", "prev"],
-      ["h", "prev"],
-      ["K", "prev"],
-      ["r", "replay"],
-      ["m", "mute"],
-      ["s", "skip"],
-      ["q", "quit"],
-      ["\x1b", "quit"],
-      ["\x03", "quit"],
-      ["?", null],
-    ] as const) {
-      expect(investor.parseInvestorKey(key)).toBe(expected);
-    }
-    const simulation = simulate(investor.default, {
-      input: { silent: true, auto: true, autoMs: 0, startAt: 10_000 },
-      workflowPath: pathFor("investor.tsx"),
-    });
-    const originalWrite = process.stdout.write;
-    let rendered = "";
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      rendered += String(chunk);
-      return true;
-    }) as typeof process.stdout.write;
-    try {
-      await simulation.run();
-    } finally {
-      process.stdout.write = originalWrite;
-    }
-    expect(simulation.executed).toEqual(["slideshow"]);
-    expect(simulation.output).toEqual({ finished: true });
-    expect(rendered).toContain("investor deck ended");
-    expect(simulation.unusedMocks).toEqual([]);
-  }, 15_000);
 
   test("stable rejects a stale approval until review matches the green iteration", async () => {
     const workflow = await load("implement-stable.tsx");

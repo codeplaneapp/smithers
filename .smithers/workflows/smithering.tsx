@@ -72,10 +72,10 @@
 // budgets are unenforced in smithers 0.23.0 (filed as smithersai/smithers#265).
 //
 // Operating agent runs (the human just asks for the outcome):
-//   bunx smithers-orchestrator workflow run smithering --prompt "build X"   # or no prompt → setup interview
-//   bunx smithers-orchestrator ps / inspect RUN_ID / why RUN_ID
-//   bunx smithers-orchestrator approve RUN_ID --node gate:prd --by <human>   # after asking the human
-//   bunx smithers-orchestrator human inbox / human answer <id> --value '<json>'
+//   bun apps/cli/src/index.js workflow run smithering --prompt "build X"   # or no prompt → setup interview
+//   bun apps/cli/src/index.js ps / inspect RUN_ID / why RUN_ID
+//   bun apps/cli/src/index.js approve RUN_ID --node gate:prd --by <human>   # after asking the human
+//   bun apps/cli/src/index.js human inbox / human answer <id> --value '<json>'
 //
 // Known limitations (deliberate v1 tradeoffs):
 //   - The generated implementation workflow lands at a fixed path, so one product build
@@ -253,7 +253,7 @@ async function runPreflight() {
   const git = await $`git --version`.nothrow().quiet();
   const vcs = jj.exitCode === 0 ? "jj" : git.exitCode === 0 ? "git" : "none";
   if (vcs === "git") notes.push("jj not found: attempt-level revert/time-travel will be unavailable (git-only mode).");
-  const doctor = await $`bunx smithers-orchestrator workflow doctor`.nothrow().quiet();
+  const doctor = await $`bun apps/cli/src/index.js workflow doctor`.nothrow().quiet();
   if (doctor.exitCode !== 0) notes.push(`workflow doctor failed: ${(doctor.stderr?.toString() ?? "").slice(0, 1500)}`);
   await $`mkdir -p ${ART}/research ${ART}/mockups ${ART}/probes ${ART}/reports ${ART}/decisions ${PLANNING}`
     .nothrow()
@@ -262,8 +262,8 @@ async function runPreflight() {
 }
 
 async function checkImplGraph(passNote: string, failNote: string) {
-  const command = `bunx smithers-orchestrator graph ${IMPL_WORKFLOW}`;
-  const res = await $`bunx smithers-orchestrator graph ${IMPL_WORKFLOW}`.nothrow().quiet();
+  const command = `bun apps/cli/src/index.js graph ${IMPL_WORKFLOW}`;
+  const res = await $`bun apps/cli/src/index.js graph ${IMPL_WORKFLOW}`.nothrow().quiet();
   const passed = res.exitCode === 0;
   const errText = `${res.stderr?.toString() ?? ""}\n${res.stdout?.toString() ?? ""}`.trim();
   return {
@@ -278,12 +278,12 @@ async function checkImplGraph(passNote: string, failNote: string) {
 // created; falling back to resume --force picks that child back up instead of dead-ending.
 async function runSmokeAttempt(smokeRunId: string) {
   let res =
-    await $`bunx smithers-orchestrator up ${IMPL_WORKFLOW} --run-id ${smokeRunId} --input ${JSON.stringify({ smoke: true })}`
+    await $`bun apps/cli/src/index.js up ${IMPL_WORKFLOW} --run-id ${smokeRunId} --input ${JSON.stringify({ smoke: true })}`
       .nothrow()
       .quiet();
   let tail = `${res.stderr?.toString() ?? ""}\n${res.stdout?.toString() ?? ""}`.trim();
   if (res.exitCode !== 0 && /ALREADY[_ ]?EXISTS/i.test(tail)) {
-    res = await $`bunx smithers-orchestrator up ${IMPL_WORKFLOW} --run-id ${smokeRunId} --resume true --force`
+    res = await $`bun apps/cli/src/index.js up ${IMPL_WORKFLOW} --run-id ${smokeRunId} --resume true --force`
       .nothrow()
       .quiet();
     tail = `${res.stderr?.toString() ?? ""}\n${res.stdout?.toString() ?? ""}`.trim();
@@ -301,12 +301,12 @@ async function runSmokeAttempt(smokeRunId: string) {
 
 async function launchImplementationRun(implRunId: string) {
   let res =
-    await $`bunx smithers-orchestrator up ${IMPL_WORKFLOW} --run-id ${implRunId} --input ${JSON.stringify({ smoke: false })} --detach`
+    await $`bun apps/cli/src/index.js up ${IMPL_WORKFLOW} --run-id ${implRunId} --input ${JSON.stringify({ smoke: false })} --detach`
       .nothrow()
       .quiet();
   let tail = `${res.stdout?.toString() ?? ""}\n${res.stderr?.toString() ?? ""}`.trim();
   if (res.exitCode !== 0 && /ALREADY[_ ]?EXISTS/i.test(tail)) {
-    res = await $`bunx smithers-orchestrator up ${IMPL_WORKFLOW} --run-id ${implRunId} --resume true --force --detach`
+    res = await $`bun apps/cli/src/index.js up ${IMPL_WORKFLOW} --run-id ${implRunId} --resume true --force --detach`
       .nothrow()
       .quiet();
     tail = `${res.stdout?.toString() ?? ""}\n${res.stderr?.toString() ?? ""}`.trim();
@@ -319,7 +319,7 @@ async function launchImplementationRun(implRunId: string) {
 }
 
 async function pollImplementationRun(implRunId: string) {
-  const res = await $`bunx smithers-orchestrator inspect ${implRunId} --format json --full-output`.nothrow().quiet();
+  const res = await $`bun apps/cli/src/index.js inspect ${implRunId} --format json --full-output`.nothrow().quiet();
   const raw = res.stdout?.toString() ?? "";
   let status = "unknown";
   let runState = "unknown";
@@ -338,7 +338,7 @@ async function pollImplementationRun(implRunId: string) {
   if (stale) {
     // supervise-in-miniature: the owner process died; pick the run back up.
     const r =
-      await $`bunx smithers-orchestrator up ${IMPL_WORKFLOW} --run-id ${implRunId} --resume true --force --detach`
+      await $`bun apps/cli/src/index.js up ${IMPL_WORKFLOW} --run-id ${implRunId} --resume true --force --detach`
         .nothrow()
         .quiet();
     resumed = r.exitCode === 0;
@@ -369,7 +369,7 @@ function parseFirstJsonObject(raw: string): Record<string, any> {
 }
 
 async function gatherReportInputs(implRunId: string) {
-  const run = await $`bunx smithers-orchestrator inspect ${implRunId} --format json`.nothrow().quiet();
+  const run = await $`bun apps/cli/src/index.js inspect ${implRunId} --format json`.nothrow().quiet();
   const files = await $`find ${ART} ${PLANNING} -type f | sort`.nothrow().quiet();
   const fileList = (files.stdout?.toString() ?? "").split("\n").filter(Boolean);
   return {

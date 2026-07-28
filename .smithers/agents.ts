@@ -9,6 +9,7 @@ import { AmpAgent as SmithersAmpAgent } from "smithers-orchestrator";
 import { KimiAgent as SmithersKimiAgent } from "smithers-orchestrator";
 import { OpenAIAgent as SmithersOpenAIAgent } from "smithers-orchestrator";
 import { AnthropicAgent as SmithersAnthropicAgent } from "smithers-orchestrator";
+import { OpenCodeAgent as SmithersOpenCodeAgent } from "smithers-orchestrator";
 // import { AntigravityAgent as SmithersAntigravityAgent } from "smithers-orchestrator";
 // import { PiAgent as SmithersPiAgent } from "smithers-orchestrator";
 // import { VibeAgent as SmithersVibeAgent } from "smithers-orchestrator";
@@ -249,5 +250,20 @@ export const agents = {
     // providers.kimi,
     // providers.openclaw,
     // providers.openrouter,
+  ],
+  migrationEasy: [
+    new SmithersCodexAgent({
+      model: "gpt-5.6-luna",
+      config: { model_reasoning_effort: "xhigh" },
+      skipGitRepoCheck: true,
+    }),
+  ],
+  migrationHard: [new SmithersOpenCodeAgent({ model: "kimi-for-coding/k3" })],
+  migrationReview: [
+    new SmithersCodexAgent({
+      model: "gpt-5.6-sol",
+      config: { model_reasoning_effort: "xhigh" },
+      skipGitRepoCheck: true,
+    }),
   ],
 } as const satisfies Record<string, AgentLike[]>;

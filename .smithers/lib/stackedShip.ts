@@ -270,7 +270,9 @@ export function lanePhase(state: {
 export type CommandStep = { argv: string[]; cwd: "root" | "workspace" };
 
 export function cloneCommands(options: { sourceRoot: string; originUrl: string; destDir: string }): string[][] {
-  const commands: string[][] = [["git", "clone", "--no-hardlinks", options.sourceRoot, options.destDir]];
+  const commands: string[][] = [
+    ["git", "clone", "--no-hardlinks", options.sourceRoot, options.destDir],
+  ];
   if (options.originUrl) {
     commands.push(["git", "-C", options.destDir, "remote", "set-url", "origin", options.originUrl]);
   }
