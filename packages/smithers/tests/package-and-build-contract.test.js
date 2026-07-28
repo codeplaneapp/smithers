@@ -191,8 +191,11 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     expect(scripts["sota:gen"]).toBe("bun scripts/generate-sota.ts");
     expect(scripts["sota:research"]).toBe("bun scripts/sota-research.ts");
     expect(scripts["check:effect"]).toBe("node scripts/check-single-effect-version.mjs");
+    expect(scripts["check:npm-dedupe"]).toBe("node scripts/check-npm-dedupe.mjs");
     expect(scripts["check:deps"]).toBe("node scripts/check-dependency-boundaries.mjs");
     expect(scripts["check:db-access"]).toBe("node scripts/check-no-direct-db-access.mjs");
+    expect(scripts["check:local-smithers"]).toBe("node scripts/check-local-smithers.mjs");
+    expect(scripts["test:local-smithers"]).toBe("node --test scripts/check-local-smithers.test.mjs");
     expect(scripts["check:docs"]).toBe("node scripts/check-docs.mjs");
     expect(scripts["check:llms"]).toBe("node scripts/check-llms.mjs");
     expect(scripts["check:sota"]).toBe("node scripts/check-sota.mjs");
@@ -202,10 +205,13 @@ describe("PACKAGE_AND_BUILD contracts", () => {
     expect(scripts.test).toBe(
       [
         "node scripts/check-single-effect-version.mjs",
+        "node scripts/check-npm-dedupe.mjs",
         "node scripts/check-dependency-boundaries.mjs",
         "node scripts/check-ui-architecture.mjs",
         "node --test scripts/check-ui-architecture.test.mjs",
         "node scripts/check-no-direct-db-access.mjs",
+        "node scripts/check-local-smithers.mjs",
+        "node --test scripts/check-local-smithers.test.mjs",
         "node scripts/check-docs.mjs",
         "node scripts/check-llms.mjs",
         "node scripts/check-sota.mjs",

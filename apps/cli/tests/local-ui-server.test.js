@@ -3,7 +3,12 @@ import { createServer } from "node:http";
 import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { checkLocalWorkspaceReadiness, hasConciergeCredential, startLocalUiServer } from "../src/localUiServer.js";
+import {
+  checkLocalWorkspaceReadiness,
+  chooseLocalUiSource,
+  hasConciergeCredential,
+  startLocalUiServer,
+} from "../src/localUiServer.js";
 
 const cleanups = [];
 
@@ -37,6 +42,30 @@ async function tempDist() {
   await writeFile(join(root, "index.html"), "<!doctype html><title>Smithers</title>");
   return root;
 }
+
+describe("chooseLocalUiSource", () => {
+  test("prefers the in-repo source over a prebuilt bundle", () => {
+    // ui-dist is a pack-time artifact treated as permanently fresh, so a source
+    // checkout that preferred it would serve whatever was last packed.
+    expect(chooseLocalUiSource({ hasBundle: true, hasSource: true, hasVite: true })).toBe("source");
+  });
+
+  test("falls back to the bundle when the source app cannot be built", () => {
+    expect(chooseLocalUiSource({ hasBundle: true, hasSource: true, hasVite: false })).toBe("bundle");
+  });
+
+  test("still uses the source when there is no bundle to fall back to", () => {
+    expect(chooseLocalUiSource({ hasBundle: false, hasSource: true, hasVite: false })).toBe("source");
+  });
+
+  test("uses the bundle on a published install with no source tree", () => {
+    expect(chooseLocalUiSource({ hasBundle: true, hasSource: false, hasVite: false })).toBe("bundle");
+  });
+
+  test("returns null when neither is available", () => {
+    expect(chooseLocalUiSource({ hasBundle: false, hasSource: false, hasVite: false })).toBeNull();
+  });
+});
 
 describe("localUiServer workspace readiness", () => {
   test("reports a ready local workspace scoped to the proxied gateway", async () => {

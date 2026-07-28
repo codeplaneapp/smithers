@@ -240,7 +240,7 @@ test("a fresh workspace never triggers the ps migration guard", () => {
 
 // Issue 2: after `migrate --to pglite`, running `smithers workflow run` without
 // SMITHERS_BACKEND env must write new runs to the pglite store (via backend.json),
-// not to the leftover sqlite file. This exercises the readBackendMarkerForCwd +
+// not to the leftover sqlite file. This exercises resolveSmithersBackendPreference +
 // workflow.db redirect code path inside executeUpCommand.
 // Timeout is 5 minutes: migration (pglite init ~30s) + workflow run (pglite open ~30s).
 test("post-migration smithers workflow run fails loud for a sync createSmithers workflow on a pglite marker", () => {
@@ -284,7 +284,7 @@ test("post-migration smithers workflow run fails loud for a sync createSmithers 
   expect(repo.exists(".smithers/backend.json")).toBe(true);
 
   // Run the workflow WITHOUT any SMITHERS_BACKEND override. executeUpCommand reads
-  // backend.json (pglite) via readBackendMarkerForCwd, but the workflow uses the
+  // backend.json (pglite) via resolveSmithersBackendPreference, but the workflow uses the
   // synchronous createSmithers() bun:sqlite factory, which cannot serve pglite.
   // Smithers must FAIL LOUD (never silently swap the sync db onto async pglite —
   // that deadlocks the engine — and never silently degrade to the leftover sqlite

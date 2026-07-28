@@ -396,23 +396,24 @@ async function emitMigrationRequired(error) {
 }
 
 /**
- * Resolve the storage backend (explicit → env → `.smithers/smithers.config.ts` →
- * default `sqlite`) and enforce the fail-loud migration gate shared by every
- * Smithers boot path (the async backend factory and the CLI read commands). A
- * legacy bun:sqlite store that still holds run data with no `migrated.json`
- * marker is never silently switched onto pglite/postgres: it throws
- * SMITHERS_MIGRATION_REQUIRED so the caller can migrate or pin `--backend sqlite`.
+ * Which backend this workspace selects, and why, without touching a single
+ * store. `resolveSmithersBackendChoice` boots and probes the physical stores to
+ * describe them; callers that only need to know "sqlite or not" must use this
+ * instead, so an operator's `--backend` / `SMITHERS_BACKEND` / config pin is
+ * honored everywhere rather than only on the paths that happen to call the full
+ * resolver. Reading a marker file directly is what let a stale `migrated.json`
+ * override an explicit pin and lock `smithers oneshot` out of a workspace.
+ *
+ * Precedence is the same as the full resolver: explicit → env → config →
+ * `.smithers/backend.json` → `.smithers/migrated.json` → `sqlite`.
  *
  * @param {import("./ResolveSmithersBackendChoiceOptions.ts").ResolveSmithersBackendChoiceOptions} [opts]
- * @returns {Promise<import("./SmithersBackendChoice.ts").SmithersBackendChoice>}
+ * @returns {Promise<import("./SmithersBackendPreference.ts").SmithersBackendPreference>}
  */
-export async function resolveSmithersBackendChoice(opts = {}) {
+export async function resolveSmithersBackendPreference(opts = {}) {
   const cwd = resolve(opts.cwd ?? process.cwd());
   const env = opts.env ?? process.env;
-  const anchorDir = findSmithersAnchorDir(cwd);
-  const workspaceRoot = anchorDir ?? cwd;
-  const defaultDbPath = join(workspaceRoot, "smithers.db");
-  const dbPath = resolve(cwd, opts.dbPath ?? defaultDbPath);
+  const workspaceRoot = findSmithersAnchorDir(cwd) ?? cwd;
   const configPath = opts.configPath
     ? resolve(cwd, opts.configPath)
     : join(workspaceRoot, ".smithers", "smithers.config.ts");
@@ -434,6 +435,29 @@ export async function resolveSmithersBackendChoice(opts = {}) {
         : markerBackend
           ? "marker"
           : "default";
+  return { backend, source, workspaceRoot, explicitBackend, envBackend, configBackend, migratedMarker };
+}
+
+/**
+ * Resolve the storage backend (explicit → env → `.smithers/smithers.config.ts` →
+ * default `sqlite`) and enforce the fail-loud migration gate shared by every
+ * Smithers boot path (the async backend factory and the CLI read commands). A
+ * legacy bun:sqlite store that still holds run data with no `migrated.json`
+ * marker is never silently switched onto pglite/postgres: it throws
+ * SMITHERS_MIGRATION_REQUIRED so the caller can migrate or pin `--backend sqlite`.
+ *
+ * @param {import("./ResolveSmithersBackendChoiceOptions.ts").ResolveSmithersBackendChoiceOptions} [opts]
+ * @returns {Promise<import("./SmithersBackendChoice.ts").SmithersBackendChoice>}
+ */
+export async function resolveSmithersBackendChoice(opts = {}) {
+  const cwd = resolve(opts.cwd ?? process.cwd());
+  const env = opts.env ?? process.env;
+  const anchorDir = findSmithersAnchorDir(cwd);
+  const workspaceRoot = anchorDir ?? cwd;
+  const defaultDbPath = join(workspaceRoot, "smithers.db");
+  const dbPath = resolve(cwd, opts.dbPath ?? defaultDbPath);
+  const preference = await resolveSmithersBackendPreference(opts);
+  const { backend, source, explicitBackend, envBackend, configBackend, migratedMarker } = preference;
   // An option/env/config SQLite pin is an authoritative operator choice. Do
   // not boot a leftover PGlite store merely to describe the backend we are
   // explicitly not using: a locked or corrupt store can abort the process,

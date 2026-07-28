@@ -31,23 +31,36 @@ const moduleDir = dirname(fileURLToPath(import.meta.url));
  * app runs same-origin with the gateway (its WebSocket needs same-origin).
  *
  * Resolution order for the app:
- *   1. A prebuilt bundle shipped beside the CLI (`apps/cli/ui-dist`) — the
- *      published path; no build step, works offline.
- *   2. The in-repo source at `apps/smithers` — built on demand with its own
- *      vite (`apps/smithers/node_modules/.bin/vite build`).
+ *   1. The in-repo source at `apps/smithers`, when it is present and buildable
+ *      — built on demand with its own vite
+ *      (`apps/smithers/node_modules/.bin/vite build`). A source checkout must
+ *      serve the code under edit: `ui-dist` is a pack-time artifact (gitignored,
+ *      staged by `prepack`) and is treated as permanently fresh below, so
+ *      preferring it here would silently serve a bundle from whenever the tree
+ *      was last packed.
+ *   2. A prebuilt bundle shipped beside the CLI (`apps/cli/ui-dist`) — the
+ *      published path; no build step, works offline. Also the fallback for a
+ *      slimmed checkout where the source app has no vite installed.
  */
+export function chooseLocalUiSource({ hasBundle, hasSource, hasVite }) {
+  if (hasSource && (hasVite || !hasBundle)) return "source";
+  if (hasBundle) return "bundle";
+  return null;
+}
+
 export function resolveLocalUi() {
   const bundledDist = resolve(moduleDir, "..", "ui-dist");
-  if (existsSync(join(bundledDist, "index.html"))) {
-    return { distDir: bundledDist, appDir: null, viteBin: null };
-  }
   // apps/cli/src -> apps/cli -> apps -> apps/smithers
   const appDir = resolve(moduleDir, "..", "..", "smithers");
-  if (!existsSync(join(appDir, "package.json"))) {
-    return null;
-  }
   const viteBin = resolve(appDir, "node_modules", ".bin", "vite");
-  return { distDir: resolve(appDir, "dist"), appDir, viteBin };
+  const choice = chooseLocalUiSource({
+    hasBundle: existsSync(join(bundledDist, "index.html")),
+    hasSource: existsSync(join(appDir, "package.json")),
+    hasVite: existsSync(viteBin),
+  });
+  if (choice === "source") return { distDir: resolve(appDir, "dist"), appDir, viteBin };
+  if (choice === "bundle") return { distDir: bundledDist, appDir: null, viteBin: null };
+  return null;
 }
 
 /** Is the built bundle present and newer than the newest source file? */
