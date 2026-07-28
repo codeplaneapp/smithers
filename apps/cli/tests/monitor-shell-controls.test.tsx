@@ -260,10 +260,23 @@ describe("migrated monitor surfaces", () => {
       <RunsRail runs={[]} loading={false} connStatus="unauthorized" selectedRunId={undefined} onSelect={() => {}} />,
     );
     expect(byTestId("monitor-runs-unauthorized").textContent?.toLowerCase()).toContain("credentials");
+    await rerender(
+      <RunsRail
+        runs={[{ ...run, status: "running" }]}
+        loading={false}
+        connStatus="offline"
+        selectedRunId={undefined}
+        onSelect={() => {}}
+      />,
+    );
+    expect(byTestId("monitor-runs-offline").textContent).toContain("last-known data");
+    expect(byTestId("monitor-run-row").textContent).toContain("last-known");
+    expect(byTestId("monitor-run-row").querySelector(".mon-dot")?.className).not.toContain("mon-dot-pulse");
   });
 
   test("renders loading, error, no-runs, and filtered-out table states", async () => {
     let resets = 0;
+    let retries = 0;
     await render(<RunsTable runs={[]} loading page={1} onPageChange={() => {}} onSelect={() => {}} />);
     expect(byTestId("monitor-empty-detail").textContent).toContain("Loading runs");
     expect(byTestId("monitor-empty-detail").getAttribute("data-state")).toBe("loading");
@@ -272,6 +285,7 @@ describe("migrated monitor surfaces", () => {
         runs={[]}
         loading={false}
         queryError={new Error("query failed")}
+        onRetry={() => retries++}
         page={1}
         onPageChange={() => {}}
         onSelect={() => {}}
@@ -280,6 +294,8 @@ describe("migrated monitor surfaces", () => {
     expect(byTestId("monitor-empty-detail").textContent).toContain("Couldn't load runs");
     expect(byTestId("monitor-empty-detail").textContent).toContain("query failed");
     expect(byTestId("monitor-empty-detail").getAttribute("data-state")).toBe("error");
+    await click(byTestId("monitor-empty-detail-retry"));
+    expect(retries).toBe(1);
     await rerender(<RunsTable runs={[]} loading={false} page={1} onPageChange={() => {}} onSelect={() => {}} />);
     expect(byTestId("monitor-empty-detail").textContent).toContain("No runs yet");
     expect(byTestId("monitor-empty-detail").textContent).toContain("smithers up");
@@ -305,6 +321,70 @@ describe("migrated monitor surfaces", () => {
     expect(byTestId("monitor-runs-table")).toBeDefined();
     expect(document.querySelector(".mon-panel.mon-runs-table-panel")).not.toBeNull();
     expect(byTestId("monitor-run-progress").textContent).toContain("1 failed");
+  });
+
+  test("transitions honestly through every connection and cache landing state", async () => {
+    const table = (overrides: Partial<Parameters<typeof RunsTable>[0]> = {}): ReactElement => (
+      <RunsTable
+        runs={[]}
+        loading={false}
+        connStatus="connecting"
+        page={1}
+        onPageChange={() => {}}
+        onSelect={() => {}}
+        {...overrides}
+      />
+    );
+    const cachedRun = { ...run, status: "running", finishedAtMs: undefined };
+
+    await render(table());
+    expect(byTestId("monitor-empty-detail").getAttribute("data-state")).toBe("connecting");
+    expect(byTestId("monitor-empty-detail").textContent).toContain("Connecting to the Smithers gateway");
+    expect(byTestId("monitor-empty-detail").textContent).not.toContain("No runs yet");
+
+    await rerender(table({ connStatus: "offline", queryError: new Error("connection refused") }));
+    expect(byTestId("monitor-empty-detail").getAttribute("data-state")).toBe("offline-without-cache");
+    expect(byTestId("monitor-empty-detail").textContent).toContain("No last-known runs are available");
+    expect(byTestId("monitor-empty-detail").textContent).not.toContain("No runs yet");
+
+    await rerender(table({ connStatus: "online" }));
+    expect(byTestId("monitor-empty-detail").getAttribute("data-state")).toBe("empty");
+    expect(byTestId("monitor-empty-detail").textContent).toContain("No runs yet");
+
+    await rerender(table({ connStatus: "offline", runs: [cachedRun], totalCount: 1, hasCachedData: true }));
+    expect(byTestId("monitor-runs-last-known").textContent).toContain("Every run shown below is last-known data");
+    expect(document.querySelector(".mon-runs-table-panel")?.getAttribute("data-state")).toBe("offline-with-cache");
+    expect(document.querySelector(".mon-runs-table-row")?.textContent).toContain("running · last-known");
+    expect(document.querySelector(".mon-runs-table-row .mon-dot")?.className).not.toContain("mon-dot-pulse");
+    expect([...document.querySelectorAll(".mon-runs-table-row td")].at(-1)?.textContent).toBe("last-known");
+
+    await rerender(table({ connStatus: "unauthorized", runs: [cachedRun], totalCount: 1, hasCachedData: true }));
+    expect(byTestId("monitor-empty-detail").getAttribute("data-state")).toBe("unauthorized");
+    expect(byTestId("monitor-empty-detail").textContent).toContain("fresh gateway credentials");
+    expect(document.querySelector(".mon-runs-table-row")).toBeNull();
+  });
+
+  test("keeps last-known rows visible while refetching and after a failed refresh", async () => {
+    let retries = 0;
+    await render(<RunsTable runs={[run]} loading page={1} onPageChange={() => {}} onSelect={() => {}} />);
+    expect(byTestId("monitor-runs-table")).toBeDefined();
+    expect(document.querySelector('[data-state="loading"]')).toBeNull();
+
+    await rerender(
+      <RunsTable
+        runs={[run]}
+        loading={false}
+        queryError={new Error("refresh failed")}
+        onRetry={() => retries++}
+        page={1}
+        onPageChange={() => {}}
+        onSelect={() => {}}
+      />,
+    );
+    expect(document.querySelector(".mon-runs-table-row")?.textContent).toContain("rendered-coverage");
+    expect(byTestId("monitor-runs-table-query-error").textContent).toContain("refresh failed");
+    await click(byTestId("monitor-runs-table-query-error-retry"));
+    expect(retries).toBe(1);
   });
 
   test("keyboard: run rows activate with Enter and Space", async () => {

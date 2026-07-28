@@ -103,6 +103,7 @@ import {
   rowOf,
   runErrorOf,
   runProgress,
+  runsLandingState,
   runUsageChipOf,
   runsViewState,
   RUNS_PAGE_SIZE,
@@ -131,6 +132,7 @@ import {
   type NodeStateRow,
   type PromScrape,
   type RunRow,
+  type MonitorConnectionStatus,
   type RunsTableSort,
   type ScoreRow,
   type Tone,
@@ -269,11 +271,19 @@ function useArmConfirm(timeoutMs = 4_000): {
   };
 }
 
-export function StatusTag({ status, label }: { status: string | undefined; label?: string }) {
+export function StatusTag({
+  status,
+  label,
+  pulse = true,
+}: {
+  status: string | undefined;
+  label?: string;
+  pulse?: boolean;
+}) {
   const tone = toneForStatus(status);
   return (
     <span className={`mon-pill tone-${tone}`} data-status={labelForStatus(status)}>
-      <span className={`mon-dot${tone === "running" ? " mon-dot-pulse" : ""}`} aria-hidden />
+      <span className={`mon-dot${pulse && tone === "running" ? " mon-dot-pulse" : ""}`} aria-hidden />
       {label ?? labelForStatus(status)}
     </span>
   );
@@ -579,7 +589,17 @@ function ApprovalsInbox({
 // Runs rail.
 // ---------------------------------------------------------------------------
 
-function RunListRow({ run, active, onSelect }: { run: RunRow; active: boolean; onSelect: (runId: string) => void }) {
+function RunListRow({
+  run,
+  active,
+  lastKnown = false,
+  onSelect,
+}: {
+  run: RunRow;
+  active: boolean;
+  lastKnown?: boolean;
+  onSelect: (runId: string) => void;
+}) {
   const tone = toneForStatus(run.status);
   const live = tone === "running" || tone === "waiting";
   const startedBy = startedByOf(run);
@@ -591,13 +611,19 @@ function RunListRow({ run, active, onSelect }: { run: RunRow; active: boolean; o
   return (
     <RunRailRow
       runId={run.runId}
-      name={`${run.workflowKey ?? "unknown"}${startedBy?.harness ? ` · ${startedBy.harness}` : ""}`}
+      name={`${run.workflowKey ?? "unknown"}${startedBy?.harness ? ` · ${startedBy.harness}` : ""}${lastKnown ? " · last-known" : ""}`}
       title={`${run.workflowKey ?? "unknown workflow"}${startedLabel}${startedBy?.detected ? " · auto-detected" : ""}`}
       shortId={shortRunId(run.runId)}
       tone={tone}
-      pulse={tone === "running"}
+      pulse={!lastKnown && tone === "running"}
       when={
-        live ? <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} /> : <Ago ms={run.createdAtMs} />
+        lastKnown ? (
+          <span>last-known</span>
+        ) : live ? (
+          <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={undefined} />
+        ) : (
+          <Ago ms={run.createdAtMs} />
+        )
       }
       active={active}
       onSelect={onSelect}
@@ -612,6 +638,7 @@ function RunsZeroState({
   totalCount,
   queryError,
   onResetFilters,
+  onRetry,
 }: {
   state: Exclude<ReturnType<typeof runsViewState>, "ready">;
   testId: string;
@@ -619,6 +646,7 @@ function RunsZeroState({
   totalCount: number;
   queryError?: Error;
   onResetFilters?: () => void;
+  onRetry?: () => void | Promise<void>;
 }) {
   return (
     <div
@@ -640,6 +668,11 @@ function RunsZeroState({
         <>
           <div>Couldn&apos;t load runs.</div>
           <div className="mon-dim">{queryError?.message || "Refresh to try the query again."}</div>
+          {onRetry ? (
+            <Button variant="outline" data-testid={`${testId}-retry`} onClick={() => void onRetry()}>
+              Retry
+            </Button>
+          ) : null}
         </>
       ) : state === "filtered" ? (
         <>
@@ -671,6 +704,7 @@ export function RunsRail({
   totalCount = runs.length,
   queryError,
   onResetFilters,
+  onRetry,
   connStatus,
   selectedRunId,
   onSelect,
@@ -680,7 +714,8 @@ export function RunsRail({
   totalCount?: number;
   queryError?: Error;
   onResetFilters?: () => void;
-  connStatus: string;
+  onRetry?: () => void | Promise<void>;
+  connStatus: MonitorConnectionStatus;
   selectedRunId: string | undefined;
   onSelect: (runId: string) => void;
 }) {
@@ -688,6 +723,8 @@ export function RunsRail({
   // Offline and unauthorized carry state-specific banners (an auth failure
   // must never read like a network outage); connecting states just load.
   const banner = connectionViewFor(connStatus).banner;
+  const lastKnown = connStatus === "offline" && runs.length > 0;
+  const blocked = connStatus === "unauthorized";
   const zeroState = runsViewState({
     visibleCount: runs.length,
     totalCount,
@@ -696,7 +733,7 @@ export function RunsRail({
   });
   return (
     <nav className="mon-rail-runs" data-testid="monitor-runs">
-      {banner && runs.length === 0 ? (
+      {banner ? (
         <div className="mon-banner tone-failed" data-testid={`monitor-runs-${connStatus}`}>
           <div>{banner.title}</div>
           <div className="mon-dim">{banner.detail}</div>
@@ -709,18 +746,38 @@ export function RunsRail({
           totalCount={totalCount}
           queryError={queryError}
           onResetFilters={onResetFilters}
+          onRetry={onRetry}
         />
       ) : null}
-      {groups.map((group) => (
-        <section key={group.group} className="mon-run-group">
-          <h2 className="mon-kicker">
-            {group.title} <span className="mon-count">{group.runs.length}</span>
-          </h2>
-          {group.runs.map((run) => (
-            <RunListRow key={run.runId} run={run} active={run.runId === selectedRunId} onSelect={onSelect} />
-          ))}
-        </section>
-      ))}
+      {queryError && zeroState === "ready" && !banner ? (
+        <div className="mon-banner tone-failed" data-testid="monitor-runs-query-error" role="alert">
+          <div>Couldn&apos;t refresh runs.</div>
+          <div className="mon-dim">{queryError.message}</div>
+          {onRetry ? (
+            <Button variant="outline" data-testid="monitor-runs-query-error-retry" onClick={() => void onRetry()}>
+              Retry
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {!blocked &&
+        groups.map((group) => (
+          <section key={group.group} className="mon-run-group">
+            <h2 className="mon-kicker">
+              {group.title}
+              {lastKnown ? " · last-known" : ""} <span className="mon-count">{group.runs.length}</span>
+            </h2>
+            {group.runs.map((run) => (
+              <RunListRow
+                key={run.runId}
+                run={run}
+                active={run.runId === selectedRunId}
+                lastKnown={lastKnown}
+                onSelect={onSelect}
+              />
+            ))}
+          </section>
+        ))}
     </nav>
   );
 }
@@ -1410,7 +1467,10 @@ export function RunsTable({
   loading,
   totalCount = runs.length,
   queryError,
+  connStatus = "online",
+  hasCachedData = runs.length > 0,
   onResetFilters,
+  onRetry,
   page,
   onPageChange,
   onSelect,
@@ -1422,7 +1482,10 @@ export function RunsTable({
   loading: boolean;
   totalCount?: number;
   queryError?: Error;
+  connStatus?: MonitorConnectionStatus;
+  hasCachedData?: boolean;
   onResetFilters?: () => void;
+  onRetry?: () => void | Promise<void>;
   page: number;
   onPageChange: (page: number) => void;
   onSelect: (runId: string) => void;
@@ -1439,35 +1502,106 @@ export function RunsTable({
   const setSort = onSortChange ?? setInternalSort;
   const sorted = useMemo(() => sortRunsForTable(runs, sort), [runs, sort]);
   const { pageRows, page: shownPage, pageCount, total } = paginateRuns(sorted, page, RUNS_PAGE_SIZE);
-  const zeroState = runsViewState({
+  const landingState = runsLandingState({
     visibleCount: total,
     totalCount,
     loading,
     queryError: queryError !== undefined,
+    connectionStatus: connStatus,
+    hasCachedData,
   });
-  if (zeroState !== "ready") {
+  if (landingState === "connecting") {
+    return (
+      <div className="mon-empty mon-empty-hero" data-testid="monitor-empty-detail" data-state={landingState}>
+        <div>Connecting to the Smithers gateway…</div>
+        <div className="mon-dim">Runs will appear after the first successful response.</div>
+      </div>
+    );
+  }
+  if (landingState === "offline-without-cache") {
+    return (
+      <div
+        className="mon-empty mon-empty-hero tone-failed"
+        data-testid="monitor-empty-detail"
+        data-state={landingState}
+        role="alert"
+      >
+        <div>Gateway offline.</div>
+        <div className="mon-dim">No last-known runs are available. Reconnecting automatically.</div>
+      </div>
+    );
+  }
+  if (landingState === "unauthorized") {
+    return (
+      <div
+        className="mon-empty mon-empty-hero tone-failed"
+        data-testid="monitor-empty-detail"
+        data-state={landingState}
+        role="alert"
+      >
+        <div>Unauthorized.</div>
+        <div className="mon-dim">Re-open with smithers monitor to provide fresh gateway credentials.</div>
+      </div>
+    );
+  }
+  if (landingState !== "ready" && landingState !== "offline-with-cache") {
     return (
       <RunsZeroState
-        state={zeroState}
+        state={landingState}
         testId="monitor-empty-detail"
         hero
         totalCount={totalCount}
         queryError={queryError}
         onResetFilters={onResetFilters}
+        onRetry={onRetry}
       />
+    );
+  }
+  const lastKnown = landingState === "offline-with-cache";
+  if (lastKnown && total === 0) {
+    return (
+      <div className="mon-empty mon-empty-hero" data-testid="monitor-empty-detail" data-state={landingState}>
+        <div>Gateway offline. Last-known runs are hidden by your filters.</div>
+        <div className="mon-dim">Clear filters to inspect the cached results. They may be out of date.</div>
+        {onResetFilters ? (
+          <Button variant="outline" data-testid="monitor-empty-detail-reset" onClick={onResetFilters}>
+            Clear filters
+          </Button>
+        ) : null}
+      </div>
     );
   }
   const firstRow = (shownPage - 1) * RUNS_PAGE_SIZE + 1;
   const lastRow = Math.min(shownPage * RUNS_PAGE_SIZE, total);
   const startedIndicator = sort === "newest" ? "▾" : sort === "oldest" ? "▴" : "";
   return (
-    <section className="mon-panel mon-runs-table-panel">
+    <section
+      className="mon-panel mon-runs-table-panel"
+      data-state={landingState}
+      aria-label={lastKnown ? "Last-known runs" : "Runs"}
+    >
       <header className="mon-panel-head">
         <h2 className="mon-kicker">
-          All runs <span className="mon-count">{total}</span>
+          {lastKnown ? "Last-known runs" : "All runs"} <span className="mon-count">{total}</span>
         </h2>
         {sort === "default" ? <span className="mon-dim mon-sort-note">attention first · newest first</span> : null}
       </header>
+      {lastKnown ? (
+        <div className="mon-banner tone-waiting" data-testid="monitor-runs-last-known" role="status">
+          Gateway offline. Every run shown below is last-known data and may be out of date.
+        </div>
+      ) : null}
+      {queryError ? (
+        <div className="mon-banner tone-failed" data-testid="monitor-runs-table-query-error" role="alert">
+          <div>Couldn&apos;t refresh runs.</div>
+          <div className="mon-dim">{queryError.message}</div>
+          {onRetry ? (
+            <Button variant="outline" data-testid="monitor-runs-table-query-error-retry" onClick={() => void onRetry()}>
+              Retry
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="mon-runs-scroll" role="region" aria-label="Runs table" tabIndex={0}>
         <Table className="mon-runs-table" data-testid="monitor-runs-table">
           <TableHeader>
@@ -1519,7 +1653,11 @@ export function RunsTable({
                 }}
               >
                 <TableCell>
-                  <StatusTag status={run.status} />
+                  <StatusTag
+                    status={run.status}
+                    label={lastKnown ? `${labelForStatus(run.status)} · last-known` : undefined}
+                    pulse={!lastKnown}
+                  />
                 </TableCell>
                 <TableCell className="mon-table-workflow" title={run.workflowKey ?? "unknown workflow"}>
                   <span className="mon-table-workflow-name">{middleTruncate(run.workflowKey ?? "unknown", 56)}</span>
@@ -1532,7 +1670,11 @@ export function RunsTable({
                   <Ago ms={run.startedAtMs ?? run.createdAtMs} />
                 </TableCell>
                 <TableCell className="mon-dim mon-mono">
-                  <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={run.finishedAtMs} />
+                  {lastKnown && !isTerminalStatus(run.status) ? (
+                    "last-known"
+                  ) : (
+                    <Elapsed startMs={run.startedAtMs ?? run.createdAtMs} endMs={run.finishedAtMs} />
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -4508,6 +4650,7 @@ function App() {
               totalCount={allRuns.length}
               queryError={runsQuery.error}
               onResetFilters={resetFilters}
+              onRetry={runsQuery.refetch}
               connStatus={connStatus}
               selectedRunId={selectedRunId}
               onSelect={selectRun}
@@ -4532,19 +4675,26 @@ function App() {
             />
           ) : (
             <div className="mon-overview">
-              <NeedsYouBand
-                runs={allRuns}
-                loading={runsQuery.loading ?? false}
-                onSelectRun={selectRun}
-                onResult={showResult}
-              />
-              <ActiveNowBand runs={allRuns} onSelectRun={selectRun} />
+              {connStatus === "online" ? (
+                <>
+                  <NeedsYouBand
+                    runs={allRuns}
+                    loading={runsQuery.loading ?? false}
+                    onSelectRun={selectRun}
+                    onResult={showResult}
+                  />
+                  <ActiveNowBand runs={allRuns} onSelectRun={selectRun} />
+                </>
+              ) : null}
               <RunsTable
                 runs={visibleRuns}
                 loading={runsQuery.loading ?? false}
                 totalCount={allRuns.length}
                 queryError={runsQuery.error}
+                connStatus={connStatus}
+                hasCachedData={allRuns.length > 0}
                 onResetFilters={resetFilters}
+                onRetry={runsQuery.refetch}
                 page={runsPage}
                 onPageChange={setRunsPage}
                 onSelect={selectRun}
@@ -4552,8 +4702,12 @@ function App() {
                 onSortChange={setTableSort}
                 cursorRunId={cursorRunId}
               />
-              <CronsPanel />
-              <OpsFooter runs={allRuns} onShowMetrics={() => setShowMetrics(true)} />
+              {connStatus === "online" ? (
+                <>
+                  <CronsPanel />
+                  <OpsFooter runs={allRuns} onShowMetrics={() => setShowMetrics(true)} />
+                </>
+              ) : null}
             </div>
           )}
         </div>
