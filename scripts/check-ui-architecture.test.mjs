@@ -666,7 +666,10 @@ for (const [name, mutate, expected] of [
   [
     "ui-core importing opentui",
     (root) => {
-      json(root, "packages/ui-core/package.json", { name: "@smithers-orchestrator/ui-core", exports: { ".": "./src/index.ts" } });
+      json(root, "packages/ui-core/package.json", {
+        name: "@smithers-orchestrator/ui-core",
+        exports: { ".": "./src/index.ts" },
+      });
       write(root, "packages/ui-core/src/index.ts", 'export { useKeyboard } from "@opentui/react";\n');
     },
     "ui-core-boundary",
@@ -674,7 +677,10 @@ for (const [name, mutate, expected] of [
   [
     "ui-core importing the web ui barrel",
     (root) => {
-      json(root, "packages/ui-core/package.json", { name: "@smithers-orchestrator/ui-core", exports: { ".": "./src/index.ts" } });
+      json(root, "packages/ui-core/package.json", {
+        name: "@smithers-orchestrator/ui-core",
+        exports: { ".": "./src/index.ts" },
+      });
       write(root, "packages/ui-core/src/index.ts", 'export { Button } from "@smithers-orchestrator/ui";\n');
     },
     "ui-core-boundary",
@@ -682,7 +688,10 @@ for (const [name, mutate, expected] of [
   [
     "ui-core referencing a DOM global outside the web platform adapter",
     (root) => {
-      json(root, "packages/ui-core/package.json", { name: "@smithers-orchestrator/ui-core", exports: { ".": "./src/index.ts" } });
+      json(root, "packages/ui-core/package.json", {
+        name: "@smithers-orchestrator/ui-core",
+        exports: { ".": "./src/index.ts" },
+      });
       write(root, "packages/ui-core/src/index.ts", "export const width = window.innerWidth;\n");
     },
     "ui-core-boundary",
@@ -690,7 +699,10 @@ for (const [name, mutate, expected] of [
   [
     "tui-ui importing gateway-react",
     (root) => {
-      json(root, "packages/tui-ui/package.json", { name: "@smithers-orchestrator/tui-ui", exports: { ".": "./src/index.ts" } });
+      json(root, "packages/tui-ui/package.json", {
+        name: "@smithers-orchestrator/tui-ui",
+        exports: { ".": "./src/index.ts" },
+      });
       write(
         root,
         "packages/tui-ui/src/index.ts",
@@ -702,7 +714,10 @@ for (const [name, mutate, expected] of [
   [
     "tui-ui importing zustand",
     (root) => {
-      json(root, "packages/tui-ui/package.json", { name: "@smithers-orchestrator/tui-ui", exports: { ".": "./src/index.ts" } });
+      json(root, "packages/tui-ui/package.json", {
+        name: "@smithers-orchestrator/tui-ui",
+        exports: { ".": "./src/index.ts" },
+      });
       write(
         root,
         "packages/tui-ui/src/index.ts",
@@ -1036,7 +1051,7 @@ test("compliant ui-core and tui-ui modules pass", (context) => {
   write(
     root,
     "packages/ui-core/src/runs/statusMeta.ts",
-    'export function statusTone(status: string) { return status; }\n',
+    "export function statusTone(status: string) { return status; }\n",
   );
   json(root, "packages/tui-ui/package.json", {
     name: "@smithers-orchestrator/tui-ui",
@@ -1047,7 +1062,7 @@ test("compliant ui-core and tui-ui modules pass", (context) => {
   write(
     root,
     "packages/tui-ui/src/StatusPill.tsx",
-    '/** @jsxImportSource @opentui/react */\nexport function StatusPill(props: { label: string }) { return <text>{props.label}</text>; }\n',
+    "/** @jsxImportSource @opentui/react */\nexport function StatusPill(props: { label: string }) { return <text>{props.label}</text>; }\n",
   );
   const baseline = snapshot(root);
   assert.ok(

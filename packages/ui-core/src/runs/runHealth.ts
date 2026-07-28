@@ -44,10 +44,7 @@ export type RunHealth = {
  * health value that DIVERGES from the run's lifecycle status. A run whose engine
  * already reports the same state as its status is not a divergence.
  */
-export function runHealth(
-  healthState: string | undefined,
-  runStatus: string | undefined,
-): RunHealth | null {
+export function runHealth(healthState: string | undefined, runStatus: string | undefined): RunHealth | null {
   if (!isHealthState(healthState)) return null;
   if (healthState === runStatus) return null;
   if (healthState === "recovering") {

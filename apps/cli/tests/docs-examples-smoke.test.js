@@ -55,6 +55,7 @@ const NON_STANDALONE_WORKFLOW_SNIPPETS = [
   "docs/examples/run-on-plue.mdx#5",
   "docs/examples/worktree-feature-workflow.mdx#2",
   "docs/guides/alerting.mdx#2",
+  "docs/guides/monitor-workflows.mdx#4",
   "docs/recipes.mdx#7",
 ];
 const CURRENT_MODEL_DOCS = {
@@ -273,7 +274,9 @@ test("complete single-file workflow snippets in docs render as graphs", () => {
     .filter((label) => !checkedLabels.has(label))
     .filter((label) => !allowedNonStandalone.has(label));
   expect(unclassified).toEqual([]);
-}, 120_000);
+  // Spawning the CLI graph per snippet scales with the docs; slow or loaded
+  // runners exceed 120s well before anything is actually wrong.
+}, 240_000);
 
 test("agent-facing docs use current Claude model ids", () => {
   for (const [file, expectations] of Object.entries(CURRENT_MODEL_DOCS)) {

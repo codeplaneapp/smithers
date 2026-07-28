@@ -41,8 +41,7 @@ export function runEta(input: RunEtaInput): RunEtaResult {
   const remainingNodes = Math.max(0, progress.total - progress.completed);
 
   if (nodeDurationsMs && nodeDurationsMs.length > 0) {
-    const meanMs =
-      nodeDurationsMs.reduce((sum, ms) => sum + ms, 0) / nodeDurationsMs.length;
+    const meanMs = nodeDurationsMs.reduce((sum, ms) => sum + ms, 0) / nodeDurationsMs.length;
     return withEta(Math.max(0, meanMs * remainingNodes), "history", nowMs);
   }
 

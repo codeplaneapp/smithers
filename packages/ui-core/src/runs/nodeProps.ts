@@ -13,12 +13,7 @@ import type { Run, RunNode } from "./Run.ts";
 /** Container kinds that orchestrate children rather than run a task. Their
  *  inspector hides the task-only tabs (Output/Diff/Logs/Tools) and shows a
  *  one-line role description instead (ports nodeRoleDescription). */
-const CONTAINER_KINDS = new Set([
-  "merge",
-  "loop",
-  "branch",
-  "signal",
-]);
+const CONTAINER_KINDS = new Set(["merge", "loop", "branch", "signal"]);
 
 /** Prop keys that name a prompt; the props table links these to the prompts
  *  surface with an "open prompt ↗" affordance (ports PropsTableView.promptKeys). */
@@ -165,18 +160,7 @@ export type SideEffectTone = "idle" | "waiting" | "info";
 
 /** Keywords that mark a tool call as a mutating/side-effecting operation; the
  *  badge tones to "waiting" (caution) for these (ports sideEffectStyle's write set). */
-const WRITE_KEYWORDS = [
-  "write",
-  "mutate",
-  "network",
-  "shell",
-  "file",
-  "delete",
-  "create",
-  "modify",
-  "edit",
-  "bash",
-];
+const WRITE_KEYWORDS = ["write", "mutate", "network", "shell", "file", "delete", "create", "modify", "edit", "bash"];
 
 /** Keywords that mark a read-only call; the badge tones to "idle" (ports the
  *  read/none branch). */

@@ -93,7 +93,13 @@ describe("simulate production parity", () => {
 
     expect(sim.executed).toEqual(["impl:implement", "impl:validate", "impl:review:0"]);
     expect(sim.status).toBe("finished");
-    expect(sim.output).toEqual({ reviewer: "reviewer-1", approved: true, feedback: "approved", issues: [] });
+    expect(sim.output).toEqual({
+      reviewer: "reviewer-1",
+      approved: true,
+      blocked: false,
+      feedback: "approved",
+      issues: [],
+    });
     for (const id of ["impl:implement", "impl:validate", "impl:review:0"]) {
       expect(sim.task(id).outputs).toHaveLength(1);
     }

@@ -656,5 +656,7 @@ describe("xcombo rewind lease scoping across a parent/child pair", () => {
       await lock?.release?.().catch?.(() => undefined);
       cleanup();
     }
-  });
+    // Real jj snapshots + lease acquisition run over 5s on slow CI runners
+    // (Windows took 6.4s); the default bun timeout is not enough.
+  }, 30_000);
 });

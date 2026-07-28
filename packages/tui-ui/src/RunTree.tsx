@@ -64,7 +64,13 @@ export function RunTree({ rows, focusedKey, panelWidth }: RunTreeProps) {
         const truncLabel = truncateRunTreeLabel(row.label, maxLabelWidth);
 
         return (
-          <box key={row.key} width="100%" height={1} flexDirection="row" backgroundColor={isFocused ? "#1a1a2e" : undefined}>
+          <box
+            key={row.key}
+            width="100%"
+            height={1}
+            flexDirection="row"
+            backgroundColor={isFocused ? "#1a1a2e" : undefined}
+          >
             <text fg="#333333">{" ".repeat(indentWidth)}</text>
             <text fg="#555555">{runTreeChevron(row.hasChildren, row.isCollapsed)}</text>
             <text> </text>

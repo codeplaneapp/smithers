@@ -120,16 +120,14 @@ describe("find db helpers", () => {
       await expect(waitForSmithersDb(root, { timeoutMs: 1, intervalMs: 1 }, checks)).rejects.toMatchObject({
         code: "CLI_DB_NOT_FOUND",
       });
-      await expect(
-        waitForSmithersDb(Symbol("bad"), { timeoutMs: 1, intervalMs: 1 }, checks),
-      ).rejects.toBeInstanceOf(TypeError);
+      await expect(waitForSmithersDb(Symbol("bad"), { timeoutMs: 1, intervalMs: 1 }, checks)).rejects.toBeInstanceOf(
+        TypeError,
+      );
 
       setTimeout(() => {
         writeFileSync(join(root, "smithers.db"), "");
       }, 5);
-      expect(await waitForSmithersDb(root, { timeoutMs: 100, intervalMs: 1 }, checks)).toBe(
-        join(root, "smithers.db"),
-      );
+      expect(await waitForSmithersDb(root, { timeoutMs: 100, intervalMs: 1 }, checks)).toBe(join(root, "smithers.db"));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

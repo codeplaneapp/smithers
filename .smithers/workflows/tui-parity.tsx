@@ -409,7 +409,9 @@ export default smithers((ctx) => {
     const attempts = implementationRows.filter((row) => baseNodeId(row) === `${def.id}-implement`).length;
     // A review row is only trusted for the attempt it reviewed.
     const checkCurrent =
-      implementation !== undefined && check !== undefined && asInt(check.iteration, 0) >= asInt(implementation.iteration, 0);
+      implementation !== undefined &&
+      check !== undefined &&
+      asInt(check.iteration, 0) >= asInt(implementation.iteration, 0);
     const reviewCurrent =
       checkCurrent && reviewRow !== undefined && asInt(reviewRow.iteration, 0) >= asInt(check.iteration, 0);
     const done =
@@ -501,14 +503,14 @@ pass locally; otherwise "partial" or "blocked" with the reason in summary.`}
                       {state.check?.allPassed === true &&
                       asInt(state.check.iteration, 0) >= asInt(state.implementation?.iteration, 0) ? (
                         <Task
-                            id={`${def.id}-review`}
-                            output={outputs.tuiParityReview}
-                            agent={agents.review}
-                            retries={2}
-                            timeoutMs={45 * 60_000}
-                            heartbeatTimeoutMs={10 * 60_000}
-                          >
-                            {`Strictly review phase "${def.id}" of the TUI parity program. Do not edit files.
+                          id={`${def.id}-review`}
+                          output={outputs.tuiParityReview}
+                          agent={agents.review}
+                          retries={2}
+                          timeoutMs={45 * 60_000}
+                          heartbeatTimeoutMs={10 * 60_000}
+                        >
+                          {`Strictly review phase "${def.id}" of the TUI parity program. Do not edit files.
 
 Scope: the branch diff only. In the worktree at ${state.worktreePath}, run
 jj diff --from "fork_point(${baseBranch} | ${state.branch})" --to ${state.branch}

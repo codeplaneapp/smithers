@@ -14,13 +14,7 @@ import {
 } from "@smithers-orchestrator/gateway-client";
 import { nodeLogEvents } from "./eventFrame.ts";
 import { toNodeDiffView, type NodeDiffView } from "./diffUtils.ts";
-import {
-  defaultTab,
-  flattenTree,
-  resolveFocusIdx,
-  type FlatNode,
-  type TabId,
-} from "./treeUtils.ts";
+import { defaultTab, flattenTree, resolveFocusIdx, type FlatNode, type TabId } from "./treeUtils.ts";
 
 /**
  * The run inspector view model: tree + node detail tabs (Output/Logs/Diff/

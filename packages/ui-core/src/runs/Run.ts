@@ -18,15 +18,7 @@ export type { NodeStatus };
  * with no runtime dependency): importing that module directly would pull in
  * `dagre` + `@xyflow/react`, which ui-core must not depend on.
  */
-export type FlowKind =
-  | "agent"
-  | "compute"
-  | "approval"
-  | "merge"
-  | "loop"
-  | "branch"
-  | "signal"
-  | "human";
+export type FlowKind = "agent" | "compute" | "approval" | "merge" | "loop" | "branch" | "signal" | "human";
 
 export type ToolVerb = "Edit" | "Write" | "Read" | "Bash" | "Grep";
 

@@ -3,11 +3,7 @@ import { useGatewayRuns } from "@smithers-orchestrator/gateway-react";
 import type { GatewayRunSummaryRow } from "@smithers-orchestrator/gateway-client";
 import type { RunSummary } from "./runsList.ts";
 import { isQueuedRawStatus, runListStatusFromRaw } from "./runsList.ts";
-import {
-  captureRunsIdentityEpoch,
-  setRunsListRows,
-  setRunsListUnavailable,
-} from "./runsListStore.ts";
+import { captureRunsIdentityEpoch, setRunsListRows, setRunsListUnavailable } from "./runsListStore.ts";
 
 /**
  * Bridge the live `runs` gateway collection into the runs list store.
@@ -108,9 +104,7 @@ export function toRunSummary(row: Record<string, unknown>, nowMs: number = Date.
     // Only a run with a known finish time gets a real duration — a running
     // row keeps "—" so the list never ticks.
     elapsedLabel:
-      startedAtMs !== undefined && finishedAtMs !== undefined
-        ? formatElapsed(finishedAtMs - startedAtMs)
-        : "—",
+      startedAtMs !== undefined && finishedAtMs !== undefined ? formatElapsed(finishedAtMs - startedAtMs) : "—",
     ageBucket: ageBucketFromMs(createdAtMs, nowMs),
   };
 }

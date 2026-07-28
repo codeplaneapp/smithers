@@ -2,12 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { runHealth, snapshotHealthState } from "../../src/runs/runHealth.ts";
 
 describe("snapshotHealthState — reads runState.state from the real gateway payload", () => {
-  test.each(["stale", "orphaned", "recovering"] as const)(
-    "surfaces the engine health state %s",
-    (state) => {
-      expect(snapshotHealthState({ runState: { state } })).toBe(state);
-    },
-  );
+  test.each(["stale", "orphaned", "recovering"] as const)("surfaces the engine health state %s", (state) => {
+    expect(snapshotHealthState({ runState: { state } })).toBe(state);
+  });
 
   test("a normal lifecycle state is not a health divergence", () => {
     expect(snapshotHealthState({ runState: { state: "running" } })).toBeUndefined();

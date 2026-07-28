@@ -77,24 +77,15 @@ export function isRunsIdentityEpochCurrent(epoch: number): boolean {
  * wins once it appears — it carries the run's real timestamps/status — so the
  * delegated row hands off seamlessly instead of doubling.
  */
-function mergeRunMetadata(
-  backend: RunSummary,
-  delegated: RunSummary | undefined,
-): RunSummary {
+function mergeRunMetadata(backend: RunSummary, delegated: RunSummary | undefined): RunSummary {
   if (!delegated) return backend;
   const patch: Partial<RunSummary> = {};
-  if (!backend.inferencePool && delegated.inferencePool)
-    patch.inferencePool = delegated.inferencePool;
-  if (!backend.completion && delegated.completion)
-    patch.completion = delegated.completion;
-  if (!backend.repoContext && delegated.repoContext)
-    patch.repoContext = delegated.repoContext;
-  if (!backend.sourceBookmark && delegated.sourceBookmark)
-    patch.sourceBookmark = delegated.sourceBookmark;
-  if (!backend.targetBookmark && delegated.targetBookmark)
-    patch.targetBookmark = delegated.targetBookmark;
-  if (!backend.launchInputs && delegated.launchInputs)
-    patch.launchInputs = delegated.launchInputs;
+  if (!backend.inferencePool && delegated.inferencePool) patch.inferencePool = delegated.inferencePool;
+  if (!backend.completion && delegated.completion) patch.completion = delegated.completion;
+  if (!backend.repoContext && delegated.repoContext) patch.repoContext = delegated.repoContext;
+  if (!backend.sourceBookmark && delegated.sourceBookmark) patch.sourceBookmark = delegated.sourceBookmark;
+  if (!backend.targetBookmark && delegated.targetBookmark) patch.targetBookmark = delegated.targetBookmark;
+  if (!backend.launchInputs && delegated.launchInputs) patch.launchInputs = delegated.launchInputs;
   if (Object.keys(patch).length === 0) return backend;
   return {
     ...backend,
@@ -102,26 +93,17 @@ function mergeRunMetadata(
   };
 }
 
-function mergeRuns(
-  delegatedRuns: RunSummary[],
-  backendRuns: RunSummary[],
-): RunSummary[] {
+function mergeRuns(delegatedRuns: RunSummary[], backendRuns: RunSummary[]): RunSummary[] {
   if (delegatedRuns.length === 0) return backendRuns;
   const delegatedById = new Map(delegatedRuns.map((run) => [run.runId, run]));
   const backendIds = new Set(backendRuns.map((run) => run.runId));
   return [
     ...delegatedRuns.filter((run) => !backendIds.has(run.runId)),
-    ...backendRuns.map((run) =>
-      mergeRunMetadata(run, delegatedById.get(run.runId)),
-    ),
+    ...backendRuns.map((run) => mergeRunMetadata(run, delegatedById.get(run.runId))),
   ];
 }
 
-function patchRun(
-  runs: RunSummary[],
-  runId: string,
-  patch: Partial<RunSummary>,
-): RunSummary[] {
+function patchRun(runs: RunSummary[], runId: string, patch: Partial<RunSummary>): RunSummary[] {
   return runs.map((run) => (run.runId === runId ? { ...run, ...patch } : run));
 }
 
@@ -159,12 +141,8 @@ export const useRunsListStore = create<RunsListState>((set) => ({
  * `runs` (delegated session launches survive — a repo switch or an empty poll
  * clears only the backend rows).
  */
-export function setRunsListRows(
-  runs: RunSummary[],
-  identityEpoch?: number,
-): void {
-  if (identityEpoch !== undefined && !isRunsIdentityEpochCurrent(identityEpoch))
-    return;
+export function setRunsListRows(runs: RunSummary[], identityEpoch?: number): void {
+  if (identityEpoch !== undefined && !isRunsIdentityEpochCurrent(identityEpoch)) return;
   useRunsListStore.setState((state) => {
     return {
       backendRuns: runs,
@@ -198,12 +176,8 @@ export function resetRunsForIdentityChange(): void {
  * a real runId — a failed launch has no runId and adds no row). Newest first;
  * an existing row with the same runId is replaced in place.
  */
-export function upsertDelegatedRun(
-  run: RunSummary,
-  identityEpoch?: number,
-): void {
-  if (identityEpoch !== undefined && !isRunsIdentityEpochCurrent(identityEpoch))
-    return;
+export function upsertDelegatedRun(run: RunSummary, identityEpoch?: number): void {
+  if (identityEpoch !== undefined && !isRunsIdentityEpochCurrent(identityEpoch)) return;
   useRunsListStore.setState((state) => {
     const exists = state.delegatedRuns.some((r) => r.runId === run.runId);
     const delegatedRuns = exists
@@ -219,31 +193,19 @@ export function upsertDelegatedRun(
  * unchanged status) is a no-op — the stream never invents rows, and a stream
  * error leaves the last-known status in place (honest: never flip to finished).
  */
-export function updateDelegatedRunStatus(
-  runId: string,
-  status: RunListStatus,
-  identityEpoch?: number,
-): void {
-  if (identityEpoch !== undefined && !isRunsIdentityEpochCurrent(identityEpoch))
-    return;
+export function updateDelegatedRunStatus(runId: string, status: RunListStatus, identityEpoch?: number): void {
+  if (identityEpoch !== undefined && !isRunsIdentityEpochCurrent(identityEpoch)) return;
   useRunsListStore.setState((state) => {
     const current = state.delegatedRuns.find((r) => r.runId === runId);
     if (!current || current.status === status) return state;
-    const delegatedRuns = state.delegatedRuns.map((r) =>
-      r.runId === runId ? { ...r, status } : r,
-    );
+    const delegatedRuns = state.delegatedRuns.map((r) => (r.runId === runId ? { ...r, status } : r));
     return { delegatedRuns, runs: mergeRuns(delegatedRuns, state.backendRuns) };
   });
 }
 
 /** Attach the strict verifier verdict to a settled run without inventing one. */
-export function updateRunCompletion(
-  runId: string,
-  completion: RunVerdict,
-  identityEpoch?: number,
-): void {
-  if (identityEpoch !== undefined && !isRunsIdentityEpochCurrent(identityEpoch))
-    return;
+export function updateRunCompletion(runId: string, completion: RunVerdict, identityEpoch?: number): void {
+  if (identityEpoch !== undefined && !isRunsIdentityEpochCurrent(identityEpoch)) return;
   useRunsListStore.setState((state) => {
     const delegatedRuns = patchRun(state.delegatedRuns, runId, { completion });
     const backendRuns = patchRun(state.backendRuns, runId, { completion });
@@ -262,8 +224,7 @@ export function updateRunCompletion(
  * roster (the delegated session rows survive) and re-merges.
  */
 export function setRunsListUnavailable(identityEpoch?: number): void {
-  if (identityEpoch !== undefined && !isRunsIdentityEpochCurrent(identityEpoch))
-    return;
+  if (identityEpoch !== undefined && !isRunsIdentityEpochCurrent(identityEpoch)) return;
   useRunsListStore.setState((state) => ({
     backendRuns: [],
     runs: mergeRuns(state.delegatedRuns, []),
