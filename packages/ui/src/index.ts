@@ -109,7 +109,7 @@ export { Input, Textarea } from "./input";
 export { Label, Field } from "./label";
 export { ChatMessage, type ChatMessageProps, type ChatMessageRole } from "./chat/ChatMessage";
 export { ChatTranscript, type ChatTranscriptProps } from "./chat/ChatTranscript";
-export { ChatComposer, type ChatComposerProps } from "./chat/ChatComposer";
+export { ChatComposer, type ChatComposerProps, type ChatComposerStatus } from "./chat/ChatComposer";
 export {
   MessageScroller,
   MessageScrollerProvider,
@@ -229,6 +229,9 @@ export { Progress, type ProgressProps } from "./progress";
 export { Separator } from "./separator";
 export { Skeleton } from "./skeleton";
 export { Spinner, spinnerVariants, type SpinnerProps } from "./spinner";
+export { formatRelativeTime } from "./time/formatRelativeTime";
+export { RelativeTime, useRelativeTime, type RelativeTimeProps } from "./time/RelativeTime";
+export { useDialogFocusTrap, type UseDialogFocusTrapOptions } from "./internal/useDialogFocusTrap";
 export { EmptyState, type EmptyStateProps } from "./empty-state";
 export { SectionHeader, Eyebrow, type SectionHeaderProps } from "./section-header";
 export { RowButton, type RowButtonProps } from "./row-button";
@@ -611,3 +614,9 @@ export {
   type WorkflowControlsProps,
   type WorkflowPanelProps,
 } from "./canvas/WorkflowCanvas";
+
+// lane:calendar exports (integration: keep)
+export * from "./calendar";
+
+// lane:vault exports (integration: keep)
+export * from "./vault";

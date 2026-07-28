@@ -40,6 +40,8 @@ import { agentsCss } from "./agents/agentsCss";
 import { artifactsCss } from "./artifacts/artifactsCss";
 import { sandboxCss } from "./sandbox/sandboxCss";
 import { canvasCss } from "./canvas/canvasCss";
+import { calendarCss } from "./calendar/calendarCss";
+import { vaultCss } from "./vault/vaultCss";
 
 const shadowCard = t.shadow2;
 const shadowOverlay = t.shadow3;
@@ -187,6 +189,8 @@ export const chatCss = `
 .sui-chat-composer-status { min-width:0; color:${t.mutedForeground}; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .sui-chat-composer-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex:none; }
 .sui-chat-composer-send { width:34px; height:34px; min-height:34px; border-radius:${t.radius}; font-size:18px; }
+.sui-chat-composer-stop { width:34px; height:34px; min-height:34px; border-radius:${t.radius}; color:${t.destructive}; font-size:12px; }
+.sui-chat-composer-stop:hover { background:${t.destructiveSoft}; color:${t.destructive}; }
 @keyframes sui-chat-message-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
 @keyframes sui-chat-typing { 0%, 60%, 100% { opacity:.3; } 30% { opacity:1; } }
 @media (max-width: 620px) { .sui-chat-messages { padding:24px 14px 146px; } .sui-chat-bubble { max-width:90%; } .sui-chat-composer[data-docked='true'] { right:12px; left:12px; bottom:max(10px, env(safe-area-inset-bottom)); } }
@@ -267,7 +271,7 @@ export const tableCss = `
 .sui-table-container { min-width:0; width:100%; overflow-x:auto; }
 .sui-table { width:100%; border-collapse:collapse; font-size:13px; }
 .sui-table th, .sui-table td { padding:8px 10px; border-bottom:1px solid ${t.border}; text-align:left; vertical-align:top; }
-.sui-table th { color:${t.mutedForeground}; font-size:11px; text-transform:uppercase; letter-spacing:.04em; font-weight:650; }
+.sui-table th { position:sticky; top:0; z-index:1; background:${t.card}; color:${t.mutedForeground}; font-size:11px; text-transform:uppercase; letter-spacing:.04em; font-weight:650; }
 .sui-table caption { padding:8px 10px; color:${t.mutedForeground}; font-size:11px; text-align:left; caption-side:bottom; }
 .sui-table tbody tr:hover { background:${t.hoverSubtle}; }
 `;
@@ -375,7 +379,8 @@ export const agenticPlanCss = `
 /* -------------------------------------------------------------------------- */
 
 export const selectCss = `
-.sui-select-trigger { min-width:0; min-height:32px; display:inline-flex; align-items:center; justify-content:space-between; gap:8px; padding:0 10px; border:1px solid ${t.input}; border-radius:${t.radiusControl}; background:${t.card}; color:${t.foreground}; font:inherit; font-size:13px; cursor:pointer; white-space:nowrap; }
+.sui-select-trigger { min-width:0; min-height:32px; display:inline-flex; align-items:center; justify-content:space-between; gap:8px; padding:0 10px; border:1px solid ${t.input}; border-radius:${t.radiusControl}; background:${t.card}; color:${t.foreground}; font:inherit; font-size:13px; cursor:pointer; white-space:nowrap; ${interaction} }
+.sui-select-trigger:hover { background:${t.secondary}; }
 .sui-select-trigger:focus-visible { ${focusRing} }
 .sui-select-trigger:disabled { cursor:not-allowed; opacity:.45; }
 .sui-select-trigger[data-placeholder] { color:${t.placeholder}; }
@@ -416,6 +421,14 @@ export const separatorCss = `
 .sui-separator { flex:none; background:${t.border}; }
 .sui-separator[data-orientation='horizontal'] { height:1px; width:100%; }
 .sui-separator[data-orientation='vertical'] { width:1px; align-self:stretch; }
+`;
+
+/* -------------------------------------------------------------------------- */
+/* RelativeTime                                                               */
+/* -------------------------------------------------------------------------- */
+
+export const timeCss = `
+.sui-relative-time { font-variant-numeric:tabular-nums; }
 `;
 
 /* -------------------------------------------------------------------------- */
@@ -654,6 +667,7 @@ export const smithersUiCss = [
   skeletonCss,
   spinnerCss,
   separatorCss,
+  timeCss,
   emptyStateCss,
   sectionHeaderCss,
   rowButtonCss,
@@ -677,6 +691,8 @@ export const smithersUiCss = [
   artifactsCss,
   sandboxCss,
   canvasCss,
+  calendarCss,
+  vaultCss,
   reducedMotionCss,
 ]
   .map((block) => block.trim())

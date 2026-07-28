@@ -22,7 +22,7 @@ export const canvasCss = `
 .sui-canvas-edge[data-status-class='ok'] .sui-canvas-edge-glyph { color:var(--success, #087461); }
 .sui-canvas-edge[data-status-class='warn'] .sui-canvas-edge-glyph { color:var(--warning, #916000); }
 .sui-canvas-edge[data-status-class='bad'] .sui-canvas-edge-glyph { color:var(--danger, #c5343f); }
-.sui-canvas-edge-arrow { color:var(--text-faint, #71717a); }
+.sui-canvas-edge-arrow { color:var(--text-faint, #6d6d75); }
 .sui-canvas-edge-label { color:var(--text, #18181b); }
 .sui-canvas-connection { display:inline-block; width:48px; border-top:2px dashed var(--border-strong, rgba(24,24,27,0.14)); }
 .sui-canvas-connection[data-status='valid'] { border-top-style:solid; border-top-color:var(--success, #087461); }

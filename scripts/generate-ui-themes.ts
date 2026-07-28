@@ -113,7 +113,7 @@ const crepeLightHouseTokens = crepeHouseTokens({
   background: "#fafafa",
   text: "#18181b",
   textMuted: "#52525b",
-  textFaint: "#71717a",
+  textFaint: "#6d6d75",
   surface: "#ffffff",
   surface2: "#f4f4f5",
   hover: "#f4f4f5",

@@ -142,8 +142,9 @@ export type WorkflowNodeProps = Omit<ComponentProps<"div">, "children" | "title"
    * so the state survives into the accessibility tree) instead of the
    * generic div role, where aria-selected is unsupported and stripped.
    * `role="option"` has a required context: the renderer MUST provide an
-   * owning `role="listbox"` ancestor (e.g. `WorkflowCanvas role="listbox"`,
-   * which the gateway-ui WorkflowGraph does by default) or the option is
+   * owning selection-model ancestor (e.g. `WorkflowCanvas role="listbox"`)
+   * or strip the option semantics (as the gateway-ui WorkflowGraph does via
+   * `SmithersCanvasNode` under its `role="region"` canvas), or the option is
    * orphaned in the accessibility tree.
    */
   selected?: boolean;

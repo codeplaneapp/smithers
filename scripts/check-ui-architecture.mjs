@@ -150,6 +150,7 @@ const SHADCN_DIRECTORIES = ["packages/ui/src/chat/shadcn", "packages/ui/src/prim
 // was never baselined) and already conforms to the program profile, importing
 // only the @smithers-orchestrator/ui barrel plus its local theme module.
 const SANCTIONED_GATEWAY_UI_PROGRAM_FILES = new Set([
+  "packages/gateway-ui/src/CronCalendar.tsx",
   "packages/gateway-ui/src/GatewayApprovals.tsx",
   "packages/gateway-ui/src/GatewayCheckpointControls.tsx",
   "packages/gateway-ui/src/OneshotSurface.tsx",
@@ -1114,6 +1115,7 @@ function uiLayer(path) {
     "ai",
     "approvals",
     "artifacts",
+    "calendar",
     "canvas",
     "chat",
     "internal",
@@ -1122,6 +1124,8 @@ function uiLayer(path) {
     "sandbox",
     "smithers",
     "styles",
+    "time",
+    "vault",
   ].includes(layer)
     ? layer
     : null;
@@ -1539,6 +1543,7 @@ export function collectUiArchitectureState(root, kind = "smithers") {
         ai: new Set(["ai", "chat", "internal", "primitives", "styles"]),
         approvals: new Set(["agentic", "approvals", "internal", "primitives", "styles"]),
         artifacts: new Set(["agentic", "artifacts", "internal", "primitives", "styles"]),
+        calendar: new Set(["calendar", "internal", "styles", "time"]),
         canvas: new Set(["canvas", "internal", "primitives", "styles"]),
         chat: new Set(["chat", "internal", "primitives", "styles"]),
         connected: new Set(["connected", "gateway-react", "internal", "smithers", "styles"]),
@@ -1548,6 +1553,8 @@ export function collectUiArchitectureState(root, kind = "smithers") {
         sandbox: new Set(["internal", "primitives", "sandbox", "styles"]),
         smithers: new Set(["adapters", "agentic", "ai", "internal", "primitives", "smithers", "styles"]),
         styles: new Set(["internal", "styles"]),
+        time: new Set(["internal", "styles", "time"]),
+        vault: new Set(["internal", "styles", "time", "vault"]),
       };
       if (layer) {
         for (const specifier of specifiers) {

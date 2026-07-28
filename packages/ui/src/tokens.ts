@@ -91,7 +91,7 @@ export const tokens = {
   /** Extra-subtle fill for chips and hover washes. */
   hoverSubtle: "var(--hover-subtle, rgba(24,24,27,0.04))",
   /** Faint text (placeholders use --text-placeholder). */
-  textFaint: "var(--text-faint, #71717a)",
+  textFaint: "var(--text-faint, #6d6d75)",
   placeholder: "var(--text-placeholder, #8a8a93)",
   /** Inverse surface/text (tooltips, "ink" chips). */
   inverseBg: "var(--inverse-bg, #18181b)",

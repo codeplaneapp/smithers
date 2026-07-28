@@ -12,7 +12,7 @@ const lightTokens = [
   "--bg:#fafafa",
   "--text:#18181b",
   "--text-muted:#52525b",
-  "--text-faint:#71717a",
+  "--text-faint:#6d6d75",
   "--text-placeholder:#8a8a93",
   // Elevation ramp: bg < surface (cards) < surface-2 (inset/hover) <
   // surface-3 (overlays, popovers).
@@ -155,7 +155,7 @@ const sharedTokens = [
   "--r-bubble:18px",
   "--r-full:999px",
   "--ctl-h:32px",
-  "--ctl-h-sm:26px",
+  "--ctl-h-sm:28px",
   "--ctl-h-lg:38px",
 ].join("; ");
 

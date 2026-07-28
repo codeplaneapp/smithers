@@ -3,6 +3,7 @@ import type { ComponentProps } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { Slot } from "radix-ui";
 import { cn } from "./cn";
+import { Spinner } from "./spinner";
 import { useInjectUiCss } from "./styles";
 
 export const buttonVariants = cva("sui-button", {
@@ -35,6 +36,12 @@ export type ButtonProps = ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     /** Render the child element instead of a `<button>` (Radix Slot). */
     asChild?: boolean;
+    /**
+     * Render a Spinner before the children, mark the button `aria-busy`, and
+     * disable interaction while work is in flight. Ignored under `asChild`
+     * (the Slot cannot inject a spinner into an arbitrary child element).
+     */
+    loading?: boolean;
   };
 
 /**
@@ -45,11 +52,37 @@ export type ButtonProps = ComponentProps<"button"> &
  * `variant="solid"` for shadcn's filled look. Defaults `type="button"` so
  * buttons inside forms never submit accidentally.
  */
-export function Button({ className, variant, size, asChild = false, type, ...props }: ButtonProps) {
+export function Button({
+  className,
+  variant,
+  size,
+  asChild = false,
+  loading = false,
+  type,
+  disabled,
+  children,
+  ...props
+}: ButtonProps) {
   useInjectUiCss();
   const classes = cn(buttonVariants({ variant, size }), className);
   if (asChild) {
-    return <Slot.Root data-slot="button" className={classes} {...props} />;
+    return (
+      <Slot.Root data-slot="button" className={classes} {...props}>
+        {children}
+      </Slot.Root>
+    );
   }
-  return <button data-slot="button" type={type ?? "button"} className={classes} {...props} />;
+  return (
+    <button
+      data-slot="button"
+      type={type ?? "button"}
+      className={classes}
+      disabled={disabled || loading}
+      aria-busy={loading ? true : undefined}
+      {...props}
+    >
+      {loading ? <Spinner size="sm" aria-hidden="true" /> : null}
+      {children}
+    </button>
+  );
 }
