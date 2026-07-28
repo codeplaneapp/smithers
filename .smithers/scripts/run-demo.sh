@@ -44,5 +44,5 @@ done
 input=$(printf '{"silent":%s,"auto":%s,"autoMs":%s,"startAt":%s,"voice":"%s","rate":%s}' \
   "$silent" "$auto" "$auto_ms" "$start_at" "$voice" "$rate")
 
-exec bun run smithers up .smithers/workflows/demo.tsx \
+exec bun apps/cli/src/index.js up .smithers/workflows/demo.tsx \
   --input "$input" "${forward[@]+"${forward[@]}"}"
