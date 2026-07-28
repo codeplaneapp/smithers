@@ -31,5 +31,10 @@ export function markResetCancelledMeta(metaJson) {
     }
   }
   meta[RESET_CANCELLED_META_KEY] = true;
+  // A deliberate reset is a fresh execution boundary. Veto both native CLI
+  // session continuation and conversation fallback retained by the task
+  // heartbeat; otherwise a deleted generic checkpoint can still resurrect
+  // through the legacy resume channel.
+  meta.discardResumeSession = true;
   return JSON.stringify(meta);
 }

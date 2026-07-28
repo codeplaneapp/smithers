@@ -1,4 +1,6 @@
 // @smithers-type-exports-begin
+/** @typedef {import("./AgentCheckpointRow.ts").AgentCheckpointContentRow} AgentCheckpointContentRow */
+/** @typedef {import("./AgentCheckpointRow.ts").AgentCheckpointRefRow} AgentCheckpointRefRow */
 /** @typedef {import("./AlertRow.ts").AlertRow} AlertRow */
 /** @typedef {import("./AlertSeverity.ts").AlertSeverity} AlertSeverity */
 /** @typedef {import("./AlertStatus.ts").AlertStatus} AlertStatus */

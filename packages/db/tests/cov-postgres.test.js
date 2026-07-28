@@ -35,10 +35,18 @@ let dbDescriptor;
 
 const now = 1_700_000_000_000;
 
-async function openIsolatedPgClient() {
+async function openIsolatedPgClient({ defaultInt8Strings = false } = {}) {
+  const types = defaultInt8Strings
+    ? {
+        getTypeParser(oid, format) {
+          if (oid === 20) return (value) => value;
+          return pg.types.getTypeParser(oid, format);
+        },
+      }
+    : undefined;
   const isolated = PG_URL
-    ? new pg.Client({ connectionString: PG_URL })
-    : new pg.Client({ host: HOST, port: PORT, database: "postgres", user: "postgres", ssl: false });
+    ? new pg.Client({ connectionString: PG_URL, types })
+    : new pg.Client({ host: HOST, port: PORT, database: "postgres", user: "postgres", ssl: false, types });
   await isolated.connect();
   if (PG_URL && schema) {
     await isolated.query(`SET search_path TO "${schema}"`);
@@ -128,6 +136,107 @@ describe.skipIf(process.platform === "win32" && !PG_URL)("SmithersDb + snapshot 
     });
     expect(await adapter.getLastEventSeq("pg-root")).toBe(1);
     expect((await adapter.listEvents("pg-root", -1, 10)).length).toBe(2);
+  });
+
+  test("content-addressed agent checkpoints dedupe, scope, cascade, and prune", async () => {
+    await adapter.insertRun({ runId: "pg-root", workflowName: "wf", status: "running", createdAtMs: now });
+    await adapter.insertAttempt({
+      runId: "pg-root",
+      nodeId: "checkpoint-agent",
+      iteration: 0,
+      attempt: 1,
+      state: "in-progress",
+      startedAtMs: now,
+    });
+    const base = {
+      runId: "pg-root",
+      nodeId: "checkpoint-agent",
+      iteration: 0,
+      attempt: 1,
+      checkpointJson: '{"cursor":"pg"}',
+      codec: "json",
+      version: 1,
+      agentId: "agent:pg",
+      purpose: "resume",
+      runtimeOwnerId: null,
+    };
+    const checkpointClient = await openIsolatedPgClient({ defaultInt8Strings: true });
+    const checkpointAdapter = new SmithersDb({ dialect: "postgres", connection: checkpointClient });
+    let first;
+    try {
+      first = await checkpointAdapter.putAgentCheckpoint({ ...base, sequence: 0, createdAtMs: now });
+      const second = await checkpointAdapter.putAgentCheckpoint({ ...base, sequence: 1, createdAtMs: now + 1 });
+      const rawRef = await checkpointClient.query(
+        "SELECT iteration, attempt, sequence, version, created_at_ms FROM _smithers_agent_checkpoints WHERE run_id = $1 LIMIT 1",
+        ["pg-root"],
+      );
+      expect(Object.values(rawRef.rows[0]).every((value) => typeof value === "string")).toBe(true);
+      expect(second.contentHash).toBe(first.contentHash);
+      expect(first).toMatchObject({ iteration: 0, attempt: 1, sequence: 0, version: 1, createdAtMs: now });
+      expect(await checkpointAdapter.getAgentCheckpoint(first.contentHash)).toMatchObject({
+        checkpointJson: base.checkpointJson,
+        sizeBytes: Buffer.byteLength(base.checkpointJson, "utf8"),
+        createdAtMs: now,
+      });
+      expect(await checkpointAdapter.listAgentCheckpointRefs("pg-root", { nodeId: "checkpoint-agent" })).toMatchObject([
+        { iteration: 0, attempt: 1, sequence: 0, version: 1, createdAtMs: now },
+        { iteration: 0, attempt: 1, sequence: 1, version: 1, createdAtMs: now + 1 },
+      ]);
+      expect(await checkpointAdapter.listLatestAgentCheckpointRefs("pg-root", "checkpoint-agent", 0)).toMatchObject([
+        { iteration: 0, attempt: 1, sequence: 1, version: 1, createdAtMs: now + 1 },
+      ]);
+      expect(await checkpointAdapter.getNextAgentCheckpointSequence("pg-root", "checkpoint-agent", 0, 1)).toBe(2);
+    } finally {
+      await checkpointClient.end();
+    }
+    await adapter.updateAttempt("pg-root", "checkpoint-agent", 0, 1, {
+      state: "cancelled",
+      metaJson: JSON.stringify({ resetCancelled: true }),
+    });
+    expect(await adapter.deleteResetAgentCheckpoints("pg-root", "checkpoint-agent", 0, 1, "stale-owner")).toBe(false);
+    expect(await adapter.listAgentCheckpointRefs("pg-root", { nodeId: "checkpoint-agent" })).toHaveLength(2);
+    expect(await adapter.deleteResetAgentCheckpoints("pg-root", "checkpoint-agent", 0, 1, null)).toBe(true);
+    expect(await adapter.listAgentCheckpointRefs("pg-root", { nodeId: "checkpoint-agent" })).toEqual([]);
+    expect(await adapter.getAgentCheckpoint(first.contentHash)).toBeNull();
+  });
+
+  test("checkpoint GC coordinates with an independent checkpoint writer", async () => {
+    await adapter.insertAttempt({
+      runId: "pg-root",
+      nodeId: "checkpoint-gc-race",
+      iteration: 0,
+      attempt: 1,
+      state: "in-progress",
+      startedAtMs: now,
+    });
+    const writerClient = await openIsolatedPgClient();
+    const gcClient = await openIsolatedPgClient();
+    try {
+      const writer = new SmithersDb({ dialect: "postgres", connection: writerClient });
+      const collector = new SmithersDb({ dialect: "postgres", connection: gcClient });
+      const [stored] = await Promise.all([
+        writer.putAgentCheckpoint({
+          runId: "pg-root",
+          nodeId: "checkpoint-gc-race",
+          iteration: 0,
+          attempt: 1,
+          sequence: 0,
+          checkpointJson: '{"cursor":"gc-race"}',
+          codec: "json",
+          version: 1,
+          purpose: "resume",
+          createdAtMs: now,
+          runtimeOwnerId: null,
+        }),
+        collector.pruneOrphanedAgentCheckpointContents(),
+      ]);
+      expect(stored).not.toBeNull();
+      expect(await adapter.getAgentCheckpoint(stored.contentHash)).not.toBeNull();
+      expect(await adapter.listAgentCheckpointRefs("pg-root", { nodeId: "checkpoint-gc-race" })).toHaveLength(1);
+    } finally {
+      await writerClient.end();
+      await gcClient.end();
+    }
   });
 
   test("output tables: syncZodTableSchemaPostgres + upsert + raw read + delete + hasPhysicalTable", async () => {

@@ -12,6 +12,8 @@ describe("ensureSmithersTables", () => {
     expect(tableNames).toContain("_smithers_runs");
     expect(tableNames).toContain("_smithers_nodes");
     expect(tableNames).toContain("_smithers_attempts");
+    expect(tableNames).toContain("_smithers_agent_checkpoint_contents");
+    expect(tableNames).toContain("_smithers_agent_checkpoints");
     expect(tableNames).toContain("_smithers_frames");
     expect(tableNames).toContain("_smithers_approvals");
     expect(tableNames).toContain("_smithers_cache");

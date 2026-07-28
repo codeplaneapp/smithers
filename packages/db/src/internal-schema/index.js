@@ -1,6 +1,8 @@
 export { smithersRuns } from "./smithersRuns.js";
 export { smithersNodes } from "./smithersNodes.js";
 export { smithersAttempts } from "./smithersAttempts.js";
+export { smithersAgentCheckpointContents } from "./smithersAgentCheckpointContents.js";
+export { smithersAgentCheckpoints } from "./smithersAgentCheckpoints.js";
 export { smithersFrames } from "./smithersFrames.js";
 export { smithersApprovals } from "./smithersApprovals.js";
 export { smithersHumanRequests } from "./smithersHumanRequests.js";

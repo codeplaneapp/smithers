@@ -15,6 +15,12 @@ import {
   listSnapshots,
   parseSnapshot,
 } from "../src/snapshot/index.js";
+import {
+  captureAgentCheckpointProvenance,
+  MAX_SNAPSHOT_CHECKPOINT_ATTEMPT_BYTES,
+  MAX_SNAPSHOT_CHECKPOINT_BYTES,
+  parseAgentCheckpointProvenance,
+} from "../src/snapshot/agentCheckpointProvenance.js";
 function createTestDb() {
   const sqlite = new Database(":memory:");
   const db = drizzle(sqlite);
@@ -60,6 +66,161 @@ function representativeLargeData() {
   });
 }
 describe("captureSnapshot", () => {
+  test("rejects oversized attempt text in preflight before fetching attempt rows", async () => {
+    let materialized = false;
+    const adapter = {
+      internalStorage: {
+        dialect: "sqlite",
+        queryOne: async () => ({
+          count: 1,
+          bytes: MAX_SNAPSHOT_CHECKPOINT_ATTEMPT_BYTES + 1,
+          maxBytes: MAX_SNAPSHOT_CHECKPOINT_ATTEMPT_BYTES + 1,
+        }),
+        queryAll: async () => {
+          materialized = true;
+          throw new Error("attempt rows must not be fetched");
+        },
+      },
+    };
+
+    await expect(
+      captureAgentCheckpointProvenance(adapter, "oversized-attempt", [
+        { nodeId: "analyze", iteration: 0, lastAttempt: 1 },
+      ]),
+    ).rejects.toThrow(/attempt text size exceeds limit/);
+    expect(materialized).toBe(false);
+  });
+
+  test("measures actual checkpoint TEXT before materializing corrupt size metadata", async () => {
+    const { adapter, sqlite } = createTestDb();
+    try {
+      const runId = "oversized-checkpoint-text";
+      await adapter.insertAttempt({
+        runId,
+        nodeId: "analyze",
+        iteration: 0,
+        attempt: 1,
+        state: "finished",
+        startedAtMs: 1,
+        finishedAtMs: 2,
+        cached: false,
+      });
+      const checkpointJson = `{"codec":"test.snapshot","version":1,"payload":"${"x".repeat(MAX_SNAPSHOT_CHECKPOINT_BYTES)}"}`;
+      const contentHash = createHash("sha256").update(checkpointJson).digest("hex");
+      await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoint_contents", {
+        contentHash,
+        checkpointJson,
+        sizeBytes: 1,
+        createdAtMs: 1,
+      });
+      await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoints", {
+        runId,
+        nodeId: "analyze",
+        iteration: 0,
+        attempt: 1,
+        sequence: 0,
+        contentHash,
+        codec: "test.snapshot",
+        version: 1,
+        agentId: null,
+        purpose: "turn",
+        createdAtMs: 1,
+      });
+      const queryAll = adapter.internalStorage.queryAll.bind(adapter.internalStorage);
+      let materializedCheckpointText = false;
+      adapter.internalStorage.queryAll = (...args) => {
+        if (String(args[0]).includes("SELECT checkpoint.*, content.checkpoint_json")) {
+          materializedCheckpointText = true;
+        }
+        return queryAll(...args);
+      };
+
+      await expect(captureAgentCheckpointProvenance(adapter, runId, sampleData().nodes)).rejects.toThrow(
+        /content size exceeds limit/,
+      );
+      expect(materializedCheckpointText).toBe(false);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("rejects malformed or hash-invalid embedded checkpoint provenance", () => {
+    const checkpointJson = JSON.stringify({ codec: "test.snapshot", version: 1, payload: { cursor: 1 } });
+    expect(() =>
+      parseAgentCheckpointProvenance({
+        __smithersAgentCheckpointProvenance: {
+          version: 1,
+          attempts: [],
+          checkpoints: [
+            [
+              "agent",
+              0,
+              1,
+              0,
+              "0".repeat(64),
+              "test.snapshot",
+              1,
+              null,
+              "turn",
+              1,
+              checkpointJson,
+              Buffer.byteLength(checkpointJson),
+              1,
+            ],
+          ],
+        },
+      }),
+    ).toThrow(/content is corrupt/);
+  });
+
+  test("deduplicates bounded checkpoint provenance and keeps it private from parsed outputs", async () => {
+    const { adapter, sqlite } = createTestDb();
+    const runId = "checkpoint-provenance-dedup";
+    const checkpointJson = JSON.stringify({ codec: "test.snapshot", version: 1, payload: { cursor: 3 } });
+    const contentHash = createHash("sha256").update(checkpointJson).digest("hex");
+    await adapter.insertAttempt({
+      runId,
+      nodeId: "analyze",
+      iteration: 0,
+      attempt: 1,
+      state: "finished",
+      startedAtMs: 100,
+      finishedAtMs: 200,
+      cached: false,
+    });
+    await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoint_contents", {
+      contentHash,
+      checkpointJson,
+      sizeBytes: Buffer.byteLength(checkpointJson, "utf8"),
+      createdAtMs: 150,
+    });
+    await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoints", {
+      runId,
+      nodeId: "analyze",
+      iteration: 0,
+      attempt: 1,
+      sequence: 0,
+      contentHash,
+      codec: "test.snapshot",
+      version: 1,
+      agentId: "snapshot-test",
+      purpose: "turn",
+      createdAtMs: 150,
+    });
+    await captureSnapshot(adapter, runId, 1, sampleData());
+    await captureSnapshot(adapter, runId, 2, sampleData());
+    expect(sqlite.query("SELECT COUNT(*) AS count FROM _smithers_snapshot_contents").get().count).toBe(1);
+    const loaded = await loadSnapshot(adapter, runId, 2);
+    expect(JSON.parse(loaded.outputsJson).__smithersAgentCheckpointProvenance.checkpoints).toHaveLength(1);
+    expect(parseSnapshot(loaded).outputs).toEqual(sampleData().outputs);
+
+    sqlite
+      .query("UPDATE _smithers_agent_checkpoint_contents SET checkpoint_json = ? WHERE content_hash = ?")
+      .run(`${checkpointJson} `, contentHash);
+    await expect(captureSnapshot(adapter, runId, 3, sampleData())).rejects.toThrow(/content is corrupt/);
+    sqlite.close();
+  });
+
   test("external SQLite capture rolls back partial content and metadata", async () => {
     const sqlite = new Database(":memory:");
     const descriptor = {

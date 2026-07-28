@@ -1063,6 +1063,11 @@ describe("engine internals: durability, options and graph helpers", () => {
 
     expect(() => I.validateRunOptions({ input: {}, maxOutputBytes: 0 })).toThrow("maxOutputBytes");
     expect(() => I.validateRunOptions({ input: {}, maxOutputBytes: Number.NaN })).toThrow("maxOutputBytes");
+    expect(() => I.validateRunOptions({ input: {}, maxAgentCheckpointBytes: 0 })).toThrow("maxAgentCheckpointBytes");
+    expect(() => I.validateRunOptions({ input: {}, maxAgentCheckpointBytes: 1.5 })).toThrow("maxAgentCheckpointBytes");
+    expect(() => I.validateRunOptions({ input: {}, maxAgentCheckpointBytes: 16 * 1024 * 1024 + 1 })).toThrow(
+      "system ceiling",
+    );
     expect(() => I.validateRunOptions({ input: {}, toolTimeoutMs: -1 })).toThrow("toolTimeoutMs");
     expect(() =>
       I.validateRunOptions({

@@ -4,9 +4,12 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { ensureSmithersTables } from "@smthrs/db/ensure";
 import { SmithersDb } from "@smthrs/db/adapter";
 import { Effect } from "effect";
+import { createHash } from "node:crypto";
 import { captureSnapshot } from "../src/snapshot/index.js";
 import { forkRun, listBranches, getBranchInfo } from "../src/fork/index.js";
 import { parseSnapshot, loadSnapshot } from "../src/snapshot/index.js";
+import { resolveForkAgentState } from "../../engine/src/resolveForkSessionMessages.js";
+import { acquireRewindLock } from "../src/acquireRewindLock.js";
 function createTestDb() {
   const sqlite = new Database(":memory:");
   const db = drizzle(sqlite);
@@ -171,6 +174,370 @@ describe("forkRun", () => {
     expect(parsed.nodes["implement::0"].state).toBe("pending");
     expect(parsed.nodes["implement::0"].lastAttempt).toBeNull();
   });
+  test("inherits completed checkpoints while reset nodes start fresh with parent-deletion safety", async () => {
+    const { adapter } = createTestDb();
+    const hashes = {};
+    for (const [nodeId, attempt] of [
+      ["analyze", 1],
+      ["implement", 2],
+    ]) {
+      const checkpointJson = JSON.stringify({ codec: "test.fork", version: 1, payload: { nodeId } });
+      const contentHash = createHash("sha256").update(checkpointJson).digest("hex");
+      hashes[nodeId] = contentHash;
+      await adapter.insertAttempt({
+        runId: "parent-checkpoints",
+        nodeId,
+        iteration: 0,
+        attempt,
+        state: "finished",
+        startedAtMs: 100 + attempt,
+        finishedAtMs: 200 + attempt,
+        heartbeatAtMs: null,
+        heartbeatDataJson: null,
+        errorJson: null,
+        jjPointer: null,
+        cached: false,
+        metaJson: JSON.stringify({ agentId: `agent-${nodeId}` }),
+        responseText: null,
+        jjCwd: null,
+      });
+      await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoint_contents", {
+        contentHash,
+        checkpointJson,
+        sizeBytes: Buffer.byteLength(checkpointJson, "utf8"),
+        createdAtMs: 250 + attempt,
+      });
+      await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoints", {
+        runId: "parent-checkpoints",
+        nodeId,
+        iteration: 0,
+        attempt,
+        sequence: 0,
+        contentHash,
+        codec: "test.fork",
+        version: 1,
+        agentId: `agent-${nodeId}`,
+        purpose: "turn",
+        createdAtMs: 250 + attempt,
+      });
+    }
+    await captureSnapshot(
+      adapter,
+      "parent-checkpoints",
+      7,
+      sampleData({
+        nodes: [
+          {
+            nodeId: "analyze",
+            iteration: 0,
+            state: "finished",
+            lastAttempt: 1,
+            outputTable: "out_analyze",
+            label: null,
+          },
+          {
+            nodeId: "implement",
+            iteration: 0,
+            state: "finished",
+            lastAttempt: 2,
+            outputTable: "out_implement",
+            label: null,
+          },
+        ],
+      }),
+    );
+
+    const result = await forkRun(adapter, {
+      parentRunId: "parent-checkpoints",
+      frameNo: 7,
+      resetNodes: ["implement"],
+    });
+    const childRefs = await adapter.listAgentCheckpointRefs(result.runId);
+    expect(childRefs.map((ref) => [ref.nodeId, ref.attempt, ref.contentHash])).toEqual([
+      ["analyze", 1, hashes.analyze],
+    ]);
+    const inheritedAttempts = await adapter.listAttemptsForRun(result.runId);
+    expect(inheritedAttempts.map((attempt) => attempt.nodeId)).toEqual(["analyze"]);
+    expect(await adapter.listAttempts(result.runId, "implement", 0)).toEqual([]);
+    for (const attempt of inheritedAttempts) {
+      expect(JSON.parse(attempt.metaJson)).toMatchObject({
+        agentId: `agent-${attempt.nodeId}`,
+        inheritedCheckpointFrom: {
+          runId: "parent-checkpoints",
+          frameNo: 7,
+          nodeId: attempt.nodeId,
+          iteration: 0,
+          attempt: attempt.attempt,
+        },
+      });
+    }
+    const childSnapshot = parseSnapshot(await loadSnapshot(adapter, result.runId, 0));
+    expect(childSnapshot.nodes["analyze::0"].state).toBe("finished");
+    expect(childSnapshot.nodes["implement::0"]).toMatchObject({ state: "pending", lastAttempt: null });
+
+    await adapter.internalStorage.deleteWhere("_smithers_attempts", "run_id = ?", ["parent-checkpoints"]);
+    await adapter.pruneOrphanedAgentCheckpointContents();
+    expect(await adapter.listAgentCheckpointRefs("parent-checkpoints")).toEqual([]);
+    expect(await adapter.getAgentCheckpoint(hashes.analyze)).not.toBeNull();
+    expect(await adapter.getAgentCheckpoint(hashes.implement)).toBeNull();
+    expect(await adapter.listAgentCheckpointRefs(result.runId)).toHaveLength(1);
+  });
+  test("rehydrates an older frame's exact checkpoint after retry/reset cleanup", async () => {
+    const { adapter } = createTestDb();
+    const runId = "parent-retried-after-snapshot";
+    const checkpointJson = JSON.stringify({ codec: "test.fork", version: 1, payload: { cursor: "frame-7" } });
+    const contentHash = createHash("sha256").update(checkpointJson).digest("hex");
+    const originalMeta = JSON.stringify({
+      agentId: "agent-analyze",
+      agentConversation: [{ role: "assistant", content: "old" }],
+    });
+    await adapter.insertAttempt({
+      runId,
+      nodeId: "analyze",
+      iteration: 0,
+      attempt: 1,
+      state: "finished",
+      startedAtMs: 100,
+      finishedAtMs: 200,
+      cached: false,
+      metaJson: originalMeta,
+      responseText: "old response",
+    });
+    await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoint_contents", {
+      contentHash,
+      checkpointJson,
+      sizeBytes: Buffer.byteLength(checkpointJson, "utf8"),
+      createdAtMs: 150,
+    });
+    await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoints", {
+      runId,
+      nodeId: "analyze",
+      iteration: 0,
+      attempt: 1,
+      sequence: 0,
+      contentHash,
+      codec: "test.fork",
+      version: 1,
+      agentId: "agent-analyze",
+      purpose: "turn",
+      createdAtMs: 150,
+    });
+    await captureSnapshot(adapter, runId, 7, sampleData());
+
+    // This is the durable effect of reset attempt reuse: the old attempt ref
+    // and now-orphaned bytes disappear, and the same attempt key is replaced.
+    await adapter.internalStorage.deleteWhere("_smithers_attempts", "run_id = ? AND node_id = ?", [runId, "analyze"]);
+    await adapter.pruneOrphanedAgentCheckpointContents();
+    await adapter.insertAttempt({
+      runId,
+      nodeId: "analyze",
+      iteration: 0,
+      attempt: 1,
+      state: "failed",
+      startedAtMs: 300,
+      finishedAtMs: 400,
+      cached: false,
+      metaJson: JSON.stringify({ resetGeneration: 2 }),
+    });
+    expect(await adapter.getAgentCheckpoint(contentHash)).toBeNull();
+
+    const fork = await forkRun(adapter, { parentRunId: runId, frameNo: 7 });
+    const refs = await adapter.listAgentCheckpointRefs(fork.runId);
+    expect(refs.map((ref) => [ref.attempt, ref.sequence, ref.contentHash])).toEqual([[1, 0, contentHash]]);
+    expect(await adapter.getAgentCheckpoint(contentHash)).toMatchObject({ checkpointJson });
+    const [attempt] = await adapter.listAttempts(fork.runId, "analyze", 0);
+    expect(attempt).toMatchObject({ state: "finished", responseText: "old response" });
+    expect(JSON.parse(attempt.metaJson)).toMatchObject(JSON.parse(originalMeta));
+  });
+
+  test("copies checkpoint producer and successful consumer lineage for downstream task forks", async () => {
+    const { adapter } = createTestDb();
+    const runId = "parent-checkpoint-consumer";
+    const checkpointJson = JSON.stringify({ codec: "test.fork", version: 1, payload: { cursor: "produced" } });
+    const contentHash = createHash("sha256").update(checkpointJson).digest("hex");
+    await adapter.insertAttempt({
+      runId,
+      nodeId: "analyze",
+      iteration: 0,
+      attempt: 1,
+      state: "failed",
+      startedAtMs: 100,
+      finishedAtMs: 150,
+      cached: false,
+      metaJson: JSON.stringify({
+        agentCheckpoint: { contentHash, sequence: 0, codec: "test.fork", version: 1 },
+      }),
+    });
+    await adapter.insertAttempt({
+      runId,
+      nodeId: "analyze",
+      iteration: 0,
+      attempt: 2,
+      state: "finished",
+      startedAtMs: 160,
+      finishedAtMs: 220,
+      cached: false,
+      metaJson: JSON.stringify({
+        resumedFromCheckpoint: { contentHash, sequence: 0 },
+        agentConversation: [
+          { role: "user", content: "continue" },
+          { role: "assistant", content: "completed from checkpoint" },
+        ],
+      }),
+      responseText: "completed from checkpoint",
+    });
+    await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoint_contents", {
+      contentHash,
+      checkpointJson,
+      sizeBytes: Buffer.byteLength(checkpointJson, "utf8"),
+      createdAtMs: 120,
+    });
+    await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoints", {
+      runId,
+      nodeId: "analyze",
+      iteration: 0,
+      attempt: 1,
+      sequence: 0,
+      contentHash,
+      codec: "test.fork",
+      version: 1,
+      agentId: "agent-analyze",
+      purpose: "turn",
+      createdAtMs: 120,
+    });
+    await captureSnapshot(
+      adapter,
+      runId,
+      9,
+      sampleData({
+        nodes: [
+          {
+            nodeId: "analyze",
+            iteration: 0,
+            state: "finished",
+            lastAttempt: 2,
+            outputTable: "out_analyze",
+            label: null,
+          },
+        ],
+      }),
+    );
+
+    const fork = await forkRun(adapter, { parentRunId: runId, frameNo: 9 });
+    const attempts = await adapter.listAttempts(fork.runId, "analyze", 0);
+    expect(attempts.map((attempt) => [attempt.attempt, attempt.state])).toEqual([
+      [2, "finished"],
+      [1, "failed"],
+    ]);
+    expect((await adapter.listAgentCheckpointRefs(fork.runId)).map((ref) => ref.attempt)).toEqual([1]);
+    const downstream = resolveForkAgentState(attempts, "analyze", "downstream");
+    expect(downstream.sourceAttempt.attempt).toBe(2);
+    expect(downstream.checkpointRef).toBeNull();
+    expect(downstream.messages).toEqual([
+      { role: "user", content: "continue" },
+      { role: "assistant", content: "completed from checkpoint" },
+    ]);
+  });
+  test("does not inherit a same-millisecond checkpoint created after the selected snapshot", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertAttempt({
+      runId: "parent-checkpoint-horizon",
+      nodeId: "analyze",
+      iteration: 0,
+      attempt: 1,
+      state: "finished",
+      startedAtMs: 100,
+      finishedAtMs: 200,
+      cached: false,
+    });
+    const snapshot = await captureSnapshot(adapter, "parent-checkpoint-horizon", 2, sampleData());
+    const checkpointJson = JSON.stringify({ codec: "test.fork", version: 1, payload: {} });
+    const contentHash = createHash("sha256").update(checkpointJson).digest("hex");
+    await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoint_contents", {
+      contentHash,
+      checkpointJson,
+      sizeBytes: Buffer.byteLength(checkpointJson, "utf8"),
+      createdAtMs: snapshot.createdAtMs,
+    });
+    await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoints", {
+      runId: "parent-checkpoint-horizon",
+      nodeId: "analyze",
+      iteration: 0,
+      attempt: 1,
+      sequence: 0,
+      contentHash,
+      codec: "test.fork",
+      version: 1,
+      agentId: "agent-analyze",
+      purpose: "turn",
+      createdAtMs: snapshot.createdAtMs,
+    });
+    const result = await forkRun(adapter, { parentRunId: "parent-checkpoint-horizon", frameNo: 2 });
+    expect(await adapter.listAgentCheckpointRefs(result.runId)).toEqual([]);
+  });
+  test("uses the snapshot timestamp for legacy checkpoint inheritance", async () => {
+    const { adapter, sqlite } = createTestDb();
+    const runId = "parent-checkpoint-legacy";
+    await adapter.insertAttempt({
+      runId,
+      nodeId: "analyze",
+      iteration: 0,
+      attempt: 1,
+      state: "finished",
+      startedAtMs: 100,
+      finishedAtMs: 200,
+      cached: false,
+    });
+    const insertCheckpoint = async (sequence, cursor, createdAtMs) => {
+      const checkpointJson = JSON.stringify({ codec: "test.fork", version: 1, payload: { cursor } });
+      const contentHash = createHash("sha256").update(checkpointJson).digest("hex");
+      await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoint_contents", {
+        contentHash,
+        checkpointJson,
+        sizeBytes: Buffer.byteLength(checkpointJson, "utf8"),
+        createdAtMs,
+      });
+      await adapter.internalStorage.insertIgnore("_smithers_agent_checkpoints", {
+        runId,
+        nodeId: "analyze",
+        iteration: 0,
+        attempt: 1,
+        sequence,
+        contentHash,
+        codec: "test.fork",
+        version: 1,
+        agentId: "agent-analyze",
+        purpose: "turn",
+        createdAtMs,
+      });
+      return contentHash;
+    };
+    const retainedHash = await insertCheckpoint(0, "retained", 100);
+    const snapshot = await captureSnapshot(adapter, runId, 2, sampleData());
+    const legacyOutputs = JSON.parse(snapshot.outputsJson);
+    delete legacyOutputs.__smithersAgentCheckpointHorizons;
+    delete legacyOutputs.__smithersAgentCheckpointProvenance;
+    sqlite
+      .query(
+        `UPDATE _smithers_snapshots
+            SET nodes_json = ?, outputs_json = ?, ralph_json = ?, input_json = ?, content_hash = ?
+          WHERE run_id = ? AND frame_no = ?`,
+      )
+      .run(
+        snapshot.nodesJson,
+        JSON.stringify(legacyOutputs),
+        snapshot.ralphJson,
+        snapshot.inputJson,
+        "legacy-inline",
+        runId,
+        2,
+      );
+    await insertCheckpoint(1, "future", snapshot.createdAtMs + 1);
+
+    const result = await forkRun(adapter, { parentRunId: runId, frameNo: 2 });
+
+    expect((await adapter.listAgentCheckpointRefs(result.runId)).map((ref) => ref.contentHash)).toEqual([retainedHash]);
+  });
   test("records branch label and description", async () => {
     const { adapter } = createTestDb();
     await captureSnapshot(adapter, "parent-run", 0, sampleData());
@@ -296,6 +663,22 @@ describe("forkRun", () => {
   test("fails for non-existent snapshot", async () => {
     const { adapter } = createTestDb();
     await expect(forkRun(adapter, { parentRunId: "nonexistent", frameNo: 0 })).rejects.toThrow("No snapshot found");
+  });
+  test("serializes fork with a contender holding the durable rewind lease", async () => {
+    const { adapter } = createTestDb();
+    await captureSnapshot(adapter, "parent-lock-race", 0, sampleData());
+    const rewindLock = await acquireRewindLock(adapter, "parent-lock-race");
+    expect(rewindLock).not.toBeNull();
+
+    await expect(forkRun(adapter, { parentRunId: "parent-lock-race", frameNo: 0 })).rejects.toThrow(
+      /Another rewind or fork is already running/,
+    );
+    expect(await loadSnapshot(adapter, "parent-lock-race", 0)).toBeDefined();
+    expect(await listBranches(adapter, "parent-lock-race")).toEqual([]);
+
+    await rewindLock.release();
+    const fork = await forkRun(adapter, { parentRunId: "parent-lock-race", frameNo: 0 });
+    expect(fork.branch.parentRunId).toBe("parent-lock-race");
   });
   test("refuses fork --run from a live parent unless forced", async () => {
     const { adapter } = createTestDb();

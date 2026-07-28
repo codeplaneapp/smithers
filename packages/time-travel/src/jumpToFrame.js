@@ -21,6 +21,8 @@ import { updateRewindAuditRow } from "./updateRewindAuditRow.js";
 import { loadSnapshot } from "./snapshot/index.js";
 import { guardEffectBoundary } from "./guardEffectBoundary.js";
 import { archiveDiscardedEffects } from "./archiveDiscardedEffects.js";
+import { parseAgentCheckpointHorizons } from "./snapshot/agentCheckpointHorizons.js";
+import { parseAgentCheckpointProvenance } from "./snapshot/agentCheckpointProvenance.js";
 
 export { JUMP_RUN_ID_PATTERN };
 export { JUMP_MAX_FRAME_NO };
@@ -35,6 +37,7 @@ export { validateJumpFrameNo };
 /** @typedef {import("./JumpStepName.ts").JumpStepName} JumpStepName */
 
 const OUTPUT_TABLE_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const DELETE_HORIZON_TUPLES_PER_QUERY = 200;
 
 /**
  * @param {unknown} value
@@ -201,13 +204,14 @@ async function readFrameByNo(adapter, runId, frameNo) {
  * @param {SmithersDb} adapter
  * @param {string} runId
  * @param {number} frameNo
- * @returns {Promise<{ found: boolean; nodes: Array<Record<string, unknown>>; outputs: Record<string, Array<Record<string, unknown>>> }>}
+ * @returns {Promise<{ found: boolean; createdAtMs: number | null; nodes: Array<Record<string, unknown>>; outputs: Record<string, Array<Record<string, unknown>>> }>}
  */
 async function readTargetSnapshotSets(adapter, runId, frameNo) {
   const row = await loadSnapshot(adapter, runId, frameNo);
-  if (!row) return { found: false, nodes: [], outputs: {} };
+  if (!row) return { found: false, createdAtMs: null, nodes: [], outputs: {} };
   return {
     found: true,
+    createdAtMs: Number(row.createdAtMs),
     nodes: JSON.parse(row.nodesJson),
     outputs: JSON.parse(row.outputsJson),
   };
@@ -491,6 +495,123 @@ async function restoreAttemptsToNodeSnapshot(adapter, runId, snapshotNodes) {
         `DELETE FROM _smithers_attempts WHERE run_id = ? AND node_id = ? AND iteration = ? AND attempt = ?`,
         [runId, attempt.nodeId ?? attempt.node_id, Number(attempt.iteration ?? 0), Number(attempt.attempt)],
       );
+  }
+}
+
+/**
+ * Restore the snapshot-owned attempt rows, immutable content, and references
+ * before destructive horizon trimming. Embedded provenance is what makes an
+ * exact rewind possible after reset reused an attempt key and GC reclaimed the
+ * original content.
+ */
+async function rehydrateAgentCheckpointProvenance(adapter, runId, snapshotOutputs) {
+  const provenance = parseAgentCheckpointProvenance(snapshotOutputs);
+  if (!provenance) return;
+  const storage = resolveStorage(adapter);
+
+  for (const tuple of provenance.attempts) {
+    await storage.upsert(
+      "_smithers_attempts",
+      {
+        runId,
+        nodeId: tuple[0],
+        iteration: tuple[1],
+        attempt: tuple[2],
+        state: tuple[3],
+        startedAtMs: tuple[4],
+        finishedAtMs: tuple[5],
+        heartbeatAtMs: tuple[6],
+        heartbeatDataJson: tuple[7],
+        errorJson: tuple[8],
+        jjPointer: tuple[9],
+        cached: tuple[10],
+        metaJson: tuple[11],
+        responseText: tuple[12],
+        jjCwd: tuple[13],
+      },
+      ["runId", "nodeId", "iteration", "attempt"],
+    );
+  }
+
+  // Remove conflicting/reused keys first. SQLite compatibility triggers may
+  // reclaim content on reference deletion, so materialize the embedded bytes
+  // only after all exact-key deletions are complete.
+  for (const tuple of provenance.checkpoints) {
+    await storage.deleteWhere(
+      "_smithers_agent_checkpoints",
+      "run_id = ? AND node_id = ? AND iteration = ? AND attempt = ? AND sequence = ?",
+      [runId, tuple[0], tuple[1], tuple[2], tuple[3]],
+    );
+  }
+
+  for (const tuple of provenance.checkpoints) {
+    await storage.insertIgnore("_smithers_agent_checkpoint_contents", {
+      contentHash: tuple[4],
+      checkpointJson: tuple[10],
+      sizeBytes: tuple[11],
+      createdAtMs: tuple[12],
+    });
+    const stored = await storage.queryOne(
+      `SELECT checkpoint_json, size_bytes
+         FROM _smithers_agent_checkpoint_contents
+        WHERE content_hash = ? LIMIT 1`,
+      [tuple[4]],
+    );
+    if (
+      !stored ||
+      (stored.checkpointJson ?? stored.checkpoint_json) !== tuple[10] ||
+      Number(stored.sizeBytes ?? stored.size_bytes) !== tuple[11]
+    ) {
+      throw new Error(`Checkpoint content hash collision or corruption: ${tuple[4]}`);
+    }
+  }
+
+  for (const tuple of provenance.checkpoints) {
+    await storage.insertIgnore("_smithers_agent_checkpoints", {
+      runId,
+      nodeId: tuple[0],
+      iteration: tuple[1],
+      attempt: tuple[2],
+      sequence: tuple[3],
+      contentHash: tuple[4],
+      codec: tuple[5],
+      version: tuple[6],
+      agentId: tuple[7],
+      purpose: tuple[8],
+      createdAtMs: tuple[9],
+    });
+  }
+}
+
+/** Delete checkpoint state beyond the target snapshot before orphan-content GC. */
+async function restoreAgentCheckpointsToSnapshot(adapter, runId, snapshotOutputs, legacyCutoffMs) {
+  const storage = resolveStorage(adapter);
+  const horizons = parseAgentCheckpointHorizons(snapshotOutputs);
+  if (!horizons) {
+    await storage.deleteWhere("_smithers_agent_checkpoints", "run_id = ? AND created_at_ms > ?", [
+      runId,
+      legacyCutoffMs,
+    ]);
+    return;
+  }
+  if (horizons.size === 0) return;
+  const tuples = [...horizons].map(([key, sequence]) => [...JSON.parse(key), sequence]);
+  for (let offset = 0; offset < tuples.length; offset += DELETE_HORIZON_TUPLES_PER_QUERY) {
+    const chunk = tuples.slice(offset, offset + DELETE_HORIZON_TUPLES_PER_QUERY);
+    const valuesSql = chunk.map(() => "(?, CAST(? AS BIGINT), CAST(? AS BIGINT), CAST(? AS BIGINT))").join(", ");
+    await storage.execute(
+      `WITH horizon(node_id, iteration, attempt, sequence) AS (VALUES ${valuesSql})
+       DELETE FROM _smithers_agent_checkpoints
+        WHERE run_id = ?
+          AND EXISTS (
+            SELECT 1 FROM horizon
+             WHERE horizon.node_id = _smithers_agent_checkpoints.node_id
+               AND horizon.iteration = _smithers_agent_checkpoints.iteration
+               AND horizon.attempt = _smithers_agent_checkpoints.attempt
+               AND _smithers_agent_checkpoints.sequence > horizon.sequence
+          )`,
+      [...chunk.flat(), runId],
+    );
   }
 }
 
@@ -962,6 +1083,19 @@ export async function jumpToFrame(input) {
                 }
               });
 
+              // Run orphan cleanup in the same transaction before any
+              // attempt/ref deletion. The rewind lease row above fences the
+              // destructive transaction through commit.
+              yield* input.adapter.pruneOrphanedAgentCheckpointContents();
+
+              // Validation happens before mutation inside the helper. Restore
+              // snapshot-owned attempt/content/ref bytes while the rewind
+              // lease is held, before reset reuse or GC can erase the selected
+              // frame's exact continuation provenance.
+              yield* Effect.promise(() =>
+                rehydrateAgentCheckpointProvenance(input.adapter, runId, targetSnapshotSets.outputs),
+              );
+
               // Invalidate node-diff cache BEFORE we truncate frames /
               // attempts: the adapter hook computes which diffs are beyond
               // the target by looking at the frame/attempt join, and that
@@ -1013,6 +1147,17 @@ export async function jumpToFrame(input) {
                   restoreAttemptsToNodeSnapshot(input.adapter, runId, targetSnapshotSets.nodes),
                 );
               }
+              yield* Effect.promise(() =>
+                restoreAgentCheckpointsToSnapshot(
+                  input.adapter,
+                  runId,
+                  targetSnapshotSets.outputs,
+                  targetSnapshotSets.createdAtMs ?? targetFrame.createdAtMs,
+                ),
+              );
+              // Attempt deletion and the exact snapshot horizon remove future
+              // checkpoint references. Reclaim their unreferenced content.
+              yield* input.adapter.pruneOrphanedAgentCheckpointContents();
               yield* Effect.promise(() => runStepHook(input.hooks, "after", "truncate-outputs"));
 
               yield* Effect.promise(() => runStepHook(input.hooks, "before", "rebuild-reconciler"));

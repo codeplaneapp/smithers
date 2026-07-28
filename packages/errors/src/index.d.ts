@@ -193,6 +193,31 @@ declare namespace smithersErrorDefinitions {
         let when_5: string;
         export { when_5 as when };
     }
+    namespace AGENT_CHECKPOINT_INVALID {
+        let category: string;
+        let when: string;
+        let details: string;
+    }
+    namespace AGENT_CHECKPOINT_CAPABILITY_UNDECLARED {
+        let category: string;
+        let when: string;
+        let details: string;
+    }
+    namespace AGENT_CHECKPOINT_HISTORY_EXHAUSTED {
+        let category: string;
+        let when: string;
+        let details: string;
+    }
+    namespace AGENT_CHECKPOINT_MISSING {
+        let category: string;
+        let when: string;
+        let details: string;
+    }
+    namespace AGENT_CHECKPOINT_CORRUPT {
+        let category: string;
+        let when: string;
+        let details: string;
+    }
     namespace WORKTREE_CREATE_FAILED {
         let category_6: string;
         export { category_6 as category };
@@ -248,6 +273,11 @@ declare namespace smithersErrorDefinitions {
         let details: string;
     }
     namespace TASK_FORK_SESSION_UNAVAILABLE {
+        let category: string;
+        let when: string;
+        let details: string;
+    }
+    namespace TASK_FORK_CHECKPOINT_INCOMPATIBLE {
         let category: string;
         let when: string;
         let details: string;

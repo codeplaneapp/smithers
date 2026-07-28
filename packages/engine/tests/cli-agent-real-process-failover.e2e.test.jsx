@@ -113,6 +113,19 @@ describe("CLI-backed agent fallback through the real process path", () => {
       expect(attempts).toHaveLength(1);
       const meta = JSON.parse(attempts[0]?.metaJson ?? "{}");
       expect(meta.agentId).toBe("codex-real-process-fallback");
+      const checkpointRefs = await adapter.listAgentCheckpointRefs(result.runId, { nodeId: "impl" });
+      expect(checkpointRefs).toHaveLength(1);
+      expect(checkpointRefs[0]).toMatchObject({
+        codec: "smithers.cli-session",
+        version: 1,
+        purpose: "session",
+      });
+      const checkpointContent = await adapter.getAgentCheckpoint(checkpointRefs[0].contentHash);
+      expect(JSON.parse(checkpointContent.checkpointJson)).toEqual({
+        codec: "smithers.cli-session",
+        version: 1,
+        payload: { engine: "codex", resume: "thread-real-process" },
+      });
 
       const captured = JSON.parse(await readFile(captureFile, "utf8"));
       expect(captured.args.slice(0, 1)).toEqual(["exec"]);

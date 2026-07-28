@@ -385,6 +385,7 @@ export async function retryTask(adapter, opts) {
           const attempts = plan.attemptsByNode.get(buildNodeKey(resetNode.nodeId, resetIteration)) ?? [];
           for (const attempt of attempts) {
             if (
+              attempt.state !== "finished" &&
               attempt.state !== "failed" &&
               attempt.state !== "in-progress" &&
               attempt.state !== "waiting-approval" &&

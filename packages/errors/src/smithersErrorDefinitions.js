@@ -28,6 +28,31 @@ export const smithersErrorDefinitions = {
     category: "engine",
     when: "Agent output cannot be parsed or validated against the declared output schema.",
   },
+  AGENT_CHECKPOINT_INVALID: {
+    category: "engine",
+    when: "An agent returns a checkpoint that is not strict JSON, has an invalid envelope, or exceeds the size limit.",
+    details: "{ nodeId, attempt }",
+  },
+  AGENT_CHECKPOINT_CAPABILITY_UNDECLARED: {
+    category: "engine",
+    when: "An agent returns a checkpoint whose codec or version it did not declare for production.",
+    details: "{ nodeId, codec, version, checkpointFormats }",
+  },
+  AGENT_CHECKPOINT_HISTORY_EXHAUSTED: {
+    category: "engine",
+    when: "More than 1,000 newer incompatible checkpoint references prevent a safe same-task resume.",
+    details: "{ nodeId, iteration, scanned }",
+  },
+  AGENT_CHECKPOINT_MISSING: {
+    category: "engine",
+    when: "A durable checkpoint reference points to content that is missing from storage.",
+    details: "{ contentHash }",
+  },
+  AGENT_CHECKPOINT_CORRUPT: {
+    category: "engine",
+    when: "Persisted checkpoint content is invalid or does not match its reference metadata.",
+    details: "{ contentHash }",
+  },
   WORKTREE_CREATE_FAILED: {
     category: "engine",
     when: "Smithers fails to create or hydrate a git or jj worktree for a task.",
@@ -75,8 +100,13 @@ export const smithersErrorDefinitions = {
   },
   TASK_FORK_SESSION_UNAVAILABLE: {
     category: "engine",
-    when: "A <Task fork> cannot obtain a usable agent session snapshot — the forking task is not an agent task, or the source completed without producing a forkable conversation (e.g. a compute/static, skipped, or cancelled source).",
+    when: "A <Task fork> cannot obtain usable agent state — the source produced neither a compatible checkpoint nor a forkable conversation.",
     details: "{ nodeId, forkSource }",
+  },
+  TASK_FORK_CHECKPOINT_INCOMPATIBLE: {
+    category: "engine",
+    when: "A <Task fork> source has only a native checkpoint whose codec, version, or fork mode the target agent cannot consume.",
+    details: "{ nodeId, forkSource, codec, version, mode }",
   },
   TASK_FORK_CYCLE: {
     category: "components",

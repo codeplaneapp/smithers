@@ -88,6 +88,11 @@ try {
 | `RESUME_METADATA_MISMATCH` | Stored run metadata no longer matches the workflow being resumed. Editing the workflow file or an imported module between stop and resume triggers this (resume hashes file content, not git; no commit required). Fork/replay onto the edit or start fresh; revert the file to resume the original run. | `mismatches`, `existing`, `current` |
 | `UNKNOWN_OUTPUT_SCHEMA` | A task references an output table not present in the schema registry. | -- |
 | `INVALID_OUTPUT` | Agent output cannot be parsed or validated against the declared output schema. | -- |
+| `AGENT_CHECKPOINT_INVALID` | An agent returned or published a malformed, non-JSON, or oversized checkpoint. | `{ nodeId, attempt }` |
+| `AGENT_CHECKPOINT_CAPABILITY_UNDECLARED` | An agent returned or published a checkpoint codec/version absent from its `checkpointFormats` production declaration. | `{ nodeId, codec, version, checkpointFormats }` |
+| `AGENT_CHECKPOINT_HISTORY_EXHAUSTED` | More than 1,000 newer incompatible checkpoint references prevent a safe same-task resume. | `{ nodeId, iteration, scanned }` |
+| `AGENT_CHECKPOINT_MISSING` | A durable checkpoint reference points to missing content. | `{ contentHash }` |
+| `AGENT_CHECKPOINT_CORRUPT` | Stored checkpoint bytes are invalid or disagree with reference metadata. | `{ contentHash }` |
 | `WORKTREE_CREATE_FAILED` | Smithers fails to create or hydrate a git or jj worktree for a task. | `{ worktreePath, vcsType, branch? }` |
 | `VCS_NOT_FOUND` | No supported git or jj repository root is found for the workflow. | `{ rootDir }` |
 | `SNAPSHOT_NOT_FOUND` | A requested time-travel snapshot or frame does not exist. | `{ runId, frameNo }` |
@@ -98,7 +103,8 @@ try {
 | `TASK_TIMEOUT` | A task compute callback exceeds its configured timeout. | `{ nodeId, attempt, timeoutMs }` |
 | `TASK_HIJACK_UNSUPPORTED` | A task requests auto-hijack but its agent cannot provide a resumable session or conversation. | `{ nodeId, agentId? }` |
 | `TASK_FORK_SOURCE_NOT_COMPLETE` | A forked task began executing but its fork source hasn't completed, so no session snapshot exists yet. | `{ nodeId, forkSource }` |
-| `TASK_FORK_SESSION_UNAVAILABLE` | A `<Task fork>` cannot obtain a usable agent session snapshot: either the forking task isn't an agent task, or the source completed without producing a forkable conversation (e.g. a compute/static, skipped, or cancelled source). | `{ nodeId, forkSource }` |
+| `TASK_FORK_SESSION_UNAVAILABLE` | A `<Task fork>` source produced neither a compatible checkpoint nor a forkable conversation. | `{ nodeId, forkSource }` |
+| `TASK_FORK_CHECKPOINT_INCOMPATIBLE` | A `<Task fork>` source has only a native checkpoint whose codec, version, or fork mode the target cannot consume. | `{ nodeId, forkSource, codec, version, mode }` |
 | `TASK_ABORTED` | A running task is aborted through an AbortSignal or shutdown path. | -- |
 | `RUN_NOT_FOUND` | A CLI or engine command references a run ID missing from the database. | `{ runId }` |
 | `NODE_NOT_FOUND` | A CLI command references a node ID missing for the given run. | `{ runId, nodeId }` |

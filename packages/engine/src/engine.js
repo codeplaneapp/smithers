@@ -39,7 +39,7 @@ import { buildPlanTree, buildStateKey } from "./scheduler.js";
 import { buildWorktreeIsolationNotice, WORKTREE_ISOLATION_NOTICE_MARKER } from "./buildWorktreeIsolationNotice.js";
 import { buildOutputValidationDiagnostics } from "./output-validation-diagnostics.js";
 import { isThenablePayload, makeThenablePayloadError } from "./thenable-payload.js";
-import { resolveForkSessionMessages } from "./resolveForkSessionMessages.js";
+import { resolveForkAgentState } from "./resolveForkSessionMessages.js";
 import { getDefinedToolMetadata } from "./getDefinedToolMetadata.js";
 import { captureSnapshotEffect, loadLatestSnapshot, parseSnapshot } from "@smthrs/time-travel/snapshot";
 import { EventBus } from "./events.js";
@@ -53,7 +53,11 @@ import { reapWorktrees } from "./reapWorktrees.js";
 import { runGit } from "./runGit.js";
 import { startDurability } from "./startDurability.js";
 import { startDocFileSync } from "./startDocFileSync.js";
-import { failedRestoreToSurface, restoreWorkspaceToLatestCheckpoint } from "./restoreWorkspace.js";
+import {
+  failedRestoreToSurface,
+  restoreWorkspaceToLatestCheckpoint,
+  shouldRestoreWorkspaceForResume,
+} from "./restoreWorkspace.js";
 import { appendGap, defaultGapSpoolPath } from "./durabilityGapSpool.js";
 import { runWithToolContext } from "@smthrs/tool-context";
 import { createToolJournalContext } from "./createToolJournalContext.js";
@@ -85,11 +89,18 @@ import { toSmithersError } from "@smthrs/errors/toSmithersError";
 import { logDebug, logError, logInfo, logWarning } from "@smthrs/observability/logging";
 import { isPidAlive, parseRuntimeOwnerPid } from "./runtime-owner.js";
 import { spawn as nodeSpawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { platform } from "node:os";
 import { annotateSmithersTrace, smithersSpanNames, withSmithersSpan } from "@smthrs/observability";
 import { withTaskRuntime } from "@smthrs/driver/task-runtime";
 import { hashCapabilityRegistry } from "@smthrs/agents/capability-registry";
+import {
+  DEFAULT_AGENT_CHECKPOINT_MAX_BYTES,
+  agentProducesCheckpoint,
+  agentSupportsCheckpoint,
+  cloneAgentCheckpoint,
+  hashAgentCheckpointCapabilities,
+} from "@smthrs/agents/agent-checkpoint";
 import {
   bridgeApprovalResolve,
   bridgeWaitForEventResolve,
@@ -537,6 +548,83 @@ function agentHijackConfig(agent, attemptMeta) {
     dangerouslySkipPermissions: opts.dangerouslySkipPermissions === true,
     configDir: typeof opts.configDir === "string" ? opts.configDir : null,
   };
+}
+
+const CLI_SESSION_CHECKPOINT_CODEC = "smithers.cli-session";
+
+/**
+ * @param {unknown} checkpoint
+ * @param {string | null} engine
+ * @returns {string | undefined}
+ */
+function resumeSessionFromCheckpoint(checkpoint, engine) {
+  if (!checkpoint || typeof checkpoint !== "object" || Array.isArray(checkpoint)) return undefined;
+  const candidate = /** @type {Record<string, unknown>} */ (checkpoint);
+  if (candidate.codec !== CLI_SESSION_CHECKPOINT_CODEC || candidate.version !== 1) return undefined;
+  const payload = candidate.payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+  const value = /** @type {Record<string, unknown>} */ (payload);
+  if (typeof value.engine !== "string" || value.engine !== engine || typeof value.resume !== "string") {
+    return undefined;
+  }
+  return value.resume.length > 0 ? value.resume : undefined;
+}
+
+/**
+ * Load and verify a content-addressed checkpoint. Corrupt content is a durable
+ * storage error, not a reason to silently start an unrelated fresh session.
+ *
+ * @param {SmithersDb} adapter
+ * @param {{ contentHash: string; codec: string; version: number }} ref
+ * @param {number} maxBytes
+ */
+async function loadAgentCheckpoint(adapter, ref, maxBytes) {
+  const row = await Effect.runPromise(adapter.getAgentCheckpoint(ref.contentHash));
+  if (!row || typeof row.checkpointJson !== "string") {
+    throw new SmithersError("AGENT_CHECKPOINT_MISSING", `Agent checkpoint content is missing: ${ref.contentHash}`, {
+      contentHash: ref.contentHash,
+      failureRetryable: false,
+    });
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(row.checkpointJson);
+  } catch (cause) {
+    throw new SmithersError(
+      "AGENT_CHECKPOINT_CORRUPT",
+      `Agent checkpoint content is not valid JSON: ${ref.contentHash}`,
+      { contentHash: ref.contentHash, failureRetryable: false },
+      { cause },
+    );
+  }
+  let checkpoint;
+  try {
+    checkpoint = cloneAgentCheckpoint(parsed, maxBytes);
+  } catch (cause) {
+    throw new SmithersError(
+      "AGENT_CHECKPOINT_CORRUPT",
+      `Agent checkpoint content failed validation: ${ref.contentHash}`,
+      { contentHash: ref.contentHash, failureRetryable: false },
+      { cause },
+    );
+  }
+  if (checkpoint.codec !== ref.codec || checkpoint.version !== ref.version) {
+    throw new SmithersError(
+      "AGENT_CHECKPOINT_CORRUPT",
+      `Agent checkpoint metadata does not match its content: ${ref.contentHash}`,
+      { contentHash: ref.contentHash, failureRetryable: false },
+    );
+  }
+  const actualSizeBytes = Buffer.byteLength(row.checkpointJson, "utf8");
+  const actualHash = createHash("sha256").update(row.checkpointJson).digest("hex");
+  if (actualHash !== ref.contentHash || Number(row.sizeBytes) !== actualSizeBytes) {
+    throw new SmithersError(
+      "AGENT_CHECKPOINT_CORRUPT",
+      `Agent checkpoint content address does not match its stored bytes: ${ref.contentHash}`,
+      { contentHash: ref.contentHash, failureRetryable: false },
+    );
+  }
+  return checkpoint;
 }
 /**
  * @template T
@@ -3149,6 +3237,17 @@ function validateRunOptions(opts) {
   if (opts.maxOutputBytes !== undefined) {
     assertPositiveFiniteInteger("maxOutputBytes", Number(opts.maxOutputBytes));
   }
+  if (opts.maxAgentCheckpointBytes !== undefined) {
+    const maxAgentCheckpointBytes = assertPositiveFiniteInteger(
+      "maxAgentCheckpointBytes",
+      Number(opts.maxAgentCheckpointBytes),
+    );
+    if (maxAgentCheckpointBytes > DEFAULT_AGENT_CHECKPOINT_MAX_BYTES) {
+      throw new RangeError(
+        `maxAgentCheckpointBytes cannot exceed the ${DEFAULT_AGENT_CHECKPOINT_MAX_BYTES}-byte system ceiling`,
+      );
+    }
+  }
   if (opts.toolTimeoutMs !== undefined) {
     assertPositiveFiniteInteger("toolTimeoutMs", Number(opts.toolTimeoutMs));
   }
@@ -4215,7 +4314,7 @@ export async function finalizeCancelledRun(adapter, runId, options = {}) {
  * @param {Map<string, TaskDescriptor>} descriptorMap
  * @param {SQLiteTable} inputTable
  * @param {EventBus} eventBus
- * @param {{ rootDir: string; allowNetwork: boolean; maxOutputBytes: number; toolTimeoutMs: number; acceptWorkflowChange?: boolean; agentPreflightCache?: WeakMap<object, Promise<void>>; memoryService?: import("@smthrs/driver/MemoryRuntimeService").MemoryRuntimeService; memoryPrefetchCache?: Map<string, Promise<string | null>>; traceContext?: { workflowPath: string | null; workflowHash: string | null; logDir?: string; annotations?: Record<string, string | number | boolean>; }; }} toolConfig
+ * @param {{ rootDir: string; allowNetwork: boolean; maxOutputBytes: number; maxAgentCheckpointBytes: number; toolTimeoutMs: number; acceptWorkflowChange?: boolean; agentPreflightCache?: WeakMap<object, Promise<void>>; memoryService?: import("@smthrs/driver/MemoryRuntimeService").MemoryRuntimeService; memoryPrefetchCache?: Map<string, Promise<string | null>>; traceContext?: { workflowPath: string | null; workflowHash: string | null; logDir?: string; annotations?: Record<string, string | number | boolean>; }; }} toolConfig
  * @param {string} workflowName
  * @param {boolean} cacheEnabled
  * @param {AbortSignal} [signal]
@@ -4525,13 +4624,30 @@ async function legacyExecuteTask(
     agentEngine: null,
     agentResume: null,
     agentConversation: null,
+    agentCheckpoint: null,
     resumedFromSession: null,
+    resumedFromCheckpoint: null,
     resumedFromConversation: false,
     hijackHandoff: null,
   };
+  const reusedResetAttempt = attempts.find(
+    (attempt) => Number(attempt.attempt) === attemptNo && isResetCancelledAttempt(attempt),
+  );
   await adapter.withTransaction(
     "task-start",
     Effect.gen(function* () {
+      if (reusedResetAttempt) {
+        const cleared = yield* adapter.deleteResetAgentCheckpoints(
+          runId,
+          desc.nodeId,
+          desc.iteration,
+          attemptNo,
+          executionOwnerId,
+        );
+        if (!cleared) {
+          throw new SmithersError("HEARTBEAT_FENCE_LOST", "Reset checkpoint cleanup ownership was lost.");
+        }
+      }
       yield* adapter.insertAttempt({
         runId,
         nodeId: desc.nodeId,
@@ -4591,6 +4707,10 @@ async function legacyExecuteTask(
   let handleAgentEvent;
   let handleSdkStepFinish;
   let handleProcess;
+  let latestAgentCheckpoint = null;
+  let captureResultCheckpoint = async () => {};
+  let enqueueAgentCheckpoint = async () => null;
+  let checkpointPublicationCount = 0;
   /** @type {ReturnType<typeof createToolJournalContext> | null} */
   let taskEffectJournalContext = null;
   /** @type {Array<ReturnType<typeof createToolJournalContext>>} */
@@ -4602,7 +4722,7 @@ async function legacyExecuteTask(
   const afterHeartbeatOwnership = (callback) => {
     const check = confirmHeartbeatOwnership()
       .then((owned) => {
-        if (owned) callback();
+        if (owned) return callback();
       })
       .catch(() => {})
       .finally(() => {
@@ -4751,6 +4871,7 @@ async function legacyExecuteTask(
         : null;
       const agentSig = cacheAgent?.id ?? "agent";
       const toolsSig = hashCapabilityRegistry(cacheAgent?.capabilities ?? null);
+      const checkpointSig = hashAgentCheckpointCapabilities(cacheAgent);
       // Incorporate JJ state so workspace changes invalidate cache as documented.
       const jjBase = await Effect.runPromise(getJjPointer(taskRoot).pipe(Effect.provide(getPlatformLayer())));
       cacheJjBase = jjBase ?? null;
@@ -4789,6 +4910,7 @@ async function legacyExecuteTask(
           outputSchemaSig,
           agentSig,
           toolsSig,
+          checkpointSig,
           jjPointer: cacheJjBase,
           cacheVersion: desc.cachePolicy.version ?? null,
           cacheKey: desc.cachePolicy.key ?? null,
@@ -4804,6 +4926,7 @@ async function legacyExecuteTask(
           outputSchemaSig,
           agentSig,
           toolsSig,
+          checkpointSig,
           jjPointer: cacheJjBase,
           prompt: desc.prompt ?? null,
           payload: desc.staticPayload ?? null,
@@ -4972,6 +5095,7 @@ async function legacyExecuteTask(
       const preflightSelectOptions = {
         rootDir: taskRoot,
         maxOutputBytes: toolConfig.maxOutputBytes,
+        maxAgentCheckpointBytes: toolConfig.maxAgentCheckpointBytes,
         timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
         taskContext: {
           runId,
@@ -5280,24 +5404,104 @@ async function legacyExecuteTask(
         );
         const lastFailedMeta = parseAttemptMetaJson(lastFailedAttempt?.metaJson);
         const discardResumeSession = lastFailedMeta?.discardResumeSession === true;
+        const resetAttempts = new Set(
+          attempts.filter(isResetCancelledAttempt).map((attempt) => `${attempt.iteration}:${attempt.attempt}`),
+        );
+        const checkpointDiscardAttempt = attempts.find(
+          (attempt) =>
+            !resetAttempts.has(`${attempt.iteration}:${attempt.attempt}`) &&
+            parseAttemptMetaJson(attempt.metaJson)?.discardAgentCheckpoint === true,
+        )?.attempt;
+        let resumeCheckpoint = null;
+        let resumeCheckpointRef = null;
+        let checkpointMode = "resume";
+        // Walk newest-to-oldest with a stable attempt/sequence cursor. An
+        // incompatible newest ref must not hide an older compatible one, and
+        // reset/discard boundaries must remain authoritative. Bound the scan
+        // so corrupt or adversarial histories cannot make task start unbounded.
+        let checkpointCursor;
+        let checkpointScanStopped = false;
+        for (let scanned = 0; scanned < 1_000; scanned += 1) {
+          const [candidate] = await Effect.runPromise(
+            adapter.listLatestAgentCheckpointRefs(runId, desc.nodeId, desc.iteration, {
+              limit: 1,
+              ...(checkpointCursor ? { before: checkpointCursor } : {}),
+            }),
+          );
+          if (!candidate) {
+            checkpointScanStopped = true;
+            break;
+          }
+          checkpointCursor = { attempt: candidate.attempt, sequence: candidate.sequence };
+          if (checkpointDiscardAttempt !== undefined && candidate.attempt <= checkpointDiscardAttempt) {
+            checkpointScanStopped = true;
+            break;
+          }
+          if (resetAttempts.has(`${candidate.iteration}:${candidate.attempt}`)) continue;
+          const mayConsumeCheckpoint =
+            candidate.codec === CLI_SESSION_CHECKPOINT_CODEC ||
+            agentSupportsCheckpoint(effectiveAgent, candidate, "resume");
+          if (!mayConsumeCheckpoint) continue;
+          const loaded = await loadAgentCheckpoint(adapter, candidate, toolConfig.maxAgentCheckpointBytes);
+          const legacyResume = discardResumeSession
+            ? undefined
+            : resumeSessionFromCheckpoint(loaded, currentAgentEngine);
+          if (legacyResume) {
+            resumeCheckpointRef = candidate;
+            checkpointScanStopped = true;
+            break;
+          }
+          if (agentSupportsCheckpoint(effectiveAgent, loaded, "resume")) {
+            resumeCheckpoint = loaded;
+            resumeCheckpointRef = candidate;
+            checkpointScanStopped = true;
+            break;
+          }
+        }
+        if (!checkpointScanStopped && checkpointCursor) {
+          const [candidateBeyondLimit] = await Effect.runPromise(
+            adapter.listLatestAgentCheckpointRefs(runId, desc.nodeId, desc.iteration, {
+              limit: 1,
+              before: checkpointCursor,
+            }),
+          );
+          if (candidateBeyondLimit) {
+            throw new SmithersError(
+              "AGENT_CHECKPOINT_HISTORY_EXHAUSTED",
+              `Task ${desc.nodeId} has more than 1,000 incompatible checkpoint references; refusing to start fresh.`,
+              {
+                nodeId: desc.nodeId,
+                iteration: desc.iteration,
+                scanned: 1_000,
+                failureRetryable: false,
+              },
+            );
+          }
+        }
         const checkpointResumeSession =
           !discardResumeSession && heartbeatCheckpointUsable && typeof heartbeatCheckpoint?.agentResume === "string"
             ? heartbeatCheckpoint.agentResume
             : undefined;
-        const checkpointResumeMessages = heartbeatCheckpointUsable
-          ? asConversationMessages(heartbeatCheckpoint?.agentConversation)
-          : undefined;
-        const priorContinuation = hijackCapableEngine
-          ? findHijackContinuation(attempts, hijackCapableEngine)
-          : undefined;
+        const checkpointResumeMessages =
+          !discardResumeSession && heartbeatCheckpointUsable
+            ? asConversationMessages(heartbeatCheckpoint?.agentConversation)
+            : undefined;
+        const priorContinuation =
+          !discardResumeSession && hijackCapableEngine
+            ? findHijackContinuation(attempts, hijackCapableEngine)
+            : undefined;
         // discardResumeSession must also veto the hijack-continuation
         // path: the corrupt session id lives in prior attempt meta, so
         // resuming it via priorContinuation reproduces the crash on
         // every retry despite the checkpoint gate above.
-        const resumeSession =
+        let resumeSession =
           priorContinuation?.mode === "native-cli" && !discardResumeSession
             ? priorContinuation.resume
             : checkpointResumeSession;
+        if (!resumeSession && resumeCheckpointRef && !resumeCheckpoint) {
+          const stored = await loadAgentCheckpoint(adapter, resumeCheckpointRef, toolConfig.maxAgentCheckpointBytes);
+          resumeSession = resumeSessionFromCheckpoint(stored, currentAgentEngine);
+        }
         // Fallback: we should be resuming (the same agent ran before) but
         // no session id was captured. Continue the latest session in this
         // worktree via --continue. CLI agents that support it read
@@ -5306,6 +5510,7 @@ async function legacyExecuteTask(
         // and may attach the most recent session.
         const continueSession =
           !resumeSession &&
+          !resumeCheckpoint &&
           !discardResumeSession &&
           heartbeatCheckpointUsable &&
           typeof heartbeatCheckpoint?.agentEngine === "string" &&
@@ -5322,10 +5527,43 @@ async function legacyExecuteTask(
         // task, guidedResumeMessages (its own checkpoint) takes over and
         // already carries the forked-in context forward.
         let forkSeedMessages = null;
-        if (desc.forkSource && !guidedResumeMessages?.length) {
+        if (
+          desc.forkSource &&
+          !guidedResumeMessages?.length &&
+          !resumeCheckpoint &&
+          !resumeSession &&
+          !continueSession
+        ) {
           const forkSourceAttempts = await Effect.runPromise(adapter.listAttemptsForRun(runId));
           try {
-            forkSeedMessages = resolveForkSessionMessages(forkSourceAttempts, desc.forkSource, desc.nodeId);
+            const forkState = resolveForkAgentState(forkSourceAttempts, desc.forkSource, desc.nodeId);
+            if (forkState.checkpointRef && agentSupportsCheckpoint(effectiveAgent, forkState.checkpointRef, "fork")) {
+              const sourceCheckpoint = await loadAgentCheckpoint(
+                adapter,
+                forkState.checkpointRef,
+                toolConfig.maxAgentCheckpointBytes,
+              );
+              resumeCheckpoint = sourceCheckpoint;
+              resumeCheckpointRef = forkState.checkpointRef;
+              checkpointMode = "fork";
+            }
+            if (!resumeCheckpoint && forkState.messages) {
+              forkSeedMessages = forkState.messages;
+            }
+            if (!resumeCheckpoint && !forkSeedMessages?.length) {
+              throw new SmithersError(
+                "TASK_FORK_CHECKPOINT_INCOMPATIBLE",
+                `Task ${desc.nodeId} cannot consume the checkpoint produced by ${desc.forkSource}.`,
+                {
+                  nodeId: desc.nodeId,
+                  forkSource: desc.forkSource,
+                  codec: forkState.checkpointRef?.codec,
+                  version: forkState.checkpointRef?.version,
+                  mode: "fork",
+                  failureRetryable: false,
+                },
+              );
+            }
           } catch (err) {
             // The fork source is terminal (the scheduler only runs a
             // forked task once its source reaches a terminal state) but
@@ -5385,6 +5623,18 @@ async function legacyExecuteTask(
         if (resumeSession) {
           attemptMeta.resumedFromSession = resumeSession;
         }
+        if (resumeCheckpointRef) {
+          const compactResumeRef = {
+            contentHash: resumeCheckpointRef.contentHash,
+            sequence: resumeCheckpointRef.sequence,
+            codec: resumeCheckpointRef.codec,
+            version: resumeCheckpointRef.version,
+          };
+          attemptMeta.resumedFromCheckpoint = {
+            ...compactResumeRef,
+            mode: checkpointMode,
+          };
+        }
         if (guidedResumeMessages?.length) {
           attemptMeta.resumedFromConversation = true;
           attemptMeta.agentConversation = guidedResumeMessages;
@@ -5408,6 +5658,7 @@ async function legacyExecuteTask(
               {
                 rootDir: taskRoot,
                 maxOutputBytes: toolConfig.maxOutputBytes,
+                maxAgentCheckpointBytes: toolConfig.maxAgentCheckpointBytes,
                 timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
                 taskContext: {
                   runId,
@@ -5494,6 +5745,7 @@ async function legacyExecuteTask(
           !guidedResumeMessages?.length &&
           !forkSeedMessages?.length &&
           !resumeSession &&
+          !resumeCheckpoint &&
           !continueSession
         ) {
           throw new SmithersError(
@@ -5585,6 +5837,105 @@ async function legacyExecuteTask(
         const forkConversationBase = forkSeedMessages?.length
           ? [...forkSeedMessages, { role: "user", content: effectivePrompt }]
           : null;
+        latestAgentCheckpoint = resumeCheckpoint;
+        let latestAgentCheckpointJson = resumeCheckpoint ? JSON.stringify(resumeCheckpoint) : null;
+        let latestAgentCheckpointOwnedByAttempt = false;
+        let checkpointWriteChain = Promise.resolve();
+        /**
+         * @param {unknown} candidate
+         * @param {string} purpose
+         * @param {{ allowLegacy?: boolean }} [options]
+         */
+        const persistAgentCheckpoint = async (candidate, purpose, options) => {
+          let checkpoint;
+          try {
+            checkpoint = cloneAgentCheckpoint(candidate, toolConfig.maxAgentCheckpointBytes);
+          } catch (cause) {
+            throw new SmithersError(
+              "AGENT_CHECKPOINT_INVALID",
+              `Agent ${attemptMeta.agentId ?? "unknown"} returned an invalid checkpoint.`,
+              { nodeId: desc.nodeId, attempt: attemptNo, failureRetryable: false },
+              { cause },
+            );
+          }
+          if (!options?.allowLegacy && !agentProducesCheckpoint(effectiveAgent, checkpoint)) {
+            throw new SmithersError(
+              "AGENT_CHECKPOINT_CAPABILITY_UNDECLARED",
+              `Agent ${attemptMeta.agentId ?? "unknown"} returned an undeclared checkpoint capability.`,
+              {
+                nodeId: desc.nodeId,
+                codec: checkpoint.codec,
+                version: checkpoint.version,
+                checkpointFormats: effectiveAgent.checkpointFormats,
+                failureRetryable: false,
+              },
+            );
+          }
+          const checkpointJson = JSON.stringify(checkpoint);
+          if (checkpointJson === latestAgentCheckpointJson && latestAgentCheckpointOwnedByAttempt) {
+            return attemptMeta.agentCheckpoint ?? null;
+          }
+          if (taskSignal.aborted || heartbeatOwnerLost) throw taskSignal.reason ?? makeAbortError();
+          const ref = await Effect.runPromise(
+            adapter.putAgentCheckpoint({
+              runId,
+              nodeId: desc.nodeId,
+              iteration: desc.iteration,
+              attempt: attemptNo,
+              checkpointJson,
+              codec: checkpoint.codec,
+              version: checkpoint.version,
+              agentId: typeof attemptMeta.agentId === "string" ? attemptMeta.agentId : null,
+              purpose,
+              createdAtMs: nowMs(),
+              runtimeOwnerId: executionOwnerId,
+            }),
+          );
+          if (!ref) {
+            heartbeatOwnerLost = true;
+            throw new SmithersError("HEARTBEAT_FENCE_LOST", "Agent checkpoint ownership was lost.");
+          }
+          const compactRef = {
+            contentHash: ref.contentHash,
+            sequence: ref.sequence,
+            codec: ref.codec,
+            version: ref.version,
+          };
+          latestAgentCheckpoint = checkpoint;
+          latestAgentCheckpointJson = checkpointJson;
+          latestAgentCheckpointOwnedByAttempt = true;
+          attemptMeta.agentCheckpoint = compactRef;
+          return compactRef;
+        };
+        enqueueAgentCheckpoint = (candidate, purpose, options) => {
+          const write = checkpointWriteChain.then(() => persistAgentCheckpoint(candidate, purpose, options));
+          const observed = write.then((ref) => {
+            checkpointPublicationCount += 1;
+            return ref;
+          });
+          checkpointWriteChain = observed.catch(() => undefined);
+          return observed;
+        };
+        /** @param {unknown} generationResult @param {string} purpose */
+        captureResultCheckpoint = async (generationResult, purpose) => {
+          if (!generationResult || (typeof generationResult !== "object" && typeof generationResult !== "function")) {
+            return;
+          }
+          if (!Object.prototype.hasOwnProperty.call(generationResult, "checkpoint")) return;
+          let checkpoint;
+          try {
+            checkpoint = generationResult.checkpoint;
+          } catch (cause) {
+            throw new SmithersError(
+              "AGENT_CHECKPOINT_INVALID",
+              "Agent checkpoint result property could not be read.",
+              { nodeId: desc.nodeId, attempt: attemptNo, failureRetryable: false },
+              { cause },
+            );
+          }
+          if (checkpoint === undefined) return;
+          return enqueueAgentCheckpoint(checkpoint, purpose);
+        };
         let hijackCompletionCheckInFlight = false;
         const maybeCompleteHijack = async () => {
           if (!hijackState?.request || hijackState.completion || !runAbortController) {
@@ -5664,10 +6015,20 @@ async function legacyExecuteTask(
         handleAgentEvent = (event) => {
           if (heartbeatOwnerLost) return;
           recordInternalHeartbeat();
-          afterHeartbeatOwnership(() => {
+          afterHeartbeatOwnership(async () => {
             attemptMeta.agentEngine = event.engine ?? attemptMeta.agentEngine;
+            let checkpointWrite = null;
             if ("resume" in event && typeof event.resume === "string") {
               attemptMeta.agentResume = event.resume;
+              checkpointWrite = enqueueAgentCheckpoint(
+                {
+                  codec: CLI_SESSION_CHECKPOINT_CODEC,
+                  version: 1,
+                  payload: { engine: event.engine ?? attemptMeta.agentEngine, resume: event.resume },
+                },
+                "session",
+                { allowLegacy: true },
+              );
             }
             recordInternalHeartbeat({
               agentEngine: event.engine,
@@ -5691,6 +6052,24 @@ async function legacyExecuteTask(
               timestampMs: nowMs(),
             });
             void maybeCompleteHijack(true).catch(() => {});
+            if (checkpointWrite) {
+              try {
+                await checkpointWrite;
+              } catch (error) {
+                logWarning(
+                  "failed to persist CLI session checkpoint",
+                  {
+                    runId,
+                    nodeId: desc.nodeId,
+                    iteration: desc.iteration,
+                    attempt: attemptNo,
+                    engine: event.engine,
+                    error: error instanceof Error ? error.message : String(error),
+                  },
+                  "engine:agent-checkpoint",
+                );
+              }
+            }
           });
         };
         /**
@@ -5778,7 +6157,10 @@ async function legacyExecuteTask(
         // transcript before it resumes. Runs before the watcher starts so
         // we don't snapshot the pre-restore tree. No-op when disabled or
         // when there is no prior checkpoint.
-        if (process.env.SMITHERS_DURABILITY_SNAPSHOTS === "1" && resumeSession) {
+        if (
+          process.env.SMITHERS_DURABILITY_SNAPSHOTS === "1" &&
+          shouldRestoreWorkspaceForResume({ resumeSession, resumeCheckpoint, checkpointMode })
+        ) {
           const restoreResult = await restoreWorkspaceToLatestCheckpoint({
             adapter,
             runId,
@@ -5880,24 +6262,31 @@ async function legacyExecuteTask(
                   smithersSpanNames.agent,
                   Effect.tryPromise({
                     try: () => {
-                      const agentCall = guidedResumeMessages?.length
-                        ? {
-                            messages: guidedResumeMessages,
-                          }
-                        : forkConversationBase
+                      const resumeCheckpointForCall = latestAgentCheckpoint
+                        ? cloneAgentCheckpoint(latestAgentCheckpoint, toolConfig.maxAgentCheckpointBytes)
+                        : null;
+                      const agentCall = resumeCheckpointForCall
+                        ? { prompt: effectivePrompt }
+                        : guidedResumeMessages?.length
                           ? {
-                              messages: forkConversationBase,
+                              messages: guidedResumeMessages,
                             }
-                          : {
-                              prompt: effectivePrompt,
-                            };
+                          : forkConversationBase
+                            ? {
+                                messages: forkConversationBase,
+                              }
+                            : {
+                                prompt: effectivePrompt,
+                              };
                       const doGenerate = () =>
                         effectiveAgent.generate({
                           options: undefined,
                           abortSignal: taskSignal,
                           ...agentCall,
                           ...(generationTools ? { tools: generationTools } : {}),
-                          resumeSession,
+                          ...(resumeCheckpointForCall
+                            ? { resumeCheckpoint: resumeCheckpointForCall, checkpointMode }
+                            : { resumeSession }),
                           continueSession,
                           durabilitySocket: durability.socketPath,
                           lastHeartbeat: previousHeartbeat,
@@ -5909,6 +6298,7 @@ async function legacyExecuteTask(
                             attempt: attemptNo,
                           },
                           maxOutputBytes: toolConfig.maxOutputBytes,
+                          maxAgentCheckpointBytes: toolConfig.maxAgentCheckpointBytes,
                           timeout: desc.timeoutMs ? { totalMs: desc.timeoutMs } : undefined,
                           onStdout: (text) => {
                             if (heartbeatOwnerLost) return;
@@ -5928,6 +6318,9 @@ async function legacyExecuteTask(
                           },
                           onProcess: handleProcess,
                           onEvent: handleAgentEvent,
+                          onCheckpoint: async (checkpoint) => {
+                            await enqueueAgentCheckpoint(checkpoint, "progress");
+                          },
                           onStepFinish: handleSdkStepFinish,
                           onStepEnd: handleSdkStepFinish,
                           outputSchema: desc.outputSchema,
@@ -5951,6 +6344,7 @@ async function legacyExecuteTask(
             }
           }
         } catch (error) {
+          await Promise.all([...pendingOwnershipChecks]);
           const errorDetails = {
             attempt: attemptNo,
             iteration: desc.iteration,
@@ -6012,10 +6406,11 @@ async function legacyExecuteTask(
           }
         }
         await Promise.all(pendingOwnershipChecks);
+        await captureResultCheckpoint(result, "turn");
         if (traceCollector) {
-          traceCollector.observeResult(result);
-          await traceCollector.flush();
-        }
+        traceCollector.observeResult(result);
+        await traceCollector.flush();
+      }
         agentResult = result;
         // The agent's resolved model id is authoritative only after the
         // call returns. Refresh the span-tag model so it isn't the agent's
@@ -6052,7 +6447,10 @@ async function legacyExecuteTask(
         // not the generate() return value — without the `?? responseText`
         // fallback a schema-conforming final message is discarded and the
         // task finishes "succeeded" with an empty output row (NodeHasNoOutput).
-        responseText = result.text ?? responseText ?? null;
+        responseText =
+          typeof result.text === "string" && result.text.length > 0
+            ? result.text
+            : (responseText ?? result.text ?? null);
         if (responseText) {
           void Effect.runPromise(Metric.update(responseSizeBytes, Buffer.byteLength(responseText, "utf8")));
         }
@@ -6113,7 +6511,10 @@ async function legacyExecuteTask(
         // agents) so structured output is recovered even when the agent
         // exposes no `result.text`.
         if (output === undefined) {
-          const text = result.text ?? responseText ?? "";
+          const text =
+            typeof result.text === "string" && result.text.length > 0
+              ? result.text
+              : (responseText ?? result.text ?? "");
           // Try to parse the whole text as JSON first. Strip a leading
           // UTF-8 BOM and accept either object or array at the root,
           // since Zod schemas occasionally validate arrays.
@@ -6209,7 +6610,13 @@ async function legacyExecuteTask(
             schemaCorrectionAttempts += 1;
             attemptMeta.schemaCorrectionAttempts = schemaCorrectionAttempts;
             const schemaDesc = describeSchemaShape(desc.outputTable, desc.outputSchema);
-            const correctionResumeSession = resolveCorrectionResumeSession(effectiveAgent, attemptMeta);
+            const correctionCheckpoint =
+              latestAgentCheckpoint && agentSupportsCheckpoint(effectiveAgent, latestAgentCheckpoint, "resume")
+                ? cloneAgentCheckpoint(latestAgentCheckpoint, toolConfig.maxAgentCheckpointBytes)
+                : null;
+            const correctionResumeSession = correctionCheckpoint
+              ? undefined
+              : resolveCorrectionResumeSession(effectiveAgent, attemptMeta);
             // Include a truncated summary of the latest non-JSON response so the model has context
             const responseSummary =
               latestNoJsonText.length > 2000
@@ -6259,18 +6666,22 @@ async function legacyExecuteTask(
                 maxSchemaRetries,
                 correctionKind: "json-format",
                 resumedSession: Boolean(correctionResumeSession),
+                resumedCheckpoint: Boolean(correctionCheckpoint),
               },
               "engine:schema-retry",
             );
+            const checkpointPublicationBeforeCorrection = checkpointPublicationCount;
             const retryResult = await raceTaskAbort(
               effectiveAgent.generate({
                 options: undefined,
                 abortSignal: taskSignal,
                 prompt: jsonPrompt,
                 resumeSession: correctionResumeSession,
+                ...(correctionCheckpoint ? { resumeCheckpoint: correctionCheckpoint, checkpointMode: "resume" } : {}),
                 ...(generationTools ? { tools: generationTools } : {}),
                 rootDir: taskRoot,
                 maxOutputBytes: toolConfig.maxOutputBytes,
+                maxAgentCheckpointBytes: toolConfig.maxAgentCheckpointBytes,
                 taskContext: {
                   runId,
                   nodeId: desc.nodeId,
@@ -6294,6 +6705,9 @@ async function legacyExecuteTask(
                 },
                 onProcess: handleProcess,
                 onEvent: handleAgentEvent,
+                onCheckpoint: async (checkpoint) => {
+                  await enqueueAgentCheckpoint(checkpoint, "progress");
+                },
                 onStepFinish: handleSdkStepFinish,
                 onStepEnd: handleSdkStepFinish,
               }),
@@ -6302,6 +6716,13 @@ async function legacyExecuteTask(
             // emitted by this correction call is visible before the
             // next iteration decides what to resume.
             await Promise.all(pendingOwnershipChecks);
+            await captureResultCheckpoint(retryResult, "schema-correction");
+            if (
+              checkpointPublicationCount === checkpointPublicationBeforeCorrection &&
+              attemptMeta.agentCheckpoint?.codec !== CLI_SESSION_CHECKPOINT_CODEC
+            ) {
+              attemptMeta.agentCheckpoint = null;
+            }
             const retryText = retryResult.text ?? "";
             responseText = retryText || responseText;
             latestNoJsonText = retryText || latestNoJsonText;
@@ -6584,7 +7005,13 @@ async function legacyExecuteTask(
       // CLI harness agents resume their own session so the correction
       // runs with the full task context; SDK agents replay the recorded
       // conversation messages instead.
-      const correctionResumeSession = resolveCorrectionResumeSession(effectiveAgent, attemptMeta);
+      const correctionCheckpoint =
+        latestAgentCheckpoint && agentSupportsCheckpoint(effectiveAgent, latestAgentCheckpoint, "resume")
+          ? cloneAgentCheckpoint(latestAgentCheckpoint, toolConfig.maxAgentCheckpointBytes)
+          : null;
+      const correctionResumeSession = correctionCheckpoint
+        ? undefined
+        : resolveCorrectionResumeSession(effectiveAgent, attemptMeta);
       logInfo(
         "schema validation retry",
         {
@@ -6596,22 +7023,27 @@ async function legacyExecuteTask(
           maxSchemaRetries,
           correctionKind: "schema-validation",
           resumedSession: Boolean(correctionResumeSession),
+          resumedCheckpoint: Boolean(correctionCheckpoint),
           zodIssues,
         },
         "engine:schema-retry",
       );
       // Append the correction as a user message to the conversation
       const retryMessages = [...schemaCorrectionMessages, { role: "user", content: schemaRetryPrompt }];
+      const checkpointPublicationBeforeCorrection = checkpointPublicationCount;
       const schemaRetryResult = await raceTaskAbort(
         effectiveAgent.generate({
           options: undefined,
           abortSignal: taskSignal,
-          ...(correctionResumeSession
-            ? { prompt: schemaRetryPrompt, resumeSession: correctionResumeSession }
-            : { messages: retryMessages }),
+          ...(correctionCheckpoint
+            ? { prompt: schemaRetryPrompt, resumeCheckpoint: correctionCheckpoint, checkpointMode: "resume" }
+            : correctionResumeSession
+              ? { prompt: schemaRetryPrompt, resumeSession: correctionResumeSession }
+              : { messages: retryMessages }),
           ...(generationTools ? { tools: generationTools } : {}),
           rootDir: taskRoot,
           maxOutputBytes: toolConfig.maxOutputBytes,
+          maxAgentCheckpointBytes: toolConfig.maxAgentCheckpointBytes,
           taskContext: {
             runId,
             nodeId: desc.nodeId,
@@ -6635,6 +7067,9 @@ async function legacyExecuteTask(
           },
           onProcess: handleProcess,
           onEvent: handleAgentEvent,
+          onCheckpoint: async (checkpoint) => {
+            await enqueueAgentCheckpoint(checkpoint, "progress");
+          },
           onStepFinish: handleSdkStepFinish,
           onStepEnd: handleSdkStepFinish,
           ...(supportsNativeStructuredOutput ? { outputSchema: desc.outputSchema } : {}),
@@ -6643,6 +7078,13 @@ async function legacyExecuteTask(
       // Flush deferred event handlers so a fresh session id emitted by
       // this correction call is visible to the next iteration.
       await Promise.all(pendingOwnershipChecks);
+      await captureResultCheckpoint(schemaRetryResult, "schema-correction");
+      if (
+        checkpointPublicationCount === checkpointPublicationBeforeCorrection &&
+        attemptMeta.agentCheckpoint?.codec !== CLI_SESSION_CHECKPOINT_CODEC
+      ) {
+        attemptMeta.agentCheckpoint = null;
+      }
       const retryText = (schemaRetryResult.text ?? "").trim();
       responseText = retryText || responseText;
       if (!(await confirmHeartbeatOwnership())) {
@@ -6942,6 +7384,14 @@ async function legacyExecuteTask(
       effectiveError.details.discardResumeSession === true
     ) {
       attemptMeta.discardResumeSession = true;
+    }
+    if (
+      effectiveError &&
+      typeof effectiveError === "object" &&
+      effectiveError.details &&
+      effectiveError.details.discardAgentCheckpoint === true
+    ) {
+      attemptMeta.discardAgentCheckpoint = true;
     }
     if (!heartbeatTimeoutError && (taskSignal.aborted || isAbortError(err))) {
       const currentAttempt = await Effect.runPromise(adapter.getAttempt(runId, desc.nodeId, desc.iteration, attemptNo));
@@ -7621,6 +8071,11 @@ async function runWorkflowBodyDriver(workflow, opts) {
   // not pin it; every read (withTaskSlot admission included) sees the raise.
   let maxConcurrency = coercePositiveInt("maxConcurrency", opts.maxConcurrency, DEFAULT_MAX_CONCURRENCY);
   const maxOutputBytes = coercePositiveInt("maxOutputBytes", opts.maxOutputBytes, DEFAULT_MAX_OUTPUT_BYTES);
+  const maxAgentCheckpointBytes = coercePositiveInt(
+    "maxAgentCheckpointBytes",
+    opts.maxAgentCheckpointBytes,
+    DEFAULT_AGENT_CHECKPOINT_MAX_BYTES,
+  );
   const toolTimeoutMs = coercePositiveInt("toolTimeoutMs", opts.toolTimeoutMs, DEFAULT_TOOL_TIMEOUT_MS);
   const allowNetwork = Boolean(opts.allowNetwork);
   const runtimeOwnerId = buildRuntimeOwnerId();
@@ -7673,6 +8128,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
     rootDir,
     allowNetwork,
     maxOutputBytes,
+    maxAgentCheckpointBytes,
     toolTimeoutMs,
     acceptWorkflowChange: opts.acceptWorkflowChange === true,
     reportError: (rawError, context) => reportSmithersError(opts.onError, rawError, context),
@@ -8457,13 +8913,19 @@ async function runWorkflowBodyDriver(workflow, opts) {
       try {
         const existingOutput = await readTaskOutput(task);
         if (existingOutput !== undefined) {
+          const existingNode = await Effect.runPromise(adapter.getNode(runId, task.nodeId, task.iteration));
+          let lastAttempt = existingNode?.lastAttempt ?? null;
+          if (lastAttempt == null) {
+            const attempts = await Effect.runPromise(adapter.listAttempts(runId, task.nodeId, task.iteration));
+            lastAttempt = attempts[0]?.attempt ?? null;
+          }
           await Effect.runPromise(
             adapter.insertNode({
               runId,
               nodeId: task.nodeId,
               iteration: task.iteration,
               state: "finished",
-              lastAttempt: null,
+              lastAttempt,
               updatedAtMs: nowMs(),
               outputTable: task.outputTableName,
               label: task.label ?? null,

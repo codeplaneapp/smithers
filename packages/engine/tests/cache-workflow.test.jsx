@@ -84,6 +84,48 @@ describe("workflow caching", () => {
     expect(calls).toBe(2);
     cleanup();
   });
+  test("checkpoint capability changes invalidate the cache", async () => {
+    const { smithers, outputs, cleanup } = createTestSmithers({
+      out: z.object({ v: z.number() }),
+    });
+    let calls = 0;
+    const makeWorkflow = (checkpointCapabilities) =>
+      smithers(() => (
+        <Workflow name="checkpoint-capability-cache" cache>
+          <Task
+            id="t"
+            output={outputs.out}
+            agent={{
+              id: "checkpoint-capability-cache-agent",
+              tools: {},
+              checkpointCapabilities,
+              async generate() {
+                calls += 1;
+                return { output: { v: calls } };
+              },
+            }}
+          >
+            Same prompt
+          </Task>
+        </Workflow>
+      ));
+
+    await Effect.runPromise(
+      runWorkflow(makeWorkflow([{ codec: "cache.checkpoint", versions: [1], modes: ["resume"] }]), {
+        input: {},
+        runId: "checkpoint-capability-r1",
+      }),
+    );
+    await Effect.runPromise(
+      runWorkflow(makeWorkflow([{ codec: "cache.checkpoint", versions: [1], modes: ["resume", "fork"] }]), {
+        input: {},
+        runId: "checkpoint-capability-r2",
+      }),
+    );
+
+    expect(calls).toBe(2);
+    cleanup();
+  });
   test("cache works with static tasks", async () => {
     const { smithers, outputs, cleanup } = createTestSmithers({
       out: z.object({ v: z.number() }),

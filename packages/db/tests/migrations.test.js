@@ -157,8 +157,68 @@ describe("DB migration edges", () => {
           "0014_current_indexes",
           "0017_add_scorer_context_columns",
           "0018_add_docs",
+          "0037_agent_checkpoints",
         ]),
       );
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("0037 repairs missing agent checkpoint tables and index idempotently", () => {
+    const { sqlite, db } = setupMemoryDb();
+    try {
+      sqlite.run("DROP TABLE _smithers_agent_checkpoints");
+      sqlite.run("DROP TABLE _smithers_agent_checkpoint_contents");
+      sqlite.run("DELETE FROM _smithers_schema_migrations WHERE id = '0037_agent_checkpoints'");
+      ensureSmithersTables(db);
+      expect(
+        sqlite
+          .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_agent_checkpoint_contents'")
+          .get(),
+      ).toBeDefined();
+      expect(
+        sqlite
+          .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_agent_checkpoints'")
+          .get(),
+      ).toBeDefined();
+      expect(
+        sqlite
+          .query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = '_smithers_agent_checkpoints_content_hash_idx'",
+          )
+          .get(),
+      ).toBeDefined();
+      expect(
+        sqlite
+          .query(
+            "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = '_smithers_agent_checkpoints_attempt_delete'",
+          )
+          .get(),
+      ).toBeDefined();
+      sqlite.run("DROP TRIGGER _smithers_agent_checkpoints_attempt_delete");
+      expect(() => ensureSmithersTables(db)).not.toThrow();
+      expect(
+        sqlite
+          .query(
+            "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = '_smithers_agent_checkpoints_attempt_delete'",
+          )
+          .get(),
+      ).toBeDefined();
+      expect(migrationRows(sqlite).filter((row) => row.id === "0037_agent_checkpoints")).toHaveLength(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("0037 fails closed when a recorded checkpoint table has an incompatible shape", () => {
+    const { sqlite, db } = setupMemoryDb();
+    try {
+      sqlite.run("DROP TRIGGER _smithers_agent_checkpoints_attempt_delete");
+      sqlite.run("DROP TRIGGER _smithers_agent_checkpoint_refs_delete");
+      sqlite.run("DROP TABLE _smithers_agent_checkpoints");
+      sqlite.run("CREATE TABLE _smithers_agent_checkpoints (run_id TEXT PRIMARY KEY)");
+      expect(() => ensureSmithersTables(db)).toThrow(/0037 agent checkpoint schema mismatch/);
     } finally {
       sqlite.close();
     }

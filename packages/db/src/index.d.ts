@@ -76,6 +76,27 @@ type AttemptRow$1 = {
     metaJson: string | null;
 };
 
+type AgentCheckpointContentRow = {
+    contentHash: string;
+    checkpointJson: string;
+    sizeBytes: number;
+    createdAtMs: number;
+};
+
+type AgentCheckpointRefRow = {
+    runId: string;
+    nodeId: string;
+    iteration: number;
+    attempt: number;
+    sequence: number;
+    contentHash: string;
+    codec: string;
+    version: number;
+    agentId: string | null;
+    purpose: string;
+    createdAtMs: number;
+};
+
 declare const DB_ALERT_ALLOWED_STATUSES$1: string[];
 
 type AlertStatus$1 = (typeof DB_ALERT_ALLOWED_STATUSES$1)[number];
@@ -973,6 +994,56 @@ declare class SmithersDb {
    * @returns {RunnableEffect<AttemptRow | undefined, SmithersError>}
    */
     getAttempt(runId: string, nodeId: string, iteration: number, attempt: number): RunnableEffect<AttemptRow | undefined, SmithersError$1>;
+    putAgentCheckpoint(row: {
+        runId: string;
+        nodeId: string;
+        iteration: number;
+        attempt: number;
+        sequence?: number;
+        checkpointJson: string;
+        codec: string;
+        version: number;
+        agentId?: string | null;
+        purpose: string;
+        createdAtMs: number;
+        runtimeOwnerId: string | null;
+    }): RunnableEffect<AgentCheckpointRefRow | null, SmithersError$1>;
+    getAgentCheckpoint(contentHash: string): RunnableEffect<AgentCheckpointContentRow | null, SmithersError$1>;
+    listAgentCheckpointRefs(runId: string, filters?: {
+        nodeId?: string;
+        iteration?: number;
+        attempt?: number;
+        purpose?: string;
+        limit?: number;
+        after?: {
+            nodeId: string;
+            iteration: number;
+            attempt: number;
+            sequence: number;
+        };
+    }): RunnableEffect<AgentCheckpointRefRow[], SmithersError$1>;
+    listLatestAgentCheckpointRefs(runId: string, nodeId: string, iteration: number, options?: {
+        limit?: number;
+        beforeAttemptExclusive?: number;
+        before?: {
+            attempt: number;
+            sequence: number;
+        };
+    }): RunnableEffect<AgentCheckpointRefRow[], SmithersError$1>;
+    getNextAgentCheckpointSequence(runId: string, nodeId: string, iteration: number, attempt: number): RunnableEffect<number, SmithersError$1>;
+    /**
+     * Delete refs and orphaned content for an exact reset-cancelled attempt,
+     * fenced by current run ownership. Returns false when the fence or reset
+     * marker does not match; otherwise true, including idempotent retries.
+     */
+    deleteResetAgentCheckpoints(runId: string, nodeId: string, iteration: number, attempt: number, runtimeOwnerId: string | null): RunnableEffect<boolean, SmithersError$1>;
+    pruneOrphanedAgentCheckpointContents(options?: {
+        limit?: number;
+        afterContentHash?: string;
+    }): RunnableEffect<{
+        deletedCount: number;
+        nextCursor: string | null;
+    }, SmithersError$1>;
     /**
    * @param {string} runId
    * @returns {RunnableEffect<AttemptRow[], SmithersError>}
@@ -3276,6 +3347,8 @@ declare const smithersWorkspaceStates: drizzle_orm_sqlite_core.SQLiteTableWithCo
     dialect: "sqlite";
 }>;
 
+declare const smithersAgentCheckpointContents: drizzle_orm_sqlite_core.SQLiteTableWithColumns<any>;
+declare const smithersAgentCheckpoints: drizzle_orm_sqlite_core.SQLiteTableWithColumns<any>;
 declare const smithersWorkspaceCheckpoints: drizzle_orm_sqlite_core.SQLiteTableWithColumns<{
     name: "_smithers_workspace_checkpoints";
     schema: undefined;
@@ -8183,5 +8256,9 @@ declare function zodToTable(tableName: any, schema: any, opts: any): drizzle_orm
 declare function camelToSnake(str: string): string;
 
 type SchemaRegistryEntry = SchemaRegistryEntry$1;
+
+export type { AgentCheckpointContentRow, AgentCheckpointRefRow };
+
+export { smithersAgentCheckpointContents, smithersAgentCheckpoints };
 
 export { type AlertRow, type AlertSeverity, type AlertStatus, type AnyColumn, type ApprovalRow, type AttemptRow, type CacheRow, type CacheRowLike, type CountRow, DB_ALERT_ALLOWED_SEVERITIES, DB_ALERT_ALLOWED_STATUSES, DB_ALERT_ID_MAX_LENGTH, DB_ALERT_MESSAGE_MAX_LENGTH, DB_ALERT_POLICY_NAME_MAX_LENGTH, DB_RUN_ALLOWED_STATUSES, DB_RUN_ID_MAX_LENGTH, DB_RUN_WORKFLOW_NAME_MAX_LENGTH, type Database, type Dialect, type DocRow, type EventHistoryQuery, type ExternalSqliteDescriptor, FRAME_KEYFRAME_INTERVAL, type FrameDelta, type FrameDeltaOp, type FrameEncoding, type FrameRow, type HumanRequestRow, type IntegrationDeliveryClaim, type JsonBounds, type JsonPath, type JsonPathSegment, NODE_DIFF_MAX_BYTES, NodeDiffCache, type NodeDiffCacheResult, type NodeDiffCacheRow$1 as NodeDiffCacheRow, NodeDiffTooLargeError, type NodeRow, type OutputKey, type OutputSnapshot, POSTGRES, type PendingHumanRequestRow, type RalphRow, type RunAncestryRow, type RunRow, type RunnableEffect, SQLITE, type SchemaRegistryEntry, type SignalQuery, type SignalRow, SmithersDb, type SmithersError$1 as SmithersError, SqlMessageStorage, type SqlMessageStorageEventHistoryQuery, type SqliteParam, type SqliteTransactionState, type SqliteWriteRetryOptions, type StaleRunRecord, type Table, type TxidCapture, type ZodError, type _BunSQLiteDatabase, type _NodeDiffCacheRow, type _OutputKey, type _SmithersDb, type _SmithersError, applyFrameDelta, applyFrameDeltaJson, assertJsonPayloadWithinBounds, assertMaxBytes, assertMaxJsonDepth, assertMaxStringLength, assertNoReservedColumns, assertOptionalArrayMaxLength, assertOptionalStringMaxLength, assertPositiveFiniteInteger, assertPositiveFiniteNumber, beginTransactionSql, buildKeyWhere, buildOutputRow, camelToSnake, capturePostgresTransactionTxid, captureTxid, columnType, createTxidCapture, describeSchemaShape, encodeFrameDelta, ensureSmithersTables, ensureSmithersTablesEffect, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, getAgentOutputSchema, getJsonColumnKeys, getKeyColumns, getSmithersSchemaSignature, getSqlMessageStorage, hasActiveTxidCapture, isPostgresDb, isRealPostgresAdapter, isRetryableSqliteWriteError, jsonExtractText, loadInput, loadInputEffect, loadOutputs, loadOutputsEffect, loadRunOutputRowsEffect, normalizeFrameEncoding, openDurableSqliteDatabase, parseFrameDelta, pgRowToDrizzle, quoteIdentifier, recordCommittedTxid, runWithTxidCapture, schemaSignature, selectOutputRow, selectOutputRowEffect, serializeFrameDelta, shouldCapturePostgresTxid, smithersAlerts, smithersApprovals, smithersAttempts, smithersCache, smithersCron, smithersDocs, smithersEvents, smithersFrames, smithersHumanRequests, smithersIntegrationCursors, smithersIntegrationDeliveries, smithersMemoryFacts, smithersMemoryMessages, smithersMemoryNoteSupersessions, smithersMemoryNotes, smithersMemoryThreads, smithersNodeDiffs, smithersNodes, smithersRalph, smithersRuns, smithersSandboxes, smithersSchemaMigrations, smithersScorers, smithersSignals, smithersTimeTravelAudit, smithersToolCallArchive, smithersToolCalls, smithersVectors, smithersWorkspaceCheckpoints, smithersWorkspaceStates, stripAutoColumns, syncZodTableSchema, syncZodTableSchemaPostgres, translateDdl, translatePlaceholders, unwrapZodType, upsertOutputRow, upsertOutputRowEffect, validateExistingOutput, validateInput, validateOutput, withSqliteWriteRetry, withSqliteWriteRetryEffect, zodSchemaColumns, zodToCreateTableSQL, zodToTable };

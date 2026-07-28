@@ -1742,6 +1742,7 @@ function checkAgentAndCacheDocsMatchSourceTypes() {
     [AGENT_LIKE_SOURCE, "tools?: Record<string, unknown>;"],
     [AGENT_LIKE_SOURCE, "capabilities?: AgentCapabilityRegistry;"],
     [AGENT_LIKE_SOURCE, "generate: (args?: AgentGenerateOptions) => Promise<unknown>;"],
+    [AGENT_GENERATE_OPTIONS_SOURCE, "maxAgentCheckpointBytes?: number;"],
     [AGENT_GENERATE_OPTIONS_SOURCE, "taskContext?: {"],
     [AGENT_GENERATE_OPTIONS_SOURCE, "[key: string]: unknown;"],
     [
@@ -1761,6 +1762,7 @@ function checkAgentAndCacheDocsMatchSourceTypes() {
     ],
     [TYPES_REFERENCE, "runtimeTools: Record<string, AgentToolDescriptor>;"],
     [TYPES_REFERENCE, "type AgentGenerateOptions = {"],
+    [TYPES_REFERENCE, "maxAgentCheckpointBytes?: number;"],
     [TYPES_REFERENCE, "taskContext?: {"],
     [TYPES_REFERENCE, "tools?: Record<string, unknown>;"],
     [TYPES_REFERENCE, "capabilities?: AgentCapabilityRegistry;"],
