@@ -709,7 +709,7 @@ describe("ApprovalPanel", () => {
         { runId: "run-b", nodeId: "gate2", iteration: 1 },
       ],
     });
-    const harness = await mount(gw, createElement(ApprovalPanel, { filter: { workflow: "implement" }, pollMs: 40 }));
+    const harness = await mount(gw, createElement(ApprovalPanel, { filter: { workflow: "implement" }, pollMs: 0 }));
     await harness.flush(50);
     expect(harness.container.textContent).toContain("Ship it?");
     // Second approval has no title/summary -> default title path.
@@ -717,9 +717,21 @@ describe("ApprovalPanel", () => {
     const approveButtons = [...harness.container.querySelectorAll("button")].filter((b) => b.textContent === "Approve");
     expect(approveButtons[0]?.className).toContain("gw-approval-button-success");
     click(approveButtons[0]);
-    await harness.flush(60);
-    expect(gw.approvalsSubmitted.length).toBeGreaterThanOrEqual(1);
-    await waitFor(harness, () => !harness.container.textContent!.includes("Ship it?"), "resolved approval removed");
+    await waitFor(
+      harness,
+      () =>
+        gw.approvalsSubmitted.length === 1 &&
+        [...harness.container.querySelectorAll("button")].filter((button) => button.textContent === "Approve")
+          .length === 1,
+      "approved request removed",
+    );
+    expect(gw.approvalsSubmitted).toHaveLength(1);
+    expect(
+      [...harness.container.querySelectorAll("button")].filter((button) => button.textContent === "Approve"),
+    ).toHaveLength(1);
+    const status = harness.container.querySelector("[role='status']");
+    expect(status?.textContent).toContain("Approved gate Ship it? for run run-a.");
+    expect(status?.textContent).toContain("1 approval remains pending.");
   });
 
   test("confirms denial with gate and run context while preserving the optional note", async () => {
@@ -752,6 +764,9 @@ describe("ApprovalPanel", () => {
       decision: { approved: false, note: "not safe yet" },
       note: "not safe yet",
     });
+    expect(harness.container.querySelector("[role='status']")?.textContent).toContain(
+      "Denied gate gate for run run-c. 0 approvals remain pending.",
+    );
   });
 
   test("disables a pending row and ignores duplicate decision clicks", async () => {
@@ -783,7 +798,7 @@ describe("ApprovalPanel", () => {
     expect(harness.container.textContent).toContain("No approvals waiting.");
   });
 
-  test("surfaces the submitApproval failure and re-enables the buttons", async () => {
+  test("surfaces the actionable gateway rejection, retains the request, and retries", async () => {
     const gw = boot({
       approvals: [{ runId: "run-c", nodeId: "gate", iteration: 0 }],
       failApprovalSubmit: true,
@@ -792,10 +807,67 @@ describe("ApprovalPanel", () => {
     await harness.flush(50);
     const approveButtons = [...harness.container.querySelectorAll("button")].filter((b) => b.textContent === "Approve");
     click(approveButtons[0]);
-    await harness.flush(60);
-    expect(harness.container.textContent).toMatch(/Forced failure|failed|error/i);
+    await waitFor(
+      harness,
+      () => harness.container.querySelector("[role='alert']")?.textContent?.includes("Forced failure") === true,
+      "gateway rejection shown",
+    );
+    const alert = harness.container.querySelector("[role='alert']");
+    expect(alert?.textContent).toContain("Approve failed for gate gate on run run-c");
+    expect(alert?.textContent).toContain("Forced failure for approval submit");
+    expect(alert?.textContent).toContain("Try again");
+    expect(harness.container.textContent).toContain("Approval: gate");
     const stillApprove = [...harness.container.querySelectorAll("button")].filter((b) => b.textContent === "Approve");
     expect((stillApprove[0] as HTMLButtonElement).disabled).toBe(false);
+
+    gw.state.failApprovalSubmit = false;
+    click(stillApprove[0]);
+    await waitFor(
+      harness,
+      () => gw.approvalsSubmitted.length === 1 && !harness.container.textContent!.includes("Approval: gate"),
+      "retry accepted",
+    );
+    expect(gw.approvalsSubmitted).toHaveLength(1);
+    expect(harness.container.textContent).not.toContain("Approval: gate");
+    expect(harness.container.querySelector("[role='status']")?.textContent).toContain(
+      "Approved gate gate for run run-c.",
+    );
+  });
+
+  test("reports a post-decision refresh failure without exposing a duplicate retry", async () => {
+    const gw = boot({
+      approvals: [{ runId: "run-c", nodeId: "gate", iteration: 0 }],
+      failApprovalRefreshAfterSubmit: true,
+    });
+    const errors: Error[] = [];
+    const harness = await mount(
+      gw,
+      createElement(ApprovalPanel, { pollMs: 0, onError: (error: Error) => errors.push(error) }),
+    );
+    await harness.flush(50);
+    click([...harness.container.querySelectorAll("button")].find((button) => button.textContent === "Approve")!);
+    await waitFor(
+      harness,
+      () =>
+        harness.container
+          .querySelector("[role='alert']")
+          ?.textContent?.includes("Approval accepted, but refreshing the pending list failed") === true,
+      "post-decision refresh failure shown",
+    );
+    expect(gw.approvalsSubmitted).toHaveLength(1);
+
+    const status = harness.container.querySelector("[role='status']");
+    expect(status?.textContent).toContain("Approved gate gate for run run-c.");
+    expect(status?.textContent).toContain("0 approvals remain pending.");
+    const alert = harness.container.querySelector("[role='alert']");
+    expect(alert?.textContent).toContain("pending approvals could not be refreshed");
+    expect(alert?.textContent).toContain("Approval accepted, but refreshing the pending list failed");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.message).toContain("Approval accepted, but refreshing the pending list failed");
+    expect(harness.container.querySelector("[data-approval-deny-confirmation]")).toBeNull();
+    expect([...harness.container.querySelectorAll("button")].some((button) => button.textContent === "Approve")).toBe(
+      false,
+    );
   });
 
   test("calls onError when submitApproval rejects", async () => {

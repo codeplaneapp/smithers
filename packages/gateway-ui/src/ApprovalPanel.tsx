@@ -8,7 +8,7 @@ export type ApprovalPanelProps = {
   filter?: { workflow?: string; runId?: string; limit?: number };
   /** Poll interval (ms) to refresh the pending list. 0 disables. Default 2000. */
   pollMs?: number;
-  /** Called if the submitApproval RPC throws. */
+  /** Called if the submitApproval RPC or pending-list refresh throws. */
   onError?: (error: Error) => void;
   className?: string;
   style?: CSSProperties;
@@ -39,24 +39,78 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
   const { data, loading, error, refetch } = useGatewayApprovals(filter ? { filter } : undefined);
   const actions = useGatewayActions();
   const [busy, setBusy] = useState<Set<string>>(() => new Set());
+  const [resolved, setResolved] = useState<Set<string>>(() => new Set());
   const [confirmingDeny, setConfirmingDeny] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
-  const [submitError, setSubmitError] = useState<{ key: string; message: string } | null>(null);
+  const [submitError, setSubmitError] = useState<{
+    key: string;
+    approved: boolean;
+    target: string;
+    runId: string;
+    message: string;
+  } | null>(null);
+  const [decisionFeedback, setDecisionFeedback] = useState<{
+    approved: boolean;
+    target: string;
+    runId: string;
+  } | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [, setRefreshResultVersion] = useState(0);
   const inFlight = useRef(new Set<string>());
-  const approvals = (data ?? []) as ApprovalRow[];
+  const reportedCollectionError = useRef<Error | null>(null);
+  const pendingApprovals = (data ?? []) as ApprovalRow[];
+  // Once the gateway accepts a decision, immediately remove that request from
+  // the actionable queue. A failed refresh must not expose a stale retry that
+  // would submit the same decision twice.
+  const approvals = pendingApprovals.filter((row) => !resolved.has(approvalKey(row)));
+
+  const notifyError = (cause: unknown): Error => {
+    const err = cause instanceof Error ? cause : new Error(String(cause));
+    try {
+      onError?.(err);
+    } catch {
+      /* observer fault */
+    }
+    return err;
+  };
+
+  useEffect(() => {
+    if (!error) {
+      if (reportedCollectionError.current) setRefreshError(null);
+      reportedCollectionError.current = null;
+      return;
+    }
+    if (reportedCollectionError.current === error) return;
+    reportedCollectionError.current = error;
+    notifyError(error);
+    setRefreshError(
+      decisionFeedback
+        ? `${decisionFeedback.approved ? "Approved" : "Denied"} gate ${decisionFeedback.target} for run ${decisionFeedback.runId}, but pending approvals could not be refreshed: ${error.message}`
+        : `Approval refresh failed: ${error.message}`,
+    );
+  }, [error, decisionFeedback, onError]);
 
   // listApprovals is pull-only on the local gateway path, so poll to stay live.
   useEffect(() => {
     if (pollMs <= 0 || typeof refetch !== "function") return;
-    const handle = setInterval(refetch, pollMs);
+    const handle = setInterval(() => {
+      void refetch()
+        .catch((cause) => {
+          const err = notifyError(cause);
+          setRefreshError(`Approval refresh failed: ${err.message}`);
+        })
+        .finally(() => setRefreshResultVersion((current) => current + 1));
+    }, pollMs);
     return () => clearInterval(handle);
-  }, [refetch, pollMs]);
+  }, [refetch, pollMs, onError]);
 
   const decide = async (row: ApprovalRow, approved: boolean) => {
     const key = approvalKey(row);
+    const target = row.requestTitle ?? row.nodeId;
     if (inFlight.current.has(key)) return;
     inFlight.current.add(key);
     setSubmitError(null);
+    setRefreshError(null);
     setConfirmingDeny((current) => (current === key ? null : current));
     setBusy((current) => new Set(current).add(key));
     const note = notes[key]?.trim();
@@ -68,11 +122,19 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
         decision: { approved, ...(note ? { note } : {}) },
         ...(note ? { note } : {}),
       });
-      refetch?.();
+      setResolved((current) => new Set(current).add(key));
+      setDecisionFeedback({ approved, target, runId: row.runId });
+      void refetch()
+        .catch((cause) => {
+          const err = notifyError(cause);
+          setRefreshError(
+            `${approved ? "Approved" : "Denied"} gate ${target} for run ${row.runId}, but pending approvals could not be refreshed: ${err.message}`,
+          );
+        })
+        .finally(() => setRefreshResultVersion((current) => current + 1));
     } catch (cause) {
-      const err = cause instanceof Error ? cause : new Error(String(cause));
-      setSubmitError({ key, message: err.message });
-      onError?.(err);
+      const err = notifyError(cause);
+      setSubmitError({ key, approved, target, runId: row.runId, message: err.message });
     } finally {
       inFlight.current.delete(key);
       setBusy((current) => {
@@ -95,7 +157,25 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
         ...style,
       }}
     >
-      {error ? <div style={{ color: theme.danger, fontSize: 13 }}>{error.message}</div> : null}
+      {decisionFeedback ? (
+        <div role="status" aria-live="polite" style={{ color: theme.success, fontSize: 13 }}>
+          {decisionFeedback.approved ? "Approved" : "Denied"} gate {decisionFeedback.target} for run{" "}
+          {decisionFeedback.runId}. {approvals.length}{" "}
+          {approvals.length === 1 ? "approval remains" : "approvals remain"} pending.
+        </div>
+      ) : null}
+      {refreshError ? (
+        <div role="alert" style={{ color: theme.danger, fontSize: 13 }}>
+          {refreshError}
+        </div>
+      ) : null}
+      {error && !refreshError ? (
+        <div role="alert" style={{ color: theme.danger, fontSize: 13 }}>
+          {decisionFeedback
+            ? `${decisionFeedback.approved ? "Approved" : "Denied"} gate ${decisionFeedback.target} for run ${decisionFeedback.runId}, but pending approvals could not be refreshed: ${error.message}`
+            : `Approval refresh failed: ${error.message}`}
+        </div>
+      ) : null}
       {!loading && approvals.length === 0 && !error ? (
         <div style={{ color: theme.textDim, fontSize: 13 }}>No approvals waiting.</div>
       ) : null}
@@ -203,7 +283,10 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
               </div>
             )}
             {submitError?.key === key ? (
-              <div style={{ color: theme.danger, fontSize: 13 }}>{submitError.message}</div>
+              <div role="alert" style={{ color: theme.danger, fontSize: 13 }}>
+                {submitError.approved ? "Approve" : "Deny"} failed for gate {submitError.target} on run{" "}
+                {submitError.runId}: {submitError.message}. Try again.
+              </div>
             ) : null}
           </div>
         );

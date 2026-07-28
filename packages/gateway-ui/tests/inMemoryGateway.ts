@@ -33,6 +33,8 @@ export type SeedState = {
   streamStatus?: number;
   /** When true, POST /v1/api/approvals/:id (submitApproval) always fails. */
   failApprovalSubmit?: boolean;
+  /** When true, approval GETs fail after a successful submit. */
+  failApprovalRefreshAfterSubmit?: boolean;
   /** When true, submitApproval hangs until releaseApprovalSubmits() is called. */
   deferApprovalSubmit?: boolean;
 };
@@ -77,6 +79,7 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
     failPaths: seed.failPaths ?? new Set<string>(),
     streamStatus: seed.streamStatus ?? 200,
     failApprovalSubmit: seed.failApprovalSubmit ?? false,
+    failApprovalRefreshAfterSubmit: seed.failApprovalRefreshAfterSubmit ?? false,
     deferApprovalSubmit: seed.deferApprovalSubmit ?? false,
     approvalSubmitWaiters: [] as Array<() => void>,
   };
@@ -202,6 +205,9 @@ export function startInMemoryGateway(seed: SeedState = {}): InMemoryGateway {
       }
       // GET /v1/api/approvals
       if (path === "/v1/api/approvals" && request.method === "GET") {
+        if (state.failApprovalRefreshAfterSubmit && gateway.approvalsSubmitted.length > 0) {
+          return fail(500, "REFRESH_FAILED", "Approval accepted, but refreshing the pending list failed");
+        }
         return ok(state.approvals);
       }
       // POST /v1/api/approvals/:id (submitApproval)
