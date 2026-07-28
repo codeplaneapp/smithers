@@ -155,9 +155,11 @@ describe("Batch C utility behavior", () => {
               return generated;
             },
           };
-          await expect(runTask({ ...task(staged, "review-moderator"), agent: runnable } as never)).resolves.toEqual(
-            generated,
-          );
+          // The moderator omits `blocked`; reviewSynthesisSchema defaults it.
+          await expect(runTask({ ...task(staged, "review-moderator"), agent: runnable } as never)).resolves.toEqual({
+            ...generated,
+            blocked: false,
+          });
           expect(received).toBe(moderatorPrompt);
           expect(task(staged, "review-moderator").outputSchema?.safeParse(generated).success).toBe(true);
         }

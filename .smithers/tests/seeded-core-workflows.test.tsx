@@ -103,6 +103,8 @@ describe.serial("seeded core workflow causal behavior", () => {
     expect(String(review.task("review-moderator").prompts[0])).toContain("MAJOR_REVIEW_DESCRIPTION");
     expect(review.output).toEqual({
       approved: false,
+      // Not classified as an environment fault, so the schema default holds.
+      blocked: false,
       feedback: "MAJOR_REVIEW_FEEDBACK",
       issues: [
         { severity: "major", title: "MAJOR_REVIEW_ISSUE", file: "src/a.ts", description: "MAJOR_REVIEW_DESCRIPTION" },
@@ -284,7 +286,7 @@ describe.serial("seeded core workflow causal behavior", () => {
     expect(sim.task("impl:implement").prompts[1]).toContain("test-first");
     expect(sim.task("impl:implement").prompts[1]).toContain("LATEST_FAILURE_SENTINEL");
     expect(sim.task("impl:implement").prompts[1]).toContain("LATEST_REVIEW_SENTINEL");
-    expect(sim.output).toEqual({ approved: true, feedback: "approved", issues: [] });
+    expect(sim.output).toEqual({ approved: true, blocked: false, feedback: "approved", issues: [] });
     expect(sim.unusedMocks).toEqual([]);
   });
 

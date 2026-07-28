@@ -58,6 +58,7 @@ export const caseRows = {
     status: "ok",
     assertions: [{ description: "output", passed: true }],
     passed: true,
+    inconclusive: false,
     error: null,
   },
   fail: {
@@ -65,6 +66,7 @@ export const caseRows = {
     status: "failed",
     assertions: [{ description: "output", passed: false }],
     passed: false,
+    inconclusive: false,
     error: "mismatch",
   },
   passedFail: {
@@ -72,6 +74,7 @@ export const caseRows = {
     status: "ok",
     assertions: [{ description: "output", passed: true }],
     passed: true,
+    inconclusive: false,
     error: null,
   },
   failedPass: {
@@ -79,6 +82,17 @@ export const caseRows = {
     status: "failed",
     assertions: [{ description: "output", passed: false }],
     passed: false,
+    inconclusive: false,
     error: "mismatch",
+  },
+  // A harness/environment death: not passed, but not evidence about the
+  // workflow either, so the verdict must name it rather than count it as red.
+  inconclusiveFail: {
+    caseId: "fail",
+    status: "failed",
+    assertions: [],
+    passed: false,
+    inconclusive: true,
+    error: "connect ECONNREFUSED",
   },
 } as const;

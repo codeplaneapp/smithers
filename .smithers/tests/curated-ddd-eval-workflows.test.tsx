@@ -508,20 +508,35 @@ describe.serial("curated production-shaped DDD and eval workflows", () => {
     };
     await verdict(caseRows.pass, caseRows.passedFail, {
       pass: true,
+      inconclusive: 0,
       paragraph: 'Suite "Curated suite": 2/2 case(s) passed.',
     });
     await verdict(caseRows.pass, caseRows.fail, {
       pass: false,
+      inconclusive: 0,
       paragraph: 'Suite "Curated suite": 1/2 case(s) passed.',
     });
     await verdict(caseRows.failedPass, caseRows.fail, {
       pass: false,
+      inconclusive: 0,
       paragraph: 'Suite "Curated suite": 0/2 case(s) passed.',
     });
-    await verdict(caseRows.pass, undefined, { pass: false, paragraph: 'Suite "Curated suite": 1/2 case(s) passed.' });
+    await verdict(caseRows.pass, undefined, {
+      pass: false,
+      inconclusive: 0,
+      paragraph: 'Suite "Curated suite": 1/2 case(s) passed.',
+    });
     await verdict(caseRows.failedPass, caseRows.passedFail, {
       pass: false,
+      inconclusive: 0,
       paragraph: 'Suite "Curated suite": 1/2 case(s) passed.',
+    });
+    // A harness death is counted and named, never folded into the red count.
+    await verdict(caseRows.pass, caseRows.inconclusiveFail, {
+      pass: false,
+      inconclusive: 1,
+      paragraph:
+        'Suite "Curated suite": 1/2 case(s) passed. 1 case(s) were INCONCLUSIVE (harness/environment fault, not workflow evidence): fix the harness before iterating on the workflow.',
     });
     const empty = await stage(
       workflow,
@@ -532,6 +547,7 @@ describe.serial("curated production-shaped DDD and eval workflows", () => {
     );
     expect(await runTask(task(empty, "verdict"))).toEqual({
       pass: false,
+      inconclusive: 0,
       paragraph: 'Suite "Curated suite" had no cases to run.',
     });
     // executeChildWorkflow is intentionally not invoked here: apps/cli/tests/eval-suite-run.e2e.test.js owns the real no-mocks child-run, DB, and scorer boundary.

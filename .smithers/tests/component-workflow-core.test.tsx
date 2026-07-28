@@ -711,7 +711,9 @@ describe("component workflow core", () => {
       ),
     ).toBe(true);
     expect(renderPrompt(task(legacy, "legacy:1").prompt)).toContain('"target":"auth"');
-    await expect(runTask(task(legacy, "legacy:1"))).resolves.toEqual(review("reviewer-1"));
+    // The reviewer never emits `blocked`; reviewOutputSchema defaults it to
+    // false so downstream loops always see the rejected-vs-blocked distinction.
+    await expect(runTask(task(legacy, "legacy:1"))).resolves.toEqual({ ...review("reviewer-1"), blocked: false });
     const panel = legacy;
     const security = task(panel, "panel-security"),
       mod = task(panel, "panel-moderator");
@@ -724,22 +726,42 @@ describe("component workflow core", () => {
     expect(mod.heartbeatTimeoutMs).toBe(600_000);
     expect(security.outputTableName).toBe("review");
     expect(mod.outputTableName).toBe("reviewSynthesis");
-    await expect(runTask(mod)).resolves.toEqual({ approved: false, feedback: "fix auth", issues: [issue] });
+    await expect(runTask(mod)).resolves.toEqual({
+      approved: false,
+      blocked: false,
+      feedback: "fix auth",
+      issues: [issue],
+    });
     const invalidFrame = legacy;
     await expect(runTask(task(invalidFrame, "invalid:0"))).rejects.toThrow(/validation/);
     expect(reviewGate({ latest: () => undefined }, "panel-moderator")).toEqual({
       hasVerdict: false,
       approved: false,
+      blocked: false,
       feedback: null,
     });
     expect(reviewGate({ latest: () => ({ approved: true, feedback: "", issues: [] }) }, "panel-moderator")).toEqual({
       hasVerdict: true,
       approved: true,
+      blocked: false,
       feedback: null,
     });
     expect(
       reviewGate({ latest: () => ({ approved: false, feedback: "fix auth", issues: [issue] }) }, "panel-moderator"),
-    ).toEqual({ hasVerdict: true, approved: false, feedback: "fix auth\n  [major] Auth: missing (auth.ts)" });
+    ).toEqual({
+      hasVerdict: true,
+      approved: false,
+      blocked: false,
+      feedback: "fix auth\n  [major] Auth: missing (auth.ts)",
+    });
+    // A blocked verdict is not a rejection: the gate surfaces it separately so
+    // repair loops fix the environment instead of iterating on the product.
+    expect(
+      reviewGate(
+        { latest: () => ({ approved: false, blocked: true, feedback: "network denied", issues: [] }) },
+        "panel-moderator",
+      ),
+    ).toEqual({ hasVerdict: true, approved: false, blocked: true, feedback: "network denied" });
   }, 30_000);
 
   test("validationLoopState pairs only current validation and review iterations", () => {

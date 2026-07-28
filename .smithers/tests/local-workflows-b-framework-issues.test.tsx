@@ -96,7 +96,9 @@ describe("issue workflow owner coverage", () => {
       const secondValidation = sim.executed.lastIndexOf(validateId);
       expect(sim.executed.findIndex((id) => id.includes(":review"))).toBeGreaterThan(secondValidation);
       for (const panelistId of panelistIds) expect(sim.executed).toContain(panelistId);
-      expect(sim.task(moderatorId).outputs).toEqual([{ approved: true, feedback: "current approval", issues: [] }]);
+      expect(sim.task(moderatorId).outputs).toEqual([
+        { approved: true, blocked: false, feedback: "current approval", issues: [] },
+      ]);
       expect(sim.status).toBe("finished");
       expect(sim.unusedMocks).toEqual([]);
     },

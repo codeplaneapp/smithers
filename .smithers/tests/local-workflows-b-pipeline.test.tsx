@@ -213,7 +213,9 @@ describe("pipeline workflow behavior", () => {
     await success.run();
     expect(success.executed).toEqual(panelTrace("impl"));
     expect(success.task("impl:implement").prompts[1]).toContain("VALIDATION_SENTINEL");
-    expect(success.output).toEqual(moderator);
+    // reviewSynthesisSchema defaults `blocked` to false when the moderator
+    // does not classify the verdict as an environment fault.
+    expect(success.output).toEqual({ ...moderator, blocked: false });
     const exhausted = simulate(await load("implement-stable.tsx"), {
       input: { prompt: "ship", maxIterations: 2 },
       workflowPath: pathFor("implement-stable.tsx"),

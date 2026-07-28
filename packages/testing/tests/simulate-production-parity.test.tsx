@@ -93,6 +93,8 @@ describe("simulate production parity", () => {
 
     expect(sim.executed).toEqual(["impl:implement", "impl:validate", "impl:review:0"]);
     expect(sim.status).toBe("finished");
+    // The mocked reviewer omits `blocked`; the production review schema
+    // defaults it to false, and the simulator records the parsed row.
     expect(sim.output).toEqual({
       reviewer: "reviewer-1",
       approved: true,
