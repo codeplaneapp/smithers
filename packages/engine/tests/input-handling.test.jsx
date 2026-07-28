@@ -1,9 +1,12 @@
 /** @jsxImportSource smithers-orchestrator */
 import { describe, expect, test } from "bun:test";
-import { Workflow, Task, runWorkflow } from "smithers-orchestrator";
-import { createTestSmithers } from "../../smithers/tests/helpers.js";
-import { z } from "zod";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { captureSnapshot, loadLatestSnapshot, parseSnapshot } from "@smithers-orchestrator/time-travel/snapshot";
 import { Effect } from "effect";
+import { Task, Workflow, runWorkflow } from "smithers-orchestrator";
+import { z } from "zod";
+import { createTestSmithers } from "../../smithers/tests/helpers.js";
+
 describe("workflow input handling", () => {
   test("input is accessible via ctx.input", async () => {
     const { smithers, outputs, tables, db, cleanup } = createTestSmithers({
@@ -95,5 +98,42 @@ describe("workflow input handling", () => {
     expect(typeof r.runId).toBe("string");
     expect(r.runId.length).toBeGreaterThan(0);
     cleanup();
+  });
+  test("resume coerces numeric strings recorded by legacy snapshots", async () => {
+    const { smithers, outputs, db, cleanup } = createTestSmithers({
+      input: z.object({ maxRounds: z.number().int() }),
+      out: z.object({ v: z.number() }),
+    });
+    const workflow = smithers(() => (
+      <Workflow name="legacy-snapshot-input">
+        <Task id="t" output={outputs.out}>
+          {{ v: 1 }}
+        </Task>
+      </Workflow>
+    ));
+    const runId = "legacy-snapshot-input";
+    try {
+      const first = await Effect.runPromise(runWorkflow(workflow, { input: { maxRounds: 8 }, runId }));
+      expect(first.status).toBe("finished");
+
+      const adapter = new SmithersDb(db);
+      const latest = await loadLatestSnapshot(adapter, runId);
+      const parsed = parseSnapshot(latest);
+      await captureSnapshot(adapter, runId, latest.frameNo + 1, {
+        nodes: Object.values(parsed.nodes),
+        outputs: parsed.outputs,
+        ralph: Object.values(parsed.ralph),
+        input: { maxRounds: "8" },
+      });
+      db.$client.query(`DELETE FROM "input" WHERE run_id = ?`).run(runId);
+
+      const resumed = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId, resume: true }));
+      expect(resumed.status).toBe("finished");
+      expect(db.$client.query(`SELECT max_rounds AS maxRounds FROM "input" WHERE run_id = ?`).get(runId)).toEqual({
+        maxRounds: 8,
+      });
+    } finally {
+      cleanup();
+    }
   });
 });

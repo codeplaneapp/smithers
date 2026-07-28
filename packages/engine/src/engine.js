@@ -1707,6 +1707,31 @@ function normalizeInputRow(row) {
   return rest;
 }
 /**
+ * Coerce legacy CLI-style scalar strings using the durable input table's
+ * column types. The candidate is still validated against both the workflow
+ * schema and the table schema before it is restored.
+ * @param {SQLiteTable} inputTable
+ * @param {Record<string, unknown>} input
+ * @returns {{ input: Record<string, unknown>; coercedKeys: string[] }}
+ */
+function coerceLegacySnapshotInput(inputTable, input) {
+  const columns = getTableColumns(inputTable);
+  let coercedInput = input;
+  const coercedKeys = [];
+  for (const [key, value] of Object.entries(input)) {
+    const column = columns[key];
+    if (column?.dataType !== "number" || typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(trimmed)) continue;
+    const numberValue = Number(trimmed);
+    if (!Number.isFinite(numberValue)) continue;
+    if (coercedInput === input) coercedInput = { ...input };
+    coercedInput[key] = numberValue;
+    coercedKeys.push(key);
+  }
+  return { input: coercedInput, coercedKeys };
+}
+/**
  * @param {any} row
  * @returns {unknown}
  */
@@ -1726,16 +1751,43 @@ function normalizeOutputRow(row) {
  * @param {BunSQLiteDatabase} db
  * @param {Record<string, unknown>} schema
  * @param {SQLiteTable} inputTable
+ * @param {unknown} inputSchema
  * @param {string} runId
  * @returns {Promise<boolean>}
  */
-async function restoreDurableStateFromSnapshot(adapter, db, schema, inputTable, runId) {
+async function restoreDurableStateFromSnapshot(adapter, db, schema, inputTable, inputSchema, runId) {
   const snapshot = await loadLatestSnapshot(adapter, runId);
   if (!snapshot) return false;
   const parsed = parseSnapshot(snapshot);
   const restoredAtMs = snapshot.createdAtMs ?? nowMs();
-  const inputRow = buildInputRow(inputTable, runId, normalizeInputRow(parsed.input));
-  const inputValidation = validateInput(inputTable, inputRow);
+  const snapshotInput = normalizeInputRow(parsed.input);
+  let inputRow = buildInputRow(inputTable, runId, snapshotInput);
+  let inputValidation = validateInput(inputTable, inputRow);
+  if (!inputValidation.ok) {
+    const legacyInput = coerceLegacySnapshotInput(inputTable, snapshotInput);
+    if (legacyInput.coercedKeys.length > 0) {
+      try {
+        const normalizedInput = parseInputWithSchema(inputSchema, legacyInput.input);
+        const normalizedRow = buildInputRow(inputTable, runId, normalizedInput);
+        const normalizedValidation = validateInput(inputTable, normalizedRow);
+        if (normalizedValidation.ok) {
+          inputRow = normalizedRow;
+          inputValidation = normalizedValidation;
+          logWarning(
+            "restoring legacy snapshot after coercing string input values",
+            {
+              runId,
+              frameNo: snapshot.frameNo,
+              coercedKeys: legacyInput.coercedKeys,
+            },
+            "engine:snapshot",
+          );
+        }
+      } catch {
+        // Preserve the snapshot-specific validation error below.
+      }
+    }
+  }
   if (!inputValidation.ok) {
     throw new SmithersError("INVALID_INPUT", "Snapshot input does not match schema", {
       issues: inputValidation.error?.issues,
@@ -8863,7 +8915,14 @@ async function runWorkflowBodyDriver(workflow, opts) {
     } else {
       let existingInput = await loadInput(db, inputTable, runId);
       if (!existingInput) {
-        const restored = await restoreDurableStateFromSnapshot(adapter, db, schema, inputTable, runId);
+        const restored = await restoreDurableStateFromSnapshot(
+          adapter,
+          db,
+          schema,
+          inputTable,
+          workflowRef.inputSchema,
+          runId,
+        );
         if (restored) {
           existingInput = await loadInput(db, inputTable, runId);
         }
