@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { accountsRoot } from "@smithers-orchestrator/accounts";
 import { generateAgentsTs } from "./agent-detection.js";
@@ -633,6 +633,23 @@ function linkLocalSourceRuntime(rootDir) {
   symlinkSync(SOURCE_SMITHERS_PACKAGE, runtimeLink, "dir");
 }
 /**
+ * Locate the `bun` executable by scanning PATH directly, so lookup honors the
+ * caller's environment on every bun version.
+ * @returns {string | null}
+ */
+function findBunOnPath() {
+  const pathEnv = process.env.PATH ?? "";
+  const names = process.platform === "win32" ? ["bun.exe", "bun.cmd", "bun.bat", "bun"] : ["bun"];
+  for (const dir of pathEnv.split(delimiter)) {
+    if (!dir) continue;
+    for (const name of names) {
+      const candidate = join(dir, name);
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return null;
+}
+/**
  * Install `.smithers/` workspace deps so the first workflow run isn't blocked
  * on a cold install. Failures here don't fail init: the scaffold is on disk,
  * the user can always re-run `bun install` by hand.
@@ -651,7 +668,21 @@ function runBunInstall(rootDir, skip, reporter) {
   if (skip) return { status: "skipped", reason: "skip-install" };
   reporter?.installStart?.();
   const quiet = Boolean(reporter);
-  const result = spawnSync("bun", ["install"], {
+  // Resolve bun from PATH ourselves: when this process IS bun, spawning the
+  // bare name "bun" is special-cased to the running binary on some bun
+  // versions (1.3.x), silently ignoring PATH. That turned the intended
+  // "bun not found" short-circuit into a real network install on CI.
+  const bunBinary = findBunOnPath();
+  if (!bunBinary) {
+    /** @type {InitInstallResult} */
+    const notFound = {
+      status: "failed",
+      reason: "`bun` not found on PATH; run `bun install` inside .smithers/ manually",
+    };
+    reporter?.installDone?.(notFound, quiet ? { stdout: "", stderr: "" } : undefined);
+    return notFound;
+  }
+  const result = spawnSync(bunBinary, ["install"], {
     cwd: rootDir,
     stdio: quiet ? ["ignore", "pipe", "pipe"] : "inherit",
     encoding: quiet ? "utf8" : undefined,
