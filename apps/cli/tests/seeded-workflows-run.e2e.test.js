@@ -153,7 +153,11 @@ const AGENT_RESPONSE = JSON.stringify({
   digest: "abc123",
   tier: "trivial",
   status: "delivered",
-  route: "trivial",
+  // create-workflow's clarify step right-sizes the request into a `route`
+  // OBJECT (tier/reason/oneshotCommand). A bare string fails schema validation,
+  // and the engine's default agent retries then spin until the harness command
+  // timeout — which is what made every create-workflow case burn ~120s.
+  route: { tier: "workflow", reason: "The fixture exercises the full authoring pipeline.", oneshotCommand: null },
   reportPath: null,
   branch: null,
   prUrl: null,
@@ -604,11 +608,22 @@ test(
 
 for (const mode of ["missing", "malformed", "mismatched", "wrong-path"]) {
   test(
-    `create-workflow fails after bounded retries for a ${mode} companion skill`,
+    `create-workflow downgrades skillPath to null after bounded retries for a ${mode} companion skill`,
     () => {
-      const { repo, result, verification } = runCreateWorkflowSkillCase(mode);
-      expect(result.exitCode).not.toBe(0);
-      expect(result.json?.status).not.toBe("finished");
+      const { repo, result, verification, runId, env } = runCreateWorkflowSkillCase(mode);
+      // The companion-skill loop is best-effort by design: a workflow that
+      // builds and verifies is BUILT, so an unusable skill doc downgrades the
+      // terminal skillPath to null instead of failing the whole run.
+      expect(result.exitCode).toBe(0);
+      expect(result.json?.status).toBe("finished");
+      const terminal = runSmithers(["output", runId, "output"], {
+        cwd: repo.dir,
+        format: "json",
+        env,
+        timeoutMs: SMOKE_COMMAND_TIMEOUT_MS,
+      });
+      expect(terminal.exitCode).toBe(0);
+      expect(jsonOutput(terminal)).toMatchObject({ status: "built", skill_path: null });
       expect(repo.read(".smithers/test-document-attempts")).toBe("3");
       expect(repo.read(".smithers/test-scaffold-count")).toBe("1");
       expect(repo.read(".smithers/workflows/mock-workflow.tsx")).toBe(EXPECTED_WORKFLOW);
