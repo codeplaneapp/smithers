@@ -29,8 +29,13 @@
     "@smithers-orchestrator/errors": "workspace:*",
     "@smithers-orchestrator/sandbox": "workspace:*"
   },
-  "optionalDependencies": {
+  "peerDependencies": {
     "microsandbox": "0.6.6"
+  },
+  "peerDependenciesMeta": {
+    "microsandbox": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@superradcompany/microsandbox-darwin-arm64": "0.6.6",
@@ -40,6 +45,7 @@
     "@superradcompany/microsandbox-win32-x64-msvc": "0.6.6",
     "@types/bun": "latest",
     "microsandbox-test-sdk": "npm:microsandbox@0.6.6",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "microsandbox": "0.6.6"
   }
 }

@@ -28,11 +28,17 @@
     "@smithers-orchestrator/errors": "workspace:*",
     "@smithers-orchestrator/sandbox": "workspace:*"
   },
-  "optionalDependencies": {
+  "peerDependencies": {
     "@vercel/sandbox": "^2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@vercel/sandbox": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "@vercel/sandbox": "^2.0.0"
   }
 }

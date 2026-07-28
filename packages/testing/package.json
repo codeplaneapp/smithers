@@ -37,12 +37,20 @@
     "@smithers-orchestrator/graph": "workspace:*",
     "@smithers-orchestrator/react-reconciler": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
-    "effect": "3.21.4",
-    "koffi": "^2.16.2",
+    "effect": "^3.21.4",
     "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "koffi": "^2.16.2"
+  },
+  "peerDependenciesMeta": {
+    "koffi": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "koffi": "^2.16.2",
     "smithers-orchestrator": "workspace:*",
     "typescript": "~6.0.3"
   }

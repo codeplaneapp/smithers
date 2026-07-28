@@ -61,7 +61,7 @@
     "@smithers-orchestrator/scheduler": "workspace:*",
     "@smithers-orchestrator/vcs": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "effect": "3.21.4",
+    "effect": "^3.21.4",
     "picocolors": "^1.1.1"
   },
   "devDependencies": {

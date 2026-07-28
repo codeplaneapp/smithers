@@ -28,12 +28,22 @@
     "@smithers-orchestrator/errors": "workspace:*",
     "@smithers-orchestrator/sandbox": "workspace:*"
   },
-  "optionalDependencies": {
+  "peerDependencies": {
     "@google-cloud/run": "^2.0.0",
     "@google-cloud/storage": "^7.0.0"
   },
+  "peerDependenciesMeta": {
+    "@google-cloud/run": {
+      "optional": true
+    },
+    "@google-cloud/storage": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "@google-cloud/run": "^2.0.0",
+    "@google-cloud/storage": "^7.0.0"
   }
 }

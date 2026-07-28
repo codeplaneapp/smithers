@@ -22,12 +22,18 @@
   "dependencies": {
     "@smithers-orchestrator/sandbox": "workspace:*"
   },
-  "optionalDependencies": {
+  "peerDependencies": {
     "@cloudflare/sandbox": "^0.12.3"
+  },
+  "peerDependenciesMeta": {
+    "@cloudflare/sandbox": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@smithers-orchestrator/db": "workspace:*",
     "@types/bun": "latest",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "@cloudflare/sandbox": "^0.12.3"
   }
 }

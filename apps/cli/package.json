@@ -64,7 +64,7 @@
     "@xterm/xterm": "^6.0.0",
     "cron-parser": "^5.6.1",
     "drizzle-orm": "^0.45.2",
-    "effect": "3.21.4",
+    "effect": "^3.21.4",
     "incur": "^0.4.10",
     "picocolors": "^1.1.1",
     "react": "^19.2.7",

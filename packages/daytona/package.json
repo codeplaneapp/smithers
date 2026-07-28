@@ -28,11 +28,17 @@
     "@smithers-orchestrator/errors": "workspace:*",
     "@smithers-orchestrator/sandbox": "workspace:*"
   },
-  "optionalDependencies": {
+  "peerDependencies": {
     "@daytonaio/sdk": "^0.194.0"
+  },
+  "peerDependenciesMeta": {
+    "@daytonaio/sdk": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "@daytonaio/sdk": "^0.194.0"
   }
 }

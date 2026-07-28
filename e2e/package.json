@@ -35,7 +35,7 @@
     "@smithers-orchestrator/vcs": "workspace:*",
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.45.2",
-    "effect": "3.21.4",
+    "effect": "^3.21.4",
     "esbuild": "^0.28.1",
     "playwright": "^1.61.1",
     "react": "^19.2.7",

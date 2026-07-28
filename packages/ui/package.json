@@ -34,6 +34,21 @@
       "types": "./src/status.ts",
       "import": "./src/status.ts",
       "default": "./src/status.ts"
+    },
+    "./time": {
+      "types": "./src/time/index.ts",
+      "import": "./src/time/index.ts",
+      "default": "./src/time/index.ts"
+    },
+    "./calendar": {
+      "types": "./src/calendar/index.ts",
+      "import": "./src/calendar/index.ts",
+      "default": "./src/calendar/index.ts"
+    },
+    "./vault": {
+      "types": "./src/vault/index.ts",
+      "import": "./src/vault/index.ts",
+      "default": "./src/vault/index.ts"
     }
   },
   "files": [
@@ -54,6 +69,7 @@
     "@xterm/xterm": "^6.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "d3-force": "3.0.0",
     "radix-ui": "^1.6.1",
     "recharts": "^3.2.1"
   },
@@ -63,6 +79,7 @@
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.10.6",
+    "@types/d3-force": "^3.0.10",
     "@types/bun": "latest",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
