@@ -24,6 +24,14 @@ Wire/type modules:
 - `objectGuards` — shared narrowing helpers (`isObject`, `asRecord`,
   `isGatewayResponseFrame`).
 
+Run event streams intentionally use a stable two-level envelope. The outer
+`GatewayEventFrame.event` is the transport/control name (`run.event`,
+`run.heartbeat`, or `run.gap_resync`). For `run.event`, the lifecycle name is
+`frame.payload.event`, its data is `frame.payload.payload`, and its resumable
+per-run cursor is `frame.payload.seq`. The outer `frame.seq` only orders frames
+on that WebSocket connection. Clients must discriminate the outer event before
+reading the inner run event; do not flatten this envelope in client helpers.
+
 Subdirectories: `data/` is the REST + SSE data client and TanStack DB
 collection layer; `sync/` holds the `Gateway*Row` types and the
 DevTools-snapshot → run-tree mapping.

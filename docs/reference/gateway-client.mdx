@@ -126,9 +126,48 @@ for await (const frame of client.streamRunEvents(
   { runId: RUN_ID },
   { signal: ac.signal },
 )) {
-  console.log(frame.event, frame.payload);
+  if (frame.event === "run.event" && frame.payload) {
+    const runEvent = frame.payload;
+    console.log(runEvent.event, runEvent.payload);
+  }
 }
 ```
+
+Run streams use a stable two-level envelope. The outer
+`GatewayEventFrame.event` is the stream frame kind. For an outer
+`"run.event"` frame, `frame.payload.event` is the run lifecycle name (such as
+`"node.started"`), and `frame.payload.payload` contains that lifecycle event's
+fields:
+
+```ts
+{
+  type: "event",
+  event: "run.event",
+  seq: 17, // WebSocket connection sequence
+  stateVersion: 42,
+  payload: {
+    type: "RunEvent",
+    streamId: "stream-123",
+    runId: "run-123",
+    seq: 5, // per-run sequence used by afterSeq
+    stateVersion: 42,
+    event: "node.started",
+    payload: {
+      runId: "run-123",
+      nodeId: "build",
+      state: "in-progress",
+    },
+  },
+}
+```
+
+Check `frame.event` for control frames (`run.heartbeat`, `run.gap_resync`).
+Only read `frame.payload.event` and `frame.payload.payload` when
+`frame.event === "run.event"`. Use `frame.payload.seq`, not the outer
+connection `frame.seq`, to order run events or persist an `afterSeq` cursor. A
+reducer must not compare the outer `frame.event` to lifecycle names such as
+`"node.started"`; heartbeat frames report transport liveness and do not
+represent lifecycle progress.
 
 <ResponseField name="streamRunEvents(params, { signal? })" type="AsyncGenerator<GatewayEventFrame>">
   Subscribes to one run and yields its `run.*` frames (`run.event`,
