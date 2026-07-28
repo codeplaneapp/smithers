@@ -118,5 +118,5 @@ export type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends
     | Row
     | (() => Row | Promise<Row>)
     | React.ReactNode
-    | ((deps: InferDeps<D>) => Row | React.ReactNode);
+    | ((deps: InferDeps<D>) => Row | Promise<Row> | React.ReactNode);
 };

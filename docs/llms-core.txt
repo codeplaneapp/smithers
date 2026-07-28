@@ -4106,6 +4106,11 @@ const reviewAgent = new CodexAgent({
 </Task>
 ```
 
+A declared `async` deps callback runs once inside the task attempt, after its
+dependencies resolve, and the task cannot complete until its promise settles.
+Synchronous deps callbacks retain their historical render-time evaluation
+ordering.
+
 A compute or static Task is a first-class node: it persists, resumes, gates
 downstream `deps`, and works inside `<Loop>`, `<Branch>`, `<Parallel>`, and
 `<Sequence>` like an agent Task, except it can't be a `fork` source (no agent
@@ -8976,7 +8981,7 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
   meta?: Record<string, unknown>;
   // string = prompt literal; Row = static result; () => Row = compute fn;
   // (deps) => result = deps-aware fn; React.ReactNode = JSX subtree
-  children: string | Row | (() => Row | Promise<Row>) | React.ReactNode | ((deps: InferDeps<D>) => Row | React.ReactNode);
+  children: string | Row | (() => Row | Promise<Row>) | React.ReactNode | ((deps: InferDeps<D>) => Row | Promise<Row> | React.ReactNode);
 };
 
 type SequenceProps = {

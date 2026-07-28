@@ -39,6 +39,7 @@ import {
 import { buildPlanTree, buildStateKey } from "./scheduler.js";
 import { buildWorktreeIsolationNotice, WORKTREE_ISOLATION_NOTICE_MARKER } from "./buildWorktreeIsolationNotice.js";
 import { buildOutputValidationDiagnostics } from "./output-validation-diagnostics.js";
+import { isThenablePayload, makeThenablePayloadError } from "./thenable-payload.js";
 import { resolveForkSessionMessages } from "./resolveForkSessionMessages.js";
 import { getDefinedToolMetadata } from "./getDefinedToolMetadata.js";
 import { captureSnapshotEffect, loadLatestSnapshot, parseSnapshot } from "@smithers-orchestrator/time-travel/snapshot";
@@ -6270,6 +6271,10 @@ async function legacyExecuteTask(
     // finished instead of entering the normal timeout/retry path.
     if (taskSignal.aborted) {
       throw taskSignal.reason instanceof Error ? taskSignal.reason : makeAbortError();
+    }
+    if (isThenablePayload(payload)) {
+      attemptMeta.failureRetryable = false;
+      throw makeThenablePayloadError(desc, { attempt: attemptNo });
     }
     payload = stripAutoColumns(payload);
     const payloadWithKeys = buildOutputRow(desc.outputTable, runId, desc.nodeId, desc.iteration, payload);

@@ -672,7 +672,7 @@ type TaskProps<Row, Output extends OutputTarget = OutputTarget, D extends DepsSp
   meta?: Record<string, unknown>;
   // string = prompt literal; Row = static result; () => Row = compute fn;
   // (deps) => result = deps-aware fn; React.ReactNode = JSX subtree
-  children: string | Row | (() => Row | Promise<Row>) | React.ReactNode | ((deps: InferDeps<D>) => Row | React.ReactNode);
+  children: string | Row | (() => Row | Promise<Row>) | React.ReactNode | ((deps: InferDeps<D>) => Row | Promise<Row> | React.ReactNode);
 };
 
 type SequenceProps = {

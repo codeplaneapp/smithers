@@ -9,6 +9,7 @@ import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { getJjPointer } from "@smithers-orchestrator/vcs/jj";
 import { buildOutputValidationDiagnostics } from "../output-validation-diagnostics.js";
 import { getPlatformLayer } from "../platform-layer.js";
+import { isThenablePayload, makeThenablePayloadError } from "../thenable-payload.js";
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} _SmithersDb */
 /**
  * @typedef {{ rootDir: string; }} StaticTaskBridgeToolConfig
@@ -145,6 +146,10 @@ export const executeStaticTaskBridge = async (adapter, runId, desc, eventBus, to
       },
       "engine:task",
     );
+    if (isThenablePayload(desc.staticPayload)) {
+      attemptMeta.failureRetryable = false;
+      throw makeThenablePayloadError(desc, { attempt: attemptNo });
+    }
     let payload = stripAutoColumns(desc.staticPayload);
     const payloadWithKeys = buildOutputRow(desc.outputTable, runId, desc.nodeId, desc.iteration, payload);
     let validation = validateOutput(desc.outputTable, payloadWithKeys);
