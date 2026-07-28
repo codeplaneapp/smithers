@@ -21,7 +21,7 @@ const validation = (iteration: number, alwaysRed = false) =>
     ? { summary: "red", allPassed: false, failingSummary: "VALIDATION_SENTINEL" }
     : { summary: "green", allPassed: true, failingSummary: null };
 const panelist = (nodeId: string) => ({ reviewer: nodeId, approved: true, feedback: "panel approved", issues: [] });
-const moderator = { approved: true, feedback: "current approval", issues: [] };
+const moderator = { approved: true, blocked: false, feedback: "current approval", issues: [] };
 
 function convergenceMock({ nodeId, iteration }: MockArgs) {
   if (nodeId.endsWith(":implement")) return implementation(iteration);

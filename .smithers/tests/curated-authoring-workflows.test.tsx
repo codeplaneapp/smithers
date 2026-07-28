@@ -52,7 +52,7 @@ const renderRows = async (workflow: any, name: string, input: unknown, rows: Row
     const mounted = task(frame, staged.nodeId);
     expect(mounted.outputTableName).toBeDefined();
     const parsed = mounted.outputSchema?.safeParse({ ...staged.value, nodeId: staged.nodeId });
-    expect(parsed?.success).toBe(true);
+    expect(parsed?.success, `${name}:${staged.nodeId} ${parsed?.error?.message ?? "missing schema"}`).toBe(true);
     outputs[mounted.outputTableName!] = [...(outputs[mounted.outputTableName!] ?? []), parsed!.data];
   }
   return renderWorkflow(workflow, {

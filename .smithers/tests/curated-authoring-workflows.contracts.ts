@@ -9,12 +9,21 @@ export const workflowInput = { prompt: "  build a report workflow  ", name: "rep
 export const skillInput = { prompt: "  audit workflow graphs  ", name: "graph-auditor", review: true };
 
 export const workflowClarify = {
+<<<<<<< HEAD
   // Tier-0 routing: only `workflow` proceeds past clarify into provision/design.
   route: {
     tier: "workflow",
     reason: "Ordered stages plus a human gate need durability.",
     oneshotCommand: null,
   },
+||||||| parent of 466f418917 (🚨 fix: repair wave 2 gate failures)
+=======
+  route: {
+    tier: "workflow",
+    reason: "The request needs a durable, reusable workflow.",
+    oneshotCommand: null,
+  },
+>>>>>>> 466f418917 (🚨 fix: repair wave 2 gate failures)
   name: "report-workflow",
   goal: "Build reports",
   trigger: "manual",

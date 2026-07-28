@@ -153,6 +153,25 @@ describe("coverWorkflow", () => {
     expect(result.taskOutputs.repeat).toHaveLength(2);
   });
 
+  test("does not broaden a workflow loop below the coverage cap", async () => {
+    const schemas = { value: valueSchema };
+    const { Workflow, Loop, Task, smithers, outputs } = createSmithers(schemas, { dbPath: ":memory:" });
+    const workflow = smithers(() => (
+      <Workflow name="already-bounded">
+        <Loop until={false} maxIterations={2}>
+          <Task id="repeat" output={outputs.value} agent={fakeAgent(valueSchema, { value: "unused" })}>
+            Again
+          </Task>
+        </Loop>
+      </Workflow>
+    ));
+
+    const result = await coverWorkflow(workflow, { maxLoopIterations: 5 });
+
+    expect(result.executed).toEqual(["repeat", "repeat"]);
+    expect(result.passes[0].unusedMocks).toEqual([]);
+  });
+
   test("reports unreached nodes clearly and honors an allowlist", async () => {
     await expect(coverWorkflow(agentWorkflow(), { expectedNodes: ["work", "missing-branch"] })).rejects.toThrow(
       'unreached expected nodes: ["missing-branch"]',

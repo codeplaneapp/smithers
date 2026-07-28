@@ -34,7 +34,10 @@ async function stage(
     const frame = await renderWorkflow(workflow, { workflowPath: actualWorkflowPath, input, iteration, outputs });
     const producer = task(frame, row.nodeId);
     const parsed = producer.outputSchema?.safeParse(row);
-    expect(parsed?.success, `${row.nodeId} validates against its production schema`).toBe(true);
+    expect(
+      parsed?.success,
+      `${row.nodeId} validates against its production schema: ${parsed?.error?.message ?? "missing schema"}`,
+    ).toBe(true);
     const table = producer.outputTableName;
     expect(table, `${row.nodeId} has its production output table`).toBeDefined();
     const preserved = { ...parsed!.data, nodeId: row.nodeId, iteration };

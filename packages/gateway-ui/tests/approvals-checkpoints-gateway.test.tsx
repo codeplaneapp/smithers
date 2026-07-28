@@ -205,9 +205,8 @@ describe("GatewayApprovalList", () => {
       click(approve);
     });
     expect(harness.container.querySelector<HTMLTextAreaElement>("textarea")!.readOnly).toBe(true);
-    const buttons = harness.container.querySelectorAll<HTMLButtonElement>("[data-slot='confirmation-action']");
-    expect(buttons).toHaveLength(2);
-    buttons.forEach((button) => expect(button.disabled).toBe(true));
+    expect(harness.container.querySelector("[data-slot='confirmation']")?.getAttribute("data-state")).toBe("approving");
+    expect(harness.container.querySelectorAll("[data-slot='confirmation-action']")).toHaveLength(0);
     gateway.releaseApprovalSubmits();
     await waitFor(harness, () => gateway!.approvalsSubmitted.length === 1, "single approval submitted");
     await harness.flush(50);

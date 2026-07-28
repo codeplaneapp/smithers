@@ -344,7 +344,7 @@ describe("gateway — many workflows sharing one DB", () => {
     );
 
     expect(response.ok).toBe(true);
-    expect(response.payload.schemaVersion).toBe("0033");
+    expect(response.payload.schemaVersion).toBe("0034");
     expect(typeof response.payload.signature).toBe("string");
     expect(typeof response.payload.components._smithers_runs).toBe("string");
   });

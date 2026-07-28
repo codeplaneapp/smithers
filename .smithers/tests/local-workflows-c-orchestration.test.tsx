@@ -67,6 +67,12 @@ const row = (nodeId: string, iteration: number, value: Record<string, unknown>) 
 });
 
 describe("local orchestration workflows C", () => {
+  test("issue-train orchestration workflows remain importable", async () => {
+    for (const name of ["design-partner-fixes.tsx", "sol-issue-train.tsx", "xcombo-fix-train.tsx"]) {
+      expect(await load(name)).toBeDefined();
+    }
+  });
+
   test("monitor redesign and OrchBench expose their initial orchestration topology", async () => {
     const monitor = await render("monitor-redesign.tsx", {}, {}, { runId: "Inventory Smoke" });
     expect(optional(monitor, "shell-split-plan")).toBeDefined();

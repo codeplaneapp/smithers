@@ -147,7 +147,7 @@ describe("Batch C utility behavior", () => {
           const moderatorPrompt = prompt(staged, "review-moderator");
           expect(moderatorPrompt).toContain(JSON.stringify(panel0));
           expect(moderatorPrompt).toContain(JSON.stringify(panel1));
-          const generated = { approved: false, feedback: "MERGED-FIRST-AND-SECOND", issues: [] };
+          const generated = { approved: false, blocked: false, feedback: "MERGED-FIRST-AND-SECOND", issues: [] };
           let received = "";
           const runnable = {
             generate: async ({ prompt: value }: { prompt: unknown }) => {

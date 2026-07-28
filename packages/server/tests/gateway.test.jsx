@@ -1962,9 +1962,14 @@ describe("Gateway", () => {
         nodeId: "task1",
       }),
     });
-    const event = await client.waitFor((message) => message.type === "event" && message.event === "node.started");
+    const event = await client.waitFor(
+      (message) =>
+        message.type === "event" &&
+        message.event === "run.event" &&
+        message.payload.event === "node.started",
+    );
     expect(event.payload.runId).toBe("detached-run");
-    expect(event.payload.nodeId).toBe("task1");
+    expect(event.payload.payload.nodeId).toBe("task1");
     await client.close();
   });
   test("does not replay persisted copies for in-process runs after registry cleanup", async () => {
