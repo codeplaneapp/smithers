@@ -186,6 +186,42 @@ describe("buildTimeline", () => {
     expect(tl.branch.parentRunId).toBe("parent");
     expect(tl.branch.branchLabel).toBe("child");
   });
+  test("includes durable oneshot controls between frames", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertRun({
+      runId: "oneshot-control",
+      workflowName: "oneshot",
+      status: "running",
+      createdAtMs: 1,
+    });
+    await adapter.insertEventWithNextSeq({
+      runId: "oneshot-control",
+      timestampMs: 2,
+      type: "OneshotSteerAcknowledged",
+      payloadJson: JSON.stringify({
+        type: "OneshotSteerAcknowledged",
+        runId: "oneshot-control",
+        nodeId: "steer",
+        messageId: "message-1",
+        engine: "claude-code",
+        delivery: "agent-acked",
+        timestampMs: 2,
+      }),
+    });
+    const tl = await buildTimeline(adapter, "oneshot-control");
+    expect(tl.controls).toEqual([
+      {
+        seq: 0,
+        type: "OneshotSteerAcknowledged",
+        timestampMs: 2,
+        payload: expect.objectContaining({ messageId: "message-1", delivery: "agent-acked" }),
+      },
+    ]);
+    const formatted = formatTimelineForTui({ timeline: tl, children: [] });
+    expect(formatted).toContain("Control");
+    expect(formatted).toContain("agent-acked");
+    expect(formatTimelineAsJson({ timeline: tl, children: [] }).controls).toEqual(tl.controls);
+  });
 });
 describe("buildTimelineTree", () => {
   test("builds a flat tree for a run with no forks", async () => {

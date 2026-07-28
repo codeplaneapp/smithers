@@ -495,6 +495,54 @@ describe("summarizeRunStatus verdicts (real sqlite rows)", () => {
       sqlite.close();
     }
   });
+
+  test("shows the latest durable oneshot control without exposing the steering message", async () => {
+    const { sqlite, adapter } = createMemoryDb();
+    try {
+      await seedRun(adapter, "oneshot-control", { workflowName: "oneshot" });
+      await adapter.insertEventWithNextSeq({
+        runId: "oneshot-control",
+        timestampMs: NOW - 2_000,
+        type: "OneshotSteerQueued",
+        payloadJson: JSON.stringify({
+          type: "OneshotSteerQueued",
+          runId: "oneshot-control",
+          nodeId: "steer",
+          messageId: "message-1",
+          message: "private steering text",
+          engine: "claude-code",
+          delivery: "queued",
+          timestampMs: NOW - 2_000,
+        }),
+      });
+      await adapter.insertEventWithNextSeq({
+        runId: "oneshot-control",
+        timestampMs: NOW - 1_000,
+        type: "OneshotSteerAcknowledged",
+        payloadJson: JSON.stringify({
+          type: "OneshotSteerAcknowledged",
+          runId: "oneshot-control",
+          nodeId: "steer",
+          messageId: "message-1",
+          engine: "claude-code",
+          delivery: "agent-acked",
+          timestampMs: NOW - 1_000,
+        }),
+      });
+
+      const summary = await buildRunStatusSummary(adapter, "oneshot-control", { nowMs: NOW });
+      expect(summary.oneshotControl).toMatchObject({
+        kind: "steer",
+        status: "agent-acked",
+        messageId: "message-1",
+      });
+      const rendered = renderRunStatusHuman(summary);
+      expect(rendered).toContain("Control  steer agent-acked");
+      expect(rendered).not.toContain("private steering text");
+    } finally {
+      sqlite.close();
+    }
+  });
 });
 
 describe("quota + frame helpers", () => {

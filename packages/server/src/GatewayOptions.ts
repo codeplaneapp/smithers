@@ -4,6 +4,7 @@ import type { GatewayOperatorUiConfig } from "./GatewayOperatorUiConfig.js";
 import type { GatewayUiConfig } from "./GatewayUiConfig.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { createBrowserSessionRegistry } from "./browser.js";
+import type { SmithersDb } from "@smithers-orchestrator/db/adapter";
 
 export type GatewayOptions = {
   browser?: ReturnType<typeof createBrowserSessionRegistry>;
@@ -102,6 +103,16 @@ export type GatewayOptions = {
     cwd?: string;
     env?: Record<string, string | undefined>;
   } | null;
+  /**
+   * Host-owned built-in oneshot controls. The CLI injects these because it
+   * owns agent session argv, resume-target argv, and cheap narrator selection;
+   * the Gateway only authenticates and transports monitor requests.
+   */
+  oneshotMonitor?: {
+    attach(params: { runId: string; adapter: SmithersDb }): Promise<Record<string, unknown>>;
+    steer(params: { runId: string; message: string; adapter: SmithersDb }): Promise<Record<string, unknown>>;
+    restart(params: { runId: string; adapter: SmithersDb }): Promise<Record<string, unknown>>;
+  };
   defaults?: GatewayDefaults;
   maxBodyBytes?: number;
   maxPayload?: number;

@@ -107,16 +107,42 @@ Oneshot runs directly in `--cwd`, so a stale detached lineage, foreign WIP, or
 The default `--preflight auto` warns and prepends agent-judged triage
 instructions; use `warn` to warn without injection or `off` to skip assessment.
 
-## The live dashboard
+## Watching and steering a oneshot
 
-The oneshot UI shows the run as it happens:
+Every launch CTA tells the operator to offer the monitor to the user. Open it
+directly with:
 
-- **Goal and status cards** with the execution metadata (agent, model, chain).
-- **A live status narrator**: a cheap sidecar agent watches the implement and
-  review agents' recorded output and posts one-line "what is it doing"
-  updates into a pulsing status card, so a stuck run is obvious without
-  reading the raw transcript.
-- Chat, diff, hijack, pause, and cancel controls.
+```bash
+bunx smithers-orchestrator monitor ONESHOT_RUN_ID
+```
+
+For a built-in oneshot, this opens the dedicated oneshot monitor. It includes
+the live implement and review transcripts, diff, durable event log, pause and
+cancel controls, plus:
+
+- **Steer**: send a message from the chat composer. Delivery is shown as
+  `queued`, `delivered`, `agent-acked`, or an explicit failure. Claude Code is
+  currently supported by interrupting at the next recorded agent-event
+  boundary, resuming the same Claude session with the appended message, then
+  resuming the Smithers run. If delivery fails after handoff, the monitor clears
+  the hijack request and returns control to Smithers so the run is not stranded.
+  Codex, Kimi, and OpenCode are shown as unsupported
+  because their current headless sessions do not provide an equally reliable
+  live message boundary. Use `bunx smithers-orchestrator hijack RUN_ID` for
+  interactive takeover.
+- **Restart**: after confirmation, cancel the active attempt if needed and
+  launch a fresh run from the durable `builtinResume` argv recorded at the
+  original launch. The UI follows the new run id.
+- **Cheap narrator**: while the monitor remains attached, the Luna/trivial
+  model tier tails recorded agent activity and emits short status lines. It
+  stops after the attachment lease expires, so an unattended oneshot does not
+  pay narration cost. Lines are persisted as run events and reappear after a
+  monitor reattaches.
+
+Steering and restart requests and outcomes are durable run events shown by
+`bunx smithers-orchestrator status RUN_ID`, `events RUN_ID`, and
+`timeline RUN_ID`. Narrator lines are durable `NodeOutput` events shown by
+`events RUN_ID --raw` and by a later monitor attachment.
 
 On an interactive TTY, `--interactive` opens the full-screen TUI monitor
 instead of the detached default. `--detach false` runs in the foreground.

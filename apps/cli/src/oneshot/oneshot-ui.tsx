@@ -7,12 +7,16 @@ import {
   useGatewayRpc,
   useGatewayRun,
   useGatewayRunDiff,
+  useGatewayRunEvents,
 } from "smithers-orchestrator/gateway-react";
 import { NodeChatStream, RunEventLog, WorkflowUiShell, theme } from "smithers-orchestrator/gateway-ui";
 import {
   Button,
   Card,
   CardContent,
+  ChatComposer,
+  ChatMessage,
+  ChatTranscript,
   EmptyState,
   KpiStat,
   SmithersUiStyles,
@@ -27,7 +31,8 @@ import { PierreDiffView } from "smithers-orchestrator/ui/adapters/pierre-diff-vi
 
 type HijackCandidate = { nodeId?: string; engine?: string };
 type OneshotChainEntry = { engine?: string; model?: string };
-type OneshotStatus = { text: string; engine?: string; timestampMs?: number };
+type OneshotStatus = { text: string; engine?: string; timestampMs?: number; seq?: number };
+type SteerDelivery = "idle" | "sending" | "queued" | "delivered" | "agent-acked" | "failed";
 
 const STATUS_NODE_ID = "status";
 
@@ -75,22 +80,23 @@ function useHijackCandidates(runId: string | undefined) {
   return candidates;
 }
 
-function useOneshotStatus(runId: string | undefined): { status?: OneshotStatus; loading: boolean } {
+function useOneshotStatus(runId: string | undefined): { statuses: OneshotStatus[]; loading: boolean } {
   const { events, loading } = useGatewayNodeEvents(runId, STATUS_NODE_ID, { maxEvents: 50, pollIntervalMs: 4000 });
   return useMemo(() => {
-    let status: OneshotStatus | undefined;
+    const statuses: OneshotStatus[] = [];
     for (const frame of events) {
       if (frame.event !== "NodeOutput") continue;
       const payload = parsePayload(frame.payload);
       const text = typeof payload?.text === "string" ? payload.text.trim() : "";
       if (!text) continue;
-      status = {
+      statuses.push({
         text,
         engine: typeof payload?.engine === "string" ? payload.engine : undefined,
         timestampMs: typeof payload?.timestampMs === "number" ? payload.timestampMs : undefined,
-      };
+        seq: typeof frame.seq === "number" ? frame.seq : undefined,
+      });
     }
-    return { status, loading };
+    return { statuses: statuses.slice(-6), loading };
   }, [events, loading]);
 }
 
@@ -118,16 +124,31 @@ const STATUS_STYLES = `
 .oneshot-status-text { transition: opacity 200ms ease; }
 `;
 
-function LunaStatusCard({ runId, running, now }: { runId: string | undefined; running: boolean; now: number }) {
-  const { status, loading } = useOneshotStatus(runId);
-  if (!status && !running && !loading) return null;
-  const label = status?.engine ? `Luna live status · ${status.engine}` : "Luna live status";
-  const ago = agoLabel(status?.timestampMs, now);
+function NarratorLane({
+  runId,
+  running,
+  now,
+  available,
+}: {
+  runId: string | undefined;
+  running: boolean;
+  now: number;
+  available: boolean | undefined;
+}) {
+  const { statuses, loading } = useOneshotStatus(runId);
+  if (statuses.length === 0 && !running && !loading) return null;
+  const latest = statuses.at(-1);
+  const label =
+    available === false
+      ? "Cheap narrator unavailable"
+      : latest?.engine
+        ? `Cheap narrator · ${latest.engine}`
+        : "Cheap narrator";
   return (
     <Card>
-      <CardContent style={{ display: "flex", alignItems: "center", gap: 12, paddingTop: 16 }}>
-        <span className="oneshot-status-dot" data-live={running} aria-hidden="true" />
-        <div style={{ flex: 1, minWidth: 0 }}>
+      <CardContent style={{ display: "flex", flexDirection: "column", gap: 10, paddingTop: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="oneshot-status-dot" data-live={running} aria-hidden="true" />
           <div
             style={{
               fontSize: 11,
@@ -139,24 +160,56 @@ function LunaStatusCard({ runId, running, now }: { runId: string | undefined; ru
           >
             {label}
           </div>
-          <div
-            className="oneshot-status-text"
-            key={status?.text ?? "empty"}
-            style={{
-              fontSize: 14,
-              color: theme.text,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {status?.text ?? (running ? "Listening for agent activity…" : "No status recorded")}
-          </div>
         </div>
-        {ago ? <span style={{ fontSize: 12, color: theme.textDim, flex: "none" }}>{ago}</span> : null}
+        <ChatTranscript
+          style={{ maxHeight: 190 }}
+          empty={
+            <EmptyState
+              title={
+                available === false
+                  ? "No Luna or Haiku narrator is available"
+                  : running
+                    ? "Listening for agent activity…"
+                    : "No narration recorded"
+              }
+              description={
+                available === false
+                  ? "The transcript and controls remain available without narration."
+                  : "Narration runs only while this monitor is attached."
+              }
+            />
+          }
+        >
+          {statuses.map((status) => (
+            <ChatMessage
+              key={status.seq ?? `${status.timestampMs}-${status.text}`}
+              role="system"
+              meta={agoLabel(status.timestampMs, now)}
+            >
+              {status.text}
+            </ChatMessage>
+          ))}
+        </ChatTranscript>
       </CardContent>
     </Card>
   );
+}
+
+async function postOneshotControl(runId: string, action: "attach" | "steer" | "restart", body = {}) {
+  const response = await fetch(`/v1/api/runs/${encodeURIComponent(runId)}/oneshot-monitor/${action}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = (await response.json().catch(() => null)) as {
+    ok?: boolean;
+    data?: Record<string, unknown>;
+    error?: { message?: string };
+  } | null;
+  if (!response.ok || payload?.ok === false) {
+    throw new Error(payload?.error?.message ?? `Monitor ${action} failed (HTTP ${response.status})`);
+  }
+  return payload?.data ?? {};
 }
 
 function GoalCard({ goal, chain }: { goal?: string; chain?: OneshotChainEntry[] }) {
@@ -211,10 +264,17 @@ function App() {
   const runId = runIdFromUrl();
   const runState = useGatewayRun(runId);
   const diffState = useGatewayRunDiff({ runId });
+  const controlEvents = useGatewayRunEvents(runId, { maxEvents: 200 });
   const actions = useGatewayActions();
   const candidates = useHijackCandidates(runId);
   const [now, setNow] = useState(Date.now());
   const [pauseRequested, setPauseRequested] = useState(false);
+  const [steerText, setSteerText] = useState("");
+  const [steerMessageId, setSteerMessageId] = useState<string>();
+  const [steerDelivery, setSteerDelivery] = useState<SteerDelivery>("idle");
+  const [controlError, setControlError] = useState<string>();
+  const [restartBusy, setRestartBusy] = useState(false);
+  const [narratorAvailable, setNarratorAvailable] = useState<boolean>();
   const pause = useGatewayRpc("pauseRun", { runId: runId ?? "" }, { enabled: Boolean(runId && pauseRequested) });
 
   useEffect(() => {
@@ -252,8 +312,79 @@ function App() {
   const hasReview = Boolean(oneshot?.review);
   const running = status === "running";
 
+  useEffect(() => {
+    if (!runId || !running) return;
+    let stopped = false;
+    const attach = async () => {
+      try {
+        const result = await postOneshotControl(runId, "attach");
+        if (!stopped) setNarratorAvailable(result.narrator !== false);
+      } catch {
+        if (!stopped) setNarratorAvailable(false);
+      }
+    };
+    void attach();
+    const timer = window.setInterval(() => void attach(), 15_000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [runId, running]);
+
+  useEffect(() => {
+    if (!steerMessageId) return;
+    for (const frame of controlEvents.events) {
+      const payload = parsePayload(frame.payload);
+      if (payload?.messageId !== steerMessageId) continue;
+      if (frame.event === "OneshotSteerDelivered") setSteerDelivery("delivered");
+      if (frame.event === "OneshotSteerAcknowledged") setSteerDelivery("agent-acked");
+      if (frame.event === "OneshotSteerFailed") {
+        setSteerDelivery("failed");
+        setControlError(typeof payload.error === "string" ? payload.error : "Steering delivery failed");
+      }
+    }
+  }, [controlEvents.events, steerMessageId]);
+
+  const sendSteer = async (message: string) => {
+    if (!runId) return;
+    setSteerDelivery("sending");
+    setControlError(undefined);
+    try {
+      const result = await postOneshotControl(runId, "steer", { message });
+      setSteerMessageId(typeof result.messageId === "string" ? result.messageId : undefined);
+      setSteerDelivery(result.status === "queued" ? "queued" : "failed");
+      if (result.status === "failed") {
+        setControlError(typeof result.error === "string" ? result.error : "Steering is unavailable for this agent.");
+      }
+      setSteerText("");
+    } catch (error) {
+      setSteerDelivery("failed");
+      setControlError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const restart = async () => {
+    if (!runId || !window.confirm("Cancel this attempt if it is active and launch a fresh oneshot run?")) return;
+    setRestartBusy(true);
+    setControlError(undefined);
+    try {
+      const result = await postOneshotControl(runId, "restart");
+      const nextRunId = typeof result.restartedAsRunId === "string" ? result.restartedAsRunId : undefined;
+      if (!nextRunId) throw new Error("Restart launched without a new run ID");
+      const params = new URLSearchParams(location.search);
+      params.set("runId", nextRunId);
+      location.search = params.toString();
+    } catch (error) {
+      setControlError(error instanceof Error ? error.message : String(error));
+      setRestartBusy(false);
+    }
+  };
+
   const controls = (
     <>
+      <Button variant="outline" onClick={() => void restart()} disabled={!runId || restartBusy}>
+        {restartBusy ? "Restarting…" : "Restart"}
+      </Button>
       <Button variant="outline" onClick={() => runId && actions.resumeRun({ runId })} disabled={!runId}>
         Resume
       </Button>
@@ -305,7 +436,7 @@ function App() {
             <KpiStat label="Files changed" value={filesChanged} />
           </CardContent>
         </Card>
-        <LunaStatusCard runId={runId} running={running} now={now} />
+        <NarratorLane runId={runId} running={running} now={now} available={narratorAvailable} />
         <Tabs defaultValue="chat">
           <TabsList>
             <TabsTrigger value="chat">Chat</TabsTrigger>
@@ -317,6 +448,35 @@ function App() {
           <TabsContent value="chat">
             <NodeChatStream runId={runId} nodeId="implement" title="Implement" height={420} />
             {hasReview ? <NodeChatStream runId={runId} nodeId="review" title="Review" height={320} /> : null}
+            <Card>
+              <CardContent style={{ paddingTop: 16 }}>
+                <ChatComposer
+                  value={steerText}
+                  onValueChange={setSteerText}
+                  onSubmit={sendSteer}
+                  disabled={
+                    !running ||
+                    steerDelivery === "sending" ||
+                    steerDelivery === "queued" ||
+                    steerDelivery === "delivered"
+                  }
+                  placeholder={
+                    running
+                      ? "Steer the Claude Code agent at its next safe turn boundary…"
+                      : "Steering is available only while the run is active."
+                  }
+                  inputAriaLabel="Steering message"
+                  submitLabel="Send steering message"
+                  status={
+                    controlError
+                      ? controlError
+                      : steerDelivery === "idle"
+                        ? "Claude Code: interrupt at an event boundary, append the message, then resume."
+                        : `Delivery: ${steerDelivery}`
+                  }
+                />
+              </CardContent>
+            </Card>
           </TabsContent>
           <TabsContent value="diff">
             {oversized ? (

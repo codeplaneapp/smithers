@@ -54,7 +54,7 @@ under `frame.payload`. Client-side equivalent:
 const { events } = useGatewayRunEvents(runId, { afterSeq: 0 });
 for (const frame of events) {
   if (frame.event === "NodeFailed") {
-    const { nodeId, error } = frame.payload;   // NOT frame.type / frame.nodeId
+    const { nodeId, error } = frame.payload; // NOT frame.type / frame.nodeId
     // error is the errorToJson value: read error.message
   }
 }
@@ -65,8 +65,10 @@ per-node status view, keyed by `frame.payload.nodeId`. The table below lists
 each variant's fields; in a UI those live under `frame.payload`. Frames
 reconstructed from persisted rows also carry an optional `timestampMs` (epoch
 millis from the stored row) and surface `stateVersion: 0`.
+
 </Warning>
 
+<!-- prettier-ignore -->
 | Event | Top-level fields |
 |---|---|
 | `SupervisorStarted` | `runId`, `pollIntervalMs`, `staleThresholdMs`, `timestampMs` |
@@ -82,6 +84,13 @@ millis from the stored row) and surface `stateVersion: 0`.
 | `RunContinuedAsNew` | `runId`, `newRunId`, `iteration`, `carriedStateSize`, `ancestryDepth?`, `timestampMs` |
 | `RunHijackRequested` | `runId`, `target?`, `timestampMs` |
 | `RunHijacked` | `runId`, `nodeId`, `iteration`, `attempt`, `engine`, `mode`, `resume?`, `cwd`, `timestampMs` |
+| `OneshotSteerQueued` | `runId`, `nodeId`, `messageId`, `message`, `engine`, `delivery`, `timestampMs` |
+| `OneshotSteerDelivered` | `runId`, `nodeId`, `messageId`, `engine`, `delivery`, `timestampMs` |
+| `OneshotSteerAcknowledged` | `runId`, `nodeId`, `messageId`, `engine`, `delivery`, `timestampMs` |
+| `OneshotSteerFailed` | `runId`, `nodeId`, `messageId`, `message?`, `engine?`, `delivery`, `error`, `resumed?`, `recoveryError?`, `timestampMs` |
+| `OneshotRestartRequested` | `runId`, `restartedAsRunId`, `priorStatus`, `timestampMs` |
+| `OneshotRestartLaunched` | `runId`, `restartedAsRunId`, `pid`, `timestampMs` |
+| `OneshotRestartFailed` | `runId`, `restartedAsRunId`, `error`, `timestampMs` |
 | `SandboxCreated` | `runId`, `sandboxId`, `runtime`, `configJson`, `timestampMs` |
 | `SandboxShipped` | `runId`, `sandboxId`, `runtime`, `bundleSizeBytes`, `timestampMs` |
 | `SandboxHeartbeat` | `runId`, `sandboxId`, `remoteRunId?`, `progress?`, `timestampMs` |
@@ -165,5 +174,13 @@ type AgentCliEvent =
       ok?: boolean;
       level?: "debug" | "info" | "warning" | "error";
     }
-  | { type: "completed"; engine: string; ok: boolean; answer?: string; error?: string; resume?: string; usage?: Record<string, unknown> };
+  | {
+      type: "completed";
+      engine: string;
+      ok: boolean;
+      answer?: string;
+      error?: string;
+      resume?: string;
+      usage?: Record<string, unknown>;
+    };
 ```

@@ -29,13 +29,18 @@ async function findOpenPort() {
   return address.port;
 }
 
-async function startFakeGateway() {
+async function startFakeGateway(run) {
   const requests = [];
   const server = createHttpServer((req, res) => {
     requests.push(req.url ?? "");
     if (req.url === "/health") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (run && req.url === `/v1/api/runs/${encodeURIComponent(run.runId)}`) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, data: run }));
       return;
     }
     res.writeHead(404);
@@ -203,6 +208,54 @@ describe("smithers monitor", () => {
         opened: false,
         url: `${gateway.base}/monitor?runId=run-focus%2F1`,
         runId: "run-focus/1",
+      });
+    } finally {
+      await gateway.close();
+    }
+  }, 30_000);
+
+  test("opens the dedicated UI only for a built-in restartable oneshot", async () => {
+    const repo = createTempRepo();
+    const gateway = await startFakeGateway({
+      runId: "oneshot-live",
+      workflowName: "oneshot",
+      configJson: JSON.stringify({
+        builtinResume: { command: "oneshot", args: ["ship it"], cwd: repo.dir },
+      }),
+    });
+    try {
+      const result = await runSmithersAsync(["monitor", "oneshot-live", "--gateway", gateway.base, "--no-open"], {
+        cwd: repo.dir,
+        format: "json",
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.json).toMatchObject({
+        opened: false,
+        url: `${gateway.base}/workflows/oneshot?runId=oneshot-live`,
+        runId: "oneshot-live",
+        view: "oneshot",
+      });
+    } finally {
+      await gateway.close();
+    }
+  }, 30_000);
+
+  test("keeps a custom workflow named oneshot in the all-runs monitor", async () => {
+    const repo = createTempRepo();
+    const gateway = await startFakeGateway({
+      runId: "custom-oneshot",
+      workflowName: "oneshot",
+      configJson: JSON.stringify({ input: { goal: "custom" } }),
+    });
+    try {
+      const result = await runSmithersAsync(["monitor", "custom-oneshot", "--gateway", gateway.base, "--no-open"], {
+        cwd: repo.dir,
+        format: "json",
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.json).toMatchObject({
+        url: `${gateway.base}/monitor?runId=custom-oneshot`,
+        view: "all-runs",
       });
     } finally {
       await gateway.close();

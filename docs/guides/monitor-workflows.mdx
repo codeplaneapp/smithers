@@ -7,6 +7,10 @@ A workflow that runs long, unattended, or in a loop can wedge silently and nobod
 
 Monitors are opt-in per workflow and cost nothing until you write one. A workspace with no monitor files behaves exactly as it did before.
 
+This page covers autonomous monitor workflows. To watch a built-in oneshot
+interactively, stream its transcript, steer Claude Code, restart it, and attach
+the cheap narrator, see [Watching and steering a oneshot](/guides/oneshot#watching-and-steering-a-oneshot).
+
 ## 10-second quickstart
 
 Write the monitor at `.smithers/monitor/<workflowId>.tsx`, named after the workflow it watches:

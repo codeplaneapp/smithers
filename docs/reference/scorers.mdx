@@ -355,7 +355,9 @@ the exported low-level helpers for clients that must share the same semantics.
 collision-resistant child-run id. `evalAssertionScorer()` converts the
 assertions stored on a case task output into the persisted score row read by
 `listScoresForRuns` and `getScoreDetail`. `EVAL_CASE_STATUSES` defines the
-allowed engine statuses for status assertions.
+allowed engine statuses for status assertions. `isEvalInfraFailure(errorText)`
+lets custom eval hosts distinguish infrastructure faults from evaluated
+workflow behavior.
 
 **Source** [`evalCases.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/src/evalCases.js) · **Tests** [`eval-cases.test.js`](https://github.com/smithersai/smithers/blob/main/packages/scorers/tests/eval-cases.test.js) · **See also** [Evals quickstart](/guides/evals-quickstart), [Score comparison RPC](/rpc/list-scores-for-runs)
 

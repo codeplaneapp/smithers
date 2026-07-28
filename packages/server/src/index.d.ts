@@ -397,6 +397,26 @@ type GatewayOptions$1 = {
         cwd?: string;
         env?: Record<string, string | undefined>;
     } | null;
+    /**
+     * Host-owned built-in oneshot controls. The CLI injects these because it
+     * owns agent session argv, resume-target argv, and cheap narrator selection;
+     * the Gateway only authenticates and transports monitor requests.
+     */
+    oneshotMonitor?: {
+        attach(params: {
+            runId: string;
+            adapter: SmithersDb$4;
+        }): Promise<Record<string, unknown>>;
+        steer(params: {
+            runId: string;
+            message: string;
+            adapter: SmithersDb$4;
+        }): Promise<Record<string, unknown>>;
+        restart(params: {
+            runId: string;
+            adapter: SmithersDb$4;
+        }): Promise<Record<string, unknown>>;
+    };
     defaults?: GatewayDefaults$1;
     maxBodyBytes?: number;
     maxPayload?: number;
@@ -1012,6 +1032,21 @@ declare class Gateway {
         cwd?: string;
         env?: Record<string, string | undefined>;
     } | null) | null;
+    oneshotMonitor: {
+        attach(params: {
+            runId: string;
+            adapter: SmithersDb$4;
+        }): Promise<Record<string, unknown>>;
+        steer(params: {
+            runId: string;
+            message: string;
+            adapter: SmithersDb$4;
+        }): Promise<Record<string, unknown>>;
+        restart(params: {
+            runId: string;
+            adapter: SmithersDb$4;
+        }): Promise<Record<string, unknown>>;
+    } | null;
     /** @type {Set<{ dispose: () => void }>} */
     ptySessions: Set<{
         dispose: () => void;

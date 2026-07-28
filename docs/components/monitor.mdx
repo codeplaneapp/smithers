@@ -35,6 +35,10 @@ type MonitorProps = {
 };
 ```
 
+`<Monitor>` is an autonomous sibling workflow, not the interactive oneshot
+monitor UI. For live transcript, steer, restart, and attachment-scoped
+narration, see [Watching and steering a oneshot](/guides/oneshot#watching-and-steering-a-oneshot).
+
 ```tsx
 <Workflow name="nightly-monitor">
   <Monitor

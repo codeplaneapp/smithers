@@ -115,7 +115,7 @@ The status header shrinks to a compact one-liner on terminals narrower than 100 
 
 A detached run (`up --detach` / `run --detach`) and an MCP `run_workflow` background launch both execute where the user has no live view of progress. To close that gap, the CLI returns a `monitoring` block with the run and prints agent-directed guidance in the "Next steps" CTA: offer the user one of these ways to watch the run, then set up whichever they pick.
 
-1. **Smithers Monitor (live, zero setup):** run `bunx smithers-orchestrator monitor RUN_ID` to open the gateway's live web UI over every run in the workspace, focused on this one (status, execution tree, events, approvals), no code required. See [the Smithers Monitor](/guides/monitor).
+1. **Smithers Monitor (live, zero setup):** run `bunx smithers-orchestrator monitor RUN_ID`. A built-in oneshot opens its dedicated transcript, steer, restart, and attachment-scoped cheap narrator surface. Other runs open the all-runs workspace view focused on that run (status, execution tree, events, approvals). See [the Smithers Monitor](/guides/monitor).
 2. **Status-report cron (hands-off):** a Bun job that every 5 minutes calls Gateway `getRun` and reports the status; use `streamRunEventsResilient` while the process is awake.
 3. **Live custom UI (richest, most work):** run `bunx smithers-orchestrator ui RUN_ID` when the workflow declares a `.smithers/ui/<workflow>.tsx` UI with `<UI entry="../ui/<workflow>.tsx" />`, otherwise author the UI source and declaration first. See [custom workflow UIs](/guides/custom-workflow-ui).
 4. **Quick HTML page (fastest):** write a static status page from Gateway `getRun` / `getDevToolsSnapshot`, open it, and refresh it about every 5 minutes.
@@ -384,9 +384,9 @@ commands[102]:
       insecure,,boolean,false,Allow a non-loopback host with NO auth (dangerous)
       idle-timeout,,number,,Exit after this many ms with no clients, in-flight runs, or registered schedules (0 = stay up; autostarted daemons set this automatically); overridable via SMITHERS_GATEWAY_IDLE_MS
   - name: monitor
-    purpose: Open the Smithers Monitor, the gateway's live web UI over every run in the workspace (served at /monitor, no .smithers pack required). Pure observation; launches no run, no workflow, no agents. Resolves the workspace's singleton gateway (--gateway probe, then runtime-state discovery, then legacy port probe, then autostart) and opens the browser
+    purpose: Open the Smithers Monitor. A built-in oneshot opens its dedicated live transcript, honest steering delivery, restart, and attachment-scoped cheap narrator controls. Other runs use the all-runs workspace view. Resolves the workspace's singleton gateway (--gateway probe, then runtime-state discovery, then legacy port probe, then autostart) and opens the browser
     args[1]{name,type,required,desc}:
-      runId,string,false,Focus this run when the monitor opens (deep-linked as ?runId=)
+      runId,string,false,Focus this run; built-in oneshots open their dedicated monitor
     flags[5]{name,short,type,default,desc}:
       gateway,g,string,,Gateway base URL (default http://127.0.0.1:<port>)
       port,,number,7331,Gateway port when --gateway is not set

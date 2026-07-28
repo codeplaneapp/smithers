@@ -190,6 +190,13 @@ type RunTimeline$2 = {
     runId: string;
     frames: TimelineFrame$1[];
     branch: BranchInfo$2 | null;
+    /** Durable operator controls that affect oneshot execution between frames. */
+    controls?: Array<{
+        seq: number;
+        type: string;
+        timestampMs: number;
+        payload: Record<string, unknown>;
+    }>;
 };
 
 /**
@@ -1193,9 +1200,10 @@ declare function hasRewindLock(runId: string): boolean;
 declare function resetRewindLocksForTests(): void;
 
 /**
- * Acquire a durable single-flight lease for one run. The database compare-and-set
- * makes the exclusion visible to CLI, MCP, and server processes that share the
- * Smithers store. An expired lease can be replaced atomically.
+ * Acquire a durable single-flight lease for one run lineage. The database
+ * compare-and-set makes the exclusion visible to CLI, MCP, and server
+ * processes that share the Smithers store. An expired lease can be replaced
+ * atomically.
  *
  * @param {SmithersDb} adapter
  * @param {string} runId

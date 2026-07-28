@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildOneshotWorkflow } from "../src/oneshot/buildOneshotWorkflow.js";
 import { buildOneshotChildArgs } from "../src/oneshot/buildOneshotChildArgs.js";
@@ -10,14 +11,21 @@ import { loadOneshotConfig } from "../src/oneshot/loadOneshotConfig.js";
 import { saveOneshotConfig } from "../src/oneshot/saveOneshotConfig.js";
 import { resolveOneshotChain } from "../src/oneshot/resolveOneshotChain.js";
 import { rewriteOneshotBooleanValues } from "../src/oneshot/rewriteOneshotBooleanValues.js";
-import { cleanStatusLine } from "../src/oneshot/startOneshotStatusUpdater.js";
-import { startOneshotStatusUpdater } from "../src/oneshot/startOneshotStatusUpdater.js";
+import {
+  cleanStatusLine,
+  ONESHOT_NARRATOR_MODELS,
+  startOneshotStatusUpdater,
+} from "../src/oneshot/startOneshotStatusUpdater.js";
+import { createOneshotMonitorControl } from "../src/oneshot/monitor-control.js";
+import { oneshotCta } from "../src/oneshot/oneshotCta.js";
+import { buildBuiltinRelaunch, buildBuiltinResumeConfig } from "../src/resume-target.js";
 import { bundleGatewayUiEntry } from "../../../packages/server/src/gatewayUi/bundle.js";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { createTestDb } from "../../../packages/smithers/tests/helpers.js";
 import { ddl, schema } from "../../../packages/smithers/tests/schema.js";
 import { openDurableSqliteDatabase } from "@smithers-orchestrator/db";
+import { SOTA_SLOTS } from "../src/sota-models.generated.js";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../..");
 const cliEntry = join(repoRoot, "apps/cli/src/index.js");
@@ -108,6 +116,15 @@ describe("oneshot model chain", () => {
 });
 
 describe("oneshot status updater", () => {
+  test("pins every default narrator to the cheap model tier", () => {
+    expect(ONESHOT_NARRATOR_MODELS).toEqual({
+      codex: SOTA_SLOTS.codex,
+      claude: SOTA_SLOTS.haiku,
+    });
+    expect(ONESHOT_NARRATOR_MODELS.codex).not.toContain("sol");
+    expect(ONESHOT_NARRATOR_MODELS.claude).not.toContain("opus");
+  });
+
   test("cleans narrator output to a single bounded line", () => {
     expect(cleanStatusLine("Editing foo.ts.")).toBe("Editing foo.ts");
     expect(cleanStatusLine('\n- "Running tests."\nsome second line')).toBe("Running tests");
@@ -141,6 +158,47 @@ describe("oneshot status updater", () => {
   async function waitFor(predicate) {
     for (let i = 0; i < 100 && !predicate(); i++) await Bun.sleep(5);
   }
+
+  test("persists successful narration as a status event", async () => {
+    const { db, adapter, cleanup } = statusDb();
+    try {
+      await seedActivity(adapter);
+      const updater = startOneshotStatusUpdater({
+        db,
+        adapter,
+        runId: "status-run",
+        goal: "goal",
+        cwd: process.cwd(),
+        pollMs: 1,
+        candidates: [
+          {
+            id: "test",
+            build: () => ({
+              generate: async () => ({ text: "Running the focused tests" }),
+            }),
+          },
+        ],
+      });
+      let narration;
+      for (let index = 0; index < 300 && !narration; index += 1) {
+        await Bun.sleep(10);
+        const events = await adapter.listEvents("status-run", -1, 100);
+        narration = events.find((event) => {
+          if (event.type !== "NodeOutput") return false;
+          return JSON.parse(event.payloadJson).nodeId === "status";
+        });
+      }
+      await updater.stop();
+      expect(narration).toBeDefined();
+      expect(JSON.parse(narration.payloadJson)).toMatchObject({
+        nodeId: "status",
+        text: "Running the focused tests\n",
+        engine: "test",
+      });
+    } finally {
+      cleanup();
+    }
+  });
 
   test("stop waits while events are loading and prevents narration", async () => {
     const { db, adapter, cleanup } = statusDb();
@@ -287,6 +345,353 @@ describe("oneshot status updater", () => {
       ).toHaveLength(1);
     } finally {
       cleanup();
+    }
+  });
+});
+
+describe("oneshot monitor controls", () => {
+  test("CTA tells an operator to offer the monitor and prints its command", () => {
+    const cta = oneshotCta("oneshot-123");
+    expect(cta.description).toContain("offer to launch the monitor");
+    expect(cta.commands[0]).toEqual({
+      command: "monitor oneshot-123",
+      description: "Open the live monitor with steer and restart controls",
+    });
+  });
+
+  function controlDb(status = "running") {
+    const { db, cleanup } = createTestDb(schema, ddl);
+    ensureSmithersTables(db);
+    const adapter = new SmithersDb(db);
+    const resume = buildBuiltinResumeConfig({
+      command: "oneshot",
+      args: ["ship it", "--cwd", "/tmp/work", "--detach", "false", "--open", "false", "--review", "off"],
+      cwd: "/tmp/work",
+    });
+    return {
+      adapter,
+      cleanup,
+      seed: () =>
+        adapter.insertRun({
+          runId: "control-run",
+          workflowName: "oneshot",
+          status,
+          createdAtMs: Date.now(),
+          configJson: JSON.stringify({ builtinResume: resume, oneshot: { goal: "ship it" } }),
+        }),
+    };
+  }
+
+  test("reconstructs fresh restart and durable resume argv from builtinResume", () => {
+    const config = buildBuiltinResumeConfig({
+      command: "oneshot",
+      args: ["goal", "--cwd", "/repo", "--detach", "false", "--open=false", "--review", "on"],
+      cwd: "/repo",
+    });
+    expect(buildBuiltinRelaunch(config, { runId: "fresh", resume: false })).toEqual({
+      cwd: "/repo",
+      args: [
+        "oneshot",
+        "goal",
+        "--cwd",
+        "/repo",
+        "--review",
+        "on",
+        "--run-id",
+        "fresh",
+        "--detach",
+        "false",
+        "--open",
+        "false",
+      ],
+    });
+    expect(buildBuiltinRelaunch(config, { runId: "same", resume: true }).args.slice(-8)).toEqual([
+      "--detach",
+      "false",
+      "--open",
+      "false",
+      "--resume",
+      "true",
+      "--force",
+      "true",
+    ]);
+  });
+
+  test("starts narration only after monitor attachment and stops it on dispose", async () => {
+    const fixture = controlDb();
+    try {
+      await fixture.seed();
+      let started = 0;
+      let stopped = 0;
+      const control = createOneshotMonitorControl({
+        cliEntry: "/cli/index.js",
+        cancelRun: async () => {},
+        narratorStart: () => {
+          started += 1;
+          return {
+            stop: async () => {
+              stopped += 1;
+            },
+          };
+        },
+      });
+      expect(started).toBe(0);
+      await control.attach({ runId: "control-run", adapter: fixture.adapter });
+      expect(started).toBe(1);
+      await control.attach({ runId: "control-run", adapter: fixture.adapter });
+      expect(started).toBe(1);
+      await control.dispose();
+      expect(stopped).toBe(1);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test("records an honest failed delivery for unsupported engines", async () => {
+    const fixture = controlDb();
+    try {
+      await fixture.seed();
+      const now = Date.now();
+      await fixture.adapter.insertNode({
+        runId: "control-run",
+        nodeId: "implement",
+        iteration: 0,
+        state: "in-progress",
+        lastAttempt: 1,
+        updatedAtMs: now,
+        outputTable: "",
+        label: "Implement",
+      });
+      await fixture.adapter.insertAttempt({
+        runId: "control-run",
+        nodeId: "implement",
+        iteration: 0,
+        attempt: 1,
+        state: "in-progress",
+        startedAtMs: now,
+        finishedAtMs: null,
+        errorJson: null,
+        metaJson: JSON.stringify({ agentEngine: "codex", agentResume: "thread-1" }),
+        responseText: null,
+        cached: false,
+        jjPointer: null,
+        jjCwd: "/tmp/work",
+      });
+      let spawned = false;
+      const control = createOneshotMonitorControl({
+        cliEntry: "/cli/index.js",
+        cancelRun: async () => {},
+        spawnImpl: () => {
+          spawned = true;
+          const child = new EventEmitter();
+          child.unref = () => {};
+          return child;
+        },
+      });
+      const result = await control.steer({
+        runId: "control-run",
+        message: "Focus on the failing test",
+        adapter: fixture.adapter,
+      });
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain("Claude Code");
+      expect(spawned).toBe(false);
+      const events = await fixture.adapter.listEvents("control-run", -1, 100);
+      const failure = events.find((event) => event.type === "OneshotSteerFailed");
+      expect(failure).toBeDefined();
+      expect(JSON.parse(failure.payloadJson).delivery).toBe("failed");
+      await control.dispose();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test("records queued, delivered, and agent-acked states for Claude steering", async () => {
+    const fixture = controlDb("finished");
+    try {
+      await fixture.seed();
+      const now = Date.now();
+      await fixture.adapter.insertNode({
+        runId: "control-run",
+        nodeId: "implement",
+        iteration: 0,
+        state: "completed",
+        lastAttempt: 1,
+        updatedAtMs: now,
+        outputTable: "",
+        label: "Implement",
+      });
+      await fixture.adapter.insertAttempt({
+        runId: "control-run",
+        nodeId: "implement",
+        iteration: 0,
+        attempt: 1,
+        state: "completed",
+        startedAtMs: now,
+        finishedAtMs: now,
+        errorJson: null,
+        metaJson: JSON.stringify({ agentEngine: "claude-code", agentResume: "session-1" }),
+        responseText: "Initial answer",
+        cached: false,
+        jjPointer: null,
+        jjCwd: "/tmp/work",
+      });
+      const launches = [];
+      const control = createOneshotMonitorControl({
+        cliEntry: "/cli/index.js",
+        cancelRun: async () => {},
+        spawnImpl: (command, args) => {
+          launches.push({ command, args });
+          const child = new EventEmitter();
+          child.unref = () => {};
+          queueMicrotask(() => {
+            child.emit("spawn");
+            if (command === "claude") child.emit("close", 0);
+          });
+          return child;
+        },
+      });
+      const result = await control.steer({
+        runId: "control-run",
+        message: "Run the focused test",
+        adapter: fixture.adapter,
+      });
+      expect(result.status).toBe("queued");
+      let eventTypes = [];
+      for (let index = 0; index < 100 && !eventTypes.includes("OneshotSteerAcknowledged"); index += 1) {
+        await Bun.sleep(5);
+        eventTypes = (await fixture.adapter.listEvents("control-run", -1, 100)).map((event) => event.type);
+      }
+      expect(eventTypes).toEqual(
+        expect.arrayContaining(["OneshotSteerQueued", "OneshotSteerDelivered", "OneshotSteerAcknowledged"]),
+      );
+      expect(launches[0]).toMatchObject({
+        command: "claude",
+        args: expect.arrayContaining(["--resume", "session-1", "Run the focused test"]),
+      });
+      expect(launches[1].args).toEqual(expect.arrayContaining(["--run-id", "control-run", "--resume", "true"]));
+      await control.dispose();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test("clears a live hijack request and resumes Smithers when steering launch fails", async () => {
+    const fixture = controlDb();
+    try {
+      await fixture.seed();
+      const candidate = {
+        runId: "control-run",
+        nodeId: "implement",
+        iteration: 0,
+        attempt: 1,
+        engine: "claude-code",
+        mode: "native-cli",
+        resume: "session-1",
+        cwd: "/tmp/work",
+      };
+      const launches = [];
+      const control = createOneshotMonitorControl({
+        cliEntry: "/cli/index.js",
+        cancelRun: async () => {},
+        resolveCandidate: async () => candidate,
+        waitForCandidate: async () => candidate,
+        spawnImpl: (command, args) => {
+          launches.push({ command, args });
+          const child = new EventEmitter();
+          child.unref = () => {};
+          queueMicrotask(() => {
+            if (command === "claude") child.emit("error", new Error("claude spawn failed"));
+            else child.emit("spawn");
+          });
+          return child;
+        },
+      });
+      const result = await control.steer({
+        runId: "control-run",
+        message: "Focus on the failing test",
+        adapter: fixture.adapter,
+      });
+      expect(result.status).toBe("queued");
+      let failure;
+      for (let index = 0; index < 100 && !failure; index += 1) {
+        await Bun.sleep(5);
+        failure = (await fixture.adapter.listEvents("control-run", -1, 100)).find(
+          (event) => event.type === "OneshotSteerFailed",
+        );
+      }
+      expect(failure).toBeDefined();
+      expect(JSON.parse(failure.payloadJson)).toMatchObject({
+        delivery: "failed",
+        resumed: true,
+        error: "claude spawn failed",
+      });
+      expect(launches).toHaveLength(2);
+      expect(launches[1].args).toEqual(expect.arrayContaining(["--run-id", "control-run", "--resume", "true"]));
+      expect((await fixture.adapter.getRun("control-run")).hijackRequestedAtMs).toBeNull();
+      await control.dispose();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test("restart cancels an active attempt and launches a fresh run id", async () => {
+    const fixture = controlDb();
+    try {
+      await fixture.seed();
+      const launches = [];
+      let cancelled = false;
+      const control = createOneshotMonitorControl({
+        cliEntry: "/cli/index.js",
+        cancelRun: async () => {
+          cancelled = true;
+        },
+        spawnImpl: (command, args, options) => {
+          launches.push({ command, args, options });
+          const child = new EventEmitter();
+          child.pid = 42;
+          child.unref = () => {};
+          queueMicrotask(() => child.emit("spawn"));
+          return child;
+        },
+      });
+      const result = await control.restart({ runId: "control-run", adapter: fixture.adapter });
+      expect(cancelled).toBe(true);
+      expect(result.restartedAsRunId).toStartWith("control-run-restart-");
+      expect(launches).toHaveLength(1);
+      expect(launches[0].args).toContain(result.restartedAsRunId);
+      expect(launches[0].args).not.toContain("--resume");
+      const eventTypes = (await fixture.adapter.listEvents("control-run", -1, 100)).map((event) => event.type);
+      expect(eventTypes).toContain("OneshotRestartRequested");
+      expect(eventTypes).toContain("OneshotRestartLaunched");
+      await control.dispose();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test("records restart spawn failures instead of claiming a launch", async () => {
+    const fixture = controlDb("finished");
+    try {
+      await fixture.seed();
+      const control = createOneshotMonitorControl({
+        cliEntry: "/cli/index.js",
+        cancelRun: async () => {},
+        spawnImpl: () => {
+          const child = new EventEmitter();
+          child.unref = () => {};
+          queueMicrotask(() => child.emit("error", new Error("spawn denied")));
+          return child;
+        },
+      });
+      await expect(control.restart({ runId: "control-run", adapter: fixture.adapter })).rejects.toThrow("spawn denied");
+      const eventTypes = (await fixture.adapter.listEvents("control-run", -1, 100)).map((event) => event.type);
+      expect(eventTypes).toContain("OneshotRestartRequested");
+      expect(eventTypes).toContain("OneshotRestartFailed");
+      expect(eventTypes).not.toContain("OneshotRestartLaunched");
+      await control.dispose();
+    } finally {
+      fixture.cleanup();
     }
   });
 });

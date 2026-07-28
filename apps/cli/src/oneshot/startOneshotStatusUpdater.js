@@ -1,6 +1,7 @@
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { listNarratorCandidates } from "../narrator-agents.js";
 import { runPromise } from "../smithersRuntime.js";
+import { SOTA_SLOTS } from "../sota-models.generated.js";
 import { oneshotCodexPaused } from "./oneshotCodexPaused.js";
 
 // Live status narrator for `smithers oneshot`. While the implement/review
@@ -23,6 +24,11 @@ const MAX_TAIL_CHARS = 3_000;
 const MAX_STATUS_CHARS = 140;
 const NARRATE_TIMEOUT_MS = 90_000;
 const MAX_CONSECUTIVE_FAILURES = 3;
+
+export const ONESHOT_NARRATOR_MODELS = Object.freeze({
+  codex: SOTA_SLOTS.codex,
+  claude: SOTA_SLOTS.haiku,
+});
 
 const SYSTEM_PROMPT = [
   "You are the live status line for a coding agent working a task while a human watches from a dashboard.",
@@ -64,15 +70,30 @@ export function cleanStatusLine(text) {
  * also stops itself after repeated narrator failures. Every failure is
  * swallowed — status narration must never break the oneshot run it watches.
  *
- * @param {{ db: any; runId: string; goal: string; cwd: string; env?: NodeJS.ProcessEnv }} options
- * @returns {{ stop: () => Promise<void> }}
+ * @param {{
+ *   db?: any;
+ *   adapter?: any;
+ *   runId: string;
+ *   goal: string;
+ *   cwd: string;
+ *   env?: NodeJS.ProcessEnv;
+ *   pollMs?: number;
+ *   candidates?: ReturnType<typeof listNarratorCandidates>;
+ * }} options
+ * @returns {{ enabled: boolean; stop: () => Promise<void> }}
  */
 export function startOneshotStatusUpdater(options) {
   const env = options.env ?? process.env;
-  let candidates = options.candidates ?? listNarratorCandidates(env, options.cwd);
+  let candidates =
+    options.candidates ??
+    listNarratorCandidates(env, options.cwd, {
+      ids: ["codex", "claude"],
+      models: ONESHOT_NARRATOR_MODELS,
+    });
   if (oneshotCodexPaused(env)) candidates = candidates.filter((candidate) => candidate.id !== "codex");
   if (candidates.length === 0)
     return {
+      enabled: false,
       stop() {
         return Promise.resolve();
       },
@@ -81,7 +102,7 @@ export function startOneshotStatusUpdater(options) {
   const state = {
     stopped: false,
     inFlight: false,
-    afterSeq: 0,
+    afterSeq: -1,
     delta: "",
     tail: "",
     lastNarrateAt: 0,
@@ -212,5 +233,5 @@ export function startOneshotStatusUpdater(options) {
     });
   }, options.pollMs ?? POLL_MS);
   if (typeof timer.unref === "function") timer.unref();
-  return { stop };
+  return { enabled: true, stop };
 }

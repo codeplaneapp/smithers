@@ -25,6 +25,13 @@ export function formatTimelineForTui(tree, indent = 0) {
     ? ` ${pc.dim(`[${tl.branch.branchLabel ?? "fork"}]`)} ${pc.dim(`(forked from ${tl.branch.parentRunId.slice(0, 8)}:${tl.branch.parentFrameNo})`)}`
     : "";
   lines.push(`${pad}${pc.bold(tl.runId)}${labelSuffix}`);
+  for (const control of tl.controls ?? []) {
+    const payload = control.payload ?? {};
+    const detail = control.type.startsWith("OneshotSteer")
+      ? `${payload.delivery ?? control.type.replace("OneshotSteer", "").toLowerCase()}${payload.engine ? ` · ${payload.engine}` : ""}`
+      : `${control.type.replace("OneshotRestart", "").toLowerCase()}${payload.restartedAsRunId ? ` · ${payload.restartedAsRunId}` : ""}`;
+    lines.push(`${pad}  Control  ${pc.dim(formatTimestamp(control.timestampMs))}  ${detail}`);
+  }
   for (const frame of tl.frames) {
     const ts = formatTimestamp(frame.createdAtMs);
     const hash = frame.contentHash.slice(0, 8);

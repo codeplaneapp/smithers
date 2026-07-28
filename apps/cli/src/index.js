@@ -119,7 +119,8 @@ import { saveOneshotConfig } from "./oneshot/saveOneshotConfig.js";
 import { resolveOneshotChain } from "./oneshot/resolveOneshotChain.js";
 import { rewriteOneshotBooleanValues } from "./oneshot/rewriteOneshotBooleanValues.js";
 import { selectOneshotAgents } from "./oneshot/selectOneshotAgents.js";
-import { startOneshotStatusUpdater } from "./oneshot/startOneshotStatusUpdater.js";
+import { createOneshotMonitorControl } from "./oneshot/monitor-control.js";
+import { oneshotCta } from "./oneshot/oneshotCta.js";
 import {
   assessWorkingCopy,
   buildPreflightNotice,
@@ -3577,9 +3578,9 @@ async function resolveBrowserGateway(options) {
 const MONITOR_UI_MOUNT_PATH = "/monitor";
 /**
  * `smithers monitor` — open the Smithers Monitor, a live web UI over every
- * run in this workspace (runs list, execution tree, events, approvals). It
- * observes; it never launches a run. The page itself is served by the
- * workspace gateway at /monitor (see runGatewayCommand's monitor UI mount).
+ * run in this workspace. A focused built-in oneshot opens its dedicated
+ * transcript/steer/restart surface; other runs use the all-runs page served at
+ * /monitor.
  */
 async function runMonitorCommand(c) {
   const fail = (code, message) => c.error({ code, message, exitCode: 1 });
@@ -3589,12 +3590,31 @@ async function runMonitorCommand(c) {
   }
   const { base, token } = resolved;
   const runId = c.args.runId;
-  const url = `${base}${MONITOR_UI_MOUNT_PATH}${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`;
+  let oneshot = false;
+  if (runId) {
+    const response = await fetch(`${base}/v1/api/runs/${encodeURIComponent(runId)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }).catch(() => null);
+    if (response?.ok) {
+      const body = await response.json().catch(() => null);
+      const run = body?.data ?? body;
+      let config;
+      try {
+        config = typeof run?.configJson === "string" ? JSON.parse(run.configJson) : run?.configJson;
+      } catch {
+        config = null;
+      }
+      oneshot = config?.[BUILTIN_RESUME_CONFIG_KEY]?.command === "oneshot";
+    }
+  }
+  const url = oneshot
+    ? `${base}/workflows/oneshot?runId=${encodeURIComponent(runId)}`
+    : `${base}${MONITOR_UI_MOUNT_PATH}${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`;
   warnIfBrowserUiNeedsBearer(token);
   const opened = c.options.open ? openInBrowser(url) : false;
   console.log(`${opened ? "Opening" : "Monitor URL:"} ${url}`);
   return c.ok(
-    { opened, url, gateway: base, runId: runId ?? null },
+    { opened, url, gateway: base, runId: runId ?? null, view: oneshot ? "oneshot" : "all-runs" },
     {
       cta: {
         description: "The monitor shows every run this gateway owns, live.",
@@ -4051,6 +4071,11 @@ async function runGatewayCommand(options) {
       cwd: workspace,
       env: { ...process.env, FORCE_COLOR: process.env.FORCE_COLOR ?? "1" },
     });
+    const oneshotMonitor = createOneshotMonitorControl({
+      cliEntry,
+      cancelRun: (adapter, runId) => cascadeCancelRun(adapter, runId),
+    });
+    backendCleanups.push(() => oneshotMonitor.dispose());
     /** @type {(workflowKey: string) => Promise<void>} */
     let refreshWorkflowRegistry = async () => {};
     gateway = new Gateway({
@@ -4082,6 +4107,7 @@ async function runGatewayCommand(options) {
         ? { ui: { entry: monitorUiEntry, path: "/monitor", title: "Smithers Monitor" } }
         : {}),
       hijackPty,
+      oneshotMonitor,
     });
     const workspaceApi = await openSmithersBackend(
       {},
@@ -5950,20 +5976,6 @@ function openOneshotUi(runId, cwd) {
   opener.unref();
 }
 
-/** @param {string} runId */
-function oneshotCta(runId) {
-  return {
-    description: "Operate the oneshot run:",
-    commands: [
-      { command: `ui ${runId}`, description: "Open the live oneshot UI" },
-      { command: `chat ${runId}`, description: "Read the agent transcript" },
-      { command: `hijack ${runId}`, description: "Take over the agent session" },
-      { command: `pause ${runId}`, description: "Pause the run" },
-      { command: `cancel ${runId}`, description: "Cancel the run" },
-    ],
-  };
-}
-
 /** @param {import("./DiscoveredWorkflow.ts").DiscoveredWorkflow} discovered */
 function workflowGatewayRegistration(discovered) {
   if (discovered.id !== "oneshot") return { system: discovered.system, entryFile: discovered.entryFile };
@@ -6297,7 +6309,6 @@ const cli = Cli.create({
           sessionId: c.options.startedBySession,
           prompt: c.options.startedByPrompt,
         });
-        const statusUpdater = startOneshotStatusUpdater({ db: workflow.db, runId: effectiveRunId, goal, cwd: taskCwd });
         // Oneshot builds its workflow in-process from the selected agent chain,
         // so there is no `.tsx` for `supervise` to re-run. Record the argv that
         // reconstructs it instead; without this a detached oneshot that loses
@@ -6332,34 +6343,30 @@ const cli = Cli.create({
                 restoreHeartbeatAtMs: c.options.resumeRestoreHeartbeat ?? null,
               }
             : undefined;
-        try {
-          const result = await Effect.runPromise(
-            runWorkflow(workflow, {
-              input: {},
-              runId: effectiveRunId,
-              rootDir: taskCwd,
-              config: {
-                ...(detachedLogFile ? { logFile: detachedLogFile } : {}),
-                oneshot: {
-                  chain: selected.chain,
-                  review,
-                  goal: goal.length > 500 ? `${goal.slice(0, 500)}…` : goal,
-                  preflight: preflightConfigEntry(preflightMode, preflightSummary),
-                },
-                [BUILTIN_RESUME_CONFIG_KEY]: builtinResume,
+        const result = await Effect.runPromise(
+          runWorkflow(workflow, {
+            input: {},
+            runId: effectiveRunId,
+            rootDir: taskCwd,
+            config: {
+              ...(detachedLogFile ? { logFile: detachedLogFile } : {}),
+              oneshot: {
+                chain: selected.chain,
+                review,
+                goal: goal.length > 500 ? `${goal.slice(0, 500)}…` : goal,
+                preflight: preflightConfigEntry(preflightMode, preflightSummary),
               },
-              ...buildDurabilityRunOptions({ resume: c.options.resume, force: c.options.force }),
-              resumeClaim,
-              startedBy,
-              onProgress: buildProgressReporter(),
-              signal: setupAbortSignal().signal,
-            }),
-          );
-          process.exitCode = formatStatusExitCode(result.status);
-          return c.ok(summarizeRunResult(result), { cta: result.runId ? oneshotCta(result.runId) : undefined });
-        } finally {
-          await statusUpdater.stop();
-        }
+              [BUILTIN_RESUME_CONFIG_KEY]: builtinResume,
+            },
+            ...buildDurabilityRunOptions({ resume: c.options.resume, force: c.options.force }),
+            resumeClaim,
+            startedBy,
+            onProgress: buildProgressReporter(),
+            signal: setupAbortSignal().signal,
+          }),
+        );
+        process.exitCode = formatStatusExitCode(result.status);
+        return c.ok(summarizeRunResult(result), { cta: result.runId ? oneshotCta(result.runId) : undefined });
       } catch (error) {
         return fail({
           code: error instanceof SmithersError ? error.code : "ONESHOT_FAILED",
@@ -9939,9 +9946,12 @@ const cli = Cli.create({
   // =========================================================================
   .command("monitor", {
     description:
-      "Open the Smithers Monitor: a live web UI over every run in this workspace (runs, execution trees, events, approvals). Starts the workspace Gateway automatically if none is running; pass --no-autostart or --gateway <url> to opt out.",
+      "Open the Smithers Monitor: a live web UI over every run in this workspace. A focused built-in oneshot opens its transcript, steering, restart, and cheap narrator controls. Starts the workspace Gateway automatically if none is running; pass --no-autostart or --gateway <url> to opt out.",
     args: z.object({
-      runId: z.string().optional().describe("Focus this run when the monitor opens (deep-links ?runId=)."),
+      runId: z
+        .string()
+        .optional()
+        .describe("Focus this run; built-in oneshots open their dedicated transcript, steer, and restart monitor."),
     }),
     options: z.object({
       gateway: z.string().optional().describe("Gateway base URL (default http://127.0.0.1:<port>)."),

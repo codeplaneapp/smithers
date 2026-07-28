@@ -72,34 +72,40 @@ function registeredCodexAccounts(env) {
  *
  * @param {NodeJS.ProcessEnv} env
  * @param {string} cwd
- * @param {{ model?: string }} [options]
+ * @param {{
+ *   model?: string;
+ *   models?: Partial<Record<"codex" | "claude" | "antigravity" | "kimi" | "pi", string>>;
+ *   ids?: Array<"codex" | "claude" | "antigravity" | "kimi" | "pi">;
+ * }} [options]
  * @returns {Array<{ id: string; build: (systemPrompt: string) => { generate: (params: { prompt: string; timeout?: { totalMs: number }; onStdout?: (chunk: string) => void }) => Promise<unknown> } }>}
  */
 export function listNarratorCandidates(env, cwd, options = {}) {
   const detections = detectAvailableAgents(env, { cwd });
   const usable = new Set(detections.filter((d) => !d.deprecated && d.usable).map((d) => d.id));
+  const allowed = options.ids ? new Set(options.ids) : null;
+  const modelFor = (id) => options.models?.[id] ?? options.model;
   const codex = detections.find((entry) => entry.id === "codex");
   const candidates = [];
   const codexBuilder = NARRATOR_AGENTS.find((entry) => entry.id === "codex");
-  if (codexBuilder && codex?.hasBinary) {
+  if ((!allowed || allowed.has("codex")) && codexBuilder && codex?.hasBinary) {
     if (codex.usable) {
       candidates.push({
         id: codexBuilder.id,
-        build: (systemPrompt) => codexBuilder.build(cwd, systemPrompt, undefined, options.model),
+        build: (systemPrompt) => codexBuilder.build(cwd, systemPrompt, undefined, modelFor("codex")),
       });
     }
     for (const account of registeredCodexAccounts(env)) {
       candidates.push({
         id: codexBuilder.id,
-        build: (systemPrompt) => codexBuilder.build(cwd, systemPrompt, account, options.model),
+        build: (systemPrompt) => codexBuilder.build(cwd, systemPrompt, account, modelFor("codex")),
       });
     }
   }
   for (const entry of NARRATOR_AGENTS) {
-    if (entry.id !== "codex" && usable.has(entry.id)) {
+    if (entry.id !== "codex" && usable.has(entry.id) && (!allowed || allowed.has(entry.id))) {
       candidates.push({
         id: entry.id,
-        build: (systemPrompt) => entry.build(cwd, systemPrompt, undefined, options.model),
+        build: (systemPrompt) => entry.build(cwd, systemPrompt, undefined, modelFor(entry.id)),
       });
     }
   }

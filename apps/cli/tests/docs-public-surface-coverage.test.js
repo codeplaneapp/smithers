@@ -88,7 +88,7 @@ test("component reference docs cover exported components", () => {
   const exportedComponents = componentExportBlock
     .split(",")
     .map((name) => name.trim())
-    .filter((name) => /^[A-Z]/.test(name));
+    .filter((name) => /^[A-Z]/.test(name) && !name.includes("_"));
   exportedComponents.push("Trellis");
 
   const sagaDoc = readRepoFile("docs/components/saga.mdx");

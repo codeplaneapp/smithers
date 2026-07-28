@@ -704,6 +704,23 @@ type MemoryProps = {
   tools?: boolean;
   children?: React.ReactNode;
 };
+type MonitorProps = {
+  id?: string;
+  watchRunId: string;
+  agent: AgentLike | AgentLike[];
+  healthOutput: OutputTarget;
+  actionOutput?: OutputTarget;
+  healAgent?: AgentLike | AgentLike[];
+  intervalMs?: number;
+  maxChecks?: number;
+  stallBeats?: number;
+  autoHeal?: MonitorCondition[];
+  handlers?: Partial<Record<MonitorCondition, React.ReactElement | null>>;
+  guidance?: string;
+  prompt?: string | React.ReactNode;
+  skipIf?: boolean;
+  children?: string | React.ReactNode;
+};
 type BranchProps    = { if: boolean; then: React.ReactElement; else?: React.ReactElement | null; skipIf?: boolean };
 type LoopProps      = {
   key?: string;

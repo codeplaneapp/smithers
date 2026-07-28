@@ -189,6 +189,20 @@ export function formatEventLine(event, baseMs, options) {
       return payload?.mode === "conversation"
         ? `${prefix}⇢ Hijacked ${payload?.engine ?? "agent"} conversation`
         : `${prefix}⇢ Hijacked ${payload?.engine ?? "agent"} session ${payload?.resume ?? ""}`.trim();
+    case "OneshotSteerQueued":
+      return `${prefix}⇢ Oneshot steering queued (${payload?.messageId ?? "unknown"})`;
+    case "OneshotSteerDelivered":
+      return `${prefix}⇢ Oneshot steering delivered to ${payload?.engine ?? "agent"}`;
+    case "OneshotSteerAcknowledged":
+      return `${prefix}✓ Oneshot steering acknowledged by ${payload?.engine ?? "agent"}`;
+    case "OneshotSteerFailed":
+      return `${prefix}✗ Oneshot steering failed: ${truncateText(payload?.error ?? "unknown", truncatePayloadAt)}`;
+    case "OneshotRestartRequested":
+      return `${prefix}⇢ Oneshot restart requested as ${payload?.restartedAsRunId ?? "unknown"}`;
+    case "OneshotRestartLaunched":
+      return `${prefix}✓ Oneshot restart launched as ${payload?.restartedAsRunId ?? "unknown"}`;
+    case "OneshotRestartFailed":
+      return `${prefix}✗ Oneshot restart failed: ${truncateText(payload?.error ?? "unknown", truncatePayloadAt)}`;
     case "SandboxCreated":
       return `${prefix}🧪 Sandbox created: ${payload?.sandboxId ?? "?"} (${payload?.runtime ?? "bubblewrap"})`;
     case "SandboxShipped":

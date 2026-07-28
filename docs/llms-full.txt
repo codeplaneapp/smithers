@@ -2389,16 +2389,42 @@ Oneshot runs directly in `--cwd`, so a stale detached lineage, foreign WIP, or
 The default `--preflight auto` warns and prepends agent-judged triage
 instructions; use `warn` to warn without injection or `off` to skip assessment.
 
-## The live dashboard
+## Watching and steering a oneshot
 
-The oneshot UI shows the run as it happens:
+Every launch CTA tells the operator to offer the monitor to the user. Open it
+directly with:
 
-- **Goal and status cards** with the execution metadata (agent, model, chain).
-- **A live status narrator**: a cheap sidecar agent watches the implement and
-  review agents' recorded output and posts one-line "what is it doing"
-  updates into a pulsing status card, so a stuck run is obvious without
-  reading the raw transcript.
-- Chat, diff, hijack, pause, and cancel controls.
+```bash
+bunx smithers-orchestrator monitor ONESHOT_RUN_ID
+```
+
+For a built-in oneshot, this opens the dedicated oneshot monitor. It includes
+the live implement and review transcripts, diff, durable event log, pause and
+cancel controls, plus:
+
+- **Steer**: send a message from the chat composer. Delivery is shown as
+  `queued`, `delivered`, `agent-acked`, or an explicit failure. Claude Code is
+  currently supported by interrupting at the next recorded agent-event
+  boundary, resuming the same Claude session with the appended message, then
+  resuming the Smithers run. If delivery fails after handoff, the monitor clears
+  the hijack request and returns control to Smithers so the run is not stranded.
+  Codex, Kimi, and OpenCode are shown as unsupported
+  because their current headless sessions do not provide an equally reliable
+  live message boundary. Use `bunx smithers-orchestrator hijack RUN_ID` for
+  interactive takeover.
+- **Restart**: after confirmation, cancel the active attempt if needed and
+  launch a fresh run from the durable `builtinResume` argv recorded at the
+  original launch. The UI follows the new run id.
+- **Cheap narrator**: while the monitor remains attached, the Luna/trivial
+  model tier tails recorded agent activity and emits short status lines. It
+  stops after the attachment lease expires, so an unattended oneshot does not
+  pay narration cost. Lines are persisted as run events and reappear after a
+  monitor reattaches.
+
+Steering and restart requests and outcomes are durable run events shown by
+`bunx smithers-orchestrator status RUN_ID`, `events RUN_ID`, and
+`timeline RUN_ID`. Narrator lines are durable `NodeOutput` events shown by
+`events RUN_ID --raw` and by a later monitor attachment.
 
 On an interactive TTY, `--interactive` opens the full-screen TUI monitor
 instead of the detached default. `--detach false` runs in the foreground.
@@ -2621,7 +2647,7 @@ The status header shrinks to a compact one-liner on terminals narrower than 100 
 
 A detached run (`up --detach` / `run --detach`) and an MCP `run_workflow` background launch both execute where the user has no live view of progress. To close that gap, the CLI returns a `monitoring` block with the run and prints agent-directed guidance in the "Next steps" CTA: offer the user one of these ways to watch the run, then set up whichever they pick.
 
-1. **Smithers Monitor (live, zero setup):** run `bunx smithers-orchestrator monitor RUN_ID` to open the gateway's live web UI over every run in the workspace, focused on this one (status, execution tree, events, approvals), no code required. See the Smithers Monitor.
+1. **Smithers Monitor (live, zero setup):** run `bunx smithers-orchestrator monitor RUN_ID`. A built-in oneshot opens its dedicated transcript, steer, restart, and attachment-scoped cheap narrator surface. Other runs open the all-runs workspace view focused on that run (status, execution tree, events, approvals). See the Smithers Monitor.
 2. **Status-report cron (hands-off):** a Bun job that every 5 minutes calls Gateway `getRun` and reports the status; use `streamRunEventsResilient` while the process is awake.
 3. **Live custom UI (richest, most work):** run `bunx smithers-orchestrator ui RUN_ID` when the workflow declares a `.smithers/ui/<workflow>.tsx` UI with `<UI entry="../ui/<workflow>.tsx" />`, otherwise author the UI source and declaration first. See custom workflow UIs.
 4. **Quick HTML page (fastest):** write a static status page from Gateway `getRun` / `getDevToolsSnapshot`, open it, and refresh it about every 5 minutes.
@@ -2890,9 +2916,9 @@ commands[102]:
       insecure,,boolean,false,Allow a non-loopback host with NO auth (dangerous)
       idle-timeout,,number,,Exit after this many ms with no clients, in-flight runs, or registered schedules (0 = stay up; autostarted daemons set this automatically); overridable via SMITHERS_GATEWAY_IDLE_MS
   - name: monitor
-    purpose: Open the Smithers Monitor, the gateway's live web UI over every run in the workspace (served at /monitor, no .smithers pack required). Pure observation; launches no run, no workflow, no agents. Resolves the workspace's singleton gateway (--gateway probe, then runtime-state discovery, then legacy port probe, then autostart) and opens the browser
+    purpose: Open the Smithers Monitor. A built-in oneshot opens its dedicated live transcript, honest steering delivery, restart, and attachment-scoped cheap narrator controls. Other runs use the all-runs workspace view. Resolves the workspace's singleton gateway (--gateway probe, then runtime-state discovery, then legacy port probe, then autostart) and opens the browser
     args[1]{name,type,required,desc}:
-      runId,string,false,Focus this run when the monitor opens (deep-linked as ?runId=)
+      runId,string,false,Focus this run; built-in oneshots open their dedicated monitor
     flags[5]{name,short,type,default,desc}:
       gateway,g,string,,Gateway base URL (default http://127.0.0.1:<port>)
       port,,number,7331,Gateway port when --gateway is not set
@@ -9015,6 +9041,23 @@ type MemoryProps = {
   tools?: boolean;
   children?: React.ReactNode;
 };
+type MonitorProps = {
+  id?: string;
+  watchRunId: string;
+  agent: AgentLike | AgentLike[];
+  healthOutput: OutputTarget;
+  actionOutput?: OutputTarget;
+  healAgent?: AgentLike | AgentLike[];
+  intervalMs?: number;
+  maxChecks?: number;
+  stallBeats?: number;
+  autoHeal?: MonitorCondition[];
+  handlers?: Partial<Record<MonitorCondition, React.ReactElement | null>>;
+  guidance?: string;
+  prompt?: string | React.ReactNode;
+  skipIf?: boolean;
+  children?: string | React.ReactNode;
+};
 type BranchProps    = { if: boolean; then: React.ReactElement; else?: React.ReactElement | null; skipIf?: boolean };
 type LoopProps      = {
   key?: string;
@@ -13556,9 +13599,13 @@ A run id that doesn't exist isn't a `RunState`. It's an error
 
 ## The Smithers Monitor
 
-> A zero-setup live web UI over every run in the workspace, served by the workspace gateway at /monitor and opened with smithers monitor.
+> A zero-setup live web UI over workspace runs, with a dedicated transcript, steer, restart, and cheap narrator surface for built-in oneshots.
 
-The Smithers Monitor is a live browser view over **every run in the workspace**, all on one page. It ships inside the CLI (no `.smithers/` pack or UI code required) and is pure observation: opening it launches no run, workflow, or agent.
+The Smithers Monitor is a live browser view over **every run in the workspace**,
+all on one page. It ships inside the CLI with no `.smithers/` pack or UI code
+required. Passing a built-in oneshot run id opens that run's dedicated monitor
+instead, including live transcripts, steering, restart, and a cheap narrator
+that runs only while the monitor stays attached.
 
 ## 10-second quickstart
 
@@ -13567,7 +13614,11 @@ bunx smithers-orchestrator monitor              # open the monitor over all runs
 bunx smithers-orchestrator monitor --no-open    # print the URL instead of opening a browser
 ```
 
-The command resolves the workspace's singleton gateway like `bunx smithers-orchestrator ui` does: explicit `--gateway` probe, then runtime-state discovery, then the legacy port probe on `--port` (default 7331). It **autostarts** `smithers gateway` when none is running (disable with `--no-autostart`; `--no-daemon` or `SMITHERS_NO_DAEMON=1` disables daemonized autostart), opens the gateway's `/monitor` page in the browser, deep-links `?runId=` if you passed one, and prints a `{ opened, url, gateway, runId }` envelope.
+The command resolves the workspace's singleton gateway like `bunx smithers-orchestrator ui` does: explicit `--gateway` probe, then runtime-state discovery, then the legacy port probe on `--port` (default 7331). It **autostarts** `smithers gateway` when none is running (disable with `--no-autostart`; `--no-daemon` or `SMITHERS_NO_DAEMON=1` disables daemonized autostart), opens `/workflows/oneshot?runId=` for a built-in oneshot or `/monitor?runId=` otherwise, and prints a `{ opened, url, gateway, runId, view }` envelope.
+
+See Watching and steering a oneshot
+for the steering engine matrix, durable delivery states, restart semantics, and
+narrator cost discipline.
 
 ## What you see
 
@@ -13588,7 +13639,7 @@ The overview is organized around triage: what needs you first, what is running n
 
 | Surface | What it is for |
 | --- | --- |
-| `bunx smithers-orchestrator monitor` | Watch **all runs** live in the browser: triage, approvals, and drill-down, zero setup. |
+| `bunx smithers-orchestrator monitor [RUN_ID]` | Watch all runs, or open the dedicated monitor when `RUN_ID` is a built-in oneshot. |
 | `bunx smithers-orchestrator ui` | Open **one workflow's own custom UI** (`.smithers/ui/<workflow>.tsx`), built for its domain. |
 | `bunx smithers-orchestrator ps` / `logs` / `inspect` | The terminal watch loop: scriptable, agent-drivable, works over SSH. See the CLI catalog. |
 
@@ -21641,7 +21692,7 @@ under `frame.payload`. Client-side equivalent:
 const { events } = useGatewayRunEvents(runId, { afterSeq: 0 });
 for (const frame of events) {
   if (frame.event === "NodeFailed") {
-    const { nodeId, error } = frame.payload;   // NOT frame.type / frame.nodeId
+    const { nodeId, error } = frame.payload; // NOT frame.type / frame.nodeId
     // error is the errorToJson value: read error.message
   }
 }
@@ -21652,8 +21703,10 @@ per-node status view, keyed by `frame.payload.nodeId`. The table below lists
 each variant's fields; in a UI those live under `frame.payload`. Frames
 reconstructed from persisted rows also carry an optional `timestampMs` (epoch
 millis from the stored row) and surface `stateVersion: 0`.
+
 </Warning>
 
+<!-- prettier-ignore -->
 | Event | Top-level fields |
 |---|---|
 | `SupervisorStarted` | `runId`, `pollIntervalMs`, `staleThresholdMs`, `timestampMs` |
@@ -21669,6 +21722,13 @@ millis from the stored row) and surface `stateVersion: 0`.
 | `RunContinuedAsNew` | `runId`, `newRunId`, `iteration`, `carriedStateSize`, `ancestryDepth?`, `timestampMs` |
 | `RunHijackRequested` | `runId`, `target?`, `timestampMs` |
 | `RunHijacked` | `runId`, `nodeId`, `iteration`, `attempt`, `engine`, `mode`, `resume?`, `cwd`, `timestampMs` |
+| `OneshotSteerQueued` | `runId`, `nodeId`, `messageId`, `message`, `engine`, `delivery`, `timestampMs` |
+| `OneshotSteerDelivered` | `runId`, `nodeId`, `messageId`, `engine`, `delivery`, `timestampMs` |
+| `OneshotSteerAcknowledged` | `runId`, `nodeId`, `messageId`, `engine`, `delivery`, `timestampMs` |
+| `OneshotSteerFailed` | `runId`, `nodeId`, `messageId`, `message?`, `engine?`, `delivery`, `error`, `resumed?`, `recoveryError?`, `timestampMs` |
+| `OneshotRestartRequested` | `runId`, `restartedAsRunId`, `priorStatus`, `timestampMs` |
+| `OneshotRestartLaunched` | `runId`, `restartedAsRunId`, `pid`, `timestampMs` |
+| `OneshotRestartFailed` | `runId`, `restartedAsRunId`, `error`, `timestampMs` |
 | `SandboxCreated` | `runId`, `sandboxId`, `runtime`, `configJson`, `timestampMs` |
 | `SandboxShipped` | `runId`, `sandboxId`, `runtime`, `bundleSizeBytes`, `timestampMs` |
 | `SandboxHeartbeat` | `runId`, `sandboxId`, `remoteRunId?`, `progress?`, `timestampMs` |
@@ -21752,5 +21812,13 @@ type AgentCliEvent =
       ok?: boolean;
       level?: "debug" | "info" | "warning" | "error";
     }
-  | { type: "completed"; engine: string; ok: boolean; answer?: string; error?: string; resume?: string; usage?: Record<string, unknown> };
+  | {
+      type: "completed";
+      engine: string;
+      ok: boolean;
+      answer?: string;
+      error?: string;
+      resume?: string;
+      usage?: Record<string, unknown>;
+    };
 ```
