@@ -445,12 +445,7 @@ const laneMocks = (slug: string) => ({
 });
 
 describe("simulation (coverWorkflow drives async approvals in-band)", () => {
-  // QUARANTINED (smithers#1442): these three simulations were committed
-  // expecting a version of ../lib/stackedShip.ts that never landed (it sits
-  // unmerged in the authoring worktree), so on main they degrade into schema
-  // auto-mock placeholders (summary "string", lanesTotal 0). Un-skip when the
-  // stacked-ship lib wave lands.
-  test.skip("happy path: two lanes build, get approved, assemble, and summarize", async () => {
+  test("happy path: two lanes build, get approved, assemble, and summarize", async () => {
     const result = await coverWorkflow(workflow, {
       input: { laneConcurrency: 1 },
       workflowPath: WORKFLOW_PATH,
@@ -489,7 +484,7 @@ describe("simulation (coverWorkflow drives async approvals in-band)", () => {
     expect(String(summary?.summary)).toContain("2/2 lanes green");
   });
 
-  test.skip("deny then approve: the denial note reaches the rework prompt and the artifact regenerates", async () => {
+  test("deny then approve: the denial note reaches the rework prompt and the artifact regenerates", async () => {
     const reworkPrompts: string[] = [];
     const result = await coverWorkflow(workflow, {
       input: { planJson: SINGLE_PLAN_JSON, laneConcurrency: 1, reviewRounds: 3 },
@@ -533,7 +528,7 @@ describe("simulation (coverWorkflow drives async approvals in-band)", () => {
     expect(summary).toMatchObject({ lanesTotal: 1, lanesApproved: 1 });
   });
 
-  test.skip("never approved: the review loop exhausts, the run still finishes, and nothing is pushed", async () => {
+  test("never approved: the review loop exhausts, the run still finishes, and nothing is pushed", async () => {
     const result = await coverWorkflow(workflow, {
       input: { planJson: SINGLE_PLAN_JSON, laneConcurrency: 1, reviewRounds: 2 },
       workflowPath: WORKFLOW_PATH,
