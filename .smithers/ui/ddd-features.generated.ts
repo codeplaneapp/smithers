@@ -992,7 +992,9 @@ export const featuresData = [
       "packages/gateway-ui",
       "packages/devtools",
       "packages/tui",
+      "packages/tui-ui",
       "packages/ui",
+      "packages/ui-core",
       "packages/ui-styleguide"
     ],
     "missing": []

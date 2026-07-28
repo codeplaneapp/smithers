@@ -102,5 +102,7 @@ The TUI reuses Gateway hooks for live tree, graph, logs, timeline, and hijack vi
 - `packages/gateway-ui`
 - `packages/devtools`
 - `packages/tui`
+- `packages/tui-ui`
 - `packages/ui`
+- `packages/ui-core`
 - `packages/ui-styleguide`

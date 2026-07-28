@@ -143,12 +143,10 @@ const workflowOwners = {
     "vcs.tsx",
     "verify-push-safety.tsx",
   ],
-  "./tests/local-workflows-d-campaigns.test.tsx": [
-    "design-partner-fixes.tsx",
-    "sol-issue-train.tsx",
-    "tui-parity.tsx",
-    "xcombo-fix-train.tsx",
-  ],
+  // Owns tui-parity only. Its design-partner-fixes / sol-issue-train /
+  // xcombo-fix-train cases still run, but local-workflows-c-orchestration is
+  // the registered owner for those three — ownership must be exactly once.
+  "./tests/local-workflows-d-campaigns.test.tsx": ["tui-parity.tsx"],
   "./tests/local-workflows-c-orchestration.test.tsx": [
     "design-partner-fixes.tsx",
     "monitor-redesign.tsx",
