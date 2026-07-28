@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, statSync } from "node:fs";
 import type { GatewayRunNode } from "@smithers-orchestrator/gateway-client";
 import { spawn as nodeSpawn } from "node:child_process";
 import { tmpdir } from "node:os";
-import { dirname, join, parse, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { resolveCliEntry } from "../src/cliEntry.ts";
 import { DEFAULT_GATEWAY_PORT, resolveGatewayConfig } from "../src/gatewayConfig.ts";
 import {
@@ -112,9 +112,12 @@ describe("gatewayRuntimeState edge branches", () => {
   });
 
   test("resolveMonitorWorkspaceRoot returns the start dir when no marker exists anywhere up the tree", () => {
-    // Use a missing path directly below the filesystem root so unrelated
-    // markers left in the shared OS temp directory cannot affect this test.
-    const nested = join(parse(tmpdir()).root, `smx-nomarker-${process.pid}-${Date.now()}`, "a", "b", "c");
+    // A fresh temp dir under the OS tmp root: no `.smithers/` pack and no
+    // `smithers.db` in it or any ancestor, so both walk-up passes exhaust and
+    // the start directory is returned unchanged.
+    const dir = tempDir("smx-nomarker-");
+    const nested = join(dir, "a", "b", "c");
+    mkdirSync(nested, { recursive: true });
     expect(resolveMonitorWorkspaceRoot(nested, {}, sandboxedMarkerChecks(dir))).toBe(resolve(nested));
   });
 
