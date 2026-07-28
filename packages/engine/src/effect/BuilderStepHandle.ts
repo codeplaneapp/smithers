@@ -3,7 +3,11 @@ import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import type { CachePolicy } from "@smithers-orchestrator/scheduler/CachePolicy";
 import type { RetryPolicy } from "@smithers-orchestrator/scheduler/RetryPolicy";
 
-type AnySchema = Schema.Schema<unknown, unknown, never>;
+// `unknown` here made every concrete `Schema.Struct<...>` unassignable (schema
+// type params are invariant), so the documented Effect API could not typecheck
+// at all. `any` keeps the shape while accepting any concrete schema.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnySchema = Schema.Schema<any, any, never>;
 type AnyEffect = unknown | Promise<unknown> | Effect.Effect<unknown, unknown, unknown>;
 
 type BuilderStepContext = Record<string, unknown> & {

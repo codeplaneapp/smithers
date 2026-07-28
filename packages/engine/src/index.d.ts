@@ -1673,7 +1673,7 @@ type SmithersSqliteOptions$1 = {
     filename: string;
 };
 
-type AnySchema$1 = Schema.Schema<unknown, unknown, never>;
+type AnySchema$1 = Schema.Schema<any, any, never>;
 type AnyEffect$1 = unknown | Promise<unknown> | Effect.Effect<unknown, unknown, unknown>;
 type BuilderStepContext$1 = Record<string, unknown> & {
     input: unknown;
@@ -1873,7 +1873,7 @@ declare function workflow(options: {
  * @param {AnySchema} inputSchema
  */
 declare function fragment(inputSchema: AnySchema): {
-    inputSchema: Schema.Schema<unknown, unknown, never>;
+    inputSchema: Schema.Schema<any, any, never>;
     /**
      * @param {string} id
      * @param {StepOptions} options
@@ -1950,7 +1950,7 @@ type WorkflowGraph = {
     expr: unknown;
     pipe: (...fns: Array<(g: any) => any>) => any;
 };
-type AnySchema = effect.Schema.Schema<unknown, unknown, never>;
+type AnySchema = effect.Schema.Schema<any, any, never>;
 type AnyEffect = unknown | Promise<unknown> | effect.Effect.Effect<unknown, unknown, unknown>;
 type ApprovalOptions = {
     needs?: Record<string, BuilderStepHandle>;
@@ -2045,7 +2045,7 @@ declare function pglite(options?: {
 declare class ApprovalDecision {
 }
 /**
- * @typedef {import("effect").Schema.Schema<unknown, unknown, never>} AnySchema
+ * @typedef {import("effect").Schema.Schema<any, any, never>} AnySchema
  */
 /**
  * @typedef {unknown | Promise<unknown> | import("effect").Effect.Effect<unknown, unknown, unknown>} AnyEffect
