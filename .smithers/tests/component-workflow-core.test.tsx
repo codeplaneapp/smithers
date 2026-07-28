@@ -42,6 +42,7 @@ const feature = (name: string, hash = "hash") => ({
 const review = (reviewer: string, approved = true) => ({
   reviewer,
   approved,
+  blocked: false,
   feedback: approved ? "looks good" : "missing auth",
   issues: [],
 });
@@ -672,10 +673,10 @@ describe("component workflow core", () => {
   test("Review covers legacy/labelled panels, prompts, propagation, policy, schema rejection, feedback and gates", async () => {
     const reviewer = fakeAgent(reviewOutputSchema, { output: review("reviewer-1") });
     const moderator = fakeAgent(reviewSynthesisSchema, {
-      output: { approved: false, feedback: "fix auth", issues: [issue] },
+      output: { approved: false, blocked: false, feedback: "fix auth", issues: [issue] },
     });
     const invalid = fakeAgent(reviewOutputSchema, {
-      output: { reviewer: "bad", approved: "yes" as never, feedback: "bad", issues: [] },
+      output: { reviewer: "bad", approved: "yes" as never, blocked: false, feedback: "bad", issues: [] },
     });
     const legacy = await render(
       <>
@@ -740,14 +741,19 @@ describe("component workflow core", () => {
       blocked: false,
       feedback: null,
     });
-    expect(reviewGate({ latest: () => ({ approved: true, feedback: "", issues: [] }) }, "panel-moderator")).toEqual({
+    expect(
+      reviewGate({ latest: () => ({ approved: true, blocked: false, feedback: "", issues: [] }) }, "panel-moderator"),
+    ).toEqual({
       hasVerdict: true,
       approved: true,
       blocked: false,
       feedback: null,
     });
     expect(
-      reviewGate({ latest: () => ({ approved: false, feedback: "fix auth", issues: [issue] }) }, "panel-moderator"),
+      reviewGate(
+        { latest: () => ({ approved: false, blocked: false, feedback: "fix auth", issues: [issue] }) },
+        "panel-moderator",
+      ),
     ).toEqual({
       hasVerdict: true,
       approved: false,

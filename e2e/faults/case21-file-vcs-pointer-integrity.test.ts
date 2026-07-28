@@ -29,6 +29,8 @@ async function expectTreeMatches(pointer: string, workspace: string): Promise<vo
 
 async function expectCurrentPointer(changeId: string, workspace: string): Promise<void> {
   const pointer = await runVcs(getJjPointer(workspace));
+  expect(pointer).not.toBeNull();
+  if (pointer === null) throw new Error(`workspace ${workspace} reported no jj pointer`);
   expect(pointer).toMatch(/^[0-9a-f]{40}$/);
 
   const snapshot = await runVcs(captureWorkspaceSnapshot(workspace));

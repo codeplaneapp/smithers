@@ -106,7 +106,7 @@ const validate = fakeAgent(validateOutputSchema, {
   output: { summary: "valid", allPassed: true, failingSummary: null },
 });
 const review = fakeAgent(reviewOutputSchema, {
-  output: { reviewer: "reviewer", approved: true, feedback: "accepted", issues: [] },
+  output: { reviewer: "reviewer", approved: true, blocked: false, feedback: "accepted", issues: [] },
 });
 const fortressHarden = fakeAgent(tfHardenSchema, {
   output: {
@@ -705,9 +705,11 @@ describe("ValidationLoop", () => {
     expect(ids(feedback)).not.toContain("f:review:0");
     expect(xmlProps(feedback)).toMatchObject({ maxIterations: "5" });
     const panelist = fakeAgent(reviewOutputSchema, {
-      output: { reviewer: "panel", approved: true, feedback: "ok", issues: [] },
+      output: { reviewer: "panel", approved: true, blocked: false, feedback: "ok", issues: [] },
     });
-    const moderator = fakeAgent(reviewSynthesisSchema, { output: { approved: true, feedback: "ok", issues: [] } });
+    const moderator = fakeAgent(reviewSynthesisSchema, {
+      output: { approved: true, blocked: false, feedback: "ok", issues: [] },
+    });
     const panel = await renderWorkflow(
       harness(
         <ValidationLoop
