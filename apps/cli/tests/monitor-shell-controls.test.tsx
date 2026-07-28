@@ -23,7 +23,7 @@ const previousReactActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: 
 GlobalRegistrator.register({ url: "http://localhost/monitor" });
 globalThis.fetch = nativeFetch;
 
-const { act } = await import("react");
+const { act, useState } = await import("react");
 const { createRoot } = await import("react-dom/client");
 type ReactElement = import("react").ReactElement;
 type Root = import("react-dom/client").Root;
@@ -31,8 +31,16 @@ const { SMITHERS_UI_STYLE_ATTR, smithersUiCss } = await import("smithers-orchest
 const { workflowUiThemeCss } = await import("smithers-orchestrator/gateway-ui");
 const { Chip, MonitorToolbar, RunLifecycleActions, RunLifecycleControls, RunRailRow, RunsPagination } =
   await import("../src/monitor-ui/monitorShell.tsx");
-const { createMonitorKeydownHandler, monitorCss, RunProgressCell, RunsRail, RunsTable, StatCard, StatusTag } =
-  await import("../src/monitor-ui/monitor.tsx");
+const {
+  createMonitorKeydownHandler,
+  monitorCss,
+  RunProgressCell,
+  RunSelectionState,
+  RunsRail,
+  RunsTable,
+  StatCard,
+  StatusTag,
+} = await import("../src/monitor-ui/monitor.tsx");
 const monitorSource = readFileSync(new URL("../src/monitor-ui/monitor.tsx", import.meta.url), "utf8");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -823,6 +831,69 @@ describe("RunLifecycleControls", () => {
     expect(actions).toEqual([]);
     await click(byTestId("monitor-confirm-cancel-run"));
     expect(actions).toEqual(["cancel"]);
+  });
+});
+
+describe("unavailable run selections", () => {
+  test("distinguishes loading, missing, and failed selections", async () => {
+    const noOp = () => {};
+    await render(<RunSelectionState runId="deep-link-42" loading onRetry={noOp} onReturnToRuns={noOp} />);
+    expect(byTestId("monitor-run-loading").textContent).toContain("deep-link-42");
+    expect(document.querySelector('[data-testid="monitor-run-return"]')).toBeNull();
+
+    await rerender(<RunSelectionState runId="deep-link-42" loading={false} onRetry={noOp} onReturnToRuns={noOp} />);
+    expect(byTestId("monitor-run-unavailable").textContent).toContain("Run unavailable");
+    expect(byTestId("monitor-run-unavailable").textContent).toContain("deep-link-42");
+    expect(byTestId("monitor-run-refresh")).toBeTruthy();
+    expect(byTestId("monitor-run-return")).toBeTruthy();
+
+    for (const error of [
+      Object.assign(new Error("no run"), { code: "RunNotFound" }),
+      Object.assign(new Error("no run"), { code: "NOT_FOUND", status: 404 }),
+    ]) {
+      await rerender(
+        <RunSelectionState runId="deep-link-42" loading={false} error={error} onRetry={noOp} onReturnToRuns={noOp} />,
+      );
+      expect(byTestId("monitor-run-unavailable").textContent).toContain("Run unavailable");
+    }
+
+    await rerender(
+      <RunSelectionState
+        runId="deep-link-42"
+        loading={false}
+        error={new Error("gateway timed out")}
+        onRetry={noOp}
+        onReturnToRuns={noOp}
+      />,
+    );
+    expect(byTestId("monitor-run-query-error").getAttribute("role")).toBe("alert");
+    expect(byTestId("monitor-run-query-error").textContent).toContain("Couldn't load run");
+    expect(byTestId("monitor-run-query-error").textContent).toContain("gateway timed out");
+    expect(byTestId("monitor-run-retry")).toBeTruthy();
+  });
+
+  test("retries a failed selection and returns safely to the runs landing", async () => {
+    let returns = 0;
+    const RecoveryHarness = () => {
+      const [recovered, setRecovered] = useState(false);
+      return recovered ? (
+        <div data-testid="monitor-run-recovered">Recovered run</div>
+      ) : (
+        <RunSelectionState
+          runId="run-recover"
+          loading={false}
+          error={new Error("temporary failure")}
+          onRetry={() => setRecovered(true)}
+          onReturnToRuns={() => returns++}
+        />
+      );
+    };
+
+    await render(<RecoveryHarness />);
+    await click(byTestId("monitor-run-return"));
+    expect(returns).toBe(1);
+    await click(byTestId("monitor-run-retry"));
+    expect(byTestId("monitor-run-recovered").textContent).toBe("Recovered run");
   });
 });
 

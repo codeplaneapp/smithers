@@ -4152,10 +4152,68 @@ function RunUsageChip({
   );
 }
 
+function isRunNotFoundError(error: Error | undefined): boolean {
+  if (error === undefined) return false;
+  if ("status" in error && error.status === 404) return true;
+  if (!("code" in error)) return false;
+  return error.code === "RunNotFound" || error.code === "RUN_NOT_FOUND" || error.code === "NOT_FOUND";
+}
+
+export function RunSelectionState({
+  runId,
+  loading,
+  error,
+  onRetry,
+  onReturnToRuns,
+}: {
+  runId: string;
+  loading: boolean;
+  error?: Error;
+  onRetry: () => void | Promise<void>;
+  onReturnToRuns: () => void;
+}) {
+  if (loading) {
+    return (
+      <div className="mon-empty" data-testid="monitor-run-loading" role="status">
+        <div>Loading run…</div>
+        <div className="mon-dim mon-mono">{runId}</div>
+      </div>
+    );
+  }
+
+  const missing = error === undefined || isRunNotFoundError(error);
+  return (
+    <div
+      className="mon-empty"
+      data-testid={missing ? "monitor-run-unavailable" : "monitor-run-query-error"}
+      role={missing ? "status" : "alert"}
+    >
+      <div>{missing ? "Run unavailable." : "Couldn't load run."}</div>
+      <div className="mon-dim mon-mono">{runId}</div>
+      <div className="mon-dim">
+        {missing ? "The requested run does not exist or is no longer available." : error?.message}
+      </div>
+      <div className="mon-empty-actions">
+        <Button
+          variant="outline"
+          data-testid={missing ? "monitor-run-refresh" : "monitor-run-retry"}
+          onClick={() => void onRetry()}
+        >
+          {missing ? "Refresh" : "Retry"}
+        </Button>
+        <Button variant="outline" data-testid="monitor-run-return" onClick={onReturnToRuns}>
+          Return to runs
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function RunDetail({
   runId,
   scores,
   onResult,
+  onReturnToRuns,
   selectedNode,
   onSelectNode,
   autoSelectNodeId,
@@ -4164,6 +4222,7 @@ function RunDetail({
   runId: string;
   scores: RunScores;
   onResult: (kind: "ok" | "err", text: string) => void;
+  onReturnToRuns: () => void;
   selectedNode: TreeNode | undefined;
   onSelectNode: (node: TreeNode | undefined) => void;
   autoSelectNodeId?: string;
@@ -4221,13 +4280,15 @@ function RunDetail({
 
   const run = isRecord(runQuery.data) ? runQuery.data : null;
 
-  if (!run && runQuery.loading) return <div className="mon-empty">Loading run…</div>;
-  if (!run) {
+  if (!run || isRunNotFoundError(runQuery.error)) {
     return (
-      <div className="mon-empty" data-testid="monitor-run-missing">
-        <div>Run not found.</div>
-        <div className="mon-dim mon-mono">{runId}</div>
-      </div>
+      <RunSelectionState
+        runId={runId}
+        loading={runQuery.loading}
+        error={runQuery.error}
+        onRetry={runQuery.refetch}
+        onReturnToRuns={onReturnToRuns}
+      />
     );
   }
 
@@ -4666,6 +4727,7 @@ function App() {
               runId={selectedRunId}
               scores={scores}
               onResult={showResult}
+              onReturnToRuns={() => selectRun(undefined)}
               selectedNode={selectedNode}
               onSelectNode={selectNode}
               autoSelectNodeId={initialNodeId.current}
@@ -5091,6 +5153,7 @@ code { font-family: var(--font-mono); font-size: var(--fs-2); background: var(--
 .mon-hijack-terminal .xterm { height: 100%; }
 
 .mon-empty { color: var(--muted); text-align: center; padding: var(--sp-6) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-1); }
+.mon-empty-actions { display: flex; justify-content: center; gap: var(--sp-2); margin-top: var(--sp-3); }
 .mon-empty-hero { padding-top: 18vh; }
 
 /* Workspace overview: ops strip above the runs table, crons panel below.
