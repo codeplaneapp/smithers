@@ -178,6 +178,44 @@ test("selecting a tree node loads its real output", async ({ page }) => {
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
 });
 
+test("a transient output fetch failure can be retried", async ({ page }) => {
+  const pageErrors = trackPageErrors(page);
+  const run = await findFinishedTaskRun(page);
+  let allowOutputFetch = false;
+  let failedFetches = 0;
+  let successfulFetches = 0;
+
+  await page.route(
+    (url) => url.pathname.startsWith("/v1/api/nodes/") && url.pathname.endsWith("/output"),
+    async (route) => {
+      if (!allowOutputFetch) {
+        failedFetches += 1;
+        await route.abort("connectionfailed");
+        return;
+      }
+      successfulFetches += 1;
+      await route.continue();
+    },
+  );
+
+  await page.goto(`/gw/e2e-task/${run.runId}`);
+  await page.getByTestId("gateway-view-inspector").click();
+  await page.getByTestId("tree-row-compute").click();
+
+  const detail = page.getByTestId("gateway-node-detail");
+  await expect(detail.getByRole("alert")).toContainText("Output unavailable.");
+  await expect(detail).not.toContainText("No output for this node.");
+  expect(failedFetches).toBeGreaterThan(0);
+
+  allowOutputFetch = true;
+  await detail.getByRole("button", { name: "Retry output" }).click();
+
+  await expect(page.getByTestId("gateway-node-output")).toContainText('"value": 42');
+  expect(successfulFetches).toBeGreaterThan(0);
+  await expect(detail.getByRole("alert")).toHaveCount(0);
+  expect(pageErrors, pageErrors.join("\n")).toEqual([]);
+});
+
 test("a failed node shows partial output and structured attempt details", async ({ page }) => {
   const pageErrors = trackPageErrors(page);
   const runId = await launchFailedRun(page);
