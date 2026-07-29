@@ -564,12 +564,6 @@ importers:
         specifier: ^4.106.0
         version: 4.106.0(@cloudflare/workers-types@4.20260701.1)
 
-  apps/fleet-console:
-    dependencies:
-      '@smithers-orchestrator/accounts':
-        specifier: workspace:*
-        version: link:../../packages/accounts
-
   apps/init-site:
     devDependencies:
       '@types/node':
@@ -6580,31 +6574,26 @@ packages:
   '@superradcompany/microsandbox-darwin-arm64@0.6.6':
     resolution: {integrity: sha512-rw7cg0G9mj1c9/14K/K6PMg78H11rGRA5tDzRbx67kAeoKWpAJnFsIYLvOCHcD+6aM0Xdxote90FVVlt1Kknjw==}
     engines: {node: '>= 22'}
-    cpu: [arm64]
     os: [darwin]
 
   '@superradcompany/microsandbox-linux-arm64-gnu@0.6.6':
     resolution: {integrity: sha512-y4CdSPkSOtCwBNbG8Yhkahxg9yh/jpp4cBMOItCOj0JshU7luE2r4+6ceIrPNAkb8sF0fX7tNTXMDK4fJA8iFA==}
     engines: {node: '>= 22'}
-    cpu: [arm64]
     os: [linux]
 
   '@superradcompany/microsandbox-linux-x64-gnu@0.6.6':
     resolution: {integrity: sha512-9yo6/G454L8ebzZP1qMxjIXRD3zJqQ68w2p9Ust7B7MOj5hr+VyuVZ0kYjSJAc4GSI0fno2xQe5z2tp5ynk78A==}
     engines: {node: '>= 22'}
-    cpu: [x64]
     os: [linux]
 
   '@superradcompany/microsandbox-win32-arm64-msvc@0.6.6':
     resolution: {integrity: sha512-q22t1DVlB8FR90adjBxTf0i//f3yzm7QYsKbsar29zoUAHC/24h6R4LE6YfIDWtPKB8jvTSpCeMehFoyXyLN1Q==}
     engines: {node: '>= 22'}
-    cpu: [arm64]
     os: [win32]
 
   '@superradcompany/microsandbox-win32-x64-msvc@0.6.6':
     resolution: {integrity: sha512-m2ir3DNw+Sc7i2DEg1kgY9bFmFHCFt2KamnXzJMUL9qtkE2n11GqIUhQJtKXwcWyM7nH0AxooMmnbx7UDMG8Ww==}
     engines: {node: '>= 22'}
-    cpu: [x64]
     os: [win32]
 
   '@tanstack/ai-event-client@0.6.8':

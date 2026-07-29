@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/agent-eliza",
-  "version": "0.31.0",
+  "version": "0.31.1",
   "description": "elizaOS agent harness for Smithers (opt-in, installs @elizaos/core)",
   "type": "module",
   "sideEffects": false,

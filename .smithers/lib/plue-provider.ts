@@ -323,7 +323,7 @@ function buildUnpackScript(remoteDir: string, archiveB64: string): string {
 // Exported so a unit test can assert it tracks the repo's root package.json
 // version — the release bump/publish flow edits package.json, not this literal,
 // so without the gate a bump would leave the remote VM on a stale orchestrator.
-export const DEFAULT_ORCHESTRATOR_VERSION = "0.31.0";
+export const DEFAULT_ORCHESTRATOR_VERSION = "0.31.1";
 const DEFAULT_POLL_INTERVAL_MS = 5_000;
 const DEFAULT_BOOT_TIMEOUT_MS = 6 * 60_000;
 const REMOTE_DIR = "/home/developer/smithers-plue-run";

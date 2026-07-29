@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/microsandbox",
-  "version": "0.31.0",
+  "version": "0.31.1",
   "description": "Microsandbox provider for Smithers: run sandboxed workflows in local microVMs",
   "type": "module",
   "sideEffects": false,

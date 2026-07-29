@@ -1,6 +1,6 @@
 {
   "name": "@smithers-orchestrator/testing",
-  "version": "0.31.0",
+  "version": "0.31.1",
   "description": "Workflow testing helpers for Smithers",
   "type": "module",
   "sideEffects": false,
