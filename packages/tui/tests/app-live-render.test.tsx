@@ -165,6 +165,44 @@ describeHeadlessRender("App – live gateway integration", () => {
     r.renderer.destroy();
   });
 
+  it("captures search text in Runs mode without leaking global key bindings", async () => {
+    const exits: number[] = [];
+    const seed = {
+      ...defaultSeed(RUN_ID),
+      runsList: [
+        {
+          runId: RUN_ID,
+          workflowKey: "deploy-flow",
+          status: "running",
+          createdAtMs: Date.now(),
+          startedAtMs: Date.now() - 1_000,
+        },
+      ],
+    };
+    const r = await renderApp(seed, (code) => exits.push(code));
+    await waitForFrame(r, "fetch-data");
+    await press(r, "r");
+    await waitForFrame(r, "RUNS");
+
+    await press(r, "/");
+    for (const key of ["q", "g", "?", "1"]) await press(r, key);
+
+    const searching = r.captureCharFrame();
+    expect(searching).toContain("/qg?1");
+    expect(searching).not.toContain("Keybindings");
+    expect(exits).toEqual([]);
+
+    act(() => {
+      r.mockInput.pressEscape();
+    });
+    await delay(120);
+    await r.flush();
+    await r.waitForVisualIdle();
+    await press(r, "q");
+    expect(exits).toEqual([0]);
+    r.renderer.destroy();
+  });
+
   it("drives Tree navigation, collapse, inspector focus, and tab switching", async () => {
     const r = await renderApp(defaultSeed(RUN_ID));
     await waitForFrame(r, "fetch-data");

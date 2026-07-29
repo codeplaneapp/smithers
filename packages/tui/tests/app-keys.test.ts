@@ -96,3 +96,18 @@ describe("routeAppKey – help overlay", () => {
     expect(routeAppKey(key("1"), { ...helpOpen, mode: 4 })).toBeNull();
   });
 });
+
+describe("routeAppKey – text capture", () => {
+  const captured = { mode: 6 as Mode, showHelp: false, keysCaptured: true };
+
+  it("suppresses quit, help, mode, and digit bindings while a mode captures text", () => {
+    for (const raw of ["q", "?", "g", "l", "t", "h", "r", "1", "6"]) {
+      expect(routeAppKey(key(raw), captured)).toBeNull();
+    }
+  });
+
+  it("keeps Ctrl-C as the global escape hatch", () => {
+    expect(routeAppKey(key("\x03"), captured)).toEqual({ kind: "exit" });
+    expect(routeAppKey(key("\x1b"), captured)).toBeNull();
+  });
+});

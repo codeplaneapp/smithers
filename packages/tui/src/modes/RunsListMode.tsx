@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import {
   RunsListBridge,
@@ -14,13 +14,24 @@ import { useOverlayOpen } from "../OverlayContext.tsx";
 
 const COMPACT_WIDTH = 100;
 
+/**
+ * Runs search is a text-capture mode. OpenTUI keyboard listeners are
+ * independent, so the app-level listener must be told to suspend global
+ * bindings while this mode consumes printable input.
+ */
+export const TextInputCaptureContext = createContext<(captured: boolean) => void>(() => {});
+
 /** `f`'s status-filter cycle order (research/tui-parity/03-tui-screens.md
  *  "Runs list"). Starts and ends on "all" so repeated presses loop. */
 const STATUS_FILTER_CYCLE: RunStatusFilter[] = ["all", "running", "waiting", "finished", "failed", "cancelled"];
 
-function nextStatusFilter(current: RunStatusFilter): RunStatusFilter {
+export function nextStatusFilter(current: RunStatusFilter): RunStatusFilter {
   const idx = STATUS_FILTER_CYCLE.indexOf(current);
   return STATUS_FILTER_CYCLE[(idx + 1) % STATUS_FILTER_CYCLE.length]!;
+}
+
+export function flattenRunGroups(groups: ReadonlyArray<{ runs: readonly RunSummary[] }>): RunSummary[] {
+  return groups.flatMap((group) => group.runs);
 }
 
 /**
@@ -50,12 +61,13 @@ export function RunsListMode({ onSelectRun }: { onSelectRun: (runId: string) => 
 export function RunsListView({ onSelectRun }: { onSelectRun: (runId: string) => void }) {
   const vm = useRunsListVm();
   const overlayOpen = useOverlayOpen();
+  const setTextInputCaptured = useContext(TextInputCaptureContext);
   const { width } = useTerminalDimensions();
   const compact = width < COMPACT_WIDTH;
 
   // Flat, group-ordered roster so j/k walk the same rows the sections render
   // (groups.flatMap preserves ACTIVE/COMPLETED/FAILED/CANCELLED order).
-  const rows: RunSummary[] = useMemo(() => vm.groups.flatMap((g) => g.runs), [vm.groups]);
+  const rows: RunSummary[] = useMemo(() => flattenRunGroups(vm.groups), [vm.groups]);
   const [focusIdx, setFocusIdx] = useState(0);
   const clampedFocusIdx = rows.length === 0 ? 0 : Math.min(focusIdx, rows.length - 1);
 
@@ -63,6 +75,11 @@ export function RunsListView({ onSelectRun }: { onSelectRun: (runId: string) => 
   // research/tui-parity/03-tui-screens.md's Keymap): while searching, every
   // printable key edits the search text instead of navigating rows.
   const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    setTextInputCaptured(searching);
+    return () => setTextInputCaptured(false);
+  }, [searching, setTextInputCaptured]);
 
   useKeyboard((e) => {
     if (overlayOpen || isModifiedKeyEvent(e)) return;

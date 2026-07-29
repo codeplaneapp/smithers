@@ -8,7 +8,7 @@ import { GraphMode } from "./modes/GraphMode.tsx";
 import { LogMode } from "./modes/LogMode.tsx";
 import { TimelineMode } from "./modes/TimelineMode.tsx";
 import { HijackMode } from "./modes/HijackMode.tsx";
-import { RunsListMode } from "./modes/RunsListMode.tsx";
+import { RunsListMode, TextInputCaptureContext } from "./modes/RunsListMode.tsx";
 
 export type Mode = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -172,11 +172,15 @@ export type AppKeyAction =
  */
 export function routeAppKey(
   event: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean },
-  ctx: { mode: Mode; showHelp: boolean },
+  ctx: { mode: Mode; showHelp: boolean; keysCaptured?: boolean },
 ): AppKeyAction | null {
   const { name, ctrl, meta, shift } = event;
   if (ctrl && name === "c") return { kind: "exit" };
   if (ctrl || meta) return null;
+  // A mounted mode is consuming text. OpenTUI sends the key to every
+  // subscription, so suppress all app bindings; Escape still reaches the
+  // mode's listener and Ctrl-C remains the one global escape hatch above.
+  if (ctx.keysCaptured) return null;
   if (name === "?") return { kind: "toggle-help" };
   if (ctx.showHelp) {
     if (name === "escape") return { kind: "close-help" };
@@ -208,11 +212,12 @@ export function App({ runId, onExit }: { runId: string; onExit: (code: number) =
   const [activeRunId, setActiveRunId] = useState(runId);
   const [treeSelectedNodeKey, setTreeSelectedNodeKey] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [keysCaptured, setKeysCaptured] = useState(false);
   const { width } = useTerminalDimensions();
   const compact = width < COMPACT_WIDTH;
 
   useKeyboard((e) => {
-    const action = routeAppKey(e, { mode, showHelp });
+    const action = routeAppKey(e, { mode, showHelp, keysCaptured });
     if (!action) return;
     switch (action.kind) {
       case "exit":
@@ -242,16 +247,18 @@ export function App({ runId, onExit }: { runId: string; onExit: (code: number) =
   return (
     <box width="100%" height="100%" flexDirection="column">
       <Header runId={activeRunId} compact={compact} />
-      <AppBody helpMode={showHelp ? mode : null}>
-        <ModeBody
-          runId={activeRunId}
-          mode={mode}
-          treeSelectedNodeKey={treeSelectedNodeKey}
-          onSelectNodeKey={handleSelectNodeKey}
-          onSelectRun={handleSelectRun}
-          onBack={() => setMode(1)}
-        />
-      </AppBody>
+      <TextInputCaptureContext.Provider value={setKeysCaptured}>
+        <AppBody helpMode={showHelp ? mode : null}>
+          <ModeBody
+            runId={activeRunId}
+            mode={mode}
+            treeSelectedNodeKey={treeSelectedNodeKey}
+            onSelectNodeKey={handleSelectNodeKey}
+            onSelectRun={handleSelectRun}
+            onBack={() => setMode(1)}
+          />
+        </AppBody>
+      </TextInputCaptureContext.Provider>
       <Keybar compact={compact} mode={mode} />
     </box>
   );
