@@ -1,6 +1,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { describe, expect, test } from "bun:test";
-import { Effect, SchemaParser } from "effect";
+import { Effect } from "effect";
+import * as SchemaParser from "effect/SchemaParser";
 import { z } from "zod";
 import { jsx, jsxs } from "smithers-orchestrator/jsx-runtime";
 import { createTestSmithers } from "../../smithers/tests/helpers.js";

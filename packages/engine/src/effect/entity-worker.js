@@ -14,8 +14,8 @@ import * as Rpc from "effect/unstable/rpc/Rpc";
 import { Schema } from "effect";
 /** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
 
-export const WorkerTaskKind = Schema.Literal("agent", "compute", "static");
-export const WorkerDispatchKind = Schema.Literal("compute", "static", "legacy");
+export const WorkerTaskKind = Schema.Literals(["agent", "compute", "static"]);
+export const WorkerDispatchKind = Schema.Literals(["compute", "static", "legacy"]);
 export const WorkerTask = Schema.Struct({
   executionId: Schema.String,
   bridgeKey: Schema.String,

@@ -160,7 +160,7 @@ export function spawnCaptureEffect(command, args, options) {
     idleTimeoutMs: idleTimeoutMs ?? null,
   };
   const span = `process:${command}`;
-  return Effect.async((resume) => {
+  return Effect.callback((resume) => {
     let stdout = "";
     let stderr = "";
     let settled = false;

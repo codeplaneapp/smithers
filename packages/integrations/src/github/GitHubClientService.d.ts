@@ -4,7 +4,7 @@ import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
 type GitHubRequestMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 type GitHubRequestOptions<A = unknown> = {
     /** Effect Schema to validate/decode the response body with. */
-    schema?: Schema.Schema<A, any>;
+    schema?: Schema.Schema<A>;
     /** Extra query params appended to the path. */
     query?: Record<string, string | number | boolean | undefined>;
 };

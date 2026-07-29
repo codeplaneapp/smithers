@@ -2,7 +2,8 @@
 /** @typedef {import("./ExternalEventTypes.ts").ExternalEvent} ExternalEvent */
 // @smithers-type-exports-end
 
-import { Schema, SchemaParser } from "effect";
+import { Schema } from "effect";
+import * as SchemaParser from "effect/SchemaParser";
 
 /**
  * Runtime schema for {@link ExternalEvent}. Webhook sources decode incoming

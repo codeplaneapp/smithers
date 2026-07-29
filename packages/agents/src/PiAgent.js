@@ -463,7 +463,8 @@ export class PiAgent extends BaseCliAgent {
         },
         catch: (cause) => toSmithersError(cause, "enrich diagnostics"),
       }).pipe(Effect.ignore);
-    const rpcProgram = Effect.gen(this, function* () {
+    const self = this;
+    const rpcProgram = Effect.gen(function* () {
       const rpcResult = yield* runRpcCommandEffect("pi", args, {
         cwd,
         env,
@@ -471,12 +472,12 @@ export class PiAgent extends BaseCliAgent {
         timeoutMs: callTimeouts.totalMs,
         idleTimeoutMs: callTimeouts.idleMs,
         signal: options?.abortSignal,
-        maxOutputBytes: this.maxOutputBytes ?? options?.maxOutputBytes,
+        maxOutputBytes: self.maxOutputBytes ?? options?.maxOutputBytes,
         onStdout: options?.onStdout,
         onStderr: options?.onStderr,
         onProcess: options?.onProcess,
         onJsonEvent: (event) => emitEvents(interpreter.onStdoutLine?.(JSON.stringify(event))),
-        onExtensionUiRequest: this.opts.onExtensionUiRequest,
+        onExtensionUiRequest: self.opts.onExtensionUiRequest,
       });
       emitEvents(
         interpreter.onExit?.({
@@ -485,7 +486,7 @@ export class PiAgent extends BaseCliAgent {
           exitCode: rpcResult.exitCode,
         }),
       );
-      return buildGenerateResult(rpcResult.text, rpcResult.output, this.opts.model ?? "pi", rpcResult.usage);
+      return buildGenerateResult(rpcResult.text, rpcResult.output, self.opts.model ?? "pi", rpcResult.usage);
     }).pipe(Effect.tapError(diagnosticsEnrichment));
     return runAgentPromise(rpcProgram);
   }

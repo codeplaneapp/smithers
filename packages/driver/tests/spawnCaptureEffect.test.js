@@ -204,7 +204,8 @@ describe("spawnCaptureEffect — timeouts and cancellation", () => {
       }),
     );
     await new Promise((resolve) => setTimeout(resolve, 30));
-    const exit = await Effect.runPromise(Fiber.interrupt(fiber));
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    const exit = await Effect.runPromise(Fiber.await(fiber));
     expect(Exit.isFailure(exit)).toBe(true);
   });
 
@@ -226,7 +227,8 @@ describe("spawnCaptureEffect — timeouts and cancellation", () => {
         }),
       );
       await new Promise((resolve) => setTimeout(resolve, 30));
-      const exit = await Effect.runPromise(Fiber.interrupt(fiber));
+      await Effect.runPromise(Fiber.interrupt(fiber));
+      const exit = await Effect.runPromise(Fiber.await(fiber));
       expect(Exit.isFailure(exit)).toBe(true);
     } finally {
       process.kill = originalKill;

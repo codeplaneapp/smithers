@@ -68,7 +68,7 @@ type TelegramDocumentInput = string | {
     content: string | Uint8Array;
     contentType?: string;
 };
-/** The service behind the `TelegramClient` Context.Tag. */
+/** The service behind the `TelegramClient` Context.Service. */
 type TelegramClientService = {
     /**
      * Raw Bot API call: POST `<apiBaseUrl>/bot<token>/<method>` with a JSON

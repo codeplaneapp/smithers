@@ -50,11 +50,11 @@ declare class TelegramApiError extends SmithersError {
     retryAfterSeconds: number | null;
 }
 /**
- * `Context.Tag` for the Telegram Bot API client service. Provide it with
+ * `Context.Service` for the Telegram Bot API client service. Provide it with
  * `TelegramClientLive(config)` or `Layer.succeed(TelegramClient, service)`.
- * @type {Context.Tag<TelegramClientService, TelegramClientService>}
+ * @type {Context.Service<TelegramClientService, TelegramClientService>}
  */
-declare const TelegramClient: Context.Tag<TelegramClientService, TelegramClientService>;
+declare const TelegramClient: Context.Service<TelegramClientService, TelegramClientService>;
 type TelegramClientConfig = TelegramClientConfig$1;
 type TelegramClientService = TelegramClientService$1;
 type SendMessageSmartOptions = SendMessageSmartOptions$1;

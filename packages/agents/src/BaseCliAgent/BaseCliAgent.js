@@ -398,10 +398,13 @@ function recordAgentTokenMetrics(tags, totals) {
   const pushMetric = (kind, value) => {
     if (!value || value <= 0) return;
     effects.push(
-      Metric.update(taggedMetric(agentTokensTotal, {
+      Metric.update(
+        taggedMetric(agentTokensTotal, {
           ...tags,
           kind,
-        }), value),
+        }),
+        value,
+      ),
     );
   };
   pushMetric("input", totals.inputTokens);
@@ -966,10 +969,13 @@ export class BaseCliAgent {
         Metric.update(taggedMetric(agentInvocationsTotal, metricTags), 1),
         ...(retryHint.isRetry
           ? [
-              Metric.update(taggedMetric(agentRetriesTotal, {
+              Metric.update(
+                taggedMetric(agentRetriesTotal, {
                   ...metricTags,
                   reason: retryHint.reason ?? "explicit",
-                }), 1),
+                }),
+                1,
+              ),
             ]
           : []),
         Effect.logDebug("agent invocation started").pipe(
@@ -1071,216 +1077,222 @@ export class BaseCliAgent {
             flushBufferedLines(stream, false);
           };
           diagnosticsPromise = launchDiagnostics(commandSpec.command, commandEnv, cwd, this.diagnosticHints?.());
-          return Effect.gen(this, function* () {
-            const result = yield* runCommandEffect(commandSpec.command, commandSpec.args, {
-              cwd,
-              env: commandEnv,
-              input: commandSpec.stdin,
-              timeoutMs: callTimeouts.totalMs,
-              idleTimeoutMs: callTimeouts.idleMs,
-              signal: options?.abortSignal,
-              maxOutputBytes: this.maxOutputBytes ?? options?.maxOutputBytes,
-              // CLI harnesses emit their final result event at the END of
-              // the stream; if the capture cap trips, the tail is the part
-              // that must survive (#277).
-              truncateKeep: "tail",
-              onStdout: (chunk) => {
-                stdoutEmitter?.push(chunk);
-                handleInterpreterChunk("stdout", chunk);
-              },
-              onStderr: (chunk) => {
-                options?.onStderr?.(chunk);
-                handleInterpreterChunk("stderr", chunk);
-              },
-              onProcess: options?.onProcess,
-            });
-            flushBufferedLines("stdout", true);
-            flushBufferedLines("stderr", true);
-            emitEvents(interpreter?.onExit?.(result));
-            if (result.stdoutTruncated) {
-              emitEvents({
-                type: "action",
-                engine: commandSpec.command,
-                phase: "completed",
-                entryType: "thought",
-                action: {
-                  id: `stdout-truncated-${randomUUID()}`,
-                  kind: "warning",
-                  title: "captured stdout truncated",
-                  detail: {},
+          return Effect.gen(
+            function* () {
+              const result = yield* runCommandEffect(commandSpec.command, commandSpec.args, {
+                cwd,
+                env: commandEnv,
+                input: commandSpec.stdin,
+                timeoutMs: callTimeouts.totalMs,
+                idleTimeoutMs: callTimeouts.idleMs,
+                signal: options?.abortSignal,
+                maxOutputBytes: this.maxOutputBytes ?? options?.maxOutputBytes,
+                // CLI harnesses emit their final result event at the END of
+                // the stream; if the capture cap trips, the tail is the part
+                // that must survive (#277).
+                truncateKeep: "tail",
+                onStdout: (chunk) => {
+                  stdoutEmitter?.push(chunk);
+                  handleInterpreterChunk("stdout", chunk);
                 },
-                message:
-                  "Captured stdout exceeded maxOutputBytes; kept the stream tail. The streamed interpreter answer is used as the result text.",
-                ok: true,
-                level: "warning",
+                onStderr: (chunk) => {
+                  options?.onStderr?.(chunk);
+                  handleInterpreterChunk("stderr", chunk);
+                },
+                onProcess: options?.onProcess,
               });
-            }
-            const outputFileText = commandSpec.outputFile
-              ? yield* Effect.tryPromise({
-                  try: () => fs.readFile(commandSpec.outputFile, "utf8"),
-                  catch: (cause) => toSmithersError(cause, "read output file"),
-                }).pipe(Effect.catch(() => Effect.succeed(null)))
-              : null;
-            const stdout = typeof outputFileText === "string" ? outputFileText : result.stdout;
-            if (result.exitCode && result.exitCode !== 0) {
-              const filteredStderr = filterBenignStderr(result.stderr, commandSpec.benignStderrPatterns);
-              if (!(commandSpec.command === "codex" && filteredStderr.length === 0)) {
-                const structuredError =
-                  commandSpec.outputFormat === "json" || commandSpec.outputFormat === "stream-json"
-                    ? extractErrorFromJsonPayload(result.stdout)
-                    : undefined;
-                // Prefer a distilled error over the raw stdout tail: a
-                // stream-json stdout tail is usually an init line or
-                // token-usage event, not the failure. The interpreter's
-                // completed event already carries the distilled error
-                // when the stream surfaced one.
-                const rawInterpreterError =
-                  completedEvent?.ok === false && typeof completedEvent.error === "string"
-                    ? completedEvent.error.trim()
-                    : "";
-                // The interpreter's generic onExit fallback ("<CLI>
-                // exited with code N") carries less signal than stderr;
-                // only a real distilled message may outrank it.
-                const interpreterError = /exited with code/i.test(rawInterpreterError) ? "" : rawInterpreterError;
-                const errorText =
-                  structuredError ||
-                  interpreterError ||
-                  filteredStderr ||
-                  result.stdout.trim() ||
-                  `CLI exited with code ${result.exitCode}`;
-                const quota = classifyQuota(errorText, commandSpec.command);
-                if (quota) {
-                  return yield* Effect.fail(quota);
-                }
-                const nonRetryable = classifyNonRetryableAgentError(errorText, commandSpec.command, agentCtx);
-                if (nonRetryable) {
-                  return yield* Effect.fail(nonRetryable);
-                }
-                const rawStderr = result.stderr ?? "";
-                const sessionLoss = classifySessionLoss(commandSpec.command, errorText, rawStderr);
-                if (sessionLoss) {
-                  return yield* Effect.fail(sessionLoss);
-                }
-                return yield* Effect.fail(new SmithersError("AGENT_CLI_ERROR", errorText));
+              flushBufferedLines("stdout", true);
+              flushBufferedLines("stderr", true);
+              emitEvents(interpreter?.onExit?.(result));
+              if (result.stdoutTruncated) {
+                emitEvents({
+                  type: "action",
+                  engine: commandSpec.command,
+                  phase: "completed",
+                  entryType: "thought",
+                  action: {
+                    id: `stdout-truncated-${randomUUID()}`,
+                    kind: "warning",
+                    title: "captured stdout truncated",
+                    detail: {},
+                  },
+                  message:
+                    "Captured stdout exceeded maxOutputBytes; kept the stream tail. The streamed interpreter answer is used as the result text.",
+                  ok: true,
+                  level: "warning",
+                });
               }
-            }
-            if (completedEvent?.ok === false) {
-              const completedError = completedEvent.error || "CLI agent reported an error";
-              const completedQuota = classifyQuota(completedError, commandSpec.command);
-              if (completedQuota) {
-                return yield* Effect.fail(completedQuota);
+              const outputFileText = commandSpec.outputFile
+                ? yield* Effect.tryPromise({
+                    try: () => fs.readFile(commandSpec.outputFile, "utf8"),
+                    catch: (cause) => toSmithersError(cause, "read output file"),
+                  }).pipe(Effect.catch(() => Effect.succeed(null)))
+                : null;
+              const stdout = typeof outputFileText === "string" ? outputFileText : result.stdout;
+              if (result.exitCode && result.exitCode !== 0) {
+                const filteredStderr = filterBenignStderr(result.stderr, commandSpec.benignStderrPatterns);
+                if (!(commandSpec.command === "codex" && filteredStderr.length === 0)) {
+                  const structuredError =
+                    commandSpec.outputFormat === "json" || commandSpec.outputFormat === "stream-json"
+                      ? extractErrorFromJsonPayload(result.stdout)
+                      : undefined;
+                  // Prefer a distilled error over the raw stdout tail: a
+                  // stream-json stdout tail is usually an init line or
+                  // token-usage event, not the failure. The interpreter's
+                  // completed event already carries the distilled error
+                  // when the stream surfaced one.
+                  const rawInterpreterError =
+                    completedEvent?.ok === false && typeof completedEvent.error === "string"
+                      ? completedEvent.error.trim()
+                      : "";
+                  // The interpreter's generic onExit fallback ("<CLI>
+                  // exited with code N") carries less signal than stderr;
+                  // only a real distilled message may outrank it.
+                  const interpreterError = /exited with code/i.test(rawInterpreterError) ? "" : rawInterpreterError;
+                  const errorText =
+                    structuredError ||
+                    interpreterError ||
+                    filteredStderr ||
+                    result.stdout.trim() ||
+                    `CLI exited with code ${result.exitCode}`;
+                  const quota = classifyQuota(errorText, commandSpec.command);
+                  if (quota) {
+                    return yield* Effect.fail(quota);
+                  }
+                  const nonRetryable = classifyNonRetryableAgentError(errorText, commandSpec.command, agentCtx);
+                  if (nonRetryable) {
+                    return yield* Effect.fail(nonRetryable);
+                  }
+                  const rawStderr = result.stderr ?? "";
+                  const sessionLoss = classifySessionLoss(commandSpec.command, errorText, rawStderr);
+                  if (sessionLoss) {
+                    return yield* Effect.fail(sessionLoss);
+                  }
+                  return yield* Effect.fail(new SmithersError("AGENT_CLI_ERROR", errorText));
+                }
               }
-              // Session loss can surface through the CLI's structured result
-              // (a `completed ok:false` event) instead of a non-zero exit —
-              // claude-code reports "No conversation found" this way. Same
-              // treatment: drop the dead id, retry fresh.
-              const completedSessionLoss = classifySessionLoss(
-                commandSpec.command,
-                completedError,
-                result.stderr ?? "",
-              );
-              if (completedSessionLoss) {
-                return yield* Effect.fail(completedSessionLoss);
+              if (completedEvent?.ok === false) {
+                const completedError = completedEvent.error || "CLI agent reported an error";
+                const completedQuota = classifyQuota(completedError, commandSpec.command);
+                if (completedQuota) {
+                  return yield* Effect.fail(completedQuota);
+                }
+                // Session loss can surface through the CLI's structured result
+                // (a `completed ok:false` event) instead of a non-zero exit —
+                // claude-code reports "No conversation found" this way. Same
+                // treatment: drop the dead id, retry fresh.
+                const completedSessionLoss = classifySessionLoss(
+                  commandSpec.command,
+                  completedError,
+                  result.stderr ?? "",
+                );
+                if (completedSessionLoss) {
+                  return yield* Effect.fail(completedSessionLoss);
+                }
+                return yield* Effect.fail(new SmithersError("AGENT_CLI_ERROR", completedError));
               }
-              return yield* Effect.fail(new SmithersError("AGENT_CLI_ERROR", completedError));
-            }
-            // Some CLIs may print extra banners to stdout. Allow individual agents
-            // to provide patterns so this logic stays opt-in and agent-specific.
-            const stdoutBannerPatterns = commandSpec.stdoutBannerPatterns ?? [];
-            let cleanedStdout = stdout;
-            for (const pattern of stdoutBannerPatterns) {
-              const regex = new RegExp(pattern.source, pattern.flags);
-              cleanedStdout = cleanedStdout.replace(regex, "");
-            }
-            const rawText = cleanedStdout.trim();
-            // Optionally treat "banner-only" output as an error when requested.
-            if (commandSpec.errorOnBannerOnly && !rawText && stdout.trim()) {
-              return yield* Effect.fail(
-                new SmithersError(
-                  "AGENT_CLI_ERROR",
-                  "CLI agent error (stdout): output was only a banner with no model response",
-                ),
-              );
-            }
-            // Some CLIs report failures on stdout even with exit code 0. Keep
-            // detection patterns opt-in so normal model text is not misclassified.
-            const stdoutErrorPatterns = commandSpec.stdoutErrorPatterns ?? [];
-            if (rawText && !rawText.startsWith("{") && !rawText.startsWith("[")) {
-              for (const pattern of stdoutErrorPatterns) {
+              // Some CLIs may print extra banners to stdout. Allow individual agents
+              // to provide patterns so this logic stays opt-in and agent-specific.
+              const stdoutBannerPatterns = commandSpec.stdoutBannerPatterns ?? [];
+              let cleanedStdout = stdout;
+              for (const pattern of stdoutBannerPatterns) {
                 const regex = new RegExp(pattern.source, pattern.flags);
-                if (regex.test(rawText)) {
-                  const stdoutErrText = `CLI agent error (stdout): ${rawText.slice(0, 500)}`;
-                  const nonRetryable = classifyNonRetryableAgentError(rawText, commandSpec.command, agentCtx);
-                  return yield* Effect.fail(nonRetryable ?? new SmithersError("AGENT_CLI_ERROR", stdoutErrText));
+                cleanedStdout = cleanedStdout.replace(regex, "");
+              }
+              const rawText = cleanedStdout.trim();
+              // Optionally treat "banner-only" output as an error when requested.
+              if (commandSpec.errorOnBannerOnly && !rawText && stdout.trim()) {
+                return yield* Effect.fail(
+                  new SmithersError(
+                    "AGENT_CLI_ERROR",
+                    "CLI agent error (stdout): output was only a banner with no model response",
+                  ),
+                );
+              }
+              // Some CLIs report failures on stdout even with exit code 0. Keep
+              // detection patterns opt-in so normal model text is not misclassified.
+              const stdoutErrorPatterns = commandSpec.stdoutErrorPatterns ?? [];
+              if (rawText && !rawText.startsWith("{") && !rawText.startsWith("[")) {
+                for (const pattern of stdoutErrorPatterns) {
+                  const regex = new RegExp(pattern.source, pattern.flags);
+                  if (regex.test(rawText)) {
+                    const stdoutErrText = `CLI agent error (stdout): ${rawText.slice(0, 500)}`;
+                    const nonRetryable = classifyNonRetryableAgentError(rawText, commandSpec.command, agentCtx);
+                    return yield* Effect.fail(nonRetryable ?? new SmithersError("AGENT_CLI_ERROR", stdoutErrText));
+                  }
                 }
               }
-            }
-            const extractedFromStdout =
-              outputFormat === "json" || outputFormat === "stream-json" ? extractTextFromJsonPayload(rawText) : rawText;
-            // The interpreter parses the live stream line-by-line BEFORE the
-            // capture cap applies, so its completed answer survives stdout
-            // truncation. Prefer it whenever the captured stdout was
-            // truncated or yields no final message; otherwise keep the
-            // historical extraction so intact runs are unchanged (#277).
-            const streamedAnswer =
-              typeof completedEvent?.answer === "string" && completedEvent.answer.trim().length > 0
-                ? completedEvent.answer
+              const extractedFromStdout =
+                outputFormat === "json" || outputFormat === "stream-json"
+                  ? extractTextFromJsonPayload(rawText)
+                  : rawText;
+              // The interpreter parses the live stream line-by-line BEFORE the
+              // capture cap applies, so its completed answer survives stdout
+              // truncation. Prefer it whenever the captured stdout was
+              // truncated or yields no final message; otherwise keep the
+              // historical extraction so intact runs are unchanged (#277).
+              const streamedAnswer =
+                typeof completedEvent?.answer === "string" && completedEvent.answer.trim().length > 0
+                  ? completedEvent.answer
+                  : undefined;
+              // A dedicated final-message file (e.g. codex --output-last-message)
+              // is the CLI's authoritative output channel: it holds the complete
+              // final message and is immune to the stdout byte cap and to
+              // line-by-line stream interpretation. When it parsed as JSON, trust
+              // it over the truncation/stream fallbacks, which otherwise surface a
+              // short `message` field instead of the full structured object.
+              const outputFileJson =
+                typeof outputFileText === "string" && outputFileText.trim() !== ""
+                  ? tryParseJson(outputFileText)
+                  : null;
+              const extractedText = resolveAgentAnswerText({
+                outputFileJson,
+                outputFileText,
+                streamedAnswer,
+                extractedFromStdout,
+                rawText,
+                stdoutTruncated: result.stdoutTruncated,
+                outputFormat,
+              });
+              const output = outputFileJson ?? tryParseJson(extractedText);
+              // Extract token usage from raw stdout before text extraction strips it.
+              // Each CLI harness embeds usage differently (NDJSON events, JSON stats, etc.)
+              const cliUsage = extractUsageFromOutput(result.stdout) ?? usageFromCompletedEvent(completedEvent);
+              const usage = cliUsage
+                ? {
+                    inputTokens: cliUsage.inputTokens,
+                    inputTokenDetails: {
+                      noCacheTokens: undefined,
+                      cacheReadTokens: cliUsage.cacheReadTokens,
+                      cacheWriteTokens: cliUsage.cacheWriteTokens,
+                    },
+                    outputTokens: cliUsage.outputTokens,
+                    outputTokenDetails: {
+                      textTokens: undefined,
+                      reasoningTokens: cliUsage.reasoningTokens,
+                    },
+                    totalTokens:
+                      cliUsage.totalTokens ?? ((cliUsage.inputTokens ?? 0) + (cliUsage.outputTokens ?? 0) || undefined),
+                  }
                 : undefined;
-            // A dedicated final-message file (e.g. codex --output-last-message)
-            // is the CLI's authoritative output channel: it holds the complete
-            // final message and is immune to the stdout byte cap and to
-            // line-by-line stream interpretation. When it parsed as JSON, trust
-            // it over the truncation/stream fallbacks, which otherwise surface a
-            // short `message` field instead of the full structured object.
-            const outputFileJson =
-              typeof outputFileText === "string" && outputFileText.trim() !== "" ? tryParseJson(outputFileText) : null;
-            const extractedText = resolveAgentAnswerText({
-              outputFileJson,
-              outputFileText,
-              streamedAnswer,
-              extractedFromStdout,
-              rawText,
-              stdoutTruncated: result.stdoutTruncated,
-              outputFormat,
-            });
-            const output = outputFileJson ?? tryParseJson(extractedText);
-            // Extract token usage from raw stdout before text extraction strips it.
-            // Each CLI harness embeds usage differently (NDJSON events, JSON stats, etc.)
-            const cliUsage = extractUsageFromOutput(result.stdout) ?? usageFromCompletedEvent(completedEvent);
-            const usage = cliUsage
-              ? {
-                  inputTokens: cliUsage.inputTokens,
-                  inputTokenDetails: {
-                    noCacheTokens: undefined,
-                    cacheReadTokens: cliUsage.cacheReadTokens,
-                    cacheWriteTokens: cliUsage.cacheWriteTokens,
-                  },
-                  outputTokens: cliUsage.outputTokens,
-                  outputTokenDetails: {
-                    textTokens: undefined,
-                    reasoningTokens: cliUsage.reasoningTokens,
-                  },
-                  totalTokens:
-                    cliUsage.totalTokens ?? ((cliUsage.inputTokens ?? 0) + (cliUsage.outputTokens ?? 0) || undefined),
-                }
-              : undefined;
-            const tokenTotals = extractAgentTokenTotals(usage);
-            stdoutEmitter?.flush(extractedText);
-            yield* recordAgentTokenMetrics(metricTags, tokenTotals);
-            const durationMs = performance.now() - invocationStart;
-            yield* Effect.logDebug("agent invocation completed").pipe(
-              Effect.annotateLogs({
-                ...commandLogAnnotations,
-                durationMs,
-                textBytes: Buffer.byteLength(extractedText, "utf8"),
-                stderrBytes: Buffer.byteLength(result.stderr, "utf8"),
-                inputTokens: tokenTotals.inputTokens ?? 0,
-                outputTokens: tokenTotals.outputTokens ?? 0,
-                totalTokens: tokenTotals.totalTokens ?? 0,
-              }),
-            );
-            return buildGenerateResult(extractedText, output, this.model ?? commandSpec.command, usage);
-          });
+              const tokenTotals = extractAgentTokenTotals(usage);
+              stdoutEmitter?.flush(extractedText);
+              yield* recordAgentTokenMetrics(metricTags, tokenTotals);
+              const durationMs = performance.now() - invocationStart;
+              yield* Effect.logDebug("agent invocation completed").pipe(
+                Effect.annotateLogs({
+                  ...commandLogAnnotations,
+                  durationMs,
+                  textBytes: Buffer.byteLength(extractedText, "utf8"),
+                  stderrBytes: Buffer.byteLength(result.stderr, "utf8"),
+                  inputTokens: tokenTotals.inputTokens ?? 0,
+                  outputTokens: tokenTotals.outputTokens ?? 0,
+                  totalTokens: tokenTotals.totalTokens ?? 0,
+                }),
+              );
+              return buildGenerateResult(extractedText, output, this.model ?? commandSpec.command, usage);
+            }.bind(this),
+          );
         }),
       )
       .pipe(

@@ -7,7 +7,5 @@ import { Effect, Metric } from "effect";
  * @param {number} delta
  */
 export function incrementGauge(metric, delta) {
-  return Metric.value(metric).pipe(
-    Effect.flatMap((state) => Metric.update(metric, Number(state.value) + delta)),
-  );
+  return Metric.value(metric).pipe(Effect.flatMap((state) => Metric.update(metric, Number(state.value) + delta)));
 }

@@ -504,7 +504,9 @@ export function createDelegationChainStore(options: {
           Queue.offerUnsafe(queue, StoreMessage.InputsChanged({ inputs: next }));
         },
         subscribe: (listener) => {
-          const fiber = Effect.runFork(Stream.runForEach(SubscriptionRef.changes(snapshot), () => Effect.sync(listener)));
+          const fiber = Effect.runFork(
+            Stream.runForEach(SubscriptionRef.changes(snapshot), () => Effect.sync(listener)),
+          );
           return () => {
             Effect.runFork(Fiber.interrupt(fiber));
           };

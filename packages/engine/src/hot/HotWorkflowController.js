@@ -117,24 +117,26 @@ export class HotWorkflowController {
     return Effect.runPromise(this.reloadEffect(changedFiles));
   }
   initEffect() {
-    return Effect.gen(this, function* () {
-      yield* Effect.tryPromise({
-        try: () => mkdir(this.outDir, { recursive: true }),
-        catch: (cause) => toSmithersError(cause, "create hot reload output dir"),
-      });
-      yield* this.watcher.startEffect();
-      yield* Effect.sync(() => {
-        logInfo(
-          "initialized hot workflow controller",
-          {
-            entryPath: this.entryPath,
-            hotRoot: this.hotRoot,
-            outDir: this.outDir,
-          },
-          "hot:controller",
-        );
-      });
-    }).pipe(
+    return Effect.gen(
+      function* () {
+        yield* Effect.tryPromise({
+          try: () => mkdir(this.outDir, { recursive: true }),
+          catch: (cause) => toSmithersError(cause, "create hot reload output dir"),
+        });
+        yield* this.watcher.startEffect();
+        yield* Effect.sync(() => {
+          logInfo(
+            "initialized hot workflow controller",
+            {
+              entryPath: this.entryPath,
+              hotRoot: this.hotRoot,
+              outDir: this.outDir,
+            },
+            "hot:controller",
+          );
+        });
+      }.bind(this),
+    ).pipe(
       Effect.annotateLogs({
         entryPath: this.entryPath,
         hotRoot: this.hotRoot,
@@ -162,31 +164,31 @@ export class HotWorkflowController {
     const hotRoot = this.hotRoot;
     const outDir = this.outDir;
     const maxGenerations = this.maxGenerations;
-    return Effect.gen(this, function* () {
+    return Effect.gen(function* () {
       const reloadStart = performance.now();
       const genDir = yield* buildOverlayEffect(hotRoot, outDir, gen);
       const overlayEntry = resolveOverlayEntry(entryPath, hotRoot, genDir);
       const overlayUrl = pathToFileURL(overlayEntry).href;
-      const mod = yield* Effect.either(
+      const mod = yield* Effect.result(
         Effect.tryPromise({
           try: () => import(overlayUrl),
           catch: (cause) => toSmithersError(cause, "import hot workflow generation"),
         }),
       );
-      if (mod._tag === "Left") {
+      if (mod._tag === "Failure") {
         logWarning(
           "hot workflow import failed",
           {
             entryPath,
             generation: gen,
             changedFileCount: changedFiles.length,
-            error: mod.left instanceof Error ? mod.left.message : String(mod.left),
+            error: mod.failure instanceof Error ? mod.failure.message : String(mod.failure),
           },
           "hot:reload",
         );
-        return { type: "failed", generation: gen, changedFiles, error: mod.left };
+        return { type: "failed", generation: gen, changedFiles, error: mod.failure };
       }
-      const workflow = mod.right.default;
+      const workflow = mod.success.default;
       if (!workflow) {
         return {
           type: "failed",

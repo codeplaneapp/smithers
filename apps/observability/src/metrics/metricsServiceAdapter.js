@@ -65,9 +65,7 @@ function gaugeMetric(name, labels) {
 function histogramMetric(name, labels) {
   const definition = resolveMetricDefinition(name);
   const metric =
-    definition?.type === "histogram"
-      ? definition.metric
-      : Metric.histogram(name, { boundaries: durationBuckets });
+    definition?.type === "histogram" ? definition.metric : Metric.histogram(name, { boundaries: durationBuckets });
   return tagMetricWithLabels(metric, labels);
 }
 /**
@@ -84,9 +82,7 @@ function metricValueAsNumber(value) {
  */
 function metricsServiceLabels(attributes) {
   return Object.freeze(
-    Object.fromEntries(
-      Object.entries(attributes ?? {}).sort(([left], [right]) => left.localeCompare(right)),
-    ),
+    Object.fromEntries(Object.entries(attributes ?? {}).sort(([left], [right]) => left.localeCompare(right))),
   );
 }
 /**
@@ -167,9 +163,7 @@ function metricsServiceSnapshot() {
 export const metricsServiceAdapter = {
   increment: (name, labels) => {
     const metric = counterOrGaugeMetric(name, labels);
-    return resolveMetricDefinition(name)?.type === "gauge"
-      ? incrementGauge(metric, 1)
-      : Metric.update(metric, 1);
+    return resolveMetricDefinition(name)?.type === "gauge" ? incrementGauge(metric, 1) : Metric.update(metric, 1);
   },
   incrementBy: (name, value, labels) => {
     const metric = counterOrGaugeMetric(name, labels);

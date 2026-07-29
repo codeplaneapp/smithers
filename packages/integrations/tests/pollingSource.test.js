@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Chunk, Effect, Schedule, Stream } from "effect";
+import { Effect, Schedule, Stream } from "effect";
 import { createTestAdapter } from "./helpers.js";
 import { makePollingSource } from "../src/core/EventSource.js";
 import { makeDbCursorStore, makeInMemoryCursorStore } from "../src/core/CursorStore.js";
@@ -70,7 +70,7 @@ describe("makePollingSource", () => {
           return { events: [pollEvent(next)], cursor: String(next) };
         }),
     });
-    const batches = Chunk.toReadonlyArray(await Effect.runPromise(Stream.runCollect(Stream.take(source.events, 2))));
+    const batches = await Effect.runPromise(Stream.runCollect(Stream.take(source.events, 2)));
     expect(seenCursors).toEqual([null, null]);
     expect(batches.map((batch) => batch.events[0].dedupeKey)).toEqual(["update-1", "update-1"]);
     expect(await Effect.runPromise(cursorStore.get("poll-unacked"))).toBeUndefined();
@@ -85,7 +85,7 @@ describe("makePollingSource", () => {
       schedule: Schedule.recurs(0),
       poll: () => Effect.succeed({ events: [], cursor: "after-empty" }),
     });
-    const [batch] = Chunk.toReadonlyArray(await Effect.runPromise(Stream.runCollect(Stream.take(source.events, 1))));
+    const [batch] = await Effect.runPromise(Stream.runCollect(Stream.take(source.events, 1)));
     expect(batch.events).toEqual([]);
     expect(await Effect.runPromise(cursorStore.get("poll-empty"))).toBeUndefined();
     await Effect.runPromise(batch.ack);
@@ -121,15 +121,11 @@ describe("makePollingSource", () => {
             return { events: [pollEvent(1)], cursor: "1" };
           }),
       });
-    const [failedBatch] = Chunk.toReadonlyArray(
-      await Effect.runPromise(Stream.runCollect(Stream.take(makeSource().events, 1))),
-    );
+    const [failedBatch] = await Effect.runPromise(Stream.runCollect(Stream.take(makeSource().events, 1)));
     const failure = await Effect.runPromise(failedBatch.ack.pipe(Effect.flip));
     expect(failure).toBeInstanceOf(IntegrationError);
     expect(persisted).toBeUndefined();
-    const [retryBatch] = Chunk.toReadonlyArray(
-      await Effect.runPromise(Stream.runCollect(Stream.take(makeSource().events, 1))),
-    );
+    const [retryBatch] = await Effect.runPromise(Stream.runCollect(Stream.take(makeSource().events, 1)));
     expect(seenCursors).toEqual([null, null]);
     await Effect.runPromise(retryBatch.ack);
     expect(persisted).toBe("1");
@@ -151,14 +147,10 @@ describe("makePollingSource", () => {
             return { events: [pollEvent(next)], cursor: String(next) };
           }),
       });
-    const [first] = Chunk.toReadonlyArray(
-      await Effect.runPromise(Stream.runCollect(Stream.take(makeSource().events, 1))),
-    );
+    const [first] = await Effect.runPromise(Stream.runCollect(Stream.take(makeSource().events, 1)));
     await Effect.runPromise(first.ack);
     // A "restarted" source resumes from the persisted cursor, not from scratch.
-    const [second] = Chunk.toReadonlyArray(
-      await Effect.runPromise(Stream.runCollect(Stream.take(makeSource().events, 1))),
-    );
+    const [second] = await Effect.runPromise(Stream.runCollect(Stream.take(makeSource().events, 1)));
     await Effect.runPromise(second.ack);
     expect(seenCursors).toEqual([null, "1"]);
     expect(await adapter.getIntegrationCursor("poll-db")).toBe("2");

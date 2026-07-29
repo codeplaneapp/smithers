@@ -17,7 +17,8 @@ function loadBunDrizzle() {
   return (bunDrizzle ??= requireBun("drizzle-orm/bun-sqlite").drizzle);
 }
 import { and, desc, eq } from "drizzle-orm";
-import { Context, Duration, Effect, Layer, Result, Schedule, Schema, SchemaParser } from "effect";
+import { Context, Duration, Effect, Layer, Result, Schedule, Schema } from "effect";
+import * as SchemaParser from "effect/SchemaParser";
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import React from "react";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
@@ -271,7 +272,7 @@ function durationToMs(input) {
     return Math.max(0, Math.floor(input));
   }
   try {
-    return Math.max(0, Math.floor(Duration.toMillis(Duration.decode(input))));
+    return Math.max(0, Math.floor(Duration.toMillis(Duration.fromInputUnsafe(input))));
   } catch {
     return null;
   }
@@ -307,16 +308,20 @@ function deriveRetryCount(retry) {
       return Math.max(0, Math.floor(maxAttempts - 1));
     }
   }
-  const step = Effect.runSync(Schedule.toStep(retry));
-  let count = 0;
-  while (count < 100) {
-    const result = Effect.runSync(Effect.result(step(count, undefined)));
-    if (Result.isFailure(result)) {
-      return count;
+  try {
+    const step = Effect.runSync(Schedule.toStep(retry));
+    let count = 0;
+    while (count < 100) {
+      const result = Effect.runSync(Effect.result(step(count, undefined)));
+      if (Result.isFailure(result)) {
+        return count;
+      }
+      count += 1;
     }
-    count += 1;
+    return count;
+  } catch {
+    return 0;
   }
-  return count;
 }
 /**
  * @template T
@@ -468,7 +473,7 @@ async function executeStepHandle(handle, ctx, decodedInput, env) {
   if (handle.kind === "approval") {
     const adapter = new SmithersDb(runtime.db);
     const approval = await adapter.getApproval(runtime.runId, handle.id, runtime.iteration);
-    return encodeSchema(ApprovalDecision, {
+    const decision = decodeSchema(ApprovalDecision, {
       approved: approval?.status === "approved",
       // Only include `note` when a string was provided; omitting the key
       // keeps note-less decisions valid against optional string schemas.
@@ -476,6 +481,7 @@ async function executeStepHandle(handle, ctx, decodedInput, env) {
       decidedBy: approval?.decidedBy ?? null,
       decidedAt: null,
     });
+    return encodeSchema(ApprovalDecision, decision);
   }
   const userCtx = buildUserContext(handle, ctx, decodedInput, runtime);
   const output = await resolveEffectResult(handle.run?.(userCtx), env, runtime.signal);

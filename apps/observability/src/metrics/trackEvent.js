@@ -184,10 +184,13 @@ function recordAgentUsageMetrics(tags, usage) {
   const pushMetric = (kind, value) => {
     if (!value || value <= 0) return;
     effects.push(
-      Metric.update(tagMetricWithTags(agentTokensTotal, {
+      Metric.update(
+        tagMetricWithTags(agentTokensTotal, {
           ...tags,
           kind,
-        }), value),
+        }),
+        value,
+      ),
     );
   };
   pushMetric("input", totals.inputTokens);
@@ -254,9 +257,15 @@ export function trackEvent(event) {
         { discard: true },
       );
     case "RunAutoResumeSkipped":
-      return Effect.all([countEvent, Metric.update(Metric.withAttributes(supervisorSkippedTotal, { ["reason"]: String(event.reason) }), 1)], {
-        discard: true,
-      });
+      return Effect.all(
+        [
+          countEvent,
+          Metric.update(Metric.withAttributes(supervisorSkippedTotal, { ["reason"]: String(event.reason) }), 1),
+        ],
+        {
+          discard: true,
+        },
+      );
     case "RunStarted":
       return Effect.all([countEvent, Metric.update(runsTotal, 1), incrementGauge(activeRuns, 1)], {
         discard: true,
@@ -292,7 +301,9 @@ export function trackEvent(event) {
     case "SandboxCompleted": {
       const byStatus = Metric.withAttributes(sandboxCompletedTotal, { ["status"]: String(event.status) });
       const byRuntime =
-        event.runtime && event.runtime.length > 0 ? Metric.withAttributes(byStatus, { ["runtime"]: String(event.runtime) }) : byStatus;
+        event.runtime && event.runtime.length > 0
+          ? Metric.withAttributes(byStatus, { ["runtime"]: String(event.runtime) })
+          : byStatus;
       return Effect.all(
         [
           countEvent,
@@ -320,12 +331,7 @@ export function trackEvent(event) {
       });
     case "RunFailed":
       return Effect.all(
-        [
-          countEvent,
-          incrementGauge(activeRuns, -1),
-          Metric.update(runsFailedTotal, 1),
-          Metric.update(errorsTotal, 1),
-        ],
+        [countEvent, incrementGauge(activeRuns, -1), Metric.update(runsFailedTotal, 1), Metric.update(errorsTotal, 1)],
         { discard: true },
       );
     case "RunCancelled":
@@ -443,9 +449,14 @@ export function trackEvent(event) {
       if (contextWindowTokens) {
         effects.push(
           Metric.update(tagMetric(tokensContextWindowPerCall), contextWindowTokens),
-          Metric.update(tagMetric(
-              Metric.withAttributes(tokensContextWindowBucketTotal, { ["bucket"]: String(classifyContextWindowBucket(contextWindowTokens)) }),
-            ), 1),
+          Metric.update(
+            tagMetric(
+              Metric.withAttributes(tokensContextWindowBucketTotal, {
+                ["bucket"]: String(classifyContextWindowBucket(contextWindowTokens)),
+              }),
+            ),
+            1,
+          ),
         );
       }
       return Effect.all(effects, { discard: true });
@@ -459,73 +470,97 @@ export function trackEvent(event) {
       };
       const effects = [
         countEvent,
-        Metric.update(tagMetricWithTags(agentEventsTotal, {
+        Metric.update(
+          tagMetricWithTags(agentEventsTotal, {
             ...baseTags,
             event_type: agentEvent.type,
-          }), 1),
+          }),
+          1,
+        ),
       ];
       switch (agentEvent.type) {
         case "started":
           effects.push(
-            Metric.update(tagMetricWithTags(agentSessionsTotal, {
+            Metric.update(
+              tagMetricWithTags(agentSessionsTotal, {
                 ...baseTags,
                 status: "started",
                 resume: agentEvent.resume ? "true" : "false",
-              }), 1),
+              }),
+              1,
+            ),
           );
           break;
         case "action":
           effects.push(
-            Metric.update(tagMetricWithTags(agentActionsTotal, {
+            Metric.update(
+              tagMetricWithTags(agentActionsTotal, {
                 ...baseTags,
                 action_kind: agentEvent.action.kind,
                 phase: agentEvent.phase,
                 level: agentEvent.level,
                 entry_type: agentEvent.entryType,
                 ok: typeof agentEvent.ok === "boolean" ? String(agentEvent.ok) : undefined,
-              }), 1),
+              }),
+              1,
+            ),
           );
           if (agentEvent.level === "error" || agentEvent.ok === false) {
             effects.push(
-              Metric.update(tagMetricWithTags(agentErrorsTotal, {
+              Metric.update(
+                tagMetricWithTags(agentErrorsTotal, {
                   ...baseTags,
                   event_type: agentEvent.type,
                   action_kind: agentEvent.action.kind,
-                }), 1),
+                }),
+                1,
+              ),
             );
           }
           if (hasAgentRetrySignal(agentEvent)) {
             effects.push(
-              Metric.update(tagMetricWithTags(agentRetriesTotal, {
+              Metric.update(
+                tagMetricWithTags(agentRetriesTotal, {
                   ...baseTags,
                   reason: "event_signal",
-                }), 1),
+                }),
+                1,
+              ),
             );
           }
           break;
         case "completed":
           effects.push(
-            Metric.update(tagMetricWithTags(agentSessionsTotal, {
+            Metric.update(
+              tagMetricWithTags(agentSessionsTotal, {
                 ...baseTags,
                 status: agentEvent.ok ? "completed" : "failed",
                 resume: agentEvent.resume ? "true" : "false",
-              }), 1),
+              }),
+              1,
+            ),
           );
           effects.push(recordAgentUsageMetrics(baseTags, agentEvent.usage));
           if (!agentEvent.ok) {
             effects.push(
-              Metric.update(tagMetricWithTags(agentErrorsTotal, {
+              Metric.update(
+                tagMetricWithTags(agentErrorsTotal, {
                   ...baseTags,
                   event_type: agentEvent.type,
-                }), 1),
+                }),
+                1,
+              ),
             );
           }
           if (hasAgentRetrySignal(agentEvent)) {
             effects.push(
-              Metric.update(tagMetricWithTags(agentRetriesTotal, {
+              Metric.update(
+                tagMetricWithTags(agentRetriesTotal, {
                   ...baseTags,
                   reason: "event_signal",
-                }), 1),
+                }),
+                1,
+              ),
             );
           }
           break;

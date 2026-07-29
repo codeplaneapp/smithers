@@ -1,8 +1,7 @@
 import * as Workflow from "effect/unstable/workflow/Workflow";
 import * as WorkflowEngine from "effect/unstable/workflow/WorkflowEngine";
-import { Cause, Effect, Exit, Layer, Schema, Scope } from "effect";
+import { Effect, Exit, Layer, Schema, Scope } from "effect";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 /**
  * @typedef {RunResult | (RunResult & { status: "continued"; nextRunId: string; })} RunBodyResult
  */
@@ -42,14 +41,16 @@ function getWorkflowNamespace(workflow) {
  * @param {string} runId
  */
 function makeBridgeWorkflow(workflow, runId) {
-  return Workflow.make({
-    name: `SmithersWorkflowBridge:${getWorkflowNamespace(workflow)}:${runId}`,
+  const name = `SmithersWorkflowBridge:${getWorkflowNamespace(workflow)}:${runId}`;
+  const bridge = Workflow.make(name, {
     payload: {
       executionId: Schema.String,
     },
     success: Schema.Unknown,
     idempotencyKey: ({ executionId }) => executionId,
   });
+  Object.defineProperty(bridge, "name", { configurable: true, value: name });
+  return bridge;
 }
 /**
  * @param {string} status
@@ -142,36 +143,32 @@ function createWorkflowExecutionEffect(workflow, initialOpts, services, lastRunI
  * @returns {WorkflowMakeBridgeRuntime}
  */
 function createWorkflowMakeBridgeRuntime(services) {
-  return {
+  const runtime = {
     ...services,
-    executeChildWorkflow: async (workflow, opts) => {
-      const bridgeExecutionId = opts.bridgeExecutionId ?? opts.runId;
-      const workflowBridge = makeBridgeWorkflow(workflow, opts.runId);
-      const lastRunIdRef = { current: opts.runId };
-      const execute = createWorkflowExecutionEffect(workflow, opts, services, lastRunIdRef);
-      await registerBridgeWorkflow(workflowBridge, services.scope, services.engineContext, execute);
-      const result = await executeRegisteredChildWorkflow(
-        workflowBridge,
-        bridgeExecutionId,
-        services.scope,
-        services.engineContext,
-        services.parentInstance,
-      );
-      if (result._tag === "Complete") {
-        if (Exit.isSuccess(result.exit)) {
-          return result.exit.value;
-        }
-        throw Cause.squash(result.exit.cause);
-      }
-      const adapter = new SmithersDb(workflow.db);
-      const run = await Effect.runPromise(adapter.getRun(lastRunIdRef.current));
-      const status = run && isSuspendingStatus(run.status) ? run.status : "cancelled";
-      return {
-        runId: lastRunIdRef.current,
-        status,
-      };
-    },
+    executeChildWorkflow: async (workflow, opts) => executeWorkflowBodyLoop(workflow, opts, runtime),
   };
+  return runtime;
+}
+/**
+ * @template Schema
+ * @param {SmithersWorkflow<Schema>} workflow
+ * @param {RunOptions & { runId: string }} initialOpts
+ * @param {WorkflowMakeBridgeRuntime} runtime
+ * @returns {Promise<RunResult>}
+ */
+async function executeWorkflowBodyLoop(workflow, initialOpts, runtime) {
+  let nextOpts = initialOpts;
+  while (true) {
+    const result = await withWorkflowMakeBridgeRuntime(runtime, () => runtime.executeBody(workflow, nextOpts));
+    if (result.status !== "continued" || !result.nextRunId) {
+      return result;
+    }
+    nextOpts = {
+      ...nextOpts,
+      runId: result.nextRunId,
+      resume: true,
+    };
+  }
 }
 /**
  * @template T
@@ -225,43 +222,18 @@ export function createSchedulerWakeQueue() {
  * @returns {Promise<RunResult>}
  */
 export async function runWorkflowWithMakeBridge(workflow, opts, executeBody) {
-  const adapter = new SmithersDb(workflow.db);
   const scope = await Effect.runPromise(Scope.make());
   try {
     const engineContext = await Effect.runPromise(Layer.buildWithScope(WorkflowEngine.layerMemory, scope));
     const workflowBridge = makeBridgeWorkflow(workflow, opts.runId);
     const instance = WorkflowEngine.WorkflowInstance.initial(workflowBridge, opts.runId);
-    const lastRunIdRef = { current: opts.runId };
-    const execute = createWorkflowExecutionEffect(
-      workflow,
-      opts,
-      {
-        engineContext,
-        scope,
-        executeBody,
-      },
-      lastRunIdRef,
-    );
-    await registerBridgeWorkflow(workflowBridge, scope, engineContext, execute);
-    const result = await Effect.runPromise(
-      execute.pipe(
-        Workflow.intoResult,
-        Effect.provideService(WorkflowEngine.WorkflowInstance, instance),
-        Effect.provide(engineContext),
-      ),
-    );
-    if (result._tag === "Complete") {
-      if (Exit.isSuccess(result.exit)) {
-        return result.exit.value;
-      }
-      throw Cause.squash(result.exit.cause);
-    }
-    const run = await Effect.runPromise(adapter.getRun(lastRunIdRef.current));
-    const status = run && isSuspendingStatus(run.status) ? run.status : "cancelled";
-    return {
-      runId: lastRunIdRef.current,
-      status,
-    };
+    const runtime = createWorkflowMakeBridgeRuntime({
+      engineContext,
+      scope,
+      parentInstance: instance,
+      executeBody,
+    });
+    return await executeWorkflowBodyLoop(workflow, opts, runtime);
   } finally {
     await Effect.runPromise(Scope.close(scope, Exit.void));
   }

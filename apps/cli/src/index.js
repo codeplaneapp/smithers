@@ -2667,7 +2667,7 @@ async function preflightDetachedLaunch(options) {
       outputs,
     });
     const rendered = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         renderFrame(workflow, ctx, {
           baseRootDir: resolveLaunchRootDir(options.root),
           workflowPath: options.resolvedWorkflowPath,
@@ -2675,8 +2675,8 @@ async function preflightDetachedLaunch(options) {
         }),
       ),
     );
-    if (rendered._tag === "Left") {
-      throw rendered.left;
+    if (rendered._tag === "Failure") {
+      throw rendered.failure;
     }
   } finally {
     if (workflow) await closeWorkflowBackend(workflow).catch(() => {});
@@ -9120,7 +9120,7 @@ const cli = Cli.create({
         });
         const baseRootDir = resolveLaunchRootDir(c.options.root);
         const rendered = await Effect.runPromise(
-          Effect.either(
+          Effect.result(
             renderFrame(workflow, ctx, {
               baseRootDir,
               workflowPath: resolvedWorkflowPath,
@@ -9129,10 +9129,10 @@ const cli = Cli.create({
             }),
           ),
         );
-        if (rendered._tag === "Left") {
-          throw rendered.left;
+        if (rendered._tag === "Failure") {
+          throw rendered.failure;
         }
-        const snap = rendered.right;
+        const snap = rendered.success;
         const seen = new WeakSet();
         const stripPrompts = c.options.compact === true;
         return c.ok(

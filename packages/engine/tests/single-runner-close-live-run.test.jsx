@@ -106,10 +106,10 @@ describe("closeSingleRunnerRuntime against a live run", () => {
       // Terminal by default: the next run must not silently resurrect the
       // cluster daemons during a shutdown.
       const blocked = await Effect.runPromise(
-        Effect.either(runWorkflow(workflow, { input: {}, runId: "close-between-blocked" })),
+        Effect.result(runWorkflow(workflow, { input: {}, runId: "close-between-blocked" })),
       );
-      expect(blocked._tag).toBe("Left");
-      expect(blocked.left.code).toBe("SINGLE_RUNNER_CLOSED");
+      expect(blocked._tag).toBe("Failure");
+      expect(blocked.failure.code).toBe("SINGLE_RUNNER_CLOSED");
       reopenSingleRunnerRuntime();
       const second = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "close-between-b" }));
       expect(second.status).toBe("finished");

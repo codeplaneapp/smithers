@@ -89,7 +89,7 @@ const G = Smithers.workflow({
 const analyze = G.step("analyze", {
   output: Schema.Struct({
     summary: Schema.String,
-    risk: Schema.Literal("low", "medium", "high"),
+    risk: Schema.Literals(["low", "medium", "high"]),
   }),
   timeout: "2m",
   retry: { maxAttempts: 3, backoff: "exponential", initialDelay: "1s" },

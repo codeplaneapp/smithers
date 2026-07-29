@@ -10,6 +10,7 @@ import { fromTaggedErrorPayload } from "@smithers-orchestrator/errors/fromTagged
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { toTaggedErrorPayload } from "@smithers-orchestrator/errors/toTaggedErrorPayload";
 import { isUnknownWorkerError, isTaskResultFailure, TaskWorkerEntity } from "./entity-worker.js";
+import { getPlatformLayer } from "../platform-layer.js";
 /**
  * @typedef {(task: WorkerTask) => void} TaskWorkerDispatchSubscriber
  */
@@ -383,12 +384,12 @@ async function buildSingleRunnerRuntime() {
       execute: (request) => Effect.promise(() => runRegisteredExecution(request.payload)),
     }),
     { concurrency: "unbounded" },
-  ).pipe(Layer.provideMerge(runnerLayer));
+  ).pipe(Layer.provideMerge(runnerLayer), Layer.provide(getPlatformLayer()));
   // ManagedRuntime owns the layer's scope, so `dispose()` is the teardown
   // handle this function used to build and then drop on the floor (#1378).
   // Precedent: packages/integrations/src/core/IntegrationRuntime.js.
   const managed = ManagedRuntime.make(layer);
-  const context = (await managed.runtime()).context;
+  const context = await managed.context();
   const client = await managed.runPromise(TaskWorkerEntity.client);
   return {
     client: client,

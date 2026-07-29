@@ -7,7 +7,8 @@
  */
 // @smithers-type-exports-end
 
-import { Context, Duration, Effect, Layer, Schedule, Schema, SchemaParser } from "effect";
+import { Context, Duration, Effect, Layer, Schedule, Schema } from "effect";
+import * as SchemaParser from "effect/SchemaParser";
 import { logWarning } from "@smithers-orchestrator/observability/logging";
 import { IntegrationError } from "../core/IntegrationError.js";
 import { resolveGitHubConfig } from "./config.js";
@@ -21,9 +22,9 @@ const MAX_RETRY_AFTER_MS = 60_000;
 /**
  * Context tag for the GitHub REST client. Provide it with
  * `githubClientLayer(config)` (or `Layer.succeed(GitHubClient, makeGitHubClient(...))`).
- * @type {Context.TagClass<GitHubClientTag, "GitHubClient", GitHubClientService>}
+ * @type {Context.ServiceClass<GitHubClientTag, "GitHubClient", GitHubClientService>}
  */
-export const GitHubClient = /** @type {Context.TagClass<GitHubClientTag, "GitHubClient", GitHubClientService>} */ (
+export const GitHubClient = /** @type {Context.ServiceClass<GitHubClientTag, "GitHubClient", GitHubClientService>} */ (
   /** @type {unknown} */ (Context.Service("GitHubClient"))
 );
 /** @typedef {{ readonly _: unique symbol }} GitHubClientTag */

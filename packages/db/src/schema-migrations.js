@@ -1,5 +1,12 @@
-import { Effect } from "effect";
+import { Effect, Logger } from "effect";
 import { POSTGRES, quoteIdentifier, translateDdl } from "./dialect.js";
+
+const schemaMigrationLogger = Logger.make((options) => {
+  const line = Logger.formatLogFmt.log(options).replace(/\blevel=([A-Za-z]+)\b/, (_match, level) => {
+    return `level=${level.toUpperCase()}`;
+  });
+  console.log(line);
+});
 
 const MIGRATION_TABLE_SQL = `CREATE TABLE IF NOT EXISTS _smithers_schema_migrations (
     id TEXT PRIMARY KEY,
@@ -747,6 +754,7 @@ function logDestructiveMigration(migration, details) {
         droppedTables: details.tables,
       }),
       Effect.withLogSpan("db:schema-migration"),
+      Effect.provide(Logger.layer([schemaMigrationLogger])),
     ),
   );
 }

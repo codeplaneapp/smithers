@@ -29,9 +29,11 @@ const JJ_PROBE_TIMEOUT_MS = 1_500;
  */
 function collectUtf8(stream) {
   const decoder = new TextDecoder("utf-8");
-  return Stream.runFold(stream, "", (acc, chunk) => acc + decoder.decode(chunk, { stream: true })).pipe(
-    Effect.map((acc) => acc + decoder.decode()),
-  );
+  return Stream.runFold(
+    stream,
+    () => "",
+    (acc, chunk) => acc + decoder.decode(chunk, { stream: true }),
+  ).pipe(Effect.map((acc) => acc + decoder.decode()));
 }
 /**
  * Run a `jj` command and capture output.
@@ -126,17 +128,18 @@ export function getJjPointer(cwd) {
  */
 function withJjTimeout(effect, label) {
   return effect.pipe(
-    Effect.timeoutTo({
+    Effect.map((res) => ({ res, timedOut: false })),
+    Effect.timeoutOrElse({
       duration: Duration.millis(JJ_PROBE_TIMEOUT_MS),
-      onSuccess: (res) => ({ res, timedOut: false }),
-      onTimeout: () => ({
-        res: {
-          code: 124,
-          stdout: "",
-          stderr: `${label} timed out after ${JJ_PROBE_TIMEOUT_MS}ms`,
-        },
-        timedOut: true,
-      }),
+      orElse: () =>
+        Effect.succeed({
+          res: {
+            code: 124,
+            stdout: "",
+            stderr: `${label} timed out after ${JJ_PROBE_TIMEOUT_MS}ms`,
+          },
+          timedOut: true,
+        }),
     }),
     Effect.tap(({ timedOut }) =>
       timedOut
