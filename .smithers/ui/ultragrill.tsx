@@ -48,7 +48,7 @@ function eventInfo(ev: unknown): EventInfo {
   const nodePayload = isRecord(inner.payload) ? inner.payload : {};
   return {
     nodeId: asString(nodePayload.nodeId) ?? asString(inner.nodeId) ?? asString(frame.nodeId) ?? "",
-    type: asString(inner.event) ?? asString(frame.type) ?? "",
+    type: asString(inner.event) ?? asString(frame.event) ?? asString(frame.type) ?? "",
     seq: typeof inner.seq === "number" ? inner.seq : typeof frame.seq === "number" ? frame.seq : 0,
   };
 }
@@ -57,9 +57,10 @@ function workerIndex(nodeId: string): number | null {
   return m ? Number(m[1]) : null;
 }
 function classify(type: string): "active" | "done" | "failed" | "" {
-  if (type.includes("fail") || type.includes("error")) return "failed";
-  if (type.includes("finish") || type.includes("complete")) return "done";
-  if (type.includes("start")) return "active";
+  const normalized = type.toLowerCase();
+  if (normalized.includes("fail") || normalized.includes("error")) return "failed";
+  if (normalized.includes("finish") || normalized.includes("complete")) return "done";
+  if (normalized.includes("start")) return "active";
   return "";
 }
 
@@ -231,19 +232,27 @@ function App() {
 
   // The run-completed frame in the event stream is the authoritative terminal
   // status (runDetail is fetched once and won't otherwise reflect the ending).
-  const terminalStatus = useMemo(() => {
+  const streamedStatus = useMemo(() => {
     const empty: Record<string, unknown> = {};
+    let status: string | undefined;
     for (const ev of events) {
       const frame = isRecord(ev) ? ev : empty;
       const inner = isRecord(frame.payload) ? frame.payload : empty;
-      if (inner.event === "run.completed") {
-        const p = isRecord(inner.payload) ? inner.payload : empty;
-        return asString(p.status) ?? "finished";
+      const payload = isRecord(inner.payload) ? inner.payload : inner;
+      const event = (asString(inner.event) ?? asString(frame.event) ?? asString(inner.type) ?? "").toLowerCase();
+      if (event === "run.completed" || event === "runfinished" || event === "runcompleted") {
+        status = asString(payload.status) ?? "finished";
+      } else if (event === "run.failed" || event === "runfailed") {
+        status = "failed";
+      } else if (event === "run.cancelled" || event === "runcancelled") {
+        status = "cancelled";
+      } else if (event === "runstatuschanged") {
+        status = asString(payload.status) ?? status;
       }
     }
-    return undefined;
+    return status;
   }, [events]);
-  const runStatus = terminalStatus ?? (runDetail.data as RunSummary | undefined)?.status ?? activeRun?.status;
+  const runStatus = streamedStatus ?? (runDetail.data as RunSummary | undefined)?.status ?? activeRun?.status;
   const hasRun = Boolean(activeRunId);
 
   // Worker activity from the event stream.
