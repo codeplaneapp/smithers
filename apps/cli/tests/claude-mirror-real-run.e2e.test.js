@@ -161,7 +161,7 @@ describe("claude mirror protocol (real run)", () => {
     // Unknown run fails loud with the standard exit code.
     const missing = runSmithers(["claude", "tick", "definitely-not-a-run"], { cwd: repo.dir, format: "json" });
     expect(missing.exitCode).toBe(4);
-    // Seeds a real detached run and polls the CLI, so it needs more than
-    // Bun's default 5s per-test budget.
-  }, 60_000);
+    // Seeds a real detached run and polls several CLI processes; the root
+    // workspace suite runs package tests concurrently on shared CI runners.
+  }, 120_000);
 });

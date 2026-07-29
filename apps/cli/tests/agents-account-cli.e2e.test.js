@@ -245,8 +245,9 @@ test("agents add appends to a detection-based agents.ts without dropping detecte
   // Detection-based provider survives the regen.
   expect(agentsTs).toContain("claude: new SmithersClaudeCodeAgent(");
   // This exercises two synchronous CLI boots. An isolated run takes about 17s,
-  // so the old 20s budget was too narrow once the root workspace suite was busy.
-}, 60_000);
+  // but the root workspace suite runs package tests concurrently and can
+  // saturate CI runners.
+}, 120_000);
 
 test("agents add preserves a legacy unknown-provider account, and agents remove deletes it", () => {
   // #529: a pre-0.25 `gemini` subscription row is unparseable by this build,
