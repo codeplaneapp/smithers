@@ -4,3 +4,4 @@ packages:
   - "e2e"
   - ".smithers"
   - "codex-plugin"
+  - "vendor/smithers-flows/packages/*"

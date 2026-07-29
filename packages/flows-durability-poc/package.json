@@ -1,0 +1,18 @@
+{
+  "name": "@smithers-poc/flows-durability",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "POC: back smithers' durability seam with vendored smithers-flows (@flows/*, effect 4) behind a plain-JS boundary",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "bun test tests"
+  },
+  "dependencies": {
+    "@flows/database": "file:../../vendor/smithers-flows/packages/database",
+    "@flows/journal": "file:../../vendor/smithers-flows/packages/journal",
+    "effect": "4.0.0-beta.102"
+  }
+}
