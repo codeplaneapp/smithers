@@ -164,6 +164,7 @@ export async function retryTask(adapter, opts) {
   const iteration = opts.iteration ?? 0;
   const resetDependents = opts.resetDependents ?? true;
   const force = opts.force ?? false;
+  const acceptWorkflowChange = /** @type {any} */ (opts).acceptWorkflowChange === true;
   const resumeClaim = /** @type {{ claimOwnerId: string; claimHeartbeatAtMs: number } | undefined} */ (
     /** @type {any} */ (opts).resumeClaim
   );
@@ -205,19 +206,7 @@ export async function retryTask(adapter, opts) {
     });
     return { success: false, resetNodes: [], error };
   }
-  if ((run.workflowPath || run.workflowHash) && !(await validateWorkflowIdentity(run))) {
-    const error = `Cannot retry run because its durable workflow metadata no longer matches: ${runId}`;
-    emitRetryFinished(opts, {
-      runId,
-      nodeId,
-      iteration,
-      resetNodes: [],
-      success: false,
-      error,
-    });
-    return { success: false, resetNodes: [], error };
-  }
-  if ((run.workflowPath || run.workflowHash) && !(await validateWorkflowIdentity(run))) {
+  if ((run.workflowPath || run.workflowHash) && !acceptWorkflowChange && !(await validateWorkflowIdentity(run))) {
     const error = `Cannot retry run because its durable workflow metadata no longer matches: ${runId}`;
     emitRetryFinished(opts, {
       runId,

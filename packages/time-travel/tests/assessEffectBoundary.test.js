@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
+import { SUBFLOW_RUN_LINEAGE_MAX_ROWS } from "@smithers-orchestrator/graph/subflow-run-lineage";
 import { assessEffectBoundary } from "../src/assessEffectBoundary.js";
 
 function setup() {
@@ -75,6 +76,26 @@ function insertEffect(sqlite, row, archived) {
 }
 
 describe("assessEffectBoundary", () => {
+  test("requests the full bounded lineage and fails closed on overflow", async () => {
+    let requestedLimit;
+    const adapter = {
+      listRunDescendants: async (_runId, limit) => {
+        requestedLimit = limit;
+        return Array.from({ length: SUBFLOW_RUN_LINEAGE_MAX_ROWS + 1 });
+      },
+      internalStorage: {
+        queryAll: () => {
+          throw new Error("effect rows must not be queried after lineage overflow");
+        },
+      },
+    };
+
+    await expect(assessEffectBoundary(adapter, { runId: "wide-run", cutoffMs: 0 })).rejects.toThrow(
+      "Cannot safely assess effect boundary",
+    );
+    expect(requestedLimit).toBe(SUBFLOW_RUN_LINEAGE_MAX_ROWS + 1);
+  });
+
   test("covers status x idempotent x hasRevert x archived x forced x legacy-null-flags", async () => {
     const { sqlite, adapter } = setup();
     const statuses = ["succeeded", "unknown", "intended", "failed", "reverted"];

@@ -358,6 +358,59 @@ describe("retry-task e2e", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+  test("CLI retry-task accepts an edited workflow only with --accept-workflow-change", () => {
+    const repo = createTempRepo();
+    pinSqliteBackend(repo.dir);
+    const source = (value) => `/** @jsxImportSource smithers-orchestrator */
+import { createSmithers } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { smithers, Workflow, Task, outputs } = createSmithers({
+  input: z.object({}),
+  result: z.object({ value: z.number() }),
+});
+
+export default smithers(() => (
+  <Workflow name="retry-accepted-workflow-change">
+    <Task id="target" output={outputs.result}>{{ value: ${value} }}</Task>
+  </Workflow>
+));
+`;
+    repo.write("workflow.tsx", source(1));
+    const runId = "retry-cli-accepted-workflow-change";
+    const initial = runSmithers(["up", "workflow.tsx", "--run-id", runId], {
+      cwd: repo.dir,
+      format: "json",
+      timeoutMs: 90_000,
+    });
+    expect(initial.exitCode, `${initial.stdout}\n${initial.stderr}`).toBe(0);
+
+    repo.write("workflow.tsx", source(2));
+    const rejected = runSmithers(["retry-task", "workflow.tsx", "--run-id", runId, "--node-id", "target"], {
+      cwd: repo.dir,
+      format: "json",
+      timeoutMs: 90_000,
+    });
+    expect(rejected.exitCode).toBe(1);
+    expect(`${rejected.stdout}${rejected.stderr}`).toContain("durable metadata changed");
+
+    const accepted = runSmithers(
+      ["retry-task", "workflow.tsx", "--run-id", runId, "--node-id", "target", "--accept-workflow-change"],
+      {
+        cwd: repo.dir,
+        format: "json",
+        timeoutMs: 90_000,
+      },
+    );
+    expect(accepted.exitCode, `${accepted.stdout}\n${accepted.stderr}`).toBe(0);
+    expect(accepted.json?.status).toBe("finished");
+    const sqlite = new Database(repo.path("smithers.db"), { readonly: true });
+    try {
+      expect(sqlite.query("SELECT value FROM result WHERE run_id = ?").get(runId)).toEqual({ value: 2 });
+    } finally {
+      sqlite.close();
+    }
+  });
   test("retry-task leaves a durable, supervisor-recoverable claim across the relaunch window", async () => {
     const { smithers, Workflow, Task, outputs, db, cleanup } = createTestSmithers(outputSchemas);
     const adapter = new SmithersDb(db);

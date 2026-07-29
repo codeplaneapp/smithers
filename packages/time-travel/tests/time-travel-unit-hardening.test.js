@@ -321,6 +321,10 @@ describe("rewind validation and rate-limit boundaries", () => {
     expect(validateJumpRunId("a".repeat(64))).toBe("a".repeat(64));
     // `up --run-id` creates dotted ids, so rewinding one must work too.
     expect(validateJumpRunId("run.with.dot")).toBe("run.with.dot");
+    expect(validateJumpRunId("root:child:synchronizeFutureDependencyFacts:0")).toBe(
+      "root:child:synchronizeFutureDependencyFacts:0",
+    );
+    expect(validateJumpRunId("root:child:lane@@3.taskName:2")).toBe("root:child:lane@@3.taskName:2");
     for (const invalid of ["", "a".repeat(65), "RunUpper", ".leading.dot", ".."]) {
       let caught;
       try {

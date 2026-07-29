@@ -1,3 +1,5 @@
+import { SUBFLOW_RUN_LINEAGE_MAX_ROWS } from "@smithers-orchestrator/graph/subflow-run-lineage";
+
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
 /** @typedef {import("./CrossedEffect.ts").CrossedEffect} CrossedEffect */
 /** @typedef {import("./EffectBoundaryParams.ts").EffectBoundaryParams} EffectBoundaryParams */
@@ -122,8 +124,13 @@ function isCrossed(row, params, crossedChildRunIds) {
 export async function assessEffectBoundary(db, params) {
   const descendants =
     typeof db.listRunDescendants === "function"
-      ? await db.listRunDescendants(params.runId)
+      ? await db.listRunDescendants(params.runId, SUBFLOW_RUN_LINEAGE_MAX_ROWS + 1)
       : [{ runId: params.runId, parentRunId: null, depth: 0 }];
+  if (descendants.length > SUBFLOW_RUN_LINEAGE_MAX_ROWS) {
+    throw new Error(
+      `Cannot safely assess effect boundary: run lineage for ${params.runId} exceeds ${SUBFLOW_RUN_LINEAGE_MAX_ROWS} rows`,
+    );
+  }
   const runIds = descendants.length > 0 ? descendants.map((row) => String(row.runId)) : [params.runId];
   const crossedChildRunIds = new Set();
   if (params.attempts) {
