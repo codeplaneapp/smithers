@@ -337,6 +337,17 @@ export function summarizeEvalResults(results) {
 }
 
 /**
+ * Exit 5 is reserved for suites whose reds are entirely harness/environment
+ * faults. A mixed suite still exits 1 because it contains product evidence.
+ *
+ * @param {{ failed: number; inconclusive: number }} summary
+ */
+export function evalSummaryExitCode(summary) {
+  if (summary.failed === 0) return 0;
+  return summary.inconclusive === summary.failed ? 5 : 1;
+}
+
+/**
  * @param {ReturnType<typeof normalizeEvalCase>} testCase
  * @param {{ status?: string; output?: unknown; error?: unknown }} result
  */

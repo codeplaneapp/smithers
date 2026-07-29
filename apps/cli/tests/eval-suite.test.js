@@ -4,6 +4,7 @@ import {
   buildEvalPlan,
   buildEvalReport,
   createEvalJudgeRunner,
+  evalSummaryExitCode,
   evaluateEvalCaseResult,
   evaluateEvalCaseResultAsync,
   evalRunId,
@@ -198,6 +199,13 @@ describe("eval suite helpers", () => {
     expect(rendered).toContain("1/3 passed, 1 inconclusive");
     expect(rendered).toContain("INCONCLUSIVE b");
     expect(rendered).toContain("FAIL c");
+  });
+
+  test("uses exit 5 only when every failed case is inconclusive", () => {
+    expect(evalSummaryExitCode({ failed: 0, inconclusive: 0 })).toBe(0);
+    expect(evalSummaryExitCode({ failed: 2, inconclusive: 2 })).toBe(5);
+    expect(evalSummaryExitCode({ failed: 2, inconclusive: 1 })).toBe(1);
+    expect(evalSummaryExitCode({ failed: 1, inconclusive: 0 })).toBe(1);
   });
 
   test("detects existing run IDs before execution", async () => {
