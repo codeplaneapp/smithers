@@ -527,6 +527,8 @@ describe("process helpers and bash tool", () => {
       const error = await expectSmithersCode(bashTool("curl", ["https://example.com"]), "TOOL_NETWORK_DISABLED");
       expect(error.message).toContain("allowNetwork");
       await expectSmithersCode(bashTool("curl", ["example.com"]), "TOOL_NETWORK_DISABLED");
+      await expectSmithersCode(bashTool("curl", ["http://localhost:3000", "evil.com"]), "TOOL_NETWORK_DISABLED");
+      await expectSmithersCode(bashTool("wget", ["http://127.0.0.1:3000", "evil.com"]), "TOOL_NETWORK_DISABLED");
       await expectSmithersCode(bashTool("wget", ["-qO-", "https://example.com"]), "TOOL_NETWORK_DISABLED");
       await expectSmithersCode(
         bashTool("/bin/sh", ["-c", "curl http://localhost:1 && curl https://example.com"]),

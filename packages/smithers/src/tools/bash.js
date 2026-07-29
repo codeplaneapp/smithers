@@ -134,6 +134,58 @@ function validateBashInvocation(cmd, args, opts, ctx) {
 // local dev server is exactly what a local test harness does. Package managers
 // stay blocked outright because they reach registries regardless of argv.
 const FETCH_EXECUTABLES = new Set(["curl", "wget"]);
+// Value-taking flags whose following token is local request/output metadata,
+// not another fetch target. Endpoint-bearing flags such as curl --proxy are
+// deliberately absent: a bare remote hostname there must fail closed too.
+const FETCH_LOCAL_VALUE_FLAGS = {
+  curl: new Set([
+    "-A",
+    "--user-agent",
+    "-b",
+    "--cookie",
+    "-c",
+    "--cookie-jar",
+    "--cacert",
+    "--cert",
+    "--connect-timeout",
+    "-d",
+    "--data",
+    "--data-ascii",
+    "--data-binary",
+    "--data-raw",
+    "--data-urlencode",
+    "-H",
+    "--header",
+    "--key",
+    "--max-time",
+    "-o",
+    "--output",
+    "--retry",
+    "-u",
+    "--user",
+    "-w",
+    "--write-out",
+    "-X",
+    "--request",
+  ]),
+  wget: new Set([
+    "--body-data",
+    "--ca-certificate",
+    "--certificate",
+    "--header",
+    "--method",
+    "-O",
+    "--output-document",
+    "-P",
+    "--directory-prefix",
+    "--password",
+    "--post-data",
+    "--timeout",
+    "--tries",
+    "--user",
+    "--user-agent",
+  ]),
+};
 const PACKAGE_EXECUTABLES = new Set(["npm", "bun", "pip"]);
 const GIT_REMOTE_OPS = new Set(["push", "pull", "fetch", "clone", "remote"]);
 const URL_SCHEMES = ["http://", "https://"];
@@ -196,6 +248,34 @@ function isRemoteUrlArgument(arg) {
   return urlValues(arg).some((value) => !isLoopbackUrl(value));
 }
 
+function fetchTargets(executable, argv) {
+  const valueFlags = FETCH_LOCAL_VALUE_FLAGS[executable] ?? new Set();
+  const targets = [];
+  let positionalOnly = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (!positionalOnly && arg === "--") {
+      positionalOnly = true;
+      continue;
+    }
+    if (!positionalOnly && executable === "curl" && arg.startsWith("--url=")) {
+      targets.push(arg.slice("--url=".length));
+      continue;
+    }
+    if (!positionalOnly && arg === "--url" && executable === "curl") {
+      if (typeof argv[index + 1] === "string") targets.push(argv[++index]);
+      continue;
+    }
+    if (!positionalOnly && valueFlags.has(arg)) {
+      index += 1;
+      continue;
+    }
+    if (!positionalOnly && arg.startsWith("-")) continue;
+    targets.push(arg);
+  }
+  return targets;
+}
+
 function gitSubcommand(args) {
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -247,9 +327,11 @@ function throwNetworkDisabled(executable) {
 function assertLocalExecutable(executable, argv) {
   if (FETCH_EXECUTABLES.has(executable)) {
     // curl/wget must name a loopback URL to run; a bare hostname or a remote
-    // URL is (potential) egress. Every URL argument has to be loopback.
+    // URL is (potential) egress. Every positional fetch target has to be a
+    // recognized loopback URL, even when another target is already loopback.
     const urls = argv.flatMap(urlValues);
-    if (urls.length === 0 || !urls.every(isLoopbackUrl)) {
+    const targets = fetchTargets(executable, argv);
+    if (targets.length === 0 || !targets.every(isLoopbackUrl) || !urls.every(isLoopbackUrl)) {
       throwNetworkDisabled(executable);
     }
     return;
