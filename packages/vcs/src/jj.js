@@ -44,7 +44,7 @@ function collectUtf8(stream) {
  * @returns {Effect.Effect<RunJjResult, never, import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner>}
  */
 export function runJj(args, opts = {}) {
-  let command = Command.make(resolveJjBinary().path, ...args);
+  let command = Command.make(resolveJjBinary().path, args);
   if (opts.cwd) {
     command = Command.setCwd(command, opts.cwd);
   }
