@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { join } from "node:path";
-import { renderWorkflow } from "smithers-orchestrator/testing";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { renderWorkflow, runTask } from "smithers-orchestrator/testing";
 import workflow, {
   ARMS,
   ARM_CONFIG,
@@ -13,6 +14,7 @@ import workflow, {
   estimateTokens,
   median,
   parseRunnerResult,
+  resetBenchmarkScratch,
   renderBuilderPrompt,
   renderReportHtml,
   type ScoreRow,
@@ -40,8 +42,18 @@ function row(overrides: Partial<ScoreRow>): ScoreRow {
 }
 
 describe("api-ab-benchmark workflow", () => {
-  test("renders one builder task per arm x task x trial and no scoring or report yet", async () => {
+  test("renders only setup until stale scratch has been cleared", async () => {
     const frame = await renderWorkflow(workflow, { workflowPath, input: { trials: 2 } });
+    const nodeIds = frame.tasks.map((task: { nodeId: string }) => task.nodeId);
+    expect(nodeIds).toEqual(["setup"]);
+  });
+
+  test("renders one builder task per arm x task x trial after setup", async () => {
+    const frame = await renderWorkflow(workflow, {
+      workflowPath,
+      input: { trials: 2 },
+      outputs: { setup: [{ nodeId: "setup", iteration: 0, ready: true, candidates: 12 }] },
+    });
     const nodeIds = frame.tasks.map((task: { nodeId: string }) => task.nodeId);
     expect(nodeIds).toContain("build-effect-pipeline-1");
     expect(nodeIds).toContain("build-jsx-reuse-2");
@@ -55,6 +67,7 @@ describe("api-ab-benchmark workflow", () => {
       workflowPath,
       input: { trials: 1 },
       outputs: {
+        setup: [{ nodeId: "setup", iteration: 0, ready: true, candidates: 6 }],
         build: [
           {
             nodeId: "build-effect-pipeline-1",
@@ -69,6 +82,21 @@ describe("api-ab-benchmark workflow", () => {
     const nodeIds = frame.tasks.map((task: { nodeId: string }) => task.nodeId);
     expect(nodeIds).toContain("score-effect-pipeline-1");
     expect(nodeIds).not.toContain("score-jsx-pipeline-1");
+  });
+
+  test("setup removes a candidate left by a prior run before builders mount", async () => {
+    const stale = candidatePath("effect", "pipeline", 1);
+    mkdirSync(dirname(stale), { recursive: true });
+    writeFileSync(stale, "stale");
+    try {
+      const frame = await renderWorkflow(workflow, { workflowPath, input: { trials: 1 } });
+      const setup = frame.tasks.find((task: { nodeId: string }) => task.nodeId === "setup");
+      expect(setup).toBeDefined();
+      await runTask(setup!);
+      expect(existsSync(stale)).toBe(false);
+    } finally {
+      resetBenchmarkScratch();
+    }
   });
 });
 

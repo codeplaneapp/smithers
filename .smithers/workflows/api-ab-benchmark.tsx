@@ -161,9 +161,14 @@ const reportSchema = z.object({
   htmlPath: z.string(),
   jsonPath: z.string(),
 });
+const setupSchema = z.object({
+  ready: z.boolean(),
+  candidates: z.number().int(),
+});
 
 const { Workflow, Task, Sequence, Parallel, smithers, outputs } = createSmithers({
   input: inputSchema,
+  setup: setupSchema,
   build: buildSchema,
   score: scoreSchema,
   report: reportSchema,
@@ -653,6 +658,22 @@ export function resetBenchmarkScratch(): void {
   rmSync(BENCH_DIR, { recursive: true, force: true });
 }
 
+export function prepareBenchmarkScratch(trials: number): z.infer<typeof setupSchema> {
+  resetBenchmarkScratch();
+  let candidates = 0;
+  for (const arm of ARMS) {
+    for (const spec of TASK_SPECS) {
+      for (let trial = 1; trial <= trials; trial += 1) {
+        const dir = candidateDir(arm, spec.id, trial);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(resolve(dir, "reference.txt"), readFileSync(ARM_CONFIG[arm].docPath, "utf8"));
+        candidates += 1;
+      }
+    }
+  }
+  return { ready: true, candidates };
+}
+
 // ---------------------------------------------------------------------------
 // Workflow
 // ---------------------------------------------------------------------------
@@ -666,16 +687,7 @@ export default smithers(
     const candidates = ARMS.flatMap((arm) =>
       TASK_SPECS.flatMap((spec) => Array.from({ length: trials }, (_, index) => ({ arm, spec, trial: index + 1 }))),
     );
-
-    // Every candidate owns a private scratch directory, so parallel lanes cannot
-    // collide on a shared path (this repo has a known parallel-lane race).
-    for (const candidate of candidates) {
-      const dir = candidateDir(candidate.arm, candidate.spec.id, candidate.trial);
-      mkdirSync(dir, { recursive: true });
-      // The arm's one reference doc lands next to the candidate; the prompt
-      // points at it by absolute path.
-      writeFileSync(resolve(dir, "reference.txt"), readFileSync(ARM_CONFIG[candidate.arm].docPath, "utf8"));
-    }
+    const setup = ctx.outputMaybe(outputs.setup, { nodeId: "setup" });
 
     const scored = candidates.map((candidate) =>
       ctx.outputMaybe(outputs.score, {
@@ -688,33 +700,38 @@ export default smithers(
       <Workflow name="api-ab-benchmark">
         <UI entry="../ui/api-ab-benchmark.tsx" title="API A/B Benchmark" />
         <Sequence>
-          <Parallel maxConcurrency={6}>
-            {candidates.map((candidate) => {
-              const key = candidateKey(candidate.arm, candidate.spec.id, candidate.trial);
-              const dir = candidateDir(candidate.arm, candidate.spec.id, candidate.trial);
-              const scratchDocPath = resolve(dir, "reference.txt");
-              const built = ctx.outputMaybe(outputs.build, { nodeId: `build-${key}` });
-              return (
-                <Sequence key={key}>
-                  <Task
-                    id={`build-${key}`}
-                    output={outputs.build}
-                    agent={builder}
-                    timeoutMs={20 * 60_000}
-                    heartbeatTimeoutMs={10 * 60_000}
-                  >
-                    {renderBuilderPrompt(candidate.arm, candidate.spec, candidate.trial, scratchDocPath)}
-                  </Task>
-                  {built ? (
-                    <Task id={`score-${key}`} output={outputs.score}>
-                      {() => scoreCandidate(candidate.arm, candidate.spec, candidate.trial)}
+          <Task id="setup" output={outputs.setup}>
+            {() => prepareBenchmarkScratch(trials)}
+          </Task>
+          {setup?.ready ? (
+            <Parallel maxConcurrency={6}>
+              {candidates.map((candidate) => {
+                const key = candidateKey(candidate.arm, candidate.spec.id, candidate.trial);
+                const dir = candidateDir(candidate.arm, candidate.spec.id, candidate.trial);
+                const scratchDocPath = resolve(dir, "reference.txt");
+                const built = ctx.outputMaybe(outputs.build, { nodeId: `build-${key}` });
+                return (
+                  <Sequence key={key}>
+                    <Task
+                      id={`build-${key}`}
+                      output={outputs.build}
+                      agent={builder}
+                      timeoutMs={20 * 60_000}
+                      heartbeatTimeoutMs={10 * 60_000}
+                    >
+                      {renderBuilderPrompt(candidate.arm, candidate.spec, candidate.trial, scratchDocPath)}
                     </Task>
-                  ) : null}
-                </Sequence>
-              );
-            })}
-          </Parallel>
-          {allScored ? (
+                    {built ? (
+                      <Task id={`score-${key}`} output={outputs.score}>
+                        {() => scoreCandidate(candidate.arm, candidate.spec, candidate.trial)}
+                      </Task>
+                    ) : null}
+                  </Sequence>
+                );
+              })}
+            </Parallel>
+          ) : null}
+          {setup?.ready && allScored ? (
             <Task id="report" output={outputs.report}>
               {() => writeReport(scored as ScoreRow[], { builderModel, trials })}
             </Task>
