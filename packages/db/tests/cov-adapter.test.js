@@ -386,7 +386,22 @@ describe("adapter: cache / cron / scorer / memory / scorer effects", () => {
       score: 0.9,
       scoredAtMs: now,
     });
-    expect((await adapter.listScorerResults("r1")).length).toBe(1);
+    await adapter.insertScorerResult({
+      id: "s1",
+      runId: "r1",
+      nodeId: "n1",
+      iteration: 0,
+      attempt: 0,
+      scorerId: "sc",
+      scorerName: "Scorer",
+      source: "eval",
+      score: 0.2,
+      reason: "re-executed after rewind",
+      scoredAtMs: now + 1,
+    });
+    const rows = await adapter.listScorerResults("r1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ score: 0.2, reason: "re-executed after rewind", scoredAtMs: now + 1 });
     expect((await adapter.listScorerResults("r1", "n1")).length).toBe(1);
   });
 });

@@ -1777,13 +1777,15 @@ export class SmithersDb {
       }
       const client = this.db.session.client;
       client
-        .query(`UPDATE _smithers_runs
+        .query(
+          `UPDATE _smithers_runs
            SET runtime_owner_id = ?, heartbeat_at_ms = ?
            WHERE run_id = ?
              AND status = ?
              AND COALESCE(runtime_owner_id, '') = COALESCE(?, '')
              AND COALESCE(heartbeat_at_ms, -1) = COALESCE(?, -1)
-             AND (? = 0 OR heartbeat_at_ms IS NULL OR heartbeat_at_ms < ?)`)
+             AND (? = 0 OR heartbeat_at_ms IS NULL OR heartbeat_at_ms < ?)`,
+        )
         .run(
           params.claimOwnerId,
           params.claimHeartbeatAtMs,
@@ -1856,12 +1858,14 @@ export class SmithersDb {
       const claimArgs = hasClaimGuard ? [params.expectedClaimedBy ?? null, params.expectedClaimedAtMs ?? null] : [];
       const client = this.db.session.client;
       client
-        .query(`UPDATE _smithers_runs
+        .query(
+          `UPDATE _smithers_runs
            SET ${assignments.join(", ")}
            WHERE run_id = ?
              AND COALESCE(runtime_owner_id, '') = COALESCE(?, '')
              AND COALESCE(heartbeat_at_ms, -1) = COALESCE(?, -1)
-             ${claimWhere}`)
+             ${claimWhere}`,
+        )
         .run(...setArgs, params.runId, params.expectedRuntimeOwnerId, params.expectedHeartbeatAtMs, ...claimArgs);
       return this.internalStorage.queryOne("SELECT changes() AS count").then((row) => Number(row?.count ?? 0) > 0);
     });
@@ -2111,13 +2115,17 @@ export class SmithersDb {
       }
       if (iterationColumn) {
         client
-          .query(`DELETE FROM "${escapedTableName}"
-             WHERE "${runIdColumn}" = ? AND "${nodeIdColumn}" = ? AND "${iterationColumn}" = ?`)
+          .query(
+            `DELETE FROM "${escapedTableName}"
+             WHERE "${runIdColumn}" = ? AND "${nodeIdColumn}" = ? AND "${iterationColumn}" = ?`,
+          )
           .run(key.runId, key.nodeId, key.iteration ?? 0);
       } else {
         client
-          .query(`DELETE FROM "${escapedTableName}"
-             WHERE "${runIdColumn}" = ? AND "${nodeIdColumn}" = ?`)
+          .query(
+            `DELETE FROM "${escapedTableName}"
+             WHERE "${runIdColumn}" = ? AND "${nodeIdColumn}" = ?`,
+          )
           .run(key.runId, key.nodeId);
       }
       return Promise.resolve(undefined);
@@ -3131,11 +3139,13 @@ export class SmithersDb {
                     client.run("BEGIN IMMEDIATE");
                     try {
                       const existingInTurn = client
-                        .query(`SELECT seq
+                        .query(
+                          `SELECT seq
                                FROM _smithers_signals
                                WHERE ${dedupeWhereSql}
                                ORDER BY seq DESC
-                               LIMIT 1`)
+                               LIMIT 1`,
+                        )
                         .get(...dedupeParams);
                       if (existingInTurn?.seq !== undefined) {
                         client.run("COMMIT");
@@ -3661,14 +3671,16 @@ export class SmithersDb {
                     client.run("BEGIN IMMEDIATE");
                     try {
                       const existingInTurn = client
-                        .query(`SELECT seq
+                        .query(
+                          `SELECT seq
                                FROM _smithers_events
                                WHERE run_id = ?
                                  AND timestamp_ms = ?
                                  AND type = ?
                                  AND payload_json = ?
                                ORDER BY seq DESC
-                               LIMIT 1`)
+                               LIMIT 1`,
+                        )
                         .get(row.runId, row.timestampMs, row.type, row.payloadJson);
                       if (existingInTurn?.seq !== undefined) {
                         client.run("COMMIT");
@@ -3805,9 +3817,10 @@ export class SmithersDb {
       this.internalStorage.dialect === POSTGRES
         ? "POSITION(',' || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ',' IN descendants.path) = 0"
         : "instr(descendants.path, ',' || CAST(length(child.run_id) AS TEXT) || ':' || child.run_id || ',') = 0";
-    return this.read(`list pending approvals ${runId}`, () =>
-      this.internalStorage.queryAll(
-        `WITH RECURSIVE descendants(run_id, depth, path) AS (
+    return this.read(`list pending approvals ${runId}`, async () => {
+      const query = (excludeForks) =>
+        this.internalStorage.queryAll(
+          `WITH RECURSIVE descendants(run_id, depth, path) AS (
            SELECT run_id, 0
                 , ',' || CAST(length(run_id) AS TEXT) || ':' || run_id || ','
            FROM _smithers_runs
@@ -3819,6 +3832,15 @@ export class SmithersDb {
            JOIN descendants ON child.parent_run_id = descendants.run_id
            WHERE descendants.depth + 1 < 1000
              AND ${visitedCheck}
+             ${
+               excludeForks
+                 ? `AND NOT EXISTS (
+               SELECT 1 FROM _smithers_branches branch
+               WHERE branch.run_id = child.run_id
+                 AND (branch.branch_label IS NULL OR branch.branch_label <> ?)
+             )`
+                 : ""
+             }
          )
          SELECT *
          FROM (
@@ -3873,10 +3895,18 @@ export class SmithersDb {
              )
          ) pending
          ORDER BY COALESCE(requested_at_ms, 0) ASC, run_id, node_id, iteration`,
-        [runId, "requested", "waiting-approval", "waiting-approval"],
-        { booleanColumns: ["autoApproved"] },
-      ),
-    );
+          excludeForks
+            ? [runId, CONTINUE_AS_NEW_BRANCH_LABEL, "requested", "waiting-approval", "waiting-approval"]
+            : [runId, "requested", "waiting-approval", "waiting-approval"],
+          { booleanColumns: ["autoApproved"] },
+        );
+      try {
+        return await query(true);
+      } catch (error) {
+        if (!isMissingOutputTableError(error)) throw error;
+        return query(false);
+      }
+    });
   }
   /**
    * @param {string} runId
@@ -4857,7 +4887,7 @@ export class SmithersDb {
    */
   insertScorerResult(row) {
     return this.write(`insert scorer result ${row.scorerId}`, () =>
-      this.internalStorage.insertIgnore("_smithers_scorers", row),
+      this.internalStorage.upsert("_smithers_scorers", row, ["id"]),
     );
   }
   /**

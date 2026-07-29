@@ -463,10 +463,12 @@ describe("SmithersDb adapter", () => {
     await adapter.insertFrame(frameRow("r1", 1, { xmlJson: frame1, xmlHash: "h1" }));
     await adapter.insertFrame(frameRow("r1", 2, { xmlJson: frame2, xmlHash: "h2" }));
     const rawRows = sqlite
-      .query(`SELECT frame_no AS frameNo, encoding, xml_json AS xmlJson
+      .query(
+        `SELECT frame_no AS frameNo, encoding, xml_json AS xmlJson
          FROM _smithers_frames
          WHERE run_id = 'r1'
-         ORDER BY frame_no ASC`)
+         ORDER BY frame_no ASC`,
+      )
       .all();
     expect(rawRows.map((row) => row.encoding)).toEqual(["keyframe", "delta", "delta"]);
     expect(rawRows[1].xmlJson.length).toBeLessThan(frame1.length);
@@ -721,6 +723,50 @@ describe("SmithersDb adapter", () => {
     // The real row keeps its request payload; the fallback row has none.
     expect(byNode["real-gate"].requestJson).toContain("decision");
     expect(byNode["fallback-gate"].requestJson).toBeNull();
+  });
+  test("pending approvals include subflows and continue-as-new descendants but exclude time-travel forks", async () => {
+    const { adapter } = createTestDb();
+    await adapter.insertRun(runRow("root", "waiting-approval"));
+    await adapter.insertRun(runRow("subflow", "waiting-approval", { parentRunId: "root" }));
+    await adapter.insertRun(runRow("continued", "waiting-approval", { parentRunId: "root" }));
+    await adapter.insertRun(runRow("fork", "waiting-approval", { parentRunId: "root" }));
+    await adapter.internalStorage.upsert(
+      "_smithers_branches",
+      {
+        runId: "continued",
+        parentRunId: "root",
+        parentFrameNo: 1,
+        branchLabel: "continue-as-new",
+        createdAtMs: now,
+      },
+      ["runId"],
+    );
+    await adapter.internalStorage.upsert(
+      "_smithers_branches",
+      {
+        runId: "fork",
+        parentRunId: "root",
+        parentFrameNo: 1,
+        branchLabel: "experiment",
+        createdAtMs: now,
+      },
+      ["runId"],
+    );
+    for (const runId of ["subflow", "continued", "fork"]) {
+      await adapter.insertNode(nodeRow(runId, `${runId}-gate`, "waiting-approval"));
+      await adapter.insertOrUpdateApproval({
+        runId,
+        nodeId: `${runId}-gate`,
+        iteration: 0,
+        status: "requested",
+        requestedAtMs: now,
+      });
+    }
+
+    expect((await adapter.listPendingApprovals("root")).map((approval) => approval.runId).sort()).toEqual([
+      "continued",
+      "subflow",
+    ]);
   });
   test("insertCache and getCache", async () => {
     const { adapter } = createTestDb();

@@ -53,8 +53,9 @@ function shouldRun(binding, ctx) {
 }
 /**
  * Builds the stable primary key for one logical scorer execution. Rewinds can
- * execute the same attempt again, so a random id would make insertIgnore append
- * a duplicate and corrupt aggregates.
+ * execute the same attempt again, so persistence upserts this logical identity:
+ * the latest execution replaces the pre-rewind score without creating a
+ * duplicate that would corrupt aggregates.
  *
  * @param {ScorerContext} ctx
  * @param {string} scorerId
