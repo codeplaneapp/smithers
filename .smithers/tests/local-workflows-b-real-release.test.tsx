@@ -320,6 +320,7 @@ describe("real stack and release workflow owner coverage", () => {
       },
     });
     frame = await renderWorkflow(workflow, { input, outputs, workflowPath: pathFor(file) });
+    expect(task(frame, "quality-gate")).toMatchObject({ retries: 0 });
     expect(await runTask(task(frame, "quality-gate"))).toMatchObject({ ok: true });
     expect(frame.tasks.some((item) => item.nodeId === "approve-content")).toBe(true);
     outputs = add(frame, outputs, "approve-content", {

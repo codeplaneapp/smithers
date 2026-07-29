@@ -490,7 +490,7 @@ export default smithers((rawCtx) => {
         ) : null}
 
         {latestCheck && latestEdited ? (
-          <Task id="quality-gate" output={outputs.qualityGate}>
+          <Task id="quality-gate" output={outputs.qualityGate} noRetry>
             {() => enforceQualityGate({ input, check: latestCheck, score: latestScore })}
           </Task>
         ) : null}
