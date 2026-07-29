@@ -109,7 +109,7 @@ describe("SmithersCanvasNode", () => {
     expect(html).toContain('data-selected="true"');
     // The canvas is a labelled region, not a listbox: no option semantics.
     expect(html).not.toContain('role="option"');
-    expect(html).not.toContain('aria-selected');
+    expect(html).not.toContain("aria-selected");
     expect(html).toContain('data-slot="workflow-node-header"');
     expect(html).toContain('data-slot="workflow-node-status"');
     expect(html).toContain("Running");
@@ -130,7 +130,7 @@ describe("SmithersCanvasNode", () => {
     expect(html).toContain('data-slot="workflow-node"');
     expect(html).toContain('data-selected="false"');
     expect(html).not.toContain('role="option"');
-    expect(html).not.toContain('aria-selected');
+    expect(html).not.toContain("aria-selected");
     expect(html).not.toContain('data-slot="workflow-node-content"');
     expect(html).not.toContain('data-slot="workflow-node-status"');
     expect(html).toContain("Ship it");
