@@ -176,4 +176,56 @@ describe("CLI observability", () => {
     },
     TIMEOUT_MS,
   );
+
+  test(
+    "inspect preserves degraded outcomes for continued and pre-payload finished runs",
+    async () => {
+      const repo = createTempRepo();
+      const { sqlite, adapter } = openRepoDb(repo);
+      try {
+        await insertFinishedRun(adapter, "inspect-continued-run");
+        await adapter.updateRun("inspect-continued-run", { status: "continued" });
+        await adapter.insertEventWithNextSeq({
+          runId: "inspect-continued-run",
+          timestampMs: Date.now(),
+          type: "RunFinished",
+          payloadJson: JSON.stringify({
+            failedChildren: 1,
+            failedChildKeys: ["masked::3"],
+          }),
+        });
+        const continued = runSmithers(["inspect", "inspect-continued-run"], {
+          cwd: repo.dir,
+          format: "json",
+          timeoutMs: TIMEOUT_MS,
+        });
+        expect(continued.exitCode, `${continued.stdout}\n${continued.stderr}`).toBe(0);
+        expect(continued.json.failedChildren).toBe(1);
+        expect(continued.json.failedChildKeys).toEqual(["masked::3"]);
+
+        await insertFinishedRun(adapter, "inspect-legacy-run");
+        await adapter.insertNode({
+          runId: "inspect-legacy-run",
+          nodeId: "legacy-masked",
+          iteration: 2,
+          state: "failed",
+          lastAttempt: 1,
+          updatedAtMs: Date.now(),
+          outputTable: "",
+          label: "Legacy masked failure",
+        });
+        const legacy = runSmithers(["inspect", "inspect-legacy-run"], {
+          cwd: repo.dir,
+          format: "json",
+          timeoutMs: TIMEOUT_MS,
+        });
+        expect(legacy.exitCode, `${legacy.stdout}\n${legacy.stderr}`).toBe(0);
+        expect(legacy.json.failedChildren).toBe(1);
+        expect(legacy.json.failedChildKeys).toEqual(["legacy-masked::2"]);
+      } finally {
+        sqlite.close();
+      }
+    },
+    TIMEOUT_MS,
+  );
 });

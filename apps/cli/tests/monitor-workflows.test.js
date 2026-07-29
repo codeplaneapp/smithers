@@ -192,7 +192,15 @@ describe("monitor launch argv", () => {
     // parent_run_id is what makes ps/inspect/the Gateway show the pairing, and
     // what makes `smithers cancel` cascade to the monitor.
     expect(args[args.indexOf("--parent-run-id") + 1]).toBe("run-42");
-    expect(args[args.indexOf("--run-id") + 1]).toBe(buildMonitorRunId("run-42"));
+    expect(args[args.indexOf("--run-id") + 1]).toMatch(/^run-42-monitor-[a-f0-9]{16}$/);
+  });
+
+  test("mints a collision-resistant id for every launch", () => {
+    const first = buildMonitorRunId("run-42");
+    const second = buildMonitorRunId("run-42");
+    expect(first).not.toBe(second);
+    expect(first).toStartWith("run-42-monitor-");
+    expect(buildMonitorRunId("x".repeat(64)).length).toBeLessThanOrEqual(64);
   });
 
   test("tells the monitor what it is watching", () => {

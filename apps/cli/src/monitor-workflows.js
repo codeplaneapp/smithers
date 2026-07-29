@@ -4,6 +4,7 @@
 // @smithers-type-exports-end
 
 import { existsSync, statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { resolvePackDirs } from "./workflows.js";
@@ -187,15 +188,16 @@ export function resolveMonitorLaunch(params) {
 }
 
 /**
- * The run id a monitor gets. Derived from the watched run so relaunching a
- * monitor for the same run is detectably a duplicate rather than a silent
- * second watcher.
+ * The run id a monitor gets. It retains the watched run prefix for diagnosis,
+ * but includes launch entropy so an existing unrelated row can never be
+ * mistaken for the child this process just spawned and later torn down.
  *
  * @param {string} watchRunId
  * @returns {string}
  */
 export function buildMonitorRunId(watchRunId) {
-  return `${watchRunId}-monitor`;
+  const suffix = `-monitor-${randomUUID().replaceAll("-", "").slice(0, 16)}`;
+  return `${watchRunId.slice(0, 64 - suffix.length)}${suffix}`;
 }
 
 /**

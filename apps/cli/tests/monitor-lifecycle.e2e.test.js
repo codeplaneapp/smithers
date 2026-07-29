@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { Database } from "bun:sqlite";
 import { createTempRepo, pinSqliteBackend, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
 
 const TIMEOUT_MS = 180_000;
@@ -37,6 +38,25 @@ function computeWorkflow(name, delayMs) {
   ].join("\n");
 }
 
+function approvalWorkflow(name) {
+  return [
+    "/** @jsxImportSource smithers-orchestrator */",
+    'import { Approval, createSmithers } from "smithers-orchestrator";',
+    'import { z } from "zod";',
+    "",
+    "const { Workflow, smithers, outputs } = createSmithers({",
+    "  approval: z.object({ approved: z.boolean() }),",
+    "});",
+    "",
+    "export default smithers(() => (",
+    `  <Workflow name="${name}">`,
+    '    <Approval id="gate" output={outputs.approval} request={{ title: "Continue?" }} onDeny="fail" />',
+    "  </Workflow>",
+    "));",
+    "",
+  ].join("\n");
+}
+
 /**
  * A workspace holding one watched workflow and (optionally) its monitor. The
  * monitor sleeps far longer than the run it watches, so "the monitor is
@@ -59,6 +79,19 @@ function fixture({ withMonitor }) {
 /** @param {import("../../../packages/smithers/tests/e2e-helpers.js").TempRepo} repo */
 function inspect(repo, runId) {
   return runSmithers(["inspect", runId], { cwd: repo.dir, format: "json", timeoutMs: 60_000 });
+}
+
+/** @param {import("../../../packages/smithers/tests/e2e-helpers.js").TempRepo} repo */
+function childRunIds(repo, parentRunId) {
+  const sqlite = new Database(repo.path("smithers.db"), { readonly: true });
+  try {
+    return sqlite
+      .query("SELECT run_id FROM _smithers_runs WHERE parent_run_id = ? ORDER BY created_at_ms")
+      .all(parentRunId)
+      .map((row) => row.run_id);
+  } finally {
+    sqlite.close();
+  }
 }
 
 const TERMINAL = new Set(["finished", "failed", "cancelled", "continued"]);
@@ -94,16 +127,17 @@ describe("monitor workflow lifecycle", () => {
       });
       expect(run.exitCode).toBe(0);
       // Starts with the run.
-      expect(`${run.stdout}${run.stderr}`).toContain("monitor watched-1-monitor watching watched-1");
+      expect(`${run.stdout}${run.stderr}`).toContain("watching watched-1");
 
-      const monitor = inspect(repo, "watched-1-monitor");
+      const [monitorRunId] = childRunIds(repo, "watched-1");
+      const monitor = inspect(repo, monitorRunId);
       expect(monitor.exitCode).toBe(0);
       // Linked in the store, so ps / inspect / the Gateway can show the pairing
       // and `smithers cancel` cascades to it.
       expect(monitor.json?.run?.parentRunId).toBe("watched-1");
       // Dies with the run: its own task would have slept ten minutes, so only
       // teardown can put it in a terminal state this soon.
-      expect(await waitForTerminal(repo, "watched-1-monitor")).toBe("cancelled");
+      expect(await waitForTerminal(repo, monitorRunId)).toBe("cancelled");
     },
     TIMEOUT_MS,
   );
@@ -119,9 +153,8 @@ describe("monitor workflow lifecycle", () => {
         timeoutMs: TIMEOUT_MS,
       });
       expect(run.exitCode).toBe(0);
-      const grandchild = inspect(repo, "watched-2-monitor-monitor");
-      expect(grandchild.exitCode).not.toBe(0);
-      expect(`${grandchild.stdout}${grandchild.stderr}`).toContain("RUN_NOT_FOUND");
+      const [monitorRunId] = childRunIds(repo, "watched-2");
+      expect(childRunIds(repo, monitorRunId)).toEqual([]);
     },
     TIMEOUT_MS,
   );
@@ -136,7 +169,7 @@ describe("monitor workflow lifecycle", () => {
       );
       expect(run.exitCode).toBe(0);
       expect(`${run.stdout}${run.stderr}`).not.toContain("watching watched-3");
-      expect(inspect(repo, "watched-3-monitor").exitCode).not.toBe(0);
+      expect(childRunIds(repo, "watched-3")).toEqual([]);
     },
     TIMEOUT_MS,
   );
@@ -151,7 +184,103 @@ describe("monitor workflow lifecycle", () => {
       });
       expect(run.exitCode).toBe(0);
       expect(`${run.stdout}${run.stderr}`).not.toContain("watching watched-4");
-      expect(inspect(repo, "watched-4-monitor").exitCode).not.toBe(0);
+      expect(childRunIds(repo, "watched-4")).toEqual([]);
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "a parked run keeps its monitor and a later resume adopts it",
+    async () => {
+      const repo = createTempRepo();
+      mkdirSync(join(repo.dir, ".smithers", "workflows"), { recursive: true });
+      mkdirSync(join(repo.dir, ".smithers", "monitor"), { recursive: true });
+      pinSqliteBackend(repo.dir);
+      repo.write(".smithers/workflows/watched.tsx", approvalWorkflow("watched"));
+      repo.write(".smithers/monitor/watched.tsx", computeWorkflow("watcher", 600_000));
+
+      const parked = runSmithers(
+        ["up", ".smithers/workflows/watched.tsx", "--run-id", "watched-parked", "--no-report"],
+        { cwd: repo.dir, timeoutMs: TIMEOUT_MS },
+      );
+      expect(parked.exitCode, `${parked.stdout}\n${parked.stderr}`).toBe(3);
+
+      let monitorRunId;
+      let monitorStatus;
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        [monitorRunId] = childRunIds(repo, "watched-parked");
+        monitorStatus = monitorRunId ? inspect(repo, monitorRunId).json?.run?.status : undefined;
+        if (monitorStatus === "running") break;
+        await Bun.sleep(250);
+      }
+      expect(monitorStatus).toBe("running");
+
+      const approved = runSmithers(["approve", "watched-parked", "--node", "gate"], {
+        cwd: repo.dir,
+        format: "json",
+        timeoutMs: 60_000,
+      });
+      expect(approved.exitCode, `${approved.stdout}\n${approved.stderr}`).toBe(0);
+      const resumed = runSmithers(
+        ["up", ".smithers/workflows/watched.tsx", "--run-id", "watched-parked", "--resume", "--force", "--no-report"],
+        { cwd: repo.dir, timeoutMs: TIMEOUT_MS },
+      );
+      expect(resumed.exitCode, `${resumed.stdout}\n${resumed.stderr}`).toBe(0);
+      expect(`${resumed.stdout}${resumed.stderr}`).toContain("already watching watched-parked; adopted");
+      expect(childRunIds(repo, "watched-parked")).toEqual([monitorRunId]);
+      expect(await waitForTerminal(repo, monitorRunId)).toBe("cancelled");
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "a post-launch resume rejection tears the monitor child down",
+    async () => {
+      const repo = createTempRepo();
+      mkdirSync(join(repo.dir, ".smithers", "workflows"), { recursive: true });
+      mkdirSync(join(repo.dir, ".smithers", "monitor"), { recursive: true });
+      pinSqliteBackend(repo.dir);
+      const originalWorkflow = approvalWorkflow("watched");
+      repo.write(".smithers/workflows/watched.tsx", originalWorkflow);
+      repo.write(".smithers/monitor/watched.tsx", computeWorkflow("watcher", 600_000));
+
+      const parked = runSmithers(
+        ["up", ".smithers/workflows/watched.tsx", "--run-id", "watched-rejected", "--no-report"],
+        { cwd: repo.dir, timeoutMs: TIMEOUT_MS },
+      );
+      expect(parked.exitCode, `${parked.stdout}\n${parked.stderr}`).toBe(3);
+      let monitorRunId;
+      let monitorStatus;
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        [monitorRunId] = childRunIds(repo, "watched-rejected");
+        monitorStatus = monitorRunId ? inspect(repo, monitorRunId).json?.run?.status : undefined;
+        if (monitorStatus === "running") break;
+        await Bun.sleep(250);
+      }
+      expect(monitorStatus).toBe("running");
+
+      const approved = runSmithers(["approve", "watched-rejected", "--node", "gate"], {
+        cwd: repo.dir,
+        format: "json",
+        timeoutMs: 60_000,
+      });
+      expect(approved.exitCode, `${approved.stdout}\n${approved.stderr}`).toBe(0);
+      repo.write(".smithers/workflows/watched.tsx", `${originalWorkflow}\n// changed after the durable run\n`);
+      const rejected = runSmithers(
+        ["up", ".smithers/workflows/watched.tsx", "--run-id", "watched-rejected", "--resume", "--force", "--no-report"],
+        { cwd: repo.dir, timeoutMs: TIMEOUT_MS },
+      );
+      expect(rejected.exitCode).toBe(1);
+      expect(`${rejected.stdout}${rejected.stderr}`).toContain("durable metadata changed");
+
+      const sqlite = new Database(repo.path("smithers.db"), { readonly: true });
+      try {
+        expect(sqlite.query("SELECT status FROM _smithers_runs WHERE run_id = ?").get(monitorRunId)).toEqual({
+          status: "cancelled",
+        });
+      } finally {
+        sqlite.close();
+      }
     },
     TIMEOUT_MS,
   );
