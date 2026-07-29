@@ -220,6 +220,11 @@ export const CURATED_SYSTEM_WORKFLOW_IDS = [
   "share-pack",
   "upgrade",
 ];
+const CURATED_WORKFLOW_IDS = new Set([...CURATED_PUBLIC_WORKFLOW_IDS, ...CURATED_SYSTEM_WORKFLOW_IDS]);
+const CURATED_SEEDED_FILES = GENERATED_SEEDED_FILES.filter((file) => {
+  const match = /^\.smithers\/workflows\/([^/]+)\.tsx$/.exec(file.path);
+  return !match || CURATED_WORKFLOW_IDS.has(match[1]);
+});
 
 const INIT_TEMPLATE_BY_PATH = new Map(GENERATED_INIT_TEMPLATES.map((file) => [file.path, file]));
 
@@ -289,7 +294,7 @@ function renderTemplateFiles(versions, env, projectRoot, options = {}) {
     ...renderAgentScaffoldFiles({ scaffoldCustomAgent: options.scaffoldCustomAgent }),
     { path: ".smithers/agents.ts", contents: generateAgentsTs(env, { cwd: projectRoot }) },
     initTemplate(".smithers/smithers.config.ts"),
-    ...GENERATED_SEEDED_FILES,
+    ...CURATED_SEEDED_FILES,
     initTemplate(".smithers/skills/.gitkeep"),
     initTemplate(".smithers/tickets/.gitkeep"),
   ];
