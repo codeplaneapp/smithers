@@ -1,0 +1,44 @@
+---
+title: Smithers Repo Federation
+description: Approval-gated migration workflow for splitting Smithers into standalone repositories while preserving history, package order, verification, and release safety.
+---
+
+`smithers-repo-federation` coordinates a repository migration across ten new
+public repositories plus the existing `multi`, `plue`, and
+`awesome-smithers` repositories. It works only in fresh migration clones and
+does not mutate the source checkout.
+
+Run the manifest-only path first:
+
+```bash
+bunx smithers-orchestrator workflow run smithers-repo-federation --input '{
+  "migrationRoot": "~/smithers-federation-migration",
+  "githubOrg": "smithersai",
+  "sourceRepo": "smithersai/smithers",
+  "dryRun": true
+}'
+```
+
+## Inputs
+
+| Field           | Meaning                                                                                                                                   |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `migrationRoot` | Dedicated directory for migration clones and artifacts. It cannot be the source checkout, an ancestor of it, or a reused dirty directory. |
+| `githubOrg`     | Organization that will own the ten new public repositories.                                                                               |
+| `sourceRepo`    | Source repository in `owner/name` form.                                                                                                   |
+| `dryRun`        | Stop after manifest review and approval without creating repositories or pushing.                                                         |
+
+## Stages and gates
+
+1. Prepare a protected migration root and clone the source.
+2. Inventory package destinations, dependency order, and release order.
+3. Review and approve the migration manifest.
+4. Create repositories, then extract, decouple, document, verify, and push 13 isolated lanes.
+5. Strip the source repository to the runtime kernel and run the federated release dry run.
+6. Repair and re-verify until the release plan is approvable.
+7. Require separate approvals before package publication and before merging removal/reference PRs.
+8. Verify the landed repositories and write a final report.
+
+The non-dry path creates public repositories, pushes branches, publishes
+packages, and can merge PRs. Those effects remain behind durable approval
+gates and exact verification checks.
