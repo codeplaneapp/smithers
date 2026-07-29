@@ -3,6 +3,7 @@ import { buildUsageReport } from "./buildUsageReport.js";
 import { claudeOauthUsage } from "./claudeOauthUsage.js";
 import { codexWhamUsage } from "./codexWhamUsage.js";
 import { googleUsage } from "./googleUsage.js";
+import { kimiCodeUsage } from "./kimiCodeUsage.js";
 import { openaiHeaderUsage } from "./openaiHeaderUsage.js";
 
 /** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
@@ -42,7 +43,7 @@ async function probeFor(account) {
     case "gemini-api":
       return googleUsage(account);
     case "kimi":
-      return { source: "none", error: "Kimi exposes no usage endpoint yet" };
+      return kimiCodeUsage(account);
     default:
       return { source: "none", error: `Usage not supported for provider "${account.provider}"` };
   }

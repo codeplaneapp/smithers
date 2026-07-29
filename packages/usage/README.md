@@ -22,15 +22,18 @@ The numbers live in three incompatible shapes, so every adapter normalizes to on
 | --- | --- | --- |
 | `claude-code` | `GET api.anthropic.com/api/oauth/usage` (5h + weekly %) | `<configDir>/.credentials.json` or macOS Keychain `Claude Code-credentials` |
 | `codex` | `GET chatgpt.com/backend-api/wham/usage` (5h + weekly %) | `<configDir>/auth.json` |
+| `kimi` | `GET api.kimi.com/coding/v1/usages` (weekly %, rate windows, parallel sessions) | `<configDir>/credentials/kimi-code.json` (refreshed via `auth.kimi.com/api/oauth/token`) |
 | `anthropic-api` | live `anthropic-ratelimit-*` headers off `count_tokens` | account `apiKey` |
 | `openai-api` | live `x-ratelimit-*` headers off a `max_tokens:1` POST | account `apiKey` |
 | `gemini` / `antigravity` / `gemini-api` | none yet (Google exposes no live quota) | — |
-| `kimi`, others | none | — |
+| others | none | — |
 
-The subscription endpoints (`claude-code`, `codex`) are undocumented: they are the
+The subscription endpoints (`claude-code`, `codex`, `kimi`) are undocumented: they are the
 same endpoints the official CLIs call, reachable by reading the CLI's own OAuth
 token off disk. They are best-effort — any failure degrades to a `source: "none"`
-report with a readable reason, never an exception.
+report with a readable reason, never an exception. Kimi access tokens live ~15
+minutes, so the kimi adapter refreshes them with the on-disk refresh token and
+persists the rotated pair back (the kimi CLI's own client_id/grant).
 
 ## Design
 
