@@ -5506,6 +5506,11 @@ async function legacyExecuteTask(
               iteration: completion.iteration,
               attempt: completion.attempt,
             };
+            await Effect.runPromise(
+              adapter.updateAttempt(runId, desc.nodeId, desc.iteration, attemptNo, {
+                metaJson: JSON.stringify(attemptMeta),
+              }),
+            );
             void eventBus.emitEventQueued({
               type: "RunHijacked",
               runId,

@@ -101,6 +101,36 @@ export async function resolveHijackCandidate(adapter, runId, target) {
       cwd: attempt.jjCwd ?? process.cwd(),
     };
   }
+  // Auto-hijack emits this durable event before aborting the live task. Under
+  // load, run shutdown can return before the final attempt metadata is flushed,
+  // so recover native CLI handoffs from the event instead of falsely reporting
+  // CHAT_CREATE_UNAVAILABLE.
+  const hijackEvents = await adapter.listEventsByType(runId, "RunHijacked");
+  for (const event of [...hijackEvents].reverse()) {
+    const payload = parseAttemptMeta(event.payloadJson ?? event.payload_json);
+    const engine = typeof payload.engine === "string" ? payload.engine : undefined;
+    const resume = typeof payload.resume === "string" ? payload.resume : undefined;
+    const nodeId =
+      typeof payload.nodeId === "string"
+        ? payload.nodeId
+        : typeof event.nodeId === "string"
+          ? event.nodeId
+          : typeof event.node_id === "string"
+            ? event.node_id
+            : undefined;
+    if (!engine || !resume || !nodeId) continue;
+    if (target && target !== engine && target !== nodeId) continue;
+    return {
+      runId,
+      nodeId,
+      iteration: typeof payload.iteration === "number" ? payload.iteration : 0,
+      attempt: typeof payload.attempt === "number" ? payload.attempt : 1,
+      engine,
+      mode: "native-cli",
+      resume,
+      cwd: typeof payload.cwd === "string" ? payload.cwd : process.cwd(),
+    };
+  }
   return null;
 }
 /**

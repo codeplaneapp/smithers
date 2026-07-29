@@ -7765,7 +7765,19 @@ const cli = Cli.create({
           }),
         );
         const adapter = new SmithersDb(workflow.db);
-        const candidate = result.runId ? await resolveHijackCandidate(adapter, result.runId, c.options.agent) : null;
+        let candidate = result.runId ? await resolveHijackCandidate(adapter, result.runId, c.options.agent) : null;
+        if (!candidate && result.runId && result.status !== "failed") {
+          try {
+            candidate = await waitForHijackCandidate(adapter, result.runId, {
+              target: c.options.agent,
+              timeoutMs: 10_000,
+            });
+          } catch {
+            // Preserve CHAT_CREATE_UNAVAILABLE below after the bounded
+            // persistence grace period. Auto-hijack aborts the task before its
+            // final attempt metadata is always visible to a separate reader.
+          }
+        }
         if (!candidate) {
           if (result.status === "failed") {
             return fail({
