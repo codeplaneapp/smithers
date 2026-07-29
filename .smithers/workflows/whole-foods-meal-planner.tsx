@@ -4,6 +4,8 @@
 // smithers-description: Plans a calorie-and-budget-targeted, Whole Foods-biased meal plan, validates it deterministically with a bounded re-plan loop, gates ordering behind a durable approval, then places the order or returns checkout links.
 // smithers-tags: meal-planning, whole-foods, approval, groceries
 /** @jsxImportSource smithers-orchestrator */
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { resolve } from "node:path";
 import { Approval, Branch, ClaudeCodeAgent, createSmithers, Loop, Sequence, UI } from "smithers-orchestrator";
 import { z } from "zod/v4";
@@ -235,20 +237,131 @@ const plannerAgent = new ClaudeCodeAgent({
   permissionMode: "dontAsk",
 });
 
-function isHttpsOrLocalhost(rawUrl: string): { valid: boolean; error: string | null } {
+export type OrderWebhookConfig = {
+  configured: boolean;
+  valid: boolean;
+  endpoint: string | null;
+  destinationHost: string | null;
+  error: string | null;
+};
+
+/**
+ * Ordering is opt-in through workflow input, but the credentialed endpoint is
+ * owned by the server. Input can only select that exact endpoint.
+ */
+export function resolveOrderWebhookConfig(
+  requestedRawUrl: string,
+  serverConfiguredRawUrl: string | undefined,
+): OrderWebhookConfig {
+  const requested = requestedRawUrl.trim();
+  if (!requested) {
+    return { configured: false, valid: true, endpoint: null, destinationHost: null, error: null };
+  }
+  const configured = serverConfiguredRawUrl?.trim() ?? "";
+  if (!configured) {
+    return {
+      configured: true,
+      valid: false,
+      endpoint: null,
+      destinationHost: null,
+      error: "Order webhook is not configured by the server.",
+    };
+  }
   try {
-    const parsed = new URL(rawUrl);
-    if (parsed.protocol === "https:") return { valid: true, error: null };
-    if (parsed.protocol === "http:" && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1")) {
-      return { valid: true, error: null };
+    const requestedUrl = new URL(requested);
+    const configuredUrl = new URL(configured);
+    if (configuredUrl.protocol !== "https:") {
+      return {
+        configured: true,
+        valid: false,
+        endpoint: null,
+        destinationHost: configuredUrl.host || null,
+        error: "Server-configured order webhook must use HTTPS.",
+      };
+    }
+    if (configuredUrl.username || configuredUrl.password || configuredUrl.hash) {
+      return {
+        configured: true,
+        valid: false,
+        endpoint: null,
+        destinationHost: configuredUrl.host || null,
+        error: "Server-configured order webhook cannot contain credentials or a fragment.",
+      };
+    }
+    if (requestedUrl.href !== configuredUrl.href) {
+      return {
+        configured: true,
+        valid: false,
+        endpoint: null,
+        destinationHost: requestedUrl.host || null,
+        error: "Requested order webhook does not match the server-configured endpoint.",
+      };
     }
     return {
-      valid: false,
-      error: `Webhook URL must be HTTPS or localhost, got ${parsed.protocol}//${parsed.hostname}`,
+      configured: true,
+      valid: true,
+      endpoint: configuredUrl.href,
+      destinationHost: configuredUrl.host,
+      error: null,
     };
   } catch {
-    return { valid: false, error: "Webhook URL is not a valid URL" };
+    return {
+      configured: true,
+      valid: false,
+      endpoint: null,
+      destinationHost: null,
+      error: "Order webhook URL is not valid.",
+    };
   }
+}
+
+export function isNonPublicIpAddress(rawAddress: string): boolean {
+  const address = rawAddress
+    .toLocaleLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .split("%", 1)[0]!;
+  const family = isIP(address);
+  if (family === 4) {
+    const [a, b] = address.split(".").map(Number);
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 100 && b! >= 64 && b! <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b! >= 16 && b! <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 198 && (b === 18 || b === 19)) ||
+      a! >= 224
+    );
+  }
+  if (family === 6) {
+    if (address === "::" || address === "::1") return true;
+    if (address.startsWith("::ffff:")) return isNonPublicIpAddress(address.slice("::ffff:".length));
+    if (address.startsWith("::")) return true;
+    const first = Number.parseInt(address.split(":")[0] || "0", 16);
+    return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80 || (first & 0xff00) === 0xff00;
+  }
+  return true;
+}
+
+type WebhookLookup = (hostname: string) => Promise<Array<{ address: string; family: number }>>;
+
+export async function assertPublicWebhookDestination(
+  rawUrl: string,
+  resolveHostname: WebhookLookup = async (hostname) => lookup(hostname, { all: true, verbatim: true }),
+): Promise<URL> {
+  const url = new URL(rawUrl);
+  if (url.protocol !== "https:") throw new Error("Order webhook must use HTTPS.");
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  const literalFamily = isIP(hostname);
+  const addresses = literalFamily ? [{ address: hostname, family: literalFamily }] : await resolveHostname(hostname);
+  if (addresses.length === 0) throw new Error(`Order webhook host ${url.host} has no DNS addresses.`);
+  const unsafe = addresses.find((entry) => isNonPublicIpAddress(entry.address));
+  if (unsafe) {
+    throw new Error(`Order webhook host ${url.host} resolves to a non-public address (${unsafe.address}).`);
+  }
+  return url;
 }
 
 function buildCheckoutLinks(items: Array<{ name: string }>, zipCode: string) {
@@ -279,6 +392,7 @@ export default smithers((ctx) => {
   const revisionPrompt = ctx.input.revisionPrompt ?? "";
   const priorPlanJson = ctx.input.priorPlanJson ?? "";
   const orderWebhookUrl = ctx.input.orderWebhookUrl ?? "";
+  const orderWebhook = resolveOrderWebhookConfig(orderWebhookUrl, process.env.WHOLE_FOODS_ORDER_WEBHOOK_URL);
   const requireOrderApproval = ctx.input.requireOrderApproval ?? true;
 
   const normalized = ctx.outputMaybe("normalizeInputs", { nodeId: "normalize-inputs" });
@@ -294,7 +408,11 @@ export default smithers((ctx) => {
   const approval = ctx.outputMaybe("approval", { nodeId: "order-approval" });
 
   const validated = latestValidation?.passed === true;
-  const webhookReady = (normalized?.webhookConfigured ?? false) && (normalized?.webhookUrlValid ?? false);
+  const webhookReady =
+    (normalized?.webhookConfigured ?? false) &&
+    (normalized?.webhookUrlValid ?? false) &&
+    orderWebhook.valid &&
+    orderWebhook.endpoint !== null;
   // A configured order webhook is always approval-gated. The optional input
   // only controls whether link-only checkout also pauses for approval.
   const approvalNeeded = requireOrderApproval || webhookReady;
@@ -351,16 +469,8 @@ export default smithers((ctx) => {
             if (priorPlanError) {
               throw new Error(priorPlanError);
             }
-            const webhookConfigured = orderWebhookUrl.trim().length > 0;
-            let webhookUrlValid = true;
-            let webhookUrlError: string | null = null;
-            if (webhookConfigured) {
-              const check = isHttpsOrLocalhost(orderWebhookUrl.trim());
-              webhookUrlValid = check.valid;
-              webhookUrlError = check.error;
-              if (!webhookUrlValid) {
-                throw new Error(webhookUrlError ?? "Invalid orderWebhookUrl");
-              }
+            if (orderWebhook.configured && !orderWebhook.valid) {
+              throw new Error(orderWebhook.error ?? "Invalid orderWebhookUrl");
             }
             return {
               summary: revisionMode
@@ -370,9 +480,9 @@ export default smithers((ctx) => {
               revisionMode,
               priorPlan,
               priorPlanError,
-              webhookConfigured,
-              webhookUrlValid,
-              webhookUrlError,
+              webhookConfigured: orderWebhook.configured,
+              webhookUrlValid: orderWebhook.valid,
+              webhookUrlError: orderWebhook.error,
               calorieTargetSource: calorieTarget.source,
             };
           }}
@@ -605,7 +715,7 @@ export default smithers((ctx) => {
                   latestValidation?.passed
                     ? "passed"
                     : `${latestValidation?.findings.length ?? 0} residual finding(s) as warnings`
-                }.`,
+                }.${webhookReady ? ` Destination: ${orderWebhook.destinationHost}.` : ""}`,
               }}
               onDeny="continue"
             />
@@ -655,10 +765,14 @@ export default smithers((ctx) => {
                   headers.authorization = `Bearer ${process.env.WHOLE_FOODS_ORDER_TOKEN}`;
                 }
                 try {
-                  const res = await fetch(orderWebhookUrl.trim(), {
+                  const endpoint = orderWebhook.endpoint;
+                  if (!endpoint) throw new Error("Server-configured order webhook is unavailable.");
+                  await assertPublicWebhookDestination(endpoint);
+                  const res = await fetch(endpoint, {
                     method: "POST",
                     headers,
                     body: JSON.stringify(payload),
+                    redirect: "manual",
                   });
                   const body = await res.text();
                   if (res.ok) {

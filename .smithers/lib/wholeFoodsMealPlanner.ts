@@ -64,13 +64,16 @@ function boundedCalorieTarget(value: number): number {
 export function calorieTargetFromPrompt(prompt: string): number | null {
   const normalized = prompt.replaceAll(",", "");
   const patterns = [
-    /(?:aim|target|set|change|update|make)(?:\s+\w+){0,5}\s+(\d{3,4})\s*(?:kcal|calories|cal)\b/i,
-    /(\d{3,4})\s*(?:kcal|calories|cal)(?:\s*\/?\s*(?:day|daily|per day))?/i,
+    /\b(?:aim|target)(?:\s+\w+){0,4}\s+(\d{3,4})\s*(?:kcal|calories|cal)\b/i,
+    /\b(?:set|change|update)(?:\s+(?:the|my|our|daily|calorie|caloric|target|to|at|for)){0,8}\s+(\d{3,4})\s*(?:kcal|calories|cal)\b/i,
+    /\bmake(?:\s+(?:the|my|our|daily|calorie|caloric)){0,6}\s+target(?:\s+(?:to|at))?\s+(\d{3,4})\s*(?:kcal|calories|cal)\b/i,
   ];
   for (const pattern of patterns) {
     const match = normalized.match(pattern);
     if (!match) continue;
-    return boundedCalorieTarget(Number(match[1]));
+    const value = Number(match[1]);
+    if (!Number.isFinite(value) || value < MIN_DAILY_CALORIES || value > MAX_DAILY_CALORIES) return null;
+    return Math.round(value);
   }
   return null;
 }

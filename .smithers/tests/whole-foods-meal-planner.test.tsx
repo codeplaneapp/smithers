@@ -1,6 +1,6 @@
 /** @jsxImportSource smithers-orchestrator */
 import "../preload.ts";
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { renderWorkflow, runTask } from "smithers-orchestrator/testing";
 import {
@@ -12,7 +12,11 @@ import {
   updateCalorieTarget,
 } from "../lib/wholeFoodsMealPlanner";
 import { handleMcpRequest } from "../lib/whole-foods-meal-planner-mcp";
-import workflow from "../workflows/whole-foods-meal-planner";
+import workflow, {
+  assertPublicWebhookDestination,
+  isNonPublicIpAddress,
+  resolveOrderWebhookConfig,
+} from "../workflows/whole-foods-meal-planner";
 
 type Task = {
   nodeId: string;
@@ -43,6 +47,13 @@ const input = {
   requireOrderApproval: false,
   deliveryOnly: false,
 };
+
+const previousOrderWebhookUrl = process.env.WHOLE_FOODS_ORDER_WEBHOOK_URL;
+process.env.WHOLE_FOODS_ORDER_WEBHOOK_URL = input.orderWebhookUrl;
+afterAll(() => {
+  if (previousOrderWebhookUrl === undefined) delete process.env.WHOLE_FOODS_ORDER_WEBHOOK_URL;
+  else process.env.WHOLE_FOODS_ORDER_WEBHOOK_URL = previousOrderWebhookUrl;
+});
 
 const plan = {
   summary: "One-day prepared-food plan.",
@@ -246,6 +257,47 @@ describe("whole-foods-meal-planner tools", () => {
         revisionPrompt: "Please aim for 1,700 calories per day.",
       }),
     ).toEqual({ target: 1_700, source: "revision-prompt" });
+    expect(
+      updateCalorieTarget({
+        dailyCalorieTarget: 2_000,
+        revisionPrompt: "swap day 2 lunch for a 300 cal snack",
+      }),
+    ).toEqual({ target: 2_000, source: "daily-target" });
+    expect(
+      updateCalorieTarget({
+        dailyCalorieTarget: 2_000,
+        revisionPrompt: "make dinner about 900 calories lighter",
+      }),
+    ).toEqual({ target: 2_000, source: "daily-target" });
+    expect(
+      updateCalorieTarget({
+        dailyCalorieTarget: 2_000,
+        revisionPrompt: "aim for 700 calories daily",
+      }),
+    ).toEqual({ target: 2_000, source: "daily-target" });
+  });
+
+  test("only permits the server-configured public order destination", async () => {
+    expect(resolveOrderWebhookConfig("https://attacker.example/order", input.orderWebhookUrl)).toMatchObject({
+      configured: true,
+      valid: false,
+      endpoint: null,
+    });
+    expect(resolveOrderWebhookConfig(input.orderWebhookUrl, input.orderWebhookUrl)).toMatchObject({
+      configured: true,
+      valid: true,
+      endpoint: input.orderWebhookUrl,
+      destinationHost: "orders.example.test",
+    });
+    for (const address of ["127.0.0.1", "10.0.0.2", "169.254.169.254", "::1", "fe80::1", "fd00::1"]) {
+      expect(isNonPublicIpAddress(address)).toBe(true);
+    }
+    expect(isNonPublicIpAddress("93.184.216.34")).toBe(false);
+    await expect(
+      assertPublicWebhookDestination("https://orders.example.test/hook", async () => [
+        { address: "169.254.169.254", family: 4 },
+      ]),
+    ).rejects.toThrow("non-public address");
   });
 
   test("normalizes favorites and calculates totals from meal items", () => {
@@ -466,7 +518,11 @@ describe("whole-foods-meal-planner order boundary", () => {
       validatePlan: [{ nodeId: "validate-plan", ...validation }],
     };
     const waiting = await render(readyOutputs);
-    expect(task(waiting, "order-approval")).toBeDefined();
+    const approvalTask = task(waiting, "order-approval");
+    expect(approvalTask).toBeDefined();
+    expect((approvalTask.meta as { requestSummary: string }).requestSummary).toContain(
+      "Destination: orders.example.test.",
+    );
     expect(maybeTask(waiting, "order-webhook")).toBeUndefined();
 
     const approved = await render({
