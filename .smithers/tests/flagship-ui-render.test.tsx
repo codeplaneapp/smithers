@@ -62,6 +62,28 @@ afterAll(() => {
 });
 
 describe("flagship pack UI composition", () => {
+  test("normalizes review-since-publish durable and live event frames", async () => {
+    const { reviewProgress } = await import("../ui/review-since-publish.tsx");
+    expect(
+      reviewProgress([
+        { type: "event", event: "NodeFinished", payload: { nodeId: "merge" }, seq: 1 },
+        {
+          type: "event",
+          event: "run.event",
+          payload: { event: "node.finished", payload: { nodeId: "merge:1" } },
+          seq: 2,
+        },
+        {
+          type: "event",
+          event: "run.event",
+          payload: { event: "node.started", payload: { nodeId: "fix:lane-1" } },
+          seq: 3,
+        },
+        { type: "event", event: "NodeFinished", payload: { nodeId: "fix:lane-2" }, seq: 4 },
+      ]),
+    ).toEqual({ rounds: 2, fixLanes: 2 });
+  });
+
   test("renders the review dashboard through shared UI primitives", async () => {
     const { ReviewApp } = await import("../ui/review.tsx");
     await act(async () => root.render(<ReviewApp />));
