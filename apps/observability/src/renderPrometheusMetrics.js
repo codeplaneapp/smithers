@@ -1,4 +1,4 @@
-import { Effect, Metric, MetricState, Option } from "effect";
+import { Effect, Metric, Option } from "effect";
 import { smithersMetricCatalog, toPrometheusMetricName, updateProcessMetrics } from "./metrics/index.js";
 /** @typedef {import("./metrics/SmithersMetricDefinition.ts").SmithersMetricDefinition} SmithersMetricDefinition */
 /** @typedef {{ boundary: number; count: number | bigint }} PrometheusBucket */
@@ -50,20 +50,18 @@ function mergePrometheusLabels(base, extra) {
   return formatPrometheusLabels(merged);
 }
 /**
- * @param {any} metricKey
+ * @param {Record<string, string> | undefined} attributes
  * @returns {ReadonlyArray<[string, string]>}
  */
-function metricLabels(metricKey) {
-  const tags = Array.isArray(metricKey?.tags) ? metricKey.tags : [];
-  return tags.map((tag) => [String(tag.key), String(tag.value)]).sort(([left], [right]) => left.localeCompare(right));
+function metricLabels(attributes) {
+  return Object.entries(attributes ?? {}).sort(([left], [right]) => left.localeCompare(right));
 }
 /**
- * @param {any} metricKey
+ * @param {string | undefined} description
  * @returns {string | undefined}
  */
-function metricHelp(metricKey) {
-  const description = Option.getOrElse(metricKey?.description, () => "");
-  return description.trim() ? description : undefined;
+function metricHelp(description) {
+  return description?.trim() ? description : undefined;
 }
 /**
  * @param {any} metricState
@@ -136,24 +134,23 @@ export function renderPrometheusMetrics() {
     /* non-critical */
   }
   const registry = new Map();
-  for (const snapshot of Metric.unsafeSnapshot()) {
-    const metricKey = snapshot.metricKey;
-    const metricState = snapshot.metricState;
-    const name = toPrometheusMetricName(String(metricKey.name ?? ""));
+  for (const snapshot of Effect.runSync(Metric.snapshot)) {
+    const metricState = snapshot.state;
+    const name = toPrometheusMetricName(snapshot.id);
     if (!name) continue;
-    const labels = metricLabels(metricKey);
-    const help = metricHelp(metricKey);
-    if (MetricState.isCounterState(metricState)) {
+    const labels = metricLabels(snapshot.attributes);
+    const help = metricHelp(snapshot.description);
+    if (snapshot.type === "Counter") {
       const metric = registerPrometheusMetric(registry, name, "counter", help);
       metric.lines.push(`${name}${formatPrometheusLabels(labels)} ${formatPrometheusNumber(metricState.count)}`);
       continue;
     }
-    if (MetricState.isGaugeState(metricState)) {
+    if (snapshot.type === "Gauge") {
       const metric = registerPrometheusMetric(registry, name, "gauge", help);
       metric.lines.push(`${name}${formatPrometheusLabels(labels)} ${formatPrometheusNumber(metricState.value)}`);
       continue;
     }
-    if (MetricState.isHistogramState(metricState)) {
+    if (snapshot.type === "Histogram") {
       const metric = registerPrometheusMetric(registry, name, "histogram", help);
       for (const bucket of histogramBuckets(metricState)) {
         metric.lines.push(
@@ -167,14 +164,14 @@ export function renderPrometheusMetrics() {
       metric.lines.push(`${name}_count${formatPrometheusLabels(labels)} ${formatPrometheusNumber(metricState.count)}`);
       continue;
     }
-    if (MetricState.isFrequencyState(metricState)) {
+    if (snapshot.type === "Frequency") {
       const metric = registerPrometheusMetric(registry, name, "counter", help);
       for (const [key, count] of metricState.occurrences) {
         metric.lines.push(`${name}${mergePrometheusLabels(labels, [["key", key]])} ${formatPrometheusNumber(count)}`);
       }
       continue;
     }
-    if (MetricState.isSummaryState(metricState)) {
+    if (snapshot.type === "Summary") {
       const metric = registerPrometheusMetric(registry, name, "summary", help);
       metric.lines.push(
         `${name}${mergePrometheusLabels(labels, [["quantile", "min"]])} ${formatPrometheusNumber(metricState.min)}`,

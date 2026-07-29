@@ -841,7 +841,7 @@ export function OneshotSurface({
                   }
                   inputAriaLabel="Steering message"
                   submitLabel="Send steering message"
-                  status={
+                  statusText={
                     controlError
                       ? controlError
                       : steerDelivery === "idle"

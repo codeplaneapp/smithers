@@ -931,7 +931,7 @@ describe("why diagnosis unit coverage", () => {
     if (Exit.isSuccess(exit)) {
       throw new Error("expected diagnoseRunEffect to fail");
     }
-    const failure = Cause.failureOption(exit.cause);
+    const failure = Cause.findErrorOption(exit.cause);
     expect(failure._tag).toBe("Some");
     if (failure._tag === "Some") {
       expect(failure.value.code).toBe("RUN_NOT_FOUND");

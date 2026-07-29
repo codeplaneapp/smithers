@@ -132,14 +132,14 @@ function resolveApprovalDecision(config, chatId, callbackQuery, spec, request, p
     Effect.gen(function* () {
       yield* client
         .answerCallbackQuery(callbackQuery.id, { text: ackText(spec, decision) })
-        .pipe(Effect.catchAll(() => Effect.void));
+        .pipe(Effect.catch(() => Effect.void));
       if (typeof messageId === "number") {
         yield* client
           .editMessageSmart(chatId, messageId, outcomeText(request, spec, decision, by), {
             parseMode,
             inlineKeyboard: [],
           })
-          .pipe(Effect.catchAll(() => Effect.void));
+          .pipe(Effect.catch(() => Effect.void));
       }
       return decision;
     }),

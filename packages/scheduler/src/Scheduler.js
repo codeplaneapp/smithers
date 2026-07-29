@@ -21,7 +21,7 @@ import { Context } from "effect";
  */
 
 const SchedulerBase = /** @type {Context.TagClass<Scheduler, "Scheduler", SchedulerService>} */ (
-  /** @type {unknown} */ (Context.Tag("Scheduler")())
+  /** @type {unknown} */ (Context.Service("Scheduler"))
 );
 
 export class Scheduler extends SchedulerBase {}

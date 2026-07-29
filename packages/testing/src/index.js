@@ -836,8 +836,8 @@ var init_Harness = __esm({
 });
 
 // src/kernel/boundary.ts
-import { Cause, Effect as Effect3, Exit, Fiber, Option } from "effect";
-var toHarnessError, runAtBoundaryFork;
+import { Cause, Effect as Effect3, Exit, Fiber, Option, Result } from "effect";
+var toHarnessError, squashCause, runAtBoundaryFork;
 var init_boundary = __esm({
   "src/kernel/boundary.ts"() {
     "use strict";
@@ -859,15 +859,17 @@ var init_boundary = __esm({
       }
       return { name: "Error", code: "HARNESS_ERROR", message: String(error) };
     };
+    squashCause = (cause) => {
+      const failure2 = Cause.findErrorOption(cause);
+      if (Option.isSome(failure2)) return failure2.value;
+      const defect = Cause.findDefect(cause);
+      return Result.isSuccess(defect) ? defect.success : new Error("kernel program failed");
+    };
     runAtBoundaryFork = (program) => {
       const fiber = Effect3.runFork(Effect3.exit(program));
       const promise = Effect3.runPromise(Fiber.join(fiber)).then((exit) => {
         if (Exit.isSuccess(exit)) return { ok: true, value: exit.value };
-        const cause = Option.getOrElse(
-          Cause.failureOption(exit.cause),
-          () => Option.getOrElse(Cause.dieOption(exit.cause), () => new Error("kernel program failed"))
-        );
-        return { ok: false, error: toHarnessError(cause) };
+        return { ok: false, error: toHarnessError(squashCause(exit.cause)) };
       });
       return { promise, interrupt: () => Effect3.runPromise(Fiber.interrupt(fiber)) };
     };
@@ -875,7 +877,7 @@ var init_boundary = __esm({
 });
 
 // src/kernel/KernelRuntime.ts
-import { Context, Effect as Effect4, Either, Fiber as Fiber2, Layer } from "effect";
+import { Context, Effect as Effect4, Fiber as Fiber2, Layer, Result as Result2 } from "effect";
 var KernelRuntimeService, kernelLayer, makeKernel;
 var init_KernelRuntime = __esm({
   "src/kernel/KernelRuntime.ts"() {
@@ -884,7 +886,7 @@ var init_KernelRuntime = __esm({
     init_SeededScheduler();
     init_TraceCollector();
     init_VirtualClock();
-    KernelRuntimeService = class extends Context.Tag("@smithers/testing/KernelRuntime")() {
+    KernelRuntimeService = class extends Context.Service()("@smithers/testing/KernelRuntime") {
     };
     kernelLayer = (kernel) => Layer.succeed(KernelRuntimeService, kernel);
     makeKernel = (seed, controls = []) => {
@@ -898,23 +900,23 @@ var init_KernelRuntime = __esm({
         // task fibers or implements a Promise race itself.
         runReadySet: (tasks) => Effect4.gen(function* () {
           const fresh = tasks.filter(({ stepId }) => !active.has(stepId));
-          for (const { stepId, effect } of fresh) active.set(stepId, yield* Effect4.fork(effect));
+          for (const { stepId, effect } of fresh) active.set(stepId, yield* Effect4.forkChild(effect));
           if (!active.size) throw new Error("KERNEL_NO_ACTIVE_FIBERS");
           const winner = yield* Effect4.raceAll(
             [...active.entries()].map(
               ([stepId, fiber]) => Fiber2.join(fiber).pipe(
-                Effect4.either,
+                Effect4.result,
                 Effect4.map((exit) => ({ stepId, exit }))
               )
             )
           );
           active.delete(winner.stepId);
-          if (Either.isLeft(winner.exit)) {
+          if (Result2.isFailure(winner.exit)) {
             yield* Effect4.all([...active.values()].map((fiber) => Fiber2.interrupt(fiber)));
             active.clear();
-            return yield* Effect4.fail(winner.exit.left);
+            return yield* Effect4.fail(winner.exit.failure);
           }
-          return { stepId: winner.stepId, value: winner.exit.right };
+          return { stepId: winner.stepId, value: winner.exit.success };
         })
       });
       return Object.freeze({ ...runtime, executor });
@@ -1145,7 +1147,7 @@ var runScenario_exports = {};
 __export(runScenario_exports, {
   runScenario: () => runScenario
 });
-import { Effect as Effect5, Fiber as Fiber3, Option as Option2 } from "effect";
+import { Effect as Effect5, Fiber as Fiber3 } from "effect";
 var faultFor, dbOperationKind, processOperationKind, faultError, adapterFailure, settleKernel, runScenario;
 var init_runScenario = __esm({
   "src/runScenario.ts"() {
@@ -2066,11 +2068,11 @@ var init_runScenario = __esm({
                 return pending;
               };
               if (runner && duringFault && harness.kind === "unit-sim") {
-                const child = yield* Effect5.fork(Effect5.tryPromise({ try: () => runTask2(), catch: (e) => e }));
-                yield* Effect5.yieldNow();
+                const child = yield* Effect5.forkChild(Effect5.tryPromise({ try: () => runTask2(), catch: (e) => e }));
+                yield* Effect5.yieldNow;
                 yield* Effect5.tryPromise({ try: () => Promise.resolve(), catch: (cause) => cause });
-                const completedExit = yield* Fiber3.poll(child);
-                if (Option2.isSome(completedExit)) {
+                const completedExit = child.pollUnsafe();
+                if (completedExit !== void 0) {
                   value = yield* Fiber3.join(child);
                 } else {
                   yield* Fiber3.interrupt(child);
@@ -2191,7 +2193,10 @@ var init_runScenario = __esm({
           );
           for (const selected of executableOrdered) activeTaskIds.add(selected.id);
           const winner = yield* runtimeKernel.executor.runReadySet(
-            tasks.map((effect, index) => ({ stepId: executableOrdered[index].id, effect }))
+            tasks.map((effect, index) => ({
+              stepId: executableOrdered[index].id,
+              effect
+            }))
           );
           activeTaskIds.delete(winner.stepId);
           const winnerBarrier = ast.barriers.find(

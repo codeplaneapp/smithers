@@ -3,7 +3,7 @@
 // @smithers-type-exports-end
 
 import { Effect } from "effect";
-import * as BunContext from "@effect/platform-bun/BunContext";
+import * as BunContext from "@effect/platform-bun/BunServices";
 import { loadVcsTag as loadVcsTagEffect } from "./loadVcsTagEffect.js";
 import { rerunAtRevision as rerunAtRevisionEffect } from "./rerunAtRevisionEffect.js";
 import { resolveWorkflowAtRevision as resolveWorkflowAtRevisionEffect } from "./resolveWorkflowAtRevisionEffect.js";

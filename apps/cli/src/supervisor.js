@@ -216,7 +216,7 @@ function runHasDecidedApprovalEffect(options, runId) {
     const approvals = yield* options.adapter
       .listDecidedApprovalsEffect(runId)
       .pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.logWarning(
             `[supervisor] failed to list decided approvals for run ${runId}: ${error instanceof Error ? error.message : String(error)}`,
           ).pipe(Effect.as([])),
@@ -236,7 +236,7 @@ function runHasDueTimerEffect(options, runId, now) {
     const nodes = yield* options.adapter
       .listNodesEffect(runId)
       .pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.logWarning(
             `[supervisor] failed to list nodes for timer run ${runId}: ${error instanceof Error ? error.message : String(error)}`,
           ).pipe(Effect.as([])),
@@ -250,7 +250,7 @@ function runHasDueTimerEffect(options, runId, now) {
       const attempts = yield* options.adapter
         .listAttemptsEffect(runId, node.nodeId, node.iteration ?? 0)
         .pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.logWarning(
               `[supervisor] failed to list attempts for timer ${runId}/${node.nodeId}: ${error instanceof Error ? error.message : String(error)}`,
             ).pipe(Effect.as([])),
@@ -282,7 +282,7 @@ function emitEventEffect(adapter, event) {
           payloadJson: JSON.stringify(event),
         })
         .pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.logWarning(
               `[supervisor] failed to persist event ${event.type}: ${error instanceof Error ? error.message : String(error)}`,
             ),
@@ -338,7 +338,7 @@ function giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorAttempts,
         requireStale: claimOptions.requireStale,
       })
       .pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.logWarning(
             `[supervisor] failed to claim run ${run.runId} for give-up: ${error instanceof Error ? error.message : String(error)}`,
           ).pipe(Effect.as(false)),
@@ -381,7 +381,7 @@ function giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorAttempts,
         },
       })
       .pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.logWarning(
             `[supervisor] failed to mark run ${run.runId} as failed after exhausted resumes: ${error instanceof Error ? error.message : String(error)}`,
           ).pipe(Effect.as(false)),
@@ -488,7 +488,7 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
           claimHeartbeatAtMs,
         })
         .pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.logWarning(
               `[supervisor] failed to claim run ${staleRun.runId}: ${error instanceof Error ? error.message : String(error)}`,
             ).pipe(Effect.as(false)),
@@ -522,7 +522,7 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
             restoreHeartbeatAtMs: staleRun.heartbeatAtMs ?? null,
           })
           .pipe(
-            Effect.catchAll((error) =>
+            Effect.catch((error) =>
               Effect.logWarning(
                 `[supervisor] failed to release claim for run ${staleRun.runId}: ${error instanceof Error ? error.message : String(error)}`,
               ),
@@ -545,7 +545,7 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
       return "resumed";
     }).pipe(Effect.annotateLogs(runAnnotations)),
   ).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       Effect.logWarning(`[supervisor] failed while processing stale run ${staleRun.runId}: ${String(error)}`).pipe(
         Effect.as("skipped"),
       ),
@@ -612,7 +612,7 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
           requireStale: true,
         })
         .pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.logWarning(
               `[supervisor] failed to claim timer run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`,
             ).pipe(Effect.as(false)),
@@ -646,7 +646,7 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
             restoreHeartbeatAtMs: run.heartbeatAtMs ?? null,
           })
           .pipe(
-            Effect.catchAll((error) =>
+            Effect.catch((error) =>
               Effect.logWarning(
                 `[supervisor] failed to release timer claim for run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`,
               ),
@@ -670,7 +670,7 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
       return "resumed";
     }).pipe(Effect.annotateLogs(runAnnotations)),
   ).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       Effect.logWarning(`[supervisor] failed while processing timer run ${run.runId}: ${String(error)}`).pipe(
         Effect.as("skipped"),
       ),
@@ -743,7 +743,7 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
           requireStale: true,
         })
         .pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.logWarning(
               `[supervisor] failed to claim approval-decided run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`,
             ).pipe(Effect.as(false)),
@@ -779,7 +779,7 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
             restoreHeartbeatAtMs: run.heartbeatAtMs ?? null,
           })
           .pipe(
-            Effect.catchAll((error) =>
+            Effect.catch((error) =>
               Effect.logWarning(
                 `[supervisor] failed to release approval-decided claim for run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`,
               ),
@@ -803,7 +803,7 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
       return "resumed";
     }).pipe(Effect.annotateLogs(runAnnotations)),
   ).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       Effect.logWarning(
         `[supervisor] failed while processing approval-decided run ${run.runId}: ${String(error)}`,
       ).pipe(Effect.as("skipped")),
@@ -861,7 +861,7 @@ function processQuotaCandidateEffect(options, run, staleBeforeMs) {
           requireStale: false,
         })
         .pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.logWarning(
               `[supervisor] failed to claim quota run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`,
             ).pipe(Effect.as(false)),
@@ -893,7 +893,7 @@ function processQuotaCandidateEffect(options, run, staleBeforeMs) {
             restoreHeartbeatAtMs: run.heartbeatAtMs ?? null,
           })
           .pipe(
-            Effect.catchAll((error) =>
+            Effect.catch((error) =>
               Effect.logWarning(
                 `[supervisor] failed to release quota claim for run ${run.runId}: ${error instanceof Error ? error.message : String(error)}`,
               ),
@@ -913,7 +913,7 @@ function processQuotaCandidateEffect(options, run, staleBeforeMs) {
       return "resumed";
     }).pipe(Effect.annotateLogs({ runId: run.runId, status: run.status ?? null })),
   ).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       Effect.logWarning(`[supervisor] failed while processing quota run ${run.runId}: ${String(error)}`).pipe(
         Effect.as("skipped"),
       ),
@@ -932,7 +932,7 @@ function pollEffect(options) {
       const allStaleRuns = yield* options.adapter
         .listStaleRunningRunsEffect(staleBeforeMs)
         .pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.logWarning(
               `[supervisor] stale-run query failed: ${error instanceof Error ? error.message : String(error)}`,
             ).pipe(Effect.as([])),
@@ -960,7 +960,7 @@ function pollEffect(options) {
       const waitingTimerRuns = (yield* options.adapter
         .listRunsEffect(500, "waiting-timer")
         .pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.logWarning(
               `[supervisor] waiting-timer query failed: ${error instanceof Error ? error.message : String(error)}`,
             ).pipe(Effect.as([])),
@@ -991,7 +991,7 @@ function pollEffect(options) {
       const waitingEventRuns = (yield* options.adapter
         .listRunsEffect(500, "waiting-event")
         .pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.logWarning(
               `[supervisor] waiting-event query failed: ${error instanceof Error ? error.message : String(error)}`,
             ).pipe(Effect.as([])),
@@ -1020,7 +1020,7 @@ function pollEffect(options) {
         try: () => options.deps.runsDueForQuotaResume(options.adapter, pollStartedAtMs),
         catch: (cause) => toSmithersError(cause, "find quota runs due for resume"),
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.logWarning(`[supervisor] waiting-quota query failed: ${error.message}`).pipe(Effect.as([])),
         ),
       )).filter(inScope);
@@ -1105,7 +1105,7 @@ export function supervisorLoopEffect(options) {
       if (normalized.runIds !== null) {
         const scopedRuns = yield* Effect.all(
           [...normalized.runIds].map((runId) =>
-            normalized.adapter.getRunEffect(runId).pipe(Effect.catchAll(() => Effect.succeed(null))),
+            normalized.adapter.getRunEffect(runId).pipe(Effect.catch(() => Effect.succeed(null))),
           ),
         );
         if (

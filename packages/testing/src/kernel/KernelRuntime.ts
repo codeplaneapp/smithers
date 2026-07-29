@@ -1,4 +1,4 @@
-import { Context, Effect, Either, Fiber, Layer } from "effect";
+import { Context, Effect, Fiber, Layer, Result } from "effect";
 import type { ControlMessage } from "../control/ControlMessage.ts";
 import { ControlBus } from "./ControlBus.ts";
 import { SeededScheduler } from "./SeededScheduler.ts";
@@ -16,10 +16,10 @@ export type KernelExecutor = Readonly<{
     tasks: readonly KernelReadyTask[],
   ) => Effect.Effect<Readonly<{ readonly stepId: string; readonly value: unknown }>, unknown>;
 }>;
-export class KernelRuntimeService extends Context.Tag("@smithers/testing/KernelRuntime")<
+export class KernelRuntimeService extends Context.Service<
   KernelRuntimeService,
   KernelRuntime & { readonly executor: KernelExecutor }
->() {}
+>()("@smithers/testing/KernelRuntime") {}
 export const kernelLayer = (
   kernel: KernelRuntime & { readonly executor: KernelExecutor },
 ): Layer.Layer<KernelRuntimeService> => Layer.succeed(KernelRuntimeService, kernel);
@@ -38,7 +38,7 @@ export const makeKernel = (
     runReadySet: (tasks) =>
       Effect.gen(function* () {
         const fresh = tasks.filter(({ stepId }) => !active.has(stepId));
-        for (const { stepId, effect } of fresh) active.set(stepId, yield* Effect.fork(effect));
+        for (const { stepId, effect } of fresh) active.set(stepId, yield* Effect.forkChild(effect));
         if (!active.size) throw new Error("KERNEL_NO_ACTIVE_FIBERS");
         // Every active fiber participates in the race, including newly forked
         // fibers. Joining fresh[0] makes a slow first task hide a completed
@@ -46,20 +46,20 @@ export const makeKernel = (
         const winner = yield* Effect.raceAll(
           [...active.entries()].map(([stepId, fiber]) =>
             Fiber.join(fiber).pipe(
-              Effect.either,
+              Effect.result,
               Effect.map((exit) => ({ stepId, exit })),
             ),
           ),
         );
         active.delete(winner.stepId);
-        if (Either.isLeft(winner.exit)) {
+        if (Result.isFailure(winner.exit)) {
           // A terminal failure cancels every sibling still owned by this ready
           // set before the failure crosses the public boundary.
           yield* Effect.all([...active.values()].map((fiber) => Fiber.interrupt(fiber)));
           active.clear();
-          return yield* Effect.fail(winner.exit.left);
+          return yield* Effect.fail(winner.exit.failure);
         }
-        return { stepId: winner.stepId, value: winner.exit.right };
+        return { stepId: winner.stepId, value: winner.exit.success };
       }),
   });
   return Object.freeze({ ...runtime, executor });

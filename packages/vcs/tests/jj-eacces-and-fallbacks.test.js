@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import { Effect } from "effect";
-import * as BunContext from "@effect/platform-bun/BunContext";
+import * as BunContext from "@effect/platform-bun/BunServices";
 import { workspaceAdd } from "../src/jj.js";
 import { resolveJjBinary } from "../src/resolveJjBinary.js";
 import * as barrel from "../src/index.js";

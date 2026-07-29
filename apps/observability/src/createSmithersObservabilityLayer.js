@@ -1,6 +1,6 @@
-import * as BunContext from "@effect/platform-bun/BunContext";
+import * as BunContext from "@effect/platform-bun/BunServices";
 import { TracingServiceLive } from "./_coreTracing.js";
-import { Effect, Layer, Logger } from "effect";
+import { Effect, Layer, Logger, References } from "effect";
 import { SmithersObservability } from "./SmithersObservability.js";
 import { resolveSmithersObservabilityOptions } from "./resolveSmithersObservabilityOptions.js";
 import { createSmithersOtelLayer } from "./createSmithersOtelLayer.js";
@@ -19,14 +19,14 @@ import { withSmithersSpan } from "./withSmithersSpan.js";
 function resolveLogger(format) {
   switch (format) {
     case "json":
-      return Logger.withLeveledConsole(Logger.jsonLogger);
+      return Logger.consoleJson;
     case "pretty":
-      return Logger.prettyLogger();
+      return Logger.consolePretty();
     case "string":
-      return Logger.withLeveledConsole(Logger.stringLogger);
+      return Logger.consolePretty({ colors: false });
     case "logfmt":
     default:
-      return Logger.withLeveledConsole(Logger.logfmtLogger);
+      return Logger.consoleLogFmt;
   }
 }
 /**
@@ -47,8 +47,8 @@ export function createSmithersObservabilityLayer(options = {}) {
   const resolved = resolveSmithersObservabilityOptions(options);
   const loggerLayers = resolved.installLogger
     ? [
-        Logger.replace(Logger.defaultLogger, resolveLogger(resolved.logFormat)),
-        Logger.minimumLogLevel(resolved.logLevel),
+        Logger.layer([resolveLogger(resolved.logFormat)]),
+        Layer.succeed(References.MinimumLogLevel, resolved.logLevel),
       ]
     : [];
   return Layer.mergeAll(

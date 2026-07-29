@@ -434,7 +434,7 @@ export function forkRun(adapter, params) {
         };
       }),
     );
-    yield* Metric.increment(runForksCreated);
+    yield* Metric.update(runForksCreated, 1);
     if (boundary.report.warnings.length > 0 && params.autoRun !== true) {
       const event = {
         type: "SideEffectBoundaryCrossed",

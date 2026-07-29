@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { revertToJjPointer } from "@smithers-orchestrator/vcs/jj";
-import * as BunContext from "@effect/platform-bun/BunContext";
+import * as BunContext from "@effect/platform-bun/BunServices";
 import { Effect } from "effect";
 import { revertToAttempt } from "../src/revert.js";
 import { createTestDb } from "../../smithers/tests/helpers.js";

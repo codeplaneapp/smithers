@@ -43,7 +43,7 @@
     "@tanstack/react-query": "^5.101.2",
     "@types/bun": "latest",
     "drizzle-orm": "^0.45.2",
-    "effect": "^3.21.4",
+    "effect": "4.0.0-beta.102",
     "typescript": "~6.0.3"
   }
 }

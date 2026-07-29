@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Chunk, Effect, Stream } from "effect";
+import { Stream } from "effect";
 import { Database } from "bun:sqlite";
 import { SqlMessageStorage } from "../src/sql-message-storage.js";
 
@@ -12,9 +12,7 @@ describe("SqlMessageStorage executeStream", () => {
     await storage.execute("INSERT INTO stream_items (name) VALUES (?), (?)", ["alpha", "beta"]);
 
     const rows = await storage.withConnection((connection) =>
-      Stream.runCollect(connection.executeStream("SELECT id, name FROM stream_items ORDER BY id", [], undefined)).pipe(
-        Effect.map(Chunk.toReadonlyArray),
-      ),
+      Stream.runCollect(connection.executeStream("SELECT id, name FROM stream_items ORDER BY id", [], undefined)),
     );
 
     expect(rows).toEqual([

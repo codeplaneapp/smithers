@@ -1194,18 +1194,18 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
             return pending;
           };
           if (runner && duringFault && harness.kind === "unit-sim") {
-            const child = yield* Effect.fork(Effect.tryPromise({ try: () => runTask(), catch: (e) => e }));
+            const child = yield* Effect.forkChild(Effect.tryPromise({ try: () => runTask(), catch: (e) => e }));
             // Let the child cross the callback boundary before interrupting it;
             // an immediate interrupt is a cancellation-before-start, not a
             // cancellation race during a running task.
-            yield* Effect.yieldNow();
+            yield* Effect.yieldNow;
             // Effect scheduling and a Promise-returning synchronous callback use
             // separate queues. Give the callback one host continuation to reach
             // its terminal state before polling; otherwise a completed callback
             // is misclassified as an interrupted race.
             yield* Effect.tryPromise({ try: () => Promise.resolve(), catch: (cause) => cause });
-            const completedExit = yield* Fiber.poll(child);
-            if (Option.isSome(completedExit)) {
+            const completedExit = child.pollUnsafe();
+            if (completedExit !== undefined) {
               // The callback reached its terminal state before the crash window
               // opened: the in-flight transition never occurred, so the fault
               // stays inert and the completed value stands.
@@ -1354,7 +1354,10 @@ export const runScenario = async (ast: ScenarioAst, options: RunScenarioOptions 
       // scheduled immediately, rather than waiting for an unrelated ready
       // task (for example a sleeping sibling) to finish.
       const winner = yield* runtimeKernel.executor.runReadySet(
-        tasks.map((effect, index) => ({ stepId: executableOrdered[index]!.id, effect })),
+        tasks.map((effect, index) => ({
+          stepId: executableOrdered[index]!.id,
+          effect: effect as Effect.Effect<unknown, unknown, never>,
+        })),
       );
       activeTaskIds.delete(winner.stepId);
       const winnerBarrier = ast.barriers.find(

@@ -16,6 +16,7 @@ const LOG_LEVEL_INFO = 2;
 const LOG_LEVEL_WARNING = 3;
 const LOG_LEVEL_ERROR = 4;
 const LOG_RUNNER_KEY = Symbol.for("smithers.observability.logRunner");
+const defaultLoggerLayer = Logger.layer([Logger.consoleLogFmt]);
 
 /**
  * Resolve the minimum imperative log level. The environment value is an
@@ -70,8 +71,8 @@ function getRunnerState() {
 
 /** @type {SmithersLogRunner} */
 const defaultRunner = {
-  runFork: (effect) => Effect.runFork(effect),
-  runPromise: (effect) => Effect.runPromise(effect),
+  runFork: (effect) => Effect.runFork(effect.pipe(Effect.provide(defaultLoggerLayer))),
+  runPromise: (effect) => Effect.runPromise(effect.pipe(Effect.provide(defaultLoggerLayer))),
 };
 
 /** @returns {SmithersLogRunner} */
@@ -110,7 +111,7 @@ export function toEffectLogLevel(level) {
     case LOG_LEVEL_INFO:
       return LogLevel.Info;
     case LOG_LEVEL_WARNING:
-      return LogLevel.Warning;
+      return LogLevel.Warn;
     case LOG_LEVEL_ERROR:
       return LogLevel.Error;
     default:
@@ -155,7 +156,7 @@ function emitLog(effect, annotations, span, level = LOG_LEVEL_INFO) {
   if (level < minLevel) return;
   const program = buildLogProgram(effect, annotations, span);
   try {
-    void getLogRunner().runFork(program.pipe(Logger.withMinimumLogLevel(toEffectLogLevel(level))));
+    void getLogRunner().runFork(program);
   } catch {
     // Logging must never break the caller.
   }
@@ -172,7 +173,7 @@ async function emitLogAwait(effect, annotations, span, level = LOG_LEVEL_INFO) {
   if (level < minLevel) return;
   const program = buildLogProgram(effect, annotations, span);
   try {
-    await getLogRunner().runPromise(program.pipe(Logger.withMinimumLogLevel(toEffectLogLevel(level))));
+    await getLogRunner().runPromise(program);
   } catch {
     // Logging must never break the caller.
   }

@@ -113,14 +113,14 @@ describe("effect/metrics definitions", () => {
       taskHeartbeatTimeoutTotal,
     ];
     for (const counter of counters) {
-      await Effect.runPromise(Metric.increment(counter));
+      await Effect.runPromise(Metric.update(counter, 1));
     }
   });
   test("all gauges can be set without error", async () => {
     const gauges = [activeRuns, activeNodes, schedulerQueueDepth, approvalPending, externalWaitAsyncPending];
     for (const gauge of gauges) {
-      await Effect.runPromise(Metric.set(gauge, 1));
-      await Effect.runPromise(Metric.set(gauge, 0));
+      await Effect.runPromise(Metric.update(gauge, 1));
+      await Effect.runPromise(Metric.update(gauge, 0));
     }
   });
   test("all histograms can be updated without error", async () => {

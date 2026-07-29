@@ -142,7 +142,7 @@ function runSingleScorerEffect(key, binding, ctx, adapter, source, eventBus) {
     if (!shouldRun(binding, ctx)) {
       return null;
     }
-    yield* Metric.increment(scorersStarted);
+    yield* Metric.update(scorersStarted, 1);
     if (eventBus) {
       yield* emitScorerEvent(eventBus, {
         type: "ScorerStarted",
@@ -184,7 +184,7 @@ function runSingleScorerEffect(key, binding, ctx, adapter, source, eventBus) {
     }).pipe(
       Effect.tapError((err) =>
         Effect.gen(function* () {
-          yield* Metric.increment(scorersFailed);
+          yield* Metric.update(scorersFailed, 1);
           if (eventBus) {
             yield* emitScorerEvent(eventBus, {
               type: "ScorerFailed",
@@ -200,7 +200,7 @@ function runSingleScorerEffect(key, binding, ctx, adapter, source, eventBus) {
       ),
     );
     const durationMs = performance.now() - start;
-    yield* Metric.increment(scorersFinished);
+    yield* Metric.update(scorersFinished, 1);
     yield* Metric.update(scorerDuration, durationMs);
     if (eventBus) {
       yield* emitScorerEvent(eventBus, {
@@ -269,7 +269,7 @@ export function runScorersAsync(scorers, ctx, adapter, eventBus) {
   if (entries.length === 0) return;
   const effects = entries.map(([key, binding]) =>
     runSingleScorerEffect(key, binding, ctx, adapter, "live", eventBus).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.logError(`Scorer ${key} failed: ${error.message}`).pipe(
           Effect.annotateLogs({ scorer: key, error: error.message }),
           Effect.map(() => null),
@@ -298,7 +298,7 @@ export async function runScorersBatch(scorers, ctx, adapter, eventBus) {
   const effects = entries.map(([key, binding]) =>
     runSingleScorerEffect(key, binding, ctx, adapter, "batch", eventBus).pipe(
       Effect.map((result) => [key, result]),
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.logError(`Scorer ${key} failed: ${error.message}`).pipe(
           Effect.annotateLogs({ scorer: key, error: error.message }),
           Effect.map(() => [key, null]),

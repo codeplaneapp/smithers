@@ -97,7 +97,7 @@
     "@smithers-orchestrator/graph": "workspace:*",
     "@smithers-orchestrator/observability": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
-    "effect": "^3.21.4",
+    "effect": "4.0.0-beta.102",
     "zod": "^4.4.3"
   },
   "devDependencies": {

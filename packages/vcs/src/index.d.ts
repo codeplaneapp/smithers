@@ -1,4 +1,4 @@
-import * as _effect_platform_CommandExecutor from '@effect/platform/CommandExecutor';
+import * as _effect_platform_CommandExecutor from 'effect/unstable/process/ChildProcessSpawner';
 import { Effect } from 'effect';
 import { accessSync, existsSync } from 'node:fs';
 
@@ -55,7 +55,7 @@ type JjRevertResult$1 = {
  *
  * @param {string[]} args
  * @param {RunJjOptions} [opts]
- * @returns {Effect.Effect<RunJjResult, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
+ * @returns {Effect.Effect<RunJjResult, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
 declare function runJj(args: string[], opts?: RunJjOptions): Effect.Effect<RunJjResult, never, _effect_platform_CommandExecutor.CommandExecutor>;
 /**
@@ -71,7 +71,7 @@ declare function runJj(args: string[], opts?: RunJjOptions): Effect.Effect<RunJj
  * state-discriminating cache-key component.
  *
  * @param {string} [cwd]
- * @returns {Effect.Effect<string | null, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
+ * @returns {Effect.Effect<string | null, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
 declare function getJjPointer(cwd?: string): Effect.Effect<string | null, never, _effect_platform_CommandExecutor.CommandExecutor>;
 /**
@@ -93,7 +93,7 @@ declare function parseWorkspaceSnapshot(logStdout: string, opStdout: string): Wo
  * durability gap the caller records); it never throws into the agent path.
  *
  * @param {string} [cwd]
- * @returns {Effect.Effect<WorkspaceSnapshot | null, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
+ * @returns {Effect.Effect<WorkspaceSnapshot | null, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
 declare function captureWorkspaceSnapshot(cwd?: string): Effect.Effect<WorkspaceSnapshot | null, never, _effect_platform_CommandExecutor.CommandExecutor>;
 /**
@@ -110,14 +110,14 @@ declare function captureWorkspaceSnapshot(cwd?: string): Effect.Effect<Workspace
  *
  * @param {string} pointer
  * @param {string} [cwd]
- * @returns {Effect.Effect<JjRevertResult, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
+ * @returns {Effect.Effect<JjRevertResult, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
 declare function revertToJjPointer(pointer: string, cwd?: string): Effect.Effect<JjRevertResult, never, _effect_platform_CommandExecutor.CommandExecutor>;
 /**
  * Quick repo detection by executing a read-only jj command.
  *
  * @param {string} [cwd]
- * @returns {Effect.Effect<boolean, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
+ * @returns {Effect.Effect<boolean, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
 declare function isJjRepo(cwd?: string): Effect.Effect<boolean, never, _effect_platform_CommandExecutor.CommandExecutor>;
 declare function workspaceAdd(name: any, path: any, opts?: {}): Effect.Effect<{
@@ -132,7 +132,7 @@ declare function workspaceAdd(name: any, path: any, opts?: {}): Effect.Effect<{
  * Falls back to parsing human output if `-T` is unavailable.
  *
  * @param {string} [cwd]
- * @returns {Effect.Effect<WorkspaceInfo[], never, import("@effect/platform/CommandExecutor").CommandExecutor>}
+ * @returns {Effect.Effect<WorkspaceInfo[], never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
 declare function workspaceList(cwd?: string): Effect.Effect<WorkspaceInfo[], never, _effect_platform_CommandExecutor.CommandExecutor>;
 /**
@@ -140,7 +140,7 @@ declare function workspaceList(cwd?: string): Effect.Effect<WorkspaceInfo[], nev
  *
  * @param {string} name
  * @param {{ cwd?: string }} [opts]
- * @returns {Effect.Effect<WorkspaceResult, never, import("@effect/platform/CommandExecutor").CommandExecutor>}
+ * @returns {Effect.Effect<WorkspaceResult, never, import("effect/unstable/process/ChildProcessSpawner").CommandExecutor>}
  */
 declare function workspaceClose(name: string, opts?: {
     cwd?: string;

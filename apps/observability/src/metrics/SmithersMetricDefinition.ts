@@ -4,7 +4,7 @@ import type { SmithersMetricUnit } from "./SmithersMetricUnit";
 
 export type SmithersMetricDefinition = {
   readonly key: string;
-  readonly metric: Metric.Metric<any, any, any>;
+  readonly metric: Metric.Metric<any, any>;
   readonly name: string;
   readonly prometheusName: string;
   readonly type: SmithersMetricType;

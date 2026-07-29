@@ -1,4 +1,4 @@
-import { Duration, Effect, Metric, Schedule, ScheduleDecision, ScheduleIntervals } from "effect";
+import { Duration, Effect, Metric, Schedule } from "effect";
 import { dbRetries } from "@smithers-orchestrator/observability/metrics";
 import { retryPolicyToSchedule } from "@smithers-orchestrator/scheduler/retryPolicyToSchedule";
 import { isRetryableSqliteWriteError } from "./isRetryableSqliteWriteError.js";
@@ -71,10 +71,12 @@ function makeSqliteRetrySchedule(maxAttempts, baseDelayMs, maxDelayMs) {
     backoff: "exponential",
     initialDelayMs: boundedBaseDelayMs,
   }).pipe(
-    Schedule.modifyDelay((_, delay) => Duration.millis(Math.min(boundedMaxDelayMs, Duration.toMillis(delay)))),
-    Schedule.jitteredWith({ min: 0.75, max: 1.25 }),
-    Schedule.whileInput(isRetryableSqliteWriteError),
-    Schedule.intersect(Schedule.recurs(Math.max(0, maxAttempts - 1))),
+    Schedule.modifyDelay(({ duration }) =>
+      Effect.succeed(Duration.millis(Math.min(boundedMaxDelayMs, Duration.toMillis(duration)))),
+    ),
+    Schedule.jittered,
+    Schedule.while(({ input }) => isRetryableSqliteWriteError(input)),
+    Schedule.upTo({ times: Math.max(0, maxAttempts - 1) }),
   );
 }
 /**
@@ -92,25 +94,14 @@ export function withSqliteWriteRetryEffect(operation, opts = {}) {
     sleep,
   } = opts;
   const boundedMaxAttempts = Math.max(1, Math.floor(maxAttempts));
-  let retryAttempt = 0;
-  let lastRetryError;
-  const retrySchedule = Schedule.mapInput(
-    makeSqliteRetrySchedule(boundedMaxAttempts, baseDelayMs, maxDelayMs),
-    (error) => {
-      lastRetryError = error;
-      return error;
-    },
-  ).pipe(
-    Schedule.onDecision((_, decision) => {
-      if (ScheduleDecision.isDone(decision) || !lastRetryError) {
-        return Effect.void;
-      }
-      retryAttempt += 1;
-      const delayMs = Math.max(1, Math.round(ScheduleIntervals.start(decision.intervals) - Date.now()));
+  const retrySchedule = makeSqliteRetrySchedule(boundedMaxAttempts, baseDelayMs, maxDelayMs).pipe(
+    Schedule.tap(({ attempt, duration, input: retryError }) => {
+      const retryAttempt = attempt + 1;
+      const delayMs = Math.max(1, Math.round(Duration.toMillis(duration)));
       return Effect.gen(function* () {
-        yield* Metric.increment(dbRetries);
+        yield* Metric.update(dbRetries, 1);
         yield* Effect.logWarning(
-          `${label} failed with ${describeSqliteWriteError(lastRetryError)}; retrying in ${delayMs}ms (${retryAttempt}/${boundedMaxAttempts})`,
+          `${label} failed with ${describeSqliteWriteError(retryError)}; retrying in ${delayMs}ms (${retryAttempt}/${boundedMaxAttempts})`,
         );
         if (sleep) {
           yield* Effect.promise(() => sleep(delayMs));
@@ -127,7 +118,11 @@ export function withSqliteWriteRetryEffect(operation, opts = {}) {
     }),
   );
   return Effect.suspend(operation).pipe(
-    Effect.retry(sleep ? Schedule.modifyDelay(retrySchedule, () => Duration.zero) : retrySchedule),
+    Effect.retry(
+      sleep
+        ? retrySchedule.pipe(Schedule.modifyDelay(() => Effect.succeed(Duration.zero)))
+        : retrySchedule,
+    ),
     Effect.withLogSpan("sqlite-write-retry"),
   );
 }

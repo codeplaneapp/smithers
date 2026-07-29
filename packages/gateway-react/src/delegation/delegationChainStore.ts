@@ -293,7 +293,7 @@ export function createDelegationChainStore(options: {
           const folded = yield* foldRecords;
           const hydratedNow = yield* Ref.get(hydrated);
           const historyErrorNow = yield* Ref.get(historyError);
-          const previous = yield* Ref.get(snapshot);
+          const previous = yield* SubscriptionRef.get(snapshot);
           if (
             previous.graph === folded.graph &&
             previous.recordErrors === folded.recordErrors &&
@@ -303,7 +303,7 @@ export function createDelegationChainStore(options: {
           ) {
             return;
           }
-          yield* Ref.set(snapshot, {
+          yield* SubscriptionRef.set(snapshot, {
             graph: folded.graph,
             recordErrors: folded.recordErrors,
             historyError: historyErrorNow,
@@ -335,13 +335,16 @@ export function createDelegationChainStore(options: {
                       }
                     : { state: "missing", finishCount };
                 }),
-                Effect.catchAll((cause): Effect.Effect<OutputCacheEntry> => {
-                  const code = cause instanceof GatewayRpcError ? cause.code : undefined;
-                  if (code !== undefined && EXPECTED_OUTPUT_ERRORS.has(code)) {
-                    return Effect.succeed({ state: "missing", finishCount });
-                  }
-                  const error = cause instanceof Error ? cause : new Error(String(cause));
-                  return Effect.succeed({ state: "error", finishCount, attempts: attempts + 1, error });
+                Effect.matchEffect({
+                  onFailure: (cause): Effect.Effect<OutputCacheEntry> => {
+                    const code = cause instanceof GatewayRpcError ? cause.code : undefined;
+                    if (code !== undefined && EXPECTED_OUTPUT_ERRORS.has(code)) {
+                      return Effect.succeed({ state: "missing", finishCount });
+                    }
+                    const error = cause instanceof Error ? cause : new Error(String(cause));
+                    return Effect.succeed({ state: "error", finishCount, attempts: attempts + 1, error });
+                  },
+                  onSuccess: Effect.succeed,
                 }),
                 Effect.map((entry) => ({ key, entry })),
               );
@@ -474,9 +477,12 @@ export function createDelegationChainStore(options: {
                 }),
               catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
             }).pipe(
-              Effect.catchAll((cause) => {
-                error = cause;
-                return Effect.succeed(undefined);
+              Effect.matchEffect({
+                onFailure: (cause) => {
+                  error = cause;
+                  return Effect.succeed(undefined);
+                },
+                onSuccess: Effect.succeed,
               }),
             );
             if (page === undefined) break;
@@ -495,15 +501,15 @@ export function createDelegationChainStore(options: {
       let disposed = false;
       const store: DelegationChainStore = {
         push: (next) => {
-          Queue.unsafeOffer(queue, StoreMessage.InputsChanged({ inputs: next }));
+          Queue.offerUnsafe(queue, StoreMessage.InputsChanged({ inputs: next }));
         },
         subscribe: (listener) => {
-          const fiber = Effect.runFork(Stream.runForEach(snapshot.changes, () => Effect.sync(listener)));
+          const fiber = Effect.runFork(Stream.runForEach(SubscriptionRef.changes(snapshot), () => Effect.sync(listener)));
           return () => {
             Effect.runFork(Fiber.interrupt(fiber));
           };
         },
-        getSnapshot: () => Effect.runSync(Ref.get(snapshot)),
+        getSnapshot: () => SubscriptionRef.getUnsafe(snapshot),
         dispose: () => {
           if (disposed) return;
           disposed = true;

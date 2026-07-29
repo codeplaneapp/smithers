@@ -32,13 +32,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@effect/cluster": "^0.59.0",
-    "@effect/experimental": "^0.60.0",
-    "@effect/platform-bun": "^0.90.0",
-    "@effect/rpc": "^0.75.1",
-    "@effect/sql": "^0.51.1",
-    "@effect/sql-sqlite-bun": "^0.52.0",
-    "@effect/workflow": "^0.18.2",
+    "@effect/platform-bun": "4.0.0-beta.102",
+    "@effect/sql-sqlite-bun": "4.0.0-beta.102",
     "@smithers-orchestrator/agents": "workspace:*",
     "@smithers-orchestrator/components": "workspace:*",
     "@smithers-orchestrator/db": "workspace:*",
@@ -55,7 +50,7 @@
     "@smithers-orchestrator/vcs": "workspace:*",
     "diff": "^9.0.0",
     "drizzle-orm": "^0.45.2",
-    "effect": "^3.21.4",
+    "effect": "4.0.0-beta.102",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "zod": "^4.4.3"
@@ -66,7 +61,7 @@
     "pg": "^8.22.0"
   },
   "devDependencies": {
-    "@effect/platform-node": "^0.107.0",
+    "@effect/platform-node": "4.0.0-beta.102",
     "@types/bun": "latest",
     "typescript": "~6.0.3"
   }

@@ -14,7 +14,7 @@ import { BubblewrapSandboxExecutorLive } from "./effect/socket-runner.js";
 
 const SandboxTransportTag =
   /** @type {Context.TagClass<SandboxTransport, "SandboxTransport", SandboxTransportService>} */ (
-    Context.Tag("SandboxTransport")()
+    Context.Service("SandboxTransport")
   );
 export class SandboxTransport extends SandboxTransportTag {
   // Explicit constructor (identical to the implicit one) so runtime
@@ -29,7 +29,7 @@ export class SandboxTransport extends SandboxTransportTag {
  * @returns {Layer.Layer<SandboxTransport, E, R>}
  */
 export function makeSandboxTransportLayer(executorLayer) {
-  return Layer.scoped(
+  return Layer.effect(
     SandboxTransport,
     makeSandboxTransportServiceEffect(executorLayer).pipe(Effect.map((service) => SandboxTransport.of(service))),
   );

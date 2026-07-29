@@ -38,7 +38,7 @@ class HttpError extends Error {
 function taggedMetric(metric, tags) {
   let tagged = metric;
   for (const [key, value] of Object.entries(tags)) {
-    tagged = Metric.tagged(tagged, key, value);
+    tagged = Metric.withAttributes(tagged, { [key]: String(value) });
   }
   return tagged;
 }
@@ -84,7 +84,7 @@ function recordHttpRequestMetrics(method, pathname, statusCode, durationMs) {
   };
   return Effect.all(
     [
-      Metric.increment(taggedMetric(httpRequests, tags)),
+      Metric.update(taggedMetric(httpRequests, tags), 1),
       Metric.update(taggedMetric(httpRequestDuration, tags), durationMs),
     ],
     { discard: true },

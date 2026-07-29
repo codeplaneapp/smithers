@@ -1,36 +1,36 @@
-import { MetricBoundaries } from "effect";
-export const durationBuckets = MetricBoundaries.exponential({
+import { Metric } from "effect";
+export const durationBuckets = Metric.exponentialBoundaries({
   start: 100,
   factor: 2,
   count: 12,
 }); // ~100ms to ~200s
-export const fastBuckets = MetricBoundaries.exponential({
+export const fastBuckets = Metric.exponentialBoundaries({
   start: 1,
   factor: 2,
   count: 12,
 }); // ~1ms to ~2s
-export const toolBuckets = MetricBoundaries.exponential({
+export const toolBuckets = Metric.exponentialBoundaries({
   start: 10,
   factor: 2,
   count: 14,
 }); // ~10ms to ~80s
-export const tokenBuckets = MetricBoundaries.exponential({
+export const tokenBuckets = Metric.exponentialBoundaries({
   start: 10,
   factor: 2,
   count: 18,
 }); // ~10 to ~1.3M tokens
-export const contextWindowBuckets = MetricBoundaries.fromIterable([50_000, 100_000, 200_000, 500_000, 1_000_000]);
-export const sizeBuckets = MetricBoundaries.exponential({
+export const contextWindowBuckets = Metric.boundariesFromIterable([50_000, 100_000, 200_000, 500_000, 1_000_000]);
+export const sizeBuckets = Metric.exponentialBoundaries({
   start: 100,
   factor: 2,
   count: 16,
 }); // ~100 bytes to ~3.2MB
-export const carriedStateSizeBuckets = MetricBoundaries.exponential({
+export const carriedStateSizeBuckets = Metric.exponentialBoundaries({
   start: 256,
   factor: 2,
   count: 17,
 }); // ~256 bytes to ~16MB
-export const ancestryDepthBuckets = MetricBoundaries.exponential({
+export const ancestryDepthBuckets = Metric.exponentialBoundaries({
   start: 1,
   factor: 2,
   count: 12,

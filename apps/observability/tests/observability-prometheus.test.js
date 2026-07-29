@@ -17,7 +17,7 @@ describe("renderPrometheusMetrics", () => {
   });
   test("contains counter metrics for smithers", () => {
     // Increment a known counter so it appears in output
-    Effect.runSync(Metric.increment(Metric.counter("smithers.test_prom.runs")));
+    Effect.runSync(Metric.update(Metric.counter("smithers.test_prom.runs"), 1));
     const result = renderPrometheusMetrics();
     expect(result).toContain("smithers");
   });
@@ -29,7 +29,7 @@ describe("renderPrometheusMetrics", () => {
     }
   });
   test("includes TYPE annotations", () => {
-    Effect.runSync(Metric.increment(Metric.counter("smithers.test_prom.typed")));
+    Effect.runSync(Metric.update(Metric.counter("smithers.test_prom.typed"), 1));
     const result = renderPrometheusMetrics();
     if (result.includes("smithers_test_prom_typed")) {
       expect(result).toContain("# TYPE");
@@ -37,7 +37,7 @@ describe("renderPrometheusMetrics", () => {
   });
   test("renders async external wait gauges with labels", () => {
     Effect.runSync(
-      Metric.set(Metric.tagged(Metric.tagged(externalWaitAsyncPending, "kind", "event"), "case", "render"), 2),
+      Metric.update(Metric.withAttributes(Metric.withAttributes(externalWaitAsyncPending, { ["kind"]: String("event") }), { ["case"]: String("render") }), 2),
     );
     const result = renderPrometheusMetrics();
     expect(result).toContain('smithers_external_wait_async_pending{case="render",kind="event"} 2');
@@ -45,11 +45,11 @@ describe("renderPrometheusMetrics", () => {
   test("renders rewind metrics with underscore names (no dots)", () => {
     Effect.runSync(
       Effect.all([
-        Metric.increment(Metric.tagged(rewindTotal, "result", "success")),
+        Metric.update(Metric.withAttributes(rewindTotal, { ["result"]: String("success") }), 1),
         Metric.update(rewindDurationMs, 42),
         Metric.update(rewindFramesDeleted, 3),
         Metric.update(rewindSandboxesReverted, 1),
-        Metric.increment(rewindRollbackTotal),
+        Metric.update(rewindRollbackTotal, 1),
       ]),
     );
     const result = renderPrometheusMetrics();
@@ -75,11 +75,9 @@ describe("renderPrometheusMetrics", () => {
   });
 
   test("renders Summary metric states with min/max quantile lines", () => {
-    const summary = Metric.summary({
-      name: "smithers.test_prom_summary",
+    const summary = Metric.summary("smithers.test_prom_summary", {
       maxAge: "1 minutes",
       maxSize: 100,
-      error: 0.01,
       quantiles: [0.5, 0.9],
     });
     Effect.runSync(Metric.update(summary, 1));

@@ -1,4 +1,4 @@
-import * as WorkflowEngine from "@effect/workflow/WorkflowEngine";
+import * as WorkflowEngine from "effect/unstable/workflow/WorkflowEngine";
 import { Cause, Effect, Exit, Layer, ManagedRuntime } from "effect";
 import { SchedulerLive, WorkflowSessionLive } from "@smithers-orchestrator/scheduler";
 import {
@@ -60,7 +60,7 @@ export async function runPromise(effect, options) {
   if (Exit.isSuccess(exit)) {
     return exit.value;
   }
-  const failure = Cause.failureOption(exit.cause);
+  const failure = Cause.findErrorOption(exit.cause);
   if (failure._tag === "Some") {
     throw toSmithersError(failure.value);
   }

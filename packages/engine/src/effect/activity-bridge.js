@@ -4,7 +4,7 @@
 /** @typedef {import("./TaskActivityContext.ts").TaskActivityContext} TaskActivityContext */
 // @smithers-type-exports-end
 
-import * as Activity from "@effect/workflow/Activity";
+import * as Activity from "effect/unstable/workflow/Activity";
 import { Effect, Schema } from "effect";
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} _SmithersDb */
 /** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */

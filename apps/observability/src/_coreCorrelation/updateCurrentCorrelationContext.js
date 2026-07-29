@@ -1,5 +1,4 @@
-import { Effect, FiberRef } from "effect";
-import { correlationContextFiberRef } from "./correlationContextFiberRef.js";
+import { Effect } from "effect";
 import { getCurrentCorrelationContextEffect } from "./getCurrentCorrelationContextEffect.js";
 import { mergeCorrelationContext } from "./mergeCorrelationContext.js";
 /** @typedef {import("./CorrelationContext.ts").CorrelationContext} CorrelationContext */
@@ -13,7 +12,6 @@ export function updateCurrentCorrelationContext(patch) {
   return Effect.gen(function* () {
     const current = yield* getCurrentCorrelationContextEffect();
     const next = mergeCorrelationContext(current, patch);
-    yield* FiberRef.set(correlationContextFiberRef, next);
     return next;
   });
 }

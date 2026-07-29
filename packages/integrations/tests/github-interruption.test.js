@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { Effect, Exit, Fiber } from "effect";
+import { Cause, Effect, Exit, Fiber } from "effect";
 import { makeGitHubClient } from "../src/github/GitHubClient.js";
 
 /**
@@ -84,8 +84,9 @@ describe("GitHubClient interruption", () => {
     await waitFor(() => fixture.state.hangRequested, "server to receive the request");
     expect(fixture.state.hangAborted).toBe(false);
     const started = Date.now();
-    const exit = await Effect.runPromise(Fiber.interrupt(fiber));
-    expect(Exit.isInterrupted(exit)).toBe(true);
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    const exit = await Effect.runPromise(Fiber.await(fiber));
+    expect(Exit.isFailure(exit) && exit.cause.reasons.some(Cause.isInterruptReason)).toBe(true);
     // Prompt: interruption must not wait out a request that never ends.
     expect(Date.now() - started).toBeLessThan(2000);
     await waitFor(() => fixture.state.hangAborted, "server to observe the disconnect");
@@ -98,8 +99,9 @@ describe("GitHubClient interruption", () => {
     // inside response.text() rather than still awaiting fetch().
     await new Promise((resolve) => setTimeout(resolve, 100));
     const started = Date.now();
-    const exit = await Effect.runPromise(Fiber.interrupt(fiber));
-    expect(Exit.isInterrupted(exit)).toBe(true);
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    const exit = await Effect.runPromise(Fiber.await(fiber));
+    expect(Exit.isFailure(exit) && exit.cause.reasons.some(Cause.isInterruptReason)).toBe(true);
     expect(Date.now() - started).toBeLessThan(2000);
     await waitFor(() => fixture.state.bodyDisconnected, "server to observe the body stream cancel");
   });

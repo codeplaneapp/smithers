@@ -148,7 +148,7 @@ function makeMemoryStore(db) {
   function getFactEffect(ns, key) {
     const nsStr = namespaceToString(ns);
     return Effect.gen(function* () {
-      yield* Metric.increment(memoryFactReads);
+      yield* Metric.update(memoryFactReads, 1);
       const rows = yield* readEffect("memory getFact", () =>
         db
           .select()
@@ -180,7 +180,7 @@ function makeMemoryStore(db) {
       iteration: provenance?.iteration ?? null,
     };
     return Effect.gen(function* () {
-      yield* Metric.increment(memoryFactWrites);
+      yield* Metric.update(memoryFactWrites, 1);
       yield* writeEffect("memory setFact", () =>
         db
           .insert(smithersMemoryFacts)
@@ -299,7 +299,7 @@ function makeMemoryStore(db) {
     // Delete the messages and the thread row atomically so a failure on the
     // second write can't leave the thread without its messages (or vice versa).
     return requireSqliteNotesEffect("DB_WRITE_FAILED", "memory deleteThread").pipe(
-      Effect.zipRight(
+      Effect.andThen(
         writeEffect("memory deleteThread", () =>
           Promise.resolve(
             db.transaction((tx) => {
@@ -318,7 +318,7 @@ function makeMemoryStore(db) {
    */
   function saveMessageEffect(msg) {
     return Effect.gen(function* () {
-      yield* Metric.increment(memoryMessageSaves);
+      yield* Metric.update(memoryMessageSaves, 1);
       const createdAtMs = msg.createdAtMs ?? nowMs();
       // Idempotent: re-saving a message with the same id (e.g. on
       // crash-resume, deterministic replay, or fork/restore where ids are
@@ -521,7 +521,7 @@ function makeMemoryStore(db) {
     };
     const nsKind = parseNamespace(nsStr).kind;
     return requireSqliteNotesEffect("DB_WRITE_FAILED", "memory saveNote").pipe(
-      Effect.zipRight(
+      Effect.andThen(
         writeEffect("memory saveNote", () =>
           Promise.resolve(
             db.transaction((tx) => {
@@ -546,7 +546,7 @@ function makeMemoryStore(db) {
       ),
       // Read back so an id-conflict no-op returns the row the database
       // actually holds rather than echoing the ignored input.
-      Effect.zipRight(
+      Effect.andThen(
         readEffect("memory saveNote readback", () =>
           db.select().from(smithersMemoryNotes).where(eq(smithersMemoryNotes.id, id)).limit(1),
         ),
@@ -616,7 +616,7 @@ function makeMemoryStore(db) {
   function enableNoteSearchEffect(kind) {
     return requireSqliteNotesEffect("DB_WRITE_FAILED", "memory enableNoteSearch")
       .pipe(
-        Effect.zipRight(
+        Effect.andThen(
           writeEffect("memory enableNoteSearch", () =>
             Promise.resolve(
               db.transaction((tx) => {

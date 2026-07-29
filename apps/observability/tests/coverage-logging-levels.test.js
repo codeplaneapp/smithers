@@ -32,7 +32,7 @@ describe("toEffectLogLevel", () => {
   test("maps numeric levels to Effect LogLevels", () => {
     expect(toEffectLogLevel(1)).toBe(LogLevel.Debug);
     expect(toEffectLogLevel(2)).toBe(LogLevel.Info);
-    expect(toEffectLogLevel(3)).toBe(LogLevel.Warning);
+    expect(toEffectLogLevel(3)).toBe(LogLevel.Warn);
     expect(toEffectLogLevel(4)).toBe(LogLevel.Error);
   });
   test("falls back to LogLevel.All for out-of-range levels", () => {

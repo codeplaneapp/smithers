@@ -106,7 +106,7 @@ describe("resolveSmithersObservabilityOptions", () => {
     expect(result.endpoint).toBe("http://env:4318");
     expect(result.serviceName).toBe("env-service");
     expect(result.logFormat).toBe("pretty");
-    expect(result.logLevel).toBe(LogLevel.Warning);
+    expect(result.logLevel).toBe(LogLevel.Warn);
   });
   test("SMITHERS_OTEL_ENABLED=1 enables", () => {
     process.env.SMITHERS_OTEL_ENABLED = "1";
@@ -124,8 +124,8 @@ describe("resolveSmithersObservabilityOptions", () => {
       ["trace", LogLevel.Trace],
       ["debug", LogLevel.Debug],
       ["info", LogLevel.Info],
-      ["warning", LogLevel.Warning],
-      ["warn", LogLevel.Warning],
+      ["warning", LogLevel.Warn],
+      ["warn", LogLevel.Warn],
       ["error", LogLevel.Error],
       ["fatal", LogLevel.Fatal],
       ["all", LogLevel.All],

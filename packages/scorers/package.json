@@ -42,7 +42,7 @@
     "@smithers-orchestrator/observability": "workspace:*",
     "@smithers-orchestrator/scheduler": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "effect": "^3.21.4",
+    "effect": "4.0.0-beta.102",
     "typescript": "~6.0.3",
     "zod": "^4.4.3"
   },

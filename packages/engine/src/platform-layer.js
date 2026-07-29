@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import * as BunContext from "@effect/platform-bun/BunContext";
+import * as BunContext from "@effect/platform-bun/BunServices";
 
 /**
  * @typedef {import("effect").Layer.Layer<any, never, never>} PlatformLayer

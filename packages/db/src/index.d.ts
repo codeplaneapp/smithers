@@ -8,8 +8,8 @@ import * as drizzle_orm_bun_sqlite from 'drizzle-orm/bun-sqlite';
 import * as _smithers_orchestrator_errors_toSmithersError from '@smithers-orchestrator/errors/toSmithersError';
 import * as bun_sqlite from 'bun:sqlite';
 import { ManagedRuntime, Effect } from 'effect';
-import * as SqlClient from '@effect/sql/SqlClient';
-import { SqlError } from '@effect/sql/SqlError';
+import * as SqlClient from 'effect/unstable/sql/SqlClient';
+import { SqlError } from 'effect/unstable/sql/SqlError';
 import * as drizzle_orm_sqlite_core from 'drizzle-orm/sqlite-core';
 
 type SchemaRegistryEntry$1 = {

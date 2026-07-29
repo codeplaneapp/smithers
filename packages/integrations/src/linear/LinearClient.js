@@ -14,7 +14,7 @@ import { resolveLinearConfig } from "./config.js";
 
 /** Context tag for the Linear GraphQL client service. */
 export const LinearClient = /** @type {Context.Tag<LinearClientService, LinearClientService>} */ (
-  Context.GenericTag("@smithers-orchestrator/integrations/linear/LinearClient")
+  Context.Service("@smithers-orchestrator/integrations/linear/LinearClient")
 );
 
 /**

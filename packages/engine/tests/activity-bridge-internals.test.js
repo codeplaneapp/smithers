@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import * as Activity from "@effect/workflow/Activity";
+import * as Activity from "effect/unstable/workflow/Activity";
 import { Context, Effect } from "effect";
 import {
   executeTaskActivity,
@@ -8,7 +8,7 @@ import {
   RetriableTaskFailure,
 } from "../src/effect/activity-bridge.js";
 
-const WorkflowInstanceTag = Context.GenericTag("@effect/workflow/WorkflowEngine/WorkflowInstance");
+const WorkflowInstanceTag = Context.Service("effect/unstable/workflow/WorkflowEngine/WorkflowInstance");
 
 const desc = {
   nodeId: "activity-node",

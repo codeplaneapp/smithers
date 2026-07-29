@@ -212,7 +212,7 @@ export class HotWorkflowController {
         };
       }
       yield* cleanupGenerationsEffect(outDir, maxGenerations);
-      yield* Metric.increment(hotReloads);
+      yield* Metric.update(hotReloads, 1);
       yield* Metric.update(hotReloadDuration, performance.now() - reloadStart);
       logInfo(
         "reloaded hot workflow generation",
@@ -230,9 +230,9 @@ export class HotWorkflowController {
         newBuild: workflow.build,
       };
     }).pipe(
-      Effect.catchAll((err) =>
+      Effect.catch((err) =>
         Effect.gen(function* () {
-          yield* Metric.increment(hotReloadFailures);
+          yield* Metric.update(hotReloadFailures, 1);
           return makeHotReloadFailureEvent(err, {
             entryPath,
             generation: gen,

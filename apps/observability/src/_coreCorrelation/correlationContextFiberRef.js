@@ -1,2 +1,5 @@
-import { FiberRef } from "effect";
-export const correlationContextFiberRef = FiberRef.unsafeMake(undefined);
+import { Context } from "effect";
+
+export const correlationContextFiberRef = Context.Reference("smithers/observability/correlation-context", {
+  defaultValue: () => undefined,
+});

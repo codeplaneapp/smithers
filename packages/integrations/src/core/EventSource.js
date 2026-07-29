@@ -9,7 +9,7 @@
 /** @typedef {import("./EventSourceTypes.ts").WebhookSource} WebhookSource */
 // @smithers-type-exports-end
 
-import { Effect, Queue, Ref, Schedule, Stream } from "effect";
+import { Effect, Queue, Ref, Schedule, Semaphore, Stream } from "effect";
 import { decodeExternalEvent } from "./ExternalEvent.js";
 import { IntegrationError } from "./IntegrationError.js";
 
@@ -34,7 +34,7 @@ export function makeWebhookSource(options) {
     // exactly `capacity`, so close never waits behind a full event queue.
     /** @type {Queue.Queue<import("./ExternalEventTypes.ts").ExternalEvent | typeof WEBHOOK_END>} */
     const queue = yield* Queue.bounded(capacity + 1);
-    const offerLock = yield* Effect.makeSemaphore(1);
+    const offerLock = yield* Semaphore.make(1);
     let closed = false;
     /** @type {EventSource} */
     const source = {
@@ -188,7 +188,7 @@ export function makePollingSource(options) {
         };
         return batch;
       });
-      return Stream.repeatEffectWithSchedule(pollOnce, schedule);
+      return Stream.fromEffect(pollOnce).pipe(Stream.repeat(schedule));
     }),
   );
   return { id, events };
