@@ -1,4 +1,4 @@
-# Smithers 0.31.1 launch thread
+# Smithers 0.32.0 launch thread
 
 Production-hardening shape: hook with scale, headline feature (monitor workflows) on tweet 2, recovery ergonomics on 3-4, fix-count tweet on 5, safe defaults + CTA on 6. charCounts recomputed as actual Unicode character length with the CTA URL normalized to 23 chars (t.co). Cut per ledger flags: examples coverage, OrchBench numbers, and marketing-deck removal are allowedInMarketing:false; ui-core/tui-ui extraction and gateway child-run APIs stayed in the changelog to keep the thread at 6 tweets.
 
@@ -6,7 +6,7 @@ Production-hardening shape: hook with scale, headline feature (monitor workflows
 
 ### 1. Tweet 1
 
-> Smithers 0.31.1 is out. 163 commits, 993 files changed.
+> Smithers 0.32.0 is out: monitor workflows, task-shaped oneshots, release-review automation, and a broad durability hardening pass.
 >
 > First-class monitor workflows, resumable runs after in-flight workflow edits, and durable subflow fixes across the engine.
 >
@@ -14,7 +14,7 @@ Production-hardening shape: hook with scale, headline feature (monitor workflows
 >
 > 1/6
 
-Claim IDs: claim-163-commits-993-files, claim-monitor-workflows, claim-retry-task-accept-workflow-change, claim-subflow-hardening-batch
+Claim IDs: claim-monitor-workflows, claim-retry-task-accept-workflow-change, claim-subflow-hardening-batch
 Characters: 224
 
 ---
@@ -56,11 +56,11 @@ Characters: 224
 
 ### 5. Tweet 5
 
-> The honest shape of this release: 80 of 163 commits are fixes. Child-run cancel/pause propagation, signals across child waits, a <Task deps> completion race (#1415), and a silent jj revert no-op are all fixed.
+> The honest shape of this release: durability fixes dominate. Child-run cancel/pause propagation, signals across child waits, a <Task deps> completion race (#1415), and a silent jj revert no-op are all fixed.
 >
 > 5/6
 
-Claim IDs: claim-163-commits-993-files, claim-subflow-hardening-batch, claim-async-deps-completion-fix, claim-jj-commit-id-pointer-fix
+Claim IDs: claim-subflow-hardening-batch, claim-async-deps-completion-fix, claim-jj-commit-id-pointer-fix
 Characters: 214
 
 ---

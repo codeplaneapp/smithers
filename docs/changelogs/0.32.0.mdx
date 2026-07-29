@@ -1,14 +1,14 @@
 ---
-title: "0.31.1"
-description: "Smithers 0.31.1 adds monitor workflows that watch and heal runs, lets you resume a run after editing its workflow, hardens child-run durability across a large batch of subflow fixes, and fixes the network sandbox so loopback stays reachable."
+title: "0.32.0"
+description: "Smithers 0.32.0 adds monitor workflows that watch and heal runs, task-shaped oneshot routing, release review automation, safer workflow recovery, and a broad child-run durability hardening pass."
 ---
 
-**Smithers 0.31.1 is a hardening release.** Of its 163 commits, 80 are fixes,
-most aimed at the places durable runs break in production: resumed runs, child
-workflows, sandboxed networks, and time travel. Two features land alongside
-the fixes: monitor workflows that watch a run and heal it, and a resume path
-that accepts an edited workflow instead of refusing to continue. The release
-touches 993 files, with 71,939 insertions and 18,111 deletions.
+**Smithers 0.32.0 is a durability and operations release.** Most changes target
+the places durable runs break in production: resumed runs, child workflows,
+sandboxed networks, monitors, and time travel. It also adds task-shaped
+oneshot routing, a release-review workflow, monitor workflows that can heal a
+run, and a resume path that accepts an edited workflow instead of refusing to
+continue.
 
 ## Upgrading
 
@@ -19,6 +19,17 @@ bunx smithers-orchestrator packs update  # refresh installed workflow packs
 ```
 
 Behavior changes are collected in the [upgrade notes](#upgrade-notes).
+
+## Task-shaped oneshots and release review
+
+`smithers oneshot` now chooses its first available model from the goal shape.
+UI and frontend goals lead with Kimi K3, while general implementation goals
+lead with Claude Opus 5. Explicit `--agent` and `--model` choices still win,
+and `smithers oneshot --status` reports the resolved task type and chain.
+
+The built-in pack also gains `review-since-publish`, a three-model review panel
+that compares the working tree with the last published tag, merges verified
+findings, partitions fixes into file-disjoint lanes, and repeats until clean.
 
 ## Monitor workflows: a workflow that watches your workflow
 
@@ -109,6 +120,11 @@ This is where much of the release's hardening work went.
   graded INCONCLUSIVE instead of failed, and `bunx smithers-orchestrator eval` exits with code
   5 when every red case is inconclusive, so CI can retry instead of
   reverting good work.
+- **Subflow timers wake durably.** Parent subflows now persist their child
+  timer deadline, close stale waiting attempts, and resume through the gateway
+  timer sweep instead of parking forever.
+- **Event waits reject stale matches.** A new wait cannot consume an older
+  matching signal that predates the wait node.
 
 ## Other improvements
 
@@ -126,6 +142,11 @@ This is where much of the release's hardening work went.
   an optional peer dependency.
 - New docs: capability pages, a monitor workflows guide, and a compatibility
   policy page.
+- Whole Foods ordering webhooks must match the server-configured HTTPS
+  endpoint and resolve only to public addresses, closing input-driven SSRF and
+  redirect paths.
+- The TUI run search now captures printable keys without triggering global
+  shortcuts, and unknown backend statuses stay out of active-run counts.
 
 ## Upgrade notes
 

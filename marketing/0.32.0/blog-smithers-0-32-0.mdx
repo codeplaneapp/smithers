@@ -1,16 +1,16 @@
 ---
-title: "Smithers 0.31.1: Monitor Workflows and 163 Commits of Production Hardening"
-description: "A 163-commit patch release fixing workflow authoring, run recovery, and cross-workflow durability, and adding first-class monitor workflows."
+title: "Smithers 0.32.0: Monitor Workflows and Production Hardening"
+description: "A minor release adding monitor workflows, task-shaped oneshots, release-review automation, safer recovery, and cross-workflow durability fixes."
 date: "2026-07-29"
-version: "0.31.1"
+version: "0.32.0"
 tags: ["release", "durability", "monitoring", "cli"]
 ---
 
-Smithers 0.31.1 changes what happens when a long-running agent run goes sideways. Before this release, a stalled run waited for a human to notice, an edited workflow file killed your resume with `RESUME_METADATA_MISMATCH`, and a couple of durability bugs could mark work complete that had not actually finished. After this release, a run can carry its own monitor workflow that watches it and heals it, a wedged run can be resumed in place even after you edit the workflow, and the engine no longer claims completion for work that is still pending.
+Smithers 0.32.0 changes what happens when a long-running agent run goes sideways. Before this release, a stalled run waited for a human to notice, an edited workflow file killed your resume with `RESUME_METADATA_MISMATCH`, and a couple of durability bugs could mark work complete that had not actually finished. After this release, a run can carry its own monitor workflow that watches it and heals it, a wedged run can be resumed in place even after you edit the workflow, and the engine no longer claims completion for work that is still pending.
 
 ## Why this release exists
 
-0.31.1 is a patch release by version number and a hardening campaign by volume: 163 commits and 993 changed files ([release range](https://github.com/smithersai/smithers/compare/v0.31.0...v0.31.1)), aimed at the failure modes operators hit when they run agents for hours instead of minutes. The headline capability is monitor workflows, but most of the release is fixes: run recovery, resume semantics, and a large batch of child-run durability issues spanning cancellation, approvals, signals, snapshots, and retries.
+0.32.0 is a minor release aimed at the failure modes operators hit when they run agents for hours instead of minutes ([release range](https://github.com/smithersai/smithers/compare/v0.31.0...v0.32.0)). The headline capabilities are monitor workflows, task-shaped oneshot routing, and automated review-since-publish; the hardening spans run recovery, resume semantics, child timers, cancellation, approvals, signals, snapshots, and retries.
 
 ## Monitor workflows: runs that watch and heal themselves
 
@@ -26,7 +26,7 @@ Finally, watching a run is now a better experience. `smithers monitor <runId>` s
 
 A common operator loop looks like this: a run wedges on a node, you inspect it, you realize the workflow itself needs a small edit, you make the edit, and then the resume dies with `RESUME_METADATA_MISMATCH` because the workflow on disk no longer matches the one the run was started with. Your only option was to fork a fresh run and eat the lost progress.
 
-0.31.1 closes that loop. `retry-task` now accepts `--accept-workflow-change`, which tells the engine to carry the edited workflow forward into the resumed run ([51e57e1a](https://github.com/smithersai/smithers/commit/51e57e1af7d7e1563dcfdfbc08b54a19c865c30b)), and the mismatch error itself now names the flag so you learn about it exactly when you need it ([32b4bc82](https://github.com/smithersai/smithers/commit/32b4bc82aa65a57ee25a702655db14d97beb9725)):
+0.32.0 closes that loop. `retry-task` now accepts `--accept-workflow-change`, which tells the engine to carry the edited workflow forward into the resumed run ([51e57e1a](https://github.com/smithersai/smithers/commit/51e57e1af7d7e1563dcfdfbc08b54a19c865c30b)), and the mismatch error itself now names the flag so you learn about it exactly when you need it ([32b4bc82](https://github.com/smithersai/smithers/commit/32b4bc82aa65a57ee25a702655db14d97beb9725)):
 
 ```sh
 # The run wedged, you fixed the workflow file. Resume in place:
@@ -74,7 +74,7 @@ Two new packages, `packages/ui-core` and `packages/tui-ui`, extract the shared r
 
 ## Upgrade notes
 
-There are no breaking changes in 0.31.1. Two things are worth checking after you upgrade:
+There are no breaking changes in 0.32.0. Two things are worth checking after you upgrade:
 
 - If a resumed run previously failed with `RESUME_METADATA_MISMATCH` after an in-flight workflow edit, re-run it with `retry-task --accept-workflow-change` (or `up --resume --accept-workflow-change`) instead of forking a fresh run.
 - If your workflows use `<Task deps>` with async function children, confirm downstream consumers were not silently reading an empty `{}` payload before this release. The compute bridge now awaits the callback before claiming completion, so outputs that were missing will start arriving.
@@ -88,4 +88,4 @@ bunx smithers-orchestrator update
 bunx smithers-orchestrator monitor <runId>
 ```
 
-The full changelog lives at [docs/changelogs/0.31.1](https://smithers.sh/changelogs/0.31.1). If you have been waiting for subflows, resume, and time-travel to be boring, 0.31.1 is the release to take them into production. Start at [smithers.sh](https://smithers.sh).
+The full changelog lives at [docs/changelogs/0.32.0](https://smithers.sh/changelogs/0.32.0). If you have been waiting for subflows, resume, and time-travel to be boring, 0.32.0 is the release to take them into production. Start at [smithers.sh](https://smithers.sh).
