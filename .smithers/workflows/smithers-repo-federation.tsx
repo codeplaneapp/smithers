@@ -335,9 +335,9 @@ function prepareRoot(migrationRoot: string, sourceRepo: string) {
   const expanded = expandHome(migrationRoot.trim());
   const rootPath = resolve(expanded);
   const existed = existsSync(rootPath);
-  if (!agents.migrationEasy?.length || !agents.migrationHard?.length || !agents.migrationReview?.length) {
+  if (!agents.cheapFast?.length || !agents.implement?.length || !agents.planning?.length) {
     throw new Error(
-      "smithers-repo-federation requires agents.migrationEasy, agents.migrationHard, and agents.migrationReview " +
+      "smithers-repo-federation requires agents.cheapFast, agents.implement, and agents.planning " +
         "to be non-empty pools in .smithers/agents.ts — one or more is missing/empty. Fix agents.ts before rerunning.",
     );
   }
@@ -936,7 +936,7 @@ export default smithers((ctx) => {
   const updateSmithersResult = ctx.outputMaybe(outputs.updateSmithers, { nodeId: "updateSmithers" });
   const releaseDryRunResult = ctx.outputMaybe(outputs.releaseDryRun, { nodeId: "releaseDryRun" });
 
-  // The migrationReview Ralph loop must clear BEFORE any destructive
+  // The planning-agent Ralph loop must clear BEFORE any destructive
   // publication or merge happens.
   const lastFinalVerify = ctx.latest(outputs.finalVerify, "finalVerify");
   const finalApprovable = lastFinalVerify?.approvable === true;
@@ -962,13 +962,13 @@ export default smithers((ctx) => {
         </Task>
 
         {prepareRootResult ? (
-          <Task id="inventory" output={outputs.inventory} agent={agents.migrationEasy} heartbeatTimeoutMs={900_000}>
+          <Task id="inventory" output={outputs.inventory} agent={agents.cheapFast} heartbeatTimeoutMs={900_000}>
             <FederationInventoryPrompt migrationRoot={migrationRoot} githubOrg={githubOrg} sourceClone={sourceClone} />
           </Task>
         ) : null}
 
         {inventory ? (
-          <Task id="manifestReviewFinalApproved" output={outputs.manifestReview} agent={agents.migrationHard}>
+          <Task id="manifestReviewFinalApproved" output={outputs.manifestReview} agent={agents.implement}>
             <FederationManifestReviewPrompt
               migrationRoot={migrationRoot}
               sourceClone={sourceClone}
@@ -1017,7 +1017,7 @@ export default smithers((ctx) => {
                         <Task
                           id={`extract-${lane}`}
                           output={outputs.laneExtract}
-                          agent={agents.migrationEasy}
+                          agent={agents.cheapFast}
                           timeoutMs={30 * 60_000}
                           heartbeatTimeoutMs={10 * 60_000}
                         >
@@ -1034,7 +1034,7 @@ export default smithers((ctx) => {
                           <Task
                             id={`decouple-${lane}`}
                             output={outputs.laneDecouple}
-                            agent={agents.migrationHard}
+                            agent={agents.implement}
                             timeoutMs={45 * 60_000}
                             heartbeatTimeoutMs={15 * 60_000}
                           >
@@ -1051,7 +1051,7 @@ export default smithers((ctx) => {
                           <Task
                             id={`docs-${lane}`}
                             output={outputs.laneDocs}
-                            agent={agents.migrationEasy}
+                            agent={agents.cheapFast}
                             timeoutMs={20 * 60_000}
                             heartbeatTimeoutMs={10 * 60_000}
                           >
@@ -1074,7 +1074,7 @@ export default smithers((ctx) => {
                               <Task
                                 id={`laneVerify-${lane}`}
                                 output={outputs.laneVerify}
-                                agent={agents.migrationReview}
+                                agent={agents.planning}
                                 timeoutMs={30 * 60_000}
                                 heartbeatTimeoutMs={10 * 60_000}
                               >
@@ -1093,7 +1093,7 @@ export default smithers((ctx) => {
                                   <Task
                                     id={`laneFix-${lane}`}
                                     output={outputs.laneFix}
-                                    agent={agents.migrationHard}
+                                    agent={agents.implement}
                                     timeoutMs={40 * 60_000}
                                     heartbeatTimeoutMs={15 * 60_000}
                                   >
@@ -1129,7 +1129,7 @@ export default smithers((ctx) => {
                 <Task
                   id="updateSmithers"
                   output={outputs.updateSmithers}
-                  agent={agents.migrationHard}
+                  agent={agents.implement}
                   timeoutMs={60 * 60_000}
                   heartbeatTimeoutMs={20 * 60_000}
                 >
@@ -1148,7 +1148,7 @@ export default smithers((ctx) => {
                 <Task
                   id="releaseDryRun"
                   output={outputs.releaseDryRun}
-                  agent={agents.migrationReview}
+                  agent={agents.planning}
                   timeoutMs={45 * 60_000}
                   heartbeatTimeoutMs={15 * 60_000}
                 >
@@ -1166,7 +1166,7 @@ export default smithers((ctx) => {
                     <Task
                       id="finalVerify"
                       output={outputs.finalVerify}
-                      agent={agents.migrationReview}
+                      agent={agents.planning}
                       timeoutMs={30 * 60_000}
                       heartbeatTimeoutMs={15 * 60_000}
                     >
@@ -1185,7 +1185,7 @@ export default smithers((ctx) => {
                         <Task
                           id="finalFix"
                           output={outputs.finalFix}
-                          agent={agents.migrationHard}
+                          agent={agents.implement}
                           timeoutMs={40 * 60_000}
                           heartbeatTimeoutMs={15 * 60_000}
                         >
@@ -1250,7 +1250,7 @@ export default smithers((ctx) => {
                 <Task
                   id="landedVerify"
                   output={outputs.landedVerify}
-                  agent={agents.migrationReview}
+                  agent={agents.planning}
                   timeoutMs={30 * 60_000}
                   heartbeatTimeoutMs={15 * 60_000}
                 >
