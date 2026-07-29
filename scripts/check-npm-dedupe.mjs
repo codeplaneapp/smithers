@@ -152,9 +152,18 @@ function main() {
     const install = spawnSync(
       "npm",
       ["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error"],
-      { cwd: tmp, stdio: "inherit", timeout: 10 * 60_000 },
+      {
+        cwd: tmp,
+        stdio: "inherit",
+        timeout: 10 * 60_000,
+        // npm is npm.cmd on Windows; .cmd files only spawn through a shell.
+        shell: process.platform === "win32",
+      },
     );
-    if (install.status !== 0) throw new Error("npm install --package-lock-only failed");
+    if (install.status !== 0) {
+      const detail = install.error?.message ? `: ${install.error.message}` : "";
+      throw new Error(`npm install --package-lock-only failed${detail}`);
+    }
     const lock = JSON.parse(readFileSync(join(tmp, "package-lock.json"), "utf8"));
     const lockPackages = lock.packages ?? {};
 
