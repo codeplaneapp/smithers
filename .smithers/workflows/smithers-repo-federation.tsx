@@ -844,7 +844,7 @@ function removalPRs(
   const prNumber = Number(prUrl.split("/").pop());
   prs.push({ lane: "smithers", repo: sourceRepo, prUrl, prNumber: Number.isFinite(prNumber) ? prNumber : null });
   for (const r of lanePushResults.filter((x) => isPrOnlyLane(x.lane) && x.prUrl)) {
-    prs.push({ lane: x.lane, repo: x.repo, prUrl: x.prUrl, prNumber: x.prNumber });
+    prs.push({ lane: r.lane, repo: r.repo, prUrl: r.prUrl, prNumber: r.prNumber });
   }
   return { prs, summary: `Opened/collected ${prs.length} removal/reference-update draft PR(s).` };
 }
