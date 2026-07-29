@@ -310,6 +310,23 @@ describe("gateway connection writer", () => {
     expect(connection.closes).toEqual([{ code: BACKPRESSURE_CLOSE_CODE, reason: "event backpressure" }]);
   });
 
+  test("sends one oversized response immediately when the socket is healthy", () => {
+    gateway = new Gateway({});
+    connection = makeFakeConnection({ bufferedAmount: 0 });
+
+    gateway.sendResponse(connection, {
+      type: "res",
+      id: "large-response",
+      ok: true,
+      payload: { chunk: "x".repeat(QUEUE_MAX_BYTES + 1) },
+    });
+
+    expect(connection.sent).toHaveLength(1);
+    expect(connection.sent[0].id).toBe("large-response");
+    expect(connection.eventWriter.queuedBytes).toBe(0);
+    expect(connection.closes).toEqual([]);
+  });
+
   test("overflowing the byte-bounded writer disconnects the connection (close 1013)", async () => {
     gateway = new Gateway({});
     // Permanently congested socket: drains never make progress.

@@ -302,8 +302,16 @@ describe("getNodeOutputRoute input boundaries", () => {
     expect(response.status).toBe("produced");
   });
 
+  test("engine-generated child runId is accepted", async () => {
+    const response = await invokeRoute({
+      runId: "parent-run:child:Subflow@node:0",
+      selectOutputRowImpl: async () => ({ value: "child output" }),
+    });
+    expect(response.status).toBe("produced");
+  });
+
   test("runId that could escape a path join still yields InvalidRunId", async () => {
-    for (const runId of ["..", ".hidden", "../etc/passwd", "a".repeat(65)]) {
+    for (const runId of ["..", ".hidden", "../etc/passwd", "a".repeat(65), `parent:child:${"n".repeat(244)}:0`]) {
       await expect(invokeRoute({ runId })).rejects.toMatchObject({
         code: "InvalidRunId",
       });

@@ -63,6 +63,20 @@ describe("whatHappenedRoute validation", () => {
     });
   });
 
+  test("accepts an engine-generated child runId", async () => {
+    const runId = "parent:child:review-lane:2";
+    const payload = await whatHappenedRoute(
+      makeParams({
+        runId,
+        adapter: makeAdapter({
+          run: runRow({ runId }),
+          nodes: [{ runId, nodeId: "task", iteration: 0, state: "finished", lastAttempt: 1, updatedAtMs: NOW }],
+        }),
+      }),
+    );
+    expect(payload.runId).toBe(runId);
+  });
+
   test("maps a missing run and node to RunNotFound / NodeNotFound", async () => {
     await expect(whatHappenedRoute(makeParams({ resolveRun: async () => null }))).rejects.toMatchObject({
       code: "RunNotFound",

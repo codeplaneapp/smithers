@@ -783,6 +783,31 @@ describe("getDevToolsSnapshotRoute", () => {
     sqlite.close();
   });
 
+  test("loads an engine-generated child runId", async () => {
+    const { adapter, sqlite } = createAdapter();
+    const runId = "parent:child:subflow-node:0";
+    await adapter.insertRun({
+      runId,
+      workflowName: "child-wf",
+      status: "running",
+      createdAtMs: now(),
+    });
+    await adapter.insertFrame({
+      runId,
+      frameNo: 0,
+      createdAtMs: now(),
+      xmlJson: xmlFrame("child-wf", "child"),
+      xmlHash: "hash-child",
+      mountedTaskIdsJson: "[]",
+      taskIndexJson: "[]",
+      note: "child",
+    });
+
+    const snapshot = await getDevToolsSnapshotRoute({ adapter, runId, frameNo: 0 });
+    expect(snapshot.runId).toBe(runId);
+    sqlite.close();
+  });
+
   test("validates frameNo boundaries", async () => {
     const { adapter, sqlite } = createAdapter();
     const runId = "run-bounds";

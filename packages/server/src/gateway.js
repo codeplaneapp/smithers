@@ -7334,10 +7334,6 @@ a { color: var(--brand); }</style>
   writeConnectionEventFrame(connection, writer, data, event) {
     const ws = connection.ws;
     const bytes = Buffer.byteLength(data, "utf8");
-    if (writer.queuedBytes + bytes > CONNECTION_EVENT_QUEUE_MAX_BYTES) {
-      this.disconnectConnectionForEventBackpressure(connection, writer, event);
-      return;
-    }
     const socketCongested =
       typeof ws.bufferedAmount === "number" && ws.bufferedAmount > CONNECTION_EVENT_WS_BUFFERED_HIGH_WATER_BYTES;
     if (writer.queue.length === 0 && !socketCongested) {
@@ -7349,6 +7345,10 @@ a { color: var(--brand); }</style>
       } else {
         this.recordMessageSent("ws", "event", { event });
       }
+      return;
+    }
+    if (writer.queuedBytes + bytes > CONNECTION_EVENT_QUEUE_MAX_BYTES) {
+      this.disconnectConnectionForEventBackpressure(connection, writer, event);
       return;
     }
     writer.queue.push({ data, bytes, event });

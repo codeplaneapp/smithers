@@ -58,7 +58,7 @@ function attemptRow(runId, nodeId, iteration = 0, extra = {}) {
 describe("getNodeDiffRoute", () => {
   test("valid request cache miss returns DiffBundle", async () => {
     const { sqlite, adapter } = createTestDb();
-    const runId = "run-diff-miss";
+    const runId = "run-diff-miss:child:subflow:0";
     const nodeId = "task:diff";
     await adapter.insertRun(runRow(runId, { vcsRevision: "base-ref" }));
     await adapter.insertNode(nodeRow(runId, nodeId));
