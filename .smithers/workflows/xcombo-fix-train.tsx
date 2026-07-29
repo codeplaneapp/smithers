@@ -387,11 +387,21 @@ async function setupTrain(key: string, baseRef: string): Promise<Setup> {
       }
     }
   }
-  // Bring in the red pinning tests exactly once (resume-safe: check on disk).
-  if (!existsSync(join(path, GROUPS[0].testFiles[0]))) {
+  // Bring in the red pinning tests exactly once. Commit ancestry is the
+  // resume-safe proof; file existence can be left behind by a conflicted
+  // cherry-pick.
+  let auditTestsApplied = false;
+  try {
+    git(["merge-base", "--is-ancestor", AUDIT_TESTS_COMMIT, "HEAD"], path);
+    auditTestsApplied = true;
+  } catch {}
+  if (!auditTestsApplied) {
     try {
       git(["cherry-pick", AUDIT_TESTS_COMMIT], path);
     } catch (error) {
+      try {
+        git(["cherry-pick", "--abort"], path);
+      } catch {}
       return {
         ready: false,
         trainPath: path,
