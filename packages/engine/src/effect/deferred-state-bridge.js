@@ -975,6 +975,7 @@ async function resolveWaitForEventTimeoutBridge(adapter, runId, desc, attemptNo,
 async function syncWaitForEventDurableDeferredFromDb(adapter, runId, desc, snapshot) {
   const expectedSignalSeq = snapshot.resolvedSignalSeq;
   let afterSeq = typeof expectedSignalSeq === "number" ? expectedSignalSeq - 1 : -1;
+  let hasResolvedPriorIteration = false;
   if (expectedSignalSeq === undefined) {
     const attempts = await Effect.runPromise(adapter.listAttemptsForRun(runId));
     for (const attempt of attempts) {
@@ -983,6 +984,7 @@ async function syncWaitForEventDurableDeferredFromDb(adapter, runId, desc, snaps
       if (!previous || previous.signalName !== snapshot.signalName) continue;
       if ((previous.correlationId ?? null) !== (snapshot.correlationId ?? null)) continue;
       if (typeof previous.resolvedSignalSeq === "number") {
+        hasResolvedPriorIteration = true;
         afterSeq = Math.max(afterSeq, previous.resolvedSignalSeq);
       }
     }
@@ -995,7 +997,9 @@ async function syncWaitForEventDurableDeferredFromDb(adapter, runId, desc, snaps
       // A seq cursor prevents replay across iterations of the same node. The
       // start-time floor also prevents a different WaitForEvent node from
       // consuming an older matching signal that predates this wait.
-      ...(expectedSignalSeq === undefined ? { receivedAfterMs: snapshot.startedAtMs } : {}),
+      ...(expectedSignalSeq === undefined && !hasResolvedPriorIteration
+        ? { receivedAfterMs: snapshot.startedAtMs }
+        : {}),
       limit: 1,
     }),
   );
