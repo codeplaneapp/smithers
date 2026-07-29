@@ -81,4 +81,50 @@ describe("WaitForEvent durable resync signal cursor", () => {
       limit: 1,
     });
   });
+
+  test("accepts a queued signal for the next iteration of the same wait", async () => {
+    let query;
+    const adapter = {
+      listAttemptsForRun: () =>
+        Effect.succeed([
+          {
+            nodeId: "utterance",
+            iteration: 0,
+            metaJson: JSON.stringify({
+              waitForEvent: {
+                signalName: "utterance",
+                correlationId: "utterance",
+                startedAtMs: 5_000,
+                resolvedSignalSeq: 7,
+              },
+            }),
+          },
+        ]),
+      listSignals: (_runId, nextQuery) => {
+        query = nextQuery;
+        return Effect.succeed([]);
+      },
+    };
+
+    await __deferredStateBridgeInternals.syncWaitForEventDurableDeferredFromDb(
+      adapter,
+      "run-1",
+      { nodeId: "utterance", iteration: 1 },
+      {
+        signalName: "utterance",
+        correlationId: "utterance",
+        onTimeout: "fail",
+        timeoutMs: null,
+        waitAsync: false,
+        startedAtMs: 10_000,
+      },
+    );
+
+    expect(query).toEqual({
+      signalName: "utterance",
+      correlationId: "utterance",
+      afterSeq: 7,
+      limit: 1,
+    });
+  });
 });

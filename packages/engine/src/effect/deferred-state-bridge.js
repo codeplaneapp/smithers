@@ -975,6 +975,7 @@ async function resolveWaitForEventTimeoutBridge(adapter, runId, desc, attemptNo,
 async function syncWaitForEventDurableDeferredFromDb(adapter, runId, desc, snapshot) {
   const expectedSignalSeq = snapshot.resolvedSignalSeq;
   let afterSeq = typeof expectedSignalSeq === "number" ? expectedSignalSeq - 1 : -1;
+  let hasResolvedPriorIteration = false;
   if (expectedSignalSeq === undefined) {
     const attempts = await Effect.runPromise(adapter.listAttemptsForRun(runId));
     for (const attempt of attempts) {
