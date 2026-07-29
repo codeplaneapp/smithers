@@ -51,8 +51,8 @@ import {
 
 /**
  * Stacked Ship: build a large mission as a linear jj stack of clean PRs with
- * non-blocking human review. One jj change per PR, amended in place; async
- * approvals; denials trigger rework rebases; every revision ships a
+ * lane-scoped human review. One jj change per PR, amended in place; blocking
+ * lane approvals; denials trigger rework rebases; every revision ships a
  * story-form HTML artifact. Spec: .smithers/specs/stacked-ship-workflow.md
  *
  * First mission: build Smithers Studio (the open-source local electrobun app)
@@ -384,22 +384,26 @@ export async function createLane(key: string, entry: PrPlanEntry, parentRev: str
   const workspaceDir = laneDirFor(key, entry.slug);
   const bookmark = bookmarkFor(key, entry.slug);
   try {
-    if (!existsSync(workspaceDir)) {
-      const steps = laneWorkspaceCommands({ slug: entry.slug, parentRev, bookmark, workspaceDir });
-      for (const step of steps) {
-        const cwd = step.cwd === "root" ? stackRoot : workspaceDir;
-        let attempt = 0;
-        for (;;) {
-          try {
-            execTool(step.argv[0], step.argv.slice(1), cwd);
-            break;
-          } catch (error) {
-            attempt += 1;
-            const text = String(error);
-            const lockRace = /index\.lock|packed-refs\.lock|lock/i.test(text);
-            if (!lockRace || attempt >= 4) throw error;
-            await new Promise((tick) => setTimeout(tick, 250 * attempt));
-          }
+    const steps = laneSetupCommands({
+      slug: entry.slug,
+      parentRev,
+      bookmark,
+      workspaceDir,
+      workspaceExists: existsSync(workspaceDir),
+    });
+    for (const step of steps) {
+      const cwd = step.cwd === "root" ? stackRoot : workspaceDir;
+      let attempt = 0;
+      for (;;) {
+        try {
+          execTool(step.argv[0], step.argv.slice(1), cwd);
+          break;
+        } catch (error) {
+          attempt += 1;
+          const text = String(error);
+          const lockRace = /index\.lock|packed-refs\.lock|lock/i.test(text);
+          if (!lockRace || attempt >= 4) throw error;
+          await new Promise((tick) => setTimeout(tick, 250 * attempt));
         }
       }
     }
@@ -422,6 +426,19 @@ export async function createLane(key: string, entry: PrPlanEntry, parentRev: str
       summary: "workspace failed: " + String(error).slice(0, 2_000),
     };
   }
+}
+
+export function laneSetupCommands(options: {
+  slug: string;
+  parentRev: string;
+  bookmark: string;
+  workspaceDir: string;
+  workspaceExists: boolean;
+}) {
+  const steps = laneWorkspaceCommands(options);
+  return options.workspaceExists
+    ? steps.filter((step) => !(step.argv[1] === "workspace" && step.argv[2] === "add"))
+    : steps;
 }
 
 function tryConflictCount(stackRoot: string, bookmark: string): number {
@@ -1184,7 +1201,6 @@ export default smithers((ctx) => {
                               </Task>
                               <Approval
                                 id={slug + ":approval"}
-                                async
                                 output={outputs.stshipDecision}
                                 onDeny="continue"
                                 request={{

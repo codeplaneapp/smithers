@@ -4,6 +4,7 @@ import { coverWorkflow, renderPrompt, renderWorkflow } from "smithers-orchestrat
 import workflow, {
   finalReviewPrompt,
   implementPrompt,
+  laneSetupCommands,
   parseInput,
   planPrompt,
   reworkPrompt,
@@ -340,7 +341,7 @@ describe("graph gating", () => {
     expect(taskIds(frame)).not.toContain("one:story");
   });
 
-  test("a green + self-approved lane mounts the review loop with an async approval", async () => {
+  test("a green + self-approved lane mounts the review loop with a blocking approval", async () => {
     const staged = mergeOutputs(
       { stshipSetup: [row("setup", SETUP_ROW)], stshipPlan: [row("plan", PLAN_OUT)] },
       greenLaneOutputs("one"),
@@ -353,10 +354,23 @@ describe("graph gating", () => {
     expect(ids).not.toContain("one:rework");
     const approval = task(frame, "one:approval") as AnyRow;
     expect(approval.needsApproval).toBe(true);
+    expect(approval.waitAsync).toBe(false);
     expect(approval.approvalOnDeny).toBe("continue");
     expect(approval.approvalMode).toBe("decision");
     expect(String((approval.meta as AnyRow)?.requestTitle)).toContain("PR 1/2");
     expect(String((approval.meta as AnyRow)?.requestSummary)).toContain("deny WITH A NOTE");
+  });
+
+  test("an existing lane still re-pins its bookmark without recreating the workspace", () => {
+    expect(
+      laneSetupCommands({
+        slug: "one",
+        parentRev: "stack/k/base",
+        bookmark: "stack/k/one",
+        workspaceDir: "/ws/pr-one",
+        workspaceExists: true,
+      }),
+    ).toEqual([{ argv: ["jj", "bookmark", "set", "stack/k/one", "-r", "@", "--allow-backwards"], cwd: "workspace" }]);
   });
 
   test("a denial mounts rework carrying the reviewer note", async () => {
@@ -444,7 +458,7 @@ const laneMocks = (slug: string) => ({
   [slug + ":artifact"]: artifactRow(slug),
 });
 
-describe("simulation (coverWorkflow drives async approvals in-band)", () => {
+describe("simulation (coverWorkflow drives approvals in-band)", () => {
   test("happy path: two lanes build, get approved, assemble, and summarize", async () => {
     const result = await coverWorkflow(workflow, {
       input: { laneConcurrency: 1 },
