@@ -62,20 +62,24 @@ describe("runListStatusFromRaw", () => {
     expect(runListStatusFromRaw("resumed")).toBe("running");
   });
 
-  test("maps terminal/waiting vocabularies onto the five list statuses", () => {
+  test("maps terminal/waiting vocabularies onto list statuses", () => {
     expect(runListStatusFromRaw("succeeded")).toBe("finished");
     expect(runListStatusFromRaw("completed")).toBe("finished");
+    expect(runListStatusFromRaw("continued")).toBe("finished");
     expect(runListStatusFromRaw("failed")).toBe("failed");
     expect(runListStatusFromRaw("errored")).toBe("failed");
     expect(runListStatusFromRaw("cancelled")).toBe("cancelled");
     expect(runListStatusFromRaw("canceled")).toBe("cancelled");
     expect(runListStatusFromRaw("waiting-approval")).toBe("waiting");
+    expect(runListStatusFromRaw("waiting-quota")).toBe("waiting");
+    expect(runListStatusFromRaw("waiting-new-compatible-state")).toBe("waiting");
+    expect(runListStatusFromRaw("paused")).toBe("waiting");
     expect(runListStatusFromRaw("blocked")).toBe("waiting");
   });
 
-  test("an unknown status defaults to running, not dropped", () => {
-    expect(runListStatusFromRaw("some-new-backend-status")).toBe("running");
-    expect(runListStatusFromRaw(undefined)).toBe("running");
+  test("an unknown status remains neutral instead of being counted as active", () => {
+    expect(runListStatusFromRaw("some-new-backend-status")).toBe("unknown");
+    expect(runListStatusFromRaw(undefined)).toBe("unknown");
   });
 });
 
@@ -95,6 +99,7 @@ describe("runStatusToNode / runStatusTone / runStatusLabel", () => {
     expect(runStatusToNode("finished")).toBe("ok");
     expect(runStatusToNode("failed")).toBe("failed");
     expect(runStatusToNode("cancelled")).toBe("queued");
+    expect(runStatusToNode("unknown")).toBe("queued");
   });
 
   test("cancelled tones as idle, not failed", () => {
@@ -221,8 +226,9 @@ describe("summarizeRuns", () => {
       run({ status: "finished" }),
       run({ status: "failed" }),
       run({ status: "cancelled" }),
+      run({ status: "unknown" }),
     ];
-    expect(summarizeRuns(runs)).toEqual({ total: 5, active: 2, done: 1, failed: 1, cancelled: 1 });
+    expect(summarizeRuns(runs)).toEqual({ total: 6, active: 2, done: 1, failed: 1, cancelled: 1, unknown: 1 });
   });
 });
 

@@ -20,7 +20,7 @@ import type { NodeStatus } from "./Run.ts";
 import type { StatusTone } from "./statusMeta.ts";
 
 /** A run's lifecycle as the list models it (a superset of NodeStatus framing). */
-export type RunListStatus = "running" | "waiting" | "finished" | "failed" | "cancelled";
+export type RunListStatus = "running" | "waiting" | "finished" | "failed" | "cancelled" | "unknown";
 
 /** The status filter: every RunListStatus plus the "all" pass-through. */
 export type RunStatusFilter = "all" | RunListStatus;
@@ -107,10 +107,8 @@ export function shortRunId(runId: string): string {
 
 /**
  * Collapse a backend's richer lifecycle vocabulary (gateway `listRuns`
- * statuses) onto the five `RunListStatus` tones the list renders. Preserves
- * the `cancelled`/`finished`/`waiting` distinctions the grouped sections rely
- * on. Unknown → `running` so an in-flight row still surfaces in the ACTIVE
- * group rather than vanishing.
+ * statuses) onto the list's lifecycle tones. Unknown wire values stay neutral
+ * instead of being counted as active execution.
  */
 export function runListStatusFromRaw(status: string | undefined): RunListStatus {
   switch (status) {
@@ -122,6 +120,7 @@ export function runListStatusFromRaw(status: string | undefined): RunListStatus 
     case "succeeded":
     case "finished":
     case "completed":
+    case "continued":
     case "ok":
       return "finished";
     case "failed":
@@ -130,14 +129,12 @@ export function runListStatusFromRaw(status: string | undefined): RunListStatus 
     case "cancelled":
     case "canceled":
       return "cancelled";
-    case "waiting-approval":
-    case "waiting-event":
-    case "waiting-timer":
     case "waiting":
     case "blocked":
+    case "paused":
       return "waiting";
     default:
-      return "running";
+      return status?.startsWith("waiting-") ? "waiting" : "unknown";
   }
 }
 
@@ -163,6 +160,8 @@ export function runStatusToNode(status: RunListStatus): NodeStatus {
       return "failed";
     case "cancelled":
       return "queued";
+    case "unknown":
+      return "queued";
   }
 }
 
@@ -178,6 +177,8 @@ export function runStatusTone(status: RunListStatus): StatusTone {
     case "failed":
       return "failed";
     case "cancelled":
+      return "idle";
+    case "unknown":
       return "idle";
   }
 }
@@ -195,6 +196,8 @@ export function runStatusLabel(status: RunListStatus): string {
       return "failed";
     case "cancelled":
       return "cancelled";
+    case "unknown":
+      return "unknown";
   }
 }
 
@@ -287,7 +290,7 @@ export function distinctWorkflows(runs: RunSummary[]): string[] {
 }
 
 /** The grouped sections, in fixed render order (RunsView.runsList). */
-export type RunGroupKey = "active" | "completed" | "failed" | "cancelled";
+export type RunGroupKey = "active" | "completed" | "failed" | "cancelled" | "unknown";
 
 export type RunGroup = { key: RunGroupKey; label: string; runs: RunSummary[] };
 
@@ -296,10 +299,11 @@ const GROUP_ORDER: { key: RunGroupKey; label: string; admit: (s: RunListStatus) 
   { key: "completed", label: "COMPLETED", admit: (s) => s === "finished" },
   { key: "failed", label: "FAILED", admit: (s) => s === "failed" },
   { key: "cancelled", label: "CANCELLED", admit: (s) => s === "cancelled" },
+  { key: "unknown", label: "UNKNOWN", admit: (s) => s === "unknown" },
 ];
 
 /**
- * Partition the (already filtered) runs into the four fixed sections, dropping
+ * Partition the (already filtered) runs into the fixed sections, dropping
  * any empty section so the view can map straight over the result.
  */
 export function groupRuns(runs: RunSummary[]): RunGroup[] {
@@ -319,6 +323,7 @@ export type RunsSummary = {
   done: number;
   failed: number;
   cancelled: number;
+  unknown: number;
 };
 
 export function summarizeRuns(runs: RunSummary[]): RunsSummary {
@@ -326,13 +331,15 @@ export function summarizeRuns(runs: RunSummary[]): RunsSummary {
   let done = 0;
   let failed = 0;
   let cancelled = 0;
+  let unknown = 0;
   for (const run of runs) {
     if (run.status === "running" || run.status === "waiting") active += 1;
     else if (run.status === "finished") done += 1;
     else if (run.status === "failed") failed += 1;
-    else cancelled += 1;
+    else if (run.status === "cancelled") cancelled += 1;
+    else unknown += 1;
   }
-  return { total: runs.length, active, done, failed, cancelled };
+  return { total: runs.length, active, done, failed, cancelled, unknown };
 }
 
 /** True for terminal runs — only terminal rows omit Rerun; the list shows
