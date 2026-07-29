@@ -1004,10 +1004,8 @@ export default smithers((ctx) => {
                     const extractResult = extractByLane.get(lane);
                     const decoupleResult = decoupleByLane.get(lane);
                     const docsResult = docsByLane.get(lane);
-                    const verifyRows = verifyByLane.get(lane) ?? [];
-                    const lastVerify = verifyRows.at(-1);
-                    const fixRows = fixByLane.get(lane) ?? [];
-                    const lastFix = fixRows.at(-1);
+                    const lastVerify = verifyByLane.get(lane);
+                    const lastFix = fixByLane.get(lane);
                     const verifyPassed = lastVerify?.passed === true;
                     const branch = laneBranch(lane);
                     const prOnly = isPrOnlyLane(lane);
