@@ -9,7 +9,7 @@ import { agents, providers } from "../agents";
 
 // All release content is produced with Claude Fable (2026-07-25 policy); Opus
 // is the fallback only for Fable safeguard reroutes or unavailability.
-const contentAgent = [providers.claude, providers.claudeOpus];
+const contentAgent = [providers.claude, providers.claudeOpus, providers.codex];
 import AnalyzeReleasePrompt from "../prompts/release-content/analyze-release.mdx";
 import DraftBlogPrompt from "../prompts/release-content/draft-blog.mdx";
 import DraftBlogOutlinePrompt from "../prompts/release-content/draft-blog-outline.mdx";
