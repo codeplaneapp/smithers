@@ -5,11 +5,13 @@ import { delimiter, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { Database } from "bun:sqlite";
 import { buildOneshotWorkflow } from "../src/oneshot/buildOneshotWorkflow.js";
 import { buildOneshotChildArgs } from "../src/oneshot/buildOneshotChildArgs.js";
 import { loadOneshotConfig } from "../src/oneshot/loadOneshotConfig.js";
 import { saveOneshotConfig } from "../src/oneshot/saveOneshotConfig.js";
 import { resolveOneshotChain } from "../src/oneshot/resolveOneshotChain.js";
+import { classifyOneshotGoal } from "../src/oneshot/classifyOneshotGoal.js";
 import { rewriteOneshotBooleanValues } from "../src/oneshot/rewriteOneshotBooleanValues.js";
 import {
   cleanStatusLine,
@@ -18,7 +20,7 @@ import {
 } from "../src/oneshot/startOneshotStatusUpdater.js";
 import { createOneshotMonitorControl } from "../src/oneshot/monitor-control.js";
 import { oneshotCta } from "../src/oneshot/oneshotCta.js";
-import { buildBuiltinRelaunch, buildBuiltinResumeConfig } from "../src/resume-target.js";
+import { buildBuiltinRelaunch, buildBuiltinResumeConfig, parseBuiltinResume } from "../src/resume-target.js";
 import { bundleGatewayUiEntry } from "../../../packages/server/src/gatewayUi/bundle.js";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
@@ -26,7 +28,12 @@ import { createTestDb } from "../../../packages/smithers/tests/helpers.js";
 import { ddl, schema } from "../../../packages/smithers/tests/schema.js";
 import { openDurableSqliteDatabase } from "@smithers-orchestrator/db";
 import { SOTA_SLOTS } from "../src/sota-models.generated.js";
-import { createExecutableDir, writeExecutable } from "../../../packages/smithers/tests/e2e-helpers.js";
+import {
+  createExecutableDir,
+  prependPath,
+  writeExecutable,
+  writeFakeCodexBinary,
+} from "../../../packages/smithers/tests/e2e-helpers.js";
 import { detectAvailableAgents } from "../src/agent-detection.js";
 import { selectOneshotAgents } from "../src/oneshot/selectOneshotAgents.js";
 
@@ -115,6 +122,85 @@ describe("oneshot model chain", () => {
     expect(
       resolveOneshotChain(all, { model: "future-model", agent: "kimi", env: { SMITHERS_CODEX_PAUSED: "0" } })[0],
     ).toEqual({ engine: "kimi", model: "future-model" });
+    // kimi-for-coding is OpenCode's provider, not the Kimi CLI.
+    expect(resolveOneshotChain(all, { model: "kimi-for-coding/k3", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({
+      engine: "opencode",
+      model: "kimi-for-coding/k3",
+    });
+  });
+});
+
+describe("oneshot task-aware routing", () => {
+  const every = ["codex", "kimi", "claude", "opencode", "pi"].map((id) => availability(id));
+  const env = { SMITHERS_CODEX_PAUSED: "0" };
+
+  test("classifies UI-flavored goals, everything else general", () => {
+    expect(classifyOneshotGoal("build a responsive landing page with a hero animation")).toBe("ui");
+    expect(classifyOneshotGoal("make the settings page better")).toBe("ui");
+    expect(classifyOneshotGoal("add a dark mode toggle to the dashboard")).toBe("ui");
+    expect(classifyOneshotGoal("migrate the billing schema and backfill rows")).toBe("general");
+    expect(classifyOneshotGoal("rename getCwd across the repo and keep tests green")).toBe("general");
+    expect(classifyOneshotGoal("paginate the users endpoint")).toBe("general");
+    expect(classifyOneshotGoal(undefined)).toBe("general");
+  });
+
+  test("UI goals lead with opencode kimi, then kimi through pi, then the Kimi CLI", () => {
+    expect(resolveOneshotChain(every, { env, goal: "build a responsive landing page" })).toEqual([
+      { engine: "opencode", model: "kimi-for-coding/k3" },
+      { engine: "pi", provider: "kimi-coding", model: "k3" },
+      { engine: "kimi", model: "kimi-code/k3" },
+      { engine: "claude", model: "claude-opus-5" },
+      { engine: "claude", model: "claude-fable-5" },
+      { engine: "codex", model: "gpt-5.6-sol" },
+    ]);
+  });
+
+  test("backend goals keep the Opus-led default chain", () => {
+    expect(resolveOneshotChain(every, { env, goal: "backfill billing rows and fix the migration tests" })).toEqual([
+      { engine: "claude", model: "claude-opus-5" },
+      { engine: "codex", model: "gpt-5.6-sol" },
+      { engine: "kimi", model: "kimi-code/k3" },
+      { engine: "claude", model: "claude-fable-5" },
+      { engine: "pi", provider: "kimi-coding", model: "k3" },
+    ]);
+  });
+
+  test("UI goals fall back to Opus then Fable when no kimi seat is usable", () => {
+    const noKimi = [availability("claude"), availability("codex")];
+    expect(resolveOneshotChain(noKimi, { env, goal: "redesign the dashboard css" })).toEqual([
+      { engine: "claude", model: "claude-opus-5" },
+      { engine: "claude", model: "claude-fable-5" },
+      { engine: "codex", model: "gpt-5.6-sol" },
+    ]);
+  });
+
+  test("pi alone carries a UI oneshot through the kimi-coding provider", () => {
+    expect(resolveOneshotChain([availability("pi")], { env, goal: "add a modal component" })).toEqual([
+      { engine: "pi", provider: "kimi-coding", model: "k3" },
+    ]);
+  });
+
+  test("explicit model or agent overrides classification", () => {
+    expect(resolveOneshotChain(every, { env, goal: "build a landing page", model: "opus" })[0]).toEqual({
+      engine: "claude",
+      model: "claude-opus-5",
+    });
+    expect(resolveOneshotChain(every, { env, goal: "backfill rows", agent: "pi" })[0]).toEqual({
+      engine: "pi",
+      provider: "kimi-coding",
+      model: "k3",
+    });
+  });
+
+  test("opencode kimi and pi kimi specs construct matching agents", async () => {
+    const home = temp("smithers-oneshot-ui-agents-");
+    const isolated = { ...env, HOME: home, SMITHERS_HOME: join(home, ".smithers") };
+    const selected = await selectOneshotAgents(every, { cwd: home, env: isolated, goal: "build a landing page" });
+    expect(selected.chain[0]).toEqual({ engine: "opencode", model: "kimi-for-coding/k3" });
+    // A provider-qualified id passes through OpenCode without an anthropic/ prefix.
+    expect(selected.agents[0].opts.model).toBe("kimi-for-coding/k3");
+    expect(selected.agents[1].opts.provider).toBe("kimi-coding");
+    expect(selected.agents[1].opts.model).toBe("k3");
   });
 });
 
@@ -722,8 +808,9 @@ describe("oneshot monitor controls", () => {
       let cancelled = false;
       const control = createOneshotMonitorControl({
         cliEntry: "/cli/index.js",
-        cancelRun: async () => {
+        cancelRun: async (adapter, runId) => {
           cancelled = true;
+          await adapter.updateRun(runId, { status: "cancelled" });
         },
         spawnImpl: (command, args, options) => {
           launches.push({ command, args, options });
@@ -743,6 +830,108 @@ describe("oneshot monitor controls", () => {
       const eventTypes = (await fixture.adapter.listEvents("control-run", -1, 100)).map((event) => event.type);
       expect(eventTypes).toContain("OneshotRestartRequested");
       expect(eventTypes).toContain("OneshotRestartLaunched");
+      await control.dispose();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test("restart waits for the prior owner and terminates it before launching", async () => {
+    const fixture = controlDb();
+    try {
+      await fixture.seed();
+      await fixture.adapter.updateRun("control-run", { runtimeOwnerId: "pid:4242" });
+      const order = [];
+      let ownerAlive = true;
+      const control = createOneshotMonitorControl({
+        cliEntry: "/cli/index.js",
+        cancelRun: async () => {
+          order.push("cancel");
+        },
+        restartReleaseTimeoutMs: 5,
+        restartReleasePollMs: 1,
+        ownerAlive: () => ownerAlive,
+        terminateOwner: async (pid) => {
+          expect(pid).toBe(4242);
+          order.push("terminate");
+          ownerAlive = false;
+          return { terminated: true };
+        },
+        spawnImpl: () => {
+          order.push("launch");
+          const child = new EventEmitter();
+          child.pid = 43;
+          child.unref = () => {};
+          queueMicrotask(() => child.emit("spawn"));
+          return child;
+        },
+      });
+
+      await control.restart({ runId: "control-run", adapter: fixture.adapter });
+      expect(order).toEqual(["cancel", "terminate", "launch"]);
+      await control.dispose();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test("times out a hung Claude steering process and resumes the parked run", async () => {
+    const fixture = controlDb();
+    try {
+      await fixture.seed();
+      const candidate = {
+        runId: "control-run",
+        nodeId: "implement",
+        iteration: 0,
+        attempt: 1,
+        engine: "claude-code",
+        mode: "native-cli",
+        resume: "session-1",
+        cwd: "/tmp/work",
+      };
+      const launches = [];
+      const terminated = [];
+      const control = createOneshotMonitorControl({
+        cliEntry: "/cli/index.js",
+        cancelRun: async () => {},
+        resolveCandidate: async () => candidate,
+        waitForCandidate: async () => candidate,
+        steerTimeoutMs: 5,
+        terminateOwner: async (pid) => {
+          terminated.push(pid);
+          return { terminated: true };
+        },
+        spawnImpl: (command, args) => {
+          launches.push({ command, args });
+          const child = new EventEmitter();
+          child.pid = command === "claude" ? 99 : 100;
+          child.unref = () => {};
+          queueMicrotask(() => child.emit("spawn"));
+          return child;
+        },
+      });
+
+      const result = await control.steer({
+        runId: "control-run",
+        message: "Try a different approach",
+        adapter: fixture.adapter,
+      });
+      expect(result.status).toBe("queued");
+      let failure;
+      for (let index = 0; index < 100 && !failure; index += 1) {
+        await Bun.sleep(5);
+        failure = (await fixture.adapter.listEvents("control-run", -1, 100)).find(
+          (event) => event.type === "OneshotSteerFailed",
+        );
+      }
+      expect(terminated).toEqual([99]);
+      expect(JSON.parse(failure.payloadJson)).toMatchObject({
+        delivery: "failed",
+        resumed: true,
+        error: expect.stringContaining("timed out"),
+      });
+      expect(launches).toHaveLength(2);
+      expect(launches[1].args).toEqual(expect.arrayContaining(["--run-id", "control-run", "--resume", "true"]));
       await control.dispose();
     } finally {
       fixture.cleanup();
@@ -821,6 +1010,71 @@ test("detached child re-invokes oneshot and forwards launch flags", () => {
     "launch context",
   ]);
 });
+
+test("oneshot persists goal-file contents, not the transient path, for builtin resume", () => {
+  const workspace = temp("smithers-oneshot-goal-file-resume-");
+  const binDir = createExecutableDir();
+  writeFakeCodexBinary(binDir);
+  const codexHome = join(workspace, ".codex");
+  mkdirSync(codexHome, { recursive: true });
+  writeFileSync(join(codexHome, "auth.json"), JSON.stringify({ tokens: { access_token: "test" } }));
+  const goalFile = join(workspace, "transient-goal.txt");
+  const goal = "Fix the transient goal-file resume regression.";
+  writeFileSync(goalFile, goal);
+  const runId = "oneshot-goal-file-resume";
+  const result = spawnSync(
+    process.execPath,
+    [
+      "run",
+      cliEntry,
+      "oneshot",
+      "--goal-file",
+      goalFile,
+      "--cwd",
+      workspace,
+      "--detach",
+      "false",
+      "--open",
+      "false",
+      "--review",
+      "off",
+      "--preflight",
+      "off",
+      "--agent",
+      "codex",
+      "--run-id",
+      runId,
+      "--format",
+      "json",
+    ],
+    {
+      cwd: workspace,
+      env: prependPath(binDir, {
+        ...process.env,
+        CODEX_HOME: codexHome,
+        OPENAI_API_KEY: "",
+        SMITHERS_HOME: join(workspace, ".smithers-home"),
+        SMITHERS_NO_SKILL_REFRESH: "1",
+      }),
+      encoding: "utf8",
+      timeout: 90_000,
+    },
+  );
+  expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+  rmSync(goalFile);
+
+  const sqlite = new Database(join(workspace, "smithers.db"), { readonly: true });
+  try {
+    const row = sqlite.query("SELECT config_json FROM _smithers_runs WHERE run_id = ?").get(runId);
+    const resume = parseBuiltinResume(row?.config_json);
+    expect(resume).not.toBeNull();
+    expect(resume?.args[0]).toBe(goal);
+    expect(resume?.args).not.toContain("--goal-file");
+    expect(buildBuiltinRelaunch(resume, { runId, resume: true }).args).toContain(goal);
+  } finally {
+    sqlite.close();
+  }
+}, 120_000);
 
 test("oneshot accepts explicit boolean values for default-true flags", () => {
   expect(rewriteOneshotBooleanValues(["oneshot", "goal", "--detach", "false", "--open=true"])).toEqual([

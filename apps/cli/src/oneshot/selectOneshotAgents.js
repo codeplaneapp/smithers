@@ -7,8 +7,9 @@ const ACCOUNT_PROVIDERS = {
   kimi: new Set(["kimi"]),
 };
 
-/** @param {string} engine @param {string} model @param {string} cwd @param {{ configDir?: string; apiKey?: string } | undefined} account */
-async function createAgent(engine, model, cwd, account) {
+/** @param {{ engine: string; model: string; provider?: string }} spec @param {string} cwd @param {{ configDir?: string; apiKey?: string } | undefined} account */
+async function createAgent(spec, cwd, account) {
+  const { engine, model } = spec;
   if (engine === "codex") {
     const { CodexAgent } = await import("@smithers-orchestrator/agents/CodexAgent");
     return new CodexAgent({
@@ -24,9 +25,15 @@ async function createAgent(engine, model, cwd, account) {
     const { KimiAgent } = await import("@smithers-orchestrator/agents/KimiAgent");
     return new KimiAgent({ cwd, model, ...(account?.configDir ? { configDir: account.configDir } : {}) });
   }
+  if (engine === "pi") {
+    const { PiAgent } = await import("@smithers-orchestrator/agents/PiAgent");
+    return new PiAgent({ cwd, ...(spec.provider ? { provider: spec.provider } : {}), model });
+  }
   if (engine === "opencode") {
     const { OpenCodeAgent } = await import("@smithers-orchestrator/agents/OpenCodeAgent");
-    return new OpenCodeAgent({ cwd, model: model.startsWith("anthropic/") ? model : `anthropic/${model}` });
+    // Provider-qualified ids (anthropic/claude-opus-5, kimi-for-coding/k3) pass
+    // through; a bare Anthropic id gets the anthropic/ prefix.
+    return new OpenCodeAgent({ cwd, model: model.includes("/") ? model : `anthropic/${model}` });
   }
   const { ClaudeCodeAgent } = await import("@smithers-orchestrator/agents/ClaudeCodeAgent");
   return new ClaudeCodeAgent({
@@ -39,7 +46,7 @@ async function createAgent(engine, model, cwd, account) {
 
 /**
  * @param {import("../AgentAvailability.ts").AgentAvailability[]} detections
- * @param {{ cwd: string; model?: string; agent?: string; env?: NodeJS.ProcessEnv }} options
+ * @param {{ cwd: string; model?: string; agent?: string; goal?: string; env?: NodeJS.ProcessEnv }} options
  */
 export async function selectOneshotAgents(detections, options) {
   const specs = resolveOneshotChain(detections, options);
@@ -49,12 +56,10 @@ export async function selectOneshotAgents(detections, options) {
     const providers = ACCOUNT_PROVIDERS[engine];
     return accounts.find((account) => labels.includes(account.label) && providers?.has(account.provider));
   };
-  const agents = await Promise.all(
-    specs.map((spec) => createAgent(spec.engine, spec.model, options.cwd, accountFor(spec.engine))),
-  );
+  const agents = await Promise.all(specs.map((spec) => createAgent(spec, options.cwd, accountFor(spec.engine))));
   const reviewSpecs = specs.length > 1 ? [...specs.slice(1), specs[0]] : specs;
   const reviewAgents = await Promise.all(
-    reviewSpecs.map((spec) => createAgent(spec.engine, spec.model, options.cwd, accountFor(spec.engine))),
+    reviewSpecs.map((spec) => createAgent(spec, options.cwd, accountFor(spec.engine))),
   );
   return { agents, reviewAgents, chain: specs };
 }

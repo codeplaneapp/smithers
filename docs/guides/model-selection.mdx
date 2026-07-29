@@ -29,6 +29,15 @@ or Terra: they run on Claude, Opus 5 at medium reasoning effort by default,
 with Fable 5 for planning. See
 [SOTA role defaults](/reference/sota-models#role-defaults).
 
+`smithers oneshot` applies one refinement on top of the seat table (registry
+v8): it routes by task shape. A UI-flavored goal leads with Kimi K3, reached
+through OpenCode (`kimi-for-coding/k3`), then the Pi CLI
+(`pi --provider kimi-coding --model k3`), then the Kimi CLI (`kimi-code/k3`),
+with Opus 5 and Fable 5 as the no-kimi fallback; every other goal, tedious
+backend work included, leads with Opus 5. Every rung is availability-gated, so
+oneshot only ever picks an agent that is usable on the machine. See
+[Oneshot task routing](/reference/sota-models#oneshot-task-routing).
+
 When Codex is unavailable, Smithers falls back to detected Claude, Kimi,
 Gemini, or other compatible adapters. Explicit provider-specific workflows
 remain supported. The [SOTA model registry](/reference/sota-models) lists the

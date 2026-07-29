@@ -32,8 +32,12 @@ Use the lightest route that preserves the durability the task needs:
   reviewer, and a live chat/diff UI — no workflow file to author. One strong
   agent routinely finishes repo-wide, hours-long goals of up to roughly 300k
   tokens in a single run; the worker manages its own context, so "it will
-  not fit in one context window" is never a reason to author a workflow.
-  Prefer codex sol, then kimi, then claude fable or opus.
+   not fit in one context window" is never a reason to author a workflow.
+   Oneshot picks the model from the goal: a UI-flavored ask leads with Kimi
+   K3 (opencode's `kimi-for-coding/k3`, then kimi through pi
+   (`pi --provider kimi-coding --model k3`), then the kimi CLI, backed by
+   claude opus then fable); every other ask leads with claude opus. Every
+   rung is availability-gated.
 4. **Genuinely multi-goal work** (ordered phases, human approvals, loops with
   verified exits, several agents with different tools, schedules, reuse):
   a full workflow.

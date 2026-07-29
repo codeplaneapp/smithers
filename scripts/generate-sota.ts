@@ -76,6 +76,7 @@ type SotaRegistry = {
     intro: string;
     workflowDefault: string;
     fableGuidance: string;
+    oneshot: string;
     situations: Array<{ start: string; when: string; escalate: string }>;
   };
   models: SotaModel[];
@@ -127,6 +128,7 @@ export function validateRegistry(registry: SotaRegistry): void {
     intro: registry.routing.intro,
     workflowDefault: registry.routing.workflowDefault,
     fableGuidance: registry.routing.fableGuidance,
+    oneshot: registry.routing.oneshot,
   })) {
     if (typeof text !== "string" || !text.trim()) throw new Error(`routing ${name} must be non-empty text`);
   }
@@ -351,6 +353,10 @@ function renderMdx(registry: SotaRegistry, benchmarks: Benchmark[]): string {
   lines.push(`const fableFallback = new ClaudeCodeAgent({ model: "${routingId("fable")}" });`);
   lines.push("const smartFallbackChain = [reviewer, fableFallback];");
   lines.push("```");
+  lines.push("");
+  lines.push("### Oneshot task routing");
+  lines.push("");
+  lines.push(registry.routing.oneshot);
   lines.push("");
   lines.push(
     `${registry.routing.fableGuidance} See [Anthropic's Fable 5 announcement](https://www.anthropic.com/news/claude-fable-5-mythos-5) and [July redeployment update](https://www.anthropic.com/news/redeploying-fable-5).`,

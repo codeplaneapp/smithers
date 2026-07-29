@@ -6,7 +6,7 @@ lightest correct route.
 | ask | required route |
 | --- | --- |
 | Most-trivial edit | Direct by default; oneshot with opus or terra when stored preference says oneshot |
-| Clear single-agent task | `smithers oneshot`, with Sol, Kimi, Fable, Opus preference order |
+| Clear single-agent task | `smithers oneshot`, task-shaped: UI goals lead with kimi (opencode, then pi, then the kimi CLI, backed by claude opus or fable), other goals lead with claude opus |
 | Large single-goal task (repo-wide docs audit, dependency upgrade, CI-green, library migration, review burndown) | `smithers oneshot`; authoring a workflow is overengineering |
 | Ambiguous task | Clarify before launching |
 | Multi-stage or approval-gated task | Full Smithers workflow |

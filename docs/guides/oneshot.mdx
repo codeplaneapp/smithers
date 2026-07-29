@@ -30,9 +30,11 @@ Route work in three tiers:
    strong agent routinely finishes hours-long goals in a single oneshot run of
    up to roughly 300k tokens, so a large goal is not a reason to leave this
    tier. The worker manages its own context across the run, so "it will not
-   fit in one context window" is not a reason either. When explaining a
-   routing decision, name the seat order (codex sol, then kimi, then claude
-   fable or opus) and which seat you picked.
+    fit in one context window" is not a reason either. When explaining a
+    routing decision, name the task shape and the seat it routes to (UI goals
+    lead with kimi: opencode, then pi, then the kimi CLI, backed by claude
+    opus or fable; every other goal leads with claude opus) and which seat
+    you picked.
 3. **Genuinely multi-goal work** (human approval gates, staged phases that
    need different agents or models, parallel fan-out, durable loops, or a
    reusable procedure): build and run a real [workflow](/cli/quickstart).
@@ -69,25 +71,35 @@ find out, and never a provisional plan under an assumed answer.
 
 ## Agents and models
 
-With no `--model`, oneshot's auto chain follows the registry: Claude Opus 5
-first (the registry v7 default implementer), then Codex Sol, then Kimi K3,
-then Fable, unless `--agent` pins one. That is the fallback default, not the
-routing doctrine: when you route tier-2 work yourself, explicitly prefer
-codex sol (`--model sol`) when it is usable, then kimi, then claude fable or
-opus, exactly as the tiers above say. The claude seats fall back to opencode
-when the Claude CLI is unavailable, and the kimi seat runs Kimi K3
-(`kimi-code/k3`, 1M-token context). `--model` accepts a slot (`sol`,
-`terra`, `luna`, `kimi`, `fable`, `opus`, `sonnet`) or a canonical model id;
-the default `auto` follows the seat's registry slot, with review on Sol at
-high reasoning effort.
+With no `--model` or `--agent`, oneshot classifies the goal and routes by task
+shape (registry v8). A UI-flavored goal (interface, page, component, styling,
+layout, responsive, animation, theme, dashboard, and similar keywords) leads
+with Kimi K3: OpenCode's `kimi-for-coding/k3` seat first, then kimi through
+the Pi CLI (`pi --provider kimi-coding --model k3`), then the Kimi CLI's
+`kimi-code/k3`. When no kimi seat is usable, the UI chain falls back to Claude
+Opus 5, then Fable 5; Codex Sol is only ever the last-resort UI rung. Every
+other goal, including tedious backend work (migrations, backfills, renames,
+test burndowns), runs the default chain: Claude Opus 5 first (the default
+implementer), then Codex Sol, then Kimi K3, then Fable, with pi's kimi-coding
+seat closing the chain.
 
-Run `bunx smithers-orchestrator oneshot --status` before first use. It prints
-the usable agents, the resolved model chain, and the stored preferences as
-JSON; when no usable agent is detected, oneshot is unavailable and work should
-go through the direct or workflow route instead. Oneshot being unavailable
-never means the orchestrating agent is unavailable: a simple task still gets
-done directly, a multi-goal one still gets a workflow, and "no routing path
-exists" is never the answer.
+Every rung is availability-gated: oneshot selects only from the agents
+detected usable on the machine, the claude seats fall back to opencode when
+the Claude CLI is unavailable, and the kimi seats all run Kimi K3 (1M-token
+context). An explicit `--model` (a slot: `sol`, `terra`, `luna`, `kimi`,
+`fable`, `opus`, `sonnet`; or a canonical model id) or `--agent` (`codex`,
+`kimi`, `claude-code`, `opencode`, `pi`) always overrides classification; the
+default `auto` follows the task shape, with review on Sol at high reasoning
+effort.
+
+Run `bunx smithers-orchestrator oneshot --status "<goal>"` before first use.
+It prints the usable agents, the goal's classified `taskType`, the resolved
+model chain, and the stored preferences as JSON; when no usable agent is
+detected, oneshot is unavailable and work should go through the direct or
+workflow route instead. Oneshot being unavailable never means the
+orchestrating agent is unavailable: a simple task still gets done directly, a
+multi-goal one still gets a workflow, and "no routing path exists" is never
+the answer.
 
 ## Review and trivial preferences
 

@@ -4,9 +4,9 @@
 // default. Code refers to stable slots (codexSol, codexTerra, codex, ...) so a model
 // bump is a registry edit, not a code change. See docs/reference/sota-models.mdx.
 
-export const SOTA_REGISTRY_VERSION = 7;
+export const SOTA_REGISTRY_VERSION = 8;
 
-export const SOTA_REGISTRY_UPDATED_AT = "2026-07-24";
+export const SOTA_REGISTRY_UPDATED_AT = "2026-07-29";
 
 /** Stable handle → current best model id for that seat. */
 export const SOTA_SLOTS = Object.freeze({

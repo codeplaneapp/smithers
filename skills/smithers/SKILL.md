@@ -799,16 +799,24 @@ Route work in three tiers:
    those are the ONLY two slots allowed for trivial oneshot (never sol, luna,
    kimi, or any other tier), and when explaining a trivial route, do not list
    any other model as an option.
-2. For a clear single-goal ask, run `smithers oneshot`. Prefer codex sol, then
-   kimi, then claude fable or opus. Opus or terra is fine for the easy end of
+2. For a clear single-goal ask, run `smithers oneshot`. Oneshot picks the
+   model from the goal itself: a UI-flavored ask (page, component, styling,
+   layout, animation, theme, dashboard, and similar) leads with Kimi K3 -
+   opencode's `kimi-for-coding/k3` seat first, then kimi through pi
+   (`pi --provider kimi-coding --model k3`), then the kimi CLI, backed by
+   claude opus then fable - and every other ask, including tedious backend
+   work, leads with claude opus. Opus or terra is fine for the easy end of
    this tier. This tier is much bigger than it sounds: one strong agent
    routinely finishes repo-wide, hours-long goals in a single oneshot run of up
    to roughly 300k tokens, so "large" is never a reason to leave this tier. The
    worker manages its own context across the run, so "it will not fit in one
-   context window / one prompt" is not a reason either. When you explain or
-   announce a routing decision in this tier, name the seat order you will use
-   (codex sol, then kimi, then claude fable or opus) and which one you picked;
-   that order applies to this tier only, never to trivial asks.
+   context window / one prompt" is not a reason either. Every rung is
+   availability-gated: oneshot selects only from the agents actually usable on
+   the machine. When you explain or announce a routing decision in this tier,
+   name the task shape and the seat it routes to (UI: opencode kimi, then pi
+   kimi, then kimi CLI, then claude opus or fable; everything else: claude
+   opus) and which one you picked; that doctrine applies to this tier only,
+   never to trivial asks.
 3. For work that is genuinely multi-goal in shape - human approval gates,
    staged phases that need different agents or models, parallel fan-out across
    worktrees, durable loops with caps, or a procedure you will reuse - build
@@ -839,8 +847,10 @@ your own assumptions or an exploratory plan for what the user actually wants.
 Infer the tier from the prompt, but honor these explicit overrides: "oneshot" forces oneshot, "oneshot with review" adds `--review on`,
 and "oneshot without review" adds `--review off`.
 
-Call `smithers oneshot --status` before first use. If it reports no usable agent
-among claude, codex, kimi, and opencode, do not offer or attempt oneshot. Use the
+Call `smithers oneshot --status "<goal>"` before first use. It reports the
+goal's classified `taskType` and the resolved chain. If it reports no usable
+agent among claude, codex, kimi, opencode, and pi, do not offer or attempt
+oneshot. Use the
 normal direct or workflow route instead: oneshot being unavailable never means
 YOU are unavailable. You are still a working agent, so a simple task just gets
 done directly by you, and a multi-goal one still gets a workflow. Never conclude

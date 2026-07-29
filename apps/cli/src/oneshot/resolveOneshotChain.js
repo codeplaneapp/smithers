@@ -1,12 +1,19 @@
 import { SmithersError } from "@smithers-orchestrator/errors";
 import { describeUnavailableAgent } from "../agent-detection.js";
 import { SOTA_SLOTS } from "../sota-models.generated.js";
+import { classifyOneshotGoal } from "./classifyOneshotGoal.js";
 import { oneshotCodexPaused } from "./oneshotCodexPaused.js";
 
 // Oneshot's kimi seat runs Kimi K3 (`kimi-code/k3` in the Kimi CLI), ahead of
 // the registry's `kimi` slot (k2.7-code): K3's 1M window absorbs a whole
 // oneshot session without compaction.
 export const ONESHOT_KIMI_MODEL = "kimi-code/k3";
+// The same Kimi K3 reached through OpenCode's kimi-for-coding provider and
+// through the Pi CLI's kimi-coding provider (`pi --provider kimi-coding
+// --model k3`). UI-flavored goals lead with these two kimi seats.
+export const ONESHOT_OPENCODE_KIMI_MODEL = "kimi-for-coding/k3";
+export const ONESHOT_PI_KIMI_PROVIDER = "kimi-coding";
+export const ONESHOT_PI_KIMI_MODEL = "k3";
 const SLOTS = Object.freeze({
   sol: SOTA_SLOTS.codexSol,
   terra: SOTA_SLOTS.codexTerra,
@@ -16,12 +23,13 @@ const SLOTS = Object.freeze({
   opus: SOTA_SLOTS.opus,
   sonnet: SOTA_SLOTS.sonnet,
 });
-const ALLOWED = ["claude", "codex", "kimi", "opencode"];
+const ALLOWED = ["claude", "codex", "kimi", "opencode", "pi"];
 
 /** @param {string} model @param {Set<string>} usable */
 function engineForCanonicalModel(model, usable) {
   if (model.startsWith("gpt-") || model.startsWith("o1") || model.startsWith("o3") || model.startsWith("o4"))
     return "codex";
+  if (model.startsWith("kimi-for-coding/")) return "opencode";
   if (model.startsWith("kimi-")) return "kimi";
   if (model.startsWith("anthropic/")) return "opencode";
   if (model.startsWith("claude-")) return usable.has("claude") ? "claude" : "opencode";
@@ -30,7 +38,7 @@ function engineForCanonicalModel(model, usable) {
 
 /**
  * @param {import("../AgentAvailability.ts").AgentAvailability[]} detections
- * @param {{ model?: string; agent?: string; env?: NodeJS.ProcessEnv }} [options]
+ * @param {{ model?: string; agent?: string; goal?: string; env?: NodeJS.ProcessEnv }} [options]
  */
 export function resolveOneshotChain(detections, options = {}) {
   const env = options.env ?? process.env;
@@ -68,33 +76,40 @@ export function resolveOneshotChain(detections, options = {}) {
     );
   }
   const claudeEngine = usable.has("claude") ? "claude" : usable.has("opencode") ? "opencode" : null;
-  // Opus leads: Claude Opus 5 is the default implementer (registry v7), with
-  // Codex Sol, Kimi K3, and Fable as availability fallbacks in that order.
-  const defaults = [
-    ...(claudeEngine
-      ? [
-          {
-            engine: claudeEngine,
-            model: claudeEngine === "opencode" ? `anthropic/${SOTA_SLOTS.opus}` : SOTA_SLOTS.opus,
-          },
-        ]
-      : []),
+  const claudeSpec = (model) => ({
+    engine: claudeEngine,
+    model: claudeEngine === "opencode" ? `anthropic/${model}` : model,
+  });
+  const piSpec = { engine: "pi", provider: ONESHOT_PI_KIMI_PROVIDER, model: ONESHOT_PI_KIMI_MODEL };
+  // General/default chain: Opus leads (Claude Opus 5 is the default implementer,
+  // registry v7), with Codex Sol, Kimi K3, and Fable as availability fallbacks
+  // in that order; pi's kimi-coding seat is the last-resort rung.
+  const general = [
+    ...(claudeEngine ? [claudeSpec(SOTA_SLOTS.opus)] : []),
     ...(usable.has("codex") ? [{ engine: "codex", model: SOTA_SLOTS.codexSol }] : []),
     ...(usable.has("kimi") ? [{ engine: "kimi", model: ONESHOT_KIMI_MODEL }] : []),
-    ...(claudeEngine
-      ? [
-          {
-            engine: claudeEngine,
-            model: claudeEngine === "opencode" ? `anthropic/${SOTA_SLOTS.fable}` : SOTA_SLOTS.fable,
-          },
-        ]
-      : []),
+    ...(claudeEngine ? [claudeSpec(SOTA_SLOTS.fable)] : []),
+    ...(usable.has("pi") ? [piSpec] : []),
   ];
+  // UI-flavored goals lead with Kimi K3 (registry v8 oneshot doctrine):
+  // OpenCode's kimi-for-coding seat first, then kimi through pi, then the Kimi
+  // CLI. With no kimi reachable, Claude Opus then Fable; Codex Sol is the
+  // last-resort rung when nothing else is usable.
+  const ui = [
+    ...(usable.has("opencode") ? [{ engine: "opencode", model: ONESHOT_OPENCODE_KIMI_MODEL }] : []),
+    ...(usable.has("pi") ? [piSpec] : []),
+    ...(usable.has("kimi") ? [{ engine: "kimi", model: ONESHOT_KIMI_MODEL }] : []),
+    ...(claudeEngine ? [claudeSpec(SOTA_SLOTS.opus), claudeSpec(SOTA_SLOTS.fable)] : []),
+    ...(usable.has("codex") ? [{ engine: "codex", model: SOTA_SLOTS.codexSol }] : []),
+  ];
+  const defaults = classifyOneshotGoal(options.goal) === "ui" ? ui : general;
+  const requestedSpec = requestedEngine ? defaults.find((item) => item.engine === requestedEngine) : undefined;
   const chain = requestedEngine
     ? [
         {
           engine: requestedEngine,
-          model: requestedModel ?? defaults.find((item) => item.engine === requestedEngine)?.model ?? SOTA_SLOTS.fable,
+          ...(requestedSpec?.provider ? { provider: requestedSpec.provider } : {}),
+          model: requestedModel ?? requestedSpec?.model ?? SOTA_SLOTS.fable,
         },
         ...defaults.filter((item) => item.engine !== requestedEngine),
       ]

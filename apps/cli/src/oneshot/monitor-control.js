@@ -1,12 +1,18 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
+import { isPidAlive, parseRuntimeOwnerPid } from "@smithers-orchestrator/engine/runtime-owner";
+import { terminateRunOwner } from "../cancel-cascade.js";
 import { BUILTIN_RESUME_CONFIG_KEY, buildBuiltinRelaunch } from "../resume-target.js";
 import { resolveHijackCandidate, waitForHijackCandidate } from "../hijack.js";
 import { startOneshotStatusUpdater } from "./startOneshotStatusUpdater.js";
 
 const ATTACH_LEASE_MS = 35_000;
+const RESTART_RELEASE_TIMEOUT_MS = 15_000;
+const RESTART_RELEASE_POLL_MS = 100;
+const STEER_PROCESS_TIMEOUT_MS = 15 * 60_000;
 const STEER_NODE_ID = "steer";
 const MAX_STEER_CHARS = 16_000;
+const TERMINAL_RUN_STATUSES = new Set(["finished", "failed", "cancelled", "canceled", "continued"]);
 
 /** @param {unknown} value */
 function asObject(value) {
@@ -103,6 +109,81 @@ function waitForChildSpawn(child) {
   });
 }
 
+/**
+ * @param {Promise<unknown>} completion
+ * @param {import("node:child_process").ChildProcess} child
+ * @param {number} timeoutMs
+ * @param {(pid: number | null) => Promise<unknown>} terminateOwner
+ */
+async function waitForSteeringCompletion(completion, child, timeoutMs, terminateOwner) {
+  let timer;
+  const timedOut = Symbol("timed-out");
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(timedOut), timeoutMs);
+  });
+  try {
+    const result = await Promise.race([completion, timeout]);
+    if (result !== timedOut) return result;
+    let termination;
+    try {
+      termination = await terminateOwner(Number.isInteger(child.pid) ? child.pid : null);
+    } catch (failure) {
+      const error = new Error(
+        `claude-code steering process timed out after ${timeoutMs}ms and could not be terminated: ${failure instanceof Error ? failure.message : String(failure)}`,
+      );
+      error.recoveryUnsafe = true;
+      throw error;
+    }
+    if (!termination?.terminated) {
+      const error = new Error(
+        `claude-code steering process timed out after ${timeoutMs}ms and its process group is still alive`,
+      );
+      error.recoveryUnsafe = true;
+      throw error;
+    }
+    throw new Error(`claude-code steering process timed out after ${timeoutMs}ms`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** @param {number} ms */
+function sleep(ms) {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+/**
+ * @param {any} adapter
+ * @param {string} runId
+ * @param {{
+ *   timeoutMs: number;
+ *   pollMs: number;
+ *   ownerAlive: (pid: number) => boolean;
+ *   terminateOwner: (pid: number | null) => Promise<{ terminated?: boolean } | unknown>;
+ * }} options
+ */
+async function waitForRestartRelease(adapter, runId, options) {
+  const deadline = Date.now() + options.timeoutMs;
+  let latest = null;
+  while (true) {
+    latest = await adapter.getRun(runId);
+    if (!latest || TERMINAL_RUN_STATUSES.has(String(latest.status).toLowerCase())) return;
+    const ownerPid = parseRuntimeOwnerPid(latest.runtimeOwnerId);
+    if (ownerPid !== null && !options.ownerAlive(ownerPid)) return;
+    if (Date.now() >= deadline) break;
+    await sleep(Math.min(options.pollMs, Math.max(1, deadline - Date.now())));
+  }
+
+  const ownerPid = parseRuntimeOwnerPid(latest?.runtimeOwnerId);
+  if (ownerPid === null) {
+    throw new Error(`Timed out waiting for run ${runId} to release its workspace; no owner pid was recorded`);
+  }
+  await options.terminateOwner(ownerPid);
+  if (options.ownerAlive(ownerPid)) {
+    throw new Error(`Timed out waiting for run ${runId} to release its workspace; owner ${ownerPid} is still alive`);
+  }
+}
+
 /** @param {Record<string, unknown> | null | undefined} run */
 function runWasHijacked(run) {
   const error = parseJsonObject(run?.errorJson);
@@ -137,6 +218,11 @@ async function recordControlEvent(adapter, runId, type, payload) {
  *   resolveCandidate?: typeof resolveHijackCandidate;
  *   waitForCandidate?: typeof waitForHijackCandidate;
  *   attachLeaseMs?: number;
+ *   steerTimeoutMs?: number;
+ *   restartReleaseTimeoutMs?: number;
+ *   restartReleasePollMs?: number;
+ *   terminateOwner?: typeof terminateRunOwner;
+ *   ownerAlive?: typeof isPidAlive;
  * }} options
  */
 export function createOneshotMonitorControl(options) {
@@ -145,6 +231,11 @@ export function createOneshotMonitorControl(options) {
   const resolveCandidate = options.resolveCandidate ?? resolveHijackCandidate;
   const waitForCandidate = options.waitForCandidate ?? waitForHijackCandidate;
   const attachLeaseMs = options.attachLeaseMs ?? ATTACH_LEASE_MS;
+  const steerTimeoutMs = options.steerTimeoutMs ?? STEER_PROCESS_TIMEOUT_MS;
+  const restartReleaseTimeoutMs = options.restartReleaseTimeoutMs ?? RESTART_RELEASE_TIMEOUT_MS;
+  const restartReleasePollMs = options.restartReleasePollMs ?? RESTART_RELEASE_POLL_MS;
+  const terminateOwner = options.terminateOwner ?? terminateRunOwner;
+  const ownerAlive = options.ownerAlive ?? isPidAlive;
   /** @type {Map<string, { updater: { enabled?: boolean; stop: () => Promise<void> }; timer: ReturnType<typeof setTimeout> }>} */
   const attached = new Map();
   /** @type {Set<string>} */
@@ -267,6 +358,7 @@ export function createOneshotMonitorControl(options) {
             cwd: spec.cwd,
             env: spec.env,
             stdio: "ignore",
+            detached: true,
           });
           const completion = waitForChild(child);
           void completion.catch(() => undefined);
@@ -277,7 +369,7 @@ export function createOneshotMonitorControl(options) {
             engine: candidate.engine,
             delivery: "delivered",
           });
-          const code = await completion;
+          const code = await waitForSteeringCompletion(completion, child, steerTimeoutMs, terminateOwner);
           if (code !== 0) throw new Error(`${candidate.engine} steering process exited with code ${code}`);
           await recordControlEvent(adapter, runId, "OneshotSteerAcknowledged", {
             nodeId: STEER_NODE_ID,
@@ -294,7 +386,7 @@ export function createOneshotMonitorControl(options) {
             } catch {}
           }
           let recoveryError;
-          if (!resumed) {
+          if (!resumed && error?.recoveryUnsafe !== true) {
             let latestRun = null;
             try {
               latestRun = await adapter.getRun(runId);
@@ -341,6 +433,12 @@ export function createOneshotMonitorControl(options) {
           )
         ) {
           await options.cancelRun(adapter, runId);
+          await waitForRestartRelease(adapter, runId, {
+            timeoutMs: restartReleaseTimeoutMs,
+            pollMs: restartReleasePollMs,
+            ownerAlive,
+            terminateOwner,
+          });
         }
         const child = await launchBuiltin(resume, nextRunId, false);
         await recordControlEvent(adapter, runId, "OneshotRestartLaunched", {
