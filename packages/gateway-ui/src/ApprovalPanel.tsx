@@ -200,31 +200,31 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
         ...style,
       }}
     >
-     {decisionFeedback ? (
-       <div
-         ref={statusRef}
-         role="status"
-         aria-live="polite"
-         tabIndex={-1}
-         style={{ color: theme.success, fontSize: 13 }}
-       >
-         {decisionFeedback.approved ? "Approved" : "Denied"} gate {decisionFeedback.target} for run{" "}
-         {decisionFeedback.runId}. {approvals.length}{" "}
-         {approvals.length === 1 ? "approval remains" : "approvals remain"} pending.
-       </div>
-     ) : null}
-     {refreshError ? (
-       <div role="alert" style={{ color: theme.danger, fontSize: 13 }}>
-         {refreshError}
-       </div>
-     ) : null}
-     {error && !refreshError ? (
-       <div role="alert" style={{ color: theme.danger, fontSize: 13 }}>
-         {decisionFeedback
-           ? `${decisionFeedback.approved ? "Approved" : "Denied"} gate ${decisionFeedback.target} for run ${decisionFeedback.runId}, but pending approvals could not be refreshed: ${error.message}`
-           : `Approval refresh failed: ${error.message}`}
-       </div>
-     ) : null}
+      {decisionFeedback ? (
+        <div
+          ref={statusRef}
+          role="status"
+          aria-live="polite"
+          tabIndex={-1}
+          style={{ color: theme.success, fontSize: 13 }}
+        >
+          {decisionFeedback.approved ? "Approved" : "Denied"} gate {decisionFeedback.target} for run{" "}
+          {decisionFeedback.runId}. {approvals.length}{" "}
+          {approvals.length === 1 ? "approval remains" : "approvals remain"} pending.
+        </div>
+      ) : null}
+      {refreshError ? (
+        <div role="alert" style={{ color: theme.danger, fontSize: 13 }}>
+          {refreshError}
+        </div>
+      ) : null}
+      {error && !refreshError ? (
+        <div role="alert" style={{ color: theme.danger, fontSize: 13 }}>
+          {decisionFeedback
+            ? `${decisionFeedback.approved ? "Approved" : "Denied"} gate ${decisionFeedback.target} for run ${decisionFeedback.runId}, but pending approvals could not be refreshed: ${error.message}`
+            : `Approval refresh failed: ${error.message}`}
+        </div>
+      ) : null}
       {loading && approvals.length === 0 && !error ? (
         <div role="status" aria-label="Loading approvals" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {[0, 1].map((index) => (
@@ -237,8 +237,8 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
       ) : null}
       {approvals.map((row) => {
         const key = approvalKey(row);
-       const isBusy = busy.has(key);
-       const denyConfirmationId = `gw-deny-${key}`;
+        const isBusy = busy.has(key);
+        const denyConfirmationId = `gw-deny-${key}`;
         const meta = `${row.workflowKey ?? ""} · ${row.runId} · ${row.nodeId}#${row.iteration}`;
         return (
           <div
@@ -358,10 +358,10 @@ export function ApprovalPanel({ filter, pollMs = 2000, onError, className, style
               </div>
             )}
             {submitError?.key === key ? (
-             <div role="alert" style={{ color: theme.danger, fontSize: 13 }}>
-               {submitError.approved ? "Approve" : "Deny"} failed for gate {submitError.target} on run{" "}
-               {submitError.runId}: {submitError.message}. Try again.
-             </div>
+              <div role="alert" style={{ color: theme.danger, fontSize: 13 }}>
+                {submitError.approved ? "Approve" : "Deny"} failed for gate {submitError.target} on run{" "}
+                {submitError.runId}: {submitError.message}. Try again.
+              </div>
             ) : null}
           </div>
         );

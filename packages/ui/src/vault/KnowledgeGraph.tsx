@@ -56,7 +56,15 @@ export type KnowledgeGraphProps = {
  * d3-force simulation. d3-force is lazy-imported so the main bundle stays
  * lean; if it cannot load, a list of the vault's hub notes renders instead.
  */
-export function KnowledgeGraph({ notes, links, onOpenNote, height = 480, className, style, loadPhysics }: KnowledgeGraphProps) {
+export function KnowledgeGraph({
+  notes,
+  links,
+  onOpenNote,
+  height = 480,
+  className,
+  style,
+  loadPhysics,
+}: KnowledgeGraphProps) {
   useVaultCss();
   // computeGraphModel returns fresh copies: d3-force mutates nodes/links in
   // place, and mutating the caller's props would corrupt them on refetch.

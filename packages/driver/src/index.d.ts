@@ -915,6 +915,8 @@ declare class WorkflowDriver<Schema extends unknown = unknown> {
         output?: unknown;
         error?: unknown;
     }>;
+    /** A paused child task parks the run through the same graceful drain path as a direct pause signal. */
+    pausedByChildSuspension: boolean;
     /** @type {import("./RuntimeAdapter.ts").RuntimeAdapter | undefined} */
     runtimeAdapter: RuntimeAdapter$1 | undefined;
     /** @type {OutputSnapshot} Output rows persisted to runtimeAdapter.storage this run, kept in sync so each save is a full, monotonically-growing snapshot. */

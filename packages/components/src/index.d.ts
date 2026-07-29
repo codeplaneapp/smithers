@@ -489,7 +489,7 @@ type TaskProps$2<Row, Output extends OutputTarget$1 = OutputTarget$1, D extends 
     meta?: Record<string, unknown>;
     /** @internal Used by createSmithers() to bind tasks to the correct workflow context. */
     smithersContext?: React__default.Context<SmithersCtx$1<unknown> | null>;
-    children?: string | Row | (() => Row | Promise<Row>) | React__default.ReactNode | ((deps: InferDeps$1<D>) => Row | React__default.ReactNode);
+    children?: string | Row | (() => Row | Promise<Row>) | React__default.ReactNode | ((deps: InferDeps$1<D>) => Row | Promise<Row> | React__default.ReactNode);
 };
 
 type SupervisorProps$2 = {

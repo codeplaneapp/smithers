@@ -19,6 +19,7 @@ import {
 
 const ARMS = ["effect", "jsx"] as const;
 const TASKS = ["pipeline", "fanout", "reuse"] as const;
+const apiAbBenchmarkStyles = ".api-ab-events { height:320px; }";
 
 export type GatewayNode = { id: string; name?: string; status: string; output?: string };
 
@@ -151,7 +152,7 @@ export function ApiAbBenchmarkApp({ runId = runIdFromUrl(), trials = 3 }: { runI
       title="API A/B Benchmark"
       meta={`${runId ?? "preview"} · effect vs jsx${status ? ` · ${status}` : ""}`}
     >
-      <SmithersUiStyles />
+      <SmithersUiStyles extra={apiAbBenchmarkStyles} />
       <Card>
         <h2>Scoreboard</h2>
         {ARMS.map((arm) => {
@@ -177,7 +178,7 @@ export function ApiAbBenchmarkApp({ runId = runIdFromUrl(), trials = 3 }: { runI
       </Card>
       <Card>
         <h2>Gateway events</h2>
-        <RunEventLog runId={runId} style={{ height: 320 }} />
+        <RunEventLog runId={runId} className="api-ab-events" />
       </Card>
     </WorkflowUiShell>
   );

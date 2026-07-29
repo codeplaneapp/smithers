@@ -1,14 +1,14 @@
 ---
 title: "Agent and Model Agnosticism"
-description: "One workflow can mix Claude Code, Codex, Cursor, Pi, Hermes, OpenClaw, and raw AI SDK models — with per-Task agent chains, quota-aware failover, and subscription or API-key billing per seat."
+description: "One workflow can mix Claude Code, Codex, Cursor, Pi, Hermes, OpenClaw, and raw AI SDK models - with per-Task agent chains, quota-aware failover, and subscription or API-key billing per seat."
 icon: "robot"
 ---
 
-The model layer churns weekly and the harness layer churns quarterly. A workflow written against one vendor's agent inherits every one of that vendor's failure modes: the 5-hour Claude subscription window closes mid-run and the whole pipeline stalls; a Codex outage takes down a review loop that never needed GPT specifically; a price change on the frontier model makes a hundred cheap classification tasks cost like a hundred hard ones. None of those are workflow bugs. They are binding bugs — the orchestration was coupled to a single provider.
+The model layer churns weekly and the harness layer churns quarterly. A workflow written against one vendor's agent inherits every one of that vendor's failure modes: the 5-hour Claude subscription window closes mid-run and the whole pipeline stalls; a Codex outage takes down a review loop that never needed GPT specifically; a price change on the frontier model makes a hundred cheap classification tasks cost like a hundred hard ones. None of those are workflow bugs. They are binding bugs - the orchestration was coupled to a single provider.
 
-Smithers treats the agent as a **value you pass to a Task**, not an assumption baked into the runtime. Every harness adapter — `ClaudeCodeAgent`, `CodexAgent`, `CursorAgent`, `GeminiAgent`, `PiAgent`, `HermesAgent`, `OpenClawAgent`, `OpenCodeAgent`, `KimiAgent`, `AmpAgent`, and more — satisfies the same `AgentLike` contract, and so do in-process SDK agents (`AnthropicAgent`, `OpenAIAgent`) built on the Vercel AI SDK. A single workflow can plan with a subscription-billed Claude seat, implement with Codex on an API key, and review with a cheap Gemini model, and the engine fails over between them when one hits a quota wall.
+Smithers treats the agent as a **value you pass to a Task**, not an assumption baked into the runtime. Every harness adapter - `ClaudeCodeAgent`, `CodexAgent`, `CursorAgent`, `GeminiAgent`, `PiAgent`, `HermesAgent`, `OpenClawAgent`, `OpenCodeAgent`, `KimiAgent`, `AmpAgent`, and more - satisfies the same `AgentLike` contract, and so do in-process SDK agents (`AnthropicAgent`, `OpenAIAgent`) built on the Vercel AI SDK. A single workflow can plan with a subscription-billed Claude seat, implement with Codex on an API key, and review with a cheap Gemini model, and the engine fails over between them when one hits a quota wall.
 
-This page is about running agents *inside* workflows. The other direction — wiring Smithers into the coding agent you drive by hand so it can start and steer runs — is covered in [Agent Support](/agents/overview).
+This page is about running agents *inside* workflows. The other direction - wiring Smithers into the coding agent you drive by hand so it can start and steer runs - is covered in [Agent Support](/agents/overview).
 
 ## How the industry solves it
 
@@ -16,7 +16,7 @@ Model portability is a solved problem at the API layer and an unsolved one at th
 
 | System | Mechanism | Tradeoff |
 |---|---|---|
-| [Vercel AI SDK](https://ai-sdk.dev/docs/foundations/providers-and-models) | `LanguageModel` provider abstraction: `anthropic("...")`, `openai("...")` interchangeable in `generateText` | Model calls only — no harness, no durable state |
+| [Vercel AI SDK](https://ai-sdk.dev/docs/foundations/providers-and-models) | `LanguageModel` provider abstraction: `anthropic("...")`, `openai("...")` interchangeable in `generateText` | Model calls only - no harness, no durable state |
 | [OpenRouter](https://openrouter.ai/blog/insights/model-routing/) | One API over hundreds of models; ordered fallback arrays and an Auto Router that picks per-prompt | Adds a routing hop and a margin; you still own orchestration |
 | [LiteLLM](https://docs.litellm.ai/docs/proxy/reliability) | Self-hosted proxy: load balancing, cooldowns, in-order fallbacks (`["gpt-3.5-turbo", "gpt-4", ...]`) across deployments | You run the proxy; per-request failover, no run-level memory of what's blocked |
 | [Portkey](https://portkey.ai/docs/product/ai-gateway/fallbacks) | Gateway with fallback on non-2xx (customizable to 429/503), nested strategies, circuit breakers | Managed hop in the request path; same request-scoped view |
@@ -24,7 +24,7 @@ Model portability is a solved problem at the API layer and an unsolved one at th
 | [LangChain](https://python.langchain.com/docs/concepts/chat_models/) | `ChatModel` abstraction over providers | Famously leaky: tool-calling formats, streaming, and structured-output support differ per provider and surface through the abstraction |
 | [MCP](https://modelcontextprotocol.io) | Standardizes the *tool* side so servers port across clients | Tools port; the agents' permission models and prompting behavior do not |
 
-Closed agent platforms take the opposite bet. Claude Code's [Dynamic Workflows](https://code.claude.com/docs/en/workflows) fans out subagents — all Claude, inside Anthropic's runtime. [Devin](https://devin.ai) is a hosted engineer you cannot point at your own model. The [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/) is open code but its sessions, tracing, and handoffs assume OpenAI's Responses API. Each is excellent inside its walls; none lets you route a step to a competitor when quota runs out. The longer argument is in [Durable, open orchestration](/why/durable-open-orchestration).
+Closed agent platforms take the opposite bet. Claude Code's [Dynamic Workflows](https://code.claude.com/docs/en/workflows) fans out subagents - all Claude, inside Anthropic's runtime. [Devin](https://devin.ai) is a hosted engineer you cannot point at your own model. The [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/) is open code but its sessions, tracing, and handoffs assume OpenAI's Responses API. Each is excellent inside its walls; none lets you route a step to a competitor when quota runs out. The longer argument is in [Durable, open orchestration](/why/durable-open-orchestration).
 
 A gateway's failover is per-request. Smithers' failover is **per-attempt inside a durable run**: which chain rungs are quota-blocked, and when each provider resets, is state that survives a process restart.
 
@@ -32,9 +32,9 @@ A gateway's failover is per-request. Smithers' failover is **per-attempt inside 
 
 ### One contract, many harnesses
 
-Everything that can execute a Task implements `AgentLike` (`packages/agents/src/AgentLike.ts`): a `generate()` call, an optional `preflight()` (deterministic startup checks — a rejected preflight fails fast without burning retries), and an optional `capabilities` registry describing the harness's tool surface, MCP bootstrap mode, and skill support.
+Everything that can execute a Task implements `AgentLike` (`packages/agents/src/AgentLike.ts`): a `generate()` call, an optional `preflight()` (deterministic startup checks - a rejected preflight fails fast without burning retries), and an optional `capabilities` registry describing the harness's tool surface, MCP bootstrap mode, and skill support.
 
-CLI harnesses extend `BaseCliAgent` and spawn the vendor binary as a child process. SDK agents run in-process on the Vercel AI SDK — `AnthropicAgent` imports `@ai-sdk/anthropic` directly, and `resolveSdkModel` accepts either a model-id string or a raw AI SDK `LanguageModel` instance, so anything the AI SDK supports (including an OpenRouter or LiteLLM endpoint via a custom provider) drops in.
+CLI harnesses extend `BaseCliAgent` and spawn the vendor binary as a child process. SDK agents run in-process on the Vercel AI SDK - `AnthropicAgent` imports `@ai-sdk/anthropic` directly, and `resolveSdkModel` accepts either a model-id string or a raw AI SDK `LanguageModel` instance, so anything the AI SDK supports (including an OpenRouter or LiteLLM endpoint via a custom provider) drops in.
 
 ### Per-Task agent, model, and fallback chain
 
@@ -69,62 +69,62 @@ export default smithers((ctx) => (
 ));
 ```
 
-Retries walk the chain in order. For explicit cheap-model-first escalation with a predicate (`escalateIf: (r) => r.confidence < 0.7`) and an optional human fallback, use [`<EscalationChain>`](/components/escalation-chain); `smithers upgrade` uses the same pattern internally — a cheap agent attempts the upgrade and a smart agent is engaged only on failure.
+Retries walk the chain in order. For explicit cheap-model-first escalation with a predicate (`escalateIf: (r) => r.confidence < 0.7`) and an optional human fallback, use [`<EscalationChain>`](/components/escalation-chain); `smithers upgrade` uses the same pattern internally - a cheap agent attempts the upgrade and a smart agent is engaged only on failure.
 
 ### Quota walls are transient, not failures
 
 The engine (`packages/engine/src/engine.js`) treats `AGENT_QUOTA_EXCEEDED` specially:
 
-- A quota-limited attempt **never consumes the retry budget** — the retry happens as if the attempt never occurred.
+- A quota-limited attempt **never consumes the retry budget** - the retry happens as if the attempt never occurred.
 - A rate limit is a property of the *provider*, not the task, so the next attempt fails over to the next non-blocked rung in the agent chain rather than hammering the blocked one. The blocked-rung set and each provider's reported reset time are persisted in attempt metadata, so failover survives a restart.
-- Only when **every** rung is blocked does the run park in `waiting-quota` — with the *earliest* reset among the blocked providers, so it wakes as soon as any of them frees up. The gateway's timer/quota sweep resumes it automatically.
-- Chain rungs disabled for repeated *genuine* failures exclude quota-failed attempts from that count — otherwise a Codex quota wall would permanently pin every task to its Claude fallback even after the quota reset.
+- Only when **every** rung is blocked does the run park in `waiting-quota` - with the *earliest* reset among the blocked providers, so it wakes as soon as any of them frees up. The gateway's timer/quota sweep resumes it automatically.
+- Chain rungs disabled for repeated *genuine* failures exclude quota-failed attempts from that count - otherwise a Codex quota wall would permanently pin every task to its Claude fallback even after the quota reset.
 
 ### Seats: subscriptions and API keys
 
-`smithers agents add` registers an account — interactively or via flags — for `claude-code`, `codex`, `antigravity`, `kimi`, `anthropic-api`, `openai-api`, or `gemini-api`:
+`bunx smithers-orchestrator agents add` registers an account - interactively or via flags - for `claude-code`, `codex`, `antigravity`, `kimi`, `anthropic-api`, `openai-api`, or `gemini-api`:
 
 ```bash
-smithers agents add --provider claude-code --label claude-work \
+bunx smithers-orchestrator agents add --provider claude-code --label claude-work \
   --configDir ~/.smithers-accounts/claude-work
-smithers agents add --provider openai-api --label oai-main --apiKey sk-...
-smithers agents list
-smithers usage          # rate-limit / subscription quota per registered account
+bunx smithers-orchestrator agents add --provider openai-api --label oai-main --apiKey sk-...
+bunx smithers-orchestrator agents list
+bunx smithers-orchestrator usage          # rate-limit / subscription quota per registered account
 ```
 
-Subscription seats are a **config directory**, not a key: `ClaudeCodeAgent` *clears* `ANTHROPIC_API_KEY` so the CLI bills your Claude Pro/Max plan from credentials at `CLAUDE_CONFIG_DIR/.credentials.json`; `CodexAgent` mirrors this with `CODEX_HOME`/`auth.json`. Registering multiple labels for one provider gives you a seat pool you wire into distinct agent instances (one `configDir` each) and place on chain rungs — the quota failover above then rotates work off exhausted seats. Setting `apiKey` flips the same adapter to pay-per-token API billing, which is what makes cold sandboxes viable (see [Sandboxes](/concepts/sandboxes)). `smithers agents add` also regenerates a previously generated `.smithers/agents.ts` to reflect the registry; hand-edited files are left alone.
+Subscription seats are a **config directory**, not a key: `ClaudeCodeAgent` *clears* `ANTHROPIC_API_KEY` so the CLI bills your Claude Pro/Max plan from credentials at `CLAUDE_CONFIG_DIR/.credentials.json`; `CodexAgent` mirrors this with `CODEX_HOME`/`auth.json`. Registering multiple labels for one provider gives you a seat pool you wire into distinct agent instances (one `configDir` each) and place on chain rungs - the quota failover above then rotates work off exhausted seats. Setting `apiKey` flips the same adapter to pay-per-token API billing, which is what makes cold sandboxes viable (see [Sandboxes](/concepts/sandboxes)). `bunx smithers-orchestrator agents add` also regenerates a previously generated `.smithers/agents.ts` to reflect the registry; hand-edited files are left alone.
 
 ## Guarantees and limits
 
 **Guaranteed:** one `AgentLike` contract across every adapter; per-Task chains with restart-surviving quota failover; quota attempts exempt from retry budgets; runs park and self-resume on provider reset; structured output enforced by Zod regardless of harness (prompt-injected schema for CLI agents, native structured output where `supportsNativeStructuredOutput` is set).
 
-**Not guaranteed — what does not port cleanly:**
+**Not guaranteed - what does not port cleanly:**
 
-- **Tool surfaces differ.** Each harness ships its own built-ins and its own MCP bootstrap (project-config vs. CLI-flag vs. none). The per-agent capability registry (`smithers agents capabilities`, validated by `smithers agents doctor`) makes the differences inspectable, not invisible.
+- **Tool surfaces differ.** Each harness ships its own built-ins and its own MCP bootstrap (project-config vs. CLI-flag vs. none). The per-agent capability registry (`bunx smithers-orchestrator agents capabilities`, validated by `bunx smithers-orchestrator agents doctor`) makes the differences inspectable, not invisible.
 - **Permission models differ.** Claude Code's allowlists, Codex's sandbox modes, and Cursor's approval flows are not translated between each other. A prompt tuned to one harness's permission prompts can behave differently on its fallback.
-- **Context windows and prompt caching differ.** A prompt near one model's window may truncate on its fallback, and provider-side prompt-cache economics do not transfer — a fallover attempt is a cold cache.
+- **Context windows and prompt caching differ.** A prompt near one model's window may truncate on its fallback, and provider-side prompt-cache economics do not transfer - a fallover attempt is a cold cache.
 - **Subscription ToS are the vendor's.** Smithers routes work across the seats *you* registered; whether pooled or automated use fits your Claude/ChatGPT plan terms is between you and the vendor.
 - **Failover is retry-scoped.** The chain advances on failure or quota, not on latency or cost mid-attempt; there is no request-level load balancer. If you want weighted balancing across API deployments, put LiteLLM or Portkey behind an SDK agent and let Smithers own the run-level state.
 
 ## Operating it
 
 ```bash
-smithers agents list                 # registered seats and keys
-smithers usage --fresh               # live quota per account
-smithers agents capabilities         # per-harness tool/MCP/skill surface report
-smithers agents doctor               # validate the capability registries
-smithers status <runId>              # verdict incl. agent/model mix
-smithers inspect <runId> --pool      # tally attempt engine/model usage
-smithers why <runId>                 # explains a waiting-quota park
-smithers retry-task <runId> <nodeId> # manual failover nudge
+bunx smithers-orchestrator agents list                 # registered seats and keys
+bunx smithers-orchestrator usage --fresh               # live quota per account
+bunx smithers-orchestrator agents capabilities         # per-harness tool/MCP/skill surface report
+bunx smithers-orchestrator agents doctor               # validate the capability registries
+smithers status RUN_ID              # verdict incl. agent/model mix
+bunx smithers-orchestrator inspect RUN_ID --pool      # tally attempt engine/model usage
+bunx smithers-orchestrator why RUN_ID                 # explains a waiting-quota park
+bunx smithers-orchestrator retry-task RUN_ID NODE_ID # manual failover nudge
 ```
 
 `smithers status` shows which engines and models a run actually used; `inspect --pool` tallies attempts per engine/model, which is how you audit that the cheap model is really taking the bulk of the work.
 
 ## See also
 
-- [Agent Support](/agents/overview) — driving Smithers *from* Claude Code, Codex, Cursor, Copilot, Pi, Hermes, and OpenClaw
-- [Model selection](/guides/model-selection) — which model for which role
-- [SOTA model registry](/reference/sota-models) — the generated source of truth for default model ids
-- [Error handling](/guides/error-handling) — retries, `continueOnFail`, and failure semantics
-- [Durable, open orchestration](/why/durable-open-orchestration) — the case against vendor-bound orchestration
+- [Agent Support](/agents/overview) - driving Smithers *from* Claude Code, Codex, Cursor, Copilot, Pi, Hermes, and OpenClaw
+- [Model selection](/guides/model-selection) - which model for which role
+- [SOTA model registry](/reference/sota-models) - the generated source of truth for default model ids
+- [Error handling](/guides/error-handling) - retries, `continueOnFail`, and failure semantics
+- [Durable, open orchestration](/why/durable-open-orchestration) - the case against vendor-bound orchestration

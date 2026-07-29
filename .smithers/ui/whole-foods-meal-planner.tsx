@@ -26,9 +26,31 @@ import {
   TableHeader,
   TableRow,
 } from "smithers-orchestrator/ui";
-import { groupByStoreSection } from "../lib/wholeFoodsMealPlanner";
 
 const WORKFLOW = "whole-foods-meal-planner";
+const wholeFoodsMealPlannerStyles = [
+  ".wfm-form-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }",
+  ".wfm-wide { grid-column:span 2; }",
+  ".wfm-full { grid-column:1 / -1; }",
+  ".wfm-note { margin:0; font-size:12px; }",
+  ".wfm-actions { margin-top:12px; }",
+  ".wfm-stat-row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }",
+  ".wfm-warning-row { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }",
+  ".wfm-meal-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; }",
+  ".wfm-meal-card { border:1px solid var(--sui-border,var(--border)); border-radius:8px; padding:10px; }",
+  ".wfm-meal-item { margin-top:6px; }",
+  ".wfm-meal-name { font-weight:600; }",
+  ".wfm-small { font-size:12px; }",
+  ".wfm-muted { color:var(--sui-muted-foreground,var(--muted)); }",
+  ".wfm-section { margin-bottom:12px; }",
+  ".wfm-revision-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }",
+  ".wfm-bottom-note { margin-bottom:0; font-size:12px; }",
+  ".wfm-checkout { margin-top:8px; }",
+  ".wfm-shell-content { display:flex; flex-direction:column; gap:12px; padding:16px; }",
+  ".wfm-run-grid { display:grid; grid-template-columns:260px minmax(0,1fr); gap:12px; }",
+  ".wfm-event-log { height:260px; }",
+  "@media (max-width:760px) { .wfm-form-grid,.wfm-revision-grid,.wfm-run-grid { grid-template-columns:1fr; } .wfm-wide,.wfm-full { grid-column:auto; } }",
+].join("\n");
 
 type GroceryItem = {
   name: string;
@@ -141,6 +163,14 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   }
 }
 
+function groupByStoreSection<T extends { storeSection: string }>(items: readonly T[]): Record<string, T[]> {
+  return items.reduce<Record<string, T[]>>((groups, item) => {
+    const section = item.storeSection.trim() || "other";
+    (groups[section] ??= []).push(item);
+    return groups;
+  }, {});
+}
+
 function LaunchPanel({ onLaunched }: { onLaunched: (runId: string) => void }) {
   const [form, setForm] = useState<LaunchForm>(DEFAULT_FORM);
   const set = <K extends keyof LaunchForm>(key: K, value: LaunchForm[K]) => setForm((f) => ({ ...f, [key]: value }));
@@ -152,7 +182,7 @@ function LaunchPanel({ onLaunched }: { onLaunched: (runId: string) => void }) {
           Configure constraints, then launch. For a revision run, paste the prior plan JSON and describe what to change.
         </span>
       </SectionHeader>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+      <div className="wfm-form-grid">
         <label>
           Household size
           <Input
@@ -173,7 +203,7 @@ function LaunchPanel({ onLaunched }: { onLaunched: (runId: string) => void }) {
             onChange={(e: any) => set("dailyCalorieTarget", Number(e.target.value))}
           />
         </label>
-        <label style={{ gridColumn: "span 2" }}>
+        <label className="wfm-wide">
           Person-specific calorie targets
           <Input
             value={form.calorieProfiles}
@@ -197,11 +227,11 @@ function LaunchPanel({ onLaunched }: { onLaunched: (runId: string) => void }) {
           Zip code
           <Input value={form.zipCode} onChange={(e: any) => set("zipCode", e.target.value)} />
         </label>
-        <label style={{ gridColumn: "span 3" }}>
+        <label className="wfm-full">
           Dietary preferences
           <Input value={form.dietaryPreferences} onChange={(e: any) => set("dietaryPreferences", e.target.value)} />
         </label>
-        <label style={{ gridColumn: "span 3" }}>
+        <label className="wfm-full">
           Favorite foods
           <Input
             value={form.favoriteFoods}
@@ -209,11 +239,11 @@ function LaunchPanel({ onLaunched }: { onLaunched: (runId: string) => void }) {
             placeholder="berries, sushi bowls, rotisserie chicken"
           />
         </label>
-        <label style={{ gridColumn: "span 3" }}>
+        <label className="wfm-full">
           Allergies / exclusions
           <Input value={form.allergiesExclusions} onChange={(e: any) => set("allergiesExclusions", e.target.value)} />
         </label>
-        <label style={{ gridColumn: "span 3" }}>
+        <label className="wfm-full">
           Order webhook URL (HTTPS or localhost, optional)
           <Input value={form.orderWebhookUrl} onChange={(e: any) => set("orderWebhookUrl", e.target.value)} />
         </label>
@@ -229,17 +259,17 @@ function LaunchPanel({ onLaunched }: { onLaunched: (runId: string) => void }) {
           <input type="checkbox" checked={form.deliveryOnly} onChange={(e) => set("deliveryOnly", e.target.checked)} />{" "}
           Delivery products only
         </label>
-        <p style={{ margin: 0, fontSize: 12 }}>Real webhook orders always require approval.</p>
-        <label style={{ gridColumn: "span 3" }}>
+        <p className="wfm-note">Real webhook orders always require approval.</p>
+        <label className="wfm-full">
           Revision prompt (optional)
           <Input value={form.revisionPrompt} onChange={(e: any) => set("revisionPrompt", e.target.value)} />
         </label>
-        <label style={{ gridColumn: "span 3" }}>
+        <label className="wfm-full">
           Prior plan JSON (optional, for revisions)
           <Input value={form.priorPlanJson} onChange={(e: any) => set("priorPlanJson", e.target.value)} />
         </label>
       </div>
-      <div style={{ marginTop: 12 }}>
+      <div className="wfm-actions">
         <LaunchButton workflow={WORKFLOW} input={form} onLaunched={onLaunched}>
           Launch plan
         </LaunchButton>
@@ -268,7 +298,7 @@ function CalorieOverview({ runId }: { runId?: string }) {
   return (
     <Card>
       <SectionHeader title="Calorie overview" />
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      <div className="wfm-stat-row">
         {days.map((day) => (
           <KpiStat
             key={day.day}
@@ -281,7 +311,7 @@ function CalorieOverview({ runId }: { runId?: string }) {
         ))}
       </div>
       {warnings.length > 0 ? (
-        <div style={{ marginTop: 8 }}>
+        <div className="wfm-warning-row">
           {warnings.map((w, i) => (
             <Badge key={i}>{w}</Badge>
           ))}
@@ -300,16 +330,16 @@ function MealCards({ runId }: { runId?: string }) {
   return (
     <Card>
       <SectionHeader title="Meal plan" />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
+      <div className="wfm-meal-grid">
         {days.map((day) => (
-          <div key={day.day} style={{ border: "1px solid #262629", borderRadius: 8, padding: 10 }}>
+          <div key={day.day} className="wfm-meal-card">
             <strong>Day {day.day}</strong>
             <div>{day.dailyTotalCalories} kcal total</div>
             {day.meals.map((meal, i) => (
-              <div key={i} style={{ marginTop: 6 }}>
-                <div style={{ fontWeight: 600 }}>{meal.name}</div>
+              <div key={i} className="wfm-meal-item">
+                <div className="wfm-meal-name">{meal.name}</div>
                 {meal.items.map((item, itemIndex) => (
-                  <div key={itemIndex} style={{ fontSize: 12, color: "#8a8a8e" }}>
+                  <div key={itemIndex} className="wfm-small wfm-muted">
                     {item.sourceUrl ? (
                       <a href={item.sourceUrl} target="_blank" rel="noreferrer">
                         {item.name}
@@ -321,9 +351,9 @@ function MealCards({ runId }: { runId?: string }) {
                     {item.favoriteMatch ? " · favorite" : ""}
                   </div>
                 ))}
-                <div style={{ fontSize: 12 }}>{meal.totalCalories} kcal</div>
+                <div className="wfm-small">{meal.totalCalories} kcal</div>
                 {(meal.memberCalories ?? []).length > 0 ? (
-                  <div style={{ fontSize: 12 }}>
+                  <div className="wfm-small">
                     {(meal.memberCalories ?? [])
                       .map((member) => `${member.name}: ${member.estimatedCalories} kcal`)
                       .join(" · ")}
@@ -349,7 +379,7 @@ function GroceryChecklist({ runId }: { runId?: string }) {
     <Card>
       <SectionHeader title="Grocery checklist" />
       {Object.entries(bySection).map(([section, sectionItems]) => (
-        <div key={section} style={{ marginBottom: 12 }}>
+        <div key={section} className="wfm-section">
           <strong>{section}</strong>
           <Table>
             <TableHeader>
@@ -396,7 +426,7 @@ function BudgetPrepSummary({ runId }: { runId?: string }) {
   return (
     <Card>
       <SectionHeader title="Budget & validation" />
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+      <div className="wfm-stat-row">
         <KpiStat label="Estimated subtotal" value={`$${Number(planRow.estimatedSubtotal ?? 0).toFixed(2)}`} />
         <StatusPill status={passed ? "finished" : "running"} label={passed ? "validated" : "revising"} />
       </div>
@@ -445,8 +475,8 @@ function RevisionPanel({ runId, onLaunched }: { runId: string; onLaunched: (next
       <SectionHeader title="Update this plan">
         <span>Prompt the agent to revise the current plan. Allergies and exclusions remain hard constraints.</span>
       </SectionHeader>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <label style={{ gridColumn: "span 2" }}>
+      <div className="wfm-revision-grid">
+        <label className="wfm-full">
           What should change?
           <Input
             value={revisionPrompt}
@@ -483,12 +513,12 @@ function RevisionPanel({ runId, onLaunched }: { runId: string; onLaunched: (next
           />
         </label>
       </div>
-      <div style={{ marginTop: 12 }}>
+      <div className="wfm-actions">
         <LaunchButton workflow={WORKFLOW} input={input} onLaunched={onLaunched}>
           Update meal plan
         </LaunchButton>
       </div>
-      <p style={{ marginBottom: 0, fontSize: 12 }}>
+      <p className="wfm-bottom-note">
         The revision starts without an order connector. Review the updated plan before configuring checkout.
       </p>
     </Card>
@@ -512,9 +542,9 @@ function OrderStatus({ runId }: { runId?: string }) {
         label={status}
       />
       {status === "needs-checkout" && links.length > 0 ? (
-        <div style={{ marginTop: 8 }}>
+        <div className="wfm-checkout">
           {links.map((l, i) => (
-            <div key={i} style={{ fontSize: 12 }}>
+            <div key={i} className="wfm-small">
               {l.name}:{" "}
               <a href={l.wholeFoodsUrl} target="_blank" rel="noreferrer">
                 Whole Foods
@@ -546,8 +576,8 @@ function App() {
       meta={`${runId ?? "no run"}${status ? ` · ${status}` : ""}`}
       actions={<ConnectionBadge />}
     >
-      <SmithersUiStyles />
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16 }}>
+      <SmithersUiStyles extra={wholeFoodsMealPlannerStyles} />
+      <div className="wfm-shell-content">
         {!runId ? <LaunchPanel onLaunched={setRunId} /> : null}
         {runId ? (
           <>
@@ -558,13 +588,13 @@ function App() {
             <RevisionPanel runId={runId} onLaunched={setRunId} />
             <ApprovalPanel filter={{ workflow: WORKFLOW, runId }} />
             <OrderStatus runId={runId} />
-            <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 12 }}>
+            <div className="wfm-run-grid">
               <RunTree
                 runId={runId}
                 activeNodeId={nodeId}
                 onSelectNode={(node: { id: string }) => setNodeId(node.id)}
               />
-              <RunEventLog runId={runId} style={{ height: 260 }} selectedNodeId={nodeId} onSelectNode={setNodeId} />
+              <RunEventLog runId={runId} className="wfm-event-log" selectedNodeId={nodeId} onSelectNode={setNodeId} />
             </div>
             <Button onClick={() => setRunId(undefined)}>Start a new plan</Button>
           </>

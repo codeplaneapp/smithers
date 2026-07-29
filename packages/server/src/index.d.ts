@@ -1388,6 +1388,10 @@ declare class Gateway {
         heartbeatAtMs: number | null;
         runtimeOwnerId: string | null;
         cancelRequestedAtMs: number | null;
+        cancelRequestId: string | null;
+        cancelRequestSource: string | null;
+        cancelRequestClientIdentity: string | null;
+        cancelRequestClientPid: number | null;
         pauseRequestedAtMs?: number | null;
         hijackRequestedAtMs: number | null;
         hijackTarget: string | null;
@@ -1803,12 +1807,10 @@ declare class Gateway {
     getConnectionBufferedEventBytes(connection: ConnectionState): number;
     /**
      * The single byte-bounded writer every event frame for a connection goes
-     * through — the generic broadcast copy AND the dedicated run-event stream
-     * frames (whose per-stream queues drain into sendEvent) both land here, so
-     * neither can bypass backpressure. On a healthy socket frames are written
-     * straight through; once the socket's observable bufferedAmount crosses the
-     * high-water mark frames queue here — bounded by bytes — and drain when the
-     * socket recovers. Overflow disconnects the connection.
+     * through. On a healthy socket frames are written straight through; once
+     * the socket's observable bufferedAmount crosses the high-water mark frames
+     * queue here — bounded by bytes — and drain when the socket recovers.
+     * Overflow disconnects the connection.
      * @param {ConnectionState} connection
      * @param {ConnectionEventWriterState} writer
      * @param {string} data

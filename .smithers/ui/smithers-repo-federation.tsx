@@ -30,6 +30,17 @@ import {
 } from "smithers-orchestrator/ui";
 
 const WORKFLOW_KEY = "smithers-repo-federation";
+const federationStyles = [
+  ".fed-layout { display:grid; grid-template-columns:minmax(0,1fr) 260px; gap:16px; }",
+  ".fed-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:16px; }",
+  ".fed-muted { opacity:.7; }",
+  ".fed-section { margin-top:16px; }",
+  ".fed-gates { opacity:.7; margin-top:8px; }",
+  ".fed-run-row { display:flex; justify-content:space-between; width:100%; padding:8px 10px; margin-bottom:4px; border:1px solid var(--border,#262629); border-radius:6px; background:transparent; color:inherit; cursor:pointer; }",
+  ".fed-run-row.active { background:var(--card,#1c1c1f); }",
+  ".fed-mono { font-family:ui-monospace,monospace; }",
+  "@media (max-width:900px) { .fed-layout { grid-template-columns:1fr; } .fed-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } }",
+].join("\n");
 
 const NEW_REPO_LANES = [
   "smithers-examples",
@@ -179,11 +190,11 @@ function App() {
         </>
       }
     >
-      <SmithersUiStyles />
+      <SmithersUiStyles extra={federationStyles} />
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 260px", gap: 16 }}>
+      <div className="fed-layout">
         <div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
+          <div className="fed-stats">
             <KpiStat label="Lanes pushed" value={`${lanesPushed} / ${ALL_LANES.length}`} />
             <KpiStat
               label="Manifest approvable"
@@ -257,7 +268,7 @@ function App() {
                   {inventory ? (
                     <>
                       <p>{asString(inventory.summary)}</p>
-                      <p style={{ opacity: 0.7 }}>
+                      <p className="fed-muted">
                         Manifest: {asString(inventory.manifestPath) || "—"} · DAG: {asString(inventory.dagPath) || "—"}{" "}
                         · Release plan: {asString(inventory.releasePlanPath) || "—"}
                       </p>
@@ -282,10 +293,10 @@ function App() {
                     <EmptyState title="No inventory yet" description="Waiting for the inventory step to run." />
                   )}
                   {manifestReview ? (
-                    <div style={{ marginTop: 16 }}>
+                    <div className="fed-section">
                       <SectionHeader title="Manifest review" />
                       <p>{asString(manifestReview.summary)}</p>
-                      <p style={{ opacity: 0.7 }}>
+                      <p className="fed-muted">
                         Boundary issues: {asArray(manifestReview.boundaryIssues).length} · Ambiguous utilities:{" "}
                         {asArray(manifestReview.ambiguousUtilities).length} · License gaps:{" "}
                         {asArray(manifestReview.licenseGaps).length}
@@ -303,7 +314,7 @@ function App() {
                 </CardHeader>
                 <CardContent>
                   <ApprovalPanel filter={{ workflow: WORKFLOW_KEY, runId: activeRunId }} />
-                  <p style={{ opacity: 0.7, marginTop: 8 }}>Gates: gate-manifest → gate-publish → gate-merge.</p>
+                  <p className="fed-gates">Gates: gate-manifest → gate-publish → gate-merge.</p>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -317,7 +328,7 @@ function App() {
                   {updateSmithers ? (
                     <>
                       <p>{asString(updateSmithers.summary)}</p>
-                      <p style={{ opacity: 0.7 }}>
+                      <p className="fed-muted">
                         Removed packages: {asArray(updateSmithers.removedPackages).length} · Stale-link gate:{" "}
                         {String(asBool(updateSmithers.staleLinkGateWired))} · Integration gate:{" "}
                         {String(asBool(updateSmithers.integrationGateWired))}
@@ -327,13 +338,13 @@ function App() {
                     <EmptyState title="Not run yet" description="The kernel-strip step hasn't produced output." />
                   )}
                   {removalPrs ? (
-                    <div style={{ marginTop: 16 }}>
+                    <div className="fed-section">
                       <SectionHeader title="Removal PRs" />
                       <p>{asString(removalPrs.summary)}</p>
                     </div>
                   ) : null}
                   {mergeRemovalPrs ? (
-                    <div style={{ marginTop: 16 }}>
+                    <div className="fed-section">
                       <SectionHeader title="Merged removal PRs" />
                       <p>{asString(mergeRemovalPrs.summary)}</p>
                     </div>
@@ -348,17 +359,17 @@ function App() {
                   <CardTitle>Release</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {createRepos ? <p style={{ opacity: 0.7 }}>{asString(createRepos.summary)}</p> : null}
+                  {createRepos ? <p className="fed-muted">{asString(createRepos.summary)}</p> : null}
                   {releaseDryRun ? (
                     <>
                       <p>{asString(releaseDryRun.summary)}</p>
-                      <p style={{ opacity: 0.7 }}>ok: {String(asBool(releaseDryRun.ok))}</p>
+                      <p className="fed-muted">ok: {String(asBool(releaseDryRun.ok))}</p>
                     </>
                   ) : (
                     <EmptyState title="No release dry-run yet" description="Waiting for all lanes to push." />
                   )}
                   {executeReleases ? (
-                    <div style={{ marginTop: 16 }}>
+                    <div className="fed-section">
                       <SectionHeader title="Executed releases" />
                       <p>{asString(executeReleases.summary)}</p>
                     </div>
@@ -376,7 +387,7 @@ function App() {
                   {finalVerify ? (
                     <>
                       <p>{asString(finalVerify.summary)}</p>
-                      <p style={{ opacity: 0.7 }}>approvable: {String(asBool(finalVerify.approvable))}</p>
+                      <p className="fed-muted">approvable: {String(asBool(finalVerify.approvable))}</p>
                       {finalFixList.length > 0 ? (
                         <Table>
                           <TableHeader>
@@ -405,17 +416,17 @@ function App() {
                     />
                   )}
                   {landedVerify ? (
-                    <div style={{ marginTop: 16 }}>
+                    <div className="fed-section">
                       <SectionHeader title="Landed verification (post-publish, post-merge)" />
                       <p>{asString(landedVerify.summary)}</p>
-                      <p style={{ opacity: 0.7 }}>approvable: {String(asBool(landedVerify.approvable))}</p>
+                      <p className="fed-muted">approvable: {String(asBool(landedVerify.approvable))}</p>
                     </div>
                   ) : null}
                   {report ? (
-                    <div style={{ marginTop: 16 }}>
+                    <div className="fed-section">
                       <SectionHeader title="Report" />
                       <p>{asString(report.summary)}</p>
-                      <p style={{ opacity: 0.7 }}>{asString(report.reportPath)}</p>
+                      <p className="fed-muted">{asString(report.reportPath)}</p>
                     </div>
                   ) : null}
                 </CardContent>
@@ -451,23 +462,11 @@ function App() {
           {runs.map((r) => (
             <button
               key={r.runId}
-              className={"run-row" + (r.runId === activeRunId ? " active" : "")}
+              className={"fed-run-row" + (r.runId === activeRunId ? " active" : "")}
               data-testid={`federation-run-${r.runId}`}
               onClick={() => setSelectedRunId(r.runId)}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                width: "100%",
-                padding: "8px 10px",
-                marginBottom: 4,
-                border: "1px solid var(--border, #262629)",
-                borderRadius: 6,
-                background: r.runId === activeRunId ? "var(--card, #1c1c1f)" : "transparent",
-                color: "inherit",
-                cursor: "pointer",
-              }}
             >
-              <span style={{ fontFamily: "ui-monospace,monospace" }}>{shortRunId(r.runId)}</span>
+              <span className="fed-mono">{shortRunId(r.runId)}</span>
               <StatusPill status={r.status ?? "?"} />
             </button>
           ))}

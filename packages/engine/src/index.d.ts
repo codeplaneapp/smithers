@@ -7,6 +7,7 @@ import * as _smithers_orchestrator_errors_SmithersError from '@smithers-orchestr
 import { SmithersError } from '@smithers-orchestrator/errors/SmithersError';
 import * as _smithers_orchestrator_db_adapter_RunRow from '@smithers-orchestrator/db/adapter/RunRow';
 import * as _smithers_orchestrator_driver_RunResult from '@smithers-orchestrator/driver/RunResult';
+import { buildSubflowChildRunId } from '@smithers-orchestrator/graph/subflow-run-lineage';
 import * as _smithers_orchestrator_db_adapter from '@smithers-orchestrator/db/adapter';
 import { SmithersDb as SmithersDb$1 } from '@smithers-orchestrator/db/adapter';
 import * as _smithers_orchestrator_observability_SmithersEvent from '@smithers-orchestrator/observability/SmithersEvent';
@@ -293,7 +294,7 @@ declare function executeChildWorkflow(parentWorkflow: _smithers_orchestrator_com
     output: unknown;
 }>;
 declare namespace __childWorkflowInternals {
-    export { buildChildWorkflowRunId };
+    export { buildSubflowChildRunId as buildChildWorkflowRunId };
     export { isChildRunLiveElsewhere };
     export { loadPreservedChildResult };
     export { normalizeChildInput };
@@ -306,13 +307,7 @@ type ChildWorkflowDefinition$1 = ChildWorkflowDefinition$2;
 type ChildWorkflowExecuteOptions = ChildWorkflowExecuteOptions$1;
 type RunResult$2 = _smithers_orchestrator_driver_RunResult.RunResult;
 type RunRow = _smithers_orchestrator_db_adapter_RunRow.RunRow;
-/**
- * @param {string} parentRunId
- * @param {string} stepId
- * @param {number} iteration
- * @returns {string}
- */
-declare function buildChildWorkflowRunId(parentRunId: string, stepId: string, iteration: number): string;
+
 /**
  * A child run is "live elsewhere" when another engine process is actively
  * executing it: its status is `running` and either its heartbeat is fresh or
@@ -461,7 +456,7 @@ declare class EventBus$1 extends EventEmitter<any> {
      */
     eventLogAnnotations(event: CorrelatedSmithersEvent): {
         runId: string;
-        eventType: "SupervisorStarted" | "SupervisorPollCompleted" | "RunAutoResumed" | "RunAutoResumeSkipped" | "RunStarted" | "RunStatusChanged" | "RunStateChanged" | "RunFinished" | "RunFailed" | "RunCancelled" | "RunContinuedAsNew" | "RunHijackRequested" | "RunHijacked" | "SandboxCreated" | "SandboxShipped" | "SandboxHeartbeat" | "SandboxBundleReceived" | "SandboxCompleted" | "SandboxFailed" | "SandboxDiffReviewRequested" | "SandboxDiffAccepted" | "SandboxDiffRejected" | "FrameCommitted" | "NodePending" | "NodeStarted" | "TaskHeartbeat" | "TaskHeartbeatTimeout" | "NodeFinished" | "NodeFailed" | "NodeCancelled" | "NodeSkipped" | "NodeRetrying" | "NodeWaitingApproval" | "NodeWaitingTimer" | "ApprovalRequested" | "ApprovalGranted" | "ApprovalAutoApproved" | "ApprovalDenied" | "ToolCallStarted" | "ToolCallFinished" | "NodeOutput" | "AgentEvent" | "RetryTaskStarted" | "RetryTaskFinished" | "RevertStarted" | "RevertFinished" | "TimeTravelStarted" | "TimeTravelFinished" | "TimeTravelJumped" | "EffectRevertStarted" | "EffectRevertFinished" | "EffectRevertFailed" | "SideEffectBoundaryCrossed" | "WorkflowReloadDetected" | "WorkflowReloaded" | "WorkflowReloadFailed" | "WorkflowReloadUnsafe" | "ScorerStarted" | "ScorerFinished" | "ScorerFailed" | "TokenUsageReported" | "SnapshotCaptured" | "RunForked" | "ReplayStarted" | "MemoryFactSet" | "MemoryRecalled" | "MemoryMessageSaved" | "OpenApiToolCalled" | "TimerCreated" | "TimerFired" | "TimerCancelled" | "AgentTraceEvent" | "AgentTraceSummary" | "AgentSessionEvent";
+        eventType: "SupervisorStarted" | "SupervisorPollCompleted" | "RunAutoResumed" | "RunAutoResumeSkipped" | "RunStarted" | "RunStatusChanged" | "RunStateChanged" | "RunFinished" | "RunFailed" | "RunCancelled" | "RunContinuedAsNew" | "RunHijackRequested" | "RunHijacked" | "OneshotSteerQueued" | "OneshotSteerDelivered" | "OneshotSteerAcknowledged" | "OneshotSteerFailed" | "OneshotRestartRequested" | "OneshotRestartLaunched" | "OneshotRestartFailed" | "SandboxCreated" | "SandboxShipped" | "SandboxHeartbeat" | "SandboxBundleReceived" | "SandboxCompleted" | "SandboxFailed" | "SandboxDiffReviewRequested" | "SandboxDiffAccepted" | "SandboxDiffRejected" | "FrameCommitted" | "NodePending" | "NodeStarted" | "TaskHeartbeat" | "TaskHeartbeatTimeout" | "NodeFinished" | "NodeFailed" | "NodeCancelled" | "NodeSkipped" | "NodeRetrying" | "NodeWaitingApproval" | "NodeWaitingTimer" | "ApprovalRequested" | "ApprovalGranted" | "ApprovalAutoApproved" | "ApprovalDenied" | "ToolCallStarted" | "ToolCallFinished" | "NodeOutput" | "AgentEvent" | "RetryTaskStarted" | "RetryTaskFinished" | "RevertStarted" | "RevertFinished" | "TimeTravelStarted" | "TimeTravelFinished" | "TimeTravelJumped" | "EffectRevertStarted" | "EffectRevertFinished" | "EffectRevertFailed" | "SideEffectBoundaryCrossed" | "WorkflowReloadDetected" | "WorkflowReloaded" | "WorkflowReloadFailed" | "WorkflowReloadUnsafe" | "ScorerStarted" | "ScorerFinished" | "ScorerFailed" | "TokenUsageReported" | "SnapshotCaptured" | "RunForked" | "ReplayStarted" | "MemoryFactSet" | "MemoryRecalled" | "MemoryMessageSaved" | "OpenApiToolCalled" | "TimerCreated" | "TimerFired" | "TimerCancelled" | "AgentTraceEvent" | "AgentTraceSummary" | "AgentSessionEvent";
     };
 }
 type CorrelationContext = _smithers_orchestrator_observability_correlation.CorrelationContext;
@@ -1256,6 +1251,7 @@ type WorkflowMakeBridgeRuntime = {
     readonly executeBody: RunBodyExecutor;
     executeChildWorkflow: <Schema>(workflow: SmithersWorkflow$1<Schema>, opts: RunOptions$1 & {
         runId: string;
+        bridgeExecutionId?: string;
     }) => Promise<RunResult$1>;
 };
 
@@ -2490,7 +2486,7 @@ declare function durationToMs(input: unknown): number | null;
  * @param {AnySchema} schema
  * @param {unknown} value
  */
-declare function encodeSchema(schema: AnySchema, value: unknown): unknown;
+declare function encodeSchema(schema: AnySchema, value: unknown): any;
 /**
  * @param {BuilderStepHandle} handle
  * @param {any} ctx
@@ -2504,7 +2500,7 @@ declare function evaluateSkip(handle: BuilderStepHandle, ctx: any, decodedInput:
  * @param {unknown} decodedInput
  * @param {any} env
  */
-declare function executeStepHandle(handle: BuilderStepHandle, ctx: any, decodedInput: unknown, env: any): Promise<unknown>;
+declare function executeStepHandle(handle: BuilderStepHandle, ctx: any, decodedInput: unknown, env: any): Promise<any>;
 /**
  * @param {BuilderNode} node
  * @param {any} db
