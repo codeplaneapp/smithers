@@ -117,6 +117,7 @@ import { buildOneshotChildArgs } from "./oneshot/buildOneshotChildArgs.js";
 import { loadOneshotConfig } from "./oneshot/loadOneshotConfig.js";
 import { saveOneshotConfig } from "./oneshot/saveOneshotConfig.js";
 import { resolveOneshotChain } from "./oneshot/resolveOneshotChain.js";
+import { classifyOneshotGoal } from "./oneshot/classifyOneshotGoal.js";
 import { rewriteOneshotBooleanValues } from "./oneshot/rewriteOneshotBooleanValues.js";
 import { selectOneshotAgents } from "./oneshot/selectOneshotAgents.js";
 import { createOneshotMonitorControl } from "./oneshot/monitor-control.js";
@@ -168,6 +169,7 @@ import {
   buildEvalReport,
   createEvalJudgeRunner,
   EVAL_JUDGE_PROVIDER_IDS,
+  evalSummaryExitCode,
   evaluateEvalCaseResultAsync,
   loadEvalCases,
   renderEvalPlan,
@@ -309,8 +311,9 @@ async function loadWorkflowDb(workflowPath) {
  * @param {SmithersDb} adapter
  * @param {string} runId
  * @param {string} workflowPath
+ * @param {{ acceptWorkflowChange?: boolean }} [options]
  */
-async function preflightRetryResume(adapter, runId, workflowPath) {
+async function preflightRetryResume(adapter, runId, workflowPath, options = {}) {
   const run = await adapter.getRun(runId);
   if (!run) return;
   const resolvedWorkflowPath = resolve(cliWorkspace.cwd(), workflowPath);
@@ -326,6 +329,7 @@ async function preflightRetryResume(adapter, runId, workflowPath) {
       vcsRevision: null,
     },
     resolvedWorkflowPath,
+    { acceptWorkflowChange: options.acceptWorkflowChange === true },
   );
 }
 /**
@@ -784,9 +788,18 @@ const ENGINE_TERMINATION_SIGNALS = /** @type {NodeJS.Signals[]} */ (["SIGINT", "
 /** Conventional 128 + signo exit codes. */
 const SIGNAL_EXIT_CODES = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
 function setupAbortSignal() {
+  /** @type {AbortController & { setForceExitCleanup?: (cleanup: () => Promise<void>) => void }} */
   const abort = new AbortController();
   const startedAtMs = Date.now();
   let signalCount = 0;
+  let forceExitCleanup = async () => {};
+  abort.setForceExitCleanup = (cleanup) => {
+    forceExitCleanup = typeof cleanup === "function" ? cleanup : async () => {};
+  };
+  const forceExit = async (exitCode) => {
+    await forceExitCleanup().catch(() => undefined);
+    process.exit(exitCode);
+  };
   /**
    * @param {string} signal
    */
@@ -802,7 +815,7 @@ function setupAbortSignal() {
     if (signalCount >= 2) {
       // Second signal: graceful cancellation is taking too long — exit now.
       process.stderr.write(`[smithers] received ${signal} again, exiting immediately.\n`);
-      process.exit(exitCode);
+      void forceExit(exitCode);
       return;
     }
     process.stderr.write(`[smithers] cancelling run... (signal again to force-exit)\n`);
@@ -812,7 +825,7 @@ function setupAbortSignal() {
     // alive when shutdown completes normally.
     const deadline = setTimeout(() => {
       process.stderr.write(`\n[smithers] graceful shutdown timed out, exiting.\n`);
-      process.exit(exitCode);
+      void forceExit(exitCode);
     }, FORCE_EXIT_BACKSTOP_MS);
     if (typeof deadline.unref === "function") deadline.unref();
   };
@@ -1674,15 +1687,21 @@ async function buildInspectSnapshot(adapter, runId, options = {}) {
   }
   const r = run;
   const nodes = await adapter.listNodes(runId);
-  const finishedEvents = r.status === "finished" ? await adapter.listEventsByType(runId, "RunFinished") : [];
+  const isSuccessTerminal = r.status === "finished" || r.status === "continued";
+  const finishedEvents = isSuccessTerminal ? await adapter.listEventsByType(runId, "RunFinished") : [];
   const finishedPayload = parseEventPayload(finishedEvents.at(-1)?.payloadJson ?? "");
-  const failedChildren =
-    typeof finishedPayload.failedChildren === "number" && finishedPayload.failedChildren > 0
-      ? finishedPayload.failedChildren
-      : 0;
-  const failedChildKeys = Array.isArray(finishedPayload.failedChildKeys)
-    ? finishedPayload.failedChildKeys.filter((key) => typeof key === "string")
+  const eventHasFailedChildren =
+    typeof finishedPayload.failedChildren === "number" &&
+    Number.isInteger(finishedPayload.failedChildren) &&
+    finishedPayload.failedChildren >= 0;
+  const derivedFailedChildKeys = isSuccessTerminal
+    ? nodes.filter((node) => node.state === "failed").map((node) => `${node.nodeId}::${node.iteration ?? 0}`)
     : [];
+  const failedChildren = eventHasFailedChildren ? finishedPayload.failedChildren : derivedFailedChildKeys.length;
+  const failedChildKeys =
+    eventHasFailedChildren && Array.isArray(finishedPayload.failedChildKeys)
+      ? finishedPayload.failedChildKeys.filter((key) => typeof key === "string")
+      : derivedFailedChildKeys;
   const approvals = await adapter.listPendingApprovals(runId);
   const waitingTimers = await listWaitingTimers(adapter, runId);
   const loops = await adapter.listRalph(runId);
@@ -1985,7 +2004,7 @@ const oneshotOptions = z
   .object({
     goalFile: z.string().optional().describe("Read a long goal from a file"),
     model: z.string().optional().describe("Model slot or canonical model id"),
-    agent: z.enum(["codex", "kimi", "claude-code", "opencode"]).optional().describe("Force an agent engine"),
+    agent: z.enum(["codex", "kimi", "claude-code", "opencode", "pi"]).optional().describe("Force an agent engine"),
     review: z.enum(["on", "off"]).optional().describe("Review preference for this run"),
     setReview: z.enum(["on", "off"]).optional().describe("Persist the review preference"),
     setTrivial: z.enum(["direct", "oneshot"]).optional().describe("Persist trivial-task routing"),
@@ -3217,26 +3236,60 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
         process.stderr.write(`⚠ Monitor not started: run ${monitoredRunId} did not register in time.\n`);
         return;
       }
-      const monitorRunId = buildMonitorRunId(monitoredRunId);
-      const child = spawn(
-        "bun",
-        [
-          fileURLToPath(import.meta.url),
-          ...buildMonitorLaunchArgs({
-            monitorEntryFile: monitorPlan.monitor.entryFile,
-            watchRunId: monitoredRunId,
-            watchWorkflowId: workflowIdFromPath(workflowPath),
-            watchWorkflowPath: resolvedWorkflowPath,
-            monitorRunId,
-            root: options.root,
-            logDir: options.logDir,
-            backend: options.backend,
-          }),
-        ],
-        { detached: true, stdio: "ignore", env: buildMonitorLaunchEnv() },
+      const existingMonitor = (
+        await adapter.listRuns(1_000, undefined, undefined, { parentRunId: monitoredRunId })
+      ).find(
+        (candidate) =>
+          candidate.workflowPath && resolve(candidate.workflowPath) === resolve(monitorPlan.monitor.entryFile),
       );
+      const monitorRunId = existingMonitor?.runId ?? buildMonitorRunId(monitoredRunId);
+      if (existingMonitor?.status === "running" && isRunHeartbeatFresh(existingMonitor)) {
+        monitorRun = { runId: monitorRunId, pid: undefined };
+        process.stderr.write(`[smithers] monitor ${monitorRunId} already watching ${monitoredRunId}; adopted.\n`);
+        return;
+      }
+      const monitorArgs = buildMonitorLaunchArgs({
+        monitorEntryFile: monitorPlan.monitor.entryFile,
+        watchRunId: monitoredRunId,
+        watchWorkflowId: workflowIdFromPath(workflowPath),
+        watchWorkflowPath: resolvedWorkflowPath,
+        monitorRunId,
+        root: options.root,
+        logDir: options.logDir,
+        backend: options.backend,
+      });
+      if (existingMonitor) monitorArgs.push("--resume", "--force");
+      const child = spawn("bun", [fileURLToPath(import.meta.url), ...monitorArgs], {
+        detached: true,
+        stdio: "ignore",
+        env: buildMonitorLaunchEnv(),
+      });
       child.unref();
       monitorRun = { runId: monitorRunId, pid: child.pid ?? undefined };
+      const admissionDeadline = Date.now() + MONITOR_PARENT_WAIT_MS;
+      let admitted = false;
+      while (Date.now() < admissionDeadline && !abort.signal.aborted) {
+        const currentMonitor = await adapter.getRun(monitorRunId);
+        if (
+          currentMonitor &&
+          (!existingMonitor ||
+            currentMonitor.runtimeOwnerId !== existingMonitor.runtimeOwnerId ||
+            currentMonitor.heartbeatAtMs !== existingMonitor.heartbeatAtMs)
+        ) {
+          admitted = true;
+          break;
+        }
+        if (child.exitCode !== null || child.signalCode !== null) break;
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, MONITOR_PARENT_POLL_MS));
+      }
+      if (!admitted) {
+        if (child.pid) await terminateRunOwner(child.pid).catch(() => undefined);
+        monitorRun = null;
+        process.stderr.write(
+          `⚠ Monitor ${monitorRunId} failed to register${child.exitCode !== null ? ` (exit ${child.exitCode})` : ""}; run ${monitoredRunId} continues without it.\n`,
+        );
+        return;
+      }
       process.stderr.write(
         `[smithers] monitor ${monitorRunId} watching ${monitoredRunId} (${relative(process.cwd(), monitorPlan.monitor.entryFile)})\n`,
       );
@@ -3244,13 +3297,18 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
     // Fire-and-forget: the monitor runs ALONGSIDE the workflow, so this must
     // not gate the run starting. Failures are reported, never fatal — a broken
     // monitor must not take down the run it was meant to protect.
-    const monitorStarting = startMonitor().catch((error) => {
+    const monitorStarting = startMonitor().catch(async (error) => {
+      if (monitorRun?.pid) await terminateRunOwner(monitorRun.pid).catch(() => undefined);
+      monitorRun = null;
       process.stderr.write(`⚠ Monitor launch failed: ${error instanceof Error ? error.message : String(error)}\n`);
     });
     // A monitor must never outlive the run it watches. Cancelling the watched
     // run already cascades to it (`parent_run_id`); this closes the other door,
     // where the watched run simply finishes.
+    let monitorStopped = false;
     const stopMonitor = async () => {
+      if (monitorStopped) return;
+      monitorStopped = true;
       await monitorStarting;
       if (!monitorRun) return;
       try {
@@ -3273,12 +3331,15 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
         );
       }
     };
+    abort.setForceExitCleanup?.(stopMonitor);
     // Shared run-completion response for both the plain and --serve paths:
     // set the exit code, launch the post-failure autopsy on failure, narrate
     // the run for a human (a cheap agent writes + opens an HTML summary), and
     // attach the next-steps CTA (concise for humans, agent script otherwise).
     const finishRun = async (result) => {
-      await stopMonitor();
+      if (["finished", "failed", "cancelled", "canceled", "continued"].includes(result.status)) {
+        await stopMonitor();
+      }
       process.exitCode = formatStatusExitCode(result.status);
       if (result.status === "failed") {
         launchPostFailureAutopsy({
@@ -3450,32 +3511,38 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
       });
       return await finishRun(result);
     }
-    const result = await Effect.runPromise(
-      runWorkflow(workflow, {
-        input,
-        runId: monitoredRunId,
-        parentRunId: options.parentRunId,
-        ...(Object.keys(runConfig).length > 0 ? { config: runConfig } : {}),
-        ...buildDurabilityRunOptions({
-          resume,
-          force: options.force,
-          acceptWorkflowChange: options.acceptWorkflowChange,
+    let result;
+    try {
+      result = await Effect.runPromise(
+        runWorkflow(workflow, {
+          input,
+          runId: monitoredRunId,
+          parentRunId: options.parentRunId,
+          ...(Object.keys(runConfig).length > 0 ? { config: runConfig } : {}),
+          ...buildDurabilityRunOptions({
+            resume,
+            force: options.force,
+            acceptWorkflowChange: options.acceptWorkflowChange,
+          }),
+          resumeClaim,
+          workflowPath: resolvedWorkflowPath,
+          maxConcurrency: options.maxConcurrency,
+          rootDir,
+          logDir,
+          allowNetwork: options.allowNetwork,
+          maxOutputBytes: options.maxOutputBytes,
+          toolTimeoutMs: options.toolTimeoutMs,
+          hot: options.hot,
+          annotations,
+          startedBy,
+          onProgress,
+          signal: abort.signal,
         }),
-        resumeClaim,
-        workflowPath: resolvedWorkflowPath,
-        maxConcurrency: options.maxConcurrency,
-        rootDir,
-        logDir,
-        allowNetwork: options.allowNetwork,
-        maxOutputBytes: options.maxOutputBytes,
-        toolTimeoutMs: options.toolTimeoutMs,
-        hot: options.hot,
-        annotations,
-        startedBy,
-        onProgress,
-        signal: abort.signal,
-      }),
-    );
+      );
+    } catch (error) {
+      await stopMonitor();
+      throw error;
+    }
     return await finishRun(result);
   } catch (err) {
     return fail({ code: "RUN_FAILED", message: err?.message ?? String(err), exitCode: 1 });
@@ -6232,12 +6299,16 @@ const cli = Cli.create({
         saveOneshotConfig(config);
       }
       const detections = detectAvailableAgents(process.env, { cwd: taskCwd });
-      const relevant = detections.filter((item) => ["claude", "codex", "kimi", "opencode"].includes(item.id));
+      const relevant = detections.filter((item) => ["claude", "codex", "kimi", "opencode", "pi"].includes(item.id));
       const usable = relevant.filter((item) => item.usable && !item.deprecated);
       if (c.options.status) {
         let chain = [];
         try {
-          chain = resolveOneshotChain(detections, { model: c.options.model, agent: c.options.agent });
+          chain = resolveOneshotChain(detections, {
+            model: c.options.model,
+            agent: c.options.agent,
+            goal: c.args.goal,
+          });
         } catch (error) {
           if (c.options.model || c.options.agent) {
             return fail({
@@ -6249,6 +6320,7 @@ const cli = Cli.create({
         }
         return c.ok({
           usableAgents: usable.map((item) => item.id),
+          taskType: classifyOneshotGoal(c.args.goal),
           chain,
           preferences: { review: config.review, trivial: config.trivial },
           announced: config.announced,
@@ -6453,6 +6525,7 @@ const cli = Cli.create({
           cwd: taskCwd,
           model: c.options.model,
           agent: c.options.agent,
+          goal,
         });
         const workflow = await buildOneshotWorkflow({
           cwd: taskCwd,
@@ -6475,10 +6548,24 @@ const cli = Cli.create({
         // reconstructs it instead; without this a detached oneshot that loses
         // its engine can never be auto-resumed (it was skipped forever with
         // "workflow file not found at (missing path)").
+        let builtinResumeGoalArgs = [goal];
+        if (Buffer.byteLength(goal, "utf8") > 64 * 1024) {
+          const smithersHome =
+            process.env.SMITHERS_HOME ||
+            (process.env.HOME ? resolve(process.env.HOME, ".smithers") : resolve(taskCwd, ".smithers"));
+          const resumeGoalDir = resolve(smithersHome, "resume-goals");
+          const resumeGoalPath = resolve(
+            resumeGoalDir,
+            `${crypto.createHash("sha256").update(effectiveRunId).digest("hex")}.txt`,
+          );
+          mkdirSync(resumeGoalDir, { recursive: true });
+          writeFileSync(resumeGoalPath, goal, { mode: 0o600 });
+          builtinResumeGoalArgs = ["--goal-file", resumeGoalPath];
+        }
         const builtinResume = buildBuiltinResumeConfig({
           command: "oneshot",
           args: [
-            ...(c.options.goalFile ? ["--goal-file", resolve(process.cwd(), c.options.goalFile)] : [goal]),
+            ...builtinResumeGoalArgs,
             "--cwd",
             taskCwd,
             "--detach",
@@ -7048,7 +7135,7 @@ const cli = Cli.create({
           force: c.options.force,
         });
         report = { ...report, reportPath };
-        process.exitCode = report.summary.failed > 0 ? 1 : 0;
+        process.exitCode = evalSummaryExitCode(report.summary);
         // Only a human on a TTY gets the formatted `renderEvalReport` text.
         // A piped/agent consumer (non-TTY, default TOON) must get a single
         // coherent TOON envelope, NOT the human report followed by a stray
@@ -9322,7 +9409,9 @@ const cli = Cli.create({
             }
             reportProgress(event);
           };
-          await preflightRetryResume(adapter, c.options.runId, c.args.workflow);
+          await preflightRetryResume(adapter, c.options.runId, c.args.workflow, {
+            acceptWorkflowChange: c.options.acceptWorkflowChange,
+          });
           retryState = await captureRetryTaskState(adapter, workflow, c.options.runId);
           const retryResumeClaim = {
             claimOwnerId: `supervisor:retry-task:${process.pid}:${crypto.randomUUID()}`,
@@ -9334,6 +9423,7 @@ const cli = Cli.create({
             iteration: c.options.iteration,
             resetDependents: c.options.deps,
             force: c.options.force,
+            acceptWorkflowChange: c.options.acceptWorkflowChange,
             onProgress,
             resumeClaim: retryResumeClaim,
           });
