@@ -28,37 +28,60 @@ export type UseAutosaveDocResult = {
 export function useAutosaveDoc(options: UseAutosaveDocOptions): UseAutosaveDocResult {
   const saveRef = useRef(options.save);
   const readExternalRef = useRef(options.readExternal);
-  useEffect(() => {
-    saveRef.current = options.save;
-    readExternalRef.current = options.readExternal;
-  });
+  const optionsRef = useRef(options);
+  // These proxies must observe callbacks from this render. Updating in an
+  // effect leaves a commit where saveNow still calls stale/absent callbacks.
+  saveRef.current = options.save;
+  readExternalRef.current = options.readExternal;
+  optionsRef.current = options;
 
   const docRef = useRef<AutosaveDoc | null>(null);
-  if (docRef.current === null) {
+  const getDoc = useCallback((): AutosaveDoc => {
+    if (docRef.current) return docRef.current;
+    const current = optionsRef.current;
     docRef.current = createAutosaveDoc({
-      initialValue: options.initialValue,
-      initialMtimeMs: options.initialMtimeMs,
-      debounceMs: options.debounceMs,
-      schedule: options.schedule,
+      initialValue: current.initialValue,
+      initialMtimeMs: current.initialMtimeMs,
+      debounceMs: current.debounceMs,
+      schedule: current.schedule,
       save: (value) => saveRef.current(value),
-      readExternal: options.readExternal ? () => readExternalRef.current!() : undefined,
+      // Always install the proxy so a callback supplied after mount is picked
+      // up. Throwing while absent is intentional: the state machine treats an
+      // unavailable conflict check as non-blocking.
+      readExternal: async () => {
+        const readExternal = readExternalRef.current;
+        if (!readExternal) throw new Error("No external document reader is configured.");
+        return readExternal();
+      },
     });
-  }
-  useEffect(
-    () => () => {
-      docRef.current?.dispose();
-      docRef.current = null;
-    },
-    [],
-  );
+    return docRef.current;
+  }, []);
 
-  const subscribe = useCallback((listener: () => void) => docRef.current!.subscribe(listener), []);
-  const getSnapshot = useCallback(() => docRef.current!.getSnapshot(), []);
+  getDoc();
+
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      // StrictMode immediately re-runs effect setup without re-rendering.
+      // Deferring disposal by one microtask lets that setup retain the same
+      // live machine and its pending save; a real unmount still disposes it.
+      queueMicrotask(() => {
+        if (mountedRef.current) return;
+        docRef.current?.dispose();
+        docRef.current = null;
+      });
+    };
+  }, []);
+
+  const subscribe = useCallback((listener: () => void) => getDoc().subscribe(listener), [getDoc]);
+  const getSnapshot = useCallback(() => getDoc().getSnapshot(), [getDoc]);
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
-  const setValue = useCallback((value: string) => docRef.current!.setValue(value), []);
-  const saveNow = useCallback(() => docRef.current!.saveNow(), []);
-  const discardExternal = useCallback(() => docRef.current!.discardExternal(), []);
+  const setValue = useCallback((value: string) => getDoc().setValue(value), [getDoc]);
+  const saveNow = useCallback(() => getDoc().saveNow(), [getDoc]);
+  const discardExternal = useCallback(() => getDoc().discardExternal(), [getDoc]);
 
   return {
     value: snapshot.value,
