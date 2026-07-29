@@ -20,6 +20,10 @@ describe("workflow make bridge internals", () => {
     expect(I.isSuspendingStatus("waiting-event")).toBe(true);
     expect(I.isSuspendingStatus("waiting-timer")).toBe(true);
     expect(I.isSuspendingStatus("finished")).toBe(false);
+    expect(I.statusAfterWorkflowSuspended("running")).toBe("paused");
+    expect(I.statusAfterWorkflowSuspended(undefined)).toBe("paused");
+    expect(I.statusAfterWorkflowSuspended("waiting-event")).toBe("waiting-event");
+    expect(I.statusAfterWorkflowSuspended("failed")).toBe("failed");
   });
 
   test("scopes workflow make bridge runtime in async local storage", () => {

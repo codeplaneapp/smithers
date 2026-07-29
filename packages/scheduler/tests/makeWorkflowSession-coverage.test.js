@@ -148,6 +148,22 @@ describe("makeWorkflowSession timer scheduling", () => {
     expect(decision.reason._tag).toBe("Timer");
     expect(decision.reason.resumeAtMs).toBe(5_000 + 3_600_000);
   });
+
+  test("a Subflow suspended on a child timer gets a bounded future poll deadline", () => {
+    const session = makeWorkflowSession({ nowMs: () => 5_000 });
+    const subflow = descriptor("child", { meta: { __subflow: true } });
+    expect(run(session.submitGraph(graph([subflow])))._tag).toBe("Execute");
+
+    const decision = run(
+      session.taskFailed({
+        nodeId: "child",
+        iteration: 0,
+        error: { details: { suspensionStatus: "waiting-timer" } },
+      }),
+    );
+
+    expect(decision).toEqual({ _tag: "Wait", reason: { _tag: "Timer", resumeAtMs: 6_000 } });
+  });
 });
 
 describe("makeWorkflowSession deadlock diagnostics", () => {

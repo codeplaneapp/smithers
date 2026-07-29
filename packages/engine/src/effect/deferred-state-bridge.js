@@ -992,6 +992,10 @@ async function syncWaitForEventDurableDeferredFromDb(adapter, runId, desc, snaps
       signalName: snapshot.signalName,
       correlationId: snapshot.correlationId ?? null,
       afterSeq,
+      // A seq cursor prevents replay across iterations of the same node. The
+      // start-time floor also prevents a different WaitForEvent node from
+      // consuming an older matching signal that predates this wait.
+      ...(expectedSignalSeq === undefined ? { receivedAfterMs: snapshot.startedAtMs } : {}),
       limit: 1,
     }),
   );

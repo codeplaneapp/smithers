@@ -8122,7 +8122,71 @@ async function runWorkflowBodyDriver(workflow, opts) {
         return completeSessionTask(task);
       }
     }
-    const waitMs = Math.max(0, resumeAtMs - nowMs());
+    // A Subflow inherits waiting-timer when its child parks on a Timer, but
+    // the parent descriptor has no __timer metadata for the deferred bridge
+    // to persist. Stamp the bounded scheduler poll deadline on the current
+    // parent attempt so the gateway timer sweep can wake it durably. Older
+    // poll attempts are closed to keep a stale past deadline from winning the
+    // gateway's waiting-attempt lookup.
+    const subflows =
+      lastGraph?.tasks.filter((candidate) => {
+        const state = sessionStates.get(buildStateKey(candidate.nodeId, candidate.iteration));
+        return candidate.meta?.__subflow && state === "waiting-timer";
+      }) ?? [];
+    let earliestSubflowPollAtMs = null;
+    for (const task of subflows) {
+      const childRunId = getSubflowChildRunId(task, runId);
+      let childResumeAtMs = null;
+      if (childRunId) {
+        const childNodes = await Effect.runPromise(adapter.listNodes(childRunId));
+        for (const childNode of childNodes) {
+          if (childNode.state !== "waiting-timer") continue;
+          const childAttempts = await Effect.runPromise(
+            adapter.listAttempts(childRunId, childNode.nodeId, childNode.iteration ?? 0),
+          );
+          const childWaiting = childAttempts.find((attempt) => attempt.state === "waiting-timer");
+          const firesAtMs = Number(parseAttemptMetaJson(childWaiting?.metaJson)?.timer?.firesAtMs);
+          if (Number.isFinite(firesAtMs)) {
+            childResumeAtMs = childResumeAtMs == null ? firesAtMs : Math.min(childResumeAtMs, firesAtMs);
+          }
+        }
+      }
+      const subflowPollAtMs =
+        childResumeAtMs != null && childResumeAtMs > nowMs() ? childResumeAtMs : Math.max(resumeAtMs, nowMs() + 1);
+      earliestSubflowPollAtMs =
+        earliestSubflowPollAtMs == null ? subflowPollAtMs : Math.min(earliestSubflowPollAtMs, subflowPollAtMs);
+      const attempts = await Effect.runPromise(adapter.listAttempts(runId, task.nodeId, task.iteration));
+      const waitingAttempts = attempts
+        .filter((attempt) => attempt.state === "waiting-timer")
+        .sort((left, right) => right.attempt - left.attempt);
+      const current = waitingAttempts[0];
+      if (!current) continue;
+      for (const stale of waitingAttempts.slice(1)) {
+        await Effect.runPromise(
+          adapter.updateAttempt(runId, task.nodeId, task.iteration, stale.attempt, {
+            state: "cancelled",
+            finishedAtMs: nowMs(),
+          }),
+        );
+      }
+      await Effect.runPromise(
+        adapter.updateAttempt(runId, task.nodeId, task.iteration, current.attempt, {
+          metaJson: JSON.stringify({
+            ...parseAttemptMetaJson(current.metaJson),
+            timer: {
+              firesAtMs: subflowPollAtMs,
+              kind: "subflow-poll",
+              childRunId,
+            },
+          }),
+        }),
+      );
+    }
+    const effectiveResumeAtMs =
+      tasks.length === 0 && earliestSubflowPollAtMs != null
+        ? earliestSubflowPollAtMs
+        : Math.min(resumeAtMs, earliestSubflowPollAtMs ?? resumeAtMs);
+    const waitMs = Math.max(0, effectiveResumeAtMs - nowMs());
     if (waitMs <= 0) {
       return submitLastGraph();
     }

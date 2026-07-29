@@ -95,6 +95,7 @@ function preferWaitReason(current, candidate) {
   }
   return current;
 }
+const SUSPENDED_SUBFLOW_TIMER_POLL_MS = 1_000;
 /**
  * @param {SessionState} state
  * @param {number} currentTimeMs
@@ -118,11 +119,13 @@ function findWaitingReason(state, currentTimeMs) {
       const eventName = typeof descriptor.meta?.__eventName === "string" ? descriptor.meta.__eventName : "";
       primaryReason = preferWaitReason(primaryReason, { _tag: "Event", eventName });
     } else if (taskState === "waiting-timer") {
-      // A task only reaches waiting-timer once decide() has validated its
-      // spec, so this cannot be null in practice; the fallback is defensive.
+      // A Subflow can inherit waiting-timer from its child without carrying
+      // timer metadata of its own. Give the engine a bounded future deadline
+      // so it can durably park and poll the child instead of re-deciding now.
+      const resumeAtMs = timerResumeAtMs(state, descriptor, currentTimeMs);
       primaryReason = preferWaitReason(primaryReason, {
         _tag: "Timer",
-        resumeAtMs: timerResumeAtMs(state, descriptor, currentTimeMs) ?? currentTimeMs,
+        resumeAtMs: resumeAtMs ?? currentTimeMs + SUSPENDED_SUBFLOW_TIMER_POLL_MS,
       });
     } else if (taskState === "waiting-quota") {
       quotaBlockedCount += 1;

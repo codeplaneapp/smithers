@@ -1,7 +1,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { createSmithers, HumanTask, Signal } from "smithers-orchestrator";
+import { createSmithers, HumanTask, Parallel, Signal, Timer } from "smithers-orchestrator";
 import { coverWorkflow, expectFullCoverage, fakeAgent, WorkflowCoverageError } from "../src/index.ts";
 
 const valueSchema = z.object({ value: z.string() });
@@ -228,6 +228,22 @@ describe("coverWorkflow", () => {
     expect(attempts).toBe(2);
     expect(result.errors).toEqual([]);
     expect(result.taskOutputs.work).toEqual([{ value: "recovered" }]);
+  });
+
+  test("fires the earliest matching timer when unequal timers wait in parallel", async () => {
+    const { Workflow, smithers } = createSmithers({}, { dbPath: ":memory:" });
+    const workflow = smithers(() => (
+      <Workflow name="parallel-timer-coverage">
+        <Parallel>
+          <Timer id="short" duration="1s" />
+          <Timer id="long" duration="1h" />
+        </Parallel>
+      </Workflow>
+    ));
+
+    const result = await coverWorkflow(workflow);
+
+    expect(result.executed).toEqual(["short", "long"]);
   });
 
   test("aggregates coverage over multiple inputs", async () => {

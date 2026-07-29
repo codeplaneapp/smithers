@@ -64,6 +64,14 @@ function isSuspendingStatus(status) {
     status === "paused"
   );
 }
+const TERMINAL_RUN_STATUSES = new Set(["finished", "failed", "cancelled", "canceled"]);
+/**
+ * @param {string | null | undefined} status
+ */
+function statusAfterWorkflowSuspended(status) {
+  if (status && (isSuspendingStatus(status) || TERMINAL_RUN_STATUSES.has(status))) return status;
+  return "paused";
+}
 /**
  * @param {ReturnType<typeof makeBridgeWorkflow>} workflowBridge
  * @param {Scope.CloseableScope} scope
@@ -165,7 +173,7 @@ function createWorkflowMakeBridgeRuntime(services) {
       }
       const adapter = new SmithersDb(workflow.db);
       const run = await Effect.runPromise(adapter.getRun(lastRunIdRef.current));
-      const status = run && isSuspendingStatus(run.status) ? run.status : "cancelled";
+      const status = statusAfterWorkflowSuspended(run?.status);
       return {
         runId: lastRunIdRef.current,
         status,
@@ -257,7 +265,7 @@ export async function runWorkflowWithMakeBridge(workflow, opts, executeBody) {
       throw Cause.squash(result.exit.cause);
     }
     const run = await Effect.runPromise(adapter.getRun(lastRunIdRef.current));
-    const status = run && isSuspendingStatus(run.status) ? run.status : "cancelled";
+    const status = statusAfterWorkflowSuspended(run?.status);
     return {
       runId: lastRunIdRef.current,
       status,
@@ -273,6 +281,7 @@ export const __workflowMakeBridgeInternals = {
   executeRegisteredChildWorkflow,
   getWorkflowNamespace,
   isSuspendingStatus,
+  statusAfterWorkflowSuspended,
   makeBridgeWorkflow,
   registerBridgeWorkflow,
 };

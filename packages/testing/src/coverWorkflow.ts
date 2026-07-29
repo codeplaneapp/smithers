@@ -150,6 +150,7 @@ type MutablePassState = {
   approvals: WorkflowCoverageDecision[];
   taskFailures: WorkflowCoverageFailure[];
   approvalOutputs: Map<string, unknown>;
+  timerDeadlines: Map<string, number>;
   latestGraph?: WorkflowGraph;
   nowMs: number;
 };
@@ -386,6 +387,32 @@ function waitingTask(
     .find((task) => states.get(stateKey(task)) === expectedState && (!predicate || predicate(task)));
 }
 
+function timerDeadline(state: MutablePassState, task: TaskDescriptor): number | undefined {
+  const key = stateKey(task);
+  const existing = state.timerDeadlines.get(key);
+  if (existing !== undefined) return existing;
+
+  const until = task.meta?.__timerUntil;
+  let deadline: number | undefined;
+  if (typeof until === "string" && until.length > 0) {
+    const parsed = Date.parse(until);
+    if (Number.isFinite(parsed)) deadline = Math.floor(parsed);
+  } else {
+    const duration = task.meta?.__timerDuration;
+    if (typeof duration === "string") {
+      const match = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/.exec(duration.trim().toLowerCase());
+      const multipliers = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 } as const;
+      const multiplier = match ? multipliers[(match[2] ?? "ms") as keyof typeof multipliers] : undefined;
+      const amount = match ? Number(match[1]) : Number.NaN;
+      if (multiplier !== undefined && Number.isFinite(amount)) {
+        deadline = state.nowMs + Math.floor(amount * multiplier);
+      }
+    }
+  }
+  if (deadline !== undefined) state.timerDeadlines.set(key, deadline);
+  return deadline;
+}
+
 function appendOutput(record: Record<string, unknown[]>, key: string, value: unknown): void {
   (record[key] ??= []).push(value);
 }
@@ -415,6 +442,7 @@ async function runCoveragePass<Schema>(
     approvals: [],
     taskFailures: [],
     approvalOutputs: new Map(),
+    timerDeadlines: new Map(),
     nowMs: Date.now(),
   };
   const callerMocks = options.mocks ?? {};
@@ -534,7 +562,16 @@ async function runCoveragePass<Schema>(
         }
         if (reason._tag === "Timer") {
           const states = await runEffect<Map<string, string>>(session.getTaskStates());
-          const task = waitingTask(state, states, "waiting-timer");
+          const waiting = [...state.descriptors.values()]
+            .reverse()
+            .filter((candidate) => states.get(stateKey(candidate)) === "waiting-timer");
+          const deadlines = waiting.map((candidate) => ({ candidate, deadline: timerDeadline(state, candidate) }));
+          const task =
+            deadlines.find(({ deadline }) => deadline === reason.resumeAtMs)?.candidate ??
+            deadlines
+              .filter((entry): entry is { candidate: TaskDescriptor; deadline: number } => entry.deadline !== undefined)
+              .sort((left, right) => left.deadline - right.deadline)[0]?.candidate ??
+            (waiting.length === 1 ? waiting[0] : undefined);
           if (!task) throw new Error("coverWorkflow(): waiting timer has no rendered task");
           state.nowMs = Math.max(state.nowMs, reason.resumeAtMs);
           state.executionOrder.push(task.nodeId);
