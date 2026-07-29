@@ -61,7 +61,9 @@ test("every seeded init-pack workflow renders its graph without a load-time erro
     "init.tsx",
     "post-failure.tsx",
     "share-pack.tsx",
+    "smithers-repo-federation.tsx",
     "upgrade.tsx",
+    "whole-foods-meal-planner.tsx",
   ]);
 
   // `graph` loads the workflow and builds one frame (running createSmithers and
