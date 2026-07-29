@@ -42,7 +42,14 @@ async function render(element, { outputs = {}, iterations } = {}) {
 }
 
 const monitor = (props = {}) => (
-  <Monitor watchRunId="run-under-watch" agent={agent} healthOutput="health" actionOutput="action" {...props} />
+  <Monitor
+    watchRunId="run-under-watch"
+    watchWorkflowPath="/repo/workflows/nightly.tsx"
+    agent={agent}
+    healthOutput="health"
+    actionOutput="action"
+    {...props}
+  />
 );
 
 describe("<Monitor> classify → route → heal", () => {
@@ -65,9 +72,22 @@ describe("<Monitor> classify → route → heal", () => {
     expect(ids).not.toContain("monitor-escalate-stalled");
   });
 
-  test("wedged-node heals by default, because retrying a node discards nothing", async () => {
-    const { ids } = await render(monitor(), { outputs: sample({ condition: "wedged-node" }) });
+  test("wedged-node heals by default with the exact reset command", async () => {
+    const { graph, ids } = await render(monitor(), { outputs: sample({ condition: "wedged-node" }) });
     expect(ids).toContain("monitor-wedged-node");
+    const handler = graph.tasks.find((task) => task.nodeId === "monitor-wedged-node");
+    expect(String(handler.prompt)).toContain(
+      "retry-task '/repo/workflows/nightly.tsx' --run-id 'run-under-watch' --node-id 'implement'",
+    );
+    expect(String(handler.prompt)).toContain("resets that node's output and downstream dependents");
+    expect(String(handler.prompt)).not.toContain("discards nothing");
+  });
+
+  test("stalled resume uses the watched workflow path", async () => {
+    const { graph } = await render(monitor(), { outputs: sample({ condition: "stalled" }) });
+    const handler = graph.tasks.find((task) => task.nodeId === "monitor-stalled");
+    expect(String(handler.prompt)).toContain("up '/repo/workflows/nightly.tsx' --resume --run-id 'run-under-watch'");
+    expect(String(handler.prompt)).not.toContain("<workflow>");
   });
 
   test("a condition outside autoHeal escalates to a human instead of guessing", async () => {

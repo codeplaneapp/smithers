@@ -1,12 +1,46 @@
 /** @jsxImportSource smithers-orchestrator */
 import { describe, expect, test } from "bun:test";
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Workflow, Task, Ralph, runWorkflow } from "smithers-orchestrator";
+import { Workflow, Task, Ralph, Panel, runWorkflow } from "smithers-orchestrator";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { createTestSmithers } from "./helpers.js";
 import { outputSchemas } from "./schema.js";
 import { Effect } from "effect";
 describe("React hooks e2e", () => {
+  test("Panel keeps a stable hook count when skipIf changes between renders", async () => {
+    const { smithers, outputs, cleanup } = createTestSmithers(outputSchemas);
+    const agent = {
+      id: "panel-hooks",
+      tools: {},
+      generate: async () => ({ output: { value: 1 } }),
+    };
+    try {
+      const workflow = smithers((ctx) => (
+        <Workflow name="panel-skip-hook-order">
+          <Ralph id="loop" maxIterations={2}>
+            <Panel
+              id="dynamic-panel"
+              skipIf={ctx.iteration === 0}
+              panelists={[agent]}
+              moderator={agent}
+              panelistOutput={outputs.outputA}
+              moderatorOutput={outputs.outputB}
+            >
+              review
+            </Panel>
+            <Task id="heartbeat" output={outputs.outputC}>
+              {{ value: ctx.iteration }}
+            </Task>
+          </Ralph>
+        </Workflow>
+      ));
+      const result = await Effect.runPromise(runWorkflow(workflow, { input: {} }));
+      expect(result.status).toBe("finished");
+    } finally {
+      cleanup();
+    }
+  });
+
   test("useState setter triggers re-render with updated state", async () => {
     const { smithers, outputs, cleanup } = createTestSmithers(outputSchemas);
     const promptsSeen = [];

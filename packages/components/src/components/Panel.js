@@ -34,6 +34,7 @@ function normalizePanelist(entry, index) {
  * @param {PanelProps} props
  */
 export function Panel(props) {
+  const ctx = useOptionalSmithersContext();
   if (props.skipIf) return null;
   const {
     id,
@@ -51,7 +52,6 @@ export function Panel(props) {
   if (!Array.isArray(panelists) || panelists.length === 0) {
     throw new Error("Panel panelists must include at least one panelist.");
   }
-  const ctx = useOptionalSmithersContext();
   const prefix = id ?? "panel";
   const normalized = panelists.map(normalizePanelist);
   // Single source of the panelist task ids: the tasks, needs, and deps maps

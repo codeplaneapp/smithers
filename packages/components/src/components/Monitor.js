@@ -18,6 +18,11 @@ import {
   monitorPrompt,
 } from "./monitorPrompt.js";
 
+/** @param {string} value */
+function shellArg(value) {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 /**
  * <Monitor> — a heartbeat health check that watches ONE other run and keeps it
  * healthy.
@@ -56,6 +61,9 @@ export function Monitor(props) {
   const healAgent = props.healAgent ?? props.agent;
   const actionOutput = props.actionOutput ?? props.healthOutput;
   const watchRunId = props.watchRunId;
+  const watchWorkflowPath =
+    props.watchWorkflowPath ??
+    (typeof ctx?.input?.watchWorkflowPath === "string" ? ctx.input.watchWorkflowPath : undefined);
   const checkId = `${prefix}-check`;
   // `latest` (not `outputMaybe`) is the correct reader for a loop's exit
   // condition and for routing: it resolves the newest iteration's row, so the
@@ -145,13 +153,17 @@ export function Monitor(props) {
     stalled: autoHeal.includes("stalled")
       ? handlerTask(
           "stalled",
-          `Resume the run: \`bunx smithers-orchestrator up <workflow> --resume --run-id ${watchRunId}\` (idempotent — it re-enters the same durable frame). Confirm with \`bunx smithers-orchestrator status ${watchRunId}\` that events resumed. Do nothing else.`,
+          watchWorkflowPath
+            ? `Resume the run: \`bunx smithers-orchestrator up ${shellArg(watchWorkflowPath)} --resume --run-id ${shellArg(watchRunId)}\` (idempotent — it re-enters the same durable frame). Confirm with \`bunx smithers-orchestrator status ${shellArg(watchRunId)}\` that events resumed. Do nothing else.`
+            : "Do not resume: watchWorkflowPath was not supplied. Report that the monitor cannot build a safe resume command.",
         )
       : escalate("stalled", "Should this run be resumed?"),
     "wedged-node": autoHeal.includes("wedged-node")
       ? handlerTask(
           "wedged-node",
-          `Retry the single wedged node: \`bunx smithers-orchestrator retry-task ${watchRunId} --node <NODE_ID>\` using \`targetNodeId\` from the health sample (it adds an attempt and discards nothing). Retry it once, then report. Do not retry a second time — a node that wedges again needs a human.`,
+          watchWorkflowPath && typeof health?.targetNodeId === "string" && health.targetNodeId
+            ? `Retry the wedged node once: \`bunx smithers-orchestrator retry-task ${shellArg(watchWorkflowPath)} --run-id ${shellArg(watchRunId)} --node-id ${shellArg(health.targetNodeId)}\`. This resets that node's output and downstream dependents before creating fresh attempts. Report exactly what was reset. Do not retry a second time — a node that wedges again needs a human.`
+            : "Do not retry: watchWorkflowPath or targetNodeId is missing from the health sample. Report the incomplete monitor evidence.",
         )
       : escalate("wedged-node", "Should this node be retried, or is the failure real?"),
     // Cancelling is destructive, so it ships behind an explicit opt-in: it only
