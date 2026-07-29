@@ -15,7 +15,7 @@ The concrete Smithers workflow execution engine.
   `startDocFileSync.js`, `syncDocsFromDisk.js`).
 - `AgentTraceCollector.js` — bounded capture of agent traces per attempt.
 - Subdirectories: `aspects/` (per-run token/cost/latency budget enforcement),
-  `effect/` (@effect/cluster + @effect/workflow bridges, RPC schema, builder),
+  `effect/` (Effect unstable cluster + workflow bridges, RPC schema, builder),
   `hot/` (hot-reload controller/overlay/watch), `external/` (vendored
   json-schema-to-zod).
 

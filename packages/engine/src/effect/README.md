@@ -1,7 +1,8 @@
 # effect/
 
-The bridge between the React/JSX engine (`../engine.js`) and Effect-land
-durable primitives (`@effect/workflow`, `@effect/cluster`).
+The bridge between the React/JSX engine (`../engine.js`) and Effect's unstable
+workflow and cluster primitives (`effect/unstable/workflow`,
+`effect/unstable/cluster`).
 
 - **Task execution bridges** — `compute-task-bridge.js` (computeFn tasks with
   heartbeats/timeouts), `static-task-bridge.js` (static output tasks),

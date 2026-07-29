@@ -345,8 +345,8 @@ async function runRegisteredExecution(task) {
  * The cluster layer backing the in-process task worker. Under Bun this is the
  * stock sql-backed SingleRunner.layer over an in-memory bun:sqlite database
  * (behavior unchanged). Under plain Node (serverless hosts) `bun:sqlite` does
- * not exist, so the same Sharding stack is assembled with @effect/cluster's
- * official in-memory MessageStorage driver instead. Durability is equivalent:
+ * not exist, so the same Sharding stack is assembled with Effect's official
+ * in-memory MessageStorage driver instead. Durability is equivalent:
  * the Bun path's sqlite storage is `:memory:` — process-local and non-durable
  * — already; smithers' own durability lives in the workflow store, not here.
  * @returns {Promise<import("effect").Layer.Layer<never, unknown, never>>}
