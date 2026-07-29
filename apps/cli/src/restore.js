@@ -300,13 +300,13 @@ export async function runRestoreOnce(opts) {
     stderr.write(`Restore invalidation failed: ${invalidationPlan.error ?? "unknown error"}\n`);
     return { exitCode: 1 };
   }
+  const invalidation = await invalidateNewerChildWork(adapter, runId, invalidationPlan.owners);
+  if (!invalidation.success) {
+    stderr.write(`Restore invalidation failed: ${invalidation.error ?? "unknown error"}\n`);
+    return { exitCode: 1 };
+  }
   const result = await revert(target.jjCommitId, target.jjCwd, { timeoutMs: opts.timeoutMs, signal: opts.signal });
   if (result?.success) {
-    const invalidation = await invalidateNewerChildWork(adapter, runId, invalidationPlan.owners);
-    if (!invalidation.success) {
-      stderr.write(`Restore invalidation failed: ${invalidation.error ?? "unknown error"}\n`);
-      return { exitCode: 1 };
-    }
     stdout.write(`Restored ${target.jjCwd} to checkpoint #${target.seq} (${short(target.jjCommitId)})\n`);
     return { exitCode: 0 };
   }

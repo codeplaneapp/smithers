@@ -285,6 +285,53 @@ describe("smithers restore", () => {
     expect(err.get()).toContain("Run is still running: parent");
   });
 
+  test("invalidates newer child state before touching the filesystem", async () => {
+    const reverted = [];
+    const err = capture();
+    const target = { ...cps[0], runId: "parent", createdAtMs: 10 };
+    const child = {
+      ...cps[1],
+      runId: "parent:child:sub:0",
+      nodeId: "child-task",
+      createdAtMs: 20,
+    };
+    const result = await runRestoreOnce({
+      adapter: {
+        async listRunDescendants() {
+          return [
+            { runId: "parent", parentRunId: null, depth: 0 },
+            { runId: "parent:child:sub:0", parentRunId: "parent", depth: 1 },
+          ];
+        },
+        async listWorkspaceCheckpoints(runId) {
+          return runId === "parent" ? [target] : [child];
+        },
+        async listWorkspaceStates() {
+          return [];
+        },
+        async getNode() {
+          return null;
+        },
+        async getRun() {
+          return { runId: "parent", status: "failed" };
+        },
+      },
+      runId: "parent",
+      nodeId: "n1",
+      target,
+      stdout: capture(),
+      stderr: err,
+      revert: async (commitId, cwd) => {
+        reverted.push([commitId, cwd]);
+        return { success: true };
+      },
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(reverted).toEqual([]);
+    expect(err.get()).toContain("Node not found: parent/sub/0");
+  });
+
   test("reverts to the target and reports success", async () => {
     const reverted = [];
     const out = capture();
