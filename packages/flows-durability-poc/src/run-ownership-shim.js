@@ -28,13 +28,19 @@ export class UnsupportedShimOperation extends Error {
 
 export const parseRuntimeOwnerId = (runtimeOwnerId) => {
   const match = /^pid:(\d+):(.+)$/.exec(runtimeOwnerId)
-  if (!match) {
-    throw new UnsupportedShimOperation(`cannot map smithers runtimeOwnerId onto flows OwnerId: ${runtimeOwnerId}`)
+  if (match) {
+    return { hostId: HOST_ID, pid: Number(match[1]), nonce: match[2] }
   }
-  return { hostId: HOST_ID, pid: Number(match[1]), nonce: match[2] }
+  // Supervisors and other non-engine owners use free-form ids
+  // ("supervisor:takeover", ...). They round-trip through the nonce slot.
+  return { hostId: "external", pid: 0, nonce: runtimeOwnerId }
 }
 
-export const formatRuntimeOwnerId = (owner) => owner === null ? null : `pid:${owner.pid}:${owner.nonce}`
+export const formatRuntimeOwnerId = (owner) => {
+  if (owner === null) return null
+  if (owner.hostId === "external" && owner.pid === 0) return owner.nonce
+  return `pid:${owner.pid}:${owner.nonce}`
+}
 
 const sameOwnerId = (owner, runtimeOwnerId) => formatRuntimeOwnerId(owner) === runtimeOwnerId
 
@@ -106,8 +112,8 @@ const toSmithersRunRow = (row) => {
   }
 }
 
-const livenessEvidenceFor = (expectedOwner, nowMs) => ({
-  kind: expectedOwner.hostId === HOST_ID ? "same-host-pid-dead" : "cross-host-unreachable",
+const livenessEvidenceFor = (expectedOwner, claimant, nowMs) => ({
+  kind: expectedOwner.hostId === claimant.hostId ? "same-host-pid-dead" : "cross-host-unreachable",
   expectedOwner,
   checkedAtMs: nowMs
 })
@@ -249,7 +255,7 @@ export const createRunOwnershipShim = (boundary) => {
       if (flowsExpectedStatus === "running") {
         if (expectedOwner === null) return false
         const outcome = await boundary.run(
-          store.steal(params.runId, expected, claimant, params.claimHeartbeatAtMs, livenessEvidenceFor(expectedOwner, params.claimHeartbeatAtMs))
+          store.steal(params.runId, expected, claimant, params.claimHeartbeatAtMs, livenessEvidenceFor(expectedOwner, claimant, params.claimHeartbeatAtMs))
         )
         return outcome._tag === "Claimed"
       }

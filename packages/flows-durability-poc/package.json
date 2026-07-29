@@ -13,6 +13,10 @@
   "dependencies": {
     "@flows/database": "file:../../vendor/smithers-flows/packages/database",
     "@flows/journal": "file:../../vendor/smithers-flows/packages/journal",
-    "effect": "4.0.0-beta.102"
+    "effect": "4.0.0-beta.102",
+    "@smithers-orchestrator/db": "workspace:*"
+  },
+  "devDependencies": {
+    "drizzle-orm": "^0.45.2"
   }
 }
