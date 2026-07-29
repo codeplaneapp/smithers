@@ -227,7 +227,7 @@ describe("chat", () => {
         value="Ship it"
         onValueChange={() => {}}
         onSubmit={() => {}}
-        status="streaming"
+        lifecycleStatus="streaming"
         onStop={() => {}}
       />,
     );
@@ -238,7 +238,7 @@ describe("chat", () => {
     expect(streaming).toContain('disabled=""');
 
     const withoutStop = renderToStaticMarkup(
-      <ChatComposer value="Ship it" onValueChange={() => {}} onSubmit={() => {}} status="submitted" />,
+      <ChatComposer value="Ship it" onValueChange={() => {}} onSubmit={() => {}} lifecycleStatus="submitted" />,
     );
     expect(withoutStop).not.toContain("sui-chat-composer-stop");
 
@@ -246,6 +246,13 @@ describe("chat", () => {
       <ChatComposer value="Ship it" onValueChange={() => {}} onSubmit={() => {}} onStop={() => {}} />,
     );
     expect(ready).not.toContain("sui-chat-composer-stop");
+
+    const legacyStatus = renderToStaticMarkup(
+      <ChatComposer value="Ship it" onValueChange={() => {}} onSubmit={() => {}} status={<em>streaming</em>} />,
+    );
+    expect(legacyStatus).toContain("<em>streaming</em>");
+    expect(legacyStatus).toContain('data-status="ready"');
+    expect(legacyStatus).not.toContain('disabled=""');
   });
 });
 

@@ -23,8 +23,10 @@ export type ChatComposerProps = Omit<ComponentProps<"form">, "onSubmit"> & {
   onValueChange: (value: string) => void;
   onSubmit: (value: string) => void | Promise<void>;
   placeholder?: string;
+  /** @deprecated Free-form toolbar status. Prefer `statusText`. */
+  status?: ReactNode;
   /** Lifecycle state, mirroring PromptInput: while submitted|streaming the composer is busy, submission is blocked, and a Stop button appears when `onStop` is set. */
-  status?: ChatComposerStatus;
+  lifecycleStatus?: ChatComposerStatus;
   /** Stop the in-flight generation; renders a Stop button next to Send while busy. */
   onStop?: () => void;
   /** Free-form status line in the composer toolbar (announced via aria-live). */
@@ -45,7 +47,8 @@ export function ChatComposer({
   onValueChange,
   onSubmit,
   placeholder = "Message Smithers…",
-  status = "ready",
+  status,
+  lifecycleStatus = "ready",
   onStop,
   statusText,
   actions,
@@ -59,7 +62,7 @@ export function ChatComposer({
   ...props
 }: ChatComposerProps) {
   useInjectUiCss();
-  const busy = status === "submitted" || status === "streaming";
+  const busy = lifecycleStatus === "submitted" || lifecycleStatus === "streaming";
   const canSubmit = !disabled && !busy && value.trim().length > 0;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -104,7 +107,7 @@ export function ChatComposer({
     <form
       data-slot="chat-composer"
       data-docked={docked ? "true" : "false"}
-      data-status={status}
+      data-status={lifecycleStatus}
       className={cn("sui-chat-composer", className)}
       onSubmit={submit}
       {...props}
@@ -126,7 +129,7 @@ export function ChatComposer({
       />
       <div className="sui-chat-composer-toolbar">
         <div className="sui-chat-composer-status" aria-live="polite">
-          {statusText}
+          {statusText ?? status}
         </div>
         <div className="sui-chat-composer-actions">
           {actions}
