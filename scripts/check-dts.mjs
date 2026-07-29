@@ -31,6 +31,7 @@ export const DEFAULT_DECLARATION_PACKAGES = [
   "packages/agents",
   "packages/cloudflare",
   "packages/gateway",
+  "packages/gateway-react",
   "packages/graph",
   "packages/integrations",
   "packages/microsandbox",

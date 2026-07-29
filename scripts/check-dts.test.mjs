@@ -8,6 +8,7 @@ import { checkDeclarations, DEFAULT_DECLARATION_PACKAGES } from "./check-dts.mjs
 
 test("the declaration gate covers gateway bundle drift and restores the tree", (context) => {
   assert.ok(DEFAULT_DECLARATION_PACKAGES.includes("packages/gateway"));
+  assert.ok(DEFAULT_DECLARATION_PACKAGES.includes("packages/gateway-react"));
 
   const repoRoot = mkdtempSync(join(tmpdir(), "smithers-check-dts-"));
   context.after(() => rmSync(repoRoot, { recursive: true, force: true }));
