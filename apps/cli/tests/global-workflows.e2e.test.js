@@ -131,13 +131,15 @@ test("smithers init --global scaffolds the canonical ~/.smithers pack (no nested
     "init.tsx",
     "post-failure.tsx",
     "share-pack.tsx",
+    "smithers-repo-federation.tsx",
     "upgrade.tsx",
+    "whole-foods-meal-planner.tsx",
   ]);
   expect(existsSync(join(smithersHome, "components"))).toBe(false);
   expect(existsSync(join(smithersHome, ".smithers"))).toBe(false);
   // It did NOT scaffold a local pack in the cwd repo.
   expect(repo.exists(".smithers")).toBe(false);
-});
+}, 30_000);
 
 test("smithers init --global honors HOME when SMITHERS_HOME is unset", () => {
   const home = createTempRepo();

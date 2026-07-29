@@ -204,7 +204,13 @@ function renderPackageJson(versions) {
     ) + "\n"
   );
 }
-export const CURATED_PUBLIC_WORKFLOW_IDS = ["create-workflow", "create-skill", "docs-driven-development"];
+export const CURATED_PUBLIC_WORKFLOW_IDS = [
+  "create-workflow",
+  "create-skill",
+  "docs-driven-development",
+  "smithers-repo-federation",
+  "whole-foods-meal-planner",
+];
 export const CURATED_SYSTEM_WORKFLOW_IDS = [
   "add",
   "create-ui",
@@ -258,6 +264,8 @@ const UI_WORKFLOWS = [
   { key: "create-skill", title: "Create Skill" },
   { key: "docs-driven-development", title: "Docs Driven Development" },
   { key: "share-pack", title: "Share Pack" },
+  { key: "smithers-repo-federation", title: "Smithers Repo Federation" },
+  { key: "whole-foods-meal-planner", title: "Whole Foods Meal Planner" },
 ];
 export const UI_WORKFLOW_IDS = UI_WORKFLOWS.map((workflow) => workflow.key);
 function renderGatewayFile() {
