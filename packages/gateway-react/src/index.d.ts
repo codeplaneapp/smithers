@@ -227,6 +227,83 @@ declare function useGatewayApprovals(params?: ListApprovalsRequest): GatewayAsyn
 declare function useGatewayCrons(params?: CronListRequest): GatewayAsyncState<GatewayCronRow[]>;
 
 /**
+ * Minimal standard 5-field cron expander (minute hour day-of-month month
+ * day-of-week), evaluated in the host's local timezone to match how the
+ * server computes `next_run_at_ms`. Supports `*`, `?`, `*`/`n`, `a`, `a-b`,
+ * `a-b/n`, `a/n`, comma lists, and JAN-DEC / SUN-SAT names (case-insensitive;
+ * 7 also maps to Sunday). Day-of-month and day-of-week follow Vixie cron OR
+ * semantics when both are restricted.
+ *
+ * Hand-rolled on purpose: `cron-parser` is a server/cli dependency and is not
+ * resolvable from this package (pnpm strict node_modules; the
+ * gateway-react-direction architecture rule also bars importing other
+ * smithers packages here).
+ */
+
+/**
+ * Structural mirror of `@smithers-orchestrator/ui/calendar`'s CalendarEvent.
+ * gateway-react may not import UI packages (architecture rule), so the type
+ * is redeclared; assignment to CalendarEvent is checked structurally at the
+ * gateway-ui boundary.
+ */
+type CronScheduleEvent = {
+    id: string;
+    title: string;
+    start: number;
+    end?: number;
+    allDay?: boolean;
+    rrule?: string;
+    source?: string;
+    status?: string;
+    href?: string;
+    color?: string;
+};
+declare const DEFAULT_PER_CRON_LIMIT = 250;
+type CronFieldSpec = {
+    /** True for a bare `*`/`?` (no step) — the field places no restriction. */
+    any: boolean;
+    values: Set<number>;
+};
+type ParsedCronPattern = {
+    minute: CronFieldSpec;
+    hour: CronFieldSpec;
+    dayOfMonth: CronFieldSpec;
+    month: CronFieldSpec;
+    dayOfWeek: CronFieldSpec;
+};
+/** Parse a standard 5-field cron expression; throws on invalid input. */
+declare function parseCronPattern(pattern: string): ParsedCronPattern;
+/**
+ * Every occurrence of `pattern` in `[windowStart, windowEnd)` as epoch ms,
+ * ascending, capped at `limit`. Throws on an invalid pattern.
+ */
+declare function expandCron(pattern: string, windowStart: number, windowEnd: number, limit?: number): number[];
+/** The chip status a cron row carries: last-error, paused, or scheduled. */
+declare function cronStatus(cron: GatewayCronRow): string;
+/**
+ * Expand one cron row into calendar events over the window. An unparseable
+ * pattern degrades to the server-computed `nextRunAtMs` when it lands inside
+ * the window instead of vanishing silently.
+ */
+declare function cronToCalendarEvents(cron: GatewayCronRow, windowStart: number, windowEnd: number, limit?: number): CronScheduleEvent[];
+
+type UseCronScheduleOptions = {
+    /** Window start, epoch ms (inclusive). Day-aligned values keep useMemo stable. */
+    windowStart: number;
+    /** Window end, epoch ms (exclusive). */
+    windowEnd: number;
+    /** Max expanded occurrences per cron (default 250) so `* * * * *` cannot flood the view. */
+    perCronLimit?: number;
+};
+/**
+ * Expand every cron's upcoming occurrences within the window into calendar
+ * events (`@smithers-orchestrator/ui/calendar`-shaped). Async state passes
+ * straight through from {@link useGatewayCrons}; `data` stays undefined until
+ * the first populated snapshot, then is a chronologically sorted event list.
+ */
+declare function useCronSchedule({ windowStart, windowEnd, perCronLimit, }: UseCronScheduleOptions): GatewayAsyncState<CronScheduleEvent[]>;
+
+/**
  * Live cross-run memory facts over the `memoryFacts` collection (initial
  * `listMemoryFacts`, re-pulled on `invalidate`). Pass a `namespace` to scope the
  * list to one namespace; omit it to list every namespace's facts. The facts are
@@ -500,6 +577,123 @@ type UseGatewayConnectionStatusResult = {
 declare function useGatewayConnectionStatus(): UseGatewayConnectionStatusResult;
 
 declare function useSmithersCollections(): SmithersCollectionsContextValue;
+
+/**
+ * Defensive readers for gateway node-output rows. `getNodeOutput` hands back
+ * either the row itself or a `{ row }` / `{ data: { row } }` envelope, keys can
+ * arrive snake_case, and array/object values sometimes survive the wire as JSON
+ * strings. Normalize in exactly one place instead of re-implementing per UI.
+ */
+declare function isRecord(value: unknown): value is Record<string, unknown>;
+/**
+ * Unwrap `{ row }` / `{ data }` envelopes (including nested `data` layers) and
+ * return the row. A bare record passes through unchanged; anything that is not
+ * a record at all returns undefined.
+ */
+declare function rowOf<T = Record<string, unknown>>(value: unknown): T | undefined;
+/** Alias for {@link rowOf}; several workflow UIs know it by this name. */
+declare const unwrapRow: <T = Record<string, unknown>>(value: unknown) => T | undefined;
+/**
+ * Parse a value that may be a JSON-encoded array/object string. Only strings
+ * that start with `[` or `{` are attempted; anything else passes through.
+ */
+declare function parseMaybeJson(value: unknown): unknown;
+/** `created_at_ms` → `createdAtMs`; already-camel keys pass through. */
+declare function camelKey(key: string): string;
+/**
+ * Unwrap the envelope, JSON-parse stringified array/object values, and alias
+ * snake_case keys to camelCase (without clobbering an existing camel key) so
+ * extractors read either spelling.
+ */
+declare function normalizeRow(value: unknown): Record<string, unknown>;
+declare function asString(value: unknown): string;
+declare function asArray(value: unknown): unknown[];
+declare function asNumber(value: unknown): number | undefined;
+/** Coerce the boolean spellings rows carry: booleans, `0`/`1`, `"true"`/`"false"`. */
+declare function asBool(value: unknown): boolean | undefined;
+declare function strings(value: unknown): string[];
+
+/** URL helpers for gateway-served workflow UIs. All SSR-safe. */
+/** Read one query param from the current page URL; undefined when absent or SSR. */
+declare function paramFromUrl(name: string): string | undefined;
+declare function runIdFromUrl(): string | undefined;
+/**
+ * Same-origin href to a sibling workflow's run UI (served by the same gateway).
+ * `pathname` defaults to the current page path; pass it explicitly in tests or
+ * SSR. Returns the href even in SSR when a pathname is provided.
+ */
+declare function workflowUiHref(workflowKey: string, runId: string, pathname?: string): string;
+
+/**
+ * `useGatewayNodeOutput` with the row normalized: the `{ row }` / `{ data }`
+ * envelope unwrapped, JSON-string values parsed, and snake_case keys aliased to
+ * camelCase (see {@link normalizeRow}). Same `GatewayAsyncState` contract as
+ * the other hooks; `data` is undefined until a row arrives.
+ */
+declare function useRow<T = Record<string, unknown>>(args: {
+    runId?: string;
+    nodeId?: string;
+    iteration?: number;
+}): GatewayAsyncState<T | undefined>;
+
+/**
+ * Decoders for the gateway's public run-event vocabulary (`task.output`,
+ * `agent.trace`, `agent.session`, `agent.event`, `node.*`, `run.*`). Pure and
+ * framework-free so workflow UIs, gateway-ui, and plain scripts can all share
+ * one implementation.
+ */
+
+/** A run-event frame; collection rows may also carry `timestampMs`. */
+type RunEventFrame = GatewayEventFrame & {
+    timestampMs?: number;
+};
+/** One raw chat line for the live feed (single best-effort line per frame). */
+declare function chatLineFromFrame(frame: RunEventFrame): {
+    who: string;
+    text: string;
+} | null;
+/**
+ * A single rendered conversation line. `kind` distinguishes a real chat message
+ * (assistant/user/system/tool transcript turn or streaming assistant text) from
+ * raw node `output` text and tool-activity lines.
+ */
+type ChatLine = {
+    who: string;
+    role?: string;
+    text: string;
+    kind: "message" | "tool" | "output";
+};
+/**
+ * Conversational view of a frame: ZERO-OR-MORE chat lines. Unlike
+ * {@link chatLineFromFrame} (one raw line, used by the live feed), this expands
+ * an `agent.session` transcript into one line per message and ignores tool /
+ * command activity so the chat panel reads like the agent's actual conversation.
+ */
+declare function chatLinesFromFrame(frame: RunEventFrame): ChatLine[];
+/**
+ * Build a clean, de-duplicated conversation from a run's event frames.
+ *
+ * `agent.session` events fire repeatedly, each carrying that node/session's
+ * cumulative transcript, and a run can host several sessions (audit, work,
+ * review, ...), so de-dupe per node/session instead of picking one global best
+ * transcript. Non-session lines (streaming fragments, completed answers) are
+ * dropped when their text already appears in the matching session transcript.
+ */
+declare function buildChatLines(frames: RunEventFrame[]): ChatLine[];
+/** One toned line of the live log for any run event. */
+type LogLine = {
+    seq: number;
+    event: string;
+    node: string;
+    detail: string;
+    tone: "ok" | "warn" | "bad" | "";
+};
+/**
+ * Generic one-line view of any run event for the live log (the `smithers up
+ * --interactive` style feed). Renders every public event, not just agent text;
+ * heartbeats and unidentifiable frames return null.
+ */
+declare function logLineFromFrame(frame: RunEventFrame): LogLine | null;
 
 /**
  * UI-facing types for the delegation-chain folded state (the flux store the
@@ -881,4 +1075,4 @@ declare function useDelegationChain(params: {
     runId: string | undefined;
 }): UseDelegationChainResult;
 
-export { DELEGATION_TIERS, type DcDevPreviewRow, type DcEditRow, type DcExecRow, type DcGatesRow, type DcGoalRow, type DcPlanChild, type DcPlanRisk, type DcPlanRow, type DcPollAnswer, type DcPollRow, type DcPreviewRow, type DcProbeRow, type DcQuestionRow, type DcReplanRow, type DcReviewRow, type DcSkipRow, type DelegationApprovalRecord, type DelegationEdge, type DelegationFoldIssue, type DelegationGraph, type DelegationNodeKind, type DelegationNodeState, type DelegationNodeStatus, type DelegationOutputRecord, type DelegationPhase, type DelegationRecord, type DelegationVersionSnapshot, type DevPreviewKind, type Estimate, type FoldDelegationOptions, type Gate, type GatewayAsyncState, type GatewayConnectionState, type GatewayConnectionStatus, type GatewayExtensionStreamState, type NodeStatus, SmithersCollectionsContext, type SmithersCollectionsContextValue, SmithersCollectionsProvider, SmithersGatewayContext, SmithersGatewayProvider, type Tier, type UseDelegationChainResult, type UseGatewayConnectionStatusResult, type UseGatewayRunTreeResult, createGatewayReactRoot, delegationTableForNodeId, foldDelegation, isDcDevPreviewRow, isDcEditRow, isDcExecRow, isDcGatesRow, isDcGoalRow, isDcPlanChild, isDcPlanRow, isDcPollRow, isDcPreviewRow, isDcProbeRow, isDcQuestionRow, isDcReplanRow, isDcReviewRow, isDcSkipRow, isDelegationApprovalRecord, isDevPreviewKind, isEstimate, isGate, isTier, parseDelegationNodeId, useDelegationChain, useGatewayActions, useGatewayApprovals, useGatewayConnectionStatus, useGatewayCrons, useGatewayExtensionAction, useGatewayExtensionResource, useGatewayExtensionStream, useGatewayMemoryFacts, useGatewayMutation, useGatewayNodeEvents, useGatewayNodeOutput, useGatewayPrompts, useGatewayRpc, useGatewayRun, useGatewayRunDiff, useGatewayRunEvents, useGatewayRunTokenUsage, useGatewayRunTree, useGatewayRuns, useGatewayScores, useGatewayTickets, useGatewayUsageReports, useGatewayWorkflows, useSmithersCollections, useSmithersGateway };
+export { type ChatLine, type CronScheduleEvent, DEFAULT_PER_CRON_LIMIT, DELEGATION_TIERS, type DcDevPreviewRow, type DcEditRow, type DcExecRow, type DcGatesRow, type DcGoalRow, type DcPlanChild, type DcPlanRisk, type DcPlanRow, type DcPollAnswer, type DcPollRow, type DcPreviewRow, type DcProbeRow, type DcQuestionRow, type DcReplanRow, type DcReviewRow, type DcSkipRow, type DelegationApprovalRecord, type DelegationEdge, type DelegationFoldIssue, type DelegationGraph, type DelegationNodeKind, type DelegationNodeState, type DelegationNodeStatus, type DelegationOutputRecord, type DelegationPhase, type DelegationRecord, type DelegationVersionSnapshot, type DevPreviewKind, type Estimate, type FoldDelegationOptions, type Gate, type GatewayAsyncState, type GatewayConnectionState, type GatewayConnectionStatus, type GatewayExtensionStreamState, type LogLine, type NodeStatus, type ParsedCronPattern, type RunEventFrame, SmithersCollectionsContext, type SmithersCollectionsContextValue, SmithersCollectionsProvider, SmithersGatewayContext, SmithersGatewayProvider, type Tier, type UseCronScheduleOptions, type UseDelegationChainResult, type UseGatewayConnectionStatusResult, type UseGatewayRunTreeResult, asArray, asBool, asNumber, asString, buildChatLines, camelKey, chatLineFromFrame, chatLinesFromFrame, createGatewayReactRoot, cronStatus, cronToCalendarEvents, delegationTableForNodeId, expandCron, foldDelegation, isDcDevPreviewRow, isDcEditRow, isDcExecRow, isDcGatesRow, isDcGoalRow, isDcPlanChild, isDcPlanRow, isDcPollRow, isDcPreviewRow, isDcProbeRow, isDcQuestionRow, isDcReplanRow, isDcReviewRow, isDcSkipRow, isDelegationApprovalRecord, isDevPreviewKind, isEstimate, isGate, isRecord, isTier, logLineFromFrame, normalizeRow, paramFromUrl, parseCronPattern, parseDelegationNodeId, parseMaybeJson, rowOf, runIdFromUrl, strings, unwrapRow, useCronSchedule, useDelegationChain, useGatewayActions, useGatewayApprovals, useGatewayConnectionStatus, useGatewayCrons, useGatewayExtensionAction, useGatewayExtensionResource, useGatewayExtensionStream, useGatewayMemoryFacts, useGatewayMutation, useGatewayNodeEvents, useGatewayNodeOutput, useGatewayPrompts, useGatewayRpc, useGatewayRun, useGatewayRunDiff, useGatewayRunEvents, useGatewayRunTokenUsage, useGatewayRunTree, useGatewayRuns, useGatewayScores, useGatewayTickets, useGatewayUsageReports, useGatewayWorkflows, useRow, useSmithersCollections, useSmithersGateway, workflowUiHref };
