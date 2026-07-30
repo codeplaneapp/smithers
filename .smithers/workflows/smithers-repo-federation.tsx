@@ -230,6 +230,12 @@ const releaseDryRunSchema = z.object({
   summary: z.string().default(""),
 });
 
+const releaseReadinessSchema = z.object({
+  ok: z.boolean().default(false),
+  issues: z.array(z.string()).default([]),
+  summary: z.string().default(""),
+});
+
 const executeReleasesSchema = z.object({
   released: z.array(z.object({ lane: z.string(), version: z.string(), tag: z.string().nullable() })).default([]),
   failed: z.array(z.object({ lane: z.string(), reason: z.string() })).default([]),
@@ -300,6 +306,7 @@ const { Workflow, Task, Sequence, Parallel, Branch, Loop, Ralph, Approval, smith
   lanePush: lanePushSchema,
   updateSmithers: updateSmithersSchema,
   releaseDryRun: releaseDryRunSchema,
+  releaseReadiness: releaseReadinessSchema,
   gatePublish: approvalSchema,
   executeReleases: executeReleasesSchema,
   removalPrs: removalPrsSchema,
@@ -329,9 +336,20 @@ function gitIn(path: string, args: string[]) {
   return execFileSync("git", args, { cwd: path, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 }
 
+function canonicalGithubRepo(value: string): string | null {
+  const trimmed = value
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\.git$/i, "");
+  const match = /^(?:https?:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+\/[^/]+)$/i.exec(
+    trimmed,
+  );
+  return match?.[1]?.toLowerCase() ?? null;
+}
+
 // Any refusal here must FAIL THE TASK (throw) — never return a success-shaped
 // row that downstream nodes could read as "root is ready".
-function prepareRoot(migrationRoot: string, sourceRepo: string) {
+function prepareRoot(migrationRoot: string, sourceRepo: string, githubOrg: string) {
   const expanded = expandHome(migrationRoot.trim());
   const rootPath = resolve(expanded);
   const existed = existsSync(rootPath);
@@ -368,10 +386,21 @@ function prepareRoot(migrationRoot: string, sourceRepo: string) {
       );
     }
     if (existsSync(markerPath)) {
-      const marker = JSON.parse(readFileSync(markerPath, "utf8")) as { workflow?: string };
+      const marker = JSON.parse(readFileSync(markerPath, "utf8")) as {
+        workflow?: string;
+        sourceRepo?: string;
+        githubOrg?: string;
+      };
       if (marker.workflow !== "smithers-repo-federation") {
         throw new Error(
           `migrationRoot "${rootPath}" has a marker for a different workflow (${marker.workflow ?? "unknown"}). Refused.`,
+        );
+      }
+      if (marker.sourceRepo !== sourceRepo || marker.githubOrg !== githubOrg) {
+        throw new Error(
+          `migrationRoot "${rootPath}" belongs to sourceRepo=${JSON.stringify(marker.sourceRepo ?? null)}, ` +
+            `githubOrg=${JSON.stringify(marker.githubOrg ?? null)}, not sourceRepo=${JSON.stringify(sourceRepo)}, ` +
+            `githubOrg=${JSON.stringify(githubOrg)}. Use a new isolated migrationRoot.`,
         );
       }
     }
@@ -382,7 +411,13 @@ function prepareRoot(migrationRoot: string, sourceRepo: string) {
     writeFileSync(
       markerPath,
       JSON.stringify(
-        { workflow: "smithers-repo-federation", sourceCheckout: SOURCE_CHECKOUT, createdAt: new Date().toISOString() },
+        {
+          workflow: "smithers-repo-federation",
+          sourceRepo,
+          githubOrg,
+          sourceCheckout: SOURCE_CHECKOUT,
+          createdAt: new Date().toISOString(),
+        },
         null,
         2,
       ),
@@ -394,6 +429,16 @@ function prepareRoot(migrationRoot: string, sourceRepo: string) {
   const sourceRemote = `https://github.com/${sourceRepo}.git`;
   const sourceClonePath = join(rootPath, SOURCE_CLONE_DIR);
   if (existsSync(join(sourceClonePath, ".git"))) {
+    const actualOrigin = gitIn(sourceClonePath, ["remote", "get-url", "origin"]).trim();
+    if (
+      canonicalGithubRepo(actualOrigin) !== canonicalGithubRepo(sourceRemote) ||
+      canonicalGithubRepo(sourceRemote) === null
+    ) {
+      throw new Error(
+        `source clone origin mismatch: requested ${sourceRemote}, found ${actualOrigin || "(missing)"}. ` +
+          "Refusing to fetch/reset a clone from another repository.",
+      );
+    }
     gitIn(sourceClonePath, ["fetch", "origin", "main"]);
     gitIn(sourceClonePath, ["checkout", "main"]);
     gitIn(sourceClonePath, ["reset", "--hard", "origin/main"]);
@@ -674,6 +719,57 @@ function readDagOrder(migrationRoot: string): string[] {
   }
 }
 
+function verifyReleaseClonesReady(
+  migrationRoot: string,
+  lanePushResults: Array<z.infer<typeof lanePushSchema>>,
+): z.infer<typeof releaseReadinessSchema> {
+  const rootPath = expandHome(migrationRoot);
+  const issues: string[] = [];
+  for (const lane of ALL_LANES) {
+    const recorded = lanePushResults.find((result) => result.lane === lane);
+    const path = laneDir(rootPath, lane);
+    if (!recorded?.pushed || !recorded.remote || !recorded.branch) {
+      issues.push(`${lane}: no complete pushed revision is recorded`);
+      continue;
+    }
+    if (!existsSync(join(path, ".git"))) {
+      issues.push(`${lane}: release clone ${path} is missing`);
+      continue;
+    }
+    try {
+      if (gitIn(path, ["status", "--porcelain"]).trim()) {
+        issues.push(`${lane}: release clone has uncommitted changes`);
+      }
+      const actualOrigin = gitIn(path, ["remote", "get-url", "origin"]).trim();
+      const expectedRepo = canonicalGithubRepo(recorded.remote);
+      if (!expectedRepo || canonicalGithubRepo(actualOrigin) !== expectedRepo) {
+        issues.push(`${lane}: origin ${actualOrigin || "(missing)"} does not match recorded ${recorded.remote}`);
+      }
+      const head = gitIn(path, ["rev-parse", "HEAD"]).trim();
+      const remoteHead = gitIn(path, ["ls-remote", "--heads", "origin", `refs/heads/${recorded.branch}`])
+        .trim()
+        .split(/\s+/)[0];
+      if (!remoteHead) {
+        issues.push(`${lane}: origin/${recorded.branch} does not exist`);
+      } else if (remoteHead !== head) {
+        issues.push(`${lane}: local HEAD ${head} is not pushed to origin/${recorded.branch} (${remoteHead})`);
+      }
+    } catch (error) {
+      issues.push(
+        `${lane}: revision readiness check failed: ${String(error instanceof Error ? error.message : error)}`,
+      );
+    }
+  }
+  return {
+    ok: issues.length === 0,
+    issues,
+    summary:
+      issues.length === 0
+        ? `All ${ALL_LANES.length} release clones are clean, point at their recorded destinations, and have HEAD pushed to the intended branch.`
+        : `${issues.length} release-clone readiness issue(s): ${issues.join("; ")}`,
+  };
+}
+
 type ReleasePlan = {
   packages?: Array<{
     repo?: string;
@@ -701,7 +797,12 @@ function planVersionForLane(plan: ReleasePlan, lane: string): string {
 // the validated ROOT COORDINATOR (authored in the kernel clone, consuming the
 // release plan) which publishes every publishable package in DAG order, then
 // this creates a tag + GitHub release for EVERY repo. Failures throw.
-function executeReleases(migrationRoot: string, githubOrg: string, dryRunOk: boolean) {
+function executeReleases(
+  migrationRoot: string,
+  githubOrg: string,
+  dryRunOk: boolean,
+  lanePushResults: Array<z.infer<typeof lanePushSchema>>,
+) {
   if (!dryRunOk) {
     throw new Error(
       "executeReleases refused: the release dry-run did not pass (ok !== true). Fix the dry-run before publishing.",
@@ -709,6 +810,10 @@ function executeReleases(migrationRoot: string, githubOrg: string, dryRunOk: boo
   }
   if (!githubOrg) {
     throw new Error("executeReleases refused: githubOrg input is empty — cannot tag/release without an owner.");
+  }
+  const readiness = verifyReleaseClonesReady(migrationRoot, lanePushResults);
+  if (!readiness.ok) {
+    throw new Error(`executeReleases refused because release revisions changed after approval: ${readiness.summary}`);
   }
   const rootPath = expandHome(migrationRoot);
   const kernelPath = join(rootPath, KERNEL_CLONE_DIR);
@@ -951,13 +1056,34 @@ export default smithers((ctx) => {
   );
 
   const updateSmithersResult = ctx.outputMaybe(outputs.updateSmithers, { nodeId: "updateSmithers" });
-  const releaseDryRunResult = ctx.outputMaybe(outputs.releaseDryRun, { nodeId: "releaseDryRun" });
+  const initialReleaseDryRun = ctx.outputMaybe(outputs.releaseDryRun, { nodeId: "releaseDryRun" });
+  const postFixReleaseDryRun = ctx.latest(outputs.releaseDryRun, "releaseDryRunPostFix");
+  const releaseDryRunResult = postFixReleaseDryRun ?? initialReleaseDryRun;
+  const releaseReadinessResult = ctx.latest(outputs.releaseReadiness, "releaseReadiness");
 
   // The planning-agent Ralph loop must clear BEFORE any destructive
   // publication or merge happens.
   const lastFinalVerify = ctx.latest(outputs.finalVerify, "finalVerify");
   const finalApprovable = lastFinalVerify?.approvable === true;
   const lastFinalFix = ctx.latest(outputs.finalFix, "finalFix");
+  const finalReady = finalApprovable && postFixReleaseDryRun?.ok === true && releaseReadinessResult?.ok === true;
+  const finalFixList = [
+    ...(lastFinalVerify?.fixList ?? []),
+    ...(releaseDryRunResult?.ok === false
+      ? releaseDryRunResult.issues.map((detail) => ({
+          target: "release plan",
+          check: "aggregate release dry-run",
+          detail,
+        }))
+      : []),
+    ...(releaseReadinessResult?.ok === false
+      ? releaseReadinessResult.issues.map((detail) => ({
+          target: "release clone",
+          check: "clean pushed revision",
+          detail,
+        }))
+      : []),
+  ];
 
   const gatePublish = ctx.outputMaybe(outputs.gatePublish, { nodeId: "gate-publish" });
   const publishApproved = gatePublish?.approved === true;
@@ -975,7 +1101,7 @@ export default smithers((ctx) => {
       <UI entry="../ui/smithers-repo-federation.tsx" title="Smithers Repo Federation" />
       <Sequence>
         <Task id="prepareRoot" output={outputs.prepareRoot}>
-          {() => prepareRoot(migrationRoot, sourceRepo)}
+          {() => prepareRoot(migrationRoot, sourceRepo, githubOrg)}
         </Task>
 
         {prepareRootResult ? (
@@ -1175,8 +1301,8 @@ export default smithers((ctx) => {
                 </Task>
               ) : null}
 
-              {releaseDryRunResult ? (
-                <Ralph id="final-verify-loop" until={finalApprovable} maxIterations={4} onMaxReached="return-last">
+              {initialReleaseDryRun ? (
+                <Ralph id="final-verify-loop" until={finalReady} maxIterations={4} onMaxReached="return-last">
                   <Sequence>
                     <Task
                       id="finalVerify"
@@ -1195,7 +1321,12 @@ export default smithers((ctx) => {
                       />
                     </Task>
                     <Branch
-                      if={lastFinalVerify !== undefined && lastFinalVerify.approvable === false}
+                      if={
+                        lastFinalVerify !== undefined &&
+                        (lastFinalVerify.approvable === false ||
+                          releaseDryRunResult?.ok === false ||
+                          releaseReadinessResult?.ok === false)
+                      }
                       then={
                         <Task
                           id="finalFix"
@@ -1207,24 +1338,44 @@ export default smithers((ctx) => {
                           <FederationFinalFixPrompt
                             migrationRoot={migrationRoot}
                             kernelCloneDir={KERNEL_CLONE_DIR}
-                            fixList={lastFinalVerify?.fixList ?? []}
+                            fixList={finalFixList}
                           />
                         </Task>
                       }
                       else={null}
                     />
+                    <Task
+                      id="releaseDryRunPostFix"
+                      output={outputs.releaseDryRun}
+                      agent={agents.planning}
+                      timeoutMs={45 * 60_000}
+                      heartbeatTimeoutMs={15 * 60_000}
+                    >
+                      <FederationReleaseDryRunPrompt
+                        migrationRoot={migrationRoot}
+                        kernelCloneDir={KERNEL_CLONE_DIR}
+                        lanePushResults={lanePushResults}
+                      />
+                    </Task>
+                    <Task id="releaseReadiness" output={outputs.releaseReadiness} timeoutMs={10 * 60_000}>
+                      {() => verifyReleaseClonesReady(migrationRoot, lanePushResults)}
+                    </Task>
                   </Sequence>
                 </Ralph>
               ) : null}
 
-              {finalApprovable && releaseDryRunResult?.ok === true ? (
+              {finalReady ? (
                 <Approval
                   id="gate-publish"
                   output={outputs.gatePublish}
                   request={{
                     title: "Publish the 10 federated PUBLIC repos?",
-                    summary: `${releaseDryRunResult.summary}\nFinal verification: ${lastFinalVerify?.summary ?? ""}\n\nApproving invokes the validated root release coordinator (publishes every publishable package in the release plan, in package-DAG order) and creates tags + GitHub releases for each of the 10 new repos.`,
-                    metadata: { ok: releaseDryRunResult.ok, approvable: finalApprovable },
+                    summary: `${postFixReleaseDryRun?.summary ?? ""}\nRevision readiness: ${releaseReadinessResult?.summary ?? ""}\nFinal verification: ${lastFinalVerify?.summary ?? ""}\n\nApproving invokes the validated root release coordinator (publishes every publishable package in the release plan, in package-DAG order) and creates tags + GitHub releases for each of the 10 new repos.`,
+                    metadata: {
+                      ok: postFixReleaseDryRun?.ok === true,
+                      revisionsReady: releaseReadinessResult?.ok === true,
+                      approvable: finalApprovable,
+                    },
                   }}
                   onDeny="skip"
                 />
@@ -1232,7 +1383,7 @@ export default smithers((ctx) => {
 
               {publishApproved ? (
                 <Task id="executeReleases" output={outputs.executeReleases} timeoutMs={30 * 60_000}>
-                  {() => executeReleases(migrationRoot, githubOrg, releaseDryRunResult?.ok === true && finalApprovable)}
+                  {() => executeReleases(migrationRoot, githubOrg, finalReady, lanePushResults)}
                 </Task>
               ) : null}
 
