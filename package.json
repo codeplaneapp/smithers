@@ -11,8 +11,7 @@
   "workspaces": [
     "packages/*",
     "apps/*",
-    ".smithers",
-    "vendor/smithers-flows/packages/*"
+    ".smithers"
   ],
   "bin": {
     "smithers": "apps/cli/src/index.js"
@@ -143,20 +142,6 @@
   },
   "pnpm": {
     "overrides": {
-      "@flows/database": "workspace:*",
-      "@flows/engine-store": "workspace:*",
-      "@flows/host": "workspace:*",
-      "@flows/host-cloudflare": "workspace:*",
-      "@flows/host-vercel": "workspace:*",
-      "@flows/journal": "workspace:*",
-      "@flows/kernel": "workspace:*",
-      "@flows/keys": "workspace:*",
-      "@flows/sync": "workspace:*",
-      "@flows/time-travel": "workspace:*",
-      "@flows/workflow-engine": "workspace:*",
-      "@flows/database>effect": "4.0.0-beta.102",
-      "@flows/journal>effect": "4.0.0-beta.102",
-      "@smithers-poc/flows-durability>effect": "4.0.0-beta.102",
       "@opentelemetry/propagator-jaeger": "2.9.0",
       "effect": "3.21.4"
     },
