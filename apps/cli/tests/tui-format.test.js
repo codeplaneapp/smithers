@@ -157,6 +157,15 @@ describe("formatToolCall", () => {
 });
 
 describe("formatStreamText", () => {
+  test("neutralizes hostile terminal escapes but keeps SGR styling", () => {
+    const hostile = "out\x1b]52;c;c2VjcmV0\x07\x1b[2J\x1b]0;spoofed\x07\x00\x1b[31mred\x1b[0m";
+    const formatted = formatStreamText(hostile);
+    expect(formatted).not.toContain("\x1b]");
+    expect(formatted).not.toContain("\x1b[2J");
+    expect(stripAnsi(formatted)).toBe("outred");
+    expect(formatStreamText("keep\x1b[31mred\x1b[0m")).toContain("\x1b[31m");
+  });
+
   test("compacts Codex tracing logs", () => {
     const home = process.env.HOME ?? "/Users/williamcory";
     const input = [
