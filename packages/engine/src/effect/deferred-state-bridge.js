@@ -976,12 +976,15 @@ async function syncWaitForEventDurableDeferredFromDb(adapter, runId, desc, snaps
   const expectedSignalSeq = snapshot.resolvedSignalSeq;
   let afterSeq = typeof expectedSignalSeq === "number" ? expectedSignalSeq - 1 : -1;
   let hasResolvedPriorIteration = false;
+  let hasPriorWait = false;
   if (expectedSignalSeq === undefined) {
     const attempts = await Effect.runPromise(adapter.listAttemptsForRun(runId));
     for (const attempt of attempts) {
-      if (attempt.nodeId !== desc.nodeId || attempt.iteration >= desc.iteration) continue;
       const previous = parseWaitForEventSnapshot(attempt.metaJson);
-      if (!previous || previous.signalName !== snapshot.signalName) continue;
+      if (!previous || (attempt.nodeId === desc.nodeId && attempt.iteration === desc.iteration)) continue;
+      hasPriorWait = true;
+      if (attempt.nodeId !== desc.nodeId || attempt.iteration >= desc.iteration) continue;
+      if (previous.signalName !== snapshot.signalName) continue;
       if ((previous.correlationId ?? null) !== (snapshot.correlationId ?? null)) continue;
       if (typeof previous.resolvedSignalSeq === "number") {
         hasResolvedPriorIteration = true;
@@ -996,8 +999,10 @@ async function syncWaitForEventDurableDeferredFromDb(adapter, runId, desc, snaps
       afterSeq,
       // A seq cursor prevents replay across iterations of the same node. The
       // start-time floor also prevents a different WaitForEvent node from
-      // consuming an older matching signal that predates this wait.
-      ...(expectedSignalSeq === undefined && !hasResolvedPriorIteration
+      // consuming an older matching signal that predates this wait. A run's
+      // first wait has no floor: every run-scoped signal necessarily arrived
+      // after the run was created, so it is a deliberately queued event.
+      ...(expectedSignalSeq === undefined && !hasResolvedPriorIteration && hasPriorWait
         ? { receivedAfterMs: snapshot.startedAtMs }
         : {}),
       limit: 1,
