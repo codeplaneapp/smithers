@@ -6382,7 +6382,7 @@ const cli = Cli.create({
       // tree that already carries foreign work will have it swept into the
       // agent's commits. Warn the operator, and in `auto` mode make triaging
       // that work the agent's first job.
-      const preflightMode = c.options.preflight;
+      const preflightMode = c.options.resume ? "off" : c.options.preflight;
       const preflightSummary = preflightMode === "off" ? null : assessWorkingCopy(taskCwd);
       const preflightNotice =
         preflightSummary && needsPreflightNotice(preflightSummary)
