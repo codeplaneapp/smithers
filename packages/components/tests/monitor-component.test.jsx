@@ -10,7 +10,7 @@ const agent = { id: "watcher", generate: async () => ({}) };
  * One heartbeat sample of a fake watched run, shaped like the `healthOutput`
  * row `<Monitor>` reads: the classifier's verdict plus its evidence.
  */
-function sample({ condition, runStatus = "running", iteration = 0 } = {}) {
+function sample({ condition, runStatus = "running", ownerActive = false, iteration = 0 } = {}) {
   return {
     health: [
       {
@@ -19,6 +19,7 @@ function sample({ condition, runStatus = "running", iteration = 0 } = {}) {
         iteration,
         condition,
         runStatus,
+        ownerActive,
         targetNodeId: "implement",
         evidence: "no event for 4m",
         summary: condition,
@@ -70,6 +71,14 @@ describe("<Monitor> classify → route → heal", () => {
     const { ids } = await render(monitor(), { outputs: sample({ condition: "stalled" }) });
     expect(ids).toContain("monitor-stalled");
     expect(ids).not.toContain("monitor-escalate-stalled");
+  });
+
+  test("a stalled run with a live owner escalates instead of racing it", async () => {
+    const { ids } = await render(monitor(), {
+      outputs: sample({ condition: "stalled", ownerActive: true }),
+    });
+    expect(ids).toContain("monitor-escalate-stalled");
+    expect(ids).not.toContain("monitor-stalled");
   });
 
   test("wedged-node heals by default with the exact reset command", async () => {

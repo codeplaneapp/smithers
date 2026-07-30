@@ -3275,11 +3275,17 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
         stdio: "ignore",
         env: buildMonitorLaunchEnv(),
       });
+      /** @type {Error | null} */
+      let spawnError = null;
+      child.once("error", (error) => {
+        spawnError = error;
+        monitorRun = null;
+      });
       child.unref();
       monitorRun = { runId: monitorRunId, pid: child.pid ?? undefined };
       const admissionDeadline = Date.now() + MONITOR_PARENT_WAIT_MS;
       let admitted = false;
-      while (Date.now() < admissionDeadline && !abort.signal.aborted) {
+      while (Date.now() < admissionDeadline && !abort.signal.aborted && !spawnError) {
         const currentMonitor = await adapter.getRun(monitorRunId);
         if (
           currentMonitor &&
@@ -3290,6 +3296,7 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
           admitted = true;
           break;
         }
+        if (spawnError) break;
         if (child.exitCode !== null || child.signalCode !== null) break;
         await new Promise((resolvePromise) => setTimeout(resolvePromise, MONITOR_PARENT_POLL_MS));
       }
@@ -3297,7 +3304,9 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
         if (child.pid) await terminateRunOwner(child.pid).catch(() => undefined);
         monitorRun = null;
         process.stderr.write(
-          `⚠ Monitor ${monitorRunId} failed to register${child.exitCode !== null ? ` (exit ${child.exitCode})` : ""}; run ${monitoredRunId} continues without it.\n`,
+          `⚠ Monitor ${monitorRunId} failed to register${
+            spawnError ? ` (${spawnError.message})` : child.exitCode !== null ? ` (exit ${child.exitCode})` : ""
+          }; run ${monitoredRunId} continues without it.\n`,
         );
         return;
       }

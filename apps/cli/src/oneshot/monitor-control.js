@@ -78,6 +78,7 @@ export function buildSteeringLaunchSpec(candidate, message) {
       "--output-format",
       "stream-json",
       "--dangerously-skip-permissions",
+      "--",
       message,
     ],
     cwd: candidate.cwd,
@@ -239,6 +240,8 @@ export function createOneshotMonitorControl(options) {
   /** @type {Map<string, { updater: { enabled?: boolean; stop: () => Promise<void> }; timer: ReturnType<typeof setTimeout> }>} */
   const attached = new Map();
   /** @type {Set<string>} */
+  const attaching = new Set();
+  /** @type {Set<string>} */
   const steering = new Set();
   /** @type {Set<string>} */
   const restarting = new Set();
@@ -266,12 +269,6 @@ export function createOneshotMonitorControl(options) {
 
   return {
     async attach({ runId, adapter }) {
-      const run = await adapter.getRun(runId);
-      if (!run) throw new Error(`Run not found: ${runId}`);
-      const resume = builtinResumeConfigOf(run);
-      if (run.status !== "running") {
-        return { runId, status: "attached", narrator: false };
-      }
       const existing = attached.get(runId);
       if (existing) {
         clearTimeout(existing.timer);
@@ -279,18 +276,30 @@ export function createOneshotMonitorControl(options) {
         existing.timer.unref?.();
         return { runId, status: "attached", narrator: existing.updater.enabled !== false };
       }
-      const config = parseJsonObject(run.configJson);
-      const oneshot = asObject(config?.oneshot);
-      const updater = narratorStart({
-        adapter,
-        runId,
-        goal: typeof oneshot?.goal === "string" ? oneshot.goal : "Complete the oneshot goal",
-        cwd: resume.cwd,
-      });
-      const timer = setTimeout(() => void stopAttached(runId), attachLeaseMs);
-      timer.unref?.();
-      attached.set(runId, { updater, timer });
-      return { runId, status: "attached", narrator: updater.enabled !== false };
+      if (attaching.has(runId)) throw new Error("A monitor attachment is already being started");
+      attaching.add(runId);
+      try {
+        const run = await adapter.getRun(runId);
+        if (!run) throw new Error(`Run not found: ${runId}`);
+        const resume = builtinResumeConfigOf(run);
+        if (run.status !== "running") {
+          return { runId, status: "attached", narrator: false };
+        }
+        const config = parseJsonObject(run.configJson);
+        const oneshot = asObject(config?.oneshot);
+        const updater = narratorStart({
+          adapter,
+          runId,
+          goal: typeof oneshot?.goal === "string" ? oneshot.goal : "Complete the oneshot goal",
+          cwd: resume.cwd,
+        });
+        const timer = setTimeout(() => void stopAttached(runId), attachLeaseMs);
+        timer.unref?.();
+        attached.set(runId, { updater, timer });
+        return { runId, status: "attached", narrator: updater.enabled !== false };
+      } finally {
+        attaching.delete(runId);
+      }
     },
 
     async steer({ runId, message, adapter }) {
@@ -298,131 +307,137 @@ export function createOneshotMonitorControl(options) {
       if (!trimmed) throw new Error("Steering message is required");
       if (trimmed.length > MAX_STEER_CHARS) throw new Error(`Steering message exceeds ${MAX_STEER_CHARS} characters`);
       if (steering.has(runId)) throw new Error("A steering message is already being delivered");
-      const run = await adapter.getRun(runId);
-      if (!run) throw new Error(`Run not found: ${runId}`);
-      const resume = builtinResumeConfigOf(run);
-      const messageId = crypto.randomUUID();
-      const initialCandidate = await resolveCandidate(adapter, runId);
-      if (!initialCandidate) {
-        const error = "No resumable agent session is recorded yet";
-        await recordControlEvent(adapter, runId, "OneshotSteerFailed", {
-          nodeId: STEER_NODE_ID,
-          messageId,
-          message: trimmed,
-          delivery: "failed",
-          error,
-        });
-        return { runId, messageId, status: "failed", error };
-      }
+      steering.add(runId);
+      let deliveryStarted = false;
       try {
-        buildSteeringLaunchSpec(initialCandidate, trimmed);
-      } catch (failure) {
-        const error = failure instanceof Error ? failure.message : String(failure);
-        await recordControlEvent(adapter, runId, "OneshotSteerFailed", {
+        const run = await adapter.getRun(runId);
+        if (!run) throw new Error(`Run not found: ${runId}`);
+        const resume = builtinResumeConfigOf(run);
+        const messageId = crypto.randomUUID();
+        const initialCandidate = await resolveCandidate(adapter, runId);
+        if (!initialCandidate) {
+          const error = "No resumable agent session is recorded yet";
+          await recordControlEvent(adapter, runId, "OneshotSteerFailed", {
+            nodeId: STEER_NODE_ID,
+            messageId,
+            message: trimmed,
+            delivery: "failed",
+            error,
+          });
+          return { runId, messageId, status: "failed", error };
+        }
+        try {
+          buildSteeringLaunchSpec(initialCandidate, trimmed);
+        } catch (failure) {
+          const error = failure instanceof Error ? failure.message : String(failure);
+          await recordControlEvent(adapter, runId, "OneshotSteerFailed", {
+            nodeId: STEER_NODE_ID,
+            messageId,
+            message: trimmed,
+            engine: initialCandidate.engine,
+            delivery: "failed",
+            error,
+          });
+          return { runId, messageId, status: "failed", engine: initialCandidate.engine, error };
+        }
+        await recordControlEvent(adapter, runId, "OneshotSteerQueued", {
           nodeId: STEER_NODE_ID,
           messageId,
           message: trimmed,
           engine: initialCandidate.engine,
-          delivery: "failed",
-          error,
+          delivery: "queued",
         });
-        return { runId, messageId, status: "failed", engine: initialCandidate.engine, error };
-      }
-      await recordControlEvent(adapter, runId, "OneshotSteerQueued", {
-        nodeId: STEER_NODE_ID,
-        messageId,
-        message: trimmed,
-        engine: initialCandidate.engine,
-        delivery: "queued",
-      });
-      steering.add(runId);
-      void (async () => {
-        let hijackRequested = false;
-        let handoffCompleted = false;
-        let resumed = false;
-        try {
-          let candidate = initialCandidate;
-          if (run.status === "running") {
-            const requestedAtMs = Date.now();
-            await adapter.requestRunHijack(runId, requestedAtMs, initialCandidate.engine);
-            hijackRequested = true;
-            await recordControlEvent(adapter, runId, "RunHijackRequested", {
-              target: initialCandidate.engine,
-              reason: "oneshot-steer",
+        deliveryStarted = true;
+        void (async () => {
+          let hijackRequested = false;
+          let handoffCompleted = false;
+          let resumed = false;
+          try {
+            let candidate = initialCandidate;
+            if (run.status === "running") {
+              const requestedAtMs = Date.now();
+              await adapter.requestRunHijack(runId, requestedAtMs, initialCandidate.engine);
+              hijackRequested = true;
+              await recordControlEvent(adapter, runId, "RunHijackRequested", {
+                target: initialCandidate.engine,
+                reason: "oneshot-steer",
+              });
+              candidate = await waitForCandidate(adapter, runId, { timeoutMs: 30_000 });
+              handoffCompleted = true;
+            }
+            const spec = buildSteeringLaunchSpec(candidate, trimmed);
+            const child = spawnImpl(spec.command, spec.args, {
+              cwd: spec.cwd,
+              env: spec.env,
+              stdio: "ignore",
+              detached: true,
             });
-            candidate = await waitForCandidate(adapter, runId, { timeoutMs: 30_000 });
-            handoffCompleted = true;
-          }
-          const spec = buildSteeringLaunchSpec(candidate, trimmed);
-          const child = spawnImpl(spec.command, spec.args, {
-            cwd: spec.cwd,
-            env: spec.env,
-            stdio: "ignore",
-            detached: true,
-          });
-          const completion = waitForChild(child);
-          void completion.catch(() => undefined);
-          await waitForChildSpawn(child);
-          await recordControlEvent(adapter, runId, "OneshotSteerDelivered", {
-            nodeId: STEER_NODE_ID,
-            messageId,
-            engine: candidate.engine,
-            delivery: "delivered",
-          });
-          const code = await waitForSteeringCompletion(completion, child, steerTimeoutMs, terminateOwner);
-          if (code !== 0) throw new Error(`${candidate.engine} steering process exited with code ${code}`);
-          await recordControlEvent(adapter, runId, "OneshotSteerAcknowledged", {
-            nodeId: STEER_NODE_ID,
-            messageId,
-            engine: candidate.engine,
-            delivery: "agent-acked",
-          });
-          await launchBuiltin(resume, runId, true);
-          resumed = true;
-        } catch (error) {
-          if (hijackRequested) {
-            try {
-              await adapter.clearRunHijack(runId);
-            } catch {}
-          }
-          let recoveryError;
-          if (!resumed && error?.recoveryUnsafe !== true) {
-            let latestRun = null;
-            try {
-              latestRun = await adapter.getRun(runId);
-            } catch {}
-            if (handoffCompleted || runWasHijacked(latestRun)) {
+            const completion = waitForChild(child);
+            void completion.catch(() => undefined);
+            await waitForChildSpawn(child);
+            await recordControlEvent(adapter, runId, "OneshotSteerDelivered", {
+              nodeId: STEER_NODE_ID,
+              messageId,
+              engine: candidate.engine,
+              delivery: "delivered",
+            });
+            const code = await waitForSteeringCompletion(completion, child, steerTimeoutMs, terminateOwner);
+            if (code !== 0) throw new Error(`${candidate.engine} steering process exited with code ${code}`);
+            await recordControlEvent(adapter, runId, "OneshotSteerAcknowledged", {
+              nodeId: STEER_NODE_ID,
+              messageId,
+              engine: candidate.engine,
+              delivery: "agent-acked",
+            });
+            await launchBuiltin(resume, runId, true);
+            resumed = true;
+          } catch (error) {
+            if (hijackRequested) {
               try {
-                await launchBuiltin(resume, runId, true);
-                resumed = true;
-              } catch (failure) {
-                recoveryError = failure instanceof Error ? failure.message : String(failure);
+                await adapter.clearRunHijack(runId);
+              } catch {}
+            }
+            let recoveryError;
+            if (!resumed && error?.recoveryUnsafe !== true) {
+              let latestRun = null;
+              try {
+                latestRun = await adapter.getRun(runId);
+              } catch {}
+              if (handoffCompleted || runWasHijacked(latestRun)) {
+                try {
+                  await launchBuiltin(resume, runId, true);
+                  resumed = true;
+                } catch (failure) {
+                  recoveryError = failure instanceof Error ? failure.message : String(failure);
+                }
               }
             }
+            await recordControlEvent(adapter, runId, "OneshotSteerFailed", {
+              nodeId: STEER_NODE_ID,
+              messageId,
+              delivery: "failed",
+              error: error instanceof Error ? error.message : String(error),
+              resumed,
+              ...(recoveryError ? { recoveryError } : {}),
+            }).catch(() => undefined);
+          } finally {
+            steering.delete(runId);
           }
-          await recordControlEvent(adapter, runId, "OneshotSteerFailed", {
-            nodeId: STEER_NODE_ID,
-            messageId,
-            delivery: "failed",
-            error: error instanceof Error ? error.message : String(error),
-            resumed,
-            ...(recoveryError ? { recoveryError } : {}),
-          }).catch(() => undefined);
-        } finally {
-          steering.delete(runId);
-        }
-      })();
-      return { runId, messageId, status: "queued", engine: initialCandidate.engine };
+        })();
+        return { runId, messageId, status: "queued", engine: initialCandidate.engine };
+      } finally {
+        if (!deliveryStarted) steering.delete(runId);
+      }
     },
 
     async restart({ runId, adapter }) {
       if (restarting.has(runId)) throw new Error("A restart is already being launched");
-      const run = await adapter.getRun(runId);
-      if (!run) throw new Error(`Run not found: ${runId}`);
-      const resume = builtinResumeConfigOf(run);
-      const nextRunId = `${runId}-restart-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 6)}`;
       restarting.add(runId);
+      const nextRunId = `${runId}-restart-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 6)}`;
       try {
+        const run = await adapter.getRun(runId);
+        if (!run) throw new Error(`Run not found: ${runId}`);
+        const resume = builtinResumeConfigOf(run);
         await recordControlEvent(adapter, runId, "OneshotRestartRequested", {
           restartedAsRunId: nextRunId,
           priorStatus: run.status,

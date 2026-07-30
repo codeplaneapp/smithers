@@ -38,12 +38,12 @@ function shellArg(value) {
  * which is precisely `<DecisionTable strategy="first-match">`. Routing here is
  * deterministic: the agent names a condition, the table picks the handler.
  *
- * The healing half is deliberately timid. Only `stalled` and `wedged-node` heal
- * without a human by default, because resuming a run and retrying a node are
- * the two repairs that are both idempotent and reversible. Everything else
- * escalates through a durable `<HumanTask>`. Put a condition in `autoHeal` to
- * grant broader authority; pass `handlers` to replace any element outright, or
- * map one to `null` to make it a no-op.
+ * The healing half is deliberately timid. Only ownerless `stalled` and
+ * `wedged-node` runs heal without a human by default. A live owner is never
+ * taken over by the monitor; that condition escalates through a durable
+ * `<HumanTask>`. Put a condition in `autoHeal` to grant broader authority; pass
+ * `handlers` to replace any element outright, or map one to `null` to make it a
+ * no-op.
  *
  * The monitor never reads the store: its prompt binds it to the Gateway client
  * and the public CLI surface.
@@ -70,6 +70,7 @@ export function Monitor(props) {
   // table routes on THIS beat's verdict rather than beat 0's.
   const health = ctx?.latest?.(props.healthOutput, checkId);
   const condition = typeof health?.condition === "string" ? health.condition : undefined;
+  const ownerActive = health?.ownerActive === true;
   // A monitor must never outlive the run it watches. The loop's own exit is the
   // watched run reaching a terminal status; the CLI tears the monitor down as
   // well, so this is the graceful path, not the only one.
@@ -124,7 +125,7 @@ export function Monitor(props) {
 
   /**
    * Escalation is a durable human request on the MONITOR run, so it survives a
-   * restart and shows up in `bunx smithers-orchestrator human list` / the Gateway.
+   * restart and shows up in `bunx smithers-orchestrator human inbox` / the Gateway.
    * @param {MonitorCondition} name
    * @param {string} ask
    */
@@ -150,22 +151,34 @@ export function Monitor(props) {
   const defaults = {
     // Nothing to do. Rendering nothing IS the handler.
     healthy: null,
-    stalled: autoHeal.includes("stalled")
-      ? handlerTask(
-          "stalled",
-          watchWorkflowPath
-            ? `Resume the run: \`bunx smithers-orchestrator up ${shellArg(watchWorkflowPath)} --resume --run-id ${shellArg(watchRunId)}\` (idempotent — it re-enters the same durable frame). Confirm with \`bunx smithers-orchestrator status ${shellArg(watchRunId)}\` that events resumed. Do nothing else.`
-            : "Do not resume: watchWorkflowPath was not supplied. Report that the monitor cannot build a safe resume command.",
-        )
-      : escalate("stalled", "Should this run be resumed?"),
-    "wedged-node": autoHeal.includes("wedged-node")
-      ? handlerTask(
-          "wedged-node",
-          watchWorkflowPath && typeof health?.targetNodeId === "string" && health.targetNodeId
-            ? `Retry the wedged node once: \`bunx smithers-orchestrator retry-task ${shellArg(watchWorkflowPath)} --run-id ${shellArg(watchRunId)} --node-id ${shellArg(health.targetNodeId)}\`. This resets that node's output and downstream dependents before creating fresh attempts. Report exactly what was reset. Do not retry a second time — a node that wedges again needs a human.`
-            : "Do not retry: watchWorkflowPath or targetNodeId is missing from the health sample. Report the incomplete monitor evidence.",
-        )
-      : escalate("wedged-node", "Should this node be retried, or is the failure real?"),
+    stalled:
+      autoHeal.includes("stalled") && !ownerActive
+        ? handlerTask(
+            "stalled",
+            watchWorkflowPath
+              ? `First confirm that the health sample explicitly reports \`ownerActive: false\`; if ownership evidence is absent or true, do not act and report that recovery needs a human. Then resume the ownerless run: \`bunx smithers-orchestrator up ${shellArg(watchWorkflowPath)} --resume --run-id ${shellArg(watchRunId)}\`. Confirm with \`bunx smithers-orchestrator status ${shellArg(watchRunId)}\` that events resumed. Do nothing else.`
+              : "Do not resume: watchWorkflowPath was not supplied. Report that the monitor cannot build a safe resume command.",
+          )
+        : escalate(
+            "stalled",
+            ownerActive
+              ? "The run still has an active runtime owner, so an automatic resume would race it. Should the owner be stopped before recovery?"
+              : "Should this run be resumed?",
+          ),
+    "wedged-node":
+      autoHeal.includes("wedged-node") && !ownerActive
+        ? handlerTask(
+            "wedged-node",
+            watchWorkflowPath && typeof health?.targetNodeId === "string" && health.targetNodeId
+              ? `First confirm that the health sample explicitly reports \`ownerActive: false\`; if ownership evidence is absent or true, do not act and report that recovery needs a human. Then retry the ownerless wedged node once: \`bunx smithers-orchestrator retry-task ${shellArg(watchWorkflowPath)} --run-id ${shellArg(watchRunId)} --node-id ${shellArg(health.targetNodeId)}\`. This resets that node's output and downstream dependents before creating fresh attempts. Report exactly what was reset. Do not retry a second time — a node that wedges again needs a human.`
+              : "Do not retry: watchWorkflowPath or targetNodeId is missing from the health sample. Report the incomplete monitor evidence.",
+          )
+        : escalate(
+            "wedged-node",
+            ownerActive
+              ? "The run still has an active runtime owner, so retrying would race it. Should the owner be stopped before this node is reset?"
+              : "Should this node be retried, or is the failure real?",
+          ),
     // Cancelling is destructive, so it ships behind an explicit opt-in: it only
     // becomes the handler when the author puts "runaway-loop" in `autoHeal`.
     "runaway-loop": autoHeal.includes("runaway-loop")

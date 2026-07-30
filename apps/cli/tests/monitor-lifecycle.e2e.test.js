@@ -189,6 +189,20 @@ describe("monitor workflow lifecycle", () => {
     TIMEOUT_MS,
   );
 
+  test("a missing bun executable degrades monitor launch without killing or delaying the watched run", () => {
+    const repo = fixture({ withMonitor: true });
+    const startedAt = Date.now();
+    const run = runSmithers(["up", ".smithers/workflows/watched.tsx", "--run-id", "watched-no-bun", "--no-report"], {
+      cwd: repo.dir,
+      env: { PATH: "" },
+      timeoutMs: 30_000,
+    });
+    expect(run.exitCode, `${run.stdout}\n${run.stderr}`).toBe(0);
+    expect(`${run.stdout}${run.stderr}`).toContain("continues without it");
+    expect(Date.now() - startedAt).toBeLessThan(20_000);
+    expect(childRunIds(repo, "watched-no-bun")).toEqual([]);
+  }, 30_000);
+
   test(
     "a parked run keeps its monitor and a later resume adopts it",
     async () => {
