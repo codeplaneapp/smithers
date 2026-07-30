@@ -8,6 +8,7 @@ import {
   useGatewayRunEvents,
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
+import { sharedDarkThemeCss } from "./shared-theme";
 
 const WORKFLOW_KEY = "issue-train";
 
@@ -350,21 +351,16 @@ function App() {
 }
 
 const STYLES = [
-  ":root{--bg:#0c0c0e;--panel:#151518;--card:#1c1c1f;--text:#eee;--muted:#8a8a8e;--border:#262629;--ok:#4ade80;--err:#f87171;--warn:#fbbf24;--run:#60a5fa;color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;}",
-  "*{box-sizing:border-box;}",
-  "body{margin:0;background:var(--bg);color:var(--text);font-size:13px;line-height:1.5;}",
+  ...sharedDarkThemeCss,
+  ":root { --run:#60a5fa; }",
   ".shell{min-height:100vh;display:flex;flex-direction:column;}",
   ".topbar{display:flex;align-items:center;gap:10px;padding:12px 20px;border-bottom:1px solid var(--border);flex-wrap:wrap;position:sticky;top:0;background:var(--bg);z-index:2;}",
-  "h1{margin:0;font-size:14px;font-weight:600;}",
   "h2{margin:0 0 8px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}",
   "h3{margin:12px 0 6px;font-size:12px;}",
   ".pill{font-size:12px;color:var(--muted);background:var(--panel);padding:3px 9px;border-radius:6px;border:1px solid var(--border);}",
   ".mono{font-family:ui-monospace,monospace;font-size:11px;}",
   ".spacer{flex:1;}",
-  ".badge{font-size:11px;font-weight:600;text-transform:uppercase;padding:3px 8px;border-radius:5px;border:1px solid var(--border);}",
   ".badge.running{color:var(--run);border-color:var(--run);}",
-  ".badge.finished{color:var(--ok);border-color:var(--ok);}",
-  ".badge.failed{color:var(--err);border-color:var(--err);}",
   ".badge.waiting-approval,.badge.paused{color:var(--warn);border-color:var(--warn);}",
   ".content{padding:20px;max-width:1200px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:14px;}",
   ".panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px;}",
@@ -389,7 +385,6 @@ const STYLES = [
   ".approval{display:flex;align-items:center;gap:10px;margin:6px 0;}",
   ".button{height:28px;padding:0 12px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--text);cursor:pointer;font-weight:500;font:inherit;}",
   ".button.ok{background:var(--ok);color:#04210f;border-color:var(--ok);}",
-  ".button.danger{color:var(--err);}",
   "a{color:var(--run);text-decoration:none;}",
   "ul{margin:6px 0;padding-left:18px;}",
 ].join("\n");

@@ -8,6 +8,7 @@ import {
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+import { sharedDarkThemeCss } from "./shared-theme";
 
 const WORKFLOW_KEY = "ticket-create";
 
@@ -69,27 +70,11 @@ function copyText(text: string) {
 }
 
 const styles = [
-  ":root { --bg:#0c0c0e; --panel:#151518; --card:#1c1c1f; --text:#eee; --muted:#8a8a8e; --border:#262629; --primary:#5e6ad2; --ok:#4ade80; --err:#f87171; --warn:#fbbf24; color-scheme:dark; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; }",
-  "* { box-sizing:border-box; }",
-  "body { margin:0; background:var(--bg); color:var(--text); font-size:13px; line-height:1.5; }",
-  "button,input { font:inherit; }",
-  ".shell { height:100vh; display:flex; flex-direction:column; overflow:hidden; }",
-  ".topbar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 20px; border-bottom:1px solid var(--border); }",
-  ".title-group { display:flex; align-items:center; gap:12px; min-width:0; }",
-  "h1 { margin:0; font-size:14px; font-weight:600; }",
+  ...sharedDarkThemeCss,
   ".pill { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); background:var(--panel); padding:4px 10px; border-radius:6px; border:1px solid var(--border); font-family:ui-monospace,monospace; }",
   ".toolbar { display:flex; align-items:center; gap:8px; flex:1; justify-content:flex-end; }",
   ".prompt { flex:1; max-width:420px; height:30px; padding:0 10px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--text); }",
-  ".button { height:30px; padding:0 12px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--text); cursor:pointer; font-weight:500; }",
-  ".button:hover { background:var(--card); }",
-  ".button.primary { background:var(--primary); color:#fff; border-color:var(--primary); }",
-  ".button.danger { color:var(--err); }",
-  ".button:disabled { opacity:0.4; cursor:not-allowed; }",
   ".button.tiny { height:24px; padding:0 8px; font-size:11px; }",
-  ".badge { font-size:11px; font-weight:600; text-transform:uppercase; padding:3px 8px; border-radius:5px; border:1px solid var(--border); }",
-  ".badge.running { color:var(--warn); border-color:var(--warn); }",
-  ".badge.finished { color:var(--ok); border-color:var(--ok); }",
-  ".badge.failed { color:var(--err); border-color:var(--err); }",
   ".main { display:grid; grid-template-columns:1fr 280px; flex:1; overflow:hidden; }",
   ".content { padding:24px; overflow:auto; display:flex; flex-direction:column; align-items:center; }",
   ".col { width:100%; max-width:680px; }",
@@ -113,16 +98,10 @@ const styles = [
   ".ac-text.done { color:var(--muted); text-decoration:line-through; }",
   ".ac-empty { color:var(--muted); font-size:13px; padding:6px 0; }",
   ".actions-footer { display:flex; gap:8px; flex-wrap:wrap; padding-top:4px; }",
-  ".empty { color:var(--muted); text-align:center; padding:48px 16px; }",
   ".empty h2 { color:var(--text); font-size:16px; margin:0 0 6px; }",
   ".empty .form { display:flex; flex-direction:column; gap:10px; max-width:420px; margin:18px auto 0; }",
   ".empty textarea { min-height:84px; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:var(--panel); color:var(--text); resize:vertical; }",
-  ".sidebar { border-left:1px solid var(--border); background:var(--panel); overflow:auto; }",
-  ".side-head { padding:12px 16px; font-size:11px; text-transform:uppercase; letter-spacing:0.04em; color:var(--muted); border-bottom:1px solid var(--border); }",
   ".run-row { width:100%; text-align:left; padding:10px 16px; border:0; border-bottom:1px solid var(--border); background:transparent; color:var(--text); cursor:pointer; display:flex; justify-content:space-between; gap:8px; }",
-  ".run-row:hover { background:var(--card); }",
-  ".run-row.active { background:var(--card); box-shadow:inset 2px 0 0 var(--primary); }",
-  ".run-row .mono { font-family:ui-monospace,monospace; font-size:11px; }",
 ].join("\n");
 
 function App() {

@@ -8,6 +8,7 @@ import {
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+import { sharedDarkThemeCss } from "./shared-theme";
 
 const WORKFLOW_KEY = "feature-enum";
 
@@ -76,34 +77,15 @@ function isRefiningExisting(input: unknown): boolean {
 }
 
 const styles = [
-  ":root { --bg:#0c0c0e; --panel:#151518; --card:#1c1c1f; --text:#eee; --muted:#8a8a8e; --border:#262629; --primary:#5e6ad2; --ok:#4ade80; --err:#f87171; --warn:#fbbf24; color-scheme:dark; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; }",
-  "* { box-sizing:border-box; }",
-  "body { margin:0; background:var(--bg); color:var(--text); font-size:13px; line-height:1.5; }",
-  "button,input { font:inherit; }",
-  ".shell { height:100vh; display:flex; flex-direction:column; overflow:hidden; }",
-  ".topbar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 20px; border-bottom:1px solid var(--border); }",
-  ".title-group { display:flex; align-items:center; gap:12px; min-width:0; }",
-  "h1 { margin:0; font-size:14px; font-weight:600; }",
-  ".pill { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); background:var(--panel); padding:4px 10px; border-radius:6px; border:1px solid var(--border); }",
+  ...sharedDarkThemeCss,
   ".pill .mono { font-family:ui-monospace,monospace; }",
   ".toolbar { display:flex; align-items:center; gap:8px; flex:1; justify-content:flex-end; }",
   ".prompt { width:64px; height:30px; padding:0 10px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--text); }",
   ".search { flex:1; max-width:280px; height:30px; padding:0 10px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--text); }",
   ".field { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:12px; }",
-  ".button { height:30px; padding:0 12px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--text); cursor:pointer; font-weight:500; }",
-  ".button:hover { background:var(--card); }",
-  ".button.primary { background:var(--primary); color:#fff; border-color:var(--primary); }",
-  ".button.danger { color:var(--err); }",
-  ".button:disabled { opacity:0.4; cursor:not-allowed; }",
   ".main { display:grid; grid-template-columns:260px 1fr 300px; flex:1; overflow:hidden; }",
   ".rail { border-right:1px solid var(--border); background:var(--panel); overflow:auto; padding:16px; }",
-  ".content { padding:20px; overflow:auto; }",
-  ".sidebar { border-left:1px solid var(--border); background:var(--panel); overflow:auto; }",
   ".section-head { font-size:11px; text-transform:uppercase; letter-spacing:0.04em; color:var(--muted); margin:0 0 10px; }",
-  ".badge { font-size:11px; font-weight:600; text-transform:uppercase; padding:3px 8px; border-radius:5px; border:1px solid var(--border); }",
-  ".badge.running { color:var(--warn); border-color:var(--warn); }",
-  ".badge.finished { color:var(--ok); border-color:var(--ok); }",
-  ".badge.failed { color:var(--err); border-color:var(--err); }",
   ".count-badge { font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px; background:var(--primary); color:#fff; }",
   ".meta { display:flex; flex-direction:column; gap:8px; margin-bottom:20px; }",
   ".meta-row { display:flex; justify-content:space-between; gap:10px; font-size:12px; }",
@@ -132,10 +114,7 @@ const styles = [
   ".notes { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }",
   ".notes pre { margin:0; white-space:pre-wrap; word-break:break-word; font-family:ui-monospace,monospace; font-size:12px; color:var(--text); }",
   ".run-row { width:100%; text-align:left; padding:10px 16px; border:0; border-bottom:1px solid var(--border); background:transparent; color:var(--text); cursor:pointer; display:flex; flex-direction:column; gap:4px; }",
-  ".run-row:hover { background:var(--card); }",
-  ".run-row.active { background:var(--card); box-shadow:inset 2px 0 0 var(--primary); }",
   ".run-row .top { display:flex; justify-content:space-between; gap:8px; align-items:center; }",
-  ".run-row .mono { font-family:ui-monospace,monospace; font-size:11px; }",
   ".run-row .sub { font-size:11px; color:var(--muted); }",
   ".empty { color:var(--muted); text-align:center; padding:40px 16px; }",
   ".empty .button { margin-top:14px; }",

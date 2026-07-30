@@ -11,6 +11,7 @@ import {
 } from "smithers-orchestrator/gateway-react";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
 import { parseTicketFleetDispositionRows } from "../lib/ticketFleetDisposition";
+import { sharedDarkThemeCss } from "./shared-theme";
 
 const WORKFLOW_KEY = "ticket-fleet";
 
@@ -192,8 +193,8 @@ const STAGE_COLUMNS: Array<{ stage: Stage; label: string }> = [
 ];
 
 const styles = [
-  ":root{--bg:#0c0c0e;--panel:#151518;--card:#1c1c1f;--text:#eee;--muted:#8a8a8e;--border:#262629;--primary:#5e6ad2;--ok:#4ade80;--err:#f87171;--warn:#fbbf24;--run:#60a5fa;color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;}",
-  "*{box-sizing:border-box;}",
+  ...sharedDarkThemeCss,
+  ":root { --run:#60a5fa; }",
   "body{margin:0;background:var(--bg);color:var(--text);}",
   ".wrap{max-width:1400px;margin:0 auto;padding:20px;}",
   ".hdr{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;}",

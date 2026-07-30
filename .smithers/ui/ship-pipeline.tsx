@@ -10,6 +10,7 @@ import {
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+import { sharedDarkThemeCss } from "./shared-theme";
 
 const WORKFLOW_KEY = "ship-pipeline";
 
@@ -220,15 +221,9 @@ function ticketProgress(slug: string, nodeStatus: Record<string, StageState>): T
 }
 
 const styles = [
-  ":root { --bg:#0c0c0e; --panel:#151518; --card:#1c1c1f; --text:#eee; --muted:#8a8a8e; --border:#262629; --primary:#5e6ad2; --ok:#4ade80; --err:#f87171; --warn:#fbbf24; color-scheme:dark; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; }",
-  "* { box-sizing:border-box; }",
-  "body { margin:0; background:var(--bg); color:var(--text); font-size:13px; line-height:1.5; }",
+  ...sharedDarkThemeCss,
   "button,input,textarea { font:inherit; }",
-  ".shell { height:100vh; display:flex; flex-direction:column; overflow:hidden; }",
   ".topbar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 20px; border-bottom:1px solid var(--border); flex-wrap:wrap; }",
-  ".title-group { display:flex; align-items:center; gap:12px; min-width:0; }",
-  "h1 { margin:0; font-size:14px; font-weight:600; }",
-  ".pill { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); background:var(--panel); padding:4px 10px; border-radius:6px; border:1px solid var(--border); }",
   ".pill .mono { font-family:ui-monospace,monospace; }",
   ".progress-pill { color:var(--text); }",
   ".progress-pill b { color:var(--ok); }",
@@ -236,13 +231,6 @@ const styles = [
   ".prompt { height:30px; padding:0 10px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--text); }",
   ".prompt.dir { min-width:220px; }",
   ".check { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); cursor:pointer; user-select:none; }",
-  ".button { height:30px; padding:0 12px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--text); cursor:pointer; font-weight:500; }",
-  ".button:hover { background:var(--card); }",
-  ".button.primary { background:var(--primary); color:#fff; border-color:var(--primary); }",
-  ".button.danger { color:var(--err); }",
-  ".button:disabled { opacity:0.4; cursor:not-allowed; }",
-  ".badge { font-size:11px; font-weight:600; text-transform:uppercase; padding:3px 8px; border-radius:5px; border:1px solid var(--border); }",
-  ".badge.running { color:var(--warn); border-color:var(--warn); }",
   ".badge.finished, .badge.landed, .badge.ok { color:var(--ok); border-color:var(--ok); }",
   ".badge.failed, .badge.err { color:var(--err); border-color:var(--err); }",
   ".badge.queued { color:var(--muted); }",
@@ -300,13 +288,8 @@ const styles = [
   ".launch-form p { margin:0 0 18px; color:var(--muted); }",
   ".launch-form .prompt { width:100%; height:34px; margin-bottom:12px; }",
   ".field { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px solid var(--border); }",
-  ".sidebar { border-left:1px solid var(--border); background:var(--panel); overflow:auto; }",
-  ".side-head { padding:12px 16px; font-size:11px; text-transform:uppercase; letter-spacing:0.04em; color:var(--muted); border-bottom:1px solid var(--border); }",
   ".side-body { padding:12px 16px; }",
   ".run-row { width:100%; text-align:left; padding:10px 16px; border:0; border-bottom:1px solid var(--border); background:transparent; color:var(--text); cursor:pointer; display:flex; justify-content:space-between; gap:8px; }",
-  ".run-row:hover { background:var(--card); }",
-  ".run-row.active { background:var(--card); box-shadow:inset 2px 0 0 var(--primary); }",
-  ".run-row .mono { font-family:ui-monospace,monospace; font-size:11px; }",
 ].join("\n");
 
 function statusClass(status: string | undefined) {

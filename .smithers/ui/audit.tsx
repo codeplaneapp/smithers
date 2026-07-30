@@ -9,6 +9,7 @@ import {
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+import { sharedDarkThemeCss } from "./shared-theme";
 
 const WORKFLOW_KEY = "audit";
 
@@ -123,27 +124,11 @@ function scoreClass(score: number | undefined) {
 }
 
 const styles = [
-  ":root { --bg:#0c0c0e; --panel:#151518; --card:#1c1c1f; --text:#eee; --muted:#8a8a8e; --border:#262629; --primary:#5e6ad2; --ok:#4ade80; --err:#f87171; --warn:#fbbf24; color-scheme:dark; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; }",
-  "* { box-sizing:border-box; }",
-  "body { margin:0; background:var(--bg); color:var(--text); font-size:13px; line-height:1.5; }",
-  "button,input { font:inherit; }",
-  ".shell { height:100vh; display:flex; flex-direction:column; overflow:hidden; }",
-  ".topbar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 20px; border-bottom:1px solid var(--border); }",
+  ...sharedDarkThemeCss,
   ".title-group { display:flex; align-items:center; gap:12px; min-width:0; flex-wrap:wrap; }",
-  "h1 { margin:0; font-size:14px; font-weight:600; }",
-  ".pill { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); background:var(--panel); padding:4px 10px; border-radius:6px; border:1px solid var(--border); }",
   ".pill.focus { color:var(--primary); }",
   ".toolbar { display:flex; align-items:center; gap:8px; flex:1; justify-content:flex-end; }",
   ".prompt { flex:1; max-width:360px; height:30px; padding:0 10px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--text); }",
-  ".button { height:30px; padding:0 12px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--text); cursor:pointer; font-weight:500; }",
-  ".button:hover { background:var(--card); }",
-  ".button.primary { background:var(--primary); color:#fff; border-color:var(--primary); }",
-  ".button.danger { color:var(--err); }",
-  ".button:disabled { opacity:0.4; cursor:not-allowed; }",
-  ".badge { font-size:11px; font-weight:600; text-transform:uppercase; padding:3px 8px; border-radius:5px; border:1px solid var(--border); }",
-  ".badge.running { color:var(--warn); border-color:var(--warn); }",
-  ".badge.finished { color:var(--ok); border-color:var(--ok); }",
-  ".badge.failed { color:var(--err); border-color:var(--err); }",
   ".phases { display:flex; align-items:center; gap:8px; padding:10px 20px; border-bottom:1px solid var(--border); background:var(--panel); font-size:11px; }",
   ".phase { display:flex; align-items:center; gap:6px; color:var(--muted); }",
   ".phase .dot { width:8px; height:8px; border-radius:50%; background:var(--border); }",
@@ -168,7 +153,6 @@ const styles = [
   ".score.ok { color:var(--ok); }",
   ".score.warn { color:var(--warn); }",
   ".score.err { color:var(--err); }",
-  ".content { padding:20px; overflow:auto; }",
   ".tabs { display:flex; gap:6px; margin-bottom:18px; }",
   ".tab { height:28px; padding:0 12px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--muted); cursor:pointer; }",
   ".tab.active { background:var(--card); color:var(--text); border-color:var(--primary); }",
@@ -180,7 +164,6 @@ const styles = [
   ".chip { font-size:11px; color:var(--muted); background:var(--panel); border:1px solid var(--border); border-radius:5px; padding:3px 8px; }",
   ".findings { white-space:pre-wrap; font-size:13px; line-height:1.6; margin:0; }",
   ".report-body { white-space:pre-wrap; font-family:ui-monospace,monospace; font-size:12px; line-height:1.6; margin:0; }",
-  ".empty { color:var(--muted); text-align:center; padding:48px 16px; }",
   ".empty .button { margin-top:14px; }",
   ".meta-row { display:flex; gap:16px; color:var(--muted); font-size:12px; margin-top:6px; }",
 ].join("\n");

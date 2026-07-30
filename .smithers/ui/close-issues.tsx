@@ -10,6 +10,7 @@ import {
   useGatewayRuns,
 } from "smithers-orchestrator/gateway-react";
 import { WorkflowUiStyles } from "smithers-orchestrator/gateway-ui";
+import { sharedDarkThemeCss } from "./shared-theme";
 
 const WORKFLOW_KEY = "close-issues";
 
@@ -98,26 +99,16 @@ const PHASES: Array<{ key: "implement" | "review" | "pr" | "merge"; label: strin
 ];
 
 const styles = [
-  ":root{--bg:#0c0c0e;--panel:#151518;--card:#1c1c1f;--text:#eee;--muted:#8a8a8e;--border:#262629;--primary:#5e6ad2;--ok:#4ade80;--err:#f87171;--warn:#fbbf24;--run:#60a5fa;color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;}",
-  "*{box-sizing:border-box;}",
-  "body{margin:0;background:var(--bg);color:var(--text);font-size:13px;line-height:1.5;}",
+  ...sharedDarkThemeCss,
+  ":root { --run:#60a5fa; }",
   "button,input,textarea{font:inherit;}",
   ".shell{min-height:100vh;display:flex;flex-direction:column;}",
   ".topbar{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--border);flex-wrap:wrap;}",
-  "h1{margin:0;font-size:14px;font-weight:600;}",
-  ".pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);background:var(--panel);padding:4px 10px;border-radius:6px;border:1px solid var(--border);}",
   ".mono{font-family:ui-monospace,monospace;font-size:11px;}",
   ".spacer{flex:1;}",
-  ".badge{font-size:11px;font-weight:600;text-transform:uppercase;padding:3px 8px;border-radius:5px;border:1px solid var(--border);}",
   ".badge.running{color:var(--run);border-color:var(--run);}",
-  ".badge.finished{color:var(--ok);border-color:var(--ok);}",
-  ".badge.failed{color:var(--err);border-color:var(--err);}",
   ".badge.waiting-approval,.badge.paused{color:var(--warn);border-color:var(--warn);}",
-  ".button{height:30px;padding:0 12px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--text);cursor:pointer;font-weight:500;}",
-  ".button:hover{background:var(--card);}",
-  ".button.primary{background:var(--primary);color:#fff;border-color:var(--primary);}",
   ".button.ok{background:var(--ok);color:#04210f;border-color:var(--ok);}",
-  ".button.danger{color:var(--err);}",
   ".button:disabled{opacity:.4;cursor:not-allowed;}",
   ".content{padding:20px;max-width:1100px;width:100%;margin:0 auto;}",
   ".lead{color:var(--muted);margin:0 0 16px;}",
@@ -143,7 +134,6 @@ const styles = [
   ".banner{display:flex;gap:10px;align-items:center;padding:14px 18px;border-radius:10px;margin-bottom:18px;border:1px solid var(--border);font-weight:600;}",
   ".banner.done{background:rgba(74,222,128,.08);border-color:var(--ok);color:var(--ok);}",
   ".banner.progress{background:rgba(94,106,210,.1);border-color:var(--primary);color:#aab2f0;}",
-  ".empty{color:var(--muted);text-align:center;padding:48px 16px;}",
 ].join("\n");
 
 function statusClass(status: string | undefined) {
