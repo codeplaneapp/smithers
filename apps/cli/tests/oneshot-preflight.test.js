@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { assessWorkingCopy, buildPreflightNotice } from "../src/oneshot-preflight.js";
+import { assessWorkingCopy, buildPreflightNotice, needsPreflightNotice } from "../src/oneshot-preflight.js";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../..");
 const cliEntry = join(repoRoot, "apps/cli/src/index.js");
@@ -51,6 +51,17 @@ describe("assessWorkingCopy", () => {
       dirty: { modified: 0, untracked: 0, staged: 0, conflicted: 0 },
       detachedHead: false,
     });
+  });
+
+  test("requires preflight for a clean detached HEAD", () => {
+    const cwd = fixtureRepo();
+    git(cwd, ["checkout", "--detach", "HEAD"]);
+    const summary = assessWorkingCopy(cwd);
+    expect(summary).toMatchObject({ vcs: "git", clean: true, detachedHead: true });
+    expect(needsPreflightNotice(summary)).toBe(true);
+    const notice = buildPreflightNotice(summary, "detached-run");
+    expect(notice.warning).toContain("detached HEAD");
+    expect(notice.preamble).toContain("Create or select a branch before making any goal commit");
   });
 
   test("counts dirty tracked files", () => {
@@ -121,7 +132,7 @@ test("buildPreflightNotice renders the warning and compact agent triage from the
     "oneshot-test-run",
   );
   expect(notice.warning).toBe(
-    "oneshot preflight: working copy at /workspace has 7 modified, 3 untracked, 2 staged, 1 conflicted file(s) (detached HEAD, 1 .jjconflict path(s)); pre-existing work can be swept into or block the agent's commits",
+    "oneshot preflight: working copy at /workspace requires attention: 7 modified, 3 untracked, 2 staged, 1 conflicted file(s) (detached HEAD, 1 .jjconflict path(s)); commits can absorb pre-existing work or be left on an unreferenced detached lineage",
   );
   expect(notice.preamble).toContain(
     "chore(preflight): preserve pre-existing working-copy changes before oneshot-test-run",
@@ -131,7 +142,7 @@ test("buildPreflightNotice renders the warning and compact agent triage from the
   expect(notice.preamble).toContain("`git add` every NEW file");
   expect(notice.preamble).toContain("left the CLI unbootable");
   expect(notice.preamble).toContain("Goal commits contain only goal work");
-  expect(notice.preamble.split("\n").length).toBeLessThan(25);
+  expect(notice.preamble.split("\n").length).toBeLessThan(27);
 });
 
 test("oneshot flag schema parses preflight as auto by default", () => {
