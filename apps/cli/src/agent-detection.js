@@ -1300,7 +1300,7 @@ function renderAccountProviderVariantLine(account, homeDir, providerId, modelOve
     opts.push(`config: { model_reasoning_effort: ${JSON.stringify(reasoningEffort)} }`);
   }
   if (account.configDir) opts.push(`configDir: ${pathLiteral(account.configDir, homeDir)}`);
-  else if (account.apiKey) opts.push(`apiKey: ${JSON.stringify(account.apiKey)}`);
+  else if (account.apiKey) opts.push(`apiKey: registeredAccountApiKey(${JSON.stringify(account.label)})`);
   if (account.provider === "codex" || account.provider === "openai-api") {
     opts.push("skipGitRepoCheck: true");
   }
@@ -1548,6 +1548,7 @@ export function generateAgentsTs(env = process.env, options = {}) {
   ];
   const homeDir = env.HOME ?? homedir();
   const hasAccounts = registeredAccounts.length > 0;
+  const hasApiKeyAccounts = registeredAccounts.some((account) => !account.configDir && Boolean(account.apiKey));
   // Provider lines: detection base + variants + accounts (additive — `agent
   // add` must never silently delete a previously-emitted provider). Base
   // providers deliberately use cwd-neutral SDK constructors instead of the
@@ -1693,9 +1694,32 @@ export function generateAgentsTs(env = process.env, options = {}) {
           "// Account providers (camelCase labels) come from ~/.smithers/accounts.json — managed via `smithers agent add|list|remove`.",
         ]
       : []),
+    ...(hasApiKeyAccounts ? ['import { readFileSync } from "node:fs";'] : []),
     ...(hasAccounts ? ['import { homedir } from "node:os";', 'import path from "node:path";'] : []),
     ...smithersImportLines,
     "",
+    ...(hasApiKeyAccounts
+      ? [
+          "function registeredAccountApiKey(label: string): string {",
+          '  const accountRoot = process.env.SMITHERS_HOME || path.join(process.env.HOME || homedir(), ".smithers");',
+          '  const registryPath = path.join(accountRoot, "accounts.json");',
+          "  let registry: { accounts?: Array<{ label?: string; apiKey?: string }> };",
+          "  try {",
+          '    registry = JSON.parse(readFileSync(registryPath, "utf8"));',
+          "  } catch (error) {",
+          "    throw new Error(",
+          '      `Unable to read registered agent account "${label}" from ${registryPath}: ${error instanceof Error ? error.message : String(error)}`,',
+          "    );",
+          "  }",
+          "  const apiKey = registry.accounts?.find((account) => account.label === label)?.apiKey;",
+          "  if (!apiKey) {",
+          '    throw new Error(`Registered agent account "${label}" has no API key in ${registryPath}.`);',
+          "  }",
+          "  return apiKey;",
+          "}",
+          "",
+        ]
+      : []),
     ...scaffoldExportLines,
     ...(scaffoldExportLines.length ? [""] : []),
     ...openRouterHelperLines,

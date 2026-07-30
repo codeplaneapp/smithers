@@ -66,6 +66,24 @@ test("agents add for an api-key provider stores the key", () => {
   });
 });
 
+test("agents add never embeds a registered API key in generated source", () => {
+  const repo = createTempRepo();
+  const home = newSmithersHome();
+  const apiKey = "sk-test-source-must-not-contain-this";
+  repo.write(".smithers/agents.ts", "// smithers-source: generated\n// (placeholder)\n");
+
+  const result = runSmithers(
+    ["agents", "add", "--provider", "openai-api", "--label", "openai-1", "--api-key", apiKey],
+    { cwd: repo.dir, format: "json", env: { SMITHERS_HOME: home } },
+  );
+
+  expect(result.exitCode).toBe(0);
+  const generated = repo.read(".smithers/agents.ts");
+  expect(generated).not.toContain(apiKey);
+  expect(generated).toContain('apiKey: registeredAccountApiKey("openai-1")');
+  expect(generated).toContain('path.join(accountRoot, "accounts.json")');
+});
+
 test("agents add fails clearly when subscription dir is empty and --skip-login not passed", () => {
   const repo = createTempRepo();
   const home = newSmithersHome();
