@@ -7,6 +7,8 @@ const CASES: Array<{ status: NodeStatus; tone: StatusTone; label: string }> = [
   { status: "queued", tone: "idle", label: "queued" },
   { status: "waiting", tone: "waiting", label: "waiting" },
   { status: "failed", tone: "failed", label: "failed" },
+  { status: "cancelled", tone: "idle", label: "cancelled" },
+  { status: "unknown", tone: "idle", label: "unknown" },
 ];
 
 describe("statusMeta", () => {

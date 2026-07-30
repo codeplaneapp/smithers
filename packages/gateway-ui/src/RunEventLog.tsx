@@ -351,6 +351,7 @@ export function RunEventLog({
   useInsertionEffect(ensureGatewayUiStyles, []);
   const { events, error, streaming } = useGatewayRunEvents(runId, { maxEvents, includeHeartbeats: true });
   const [showAll, setShowAll] = useState(showAllHeartbeats);
+  const [dismissedError, setDismissedError] = useState<string>();
   const endRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   // At-bottom gating (the MessageScroller pattern): auto-scroll only while the
@@ -368,6 +369,10 @@ export function RunEventLog({
     atBottomRef.current = atBottom;
     if (atBottom) setJumpVisible(false);
   };
+
+  useEffect(() => {
+    if (!error) setDismissedError(undefined);
+  }, [error]);
 
   useEffect(() => {
     if (!follow) return;
@@ -393,7 +398,7 @@ export function RunEventLog({
   let body: ReactNode;
   if (!runId) {
     body = <EmptyState description="Select a run to stream its events." />;
-  } else if (error) {
+  } else if (error && events.length === 0) {
     body = <EmptyState title="Event stream failed" description={error.message} />;
   } else if (events.length === 0) {
     body = <EmptyState description={streaming ? "Waiting for events…" : "No events."} />;
@@ -411,6 +416,33 @@ export function RunEventLog({
           ))}
           <div ref={endRef} />
         </div>
+        {error && error.message !== dismissedError ? (
+          <div
+            data-slot="run-event-log-error"
+            role="alert"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "6px 8px",
+              borderTop: `1px solid ${theme.dangerBorder}`,
+              background: theme.dangerSoft,
+              color: theme.danger,
+              fontFamily: theme.fontSans,
+              fontSize: 12,
+            }}
+          >
+            <span style={{ flex: 1, minWidth: 0 }}>Event stream interrupted. {error.message}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Dismiss event stream error"
+              onClick={() => setDismissedError(error.message)}
+            >
+              Dismiss
+            </Button>
+          </div>
+        ) : null}
         {jumpVisible ? (
           <button type="button" className="gw-event-jump" onClick={jumpToLatest}>
             <span aria-hidden="true">↓</span> Jump to latest

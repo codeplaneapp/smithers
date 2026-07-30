@@ -193,9 +193,12 @@ get `429 RESOURCE_EXHAUSTED` with a `google.rpc.RetryInfo.retryDelay` in the bod
 
 ### 3.6 `kimi` and the CLI-managed agents (amp, opencode, forge)
 
-- **Kimi:** OAuth subscription with tokens at `<configDir>/credentials/*.json`. No known usage
-  endpoint yet. v1 reports `source: "none"` with a clear "not supported" reason; revisit if
-  Kimi exposes a usage surface.
+- **Kimi:** OAuth subscription with tokens at `<configDir>/credentials/kimi-code.json`. Kimi for
+  Coding exposes `GET {KIMI_CODE_BASE_URL|api.kimi.com/coding/v1}/usages` (the kimi CLI's own
+  `/usage` command reads it): a weekly percent quota, shorter rate windows under `limits[]`, and
+  the parallel-session cap. Access tokens live ~15 minutes, so the adapter refreshes them via
+  `POST {KIMI_CODE_OAUTH_HOST|KIMI_OAUTH_HOST|auth.kimi.com}/api/oauth/token` and persists the
+  rotated pair back, re-reading the file before writing so a concurrently running kimi CLI wins.
 - **amp / opencode / forge:** own auth, no exposed usage surface. Report `source: "none"`.
 
 ### 3.7 Summary
@@ -208,7 +211,7 @@ get `429 RESOURCE_EXHAUSTED` with a `google.rpc.RetryInfo.retryDelay` in the bod
 | openai-api | api key | response headers (POST) | yes (rpm + tpm) | count |
 | gemini / pi / gemini-api | login or key | local logs + 429 | estimate only | estimated |
 | antigravity | subscription | local logs + 429 | estimate only | estimated |
-| kimi | subscription | none | no | — |
+| kimi | subscription | `/coding/v1/usages` | yes (weekly %, rate windows, parallel) | percent + count |
 | amp / opencode / forge | own | none | no | — |
 
 ---
@@ -305,7 +308,8 @@ export type UsageReport = {
 
 This model expresses all three shapes. A Claude report has two `percent` windows; an
 OpenAI-API report has two `count` windows with `remaining`; a Gemini report has one
-`estimated` window with `estimate: true`; a Kimi report has empty `windows` and an `error`.
+`estimated` window with `estimate: true`; a Kimi report mixes `percent` quota windows
+with a `count` parallel-sessions window.
 
 ---
 
@@ -333,7 +337,7 @@ codex-main    codex         pro    weekly        40%        6d 1h
 openai-ci     openai-api    —      requests/min   820/1000   00:42
 openai-ci     openai-api    —      tokens/min     impacted   00:42
 gemini-free   gemini        free   daily (est.)  ~310/1000   18h 12m   ⚠ estimate
-kimi-main     kimi          —      —              not supported
+kimi-main     kimi          standard weekly        73%        1d 9h
 ```
 
 `--watch` reuses `usageCache.js`; it never polls a single account faster than its floor
@@ -460,8 +464,8 @@ then code.
 
 ## 12. Open questions
 
-- **Kimi usage.** Does Kimi expose a usage endpoint we can read with the stored OAuth token?
-  If yes, it becomes a fourth real adapter; if not, it stays `source: "none"`.
+- ~~**Kimi usage.** Does Kimi expose a usage endpoint we can read with the stored OAuth token?~~
+  Answered: yes — `GET /coding/v1/usages`, wired as the fourth real adapter.
 - **Anthropic Admin API for org accounts.** Worth surfacing historical spend for accounts that
   do hold an `sk-ant-admin` key, as an enrichment beyond live limits?
 - **Antigravity post-deprecation.** Once Antigravity becomes Google's primary CLI, does it

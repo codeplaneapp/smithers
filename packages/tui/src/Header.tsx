@@ -1,6 +1,7 @@
 /** @jsxImportSource @opentui/react */
 import { useEffect, useState } from "react";
 import { useRun } from "./data.ts";
+import { sanitizeTerminalText } from "@smithers-orchestrator/tui-ui";
 import {
   buildRunHeaderData,
   statusDotColor,
@@ -26,9 +27,11 @@ export function RunHeaderView({ data, compact }: { data: RunHeaderData; compact:
   const { status, workflowKey, runId, model, elapsedMs } = data;
   const dot = statusDotColor(status);
   const liveLabel = runLiveLabel(status);
-  const id = shortRunId(runId);
+  const id = sanitizeTerminalText(shortRunId(runId));
   const elapsed = formatElapsed(elapsedMs);
-  const name = workflowKey ?? "(workflow)";
+  const name = sanitizeTerminalText(workflowKey ?? "(workflow)");
+  const safeStatus = sanitizeTerminalText(status);
+  const safeModel = model ? sanitizeTerminalText(model) : undefined;
 
   if (compact) {
     // Tight single line: dot + id + status + live/paused.
@@ -36,7 +39,7 @@ export function RunHeaderView({ data, compact }: { data: RunHeaderData; compact:
       <box width="100%" height={1} flexDirection="row">
         <text fg={dot}>{"● "}</text>
         <text fg="#cccccc">{`${id} `}</text>
-        <text fg="#888888">{`${status} `}</text>
+        <text fg="#888888">{`${safeStatus} `}</text>
         <text fg={liveLabel.color}>{`[${liveLabel.text}]`}</text>
       </box>
     );
@@ -47,7 +50,7 @@ export function RunHeaderView({ data, compact }: { data: RunHeaderData; compact:
       <text fg={dot}>{"● "}</text>
       <text fg="#ffffff">{`${name}  `}</text>
       <text fg="#888888">{`${id}  `}</text>
-      {model ? <text fg="#5f87af">{`${model}  `}</text> : null}
+      {safeModel ? <text fg="#5f87af">{`${safeModel}  `}</text> : null}
       <text fg={isRunningStatus(status) ? "#00d7ff" : "#888888"}>{`${elapsed}  `}</text>
       <text fg={liveLabel.color}>{`[${liveLabel.text}]`}</text>
     </box>

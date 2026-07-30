@@ -107,6 +107,9 @@ function configColor(entry: ChartConfig[string] | undefined, theme: "light" | "d
   return entry.color;
 }
 
+const CSS_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_-]*$/;
+const UNSAFE_CSS_VALUE = /[;{}]|<\/style/i;
+
 /**
  * Emits the per-series `--color-<key>` custom properties for the ACTIVE
  * resolved theme (the house adapter convention: `useResolvedTheme` tracks the
@@ -118,7 +121,9 @@ function ChartStyle({ id, config }: { id: string; config: ChartConfig }) {
     const lines = Object.entries(config)
       .map(([key, entry]) => {
         const color = configColor(entry, theme);
-        return color ? `  --color-${key}: ${color};` : null;
+        return color && CSS_IDENTIFIER.test(key) && !UNSAFE_CSS_VALUE.test(color)
+          ? `  --color-${key}: ${color};`
+          : null;
       })
       .filter(Boolean);
     return lines.length > 0 ? `[data-chart="${id}"] {\n${lines.join("\n")}\n}` : "";

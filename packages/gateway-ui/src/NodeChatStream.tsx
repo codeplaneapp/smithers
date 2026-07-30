@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { useGatewayNodeEvents } from "@smithers-orchestrator/gateway-react";
 import {
   ChatMessage,
@@ -112,9 +112,17 @@ export function NodeChatStream({
   useNodeEvents = useGatewayNodeEvents,
 }: NodeChatStreamProps) {
   const { events, error, loading } = useNodeEvents(runId, nodeId);
-  const transcript = nodeId
-    ? buildNodeChatTranscript(events, nodeId, { maxItems })
-    : { items: [], status: undefined, engine: undefined, streaming: false };
+  const [dismissedError, setDismissedError] = useState<string>();
+  useEffect(() => {
+    if (!error) setDismissedError(undefined);
+  }, [error]);
+  const transcript = useMemo(
+    () =>
+      nodeId
+        ? buildNodeChatTranscript(events, nodeId, { maxItems })
+        : { items: [], status: undefined, engine: undefined, streaming: false },
+    [events, nodeId, maxItems],
+  );
   const resolvedStatus = status ?? transcript.status;
   const streaming = status !== undefined ? status === "running" : transcript.streaming;
   const lastKey = transcript.items[transcript.items.length - 1]?.key;
@@ -122,7 +130,7 @@ export function NodeChatStream({
   let body: ReactNode;
   if (!runId || !nodeId) {
     body = <EmptyState title="No node selected" description="Pick an agent node to follow its chat." />;
-  } else if (error) {
+  } else if (error && transcript.items.length === 0) {
     body = <EmptyState title="Chat stream failed" description={error.message} />;
   } else if (transcript.items.length === 0) {
     body = loading ? (
@@ -186,6 +194,40 @@ export function NodeChatStream({
         <StatusPill status={resolvedStatus ?? "pending"} />
       </header>
       {body}
+      {error && transcript.items.length > 0 && error.message !== dismissedError ? (
+        <div
+          data-slot="node-chat-stream-error"
+          role="alert"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "6px 8px",
+            border: `1px solid ${theme.dangerBorder}`,
+            borderRadius: 6,
+            background: theme.dangerSoft,
+            color: theme.danger,
+            fontSize: 12,
+          }}
+        >
+          <span style={{ flex: 1, minWidth: 0 }}>Chat stream interrupted. {error.message}</span>
+          <button
+            type="button"
+            aria-label="Dismiss chat stream error"
+            onClick={() => setDismissedError(error.message)}
+            style={{
+              padding: "1px 5px",
+              border: `1px solid ${theme.dangerBorder}`,
+              borderRadius: 4,
+              background: "transparent",
+              color: "inherit",
+              cursor: "pointer",
+            }}
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }

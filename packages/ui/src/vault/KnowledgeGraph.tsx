@@ -10,6 +10,8 @@ import { RowButton } from "../row-button";
 import { prefersReducedMotion } from "../styles";
 import { useVaultCss } from "./useVaultCss";
 import {
+  GRAPH_VIEWPORT_HEIGHT,
+  GRAPH_VIEWPORT_WIDTH,
   computeGraphModel,
   folderTint,
   neighbourSet,
@@ -20,8 +22,8 @@ import {
 } from "./graphModel";
 import type { VaultLink, VaultNoteMeta } from "./types";
 
-const WIDTH = 1200;
-const HEIGHT = 720;
+const WIDTH = GRAPH_VIEWPORT_WIDTH;
+const HEIGHT = GRAPH_VIEWPORT_HEIGHT;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 4;
 /**

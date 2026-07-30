@@ -59,9 +59,14 @@ export function renderPromptToText(prompt) {
     let element;
     if (React.isValidElement(prompt)) {
       // Inject markdown components into the element so MDX components
-      // render fragments instead of HTML tags.
+      // render fragments instead of HTML tags. Merge with (don't overwrite)
+      // any user-supplied `components` so custom MDX components survive,
+      // matching renderMdx.js.
       element = React.cloneElement(prompt, {
-        components: markdownComponents,
+        components: {
+          ...markdownComponents,
+          ...(/** @type {{ components?: Record<string, unknown> }} */ (prompt.props).components ?? {}),
+        },
       });
     } else {
       element = React.createElement(React.Fragment, null, prompt);

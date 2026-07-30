@@ -200,6 +200,12 @@ export function parseHunks(diffText: string): {
       continue;
     }
     if (!inHunk) continue;
+    if (raw === "") {
+      lines.push({ kind: "context", lnOld: oldLine, ln: newLine, text: raw });
+      oldLine += 1;
+      newLine += 1;
+      continue;
+    }
     if (raw.startsWith("\\ No newline")) continue;
     if (raw.startsWith("+") && !raw.startsWith("+++")) {
       lines.push({ kind: "add", ln: newLine, text: raw.slice(1) });

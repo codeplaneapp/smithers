@@ -139,6 +139,10 @@ function rowOf(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//.test(value);
+}
+
 function asArray<T = unknown>(value: unknown): T[] {
   if (Array.isArray(value)) return value as T[];
   if (typeof value === "string" && value.trim().startsWith("[")) {
@@ -340,12 +344,15 @@ function MealCards({ runId }: { runId?: string }) {
                 <div className="wfm-meal-name">{meal.name}</div>
                 {meal.items.map((item, itemIndex) => (
                   <div key={itemIndex} className="wfm-small wfm-muted">
-                    {item.sourceUrl ? (
+                    {item.sourceUrl && isHttpUrl(item.sourceUrl) ? (
                       <a href={item.sourceUrl} target="_blank" rel="noreferrer">
                         {item.name}
                       </a>
                     ) : (
-                      item.name
+                      <>
+                        {item.name}
+                        {item.sourceUrl ? ` · ${item.sourceUrl}` : ""}
+                      </>
                     )}
                     {` · ${item.quantity} · ~${item.estimatedCalories} kcal · ${item.prepTag}`}
                     {item.favoriteMatch ? " · favorite" : ""}
@@ -402,9 +409,13 @@ function GroceryChecklist({ runId }: { runId?: string }) {
                     {item.favoriteMatch ? " · favorite" : ""}
                   </TableCell>
                   <TableCell>
-                    <a href={item.sourceUrl} target="_blank" rel="noreferrer">
-                      link
-                    </a>
+                    {isHttpUrl(item.sourceUrl) ? (
+                      <a href={item.sourceUrl} target="_blank" rel="noreferrer">
+                        link
+                      </a>
+                    ) : (
+                      item.sourceUrl
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -546,13 +557,21 @@ function OrderStatus({ runId }: { runId?: string }) {
           {links.map((l, i) => (
             <div key={i} className="wfm-small">
               {l.name}:{" "}
-              <a href={l.wholeFoodsUrl} target="_blank" rel="noreferrer">
-                Whole Foods
-              </a>
+              {isHttpUrl(l.wholeFoodsUrl) ? (
+                <a href={l.wholeFoodsUrl} target="_blank" rel="noreferrer">
+                  Whole Foods
+                </a>
+              ) : (
+                l.wholeFoodsUrl
+              )}
               {" · "}
-              <a href={l.amazonUrl} target="_blank" rel="noreferrer">
-                Amazon
-              </a>
+              {isHttpUrl(l.amazonUrl) ? (
+                <a href={l.amazonUrl} target="_blank" rel="noreferrer">
+                  Amazon
+                </a>
+              ) : (
+                l.amazonUrl
+              )}
             </div>
           ))}
         </div>

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -12,14 +12,18 @@ import {
   getUsageForAccounts,
   googleUsage,
   humanizeDurationShort,
+  kimiCodeUsage,
   openaiHeaderUsage,
   parseAnthropicRateLimitHeaders,
   parseCodexUsage,
   parseDurationSeconds,
+  parseKimiUsage,
   parseOpenAiRateLimitHeaders,
   readUsageCache,
   readClaudeCredentials,
   readCodexCredentials,
+  readKimiCredentials,
+  refreshKimiToken,
   writeUsageCache,
 } from "../src/index.js";
 
@@ -163,6 +167,188 @@ describe("network usage probes", () => {
       error: expect.stringContaining("Google exposes no live usage endpoint"),
     });
   });
+
+  test("kimiCodeUsage refreshes an expired token, probes, and parses the live payload shape", async () => {
+    const configDir = tempDir();
+    mkdirSync(join(configDir, "credentials"), { recursive: true });
+    writeFileSync(
+      join(configDir, "credentials", "kimi-code.json"),
+      JSON.stringify({
+        access_token: "kimi-old",
+        refresh_token: "kimi-refresh-1",
+        expires_at: 1,
+        expires_in: 900,
+        scope: "kimi-code",
+        token_type: "Bearer",
+      }),
+    );
+
+    const calls = [];
+    globalThis.fetch = mock(async (url, init) => {
+      calls.push({ url, init });
+      if (calls.length === 1) {
+        expect(url).toBe("https://auth.kimi.com/api/oauth/token");
+        expect(init.method).toBe("POST");
+        expect(String(init.body)).toContain("grant_type=refresh_token");
+        expect(String(init.body)).toContain("refresh_token=kimi-refresh-1");
+        return jsonResponse(200, {
+          access_token: "kimi-fresh",
+          refresh_token: "kimi-refresh-2",
+          expires_in: 900,
+          scope: "kimi-code",
+          token_type: "Bearer",
+        });
+      }
+      expect(url).toBe("https://api.kimi.com/coding/v1/usages");
+      expect(init.headers.Authorization).toBe("Bearer kimi-fresh");
+      return jsonResponse(200, {
+        user: { userId: "u1", region: "REGION_OVERSEA", membership: { level: "LEVEL_STANDARD" } },
+        usage: { limit: "100", used: "73", remaining: "27", resetTime: "2026-07-31T15:57:51.057807Z" },
+        limits: [
+          {
+            window: { duration: 300, timeUnit: "TIME_UNIT_MINUTE" },
+            detail: { limit: "100", used: "5", remaining: "95", resetTime: "2026-07-30T05:57:51.057807Z" },
+          },
+        ],
+        parallel: { limit: "30", details: ["a", "b", "c"] },
+        authentication: { method: "METHOD_API_KEY", scope: "FEATURE_CODING" },
+      });
+    });
+
+    const usage = await kimiCodeUsage({ configDir });
+
+    expect(calls).toHaveLength(2);
+    expect(usage).toMatchObject({ source: "oauth", planType: "standard" });
+    expect(usage.windows.map((w) => w.id)).toEqual(["weekly", "5h", "parallel-sessions"]);
+    expect(usage.windows[0]).toMatchObject({ unit: "percent", usedPercent: 73, resetsAt: "2026-07-31T15:57:51.057Z" });
+    expect(usage.windows[1]).toMatchObject({ label: "5-hour", usedPercent: 5 });
+    expect(usage.windows[2]).toMatchObject({ unit: "count", used: 3, limit: 30, remaining: 27 });
+
+    const persisted = JSON.parse(readFileSync(join(configDir, "credentials", "kimi-code.json"), "utf8"));
+    expect(persisted.access_token).toBe("kimi-fresh");
+    expect(persisted.refresh_token).toBe("kimi-refresh-2");
+    expect(persisted.expires_at).toBeGreaterThan(Date.now() / 1000);
+  });
+
+  test("kimiCodeUsage skips the refresh when the on-disk token is still live", async () => {
+    const configDir = tempDir();
+    mkdirSync(join(configDir, "credentials"), { recursive: true });
+    writeFileSync(
+      join(configDir, "credentials", "kimi-code.json"),
+      JSON.stringify({
+        access_token: "kimi-live",
+        refresh_token: "kimi-refresh",
+        expires_at: Date.now() / 1000 + 600,
+      }),
+    );
+    globalThis.fetch = mock(async (url, init) => {
+      expect(url).toBe("https://api.kimi.com/coding/v1/usages");
+      expect(init.headers.Authorization).toBe("Bearer kimi-live");
+      return jsonResponse(200, { usage: { limit: "100", used: "10" } });
+    });
+
+    const usage = await kimiCodeUsage({ configDir });
+
+    expect(usage.source).toBe("oauth");
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("kimiCodeUsage degrades on missing creds, dead refresh grant, rejection, non-ok, and throw", async () => {
+    await expect(kimiCodeUsage({ configDir: tempDir() })).resolves.toEqual({
+      source: "none",
+      error: "No Kimi OAuth credentials in configDir/credentials/kimi-code.json",
+    });
+
+    const configDir = tempDir();
+    mkdirSync(join(configDir, "credentials"), { recursive: true });
+    writeFileSync(
+      join(configDir, "credentials", "kimi-code.json"),
+      JSON.stringify({ access_token: "kimi-old", refresh_token: "dead-grant", expires_at: 1 }),
+    );
+
+    globalThis.fetch = mock(async () => jsonResponse(400, { error: "invalid_grant" }));
+    await expect(kimiCodeUsage({ configDir })).resolves.toMatchObject({
+      source: "none",
+      error: expect.stringContaining("rejected"),
+    });
+
+    globalThis.fetch = mock(async (url) => {
+      if (String(url).includes("auth.kimi.com")) {
+        return jsonResponse(200, { access_token: "kimi-fresh", refresh_token: "r2", expires_in: 900 });
+      }
+      return jsonResponse(401, {});
+    });
+    await expect(kimiCodeUsage({ configDir })).resolves.toMatchObject({
+      source: "none",
+      error: expect.stringContaining("rejected (401)"),
+    });
+
+    globalThis.fetch = mock(async (url) => {
+      if (String(url).includes("auth.kimi.com")) {
+        return jsonResponse(200, { access_token: "kimi-fresh", refresh_token: "r2", expires_in: 900 });
+      }
+      return jsonResponse(502, {});
+    });
+    await expect(kimiCodeUsage({ configDir })).resolves.toEqual({
+      source: "none",
+      error: "Kimi usage endpoint returned 502",
+    });
+
+    globalThis.fetch = mock(async (url) => {
+      if (String(url).includes("auth.kimi.com")) {
+        return jsonResponse(200, { access_token: "kimi-fresh", refresh_token: "r2", expires_in: 900 });
+      }
+      throw new Error("kaput");
+    });
+    await expect(kimiCodeUsage({ configDir })).resolves.toMatchObject({
+      source: "none",
+      error: expect.stringContaining("Kimi usage probe failed: kaput"),
+    });
+  });
+
+  test("refreshKimiToken keeps a concurrently rotated on-disk credential", async () => {
+    const configDir = tempDir();
+    mkdirSync(join(configDir, "credentials"), { recursive: true });
+    const path = join(configDir, "credentials", "kimi-code.json");
+    writeFileSync(path, JSON.stringify({ access_token: "old", refresh_token: "sent-grant", expires_at: 1 }));
+    globalThis.fetch = mock(async () => {
+      // A running kimi CLI rotated the grant while our refresh was in flight.
+      writeFileSync(path, JSON.stringify({ access_token: "theirs", refresh_token: "their-grant" }));
+      return jsonResponse(200, { access_token: "ours", refresh_token: "our-grant", expires_in: 900 });
+    });
+
+    const result = await refreshKimiToken({ configDir }, "sent-grant");
+
+    expect(result).toMatchObject({ ok: true, accessToken: "ours" });
+    const onDisk = JSON.parse(readFileSync(path, "utf8"));
+    expect(onDisk.refresh_token).toBe("their-grant");
+  });
+
+  test("refreshKimiToken covers http failure, empty token, and network throw", async () => {
+    const configDir = tempDir();
+    globalThis.fetch = mock(async () => jsonResponse(503, {}));
+    await expect(refreshKimiToken({ configDir }, "r")).resolves.toEqual({
+      ok: false,
+      reauth: false,
+      error: "Kimi token refresh returned 503",
+    });
+
+    globalThis.fetch = mock(async () => jsonResponse(200, {}));
+    await expect(refreshKimiToken({ configDir }, "r")).resolves.toEqual({
+      ok: false,
+      reauth: false,
+      error: "Kimi token refresh returned no access_token",
+    });
+
+    globalThis.fetch = mock(async () => {
+      throw new Error("down");
+    });
+    await expect(refreshKimiToken({ configDir }, "r")).resolves.toMatchObject({
+      ok: false,
+      reauth: false,
+      error: "Kimi token refresh failed: down",
+    });
+  });
 });
 
 describe("credential readers", () => {
@@ -269,6 +455,31 @@ describe("credential readers", () => {
       accountId: "acct-from-jwt",
     });
   });
+
+  test("readKimiCredentials reads credentials/kimi-code.json and degrades on bad input", () => {
+    expect(readKimiCredentials({})).toBeNull();
+
+    const bad = tempDir();
+    mkdirSync(join(bad, "credentials"), { recursive: true });
+    writeFileSync(join(bad, "credentials", "kimi-code.json"), "{not json");
+    expect(readKimiCredentials({ configDir: bad })).toBeNull();
+
+    const noToken = tempDir();
+    mkdirSync(join(noToken, "credentials"), { recursive: true });
+    writeFileSync(join(noToken, "credentials", "kimi-code.json"), JSON.stringify({ refresh_token: "r" }));
+    expect(readKimiCredentials({ configDir: noToken })).toBeNull();
+
+    const good = tempDir();
+    mkdirSync(join(good, "credentials"), { recursive: true });
+    writeFileSync(
+      join(good, "credentials", "kimi-code.json"),
+      JSON.stringify({ access_token: "kimi-token", refresh_token: "kimi-refresh", expires_at: 1784684567.749258 }),
+    );
+    const creds = readKimiCredentials({ configDir: good });
+    expect(creds?.accessToken).toBe("kimi-token");
+    expect(creds?.refreshToken).toBe("kimi-refresh");
+    expect(creds?.expiresAtMs).toBeCloseTo(1784684567749, -3);
+  });
 });
 
 describe("parser and formatter branches", () => {
@@ -337,6 +548,33 @@ describe("parser and formatter branches", () => {
       id: "primary",
       label: "primary",
     });
+  });
+
+  test("parseKimiUsage labels windows, derives used from remaining, and tolerates junk", () => {
+    expect(parseKimiUsage(null)).toEqual({ windows: [] });
+
+    const { windows, planType } = parseKimiUsage({
+      user: { membership: { level: "LEVEL_PRO" } },
+      usage: { limit: "100", remaining: "40", resetTime: "not-a-date" },
+      limits: [
+        { window: { duration: 2, timeUnit: "TIME_UNIT_HOUR" }, detail: { limit: "50", used: "25" } },
+        { window: { duration: 1, timeUnit: "TIME_UNIT_DAY" }, detail: { limit: "0", used: "0" } },
+        "junk",
+        { detail: { limit: "10", used: "1" } },
+      ],
+      parallel: { limit: "5" },
+    });
+
+    expect(planType).toBe("pro");
+    expect(windows.map((w) => [w.id, w.label])).toEqual([
+      ["weekly", "weekly"],
+      ["5h", "2-hour"],
+      ["limit", "limit"],
+      ["parallel-sessions", "parallel sessions"],
+    ]);
+    expect(windows[0]).toMatchObject({ usedPercent: 60, resetsAt: undefined });
+    expect(windows[1].usedPercent).toBe(50);
+    expect(windows[3]).toMatchObject({ used: 0, remaining: 5 });
   });
 
   test("rate-limit header parsers handle partial and inverted count windows", () => {
@@ -429,7 +667,7 @@ describe("getUsageForAccounts cache decisions", () => {
     });
 
     expect(reports[0].stale).toBe(false);
-    expect(reports[0].error).toBe("Kimi exposes no usage endpoint yet");
+    expect(reports[0].error).toBe("No Kimi OAuth credentials in configDir/credentials/kimi-code.json");
   });
 
   test("claude-code respects the hard 180s floor even with --fresh", async () => {

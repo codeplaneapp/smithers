@@ -60,6 +60,18 @@ describe("Calendar month view", () => {
     expect(html).toContain("color-mix(in srgb");
   });
 
+  test("header navigation uses the shared Button component (data-slot, sm size, outline look)", () => {
+    const html = renderToStaticMarkup(<Calendar events={[]} now={NOW} />);
+    // The shared Button renders data-slot="button"; the previous hand-rolled
+    // class-string buttons did not.
+    expect(count(html, 'data-slot="button"')).toBe(3);
+    expect(count(html, "sui-button-sm")).toBe(3);
+    expect(count(html, "sui-button-outline")).toBe(3);
+    expect(html).toContain('aria-label="Previous"');
+    expect(html).toContain('aria-label="Next"');
+    expect(html).toContain(">Today</button>");
+  });
+
   test("className and style overrides land on the root", () => {
     const html = renderToStaticMarkup(<Calendar events={[]} now={NOW} className="my-cal" style={{ maxWidth: 640 }} />);
     expect(html).toContain("my-cal");
@@ -119,6 +131,33 @@ describe("Calendar agenda view", () => {
   test("events before the anchor day are hidden", () => {
     const html = renderToStaticMarkup(<Calendar events={[event("old", at(20, 9))]} view="agenda" now={NOW} />);
     expect(html).not.toContain("Event old");
+  });
+});
+
+describe("Calendar event links", () => {
+  test("unsafe hrefs render as buttons in month, week, and agenda views", () => {
+    for (const view of ["month", "week", "agenda"] as const) {
+      for (const href of ["javascript:alert(1)", "data:text/html,<script>alert(1)</script>", "java\nscript:alert(1)"]) {
+        const html = renderToStaticMarkup(
+          <Calendar events={[event("unsafe", at(27, 13), { href })]} view={view} now={NOW} />,
+        );
+        expect(html).not.toContain("<a");
+        expect(html).not.toContain("href=");
+        expect(html).toContain("<button");
+        expect(html).toContain("Event unsafe");
+      }
+    }
+  });
+
+  test("https hrefs render as links in month, week, and agenda views", () => {
+    for (const view of ["month", "week", "agenda"] as const) {
+      const html = renderToStaticMarkup(
+        <Calendar events={[event("safe", at(27, 13), { href: "https://example.com/event" })]} view={view} now={NOW} />,
+      );
+      expect(html).toContain("<a");
+      expect(html).toContain('href="https://example.com/event"');
+      expect(html).toContain("Event safe");
+    }
   });
 });
 

@@ -46,6 +46,18 @@ function event(overrides = {}) {
 }
 
 describe("chat helpers", () => {
+  test("sanitizes terminal escapes and controls from followed agent output", () => {
+    expect(
+      formatChatBlock({
+        baseMs: BASE,
+        timestampMs: BASE,
+        role: "assistant",
+        attempt: { nodeId: "node\x1b]0;spoof\x07", iteration: 0, attempt: 1 },
+        text: "safe\x1b]52;c;c2VjcmV0\x07\x1b[2J\x07\x00\n\ttext\x1b[31m",
+      }),
+    ).toBe("[00:00:00] assistant node#1:\n  safe\n  \ttext");
+  });
+
   test("parses attempt metadata and node output events defensively", () => {
     expect(parseChatAttemptMeta(null)).toEqual({});
     expect(parseChatAttemptMeta("not json")).toEqual({});

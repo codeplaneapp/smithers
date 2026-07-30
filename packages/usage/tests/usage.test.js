@@ -298,7 +298,7 @@ describe("formatUsageReports", () => {
           estimate: false,
           fetchedAt: isoIn(0),
           windows: [],
-          error: "Kimi exposes no usage endpoint yet",
+          error: "No Kimi OAuth credentials in configDir/credentials/kimi-code.json",
         },
       ],
       NOW,
@@ -307,7 +307,7 @@ describe("formatUsageReports", () => {
     expect(out).toContain("claude-work");
     expect(out).toContain("33%");
     expect(out).toContain("2h 0m");
-    expect(out).toContain("Kimi exposes no usage endpoint yet");
+    expect(out).toContain("No Kimi OAuth credentials");
   });
   test("empty -> hint", () => {
     expect(formatUsageReports([], NOW)).toContain("No accounts registered");

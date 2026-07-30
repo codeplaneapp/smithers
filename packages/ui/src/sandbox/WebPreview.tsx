@@ -140,13 +140,22 @@ const WebPreviewContext = createContext<WebPreviewContextValue | null>(null);
 const ROVING_BUTTONS = ".sui-webpreview-toolbar-button";
 
 function useRovingTabIndex(ref: RefObject<HTMLElement | null>) {
+  // The current tab stop survives re-renders: without this ref the effect
+  // (which runs every render) would reset the stop to the first button and
+  // stomp keyboard position.
+  const currentRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     const root = ref.current;
     if (!root) return;
     const items = Array.from(root.querySelectorAll<HTMLElement>(ROVING_BUTTONS));
-    items.forEach((el, index) => {
-      el.tabIndex = index === 0 ? 0 : -1;
+    if (items.length === 0) return;
+    let index = currentRef.current ? items.indexOf(currentRef.current) : -1;
+    if (index === -1) index = 0;
+    items.forEach((el, i) => {
+      el.tabIndex = i === index ? 0 : -1;
     });
+    currentRef.current = items[index]!;
   });
 
   function onKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
@@ -169,6 +178,7 @@ function useRovingTabIndex(ref: RefObject<HTMLElement | null>) {
     items.forEach((el, index) => {
       el.tabIndex = index === next ? 0 : -1;
     });
+    currentRef.current = items[next]!;
     items[next]!.focus();
   }
 

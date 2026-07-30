@@ -96,6 +96,24 @@ export const inputSchema = z.object({
   maxFixLanes: z.number().int().min(1).max(8).default(4),
   /** Severities worth fixing; anything below is reported but not gated on. */
   fixSeverities: z.array(severity).default(["critical", "high", "medium"]),
+  /**
+   * Heartbeat budget for reviewer/fixer tasks; 6h, i.e. effectively no timeout.
+   *
+   * The engine's 10m default assumes a chatty agent. A reviewer deep-reading a
+   * few hundred files, or a fixer running a test suite, is legitimately silent
+   * far longer, and the watchdog then kills healthy work mid-read and restarts
+   * the whole task from scratch (observed: three reviewers lost ~35m each).
+   *
+   * The watchdog cannot be switched off: `parseHeartbeatTimeoutMs` maps any
+   * non-positive value to null and an agent task falls back to the 10m default
+   * (packages/graph/src/extract.js), so a large ceiling is the only opt-out.
+   */
+  agentTimeoutMs: z
+    .number()
+    .int()
+    .min(60_000)
+    .max(12 * 60 * 60_000)
+    .default(6 * 60 * 60_000),
 });
 
 const { Workflow, smithers, outputs } = createSmithers({
@@ -199,6 +217,13 @@ Fix these verified issues. Other fixers are working in parallel on OTHER files r
 ${JSON.stringify(opts.issues, null, 2)}
 \`\`\`
 
+NEVER EDIT THE RUNNING WORKFLOW. \`.smithers/workflows/review-since-publish.tsx\`,
+\`.smithers/ui/review-since-publish.tsx\`, \`.smithers/lib/publishBaseline.ts\`, and
+\`.smithers/tests/review-since-publish.test.tsx\` are the workflow executing you
+right now; the engine re-reads them every frame, so editing them mid-run
+clobbers live configuration and corrupts the run. If an issue targets one of
+them, record it in \`skipped\` — a human applies it between runs.
+
 HARD BOUNDARY — you may only edit these files:
 ${opts.files.map((f) => `- ${f}`).join("\n")}
 
@@ -286,6 +311,7 @@ export default smithers((ctx) => {
   const briefing = baseline?.briefing ?? "";
   const priorSummary = merges.map((m, i) => `- round ${i + 1}: ${m.issues.length} issue(s) — ${m.summary}`).join("\n");
 
+  const agentTimeoutMs = ctx.input.agentTimeoutMs ?? 6 * 60 * 60_000;
   const shardCount = Math.max(1, ctx.input.reviewShards ?? 1);
   const changed = [...new Set([...(baseline?.changedFiles ?? []), ...(baseline?.untrackedFiles ?? [])])];
   const shards = Array.from({ length: shardCount }, (_, index) => ({
@@ -322,7 +348,13 @@ export default smithers((ctx) => {
                 shards.map((shard) => {
                   const nodeId = shardCount > 1 ? `review:${member.key}:${shard.index}` : `review:${member.key}`;
                   return (
-                    <Task key={nodeId} id={nodeId} output={outputs.review} agent={member.agent}>
+                    <Task
+                      key={nodeId}
+                      id={nodeId}
+                      output={outputs.review}
+                      agent={member.agent}
+                      heartbeatTimeoutMs={agentTimeoutMs}
+                    >
                       {reviewPrompt({ label: member.label, briefing, round, priorSummary, shard })}
                     </Task>
                   );
@@ -330,14 +362,25 @@ export default smithers((ctx) => {
               )}
             </Parallel>
 
-            <Task id="merge" output={outputs.merged} agent={providers.claude}>
+            <Task
+              id="merge"
+              output={outputs.merged}
+              agent={providers.claude}
+              heartbeatTimeoutMs={agentTimeoutMs}
+            >
               {mergePrompt({ briefing, round, reviews })}
             </Task>
 
             {lanes.length > 0 ? (
               <Parallel>
                 {lanes.map((lane) => (
-                  <Task key={lane.lane} id={`fix:${lane.lane}`} output={outputs.fix} agent={providers.codexSol}>
+                  <Task
+                    key={lane.lane}
+                    id={`fix:${lane.lane}`}
+                    output={outputs.fix}
+                    agent={providers.codexSol}
+                    heartbeatTimeoutMs={agentTimeoutMs}
+                  >
                     {fixPrompt({ lane: lane.lane, round, issues: lane.issues, files: lane.files })}
                   </Task>
                 ))}

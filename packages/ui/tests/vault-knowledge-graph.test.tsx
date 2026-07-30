@@ -53,6 +53,13 @@ describe("KnowledgeGraph (server render)", () => {
     expect(html.match(/<line/g)).toHaveLength(LINKS.length);
   });
 
+  test("first paint (pre-physics) is already spread out — nothing stacked at the origin", () => {
+    const html = renderToStaticMarkup(<KnowledgeGraph notes={NOTES} links={HUB_LINKS} />);
+    expect(html).not.toContain("translate(0 0)");
+    expect(html).not.toContain('x1="0"');
+    expect(html).not.toContain('y2="0"');
+  });
+
   test("empty vault renders the empty state", () => {
     const html = renderToStaticMarkup(<KnowledgeGraph notes={[]} links={[]} />);
     expect(html).toContain("No graph");

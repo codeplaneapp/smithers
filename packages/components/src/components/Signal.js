@@ -18,7 +18,6 @@ export function Signal(props) {
   const ctx = React.useContext(smithersContext);
   const waitNode = React.createElement(WaitForEvent, {
     id: props.id,
-    key: props.key,
     event: props.id,
     correlationId: props.correlationId,
     output: props.schema,

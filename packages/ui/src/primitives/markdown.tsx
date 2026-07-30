@@ -1,7 +1,8 @@
 /** @jsxImportSource react */
-import { type ComponentProps, Fragment, memo, type MouseEvent, type ReactNode } from "react";
+import { type ComponentProps, Fragment, memo, type MouseEvent, type ReactNode, useMemo } from "react";
 import { CodeBlock } from "./CodeBlock";
 import { cn } from "../cn";
+import { safeHref } from "../agentic/safeHref";
 import { useInjectUiCss } from "../styles";
 
 /**
@@ -16,21 +17,8 @@ const LINK = /^\[([^\]]+)\]\(([^)]+)\)$/;
 /** Handler invoked when a rendered link is activated. */
 export type MarkdownLinkClick = (href: string, event: MouseEvent<HTMLAnchorElement>) => void;
 
-/**
- * Allow only navigable schemes onto a rendered `href`. A `javascript:` or
- * `data:` URL from model output would otherwise be a live XSS vector on click;
- * anything scheme-bearing outside the allowlist is dropped (the anchor renders
- * with no `href`), while scheme-less relative/anchor links pass through.
- */
-export function safeMarkdownHref(raw: string): string | undefined {
-  const href = raw.trim();
-  const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(href);
-  if (scheme) {
-    const proto = scheme[1]!.toLowerCase();
-    if (proto !== "http" && proto !== "https" && proto !== "mailto") return undefined;
-  }
-  return href;
-}
+/** @deprecated Use `safeHref` from `agentic/safeHref` instead. */
+export { safeHref as safeMarkdownHref } from "../agentic/safeHref";
 
 /**
  * Everything renders through React children (never `innerHTML`), so model
@@ -59,7 +47,7 @@ function renderInline(text: string, keyPrefix: string, onLinkClick?: MarkdownLin
     } else if (token.startsWith("[")) {
       const link = LINK.exec(token)!;
       const label = link[1]!;
-      const href = safeMarkdownHref(link[2]!);
+      const href = safeHref(link[2]!);
       out.push(
         <a
           className="sui-md-link"
@@ -191,6 +179,53 @@ function renderBlocks(content: string, onLinkClick?: MarkdownLinkClick): ReactNo
   return blocks;
 }
 
+/**
+ * Split at the same boundaries as `renderBlocks`. The final block may still
+ * grow while content streams; every earlier block is stable.
+ */
+function splitBlockSources(content: string): string[] {
+  const lines = content.split("\n");
+  const blocks: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    if (lines[i]!.trim() === "") {
+      i += 1;
+      continue;
+    }
+
+    const start = i;
+    if (isFence(lines[i]!)) {
+      i += 1;
+      while (i < lines.length && !isFence(lines[i]!)) i += 1;
+      if (i < lines.length) i += 1;
+    } else if (isHeading(lines[i]!)) {
+      i += 1;
+    } else if (isBullet(lines[i]!)) {
+      while (i < lines.length && isBullet(lines[i]!)) i += 1;
+    } else if (isOrdered(lines[i]!)) {
+      while (i < lines.length && isOrdered(lines[i]!)) i += 1;
+    } else {
+      while (
+        i < lines.length &&
+        lines[i]!.trim() !== "" &&
+        !isFence(lines[i]!) &&
+        !isHeading(lines[i]!) &&
+        !isBullet(lines[i]!) &&
+        !isOrdered(lines[i]!)
+      ) {
+        i += 1;
+      }
+    }
+    blocks.push(lines.slice(start, i).join("\n"));
+  }
+
+  return blocks;
+}
+
+/** @internal Exposed so parser reuse can be verified without mocking Markdown output. */
+export const markdownBlockParser = { render: renderBlocks };
+
 export type MarkdownProps = Omit<ComponentProps<"div">, "children" | "onClick"> & {
   /** The Markdown source string to render. */
   content: string;
@@ -207,15 +242,27 @@ export type MarkdownProps = Omit<ComponentProps<"div">, "children" | "onClick"> 
  * code, bold, italics, and links. Anything else falls through as plain
  * paragraphs.
  *
- * Wrapped in `React.memo`, so a streaming transcript only re-parses the source
- * whose `content` actually changed -- the default shallow prop comparison keeps
- * a stable `content` string (and `onLinkClick`) from re-rendering.
+ * Wrapped in `React.memo`, with completed blocks cached by source so streaming
+ * updates only re-parse the trailing block.
  */
 function MarkdownImpl({ content, onLinkClick, className, ...props }: MarkdownProps) {
   useInjectUiCss();
+  const completedBlocks = useMemo(() => new Map<string, ReactNode[]>(), [onLinkClick]);
+  const sources = splitBlockSources(content);
+  const rendered = sources.map((source, index) => {
+    if (index === sources.length - 1) return markdownBlockParser.render(source, onLinkClick);
+
+    let block = completedBlocks.get(source);
+    if (!block) {
+      block = markdownBlockParser.render(source, onLinkClick);
+      completedBlocks.set(source, block);
+    }
+    return block;
+  });
+
   return (
     <div data-slot="markdown" className={cn("sui-md", className)} {...props}>
-      {renderBlocks(content, onLinkClick)}
+      {rendered}
     </div>
   );
 }

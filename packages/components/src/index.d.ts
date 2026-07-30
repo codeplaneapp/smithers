@@ -956,6 +956,8 @@ type MonitorProps$2 = {
     id?: string;
     /** Run id this monitor watches. Usually `ctx.input.watchRunId`. */
     watchRunId: string;
+    /** Workflow path used by shipped resume/retry commands. Defaults to `ctx.input.watchWorkflowPath`. */
+    watchWorkflowPath?: string;
     /** Agent that samples the watched run and classifies its health. */
     agent: AgentLike$2 | AgentLike$2[];
     /**
@@ -2351,7 +2353,6 @@ type ComputeSidecarDeltaOptions = {
  */
 declare function Subflow(props: SubflowProps$1): React__default.ReactElement<{
     id: string;
-    key: string | undefined;
     workflow: WorkflowFileRef$1 | _smithers_orchestrator_driver.WorkflowDefinition<unknown>;
     input: unknown;
     mode: "childRun" | "inline";
@@ -2382,7 +2383,6 @@ type SubflowProps$1 = SubflowProps$2;
  */
 declare function Sandbox(props: SandboxProps$1): React__default.ReactElement<{
     id: string;
-    key: string | undefined;
     output: OutputTarget$1;
     provider: unknown;
     runtime: SandboxRuntime$1 | undefined;
@@ -2431,7 +2431,6 @@ type SandboxProps$1 = SandboxProps$2;
  */
 declare function WaitForEvent(props: WaitForEventProps$1): React__default.ReactElement<{
     id: string;
-    key: string | undefined;
     event: string;
     correlationId: string | undefined;
     output: OutputTarget$1;
@@ -2473,7 +2472,6 @@ type SignalProps$1<Schema> = SignalProps$2<Schema>;
  */
 declare function Timer(props: TimerProps$1): React__default.ReactElement<{
     id: string;
-    key: string | undefined;
     duration: string | undefined;
     until: string | undefined;
     dependsOn: string[] | undefined;

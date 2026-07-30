@@ -1,5 +1,6 @@
 /** @jsxImportSource @opentui/react */
 import { StatusGlyph } from "./StatusGlyph.tsx";
+import { sanitizeTerminalText } from "./sanitizeTerminalText.ts";
 
 /**
  * One already-windowed tree row (see ui-core's `treeScrollWindow`/
@@ -57,11 +58,12 @@ export function RunTree({ rows, focusedKey, panelWidth }: RunTreeProps) {
     <box width="100%" height="100%" flexDirection="column">
       {rows.map((row) => {
         const isFocused = row.key === focusedKey;
-        const meta = row.meta ? ` ${row.meta}` : "";
+        const safeLabel = sanitizeTerminalText(row.label);
+        const meta = row.meta ? ` ${sanitizeTerminalText(row.meta)}` : "";
         const indentWidth = row.depth * 2;
         const reservedWidth = indentWidth + 4 + meta.length;
         const maxLabelWidth = Math.max(8, panelWidth - reservedWidth);
-        const truncLabel = truncateRunTreeLabel(row.label, maxLabelWidth);
+        const truncLabel = truncateRunTreeLabel(safeLabel, maxLabelWidth);
 
         return (
           <box

@@ -80,7 +80,7 @@ describe("runSteps", () => {
 });
 
 describe("statusMeta (Run.ts <-> statusMeta.ts share one NodeStatus)", () => {
-  const ALL_STATUSES: NodeStatus[] = ["ok", "running", "queued", "failed", "waiting"];
+  const ALL_STATUSES: NodeStatus[] = ["ok", "running", "queued", "failed", "waiting", "cancelled", "unknown"];
   const TONES = new Set(["running", "ok", "waiting", "failed", "idle"]);
 
   test("every NodeStatus resolves to a defined tone and label", () => {

@@ -30,8 +30,8 @@ export const markdownComponents = {
   },
   li: ({ children, ordinal }) => fragment(typeof ordinal === "number" ? `${ordinal}. ` : "- ", children, "\n"),
   code: ({ children, className }) => {
-    if (className) {
-      const lang = className.replace("language-", "");
+    const lang = typeof className === "string" ? /(?:^|\s)language-(\S+)/.exec(className)?.[1] : undefined;
+    if (lang) {
       return fragment("```", lang, "\n", children, "\n```\n\n");
     }
     return fragment("`", children, "`");

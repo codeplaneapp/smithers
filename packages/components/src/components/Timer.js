@@ -28,7 +28,6 @@ export function Timer(props) {
   };
   return React.createElement("smithers:timer", {
     id: props.id,
-    key: props.key,
     duration: props.duration,
     until: untilIso,
     dependsOn: props.dependsOn,

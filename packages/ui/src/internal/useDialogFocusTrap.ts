@@ -61,7 +61,10 @@ export function useDialogFocusTrap({
       target.focus();
     };
 
-    window.requestAnimationFrame(focusInitial);
+    // Keep the handle: cleanup must cancel a still-pending frame or it would
+    // steal focus back into a suspended/closed dialog after focus was
+    // restored to the opener.
+    const initialFocusRaf = window.requestAnimationFrame(focusInitial);
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (!isTopDialog()) return;
@@ -102,6 +105,7 @@ export function useDialogFocusTrap({
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("focusin", onFocusIn);
     return () => {
+      window.cancelAnimationFrame(initialFocusRaf);
       document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("focusin", onFocusIn);
       removeDialogFromStack(container);

@@ -96,6 +96,37 @@ describe("devops automation gap hardening", () => {
     // on loaded CI runners; the 60s hang this guards against stays far out.
   }, 30_000);
 
+  test.skipIf(process.platform === "win32")(
+    "CheckSuite cancels SIGKILL escalation when a timed-out command exits after SIGTERM",
+    async () => {
+      const termCommand = `${JSON.stringify(process.execPath)} -e "process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 60000)"`;
+      const { graph } = await render(
+        <CheckSuite
+          id="gate"
+          verdictOutput="verdict_out"
+          checks={[{ id: "term-exit", command: termCommand, timeoutMs: 100 }]}
+        />,
+      );
+      const originalKill = process.kill;
+      const signals = [];
+      process.kill = (pid, signal) => {
+        signals.push(signal);
+        return originalKill(pid, signal);
+      };
+
+      try {
+        const row = await byId(graph, "gate-term-exit").computeFn();
+        expect(row).toMatchObject({ timedOut: true });
+        await new Promise((resolve) => setTimeout(resolve, 5_100));
+        expect(signals).toContain("SIGTERM");
+        expect(signals).not.toContain("SIGKILL");
+      } finally {
+        process.kill = originalKill;
+      }
+    },
+    15_000,
+  );
+
   test("CheckSuite command check keeps the real exit code when stdout exceeds the capture limit", async () => {
     const largeCommand = `${JSON.stringify(process.execPath)} -e "process.stdout.write('x'.repeat(17 * 1024 * 1024) + 'tail-marker')"`;
     const { graph } = await render(

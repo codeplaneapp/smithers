@@ -63,6 +63,33 @@ export function noteFolder(path: string): string {
   return idx === -1 ? "" : path.slice(0, idx);
 }
 
+/** Default SVG viewport the seed layout (and the KnowledgeGraph viewBox) targets. */
+export const GRAPH_VIEWPORT_WIDTH = 1200;
+export const GRAPH_VIEWPORT_HEIGHT = 720;
+
+/** Golden angle (rad): successive nodes land ~137.5° apart, so the spiral never lines up with itself. */
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+/** Radial spacing between successive turns of the seed spiral. */
+const SEED_SPACING = 36;
+
+/**
+ * Seed every node a distinct position on a golden-angle spiral around the
+ * viewport center. Without seeds every node starts at (0,0) and the first
+ * pre-physics paint is a single stacked pile (edges converging on the
+ * origin) before the simulation snaps into layout; the spiral makes the
+ * very first frame an honest, readable scatter instead.
+ */
+function seedGraphPositions(nodes: VaultGraphNode[]): void {
+  const cx = GRAPH_VIEWPORT_WIDTH / 2;
+  const cy = GRAPH_VIEWPORT_HEIGHT / 2;
+  nodes.forEach((node, index) => {
+    const radius = SEED_SPACING * Math.sqrt(index + 0.5);
+    const angle = index * GOLDEN_ANGLE;
+    node.x = cx + radius * Math.cos(angle);
+    node.y = cy + radius * Math.sin(angle);
+  });
+}
+
 /**
  * Build the force-simulation payload from vault data. Nodes/links are fresh
  * copies (d3-force mutates them in place; mutating caller data would corrupt
@@ -112,6 +139,7 @@ export function computeGraphModel(
       degree: entry.in + entry.out,
     });
   }
+  seedGraphPositions(nodes);
   return { nodes, links: links.map((link) => ({ source: link.source, target: link.target })) };
 }
 

@@ -11,6 +11,8 @@ import {
   type ReactNode,
 } from "react";
 import { cn } from "../cn";
+import { safeHref } from "../agentic/safeHref";
+import { Button } from "../button";
 import { EmptyState } from "../empty-state";
 import { statusColor } from "../status";
 import { useInjectUiCss } from "../styles";
@@ -89,9 +91,10 @@ function eventElement(
   children: ReactNode,
 ) {
   const title = `${event.title} — ${event.allDay ? "all day" : timeLabel(event.start)}`;
-  if (event.href && !onEventClick) {
+  const href = event.href === undefined ? undefined : safeHref(event.href);
+  if (href !== undefined && !onEventClick) {
     return (
-      <a {...props} key={event.id} href={event.href} title={title}>
+      <a {...props} key={event.id} href={href} title={title}>
         {children}
       </a>
     );
@@ -419,6 +422,7 @@ function AgendaView({
           <div className="sui-cal-agenda-day-label">{agendaDayLabel(group.dayMs, nowMs)}</div>
           {group.events.map((event) => {
             const isRecentPast = !event.allDay && event.start <= nowMs && nowMs - event.start < 24 * 3_600_000;
+            const href = event.href === undefined ? undefined : safeHref(event.href);
             const row = (
               <>
                 <span className="sui-cal-agenda-time">
@@ -435,8 +439,8 @@ function AgendaView({
                 ) : null}
               </>
             );
-            return event.href && !onEventClick ? (
-              <a key={event.id} role="listitem" className="sui-cal-agenda-row" href={event.href}>
+            return href !== undefined && !onEventClick ? (
+              <a key={event.id} role="listitem" className="sui-cal-agenda-row" href={href}>
                 {row}
               </a>
             ) : (
@@ -563,15 +567,15 @@ export function Calendar({
           {label}
         </div>
         <div className="sui-cal-controls">
-          <button type="button" className="sui-button sui-button-sm" aria-label="Previous" onClick={() => shift(-1)}>
+          <Button variant="outline" size="sm" aria-label="Previous" onClick={() => shift(-1)}>
             ‹
-          </button>
-          <button type="button" className="sui-button sui-button-sm" onClick={() => shiftAnchor(startOfDay(nowMs))}>
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => shiftAnchor(startOfDay(nowMs))}>
             Today
-          </button>
-          <button type="button" className="sui-button sui-button-sm" aria-label="Next" onClick={() => shift(1)}>
+          </Button>
+          <Button variant="outline" size="sm" aria-label="Next" onClick={() => shift(1)}>
             ›
-          </button>
+          </Button>
           <div className="sui-cal-segment" role="group" aria-label="Calendar view">
             {VIEWS.map((candidate) => (
               <button

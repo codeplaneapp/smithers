@@ -107,6 +107,24 @@ describe("<Monitor> classify → route → heal", () => {
     expect(cancelling.ids).not.toContain("monitor-escalate-runaway-loop");
   });
 
+  test("shell-quotes the watched run id in every handler command", async () => {
+    const watchRunId = "run id; echo 'pwned' $(id)";
+    const quotedRunId = "'run id; echo '\\''pwned'\\'' $(id)'";
+    const cases = [
+      { condition: "stalled", autoHeal: ["stalled"] },
+      { condition: "wedged-node", autoHeal: ["wedged-node"] },
+      { condition: "runaway-loop", autoHeal: ["runaway-loop"] },
+    ];
+
+    for (const { condition, autoHeal } of cases) {
+      const { graph } = await render(monitor({ watchRunId, autoHeal }), {
+        outputs: sample({ condition }),
+      });
+      const handler = graph.tasks.find((task) => task.nodeId === `monitor-${condition}`);
+      expect(String(handler.prompt)).toContain(quotedRunId);
+    }
+  });
+
   test("unknown always escalates — an unreadable run is never repaired on a guess", async () => {
     const { ids } = await render(monitor({ autoHeal: ["stalled", "wedged-node", "unknown"] }), {
       outputs: sample({ condition: "unknown" }),

@@ -49,6 +49,7 @@ export function useGatewayNodeEvents(
         const nextCursor = rows.reduce((latest, row) => Math.max(latest, row.seq), cursor ?? -1);
         if (rows.length > 0) cursor = nextCursor;
         setState((previous) => {
+          if (rows.length === 0 && !previous.loading && previous.error === undefined) return previous;
           const bySeq = new Map(previous.events.map((event) => [event.seq, event]));
           for (const row of rows) {
             bySeq.set(row.seq, {

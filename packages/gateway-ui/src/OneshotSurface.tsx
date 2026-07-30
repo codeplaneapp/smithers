@@ -17,7 +17,16 @@
  * binary frames are raw PTY bytes both ways, text frames are JSON control
  * messages (`resize` up, `exit`/`error` down).
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import {
   useGatewayActions,
   useGatewayNodeEvents,
@@ -98,6 +107,7 @@ const WEBSOCKET_OPEN = 1;
 // the Gateway client. Test/browser hosts may replace DOM globals after modules
 // load (happy-dom does); mixing constructors produces an invalid AbortSignal.
 const RuntimeAbortController = globalThis.AbortController;
+const EMPTY_HIJACK_CANDIDATES: HijackCandidate[] = [];
 
 const SURFACE_STYLES = `
 @keyframes oneshot-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.75); } }
@@ -109,37 +119,110 @@ const SURFACE_STYLES = `
 .oneshot-surface-embedded { display: flex; flex-direction: column; min-height: 0; }
 `;
 
-/** Poll the gateway's per-node hijack candidates for a run. */
+type HijackCandidatesStore = {
+  candidates: HijackCandidate[];
+  subscribe(listener: () => void, live: boolean): () => void;
+};
+
+const hijackCandidateStores = new WeakMap<
+  ReturnType<typeof useSmithersGateway>,
+  Map<string, HijackCandidatesStore>
+>();
+
+function hijackCandidatesStore(
+  gateway: ReturnType<typeof useSmithersGateway>,
+  runId: string,
+): HijackCandidatesStore {
+  let stores = hijackCandidateStores.get(gateway);
+  if (!stores) {
+    stores = new Map();
+    hijackCandidateStores.set(gateway, stores);
+  }
+  const existing = stores.get(runId);
+  if (existing) return existing;
+
+  const listeners = new Set<() => void>();
+  const controller = new RuntimeAbortController();
+  let liveSubscribers = 0;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let started = false;
+  let disposeTicket: { cancelled: boolean } | undefined;
+  const load = async () => {
+    try {
+      const headers = new Headers(gateway.headers);
+      if (gateway.token) headers.set("authorization", `Bearer ${gateway.token}`);
+      const response = await gateway.fetchImpl(
+        `${gateway.baseUrl}/v1/api/runs/${encodeURIComponent(runId)}/hijack-candidates`,
+        { headers, signal: controller.signal },
+      );
+      if (!response.ok) return;
+      const body: unknown = await response.json();
+      if (!controller.signal.aborted) {
+        store.candidates = hijackCandidatesOf(body);
+        listeners.forEach((listener) => listener());
+      }
+    } catch {
+      // Transient fetch failures just keep the previous candidate view.
+    }
+  };
+  const updateTimer = () => {
+    if (liveSubscribers > 0 && !timer) {
+      timer = setInterval(() => void load(), 5_000);
+    } else if (liveSubscribers === 0 && timer) {
+      clearInterval(timer);
+      timer = undefined;
+    }
+  };
+  const store: HijackCandidatesStore = {
+    candidates: EMPTY_HIJACK_CANDIDATES,
+    subscribe(listener, live) {
+      if (disposeTicket) {
+        disposeTicket.cancelled = true;
+        disposeTicket = undefined;
+      }
+      listeners.add(listener);
+      if (live) liveSubscribers += 1;
+      if (!started) {
+        started = true;
+        void load();
+      }
+      updateTimer();
+      let active = true;
+      return () => {
+        if (!active) return;
+        active = false;
+        listeners.delete(listener);
+        if (live) liveSubscribers -= 1;
+        updateTimer();
+        if (listeners.size > 0) return;
+        const ticket = { cancelled: false };
+        disposeTicket = ticket;
+        queueMicrotask(() => {
+          if (ticket.cancelled || listeners.size > 0) return;
+          controller.abort();
+          updateTimer();
+          stores!.delete(runId);
+        });
+      };
+    },
+  };
+  stores.set(runId, store);
+  return store;
+}
+
+/** Read the shared run-level hijack-candidate poller. */
 function useHijackCandidates(runId: string | undefined, live = true): HijackCandidate[] {
   const gateway = useSmithersGateway();
-  const [candidates, setCandidates] = useState<HijackCandidate[]>([]);
-  useEffect(() => {
-    setCandidates([]);
-    if (!runId) return;
-    const controller = new RuntimeAbortController();
-    const load = async () => {
-      try {
-        const headers = new Headers(gateway.headers);
-        if (gateway.token) headers.set("authorization", `Bearer ${gateway.token}`);
-        const response = await gateway.fetchImpl(
-          `${gateway.baseUrl}/v1/api/runs/${encodeURIComponent(runId)}/hijack-candidates`,
-          { headers, signal: controller.signal },
-        );
-        if (!response.ok) return;
-        const body: unknown = await response.json();
-        if (!controller.signal.aborted) setCandidates(hijackCandidatesOf(body));
-      } catch {
-        // Transient fetch failures just keep the previous candidate view.
-      }
-    };
-    void load();
-    const timer = live ? setInterval(() => void load(), 5_000) : null;
-    return () => {
-      controller.abort();
-      if (timer) clearInterval(timer);
-    };
-  }, [gateway, runId, live]);
-  return candidates;
+  const store = useMemo(() => (runId ? hijackCandidatesStore(gateway, runId) : undefined), [gateway, runId]);
+  const subscribe = useCallback(
+    (listener: () => void) => store?.subscribe(listener, live) ?? (() => {}),
+    [store, live],
+  );
+  return useSyncExternalStore(
+    subscribe,
+    () => store?.candidates ?? EMPTY_HIJACK_CANDIDATES,
+    () => EMPTY_HIJACK_CANDIDATES,
+  );
 }
 
 export type HijackCandidateButtonProps = {

@@ -77,6 +77,15 @@ describe("tui helpers", () => {
     expect(option.hint).toEndWith("\u2026");
   });
 
+  test("sanitizes streamed agent text while preserving deliberate SGR styling", () => {
+    expect(normalizeStreamText("safe\x1b]52;c;c2VjcmV0\x07\x1b[2J\x1b]0;spoof\x07\x07\x00\n\t\x1b[31mred\x1b[0m")).toBe(
+      "safe ↵     \x1b[31mred\x1b[0m",
+    );
+    expect(formatStreamText("[tool] Bash: safe\x1b]52;c;c2VjcmV0\x07\x1b[2J\x07\x00 \x1b[31mred\x1b[0m")).not.toMatch(
+      /(?:\x1b\](?:52|0)|\x1b\[2J|\x07|\x00)/,
+    );
+  });
+
   test("lets labels use the full width budget when no hint is shown", () => {
     const [option] = buildWorkflowPickerOptions(
       [

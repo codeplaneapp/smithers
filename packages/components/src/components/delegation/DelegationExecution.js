@@ -248,8 +248,9 @@ export function DelegationExecution(props) {
       }
       for (const [i, gate] of approvals.entries()) {
         const approvalId = physicalId(p, leaf.logicalId, `approval-${i + 1}`);
-        // Keyed Fragment wrapper: Approval forwards `props.key` to its host
-        // node, so keying it directly trips React's special-prop warning.
+        // Keyed Fragment wrapper: React's `key` is a special prop handled by
+        // createElement — it never reaches props — so key the wrapper, not the
+        // Approval element.
         pipelineChildren.push(
           React.createElement(
             React.Fragment,

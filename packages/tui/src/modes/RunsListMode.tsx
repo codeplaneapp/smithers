@@ -8,7 +8,7 @@ import {
   type RunSummary,
   type RunStatusFilter,
 } from "@smithers-orchestrator/ui-core";
-import { StatusGlyph } from "@smithers-orchestrator/tui-ui";
+import { sanitizeTerminalText, StatusGlyph } from "@smithers-orchestrator/tui-ui";
 import { isModifiedKeyEvent } from "./treeUtils.ts";
 import { useOverlayOpen } from "../OverlayContext.tsx";
 
@@ -172,7 +172,7 @@ export function RunsListView({ onSelectRun }: { onSelectRun: (runId: string) => 
               {group.runs.map((run, i) => {
                 const idx = groupStart + i;
                 const isFocused = idx === clampedFocusIdx;
-                const label = runDisplayName(run);
+                const label = sanitizeTerminalText(runDisplayName(run));
                 const maxLabelWidth = compact ? 32 : 60;
                 const truncLabel = label.length > maxLabelWidth ? `${label.slice(0, maxLabelWidth - 1)}…` : label;
                 return (

@@ -3,6 +3,7 @@ import { connect as netConnect, isIP } from "node:net";
 import { request as httpRequest } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import {
   chmodSync,
   closeSync,
@@ -64,7 +65,7 @@ export function resolveLocalUi() {
 }
 
 /** Is the built bundle present and newer than the newest source file? */
-function bundleIsFresh(distDir, appDir) {
+export function bundleIsFresh(distDir, appDir) {
   const indexHtml = join(distDir, "index.html");
   if (!existsSync(indexHtml)) return false;
   if (!appDir) return true; // prebuilt bundle: always fresh
@@ -88,6 +89,31 @@ function bundleIsFresh(distDir, appDir) {
     }
   };
   walk(join(appDir, "src"));
+  try {
+    const appPackage = JSON.parse(readFileSync(join(appDir, "package.json"), "utf8"));
+    const requireFromApp = createRequire(join(appDir, "package.json"));
+    for (const name of Object.keys(appPackage.dependencies ?? {})) {
+      if (!name.startsWith("@smithers-orchestrator/")) continue;
+      try {
+        let dir = dirname(requireFromApp.resolve(name));
+        while (dirname(dir) !== dir) {
+          const packageJson = join(dir, "package.json");
+          if (existsSync(packageJson)) {
+            const dependencyPackage = JSON.parse(readFileSync(packageJson, "utf8"));
+            if (dependencyPackage.name === name) {
+              walk(join(dir, "src"));
+              break;
+            }
+          }
+          dir = dirname(dir);
+        }
+      } catch {
+        // The source app can still build without every optional/local dependency.
+      }
+    }
+  } catch {
+    // A missing or malformed package manifest is handled by the build itself.
+  }
   // Also consider config files.
   for (const f of ["vite.config.ts", "index.html", "package.json"]) {
     const p = join(appDir, f);

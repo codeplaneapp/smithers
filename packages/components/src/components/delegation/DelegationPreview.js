@@ -55,8 +55,9 @@ export function DelegationPreview(props) {
     leaves.length > 0 &&
     leaves.every((leaf) => rowsForNode(previewRows, physicalId(p, leaf.logicalId, "preview")).length > 0);
   if (!skipped && !allRendered) {
-    // Keyed Fragment wrapper: Signal forwards `props.key` to its host node,
-    // so keying the Signal element directly trips React's special-prop warning.
+    // Keyed Fragment wrapper: React's `key` is a special prop handled by
+    // createElement — it never reaches props — so key the wrapper, not the
+    // Signal element.
     children.push(
       React.createElement(
         React.Fragment,

@@ -181,6 +181,47 @@ describe("createAutosaveDoc", () => {
     expect(doc.getSnapshot().mtimeMs).toBe(250);
   });
 
+  test("discardExternal waits for an in-flight save before force-saving exactly once", async () => {
+    const saved: string[] = [];
+    let finishFirstSave!: () => void;
+    let readCalls = 0;
+    const doc = createAutosaveDoc({
+      initialValue: "mine",
+      initialMtimeMs: 100,
+      save: async (value) => {
+        saved.push(value);
+        if (saved.length === 1) {
+          await new Promise<void>((resolve) => {
+            finishFirstSave = resolve;
+          });
+          return { mtimeMs: 150 };
+        }
+        return { mtimeMs: 250 };
+      },
+      readExternal: async () => {
+        readCalls += 1;
+        return readCalls === 1
+          ? { content: "mine edited", mtimeMs: 100 }
+          : { content: "someone else", mtimeMs: 200 };
+      },
+    });
+    doc.setValue("mine edited");
+    const firstSave = doc.saveNow();
+    await flushMicrotasks();
+    expect(doc.getSnapshot().state).toBe("saving");
+
+    const discard = doc.discardExternal();
+    await flushMicrotasks();
+    expect(saved).toEqual(["mine edited"]);
+
+    finishFirstSave();
+    await firstSave;
+    await discard;
+    expect(saved).toEqual(["mine edited", "mine edited"]);
+    expect(doc.getSnapshot().state).toBe("saved");
+    expect(doc.getSnapshot().mtimeMs).toBe(250);
+  });
+
   test("subscribers are notified on transitions and unsubscribe works", async () => {
     const states: AutosaveState[] = [];
     const doc = createAutosaveDoc({ initialValue: "a", save: async () => {} });

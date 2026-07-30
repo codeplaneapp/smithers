@@ -22,22 +22,22 @@ type UsageSource$1 = "oauth" | "headers" | "local" | "none";
  *                 a lower bound, never as authoritative.
  */
 type UsageWindow$4 = {
-    /** Stable id, e.g. "5h" | "weekly" | "requests-per-min" | "tokens-per-min". */
-    id: string;
-    /** Human label, e.g. "5-hour session". */
-    label: string;
-    /** Which fields below are meaningful. */
-    unit: "percent" | "count" | "estimated";
-    /** 0–100. Set for `percent` and `estimated`. */
-    usedPercent?: number;
-    /** Absolute amount consumed. Set for `count` and `estimated`. */
-    used?: number;
-    /** Absolute cap. Set for `count` and `estimated`. */
-    limit?: number;
-    /** `limit - used`. Set for `count`. */
-    remaining?: number;
-    /** ISO-8601 timestamp when this window rolls over. */
-    resetsAt?: string;
+  /** Stable id, e.g. "5h" | "weekly" | "requests-per-min" | "tokens-per-min". */
+  id: string;
+  /** Human label, e.g. "5-hour session". */
+  label: string;
+  /** Which fields below are meaningful. */
+  unit: "percent" | "count" | "estimated";
+  /** 0–100. Set for `percent` and `estimated`. */
+  usedPercent?: number;
+  /** Absolute amount consumed. Set for `count` and `estimated`. */
+  used?: number;
+  /** Absolute cap. Set for `count` and `estimated`. */
+  limit?: number;
+  /** `limit - used`. Set for `count`. */
+  remaining?: number;
+  /** ISO-8601 timestamp when this window rolls over. */
+  resetsAt?: string;
 };
 
 /**
@@ -46,32 +46,32 @@ type UsageWindow$4 = {
  * CLI, gateway, and UI render one model.
  */
 type UsageReport$5 = {
-    /** The account's label in `~/.smithers/accounts.json`. */
-    accountLabel: string;
-    /** The account's provider. */
-    provider: AccountProvider;
-    /** How this account authenticates. */
-    authMode: "subscription" | "api-key";
-    /** Where the numbers came from. */
-    source: UsageSource$1;
-    /** Quota windows, possibly empty when `source` is `none`. */
-    windows: UsageWindow$4[];
-    /** Plan/tier label if the provider reports one, e.g. "max", "pro". */
-    planType?: string;
-    /** Pay-as-you-go credit balance, if the provider reports one (Codex). */
-    credits?: {
-        hasCredits: boolean;
-        unlimited: boolean;
-        balance?: string;
-    };
-    /** ISO-8601 timestamp of when this report was produced. */
-    fetchedAt: string;
-    /** True when served from cache past its soft TTL. */
-    stale: boolean;
-    /** True when the windows are locally estimated, not provider-authoritative. */
-    estimate: boolean;
-    /** Human-readable reason when `source` is `none` or a probe failed. */
-    error?: string;
+  /** The account's label in `~/.smithers/accounts.json`. */
+  accountLabel: string;
+  /** The account's provider. */
+  provider: AccountProvider;
+  /** How this account authenticates. */
+  authMode: "subscription" | "api-key";
+  /** Where the numbers came from. */
+  source: UsageSource$1;
+  /** Quota windows, possibly empty when `source` is `none`. */
+  windows: UsageWindow$4[];
+  /** Plan/tier label if the provider reports one, e.g. "max", "pro". */
+  planType?: string;
+  /** Pay-as-you-go credit balance, if the provider reports one (Codex). */
+  credits?: {
+    hasCredits: boolean;
+    unlimited: boolean;
+    balance?: string;
+  };
+  /** ISO-8601 timestamp of when this report was produced. */
+  fetchedAt: string;
+  /** True when served from cache past its soft TTL. */
+  stale: boolean;
+  /** True when the windows are locally estimated, not provider-authoritative. */
+  estimate: boolean;
+  /** Human-readable reason when `source` is `none` or a probe failed. */
+  error?: string;
 };
 
 /** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
@@ -100,11 +100,14 @@ type UsageReport$4 = UsageReport$5;
  * @param {{ fresh?: boolean; env?: NodeJS.ProcessEnv; nowMs?: number }} [options]
  * @returns {Promise<UsageReport[]>}
  */
-declare function getUsageForAccounts(accounts: Account$1[], options?: {
+declare function getUsageForAccounts(
+  accounts: Account$1[],
+  options?: {
     fresh?: boolean;
     env?: NodeJS.ProcessEnv;
     nowMs?: number;
-}): Promise<UsageReport$3[]>;
+  },
+): Promise<UsageReport$3[]>;
 type Account$1 = _smithers_orchestrator_accounts.Account;
 type UsageReport$3 = UsageReport$5;
 
@@ -132,9 +135,13 @@ type UsageReport$3 = UsageReport$5;
  * @param {{ nowIso?: string }} [options]
  * @returns {UsageReport}
  */
-declare function buildUsageReport(account: Account, probe: UsageProbe$5, options?: {
+declare function buildUsageReport(
+  account: Account,
+  probe: UsageProbe$5,
+  options?: {
     nowIso?: string;
-}): UsageReport$2;
+  },
+): UsageReport$2;
 type Account = _smithers_orchestrator_accounts.Account;
 type UsageReport$2 = UsageReport$5;
 /**
@@ -142,16 +149,18 @@ type UsageReport$2 = UsageReport$5;
  * account identity and timestamp to form a complete {@link UsageReport}.
  */
 type UsageProbe$5 = {
-    source: UsageSource$1;
-    windows?: UsageWindow$4[] | undefined;
-    planType?: string | undefined;
-    credits?: {
+  source: UsageSource$1;
+  windows?: UsageWindow$4[] | undefined;
+  planType?: string | undefined;
+  credits?:
+    | {
         hasCredits: boolean;
         unlimited: boolean;
         balance?: string;
-    } | undefined;
-    estimate?: boolean | undefined;
-    error?: string | undefined;
+      }
+    | undefined;
+  estimate?: boolean | undefined;
+  error?: string | undefined;
 };
 
 /**
@@ -210,13 +219,13 @@ type UsageWindow$3 = UsageWindow$4;
  * @returns {{ windows: UsageWindow[]; planType?: string; credits?: { hasCredits: boolean; unlimited: boolean; balance?: string } }}
  */
 declare function parseCodexUsage(payload: unknown): {
-    windows: UsageWindow$2[];
-    planType?: string;
-    credits?: {
-        hasCredits: boolean;
-        unlimited: boolean;
-        balance?: string;
-    };
+  windows: UsageWindow$2[];
+  planType?: string;
+  credits?: {
+    hasCredits: boolean;
+    unlimited: boolean;
+    balance?: string;
+  };
 };
 type UsageWindow$2 = UsageWindow$4;
 
@@ -243,7 +252,10 @@ type UsageWindow$1 = UsageWindow$4;
  * @param {number} [nowMs]
  * @returns {UsageWindow[]}
  */
-declare function parseOpenAiRateLimitHeaders(get: (name: string) => string | null | undefined, nowMs?: number): UsageWindow$5[];
+declare function parseOpenAiRateLimitHeaders(
+  get: (name: string) => string | null | undefined,
+  nowMs?: number,
+): UsageWindow$5[];
 type UsageWindow$5 = UsageWindow$4;
 
 /**
@@ -287,11 +299,14 @@ declare function decodeJwtClaims(token: string | null | undefined): Record<strin
  * @param {NodeJS.Platform} [platform]
  * @returns {{ accessToken: string; expiresAt?: number } | null}
  */
-declare function readClaudeCredentials(account: {
+declare function readClaudeCredentials(
+  account: {
     configDir?: string;
-}, platform?: NodeJS.Platform): {
-    accessToken: string;
-    expiresAt?: number;
+  },
+  platform?: NodeJS.Platform,
+): {
+  accessToken: string;
+  expiresAt?: number;
 } | null;
 
 /**
@@ -307,11 +322,9 @@ declare function readClaudeCredentials(account: {
  * @param {{ configDir?: string }} account
  * @returns {{ accessToken: string; accountId?: string } | null}
  */
-declare function readCodexCredentials(account: {
-    configDir?: string;
-}): {
-    accessToken: string;
-    accountId?: string;
+declare function readCodexCredentials(account: { configDir?: string }): {
+  accessToken: string;
+  accountId?: string;
 } | null;
 
 /**
@@ -322,9 +335,7 @@ declare function readCodexCredentials(account: {
  * @param {{ configDir?: string }} account
  * @returns {Promise<UsageProbe>}
  */
-declare function claudeOauthUsage(account: {
-    configDir?: string;
-}): Promise<UsageProbe$4>;
+declare function claudeOauthUsage(account: { configDir?: string }): Promise<UsageProbe$4>;
 type UsageProbe$4 = UsageProbe$5;
 
 /**
@@ -335,9 +346,7 @@ type UsageProbe$4 = UsageProbe$5;
  * @param {{ configDir?: string }} account
  * @returns {Promise<UsageProbe>}
  */
-declare function codexWhamUsage(account: {
-    configDir?: string;
-}): Promise<UsageProbe$3>;
+declare function codexWhamUsage(account: { configDir?: string }): Promise<UsageProbe$3>;
 type UsageProbe$3 = UsageProbe$5;
 
 /**
@@ -348,9 +357,7 @@ type UsageProbe$3 = UsageProbe$5;
  * @param {{ apiKey?: string }} account
  * @returns {Promise<UsageProbe>}
  */
-declare function anthropicHeaderUsage(account: {
-    apiKey?: string;
-}): Promise<UsageProbe$2>;
+declare function anthropicHeaderUsage(account: { apiKey?: string }): Promise<UsageProbe$2>;
 type UsageProbe$2 = UsageProbe$5;
 
 /**
@@ -359,9 +366,7 @@ type UsageProbe$2 = UsageProbe$5;
  * @param {{ apiKey?: string }} account
  * @returns {Promise<UsageProbe>}
  */
-declare function openaiHeaderUsage(account: {
-    apiKey?: string;
-}): Promise<UsageProbe$1>;
+declare function openaiHeaderUsage(account: { apiKey?: string }): Promise<UsageProbe$1>;
 type UsageProbe$1 = UsageProbe$5;
 
 /** @typedef {import("./buildUsageReport.js").UsageProbe} UsageProbe */
@@ -377,9 +382,7 @@ type UsageProbe$1 = UsageProbe$5;
  * @param {{ provider: string }} account
  * @returns {Promise<UsageProbe>}
  */
-declare function googleUsage(account: {
-    provider: string;
-}): Promise<UsageProbe>;
+declare function googleUsage(account: { provider: string }): Promise<UsageProbe>;
 type UsageProbe = UsageProbe$5;
 
 /**
@@ -389,11 +392,13 @@ type UsageProbe = UsageProbe$5;
  * @param {string | undefined} tier
  * @returns {{ label: string; requestsPerDay: number; rpm?: number } | undefined}
  */
-declare function publishedCapForTier(tier: string | undefined): {
-    label: string;
-    requestsPerDay: number;
-    rpm?: number;
-} | undefined;
+declare function publishedCapForTier(tier: string | undefined):
+  | {
+      label: string;
+      requestsPerDay: number;
+      rpm?: number;
+    }
+  | undefined;
 /**
  * Published daily request caps for Google providers, keyed by tier. Google does
  * not expose a live "remaining quota" surface to a personal-login or API-key
@@ -403,11 +408,14 @@ declare function publishedCapForTier(tier: string | undefined): {
  *
  * @type {Record<string, { label: string; requestsPerDay: number; rpm?: number }>}
  */
-declare const PUBLISHED_CAPS: Record<string, {
+declare const PUBLISHED_CAPS: Record<
+  string,
+  {
     label: string;
     requestsPerDay: number;
     rpm?: number;
-}>;
+  }
+>;
 
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
 /** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
@@ -439,17 +447,20 @@ declare function readUsageCache(env?: NodeJS.ProcessEnv): UsageCacheFile;
 declare function writeUsageCache(contents: UsageCacheFile, env?: NodeJS.ProcessEnv): string;
 type UsageReport$6 = UsageReport$5;
 type UsageCacheAccountIdentity = {
-    provider: AccountProvider;
-    configDir?: string;
-    model?: string;
-    apiKeyHash?: string;
+  provider: AccountProvider;
+  configDir?: string;
+  model?: string;
+  apiKeyHash?: string;
 };
 type UsageCacheFile = {
-    version: 1;
-    entries: Record<string, {
-        identity?: UsageCacheAccountIdentity;
-        report: UsageReport$6;
-    }>;
+  version: 1;
+  entries: Record<
+    string,
+    {
+      identity?: UsageCacheAccountIdentity;
+      report: UsageReport$6;
+    }
+  >;
 };
 
 /**

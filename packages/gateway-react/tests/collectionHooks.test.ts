@@ -185,6 +185,43 @@ async function mountHarness(): Promise<Harness> {
 }
 
 describe("collection-backed gateway hooks over a real in-memory gateway", () => {
+  test("keeps collection refetch callbacks stable across equal inline params", async () => {
+    const { baseUrl } = await bootGateway();
+    const captured: Record<string, any> = {};
+
+    function Probe() {
+      const [renderCount, setRenderCount] = React.useState(0);
+      captured.approvals = useGatewayApprovals({ filter: { runId: "r1" } }).refetch;
+      captured.runs = useGatewayRuns({}).refetch;
+      captured.crons = useGatewayCrons({}).refetch;
+      captured.tickets = useGatewayTickets({}).refetch;
+      captured.workflows = useGatewayWorkflows({}).refetch;
+      captured.rerender = () => setRenderCount((count) => count + 1);
+      return createElement("span", { "data-render-count": renderCount });
+    }
+
+    const harness = await mountHarness();
+    await harness.render(createElement(SmithersGatewayProvider, { client: makeClient(baseUrl) }, createElement(Probe)));
+
+    const firstRefetches = {
+      approvals: captured.approvals,
+      runs: captured.runs,
+      crons: captured.crons,
+      tickets: captured.tickets,
+      workflows: captured.workflows,
+    };
+    await act(async () => {
+      captured.rerender();
+    });
+
+    expect(captured.approvals).toBe(firstRefetches.approvals);
+    expect(captured.runs).toBe(firstRefetches.runs);
+    expect(captured.crons).toBe(firstRefetches.crons);
+    expect(captured.tickets).toBe(firstRefetches.tickets);
+    expect(captured.workflows).toBe(firstRefetches.workflows);
+    await harness.unmount();
+  });
+
   test("useGatewayNodeOutput refetches when matching work finishes", async () => {
     const runId = "event-invalidated-output";
     const nodeId = "task1";
@@ -272,6 +309,101 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     await harness.unmount();
   });
 
+  test("useGatewayNodeOutput hides the previous node's row while the next node loads", async () => {
+    let resolveNext!: (value: Record<string, unknown>) => void;
+    const nextOutput = new Promise<Record<string, unknown>>((resolve) => {
+      resolveNext = resolve;
+    });
+    const client = {
+      api: {
+        getNodeOutput: async ({ nodeId }: { nodeId: string }) =>
+          nodeId === "task-a" ? { status: "produced", row: { value: "a" } } : nextOutput,
+        listRunEvents: async () => [],
+      },
+      stream: {
+        subscribe: () => () => {},
+      },
+    } as unknown as SmithersDataClient;
+    const collections = { connect() {} } as any;
+    let snapshot: ReturnType<typeof useGatewayNodeOutput> | undefined;
+
+    function Probe({ nodeId }: { nodeId: string }) {
+      snapshot = useGatewayNodeOutput({ runId: "run-1", nodeId, iteration: 0 });
+      return null;
+    }
+
+    const harness = await mountHarness();
+    const renderProbe = (nodeId: string) =>
+      createElement(
+        SmithersCollectionsContext.Provider,
+        { value: { client, collections, queryClient: {} as any } },
+        createElement(Probe, { nodeId }),
+      );
+    await harness.render(renderProbe("task-a"));
+    await waitFor(() => snapshot?.data?.row !== undefined, "first node output");
+
+    await harness.render(renderProbe("task-b"));
+    expect(snapshot?.data).toBeUndefined();
+
+    await act(async () => {
+      resolveNext({ status: "produced", row: { value: "b" } });
+    });
+    await waitFor(() => snapshot?.data?.row !== undefined, "second node output");
+    expect(snapshot?.data).toEqual({ status: "produced", row: { value: "b" } });
+    await harness.unmount();
+  });
+
+  test("useGatewayNodeOutput retains data during a matching-key refetch", async () => {
+    let calls = 0;
+    let resolveRefetch!: (value: Record<string, unknown>) => void;
+    const refetchedOutput = new Promise<Record<string, unknown>>((resolve) => {
+      resolveRefetch = resolve;
+    });
+    const client = {
+      api: {
+        getNodeOutput: async () => {
+          calls += 1;
+          return calls === 1 ? { status: "produced", row: { value: 1 } } : refetchedOutput;
+        },
+        listRunEvents: async () => [],
+      },
+      stream: {
+        subscribe: () => () => {},
+      },
+    } as unknown as SmithersDataClient;
+    const collections = { connect() {} } as any;
+    let snapshot: ReturnType<typeof useGatewayNodeOutput> | undefined;
+
+    function Probe() {
+      snapshot = useGatewayNodeOutput({ runId: "run-1", nodeId: "task-a", iteration: 0 });
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(
+      createElement(
+        SmithersCollectionsContext.Provider,
+        { value: { client, collections, queryClient: {} as any } },
+        createElement(Probe),
+      ),
+    );
+    await waitFor(() => snapshot?.data?.row !== undefined, "initial node output");
+
+    let refetch!: Promise<void>;
+    await act(async () => {
+      refetch = snapshot!.refetch();
+      await Promise.resolve();
+    });
+    expect(snapshot?.data).toEqual({ status: "produced", row: { value: 1 } });
+
+    await act(async () => {
+      resolveRefetch({ status: "produced", row: { value: 2 } });
+      await refetch;
+    });
+    expect(snapshot?.data).toEqual({ status: "produced", row: { value: 2 } });
+    await harness.unmount();
+  });
+
   test("keeps run event results stable across renders without new collection data", async () => {
     const { baseUrl } = await bootGateway();
     const runId = await launchRun(baseUrl, 3);
@@ -296,6 +428,107 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     });
 
     expect(captured.events).toBe(firstEvents);
+    await harness.unmount();
+  });
+
+  test("keeps buffered run events when the stream disconnects", async () => {
+    const runId = "buffered-offline-events";
+    const rows = [{ runId, seq: 1, event: "NodeStarted", payload: { nodeId: "task1" } }];
+    const statusListeners = new Set<() => void>();
+    let streamStatus: ReturnType<SmithersDataClient["stream"]["status"]> = { status: "online" };
+    const client = {
+      mode: { kind: "local", apiBaseUrl: "http://gateway.test" },
+      api: {
+        listRunEvents: async () => rows,
+      },
+      stream: {
+        subscribe() {
+          return () => {};
+        },
+        subscribeStatus(listener: () => void) {
+          statusListeners.add(listener);
+          return () => statusListeners.delete(listener);
+        },
+        status: () => streamStatus,
+        waitForSeq: async () => {},
+      },
+      close() {},
+    } as unknown as SmithersDataClient;
+    let snapshot: ReturnType<typeof useGatewayRunEvents> | undefined;
+
+    function Probe() {
+      snapshot = useGatewayRunEvents(runId);
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(createElement(SmithersCollectionsProvider, { client }, createElement(Probe)));
+    await waitFor(() => snapshot?.events.length === 1, "buffered run event");
+    const bufferedEvents = snapshot!.events;
+
+    await act(async () => {
+      streamStatus = { status: "offline" };
+      for (const listener of statusListeners) listener();
+    });
+
+    expect(snapshot?.error?.message).toBe("Run event stream failed.");
+    expect(snapshot?.events).toBe(bufferedEvents);
+    expect(snapshot?.events[0]?.event).toBe("NodeStarted");
+    await harness.unmount();
+  });
+
+  test("keeps node events stable across empty polls and merges new rows by sequence", async () => {
+    const runId = "stable-node-events";
+    const nodeId = "task1";
+    let calls = 0;
+    let pendingRows: Array<{ runId: string; seq: number; event: string; payload: unknown }> = [
+      { runId, seq: 2, event: "NodeOutput", payload: { nodeId, text: "old" } },
+      { runId, seq: 1, event: "NodeStarted", payload: { nodeId } },
+      { runId, seq: 2, event: "NodeOutput", payload: { nodeId, text: "latest" } },
+    ];
+    const client = {
+      api: {
+        listRunEvents: async () => {
+          calls += 1;
+          const rows = pendingRows;
+          pendingRows = [];
+          return rows;
+        },
+      },
+    } as unknown as SmithersDataClient;
+    const collections = { connect() {} } as any;
+    let snapshot: ReturnType<typeof useGatewayNodeEvents> | undefined;
+
+    function Probe() {
+      snapshot = useGatewayNodeEvents(runId, nodeId, { pollIntervalMs: 25 });
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(
+      createElement(
+        SmithersCollectionsContext.Provider,
+        { value: { client, collections, queryClient: {} as any } },
+        createElement(Probe),
+      ),
+    );
+    await waitFor(() => snapshot?.events.length === 2, "initial node events");
+    expect(snapshot?.events.map((event) => event.seq)).toEqual([1, 2]);
+    expect(snapshot?.events[1]?.payload).toEqual({ nodeId, text: "latest" });
+
+    const stableEvents = snapshot?.events;
+    await waitFor(() => calls >= 2, "empty node event poll");
+    expect(snapshot?.events).toBe(stableEvents);
+
+    pendingRows = [
+      { runId, seq: 4, event: "NodeFinished", payload: { nodeId } },
+      { runId, seq: 3, event: "NodeOutput", payload: { nodeId, text: "first" } },
+      { runId, seq: 3, event: "NodeOutput", payload: { nodeId, text: "replacement" } },
+    ];
+    await waitFor(() => snapshot?.events.length === 4, "incremental node events");
+    expect(snapshot?.events.map((event) => event.seq)).toEqual([1, 2, 3, 4]);
+    expect(snapshot?.events[2]?.payload).toEqual({ nodeId, text: "replacement" });
+    expect(snapshot?.events).not.toBe(stableEvents);
     await harness.unmount();
   });
 

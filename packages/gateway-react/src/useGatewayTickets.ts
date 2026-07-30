@@ -20,7 +20,7 @@ export function useGatewayTickets(params: ListTicketsRequest = {}): GatewayAsync
   const live = useLiveQuery((q) => q.from({ row: collection }), [collection]);
   const refetch = useCallback(async () => {
     await collections.invalidate(["tickets"]);
-  }, [collections, params]);
+  }, [collections]);
 
   const data = (live.data ?? []) as GatewayTicketRow[];
   return gatewayCollectionAsyncState({

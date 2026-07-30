@@ -1,36 +1,69 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { openInBrowser } from "../src/openInBrowser.js";
 import { renderInitNextSteps } from "../src/renderInitNextSteps.js";
 import { runStartersCommand } from "../src/starter-gallery-command.js";
 import { buildStarterGallery } from "../src/starter-gallery.js";
 
 describe("openInBrowser", () => {
-  // Force the non-darwin launcher (`xdg-open`, absent on the test box) so the
-  // spawn succeeds structurally without actually opening a browser tab.
-  function withPlatform(platform, fn) {
-    const original = Object.getOwnPropertyDescriptor(process, "platform");
+  // Force the platform launcher and control PATH so the launcher-availability
+  // probe is deterministic on any test box.
+  function withLaunchEnv({ platform, path }, fn) {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    const originalPath = process.env.PATH;
     Object.defineProperty(process, "platform", { value: platform, configurable: true });
+    process.env.PATH = path;
     try {
       return fn();
     } finally {
-      Object.defineProperty(process, "platform", original);
+      Object.defineProperty(process, "platform", originalPlatform);
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
     }
   }
 
+  // A directory holding an executable file named `launcher` (a no-op script,
+  // so a successful spawn still never opens a browser tab).
+  function fakeLauncherDir(launcher) {
+    const dir = mkdtempSync(join(tmpdir(), "smithers-open-in-browser-"));
+    const file = join(dir, launcher);
+    writeFileSync(file, "#!/bin/sh\nexit 0\n");
+    chmodSync(file, 0o755);
+    return dir;
+  }
+
   test("spawns a launcher for an http URL", () => {
-    withPlatform("linux", () => {
+    withLaunchEnv({ platform: "linux", path: fakeLauncherDir("xdg-open") }, () => {
       expect(openInBrowser("https://example.test/never-opened")).toBe(true);
     });
   });
 
   test("converts a filesystem path to a file:// URL and spawns", () => {
-    withPlatform("linux", () => {
+    withLaunchEnv({ platform: "linux", path: fakeLauncherDir("xdg-open") }, () => {
       expect(openInBrowser("/tmp/smithers-open-in-browser-test.html")).toBe(true);
     });
   });
 
+  test("spawns `open` on darwin", () => {
+    withLaunchEnv({ platform: "darwin", path: fakeLauncherDir("open") }, () => {
+      expect(openInBrowser("https://example.test/never-opened")).toBe(true);
+    });
+  });
+
+  test("returns false when no launcher exists on PATH (headless box)", () => {
+    // Regression: spawn() does not throw for a missing executable — ENOENT
+    // arrives async on the child's error event — so without the PATH probe
+    // this returned true and callers printed "Opening <url>" with nothing open.
+    const emptyDir = mkdtempSync(join(tmpdir(), "smithers-open-in-browser-empty-"));
+    withLaunchEnv({ platform: "linux", path: emptyDir }, () => {
+      expect(openInBrowser("https://example.test/never-opened")).toBe(false);
+    });
+  });
+
   test("returns false when the launcher cannot be spawned", () => {
-    withPlatform("linux", () => {
+    withLaunchEnv({ platform: "linux", path: fakeLauncherDir("xdg-open") }, () => {
       // A NUL byte in the URL makes spawn throw synchronously (ERR_INVALID_ARG_VALUE),
       // which openInBrowser swallows into a `false` return.
       expect(openInBrowser(`https://example.test/${String.fromCharCode(0)}`)).toBe(false);

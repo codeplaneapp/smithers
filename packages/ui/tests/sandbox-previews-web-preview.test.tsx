@@ -384,6 +384,36 @@ describe("WebPreview", () => {
     expect(input.tabIndex).toBe(0);
   });
 
+  test("the roved tab stop survives unrelated re-renders", async () => {
+    let bump!: () => void;
+    function Harness() {
+      const [, setN] = useState(0);
+      bump = () => setN((n) => n + 1);
+      return (
+        <WebPreview url="https://example.com">
+          <WebPreviewToolbar onBack={() => {}} onForward={() => {}}>
+            <WebPreviewAddress />
+          </WebPreviewToolbar>
+          <WebPreviewContent />
+        </WebPreview>
+      );
+    }
+    await render(<Harness />);
+    const back = container!.querySelector<HTMLButtonElement>('[data-slot="web-preview-back"]')!;
+    const forward = container!.querySelector<HTMLButtonElement>('[data-slot="web-preview-forward"]')!;
+    await act(async () => {
+      back.focus();
+      back.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    });
+    expect(forward.tabIndex).toBe(0);
+
+    // An unrelated state change re-renders the toolbar; the current item
+    // must keep its stop instead of resetting to the first button.
+    await act(async () => bump());
+    expect(forward.tabIndex).toBe(0);
+    expect(back.tabIndex).toBe(-1);
+  });
+
   test("content region announces busy while loading so the covered frame is honest to screen readers", async () => {
     await render(<WebPreview url="https://example.com" loading />);
     const content = container!.querySelector('[data-slot="web-preview-content"]')!;

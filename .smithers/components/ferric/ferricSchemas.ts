@@ -136,7 +136,7 @@ export const ferricSchemas = {
     artifact: z.string().min(3),
     shouldPublish: z.boolean(),
     reason: z.string().min(10),
-    idempotencyKey: z.string().min(8),
+    idempotencyKey: z.string().min(8).regex(/^[A-Za-z0-9._-]+$/),
   }),
   frcPublishAct: z.object({
     artifact: z.string().min(3),

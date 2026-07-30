@@ -3,7 +3,7 @@
 // run events, approvals, and the Effect delegation store; here we exercise its
 // action surface (edit / skip-preview / answer-human / poll), the runId guard
 // paths, a real delegation-shaped node (the `dc-poll` approval), and a
-// StrictMode remount (store dispose + epoch bump).
+// StrictMode remount (store dispose + effect recreation).
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 try {
@@ -19,7 +19,7 @@ import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import React, { act, createElement, StrictMode, type ReactElement } from "react";
+import React, { act, createElement, StrictMode, Suspense, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { z } from "zod";
 import { Gateway } from "@smithers-orchestrator/server";
@@ -162,6 +162,18 @@ function client(baseUrl: string) {
   return new SmithersGatewayClient({ baseUrl, token: "operator-token", fetch: Bun.fetch });
 }
 
+function clientWithBackfillCount(baseUrl: string, onBackfill: () => void) {
+  return new SmithersGatewayClient({
+    baseUrl,
+    token: "operator-token",
+    fetch: ((input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v1/api/events" && url.searchParams.get("limit") === "500") onBackfill();
+      return Bun.fetch(input, init);
+    }) as typeof fetch,
+  });
+}
+
 const swallow = async (p: Promise<unknown>) => {
   try {
     await p;
@@ -171,6 +183,55 @@ const swallow = async (p: Promise<unknown>) => {
 };
 
 describe("useDelegationChain over a real gateway", () => {
+  test("a suspended render does not create a delegation store or start history backfill", async () => {
+    const { baseUrl } = await bootGateway();
+    const runId = await launch(baseUrl, "value", { value: 1 });
+    let backfills = 0;
+    const observedClient = clientWithBackfillCount(baseUrl, () => backfills++);
+    cleanups.push(() => observedClient.close());
+    const suspended = new Promise<never>(() => {});
+
+    function Probe() {
+      useDelegationChain({ runId });
+      throw suspended;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(
+      createElement(
+        SmithersGatewayProvider,
+        { client: observedClient },
+        createElement(Suspense, { fallback: null }, createElement(Probe)),
+      ),
+    );
+    await sleep(25);
+    expect(backfills).toBe(0);
+    await harness.unmount();
+  });
+
+  test("mount/unmount cycles create exactly one committed store per mount", async () => {
+    const { baseUrl } = await bootGateway();
+    const runId = await launch(baseUrl, "value", { value: 1 });
+    let backfills = 0;
+    const observedClient = clientWithBackfillCount(baseUrl, () => backfills++);
+    cleanups.push(() => observedClient.close());
+
+    function Probe() {
+      useDelegationChain({ runId });
+      return null;
+    }
+
+    for (let cycle = 1; cycle <= 2; cycle++) {
+      const harness = await mountHarness();
+      await harness.render(
+        createElement(SmithersGatewayProvider, { client: observedClient }, createElement(Probe)),
+      );
+      await waitFor(() => backfills === cycle, `delegation backfill for mount ${cycle}`);
+      await harness.unmount();
+      expect(backfills).toBe(cycle);
+    }
+  });
+
   test("assembles state for a runId and dispatches every action (edit/skip/answer/poll)", async () => {
     const { baseUrl } = await bootGateway();
     const runId = await launch(baseUrl, "value", { value: 1 });
@@ -320,7 +381,7 @@ describe("useDelegationChain over a real gateway", () => {
     await harness.unmount();
   });
 
-  test("a StrictMode remount disposes and recreates the store (epoch bump)", async () => {
+  test("a StrictMode remount disposes and recreates the store", async () => {
     const { baseUrl } = await bootGateway();
     const runId = await launch(baseUrl, "value", { value: 1 });
 
@@ -330,7 +391,7 @@ describe("useDelegationChain over a real gateway", () => {
       return null;
     }
     // StrictMode double-invokes effects: mount → cleanup (store.dispose) →
-    // mount again against the disposed store → the epoch bump recreates it.
+    // mount again → the effect creates a fresh store.
     const harness = await mountHarness();
     await harness.render(
       createElement(

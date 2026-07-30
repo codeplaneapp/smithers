@@ -1,13 +1,33 @@
-import { useCallback, useEffect, useMemo, useReducer, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useSyncExternalStore } from "react";
 import { useGatewayActions } from "../useGatewayActions.ts";
 import { useGatewayApprovals } from "../useGatewayApprovals.ts";
 import { useGatewayRunEvents } from "../useGatewayRunEvents.ts";
 import { useGatewayRunTree } from "../sync/useGatewayRunTree.ts";
 import { useSmithersCollections } from "../useSmithersCollections.ts";
-import { createDelegationChainStore } from "./delegationChainStore.ts";
+import {
+  createDelegationChainStore,
+  type DelegationChainSnapshot,
+  type DelegationChainStore,
+} from "./delegationChainStore.ts";
 import { delegationTargetKey } from "./delegationEventTargets.ts";
-import { delegationTableForNodeId, parseDelegationNodeId } from "./foldDelegation.ts";
+import { delegationTableForNodeId, foldDelegation, parseDelegationNodeId } from "./foldDelegation.ts";
 import type { DcPollAnswer, DelegationGraph } from "./types.ts";
+
+const EMPTY_SNAPSHOT: DelegationChainSnapshot = {
+  graph: foldDelegation([]),
+  recordErrors: [],
+  historyError: undefined,
+  hydrated: false,
+  targetCount: 0,
+};
+
+const EMPTY_STORE: DelegationChainStore = {
+  push: () => {},
+  subscribe: () => () => {},
+  getSnapshot: () => EMPTY_SNAPSHOT,
+  dispose: () => {},
+  disposed: false,
+};
 
 export type UseDelegationChainResult = {
   graph: DelegationGraph;
@@ -53,19 +73,24 @@ export function useDelegationChain(params: { runId: string | undefined }): UseDe
   const events = useGatewayRunEvents(runId, { maxEvents: 1000 });
   const approvals = useGatewayApprovals(runId ? { filter: { runId } } : {});
 
-  // One Effect store per (runId, client) — a run switch resets all assembly
-  // state, like the old per-run generation counter. Dev/strict-mode remounts
-  // dispose the store in the effect cleanup; the epoch bump recreates it when
-  // the effect re-runs against an already-disposed store.
-  const [storeEpoch, bumpStoreEpoch] = useReducer((epoch: number) => epoch + 1, 0);
-  const store = useMemo(() => createDelegationChainStore({ runId, api: client.api }), [runId, client, storeEpoch]);
+  // Create the Effect store only after commit: a concurrent/Suspense render
+  // React discards must not start fibers or the history backfill. The keyed ref
+  // also prevents a run switch from rendering the previous run's snapshot.
+  const storeRef = useRef<{ runId: string | undefined; client: typeof client; store: DelegationChainStore } | null>(
+    null,
+  );
+  const [, bumpStoreEpoch] = useReducer((epoch: number) => epoch + 1, 0);
+  const slot = storeRef.current;
+  const store = slot !== null && slot.runId === runId && slot.client === client ? slot.store : EMPTY_STORE;
   useEffect(() => {
-    if (store.disposed) {
-      bumpStoreEpoch();
-      return;
-    }
-    return () => store.dispose();
-  }, [store]);
+    const next = createDelegationChainStore({ runId, api: client.api });
+    storeRef.current = { runId, client, store: next };
+    bumpStoreEpoch();
+    return () => {
+      if (storeRef.current?.store === next) storeRef.current = null;
+      next.dispose();
+    };
+  }, [runId, client]);
 
   // Push every input batch into the pipeline (the store dedupes internally:
   // an unchanged batch publishes no snapshot update).

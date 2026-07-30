@@ -10,6 +10,15 @@ import type { FerricGateId } from "./ferricGates";
 import { sh } from "./ferricShell";
 import PublishDecisionPrompt from "../../prompts/ferric-publish-decision.mdx";
 
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._-]+$/;
+
+export function publishMarkerPath(repo: string, idempotencyKey: string) {
+  if (idempotencyKey.length < 8 || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+    throw new Error("Invalid publish idempotency key: expected at least 8 characters using only A-Z, a-z, 0-9, '.', '_', or '-'");
+  }
+  return join(repo, ".ferric-published", `${idempotencyKey}.done`);
+}
+
 /**
  * Decide, gate, then act exactly once.
  *
@@ -46,7 +55,7 @@ export function PublishPipeline(props: {
         <Task id={`${props.idPrefix}:act`} output={outputs.frcPublishAct} noRetry>
           {async () => {
             const dir = join(c.repo, ".ferric-published");
-            const marker = join(dir, `${decision.idempotencyKey}.done`);
+            const marker = publishMarkerPath(c.repo, decision.idempotencyKey);
             if (existsSync(marker)) {
               return {
                 artifact: props.artifact,
