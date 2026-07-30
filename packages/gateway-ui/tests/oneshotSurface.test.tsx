@@ -20,7 +20,7 @@ import { startInMemoryGateway, type InMemoryGateway } from "./inMemoryGateway.ts
 
 // Radix decides whether portals/layout effects are available at module load,
 // so DOM-dependent imports must happen after happy-dom registration above.
-const { act, createElement } = await import("react");
+const { act, createElement, useState } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { SmithersGatewayProvider } = await import("@smithers-orchestrator/gateway-react");
 const {
@@ -128,6 +128,41 @@ describe("hijack model helpers", () => {
 });
 
 describe("OneshotSurface", () => {
+  test("shares one hijack-candidate request across duplicate buttons", async () => {
+    function CandidateButtons() {
+      const [showCompact, setShowCompact] = useState(true);
+      const props = {
+        runId: RUN_ID,
+        nodeId: "implement",
+        runStatus: "running",
+        nodeLive: true,
+        onOpen: () => {},
+      };
+      return createElement(
+        "div",
+        null,
+        createElement(HijackCandidateButton, props),
+        showCompact ? createElement(HijackCandidateButton, { ...props, compact: true }) : null,
+        createElement("button", { type: "button", onClick: () => setShowCompact(false) }, "Hide compact"),
+      );
+    }
+
+    const harness = await mount(createElement(CandidateButtons));
+    await harness.flush(60);
+    expect(gateway?.requests.filter((request) => request.path.endsWith("/hijack-candidates"))).toHaveLength(1);
+    expect(harness.container.querySelector('[data-testid="monitor-hijack-button"]')?.textContent).toBe("Hijack");
+    expect(harness.container.querySelector('[data-testid="monitor-hijack-inline"]')?.textContent).toContain("Hijack");
+
+    await act(async () =>
+      click(
+        [...harness.container.querySelectorAll("button")].find((button) => button.textContent === "Hide compact") ??
+          null,
+      ),
+    );
+    expect(harness.container.querySelector('[data-testid="monitor-hijack-button"]')?.textContent).toBe("Hijack");
+    expect(gateway?.requests.filter((request) => request.path.endsWith("/hijack-candidates"))).toHaveLength(1);
+  });
+
   test("provides a candidate-aware monitor trigger without exporting its data hook", async () => {
     let openedEngine = "";
     const harness = await mount(

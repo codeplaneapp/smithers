@@ -219,6 +219,106 @@ describe("NodeChatStream (live SSE)", () => {
   }, 15_000);
 });
 
+describe("NodeChatStream (memoized transcript)", () => {
+  test("keeps buffered chat visible with a dismissible stream error banner", async () => {
+    const events = [
+      {
+        type: "event" as const,
+        event: "NodeOutput",
+        payload: { nodeId: "a:implement", text: "Buffered transcript.", stream: "stdout" },
+        seq: 1,
+        stateVersion: 0,
+      },
+    ];
+    const useNodeEvents = () => ({
+      events,
+      error: new Error("Temporary disconnect."),
+      loading: false,
+      streaming: false,
+    });
+    const gw = boot();
+    const harness = await mount(
+      gw,
+      createElement(NodeChatStream, { runId: "run-a", nodeId: "a:implement", useNodeEvents }),
+    );
+
+    expect(harness.container.textContent).toContain("Buffered transcript.");
+    expect(harness.container.querySelector('[data-slot="chat-message"]')).not.toBeNull();
+    expect(harness.container.querySelector('[data-slot="node-chat-stream-error"][role="alert"]')).not.toBeNull();
+
+    click(harness.container.querySelector('[aria-label="Dismiss chat stream error"]'));
+    await harness.flush();
+    expect(harness.container.querySelector('[data-slot="node-chat-stream-error"]')).toBeNull();
+    expect(harness.container.textContent).toContain("Buffered transcript.");
+  });
+
+  test("replaces an empty chat with the stream error EmptyState", async () => {
+    const useNodeEvents = () => ({
+      events: [],
+      error: new Error("Temporary disconnect."),
+      loading: false,
+      streaming: false,
+    });
+    const gw = boot();
+    const harness = await mount(
+      gw,
+      createElement(NodeChatStream, { runId: "run-a", nodeId: "a:implement", useNodeEvents }),
+    );
+
+    expect(harness.container.textContent).toContain("Chat stream failed");
+    expect(harness.container.textContent).toContain("Temporary disconnect.");
+    expect(harness.container.querySelector('[data-slot="chat-message"]')).toBeNull();
+    expect(harness.container.querySelector('[aria-label="Dismiss chat stream error"]')).toBeNull();
+  });
+
+  test("keeps one transcript across re-renders with stable events and follows new events by identity", async () => {
+    const frame = (seq: number, text: string) => ({
+      type: "event" as const,
+      event: "NodeOutput",
+      payload: { nodeId: "a:implement", text, stream: "stdout" },
+      seq,
+      stateVersion: 0,
+    });
+    let events = [frame(1, "First chunk.")];
+    const useNodeEvents = () => ({ events, error: undefined, loading: false, streaming: true });
+    function Panel({ title }: { title: string }) {
+      return createElement(NodeChatStream, { runId: "run-a", nodeId: "a:implement", title, useNodeEvents });
+    }
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(Panel, { title: "One" }));
+      });
+      expect(container.textContent).toContain("First chunk.");
+      const occurrences = (container.textContent?.match(/First chunk\./g) ?? []).length;
+      expect(occurrences).toBe(1);
+
+      // An unrelated prop change re-renders the card but must not duplicate
+      // or drop the folded transcript.
+      await act(async () => {
+        root.render(createElement(Panel, { title: "Two" }));
+      });
+      expect(container.textContent).toContain("First chunk.");
+      expect((container.textContent?.match(/First chunk\./g) ?? []).length).toBe(1);
+
+      // A new events array identity folds the appended chunk into the stream.
+      events = [...events, frame(2, " Second chunk.")];
+      await act(async () => {
+        root.render(createElement(Panel, { title: "Three" }));
+      });
+      expect(container.textContent).toContain("Second chunk.");
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  }, 15_000);
+});
+
 describe("FleetTable (live run tree)", () => {
   test("rolls up per-item pipeline status and handles selection", async () => {
     const gw = boot({ trees: { "run-a": FLEET_TREE } });

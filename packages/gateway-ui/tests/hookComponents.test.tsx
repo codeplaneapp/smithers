@@ -1036,7 +1036,35 @@ describe("RunEventLog", () => {
     const gw = boot({ streamStatus: 401, events: { "run-a": [] } });
     const harness = await mount(gw, createElement(RunEventLog, { runId: "run-a" }));
     await harness.flush(80);
+    expect(harness.container.textContent).toContain("Event stream failed");
     expect(harness.container.textContent).toContain("Run event stream failed.");
+    expect(harness.container.querySelector('[data-slot="event-row"]')).toBeNull();
+  });
+
+  test("keeps buffered events visible with a dismissible stream error banner", async () => {
+    const gw = boot({
+      events: {
+        "run-a": [{ runId: "run-a", seq: 1, event: "NodeStarted", payload: { nodeId: "plan" } }],
+      },
+    });
+    const harness = await mount(gw, createElement(RunEventLog, { runId: "run-a" }));
+    await harness.flush(60);
+    const row = harness.container.querySelector('[data-slot="event-row"]');
+    expect(row).not.toBeNull();
+
+    await act(async () => {
+      await gw.close();
+    });
+    await harness.flush(80);
+
+    expect(harness.container.querySelector('[data-slot="event-row"]')).toBe(row);
+    expect(harness.container.textContent).toContain("NodeStarted");
+    expect(harness.container.querySelector('[data-slot="run-event-log-error"][role="alert"]')).not.toBeNull();
+
+    click(harness.container.querySelector('[aria-label="Dismiss event stream error"]'));
+    await harness.flush();
+    expect(harness.container.querySelector('[data-slot="run-event-log-error"]')).toBeNull();
+    expect(harness.container.querySelector('[data-slot="event-row"]')).not.toBeNull();
   });
 
   test("keeps following the tail once the event buffer hits maxEvents", async () => {
