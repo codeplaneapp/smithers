@@ -4829,6 +4829,7 @@ type ApprovalProps = {
   async?: boolean; // unrelated downstream may continue while pending
   dependsOn?: string[];
   needs?: Record<string, string>;
+  bind?: ProofBinding | ProofBinding[]; // accept only while the bound authority rows retain their proved content digests
   skipIf?: boolean;
   timeoutMs?: number;
   heartbeatTimeoutMs?: number;
