@@ -191,7 +191,7 @@
     "smithers": "./src/bin/smithers.js"
   },
   "scripts": {
-    "test": "bun test tests",
+    "test": "bun test tests/barrels.test.js && bun test '--path-ignore-patterns=**/barrels.test.js' tests",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "rm -f src/index.d.ts src/index-*.d.ts && tsup --dts-only"
   },
