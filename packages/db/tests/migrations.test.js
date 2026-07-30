@@ -626,7 +626,7 @@ describe("DB migration edges", () => {
       .all()
       .map((c) => c.name);
     expect(cols).toContain("effort");
-    expect(migrationRows(sqlite).map((row) => row.id)).toContain("0033_attempt_effort_column");
+    expect(migrationRows(sqlite).map((row) => row.id)).toContain("0035_attempt_effort_column");
 
     // ...and the legacy row still reads clean: the new column is NULL (never
     // backfilled from the blob) while the old meta_json value survives intact.
@@ -795,7 +795,7 @@ describe("DB migration edges", () => {
       .get();
     expect(index).toBeTruthy();
     const ledger = migrationRows(sqlite).map((row) => row.id);
-    expect(ledger).toContain("0034_add_steers");
+    expect(ledger).toContain("0036_add_steers");
     sqlite.close();
   });
 
