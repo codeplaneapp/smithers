@@ -363,6 +363,10 @@ const SHADCN_PROVENANCE_ENTRY_KEYS = [
 const SHADCN_PROVENANCE_VERIFICATION =
   "Each source file in an approved collection must name its upstream registry item URL in a lane manifest under provenance/. Entries record ported anatomy plus explicit omissions and divergences; this is provenance, not cryptographic verification.";
 const PACK_UI_DIRECTORIES = [".smithers/ui", "examples/ui"];
+// The built-in pack's older dark workflow UIs share one compatibility sheet
+// that composes the canonical gateway theme and preserves their legacy token
+// aliases. Keep this exception exact so new bespoke theme modules still fail.
+const SANCTIONED_PACK_UI_THEME_MODULES = new Set([".smithers/ui/shared-theme.ts"]);
 const PACK_UI_IMPORTS = new Set([
   "react",
   "smithers-orchestrator/gateway-react",
@@ -576,7 +580,7 @@ function packUiViolations(path, source) {
     .replace(/\.[^.]+$/, "")
     .split("/")
     .filter((segment) => segment !== ".smithers" && segment !== "ui" && segment !== "examples");
-  if (modulePath.some((segment) => /(?:theme|tokens?)/i.test(segment))) {
+  if (modulePath.some((segment) => /(?:theme|tokens?)/i.test(segment)) && !SANCTIONED_PACK_UI_THEME_MODULES.has(path)) {
     violations.push(formatViolation("pack-ui-theme-module", `${path} is a bespoke theme or token module`));
   }
   return violations;
