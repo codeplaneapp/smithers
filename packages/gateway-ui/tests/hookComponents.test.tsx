@@ -29,6 +29,7 @@ import {
   NodeOutputView,
   RunEventLog,
   RunList,
+  summarize,
   RunTree,
   SimpleWorkflowDashboard,
   WorkflowGraph,
@@ -1142,6 +1143,64 @@ describe("RunEventLog", () => {
     } finally {
       scrollSpy.mockRestore();
     }
+  });
+});
+
+describe("summarize", () => {
+  const reference = (payload: unknown): string => {
+    if (payload == null) return "";
+    if (typeof payload === "string") return payload;
+    try {
+      const json = JSON.stringify(payload);
+      return json.length > 200 ? `${json.slice(0, 200)}…` : json;
+    } catch {
+      return "";
+    }
+  };
+
+  test("matches JSON.stringify+slice for a spread of payload shapes", () => {
+    const payloads: unknown[] = [
+      null,
+      undefined,
+      "",
+      "a plain string payload",
+      42,
+      true,
+      { small: true },
+      { nested: { deep: [1, "two", null, { ok: false }] } },
+      [1, undefined, "x"],
+      { "esc\"aped": "uni snowman ☃\nnewline" },
+      { when: new Date("2024-01-02T03:04:05.000Z") },
+      { skip: undefined, fn: () => 1, keep: 1 },
+      { big: "x".repeat(500) },
+      { exact: "y".repeat(190) },
+      Number.NaN,
+      { cycle: null as unknown },
+    ];
+    (payloads[payloads.length - 1] as { cycle: unknown }).cycle = payloads[payloads.length - 1];
+    for (const payload of payloads) {
+      expect(summarize(payload)).toBe(reference(payload));
+    }
+  });
+
+  test("truncates a large payload without serializing past the preview budget", () => {
+    // A throwing getter positioned after the first 200 serialized characters:
+    // a full JSON.stringify would invoke it and throw (old behavior returned
+    // ""), while the bounded preview never reaches it.
+    const payload = {
+      head: "x".repeat(500),
+      get tail(): never {
+        throw new Error("serialized past the preview budget");
+      },
+    };
+    const expected = `${JSON.stringify({ head: "x".repeat(500) }).slice(0, 200)}…`;
+    expect(summarize(payload)).toBe(expected);
+  });
+
+  test("returns an empty string for circular payloads", () => {
+    const payload: { self?: unknown } = {};
+    payload.self = payload;
+    expect(summarize(payload)).toBe("");
   });
 });
 

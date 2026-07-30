@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useEffect, useInsertionEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { memo, useEffect, useInsertionEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useGatewayRunEvents } from "@smithers-orchestrator/gateway-react";
 import type { GatewayEventFrame } from "@smithers-orchestrator/gateway-client";
 import { Badge, type BadgeProps, Button, EmptyState } from "@smithers-orchestrator/ui";
@@ -35,6 +35,86 @@ export type RunEventLogProps = {
 const PAYLOAD_PREVIEW_CHARS = 200;
 
 /**
+ * `JSON.stringify` has no early exit, so serializing a multi-MB `task.output`
+ * payload just to slice 200 characters off the front is wasted work per row.
+ * This mirrors `JSON.stringify`'s byte-for-byte output but stops appending once
+ * the budget is exceeded, so large payloads cost O(preview) instead of
+ * O(payload-size). Throws on the same inputs `JSON.stringify` throws on
+ * (circular structures, BigInt) so callers can share one catch path.
+ */
+function stringifyPreview(value: unknown, budget: number): { text: string; truncated: boolean } {
+  const chunks: string[] = [];
+  let length = 0;
+  let truncated = false;
+  const seen = new Set<object>();
+
+  const push = (text: string): boolean => {
+    if (truncated) return false;
+    const remaining = budget - length;
+    if (text.length > remaining) {
+      chunks.push(text.slice(0, Math.max(remaining, 0)));
+      length = budget;
+      truncated = true;
+      return false;
+    }
+    chunks.push(text);
+    length += text.length;
+    return true;
+  };
+
+  const write = (node: any): boolean => {
+    if (node === null) return push("null");
+    switch (typeof node) {
+      case "number":
+      case "boolean":
+      case "string":
+        return push(JSON.stringify(node));
+      case "bigint":
+        throw new TypeError("Do not know how to serialize a BigInt");
+      case "undefined":
+      case "function":
+      case "symbol":
+        return true;
+    }
+    if (typeof node.toJSON === "function") return write(node.toJSON());
+    if (seen.has(node)) throw new TypeError("Converting circular structure to JSON");
+    seen.add(node);
+    try {
+      if (Array.isArray(node)) {
+        if (!push("[")) return false;
+        for (let index = 0; index < node.length; index += 1) {
+          if (index > 0 && !push(",")) return false;
+          const element = node[index];
+          if (element === undefined || typeof element === "function" || typeof element === "symbol") {
+            if (!push("null")) return false;
+          } else if (!write(element)) {
+            return false;
+          }
+        }
+        return push("]");
+      }
+      if (!push("{")) return false;
+      let first = true;
+      for (const key of Object.keys(node)) {
+        const property = node[key];
+        if (property === undefined || typeof property === "function" || typeof property === "symbol") continue;
+        if (!first && !push(",")) return false;
+        first = false;
+        if (!push(JSON.stringify(key))) return false;
+        if (!push(":")) return false;
+        if (!write(property)) return false;
+      }
+      return push("}");
+    } finally {
+      seen.delete(node);
+    }
+  };
+
+  write(value);
+  return { text: chunks.join(""), truncated };
+}
+
+/**
  * Compact one-line preview of a frame payload (used as the fallback summary and
  * kept exported for callers that render their own rows).
  */
@@ -42,8 +122,8 @@ export function summarize(payload: unknown): string {
   if (payload == null) return "";
   if (typeof payload === "string") return payload;
   try {
-    const json = JSON.stringify(payload);
-    return json.length > PAYLOAD_PREVIEW_CHARS ? `${json.slice(0, PAYLOAD_PREVIEW_CHARS)}…` : json;
+    const { text, truncated } = stringifyPreview(payload, PAYLOAD_PREVIEW_CHARS);
+    return truncated ? `${text}…` : text;
   } catch {
     return "";
   }
@@ -191,7 +271,6 @@ type LogRow = {
   nodeId: string | undefined;
   iteration: number;
   attempt: number;
-  summary: string;
   /** >1 when this row coalesces consecutive per-node heartbeats. */
   count: number;
 };
@@ -206,7 +285,6 @@ function toRow(frame: GatewayEventFrame, count: number): LogRow {
     nodeId: eventNodeId(frame),
     iteration: eventNumber(frame, "iteration"),
     attempt: eventNumber(frame, "attempt"),
-    summary: summarizeEvent(frame),
     count,
   };
 }
@@ -245,30 +323,49 @@ function safeJson(payload: unknown): string {
 
 // A child component so each row owns its own expand state — React hooks cannot
 // be called per-list-item in the parent map.
-function EventRow({
-  row,
-  selected,
-  onSelectNode,
-}: {
-  row: LogRow;
+type EventRowProps = {
+  seq: number;
+  event: string;
+  payload: unknown;
+  kind: string;
+  tone: EventTone;
+  nodeId: string | undefined;
+  iteration: number;
+  attempt: number;
+  count: number;
   selected: boolean;
   onSelectNode?: (nodeId: string) => void;
-}) {
+};
+
+const EventRow = memo(function EventRow({
+  seq: frameSeq,
+  event,
+  payload,
+  kind,
+  tone,
+  nodeId,
+  iteration,
+  attempt,
+  count,
+  selected,
+  onSelectNode,
+}: EventRowProps) {
   const [expanded, setExpanded] = useState(false);
-  const seq = String(row.frame.seq).padStart(4, "0");
-  const selectable = Boolean(row.nodeId && onSelectNode);
-  const badgeLabel = row.count > 1 ? `${row.kind} ×${row.count}` : row.kind;
+  const summary = useMemo(() => summarizeEvent({ event, payload }), [event, payload]);
+  const seq = String(frameSeq).padStart(4, "0");
+  const selectable = Boolean(nodeId && onSelectNode);
+  const badgeLabel = count > 1 ? `${kind} ×${count}` : kind;
 
   return (
     <div
       className="gw-event-row"
       data-slot="event-row"
-      data-kind={row.kind}
-      data-tone={row.tone}
-      data-node={row.nodeId}
-      data-seq={row.frame.seq}
+      data-kind={kind}
+      data-tone={tone}
+      data-node={nodeId}
+      data-seq={frameSeq}
       data-active={selected ? "true" : undefined}
-      data-heartbeat={row.tone === "heartbeat" ? "true" : undefined}
+      data-heartbeat={tone === "heartbeat" ? "true" : undefined}
     >
       <div className="gw-event-row-head">
         {selectable ? (
@@ -276,37 +373,37 @@ function EventRow({
             type="button"
             className="gw-event-row-main"
             data-selectable={selectable ? "true" : "false"}
-            onClick={selectable ? () => onSelectNode!(row.nodeId!) : undefined}
+            onClick={selectable ? () => onSelectNode!(nodeId!) : undefined}
           >
             <span className="gw-event-row-seq">{seq}</span>
-            <Badge variant={TONE_BADGE_VARIANT[row.tone]} style={{ flexShrink: 0 }}>
+            <Badge variant={TONE_BADGE_VARIANT[tone]} style={{ flexShrink: 0 }}>
               {badgeLabel}
             </Badge>
-            {row.nodeId ? <span className="gw-event-row-chip">{row.nodeId}</span> : null}
-            {row.iteration > 0 || row.attempt > 1 ? (
+            {nodeId ? <span className="gw-event-row-chip">{nodeId}</span> : null}
+            {iteration > 0 || attempt > 1 ? (
               <span className="gw-event-row-meta">
-                {row.iteration > 0 ? `iter ${row.iteration}` : ""}
-                {row.iteration > 0 && row.attempt > 1 ? " · " : ""}
-                {row.attempt > 1 ? `try ${row.attempt}` : ""}
+                {iteration > 0 ? `iter ${iteration}` : ""}
+                {iteration > 0 && attempt > 1 ? " · " : ""}
+                {attempt > 1 ? `try ${attempt}` : ""}
               </span>
             ) : null}
-            <span className="gw-event-row-summary">{row.summary}</span>
+            <span className="gw-event-row-summary">{summary}</span>
           </button>
         ) : (
           <div className="gw-event-row-main" data-selectable="false">
             <span className="gw-event-row-seq">{seq}</span>
-            <Badge variant={TONE_BADGE_VARIANT[row.tone]} style={{ flexShrink: 0 }}>
+            <Badge variant={TONE_BADGE_VARIANT[tone]} style={{ flexShrink: 0 }}>
               {badgeLabel}
             </Badge>
-            {row.nodeId ? <span className="gw-event-row-chip">{row.nodeId}</span> : null}
-            {row.iteration > 0 || row.attempt > 1 ? (
+            {nodeId ? <span className="gw-event-row-chip">{nodeId}</span> : null}
+            {iteration > 0 || attempt > 1 ? (
               <span className="gw-event-row-meta">
-                {row.iteration > 0 ? `iter ${row.iteration}` : ""}
-                {row.iteration > 0 && row.attempt > 1 ? " · " : ""}
-                {row.attempt > 1 ? `try ${row.attempt}` : ""}
+                {iteration > 0 ? `iter ${iteration}` : ""}
+                {iteration > 0 && attempt > 1 ? " · " : ""}
+                {attempt > 1 ? `try ${attempt}` : ""}
               </span>
             ) : null}
-            <span className="gw-event-row-summary">{row.summary}</span>
+            <span className="gw-event-row-summary">{summary}</span>
           </div>
         )}
         <button
@@ -321,10 +418,25 @@ function EventRow({
       </div>
       {expanded ? (
         <pre className="gw-event-row-json" data-slot="event-json">
-          {safeJson(row.frame.payload)}
+          {safeJson(payload)}
         </pre>
       ) : null}
     </div>
+  );
+}, eventRowPropsEqual);
+
+function eventRowPropsEqual(previous: EventRowProps, next: EventRowProps): boolean {
+  return (
+    previous.seq === next.seq &&
+    previous.event === next.event &&
+    previous.kind === next.kind &&
+    previous.tone === next.tone &&
+    previous.nodeId === next.nodeId &&
+    previous.iteration === next.iteration &&
+    previous.attempt === next.attempt &&
+    previous.count === next.count &&
+    previous.selected === next.selected &&
+    previous.onSelectNode === next.onSelectNode
   );
 }
 
@@ -417,7 +529,15 @@ export function RunEventLog({
           {rows.map((row) => (
             <EventRow
               key={row.key}
-              row={row}
+              seq={row.frame.seq}
+              event={row.frame.event}
+              payload={row.frame.payload}
+              kind={row.kind}
+              tone={row.tone}
+              nodeId={row.nodeId}
+              iteration={row.iteration}
+              attempt={row.attempt}
+              count={row.count}
               selected={Boolean(row.nodeId) && row.nodeId === selectedNodeId}
               onSelectNode={onSelectNode}
             />
