@@ -98,25 +98,16 @@ async function renderExampleOnce(projectDir, workerDir, example) {
       },
       stdout: "pipe",
       stderr: "pipe",
+      timeout: GRAPH_PROCESS_TIMEOUT_MS,
+      killSignal: "SIGKILL",
     },
   );
-  let timedOut = false;
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    child.kill();
-  }, GRAPH_PROCESS_TIMEOUT_MS);
-  let exitCode;
-  let stdout;
-  let stderr;
-  try {
-    [exitCode, stdout, stderr] = await Promise.all([
-      child.exited,
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-    ]);
-  } finally {
-    clearTimeout(timeout);
-  }
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  const timedOut = child.signalCode === "SIGKILL";
   return {
     error: timedOut
       ? new Error(`graph subprocess timed out after ${GRAPH_PROCESS_TIMEOUT_MS}ms`)
