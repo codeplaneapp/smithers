@@ -282,7 +282,7 @@ export async function runAgentPromise(effect) {
   if (Exit.isSuccess(exit)) {
     return exit.value;
   }
-  const failure = Cause.failureOption(exit.cause);
+  const failure = Cause.findErrorOption(exit.cause);
   if (failure._tag === "Some") {
     throw failure.value;
   }
@@ -307,7 +307,7 @@ function taggedMetric(metric, tags) {
   let tagged = metric;
   for (const [key, value] of Object.entries(tags)) {
     if (!value) continue;
-    tagged = Metric.tagged(tagged, key, value);
+    tagged = Metric.withAttributes(tagged, { [key]: String(value) });
   }
   return tagged;
 }
@@ -398,13 +398,10 @@ function recordAgentTokenMetrics(tags, totals) {
   const pushMetric = (kind, value) => {
     if (!value || value <= 0) return;
     effects.push(
-      Metric.incrementBy(
-        taggedMetric(agentTokensTotal, {
+      Metric.update(taggedMetric(agentTokensTotal, {
           ...tags,
           kind,
-        }),
-        value,
-      ),
+        }), value),
     );
   };
   pushMetric("input", totals.inputTokens);
@@ -967,15 +964,13 @@ export class BaseCliAgent {
     const classifyQuota = (message, command) => classifyQuotaError(message, command, agentCtx);
     const program = Effect.all(
       [
-        Metric.increment(taggedMetric(agentInvocationsTotal, metricTags)),
+        Metric.update(taggedMetric(agentInvocationsTotal, metricTags), 1),
         ...(retryHint.isRetry
           ? [
-              Metric.increment(
-                taggedMetric(agentRetriesTotal, {
+              Metric.update(taggedMetric(agentRetriesTotal, {
                   ...metricTags,
                   reason: retryHint.reason ?? "explicit",
-                }),
-              ),
+                }), 1),
             ]
           : []),
         Effect.logDebug("agent invocation started").pipe(
@@ -1125,7 +1120,7 @@ export class BaseCliAgent {
               ? yield* Effect.tryPromise({
                   try: () => fs.readFile(commandSpec.outputFile, "utf8"),
                   catch: (cause) => toSmithersError(cause, "read output file"),
-                }).pipe(Effect.catchAll(() => Effect.succeed(null)))
+                }).pipe(Effect.catch(() => Effect.succeed(null)))
               : null;
             const stdout = typeof outputFileText === "string" ? outputFileText : result.stdout;
             if (result.exitCode && result.exitCode !== 0) {
@@ -1293,7 +1288,7 @@ export class BaseCliAgent {
         Effect.tapError((err) =>
           Effect.all(
             [
-              Metric.increment(taggedMetric(agentErrorsTotal, metricTags)),
+              Metric.update(taggedMetric(agentErrorsTotal, metricTags), 1),
               Effect.logWarning("agent invocation failed").pipe(
                 Effect.annotateLogs({
                   ...commandLogAnnotations,

@@ -1,5 +1,5 @@
 import { Effect, Metric } from "effect";
-import * as BunContext from "@effect/platform-bun/BunContext";
+import * as BunContext from "@effect/platform-bun/BunServices";
 import { getJjPointer, revertToJjPointer } from "@smithers-orchestrator/vcs/jj";
 import {
   rewindTotal,
@@ -1433,7 +1433,7 @@ export async function jumpToFrame(input) {
     try {
       await Effect.runPromise(
         Effect.all([
-          Metric.increment(Metric.tagged(rewindTotal, "result", metricResultTag)),
+          Metric.update(Metric.withAttributes(rewindTotal, { ["result"]: String(metricResultTag) }), 1),
           Metric.update(rewindDurationMs, durationMs),
         ]),
       );
@@ -1446,7 +1446,7 @@ export async function jumpToFrame(input) {
         );
       }
       if (auditResult === "partial") {
-        await Effect.runPromise(Metric.increment(rewindRollbackTotal));
+        await Effect.runPromise(Metric.update(rewindRollbackTotal, 1));
       }
     } catch {
       // metrics failures must never fail the RPC

@@ -1,5 +1,5 @@
 import { renderPrometheusSamples } from "../_corePrometheus.js";
-import { Effect, Metric, MetricState } from "effect";
+import { Effect, Metric } from "effect";
 import { toPrometheusMetricName } from "./toPrometheusMetricName.js";
 import { durationBuckets } from "./_buckets.js";
 import { smithersMetricCatalogByName } from "./smithersMetricCatalogByName.js";
@@ -7,6 +7,7 @@ import { smithersMetricCatalogByPrometheusName } from "./smithersMetricCatalogBy
 import { trackEvent } from "./trackEvent.js";
 import { updateProcessMetrics } from "./updateProcessMetrics.js";
 import { updateAsyncExternalWaitPending } from "./updateAsyncExternalWaitPending.js";
+import { incrementGauge } from "./_incrementGauge.js";
 /** @typedef {import("./SmithersMetricDefinition.ts").SmithersMetricDefinition} SmithersMetricDefinition */
 /** @typedef {import("../_coreMetricsShape.ts").MetricsServiceShape} MetricsServiceShape */
 /** @typedef {import("../_corePrometheusShape.ts").MetricLabels} MetricLabels */
@@ -31,7 +32,7 @@ function resolveMetricDefinition(name) {
 function tagMetricWithLabels(metric, labels) {
   let tagged = metric;
   for (const [key, value] of Object.entries(labels ?? {})) {
-    tagged = Metric.tagged(tagged, key, String(value));
+    tagged = Metric.withAttributes(tagged, { [key]: String(value) });
   }
   return tagged;
 }
@@ -63,7 +64,10 @@ function gaugeMetric(name, labels) {
  */
 function histogramMetric(name, labels) {
   const definition = resolveMetricDefinition(name);
-  const metric = definition?.type === "histogram" ? definition.metric : Metric.histogram(name, durationBuckets);
+  const metric =
+    definition?.type === "histogram"
+      ? definition.metric
+      : Metric.histogram(name, { boundaries: durationBuckets });
   return tagMetricWithLabels(metric, labels);
 }
 /**
@@ -75,14 +79,13 @@ function metricValueAsNumber(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 /**
- * @param {any} metricKey
+ * @param {Record<string, string> | undefined} attributes
  * @returns {MetricLabels}
  */
-function metricsServiceLabels(metricKey) {
-  const tags = Array.isArray(metricKey?.tags) ? metricKey.tags : [];
+function metricsServiceLabels(attributes) {
   return Object.freeze(
     Object.fromEntries(
-      tags.map((tag) => [String(tag.key), String(tag.value)]).sort(([left], [right]) => left.localeCompare(right)),
+      Object.entries(attributes ?? {}).sort(([left], [right]) => left.localeCompare(right)),
     ),
   );
 }
@@ -99,13 +102,12 @@ function metricsServiceSnapshotKey(name, labels) {
  */
 function metricsServicePrometheusSamples() {
   const samples = [];
-  for (const snapshot of Metric.unsafeSnapshot()) {
-    const metricKey = snapshot.metricKey;
-    const metricState = snapshot.metricState;
-    const name = String(metricKey.name ?? "");
+  for (const snapshot of Effect.runSync(Metric.snapshot)) {
+    const metricState = snapshot.state;
+    const name = snapshot.id;
     if (!name) continue;
-    const labels = metricsServiceLabels(metricKey);
-    if (MetricState.isCounterState(metricState)) {
+    const labels = metricsServiceLabels(snapshot.attributes);
+    if (snapshot.type === "Counter") {
       samples.push({
         name,
         type: "counter",
@@ -114,7 +116,7 @@ function metricsServicePrometheusSamples() {
       });
       continue;
     }
-    if (MetricState.isGaugeState(metricState)) {
+    if (snapshot.type === "Gauge") {
       samples.push({
         name,
         type: "gauge",
@@ -123,7 +125,7 @@ function metricsServicePrometheusSamples() {
       });
       continue;
     }
-    if (MetricState.isHistogramState(metricState)) {
+    if (snapshot.type === "Histogram") {
       samples.push({
         name,
         type: "histogram",
@@ -163,9 +165,19 @@ function metricsServiceSnapshot() {
 }
 /** @type {MetricsServiceShape} */
 export const metricsServiceAdapter = {
-  increment: (name, labels) => Metric.incrementBy(counterOrGaugeMetric(name, labels), 1),
-  incrementBy: (name, value, labels) => Metric.incrementBy(counterOrGaugeMetric(name, labels), value),
-  gauge: (name, value, labels) => Metric.set(gaugeMetric(name, labels), value),
+  increment: (name, labels) => {
+    const metric = counterOrGaugeMetric(name, labels);
+    return resolveMetricDefinition(name)?.type === "gauge"
+      ? incrementGauge(metric, 1)
+      : Metric.update(metric, 1);
+  },
+  incrementBy: (name, value, labels) => {
+    const metric = counterOrGaugeMetric(name, labels);
+    return resolveMetricDefinition(name)?.type === "gauge"
+      ? incrementGauge(metric, value)
+      : Metric.update(metric, value);
+  },
+  gauge: (name, value, labels) => Metric.update(gaugeMetric(name, labels), value),
   histogram: (name, value, labels) => Metric.update(histogramMetric(name, labels), value),
   recordEvent: (event) => trackEvent(event),
   updateProcessMetrics: () => updateProcessMetrics(),

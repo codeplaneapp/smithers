@@ -1,5 +1,5 @@
 import { getTableName } from "drizzle-orm";
-import { Effect, Metric, MetricBoundaries } from "effect";
+import { Effect, Metric } from "effect";
 import { getAgentOutputSchema, selectOutputRow, stripAutoColumns } from "@smithers-orchestrator/db/output";
 import { buildOutputSchemaDescriptor } from "@smithers-orchestrator/db/output-schema-descriptor";
 import { runPromise } from "../smithersRuntime.js";
@@ -13,12 +13,12 @@ import { RUN_ID_PATTERN } from "./RUN_ID_PATTERN.js";
 const NODE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,128}$/;
 const INT32_MAX = 2_147_483_647;
 
-const fastBucketsMs = MetricBoundaries.exponential({ start: 1, factor: 2, count: 12 });
-const sizeBuckets = MetricBoundaries.exponential({ start: 100, factor: 2, count: 16 });
+const fastBucketsMs = Metric.exponentialBoundaries({ start: 1, factor: 2, count: 12 });
+const sizeBuckets = Metric.exponentialBoundaries({ start: 100, factor: 2, count: 16 });
 
 const nodeOutputRequestTotal = Metric.counter("smithers_node_output_request_total");
-const nodeOutputBytes = Metric.histogram("smithers_node_output_bytes", sizeBuckets);
-const nodeOutputDurationMs = Metric.histogram("smithers_node_output_duration_ms", fastBucketsMs);
+const nodeOutputBytes = Metric.histogram("smithers_node_output_bytes", { boundaries: sizeBuckets });
+const nodeOutputDurationMs = Metric.histogram("smithers_node_output_duration_ms", { boundaries: fastBucketsMs });
 const nodeOutputSchemaConversionErrorTotal = Metric.counter("smithers_node_output_schema_conversion_error_total");
 
 /**
@@ -165,7 +165,7 @@ export async function getNodeOutputRoute(params) {
           emitEffect(
             Effect.all(
               [
-                Metric.increment(nodeOutputSchemaConversionErrorTotal),
+                Metric.update(nodeOutputSchemaConversionErrorTotal, 1),
                 Effect.logWarning("getNodeOutput schema conversion warning").pipe(
                   Effect.annotateLogs({
                     runId,
@@ -324,7 +324,7 @@ export async function getNodeOutputRoute(params) {
       emitEffect(
         Effect.all(
           [
-            Metric.increment(Metric.tagged(nodeOutputRequestTotal, "status", statusForMetrics)),
+            Metric.update(Metric.withAttributes(nodeOutputRequestTotal, { ["status"]: String(statusForMetrics) }), 1),
             Metric.update(nodeOutputBytes, rowBytes),
             Metric.update(nodeOutputDurationMs, durationMs),
             Effect.logInfo("getNodeOutput completed").pipe(

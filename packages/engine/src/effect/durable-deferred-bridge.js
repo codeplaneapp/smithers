@@ -3,7 +3,7 @@
 /** @typedef {import("./WaitForEventDurableDeferredResolution.ts").WaitForEventDurableDeferredResolution} WaitForEventDurableDeferredResolution */
 // @smithers-type-exports-end
 
-import * as DurableDeferred from "@effect/workflow/DurableDeferred";
+import * as DurableDeferred from "effect/unstable/workflow/DurableDeferred";
 import { resolve as resolvePath } from "node:path";
 import { Effect, Exit, Schema } from "effect";
 import { updateAsyncExternalWaitPending } from "@smithers-orchestrator/observability/metrics";

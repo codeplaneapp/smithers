@@ -746,7 +746,7 @@ function taggedMetric(metric, labels = {}) {
     if (value === undefined || value === null) {
       continue;
     }
-    tagged = Metric.tagged(tagged, key, String(value));
+    tagged = Metric.withAttributes(tagged, { [key]: String(String(value)) });
   }
   return tagged;
 }
@@ -756,7 +756,7 @@ function taggedMetric(metric, labels = {}) {
  * @param {GatewayMetricLabels} [labels]
  */
 function incrementMetric(metric, labels = {}) {
-  return Metric.increment(taggedMetric(metric, labels));
+  return Metric.update(taggedMetric(metric, labels), 1);
 }
 /**
  * @template M
@@ -3181,7 +3181,7 @@ a { color: var(--brand); }</style>
    * @param {"ok" | "error"} result
    */
   recordDevToolsSubscribeAttempt(result) {
-    emitGatewayEffect(Metric.increment(taggedMetric(devtoolsSubscribeTotal, { result })));
+    emitGatewayEffect(Metric.update(taggedMetric(devtoolsSubscribeTotal, { result }), 1));
   }
   /**
    * Push the absolute active-subscriber count to the Prometheus gauge. The
@@ -3644,7 +3644,7 @@ a { color: var(--brand); }</style>
     }
     stream.backpressureDisconnected = true;
     stream.outboundQueue.length = 0;
-    emitGatewayEffect(Metric.increment(gatewayRunEventBackpressureDisconnectTotal));
+    emitGatewayEffect(Metric.update(gatewayRunEventBackpressureDisconnectTotal, 1));
     emitGatewayLog(
       "warning",
       "run event stream disconnected for backpressure",
@@ -7419,7 +7419,7 @@ a { color: var(--brand); }</style>
     writer.disconnected = true;
     writer.queue.length = 0;
     writer.queuedBytes = 0;
-    emitGatewayEffect(Metric.increment(gatewayRunEventBackpressureDisconnectTotal));
+    emitGatewayEffect(Metric.update(gatewayRunEventBackpressureDisconnectTotal, 1));
     emitGatewayLog(
       "warning",
       "Gateway connection disconnected for event backpressure",
@@ -9386,7 +9386,7 @@ a { color: var(--brand); }</style>
                   emitGatewayEffect(
                     Effect.all(
                       [
-                        Metric.increment(taggedMetric(devtoolsEventTotal, { kind })),
+                        Metric.update(taggedMetric(devtoolsEventTotal, { kind }), 1),
                         Metric.update(devtoolsEventBytes, stats.bytes),
                         ...(kind === "snapshot"
                           ? [Metric.update(devtoolsSnapshotBuildMs, stats.durationMs)]
@@ -9398,7 +9398,7 @@ a { color: var(--brand); }</style>
                 },
                 onClose: ({ errorCode }) => {
                   if (errorCode === "BackpressureDisconnect") {
-                    emitGatewayEffect(Metric.increment(devtoolsBackpressureDisconnectTotal));
+                    emitGatewayEffect(Metric.update(devtoolsBackpressureDisconnectTotal, 1));
                   }
                 },
               })) {
@@ -9412,7 +9412,7 @@ a { color: var(--brand); }</style>
             } catch (error) {
               const code = error?.code ?? "SERVER_ERROR";
               if (code === "BackpressureDisconnect") {
-                emitGatewayEffect(Metric.increment(devtoolsBackpressureDisconnectTotal));
+                emitGatewayEffect(Metric.update(devtoolsBackpressureDisconnectTotal, 1));
               }
               emitGatewayLog(
                 "error",

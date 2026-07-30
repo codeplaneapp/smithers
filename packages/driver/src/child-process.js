@@ -356,12 +356,12 @@ export function spawnCaptureEffect(command, args, options) {
               code: "PROCESS_ABORTED",
               details: errorDetails,
             }),
-        }).pipe(Effect.catchAll(() => ignoreSyncError("kill fallback", () => child.kill("SIGKILL"))));
+        }).pipe(Effect.catch(() => ignoreSyncError("kill fallback", () => child.kill("SIGKILL"))));
       }
     });
   }).pipe(
     Effect.tap(({ truncationCount }) =>
-      truncationCount > 0 ? Metric.incrementBy(toolOutputTruncatedTotal, truncationCount) : Effect.void,
+      truncationCount > 0 ? Metric.update(toolOutputTruncatedTotal, truncationCount) : Effect.void,
     ),
     Effect.map(({ result }) => result),
     Effect.annotateLogs(logAnnotations),

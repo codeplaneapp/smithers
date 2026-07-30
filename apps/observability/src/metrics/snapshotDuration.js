@@ -1,9 +1,9 @@
-import { Metric, MetricBoundaries } from "effect";
+import { Metric } from "effect";
 
-const snapshotBuckets = MetricBoundaries.exponential({
+const snapshotBuckets = Metric.exponentialBoundaries({
   start: 1,
   factor: 2,
   count: 12,
 }); // ~1ms to ~2s
 
-export const snapshotDuration = Metric.histogram("smithers.snapshot.duration_ms", snapshotBuckets);
+export const snapshotDuration = Metric.histogram("smithers.snapshot.duration_ms", { boundaries: snapshotBuckets });

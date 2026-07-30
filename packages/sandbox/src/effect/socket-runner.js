@@ -1,4 +1,4 @@
-import { SocketRunner } from "@effect/cluster";
+import { SocketRunner } from "effect/unstable/cluster";
 import { mkdir, cp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";

@@ -11,9 +11,9 @@ export function updateProcessMetrics() {
   const mem = process.memoryUsage();
   return Effect.all(
     [
-      Metric.set(processUptimeSeconds, uptimeS),
-      Metric.set(processMemoryRssBytes, mem.rss),
-      Metric.set(processHeapUsedBytes, mem.heapUsed),
+      Metric.update(processUptimeSeconds, uptimeS),
+      Metric.update(processMemoryRssBytes, mem.rss),
+      Metric.update(processHeapUsedBytes, mem.heapUsed),
     ],
     { discard: true },
   );

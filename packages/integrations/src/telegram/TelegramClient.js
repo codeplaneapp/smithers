@@ -109,7 +109,7 @@ function isParseEntityError(error) {
  * @type {Context.Tag<TelegramClientService, TelegramClientService>}
  */
 export const TelegramClient = /** @type {Context.Tag<TelegramClientService, TelegramClientService>} */ (
-  Context.GenericTag("@smithers-orchestrator/integrations/TelegramClient")
+  Context.Service("@smithers-orchestrator/integrations/TelegramClient")
 );
 
 /**
@@ -129,11 +129,13 @@ export function makeTelegramClient(config) {
   const maxRateLimitRetries = config.maxRateLimitRetries ?? DEFAULT_MAX_RATE_LIMIT_RETRIES;
   const maxRetryAfterSeconds = config.maxRetryAfterSeconds ?? DEFAULT_MAX_RETRY_AFTER_SECONDS;
   // Retry only 429s, waiting the (capped) server-supplied retry_after.
-  const rateLimitSchedule = Schedule.recurWhile(
-    /** @param {unknown} error */ (error) => isTelegramApiError(error) && error.errorCode === 429,
-  ).pipe(
+  const rateLimitSchedule = Schedule.forever.pipe(
+    Schedule.while(
+      /** @param {{ input: unknown }} metadata */ ({ input }) =>
+        isTelegramApiError(input) && input.errorCode === 429,
+    ),
     Schedule.addDelay(
-      /** @param {unknown} error */ (error) => {
+      /** @param {{ input: unknown }} metadata */ ({ input: error }) => {
         const seconds =
           isTelegramApiError(error) && typeof error.retryAfterSeconds === "number"
             ? Math.min(Math.max(error.retryAfterSeconds, 0), maxRetryAfterSeconds)
@@ -143,10 +145,10 @@ export function makeTelegramClient(config) {
           { retryAfterSeconds: seconds },
           "integrations:telegram",
         );
-        return `${seconds} seconds`;
+        return Effect.succeed(`${seconds} seconds`);
       },
     ),
-    Schedule.intersect(Schedule.recurs(maxRateLimitRetries)),
+    Schedule.upTo({ times: maxRateLimitRetries }),
   );
   /**
    * @param {string} method
@@ -235,7 +237,7 @@ export function makeTelegramClient(config) {
     }
     return call("sendMessage", { ...base, text: formatted, parse_mode: parseMode }).pipe(
       Effect.map((result) => ({ result, usedPlainTextFallback: false })),
-      Effect.catchAll((error) => {
+      Effect.catch((error) => {
         if (!isParseEntityError(error)) {
           return Effect.fail(error);
         }
@@ -270,7 +272,7 @@ export function makeTelegramClient(config) {
           chat_id: chatId,
           action: "typing",
           ...(options.messageThreadId != null ? { message_thread_id: options.messageThreadId } : {}),
-        }).pipe(Effect.catchAll(() => Effect.void));
+        }).pipe(Effect.catch(() => Effect.void));
       }
       /** @type {number[]} */
       const messageIds = [];
@@ -322,7 +324,7 @@ export function makeTelegramClient(config) {
       return call("editMessageText", { ...base, text: plain });
     }
     return call("editMessageText", { ...base, text: formatted, parse_mode: parseMode }).pipe(
-      Effect.catchAll((error) => {
+      Effect.catch((error) => {
         if (!isParseEntityError(error)) {
           return Effect.fail(error);
         }

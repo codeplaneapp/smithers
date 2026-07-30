@@ -1,3 +1,3 @@
 import { Metric } from "effect";
 import { durationBuckets } from "./_buckets.js";
-export const supervisorResumeLag = Metric.histogram("smithers.supervisor.resume_lag_ms", durationBuckets);
+export const supervisorResumeLag = Metric.histogram("smithers.supervisor.resume_lag_ms", { boundaries: durationBuckets });

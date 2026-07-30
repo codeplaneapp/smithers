@@ -9,8 +9,8 @@
 /** @typedef {import("./WorkerTaskKind.ts").WorkerTaskKind} WorkerTaskKind */
 // @smithers-type-exports-end
 
-import * as Entity from "@effect/cluster/Entity";
-import * as Rpc from "@effect/rpc/Rpc";
+import * as Entity from "effect/unstable/cluster/Entity";
+import * as Rpc from "effect/unstable/rpc/Rpc";
 import { Schema } from "effect";
 /** @typedef {import("@smithers-orchestrator/graph/TaskDescriptor").TaskDescriptor} _TaskDescriptor */
 
@@ -27,10 +27,7 @@ export const WorkerTask = Schema.Struct({
   taskKind: WorkerTaskKind,
   dispatchKind: WorkerDispatchKind,
 });
-const WorkerErrorDetails = Schema.Record({
-  key: Schema.String,
-  value: Schema.Unknown,
-});
+const WorkerErrorDetails = Schema.Record(Schema.String, Schema.Unknown);
 const TaskAbortedError = Schema.Struct({
   _tag: Schema.Literal("TaskAborted"),
   message: Schema.String,
@@ -80,7 +77,7 @@ const WorkflowFailedError = Schema.Struct({
   details: Schema.optional(WorkerErrorDetails),
   status: Schema.optional(Schema.Number),
 });
-export const TaggedWorkerError = Schema.Union(
+export const TaggedWorkerError = Schema.Union([
   TaskAbortedError,
   TaskTimeoutError,
   TaskHeartbeatTimeoutError,
@@ -89,13 +86,13 @@ export const TaggedWorkerError = Schema.Union(
   DbWriteFailedError,
   AgentCliError,
   WorkflowFailedError,
-);
+]);
 const UnknownWorkerError = Schema.Struct({
   _tag: Schema.Literal("UnknownWorkerError"),
   errorId: Schema.String,
   message: Schema.String,
 });
-export const WorkerTaskError = Schema.Union(TaggedWorkerError, UnknownWorkerError);
+export const WorkerTaskError = Schema.Union([TaggedWorkerError, UnknownWorkerError]);
 const TaskSuccess = Schema.Struct({
   _tag: Schema.Literal("Success"),
   executionId: Schema.String,
@@ -106,7 +103,7 @@ const TaskFailure = Schema.Struct({
   executionId: Schema.String,
   error: WorkerTaskError,
 });
-export const TaskResult = Schema.Union(TaskSuccess, TaskFailure);
+export const TaskResult = Schema.Union([TaskSuccess, TaskFailure]);
 export const TaskWorkerEntity = Entity.make("TaskWorker", [
   Rpc.make("execute", {
     payload: WorkerTask,

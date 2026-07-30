@@ -22,7 +22,7 @@ import * as drizzle_orm_sqlite_core from 'drizzle-orm/sqlite-core';
 import { SQLiteTable as SQLiteTable$1 } from 'drizzle-orm/sqlite-core';
 import * as drizzle_orm_bun_sqlite from 'drizzle-orm/bun-sqlite';
 import { BunSQLiteDatabase as BunSQLiteDatabase$2 } from 'drizzle-orm/bun-sqlite';
-import * as Activity from '@effect/workflow/Activity';
+import * as Activity from 'effect/unstable/workflow/Activity';
 import { TaskAborted } from '@smithers-orchestrator/errors/TaskAborted';
 import * as _smithers_orchestrator_scheduler_CachePolicy from '@smithers-orchestrator/scheduler/CachePolicy';
 import { CachePolicy } from '@smithers-orchestrator/scheduler/CachePolicy';
@@ -32,8 +32,8 @@ import * as _smithers_orchestrator_driver_RunOptions from '@smithers-orchestrato
 import * as _smithers_orchestrator_graph_GraphSnapshot from '@smithers-orchestrator/graph/GraphSnapshot';
 import { SmithersCtx } from '@smithers-orchestrator/driver/SmithersCtx';
 import React from 'react';
-import * as Rpc from '@effect/rpc/Rpc';
-import * as RpcGroup from '@effect/rpc/RpcGroup';
+import * as Rpc from 'effect/unstable/rpc/Rpc';
+import * as RpcGroup from 'effect/unstable/rpc/RpcGroup';
 import * as zod from 'zod';
 import { z } from 'zod';
 import * as _smithers_orchestrator_graph_ProofBinding from '@smithers-orchestrator/graph/ProofBinding';
@@ -41,9 +41,9 @@ import * as _smithers_orchestrator_graph_TaskSideEffect from '@smithers-orchestr
 import * as _smithers_orchestrator_graph_types from '@smithers-orchestrator/graph/types';
 import * as _smithers_orchestrator_errors_toSmithersError from '@smithers-orchestrator/errors/toSmithersError';
 export { SqlMessageStorage, ensureSqlMessageStorage, ensureSqlMessageStorageEffect, getSqlMessageStorage } from '@smithers-orchestrator/db/sql-message-storage';
-import * as Entity from '@effect/cluster/Entity';
-import * as DurableDeferred from '@effect/workflow/DurableDeferred';
-import * as WorkflowEngine from '@effect/workflow/WorkflowEngine';
+import * as Entity from 'effect/unstable/cluster/Entity';
+import * as DurableDeferred from 'effect/unstable/workflow/DurableDeferred';
+import * as WorkflowEngine from 'effect/unstable/workflow/WorkflowEngine';
 
 /**
  * Reference to a workflow module file produced at runtime (for example by an

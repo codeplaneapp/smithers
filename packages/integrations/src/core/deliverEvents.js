@@ -10,7 +10,7 @@ import { IntegrationError } from "./IntegrationError.js";
 
 // Per-run delivery retry: transient db/signal failures back off exponentially,
 // bounded so one poisoned run cannot stall the source stream.
-const SIGNAL_RETRY_SCHEDULE = Schedule.intersect(Schedule.exponential("200 millis"), Schedule.recurs(3));
+const SIGNAL_RETRY_SCHEDULE = Schedule.exponential("200 millis").pipe(Schedule.upTo({ times: 3 }));
 const CLAIM_LEASE_DURATION_MS = 30_000;
 const CLAIM_HEARTBEAT_SCHEDULE = Schedule.spaced("10 seconds");
 
@@ -106,7 +106,7 @@ export function deliverEvent(adapter, event) {
           ).pipe(
             Effect.retry(SIGNAL_RETRY_SCHEDULE),
             Effect.map(() => runId),
-            Effect.catchAll((error) =>
+            Effect.catch((error) =>
               Effect.sync(() => {
                 logError(
                   "integration signal delivery failed",
@@ -170,7 +170,7 @@ export function deliverEvent(adapter, event) {
         Exit.isSuccess(exit)
           ? Effect.void
           : adapter.releaseIntegrationDeliveryClaim(event.source, event.dedupeKey, ownerToken).pipe(
-              Effect.catchAll((error) =>
+              Effect.catch((error) =>
                 Effect.sync(() => {
                   logError(
                     "integration delivery claim release failed",
@@ -212,7 +212,7 @@ export function deliverEvents(adapter, source) {
   return Stream.runForEach(source.events, (item) => {
     if (!(item && "_tag" in item && item._tag === "EventBatch")) {
       return deliverEvent(adapter, item).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           Effect.sync(() => {
             logError(
               "integration event delivery failed",

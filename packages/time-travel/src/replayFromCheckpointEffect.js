@@ -57,7 +57,7 @@ export function replayFromCheckpoint(adapter, params) {
       vcsPointer = vcsResult.vcsPointer;
       vcsError = vcsResult.error;
     }
-    yield* Metric.increment(replaysStarted);
+    yield* Metric.update(replaysStarted, 1);
     yield* Effect.logInfo("Replay started").pipe(
       Effect.annotateLogs({
         parentRunId,

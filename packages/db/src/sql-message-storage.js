@@ -1,8 +1,8 @@
-import * as Reactivity from "@effect/experimental/Reactivity";
-import * as SqlClient from "@effect/sql/SqlClient";
-import { SqlError } from "@effect/sql/SqlError";
-import * as Statement from "@effect/sql/Statement";
-import { Context, Effect, Layer, ManagedRuntime, Scope, Stream } from "effect";
+import * as Reactivity from "effect/unstable/reactivity/Reactivity";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { SqlError as EffectSqlError, UnknownError } from "effect/unstable/sql/SqlError";
+import * as Statement from "effect/unstable/sql/Statement";
+import { Effect, Layer, ManagedRuntime, Scope, Semaphore, Stream } from "effect";
 import { POSTGRES, SQLITE, jsonExtractText, translatePlaceholders } from "./dialect.js";
 import {
   runSmithersSchemaMigrations,
@@ -13,6 +13,12 @@ import { camelToSnake } from "./utils/camelToSnake.js";
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase} BunSQLiteDatabase */
 /** @typedef {import("bun:sqlite").Database} Database */
 /** @typedef {import("./SqlMessageStorageEventHistoryQuery.ts").SqlMessageStorageEventHistoryQuery} SqlMessageStorageEventHistoryQuery */
+
+class SqlError extends EffectSqlError {
+  constructor(options) {
+    super({ reason: new UnknownError(options) });
+  }
+}
 /**
  * @typedef {string | number | bigint | boolean | Uint8Array | null | undefined} SqliteParam
  */
@@ -715,16 +721,16 @@ function createConnection(sqlite) {
    * @param {(<A extends object>(rows: ReadonlyArray<A>) => ReadonlyArray<A>) | undefined} [transformRows]
    */
   const execute = (statement, params, transformRows) =>
-    Effect.withFiberRuntime((fiber) => {
-      const useSafeIntegers = Context.get(fiber.currentContext, SqlClient.SafeIntegers);
+    Effect.gen(function* () {
+      const useSafeIntegers = yield* SqlClient.SafeIntegers;
       try {
         const query = sqlite.query(statement);
         // @ts-ignore bun-types missing safeIntegers()
         query.safeIntegers(useSafeIntegers);
         const rows = query.all(...params) ?? [];
-        return Effect.succeed(transformRows ? transformRows(rows) : rows);
+        return transformRows ? transformRows(rows) : rows;
       } catch (cause) {
-        return Effect.fail(
+        return yield* Effect.fail(
           new SqlError({
             cause,
             message: formatSqlErrorMessage("SQLite", "statement", statement, cause),
@@ -736,15 +742,15 @@ function createConnection(sqlite) {
     execute: (statement, params, transformRows) => execute(statement, params, transformRows),
     executeRaw: (statement, params) => execute(statement, params, undefined),
     executeValues: (statement, params) =>
-      Effect.withFiberRuntime((fiber) => {
-        const useSafeIntegers = Context.get(fiber.currentContext, SqlClient.SafeIntegers);
+      Effect.gen(function* () {
+        const useSafeIntegers = yield* SqlClient.SafeIntegers;
         try {
           const query = sqlite.query(statement);
           // @ts-ignore bun-types missing safeIntegers()
           query.safeIntegers(useSafeIntegers);
-          return Effect.succeed(query.values(...params) ?? []);
+          return query.values(...params) ?? [];
         } catch (cause) {
-          return Effect.fail(
+          return yield* Effect.fail(
             new SqlError({
               cause,
               message: formatSqlErrorMessage("SQLite", "values statement", statement, cause),
@@ -770,14 +776,14 @@ function createConnection(sqlite) {
  * @param {string} dbSystemName OpenTelemetry `db.system.name` span attribute value.
  */
 function makeSqlClientLayer(connection, dbSystemName) {
-  return Layer.scoped(
+  return Layer.effect(
     SqlClient.SqlClient,
     Effect.gen(function* () {
-      const semaphore = yield* Effect.makeSemaphore(1);
+      const semaphore = yield* Semaphore.make(1);
       const acquirer = semaphore.withPermits(1)(Effect.succeed(connection));
       const transactionAcquirer = Effect.uninterruptibleMask((restore) =>
         Effect.as(
-          Effect.zipRight(
+          Effect.andThen(
             restore(semaphore.take(1)),
             Effect.tap(Effect.scope, (scope) => Scope.addFinalizer(scope, semaphore.release(1))),
           ),

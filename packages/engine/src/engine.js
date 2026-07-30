@@ -679,7 +679,7 @@ async function runPromisePreservingFailure(effect) {
   if (Exit.isSuccess(exit)) {
     return exit.value;
   }
-  const failure = Cause.failureOption(exit.cause);
+  const failure = Cause.findErrorOption(exit.cause);
   if (failure._tag === "Some") {
     throw failure.value;
   }
@@ -3666,7 +3666,7 @@ export function applyConcurrencyLimits(runnable, stateMap, maxConcurrency, allTa
     }
   }
   void Effect.runPromise(
-    Metric.set(schedulerConcurrencyUtilization, maxConcurrency > 0 ? inProgressTotal / maxConcurrency : 0),
+    Metric.update(schedulerConcurrencyUtilization, maxConcurrency > 0 ? inProgressTotal / maxConcurrency : 0),
   );
   const capacity = Math.max(0, maxConcurrency - inProgressTotal);
   const ordered = runnable.some((desc) => descriptorPriority(desc) !== 0)
@@ -4752,7 +4752,7 @@ async function legacyExecuteTask(
           const expired =
             cachePolicyTtlMs !== null && Number.isFinite(createdAtMs) && nowMs() - createdAtMs >= cachePolicyTtlMs;
           if (expired) {
-            void Effect.runPromise(Metric.increment(cacheMisses));
+            void Effect.runPromise(Metric.update(cacheMisses, 1));
             logInfo(
               "cache entry expired for task output",
               {
@@ -4790,7 +4790,7 @@ async function legacyExecuteTask(
             if (valid.ok) {
               payload = valid.data;
               cached = true;
-              void Effect.runPromise(Metric.increment(cacheHits));
+              void Effect.runPromise(Metric.update(cacheHits, 1));
               logInfo(
                 "cache hit for task output",
                 {
@@ -4803,7 +4803,7 @@ async function legacyExecuteTask(
                 "engine:task-cache",
               );
             } else {
-              void Effect.runPromise(Metric.increment(cacheMisses));
+              void Effect.runPromise(Metric.update(cacheMisses, 1));
             }
           }
         } else {
@@ -4821,7 +4821,7 @@ async function legacyExecuteTask(
               "engine:task-cache",
             );
           }
-          void Effect.runPromise(Metric.increment(cacheMisses));
+          void Effect.runPromise(Metric.update(cacheMisses, 1));
         }
       }
     }
@@ -9188,6 +9188,66 @@ async function runWorkflowBodyDriver(workflow, opts) {
     // retain their existing eager startup order.
     if (!opts.resume) await startRunRuntime();
     const runStartPerformanceMs = performance.now();
+<<<<<<< HEAD
+||||||| parent of c18f9da0d (⬆️ chore(effect): upgrade monorepo to Effect 4)
+    await cancelStaleAttempts(adapter, runId);
+    if (opts.resume) {
+      void Effect.runPromise(Metric.increment(runsResumedTotal));
+      const staleInProgress = await Effect.runPromise(adapter.listInProgressAttempts(runId));
+      const now = nowMs();
+      for (const attempt of staleInProgress) {
+        const existingNode = await Effect.runPromise(adapter.getNode(runId, attempt.nodeId, attempt.iteration));
+        await adapter.withTransaction(
+          "resume-cancel-stale-attempt",
+          Effect.gen(function* () {
+            yield* adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
+              state: "cancelled",
+              finishedAtMs: now,
+            });
+            yield* adapter.insertNode({
+              runId,
+              nodeId: attempt.nodeId,
+              iteration: attempt.iteration,
+              state: "pending",
+              lastAttempt: attempt.attempt,
+              updatedAtMs: now,
+              outputTable: existingNode?.outputTable ?? "",
+              label: existingNode?.label ?? null,
+            });
+          }),
+        );
+      }
+    }
+=======
+    await cancelStaleAttempts(adapter, runId);
+    if (opts.resume) {
+      void Effect.runPromise(Metric.update(runsResumedTotal, 1));
+      const staleInProgress = await Effect.runPromise(adapter.listInProgressAttempts(runId));
+      const now = nowMs();
+      for (const attempt of staleInProgress) {
+        const existingNode = await Effect.runPromise(adapter.getNode(runId, attempt.nodeId, attempt.iteration));
+        await adapter.withTransaction(
+          "resume-cancel-stale-attempt",
+          Effect.gen(function* () {
+            yield* adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
+              state: "cancelled",
+              finishedAtMs: now,
+            });
+            yield* adapter.insertNode({
+              runId,
+              nodeId: attempt.nodeId,
+              iteration: attempt.iteration,
+              state: "pending",
+              lastAttempt: attempt.attempt,
+              updatedAtMs: now,
+              outputTable: existingNode?.outputTable ?? "",
+              label: existingNode?.label ?? null,
+            });
+          }),
+        );
+      }
+    }
+>>>>>>> c18f9da0d (⬆️ chore(effect): upgrade monorepo to Effect 4)
     if (opts.resume) {
       const nodes = await Effect.runPromise(adapter.listNodes(runId));
       defaultIteration = nodes.reduce((max, node) => Math.max(max, node.iteration ?? 0), 0);

@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { revertToJjPointer } from "@smithers-orchestrator/vcs/jj";
-import * as BunContext from "@effect/platform-bun/BunContext";
+import * as BunContext from "@effect/platform-bun/BunServices";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { acquireRewindLock, resolveRewindLeaseRunId } from "./acquireRewindLock.js";
 import { writeRewindAuditRow } from "./writeRewindAuditRow.js";

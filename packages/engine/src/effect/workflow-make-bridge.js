@@ -1,5 +1,5 @@
-import * as Workflow from "@effect/workflow/Workflow";
-import * as WorkflowEngine from "@effect/workflow/WorkflowEngine";
+import * as Workflow from "effect/unstable/workflow/Workflow";
+import * as WorkflowEngine from "effect/unstable/workflow/WorkflowEngine";
 import { Cause, Effect, Exit, Layer, Schema, Scope } from "effect";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";

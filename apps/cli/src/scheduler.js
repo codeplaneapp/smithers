@@ -84,7 +84,7 @@ export function processCronEffect(adapter, job, now, launch = launchCronWorkflow
       catch: (cause) => toSmithersError(cause, `spawn cron workflow ${job.cronId}`),
     });
   }).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       Effect.gen(function* () {
         const errorMessage = formatError(error);
         yield* Effect.logWarning(`[smithers-cron] Error processing job ${job.cronId}: ${errorMessage}`);
@@ -94,7 +94,7 @@ export function processCronEffect(adapter, job, now, launch = launchCronWorkflow
         yield* adapter
           .updateCronRunTimeEffect(job.cronId, failedAtMs, failedAtMs + 60_000, errorMessage)
           .pipe(
-            Effect.catchAll((updateError) =>
+            Effect.catch((updateError) =>
               Effect.logWarning(
                 `[smithers-cron] Failed to record error for job ${job.cronId}: ${formatError(updateError)}`,
               ),
@@ -115,7 +115,7 @@ export function schedulerTickEffect(adapter, options = {}) {
       const crons = yield* adapter
         .listCronsEffect(true)
         .pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.logWarning(`[smithers-cron] Tick failed: ${formatError(error)}`).pipe(Effect.as([])),
           ),
         );

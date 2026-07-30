@@ -624,7 +624,7 @@ export function executeToolEffect(operation, args, baseUrl, options, abortSignal
   return Effect.suspend(() => {
     const started = nowMs();
     return Effect.gen(function* () {
-      yield* Metric.increment(openApiToolCallsTotal);
+      yield* Metric.update(openApiToolCallsTotal, 1);
       return yield* Effect.tryPromise({
         // The `(fiberSignal)` form makes fiber interruption abort the
         // in-flight request instead of orphaning it.
@@ -640,7 +640,7 @@ export function executeToolEffect(operation, args, baseUrl, options, abortSignal
       });
     }).pipe(Effect.ensuring(Effect.suspend(() => Metric.update(openApiToolDuration, nowMs() - started))));
   }).pipe(
-    Effect.tapError(() => Metric.increment(openApiToolCallErrorsTotal)),
+    Effect.tapError(() => Metric.update(openApiToolCallErrorsTotal, 1)),
     Effect.annotateLogs({
       toolName: `openapi:${operation.operationId}`,
       method: operation.method,

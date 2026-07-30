@@ -13,8 +13,12 @@ const NODE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,128}$/;
 const ITERATION_MAX = 2_147_483_647;
 const CACHE_ROW_GAUGE_EMIT_MS = 5 * 60 * 1000;
 const nodeDiffRequestTotal = Metric.counter("smithers_node_diff_request_total");
-const nodeDiffComputeMs = Metric.histogram("smithers_node_diff_compute_ms");
-const nodeDiffBytes = Metric.histogram("smithers_node_diff_bytes");
+const nodeDiffComputeMs = Metric.histogram("smithers_node_diff_compute_ms", {
+  boundaries: Metric.exponentialBoundaries({ start: 1, factor: 2, count: 16 }),
+});
+const nodeDiffBytes = Metric.histogram("smithers_node_diff_bytes", {
+  boundaries: Metric.exponentialBoundaries({ start: 100, factor: 2, count: 20 }),
+});
 const nodeDiffCacheTotal = Metric.counter("smithers_node_diff_cache_total");
 const nodeDiffCacheRows = Metric.gauge("smithers_node_diff_cache_rows");
 // The gauge is process-global because "total rows across the DB" is the
@@ -34,7 +38,7 @@ function taggedMetric(metric, labels = {}) {
     if (value === undefined || value === null) {
       continue;
     }
-    tagged = Metric.tagged(tagged, key, String(value));
+    tagged = Metric.withAttributes(tagged, { [key]: String(String(value)) });
   }
   return tagged;
 }
@@ -240,7 +244,7 @@ function scheduleCacheRowGauge(cache, emitEffect, nowMs) {
   cacheRowGaugeInflight = (async () => {
     try {
       const rows = await cache.countRows();
-      await emitEffect(Metric.set(nodeDiffCacheRows, rows));
+      await emitEffect(Metric.update(nodeDiffCacheRows, rows));
     } catch {
       // Gauge is best-effort.
     } finally {
@@ -302,7 +306,7 @@ export async function getNodeDiffRoute({
       emitEffect(
         Effect.all(
           [
-            Metric.increment(taggedMetric(nodeDiffRequestTotal, { result: resultLabel })),
+            Metric.update(taggedMetric(nodeDiffRequestTotal, { result: resultLabel }), 1),
             Effect.logInfo("getNodeDiff request handled").pipe(
               Effect.annotateLogs({
                 ...rootSpanAttrs,
@@ -399,7 +403,7 @@ export async function getNodeDiffRoute({
         emitEffect(
           Effect.all(
             [
-              Metric.increment(taggedMetric(nodeDiffCacheTotal, { result: cacheResult })),
+              Metric.update(taggedMetric(nodeDiffCacheTotal, { result: cacheResult }), 1),
               Metric.update(nodeDiffBytes, bytes),
             ],
             { discard: true },

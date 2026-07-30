@@ -1,4 +1,4 @@
-import { HttpRunner } from "@effect/cluster";
+import { HttpRunner } from "effect/unstable/cluster";
 import { mkdir, cp, rm } from "node:fs/promises";
 import { Effect, Layer } from "effect";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
@@ -19,7 +19,7 @@ export const DockerSandboxExecutorLive = Layer.succeed(
           timeoutMs: 10_000,
           maxOutputBytes: 200_000,
         }).pipe(
-          Effect.catchAll(() =>
+          Effect.catch(() =>
             Effect.fail(
               new SmithersError("PROCESS_SPAWN_FAILED", "Docker daemon not reachable.", { runtime: "docker" }),
             ),
