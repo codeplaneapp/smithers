@@ -1,7 +1,9 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, test } from "bun:test";
 import { Effect } from "effect";
+import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { SmithersError } from "@smithers-orchestrator/errors";
 import {
   SEMANTIC_TOOL_NAMES,
@@ -27,8 +29,23 @@ function tempCwd() {
   return dir;
 }
 
+async function waitForTerminalRuns(adapter, runIds) {
+  const terminalStatuses = new Set(["finished", "failed", "cancelled", "continued"]);
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const runs = await Promise.all(runIds.map((runId) => adapter.getRun(runId)));
+    if (runs.every((run) => terminalStatuses.has(run?.status))) {
+      // Run status is committed just before final event/log persistence.
+      await Bun.sleep(250);
+      return runs;
+    }
+    await Bun.sleep(25);
+  }
+  throw new Error(`background semantic runs did not settle: ${runIds.join(", ")}`);
+}
+
 function runnableEffect(effect) {
-  const runnable = effect;
+  const runnable = Effect.suspend(() => effect);
   if (typeof runnable.then !== "function") {
     Object.defineProperty(runnable, "then", {
       configurable: true,
@@ -338,10 +355,14 @@ function makeSemanticAdapter(overrides = {}) {
     listRunAncestry: async () => [baseRun, runRow({ runId: "parent-run", workflowName: "parent" })],
     listRunDescendants: (runId) =>
       runnableEffect(
-        Effect.succeed([
-          { runId, parentRunId: null, depth: 0 },
-          { runId: "child-run", parentRunId: runId, depth: 1 },
-        ]),
+        Effect.succeed(
+          runId === "run-1"
+            ? [
+                { runId, parentRunId: null, depth: 0 },
+                { runId: "child-run", parentRunId: runId, depth: 1 },
+              ]
+            : [{ runId, parentRunId: "run-1", depth: 0 }],
+        ),
       ),
     getLatestChildRun: async (runId) => state.latestChildByRunId.get(runId),
     listAllPendingApprovals: async () => state.approvals.filter((approval) => approval.status === "requested"),
@@ -453,7 +474,7 @@ function makeSemanticAdapter(overrides = {}) {
     deleteVcsTagsAfter: (_runId, _frameNo) => Effect.succeed(undefined),
     updateAttempt: () => Effect.succeed(undefined),
     deleteOutputRow: () => Effect.succeed(undefined),
-    listEvents: async (_runId, afterSeq) => (afterSeq < 0 ? state.events : []),
+    listEvents: (_runId, afterSeq) => runnableEffect(Effect.succeed(afterSeq < 0 ? state.events : [])),
     listEventHistory: async (runId, options) => {
       state.listEventHistoryCalls.push({ runId, options });
       if (typeof state.listEventHistoryImpl === "function") {
@@ -952,13 +973,19 @@ describe("semantic tool definitions", () => {
     expect(missingDefault.isError).toBe(true);
     expect(missingDefault.structuredContent.error.code).toBe("WORKFLOW_MISSING_DEFAULT");
 
+    const quickWorkflowPath = join(harness.cwd, ".smithers", "workflows", "quick.tsx");
+    const quickDbPath = join(harness.cwd, "quick.db");
+    const backgroundRoot = join(harness.cwd, "background-root");
+    const detachedRoot = join(harness.cwd, "detached-root");
+    mkdirSync(backgroundRoot, { recursive: true });
+    mkdirSync(detachedRoot, { recursive: true });
     writeFileSync(
-      join(harness.cwd, ".smithers", "workflows", "quick.tsx"),
+      quickWorkflowPath,
       [
         "/** @jsxImportSource smithers-orchestrator */",
         'import { createSmithers, Workflow, Task } from "smithers-orchestrator";',
         'import { z } from "zod";',
-        "const { smithers, outputs } = createSmithers({ result: z.object({ value: z.number() }) });",
+        `const { smithers, outputs } = createSmithers({ result: z.object({ value: z.number() }) }, { dbPath: ${JSON.stringify(quickDbPath)} });`,
         "export default smithers(() => (",
         '  <Workflow name="quick">',
         '    <Task id="answer" output={outputs.result}>',
@@ -981,6 +1008,7 @@ describe("semantic tool definitions", () => {
       runId: "semantic-quick-background",
       waitForStartMs: 50,
       prompt: "hello",
+      rootDir: backgroundRoot,
     });
     expect(typeof background.structuredContent.ok).toBe("boolean");
     expectWorkflowSummaryMatchesSchema(background.structuredContent.data.workflow);
@@ -998,12 +1026,21 @@ describe("semantic tool definitions", () => {
         workflowId: "quick",
         runId: "semantic-quick-detached",
         waitForTerminal: true,
+        rootDir: detachedRoot,
       },
       { signal: preAborted.signal },
     );
     expect(detached.structuredContent.ok).toBe(true);
     expect(detached.structuredContent.data.launchMode).toBe("background");
     expect(detached.structuredContent.data.status).not.toBe("cancelled");
+
+    const quickWorkflow = (await import(pathToFileURL(quickWorkflowPath).href)).default;
+    const quickAdapter = new SmithersDb(quickWorkflow.db);
+    const terminalRuns = await waitForTerminalRuns(quickAdapter, [
+      "semantic-quick-background",
+      "semantic-quick-detached",
+    ]);
+    expect(terminalRuns.map((run) => run.status)).toEqual(["finished", "finished"]);
   });
 
   test("list_workflows payload carries only keys declared in the output schema (#223)", async () => {
@@ -1580,12 +1617,11 @@ describe("semantic tool definitions", () => {
     expect(restore.structuredContent.data.error).toBeString();
   });
 
-  test("restore_checkpoint restores the same checkpoint it reports", async () => {
+  test("restore_checkpoint keeps its reported target across the invalidation refresh", async () => {
     let reads = 0;
     const harness = makeHarness({
       listWorkspaceCheckpoints: async () => {
         reads += 1;
-        if (reads > 1) throw new Error("checkpoint target was selected twice");
         return [
           {
             seq: 0,
@@ -1596,7 +1632,7 @@ describe("semantic tool definitions", () => {
             source: "hook",
             label: "Edit output",
             jjCwd: "/tmp/work",
-            jjCommitId: "commit-1",
+            jjCommitId: reads === 1 ? "commit-1" : "newer-commit",
             createdAtMs: NOW - 1_000,
           },
         ];
@@ -1609,7 +1645,7 @@ describe("semantic tool definitions", () => {
       confirm: true,
     });
 
-    expect(reads).toBe(1);
+    expect(reads).toBe(2);
     expect(restore.structuredContent.data).toMatchObject({
       runId: "run-1",
       nodeId: "artifact-node",
