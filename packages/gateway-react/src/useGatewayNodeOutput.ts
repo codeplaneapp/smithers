@@ -46,7 +46,7 @@ export function useGatewayNodeOutput(params: {
   nodeId: string | undefined;
   iteration?: number;
 }) {
-  const { client } = useSmithersCollections();
+  const { client, collections } = useSmithersCollections();
   const iteration = params.iteration ?? 0;
   const key = JSON.stringify([params.runId, params.nodeId, iteration]);
   const [result, setResult] = useState<
@@ -99,8 +99,10 @@ export function useGatewayNodeOutput(params: {
     if (!params.runId || !params.nodeId) return;
     const runId = params.runId;
     const nodeId = params.nodeId;
+    const eventCollection = collections.runEvents(runId);
     let active = true;
     let afterSeq: number | undefined;
+    let seeded = false;
     let inFlight = false;
     let queued = false;
 
@@ -112,6 +114,19 @@ export function useGatewayNodeOutput(params: {
       inFlight = true;
       let shouldRefetch = false;
       try {
+        if (!seeded) {
+          await eventCollection.preload();
+          if (!active) return;
+          const latest = eventCollection.toArray.reduce((max, row) => Math.max(max, row.seq), -1);
+          afterSeq = latest >= 0 ? latest : undefined;
+          seeded = true;
+          // A change that arrived while the shared tail was loading (queued)
+          // may predate the seeded cursor, and the queued re-scan only pages
+          // events AFTER it. Refetch once to cover the gap between the initial
+          // getNodeOutput and the cursor.
+          shouldRefetch = queued;
+          return;
+        }
         while (active) {
           const rows = await client.api.listRunEvents({ runId, afterSeq, limit: EVENT_PAGE_SIZE });
           if (!active || rows.length === 0) break;
@@ -148,7 +163,7 @@ export function useGatewayNodeOutput(params: {
       active = false;
       unsubscribe();
     };
-  }, [client, params.runId, params.nodeId, iteration, refetch]);
+  }, [client, collections, params.runId, params.nodeId, iteration, refetch]);
 
   return { data, error, loading, refetch };
 }
