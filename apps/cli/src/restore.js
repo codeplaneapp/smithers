@@ -171,7 +171,7 @@ export function pickTargetCheckpoint(checkpoints, sel) {
  * @param {any} adapter
  * @param {string} runId
  * @param {Checkpoint} target
- * @returns {Promise<{ success: boolean, owners: Array<{ nodeId: string, iteration: number, createdAtMs: number }>, error?: string }>}
+ * @returns {Promise<{ success: boolean, owners: Array<{ nodeId: string, iteration: number, createdAtMs: number }>, recoveryCommitId?: string, error?: string }>}
  */
 async function prepareNewerChildWorkInvalidation(adapter, runId, target) {
   if (
@@ -181,7 +181,12 @@ async function prepareNewerChildWorkInvalidation(adapter, runId, target) {
   ) {
     return { success: true, owners: [] };
   }
-  const { checkpoints } = await listScopedWorkspaceSnapshots(adapter, runId);
+  const { checkpoints, states } = await listScopedWorkspaceSnapshots(adapter, runId);
+  const recoveryCandidates = [
+    ...states.filter((state) => state.jjCwd === target.jjCwd),
+    ...checkpoints.filter((checkpoint) => checkpoint.jjCwd === target.jjCwd),
+  ].sort((a, b) => Number(a.createdAtMs ?? 0) - Number(b.createdAtMs ?? 0));
+  const recoveryCommitId = recoveryCandidates.at(-1)?.jjCommitId;
   const owners = new Map();
   for (const checkpoint of checkpoints) {
     if (
@@ -202,10 +207,10 @@ async function prepareNewerChildWorkInvalidation(adapter, runId, target) {
     }
   }
   const ordered = [...owners.values()].sort((a, b) => a.createdAtMs - b.createdAtMs);
-  if (ordered.length === 0) return { success: true, owners: ordered };
+  if (ordered.length === 0) return { success: true, owners: ordered, recoveryCommitId };
   if (typeof adapter?.getRun === "function") {
     const run = await adapter.getRun(runId);
-    if (!run) return { success: false, owners: ordered, error: `Run not found: ${runId}` };
+    if (!run) return { success: false, owners: ordered, recoveryCommitId, error: `Run not found: ${runId}` };
     if (
       run.status === "running" ||
       run.status === "waiting-approval" ||
@@ -213,10 +218,10 @@ async function prepareNewerChildWorkInvalidation(adapter, runId, target) {
       run.status === "waiting-timer" ||
       run.status === "waiting-quota"
     ) {
-      return { success: false, owners: ordered, error: `Run is still running: ${runId}` };
+      return { success: false, owners: ordered, recoveryCommitId, error: `Run is still running: ${runId}` };
     }
   }
-  return { success: true, owners: ordered };
+  return { success: true, owners: ordered, recoveryCommitId };
 }
 
 /**
@@ -356,6 +361,10 @@ export async function runRestoreOnce(opts) {
     stderr.write(`Restore invalidation failed: ${stagedInvalidation.error ?? "unknown error"}\n`);
     return { exitCode: 1 };
   }
+  if (stagedInvalidation.effects.length > 0 && !invalidationPlan.recoveryCommitId) {
+    stderr.write("Restore invalidation failed: no pre-restore VCS checkpoint is available for compensation\n");
+    return { exitCode: 1 };
+  }
   const result = await revert(target.jjCommitId, target.jjCwd, { timeoutMs: opts.timeoutMs, signal: opts.signal });
   if (!result?.success) {
     stderr.write(`Restore failed: ${result?.error ?? "unknown error"}\n`);
@@ -363,7 +372,20 @@ export async function runRestoreOnce(opts) {
   }
   const invalidation = await commitNewerChildWorkInvalidation(adapter, stagedInvalidation.effects);
   if (!invalidation.success) {
-    stderr.write(`Restore invalidation failed: ${invalidation.error ?? "unknown error"}\n`);
+    let compensation = { success: true };
+    if (stagedInvalidation.effects.length > 0 && invalidationPlan.recoveryCommitId) {
+      compensation = await revert(invalidationPlan.recoveryCommitId, target.jjCwd, {
+        timeoutMs: opts.timeoutMs,
+        signal: opts.signal,
+      });
+    }
+    stderr.write(
+      `Restore invalidation failed: ${invalidation.error ?? "unknown error"}; ${
+        compensation.success
+          ? "working copy restored to its pre-restore checkpoint"
+          : `filesystem compensation failed: ${compensation.error ?? "unknown error"}`
+      }\n`,
+    );
     return { exitCode: 1 };
   }
   stdout.write(`Restored ${target.jjCwd} to checkpoint #${target.seq} (${short(target.jjCommitId)})\n`);

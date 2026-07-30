@@ -677,6 +677,81 @@ describe("smithers restore", () => {
     expect(resetNodes).toEqual(["sub-a", "sub-b", "sub-b"]);
   });
 
+  test("compensates the filesystem when child invalidation commit fails after restore", async () => {
+    const target = { ...cps[0], runId: "parent", jjCommitId: "target", createdAtMs: 10 };
+    const child = {
+      ...cps[1],
+      runId: "parent:child:sub:0",
+      nodeId: "child-task",
+      jjCommitId: "before-restore",
+      createdAtMs: 20,
+    };
+    const ownerNode = {
+      runId: "parent",
+      nodeId: "sub",
+      iteration: 0,
+      state: "finished",
+      updatedAtMs: 15,
+      outputTable: "",
+    };
+    const reverted = [];
+    const err = capture();
+    const result = await runRestoreOnce({
+      adapter: {
+        async listRunDescendants() {
+          return [
+            { runId: "parent", parentRunId: null, depth: 0 },
+            { runId: child.runId, parentRunId: "parent", depth: 1 },
+          ];
+        },
+        async listWorkspaceCheckpoints(runId) {
+          return runId === "parent" ? [target] : [child];
+        },
+        async listWorkspaceStates() {
+          return [];
+        },
+        async getNode() {
+          return ownerNode;
+        },
+        async getRun(runId) {
+          return runId === "parent" ? { runId, status: "failed" } : null;
+        },
+        async listNodes() {
+          return [ownerNode];
+        },
+        async listAttemptsForRun() {
+          return [];
+        },
+        async listAttempts() {
+          return [];
+        },
+        insertNodeEffect() {
+          return Effect.void;
+        },
+        updateRunEffect() {
+          return Effect.void;
+        },
+        async withTransaction() {
+          throw new Error("injected commit failure");
+        },
+      },
+      runId: "parent",
+      nodeId: "n1",
+      target,
+      stdout: capture(),
+      stderr: err,
+      revert: async (commitId) => {
+        reverted.push(commitId);
+        return { success: true };
+      },
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(reverted).toEqual(["target", "before-restore"]);
+    expect(err.get()).toContain("injected commit failure");
+    expect(err.get()).toContain("pre-restore checkpoint");
+  });
+
   test("the timeout and abort signal reach the revert runner", async () => {
     /** @type {Array<unknown>} */
     const seen = [];
