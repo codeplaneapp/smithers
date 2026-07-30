@@ -47,6 +47,48 @@ function App() {
 createGatewayReactRoot(<App />);
 `;
 
+// The silent-failure this rule exists to catch: a phase strip that rolls its
+// own node statuses up against engine lifecycle words. `toRunStatus` has
+// already mapped those to `ok`, so every finished phase renders as un-started.
+const ENGINE_VOCABULARY_UI = `/** @jsxImportSource react */
+import { createGatewayReactRoot, useGatewayRunTree } from "smithers-orchestrator/gateway-react";
+import { NodeChatStream, RunMeta, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+
+function statusOf(tree, ids) {
+  const mine = ids.map((id) => (tree.nodes ?? []).find((n) => n.id === id)).filter(Boolean);
+  if (mine.some((n) => n.status === "running")) return "running";
+  if (mine.every((n) => n.status === "completed")) return "completed";
+  if (mine.some((n) => n.status !== "finished")) return "partial";
+  return "pending";
+}
+function App() {
+  const tree = useGatewayRunTree("run-1");
+  return (
+    <WorkflowUiShell title="Phases" meta={<RunMeta runId="run-1" />}>
+      <span>{statusOf(tree, ["plan"])}</span>
+      <NodeChatStream runId="run-1" nodeId="plan" />
+    </WorkflowUiShell>
+  );
+}
+createGatewayReactRoot(<App />);
+`;
+
+// A ticket/agent-output `status` has its own vocabulary and must not be
+// flagged — the rule only applies to UIs that read the run tree.
+const TICKET_STATUS_UI = `/** @jsxImportSource react */
+import { createGatewayReactRoot } from "smithers-orchestrator/gateway-react";
+import { RunMeta, WorkflowUiShell } from "smithers-orchestrator/gateway-ui";
+
+function App({ ticket }) {
+  return (
+    <WorkflowUiShell title="Tickets" meta={<RunMeta runId="run-1" />}>
+      <span>{ticket.status === "closed" ? "done" : "open"}</span>
+    </WorkflowUiShell>
+  );
+}
+createGatewayReactRoot(<App />);
+`;
+
 const AGENT_WORKFLOW = `
 export default function Workflow() {
   return (
@@ -101,6 +143,28 @@ describe("gradeWorkflowUiSource", () => {
     expect(report.violations).toEqual([]);
     expect(report.passed).toBe(true);
     expect(report.score).toBe(1);
+  });
+
+  test("flags node statuses matched against engine lifecycle words", () => {
+    const report = gradeWorkflowUiSource(ENGINE_VOCABULARY_UI, { workflowSource: AGENT_WORKFLOW });
+    const violations = report.violations.filter((violation) => violation.rule === "node-status-vocabulary");
+    expect(violations).toHaveLength(2);
+    expect(violations[0].detail).toContain('"completed"');
+    expect(violations[1].detail).toContain('"finished"');
+    expect(report.passed).toBe(false);
+  });
+
+  test("accepts the tones the gateway actually emits", () => {
+    const report = gradeWorkflowUiSource(
+      ENGINE_VOCABULARY_UI.replaceAll('=== "completed"', '=== "ok"').replaceAll('!== "finished"', '!== "ok"'),
+      { workflowSource: AGENT_WORKFLOW },
+    );
+    expect(report.violations.map((violation) => violation.rule)).not.toContain("node-status-vocabulary");
+  });
+
+  test("leaves a non-run-tree status vocabulary alone", () => {
+    const report = gradeWorkflowUiSource(TICKET_STATUS_UI, { workflowSource: DETERMINISTIC_WORKFLOW });
+    expect(report.violations.map((violation) => violation.rule)).not.toContain("node-status-vocabulary");
   });
 
   test("flags the classic hand-rolled dashboard", () => {

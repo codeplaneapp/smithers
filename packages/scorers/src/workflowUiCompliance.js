@@ -1,5 +1,40 @@
 import { createScorer } from "./createScorer.js";
 
+/**
+ * The only statuses a run-tree row can carry. `toRunStatus` (gateway-client)
+ * collapses every engine lifecycle state onto one of these before it reaches a
+ * UI, so these six are the entire vocabulary a workflow UI can match against.
+ */
+const NODE_STATUSES = new Set(["ok", "running", "queued", "failed", "waiting", "cancelled"]);
+
+/**
+ * Engine lifecycle states `toRunStatus` maps onto a *different* tone. A run
+ * tree row can never carry one, so a UI comparing against one is silently
+ * always false — the bug this rule exists to catch.
+ *
+ * Deliberately only these: a node's own output payload may define any
+ * `status` vocabulary it likes (`merged`, `conflict-aborted`, …), and those
+ * must not be flagged.
+ */
+const NORMALIZED_AWAY = new Set([
+  "in-progress",
+  "retrying",
+  "succeeded",
+  "finished",
+  "completed",
+  "canceled",
+  "errored",
+  "waiting-approval",
+  "waiting-event",
+  "waiting-timer",
+  "blocked",
+  "paused",
+  "pending",
+]);
+
+/** Bindings the grader resolves against gateway-react; everything else is gateway-ui. */
+const GATEWAY_REACT_EXPORTS = new Set(["createGatewayReactRoot", "useGatewayRunTree"]);
+
 /** @typedef {import("./WorkflowUiComplianceOptions.ts").WorkflowUiComplianceOptions} WorkflowUiComplianceOptions */
 /** @typedef {import("./WorkflowUiComplianceOptions.ts").WorkflowUiComplianceReport} WorkflowUiComplianceReport */
 /** @typedef {import("./WorkflowUiComplianceOptions.ts").WorkflowUiViolation} WorkflowUiViolation */
@@ -24,6 +59,12 @@ import { createScorer } from "./createScorer.js";
  * - `hand-rolled-pills`  — no `borderRadius: 999` pill re-implementations;
  *                      that's `StatusPill` / `Badge`.
  * - `hand-rolled-table`  — no raw `<table>` markup; use `Table` / `FleetTable`.
+ * - `node-status-vocabulary` — a UI reading the run tree may only compare
+ *                      `.status` against the tones the gateway actually emits
+ *                      (`ok`/`running`/`queued`/`failed`/`waiting`/`cancelled`);
+ *                      engine lifecycle words like `finished` or `completed`
+ *                      are normalized away by `toRunStatus` before a UI sees
+ *                      them, so comparing against one is silently always false.
  *
  * Pure and deterministic: feed it source text (no filesystem access) so it
  * runs identically in unit tests, create-ui gate tasks, and `smithers eval`
@@ -101,7 +142,21 @@ export function gradeWorkflowUiSource(uiSource, options = {}) {
     });
   }
 
-  const rules = 7;
+  // Node statuses reach a UI already normalized by `toRunStatus`, so an engine
+  // lifecycle literal can never match. Only checked for UIs that actually read
+  // the run tree — a ticket or agent-output `status` has its own vocabulary.
+  if (importedBindings(code, ["useGatewayRunTree"]).some((binding) => callExpressionExists(syntax, binding))) {
+    for (const match of code.matchAll(/\.status\s*[!=]==?\s*["'`]([^"'`]*)["'`]/g)) {
+      if (NORMALIZED_AWAY.has(match[1])) {
+        violations.push({
+          rule: "node-status-vocabulary",
+          detail: `Comparing a status against the engine state "${match[1]}". toRunStatus normalizes that to one of ${[...NODE_STATUSES].join("/")} before a UI sees it, so this test is always false and finished nodes render as un-started. Roll phases up with nodeStatusIndex + rollupNodeStatus (gateway-ui) instead of matching literals.`,
+        });
+      }
+    }
+  }
+
+  const rules = 8;
   const failedRules = new Set(violations.map((violation) => violation.rule)).size;
   return {
     passed: violations.length === 0,
@@ -146,7 +201,7 @@ function importedBindings(source, names) {
   const bindings = [];
   const syntax = maskStringsAndComments(source);
   const modulesFor = (name) =>
-    name === "createGatewayReactRoot"
+    GATEWAY_REACT_EXPORTS.has(name)
       ? ["smithers-orchestrator/gateway-react", "@smithers-orchestrator/gateway-react"]
       : ["smithers-orchestrator/gateway-ui", "@smithers-orchestrator/gateway-ui"];
   for (const match of source.matchAll(/\bimport\s*\{([\s\S]*?)\}\s*from\s*["']([^"']+)["']/g)) {
