@@ -12,7 +12,6 @@ import type { TaskDescriptor } from "smithers-orchestrator/graph";
 import { attempt, investigate, smithersBug } from "./curated-system-workflows.contracts";
 
 type Row = Record<string, unknown> & { nodeId: string };
-type PackResult = { written: number; skipped: number; changed: string[] };
 type Frame = RenderedWorkflow;
 const workflows = join(import.meta.dir, "..", "workflows");
 const cliSrc = pathToFileURL(resolve(import.meta.dir, "../../apps/cli/src")).href;
