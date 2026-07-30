@@ -600,6 +600,45 @@ type BaseCliAgentOptions = {
   extraArgs?: string[];
 };
 
+type NanocodexApiKeyAuth = {
+  mode: "api-key-env";
+  environmentVariable: string;
+};
+
+type NanocodexChatGptAuth = {
+  mode: "chatgpt";
+  authFile?: string;
+};
+
+type NanocodexAuth = NanocodexApiKeyAuth | NanocodexChatGptAuth;
+type NanocodexThinking = "none" | "low" | "medium" | "high" | "xhigh" | "max";
+type NanocodexReasoningMode = "standard" | "pro";
+
+type NanocodexGenerateOptions = AgentGenerateOptions & {
+  tools?: never; // always uses stock native tools
+  options?: never; // configure provider behavior on the agent
+  resumeCheckpoint?: AgentCheckpoint;
+  checkpointMode?: "resume";
+  resumeSession?: never;
+};
+
+type NanocodexAgentOptions = {
+  id?: string;
+  binary?: string;                 // external executable path or PATH-resolved command
+  cwd?: string;                    // absolute workspace fallback
+  auth?: NanocodexAuth;            // defaults to OPENAI_API_KEY environment mode
+  instructions?: string;           // replaces stock instructions completely
+  thinking?: NanocodexThinking;
+  reasoningMode?: NanocodexReasoningMode;
+  fastMode?: boolean;
+  env?: Record<string, string>;
+  inheritEnv?: boolean;            // default true
+  timeoutMs?: number;
+  idleTimeoutMs?: number;
+  cancellationGraceMs?: number;
+  maxCheckpointBytes?: number;
+};
+
 type PiExtensionUiRequest = {
   type: "extension_ui_request";
   id: string;

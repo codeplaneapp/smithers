@@ -344,6 +344,7 @@
               "integrations/community-connectors",
               "concepts/openapi-tools",
               "integrations/cli-agents",
+              "integrations/nanocodex",
               "integrations/sdk-agents",
               "integrations/mcp-toolset",
               "integrations/server",

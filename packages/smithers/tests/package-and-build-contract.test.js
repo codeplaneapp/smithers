@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -211,6 +212,7 @@ describe("PACKAGE_AND_BUILD contracts", () => {
         "node scripts/check-sota.mjs",
         "node scripts/check-dts.mjs",
         "node scripts/check-smithers-test-script.mjs",
+        "node --test scripts/qualify-nanocodex-release.test.mjs",
         "bun test scripts/publish-next.test.mjs scripts/release-next-gate.test.mjs scripts/bump.test.mjs scripts/run-workspace-tests-timeout.test.mjs",
         "pnpm -r --no-bail test",
       ].join(" && "),
@@ -241,6 +243,25 @@ describe("PACKAGE_AND_BUILD contracts", () => {
   });
 
   test("CI and fault workflows keep clean-runner package/build gates wired", () => {
+    const ci = parseYaml(text(".github/workflows/ci.yml"));
+    const linuxTestRows = ci.jobs.test.strategy.matrix.include.filter(({ os }) => os.startsWith("ubuntu-"));
+    const linuxTestSetup = ci.jobs.test.steps.find(
+      ({ name }) => name === "Install Linux test dependencies and probe Bubblewrap",
+    );
+    const coverageSetup = ci.jobs.coverage.steps.find(
+      ({ name }) => name === "Install coverage dependencies and probe Bubblewrap",
+    );
+
+    expect(linuxTestRows).toHaveLength(4);
+    expect(linuxTestRows.every(({ os }) => os === "ubuntu-22.04")).toBe(true);
+    expect(linuxTestSetup.if).toBe("runner.os == 'Linux'");
+    expect(linuxTestSetup.run).toContain("sudo apt-get install -y bubblewrap ripgrep");
+    expect(linuxTestSetup.run).toContain("--unshare-pid");
+    expect(ci.jobs.coverage["runs-on"]).toBe("ubuntu-22.04");
+    expect(coverageSetup.run).toContain("sudo apt-get install -y bubblewrap ripgrep");
+    expect(coverageSetup.run).toContain("--unshare-pid");
+    expect(ci.jobs["nanocodex-release-qualification"]["runs-on"]).toBe("ubuntu-22.04");
+
     expectText(".github/workflows/ci.yml", [
       "  typecheck:",
       "  test:",
@@ -248,7 +269,6 @@ describe("PACKAGE_AND_BUILD contracts", () => {
       "  test-postgres:",
       "node-version: 22",
       "bun-version: 1.3.13",
-      "sudo apt-get update && sudo apt-get install -y ripgrep",
       "choco install ripgrep -y",
       "node scripts/check-single-effect-version.mjs",
       "node scripts/check-dependency-boundaries.mjs",

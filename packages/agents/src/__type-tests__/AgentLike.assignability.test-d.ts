@@ -17,6 +17,7 @@ import type {
   ForgeAgent,
   GeminiAgent,
   KimiAgent,
+  NanocodexAgent,
   OpenAIAgent,
   PiAgent,
 } from "../index.js";
@@ -95,6 +96,7 @@ type _ConcreteAgentsAreAgentLike = [
   AssertAssignable<ForgeAgent>,
   AssertAssignable<GeminiAgent>,
   AssertAssignable<KimiAgent>,
+  AssertAssignable<NanocodexAgent>,
   AssertAssignable<OpenAIAgent>,
   AssertAssignable<PiAgent>,
 ];
