@@ -821,8 +821,19 @@ async function runGate(cwd: string, waveIndex: number): Promise<Gate> {
   }
 }
 
-async function pushTrainUnsafe(cwd: string, waveIndex: number, dryRun: boolean): Promise<Push> {
-  const headSha = git(["rev-parse", "HEAD"], cwd);
+async function pushTrainUnsafe(
+  cwd: string,
+  waveIndex: number,
+  approvedHeadSha: string,
+  dryRun: boolean,
+): Promise<Push> {
+  if (!/^[0-9a-f]{40,64}$/.test(approvedHeadSha)) {
+    throw new Error(`Refusing to push wave ${waveIndex}: its passing gate did not record a full commit SHA.`);
+  }
+  const headSha = git(["rev-parse", `${approvedHeadSha}^{commit}`], cwd);
+  if (headSha !== approvedHeadSha) {
+    throw new Error(`Refusing to push wave ${waveIndex}: approved gate revision ${approvedHeadSha} is not exact.`);
+  }
   if (dryRun) {
     return {
       waveIndex,
@@ -837,7 +848,17 @@ async function pushTrainUnsafe(cwd: string, waveIndex: number, dryRun: boolean):
   } catch {}
   const remoteSha = git(["rev-parse", "origin/main"], cwd);
   if (remoteSha === headSha) {
-    return { waveIndex, pushed: true, headSha, remoteSha, summary: "origin/main already at train head." };
+    return { waveIndex, pushed: true, headSha, remoteSha, summary: "origin/main already at the approved gate head." };
+  }
+  const targetRemoteBase = git(["merge-base", headSha, remoteSha], cwd);
+  if (targetRemoteBase === headSha) {
+    return {
+      waveIndex,
+      pushed: true,
+      headSha,
+      remoteSha,
+      summary: "origin/main already contains the approved gate head.",
+    };
   }
   const mergeBase = git(["merge-base", remoteSha, headSha], cwd);
   if (mergeBase !== remoteSha) {
@@ -846,10 +867,10 @@ async function pushTrainUnsafe(cwd: string, waveIndex: number, dryRun: boolean):
       pushed: false,
       headSha,
       remoteSha,
-      summary: "origin/main diverged from the train; the next wave's sync rebases onto it.",
+      summary: "origin/main diverged from the approved gate head; the next wave's sync rebases onto it.",
     };
   }
-  const result = await runProcess("git", ["push", "origin", "HEAD:refs/heads/main"], cwd, 15 * 60_000);
+  const result = await runProcess("git", ["push", "origin", `${headSha}:refs/heads/main`], cwd, 15 * 60_000);
   if (result.exitCode !== 0) {
     return {
       waveIndex,
@@ -866,13 +887,13 @@ async function pushTrainUnsafe(cwd: string, waveIndex: number, dryRun: boolean):
     pushed: after === headSha,
     headSha,
     remoteSha: after,
-    summary: after === headSha ? "Pushed train head to origin/main." : "Push verification mismatch.",
+    summary: after === headSha ? "Pushed the approved gate head to origin/main." : "Push verification mismatch.",
   };
 }
 
-async function pushTrain(cwd: string, waveIndex: number, dryRun: boolean): Promise<Push> {
+async function pushTrain(cwd: string, waveIndex: number, approvedHeadSha: string, dryRun: boolean): Promise<Push> {
   try {
-    return await pushTrainUnsafe(cwd, waveIndex, dryRun);
+    return await pushTrainUnsafe(cwd, waveIndex, approvedHeadSha, dryRun);
   } catch (error) {
     return {
       waveIndex,
@@ -1206,12 +1227,22 @@ export default smithers((ctx) => {
   const pushRows: Array<Push | undefined> = waves.map((_, w) =>
     latest<Push>(ctx, outputs.strainPush, "w" + w + ":push"),
   );
+  const gateRows: Array<Gate | undefined> = waves.map((_, w) =>
+    latest<Gate>(ctx, outputs.strainGate, "w" + w + ":gate"),
+  );
+  const highestPassedGate = gateRows.reduce<Gate | undefined>(
+    (highest, gate) =>
+      gate?.passed === true && gate.headSha && (highest === undefined || gate.waveIndex > highest.waveIndex)
+        ? gate
+        : highest,
+    undefined,
+  );
   const finalPush = latest<Push>(ctx, outputs.strainPush, "final-push");
   let maxPushedWave = -1;
   pushRows.forEach((row, w) => {
     if (row?.pushed) maxPushedWave = Math.max(maxPushedWave, w);
   });
-  if (finalPush?.pushed) maxPushedWave = waves.length;
+  if (finalPush?.pushed) maxPushedWave = Math.max(maxPushedWave, finalPush.waveIndex);
   const landed = (n: number) => {
     const w = waveOf.get(n);
     return w !== undefined && verifiedCommits.has(n) && maxPushedWave >= w;
@@ -1352,7 +1383,7 @@ export default smithers((ctx) => {
           const commitVerificationFailures = approvedIssues.filter(
             (issue) => laneCommitCheck(w, issue.number)?.verified === false,
           );
-          const gate = latest<Gate>(ctx, outputs.strainGate, "w" + w + ":gate");
+          const gate = gateRows[w];
           const gatePassed = gate?.passed === true;
           const waveFix = latest<WaveFix>(ctx, outputs.strainWaveFix, "w" + w + ":gate-fix");
           const iterationOf = (row: unknown) => Number((row as { iteration?: number } | undefined)?.iteration ?? 0);
@@ -1600,8 +1631,8 @@ export default smithers((ctx) => {
               {lanesSettled && (commitsSettled || !approvedIssues.length) ? (
                 <Task id={"w" + w + ":push"} output={outputs.strainPush} timeoutMs={20 * 60_000} continueOnFail>
                   {() =>
-                    committedIssues.length && latest<Gate>(ctx, outputs.strainGate, "w" + w + ":gate")?.passed === true
-                      ? pushTrain(trainPath, w, input.dryRun)
+                    committedIssues.length && gate?.passed === true && gate.headSha
+                      ? pushTrain(trainPath, w, gate.headSha, input.dryRun)
                       : Promise.resolve({
                           waveIndex: w,
                           pushed: false,
@@ -1656,7 +1687,17 @@ export default smithers((ctx) => {
 
         {allWavesSettled ? (
           <Task id="final-push" output={outputs.strainPush} timeoutMs={20 * 60_000} continueOnFail>
-            {() => pushTrain(trainPath, waves.length, input.dryRun)}
+            {() =>
+              highestPassedGate
+                ? pushTrain(trainPath, highestPassedGate.waveIndex, highestPassedGate.headSha, input.dryRun)
+                : Promise.resolve({
+                    waveIndex: -1,
+                    pushed: false,
+                    headSha: "",
+                    remoteSha: "",
+                    summary: "No wave has a passing gate; final push refused.",
+                  })
+            }
           </Task>
         ) : null}
 
