@@ -831,6 +831,44 @@ describe("retryTask branches", () => {
       sqlite.close();
     }
   });
+
+  test("cancels a waiting-quota attempt when retrying its parked task", async () => {
+    const { adapter, sqlite } = createTestDb();
+    try {
+      const runId = "run-quota-parked";
+      await adapter.insertRun({ runId, workflowName: "wf", status: "waiting-quota", createdAtMs: 1 });
+      await adapter.insertNode({
+        runId,
+        nodeId: "task:quota",
+        iteration: 0,
+        state: "waiting-quota",
+        lastAttempt: 1,
+        updatedAtMs: 100,
+        outputTable: "",
+        label: null,
+      });
+      await adapter.insertAttempt({
+        runId,
+        nodeId: "task:quota",
+        iteration: 0,
+        attempt: 1,
+        state: "waiting-quota",
+        startedAtMs: 90,
+        finishedAtMs: null,
+      });
+
+      const result = await retryTask(adapter, { runId, nodeId: "task:quota", force: true });
+
+      expect(result.success).toBe(true);
+      expect((await adapter.getNode(runId, "task:quota", 0))?.state).toBe("pending");
+      const [attempt] = await adapter.listAttempts(runId, "task:quota", 0);
+      expect(attempt?.state).toBe("cancelled");
+      expect(attempt?.finishedAtMs).not.toBeNull();
+      expect(JSON.parse(attempt?.metaJson ?? "{}")).toMatchObject({ resetCancelled: true });
+    } finally {
+      sqlite.close();
+    }
+  });
 });
 
 describe("timeTravel branches", () => {

@@ -279,7 +279,8 @@ export async function retryTask(adapter, opts) {
               attempt.state !== "in-progress" &&
               attempt.state !== "waiting-approval" &&
               attempt.state !== "waiting-event" &&
-              attempt.state !== "waiting-timer"
+              attempt.state !== "waiting-timer" &&
+              attempt.state !== "waiting-quota"
             ) {
               continue;
             }
