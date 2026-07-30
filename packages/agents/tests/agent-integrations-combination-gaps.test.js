@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ClaudeCodeAgent } from "../src/ClaudeCodeAgent.js";
@@ -91,7 +91,10 @@ describe("ClaudeCodeAgent option combinations", () => {
         .filter((value) => value !== undefined);
       // Exactly ONE --settings — the user file merged with the durability hook.
       expect(settingsValues).toHaveLength(1);
-      const merged = JSON.parse(settingsValues[0]);
+      // The merged value is a private temp-file PATH, not inline JSON on argv
+      // (a merged object routinely carries secrets folded in from the user's
+      // settings file, and argv is world-readable via `ps`).
+      const merged = JSON.parse(await readFile(settingsValues[0], "utf8"));
       // The user file's own keys survive...
       expect(merged.permissions).toEqual({ allow: ["Bash"] });
       // ...and the durability hook is folded in (arrays concatenate: the file's
