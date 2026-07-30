@@ -10,6 +10,7 @@ const packRoot = join(import.meta.dir, "..");
 const repoRoot = join(packRoot, "..");
 const workflowRoot = join(packRoot, "workflows");
 const componentRoot = join(packRoot, "components");
+
 const slash = (value: string) => value.split(sep).join("/");
 const sorted = (values: Iterable<string>) => [...values].sort((a, b) => a.localeCompare(b));
 
