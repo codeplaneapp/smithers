@@ -575,6 +575,126 @@ describe("forkRun failure branches", () => {
 });
 
 describe("retryTask branches", () => {
+  test("resets an explicitly named parked child from persisted ownership", async () => {
+    const { adapter, sqlite } = createTestDb();
+    try {
+      await adapter.insertRun({
+        runId: "parent-explicit",
+        workflowName: "parent",
+        status: "failed",
+        createdAtMs: 1,
+      });
+      await adapter.insertNode({
+        runId: "parent-explicit",
+        nodeId: "review",
+        iteration: 0,
+        state: "failed",
+        lastAttempt: 1,
+        updatedAtMs: 10,
+        outputTable: "",
+        label: null,
+      });
+      await adapter.insertRun({
+        runId: "named-review-run",
+        parentRunId: "parent-explicit",
+        workflowName: "child",
+        status: "waiting-event",
+        createdAtMs: 2,
+        configJson: JSON.stringify({ subflowWorkspaceParentRunId: "parent-explicit" }),
+      });
+      await adapter.insertNode({
+        runId: "named-review-run",
+        nodeId: "wait",
+        iteration: 0,
+        state: "waiting-event",
+        lastAttempt: 1,
+        updatedAtMs: 20,
+        outputTable: "",
+        label: null,
+      });
+      await adapter.insertAttempt({
+        runId: "named-review-run",
+        nodeId: "wait",
+        iteration: 0,
+        attempt: 1,
+        state: "waiting-event",
+        startedAtMs: 20,
+        finishedAtMs: null,
+      });
+
+      expect((await retryTask(adapter, { runId: "parent-explicit", nodeId: "review" })).success).toBe(true);
+      expect((await adapter.getNode("named-review-run", "wait", 0))?.state).toBe("pending");
+      expect((await adapter.getRun("named-review-run"))?.status).toBe("running");
+      expect((await adapter.listAttempts("named-review-run", "wait", 0))[0]?.state).toBe("cancelled");
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("resets a continue-as-new child lineage through its parked successor", async () => {
+    const { adapter, sqlite } = createTestDb();
+    try {
+      const parentRunId = "parent-continuation";
+      const childRunId = `${parentRunId}:child:review:0`;
+      const successorRunId = "named-continuation-successor";
+      await adapter.insertRun({ runId: parentRunId, workflowName: "parent", status: "failed", createdAtMs: 1 });
+      await adapter.insertNode({
+        runId: parentRunId,
+        nodeId: "review",
+        iteration: 0,
+        state: "failed",
+        lastAttempt: 1,
+        updatedAtMs: 10,
+        outputTable: "",
+        label: null,
+      });
+      await adapter.insertRun({
+        runId: childRunId,
+        parentRunId,
+        workflowName: "child",
+        status: "continued",
+        createdAtMs: 2,
+        configJson: JSON.stringify({ subflowWorkspaceParentRunId: parentRunId }),
+      });
+      await adapter.insertNode({
+        runId: childRunId,
+        nodeId: "segment-one",
+        iteration: 0,
+        state: "finished",
+        lastAttempt: 1,
+        updatedAtMs: 20,
+        outputTable: "",
+        label: null,
+      });
+      await adapter.insertRun({
+        runId: successorRunId,
+        parentRunId: childRunId,
+        workflowName: "child",
+        status: "waiting-timer",
+        createdAtMs: 3,
+        configJson: JSON.stringify({ continuation: { parentRunId: childRunId } }),
+      });
+      await adapter.insertNode({
+        runId: successorRunId,
+        nodeId: "segment-two",
+        iteration: 0,
+        state: "waiting-timer",
+        lastAttempt: 1,
+        updatedAtMs: 30,
+        outputTable: "",
+        label: null,
+      });
+
+      expect((await retryTask(adapter, { runId: parentRunId, nodeId: "review" })).success).toBe(true);
+      expect((await adapter.getRun(successorRunId))?.status).toBe("running");
+      expect((await adapter.getNode(successorRunId, "segment-two", 0))?.state).toBe("pending");
+      expect((await adapter.getRun(childRunId))?.status).toBe("running");
+      expect((await adapter.getNode(childRunId, "segment-one", 0))?.state).toBe("pending");
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("CLI rollback restores completed nested child runs after pre-ownership resume failure", () => {
     const repo = createTempRepo();
     pinSqliteBackend(repo.dir);
@@ -1090,6 +1210,87 @@ export default smithers(() => (
 });
 
 describe("timeTravel branches", () => {
+  test("time travel resets an explicitly named continued child through its parked successor", async () => {
+    const { adapter, sqlite } = createTestDb();
+    try {
+      const runId = "time-travel-explicit-child";
+      const childRunId = "time-travel-named-child";
+      const successorRunId = "time-travel-child-successor";
+      await adapter.insertRun({ runId, workflowName: "parent", status: "failed", createdAtMs: 1 });
+      await adapter.insertNode({
+        runId,
+        nodeId: "review",
+        iteration: 0,
+        state: "failed",
+        lastAttempt: 1,
+        updatedAtMs: 10,
+        outputTable: "",
+        label: null,
+      });
+      await adapter.insertAttempt({
+        runId,
+        nodeId: "review",
+        iteration: 0,
+        attempt: 1,
+        state: "failed",
+        startedAtMs: 10,
+        finishedAtMs: 20,
+        jjPointer: null,
+      });
+      await adapter.insertRun({
+        runId: childRunId,
+        parentRunId: runId,
+        workflowName: "child",
+        status: "continued",
+        createdAtMs: 2,
+        configJson: JSON.stringify({ subflowWorkspaceParentRunId: runId }),
+      });
+      await adapter.insertNode({
+        runId: childRunId,
+        nodeId: "segment-one",
+        iteration: 0,
+        state: "finished",
+        lastAttempt: 1,
+        updatedAtMs: 20,
+        outputTable: "",
+        label: null,
+      });
+      await adapter.insertRun({
+        runId: successorRunId,
+        parentRunId: childRunId,
+        workflowName: "child",
+        status: "waiting-approval",
+        createdAtMs: 3,
+        configJson: JSON.stringify({ continuation: { parentRunId: childRunId } }),
+      });
+      await adapter.insertNode({
+        runId: successorRunId,
+        nodeId: "gate",
+        iteration: 0,
+        state: "waiting-approval",
+        lastAttempt: 1,
+        updatedAtMs: 30,
+        outputTable: "",
+        label: null,
+      });
+
+      const result = await timeTravel(adapter, {
+        runId,
+        nodeId: "review",
+        restoreVcs: false,
+        resetDependents: false,
+      });
+
+      expect(result.success).toBe(true);
+      expect((await adapter.getRun(childRunId))?.status).toBe("running");
+      expect((await adapter.getNode(childRunId, "segment-one", 0))?.state).toBe("pending");
+      expect((await adapter.getRun(successorRunId))?.status).toBe("running");
+      expect((await adapter.getNode(successorRunId, "gate", 0))?.state).toBe("pending");
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("fails when the attempt exists but the node row is missing", async () => {
     const { adapter, sqlite } = createTestDb();
     try {

@@ -143,6 +143,25 @@ function makeFakeTimeTravelAdapter(overrides = {}) {
   const adapter = {
     internalStorage,
     write: async (_label, operation) => await operation(),
+    getRun: (runId) =>
+      succeed(
+        runId === state.runId
+          ? {
+              runId,
+              status: "failed",
+              parentRunId: null,
+              configJson: "{}",
+              heartbeatAtMs: null,
+              runtimeOwnerId: null,
+            }
+          : undefined,
+      ),
+    listRunDescendants: () => {
+      if (state.listRunDescendantsShouldThrow) {
+        throw new Error("child reset plan unavailable");
+      }
+      return succeed([]);
+    },
     listAttempts: (runId, nodeId, iteration) => {
       const attempts = state.attemptsForTarget.filter(
         (attempt) => attempt.runId === runId && attempt.nodeId === nodeId && attempt.iteration === iteration,
@@ -213,6 +232,22 @@ function makeFakeTimeTravelAdapter(overrides = {}) {
 }
 
 describe("timeTravel direct unit coverage", () => {
+  test("loads child reset plans before attempting the VCS restore", async () => {
+    const { adapter, state } = makeFakeTimeTravelAdapter({
+      listRunDescendantsShouldThrow: true,
+    });
+
+    await expect(
+      timeTravel(adapter, {
+        runId: "run-unit",
+        nodeId: "target",
+      }),
+    ).rejects.toThrow("child reset plan unavailable");
+
+    expect(state.calls.transactions).toEqual([]);
+    expect(state.leaseOwner).toBeNull();
+  });
+
   test("uses the latest attempt by default and resets target plus downstream nodes", async () => {
     const { adapter, state } = makeFakeTimeTravelAdapter();
     const events = [];

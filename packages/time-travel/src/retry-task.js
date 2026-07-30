@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
+import { parseSubflowChildRunId } from "@smithers-orchestrator/graph/subflow-run-lineage";
 import { markResetCancelledMeta } from "./resetCancelMarker.js";
 import { validateWorkflowIdentity } from "./validateWorkflowIdentity.js";
 /** @typedef {import("./RetryTaskOptions.ts").RetryTaskOptions} RetryTaskOptions */
@@ -39,7 +40,20 @@ function isActiveRunStatus(status) {
     status === "waiting-quota"
   );
 }
-const RESETTABLE_CHILD_RUN_STATUSES = new Set(["failed", "finished", "cancelled", "canceled", "continued"]);
+const RESETTABLE_CHILD_RUN_STATUSES = new Set([
+  "failed",
+  "finished",
+  "cancelled",
+  "canceled",
+  "continued",
+  "waiting-approval",
+  "waiting-event",
+  "waiting-timer",
+  "waiting-quota",
+  "waiting-bound",
+  "bound-stale",
+  "paused",
+]);
 const CHILD_RESET_TARGET_STATES = new Set([
   "waiting-approval",
   "waiting-event",
@@ -59,16 +73,57 @@ const CHILD_RESET_TARGET_STATES = new Set([
  * @param {SmithersDb} adapter
  * @param {string} runId
  */
+function parseRunConfig(run) {
+  try {
+    return JSON.parse(run?.configJson ?? "{}");
+  } catch {
+    return {};
+  }
+}
+/**
+ * Load direct owned descendants from durable parent/config lineage. Forks and
+ * monitor sidecars also use parentRunId, so only structured Subflow and
+ * ContinueAsNew provenance is accepted (plus the legacy generated id grammar).
+ *
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ */
+async function listOwnedChildRuns(adapter, runId) {
+  const candidates = [];
+  if (typeof adapter.listRunDescendants === "function" && typeof adapter.getRun === "function") {
+    const descendants = await adapter.listRunDescendants(runId);
+    for (const descendant of descendants) {
+      if (descendant.runId === runId || (descendant.depth !== 1 && descendant.parentRunId !== runId)) continue;
+      const child = await adapter.getRun(descendant.runId);
+      if (child?.parentRunId === runId) candidates.push(child);
+    }
+  } else if (typeof adapter.listRuns === "function") {
+    candidates.push(...(await adapter.listRuns(1_000, undefined, undefined, { parentRunId: runId })));
+  }
+  return candidates.filter((child) => {
+    const config = parseRunConfig(child);
+    return (
+      config?.subflowWorkspaceParentRunId === runId ||
+      config?.continuation?.parentRunId === runId ||
+      Boolean(parseSubflowChildRunId(child.runId, runId))
+    );
+  });
+}
+/**
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ */
 async function findContinuationSuccessor(adapter, runId) {
+  const owned = await listOwnedChildRuns(adapter, runId);
+  const successor = owned
+    .filter((candidate) => parseRunConfig(candidate)?.continuation?.parentRunId === runId)
+    .sort((left, right) => Number(right.createdAtMs ?? 0) - Number(left.createdAtMs ?? 0))[0];
+  if (successor) return successor;
   if (typeof adapter.getLatestChildRun !== "function") return undefined;
   const candidate = await adapter.getLatestChildRun(runId);
-  if (!candidate || candidate.parentRunId !== runId) return undefined;
-  try {
-    const config = JSON.parse(candidate.configJson ?? "{}");
-    return config?.continuation?.parentRunId === runId ? candidate : undefined;
-  } catch {
-    return undefined;
-  }
+  return candidate?.parentRunId === runId && parseRunConfig(candidate)?.continuation?.parentRunId === runId
+    ? candidate
+    : undefined;
 }
 /**
  * @param {SmithersDb} adapter
@@ -114,14 +169,23 @@ async function resolveResetNodes(adapter, opts) {
  */
 async function resolveChildResetPlans(adapter, runId, resetNodes, resetDependents, seenRunIds = new Set()) {
   const plans = [];
+  const resetKeys = new Set(resetNodes.map((node) => buildNodeKey(node.nodeId, node.iteration ?? 0)));
+  const children = await listOwnedChildRuns(adapter, runId);
   for (const resetNode of resetNodes) {
     const iteration = resetNode.iteration ?? 0;
     const childRunId = `${runId}:child:${resetNode.nodeId}:${iteration}`;
-    if (seenRunIds.has(childRunId)) continue;
-    const childRun = await adapter.getRun(childRunId);
-    if (childRun?.parentRunId !== runId || !RESETTABLE_CHILD_RUN_STATUSES.has(childRun.status)) {
-      continue;
+    if (!children.some((child) => child.runId === childRunId) && typeof adapter.getRun === "function") {
+      const childRun = await adapter.getRun(childRunId);
+      if (childRun?.parentRunId === runId) children.push(childRun);
     }
+  }
+  for (const childRun of children) {
+    if (seenRunIds.has(childRun.runId) || !RESETTABLE_CHILD_RUN_STATUSES.has(childRun.status)) continue;
+    const generated = parseSubflowChildRunId(childRun.runId, runId);
+    const config = parseRunConfig(childRun);
+    const explicitSubflow = config?.subflowWorkspaceParentRunId === runId && !generated;
+    if (!explicitSubflow && (!generated || !resetKeys.has(buildNodeKey(generated.nodeId, generated.iteration))))
+      continue;
     plans.push(...(await resolveExistingChildResetPlans(adapter, childRun, resetDependents, seenRunIds)));
   }
   return plans;
@@ -135,7 +199,7 @@ async function resolveChildResetPlans(adapter, runId, resetNodes, resetDependent
  * @param {boolean} resetDependents
  * @param {Set<string>} seenRunIds
  */
-async function resolveExistingChildResetPlans(adapter, childRun, resetDependents, seenRunIds) {
+async function resolveExistingChildResetPlans(adapter, childRun, resetDependents, seenRunIds, resetWholeRun = false) {
   const childRunId = childRun.runId;
   if (seenRunIds.has(childRunId) || !RESETTABLE_CHILD_RUN_STATUSES.has(childRun.status)) return [];
   seenRunIds.add(childRunId);
@@ -150,7 +214,7 @@ async function resolveExistingChildResetPlans(adapter, childRun, resetDependents
       childResetNodes.push(node);
     }
   };
-  if (childRun.status === "finished" || childRun.status === "continued") {
+  if (resetWholeRun || childRun.status === "finished" || childRun.status === "continued") {
     // A continued predecessor must be reset wholesale. Leaving it continued
     // makes executeChildWorkflow try to resume a non-resumable run.
     addChildResetNodes(childNodes);
@@ -164,11 +228,20 @@ async function resolveExistingChildResetPlans(adapter, childRun, resetDependents
         }),
       );
     }
+    if (
+      childResetNodes.length === 0 &&
+      (childRun.status?.startsWith("waiting-") || childRun.status === "paused" || childRun.status === "bound-stale")
+    ) {
+      addChildResetNodes(childNodes.filter((node) => node.state === "pending"));
+    }
   }
-  if (childResetNodes.length === 0) return [];
   const successor = await findContinuationSuccessor(adapter, childRunId);
+  const successorPlans = successor
+    ? await resolveExistingChildResetPlans(adapter, successor, resetDependents, seenRunIds, true)
+    : [];
+  if (childResetNodes.length === 0) return successorPlans;
   return [
-    ...(successor ? await resolveExistingChildResetPlans(adapter, successor, resetDependents, seenRunIds) : []),
+    ...successorPlans,
     ...(await resolveChildResetPlans(adapter, childRunId, childResetNodes, resetDependents, seenRunIds)),
     { runId: childRunId, nodes: childResetNodes },
   ];

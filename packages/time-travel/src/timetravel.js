@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
+import { parseSubflowChildRunId } from "@smithers-orchestrator/graph/subflow-run-lineage";
 import { revertToJjPointer } from "@smithers-orchestrator/vcs/jj";
 import { markResetCancelledMeta } from "./resetCancelMarker.js";
 import * as BunContext from "@effect/platform-bun/BunContext";
@@ -109,21 +110,70 @@ function buildPendingNode(existingNode) {
     updatedAtMs: nowMs(),
   };
 }
-const TERMINAL_CHILD_RUN_STATUSES = new Set(["finished", "failed", "cancelled", "canceled", "continued"]);
+const RESETTABLE_CHILD_RUN_STATUSES = new Set([
+  "finished",
+  "failed",
+  "cancelled",
+  "canceled",
+  "continued",
+  "waiting-approval",
+  "waiting-event",
+  "waiting-timer",
+  "waiting-quota",
+  "waiting-bound",
+  "bound-stale",
+  "paused",
+]);
+/**
+ * @param {any} run
+ */
+function parseRunConfig(run) {
+  try {
+    return JSON.parse(run?.configJson ?? "{}");
+  } catch {
+    return {};
+  }
+}
+/**
+ * @param {SmithersDb} adapter
+ * @param {string} runId
+ */
+async function listOwnedChildRuns(adapter, runId) {
+  const candidates = [];
+  if (typeof adapter.listRunDescendants === "function" && typeof adapter.getRun === "function") {
+    const descendants = await adapter.listRunDescendants(runId);
+    for (const descendant of descendants) {
+      if (descendant.runId === runId || (descendant.depth !== 1 && descendant.parentRunId !== runId)) continue;
+      const child = await adapter.getRun(descendant.runId);
+      if (child?.parentRunId === runId) candidates.push(child);
+    }
+  } else if (typeof adapter.listRuns === "function") {
+    candidates.push(...(await adapter.listRuns(1_000, undefined, undefined, { parentRunId: runId })));
+  }
+  return candidates.filter((child) => {
+    const config = parseRunConfig(child);
+    return (
+      config?.subflowWorkspaceParentRunId === runId ||
+      config?.continuation?.parentRunId === runId ||
+      Boolean(parseSubflowChildRunId(child.runId, runId))
+    );
+  });
+}
 /**
  * @param {SmithersDb} adapter
  * @param {string} runId
  */
 async function findContinuationSuccessor(adapter, runId) {
+  const owned = await listOwnedChildRuns(adapter, runId);
+  const successor = owned
+    .filter((candidate) => parseRunConfig(candidate)?.continuation?.parentRunId === runId)
+    .sort((left, right) => Number(right.createdAtMs ?? 0) - Number(left.createdAtMs ?? 0))[0];
+  if (successor) return successor;
   if (typeof adapter.getLatestChildRun !== "function") return undefined;
   const candidate = await adapter.getLatestChildRun(runId);
-  if (!candidate || candidate.parentRunId !== runId) return undefined;
-  try {
-    const config = JSON.parse(candidate.configJson ?? "{}");
-    return config?.continuation?.parentRunId === runId ? candidate : undefined;
-  } catch {
-    return undefined;
-  }
+  return candidate?.parentRunId === runId && parseRunConfig(candidate)?.continuation?.parentRunId === runId
+    ? candidate
+    : undefined;
 }
 /**
  * Resolve terminal child workflows owned by reset parent nodes. Plans are
@@ -138,11 +188,20 @@ async function findContinuationSuccessor(adapter, runId) {
 async function resolveCompletedChildResetPlans(adapter, runId, resetNodes, seen = new Set()) {
   if (typeof adapter.getRun !== "function") return [];
   const plans = [];
+  const resetKeys = new Set(resetNodes.map((node) => nodeKey(node.nodeId, node.iteration ?? 0)));
+  const children = await listOwnedChildRuns(adapter, runId);
   for (const resetNode of resetNodes) {
     const childRunId = `${runId}:child:${resetNode.nodeId}:${resetNode.iteration ?? 0}`;
-    if (seen.has(childRunId)) continue;
-    const childRun = await adapter.getRun(childRunId);
-    if (childRun?.parentRunId !== runId || !TERMINAL_CHILD_RUN_STATUSES.has(childRun.status)) continue;
+    if (!children.some((child) => child.runId === childRunId)) {
+      const childRun = await adapter.getRun(childRunId);
+      if (childRun?.parentRunId === runId) children.push(childRun);
+    }
+  }
+  for (const childRun of children) {
+    if (seen.has(childRun.runId) || !RESETTABLE_CHILD_RUN_STATUSES.has(childRun.status)) continue;
+    const generated = parseSubflowChildRunId(childRun.runId, runId);
+    const explicitSubflow = parseRunConfig(childRun)?.subflowWorkspaceParentRunId === runId && !generated;
+    if (!explicitSubflow && (!generated || !resetKeys.has(nodeKey(generated.nodeId, generated.iteration)))) continue;
     plans.push(...(await resolveExistingChildResetPlans(adapter, childRun, seen)));
   }
   return plans;
@@ -152,16 +211,22 @@ async function resolveCompletedChildResetPlans(adapter, runId, resetNodes, seen 
  * @param {any} childRun
  * @param {Set<string>} seen
  */
-async function resolveExistingChildResetPlans(adapter, childRun, seen) {
+async function resolveExistingChildResetPlans(adapter, childRun, seen, resetWholeRun = false) {
   const childRunId = childRun.runId;
-  if (seen.has(childRunId) || !TERMINAL_CHILD_RUN_STATUSES.has(childRun.status)) return [];
+  if (seen.has(childRunId) || !RESETTABLE_CHILD_RUN_STATUSES.has(childRun.status)) return [];
   seen.add(childRunId);
   const childNodes = await adapter.listNodes(childRunId);
   const successor = await findContinuationSuccessor(adapter, childRunId);
+  const nodes =
+    resetWholeRun || childRun.status === "finished" || childRun.status === "continued"
+      ? childNodes
+      : childNodes.filter((node) => node.state !== "finished" && node.state !== "skipped");
+  const successorPlans = successor ? await resolveExistingChildResetPlans(adapter, successor, seen, true) : [];
+  if (nodes.length === 0) return successorPlans;
   return [
-    ...(successor ? await resolveExistingChildResetPlans(adapter, successor, seen) : []),
-    ...(await resolveCompletedChildResetPlans(adapter, childRunId, childNodes, seen)),
-    { runId: childRunId, nodes: childNodes },
+    ...successorPlans,
+    ...(await resolveCompletedChildResetPlans(adapter, childRunId, nodes, seen)),
+    { runId: childRunId, nodes },
   ];
 }
 /**
@@ -265,6 +330,36 @@ export async function timeTravel(adapter, opts) {
       jjPointer,
       timestampMs: nowMs(),
     });
+    // Resolve every durable row the reset will need before changing the
+    // working copy. Any lineage/listing failure can then abort without
+    // leaving VCS at the target while the database still describes later
+    // work.
+    const resetNodeIds = uniqueNodeIds(
+      resetNodes.map((node) => ({
+        nodeId: node.nodeId,
+        iteration: node.iteration ?? 0,
+      })),
+    );
+    const attemptsByNode = new Map();
+    for (const resetNode of resetNodes) {
+      attemptsByNode.set(
+        nodeKey(resetNode.nodeId, resetNode.iteration ?? 0),
+        attemptsForRun.filter(
+          (attempt) => attempt.nodeId === resetNode.nodeId && (attempt.iteration ?? 0) === (resetNode.iteration ?? 0),
+        ),
+      );
+    }
+    const childResetPlans = await resolveCompletedChildResetPlans(adapter, runId, resetNodes);
+    for (const plan of childResetPlans) {
+      plan.attemptsByNode = new Map();
+      for (const childNode of plan.nodes) {
+        const childIteration = childNode.iteration ?? 0;
+        plan.attemptsByNode.set(
+          nodeKey(childNode.nodeId, childIteration),
+          await adapter.listAttempts(plan.runId, childNode.nodeId, childIteration),
+        );
+      }
+    }
     let vcsRestored = false;
     if (restoreVcs && jjPointer) {
       if (!(await lock.renew())) {
@@ -298,35 +393,6 @@ export async function timeTravel(adapter, opts) {
           effectBoundary: boundary.report,
         };
       }
-    }
-    const resetNodeIds = uniqueNodeIds(
-      resetNodes.map((node) => ({
-        nodeId: node.nodeId,
-        iteration: node.iteration ?? 0,
-      })),
-    );
-    const attemptsByNode = new Map();
-    for (const resetNode of resetNodes) {
-      attemptsByNode.set(
-        nodeKey(resetNode.nodeId, resetNode.iteration ?? 0),
-        attemptsForRun.filter(
-          (attempt) => attempt.nodeId === resetNode.nodeId && (attempt.iteration ?? 0) === (resetNode.iteration ?? 0),
-        ),
-      );
-    }
-    const childResetPlans = await resolveCompletedChildResetPlans(adapter, runId, resetNodes);
-    for (const plan of childResetPlans) {
-      plan.attemptsByNode = new Map();
-      for (const childNode of plan.nodes) {
-        const childIteration = childNode.iteration ?? 0;
-        plan.attemptsByNode.set(
-          nodeKey(childNode.nodeId, childIteration),
-          await adapter.listAttempts(plan.runId, childNode.nodeId, childIteration),
-        );
-      }
-    }
-    if (!(await lock.renew())) {
-      throw new Error(`Time-travel lease ownership was lost for ${runId}.`);
     }
     try {
       await adapter.withTransaction(
