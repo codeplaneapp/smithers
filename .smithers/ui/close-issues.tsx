@@ -153,7 +153,7 @@ function statusClass(status: string | undefined) {
   return "";
 }
 
-function App() {
+export function App() {
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>(runIdFromUrl());
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
