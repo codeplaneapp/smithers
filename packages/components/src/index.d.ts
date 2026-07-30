@@ -956,6 +956,8 @@ type MonitorProps$2 = {
     id?: string;
     /** Run id this monitor watches. Usually `ctx.input.watchRunId`. */
     watchRunId: string;
+    /** Workflow path used by shipped resume/retry commands. Defaults to `ctx.input.watchWorkflowPath`. */
+    watchWorkflowPath?: string;
     /** Agent that samples the watched run and classifies its health. */
     agent: AgentLike$2 | AgentLike$2[];
     /**
