@@ -267,7 +267,7 @@ jobs:
     # A second, instrumented pass of the whole workspace (per-package coverage +
     # thresholds). Runs in parallel with `test`; instrumentation makes it slower
     # than the plain suite, so it gets its own generous budget.
-    timeout-minutes: 35
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v6.0.2
