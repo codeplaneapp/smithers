@@ -132,60 +132,29 @@ describe.serial("curated system workflow causal contracts", () => {
         )!.contents;
         const first = (await runTask(
           task(await render("init.tsx", { force: false, refreshSkills: false, skipInstall: true }), "install-pack"),
-<<<<<<< HEAD
-        )) as { written: number; skipped: number; changed: string[] };
-        expect(first).toMatchObject({ skipped: 1, changed: [] });
-        const seededFileCount = Number(first.written) + Number(first.skipped);
-        expect(seededFileCount).toBeGreaterThan(1);
-||||||| parent of bfc8c6d076 (🧪 test(workflows): sync curated pack ownership)
-        );
-        expect(first).toEqual({ written: 70, skipped: 1, changed: [] });
-=======
         )) as PackResult;
-        const packFileCount = first.written + first.skipped;
-        expect(first).toEqual({ written: packFileCount - 1, skipped: 1, changed: [] });
->>>>>>> bfc8c6d076 (🧪 test(workflows): sync curated pack ownership)
+        expect(first).toMatchObject({ skipped: 1, changed: [] });
+        const seededFileCount = first.written + first.skipped;
+        expect(seededFileCount).toBeGreaterThan(1);
         expect(await readFile(join(root, ".smithers/workflows/init.tsx"), "utf8")).toBe(bundled);
         expect(await readFile(join(root, ".smithers/agents/claude-code.ts"), "utf8")).toBe("preserve this config\n");
         const skipped = await runTask(
           task(await render("init.tsx", { force: false, refreshSkills: false, skipInstall: true }), "install-pack"),
         );
-<<<<<<< HEAD
         expect(skipped).toEqual({ written: 0, skipped: seededFileCount, changed: [] });
-||||||| parent of bfc8c6d076 (🧪 test(workflows): sync curated pack ownership)
-        expect(skipped).toEqual({ written: 0, skipped: 71, changed: [] });
-=======
-        expect(skipped).toEqual({ written: 0, skipped: packFileCount, changed: [] });
->>>>>>> bfc8c6d076 (🧪 test(workflows): sync curated pack ownership)
         await writeFile(join(root, ".smithers/workflows/init.tsx"), "local modification\n");
         const drift = await runTask(
           task(await render("init.tsx", { force: false, refreshSkills: false, skipInstall: true }), "install-pack"),
         );
-<<<<<<< HEAD
         expect(drift).toEqual({
           written: 0,
           skipped: seededFileCount,
           changed: [".smithers/workflows/init.tsx"],
         });
-||||||| parent of bfc8c6d076 (🧪 test(workflows): sync curated pack ownership)
-        expect(drift).toEqual({ written: 0, skipped: 71, changed: [".smithers/workflows/init.tsx"] });
-=======
-        expect(drift).toEqual({
-          written: 0,
-          skipped: packFileCount,
-          changed: [".smithers/workflows/init.tsx"],
-        });
->>>>>>> bfc8c6d076 (🧪 test(workflows): sync curated pack ownership)
         const forced = await runTask(
           task(await render("init.tsx", { force: true, refreshSkills: false, skipInstall: true }), "install-pack"),
         );
-<<<<<<< HEAD
         expect(forced).toEqual({ written: seededFileCount - 7, skipped: 7, changed: [] });
-||||||| parent of bfc8c6d076 (🧪 test(workflows): sync curated pack ownership)
-        expect(forced).toEqual({ written: 64, skipped: 7, changed: [] });
-=======
-        expect(forced).toEqual({ written: packFileCount - 7, skipped: 7, changed: [] });
->>>>>>> bfc8c6d076 (🧪 test(workflows): sync curated pack ownership)
         expect(await readFile(join(root, ".smithers/workflows/init.tsx"), "utf8")).toBe(bundled);
         expect(await readFile(join(root, ".smithers/agents/claude-code.ts"), "utf8")).toBe("preserve this config\n");
 
