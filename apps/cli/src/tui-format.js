@@ -1,4 +1,5 @@
 import pc from "picocolors";
+import { sanitizeTerminalText } from "@smithers-orchestrator/tui/src/sanitizeTerminalText.ts";
 
 /**
  * Format any agent stream text before the TUI wraps it. This keeps raw event
@@ -8,7 +9,9 @@ import pc from "picocolors";
  * @returns {string}
  */
 export function formatStreamText(text) {
-  const raw = typeof text === "string" ? text : text == null ? "" : String(text);
+  const raw = sanitizeTerminalText(typeof text === "string" ? text : text == null ? "" : String(text), {
+    preserveSgr: true,
+  });
   const codexLog = formatCodexLog(raw);
   if (codexLog !== null) return codexLog;
   if (/^\s*\[(?:tool|command)\]/i.test(raw)) return formatToolCall(raw);
@@ -340,7 +343,7 @@ function collapse(input) {
  * @param {string} input
  */
 function normalizeStreamText(input) {
-  return String(input)
+  return sanitizeTerminalText(input, { preserveSgr: true })
     .replace(/\s+$/g, "")
     .replace(/[\r\n]+/g, " ↵ ")
     .replace(/\t/g, "    ");

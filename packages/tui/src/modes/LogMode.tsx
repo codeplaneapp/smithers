@@ -13,6 +13,7 @@ import {
 import { normalizeFrame } from "./eventFrame.ts";
 import { isModifiedKeyEvent } from "./treeUtils.ts";
 import { useOverlayOpen } from "../OverlayContext.tsx";
+import { sanitizeTerminalText } from "@smithers-orchestrator/tui-ui";
 
 const COMPACT_WIDTH = 100;
 
@@ -97,7 +98,7 @@ export function LogView({ events, streaming = false }: { events: GatewayEventFra
     // Split on the LAST colon so namespaced node ids (which contain colons)
     // aren't truncated to their first segment.
     const { nodeId, iteration } = splitAttemptKey(selectedAttempt);
-    return `${nodeId.slice(0, tagMaxLen)}:${iteration}`;
+    return `${sanitizeTerminalText(nodeId).slice(0, tagMaxLen)}:${iteration}`;
   })();
 
   const followColor = follow ? "#00d787" : "#ffaf00";
@@ -118,8 +119,8 @@ export function LogView({ events, streaming = false }: { events: GatewayEventFra
         ) : (
           filteredEvents.map((ev) => {
             const { event, payload, nodeId } = normalizeFrame(ev);
-            const text = extractEventText(event, payload);
-            const tag = nodeId ? nodeId.slice(0, tagMaxLen) : "·";
+            const text = sanitizeTerminalText(extractEventText(event, payload));
+            const tag = nodeId ? sanitizeTerminalText(nodeId).slice(0, tagMaxLen) : "·";
             const seqStr = String(ev.seq).padStart(4, " ");
 
             return (

@@ -143,7 +143,7 @@ export function AppBody({ helpMode, children }: { helpMode: Mode | null; childre
 
 /** What a global key should do, routed by {@link routeAppKey}. */
 export type AppKeyAction =
-  | { kind: "exit" }
+  | { kind: "exit"; code?: number }
   | { kind: "toggle-help" }
   | { kind: "close-help" }
   | { kind: "set-mode"; mode: Mode }
@@ -155,7 +155,9 @@ export type AppKeyAction =
  * parseKeypress events. The rules that earned their comments:
  *
  * - Ctrl-C quits through the same teardown as `q` (the renderer runs with
- *   exitOnCtrlC:false — we own the quit path).
+ *   exitOnCtrlC:false — we own the quit path), but carries exit code 130
+ *   (128 + SIGINT) so shell scripts can tell a keyboard interrupt from a
+ *   clean `q` quit — the same convention index.tsx's signal handlers use.
  * - Any OTHER ctrl/meta chord is a no-op: parseKeypress maps Ctrl+letter
  *   control bytes (and Alt+letter) to the plain letter name with ctrl/meta
  *   set, so without this a reflexive Ctrl-L (terminal redraw habit) would
@@ -175,7 +177,7 @@ export function routeAppKey(
   ctx: { mode: Mode; showHelp: boolean; keysCaptured?: boolean },
 ): AppKeyAction | null {
   const { name, ctrl, meta, shift } = event;
-  if (ctrl && name === "c") return { kind: "exit" };
+  if (ctrl && name === "c") return { kind: "exit", code: 130 };
   if (ctrl || meta) return null;
   // A mounted mode is consuming text. OpenTUI sends the key to every
   // subscription, so suppress all app bindings; Escape still reaches the
@@ -221,7 +223,7 @@ export function App({ runId, onExit }: { runId: string; onExit: (code: number) =
     if (!action) return;
     switch (action.kind) {
       case "exit":
-        return onExit(0);
+        return onExit(action.code ?? 0);
       case "toggle-help":
         return setShowHelp((prev) => !prev);
       case "close-help":

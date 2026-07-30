@@ -11,7 +11,13 @@ import {
   TUI_OUTPUT_PREVIEW_CHARS,
   TUI_OUTPUT_TRUNCATION_MARKER,
 } from "@smithers-orchestrator/ui-core";
-import { RunTree, RunEventLog, type RunTreeRow, type RunEventLogRow } from "@smithers-orchestrator/tui-ui";
+import {
+  RunTree,
+  RunEventLog,
+  sanitizeTerminalText,
+  type RunTreeRow,
+  type RunEventLogRow,
+} from "@smithers-orchestrator/tui-ui";
 import {
   eventKeyName,
   isModifiedKeyEvent,
@@ -84,6 +90,9 @@ const MAX_OPTION_ROWS = 6;
 
 function ApprovalBanner({ approval }: { approval: ApprovalUiState }) {
   const { title, summary, mode, options, selectedKey, busy, error } = approval;
+  const safeTitle = sanitizeTerminalText(title);
+  const safeSummary = summary ? sanitizeTerminalText(summary) : undefined;
+  const safeError = error ? sanitizeTerminalText(error) : null;
   const showOptions = modeHasOptions(mode);
   // Window the rendered options around the highlighted one: `[`/`]` cycle
   // through ALL options, so a fixed 0-based slice would let the selection walk
@@ -122,11 +131,11 @@ function ApprovalBanner({ approval }: { approval: ApprovalUiState }) {
       paddingLeft={1}
       paddingRight={1}
     >
-      <text fg="#ffaf00">{`⏸  ${title}  [${mode}]`}</text>
-      {error ? (
-        <text fg="#ff5f5f">{`   ! ${error.slice(0, 60)}`}</text>
-      ) : summary ? (
-        <text fg="#888888">{`   ${summary}`}</text>
+      <text fg="#ffaf00">{`⏸  ${safeTitle}  [${mode}]`}</text>
+      {safeError ? (
+        <text fg="#ff5f5f">{`   ! ${safeError.slice(0, 60)}`}</text>
+      ) : safeSummary ? (
+        <text fg="#888888">{`   ${safeSummary}`}</text>
       ) : (
         <text fg="#555555">{"   awaiting your decision"}</text>
       )}
@@ -140,7 +149,7 @@ function ApprovalBanner({ approval }: { approval: ApprovalUiState }) {
             return (
               <box key={opt.key} width="100%" height={1} flexDirection="row">
                 <text fg={isSel ? "#ffaf00" : "#888888"}>{`   ${prefix} `}</text>
-                <text fg={isSel ? "#ffffff" : "#cccccc"}>{opt.label}</text>
+                <text fg={isSel ? "#ffffff" : "#cccccc"}>{sanitizeTerminalText(opt.label)}</text>
               </box>
             );
           })
@@ -167,6 +176,9 @@ function ApprovalBanner({ approval }: { approval: ApprovalUiState }) {
  */
 function HumanRequestBanner({ human }: { human: HumanRequestUiState }) {
   const { title, prompt, runId } = human;
+  const safeTitle = sanitizeTerminalText(title);
+  const safePrompt = prompt ? sanitizeTerminalText(prompt) : undefined;
+  const safeRunId = sanitizeTerminalText(runId);
   // border(2) + title(1) + prompt(1) + guidance(1)
   return (
     <box
@@ -179,13 +191,13 @@ function HumanRequestBanner({ human }: { human: HumanRequestUiState }) {
       paddingLeft={1}
       paddingRight={1}
     >
-      <text fg="#ffaf00">{`⏸  ${title}  [human input]`}</text>
-      {prompt ? (
-        <text fg="#888888">{`   ${prompt.slice(0, 80)}`}</text>
+      <text fg="#ffaf00">{`⏸  ${safeTitle}  [human input]`}</text>
+      {safePrompt ? (
+        <text fg="#888888">{`   ${safePrompt.slice(0, 80)}`}</text>
       ) : (
         <text fg="#555555">{"   this step is waiting on a typed answer"}</text>
       )}
-      <text fg="#00d7ff">{`   answer via CLI:  smithers human inbox   (run ${runId})`}</text>
+      <text fg="#00d7ff">{`   answer via CLI:  smithers human inbox   (run ${safeRunId})`}</text>
     </box>
   );
 }
@@ -261,7 +273,7 @@ export function NodeInspectorView({
       <box width="100%" flexGrow={1}>
         {activeTab === "output" && (
           <scrollbox width="100%" height="100%" stickyScroll scrollY>
-            <code width="100%" content={outputText} syntaxStyle={style} wrapMode="char" />
+            <code width="100%" content={sanitizeTerminalText(outputText)} syntaxStyle={style} wrapMode="char" />
           </scrollbox>
         )}
         {activeTab === "logs" && (
@@ -273,27 +285,39 @@ export function NodeInspectorView({
               <text fg="#888888">{"  Loading diff…"}</text>
             ) : diff.kind === "patch" ? (
               <box width="100%" flexDirection="column">
-                <text fg="#888888">{`  ${diff.summary}`}</text>
-                <code width="100%" content={diff.unified} syntaxStyle={style} filetype="diff" wrapMode="char" />
+                <text fg="#888888">{`  ${sanitizeTerminalText(diff.summary)}`}</text>
+                <code
+                  width="100%"
+                  content={sanitizeTerminalText(diff.unified)}
+                  syntaxStyle={style}
+                  filetype="diff"
+                  wrapMode="char"
+                />
               </box>
             ) : diff.kind === "stat" ? (
               <box width="100%" flexDirection="column">
-                <text fg="#888888">{`  ${diff.summary}`}</text>
-                <code width="100%" content={diff.files} syntaxStyle={style} wrapMode="char" />
+                <text fg="#888888">{`  ${sanitizeTerminalText(diff.summary)}`}</text>
+                <code width="100%" content={sanitizeTerminalText(diff.files)} syntaxStyle={style} wrapMode="char" />
               </box>
             ) : diff.kind === "error" ? (
               // A failed RPC (DiffTooLarge, dirty working tree, gateway down…)
               // is NOT "no diff" — surface it distinctly so the operator knows
               // a diff may exist but could not be fetched.
-              <text fg="#ff5f5f" wrapMode="char">{`  Diff unavailable: ${diff.message}`}</text>
+              <text fg="#ff5f5f" wrapMode="char">{`  Diff unavailable: ${sanitizeTerminalText(diff.message)}`}</text>
             ) : (
-              <text fg="#444444">{`  ${diff.message}`}</text>
+              <text fg="#444444">{`  ${sanitizeTerminalText(diff.message)}`}</text>
             )}
           </scrollbox>
         )}
         {activeTab === "props" && (
           <scrollbox width="100%" height="100%" scrollY>
-            <code width="100%" content={propsText} syntaxStyle={style} filetype="json" wrapMode="char" />
+            <code
+              width="100%"
+              content={sanitizeTerminalText(propsText)}
+              syntaxStyle={style}
+              filetype="json"
+              wrapMode="char"
+            />
           </scrollbox>
         )}
       </box>
@@ -621,7 +645,7 @@ export function TreeMode({ runId, initialSelectedNodeKey }: { runId: string; ini
   if (error) {
     return (
       <box width="100%" height="100%">
-        <text fg="#ff5f5f">{`  Error: ${error.message}`}</text>
+        <text fg="#ff5f5f">{`  Error: ${sanitizeTerminalText(error.message)}`}</text>
       </box>
     );
   }

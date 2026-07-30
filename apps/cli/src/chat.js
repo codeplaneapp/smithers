@@ -1,4 +1,5 @@
 import { formatTimestamp } from "./format.js";
+import { sanitizeTerminalText } from "@smithers-orchestrator/tui/src/sanitizeTerminalText.ts";
 
 /** @typedef {import("./ChatAttemptMeta.ts").ChatAttemptMeta} ChatAttemptMeta */
 /** @typedef {import("./ChatAttemptRow.ts").ChatAttemptRow} ChatAttemptRow */
@@ -161,8 +162,11 @@ export function selectChatAttempts(attempts, outputAttemptKeys, includeAll) {
  */
 export function formatChatAttemptHeader(attempt) {
   const meta = parseChatAttemptMeta(attempt.metaJson);
-  const title = meta.label?.trim() || attempt.nodeId;
-  const agentBits = [meta.agentId, meta.agentModel].filter(Boolean).join(" · ");
+  const title = sanitizeTerminalText(meta.label?.trim() || attempt.nodeId);
+  const agentBits = [meta.agentId, meta.agentModel]
+    .filter(Boolean)
+    .map((value) => sanitizeTerminalText(value))
+    .join(" · ");
   const parts = [
     title,
     `attempt ${attempt.attempt}`,
@@ -179,8 +183,8 @@ export function formatChatAttemptHeader(attempt) {
 export function formatChatBlock(options) {
   const { baseMs, timestampMs, role, attempt, text } = options;
   const ts = formatTimestamp(baseMs, timestampMs);
-  const ref = `${attempt.nodeId}#${attempt.attempt}${attempt.iteration > 0 ? `.${attempt.iteration}` : ""}`;
-  const body = text.replace(/\s+$/, "");
+  const ref = `${sanitizeTerminalText(attempt.nodeId)}#${attempt.attempt}${attempt.iteration > 0 ? `.${attempt.iteration}` : ""}`;
+  const body = sanitizeTerminalText(text).replace(/\s+$/, "");
   const prefix = `[${ts}] ${role} ${ref}`;
   if (!body.includes("\n")) {
     return `${prefix}: ${body}`;

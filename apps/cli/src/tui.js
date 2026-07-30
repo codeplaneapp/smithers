@@ -21,6 +21,7 @@ import { computeRunStateFromRow } from "@smithers-orchestrator/db/runState";
 import { DETACHED_RUN_LOG_FILE_ENV } from "./detachedRunLogEnv.js";
 import { reapDetachedRunLogs } from "./reapDetachedRunLogs.js";
 import { resolveDetachedRunLogFile } from "./resolveDetachedRunLogFile.js";
+import { sanitizeTerminalText } from "@smithers-orchestrator/tui/src/sanitizeTerminalText.ts";
 
 export { formatStreamText } from "./tui-format.js";
 
@@ -150,7 +151,7 @@ function makeNodeColorer() {
  * @param {string} text
  */
 export function normalizeStreamText(text) {
-  return text
+  return sanitizeTerminalText(text, { preserveSgr: true })
     .replace(/\s+$/g, "")
     .replace(/[\r\n]+/g, " ↵ ")
     .replace(/\t/g, "    ");

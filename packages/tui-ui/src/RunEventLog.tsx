@@ -1,4 +1,5 @@
 /** @jsxImportSource @opentui/react */
+import { sanitizeTerminalText } from "./sanitizeTerminalText.ts";
 
 /**
  * One already-normalized log row: the caller unwraps the gateway's event
@@ -12,7 +13,7 @@ export type RunEventLogRow = {
 };
 
 export function formatRunEventLogRow(row: RunEventLogRow): string {
-  return `  [${row.seq}] ${row.event}  ${row.payload}`;
+  return `  [${row.seq}] ${sanitizeTerminalText(row.event)}  ${sanitizeTerminalText(row.payload)}`;
 }
 
 export type RunEventLogProps = {
@@ -30,7 +31,7 @@ export function RunEventLog({ rows, emptyLabel = "(no log events)" }: RunEventLo
   if (rows.length === 0) {
     return (
       <box width="100%" height="100%">
-        <text fg="#444444">{`  ${emptyLabel}`}</text>
+        <text fg="#444444">{`  ${sanitizeTerminalText(emptyLabel)}`}</text>
       </box>
     );
   }
