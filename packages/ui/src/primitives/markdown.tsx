@@ -17,7 +17,7 @@ const LINK = /^\[([^\]]+)\]\(([^)]+)\)$/;
 /** Handler invoked when a rendered link is activated. */
 export type MarkdownLinkClick = (href: string, event: MouseEvent<HTMLAnchorElement>) => void;
 
-/** @deprecated Use the link sanitization provided by higher-level components instead. */
+/** @deprecated Use `safeHref` from `internal/safeHref` instead. */
 export { safeHref as safeMarkdownHref } from "../internal/safeHref";
 
 /**

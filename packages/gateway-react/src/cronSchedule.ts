@@ -84,8 +84,6 @@ function fieldValue(
   const named = names?.[token.toLowerCase()];
   const value = named ?? (/^\d+$/.test(token) ? Number.parseInt(token, 10) : Number.NaN);
   if (Number.isNaN(value)) throw new Error(`Invalid cron value "${token}"`);
-  // Sunday accepts both 0 and 7.
-  if (min === 0 && max === 7 && value === 7) return 0;
   if (value < min || value > max) throw new Error(`Cron value "${token}" is outside ${min}-${max}`);
   return value;
 }
@@ -111,6 +109,9 @@ function parseField(text: string, min: number, max: number, names?: Readonly<Rec
       const [fromRaw, toRaw] = base.split("-", 2);
       lo = fieldValue(fromRaw!, min, max, names);
       hi = fieldValue(toRaw!, min, max, names);
+      // In a DOW range, a named Sunday at the upper bound is the same endpoint
+      // as numeric 7 (for example fri-sun === 5-7). Standalone Sunday remains 0.
+      if (min === 0 && max === 7 && hi === 0 && toRaw?.toLowerCase() === "sun" && lo > 0) hi = 7;
       if (hi < lo) throw new Error(`Invalid cron range "${base}"`);
       any = false;
     } else {

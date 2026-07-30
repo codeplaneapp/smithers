@@ -416,10 +416,10 @@
     "title": "Smithers Repo Federation",
     "runnable": false,
     "launchArgs": [],
-    "primaryTestId": "",
+    "primaryTestId": "federation-ui",
     "populatedTestId": "",
     "expectedText": [],
-    "mountOnlyReason": "performs a multi-repository migration with GitHub authentication and human approval gates; UI is asserted to mount + boot",
+    "mountOnlyReason": "creates repositories and pull requests through authenticated CLIs; UI is asserted to mount + boot",
     "verifyOutput": false
   },
   {
@@ -430,7 +430,7 @@
     "primaryTestId": "",
     "populatedTestId": "",
     "expectedText": [],
-    "mountOnlyReason": "uses live product research and an optional order webhook with human approval; UI is asserted to mount + boot",
+    "mountOnlyReason": "requires live grocery data and an approval-gated order path; UI is asserted to mount + boot",
     "verifyOutput": false
   },
   {

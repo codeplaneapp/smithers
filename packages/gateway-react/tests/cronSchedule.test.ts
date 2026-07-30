@@ -111,6 +111,34 @@ describe("expandCron", () => {
     expect(expandCron("0 9 * * sun", start, end)).toEqual(expected);
   });
 
+  test("day-of-week ranges ending in Sunday preserve every day in the range", () => {
+    const start = localDate(2026, 6, 26); // Sunday
+    const end = start + 7 * DAY_MS;
+    const atNine = (day: number) => localDate(2026, 6, day, 9);
+
+    expect(expandCron("0 9 * * 0-7", start, end)).toEqual([
+      atNine(26),
+      atNine(27),
+      atNine(28),
+      atNine(29),
+      atNine(30),
+      atNine(31),
+      localDate(2026, 7, 1, 9),
+    ]);
+    expect(expandCron("0 9 * * 1-7", start, end)).toEqual([
+      atNine(26),
+      atNine(27),
+      atNine(28),
+      atNine(29),
+      atNine(30),
+      atNine(31),
+      localDate(2026, 7, 1, 9),
+    ]);
+    const fridayThroughSunday = [atNine(26), atNine(31), localDate(2026, 7, 1, 9)];
+    expect(expandCron("0 9 * * 5-7", start, end)).toEqual(fridayThroughSunday);
+    expect(expandCron("0 9 * * fri-sun", start, end)).toEqual(fridayThroughSunday);
+  });
+
   test("respects the occurrence limit", () => {
     const start = localDate(2026, 6, 27);
     expect(expandCron("* * * * *", start, start + 7 * DAY_MS, 10)).toHaveLength(10);

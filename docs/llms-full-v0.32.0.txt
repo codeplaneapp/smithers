@@ -9254,7 +9254,7 @@ type MonitorCondition =
 type MonitorProps = {
   id?: string;                      // id prefix for generated nodes; default "monitor"
   watchRunId: string;               // the run this monitor watches
-  watchWorkflowPath?: string;       // workflow path used by resume/retry commands
+  watchWorkflowPath?: string;       // workflow path used by safe resume/retry commands
   agent: AgentLike | AgentLike[];   // samples the watched run and classifies its health
   healthOutput: OutputTarget;       // schema must carry `condition` + `runStatus`
   actionOutput?: OutputTarget;      // handler tasks write here; defaults to healthOutput

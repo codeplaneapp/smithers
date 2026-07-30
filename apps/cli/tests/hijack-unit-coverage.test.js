@@ -32,6 +32,9 @@ function adapterWithAttempts(attempts, run = { status: "finished" }) {
     async getRun() {
       return run;
     },
+    async listEventsByType() {
+      return [];
+    },
   };
 }
 
@@ -168,6 +171,9 @@ describe("waitForHijackCandidate", () => {
       async listAttemptsForRun() {
         return [attempt({ metaJson: JSON.stringify({ agentEngine: "codex", agentResume: "s1" }) })];
       },
+      async listEventsByType() {
+        return [];
+      },
     };
     const candidate = await waitForHijackCandidate(adapter, "run-1", { timeoutMs: 1000 });
     expect(candidate.engine).toBe("codex");
@@ -179,6 +185,9 @@ describe("waitForHijackCandidate", () => {
         return { status: "running" };
       },
       async listAttemptsForRun() {
+        return [];
+      },
+      async listEventsByType() {
         return [];
       },
     };

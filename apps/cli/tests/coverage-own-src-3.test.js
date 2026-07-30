@@ -51,8 +51,9 @@ describe("regenerateAgentsTsIfPresent", () => {
     const path = join(cwd, ".smithers", "agents.ts");
     // Sentinel present but deliberately stale content → regeneration changes it.
     writeFileSync(path, "// smithers-source: generated\n// STALE PLACEHOLDER\n", "utf8");
+    const env = { HOME: cwd, PATH: "", SMITHERS_HOME: join(cwd, ".smithers-home") };
 
-    const first = regenerateAgentsTsIfPresent(cwd);
+    const first = regenerateAgentsTsIfPresent(cwd, env);
     expect(first.rewritten).toBe(true);
     expect(first.path).toBe(path);
     const regenerated = readFileSync(path, "utf8");
@@ -60,7 +61,7 @@ describe("regenerateAgentsTsIfPresent", () => {
     expect(regenerated).not.toContain("STALE PLACEHOLDER");
 
     // The file now equals the canonical output → the second pass reports no changes.
-    const second = regenerateAgentsTsIfPresent(cwd);
+    const second = regenerateAgentsTsIfPresent(cwd, env);
     expect(second).toEqual({ rewritten: false, path, reason: "no changes" });
     expect(readFileSync(path, "utf8")).toBe(regenerated);
   }, 30000); // first call pays one-time scaffold generation cost; > default 5s under load

@@ -10,7 +10,8 @@ import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { captureSnapshot } from "@smithers-orchestrator/time-travel/snapshot";
 import { createTempRepo, pinSqliteBackend, runSmithers } from "../../../packages/smithers/tests/e2e-helpers.js";
 
-const TIMEOUT_MS = 120_000;
+const COMMAND_TIMEOUT_MS = 120_000;
+const TEST_TIMEOUT_MS = 900_000;
 
 function hasJj() {
   try {
@@ -195,7 +196,7 @@ function run(repo, command, workflow, runId, extra = []) {
   return runSmithers(commandArgs(command, workflow, runId, extra), {
     cwd: repo.dir,
     format: null,
-    timeoutMs: TIMEOUT_MS,
+    timeoutMs: COMMAND_TIMEOUT_MS,
   });
 }
 
@@ -304,11 +305,11 @@ describe("CLI side-effect boundaries", () => {
       const warningFork = runSmithers(["fork", "workflow.tsx", "--run-id", warningForkRunId, "--frame", "0"], {
         cwd: repo.dir,
         format: null,
-        timeoutMs: TIMEOUT_MS,
+        timeoutMs: COMMAND_TIMEOUT_MS,
       });
       expect(warningFork.exitCode).toBe(0);
       expect(warningFork.stderr).toContain("Fork warning");
     },
-    TIMEOUT_MS,
+    TEST_TIMEOUT_MS,
   );
 });

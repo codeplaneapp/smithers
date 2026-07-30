@@ -38,8 +38,9 @@ export type ButtonProps = ComponentProps<"button"> &
     asChild?: boolean;
     /**
      * Render a Spinner before the children, mark the button `aria-busy`, and
-     * disable interaction while work is in flight. Ignored under `asChild`
-     * (the Slot cannot inject a spinner into an arbitrary child element).
+     * disable interaction while work is in flight. Under `asChild`, busy and
+     * aria-disabled semantics are forwarded but no Spinner is injected (the
+     * Slot cannot inject one into an arbitrary child element).
      */
     loading?: boolean;
   };
@@ -65,9 +66,16 @@ export function Button({
 }: ButtonProps) {
   useInjectUiCss();
   const classes = cn(buttonVariants({ variant, size }), className);
+  const interactionDisabled = disabled || loading;
   if (asChild) {
     return (
-      <Slot.Root data-slot="button" className={classes} {...props}>
+      <Slot.Root
+        data-slot="button"
+        className={classes}
+        aria-disabled={interactionDisabled ? true : undefined}
+        aria-busy={loading ? true : undefined}
+        {...props}
+      >
         {children}
       </Slot.Root>
     );
@@ -77,7 +85,7 @@ export function Button({
       data-slot="button"
       type={type ?? "button"}
       className={classes}
-      disabled={disabled || loading}
+      disabled={interactionDisabled}
       aria-busy={loading ? true : undefined}
       {...props}
     >

@@ -19,6 +19,7 @@ type MonitorCondition =
 type MonitorProps = {
   id?: string; // default "monitor"
   watchRunId: string; // the run being watched, usually ctx.input.watchRunId
+  watchWorkflowPath?: string; // workflow path used by safe resume/retry commands
   agent: AgentLike | AgentLike[]; // samples and classifies
   healthOutput: OutputTarget; // must include `condition` and `runStatus`
   actionOutput?: OutputTarget; // defaults to healthOutput

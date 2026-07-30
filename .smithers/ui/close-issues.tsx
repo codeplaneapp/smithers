@@ -18,7 +18,8 @@ type ApprovalSummary = {
   runId: string;
   nodeId: string;
   iteration: number;
-  request?: { title?: string; summary?: string };
+  requestTitle?: string;
+  requestSummary?: string;
 };
 type Issue = { number: number; title: string };
 type NodeStatus = "pending" | "running" | "done" | "failed" | "waiting" | "skipped";
@@ -152,7 +153,7 @@ function statusClass(status: string | undefined) {
   return "";
 }
 
-function App() {
+export function App() {
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>(runIdFromUrl());
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -297,10 +298,9 @@ function App() {
 
             {pendingApproval ? (
               <div className="gate" data-testid="approval-gate">
-                <h2>⏸ Approval required — land these fixes to main?</h2>
+                <h2>⏸ {pendingApproval.requestTitle ?? "Approval required — land these fixes to main?"}</h2>
                 <pre>
-                  {pendingApproval.request?.summary ??
-                    "Review the prepared PRs, then approve to start the merge queue."}
+                  {pendingApproval.requestSummary ?? "Review the prepared PRs, then approve to start the merge queue."}
                 </pre>
                 <div className="gate-actions">
                   <input

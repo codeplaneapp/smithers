@@ -1,54 +1,63 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { availableParallelism, tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../../../..");
 const CLI_ENTRY = resolve(REPO_ROOT, "apps/cli/src/index.js");
 const EXAMPLES_DIR = resolve(REPO_ROOT, "examples");
+const EXAMPLE_COPY_EXCLUDES = new Set(["node_modules", "swe-evo", "bun-port-smithers"]);
 
-// The committed examples import the AI SDK (`ai`, `@ai-sdk/anthropic`) purely to
-// declare agents; those packages are deliberately NOT installed at the repo root
-// (see docs-examples-smoke.test.js, which stubs them the same way). Rendering a
-// workflow graph only loads the module — it never invokes an agent — so a tiny
-// stub resolvable from examples/ is enough to let every example load. We write it
-// into examples/node_modules (gitignored) and clean it up afterward.
-const AI_STUB_PACKAGES = {
-  "ai/package.json": JSON.stringify({ type: "module", exports: { ".": "./index.js" } }) + "\n",
-  "ai/index.js": [
-    "export class ToolLoopAgent { constructor(opts = {}) { this.opts = opts; } }",
-    "export const Output = { object(value) { return value; } };",
-    "export function stepCountIs() { return () => false; }",
-    "export function tool(def) { return def; }",
-    "",
-  ].join("\n"),
-  "@ai-sdk/anthropic/package.json": JSON.stringify({ type: "module", exports: { ".": "./index.js" } }) + "\n",
-  "@ai-sdk/anthropic/index.js": 'export function anthropic(model) { return { provider: "anthropic", model }; }\n',
-  "@ai-sdk/openai/package.json": JSON.stringify({ type: "module", exports: { ".": "./index.js" } }) + "\n",
-  "@ai-sdk/openai/index.js": 'export function openai(model) { return { provider: "openai", model }; }\n',
-};
+function writeFile(path, contents) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, contents, "utf8");
+}
 
-function writeAiSdkStubs() {
-  const created = [];
-  const modulesDir = resolve(EXAMPLES_DIR, "node_modules");
-  for (const [relative, contents] of Object.entries(AI_STUB_PACKAGES)) {
-    const target = resolve(modulesDir, relative);
-    // Never clobber a real install: only write (and later remove) stub files we own.
-    if (existsSync(target)) continue;
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, contents, "utf8");
-    created.push(target);
-  }
-  return () => {
-    for (const packageDir of ["ai", "@ai-sdk"]) {
-      rmSync(resolve(modulesDir, packageDir), { recursive: true, force: true });
-    }
-    // Only remove examples/node_modules if we created it and nothing else landed there.
-    if (created.length > 0 && existsSync(modulesDir) && readdirSync(modulesDir).length === 0) {
-      rmSync(modulesDir, { recursive: true, force: true });
-    }
-  };
+function symlinkDir(target, path) {
+  mkdirSync(dirname(path), { recursive: true });
+  symlinkSync(target, path, "dir");
+}
+
+function createExampleProject() {
+  const dir = mkdtempSync(join(tmpdir(), "smithers-example-graphs-"));
+  const examplesDir = join(dir, "examples");
+  cpSync(EXAMPLES_DIR, examplesDir, {
+    recursive: true,
+    filter: (source) => {
+      const relative = source.slice(EXAMPLES_DIR.length + 1);
+      return !EXAMPLE_COPY_EXCLUDES.has(relative.split(/[\\/]/, 1)[0]);
+    },
+  });
+  const modulesDir = join(dir, "node_modules");
+  symlinkDir(resolve(REPO_ROOT, "packages/smithers"), join(modulesDir, "smithers-orchestrator"));
+  symlinkDir(resolve(REPO_ROOT, "node_modules/@smithers-orchestrator"), join(modulesDir, "@smithers-orchestrator"));
+  symlinkDir(resolve(REPO_ROOT, "node_modules/react"), join(modulesDir, "react"));
+  symlinkDir(resolve(REPO_ROOT, "node_modules/react-dom"), join(modulesDir, "react-dom"));
+  symlinkDir(resolve(REPO_ROOT, "node_modules/zod"), join(modulesDir, "zod"));
+  writeFile(
+    join(modulesDir, "ai/package.json"),
+    JSON.stringify({ type: "module", exports: { ".": "./index.js" } }) + "\n",
+  );
+  writeFile(
+    join(modulesDir, "ai/index.js"),
+    [
+      "export class ToolLoopAgent { constructor(opts = {}) { this.opts = opts; } }",
+      "export const Output = { object(value) { return value; } };",
+      "export function stepCountIs() { return () => false; }",
+      "export function tool(def) { return def; }",
+      "",
+    ].join("\n"),
+  );
+  writeFile(
+    join(modulesDir, "@ai-sdk/anthropic/package.json"),
+    JSON.stringify({ type: "module", exports: { ".": "./index.js" } }) + "\n",
+  );
+  writeFile(
+    join(modulesDir, "@ai-sdk/anthropic/index.js"),
+    'export function anthropic(model) { return { provider: "anthropic", model }; }\n',
+  );
+  return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 const GRAPH_INPUT = {
   repo: ".",
@@ -58,41 +67,86 @@ const GRAPH_INPUT = {
   diff: "diff --git a/example b/example",
   maxIterations: 1,
 };
+const GRAPH_CONCURRENCY = Math.min(8, availableParallelism());
 
 function findTopLevelExampleWorkflows() {
   return Array.from(new Bun.Glob("examples/*.jsx").scanSync({ cwd: REPO_ROOT })).sort();
 }
 
-test("top-level example workflows render as graphs", () => {
+async function renderExample(projectDir, workerDir, example) {
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "run",
+      CLI_ENTRY,
+      "graph",
+      resolve(projectDir, example),
+      "--input",
+      JSON.stringify(GRAPH_INPUT),
+      "--format",
+      "json",
+    ],
+    {
+      cwd: workerDir,
+      env: {
+        ...process.env,
+        ANTHROPIC_API_KEY: "sk-ant-test",
+        OPENAI_API_KEY: "sk-test",
+        GEMINI_API_KEY: "",
+        GOOGLE_API_KEY: "",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  return {
+    error: exitCode === 0 ? null : new Error(`graph subprocess exited with code ${exitCode}`),
+    stdout,
+    stderr,
+  };
+}
+
+test("top-level example workflows render as graphs", async () => {
   const examples = findTopLevelExampleWorkflows();
   expect(examples).toContain("examples/smoketest.jsx");
   expect(examples.length).toBeGreaterThan(50);
 
-  const cleanupStubs = writeAiSdkStubs();
+  const project = createExampleProject();
   try {
-    for (const example of examples) {
-      const result = spawnSync(
-        process.execPath,
-        ["run", CLI_ENTRY, "graph", example, "--input", JSON.stringify(GRAPH_INPUT), "--format", "json"],
-        {
-          cwd: REPO_ROOT,
-          env: {
-            ...process.env,
-            ANTHROPIC_API_KEY: "sk-ant-test",
-            OPENAI_API_KEY: "sk-test",
-            GEMINI_API_KEY: "",
-            GOOGLE_API_KEY: "",
-          },
-          encoding: "utf8",
-          maxBuffer: 10 * 1024 * 1024,
-        },
-      );
+    const results = new Array(examples.length);
+    let nextExample = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(GRAPH_CONCURRENCY, examples.length) }, async (_, workerIndex) => {
+        const workerDir = join(project.dir, ".graph-workers", String(workerIndex));
+        mkdirSync(workerDir, { recursive: true });
+        while (nextExample < examples.length) {
+          const index = nextExample++;
+          results[index] = await renderExample(project.dir, workerDir, examples[index]);
+        }
+      }),
+    );
 
-      if (result.status !== 0) {
-        throw new Error(`${example} failed:\nstdout:${result.stdout}\nstderr:${result.stderr}`);
+    for (const [index, result] of results.entries()) {
+      const example = examples[index];
+      if (result.error) {
+        throw new Error(
+          `${example} failed (${result.error.message}):\nstdout:${result.stdout}\nstderr:${result.stderr}`,
+        );
       }
 
-      const graph = JSON.parse(result.stdout);
+      let graph;
+      try {
+        graph = JSON.parse(result.stdout);
+      } catch (error) {
+        throw new Error(
+          `${example} emitted invalid JSON (${error instanceof Error ? error.message : String(error)}):\nstdout:${result.stdout}\nstderr:${result.stderr}`,
+        );
+      }
       expect(graph.xml?.kind, `${example} did not render an XML graph`).toBe("element");
       expect(Array.isArray(graph.tasks), `${example} did not expose graph tasks`).toBe(true);
 
@@ -100,7 +154,7 @@ test("top-level example workflows render as graphs", () => {
       expect(source.length, `${example} should be a committed source file`).toBeGreaterThan(0);
     }
   } finally {
-    cleanupStubs();
+    project.cleanup();
   }
   // 100+ examples, each a separate CLI subprocess at ~2.4s on an idle machine, so
   // the old 240s budget was exactly the serial runtime: one added example or any

@@ -82,6 +82,52 @@ describe("WaitForEvent durable resync signal floor", () => {
     });
   });
 
+  test("skips signals already handled by an earlier matching wait", async () => {
+    let query;
+    const adapter = {
+      listAttemptsForRun: () =>
+        Effect.succeed([
+          {
+            nodeId: "first-wait",
+            iteration: 0,
+            metaJson: JSON.stringify({
+              waitForEvent: {
+                signalName: "deploy.ready",
+                correlationId: "pr-42",
+                startedAtMs: 1_000,
+                resolvedSignalSeq: 7,
+              },
+            }),
+          },
+        ]),
+      listSignals: (_runId, nextQuery) => {
+        query = nextQuery;
+        return Effect.succeed([]);
+      },
+    };
+
+    await __deferredStateBridgeInternals.syncWaitForEventDurableDeferredFromDb(
+      adapter,
+      "run-1",
+      { nodeId: "second-wait", iteration: 0 },
+      {
+        signalName: "deploy.ready",
+        correlationId: "pr-42",
+        onTimeout: "fail",
+        timeoutMs: null,
+        waitAsync: false,
+        startedAtMs: 5_000,
+      },
+    );
+
+    expect(query).toMatchObject({
+      signalName: "deploy.ready",
+      correlationId: "pr-42",
+      afterSeq: 7,
+      limit: 1,
+    });
+  });
+
   test("accepts a queued signal for the next iteration of the same wait", async () => {
     let query;
     const adapter = {
