@@ -244,6 +244,44 @@ describe("CollapsiblePanel", () => {
     expect(panel()!.getAttribute("data-state")).toBe("open");
   });
 
+  test("does not toggle when a button in the title is activated", async () => {
+    let activations = 0;
+    await render(
+      <CollapsiblePanel title={<button onClick={() => activations++}>Title action</button>}>
+        <div>panel body</div>
+      </CollapsiblePanel>,
+    );
+
+    const titleButton = document.querySelector(".sui-collapsible-title button");
+    await click(titleButton!);
+
+    expect(activations).toBe(1);
+    expect(panel()!.getAttribute("data-state")).toBe("open");
+    expect(document.body.textContent).toContain("panel body");
+  });
+
+  test("toggles on Enter and Space from the focused header", async () => {
+    await render(
+      <CollapsiblePanel title="Keyboard">
+        <div>keyboard body</div>
+      </CollapsiblePanel>,
+    );
+
+    const panelHeader = header() as HTMLElement;
+    panelHeader.focus();
+    expect(document.activeElement).toBe(panelHeader);
+
+    await act(async () => {
+      panelHeader.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    expect(panel()!.getAttribute("data-state")).toBe("closed");
+
+    await act(async () => {
+      panelHeader.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true }));
+    });
+    expect(panel()!.getAttribute("data-state")).toBe("open");
+  });
+
   test("controlled panel defers to onOpenChange and does not self-toggle", async () => {
     const changes: boolean[] = [];
     await render(

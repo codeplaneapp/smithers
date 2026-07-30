@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Markdown, SMITHERS_UI_STYLE_ATTR } from "../src/index";
+import { Markdown, safeMarkdownHref, SMITHERS_UI_STYLE_ATTR } from "../src/index";
+import { markdownBlockParser } from "../src/primitives/markdown";
 
 /**
  * The mixed-block structure and HTML-escaping cases render with
@@ -26,6 +27,34 @@ const SAMPLE = [
   "const x = 1;",
   "```",
 ].join("\n");
+
+describe("safeMarkdownHref", () => {
+  test("rejects browser-normalized control characters and unsafe schemes", () => {
+    for (const href of [
+      "java\tscript:alert(1)",
+      "java\nscript:alert(1)",
+      "java\rscript:alert(1)",
+      "\x01javascript:alert(1)",
+      "javascript:alert(1)",
+      "data:text/html,<script>alert(1)</script>",
+    ]) {
+      expect(safeMarkdownHref(href)).toBeUndefined();
+    }
+  });
+
+  test("allows navigable schemes, relative links, and anchors", () => {
+    for (const href of [
+      "https://smithers.sh/docs",
+      "http://smithers.sh/docs",
+      "mailto:hello@smithers.sh",
+      "/docs/getting-started",
+      "docs/getting-started",
+      "#anchor",
+    ]) {
+      expect(safeMarkdownHref(href)).toBe(href);
+    }
+  });
+});
 
 describe("Markdown (static markup)", () => {
   test("is a memoized component (re-renders only on prop change)", () => {
@@ -81,6 +110,33 @@ describe("Markdown (static markup)", () => {
     expect(html).toContain("mine");
     expect(html).toContain("sui-md");
     expect(html).toContain('data-slot="markdown"');
+  });
+
+  test("matches the uncached renderer across markdown block shapes", () => {
+    const inputs = [
+      "",
+      "plain text",
+      "first line\nsecond line",
+      "first paragraph\n\nsecond paragraph",
+      "# Heading\nparagraph\n## Next",
+      "- one\n- two\nparagraph",
+      "1. one\n2. two\n\n- three",
+      "```\nconst x = 1;",
+      "```ts\nconst x = 1;\n```\nAfter",
+      "same\n\nsame\n\nlast",
+      "Raw <tag> and **bold**, *italic*, `code`, and [link](/docs).",
+      SAMPLE,
+    ];
+
+    for (const content of inputs) {
+      const cached = renderToStaticMarkup(<Markdown content={content} />);
+      const uncached = renderToStaticMarkup(
+        <div data-slot="markdown" className="sui-md">
+          {markdownBlockParser.render(content)}
+        </div>,
+      );
+      expect(cached).toBe(uncached);
+    }
   });
 });
 
@@ -147,5 +203,24 @@ describe("Markdown (link activation)", () => {
       anchor.dispatchEvent(event);
     });
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  test("appending streamed content does not re-parse completed blocks", async () => {
+    const parse = spyOn(markdownBlockParser, "render");
+    try {
+      await render(<Markdown content={"First.\n\nSecond"} />);
+      expect(parse.mock.calls.filter(([source]) => source === "First.")).toHaveLength(1);
+
+      await act(async () => root!.render(<Markdown content={"First.\n\nSecond grows"} />));
+      await act(async () => root!.render(<Markdown content={"First.\n\nSecond grows\n\nThird"} />));
+      const completedSecondParses = parse.mock.calls.filter(([source]) => source === "Second grows").length;
+      await act(async () => root!.render(<Markdown content={"First.\n\nSecond grows\n\nThird grows"} />));
+
+      expect(parse.mock.calls.filter(([source]) => source === "First.")).toHaveLength(1);
+      expect(parse.mock.calls.filter(([source]) => source === "Second grows")).toHaveLength(completedSecondParses);
+      expect(parse.mock.calls.filter(([source]) => source === "Third grows")).toHaveLength(1);
+    } finally {
+      parse.mockRestore();
+    }
   });
 });

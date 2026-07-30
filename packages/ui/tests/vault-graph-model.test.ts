@@ -104,6 +104,21 @@ describe("computeGraphModel", () => {
     expect(LINKS[0]!.source).toBe("Areas/Marketing.md");
     expect(NOTES[0]).not.toHaveProperty("x");
   });
+
+  test("seeds distinct finite positions so the pre-physics paint is not stacked at the origin", () => {
+    const { nodes } = computeGraphModel(NOTES, LINKS);
+    expect(nodes.length).toBeGreaterThan(1);
+    const seen = new Set<string>();
+    for (const node of nodes) {
+      expect(Number.isFinite(node.x)).toBe(true);
+      expect(Number.isFinite(node.y)).toBe(true);
+      const key = `${node.x}:${node.y}`;
+      expect(seen.has(key)).toBe(false);
+      seen.add(key);
+    }
+    // Ghost nodes are seeded too.
+    expect(nodes.find((n) => n.id === "Missing.md")?.x).toBeDefined();
+  });
 });
 
 describe("neighbourSet", () => {

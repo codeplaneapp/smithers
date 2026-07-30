@@ -79,6 +79,7 @@ export function createAutosaveDoc(options: AutosaveDocOptions): AutosaveDoc {
   let mtimeMs = options.initialMtimeMs;
   let cancelPending: (() => void) | null = null;
   let inflight = false;
+  let inflightDone: Promise<void> | null = null;
   let disposed = false;
   const listeners = new Set<() => void>();
 
@@ -127,6 +128,10 @@ export function createAutosaveDoc(options: AutosaveDocOptions): AutosaveDoc {
       return;
     }
     inflight = true;
+    let finishInflight!: () => void;
+    inflightDone = new Promise<void>((resolve) => {
+      finishInflight = resolve;
+    });
     const savingValue = value;
     emit("saving");
     try {
@@ -139,6 +144,8 @@ export function createAutosaveDoc(options: AutosaveDocOptions): AutosaveDoc {
       emit("dirty");
     } finally {
       inflight = false;
+      finishInflight();
+      inflightDone = null;
     }
     if (!disposed && state === "dirty") scheduleFlush();
   }
@@ -161,6 +168,7 @@ export function createAutosaveDoc(options: AutosaveDocOptions): AutosaveDoc {
     saveNow,
     async discardExternal() {
       if (disposed) return;
+      if (inflightDone) await inflightDone;
       if (options.readExternal) {
         try {
           const external = await options.readExternal();

@@ -40,6 +40,16 @@ const SAMPLE_PATCH = `diff --git a/src/auth/session.ts b/src/auth/session.ts
  }
 `;
 
+const WHITESPACE_STRIPPED_PATCH = [
+  "diff --git a/src/example.ts b/src/example.ts",
+  "--- a/src/example.ts",
+  "+++ b/src/example.ts",
+  "@@ -7,3 +7,3 @@",
+  " before",
+  " ",
+  " after",
+].join("\n").replace(/[ \t]+$/gm, "");
+
 describe("parseUnifiedFile", () => {
   test("parses a multi-hunk patch into DiffFile totals and hunks", () => {
     const file = parseUnifiedFile(SAMPLE_PATCH);
@@ -72,6 +82,15 @@ describe("parseUnifiedFile", () => {
         expect(line.ln).toBeUndefined();
       }
     }
+  });
+
+  test("treats whitespace-stripped empty hunk lines as context", () => {
+    const file = parseUnifiedFile(WHITESPACE_STRIPPED_PATCH);
+    expect(groupHunks(file)[0]!.lines).toEqual([
+      { kind: "context", lnOld: 7, ln: 7, text: "before" },
+      { kind: "context", lnOld: 8, ln: 8, text: "" },
+      { kind: "context", lnOld: 9, ln: 9, text: "after" },
+    ]);
   });
 
   test("detects an added file from /dev/null and new file mode", () => {
@@ -241,6 +260,13 @@ describe("DiffHunks markup", () => {
     expect(html).toContain("sui-diff-line sui-diff-add");
     expect(html).toContain("sui-diff-line sui-diff-del");
     expect(html).toContain("@@ -41,5 +41,6 @@");
+  });
+
+  test("renders whitespace-stripped empty hunk lines as context", () => {
+    const html = renderToStaticMarkup(<DiffHunks file={parseUnifiedFile(WHITESPACE_STRIPPED_PATCH)} />);
+    expect(html).toContain(
+      '<span class="sui-diff-ln sui-diff-ln-old">8</span><span class="sui-diff-ln sui-diff-ln-new">8</span><span class="sui-diff-sign"> </span><span class="sui-diff-text"></span>',
+    );
   });
 
   test("revealed by default renders every line and no expand button", () => {

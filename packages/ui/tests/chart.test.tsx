@@ -49,6 +49,27 @@ describe("<ChartContainer>", () => {
     // Recessive chrome restated in tokens, never series color on text.
     expect(html).toContain(".recharts-cartesian-axis-tick text");
   });
+
+  test("omits unsafe config keys and color values from generated CSS", () => {
+    const config: Parameters<typeof ChartContainer>[0]["config"] = {
+      safe_key: { color: "rgb(42 120 214 / 0.8)" },
+      ["bad};body"]: { color: "red" },
+      badColor: { color: "red; } body { color: red" },
+      styleClose: { color: "</style><style>body{color:red}" },
+    };
+    const html = renderToStaticMarkup(
+      <ChartContainer id="security" config={config}>
+        <BarChart width={400} height={200} data={[]}>
+          <Bar dataKey="safe_key" fill="var(--color-safe_key)" />
+        </BarChart>
+      </ChartContainer>,
+    );
+
+    expect(html).toContain("--color-safe_key: rgb(42 120 214 / 0.8);");
+    expect(html).not.toContain("--color-bad");
+    expect(html).not.toContain("--color-styleClose");
+    expect(html).not.toContain("bad};body");
+  });
 });
 
 describe("<ChartTooltipContent>", () => {

@@ -75,4 +75,71 @@ describe("OutlineView", () => {
       container.remove();
     }
   });
+
+  test("arrow keys move a roving tab stop between treeitems", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<OutlineView markdown={MD} onHeadingClick={() => {}} />);
+      });
+      const items = () => Array.from(container.querySelectorAll<HTMLElement>('[role="treeitem"]'));
+      // One tab stop into the tree: first item only.
+      expect(items().map((el) => el.tabIndex)).toEqual([0, -1, -1, -1]);
+
+      await act(async () => {
+        items()[0]!.focus();
+        items()[0]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+      });
+      expect(document.activeElement).toBe(items()[1]);
+      expect(items().map((el) => el.tabIndex)).toEqual([-1, 0, -1, -1]);
+
+      await act(async () => {
+        items()[1]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }));
+      });
+      expect(document.activeElement).toBe(items()[0]);
+      expect(items().map((el) => el.tabIndex)).toEqual([0, -1, -1, -1]);
+
+      // Wrap-around at both ends, plus Home/End.
+      await act(async () => {
+        items()[0]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }));
+      });
+      expect(document.activeElement).toBe(items()[3]);
+      await act(async () => {
+        items()[3]!.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true }));
+      });
+      expect(document.activeElement).toBe(items()[0]);
+      await act(async () => {
+        items()[0]!.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true }));
+      });
+      expect(document.activeElement).toBe(items()[3]);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  test("Enter is not hijacked, so native button activation still fires the click handler", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<OutlineView markdown={MD} onHeadingClick={() => {}} />);
+      });
+      const first = container.querySelector<HTMLElement>('[role="treeitem"]')!;
+      const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+      await act(async () => {
+        first.focus();
+        first.dispatchEvent(event);
+      });
+      expect(event.defaultPrevented).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
 });

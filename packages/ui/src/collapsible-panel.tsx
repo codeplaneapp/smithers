@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useState, type ComponentProps, type KeyboardEvent, type ReactNode } from "react";
+import { useState, type ComponentProps, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { cn } from "./cn";
 import { StatusPill } from "./status-pill";
 import { useInjectUiCss } from "./styles";
@@ -71,10 +71,16 @@ export function CollapsiblePanel({
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.target !== event.currentTarget) return;
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       toggle();
     }
+  }
+
+  function onClick(event: MouseEvent<HTMLDivElement>) {
+    if (event.target !== event.currentTarget) return;
+    toggle();
   }
 
   const showFallback = pending || isEmptyContent(children);
@@ -91,7 +97,7 @@ export function CollapsiblePanel({
         role="button"
         tabIndex={0}
         aria-expanded={open}
-        onClick={toggle}
+        onClick={onClick}
         onKeyDown={onKeyDown}
       >
         <span className="sui-collapsible-heading">
