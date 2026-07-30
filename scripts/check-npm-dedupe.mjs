@@ -150,11 +150,13 @@ function main() {
 
     console.log(`resolving ${packages.length} workspace packages with npm arborist (registry metadata)...`);
     const install = spawnSync(
-      "npm",
+      process.platform === "win32" ? "npm.cmd" : "npm",
       ["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error"],
       { cwd: tmp, stdio: "inherit", timeout: 10 * 60_000 },
     );
-    if (install.status !== 0) throw new Error("npm install --package-lock-only failed");
+    if (install.error || install.status !== 0) {
+      throw new Error(`npm install --package-lock-only failed: ${install.error?.message ?? `exit ${install.status}`}`);
+    }
     const lock = JSON.parse(readFileSync(join(tmp, "package-lock.json"), "utf8"));
     const lockPackages = lock.packages ?? {};
 
