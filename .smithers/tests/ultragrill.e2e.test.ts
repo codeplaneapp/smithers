@@ -111,6 +111,8 @@ beforeAll(async () => {
   binDir = mkdtempSync(join(tmpdir(), "ultragrill-bin-"));
   const claudeSrc = [
     `#!${process.execPath}`,
+    `const args = process.argv.slice(2);`,
+    `if (args.join(" ") === "auth status") { process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }) + "\\n"); process.exit(0); }`,
     `const payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? "{}";`,
     `const text = "\\u0060\\u0060\\u0060json\\n" + payload + "\\n\\u0060\\u0060\\u0060\\n";`,
     `process.stdout.write(JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text }] }, session_id: "ultragrill-e2e" }) + "\\n");`,
@@ -182,11 +184,10 @@ browserTest(
         await page.waitForFunction(
           () => {
             const text = document.body.textContent ?? "";
-            const worker = document.querySelector('[data-testid="ug-feed-worker"]')?.textContent ?? "";
-            return (
-              (text.includes("Settings Page — Living Spec") && text.includes("dark-mode toggle")) ||
-              worker.includes("failed")
+            const workerFailed = Array.from(document.querySelectorAll('[data-testid="ug-feed-worker"]')).some((entry) =>
+              (entry.textContent ?? "").includes("failed"),
             );
+            return (text.includes("Settings Page — Living Spec") && text.includes("dark-mode toggle")) || workerFailed;
           },
           undefined,
           { timeout: 60_000 },
