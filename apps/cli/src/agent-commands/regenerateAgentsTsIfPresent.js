@@ -8,9 +8,10 @@ import { extractGeneratedDetectionProviderIds, generateAgentsTs } from "../agent
  * to reflect the current accounts registry. User-edited files are left alone.
  *
  * @param {string} [cwd]
+ * @param {NodeJS.ProcessEnv} [env]
  * @returns {{ rewritten: boolean; path: string | null; reason?: string }}
  */
-export function regenerateAgentsTsIfPresent(cwd = process.cwd()) {
+export function regenerateAgentsTsIfPresent(cwd = process.cwd(), env = process.env) {
   const path = join(cwd, ".smithers", "agents.ts");
   if (!existsSync(path)) {
     return { rewritten: false, path: null, reason: "no .smithers/agents.ts in cwd" };
@@ -30,7 +31,7 @@ export function regenerateAgentsTsIfPresent(cwd = process.cwd()) {
   const scaffoldProviderIds = Object.entries(scaffoldFiles)
     .filter(([, file]) => existsSync(join(cwd, ".smithers", "agents", file)))
     .map(([providerId]) => providerId);
-  const next = generateAgentsTs(process.env, {
+  const next = generateAgentsTs(env, {
     cwd,
     preserveProviderIds: extractGeneratedDetectionProviderIds(existing),
     scaffoldProviderIds,
