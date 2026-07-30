@@ -1,8 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 
+const previousDisableAutoMain = process.env.SMITHERS_CLI_DISABLE_AUTO_MAIN;
 process.env.SMITHERS_CLI_DISABLE_AUTO_MAIN = "1";
 const { __retryTaskCliInternals } = await import("../src/index.js");
+if (previousDisableAutoMain === undefined) {
+  delete process.env.SMITHERS_CLI_DISABLE_AUTO_MAIN;
+} else {
+  process.env.SMITHERS_CLI_DISABLE_AUTO_MAIN = previousDisableAutoMain;
+}
 
 describe("retry-task rollback ownership", () => {
   test("surfaces a lost rollback CAS as an aggregate failure", async () => {

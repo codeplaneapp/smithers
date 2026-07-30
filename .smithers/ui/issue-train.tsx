@@ -62,13 +62,12 @@ function extractWaves(value: unknown): number[][] {
   return raw.map((wave) => (Array.isArray(wave) ? wave.map(Number).filter(Number.isFinite) : []));
 }
 
-/** Event frames may carry the lifecycle event nested (payload.event/payload.payload.nodeId) or flat. */
+/** Decode the durable run-event frame emitted by useGatewayRunEvents. */
 function eventParts(ev: unknown): { type: string; nodeId: string } | null {
   if (!isRecord(ev)) return null;
   const payload = isRecord(ev.payload) ? ev.payload : undefined;
-  const inner = payload && isRecord(payload.payload) ? payload.payload : undefined;
-  const type = asString(ev.type) ?? asString(payload?.event) ?? asString(ev.event) ?? "";
-  const nodeId = asString(ev.nodeId) ?? asString(inner?.nodeId) ?? asString(payload?.nodeId) ?? "";
+  const type = asString(ev.event) ?? "";
+  const nodeId = asString(payload?.nodeId) ?? "";
   if (!type || !nodeId) return null;
   return { type, nodeId };
 }

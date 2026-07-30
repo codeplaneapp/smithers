@@ -11,6 +11,8 @@ const previousActEnvironment = reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT;
 reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 
 let mockedApprovals: unknown[] = [];
+let mockedEvents: unknown[] = [];
+let mockedDiscoverOutput: unknown;
 
 mock.module("smithers-orchestrator/gateway-react", () => ({
   ...gatewayReact,
@@ -25,9 +27,9 @@ mock.module("smithers-orchestrator/gateway-react", () => ({
     refetch: async () => {},
   }),
   useGatewayRun: () => ({ data: { runId: "run-ci-test", status: "waiting-approval" }, refetch: async () => {} }),
-  useGatewayRunEvents: () => ({ events: [], refetch: async () => {} }),
+  useGatewayRunEvents: () => ({ events: mockedEvents, refetch: async () => {} }),
   useGatewayApprovals: () => ({ data: mockedApprovals, refetch: async () => {} }),
-  useGatewayNodeOutput: () => ({ data: undefined, refetch: async () => {} }),
+  useGatewayNodeOutput: () => ({ data: mockedDiscoverOutput, refetch: async () => {} }),
 }));
 
 const { App } = await import("./close-issues");
@@ -37,6 +39,8 @@ let host: HTMLDivElement;
 
 beforeEach(() => {
   mockedApprovals = [];
+  mockedEvents = [];
+  mockedDiscoverOutput = undefined;
   host = document.createElement("div");
   document.body.replaceChildren(host);
   root = createRoot(host);
@@ -94,5 +98,32 @@ describe("close-issues approval gate", () => {
 
     expect(host.querySelector('[data-testid="approval-gate"]')).toBeNull();
     expect(host.textContent).not.toContain("Unrelated gate");
+  });
+
+  test("derives issue phases and merged progress from durable run-event frames", async () => {
+    mockedDiscoverOutput = {
+      row: { issues: [{ number: 41, title: "Fix event decoding" }], summary: "One issue found." },
+    };
+    mockedEvents = [
+      {
+        type: "event",
+        event: "NodeStarted",
+        payload: { runId: "run-ci-test", nodeId: "issue-41-implement" },
+        seq: 1,
+      },
+      {
+        type: "event",
+        event: "NodeFinished",
+        payload: { runId: "run-ci-test", nodeId: "merge-41" },
+        seq: 2,
+      },
+    ];
+
+    await act(async () => root.render(<App />));
+
+    expect(host.querySelector('[data-testid="issue-41-implement"]')?.getAttribute("data-status")).toBe("running");
+    expect(host.querySelector('[data-testid="issue-41-merge"]')?.getAttribute("data-status")).toBe("done");
+    expect(host.querySelector('[data-testid="merged-count"]')?.textContent).toContain("1/1 merged");
+    expect(host.querySelector('[data-testid="banner-done"]')).not.toBeNull();
   });
 });

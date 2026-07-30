@@ -101,9 +101,10 @@ function isFinished(status: string | undefined) {
 
 function eventLabel(ev: unknown): { text: string; kind: string } {
   if (!isRecord(ev)) return { text: String(ev), kind: "" };
-  const type = asString(ev.type) ?? asString(ev.kind) ?? "event";
-  const node = asString(ev.nodeId) ?? asString(ev.taskId);
-  const message = asString(ev.message) ?? asString(ev.text) ?? asString(ev.chunk);
+  const payload = isRecord(ev.payload) ? ev.payload : {};
+  const type = asString(ev.event) ?? "event";
+  const node = asString(payload.nodeId) ?? asString(payload.taskId);
+  const message = asString(payload.message) ?? asString(payload.text) ?? asString(payload.chunk);
   const parts = [type];
   if (node) parts.push(node);
   const head = parts.join(" · ");

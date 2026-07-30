@@ -75,8 +75,9 @@ function buildNodeStatus(events: unknown[]): Map<string, NodeStatus> {
   const map = new Map<string, NodeStatus>();
   for (const ev of events) {
     if (!isRecord(ev)) continue;
-    const nodeId = asString(ev.nodeId);
-    const type = asString(ev.type);
+    const payload = isRecord(ev.payload) ? ev.payload : {};
+    const nodeId = asString(payload.nodeId);
+    const type = asString(ev.event);
     if (!nodeId || !type) continue;
     if (type === "NodeFinished") map.set(nodeId, "done");
     else if (type === "NodeFailed" || type === "NodeCancelled") map.set(nodeId, "failed");
