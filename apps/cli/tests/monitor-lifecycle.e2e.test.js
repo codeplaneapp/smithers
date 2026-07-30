@@ -94,6 +94,25 @@ function childRunIds(repo, parentRunId) {
   }
 }
 
+/**
+ * @param {import("../../../packages/smithers/tests/e2e-helpers.js").TempRepo} repo
+ * @param {string} parentRunId
+ * @param {string} expectedStatus
+ * @param {number} timeoutMs
+ */
+async function waitForChildRunStatus(repo, parentRunId, expectedStatus, timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  let runId;
+  let status;
+  while (Date.now() < deadline) {
+    [runId] = childRunIds(repo, parentRunId);
+    status = runId ? inspect(repo, runId).json?.run?.status : undefined;
+    if (status === expectedStatus) break;
+    await Bun.sleep(250);
+  }
+  return { runId, status };
+}
+
 const TERMINAL = new Set(["finished", "failed", "cancelled", "continued"]);
 
 /**
@@ -219,15 +238,12 @@ describe("monitor workflow lifecycle", () => {
       );
       expect(parked.exitCode, `${parked.stdout}\n${parked.stderr}`).toBe(3);
 
-      let monitorRunId;
-      let monitorStatus;
-      for (let attempt = 0; attempt < 120; attempt += 1) {
-        [monitorRunId] = childRunIds(repo, "watched-parked");
-        monitorStatus = monitorRunId ? inspect(repo, monitorRunId).json?.run?.status : undefined;
-        if (monitorStatus === "running") break;
-        await Bun.sleep(250);
-      }
-      expect(monitorStatus).toBe("running");
+      const { runId: monitorRunId, status: monitorStatus } = await waitForChildRunStatus(
+        repo,
+        "watched-parked",
+        "running",
+      );
+      expect(monitorStatus, `monitor ${monitorRunId ?? "not started"}`).toBe("running");
 
       const approved = runSmithers(["approve", "watched-parked", "--node", "gate"], {
         cwd: repo.dir,
@@ -263,15 +279,12 @@ describe("monitor workflow lifecycle", () => {
         { cwd: repo.dir, timeoutMs: TIMEOUT_MS },
       );
       expect(parked.exitCode, `${parked.stdout}\n${parked.stderr}`).toBe(3);
-      let monitorRunId;
-      let monitorStatus;
-      for (let attempt = 0; attempt < 120; attempt += 1) {
-        [monitorRunId] = childRunIds(repo, "watched-rejected");
-        monitorStatus = monitorRunId ? inspect(repo, monitorRunId).json?.run?.status : undefined;
-        if (monitorStatus === "running") break;
-        await Bun.sleep(250);
-      }
-      expect(monitorStatus).toBe("running");
+      const { runId: monitorRunId, status: monitorStatus } = await waitForChildRunStatus(
+        repo,
+        "watched-rejected",
+        "running",
+      );
+      expect(monitorStatus, `monitor ${monitorRunId ?? "not started"}`).toBe("running");
 
       const approved = runSmithers(["approve", "watched-rejected", "--node", "gate"], {
         cwd: repo.dir,
