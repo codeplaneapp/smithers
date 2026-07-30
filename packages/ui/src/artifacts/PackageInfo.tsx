@@ -3,7 +3,7 @@ import type { ComponentProps } from "react";
 import { cn } from "../cn";
 import { useInjectUiCss } from "../styles";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
-import { safeHref } from "../agentic/safeHref";
+import { safeHref } from "../internal/safeHref";
 import { Snippet } from "./Snippet";
 import { CODING_ARTIFACTS_CSS_ID, artifactsCss } from "./artifactsCss";
 

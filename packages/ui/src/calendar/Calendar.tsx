@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { cn } from "../cn";
-import { safeHref } from "../agentic/safeHref";
+import { safeHref } from "../internal/safeHref";
 import { Button } from "../button";
 import { EmptyState } from "../empty-state";
 import { statusColor } from "../status";

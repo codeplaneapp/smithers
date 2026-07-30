@@ -11,7 +11,7 @@ import {
 import { cn } from "../cn";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { useInjectUiCss } from "../styles";
-import { safeHref } from "./safeHref";
+import { safeHref } from "../internal/safeHref";
 import { SOURCES_CITATIONS_CSS_ID, sourcesCitationsCss } from "./sourcesCitationsCss";
 
 export type SourceItem = { id: string; label: string; href?: string };
