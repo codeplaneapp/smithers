@@ -1169,7 +1169,7 @@ describe("summarize", () => {
       { small: true },
       { nested: { deep: [1, "two", null, { ok: false }] } },
       [1, undefined, "x"],
-      { "esc\"aped": "uni snowman ☃\nnewline" },
+      { 'esc"aped': "uni snowman ☃\nnewline" },
       { when: new Date("2024-01-02T03:04:05.000Z") },
       { skip: undefined, fn: () => 1, keep: 1 },
       { big: "x".repeat(500) },
