@@ -1264,8 +1264,8 @@ button {
   border: 1px solid color-mix(in srgb, var(--danger) 26%, var(--border));
   border-radius: 8px;
   background: var(--surface-glass-strong);
-  box-shadow: var(--shadow-soft);
-  color: var(--ink);
+  box-shadow: var(--shadow-2);
+  color: var(--text);
   font-size: 12px;
   line-height: 1.35;
 }
@@ -1275,7 +1275,7 @@ button {
 }
 
 .gateway-disconnected-banner span {
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 .toast-spinner {

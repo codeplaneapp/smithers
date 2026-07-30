@@ -243,8 +243,6 @@
 
 /* ---- Approval / human gate cards ---- */
 .gate-card.is-pending { border-left: 3px solid var(--st-waiting); }
-.gate-card.is-approved { border-left: 3px solid var(--st-ok); }
-.gate-card.is-denied { border-left: 3px solid var(--st-failed); }
 .gate-card.is-human { border-left: 3px solid #a34d9f; }
 .gate-summary { margin: 0 0 11px; font-size: 13.5px; color: var(--text-muted); line-height: 1.5; }
 .gate-summary b { color: var(--text); }
@@ -274,7 +272,6 @@
   cursor: pointer;
 }
 .file-tab.is-on { background: var(--inverse-bg); color: var(--inverse-text); }
-.file-tab.is-more { background: transparent; color: var(--text-faint); }
 .diff {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -327,8 +324,6 @@
 .log-line { white-space: pre-wrap; }
 .log-line .log-role { font-weight: 700; }
 .log-line.role-agent .log-role { color: var(--brand); }
-.log-line.role-tool .log-role { color: var(--st-info); }
-.log-line.role-noise { color: var(--text-placeholder); }
 
 /* ---- Timeline ---- */
 .timeline { padding: 20px 18px; }
@@ -395,8 +390,6 @@
 .score-tile { border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px; }
 .tile-name { font: 700 9.5px/1 ui-monospace, Menlo, monospace; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); }
 .tile-value { margin-top: 6px; font: 650 18px/1 Inter, sans-serif; letter-spacing: -0.02em; }
-.spark { display: flex; align-items: flex-end; gap: 3px; height: 38px; margin-top: 12px; }
-.spark span { flex: 1; background: color-mix(in srgb, var(--brand) 30%, var(--surface)); border-radius: 2px 2px 0 0; }
 
 /* ---- Launch / prompts / human option chips ---- */
 .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }

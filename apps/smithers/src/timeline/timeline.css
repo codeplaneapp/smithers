@@ -83,9 +83,8 @@
   justify-content: center;
 }
 
-/* Historical banner: viewing a frame behind the live head. Warning-toned, like
- * the base .tl-banner, with the running-task pill and the return-to-live button
- * docked inside it. */
+/* Historical banner: viewing a frame behind the live head. Warning-toned, with
+ * the running-task pill and the return-to-live button docked inside it. */
 .tl-historical {
   display: flex;
   align-items: center;

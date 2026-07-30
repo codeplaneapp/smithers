@@ -68,7 +68,7 @@
   gap: 12px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
 }
 .gw-approval-copy {
   display: flex;
