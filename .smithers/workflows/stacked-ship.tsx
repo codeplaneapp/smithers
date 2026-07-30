@@ -1032,10 +1032,11 @@ export default smithers((ctx) => {
   const pushGateReady = !input.push || (allReviewSettled && finalRow !== undefined);
   // The summary is the TERMINAL roll-up: it reports per-lane decisions and the
   // approved count, so it must wait for every reachable lane's review to settle
-  // (approved, or out of rounds). The push path gets that for free because push
-  // itself is gated on allReviewSettled; the no-push path has to ask directly,
-  // otherwise the run ends with a roll-up that reports 0 approved lanes.
-  const summaryReady = !input.push ? allReviewSettled && (finalRow !== undefined || !allGreen) : pushRow !== undefined;
+  // (approved, or out of rounds). A requested push never mounts when a lane
+  // remains red, so that path also needs the settled-review fallback.
+  const summaryReady = input.push
+    ? pushRow !== undefined || (allReviewSettled && (finalRow !== undefined || !allGreen))
+    : allReviewSettled && (finalRow !== undefined || !allGreen);
 
   return (
     <Workflow name="stacked-ship">
@@ -1290,6 +1291,14 @@ export default smithers((ctx) => {
                   }));
                   const green = details.filter((detail) => detail.hygieneGreen).length;
                   const approved = details.filter((detail) => detail.decision === "approved").length;
+                  const pushSummary =
+                    pushRow?.pushed === true
+                      ? "pushed."
+                      : input.push && !allGreen
+                        ? "push skipped because not all lanes went green."
+                        : input.push && pushRow
+                          ? "push not completed: " + pushRow.summary
+                          : "not pushed.";
                   return {
                     lanesTotal: entries.length,
                     lanesGreen: green,
@@ -1306,7 +1315,7 @@ export default smithers((ctx) => {
                       " approved; assemble " +
                       (rowOk(assembleGate) ? "GREEN" : "red/skipped") +
                       "; " +
-                      (pushRow?.pushed === true ? "pushed." : "not pushed.") +
+                      pushSummary +
                       " Artifacts: " +
                       reportsDirFor(repoRoot, key) +
                       "/index.html",

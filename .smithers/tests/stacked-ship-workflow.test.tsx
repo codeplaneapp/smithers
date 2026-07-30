@@ -439,11 +439,30 @@ describe("graph gating", () => {
     });
     const ready = await render({ push: true }, decided);
     expect(taskIds(ready)).toContain("push");
-    expect(taskIds(ready)).not.toContain("summary");
+    expect(taskIds(ready)).toContain("summary");
 
     const pushed = mergeOutputs(decided, { stshipPush: [row("push", PUSH_ROW)] });
     const done = await render({ push: true }, pushed);
     expect(taskIds(done)).toContain("summary");
+  });
+
+  test("push request still summarizes when settled lanes are not all green", async () => {
+    const exhausted = mergeOutputs(
+      { stshipSetup: [row("setup", SETUP_ROW)], stshipPlan: [row("plan", { ...PLAN_OUT, entries: [ENTRY_ONE] })] },
+      {
+        stshipLane: [row("one:workspace", laneRow("one"))],
+        stshipGate: [row("one:hygiene", redGate("one:build"))],
+        stshipArtifact: [row("one:artifact", artifactRow("one", 1), 0), row("one:artifact", artifactRow("one", 2), 1)],
+      },
+    );
+    const frame = await render({ push: true, buildIterations: 1, reviewRounds: 2 }, exhausted);
+    expect(taskIds(frame)).not.toContain("push");
+    expect(taskIds(frame)).toContain("summary");
+
+    const summaryTask = task(frame, "summary");
+    const summary = await (summaryTask.computeFn as () => Promise<AnyRow>)();
+    expect(summary.pushed).toBe(false);
+    expect(String(summary.summary)).toContain("push skipped because not all lanes went green");
   });
 });
 
