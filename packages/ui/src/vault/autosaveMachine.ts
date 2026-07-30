@@ -123,25 +123,29 @@ export function createAutosaveDoc(options: AutosaveDocOptions): AutosaveDoc {
   async function saveNow(): Promise<void> {
     cancelScheduled();
     if (disposed || inflight) return;
-    if (await detectConflict()) {
-      emit("conflict");
-      return;
-    }
+    // Conflict detection is asynchronous too, so acquire the single-flight
+    // guard before it. Same-tick callers can no longer overlap writes.
     inflight = true;
     let finishInflight!: () => void;
     inflightDone = new Promise<void>((resolve) => {
       finishInflight = resolve;
     });
-    const savingValue = value;
-    emit("saving");
     try {
+      if (await detectConflict()) {
+        if (!disposed) emit("conflict");
+        return;
+      }
+      if (disposed) return;
+      const savingValue = value;
+      emit("saving");
       const result = await options.save(savingValue);
+      if (disposed) return;
       mtimeMs = result?.mtimeMs ?? mtimeMs;
       // Edits during the flight are not covered by this save: stay dirty.
       emit(value === savingValue ? "saved" : "dirty");
     } catch {
       // Still unsaved; the next edit (or saveNow retry) will attempt again.
-      emit("dirty");
+      if (!disposed) emit("dirty");
     } finally {
       inflight = false;
       finishInflight();
