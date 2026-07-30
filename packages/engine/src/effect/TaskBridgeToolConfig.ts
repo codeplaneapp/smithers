@@ -3,4 +3,5 @@ export type TaskBridgeToolConfig = {
   allowNetwork: boolean;
   maxOutputBytes: number;
   toolTimeoutMs: number;
+  acceptWorkflowChange?: boolean;
 };
