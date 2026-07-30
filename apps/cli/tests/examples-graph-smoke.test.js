@@ -138,6 +138,11 @@ async function renderExample(projectDir, workerDir, example) {
   return first.timedOut ? renderExampleAttempt(projectDir, workerDir, example) : first;
 }
 
+async function renderExample(projectDir, workerDir, example) {
+  const first = await renderExampleAttempt(projectDir, workerDir, example);
+  return first.timedOut ? renderExampleAttempt(projectDir, workerDir, example) : first;
+}
+
 test("top-level example workflows render as graphs", async () => {
   if (process.env.SMITHERS_SKIP_EXAMPLE_GRAPH_SMOKE === "1") return;
   const examples = findTopLevelExampleWorkflows();
