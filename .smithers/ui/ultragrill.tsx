@@ -297,7 +297,11 @@ function App() {
   async function launch() {
     setBusy(true);
     try {
-      const run = await actions.launchRun({ workflow: WORKFLOW_KEY, input: { goal } });
+      const run = await actions.launchRun({
+        workflow: WORKFLOW_KEY,
+        input: { goal },
+        options: { allowNetwork: true },
+      });
       setSelectedRunId(run.runId);
       setSent([]);
       await refresh();
