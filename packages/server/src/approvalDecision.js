@@ -100,23 +100,38 @@ function parseApprovalRequest(value, fallbackTitle) {
  */
 function validateApprovalDecision(request, decision) {
   if (request.mode === "select") {
+    // Fail closed: a select request whose options were all malformed (dropped
+    // by parseApprovalRequest) must not accept an arbitrary selection.
+    if (request.options.length === 0) {
+      return { ok: false, code: "INVALID_REQUEST", message: "select approval request has no valid options" };
+    }
     const payload = asObject(decision);
     const selected = asString(payload?.selected);
     if (!selected) {
       return { ok: false, code: "INVALID_REQUEST", message: "select approvals require decision.selected" };
     }
-    if (request.options.length > 0 && !request.options.some((option) => option.key === selected)) {
+    if (!request.options.some((option) => option.key === selected)) {
       return { ok: false, code: "INVALID_REQUEST", message: `Unknown selection: ${selected}` };
     }
   }
   if (request.mode === "rank") {
+    if (request.options.length === 0) {
+      return { ok: false, code: "INVALID_REQUEST", message: "rank approval request has no valid options" };
+    }
     const payload = asObject(decision);
-    const ranked = parseStringArray(payload?.ranked);
+    const rankedRaw = payload?.ranked;
+    // The original decision object is what gets persisted, so a mixed-type
+    // array must be rejected outright — sanitizing only the validation copy
+    // would persist a decisionJson that violates the string[] contract.
+    if (!Array.isArray(rankedRaw) || rankedRaw.some((entry) => typeof entry !== "string")) {
+      return { ok: false, code: "INVALID_REQUEST", message: "decision.ranked must be an array of strings" };
+    }
+    const ranked = parseStringArray(rankedRaw);
     if (ranked.length === 0) {
       return { ok: false, code: "INVALID_REQUEST", message: "rank approvals require decision.ranked" };
     }
     const allowed = new Set(request.options.map((option) => option.key));
-    if (allowed.size > 0 && ranked.some((value) => !allowed.has(value))) {
+    if (ranked.some((value) => !allowed.has(value))) {
       return { ok: false, code: "INVALID_REQUEST", message: "rank approval included unknown options" };
     }
   }
