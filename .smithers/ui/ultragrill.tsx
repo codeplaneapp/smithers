@@ -175,21 +175,6 @@ function WorkerPane(props: { runId: string | undefined; index: number | null }) 
     return () => clearInterval(timer);
   }, [props.index, props.runId, refetch, work]);
 
-  useEffect(() => {
-    if (!props.runId || props.index === null || work) return;
-    let active = true;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      await out.refetch();
-      if (active) timer = setTimeout(poll, 1_000);
-    };
-    timer = setTimeout(poll, 1_000);
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
-  }, [out.refetch, props.index, props.runId, work]);
-
   return (
     <>
       <div className="col-head">Living spec {work ? <span>turn {(props.index ?? 0) + 1}</span> : null}</div>
