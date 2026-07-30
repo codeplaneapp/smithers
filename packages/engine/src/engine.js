@@ -2326,7 +2326,8 @@ async function continueRunAsNew(params) {
           });
         }
         client
-          .query(`INSERT INTO _smithers_runs (
+          .query(
+            `INSERT INTO _smithers_runs (
               run_id,
               parent_run_id,
               workflow_name,
@@ -2346,7 +2347,8 @@ async function continueRunAsNew(params) {
               vcs_revision,
               error_json,
               config_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
           .run(
             targetRunId,
             runId,
@@ -2374,14 +2376,17 @@ async function continueRunAsNew(params) {
         }
         for (const [ralphId, state] of carriedRalphState.entries()) {
           client
-            .query(`INSERT INTO _smithers_ralph (run_id, ralph_id, iteration, done, updated_at_ms)
+            .query(
+              `INSERT INTO _smithers_ralph (run_id, ralph_id, iteration, done, updated_at_ms)
                VALUES (?, ?, ?, ?, ?)
                ON CONFLICT(run_id, ralph_id)
-               DO UPDATE SET iteration = excluded.iteration, done = excluded.done, updated_at_ms = excluded.updated_at_ms`)
+               DO UPDATE SET iteration = excluded.iteration, done = excluded.done, updated_at_ms = excluded.updated_at_ms`,
+            )
             .run(targetRunId, ralphId, state.iteration, state.done ? 1 : 0, ts);
         }
         client
-          .query(`INSERT INTO _smithers_branches (
+          .query(
+            `INSERT INTO _smithers_branches (
               run_id,
               parent_run_id,
               parent_frame_no,
@@ -2395,21 +2400,26 @@ async function continueRunAsNew(params) {
               parent_frame_no = excluded.parent_frame_no,
               branch_label = excluded.branch_label,
               fork_description = excluded.fork_description,
-              created_at_ms = excluded.created_at_ms`)
+              created_at_ms = excluded.created_at_ms`,
+          )
           .run(targetRunId, runId, currentFrameNo, "continue-as-new", `continue-as-new:${continuation.reason}`, ts);
         client
-          .query(`UPDATE _smithers_runs
+          .query(
+            `UPDATE _smithers_runs
              SET status = ?, finished_at_ms = ?, heartbeat_at_ms = NULL, runtime_owner_id = NULL,
                  cancel_requested_at_ms = NULL, hijack_requested_at_ms = NULL, hijack_target = NULL
-             WHERE run_id = ?`)
+             WHERE run_id = ?`,
+          )
           .run("continued", ts, runId);
         const nextEventSeq = Number(
           client.query("SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM _smithers_events WHERE run_id = ?").get(runId)
             ?.seq ?? 0,
         );
         client
-          .query(`INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
-             VALUES (?, ?, ?, ?, ?)`)
+          .query(
+            `INSERT INTO _smithers_events (run_id, seq, timestamp_ms, type, payload_json)
+             VALUES (?, ?, ?, ?, ?)`,
+          )
           .run(runId, nextEventSeq, ts, continuationEvent.type, JSON.stringify(continuationEvent));
         client.run("COMMIT");
       } catch (error) {
@@ -7497,6 +7507,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
   let runBeforeResume = null;
   let runHadNodesBeforeResume = true;
   let workflowNameMismatchDetected = false;
+  let resumeWorkflowNameValidated = false;
   let driverTaskError = null;
   const activeDriverTaskKeys = new Set();
   /**
@@ -8661,7 +8672,10 @@ async function runWorkflowBodyDriver(workflow, opts) {
     return frameNodeRows;
   };
   const restoreRunBeforeWorkflowNameMismatch = async () => {
-    if (!runBeforeResume) return;
+    // The initial resume render now validates the workflow name before this
+    // process activates or otherwise mutates the run. A mismatch at that gate
+    // therefore has nothing to restore.
+    if (!runBeforeResume || !runOwnedByCurrentProcess) return;
     await Effect.runPromise(
       adapter.updateRun(runId, {
         workflowName: runBeforeResume.workflowName,
@@ -9020,6 +9034,96 @@ async function runWorkflowBodyDriver(workflow, opts) {
         throw new SmithersError("MISSING_INPUT", "Cannot resume without an existing input row");
       }
     }
+    let runRuntimeStarted = false;
+    const startRunRuntime = async () => {
+      if (runRuntimeStarted) return;
+      if (opts.resume && existingRun) {
+        await activateRunForResume(
+          adapter,
+          existingRun,
+          opts,
+          runtimeOwnerId,
+          runConfigJson,
+          runMetadata,
+          resolvedWorkflowPath,
+        );
+        runOwnedByCurrentProcess = true;
+      }
+      stopSupervisor = startRunSupervisor(
+        adapter,
+        runId,
+        runtimeOwnerId,
+        runAbortController,
+        hijackState,
+        pauseAbortController,
+      );
+      await Effect.runPromise(
+        eventBus.emitEventWithPersist({
+          type: "RunStarted",
+          runId,
+          timestampMs: nowMs(),
+        }),
+      );
+      if (effectiveAlertPolicy && effectiveAlertPolicy.rules && Object.keys(effectiveAlertPolicy.rules).length > 0) {
+        alertRuntime = new AlertRuntime(effectiveAlertPolicy, {
+          runId,
+          adapter,
+          eventBus,
+          requestCancel: () => runAbortController.abort(),
+          createHumanRequest: async (reqOpts) => {
+            await Effect.runPromise(
+              adapter.insertHumanRequest({
+                requestId: `human:${reqOpts.runId}:${reqOpts.nodeId}:${reqOpts.iteration}`,
+                runId: reqOpts.runId,
+                nodeId: reqOpts.nodeId,
+                iteration: reqOpts.iteration,
+                kind: reqOpts.kind,
+                status: "pending",
+                prompt: reqOpts.prompt,
+                schemaJson: null,
+                optionsJson: reqOpts.linkedAlertId ? JSON.stringify({ linkedAlertId: reqOpts.linkedAlertId }) : null,
+                responseJson: null,
+                requestedAtMs: Date.now(),
+                answeredAtMs: null,
+                answeredBy: null,
+                timeoutAtMs: null,
+              }),
+            );
+          },
+          pauseScheduler: (_reason) => {},
+        });
+        alertRuntime.start();
+      }
+      await cancelStaleAttempts(adapter, runId);
+      if (opts.resume) {
+        void Effect.runPromise(Metric.increment(runsResumedTotal));
+        const staleInProgress = await Effect.runPromise(adapter.listInProgressAttempts(runId));
+        const now = nowMs();
+        for (const attempt of staleInProgress) {
+          const existingNode = await Effect.runPromise(adapter.getNode(runId, attempt.nodeId, attempt.iteration));
+          await adapter.withTransaction(
+            "resume-cancel-stale-attempt",
+            Effect.gen(function* () {
+              yield* adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
+                state: "cancelled",
+                finishedAtMs: now,
+              });
+              yield* adapter.insertNode({
+                runId,
+                nodeId: attempt.nodeId,
+                iteration: attempt.iteration,
+                state: "pending",
+                lastAttempt: attempt.attempt,
+                updatedAtMs: now,
+                outputTable: existingNode?.outputTable ?? "",
+                label: existingNode?.label ?? null,
+              });
+            }),
+          );
+        }
+      }
+      runRuntimeStarted = true;
+    };
     if (!existingRun) {
       await Effect.runPromise(
         adapter.insertRun({
@@ -9045,18 +9149,7 @@ async function runWorkflowBodyDriver(workflow, opts) {
         }),
       );
       runOwnedByCurrentProcess = true;
-    } else if (opts.resume) {
-      await activateRunForResume(
-        adapter,
-        existingRun,
-        opts,
-        runtimeOwnerId,
-        runConfigJson,
-        runMetadata,
-        resolvedWorkflowPath,
-      );
-      runOwnedByCurrentProcess = true;
-    } else {
+    } else if (!opts.resume) {
       await Effect.runPromise(
         adapter.updateRunIfNotCancelled(runId, {
           status: "running",
@@ -9079,80 +9172,11 @@ async function runWorkflowBodyDriver(workflow, opts) {
       );
       runOwnedByCurrentProcess = true;
     }
-    stopSupervisor = startRunSupervisor(
-      adapter,
-      runId,
-      runtimeOwnerId,
-      runAbortController,
-      hijackState,
-      pauseAbortController,
-    );
-    await Effect.runPromise(
-      eventBus.emitEventWithPersist({
-        type: "RunStarted",
-        runId,
-        timestampMs: nowMs(),
-      }),
-    );
-    if (effectiveAlertPolicy && effectiveAlertPolicy.rules && Object.keys(effectiveAlertPolicy.rules).length > 0) {
-      alertRuntime = new AlertRuntime(effectiveAlertPolicy, {
-        runId,
-        adapter,
-        eventBus,
-        requestCancel: () => runAbortController.abort(),
-        createHumanRequest: async (reqOpts) => {
-          await Effect.runPromise(
-            adapter.insertHumanRequest({
-              requestId: `human:${reqOpts.runId}:${reqOpts.nodeId}:${reqOpts.iteration}`,
-              runId: reqOpts.runId,
-              nodeId: reqOpts.nodeId,
-              iteration: reqOpts.iteration,
-              kind: reqOpts.kind,
-              status: "pending",
-              prompt: reqOpts.prompt,
-              schemaJson: null,
-              optionsJson: reqOpts.linkedAlertId ? JSON.stringify({ linkedAlertId: reqOpts.linkedAlertId }) : null,
-              responseJson: null,
-              requestedAtMs: Date.now(),
-              answeredAtMs: null,
-              answeredBy: null,
-              timeoutAtMs: null,
-            }),
-          );
-        },
-        pauseScheduler: (_reason) => {},
-      });
-      alertRuntime.start();
-    }
+    // A resume stays read-only until the first actual graph has supplied and
+    // passed the stored workflow-name check. New runs and non-resume starts
+    // retain their existing eager startup order.
+    if (!opts.resume) await startRunRuntime();
     const runStartPerformanceMs = performance.now();
-    await cancelStaleAttempts(adapter, runId);
-    if (opts.resume) {
-      void Effect.runPromise(Metric.increment(runsResumedTotal));
-      const staleInProgress = await Effect.runPromise(adapter.listInProgressAttempts(runId));
-      const now = nowMs();
-      for (const attempt of staleInProgress) {
-        const existingNode = await Effect.runPromise(adapter.getNode(runId, attempt.nodeId, attempt.iteration));
-        await adapter.withTransaction(
-          "resume-cancel-stale-attempt",
-          Effect.gen(function* () {
-            yield* adapter.updateAttempt(runId, attempt.nodeId, attempt.iteration, attempt.attempt, {
-              state: "cancelled",
-              finishedAtMs: now,
-            });
-            yield* adapter.insertNode({
-              runId,
-              nodeId: attempt.nodeId,
-              iteration: attempt.iteration,
-              state: "pending",
-              lastAttempt: attempt.attempt,
-              updatedAtMs: now,
-              outputTable: existingNode?.outputTable ?? "",
-              label: existingNode?.label ?? null,
-            });
-          }),
-        );
-      }
-    }
     if (opts.resume) {
       const nodes = await Effect.runPromise(adapter.listNodes(runId));
       defaultIteration = nodes.reduce((max, node) => Math.max(max, node.iteration ?? 0), 0);
@@ -9206,6 +9230,36 @@ async function runWorkflowBodyDriver(workflow, opts) {
         const graph = await withWorkflowVersioningRuntime(workflowVersioning, () =>
           renderer.render(element, renderOpts),
         );
+        workflowName = getWorkflowNameFromXml(graph.xml);
+        if (opts.resume && !resumeWorkflowNameValidated) {
+          const storedWorkflowNameIsUnstamped =
+            existingRun?.workflowName === "workflow" &&
+            existingRun.workflowName !== workflowName &&
+            !runHadNodesBeforeResume;
+          if (
+            opts.acceptWorkflowChange !== true &&
+            existingRun?.workflowName &&
+            !storedWorkflowNameIsUnstamped &&
+            existingRun.workflowName !== workflowName
+          ) {
+            workflowNameMismatchDetected = true;
+            throw new SmithersError(
+              "RESUME_METADATA_MISMATCH",
+              `Cannot resume run ${runId} with workflow ${workflowName}; it belongs to workflow ${existingRun.workflowName}.`,
+              {
+                mismatches: ["workflow name changed"],
+                existing: {
+                  workflowName: existingRun.workflowName,
+                },
+                current: {
+                  workflowName,
+                },
+              },
+            );
+          }
+          resumeWorkflowNameValidated = true;
+          await startRunRuntime();
+        }
         await workflowVersioning.flush();
         graph.tasks = applyOptimizationArtifactToTasks(graph.tasks);
         resolveTaskOutputs(graph.tasks, workflowRef);
@@ -9254,34 +9308,6 @@ async function runWorkflowBodyDriver(workflow, opts) {
             next?.resolve();
             capacity -= 1;
           }
-        }
-        workflowName = getWorkflowNameFromXml(graph.xml);
-        const storedWorkflowNameIsUnstamped =
-          opts.resume &&
-          existingRun?.workflowName === "workflow" &&
-          existingRun.workflowName !== workflowName &&
-          !runHadNodesBeforeResume;
-        if (
-          opts.resume &&
-          opts.acceptWorkflowChange !== true &&
-          existingRun?.workflowName &&
-          !storedWorkflowNameIsUnstamped &&
-          existingRun.workflowName !== workflowName
-        ) {
-          workflowNameMismatchDetected = true;
-          throw new SmithersError(
-            "RESUME_METADATA_MISMATCH",
-            `Cannot resume run ${runId} with workflow ${workflowName}; it belongs to workflow ${existingRun.workflowName}.`,
-            {
-              mismatches: ["workflow name changed"],
-              existing: {
-                workflowName: existingRun.workflowName,
-              },
-              current: {
-                workflowName,
-              },
-            },
-          );
         }
         updateCurrentCorrelationContext({ workflowName });
         cacheEnabled =
