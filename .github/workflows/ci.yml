@@ -283,8 +283,12 @@ jobs:
     # This lane is provider-free and receives no provider or managed-ChatGPT
     # secret. Managed-auth live turns remain explicit trusted/manual tests so a
     # fork pull request can never cause secret-bearing Nanocodex execution.
+    # persist-credentials: false so the unaudited binary this lane executes
+    # cannot read a GITHUB_TOKEN left in .git/config by actions/checkout.
     steps:
       - uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v6.0.8
         with:
