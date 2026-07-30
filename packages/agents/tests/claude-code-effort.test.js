@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ClaudeCodeAgent } from "../src/ClaudeCodeAgent.js";
@@ -23,6 +23,18 @@ function settingsValues(args) {
   return values;
 }
 
+/**
+ * A merged `--settings` value is now always a private temp-file PATH (never
+ * inline JSON on argv, so secrets folded in from a settings file never
+ * round-trip through a world-readable process listing). Resolve a settings
+ * value to its parsed object by reading the file it points to.
+ * @param {string} value
+ * @returns {Promise<Record<string, unknown>>}
+ */
+async function readMergedSettings(value) {
+  return JSON.parse(await readFile(value, "utf8"));
+}
+
 describe("ClaudeCodeAgent first-class effort", () => {
   test("merges effortLevel into a single --settings flag", async () => {
     const agent = new ClaudeCodeAgent({ model: "claude-sonnet-5", effort: "xhigh" });
@@ -33,7 +45,7 @@ describe("ClaudeCodeAgent first-class effort", () => {
     });
     const values = settingsValues(cmd.args);
     expect(values.length).toBe(1);
-    expect(JSON.parse(values[0]).effortLevel).toBe("xhigh");
+    expect((await readMergedSettings(values[0])).effortLevel).toBe("xhigh");
   });
 
   test("MERGES effortLevel INTO a user --settings that lacks it, keeping ONE flag and preserving user keys", async () => {
@@ -50,7 +62,7 @@ describe("ClaudeCodeAgent first-class effort", () => {
     const values = settingsValues(cmd.args);
     // Exactly one --settings — ours merged into the user's token, never duplicated.
     expect(values.length).toBe(1);
-    const parsed = JSON.parse(values[0]);
+    const parsed = await readMergedSettings(values[0]);
     // Our effort was merged in...
     expect(parsed.effortLevel).toBe("high");
     // ...and the user's own keys survive untouched.
@@ -70,7 +82,7 @@ describe("ClaudeCodeAgent first-class effort", () => {
     });
     const values = settingsValues(cmd.args);
     expect(values.length).toBe(1);
-    const parsed = JSON.parse(values[0]);
+    const parsed = await readMergedSettings(values[0]);
     expect(parsed.effortLevel).toBe("medium");
     expect(parsed.custom).toBe(true);
   });
@@ -87,7 +99,7 @@ describe("ClaudeCodeAgent first-class effort", () => {
     });
     const values = settingsValues(cmd.args);
     expect(values.length).toBe(1);
-    const parsed = JSON.parse(values[0]);
+    const parsed = await readMergedSettings(values[0]);
     expect(parsed.effortLevel).toBe("max");
     expect(parsed.custom).toBe(42);
     // The user token is consumed and re-emitted as one canonical
@@ -131,7 +143,7 @@ describe("ClaudeCodeAgent first-class effort", () => {
       const values = settingsValues(cmd.args);
       // One flag — the file content merged with our effortLevel, not duplicated.
       expect(values.length).toBe(1);
-      const parsed = JSON.parse(values[0]);
+      const parsed = await readMergedSettings(values[0]);
       expect(parsed.effortLevel).toBe("high");
       expect(parsed.permissions).toEqual({ allow: ["Bash"] });
     } finally {
@@ -148,7 +160,7 @@ describe("ClaudeCodeAgent first-class effort", () => {
       const cmd = await agent.buildCommand({ prompt: "hi", cwd: dir, options: {} });
       const values = settingsValues(cmd.args);
       expect(values.length).toBe(1);
-      const parsed = JSON.parse(values[0]);
+      const parsed = await readMergedSettings(values[0]);
       // The user's file (higher precedence) wins the effortLevel conflict.
       expect(parsed.effortLevel).toBe("low");
       expect(parsed.custom).toBe(true);
@@ -167,7 +179,7 @@ describe("ClaudeCodeAgent first-class effort", () => {
       const cmd = await agent.buildCommand({ prompt: "hi", cwd: dir, options: {} });
       const values = settingsValues(cmd.args);
       expect(values.length).toBe(1);
-      const parsed = JSON.parse(values[0]);
+      const parsed = await readMergedSettings(values[0]);
       expect(parsed.effortLevel).toBe("xhigh");
       expect(parsed.permissions).toEqual({ allow: ["Read"] });
     } finally {

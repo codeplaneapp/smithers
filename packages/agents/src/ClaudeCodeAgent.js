@@ -14,8 +14,9 @@ import {
 import { normalizeCapabilityStringList } from "./capability-registry/index.js";
 import { isClaudeLimitBanner } from "./BaseCliAgent/isClaudeLimitBanner.js";
 import { logWarning } from "@smthrs/observability/logging";
-import { readFile } from "node:fs/promises";
-import { isAbsolute, resolve as resolvePath } from "node:path";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { isAbsolute, resolve as resolvePath, join as joinPath } from "node:path";
+import { tmpdir } from "node:os";
 /** @typedef {import("./BaseCliAgent/BaseCliAgentOptions.ts").BaseCliAgentOptions} BaseCliAgentOptions */
 /** @typedef {import("./capability-registry/AgentCapabilityRegistry.ts").AgentCapabilityRegistry} AgentCapabilityRegistry */
 /** @typedef {import("./ClaudeCodeAgentOptions.ts").ClaudeCodeAgentOptions} ClaudeCodeAgentOptions */
@@ -120,6 +121,20 @@ async function readSettingsFileJson(pathValue, cwd) {
     // Unreadable / non-JSON — caller preserves the verbatim path.
   }
   return null;
+}
+/**
+ * Write a merged settings object to a private (mode 0600) temp file and
+ * return its path. Used instead of inlining the JSON onto argv, since a
+ * merged object routinely contains secrets folded in from a user settings
+ * file and argv is world-readable via `ps` on shared hosts.
+ * @param {Record<string, unknown>} settings
+ * @returns {Promise<string>}
+ */
+async function writePrivateSettingsFile(settings) {
+  const dir = await mkdtemp(joinPath(tmpdir(), "smithers-claude-settings-"));
+  const filePath = joinPath(dir, "settings.json");
+  await writeFile(filePath, JSON.stringify(settings), { mode: 0o600 });
+  return filePath;
 }
 /**
  * @param {string} toolName
@@ -697,8 +712,17 @@ export class ClaudeCodeAgent extends BaseCliAgent {
         opaqueSettingsPath = raw;
       }
     };
-    if (rawSettingsPath) {
+    // Security: a settings FILE routinely holds secrets (env.ANTHROPIC_API_KEY,
+    // apiKeyHelper output, ...) and argv is world-readable via `ps` on shared
+    // hosts. Only read+fold a settings file when Smithers actually has
+    // something to inject (effort/durability/inline opts.settings); otherwise
+    // pass the file path through untouched so its contents never round-trip
+    // through this process's argv.
+    const smithersHasInjections = Object.keys(ourSettings).length > 0;
+    if (rawSettingsPath && (smithersHasInjections || userSettingsRawList.some((raw) => raw !== ""))) {
       await foldSettingsSource(rawSettingsPath, false);
+    } else if (rawSettingsPath) {
+      opaqueSettingsPath = rawSettingsPath;
     }
     for (const raw of userSettingsRawList) {
       if (raw !== "") {
@@ -726,7 +750,11 @@ export class ClaudeCodeAgent extends BaseCliAgent {
       }
       pushFlag(args, "--settings", opaqueSettingsPath);
     } else if (Object.keys(mergedSettings).length > 0) {
-      pushFlag(args, "--settings", JSON.stringify(mergedSettings));
+      // A merged settings object routinely contains secrets from a folded
+      // settings file — never inline it onto argv (world-readable via `ps`).
+      // Write it to a private temp file instead and pass that path.
+      const settingsFilePath = await writePrivateSettingsFile(mergedSettings);
+      pushFlag(args, "--settings", settingsFilePath);
     }
     if (params.prompt) args.push(params.prompt);
     const accountEnv = {};
