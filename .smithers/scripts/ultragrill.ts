@@ -54,6 +54,7 @@ try {
   await gateway.listen({ port, host });
   await gateway.startRun("ultragrill", { goal, artifactPath }, auth as Parameters<typeof gateway.startRun>[2], runId, {
     resume: false,
+    allowNetwork: true,
   });
 } catch (error) {
   await gateway.close().catch(() => {});

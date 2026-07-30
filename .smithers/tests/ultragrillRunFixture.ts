@@ -27,7 +27,7 @@ await gateway.startRun(
   { goal: "Build a settings page", turnTimeoutMs: 60_000, maxTurns: 10 },
   auth as Parameters<typeof gateway.startRun>[2],
   RUN_ID,
-  { resume: false },
+  { resume: false, allowNetwork: true },
 );
 await gateway.resumeRunIfNeeded(RUN_ID, "ultragrill", new SmithersDb((workflow as { db: unknown }).db), auth as never);
 
