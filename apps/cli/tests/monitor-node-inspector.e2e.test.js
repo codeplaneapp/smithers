@@ -235,7 +235,7 @@ browserTest(
       await page.waitForSelector('[data-testid="monitor-node-prompt"] .mon-section-body');
       await promptSection.locator("summary").click();
       expect(await promptSection.evaluate((el) => el.open)).toBe(false);
-      expect(await page.locator('[data-testid="monitor-node-prompt"] .mon-section-body').count()).toBe(0);
+      await page.locator('[data-testid="monitor-node-prompt"] .mon-section-body').waitFor({ state: "detached" });
       await promptSection.locator("summary").click();
       expect(await promptSection.evaluate((el) => el.open)).toBe(true);
       await page.waitForSelector('[data-testid="monitor-node-prompt"] .mon-section-body');
