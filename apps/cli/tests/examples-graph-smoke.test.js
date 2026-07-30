@@ -68,12 +68,13 @@ const GRAPH_INPUT = {
   maxIterations: 1,
 };
 const GRAPH_CONCURRENCY = Math.min(8, availableParallelism());
+const GRAPH_RENDER_TIMEOUT_MS = 60_000;
 
 function findTopLevelExampleWorkflows() {
   return Array.from(new Bun.Glob("examples/*.jsx").scanSync({ cwd: REPO_ROOT })).sort();
 }
 
-async function renderExample(projectDir, workerDir, example) {
+async function renderExampleAttempt(projectDir, workerDir, example) {
   const child = Bun.spawn(
     [
       process.execPath,
@@ -99,16 +100,40 @@ async function renderExample(projectDir, workerDir, example) {
       stderr: "pipe",
     },
   );
-  const [exitCode, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
+  const stdoutPromise = new Response(child.stdout).text();
+  const stderrPromise = new Response(child.stderr).text();
+  let timeout;
+  const outcome = await Promise.race([
+    child.exited.then((exitCode) => ({ exitCode, timedOut: false })),
+    new Promise((resolveTimeout) => {
+      timeout = setTimeout(() => resolveTimeout({ exitCode: null, timedOut: true }), GRAPH_RENDER_TIMEOUT_MS);
+    }),
   ]);
+  clearTimeout(timeout);
+  if (outcome.timedOut) {
+    child.kill("SIGKILL");
+    await child.exited.catch(() => undefined);
+  }
+  const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
   return {
-    error: exitCode === 0 ? null : new Error(`graph subprocess exited with code ${exitCode}`),
+    error:
+      outcome.exitCode === 0
+        ? null
+        : new Error(
+            outcome.timedOut
+              ? `graph subprocess timed out after ${GRAPH_RENDER_TIMEOUT_MS}ms`
+              : `graph subprocess exited with code ${outcome.exitCode}`,
+          ),
     stdout,
     stderr,
+    timedOut: outcome.timedOut,
   };
+}
+
+async function renderExample(projectDir, workerDir, example) {
+  const first = await renderExampleAttempt(projectDir, workerDir, example);
+  if (!first.timedOut) return first;
+  return renderExampleAttempt(projectDir, workerDir, example);
 }
 
 test("top-level example workflows render as graphs", async () => {
