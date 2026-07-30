@@ -170,17 +170,38 @@ describe("createSmithersCollections local factories", () => {
     expect([...runEvents.values()].map((row: { seq: number }) => row.seq).sort()).toEqual([4, 9]);
   });
 
-  test("runEvents pages past the first API window and keeps advancing after invalidation", async () => {
+  test("runEvents keeps a short history that exactly fills the requested cap", async () => {
+    const { collections } = makeCollections({
+      "GET /v1/api/events": (_init, url) => {
+        const events = [
+          { runId: "run-1", seq: 0, type: "e", payloadJson: "{}" },
+          { runId: "run-1", seq: 1, type: "e", payloadJson: "{}" },
+        ];
+        const afterSeq = Number(url.searchParams.get("afterSeq") ?? -1);
+        const limit = Number(url.searchParams.get("limit") ?? 100);
+        return events.filter((event) => event.seq > afterSeq).slice(0, limit);
+      },
+    });
+    const runEvents = collections.runEvents("run-1", 2);
+    await runEvents.preload();
+
+    expect([...runEvents.values()].map((event) => event.seq).sort()).toEqual([0, 1]);
+  });
+
+  test("runEvents locates the cold tail without downloading the full history and keeps advancing", async () => {
     let events = Array.from({ length: 10_001 }, (_, seq) => ({
       runId: "run-1",
       seq,
       type: "e",
       payloadJson: "{}",
     }));
+    const eventRequests: Array<{ afterSeq: number | undefined; limit: number }> = [];
     const { collections, queryClient } = makeCollections({
       "GET /v1/api/events": (_init, url) => {
-        const afterSeq = Number(url.searchParams.get("afterSeq") ?? -1);
+        const afterSeqParam = url.searchParams.get("afterSeq");
+        const afterSeq = Number(afterSeqParam ?? -1);
         const limit = Number(url.searchParams.get("limit") ?? 100);
+        eventRequests.push({ afterSeq: afterSeqParam === null ? undefined : afterSeq, limit });
         return events.filter((event) => event.seq > afterSeq).slice(0, limit);
       },
     });
@@ -189,6 +210,9 @@ describe("createSmithersCollections local factories", () => {
 
     expect(runEvents.size).toBe(1_024);
     expect(Math.max(...[...runEvents.values()].map((event) => event.seq))).toBe(10_000);
+    expect(eventRequests[0]).toEqual({ afterSeq: undefined, limit: 1_024 });
+    expect(eventRequests.at(-1)).toEqual({ afterSeq: 8_976, limit: 1_024 });
+    expect(eventRequests.reduce((total, request) => total + request.limit, 0)).toBeLessThan(2_100);
 
     events = [...events, { runId: "run-1", seq: 10_001, type: "e", payloadJson: "{}" }];
     await queryClient.invalidateQueries({ queryKey: ["smithers", "events", "run-1", 1_024] });
@@ -196,6 +220,25 @@ describe("createSmithersCollections local factories", () => {
 
     expect(runEvents.size).toBe(1_024);
     expect(Math.max(...[...runEvents.values()].map((event) => event.seq))).toBe(10_001);
+  });
+
+  test("runEvents cold sync on an empty run issues a single request and stays empty", async () => {
+    const eventRequests: Array<{ afterSeq: number | undefined; limit: number }> = [];
+    const { collections } = makeCollections({
+      "GET /v1/api/events": (_init, url) => {
+        const afterSeqParam = url.searchParams.get("afterSeq");
+        eventRequests.push({
+          afterSeq: afterSeqParam === null ? undefined : Number(afterSeqParam),
+          limit: Number(url.searchParams.get("limit") ?? 100),
+        });
+        return [];
+      },
+    });
+    const runEvents = collections.runEvents("run-1");
+    await runEvents.preload();
+
+    expect(runEvents.size).toBe(0);
+    expect(eventRequests).toEqual([{ afterSeq: undefined, limit: 1_024 }]);
   });
 
   test("empty runId factories resolve to empty collections without hitting the API", async () => {

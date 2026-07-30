@@ -95,8 +95,48 @@ function boundedRunEventRows(rows: GatewayRunEventRow[], maxRows: number): Gatew
 function createRunEventTailQuery(client: SmithersDataClient, runId: string, maxRows: number) {
   let rows: GatewayRunEventRow[] = [];
   let afterSeq: number | undefined;
+  let initialized = false;
 
   return async (): Promise<GatewayRunEventRow[]> => {
+    if (!initialized) {
+      const firstPage = await client.api.listRunEvents({ runId, limit: maxRows });
+      if (firstPage.length === 0) {
+        initialized = true;
+        return rows;
+      }
+
+      rows = boundedRunEventRows(firstPage, maxRows);
+      afterSeq = firstPage.reduce((latest, row) => Math.max(latest, row.seq), -1);
+      if (firstPage.length === maxRows) {
+        let step = maxRows;
+        let next = await client.api.listRunEvents({ runId, afterSeq, limit: 1 });
+        if (next.length > 0) {
+          while (next.length > 0) {
+            afterSeq = Math.max(afterSeq, next[0]!.seq);
+            next = await client.api.listRunEvents({ runId, afterSeq: afterSeq + step - 1, limit: 1 });
+            step *= 2;
+          }
+
+          let upperSeq = afterSeq + Math.floor(step / 2) - 1;
+          while (afterSeq < upperSeq) {
+            const candidate = Math.floor((afterSeq + upperSeq + 1) / 2);
+            const probe = await client.api.listRunEvents({ runId, afterSeq: candidate - 1, limit: 1 });
+            if (probe.length > 0) afterSeq = Math.max(afterSeq, probe[0]!.seq);
+            else upperSeq = candidate - 1;
+          }
+
+          const tail = await client.api.listRunEvents({
+            runId,
+            afterSeq: Math.max(0, afterSeq - maxRows),
+            limit: maxRows,
+          });
+          rows = boundedRunEventRows(tail, maxRows);
+        }
+      }
+      initialized = true;
+      return rows;
+    }
+
     while (true) {
       const page = await client.api.listRunEvents({ runId, afterSeq, limit: RUN_EVENT_API_FETCH_LIMIT });
       if (page.length === 0) return rows;
