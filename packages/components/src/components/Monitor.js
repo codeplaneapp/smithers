@@ -65,10 +65,11 @@ export function Monitor(props) {
     props.watchWorkflowPath ??
     (typeof ctx?.input?.watchWorkflowPath === "string" ? ctx.input.watchWorkflowPath : undefined);
   const checkId = `${prefix}-check`;
-  // `latest` (not `outputMaybe`) is the correct reader for a loop's exit
-  // condition and for routing: it resolves the newest iteration's row, so the
-  // table routes on THIS beat's verdict rather than beat 0's.
-  const health = ctx?.latest?.(props.healthOutput, checkId);
+  const beat = ctx?.iterations?.[`${prefix}-loop`] ?? ctx?.iteration ?? 0;
+  // Pin the sample to this loop iteration. `latest` falls back to the previous
+  // successful row when a continueOnFail heartbeat produces no output, which
+  // would route stale evidence as though the failed beat had classified it.
+  const health = ctx?.outputMaybe?.(props.healthOutput, { nodeId: checkId, iteration: beat });
   const condition = typeof health?.condition === "string" ? health.condition : undefined;
   const ownerActive = health?.ownerActive === true;
   // A monitor must never outlive the run it watches. The loop's own exit is the
@@ -77,7 +78,6 @@ export function Monitor(props) {
   const watchedRunFinished = MONITOR_TERMINAL_STATUSES.includes(
     /** @type {(typeof MONITOR_TERMINAL_STATUSES)[number]} */ (health?.runStatus),
   );
-  const beat = ctx?.iterations?.[`${prefix}-loop`] ?? ctx?.iteration ?? 0;
 
   const promptNode =
     props.prompt ??
