@@ -1,16 +1,22 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import React from "react";
 import { z } from "zod";
-import { createSmithers } from "../src/create.js";
+import { createSmithers, createSmithersCloudflare, createSmithersPostgres } from "../src/create.js";
 import { prepareOutputSchemas } from "../src/prepareOutputSchemas.js";
 import { createExternalSmithers, hostNodeToReact, serializeCtx } from "../src/external/create-external-smithers.js";
+import { openSmithersBackend } from "../src/openSmithersBackend.js";
 
 let tempDirs = [];
 const CWD_BEFORE = process.cwd();
+const RESERVED_PUBLIC_OUTPUT_NAMES = [
+  "__smithersSignalProvenanceHorizon",
+  "__smithersAgentCheckpointHorizons",
+  "__smithersAgentCheckpointProvenance",
+];
 
 function makeDbPath(prefix) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -25,6 +31,24 @@ function closeApi(api) {
   try {
     api.cleanup?.();
   } catch {}
+}
+
+function captureError(fn) {
+  try {
+    fn();
+  } catch (error) {
+    return error;
+  }
+  throw new Error("Expected function to throw");
+}
+
+function expectReservedOutputNameError(error, outputName) {
+  expect(error).toMatchObject({
+    code: "INVALID_INPUT",
+    details: { outputName },
+  });
+  expect(error.summary).toContain(`"${outputName}"`);
+  expect(error.summary).toContain("reserved for Smithers snapshot metadata");
 }
 
 afterEach(() => {
@@ -57,9 +81,44 @@ describe("prepareOutputSchemas", () => {
     expect(prepared.zodToKeyName.get(unique)).toBe("result");
     expect(prepared.zodToKeyName.has(shared)).toBe(false);
   });
+
+  test("rejects output names used by snapshot capture and parsing", () => {
+    for (const outputName of RESERVED_PUBLIC_OUTPUT_NAMES) {
+      const error = captureError(() => prepareOutputSchemas({ [outputName]: z.object({ value: z.string() }) }));
+      expectReservedOutputNameError(error, outputName);
+    }
+  });
 });
 
 describe("createSmithers", () => {
+  test("rejects reserved public output names before opening the local database", () => {
+    for (const outputName of RESERVED_PUBLIC_OUTPUT_NAMES) {
+      const dbPath = makeDbPath("smithers-reserved-output-");
+      const error = captureError(() => createSmithers({ [outputName]: z.object({ value: z.string() }) }, { dbPath }));
+
+      expectReservedOutputNameError(error, outputName);
+      expect(existsSync(dbPath)).toBe(false);
+    }
+  });
+
+  test("rejects reserved public output names at every async local constructor entry", async () => {
+    for (const outputName of RESERVED_PUBLIC_OUTPUT_NAMES) {
+      const schemas = { [outputName]: z.object({ value: z.string() }) };
+      const constructors = [
+        () => createSmithersCloudflare(schemas, {}),
+        () => createSmithersPostgres(schemas, { provider: "pglite" }),
+        () => openSmithersBackend(schemas, { backend: "pglite", env: {} }),
+      ];
+
+      for (const construct of constructors) {
+        await expect(construct()).rejects.toMatchObject({
+          code: "INVALID_INPUT",
+          details: { outputName },
+        });
+      }
+    }
+  });
+
   test("creates schema-backed API wrappers and merges workflow alert policy", () => {
     const shared = z.object({ value: z.string() });
     const api = createSmithers(
@@ -435,6 +494,23 @@ describe("createSmithers", () => {
 });
 
 describe("createExternalSmithers", () => {
+  test("rejects reserved public output names before opening the external database", () => {
+    for (const outputName of RESERVED_PUBLIC_OUTPUT_NAMES) {
+      const dbPath = makeDbPath("smithers-external-reserved-output-");
+      const error = captureError(() =>
+        createExternalSmithers({
+          dbPath,
+          schemas: { [outputName]: z.object({ value: z.string() }) },
+          agents: {},
+          buildFn: () => ({ kind: "text", text: "noop" }),
+        }),
+      );
+
+      expectReservedOutputNameError(error, outputName);
+      expect(existsSync(dbPath)).toBe(false);
+    }
+  });
+
   test("serializes context and converts host nodes to React elements", () => {
     const outputs = () => {};
     outputs.ready = [{ value: 1 }];

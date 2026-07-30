@@ -1,4 +1,4 @@
-import { makeWorkflowSession } from "@smthrs/scheduler";
+import { attachDurableRetryState, makeWorkflowSession, parseDurableRetryState } from "@smthrs/scheduler";
 import { ReactWorkflowDriver } from "@smthrs/react-reconciler/driver";
 import { SmithersRenderer } from "@smthrs/react-reconciler/dom/renderer";
 import { normalizeRunStartedBy } from "@smthrs/driver";
@@ -114,6 +114,7 @@ import { AlertRuntime } from "./alert-runtime.js";
 import { attachSandboxComputeFns, attachSubflowComputeFns, getSubflowChildRunId } from "./task-compute-fns.js";
 import { SUBFLOW_RUN_LINEAGE_MAX_ROWS, subflowRunLineage } from "@smthrs/graph/subflow-run-lineage";
 import { buildCacheScopeIdentity, isFreshCacheRow, normalizeCacheScope } from "./cache-policy.js";
+import { RETRY_STATE_META_KEY, stampDurableRetryState } from "./effect/retry-state.js";
 import { runWorkflowWithMakeBridge } from "./effect/workflow-make-bridge.js";
 import {
   createWorkflowVersioningRuntime,
@@ -149,6 +150,7 @@ import { buildMemoryPromptBlock, createTaskMemoryTools, retainTaskMemory } from 
 /** @typedef {import("@smthrs/scheduler").RenderContext} RenderContext */
 /** @typedef {import("@smthrs/scheduler").TaskStateMap} TaskStateMap */
 /** @typedef {import("@smthrs/db/adapter/ApprovalRow").ApprovalRow} ApprovalRow */
+/** @typedef {import("@smthrs/db/adapter/AttemptRow").AttemptRow} AttemptRow */
 /** @typedef {import("@smthrs/db/adapter/RunRow").RunRow} RunRow */
 /** @typedef {import("@smthrs/graph/XmlNode").XmlNode} XmlNode */
 /** @typedef {import("drizzle-orm/bun-sqlite").BunSQLiteDatabase<Record<string, unknown>>} BunSQLiteDatabase */
@@ -1612,6 +1614,14 @@ const RUN_HEARTBEAT_MS = 1_000;
 const RUN_HEARTBEAT_STALE_MS = 30_000;
 const RUN_ABORT_SETTLE_POLL_MS = 10;
 const RUN_ABORT_SETTLE_TIMEOUT_MS = 5_000;
+// Process-backed agent adapters may need to finish process-group termination
+// and publish final process/checkpoint callbacks after the task abort signal
+// fires. Once an adapter has identified a started process through onProcess,
+// keep its generate promise attached for this bounded grace period. Four
+// seconds accommodates the existing bounded terminate-and-verify adapters and
+// remains below the run's five-second abort-settlement ceiling. Agents that do
+// not report a process do not impose this delay on cancellation.
+const AGENT_PROCESS_ABORT_CLEANUP_GRACE_MS = 4_000;
 const RUN_CANCEL_POLL_MS = 250;
 const TASK_HEARTBEAT_THROTTLE_MS = 500;
 const TASK_HEARTBEAT_MAX_PAYLOAD_BYTES = 1_000_000;
@@ -3633,6 +3643,9 @@ function isRetryableTaskFailure(attempt) {
   if (meta?.failureRetryable === false) {
     return false;
   }
+  if (meta?.failureRetryable === true) {
+    return true;
+  }
   const errorCode = parseAttemptErrorCode(attempt?.errorJson);
   // AGENT_CONFIG_INVALID is a deterministic configuration failure (e.g.
   // "LLM not set", unknown model). Retrying is guaranteed to fail again
@@ -3665,6 +3678,62 @@ function isQuotaTaskFailure(attempt) {
   // Legacy: some paths may set failureQuota in metaJson instead of errorJson.
   const meta = parseAttemptMetaJson(attempt?.metaJson);
   return meta?.failureQuota === true;
+}
+
+/**
+ * Rebuild the scheduler's retry rung and absolute wait from durable attempts.
+ * Only the newest live attempt may contribute a deadline: a later finished or
+ * cancelled row makes an older deadline stale. Rows without retryState are
+ * legacy and preserve the old immediate-resume behavior. An own malformed
+ * retryState on the newest failed row fails closed rather than dispatching
+ * before a deadline that can no longer be trusted.
+ *
+ * @param {ReadonlyArray<AttemptRow>} attempts
+ */
+function retrySessionStateFromAttempts(attempts) {
+  /** @type {Map<string, AttemptRow[]>} */
+  const byTask = new Map();
+  for (const attempt of attempts) {
+    if (isResetCancelledAttempt(attempt)) continue;
+    const key = buildStateKey(attempt.nodeId, attempt.iteration ?? 0);
+    const rows = byTask.get(key) ?? [];
+    rows.push(attempt);
+    byTask.set(key, rows);
+  }
+  const retryCounts = new Map();
+  const retryWait = new Map();
+  for (const [key, rows] of byTask) {
+    const failed = rows.filter((attempt) => attempt.state === "failed" && !isQuotaTaskFailure(attempt));
+    const latest = rows.reduce((candidate, attempt) => {
+      if (!candidate) return attempt;
+      const startedDelta = Number(attempt.startedAtMs ?? 0) - Number(candidate.startedAtMs ?? 0);
+      if (startedDelta !== 0) return startedDelta > 0 ? attempt : candidate;
+      return attempt.attempt > candidate.attempt ? attempt : candidate;
+    }, /** @type {AttemptRow | null} */ (null));
+    // A later successful attempt makes every older failure rung irrelevant.
+    // Cancelled crash-recovery attempts retain the prior rung; they do not
+    // consume it, but the next failure must still advance it.
+    if (failed.length > 0 && latest?.state !== "finished") retryCounts.set(key, failed.length);
+    if (!latest || latest.state !== "failed" || isQuotaTaskFailure(latest)) continue;
+    const meta = parseAttemptMetaJson(latest.metaJson);
+    if (!Object.prototype.hasOwnProperty.call(meta, RETRY_STATE_META_KEY)) continue;
+    const retryState = parseDurableRetryState(meta[RETRY_STATE_META_KEY]);
+    if (!retryState || retryState.failureCount !== failed.length) {
+      throw new SmithersError(
+        "INVALID_RETRY_STATE",
+        `Cannot safely resume task ${latest.nodeId}: its durable retry state is malformed.`,
+        {
+          nodeId: latest.nodeId,
+          iteration: latest.iteration ?? 0,
+          attempt: latest.attempt,
+          failureRetryable: false,
+        },
+      );
+    }
+    retryCounts.set(key, retryState.failureCount);
+    retryWait.set(key, retryState.retryAtMs);
+  }
+  return { retryCounts, retryWait };
 }
 /**
  * @param {Record<string, unknown> | null | undefined} errorJson
@@ -4409,6 +4478,7 @@ async function legacyExecuteTask(
   let heartbeatWriteTimer;
   let traceCollector;
   const liveOwnedPids = new Set();
+  let agentProcessObserved = false;
   // Construct the abort race only for an agent call that consumes it. A
   // static/compute attempt may never observe the promise; constructing it
   // eagerly would leave a rejected promise behind when the watchdog fires.
@@ -4424,7 +4494,41 @@ async function legacyExecuteTask(
     }
     return taskAbortPromise;
   };
-  const raceTaskAbort = (promise) => Promise.race([promise, getTaskAbortPromise()]);
+  /**
+   * Race an in-flight agent call against task cancellation while retaining the
+   * underlying promise long enough for an abort-aware process adapter to finish
+   * bounded cleanup. A late rejection is always observed, including after the
+   * grace expires, so a non-cooperative adapter cannot create an unhandled
+   * rejection after the engine has detached it.
+   * @template A
+   * @param {Promise<A>} promise
+   * @returns {Promise<A>}
+   */
+  const raceAgentCallAbort = async (promise) => {
+    const agentCall = Promise.resolve(promise);
+    agentCall.catch(() => undefined);
+    try {
+      return await Promise.race([agentCall, getTaskAbortPromise()]);
+    } catch (error) {
+      if (taskSignal.aborted && agentProcessObserved) {
+        let cleanupTimer;
+        try {
+          await Promise.race([
+            agentCall.then(
+              () => undefined,
+              () => undefined,
+            ),
+            new Promise((resolve) => {
+              cleanupTimer = setTimeout(resolve, AGENT_PROCESS_ABORT_CLEANUP_GRACE_MS);
+            }),
+          ]);
+        } finally {
+          if (cleanupTimer !== undefined) clearTimeout(cleanupTimer);
+        }
+      }
+      throw error;
+    }
+  };
   /**
    * @returns {Promise<void>}
    */
@@ -5873,9 +5977,43 @@ async function legacyExecuteTask(
           }
           const checkpointJson = JSON.stringify(checkpoint);
           if (checkpointJson === latestAgentCheckpointJson && latestAgentCheckpointOwnedByAttempt) {
+            // Identical publication is a content/ref no-op, but never an
+            // authority no-op. Re-run the same durable run-owner,
+            // cancellation, and in-progress-attempt fence used by checkpoint
+            // writes so a stale, cancelled, or post-terminal callback cannot
+            // report success merely because its bytes were seen earlier.
+            if (heartbeatOwnerLost) {
+              throw new SmithersError("HEARTBEAT_FENCE_LOST", "Agent checkpoint ownership was lost.");
+            }
+            const fencedAtMs = nowMs();
+            const owned = await Effect.runPromise(
+              adapter.heartbeatAttempt(
+                runId,
+                desc.nodeId,
+                desc.iteration,
+                attemptNo,
+                fencedAtMs,
+                heartbeatPendingDataJson,
+                executionOwnerId,
+              ),
+            );
+            if (!owned) {
+              heartbeatOwnerLost = true;
+              throw new SmithersError("HEARTBEAT_FENCE_LOST", "Agent checkpoint ownership was lost.");
+            }
+            heartbeatEvidenceAtMs = fencedAtMs;
+            heartbeatLastPersistedWriteAtMs = fencedAtMs;
+            heartbeatLastWriteSucceeded = true;
             return attemptMeta.agentCheckpoint ?? null;
           }
-          if (taskSignal.aborted || heartbeatOwnerLost) throw taskSignal.reason ?? makeAbortError();
+          // Abort starts a bounded cleanup window for process-backed agents;
+          // it does not itself revoke checkpoint publication authority. The
+          // durable write atomically fences runtime ownership, cancellation
+          // requests, and the attempt's in-progress state, so cleanup can
+          // publish its final checkpoint while stale or post-terminal callbacks
+          // are still rejected.
+          if (heartbeatOwnerLost)
+            throw new SmithersError("HEARTBEAT_FENCE_LOST", "Agent checkpoint ownership was lost.");
           const ref = await Effect.runPromise(
             adapter.putAgentCheckpoint({
               runId,
@@ -6099,6 +6237,7 @@ async function legacyExecuteTask(
         };
         handleProcess = ({ phase, pid }) => {
           if (typeof pid !== "number" || pid <= 0 || heartbeatOwnerLost) return;
+          if (phase === "started") agentProcessObserved = true;
           // A process callback is evidence only after the same fenced
           // heartbeat used by stdout/stderr has proved ownership.
           recordInternalHeartbeat();
@@ -6256,7 +6395,7 @@ async function legacyExecuteTask(
               : {}),
           };
           try {
-            result = await Promise.race([
+            result = await raceAgentCallAbort(
               runPromisePreservingFailure(
                 withSmithersSpan(
                   smithersSpanNames.agent,
@@ -6336,8 +6475,7 @@ async function legacyExecuteTask(
                   },
                 ),
               ),
-              getTaskAbortPromise(),
-            ]);
+            );
           } finally {
             if (hijackPollingInterval) {
               clearInterval(hijackPollingInterval);
@@ -6671,13 +6809,16 @@ async function legacyExecuteTask(
               "engine:schema-retry",
             );
             const checkpointPublicationBeforeCorrection = checkpointPublicationCount;
-            const retryResult = await raceTaskAbort(
+            const retryResult = await raceAgentCallAbort(
               effectiveAgent.generate({
                 options: undefined,
                 abortSignal: taskSignal,
                 prompt: jsonPrompt,
-                resumeSession: correctionResumeSession,
-                ...(correctionCheckpoint ? { resumeCheckpoint: correctionCheckpoint, checkpointMode: "resume" } : {}),
+                ...(correctionCheckpoint
+                  ? { resumeCheckpoint: correctionCheckpoint, checkpointMode: "resume" }
+                  : correctionResumeSession
+                    ? { resumeSession: correctionResumeSession }
+                    : {}),
                 ...(generationTools ? { tools: generationTools } : {}),
                 rootDir: taskRoot,
                 maxOutputBytes: toolConfig.maxOutputBytes,
@@ -7031,7 +7172,7 @@ async function legacyExecuteTask(
       // Append the correction as a user message to the conversation
       const retryMessages = [...schemaCorrectionMessages, { role: "user", content: schemaRetryPrompt }];
       const checkpointPublicationBeforeCorrection = checkpointPublicationCount;
-      const schemaRetryResult = await raceTaskAbort(
+      const schemaRetryResult = await raceAgentCallAbort(
         effectiveAgent.generate({
           options: undefined,
           abortSignal: taskSignal,
@@ -7357,18 +7498,17 @@ async function legacyExecuteTask(
     if (isHeartbeatPayloadValidationError(effectiveError)) {
       attemptMeta.failureRetryable = false;
     }
-    // Allow agents (e.g. BaseCliAgent on "LLM not set") to flag a failure as
-    // non-retryable via SmithersError details. Without this, the engine would
-    // retry deterministic configuration errors up to desc.retries times.
-    if (
-      effectiveError &&
-      typeof effectiveError === "object" &&
+    // An authored retryability decision is authoritative. In its absence,
+    // deterministic configuration errors keep their fail-fast default.
+    if (effectiveError && typeof effectiveError === "object") {
       // @ts-ignore — duck-type on SmithersError shape
-      (effectiveError.details?.failureRetryable === false ||
-        // @ts-ignore
-        effectiveError.code === "AGENT_CONFIG_INVALID")
-    ) {
-      attemptMeta.failureRetryable = false;
+      const explicitRetryability = effectiveError.details?.failureRetryable;
+      if (explicitRetryability === false || explicitRetryability === true) {
+        attemptMeta.failureRetryable = explicitRetryability;
+        // @ts-ignore — duck-type on SmithersError shape
+      } else if (effectiveError.code === "AGENT_CONFIG_INVALID") {
+        attemptMeta.failureRetryable = false;
+      }
     }
     // Honour `discardResumeSession: true` from agent-side errors (e.g. kimi
     // session-loss). The next attempt's resumeSession resolution checks
@@ -7516,6 +7656,13 @@ async function legacyExecuteTask(
       }
       failureErrorJson.details = details;
     }
+    stampDurableRetryState({
+      attemptMeta,
+      attempts,
+      descriptor: desc,
+      error: failureErrorJson,
+      failedAtMs,
+    });
     const failureClaimed = await adapter.withTransaction(
       "task-fail",
       Effect.gen(function* () {
@@ -7593,8 +7740,8 @@ async function legacyExecuteTask(
     await annotateTaskSpan({
       status: "failed",
     });
-    const attempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
-    const failedAttempts = attempts.filter((a) => a.state === "failed");
+    const updatedAttempts = await Effect.runPromise(adapter.listAttempts(runId, desc.nodeId, desc.iteration));
+    const failedAttempts = updatedAttempts.filter((a) => a.state === "failed");
     const hasNonRetryableFailure = failedAttempts.some((attempt) => !isRetryableTaskFailure(attempt));
     const retryConsumingFailedAttempts = failedAttempts.filter((a) => !isQuotaTaskFailure(a));
     const latestFailedAttemptIsQuota = isQuotaTaskFailure(failedAttempts[0]);
@@ -8465,7 +8612,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
     const latest = attempts[0];
     if (latest?.errorJson) {
       try {
-        return JSON.parse(latest.errorJson);
+        const error = JSON.parse(latest.errorJson);
+        const retryState = parseDurableRetryState(parseAttemptMetaJson(latest.metaJson)[RETRY_STATE_META_KEY]);
+        return attachDurableRetryState(error, retryState);
       } catch {
         return latest.errorJson;
       }
@@ -8881,7 +9030,10 @@ async function runWorkflowBodyDriver(workflow, opts) {
       case "Timer":
         return reconcileTimerWait(reason.resumeAtMs);
       case "RetryBackoff":
-        await sleep(reason.waitMs);
+        await sleep(reason.waitMs, runAbortController.signal);
+        if (runAbortController.signal.aborted) {
+          return { runId, status: "cancelled" };
+        }
         return submitLastGraph();
       case "Quota":
         return markRunWaiting("waiting-quota", "quota", {
@@ -9815,6 +9967,9 @@ async function runWorkflowBodyDriver(workflow, opts) {
       eventBus,
       runStartMs: activeRun?.createdAtMs ?? nowMs(),
     });
+    const retrySessionState = opts.resume
+      ? retrySessionStateFromAttempts(await Effect.runPromise(adapter.listAttemptsForRun(runId)))
+      : { retryCounts: new Map(), retryWait: new Map() };
     workflowSession = makeWorkflowSession({
       runId,
       nowMs,
@@ -9822,6 +9977,8 @@ async function runWorkflowBodyDriver(workflow, opts) {
       requireRerenderOnOutputChange: opts.requireRerenderOnOutputChange ?? true,
       initialRalphState: ralphState,
       initialTimerStarts: carriedTimerStarts,
+      initialRetryCounts: retrySessionState.retryCounts,
+      initialRetryWait: retrySessionState.retryWait,
       evaluateAspectBudget: (descriptor) =>
         budgetTracker ? evaluateAspectBudget(descriptor.aspects, budgetTracker.snapshot(nowMs())) : null,
       onAspectBudgetSkip: (descriptor) => {
@@ -10311,6 +10468,7 @@ export const __engineInternals = {
   parseAttemptErrorCode,
   isRetryableTaskFailure,
   isQuotaTaskFailure,
+  retrySessionStateFromAttempts,
   cancelInProgress,
   cancelStaleAttempts,
   cancelPendingExternalWaits,

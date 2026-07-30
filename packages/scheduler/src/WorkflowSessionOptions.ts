@@ -21,6 +21,10 @@ export type WorkflowSessionOptions = {
     }
   >;
   readonly initialTimerStarts?: ReadonlyMap<string, number>;
+  /** Retry-policy failure rungs restored from durable attempts. */
+  readonly initialRetryCounts?: ReadonlyMap<string, number>;
+  /** Absolute retry deadlines restored from durable attempts. */
+  readonly initialRetryWait?: ReadonlyMap<string, number>;
   /**
    * Evaluate a runnable task's Aspects budgets against the run's accumulated
    * usage. Return the first breach, or `null`/`undefined` when within budget.

@@ -1,6 +1,6 @@
 /** @jsxImportSource smthrs */
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { SmithersDb } from "@smthrs/db/adapter";
@@ -8,6 +8,7 @@ import { Effect } from "effect";
 import { Sequence, Task, Workflow, runWorkflow } from "smthrs";
 import { createTestSmithers, sleep } from "../../smithers/tests/helpers.js";
 import { outputSchemas } from "../../smithers/tests/schema.js";
+import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 /**
  * @param {any[]} nodes
  * @param {string} nodeId
@@ -30,6 +31,36 @@ function incrementCounter(counterPath) {
   const next = readCounter(counterPath) + 1;
   writeFileSync(counterPath, String(next));
   return next;
+}
+
+function readCallTimes(callLogPath) {
+  if (!existsSync(callLogPath)) return [];
+  return readFileSync(callLogPath, "utf8").trim().split("\n").filter(Boolean).map(Number);
+}
+
+function buildRetryBackoffWorkflow(smithers, outputs, callLogPath, firstRetryAfterMs) {
+  return smithers(() => (
+    <Workflow name="resume-durable-retry-backoff">
+      <Task
+        id="flaky"
+        output={outputs.outputA}
+        retries={2}
+        retryPolicy={{ backoff: "exponential", initialDelayMs: 750 }}
+      >
+        {() => {
+          const call = readCallTimes(callLogPath).length + 1;
+          appendFileSync(callLogPath, `${Date.now()}\n`);
+          if (call <= 2) {
+            throw new SmithersError("PROVIDER_TRANSIENT", `failure ${call}`, {
+              failureRetryable: true,
+              retryAfterMs: call === 1 ? firstRetryAfterMs : 50,
+            });
+          }
+          return { value: call };
+        }}
+      </Task>
+    </Workflow>
+  ));
 }
 /**
  * @param {() => Promise<boolean>} predicate
@@ -130,7 +161,146 @@ await Effect.runPromise(runWorkflow(workflow, {
     readStderr: () => stderr,
   };
 }
+
+function spawnRetryBackoffRun(params) {
+  const smithersPath = resolve(import.meta.dir, "../../smithers/src/index.js");
+  const schemaPath = resolve(import.meta.dir, "../../smithers/tests/schema.js");
+  const errorPath = resolve(import.meta.dir, "../../errors/src/SmithersError.js");
+  const script = `
+import React from "react";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { createSmithers, Task, Workflow, runWorkflow } from ${JSON.stringify(smithersPath)};
+import { outputSchemas } from ${JSON.stringify(schemaPath)};
+import { SmithersError } from ${JSON.stringify(errorPath)};
+import { Effect } from "effect";
+
+const callLogPath = ${JSON.stringify(params.callLogPath)};
+const readCalls = () => existsSync(callLogPath)
+  ? readFileSync(callLogPath, "utf8").trim().split("\\n").filter(Boolean).length
+  : 0;
+const api = createSmithers(outputSchemas, { dbPath: ${JSON.stringify(params.dbPath)} });
+const workflow = api.smithers(() => React.createElement(
+  Workflow,
+  { name: "resume-durable-retry-backoff" },
+  React.createElement(
+    Task,
+    {
+      id: "flaky",
+      output: api.outputs.outputA,
+      retries: 2,
+      retryPolicy: { backoff: "exponential", initialDelayMs: 750 },
+    },
+    () => {
+      const call = readCalls() + 1;
+      appendFileSync(callLogPath, String(Date.now()) + "\\n");
+      if (call <= 2) {
+        throw new SmithersError("PROVIDER_TRANSIENT", "failure " + call, {
+          failureRetryable: true,
+          retryAfterMs: call === 1 ? ${JSON.stringify(params.firstRetryAfterMs)} : 50,
+        });
+      }
+      return { value: call };
+    },
+  ),
+));
+await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: ${JSON.stringify(params.runId)} }));
+`;
+  const child = spawn(process.execPath, ["-e", script], {
+    cwd: process.cwd(),
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let stderr = "";
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const exited = new Promise((resolveExit, rejectExit) => {
+    child.once("error", rejectExit);
+    child.once("close", (code, signal) => resolveExit({ exitCode: code, signal }));
+  });
+  return { child, exited, readStderr: () => stderr };
+}
 describe("resume without time travel", () => {
+  test("hard-stop resume preserves the original retry deadline and exponential rung", async () => {
+    const { smithers, outputs, db, dbPath, cleanup } = createTestSmithers(outputSchemas);
+    const adapter = new SmithersDb(db);
+    const runId = "resume-durable-retry-deadline";
+    const callLogPath = `${dbPath}.retry-calls`;
+    const child = spawnRetryBackoffRun({ dbPath, callLogPath, runId, firstRetryAfterMs: 1_500 });
+    try {
+      let durableRetryState;
+      await waitFor(
+        async () => {
+          const failed = (await adapter.listAttempts(runId, "flaky", 0)).find((attempt) => attempt.state === "failed");
+          durableRetryState = failed ? JSON.parse(failed.metaJson ?? "{}").retryState : undefined;
+          return durableRetryState?.failureCount === 1;
+        },
+        { timeoutMs: 10_000, intervalMs: 20 },
+      );
+      expect(readCallTimes(callLogPath)).toHaveLength(1);
+      child.child.kill("SIGKILL");
+      await child.exited;
+
+      const workflow = buildRetryBackoffWorkflow(smithers, outputs, callLogPath, 1_500);
+      const resumedPromise = Effect.runPromise(runWorkflow(workflow, { input: {}, runId, resume: true, force: true }));
+      await sleep(100);
+      expect(readCallTimes(callLogPath)).toHaveLength(1);
+      const resumed = await resumedPromise;
+      expect(resumed.status).toBe("finished");
+      const callTimes = readCallTimes(callLogPath);
+      expect(callTimes).toHaveLength(3);
+      expect(callTimes[1]).toBeGreaterThanOrEqual(durableRetryState.retryAtMs);
+      expect(callTimes[2] - callTimes[1]).toBeGreaterThanOrEqual(1_400);
+      const attempts = await adapter.listAttempts(runId, "flaky", 0);
+      expect(JSON.parse(attempts.find((attempt) => attempt.attempt === 2).metaJson).retryState.failureCount).toBe(2);
+    } finally {
+      if (child.child.exitCode === null && !child.child.killed) {
+        child.child.kill("SIGKILL");
+        await child.exited.catch(() => undefined);
+      }
+      cleanup();
+    }
+  }, 30_000);
+
+  test("cancellation promptly interrupts a retry wait hydrated after a hard stop", async () => {
+    const { smithers, outputs, db, dbPath, cleanup } = createTestSmithers(outputSchemas);
+    const adapter = new SmithersDb(db);
+    const runId = "resume-durable-retry-cancel";
+    const callLogPath = `${dbPath}.retry-cancel-calls`;
+    const child = spawnRetryBackoffRun({ dbPath, callLogPath, runId, firstRetryAfterMs: 5_000 });
+    try {
+      await waitFor(
+        async () => {
+          const failed = (await adapter.listAttempts(runId, "flaky", 0)).find((attempt) => attempt.state === "failed");
+          return JSON.parse(failed?.metaJson ?? "{}").retryState?.failureCount === 1;
+        },
+        { timeoutMs: 10_000, intervalMs: 20 },
+      );
+      const ownerBeforeKill = (await adapter.getRun(runId))?.runtimeOwnerId;
+      child.child.kill("SIGKILL");
+      await child.exited;
+
+      const workflow = buildRetryBackoffWorkflow(smithers, outputs, callLogPath, 5_000);
+      const startedAtMs = Date.now();
+      const resumedPromise = Effect.runPromise(runWorkflow(workflow, { input: {}, runId, resume: true, force: true }));
+      await waitFor(async () => {
+        const run = await adapter.getRun(runId);
+        return run?.status === "running" && run.runtimeOwnerId && run.runtimeOwnerId !== ownerBeforeKill;
+      });
+      await adapter.requestRunCancel(runId, Date.now());
+      const resumed = await resumedPromise;
+      expect(resumed.status).toBe("cancelled");
+      expect(Date.now() - startedAtMs).toBeLessThan(2_000);
+      expect(readCallTimes(callLogPath)).toHaveLength(1);
+    } finally {
+      if (child.child.exitCode === null && !child.child.killed) {
+        child.child.kill("SIGKILL");
+        await child.exited.catch(() => undefined);
+      }
+      cleanup();
+    }
+  }, 30_000);
+
   test("resume keeps exhausted failed task failed until retries increase", async () => {
     const { smithers, outputs, db, cleanup } = createTestSmithers(outputSchemas);
     try {

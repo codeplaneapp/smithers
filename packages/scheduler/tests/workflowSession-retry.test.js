@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
+import { attachDurableRetryState, createDurableRetryState } from "../src/durableRetryState.js";
 import { makeWorkflowSession } from "../src/makeWorkflowSession.js";
 
 function el(tag, props = {}, children = []) {
@@ -30,6 +31,74 @@ function makeGraph(descriptor = makeAgentDescriptor()) {
 }
 
 describe("makeWorkflowSession retry classification", () => {
+  test("uses an attempt-committed absolute deadline instead of restarting provider backoff", () => {
+    let currentTimeMs = 2_000;
+    const session = makeWorkflowSession({ nowMs: () => currentTimeMs });
+    const descriptor = makeAgentDescriptor();
+    const graph = makeGraph(descriptor);
+    Effect.runSync(session.submitGraph(graph));
+    const error = attachDurableRetryState(
+      { message: "retry later", details: { retryAfterMs: 5_000 } },
+      createDurableRetryState({
+        failureCount: 1,
+        failedAtMs: 1_000,
+        retryAfterMs: 5_000,
+        retryPolicy: descriptor.retryPolicy,
+      }),
+    );
+
+    expect(
+      Effect.runSync(session.taskFailed({ nodeId: descriptor.nodeId, iteration: descriptor.iteration, error })),
+    ).toEqual({ _tag: "Wait", reason: { _tag: "RetryBackoff", waitMs: 4_000 } });
+
+    currentTimeMs = 5_999;
+    expect(Effect.runSync(session.submitGraph(graph))).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "RetryBackoff", waitMs: 1 },
+    });
+  });
+
+  test("hydrates a retry wait without dispatch and preserves the next exponential rung", () => {
+    let currentTimeMs = 2_000;
+    const descriptor = makeAgentDescriptor({ retryPolicy: { backoff: "exponential", initialDelayMs: 1_000 } });
+    const graph = makeGraph(descriptor);
+    const session = makeWorkflowSession({
+      nowMs: () => currentTimeMs,
+      initialRetryCounts: new Map([["agent-task::0", 1]]),
+      initialRetryWait: new Map([["agent-task::0", 6_000]]),
+    });
+
+    expect(Effect.runSync(session.submitGraph(graph))).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "RetryBackoff", waitMs: 4_000 },
+    });
+    currentTimeMs = 6_000;
+    expect(Effect.runSync(session.submitGraph(graph))).toEqual({ _tag: "Execute", tasks: [descriptor] });
+    expect(
+      Effect.runSync(
+        session.taskFailed({
+          nodeId: descriptor.nodeId,
+          iteration: descriptor.iteration,
+          error: { message: "second transient failure" },
+        }),
+      ),
+    ).toEqual({ _tag: "Wait", reason: { _tag: "RetryBackoff", waitMs: 2_000 } });
+  });
+
+  test("cancellation interrupts a hydrated retry wait", () => {
+    const descriptor = makeAgentDescriptor();
+    const session = makeWorkflowSession({
+      nowMs: () => 2_000,
+      initialRetryCounts: new Map([["agent-task::0", 1]]),
+      initialRetryWait: new Map([["agent-task::0", 60_000]]),
+    });
+    expect(Effect.runSync(session.submitGraph(makeGraph(descriptor)))._tag).toBe("Wait");
+    expect(Effect.runSync(session.cancelRequested())).toEqual({
+      _tag: "Finished",
+      result: { runId: expect.any(String), status: "cancelled", output: undefined },
+    });
+  });
+
   test("details.failureRetryable=false fails an agent task without backoff", () => {
     const session = makeWorkflowSession({ nowMs: () => 1_000 });
     const descriptor = makeAgentDescriptor();
@@ -69,6 +138,172 @@ describe("makeWorkflowSession retry classification", () => {
     );
 
     expect(decision._tag).toBe("Failed");
+  });
+
+  test("explicit failureRetryable=true overrides AGENT_CONFIG_INVALID", () => {
+    let currentTimeMs = 1_000;
+    const session = makeWorkflowSession({ nowMs: () => currentTimeMs });
+    const descriptor = makeAgentDescriptor();
+    const graph = makeGraph(descriptor);
+    Effect.runSync(session.submitGraph(graph));
+
+    const decision = Effect.runSync(
+      session.taskFailed({
+        nodeId: descriptor.nodeId,
+        iteration: descriptor.iteration,
+        error: {
+          code: "AGENT_CONFIG_INVALID",
+          message: "provider requested a fresh configuration probe",
+          details: { failureRetryable: true },
+        },
+      }),
+    );
+
+    expect(decision).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "RetryBackoff", waitMs: 1_000 },
+    });
+    currentTimeMs = 2_000;
+    expect(Effect.runSync(session.submitGraph(graph))).toEqual({ _tag: "Execute", tasks: [descriptor] });
+  });
+
+  test("retryAfterMs is a minimum over authored policy and prevents an early retry", () => {
+    let currentTimeMs = 1_000;
+    const session = makeWorkflowSession({ nowMs: () => currentTimeMs });
+    const descriptor = makeAgentDescriptor();
+    const graph = makeGraph(descriptor);
+    Effect.runSync(session.submitGraph(graph));
+
+    const decision = Effect.runSync(
+      session.taskFailed({
+        nodeId: descriptor.nodeId,
+        iteration: descriptor.iteration,
+        error: {
+          code: "AGENT_RATE_LIMITED",
+          message: "retry later",
+          details: { retryAfterMs: 5_000 },
+        },
+      }),
+    );
+    expect(decision).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "RetryBackoff", waitMs: 5_000 },
+    });
+
+    currentTimeMs = 5_999;
+    expect(Effect.runSync(session.submitGraph(graph))).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "RetryBackoff", waitMs: 1 },
+    });
+    currentTimeMs = 6_000;
+    expect(Effect.runSync(session.submitGraph(graph))).toEqual({ _tag: "Execute", tasks: [descriptor] });
+  });
+
+  test("authored policy remains the minimum when it exceeds retryAfterMs", () => {
+    const session = makeWorkflowSession({ nowMs: () => 1_000 });
+    const descriptor = makeAgentDescriptor({ retryPolicy: { initialDelayMs: 2_000 } });
+    Effect.runSync(session.submitGraph(makeGraph(descriptor)));
+
+    expect(
+      Effect.runSync(
+        session.taskFailed({
+          nodeId: descriptor.nodeId,
+          iteration: descriptor.iteration,
+          error: { message: "transient", details: { retryAfterMs: 500 } },
+        }),
+      ),
+    ).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "RetryBackoff", waitMs: 2_000 },
+    });
+  });
+
+  test.each([-1, 1.5, Number.MAX_SAFE_INTEGER + 1, "5000"])("ignores invalid retryAfterMs value %p", (retryAfterMs) => {
+    const session = makeWorkflowSession({ nowMs: () => 1_000 });
+    const descriptor = makeAgentDescriptor();
+    Effect.runSync(session.submitGraph(makeGraph(descriptor)));
+
+    expect(
+      Effect.runSync(
+        session.taskFailed({
+          nodeId: descriptor.nodeId,
+          iteration: descriptor.iteration,
+          error: { message: "transient", details: { retryAfterMs } },
+        }),
+      ),
+    ).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "RetryBackoff", waitMs: 1_000 },
+    });
+  });
+
+  test("preserves retryAfterMs above the runtime safe single-timer maximum", () => {
+    const retryAfterMs = 2_147_483_647 + 5_000;
+    let currentTimeMs = 1_000;
+    const session = makeWorkflowSession({ nowMs: () => currentTimeMs });
+    const descriptor = makeAgentDescriptor();
+    const graph = makeGraph(descriptor);
+    Effect.runSync(session.submitGraph(graph));
+
+    expect(
+      Effect.runSync(
+        session.taskFailed({
+          nodeId: descriptor.nodeId,
+          iteration: descriptor.iteration,
+          error: { message: "transient", details: { retryAfterMs } },
+        }),
+      ),
+    ).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "RetryBackoff", waitMs: 2_147_483_647 },
+    });
+
+    currentTimeMs += 2_147_483_647;
+    expect(Effect.runSync(session.submitGraph(graph))).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "RetryBackoff", waitMs: 5_000 },
+    });
+    currentTimeMs += 4_999;
+    expect(Effect.runSync(session.submitGraph(graph))).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "RetryBackoff", waitMs: 1 },
+    });
+    currentTimeMs += 1;
+    expect(Effect.runSync(session.submitGraph(graph))).toEqual({ _tag: "Execute", tasks: [descriptor] });
+  });
+
+  test("rounds a maximum safe retryAfterMs deadline up rather than shortening its minimum", () => {
+    const startedAtMs = 1_785_424_712_358;
+    const retryAfterMs = Number.MAX_SAFE_INTEGER;
+    let currentTimeMs = startedAtMs;
+    const session = makeWorkflowSession({ nowMs: () => currentTimeMs });
+    const descriptor = makeAgentDescriptor();
+    const graph = makeGraph(descriptor);
+    Effect.runSync(session.submitGraph(graph));
+
+    expect(
+      Effect.runSync(
+        session.taskFailed({
+          nodeId: descriptor.nodeId,
+          iteration: descriptor.iteration,
+          error: { message: "transient", details: { retryAfterMs } },
+        }),
+      ),
+    ).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "RetryBackoff", waitMs: 2_147_483_647 },
+    });
+
+    // The exact mathematical deadline is odd and cannot be represented at
+    // this magnitude. One millisecond before it is representable; the task
+    // must remain parked there rather than using the rounded-down timestamp.
+    currentTimeMs = Number(BigInt(startedAtMs) + BigInt(retryAfterMs) - 1n);
+    expect(Effect.runSync(session.submitGraph(graph))).toEqual({
+      _tag: "Wait",
+      reason: { _tag: "RetryBackoff", waitMs: 2 },
+    });
+    currentTimeMs += 2;
+    expect(Effect.runSync(session.submitGraph(graph))).toEqual({ _tag: "Execute", tasks: [descriptor] });
   });
 
   test("ordinary agent failures still use retry backoff", () => {

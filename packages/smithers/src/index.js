@@ -13,6 +13,7 @@
 /** @typedef {import("@smthrs/agents").AgentCheckpointResult} AgentCheckpointResult */
 /** @typedef {import("@smthrs/agents").AgentFileChange} AgentFileChange */
 /** @typedef {import("@smthrs/agents").AgentFileChangeKind} AgentFileChangeKind */
+/** @typedef {import("@smthrs/agents").AgentGenerateOptions} AgentGenerateOptions */
 /** @typedef {import("@smthrs/agents/AgentLike").AgentLike} AgentLike */
 /** @typedef {import("@smthrs/agents/capability-registry").AgentToolDescriptor} AgentToolDescriptor */
 /** @typedef {import("@smthrs/scorers").AggregateOptions} AggregateOptions */

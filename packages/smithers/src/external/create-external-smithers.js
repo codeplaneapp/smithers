@@ -79,6 +79,7 @@ export function hostNodeToReact(node, agents) {
  */
 export function createExternalSmithers(config) {
   const { schemas, agents, buildFn } = config;
+  const { zodToKeyName, ambiguousZodSchemas } = prepareOutputSchemas(schemas);
   const dbPath = config.dbPath
     ? resolve(config.dbPath)
     : join(mkdtempSync(join(tmpdir(), "smithers-ext-")), "smithers.db");
@@ -126,7 +127,6 @@ export function createExternalSmithers(config) {
     if (name === "input") continue;
     schemaRegistry.set(name, { table: tables[name], zodSchema });
   }
-  const { zodToKeyName, ambiguousZodSchemas } = prepareOutputSchemas(schemas);
   return {
     db,
     build: (ctx) => {
