@@ -3955,8 +3955,8 @@ async function runUiCommand(c) {
     }
     const url = `${base}${summary.uiPath}${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`;
     warnIfBrowserUiNeedsBearer(token);
-    if (c.options.open) openInBrowser(url);
-    console.log(`${c.options.open ? "Opening" : "UI URL:"} ${url}`);
+    const opened = c.options.open ? openInBrowser(url) : false;
+    console.log(`${opened ? "Opening" : "UI URL:"} ${url}`);
     return c.ok(
       { opened: c.options.open, url, runId: runId ?? null, workflow: workflowKey },
       {
@@ -3985,8 +3985,8 @@ async function runFullUiCommand(c, base, fail) {
       port: c.options.appPort,
       rebuild: c.options.rebuild,
     });
-    if (c.options.open) openInBrowser(url);
-    console.log(`${c.options.open ? "Opening" : "UI URL:"} ${url}`);
+    const opened = c.options.open ? openInBrowser(url) : false;
+    console.log(`${opened ? "Opening" : "UI URL:"} ${url}`);
     console.log(`[smithers] Serving the full Smithers UI (gateway: ${base}). Press Ctrl-C to stop.`);
     const stop = () => {
       server.close();
@@ -3997,6 +3997,14 @@ async function runFullUiCommand(c, base, fail) {
     await new Promise(() => {});
     return c.ok({ opened: c.options.open, url, gateway: base });
   } catch (err) {
+    // A taken --app-port rejects with EADDRINUSE out of the listen; name the
+    // port and the flag to change it instead of surfacing the raw listen error.
+    if (err?.code === "EADDRINUSE") {
+      return fail(
+        "UI_SERVE_FAILED",
+        `port ${c.options.appPort} is in use; pass --app-port <other> to serve on a different port.`,
+      );
+    }
     return fail("UI_SERVE_FAILED", err?.message ?? String(err));
   }
 }
