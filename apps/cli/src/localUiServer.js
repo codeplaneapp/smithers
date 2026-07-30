@@ -114,16 +114,14 @@ export function bundleIsFresh(distDir, appDir) {
         return;
       }
       const requireFromDependency = createRequire(manifestPath);
-      for (const name of Object.keys(dependencyPackage.dependencies ?? {})) {
-        if (!name.startsWith("@smithers-orchestrator/")) continue;
+      for (const name of workspaceDependencyNames(dependencyPackage)) {
         const transitiveDir =
           resolveDependencyDir(requireFromDependency, canonicalDir, name) ??
           resolveDependencyDir(requireFromApp, appDir, name);
         if (transitiveDir) visitWorkspaceDependency(transitiveDir);
       }
     };
-    for (const name of Object.keys(appPackage.dependencies ?? {})) {
-      if (!name.startsWith("@smithers-orchestrator/")) continue;
+    for (const name of workspaceDependencyNames(appPackage)) {
       const dependencyDir = resolveDependencyDir(requireFromApp, appDir, name);
       if (dependencyDir) visitWorkspaceDependency(dependencyDir);
     }
@@ -139,6 +137,12 @@ export function bundleIsFresh(distDir, appDir) {
     }
   }
   return builtAt >= newest;
+}
+
+function workspaceDependencyNames(packageJson) {
+  return Object.entries(packageJson.dependencies ?? {})
+    .filter(([, version]) => typeof version === "string" && version.startsWith("workspace:"))
+    .map(([name]) => name);
 }
 
 /**
