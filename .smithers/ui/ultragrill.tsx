@@ -39,17 +39,16 @@ function rowOf(value: unknown): Record<string, unknown> {
   return isRecord(data.row) ? data.row : data;
 }
 
-// Gateway run-event frames wrap the node event two levels deep:
-//   { event:"run.event", payload:{ event:"node.finished", payload:{ nodeId }, seq } }
+// Durable run-event frames carry the engine event at frame.event and its data
+// at frame.payload.
 type EventInfo = { nodeId: string; type: string; seq: number };
 function eventInfo(ev: unknown): EventInfo {
   const frame = isRecord(ev) ? ev : {};
-  const inner = isRecord(frame.payload) ? frame.payload : {};
-  const nodePayload = isRecord(inner.payload) ? inner.payload : {};
+  const payload = isRecord(frame.payload) ? frame.payload : {};
   return {
-    nodeId: asString(nodePayload.nodeId) ?? asString(inner.nodeId) ?? asString(frame.nodeId) ?? "",
-    type: asString(inner.event) ?? asString(frame.event) ?? asString(frame.type) ?? "",
-    seq: typeof inner.seq === "number" ? inner.seq : typeof frame.seq === "number" ? frame.seq : 0,
+    nodeId: asString(payload.nodeId) ?? "",
+    type: asString(frame.event) ?? "",
+    seq: typeof frame.seq === "number" ? frame.seq : 0,
   };
 }
 function workerIndex(nodeId: string): number | null {

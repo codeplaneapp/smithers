@@ -196,9 +196,7 @@ function App() {
     }
     labels.push({ id: "feature-enum:result", name: "Result", sub: "Final inventory" });
 
-    const completedTasks = eventNames.filter(
-      (n) => n === "task.finished" || n === "node.completed" || n === "task.completed",
-    ).length;
+    const completedTasks = eventNames.filter((name) => name === "NodeFinished").length;
     const runStatus = activeRun?.status;
     const runDone = runStatus === "finished";
     const runActive = runStatus === "running" || runStatus === "continued";

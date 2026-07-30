@@ -401,9 +401,10 @@ function App() {
     let highestPassed = -1;
     for (const ev of events) {
       const rec: Record<string, unknown> = isRecord(ev) ? ev : {};
-      const nodeId = asString(rec.nodeId) ?? "";
+      const payload = isRecord(rec.payload) ? rec.payload : {};
+      const nodeId = asString(payload.nodeId) ?? "";
       const match = nodeId.match(/^mission:milestone:(\d+):(validate|revalidate)$/);
-      if (match && (asString(rec.type) ?? "").includes("complete")) {
+      if (match && asString(rec.event) === "NodeFinished") {
         const idx = Number(match[1]) - 1;
         if (idx > highestPassed) highestPassed = idx;
       }

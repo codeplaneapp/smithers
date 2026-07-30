@@ -194,7 +194,7 @@ function deriveTickets(discovered: TicketSummary[], events: Array<Record<string,
   }
   for (const event of events) {
     const eventName = asString(event.event);
-    if (eventName !== "node.started" && eventName !== "node.finished" && eventName !== "node.failed") continue;
+    if (eventName !== "NodeStarted" && eventName !== "NodeFinished" && eventName !== "NodeFailed") continue;
     const payload = isRecord(event.payload) ? event.payload : {};
     const nodeId = asString(payload.nodeId);
     if (!nodeId) continue;
@@ -208,11 +208,11 @@ function deriveTickets(discovered: TicketSummary[], events: Array<Record<string,
       state: "pending" as TicketState,
       events: 0,
     };
-    if (eventName === "node.failed") {
+    if (eventName === "NodeFailed") {
       existing.lane = "completed";
       existing.state = "failed";
       existing.currentStep = "Failed: " + stepLabel(parsed.step);
-    } else if (parsed.result && eventName === "node.finished") {
+    } else if (parsed.result && eventName === "NodeFinished") {
       existing.lane = "completed";
       existing.state = "finished";
       existing.currentStep = "Completed";

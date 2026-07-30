@@ -214,7 +214,11 @@ function App() {
   const eventCount = events.length;
   const mergeStarted =
     events.some(
-      (e) => isRecord(e.payload) && typeof e.payload.event === "string" && /merge/.test(JSON.stringify(e.payload)),
+      (e) =>
+        e.event === "NodeStarted" &&
+        isRecord(e.payload) &&
+        typeof e.payload.nodeId === "string" &&
+        e.payload.nodeId.includes("merge"),
     ) || merge !== null;
 
   const activeGroupId = selectedGroupIdx !== undefined ? selectedGroupIdx : groups[0]?.index;

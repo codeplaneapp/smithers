@@ -85,9 +85,7 @@ function baseNode(nodeId: string): string {
   return nodeId.split("@@", 1)[0] ?? nodeId;
 }
 
-// Ledger of node lifecycle derived from the run event stream. Frames wrap the
-// lifecycle event at frame.payload.event and the node id at
-// frame.payload.payload.nodeId.
+// Ledger of node lifecycle derived from durable run-event frames.
 export type Ledger = { states: Map<string, NodeState>; starts: Map<string, number>; order: Map<string, number> };
 export function buildLedger(events: unknown[]): Ledger {
   const states = new Map<string, NodeState>();
@@ -96,9 +94,8 @@ export function buildLedger(events: unknown[]): Ledger {
   let seq = 0;
   for (const frame of events) {
     if (!isRecord(frame) || !isRecord(frame.payload)) continue;
-    const event = asString(frame.payload.event);
-    const inner = isRecord(frame.payload.payload) ? frame.payload.payload : {};
-    const nodeId = asString(inner.nodeId);
+    const event = asString(frame.event);
+    const nodeId = asString(frame.payload.nodeId);
     if (!event || !nodeId) continue;
     const node = baseNode(nodeId);
     seq += 1;
