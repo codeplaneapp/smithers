@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   createGatewayReactRoot,
   useGatewayActions,
@@ -176,6 +176,21 @@ function WorkerPane(props: { runId: string | undefined; index: number | null }) 
     iteration: 0,
   });
   const work = useMemo(() => extractWork(out.data), [out.data]);
+
+  useEffect(() => {
+    if (!props.runId || props.index === null || work) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      await out.refetch();
+      if (active) timer = setTimeout(poll, 1_000);
+    };
+    timer = setTimeout(poll, 1_000);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [out.refetch, props.index, props.runId, work]);
 
   return (
     <>
