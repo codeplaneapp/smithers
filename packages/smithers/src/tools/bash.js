@@ -4,17 +4,15 @@ import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { defineTool } from "./defineTool.js";
 import { captureProcess, getToolRuntimeOptions, resolveToolPath, truncateToBytes } from "./utils.js";
 
-// Deny egress, keep the machine: loopback TCP and unix-domain sockets are the
-// substrate of local test compositions (dev servers, local postgres, socket
-// simulators) and move no bytes off the host, so `allowNetwork: false` leaves
-// them reachable. Only remote endpoints are denied. Rules are direction-scoped
-// because a broad `(allow network* (local ip "localhost:*"))` also matches the
-// local endpoint of an OUTBOUND socket and silently re-opens egress (verified
+// Deny egress, keep loopback TCP for local test compositions. Outbound unix
+// sockets stay denied: a local daemon (notably Docker) can proxy arbitrary
+// remote egress on the caller's behalf. Rules are direction-scoped because a
+// broad `(allow network* (local ip "localhost:*"))` also matches the local
+// endpoint of an OUTBOUND socket and silently re-opens egress (verified
 // empirically with sandbox-exec + curl).
 const DARWIN_NETWORK_DENY_PROFILE = [
   "(version 1) (allow default) (deny network*)",
   '(allow network-outbound (remote ip "localhost:*"))',
-  "(allow network-outbound (remote unix-socket))",
   '(allow network-inbound (local ip "localhost:*"))',
   '(allow network-bind (local ip "localhost:*"))',
   "(allow network-bind (local unix-socket))",
@@ -190,7 +188,7 @@ const PACKAGE_EXECUTABLES = new Set(["npm", "bun", "pip"]);
 const GIT_REMOTE_OPS = new Set(["push", "pull", "fetch", "clone", "remote"]);
 const URL_SCHEMES = ["http://", "https://"];
 const NETWORK_DISABLED_HINT =
-  "Loopback stays reachable (localhost, 127.0.0.1, *.localhost, unix sockets); for real egress set allowNetwork: true (--allow-network on up/eval/oneshot).";
+  "Loopback TCP stays reachable (localhost, 127.0.0.1, *.localhost); outbound unix sockets and real egress require allowNetwork: true (--allow-network on up/eval/oneshot).";
 // git's global options come before the subcommand, and these consume the next
 // argument, so `git -C /repo fetch` still resolves to the `fetch` subcommand.
 const GIT_VALUE_FLAGS = new Set(["-C", "-c", "--exec-path", "--git-dir", "--namespace", "--work-tree"]);
@@ -371,6 +369,45 @@ function assertNetworkAllowed(cmd, args, allowNetwork) {
   }
 }
 
+function curlRedirectsEnabled(argv) {
+  let positionalOnly = false;
+  for (const arg of argv) {
+    if (!positionalOnly && arg === "--") {
+      positionalOnly = true;
+      continue;
+    }
+    if (positionalOnly) continue;
+    if (arg === "--location" || arg === "--location-trusted") return true;
+    if (arg === "-K" || arg === "--config" || arg.startsWith("--config=") || /^-K.+/.test(arg)) return true;
+    if (/^-[^-]*L/.test(arg)) return true;
+  }
+  return false;
+}
+
+// Without a kernel sandbox, a loopback URL is only safe if the fetch client
+// cannot follow a server-controlled redirect to a remote origin. Direct
+// invocations are pinned to zero redirects. Shell payloads cannot be rewritten
+// safely, so wget (redirecting by default) and redirect-enabled curl are denied.
+function hardenUnsandboxedFetch(cmd, args) {
+  const executable = tokenExecutableName(String(cmd).trim());
+  const argv = args.map((arg) => String(arg));
+  if (executable === "curl") {
+    if (curlRedirectsEnabled(argv)) throwNetworkDisabled(executable);
+    return [...args, "--max-redirs", "0"];
+  }
+  if (executable === "wget") {
+    return [...args, "--max-redirect=0"];
+  }
+  const executables = commandExecutables(cmd);
+  for (const tokens of interpreterCommands(executables, argv)) {
+    const nestedExecutable = tokenExecutableName(tokens[0]);
+    if (nestedExecutable === "wget" || (nestedExecutable === "curl" && curlRedirectsEnabled(tokens.slice(1)))) {
+      throwNetworkDisabled(nestedExecutable);
+    }
+  }
+  return args;
+}
+
 export async function bashTool(cmd, args = [], opts = undefined) {
   const runtime = getToolRuntimeOptions();
   validateBashInvocation(cmd, args, opts, runtime);
@@ -378,17 +415,21 @@ export async function bashTool(cmd, args = [], opts = undefined) {
   const cwd = opts?.cwd ? await resolveToolPath(runtime.rootDir, opts.cwd) : runtime.rootDir;
   let command = cmd;
   let commandArgs = args;
+  let commandEnv = process.env;
   if (!runtime.allowNetwork) {
     const isolation = resolveNetworkIsolatedCommand(cmd, args);
     command = isolation.command;
-    commandArgs = isolation.args;
+    commandArgs = isolation.enforced ? isolation.args : hardenUnsandboxedFetch(cmd, args);
     if (!isolation.enforced) {
+      // Keep curl (including curl inside a shell payload) from loading a user
+      // config that silently enables redirects and defeats the argv guard.
+      commandEnv = { ...process.env, CURL_HOME: "/dev/null" };
       noteNetworkIsolationUnenforced();
     }
   }
   const result = await captureProcess(command, commandArgs, {
     cwd,
-    env: process.env,
+    env: commandEnv,
     detached: true,
     maxOutputBytes: runtime.maxOutputBytes,
     timeoutMs: runtime.timeoutMs,
