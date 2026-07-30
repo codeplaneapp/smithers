@@ -29,6 +29,7 @@ import {
   NodeOutputView,
   RunEventLog,
   RunList,
+  summarize,
   RunTree,
   SimpleWorkflowDashboard,
   WorkflowGraph,
@@ -961,6 +962,26 @@ describe("RunEventLog", () => {
     ).toBe(true);
   });
 
+  test("syncs heartbeat visibility when showAllHeartbeats changes", async () => {
+    const gw = boot({
+      events: {
+        "run-a": [
+          { runId: "run-a", seq: 1, event: "TaskHeartbeat", payload: { nodeId: "build" } },
+          { runId: "run-a", seq: 2, event: "TaskHeartbeat", payload: { nodeId: "build" } },
+        ],
+      },
+    });
+    const harness = await mount(gw, createElement(RunEventLog, { runId: "run-a", showAllHeartbeats: false }));
+    await harness.flush(40);
+    expect(harness.container.querySelectorAll('[data-slot="event-row"]').length).toBe(1);
+
+    await harness.render(createElement(RunEventLog, { runId: "run-a", showAllHeartbeats: true }));
+    expect(harness.container.querySelectorAll('[data-slot="event-row"]').length).toBe(2);
+
+    await harness.render(createElement(RunEventLog, { runId: "run-a", showAllHeartbeats: false }));
+    expect(harness.container.querySelectorAll('[data-slot="event-row"]').length).toBe(1);
+  });
+
   test("makes a failed node visually prominent with an error summary", async () => {
     const gw = boot({
       events: {
@@ -1025,11 +1046,36 @@ describe("RunEventLog", () => {
     expect(harness.container.querySelectorAll(".gw-event-row-toggle").length).toBe(2);
   });
 
-  test("shows the waiting/empty state for a run with no events", async () => {
+  test("distinguishes an initial event load from a loaded empty stream", async () => {
     const gw = boot({ events: { "run-empty": [] } });
-    const harness = await mount(gw, createElement(RunEventLog, { runId: "run-empty" }));
-    await harness.flush(40);
-    expect(harness.container.textContent).toMatch(/Waiting for events|No events/);
+    const originalFetch = globalThis.fetch;
+    let releaseEvents!: () => void;
+    const eventRequestReleased = new Promise<void>((resolve) => {
+      releaseEvents = resolve;
+    });
+    globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+      const input = args[0];
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (new URL(url).pathname === "/v1/api/events") await eventRequestReleased;
+      return originalFetch(...args);
+    }) as typeof fetch;
+
+    try {
+      const harness = await mount(gw, createElement(RunEventLog, { runId: "run-empty" }));
+      expect(harness.container.textContent).toContain("Loading events…");
+      expect(harness.container.textContent).not.toContain("Waiting for events…");
+      expect(harness.container.textContent).not.toContain("No events.");
+
+      await act(async () => {
+        releaseEvents();
+        await sleep(40);
+      });
+      expect(harness.container.textContent).not.toContain("Loading events…");
+      expect(harness.container.textContent).toContain("Waiting for events…");
+    } finally {
+      releaseEvents();
+      globalThis.fetch = originalFetch;
+    }
   });
 
   test("surfaces a stream error when the connection is unauthorized", async () => {
@@ -1097,6 +1143,64 @@ describe("RunEventLog", () => {
     } finally {
       scrollSpy.mockRestore();
     }
+  });
+});
+
+describe("summarize", () => {
+  const reference = (payload: unknown): string => {
+    if (payload == null) return "";
+    if (typeof payload === "string") return payload;
+    try {
+      const json = JSON.stringify(payload);
+      return json.length > 200 ? `${json.slice(0, 200)}…` : json;
+    } catch {
+      return "";
+    }
+  };
+
+  test("matches JSON.stringify+slice for a spread of payload shapes", () => {
+    const payloads: unknown[] = [
+      null,
+      undefined,
+      "",
+      "a plain string payload",
+      42,
+      true,
+      { small: true },
+      { nested: { deep: [1, "two", null, { ok: false }] } },
+      [1, undefined, "x"],
+      { "esc\"aped": "uni snowman ☃\nnewline" },
+      { when: new Date("2024-01-02T03:04:05.000Z") },
+      { skip: undefined, fn: () => 1, keep: 1 },
+      { big: "x".repeat(500) },
+      { exact: "y".repeat(190) },
+      Number.NaN,
+      { cycle: null as unknown },
+    ];
+    (payloads[payloads.length - 1] as { cycle: unknown }).cycle = payloads[payloads.length - 1];
+    for (const payload of payloads) {
+      expect(summarize(payload)).toBe(reference(payload));
+    }
+  });
+
+  test("truncates a large payload without serializing past the preview budget", () => {
+    // A throwing getter positioned after the first 200 serialized characters:
+    // a full JSON.stringify would invoke it and throw (old behavior returned
+    // ""), while the bounded preview never reaches it.
+    const payload = {
+      head: "x".repeat(500),
+      get tail(): never {
+        throw new Error("serialized past the preview budget");
+      },
+    };
+    const expected = `${JSON.stringify({ head: "x".repeat(500) }).slice(0, 200)}…`;
+    expect(summarize(payload)).toBe(expected);
+  });
+
+  test("returns an empty string for circular payloads", () => {
+    const payload: { self?: unknown } = {};
+    payload.self = payload;
+    expect(summarize(payload)).toBe("");
   });
 });
 

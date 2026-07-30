@@ -309,6 +309,138 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
     await harness.unmount();
   });
 
+  test("useGatewayNodeOutput seeds invalidation from the shared run-event tail", async () => {
+    const runId = "long-output-run";
+    const nodeId = "task1";
+    let produced = false;
+    let eventRows = Array.from({ length: 2_501 }, (_, seq) => ({
+      runId,
+      seq,
+      event: "OtherEvent",
+      payload: { runId },
+    }));
+    const eventRequests: Array<{ afterSeq?: number; limit?: number }> = [];
+    const outputCalls: Array<{ runId: string; nodeId: string; iteration?: number }> = [];
+    const streamListeners = new Set<(event: { type: "change"; seq: number; collections: string[] }) => void>();
+    const client = {
+      mode: { kind: "local", apiBaseUrl: "http://gateway.test" },
+      api: {
+        getNodeOutput: async (params: { runId: string; nodeId: string; iteration?: number }) => {
+          outputCalls.push(params);
+          return produced ? { status: "produced" } : { status: "pending" };
+        },
+        listRunEvents: async (params: { afterSeq?: number; limit?: number }) => {
+          eventRequests.push(params);
+          return eventRows.filter((row) => params.afterSeq === undefined || row.seq > params.afterSeq).slice(0, params.limit);
+        },
+      },
+      stream: {
+        subscribe(listener: (event: { type: "change"; seq: number; collections: string[] }) => void) {
+          streamListeners.add(listener);
+          return () => streamListeners.delete(listener);
+        },
+        subscribeStatus() {
+          return () => {};
+        },
+        status: () => ({ status: "online" as const }),
+        waitForSeq: async () => {},
+      },
+      close() {},
+    } as unknown as SmithersDataClient;
+    let snapshot: ReturnType<typeof useGatewayNodeOutput> | undefined;
+
+    function Probe() {
+      snapshot = useGatewayNodeOutput({ runId, nodeId });
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(createElement(SmithersCollectionsProvider, { client }, createElement(Probe)));
+    await waitFor(
+      () => eventRequests.some((request) => request.afterSeq === 1_476 && request.limit === 1_024),
+      "shared event tail",
+    );
+    expect(eventRequests.filter((request) => request.afterSeq === undefined)).toEqual([{ runId, limit: 1_024 }]);
+
+    produced = true;
+    eventRows = [
+      ...eventRows,
+      { runId, seq: 2_501, event: "NodeFinished", payload: { runId, nodeId, iteration: 0 } },
+    ];
+    await act(async () => {
+      for (const listener of streamListeners) {
+        listener({ type: "change", seq: 2_501, collections: ["run_events"] });
+      }
+    });
+
+    await waitFor(() => snapshot?.data?.status === "produced", "tail-invalidated node output");
+    expect(eventRequests.some((request) => request.afterSeq === 2_500 && request.limit === 1_000)).toBe(true);
+    expect(outputCalls).toHaveLength(2);
+    await harness.unmount();
+  });
+
+  test("useGatewayNodeOutput refetches when a change lands while the event tail is still loading", async () => {
+    // A stream change that arrives during the seed preload may reference an
+    // event at or before the seeded cursor, which the queued re-scan cannot
+    // see — the hook must refetch the output once to cover that gap.
+    let resolvePreload!: () => void;
+    const preloadGate = new Promise<void>((resolve) => {
+      resolvePreload = resolve;
+    });
+    let outputCalls = 0;
+    const streamListeners = new Set<(event: { type: "change"; seq: number; collections: string[] }) => void>();
+    const client = {
+      api: {
+        getNodeOutput: async () => {
+          outputCalls += 1;
+          return { status: "produced", calls: outputCalls };
+        },
+        listRunEvents: async () => [],
+      },
+      stream: {
+        subscribe(listener: (event: { type: "change"; seq: number; collections: string[] }) => void) {
+          streamListeners.add(listener);
+          return () => streamListeners.delete(listener);
+        },
+      },
+    } as unknown as SmithersDataClient;
+    const collections = {
+      connect() {},
+      runEvents: () => ({ preload: () => preloadGate, toArray: [{ seq: 42 }] }),
+    } as any;
+    let snapshot: ReturnType<typeof useGatewayNodeOutput> | undefined;
+
+    function Probe() {
+      snapshot = useGatewayNodeOutput({ runId: "run-1", nodeId: "task-a", iteration: 0 });
+      return null;
+    }
+
+    const harness = await mountHarness();
+    await harness.render(
+      createElement(
+        SmithersCollectionsContext.Provider,
+        { value: { client, collections, queryClient: {} as any } },
+        createElement(Probe),
+      ),
+    );
+    await waitFor(() => snapshot?.data !== undefined, "initial node output");
+    expect(outputCalls).toBe(1);
+
+    await act(async () => {
+      for (const listener of streamListeners) {
+        listener({ type: "change", seq: 42, collections: ["run_events"] });
+      }
+    });
+    // The change queued behind the in-flight seed; resolving the preload must
+    // trigger exactly one catch-up refetch, not a full-history event scan.
+    await act(async () => {
+      resolvePreload();
+    });
+    await waitFor(() => outputCalls === 2, "seed-gap refetch");
+    expect(outputCalls).toBe(2);
+    await harness.unmount();
+  });
+
   test("useGatewayNodeOutput hides the previous node's row while the next node loads", async () => {
     let resolveNext!: (value: Record<string, unknown>) => void;
     const nextOutput = new Promise<Record<string, unknown>>((resolve) => {
@@ -324,7 +456,10 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
         subscribe: () => () => {},
       },
     } as unknown as SmithersDataClient;
-    const collections = { connect() {} } as any;
+    const collections = {
+      connect() {},
+      runEvents: () => ({ preload: async () => {}, toArray: [] }),
+    } as any;
     let snapshot: ReturnType<typeof useGatewayNodeOutput> | undefined;
 
     function Probe({ nodeId }: { nodeId: string }) {
@@ -371,7 +506,10 @@ describe("collection-backed gateway hooks over a real in-memory gateway", () => 
         subscribe: () => () => {},
       },
     } as unknown as SmithersDataClient;
-    const collections = { connect() {} } as any;
+    const collections = {
+      connect() {},
+      runEvents: () => ({ preload: async () => {}, toArray: [] }),
+    } as any;
     let snapshot: ReturnType<typeof useGatewayNodeOutput> | undefined;
 
     function Probe() {

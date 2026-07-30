@@ -1,0 +1,54 @@
+---
+title: Smithers Next
+description: The unreleased Effect-native rewrite of Smithers.
+---
+
+Smithers Next is an unreleased rewrite. It is separate from the current
+`smithers-orchestrator` API documented elsewhere on this site.
+
+## Scope
+
+- Flows are discovered from `flow.ts`, `flow.mdx`, or `SKILL.md`.
+- Authoring, services, schemas, errors, and dependency injection use Effect.
+- Models are selected as seats (`harness:model`), not as unqualified model IDs.
+- Capabilities, placement, persistence, control operations, and journal history
+  remain explicit.
+- CLI, gateway, plugins, and UI consume the same run model.
+
+## Execution model
+
+| Layer | Role | Guarantee |
+| --- | --- | --- |
+| Actions | Hermetic work with declared inputs and outputs, content identity, and evidence-gated caching | Enforced and cache-sound at the recorded boundary tier |
+| Runs | Imperative, dynamic workflow code that emits work and durably awaits results | Resumable; replay divergence after code changes is detected and parked |
+
+The runtime reduces to five primitives:
+
+| Primitive | Purpose |
+| --- | --- |
+| Action | Content-addressed, hermetic work |
+| Cell | Named, write-once result; the only wait and completion mechanism |
+| Intent | Durable, claimable work such as an effect, wake, compensation, or child start |
+| Run | Leased workflow instance pinned to a workflow digest |
+| Ledger | Atomic commit of facts, cell changes, and resulting intents |
+
+Sealed effects may run as Actions. Compensable and irreversible effects remain
+run-local. Irreversible effects require idempotency from the first attempt.
+Sleep, approval, signal, cancellation, action completion, and child completion
+all resolve by filling Cells. Fork and rewind create immutable lineage.
+
+## Repositories
+
+| Repository | Responsibility |
+| --- | --- |
+| [`flows`](https://github.com/smithersai/flows) | Umbrella checkout and combined documentation |
+| [`smithers-flows`](https://github.com/smithersai/smithers-flows) | Durable engine, journal, database, capability kernel, hosts, sync, and time travel |
+| [`smithers-agent`](https://github.com/smithersai/smithers-agent) | Agent harness, registry, models, control API, CLI, gateway, evals, memory, triggers, and observability |
+| [`smithers-plugins`](https://github.com/smithersai/smithers-plugins) | Agent adapters, skills, and MCP projections |
+| [`smithers-ui`](https://github.com/smithersai/smithers-ui) | Browser and Electrobun application |
+
+## Status
+
+The repositories contain implemented packages and active architecture work.
+The integrated product is not released. APIs, schemas, package boundaries, and
+migration behavior may change without compatibility support.

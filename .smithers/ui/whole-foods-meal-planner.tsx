@@ -139,7 +139,7 @@ function rowOf(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
-function isHttpUrl(value: string): boolean {
+export function isHttpUrl(value: string): boolean {
   return /^https?:\/\//.test(value);
 }
 
@@ -325,7 +325,7 @@ function CalorieOverview({ runId }: { runId?: string }) {
   );
 }
 
-function MealCards({ runId }: { runId?: string }) {
+export function MealCards({ runId }: { runId?: string }) {
   const plan = useGatewayNodeOutput({ runId, nodeId: "plan-meals" });
   const planRow = rowOf(plan.data);
   const days = asArray<PlanDay>(planRow?.plan);
@@ -375,7 +375,7 @@ function MealCards({ runId }: { runId?: string }) {
   );
 }
 
-function GroceryChecklist({ runId }: { runId?: string }) {
+export function GroceryChecklist({ runId }: { runId?: string }) {
   const plan = useGatewayNodeOutput({ runId, nodeId: "plan-meals" });
   const planRow = rowOf(plan.data);
   const items = asArray<GroceryItem>(planRow?.groceryList);
@@ -536,7 +536,7 @@ function RevisionPanel({ runId, onLaunched }: { runId: string; onLaunched: (next
   );
 }
 
-function OrderStatus({ runId }: { runId?: string }) {
+export function OrderStatus({ runId }: { runId?: string }) {
   const finalize = useGatewayNodeOutput({ runId, nodeId: "finalize" });
   const row = rowOf(finalize.data);
   if (!row)
