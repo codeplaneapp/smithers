@@ -112,6 +112,68 @@ describe("bundleIsFresh", () => {
     await utimes(dependencySource, changed, changed);
     expect(bundleIsFresh(distDir, appDir)).toBe(false);
   });
+
+  test("sees a workspace dependency whose entry the CommonJS resolver cannot take", async () => {
+    const root = await mkdtemp(join(tmpdir(), "smithers-ui-freshness-esm-"));
+    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    const appDir = join(root, "app");
+    const distDir = join(appDir, "dist");
+    const dependencyDir = join(root, "ui");
+    await mkdir(join(appDir, "src"), { recursive: true });
+    await mkdir(distDir);
+    await mkdir(join(dependencyDir, "src"), { recursive: true });
+    await mkdir(join(appDir, "node_modules", "@smithers-orchestrator"), { recursive: true });
+    await writeFile(join(appDir, "src", "main.tsx"), "");
+    await writeFile(
+      join(appDir, "package.json"),
+      JSON.stringify({ dependencies: { "@smithers-orchestrator/ui": "workspace:*" } }),
+    );
+    await writeFile(
+      join(dependencyDir, "package.json"),
+      // Only an `import` condition: `require.resolve` cannot reach this entry.
+      JSON.stringify({ name: "@smithers-orchestrator/ui", exports: { ".": { import: "./src/index.ts" } } }),
+    );
+    const dependencySource = join(dependencyDir, "src", "index.ts");
+    await writeFile(dependencySource, "");
+    await symlink(dependencyDir, join(appDir, "node_modules", "@smithers-orchestrator", "ui"));
+    const bundle = join(distDir, "index.html");
+    await writeFile(bundle, "");
+
+    const old = new Date("2020-01-01T00:00:00Z");
+    const built = new Date("2020-01-02T00:00:00Z");
+    const changed = new Date("2020-01-03T00:00:00Z");
+    await utimes(join(appDir, "src", "main.tsx"), old, old);
+    await utimes(join(appDir, "package.json"), old, old);
+    await utimes(join(dependencyDir, "package.json"), old, old);
+    await utimes(dependencySource, old, old);
+    await utimes(bundle, built, built);
+    expect(bundleIsFresh(distDir, appDir)).toBe(true);
+
+    await utimes(dependencySource, changed, changed);
+    expect(bundleIsFresh(distDir, appDir)).toBe(false);
+  });
+
+  test("stays fresh when a declared dependency is not installed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "smithers-ui-freshness-missing-"));
+    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    const appDir = join(root, "app");
+    const distDir = join(appDir, "dist");
+    await mkdir(join(appDir, "src"), { recursive: true });
+    await mkdir(distDir);
+    await writeFile(join(appDir, "src", "main.tsx"), "");
+    await writeFile(
+      join(appDir, "package.json"),
+      JSON.stringify({ dependencies: { "@smithers-orchestrator/absent": "workspace:*" } }),
+    );
+    const bundle = join(distDir, "index.html");
+    await writeFile(bundle, "");
+    const old = new Date("2020-01-01T00:00:00Z");
+    const built = new Date("2020-01-02T00:00:00Z");
+    await utimes(join(appDir, "src", "main.tsx"), old, old);
+    await utimes(join(appDir, "package.json"), old, old);
+    await utimes(bundle, built, built);
+    expect(bundleIsFresh(distDir, appDir)).toBe(true);
+  });
 });
 
 describe("localUiServer workspace readiness", () => {

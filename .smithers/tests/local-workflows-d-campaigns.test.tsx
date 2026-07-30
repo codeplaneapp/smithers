@@ -8,8 +8,7 @@ setDefaultTimeout(60_000);
 
 /**
  * Owner suite for the three long-running campaign workflows:
- * sol-issue-train.tsx, tui-parity.tsx and xcombo-fix-train.tsx.
- * Each of these drives real repos, worktrees and
+ * sol-issue-train.tsx, tui-parity.tsx and xcombo-fix-train.tsx. Each drives real repos, worktrees and
  * remotes, so the contract this suite pins is the GRAPH: what mounts, what
  * stays unmounted until its evidence row exists, and which prompt carries
  * which sentinel. Behavior against real services belongs to their runs.

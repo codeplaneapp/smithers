@@ -3,12 +3,12 @@ title: "0.31.1"
 description: "Smithers 0.31.1 adds monitor workflows that watch and heal runs, lets you resume a run after editing its workflow, hardens child-run durability across a large batch of subflow fixes, and fixes the network sandbox so loopback stays reachable."
 ---
 
-**Smithers 0.31.1 is a hardening release.** Of its 163 commits, 80 are fixes,
+**Smithers 0.31.1 is a hardening release.** Of its 270 commits, 140 are fixes,
 most aimed at the places durable runs break in production: resumed runs, child
 workflows, sandboxed networks, and time travel. Two features land alongside
 the fixes: monitor workflows that watch a run and heal it, and a resume path
 that accepts an edited workflow instead of refusing to continue. The release
-touches 993 files, with 71,939 insertions and 18,111 deletions.
+touches 1,160 files, with 103,558 insertions and 19,071 deletions.
 
 ## Upgrading
 
@@ -32,7 +32,7 @@ you define for stalled or wedged-node conditions, and escalates to a durable
 - Healing actions are ordinary workflow code, so a monitor can retry a node,
   resume a parked run, or gather diagnostics before waking you.
 - Escalations are durable human requests, so the question survives restarts
-  and shows up in `bunx smithers-orchestrator human` and the Monitor UI.
+  and shows up in `bunx smithers-orchestrator human inbox` and the Monitor UI.
 - This is a first release of the surface; expect the condition vocabulary to
   grow in coming versions.
 

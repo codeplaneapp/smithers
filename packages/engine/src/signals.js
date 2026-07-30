@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { bridgeSignalResolve } from "./effect/durable-deferred-bridge.js";
 import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
+import { SUBFLOW_RUN_LINEAGE_MAX_ROWS, subflowRunLineage } from "@smithers-orchestrator/graph/subflow-run-lineage";
 import { nowMs } from "@smithers-orchestrator/scheduler/nowMs";
 import { normalizeWaitForEventCorrelationId } from "@smithers-orchestrator/db/waitForEventAttempt";
 /** @typedef {import("./SignalRunOptions.ts").SignalRunOptions} SignalRunOptions */
@@ -68,10 +69,11 @@ export function signalRun(adapter, runId, signalName, payload, options = {}) {
       correlationId: normalizedCorrelationId,
       receivedAtMs,
     };
-    const descendants =
+    const discoveredDescendants =
       typeof adapter.listRunDescendants === "function"
-        ? yield* adapter.listRunDescendants(runId)
+        ? yield* adapter.listRunDescendants(runId, SUBFLOW_RUN_LINEAGE_MAX_ROWS + 1)
         : [{ runId, parentRunId: run.parentRunId ?? null, depth: 0 }];
+    const descendants = subflowRunLineage(discoveredDescendants, runId);
     for (const target of descendants) {
       const targetRunId = target.runId;
       if (targetRunId !== runId) {

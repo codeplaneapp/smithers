@@ -12,7 +12,6 @@ import type { TaskDescriptor } from "smithers-orchestrator/graph";
 import { attempt, investigate, smithersBug } from "./curated-system-workflows.contracts";
 
 type Row = Record<string, unknown> & { nodeId: string };
-type PackResult = { written: number; skipped: number; changed: string[] };
 type Frame = RenderedWorkflow;
 const workflows = join(import.meta.dir, "..", "workflows");
 const cliSrc = pathToFileURL(resolve(import.meta.dir, "../../apps/cli/src")).href;
@@ -130,30 +129,31 @@ describe.serial("curated system workflow causal contracts", () => {
         const bundled = seeded.GENERATED_SEEDED_FILES.find(
           (file) => file.path === ".smithers/workflows/init.tsx",
         )!.contents;
-        const first = (await runTask(
+        const first = await runTask(
           task(await render("init.tsx", { force: false, refreshSkills: false, skipInstall: true }), "install-pack"),
-        )) as PackResult;
-        const packFileCount = first.written + first.skipped;
-        expect(first).toEqual({ written: packFileCount - 1, skipped: 1, changed: [] });
+        );
+        expect(first).toMatchObject({ skipped: 1, changed: [] });
+        const seededFileCount = Number(first.written) + Number(first.skipped);
+        expect(seededFileCount).toBeGreaterThan(1);
         expect(await readFile(join(root, ".smithers/workflows/init.tsx"), "utf8")).toBe(bundled);
         expect(await readFile(join(root, ".smithers/agents/claude-code.ts"), "utf8")).toBe("preserve this config\n");
         const skipped = await runTask(
           task(await render("init.tsx", { force: false, refreshSkills: false, skipInstall: true }), "install-pack"),
         );
-        expect(skipped).toEqual({ written: 0, skipped: packFileCount, changed: [] });
+        expect(skipped).toEqual({ written: 0, skipped: seededFileCount, changed: [] });
         await writeFile(join(root, ".smithers/workflows/init.tsx"), "local modification\n");
         const drift = await runTask(
           task(await render("init.tsx", { force: false, refreshSkills: false, skipInstall: true }), "install-pack"),
         );
         expect(drift).toEqual({
           written: 0,
-          skipped: packFileCount,
+          skipped: seededFileCount,
           changed: [".smithers/workflows/init.tsx"],
         });
         const forced = await runTask(
           task(await render("init.tsx", { force: true, refreshSkills: false, skipInstall: true }), "install-pack"),
         );
-        expect(forced).toEqual({ written: packFileCount - 7, skipped: 7, changed: [] });
+        expect(forced).toEqual({ written: seededFileCount - 7, skipped: 7, changed: [] });
         expect(await readFile(join(root, ".smithers/workflows/init.tsx"), "utf8")).toBe(bundled);
         expect(await readFile(join(root, ".smithers/agents/claude-code.ts"), "utf8")).toBe("preserve this config\n");
 

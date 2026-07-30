@@ -94,22 +94,8 @@ export function bundleIsFresh(distDir, appDir) {
     const requireFromApp = createRequire(join(appDir, "package.json"));
     for (const name of Object.keys(appPackage.dependencies ?? {})) {
       if (!name.startsWith("@smithers-orchestrator/")) continue;
-      try {
-        let dir = dirname(requireFromApp.resolve(name));
-        while (dirname(dir) !== dir) {
-          const packageJson = join(dir, "package.json");
-          if (existsSync(packageJson)) {
-            const dependencyPackage = JSON.parse(readFileSync(packageJson, "utf8"));
-            if (dependencyPackage.name === name) {
-              walk(join(dir, "src"));
-              break;
-            }
-          }
-          dir = dirname(dir);
-        }
-      } catch {
-        // The source app can still build without every optional/local dependency.
-      }
+      const dependencyDir = resolveDependencyDir(requireFromApp, appDir, name);
+      if (dependencyDir) walk(join(dependencyDir, "src"));
     }
   } catch {
     // A missing or malformed package manifest is handled by the build itself.
@@ -123,6 +109,36 @@ export function bundleIsFresh(distDir, appDir) {
     }
   }
   return builtAt >= newest;
+}
+
+/**
+ * Where does `name` actually live on disk, as seen from the app? Vite inlines
+ * workspace packages from their `src/`, so freshness has to see those sources.
+ * Entry resolution can fail (export conditions the CommonJS resolver can't
+ * take), so fall back to the app's own `node_modules` link; unresolvable
+ * dependencies are simply skipped — the build itself reports those.
+ */
+function resolveDependencyDir(requireFromApp, appDir, name) {
+  try {
+    let dir = dirname(requireFromApp.resolve(name));
+    while (dirname(dir) !== dir) {
+      const packageJson = join(dir, "package.json");
+      if (existsSync(packageJson)) {
+        const dependencyPackage = JSON.parse(readFileSync(packageJson, "utf8"));
+        if (dependencyPackage.name === name) return dir;
+      }
+      dir = dirname(dir);
+    }
+  } catch {
+    // Fall through to the node_modules layout below.
+  }
+  const linked = join(appDir, "node_modules", ...name.split("/"));
+  try {
+    if (existsSync(join(linked, "package.json"))) return realpathSync(linked);
+  } catch {
+    // Not installed here.
+  }
+  return null;
 }
 
 function safeReaddir(dir) {

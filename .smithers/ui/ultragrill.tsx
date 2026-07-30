@@ -261,6 +261,8 @@ function App() {
         status = "failed";
       } else if (event === "run.cancelled" || event === "runcancelled") {
         status = "cancelled";
+      } else if (event === "runcontinued") {
+        status = asString(payload.status) ?? "continued";
       } else if (event === "runstatuschanged") {
         status = asString(payload.status) ?? status;
       }

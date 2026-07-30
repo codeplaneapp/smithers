@@ -168,6 +168,9 @@ export async function retryTask(adapter, opts) {
   const resumeClaim = /** @type {{ claimOwnerId: string; claimHeartbeatAtMs: number } | undefined} */ (
     /** @type {any} */ (opts).resumeClaim
   );
+  const beforeReset = /** @type {((plan: { runIds: string[] }) => Promise<void>) | undefined} */ (
+    /** @type {any} */ (opts).beforeReset
+  );
   const node = await adapter.getNode(runId, nodeId, iteration);
   if (!node) {
     const error = `Node not found: ${runId}/${nodeId}/${iteration}`;
@@ -256,6 +259,9 @@ export async function retryTask(adapter, opts) {
   const resetCommitted = await adapter.withTransaction(
     "retry-task-reset",
     Effect.gen(function* () {
+      if (beforeReset) {
+        yield* Effect.promise(() => beforeReset({ runIds: resetPlans.map((plan) => plan.runId) }));
+      }
       if (resumeClaim) {
         const claimed = yield* adapter.claimRunForResume({
           runId,

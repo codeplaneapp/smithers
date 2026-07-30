@@ -33,9 +33,9 @@ import { z } from "zod/v4";
 
 const inputSchema = z.object({
   silent: z.boolean().default(false),
-  voice: z.string().default("Ava (Premium)"),
+  voice: z.string().trim().min(1).default("Ava (Premium)"),
   rate: z.number().int().min(1).max(500).default(195),
-  startAt: z.number().int().min(0).default(0),
+  startAt: z.number().int().min(0).max(10_000).default(0),
   auto: z.boolean().default(false),
   autoMs: z.number().int().min(0).max(600000).default(8000),
 });

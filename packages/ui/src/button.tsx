@@ -38,9 +38,9 @@ export type ButtonProps = ComponentProps<"button"> &
     asChild?: boolean;
     /**
      * Render a Spinner before the children, mark the button `aria-busy`, and
-     * disable interaction while work is in flight. Under `asChild`, busy and
-     * aria-disabled semantics are forwarded but no Spinner is injected (the
-     * Slot cannot inject one into an arbitrary child element).
+     * disable interaction while work is in flight. Under `asChild`, disabled,
+     * busy, and aria-disabled semantics are forwarded but no Spinner is
+     * injected (the Slot cannot inject one into an arbitrary child element).
      */
     loading?: boolean;
   };
@@ -68,14 +68,17 @@ export function Button({
   const classes = cn(buttonVariants({ variant, size }), className);
   const interactionDisabled = disabled || loading;
   if (asChild) {
+    // Slot.Root's public type only declares generic HTML attributes, but it
+    // merges arbitrary child props at runtime. Keep `disabled` in a spread so
+    // slotted native controls receive the real disabling attribute rather
+    // than only advisory aria-disabled state.
+    const slottedStateProps = {
+      disabled: interactionDisabled || undefined,
+      "aria-disabled": interactionDisabled ? true : undefined,
+      "aria-busy": loading ? true : undefined,
+    };
     return (
-      <Slot.Root
-        data-slot="button"
-        className={classes}
-        aria-disabled={interactionDisabled ? true : undefined}
-        aria-busy={loading ? true : undefined}
-        {...props}
-      >
+      <Slot.Root data-slot="button" className={classes} {...slottedStateProps} {...props}>
         {children}
       </Slot.Root>
     );
