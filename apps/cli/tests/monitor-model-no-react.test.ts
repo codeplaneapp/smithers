@@ -55,6 +55,7 @@ test("only the shared CLI shard preloads the remaining mixed React module graph"
   const [isolated, shared] = packageJson.scripts.test.split(" && ");
   expect(isolated).toContain("tests/monitor-shell-controls.test.tsx");
   expect(isolated).not.toContain("--preload");
+  expect(shared).toContain("--isolate");
   expect(shared).toContain("--preload ./tests/preload-ui-chain.ts");
   expect(shared).toContain('--path-ignore-patterns="**/monitor-shell-controls.test.tsx"');
   expect(existsSync(resolve(CLI_ROOT, "bunfig.toml"))).toBe(false);
