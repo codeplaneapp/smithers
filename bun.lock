@@ -310,6 +310,7 @@
         "@smithers-orchestrator/engine": "workspace:*",
         "@smithers-orchestrator/ui-styleguide": "workspace:*",
         "effect": "^3.21.4",
+        "mermaid": "^11.16.0",
         "smithers-orchestrator": "workspace:*",
         "zod": "^4.4.3",
       },
@@ -317,17 +318,10 @@
         "@types/node": "26.1.0",
         "alchemy": "^0.93.12",
         "bun-types": "^1.3.14",
-        "mermaid": "^11.16.0",
         "react": "19.2.7",
         "react-dom": "19.2.7",
         "typescript": "~6.0.3",
       },
-      "peerDependencies": {
-        "mermaid": "^11.16.0",
-      },
-      "optionalPeers": [
-        "mermaid",
-      ],
     },
     "apps/self-healing-site": {
       "name": "@smithers-orchestrator/self-healing-site",
