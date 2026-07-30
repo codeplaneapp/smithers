@@ -807,8 +807,10 @@ function setupAbortSignal() {
   abort.setForceExitCleanup = (cleanup) => {
     forceExitCleanup = typeof cleanup === "function" ? cleanup : async () => {};
   };
-  const forceExit = async (exitCode) => {
-    await forceExitCleanup().catch(() => undefined);
+  const forceExit = (exitCode) => {
+    // Forced means forced: cleanup may contain DB, monitor-admission, or owner
+    // termination awaits that can stall forever.
+    void forceExitCleanup().catch(() => undefined);
     process.exit(exitCode);
   };
   /**
@@ -826,7 +828,7 @@ function setupAbortSignal() {
     if (signalCount >= 2) {
       // Second signal: graceful cancellation is taking too long — exit now.
       process.stderr.write(`[smithers] received ${signal} again, exiting immediately.\n`);
-      void forceExit(exitCode);
+      forceExit(exitCode);
       return;
     }
     process.stderr.write(`[smithers] cancelling run... (signal again to force-exit)\n`);
@@ -836,7 +838,7 @@ function setupAbortSignal() {
     // alive when shutdown completes normally.
     const deadline = setTimeout(() => {
       process.stderr.write(`\n[smithers] graceful shutdown timed out, exiting.\n`);
-      void forceExit(exitCode);
+      forceExit(exitCode);
     }, FORCE_EXIT_BACKSTOP_MS);
     if (typeof deadline.unref === "function") deadline.unref();
   };
@@ -3275,11 +3277,17 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
         stdio: "ignore",
         env: buildMonitorLaunchEnv(),
       });
+      /** @type {Error | null} */
+      let spawnError = null;
+      child.once("error", (error) => {
+        spawnError = error;
+        monitorRun = null;
+      });
       child.unref();
       monitorRun = { runId: monitorRunId, pid: child.pid ?? undefined };
       const admissionDeadline = Date.now() + MONITOR_PARENT_WAIT_MS;
       let admitted = false;
-      while (Date.now() < admissionDeadline && !abort.signal.aborted) {
+      while (Date.now() < admissionDeadline && !abort.signal.aborted && !spawnError) {
         const currentMonitor = await adapter.getRun(monitorRunId);
         if (
           currentMonitor &&
@@ -3290,6 +3298,7 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
           admitted = true;
           break;
         }
+        if (spawnError) break;
         if (child.exitCode !== null || child.signalCode !== null) break;
         await new Promise((resolvePromise) => setTimeout(resolvePromise, MONITOR_PARENT_POLL_MS));
       }
@@ -3297,7 +3306,9 @@ async function executeUpCommand(c, workflowPath, options, fail, launchConfig = {
         if (child.pid) await terminateRunOwner(child.pid).catch(() => undefined);
         monitorRun = null;
         process.stderr.write(
-          `⚠ Monitor ${monitorRunId} failed to register${child.exitCode !== null ? ` (exit ${child.exitCode})` : ""}; run ${monitoredRunId} continues without it.\n`,
+          `⚠ Monitor ${monitorRunId} failed to register${
+            spawnError ? ` (${spawnError.message})` : child.exitCode !== null ? ` (exit ${child.exitCode})` : ""
+          }; run ${monitoredRunId} continues without it.\n`,
         );
         return;
       }
@@ -6421,6 +6432,13 @@ const cli = Cli.create({
             options: {
               ...upOptions.parse({}),
               interactive: true,
+              runId: c.options.runId,
+              resume: c.options.resume,
+              force: c.options.force,
+              resumeClaimOwner: c.options.resumeClaimOwner,
+              resumeClaimHeartbeat: c.options.resumeClaimHeartbeat,
+              resumeRestoreOwner: c.options.resumeRestoreOwner,
+              resumeRestoreHeartbeat: c.options.resumeRestoreHeartbeat,
               startedByHarness: c.options.startedByHarness,
               startedBySession: c.options.startedBySession,
               startedByPrompt: c.options.startedByPrompt,
@@ -6446,6 +6464,13 @@ const cli = Cli.create({
                 model: c.options.model,
                 agent: c.options.agent,
                 preflight: preflightMode,
+                runId: c.options.runId,
+                resume: c.options.resume,
+                force: c.options.force,
+                resumeClaimOwner: c.options.resumeClaimOwner,
+                resumeClaimHeartbeat: c.options.resumeClaimHeartbeat,
+                resumeRestoreOwner: c.options.resumeRestoreOwner,
+                resumeRestoreHeartbeat: c.options.resumeRestoreHeartbeat,
                 open: false,
                 startedByHarness: c.options.startedByHarness,
                 startedBySession: c.options.startedBySession,
@@ -6468,6 +6493,13 @@ const cli = Cli.create({
           model: c.options.model,
           agent: c.options.agent,
           preflight: preflightMode,
+          runId: c.options.runId,
+          resume: c.options.resume,
+          force: c.options.force,
+          resumeClaimOwner: c.options.resumeClaimOwner,
+          resumeClaimHeartbeat: c.options.resumeClaimHeartbeat,
+          resumeRestoreOwner: c.options.resumeRestoreOwner,
+          resumeRestoreHeartbeat: c.options.resumeRestoreHeartbeat,
           open: c.options.open,
           startedByHarness: c.options.startedByHarness,
           startedBySession: c.options.startedBySession,
@@ -6519,6 +6551,12 @@ const cli = Cli.create({
           {
             ...upOptions.parse({}),
             runId: effectiveRunId,
+            resume: c.options.resume,
+            force: c.options.force,
+            resumeClaimOwner: c.options.resumeClaimOwner,
+            resumeClaimHeartbeat: c.options.resumeClaimHeartbeat,
+            resumeRestoreOwner: c.options.resumeRestoreOwner,
+            resumeRestoreHeartbeat: c.options.resumeRestoreHeartbeat,
             input: JSON.stringify({
               goal: goalForWorkflow,
               review: review ? "on" : "off",

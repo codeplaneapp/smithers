@@ -85,6 +85,33 @@ describe("createAutosaveDoc", () => {
     expect(scheduler.pending()).toBe(0);
   });
 
+  test("same-tick saveNow calls share conflict detection and one write", async () => {
+    let finishConflictCheck!: () => void;
+    let readCalls = 0;
+    const saved: string[] = [];
+    const doc = createAutosaveDoc({
+      initialValue: "a",
+      initialMtimeMs: 100,
+      readExternal: async () => {
+        readCalls += 1;
+        await new Promise<void>((resolve) => {
+          finishConflictCheck = resolve;
+        });
+        return { content: "a", mtimeMs: 100 };
+      },
+      save: async (value) => {
+        saved.push(value);
+      },
+    });
+    doc.setValue("b");
+    const first = doc.saveNow();
+    const second = doc.saveNow();
+    expect(readCalls).toBe(1);
+    finishConflictCheck();
+    await Promise.all([first, second]);
+    expect(saved).toEqual(["b"]);
+  });
+
   test("a failed save returns to dirty and reschedules", async () => {
     const scheduler = manualScheduler();
     let calls = 0;
@@ -237,6 +264,33 @@ describe("createAutosaveDoc", () => {
     doc.setValue("b");
     doc.dispose();
     expect(scheduler.pending()).toBe(0);
+  });
+
+  test("dispose suppresses late conflict and save completion notifications", async () => {
+    let finishRead!: () => void;
+    let saveCalls = 0;
+    const states: AutosaveState[] = [];
+    const doc = createAutosaveDoc({
+      initialValue: "a",
+      initialMtimeMs: 100,
+      readExternal: async () => {
+        await new Promise<void>((resolve) => {
+          finishRead = resolve;
+        });
+        return { content: "external", mtimeMs: 200 };
+      },
+      save: async () => {
+        saveCalls += 1;
+      },
+    });
+    doc.subscribe(() => states.push(doc.getSnapshot().state));
+    doc.setValue("b");
+    const saving = doc.saveNow();
+    doc.dispose();
+    finishRead();
+    await saving;
+    expect(states).toEqual(["dirty"]);
+    expect(saveCalls).toBe(0);
   });
 });
 

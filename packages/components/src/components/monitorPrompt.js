@@ -29,9 +29,9 @@ export const MONITOR_CONDITIONS = /** @type {const} */ ([
 export const MONITOR_TERMINAL_STATUSES = /** @type {const} */ (["finished", "failed", "cancelled", "continued"]);
 
 /**
- * The conditions a monitor may repair on its own by default: the only two whose
- * repair is both idempotent (running it twice equals running it once) and
- * reversible (the run's durable state is unchanged if it was the wrong call).
+ * The conditions a monitor may repair on its own by default when no active
+ * runtime owner exists. Retry remains a bounded reset, so the prompt requires
+ * reporting its effects and never applying it twice.
  * @type {readonly MonitorCondition[]}
  */
 export const MONITOR_DEFAULT_AUTO_HEAL = /** @type {const} */ (["stalled", "wedged-node"]);
@@ -44,7 +44,7 @@ export const MONITOR_DEFAULT_AUTO_HEAL = /** @type {const} */ (["stalled", "wedg
  */
 export function monitorReadPathRules() {
   return [
-    "Read run state ONLY through the Gateway client (`smithers-orchestrator/gateway-client`) or the public CLI: `bunx smithers-orchestrator status`, `bunx smithers-orchestrator inspect RUN_ID --format json`, `bunx smithers-orchestrator events RUN_ID`, `bunx smithers-orchestrator node RUN_ID --node NODE_ID`, `bunx smithers-orchestrator why RUN_ID`, `bunx smithers-orchestrator ps`.",
+    "Read run state ONLY through the Gateway client (`smithers-orchestrator/gateway-client`) or the public CLI: `bunx smithers-orchestrator status`, `bunx smithers-orchestrator inspect RUN_ID --format json`, `bunx smithers-orchestrator events RUN_ID`, `bunx smithers-orchestrator node NODE_ID --runId RUN_ID`, `bunx smithers-orchestrator why RUN_ID`, `bunx smithers-orchestrator ps`.",
     "NEVER open the store directly. Do not read `.smithers/*.db`, `.smithers/pg`, `smithers.db`, or any SQL over them, and do not parse the Gateway runtime state file. Those are private engine state; reading them races the run and is wrong even when it appears to work.",
     "If a read fails or returns nothing, that is evidence of `unknown` — not a licence to guess from stale memory.",
   ];
@@ -79,7 +79,7 @@ export function monitorHealthSignals(params = {}) {
  */
 export function monitorEvidenceRules() {
   return [
-    "Gather, every heartbeat, before classifying: the run status; each node's state and attempt/retry count; the timestamp of the newest event (stall time); cumulative token usage; pending approvals and open human requests; and the error signatures in the most recent events.",
+    "Gather, every heartbeat, before classifying: the run status; whether its recorded runtime owner is still active (a live pid with a fresh heartbeat); each node's state and attempt/retry count; the timestamp of the newest event (stall time); cumulative token usage; pending approvals and open human requests; and the error signatures in the most recent events.",
     "Quote the evidence you used in `evidence` — node ids, attempt numbers, timestamps, the actual error text. A classification with no citable evidence is an `unknown`.",
     "Never act on a single sample. A condition must hold across at least two consecutive heartbeats before you route it to a healing handler; say so in `evidence` when it does.",
     "Compare against the PREVIOUS heartbeat, not against your expectations. 'Nothing changed since last beat' is the observation that matters.",
@@ -100,7 +100,7 @@ export function monitorAuthorityRules(params = {}) {
   return [
     "Your default action is to OBSERVE AND REPORT. Doing nothing and watching another beat is a correct, complete answer, and it is the right one whenever you are unsure.",
     `You may act autonomously ONLY on these conditions: ${allowed}. Every other condition must be escalated to a human.`,
-    `Every repair you are allowed to make is idempotent and reversible: resuming a stalled run (\`bunx smithers-orchestrator up WORKFLOW --resume --run-id ${runId}\`) re-enters the same durable frame, and retrying a wedged node (\`bunx smithers-orchestrator retry-task ${runId} --node NODE_ID\`) adds an attempt without discarding prior state. Running either twice is harmless.`,
+    `Resume a stalled run only when it has no active runtime owner: \`bunx smithers-orchestrator up WORKFLOW --resume --run-id ${runId}\` re-enters its durable frame. Retry a wedged node at most once with \`bunx smithers-orchestrator retry-task WORKFLOW --run-id ${runId} --node-id NODE_ID\`; this resets the node's output and downstream dependents before creating fresh attempts, so report exactly what was reset. Never run either repair against a live owner; escalate instead.`,
     "You may NEVER take a destructive or irreversible action on your own. Do not cancel a run, do not rewind, revert, or time-travel it, do not resolve an approval or answer a human request on the human's behalf, and do not edit the repository. Those require a human decision, always.",
     "ESCALATE to a human instead of guessing when: the condition is not in your auto-heal set; the evidence is contradictory or unreadable; a repair you already applied did not change the symptom; the same condition recurs after two repairs; or the correct fix would be destructive.",
     "When you escalate, state what you saw, what you already tried, what you believe is wrong, and the single specific decision you need. Do not ask an open question.",
@@ -133,7 +133,7 @@ export function monitorPrompt(params = {}) {
     "## What you may do, and when you must ask",
     ...monitorAuthorityRules({ autoHeal: params.autoHeal, watchRunId: runId }).map((line) => `- ${line}`),
     "## Output",
-    `Return exactly one condition from: ${MONITOR_CONDITIONS.join(" | ")}. Include \`runStatus\` (the watched run's status as reported by the CLI/Gateway), \`targetNodeId\` when a single node is implicated, \`evidence\` quoting what you actually read, and a one-line \`summary\`. When the watched run has reached ${MONITOR_TERMINAL_STATUSES.join("/")}, report it with condition \`healthy\` (or \`failing\` if it failed) and the monitor will stop.`,
+    `Return exactly one condition from: ${MONITOR_CONDITIONS.join(" | ")}. Include \`runStatus\` (the watched run's status as reported by the CLI/Gateway), \`ownerActive\` (true only for a live runtime-owner pid with a fresh heartbeat), \`targetNodeId\` when a single node is implicated, \`evidence\` quoting what you actually read, and a one-line \`summary\`. When the watched run has reached ${MONITOR_TERMINAL_STATUSES.join("/")}, report it with condition \`healthy\` (or \`failing\` if it failed) and the monitor will stop.`,
   ];
   if (params.guidance) sections.push("## Repo-specific guidance", params.guidance);
   return sections.join("\n\n");

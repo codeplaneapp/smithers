@@ -103,9 +103,10 @@ function normalizeChildOutput(runResult) {
  *
  * @param {SmithersDb} adapter
  * @param {string} childRunId
+ * @param {boolean} acceptWorkflowChange
  * @returns {Promise<boolean>}
  */
-async function resetFailedChildRun(adapter, childRunId) {
+async function resetFailedChildRun(adapter, childRunId, acceptWorkflowChange) {
   const nodes = await adapter.listNodes(childRunId);
   const failedNodes = nodes.filter((node) => node.state === "failed");
   if (failedNodes.length === 0) return false;
@@ -116,6 +117,7 @@ async function resetFailedChildRun(adapter, childRunId) {
       iteration: failedNode.iteration ?? 0,
       resetDependents: false,
       force: true,
+      acceptWorkflowChange,
     });
     if (!reset.success) {
       throw new SmithersError(
@@ -281,6 +283,7 @@ function resolveChildWorkflow(definition, parentWorkflow) {
  */
 export async function executeChildWorkflow(parentWorkflow, options) {
   const runtime = requireTaskRuntime();
+  const acceptWorkflowChange = /** @type {any} */ (runtime).acceptWorkflowChange === true;
   let definition = options.workflow;
   let workflowPath = options.workflowPath;
   if (isWorkflowFileRef(definition)) {
@@ -307,12 +310,19 @@ export async function executeChildWorkflow(parentWorkflow, options) {
   let existingChildRun = await adapter.getRun(childRunId);
   const automaticFailedRetry =
     options.runId === undefined && runtime.attempt > 1 && existingChildRun?.status === "failed";
-  if (automaticFailedRetry && (await resetFailedChildRun(adapter, childRunId))) {
+  if (automaticFailedRetry && (await resetFailedChildRun(adapter, childRunId, acceptWorkflowChange))) {
     existingChildRun = await adapter.getRun(childRunId);
   }
   const signal = options.signal ?? runtime.signal;
   const pauseSignal = options.pauseSignal ?? runtime.pauseSignal;
   const parentContext = await loadParentRunContext(parentWorkflow?.db ?? runtime.db, parentRunId);
+  const childConfig = {
+    ...(parentContext.config ?? {}),
+    // Explicit child ids cannot be recognized from the generated `:child:`
+    // grammar. Persist workspace lineage so destructive operations still
+    // share the parent's rewind lease.
+    subflowWorkspaceParentRunId: parentRunId,
+  };
   if (existingChildRun?.status === "finished") {
     // The child already completed (e.g. the parent crashed after the child
     // finished): preserve its recorded output instead of re-executing it.
@@ -341,9 +351,10 @@ export async function executeChildWorkflow(parentWorkflow, options) {
       // bridge execution gets a retry-specific key after an in-place reset.
       ...(automaticFailedRetry ? { bridgeExecutionId: `${childRunId}:retry:${runtime.attempt}` } : {}),
       resume,
+      acceptWorkflowChange,
       parentRunId,
       ...(parentContext.startedBy ? { startedBy: parentContext.startedBy } : {}),
-      ...(parentContext.config ? { config: parentContext.config } : {}),
+      config: childConfig,
       rootDir: options.rootDir,
       workflowPath,
       allowNetwork: options.allowNetwork,
@@ -363,9 +374,10 @@ export async function executeChildWorkflow(parentWorkflow, options) {
       input,
       runId: childRunId,
       resume,
+      acceptWorkflowChange,
       parentRunId,
       ...(parentContext.startedBy ? { startedBy: parentContext.startedBy } : {}),
-      ...(parentContext.config ? { config: parentContext.config } : {}),
+      config: childConfig,
       rootDir: options.rootDir,
       workflowPath,
       allowNetwork: options.allowNetwork,

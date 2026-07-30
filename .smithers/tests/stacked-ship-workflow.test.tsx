@@ -137,6 +137,7 @@ const artifactRow = (slug: string, revision = 1) => ({
   laneSlug: slug,
   artifactPath: "/reports/" + slug + "-r" + revision + ".html",
   revision,
+  commitId: "commit-" + slug + "-" + revision,
   headline: "The " + slug + " slice ships",
   summary: "artifact written",
 });
@@ -153,6 +154,7 @@ const DENIED = {
   decidedAt: "2026-07-27T00:00:00Z",
 };
 const FINAL_ROW = { status: "clean", summary: "Reviewed the full stack for cross-PR drift; nothing further needed." };
+const FINAL_SETTLED_ROW = { ...FINAL_ROW, accepted: true };
 const PUSH_ROW = { pushed: true, branchesJson: "[]", prUrlsJson: "[]", summary: "pushed" };
 
 const greenLaneOutputs = (slug: string) => ({
@@ -280,7 +282,8 @@ describe("prompts", () => {
       assembleGate: greenGate("assemble") as never,
       specPath: "spec.md",
     });
-    expect(final).toContain("jj squash --into");
+    expect(final).toContain("READ-ONLY review");
+    expect(final).not.toContain("jj squash --into");
     expect(final).toContain("spec.md");
   });
 });
@@ -361,6 +364,19 @@ describe("graph gating", () => {
     expect(String((approval.meta as AnyRow)?.requestSummary)).toContain("deny WITH A NOTE");
   });
 
+  test("approval labels the artifact revision that was actually generated", async () => {
+    const frame = await render(
+      {},
+      mergeOutputs(
+        { stshipSetup: [row("setup", SETUP_ROW)], stshipPlan: [row("plan", PLAN_OUT)] },
+        greenLaneOutputs("one"),
+        { stshipArtifact: [row("one:artifact", artifactRow("one", 2), 1)] },
+      ),
+    );
+    expect(String((task(frame, "one:approval").meta as AnyRow)?.requestTitle)).toContain("r2");
+    expect(String((task(frame, "one:approval").meta as AnyRow)?.requestTitle)).not.toContain("r3");
+  });
+
   test("an existing lane still re-pins its bookmark without recreating the workspace", () => {
     expect(
       laneSetupCommands({
@@ -408,7 +424,10 @@ describe("graph gating", () => {
 
     // The terminal roll-up reports per-lane decisions, so a final-review row is
     // not enough on its own: every reachable lane's review has to settle first.
-    const finished = mergeOutputs(assembled, { stshipFinal: [row("final-review", FINAL_ROW)] });
+    const finished = mergeOutputs(assembled, {
+      stshipFinal: [row("final-review", FINAL_ROW)],
+      stshipFinalSettled: [row("final-review-settled", FINAL_SETTLED_ROW)],
+    });
     const pending = await render({}, finished);
     expect(taskIds(pending)).not.toContain("summary");
 
@@ -429,6 +448,7 @@ describe("graph gating", () => {
       greenLaneOutputs("two"),
       { stshipGate: [row("assemble", greenGate("assemble"))] },
       { stshipFinal: [row("final-review", FINAL_ROW)] },
+      { stshipFinalSettled: [row("final-review-settled", FINAL_SETTLED_ROW)] },
     );
     const undecided = await render({ push: true }, settled);
     expect(taskIds(undecided)).not.toContain("push");
@@ -463,6 +483,70 @@ describe("graph gating", () => {
     const summary = await (summaryTask.computeFn as () => Promise<AnyRow>)();
     expect(summary.pushed).toBe(false);
     expect(String(summary.summary)).toContain("push skipped because not all lanes went green");
+  });
+
+  test("a blocked final review settles the run but never opens the push gate", async () => {
+    const outputs = mergeOutputs(
+      { stshipSetup: [row("setup", SETUP_ROW)], stshipPlan: [row("plan", PLAN_OUT)] },
+      greenLaneOutputs("one"),
+      greenLaneOutputs("two"),
+      {
+        stshipGate: [row("assemble", greenGate("assemble"))],
+        stshipDecision: [row("one:approval", APPROVED), row("two:approval", APPROVED)],
+        stshipFinal: [
+          row("final-review", {
+            status: "blocked",
+            summary: "Cross-lane regression blocks release until the shared contract is repaired.",
+          }),
+        ],
+        stshipFinalSettled: [
+          row("final-review-settled", {
+            status: "blocked",
+            accepted: false,
+            summary: "Cross-lane regression blocks release until the shared contract is repaired.",
+          }),
+        ],
+      },
+    );
+    const frame = await render({ push: true }, outputs);
+    expect(taskIds(frame)).not.toContain("push");
+    expect(taskIds(frame)).toContain("summary");
+  });
+
+  test("a failed final review gets a terminal fallback summary instead of silently ending", async () => {
+    const outputs = mergeOutputs(
+      { stshipSetup: [row("setup", SETUP_ROW)], stshipPlan: [row("plan", PLAN_OUT)] },
+      greenLaneOutputs("one"),
+      greenLaneOutputs("two"),
+      {
+        stshipGate: [row("assemble", greenGate("assemble"))],
+        stshipDecision: [row("one:approval", APPROVED), row("two:approval", APPROVED)],
+        stshipFinalSettled: [
+          row("final-review-settled", {
+            status: "failed",
+            accepted: false,
+            summary: "final review failed before producing a verdict",
+          }),
+        ],
+      },
+    );
+    const frame = await render({ push: true }, outputs);
+    expect(taskIds(frame)).not.toContain("push");
+    expect(taskIds(frame)).toContain("summary");
+  });
+
+  test("a red rework gate supersedes an initially green build gate", async () => {
+    const outputs = mergeOutputs(
+      { stshipSetup: [row("setup", SETUP_ROW)], stshipPlan: [row("plan", PLAN_OUT)] },
+      greenLaneOutputs("one"),
+      {
+        stshipGate: [row("one:rework-hygiene", redGate("one:rework"))],
+        stshipDecision: [row("one:approval", DENIED)],
+      },
+    );
+    const frame = await render({ buildIterations: 1, reviewRounds: 1 }, outputs);
+    expect(taskIds(frame)).not.toContain("two:workspace");
+    expect(taskIds(frame)).not.toContain("assemble");
   });
 });
 

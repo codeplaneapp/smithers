@@ -99,9 +99,28 @@ function runIdFromUrl(): string | undefined {
   return new URLSearchParams(location.search).get("runId") ?? undefined;
 }
 
-/** Reads a single-occurrence node output row for `nodeId` via the standard hook. */
-function useNodeRow(runId: string | undefined, nodeId: string) {
-  const out = useGatewayNodeOutput({ runId, nodeId, iteration: 0 });
+function latestNodeIterations(events: readonly unknown[]): Map<string, number> {
+  const latest = new Map<string, number>();
+  for (const event of events) {
+    if (!isRecord(event)) continue;
+    let eventName = asString(event.event);
+    let payload = isRecord(event.payload) ? event.payload : {};
+    for (let depth = 0; depth < 3 && eventName === "run.event"; depth += 1) {
+      const nestedEvent = asString(payload.event);
+      if (!nestedEvent) break;
+      eventName = nestedEvent;
+      payload = isRecord(payload.payload) ? payload.payload : payload;
+    }
+    const nodeId = asString(payload.nodeId);
+    const iteration = asNumber(payload.iteration, -1);
+    if (nodeId && iteration >= 0) latest.set(nodeId, Math.max(latest.get(nodeId) ?? 0, iteration));
+  }
+  return latest;
+}
+
+/** Reads the requested iteration of a node output row via the standard hook. */
+function useNodeRow(runId: string | undefined, nodeId: string, iteration = 0) {
+  const out = useGatewayNodeOutput({ runId, nodeId, iteration });
   return rowOf(out.data);
 }
 
@@ -146,30 +165,38 @@ function App() {
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? runs[0]?.runId;
   const activeRun = runs.find((r) => r.runId === activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0, maxEvents: 6000 });
+  const latestIterations = useMemo(() => latestNodeIterations(stream.events), [stream.events]);
+  const iterationFor = (nodeId: string) => latestIterations.get(nodeId) ?? 0;
 
-  const inventory = useNodeRow(activeRunId, "inventory");
-  const manifestReview = useNodeRow(activeRunId, "manifestReview");
-  const createRepos = useNodeRow(activeRunId, "createRepos");
-  const updateSmithers = useNodeRow(activeRunId, "updateSmithers");
-  const releaseDryRun = useNodeRow(activeRunId, "releaseDryRun");
-  const executeReleases = useNodeRow(activeRunId, "executeReleases");
-  const removalPrs = useNodeRow(activeRunId, "removalPrs");
-  const mergeRemovalPrs = useNodeRow(activeRunId, "mergeRemovalPrs");
-  const finalVerify = useNodeRow(activeRunId, "finalVerify");
-  const landedVerify = useNodeRow(activeRunId, "landedVerify");
-  const report = useNodeRow(activeRunId, "report");
+  const inventory = useNodeRow(activeRunId, "inventory", iterationFor("inventory"));
+  const manifestReview = useNodeRow(
+    activeRunId,
+    "manifestReviewFinalApproved",
+    iterationFor("manifestReviewFinalApproved"),
+  );
+  const createRepos = useNodeRow(activeRunId, "createRepos", iterationFor("createRepos"));
+  const updateSmithers = useNodeRow(activeRunId, "updateSmithers", iterationFor("updateSmithers"));
+  const initialReleaseDryRun = useNodeRow(activeRunId, "releaseDryRun", iterationFor("releaseDryRun"));
+  const postFixReleaseDryRun = useNodeRow(activeRunId, "releaseDryRunPostFix", iterationFor("releaseDryRunPostFix"));
+  const releaseDryRun = postFixReleaseDryRun ?? initialReleaseDryRun;
+  const executeReleases = useNodeRow(activeRunId, "executeReleases", iterationFor("executeReleases"));
+  const removalPrs = useNodeRow(activeRunId, "removalPrs", iterationFor("removalPrs"));
+  const mergeRemovalPrs = useNodeRow(activeRunId, "mergeRemovalPrs", iterationFor("mergeRemovalPrs"));
+  const finalVerify = useNodeRow(activeRunId, "finalVerify", iterationFor("finalVerify"));
+  const landedVerify = useNodeRow(activeRunId, "landedVerify", iterationFor("landedVerify"));
+  const report = useNodeRow(activeRunId, "report", iterationFor("report"));
 
   // One node-output hook per lane per stage (13 lanes x 5 stages = 65 hooks) —
   // small, bounded, and each hook already dedupes/polls via gateway-react.
   const laneRows: Record<string, Partial<Record<LaneStage, Record<string, unknown> | null>>> = {};
   for (const lane of ALL_LANES) {
     laneRows[lane] = {
-      extract: useNodeRow(activeRunId, `extract-${lane}`),
-      decouple: useNodeRow(activeRunId, `decouple-${lane}`),
-      docs: useNodeRow(activeRunId, `docs-${lane}`),
-      verify: useNodeRow(activeRunId, `laneVerify-${lane}`),
-      push: useNodeRow(activeRunId, `push-${lane}`),
+      extract: useNodeRow(activeRunId, `extract-${lane}`, iterationFor(`extract-${lane}`)),
+      decouple: useNodeRow(activeRunId, `decouple-${lane}`, iterationFor(`decouple-${lane}`)),
+      docs: useNodeRow(activeRunId, `docs-${lane}`, iterationFor(`docs-${lane}`)),
+      verify: useNodeRow(activeRunId, `laneVerify-${lane}`, iterationFor(`laneVerify-${lane}`)),
+      push: useNodeRow(activeRunId, `push-${lane}`, iterationFor(`push-${lane}`)),
     };
   }
 

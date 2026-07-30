@@ -975,18 +975,22 @@ async function resolveWaitForEventTimeoutBridge(adapter, runId, desc, attemptNo,
 async function syncWaitForEventDurableDeferredFromDb(adapter, runId, desc, snapshot) {
   const expectedSignalSeq = snapshot.resolvedSignalSeq;
   let afterSeq = typeof expectedSignalSeq === "number" ? expectedSignalSeq - 1 : -1;
-  let hasResolvedPriorWait = false;
-  let hasPriorWait = false;
   if (expectedSignalSeq === undefined) {
     const attempts = await Effect.runPromise(adapter.listAttemptsForRun(runId));
     for (const attempt of attempts) {
       const previous = parseWaitForEventSnapshot(attempt.metaJson);
-      if (!previous || (attempt.nodeId === desc.nodeId && attempt.iteration === desc.iteration)) continue;
-      hasPriorWait = true;
-      if (previous.signalName !== snapshot.signalName) continue;
+      if (!previous || previous.signalName !== snapshot.signalName) continue;
       if ((previous.correlationId ?? null) !== (snapshot.correlationId ?? null)) continue;
       if (typeof previous.resolvedSignalSeq === "number") {
-        hasResolvedPriorWait = true;
+        const sameWaiter = attempt.nodeId === desc.nodeId && (attempt.iteration ?? 0) === desc.iteration;
+        const currentWaiterWasAlreadyParked =
+          !sameWaiter && typeof previous.receivedAtMs === "number" && previous.receivedAtMs >= snapshot.startedAtMs;
+        // A signal is broadcast to every matching waiter that was parked when
+        // it arrived. If the process crashed partway through that broadcast,
+        // a resolved sibling must not advance this waiter's replay cursor past
+        // the still-undelivered signal. Later, sequential waiters do advance
+        // past it because their start time follows its receive time.
+        if (currentWaiterWasAlreadyParked) continue;
         afterSeq = Math.max(afterSeq, previous.resolvedSignalSeq);
       }
     }
@@ -996,14 +1000,9 @@ async function syncWaitForEventDurableDeferredFromDb(adapter, runId, desc, snaps
       signalName: snapshot.signalName,
       correlationId: snapshot.correlationId ?? null,
       afterSeq,
-      // A seq cursor prevents replay across iterations of the same node. The
-      // start-time floor also prevents a different WaitForEvent node from
-      // consuming an older matching signal that predates this wait. A run's
-      // first wait has no floor: every run-scoped signal necessarily arrived
-      // after the run was created, so it is a deliberately queued event.
-      ...(expectedSignalSeq === undefined && !hasResolvedPriorWait && hasPriorWait
-        ? { receivedAfterMs: snapshot.startedAtMs }
-        : {}),
+      // Signals accepted after the run exists are durable queued work, even
+      // when they arrive before this waiter parks. The cursor prevents a later
+      // matching wait from replaying a signal an earlier wait already handled.
       limit: 1,
     }),
   );

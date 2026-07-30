@@ -429,13 +429,16 @@ function runProcess(command: string, args: string[], cwd: string, timeoutMs: num
     let childClosed = false;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     let treePollTimer: ReturnType<typeof setTimeout> | undefined;
+    let treeExitDeadlineAt: number | undefined;
     const processGroupAlive = () => {
       if (!useProcessGroup || child.pid === undefined) return !childClosed;
       try {
         process.kill(-child.pid, 0);
         return true;
-      } catch (error) {
-        return (error as NodeJS.ErrnoException).code === "EPERM";
+      } catch {
+        // EPERM means this process cannot reap the group. Treat it as
+        // not-reapable and let the timeout settle instead of polling forever.
+        return false;
       }
     };
     const killTree = (signal: "SIGTERM" | "SIGKILL") => {
@@ -459,11 +462,17 @@ function runProcess(command: string, args: string[], cwd: string, timeoutMs: num
     };
     const finishTimedOutWhenTreeExits = () => {
       if (settled) return;
-      if (childClosed && !processGroupAlive()) {
+      if (!processGroupAlive()) {
+        finish(124);
+        return;
+      }
+      if (treeExitDeadlineAt !== undefined && Date.now() >= treeExitDeadlineAt) {
+        stderr += "\nProcess group could not be fully reaped after SIGKILL; orphaned members may remain";
         finish(124);
         return;
       }
       treePollTimer = setTimeout(finishTimedOutWhenTreeExits, 50);
+      treePollTimer.unref();
     };
     child.stdout.on("data", (chunk) => {
       stdout += String(chunk);
@@ -486,7 +495,10 @@ function runProcess(command: string, args: string[], cwd: string, timeoutMs: num
       timedOut = true;
       stderr += "\nTimed out after " + timeoutMs + "ms";
       killTree("SIGTERM");
-      killTimer = setTimeout(() => killTree("SIGKILL"), 5_000);
+      killTimer = setTimeout(() => {
+        killTree("SIGKILL");
+        treeExitDeadlineAt = Date.now() + 30_000;
+      }, 5_000);
       killTimer.unref();
       finishTimedOutWhenTreeExits();
     }, timeoutMs);

@@ -9,7 +9,7 @@ import { SmithersError } from "@smithers-orchestrator/errors";
 import { isTerminalClaudeMirrorRunStatus } from "./claude-mirror/isTerminalClaudeMirrorRunStatus.js";
 import { findAndOpenDb } from "./find-db.js";
 import { resumeRunDetached, resumeRunDetachedLogFile } from "./resume-detached.js";
-import { describeResumeTarget, resolveResumeTarget } from "./resume-target.js";
+import { buildBuiltinRelaunch, describeResumeTarget, resolveResumeTarget } from "./resume-target.js";
 /** @typedef {import("./RunAutoResumeSkipReason.ts").RunAutoResumeSkipReason} RunAutoResumeSkipReason */
 /** @typedef {import("./ResumeTarget.ts").ResumeTarget} ResumeTarget */
 /** @typedef {import("@smithers-orchestrator/db/adapter").SmithersDb} SmithersDb */
@@ -28,6 +28,10 @@ export const SUPERVISOR_EVENT_RUN_ID = "__supervisor__";
  * in sync.
  */
 const SUPERVISOR_CLAIM_OWNER_PREFIX = "supervisor:";
+
+function shellQuoteArg(arg) {
+  return /^[a-zA-Z0-9_./:@%+=,-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", "'\\''")}'`;
+}
 /**
  * Parse the consecutive-resume-attempt count out of a supervisor claim owner.
  * A claim owner is `supervisor:<id>` for the first attempt and
@@ -348,10 +352,11 @@ function giveUpOnFailedResumesEffect(options, run, staleBeforeMs, priorAttempts,
       return "skipped";
     }
     const logFile = resumeRunDetachedLogFile(target, run.runId);
-    const manualResumeCommand =
+    const manualResumeArgs =
       target.kind === "workflow-file"
-        ? `smithers up ${target.workflowPath} --resume --run-id ${run.runId} --force`
-        : `smithers ${target.command} ${target.args.join(" ")} --run-id ${run.runId} --resume --force`;
+        ? ["up", target.workflowPath, "--resume", "--run-id", run.runId, "--force"]
+        : buildBuiltinRelaunch(target, { runId: run.runId, resume: true }).args;
+    const manualResumeCommand = ["smithers", ...manualResumeArgs].map(shellQuoteArg).join(" ");
     const logTail = options.deps.readDetachedLogTail(logFile);
     const errorInfo = {
       name: "SmithersError",

@@ -135,6 +135,7 @@ describe("Durability", () => {
     const run = await adapter.getRun(runId);
     expect(run?.status).toBe("cancelled");
     expect(run?.runtimeOwnerId).toBeNull();
+    expect(await adapter.listInProgressAttempts(runId)).toEqual([]);
     cleanup();
   });
   test("resume fails when workflow file contents changed", async () => {

@@ -554,6 +554,43 @@ describe("process helpers and bash tool", () => {
     });
   });
 
+  test("unsandboxed loopback fetches cannot follow redirects to another endpoint", async () => {
+    const curl = globalThis.Bun?.which?.("curl") ?? null;
+    if (!curl) return;
+    const root = await makeRoot();
+    let targetRequests = 0;
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        if (new URL(request.url).pathname === "/target") {
+          targetRequests += 1;
+          return new Response("should-not-be-reached");
+        }
+        return Response.redirect(`http://127.0.0.1:${server.port}/target`, 302);
+      },
+    });
+    try {
+      await withPlatform("linux", () =>
+        withToolCtx(root, { allowNetwork: false, timeoutMs: 10_000 }, async () => {
+          await bashTool(curl, ["-s", `http://127.0.0.1:${server.port}/`]);
+          expect(targetRequests).toBe(0);
+          await expectSmithersCode(bashTool(curl, ["-L", `http://127.0.0.1:${server.port}/`]), "TOOL_NETWORK_DISABLED");
+          await expectSmithersCode(
+            bashTool("/bin/sh", ["-c", `curl --location http://127.0.0.1:${server.port}/`]),
+            "TOOL_NETWORK_DISABLED",
+          );
+          await expectSmithersCode(
+            bashTool(curl, ["--config", "/tmp/curlrc", `http://127.0.0.1:${server.port}/`]),
+            "TOOL_NETWORK_DISABLED",
+          );
+        }),
+      );
+    } finally {
+      server.stop(true);
+    }
+  });
+
   test("reports whether OS-level network isolation is actually enforced", async () => {
     // macOS with sandbox-exec is the only real kernel sandbox: enforced.
     await withPlatform("darwin", () =>

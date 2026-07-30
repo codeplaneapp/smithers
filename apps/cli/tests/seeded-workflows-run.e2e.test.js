@@ -26,6 +26,31 @@ const SEEDED_WORKFLOW_IDS = GENERATED_SEEDED_FILES.filter(
 const SMOKE_COMMAND_TIMEOUT_MS = 120_000;
 const SMOKE_TEST_TIMEOUT_MS = 180_000;
 
+test("every generated workflow runtime file reference is bundled", () => {
+  const generatedPaths = new Set(GENERATED_SEEDED_FILES.map((file) => file.path));
+  for (const file of GENERATED_SEEDED_FILES) {
+    if (file.path.startsWith(".smithers/workflows/")) {
+      for (const match of file.contents.matchAll(
+        /resolve\s*\(\s*import\.meta\.dir\s*,\s*["']\.\.\/lib\/([^"']+)["']\s*\)/g,
+      )) {
+        expect(generatedPaths.has(`.smithers/lib/${match[1]}`), `${file.path} references ${match[1]}`).toBe(true);
+      }
+    }
+    if (file.path.startsWith(".smithers/lib/") && file.path.endsWith(".json")) {
+      const visit = (value) => {
+        if (typeof value === "string" && value.startsWith(".smithers/lib/")) {
+          expect(generatedPaths.has(value), `${file.path} references ${value}`).toBe(true);
+        } else if (Array.isArray(value)) {
+          value.forEach(visit);
+        } else if (value && typeof value === "object") {
+          Object.values(value).forEach(visit);
+        }
+      };
+      visit(JSON.parse(file.contents));
+    }
+  }
+});
+
 const AGENT_RESPONSE = JSON.stringify({
   completed: true,
   detail: "completed the seeded smoke-test fixture",

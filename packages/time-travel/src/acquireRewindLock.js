@@ -41,14 +41,49 @@ async function runWrite(adapter, label, operation) {
  */
 export async function resolveRewindLeaseRunId(adapter, runId) {
   if (typeof adapter?.getRun !== "function") return runId;
-  if (!String(runId).includes(":child:")) return runId;
+  const storage = resolveStorage(adapter);
   let leaseRunId = runId;
   const seen = new Set();
   while (!seen.has(leaseRunId)) {
     seen.add(leaseRunId);
-    const run = await adapter.getRun(leaseRunId);
+    const runs = await storage.queryAllRaw(
+      `SELECT parent_run_id, config_json
+         FROM _smithers_runs
+        WHERE run_id = ?
+        LIMIT 1`,
+      [leaseRunId],
+    );
+    const run = runs[0]
+      ? {
+          parentRunId: runs[0].parent_run_id ?? runs[0].parentRunId ?? null,
+          configJson: runs[0].config_json ?? runs[0].configJson ?? null,
+        }
+      : undefined;
     if (!run?.parentRunId) break;
-    if (!parseSubflowChildRunId(leaseRunId, run.parentRunId)) break;
+    // Forks own an independent workspace and therefore an independent lease.
+    // Subflows (including explicitly named child runs) have parentRunId but no
+    // branch row; ContinueAsNew has a structured branch label and keeps using
+    // the same workspace. Resolve from those durable rows instead of parsing
+    // the generated `:child:` run-id grammar.
+    const branches = await storage.queryAllRaw(
+      `SELECT branch_label
+         FROM _smithers_branches
+        WHERE run_id = ?
+        LIMIT 1`,
+      [leaseRunId],
+    );
+    const branchLabel = branches[0]?.branch_label ?? branches[0]?.branchLabel ?? null;
+    if (branches.length > 0 && branchLabel !== "continue-as-new") break;
+    if (branches.length === 0) {
+      let explicitSubflow = false;
+      try {
+        const config = JSON.parse(run.configJson ?? "{}");
+        explicitSubflow = config?.subflowWorkspaceParentRunId === run.parentRunId;
+      } catch {
+        explicitSubflow = false;
+      }
+      if (!explicitSubflow && !parseSubflowChildRunId(leaseRunId, run.parentRunId)) break;
+    }
     leaseRunId = run.parentRunId;
   }
   return leaseRunId;

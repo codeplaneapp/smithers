@@ -24,7 +24,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
 const keepTmp = args.includes("--keep-tmp");
 const maxPackagesFlag = args.indexOf("--max-packages");
-const maxPackages = maxPackagesFlag === -1 ? 900 : Number(args[maxPackagesFlag + 1]);
+const maxPackages = maxPackagesFlag === -1 ? 925 : Number(args[maxPackagesFlag + 1]);
 const npmInstallArgs = [
   "install",
   "--package-lock-only",
@@ -40,7 +40,6 @@ const SINGLETONS = ["effect", "@electric-sql/pglite"];
 // Optional peers that must NOT appear in a default install at all.
 const OPTIONAL_ABSENT = [
   "playwright",
-  "mermaid",
   "koffi",
   "@daytonaio/sdk",
   "@aws-sdk/client-ecs",

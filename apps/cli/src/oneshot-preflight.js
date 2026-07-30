@@ -148,12 +148,12 @@ export function assessWorkingCopy(taskCwd) {
 
 /**
  * True when the summary describes a working copy the operator should be warned
- * about (a git repo that is not clean).
+ * about (dirty state or a detached lineage).
  *
  * @param {GitWorkingCopySummary} summary
  */
 export function needsPreflightNotice(summary) {
-  return summary.vcs === "git" && !summary.clean;
+  return summary.vcs === "git" && (!summary.clean || summary.detachedHead);
 }
 
 /** @param {GitWorkingCopySummary} summary */
@@ -183,25 +183,35 @@ function describeInventory(summary) {
  */
 export function buildPreflightNotice(summary, runId) {
   const inventory = describeInventory(summary);
-  const warning = `oneshot preflight: working copy at ${summary.cwd} has ${inventory}; pre-existing work can be swept into or block the agent's commits`;
+  const warning = `oneshot preflight: working copy at ${summary.cwd} requires attention: ${inventory}; commits can absorb pre-existing work or be left on an unreferenced detached lineage`;
+  const initialTriage = summary.clean
+    ? [
+        `This working copy is clean but is on a detached HEAD: ${summary.cwd}.`,
+        "Create or select a branch before making any goal commit so the resulting lineage stays referenced.",
+        "",
+      ]
+    : [
+        `This working copy was NOT clean when the run started: ${summary.cwd} has ${inventory}.`,
+        "None of it is yours. Before you start the goal below, bring the tree to a clean",
+        "baseline, judging every pre-existing path on its merits:",
+        "",
+        "- Build artifacts, caches, logs, or junk that should never be tracked: add the",
+        "  narrowest sensible pattern to `.gitignore`.",
+        "- Meaningful pre-existing work: preserve it in its own snapshot commit",
+        `  (\`chore(preflight): preserve pre-existing working-copy changes before ${runId}\`).`,
+        "  Never let it ride along in a goal commit.",
+        "- Ambiguous or half-finished experiments: `git stash push` them with a message",
+        `  describing what they are and naming this run (\`preflight ${runId}: ...\`).`,
+        "- Conflicted/`UU` files or `.jjconflict*` trees: do NOT resolve, commit, or delete",
+        "  them. Stop, surface them in your run output as a blocker note, and continue with",
+        "  the goal only if the goal does not touch those paths.",
+        ...(summary.detachedHead ? ["- Detached HEAD: create or select a branch before making any goal commit."] : []),
+        "",
+      ];
   const preamble = [
     "## Working-copy preflight",
     "",
-    `This working copy was NOT clean when the run started: ${summary.cwd} has ${inventory}.`,
-    "None of it is yours. Before you start the goal below, bring the tree to a clean",
-    "baseline, judging every pre-existing path on its merits:",
-    "",
-    "- Build artifacts, caches, logs, or junk that should never be tracked: add the",
-    "  narrowest sensible pattern to `.gitignore`.",
-    "- Meaningful pre-existing work: preserve it in its own snapshot commit",
-    `  (\`chore(preflight): preserve pre-existing working-copy changes before ${runId}\`).`,
-    "  Never let it ride along in a goal commit.",
-    "- Ambiguous or half-finished experiments: `git stash push` them with a message",
-    `  describing what they are and naming this run (\`preflight ${runId}: ...\`).`,
-    "- Conflicted/`UU` files or `.jjconflict*` trees: do NOT resolve, commit, or delete",
-    "  them. Stop, surface them in your run output as a blocker note, and continue with",
-    "  the goal only if the goal does not touch those paths.",
-    "",
+    ...initialTriage,
     "Then, while doing the goal itself:",
     "",
     "- `git add` every NEW file you create and include it in your commits. A previous",

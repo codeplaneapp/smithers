@@ -199,6 +199,9 @@ describe("evaluateEvalCase — inconclusive stamping (harness vs product failure
       "spawn wallet-simulator ENOENT",
       "JavaScript heap out of memory",
       "429 rate limit exceeded, retry later",
+      "SmithersError AGENT_QUOTA_EXCEEDED: subscription exhausted",
+      "provider error status=429",
+      '{"type":"overloaded_error"}',
     ]) {
       const result = evaluateEvalCase({ status: "error", error });
       expect(result.passed).toBe(false);
@@ -206,10 +209,17 @@ describe("evaluateEvalCase — inconclusive stamping (harness vs product failure
     }
   });
 
-  test("an unrecognized error stays a genuine failure (fail-closed)", () => {
-    const result = evaluateEvalCase({ status: "failed", error: "assertion failed: expected 4, got 5" });
-    expect(result.passed).toBe(false);
-    expect(result.inconclusive).toBe(false);
+  test("product errors and unproven capacity text stay genuine failures (fail-closed)", () => {
+    for (const error of [
+      "assertion failed: expected 4, got 5",
+      "AGENT_CONFIG_INVALID: requested model is not configured",
+      "rate limit exceeded for tenant policy",
+      "quota exceeded in workflow output",
+    ]) {
+      const result = evaluateEvalCase({ status: "failed", error });
+      expect(result.passed).toBe(false);
+      expect(result.inconclusive).toBe(false);
+    }
   });
 
   test("a case that expected a non-finished status is never inconclusive", () => {

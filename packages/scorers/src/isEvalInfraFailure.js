@@ -8,7 +8,6 @@ const EVAL_INFRA_ERROR_PATTERNS = [
   // Smithers' own sandbox/tooling denials: the run was blocked, not wrong.
   /TOOL_NETWORK_DISABLED/,
   /TOOL_GIT_REMOTE_DISABLED/,
-  /AGENT_CONFIG_INVALID/,
   // Sockets, DNS, and TLS: the service on the other end never answered.
   /ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|EADDRINUSE|EHOSTUNREACH|ENETUNREACH/,
   /TLS handshake|SSL routines|certificate (?:verify|has expired|is not trusted|unknown)|self[- ]signed certificate/i,
@@ -16,8 +15,13 @@ const EVAL_INFRA_ERROR_PATTERNS = [
   /spawn .* ENOENT/,
   /SIGKILL|SIGSEGV|SIGABRT|SIGBUS/,
   /out of memory|heap limit|Bus error/i,
-  // Provider capacity: quota and rate limits are never the workflow's fault.
-  /rate limit|quota exceeded|overloaded_error|status[: ]+429/i,
+  // Provider capacity must carry provider provenance: a Smithers agent quota
+  // code, a provider response code/type, or an HTTP status. Free-form
+  // workflow messages such as "rate limit exceeded for tenant" are product
+  // failures and deliberately do not match.
+  /\bAGENT_QUOTA_EXCEEDED\b/,
+  /(?:^429\b|(?:HTTP(?:\/[0-9.]+)?\s+|status(?:Code)?[:= ]+|error status[:= ]*)429\b)/i,
+  /\boverloaded_error\b/,
 ];
 
 /**

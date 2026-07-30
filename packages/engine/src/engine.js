@@ -6283,25 +6283,29 @@ async function legacyExecuteTask(
           abortSignal: taskSignal,
         });
         activeToolJournalContexts.push(computeToolContext);
-        const computePromise = Promise.resolve().then(() =>
-          withTaskRuntime(
-            {
-              runId,
-              stepId: desc.nodeId,
-              attempt: attemptNo,
-              iteration: desc.iteration,
-              rootDir: taskRoot,
-              signal: taskSignal,
-              pauseSignal,
-              db,
-              heartbeat: (data) => {
-                queueHeartbeat(data);
-              },
-              lastHeartbeat: previousHeartbeat,
+        const computePromise = Promise.resolve().then(() => {
+          /** @type {any} */
+          const taskRuntime = {
+            runId,
+            stepId: desc.nodeId,
+            attempt: attemptNo,
+            iteration: desc.iteration,
+            rootDir: taskRoot,
+            signal: taskSignal,
+            pauseSignal,
+            db,
+            heartbeat: (data) => {
+              queueHeartbeat(data);
             },
-            () => runWithToolContext(computeToolContext, () => desc.computeFn()),
-          ),
-        );
+            lastHeartbeat: previousHeartbeat,
+          };
+          // A Subflow executes from this async-local runtime rather than from
+          // the root RunOptions. Preserve the explicit identity waiver so a
+          // parent resume that accepted edited workflow source does not fail
+          // again when it reaches an existing child run.
+          taskRuntime.acceptWorkflowChange = opts.acceptWorkflowChange === true;
+          return withTaskRuntime(taskRuntime, () => runWithToolContext(computeToolContext, () => desc.computeFn()));
+        });
         const races = [computePromise];
         const abort = abortPromise(taskSignal);
         if (abort) races.push(abort);
@@ -7641,7 +7645,11 @@ async function runWorkflowBodyDriver(workflow, opts) {
       );
       const inProgress = inProgressByRun.flat();
       const runningDescendants = descendantRuns.filter((run) => run?.status === "running");
-      if (activeDriverTaskKeys.size === 0 && inProgress.length === 0 && runningDescendants.length === 0) {
+      // Once the driver has released every task and no child run is still
+      // active, any remaining in-progress rows are abandoned durable state.
+      // finalizeCancelledRun below owns repairing those rows; waiting for the
+      // full settle timeout cannot make an already-detached task update them.
+      if (activeDriverTaskKeys.size === 0 && runningDescendants.length === 0) {
         return;
       }
       if (nowMs() >= deadlineAt) {

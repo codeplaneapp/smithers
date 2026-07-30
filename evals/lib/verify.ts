@@ -2,7 +2,17 @@
 // possible. A fluency eval's verify <Task> calls computeVerdict() from an
 // agentless compute child; only `judge` verification spends a model.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import ts from "typescript";
 import { build } from "esbuild";
@@ -10,7 +20,17 @@ import { gradeSideEffectCompliance } from "@smithers/scorers";
 import { repoRoot } from "./paths.js";
 import type { CandidateReport, EvalVerdict } from "./report-schema.js";
 
-export type VerifyKind = "contains" | "equals" | "graph" | "workflow-files" | "sql" | "query" | "build" | "ui-functional" | "side-effect-marking" | "judge";
+export type VerifyKind =
+  | "contains"
+  | "equals"
+  | "graph"
+  | "workflow-files"
+  | "sql"
+  | "query"
+  | "build"
+  | "ui-functional"
+  | "side-effect-marking"
+  | "judge";
 
 export type VerifySpec = {
   kind: VerifyKind;
@@ -81,13 +101,14 @@ function sideEffectMarkingVerify(artifact: string, v: VerifySpec): EvalVerdict {
     requireRevert: v.requireRevert,
     ...(v.repoRoot ? { repoRoot: v.repoRoot } : {}),
   });
-  const checks: EvalVerdict["checks"] = report.violations.length > 0
-    ? report.violations.map((violation, index) => ({
-        name: `${violation.kind}:${index + 1}`,
-        passed: false,
-        detail: violation.detail,
-      }))
-    : [{ name: "side-effect-compliance", passed: true, detail: "all detected external mutations are marked" }];
+  const checks: EvalVerdict["checks"] =
+    report.violations.length > 0
+      ? report.violations.map((violation, index) => ({
+          name: `${violation.kind}:${index + 1}`,
+          passed: false,
+          detail: violation.detail,
+        }))
+      : [{ name: "side-effect-compliance", passed: true, detail: "all detected external mutations are marked" }];
   return {
     passed: report.passed,
     score: report.score,
@@ -127,7 +148,10 @@ function containsVerify(artifact: string, v: VerifySpec): EvalVerdict {
     score: scoreFromChecks(checks),
     reason: passed
       ? `artifact contains all ${v.must.length} required token(s)`
-      : `missing/forbidden tokens: ${checks.filter((c) => !c.passed).map((c) => c.name).join(", ")}`,
+      : `missing/forbidden tokens: ${checks
+          .filter((c) => !c.passed)
+          .map((c) => c.name)
+          .join(", ")}`,
     method: "contains",
     checks,
   };
@@ -197,7 +221,10 @@ function graphVerify(artifact: string, v: VerifySpec): EvalVerdict {
     score: scoreFromChecks(checks),
     reason: passed
       ? "workflow renders and uses the required components"
-      : `failed: ${checks.filter((c) => !c.passed).map((c) => c.name).join(", ")}`,
+      : `failed: ${checks
+          .filter((c) => !c.passed)
+          .map((c) => c.name)
+          .join(", ")}`,
     method: "graph",
     checks,
   };
@@ -311,6 +338,177 @@ function analyzeWorkflowTest(testSource: string, workflowName: string) {
   };
 }
 
+type IsolatedCommandResult = {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+};
+
+function sandboxProfilePath(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+/**
+ * Execute model-authored workflow/test modules without checkout credentials,
+ * network, or write access to Smithers source. The candidate bundle itself is
+ * read-only while running; only its private HOME/TMP directory is writable.
+ * Fail closed when the host has no supported kernel sandbox.
+ */
+function runIsolatedCandidateCommand(root: string, candidateDir: string, args: string[]): IsolatedCommandResult {
+  // Keep cwd outside every `.smithers` ancestor. createSmithers otherwise
+  // anchors its SQLite file beside the read-only candidate sources.
+  const runtimeDir = realpathSync(mkdtempSync(join(tmpdir(), "smithers-eval-verify-")));
+  writeFileSync(join(runtimeDir, "smithers.db"), "");
+  const finish = (result: IsolatedCommandResult) => {
+    rmSync(runtimeDir, { recursive: true, force: true });
+    return result;
+  };
+  const cleanEnv = {
+    PATH: `${dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`,
+    HOME: runtimeDir,
+    TMPDIR: runtimeDir,
+    TMP: runtimeDir,
+    TEMP: runtimeDir,
+    CI: "1",
+  };
+  const spawnOptions = {
+    cwd: runtimeDir,
+    encoding: "utf8" as const,
+    timeout: 120_000,
+    env: { PATH: cleanEnv.PATH },
+  };
+
+  if (process.platform === "darwin" && existsSync("/usr/bin/sandbox-exec")) {
+    // Keep module resolution inside the explicitly readable candidate tree;
+    // otherwise Bun climbs through the denied checkout parent directories
+    // before it reaches the workspace node_modules.
+    const candidateNodeModules = join(candidateDir, "node_modules");
+    if (!existsSync(candidateNodeModules)) {
+      symlinkSync(join(root, "node_modules"), candidateNodeModules, "dir");
+    }
+    const readable = [
+      "/bin",
+      "/usr",
+      "/System",
+      "/Library",
+      process.execPath,
+      join(root, "apps"),
+      join(root, "packages"),
+      join(root, "node_modules"),
+      join(root, "package.json"),
+      join(root, "pnpm-workspace.yaml"),
+      join(root, "tsconfig.json"),
+      candidateDir,
+    ].filter(existsSync);
+    const profile = [
+      "(version 1)",
+      "(deny default)",
+      "(allow process*)",
+      // Bun's module loader queries kernel limits while initializing.
+      "(allow sysctl*)",
+      "(deny network*)",
+      // Bun reads system runtime metadata outside /usr during startup. Permit
+      // system reads, then carve out the checkout and user home; the explicit
+      // source/dependency paths below are more specific allowances.
+      "(allow file-read*)",
+      `(deny file-read* (subpath "${sandboxProfilePath(root)}") (subpath "${sandboxProfilePath(homedir())}"))`,
+      // Directory metadata lets Bun finish normal ancestor-based module
+      // resolution without granting file-content access to those ancestors.
+      `(allow file-read-metadata (subpath "${sandboxProfilePath(root)}") (subpath "${sandboxProfilePath(homedir())}"))`,
+      `(allow file-read* ${readable.map((path) => `(subpath "${sandboxProfilePath(path)}")`).join(" ")})`,
+      `(allow file-write* (subpath "${sandboxProfilePath(runtimeDir)}") (literal "/dev/null"))`,
+    ].join(" ");
+    const envArgs = Object.entries(cleanEnv).map(([key, value]) => `${key}=${value}`);
+    const result = spawnSync(
+      "/usr/bin/sandbox-exec",
+      ["-p", profile, "/usr/bin/env", "-i", ...envArgs, process.execPath, ...args],
+      spawnOptions,
+    );
+    return finish({
+      status: result.status,
+      stdout: String(result.stdout ?? ""),
+      stderr: `${result.stderr ?? ""}${result.error ? `\n${result.error.message}` : ""}${
+        result.signal ? `\nterminated by ${result.signal}` : ""
+      }`,
+    });
+  }
+
+  if (process.platform === "linux") {
+    const bwrap = typeof Bun !== "undefined" ? Bun.which("bwrap") : null;
+    if (bwrap) {
+      const isolatedBun = join(runtimeDir, "bun");
+      writeFileSync(isolatedBun, "");
+      // Relative workspace links in node_modules point at ../packages, so
+      // mount the source packages at matching paths inside the candidate.
+      for (const path of ["apps", "packages", "node_modules"]) {
+        mkdirSync(join(candidateDir, path), { recursive: true });
+      }
+      const bwrapArgs = [
+        "--die-with-parent",
+        "--clearenv",
+        "--unshare-user",
+        "--unshare-pid",
+        "--unshare-ipc",
+        "--unshare-uts",
+        "--unshare-cgroup",
+        "--unshare-net",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+        "--tmpfs",
+        "/tmp",
+        "--ro-bind",
+        candidateDir,
+        "/workspace",
+        "--bind",
+        runtimeDir,
+        "/runtime",
+        "--ro-bind",
+        realpathSync(process.execPath),
+        "/runtime/bun",
+        "--ro-bind",
+        join(root, "apps"),
+        "/workspace/apps",
+        "--ro-bind",
+        join(root, "packages"),
+        "/workspace/packages",
+        "--ro-bind",
+        join(root, "node_modules"),
+        "/workspace/node_modules",
+        "--chdir",
+        "/runtime",
+      ];
+      for (const path of ["/usr", "/bin", "/lib", "/lib64"]) {
+        if (existsSync(path)) bwrapArgs.push("--ro-bind", path, path);
+      }
+      for (const [key, value] of Object.entries({ ...cleanEnv, HOME: "/runtime", TMPDIR: "/runtime" })) {
+        bwrapArgs.push("--setenv", key, value);
+      }
+      const isolatedArgs = args.map((arg) => {
+        if (arg === join(root, "apps/cli/src/index.js")) return "/workspace/apps/cli/src/index.js";
+        if (arg.startsWith(`${candidateDir}/`)) return `/workspace/${arg.slice(candidateDir.length + 1)}`;
+        return arg;
+      });
+      bwrapArgs.push("/runtime/bun", ...isolatedArgs);
+      const result = spawnSync(bwrap, bwrapArgs, spawnOptions);
+      return finish({
+        status: result.status,
+        stdout: String(result.stdout ?? ""),
+        stderr: `${result.stderr ?? ""}${result.error ? `\n${result.error.message}` : ""}${
+          result.signal ? `\nterminated by ${result.signal}` : ""
+        }`,
+      });
+    }
+  }
+
+  return finish({
+    status: null,
+    stdout: "",
+    stderr: "No supported local isolation runtime (sandbox-exec or bubblewrap) is available.",
+  });
+}
+
 /** Verify a workflow-authoring change set, not merely a workflow snippet.
  * The candidate returns a JSON path->contents bundle so this deterministic
  * scorer can inspect registration, render the real workflow, and run the real
@@ -344,7 +542,11 @@ function workflowFilesVerify(artifact: string, v: VerifySpec): EvalVerdict {
 
   const workflowPaths = Object.keys(files).filter((path) => /^\.smithers\/workflows\/[^/]+\.tsx$/.test(path));
   const workflowPath = workflowPaths[0] ?? "";
-  const workflowName = workflowPath.split("/").at(-1)?.replace(/\.tsx$/, "") ?? "";
+  const workflowName =
+    workflowPath
+      .split("/")
+      .at(-1)
+      ?.replace(/\.tsx$/, "") ?? "";
   const testPath = `.smithers/tests/${workflowName}.test.tsx`;
   const packagePath = ".smithers/package.json";
   const workflowSource = files[workflowPath] ?? "";
@@ -427,22 +629,14 @@ function workflowFilesVerify(artifact: string, v: VerifySpec): EvalVerdict {
     }
     if (workflowPath) {
       const cliEntry = join(root, "apps/cli/src/index.js");
-      const graph = spawnSync("bun", [cliEntry, "graph", join(dir, workflowPath)], {
-        cwd: root,
-        encoding: "utf8",
-        timeout: 120_000,
-      });
+      const graph = runIsolatedCandidateCommand(root, dir, [cliEntry, "graph", join(dir, workflowPath)]);
       graphPassed = graph.status === 0;
       graphDetail = graphPassed
         ? "rendered"
         : `exit ${graph.status}: ${`${graph.stdout ?? ""}\n${graph.stderr ?? ""}`.trim().slice(0, 300)}`;
     }
     if (testSource) {
-      const test = spawnSync("bun", ["test", join(dir, testPath)], {
-        cwd: root,
-        encoding: "utf8",
-        timeout: 120_000,
-      });
+      const test = runIsolatedCandidateCommand(root, dir, ["test", join(dir, testPath)]);
       testPassed = test.status === 0;
       testDetail = testPassed
         ? "passed"
@@ -468,7 +662,10 @@ function workflowFilesVerify(artifact: string, v: VerifySpec): EvalVerdict {
     score: scoreFromChecks(checks),
     reason: passed
       ? "workflow, registered testing-library test, graph assertions, and execution all passed"
-      : `failed: ${checks.filter((check) => !check.passed).map((check) => check.name).join(", ")}`,
+      : `failed: ${checks
+          .filter((check) => !check.passed)
+          .map((check) => check.name)
+          .join(", ")}`,
     method: "workflow-files",
     checks,
   };
@@ -517,10 +714,19 @@ async function sqlVerify(v: VerifySpec): Promise<EvalVerdict> {
  * write SQL that answers the question? */
 async function queryVerify(artifact: string, v: VerifySpec): Promise<EvalVerdict> {
   if (!v.db) {
-    return { passed: false, score: 0, reason: "query verify needs a fixture db", method: "query", checks: [{ name: "fixture", passed: false, detail: "missing db" }] };
+    return {
+      passed: false,
+      score: 0,
+      reason: "query verify needs a fixture db",
+      method: "query",
+      checks: [{ name: "fixture", passed: false, detail: "missing db" }],
+    };
   }
   // Strip code fences / leading prose so a candidate's ```sql block still runs.
-  const sql = artifact.replace(/```sql/gi, "").replace(/```/g, "").trim();
+  const sql = artifact
+    .replace(/```sql/gi, "")
+    .replace(/```/g, "")
+    .trim();
   const { Database } = await import("bun:sqlite");
   let rows: unknown[] = [];
   try {
@@ -528,7 +734,13 @@ async function queryVerify(artifact: string, v: VerifySpec): Promise<EvalVerdict
     rows = db.query(sql).all();
     db.close();
   } catch (err) {
-    return { passed: false, score: 0, reason: `candidate SQL failed: ${err instanceof Error ? err.message : String(err)}`, method: "query", checks: [{ name: "runs", passed: false, detail: sql.slice(0, 120) }] };
+    return {
+      passed: false,
+      score: 0,
+      reason: `candidate SQL failed: ${err instanceof Error ? err.message : String(err)}`,
+      method: "query",
+      checks: [{ name: "runs", passed: false, detail: sql.slice(0, 120) }],
+    };
   }
   const got = JSON.stringify(rows);
   const want = (v.expect ?? "").trim();
@@ -592,7 +804,14 @@ function importedBindings(source: ts.SourceFile): ImportBinding[] {
     const named = clause.namedBindings;
     if (!named) continue;
     if (ts.isNamespaceImport(named)) result.push({ imported: "*", local: named.name.text, module, namespace: true });
-    else for (const element of named.elements) result.push({ imported: element.propertyName?.text ?? element.name.text, local: element.name.text, module, namespace: false });
+    else
+      for (const element of named.elements)
+        result.push({
+          imported: element.propertyName?.text ?? element.name.text,
+          local: element.name.text,
+          module,
+          namespace: false,
+        });
   }
   return result;
 }
@@ -628,11 +847,26 @@ function hasCallOrJsxUse(source: ts.SourceFile, bindings: ImportBinding[], name:
   const visit = (node: ts.Node) => {
     if (ts.isJsxOpeningLikeElement(node)) {
       const tag = node.tagName;
-      if (relevant.some((b) => (b.namespace && tag.getText() === `${b.local}.${name}`) || (!b.namespace && tag.getText() === b.local))) found = true;
+      if (
+        relevant.some(
+          (b) => (b.namespace && tag.getText() === `${b.local}.${name}`) || (!b.namespace && tag.getText() === b.local),
+        )
+      )
+        found = true;
     }
     if (!jsxOnly && ts.isCallExpression(node)) {
       const callee = node.expression;
-      if (relevant.some((b) => (b.namespace && ts.isPropertyAccessExpression(callee) && callee.expression.getText() === b.local && callee.name.text === name) || (!b.namespace && callee.getText() === b.local))) found = true;
+      if (
+        relevant.some(
+          (b) =>
+            (b.namespace &&
+              ts.isPropertyAccessExpression(callee) &&
+              callee.expression.getText() === b.local &&
+              callee.name.text === name) ||
+            (!b.namespace && callee.getText() === b.local),
+        )
+      )
+        found = true;
     }
     if (!found) ts.forEachChild(node, visit);
   };
@@ -658,7 +892,9 @@ function structuralRequirement(source: ts.SourceFile, bindings: ImportBinding[],
   if (token.includes(".")) return hasDottedAccess(source, token);
   const imported = bindings.find((b) => b.imported === token);
   const isGatewayCall = /^(createGateway|useGateway)/.test(token);
-  return imported || bindings.some((b) => b.namespace) ? hasCallOrJsxUse(source, bindings, token, !isGatewayCall) : false;
+  return imported || bindings.some((b) => b.namespace)
+    ? hasCallOrJsxUse(source, bindings, token, !isGatewayCall)
+    : false;
 }
 
 function forbiddenStructure(source: ts.SourceFile, bindings: ImportBinding[], token: string): boolean {
@@ -666,7 +902,8 @@ function forbiddenStructure(source: ts.SourceFile, bindings: ImportBinding[], to
   if (token.startsWith(".") && token.length > 1) return !hasPropertyAccess(source, token.slice(1));
   if (token.includes(".")) return !hasDottedAccess(source, token);
   const callName = token.endsWith("(") ? token.slice(0, -1) : token;
-  if (token.endsWith("(") && bindings.some((b) => b.imported === callName)) return !hasCallOrJsxUse(source, bindings, callName);
+  if (token.endsWith("(") && bindings.some((b) => b.imported === callName))
+    return !hasCallOrJsxUse(source, bindings, callName);
   return !structuralRequirement(source, bindings, token);
 }
 
@@ -684,11 +921,23 @@ async function buildVerify(artifact: string, v: VerifySpec): Promise<EvalVerdict
     dir = mkdtempSync(join(tmpBase, "eval-build-"));
     const file = join(dir, "candidate.tsx");
     writeFileSync(file, artifact, "utf8");
-    await build({ absWorkingDir: root, entryPoints: [file], bundle: true, write: false, platform: "browser", format: "esm", logLevel: "silent" });
+    await build({
+      absWorkingDir: root,
+      entryPoints: [file],
+      bundle: true,
+      write: false,
+      platform: "browser",
+      format: "esm",
+      logLevel: "silent",
+    });
     checks.push({ name: "bundles", passed: true, detail: "resolved workspace modules and exports" });
     source = ts.createSourceFile(file, artifact, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
     const parseErrors = (source as unknown as { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics ?? [];
-    checks.push({ name: "parses", passed: parseErrors.length === 0, detail: parseErrors[0]?.messageText?.toString() ?? "valid TSX" });
+    checks.push({
+      name: "parses",
+      passed: parseErrors.length === 0,
+      detail: parseErrors[0]?.messageText?.toString() ?? "valid TSX",
+    });
     if (parseErrors.length === 0) {
       const config = ts.readConfigFile(join(root, "tsconfig.json"), ts.sys.readFile);
       const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
@@ -700,22 +949,55 @@ async function buildVerify(artifact: string, v: VerifySpec): Promise<EvalVerdict
     checks.push({
       name: "typechecks",
       passed: typeDiagnostics.length === 0,
-      detail: typeDiagnostics.length === 0 ? "imports and exports are valid" : ts.flattenDiagnosticMessageText(typeDiagnostics[0].messageText, " ").slice(0, 300),
+      detail:
+        typeDiagnostics.length === 0
+          ? "imports and exports are valid"
+          : ts.flattenDiagnosticMessageText(typeDiagnostics[0].messageText, " ").slice(0, 300),
     });
   } catch (err) {
-    checks.push({ name: "bundles", passed: false, detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300) });
+    checks.push({
+      name: "bundles",
+      passed: false,
+      detail: err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300),
+    });
   } finally {
     if (dir) rmSync(dir, { recursive: true, force: true });
   }
   if (source) {
     const bindings = importedBindings(source);
-    for (const token of v.must) checks.push({ name: `must:${token}`, passed: structuralRequirement(source, bindings, token), detail: "imported and structurally used" });
-    for (const token of v.mustNot) checks.push({ name: `mustNot:${token}`, passed: forbiddenStructure(source, bindings, token), detail: "forbidden structure absent" });
+    for (const token of v.must)
+      checks.push({
+        name: `must:${token}`,
+        passed: structuralRequirement(source, bindings, token),
+        detail: "imported and structurally used",
+      });
+    for (const token of v.mustNot)
+      checks.push({
+        name: `mustNot:${token}`,
+        passed: forbiddenStructure(source, bindings, token),
+        detail: "forbidden structure absent",
+      });
   } else {
-    for (const token of [...v.must, ...v.mustNot]) checks.push({ name: `${v.must.includes(token) ? "must" : "mustNot"}:${token}`, passed: false, detail: "artifact did not parse/build" });
+    for (const token of [...v.must, ...v.mustNot])
+      checks.push({
+        name: `${v.must.includes(token) ? "must" : "mustNot"}:${token}`,
+        passed: false,
+        detail: "artifact did not parse/build",
+      });
   }
   const passed = checks.length > 0 && checks.every((c) => c.passed);
-  return { passed, score: scoreFromChecks(checks), reason: passed ? "bundle resolves and uses required UI structures" : `failed: ${checks.filter((c) => !c.passed).map((c) => c.name).join(", ")}`, method: "build", checks };
+  return {
+    passed,
+    score: scoreFromChecks(checks),
+    reason: passed
+      ? "bundle resolves and uses required UI structures"
+      : `failed: ${checks
+          .filter((c) => !c.passed)
+          .map((c) => c.name)
+          .join(", ")}`,
+    method: "build",
+    checks,
+  };
 }
 
 /** The DEFAULT_UI_CHECKS full functional set, in display order. */
@@ -800,10 +1082,7 @@ function functionalVerify(artifact: string, v: VerifySpec): EvalVerdict {
 }
 
 /** Deterministic verdict for every non-judge verify kind. */
-export async function computeVerdict(
-  verify: VerifySpec,
-  report: CandidateReport,
-): Promise<EvalVerdict> {
+export async function computeVerdict(verify: VerifySpec, report: CandidateReport): Promise<EvalVerdict> {
   const artifact = report?.artifact ?? "";
   switch (verify.kind) {
     case "equals":

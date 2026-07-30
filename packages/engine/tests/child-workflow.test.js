@@ -105,7 +105,7 @@ describe("child workflow helpers", () => {
           startedBy: { kind: "user", id: "tester" },
         }),
       });
-      const runtime = makeRuntime({ db: childWorkflow.db });
+      const runtime = makeRuntime({ db: childWorkflow.db, acceptWorkflowChange: true });
       let capturedOptions;
       const bridgeRuntime = {
         executeChildWorkflow: async (_workflow, opts) => {
@@ -139,8 +139,13 @@ describe("child workflow helpers", () => {
         input: { value: "prompt" },
         runId: "parent-run:child:step:2",
         resume: false,
+        acceptWorkflowChange: true,
         parentRunId: "parent-run",
-        config: { gatewayWorkflowKey: "main", gatewaySystem: true },
+        config: {
+          gatewayWorkflowKey: "main",
+          gatewaySystem: true,
+          subflowWorkspaceParentRunId: "parent-run",
+        },
         startedBy: { kind: "user", id: "tester" },
         allowNetwork: true,
         maxOutputBytes: 1024,

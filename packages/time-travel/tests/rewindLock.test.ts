@@ -113,6 +113,35 @@ describe("rewindLock", () => {
     }
   });
 
+  test("explicitly named subflows share their recorded parent workspace lease", async () => {
+    const { sqlite, adapter } = setupDb();
+    try {
+      const parentRunId = "parent-run";
+      const childRunId = "release-validation";
+      await adapter.insertRun({
+        runId: parentRunId,
+        workflowName: "parent",
+        status: "finished",
+        createdAtMs: Date.now(),
+      });
+      await adapter.insertRun({
+        runId: childRunId,
+        parentRunId,
+        workflowName: "child",
+        status: "finished",
+        createdAtMs: Date.now(),
+        configJson: JSON.stringify({ subflowWorkspaceParentRunId: parentRunId }),
+      });
+
+      const lease = await acquireRewindLock(adapter, childRunId, { autoRenew: false });
+      expect(lease?.runId).toBe(parentRunId);
+      expect(await acquireRewindLock(adapter, parentRunId, { autoRenew: false })).toBeNull();
+      expect(await lease?.release()).toBe(true);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test("validates lock options and storage before probing child lineage", async () => {
     const { sqlite, adapter } = setupDb();
     const originalGetRun = adapter.getRun.bind(adapter);

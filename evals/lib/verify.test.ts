@@ -12,10 +12,25 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { computeVerdict, type VerifySpec } from "./verify.ts";
+import { repoRoot } from "./paths.ts";
 import type { CandidateReport } from "./report-schema.ts";
 
 function spec(over: Partial<VerifySpec>): VerifySpec {
-  return { kind: "query", must: [], mustNot: [], answer: null, rubric: null, sql: null, expect: null, db: null, required: [], requireIdempotencyKey: false, requireRevert: false, repoRoot: null, ...over };
+  return {
+    kind: "query",
+    must: [],
+    mustNot: [],
+    answer: null,
+    rubric: null,
+    sql: null,
+    expect: null,
+    db: null,
+    required: [],
+    requireIdempotencyKey: false,
+    requireRevert: false,
+    repoRoot: null,
+    ...over,
+  };
 }
 
 function report(sql: string): CandidateReport {
@@ -40,7 +55,10 @@ describe("query verifier whole-cell matching", () => {
   }
 
   test("a scalar number expect does NOT substring-match a larger number", async () => {
-    const db = seedDb("CREATE TABLE runs (id INTEGER)", "INSERT INTO runs (id) VALUES (1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11),(12),(13),(14)");
+    const db = seedDb(
+      "CREATE TABLE runs (id INTEGER)",
+      "INSERT INTO runs (id) VALUES (1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11),(12),(13),(14)",
+    );
     const v = spec({ kind: "query", db, expect: "4" });
     // Wrong SQL returns 14 — which CONTAINS "4". Must NOT pass.
     const wrong = await computeVerdict(v, report("SELECT count(*) AS c FROM runs"));
@@ -58,7 +76,10 @@ describe("query verifier whole-cell matching", () => {
   });
 
   test("column aliasing still matches via the single-cell normalizer", async () => {
-    const db = seedDb("CREATE TABLE runs (id INTEGER)", "INSERT INTO runs (id) VALUES (1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11),(12),(13),(14)");
+    const db = seedDb(
+      "CREATE TABLE runs (id INTEGER)",
+      "INSERT INTO runs (id) VALUES (1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11),(12),(13),(14)",
+    );
     const v = spec({ kind: "query", db, expect: "14" });
     const verdict = await computeVerdict(v, report("SELECT count(*) AS total FROM runs"));
     expect(verdict.passed).toBe(true);
@@ -67,7 +88,21 @@ describe("query verifier whole-cell matching", () => {
 
 describe("must/mustNot JSX-tag tokens tolerate the createSmithers factory namespace", () => {
   function containsSpec(over: Partial<VerifySpec>): VerifySpec {
-    return { kind: "contains", must: [], mustNot: [], answer: null, rubric: null, sql: null, expect: null, db: null, required: [], requireIdempotencyKey: false, requireRevert: false, repoRoot: null, ...over };
+    return {
+      kind: "contains",
+      must: [],
+      mustNot: [],
+      answer: null,
+      rubric: null,
+      sql: null,
+      expect: null,
+      db: null,
+      required: [],
+      requireIdempotencyKey: false,
+      requireRevert: false,
+      repoRoot: null,
+      ...over,
+    };
   }
 
   // Bug: `must: ["<Task"]` false-failed the documented createSmithers factory
@@ -93,13 +128,13 @@ describe("must/mustNot JSX-tag tokens tolerate the createSmithers factory namesp
 
   test("a bare component `must` token still matches a plain bare-imported tag", async () => {
     const v = containsSpec({ must: ["<Task"] });
-    const verdict = await computeVerdict(v, report("<Task name=\"a\" run={() => {}} />"));
+    const verdict = await computeVerdict(v, report('<Task name="a" run={() => {}} />'));
     expect(verdict.passed).toBe(true);
   });
 
   test("a bare component `must` token does not false-match a substring of another name", async () => {
     const v = containsSpec({ must: ["<Task"] });
-    const verdict = await computeVerdict(v, report("<TaskGroup name=\"a\" />"));
+    const verdict = await computeVerdict(v, report('<TaskGroup name="a" />'));
     expect(verdict.passed).toBe(false);
   });
 });
@@ -181,6 +216,36 @@ test("graph", async () => expect(await renderWorkflow(workflow)).toBeTruthy());`
     expect(verdict.checks.find((check) => check.name === "graph-behavior-assertions")?.passed).toBe(false);
     expect(verdict.checks.find((check) => check.name === "schema-assertions")?.passed).toBe(false);
   }, 30_000);
+
+  test("cannot read files outside the isolated candidate and runtime trees", async () => {
+    const readingWorkflow = workflow.replace(
+      'import { z } from "zod/v4";',
+      `import { readFileSync } from "node:fs";
+readFileSync(${JSON.stringify(join(repoRoot(), ".git", "config"))});
+import { z } from "zod/v4";`,
+    );
+    const verdict = await computeVerdict(
+      workflowFilesSpec,
+      report(bundle({ ".smithers/workflows/hello.tsx": readingWorkflow })),
+    );
+    expect(verdict.passed).toBe(false);
+    expect(verdict.checks.find((check) => check.name === "graph-renders")?.passed).toBe(false);
+  }, 30_000);
+
+  test("cannot mutate the read-only candidate bundle", async () => {
+    const writingWorkflow = workflow.replace(
+      'import { z } from "zod/v4";',
+      `import { writeFileSync } from "node:fs";
+writeFileSync(new URL("./owned", import.meta.url), "owned");
+import { z } from "zod/v4";`,
+    );
+    const verdict = await computeVerdict(
+      workflowFilesSpec,
+      report(bundle({ ".smithers/workflows/hello.tsx": writingWorkflow })),
+    );
+    expect(verdict.passed).toBe(false);
+    expect(verdict.checks.find((check) => check.name === "graph-renders")?.passed).toBe(false);
+  }, 30_000);
 });
 
 describe("side-effect-marking verifier", () => {
@@ -236,10 +301,7 @@ describe("side-effect-marking verifier", () => {
         }
       },
     })`;
-    const polarityVerdict = await computeVerdict(
-      sideEffectSpec({ requireRevert: true }),
-      report(unknownOnly),
-    );
+    const polarityVerdict = await computeVerdict(sideEffectSpec({ requireRevert: true }), report(unknownOnly));
     expect(polarityVerdict.passed).toBe(false);
     expect(polarityVerdict.checks.some((check) => check.name.startsWith("missing-revert:"))).toBe(true);
   });
@@ -247,21 +309,45 @@ describe("side-effect-marking verifier", () => {
 
 describe("build verifier resolves and structurally uses UI requirements", () => {
   function buildSpec(over: Partial<VerifySpec>): VerifySpec {
-    return { kind: "build", must: [], mustNot: [], answer: null, rubric: null, sql: null, expect: null, db: null, required: [], requireIdempotencyKey: false, requireRevert: false, repoRoot: null, ...over };
+    return {
+      kind: "build",
+      must: [],
+      mustNot: [],
+      answer: null,
+      rubric: null,
+      sql: null,
+      expect: null,
+      db: null,
+      required: [],
+      requireIdempotencyKey: false,
+      requireRevert: false,
+      repoRoot: null,
+      ...over,
+    };
   }
 
-  const reportUi = (artifact: string): CandidateReport => ({ artifact } as unknown as CandidateReport);
+  const reportUi = (artifact: string): CandidateReport => ({ artifact }) as unknown as CandidateReport;
 
   test("rejects marker strings, comments, unresolved imports, unused imports, and forbidden JSX", async () => {
     const cases = [
       [`const marker = "RunTree"; export default () => <div />;`, ["RunTree"], []],
       [`import { RunTree } from "smithers-orchestrator/not-real"; export default () => <RunTree />;`, ["RunTree"], []],
       [`import { RunTree } from "smithers-orchestrator/gateway-ui"; export default () => <div />;`, ["RunTree"], []],
-      [`import { RunTree } from "smithers-orchestrator/gateway-ui"; export default () => <textarea />;`, ["RunTree"], ["<textarea"]],
-      [`import { InventedExport } from "smithers-orchestrator/gateway-ui"; export default () => <InventedExport />;`, ["InventedExport"], []],
+      [
+        `import { RunTree } from "smithers-orchestrator/gateway-ui"; export default () => <textarea />;`,
+        ["RunTree"],
+        ["<textarea"],
+      ],
+      [
+        `import { InventedExport } from "smithers-orchestrator/gateway-ui"; export default () => <InventedExport />;`,
+        ["InventedExport"],
+        [],
+      ],
     ] as const;
     for (const [artifact, must, mustNot] of cases) {
-      expect((await computeVerdict(buildSpec({ must: [...must], mustNot: [...mustNot] }), reportUi(artifact))).passed).toBe(false);
+      expect(
+        (await computeVerdict(buildSpec({ must: [...must], mustNot: [...mustNot] }), reportUi(artifact))).passed,
+      ).toBe(false);
     }
     // Real esbuild + TS module resolution: the first case in this block pays a
     // cold start that overruns bun's 5s default.
@@ -274,13 +360,20 @@ describe("build verifier resolves and structurally uses UI requirements", () => 
       export default function App() { useRun("run"); return <UI.RunTree runId="run" className={styles.row} />; }
       const styles = { row: "row" }; mount(<App />);
     `;
-    const verdict = await computeVerdict(buildSpec({ must: ["smithers-orchestrator/gateway-react", "createGatewayReactRoot", "useGatewayRun", "RunTree", ".row"] }), reportUi(artifact));
+    const verdict = await computeVerdict(
+      buildSpec({
+        must: ["smithers-orchestrator/gateway-react", "createGatewayReactRoot", "useGatewayRun", "RunTree", ".row"],
+      }),
+      reportUi(artifact),
+    );
     expect(verdict.passed).toBe(true);
   }, 60_000);
 
   test("requires module-path requirements to be imports and validates real exports", async () => {
     const artifact = `import { MarkdownEditor } from "@smithers-orchestrator/ui/adapters/markdown-editor"; export default () => <MarkdownEditor value="" />;`;
-    expect((await computeVerdict(buildSpec({ must: ["adapters/markdown-editor"] }), reportUi(artifact))).passed).toBe(true);
+    expect((await computeVerdict(buildSpec({ must: ["adapters/markdown-editor"] }), reportUi(artifact))).passed).toBe(
+      true,
+    );
     expect((await computeVerdict(buildSpec({ must: ["adapters/not-real"] }), reportUi(artifact))).passed).toBe(false);
   }, 60_000);
 
@@ -290,7 +383,9 @@ describe("build verifier resolves and structurally uses UI requirements", () => 
     const nonexistentNamespace = `import * as UI from "smithers-orchestrator/gateway-ui"; export default () => <UI.NotARealComponent />;`;
     expect((await computeVerdict(buildSpec({ must: ["RunTree"] }), reportUi(typeOnly))).passed).toBe(false);
     expect((await computeVerdict(buildSpec({ must: ["RunTree"] }), reportUi(unresolvedTypeOnly))).passed).toBe(false);
-    expect((await computeVerdict(buildSpec({ must: ["NotARealComponent"] }), reportUi(nonexistentNamespace))).passed).toBe(false);
+    expect(
+      (await computeVerdict(buildSpec({ must: ["NotARealComponent"] }), reportUi(nonexistentNamespace))).passed,
+    ).toBe(false);
   }, 60_000);
 
   test("structurally recognizes the real location.search requirement", async () => {
@@ -300,7 +395,10 @@ describe("build verifier resolves and structurally uses UI requirements", () => 
       function App() { const runId = new URLSearchParams(location.search).get("runId") ?? undefined; useGatewayRun(runId); const row = styles.row; return null; }
       mount(<App />);
     `;
-    const verdict = await computeVerdict(buildSpec({ must: ["createGatewayReactRoot", "useGatewayRun", "location.search", ".row"] }), reportUi(artifact));
+    const verdict = await computeVerdict(
+      buildSpec({ must: ["createGatewayReactRoot", "useGatewayRun", "location.search", ".row"] }),
+      reportUi(artifact),
+    );
     expect(verdict.passed).toBe(true);
   }, 60_000);
 });
