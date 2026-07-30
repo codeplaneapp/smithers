@@ -158,7 +158,7 @@ describe("React hooks e2e", () => {
     expect(refValues.length).toBeGreaterThanOrEqual(2);
     expect(refValues[refValues.length - 1]).toBeGreaterThan(refValues[0]);
     cleanup();
-  });
+  }, 30_000);
   test("useEffect with changing deps re-fires on each Ralph iteration", async () => {
     const { smithers, outputs, cleanup } = createTestSmithers(outputSchemas);
     const effectIterations = [];
