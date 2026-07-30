@@ -10,7 +10,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { supervisorPollEffect } from "../src/supervisor.js";
-import { buildResumeArgs } from "../src/resume-detached.js";
+import { buildResumeArgs, resumeRunDetached } from "../src/resume-detached.js";
 import {
   BUILTIN_RESUME_CONFIG_KEY,
   buildBuiltinResumeConfig,
@@ -133,6 +133,15 @@ describe("buildResumeArgs", () => {
       "-d",
       "--force",
     ]);
+  });
+});
+
+describe("resumeRunDetached", () => {
+  test("rejects a vanished built-in cwd before spawning or creating its log tree", () => {
+    const cwd = `/tmp/smithers-missing-resume-cwd-${process.pid}-${Date.now()}`;
+    expect(() =>
+      resumeRunDetached({ kind: "builtin", command: "oneshot", args: ["goal", "--cwd", cwd], cwd }, "missing-cwd-run"),
+    ).toThrow(/recorded cwd is unavailable/);
   });
 });
 

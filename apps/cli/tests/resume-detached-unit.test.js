@@ -27,7 +27,7 @@ beforeAll(async () => {
     ...REAL_CHILD_PROCESS,
     spawn(command, args, options) {
       spawnCalls.push({ command, args, options });
-      return { pid: spawnPid, unref() {} };
+      return { pid: spawnPid, once() {}, unref() {} };
     },
     spawnSync,
   }));
@@ -139,9 +139,10 @@ describe("resumeRunDetached", () => {
     expect(call.args).not.toContain("--resume-restore-heartbeat");
   });
 
-  test("returns null when the spawned child exposes no pid", () => {
+  test("fails instead of claiming a detached launch when the child exposes no pid", () => {
     spawnPid = undefined;
-    const pid = resumeModule.resumeRunDetached("workflow.tsx", "run-nopid");
-    expect(pid).toBeNull();
+    expect(() => resumeModule.resumeRunDetached("workflow.tsx", "run-nopid")).toThrow(
+      "Failed to spawn detached resume for run run-nopid",
+    );
   });
 });

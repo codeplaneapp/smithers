@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { closeSync, mkdirSync, openSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildBuiltinRelaunch } from "./resume-target.js";
@@ -70,6 +70,13 @@ export function resumeRunDetached(targetOrWorkflowPath, runId, claim) {
     }
   }
   const cwd = target.cwd;
+  try {
+    if (!statSync(cwd).isDirectory()) {
+      throw new Error("not a directory");
+    }
+  } catch (cause) {
+    throw new Error(`Cannot resume run ${runId}: recorded cwd is unavailable at ${cwd}`, { cause });
+  }
   /** @type {number | null} */
   let logFd = null;
   try {
@@ -86,8 +93,15 @@ export function resumeRunDetached(targetOrWorkflowPath, runId, claim) {
       env: process.env,
       detached: true,
     });
+    // Node reports failures such as ENOENT asynchronously even though pid is
+    // already absent. Install the listener before inspecting pid so the
+    // supervisor never dies from an unhandled ChildProcess error.
+    child.once("error", () => {});
+    if (child.pid === undefined) {
+      throw new Error(`Failed to spawn detached resume for run ${runId}`);
+    }
     child.unref();
-    return child.pid ?? null;
+    return child.pid;
   } finally {
     if (logFd !== null) {
       closeSync(logFd);
