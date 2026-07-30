@@ -31,6 +31,7 @@ const {
   hijackCandidatesOf,
   ptyHijackUrl,
 } = await import("../src/index.ts");
+const { createSingleFlightPoller } = await import("../src/OneshotSurface.tsx");
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -128,6 +129,52 @@ describe("hijack model helpers", () => {
 });
 
 describe("OneshotSurface", () => {
+  test("serializes polls and aborts the outstanding request on disposal", async () => {
+    let calls = 0;
+    let concurrent = 0;
+    let maxConcurrent = 0;
+    let aborted = false;
+    const releases: Array<() => void> = [];
+    const poller = createSingleFlightPoller(async (signal) => {
+      calls += 1;
+      concurrent += 1;
+      maxConcurrent = Math.max(maxConcurrent, concurrent);
+      await new Promise<void>((resolve) => {
+        let active = true;
+        const finish = () => {
+          if (!active) return;
+          active = false;
+          signal.removeEventListener("abort", onAbort);
+          concurrent -= 1;
+          resolve();
+        };
+        const onAbort = () => {
+          aborted = true;
+          finish();
+        };
+        releases.push(finish);
+        signal.addEventListener("abort", onAbort, { once: true });
+      });
+    }, 5);
+
+    poller.setActive(true);
+    poller.pollNow();
+    poller.pollNow();
+    await sleep(10);
+    expect(calls).toBe(1);
+    expect(maxConcurrent).toBe(1);
+
+    releases.shift()?.();
+    await sleep(10);
+    expect(calls).toBe(2);
+    expect(maxConcurrent).toBe(1);
+
+    poller.dispose();
+    await sleep(10);
+    expect(aborted).toBe(true);
+    expect(calls).toBe(2);
+  });
+
   test("shares one hijack-candidate request across duplicate buttons", async () => {
     function CandidateButtons() {
       const [showCompact, setShowCompact] = useState(true);

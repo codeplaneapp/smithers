@@ -124,6 +124,69 @@ type HijackCandidatesStore = {
   subscribe(listener: () => void, live: boolean): () => void;
 };
 
+export type SingleFlightPoller = {
+  pollNow(): void;
+  setActive(active: boolean): void;
+  dispose(): void;
+};
+
+/** Poll only after the previous request settles, and abort it on disposal. */
+export function createSingleFlightPoller(
+  task: (signal: AbortSignal) => Promise<void>,
+  intervalMs: number,
+): SingleFlightPoller {
+  const controller = new RuntimeAbortController();
+  let active = false;
+  let disposed = false;
+  let inflight = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const clearTimer = () => {
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = undefined;
+  };
+  const scheduleNext = () => {
+    if (!active || disposed || inflight || timer) return;
+    timer = setTimeout(() => {
+      timer = undefined;
+      void run();
+    }, intervalMs);
+  };
+  const run = async () => {
+    if (disposed || inflight) return;
+    inflight = true;
+    try {
+      await task(controller.signal);
+    } catch {
+      // Poll failures are transient; the next serialized attempt may recover.
+    } finally {
+      inflight = false;
+      scheduleNext();
+    }
+  };
+
+  return {
+    pollNow() {
+      if (disposed || inflight) return;
+      clearTimer();
+      void run();
+    },
+    setActive(nextActive) {
+      active = nextActive;
+      if (!active) clearTimer();
+      else scheduleNext();
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      active = false;
+      clearTimer();
+      controller.abort();
+    },
+  };
+}
+
 const hijackCandidateStores = new WeakMap<ReturnType<typeof useSmithersGateway>, Map<string, HijackCandidatesStore>>();
 
 function hijackCandidatesStore(gateway: ReturnType<typeof useSmithersGateway>, runId: string): HijackCandidatesStore {
@@ -136,36 +199,29 @@ function hijackCandidatesStore(gateway: ReturnType<typeof useSmithersGateway>, r
   if (existing) return existing;
 
   const listeners = new Set<() => void>();
-  const controller = new RuntimeAbortController();
   let liveSubscribers = 0;
-  let timer: ReturnType<typeof setInterval> | undefined;
   let started = false;
   let disposeTicket: { cancelled: boolean } | undefined;
-  const load = async () => {
+  const poller = createSingleFlightPoller(async (signal) => {
     try {
       const headers = new Headers(gateway.headers);
       if (gateway.token) headers.set("authorization", `Bearer ${gateway.token}`);
       const response = await gateway.fetchImpl(
         `${gateway.baseUrl}/v1/api/runs/${encodeURIComponent(runId)}/hijack-candidates`,
-        { headers, signal: controller.signal },
+        { headers, signal },
       );
       if (!response.ok) return;
       const body: unknown = await response.json();
-      if (!controller.signal.aborted) {
+      if (!signal.aborted) {
         store.candidates = hijackCandidatesOf(body);
         listeners.forEach((listener) => listener());
       }
     } catch {
       // Transient fetch failures just keep the previous candidate view.
     }
-  };
+  }, 5_000);
   const updateTimer = () => {
-    if (liveSubscribers > 0 && !timer) {
-      timer = setInterval(() => void load(), 5_000);
-    } else if (liveSubscribers === 0 && timer) {
-      clearInterval(timer);
-      timer = undefined;
-    }
+    poller.setActive(liveSubscribers > 0);
   };
   const store: HijackCandidatesStore = {
     candidates: EMPTY_HIJACK_CANDIDATES,
@@ -178,7 +234,7 @@ function hijackCandidatesStore(gateway: ReturnType<typeof useSmithersGateway>, r
       if (live) liveSubscribers += 1;
       if (!started) {
         started = true;
-        void load();
+        poller.pollNow();
       }
       updateTimer();
       let active = true;
@@ -193,7 +249,7 @@ function hijackCandidatesStore(gateway: ReturnType<typeof useSmithersGateway>, r
         disposeTicket = ticket;
         queueMicrotask(() => {
           if (ticket.cancelled || listeners.size > 0) return;
-          controller.abort();
+          poller.dispose();
           updateTimer();
           stores!.delete(runId);
         });
@@ -402,13 +458,14 @@ async function postOneshotControl(
   runId: string,
   action: "attach" | "steer" | "restart",
   body: Record<string, unknown> = {},
+  signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
   const headers = new Headers(gateway.headers);
   headers.set("content-type", "application/json");
   if (gateway.token) headers.set("authorization", `Bearer ${gateway.token}`);
   const response = await gateway.fetchImpl(
     `${gateway.baseUrl}/v1/api/runs/${encodeURIComponent(runId)}/oneshot-monitor/${action}`,
-    { method: "POST", headers, body: JSON.stringify(body) },
+    { method: "POST", headers, body: JSON.stringify(body), signal },
   );
   const payload = (await response.json().catch(() => null)) as {
     ok?: boolean;
@@ -711,21 +768,17 @@ export function OneshotSurface({
 
   useEffect(() => {
     if (!runId || !running || !oneshotControls) return;
-    let stopped = false;
-    const attach = async () => {
+    const poller = createSingleFlightPoller(async (signal) => {
       try {
-        const result = await postOneshotControl(gateway, runId, "attach");
-        if (!stopped) setNarratorAvailable(result.narrator !== false);
+        const result = await postOneshotControl(gateway, runId, "attach", {}, signal);
+        if (!signal.aborted) setNarratorAvailable(result.narrator !== false);
       } catch {
-        if (!stopped) setNarratorAvailable(false);
+        if (!signal.aborted) setNarratorAvailable(false);
       }
-    };
-    void attach();
-    const timer = setInterval(() => void attach(), 15_000);
-    return () => {
-      stopped = true;
-      clearInterval(timer);
-    };
+    }, 15_000);
+    poller.setActive(true);
+    poller.pollNow();
+    return () => poller.dispose();
   }, [gateway, runId, running, oneshotControls]);
 
   useEffect(() => {
