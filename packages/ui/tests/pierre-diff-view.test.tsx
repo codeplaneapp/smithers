@@ -47,6 +47,8 @@ index 3333333..4444444 100644
 +const second = 2;
 `;
 
+const originalMutationObserver = globalThis.MutationObserver;
+
 describe("theme + layout mapping", () => {
   test("mode maps onto the DiffsThemeNames GitHub themes", () => {
     expect(diffsThemeForMode("light")).toBe("github-light");
@@ -152,6 +154,7 @@ describe("PierreDiffView live render (happy-dom)", () => {
     container = undefined;
     document.querySelectorAll(`style[${SMITHERS_UI_STYLE_ATTR}]`).forEach((el) => el.remove());
     document.documentElement.removeAttribute("data-theme");
+    globalThis.MutationObserver = originalMutationObserver;
   });
 
   async function mount(element: ReactElement): Promise<HTMLElement> {
@@ -182,23 +185,29 @@ describe("PierreDiffView live render (happy-dom)", () => {
   }
 
   test("the default Pierre mode follows root data-theme toggles", async () => {
+    let notifyThemeChange: (() => void) | undefined;
+    globalThis.MutationObserver = class {
+      constructor(callback: MutationCallback) {
+        notifyThemeChange = () => callback([], this as unknown as MutationObserver);
+      }
+      disconnect() {}
+      observe() {}
+      takeRecords(): MutationRecord[] {
+        return [];
+      }
+    } as unknown as typeof MutationObserver;
+
     document.documentElement.setAttribute("data-theme", "light");
     const el = await mount(<PierreDiffView patch={PATCH} />);
     const adapter = () => el.querySelector('[data-slot="pierre-diff-view"]');
     expect(adapter()?.getAttribute("data-theme-mode")).toBe("light");
+    expect(notifyThemeChange).toBeDefined();
 
     await act(async () => {
       document.documentElement.setAttribute("data-theme", "dark");
+      notifyThemeChange?.();
       await Promise.resolve();
     });
-    for (let i = 0; i < 80 && adapter()?.getAttribute("data-theme-mode") !== "dark"; i += 1) {
-      await act(async () => {
-        // Happy DOM can defer or drop MutationObserver delivery under CI load.
-        // Re-stamping queues another record while we wait for React to commit it.
-        document.documentElement.setAttribute("data-theme", "dark");
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      });
-    }
     expect(adapter()?.getAttribute("data-theme-mode")).toBe("dark");
   });
 });
