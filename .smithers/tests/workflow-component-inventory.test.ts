@@ -10,6 +10,25 @@ const packRoot = join(import.meta.dir, "..");
 const repoRoot = join(packRoot, "..");
 const workflowRoot = join(packRoot, "workflows");
 const componentRoot = join(packRoot, "components");
+const federationWorkflows = [
+  "federation-approval-polish-hardening.tsx",
+  "federation-architecture-fix.tsx",
+  "federation-artifact-edge-sync.tsx",
+  "federation-dynamic-read-hardening.tsx",
+  "federation-final-audit-hardening.tsx",
+  "federation-init-pack-support-hardening.tsx",
+  "federation-luna-residual-hardening-2.tsx",
+  "federation-manifest-hardening.tsx",
+  "federation-materialization-inventory-hardening.tsx",
+  "federation-pack-boundary-fix.tsx",
+  "federation-release-plan-fix.tsx",
+  "federation-standalone-manifest-hardening.tsx",
+  "federation-static-import-audit.tsx",
+  "federation-static-import-hardening.tsx",
+  "federation-workflow-hardening-2.tsx",
+  "smithers-repo-federation.tsx",
+  "sol-issue-train-pinned.tsx",
+] as const;
 
 const slash = (value: string) => value.split(sep).join("/");
 const sorted = (values: Iterable<string>) => [...values].sort((a, b) => a.localeCompare(b));
@@ -303,6 +322,17 @@ function assertOwnedExactlyOnce(physical: string[], owners: Record<string, reado
 }
 
 describe("shipped workflow and component test ownership", () => {
+  test("every federation workflow loads and exposes its initial graph", async () => {
+    for (const file of federationWorkflows) {
+      const workflowPath = join(workflowRoot, file);
+      const workflow = (await import(workflowPath)).default;
+      expect(workflow, `missing default export for ${file}`).toBeDefined();
+      const input = workflow.inputSchema?.parse({}) ?? {};
+      const frame = await renderWorkflow(workflow, { workflowPath, input });
+      expect(frame.tasks.length, `empty initial graph for ${file}`).toBeGreaterThan(0);
+    }
+  });
+
   test("CLI discovery and physical workflow entries agree exactly", () => {
     const home = mkdtempSync(join(tmpdir(), "smithers-inventory-home-"));
     try {

@@ -54,7 +54,7 @@ function initWorkflowPack(repo = createTempRepo()) {
   return { repo, env };
 }
 test(
-  "curated init pack discovers only the public authoring workflows",
+  "curated init pack discovers every public workflow",
   () => {
     const { repo, env } = initWorkflowPack();
     const result = runSmithers(["workflow", "list"], {
