@@ -225,7 +225,7 @@ function App() {
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? runs[0]?.runId;
   const activeRun = runs.find((r) => r.runId === activeRunId);
   const runDetail = useGatewayRun(activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const events = stream.events ?? [];
 
   // The run-completed frame in the event stream is the authoritative terminal

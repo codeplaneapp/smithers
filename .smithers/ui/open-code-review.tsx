@@ -273,7 +273,7 @@ function App() {
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? runs[0]?.runId;
   const activeRun = runs.find((run) => run.runId === activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const targetOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "resolve-target", iteration: 0 });
   const previewOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "preview", iteration: 0 });
   const reviewOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "review", iteration: 0 });

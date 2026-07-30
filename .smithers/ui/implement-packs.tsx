@@ -123,7 +123,7 @@ function App() {
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? runs[0]?.runId;
   const activeRun = runs.find((r) => r.runId === activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
 
   // Fixed phase list -> fixed hook order across renders.
   const p1i = useGatewayNodeOutput({ runId: activeRunId, nodeId: "p1:implement" });

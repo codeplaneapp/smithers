@@ -191,7 +191,7 @@ export function ReviewApp() {
   // so a deep ?runId= link or an older run still resolves its real status.
   const activeRunDetail = useGatewayRun(activeRunId);
   const activeRun = (activeRunDetail.data as RunSummary | undefined) ?? reviewRuns.find((r) => r.runId === activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const eventCount = (stream.events ?? []).length;
 
   // Probe a fixed set of panelist reviewer lanes (Panel node ids review-panelist-0 .. review-panelist-N).

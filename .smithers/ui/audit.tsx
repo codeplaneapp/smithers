@@ -187,7 +187,7 @@ function App() {
   const activeRun = auditRuns.find((r) => r.runId === activeRunId);
 
   const runQuery = useGatewayRun(activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const mergeOutput = useGatewayNodeOutput({ runId: activeRunId, nodeId: "audit:merge", iteration: 0 });
 
   const groups = useMemo(() => deriveGroups(runQuery.data), [runQuery.data]);

@@ -149,7 +149,7 @@ function App() {
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? featureRuns[0]?.runId;
   const activeRun = featureRuns.find((r) => r.runId === activeRunId);
 
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const events = stream.events ?? [];
   const eventNames = useMemo(() => events.map((e) => e.event), [events]);
 

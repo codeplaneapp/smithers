@@ -280,7 +280,7 @@ function App() {
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? debugRuns[0]?.runId;
   const activeRun = debugRuns.find((r) => r.runId === activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const eventCount = (stream.events ?? []).length;
 
   async function refresh() {

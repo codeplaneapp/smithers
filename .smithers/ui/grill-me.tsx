@@ -127,7 +127,7 @@ function App() {
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? grillRuns[0]?.runId;
   const activeRun = grillRuns.find((r) => r.runId === activeRunId);
   const runDetail = useGatewayRun(activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
 
   // Hooks cannot run in a loop, so fetch a fixed window of iterations.
   // Iteration 0 is the primary output region per the deep-link contract.

@@ -207,7 +207,7 @@ function App() {
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? runs[0]?.runId;
   const activeRun = runs.find((r) => r.runId === activeRunId);
 
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const researchOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "research", iteration: 0 });
   // Plan and review are now synthesized panels — read the moderator nodes.
   const planOut = useGatewayNodeOutput({ runId: activeRunId, nodeId: "plan-moderator", iteration: 0 });

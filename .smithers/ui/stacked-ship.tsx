@@ -213,7 +213,7 @@ function StackedShipApp() {
   const activeRunDetail = useGatewayRun(activeRunId);
   const activeRun =
     (activeRunDetail.data as RunSummary | undefined) ?? shipRuns.find((run) => run.runId === activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const finished = finishedNodeCount((stream.events ?? []) as unknown[]);
 
   const planQuery = useGatewayNodeOutput({ runId: activeRunId, nodeId: "plan", iteration: 0 });

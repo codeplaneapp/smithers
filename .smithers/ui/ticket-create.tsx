@@ -118,7 +118,7 @@ function App() {
   );
   const activeRunId = selectedRunId ?? runIdFromUrl() ?? ticketRuns[0]?.runId;
   const activeRun = ticketRuns.find((r) => r.runId === activeRunId);
-  const stream = useGatewayRunEvents(activeRunId, { afterSeq: 0 });
+  const stream = useGatewayRunEvents(activeRunId, { afterSeq: undefined });
   const ticketOutput = useGatewayNodeOutput({ runId: activeRunId, nodeId: "ticket", iteration: 0 });
   const ticket = useMemo(() => extractTicket(ticketOutput.data), [ticketOutput.data]);
   const requestText = inputPrompt(activeRun);
