@@ -54,6 +54,15 @@
       "import": "./src/image-generation/createImageGenerationTool.js",
       "default": "./src/image-generation/createImageGenerationTool.js"
     },
+    "./nanocodex/checkpoint": null,
+    "./nanocodex/process": null,
+    "./nanocodex/protocol": null,
+    "./nanocodex/protocol-types": null,
+    "./nanocodex/checkpoint.js": null,
+    "./nanocodex/process.js": null,
+    "./nanocodex/protocol.js": null,
+    "./nanocodex/protocol-types.js": null,
+    "./nanocodex/*": null,
     "./*": {
       "types": "./src/index.d.ts",
       "import": "./src/*.js",
@@ -61,7 +70,8 @@
     }
   },
   "files": [
-    "src/"
+    "src/",
+    "internal/"
   ],
   "scripts": {
     "test": "bun test --timeout=60000 --max-concurrency=1 tests",

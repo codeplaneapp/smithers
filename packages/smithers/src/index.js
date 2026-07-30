@@ -101,6 +101,11 @@
  */
 /** @typedef {import("@smthrs/agents").HermesCliAgentOptions} HermesCliAgentOptions */
 /** @typedef {import("@smthrs/agents").OpenClawAgentOptions} OpenClawAgentOptions */
+/** @typedef {import("@smthrs/agents").NanocodexAgentOptions} NanocodexAgentOptions */
+/** @typedef {import("@smthrs/agents").NanocodexGenerateOptions} NanocodexGenerateOptions */
+/** @typedef {import("@smthrs/agents").NanocodexAuth} NanocodexAuth */
+/** @typedef {import("@smthrs/agents").NanocodexThinking} NanocodexThinking */
+/** @typedef {import("@smthrs/agents").NanocodexReasoningMode} NanocodexReasoningMode */
 /** @typedef {import("@smthrs/openapi").OpenApiAuth} OpenApiAuth */
 /** @typedef {import("@smthrs/openapi").OpenApiSpec} OpenApiSpec */
 /** @typedef {import("@smthrs/openapi").OpenApiToolsOptions} OpenApiToolsOptions */
@@ -345,6 +350,7 @@ export {
   CodexAgent,
   CursorAgent,
   GeminiAgent,
+  NanocodexAgent,
   PiAgent,
   OmpAgent,
   createOmpCapabilityRegistry,

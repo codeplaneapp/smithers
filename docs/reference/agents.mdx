@@ -9,21 +9,23 @@ class in `packages/agents` satisfies one interface, [`AgentLike`](#agentlike), s
 they are interchangeable wherever a component takes an `agent` prop, including
 [`<Task>`](/components/task).
 
-There are two families. **SDK agents** wrap the [AI SDK](https://ai-sdk.dev) and
+There are three families. **SDK agents** wrap the [AI SDK](https://ai-sdk.dev) and
 bill a provider over HTTP; they take an `Options` object and a model id. **CLI
 agents** spawn a vendor's local command-line tool and share
-[`BaseCliAgentOptions`](#base-cli-options). Two helpers round out the surface:
+[`BaseCliAgentOptions`](#base-cli-options). The native `NanocodexAgent` launches
+one external, pinned stock-agent bridge worker per turn. Two helpers round out the surface:
 `createHttpTool` builds an ad-hoc REST tool, and `hashCapabilityRegistry`
 fingerprints an agent's capabilities for cache keys.
 
 ```ts
 import {
   CodexAgent,
+  NanocodexAgent,
   OpenAIAgent,
   createHttpTool,
   hashCapabilityRegistry,
 } from "smthrs";
-import type { AgentLike, OpenAIAgentOptions } from "smthrs";
+import type { AgentLike, NanocodexAgentOptions, OpenAIAgentOptions } from "smthrs";
 ```
 
 <Note>
@@ -470,6 +472,60 @@ emits `--model` / `--provider` flags. See
 [`HermesCliAgentOptions`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/HermesCliAgentOptions.ts).
 
 **Source** [`CodexAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/CodexAgent.js) · [`ClaudeCodeAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/ClaudeCodeAgent.js) · [`BaseCliAgentOptions.ts`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/BaseCliAgent/BaseCliAgentOptions.ts) · **Tests** [`codex-support.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/codex-support.test.js) · [`claude-support.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/claude-support.test.js) · **See also** [CLI Agents](/integrations/cli-agents), [Agents overview](/agents/overview)
+
+## NanocodexAgent
+
+Runs stock Nanocodex 0.3.0 through the separately installed, pinned
+`smithers-nanocodex` v0.0.1 bridge. It starts one fresh `serve` worker per
+`generate()` call, supports same-canonical-workspace resume checkpoints, and
+does not reuse a daemon or bridge session. Linux x64, glibc 2.35 or newer, and a
+working Bubblewrap PID namespace are required.
+
+```tsx
+import { NanocodexAgent } from "smithers-orchestrator";
+
+const worker = new NanocodexAgent({
+  binary: "/usr/local/bin/smithers-nanocodex",
+  auth: { mode: "api-key-env", environmentVariable: "OPENAI_API_KEY" },
+  thinking: "high",
+});
+```
+
+<ParamField path="options" type="NanocodexAgentOptions">
+  <Expandable title="NanocodexAgentOptions">
+    <ParamField path="binary" type="string" default='"smithers-nanocodex"'>
+      Executable path or command resolved on `PATH`. The binary is external;
+      Smithers never bundles or downloads it at runtime.
+    </ParamField>
+    <ParamField path="cwd" type="string">
+      Absolute workspace fallback. A task `rootDir` takes precedence.
+    </ParamField>
+    <ParamField path="auth" type="NanocodexAuth">
+      API-key environment mode (default `OPENAI_API_KEY`) or managed ChatGPT
+      auth-file mode.
+    </ParamField>
+    <ParamField path="instructions" type="string">
+      Complete replacement instructions, not an append operation.
+    </ParamField>
+    <ParamField path="thinking" type='"none" | "low" | "medium" | "high" | "xhigh" | "max"' />
+    <ParamField path="reasoningMode" type='"standard" | "pro"' />
+    <ParamField path="fastMode" type="boolean" />
+    <ParamField path="env" type="Record<string, string>" />
+    <ParamField path="inheritEnv" type="boolean" default="true" />
+    <ParamField path="timeoutMs" type="number" />
+    <ParamField path="idleTimeoutMs" type="number" />
+    <ParamField path="cancellationGraceMs" type="number" />
+    <ParamField path="maxCheckpointBytes" type="number" />
+  </Expandable>
+</ParamField>
+
+Protocol v1 keeps stock Code Mode and native tools enabled. It rejects
+JavaScript tools, MCP, subagents, steering, custom endpoints, Code Mode
+disablement, checkpoint fork, and workspace relocation. Checkpoints are opaque
+secrets. Bubblewrap provides authoritative PID cleanup, not filesystem,
+network, device, or credential isolation.
+
+**Source** [`NanocodexAgent.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/src/NanocodexAgent.js) · **Tests** [`nanocodex-agent.test.js`](https://github.com/smithersai/smithers/blob/main/packages/agents/tests/nanocodex-agent.test.js) · **See also** [Nanocodex integration](/integrations/nanocodex), [`NanocodexAgentOptions`](/reference/types)
 
 ## createHttpTool
 

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "smithers-nanocodex/v0.0.1/x86_64-unknown-linux-gnu",
+  "status": "qualified",
+  "release": {
+    "version": "0.0.1",
+    "tag": "v0.0.1",
+    "tagCommit": "56d8b4fd54bf14e9f2874e5a010b8e301f8f695b",
+    "publishedAt": "2026-07-29T23:57:32Z",
+    "url": "https://github.com/N0xMare/smithers-nanocodex/releases/tag/v0.0.1"
+  },
+  "artifact": {
+    "target": "x86_64-unknown-linux-gnu",
+    "fileName": "smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu.tar.gz",
+    "downloadUrl": "https://github.com/N0xMare/smithers-nanocodex/releases/download/v0.0.1/smithers-nanocodex-v0.0.1-x86_64-unknown-linux-gnu.tar.gz",
+    "sha256": "0e14425b3e0af5c3b1663b4db2a15302cbaa7c03e917babd841ae7fde2a1ab73",
+    "sizeBytes": 6286271,
+    "minimumGlibcVersion": "2.35"
+  },
+  "contract": {
+    "bridgeVersion": "0.0.1",
+    "nanocodexVersion": "0.3.0",
+    "protocol": "smithers.nanocodex/1",
+    "checkpointCodec": "nanocodex.session-snapshot/1",
+    "snapshotVersion": 1,
+    "policyFingerprint": "smithers.nanocodex.policy-fingerprint/1"
+  },
+  "qualification": {
+    "date": "2026-07-29",
+    "bridgeArtifact": true,
+    "smithersAdapter": false,
+    "checks": [
+      "published archive checksum, version, capabilities, and file layout",
+      "Ubuntu 22.04 glibc compatibility smoke test",
+      "exact Bubblewrap PID-containment profile",
+      "managed-ChatGPT turn using stock workspace tools",
+      "snapshot resume in a second fresh bridge process",
+      "detached descendant cleanup after bridge exit"
+    ]
+  }
+}

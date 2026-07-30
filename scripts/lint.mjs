@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Cross-platform `oxlint` runner.
 //
-// The lint scope is every `packages/*/src` and `packages/*/tests` directory.
+// The lint scope is every `packages/*/{src,internal,tests}` directory.
 // We resolve that list here in JS rather than via a shell glob: cmd.exe and
 // PowerShell do not expand `packages/*/src` the way bash does, and oxlint does
 // not expand globs in its path arguments either — so on Windows the old
@@ -23,7 +23,7 @@ const oxlintBin = join(dirname(require.resolve("oxlint/package.json")), "bin", "
 const packagesDir = join(root, "packages");
 const targets = [];
 for (const name of readdirSync(packagesDir).sort()) {
-  for (const sub of ["src", "tests"]) {
+  for (const sub of ["src", "internal", "tests"]) {
     if (existsSync(join(packagesDir, name, sub))) {
       // Forward-slash relative paths: oxlint accepts them on every OS and
       // they match how --ignore-path/.gitignore patterns are anchored.
@@ -33,7 +33,7 @@ for (const name of readdirSync(packagesDir).sort()) {
 }
 
 if (targets.length === 0) {
-  console.error("lint: found no packages/*/{src,tests} directories to lint");
+  console.error("lint: found no packages/*/{src,internal,tests} directories to lint");
   process.exit(1);
 }
 

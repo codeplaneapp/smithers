@@ -38,5 +38,6 @@ export { Timer } from "@smthrs/components";
 export { ClaudeCodeAgent } from "@smthrs/agents/ClaudeCodeAgent";
 export { KimiAgent } from "@smthrs/agents/KimiAgent";
 export { PiAgent } from "@smthrs/agents/PiAgent";
+export { NanocodexAgent } from "@smithers-orchestrator/agents";
 export { createSmithers } from "./create.js";
 export { runWorkflow, renderFrame } from "@smthrs/engine";

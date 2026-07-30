@@ -207,8 +207,8 @@ switch freely. The workflow doesn't change when the model does, so a frontier mo
 plan, a fast model can fan out, and a specialized harness can do the edits.
 
 Agent adapters ship in the box, including `ClaudeCodeAgent`, `CodexAgent`, `CursorAgent`, `PiAgent`,
-`AntigravityAgent`, `GeminiAgent`, and `AnthropicAgent` / `OpenAIAgent` for any AI SDK
-model (with tools, structured output, and MCP). The same `<Sandbox>` primitive runs an
+[`NanocodexAgent`](https://smithers.sh/integrations/nanocodex), `AntigravityAgent`, `GeminiAgent`, and `AnthropicAgent` / `OpenAIAgent` for any AI
+SDK model (with tools, structured output, and MCP). The same `<Sandbox>` primitive runs an
 agent in a local hardware-isolated microVM with
 [Microsandbox](https://github.com/superradcompany/microsandbox), through Bubblewrap or
 Docker, or on any backend you implement against `SandboxProvider`.

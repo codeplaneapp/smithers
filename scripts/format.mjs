@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Cross-platform `oxfmt` runner.
 //
-// The format scope is every `packages/*/{src,tests}` directory plus `apps`,
+// The format scope is every `packages/*/{src,internal,tests}` directory plus `apps`,
 // `scripts` and `.smithers` — i.e. the first-party JS/TS we author. Vendored
 // and generated trees (`reference/`, `.opentui_temp/`, `dist/`, build output)
 // are already listed in `.gitignore`, which oxfmt honours by default.
@@ -38,7 +38,7 @@ const targets = [];
 
 const packagesDir = join(root, "packages");
 for (const name of readdirSync(packagesDir).sort()) {
-  for (const sub of ["src", "tests"]) {
+  for (const sub of ["src", "internal", "tests"]) {
     if (existsSync(join(packagesDir, name, sub))) {
       // Forward-slash relative paths: oxfmt accepts them on every OS and they
       // match how .gitignore patterns are anchored.
