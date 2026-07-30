@@ -129,9 +129,9 @@ describe.serial("curated system workflow causal contracts", () => {
         const bundled = seeded.GENERATED_SEEDED_FILES.find(
           (file) => file.path === ".smithers/workflows/init.tsx",
         )!.contents;
-        const first = await runTask(
+        const first = (await runTask(
           task(await render("init.tsx", { force: false, refreshSkills: false, skipInstall: true }), "install-pack"),
-        );
+        )) as { written: number; skipped: number; changed: string[] };
         expect(first).toMatchObject({ skipped: 1, changed: [] });
         const seededFileCount = Number(first.written) + Number(first.skipped);
         expect(seededFileCount).toBeGreaterThan(1);
