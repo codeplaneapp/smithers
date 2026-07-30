@@ -808,8 +808,7 @@ function listWorkspaceTree(workspaceRoot, inputPath) {
     };
   }
   const allNames = readdirSync(resolved.realPath);
-  const names = allNames.slice(0, FILE_TREE_LIMIT);
-  const entries = names
+  const entries = allNames
     .map((name) => {
       try {
         return entryForPath(resolved.root, join(resolved.realPath, name), name);
@@ -822,7 +821,8 @@ function listWorkspaceTree(workspaceRoot, inputPath) {
       if (a.type === "directory" && b.type !== "directory") return -1;
       if (a.type !== "directory" && b.type === "directory") return 1;
       return a.name.localeCompare(b.name);
-    });
+    })
+    .slice(0, FILE_TREE_LIMIT);
   return {
     ok: true,
     root: basename(resolved.root),

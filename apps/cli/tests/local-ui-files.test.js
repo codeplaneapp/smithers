@@ -80,6 +80,27 @@ describe("local UI files API", () => {
     });
   });
 
+  test("sorts large directory trees before truncating them", async () => {
+    const largeDir = join(tempDir, "workspace", "large");
+    mkdirSync(largeDir);
+    for (let index = 1001; index >= 0; index -= 1) {
+      writeFileSync(join(largeDir, `file-${String(index).padStart(4, "0")}.txt`), "");
+    }
+    mkdirSync(join(largeDir, "z-directory"));
+    mkdirSync(join(largeDir, "a-directory"));
+
+    const { response, body } = await get("/api/files/tree?path=large");
+
+    expect(response.status).toBe(200);
+    expect(body.truncated).toBe(true);
+    expect(body.entries).toHaveLength(1000);
+    expect(body.entries.map((entry) => entry.name)).toEqual([
+      "a-directory",
+      "z-directory",
+      ...Array.from({ length: 998 }, (_, index) => `file-${String(index).padStart(4, "0")}.txt`),
+    ]);
+  });
+
   test("rejects file reads with a non-loopback (DNS-rebinding) Host header", async () => {
     const { response } = await getWithHost("/api/files/read?path=README.md", "attacker.example:80");
     expect(response.status).toBe(403);
