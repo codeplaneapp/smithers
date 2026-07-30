@@ -46,7 +46,7 @@ describe("timer runtime", () => {
     const workflow = smithers(() => (
       <Workflow name="timer-duration">
         <Sequence>
-          <Timer id="cooldown" duration="120ms" />
+          <Timer id="cooldown" duration="8s" />
           <Task id="after" output={outputs.out}>
             {{ v: 1 }}
           </Task>
@@ -55,7 +55,7 @@ describe("timer runtime", () => {
     ));
     const first = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(first.status).toBe("waiting-timer");
-    await sleep(180);
+    await sleep(8_100);
     const resumed = await runInTestRoot(workflow, dbPath, {
       input: {},
       runId: first.runId,
@@ -71,7 +71,7 @@ describe("timer runtime", () => {
     expect(types).toContain("TimerFired");
     expect(types).toContain("NodeWaitingTimer");
     cleanup();
-  });
+  }, 30_000);
   test("absolute timer waits, then resumes", async () => {
     const { smithers, outputs, tables, db, dbPath, cleanup } = createTestSmithers({
       out: z.object({ v: z.number() }),
