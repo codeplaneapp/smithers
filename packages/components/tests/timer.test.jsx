@@ -46,7 +46,8 @@ describe("timer runtime", () => {
     const workflow = smithers(() => (
       <Workflow name="timer-duration">
         <Sequence>
-          <Timer id="cooldown" duration="120ms" />
+          {/* Leave startup slack so a slow runner still observes the waiting state. */}
+          <Timer id="cooldown" duration="900ms" />
           <Task id="after" output={outputs.out}>
             {{ v: 1 }}
           </Task>
@@ -55,7 +56,7 @@ describe("timer runtime", () => {
     ));
     const first = await runInTestRoot(workflow, dbPath, { input: {} });
     expect(first.status).toBe("waiting-timer");
-    await sleep(180);
+    await sleep(980);
     const resumed = await runInTestRoot(workflow, dbPath, {
       input: {},
       runId: first.runId,
