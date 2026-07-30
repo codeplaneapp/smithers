@@ -594,6 +594,7 @@ describe("smithers restore", () => {
       target,
       stdout: capture(),
       stderr: capture(),
+      captureCurrent: async () => ({ commitId: "exact-current" }),
       revert: async () => ({ success: false, error: "commit gone" }),
     });
 
@@ -666,6 +667,10 @@ describe("smithers restore", () => {
       target,
       stdout: capture(),
       stderr: capture(),
+      captureCurrent: async () => {
+        events.push("capture");
+        return { commitId: "exact-current" };
+      },
       revert: async () => {
         events.push("revert");
         return { success: true };
@@ -673,7 +678,7 @@ describe("smithers restore", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(events).toEqual(["revert", "transaction:restore-child-work-invalidation"]);
+    expect(events).toEqual(["capture", "revert", "transaction:restore-child-work-invalidation"]);
     expect(resetNodes).toEqual(["sub-a", "sub-b", "sub-b"]);
   });
 
@@ -740,6 +745,7 @@ describe("smithers restore", () => {
       target,
       stdout: capture(),
       stderr: err,
+      captureCurrent: async () => ({ commitId: "exact-current" }),
       revert: async (commitId) => {
         reverted.push(commitId);
         return { success: true };
@@ -747,9 +753,77 @@ describe("smithers restore", () => {
     });
 
     expect(result.exitCode).toBe(1);
-    expect(reverted).toEqual(["target", "before-restore"]);
+    expect(reverted).toEqual(["target", "exact-current"]);
     expect(err.get()).toContain("injected commit failure");
-    expect(err.get()).toContain("pre-restore checkpoint");
+    expect(err.get()).toContain("exact pre-restore snapshot");
+  });
+
+  test("aborts before restore when the exact compensation snapshot cannot be captured", async () => {
+    const target = { ...cps[0], runId: "parent", jjCommitId: "target", createdAtMs: 10 };
+    const child = {
+      ...cps[1],
+      runId: "parent:child:sub:0",
+      nodeId: "child-task",
+      createdAtMs: 20,
+    };
+    const ownerNode = {
+      runId: "parent",
+      nodeId: "sub",
+      iteration: 0,
+      state: "finished",
+      updatedAtMs: 15,
+      outputTable: "",
+    };
+    const reverted = [];
+    const err = capture();
+    const result = await runRestoreOnce({
+      adapter: {
+        async listRunDescendants() {
+          return [
+            { runId: "parent", parentRunId: null, depth: 0 },
+            { runId: child.runId, parentRunId: "parent", depth: 1 },
+          ];
+        },
+        async listWorkspaceCheckpoints(runId) {
+          return runId === "parent" ? [target] : [child];
+        },
+        async listWorkspaceStates() {
+          return [];
+        },
+        async getNode() {
+          return ownerNode;
+        },
+        async getRun(runId) {
+          return runId === "parent" ? { runId, status: "failed" } : null;
+        },
+        async listNodes() {
+          return [ownerNode];
+        },
+        async listAttemptsForRun() {
+          return [];
+        },
+        async listAttempts() {
+          return [];
+        },
+        async withTransaction() {
+          return true;
+        },
+      },
+      runId: "parent",
+      nodeId: "n1",
+      target,
+      stdout: capture(),
+      stderr: err,
+      captureCurrent: async () => null,
+      revert: async (commitId) => {
+        reverted.push(commitId);
+        return { success: true };
+      },
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(reverted).toEqual([]);
+    expect(err.get()).toContain("could not snapshot the current working copy");
   });
 
   test("the timeout and abort signal reach the revert runner", async () => {

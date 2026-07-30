@@ -118,6 +118,58 @@ export function defaultRevert(commitId, cwd, options = {}) {
 }
 
 /**
+ * Force jj to snapshot the exact current working copy and return its immutable
+ * commit id. Kept local to the CLI so restore does not need the platform-bun
+ * Effect runtime merely to execute one bounded subprocess.
+ *
+ * @param {string} cwd
+ * @returns {Promise<{ commitId: string } | null>}
+ */
+export function defaultCaptureCurrent(cwd) {
+  let bin = "jj";
+  try {
+    bin = resolveJjBinary().path || "jj";
+  } catch {
+    bin = "jj";
+  }
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(bin, ["log", "-r", "@", "--no-graph", "-T", "commit_id"], {
+        cwd,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+    } catch {
+      resolve(null);
+      return;
+    }
+    let stdout = "";
+    let settled = false;
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    const settle = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      const escalation = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+      escalation.unref?.();
+      settle(null);
+    }, RESTORE_TIMEOUT_MS);
+    child.on("error", () => settle(null));
+    child.on("close", (code) => {
+      const commitId = stdout.trim();
+      settle(code === 0 && /^[0-9a-f]+$/i.test(commitId) ? { commitId } : null);
+    });
+  });
+}
+
+/**
  * A durability checkpoint row as returned by `listWorkspaceCheckpoints`.
  * @typedef {{
  *   nodeId: string,
@@ -311,12 +363,14 @@ async function commitNewerChildWorkInvalidation(adapter, effects) {
  *   timeoutMs?: number,
  *   signal?: AbortSignal,
  *   revert?: (commitId: string, cwd: string, options?: { timeoutMs?: number, signal?: AbortSignal }) => Promise<{ success: boolean, error?: string }>,
+ *   captureCurrent?: (cwd: string) => Promise<{ commitId: string } | null>,
  * }} opts
  * @returns {Promise<{ exitCode: number }>}
  */
 export async function runRestoreOnce(opts) {
   const { adapter, runId, nodeId, iteration, seq, stdout, stderr } = opts;
   const revert = opts.revert ?? defaultRevert;
+  const captureCurrent = opts.captureCurrent ?? defaultCaptureCurrent;
 
   // Reuse a preselected target when the caller already picked one (the
   // semantic tool reports it), so we never re-list and risk selecting a
@@ -361,9 +415,14 @@ export async function runRestoreOnce(opts) {
     stderr.write(`Restore invalidation failed: ${stagedInvalidation.error ?? "unknown error"}\n`);
     return { exitCode: 1 };
   }
-  if (stagedInvalidation.effects.length > 0 && !invalidationPlan.recoveryCommitId) {
-    stderr.write("Restore invalidation failed: no pre-restore VCS checkpoint is available for compensation\n");
-    return { exitCode: 1 };
+  let compensationCommitId;
+  if (stagedInvalidation.effects.length > 0) {
+    const currentSnapshot = await captureCurrent(target.jjCwd);
+    compensationCommitId = currentSnapshot?.commitId;
+    if (!compensationCommitId) {
+      stderr.write("Restore invalidation failed: could not snapshot the current working copy for compensation\n");
+      return { exitCode: 1 };
+    }
   }
   const result = await revert(target.jjCommitId, target.jjCwd, { timeoutMs: opts.timeoutMs, signal: opts.signal });
   if (!result?.success) {
@@ -373,8 +432,8 @@ export async function runRestoreOnce(opts) {
   const invalidation = await commitNewerChildWorkInvalidation(adapter, stagedInvalidation.effects);
   if (!invalidation.success) {
     let compensation = { success: true };
-    if (stagedInvalidation.effects.length > 0 && invalidationPlan.recoveryCommitId) {
-      compensation = await revert(invalidationPlan.recoveryCommitId, target.jjCwd, {
+    if (stagedInvalidation.effects.length > 0 && compensationCommitId) {
+      compensation = await revert(compensationCommitId, target.jjCwd, {
         timeoutMs: opts.timeoutMs,
         signal: opts.signal,
       });
@@ -382,7 +441,7 @@ export async function runRestoreOnce(opts) {
     stderr.write(
       `Restore invalidation failed: ${invalidation.error ?? "unknown error"}; ${
         compensation.success
-          ? "working copy restored to its pre-restore checkpoint"
+          ? "working copy restored to its exact pre-restore snapshot"
           : `filesystem compensation failed: ${compensation.error ?? "unknown error"}`
       }\n`,
     );
