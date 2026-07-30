@@ -4887,7 +4887,14 @@ export class SmithersDb {
    */
   insertScorerResult(row) {
     return this.write(`insert scorer result ${row.scorerId}`, () =>
-      this.internalStorage.upsert("_smithers_scorers", row, ["id"]),
+      this.internalStorage.upsert("_smithers_scorers", row, [
+        "runId",
+        "nodeId",
+        "iteration",
+        "attempt",
+        "scorerId",
+        "source",
+      ]),
     );
   }
   /**
