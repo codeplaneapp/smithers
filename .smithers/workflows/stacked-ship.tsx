@@ -1054,6 +1054,8 @@ export default smithers((ctx) => {
   const allGreen = plan !== null && entries.every((entry) => greenNow(entry.slug));
   const allReviewSettled =
     plan !== null && entries.every((entry, index) => (reachable(index) ? reviewSettled(entry.slug) : true));
+  const allLanesApproved =
+    plan !== null && entries.every((entry, index) => (reachable(index) ? decision(entry.slug) === "approved" : true));
 
   const assembleGate = latest<Gate>(ctx, outputs.stshipGate, "assemble");
   const finalRow = latest<z.infer<typeof finalSchema>>(ctx, outputs.stshipFinal, "final-review");
@@ -1082,14 +1084,15 @@ export default smithers((ctx) => {
     };
   });
 
-  const pushGateReady = !input.push || (allReviewSettled && rowOk(assembleGate) && finalSettled?.accepted === true);
+  const pushGateReady =
+    !input.push || (allReviewSettled && allLanesApproved && rowOk(assembleGate) && finalSettled?.accepted === true);
   // The summary is the TERMINAL roll-up: it reports per-lane decisions and the
   // approved count, so it must wait for every reachable lane's review to settle
   // (approved, or out of rounds). A requested push never mounts when a lane
   // remains red, so that path also needs the settled-review fallback.
   const summaryReady = input.push
-    ? pushRow !== undefined || (allReviewSettled && (finalSettled !== undefined || !allGreen))
-    : allReviewSettled && (finalSettled !== undefined || !allGreen);
+    ? pushRow !== undefined || (allReviewSettled && (finalSettled !== undefined || !allGreen || !allLanesApproved))
+    : allReviewSettled && (finalSettled !== undefined || !allGreen || !allLanesApproved);
 
   return (
     <Workflow name="stacked-ship">
@@ -1299,12 +1302,12 @@ export default smithers((ctx) => {
 
         {plan && allBuildSettled ? (
           <Sequence>
-            {allGreen ? (
+            {allGreen && allLanesApproved ? (
               <Task id="assemble" output={outputs.stshipGate} timeoutMs={ASSEMBLE_TIMEOUT_MS} continueOnFail>
                 {() => runAssemble({ key, plan })}
               </Task>
             ) : null}
-            {assembleGate ? (
+            {allLanesApproved && assembleGate ? (
               <Task
                 id="final-review"
                 output={outputs.stshipFinal}
@@ -1317,7 +1320,7 @@ export default smithers((ctx) => {
                 {finalReviewPrompt({ plan, assembleGate, specPath: input.specPath })}
               </Task>
             ) : null}
-            {assembleGate ? (
+            {allLanesApproved && assembleGate ? (
               <Task id="final-review-settled" output={outputs.stshipFinalSettled}>
                 {{
                   status: finalRow?.status ?? "failed",

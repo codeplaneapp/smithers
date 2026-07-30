@@ -10,9 +10,10 @@
 //
 // Quoted verbatim in every route's InvalidRunId message. Engine-minted child
 // ids append one or more deterministic `:child:<node>:<iteration>` segments;
-// node ids may themselves contain colons, so the numeric iteration suffix is
-// the segment boundary (matching parseSubflowChildRunId's final-colon parser).
+// node ids may themselves contain colons, and engine-added nested-loop scopes
+// contain `=` and `,`, so the numeric iteration suffix is the segment boundary
+// (matching parseSubflowChildRunId's final-colon parser).
 // the lookahead keeps both operator and child ids within the DB's 256-char
 // boundary while the first alternative retains the 64-char operator-id cap.
 export const RUN_ID_PATTERN =
-  /^(?=.{1,256}$)(?:[a-z0-9_-][a-z0-9_.-]{0,63}|[a-z0-9_-][a-z0-9_.-]{0,255}(?::child:[A-Za-z0-9_.@:-]+:[0-9]+)+)$/;
+  /^(?=.{1,256}$)(?:[a-z0-9_-][a-z0-9_.-]{0,63}|[a-z0-9_-][a-z0-9_.-]{0,255}(?::child:[A-Za-z0-9_.@,:=-]+:[0-9]+)+)$/;

@@ -411,34 +411,48 @@ describe("graph gating", () => {
 
     const settled = mergeOutputs(base, greenLaneOutputs("two"));
     const mid = await render({}, settled);
-    expect(taskIds(mid)).toContain("assemble");
+    expect(taskIds(mid)).not.toContain("assemble");
     expect(taskIds(mid)).not.toContain("final-review");
     expect(taskIds(mid)).not.toContain("push");
 
-    const assembled = mergeOutputs(settled, { stshipGate: [row("assemble", greenGate("assemble"))] });
+    const approved = mergeOutputs(settled, {
+      stshipDecision: [row("one:approval", APPROVED), row("two:approval", APPROVED)],
+    });
+    const readyToAssemble = await render({}, approved);
+    expect(taskIds(readyToAssemble)).toContain("assemble");
+
+    const assembled = mergeOutputs(approved, { stshipGate: [row("assemble", greenGate("assemble"))] });
     const late = await render({}, assembled);
     expect(taskIds(late)).toContain("final-review");
     expect(task(late, "final-review").agent).toBeDefined();
     expect(taskIds(late)).not.toContain("push");
     expect(taskIds(late)).not.toContain("summary");
 
-    // The terminal roll-up reports per-lane decisions, so a final-review row is
-    // not enough on its own: every reachable lane's review has to settle first.
     const finished = mergeOutputs(assembled, {
       stshipFinal: [row("final-review", FINAL_ROW)],
       stshipFinalSettled: [row("final-review-settled", FINAL_SETTLED_ROW)],
     });
-    const pending = await render({}, finished);
-    expect(taskIds(pending)).not.toContain("summary");
-
-    const end = await render(
-      {},
-      mergeOutputs(finished, {
-        stshipDecision: [row("one:approval", APPROVED), row("two:approval", APPROVED)],
-      }),
-    );
+    const end = await render({}, finished);
     expect(taskIds(end)).toContain("summary");
     expect(taskIds(end)).not.toContain("push");
+  });
+
+  test("assemble and final review never mount against an unapproved rework revision", async () => {
+    const denied = mergeOutputs(
+      { stshipSetup: [row("setup", SETUP_ROW)], stshipPlan: [row("plan", PLAN_OUT)] },
+      greenLaneOutputs("one"),
+      greenLaneOutputs("two"),
+      {
+        stshipDecision: [row("one:approval", DENIED), row("two:approval", APPROVED)],
+        stshipGate: [row("assemble", greenGate("assemble"))],
+        stshipFinal: [row("final-review", FINAL_ROW)],
+        stshipFinalSettled: [row("final-review-settled", FINAL_SETTLED_ROW)],
+      },
+    );
+
+    const frame = await render({}, denied);
+    expect(taskIds(frame)).not.toContain("assemble");
+    expect(taskIds(frame)).not.toContain("final-review");
   });
 
   test("push mounts only when input.push and every lane's review settled", async () => {

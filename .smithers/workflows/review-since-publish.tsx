@@ -94,6 +94,15 @@ export const inputSchema = z.object({
    */
   reviewShards: z.number().int().min(1).max(12).default(1),
   maxFixLanes: z.number().int().min(1).max(8).default(4),
+  /**
+   * Which panel seats to run. Retire a seat whose provider is unavailable
+   * (quota exhausted, credentials revoked); its tasks otherwise park the whole
+   * run on `waiting-quota`.
+   */
+  seats: z
+    .array(z.enum(["sol", "kimi", "fable"]))
+    .min(1)
+    .default(["sol", "kimi", "fable"]),
   /** Severities worth fixing; anything below is reported but not gated on. */
   fixSeverities: z.array(severity).default(["critical", "high", "medium"]),
   /**
@@ -312,6 +321,14 @@ export default smithers((ctx) => {
   const priorSummary = merges.map((m, i) => `- round ${i + 1}: ${m.issues.length} issue(s) — ${m.summary}`).join("\n");
 
   const agentTimeoutMs = ctx.input.agentTimeoutMs ?? 6 * 60 * 60_000;
+  // A run's input is immutable, so `seats` cannot be narrowed on resume. When a
+  // seat's provider dies mid-run (quota exhausted) this env override is the only
+  // way to retire it without discarding the run; it is read fresh every frame.
+  const seatOverride = (process.env.SMITHERS_PANEL_SEATS ?? "")
+    .split(",")
+    .map((seat) => seat.trim())
+    .filter(Boolean);
+  const seats: readonly string[] = seatOverride.length ? seatOverride : (ctx.input.seats ?? ["sol", "kimi", "fable"]);
   const shardCount = Math.max(1, ctx.input.reviewShards ?? 1);
   const changed = [...new Set([...(baseline?.changedFiles ?? []), ...(baseline?.untrackedFiles ?? [])])];
   const shards = Array.from({ length: shardCount }, (_, index) => ({
@@ -344,7 +361,7 @@ export default smithers((ctx) => {
         <Loop id="review-fix" until={clean} maxIterations={maxRounds}>
           <Sequence>
             <Parallel>
-              {PANEL.flatMap((member) =>
+              {PANEL.filter((member) => seats.includes(member.key)).flatMap((member) =>
                 shards.map((shard) => {
                   const nodeId = shardCount > 1 ? `review:${member.key}:${shard.index}` : `review:${member.key}`;
                   return (

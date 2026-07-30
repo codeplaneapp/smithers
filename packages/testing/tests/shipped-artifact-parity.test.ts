@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { sep } from "node:path";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, sep } from "node:path";
+import { build } from "tsup";
 import * as source from "../src/index.ts";
 
 /**
@@ -25,6 +28,26 @@ describe("published artifact parity", () => {
     // would be the SAME module instance; distinctness proves the committed
     // JavaScript genuinely loaded alongside the source.
     expect(shipped as unknown).not.toBe(source as unknown);
+  });
+
+  test("the committed coverWorkflow JavaScript exactly matches a fresh source build", async () => {
+    const outDir = mkdtempSync(join(tmpdir(), "smithers-testing-artifact-"));
+    try {
+      await build({
+        entry: { coverWorkflow: join(import.meta.dir, "../src/coverWorkflow.ts") },
+        format: ["esm"],
+        outDir,
+        clean: false,
+        dts: false,
+        splitting: false,
+        silent: true,
+      });
+      expect(readFileSync(join(outDir, "coverWorkflow.js"), "utf8")).toBe(
+        readFileSync(join(import.meta.dir, "../src/coverWorkflow.js"), "utf8"),
+      );
+    } finally {
+      rmSync(outDir, { recursive: true, force: true });
+    }
   });
 
   test("shipped serializeBoundaryError carries family-specific native fields identically to source", () => {

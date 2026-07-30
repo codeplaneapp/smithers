@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { createSmithers, HumanTask, Parallel, Signal, Timer } from "smithers-orchestrator";
 import { coverWorkflow, expectFullCoverage, fakeAgent, WorkflowCoverageError } from "../src/index.ts";
+import { coverWorkflow as shippedCoverWorkflow } from "@smithers-orchestrator/testing";
 
 const valueSchema = z.object({ value: z.string() });
 
@@ -244,6 +245,22 @@ describe("coverWorkflow", () => {
     const result = await coverWorkflow(workflow);
 
     expect(result.executed).toEqual(["short", "long"]);
+  });
+
+  test("the shipped JavaScript keeps the parallel timer ordering fix", async () => {
+    const build = () => {
+      const { Workflow, smithers } = createSmithers({}, { dbPath: ":memory:" });
+      return smithers(() => (
+        <Workflow name="published-parallel-timer-coverage">
+          <Parallel>
+            <Timer id="short" duration="1s" />
+            <Timer id="long" duration="1h" />
+          </Parallel>
+        </Workflow>
+      ));
+    };
+
+    expect((await shippedCoverWorkflow(build())).executed).toEqual(["short", "long"]);
   });
 
   test("aggregates coverage over multiple inputs", async () => {

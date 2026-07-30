@@ -1,8 +1,7 @@
-import { SmithersError } from "@smithers-orchestrator/errors/SmithersError";
 import { createSubflowResultError } from "@smithers-orchestrator/graph/subflow-result-error";
-import { buildSubflowChildRunId } from "@smithers-orchestrator/graph/subflow-run-lineage";
 import { executeSandbox } from "@smithers-orchestrator/sandbox/execute";
 import { executeChildWorkflow } from "./child-workflow.js";
+import { buildValidatedChildRunId } from "./child-run-id.js";
 import { applyDiffBundle } from "./effect/diff-bundle.js";
 
 /** @typedef {import("@smithers-orchestrator/components/SmithersWorkflow").SmithersWorkflow} SmithersWorkflow */
@@ -21,7 +20,7 @@ const SANDBOX_DEFAULT_TOOL_TIMEOUT_MS = 60_000;
  */
 export function getSubflowChildRunId(task, parentRunId) {
   if (!task.meta?.__subflow) return undefined;
-  return buildSubflowChildRunId(parentRunId, task.nodeId, task.iteration);
+  return buildValidatedChildRunId(parentRunId, task.nodeId, task.iteration);
 }
 
 /**

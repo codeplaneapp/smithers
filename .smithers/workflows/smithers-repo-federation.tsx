@@ -6,6 +6,7 @@
 /** @jsxImportSource smithers-orchestrator */
 import { createSmithers, UI } from "smithers-orchestrator";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
@@ -194,6 +195,7 @@ const laneFixSchema = z.object({
 const lanePushSchema = z.object({
   lane: z.string().default(""),
   pushed: z.boolean().default(false),
+  commitSha: z.string().default(""),
   remote: z.string().nullable().default(null),
   branch: z.string().default(""),
   repo: z.string().nullable().default(null),
@@ -234,6 +236,22 @@ const releaseReadinessSchema = z.object({
   ok: z.boolean().default(false),
   issues: z.array(z.string()).default([]),
   summary: z.string().default(""),
+});
+
+const releaseApprovalBindingSchema = z.object({
+  laneRevisions: z
+    .array(
+      z.object({
+        lane: z.string(),
+        headSha: z.string(),
+        remote: z.string(),
+        branch: z.string(),
+      }),
+    )
+    .default([]),
+  releasePlanSha256: z.string(),
+  coordinatorSha256: z.string(),
+  summary: z.string(),
 });
 
 const executeReleasesSchema = z.object({
@@ -307,6 +325,7 @@ const { Workflow, Task, Sequence, Parallel, Branch, Loop, Ralph, Approval, smith
   updateSmithers: updateSmithersSchema,
   releaseDryRun: releaseDryRunSchema,
   releaseReadiness: releaseReadinessSchema,
+  releaseApprovalBinding: releaseApprovalBindingSchema,
   gatePublish: approvalSchema,
   executeReleases: executeReleasesSchema,
   removalPrs: removalPrsSchema,
@@ -334,6 +353,10 @@ function isSameOrSubpath(parent: string, child: string): boolean {
 
 function gitIn(path: string, args: string[]) {
   return execFileSync("git", args, { cwd: path, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+}
+
+function sha256File(path: string): string {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
 function canonicalGithubRepo(value: string): string | null {
@@ -621,6 +644,7 @@ function pushNewRepoLane(migrationRoot: string, lane: string, githubOrg: string)
   return {
     lane,
     pushed: true,
+    commitSha: gitIn(path, ["rev-parse", "HEAD"]).trim(),
     remote: remoteUrl,
     branch: "main",
     repo: remoteName,
@@ -685,6 +709,7 @@ function pushPrLane(migrationRoot: string, lane: string, existingOwner: string) 
   return {
     lane,
     pushed: true,
+    commitSha: gitIn(path, ["rev-parse", "HEAD"]).trim(),
     remote: remoteUrl,
     branch,
     repo: fullRepo,
@@ -728,7 +753,7 @@ function verifyReleaseClonesReady(
   for (const lane of ALL_LANES) {
     const recorded = lanePushResults.find((result) => result.lane === lane);
     const path = laneDir(rootPath, lane);
-    if (!recorded?.pushed || !recorded.remote || !recorded.branch) {
+    if (!recorded?.pushed || !recorded.commitSha || !recorded.remote || !recorded.branch) {
       issues.push(`${lane}: no complete pushed revision is recorded`);
       continue;
     }
@@ -746,6 +771,9 @@ function verifyReleaseClonesReady(
         issues.push(`${lane}: origin ${actualOrigin || "(missing)"} does not match recorded ${recorded.remote}`);
       }
       const head = gitIn(path, ["rev-parse", "HEAD"]).trim();
+      if (head !== recorded.commitSha) {
+        issues.push(`${lane}: local HEAD ${head} does not match recorded pushed revision ${recorded.commitSha}`);
+      }
       const remoteHead = gitIn(path, ["ls-remote", "--heads", "origin", `refs/heads/${recorded.branch}`])
         .trim()
         .split(/\s+/)[0];
@@ -768,6 +796,88 @@ function verifyReleaseClonesReady(
         ? `All ${ALL_LANES.length} release clones are clean, point at their recorded destinations, and have HEAD pushed to the intended branch.`
         : `${issues.length} release-clone readiness issue(s): ${issues.join("; ")}`,
   };
+}
+
+function captureReleaseApprovalBinding(
+  migrationRoot: string,
+  lanePushResults: Array<z.infer<typeof lanePushSchema>>,
+): z.infer<typeof releaseApprovalBindingSchema> {
+  const readiness = verifyReleaseClonesReady(migrationRoot, lanePushResults);
+  if (!readiness.ok) {
+    throw new Error(`Cannot capture publish approval binding: ${readiness.summary}`);
+  }
+  const rootPath = expandHome(migrationRoot);
+  const planPath = join(rootPath, "artifacts", "release-plan.json");
+  const coordinator = join(rootPath, KERNEL_CLONE_DIR, "scripts", "federation-release.mjs");
+  if (!existsSync(planPath)) throw new Error(`Cannot bind missing release plan ${planPath}`);
+  if (!existsSync(coordinator)) throw new Error(`Cannot bind missing release coordinator ${coordinator}`);
+  const laneRevisions = ALL_LANES.map((lane) => {
+    const recorded = lanePushResults.find((result) => result.lane === lane);
+    if (!recorded?.commitSha || !recorded.remote || !recorded.branch) {
+      throw new Error(`Cannot bind ${lane}: pushed revision metadata is incomplete`);
+    }
+    return {
+      lane,
+      headSha: recorded.commitSha,
+      remote: recorded.remote,
+      branch: recorded.branch,
+    };
+  });
+  const releasePlanSha256 = sha256File(planPath);
+  const coordinatorSha256 = sha256File(coordinator);
+  return {
+    laneRevisions,
+    releasePlanSha256,
+    coordinatorSha256,
+    summary:
+      `Bound ${laneRevisions.length} pushed lane revisions, release plan ${releasePlanSha256.slice(0, 12)}, ` +
+      `and coordinator ${coordinatorSha256.slice(0, 12)}.`,
+  };
+}
+
+function verifyReleaseApprovalBinding(
+  migrationRoot: string,
+  lanePushResults: Array<z.infer<typeof lanePushSchema>>,
+  approved: z.infer<typeof releaseApprovalBindingSchema>,
+): void {
+  const current = captureReleaseApprovalBinding(migrationRoot, lanePushResults);
+  const issues: string[] = [];
+  const approvedByLane = new Map(approved.laneRevisions.map((revision) => [revision.lane, revision]));
+  for (const revision of current.laneRevisions) {
+    const expected = approvedByLane.get(revision.lane);
+    if (!expected) {
+      issues.push(`${revision.lane}: absent from the approved revision set`);
+      continue;
+    }
+    if (
+      expected.headSha !== revision.headSha ||
+      expected.remote !== revision.remote ||
+      expected.branch !== revision.branch
+    ) {
+      issues.push(
+        `${revision.lane}: approved ${expected.headSha}@${expected.remote}/${expected.branch}, ` +
+          `current ${revision.headSha}@${revision.remote}/${revision.branch}`,
+      );
+    }
+  }
+  if (approved.laneRevisions.length !== current.laneRevisions.length) {
+    issues.push(
+      `approved revision count ${approved.laneRevisions.length} does not match current ${current.laneRevisions.length}`,
+    );
+  }
+  if (approved.releasePlanSha256 !== current.releasePlanSha256) {
+    issues.push(
+      `release-plan.json hash changed (${approved.releasePlanSha256} approved, ${current.releasePlanSha256} current)`,
+    );
+  }
+  if (approved.coordinatorSha256 !== current.coordinatorSha256) {
+    issues.push(
+      `release coordinator hash changed (${approved.coordinatorSha256} approved, ${current.coordinatorSha256} current)`,
+    );
+  }
+  if (issues.length) {
+    throw new Error(`executeReleases refused because the approved release binding is stale: ${issues.join("; ")}`);
+  }
 }
 
 type ReleasePlan = {
@@ -802,6 +912,7 @@ function executeReleases(
   githubOrg: string,
   dryRunOk: boolean,
   lanePushResults: Array<z.infer<typeof lanePushSchema>>,
+  approvalBinding: z.infer<typeof releaseApprovalBindingSchema>,
 ) {
   if (!dryRunOk) {
     throw new Error(
@@ -811,10 +922,9 @@ function executeReleases(
   if (!githubOrg) {
     throw new Error("executeReleases refused: githubOrg input is empty — cannot tag/release without an owner.");
   }
-  const readiness = verifyReleaseClonesReady(migrationRoot, lanePushResults);
-  if (!readiness.ok) {
-    throw new Error(`executeReleases refused because release revisions changed after approval: ${readiness.summary}`);
-  }
+  // This check happens before the coordinator, npm, tags, releases, or pushes:
+  // approval authorizes exact bytes, not merely a boolean readiness verdict.
+  verifyReleaseApprovalBinding(migrationRoot, lanePushResults, approvalBinding);
   const rootPath = expandHome(migrationRoot);
   const kernelPath = join(rootPath, KERNEL_CLONE_DIR);
   const planPath = join(rootPath, "artifacts", "release-plan.json");
@@ -1060,6 +1170,9 @@ export default smithers((ctx) => {
   const postFixReleaseDryRun = ctx.latest(outputs.releaseDryRun, "releaseDryRunPostFix");
   const releaseDryRunResult = postFixReleaseDryRun ?? initialReleaseDryRun;
   const releaseReadinessResult = ctx.latest(outputs.releaseReadiness, "releaseReadiness");
+  const releaseApprovalBindingResult = ctx.outputMaybe(outputs.releaseApprovalBinding, {
+    nodeId: "releaseApprovalBinding",
+  });
 
   // The planning-agent Ralph loop must clear BEFORE any destructive
   // publication or merge happens.
@@ -1365,16 +1478,27 @@ export default smithers((ctx) => {
               ) : null}
 
               {finalReady ? (
+                <Task id="releaseApprovalBinding" output={outputs.releaseApprovalBinding} timeoutMs={10 * 60_000}>
+                  {() => captureReleaseApprovalBinding(migrationRoot, lanePushResults)}
+                </Task>
+              ) : null}
+
+              {releaseApprovalBindingResult ? (
                 <Approval
                   id="gate-publish"
                   output={outputs.gatePublish}
                   request={{
                     title: "Publish the 10 federated PUBLIC repos?",
-                    summary: `${postFixReleaseDryRun?.summary ?? ""}\nRevision readiness: ${releaseReadinessResult?.summary ?? ""}\nFinal verification: ${lastFinalVerify?.summary ?? ""}\n\nApproving invokes the validated root release coordinator (publishes every publishable package in the release plan, in package-DAG order) and creates tags + GitHub releases for each of the 10 new repos.`,
+                    summary: `${postFixReleaseDryRun?.summary ?? ""}\nRevision readiness: ${releaseReadinessResult?.summary ?? ""}\nApproval binding: ${releaseApprovalBindingResult.summary}\nFinal verification: ${lastFinalVerify?.summary ?? ""}\n\nApproving invokes the validated root release coordinator (publishes every publishable package in the release plan, in package-DAG order) and creates tags + GitHub releases for each of the 10 new repos.`,
                     metadata: {
                       ok: postFixReleaseDryRun?.ok === true,
                       revisionsReady: releaseReadinessResult?.ok === true,
                       approvable: finalApprovable,
+                      laneHeads: Object.fromEntries(
+                        releaseApprovalBindingResult.laneRevisions.map((revision) => [revision.lane, revision.headSha]),
+                      ),
+                      releasePlanSha256: releaseApprovalBindingResult.releasePlanSha256,
+                      coordinatorSha256: releaseApprovalBindingResult.coordinatorSha256,
                     },
                   }}
                   onDeny="skip"
@@ -1382,8 +1506,24 @@ export default smithers((ctx) => {
               ) : null}
 
               {publishApproved ? (
-                <Task id="executeReleases" output={outputs.executeReleases} timeoutMs={30 * 60_000}>
-                  {() => executeReleases(migrationRoot, githubOrg, finalReady, lanePushResults)}
+                <Task
+                  id="executeReleases"
+                  output={outputs.executeReleases}
+                  bind={[
+                    ctx.prove(outputs.gatePublish, { nodeId: "gate-publish" }),
+                    ctx.prove(outputs.releaseApprovalBinding, { nodeId: "releaseApprovalBinding" }),
+                  ]}
+                  timeoutMs={30 * 60_000}
+                >
+                  {() =>
+                    executeReleases(
+                      migrationRoot,
+                      githubOrg,
+                      finalReady,
+                      lanePushResults,
+                      releaseApprovalBindingResult as z.infer<typeof releaseApprovalBindingSchema>,
+                    )
+                  }
                 </Task>
               ) : null}
 

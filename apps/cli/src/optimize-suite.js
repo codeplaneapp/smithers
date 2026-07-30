@@ -191,13 +191,21 @@ export function buildHeuristicGepaPatches(promptTasks, cases, baselineReport) {
   // Inconclusive cases died on a harness/environment fault: their red says
   // nothing about the prompt, so seeding GEPA from them would rewrite prompts
   // to chase failures no prompt change can fix.
+  const reportResults = Array.isArray(baselineReport.results) ? baselineReport.results : [];
   const failedCaseIds = new Set(
-    (baselineReport.results ?? [])
-      .filter((result) => !result.passed && result.inconclusive !== true)
-      .map((result) => result.caseId),
+    reportResults.filter((result) => !result.passed && result.inconclusive !== true).map((result) => result.caseId),
   );
+  // An absent legacy result list has no case-level signal, so retain the
+  // historical behavior of considering all supplied hints. A real report with
+  // zero conclusive failures is different: every red was a harness failure (or
+  // every case passed), and must produce no prompt patch.
+  const candidateCases =
+    reportResults.length === 0 ? cases : cases.filter((testCase) => failedCaseIds.has(testCase.id));
+  if (candidateCases.length === 0) {
+    return patches;
+  }
   for (const task of promptTasks) {
-    const explicitPatch = cases
+    const explicitPatch = candidateCases
       .map((testCase) =>
         isObject(testCase.metadata?.promptPatches) ? asString(testCase.metadata.promptPatches[task.nodeId]) : null,
       )
@@ -210,8 +218,7 @@ export function buildHeuristicGepaPatches(promptTasks, cases, baselineReport) {
       };
       continue;
     }
-    const hints = cases
-      .filter((testCase) => failedCaseIds.size === 0 || failedCaseIds.has(testCase.id))
+    const hints = candidateCases
       .map((testCase) =>
         isObject(testCase.metadata?.optimizationHints)
           ? asString(testCase.metadata.optimizationHints[task.nodeId])

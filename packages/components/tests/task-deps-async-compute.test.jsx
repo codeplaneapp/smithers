@@ -124,7 +124,7 @@ describe("Task deps + async compute children (#1415)", () => {
     cleanup();
   }, 20_000);
 
-  test("a sync (deps) => value child preserves render-time compatibility", async () => {
+  test("a plain Promise-returning callback is not invoked during render and runs once in the compute bridge", async () => {
     const { smithers, Workflow, Task, outputs, tables, db, cleanup } = createTestSmithers({
       source: z.object({ message: z.string() }),
       derived: z.object({ echoed: z.string() }),
@@ -139,7 +139,7 @@ describe("Task deps + async compute children (#1415)", () => {
         <Task id="derived" output={outputs.derived} deps={{ source: outputs.source }}>
           {(deps) => {
             calls.push(deps.source.message);
-            return { echoed: deps.source.message };
+            return Promise.resolve({ echoed: deps.source.message });
           }}
         </Task>
       </Workflow>
@@ -159,19 +159,55 @@ describe("Task deps + async compute children (#1415)", () => {
       ),
     );
     const derived = frame.tasks.find((task) => task.nodeId === "derived");
-    expect(derived?.kind).toBe("static");
-    expect(derived?.staticPayload).toEqual({ echoed: "still fine" });
-    expect(calls).toEqual(["still fine"]);
+    expect(derived?.kind).toBe("compute");
+    expect(derived?.staticPayload).toBeUndefined();
+    expect(calls).toEqual([]);
 
-    calls.length = 0;
     const result = await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "deps-sync-compute" }));
     expect(result.status).toBe("finished");
     const rows = db.select().from(tables.derived).all();
     expect(rows[0]?.echoed).toBe("still fine");
-    // A workflow may render more than once; compatibility means each render
-    // still evaluates the sync callback before its static task executes.
-    expect(calls.length).toBeGreaterThan(0);
-    expect(new Set(calls)).toEqual(new Set(["still fine"]));
+    expect(calls).toEqual(["still fine"]);
+    cleanup();
+  }, 20_000);
+
+  test("a synchronous deps callback also runs only inside the compute bridge", async () => {
+    const { smithers, Workflow, Task, outputs, cleanup } = createTestSmithers({
+      source: z.object({ message: z.string() }),
+      derived: z.object({ echoed: z.string() }),
+    });
+    let calls = 0;
+    const workflow = smithers(() => (
+      <Workflow name="deps-sync-compute-bridge">
+        <Task id="source" output={outputs.source}>
+          {{ message: "ready" }}
+        </Task>
+        <Task id="derived" output={outputs.derived} deps={{ source: outputs.source }}>
+          {(deps) => {
+            calls += 1;
+            return { echoed: deps.source.message };
+          }}
+        </Task>
+      </Workflow>
+    ));
+    const frame = await Effect.runPromise(
+      renderFrame(
+        workflow,
+        new SmithersCtx({
+          runId: "deps-sync-compute-bridge-frame",
+          iteration: 0,
+          input: {},
+          outputs: {
+            source: [{ runId: "deps-sync-compute-bridge-frame", nodeId: "source", iteration: 0, message: "ready" }],
+          },
+          zodToKeyName: workflow.zodToKeyName,
+        }),
+      ),
+    );
+    expect(frame.tasks.find((task) => task.nodeId === "derived")?.kind).toBe("compute");
+    expect(calls).toBe(0);
+    await Effect.runPromise(runWorkflow(workflow, { input: {}, runId: "deps-sync-compute-bridge" }));
+    expect(calls).toBe(1);
     cleanup();
   }, 20_000);
 });

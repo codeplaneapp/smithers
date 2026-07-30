@@ -123,7 +123,12 @@ describe("oneshot model chain", () => {
       resolveOneshotChain(all, { model: "future-model", agent: "kimi", env: { SMITHERS_CODEX_PAUSED: "0" } })[0],
     ).toEqual({ engine: "kimi", model: "future-model" });
     // kimi-for-coding is OpenCode's provider, not the Kimi CLI.
-    expect(resolveOneshotChain(all, { model: "kimi-for-coding/k3", env: { SMITHERS_CODEX_PAUSED: "0" } })[0]).toEqual({
+    expect(
+      resolveOneshotChain(all, {
+        model: "kimi-for-coding/k3",
+        env: { SMITHERS_CODEX_PAUSED: "0", KIMI_API_KEY: "test" },
+      })[0],
+    ).toEqual({
       engine: "opencode",
       model: "kimi-for-coding/k3",
     });
@@ -132,7 +137,7 @@ describe("oneshot model chain", () => {
 
 describe("oneshot task-aware routing", () => {
   const every = ["codex", "kimi", "claude", "opencode", "pi"].map((id) => availability(id));
-  const env = { SMITHERS_CODEX_PAUSED: "0" };
+  const env = { SMITHERS_CODEX_PAUSED: "0", ANTHROPIC_API_KEY: "test", KIMI_API_KEY: "test" };
 
   test("classifies UI-flavored goals, everything else general", () => {
     expect(classifyOneshotGoal("build a responsive landing page with a hero animation")).toBe("ui");
@@ -201,6 +206,33 @@ describe("oneshot task-aware routing", () => {
     expect(selected.agents[0].opts.model).toBe("kimi-for-coding/k3");
     expect(selected.agents[1].opts.provider).toBe("kimi-coding");
     expect(selected.agents[1].opts.model).toBe("k3");
+  });
+
+  test("does not route provider-specific rungs from provider-agnostic CLI availability", () => {
+    const googleOnly = {
+      SMITHERS_CODEX_PAUSED: "0",
+      GEMINI_API_KEY: "google-only",
+      HOME: temp("smithers-oneshot-provider-capabilities-"),
+    };
+    expect(
+      resolveOneshotChain([availability("opencode"), availability("codex")], {
+        env: googleOnly,
+        goal: "build a responsive landing page",
+      }),
+    ).toEqual([{ engine: "codex", model: "gpt-5.6-sol" }]);
+    expect(() =>
+      resolveOneshotChain([availability("pi")], {
+        env: googleOnly,
+        goal: "build a responsive landing page",
+        agent: "pi",
+      }),
+    ).toThrow("kimi-coding provider is not authenticated");
+    expect(() =>
+      resolveOneshotChain([availability("opencode")], {
+        env: googleOnly,
+        model: "opus",
+      }),
+    ).toThrow("no authenticated provider");
   });
 });
 

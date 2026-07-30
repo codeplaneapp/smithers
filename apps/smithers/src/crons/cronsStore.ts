@@ -48,6 +48,8 @@ type CronsState = {
   pendingDeleteId: string | null;
   /** The dismissable action-error banner text (the Swift actionErrorBanner seam). */
   actionError: string | null;
+  /** Stable workflow/pattern keys with a replacement mutation in flight. */
+  pendingToggleKeys: string[];
   /** The live gateway RPC seam, installed by `CronsBridge` (null pre-mount). */
   rpc: CronRpc | null;
   select: (id: string) => void;
@@ -74,6 +76,7 @@ export const useCronsStore = create<CronsState>((set, get) => ({
   draftWorkflowPath: "",
   pendingDeleteId: null,
   actionError: null,
+  pendingToggleKeys: [],
   rpc: null,
 
   select: (id) => set({ selectedId: id }),
@@ -132,14 +135,16 @@ export const useCronsStore = create<CronsState>((set, get) => ({
   },
 
   toggle: (id) => {
-    const { crons, rpc } = get();
+    const { crons, pendingToggleKeys, rpc } = get();
     const target = crons.find((cron) => cron.id === id);
     if (!target || !rpc) return;
+    const toggleKey = `${target.workflowPath}\0${target.pattern}`;
+    if (pendingToggleKeys.includes(toggleKey)) return;
     const willEnable = !target.enabled;
 
     // Optimistic in-place flip; the gateway has no enable/disable RPC, so the
     // real change is a recreate (flipped `enabled`) then a drop of the old id.
-    set({ crons: toggleCron(crons, id) });
+    set({ crons: toggleCron(crons, id), pendingToggleKeys: [...pendingToggleKeys, toggleKey] });
 
     // CREATE-FIRST is data-loss safe, but the toggle is not complete until the
     // old row is gone. In particular, a failed enabled→disabled delete leaves
@@ -189,7 +194,11 @@ export const useCronsStore = create<CronsState>((set, get) => ({
       } catch (error) {
         set({ actionError: `Trigger changed, but refresh failed: ${errorText(error)}` });
       }
-    })();
+    })().finally(() => {
+      set((state) => ({
+        pendingToggleKeys: state.pendingToggleKeys.filter((pendingKey) => pendingKey !== toggleKey),
+      }));
+    });
   },
 
   requestDelete: (id) => set({ pendingDeleteId: id }),

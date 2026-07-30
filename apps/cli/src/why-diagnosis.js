@@ -1117,11 +1117,25 @@ export function diagnoseRunEffect(adapter, runId, nowMs = Date.now()) {
         lastFrame: lastFrame,
         nowMs,
       });
-      const childDiagnoses = yield* Effect.all(
+      const childDiagnoses = (yield* Effect.all(
         (descendants ?? [])
           .filter((descendant) => descendant.depth === 1)
-          .map((descendant) => diagnoseRunEffect(adapter, descendant.runId, nowMs)),
-      );
+          .map((descendant) =>
+            Effect.gen(function* () {
+              const childRun = yield* adapter.getRunEffect(descendant.runId);
+              try {
+                const config = JSON.parse(childRun?.configJson ?? "{}");
+                if (config?.annotations?.smithersMonitorFor === runId || config?.smithersMonitorFor === runId) {
+                  return null;
+                }
+              } catch {
+                // Malformed historical config is diagnosed as an ordinary
+                // child; never hide a blocker without a valid marker.
+              }
+              return yield* diagnoseRunEffect(adapter, descendant.runId, nowMs);
+            }),
+          ),
+      )).filter(Boolean);
       for (const child of childDiagnoses) {
         for (const blocker of child.blockers) {
           diagnosis.blockers.push({

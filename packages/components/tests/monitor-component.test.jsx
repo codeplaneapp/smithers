@@ -81,6 +81,14 @@ describe("<Monitor> classify → route → heal", () => {
     expect(ids).not.toContain("monitor-stalled");
   });
 
+  test("a wedged node with a live owner escalates instead of issuing a retry", async () => {
+    const { ids } = await render(monitor(), {
+      outputs: sample({ condition: "wedged-node", ownerActive: true }),
+    });
+    expect(ids).toContain("monitor-escalate-wedged-node");
+    expect(ids).not.toContain("monitor-wedged-node");
+  });
+
   test("wedged-node heals by default with the exact reset command", async () => {
     const { graph, ids } = await render(monitor(), { outputs: sample({ condition: "wedged-node" }) });
     expect(ids).toContain("monitor-wedged-node");

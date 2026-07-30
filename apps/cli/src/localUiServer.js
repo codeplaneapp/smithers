@@ -92,10 +92,40 @@ export function bundleIsFresh(distDir, appDir) {
   try {
     const appPackage = JSON.parse(readFileSync(join(appDir, "package.json"), "utf8"));
     const requireFromApp = createRequire(join(appDir, "package.json"));
+    const visited = new Set();
+    const visitWorkspaceDependency = (dependencyDir) => {
+      let canonicalDir;
+      try {
+        canonicalDir = realpathSync(dependencyDir);
+      } catch {
+        canonicalDir = dependencyDir;
+      }
+      if (visited.has(canonicalDir)) return;
+      visited.add(canonicalDir);
+      const manifestPath = join(canonicalDir, "package.json");
+      if (!existsSync(manifestPath)) return;
+      const manifestStat = statSync(manifestPath);
+      if (manifestStat.mtimeMs > newest) newest = manifestStat.mtimeMs;
+      walk(join(canonicalDir, "src"));
+      let dependencyPackage;
+      try {
+        dependencyPackage = JSON.parse(readFileSync(manifestPath, "utf8"));
+      } catch {
+        return;
+      }
+      const requireFromDependency = createRequire(manifestPath);
+      for (const name of Object.keys(dependencyPackage.dependencies ?? {})) {
+        if (!name.startsWith("@smithers-orchestrator/")) continue;
+        const transitiveDir =
+          resolveDependencyDir(requireFromDependency, canonicalDir, name) ??
+          resolveDependencyDir(requireFromApp, appDir, name);
+        if (transitiveDir) visitWorkspaceDependency(transitiveDir);
+      }
+    };
     for (const name of Object.keys(appPackage.dependencies ?? {})) {
       if (!name.startsWith("@smithers-orchestrator/")) continue;
       const dependencyDir = resolveDependencyDir(requireFromApp, appDir, name);
-      if (dependencyDir) walk(join(dependencyDir, "src"));
+      if (dependencyDir) visitWorkspaceDependency(dependencyDir);
     }
   } catch {
     // A missing or malformed package manifest is handled by the build itself.

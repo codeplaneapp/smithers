@@ -155,8 +155,8 @@ function makeEmptyEffectStorage() {
       throw new Error(`unexpected queryAll: ${sql}`);
     },
     queryAllRaw: async (sql, params) => {
-      if (sql.includes("FROM _smithers_runs")) {
-        return [{ parent_run_id: null, config_json: null }];
+      if (sql.includes("FROM _smithers_runs") || sql.includes("FROM _smithers_branches")) {
+        return [];
       }
       if (sql.includes("INSERT INTO _smithers_rewind_leases")) {
         leases.set(params[0], params[1]);
@@ -1624,6 +1624,7 @@ describe("semantic tool definitions", () => {
   test("restore_checkpoint keeps its reported target across the invalidation refresh", async () => {
     let reads = 0;
     const harness = makeHarness({
+      listRunDescendants: async () => [{ runId: "run-1", parentRunId: null, depth: 0 }],
       listWorkspaceCheckpoints: async () => {
         reads += 1;
         return [
@@ -1636,8 +1637,8 @@ describe("semantic tool definitions", () => {
             source: "hook",
             label: "Edit output",
             jjCwd: "/tmp/work",
-            jjCommitId: reads === 1 ? "commit-1" : "newer-commit",
-            createdAtMs: NOW - 1_000,
+            jjCommitId: reads === 1 ? "commit-1" : "commit-2",
+            createdAtMs: NOW - (reads === 1 ? 1_000 : 500),
           },
         ];
       },

@@ -46,11 +46,11 @@ export function useAutosaveDoc(options: UseAutosaveDocOptions): UseAutosaveDocRe
       schedule: current.schedule,
       save: (value) => saveRef.current(value),
       // Always install the proxy so a callback supplied after mount is picked
-      // up. Throwing while absent is intentional: the state machine treats an
-      // unavailable conflict check as non-blocking.
+      // up. `undefined` distinguishes "not configured" from a configured
+      // reader that failed, which the state machine must treat as a conflict.
       readExternal: async () => {
         const readExternal = readExternalRef.current;
-        if (!readExternal) throw new Error("No external document reader is configured.");
+        if (!readExternal) return undefined;
         return readExternal();
       },
     });
@@ -69,8 +69,15 @@ export function useAutosaveDoc(options: UseAutosaveDocOptions): UseAutosaveDocRe
       // live machine and its pending save; a real unmount still disposes it.
       queueMicrotask(() => {
         if (mountedRef.current) return;
-        docRef.current?.dispose();
-        docRef.current = null;
+        const doc = docRef.current;
+        if (!doc) return;
+        const flush = doc.getSnapshot().state === "dirty" ? doc.saveNow() : Promise.resolve();
+        const dispose = () => {
+          if (mountedRef.current || docRef.current !== doc) return;
+          doc.dispose();
+          docRef.current = null;
+        };
+        void flush.then(dispose, dispose);
       });
     };
   }, []);

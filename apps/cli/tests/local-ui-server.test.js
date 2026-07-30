@@ -154,6 +154,68 @@ describe("bundleIsFresh", () => {
     expect(bundleIsFresh(distDir, appDir)).toBe(false);
   });
 
+  test("tracks transitive workspace sources and package manifests", async () => {
+    const root = await mkdtemp(join(tmpdir(), "smithers-ui-freshness-transitive-"));
+    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    const appDir = join(root, "app");
+    const distDir = join(appDir, "dist");
+    const directDir = join(root, "gateway-ui");
+    const transitiveDir = join(root, "ui-styleguide");
+    await mkdir(join(appDir, "src"), { recursive: true });
+    await mkdir(distDir);
+    await mkdir(join(directDir, "src"), { recursive: true });
+    await mkdir(join(transitiveDir, "src"), { recursive: true });
+    await mkdir(join(appDir, "node_modules", "@smithers-orchestrator"), { recursive: true });
+    await mkdir(join(directDir, "node_modules", "@smithers-orchestrator"), { recursive: true });
+    await writeFile(join(appDir, "src", "main.tsx"), "");
+    await writeFile(
+      join(appDir, "package.json"),
+      JSON.stringify({ dependencies: { "@smithers-orchestrator/gateway-ui": "workspace:*" } }),
+    );
+    await writeFile(
+      join(directDir, "package.json"),
+      JSON.stringify({
+        name: "@smithers-orchestrator/gateway-ui",
+        exports: { ".": "./src/index.ts" },
+        dependencies: { "@smithers-orchestrator/ui-styleguide": "workspace:*" },
+      }),
+    );
+    await writeFile(join(directDir, "src", "index.ts"), "");
+    const transitiveManifest = join(transitiveDir, "package.json");
+    await writeFile(
+      transitiveManifest,
+      JSON.stringify({ name: "@smithers-orchestrator/ui-styleguide", exports: { ".": "./src/index.ts" } }),
+    );
+    const transitiveSource = join(transitiveDir, "src", "index.ts");
+    await writeFile(transitiveSource, "");
+    await symlink(directDir, join(appDir, "node_modules", "@smithers-orchestrator", "gateway-ui"));
+    await symlink(transitiveDir, join(directDir, "node_modules", "@smithers-orchestrator", "ui-styleguide"));
+    const bundle = join(distDir, "index.html");
+    await writeFile(bundle, "");
+
+    const old = new Date("2020-01-01T00:00:00Z");
+    const built = new Date("2020-01-02T00:00:00Z");
+    const changed = new Date("2020-01-03T00:00:00Z");
+    for (const path of [
+      join(appDir, "src", "main.tsx"),
+      join(appDir, "package.json"),
+      join(directDir, "package.json"),
+      join(directDir, "src", "index.ts"),
+      transitiveManifest,
+      transitiveSource,
+    ]) {
+      await utimes(path, old, old);
+    }
+    await utimes(bundle, built, built);
+    expect(bundleIsFresh(distDir, appDir)).toBe(true);
+
+    await utimes(transitiveSource, changed, changed);
+    expect(bundleIsFresh(distDir, appDir)).toBe(false);
+    await utimes(transitiveSource, old, old);
+    await utimes(transitiveManifest, changed, changed);
+    expect(bundleIsFresh(distDir, appDir)).toBe(false);
+  });
+
   test("stays fresh when a declared dependency is not installed", async () => {
     const root = await mkdtemp(join(tmpdir(), "smithers-ui-freshness-missing-"));
     cleanups.push(() => rm(root, { recursive: true, force: true }));

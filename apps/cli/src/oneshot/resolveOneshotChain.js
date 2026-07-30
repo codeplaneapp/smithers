@@ -1,4 +1,7 @@
 import { SmithersError } from "@smithers-orchestrator/errors";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { describeUnavailableAgent } from "../agent-detection.js";
 import { SOTA_SLOTS } from "../sota-models.generated.js";
 import { classifyOneshotGoal } from "./classifyOneshotGoal.js";
@@ -25,6 +28,43 @@ const SLOTS = Object.freeze({
 });
 const ALLOWED = ["claude", "codex", "kimi", "opencode", "pi"];
 
+function providerNamesFromJson(path) {
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    const names = new Set();
+    const visit = (value) => {
+      if (!value || typeof value !== "object") return;
+      if (Array.isArray(value)) {
+        for (const entry of value) visit(entry);
+        return;
+      }
+      for (const [key, child] of Object.entries(value)) {
+        names.add(key.toLowerCase());
+        visit(child);
+      }
+    };
+    visit(parsed);
+    return names;
+  } catch {
+    return new Set();
+  }
+}
+
+function hasNamedProvider(names, patterns) {
+  return [...names].some((name) => patterns.some((pattern) => name.includes(pattern)));
+}
+
+function resolveProviderCapabilities(env) {
+  const home = env.HOME ?? homedir();
+  const openCodeProviders = providerNamesFromJson(join(home, ".local", "share", "opencode", "auth.json"));
+  const piProviders = providerNamesFromJson(join(home, ".pi", "agent", "auth.json"));
+  return {
+    openCodeAnthropic: Boolean(env.ANTHROPIC_API_KEY) || hasNamedProvider(openCodeProviders, ["anthropic", "claude"]),
+    openCodeKimi: Boolean(env.KIMI_API_KEY) || hasNamedProvider(openCodeProviders, ["kimi-for-coding", "kimi"]),
+    piKimi: Boolean(env.KIMI_API_KEY) || hasNamedProvider(piProviders, ["kimi-coding", "kimi"]),
+  };
+}
+
 /** @param {string} model @param {Set<string>} usable */
 function engineForCanonicalModel(model, usable) {
   if (model.startsWith("gpt-") || model.startsWith("o1") || model.startsWith("o3") || model.startsWith("o4"))
@@ -42,6 +82,7 @@ function engineForCanonicalModel(model, usable) {
  */
 export function resolveOneshotChain(detections, options = {}) {
   const env = options.env ?? process.env;
+  const capabilities = resolveProviderCapabilities(env);
   let requestedEngine = options.agent === "claude-code" ? "claude" : options.agent;
   if (requestedEngine && !ALLOWED.includes(requestedEngine))
     throw new SmithersError(
@@ -75,7 +116,11 @@ export function resolveOneshotChain(detections, options = {}) {
       }`,
     );
   }
-  const claudeEngine = usable.has("claude") ? "claude" : usable.has("opencode") ? "opencode" : null;
+  const claudeEngine = usable.has("claude")
+    ? "claude"
+    : usable.has("opencode") && capabilities.openCodeAnthropic
+      ? "opencode"
+      : null;
   const claudeSpec = (model) => ({
     engine: claudeEngine,
     model: claudeEngine === "opencode" ? `anthropic/${model}` : model,
@@ -89,21 +134,48 @@ export function resolveOneshotChain(detections, options = {}) {
     ...(usable.has("codex") ? [{ engine: "codex", model: SOTA_SLOTS.codexSol }] : []),
     ...(usable.has("kimi") ? [{ engine: "kimi", model: ONESHOT_KIMI_MODEL }] : []),
     ...(claudeEngine ? [claudeSpec(SOTA_SLOTS.fable)] : []),
-    ...(usable.has("pi") ? [piSpec] : []),
+    ...(usable.has("pi") && capabilities.piKimi ? [piSpec] : []),
   ];
   // UI-flavored goals lead with Kimi K3 (registry v8 oneshot doctrine):
   // OpenCode's kimi-for-coding seat first, then kimi through pi, then the Kimi
   // CLI. With no kimi reachable, Claude Opus then Fable; Codex Sol is the
   // last-resort rung when nothing else is usable.
   const ui = [
-    ...(usable.has("opencode") ? [{ engine: "opencode", model: ONESHOT_OPENCODE_KIMI_MODEL }] : []),
-    ...(usable.has("pi") ? [piSpec] : []),
+    ...(usable.has("opencode") && capabilities.openCodeKimi
+      ? [{ engine: "opencode", model: ONESHOT_OPENCODE_KIMI_MODEL }]
+      : []),
+    ...(usable.has("pi") && capabilities.piKimi ? [piSpec] : []),
     ...(usable.has("kimi") ? [{ engine: "kimi", model: ONESHOT_KIMI_MODEL }] : []),
     ...(claudeEngine ? [claudeSpec(SOTA_SLOTS.opus), claudeSpec(SOTA_SLOTS.fable)] : []),
     ...(usable.has("codex") ? [{ engine: "codex", model: SOTA_SLOTS.codexSol }] : []),
   ];
   const defaults = classifyOneshotGoal(options.goal) === "ui" ? ui : general;
-  const requestedSpec = requestedEngine ? defaults.find((item) => item.engine === requestedEngine) : undefined;
+  let requestedSpec = requestedEngine ? defaults.find((item) => item.engine === requestedEngine) : undefined;
+  if (requestedEngine === "opencode" && !requestedModel && !requestedSpec) {
+    if (capabilities.openCodeAnthropic) {
+      requestedSpec = { engine: "opencode", model: `anthropic/${SOTA_SLOTS.fable}` };
+    } else if (capabilities.openCodeKimi) {
+      requestedSpec = { engine: "opencode", model: ONESHOT_OPENCODE_KIMI_MODEL };
+    }
+  }
+  if (
+    requestedEngine === "opencode" &&
+    (((requestedModel?.startsWith("anthropic/") || requestedModel?.startsWith("claude-")) &&
+      !capabilities.openCodeAnthropic) ||
+      (requestedModel?.startsWith("kimi-for-coding/") && !capabilities.openCodeKimi) ||
+      (!requestedModel && !requestedSpec))
+  ) {
+    throw new SmithersError(
+      "NO_USABLE_AGENTS",
+      "OpenCode is installed, but no authenticated provider can run the requested oneshot model.",
+    );
+  }
+  if (requestedEngine === "pi" && !capabilities.piKimi) {
+    throw new SmithersError(
+      "NO_USABLE_AGENTS",
+      "Pi is installed, but its kimi-coding provider is not authenticated for the oneshot chain.",
+    );
+  }
   const chain = requestedEngine
     ? [
         {

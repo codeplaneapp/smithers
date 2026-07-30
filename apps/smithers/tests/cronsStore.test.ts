@@ -17,12 +17,45 @@ beforeEach(() => {
     loading: false,
     error: null,
     actionError: null,
+    pendingToggleKeys: [],
     rpc: null,
   });
   useNotificationsStore.setState({ notifications: [] });
 });
 
 describe("crons store toggle", () => {
+  test("ignores a second toggle while the same cron replacement is in flight", async () => {
+    const created: unknown[] = [];
+    const removed: unknown[] = [];
+    let releaseCreate!: () => void;
+    bindCronActions({
+      create: async (vars) => {
+        created.push(vars);
+        await new Promise<void>((resolve) => {
+          releaseCreate = resolve;
+        });
+      },
+      remove: async (vars) => {
+        removed.push(vars);
+      },
+      refetch: async () => {},
+    });
+
+    useCronsStore.getState().toggle(enabledCron.id);
+    useCronsStore.getState().toggle(enabledCron.id);
+
+    expect(created).toEqual([{ workflow: "nightly", pattern: "0 3 * * *", enabled: false }]);
+    expect(useCronsStore.getState().pendingToggleKeys).toHaveLength(1);
+    releaseCreate();
+    for (let index = 0; index < 100 && useCronsStore.getState().pendingToggleKeys.length > 0; index += 1) {
+      await Bun.sleep(1);
+    }
+
+    expect(removed).toEqual([{ cronId: "cron-old" }]);
+    expect(useCronsStore.getState().crons).toEqual([expect.objectContaining({ id: "cron-old", enabled: false })]);
+    expect(useCronsStore.getState().pendingToggleKeys).toEqual([]);
+  });
+
   test("does not claim an enabled cron was disabled when deleting the old row fails", async () => {
     const created: unknown[] = [];
     const removed: unknown[] = [];
