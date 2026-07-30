@@ -77,6 +77,7 @@ function buildFakeInstallTree() {
   cpSync(join(CLI_SRC, "workflow-pack.js"), join(cliDir, "src/workflow-pack.js"));
   cpSync(join(CLI_SRC, "manifest.js"), join(cliDir, "src/manifest.js"));
   cpSync(join(CLI_SRC, "agent-detection.js"), join(cliDir, "src/agent-detection.js"));
+  cpSync(join(CLI_SRC, "registered-agent-id.js"), join(cliDir, "src/registered-agent-id.js"));
   cpSync(join(CLI_SRC, "sota-models.generated.js"), join(cliDir, "src/sota-models.generated.js"));
   cpSync(join(CLI_SRC, "init-templates.generated.js"), join(cliDir, "src/init-templates.generated.js"));
   cpSync(join(CLI_SRC, "installCuratedSkill.js"), join(cliDir, "src/installCuratedSkill.js"));
