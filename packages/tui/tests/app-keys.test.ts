@@ -25,7 +25,7 @@ describe("routeAppKey – quit contract", () => {
     // Shift+Q arrives as { name: "q", shift: true } — a literal "Q" never occurs.
     expect(key("Q").name).toBe("q");
     expect(routeAppKey(key("Q"), inTree)).toEqual({ kind: "exit" });
-    expect(routeAppKey(key("\x03"), inTree)).toEqual({ kind: "exit" }); // Ctrl-C
+    expect(routeAppKey(key("\x03"), inTree)).toEqual({ kind: "exit", code: 130 }); // Ctrl-C
   });
 
   it("does NOT quit on Ctrl-Q (undocumented chord)", () => {
@@ -85,7 +85,7 @@ describe("routeAppKey – help overlay", () => {
 
   it("q quits WHILE the overlay is open — the overlay advertises it", () => {
     expect(routeAppKey(key("q"), helpOpen)).toEqual({ kind: "exit" });
-    expect(routeAppKey(key("\x03"), helpOpen)).toEqual({ kind: "exit" }); // Ctrl-C too
+    expect(routeAppKey(key("\x03"), helpOpen)).toEqual({ kind: "exit", code: 130 }); // Ctrl-C too
   });
 
   it("Esc closes the overlay; mode keys are swallowed while it is open", () => {
@@ -107,7 +107,7 @@ describe("routeAppKey – text capture", () => {
   });
 
   it("keeps Ctrl-C as the global escape hatch", () => {
-    expect(routeAppKey(key("\x03"), captured)).toEqual({ kind: "exit" });
+    expect(routeAppKey(key("\x03"), captured)).toEqual({ kind: "exit", code: 130 });
     expect(routeAppKey(key("\x1b"), captured)).toBeNull();
   });
 });
