@@ -1,5 +1,6 @@
-import * as _smithers_orchestrator_accounts from "@smithers-orchestrator/accounts";
-import { AccountProvider } from "@smithers-orchestrator/accounts";
+import * as _smithers_orchestrator_accounts from '@smithers-orchestrator/accounts';
+import { AccountProvider } from '@smithers-orchestrator/accounts';
+import { spawnSync } from 'node:child_process';
 
 /**
  * Where a usage report's numbers came from.
@@ -9,7 +10,7 @@ import { AccountProvider } from "@smithers-orchestrator/accounts";
  * - `local`   — estimated locally from token logs (Google providers).
  * - `none`    — the provider exposes no usage surface, or the probe failed.
  */
-type UsageSource$1 = "oauth" | "headers" | "local" | "none";
+type UsageSource = "oauth" | "headers" | "local" | "none";
 
 /**
  * One quota window for an account: a 5-hour session, a weekly cap, a per-minute
@@ -21,23 +22,23 @@ type UsageSource$1 = "oauth" | "headers" | "local" | "none";
  * - `estimated` — locally estimated; read `usedPercent`/`used`/`limit`, treat as
  *                 a lower bound, never as authoritative.
  */
-type UsageWindow$4 = {
-  /** Stable id, e.g. "5h" | "weekly" | "requests-per-min" | "tokens-per-min". */
-  id: string;
-  /** Human label, e.g. "5-hour session". */
-  label: string;
-  /** Which fields below are meaningful. */
-  unit: "percent" | "count" | "estimated";
-  /** 0–100. Set for `percent` and `estimated`. */
-  usedPercent?: number;
-  /** Absolute amount consumed. Set for `count` and `estimated`. */
-  used?: number;
-  /** Absolute cap. Set for `count` and `estimated`. */
-  limit?: number;
-  /** `limit - used`. Set for `count`. */
-  remaining?: number;
-  /** ISO-8601 timestamp when this window rolls over. */
-  resetsAt?: string;
+type UsageWindow$5 = {
+    /** Stable id, e.g. "5h" | "weekly" | "requests-per-min" | "tokens-per-min". */
+    id: string;
+    /** Human label, e.g. "5-hour session". */
+    label: string;
+    /** Which fields below are meaningful. */
+    unit: "percent" | "count" | "estimated";
+    /** 0–100. Set for `percent` and `estimated`. */
+    usedPercent?: number;
+    /** Absolute amount consumed. Set for `count` and `estimated`. */
+    used?: number;
+    /** Absolute cap. Set for `count` and `estimated`. */
+    limit?: number;
+    /** `limit - used`. Set for `count`. */
+    remaining?: number;
+    /** ISO-8601 timestamp when this window rolls over. */
+    resetsAt?: string;
 };
 
 /**
@@ -46,32 +47,32 @@ type UsageWindow$4 = {
  * CLI, gateway, and UI render one model.
  */
 type UsageReport$5 = {
-  /** The account's label in `~/.smithers/accounts.json`. */
-  accountLabel: string;
-  /** The account's provider. */
-  provider: AccountProvider;
-  /** How this account authenticates. */
-  authMode: "subscription" | "api-key";
-  /** Where the numbers came from. */
-  source: UsageSource$1;
-  /** Quota windows, possibly empty when `source` is `none`. */
-  windows: UsageWindow$4[];
-  /** Plan/tier label if the provider reports one, e.g. "max", "pro". */
-  planType?: string;
-  /** Pay-as-you-go credit balance, if the provider reports one (Codex). */
-  credits?: {
-    hasCredits: boolean;
-    unlimited: boolean;
-    balance?: string;
-  };
-  /** ISO-8601 timestamp of when this report was produced. */
-  fetchedAt: string;
-  /** True when served from cache past its soft TTL. */
-  stale: boolean;
-  /** True when the windows are locally estimated, not provider-authoritative. */
-  estimate: boolean;
-  /** Human-readable reason when `source` is `none` or a probe failed. */
-  error?: string;
+    /** The account's label in `~/.smithers/accounts.json`. */
+    accountLabel: string;
+    /** The account's provider. */
+    provider: AccountProvider;
+    /** How this account authenticates. */
+    authMode: "subscription" | "api-key";
+    /** Where the numbers came from. */
+    source: UsageSource;
+    /** Quota windows, possibly empty when `source` is `none`. */
+    windows: UsageWindow$5[];
+    /** Plan/tier label if the provider reports one, e.g. "max", "pro". */
+    planType?: string;
+    /** Pay-as-you-go credit balance, if the provider reports one (Codex). */
+    credits?: {
+        hasCredits: boolean;
+        unlimited: boolean;
+        balance?: string;
+    };
+    /** ISO-8601 timestamp of when this report was produced. */
+    fetchedAt: string;
+    /** True when served from cache past its soft TTL. */
+    stale: boolean;
+    /** True when the windows are locally estimated, not provider-authoritative. */
+    estimate: boolean;
+    /** Human-readable reason when `source` is `none` or a probe failed. */
+    error?: string;
 };
 
 /** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
@@ -87,8 +88,8 @@ type UsageReport$5 = {
  * @param {Account} account
  * @returns {Promise<UsageReport>}
  */
-declare function getAccountUsage(account: Account$2): Promise<UsageReport$4>;
-type Account$2 = _smithers_orchestrator_accounts.Account;
+declare function getAccountUsage(account: Account$3): Promise<UsageReport$4>;
+type Account$3 = _smithers_orchestrator_accounts.Account;
 type UsageReport$4 = UsageReport$5;
 
 /**
@@ -100,15 +101,12 @@ type UsageReport$4 = UsageReport$5;
  * @param {{ fresh?: boolean; env?: NodeJS.ProcessEnv; nowMs?: number }} [options]
  * @returns {Promise<UsageReport[]>}
  */
-declare function getUsageForAccounts(
-  accounts: Account$1[],
-  options?: {
+declare function getUsageForAccounts(accounts: Account$2[], options?: {
     fresh?: boolean;
     env?: NodeJS.ProcessEnv;
     nowMs?: number;
-  },
-): Promise<UsageReport$3[]>;
-type Account$1 = _smithers_orchestrator_accounts.Account;
+}): Promise<UsageReport$3[]>;
+type Account$2 = _smithers_orchestrator_accounts.Account;
 type UsageReport$3 = UsageReport$5;
 
 /** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
@@ -135,32 +133,26 @@ type UsageReport$3 = UsageReport$5;
  * @param {{ nowIso?: string }} [options]
  * @returns {UsageReport}
  */
-declare function buildUsageReport(
-  account: Account,
-  probe: UsageProbe$5,
-  options?: {
+declare function buildUsageReport(account: Account$1, probe: UsageProbe$6, options?: {
     nowIso?: string;
-  },
-): UsageReport$2;
-type Account = _smithers_orchestrator_accounts.Account;
+}): UsageReport$2;
+type Account$1 = _smithers_orchestrator_accounts.Account;
 type UsageReport$2 = UsageReport$5;
 /**
  * The partial result an adapter returns. The dispatcher wraps it with the
  * account identity and timestamp to form a complete {@link UsageReport}.
  */
-type UsageProbe$5 = {
-  source: UsageSource$1;
-  windows?: UsageWindow$4[] | undefined;
-  planType?: string | undefined;
-  credits?:
-    | {
+type UsageProbe$6 = {
+    source: UsageSource;
+    windows?: UsageWindow$5[] | undefined;
+    planType?: string | undefined;
+    credits?: {
         hasCredits: boolean;
         unlimited: boolean;
         balance?: string;
-      }
-    | undefined;
-  estimate?: boolean | undefined;
-  error?: string | undefined;
+    } | undefined;
+    estimate?: boolean | undefined;
+    error?: string | undefined;
 };
 
 /**
@@ -186,8 +178,8 @@ declare function formatRelativeReset(resetsAt: string | undefined, nowMs?: numbe
 
 /**
  * Formats a number of seconds as a short human duration, e.g. `"2h 41m"`,
- * `"5d 3h"`, `"42s"`. Used for "resets in" columns. Negative input renders as
- * `"now"`.
+ * `"5d 3h"`, `"42s"`. Used for "resets in" columns. Non-positive or non-finite
+ * input renders as `"now"`.
  *
  * @param {number} seconds
  * @returns {string}
@@ -202,8 +194,8 @@ declare function humanizeDurationShort(seconds: number): string;
  * @param {unknown} payload
  * @returns {UsageWindow[]}
  */
-declare function parseClaudeOauthUsage(payload: unknown): UsageWindow$3[];
-type UsageWindow$3 = UsageWindow$4;
+declare function parseClaudeOauthUsage(payload: unknown): UsageWindow$4[];
+type UsageWindow$4 = UsageWindow$5;
 
 /**
  * Normalizes the Codex usage payload (from `GET /backend-api/wham/usage`, or the
@@ -219,15 +211,30 @@ type UsageWindow$3 = UsageWindow$4;
  * @returns {{ windows: UsageWindow[]; planType?: string; credits?: { hasCredits: boolean; unlimited: boolean; balance?: string } }}
  */
 declare function parseCodexUsage(payload: unknown): {
-  windows: UsageWindow$2[];
-  planType?: string;
-  credits?: {
-    hasCredits: boolean;
-    unlimited: boolean;
-    balance?: string;
-  };
+    windows: UsageWindow$3[];
+    planType?: string;
+    credits?: {
+        hasCredits: boolean;
+        unlimited: boolean;
+        balance?: string;
+    };
 };
-type UsageWindow$2 = UsageWindow$4;
+type UsageWindow$3 = UsageWindow$5;
+
+/**
+ * Normalizes the Kimi for Coding usage payload (`GET /coding/v1/usages`) into
+ * windows plus plan metadata. The top-level `usage` block is the weekly quota;
+ * `limits[]` carries shorter rate windows (observed: a 300-minute window);
+ * `parallel` is the concurrent-session cap, reported as a count window.
+ *
+ * @param {unknown} payload
+ * @returns {{ windows: UsageWindow[]; planType?: string }}
+ */
+declare function parseKimiUsage(payload: unknown): {
+    windows: UsageWindow$2[];
+    planType?: string;
+};
+type UsageWindow$2 = UsageWindow$5;
 
 /**
  * Parses Anthropic rate-limit response headers into usage windows. Anthropic
@@ -239,7 +246,7 @@ type UsageWindow$2 = UsageWindow$4;
  * @returns {UsageWindow[]}
  */
 declare function parseAnthropicRateLimitHeaders(get: (name: string) => string | null | undefined): UsageWindow$1[];
-type UsageWindow$1 = UsageWindow$4;
+type UsageWindow$1 = UsageWindow$5;
 
 /**
  * Parses OpenAI rate-limit response headers into usage windows. OpenAI's reset
@@ -252,11 +259,8 @@ type UsageWindow$1 = UsageWindow$4;
  * @param {number} [nowMs]
  * @returns {UsageWindow[]}
  */
-declare function parseOpenAiRateLimitHeaders(
-  get: (name: string) => string | null | undefined,
-  nowMs?: number,
-): UsageWindow$5[];
-type UsageWindow$5 = UsageWindow$4;
+declare function parseOpenAiRateLimitHeaders(get: (name: string) => string | null | undefined, nowMs?: number): UsageWindow[];
+type UsageWindow = UsageWindow$5;
 
 /**
  * Parses a Go-style duration string into seconds. OpenAI's rate-limit reset
@@ -297,16 +301,14 @@ declare function decodeJwtClaims(token: string | null | undefined): Record<strin
  *
  * @param {{ configDir?: string }} account
  * @param {NodeJS.Platform} [platform]
+ * @param {typeof spawnSync} [spawn] Injectable for tests; defaults to `node:child_process` `spawnSync`.
  * @returns {{ accessToken: string; expiresAt?: number } | null}
  */
-declare function readClaudeCredentials(
-  account: {
+declare function readClaudeCredentials(account: {
     configDir?: string;
-  },
-  platform?: NodeJS.Platform,
-): {
-  accessToken: string;
-  expiresAt?: number;
+}, platform?: NodeJS.Platform, spawn?: typeof spawnSync): {
+    accessToken: string;
+    expiresAt?: number;
 } | null;
 
 /**
@@ -322,10 +324,76 @@ declare function readClaudeCredentials(
  * @param {{ configDir?: string }} account
  * @returns {{ accessToken: string; accountId?: string } | null}
  */
-declare function readCodexCredentials(account: { configDir?: string }): {
-  accessToken: string;
-  accountId?: string;
+declare function readCodexCredentials(account: {
+    configDir?: string;
+}): {
+    accessToken: string;
+    accountId?: string;
 } | null;
+
+/**
+ * Reads the Kimi for Coding OAuth token for an account from
+ * `configDir/credentials/kimi-code.json` (the per-account `KIMI_SHARE_DIR`).
+ * Kimi access tokens live ~15 minutes, so callers should expect
+ * `expiresAtMs` to be in the past and refresh via `refreshKimiToken`.
+ *
+ * Returns `null` when no credential can be read. The token is returned only
+ * to mint an outbound Authorization header or a refresh grant.
+ *
+ * @param {{ configDir?: string }} account
+ * @returns {{ accessToken: string; refreshToken?: string; expiresAtMs?: number } | null}
+ */
+declare function readKimiCredentials(account: {
+    configDir?: string;
+}): {
+    accessToken: string;
+    refreshToken?: string;
+    expiresAtMs?: number;
+} | null;
+
+/**
+ * @typedef {object} KimiRefreshSuccess
+ * @property {true} ok
+ * @property {string} accessToken
+ * @property {number | undefined} expiresAtMs
+ */
+/**
+ * @typedef {object} KimiRefreshFailure
+ * @property {false} ok
+ * @property {string} error
+ * @property {boolean} reauth True when the refresh grant is dead and the user must re-login.
+ */
+/**
+ * Refreshes a Kimi for Coding OAuth token against
+ * `POST {KIMI_CODE_OAUTH_HOST|KIMI_OAUTH_HOST|auth.kimi.com}/api/oauth/token`
+ * (the same client_id and grant the official kimi CLI uses) and persists the
+ * rotated tokens back to `credentials/kimi-code.json` so the CLI keeps working.
+ *
+ * Refresh tokens rotate on every refresh. Before writing, the credentials file
+ * is re-read: when another process (a running kimi CLI) already rotated the
+ * grant, the on-disk tokens win and the just-refreshed pair is discarded —
+ * writing ours would orphan the file's newer refresh token.
+ *
+ * @param {{ configDir?: string }} account
+ * @param {string} refreshToken
+ * @returns {Promise<KimiRefreshSuccess | KimiRefreshFailure>}
+ */
+declare function refreshKimiToken(account: {
+    configDir?: string;
+}, refreshToken: string): Promise<KimiRefreshSuccess | KimiRefreshFailure>;
+type KimiRefreshSuccess = {
+    ok: true;
+    accessToken: string;
+    expiresAtMs: number | undefined;
+};
+type KimiRefreshFailure = {
+    ok: false;
+    error: string;
+    /**
+     * True when the refresh grant is dead and the user must re-login.
+     */
+    reauth: boolean;
+};
 
 /**
  * Probes the Claude Code subscription usage endpoint for an account's 5-hour and
@@ -333,10 +401,13 @@ declare function readCodexCredentials(account: { configDir?: string }): {
  * `none` report with a readable reason.
  *
  * @param {{ configDir?: string }} account
+ * @param {typeof readClaudeCredentials} [readCreds] Injectable for tests; defaults to `readClaudeCredentials`.
  * @returns {Promise<UsageProbe>}
  */
-declare function claudeOauthUsage(account: { configDir?: string }): Promise<UsageProbe$4>;
-type UsageProbe$4 = UsageProbe$5;
+declare function claudeOauthUsage(account: {
+    configDir?: string;
+}, readCreds?: typeof readClaudeCredentials): Promise<UsageProbe$5>;
+type UsageProbe$5 = UsageProbe$6;
 
 /**
  * Probes the Codex ChatGPT-subscription usage endpoint for an account's 5-hour
@@ -346,8 +417,25 @@ type UsageProbe$4 = UsageProbe$5;
  * @param {{ configDir?: string }} account
  * @returns {Promise<UsageProbe>}
  */
-declare function codexWhamUsage(account: { configDir?: string }): Promise<UsageProbe$3>;
-type UsageProbe$3 = UsageProbe$5;
+declare function codexWhamUsage(account: {
+    configDir?: string;
+}): Promise<UsageProbe$4>;
+type UsageProbe$4 = UsageProbe$6;
+
+/**
+ * Probes the Kimi for Coding usage endpoint (`GET /coding/v1/usages`) for an
+ * account's weekly quota, shorter rate windows, and parallel-session count.
+ * This is the same data the kimi CLI's `/usage` command shows. Kimi access
+ * tokens expire after ~15 minutes, so an expired token is refreshed with the
+ * on-disk refresh token first. Undocumented and best-effort.
+ *
+ * @param {{ configDir?: string }} account
+ * @returns {Promise<UsageProbe>}
+ */
+declare function kimiCodeUsage(account: {
+    configDir?: string;
+}): Promise<UsageProbe$3>;
+type UsageProbe$3 = UsageProbe$6;
 
 /**
  * Reads live Anthropic rate-limit headers for an API-key account. Uses the
@@ -357,8 +445,10 @@ type UsageProbe$3 = UsageProbe$5;
  * @param {{ apiKey?: string }} account
  * @returns {Promise<UsageProbe>}
  */
-declare function anthropicHeaderUsage(account: { apiKey?: string }): Promise<UsageProbe$2>;
-type UsageProbe$2 = UsageProbe$5;
+declare function anthropicHeaderUsage(account: {
+    apiKey?: string;
+}): Promise<UsageProbe$2>;
+type UsageProbe$2 = UsageProbe$6;
 
 /**
  * Reads live OpenAI rate-limit headers for an API-key account.
@@ -366,8 +456,10 @@ type UsageProbe$2 = UsageProbe$5;
  * @param {{ apiKey?: string }} account
  * @returns {Promise<UsageProbe>}
  */
-declare function openaiHeaderUsage(account: { apiKey?: string }): Promise<UsageProbe$1>;
-type UsageProbe$1 = UsageProbe$5;
+declare function openaiHeaderUsage(account: {
+    apiKey?: string;
+}): Promise<UsageProbe$1>;
+type UsageProbe$1 = UsageProbe$6;
 
 /** @typedef {import("./buildUsageReport.js").UsageProbe} UsageProbe */
 /**
@@ -382,8 +474,10 @@ type UsageProbe$1 = UsageProbe$5;
  * @param {{ provider: string }} account
  * @returns {Promise<UsageProbe>}
  */
-declare function googleUsage(account: { provider: string }): Promise<UsageProbe>;
-type UsageProbe = UsageProbe$5;
+declare function googleUsage(account: {
+    provider: string;
+}): Promise<UsageProbe>;
+type UsageProbe = UsageProbe$6;
 
 /**
  * Looks up a published cap by tier id. Returns `undefined` for unknown tiers so
@@ -392,13 +486,11 @@ type UsageProbe = UsageProbe$5;
  * @param {string | undefined} tier
  * @returns {{ label: string; requestsPerDay: number; rpm?: number } | undefined}
  */
-declare function publishedCapForTier(tier: string | undefined):
-  | {
-      label: string;
-      requestsPerDay: number;
-      rpm?: number;
-    }
-  | undefined;
+declare function publishedCapForTier(tier: string | undefined): {
+    label: string;
+    requestsPerDay: number;
+    rpm?: number;
+} | undefined;
 /**
  * Published daily request caps for Google providers, keyed by tier. Google does
  * not expose a live "remaining quota" surface to a personal-login or API-key
@@ -408,14 +500,11 @@ declare function publishedCapForTier(tier: string | undefined):
  *
  * @type {Record<string, { label: string; requestsPerDay: number; rpm?: number }>}
  */
-declare const PUBLISHED_CAPS: Record<
-  string,
-  {
+declare const PUBLISHED_CAPS: Record<string, {
     label: string;
     requestsPerDay: number;
     rpm?: number;
-  }
->;
+}>;
 
 /** @typedef {import("./UsageReport.ts").UsageReport} UsageReport */
 /** @typedef {import("@smithers-orchestrator/accounts").Account} Account */
@@ -445,122 +534,20 @@ declare function readUsageCache(env?: NodeJS.ProcessEnv): UsageCacheFile;
  * @returns {string} the path written
  */
 declare function writeUsageCache(contents: UsageCacheFile, env?: NodeJS.ProcessEnv): string;
-type UsageReport$6 = UsageReport$5;
+type UsageReport = UsageReport$5;
+type Account = _smithers_orchestrator_accounts.Account;
 type UsageCacheAccountIdentity = {
-  provider: AccountProvider;
-  configDir?: string;
-  model?: string;
-  apiKeyHash?: string;
+    provider: Account["provider"];
+    configDir?: string;
+    model?: string;
+    apiKeyHash?: string;
 };
 type UsageCacheFile = {
-  version: 1;
-  entries: Record<
-    string,
-    {
-      identity?: UsageCacheAccountIdentity;
-      report: UsageReport$6;
-    }
-  >;
+    version: 1;
+    entries: Record<string, {
+        identity?: UsageCacheAccountIdentity;
+        report: UsageReport;
+    }>;
 };
 
-/**
- * Where a usage report's numbers came from.
- *
- * - `oauth`   — an authenticated subscription usage endpoint (Claude, Codex).
- * - `headers` — live rate-limit response headers from an API-key request.
- * - `local`   — estimated locally from token logs (Google providers).
- * - `none`    — the provider exposes no usage surface, or the probe failed.
- */
-type UsageSource = "oauth" | "headers" | "local" | "none";
-
-/**
- * One quota window for an account: a 5-hour session, a weekly cap, a per-minute
- * request bucket, and so on.
- *
- * The `unit` decides which fields are meaningful:
- * - `percent`   — subscription utilization; read `usedPercent` (0–100).
- * - `count`     — API-key buckets; read `limit`, `remaining`, `used`.
- * - `estimated` — locally estimated; read `usedPercent`/`used`/`limit`, treat as
- *                 a lower bound, never as authoritative.
- */
-type UsageWindow = {
-  /** Stable id, e.g. "5h" | "weekly" | "requests-per-min" | "tokens-per-min". */
-  id: string;
-  /** Human label, e.g. "5-hour session". */
-  label: string;
-  /** Which fields below are meaningful. */
-  unit: "percent" | "count" | "estimated";
-  /** 0–100. Set for `percent` and `estimated`. */
-  usedPercent?: number;
-  /** Absolute amount consumed. Set for `count` and `estimated`. */
-  used?: number;
-  /** Absolute cap. Set for `count` and `estimated`. */
-  limit?: number;
-  /** `limit - used`. Set for `count`. */
-  remaining?: number;
-  /** ISO-8601 timestamp when this window rolls over. */
-  resetsAt?: string;
-};
-
-/**
- * Normalized usage for a single registered account. Every adapter — subscription
- * utilization, API-key headers, local estimate — produces this same shape so the
- * CLI, gateway, and UI render one model.
- */
-type UsageReport = {
-  /** The account's label in `~/.smithers/accounts.json`. */
-  accountLabel: string;
-  /** The account's provider. */
-  provider: AccountProvider;
-  /** How this account authenticates. */
-  authMode: "subscription" | "api-key";
-  /** Where the numbers came from. */
-  source: UsageSource;
-  /** Quota windows, possibly empty when `source` is `none`. */
-  windows: UsageWindow[];
-  /** Plan/tier label if the provider reports one, e.g. "max", "pro". */
-  planType?: string;
-  /** Pay-as-you-go credit balance, if the provider reports one (Codex). */
-  credits?: {
-    hasCredits: boolean;
-    unlimited: boolean;
-    balance?: string;
-  };
-  /** ISO-8601 timestamp of when this report was produced. */
-  fetchedAt: string;
-  /** True when served from cache past its soft TTL. */
-  stale: boolean;
-  /** True when the windows are locally estimated, not provider-authoritative. */
-  estimate: boolean;
-  /** Human-readable reason when `source` is `none` or a probe failed. */
-  error?: string;
-};
-
-export {
-  PUBLISHED_CAPS,
-  type UsageReport,
-  type UsageWindow,
-  anthropicHeaderUsage,
-  buildUsageReport,
-  claudeOauthUsage,
-  codexWhamUsage,
-  decodeJwtClaims,
-  formatRelativeReset,
-  formatUsageReports,
-  getAccountUsage,
-  getUsageForAccounts,
-  googleUsage,
-  humanizeDurationShort,
-  openaiHeaderUsage,
-  parseAnthropicRateLimitHeaders,
-  parseClaudeOauthUsage,
-  parseCodexUsage,
-  parseDurationSeconds,
-  parseOpenAiRateLimitHeaders,
-  publishedCapForTier,
-  readClaudeCredentials,
-  readCodexCredentials,
-  readUsageCache,
-  usageCachePath,
-  writeUsageCache,
-};
+export { PUBLISHED_CAPS, type UsageReport$5 as UsageReport, type UsageWindow$5 as UsageWindow, anthropicHeaderUsage, buildUsageReport, claudeOauthUsage, codexWhamUsage, decodeJwtClaims, formatRelativeReset, formatUsageReports, getAccountUsage, getUsageForAccounts, googleUsage, humanizeDurationShort, kimiCodeUsage, openaiHeaderUsage, parseAnthropicRateLimitHeaders, parseClaudeOauthUsage, parseCodexUsage, parseDurationSeconds, parseKimiUsage, parseOpenAiRateLimitHeaders, publishedCapForTier, readClaudeCredentials, readCodexCredentials, readKimiCredentials, readUsageCache, refreshKimiToken, usageCachePath, writeUsageCache };
