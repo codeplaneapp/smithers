@@ -8,7 +8,7 @@
 
 .tl-counter {
   font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--text-2, #6b7280);
+  color: var(--text-muted);
   letter-spacing: 0.01em;
 }
 
@@ -43,7 +43,7 @@
   transform: translateX(-50%);
   width: 1px;
   height: 7px;
-  background: var(--border-strong, #c7ccd1);
+  background: var(--border-strong);
 }
 .tl-tick::after {
   content: attr(data-frame);
@@ -52,7 +52,7 @@
   left: 50%;
   transform: translateX(-50%);
   font: 500 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--text-2, #8a9099);
+  color: var(--text-faint);
 }
 .tl-tick-gate {
   background: var(--st-waiting);
@@ -133,7 +133,7 @@
   border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   background: color-mix(in srgb, var(--danger) 7%, var(--surface));
   font: 500 12px/1.4 Inter, sans-serif;
-  color: var(--text-1, #1f2328);
+  color: var(--text);
 }
 .tl-rewind-confirm-actions {
   display: flex;
@@ -160,7 +160,7 @@
 }
 .tl-error-hint {
   margin-top: 3px;
-  color: var(--text-2, #8a9099);
+  color: var(--text-faint);
   font-weight: 400;
 }
 .tl-error-actions {
@@ -174,13 +174,13 @@
   margin: 18px 8px;
   padding: 16px;
   border-radius: 12px;
-  border: 1px dashed var(--border-strong, #c7ccd1);
+  border: 1px dashed var(--border-strong);
   text-align: center;
-  color: var(--text-2, #8a9099);
+  color: var(--text-faint);
   font: 500 13px/1.4 Inter, sans-serif;
 }
 
 .tl-frame-label {
   font: 500 12px/1 Inter, sans-serif;
-  color: var(--text-2, #8a9099);
+  color: var(--text-faint);
 }

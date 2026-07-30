@@ -4,20 +4,12 @@
    state via the --tone tokens, so light and dark both resolve correctly. */
 
 :root {
-  --st-running: #6d56d8;
-  --st-ok: #0f8f78;
-  --st-waiting: #bf5b16;
-  --st-failed: #e5484d;
-  --st-info: #356fd2;
-  --st-idle: #a3a3a3;
-}
-:root[data-theme="dark"] {
-  --st-running: #8b78e6;
-  --st-ok: #2ec9a8;
-  --st-waiting: #e0944a;
-  --st-failed: #f2555a;
-  --st-info: #5b8def;
-  --st-idle: #6b6b73;
+  --st-running: var(--brand);
+  --st-ok: var(--success);
+  --st-waiting: var(--warning);
+  --st-failed: var(--danger);
+  --st-info: var(--info);
+  --st-idle: var(--text-muted);
 }
 
 .tone-running { --tone: var(--st-running); }
@@ -236,7 +228,6 @@
 .toolcall-dot.tone-running { animation: dot-pulse 1.2s ease-in-out infinite; }
 .toolcall-verb { font-weight: 700; }
 .toolcall-target { color: var(--text-muted); }
-.toolcall-delta { margin-left: auto; display: flex; gap: 6px; }
 .node-output-text { margin: 10px 0; color: var(--text); line-height: 1.5; }
 .node-empty { color: var(--text-faint); margin: 10px 0; }
 .node-stream {
@@ -341,17 +332,6 @@
 
 /* ---- Timeline ---- */
 .timeline { padding: 20px 18px; }
-.tl-banner {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font: 600 12px/1 Inter, sans-serif;
-  color: var(--st-waiting);
-  background: color-mix(in srgb, var(--st-waiting) 11%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--st-waiting) 28%, transparent);
-  padding: 6px 11px;
-  border-radius: 999px;
-}
 .tl-track { position: relative; margin: 30px 8px 10px; height: 3px; background: var(--hover); border-radius: 3px; }
 .tl-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--brand); border-radius: 3px; }
 .tl-dot {
@@ -390,9 +370,6 @@
 .ready-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--text-placeholder); }
 .ready-dot.is-on { background: var(--st-ok); }
 .cron-pattern { color: var(--st-info); font: 600 11px/1 ui-monospace, Menlo, monospace; }
-.cron-add { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px 0; border: 0; background: transparent; color: var(--brand); font: 600 13px/1 Inter, sans-serif; cursor: pointer; }
-.cron-add-plus { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; border: 1px dashed color-mix(in srgb, var(--brand) 40%, transparent); }
-.cron-new-form { display: flex; gap: 8px; align-items: center; padding: 10px 0; }
 
 /* ---- Memory ---- */
 .recall-query {
@@ -430,73 +407,10 @@
 .prompt-preview { padding: 11px 13px; border: 1px solid var(--border); border-radius: 10px; background: var(--hover-subtle); font: 500 12.5px/1.6 ui-monospace, Menlo, monospace; color: var(--text-muted); }
 .prompt-slot { color: var(--brand); background: color-mix(in srgb, var(--brand) 12%, var(--surface)); border-radius: 4px; padding: 0 4px; }
 
-/* ---- Slash command menu ---- */
-.slash-menu {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
-  right: 0;
-  z-index: 12;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px;
-  border: 1px solid var(--border-solid);
-  border-radius: 14px;
-  background: var(--surface);
-  box-shadow: 0 1px 2px rgb(var(--shadow-rgb) / 0.04), 0 12px 32px rgb(var(--shadow-rgb) / 0.14);
-}
-.slash-item { display: flex; align-items: baseline; gap: 10px; padding: 8px 10px; border: 0; border-radius: 9px; background: transparent; text-align: left; cursor: pointer; }
-.slash-item:hover { background: var(--hover); }
-.slash-name { font: 600 13px/1 ui-monospace, Menlo, monospace; color: var(--brand); }
-.slash-summary { color: var(--text); font-size: 13px; }
-.slash-hint { margin-left: auto; color: var(--text-faint); font: 500 11px/1 ui-monospace, Menlo, monospace; }
-
 /* ---- VCS / Changes: working-tree status + change list + bookmarks ---- */
-.vcs-glyph {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 5px;
-  font: 700 11px/1 ui-monospace, Menlo, monospace;
-  color: var(--st-info);
-  background: color-mix(in srgb, var(--st-info) 13%, var(--surface));
-}
-.vcs-glyph.is-added { color: var(--st-ok); background: color-mix(in srgb, var(--st-ok) 13%, var(--surface)); }
-.vcs-glyph.is-modified { color: var(--st-waiting); background: color-mix(in srgb, var(--st-waiting) 13%, var(--surface)); }
-.vcs-glyph.is-deleted { color: var(--st-failed); background: color-mix(in srgb, var(--st-failed) 13%, var(--surface)); }
-.vcs-glyph.is-renamed { color: var(--st-running); background: color-mix(in srgb, var(--st-running) 13%, var(--surface)); }
-.vcs-glyph.is-untracked { color: var(--text-faint); background: var(--hover); }
 .vcs-path { font: 500 12.5px/1.4 ui-monospace, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vcs-mono { font: 600 11.5px/1 ui-monospace, Menlo, monospace; color: var(--text-muted); }
 .vcs-more { padding: 6px 2px 2px; font-size: 12px; color: var(--text-faint); }
-.vcs-card .list-row { gap: 9px; }
-
-/* Canvas action bar */
-.vcs-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 11px 18px;
-  border-bottom: 1px solid var(--border);
-}
-
-/* Canvas body: change list + bookmarks rail */
-.vcs-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 250px; }
-.vcs-changes { padding: 12px 16px; overflow: auto; }
-.vcs-section-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 14px 0 7px;
-  font: 600 11px/1 Inter, sans-serif;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-}
-.vcs-section-head:first-child { margin-top: 2px; }
 .vcs-count {
   font: 600 10.5px/1 ui-monospace, Menlo, monospace;
   padding: 2px 6px;
@@ -504,33 +418,10 @@
   background: var(--hover);
   color: var(--text-muted);
 }
-.vcs-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 7px 8px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-.vcs-row:hover { background: var(--hover); }
-.vcs-row .vcs-path { flex: 1; min-width: 0; }
-.vcs-delta { flex: none; display: flex; gap: 6px; font-size: 11.5px; }
-.vcs-label { flex: none; width: 74px; text-align: right; font-size: 11px; color: var(--text-faint); }
 .vcs-empty { padding: 8px; font-size: 12.5px; color: var(--text-faint); }
-.surface-source { font-size: 11.5px; color: var(--text-muted); font-family: var(--mono, monospace); }
-.vcs-error { margin: 0 14px 8px; padding: 8px 10px; font-size: 12px; border-radius: 8px; color: var(--danger, #c0392b); background: color-mix(in srgb, var(--danger, #c0392b) 10%, transparent); display: flex; align-items: center; gap: 8px; }
-.vcs-repo-context { padding: 8px 14px; }
 
 .vcs-bookmarks { border-left: 1px solid var(--border); padding: 12px 14px; overflow: auto; background: var(--surface); }
 .vcs-bookmark { display: flex; align-items: center; gap: 9px; padding: 8px 6px; border-radius: 8px; }
-.vcs-bookmark.is-current { background: color-mix(in srgb, var(--brand) 9%, var(--surface)); }
-.vcs-bookmark-text { min-width: 0; }
-.vcs-bookmark-name { font: 600 12.5px/1.3 ui-monospace, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; }
-.vcs-bookmark-meta { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
 
 /* ---- Review surfaces: issues, tickets, landings (list + detail) ----
    One shared vocabulary so the three cards and canvases render alike. Color =
@@ -613,7 +504,6 @@
 .rev-row-main { flex: 1; min-width: 0; }
 .rev-row-title { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rev-row-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11.5px; color: var(--text-muted); }
-.rev-row-tags { flex: none; display: flex; align-items: center; gap: 6px; }
 .rev-empty { display: grid; place-items: center; gap: 6px; min-height: 160px; padding: 20px; text-align: center; color: var(--text-faint); font-size: 13px; }
 
 /* Create form. */
@@ -630,12 +520,6 @@
 .rev-create-head { font: 700 10px/1 ui-monospace, Menlo, monospace; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); }
 .rev-create textarea.field-input { min-height: 68px; resize: vertical; font-family: inherit; }
 .rev-create-actions { display: flex; gap: 8px; }
-
-/* Repo context selector — only rendered when a platform base URL is set. */
-.rev-repo-context { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.rev-repo-context .field-input { width: 180px; }
-.rev-sub { font-size: 11.5px; color: var(--text-muted); }
-.rev-sub-error { color: var(--brand-warn, #c44); }
 
 /* Detail body text + monospace editor. */
 .rev-prose { font-size: 13.5px; line-height: 1.6; color: var(--text); white-space: pre-wrap; }
