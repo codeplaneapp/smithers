@@ -254,8 +254,8 @@ export function QueueParse({ c }: { c: FerricConfig }) {
           let loc = 0;
           const gatePool = new Map<string, number>();
           for (const m of mods) {
-            const row = byName.get(m);
-            if (!row) fail(`cohort m4-cohort-${suffix} names "${m}", which is not an SCC row in the queue`);
+            const row =
+              byName.get(m) ?? fail(`cohort m4-cohort-${suffix} names "${m}", which is not an SCC row in the queue`);
             assignedCount.set(m, (assignedCount.get(m) ?? 0) + 1);
             loc += row.loc;
             for (const t of effectiveTests(m)) gatePool.set(t.file, Math.max(gatePool.get(t.file) ?? 0, t.cases));
