@@ -12,7 +12,7 @@ import {
   createSmithers,
 } from "smithers-orchestrator";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,6 +38,8 @@ import {
   planFromRow,
   reportsDirFor,
   stackKeyFromRunId,
+  stackOwnerMarker,
+  stackOwnerMatches,
   workspaceNameFor,
 } from "../lib/stackedShip";
 import {
@@ -162,6 +164,7 @@ const artifactSchema = z.object({
   laneSlug: z.string().min(2),
   artifactPath: z.string().min(4),
   revision: z.number().int(),
+  commitId: z.string().default(""),
   headline: z.string().default(""),
   summary: z.string().min(2),
 });
@@ -176,6 +179,12 @@ const reworkSchema = z.object({
 const finalSchema = z.object({
   status: z.enum(["clean", "polished", "blocked"]),
   summary: z.string().min(20),
+});
+
+const finalSettledSchema = z.object({
+  status: z.enum(["clean", "polished", "blocked", "failed"]),
+  accepted: z.boolean(),
+  summary: z.string().min(2),
 });
 
 const pushSchema = z.object({
@@ -209,6 +218,7 @@ const { Workflow, Task, smithers, outputs } = createSmithers({
   stshipDecision: approvalDecisionSchema,
   stshipRework: reworkSchema,
   stshipFinal: finalSchema,
+  stshipFinalSettled: finalSettledSchema,
   stshipPush: pushSchema,
   stshipSummary: summarySchema,
 });
@@ -343,15 +353,26 @@ function laneDirFor(key: string, slug: string): string {
 
 // ── Compute implementations (exported for tests) ─────────────────────────────
 
-export async function setupStack(key: string): Promise<Setup> {
+export async function setupStack(key: string, rawRunId = key): Promise<Setup> {
   const stackRoot = stackRootFor(key);
+  const stackDir = join(stackRoot, "..");
+  const ownerMarkerPath = join(stackDir, ".stack-owner.json");
   let originUrl = "";
   try {
     originUrl = execTool("git", ["remote", "get-url", "origin"], repoRoot);
   } catch {}
   try {
+    mkdirSync(stackDir, { recursive: true });
+    if (existsSync(ownerMarkerPath)) {
+      if (!stackOwnerMatches(readFileSync(ownerMarkerPath, "utf8"), rawRunId)) {
+        throw new Error("stack directory belongs to a different run id: " + stackDir);
+      }
+    } else if (existsSync(stackRoot)) {
+      throw new Error("stack directory has no ownership marker; refusing unsafe reuse: " + stackDir);
+    } else {
+      writeFileSync(ownerMarkerPath, stackOwnerMarker(rawRunId), { flag: "wx" });
+    }
     if (!existsSync(stackRoot)) {
-      mkdirSync(join(stackRoot, ".."), { recursive: true });
       for (const argv of cloneCommands({ sourceRoot: repoRoot, originUrl, destDir: stackRoot })) {
         execTool(argv[0], argv.slice(1), repoRoot);
       }
@@ -531,6 +552,7 @@ export async function buildLaneArtifact(options: {
   const bookmark = bookmarkFor(options.key, options.entry.slug);
   const reportsDir = reportsDirFor(repoRoot, options.key);
   try {
+    const commitId = jj(["log", "-r", bookmark, "--no-graph", "-T", "commit_id"], stackRoot).trim();
     const diffText = jj(["diff", "--from", options.parentRev, "--to", bookmark, "--git"], stackRoot);
     const availablePaths = splitUnifiedDiff(diffText).map((file) => file.path);
     const story =
@@ -592,6 +614,7 @@ export async function buildLaneArtifact(options: {
       laneSlug: options.entry.slug,
       artifactPath,
       revision: options.revision,
+      commitId,
       headline: story.headline,
       summary: "artifact r" + options.revision + " at " + artifactPath,
     };
@@ -600,6 +623,7 @@ export async function buildLaneArtifact(options: {
       laneSlug: options.entry.slug,
       artifactPath: join(reportsDir, artifactFileName(options.entry.slug, options.revision)),
       revision: options.revision,
+      commitId: "",
       headline: "",
       summary: "artifact failed: " + String(error).slice(0, 1_000),
     };
@@ -660,6 +684,7 @@ export async function runPush(options: {
   createPrs: boolean;
   assembleOk: boolean;
   approvedSlugs: string[];
+  artifacts: { slug: string; revision: number; commitId: string; headline: string }[];
 }): Promise<Push> {
   const stackRoot = stackRootFor(options.key);
   const entries = options.plan.entries;
@@ -691,6 +716,26 @@ export async function runPush(options: {
   const branches: string[] = [];
   const prUrls: string[] = [];
   try {
+    const changedAfterApproval: string[] = [];
+    for (const entry of entries) {
+      const approved = options.artifacts.find((candidate) => candidate.slug === entry.slug);
+      const currentCommitId = jj(
+        ["log", "-r", bookmarkFor(options.key, entry.slug), "--no-graph", "-T", "commit_id"],
+        stackRoot,
+      ).trim();
+      if (!approved?.commitId || currentCommitId !== approved.commitId) changedAfterApproval.push(entry.slug);
+    }
+    if (changedAfterApproval.length > 0) {
+      return {
+        pushed: false,
+        branchesJson: "[]",
+        prUrlsJson: "[]",
+        summary:
+          "revision changed after human approval (" +
+          changedAfterApproval.join(", ") +
+          "); refusing to push until artifacts are regenerated and re-approved.",
+      };
+    }
     for (const entry of entries) {
       const bookmark = bookmarkFor(options.key, entry.slug);
       jj(["git", "push", "--bookmark", bookmark, "--allow-new", "--remote", "origin"], stackRoot);
@@ -704,6 +749,7 @@ export async function runPush(options: {
       } catch {}
       for (let index = 0; index < entries.length; index += 1) {
         const entry = entries[index];
+        const artifact = options.artifacts.find((candidate) => candidate.slug === entry.slug);
         const head = bookmarkFor(options.key, entry.slug);
         const base = index === 0 ? defaultBranch : bookmarkFor(options.key, entries[index - 1].slug);
         try {
@@ -725,10 +771,10 @@ export async function runPush(options: {
                 entries.length +
                 " from stacked-ship run " +
                 options.key +
-                ". Review artifact: .smithers/reports/stacked-ship/" +
-                options.key +
-                "/" +
-                artifactFileName(entry.slug, 1) +
+                ". Reviewed artifact revision: r" +
+                (artifact?.revision ?? 1) +
+                (artifact?.headline ? " — " + artifact.headline : "") +
+                ". The GitHub diff is the canonical review surface." +
                 "\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
             ],
             stackRoot,
@@ -938,15 +984,15 @@ export function finalReviewPrompt(options: {
         : "not run") +
       ".",
     "",
-    "DO, in order:",
-    "1. If the gate is red, fix the failures first.",
-    "2. Review the ENTIRE stack: jj log -r 'stack base..@' and the cumulative diff. Hunt for cross-PR",
+    "This is a READ-ONLY review. Do not edit files, mutate bookmarks, or run commands that change the workspace.",
+    "The human approvals and assemble result refer to this exact revision.",
+    "A RED assemble gate is release-blocking; report blocked and explain the failure.",
+    "",
+    "Review the ENTIRE stack: jj log -r 'stack base..@' and the cumulative diff. Hunt for cross-PR",
     "   inconsistencies, duplicated helpers, contract drift between lanes, and spec items silently dropped",
     "   (spec: " + options.specPath + ").",
-    "3. Small polish edits are welcome BUT must land inside the owning PR's change:",
-    "   jj squash --into <change-id> <paths> (never create new commits, never break one-change-per-PR).",
-    "4. Re-run the assemble checks after any edit.",
-    "Report status clean/polished/blocked with a summary of what you verified and improved.",
+    "Report status clean when it is safe to ship, or blocked with the exact regression. Never report polished:",
+    "polish requires edits, and edits must go back through lane hygiene, human approval, and assemble.",
   ].join("\n");
 }
 
@@ -996,19 +1042,26 @@ export default smithers((ctx) => {
 
   const buildDone = (slug: string) => rowOk(buildGate(slug)) && selfReview(slug)?.verdict === "approve";
   const buildSettled = (slug: string) => buildDone(slug) || buildIterations(slug) >= input.buildIterations;
-  const greenEver = (slug: string) => rowOk(buildGate(slug)) || rowOk(reworkGate(slug));
+  // A rework gate supersedes the original build gate. Historical green must
+  // never mask a red latest revision.
+  const greenNow = (slug: string) => rowOk(reworkGate(slug) ?? buildGate(slug));
   const reviewSettled = (slug: string) => decision(slug) === "approved" || reviewIterations(slug) >= input.reviewRounds;
 
   const entries = plan?.entries ?? [];
-  const reachable = (index: number): boolean => index === 0 || greenEver(entries[index - 1].slug);
+  const reachable = (index: number): boolean => index === 0 || greenNow(entries[index - 1].slug);
   const settled = (index: number): boolean => (reachable(index) ? buildSettled(entries[index].slug) : true);
   const allBuildSettled = plan !== null && entries.every((_, index) => settled(index));
-  const allGreen = plan !== null && entries.every((entry) => greenEver(entry.slug));
+  const allGreen = plan !== null && entries.every((entry) => greenNow(entry.slug));
   const allReviewSettled =
     plan !== null && entries.every((entry, index) => (reachable(index) ? reviewSettled(entry.slug) : true));
 
   const assembleGate = latest<Gate>(ctx, outputs.stshipGate, "assemble");
   const finalRow = latest<z.infer<typeof finalSchema>>(ctx, outputs.stshipFinal, "final-review");
+  const finalSettled = latest<z.infer<typeof finalSettledSchema>>(
+    ctx,
+    outputs.stshipFinalSettled,
+    "final-review-settled",
+  );
   const pushRow = latest<Push>(ctx, outputs.stshipPush, "push");
 
   const indexRows: StackIndexRow[] = entries.map((entry) => {
@@ -1019,7 +1072,7 @@ export default smithers((ctx) => {
       revision: artifact?.revision ?? 1,
       phase: lanePhase({
         hasWorkspace: laneRow(entry.slug)?.ready === true,
-        hygieneOk: greenEver(entry.slug),
+        hygieneOk: greenNow(entry.slug),
         selfReviewApproved: selfReview(entry.slug)?.verdict === "approve",
         decision: decision(entry.slug),
         buildExhausted: !buildDone(entry.slug) && buildIterations(entry.slug) >= input.buildIterations,
@@ -1029,14 +1082,14 @@ export default smithers((ctx) => {
     };
   });
 
-  const pushGateReady = !input.push || (allReviewSettled && finalRow !== undefined);
+  const pushGateReady = !input.push || (allReviewSettled && rowOk(assembleGate) && finalSettled?.accepted === true);
   // The summary is the TERMINAL roll-up: it reports per-lane decisions and the
   // approved count, so it must wait for every reachable lane's review to settle
   // (approved, or out of rounds). A requested push never mounts when a lane
   // remains red, so that path also needs the settled-review fallback.
   const summaryReady = input.push
-    ? pushRow !== undefined || (allReviewSettled && (finalRow !== undefined || !allGreen))
-    : allReviewSettled && (finalRow !== undefined || !allGreen);
+    ? pushRow !== undefined || (allReviewSettled && (finalSettled !== undefined || !allGreen))
+    : allReviewSettled && (finalSettled !== undefined || !allGreen);
 
   return (
     <Workflow name="stacked-ship">
@@ -1044,7 +1097,7 @@ export default smithers((ctx) => {
       <Parallel>
         <Sequence>
           <Task id="setup" output={outputs.stshipSetup} timeoutMs={SETUP_TIMEOUT_MS}>
-            {() => setupStack(key)}
+            {() => setupStack(key, ctx.runId)}
           </Task>
 
           {setup?.ready && inputPlan === null ? (
@@ -1213,17 +1266,20 @@ export default smithers((ctx) => {
                                     " · " +
                                     slug +
                                     " · r" +
-                                    (reviewIterations(slug) + 1),
+                                    (artifactRow(slug)?.revision ?? reviewIterations(slug) + 1),
                                   summary:
                                     (artifactRow(slug)?.headline ? artifactRow(slug)?.headline + "\n" : "") +
                                     "Artifact: " +
                                     (artifactRow(slug)?.artifactPath ??
                                       join(
                                         reportsDirFor(repoRoot, key),
-                                        artifactFileName(slug, reviewIterations(slug) + 1),
+                                        artifactFileName(
+                                          slug,
+                                          artifactRow(slug)?.revision ?? reviewIterations(slug) + 1,
+                                        ),
                                       )) +
                                     "\nHygiene: " +
-                                    (greenEver(slug) ? "green" : "FAILING") +
+                                    (greenNow(slug) ? "green" : "FAILING") +
                                     " · Self-review: " +
                                     (selfReview(slug)?.verdict ?? "none") +
                                     "\nApprove to accept this PR; deny WITH A NOTE to trigger a rework rebase.",
@@ -1261,6 +1317,15 @@ export default smithers((ctx) => {
                 {finalReviewPrompt({ plan, assembleGate, specPath: input.specPath })}
               </Task>
             ) : null}
+            {assembleGate ? (
+              <Task id="final-review-settled" output={outputs.stshipFinalSettled}>
+                {{
+                  status: finalRow?.status ?? "failed",
+                  accepted: finalRow?.status === "clean" || finalRow?.status === "polished",
+                  summary: finalRow?.summary ?? "final review failed before producing a verdict",
+                }}
+              </Task>
+            ) : null}
             {input.push && pushGateReady ? (
               <Task id="push" output={outputs.stshipPush} timeoutMs={PUSH_TIMEOUT_MS} continueOnFail>
                 {() =>
@@ -1273,6 +1338,15 @@ export default smithers((ctx) => {
                     approvedSlugs: entries
                       .filter((entry) => decision(entry.slug) === "approved")
                       .map((entry) => entry.slug),
+                    artifacts: entries.map((entry) => {
+                      const artifact = artifactRow(entry.slug);
+                      return {
+                        slug: entry.slug,
+                        revision: artifact?.revision ?? 1,
+                        commitId: artifact?.commitId ?? "",
+                        headline: artifact?.headline ?? "",
+                      };
+                    }),
                   })
                 }
               </Task>
@@ -1283,7 +1357,7 @@ export default smithers((ctx) => {
                   const details = entries.map((entry, index) => ({
                     laneSlug: entry.slug,
                     reachable: reachable(index),
-                    hygieneGreen: greenEver(entry.slug),
+                    hygieneGreen: greenNow(entry.slug),
                     selfReview: selfReview(entry.slug)?.verdict ?? "none",
                     decision: decision(entry.slug),
                     artifact: artifactRow(entry.slug)?.artifactPath ?? "",
@@ -1296,9 +1370,11 @@ export default smithers((ctx) => {
                       ? "pushed."
                       : input.push && !allGreen
                         ? "push skipped because not all lanes went green."
-                        : input.push && pushRow
-                          ? "push not completed: " + pushRow.summary
-                          : "not pushed.";
+                        : input.push && finalSettled?.accepted !== true
+                          ? "push skipped because final review was " + (finalSettled?.status ?? "not completed") + "."
+                          : input.push && pushRow
+                            ? "push not completed: " + pushRow.summary
+                            : "not pushed.";
                   return {
                     lanesTotal: entries.length,
                     lanesGreen: green,

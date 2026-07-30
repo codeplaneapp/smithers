@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod/v4";
 
 /**
@@ -84,7 +85,22 @@ export function planFromRow(row: unknown, maxPrs: number): StackPlan | null {
 // ── Naming ───────────────────────────────────────────────────────────────────
 
 export function stackKeyFromRunId(rawRunId: string): string {
-  return rawRunId.replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 40) || "run";
+  const readable = rawRunId.replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 27) || "run";
+  const hash = createHash("sha256").update(rawRunId).digest("hex").slice(0, 12);
+  return readable + "-" + hash;
+}
+
+export function stackOwnerMarker(rawRunId: string): string {
+  return JSON.stringify({ version: 1, runId: rawRunId }) + "\n";
+}
+
+export function stackOwnerMatches(marker: string, rawRunId: string): boolean {
+  try {
+    const parsed = JSON.parse(marker);
+    return parsed?.version === 1 && parsed?.runId === rawRunId;
+  } catch {
+    return false;
+  }
 }
 
 export function bookmarkFor(stackKey: string, slug: string): string {

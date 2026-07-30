@@ -18,6 +18,8 @@ import {
   planFromRow,
   reportsDirFor,
   stackKeyFromRunId,
+  stackOwnerMarker,
+  stackOwnerMatches,
   workspaceNameFor,
 } from "../lib/stackedShip";
 import {
@@ -110,10 +112,21 @@ describe("planFromRow", () => {
 
 describe("naming", () => {
   test("stackKeyFromRunId sanitizes and never returns empty", () => {
-    expect(stackKeyFromRunId("run 1234/abc!!")).toBe("run-1234-abc-");
-    expect(stackKeyFromRunId("!!!")).toBe("-");
-    expect(stackKeyFromRunId("")).toBe("run");
+    expect(stackKeyFromRunId("run 1234/abc!!")).toMatch(/^run-1234-abc--[a-f0-9]{12}$/);
+    expect(stackKeyFromRunId("!!!")).toMatch(/^--[a-f0-9]{12}$/);
+    expect(stackKeyFromRunId("")).toMatch(/^run-[a-f0-9]{12}$/);
     expect(stackKeyFromRunId("a".repeat(80))).toHaveLength(40);
+  });
+
+  test("stack keys distinguish long run IDs and ownership markers verify the full ID", () => {
+    const prefix = "shared-prefix-".repeat(5);
+    const first = prefix + "one";
+    const second = prefix + "two";
+    expect(stackKeyFromRunId(first)).not.toBe(stackKeyFromRunId(second));
+    const marker = stackOwnerMarker(first);
+    expect(stackOwnerMatches(marker, first)).toBe(true);
+    expect(stackOwnerMatches(marker, second)).toBe(false);
+    expect(stackOwnerMatches("not json", first)).toBe(false);
   });
 
   test("bookmark, base, and workspace names", () => {
