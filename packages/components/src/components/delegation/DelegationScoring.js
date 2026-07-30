@@ -73,8 +73,9 @@ export function DelegationScoring(props) {
   const children = [];
   if (poll) {
     const pollId = physicalId(p, "root", "poll");
-    // Keyed Fragment wrapper: HumanTask forwards `props.key` to its host
-    // node, so keying it directly trips React's special-prop warning.
+    // Keyed Fragment wrapper: React's `key` is a special prop handled by
+    // createElement — it never reaches props — so key the wrapper, not the
+    // HumanTask element.
     children.push(
       React.createElement(
         React.Fragment,

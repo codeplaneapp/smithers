@@ -85,7 +85,6 @@ export function HumanTask(props) {
   };
   return React.createElement("smithers:task", {
     id: props.id,
-    key: props.key,
     output: props.output,
     outputSchema,
     dependsOn: props.dependsOn,

@@ -171,7 +171,7 @@ export function Monitor(props) {
     "runaway-loop": autoHeal.includes("runaway-loop")
       ? handlerTask(
           "runaway-loop",
-          `Cancel the runaway run: \`bunx smithers-orchestrator cancel ${watchRunId}\`. Record the loop id, its iteration count, and the token burn that justified cancelling BEFORE you cancel.`,
+          `Cancel the runaway run: \`bunx smithers-orchestrator cancel ${shellArg(watchRunId)}\`. Record the loop id, its iteration count, and the token burn that justified cancelling BEFORE you cancel.`,
         )
       : escalate(
           "runaway-loop",

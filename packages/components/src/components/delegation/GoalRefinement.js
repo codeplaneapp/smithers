@@ -104,9 +104,9 @@ export function GoalRefinement(props) {
         .filter((other) => Number(other.seq) < seq)
         .every((other) => answerFor(Number(other.seq)) !== undefined);
       if (!form || !previousAnswered) continue;
-      // Keyed Fragment wrappers around human tasks: they forward
-      // `props.key` to their host node, so keying them directly trips
-      // React's special-prop warning.
+      // Keyed Fragment wrappers around human tasks: React's `key` is a
+      // special prop handled by createElement — it never reaches props — so
+      // key the wrapper, not the task element.
       children.push(
         React.createElement(
           React.Fragment,

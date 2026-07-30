@@ -97,6 +97,14 @@ describe("markdownComponents", () => {
       const result = render("code", { className: "language-typescript" }, "const x = 1;");
       expect(result).toBe("```typescript\nconst x = 1;\n```\n\n");
     });
+    test("code extracts the language token from a multi-class className", () => {
+      expect(render("code", { className: "highlight language-js" }, "x")).toBe("```js\nx\n```\n\n");
+      expect(render("code", { className: "language-js linenos" }, "x")).toBe("```js\nx\n```\n\n");
+      expect(render("code", { className: "highlight language-ts linenos" }, "x")).toBe("```ts\nx\n```\n\n");
+    });
+    test("code with a className but no language token renders inline", () => {
+      expect(render("code", { className: "highlight" }, "x")).toBe("`x`");
+    });
     test("pre passes through children", () => {
       expect(render("pre", {}, "raw")).toBe("raw");
     });

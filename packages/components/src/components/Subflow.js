@@ -8,7 +8,6 @@ export function Subflow(props) {
   if (props.skipIf) return null;
   return React.createElement("smithers:subflow", {
     id: props.id,
-    key: props.key,
     workflow: props.workflow,
     input: props.input,
     mode: props.mode ?? "childRun",

@@ -179,12 +179,14 @@ async function runCommandCheck(command, timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS) 
       }
       child.kill(signal);
     };
+    /** @type {ReturnType<typeof setTimeout> | null} */
+    let hardKill = null;
     const timer =
       timeoutMs > 0
         ? setTimeout(() => {
             timedOut = true;
             killTree("SIGTERM");
-            const hardKill = setTimeout(() => killTree("SIGKILL"), 5_000);
+            hardKill = setTimeout(() => killTree("SIGKILL"), 5_000);
             hardKill.unref?.();
           }, timeoutMs)
         : null;
@@ -198,6 +200,7 @@ async function runCommandCheck(command, timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS) 
     });
     child.on("close", (exitCode, signal) => {
       if (timer) clearTimeout(timer);
+      if (hardKill) clearTimeout(hardKill);
       runtime?.signal?.removeEventListener?.("abort", onAbort);
       const actualExitCode = typeof exitCode === "number" ? exitCode : null;
       const actualSignal = typeof signal === "string" ? signal : null;

@@ -15,7 +15,6 @@ export function Sandbox(props) {
   if (props.skipIf) return null;
   return React.createElement("smithers:sandbox", {
     id: props.id,
-    key: props.key,
     output: props.output,
     provider: props.provider,
     runtime: props.runtime,
