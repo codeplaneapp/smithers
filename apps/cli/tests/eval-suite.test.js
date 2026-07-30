@@ -13,6 +13,7 @@ import {
   renderEvalReport,
   summarizeEvalResults,
 } from "../src/eval-suite.js";
+import { buildHeuristicGepaPatches } from "../src/optimize-suite.js";
 import {
   createExecutableDir,
   createTempRepo,
@@ -206,6 +207,25 @@ describe("eval suite helpers", () => {
     expect(evalSummaryExitCode({ failed: 2, inconclusive: 2 })).toBe(5);
     expect(evalSummaryExitCode({ failed: 2, inconclusive: 1 })).toBe(1);
     expect(evalSummaryExitCode({ failed: 1, inconclusive: 0 })).toBe(1);
+  });
+
+  test("does not optimize prompts from an inconclusive-only report", () => {
+    const tasks = [{ nodeId: "answer", prompt: "Base prompt", promptHash: "hash", label: null }];
+    const cases = [
+      {
+        id: "infra",
+        metadata: {
+          promptPatches: { answer: "Replace the prompt" },
+          optimizationHints: { answer: "Chase the harness failure" },
+        },
+      },
+    ];
+    expect(
+      buildHeuristicGepaPatches(tasks, cases, {
+        results: [{ caseId: "infra", passed: false, inconclusive: true }],
+      }),
+    ).toEqual({});
+    expect(buildHeuristicGepaPatches(tasks, cases, {}).answer.prompt).toBe("Replace the prompt");
   });
 
   test("detects existing run IDs before execution", async () => {
