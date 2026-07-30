@@ -1,6 +1,5 @@
 /** @jsxImportSource react */
 import { forwardRef, useEffect, useImperativeHandle, useInsertionEffect, useRef, useState } from "react";
-import type { Crepe } from "@milkdown/crepe";
 import { crepeThemeCss } from "./crepeTheme.generated";
 
 /**
@@ -121,7 +120,17 @@ function prefersTextareaFallback(): boolean {
   return /happy-?dom|jsdom|\bBun\//i.test(agent);
 }
 
-type CrepeListener = Parameters<Parameters<Crepe["on"]>[0]>[0];
+type CrepeListener = {
+  markdownUpdated: (handler: (_ctx: unknown, markdown: string) => void) => void;
+};
+
+type CrepeInstance = {
+  editor: { action: (command: unknown) => unknown };
+  on: (configure: (listener: CrepeListener) => void) => unknown;
+  create: () => Promise<unknown>;
+  destroy: () => Promise<unknown>;
+  setReadonly: (readOnly: boolean) => unknown;
+};
 
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
   { value, onChange, readOnly = false, resetKey, className, "aria-label": ariaLabel },
@@ -130,7 +139,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   useInjectMarkdownEditorCss();
 
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const crepeRef = useRef<Crepe | null>(null);
+  const crepeRef = useRef<CrepeInstance | null>(null);
   const readyRef = useRef(false);
   const replaceAllRef = useRef<typeof import("@milkdown/kit/utils").replaceAll | null>(null);
   const suppressEchoRef = useRef(0);
@@ -184,14 +193,14 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     readyRef.current = false;
     const seed = lastMarkdownRef.current;
     let cancelled = false;
-    let crepe: Crepe | null = null;
+    let crepe: CrepeInstance | null = null;
     host.innerHTML = "";
 
     void Promise.all([import("@milkdown/crepe"), import("@milkdown/kit/utils")])
       .then(async ([{ Crepe }, { replaceAll }]) => {
         if (cancelled) return;
         replaceAllRef.current = replaceAll;
-        const editor = new Crepe({ root: host, defaultValue: seed });
+        const editor = new Crepe({ root: host, defaultValue: seed }) as CrepeInstance;
         crepe = editor;
         crepeRef.current = editor;
         editor.on((listener: CrepeListener) => {
