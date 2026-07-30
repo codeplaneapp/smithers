@@ -106,7 +106,8 @@ declare function captureWorkspaceSnapshot(cwd?: string): Effect.Effect<Workspace
  * commit, so when `@` never left the change the restore is a silent
  * filesystem no-op. That aliasing cannot be repaired from the pointer alone
  * (the historical commit is unrecoverable without the evolog position), so it
- * is logged loudly instead of silently succeeding.
+ * must fail closed instead of invoking a command known to alias to the current
+ * filesystem state.
  *
  * @param {string} pointer
  * @param {string} [cwd]

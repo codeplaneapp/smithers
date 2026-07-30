@@ -277,6 +277,16 @@ type ChildWorkflowExecuteOptions$1 = {
 };
 
 /**
+ * Reject authored Subflow ids that cannot be represented safely in a child
+ * run id before the engine persists that run.
+ * @param {string} parentRunId
+ * @param {string} nodeId
+ * @param {number} iteration
+ * @returns {string}
+ */
+declare function buildValidatedChildRunId(parentRunId: string, nodeId: string, iteration: number): string;
+
+/**
  * Execute a child workflow with prefer-resume fan-out semantics.
  *
  * The child run id doubles as the fan-out idempotency key: an explicit
@@ -295,6 +305,7 @@ declare function executeChildWorkflow(parentWorkflow: _smithers_orchestrator_com
 }>;
 declare namespace __childWorkflowInternals {
     export { buildSubflowChildRunId as buildChildWorkflowRunId };
+    export { buildValidatedChildRunId };
     export { isChildRunLiveElsewhere };
     export { loadPreservedChildResult };
     export { normalizeChildInput };
@@ -1101,6 +1112,7 @@ type TaskBridgeToolConfig$1 = {
     allowNetwork: boolean;
     maxOutputBytes: number;
     toolTimeoutMs: number;
+    acceptWorkflowChange?: boolean;
 };
 
 type HijackCompletion = {
