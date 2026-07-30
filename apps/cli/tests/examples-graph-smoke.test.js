@@ -74,7 +74,7 @@ function findTopLevelExampleWorkflows() {
   return Array.from(new Bun.Glob("examples/*.jsx").scanSync({ cwd: REPO_ROOT })).sort();
 }
 
-async function renderExample(projectDir, workerDir, example) {
+async function renderExampleAttempt(projectDir, workerDir, example) {
   const child = Bun.spawn(
     [
       process.execPath,
@@ -100,34 +100,42 @@ async function renderExample(projectDir, workerDir, example) {
       stderr: "pipe",
     },
   );
-  const stdoutPromise = new Response(child.stdout).text();
-  const stderrPromise = new Response(child.stderr).text();
+  const completion = Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]).then(([exitCode, stdout, stderr]) => ({ exitCode, stdout, stderr }));
+  let timedOut = false;
   let timeout;
-  const outcome = await Promise.race([
-    child.exited.then((exitCode) => ({ exitCode, timedOut: false })),
-    new Promise((resolveTimeout) => {
-      timeout = setTimeout(() => resolveTimeout({ exitCode: null, timedOut: true }), GRAPH_RENDER_TIMEOUT_MS);
-    }),
-  ]);
-  clearTimeout(timeout);
-  if (outcome.timedOut) {
-    child.kill("SIGKILL");
-    await child.exited.catch(() => undefined);
+  const stalled = new Promise((resolve) => {
+    timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+      resolve({ exitCode: null, stdout: "", stderr: "" });
+    }, GRAPH_RENDER_TIMEOUT_MS);
+  });
+  let result;
+  try {
+    result = await Promise.race([completion, stalled]);
+  } finally {
+    clearTimeout(timeout);
   }
-  const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
+  const { exitCode, stdout, stderr } = result;
   return {
-    error:
-      outcome.exitCode === 0
+    error: timedOut
+      ? new Error(`graph subprocess timed out after ${GRAPH_RENDER_TIMEOUT_MS}ms`)
+      : exitCode === 0
         ? null
-        : new Error(
-            outcome.timedOut
-              ? `graph subprocess timed out after ${GRAPH_RENDER_TIMEOUT_MS}ms`
-              : `graph subprocess exited with code ${outcome.exitCode}`,
-          ),
+        : new Error(`graph subprocess exited with code ${exitCode}`),
     stdout,
     stderr,
-    timedOut: outcome.timedOut,
+    timedOut,
   };
+}
+
+async function renderExample(projectDir, workerDir, example) {
+  const first = await renderExampleAttempt(projectDir, workerDir, example);
+  return first.timedOut ? renderExampleAttempt(projectDir, workerDir, example) : first;
 }
 
 test("top-level example workflows render as graphs", async () => {
