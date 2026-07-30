@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Calendar } from "../src/calendar/Calendar";
 import { calendarCss } from "../src/calendar/calendarCss";
 import { smithersUiCss } from "../src/uiCss";
 import type { CalendarEvent } from "../src/calendar/types";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // Monday, July 27 2026, 12:00 local — fixed "now" for deterministic markup.
 const NOW = new Date(2026, 6, 27, 12, 0).getTime();
@@ -76,6 +80,52 @@ describe("Calendar month view", () => {
     const html = renderToStaticMarkup(<Calendar events={[]} now={NOW} className="my-cal" style={{ maxWidth: 640 }} />);
     expect(html).toContain("my-cal");
     expect(html).toContain("max-width:640px");
+  });
+
+  test("keeps one tabbable day when a controlled date moves to another month", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(<Calendar events={[]} now={NOW} date={at(27, 0)} />);
+      });
+      await act(async () => {
+        root.render(<Calendar events={[]} now={NOW} date={new Date(2026, 8, 15).getTime()} />);
+      });
+      expect(container.querySelectorAll('[role="gridcell"][tabindex="0"]')).toHaveLength(1);
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
+  test("event clicks do not also trigger the containing day", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    let eventClicks = 0;
+    let dayClicks = 0;
+    try {
+      await act(async () => {
+        root.render(
+          <Calendar
+            events={[event("a", at(27, 9))]}
+            now={NOW}
+            onEventClick={() => {
+              eventClicks += 1;
+            }}
+            onSlotClick={() => {
+              dayClicks += 1;
+            }}
+          />,
+        );
+      });
+      await act(async () => {
+        (container.querySelector(".sui-cal-chip") as HTMLButtonElement).click();
+      });
+      expect(eventClicks).toBe(1);
+      expect(dayClicks).toBe(0);
+    } finally {
+      await act(async () => root.unmount());
+    }
   });
 });
 

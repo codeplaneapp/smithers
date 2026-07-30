@@ -94,13 +94,22 @@ function eventElement(
   const href = event.href === undefined ? undefined : safeHref(event.href);
   if (href !== undefined && !onEventClick) {
     return (
-      <a {...props} key={event.id} href={href} title={title}>
+      <a {...props} key={event.id} href={href} title={title} onClick={(clickEvent) => clickEvent.stopPropagation()}>
         {children}
       </a>
     );
   }
   return (
-    <button {...props} key={event.id} type="button" title={title} onClick={() => onEventClick?.(event)}>
+    <button
+      {...props}
+      key={event.id}
+      type="button"
+      title={title}
+      onClick={(clickEvent) => {
+        clickEvent.stopPropagation();
+        onEventClick?.(event);
+      }}
+    >
       {children}
     </button>
   );
@@ -155,6 +164,9 @@ function MonthView({
   const days = useMemo(() => monthGridDays(anchorMs, weekStartsOn), [anchorMs, weekStartsOn]);
   const month = new Date(anchorMs).getMonth();
   const [focusedKey, setFocusedKey] = useState(() => dayKey(nowMs));
+  const effectiveFocusedKey = days.some((dayMs) => dayKey(dayMs) === focusedKey)
+    ? focusedKey
+    : dayKey(days[0] ?? anchorMs);
   const [openKey, setOpenKey] = useState<string | null>(null);
   // Arrow-key travel past the grid edge re-anchors the month; the target cell
   // only exists after the re-render, so focus it in an effect.
@@ -239,7 +251,7 @@ function MonthView({
             <div
               key={key}
               role="gridcell"
-              tabIndex={key === focusedKey ? 0 : -1}
+              tabIndex={key === effectiveFocusedKey ? 0 : -1}
               data-date={key}
               data-today={isSameDay(dayMs, nowMs) || undefined}
               data-outside={new Date(dayMs).getMonth() !== month || undefined}
