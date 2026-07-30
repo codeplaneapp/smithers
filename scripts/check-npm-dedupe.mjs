@@ -25,6 +25,14 @@ const args = process.argv.slice(2);
 const keepTmp = args.includes("--keep-tmp");
 const maxPackagesFlag = args.indexOf("--max-packages");
 const maxPackages = maxPackagesFlag === -1 ? 900 : Number(args[maxPackagesFlag + 1]);
+const npmInstallArgs = [
+  "install",
+  "--package-lock-only",
+  "--ignore-scripts",
+  "--no-audit",
+  "--no-fund",
+  "--loglevel=error",
+];
 
 // Deps that must resolve to exactly one copy for npm users. effect duplicated
 // 20x and pglite 3x in the 0.31.0 install tree.
@@ -149,11 +157,14 @@ function main() {
     );
 
     console.log(`resolving ${packages.length} workspace packages with npm arborist (registry metadata)...`);
-    const install = spawnSync(
-      process.platform === "win32" ? "npm.cmd" : "npm",
-      ["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error"],
-      { cwd: tmp, stdio: "inherit", timeout: 10 * 60_000 },
-    );
+    const install =
+      process.platform === "win32"
+        ? spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", "npm.cmd", ...npmInstallArgs], {
+            cwd: tmp,
+            stdio: "inherit",
+            timeout: 10 * 60_000,
+          })
+        : spawnSync("npm", npmInstallArgs, { cwd: tmp, stdio: "inherit", timeout: 10 * 60_000 });
     if (install.error || install.status !== 0) {
       throw new Error(`npm install --package-lock-only failed: ${install.error?.message ?? `exit ${install.status}`}`);
     }
