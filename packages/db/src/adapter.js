@@ -521,7 +521,10 @@ function isAlertActiveStatus(status) {
  * @returns {RunnableEffect<A, E>}
  */
 function runnableEffect(effect) {
-  const runnable = effect;
+  // Keep the thenable wrapper distinct from the Effect. Fast-path Effects such
+  // as Effect.succeed are also Exit values; mutating one with `.then` makes
+  // Effect.runPromise resolve the Exit as a thenable and recurse forever.
+  const runnable = Effect.suspend(() => effect);
   if (typeof runnable.then !== "function") {
     Object.defineProperty(runnable, "then", {
       configurable: true,
