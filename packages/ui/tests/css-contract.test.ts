@@ -208,12 +208,7 @@ describe("geometry contract", () => {
   });
 
   test("does not restore selectors with no component or consumer references", () => {
-    for (const selector of [
-      ".sui-badge-info",
-      ".sui-md-code-block",
-      ".sui-msg-main",
-      ".sui-vault-save-status",
-    ]) {
+    for (const selector of [".sui-badge-info", ".sui-md-code-block", ".sui-msg-main", ".sui-vault-save-status"]) {
       expect(smithersUiCss).not.toContain(selector);
     }
   });
