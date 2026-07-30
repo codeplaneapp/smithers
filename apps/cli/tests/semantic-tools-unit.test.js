@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -154,6 +155,9 @@ function makeEmptyEffectStorage() {
       throw new Error(`unexpected queryAll: ${sql}`);
     },
     queryAllRaw: async (sql, params) => {
+      if (sql.includes("FROM _smithers_runs")) {
+        return [{ parent_run_id: null, config_json: null }];
+      }
       if (sql.includes("INSERT INTO _smithers_rewind_leases")) {
         leases.set(params[0], params[1]);
         return [{ owner_token: params[1] }];
@@ -1781,6 +1785,11 @@ describe("semantic tool definitions", () => {
 
   test("revert_attempt handler covers not-found, no-jjPointer, and jj-failure branches", async () => {
     const harness = makeHarness();
+    const jjAttempt = harness.state.attempts.find(
+      (attempt) => attempt.runId === "run-1" && attempt.nodeId === "artifact-node" && attempt.attempt === 1,
+    );
+    jjAttempt.jjCwd = mkdtempSync(join(tmpdir(), "smithers-revert-attempt-"));
+    tempDirs.push(jjAttempt.jjCwd);
 
     // Attempt not found → success: false with descriptive error
     const notFound = await harness.call("revert_attempt", {
