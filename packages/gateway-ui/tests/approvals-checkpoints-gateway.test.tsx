@@ -15,7 +15,13 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { SmithersCollectionsProvider } from "@smithers-orchestrator/gateway-react";
-import { GatewayApprovalConfirmation, GatewayApprovalList, gatewayApprovalKey } from "../src/GatewayApprovals.tsx";
+import { ApprovalPanel } from "../src/ApprovalPanel.tsx";
+import {
+  GatewayApprovalConfirmation,
+  GatewayApprovalList,
+  gatewayApprovalKey,
+  submitDecision,
+} from "../src/GatewayApprovals.tsx";
 import { GatewayCheckpointControls } from "../src/GatewayCheckpointControls.tsx";
 import { startInMemoryGateway, type InMemoryGateway } from "./inMemoryGateway.ts";
 
@@ -113,6 +119,32 @@ const approvalRow = {
 describe("gatewayApprovalKey", () => {
   test("is runId:nodeId:iteration", () => {
     expect(gatewayApprovalKey(approvalRow)).toBe("run-1:gate:0");
+  });
+
+  test("keeps ApprovalPanel as an alias of the single approval list surface", () => {
+    expect(ApprovalPanel).toBe(GatewayApprovalList);
+  });
+
+  test("submits the canonical server payload", async () => {
+    const requests: unknown[] = [];
+    await submitDecision(
+      async (request) => {
+        requests.push(request);
+      },
+      approvalRow,
+      false,
+      "  not yet  ",
+    );
+    expect(requests).toEqual([
+      {
+        runId: "run-1",
+        nodeId: "gate",
+        iteration: 0,
+        approved: false,
+        decision: { approved: false, note: "not yet" },
+        note: "not yet",
+      },
+    ]);
   });
 });
 

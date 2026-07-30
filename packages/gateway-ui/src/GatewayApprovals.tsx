@@ -1,7 +1,7 @@
 /** @jsxImportSource react */
 import { useEffect, useRef, useState, type FocusEvent, type ReactNode } from "react";
 import type { GatewayApprovalRow } from "@smithers-orchestrator/gateway-client";
-import type { ListApprovalsRequest } from "@smithers-orchestrator/gateway-client/rpc";
+import type { ListApprovalsRequest, SubmitApprovalRequest } from "@smithers-orchestrator/gateway-client/rpc";
 import { useGatewayActions, useGatewayApprovals } from "@smithers-orchestrator/gateway-react";
 import {
   Button,
@@ -21,6 +21,24 @@ export function gatewayApprovalKey(row: GatewayApprovalRow): string {
   return `${row.runId}:${row.nodeId}:${row.iteration}`;
 }
 
+/** Submit the canonical gateway approval payload for one pending row. */
+export function submitDecision(
+  submitApproval: (request: SubmitApprovalRequest) => Promise<unknown>,
+  approval: GatewayApprovalRow,
+  approved: boolean,
+  note?: string,
+): Promise<unknown> {
+  const trimmed = note?.trim();
+  return submitApproval({
+    runId: approval.runId,
+    nodeId: approval.nodeId,
+    iteration: approval.iteration,
+    approved,
+    decision: { approved, ...(trimmed ? { note: trimmed } : {}) },
+    ...(trimmed ? { note: trimmed } : {}),
+  });
+}
+
 export type GatewayApprovalConfirmationProps = {
   /** The approval row to render and resolve (host/list selects it). */
   approval: GatewayApprovalRow;
@@ -32,8 +50,7 @@ export type GatewayApprovalConfirmationProps = {
 
 /**
  * A Gateway-connected Confirmation for one pending approval row. Submits
- * exactly `submitApproval({ runId, nodeId, iteration, approved, decision:
- * { approved, note? }, note? })`; requested → approving|denying in flight →
+ * through {@link submitDecision}; requested → approving|denying in flight →
  * approved|denied on resolve, failed-submission (retryable) on reject,
  * expired when the row leaves the approvals collection while unresolved, and
  * unavailable (recovering to requested) while the approvals read fails. A
@@ -109,20 +126,12 @@ export function GatewayApprovalConfirmation({
     setConfirmingDeny(false);
     const submittedKey = key;
     setState(approved ? "approving" : "denying");
-    const trimmed = noteValue.trim();
     // If the approval identity changes while this submission is in flight,
     // the settle below belongs to the PREVIOUS gate: it must never write
     // state for the current one.
     const isCurrentIdentity = () => keyRef.current === submittedKey;
     try {
-      await actions.submitApproval({
-        runId: approval.runId,
-        nodeId: approval.nodeId,
-        iteration: approval.iteration,
-        approved,
-        decision: { approved, ...(note && trimmed !== "" ? { note: trimmed } : {}) },
-        ...(note && trimmed !== "" ? { note: trimmed } : {}),
-      });
+      await submitDecision(actions.submitApproval, approval, approved, note ? noteValue : undefined);
       // A consumer observer throwing must not convert a successful
       // submission into a failure state.
       try {

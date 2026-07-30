@@ -13,6 +13,7 @@ re-exports it (e.g. `NodeRow`). External importers exist
 or split files in this directory.
 
 Component map:
+
 - `theme.ts` — style tokens as `var(--token, #lightFallback)` expressions plus
   the status→color map. Tokens are `var()` expressions, so derive tints with
   `color-mix(...)`, never a hex+alpha suffix.
@@ -22,8 +23,11 @@ Component map:
   Gateway's `/monitor`, deep-linked to the current `runId`).
 - Hook-driven: `RunList`, `RunTree`, `RunEventLog` (structured event rows with a
   kind badge, nodeId chip, per-row JSON, heartbeat coalescing, and node
-  selection), `NodeChatStream`, `ApprovalPanel`, `LaunchButton`,
+  selection), `NodeChatStream`, `GatewayApprovalList` (`ApprovalPanel` is its
+  compatibility alias), `LaunchButton`,
   `WorkflowPicker`, `ConnectionBadge`, `NodeOutputView`, `NodeOutputCard`.
+- `OneshotSurface` composes the oneshot run view; `HijackTerminal` owns its PTY
+  websocket and terminal adapter.
 - `SimpleWorkflowDashboard` — the batteries-included composition of the above.
 - `WorkflowGraph` — an n8n-style ReactFlow + dagre DAG canvas built from a
   `WorkflowSpecNode[]`; each node is a self-styled `SmithersTaskNode` card (kind
@@ -38,9 +42,7 @@ the unwrapped row — the generic form of the `OutputCard`/`SummaryPanel` shape
 hand-rolled across `.smithers/ui/*` (ticket-fleet, issue-train, orchbench, …).
 It also folds in the `key={remountKey + ":" + nodeId}` remount convention.
 
-Gotchas: list-shaped RPCs (runs, approvals) are pull-only on the local gateway
-path, so those components poll via `pollMs` (default 2000, `0` disables).
-`NodeRow` keys children by `runNodeKey` (structural position), not logical id,
+Gotchas: `NodeRow` keys children by `runNodeKey` (structural position), not logical id,
 because loop/retry attempts share an id. `tests/` covers only the pure pieces
 via `renderToStaticMarkup`; hook-driven components are exercised by the
 gateway-react integration tests and the real-backend e2e suite.

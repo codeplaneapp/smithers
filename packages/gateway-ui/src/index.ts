@@ -75,7 +75,6 @@ export {
 } from "./MonitorButton";
 export { ApprovalPanel, type ApprovalPanelProps } from "./ApprovalPanel";
 export { LaunchButton, type LaunchButtonProps } from "./LaunchButton";
-export { CronCalendar, type CronCalendarProps } from "./CronCalendar";
 export { WorkflowPicker, type WorkflowPickerProps } from "./WorkflowPicker";
 export {
   NodeOutputView,
@@ -113,6 +112,7 @@ export {
   GatewayApprovalConfirmation,
   GatewayApprovalList,
   gatewayApprovalKey,
+  submitDecision,
   type GatewayApprovalConfirmationProps,
   type GatewayApprovalListProps,
 } from "./GatewayApprovals";
@@ -121,12 +121,11 @@ export { SmithersCanvasNode, SmithersNodeHandles } from "./SmithersCanvasNode";
 export {
   HijackCandidateButton,
   OneshotSurface,
-  HijackTerminal,
   type HijackCandidateButtonProps,
   type OneshotSurfaceProps,
   type OneshotSurfaceTab,
-  type HijackTerminalProps,
 } from "./OneshotSurface";
+export { HijackTerminal, type HijackTerminalProps } from "./HijackTerminal";
 export {
   hijackActionFor,
   hijackCandidateForNode,

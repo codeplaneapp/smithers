@@ -153,6 +153,7 @@ const SANCTIONED_GATEWAY_UI_PROGRAM_FILES = new Set([
   "packages/gateway-ui/src/CronCalendar.tsx",
   "packages/gateway-ui/src/GatewayApprovals.tsx",
   "packages/gateway-ui/src/GatewayCheckpointControls.tsx",
+  "packages/gateway-ui/src/HijackTerminal.tsx",
   "packages/gateway-ui/src/OneshotSurface.tsx",
   "packages/gateway-ui/src/MonitorButton.tsx",
   "packages/gateway-ui/src/SmithersCanvasNode.tsx",
