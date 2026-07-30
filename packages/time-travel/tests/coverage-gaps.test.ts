@@ -10,7 +10,6 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { getTableConfig } from "drizzle-orm/sqlite-core";
-import { Effect } from "effect";
 import { ensureSmithersTables } from "@smithers-orchestrator/db/ensure";
 import { SmithersDb } from "@smithers-orchestrator/db/adapter";
 import * as timeTravelBarrel from "../src/index.js";
@@ -31,6 +30,9 @@ import { loadVcsTag } from "../src/vcs-version/index.js";
 import { retryTask } from "../src/retry-task.js";
 import { timeTravel } from "../src/timetravel.js";
 import { spawnSync } from "node:child_process";
+import { chmodSync } from "node:fs";
+import { delimiter } from "node:path";
+import { createTempRepo, pinSqliteBackend, runSmithers } from "../../smithers/tests/e2e-helpers.js";
 
 function createTestDb() {
   const sqlite = new Database(":memory:");
@@ -573,6 +575,90 @@ describe("forkRun failure branches", () => {
 });
 
 describe("retryTask branches", () => {
+  test("CLI rollback restores completed nested child runs after pre-ownership resume failure", () => {
+    const repo = createTempRepo();
+    pinSqliteBackend(repo.dir);
+    repo.write(
+      "workflow.tsx",
+      `/** @jsxImportSource smithers-orchestrator */
+import { createSmithers, Subflow } from "smithers-orchestrator";
+import { z } from "zod";
+
+const { smithers, Workflow, Task, outputs } = createSmithers({
+  input: z.object({ token: z.string() }),
+  result: z.object({ value: z.number() }),
+});
+
+const grandchild = smithers(
+  () => (
+    <Workflow name="retry-rollback-grandchild">
+      <Task id="work" output={outputs.result}>{{ value: 1 }}</Task>
+    </Workflow>
+  ),
+  { output: outputs.result },
+);
+const child = smithers(
+  () => (
+    <Workflow name="retry-rollback-child">
+      <Subflow id="nested" mode="childRun" output={outputs.result} workflow={grandchild} />
+    </Workflow>
+  ),
+  { output: outputs.result },
+);
+export default smithers(() => (
+  <Workflow name="retry-rollback-parent">
+    <Subflow id="review" mode="childRun" output={outputs.result} workflow={child} />
+  </Workflow>
+));
+`,
+    );
+    const runId = "retry-cli-nested-pre-ownership-failure";
+    const childRunId = `${runId}:child:review:0`;
+    const grandchildRunId = `${childRunId}:child:nested:0`;
+    const runIds = [runId, childRunId, grandchildRunId];
+    const initial = runSmithers(
+      ["up", "workflow.tsx", "--run-id", runId, "--input", JSON.stringify({ token: "seed" })],
+      {
+        cwd: repo.dir,
+        format: "json",
+        timeoutMs: 90_000,
+      },
+    );
+    expect(initial.exitCode, `${initial.stdout}\n${initial.stderr}`).toBe(0);
+
+    const snapshot = (sqlite: Database, id: string) => ({
+      run: sqlite.query("SELECT * FROM _smithers_runs WHERE run_id = ?").get(id),
+      nodes: sqlite.query("SELECT * FROM _smithers_nodes WHERE run_id = ? ORDER BY node_id, iteration").all(id),
+      attempts: sqlite
+        .query("SELECT * FROM _smithers_attempts WHERE run_id = ? ORDER BY node_id, iteration, attempt")
+        .all(id),
+      outputs: sqlite.query("SELECT * FROM result WHERE run_id = ? ORDER BY node_id, iteration").all(id),
+    });
+    const sqlite = new Database(repo.path("smithers.db"));
+    const before = Object.fromEntries(runIds.map((id) => [id, snapshot(sqlite, id)]));
+    sqlite.query("DELETE FROM input WHERE run_id = ?").run(runId);
+    sqlite.exec(
+      "CREATE TRIGGER block_retry_input_restore BEFORE INSERT ON input BEGIN SELECT RAISE(ABORT, 'injected missing durable input'); END",
+    );
+    sqlite.close();
+
+    const retried = runSmithers(["retry-task", "workflow.tsx", "--run-id", runId, "--node-id", "review"], {
+      cwd: repo.dir,
+      format: "json",
+      timeoutMs: 90_000,
+    });
+    expect(retried.exitCode, `${retried.stdout}\n${retried.stderr}`).toBe(1);
+    expect(retried.stderr).toContain("retry reset finished");
+
+    const check = new Database(repo.path("smithers.db"), { readonly: true });
+    try {
+      const after = Object.fromEntries(runIds.map((id) => [id, snapshot(check, id)]));
+      expect(after).toEqual(before);
+    } finally {
+      check.close();
+    }
+  }, 120_000);
+
   test("fails when the run row is missing", async () => {
     const { adapter, sqlite } = createTestDb();
     try {
@@ -869,6 +955,138 @@ describe("retryTask branches", () => {
       sqlite.close();
     }
   });
+});
+
+describe("scorer identity replay", () => {
+  test("upserts a deterministic replay over a migrated v0.31 scorer row", async () => {
+    const sqlite = new Database(":memory:");
+    sqlite.exec(`
+      CREATE TABLE _smithers_scorers (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        iteration INTEGER NOT NULL DEFAULT 0,
+        attempt INTEGER NOT NULL DEFAULT 0,
+        scorer_id TEXT NOT NULL,
+        scorer_name TEXT NOT NULL,
+        source TEXT NOT NULL,
+        score REAL NOT NULL,
+        reason TEXT,
+        meta_json TEXT,
+        input_json TEXT,
+        output_json TEXT,
+        ground_truth_json TEXT,
+        context_json TEXT,
+        latency_ms REAL,
+        scored_at_ms INTEGER NOT NULL,
+        duration_ms REAL
+      );
+      INSERT INTO _smithers_scorers
+        (id, run_id, node_id, iteration, attempt, scorer_id, scorer_name, source, score, scored_at_ms)
+      VALUES
+        ('5f65bd31-7d43-4e45-b30a-25f31216b0d0', 'run-legacy', 'review', 0, 1,
+         'quality', 'Quality', 'live', 0.25, 1000);
+    `);
+    const db = drizzle(sqlite);
+    ensureSmithersTables(db);
+    const adapter = new SmithersDb(db);
+    try {
+      await adapter.insertScorerResult({
+        id: "scorer_deterministic",
+        runId: "run-legacy",
+        nodeId: "review",
+        iteration: 0,
+        attempt: 1,
+        scorerId: "quality",
+        scorerName: "Quality",
+        source: "live",
+        score: 0.9,
+        scoredAtMs: 2000,
+      });
+
+      expect(await adapter.listScorerResults("run-legacy")).toEqual([
+        expect.objectContaining({
+          id: "scorer_deterministic",
+          score: 0.9,
+          scoredAtMs: 2000,
+        }),
+      ]);
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+describe("oneshot resume preflight", () => {
+  test("does not classify interrupted-run edits as pre-existing work on resume", () => {
+    const repo = createTempRepo();
+    pinSqliteBackend(repo.dir);
+    repo.write("tracked.txt", "before\n");
+    repo.write(".gitignore", ".smithers/*\nsmithers.db*\n");
+    repo.write("bin/codex", "#!/bin/sh\nexit 0\n");
+    chmodSync(repo.path("bin/codex"), 0o755);
+    repo.write(
+      ".smithers/workflows/oneshot.tsx",
+      `/** @jsxImportSource smithers-orchestrator */
+import { createSmithers } from "smithers-orchestrator";
+import { z } from "zod";
+const { Workflow, Task, smithers, outputs } = createSmithers({
+  input: z.object({ goal: z.string(), review: z.enum(["on", "off"]), model: z.string() }),
+  receipt: z.object({ ok: z.boolean() }),
+});
+export default smithers(() => (
+  <Workflow name="custom-oneshot">
+    <Task id="done" output={outputs.receipt}>{{ ok: true }}</Task>
+  </Workflow>
+));
+`,
+    );
+    for (const args of [
+      ["init", "-b", "main"],
+      ["config", "user.name", "Smithers Test"],
+      ["config", "user.email", "smithers@example.test"],
+      ["config", "commit.gpgsign", "false"],
+      ["add", "."],
+      ["commit", "-m", "initial"],
+    ]) {
+      const result = spawnSync("git", args, { cwd: repo.dir, encoding: "utf8" });
+      expect(result.status, result.stderr).toBe(0);
+    }
+    repo.write("tracked.txt", "interrupted run work\n");
+    const result = runSmithers(
+      [
+        "oneshot",
+        "continue interrupted work",
+        "--run-id",
+        "oneshot-resume-preflight",
+        "--resume",
+        "true",
+        "--force",
+        "true",
+        "--detach",
+        "false",
+        "--open",
+        "false",
+        "--review",
+        "off",
+        "--preflight",
+        "auto",
+      ],
+      {
+        cwd: repo.dir,
+        format: "json",
+        timeoutMs: 60_000,
+        env: {
+          ...process.env,
+          PATH: `${repo.path("bin")}${delimiter}${process.env.PATH ?? ""}`,
+          SMITHERS_NO_SKILL_REFRESH: "1",
+          OPENAI_API_KEY: "sk-oneshot-resume-preflight-fixture",
+        },
+      },
+    );
+
+    expect(`${result.stdout}\n${result.stderr}`).not.toContain("oneshot preflight: working copy");
+  }, 90_000);
 });
 
 describe("timeTravel branches", () => {
