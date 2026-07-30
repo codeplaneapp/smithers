@@ -3973,6 +3973,7 @@ function checkGatewaySdkDocsMatchExports() {
     [GATEWAY_REACT_USE_GATEWAY_RPC, "): GatewayAsyncState<GatewayRpcPayload<Method>>"],
     [GATEWAY_REACT_USE_GATEWAY_NODE_OUTPUT, "const { client, collections } = useSmithersCollections();"],
     [GATEWAY_REACT_USE_GATEWAY_NODE_OUTPUT, "const next = await client.api.getNodeOutput(request);"],
+    [GATEWAY_REACT_USE_GATEWAY_NODE_OUTPUT, "const eventCollection = collections.runEvents(runId);"],
     [GATEWAY_INTEGRATION, "createSmithersCollections"],
     [GATEWAY_INTEGRATION, "createSmithersDataClient"],
     [GATEWAY_INTEGRATION, "gatewayKeys"],
