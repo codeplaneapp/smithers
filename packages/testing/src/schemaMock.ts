@@ -15,6 +15,8 @@ type JsonSchema = {
   maximum?: number;
   exclusiveMinimum?: number;
   exclusiveMaximum?: number;
+  multipleOf?: number;
+  pattern?: string;
   minItems?: number;
   maxItems?: number;
   required?: readonly string[];
@@ -53,16 +55,170 @@ function stringForFormat(format: string | undefined): string {
   }
 }
 
-function numberFromSchema(schema: JsonSchema): number {
-  let value = schema.minimum ?? 0;
-  if (schema.exclusiveMinimum !== undefined && value <= schema.exclusiveMinimum) {
-    value = schema.exclusiveMinimum + 1;
+function nextRepresentable(value: number, direction: 1 | -1): number {
+  if (!Number.isFinite(value)) return value;
+  if (value === 0) return direction === 1 ? Number.MIN_VALUE : -Number.MIN_VALUE;
+  const buffer = new ArrayBuffer(8);
+  const view = new DataView(buffer);
+  view.setFloat64(0, value);
+  let bits = view.getBigUint64(0);
+  bits += (value >= 0 ? direction : -direction) === 1 ? 1n : -1n;
+  view.setBigUint64(0, bits);
+  return view.getFloat64(0);
+}
+
+function greatestCommonDivisor(left: bigint, right: bigint): bigint {
+  while (right !== 0n) {
+    const remainder = left % right;
+    left = right;
+    right = remainder;
   }
-  if (schema.maximum !== undefined && value > schema.maximum) value = schema.maximum;
-  if (schema.exclusiveMaximum !== undefined && value >= schema.exclusiveMaximum) {
-    value = schema.exclusiveMaximum - 1;
+  return left < 0n ? -left : left;
+}
+
+/**
+ * JSON numbers are finite decimals. Reduce the decimal multiple to p/q; an
+ * integer n is a multiple of p/q exactly when n is a multiple of p after the
+ * fraction is reduced.
+ */
+function integerStepFromMultiple(multiple: number): number {
+  const [mantissa, exponentText] = multiple.toString().toLowerCase().split("e");
+  const exponent = Number(exponentText ?? 0);
+  const [whole, fraction = ""] = mantissa.split(".");
+  const digits = `${whole}${fraction}`.replace(/^\+/, "");
+  let numerator = BigInt(digits);
+  let denominator = 1n;
+  const scale = fraction.length - exponent;
+  if (scale > 0) denominator = 10n ** BigInt(scale);
+  else if (scale < 0) numerator *= 10n ** BigInt(-scale);
+  const divisor = greatestCommonDivisor(numerator, denominator);
+  return Number((numerator < 0n ? -numerator : numerator) / divisor);
+}
+
+function numberFromSchema(schema: JsonSchema, integer: boolean): number {
+  let lower = schema.minimum ?? Number.NEGATIVE_INFINITY;
+  let upper = schema.maximum ?? Number.POSITIVE_INFINITY;
+  if (schema.exclusiveMinimum !== undefined) {
+    lower = Math.max(
+      lower,
+      integer ? Math.floor(schema.exclusiveMinimum) + 1 : nextRepresentable(schema.exclusiveMinimum, 1),
+    );
   }
-  return value;
+  if (schema.exclusiveMaximum !== undefined) {
+    upper = Math.min(
+      upper,
+      integer ? Math.ceil(schema.exclusiveMaximum) - 1 : nextRepresentable(schema.exclusiveMaximum, -1),
+    );
+  }
+  if (integer) {
+    lower = Math.ceil(lower);
+    upper = Math.floor(upper);
+  }
+  const multiple = schema.multipleOf && schema.multipleOf > 0 ? Math.abs(schema.multipleOf) : integer ? 1 : null;
+  if (multiple !== null) {
+    if (integer) {
+      const step = integerStepFromMultiple(multiple);
+      if (!Number.isFinite(step) || step <= 0) {
+        throw new TypeError("JSON Schema multipleOf cannot produce a representable integer");
+      }
+      const firstMultiplier = Number.isFinite(lower) ? Math.ceil(lower / step) : 0;
+      const lastMultiplier = Number.isFinite(upper) ? Math.floor(upper / step) : Infinity;
+      const multiplier = firstMultiplier <= 0 && lastMultiplier >= 0 ? 0 : firstMultiplier;
+      const value = multiplier * step;
+      if (firstMultiplier > lastMultiplier || value < lower || value > upper || !Number.isInteger(value)) {
+        throw new TypeError("JSON Schema numeric constraints have no representable integer multiple");
+      }
+      return value;
+    }
+    let firstMultiplier = Number.isFinite(lower) ? Math.ceil(lower / multiple) : 0;
+    let lastMultiplier = Number.isFinite(upper) ? Math.floor(upper / multiple) : Infinity;
+    if (Number.isFinite(lower) && (firstMultiplier - 1) * multiple >= lower) firstMultiplier -= 1;
+    if (Number.isFinite(upper) && (lastMultiplier + 1) * multiple <= upper) lastMultiplier += 1;
+    let multiplier = firstMultiplier <= 0 && lastMultiplier >= 0 ? 0 : firstMultiplier;
+    let value = multiplier * multiple;
+    if (firstMultiplier > lastMultiplier || value < lower || value > upper) {
+      throw new TypeError("JSON Schema numeric constraints have no representable multiple");
+    }
+    return value;
+  }
+  if (lower > upper) throw new TypeError("JSON Schema numeric constraints describe an empty interval");
+  if (lower <= 0 && upper >= 0) return 0;
+  if (Number.isFinite(lower) && Number.isFinite(upper)) {
+    const midpoint = lower + (upper - lower) / 2;
+    return midpoint >= lower && midpoint <= upper ? midpoint : lower;
+  }
+  return Number.isFinite(lower) ? lower : Number.isFinite(upper) ? upper : 0;
+}
+
+function characterFromClass(source: string): string {
+  const negated = source.startsWith("^");
+  const body = negated ? source.slice(1) : source;
+  const candidates = ["a", "A", "0", "_", "-", " "];
+  let expression: RegExp;
+  try {
+    expression = new RegExp(`^[${source}]$`);
+  } catch {
+    return "a";
+  }
+  return candidates.find((candidate) => expression.test(candidate)) ?? (negated ? "a" : (body[0] ?? "a"));
+}
+
+/**
+ * Produce the shortest useful witness for common JSON-Schema regexes. The
+ * final safeParse remains authoritative; unsupported regex features simply
+ * fall through to the other candidates instead of being trusted blindly.
+ */
+function stringForPattern(pattern: string): string | null {
+  const source = pattern.replace(/^\^/, "").replace(/\$$/, "");
+  const pieces: string[] = [];
+  for (let index = 0; index < source.length;) {
+    let token = "";
+    const char = source[index];
+    if (char === "\\") {
+      const escaped = source[index + 1];
+      token = escaped === "d" ? "0" : escaped === "w" ? "a" : escaped === "s" ? " " : (escaped ?? "");
+      index += 2;
+    } else if (char === "[") {
+      const end = source.indexOf("]", index + 1);
+      if (end < 0) return null;
+      token = characterFromClass(source.slice(index + 1, end));
+      index = end + 1;
+    } else if (char === ".") {
+      token = "a";
+      index += 1;
+    } else if ("()|".includes(char)) {
+      // Choose the first simple alternative/group. Complex constructs are
+      // validated below and can fall back without throwing.
+      index += 1;
+      continue;
+    } else {
+      token = char;
+      index += 1;
+    }
+    let count = 1;
+    if (source[index] === "*") {
+      count = 0;
+      index += 1;
+    } else if (source[index] === "?") {
+      count = 0;
+      index += 1;
+    } else if (source[index] === "+") {
+      index += 1;
+    } else if (source[index] === "{") {
+      const end = source.indexOf("}", index + 1);
+      const minimum = end < 0 ? NaN : Number(source.slice(index + 1, end).split(",")[0]);
+      if (!Number.isFinite(minimum)) return null;
+      count = minimum;
+      index = end + 1;
+    }
+    pieces.push(token.repeat(count));
+  }
+  const value = pieces.join("");
+  try {
+    return new RegExp(pattern).test(value) ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 function jsonSchemaExample(schema: JsonSchema, depth = 0): unknown {
@@ -89,9 +245,9 @@ function jsonSchemaExample(schema: JsonSchema, depth = 0): unknown {
     case "boolean":
       return false;
     case "integer":
-      return Math.trunc(numberFromSchema(schema));
+      return numberFromSchema(schema, true);
     case "number":
-      return numberFromSchema(schema);
+      return numberFromSchema(schema, false);
     case "array": {
       if (schema.prefixItems?.length) {
         return schema.prefixItems.map((item) => jsonSchemaExample(item, depth + 1));
@@ -108,7 +264,7 @@ function jsonSchemaExample(schema: JsonSchema, depth = 0): unknown {
     }
     case "string":
     default: {
-      let value = stringForFormat(schema.format);
+      let value = (schema.pattern ? stringForPattern(schema.pattern) : null) ?? stringForFormat(schema.format);
       const minimum = schema.minLength ?? 0;
       if (value.length < minimum) value += "a".repeat(minimum - value.length);
       if (schema.maxLength !== undefined && value.length > schema.maxLength) {
@@ -130,9 +286,14 @@ function formatIssues(issues: readonly unknown[]): string {
 }
 
 export function schemaMock<T>(schema: SafeSchema<T>): T {
-  const first = JSON.parse(zodSchemaToJsonExample(schema as Parameters<typeof zodSchemaToJsonExample>[0]));
-  const firstResult = schema.safeParse(first);
-  if (firstResult.success) return firstResult.data;
+  try {
+    const first = JSON.parse(zodSchemaToJsonExample(schema as Parameters<typeof zodSchemaToJsonExample>[0]));
+    const firstResult = schema.safeParse(first);
+    if (firstResult.success) return firstResult.data;
+  } catch {
+    // Primitive schemas and refinements unsupported by the legacy example
+    // generator must reach the JSON-Schema fallback below.
+  }
 
   const jsonSchema = toJSONSchema(schema as unknown as ZodType) as JsonSchema;
   const candidate = jsonSchemaExample(jsonSchema);
