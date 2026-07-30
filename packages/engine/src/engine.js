@@ -7645,7 +7645,11 @@ async function runWorkflowBodyDriver(workflow, opts) {
       );
       const inProgress = inProgressByRun.flat();
       const runningDescendants = descendantRuns.filter((run) => run?.status === "running");
-      if (activeDriverTaskKeys.size === 0 && inProgress.length === 0 && runningDescendants.length === 0) {
+      // Once the driver has released every task and no child run is still
+      // active, any remaining in-progress rows are abandoned durable state.
+      // finalizeCancelledRun below owns repairing those rows; waiting for the
+      // full settle timeout cannot make an already-detached task update them.
+      if (activeDriverTaskKeys.size === 0 && runningDescendants.length === 0) {
         return;
       }
       if (nowMs() >= deadlineAt) {
