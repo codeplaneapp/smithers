@@ -982,6 +982,15 @@ async function syncWaitForEventDurableDeferredFromDb(adapter, runId, desc, snaps
       if (!previous || previous.signalName !== snapshot.signalName) continue;
       if ((previous.correlationId ?? null) !== (snapshot.correlationId ?? null)) continue;
       if (typeof previous.resolvedSignalSeq === "number") {
+        const sameWaiter = attempt.nodeId === desc.nodeId && (attempt.iteration ?? 0) === desc.iteration;
+        const currentWaiterWasAlreadyParked =
+          !sameWaiter && typeof previous.receivedAtMs === "number" && previous.receivedAtMs >= snapshot.startedAtMs;
+        // A signal is broadcast to every matching waiter that was parked when
+        // it arrived. If the process crashed partway through that broadcast,
+        // a resolved sibling must not advance this waiter's replay cursor past
+        // the still-undelivered signal. Later, sequential waiters do advance
+        // past it because their start time follows its receive time.
+        if (currentWaiterWasAlreadyParked) continue;
         afterSeq = Math.max(afterSeq, previous.resolvedSignalSeq);
       }
     }
