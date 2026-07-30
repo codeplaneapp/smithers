@@ -3358,7 +3358,7 @@ function checkOpenApiDocsMatchCurrentPackage() {
     [PACKAGE_CONFIGURATION_REFERENCE, "[OpenAPI Tools](/concepts/openapi-tools), [Tools](/integrations/tools)"],
     [RUNTIME_EVENTS_REFERENCE, "OpenApiToolCalled` is categorized as `openapi` for forward compatibility"],
     [EVENT_TYPES_REFERENCE, "OpenApiToolCalled` is typed and categorized for forward compatibility"],
-    [OPENAPI_HELPERS_SOURCE, "Metric.increment(openApiToolCallsTotal)"],
+    [OPENAPI_HELPERS_SOURCE, "Metric.update(openApiToolCallsTotal, 1)"],
     [OPENAPI_HELPERS_SOURCE, "Metric.update(openApiToolDuration, nowMs() - started)"],
     [OPENAPI_HELPERS_SOURCE, "Effect.annotateLogs"],
     [OPENAPI_HELPERS_SOURCE, "Effect.withLogSpan"],
