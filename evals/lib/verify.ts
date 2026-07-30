@@ -194,13 +194,9 @@ function graphVerify(artifact: string, v: VerifySpec): EvalVerdict {
     const file = join(dir, "candidate.tsx");
     writeFileSync(file, artifact, "utf8");
     const cliEntry = join(root, "apps/cli/src/index.js");
-    const res = spawnSync("bun", [cliEntry, "graph", file], {
-      cwd: root,
-      encoding: "utf8",
-      timeout: 120_000,
-    });
+    const res = runIsolatedCandidateCommand(root, dir, [cliEntry, "graph", file]);
     graphStatus = res.status;
-    graphOut = `${res.stdout ?? ""}\n${res.stderr ?? ""}`.trim();
+    graphOut = `${res.stdout}\n${res.stderr}`.trim();
   } catch (err) {
     graphOut = err instanceof Error ? err.message : String(err);
   } finally {
