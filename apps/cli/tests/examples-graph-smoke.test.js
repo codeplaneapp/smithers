@@ -67,8 +67,8 @@ const GRAPH_INPUT = {
   diff: "diff --git a/example b/example",
   maxIterations: 1,
 };
-const GRAPH_CONCURRENCY = Math.min(4, availableParallelism());
-const GRAPH_PROCESS_TIMEOUT_MS = 120_000;
+const GRAPH_CONCURRENCY = Math.min(8, availableParallelism());
+const GRAPH_RENDER_TIMEOUT_MS = 60_000;
 
 function findTopLevelExampleWorkflows() {
   return Array.from(new Bun.Glob("examples/*.jsx").scanSync({ cwd: REPO_ROOT })).sort();
@@ -112,7 +112,7 @@ async function renderExampleOnce(projectDir, workerDir, example) {
       timedOut = true;
       child.kill("SIGKILL");
       resolve({ exitCode: null, stdout: "", stderr: "" });
-    }, GRAPH_PROCESS_TIMEOUT_MS);
+    }, GRAPH_RENDER_TIMEOUT_MS);
   });
   let result;
   try {
@@ -123,7 +123,7 @@ async function renderExampleOnce(projectDir, workerDir, example) {
   const { exitCode, stdout, stderr } = result;
   return {
     error: timedOut
-      ? new Error(`graph subprocess timed out after ${GRAPH_PROCESS_TIMEOUT_MS}ms`)
+      ? new Error(`graph subprocess timed out after ${GRAPH_RENDER_TIMEOUT_MS}ms`)
       : exitCode === 0
         ? null
         : new Error(`graph subprocess exited with code ${exitCode}`),
