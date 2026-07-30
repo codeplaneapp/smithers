@@ -113,7 +113,7 @@ describe("rewindLock", () => {
     }
   });
 
-  test("explicitly named subflows share their recorded parent workspace lease", async () => {
+  test("explicitly named child runs share their parent's workspace lease", async () => {
     const { sqlite, adapter } = setupDb();
     try {
       const parentRunId = "parent-run";
@@ -133,10 +133,14 @@ describe("rewindLock", () => {
         configJson: JSON.stringify({ subflowWorkspaceParentRunId: parentRunId }),
       });
 
-      const lease = await acquireRewindLock(adapter, childRunId, { autoRenew: false });
-      expect(lease?.runId).toBe(parentRunId);
-      expect(await acquireRewindLock(adapter, parentRunId, { autoRenew: false })).toBeNull();
-      expect(await lease?.release()).toBe(true);
+      const parentLease = await acquireRewindLock(adapter, parentRunId, { autoRenew: false });
+      expect(parentLease).not.toBeNull();
+      expect(await acquireRewindLock(adapter, childRunId, { autoRenew: false })).toBeNull();
+      expect(await parentLease?.release()).toBe(true);
+
+      const childLease = await acquireRewindLock(adapter, childRunId, { autoRenew: false });
+      expect(childLease?.runId).toBe(parentRunId);
+      expect(await childLease?.release()).toBe(true);
     } finally {
       sqlite.close();
     }
