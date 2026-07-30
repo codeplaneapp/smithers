@@ -26,8 +26,8 @@ function resolveEngineModule(specifier, optional = false) {
 
 /**
  * Make workflow-facing modules resolve from the active engine installation.
- * Bun's runtime module registry is used instead of onResolve: runtime imports
- * of bare package specifiers do not run onResolve hooks.
+ * Resolve bare workflow imports to physical files in the engine installation
+ * so ESM imports and CommonJS requires share Bun's normal module cache.
  */
 export function installWorkflowModuleResolution() {
   const bun = typeof Bun === "undefined" ? undefined : Bun;
@@ -57,42 +57,40 @@ export function installWorkflowModuleResolution() {
       aliases.set(specifier, resolved);
     }
   }
+  const reactPackagePaths = new Map([
+    ["react", "react/index.js"],
+    ["react/jsx-runtime", "react/jsx-runtime.js"],
+    ["react/jsx-dev-runtime", "react/jsx-dev-runtime.js"],
+  ]);
+  const eagerReactExports = new Map();
+  for (const [specifier, resolved] of aliases) {
+    if (reactPackagePaths.has(specifier)) {
+      const module = require(resolved);
+      eagerReactExports.set(specifier, { ...module, default: module.default ?? module });
+    }
+  }
 
   // Keep the first engine installation in charge for the lifetime of the
   // process. A later workflow-pack copy must not replace these identities.
   globals[WORKFLOW_MODULE_RESOLUTION] = true;
-  // Load the react modules once, eagerly, while module evaluation is still
-  // serial. Requiring them lazily inside a build.module callback races the
-  // loader's own in-flight fetch of the same file (surfaces as "Requested
-  // module is already fetched" under coverage instrumentation).
-  const eagerExports = new Map();
-  for (const [specifier, resolved] of aliases) {
-    if (specifier === "react" || specifier.startsWith("react/")) {
-      const module = require(resolved);
-      eagerExports.set(specifier, { ...module, default: module.default ?? module });
-    }
-  }
   bun.plugin({
     name: "smithers-workflow-module-resolution",
     setup(build) {
       for (const [specifier, resolved] of aliases) {
-        build.module(specifier, () => {
-          // React is required by CommonJS react-dom internals. Bun
-          // cannot require an async virtual module, so these three
-          // canonical modules must stay synchronous.
-          const eager = eagerExports.get(specifier);
-          if (eager) {
-            return { exports: eager, loader: "object" };
-          }
-          return {
-            // A source-level re-export retains the complete
-            // static export list, including `export *` chains in
-            // smithers-orchestrator, while its absolute target
-            // keeps resolution in the engine installation.
+        const packagePath = reactPackagePaths.get(specifier);
+        if (!packagePath) {
+          build.module(specifier, () => ({
             contents: `export * from ${JSON.stringify(pathToFileURL(resolved).href)};`,
             loader: "js",
-          };
-        });
+          }));
+          continue;
+        }
+        const escapedPackagePath = packagePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replaceAll("/", "[\\\\/]");
+        const exports = eagerReactExports.get(specifier);
+        build.onLoad({ filter: new RegExp(`[\\\\/]node_modules[\\\\/]${escapedPackagePath}$`) }, () => ({
+          exports,
+          loader: "object",
+        }));
       }
     },
   });
