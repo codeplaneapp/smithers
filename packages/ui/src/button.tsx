@@ -39,8 +39,8 @@ export type ButtonProps = ComponentProps<"button"> &
     /**
      * Render a Spinner before the children, mark the button `aria-busy`, and
      * disable interaction while work is in flight. Under `asChild`, busy and
-     * disabled semantics are forwarded but no Spinner is injected (the Slot
-     * cannot inject one into an arbitrary child element).
+     * aria-disabled semantics are forwarded but no Spinner is injected (the
+     * Slot cannot inject one into an arbitrary child element).
      */
     loading?: boolean;
   };
@@ -72,7 +72,6 @@ export function Button({
       <Slot.Root
         data-slot="button"
         className={classes}
-        disabled={interactionDisabled}
         aria-disabled={interactionDisabled ? true : undefined}
         aria-busy={loading ? true : undefined}
         {...props}

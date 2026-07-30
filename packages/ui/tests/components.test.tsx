@@ -91,7 +91,6 @@ describe("Button", () => {
         <a href="/runs/123">Open run</a>
       </Button>,
     );
-    expect(html).toContain('disabled=""');
     expect(html).toContain('aria-disabled="true"');
     expect(html).toContain('aria-busy="true"');
     expect(html).not.toContain("sui-spinner");
