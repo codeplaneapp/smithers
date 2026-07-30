@@ -360,6 +360,17 @@ describe("DevToolsRunStore event processing", () => {
     expect(store.getTaskState("r1", "loop-n", 1)?.iteration).toBe(1);
   });
 
+  test("getTaskState without iteration returns the highest iteration", () => {
+    const store = new DevToolsRunStore();
+    const base = { runId: "r1", nodeId: "loop-n", attempt: 1 };
+    store.processEngineEvent({ ...base, type: "NodeFinished", iteration: 0, timestampMs: 1 });
+    store.processEngineEvent({ ...base, type: "NodeStarted", iteration: 2, timestampMs: 2 });
+    store.processEngineEvent({ ...base, type: "NodeFinished", iteration: 1, timestampMs: 3 });
+
+    expect(store.getTaskState("r1", "loop-n")?.iteration).toBe(2);
+    expect(store.getTaskState("r1", "loop-n")?.status).toBe("started");
+  });
+
   test("ignores events without type or runId", () => {
     const store = new DevToolsRunStore();
     store.processEngineEvent({ runId: "r1" });
@@ -484,12 +495,16 @@ describe("DevToolsRunStore event processing", () => {
     expect(store.getTaskState("r1", "flaky")?.status).toBe("failed");
 
     store.processEngineEvent({ ...base, type: "NodeRetrying", timestampMs: 3, attempt: 2 });
+    expect(store.getTaskState("r1", "flaky")?.error).toBeUndefined();
+    expect(store.getTaskState("r1", "flaky")?.finishedAt).toBeUndefined();
     store.processEngineEvent({ ...base, type: "NodeStarted", timestampMs: 4, attempt: 2 });
 
     const task = store.getTaskState("r1", "flaky");
     expect(task?.status).toBe("started");
     expect(task?.attempt).toBe(2);
     expect(task?.startedAt).toBe(4);
+    expect(task?.error).toBeUndefined();
+    expect(task?.finishedAt).toBeUndefined();
   });
 
   test("run waiting-approval clears back to running when the gated node finishes", () => {

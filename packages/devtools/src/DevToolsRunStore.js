@@ -154,10 +154,13 @@ export class DevToolsRunStore {
     if (typeof iteration === "number") {
       return run.tasks.get(`${nodeId}::${iteration}`);
     }
+    let latest;
     for (const task of run.tasks.values()) {
-      if (task.nodeId === nodeId) return task;
+      if (task.nodeId === nodeId && (!latest || task.iteration > latest.iteration)) {
+        latest = task;
+      }
     }
-    return undefined;
+    return latest;
   }
   /**
    * @param {DevToolsEngineEvent} event
@@ -212,6 +215,8 @@ export class DevToolsRunStore {
         task.status = "started";
         task.attempt = event.attempt;
         task.startedAt = event.timestampMs;
+        task.finishedAt = undefined;
+        task.error = undefined;
         refreshRunWaitingStatus(run);
         if (verbose) {
           console.log(`▶️  [smithers-devtools] Task started: ${event.nodeId} (attempt ${event.attempt})`);
@@ -263,6 +268,8 @@ export class DevToolsRunStore {
         // explicit transition OUT of a terminal failed task (retry-task).
         task.status = "retrying";
         task.attempt = event.attempt;
+        task.finishedAt = undefined;
+        task.error = undefined;
         refreshRunWaitingStatus(run);
         break;
       }
