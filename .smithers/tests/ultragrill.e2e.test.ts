@@ -129,6 +129,7 @@ beforeAll(async () => {
     env: {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH}`,
+      SMITHERS_TEST_AGENT_PATH: `${binDir}:${process.env.PATH}`,
       SMITHERS_FAKE_AGENT_RESPONSE: FAKE_RESPONSE,
       ANTHROPIC_API_KEY: "",
       UG_PORT: String(port),
@@ -179,7 +180,7 @@ browserTest(
 
       // The worker really dispatched and finished — its activity appears, and the
       // living spec + question pool render THIS run's real worker output.
-      await page.waitForSelector('[data-testid="ug-feed-worker"]', { timeout: 30_000 });
+      await page.waitForSelector('[data-testid="ug-feed-worker"] .ev.done', { timeout: 30_000 });
       try {
         await page.waitForFunction(
           () => {
