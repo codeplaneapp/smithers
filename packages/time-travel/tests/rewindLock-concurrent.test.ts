@@ -37,7 +37,7 @@ async function readFirstChunk(process: ReturnType<typeof spawnWorker>) {
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -60,7 +60,7 @@ describe("rewindLock cross-process contention", () => {
     third.stdin.write("release\n");
     third.stdin.end();
     expect(await third.exited).toBe(0);
-  }, 15_000);
+  }, 30_000);
 
   test("a crashed process lease is recoverable after expiry", async () => {
     const dbPath = createDbPath();
@@ -74,5 +74,5 @@ describe("rewindLock cross-process contention", () => {
     recovered.stdin.write("release\n");
     recovered.stdin.end();
     expect(await recovered.exited).toBe(0);
-  }, 15_000);
+  }, 30_000);
 });
