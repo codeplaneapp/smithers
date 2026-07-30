@@ -143,7 +143,7 @@
   "pnpm": {
     "overrides": {
       "@opentelemetry/propagator-jaeger": "2.9.0",
-      "effect": "3.21.4"
+      "effect": "4.0.0-beta.102"
     },
     "onlyBuiltDependencies": [
       "@smithers-orchestrator/jj-darwin-arm64",
@@ -161,20 +161,10 @@
     "@smithers-orchestrator/jj-win32-x64"
   ],
   "overrides": {
-    "@effect/cluster": "0.59.0",
-    "@effect/platform": "0.96.2",
-    "@effect/rpc": "0.75.1",
-    "@effect/sql": "0.51.1",
-    "@effect/workflow": "0.18.2",
     "@opentelemetry/propagator-jaeger": "2.9.0",
-    "effect": "3.21.4"
+    "effect": "4.0.0-beta.102"
   },
   "devDependencies": {
-    "@effect/cluster": "^0.59.0",
-    "@effect/experimental": "^0.60.0",
-    "@effect/rpc": "^0.75.1",
-    "@effect/sql": "^0.51.1",
-    "@effect/workflow": "^0.18.2",
     "@happy-dom/global-registrator": "^20.10.6",
     "@mdx-js/esbuild": "^3.1.1",
     "@smithers-orchestrator/accounts": "workspace:*",
@@ -236,7 +226,7 @@
     "bun-types": "^1.3.14",
     "diff": "^9.0.0",
     "drizzle-orm": "^0.45.2",
-    "effect": "3.21.4",
+    "effect": "4.0.0-beta.102",
     "esbuild": "^0.28.1",
     "oxfmt": "^0.60.0",
     "oxlint": "^1.72.0",

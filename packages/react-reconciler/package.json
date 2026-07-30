@@ -61,7 +61,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "effect": "^3.21.4",
+    "effect": "4.0.0-beta.102",
     "typescript": "~6.0.3",
     "zod": "^4.4.3"
   }

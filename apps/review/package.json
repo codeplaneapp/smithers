@@ -30,7 +30,7 @@
     "@smithers-orchestrator/db": "workspace:*",
     "@smithers-orchestrator/engine": "workspace:*",
     "@smithers-orchestrator/ui-styleguide": "workspace:*",
-    "effect": "^3.21.4",
+    "effect": "4.0.0-beta.102",
     "mermaid": "^11.16.0",
     "smithers-orchestrator": "workspace:*",
     "zod": "^4.4.3"
