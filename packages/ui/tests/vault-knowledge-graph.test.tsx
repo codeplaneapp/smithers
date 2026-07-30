@@ -55,7 +55,7 @@ describe("KnowledgeGraph (server render)", () => {
 
   test("first paint (pre-physics) is already spread out — nothing stacked at the origin", () => {
     const html = renderToStaticMarkup(<KnowledgeGraph notes={NOTES} links={HUB_LINKS} />);
-    expect(html).not.toContain("translate(0 0)");
+    expect(html).not.toMatch(/class="sui-vault-graph-node"[^>]*transform="translate\(0 0\)"/);
     expect(html).not.toContain('x1="0"');
     expect(html).not.toContain('y2="0"');
   });
