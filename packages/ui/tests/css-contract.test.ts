@@ -207,6 +207,17 @@ describe("geometry contract", () => {
     expect(smithersUiCss).toContain("border-radius:var(--r-full, 999px)");
   });
 
+  test("does not restore selectors with no component or consumer references", () => {
+    for (const selector of [
+      ".sui-badge-info",
+      ".sui-md-code-block",
+      ".sui-msg-main",
+      ".sui-vault-save-status",
+    ]) {
+      expect(smithersUiCss).not.toContain(selector);
+    }
+  });
+
   test("padding and gap stay on the 2px grid (1px hairline gaps sanctioned)", () => {
     const decls = smithersUiCss.match(/(?:padding[a-z-]*|gap|row-gap|column-gap):[^;}]+/g) ?? [];
     expect(decls.length).toBeGreaterThan(50);
