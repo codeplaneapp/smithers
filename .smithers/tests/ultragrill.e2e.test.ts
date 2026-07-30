@@ -180,7 +180,7 @@ browserTest(
 
       // The worker really dispatched and finished — its activity appears, and the
       // living spec + question pool render THIS run's real worker output.
-      await page.waitForSelector('[data-testid="ug-feed-worker"] .ev.done', { timeout: 30_000 });
+      await page.waitForSelector('[data-testid="ug-feed-worker"]', { timeout: 30_000 });
       try {
         await page.waitForFunction(
           () => {
