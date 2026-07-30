@@ -11277,8 +11277,8 @@ import {
 Direct JJ helper calls need a platform layer:
 
 ```ts
-import type * as CommandExecutor from "@effect/platform/CommandExecutor";
-import * as BunContext from "@effect/platform-bun/BunContext";
+import type * as CommandExecutor from "effect/unstable/process/ChildProcessSpawner";
+import * as BunContext from "@effect/platform-bun/BunServices";
 import { Effect } from "effect";
 
 type VcsEffect<A> = Effect.Effect<A, never, CommandExecutor.CommandExecutor>;
