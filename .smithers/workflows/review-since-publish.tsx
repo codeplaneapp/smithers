@@ -2,7 +2,7 @@
 // smithers-display-name: Review Since Publish
 /** @jsxImportSource smithers-orchestrator */
 import { UI } from "smithers-orchestrator";
-import { createSmithers, Loop, OpenCodeAgent, Parallel, Sequence, Task } from "smithers-orchestrator";
+import { createSmithers, Loop, Parallel, Sequence, Task } from "smithers-orchestrator";
 import { z } from "zod/v4";
 import { providers } from "../agents";
 import { baselineBriefing, resolvePublishBaseline, type PublishBaseline } from "../lib/publishBaseline";
@@ -15,9 +15,9 @@ import { baselineBriefing, resolvePublishBaseline, type PublishBaseline } from "
  * Round shape (repeats until clean or maxRounds):
  *   1. baseline (compute, once) — ask npm for the live version, resolve its
  *      `v<version>` tag in this checkout, and capture the diff surface.
- *   2. panel (parallel) — codex/sol, kimi k3 (via OpenCode), and Claude Code
- *      fable each review the SAME surface independently.
- *   3. merge (fable) — dedupes/arbitrates the three reviews into one issue list.
+ *   2. panel (parallel) — codex/sol, Claude opus, and Claude fable each review
+ *      the SAME surface independently.
+ *   3. merge — dedupes/arbitrates the reviews into one issue list.
  *   4. fix (parallel, codex/sol) — issues are partitioned into file-disjoint
  *      lanes so concurrent fixers never touch the same file.
  *
@@ -100,9 +100,9 @@ export const inputSchema = z.object({
    * run on `waiting-quota`.
    */
   seats: z
-    .array(z.enum(["sol", "kimi", "fable"]))
+    .array(z.enum(["sol", "opus", "fable"]))
     .min(1)
-    .default(["sol", "kimi", "fable"]),
+    .default(["sol", "opus", "fable"]),
   /** Severities worth fixing; anything below is reported but not gated on. */
   fixSeverities: z.array(severity).default(["critical", "high", "medium"]),
   /**
@@ -137,12 +137,9 @@ type Baseline = z.infer<typeof baselineSchema>;
 type Merged = z.infer<typeof mergedSchema>;
 type MergedIssue = z.infer<typeof mergedIssueSchema>;
 
-/** kimi k3 is served through OpenCode's kimi-for-coding provider. */
-const kimiK3 = new OpenCodeAgent({ model: "kimi-for-coding/k3" });
-
 const PANEL = [
   { key: "sol", label: "codex / gpt-5.6-sol", agent: providers.codexSol },
-  { key: "kimi", label: "kimi k3 (opencode)", agent: kimiK3 },
+  { key: "opus", label: "claude code / opus", agent: providers.claudeOpus },
   { key: "fable", label: "claude code / fable", agent: providers.claude },
 ] as const;
 
@@ -193,7 +190,7 @@ function mergePrompt(opts: {
   round: number;
   reviews: { reviewer: string; summary: string; issues: unknown[] }[];
 }): string {
-  return `You are the arbiter of a three-model release review panel (codex/sol, kimi k3, claude fable).
+  return `You are the arbiter of a three-model release review panel (codex/sol, claude opus, claude fable).
 
 Merge their three independent reviews of everything changed since the last publish into ONE authoritative issue list.
 
@@ -328,7 +325,7 @@ export default smithers((ctx) => {
     .split(",")
     .map((seat) => seat.trim())
     .filter(Boolean);
-  const seats: readonly string[] = seatOverride.length ? seatOverride : (ctx.input.seats ?? ["sol", "kimi", "fable"]);
+  const seats: readonly string[] = seatOverride.length ? seatOverride : (ctx.input.seats ?? ["sol", "opus", "fable"]);
   const shardCount = Math.max(1, ctx.input.reviewShards ?? 1);
   const changed = [...new Set([...(baseline?.changedFiles ?? []), ...(baseline?.untrackedFiles ?? [])])];
   const shards = Array.from({ length: shardCount }, (_, index) => ({
@@ -379,7 +376,7 @@ export default smithers((ctx) => {
               )}
             </Parallel>
 
-            <Task id="merge" output={outputs.merged} agent={providers.claude} heartbeatTimeoutMs={agentTimeoutMs}>
+            <Task id="merge" output={outputs.merged} agent={providers.claudeOpus} heartbeatTimeoutMs={agentTimeoutMs}>
               {mergePrompt({ briefing, round, reviews })}
             </Task>
 

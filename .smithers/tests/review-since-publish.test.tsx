@@ -51,7 +51,7 @@ describe("review-since-publish workflow", () => {
 
   test("fans the panel out to all three seats with the baseline briefing", async () => {
     const frame = await render({}, { baseline: [baselineRow] });
-    for (const seat of ["review:sol", "review:kimi", "review:fable"]) {
+    for (const seat of ["review:sol", "review:opus", "review:fable"]) {
       const found = frame.tasks.find((t) => t.nodeId === seat);
       expect(found, `missing ${seat}`).toBeDefined();
       expect(String(found!.prompt)).toContain("BRIEFING BODY");
@@ -100,7 +100,7 @@ describe("review-since-publish workflow", () => {
   test("dropping a seat removes its review tasks entirely", async () => {
     const frame = await render({ seats: ["sol", "fable"], reviewShards: 2 }, { baseline: [baselineRow] });
     const reviewIds = ids(frame).filter((id) => id.startsWith("review:"));
-    expect(reviewIds.filter((id) => id.startsWith("review:kimi"))).toEqual([]);
+    expect(reviewIds.filter((id) => id.startsWith("review:opus"))).toEqual([]);
     expect(reviewIds.length).toBe(4);
   });
 
@@ -108,8 +108,8 @@ describe("review-since-publish workflow", () => {
     const prior = process.env.SMITHERS_PANEL_SEATS;
     process.env.SMITHERS_PANEL_SEATS = "sol,fable";
     try {
-      const frame = await render({ seats: ["sol", "kimi", "fable"] }, { baseline: [baselineRow] });
-      expect(ids(frame).filter((id) => id.startsWith("review:kimi"))).toEqual([]);
+      const frame = await render({ seats: ["sol", "opus", "fable"] }, { baseline: [baselineRow] });
+      expect(ids(frame).filter((id) => id.startsWith("review:opus"))).toEqual([]);
       expect(ids(frame).filter((id) => id.startsWith("review:"))).toHaveLength(2);
     } finally {
       if (prior === undefined) delete process.env.SMITHERS_PANEL_SEATS;
