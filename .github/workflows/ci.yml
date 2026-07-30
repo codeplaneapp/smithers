@@ -124,7 +124,7 @@ jobs:
     # `coverage` job so the two full passes run in PARALLEL instead of serially.
     # Windows runners are appreciably slower than Linux, so the Windows package
     # tests are split into shards with per-package timeouts.
-    timeout-minutes: 40
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v6.0.2
