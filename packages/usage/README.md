@@ -18,15 +18,15 @@ openai-ci     openai-api    —      requests/min    820/1000 left 0m 42s
 The numbers live in three incompatible shapes, so every adapter normalizes to one
 `UsageReport`.
 
-| Provider | Source | Auth read from |
-| --- | --- | --- |
-| `claude-code` | `GET api.anthropic.com/api/oauth/usage` (5h + weekly %) | `<configDir>/.credentials.json` or macOS Keychain `Claude Code-credentials` |
-| `codex` | `GET chatgpt.com/backend-api/wham/usage` (5h + weekly %) | `<configDir>/auth.json` |
-| `kimi` | `GET api.kimi.com/coding/v1/usages` (weekly %, rate windows, parallel sessions) | `<configDir>/credentials/kimi-code.json` (refreshed via `auth.kimi.com/api/oauth/token`) |
-| `anthropic-api` | live `anthropic-ratelimit-*` headers off `count_tokens` | account `apiKey` |
-| `openai-api` | live `x-ratelimit-*` headers off a `max_tokens:1` POST | account `apiKey` |
-| `gemini` / `antigravity` / `gemini-api` | none yet (Google exposes no live quota) | — |
-| others | none | — |
+| Provider                                | Source                                                                          | Auth read from                                                                           |
+| --------------------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `claude-code`                           | `GET api.anthropic.com/api/oauth/usage` (5h + weekly %)                         | `<configDir>/.credentials.json` or macOS Keychain `Claude Code-credentials`              |
+| `codex`                                 | `GET chatgpt.com/backend-api/wham/usage` (5h + weekly %)                        | `<configDir>/auth.json`                                                                  |
+| `kimi`                                  | `GET api.kimi.com/coding/v1/usages` (weekly %, rate windows, parallel sessions) | `<configDir>/credentials/kimi-code.json` (refreshed via `auth.kimi.com/api/oauth/token`) |
+| `anthropic-api`                         | live `anthropic-ratelimit-*` headers off `count_tokens`                         | account `apiKey`                                                                         |
+| `openai-api`                            | live `x-ratelimit-*` headers off a `max_tokens:1` POST                          | account `apiKey`                                                                         |
+| `gemini` / `antigravity` / `gemini-api` | none yet (Google exposes no live quota)                                         | —                                                                                        |
+| others                                  | none                                                                            | —                                                                                        |
 
 The subscription endpoints (`claude-code`, `codex`, `kimi`) are undocumented: they are the
 same endpoints the official CLIs call, reachable by reading the CLI's own OAuth
