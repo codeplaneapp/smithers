@@ -41,11 +41,14 @@ let binDir = "";
 let proc: ChildProcess | undefined;
 let port = 0;
 let base = "";
-let fixtureStdout = "";
-let fixtureStderr = "";
+let fixtureStdoutHead = "";
+let fixtureStdoutTail = "";
+let fixtureStderrHead = "";
+let fixtureStderrTail = "";
 
-function appendFixtureLog(current: string, chunk: unknown): string {
-  return (current + String(chunk)).slice(-20_000);
+function appendFixtureLog(head: string, tail: string, chunk: unknown): [string, string] {
+  const text = String(chunk);
+  return [(head + text).slice(0, 20_000), (tail + text).slice(-20_000)];
 }
 
 function findOpenPort(): Promise<number> {
@@ -111,7 +114,9 @@ beforeAll(async () => {
     `const args = process.argv.slice(2);`,
     `if (args.join(" ") === "auth status") { process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }) + "\\n"); process.exit(0); }`,
     `const payload = process.env.SMITHERS_FAKE_AGENT_RESPONSE ?? "{}";`,
-    `process.stdout.write(JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "\\u0060\\u0060\\u0060json\\n" + payload + "\\n\\u0060\\u0060\\u0060\\n" }] } }) + "\\n");`,
+    `const text = "\\u0060\\u0060\\u0060json\\n" + payload + "\\n\\u0060\\u0060\\u0060\\n";`,
+    `process.stdout.write(JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text }] }, session_id: "ultragrill-e2e" }) + "\\n");`,
+    `process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: text, session_id: "ultragrill-e2e" }) + "\\n");`,
     ``,
   ].join("\n");
   writeFileSync(join(binDir, "claude"), claudeSrc);
@@ -133,10 +138,10 @@ beforeAll(async () => {
     stdio: ["ignore", "pipe", "pipe"],
   });
   proc.stdout?.on("data", (chunk) => {
-    fixtureStdout = appendFixtureLog(fixtureStdout, chunk);
+    [fixtureStdoutHead, fixtureStdoutTail] = appendFixtureLog(fixtureStdoutHead, fixtureStdoutTail, chunk);
   });
   proc.stderr?.on("data", (chunk) => {
-    fixtureStderr = appendFixtureLog(fixtureStderr, chunk);
+    [fixtureStderrHead, fixtureStderrTail] = appendFixtureLog(fixtureStderrHead, fixtureStderrTail, chunk);
   });
   expect(await waitForHealth(60_000)).toBe(true);
 }, 80_000);
@@ -180,11 +185,18 @@ browserTest(
         await page.waitForFunction(
           () => {
             const text = document.body.textContent ?? "";
-            return text.includes("Settings Page — Living Spec") && text.includes("dark-mode toggle");
+            const workerFailed = Array.from(document.querySelectorAll('[data-testid="ug-feed-worker"]')).some((entry) =>
+              (entry.textContent ?? "").includes("failed"),
+            );
+            return (text.includes("Settings Page — Living Spec") && text.includes("dark-mode toggle")) || workerFailed;
           },
           undefined,
           { timeout: 60_000 },
         );
+        const bodyText = (await page.textContent("body")) ?? "";
+        if (!bodyText.includes("Settings Page — Living Spec") || !bodyText.includes("dark-mode toggle")) {
+          throw new Error("UltraGrill worker failed before producing its artifact.");
+        }
       } catch (cause) {
         const bodyText = ((await page.textContent("body")) ?? "").slice(-5_000);
         const workerText = ((await page.textContent('[data-testid="ug-feed-worker"]')) ?? "").trim();
@@ -195,8 +207,10 @@ browserTest(
             `fixtureExit=${String(proc?.exitCode)} fixtureSignal=${String(proc?.signalCode)}`,
             `pageErrors=${JSON.stringify(errors)}`,
             `body=${JSON.stringify(bodyText)}`,
-            `fixtureStdout=${JSON.stringify(fixtureStdout)}`,
-            `fixtureStderr=${JSON.stringify(fixtureStderr)}`,
+            `fixtureStdoutHead=${JSON.stringify(fixtureStdoutHead)}`,
+            `fixtureStdoutTail=${JSON.stringify(fixtureStdoutTail)}`,
+            `fixtureStderrHead=${JSON.stringify(fixtureStderrHead)}`,
+            `fixtureStderrTail=${JSON.stringify(fixtureStderrTail)}`,
           ].join("\n"),
           { cause },
         );
