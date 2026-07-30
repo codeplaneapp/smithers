@@ -516,9 +516,9 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
             code: "PROCESS_SPAWN_FAILED",
             details: { runId: staleRun.runId, resumeTarget: describeResumeTarget(target) },
           }),
-      }).pipe(Effect.either);
-      if (spawnResult._tag === "Left") {
-        yield* Effect.logWarning(`[supervisor] failed to resume run ${staleRun.runId}: ${spawnResult.left.message}`);
+      }).pipe(Effect.result);
+      if (spawnResult._tag === "Failure") {
+        yield* Effect.logWarning(`[supervisor] failed to resume run ${staleRun.runId}: ${spawnResult.failure.message}`);
         yield* options.adapter
           .releaseRunResumeClaimEffect({
             runId: staleRun.runId,
@@ -535,7 +535,7 @@ function processCandidateEffect(options, staleRun, staleBeforeMs) {
           );
         return "skipped";
       }
-      const resumePid = spawnResult.right;
+      const resumePid = spawnResult.success;
       yield* Effect.logInfo(
         `Resuming stale run ${staleRun.runId} (last heartbeat ${staleDurationMs}ms ago, attempt ${resumeAttempt})${resumePid ? ` with pid ${resumePid}` : ""}`,
       );
@@ -640,9 +640,9 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
             code: "PROCESS_SPAWN_FAILED",
             details: { runId: run.runId, resumeTarget: describeResumeTarget(target) },
           }),
-      }).pipe(Effect.either);
-      if (spawnResult._tag === "Left") {
-        yield* Effect.logWarning(`[supervisor] failed to resume timer run ${run.runId}: ${spawnResult.left.message}`);
+      }).pipe(Effect.result);
+      if (spawnResult._tag === "Failure") {
+        yield* Effect.logWarning(`[supervisor] failed to resume timer run ${run.runId}: ${spawnResult.failure.message}`);
         yield* options.adapter
           .releaseRunResumeClaimEffect({
             runId: run.runId,
@@ -659,7 +659,7 @@ function processTimerCandidateEffect(options, run, staleBeforeMs) {
           );
         return "skipped";
       }
-      const resumePid = spawnResult.right;
+      const resumePid = spawnResult.success;
       yield* Effect.logInfo(
         `Resuming timer-blocked run ${run.runId} (attempt ${resumeAttempt})${resumePid ? ` with pid ${resumePid}` : ""}`,
       );
@@ -771,10 +771,10 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
             code: "PROCESS_SPAWN_FAILED",
             details: { runId: run.runId, resumeTarget: describeResumeTarget(target) },
           }),
-      }).pipe(Effect.either);
-      if (spawnResult._tag === "Left") {
+      }).pipe(Effect.result);
+      if (spawnResult._tag === "Failure") {
         yield* Effect.logWarning(
-          `[supervisor] failed to resume approval-decided run ${run.runId}: ${spawnResult.left.message}`,
+          `[supervisor] failed to resume approval-decided run ${run.runId}: ${spawnResult.failure.message}`,
         );
         yield* options.adapter
           .releaseRunResumeClaimEffect({
@@ -792,7 +792,7 @@ function processApprovalDecidedCandidateEffect(options, run, staleBeforeMs) {
           );
         return "skipped";
       }
-      const resumePid = spawnResult.right;
+      const resumePid = spawnResult.success;
       yield* Effect.logInfo(
         `Resuming approval-decided run ${run.runId} (attempt ${resumeAttempt})${resumePid ? ` with pid ${resumePid}` : ""}`,
       );
@@ -888,8 +888,8 @@ function processQuotaCandidateEffect(options, run, staleBeforeMs) {
             code: "PROCESS_SPAWN_FAILED",
             details: { runId: run.runId, resumeTarget: describeResumeTarget(target) },
           }),
-      }).pipe(Effect.either);
-      if (spawnResult._tag === "Left") {
+      }).pipe(Effect.result);
+      if (spawnResult._tag === "Failure") {
         yield* options.adapter
           .releaseRunResumeClaimEffect({
             runId: run.runId,

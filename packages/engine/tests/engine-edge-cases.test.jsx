@@ -54,10 +54,10 @@ describe("engine edge cases", () => {
         outputTable: "output",
         label: "Task",
       });
-      const approvalResult = await Effect.runPromise(Effect.either(approveNode(adapter, "run-not-waiting", "task", 0)));
-      expect(approvalResult._tag).toBe("Left");
-      if (approvalResult._tag === "Left") {
-        expect(approvalResult.left).toMatchObject({ code: "INVALID_INPUT" });
+      const approvalResult = await Effect.runPromise(Effect.result(approveNode(adapter, "run-not-waiting", "task", 0)));
+      expect(approvalResult._tag).toBe("Failure");
+      if (approvalResult._tag === "Failure") {
+        expect(approvalResult.failure).toMatchObject({ code: "INVALID_INPUT" });
       }
       const node = await adapter.getNode("run-not-waiting", "task", 0);
       expect(node?.state).toBe("finished");
